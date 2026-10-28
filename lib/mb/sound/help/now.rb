@@ -6,6 +6,8 @@ module MB
       # that apply to it.  Reads only public Session state.
       class Now
         include Page
+
+        def title = 'now'
         include Text
 
         def initialize(session = Session.current)

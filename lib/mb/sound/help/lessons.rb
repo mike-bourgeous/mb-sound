@@ -172,6 +172,8 @@ module MB
         include Page
         include Text
 
+        def title = "lesson #{@lesson.name.inspect}"
+
         # Run states.
         STATES = %i[running left done].freeze
 
@@ -354,6 +356,8 @@ module MB
       class LessonList
         include Page
         include Text
+
+        def title = 'lessons'
 
         # A lesson's commands (lesson.run, .next, ...) when no lesson is
         # running (ux-fix-1 item 20: `lesson.run` after a finished lesson

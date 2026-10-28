@@ -362,7 +362,7 @@ module MB
           # What the Router calls on its host (the optional ones through
           # respond_to?, which is false for a private method: a spec checks
           # that Tiles has each one public, ux-r4b).
-          HOST_METHODS = %i[repl_key repl_paste act line_done mode_changed grab_key play_key pane_mode_key pane_keymap once_target].freeze
+          HOST_METHODS = %i[repl_key repl_paste act line_done mode_changed grab_key play_key pane_mode_key pane_keymap once_target pane_escape].freeze
 
           # The states Ctrl-W starts :once from.
           ONCE_FROM = %i[repl play nav grab pane].freeze
@@ -564,7 +564,11 @@ module MB
           # A key in a pane's own mode: Esc to NAV, else the pane (#pane_mode_key
           # true when it took the key), else ? the overlay, else refused.
           def pane_key(e, now, event)
-            return go(:nav) if e.key == :escape && e.mods.empty?
+            if e.key == :escape && e.mods.empty?
+              # (the host may send it elsewhere: the page pane back to what opened it)
+              return if @host.respond_to?(:pane_escape) && @host.pane_escape
+              return go(:nav)
+            end
             return if @host.pane_mode_key(e)
             return go(:overlay) if e.key == '?'
             @host.act(Action.of(:refused, e.to_s, 'not a key of this pane (Esc: NAV, ? lists its keys)'))

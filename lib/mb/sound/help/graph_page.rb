@@ -6,6 +6,8 @@ module MB
       # the plan layer runs it, and the topics that cover its methods.
       class GraphPage
         include Page
+
+        def title = 'node'
         include Text
 
         def initialize(node, index)

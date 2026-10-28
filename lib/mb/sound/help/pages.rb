@@ -8,6 +8,10 @@ module MB
       # (a pipe, a log, NO_COLOR, TERM=dumb; see ColorPolicy), so `puts
       # help(:turn)` and `now.to_s` read cleanly in captured output.
       module Page
+        # The page's name for the tiled screen's page pane title ("HELP ·
+        # knobs"), or nil (the sheet: plain "HELP"; see UI::Tiles#page).
+        def title = nil
+
         # Prepended to each class that includes Page.
         module PlainOutput
           def to_s = ColorPolicy.for_output(super)
@@ -91,6 +95,8 @@ module MB
         include Page
         include Text
 
+        def title = 'level'
+
         def db = Level.db
 
         def to_s
@@ -110,6 +116,8 @@ module MB
         include Page
         include Text
 
+        def title = 'topics'
+
         def to_s
           d = Doc.new
           d.title('topics', 'help :name, or help.name; help :start (a section) for more on each group')
@@ -128,6 +136,8 @@ module MB
       class TopicPage
         include Page
         include Text
+
+        def title = @topic.name.to_s
 
         attr_reader :topic
 
@@ -205,6 +215,8 @@ module MB
       # commands from its sheet lines that no topic of it lists.
       class SectionPage
         include Page
+
+        def title = @group.to_s
         include Text
 
         attr_reader :group
@@ -277,6 +289,8 @@ module MB
       # its signature, aliases, full doc comment, and the topics listing it.
       class MethodPage
         include Page
+
+        def title = @entries.map { |e| e.respond_to?(:name) ? e.name.to_s : e.to_s }.uniq.first(2).join(', ').then { |t| t.empty? ? nil : t }
         include Text
 
         def initialize(entries, index)
@@ -388,6 +402,8 @@ module MB
       # Search results (`help /reson/`) for a Regexp over names and doc comments.
       class SearchPage
         include Page
+
+        def title = @pattern.inspect
         include Text
 
         def initialize(pattern, index)

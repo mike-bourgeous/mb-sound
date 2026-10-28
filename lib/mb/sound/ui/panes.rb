@@ -314,32 +314,44 @@ module MB
             on [:page_down, ' '], :scroll, :page_down, help: 'scroll a page up, down', label: 'PgUp PgDn b Space'
             on [:home, 'g'], :scroll, :top, help: 'top, bottom', label: 'Home End g G'
             on [:end, 'G'], :scroll, :bottom, help: 'top, bottom', label: 'Home End g G'
-            on 'q', :close, help: 'close the page (back to the console)'
+            on '/', :find, help: 'search the page (n the next match, N the one before)', label: '/ n N'
+            on 'n', :find_next, 1, help: 'search the page (n the next match, N the one before)', label: '/ n N'
+            on 'N', :find_next, -1, help: 'search the page (n the next match, N the one before)', label: '/ n N'
+            on 'y', :copy_text, help: 'copy the whole page (OSC 52)'
+            on 'q', :close, help: 'close the page (back to what opened it)'
           end
 
           keys do
             group 'Page'
-            doc 'Enter', 'scroll the page (q closes it, Esc back to NAV)'
+            doc 'Enter', 'read the page (Esc back to what opened it, q closes it)'
           end
 
           # The text's lines, and the first line shown.
           attr_reader :lines, :offset
 
           def initialize
-            super(:page, rate: 4, height: 20, width: 80, title: 'page', min_height: 3, description: 'a help page to scroll while the tiled screen is up (help opens it; q closes it)')
+            super(:page, rate: 4, height: 20, width: 80, title: 'page', min_height: 3,
+                         description: 'a help page (or Pry\'s show-doc, show-source, cat) to read while the tiled screen is up: it takes the focus; Esc goes back, q closes it')
             @lines = [].freeze
             @offset = 0
             @rows = 1
-            @label = nil
+            @find = nil
+            @found = nil
           end
 
-          # Shows +text+ from its top; +title+ is the status line's label.
+          # Shows +text+ from its top; +title+ is the pane's title (nil:
+          # "page").
           def show(text, title: nil)
             @lines = text.to_s.lines.map(&:chomp).freeze
             @offset = 0
-            @label = title
+            @found = nil
+            @title = title.to_s.empty? ? 'page' : title.to_s
+            @title_text = nil
             self
           end
+
+          # The whole page's text (what `y` copies).
+          def full_text = @lines.join("\n")
 
           def draw_body(c, _s, state)
             @rows = [c.h - 1, 1].max
@@ -348,9 +360,27 @@ module MB
               c.text(0, y, c.fit(l, c.w), :text)
             end
             last = [@offset + @rows, @lines.length].min
-            status = "#{@label ? "#{@label}  " : ''}lines #{@offset + 1}-#{last} of #{@lines.length}  " \
-                     "#{state[:mode] ? 'j k PgUp PgDn g G, q closes' : 'Enter scrolls, q closes'}"
+            status = "lines #{@offset + 1}-#{last} of #{@lines.length}#{@found ? "  /#{@find}" : ''}  " \
+                     "#{state[:mode] ? 'j k PgUp PgDn g G, / search, y copy, Esc back, q closes' : 'Enter reads, q closes'}"
             c.text(0, c.h - 1, c.fit(status, c.w), :dim)
+          end
+
+          # / : the search prompt (its answer: #key_found).
+          def key_find(_state) = PaneKeys::Ask['/', '', :found]
+
+          # Scrolls to the first line from the top showing +text+ (a
+          # case-insensitive substring).
+          def key_found(_state, text)
+            @find = text.to_s
+            @found = nil
+            return 'nothing to search for' if @find.empty?
+            seek_match(0, 1)
+          end
+
+          # n / N: the next match after (before) the one shown.
+          def key_find_next(_state, dir)
+            return 'no search yet (/)' unless @find && !@find.empty?
+            seek_match((@found || @offset) + dir, dir)
           end
 
           def key_scroll(_state, by)
@@ -367,6 +397,24 @@ module MB
           end
 
           def key_close(_state) = :close
+
+          private
+
+          # Shows the first line from +from+ (going +dir+, wrapping) that
+          # holds the search text; a message if none does.
+          def seek_match(from, dir)
+            n = @lines.length
+            return "not found: #{@find}" if n.zero?
+            want = @find.downcase
+            n.times do |k|
+              i = (from + dir * k) % n
+              next unless @lines[i].downcase.include?(want)
+              @found = i
+              @offset = (i - 1).clamp(0, [n - @rows, 0].max)
+              return nil
+            end
+            "not found: #{@find}"
+          end
         end
 
         # CPU per part: render load, then each player, bus, and master
