@@ -9,9 +9,9 @@ module MB
       # lists with pedal times come from the events as played
       # (FileSource#notes, MIDI::NoteList).
       #
-      # Playback goes through MIDI::FileSource (no clocks; see GH #67).  Due
-      # to limitations in the midilib gem, times here use one tempo for the
-      # whole file.
+      # Playback goes through MIDI::FileSource (no clocks; see GH #67).
+      # Times here follow the file's tempo map (#tempo_map, every tempo
+      # event; midilib itself uses only the first tempo).
       #
       # Also note that track names from midilib might include a trailing NUL
       # ("\x00") byte.  This happens with MIDI files exported from ACID Pro,
@@ -57,6 +57,9 @@ module MB
         # The track index given to the constructor.
         attr_reader :read_track
 
+        # The file's MIDI::TempoMap (pulses to seconds at every tempo).
+        attr_reader :tempo_map
+
         # Reads MIDI data from the given +filename+.
         #
         # If +:merge_tracks+ is false, then events will not be merged across
@@ -70,6 +73,7 @@ module MB
           end
 
           @read_track = read_track
+          @tempo_map = TempoMap.from_sequence(@seq)
           track = @seq.tracks[read_track].dup
 
           if merge_tracks
@@ -132,11 +136,11 @@ module MB
 
         private
 
-        # Calculates the time in seconds at the given number of elapsed MIDI
-        # pulses (specified by the file, commonly 960 pulses per quarter note).
-        # Does not handle variable tempo MIDI files.
+        # Calculates the time in seconds (a Float) at the given number of
+        # elapsed MIDI pulses (specified by the file, commonly 960 pulses
+        # per quarter note), through the tempo map.
         def pulse_time(pulses)
-          @seq.pulses_to_seconds(pulses)
+          @tempo_map.seconds(pulses).to_f
         end
       end
     end
