@@ -34,10 +34,14 @@ module MB
         # The Clip being played.
         attr_reader :clip
 
-        # The graph nodes (knobs, tempo LFOs) a steered generator clip reads
-        # (Sequence::Clip#param_nodes).
+        # The graph nodes (knobs, tempo LFOs) the steered generator clips
+        # this source has played read (Sequence::Clip#param_nodes): every
+        # clip's since the source was made, so the graph's node set changes
+        # only when a swapped-in clip brings new ones (announced with
+        # Plan.changed), never when a clip leaves (a ring-out's silent
+        # clip, a swap back).
         def param_nodes
-          @clip.param_nodes
+          @param_nodes
         end
 
         # The MIDI channel (0-based) given to the clip's events.
@@ -55,6 +59,7 @@ module MB
         def initialize(clip, channel: 0, transport: nil)
           raise ArgumentError, "Expected a Clip (got #{clip.class})" unless clip.is_a?(Sequence::Clip)
           @clip = clip
+          @param_nodes = clip.param_nodes.freeze
           @channel = channel
           @transport = transport
           @clip_position = 0r
@@ -220,6 +225,7 @@ module MB
           else
             @pending_swap = nil
             @clip = clip
+            note_param_nodes(clip)
             reset_flams
           end
           self
@@ -287,6 +293,15 @@ module MB
           yield
         ensure
           Generative::Steer.origin = prev
+        end
+
+        # Adds the param nodes of +clip+ (see #param_nodes), announcing a
+        # structure change when there are new ones.
+        def note_param_nodes(clip)
+          more = clip.param_nodes - @param_nodes
+          return if more.empty?
+          @param_nodes = (@param_nodes + more).freeze
+          Plan.changed(self)
         end
 
         def chase_at_position(time)
@@ -451,6 +466,7 @@ module MB
         # +split+), on its clock if it has one.
         def apply_swap(clip, swap_time, split)
           @clip = clip
+          note_param_nodes(clip)
           @swap_anchor = clip.launch_aligned? ? swap_time : nil
           if clip.clocking
             clock_rf = @clock ? clock_rf_of(split) : nil
