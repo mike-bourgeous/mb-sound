@@ -307,6 +307,8 @@ module MB
         @transport = transport
         @per_sample_cache = nil # (see #span_per_sample)
         @span_mix_bufs = nil # (see #span_mix)
+        @reuse_mix = false # (see #process_buffer)
+        @master_out_bufs = nil # (see Master#process_master)
         @tuning = tuning
         self.master_gain = master_gain
         self.master_gain_post = master_gain_post
@@ -830,9 +832,10 @@ module MB
 
       # Calls the block with every buffer of the mix (an Array of
       # Numo::SFloat, one per channel) after it is written to the output,
-      # e.g. for plotting.  The arrays are new for each buffer, so the block
-      # may keep them.  The block runs on the rendering thread, so it must
-      # return quickly.  Returns the block, for #remove_tap.
+      # e.g. for plotting.  On a realtime Session's render thread the
+      # arrays are reused for the next buffer, so a block that keeps them
+      # keeps copies (dropouts-2; #process_buffer's callers get new ones).
+      # The block runs on the rendering thread, so it must return quickly.  Returns the block, for #remove_tap.
       def add_tap(&block)
         raise ArgumentError, 'Pass a block to tap the mix' unless block
         @mutex.synchronize { @taps << block }
@@ -953,6 +956,11 @@ module MB
       # channel) before the monitor trim.
       def process_buffer(count = buffer_size)
         started = MB::U.clock_now
+        # The render thread's mix is reused from buffer to buffer (the
+        # output, taps, recordings, and the UI feed copy what they keep;
+        # dropouts-2: two new SFloats a buffer were ~470 KB/s of garbage
+        # at 256 frames); callers of #process_buffer keep what it returns
+        @reuse_mix = Thread.current.equal?(@thread)
 
         mix = @render_lock.synchronize {
           # A seek (or its undo) landing inside the buffer splits it: the
@@ -1097,8 +1105,9 @@ module MB
         begin_bus_read(0) if routed # master chains reading buses or players
         mix = process_master(mix, from, to, per_sample, count, playing: playing, seeked: seeked)
         # (without a master chain the mix itself leaves the span: callers
-        # keep what #process_buffer returns, so it can't be the reused one)
-        mix = mix.map(&:dup) if mix.equal?(@span_mix_bufs)
+        # keep what #process_buffer returns, so it can't be the reused one,
+        # except on the render thread; see #process_buffer)
+        mix = mix.map(&:dup) if !@reuse_mix && mix.equal?(@span_mix_bufs)
         end_cue_span(mix, count) # the phones mix (see Cue)
 
         @frame += count

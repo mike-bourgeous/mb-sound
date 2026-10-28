@@ -692,6 +692,11 @@ module MB
           @dry_bufs = nil
           @partitions = {} # (reused groups for #update; see #partition_reused)
           @dry_scaled = []
+          # (reused by #render_block and #network_wet every buffer; dropouts-2)
+          @block_dry = []
+          @block_pair = [nil, nil]
+          @line_bufs = {}
+          @line_input_bufs = []
 
           @sample_rate = sample_rate.to_f
 
@@ -1004,29 +1009,41 @@ module MB
         # For internal use.  Samples the dry inputs and the wet network for
         # +count+ samples.  Returns [dry, wet] (Arrays of channel buffers).
         def render_block(count)
-          dry = @upstream_samplers.map { |u| u.sample(count) }
+          # (reused Arrays, no Hash or Enumerator: this runs every buffer;
+          # dropouts-2)
+          dry = @block_dry
+          dry.clear
+          ups = @upstream_samplers
+          i = 0
+          while i < ups.length
+            dry << ups[i].sample(count)
+            i += 1
+          end
           wet = @show_internals ? @last_stage.map { |c| c.sample(count) } : network_wet(count)
 
           # After every input's source has ended (the ended ones padded with
           # silence; see PaddedInput), the output ends where the last of
           # them did
-          bufs = dry + wet
-          unless bufs.any?(&:nil?)
-            n = bufs.map(&:length).min
+          unless dry.include?(nil) || wet.include?(nil)
+            n = nil
+            dry.each { |b| n = b.length if n.nil? || b.length < n }
+            wet.each { |b| n = b.length if n.nil? || b.length < n }
             if @padded_inputs && @padded_inputs.all?(&:end_position)
               n = MB::M.min(n, @padded_inputs.map(&:end_position).max - @input_position)
               return [dry, [nil]] if n <= 0
             end
             @input_position += n
 
-            if bufs.any? { |b| b.length != n }
+            if dry.any? { |b| b.length != n } || wet.any? { |b| b.length != n }
               cut = ->(b) { b.length > n ? (b.frozen? ? b[0...n].dup.freeze : b[0...n]) : b }
               dry = dry.map(&cut)
               wet = wet.map(&cut)
             end
           end
 
-          [dry, wet]
+          @block_pair[0] = dry
+          @block_pair[1] = wet
+          @block_pair
         end
 
         # #partition_outputs of +list+ into Arrays reused from buffer to
@@ -1051,12 +1068,25 @@ module MB
         # returning the wet channels (with nil if an input or a parameter
         # node ended).
         def network_wet(count)
-          bufs = @line_samplers.transform_values { |s| s.sample(count) }
-          return [nil] if bufs.values.any?(&:nil?)
+          bufs = @line_bufs
+          ended = false
+          n = nil
+          @line_samplers.each_pair do |id, sampler|
+            b = sampler.sample(count)
+            bufs[id] = b
+            if b.nil?
+              ended = true
+            elsif n.nil? || b.length < n
+              n = b.length
+            end
+          end
+          return [nil] if ended
 
-          n = bufs.values.map(&:length).min
-          inputs = @line_inputs.map { |u| bufs[u.object_id] }
-          inputs = inputs.map { |b| b.length > n ? b[0...n] : b } if inputs.any? { |b| b.length != n }
+          inputs = @line_input_bufs
+          @line_inputs.each_with_index do |u, i|
+            b = bufs[u.object_id]
+            inputs[i] = b.length > n ? b[0...n] : b
+          end
           @network.process(inputs, n) || [nil]
         end
 

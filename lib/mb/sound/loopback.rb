@@ -35,7 +35,7 @@ module MB
         raise "Channel count must be #{@channels}" unless data.length == @channels
         raise "Buffer size must be #{@buffer_size}" unless data.all? { |d| d.length == @buffer_size }
 
-        @buf << data
+        @buf << data.map(&:dup) # (a realtime Session's render thread reuses its mix)
       end
     end
   end

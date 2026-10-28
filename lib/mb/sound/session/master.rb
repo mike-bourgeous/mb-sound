@@ -381,7 +381,7 @@ module MB
           rate = output.sample_rate.to_f
           activate_master(chains, from, to, per_sample, rate)
 
-          out = Array.new(@channels) { Numo::SFloat.zeros(count) }
+          out = master_out(count)
           chains.each do |c|
             # Like players' clips: timeline loops follow the new position,
             # launch-aligned loops keep their anchor, and non-looping clips
@@ -402,6 +402,20 @@ module MB
           }
 
           out
+        end
+
+        # Zeroed buffers for the master chains' output: reused on the
+        # render thread (see Session#process_buffer), else new (callers
+        # keep what #process_buffer returns).
+        def master_out(count)
+          return Array.new(@channels) { Numo::SFloat.zeros(count) } unless @reuse_mix
+
+          bufs = @master_out_bufs
+          if bufs.nil? || bufs.length != @channels || bufs[0].length != count
+            return @master_out_bufs = Array.new(@channels) { Numo::SFloat.zeros(count) }
+          end
+          bufs.each { |b| BufferHelper.zero(b) }
+          bufs
         end
 
         # Starts a chain whose time has come, handing over from the older

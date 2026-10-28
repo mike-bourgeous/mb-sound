@@ -96,6 +96,7 @@ module MB
 
             @params = PARAMS.map { |name, _| params[name] }
             @samplers = @params.map { |p| p.is_a?(GraphNode) ? p.get_sampler : p }
+            @param_values = Array.new(@samplers.length) # (reused by #process)
             @outputs = []
 
             self.sample_rate = sample_rate
@@ -168,15 +169,22 @@ module MB
           # Numeric or an NArray) through the network.  Returns one reused
           # SFloat buffer per line, or nil if a parameter node ended.
           def process(inputs, count)
-            params = @samplers.each_with_index.map { |s, idx|
-              next s unless s.is_a?(GraphNode)
+            # (a reused Array, no Enumerator: this runs every buffer)
+            params = @param_values
+            idx = 0
+            while idx < @samplers.length
+              s = @samplers[idx]
+              if s.is_a?(GraphNode)
+                v = s.sample(count)
+                return nil if v.nil?
 
-              v = s.sample(count)
-              return nil if v.nil?
-
-              v = MB::M.zpad(v, count) if v.length < count
-              PARAMS[idx][1] == :seconds ? v * @sample_rate : v
-            }
+                v = MB::M.zpad(v, count) if v.length < count
+                params[idx] = PARAMS[idx][1] == :seconds ? v * @sample_rate : v
+              else
+                params[idx] = s
+              end
+              idx += 1
+            end
             PARAMS.each_with_index do |(_, unit), idx|
               params[idx] = params[idx] * @sample_rate if unit == :seconds && params[idx].is_a?(Numeric)
             end

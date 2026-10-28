@@ -438,6 +438,14 @@ module MB
           @span_count = 0
           @span_out = nil
           @steady = nil
+          @steady_value = nil
+          # Reused render buffers (two, alternating), their frozen views,
+          # and scratch for ramps and follows (see #render; dropouts-2)
+          @render_bufs = [nil, nil]
+          @render_flip = 0
+          @render_views = FrozenView.new
+          @ramp_t = nil
+          @follow_buf = nil
           @cc = @spec.cc
           @midi = nil
           @learning = nil
@@ -884,7 +892,7 @@ module MB
               return seg.value
             end
 
-            out ||= Numo::SFloat.zeros(count)
+            out ||= render_buffer(count)
             n = stop - pos
             case seg
             when Hold
@@ -908,7 +916,18 @@ module MB
           end
 
           @next_frame = frame + count
-          out.freeze
+          @render_views.of(out)
+        end
+
+        # One of two reused SFloats of +count+ samples for #render, which
+        # writes every sample (in turn, so the last span's view stays
+        # valid while the next is made; its readers see a frozen view with
+        # a new generation each span: GraphNode::FrozenView).
+        def render_buffer(count)
+          @render_flip ^= 1
+          buf = @render_bufs[@render_flip]
+          buf = @render_bufs[@render_flip] = Numo::SFloat.zeros(count) if buf.nil? || buf.length != count
+          buf
         end
 
         # Starts +seg+ (from the pending list) on its frame.
@@ -928,7 +947,9 @@ module MB
         # knob's scale, and exactly +to+ from the last frame on.
         def ramp_values(seg, f, n)
           j0 = f - seg.start
-          t = Numo::DFloat.new(n).seq(j0 + 1)
+          t = @ramp_t
+          t = @ramp_t = Numo::DFloat.new(n) if t.nil? || t.length != n
+          t.seq(j0 + 1)
           t.inplace / seg.length
           ends = j0 + n >= seg.length
           t.inplace.clip(0.0, 1.0) if ends
@@ -967,7 +988,15 @@ module MB
             buf = buf.concatenate(buf.class.new(n - buf.length).fill(last))
           end
           return seg.map.call(Numo::DFloat.cast(buf)) if seg.map
-          @spec.clamp? ? buf.clip(@spec.range.begin, @spec.range.end) : buf
+          return buf unless @spec.clamp?
+
+          # (clipped in a reused copy of the same type: the same values as
+          # buf.clip)
+          c = @follow_buf
+          c = @follow_buf = buf.class.new(n) if c.nil? || c.class != buf.class || c.length != n
+          c[0..] = buf unless MB::Sound::FastArithmetic.copy(c, buf)
+          c.inplace.clip(@spec.range.begin, @spec.range.end)
+          c
         end
 
         # Reads controller events for frames [+frame+, +frame+ + +count+)
