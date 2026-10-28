@@ -140,4 +140,17 @@ RSpec.describe(MB::Sound::Session::ClipSwaps) do
     session.add(1.constant, name: :const)
     expect { session.swap(:const, bass2) }.to raise_error(ArgumentError, /doesn't play any clips/)
   end
+  it "raises ClipsOver for a one-shot clip that has ended or will have when the swap lands (omnibus15)" do
+    one = MB::Sound.seq(MB::Sound::C2).n4
+    session.add(one.synth(voices: 1) { |v| v.number * v.env(0, 0, 1, 1.0).no_velocity }, name: :bass)
+    run(4000)
+    # (still playing, but over by the next bar)
+    expect { session.swap(:bass, bass2) }.to raise_error(MB::Sound::Session::ClipsOver, /:bass's clip has ended.*bg :bass/)
+    # (a swap before it ends is heard)
+    expect(session.swap(:bass, bass2, start_time: transport.position + 1/8r)).to eq(1)
+    expect(session.clips_over_by?(:bass, transport.position + 1)).to eq(false) # (a swap is queued)
+
+    run(48000)
+    expect(run(800)[400]).to be_within(1e-6).of(MB::Sound::D2.number)
+  end
 end

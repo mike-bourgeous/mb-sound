@@ -177,6 +177,54 @@ RSpec.describe(MB::Sound::Arrangement) do
     expect(set.resolve(:bar)).to eq(3/4r)
   end
 
+  describe 'a looped clip after a one-shot (omnibus15)' do
+    # A patch whose tail rings for 1 s after the clip's last note
+    before { set.track(:s) { |c| c.synth(voices: 1) { |v| v.number * v.env(0, 0, 1, 1.0).no_velocity } } }
+
+    let(:one) { MB::Sound.seq(MB::Sound::C3).n4 }
+    let(:looped) { MB::Sound.seq(MB::Sound::D3).n4.loop }
+
+    it 'builds the patch again when the one-shot ended and its tail still rings' do
+      within { set.play(:s, one, start_time: 0) }
+      run(36000) # (the clip ended at 24000; the tail rings)
+      expect(player(:s)).not_to be_nil
+
+      entry = within { set.play(:s, looped) }
+      expect(entry.to_s).to eq('bg :s lands 2:1 (queued)')
+      data = run(96000 * 2 - 36000)
+      expect(data[96000 - 36000 + 1000]).to be_within(1e-6).of(MB::Sound::D3.number)
+      expect(data[-1]).to be_within(1e-6).of(MB::Sound::D3.number)
+    end
+
+    it 'builds the patch again when the one-shot will have ended by the landing' do
+      within { set.play(:s, one, start_time: 0) }
+      run(8000) # (still playing)
+      within { set.play(:s, looped) }
+      data = run(96000 * 2 - 8000)
+      expect(data[96000 - 8000 + 1000]).to be_within(1e-6).of(MB::Sound::D3.number)
+    end
+
+    it 'builds the patch again for a one-shot queued to start before the landing' do
+      set.go(:one, at: :now)
+      run(1600)
+      within { set.play(:s, one) } # (lands on bar 2)
+      within { set.play(:s, looped, at: MB::Sound.bar(3)) }
+      data = run(96000 * 3 - 1600)
+      expect(data[96000 * 2 - 1600 + 1000]).to be_within(1e-6).of(MB::Sound::C3.number + MB::Sound::D3.number)
+    end
+
+    it 'still swaps when the one-shot plays past the landing' do
+      long = MB::Sound.seq(MB::Sound::C3).n1 * 2
+      within { set.play(:s, long, start_time: 0) }
+      run(8000)
+      graph = player(:s).input
+      within { set.play(:s, looped) }
+      data = run(96000 * 2 - 8000)
+      expect(player(:s).input).to equal(graph) # swapped, not rebuilt
+      expect(data[96000 - 8000 + 1000]).to be_within(1e-6).of(MB::Sound::D3.number)
+    end
+  end
+
   describe 'fills on launch-aligned loops' do
     # 126 BPM: bar lines fall between samples (91428.57 frames per bar), so a
     # launch lands on the sample before its exact time

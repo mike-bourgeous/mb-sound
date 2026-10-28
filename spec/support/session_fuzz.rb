@@ -157,6 +157,16 @@ module SessionFuzz
 
       lines << "at_bar(#{bar}#{beat == 1 ? '' : ", beat: #{beat}"}) { #{cmd} }"
     end
+
+    # (omnibus15) a synth track given a one-shot, then a looping clip
+    # landing after the one-shot ended: the patch builds again instead of
+    # swapping into ended voices (drawn after the steps above, so earlier
+    # seeds keep their songs and only gain these lines)
+    synths = tracks.select { |_, k| k == :synth }.keys
+    if !synths.empty? && rng.rand < 0.35
+      t = pick(rng, synths)
+      lines << "at_bar(#{rng.rand(1..bars)}, beat: 2) { bg :#{t}, seq(C5, D5).n16, on: :now; bg :#{t}, seq(E5, G5).n8.loop, in: 1/4r }"
+    end
     Song.new(header: header, lines: lines, bars: bars)
   end
 
