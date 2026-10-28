@@ -60,10 +60,11 @@ module MB
         # becomes a few printable keys that play smoothly.  A step that
         # jumps (FIT_JUMP or more) holds the value before it until just
         # before the jump.  +budget+ caps the keys per lane (default: as many
-        # as the tolerance needs).  Lanes with fewer than 3 steps, and
+        # as the tolerance needs); +resolution+ is the spacing of the values
+        # sent between keys (whole notes).  Lanes with fewer than 3 steps, and
         # curve lanes, stay as they are.
-        def fit_controls(tolerance: FIT_TOLERANCE, budget: nil)
-          with_controls(@controls.map { |l| Clip.fit_lane(l, tolerance: tolerance, budget: budget) })
+        def fit_controls(tolerance: FIT_TOLERANCE, budget: nil, resolution: ControlLane::RESOLUTION)
+          with_controls(@controls.map { |l| Clip.fit_lane(l, tolerance: tolerance, budget: budget, resolution: resolution) })
         end
 
         # [[time, lane, value], ...] of the controller values sent at clip
@@ -191,7 +192,7 @@ module MB
         end
 
         # The fitted version of step lane +lane+ (see #fit_controls).
-        def self.fit_lane(lane, tolerance:, budget:)
+        def self.fit_lane(lane, tolerance:, budget:, resolution: ControlLane::RESOLUTION)
           return lane unless lane.stepped? && lane.points.length >= 3
           pts = lane.points
           lo = lane.type == :bend ? -1.0 : 0.0
@@ -215,7 +216,7 @@ module MB
           spec = FitSpec.new(lo, span)
           g = MB::Sound::Gesture.fit(frames, spec, tolerance: tolerance, budget: budget || frames.length)
           keys = g.keys.map { |f, v| [Rational(f, scale), v] }
-          lane.with_points(keys, curve: g.curve == :linear ? :linear : nil, error: g.error)
+          lane.with_points(keys, curve: g.curve == :linear ? :linear : nil, error: g.error, resolution: resolution)
         end
 
         # A Knob::Spec stand-in for Gesture.fit: positions 0..1 across a

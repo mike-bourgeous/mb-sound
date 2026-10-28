@@ -146,8 +146,8 @@ module MB
         end
 
         # A copy with +points+, keeping everything else.
-        def with_points(points, curve: @curve, error: @error)
-          ControlLane.new(@type, @number, points, curve: curve, resolution: @resolution, error: error, range: @range)
+        def with_points(points, curve: @curve, error: @error, resolution: @resolution)
+          ControlLane.new(@type, @number, points, curve: curve, resolution: resolution, error: error, range: @range)
         end
 
         # The lane's value at +pos+ (whole notes within one pass of the
