@@ -67,6 +67,41 @@ module MB
         Sequence::Clip.new(list, length: length&.to_r, loop: loop, seed: seed, align: align, performed: performed, controls: lanes)
       end
 
+      # Returns a Sequence::Rhythm of explicit hits, one Array per hit:
+      # [start, length, velocity], plus a Hash of marks (accented:, slid:)
+      # when it has any; starts and lengths in whole notes (exact).  How a
+      # rhythm without a recipe prints; `clip.rhythm` takes one from a
+      # clip.
+      #
+      #     rhythm([0r, 1r/8, 0.9, { accented: true }], [3r/8, 1r/8, 0.7], length: 1r, loop: true).notes(A1, C2)
+      def rhythm(*rows, length:, loop: false)
+        hits = rows.map { |row|
+          raise ArgumentError, "Rhythm rows are Arrays [start, length, velocity, { marks }] (got #{row.inspect})" unless row.is_a?(Array) && row.length.between?(3, 4)
+          start, len, velocity, marks = row
+          [start, len].each { |t|
+            raise ArgumentError, "Hit starts and lengths are whole notes (got #{t.inspect})" unless t.is_a?(Numeric) && t.real? && !t.is_a?(Float) && t >= 0
+          }
+          raise ArgumentError, "Hit velocities are numbers from 0 to 1 (got #{velocity.inspect})" unless velocity.is_a?(Numeric) && velocity.between?(0, 1)
+          marks ||= {}
+          unknown = marks.keys - Sequence::Rhythm::MARKS
+          raise ArgumentError, "Unknown hit marks #{unknown.map(&:inspect).join(', ')} (#{Sequence::Rhythm::MARKS.join(', ')})" unless unknown.empty?
+          Sequence::Rhythm::Hit.new(start: start.to_r, length: len.to_r, velocity: velocity.to_f, accented: !!marks[:accented], slid: !!marks[:slid])
+        }
+        Sequence::Rhythm.new(hits, length: length, loop: loop)
+      end
+
+      # Returns a Sequence::Groove (a feel template) on a +grid+ of note
+      # division +grid+ (or a Duration): +offsets+ per step in whole notes
+      # (exact, within half a step; negative is early), +levels+ per step
+      # (velocity scales, 1.0 by default).  How a groove without a recipe
+      # prints; `clip.groove` measures one from a played clip.
+      #
+      #     feel = groove_template(16, offsets: [0r, 1r/256, 0r, -1r/512], levels: [1.1, 0.8, 1.0, 0.9])
+      #     beat.groove(feel, amount: 0.5)
+      def groove_template(grid, offsets:, levels: nil)
+        Sequence::Groove.new(Sequence::Duration.whole_notes(grid), offsets, levels)
+      end
+
       # Returns a MB::Sound::Scale (see Scale.new and Scale.[]): a name such
       # as :minor or :dorian (Scale.names), or an Array of offsets in
       # semitones, with a +root+ (a Note, note number, or name like :a).

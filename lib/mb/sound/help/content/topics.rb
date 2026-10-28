@@ -942,6 +942,27 @@ module MB
       see :midi, :sequences
     end
 
+    Help.topic :templates, 'Rhythm and feel templates', group: :perform do
+      about <<~TEXT
+        Any clip lends its rhythm or its feel.  `clip.rhythm` is which
+        steps play, how long and how loud, with accents and slides:
+        `.notes(C1, F1, [A1, E2], nil)` pours pitches in, cycling (Arrays
+        are chords, nil rests a hit), `.pitches(0, 2, 4, scale:
+        scale(:minor))` scale degrees, `.to_clip(36)` one note.
+        `take.groove` measures a played clip against a 16th grid (`grid:
+        8`, `triplets: true`): each step's mean timing offset and level;
+        `beat.groove(feel, amount: 0.6)` moves another clip or kit onto
+        those positions and levels (the quantize core; `velocity: 0` for
+        timing only), and `midi.groove(feel)` delays live notes the same
+        way.  Printed grooves and rhythms read back as `groove_template`
+        and `rhythm` calls.
+      TEXT
+      commands :rhythm, :groove_template, :midi_clip
+      dsl :rhythm, :groove, :quantize
+      note :sequences
+      see :midi_files, :sequences
+    end
+
     Help.topic :key, 'The session key and modes', group: :time do
       about <<~TEXT
         The session has a key: `key :ab` sets the root (also 'F#', a Note

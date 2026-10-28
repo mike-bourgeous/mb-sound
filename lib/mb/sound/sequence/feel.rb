@@ -78,6 +78,17 @@ module MB
             target
           end
 
+          # Where a groove template (Sequence::Groove) puts a note at
+          # +position+ (whole notes): its quantize step on +grid+ (whole
+          # notes; #quantize_step, +direction+ :nearest for clips, :next
+          # for streams) plus the template's offset for that step, cycling
+          # through +offsets+ from position 0.  Returns [target, index].
+          def groove_target(position, grid, offsets, direction: :nearest)
+            step = quantize_step(position, grid, direction: direction)
+            i = (step / grid).to_i % offsets.length
+            [step + offsets[i], i]
+          end
+
           # +position+ (whole notes) through the swing time warp: within each
           # pair of +grid+ steps, the second step starts at +amount+ of the
           # pair instead of halfway, and times in between stretch to match

@@ -548,6 +548,9 @@ module MB
               # A clip without a recipe (captured, recorded, Clip.new):
               # its events
               return [clip_events_text(o, indent), ATOM]
+            when MB::Sound::Sequence::Rhythm, MB::Sound::Sequence::Groove
+              # (rhythm(...) / groove_template(...) values; midi-import-1)
+              return [o.to_ruby, ATOM]
             end
 
             [input_name(o), ATOM]

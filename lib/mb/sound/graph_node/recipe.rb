@@ -250,7 +250,8 @@ module MB
           def graph_object?(obj)
             obj.is_a?(GraphNode) || obj.is_a?(Channels) || obj.is_a?(MB::Sound::Notes) ||
               obj.is_a?(MB::Sound::Filter) || obj.is_a?(MB::Sound::Sequence::Clip) || obj.is_a?(MultiOutput) ||
-              obj.is_a?(MB::Sound::Sequence::Kit) || obj.is_a?(MB::Sound::Wavetable::KeyMap)
+              obj.is_a?(MB::Sound::Sequence::Kit) || obj.is_a?(MB::Sound::Wavetable::KeyMap) ||
+              obj.is_a?(MB::Sound::Sequence::Rhythm) || obj.is_a?(MB::Sound::Sequence::Groove)
           end
 
           def next_seq
