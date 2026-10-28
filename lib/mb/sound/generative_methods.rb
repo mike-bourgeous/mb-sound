@@ -239,8 +239,9 @@ module MB
       end
 
       # An evolving rhythm for a melodic line (#beats with one row of
-      # +notes+): +pattern+ is the per-step hit probability (an Array, or
-      # `euclid`-style via #beats), the notes a walk of the scale notes of
+      # +notes+): +pattern+ is the per-step hit probability (an Array; for
+      # Euclidean lines write `beats { row :line, euclid(5, 16), notes: h }`),
+      # the notes a walk of the scale notes of
       # +source+ (Weights, a Harmony, a Scale, a Field, or Harmony#over)
       # where each hit starts; the other options as #beats.
       #

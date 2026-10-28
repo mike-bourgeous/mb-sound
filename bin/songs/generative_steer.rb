@@ -98,9 +98,10 @@ module MB::Sound
   # listening).  Returns the clips (a Hash: drums, bass, lead, pad).
   def self.generative_steer(seed: 5, steer: true, form: true)
     bpm 124
-    knob :energy, steer ? 0.3 : 0.5, range: 0.0..1.0
-    knob :density, steer ? 0.2 : 0.5, range: 0.0..1.0
-    knob :wander, steer ? 0.05 : 0.5, range: 0.0..1.0
+    start = steer ? { energy: 0.3, density: 0.2, wander: 0.05 } : Hash.new(0.5)
+    knob :energy, start[:energy], range: 0.0..1.0
+    knob :density, start[:density], range: 0.0..1.0
+    knob :wander, start[:wander], range: 0.0..1.0
     h = generative_steer_harmony
 
     track(:drums) { |clip| tr909(clip, shuffle: 0) * 0.8 }
