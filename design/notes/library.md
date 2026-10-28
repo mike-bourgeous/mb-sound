@@ -114,6 +114,53 @@ S1 with root `L` (maintainer 2026-10-26); the word heads are provisional: `L.ins
 
 The DYK mark "try" (2026-10-25): 0..1 along the param's range and curve, so morph, randomize, and macros can move evenly in pitch and dB.  `:exp` ranges are logarithmic (Decibels: even in dB, since dB-linear is exp over gains), linear and stepped ranges linear (stepped values round), choices by index, booleans at 0.5.  Positions outside 0..1 give values outside the range (`#check` limits them).  Knob::Spec keeps its own Float copies on the hot path (same math).
 
+## Instruments on tracks, preset knobs, struck resonators (library-instruments-1, 2026-10-28)
+
+The maintainer's guesses from his 2026-10-27 take (workbench `research/api-guesses/take_20261027_193645.md`) and his decisions of 2026-10-28: "Params become knobs + curated"; "Yes, plus effects explain, plus make it easy to ping resonant effects as instruments and/or create instruments that reference the resonator effect presets".
+
+**Library entries as a track's patch** (`arrangement/instrument.rb`, `Arrangement::InstrumentPatch`; arrangement.md, Library instruments): `track :bass, L.inst.dnb.dnb_reese`, `track :bass, :dnb_reese`, `track :bass, riff, :dnb_reese` (either order), and `track(:bass, &entry)` are the patch `{ |clip| preset :dnb_reese, midi: clip }` (graph documents) or `{ |clip| entry.(clip) }` (every other family: SQ-80, genre patches, tr808/tr909, struck, library-file instruments).  `track`'s positional values are sorted by type (Arrangement#track_values): a Clip or Kit (or a clip entry) is the track's clip, an instrument or kit Entry or a Symbol naming one its instrument, anything else its graph; a clip alone still plays as a graph.  A Symbol resolves like `preset :x` first (graph documents and library-file instruments in shelf order), else the one instrument or kit of that name in another family (several raise with their head paths).  Effects raise with a runnable example (`track(:bass) { |clip| preset(:dnb_reese, midi: clip).then(&L.fx.hall) }`, or a bus), except resonators, which play as their struck instruments (`track :bells, L.fx.bell` is L.inst.bell).  Graph document entries take their main input positionally (`L.inst.dnb.dnb_reese.(clip)`; `Library.document_builder`).
+
+**Preset params become knobs** (`arrangement/track_knobs.rb`, `Arrangement::TrackKnobs`): a track's patch builds in `TrackKnobs.building(track, session)` (Arrangement.counted wraps every track patch, before its PatchCheck), and `preset` inside it gives each document param the patch leaves out as the Session knob `:"bass/cutoff"` (the Param's range, description, clamp; plain-number params named like a frequency or time take the names table's `:exp` curve), read through the existing knob-param path, so the samples are the same until it is turned (26 shipped presets with params, bit for bit).  Turn, learn, scenes, snapshots, undo, takes, set documents, and the inspector's knob rows work on them as on any knob.  Params the patch gives, and params `bind` made follow a knob, are not knobs.  Struck entries' decay becomes a knob the same way (`TrackKnobs::ENTRY_PARAMS`); other families' params stay numbers (their voices take numbers in places a knob can't follow or would change their sound).
+- Two tracks playing one preset have their own knobs (`:"bass/cutoff"`, `:"bass2/cutoff"`).
+- `preset` outside a track's patch (bg, plain graphs, scripts) makes none (proposal: knobs per player for `bg :x, preset(...)`; not built).
+- `bind :bass, cutoff: :cut` makes the param follow an existing knob (one rebuild at the launch point, one undo step); `bind :bass, :cutoff` names the knob that's already there; the guess `bind :bass, :cut` gets `did you mean bind :bass, cutoff: :cut?` (the params whose range holds the knob's value).
+
+**Curated knobs** (item 3): the synth scripts keep knob tables of each patch's own values (`DNB_KNOBS`, `JUNGLE_KNOBS`, `FUNK_KNOBS`, `AMBIENT_KNOBS`, `ELECTRIC_PIANO_KNOBS`), given to the voices as named Constants (bin/save_presets.rb passes them as options, so `--save` makes them params).  The documents render sample for sample like master-ai 8c7c1c24's.  Values that read through a node in float32 instead of a double (resonances and feedbacks like 0.55, sustain levels: ~4e-7) and nodes that change a voice's structure (a glide time node makes jungle_sub's lane not plan-fusable, so the idle lane sleeps and its free-running sines stop; the rain stick's adsr travel) were left out.
+
+| preset | knobs |
+|---|---|
+| dnb_reese | cutoff resonance drive glide |
+| dnb_sub | cutoff release |
+| dnb_neuro | cutoff decay grit |
+| dnb_pad | cutoff attack release |
+| dnb_pluck | cutoff decay echo |
+| dnb_boom | decay drop |
+| jungle_breaks | cutoff grit |
+| jungle_sub | release |
+| jungle_reese | glide release |
+| jungle_keys | decay |
+| jungle_pad | cutoff attack release |
+| jungle_flute | glide attack echo |
+| funk_bass | bite decay |
+| funk_keys | body decay |
+| funk_clav | cutoff decay |
+| funk_talkbox | glide echo |
+| funk_choir | dub keep attack release |
+| ambient_bowl, ambient_rin | space decay |
+| ambient_koto | space wear decay |
+| ambient_gong | space tune spread (as before) |
+| ambient_harp | space wear (as before) |
+| ambient_drone | attack release |
+| ambient_rainstick | tip |
+| tine_piano, tine_crunch | bark pickup decay release amp |
+| reed_piano | bark pickup decay release |
+| digibrass, organ_reso, square_bass | grit cutoff reso (as before) |
+| sq80_* | cutoff reso chop flutter (as before) |
+| dnb_drums, funk_beat, funk_perc, jungle_perc | none (kits) |
+
+**Struck instruments** (`lib/mb/sound/struck.rb`, `struck_methods.rb`): family `:struck` (kind :instrument), one entry per resonator preset with settings `{ resonator: name }` only, so the resonator preset (modes, decay, beat, pitch, glide) is the one source; params decay and beat are read from it.  `struck(clip, :bar, decay:, beat:, spread:, voices:, level:)` (a recorded top-level call; documents save `struck(midi, :bar)`) is a synth striking `resonate(:bar, v.freq)` with each note's trigger (velocity the height), at `Struck::LEVELS` (-20.3 LUFS on a 4-bar loop of `Struck.phrase` at 100 BPM; the membrane capped by its peak, about -27 LUFS).  `Entry#ping(*pitches)` strikes once (`L.fx.bar.ping(C5)`; chords; the typical pitch by default) and ends when rung out; `Entry#to_playable` (`Library::Audition`) is what `play entry` plays: a strike for resonator effects, the demo phrase for instruments (struck ones moved toward their typical pitch), a beat for kits; other effects raise with `play 220.hz.saw.at(0.2).for(1).then(&L.fx.hall)`.  Library files: `struck :soft_bell, resonator: :bell, decay: 6, beat: 0.4` (its level is its resonator's), or `instrument :x do |midi| struck(midi, :bell) end`.
+- Not built: a mallet (a lowpassed or velocity-shaped strike), beat as a knob (build-time), a ping shorter than the -120 dB ring-out (the bar: ~15 s).
+
 ## Not built (phase 3 and later)
 
 - Instrument params as block keywords (`instrument :reese do |midi, cutoff: 2400.hz|`, the draft's long form): rack blocks take ports as keywords, so params would need a value port type, and saving such a rack as a rack document a new `inputs` entry (a format change): library racks use `knob` lines inside for now.
@@ -130,3 +177,6 @@ The DYK mark "try" (2026-10-25): 0..1 along the param's range and curve, so morp
 | Specs stub `GraphIO.presets_dir`; a cache keyed on the environment doesn't see stubs | `Library.reload!` in those specs' before/after | stale shelves between examples | adopted (spec convention) |
 | A file shelf's broken line must not break `reverb(:hall)` at a gig | file errors become Index#problems; shipped ones fail the guard | one bad file disabling a family | adopted |
 | Session racks placed from library files shadowed their own richer entries | session entries skip names a library rack has | listings losing tags and params | adopted |
+| A value that float32 can't hold differs when read through a Constant (lp4 resonance 0.55 vs 0.55 double: ~4e-7) | knobs/params checked by rendering every preset document against master-ai's, two clips; inexact candidates left out | "same sound" claims from reading code | adopted (library-instruments-1) |
+| A node in a voice can change its skip-idle class (a glide time node: the lane isn't plan-fusable and sleeps, stopping free-running sines) | the same render comparison, with a sparse clip of rests | silent behavior changes from "harmless" nodes | adopted |
+| Track patches had no name to pass to what they build | TrackKnobs.building around every counted patch (thread-local track and Session) | per-track state reaching nested builders through globals | adopted |
