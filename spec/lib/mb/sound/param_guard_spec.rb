@@ -75,6 +75,36 @@ RSpec.describe('param declarations', :aggregate_failures) do
     end
   end
 
+  # omnibus15 (maintainer: "I'd like to specify the unit only once as long
+  # as it's not ambiguous or contradictory"): every entry point reads the
+  # one unit given, prints it fully typed, and still refuses two units
+  it 'reads a unit given once at every entry point (knob, document lines, script options, macros, mixer params, signatures)' do
+    want = '(100.hz..8000.hz).at(150.hz)'
+    built = {
+      declare: MB::Sound::Param.declare(:cut, (100..8000).at(150.hz)),
+      keywords: MB::Sound::Param.new(name: :cut, default: 150.hz, range: 100..8000),
+      knob: MB::Sound::GraphNode::Knob::Spec.new(name: :cut, default: (100.hz..8000).at(150)).param,
+      document: MB::Sound::GraphIO.parse("graph 5, name: :u\nknob :cut, (100..8000).at(150.hz)\n440.hz.sine\n").declarations[:cut],
+      script: MB::Sound::ScriptRunner.declare(:synth, :cut, [150.hz, 'cutoff', 100..8000]).param,
+      mixer: Class.new(MB::Sound::GraphNode::ChannelMixer) { param :cut, default: 150.hz, range: 100..8000 }.params[:cut],
+      signature: MB::Sound::ArgTypes::Param.new(name: :cut, default: 150.hz, range: 100..8000),
+    }
+    built.each do |where, param|
+      expect(param.to_ruby).to include(want), "#{where}: #{param.to_ruby}"
+      problems, = ParamGuard.check(param)
+      expect(problems).to eq([]), "#{where}: #{problems.join('; ')}"
+    end
+    allowed = MB::Sound::ScriptRunner.declare(:synth, :cut, [150.hz, 'cutoff', 100..8000]).allowed
+    expect(MB::Sound::Param.value_key(allowed)).to eq(MB::Sound::Param.value_key(100.hz..8000.hz))
+
+    # (rack macros and ChannelMixer params build Knob specs and Params as above)
+    expect(MB::Sound::Param.declare(:amt, (0.1..1).at(-3.db)).to_ruby).to include('(-20.0.db..0.0.db).at(-3.db)')
+    expect { MB::Sound::Param.declare(:amt, (0..1).at(-6.db)) }.to raise_error(MB::Sound::Param::Error, /linear gains, so 0 has no level/)
+    expect { MB::Sound::Param.declare(:cut, (100.hz..8000).at(2.seconds)) }.to raise_error(MB::Sound::Param::Error, /frequency \(100\.hz\) and a length in seconds \(2\.seconds\)/)
+    expect { MB::Sound::Param.new(name: :cut, default: 150.hz, range: 100..8000, type: :seconds) }.to raise_error(MB::Sound::Param::Error, /type: :seconds/)
+    expect { MB::Sound::Param.new(name: :cut, default: 150.hz, range: 100..8000, unit: 'Hz') }.to raise_error(MB::Sound::Param::Error, /carries its own unit/)
+  end
+
   it 'knows the names table it documents' do
     MB::Sound::Param.names.each do |name, entry|
       problems, built = ParamGuard.check(MB::Sound::Param.declare(name, entry[:range].begin))
