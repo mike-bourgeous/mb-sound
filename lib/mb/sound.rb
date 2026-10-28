@@ -207,6 +207,7 @@ require_relative 'sound/note'
 require_relative 'sound/scale'
 require_relative 'sound/musical_key'
 require_relative 'sound/sequence'
+require_relative 'sound/graph_node/tape_echo' # (after Sequence: its presets use musical lengths)
 require_relative 'sound/generative'
 require_relative 'sound/midi/streams'
 require_relative 'sound/notes'

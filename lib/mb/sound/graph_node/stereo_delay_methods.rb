@@ -103,6 +103,35 @@ module MB
           Channels.new([l, r])
         end
 
+        # A tape echo (GraphNode::TapeEcho): the repeats run through a tape
+        # sim on every pass (wow and flutter, a highpass and a lowpass,
+        # saturation), one sample at a time in a feedback loop.  +preset+ is
+        # :reel (default; warm 3/16 echoes), :slapback (one 110 ms slap),
+        # :ping_pong (repeats bouncing left and right; stereo out), or :dub
+        # (dark, saturated dotted quarters ringing on), or a :delay preset
+        # from a library shelf (`L.fx.delay`); options override it:
+        #
+        # +:time+ - echo time (seconds, `250.ms`, `1.n8.dotted`, a node)
+        # +:feedback+ - repeat gain (above 1 the saturation holds it up)
+        # +:mix+ - dry/wet crossfade, 0..1 (as #chorus)
+        # +:tone+ - the loop's lowpass cutoff in Hz (darker below)
+        # +:low_cut+ - the loop's highpass cutoff in Hz
+        # +:drive+ - saturation drive (0 clean)
+        # +:wow+, +:flutter+ - delay wobble depths in ms (slow random drift,
+        #   6.5 Hz sine)
+        # +:stereo+ - :mono (one tape per input channel) or :ping_pong
+        # +:spread+ - the ping-pong's echo width (1 hard left and right)
+        # +:seed+ - the wow drift's seed (default: drawn from MB::Sound.seed)
+        #
+        # Examples (bin/sound.rb):
+        #     play keys.tape_echo                       # :reel
+        #     play keys.tape_echo(:dub, feedback: 0.8)
+        #     play drums.tape_echo(:ping_pong, time: 3.n16, mix: 0.25)
+        #     play vox.tape_echo(:slapback)
+        def tape_echo(preset = :reel, seed: nil, **options)
+          TapeEcho.build(self, preset, seed: seed, **options)
+        end
+
         # [left, right] of +node+ (a mono node or one-channel bundle twice,
         # a stereo bundle's channels); raises for more channels.
         def self.sides(node, method)

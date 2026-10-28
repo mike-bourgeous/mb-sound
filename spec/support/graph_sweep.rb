@@ -301,6 +301,10 @@ module GraphSweep
       ['delay cubic and linear', ->(c) { c.sig.delay(c.mod(0.001, 0.003), interpolation: :cubic) + c.sig.delay(0.0021, interpolation: :linear) }],
       ['multitap', ->(c) { c.sig.multitap(0.001, c.mod(0.002, 0.003), 37.samples).mixdown }],
       ['multitap feedback (DelayNetwork)', ->(c) { c.sig.multitap(0.001, c.mod(0.002, 0.003), 37.samples, feedback: [0.3, c.mod(0, 0.4), 0], smooth: true).mixdown }],
+      ['tape_echo presets (TapeEcho: wobbled delay times, loops with :dc compensation)', ->(c) {
+        c.sig.tape_echo(:reel, time: 0.002, feedback: c.mod(0.3, 0.7)) + c.sig.tape_echo(:dub, time: 0.0017).at(0.5) +
+          c.sig.tape_echo(:ping_pong, time: 0.0011, wow: 0, spread: 0.5).mixdown + c.stereo_sig.tape_echo(:slapback, time: 0.001).mixdown
+      }],
       ['ping_pong and haas', ->(c) {
         c.sig.ping_pong(c.mod(0.001, 0.002), feedback: c.mod(0.2, 0.6), spread: 0.5, mix: 0.4).mixdown +
           c.stereo_sig.ping_pong(0.0013, feedback: -0.5, input: :stereo, interpolation: :cubic).mixdown +

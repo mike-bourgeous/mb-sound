@@ -314,7 +314,7 @@ RSpec.describe MB::Sound::Library do
 
     it 'complete the words of a chain without running it' do
       c = MB::Sound::Library::Heads
-      expect(c.completions('L.fx.re')).to eq(%w[L.fx.resonator L.fx.reverb])
+      expect(c.completions('L.fx.re')).to eq(%w[L.fx.reel L.fx.resonator L.fx.reverb]) # (:reel, a tape echo preset)
       expect(c.completions('L.')).to include('L.inst', 'L.fx', 'L.all')
       expect(c.completions('MB::Sound::L.kit.tr')).to eq(%w[MB::Sound::L.kit.tr808 MB::Sound::L.kit.tr909])
       expect(c.completions('L.inst.dnb.')).to include('L.inst.dnb.dnb_reese', 'L.inst.dnb.reese')
