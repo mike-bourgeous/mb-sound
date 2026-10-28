@@ -25,16 +25,17 @@ module MB
       # sustain pedal (CC 64) holds notes until it lifts, and the pedal
       # isn't kept as a lane.  Velocities as played (Clip#performed?).
       #
-      # Slides (the legato rule, +slides: :auto+): a selection is a legato
-      # line when at most two notes ever sound at once and every overlap
-      # starts at least LEGATO_GAP after the note it overlaps (not a
-      # chord) and lasts less than LEGATO_MAX_OVERLAP and less than half
-      # of that note (a player's legato, not a sustained arpeggio, whose
-      # notes ring a whole step into the next).  In a legato line every
-      # note the next one overlaps is marked slid (`~`, Seq::Step#slide),
+      # Slides (the legato rule, +slides: :auto+), decided per pair of
+      # notes in start order: a note and the next are a legato pair when
+      # the next starts at least LEGATO_GAP later (not a chord), before
+      # the first ends, overlapping it by less than LEGATO_MAX_OVERLAP and
+      # less than half of the first note (not a sustained arpeggio, whose
+      # notes ring a step or more into the next), with no third note
+      # sounding during the overlap (not voice leading in chords).  The
+      # first note of a legato pair is marked slid (`~`, Seq::Step#slide),
       # its length as played, so mono voices glide and legato envelopes
-      # hold.  Polyphonic selections keep their chords and overlaps
-      # unmarked.  +slides: true+ marks overlaps regardless, +false+ never.
+      # hold; chords and other overlaps stay unmarked notes.  +slides:
+      # true+ marks every overlap, +false+ none.
       #
       # Controllers (+cc:+): CCs (except bank select 0/32, the RPN/NRPN
       # messages 6/38/96-101, and channel mode messages 120-127), pitch
@@ -52,7 +53,7 @@ module MB
         # controller lanes it has with their event counts ({ cc1: 3296,
         # bend: 65 }), whether it looks like drums, and how many notes it
         # sounds at once at most.
-        Track = Data.define(:index, :name, :channels, :notes, :low, :high, :controls, :drums, :polyphony, :legato) do
+        Track = Data.define(:index, :name, :channels, :notes, :low, :high, :controls, :drums, :polyphony, :slides) do
           def drums? = drums
 
           def to_s
@@ -60,7 +61,7 @@ module MB
             ch = channels.empty? ? 'no channel' : "ch #{channels.map { |c| c + 1 }.join(',')}"
             ctl = controls.empty? ? '' : " #{controls.map { |k, n| "#{k} x#{n}" }.join(' ')}"
             kind = drums ? ' drums' : (notes > 0 ? (polyphony > 1 ? " poly #{polyphony}" : ' mono') : '')
-            kind = ' mono legato' if legato
+            kind += " #{slides} slide#{'s' unless slides == 1}" if slides > 0
             "#{index} #{name.inspect} #{ch}, #{notes} notes#{range}#{kind}#{ctl}"
           end
 
@@ -100,10 +101,11 @@ module MB
         # the overlap to count as legato rather than a chord: a 32nd note.
         LEGATO_GAP = 1/32r
 
-        # The longest overlap (whole notes) of a legato line: half a 16th
-        # (legato playing overlaps 5-35% of a 16th; sustained arpeggios
-        # ring a whole step).
-        LEGATO_MAX_OVERLAP = 1/32r
+        # The longest overlap (whole notes) of a legato pair: an eighth
+        # note (a mono synth's legato overlaps a few ms to an eighth;
+        # sustained arpeggios ring longer than half their note, the other
+        # limit).
+        LEGATO_MAX_OVERLAP = 1/8r
 
         # How long (whole notes) a drum hit of #kit lasts at most: drum
         # tracks' note lengths mean nothing to drum machines (they often
@@ -177,7 +179,7 @@ module MB
               Track.new(
                 index: i, name: name, channels: chans, notes: notes.length, low: nums.min, high: nums.max,
                 controls: lanes, drums: !notes.empty? && (chans == [9] || name.match?(DRUM_NAMES)), polyphony: Import.polyphony(notes),
-                legato: Import.polyphony(notes) == 2 && legato?(notes)
+                slides: notes.length > 1 ? legato_pairs(notes).count(true) : 0
               )
             }
             first = MB::M.sigfigs(tempo_map.bpm_at(0), 5)
@@ -420,7 +422,7 @@ module MB
           last = inside.map { |_, off| off }.max
           ctl = evs.select { |t, e| t >= start && lane_key(e, sustain: true) }.map(&:first).max
           last = [last, ctl && ctl + 1].compact.max
-          raise ArgumentError, "Nothing plays in #{File.basename(@path.to_s)} from bar #{from}" if last.nil?
+          raise ArgumentError, "Nothing plays in #{File.basename(@path.to_s)} from bar #{from} (no notes or controller lanes there)" if last.nil?
           grace = (END_GRACE / whole_notes_per_tick).floor
           stop = base.find { |b| b > start && b >= last - grace } || base[-1]
           [start, stop]
@@ -434,23 +436,45 @@ module MB
         # Per note, true when it is slid (see the class description).
         def slide_marks(notes, mode)
           return [] if mode == false || notes.length < 2
-          overlapped = notes.each_with_index.map { |(on, off), i|
-            nxt = notes[i + 1]
-            nxt && nxt[0] < off && nxt[0] > on
-          }
-          return overlapped if mode == true
-          legato?(notes) ? overlapped : []
+          if mode == true
+            return notes.each_with_index.map { |(on, off), i|
+              nxt = notes[i + 1]
+              nxt && nxt[0] < off && nxt[0] > on
+            }
+          end
+          legato_pairs(notes)
         end
 
-        # True if +notes+ are monophonic with legato overlaps (see the
-        # class description; a third note inside an overlap would show as
-        # polyphony 3).
-        def legato?(notes)
+        # Per note of +notes+ (sorted by start), true if it and the next
+        # note are a legato pair (see the class description): the next
+        # starts LEGATO_GAP or more later, before this one ends, overlapping
+        # it by less than LEGATO_MAX_OVERLAP and less than half of this
+        # note, with no other note sounding during the overlap.
+        def legato_pairs(notes)
           gap = (LEGATO_GAP / whole_notes_per_tick).ceil
           most = LEGATO_MAX_OVERLAP / whole_notes_per_tick
-          Import.polyphony(notes) <= 2 && notes.each_cons(2).all? { |(on, off), (on2, _)|
+          # The number of notes sounding, as [[tick, count from there], ...]
+          counts = []
+          n = 0
+          notes.flat_map { |on, off| [[on, 1], [off, -1]] }.sort_by { |t, d| [t, d] }.each do |t, d|
+            n += d
+            counts.pop if counts[-1]&.first == t
+            counts << [t, n]
+          end
+          ticks = counts.map(&:first)
+          notes.each_with_index.map { |(on, off), i|
+            nxt = notes[i + 1] or next false
+            on2 = nxt[0]
             overlap = off - on2
-            overlap <= 0 || (on2 - on >= gap && overlap < most && overlap * 2 < off - on)
+            next false unless overlap > 0 && on2 - on >= gap && overlap < most && overlap * 2 < off - on
+            # At most these two notes during the overlap [on2, off)
+            k = (ticks.bsearch_index { |t| t > on2 } || ticks.length) - 1
+            ok = true
+            while k < counts.length && counts[k][0] < off
+              (ok = false; break) if counts[k][1] > 2
+              k += 1
+            end
+            ok
           }
         end
 

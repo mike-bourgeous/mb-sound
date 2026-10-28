@@ -13,11 +13,11 @@ RSpec.describe(MB::Sound::MIDI::Import) do
       list = MB::Sound.midi_tracks(reese)
       expect(list.length).to eq(4)
       expect(list.map(&:name)).to eq(['Conductor', 'Unnamed', 'Unnamed', 'Pad'])
-      expect(list[1]).to have_attributes(notes: 8, channels: [0], polyphony: 2, legato: true, drums: false, controls: { cc1: 66, cc7: 1 })
-      expect(list[3]).to have_attributes(polyphony: 3, legato: false, controls: { bend: 2, pressure: 1 })
+      expect(list[1]).to have_attributes(notes: 8, channels: [0], polyphony: 2, slides: 6, drums: false, controls: { cc1: 66, cc7: 1 })
+      expect(list[3]).to have_attributes(polyphony: 3, slides: 0, controls: { bend: 2, pressure: 1 })
       text = list.inspect
       expect(text).to start_with('reese.mid: 180 BPM, 4/4')
-      expect(text).to include('1 "Unnamed" ch 1, 8 notes As1..G2 mono legato cc1 x66 cc7 x1')
+      expect(text).to include('1 "Unnamed" ch 1, 8 notes As1..G2 poly 2 6 slides cc1 x66 cc7 x1')
       expect(text).to include('3 "Pad" ch 3, 6 notes As3..G4 poly 3 bend x2 pressure x1')
     end
 
@@ -85,7 +85,12 @@ RSpec.describe(MB::Sound::MIDI::Import) do
       expect(MB::Sound.midi_clip(arp).events.count(&:slid)).to eq(0)
       expect(MB::Sound.midi_clip(arp, slides: true).events.count(&:slid)).to eq(7)
       expect(MB::Sound.midi_clip(reese, track: 'Pad').events.count(&:slid)).to eq(0)
-      expect(MB::Sound.midi_tracks(arp)[1]).to have_attributes(polyphony: 2, legato: false)
+      expect(MB::Sound.midi_tracks(arp)[1]).to have_attributes(polyphony: 2, slides: 0)
+      # Per pair: a legato line keeps its slides around a chord, whose notes stay unmarked
+      mixed = MidiWriter.write(tmp_path('mixed.mid'), tracks: [{ notes: [
+        [0, q + 60, 40, 90], [q, 2 * q + 60, 43, 90], [2 * q, 3 * q, 48, 90], [2 * q, 3 * q, 52, 90], [3 * q, 4 * q, 45, 90],
+      ] }])
+      expect(MB::Sound.midi_clip(mixed).events.map { |e| !!e.slid }).to eq([true, false, false, false, false])
     end
 
     it 'reads files without a tempo event in score time and rounds the loop up to whole bars' do
