@@ -1011,6 +1011,8 @@ module MB
             remaining -= n
           end
           @ui_feed.capture(self) if @ui_feed&.wants_capture? # players, buses, chains, while they can't change
+          # (no spans for a buffer of 0 frames: an empty mix, as before)
+          next [] if first.nil?
           parts.nil? ? first : parts.transpose.map { |chans| chans.reduce { |a, b| a.concatenate(b) } }
         }
 
