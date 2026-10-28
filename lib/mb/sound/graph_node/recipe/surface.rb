@@ -122,6 +122,7 @@ module MB
               midi_stream: 'a MIDI::Stream for live input', close_midi: 'closes live input',
               per_voice: 'returns a plain value for the current lane (lanes that differ print with per_voice)',
               cc: 'a MIDI::Param value (prints through its own recipe)',
+              midi_tracks: 'a listing of a file\'s tracks',
             },
             'SamplerMethods' => {
               bounce: 'returns a Sample (samples print as bundle assets or through their lineage)',

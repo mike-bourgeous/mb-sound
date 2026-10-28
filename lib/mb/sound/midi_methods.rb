@@ -25,6 +25,65 @@ module MB
         block_given? ? yield(notes) : notes
       end
 
+      # Returns one track of the MIDI file +filename+ as a Sequence::Clip
+      # (MIDI::Import#clip; design/notes/midi.md, Clips from MIDI files):
+      # notes at exact positions from the file's ticks (so files without
+      # a tempo event are fine), looping by default over whole bars of the
+      # file's meter, with velocities as played, legato overlaps of a
+      # monophonic track marked as slides (`~`), chords kept, and the
+      # track's controllers (CCs, pitch bend, pressure) as controller
+      # lanes that voices read (`v.mod`, `v.cc(1)`, `v.bend`).
+      #
+      # +track:+ a name (or a unique part of one) or index, needed when
+      # several tracks have notes (`midi_tracks(path)` lists them);
+      # +channel:+ (0-based) keeps one channel; +from:+ skips that many
+      # bars and +bars:+ sets the length (else up to the bar line after the
+      # last note); +loop: false+ for a one-shot; +slides:+ :auto, true, or
+      # false; +cc:+ :steps (as recorded), :fit (fitted curves: a few
+      # keys that play smoothly, Clip#fit_controls), false, or an Array of
+      # CC numbers and :bend/:pressure; +timing: :performed+ keeps the
+      # file's tempo map (rubato) at the session tempo instead of the
+      # score's bars; +sustain: false+ ignores the sustain pedal (keeping
+      # it as a lane).
+      #
+      # Example (bin/sound.rb):
+      #     midi_tracks 'one_eighty.mid'
+      #     bass = midi_clip('one_eighty.mid', track: 'Bass', bars: 8, from: 16, cc: :fit)
+      #     bg :bass, bass.synth(voices: 1) { |v| v.hz.saw.lp4(v.mod.at(200..4000)) * v.amp_env }
+      def midi_clip(filename, track: nil, channel: nil, bars: nil, from: 0, loop: true, slides: :auto, cc: :steps, timing: :score, sustain: true)
+        MB::Sound::MIDI::Import.new(midi_import_path(filename)).clip(
+          track: track, channel: channel, bars: bars, from: from, loop: loop, slides: slides, cc: cc, timing: timing, sustain: sustain
+        )
+      end
+
+      # Returns the drum tracks of the MIDI file +filename+ (channel 10, or
+      # tracks named like kick, snare, hat; or +track:+ names or indexes)
+      # as a Sequence::Kit with one row per drum, named like grid rows
+      # (:kick, :snare, :closed_hat, ...), so drum machines play it like a
+      # grid: `tr909(midi_kit('beat.mid'))`.  +bars:+, +from:+, +loop:+,
+      # and +timing:+ as for #midi_clip.
+      #
+      #     beat = midi_kit('n2a.mid', bars: 2)
+      #     bg :drums, tr808(beat)
+      def midi_kit(filename, track: nil, bars: nil, from: 0, loop: true, timing: :score)
+        MB::Sound::MIDI::Import.new(midi_import_path(filename)).kit(track: track, bars: bars, from: from, loop: loop, timing: timing)
+      end
+
+      # Lists the tracks of the MIDI file +filename+ (MIDI::Import::TrackList,
+      # one line per track: index, name, channels, notes and range, mono
+      # or the most notes at once, controller lanes), for picking
+      # #midi_clip's +track:+.
+      def midi_tracks(filename)
+        MB::Sound::MIDI::Import.new(midi_import_path(filename)).tracks
+      end
+
+      private def midi_import_path(filename)
+        unless filename.to_s.downcase.end_with?('.mid', '.midi')
+          raise ArgumentError, "#{filename} is not a MIDI file (expected .mid or .midi)"
+        end
+        filename
+      end
+
       # Returns live MIDI input as a MB::Sound::Notes (notes and controllers
       # as signal nodes; a mono DSL that is also a MIDI source for synths),
       # reading a MIDI::LiveSource that follows the background session's

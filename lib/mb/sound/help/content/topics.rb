@@ -917,7 +917,29 @@ module MB
       commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale
       dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord
       note :midi
-      see :record
+      see :record, :midi_files
+    end
+
+    Help.topic :midi_files, 'MIDI files as clips and kits', group: :perform do
+      about <<~TEXT
+        `midi_tracks 'song.mid'` lists a file's tracks (notes, range, mono
+        legato or chords, controller lanes).  `midi_clip 'song.mid',
+        track: 'Bass'` is that track as a looping clip in exact note
+        positions from the file's ticks (files without a tempo play at the
+        session tempo), over whole bars of the file's meter: `from: 16,
+        bars: 8` cuts a phrase.  A mono legato line keeps its overlaps as
+        slides (`~`); chords and ringing arpeggios stay notes.  The track's
+        CCs, bend (with its RPN range), and pressure come along as lanes
+        that voices read (`v.mod`, `v.cc(74)`, `v.bend`): `cc: :fit` turns
+        dense recorded steps into a few smooth keys, `cc: false` drops
+        them.  `timing: :performed` keeps a rubato file's tempo map.
+        `midi_kit 'beat.mid'` makes the drum tracks a grid-like Kit for
+        tr808/tr909.  Saved graph documents keep the notes and lanes as
+        `events(...)`, not the file.
+      TEXT
+      commands :midi_tracks, :midi_clip, :midi_kit, :midi_file
+      note :midi
+      see :midi, :sequences
     end
 
     Help.topic :key, 'The session key and modes', group: :time do
