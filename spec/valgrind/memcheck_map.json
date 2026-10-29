@@ -651,6 +651,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -1454,7 +1456,6 @@
       ],
       "fast_wavetable": [
         "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1676,8 +1677,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
