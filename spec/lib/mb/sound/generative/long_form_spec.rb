@@ -240,7 +240,7 @@ RSpec.describe('MB::Sound generative long form (G4)', :aggregate_failures) do
       end
     end
 
-    it 'replays a generated flow from a take bit for bit' do
+    it 'replays a generated flow from a take bit for bit', render_budget: { seconds: 100, reason: 'a 25 s take recorded, then replayed at 800 and (slow tier) 367/368' } do
       s = new_session
       lines = {
         0 => ['track(:x) { |c| c.notes.number }',
