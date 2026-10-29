@@ -119,7 +119,7 @@ module MB
       #     Curve.new { |x| x * x }
       #     Curve.new(:sqrt, kind: :out, monotonic: true) { |x| Math.sqrt(x) }
       def initialize(name = :custom, kind: :in_out, monotonic: false, natural: false, slopes: nil,
-                     generic: nil, scalar: nil, vector: nil, options: {}, key: nil, form: nil, cells: nil, &block)
+                     generic: nil, scalar: nil, vector: nil, options: {}, key: nil, form: nil, cells: nil, inplace: nil, &block)
         raise ArgumentError, "Curve kind must be one of #{KINDS.inspect} (got #{kind.inspect})" unless KINDS.include?(kind)
         scalar ||= block
         raise ArgumentError, 'A curve needs a block or a scalar, vector, or generic formula' unless generic || scalar || vector
@@ -136,6 +136,7 @@ module MB
         @key = key || (block ? object_id : @name)
         @form = form&.freeze
         @cells = cells
+        @inplace = inplace
       end
 
       # The closed form the antialiased shaper (GraphNode::CurveShaper)
@@ -193,6 +194,34 @@ module MB
       # - :wrap - repeats the curve every 1 (sawtooth-like)
       # - :mirror - ping-pongs (0..1 forward, 1..2 backward, ...)
       # - :none (alias :raw) - the formula as is (may give anything)
+      # Like #map for a Numo::DFloat +x+ the caller owns, which it
+      # overwrites, with +scratch+ (a DFloat of x's length the caller
+      # reuses): the same values without new arrays for curves with an
+      # in-place form (+inplace:+ of #initialize: linear, smoothstep), for
+      # render paths that run every buffer (CurveShaper's exact shaper,
+      # knob ramps; dropouts-2: smoothstep's four temporaries per call were
+      # 4.3 MB/s of garbage in night_bus_flow).  Returns +x+, +scratch+, or
+      # (other curves and arguments) a new array from #map.
+      def map!(x, scratch)
+        return map(x) unless @inplace && x.is_a?(Numo::DFloat) && !x.frozen? && scratch.is_a?(Numo::DFloat) && scratch.length == x.length && !x.equal?(scratch)
+        return x if x.empty?
+
+        @inplace.call(x, scratch)
+      end
+
+      # #map_edges in place, as #map! for #map (:clamp, :none, and :raw;
+      # other edges return #map_edges(x, edges)).
+      def map_edges!(x, edges, scratch)
+        case edges
+        when :clamp
+          return map_edges(x, edges) unless x.is_a?(Numo::DFloat) && !x.frozen?
+          x.inplace.clip(0.0, 1.0)
+          map!(x, scratch)
+        when :none, :raw then map!(x, scratch)
+        else map_edges(x, edges)
+        end
+      end
+
       def map_edges(x, edges = :clamp)
         x = Numo::DFloat.cast(x)
         case edges

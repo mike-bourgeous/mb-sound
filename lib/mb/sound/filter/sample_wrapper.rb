@@ -103,7 +103,7 @@ module MB
           if @in_place
             buf = (@frozen_copy ||= GraphNode::FrozenCopy.new).copy(buf) if buf.frozen? # a shared buffer (see Tee)
             buf.inplace!
-          elsif @base_filter.is_a?(SVF) && buf.is_a?(Numo::SFloat)
+          elsif buf.is_a?(Numo::SFloat) && (@base_filter.is_a?(SVF) || (@base_filter.is_a?(FilterChain) && @base_filter.filters.first.is_a?(SVF)))
             # SVFs filter an inplace SFloat in place: into a reused buffer
             # of the wrapper's own, instead of a new output each buffer
             # (the same values; the source's buffer stays untouched)

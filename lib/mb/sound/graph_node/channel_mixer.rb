@@ -503,8 +503,10 @@ module MB
         # previous output buffers when they fit.
         def mix(gains, data)
           if @fast_gains && data.all? { |d| d.is_a?(Numo::SFloat) }
-            length = data.map(&:length).min
-            data = data.map { |d| d.contiguous? ? d : d.dup }
+            # (no Arrays when every input is contiguous: every buffer)
+            length = nil
+            data.each { |d| length = d.length if length.nil? || d.length < length }
+            data = data.map { |d| d.contiguous? ? d : d.dup } unless data.all?(&:contiguous?)
             # (into the buffers of the frame before last; see #compute_frame)
             into = @spare_output
             @spare_output = @own_output

@@ -596,6 +596,8 @@ module MB
 
         @state = nil
         @osc_buf = nil
+        @sync_bufs = nil # (see #compute_ports)
+        @sync_flip = 0
         @truncated = false
         # Steady-input cache keys (see GraphNode::FrozenView)
         @quiet_resets = GraphNode::FrozenView::Key.new
@@ -2889,10 +2891,29 @@ module MB
           pulses = parts[0][0].concatenate(*parts[1..].map(&:first))
           increments = parts[0][1].concatenate(*parts[1..].map(&:last))
         else
-          pulses, increments = BandLimit.sync_pulses(state.frame_phase, state.frame_freq, advance, count, state.pulses)
+          pulses, increments = BandLimit.sync_pulses(state.frame_phase, state.frame_freq, advance, count, state.pulses, sync_bufs(count))
         end
         store_port(:wraps, pulses)
         store_port(:increment, increments)
+      end
+
+      # Reused buffers for BandLimit.sync_pulses: two sets in turn (the
+      # ports hand out the pulses and increments for a frame; the last
+      # frame's stay valid while the next is made), each [[phases,
+      # increments] DFloats, [pulses, increments] SFloats] of +count+
+      # samples (dropouts-2: a synced tone's four new buffers a frame were
+      # ~1.3 MB/s of garbage in tunnel_vision).
+      def sync_bufs(count)
+        @sync_flip ^= 1
+        @sync_bufs ||= [nil, nil]
+        set = @sync_bufs[@sync_flip]
+        if set.nil? || set[0][0].length != count
+          set = @sync_bufs[@sync_flip] = [
+            [Numo::DFloat.zeros(count), Numo::DFloat.zeros(count)],
+            [Numo::SFloat.zeros(count), Numo::SFloat.zeros(count)],
+          ]
+        end
+        set
       end
 
       # [low, high] frequencies (Hz) for fading band-limiting in, or [0, 0]

@@ -839,6 +839,17 @@ module MB
             SUSTAIN_SHELF * @sustain[:filter].sample_rate.to_f / t
           end
 
+          # #sustain_cutoff of a DFloat +t+ into +buf+ (a DFloat of its
+          # length, reused by the caller): the same quotients, for the loop's
+          # every block (dropouts-2).  Returns +buf+, or a new array if the
+          # kernels can't take them.
+          def sustain_cutoff_into(t, buf)
+            c = SUSTAIN_SHELF * @sustain[:filter].sample_rate.to_f
+            return sustain_cutoff(t) unless t.is_a?(Numo::DFloat) && buf.is_a?(Numo::DFloat) && buf.length == t.length &&
+                                            MB::Sound::FastArithmetic.fill_range(buf, 0, buf.length, c) && MB::Sound::FastArithmetic.divide(buf, t)
+            buf
+          end
+
           private
 
           # [latency, gain, rest] at the samples +idx+ of the block (see

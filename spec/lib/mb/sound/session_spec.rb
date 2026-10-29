@@ -16,6 +16,21 @@ RSpec.describe(MB::Sound::Session) do
     data.to_a.each_index.select { |i| data[i] != 0 }
   end
 
+  describe '#process_buffer' do
+    # dropouts-2: only the realtime render thread reuses its mix; callers
+    # of #process_buffer keep what it returns (a 0-frame buffer's empty
+    # mix is render_window_spec's "preroll: false" case)
+    it 'returns new buffers to its callers' do
+      session.add(220.hz.saw.at(0.1), name: :a)
+      a = session.process_buffer
+      b = session.process_buffer
+      expect(a[0]).not_to equal(b[0])
+      expect(a[0].to_a).not_to eq(b[0].to_a)
+    ensure
+      session.close
+    end
+  end
+
   describe '#sample_rate' do
     it "is the output's rate" do
       expect(session.sample_rate).to eq(48000)

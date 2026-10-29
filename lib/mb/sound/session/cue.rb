@@ -235,6 +235,8 @@ module MB
           @cue_clips = {}
           @cue_knobs = nil
           @cue_parts = []
+          @cue_spare = [] # (see #cue_frame)
+          @cue_nil_parts = {} # (see #end_cue_span)
           @cue_span_mix = nil
           @cue_span_count = 0
           @cue_warned = false
@@ -418,7 +420,7 @@ module MB
           mode = cue_mode
           want = output_channel_count
           if want == mix.length && mode != :split && mode != :phones
-            @cue_parts << [count, nil]
+            @cue_parts << ((@cue_nil_parts ||= {})[count] ||= [count, nil].freeze) # (one frozen pair per length: every span)
             return
           end
 
@@ -473,9 +475,14 @@ module MB
         # post-chain master gain): the spans #end_cue_span composed, or the
         # mix itself.
         def cue_frame(mix, count)
+          # (two Arrays in turn: a new one every buffer before; dropouts-2)
           parts = @cue_parts
-          @cue_parts = []
-          return mix if parts.all? { |_, out| out.nil? }
+          @cue_parts = (@cue_spare ||= [])
+          @cue_spare = parts
+          if parts.all? { |_, out| out.nil? }
+            parts.clear
+            return mix
+          end
 
           want = output_channel_count
           offset = 0
@@ -484,6 +491,7 @@ module MB
             offset += n
             out
           }
+          parts.clear
           chunks.length == 1 ? chunks[0] : chunks.transpose.map { |chans| chans.reduce { |a, b| a.concatenate(b) } }
         end
 

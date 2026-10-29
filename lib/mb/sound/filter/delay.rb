@@ -89,6 +89,7 @@ module MB
           @ring_read = nil
           @ring_feedback = nil
           @result_buf = nil
+          @dry_buf = nil # (see #gains_reused)
           @minmax = [0.0, 0.0] # (reused by #delay_buffer)
           @ring = nil
           @ring_zeros = nil
@@ -303,7 +304,8 @@ module MB
 
           if feedback && feedback != 0
             @read_buf = @line.buffer_class.zeros(data.length) unless @read_buf && @read_buf.class == @line.buffer_class && @read_buf.length == data.length
-            delayed = @line.feedback(data, delays, feedback.is_a?(Numo::NArray) ? feedback[0...length] : feedback, interpolation: @interpolation, state: @read_state, out: @read_buf)
+            fb = feedback.is_a?(Numo::NArray) && feedback.length != length ? feedback[0...length] : feedback # (no view for the whole block)
+            delayed = @line.feedback(data, delays, fb, interpolation: @interpolation, state: @read_state, out: @read_buf)
           else
             @line.write(data)
             @read_buf = @line.buffer_class.zeros(data.length) unless @read_buf && @read_buf.class == @line.buffer_class && @read_buf.length == data.length
@@ -318,6 +320,13 @@ module MB
           if wet.is_a?(Numeric) && dry.is_a?(Numeric) && data.length == length
             target = data.inplace? && !data.frozen? ? data : (@result_buf = reuse_buffer(@result_buf, data))
             return target if target && MB::Sound::FastArithmetic.wet_dry(target, delayed, wet, data, dry != 0 ? dry : nil)
+          end
+
+          # Moving gains on SFloat buffers: the same products and sums in
+          # reused buffers (dropouts-2: a moving wet was ~640 KB/s of
+          # garbage in night_bus_flow)
+          if (r = gains_reused(data, delayed, wet, dry, length))
+            return r
           end
 
           result = wet.is_a?(Numo::NArray) ? delayed * wet[0...length] : wet * delayed
@@ -386,6 +395,28 @@ module MB
         private
 
         # A reused SFloat buffer as long as +data+ (an SFloat), or nil.
+        # #process's wet * delayed + dry * data (gains Numerics or SFloats
+        # as long as the block) in reused SFloats, or nil for other types.
+        def gains_reused(data, delayed, wet, dry, length)
+          return nil unless data.is_a?(Numo::SFloat) && delayed.is_a?(Numo::SFloat) && data.length == length && delayed.length == length
+          return nil unless (wet.is_a?(Numeric) || (wet.is_a?(Numo::SFloat) && wet.length == length)) &&
+                            (dry.is_a?(Numeric) || (dry.is_a?(Numo::SFloat) && dry.length == length))
+          return nil if wet.is_a?(Numeric) && !wet.real?
+          return nil if dry.is_a?(Numeric) && !dry.real?
+
+          # (FastArithmetic.scale and .accumulate: the same float steps as
+          # Numo's, without its temporaries)
+          r = @result_buf = reuse_buffer(@result_buf, data)
+          return nil unless MB::Sound::FastArithmetic.copy(r, delayed) && MB::Sound::FastArithmetic.scale(r, wet)
+          if dry.is_a?(Numo::NArray) || dry != 0
+            r.inplace + data * dry unless length == 0 || MB::Sound::FastArithmetic.accumulate(r, 0, data, 0, length, dry, 0, nil, 0)
+          end
+          return r unless data.inplace? && !data.frozen?
+
+          data[true] = r unless MB::Sound::FastArithmetic.copy(data, r)
+          data
+        end
+
         def reuse_buffer(buf, data)
           return nil unless data.is_a?(Numo::SFloat)
           buf && buf.length == data.length ? buf : Numo::SFloat.zeros(data.length)

@@ -43,11 +43,16 @@ module MB
       # tone's phase state Array (a copy from the block's start), whose
       # grid gives a constant frequency's phases as the kernels compute
       # them (see mb_phase.h).
-      def self.sync_pulses(phi, freq, advance, count, prev)
+      #
+      # +bufs+ ([[phases, increments] DFloats, [pulses, increments]
+      # SFloats] of +count+ samples, reused by the caller; Tone#sync_bufs)
+      # lets the C kernels write into them instead of new arrays; the
+      # result is then +bufs+' SFloats.
+      def self.sync_pulses(phi, freq, advance, count, prev, bufs = nil)
         return [Numo::SFloat[], Numo::SFloat[]] if count == 0
 
-        phases, incs = sync_phases(phi, freq, advance, count)
-        MB::Sound::FastSynth.sync_pulse_edges(phases, incs, prev, EPS) || sync_edges_ruby(phases, incs, prev, count)
+        phases, incs = sync_phases(phi, freq, advance, count, bufs&.[](0))
+        MB::Sound::FastSynth.sync_pulse_edges(phases, incs, prev, EPS, bufs&.[](1)) || sync_edges_ruby(phases, incs, prev, count)
       end
 
       # The Ruby mirror of .sync_pulses (FastSynth.sync_pulse_edges' Ruby
@@ -63,10 +68,12 @@ module MB
       end
 
       # The phases and increments (DFloats) .sync_pulses finds pulses in.
-      def self.sync_phases(phi, freq, advance, count)
+      # (+out+: reused [phases, increments] DFloats for the C kernel; see
+      # .sync_pulses)
+      def self.sync_phases(phi, freq, advance, count, out = nil)
         # (a frequency signal in C when it can: FastSynth.sync_running_phases)
         if freq.is_a?(Numo::SFloat) && freq.length == count && !@ruby_phases
-          r = MB::Sound::FastSynth.sync_running_phases(freq, advance, phi.is_a?(Array) ? phi[0].to_f : phi)
+          r = MB::Sound::FastSynth.sync_running_phases(freq, advance, phi.is_a?(Array) ? phi[0].to_f : phi, out)
           return r if r
         end
 

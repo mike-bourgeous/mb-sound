@@ -177,7 +177,15 @@ module MB
           def next_frame(count)
             return :ended if @ended
 
-            data = @flushing ? nil : @inputs.map { |i| i.sample(count) }
+            data = nil
+            unless @flushing
+              data = @frame_data
+              i = 0
+              while i < @inputs.length
+                data[i] = @inputs[i].sample(count)
+                i += 1
+              end
+            end
             # (the shortest live input, without compact/reject/map Arrays)
             n = nil
             data&.each { |d| n = d.length if d && !d.empty? && (n.nil? || d.length < n) }
@@ -311,6 +319,7 @@ module MB
           @plan_curve = nil # (set later; see GraphNode::IvarPreset)
           @params = nil
           @times_list = nil # (reused by #process)
+          @frame_data = Array.new(@inputs.length) # (reused by #next_frame; dropouts-2)
           @buffer_sets = nil # (Framed.next_buffers; set here, since Channels
           @buffer_index = nil # subclasses get no IvarPreset)
 

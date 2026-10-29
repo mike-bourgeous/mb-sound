@@ -117,6 +117,8 @@ module MB
 
           @mutex.synchronize { @bus_defs[name] = [block, to || :master, description].freeze }
 
+          warm_bus_chain(name, block, chain, warm_time(point, start_time)) # (its code compiled here, not where it lands; see Warming)
+
           time = start_time ? start_time.to_r : launch_time(point, chain.timeline_nodes)
           c = change(:bus, name, time, data: { description: chain.description, fade: fade, to: to || :master }, graph: chain.chain_graph) { |t|
             start_bus_chain(name, chain, block, t)
@@ -364,7 +366,8 @@ module MB
         # graph) in the span being rendered: an Array of one SFloat per
         # channel (the span's length), or nil if it didn't play.
         def bus_signal(name, only = nil)
-          key = only ? [name, only] : name
+          # (the [name, only] key made once: readers ask every buffer)
+          key = only ? ((@only_keys[name] ||= {})[only] ||= [name, only].freeze) : name
           @bus_signal_span[key] == @bus_span ? @bus_signals[key] : nil
         end
 
@@ -410,6 +413,7 @@ module MB
           @bus_tapped_for = nil # (the bus_ranks the two sets were made for)
           @routed_order = nil # (see #routed_order)
           @stem_shadows = {}
+          @ui_bus_meter = nil # (see #render_routed)
         end
 
         # True if anything needs the routed render (buses, or graphs that
@@ -542,9 +546,12 @@ module MB
           n = MB::M.min(count, buf.length - pos)
           if n > 0 && data
             m = MB::M.min(n, data.length)
-            d = data[0...m]
-            d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
-            buf[pos...(pos + m)] = d if m > 0
+            # (without views for SFloat data; dropouts-2)
+            if m > 0 && !MB::Sound::FastArithmetic.copy_range(buf, pos, data, 0, m)
+              d = data[0...m]
+              d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
+              buf[pos...(pos + m)] = d
+            end
           end
           @bus_only_pos[key] = pos + count
         end
@@ -723,7 +730,8 @@ module MB
         # module comment), adding main outs and bus outputs into +mix+.
         # Called by #render_span with the render lock held.
         def render_routed(players, mix, from, to, per_sample, count, frame, playing)
-          buses = @mutex.synchronize { @buses.values }
+          buses = @routed_buses
+          @mutex.synchronize { buses.clear; @buses.each_value { |b| buses << b } }
           ranks = bus_ranks
           order = routed_order(players, buses, ranks)
           @bus_span += 1
@@ -808,20 +816,14 @@ module MB
           tap = bus_tapped?(p.name) ? bus_signal_buffer(p.name) : nil
           track = stem && stem_name(p)
           meter = @ui_bus_meter
-          sends = route ? route.sends.filter_map { |bus, k|
-            input = bus_input(bus) or next
-            v = k.read(@frame, @bus_span_count)
-            if v.is_a?(Numeric) && v == 0
-              meter&.send_seen(p.name, bus, 0)
-              next
-            end
-            [input, v, track && stem_shadow_input(track, bus), bus]
-          } : []
+          sends = route ? send_rows(p, route, track, meter) : NO_SENDS
           if stem && main_bus
             stem = stem_shadow_input(track, route.to)
           end
 
-          dest.each_with_index do |m, c|
+          c = -1
+          while (c += 1) < dest.length # (no each_with_index: an imemo a call)
+            m = dest[c]
             d = data[c % data.length]
             next if d.nil? || d.empty?
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
@@ -842,6 +844,35 @@ module MB
           end
         end
 
+        NO_SENDS = [].freeze
+
+        # #deliver_player's sends of player +p+ (routed by +route+): rows of
+        # [bus input, level, stem shadow input, bus name] for the sends
+        # that are on, in Arrays reused per route (dropouts-2: the
+        # filter_map's rows were ~1500 objects a second).
+        def send_rows(p, route, track, meter)
+          return NO_SENDS if route.sends.empty?
+
+          rows = (@send_rows[route] ||= [])
+          n = 0
+          route.sends.each_pair do |bus, k|
+            input = bus_input(bus) or next
+            v = k.read(@frame, @bus_span_count)
+            if v.is_a?(Numeric) && v == 0
+              meter&.send_seen(p.name, bus, 0)
+              next
+            end
+            row = (rows[n] ||= Array.new(4))
+            row[0] = input
+            row[1] = v
+            row[2] = track && stem_shadow_input(track, bus)
+            row[3] = bus
+            n += 1
+          end
+          rows.pop while rows.length > n
+          rows
+        end
+
         # #deliver_player's additions for one channel without Numo views or
         # temporaries (FastArithmetic.accumulate: the same float steps as
         # its Numo code), for SFloat data, ramps, and send levels that are
@@ -849,7 +880,7 @@ module MB
         # nothing) for anything else.
         def deliver_fast(d, len, ramp, fade, m, stem, tap, sends, c, offset)
           return false unless d.is_a?(Numo::SFloat) && acc_factor?(ramp) && acc_factor?(fade)
-          sends.each { |_, v, _, _| return false unless acc_factor?(v) }
+          return false unless sends.all? { |row| acc_factor?(row[1]) } # (not a return inside the block: an imemo each)
 
           acc_add(m, offset, d, len, ramp, nil, 0)
           acc_add(stem, offset, d, len, ramp, nil, 0) if stem
@@ -941,7 +972,7 @@ module MB
           # Keep clips in the chains on the timeline, which pauses while idle
           resync = (playing && !b.playing)
           b.playing = playing
-          pos0 = from + s * per_sample
+          pos0 = s == 0 ? from : from + s * per_sample # (no Rationals for the usual whole span)
           b.chains.each do |c|
             c.timeline_nodes.each { |n| n.start_at(pos0, origin: c.start, launch: c.launch, transport: @transport) } if resync && c.started && c.feeding
             c.timeline_nodes.each(&:pause_timeline) unless playing
@@ -965,12 +996,14 @@ module MB
             g = ((g + SLEEP_GRID - 1) / SLEEP_GRID) * SLEEP_GRID
             p1 = g < frame + e ? g - frame : e
 
-            out = run_bus_chains(b, input, p0, p1, from, per_sample, rate)
+            out = run_bus_chains(b, input, p0, p1, from, per_sample, rate, to)
             track_bus_quiet(b, input, out, p0, p1, frame)
 
             ramp = ramp_levels(b, :strip_level, :strip_ramp, frame + p0, p1 - p0)
             n = p1 - p0
-            out.each_with_index do |o, c|
+            c = -1
+            while (c += 1) < out.length # (no each_with_index: an imemo a call)
+              o = out[c]
               acc_add(tap[c], p0, o, n, nil, nil, 0) if tap # (readers hear it before its mute)
               (FastArithmetic.scale(o, ramp) || o.inplace * ramp) if ramp
               acc_add(dest[c], p0, o, n, nil, nil, 0)
@@ -1114,12 +1147,15 @@ module MB
 
         # Runs bus +b+'s chains over frames [+p0+, +p1+) of the span and
         # returns their output (one SFloat per channel).
-        def run_bus_chains(b, input, p0, p1, from, per_sample, rate)
+        def run_bus_chains(b, input, p0, p1, from, per_sample, rate, to = nil)
           n = p1 - p0
-          chains = @mutex.synchronize { b.chains.dup }
+          chains = @mutex.synchronize { (@bus_chain_copies[b] ||= []).replace(b.chains) } # (reused per bus, as Master#process_master's)
           seg =
             if input.nil?
-              Array.new(@channels) { Numo::SFloat.zeros(n) }
+              # (frozen zeros, reused: chains copy their input; dropouts-2)
+              z = @bus_zero_seg
+              z = @bus_zero_seg = Array.new(@channels) { Numo::SFloat.zeros(n).freeze }.freeze if z.nil? || z[0].length != n || z.length != @channels
+              z
             elsif p0 == 0 && input.all? { |x| x.length == n }
               input # (the whole span: no views)
             else
@@ -1132,8 +1168,10 @@ module MB
             return out
           end
 
-          seg_from = from + p0 * per_sample
-          activate_master(chains, seg_from, from + p1 * per_sample, per_sample, rate)
+          # (the span's own ends where the segment has them: no Rationals)
+          seg_from = p0 == 0 ? from : from + p0 * per_sample
+          seg_to = to && p1 == @bus_span_count ? to : from + p1 * per_sample
+          activate_master(chains, seg_from, seg_to, per_sample, rate)
           # Shared branches catch up with frames the chains didn't read
           # (asleep, or not started yet) before the segment
           bus_read_shared(b, @frame + p0, chains)
@@ -1170,7 +1208,7 @@ module MB
         # raised BranchBufferOverflow after a second.  The chains' own nodes
         # still sleep.
         def bus_read_shared(b, upto, chains = nil)
-          chains ||= @mutex.synchronize { b.chains.dup }
+          chains ||= @mutex.synchronize { (@bus_shared_copies[b] ||= []).replace(b.chains) }
           chains.each do |c|
             next unless c.started && !c.bypass?
 
@@ -1185,11 +1223,19 @@ module MB
         def bus_chain_graphs(waiting: false)
           return NO_GRAPHS if @buses.empty?
 
-          list = []
-          add = ->(b) { b.chains.each { |c| list << c.chain_graph unless c.bypass? || (waiting && c.started) } }
-          @mutex.synchronize { @buses.each_value(&add) }
-          @stem_shadows.each_value { |l| l.each_value(&add) } # (stems renders)
-          list
+          # (no lambda, and no new Array without any: called every span)
+          list = nil
+          @mutex.synchronize {
+            @buses.each_value do |b|
+              b.chains.each { |c| (list ||= []) << c.chain_graph unless c.bypass? || (waiting && c.started) }
+            end
+          }
+          @stem_shadows.each_value do |l| # (stems renders)
+            l.each_value do |b|
+              b.chains.each { |c| (list ||= []) << c.chain_graph unless c.bypass? || (waiting && c.started) }
+            end
+          end
+          list || NO_GRAPHS
         end
 
         # Prepares a chain built for bus +name+: binds its readers and

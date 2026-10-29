@@ -108,6 +108,12 @@ module MB
           @buf = nil
           @steady_in = FrozenView::Key.new # (see FrozenView)
           @steady_out = nil
+          @plain_x = nil # (reused by #plain)
+          @plain_scratch = nil
+          # The exact shaper in C for linear and smoothstep curves
+          # (FastArithmetic.ease_plain, the same values; dropouts-2)
+          @ease_kind = !@antialias && !@symmetric && %i[clamp raw none].include?(@edges) ?
+            (@curve.equal?(MB::Sound::Curve.linear) ? 0 : (@curve.equal?(MB::Sound::Curve.smoothstep) ? 1 : nil)) : nil
           @node_type_name = "#{'a' unless @antialias}ease"
         end
 
@@ -131,13 +137,13 @@ module MB
             if @steady_in.match?(data)
               return @steady_out if @steady_out
 
-              @buf[0..] = plain(data)
+              plain_into(@buf, data)
               return @steady_out = @buf.dup.freeze
             end
             @steady_in.set(data)
             @steady_out = nil
 
-            @buf[0..] = plain(data)
+            plain_into(@buf, data)
             return @buf
           end
 
@@ -150,8 +156,11 @@ module MB
           "#{super} -- #{@node_type_name}(#{@curve}, #{@input} -> #{@output}, #{@edges}#{', symmetric' if @symmetric})"
         end
 
-        # The plain (exact) shaper of +data+ (a Numo::DFloat result).
+        # The plain (exact) shaper of +data+ (a Numo::DFloat result; a
+        # reused one when the curve maps in place: Curve#map_edges!).
         def plain(data)
+          return plain_reused(data) unless @symmetric
+
           x = (Numo::DFloat.cast(data) - @in_lo) * @in_scale
           if @symmetric
             y = @curve.map_edges(x.abs, @edges)
@@ -161,6 +170,30 @@ module MB
             y = @curve.map_edges(x, @edges)
           end
           y * @out_scale + @out_lo
+        end
+
+        # @buf[0..] = plain(data), in C for linear and smoothstep curves.
+        def plain_into(buf, data)
+          return if @ease_kind && MB::Sound::FastArithmetic.ease_plain(buf, data, @in_lo, @in_scale, @ease_kind, @edges == :clamp, @out_scale, @out_lo)
+
+          buf[0..] = plain(data)
+        end
+
+        # #plain in reused DFloats (the same operations in place; dropouts-2:
+        # a smoothstep shaper's temporaries were ~5 MB/s of garbage).
+        def plain_reused(data)
+          n = data.length
+          x = @plain_x
+          x = @plain_x = Numo::DFloat.zeros(n) if x.nil? || x.length != n
+          sc = @plain_scratch
+          sc = @plain_scratch = Numo::DFloat.zeros(n) if sc.nil? || sc.length != n
+          x[0..] = data unless MB::Sound::FastArithmetic.copy(x, data)
+          x.inplace - @in_lo
+          x.inplace * @in_scale
+          y = @curve.map_edges!(x, @edges, sc)
+          y.inplace * @out_scale
+          y.inplace + @out_lo
+          y
         end
 
         # Converts a range argument: a Range, or a number n for 0..n.

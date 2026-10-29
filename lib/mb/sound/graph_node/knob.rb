@@ -438,6 +438,16 @@ module MB
           @span_count = 0
           @span_out = nil
           @steady = nil
+          @steady_value = nil
+          # Reused render buffers (two, alternating), their frozen views,
+          # and scratch for ramps and follows (see #render; dropouts-2)
+          @render_bufs = [nil, nil]
+          @render_flip = 0
+          @render_views = FrozenView.new
+          @ramp_t = nil
+          @ramp_scratch = nil
+          @follow_buf = nil
+          @follow_range = nil
           @cc = @spec.cc
           @midi = nil
           @learning = nil
@@ -780,7 +790,14 @@ module MB
         # renders the frames in between first; one that starts before it
         # (a reader that fell behind) gets the current value.
         def read(frame, count)
-          @lock.synchronize {
+          # (the body outside the block: a return from inside the block made
+          # an imemo each read, ~4000 a second in tunnel_vision; dropouts-2)
+          @lock.synchronize { read_locked(frame, count) }
+        end
+
+        # #read with the lock held.
+        def read_locked(frame, count)
+          begin
             if @span_frame == frame && count <= @span_count
               out = @span_out
               return out if count == @span_count || !out.is_a?(Numo::NArray)
@@ -806,7 +823,7 @@ module MB
             end
 
             @value
-          }
+          end
         end
 
         # A frozen buffer of +count+ samples of +value+, reused while both
@@ -884,14 +901,14 @@ module MB
               return seg.value
             end
 
-            out ||= Numo::SFloat.zeros(count)
+            out ||= render_buffer(count)
             n = stop - pos
             case seg
             when Hold
-              out[pos...stop] = seg.value
+              out[pos...stop] = seg.value unless MB::Sound::FastArithmetic.fill_range(out, pos, stop, seg.value)
               @value = seg.value
             when Ramp
-              out[pos...stop] = ramp_values(seg, f, n)
+              out[pos...stop] = ramp_values(seg, f, n) unless ramp_into(out, pos, seg, f, n)
               if f + n >= seg.start + seg.length
                 # Done: hold the target from here on
                 @value = seg.to
@@ -900,7 +917,8 @@ module MB
                 @value = out[stop - 1]
               end
             when Follow
-              out[pos...stop] = follow_values(seg, n)
+              v = follow_values(seg, n)
+              out[pos...stop] = v unless v.is_a?(Numo::SFloat) && MB::Sound::FastArithmetic.copy_range(out, pos, v, 0, n)
               @value = out[stop - 1]
             end
 
@@ -908,7 +926,18 @@ module MB
           end
 
           @next_frame = frame + count
-          out.freeze
+          @render_views.of(out)
+        end
+
+        # One of two reused SFloats of +count+ samples for #render, which
+        # writes every sample (in turn, so the last span's view stays
+        # valid while the next is made; its readers see a frozen view with
+        # a new generation each span: GraphNode::FrozenView).
+        def render_buffer(count)
+          @render_flip ^= 1
+          buf = @render_bufs[@render_flip]
+          buf = @render_bufs[@render_flip] = Numo::SFloat.zeros(count) if buf.nil? || buf.length != count
+          buf
         end
 
         # Starts +seg+ (from the pending list) on its frame.
@@ -928,11 +957,14 @@ module MB
         # knob's scale, and exactly +to+ from the last frame on.
         def ramp_values(seg, f, n)
           j0 = f - seg.start
-          t = Numo::DFloat.new(n).seq(j0 + 1)
+          t = @ramp_t
+          t = @ramp_t = Numo::DFloat.new(n) if t.nil? || t.length != n
+          t.seq(j0 + 1)
           t.inplace / seg.length
           ends = j0 + n >= seg.length
           t.inplace.clip(0.0, 1.0) if ends
-          c = seg.curve ? seg.curve.map(t) : t
+          # (in place but on the last frames, which read t again below)
+          c = seg.curve ? (ends ? seg.curve.map(t) : seg.curve.map!(t, ramp_scratch(n))) : t
           if @spec.curve == :exp
             p0 = @spec.position(seg.from)
             p1 = @spec.position(seg.to)
@@ -952,6 +984,31 @@ module MB
           v
         end
 
+        # #ramp_values written into out[pos, n] in C (FastArithmetic.knob_ramp:
+        # the same values) for ramps without a curve or with a linear or
+        # smoothstep one; false for others.
+        def ramp_into(out, pos, seg, f, n)
+          cv = seg.curve
+          kind = cv.nil? || cv.equal?(MB::Sound::Curve.linear) ? 0 : (cv.equal?(MB::Sound::Curve.smoothstep) ? 1 : nil)
+          return false unless kind
+
+          if @spec.curve == :exp
+            p0 = @spec.position(seg.from)
+            p1 = @spec.position(seg.to)
+            r = Math.log(@spec.range.end / @spec.range.begin)
+            !!MB::Sound::FastArithmetic.knob_ramp(out, pos, n, f - seg.start, seg.length, kind, true, r * (p1 - p0), Math.log(@spec.range.begin), p0 * r, seg.to)
+          else
+            !!MB::Sound::FastArithmetic.knob_ramp(out, pos, n, f - seg.start, seg.length, kind, false, seg.to - seg.from, seg.from, 0.0, seg.to)
+          end
+        end
+
+        # A reused DFloat of +n+ samples for Curve#map! in #ramp_values.
+        def ramp_scratch(n)
+          sc = @ramp_scratch
+          sc = @ramp_scratch = Numo::DFloat.zeros(n) if sc.nil? || sc.length != n
+          sc
+        end
+
         # +n+ frames of the followed node (holding its last value once it
         # ends), limited to the range or through the Follow's map.
         def follow_values(seg, n)
@@ -967,7 +1024,22 @@ module MB
             buf = buf.concatenate(buf.class.new(n - buf.length).fill(last))
           end
           return seg.map.call(Numo::DFloat.cast(buf)) if seg.map
-          @spec.clamp? ? buf.clip(@spec.range.begin, @spec.range.end) : buf
+          return buf unless @spec.clamp?
+
+          # (inside the range already, as a followed knob or LFO usually
+          # is: clip would change nothing; found without allocating)
+          lo = @spec.range.begin
+          hi = @spec.range.end
+          r = (@follow_range ||= [0.0, 0.0])
+          return buf if MB::Sound::FastArithmetic.min_max(buf, r) && r[0] >= lo && r[1] <= hi
+
+          # (clipped in a reused copy of the same type: the same values as
+          # buf.clip)
+          c = @follow_buf
+          c = @follow_buf = buf.class.new(n) if c.nil? || c.class != buf.class || c.length != n
+          c[0..] = buf unless MB::Sound::FastArithmetic.copy(c, buf)
+          c.inplace.clip(lo, hi)
+          c
         end
 
         # Reads controller events for frames [+frame+, +frame+ + +count+)

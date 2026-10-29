@@ -207,6 +207,7 @@ module MB
           @thread = nil
 
           @lookahead = :auto
+          @lookahead_cache = nil # (see #lookahead_whole_notes)
           @recent = []
           @late = []
           @running = nil
@@ -247,8 +248,7 @@ module MB
         # The lookahead used now, in whole notes (see #lookahead).
         def lookahead_whole_notes
           bar = @transport.bar_length
-          min = bar * MIN_LOOKAHEAD
-          return min unless @realtime
+          return bar * MIN_LOOKAHEAD unless @realtime
 
           case @lookahead
           when Sequence::Duration then return @lookahead.to_r
@@ -256,8 +256,17 @@ module MB
           end
 
           slow = @mutex.synchronize { @recent.max } || 0
-          wanted = (slow * SAFETY_FACTOR + SAFETY_SECONDS) * @transport.whole_notes_per_second
-          MB::M.clamp(wanted.to_r, min, bar * MAX_LOOKAHEAD)
+          wnps = @transport.whole_notes_per_second
+          # (the same answer while its inputs hold: it runs every buffer,
+          # and Float#to_r makes a Rational and a Bignum; dropouts-2)
+          c = @lookahead_cache
+          return c[3] if c && c[0] == bar && c[1] == slow && c[2] == wnps
+
+          min = bar * MIN_LOOKAHEAD
+          wanted = (slow * SAFETY_FACTOR + SAFETY_SECONDS) * wnps
+          value = MB::M.clamp(wanted.to_r, min, bar * MAX_LOOKAHEAD)
+          @lookahead_cache = [bar, slow, wnps, value]
+          value
         end
 
         # Blocks that finished after their time (the newest RECENT_BLOCKS):

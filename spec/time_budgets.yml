@@ -28,6 +28,10 @@ default:
   file: 20
   example: 8
 files:
+  spec/bin/gc_soak_spec.rb:
+    file: 80
+    example: 70
+    reason: the slow tier's GC-off soak plays tunnel_vision live for 75 s of audio at 1.5x real time (paced by the clock, about 50 s on any machine) after its warm-up (59 s in the Mac container, 2026-10-28; dropouts-2)
   spec/bin/ui_demo_spec.rb:
     file: 20
     example: 10

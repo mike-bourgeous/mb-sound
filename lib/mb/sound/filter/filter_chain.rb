@@ -23,7 +23,8 @@ module MB
         # sample buffer, or nil if any filters returned nil.
         def process(data)
           acc = call_filter(0, data)
-          for idx in 1...@filters.length
+          idx = 0
+          while (idx += 1) < @filters.length # (not `for` over a Range: a Range a call)
             acc = call_filter(idx, acc)
             return nil if acc.nil?
           end

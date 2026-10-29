@@ -17,6 +17,8 @@
 # - :timeline: a timeline-following part (a looping tween, a looping
 #   clip's frequency) launched partway through the song plays from the
 #   launch what it plays there when started at bar 1, within -80 dB
+# - :warm: warming every change before it lands (Session::Warming.always:
+#   copies built and played in sandboxes) gives the same mix, bit for bit
 #
 # Renders use exact_lanes: true (synth lanes freed on the 800-frame grid,
 # so voice allocation is the same at any buffer size; see Synth).
@@ -29,14 +31,25 @@ require 'stringio'
 require_relative 'recipe_helpers'
 
 module SessionFuzz
-  RELATIONS = %i[runs buffer_size plan timeline].freeze
+  RELATIONS = %i[runs buffer_size plan timeline warm].freeze
 
   # Relations known to fail for a reason recorded elsewhere, as
   # { relation => [[Regexp on the script, 'reason'], ...] }: skipped, counted.
   KNOWN = {
-    # (empty since omnibus13: seed 116's uneven-step tween launched where a
-    # step starts between samples, and seed 1194's tr808 revived after a
-    # ring-out, are fixed; session_fuzz_spec keeps their shrunk songs)
+    # (seed 116's uneven-step tween launched where a step starts between
+    # samples, and seed 1194's tr808 revived after a ring-out, are fixed
+    # since omnibus13; session_fuzz_spec keeps their shrunk songs)
+    buffer_size: [
+      # dropouts-2 (2026-10-28), found when the generator gained master
+      # chains (FUZZ=30 seeds 11 and 28): a master chain landing inside
+      # a buffer gets zeros for the frames before its start
+      # (Master#render_master_chain's input_from), which prime softclip's
+      # ADAA state (FastClip.shape's first-sample flag) from 0 instead of
+      # the first real input sample, as a chain landing on a buffer edge
+      # does: 8 frames differ, up to -32 dB, at the landing only.  Fix:
+      # sample a chain's first buffer from its start frame.
+      [/master \{ \|m\| m\.softclip/, 'master chain landing mid-buffer primes ADAA state from zeros'],
+    ],
   }.freeze
 
   # A generated song: +header+ lines (tempo, meter) always kept, +lines+
@@ -211,16 +224,28 @@ module SessionFuzz
         lines << "at_bar(#{bar}, beat: 3) { launch :#{t} }"
       end
     end
+    # A bus with sends and a master chain, new to the session partway
+    # through (dropouts-2's warm-ups; drawn last, so every seed keeps the
+    # song it made before)
+    if rng.rand < 0.35
+      lines << "bus(:fx) { |sig| sig.#{pick(rng, BUS_FX)} }"
+      lines << "at_bar(#{rng.rand(1..bars)}, beat: 2) { feed :#{pick(rng, names)}, :fx, -12.db }"
+    end
+    lines << "at_bar(#{rng.rand(1..bars)}, beat: 3) { master { |m| m.softclip(0, 0.9) } }" if rng.rand < 0.25
     Song.new(header: header, lines: lines, bars: bars)
   end
+
+  # Bus chains for #generate.
+  BUS_FX = ['reverb(:room, mix: 1)', 'delay(1.n8, feedback: 0.3) * 0.5', 'lp4(900) * 0.7'].freeze
 
   # --- rendering ------------------------------------------------------
 
   # Renders +code+ for +bars+ bars in +buffer_size+-frame buffers; returns
   # the mix (one DFloat per channel).
-  def render(code, bars, buffer_size: 800, plans: true, rebuilds: :inline)
+  def render(code, bars, buffer_size: 800, plans: true, rebuilds: :inline, warm: false)
     plan = MB::Sound::Plan
     old = [plan.enabled, plan.precision, plan.rebuilds]
+    MB::Sound::Session::Warming.always = warm
     plan.enabled = plans
     plan.precision = :fast
     plan.rebuilds = rebuilds
@@ -238,6 +263,7 @@ module SessionFuzz
     @warnings = err.string.lines.reject { |l| EXPECTED_WARNINGS.any? { |re| l.match?(re) } }
     out.captured.map { |c| Numo::DFloat.cast(c) }
   ensure
+    MB::Sound::Session::Warming.always = false
     plan.enabled, plan.precision, plan.rebuilds = old
     MB::Sound.rewind
   end
@@ -332,6 +358,8 @@ module SessionFuzz
       got = render(code, song.bars)
       compare(ref, got, tolerance: 0, label: 'planned vs unplanned') ||
         compare(ref, render(code, song.bars, rebuilds: :next_span), tolerance: 0, label: 'planned with deferred rebuilds vs unplanned')
+    when :warm
+      compare(render(code, song.bars), render(code, song.bars, warm: true), tolerance: 0, label: 'warmed changes vs not')
     when :timeline
       parts = timeline_parts(song)
       return :skip if parts.empty?

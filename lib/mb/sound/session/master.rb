@@ -135,6 +135,7 @@ module MB
           chain.mode, chain.fade = master_mode(fade)
           @master_block = block
           @master_preset = preset
+          warm_master_chain(block, preset, chain, warm_time(point, start_time)) # (its code compiled here, not where it lands; see Warming)
 
           time = start_time ? start_time.to_r : launch_time(point, chain.timeline_nodes)
           change(:master, :master, time, data: { description: chain.description, fade: fade }, graph: chain.chain_graph) { |t|
@@ -240,7 +241,7 @@ module MB
 
         # Returns true if every channel of +data+ is below TAIL_THRESHOLD.
         def quiet?(data)
-          data.all? { |d| d.empty? || d.abs.max < TAIL_THRESHOLD }
+          data.all? { |d| d.empty? || abs_peak(d) < TAIL_THRESHOLD } # (no Numo temporaries; Tails#abs_peak)
         end
 
         private
@@ -375,7 +376,8 @@ module MB
         # itself if there are no chains).  +playing+ is true if any player is
         # playing, for keeping clips in master chains on the timeline.
         def process_master(mix, from, to, per_sample, count, playing:, seeked:)
-          chains = @mutex.synchronize { @master_chains&.dup }
+          # (a reused copy, taken under the lock)
+          chains = @mutex.synchronize { @master_chains.nil? || @master_chains.empty? ? nil : (@master_copy ||= []).replace(@master_chains) }
           return mix if chains.nil? || chains.empty?
 
           # Keep clips in effects on the timeline, which pauses while idle
@@ -385,7 +387,7 @@ module MB
           rate = output.sample_rate.to_f
           activate_master(chains, from, to, per_sample, rate)
 
-          out = Array.new(@channels) { Numo::SFloat.zeros(count) }
+          out = master_out(count)
           chains.each do |c|
             # Like players' clips: timeline loops follow the new position,
             # launch-aligned loops keep their anchor, and non-looping clips
@@ -408,10 +410,33 @@ module MB
           out
         end
 
+        # Zeroed buffers for the master chains' output: reused on the
+        # render thread (see Session#process_buffer), else new (callers
+        # keep what #process_buffer returns).
+        def master_out(count)
+          return Array.new(@channels) { Numo::SFloat.zeros(count) } unless @reuse_mix
+
+          bufs = @master_out_bufs
+          if bufs.nil? || bufs.length != @channels || bufs[0].length != count
+            return @master_out_bufs = Array.new(@channels) { Numo::SFloat.zeros(count) }
+          end
+          bufs.each { |b| BufferHelper.zero(b) }
+          bufs
+        end
+
         # Starts a chain whose time has come, handing over from the older
         # chains at the frame where it starts in this buffer.
         def activate_master(chains, from, to, per_sample, rate)
-          @mutex.synchronize {
+          # (the lock taken only when a chain may start: the return from
+          # inside the block made an imemo every buffer)
+          chain = chains.last
+          return if chain.started
+          @mutex.synchronize { activate_master_locked(chains, from, to, per_sample, rate) }
+        end
+
+        # #activate_master with the lock held.
+        def activate_master_locked(chains, from, to, per_sample, rate)
+          begin
             chain = chains.last
             return if chain.started || (chain.start >= to && @players.any?)
 
@@ -447,7 +472,7 @@ module MB
                 c.ramp_from = offset
               end
             end
-          }
+          end
         end
 
         # Renders one chain's output into +out+.
@@ -473,7 +498,9 @@ module MB
             c.capture.add(@frame, input, data, ramp)
             @mastering_capture&.note_sections(self, @frame, count, @span.pos)
           end
-          out.each_with_index do |o, idx|
+          idx = -1
+          while (idx += 1) < out.length # (no each_with_index: an imemo a call)
+            o = out[idx]
             d = data[idx]
             next if d.length == count && (ramp.nil? || ramp.length == count) && FastArithmetic.add_at(o, 0, d, count, ramp)
             d = d * ramp if ramp
@@ -492,13 +519,17 @@ module MB
           c.source.write(input)
           t = MB::U.clock_now
           gc = GC.stat(:time)
-          results = {}
-          data = c.nodes.map { |n|
+          # (a reused Hash and, per chain, a reused Array: every buffer)
+          results = (@chain_results ||= {})
+          results.clear
+          data = (@chain_data[c] ||= [])
+          data.clear
+          c.nodes.each do |n|
             d = (results[n.__id__] ||= n.sample(count))
             raise "The master chain ended (got #{d&.length.inspect} of #{count} samples)" if d.nil? || d.length < count
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
-            d
-          }
+            data << d
+          end
           elapsed = MB::U.clock_now - t
           c.cpu = (c.cpu || 0.0) + elapsed if @ui_feed
           check_master_speed(c, Session.without_gc(elapsed, gc), count)

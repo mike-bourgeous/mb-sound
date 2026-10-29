@@ -668,7 +668,7 @@ module MB
         tap = session.add_tap { |mix|
           delay = output.respond_to?(:latency) ? output.latency : 0
           due_lock.synchronize {
-            due << [MB::U.clock_now + delay, mix]
+            due << [MB::U.clock_now + delay, mix.map(&:dup)] # (the render thread reuses its mix)
             due.shift while due.length > 1000
           }
         }

@@ -72,33 +72,38 @@ module MB
           self
         end
 
-        # Used by #spy.
+        # Used by #spy.  Runs every buffer (twice: :pre and :post), so it
+        # allocates nothing for spies without an interval (no Time, no
+        # label String, no Enumerator; dropouts-2: ~1900 objects a second
+        # from a `duck(:drums, only: :kick)` spy).
         private def call_spies(data, phase)
-          now = Time.now
+          now = nil
           now_nil = data.nil?
           frozen = nil
 
           @handled_spies.each do |origin, spies|
-            info = origin ? " from #{origin}" : ''
-
-            spies.each_with_index do |spy_info, idx|
+            idx = 0
+            while idx < spies.length
+              spy_info = spies[idx]
               s, interval, spy_phase, last_time, was_nil, snapshot = spy_info
-              next unless spy_phase == phase
-
-              begin
-                if !interval || (now - last_time) >= interval || was_nil != now_nil
-                  if snapshot && phase == :post && data.respond_to?(:dup)
-                    frozen ||= data.dup.freeze
-                    s.call(frozen)
-                  else
-                    s.call(data)
+              now ||= Time.now if interval # (once per call, as before)
+              if spy_phase == phase
+                begin
+                  if !interval || (now - last_time) >= interval || was_nil != now_nil
+                    if snapshot && phase == :post && data.respond_to?(:dup)
+                      frozen ||= data.dup.freeze
+                      s.call(frozen)
+                    else
+                      s.call(data)
+                    end
+                    spy_info[3] = now if interval
+                    spy_info[4] = now_nil
                   end
-                  spy_info[3] = now
-                  spy_info[4] = now_nil
+                rescue => e
+                  warn "Spy #{idx}/#{s}#{origin ? " from #{origin}" : ''} raised #{MB::U.highlight(e)}"
                 end
-              rescue => e
-                warn "Spy #{idx}/#{s}#{info} raised #{MB::U.highlight(e)}"
               end
+              idx += 1
             end
           end
         end

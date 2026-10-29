@@ -85,6 +85,7 @@ module MB
           super(stream, notes: notes, sample_rate: sample_rate, marks: marks)
 
           @resume = !!resume
+          @glide_bufs = nil # (reused by #fill; dropouts-2)
 
           @curve = nil
           if shape.nil?
@@ -184,19 +185,24 @@ module MB
           # The same operations as t * t * (3 - 2 * t) * (number - start) +
           # start, in place to save allocations (glides are often long, and
           # unison swarms run one per copy)
+          # (in reused DFloats: the same products and sums; dropouts-2)
           n = to - from
-          t = Numo::DFloat.new(n).seq(@position + 1)
+          t, shaped, sq, bump = glide_bufs(n)
+          t.seq(@position + 1)
           t.inplace / @length
           t.inplace.clip(0.0, 1.0)
           return fill_curve(buf, from, to, t) if @curve
 
-          shaped = t * -2
+          shaped[0..] = t unless MB::Sound::FastArithmetic.copy(shaped, t)
+          shaped.inplace * -2
           shaped.inplace + 3
-          sq = t * t
+          sq[0..] = t unless MB::Sound::FastArithmetic.copy(sq, t)
+          sq.inplace * t
           shaped.inplace * sq
           if @overshoot_k != 0
             # + k t³ (1 - t)²
-            bump = t * -1
+            bump[0..] = t unless MB::Sound::FastArithmetic.copy(bump, t)
+            bump.inplace * -1
             bump.inplace + 1
             bump.inplace * bump
             sq.inplace * t
@@ -210,6 +216,14 @@ module MB
           @position += n
           @value = buf[to - 1]
           @gliding = false if @position >= @length
+        end
+
+        # Four reused DFloats of +n+ samples for #fill: t, the shape, t
+        # squared, and the overshoot bump.
+        def glide_bufs(n)
+          b = @glide_bufs
+          b = @glide_bufs = Array.new(4) { Numo::DFloat.zeros(n) } if b.nil? || b[0].length != n
+          b
         end
 
         # #fill for a glide with a curve (see the class description) at

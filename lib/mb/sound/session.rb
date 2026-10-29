@@ -31,6 +31,7 @@ require_relative 'session/safety_limiter'
 require_relative 'session/buses'
 require_relative 'session/racks'
 require_relative 'session/ui_feed'
+require_relative 'session/warming'
 
 module MB
   module Sound
@@ -89,6 +90,7 @@ module MB
       include MonitorTrim
       include SafetyLimiter
       include UIFeed
+      include Warming
       include Buses # it extends Strip, Undo, and Seeks through super
       include Cue # last: it extends Strip, Undo, Seeks, and Buses through super
 
@@ -307,6 +309,18 @@ module MB
         @transport = transport
         @per_sample_cache = nil # (see #span_per_sample)
         @span_mix_bufs = nil # (see #span_mix)
+        @reuse_mix = false # (see #process_buffer)
+        @tail_range = nil # (see Tails#abs_peak)
+        @taps_copy = nil # (see #call_taps)
+        @master_copy = nil # (see Master#process_master)
+        @bus_chain_copies = {}.compare_by_identity # (see Buses#run_bus_chains)
+        @bus_shared_copies = {}.compare_by_identity # (see Buses#bus_read_shared)
+        @routed_buses = [] # (see Buses#render_routed)
+        @send_rows = {}.compare_by_identity # (see Buses#send_rows)
+        @only_keys = {} # (see Buses#bus_signal)
+        @chain_results = nil # (see Master#master_chain_output)
+        @chain_data = {}.compare_by_identity
+        @master_out_bufs = nil # (see Master#process_master)
         @tuning = tuning
         self.master_gain = master_gain
         self.master_gain_post = master_gain_post
@@ -348,6 +362,7 @@ module MB
         init_safety_limiter(safety_limiter.nil? ? realtime : safety_limiter)
         init_buses
         init_cue(cue_output)
+        init_warming
         @names = Names.new
         @racks = Racks.new(self)
         @arrangement = nil
@@ -373,7 +388,12 @@ module MB
         # Session.span; MIDI::Stream#spy)
         @span = Span.new(self, 0, 0r, 0r, false, 48000, 0)
         @player_frame = nil
-        @asleep_ids = nil
+        @asleep_ids = nil # (unused since dropouts-2; see Strip#span_graphs)
+        @span_graph_scratch = nil
+        @kept_scratch = nil # (see Strip#read_kept_graphs)
+        @span_player_list = nil # (see #render_span)
+        @span_step = nil # (see #span_step)
+        @bus_zero_seg = nil # (see Buses#run_bus_chains)
         @asleep_graphs = nil
         @bus_span_count = nil
         @bus_span_buses = nil
@@ -462,7 +482,11 @@ module MB
       #
       # +:to+ and +:send+ set the name's routing (see Buses#route): the bus
       # its main out feeds, and its sends (bus name => level).
-      def add(sound, at: nil, on: nil, in: nil, name: nil, fade: nil, description: nil, start_time: nil, to: :keep, send: nil)
+      #
+      # +:warm+ is a Proc that builds a copy of the graph (a track's patch
+      # again), for warming its code before it lands (see Warming; without
+      # it, a copy is loaded from the graph's recipe).
+      def add(sound, at: nil, on: nil, in: nil, name: nil, fade: nil, description: nil, start_time: nil, to: :keep, send: nil, warm: nil)
         raise IOError, 'Session is closed' if @closed
         point = LaunchPoint.of(binding) or return nil
         raise ArgumentError, "Player names must be Symbols or Integers (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol) || name.is_a?(Integer)
@@ -486,6 +510,9 @@ module MB
         # the render thread where it waits and starts
         input.prime
         description = shorten(description || playable.description)
+
+        # Its code compiled here rather than where it lands (see Warming)
+        warm_graph(name, nodes, warm, warm_time(point, start_time))
 
         time = start_time ? start_time.to_r : launch_time(point, timeline_nodes)
 
@@ -822,9 +849,10 @@ module MB
 
       # Calls the block with every buffer of the mix (an Array of
       # Numo::SFloat, one per channel) after it is written to the output,
-      # e.g. for plotting.  The arrays are new for each buffer, so the block
-      # may keep them.  The block runs on the rendering thread, so it must
-      # return quickly.  Returns the block, for #remove_tap.
+      # e.g. for plotting.  On a realtime Session's render thread the
+      # arrays are reused for the next buffer, so a block that keeps them
+      # keeps copies (dropouts-2; #process_buffer's callers get new ones).
+      # The block runs on the rendering thread, so it must return quickly.  Returns the block, for #remove_tap.
       def add_tap(&block)
         raise ArgumentError, 'Pass a block to tap the mix' unless block
         @mutex.synchronize { @taps << block }
@@ -945,12 +973,19 @@ module MB
       # channel) before the monitor trim.
       def process_buffer(count = buffer_size)
         started = MB::U.clock_now
+        # The render thread's mix is reused from buffer to buffer (the
+        # output, taps, recordings, and the UI feed copy what they keep;
+        # dropouts-2: two new SFloats a buffer were ~470 KB/s of garbage
+        # at 256 frames); callers of #process_buffer keep what it returns
+        @reuse_mix = Thread.current.equal?(@thread)
 
         mix = @render_lock.synchronize {
           # A seek (or its undo) landing inside the buffer splits it: the
           # frames before it, then the rest from the new position (see
           # Seeks), so it lands on the same frame at any buffer size
-          parts = []
+          # (no Array for the usual one span; dropouts-2)
+          first = nil
+          parts = nil
           remaining = count
           while remaining > 0
             @scheduler.apply_timed_changes
@@ -963,7 +998,7 @@ module MB
             # typed in, like live lines typed between buffers, so a tempo
             # they set covers the whole span (see Scheduler::Entry#exact)
             from = @transport.position
-            to = from + remaining * per_sample
+            to = from + span_step(remaining, per_sample)
             if @scheduler.dispatch_exact(from, to)
               @scheduler.apply_timed_changes
               commit_due_seeks unless @changes.empty?
@@ -974,11 +1009,18 @@ module MB
             n = (@changes.empty? ? nil : frames_before_seek(remaining, per_sample)) || remaining
             n = cell if cell && cell < n
             # (the span's end, computed once when the span is the rest)
-            parts << render_span(n, per_sample, n == remaining && @transport.position.equal?(from) ? to : nil)
+            r = render_span(n, per_sample, n == remaining && @transport.position.equal?(from) ? to : nil)
+            if first.nil?
+              first = r
+            else
+              (parts ||= [first]) << r
+            end
             remaining -= n
           end
           @ui_feed.capture(self) if @ui_feed&.wants_capture? # players, buses, chains, while they can't change
-          parts.length == 1 ? parts[0] : parts.transpose.map { |chans| chans.reduce { |a, b| a.concatenate(b) } }
+          # (no spans for a buffer of 0 frames: an empty mix, as before)
+          next [] if first.nil?
+          parts.nil? ? first : parts.transpose.map { |chans| chans.reduce { |a, b| a.concatenate(b) } }
         }
 
         # How busy rendering is (before the output blocks), for deciding
@@ -996,6 +1038,18 @@ module MB
         @ui_feed&.publish(self, mix, count, @load)
         mix
       end
+
+      # +count+ * +per_sample+ (whole notes), kept while both hold (a
+      # Rational every buffer otherwise).
+      def span_step(count, per_sample)
+        c = @span_step
+        return c[2] if c && c[0] == count && c[1].equal?(per_sample)
+
+        v = count * per_sample
+        @span_step = [count, per_sample, v]
+        v
+      end
+      private :span_step
 
       # Renders +count+ frames (one span of #process_buffer): scheduled
       # blocks, changes landing in the span, players, and the master chain.
@@ -1049,7 +1103,9 @@ module MB
         deferral&.apply
         Thread.current[:mb_sound_plan_deferral] = deferral
 
-        players = @mutex.synchronize { @players.values }
+        # (a reused copy, taken under the lock: every span; dropouts-2)
+        players = (@span_player_list ||= [])
+        @mutex.synchronize { players.clear; @players.each_value { |p| players << p } }
         @span_players = players # for Strip#asleep_reads
         @span_graphs = nil
         # Graphs waiting to start keep in step with shared nodes (see Strip)
@@ -1094,8 +1150,9 @@ module MB
         begin_bus_read(0) if routed # master chains reading buses or players
         mix = process_master(mix, from, to, per_sample, count, playing: playing, seeked: seeked)
         # (without a master chain the mix itself leaves the span: callers
-        # keep what #process_buffer returns, so it can't be the reused one)
-        mix = mix.map(&:dup) if mix.equal?(@span_mix_bufs)
+        # keep what #process_buffer returns, so it can't be the reused one,
+        # except on the render thread; see #process_buffer)
+        mix = mix.map(&:dup) if !@reuse_mix && mix.equal?(@span_mix_bufs)
         end_cue_span(mix, count) # the phones mix (see Cue)
 
         @frame += count
@@ -1558,7 +1615,7 @@ module MB
         # ring-out differed by buffer size, SessionFuzz seed 1194)
         quiet = ringing && p.ring.stop_frame ? (RING_QUIET_SECONDS * rate).round : nil
         total = frames
-        loop do
+        while true # (not loop do: its break and return allocated an imemo per player per buffer)
           frames = total
           if quiet
             ending = p.ring.quiet_from + quiet - base
@@ -1620,7 +1677,9 @@ module MB
           if routed
             deliver_player(p, data, ramp, mix, stem, offset, frames, fade: fade)
           else
-            mix.each_with_index do |m, c|
+            c = -1
+            while (c += 1) < mix.length # (no each_with_index: an imemo per player per buffer)
+              m = mix[c]
               d = data[c % data.length]
               next if d.nil? || d.empty?
               d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
@@ -1693,9 +1752,12 @@ module MB
         end
       end
 
+      NO_TAPS = [].freeze
+
       # Calls each #add_tap block with the mix, removing blocks that raise.
       def call_taps(mix)
-        taps = @mutex.synchronize { @taps.dup }
+        # (a reused copy, taken under the lock: no Array a buffer)
+        taps = @mutex.synchronize { @taps.empty? ? NO_TAPS : (@taps_copy ||= []).replace(@taps) }
         taps.each do |t|
           t.call(mix)
         rescue => e

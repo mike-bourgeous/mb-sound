@@ -3,13 +3,24 @@ module MB
     class Curve
       # The straight line y = x.
       def self.linear
-        @linear ||= new(:linear, kind: :linear, monotonic: true, natural: true, generic: ->(x, _m) { x * 1.0 }, form: [:poly, [0.0, 1.0]])
+        # (x * 1.0 is x itself, so #map! leaves x as it is)
+        @linear ||= new(:linear, kind: :linear, monotonic: true, natural: true, generic: ->(x, _m) { x * 1.0 }, form: [:poly, [0.0, 1.0]],
+                                 inplace: ->(x, _s) { x })
       end
 
       # 3x² - 2x³: zero slope at both ends (the shape of GraphNode#smooth,
       # Notes::Glide, and Envelope's :s at 0 dB).
       def self.smoothstep
-        @smoothstep ||= new(:smoothstep, kind: :in_out, monotonic: true, generic: ->(x, _m) { x * x * (3.0 - 2.0 * x) }, form: [:poly, [0.0, 0.0, 3.0, -2.0]])
+        # (#map! computes the same products: -2x + 3 is 3 - 2x exactly)
+        @smoothstep ||= new(:smoothstep, kind: :in_out, monotonic: true, generic: ->(x, _m) { x * x * (3.0 - 2.0 * x) }, form: [:poly, [0.0, 0.0, 3.0, -2.0]],
+                                         inplace: ->(x, s) {
+                                           s[0..] = x unless MB::Sound::FastArithmetic.copy(s, x)
+                                           s.inplace * -2.0
+                                           s.inplace + 3.0
+                                           x.inplace * x
+                                           x.inplace * s
+                                           x
+                                         })
       end
 
       # 6x⁵ - 15x⁴ + 10x³: zero slope and curvature at both ends.
