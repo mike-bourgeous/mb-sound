@@ -197,7 +197,8 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
       'a stepped node' => -> { MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(48000).fill(0.03).tap { |d| d[0...4800] = 0.02 }]).with_buffer(800).resample(mode: :libsamplerate_fastest) },
     }.each do |name, time|
       it "starts a delay time from #{name} at the node's first value with the default smoothing" do
-        [1, *slow_tier([2], keep: 0)].each do |os|
+        # (samples count at the running rate: 960 samples are 0.01 s at 2x)
+        [1, *slow_tier(name.include?('samples') ? [] : [2], keep: 0)].each do |os|
           d = glide(time.call, os, smoothing: true)
           # (the delay line's first 0.02-0.0225 s are its starting silence)
           start = d[1200]
