@@ -19,8 +19,9 @@ RSpec.describe('MB::Term::NativeCells', :aggregate_failures) do
     expect(out.lines.last.to_s.strip).to eq('3'), out
   end
 
-  it 'is the registered native grid unless an adapter registered a subclass' do
-    expect(MB::Term::Grid.native <= native).to eq(true)
+  it 'is the registered native grid unless an adapter registered another (mb-sound registers a FastTerm::Grid subclass)' do
+    expect(MB::Term::Grid.native <= MB::Term::FastTerm::Grid).to eq(true)
+    expect(MB::Term::Grid.native.include?(MB::Term::NativeMethods)).to eq(true)
   end
 
   it 'checks sizes and arguments' do

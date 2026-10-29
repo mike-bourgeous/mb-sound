@@ -1,7 +1,22 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-28",
+  "generated": "2026-10-29",
   "specs": {
+    "gems/mb-term/spec/native_spec.rb": {
+      "fast_term": [
+        "FastTerm::Grid#blit",
+        "FastTerm::Grid#char",
+        "FastTerm::Grid#copy_from",
+        "FastTerm::Grid#frame",
+        "FastTerm::Grid#initialize",
+        "FastTerm::Grid#lines",
+        "FastTerm::Grid#put_run",
+        "FastTerm::Grid#put_text",
+        "FastTerm::Grid#set_cell",
+        "FastTerm::Grid#to_text",
+        "FastTerm::Grid#write_frame"
+      ]
+    },
     "spec/ext/mb/fast_sound_spec.rb": {
       "fast_sound": [
         "FastSound.matrix_mix",
@@ -15,13 +30,16 @@
       "fast_arithmetic": [
         "FastArithmetic.accumulate",
         "FastArithmetic.add_at",
+        "FastArithmetic.cast_copy",
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.complex_part",
         "FastArithmetic.copy",
         "FastArithmetic.copy_range",
         "FastArithmetic.divide",
+        "FastArithmetic.ease_plain",
         "FastArithmetic.fill_range",
+        "FastArithmetic.knob_ramp",
         "FastArithmetic.last_at_least",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
@@ -266,6 +284,15 @@
       ]
     },
     "spec/ext/mb/sound/fast_ui_spec.rb": {
+      "fast_term": [
+        "FastTerm::Grid#copy_from",
+        "FastTerm::Grid#frame",
+        "FastTerm::Grid#initialize",
+        "FastTerm::Grid#lines",
+        "FastTerm::Grid#put_text",
+        "FastTerm::Grid#set_cell",
+        "FastTerm::Grid#width"
+      ],
       "fast_ui": [
         "FastUI.area",
         "FastUI.decimate",
@@ -278,19 +305,7 @@
         "FastUI::GVLProbe.start",
         "FastUI::GVLProbe.stop",
         "FastUI::GVLProbe.waits",
-        "FastUI::Grid#blit",
-        "FastUI::Grid#char",
-        "FastUI::Grid#compose",
-        "FastUI::Grid#copy_from",
-        "FastUI::Grid#frame",
-        "FastUI::Grid#initialize",
-        "FastUI::Grid#lines",
-        "FastUI::Grid#put_run",
-        "FastUI::Grid#put_text",
-        "FastUI::Grid#set_cell",
-        "FastUI::Grid#to_text",
-        "FastUI::Grid#width",
-        "FastUI::Grid#write_frame"
+        "FastUI::Grid#compose"
       ]
     },
     "spec/ext/mb/sound/fast_unison_spec.rb": {
@@ -425,6 +440,9 @@
       ]
     },
     "spec/lib/mb/sound/curve_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.copy"
+      ],
       "fast_clip": [
         "FastClip.curve_lookup"
       ],
@@ -546,9 +564,12 @@
     },
     "spec/lib/mb/sound/filter/delay_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.accumulate",
         "FastArithmetic.circular_write",
+        "FastArithmetic.copy",
         "FastArithmetic.min_max",
         "FastArithmetic.product",
+        "FastArithmetic.scale",
         "FastArithmetic.wet_dry"
       ],
       "fast_delay": [
@@ -659,7 +680,8 @@
     },
     "spec/lib/mb/sound/graph_node/curve_shaper_spec.rb": {
       "fast_arithmetic": [
-        "FastArithmetic.copy"
+        "FastArithmetic.copy",
+        "FastArithmetic.ease_plain"
       ],
       "fast_clip": [
         "FastClip.shape_curve"
@@ -715,6 +737,7 @@
     },
     "spec/lib/mb/sound/graph_node/feedback_loop_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.cast_copy",
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
         "FastArithmetic.fill_range",
@@ -921,12 +944,15 @@
     "spec/lib/mb/sound/graph_sweep_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.add_at",
+        "FastArithmetic.cast_copy",
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.complex_part",
         "FastArithmetic.copy",
         "FastArithmetic.divide",
+        "FastArithmetic.ease_plain",
         "FastArithmetic.fill_range",
+        "FastArithmetic.knob_ramp",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.pan",
@@ -1230,6 +1256,7 @@
     },
     "spec/lib/mb/sound/plan/channel_mixer_ops_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.copy",
         "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
@@ -1355,6 +1382,7 @@
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
         "FastArithmetic.fill_range",
+        "FastArithmetic.last_at_least",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.power",
@@ -1432,8 +1460,10 @@
     },
     "spec/lib/mb/sound/plan/loop_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.cast_copy",
         "FastArithmetic.copy",
         "FastArithmetic.divide",
+        "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.product"
@@ -1645,6 +1675,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1654,6 +1686,7 @@
         "FastArithmetic.add_at",
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
+        "FastArithmetic.copy",
         "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
@@ -2327,6 +2360,23 @@
         ]
       }
     },
+    "fast_term": {
+      "dir": "gems/mb-term/ext/mb/term/fast_term",
+      "sources": [
+        "fast_term.c"
+      ],
+      "modules": [
+        "FastTerm"
+      ],
+      "includes": [
+        "gems/mb-term/ext/mb/term/include/mb_term_grid.h"
+      ],
+      "depend": {
+        "fast_term.o": [
+          "gems/mb-term/ext/mb/term/include/mb_term_grid.h"
+        ]
+      }
+    },
     "fast_texture": {
       "dir": "ext/mb/sound/fast_texture",
       "sources": [
@@ -2355,8 +2405,14 @@
       "modules": [
         "FastUI"
       ],
-      "includes": [],
-      "depend": {}
+      "includes": [
+        "gems/mb-term/ext/mb/term/include/mb_term_grid.h"
+      ],
+      "depend": {
+        "fast_ui.o": [
+          "gems/mb-term/ext/mb/term/include/mb_term_grid.h"
+        ]
+      }
     },
     "fast_unison": {
       "dir": "ext/mb/sound/fast_unison",
