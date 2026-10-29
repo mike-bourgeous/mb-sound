@@ -447,8 +447,7 @@ namespace :spec do
   task :parallel do
     require_relative 'spec/parallel_specs'
     ok = ParallelSpecs.run_default(patterns: ENV['SPECS'].to_s.split)
-    gems_ok = ENV['SPECS'].to_s.empty? ? run_gem_specs : true
-    abort 'spec:parallel: failures' unless ok && gems_ok
+    abort 'spec:parallel: failures' unless ok & (ENV['SPECS'].to_s.empty? ? run_gem_specs : true) # (& runs the gems' specs either way)
   end
 
   desc 'The everyday subset: the 95% covering set, ALWAYS guards, and the specs of units changed since master-ai (spec/quick_selection.rb; QUICK_DRY=1 lists, BASE=ref)'
@@ -460,8 +459,7 @@ namespace :spec do
     next if ENV['QUICK_DRY'] == '1'
 
     ok = ParallelSpecs.run_default(patterns: sel.specs)
-    gems_ok = run_gem_specs # (a few seconds)
-    abort 'spec:quick: failures' unless ok && gems_ok
+    abort 'spec:quick: failures' unless ok & run_gem_specs # (a few seconds; & runs them either way)
   end
 
   namespace :quick do
