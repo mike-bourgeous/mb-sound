@@ -5,11 +5,12 @@
 #
 # Selection: changed files -> affected extensions -> memcheck specs.
 #
-# - ext/**/<ext>/** (sources, extconf.rb, depend) -> that extension
-# - ext/mb/sound/include/*.h -> every extension whose sources include it,
-#   directly or through other headers (scanned at run time; depend files
-#   aren't trusted)
-# - lib/**/*.rb whose changed lines (added or removed) mention a module an
+# - ext/**/<ext>/** (sources, extconf.rb, depend) -> that extension (also
+#   the gems' extensions, gems/*/ext/**/<ext>/**: mb-term's fast_term)
+# - ext/mb/sound/include/*.h (and gems/*/ext/**/include/*.h) -> every
+#   extension whose sources include it, directly or through other headers
+#   (scanned at run time; depend files aren't trusted)
+# - lib/**/*.rb (and gems/*/lib/**/*.rb) whose changed lines (added or removed) mention a module an
 #   extension defines (`FastSynth`, word match; the whole file when it is
 #   new or deleted) -> that extension
 # - a changed spec in SPECS -> that spec
@@ -101,6 +102,10 @@ module MemcheckSelection
 
     # Every node and filter type, planned and unplanned (memcheck light)
     'spec/lib/mb/sound/graph_sweep_spec.rb',
+
+    # mb-term's native grid against its Ruby Cells (run here under
+    # mb-sound's spec_helper; also in the gem's own specs)
+    'gems/mb-term/spec/native_spec.rb',
   ].freeze
 
   # Specs every selective run includes (when it runs anything): the graph
@@ -109,6 +114,13 @@ module MemcheckSelection
 
   MAP_PATH = 'spec/valgrind/memcheck_map.json'
   INCLUDE_DIR = 'ext/mb/sound/include'
+
+  # Every shared include directory: mb-sound's and the gems' (mb-term's
+  # mb_term_grid.h, which fast_ui includes too).
+  INCLUDE_DIRS = [INCLUDE_DIR, *Dir.glob('gems/*/ext/**/include', base: ROOT).sort].freeze
+
+  # Where extensions live: mb-sound's ext/ and each gem's.
+  EXT_ROOTS = ['ext', *Dir.glob('gems/*/ext', base: ROOT).sort].freeze
 
   # Changes to these run the full list: they change what memcheck checks
   # (suppressions, the GC.stress wrapper, the Ruby) or reach nearly every
@@ -169,7 +181,7 @@ module MemcheckSelection
   # and classes its C code defines under MB/MB::Sound (FastSound, FastMIDI,
   # ...).
   def extensions
-    @extensions ||= Dir[path('ext/**/extconf.rb')].sort.map { |f|
+    @extensions ||= EXT_ROOTS.flat_map { |r| Dir[path("#{r}/**/extconf.rb")] }.sort.map { |f|
       dir = File.dirname(f)
       mods = source_files(dir).flat_map { |s|
         File.read(s, encoding: 'binary').scan(/rb_define_(?:module|class)(?:_under)?\([^;]*?"(Fast\w*)"/).flatten
@@ -215,7 +227,7 @@ module MemcheckSelection
   def direct_includes(file)
     @direct ||= {}
     @direct[file] ||= File.read(file, encoding: 'binary').scan(/^[ \t]*#[ \t]*include[ \t]+"([^"]+)"/).flatten.filter_map { |name|
-      [File.dirname(file), path(INCLUDE_DIR)].map { |d| File.expand_path(name, d) }.find { |p| File.file?(p) }
+      [File.dirname(file), *INCLUDE_DIRS.map { |d| path(d) }].map { |d| File.expand_path(name, d) }.find { |p| File.file?(p) }
     }.uniq
   end
 
@@ -224,7 +236,7 @@ module MemcheckSelection
   def shared_headers(ext)
     ext = extension(ext)
     source_files(path(ext.dir)).flat_map { |s| includes(s) }.uniq
-      .select { |f| f.start_with?(path(INCLUDE_DIR) + '/') }.map { |f| rel(f) }.sort
+      .select { |f| INCLUDE_DIRS.any? { |d| f.start_with?(path(d) + '/') } }.map { |f| rel(f) }.sort
   end
 
   # Extensions whose sources include +header+ (a relative path).
@@ -290,7 +302,7 @@ module MemcheckSelection
   def extension_names_at(commit)
     return extension_names unless commit
 
-    git('ls-tree', '-r', '--name-only', commit, 'ext').lines.grep(%r{/extconf\.rb$}).map { |l| File.basename(File.dirname(l.chomp)) }
+    git('ls-tree', '-r', '--name-only', commit, *EXT_ROOTS).lines.grep(%r{/extconf\.rb$}).map { |l| File.basename(File.dirname(l.chomp)) }
   end
 
   # Line numbers (new side) changed in +file+ between base and to.
@@ -373,15 +385,15 @@ module MemcheckSelection
         elsif git('diff', '-U0', base, *to, '--', f).lines.any? { |l| l =~ /^[-+](?![-+])/ && l.include?('ruby_memcheck') }
           full_reasons << 'Gemfile.lock (ruby_memcheck)'
         end
-      elsif f.start_with?("#{INCLUDE_DIR}/")
+      elsif INCLUDE_DIRS.any? { |d| f.start_with?("#{d}/") }
         users = header_users(f)
         users.each { |n| exts[n] << "#{f} (included)" }
         ignored << f if users.empty?
       elsif owner
         exts[owner] << f
-      elsif f.start_with?('ext/')
+      elsif EXT_ROOTS.any? { |r| f.start_with?("#{r}/") }
         ignored << f
-      elsif f.start_with?('lib/') && f.end_with?('.rb')
+      elsif (f.start_with?('lib/') || f.match?(%r{\Agems/[^/]+/lib/})) && f.end_with?('.rb')
         content = lib_change_text(f, base, to, synthetic, changes)
         mods = content.to_s.scan(/\b(Fast[A-Z]\w*)\b/).flatten.uniq & module_extensions.keys
         mods.each { |m| exts[module_extensions[m]] << "#{f} (#{m})" }

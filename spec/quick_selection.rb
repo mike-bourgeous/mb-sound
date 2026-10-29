@@ -39,7 +39,7 @@ module QuickSelection
     spec/lib/mb/sound/relation_fuzz_spec.rb
     spec/lib/mb/sound/session_fuzz_spec.rb
     spec/lib/mb/sound/graph_node/dsl_shadowing_spec.rb
-    spec/lib/mb/sound/ui/gem_boundary_spec.rb
+    spec/lib/mb/sound/ui/term_integration_spec.rb
     spec/lib/mb/sound/ui/overlay_guard_spec.rb
     spec/valgrind/memcheck_selection_spec.rb
   ].freeze

@@ -36,12 +36,20 @@ PATH
       csv (~> 3.3, >= 3.3.3)
       logger (~> 1.7.0)
       mb-math (>= 0.5.0.usegit)
+      mb-term (~> 0.1.0)
       mb-util (>= 0.1.29.usegit)
       midilib (~> 4.0.0)
       numo-narray-alt (~> 0.10.5)
       numo-pocketfft (~> 0.6.0)
       ostruct (~> 0.6.3)
       psych (~> 5.2.3)
+
+PATH
+  remote: gems/mb-term
+  specs:
+    mb-term (0.1.0)
+      prism
+      reline
 
 GEM
   remote: https://rubygems.org/
@@ -153,6 +161,7 @@ DEPENDENCIES
   irb (~> 1.16.0)
   mb-math!
   mb-sound!
+  mb-term!
   mb-util!
   numo-narray!
   pry (~> 0.16.0)

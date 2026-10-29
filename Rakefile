@@ -216,6 +216,13 @@ Rake::ExtensionTask.new 'mb-sound-fast_reverb' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+# mb-term's native grid (gems/mb-term; fast_ui's Grid subclasses it)
+Rake::ExtensionTask.new 'mb-term-fast_term' do |ext|
+  ext.name = 'fast_term'
+  ext.ext_dir = 'gems/mb-term/ext/mb/term/fast_term'
+  ext.lib_dir = 'gems/mb-term/lib/mb/term'
+end
+
 
 # Valgrind memcheck of the C extensions (`bundle exec rake memcheck`), using
 # ruby_memcheck, which runs rspec under Valgrind and filters out Ruby's own
@@ -293,12 +300,13 @@ begin
   # the value is used in this project's extensions, or in a library they
   # called (libm, libsamplerate, ...), before control returns to libruby.
   module MemcheckUndefFilter
-    EXT_DIR = File.join(__dir__, 'lib', '')
+    # (and the gems/ extensions: mb-term's fast_term)
+    EXT_DIRS = [File.join(__dir__, 'lib', ''), *Dir[File.join(__dir__, 'gems', '*', 'lib', '')]].freeze
 
     def skip?
       return super unless kind.start_with?('Uninit')
 
-      stack.frames.take_while { |f| !f.in_ruby? }.none? { |f| f.obj.to_s.start_with?(EXT_DIR) }
+      stack.frames.take_while { |f| !f.in_ruby? }.none? { |f| EXT_DIRS.any? { |d| f.obj.to_s.start_with?(d) } }
     end
   end
   RubyMemcheck::ValgrindError.prepend(MemcheckUndefFilter)
@@ -418,12 +426,28 @@ namespace :memcheck do
   end
 end
 
+# The specs of the gems in gems/ (mb-term: the terminal UI's generic
+# layers), each in its own rspec process from its own directory, so they run
+# without mb-sound loaded.  Returns true if they all pass.
+GEM_SPEC_DIRS = %w[gems/mb-term].freeze
+def run_gem_specs
+  GEM_SPEC_DIRS.all? do |dir|
+    puts "spec: #{dir}"
+    system('bundle', 'exec', 'rspec', chdir: File.join(__dir__, dir))
+  end
+end
+
 namespace :spec do
-  desc 'Run the specs in PARALLEL rspec processes (default: half the CPUs, capped by available memory), then list the slowest files and examples (SPECS="spec/lib ..." for a subset)'
+  desc "The specs of the gems in gems/ (mb-term), each in its own process without mb-sound (spec:parallel, spec:quick, and spec:full run them too)"
+  task :gems do
+    abort 'spec:gems: failures' unless run_gem_specs
+  end
+
+  desc 'Run the specs in PARALLEL rspec processes (default: half the CPUs, capped by available memory), then list the slowest files and examples (SPECS="spec/lib ..." for a subset; the gems/ specs too without SPECS)'
   task :parallel do
     require_relative 'spec/parallel_specs'
     ok = ParallelSpecs.run_default(patterns: ENV['SPECS'].to_s.split)
-    abort 'spec:parallel: failures' unless ok
+    abort 'spec:parallel: failures' unless ok & (ENV['SPECS'].to_s.empty? ? run_gem_specs : true) # (& runs the gems' specs either way)
   end
 
   desc 'The everyday subset: the 95% covering set, ALWAYS guards, and the specs of units changed since master-ai (spec/quick_selection.rb; QUICK_DRY=1 lists, BASE=ref)'
@@ -435,7 +459,7 @@ namespace :spec do
     next if ENV['QUICK_DRY'] == '1'
 
     ok = ParallelSpecs.run_default(patterns: sel.specs)
-    abort 'spec:quick: failures' unless ok
+    abort 'spec:quick: failures' unless ok & run_gem_specs # (a few seconds; & runs them either way)
   end
 
   namespace :quick do

@@ -10,6 +10,15 @@ na = Gem.loaded_specs['numo-narray-alt'] || Gem.loaded_specs['numo-narray']
 raise "Could not find the numo-narray Gem; try running with Bundler" if na.nil?
 raise 'Could not find narray.h' unless find_header('numo/narray.h', File.join(na.extension_dir, 'numo'))
 
+# mb-term's grid struct (mb_term_grid.h): FastUI::Grid subclasses its native
+# grid and composes plot canvases into the cells.  The installed gem's
+# headers, else the copy in this repository (gems/mb-term).
+term = Gem.loaded_specs['mb-term']
+term_include = [term && File.join(term.full_gem_path, 'ext/mb/term/include'), File.expand_path('../../../../gems/mb-term/ext/mb/term/include', __dir__)]
+  .compact.find { |d| File.file?(File.join(d, 'mb_term_grid.h')) }
+raise 'Could not find mb_term_grid.h (the mb-term gem)' unless term_include
+$INCFLAGS << " -I#{term_include}"
+
 # -ffp-contract=off: specs compare the kernels with their Ruby mirrors in
 # MB::Sound::Plot (Geometry.decimate_ruby, Raster#polyline_ruby,
 # Text::Surface#area_ruby, Text::Cells) for exact equality, so clang (the

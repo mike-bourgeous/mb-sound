@@ -32,6 +32,8 @@ jobs:
         run: bundle exec rake compile
       - name: Run tests
         run: bundle exec rspec
+      - name: Run the gems/ specs (mb-term, without mb-sound)
+        run: bundle exec rake spec:gems
 
   # Runs every bin/ script with --help and a short render
   # (spec/bin/script_smoke_spec.rb), which plain `rspec` skips because it
