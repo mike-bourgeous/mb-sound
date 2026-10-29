@@ -39,6 +39,7 @@ module MB
           check_seek_target(target)
           point = at || LaunchPoint::NONE
           time = start_time && !point.given? ? start_time.to_r : launch_time(point, [], default: :now)
+          prepare_form_seek(target)
           change(:seek, target, time, data: { to: target }) { |_t| apply_seek(target) }
         end
 
@@ -126,6 +127,19 @@ module MB
 
           seek_position(target)
           nil
+        end
+
+        # Works out a playing form's passes up to a position target here
+        # (the console's thread), so the seek's landing on the render thread
+        # finds them (Form::Playback#prepare_seek).
+        def prepare_form_seek(target)
+          pb = arrangement.playback
+          return unless pb && pb.started? && !pb.ended?
+          return pb.prepare_seek(target) if target.is_a?(Symbol) && (pb.form.sections.key?(target) || pb.form.labels.key?(target))
+          pos = target.is_a?(Symbol) ? markers.position(target) : seek_position(target)
+          pb.prepare_seek(pos) if pos
+        rescue ArgumentError
+          nil # (checked again when the seek lands)
         end
 
         # Moves the timeline to +target+ (the action of a :seek change).

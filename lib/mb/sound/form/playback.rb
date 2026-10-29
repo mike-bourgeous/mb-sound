@@ -89,6 +89,9 @@ module MB
           @gen = 0
           @end_at = nil # (#end_at: no section begins at or after it)
           @decision_offset = 0 # (see #decision_count)
+          @plan = nil # (see #plan)
+          @plan_meters = nil
+          @plan_lock = Mutex.new
           @length = nil # (the current pass's length and times)
           @times = nil
           @start_time = nil
@@ -268,6 +271,36 @@ module MB
           }
         end
 
+        # The form's passes for an uninterrupted run from its start (a
+        # Form::Plan, kept so later seeks reuse the passes worked out; made
+        # again when the meter map changes), or nil before #start.
+        def plan
+          return nil unless @start_time
+          meters = @transport.meters
+          @plan_lock.synchronize {
+            unless @plan && @plan_meters == meters
+              @plan = Plan.new(@form, seed: @seed, transport: @transport, start: @start_time)
+              @plan_meters = meters
+            end
+            @plan
+          }
+        end
+
+        # Works out the plan up to +target+ (a timeline position in whole
+        # notes, or a section only generate steps play) on the calling
+        # thread, so a seek there landing later (on the render thread)
+        # finds the passes computed (a seek hours into a generated piece
+        # walks thousands of passes: ~25 us each).  Session#seek calls it
+        # when a seek is issued.
+        def prepare_seek(target)
+          if target.is_a?(Symbol)
+            find_ahead(target) if @form.sections.key?(target) && first_play(target).nil?
+          else
+            plan&.at(target)
+          end
+          nil
+        end
+
         # How many passes ahead #seek_now looks for a section only a
         # generate step plays.
         PLAN_SEARCH = 10_000
@@ -284,7 +317,7 @@ module MB
           pos = pos.to_r
           @lock.synchronize {
             raise 'The form has ended' if @ended
-            plan = Plan.new(@form, seed: @seed, transport: @transport, start: @start_time)
+            plan = self.plan
             pass = plan.at(pos)
             unless pass
               drop_pending_pass
@@ -627,7 +660,7 @@ module MB
         # start) that next plays section +name+ after the current pass, and
         # the names played before it, or nil.
         def find_ahead(name)
-          plan = Plan.new(@form, seed: @seed, transport: @transport, start: @start_time)
+          plan = self.plan
           now = [@pass_start || @start_time, @transport.position].max
           from = 0
           from += 1 while (p = plan[from]) && p.start <= now && from < PLAN_SEARCH

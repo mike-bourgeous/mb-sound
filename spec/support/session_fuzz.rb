@@ -7,7 +7,8 @@
 #
 # - :runs: the render finishes without an error (800-frame buffers);
 #   steps include re-bgs of looped clips after one-shots and cue/launch
-#   sequences (omnibus15)
+#   sequences (omnibus15), and flows generated as they play from a
+#   (sometimes knob-steered) Markov chain over the scenes (generative-g4)
 # - :buffer_size: 367-frame buffers give the same mix within -80 dB of the
 #   peak ("ears win"), and the same length
 # - :plan: plans off gives the same mix, bit for bit (both at the default
@@ -232,6 +233,16 @@ module SessionFuzz
       lines << "at_bar(#{rng.rand(1..bars)}, beat: 2) { feed :#{pick(rng, names)}, :fx, -12.db }"
     end
     lines << "at_bar(#{rng.rand(1..bars)}, beat: 3) { master { |m| m.softclip(0, 0.9) } }" if rng.rand < 0.25
+    # (generative-g4) a flow that writes itself as it plays: a Markov chain
+    # over the scenes (a weight sometimes the knob :busy, read at each
+    # commit point), lengths drawn per occurrence, from a launch point
+    # (drawn last, so every seed keeps the song it made before)
+    if rng.rand < 0.3
+      weight = -> { rng.rand < 0.25 ? 'knob(:busy)' : rng.rand(1..3).to_s }
+      chain = scenes.map { |a| "#{a}: { #{scenes.map { |b| "#{b}: #{weight.()}" }.join(', ')} }" }.join(', ')
+      lengths = scenes.map { |a| "#{a}: #{pick(rng, ['1', '1..2', '[1, 2.beats]', '2.beats'])}" }.join(', ')
+      lines << "at_bar(#{rng.rand(1..bars)}#{rng.rand < 0.5 ? ', beat: 2' : ''}) { flow(seed: #{rng.rand(1..99)}, on: :beat) { generate markov(#{chain}, seed: #{rng.rand(1..99)}), #{lengths} } }"
+    end
     Song.new(header: header, lines: lines, bars: bars)
   end
 
