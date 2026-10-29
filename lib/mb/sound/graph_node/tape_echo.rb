@@ -43,10 +43,11 @@ module MB
         # costs less than :echo while the wobbling delay time moves.
         COMPENSATE = :dc
 
-        # Delay time smoothing: off, since #delay's default smoothing starts
-        # a node delay time at 0 and glides it up (measured: a 0.375 s
-        # wobbled time read 1200-1600 samples in the first buffers, so the
-        # tail ended before the first echo); the wobble is smooth anyway.
+        # Delay time smoothing: off; the wobble is smooth anyway.  (Chosen
+        # when #delay's default smoothing started a node delay time at 0 and
+        # glided it up, until omnibus16: a 0.375 s wobbled time read
+        # 1200-1600 samples in the first buffers, so the tail ended before
+        # the first echo.)
         SMOOTH = false
 
         preset_family :delay, kind: :effect, label: 'tape echo preset', keys: KEYS,
