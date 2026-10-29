@@ -15,7 +15,7 @@ module MB
       #     plan.frames[:scope].inner   # where the scope draws
       #     Chrome.paint(grid, plan, glyphs: :unicode)
       module Chrome
-        # A pane to frame: +name+, its +rect+ (Viewports::Rect), +title+
+        # A pane to frame: +name+, its +rect+ (MB::Term::Viewports::Rect), +title+
         # (text, or nil), +number+ (NAV's number, or nil), +focused+,
         # +jump+ (its NAV jump letter, shown beside the number in NAV), and
         # +note+ (text after the number, e.g. its rate with NAV f).
@@ -73,7 +73,7 @@ module MB
               else
                 :none
               end
-            inner = at == :inside ? Viewports::Rect.new(r.x, r.y + 1, r.w, r.h - 1) : r
+            inner = at == :inside ? MB::Term::Viewports::Rect.new(r.x, r.y + 1, r.w, r.h - 1) : r
             [it.name, Frame.new(name: it.name, rect: r, inner: inner, title: it.title, at: at, number: it.number, focused: it.focused, jump: it.jump, note: it.note)]
           end
           Plan.new(gaps: gaps, w: w, h: h, frames: frames.freeze)
@@ -95,9 +95,9 @@ module MB
         # shows them; otherwise dim).  +focus_edges+ colors the rules around
         # the focused pane in the key color.
         def paint(grid, plan, glyphs: :unicode, nav: false, focus_edges: true, x0: 0, y0: 0)
-          set = Themes.glyphs(glyphs)
-          dim = Plot::Text::Cells.pack(Theme.rgb(:dim))
-          key = Plot::Text::Cells.pack(Theme.rgb(:key))
+          set = MB::Term::Themes.glyphs(glyphs)
+          dim = MB::Term::Cells.pack(Theme.rgb(:dim))
+          key = MB::Term::Cells.pack(Theme.rgb(:key))
           focus = focus_edges ? plan.frames.values.find(&:focused)&.rect : nil
           if (gaps = plan.gaps)
             joins = JOINS[glyphs == :ascii ? :ascii : :unicode]
@@ -132,8 +132,8 @@ module MB
           plan.overlays.each do |f|
             r = f.rect
             b = badge(f, nav: true, w: r.w)
-            grid.put_run(x0 + r.x + [r.w - b.length, 0].max, y0 + r.y, b[0, r.w], Plot::Text::Cells.pack(Theme.rgb(f.focused ? :key : :queued)), nil,
-                         Plot::Text::Cells::REVERSE | Plot::Text::Cells::BOLD)
+            grid.put_run(x0 + r.x + [r.w - b.length, 0].max, y0 + r.y, b[0, r.w], MB::Term::Cells.pack(Theme.rgb(f.focused ? :key : :queued)), nil,
+                         MB::Term::Cells::REVERSE | MB::Term::Cells::BOLD)
           end
         end
 
@@ -168,7 +168,7 @@ module MB
             return if room < 3
             t = " #{f.title.to_s.upcase[0, room - 1]}… "
           end
-          grid.put_run(x0 + r.x + 1, y, t, Plot::Text::Cells.pack(Theme.rgb(f.focused ? :key : :title)), nil, Plot::Text::Cells::BOLD)
+          grid.put_run(x0 + r.x + 1, y, t, MB::Term::Cells.pack(Theme.rgb(f.focused ? :key : :title)), nil, MB::Term::Cells::BOLD)
         end
 
         # The title row inside the pane ("TRACKS" at the left, as panes drew
@@ -187,22 +187,22 @@ module MB
           end
           t = f.title.to_s.upcase
           t = right >= 3 ? "#{t[0, right - 2]}…" : '' if t.length + 1 > right
-          grid.put_run(x0 + r.x, y, t, Plot::Text::Cells.pack(Theme.rgb(f.focused ? :key : :title)), nil, Plot::Text::Cells::BOLD) unless t.empty?
+          grid.put_run(x0 + r.x, y, t, MB::Term::Cells.pack(Theme.rgb(f.focused ? :key : :title)), nil, MB::Term::Cells::BOLD) unless t.empty?
         end
 
         def put_badge(grid, x, y, b, f, nav)
           if nav
-            grid.put_run(x, y, b, Plot::Text::Cells.pack(Theme.rgb(f.focused ? :key : :queued)), nil, Plot::Text::Cells::REVERSE | Plot::Text::Cells::BOLD)
+            grid.put_run(x, y, b, MB::Term::Cells.pack(Theme.rgb(f.focused ? :key : :queued)), nil, MB::Term::Cells::REVERSE | MB::Term::Cells::BOLD)
           else
-            grid.put_run(x, y, b, Plot::Text::Cells.pack(Theme.rgb(f.focused ? :key : :dim)), nil, 0)
+            grid.put_run(x, y, b, MB::Term::Cells.pack(Theme.rgb(f.focused ? :key : :dim)), nil, 0)
           end
         end
 
         # A full-width rule (a band's rule toward the console, item 3) on row
         # +y+ of +grid+, +w+ cells from +x+.
         def hrule(grid, y, w, glyphs: :unicode, x: 0)
-          g = Themes.glyphs(glyphs)[:hrule] || (glyphs == :ascii ? '-' : '─')
-          grid.put_run(x, y, g * w, Plot::Text::Cells.pack(Theme.rgb(:dim)), nil, 0)
+          g = MB::Term::Themes.glyphs(glyphs)[:hrule] || (glyphs == :ascii ? '-' : '─')
+          grid.put_run(x, y, g * w, MB::Term::Cells.pack(Theme.rgb(:dim)), nil, 0)
         end
       end
     end

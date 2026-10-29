@@ -9,7 +9,7 @@ RSpec.describe('bin/sound.rb switching between ui :tiles and the band', :aggrega
   it 'keeps the REPL history and the prompt through tiles -> band -> tiles -> off' do
     require 'pty'
     rows, cols = 30, 110
-    vt = MB::Sound::UI::VT.new(rows, cols, scrollback: 200)
+    vt = MB::Term::VT.new(rows, cols, scrollback: 200)
     lock = Mutex.new
     env = { 'MB_SOUND_HELP_DIR' => tmp_path('help'), 'COLUMNS' => cols.to_s, 'LINES' => rows.to_s, 'OUTPUT_TYPE' => 'null' }
     r, w, pid = PTY.spawn(env, 'bin/sound.rb')

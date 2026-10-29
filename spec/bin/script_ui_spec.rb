@@ -4,10 +4,10 @@ require 'pty'
 # console and stays on its final meters until q; a synth starts with the
 # screen's keyboard playing it (no MIDI device in the container).
 RSpec.describe('bin/ scripts with --ui', :aggregate_failures) do
-  # Runs +args+ in a 40x140 pty read by a UI::VT.  Yields [text, writer,
+  # Runs +args+ in a 40x140 pty read by a MB::Term::VT.  Yields [text, writer,
   # wait]; returns the exit status.
   def in_pty(*args)
-    vt = MB::Sound::UI::VT.new(40, 140, scrollback: 0)
+    vt = MB::Term::VT.new(40, 140, scrollback: 0)
     lock = Mutex.new
     r, w, pid = PTY.spawn({ 'OUTPUT_TYPE' => 'null', 'COLUMNS' => '140', 'LINES' => '40' }, *args)
     w.winsize = [40, 140]

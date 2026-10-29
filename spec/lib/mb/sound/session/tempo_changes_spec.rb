@@ -280,12 +280,10 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
       lines = {
         0 => [
           "track(:x, q: 1) { |c| c.number * c.gate * 0.002 }", # (no tones: their phases differ by ~1e-12 between buffer sizes, see Take::Replay)
+          'track :pad, 0.05.constant', # (clipless, started by :two after the seek's target: omnibus16)
           'a = seq(C4, E4, G4).n16.loop',
           'scene :one, x: a',
-          # (no clipless track started before the seek: master-ai resumes one at the
-          # start of the buffer holding its start after a seek back, not on its
-          # frame; recorded in tempo-maps-1's report)
-          'scene :two, x: a.transpose(5), bpm: [150, over: 2]',
+          'scene :two, x: a.transpose(5), pad: :on, bpm: [150, over: 2]',
           'go :one, at: :now',
         ],
         37 => ['bpm 90, over: 3'],

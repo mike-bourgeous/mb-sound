@@ -16,7 +16,7 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
   end
 
   def draw(name, snap, state = { title_in_rule: true }, w: 60, h: 12)
-    grid = MB::Sound::Plot::Text::Cells.new(w, h)
+    grid = MB::Term::Cells.new(w, h)
     ui.panes.fetch(name).draw(ui::Canvas.new(grid, 0, 0, w, h), snap, state)
     grid.to_text(:none).lines.map(&:rstrip)
   end
@@ -147,8 +147,8 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
 
       # Tab and Shift-Tab step through the nodes like n and N
       km = ui::Panes::Inspector.mode_keymap
-      expect(km[ui::Input::Key.new(key: :tab, mods: [])]).to eq(km[ui::Input::Key.new(key: 'n', mods: [])])
-      expect(km[ui::Input::Key.new(key: :tab, mods: [:shift])]).to eq(km[ui::Input::Key.new(key: 'N', mods: [])])
+      expect(km[MB::Term::Input::Key.new(key: :tab, mods: [])]).to eq(km[MB::Term::Input::Key.new(key: 'n', mods: [])])
+      expect(km[MB::Term::Input::Key.new(key: :tab, mods: [:shift])]).to eq(km[MB::Term::Input::Key.new(key: 'N', mods: [])])
     end
 
     it 'steps stepped knobs one step at a time' do

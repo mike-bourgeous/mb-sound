@@ -64,6 +64,7 @@ module MB
           @ring_out = ring_out
           @smooth_limit = nil
           @filter = nil
+          @seed_node = false # (see #reset_delay)
 
           self.delay = delay
 
@@ -129,15 +130,16 @@ module MB
 
         # Immediately sets the smoothed internal delay to +samples+, or to the
         # last value set by #delay= or #delay_samples=.  Without +samples+,
-        # this has no effect if the delay was set to a signal node with a
-        # :sample method (see GraphNode and #delay=).
+        # for a delay set to a signal node, the smoothed delay starts at the
+        # node's next value (the first sample of the next buffer; since
+        # omnibus16: a node time used to glide up from 0 at the smoothing
+        # rate, 0.5 samples per sample, so a 0.3 s delay took 0.6 s to
+        # arrive).
         def reset_delay(samples = nil)
-          # TODO: Support resetting with a signal node without consuming a
-          # sample from the signal node?  Maybe set a flag that triggers a
-          # reset in #sample?
           samples ||= @time.constant_samples(@sample_rate) unless @time.node?
           # A tempo-synced delay starts at its time at the current tempo
           samples ||= (tempo = @time.tempo_node) && tempo.value * @sample_rate
+          @seed_node = samples.nil? && @time.node?
           @filter.reset(samples) if samples && @filter
         end
 
@@ -482,6 +484,13 @@ module MB
             # multiple inputs
             delays = @time.samples(count, @sample_rate)
             return :end if delays.nil?
+
+            if @seed_node
+              # The smoothed delay starts at the node's first value (see
+              # #reset_delay)
+              @seed_node = false
+              @filter.reset(delays[0]) if @smoothing && count > 0
+            end
 
             if settled
               min, max = MB::Sound::FastArithmetic.min_max(delays, @minmax) || delays.minmax

@@ -187,6 +187,35 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
       end
     end
 
+    # (omnibus16: a node time glided up from 0 at the smoothing rate, 0.5
+    # samples per sample by default, so a 0.3 s delay(lfo) took 0.6 s to
+    # arrive)
+    {
+      'a constant node' => -> { 0.02.constant },
+      'a node in samples' => -> { 960.constant.samples },
+      'an LFO' => -> { 1.hz.lfo.at(0.0225..0.023) }, # (from its middle, rising)
+      'a stepped node' => -> { MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(48000).fill(0.03).tap { |d| d[0...4800] = 0.02 }]).with_buffer(800).resample(mode: :libsamplerate_fastest) },
+    }.each do |name, time|
+      it "starts a delay time from #{name} at the node's first value with the default smoothing" do
+        # (samples count at the running rate: 960 samples are 0.01 s at 2x)
+        [1, *slow_tier(name.include?('samples') ? [] : [2], keep: 0)].each do |os|
+          d = glide(time.call, os, smoothing: true)
+          # (the delay line's first 0.02-0.0225 s are its starting silence)
+          start = d[1200]
+          expect(d[1200..4000].to_a).to all(be_within(2e-4).of(0.02).or(be_within(3e-4).of(0.0227))), "at #{os}x"
+          expect(start).to be_within(2e-4).of(0.02).or(be_within(2e-4).of(0.02265)), "at #{os}x"
+        end
+      end
+    end
+
+    it 'still glides a node time that jumps after its first value' do
+      step = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(48000).fill(0.03).tap { |d| d[0...4800] = 0.02 }]).with_buffer(800).resample(mode: :libsamplerate_fastest)
+      d = glide(step, 1, smoothing: 0.1)
+      expect(d[1000]).to be_within(2e-4).of(0.02)
+      expect(d[4800 + 2400]).to be_within(2e-4).of(0.025) # 0.1 s/s: half way after 0.05 s
+      expect(d[4800 + 9600]).to be_within(2e-4).of(0.03)
+    end
+
     it 'starts a numeric delay at its time when oversampled' do
       [1, 2, 4].each do |os|
         d = glide(0.02, os, smoothing: 0.01)

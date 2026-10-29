@@ -414,8 +414,9 @@ module MB
           # last point #pitch_track evaluated (1.0 before or without sustain).
           attr_reader :sustain_ratio
 
-          def initialize(ops:, inputs:, params:, rings:, histories:, output:, history:, title: nil, sustain: nil)
+          def initialize(ops:, inputs:, params:, rings:, histories:, output:, history:, title: nil, sustain: nil, echo: false)
             @sustain = sustain
+            @echo = echo
             @sustain_ratio = 1.0
             @ops = ops.freeze
             @inputs = inputs.freeze
@@ -712,6 +713,24 @@ module MB
             @lat_value = l
           end
 
+          # SVF types that count as wires in an echo loop's response at the
+          # pitch (FeedbackLoop's `compensate: :echo`, which #delay's insert
+          # loops use; omnibus16): filters without gain at DC.  Their phase at
+          # an echo's 1 / T (a few Hz, far below their passband) leads by up
+          # to 180 degrees, which put repeats up to half an echo off; the
+          # repeats' energy is in the passband, where that phase is small
+          # (#latency's moments count them as no latency, as here).  Other
+          # filters keep their phase at 1 / T, so a short #delay comb through
+          # a lowpass stays in tune as in the :pitch mode.
+          ECHO_WIRES = [:highpass, :bandpass, :bandpass_skirt].freeze
+
+          # Four-pole modes without gain at DC, wires in an echo loop's
+          # response like ECHO_WIRES.
+          ECHO_WIRE_MODES = [:hp2, :hp4, :bp2, :bp4].freeze
+
+          # True for an echo loop (see ECHO_WIRES).
+          attr_reader :echo
+
           # Samples between the points where #pitch_track evaluates the
           # loop's response at the pitch (it ramps linearly between points).
           PITCH_STEP = 16
@@ -872,6 +891,9 @@ module MB
               when :svf
                 op = e[3]
                 [value_of(op.cutoff, values), value_of(op.quality, values), op.gain.nil? ? 1.0 : value_of(op.gain, values)].map(&pts)
+              when :four_pole
+                op = e[3]
+                [value_of(op.cutoff, values), value_of(op.resonance, values)].map(&pts)
               end
             }
             t = pts.call(t)
@@ -969,6 +991,10 @@ module MB
                   else
                     cr = 1.0; ci = 0.0
                   end
+                when :four_pole
+                  # (in both passes: sustain makes up for SVFs only)
+                  fc, res = params[k]
+                  cr, ci = four_pole_point(e[3].filter, at.call(fc, i), at.call(res, i), w)
                 end
                 ha[k] = ha[x]; hb[k] = hb[x]
                 ar[k] = ar[x] * cr - ai[x] * ci; ai[k] = ar[x] * ci + ai[x] * cr
@@ -1085,6 +1111,7 @@ module MB
             return true if uneven_filters?(list)
 
             list.each_with_index.any? { |e, k|
+              next true if e[0] == :four_pole # (a resonant peak; no boosts with a four-pole on the loop)
               next false unless e[0] == :svf
 
               e[3].filter.filter_type != :lowpass || at.call(params[k][1], i) > 0.7072
@@ -1180,10 +1207,18 @@ module MB
                       x && op.shaper.antialias ? emit.call([:half, nil, x]) : x
                     when Op::Svf
                       x = build.call(op.a)
-                      x && emit.call([:svf, nil, x, op])
+                      if @echo && ECHO_WIRES.include?(op.filter.filter_type)
+                        x # (an echo loop's low cut: see ECHO_WIRES)
+                      else
+                        x && emit.call([:svf, nil, x, op])
+                      end
                     when Plan::Op::FourPole
-                      # (counted as a wire: no latency estimate yet)
-                      build.call(op.a)
+                      x = build.call(op.a)
+                      if @echo && ECHO_WIRE_MODES.include?(op.filter.mode)
+                        x # (an echo loop's low cut or band: see ECHO_WIRES)
+                      else
+                        x && emit.call([:four_pole, nil, x, op])
+                      end
                     end
                 memo[v] = r
               end
@@ -1426,7 +1461,7 @@ module MB
                   ma = moments(op.a, values, memo)
                   svf_latency(op, ma, values)
                 when Plan::Op::FourPole
-                  moments(op.a, values, memo) # (a wire for now)
+                  four_pole_latency(op, moments(op.a, values, memo), values)
                 else
                   ZERO
                 end
@@ -1454,6 +1489,81 @@ module MB
             g = fc.is_a?(Numo::NArray) ? Numo::NMath.tan(Numo::DFloat.cast(fc).clip(1.0, rate * 0.49) * (Math::PI / rate)) : Math.tan(fc.to_f.clamp(1.0, rate * 0.49) * Math::PI / rate)
             q = q.is_a?(Numo::NArray) ? Numo::DFloat.cast(q).clip(1e-10, Float::INFINITY) : [q.to_f, 1e-10].max
             shift(m, (g * q * 2.0).then { |x| x.is_a?(Numo::NArray) ? factor / x : factor / x })
+          end
+
+          # A four-pole's or diode ladder's group delay at DC (omnibus16;
+          # #four_pole_dc_delay) added to moments +m+, per sample where the
+          # cutoff or resonance moves.  Modes without gain at DC (highpass and
+          # bandpass taps) count as no latency, like those SVFs.
+          def four_pole_latency(op, m, values)
+            return m if m.equal?(ZERO)
+
+            fc = value_of(op.cutoff, values)
+            res = value_of(op.resonance, values)
+            f = op.filter
+            return m unless f.diode? || f.instance_variable_get(:@mix).sum != 0
+
+            if fc.is_a?(Numo::NArray) || res.is_a?(Numo::NArray)
+              n = [fc, res].grep(Numo::NArray).map(&:length).min
+              d = Numo::DFloat.new(n).fill(0.0)
+              n.times { |i| d[i] = four_pole_dc_delay(f, fc.is_a?(Numo::NArray) ? fc[i] : fc, res.is_a?(Numo::NArray) ? res[i] : res) }
+              shift(m, d)
+            else
+              shift(m, four_pole_dc_delay(f, fc, res))
+            end
+          end
+
+          # A four-pole's group delay at DC in samples (loop_pitch.c's
+          # pc_fp_dc_delay): a TPT stage's 1 / (2 g), the output tap's
+          # stages weighted by its mix, less the resonance loop's share
+          # (2 k / (g (1 + k)) around four stages: lp4 2 / (g (1 + k)));
+          # the diode ladder's D(s) = s^4 + 7 s^3 + 15 s^2 + 10 s + 1 gives
+          # 5 / (g (1 + k)).  0 for taps without DC gain.
+          def four_pole_dc_delay(f, fc, res)
+            g, k, = f.kernel_coefficients(fc.to_f, res.to_f)
+            return 5.0 / (g * (1.0 + k)) if f.diode?
+
+            m0, m1, m2, m3, m4 = f.instance_variable_get(:@mix)
+            sm = m0 + m1 + m2 + m3 + m4
+            return 0.0 if sm == 0
+
+            (m1 + 2.0 * m2 + 3.0 * m3 + 4.0 * m4) / (2.0 * g * sm) - 2.0 * k / (g * (1.0 + k))
+          end
+
+          # A four-pole's or diode ladder's linear response (real and
+          # imaginary parts) at +w+ radians per sample for cutoff +fc+ and
+          # resonance +res+ (the kernels' coefficients; the small-signal
+          # response at any drive; loop_pitch.c's pc_fp_point, the same
+          # operations).  With s = tan(w / 2) / g, a TPT stage is 1 / (1 + j
+          # s), the cascade in_gain * mix(h) / (1 + k h^4); the diode ladder
+          # in_gain / (D(j s) + k).
+          def four_pole_point(f, fc, res, w)
+            g, k, in_gain = f.kernel_coefficients(fc.to_f, res.to_f)
+            s = Math.tan(w * 0.5) / g
+            if f.diode?
+              s2 = s * s
+              dr = (s2 - 15.0) * s2 + 1.0 + k
+              di = (10.0 - 7.0 * s2) * s
+              den = dr * dr + di * di
+              return [in_gain * dr / den, -in_gain * di / den]
+            end
+
+            m0, m1, m2, m3, m4 = f.instance_variable_get(:@mix)
+            d = 1.0 + s * s
+            h1r = 1.0 / d
+            h1i = -s / d
+            h2r = h1r * h1r - h1i * h1i
+            h2i = h1r * h1i + h1i * h1r
+            h3r = h2r * h1r - h2i * h1i
+            h3i = h2r * h1i + h2i * h1r
+            h4r = h3r * h1r - h3i * h1i
+            h4i = h3r * h1i + h3i * h1r
+            nr = m0 + m1 * h1r + m2 * h2r + m3 * h3r + m4 * h4r
+            ni = m1 * h1i + m2 * h2i + m3 * h3i + m4 * h4i
+            dr = 1.0 + k * h4r
+            di = k * h4i
+            den = dr * dr + di * di
+            [in_gain * (nr * dr + ni * di) / den, in_gain * (ni * dr - nr * di) / den]
           end
 
           # The value of +v+ for the latency estimate: a Const, a boundary

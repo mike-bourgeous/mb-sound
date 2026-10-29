@@ -102,7 +102,7 @@ module MB
           private
 
           def new_cells
-            @native ? NativeCells.new(@width, @height) : Cells.new(@width, @height)
+            @native ? NativeCells.new(@width, @height) : MB::Term::Cells.new(@width, @height)
           end
 
           # Lays out (or reuses the layout) and paints the marks into @cells
@@ -153,9 +153,8 @@ module MB
           end
         end
 
-        # The cell grid and SGR encoding live in the mb-term gem (MB::Term::Cells,
-        # the Ruby grid; MB::Term::ANSI, SGR color codes).
-        Cells = MB::Term::Cells
+        # (The cell grid and SGR encoding live in the mb-term gem:
+        # MB::Term::Cells, the Ruby grid; MB::Term::ANSI, SGR color codes.)
 
         # Cells in C with Cells' interface: mb-term's native grid
         # (MB::Term::FastTerm::Grid, NativeMethods) plus MB::Sound::FastUI::Grid's
@@ -166,8 +165,6 @@ module MB
 
         # The adapter: mb-term grids made with MB::Term::Grid.new are these.
         MB::Term::Grid.native = NativeCells
-
-        ANSI = MB::Term::ANSI
 
         # The drawing surface for marks (see Mark): a Raster of line dots,
         # plus a half-block image layer for heatmaps.
@@ -480,7 +477,7 @@ module MB
           # Turns the surface's dots into characters in the plot area
           def compose(surface, px, py, pw, ph)
             if @cells.is_a?(NativeCells) && !surface.image_ids
-              colors = Numo::Int32.cast(surface.raster.colors.map { |c| c ? Cells.pack(c) : -1 })
+              colors = Numo::Int32.cast(surface.raster.colors.map { |c| c ? MB::Term::Cells.pack(c) : -1 })
               @cells.compose(surface.raster.dots, Canvas::KINDS.fetch(@look.canvas), @cw, @ch, px, py, pw, ph,
                 surface.priorities, colors, Canvas::TABLES.fetch(@look.canvas))
               return
@@ -533,7 +530,7 @@ module MB
                 end
                 next if ch == ' ' && b.nil?
 
-                @cells.put(row0 + c, ch, f, b, rr[c] == 1 ? Cells::REVERSE : 0)
+                @cells.put(row0 + c, ch, f, b, rr[c] == 1 ? MB::Term::Cells::REVERSE : 0)
               end
             end
           end

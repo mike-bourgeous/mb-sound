@@ -1,4 +1,4 @@
-require_relative 'term_aliases'
+require 'mb/term'
 
 module MB
   module Sound
@@ -69,7 +69,7 @@ module MB
         module ClassMethods
           # Declares (or extends) the kind's keymap.
           def keys(&block)
-            @keymap ||= Input::Keymap.new((name || 'pane').split('::').last.downcase.to_sym)
+            @keymap ||= MB::Term::Input::Keymap.new((name || 'pane').split('::').last.downcase.to_sym)
             @keymap.instance_exec(&block) if block
             @keymap
           end
@@ -82,7 +82,7 @@ module MB
           # Declares (or extends) the kind's mode keymap: the keys of its
           # own mode (NAV Enter enters it, Esc leaves).
           def mode_keys(&block)
-            @mode_keymap ||= Input::Keymap.new(:"#{(name || 'pane').split('::').last.downcase}_mode")
+            @mode_keymap ||= MB::Term::Input::Keymap.new(:"#{(name || 'pane').split('::').last.downcase}_mode")
             @mode_keymap.instance_exec(&block) if block
             @mode_keymap
           end

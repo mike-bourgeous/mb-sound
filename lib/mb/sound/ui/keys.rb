@@ -6,7 +6,7 @@ module MB
       # (the band, no UI), in one place.  The `?` overlay, `help :ui`
       # (Tiles::KEY_HELP), and the specs read it, so they can't drift.
       #
-      # Keymaps: Input::Router::NAV (the Router's own), NAV_EXTRA
+      # Keymaps: MB::Term::Input::Router::NAV (the Router's own), NAV_EXTRA
       # (mb-sound's NAV keys), Keyboard::KEYMAP (KEYS mode), the REPL's
       # direct keys (REPL_DEFAULTS, minus what the user's inputrc binds,
       # plus `ui.bind`), and doc lines for keys the Router reads itself.
@@ -15,7 +15,7 @@ module MB
       #     ui.bind [:f5], :zoom, mode: :nav
       #     ui.unbind ['k', :ctrl]
       module Keys
-        Keymap = Input::Keymap
+        Keymap = MB::Term::Input::Keymap
 
         # NAV keys of mb-sound's own panes (after Router::NAV).
         NAV_EXTRA = Keymap.new(:tiles) do
@@ -47,7 +47,7 @@ module MB
         # Letters a jump may not take: every key NAV binds (Router::NAV,
         # NAV_EXTRA but jumps; Ctrl-W reads the same keys once).
         def self.reserved_letters
-          maps = [Input::Router::NAV, NAV_EXTRA]
+          maps = [MB::Term::Input::Router::NAV, NAV_EXTRA]
           maps.flat_map { |m| m.entries.reject { |b| b.action == :jump }.map(&:chord) }.select { |k, mods| k.is_a?(String) && mods.empty? }.map(&:first).uniq.sort
         end
 
@@ -64,7 +64,7 @@ module MB
         end
 
         # Direct REPL keys (scrolling without NAV), each taken only when
-        # the user's inputrc doesn't bind it (Input::RelineKeys.user_bound?).
+        # the user's inputrc doesn't bind it (MB::Term::Input::RelineKeys.user_bound?).
         REPL_DEFAULTS = Keymap.new(:repl) do
           group 'REPL'
           on [:page_up, :alt], :scroll, :page_up, help: 'scroll the REPL back, forward (typing: back to live)'
@@ -184,12 +184,12 @@ module MB
           # Returns a note String.
           def bind(key, action, *args, mode: :repl, help: nil)
             map = user.fetch(mode) { raise ArgumentError, "ui.bind modes are :repl and :nav (got #{mode.inspect})" }
-            k = key.is_a?(Array) ? Input::Key.of(*key) : Input::Key.of(key)
-            raise ArgumentError, "#{Keymap.chord_name(k.chord)} is the NAV key; it stays" if k.chord == Input::Router::NAV_KEY.chord
+            k = key.is_a?(Array) ? MB::Term::Input::Key.of(*key) : MB::Term::Input::Key.of(key)
+            raise ArgumentError, "#{Keymap.chord_name(k.chord)} is the NAV key; it stays" if k.chord == MB::Term::Input::Router::NAV_KEY.chord
             map.on(key.is_a?(Array) && key.length == 1 ? key[0] : key, action, *args, help: help || action.to_s.tr('_', ' '))
             rebuild
             note = "#{Keymap.chord_name(k.chord)} -> #{action}#{args.empty? ? '' : " #{args.map(&:inspect).join(', ')}"} (#{mode})"
-            note += '; your inputrc binds it too, the UI takes it in the tiles' if mode == :repl && Input::RelineKeys.user_bound?(k)
+            note += '; your inputrc binds it too, the UI takes it in the tiles' if mode == :repl && MB::Term::Input::RelineKeys.user_bound?(k)
             note
           end
 
@@ -216,7 +216,7 @@ module MB
           def groups(mode)
             case mode
             when :repl then merge(repl_keymap.help_groups, REPL_DOCS.help_groups)
-            when :nav then merge(Input::Router::NAV.help_groups, NAV_EXTRA.help_groups, user[:nav].help_groups)
+            when :nav then merge(MB::Term::Input::Router::NAV.help_groups, NAV_EXTRA.help_groups, user[:nav].help_groups)
             when :once then ONCE_DOCS.help_groups
             when :grab then Keyboard::KEYMAP.help_groups
             when :step then STEP_DOCS.help_groups
@@ -246,8 +246,8 @@ module MB
             map = Keymap.new(:repl) { group 'REPL' }
             @skipped = []
             REPL_DEFAULTS.entries.each do |b|
-              key = Input::Key.of(b.chord[0], *b.chord[1])
-              taken = config == :default ? Input::RelineKeys.user_bound?(key) : Input::RelineKeys.user_bound?(key, config: config)
+              key = MB::Term::Input::Key.of(b.chord[0], *b.chord[1])
+              taken = config == :default ? MB::Term::Input::RelineKeys.user_bound?(key) : MB::Term::Input::RelineKeys.user_bound?(key, config: config)
               if taken
                 @skipped << b
               else

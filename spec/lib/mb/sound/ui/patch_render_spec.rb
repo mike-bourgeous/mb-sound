@@ -366,7 +366,7 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
 
   describe 'the pane' do
     def draw(snap, state, w: 60, h: 10)
-      grid = MB::Sound::Plot::Text::Cells.new(w, h)
+      grid = MB::Term::Cells.new(w, h)
       ui.panes.fetch(:render).draw(ui::Canvas.new(grid, 0, 0, w, h), snap, state)
       grid.to_text(:none).lines.map(&:rstrip)
     end

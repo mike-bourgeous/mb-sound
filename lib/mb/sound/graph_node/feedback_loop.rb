@@ -50,6 +50,13 @@ module MB
       # Program#pitch_latency).  `compensate: :dc` uses the group delay at
       # DC instead (exact for echo centers of mass, a few cents flat for
       # strings with a lowpass near the pitch; per sample when inputs move).
+      # `compensate: :echo` (#delay's insert loops; omnibus16) is :pitch
+      # with highpasses and bandpasses counted as wires: at an echo's 1 / t,
+      # a few Hz, their phase leads by up to 180 degrees, which put repeats
+      # up to half an echo off; their echoes land as with :dc (within about
+      # 15 samples a pass, measured over low cuts, bands, and bandpasses),
+      # while a short comb through a lowpass stays tuned as with :pitch (a
+      # comb through a DC blocker detunes: tune those with :pitch).
       #
       # == Sustain (on by default)
       #
@@ -187,8 +194,9 @@ module MB
           @compensate = case compensate
                         when true, :pitch then :pitch
                         when :dc then :dc
+                        when :echo then :echo
                         when false, nil then false
-                        else raise ArgumentError, "compensate: must be true (:pitch), :dc, or false (got #{compensate.inspect})"
+                        else raise ArgumentError, "compensate: must be true (:pitch), :echo, :dc, or false (got #{compensate.inspect})"
                         end
           @sustain = case sustain
                      when true, :pitch then :pitch
@@ -394,7 +402,7 @@ module MB
           end
 
           # The latency and the sustain shelf at the pitch
-          track = pitch_track(n) if @compensate == :pitch || @program.sustain
+          track = pitch_track(n) if @compensate == :pitch || @compensate == :echo || @program.sustain
           set_sustain(track, n) if @program.sustain
 
           if (comp = @program.compensated)
@@ -792,7 +800,8 @@ module MB
 
             @program = Plan::Loop::Program.new(
               ops: b.ops, inputs: b.inputs, params: b.params, rings: rings, histories: b.histories,
-              output: @output, history: @history, title: Plan.node_label(@loop), sustain: sustain
+              output: @output, history: @history, title: Plan.node_label(@loop), sustain: sustain,
+              echo: @compensate == :echo
             )
             @program.lower
           end

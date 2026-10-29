@@ -34,10 +34,20 @@ RSpec.describe('session fuzzing') do
   it 'generates valid songs that use every kind of command' do
     songs = (1..40).map { |s| SessionFuzz.generate(Random.new(s)).code }
     all = songs.join("\n")
-    %w[track( scene go swap stop mute unmute solo turn tween .freq tr808( tr909( launch tweak meter L.inst. :dnb_sub bus( feed master flow( markov(].each do |word|
+    %w[track( scene go swap stop mute unmute solo turn tween .freq tr808( tr909( launch tweak meter L.inst. :dnb_sub bus( feed master flow( markov( seek].each do |word|
       expect(all).to include(word)
     end
     songs.each { |code| expect { Prism.parse(code).errors.then { |e| raise e.map(&:message).join(', ') unless e.empty? } }.not_to raise_error }
+  end
+
+  # The seeds that found the followed tempo LFO's end bar (omnibus16), as
+  # generated today (their songs gain later generation steps' lines)
+  it 'renders seeds 52, 82, and 127 to the same end bar at 367 and 800 frames', render_budget: { seconds: 120, reason: 'three random songs at two buffer sizes' } do
+    [52, 82, 127].each do |seed|
+      song = SessionFuzz.generate(Random.new(seed))
+      expect(song.code).to match(/bpm \d+\.beats?\.lfo|bpm \d\.bars\.lfo/), "seed #{seed} no longer draws a tempo LFO"
+      expect(SessionFuzz.check(:buffer_size, song)).to be_nil, "seed #{seed}"
+    end
   end
 
   # Shrunk songs of fixed finds (omnibus13, omnibus15), kept so they stay fixed
@@ -76,6 +86,34 @@ RSpec.describe('session fuzzing') do
         'at_bar(2) { bg :t1, seq(A4, C5).n8.loop, on: :now; cue :t1 }',
         'at_bar(2, beat: 3) { launch :t1 }',
       ], 3,
+    ],
+    # (omnibus16: generative-g4's FUZZ_BASE=41 FUZZ=150 seeds 52, 82, 127;
+    # a render's end bar under a followed tempo LFO came from the tempo at
+    # its last buffer's start, 1-2 frames off at 367-frame buffers)
+    'a followed tempo LFO up to the end bar' => [
+      :buffer_size, ['bpm 174'], [
+        'bg :a, 220.hz.sine.at(0.1)',
+        'at_bar(2, beat: 4) { bpm 2.beats.lfo.at(150..170) }',
+      ], 2,
+    ],
+    # (omnibus16: dropouts-2's seeds 11 and 28; a master chain landing
+    # inside a buffer was sampled from the buffer's start, zeros before its
+    # start priming softclip's ADAA state)
+    'a master chain landing inside a buffer' => [
+      :buffer_size, ['bpm 120'], [
+        'track(:t1, q: 1) { |clip| clip.synth(voices: 2) { |v| v.hz.saw * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t1: seq(G4.n16, B4.n16, D5.n8).loop',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 3) { master { |m| m.softclip(0, 0.9) } }',
+      ], 1,
+    ],
+    # (omnibus16: a started player waiting after a seek back played again
+    # from the start of the span holding its start, not its own sample)
+    'a clipless part after a seek back before its start' => [
+      :buffer_size, ['bpm 120'], [
+        'at_bar(1, beat: 2) { bg :held, 0.05.constant, in: 1/8r }',
+        'at_bar(1, beat: 4) { seek 1, 2.25 }',
+      ], 2,
     ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do

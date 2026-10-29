@@ -13,7 +13,7 @@ RSpec.describe('UI session panes', :aggregate_failures) do
   end
 
   def draw(name, snap, w = 50, h = 12)
-    grid = MB::Sound::Plot::Text::Cells.new(w, h)
+    grid = MB::Term::Cells.new(w, h)
     ui.panes.fetch(name).draw(ui::Canvas.new(grid, 0, 0, w, h), snap, { title_in_rule: true })
     grid.to_text(:none).lines.map(&:rstrip)
   end

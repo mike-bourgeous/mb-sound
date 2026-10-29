@@ -1015,6 +1015,40 @@ module MB
           self.class.diode_compensation(k, self.class.lp4_loop_gain(r, kernel_options[0], @k_max), @compensation)
         end
 
+        # The kernels' coefficients for cutoff +fc+ and resonance +res+
+        # (numbers): [g, the stages' prewarped gain; k, the loop gain; the
+        # input gain], computed as mb_fp_coef_update / mb_dl_coef_update do
+        # (the same operations; feedback loops' latency compensation reads
+        # them: Plan::Loop::Program#four_pole_point, loop_pitch.c).
+        def kernel_coefficients(fc, res)
+          rate = @sample_rate
+          res = 0.0 unless res >= 0.0
+          res = 1.0 if res > 1.0
+          curve = kernel_options[0]
+          if diode?
+            k = self.class.diode_loop_gain(res, curve, @k_max)
+            comp = @normalize ? self.class.diode_compensation(k, self.class.lp4_loop_gain(res, curve, @k_max), @compensation) : @compensation
+            in_gain = 1.0 + comp * k
+            scale = if @tuning_number != 0
+                      Tuning.scale(@tuning_number, k * DIODE_INV_EDGE_K) * DIODE_INV_W180
+                    elsif @normalize
+                      self.class.diode_cutoff_scale(k) * DIODE_INV_W180
+                    else
+                      DIODE_INV_W180
+                    end
+          else
+            k = self.class.lp4_loop_gain(res, curve, @k_max)
+            in_gain = 1.0 + @compensation * k
+            scale = @tuning_number != 0 ? Tuning.scale(@tuning_number, k * 0.25) : 1.0
+          end
+          fc_max = rate * MAX_CUTOFF_RATIO
+          fc = MIN_CUTOFF unless fc >= MIN_CUTOFF
+          fc = fc_max if fc > fc_max
+          t = self.class.tan(fc * (Math::PI / rate))
+          [t * scale, k, in_gain]
+        end
+        public :kernel_coefficients
+
         # The diode kernel's +normalize+ argument.
         def diode_normalize
           @normalize ? 1 : 0

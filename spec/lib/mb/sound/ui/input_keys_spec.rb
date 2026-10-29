@@ -5,8 +5,8 @@ require_relative '../../../../support/ui_helpers'
 # user's inputrc binds, Reline's own PgUp history search, ui.bind.
 RSpec.describe('UI REPL keys', :aggregate_failures) do
   let(:keys) { MB::Sound::UI::Keys }
-  let(:rk) { MB::Sound::UI::Input::RelineKeys }
-  let(:key) { MB::Sound::UI::Input::Key }
+  let(:rk) { MB::Term::Input::RelineKeys }
+  let(:key) { MB::Term::Input::Key }
 
   after do
     @tiles&.stop

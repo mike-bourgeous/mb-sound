@@ -46,6 +46,7 @@
 
 #include "mb_ext_helpers.h"
 #include "mb_svf.h"
+#include "mb_four_pole.h"
 
 #include "loop_pitch.h"
 
@@ -63,7 +64,13 @@ enum { VK_CONST = 0, VK_SRC, VK_MUL, VK_ADD, VK_DIV, VK_POW };
 
 // Response entry kinds (#response_program) and words per entry:
 // [kind, x, y, v1, v2, v3, flag, aux]
-enum { RK_ONE_A = 0, RK_ONE_B, RK_ADD, RK_SCALE, RK_COPY, RK_DELAY, RK_HALF, RK_SVF };
+enum { RK_ONE_A = 0, RK_ONE_B, RK_ADD, RK_SCALE, RK_COPY, RK_DELAY, RK_HALF, RK_SVF, RK_FOUR_POLE };
+
+// A four-pole entry's words: e[3] cutoff value, e[4] resonance value, e[5]
+// the first of its scalars (rate, k_max, compensation, mix[0..4]), e[6]
+// flags: the resonance curve (bits 0-1), normalize (2), diode (3), the
+// tuning number (bits 4-7).
+#define PC_FP_SCALARS 8
 #define PC_RWORDS 8
 
 #define PC_HEADER 8
@@ -90,7 +97,7 @@ struct pc_ctx {
 	double *vval;
 	_Bool *varr;
 	double *pv;            // scale values, delay times
-	double *pfc, *pq, *pg; // SVF parameters
+	double *pfc, *pq, *pg; // SVF parameters (a four-pole's g, k, input gain)
 	double *ar, *ai, *br, *bi;
 	_Bool *ha, *hb;
 	double *mo;            // moments, 4 per entry
@@ -160,6 +167,83 @@ static void pc_shelf_lp(double fc, double rate, double w, double *lr, double *li
 	double den = dr * dr + di * di;
 	*lr = (nr * dr + ni * di) / den + m[0];
 	*li = (ni * dr - nr * di) / den;
+}
+
+// A four-pole entry's kernel coefficients for cutoff +fc+ and resonance
+// +res+ (Filter::FourPole#kernel_coefficients): the kernels' own update.
+static void pc_fp_coef(const double *sc, int flags, double fc, double res, double *g, double *k, double *in_gain)
+{
+	struct mb_fp_args a;
+	memset(&a, 0, sizeof(a));
+	a.rate = sc[0];
+	a.k_max = sc[1];
+	a.comp = sc[2];
+	for (int j = 0; j < 5; j++) {
+		a.mix[j] = sc[3 + j];
+	}
+	a.curve = flags & 3;
+	a.normalize = (flags >> 2) & 1;
+	a.tuning = (flags >> 4) & 15;
+	double pi_over_rate = M_PI / a.rate;
+	double fc_max = a.rate * FP_MAX_CUTOFF_RATIO;
+	if ((flags >> 3) & 1) {
+		struct mb_dl_cache cc;
+		mb_dl_cache_init(&cc, &a);
+		mb_dl_coef_update(&cc, &a, fc, res, pi_over_rate, fc_max);
+		*g = cc.c.g; *k = cc.c.k; *in_gain = cc.c.in_gain;
+	} else {
+		struct mb_fp_cache cc;
+		mb_fp_cache_init(&cc);
+		mb_fp_coef_update(&cc, &a, fc, res, pi_over_rate, fc_max);
+		*g = cc.c.g; *k = cc.c.k; *in_gain = cc.c.in_gain;
+	}
+}
+
+// A four-pole's group delay at DC (#four_pole_dc_delay)
+static double pc_fp_dc_delay(const double *sc, int flags, double g, double k)
+{
+	if ((flags >> 3) & 1) {
+		return 5.0 / (g * (1.0 + k));
+	}
+	const double *m = sc + 3;
+	double sm = m[0] + m[1] + m[2] + m[3] + m[4];
+	if (sm == 0) {
+		return 0.0;
+	}
+	return (m[1] + 2.0 * m[2] + 3.0 * m[3] + 4.0 * m[4]) / (2.0 * g * sm) - 2.0 * k / (g * (1.0 + k));
+}
+
+// A four-pole's linear response at +w+ (#four_pole_point)
+static void pc_fp_point(const double *sc, int flags, double g, double k, double in_gain, double w, double *cr, double *ci)
+{
+	double s = tan(w * 0.5) / g;
+	if ((flags >> 3) & 1) {
+		double s2 = s * s;
+		double dr = (s2 - 15.0) * s2 + 1.0 + k;
+		double di = (10.0 - 7.0 * s2) * s;
+		double den = dr * dr + di * di;
+		*cr = in_gain * dr / den;
+		*ci = -in_gain * di / den;
+		return;
+	}
+
+	const double *m = sc + 3;
+	double d = 1.0 + s * s;
+	double h1r = 1.0 / d;
+	double h1i = -s / d;
+	double h2r = h1r * h1r - h1i * h1i;
+	double h2i = h1r * h1i + h1i * h1r;
+	double h3r = h2r * h1r - h2i * h1i;
+	double h3i = h2r * h1i + h2i * h1r;
+	double h4r = h3r * h1r - h3i * h1i;
+	double h4i = h3r * h1i + h3i * h1r;
+	double nr = m[0] + m[1] * h1r + m[2] * h2r + m[3] * h3r + m[4] * h4r;
+	double ni = m[1] * h1i + m[2] * h2i + m[3] * h3i + m[4] * h4i;
+	double dr = 1.0 + k * h4r;
+	double di = k * h4i;
+	double den = dr * dr + di * di;
+	*cr = in_gain * (nr * dr + ni * di) / den;
+	*ci = in_gain * (ni * dr - nr * di) / den;
 }
 
 // Evaluates every value expression at sample +i+ (#value_of)
@@ -261,6 +345,14 @@ static void pc_params_moments(struct pc_ctx *c, long i)
 				}
 				break;
 			}
+			case RK_FOUR_POLE: {
+				// #four_pole_latency (the coefficients kept for #pc_response)
+				const double *fs = c->sc + e[5];
+				pc_fp_coef(fs, e[6], c->vval[e[3]], c->vval[e[4]], &c->pfc[k], &c->pq[k], &c->pg[k]);
+				d = pc_fp_dc_delay(fs, e[6], c->pfc[k], c->pq[k]);
+				m[0] = mx[0]; m[1] = mx[1] + mx[0] * d; m[2] = mx[2]; m[3] = mx[3] + mx[2] * d;
+				break;
+			}
 		}
 	}
 }
@@ -313,6 +405,10 @@ static _Bool pc_response(struct pc_ctx *c, double w, _Bool svf, double *rr, doub
 					cr = 1.0; ci = 0.0;
 				}
 				break;
+			case RK_FOUR_POLE:
+				// (in both passes: sustain makes up for SVFs only)
+				pc_fp_point(c->sc + e[5], e[6], c->pfc[k], c->pq[k], c->pg[k], w, &cr, &ci);
+				break;
 		}
 
 		ha[k] = ha[x]; hb[k] = hb[x];
@@ -348,7 +444,7 @@ static _Bool pc_harmonic_risk(struct pc_ctx *c)
 	}
 	for (long k = 0; k < c->nr; k++) {
 		const int32_t *e = c->rx + k * PC_RWORDS;
-		if (e[0] == RK_SVF && (e[6] != SVF_LOWPASS || c->pq[k] > 0.7072)) {
+		if (e[0] == RK_FOUR_POLE || (e[0] == RK_SVF && (e[6] != SVF_LOWPASS || c->pq[k] > 0.7072))) {
 			return 1;
 		}
 	}
@@ -590,7 +686,7 @@ static VALUE pc_track(VALUE self, VALUE code, VALUE scalars, VALUE srcs, VALUE c
 	}
 	for (long k = 0; k < c.nr; k++) {
 		const int32_t *e = c.rx + k * PC_RWORDS;
-		if (e[0] < RK_ONE_A || e[0] > RK_SVF) rb_raise(rb_eArgError, "pitch_track unknown response kind %d", e[0]);
+		if (e[0] < RK_ONE_A || e[0] > RK_FOUR_POLE) rb_raise(rb_eArgError, "pitch_track unknown response kind %d", e[0]);
 		if (e[0] != RK_ONE_A && e[0] != RK_ONE_B && (e[1] < 0 || e[1] >= k)) rb_raise(rb_eArgError, "pitch_track response operand out of order");
 		if (e[0] == RK_ADD && (e[2] < 0 || e[2] >= k)) rb_raise(rb_eArgError, "pitch_track response operand out of order");
 		if (e[0] == RK_SCALE && (e[3] < 0 || e[3] >= c.nv)) rb_raise(rb_eArgError, "pitch_track scale value out of range");
@@ -600,6 +696,13 @@ static VALUE pc_track(VALUE self, VALUE code, VALUE scalars, VALUE srcs, VALUE c
 				if (e[j] < 0 || e[j] >= c.nv) rb_raise(rb_eArgError, "pitch_track SVF value out of range");
 			}
 			if (e[6] < 0 || e[6] > SVF_BANDPASS_SKIRT || e[7] < 0 || e[7] >= nscalars) rb_raise(rb_eArgError, "pitch_track SVF type or rate out of range");
+		}
+		if (e[0] == RK_FOUR_POLE) {
+			if (e[3] < 0 || e[3] >= c.nv || e[4] < 0 || e[4] >= c.nv) rb_raise(rb_eArgError, "pitch_track four-pole value out of range");
+			if (e[5] < 0 || e[5] + PC_FP_SCALARS > nscalars) rb_raise(rb_eArgError, "pitch_track four-pole scalars out of range");
+			int tuning = (e[6] >> 4) & 15;
+			if (e[6] < 0 || e[6] > 255 || !fp_tuning_valid(tuning, ((e[6] >> 3) & 1) != 0)) rb_raise(rb_eArgError, "pitch_track four-pole flags out of range");
+			if (!(c.sc[e[5]] > 0)) rb_raise(rb_eArgError, "pitch_track four-pole rate must be positive");
 		}
 	}
 	if (RARRAY_LEN(outs) != 3) {

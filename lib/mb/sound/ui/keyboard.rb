@@ -70,7 +70,7 @@ module MB
 
         # Play mode's keys besides the note rows (the key table: the `?`
         # overlay and help :ui print it; #play_key acts on it).
-        KEYMAP = Input::Keymap.new(:keys) do
+        KEYMAP = MB::Term::Input::Keymap.new(:keys) do
           group 'Keyboard'
           doc 'z s x d c v ...', 'notes from C3 (lower row)'
           doc 'q 2 w 3 e r ...', 'notes from C4 (upper row)'
@@ -285,7 +285,7 @@ module MB
           end
         end
 
-        # Handles one key event (UI::Input::Key) at monotonic time +now+.
+        # Handles one key event (MB::Term::Input::Key) at monotonic time +now+.
         # Returns true if it was a keyboard key.
         def key(k, now = @clock.call)
           r = @lock.synchronize do
@@ -466,7 +466,7 @@ module MB
           return note_key(k, semis, vel, now) if semis
 
           return false if k.release? && k.key != ' '
-          a = KEYMAP[Input::Key.of(k.key)] or return false # (modifiers as without: Shift-Up is Up)
+          a = KEYMAP[MB::Term::Input::Key.of(k.key)] or return false # (modifiers as without: Shift-Up is Up)
           case a.name
           when :octave then octave(a.args[0])
           when :velocity_step then self.velocity = @velocity + a.args[0]

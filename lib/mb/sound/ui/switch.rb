@@ -8,7 +8,7 @@ module MB
       # the palette, left Reline's prompt undrawn.  A switch is now a
       # transition with declared steps (STEPS), run in order by .run:
       #
-      # - :capture_repl - the REPL pane's recent lines (UI::VT scrollback
+      # - :capture_repl - the REPL pane's recent lines (MB::Term::VT scrollback
       #   and screen, up to the cursor), before the tiles stop.
       # - :stop_tiles / :stop_band - the old screen gives the terminal back.
       # - :replay_repl - prints the captured lines on the normal screen, so

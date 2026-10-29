@@ -120,7 +120,7 @@ module MB
           private
 
           # Color of input notes (a second color beside the keyboard's own).
-          def input_rgb = Themes.rgb(:key)
+          def input_rgb = MB::Term::Themes.rgb(:key)
 
           # The scaled piano (ux-1 item 14): white keys +ww+ columns wide
           # (one of them a gap), black keys about 60% of that and of the
@@ -182,10 +182,10 @@ module MB
           # held keys first (only in the playable span), else an input note
           # (anywhere on the strip; :pressed ones a single dim row).
           def key_fill(rows, s, playable, held, v, inputs)
-            return [fill_rows(rows, v.velocities[v.base + s]), Themes.rgb(:armed)] if playable && held.include?(s)
+            return [fill_rows(rows, v.velocities[v.base + s]), MB::Term::Themes.rgb(:armed)] if playable && held.include?(s)
             vel, kind = inputs[s]
             return [0, nil] unless kind
-            kind == :pressed ? [1, Themes.rgb(:dim)] : [fill_rows(rows, vel), input_rgb]
+            kind == :pressed ? [1, MB::Term::Themes.rgb(:dim)] : [fill_rows(rows, vel), input_rgb]
           end
 
           # Rows of a held key filled for raw velocity +vel+ (1..127).

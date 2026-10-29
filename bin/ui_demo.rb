@@ -149,7 +149,7 @@ module MB::Sound
             band.invalidate
             frame = band.refresh
             if frame
-              screen = UI::Screen.new(band.rows, band.cols)
+              screen = MB::Term::Screen.new(band.rows, band.cols)
               screen << frame
               text = screen.lines(p.color == :none ? :none : p.color)
               lines = band.top? ? text.first(band.height) : text.last(band.height)

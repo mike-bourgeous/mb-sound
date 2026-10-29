@@ -986,7 +986,15 @@ module MB
       # (with the monitor trim, see MonitorTrim), and advances the timeline
       # (unless idle; see #advance_idle=).  Returns the mix (an Array of Numo::SFloat, one per
       # channel) before the monitor trim.
-      def process_buffer(count = buffer_size)
+      #
+      # With +until_pos+ (a timeline position, whole notes) the buffer ends
+      # on the first frame at or past it, if that comes first (renders'
+      # end bar: the frame is the same at any buffer size even while the
+      # tempo moves, since it is found in the span holding it, at that
+      # span's tempo; omnibus16: renders estimated it from the tempo at the
+      # buffer's start and ended 1-2 frames apart at 367 and 800 frames).
+      # The mix is then shorter than +count+.
+      def process_buffer(count = buffer_size, until_pos: nil)
         started = MB::U.clock_now
         # The render thread's mix is reused from buffer to buffer (the
         # output, taps, recordings, and the UI feed copy what they keep;
@@ -1023,6 +1031,17 @@ module MB
             end
             n = (@changes.empty? ? nil : frames_before_seek(remaining, per_sample)) || remaining
             n = cell if cell && cell < n
+            last = false
+            if until_pos
+              left = until_pos - @transport.position
+              break if left <= 0
+
+              k = (left / per_sample).ceil
+              if k <= n
+                n = k
+                last = true
+              end
+            end
             # (the span's end, computed once when the span is the rest)
             r = render_span(n, per_sample, n == remaining && @transport.position.equal?(from) ? to : nil)
             if first.nil?
@@ -1031,12 +1050,16 @@ module MB
               (parts ||= [first]) << r
             end
             remaining -= n
+            break if last
           end
+          count -= remaining
           @ui_feed.capture(self) if @ui_feed&.wants_capture? # players, buses, chains, while they can't change
           # (no spans for a buffer of 0 frames: an empty mix, as before)
           next [] if first.nil?
           parts.nil? ? first : parts.transpose.map { |chans| chans.reduce { |a, b| a.concatenate(b) } }
         }
+
+        return mix if count == 0 # (until_pos: already there)
 
         # How busy rendering is (before the output blocks), for deciding
         # whether master chains can crossfade
@@ -1550,11 +1573,20 @@ module MB
           catch_up_started(p, offset) # a graph that waited to start
         end
 
-        if p.waited
-          # Clocked clips and loops resync to their clocks where it plays
-          # again (the timeline jumped back before its start)
+        if p.waited || p.start > from
+          # The timeline jumped back before its start (in an earlier span,
+          # or just before it in this one): it plays again from the sample
+          # holding its start, as on its first start (a clipless graph
+          # started at the span's start before omnibus16, so a 367-frame
+          # replay played it up to a buffer early), and clocked clips and
+          # loops resync to their clocks there
           p.waited = false
-          p.timeline_nodes.each { |n| n.clock_resync(from) if n.respond_to?(:clock_resync) }
+          offset = MB::M.max(((p.start - from) / per_sample).floor, 0)
+          again = from + offset * per_sample
+          if offset > 0
+            p.timeline_nodes.each { |n| n.start_at(again, origin: p.start, launch: p.launch, transport: @transport) }
+          end
+          p.timeline_nodes.each { |n| n.clock_resync(again) if n.respond_to?(:clock_resync) }
         end
 
         ringing = p.ring&.active && !p.fade_out

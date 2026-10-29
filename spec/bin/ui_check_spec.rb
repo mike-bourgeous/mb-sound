@@ -7,8 +7,8 @@ RSpec.describe('bin/ui_check.rb', :aggregate_failures) do
     expect(text).to include('Not a terminal')
   end
 
-  it 'reports what a terminal answers (here UI::VT on a pty)' do
-    vt = MB::Sound::UI::VT.new(24, 80, scrollback: 0)
+  it 'reports what a terminal answers (here MB::Term::VT on a pty)' do
+    vt = MB::Term::VT.new(24, 80, scrollback: 0)
     r, w, pid = PTY.spawn('bin/ui_check.rb', '-t', '3')
     out = +''
     loop do

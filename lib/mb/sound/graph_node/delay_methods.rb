@@ -115,8 +115,10 @@ module MB
           delay_opts = { smooth: smoothing, max_delay: max_delay, interpolation: interpolation }
           pipeline = nil
 
-          # (echo loops: no sustain shelf, whose pitch would be 1 / time)
-          loop = self.feedback(sustain: false) do |fb, input|
+          # (echo loops: no sustain shelf, whose pitch would be 1 / time,
+          # and the echo compensation, where low cuts count as wires; see
+          # Plan::Loop::Program::ECHO_WIRES)
+          loop = self.feedback(sustain: false, compensate: :echo) do |fb, input|
             delayed = (input + fb * feedback).delay(time, **delay_opts)
             pipeline = InsertPipeline.new(delayed)
             out = pipeline.call(insert)

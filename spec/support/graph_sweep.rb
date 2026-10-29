@@ -352,6 +352,15 @@ module GraphSweep
         c.sig.feedback { |fb, input| input + (fb.delay(23.samples, interpolation: :cubic) * c.mod(0.2, 0.7)).softclip.quantize(0.01).clip(-1, 1).abs / 2.constant ** 1.constant }
       }],
       ['feedback stereo', ->(c) { c.stereo_sig.feedback { |fb, input| input + fb.delay(0.001) * 0.5 } }],
+      # (omnibus16: a node delay time with the default smoothing starts at
+      # its first value)
+      ['delay with a node time and default smoothing', ->(c) { c.sig.delay(c.mod(0.001, 0.003)) + c.sig.delay(c.mod(40, 90).samples, smooth: 0.1) }],
+      # (omnibus16: #delay's echo compensation, low cuts and bandpasses as
+      # wires, with moving cutoffs and a d.fb pipeline)
+      ['delay echo loop with a low cut (compensate: :echo)', ->(c) {
+        c.sig.delay(0.002, feedback: c.mod(0.3, 0.7)) { |fb| fb.filter(:highpass, cutoff: c.mod(80, 400), quality: 0.5).filter(3000.hz.lowpass(quality: 0.5)).softclip(0, 0.5) } +
+          c.sig.delay(0.0013, feedback: 0.5) { |d| d.fb { |fb| fb.filter(:bandpass, cutoff: c.mod(500, 2000), quality: 1) } }
+      }],
 
       # Multichannel
       ['pan, balance, width', ->(c) { c.sig.pan(c.mod(-1, 1)).width(c.mod(0, 2)) + c.stereo_sig.balance(0.3) }],

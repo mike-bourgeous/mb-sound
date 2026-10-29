@@ -99,7 +99,7 @@ module MB
             @mtimes[path] = m
             begin
               defined.concat(load_file(path))
-            rescue DataFile::LoadError => e
+            rescue MB::Term::DataFile::LoadError => e
               errors << e.message
             end
           end
@@ -108,16 +108,16 @@ module MB
 
         # The panes of one file (defined in UI.panes).  Returns their names.
         def load_file(path)
-          calls = DataFile.load(path, calls: { nil => %i[pane] })
+          calls = MB::Term::DataFile.load(path, calls: { nil => %i[pane] })
           panes = calls.map do |c|
             unless c.args.length == 1 && c.args[0].is_a?(Symbol) && c.children.nil?
-              raise DataFile::LoadError, "#{path}:#{c.line}: expected `pane :name, kind: :meters, ...`"
+              raise MB::Term::DataFile::LoadError, "#{path}:#{c.line}: expected `pane :name, kind: :meters, ...`"
             end
-            raise DataFile::LoadError, "#{path}:#{c.line}: pane #{c.args[0].inspect} needs kind:" unless c.opts.key?(:kind)
+            raise MB::Term::DataFile::LoadError, "#{path}:#{c.line}: pane #{c.args[0].inspect} needs kind:" unless c.opts.key?(:kind)
             begin
               build(c.args[0], **c.opts)
             rescue ArgumentError => e
-              raise DataFile::LoadError, "#{path}:#{c.line}: #{e.message}"
+              raise MB::Term::DataFile::LoadError, "#{path}:#{c.line}: #{e.message}"
             end
           end
           panes.each { |p| UI.define_pane_object(p) }

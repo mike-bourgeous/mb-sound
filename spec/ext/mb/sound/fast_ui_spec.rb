@@ -172,7 +172,7 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
   end
 
   describe MB::Sound::FastUI::Grid do
-    let(:cells) { MB::Sound::Plot::Text::Cells }
+    let(:cells) { MB::Term::Cells }
     let(:native) { MB::Sound::Plot::Text::NativeCells }
     let(:modes) { %i[none truecolor ansi256 ansi16] }
 

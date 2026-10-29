@@ -651,6 +651,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -1675,8 +1677,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -2078,6 +2078,8 @@
         "loop_pitch.o": [
           "ext/mb/sound/fast_loop/loop_pitch.h",
           "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_four_pole.h",
+          "ext/mb/sound/include/mb_four_pole_tuning.h",
           "ext/mb/sound/include/mb_svf.h"
         ]
       }

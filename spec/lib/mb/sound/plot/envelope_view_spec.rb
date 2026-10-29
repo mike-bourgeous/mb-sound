@@ -134,7 +134,7 @@ RSpec.describe(MB::Sound::Plot::Panels::EnvelopeView, :aggregate_failures) do
     pane = MB::Sound::UI.panes.fetch(:preview)
     state = {}
     draw = -> {
-      grid = MB::Sound::Plot::Text::Cells.new(60, 12)
+      grid = MB::Term::Cells.new(60, 12)
       pane.draw(MB::Sound::UI::Canvas.new(grid, 0, 0, 60, 12), snap, state)
       grid.to_text(:none)
     }

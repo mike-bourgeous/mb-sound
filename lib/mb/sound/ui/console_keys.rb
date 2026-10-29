@@ -10,7 +10,7 @@ module MB
       #   typed kept;
       # - F2: KEYS (the tiled :keys screen, or the tiles' keyboard);
       # - Ctrl-Backspace, Ctrl-Delete, Ctrl-Shift-Delete: delete the word
-      #   before, the word after, to the end of the line (Input::RelineKeys).
+      #   before, the word after, to the end of the line (MB::Term::Input::RelineKeys).
       #
       # Prepended to Reline::LineEditor by .install (bin/sound.rb, through
       # UI.install_pry!).  Inside the tiles the Router reads these keys
@@ -36,8 +36,8 @@ module MB
           def install
             return [] unless defined?(::Reline::LineEditor)
             ::Reline::LineEditor.prepend(self) unless ::Reline::LineEditor.ancestors.include?(self)
-            BINDINGS.each { |seqs, func| seqs.each { |s| Input::RelineKeys.bind(s, func) } }
-            @editing ||= Input::RelineKeys.install_editing_keys
+            BINDINGS.each { |seqs, func| seqs.each { |s| MB::Term::Input::RelineKeys.bind(s, func) } }
+            @editing ||= MB::Term::Input::RelineKeys.install_editing_keys
           end
 
           # Ctrl-] or F2 outside the tiles: switches to the tiled screen

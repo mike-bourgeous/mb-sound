@@ -3,7 +3,7 @@ require_relative '../../../../support/ui_helpers'
 # The dashboard band (MB::Sound::UI::Band): deterministic text from fixed
 # snapshots and clocks, native grid vs the Ruby mirror, the frames' terminal
 # bytes (scroll region, save/restore cursor, synchronized output), diffed
-# frames replayed through UI::Screen, per-pane rates, and failing panes.
+# frames replayed through MB::Term::Screen, per-pane rates, and failing panes.
 RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
   # The :band layout at 120 columns with ui_fake_snapshot, left of the
   # scope's trace (the scope draws into the grid too since ui-fix-3).
@@ -97,17 +97,17 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
     expect(band.band_top).to eq(23)
     out = band.refresh(0.0)
     expect(out).to start_with("\e[?2026h\e7\e[1;22r\e[0m\e[23;1H")
-    screen = MB::Sound::UI::Screen.new(30, 120)
+    screen = MB::Term::Screen.new(30, 120)
     screen << io.string
     # The rule first, between the console and the band (ux-1 r3 item 3)
     expect(rstripped(screen.lines.last(8).map { |l| l[0, 80] }.join("\n"))).to eq(rstripped(([BAND_RULE] + BAND_TEXT.lines).map { |l| l.chomp[0, 80] }.join("\n")))
   end
 
-  it 'rebuilds the full frame from diffed frames (replayed through UI::Screen)' do
+  it 'rebuilds the full frame from diffed frames (replayed through MB::Term::Screen)' do
     i = 0
     band, io = ui_fake_band(:deck) { ui_fake_snapshot(t: i * 0.04, seq: i + 1, scope_phase: i * 0.13, peak: -6.0 - (i % 7)) }
     band.start(thread: false)
-    screen = MB::Sound::UI::Screen.new(30, 120)
+    screen = MB::Term::Screen.new(30, 120)
     40.times do |k|
       i = k
       band.refresh(k * 0.04)
@@ -119,7 +119,7 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
     # screen
     band.invalidate
     full = band.refresh(39 * 0.04)
-    expected = MB::Sound::UI::Screen.new(30, 120)
+    expected = MB::Term::Screen.new(30, 120)
     expected << full
     expect(screen.lines(:ansi256).first(band.height)).to eq(expected.lines(:ansi256).first(band.height))
     expect(screen.lines.first(band.height).join).to include('-6.0') # the hold from the loudest snapshot
@@ -173,7 +173,7 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
     out = band.refresh(0.1)
     expect([band.rows, band.cols]).to eq([40, 100])
     expect(out).to start_with("\e[?2026h\e7\e[9;40r")
-    screen = MB::Sound::UI::Screen.new(40, 100)
+    screen = MB::Term::Screen.new(40, 100)
     screen << out
     expect(screen.lines[0]).to start_with('▶ 17:3')
     expect(io.string.length).to be > out.length
@@ -196,7 +196,7 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
     band, io = ui_fake_band(:band, size: [30, 120], at: :bottom)
     band.start(thread: false)
     band.refresh(0.0)
-    screen = MB::Sound::UI::Screen.new(30, 120)
+    screen = MB::Term::Screen.new(30, 120)
     # The console's lines just above the band, the cursor on the last
     screen << io.string << "\e[1;1H" << (1..22).map { |i| "line #{i}" }.join("\r\n")
     io.truncate(0)

@@ -25,11 +25,11 @@ module MB
 
         module_function
 
-        # The color for +role+ in the current theme (UI::Themes): [r, g, b]
+        # The color for +role+ in the current theme (MB::Term::Themes): [r, g, b]
         # or a palette index (a Symbol role, or an [r, g, b] Array or index
         # as is; nil for the terminal's default color).
         def rgb(role)
-          Themes.rgb(role)
+          MB::Term::Themes.rgb(role)
         end
       end
 
@@ -42,7 +42,7 @@ module MB
       }.freeze
 
       # A pane's rectangle of a cell grid (Plot::Text::NativeCells, or the
-      # Ruby mirror Plot::Text::Cells): panes write text, meters, and
+      # Ruby mirror MB::Term::Cells): panes write text, meters, and
       # sparklines in their own coordinates, clipped to the rectangle.
       #
       #     pane :hello, height: 2 do |c, s|
@@ -69,7 +69,7 @@ module MB
           @h = h
           @row = 0
           @glyph_set = glyphs
-          @glyphs = Themes.glyphs(glyphs)
+          @glyphs = MB::Term::Themes.glyphs(glyphs)
         end
 
         # A glyph by name (see GLYPHS).
@@ -95,7 +95,7 @@ module MB
             str = str[-x..] || ''
             x = 0
           end
-          @grid.text(@x + x, @y + y, Canvas.clip(str, @w - x), fg: Theme.rgb(role), bold: bold || Themes.bold?(role), max: @w - x)
+          @grid.text(@x + x, @y + y, Canvas.clip(str, @w - x), fg: Theme.rgb(role), bold: bold || MB::Term::Themes.bold?(role), max: @w - x)
           x + str.length
         end
 
@@ -171,8 +171,8 @@ module MB
             str = str[-x..]
             x = 0
           end
-          attr = (reverse ? Plot::Text::Cells::REVERSE : 0) | (bold || Themes.bold?(role) ? Plot::Text::Cells::BOLD : 0)
-          @grid.put_run(@x + x, @y + y, Canvas.clip(str, @w - x), Plot::Text::Cells.pack(Theme.rgb(role)), bg && Plot::Text::Cells.pack(Theme.rgb(bg)), attr)
+          attr = (reverse ? MB::Term::Cells::REVERSE : 0) | (bold || MB::Term::Themes.bold?(role) ? MB::Term::Cells::BOLD : 0)
+          @grid.put_run(@x + x, @y + y, Canvas.clip(str, @w - x), MB::Term::Cells.pack(Theme.rgb(role)), bg && MB::Term::Cells.pack(Theme.rgb(bg)), attr)
           x + str.length
         end
 
@@ -275,16 +275,16 @@ module MB
       # The built-in themes: :default (ui-3's colors), :paper (for light
       # terminal backgrounds), :phosphor (green screen), and :mono (the
       # terminal's own 16 colors, so its palette decides).
-      Themes.define(:default, based_on: :default) do
+      MB::Term::Themes.define(:default, based_on: :default) do
         Theme::ROLES.each { |name, rgb| role name, rgb.dup }
         role :title, Theme::ROLES[:title].dup, bold: true
-        GLYPHS[:unicode].each { |k, v| glyphs(:unicode) { public_send(k, v) } if Themes::GLYPH_NAMES.include?(k) }
-        GLYPHS[:ascii].each { |k, v| glyphs(:ascii) { public_send(k, v) } if Themes::GLYPH_NAMES.include?(k) }
+        GLYPHS[:unicode].each { |k, v| glyphs(:unicode) { public_send(k, v) } if MB::Term::Themes::GLYPH_NAMES.include?(k) }
+        GLYPHS[:ascii].each { |k, v| glyphs(:ascii) { public_send(k, v) } if MB::Term::Themes::GLYPH_NAMES.include?(k) }
         glyphs(:unicode) { rule '│'; hrule '─' }
         glyphs(:ascii) { rule '|'; hrule '-' }
       end
 
-      Themes.define(:paper) do
+      MB::Term::Themes.define(:paper) do
         role :text, [40, 40, 40]
         role :dim, [120, 120, 120]
         role :title, [0, 75, 135], bold: true
@@ -298,7 +298,7 @@ module MB
         role :high, [200, 30, 30]
       end
 
-      Themes.define(:phosphor) do
+      MB::Term::Themes.define(:phosphor) do
         %i[text name key ok queued low].each { |r| role r, [157, 255, 180] }
         %i[dim].each { |r| role r, [79, 191, 108] }
         role :title, [200, 255, 210], bold: true
@@ -306,7 +306,7 @@ module MB
         %i[bad rec high].each { |r| role r, [255, 120, 90] }
       end
 
-      Themes.define(:mono) do
+      MB::Term::Themes.define(:mono) do
         role :text, 7
         role :dim, 8
         role :title, 12, bold: true

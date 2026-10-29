@@ -1,6 +1,6 @@
 require_relative '../support/ui_helpers'
 
-# The band at the bottom of the console (a pty read by UI::VT): when it
+# The band at the bottom of the console (a pty read by MB::Term::VT): when it
 # grows while Pry runs a multi-line command (here the messages strip opening
 # for warnings), the command's lines stay on screen and the cursor comes
 # back to the prompt (ux-1 r3 item 2: the end line was erased and the
@@ -8,7 +8,7 @@ require_relative '../support/ui_helpers'
 RSpec.describe('bin/sound.rb with the band', :aggregate_failures) do
   it 'keeps a multi-line command and the cursor in place when the band grows' do
     require 'pty'
-    vt = MB::Sound::UI::VT.new(30, 110, scrollback: 0)
+    vt = MB::Term::VT.new(30, 110, scrollback: 0)
     lock = Mutex.new
     env = { 'MB_SOUND_HELP_DIR' => tmp_path('help'), 'COLUMNS' => '110', 'LINES' => '30', 'OUTPUT_TYPE' => 'null', 'MB_SOUND_LEVEL_CHECK' => '0' }
     r, w, pid = PTY.spawn(env, 'bin/sound.rb')

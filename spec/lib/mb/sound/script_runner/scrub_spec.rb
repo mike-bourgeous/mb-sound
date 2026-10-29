@@ -1,5 +1,5 @@
 RSpec.describe(MB::Sound::ScriptRunner::Scrub) do
-  let(:key) { MB::Sound::UI::Input::Key }
+  let(:key) { MB::Term::Input::Key }
 
   describe 'the script screens\' key tables (UI::Keys)' do
     let(:keys) { MB::Sound::UI::Keys }

@@ -60,6 +60,47 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
       end
     end
 
+    # (omnibus16: lp4 and diode counted as wires; a string through
+    # lp4(2000) at a 1000-sample period was 15 cents flat, lp4(500) 65)
+    # (within 0.3 cents at 8x, 1 at 4x: a steep lowpass moves a decaying
+    # mode off the frequency where the loop's phase is whole, as an SVF's
+    # does by 0.02-0.18 cents; the exact-phase example below checks the
+    # compensation itself)
+    [[:lp4, 8, 0.0], [:lp4, 4, 0.0], [:diode, 8, 0.0], [:diode, 4, 0.0]].each do |mode, damp, res|
+      [110, 440].each do |f|
+        it "tunes a string through #{mode} at #{damp}x the pitch (resonance #{res}) at #{f} Hz" do
+          exc = MB::Sound.noise(seed: 1).at(0.5) * MB::Sound.adsr(0, 0.002, 0, 0.002, hold: false)
+          l = exc.feedback { |fb, input|
+            d = fb.delay((48000.0 / f).samples, smoothing: false) * 0.995
+            input + (mode == :diode ? d.diode(f * damp, resonance: res) : d.lp4(f * damp, resonance: res))
+          }
+          d = l.sample(96000)[4800...(4800 + 65536)]
+          expect(cents(pitch(d, f), f).abs).to be < (damp == 8 ? 0.3 : 1.0)
+        end
+      end
+    end
+
+    it "compensates a four-pole's phase delay at the pitch exactly (its linear response)" do
+      [[:lp4, 2000, 0.0], [:lp4, 500, 0.0], [:lp4, 1000, 0.9], [:lp2, 1500, 0.3], [:diode, 2000, 0.0], [:diode, 800, 0.7]].each do |mode, fc, r|
+        f = MB::Sound::Filter::FourPole.new(cutoff: fc, resonance: r, mode: mode)
+        w = 2 * Math::PI / 1000
+        exact = -Math.atan2(f.response(w).imag, f.response(w).real) / w
+        imp = PlanSpecHelpers::Source.new(kind: :impulses, at: [0])
+        l = imp.feedback { |fb, x| x + (fb.delay(1000.samples, smoothing: false) * 0.5).lp4(fc, resonance: r, mode: mode) }
+        l.sample(800)
+        expect(l.latency).to be_within(0.01).of(exact), "#{mode} #{fc} #{r}"
+      end
+    end
+
+    it 'keeps echoes through an lp4 in a feedback loop one period apart' do
+      imp = PlanSpecHelpers::Source.new(kind: :impulses, at: [0])
+      out = Numo::DFloat.cast(imp.feedback { |fb, x| (x + fb.delay(1000.samples) * 0.6).lp4(500) }.sample(4000))
+      c = (1..3).map { |k| e = out[(k * 1000 - 500)...(k * 1000 + 500)]**2; (e * Numo::DFloat.new(1000).seq).sum / e.sum }
+      # (each window starts a period later: equal centers are a period apart)
+      expect((c[1] - c[0]).abs).to be < 0.2
+      expect((c[2] - c[1]).abs).to be < 0.2
+    end
+
     it 'leaves an uncompensated string flat by the extra half sample' do
       d = ks(440, compensate: false).sample(96000)[4800...(4800 + 65536)]
       expected = cents(48000.0 / (48000.0 / 440 + 0.5), 440)
@@ -389,6 +430,52 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
       d = dry.sample(1000).to_a
       expect(out.first(35).zip(d).map { |a, b| (a - b * 0.5).abs }.max).to be < 1e-6
       expect(out.zip(d).map { |a, b| (a - b * 0.5).abs }.max).to be > 0.01
+    end
+  end
+
+  describe '#delay echo arrivals (compensate: :echo)' do
+    # Energy centers of the first +n+ echoes of a one-sample impulse
+    # through +l+, relative to k * +t+ (samples)
+    def centers(l, t, n = 4)
+      out = Numo::DFloat.cast(l.sample(t * (n + 1)))
+      Array.new(n) { |i|
+        k = i + 1
+        e = out[(k * t - t / 2)...(k * t + t / 2)]**2
+        (e * Numo::DFloat.new(t).seq).sum / e.sum - t / 2
+      }
+    end
+
+    def impulse = PlanSpecHelpers::Source.new(kind: :impulses, at: [0])
+
+    # (omnibus16: the :pitch mode measured the loop's phase at 1 / T, a few
+    # Hz, where a low cut leads by up to 180 degrees: the tape insert's
+    # echoes landed 2326, -2342, -145, and 2184 samples off at 0.1 s)
+    {
+      'the tape insert (low cut, high cut, softclip)' => ->(fb) { fb.filter(200.hz.highpass(quality: 0.5)).filter(3000.hz.lowpass(quality: 0.5)).softclip(0, 0.5) },
+      'a low cut alone' => ->(fb) { fb.filter(80.hz.highpass(quality: 0.707)) },
+      'a band (500 Hz to 2 kHz)' => ->(fb) { fb.filter(500.hz.highpass(quality: 0.707)).filter(2000.hz.lowpass(quality: 0.707)) },
+      'a bandpass' => ->(fb) { fb.filter(:bandpass, cutoff: 1000, quality: 1) },
+      'a biquad low cut' => ->(fb) { fb.filter(200.hz.highpass(quality: 0.5), structure: :biquad) },
+      'a d.fb pipeline with a low cut' => ->(d) { d.fb { |fb| fb.filter(200.hz.highpass(quality: 0.5)).filter(3000.hz.lowpass(quality: 0.5)) } },
+    }.each do |name, insert|
+      it "lands echoes through #{name} on time at 0.1 and 0.05 s" do
+        [4800, 2400].each do |t|
+          c = centers(impulse.delay(t.samples, feedback: 0.5, smoothing: false, &insert), t)
+          c.each_with_index { |x, i| expect(x.abs).to be < 15 * (i + 1), "echo #{i + 1} at #{t} samples #{x.round(1)} off (#{c.map { |v| v.round(1) }})" }
+        end
+      end
+    end
+
+    it 'keeps a short comb through a lowpass tuned as the :pitch mode does (bit for bit)' do
+      a = impulse.delay(96.samples, feedback: 0.98, smoothing: false) { |fb| fb.filter(:lowpass, cutoff: 1000, quality: 0.707) }
+      b = impulse.feedback(sustain: false) { |fb, input| (input + fb * 0.98).delay(96.samples, smoothing: false).filter(:lowpass, cutoff: 1000, quality: 0.707) }
+      expect(a.sample(4800)).to eq(b.sample(4800))
+    end
+
+    it 'accepts compensate: :echo on any loop' do
+      l = impulse.feedback(compensate: :echo) { |fb, input| input + fb.delay(100.samples) * 0.5 }
+      expect(l.compensate).to eq(:echo)
+      expect { impulse.feedback(compensate: :eco) { |fb, input| input + fb } }.to raise_error(ArgumentError, /:pitch\), :echo, :dc, or false/)
     end
   end
 

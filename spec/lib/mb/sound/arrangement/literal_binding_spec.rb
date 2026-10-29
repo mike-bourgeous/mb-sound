@@ -236,7 +236,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     st = { title_in_rule: true, mode: true, snap: snap }
     names = lp4.params.values.keys
     st[:pick] = names.index(:resonance) # (no knobs: the params come first)
-    grid = MB::Sound::Plot::Text::Cells.new(80, 16)
+    grid = MB::Term::Cells.new(80, 16)
     pane.draw(ui::Canvas.new(grid, 0, 0, 80, 16), snap, st)
     expect(grid.to_text(:none)).to include('Enter: knob :"lead/reso"')
     expect(pane.enter_hint(st)).to eq('make resonance knob :"lead/reso": rebuilds lead at its launch point (notes play on; delays and reverbs start fresh; Left/Right bind it now and turn)')
