@@ -1158,8 +1158,13 @@ module MB
         session.advance_idle = true
         begin
           until frames_left.call <= 0 || (session.idle? && !waiting.call)
-            count = MB::M.min(buffer_size, frames_left.call)
-            session.process_buffer(count)
+            # The end bar's frame is found in the span holding it (see
+            # Session#process_buffer's until_pos:): the estimate at this
+            # buffer's tempo only bounds the buffer
+            end_pos = end_time&.call
+            count = end_pos ? MB::M.min(buffer_size, max_frames - frames + skip) : MB::M.min(buffer_size, frames_left.call)
+            mix = session.process_buffer(count, until_pos: end_pos)
+            count = mix.empty? ? 0 : mix[0].length if end_pos
             frames += count - skip
             skip = 0
             progress.update(:render, frames: frames)
