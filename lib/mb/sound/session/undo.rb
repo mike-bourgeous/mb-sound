@@ -271,6 +271,10 @@ module MB
             return change(:restore, subject.name, time, data: { knob: true }, undoes: original.seq) { |_t| restore_knob(subject.name, original.before) }
           end
 
+          if subject == :tempo
+            return change(:restore, :tempo, time, data: {}, undoes: original.seq) { |_t| restore_tempo(original.before) }
+          end
+
           if subject == :key
             return change(:restore, :key, time, data: { key: original.before&.key.to_s }, undoes: original.seq) { |t| restore_key(original.before, t) }
           end
@@ -289,6 +293,7 @@ module MB
           return StripState.new(muted: @muted.dup, soloed: @soloed.dup) if subject == :strip
           return timeline_snapshot if subject == :timeline
           return key_snapshot if subject == :key
+          return tempo_snapshot if subject == :tempo
 
           if subject == :master
             chain = @mutex.synchronize { @master_chains&.last }

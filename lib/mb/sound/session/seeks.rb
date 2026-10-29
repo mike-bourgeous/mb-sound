@@ -45,7 +45,7 @@ module MB
         # True for changes that move the timeline (they land on exact frames
         # at the start of a span of a buffer; see #process_buffer).
         def timeline_change?(c)
-          c.kind == :seek || (c.kind == :restore && c.subject == :timeline)
+          c.kind == :seek || c.kind == :tempo || (c.kind == :restore && (c.subject == :timeline || c.subject == :tempo))
         end
 
         # The subject whose state a change snapshots for undo.

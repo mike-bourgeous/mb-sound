@@ -591,12 +591,26 @@ module MB
         a meter map, and bar numbers that stay stable.  Durations (`1.n8.dotted`, `2.bars`) follow the
         tempo; `1.beat.hz` locks a tone to the beat; `tuning` moves every
         Note.
+
+        Tempo moves too: `bpm 140, over: 4.bars` ramps from where the
+        tempo is (`accel`/`rit` say the same; `curve: :smooth`; `over:
+        10.seconds`), with launch points (`bpm 90, over: 2, on: :bar`).
+        `bpm :tempo` follows a knob (`knob :tempo, (90.bpm..180.bpm)
+        .at(140.bpm)`), `bpm 4.bars.lfo.at(150..180)` a tempo LFO, read
+        every 800 frames.  Scenes and sections take `bpm: [160, over:
+        4]`.  These are journaled and undoable, and takes replay them
+        exactly; a plain `bpm 120` sets one tempo right away and ends a
+        ramp.  Bars, launches, clips, delays, and LFOs all follow.
       TEXT
-      commands :bpm, :tempo, :meter, :rewind, :seek, :bar, :transport, :tuning
+      commands :bpm, :tempo, :accel, :rit, :meter, :rewind, :seek, :bar, :transport, :tuning
       note :tempo_sync, :numbers_lengths_phases
-      see :schedule
+      see :schedule, :clocks, :knobs
       example 'a tempo-locked wobble' do
         bg :try, 55.hz.saw.at(-16.db).lp4(400 + 1.beat.hz.lfo.triangle * 300 + 300).until(2.bars)
+      end
+      example 'an arpeggio speeding up' do
+        bg :try, seq(C4, E4, G4, C5).n16.loop.tone.triangle.at(-24.db).until(4.bars)
+        bpm 180, over: 3.bars
       end
     end
 

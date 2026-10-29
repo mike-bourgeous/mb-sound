@@ -1,7 +1,7 @@
 # Session fuzzing (fuzz-fixes-1, 2026-10-25): a seeded generator of small
 # Sessions (tracks with synth, drum, and pitch patches, clips including
 # drum grids and tweens, scenes, scheduled launches, swaps, stops, mutes,
-# solos, knob turns), each a short render-style Ruby script (the repro is
+# solos, knob turns, tempo ramps and followed tempo LFOs), each a short render-style Ruby script (the repro is
 # the code), rendered by MB::Sound.render and checked against relations
 # that must hold for any song (spec/lib/mb/sound/session_fuzz_spec.rb):
 #
@@ -138,7 +138,7 @@ module SessionFuzz
       on = rng.rand < 0.5 ? ', on: :now' : ''
       t = pick(rng, names)
       cmd =
-        case rng.rand(14)
+        case rng.rand(15)
         when 0 then "go :#{pick(rng, scenes)}#{on}"
         when 1, 2
           next if swappable.empty?
@@ -159,6 +159,13 @@ module SessionFuzz
           next unless instruments
 
           "track :#{pick(rng, instruments)}, #{pick(rng, INSTRUMENTS)}"
+        when 13
+          # (tempo-maps-1: a ramp from where the tempo is, or a followed tempo LFO)
+          if rng.rand < 0.75
+            "bpm #{pick(rng, [90, 140, 180])}, over: #{pick(rng, ['1', '1/2r', '3.beats'])}#{[', curve: :smooth', ''][rng.rand(2)]}#{on}"
+          else
+            "bpm #{pick(rng, ['1.bars.lfo.at(100..140)', '2.beats.lfo.at(150..170)'])}"
+          end
         when 6 then rng.rand < 0.5 ? "solo :#{t}#{on}" : "solo#{on.sub(",", "")}"
         when 7
           next unless knob

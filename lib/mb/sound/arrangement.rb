@@ -426,6 +426,10 @@ module MB
             check_key_value(name, k, v) or return nil
             next
           end
+          if tempo_value?(k)
+            check_tempo_value(name, k, v) or return nil
+            next
+          end
           kind = @session.names.kind(k)
           if kind == :knob || control_value?(k, v)
             check_knob_value(name, k, v) or return nil
@@ -487,7 +491,7 @@ module MB
           return MB::Sound.live_error(ArgumentError.new("No scene #{name.inspect}#{known.empty? ? '' : " (scenes: #{known.map(&:inspect).join(', ')})"}"))
         end
 
-        knob_values = sc.values.select { |k, v| KEY_VALUES.include?(k) || @session.names.kind(k) == :knob || control_value?(k, v) }
+        knob_values = sc.values.select { |k, v| KEY_VALUES.include?(k) || tempo_value?(k) || @session.names.kind(k) == :knob || control_value?(k, v) }
         unknown = sc.values.keys - tracks.keys - knob_values.keys
         unless unknown.empty?
           why = @mutex.synchronize { unknown.filter_map { |u| "#{u.inspect}: #{@failed_tracks[u]}" if @failed_tracks[u] } }
@@ -957,6 +961,7 @@ module MB
       # turn options (`[8000, over: 2.bars, curve: :smooth]`).
       def turn_knob(name, value, time)
         return change_key_value(name, value, time) if KEY_VALUES.include?(name)
+        return change_tempo_value(value, time) if tempo_value?(name)
         v, options = knob_value(value)
         @session.turn(name, v, start_time: time, **options)
       end
@@ -981,6 +986,53 @@ module MB
       # Scene and section values that change the session key (see
       # KeyMethods): `key: :d`, `key: [:a, :minor]`, `mode: :dorian`.
       KEY_VALUES = [:key, :mode].freeze
+
+      # Scene and section values that change the session tempo
+      # (tempo-maps-1): `bpm: 140`, `bpm: [160, over: 4.bars, curve:
+      # :smooth]` (a ramp from the tempo in effect), `bpm: :tempo` (follow
+      # a knob), `bpm: 4.bars.lfo.at(150..180)`.  `tempo:` is the same
+      # unless the Session has a knob or track named :tempo (then it turns
+      # that).
+      TEMPO_VALUES = [:bpm, :tempo].freeze
+
+      # True if scene or section value name +name+ changes the session
+      # tempo (see TEMPO_VALUES).
+      def tempo_value?(name)
+        name == :bpm || (name == :tempo && @session.names.kind(:tempo).nil?)
+      end
+
+      # The tempo (or source) and ramp options of a tempo value.
+      def tempo_value(value)
+        return [value, {}] unless value.is_a?(Array)
+        v, options = value
+        [v, (options || {})]
+      end
+
+      # Changes the session tempo at +time+ (a scene's or section's bpm:).
+      def change_tempo_value(value, time)
+        v, options = tempo_value(value)
+        follow = v.is_a?(Numeric) || v.is_a?(Tempo) ? nil : v
+        @session.change_tempo_map(follow ? nil : v, follow: follow, over: options[:over], curve: options[:curve], start_time: time)
+      end
+
+      # Checks a scene's (or section's) bpm: value; false (after
+      # live_error) if it can't be used.
+      def check_tempo_value(owner, name, value)
+        v, options = tempo_value(value)
+        extra = options.is_a?(Hash) ? options.keys - [:over, :curve] : [:not_a_hash]
+        raise ArgumentError, "unknown options #{extra.inspect}" unless extra.empty? && (!value.is_a?(Array) || value.length <= 2)
+        if v.is_a?(Numeric) || v.is_a?(Tempo)
+          Sequence::TempoMap.check_bpm(v)
+        else
+          raise ArgumentError, 'over: ramps to a tempo' if options[:over]
+          @session.check_tempo_source(v)
+        end
+        true
+      rescue ArgumentError => e
+        !!MB::Sound.live_error(ArgumentError.new(
+          "#{owner.inspect}: #{name}: takes a tempo (140), [140, over: 4.bars, curve: :smooth], a knob name, or a tempo LFO (got #{value.inspect}: #{e.message})"
+        ))
+      end
 
       # The root and mode of a scene's (or section's) key value.
       def key_value(name, value)

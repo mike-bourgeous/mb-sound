@@ -21,6 +21,7 @@ require_relative 'session/clocks'
 require_relative 'session/gestures'
 require_relative 'session/decisions'
 require_relative 'session/key_changes'
+require_relative 'session/tempo_changes'
 require_relative 'session/midi_in'
 require_relative 'session/audio_recording'
 require_relative 'session/stems'
@@ -81,6 +82,7 @@ module MB
       include Gestures
       include Decisions
       include KeyChanges
+      include TempoChanges
       include MidiIn
       include AudioRecording
       include Stems
@@ -953,6 +955,9 @@ module MB
           while remaining > 0
             @scheduler.apply_timed_changes
             commit_due_seeks unless @changes.empty?
+            # A moving tempo (a ramp, a followed knob) plays in tempo cells
+            # (see TempoChanges)
+            cell = tempo_cell(remaining)
             per_sample = span_per_sample
             # A take replay's lines run before the span whose time they were
             # typed in, like live lines typed between buffers, so a tempo
@@ -962,10 +967,12 @@ module MB
             if @scheduler.dispatch_exact(from, to)
               @scheduler.apply_timed_changes
               commit_due_seeks unless @changes.empty?
+              cell = tempo_cell(remaining)
               per_sample = span_per_sample
               to = nil
             end
             n = (@changes.empty? ? nil : frames_before_seek(remaining, per_sample)) || remaining
+            n = cell if cell && cell < n
             # (the span's end, computed once when the span is the rest)
             parts << render_span(n, per_sample, n == remaining && @transport.position.equal?(from) ? to : nil)
             remaining -= n
@@ -1092,6 +1099,10 @@ module MB
         end_cue_span(mix, count) # the phones mix (see Cue)
 
         @frame += count
+        # A moving tempo is read for the next frame now, so changes landing
+        # between buffers (console lines) and inside spans (take replays at
+        # other buffer sizes) see the same tempo (see TempoChanges)
+        tempo_cell(1) if moving && @transport.tempo_moves?
         @transport_record = transport_record_for(moving)
         mix
       ensure
