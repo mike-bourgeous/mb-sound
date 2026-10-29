@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-25",
+  "generated": "2026-10-28",
   "specs": {
     "spec/ext/mb/fast_sound_spec.rb": {
       "fast_sound": [
@@ -439,6 +439,7 @@
       ],
       "fast_delay": [
         "FastDelay.feedback",
+        "FastDelay.network",
         "FastDelay.read"
       ]
     },
@@ -629,8 +630,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -651,6 +650,9 @@
       ]
     },
     "spec/lib/mb/sound/graph_node/constant_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.fill_range"
+      ],
       "fast_sound": [
         "FastSound.smoothstep_buf"
       ]
@@ -802,6 +804,7 @@
     "spec/lib/mb/sound/graph_node/multitap_delay_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.circular_write",
+        "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.product"
       ],
@@ -943,6 +946,7 @@
       ],
       "fast_delay": [
         "FastDelay.feedback",
+        "FastDelay.network",
         "FastDelay.read"
       ],
       "fast_dynamics": [
@@ -1199,6 +1203,7 @@
         "FastArithmetic.complex_part",
         "FastArithmetic.copy",
         "FastArithmetic.divide",
+        "FastArithmetic.fill_range",
         "FastArithmetic.mix",
         "FastArithmetic.power",
         "FastArithmetic.power_fast",
@@ -1259,6 +1264,7 @@
     },
     "spec/lib/mb/sound/plan/dynamics_ops_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.fill_range",
         "FastArithmetic.mix",
         "FastArithmetic.product"
       ],
@@ -1420,13 +1426,13 @@
       ],
       "fast_wavetable": [
         "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
     },
     "spec/lib/mb/sound/plan/loop_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.copy",
         "FastArithmetic.divide",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
@@ -1442,6 +1448,7 @@
       ],
       "fast_sound": [
         "FastSound.cookbook",
+        "FastSound.dynamic_biquad",
         "FastSound.oscillate"
       ],
       "fast_synth": [
@@ -1491,6 +1498,40 @@
       "fast_wavetable": [
         "FastWavetable.oscillate",
         "FastWavetable.shape"
+      ]
+    },
+    "spec/lib/mb/sound/plan/rebuild_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.add_at",
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
+        "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.product",
+        "FastArithmetic.scale",
+        "FastArithmetic.wet_dry"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
+      ],
+      "fast_delay": [
+        "FastDelay.read"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_plan": [
+        "FastPlan.run",
+        "FastPlan.run_lanes"
+      ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
+      ],
+      "fast_sound": [
+        "FastSound.number_to_freq",
+        "FastSound.oscillate"
       ]
     },
     "spec/lib/mb/sound/plan/resonator_op_spec.rb": {
@@ -1587,6 +1628,7 @@
     "spec/lib/mb/sound/plan/tone_op_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.complex_part",
+        "FastArithmetic.fill_range",
         "FastArithmetic.mix",
         "FastArithmetic.product",
         "FastArithmetic.scale"
@@ -1603,8 +1645,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1668,6 +1708,7 @@
     },
     "spec/lib/mb/sound/tone_gain_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.fill_range",
         "FastArithmetic.mix",
         "FastArithmetic.product",
         "FastArithmetic.scale"
@@ -1705,6 +1746,7 @@
     },
     "spec/lib/mb/sound/tone_waveforms_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.fill_range",
         "FastArithmetic.mix"
       ],
       "fast_sound": [
@@ -1981,17 +2023,23 @@
       ],
       "includes": [
         "ext/mb/sound/fast_loop/loop_pitch.h",
+        "ext/mb/sound/include/mb_biquad.h",
         "ext/mb/sound/include/mb_clip_shape.h",
         "ext/mb/sound/include/mb_delay_interp.h",
         "ext/mb/sound/include/mb_ext_helpers.h",
+        "ext/mb/sound/include/mb_four_pole.h",
+        "ext/mb/sound/include/mb_four_pole_tuning.h",
         "ext/mb/sound/include/mb_svf.h"
       ],
       "depend": {
         "fast_loop.o": [
           "ext/mb/sound/fast_loop/loop_pitch.h",
+          "ext/mb/sound/include/mb_biquad.h",
           "ext/mb/sound/include/mb_clip_shape.h",
           "ext/mb/sound/include/mb_delay_interp.h",
           "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_four_pole.h",
+          "ext/mb/sound/include/mb_four_pole_tuning.h",
           "ext/mb/sound/include/mb_svf.h"
         ],
         "loop_pitch.o": [

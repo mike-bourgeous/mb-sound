@@ -31,6 +31,7 @@ module MB
         include Traversable
         include Nameable
         include ChorusMethods
+        include StereoDelayMethods
         include DynamicsMethods
         include BlendMethods
         include MasteringMethods

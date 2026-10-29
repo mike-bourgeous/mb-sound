@@ -187,16 +187,22 @@ module MB
         Sums ring until their last input ends (a gong past its click, a
         dry part plus its reverb); `(drone + hit).ring(:first)` (or
         `render(..., ring: :first)`) ends with the first.
-        Delays (sinc-interpolated, tempo-synced lengths), feedback loops that
-        run one sample at a time in C, the FDN reverb with presets, the
-        Juno chorus, and antialiased shapers.
+        Delays (sinc-interpolated, tempo-synced lengths; regenerating
+        multitaps, ping-pong, Haas), tape echoes with presets (`L.fx.delay`:
+        :reel, :slapback, :ping_pong, :dub), feedback loops that run one
+        sample at a time in C, the FDN reverb with presets, the Juno chorus,
+        and antialiased shapers.
       TEXT
-      dsl :delay, :multitap, :feedback, :reverb, :chorus, :softclip, :clip, :decimate, :quantize, :ease, :oversample, :ring
+      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :chorus, :softclip, :clip, :decimate, :quantize, :ease, :oversample, :ring
       note :delays, :feedback_loops, :reverbs, :chorus
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do
         blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop
         bg :try, (blip.tone.triangle.at(-14.db) * blip.amp_env).delay(1.n8.dotted, feedback: 0.5)
+      end
+      example 'a dub tape echo' do
+        blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop
+        bg :try, (blip.tone.triangle.at(-14.db) * blip.amp_env).tape_echo(:dub)
       end
       example 'a plate' do
         clip = seq(E4, rest, B4, rest).n8.loop

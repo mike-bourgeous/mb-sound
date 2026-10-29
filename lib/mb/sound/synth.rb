@@ -639,7 +639,7 @@ module MB
       # lanes, so they don't count (clip synths skip idle lanes since
       # 2026-10-10, user decision "yes, for now").
       def self.long_memory?(node)
-        node.is_a?(GraphNode::Reverb) || node.is_a?(GraphNode::MultitapDelay) ||
+        node.is_a?(GraphNode::Reverb) || node.is_a?(GraphNode::MultitapDelay) || node.is_a?(GraphNode::DelayNetwork) ||
           node.is_a?(GraphNode::FeedbackLoop) ||
           (node.is_a?(Sequence::TimelineNode) && !node.is_a?(MIDI::Transform) && !node.is_a?(MIDI::ClipSource)) ||
           (node.respond_to?(:base_filter) && (node.base_filter.is_a?(Filter::Delay) || node.base_filter.is_a?(Filter::FIR))) ||

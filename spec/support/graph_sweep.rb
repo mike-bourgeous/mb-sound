@@ -95,6 +95,24 @@ module GraphSweep
     }
   end
 
+  # Biquads, lp4 modes, and the diode ladder inside feedback loops
+  # (delay-fx-1's loop ops), constant and modulated.
+  def self.loop_filter_factories
+    biquads = MB::Sound::Filter::Cookbook::FILTER_TYPES.map { |t|
+      gain = MB::Sound::Filter::SVF::GAIN_TYPES.include?(t)
+      ["feedback biquad(#{t.inspect})", ->(c) {
+        c.sig.feedback { |fb, input| input + fb.delay(40.samples).filter(t, cutoff: c.mod(400, 3000), quality: 1.2, gain: gain ? 1.5 : nil, structure: :biquad) * 0.4 }
+      }]
+    }
+    ladders = MB::Sound::Filter::FourPole::MODES.keys.map { |m|
+      ["feedback lp4(mode: #{m.inspect})", ->(c) {
+        c.sig.feedback { |fb, input| input + fb.delay(40.samples).lp4(c.mod(300, 4000), resonance: c.mod(0, 0.7, 3), mode: m, drive: 1.5) * 0.5 }
+      }]
+    }
+    ladders << ['feedback diode', ->(c) { c.sig.delay(0.002, feedback: 0.6) { |fb| fb.diode(c.mod(400, 3000), resonance: 0.4) } }]
+    biquads + ladders
+  end
+
   def self.four_pole_factories
     fp = MB::Sound::Filter::FourPole
     modes = fp::MODES.keys.flat_map { |m|
@@ -282,6 +300,16 @@ module GraphSweep
       ['delay modulated', ->(c) { c.sig.delay(c.mod(0.001, 0.004, 3), feedback: c.mod(0, 0.6), wet: 0.5, dry: 0.5) }],
       ['delay cubic and linear', ->(c) { c.sig.delay(c.mod(0.001, 0.003), interpolation: :cubic) + c.sig.delay(0.0021, interpolation: :linear) }],
       ['multitap', ->(c) { c.sig.multitap(0.001, c.mod(0.002, 0.003), 37.samples).mixdown }],
+      ['multitap feedback (DelayNetwork)', ->(c) { c.sig.multitap(0.001, c.mod(0.002, 0.003), 37.samples, feedback: [0.3, c.mod(0, 0.4), 0], smooth: true).mixdown }],
+      ['tape_echo presets (TapeEcho: wobbled delay times, loops with :dc compensation)', ->(c) {
+        c.sig.tape_echo(:reel, time: 0.002, feedback: c.mod(0.3, 0.7)) + c.sig.tape_echo(:dub, time: 0.0017).at(0.5) +
+          c.sig.tape_echo(:ping_pong, time: 0.0011, wow: 0, spread: 0.5).mixdown + c.stereo_sig.tape_echo(:slapback, time: 0.001).mixdown
+      }],
+      ['ping_pong and haas', ->(c) {
+        c.sig.ping_pong(c.mod(0.001, 0.002), feedback: c.mod(0.2, 0.6), spread: 0.5, mix: 0.4).mixdown +
+          c.stereo_sig.ping_pong(0.0013, feedback: -0.5, input: :stereo, interpolation: :cubic).mixdown +
+          c.sig.haas(0.0007, side: :left, level: c.mod(0.5, 1)).mixdown
+      }],
       ['reverb', ->(c) { c.stereo_sig.reverb(:room) }],
       ['reverb room-size factory', ->(c) { c.sig.reverb(room_size: 0.3, decay: 0.5, damping: 0.5) + c.sig.reverb(room_size: 0.2, decay: 0.3, output_channels: 2).mixdown }],
       ['reverb modulation and loop processing', ->(c) {
@@ -410,7 +438,7 @@ module GraphSweep
   end
 
   def self.factories
-    node_factories + svf_factories + biquad_factories + four_pole_factories + filter_object_factories
+    node_factories + svf_factories + biquad_factories + four_pole_factories + loop_filter_factories + filter_object_factories
   end
 
   # Node classes the sweep doesn't build, with reasons.

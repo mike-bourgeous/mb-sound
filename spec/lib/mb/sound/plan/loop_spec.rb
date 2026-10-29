@@ -103,6 +103,23 @@ RSpec.describe(MB::Sound::Plan::Loop) do
     'two delays in series' => ->(s) {
       s.input.feedback { |fb, input| input + fb.delay(20.samples).delay(31.5.samples).softclip * 0.5 }
     },
+    'biquads (structure: :biquad) with constant and moving parameters (delay-fx-1)' => ->(s) {
+      s.input.feedback { |fb, input|
+        d = fb.delay(211.samples, smoothing: false)
+        lp = d.filter(:lowpass, cutoff: 2500, quality: 0.6, structure: :biquad)
+        pk = lp.filter(:peak, cutoff: 3.hz.lfo.at(400..3000), quality: 0.7.hz.lfo.at(0.5..3), gain: 4.db, structure: :biquad)
+        input + (pk + d.filter(:highpass, cutoff: 150, quality: 0.5, structure: :biquad) * 0.2).softclip * 0.6
+      }
+    },
+    'lp4 and diode ladders with drive, moving cutoff and resonance (delay-fx-1)' => ->(s) {
+      s.input.feedback { |fb, input|
+        d = fb.delay(173.samples, smoothing: false)
+        a = d.lp4(2.hz.lfo.at(600..5000), resonance: 0.4.hz.lfo.at(0..0.6), drive: 2)
+        b = d.diode(1800, resonance: 0.3)
+        c = d.lp4(3000, resonance: 0.2, mode: :bp2)
+        input + (a * 0.4 + b * 0.3 + c * 0.2)
+      }
+    },
     'a gain node on a parallel path (latency per sample)' => ->(s) {
       s.input(3, 0.1).feedback { |fb, input|
         d = fb.delay(90.25.samples, smoothing: false)

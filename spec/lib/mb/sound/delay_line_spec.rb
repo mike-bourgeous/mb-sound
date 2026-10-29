@@ -245,4 +245,55 @@ RSpec.describe(MB::Sound::DelayLine, :aggregate_failures) do
       end
     end
   end
+
+  describe '.network (FastDelay.network)' do
+    let(:input) { Numo::NArray.srand(5); Numo::SFloat.new(600).rand(-1, 1) }
+    let(:moving) { Numo::DFloat.new(600).seq * 0.04 + 10.3 }
+
+    [:linear, :cubic, :sinc].each do |interp|
+      it "matches DelayLine#feedback exactly with one line and one tap (#{interp})" do
+        a = MB::Sound::DelayLine.new(200)
+        b = MB::Sound::DelayLine.new(200)
+        [a, b].each { |l| l.prepare(600, 40) }
+        expected = a.feedback(input, moving, 0.7, interpolation: interp, state: [])
+        out = [Numo::SFloat.zeros(600)]
+        MB::Sound::DelayLine.network([b], [input], [0], [moving], [[0.7]], 600, interpolation: interp, states: [[]], outs: out)
+        expect(out[0]).to eq(expected)
+        expect(b.unwrapped).to eq(a.unwrapped)
+      end
+
+      it "matches its Ruby mirror exactly with two lines, three taps, and per-sample gains (#{interp})" do
+        gain = Numo::SFloat.new(600).seq(0, 0.0005)
+        make = ->(ls) { [ls, [input, nil], [0, 1, 0], [17, moving, 33.5], [[nil, 0.6, gain], [0.5, nil, 0.1]], 600] }
+
+        l1 = Array.new(2) { MB::Sound::DelayLine.new(300).tap { |l| l.prepare(600, 60) } }
+        l2 = Array.new(2) { MB::Sound::DelayLine.new(300).tap { |l| l.prepare(600, 60) } }
+        s1 = Array.new(3) { [] }
+        s2 = Array.new(3) { [] }
+
+        out = Array.new(3) { Numo::SFloat.zeros(600) }
+        MB::Sound::DelayLine.network(*make.(l1), interpolation: interp, states: s1, outs: out)
+        ruby = MB::Sound::DelayLine.network_ruby(*make.(l2), interpolation: interp, states: s2)
+
+        expect(out).to eq(ruby)
+        expect(s1).to eq(s2)
+        expect(l1.map(&:unwrapped)).to eq(l2.map(&:unwrapped))
+        expect(out.map { |o| o.abs.max }).to all(be > 0.1)
+      end
+    end
+
+    it 'raises for complex lines and mismatched Arrays' do
+      l = MB::Sound::DelayLine.new(100)
+      l.prepare(10, 5, Numo::SComplex)
+      expect { MB::Sound::DelayLine.network([l], [nil], [0], [3], [[0.5]], 10, outs: [Numo::SFloat.zeros(10)]) }.to raise_error(ArgumentError, /real/)
+
+      l = MB::Sound::DelayLine.new(100)
+      expect {
+        MB::Sound::FastDelay.network([l.network_buffer], [0], [nil], [Numo::SFloat.zeros(10)], [0], [3, 4], [[0.5]], 0, nil, nil, 10)
+      }.to raise_error(ArgumentError, /lengths/)
+      expect {
+        MB::Sound::FastDelay.network([l.network_buffer], [0], [nil], [Numo::SFloat.zeros(10)], [1], [3], [[0.5]], 0, nil, nil, 10)
+      }.to raise_error(ArgumentError, /line 1/)
+    end
+  end
 end
