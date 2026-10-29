@@ -46,6 +46,26 @@ module MB
       clip :stick, seq(D5, T, T).n1
       clip :weather, seq(R).n1.loop # (rain and wind ignore their notes)
 
+      # The endless form's material (G4, generative-g4, 2026-10-29): the key
+      # walks the yo scale on D, G, A, and E (a Markov chain, a key every 16
+      # bars, blending over the last 4: a 384-bar loop, 25.6 minutes at 60
+      # BPM), which all hold D, E, and A, so the bowls, rin, gong, and rain
+      # stick ring true in every key while the drone, koto, and harp follow
+      # it.  `use:` below plays these wherever the scenes play :drone,
+      # :motif, and :harp.
+      keys = markov(d: { g: 2, a: 2, e: 0.5 }, g: { d: 2, a: 0.5 }, a: { d: 2, e: 1 }, e: { a: 2, d: 1 }, seed: 61).take(24)
+      roots = { d: D2, g: G1, a: A1, e: E2 }
+      walk = harmony(keys.each_with_index.flat_map { |k, i|
+        w = scale(:yo, k).weights + tones(roots[k]) * 0.5
+        [[(16 * i).bars, w], [(16 * i + 12).bars, w]]
+      }.to_h, loop: 384.bars)
+      bass = harmony(keys.each_with_index.to_h { |k, i| [(16 * i).bars, [roots[k]]] }, curve: :step, loop: 384.bars)
+      clip :drone_walk, strikes(bass.over(G1..Fs2), every: 8.bars, length: 8.bars, chance: 1.0, gap: 1, sharpen: 4, velocity: 0.7, note: 8.bars, seed: 1)
+      clip :motif_walk, motifs(walk, 32, step: 1.n4, form: %i[a b a c], answer: { b: :a }, density: 0.1, vary: 0.3, mutate: 0.2, evolve: 2,
+                               range: G4..G5, around: D5, velocity: 0.45..0.8, legato: 1.0, seed: 2)
+      clip :harp_walk, motifs(walk, 16, step: 1.n16, form: %i[a a b a], answer: { b: :a }, density: 0.45, vary: 0.2, mutate: 0.15,
+                              range: G4..E5, around: B4, velocity: 0.5..0.8, seed: 3).swing(0.6)
+
       knob :space, 0.5, range: 0.0..1.0   # the rooms' level (bowls, rin, gong, koto, harp)
       knob :wear, 0.6, range: 0.0..1.0    # how old the tape is (koto, harp; 0.6 like the presets, textures-5)
       knob :shimmer, -7.0, range: -12.0..7.0 # the gong's shimmer tuning in semitones (turn it while a stroke rings)
@@ -78,6 +98,19 @@ module MB
                    rain: :weather, wind: :weather, drizzle: [0.7, { over: 8 }], gust: [0.3, { over: 8 }]
       scene :dissolve, bowls: :bowl_a, bowls2: :bowl_b, rin: :rin, motif: :motif, harp: :harp, rain: :weather,
                        wear: [0.7, { over: 4 }], space: [0.8, { over: 4 }], drizzle: [0.1, { over: 8 }]
+
+      # The endless form (G4): moods by a Markov chain, each for 4 to 16
+      # bars (16 to 64 s), the arch's dissolve leading into a new emerge:
+      # `genre(:ambient).endless.play` plays forever, the key walking under
+      # it (bin/songs/endless.rb); `.generative` plays 12 moods.
+      generator markov(emerge: { drift: 1 },
+                       drift: { bloom: 3, hush: 1, tide: 1, drift: 0.5 },
+                       bloom: { tide: 2, hush: 1.5, drift: 1 },
+                       hush: { drift: 2, tide: 1, emerge: 0.5 },
+                       tide: { hush: 2, drift: 1.5, dissolve: 0.5 },
+                       dissolve: { emerge: 1 }, seed: 60),
+                bars: { emerge: 8, drift: [8, 16], bloom: [8, 16], hush: [4, 8], tide: [8, 16], dissolve: 8 },
+                sections: 12, use: { drone: :drone_walk, motif: :motif_walk, harp: :harp_walk }
 
       loudness(-19..-16)
       true_peak(-1.db)

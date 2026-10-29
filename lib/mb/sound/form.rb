@@ -221,19 +221,21 @@ module MB
       # that many per visit; then the flow carries on.  +lengths+ gives
       # sections their lengths per occurrence (bars, Durations, Ranges of
       # bars or Arrays drawn per occurrence from the source's seed);
-      # sections without one play their declared length.  Every visit
+      # sections without one play their declared length.  +declares+
+      # names the sections the step declared (those it gave lengths to
+      # that the flow hadn't declared; printed with their options).  Every visit
       # continues the source where the last one left it (a chain's draws
       # keep counting), so `label :top; generate moods; goto :top` plays
       # on forever.
-      Generate = Data.define(:source, :lengths, :sections) do
-        def initialize(source:, lengths: {}, sections: nil)
+      Generate = Data.define(:source, :lengths, :sections, :declares) do
+        def initialize(source:, lengths: {}, sections: nil, declares: [])
           unless %i[form_start form_next form_states nonterminal? seed to_ruby].all? { |m| source.respond_to?(m) }
             raise ArgumentError, "generate needs a section source: markov(...) or lsystem(...) (got #{source.inspect})"
           end
           raise ArgumentError, "generate's lengths are a Hash of section => length (got #{lengths.inspect})" unless lengths.is_a?(Hash)
           lengths.each { |name, len| Form.check_length_spec(name, len) }
           raise ArgumentError, "generate sections: must be a positive Integer or nil (got #{sections.inspect})" unless sections.nil? || (sections.is_a?(Integer) && sections > 0)
-          super(source: source, lengths: lengths.dup.freeze, sections: sections)
+          super(source: source, lengths: lengths.dup.freeze, sections: sections, declares: declares.dup.freeze)
         end
 
         # The length of section +name+ for the source's draw +n+ (its own
@@ -243,9 +245,18 @@ module MB
           spec.nil? ? default : Form.draw_length(spec, source.seed, n)
         end
 
-        def to_ruby
+        # The step as a flow line; +form_sections+ (the form's) gives the
+        # options of the sections it declared (`breakdown: { length: [8,
+        # 16], fill: [:riser, 4] }`).
+        def to_ruby(form_sections = {})
           parts = [source.to_ruby]
-          parts << "bars: #{Form.ruby_value(lengths)}" unless lengths.empty?
+          unless lengths.empty?
+            bars = lengths.to_h { |name, spec|
+              opts = declares.include?(name) && form_sections[name] ? form_sections[name].options : {}
+              [name, opts.empty? ? spec : { length: spec, **opts }]
+            }
+            parts << "bars: #{Form.ruby_value(bars)}"
+          end
           parts << "sections: #{sections}" if sections
           "generate #{parts.join(', ')}"
         end
@@ -625,7 +636,7 @@ module MB
           when Pick
             emit_pick(e, declared, lines, indent)
           when Generate
-            lines << "#{indent}#{e.to_ruby}"
+            lines << "#{indent}#{e.to_ruby(@sections)}"
             # (the step declares the sections it gives lengths to)
             e.lengths.each_key { |n| declared[n] ||= @sections[n].length }
           when Play

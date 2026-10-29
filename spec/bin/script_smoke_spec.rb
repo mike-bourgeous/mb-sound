@@ -53,7 +53,9 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/generative_blur.rb' => ['--bars', '0.5', '-m', 'both', '-u', '0.4', '-t', 'slow', '-C', '0.5'],
     'bin/songs/generative_demo.rb' => ['--bars', '0.5', '-s', '3', '-u', '0.3'],
     'bin/songs/generative_steer.rb' => ['--bars', '0.5', '-s', '3'],
-    'bin/songs/genre_demo.rb' => ['--bars', '0.5', '-G', 'jungle', '-s', '20'],
+    'bin/songs/endless.rb' => ['--bars', '0.5', '-s', '3', '--plan', '4'],
+    # (a generated jungle song: the short-form path plays in the golden set's ambient, techno, and house pieces)
+    'bin/songs/genre_demo.rb' => ['--bars', '0.5', '-G', 'jungle', '-E', 'song', '-S', '2'],
     'bin/songs/granular_song.rb' => ['--bars', '0.5', '-d', '0.5'],
     'bin/songs/kit_builder.rb' => ['--bars', '0.5', '-s', '0'],
     'bin/songs/loop_church.rb' => ['--bars', '0.5', '-S', '0.6'],

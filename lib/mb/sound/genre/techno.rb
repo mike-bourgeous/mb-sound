@@ -32,6 +32,16 @@ module MB
         outro_b   8
         outro_c   8
       end
+      # A generated form (G4): a Markov chain over the sections, as a DJ
+      # set rides a track: peaks trade with their b-sides, breakdowns lead
+      # back to the second peak or another build, and the outro comes when
+      # the chain reaches it (each seed another long take).
+      # `genre(:techno).generative(seed: 4).play`
+      generator markov(intro: { hats: 1 }, hats: { build: 1 }, build: { peak: 1 },
+                       peak: { peak_b: 2, breakdown: 1 }, peak_b: { peak: 1, breakdown: 2, peak2: 0.5 },
+                       breakdown: { peak2: 2, build: 1 }, peak2: { peak_b: 0.5, outro: 1.5, breakdown: 0.5 },
+                       outro: { outro_b: 1 }, outro_b: { outro_c: 1 }, outro_c: {}, seed: 132),
+                bars: { intro: 16, hats: [8, 16], build: [8, 16], peak: [16, 32], peak_b: 16, breakdown: [8, 16], peak2: [16, 32], outro: 16, outro_b: 8, outro_c: 8 }
 
       four = 'X...X...X...X...'
       hats = '3535353535353535'

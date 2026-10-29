@@ -44,6 +44,12 @@ module MB
           @lock = Mutex.new
         end
 
+        # The same system with another seed.
+        def reseed(seed)
+          LSystem.new(@axiom, @rules.transform_values { |alts| alts.length == 1 && alts[0][1] == 1 ? alts[0][0] : alts.to_h },
+                      generations: @generations, seed: seed, vary: @vary)
+        end
+
         # True if every visit of a flow grows a new word.
         def vary?
           @vary

@@ -160,16 +160,45 @@ module MB
         #     label :top
         #     generate moods, still: 6, drift: 4..8, bloom: [8, 12]
         #     goto :top
+        #
+        # A length may come with section options for sections the flow
+        # hasn't declared: `breakdown: { length: [8, 16], fill: [:riser, 4]
+        # }` (+length:+, then +times:+, +fill:+, +scene:+, +fade:+, knob
+        # values).
         def generate(source, bars: {}, sections: nil, **lengths)
-          lengths = bars.merge(lengths)
-          step = Generate.new(source: source, lengths: lengths, sections: sections)
-          lengths.each do |name, spec|
+          given = bars.merge(lengths)
+          specs = {}
+          options = {}
+          given.each do |name, spec|
+            if spec.is_a?(::Hash)
+              ::Kernel.raise ::ArgumentError, "generate: #{name}: { ... } needs length: (got #{spec.inspect})" unless spec.key?(:length)
+              specs[name] = spec[:length]
+              options[name] = spec.reject { |k, _| k == :length }
+            else
+              specs[name] = spec
+            end
+          end
+          declares = []
+          step = nil
+          specs.each do |name, spec|
             __adopt__(name)
-            next if @sections.key?(name)
+            if @sections.key?(name)
+              ::Kernel.raise ::ArgumentError, "generate: #{name.inspect} is declared already; give its options where it is declared" if options[name] && !options[name].empty?
+              next
+            end
             ::Kernel.raise ::ArgumentError, "generate: #{name.inspect} can't be a section name" if (STEP_NAMES + SOURCE_NAMES).include?(name)
-            @sections[name] = Section.new(name: name, length: Form.default_length(spec))
+            opts = options[name] || {}
+            __check_options__(name, opts)
+            Form.check_length_spec(name, spec)
+            @sections[name] = Section.new(
+              name: name, length: Form.default_length(spec), times: opts.fetch(:times, 1),
+              fill: Fill.from(opts[:fill], section: name), scene: opts[:scene], fade: opts[:fade],
+              knobs: Form.section_options(name, opts)[1]
+            )
+            declares << name
             __define__(name)
           end
+          step = Generate.new(source: source, lengths: specs, sections: sections, declares: declares)
           @stack.last << step
           nil
         end

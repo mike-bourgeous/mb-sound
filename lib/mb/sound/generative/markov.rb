@@ -54,6 +54,11 @@ module MB
           @lock = Mutex.new
         end
 
+        # The same chain with another seed.
+        def reseed(seed)
+          Markov.new(@rules, start: @start, seed: seed)
+        end
+
         # True if a weight is a moving param (see the class comment).
         def steered?
           @steered

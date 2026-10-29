@@ -26,6 +26,14 @@ module MB
         strip  4
         outro  4
       end
+      # A generated form (G4): a Markov chain over the layers and sections:
+      # the loop builds layer by layer, then the groove trades with the
+      # bridge and the peak until a strip-down leads out (or back in).
+      # `genre(:funk).generative(seed: 5).play`
+      generator markov(beat: { bass: 1 }, bass: { keys: 1 }, keys: { perc: 1 }, perc: { groove: 1 },
+                       groove: { bridge: 2, peak: 1.5, groove: 0.5 }, bridge: { groove: 2, peak: 1 },
+                       peak: { groove: 0.5, strip: 2 }, strip: { groove: 0.5, outro: 2 }, outro: {}, seed: 96),
+                bars: { beat: 2, bass: 2, keys: 2, perc: 2, groove: [8, 16], bridge: [4, 8], peak: [8, 16], strip: [2, 4], outro: 4 }
 
       clip :beat, grid(16,
         kick:  'X.....X...X..x..' * 2,
