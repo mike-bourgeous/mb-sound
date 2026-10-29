@@ -1,20 +1,20 @@
 ▶ 17:3   128 bpm 4/4  load  31% ▃  xruns 0                                                                            │drop 1 ████▌    5/8  → break 21:1
-─ TRACKS ───────────────── 3 ─┬─ INSPECTOR ───────────────────────────────────────────────────────────────────────────┴────────── 4 ─┬─ CODE ─────────────────────────────────────────────────────────────────────────────────────────── 5 ─
+─ TRACKS ───────────────── 3 ─┬─ SOUND ───────────────────────────────────────────────────────────────────────────────┴────────── 4 ─┬─ CODE ─────────────────────────────────────────────────────────────────────────────────────────── 5 ─
 ● drums  beat_a               │bass  2/3                                                                                             │knob :cut, (100.0..8000.0).at(2400.0), curve: :exp, unit: "Hz"
-● bass   bass_a               │ cut       ███████████████████████▎         2400 Hz 100..8000 exp                                     │
-● lead   rec →21:1            │                                                                                                      │# bass: the graph it plays (to_ruby)
-● pad    stopping chords      │nodes lp4×2 highpass×4 softclip×2 saw×6                                                               │synth(riff, voices: 1) { |v|
-                              │highpass  filter ×4  2/4  n N: other nodes                                                            │  saws = v.hz.unison(6, detune: 0.32) { |p, _i| p.saw }
-                              │ cutoff     150 Hz                                                                                    │  saws.lp4(knob(:cut), resonance: 0.25).softclip(0.35, 0.95).filter(:highpass, cutoff: 150, quality:
-                              │ quality    0.7  Q                                                                                    │      0.7)
-─ LIBRARY ──────────────── 6 ─┤                                                                                                      │}
-find ▏                        │                                                                                                      │
-                              │                                                                                                      │
-the library picker goes here: │                                                                                                      │
-find-as-you-type, then        │                                                                                                      │
-Enter: the likely action      │                                                                                                      │
-(named on the status line),   │                                                                                                      │
-a key per action, auditions   │                                                                                                      ├─ RENDER ───────────────────────────────────────────────────────────────────────────────────────── 7 ─
+● bass   bass_a               │notes → saw ×6 → lp4 → softclip → highpass ×2 → out                                                   │
+● lead   rec →21:1            │SOURCE s ──────────────────────────────────────────────────────────────────────────────────────────── │# bass: the graph it plays (to_ruby)
+● pad    stopping chords      │ saw ×6         phase 0                                                                               │synth(riff, voices: 1) { |v|
+                              │  phase      0                                                                                        │  saws = v.hz.unison(6, detune: 0.32) { |p, _i| p.saw }
+                              │FILTER f ──────────────────────────────────────────────────────────────────────────────────────────── │  saws.lp4(knob(:cut), resonance: 0.25).softclip(0.35, 0.95).filter(:highpass, cutoff: 150, quality:
+                              │ lp4            stereo  cut 2400 Hz  reso 0.25                                                        │      0.7)
+─ LIBRARY ──────────────── 6 ─┤  cutoff     ███████████▋     2400 Hz  cut                                                            │}
+find ▏                        │  resonance  0.25  ·                                                                                  │
+                              │AMP a ─────────────────────────────────────────────────────────────────────────────────────────────── │
+the library picker goes here: │ softclip       stereo                                                                                │
+find-as-you-type, then        │FX x ──────────────────────────────────────────────────────────────────────────────────────────────── │
+Enter: the likely action      │▸highpass ×2    post-amp EQ  stereo  cut 150 Hz  q 0.7                                                │
+(named on the status line),   │  cutoff     150 Hz                                                                                   │
+a key per action, auditions   │  quality    0.7                                                                                      ├─ RENDER ───────────────────────────────────────────────────────────────────────────────────────── 7 ─
 on CUE only.                  │                                                                                                      │bass  -22.2 LUFS  peak -11.2  rms -20.8  first note C3, settled 15 ms, 24 kHz, 0 ms
                               │                                                                                                      │ 0.2┤⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡅⡀⡀⡀⣀⣠⡤⡖⡒⡉⡉⡉⡍⡓⡒⡤⣤⣀⡀⡀⡀⡀⡀⡀⡅⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀
                               │                                                                                                      │    │         ⢀⣀⡠⠥⠒⠊⠉⠁       ⠅     ⠉⠉⠒⠢⠤⣀⣅           ⠨           ⠨           ⠨           ⠨
@@ -30,7 +30,7 @@ on CUE only.                  │                                               
                               │                                                                                                      │   │              ⠅         ⠨ ⢸⠉  ⢸    ⠅             ⠅         ⠨          ⠅             ⠅         ⠨
                               │                                                                                                      │-40┤⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠪⣂⡎⠂⠂⠂⠺⢦⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⡏⡇⠂⠂⠇⠂⠂⠂⣢⠂⠂⠂⠂⠂⠪⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠪⠂⠂⠂
                               │                                                                                                      │-60┤⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠄⠄⣄⣬⠇⠄⠄⠄⠄⠄⠜⢤⡄⠄⠅⠄⠄⠄⠄⠄⠄⠄⠄⢴⠅⢼⠄⠄⠅⠄⠄⠄⣿⠄⠄⠄⠄⣼⠬⠄⠄⢄⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄
-                              │                                                                                                      │   │              ⠅   ⡤⠤⠤⠒⠒⠁⠨        ⠉⢦⣅        ⡎ ⠘⡆ ⠅  ⢠⠋⡆   ⡿⡨  ⣿  ⣼ ⢰⡄ ⡅             ⠅         ⠨
+                              │61 plumbing nodes hidden (p shows)                                                                    │   │              ⠅   ⡤⠤⠤⠒⠒⠁⠨        ⠉⢦⣅        ⡎ ⠘⡆ ⠅  ⢠⠋⡆   ⡿⡨  ⣿  ⣼ ⢰⡄ ⡅             ⠅         ⠨
                               ├─ PREVIEW ──────────────────────────────────────────────────────────────────────────────────────── 8 ─┤-80┤⠥⠥⠥⠥⠥⠥⠥⠥⠥⠥⠥⠗⠓⠓⠗⠉⠉⠉⠁⠁⠁⠁⠁⠁⠩⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠅⠓⢅⣁⠁⠁⠁⠁⡗⠁⠁⠁⠱⡁⠅⠁⠁⢹⠁⢇⠁⠁⠁⡇⡯⠁⢱⢹⠁⠁⣿⠁⢹⡇⢡⡇⢱⡇⢡⡅⡁⠁⠁⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⠁⠁⠁⠁⠁⠩⠁⠁⠁
                               │level (dB)                                                                                            │   └┬─────┴───┴───┬─┴──┴─┴─┴┬──────────┬─────┴───┴───┬──┴─┴─┴─┴┬──────────┬─────┴────┴──┬──┴─┴─┴─┴┬───
                               │   │                      ⠅                               ⠅                              ⠨            │   20            50        100        200           500       1k         2k             frequency (Hz)
@@ -44,15 +44,15 @@ on CUE only.                  │                                               
                               │   │      ⢀⡠⠒⠁            ⠅                               ⠅                              ⠨            │    └┬────────┬─────────┬─────────┬────────┬─────────┬─────────┬────────┬─────────┬─────────┬────────┬
                               │-30┤⡀⡀⡀⣀⡤⡚⡁⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡅⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡅⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀│     0       50        100       150      200       250       300      350       400         time (ms)
                               │   │ ⡠⠜⠁                  ⠅                               ⠅                              ⠨            ├─ KEYS ─────────────────────────────────────────────────────────────────────────────────────────── 9 ─
-                              │   │⠉                     ⠅                               ⠅                              ⠨            │Up Down    previous knob or param / next knob or param
+                              │   │⠉                     ⠅                               ⠅                              ⠨            │Up Down    previous param or knob / next param or knob
                               │-40┤⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠪⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂│Left Right turn the knob up / turn the knob down
                               │   │                      ⠅                               ⠅                              ⠨            │Enter      type a value, or bind a literal param
                               │   │                      ⠅                               ⠅                              ⠨            │0          the knob's default
                               │-50┤⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠩⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁│m          learn a MIDI controller for the knob
-                              │   │                      ⠅                               ⠅                              ⠨            │t T        the next track / the previous track
-                              │-60┤                      ⠅                               ⠅                              ⠨            │n N        the next node / the previous node
-                              │   └┴────┴───┴──┴──┴─┴─┴┴─┬────────┴─────┴───┴──┴──┴─┴┴─┴─┬────────┴─────┴───┴──┴─┴─┴─┴─┴┬─────────┴──│/          find in the library (later)
-                              │                         100                             1k                             frequency (Hz)│a          audition on CUE (later)
+                              │   │                      ⠅                               ⠅                              ⠨            │s f        SOURCE: oscillators, samples, glide / FILTER: filters and the filter envelope / AMP: drive…
+                              │-60┤                      ⠅                               ⠅                              ⠨            │n N        the next row / the previous row
+                              │   └┴────┴───┴──┴──┴─┴─┴┴─┬────────┴─────┴───┴──┴──┴─┴┴─┴─┬────────┴─────┴───┴──┴─┴─┴─┴─┴┬─────────┴──│t T        the next track / the previous track
+                              │                         100                             1k                             frequency (Hz)│v V        a kit's next voice / a kit's previous voice
 ─ AUDITION ───────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────── 10 ─
 CUE ○ nothing cued  │ audition: the picker's entry plays here (cue :x, sound)
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 11 ─

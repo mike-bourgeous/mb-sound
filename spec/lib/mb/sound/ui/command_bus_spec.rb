@@ -21,6 +21,8 @@ module CommandBusGuard
     'lib/mb/sound/ui/warm_up.rb:add' => 'a private sandbox Session for YJIT warm-up, closed afterwards',
     'lib/mb/sound/ui/keyboard/link.rb:add' => "the keyboard's default patch, a live monitor for playing with nothing armed (not part of the performance; takes replay the MIDI it played through the MIDI log)",
     'lib/mb/sound/ui/keyboard/link.rb:remove' => 'rings out that monitor once a track is armed',
+    'lib/mb/sound/ui/design.rb:track' => 'design is a console command (typed at the prompt: the take records its line); it makes the track as `track` would',
+    'lib/mb/sound/ui/design.rb:bg' => 'design is a console command (typed at the prompt: the take records its line); it plays the track as `bg` would',
     'lib/mb/sound/ui/tiles.rb:preview_turn' => "a held key's live knob sweep (UI::TurnGesture): the Session records its steps and the gesture's one console line (Session#gesture_line) is journaled at its first step and replayed from there by takes",
   }.freeze
 end

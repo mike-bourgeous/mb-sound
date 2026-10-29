@@ -1,32 +1,32 @@
 ▶ 17:3   128 bpm 4/4  load  31% ▃  xruns 0                  │drop 1 ████▌    5/8  → break 21:1
-─ TRACKS ───────────────── 3 ─┬─ INSPECTOR ─────────────────┴────────── 4 ─┬─ CODE ───────────────────────────────── 5 ─
-● drums  beat_a               │bass  2/3                                   │knob :cut, (100.0..8000.0).at(2400.0),
-● bass   bass_a               │ cut       ███████▎   2400 Hz 100..8000 exp │    curve: :exp, unit: "Hz"
-● lead   rec →21:1            │                                            │
-● pad    stopping chords      │nodes lp4×2 highpass×4 softclip×2 saw×6     │# bass: the graph it plays (to_ruby)   more
-                              │      amp_env×6                             ├─ RENDER ─────────────────────────────── 6 ─
-                              │amp_env  env ×6  5/5  n N: other nodes      │bass  -22.2 LUFS  peak -11.2  rms -20.8  …
-                              │ attack     0.02 s                          │ 0.2┤⠄⠄⠄⠄⠄⠄⣄⠴⠎⠭⠖⢦⡄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠄⠄⠄
-─ LIBRARY ──────────────── 7 ─┤ decay      0.3 s                           │    │   ⣠⠴⠊   ⠨  ⠈⠑⠤⣀   ⠨         ⠅
-find ▏                        │ sustain    0.6                             │    │⣀⠴⠊⠁     ⠨     ⠈⠓⢦⡀⠨         ⠅
-                              │ release    0.5 s                           │ 0.0┤⠁⠁⠁⠁⠁⠁⠁⠁⠁⠩⠁⠁⠁⠁⠁⠁⠁⠁⠉⠹⠧⣁⠁⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⡡⠕⠋⠁⠁
-the library picker goes here: │                                            │    │         ⠨         ⠨ ⠈⠓⠦⣄    ⠅⢀⣠⠖⠋⠁
-find-as-you-type, then        │                                            │-0.2┤⠂⠂⠂⠂⠂⠂⠂⠂⠂⠪⠂⠂⠂⠂⠂⠂⠂⠂⠂⠪⠂⠂⠂⠂⠊⠛⠦⣆⡦⠗⠋⠂⠂⠂⠂⠂⠂⠂⠂
-Enter: the likely action      │                                            │    └┬────────┬─────────┬─────────┬────────┬
-(named on the status line),   │                                            │     0        2         4         6       ms
-a key per action, auditions   ├─ PREVIEW ────────────────────────────── 8 ─┼─ KEYS ───────────────────────────────── 9 ─
-on CUE only.                  │A 20ms D 300ms S -4.4dB R 500ms pk -3.1dB   │Up Down    previous knob or param / next kn…
-                              │1.0┤⢸⣇  ⡇ ⠨   ⢈  ⠨      ⠅⢈    ⠨      ⠨    ⡁ │Left Right turn the knob up / turn the knob…
-                              │   │⢸⡘⢦⡀⡇ ⠨   ⠠  ⠨      ⠅⠠    ⠨      ⠨    ⠄ │Enter      type a value, or bind a literal …
-                              │   │⣸⠳⣄⠉⡟⠒⠺⠒⠒⠒⠒⠒⠒⠺⠒⠒⠒⠒⠒⠒⠗⢲⡀   ⠨      ⠨    ⠂ │0          the knob's default
-                              │0.5┤⣿⠁⠉⠙⡗⠓⠻⠓⠓⠓⢛⠓⠓⠻⠓⠓⠓⠓⠓⠓⠗⢻⡽⣅⠁⠁⠩⠁⠁⠁⠁⠁⠁⠩⠁⠁⠁⠁⡁⠁│m          learn a MIDI controller for the …
-                              │   │⡧   ⡇ ⠨   ⠠  ⠨      ⠅⠠⠉⠺⣷⣤⡨      ⠨    ⠄ │t T        the next track / the previous tr…
-                              │0.0┤⡗   ⡇ ⠨   ⠐  ⠨      ⠅⠐   ⠉⠻⠛⠶⠦⠤⢤⣤⣨⣀⣀⣀⣀⣂⣀│n N        the next node / the previous node
-                              │   └┬─────┬──────┬──────┬─────┬──────┬──────│/          find in the library (later)
-                              │    0    200    400    600   800   1000     │a          audition on CUE (later)
-─ AUDITION ───────────────────┴────────────────────────────────────────────┴─────────────────────────────────────── 10 ─
+─ TRACKS ───────────── 3 ─┬─ SOUND ─────────────────────────┴──────── 4 ─┬─ CODE ─────────────────────────────────── 5 ─
+● drums  beat_a           │bass  2/3                                     │knob :cut, (100.0..8000.0).at(2400.0), curve:
+● bass   bass_a           │notes → saw ×6 → lp4 → softclip → amp → highp…│    :exp, unit: "Hz"
+● lead   rec →21:1        │SOURCE s saw ×6                               │
+● pad    stopping chords  │FILTER f lp4                                  │# bass: the graph it plays (to_ruby)
+                          │AMP a ─────────────────────────────────────── │synth(riff, voices: 1) { |v|
+                          │ softclip       stereo                        │  saws = v.hz.unison(6, detune: 0.32) { |p,
+                          │▸amp_env        amp env  → amp  A 20ms  D 300…│      _i| p.saw }
+                          │  attack     20ms                             │  saws.lp4(knob(:cut), resonance:        more
+                          │  decay      300ms                            ├─ RENDER ───────────────────────────────── 6 ─
+                          │  sustain    0.6                              │bass  -22.2 LUFS  peak -11.2  rms -20.8  fi…
+                          │  release    500ms                            │ 0.2┤⠄⠄⠄⠄⠄⢄⣄⠴⠞⠍⠝⠖⠤⣄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄
+                          │FX x ──────────────────────────────────────── │    │  ⣀⠤⠚⠉    ⠅  ⠈⠉⠲⢤⣀  ⠨         ⠨
+                          │ highpass ×2    post-amp EQ  stereo  cut 150 …│ 0.0┤⠖⠏⠅⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠌⠕⠦⢬⡄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⣤⠤⠄⠄
+                          │61 plumbing nodes hidden (p shows)            │    │          ⠅         ⠨⠉⠑⠲⣄⡀    ⠨  ⣀⡴⠒⠉⠁
+                          ├─ PREVIEW ──────────────────────────────── 7 ─┤-0.2┤⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠪⠂⠂⠂⠂⠊⠛⠦⢆⣢⠮⠖⠋⠂⠂⠂⠂⠂⠂⠂⠂
+                          │A 20ms D 300ms S -4.4dB R 500ms pk -3.1dB     │    └┬─────────┬─────────┬─────────┬─────────┬
+                          │1.0┤⢸⣇  ⡇  ⠅   ⡁  ⠅      ⠅⢈     ⠅      ⠅    ⡁ │     0         2         4         6        ms
+                          │   │⢸⡘⢦⣀⡇  ⠅   ⠄  ⠅      ⠅⠠     ⠅      ⠅    ⠄ │level (dB)
+                          │   │⣸⠳⣄⠈⡟⠒⠒⠗⠒⠒⠒⠒⠒⠒⠗⠒⠒⠒⠒⠒⠒⠗⠲⡄    ⠅      ⠅    ⠂ │-20┤⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠬⢄⡶⡄⠄⠅⠄⠄⠄⠄⠄⠅⠄⠄⠄⠬⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠅⠄⠄⠄⠬⠄
+                          │0.5┤⣿⠁⠉⠉⡗⠓⠓⠗⠓⠓⠓⡓⠓⠓⠗⠓⠓⠓⠓⠓⠓⠗⢻⣝⣇⠁⠁⠁⠅⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⡁⠁│-40┤⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⢬⡇⠄⢧⠄⠅⠄⠄⠄⣶⠄⠅⢄⡄⠄⠬⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠅⠄⠄⠄⠬⠄
+                          │   │⡧   ⡇  ⠅   ⠄  ⠅      ⠅⠠⠈⠻⢷⣦⣀⠅      ⠅    ⠄ │-60┤⠂⠂⠂⠂⠂⠂⠇⠂⠂⣢⠺⠂⠂⠚⣆⠇⠂⠂⠂⡏⡆⠇⢺⡇⢢⡯⢢⠂⡆⡂⠇⠂⠂⠂⠂⠂⠇⠂⠂⠂⠪⠂
+                          │0.0┤⡗   ⡇  ⠅   ⠂  ⠅      ⠅⠐   ⠉⠙⠟⠲⠶⠤⠤⣤⣄⣅⣀⣀⣀⣀⣂⣀│-80┤⣂⣂⣢⠦⠦⠦⠗⠚⠋⠂⠪⠂⠂⠂⠊⠷⣆⠂⡲⠃⢇⠇⡺⡇⢺⡯⣾⢺⣿⣷⣷⣢⡂⠂⠂⠂⠇⠂⠂⠂⠪⠂
+                          │   └┬──────┬──────┬──────┬──────┬──────┬──────│   └┬─┴─┴─┬┴┴┴┬────┬─┴─┴─┬┴┴┴┬────┬─┴─┴─┬┴┴┴┬─
+                          │    0     200    400    600    800   1000     │   20    50  100  200   500 1k  frequency (Hz)
+─ AUDITION ───────────────┴──────────────────────────────────────────────┴────────────────────────────────────────── 8 ─
 CUE ○ nothing cued  │ audition: the picker's entry plays here (cue :x, sound)
-─────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 11 ─
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 9 ─
 
 
 

@@ -86,6 +86,52 @@ RSpec.describe('GraphNode inspection protocol') do
       expect(db.max).to be_within(1).of(20 * Math.log10(4))
     end
 
+    # sound-design-nav-1: the FILTER section's main view
+    it 'draws lp4 and diode responses with their resonance and tuning' do
+      # (the drawn line's dB at +hz+, between its points in log frequency)
+      at = ->(chart, hz) {
+        line = chart.marks.select { |m| m.is_a?(MB::Sound::Plot::Mark::Line) }.last
+        x = line.x.to_a
+        i = (x.bsearch_index { |v| v >= hz } || x.length - 1).clamp(1, x.length - 1)
+        t = (Math.log(hz) - Math.log(x[i - 1])) / (Math.log(x[i]) - Math.log(x[i - 1]))
+        line.y[i - 1] + (line.y[i] - line.y[i - 1]) * t
+      }
+      flat = MB::Sound::Plot.preview(110.hz.saw.lp4(1000.hz))
+      expect(flat.title).to eq('lp4 1000 Hz reso 0')
+      expect(at.(flat, 1000)).to be_within(0.5).of(-6) # (musical tuning: -6 dB at the cutoff)
+      peak = MB::Sound::Plot.preview(110.hz.saw.lp4(1000.hz, resonance: 0.6))
+      line = peak.marks.select { |m| m.is_a?(MB::Sound::Plot::Mark::Line) }.last
+      expect(line.x[line.y.max_index]).to be_within(100).of(1000) # (the peak on the cutoff)
+      expect(line.y.max).to be > 6
+      hw = MB::Sound::Plot.preview(110.hz.saw.lp4(1000.hz, tuning: :hardware))
+      expect(hw.title).to eq('lp4 1000 Hz reso 0 hardware')
+      expect(at.(hw, 1000)).to be < -9
+      expect(MB::Sound::Plot.preview(110.hz.saw.diode(1000.hz, resonance: 0.3)).title).to eq('diode 1000 Hz reso 0.3')
+      diode = MB::Sound::Plot.preview(110.hz.saw.diode(1000.hz))
+      expect(at.(diode, 8000)).to be > at.(flat, 8000) + 20 # (a gentler slope)
+
+      # The drawn response is the kernel's: an impulse through the filter at the same settings
+      [[:lp4, 0.0, :musical], [:lp4, 0.6, :hardware], [:diode, 0.3, :musical], [:diode, 0.6, :hardware]].each do |mode, res, tuning|
+        chart = MB::Sound::Plot.preview(110.hz.saw.lp4(1000.hz, resonance: res, mode: mode, tuning: tuning))
+        f = MB::Sound::Filter::FourPole.new(cutoff: 1000, resonance: res, mode: mode, tuning: tuning, sample_rate: 48000)
+        imp = Numo::SFloat.zeros(16384)
+        imp[0] = 1e-3
+        spec = Numo::Pocketfft.rfft(Numo::DFloat.cast(f.process(imp)) / 1e-3).abs
+        [250, 1000, 3000].each do |hz|
+          bin = (hz * 16384 / 48000.0).round
+          expect(at.(chart, bin * 48000 / 16384.0)).to be_within(0.5).of(20 * Math.log10(spec[bin])), "#{mode} #{res} #{tuning} at #{hz} Hz"
+        end
+      end
+
+      # A moving cutoff: where it was last read, an octave either side dashed, ~ in the title
+      moving = 110.hz.saw.lp4(0.5.hz.lfo.at(500..2000), resonance: 0.2)
+      moving.sample(800)
+      chart = MB::Sound::Plot.preview(moving)
+      expect(chart.title).to match(/\Alp4 ~\d+ Hz reso 0.2\z/)
+      expect(chart.marks.count { |m| m.is_a?(MB::Sound::Plot::Mark::Line) }).to eq(3)
+      expect(moving.preview_data[:moving]).to eq([:cutoff])
+    end
+
     it 'draws a shaper transfer curve' do
       c = MB::Sound::Plot.preview(110.hz.saw.softclip)
       expect(c).to be_a(MB::Sound::Plot::Chart)

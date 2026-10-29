@@ -220,6 +220,12 @@ module MB
           when Knob::Reader then "knob #{v.knob.name}"
           when Knob then "knob #{v.name}"
           else
+            # (`2 ** lfo`, `x / 3`: the operands' words, never the node ids
+            # of their generated names; sound-design-nav-1)
+            if v.is_a?(ProcNode) && %w[** /].include?(v.plan_operator) && v.sources.key?(:operand) && v.graph_node_name.to_s.include?('id=')
+              a, b = v.sources.values_at(:input, :operand)
+              return depth > 0 ? "#{words_of(a, depth - 1)} #{v.plan_operator} #{words_of(b, depth - 1)}" : (v.plan_operator == '**' ? 'a power' : 'a quotient')
+            end
             return v.graph_node_name.to_s if v.respond_to?(:named?) && v.named?
             if depth > 0 && (v.is_a?(Multiplier) || v.is_a?(Mixer))
               parts = (v.is_a?(Multiplier) ? v.multiplicands : v.summands).map { |m| words_of(m, depth - 1) }

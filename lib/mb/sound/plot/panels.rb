@@ -71,6 +71,44 @@ module MB
           chart.line db, x: f, label: d[:label]
         end
 
+        # Four-pole filters and diode ladders (lp4, diode; sound-design-nav-1):
+        # the linear response (Filter::FourPole#response, no drive) of a
+        # fresh filter with the snapshot's mode, cutoff, resonance, tuning,
+        # and curve; a cutoff another node moves is drawn where it was last
+        # read (the label marks it with ~), with dashed rules an octave
+        # either side.
+        register('MB::Sound::GraphNode::FourPole') do |params, chart|
+          d = params.preview
+          next nil unless d.is_a?(Hash) && d[:kind] == :four_pole
+
+          rate = d[:sample_rate]
+          filter = ->(cut) {
+            Filter::FourPole.new(
+              cutoff: cut, resonance: d[:resonance].clamp(0.0, 1.0), mode: d[:mode], self_oscillate: d[:self_oscillate], compensation: d[:compensation],
+              resonance_curve: d[:resonance_curve], normalize: d[:normalize], tuning: d[:tuning], sample_rate: rate,
+              drive_mode: d[:drive_mode] == :stages && d[:mode] == :diode ? :input : d[:drive_mode], clip: d[:drive_mode] == :feedback ? d[:clip] : :soft
+            )
+          }
+          f, db = Presets.response_db(filter.(d[:cutoff]), rate)
+          top = [(db.max / 6.0).ceil * 6, 6].max
+          chart.x :frequency, f[0]..f[-1]
+          chart.y Scale::DB.new([top - 66, -60].max..top)
+          if d[:moving]&.include?(:cutoff)
+            [0.5, 2.0].each do |r|
+              c = (d[:cutoff] * r).clamp(20.0, rate * 0.45)
+              f2, db2 = Presets.response_db(filter.(c), rate)
+              chart.line db2, x: f2, label: r < 1 ? '-1 oct' : '+1 oct'
+            end
+          end
+          chart.line db, x: f, label: d[:label]
+          chart.title d[:label]
+        end
+
+        # "2400 Hz", "12.5 kHz" for a cutoff in Hz.
+        def self.hz_text(hz)
+          hz >= 10_000 ? "#{format('%.3g', hz / 1000.0)} kHz" : "#{hz >= 100 ? hz.round : format('%.3g', hz)} Hz"
+        end
+
         # Envelopes: one note through a copy rendered at a low rate, the
         # sustain held for a fixed share of the plot (EnvelopeView).
         register('MB::Sound::Envelope') do |params, chart, live|

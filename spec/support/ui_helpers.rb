@@ -52,18 +52,25 @@ module UIHelpers
     pv = ->(value, unit: nil, label: nil, detail: nil, range: nil) { tr::ParamValue.new(value: value, type: :control, unit: unit, range: range, label: label, detail: detail) }
     hp = { structure: :svf, filter_type: :highpass, sample_rate: 48000.0, cutoff: 150.0, quality: 0.7, gain: nil, db_gain: nil, label: 'highpass 150.0 Hz Q 0.7' }
     params = ->(cls, values, preview = nil) { Ractor.make_shareable(tr::Params.new(node_class: cls, name: nil, values: values, preview: preview)) }
+    # (in sections, as UI::Inspect::Classify sorts a real reese: copies
+    # per voice and channel, stereo after the unison)
     nodes = [
-      UI::Inspect::NodeInfo.new(key: 0, label: "#{prefix}lp4", role: 'filter', count: 2, knobs: [knob].freeze,
-                                params: params.(MB::Sound::GraphNode::FourPole, { cutoff: pv.(2400.0, unit: 'Hz', label: knob) }), preview: false),
-      UI::Inspect::NodeInfo.new(key: 1, label: "#{prefix}highpass", role: 'filter', count: 4, knobs: [].freeze,
-                                params: params.(MB::Sound::Filter::SampleWrapper, { cutoff: pv.(150, unit: 'Hz'), quality: pv.(0.7, unit: ' Q') }, hp), preview: true),
-      UI::Inspect::NodeInfo.new(key: 2, label: 'softclip', role: 'shaper', count: 2, knobs: [].freeze,
-                                params: params.(MB::Sound::GraphNode::Shaper, {}, { mode: :softclip, p1: 0.35, p2: 0.95, label: 'softclip' }), preview: true),
+      UI::Inspect::NodeInfo.new(key: 0, label: "#{prefix}lp4", role: 'filter', count: 1, knobs: [knob].freeze,
+                                params: params.(MB::Sound::GraphNode::FourPole, { cutoff: pv.(2400.0, unit: 'Hz', label: knob), resonance: pv.(0.25, detail: 'literal') }), preview: false,
+                                section: :filter, channels: 2),
+      UI::Inspect::NodeInfo.new(key: 1, label: "#{prefix}highpass", role: 'filter', count: 2, knobs: [].freeze,
+                                params: params.(MB::Sound::Filter::SampleWrapper, { cutoff: pv.(150, unit: 'Hz'), quality: pv.(0.7, unit: ' Q') }, hp), preview: true,
+                                section: :fx, what: 'post-amp EQ', channels: 2),
+      UI::Inspect::NodeInfo.new(key: 2, label: 'softclip', role: 'shaper', count: 1, knobs: [].freeze,
+                                params: params.(MB::Sound::GraphNode::Shaper, {}, { mode: :softclip, p1: 0.35, p2: 0.95, label: 'softclip' }), preview: true,
+                                section: :amp, what: 'drive', channels: 2),
       UI::Inspect::NodeInfo.new(key: 3, label: 'saw', role: 'osc', count: 6, knobs: [].freeze,
-                                params: params.(MB::Sound::Notes::KeyedTone, { frequency: pv.(nil, detail: "#{prefix}notes frequency"), phase: pv.(0) }), preview: false),
+                                params: params.(MB::Sound::Notes::KeyedTone, { frequency: pv.(nil, detail: "#{prefix}notes frequency"), phase: pv.(0) }), preview: false,
+                                section: :source),
     ].freeze
     code = "synth(#{prefix}riff, voices: 1) { |v|\n  saws = v.hz.unison(6, detune: 0.32) { |p, _i| p.saw }\n  saws.lp4(knob(#{knob.inspect}), resonance: 0.25).softclip(0.35, 0.95).filter(:highpass, cutoff: 150, quality: 0.7)\n}"
-    UI::Inspect::InspectInfo.new(track: :"#{prefix}bass", tracks: [:drums, :"#{prefix}bass", :pad].freeze, knobs: [knob].freeze, nodes: nodes, node: 1, code: code.freeze, error: nil)
+    UI::Inspect::InspectInfo.new(track: :"#{prefix}bass", tracks: [:drums, :"#{prefix}bass", :pad].freeze, knobs: [knob].freeze, nodes: nodes, node: 1, code: code.freeze, error: nil,
+                                 loose: [].freeze, hidden: { 'tees' => 40, 'arithmetic' => 21 }.freeze)
   end
 
   # The fake inspector with an amp envelope (a real one's snapshot: A 20
@@ -76,7 +83,8 @@ module UIHelpers
     info = ui_fake_inspector
     snap = Ractor.make_shareable(FAKE_ENVELOPE.param_snapshot)
     play = live ? { stage: :segment, segment: 1, position: 0.1, peak: 0.7, at: 0.0 }.freeze : nil
-    env = UI::Inspect::NodeInfo.new(key: info.nodes.length, label: 'amp_env', role: 'env', count: 6, knobs: [].freeze, params: snap, preview: true, live: play)
+    env = UI::Inspect::NodeInfo.new(key: info.nodes.length, label: 'amp_env', role: 'env', count: 1, knobs: [].freeze, params: snap, preview: true, live: play,
+                                    section: :amp, what: 'amp env', dest: ['amp'].freeze)
     info.with(nodes: [*info.nodes, env].freeze, node: info.nodes.length)
   end
 

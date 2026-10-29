@@ -1764,6 +1764,7 @@ module MB
         def relayout(*)
           @density = Density.decide(:tiles, @rows, @cols)
           @tiler.header_rule = @density.header_rule
+          level_layout
           @placed = @tiler.placed
           @placed_layout = @tiler.layout
           klass = @native ? Plot::Text::NativeCells : Plot::Text::Cells
@@ -1776,7 +1777,13 @@ module MB
           rebuild_jumps(names)
           @chrome = chrome_plan
           # (Chrome draws every pane's title: panes draw their bodies only)
-          @placed.each { |pl| @states[pl.name][:title_in_rule] = true if pl.name }
+          # (and the screen's size level, for panes whose view depends on it:
+          # the inspector's panel at 80x24, sections from 120x40)
+          @placed.each do |pl|
+            next unless pl.name
+            @states[pl.name][:title_in_rule] = true
+            @states[pl.name][:level] = @density.level
+          end
           @canvases = {}
           @drawn_at = {}
           @relayout = false
@@ -1784,6 +1791,17 @@ module MB
           @repl_full = true
           r = repl_rect
           @host&.resize(r.h, r.w) if r && r.w > 0 && r.h > 0
+        end
+
+        # A built-in layout with smaller versions (UI.tile_layout_levels)
+        # shown at the version for the screen's Density level, while the
+        # layout on screen is one of its versions as built.
+        def level_layout
+          want = UI.tile_layout_at(@layout_name, @density.level) or return
+          now = @tiler.layout
+          return if now == want
+          versions = [UI.tile_layouts[@layout_name], *UI.tile_layout_levels[@layout_name].values]
+          @tiler.layout = want if versions.include?(now)
         end
 
         # Jump letters for the panes on screen ({name => letter}: Keys::JUMPS

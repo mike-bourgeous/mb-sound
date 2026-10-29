@@ -43,6 +43,8 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
     (info ? info.nodes.length : 1).times do |i|
       s = pick ? pick.call(i) : snap
       SOUND_PANES.each { |name| texts << draw(name, s, { title_in_rule: true }, w: 100, h: 30).join("\n") }
+      # (the inspector's other views: the panel, every node as chips)
+      [{ view: :panel }, { plumbing: true }].each { |st| texts << draw(:inspector, s, { title_in_rule: true, **st }, w: 100, h: 30).join("\n") }
       texts << key(:inspector, { snap: s }, :node, 1).to_s if info
     end
     texts.join("\n")
@@ -54,19 +56,68 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
   end
 
   describe 'the panes with fake data' do
-    it 'draws the track, its knob rows, the nodes as chips, and the picked node\'s params' do
-      text = draw(:inspector, snap).join("\n")
-      expect(text).to include('bass  2/3', 'cut', '2400 Hz', '100..8000 exp', 'nodes lp4×2 highpass×4 softclip×2 saw×6')
-      expect(text).to include('highpass  filter ×4  2/4', 'cutoff     150 Hz', 'quality    0.7  Q')
+    it 'draws the track\'s voice in sections, the picked row open with its params, knobs on the params they drive (sound-design-nav-1)' do
       lp4 = snap.with(slow: snap.slow.with(inspector: snap.inspector.with(node: 0)))
-      expect(draw(:inspector, lp4).join("\n")).to include('cutoff     → knob cut 2400 Hz')
+      lines = draw(:inspector, lp4, { title_in_rule: true, mode: true }, w: 60, h: 14)
+      text = lines.join("\n")
+      expect(lines[0]).to start_with('bass  2/3').and include('s f a o x')
+      expect(text).to include('SOURCE s', 'FILTER f', 'AMP a', 'FX x', '▸lp4', 'stereo  cut 2400 Hz  reso 0.25')
+      expect(text).to match(/cutoff +█+.* 2400 Hz  cut/) # (the knob's meter on the param it drives)
+      expect(text).to include('resonance  0.25  ·') # (a literal: dim, Enter offers its bind)
+      expect(text).to include('saw ×6', 'highpass ×2', '61 plumbing nodes hidden (p shows)')
+      expect(lines.index { |l| l.start_with?('SOURCE') }).to be < lines.index { |l| l.start_with?('FILTER') }
+      # Every row open when they all fit; the picked one alone, others on one line, when short
+      tall = draw(:inspector, lp4, { title_in_rule: true }, w: 60, h: 30).join("\n")
+      expect(tall).to include('  cutoff     150 Hz') # (highpass's params too)
+      short = draw(:inspector, lp4, { title_in_rule: true }, w: 60, h: 8)
+      expect(short.join("\n")).to include('▸lp4', 'cutoff')
+      expect(short.grep(/\A(SOURCE|AMP|FX) +[safox] /).length).to be >= 2
       empty = snap.with(slow: snap.slow.with(inspector: nil))
       expect(draw(:inspector, empty)[0]).to include('nothing to inspect')
     end
 
-    it 'turns, resets, types, and learns the picked knob as console lines; t and n pick tracks and nodes' do
+    it 'draws the signal chain on one line over the sections when there is room, the amp where the amp envelope is' do
+      env = snap.with(slow: snap.slow.with(inspector: ui_fake_envelope_inspector))
+      lines = draw(:inspector, env, { title_in_rule: true }, w: 80, h: 20)
+      expect(lines[1]).to eq('notes → saw ×6 → lp4 → softclip → amp → highpass ×2 → out')
+      expect(draw(:inspector, env, { title_in_rule: true }, w: 80, h: 12)[1]).not_to start_with('notes') # (short: the sections only)
+    end
+
+    it 'draws the front panel with P: knobs and literals as cells by section, the picked row\'s first cell picked' do
+      st = { title_in_rule: true, mode: true, view: :panel }
+      lp4 = snap.with(slow: snap.slow.with(inspector: snap.inspector.with(node: 0)))
+      lines = draw(:inspector, lp4, st, w: 80, h: 10)
+      text = lines.join("\n")
+      expect(lines[0]).to include('P sections')
+      expect(text).to include('FILTER f')
+      expect(text).to match(/cut +█+.*2400 Hz/) # (the knob's cell: meter and value)
+      expect(text).to match(/reso +·+ 0.25/) # (a literal's cell: dots, dim)
+      expect(text).not_to include('saw', 'phase') # (only knobs and literals)
+      pane = ui.panes.fetch(:inspector)
+      expect(pane.enter_hint(st)).to eq("type cut's value")
+      key(:inspector, st, :pick, 1)
+      expect(st[:pick]).to eq(1)
+      expect(pane.send(:picked_param, st)[0]).to eq(:resonance)
+      # P back, p the chips
+      expect(key(:inspector, st, :view)).to eq('sections view (P flips)')
+      expect(pane.view(st)).to eq(:sections)
+      expect(pane.view({ level: :compact })).to eq(:panel) # (by the screen's size when not flipped)
+      expect(key(:inspector, st, :plumbing)).to include('every node')
+      expect(pane.view(st)).to eq(:plumbing)
+    end
+
+    it 'draws every node as chips with p (the plumbing view, the old list)' do
+      text = draw(:inspector, snap, { title_in_rule: true, plumbing: true }).join("\n")
+      expect(text).to include('bass  2/3', 'cut', '2400 Hz', '100..8000 exp', 'nodes lp4 highpass×2 softclip saw×6')
+      expect(text).to include('highpass  filter ×2  2/4', 'cutoff     150 Hz', 'quality    0.7  Q')
+      lp4 = snap.with(slow: snap.slow.with(inspector: snap.inspector.with(node: 0)))
+      expect(draw(:inspector, lp4, { title_in_rule: true, plumbing: true }).join("\n")).to include('cutoff     → knob cut 2400 Hz')
+    end
+
+    it 'turns, resets, types, and learns the picked knob as console lines; t, n, and s f a o x pick tracks and rows' do
       st = { title_in_rule: true, mode: true }
-      draw(:inspector, snap, st)
+      lp4 = snap.with(slow: snap.slow.with(inspector: snap.inspector.with(node: 0)))
+      draw(:inspector, lp4, st)
       pane = ui.panes.fetch(:inspector)
       expect(pane.enter_hint(st)).to eq("type cut's value")
       prev = key(:inspector, st, :turn, ui::KnobTurns::STEP).last
@@ -85,8 +136,14 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(key(:inspector, st, :learn).last.code).to eq('learn :cut')
       expect(key(:inspector, st, :track, 1)).to include('inspecting pad')
       expect(ui::Inspect.target).to eq({ track: :pad, node: nil })
-      expect(key(:inspector, st, :node, 1)).to include('node softclip')
-      expect(ui::Inspect.target).to eq({ track: :bass, node: 2 })
+      # (rows step in section order from lp4: SOURCE FILTER AMP FX)
+      expect(key(:inspector, st, :node, 1)).to eq('AMP softclip (drive)')
+      expect(ui::Inspect.target).to eq({ track: :bass, node: 2, voice: nil })
+      expect(key(:inspector, st, :node, -1)).to eq('SOURCE saw ×6')
+      expect(key(:inspector, st, :section, :amp)).to eq('AMP softclip (drive)')
+      expect(ui::Inspect.target).to eq({ track: :bass, node: 2, voice: nil })
+      expect(key(:inspector, st, :section, :mod)).to eq('no MOD rows in bass')
+      expect(key(:inspector, st, :voice, 1)).to include('no drum voices')
 
       # Tab and Shift-Tab step through the nodes like n and N
       km = ui::Panes::Inspector.mode_keymap
@@ -151,7 +208,7 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
     it 'shows no node class names in any sound pane, only DSL names and roles (omnibus15)' do
       env = snap.with(slow: snap.slow.with(inspector: ui_fake_envelope_inspector))
       text = sound_text(env) { |i| env.with(slow: env.slow.with(inspector: env.inspector.with(node: i))) }
-      expect(text).to include('lp4  filter ×2', 'saw  osc ×6')
+      expect(text).to include('lp4', 'saw ×6', 'FILTER f', 'amp_env')
       expect_no_class_names(text)
     end
 
@@ -209,8 +266,16 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(labels).to include('lp4', 'highpass', 'softclip')
       lp4 = info.nodes.find { |n| n.label == 'lp4' }
       expect(lp4.knobs).to contain_exactly(:cut, :"bass/resonance") # (:cut read through knob(:cut) * lfo)
-      expect(info.nodes.first).to eq(lp4) # (knob readers first)
-      expect(info.selected.preview).to eq(true) # (by default the first node with a preview)
+      expect(lp4.param_knobs).to eq({ cutoff: :cut })
+      expect(lp4).to have_attributes(section: :filter, count: 1, channels: 2) # (one stereo lp4 per voice)
+      shown = info.nodes.reject { |n| n.section == :plumbing }
+      expect(shown.map(&:section).chunk_while { |a, b| a == b }.map(&:first)).to eq(%i[source filter amp mod fx]) # (in section order)
+      expect(shown.find { |n| n.what == 'amp env' }).to have_attributes(section: :amp, dest: ['amp'])
+      expect(shown.find { |n| n.label == 'lfo' }).to have_attributes(section: :mod, dest: ['lp4 cutoff'])
+      expect(shown.find { |n| n.label == 'highpass' }).to have_attributes(section: :fx, what: 'post-amp EQ', count: 2)
+      expect(info.selected).to eq(lp4) # (by default the filter)
+      expect(info.loose).to eq([]) # (every knob on a row's param)
+      expect(info.hidden.values.sum).to be > 100
       expect(info.code).to include('synth(', 'knob(:cut)')
       expect(Ractor.shareable?(info)).to eq(true)
       # Without a target: the clip matrix's track, else the first player
@@ -254,7 +319,8 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       ui::Inspect.target = { track: :pad, node: nil }
       st = { title_in_rule: true, mode: true }
       s = live_snap
-      expect(draw(:inspector, s, st).join("\n")).to include('pad', 'cut', '2400 Hz', '150..8000 exp')
+      expect(draw(:inspector, s, st).join("\n")).to include('pad', 'lowpass', 'cutoff', '2400 Hz  cut')
+      expect(draw(:inspector, s, st.merge(plumbing: true)).join("\n")).to include('pad', 'cut', '2400 Hz', '150..8000 exp')
       cut = @session.knobs[:cut]
 
       # Typed: Enter's Ask, then the typed Ruby as one turn line

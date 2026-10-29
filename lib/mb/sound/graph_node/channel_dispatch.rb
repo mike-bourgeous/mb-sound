@@ -62,8 +62,11 @@ module MB
       # Traversable#graphviz).  +inputs+ are the channels the method ran on,
       # +members+ the resulting nodes, +params+ descriptions of the
       # arguments that differed per channel, and +arg_nodes+ graph nodes
-      # passed as arguments (which stay visible outside the box).
-      ChannelGroup = Struct.new(:method_name, :inputs, :members, :params, :arg_nodes) do
+      # passed as arguments (which stay visible outside the box), +bundle+
+      # the Channels the call returned (the one its recipe is recorded on:
+      # Arrangement::LiteralBinding.call_of reaches it from a member, so the
+      # inspector can bind `resonance:` of an lp4 run per channel).
+      ChannelGroup = Struct.new(:method_name, :inputs, :members, :params, :arg_nodes, :bundle) do
         # A label like "filter ×2\ncutoff: 800, 1200".
         def label
           ["#{method_name} ×#{members.length}", *params].join("\n")
@@ -146,7 +149,7 @@ module MB
           results.each { |r| r.channel_group = group if r.respond_to?(:channel_group=) }
 
           names = receiver.names if receiver.is_a?(Channels) && results.sum { |r| r.outputs.length } == receiver.names&.length
-          Channels.new(results, names: names)
+          group.bundle = Channels.new(results, names: names)
         end
 
         # Describes the arguments that differ per channel, e.g.

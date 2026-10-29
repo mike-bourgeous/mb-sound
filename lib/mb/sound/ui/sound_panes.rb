@@ -10,32 +10,37 @@ module MB
       # Poll while a pane needs :inspect) and the snapshot's knobs; keys
       # change the set only through console lines (PaneKeys::Run).
       module Panes
-        # The patch inspector: the knobs a track's graph reads, as knob
-        # rows to turn (name, a meter on the knob's curve, value with unit,
-        # range and curve), then the nodes the graph is made of and the
-        # selected node's params (read-only; knob-driven ones name their
-        # knob).  Follows the clip matrix's track (else the first playing
-        # one) until t (or n, a node) picks one.
+        # The patch inspector: a track's voice in sections (SOURCE FILTER
+        # AMP MOD FX, the Minimoog way: each envelope in the section it
+        # shapes; sound-design-nav-1, design/notes/sound_design_ui.md,
+        # Sections), the picked row open with its params as rows to turn
+        # (a knob's meter, value with unit, what else moves it; literals
+        # dim, with Enter offering their `bind` line), knobs no row reads
+        # above the sections; or the same knobs as a front panel (P; the
+        # default at 80x24); or every node as chips, plumbing included (p;
+        # the old list).  Follows the clip matrix's track (else the first
+        # playing one) until t (or a row) picks one; opens on the filter.
         #
-        # Mode keys (NAV Enter, or NAV d): Up/Down pick a knob, then on
-        # down the selected node's params, Left/Right turn it (Shift or H/L
-        # fine; a held key is a live sweep and one `turn` line when it
-        # stops; a param a knob drives turns that knob), Enter types a value
-        # (`turn :cut, 3000.hz`) or, on a param no knob drives (a literal
-        # like `resonance: 0.25`, an envelope time, a document param),
-        # offers its `bind` line (Arrangement::LiteralBinding: a new knob,
-        # the patch rebuilt with it on the track's launch point; the status
-        # line says so first), 0 its default, m learns a MIDI controller for
-        # it (`learn :cut`), t/T the next/previous track, n/N (] [) the
-        # next/previous node.
+        # Mode keys (NAV Enter, or NAV d): s f a o x jump to SOURCE FILTER
+        # AMP MOD FX (again: the next row there), n/N (] [, Tab) the
+        # next/previous row, Up/Down pick a param (or a loose knob),
+        # Left/Right turn it (Shift or H/L fine; a held key is a live sweep
+        # and one `turn` line when it stops; a param a knob drives turns
+        # that knob), Enter types a value (`turn :cut, 3000.hz`) or, on a
+        # param no knob drives (a literal like `resonance: 0.25`, an
+        # envelope time), offers its `bind` line (Arrangement::LiteralBinding:
+        # a new knob, the patch rebuilt with it on the track's launch point;
+        # the status line says so first), 0 its default, m learns a MIDI
+        # controller for it (`learn :cut`), t/T the next/previous track, v/V
+        # a kit's next/previous voice, P the panel, p the plumbing.
         class Inspector < Pane
           include KnobTurns
           jump 'd'
 
           mode_keys do
             group 'Inspector'
-            on [:up, 'k'], :pick, -1, help: 'previous knob or param', label: 'Up Down'
-            on [:down, 'j'], :pick, 1, help: 'next knob or param', label: 'Up Down'
+            on [:up, 'k'], :pick, -1, help: 'previous param or knob', label: 'Up Down'
+            on [:down, 'j'], :pick, 1, help: 'next param or knob', label: 'Up Down'
             on [:right, 'l'], :turn, KnobTurns::STEP, help: 'turn the knob up (held: a live sweep, one turn line)', label: 'Left Right'
             on [:left, 'h'], :turn, -KnobTurns::STEP, help: 'turn the knob down (held: a live sweep, one turn line)', label: 'Left Right'
             on [:right, :shift], :turn, KnobTurns::FINE, help: 'turn up, fine'
@@ -45,28 +50,52 @@ module MB
             on :enter, :ask, help: 'type a value, or bind a literal param (turn :cut, 3000.hz)', label: 'Enter'
             on '0', :reset, help: "the knob's default"
             on 'm', :learn, help: 'learn a MIDI controller for the knob (learn :cut: turn one)'
+            on ['s'], :section, :source, help: 'SOURCE: oscillators, samples, glide (again: the next row)', label: 's f a o x'
+            on ['f'], :section, :filter, help: 'FILTER: filters and the filter envelope', label: 's f a o x'
+            on ['a'], :section, :amp, help: 'AMP: drive, the amp envelope', label: 's f a o x'
+            on ['o'], :section, :mod, help: 'MOD: LFOs and other modulators', label: 's f a o x'
+            on ['x'], :section, :fx, help: 'FX: effects, post-amp filters, pans', label: 's f a o x'
+            on ['n', ']'], :node, 1, help: 'the next row (preview and params)', label: 'n N'
+            on ['N', '['], :node, -1, help: 'the previous row', label: 'n N'
+            on :tab, :node, 1, help: 'the next row (preview and params)', label: 'Tab S-Tab'
+            on [:tab, :shift], :node, -1, help: 'the previous row', label: 'Tab S-Tab'
             on ['t'], :track, 1, help: 'the next track', label: 't T'
             on ['T'], :track, -1, help: 'the previous track', label: 't T'
-            on ['n', ']'], :node, 1, help: 'the next node (preview and params)', label: 'n N'
-            on ['N', '['], :node, -1, help: 'the previous node', label: 'n N'
-            on :tab, :node, 1, help: 'the next node (preview and params)', label: 'Tab S-Tab'
-            on [:tab, :shift], :node, -1, help: 'the previous node', label: 'Tab S-Tab'
+            on ['v'], :voice, 1, help: "a kit's next voice", label: 'v V'
+            on ['V'], :voice, -1, help: "a kit's previous voice", label: 'v V'
+            on ['P'], :view, help: 'the front panel (the knobs by section) or the sections', label: 'P'
+            on ['p'], :plumbing, help: 'every node as chips, the hidden plumbing too (again: back)', label: 'p'
           end
 
           keys do
             group 'Inspector'
-            doc 'Enter', 'turn the track\'s knobs, pick nodes (Esc back to NAV)'
+            doc 'Enter', 'turn the track\'s knobs, pick sections and rows (Esc back to NAV)'
           end
+
+          # Params a section row leaves out (note plumbing: they come from
+          # the notes, nothing to turn) when no number is set.
+          NOTE_PARAMS = %i[gate trigger velocity choke frequency phase reset release_at timeline_jumps timeline_phase].freeze
+
+          # Short names for row summaries and panel cells.
+          SHORTS = { resonance: 'reso', attack: 'A', decay: 'D', sustain: 'S', release: 'R', quality: 'q', cutoff: 'cut', frequency: 'freq' }.freeze
 
           def priority = :live
 
-          def initialize = super(:inspector, rate: 15, height: 14, width: 52, needs: [:inspect], title: 'inspector', min_height: 4,
-                                             description: 'a track\'s knobs to turn (ranges, units, curves) and the params of the nodes it is made of')
+          def initialize = super(:inspector, rate: 15, height: 14, width: 52, needs: [:inspect], title: 'sound', min_height: 4,
+                                             description: 'a track\'s voice in sections (SOURCE FILTER AMP MOD FX) with its knobs and params to turn, or as a front panel')
+
+          # The view shown: :plumbing (p), else state[:view] (P flips), else
+          # by the screen's size (the maintainer, 2026-10-29: the panel at
+          # 80x24, sections from 120x40 up).
+          def view(state, info = state[:snap]&.inspector)
+            return :plumbing if state[:plumbing] || (info && !info.sections?)
+            state[:view] || (state[:level] == :compact ? :panel : :sections)
+          end
 
           # What Enter does now, for the status line (the design's rule:
           # name Enter's action before it is pressed).
           def enter_hint(state)
-            if (pp = picked_param(state)) && !pp[1].label.is_a?(Symbol)
+            if (pp = picked_param(state)) && !knob_of(state, pp)
               b = pp[2]
               return nil unless b
               return "#{pp[0]}: #{b.reason}" unless b.line
@@ -85,29 +114,57 @@ module MB
               return
             end
             knobs = s.knobs.to_h { |k| [k.name, k] }
-            list = info.knobs
-            rows = list.length + (info.selected&.params&.values&.length || 0)
-            pick = rows == 0 ? nil : (state[:pick] = state[:pick].to_i.clamp(0, rows - 1))
+            list = pick_list(state, info)
+            # (nothing picked yet: the panel starts on the picked row's first cell)
+            state[:pick] ||= list.index { |e| e[0] == :param && e[3] == info.node } if view(state, info) == :panel
+            pick = list.empty? ? nil : (state[:pick] = state[:pick].to_i.clamp(0, list.length - 1))
+            case view(state, info)
+            when :plumbing then draw_plumbing(c, info, knobs, list, pick, state)
+            when :panel then draw_panel(c, info, knobs, list, pick, state)
+            else draw_sections(c, info, knobs, list, pick, state)
+            end
+          end
 
+          # The track line: name, which of the tracks, and the keys.
+          def draw_header(c, info, state, hint)
             idx = info.tracks.index(info.track)
-            x = c.line(0, [info.track.to_s, :name], ["  #{idx ? idx + 1 : '?'}/#{info.tracks.length}", :dim])
-            c.text(x, 0, c.fit(state[:mode] ? '  t: next track' : '', [c.w - x, 0].max), :dim)
+            x = c.line(0, [info.track.to_s, :name], [info.document ? "  #{info.document}" : '', :text], ["  #{idx ? idx + 1 : '?'}/#{info.tracks.length}", :dim])
+            c.text(x, 0, c.fit(state[:mode] ? "  #{hint}" : '', [c.w - x, 0].max), :dim)
             y = 1
             if info.error
               c.text(0, y, c.fit(info.error, c.w), :warn)
               y += 1
             end
-
-            if list.empty?
-              c.text(0, y, c.fit('no knobs: knob :cut, 800.hz then knob(:cut) in the patch', c.w), :dim)
+            if info.voices.length > 1
+              # A kit: one voice at a time (v V), its sections below
+              x = c.text(0, y, 'voice ', :dim)
+              info.voices.each do |v|
+                break if x >= c.w
+                sel = v == info.voice
+                x = c.run(x, y, " #{v} ", sel ? :key : :name, reverse: sel)
+              end
+              c.text(x, y, c.fit('  v V', [c.w - x, 0].max), :dim)
               y += 1
+              # (the voice's knob values: the kit's per-voice settings,
+              # `tr909(clip, kick: { decay: 0.4 })`)
+              if (vk = info.voice_knobs[info.voice]) && !vk.empty? && y < c.h - 2
+                text = vk.map { |k, v| "#{k} #{v.is_a?(Float) ? Panes.fmt(v) : v}" }.join('  ')
+                c.text(1, y, c.fit("#{info.voice}: #{text}", c.w - 1), :dim)
+                y += 1
+              end
             end
-            list.each_with_index do |kn, i|
-              break if y >= c.h - 1 && i > 0
+            y
+          end
+
+          # Knob rows (name, meter on the knob's curve, value, range) for
+          # +names+ from row +y+; +first+ the pick index of the first.
+          def draw_knob_rows(c, y, names, knobs, pick, state, first = 0, bottom: c.h - 1)
+            names.each_with_index do |kn, i|
+              break if y >= bottom && i > 0
               k = knobs[kn]
               value, turning = shown_value(state, kn, k)
               spec = k&.spec
-              sel = state[:mode] && i == pick
+              sel = state[:mode] && first + i == pick
               x = c.run(0, y, " #{c.fit(kn.to_s, 9).ljust(9)}", sel ? :key : :name, reverse: sel)
               unless spec
                 c.text(x + 1, y, '(not in the session yet)', :dim)
@@ -123,12 +180,332 @@ module MB
               c.text(x, y, c.fit(range, [c.w - x, 0].max), :dim)
               y += 1
             end
-            if pick && state[:mode] && y < c.h && (desc = knobs[list[pick]]&.spec&.param&.description)
+            y
+          end
+
+          # The sections view: SOURCE FILTER AMP MOD FX with their rows, the
+          # picked row open (every row open when they all fit; sections
+          # other than the picked one on one line each when short of
+          # room).
+          def draw_sections(c, info, knobs, list, pick, state)
+            keys = Inspect::SECTIONS.map { |sec| Inspect::SECTION_KEYS[sec] }.join(' ')
+            y = draw_header(c, info, state, "#{keys}  n N rows  P panel")
+            y = draw_chain(c, info, y) if c.h >= 14
+            loose = info.loose
+            y = draw_knob_rows(c, y, loose, knobs, pick, state, 0, bottom: c.h - 3) unless loose.empty?
+
+            rows = info.shown
+            secs = Inspect::SECTIONS.select { |sec| rows.any? { |i| info.nodes[i].section == sec } }
+            sel = info.node
+            cur = sel && info.nodes[sel]&.section
+            hidden = info.hidden.values.sum
+            foot = hidden > 0 && c.h - y > secs.length + 3 ? 1 : 0
+            room = c.h - y - foot
+            params = ->(i) { shown_params(info.nodes[i]).length }
+            # (every row open when all fit; else the picked row open, and
+            # sections collapsed to one line each, farthest from the
+            # picked one first, until the rest fit)
+            srows = secs.to_h { |sec| [sec, rows.select { |i| info.nodes[i].section == sec }] }
+            all_open = secs.sum { |sec| 1 + srows[sec].sum { |i| 1 + params.(i) } }
+            open = all_open <= room ? :all : :picked
+            need = ->(sec) { 1 + srows[sec].length + (srows[sec].include?(sel) ? params.(sel) : 0) }
+            collapsed = {}
+            if open == :picked
+              total = secs.sum { |sec| need.(sec) }
+              ci = secs.index(cur) || 0
+              far = secs.each_with_index.sort_by { |sec, i| [-(i - ci).abs, -need.(sec)] }.map(&:first) - [cur]
+              far.each do |sec|
+                break if total <= room
+                collapsed[sec] = true
+                total -= need.(sec) - 1
+              end
+              # (still too tall: the farthest collapsed lines go too)
+              far.each do |sec|
+                break if total <= room
+                collapsed[sec] = :omit
+                total -= 1
+              end
+            end
+            psel = pick && pick >= loose.length ? pick - loose.length : nil
+
+            secs.each do |sec|
+              break if y >= c.h - foot
+              list = srows[sec]
+              title = Inspect::SECTION_TITLES[sec]
+              key = Inspect::SECTION_KEYS[sec]
+              next if collapsed[sec] == :omit
+              if collapsed[sec]
+                x = c.text(0, y, c.pad(title, 7), :title)
+                x = c.text(x, y, "#{key} ", :key)
+                c.text(x, y, c.fit(list.map { |i| row_title(info.nodes[i]) }.join(' · '), [c.w - x, 0].max), :text)
+                y += 1
+                next
+              end
+              x = c.text(0, y, "#{title} ", sec == cur ? :key : :title)
+              x = c.text(x, y, key, :key)
+              c.text(x, y, " #{'─' * [c.w - x - 2, 0].max}", :dim)
+              y += 1
+              # (the picked section's rows scroll to keep the picked row and
+              # its params on screen)
+              if sel && list.include?(sel)
+                before = list.index(sel)
+                fit = c.h - foot - y - params.(sel) - 1
+                list = list.drop(before - [fit, 0].max) if before > fit
+              end
+              list.each do |i|
+                break if y >= c.h - foot
+                n = info.nodes[i]
+                on = i == sel
+                x = c.run(0, y, on ? '▸' : ' ', :key)
+                x = c.run(x, y, c.pad(row_title(n), 14), on && psel.nil? ? :key : :name, reverse: on && state[:mode] && psel.nil?)
+                c.text(x + 1, y, c.fit(row_tail(n, knobs), [c.w - x - 1, 0].max), :dim)
+                y += 1
+                next unless on || open == :all
+                shown_params(n).each_with_index do |(name, v), pi|
+                  break if y >= c.h - foot
+                  y = draw_param(c, y, info, n, name, v, knobs, state, sel: on && state[:mode] && pi == psel, indent: 2)
+                end
+              end
+            end
+            c.text(0, c.h - 1, c.fit("#{hidden} plumbing nodes hidden (p shows)", c.w), :dim) if foot == 1
+          end
+
+          # The one-line signal chain over the sections (the spike's strip:
+          # `notes → saw ×6 → lp4 → softclip → amp → highpass ×2 → out`):
+          # the audio path's rows in section order, the amp where an amp
+          # envelope is, the picked row bright.  Returns the next row.
+          def draw_chain(c, info, y)
+            rows = info.shown.sort_by { |j| [Inspect::SECTIONS.index(info.nodes[j].section) || 99, j] }
+            blocks = []
+            amp = false
+            rows.each do |j|
+              n = info.nodes[j]
+              next if n.section == :mod || n.label == 'unison' || ['pitch', 'FM operator'].include?(n.what)
+              if n.what.to_s.end_with?(' env') || n.what == 'bursts'
+                amp ||= n.what == 'amp env'
+                next
+              end
+              blocks << [:amp, nil, nil] if n.section == :fx && amp && blocks.none? { |b, _, _| b == :amp }
+              blocks << [row_title(n), j, n.section]
+            end
+            blocks << [:amp, nil, nil] if amp && blocks.none? { |b, _, _| b == :amp }
+            return y if blocks.length < 2
+            x = c.text(0, y, 'notes', :dim)
+            prev = nil
+            blocks.each do |b, j, sec|
+              # (sources side by side are layers: +, not a chain)
+              x = c.text(x, y, prev == :source && sec == :source ? ' + ' : " #{c.glyph(:arrow)} ", :dim)
+              x = c.text(x, y, b == :amp ? 'amp' : b, j && j == info.node ? :key : :name)
+              prev = sec
+              break if x >= c.w
+            end
+            c.text(x, y, " #{c.glyph(:arrow)} out", :dim) if x < c.w
+            y + 1
+          end
+
+          # A row's title: its DSL words and copies ("saw ×6", "lp4").
+          def row_title(n)
+            label = n.label == 'env' && n.what&.end_with?(' env') ? n.what : n.label
+            "#{label}#{n.count > 1 ? " ×#{n.count}" : ''}"
+          end
+
+          # A row's dim tail: its role, where it goes, its first settings.
+          def row_tail(n, knobs)
+            bits = []
+            bits << n.what if n.what && !%w[drive lfo pitch].include?(n.what) && n.what != n.label && !(n.label == 'env' && n.what.end_with?(' env'))
+            bits << "→ #{n.dest.join(', ')}" unless n.dest.empty?
+            bits << 'stereo' if n.channels > 1
+            sum = shown_params(n).filter_map { |name, v|
+              kn = n.knob_of(name)
+              v = v.with(unit: Panes.unit_of(knobs[kn].spec, name)) if v.unit.nil? && kn && knobs[kn]&.spec
+              t = value_text(v, param_value(n, name, v, knobs))
+              t && "#{SHORTS[name] || name} #{t}"
+            }.first(4)
+            (bits + sum).join('  ')
+          end
+
+          # A param's value now: its knob's (turned values follow), else
+          # the snapshot's.
+          def param_value(n, name, v, knobs)
+            kn = n.knob_of(name)
+            kn && knobs[kn] ? knobs[kn].value : v.value
+          end
+
+          # +value+ (of ParamValue +v+) as text with its unit (seconds as ms
+          # below 1 s), or nil.
+          def value_text(v, value = v.value)
+            return nil unless value.is_a?(Numeric)
+            unit = v.unit&.strip
+            if unit == 's'
+              value.abs < 1 ? "#{Panes.fmt(value * 1000)}ms" : "#{Panes.fmt(value)}s"
+            elsif unit && !unit.empty? && unit != 'Q'
+              "#{Panes.fmt(value)} #{unit}"
+            else
+              Panes.fmt(value)
+            end
+          end
+
+          # One param row: name, a meter for a knob, the value, what else
+          # moves it (a knob's name dim).  Returns the next row.
+          def draw_param(c, y, info, n, name, v, knobs, state, sel:, indent: 2)
+            x = c.run(indent, y, c.pad(name.to_s, 10), sel ? :key : :name, reverse: sel)
+            kn = n.knob_of(name)
+            k = kn && knobs[kn]
+            mods = modulators(info, n, name)
+            if k&.spec
+              value, turning = shown_value(state, kn, k)
+              vtext = value_text(v.unit ? v : v.with(unit: Panes.unit_of(k.spec, name)), value) || Panes.fmt(value)
+              more = mods.empty? ? '' : "← #{mods.join(', ')}"
+              mw = (c.w - x - vtext.length - more.length - kn.to_s.length - 6).clamp(3, 16)
+              x = c.meter(k.spec.position(value.to_f).to_f, width: mw, x: x + 1, y: y, role: :key)
+              x = c.text(x + 1, y, vtext, turning ? :queued : :text)
+              x = c.text(x + 1, y, more, :dim) unless more.empty?
+              c.text(x, y, c.fit("  #{kn}", [c.w - x, 0].max), :dim)
+            elsif !v.value.nil?
+              x = c.text(x + 1, y, value_text(v) || v.value.to_s, :text)
+              hint = sel && (b = n.binds[name]) ? (b.line ? "  Enter: knob #{b.knob.inspect}" : "  #{b.reason}") : (v.detail == Inspect::LITERAL ? '  ·' : '')
+              c.text(x, y, c.fit(hint, [c.w - x, 0].max), :dim)
+            else
+              c.text(x + 1, y, c.fit(mods.empty? ? "#{c.glyph(:arrow)} #{v.label || v.detail}" : "← #{mods.join(', ')}", [c.w - x - 1, 0].max), :dim)
+            end
+            y + 1
+          end
+
+          # The envelopes and modulators going to row +n+'s param +name+
+          # ("lfo", "filter env"), from their rows' destinations.
+          def modulators(info, n, name)
+            want = "#{n.label} #{name}"
+            info.nodes.filter_map { |m|
+              next if m.section == :plumbing || m.equal?(n) || (n.voice && m.voice && m.voice != n.voice)
+              row_title(m) if m.dest.include?(want)
+            }.uniq
+          end
+
+          # The params a row shows: note plumbing left out (see NOTE_PARAMS).
+          def shown_params(n)
+            vals = n.params.values.to_a
+            return vals unless n.section
+            vals.reject { |name, v| v.value.nil? && NOTE_PARAMS.include?(name) }
+          end
+
+          # Columns of a panel cell, at least.
+          CELL = 24
+
+          # The front panel (P; the default at 80x24): each section's knobs
+          # and bindable literals as cells side by side (name, a meter for a
+          # knob, dim dots for a literal, the value), like a synth's panel;
+          # when the pane is too short for every section, the picked one is
+          # open and the others are one line each.  Up/Down step the cells
+          # (the row a cell belongs to becomes the picked row: its preview
+          # follows), Left/Right turn, Enter types or binds.
+          def draw_panel(c, info, knobs, list, pick, state)
+            keys = Inspect::SECTIONS.map { |sec| Inspect::SECTION_KEYS[sec] }.join(' ')
+            y = draw_header(c, info, state, "#{keys}  P sections")
+            if list.empty?
+              text = info.voices.length > 1 ? "no knobs: the voice's settings are above (a kit's knob Hash: #{info.voice}: { decay: 0.4 }); P the sections" : 'no knobs or literals to show (P: the sections, p: every node)'
+              c.text(0, y, c.fit(text, c.w), :dim)
+              return
+            end
+            groups = list.each_with_index.group_by { |e, _| cell_section(info, e) }
+            order = [nil, *Inspect::SECTIONS].select { |sec| groups.key?(sec) }
+            per = [c.w / CELL, 1].max
+            cw = c.w / per
+            room = c.h - y
+            cur = pick && cell_section(info, list[pick])
+            need = order.sum { |sec| 1 + (groups[sec].length + per - 1) / per }
+            tight = need > room
+            psel = state[:mode] ? pick : nil
+            order.each do |sec|
+              break if y >= c.h
+              cells = groups[sec]
+              title = sec ? Inspect::SECTION_TITLES[sec] : 'KNOBS'
+              key = sec ? Inspect::SECTION_KEYS[sec] : ''
+              names = cell_names(info, cells.map(&:first))
+              if tight && sec != cur
+                x = c.text(0, y, c.pad(title, 7), :title)
+                x = c.text(x, y, "#{key} ", :key) unless key.empty?
+                summary = cells.each_with_index.map { |(e, _), j| "#{names[j]} #{cell_value_text(info, e, knobs, state)}" }.join('  ')
+                c.text(x, y, c.fit(summary, [c.w - x, 0].max), :dim)
+                y += 1
+                next
+              end
+              x = c.text(0, y, "#{title} ", sec == cur ? :key : :title)
+              x = c.text(x, y, key, :key) unless key.empty?
+              c.text(x, y, " #{'─' * [c.w - x - 2, 0].max}", :dim)
+              y += 1
+              cells.each_slice(per).with_index do |slice, si|
+                break if y >= c.h
+                slice.each_with_index do |(e, idx), j|
+                  draw_cell(c.sub(j * cw, y, cw - 1, 1), info, e, names[si * per + j], knobs, state, idx == psel)
+                end
+                y += 1
+              end
+            end
+          end
+
+          # The section a panel entry goes in (nil: a knob no row shows).
+          def cell_section(info, e)
+            e[0] == :knob ? nil : info.nodes[e[3]]&.section
+          end
+
+          # Cell names for +entries+ of one section: the param's short name,
+          # with its row's title before it where two rows share it (an amp
+          # env's and a layer env's attack).
+          def cell_names(info, entries)
+            base = entries.map { |e|
+              kn = e[0] == :knob ? e[1] : info.nodes[e[3]].knob_of(e[1])
+              # (a knob's cell is named after the knob: bass/glide is glide, not time)
+              kn ? kn.to_s.split('/').last : (SHORTS[e[1]] || e[1]).to_s
+            }
+            dup = base.tally.select { |_, n| n > 1 }.keys
+            entries.each_with_index.map { |e, i|
+              next base[i] unless e[0] == :param && dup.include?(base[i])
+              "#{row_title(info.nodes[e[3]]).split(' ').first}.#{base[i]}"
+            }
+          end
+
+          # A panel entry's value as text ("2400 Hz", "4ms").
+          def cell_value_text(info, e, knobs, state)
+            kn = e[0] == :knob ? e[1] : info.nodes[e[3]].knob_of(e[1])
+            if kn && (k = knobs[kn])&.spec
+              value, = shown_value(state, kn, k)
+              v = e[0] == :param ? e[2] : GraphNode::Traversable::ParamValue.new(value: value, type: :control, unit: nil, range: nil, label: kn, detail: nil)
+              return value_text(v.unit ? v : v.with(unit: Panes.unit_of(k.spec, e[1])), value) || Panes.fmt(value)
+            end
+            e[0] == :param ? (value_text(e[2]) || '-') : '-'
+          end
+
+          # One panel cell on +c+ (a one-row canvas): name, a meter (a knob)
+          # or dots (a literal), the value.
+          def draw_cell(c, info, e, name, knobs, state, sel)
+            x = c.run(0, 0, c.pad(name, 8), sel ? :key : :name, reverse: sel)
+            kn = e[0] == :knob ? e[1] : info.nodes[e[3]].knob_of(e[1])
+            vtext = cell_value_text(info, e, knobs, state)
+            mw = (c.w - x - vtext.length - 2).clamp(2, 10)
+            if kn && (k = knobs[kn])&.spec
+              value, turning = shown_value(state, kn, k)
+              x = c.meter(k.spec.position(value.to_f).to_f, width: mw, x: x + 1, y: 0, role: :key)
+              c.text(x + 1, 0, c.fit(vtext, [c.w - x - 1, 0].max), turning ? :queued : :text)
+            else
+              x = c.text(x + 1, 0, '·' * mw, :dim)
+              c.text(x + 1, 0, c.fit(vtext, [c.w - x - 1, 0].max), :dim)
+            end
+          end
+
+          # The plumbing view (p): every knob the graph reads as knob rows,
+          # every node as chips (plumbing too), the picked node's params.
+          def draw_plumbing(c, info, knobs, list, pick, state)
+            y = draw_header(c, info, state, 't: next track')
+            if info.knobs.empty?
+              c.text(0, y, c.fit('no knobs: knob :cut, 800.hz then knob(:cut) in the patch', c.w), :dim)
+              y += 1
+            end
+            y = draw_knob_rows(c, y, info.knobs, knobs, pick, state)
+            if pick && state[:mode] && y < c.h && pick < info.knobs.length && (desc = knobs[info.knobs[pick]]&.spec&.param&.description)
               c.text(1, y, c.fit(desc, c.w - 1), :dim)
               y += 1
             end
-
-            draw_node(c, info, y + (y < c.h - 2 ? 1 : 0), state[:mode] && pick && pick >= list.length ? pick - list.length : nil) if y < c.h - 1
+            draw_node(c, info, y + (y < c.h - 2 ? 1 : 0), state[:mode] && pick && pick >= info.knobs.length ? pick - info.knobs.length : nil) if y < c.h - 1
           end
 
           # The selected node (title row: label, copies, which of how many)
@@ -184,11 +561,20 @@ module MB
           def key_pick(state, d)
             out = flush(state)
             state[:pick] = state[:pick].to_i + d
+            # (the panel: the picked cell's row becomes the picked row, so
+            # the preview follows and its literals' bind lines are ready)
+            info = state[:snap]&.inspector
+            if info && view(state, info) == :panel
+              list = pick_list(state, info)
+              state[:pick] = state[:pick].clamp(0, [list.length - 1, 0].max)
+              e = list[state[:pick]]
+              Inspect.target = { track: info.track, node: e[3], voice: info.voice }.freeze if e && e[0] == :param && e[3] != info.node
+            end
             out
           end
 
           def key_ask(state)
-            if (pp = picked_param(state)) && !pp[1].label.is_a?(Symbol)
+            if (pp = picked_param(state)) && !knob_of(state, pp)
               name, _v, b = pp
               return "#{name}: driven by #{pp[1].detail || 'a node'}" unless b
               return "#{name}: #{b.reason}" unless b.line
@@ -226,36 +612,120 @@ module MB
             return 'no tracks playing' if info.tracks.empty?
             i = info.tracks.index(info.track) || 0
             t = info.tracks[(i + d) % info.tracks.length]
-            state[:pick] = 0
+            state[:pick] = nil
             Inspect.target = { track: t, node: nil }.freeze
             [*flush(state), "inspecting #{t}"]
           end
 
           def key_node(state, d)
             info = state[:snap]&.inspector or return 'nothing to inspect'
-            return 'no nodes' if info.nodes.empty?
-            i = ((info.node || 0) + d) % info.nodes.length
-            Inspect.target = { track: info.track, node: i }.freeze
-            n = info.nodes[i]
-            "node #{n.label}#{n.role && n.role != n.label ? " (#{n.role})" : ''} #{i + 1}/#{info.nodes.length}"
+            rows = view(state, info) == :plumbing ? info.nodes.each_index.to_a : info.shown.sort_by { |j| [Inspect::SECTIONS.index(info.nodes[j].section) || 99, j] }
+            return 'no nodes' if rows.empty?
+            at = rows.index(info.node)
+            i = rows[at ? (at + d) % rows.length : (d > 0 ? 0 : -1)]
+            pick_row(state, info, i)
+          end
+
+          # s f a o x: the first row of section +sec+, or (in it already)
+          # its next row.
+          def key_section(state, sec)
+            info = state[:snap]&.inspector or return 'nothing to inspect'
+            rows = info.shown.select { |i| info.nodes[i].section == sec }
+            return "no #{Inspect::SECTION_TITLES[sec]} rows in #{info.track}" if rows.empty?
+            at = rows.index(info.node)
+            state[:plumbing] = nil
+            pick_row(state, info, at ? rows[(at + 1) % rows.length] : rows.first)
+          end
+
+          # v V: a kit's next/previous drum voice.
+          def key_voice(state, d)
+            info = state[:snap]&.inspector or return 'nothing to inspect'
+            return "#{info.track} has no drum voices (a kit's voices appear once played)" if info.voices.length < 2
+            v = info.voices[((info.voices.index(info.voice) || 0) + d) % info.voices.length]
+            state[:pick] = info.loose.length
+            Inspect.target = { track: info.track, node: nil, voice: v }.freeze
+            [*flush(state), "voice #{v}"]
+          end
+
+          # P: the panel or the sections.
+          def key_view(state)
+            info = state[:snap]&.inspector
+            now = view(state, info)
+            state[:plumbing] = nil
+            state[:view] = now == :panel ? :sections : :panel
+            state[:pick] = nil
+            "#{state[:view]} view (P flips)"
+          end
+
+          # p: the plumbing view (every node as chips) or back.
+          def key_plumbing(state)
+            state[:plumbing] = !state[:plumbing]
+            state[:pick] = nil
+            state[:plumbing] ? 'every node, plumbing too (p: back to the sections)' : 'sections'
           end
 
           private
 
           def no_knob_note = 'no knob to turn: the graph reads none (knob :cut, 800.hz; then knob(:cut) in the patch)'
 
+          # Picks row +i+ (the inspector, preview, and code follow).
+          def pick_row(state, info, i)
+            n = info.nodes[i]
+            state[:pick] =
+              case view(state, info)
+              when :plumbing then info.knobs.length
+              when :panel then pick_list(state, info).index { |e| e[0] == :param && e[3] == i } || state[:pick]
+              else info.loose.length
+              end
+            Inspect.target = { track: info.track, node: i, voice: info.voice }.freeze
+            sec = n.section && n.section != :plumbing ? "#{Inspect::SECTION_TITLES[n.section]} " : ''
+            "#{sec}#{row_title(n)}#{n.what ? " (#{n.what})" : ''}"
+          end
+
+          # What Up/Down step through: [[:knob, name], ...] then [[:param,
+          # name, ParamValue], ...] of the selected row (the plumbing view:
+          # every knob; the others: the knobs no row shows).
+          #
+          # Entries are [:knob, name] or [:param, name, ParamValue, row].  The
+          # panel's are every shown row's knob-driven and literal params, in
+          # section order (they don't depend on the picked row).
+          def pick_list(state, info)
+            n = info.selected
+            case view(state, info)
+            when :plumbing
+              info.knobs.map { |k| [:knob, k] } + (n ? n.params.values.map { |name, v| [:param, name, v, info.node] } : [])
+            when :panel
+              rows = info.shown.sort_by { |j| [Inspect::SECTIONS.index(info.nodes[j].section) || 99, j] }
+              info.loose.map { |k| [:knob, k] } + rows.flat_map { |j|
+                m = info.nodes[j]
+                shown_params(m).filter_map { |name, v|
+                  # (counts stay out: read once while the patch builds, never knobs)
+                  # (and a preset's numbers: fixed in its document, its params are the knobs)
+                  [:param, name, v, j] if m.knob_of(name) || (!info.document && v.detail == Inspect::LITERAL && !Arrangement::LiteralBinding.count?(name, v.value))
+                }
+              }
+            else
+              info.loose.map { |k| [:knob, k] } + (n ? shown_params(n).map { |name, v| [:param, name, v, info.node] } : [])
+            end
+          end
+
+          # The knob param row +pp+ ([name, ParamValue, Bind, row]) turns, or
+          # nil.
+          def knob_of(state, pp)
+            n = state[:snap]&.inspector&.nodes&.[](pp[3])
+            n&.knob_of(pp[0]) || (pp[1].label.is_a?(Symbol) ? pp[1].label : nil)
+          end
+
           # The picked knob: a knob row, or a param row a knob drives
           # ([name, KnobValue]), else nil.
           def picked(state)
             s = state[:snap] or return nil
             info = s.inspector or return nil
-            if (pp = picked_param(state))
-              kn = pp[1].label
-              return nil unless kn.is_a?(Symbol)
-            else
-              return nil if info.knobs.empty?
-              kn = info.knobs[state[:pick].to_i.clamp(0, info.knobs.length - 1)]
-            end
+            list = pick_list(state, info)
+            return nil if list.empty?
+            e = list[state[:pick].to_i.clamp(0, list.length - 1)]
+            kn = e[0] == :knob ? e[1] : knob_of(state, [e[1], e[2], nil, e[3]])
+            return nil unless kn
             k = s.knobs.find { |kv| kv.name == kn } or return nil
             [kn, k]
           end
@@ -264,12 +734,11 @@ module MB
           # Bind or nil], or nil on a knob row.
           def picked_param(state)
             info = state[:snap]&.inspector or return nil
-            i = state[:pick].to_i - info.knobs.length
-            n = info.selected
-            return nil if i < 0 || n.nil?
-            name, v = n.params.values.to_a[i] || n.params.values.to_a.last
-            return nil unless name
-            [name, v, n.binds[name]]
+            list = pick_list(state, info)
+            return nil if list.empty?
+            e = list[state[:pick].to_i.clamp(0, list.length - 1)]
+            return nil unless e[0] == :param
+            [e[1], e[2], info.nodes[e[3]]&.binds&.[](e[1]), e[3]]
           end
         end
 
