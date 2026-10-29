@@ -129,9 +129,19 @@ module MB
             n ? n.to_s : 'its clip'
           end
 
+          # True if a terminal can show the screen (the tiles' REPL is one).
+          def terminal?
+            $stdout.tty? || !UI.tiles.nil? || !UI.screen.nil?
+          rescue StandardError
+            false
+          end
+
           # ui :sound, remembering the screen before the first design, with
           # the inspector focused and its keys live.
           def show_screen
+            # (no terminal, e.g. a script or a pipe: the track is set up and
+            # plays; `ui :sound` shows it in a terminal)
+            return nil unless terminal?
             t = UI.tiles
             now =
               if t&.active? then [:tiles, t.layout_name]

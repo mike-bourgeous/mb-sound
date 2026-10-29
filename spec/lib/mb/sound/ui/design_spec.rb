@@ -11,6 +11,7 @@ RSpec.describe(MB::Sound::UI::Design, :aggregate_failures) do
     @shown = []
     allow(ui).to receive(:show) { |name = nil, **| @shown << name; nil }
     allow(ui).to receive(:off) { @shown << :off; nil }
+    allow(described_class).to receive(:terminal?).and_return(true) # (no terminal shows nothing: the lesson's case)
     described_class.instance_variable_set(:@before, nil)
     described_class.instance_variable_set(:@last, nil)
     @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
