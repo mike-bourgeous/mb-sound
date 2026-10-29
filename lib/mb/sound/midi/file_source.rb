@@ -9,9 +9,10 @@ module MB
       #
       # The file is parsed by MIDIFile (midilib).  Pulse times are turned
       # into seconds by a tempo map (+:tempo_map+, anything with
-      # #seconds(pulses) returning Rational seconds).  The default,
-      # ConstantTempo, uses the file's first tempo like MIDIFile does; a
-      # reader for tempo changes can be added later as another tempo map.
+      # #seconds(pulses) returning Rational seconds).  The default is the
+      # file's MIDI::TempoMap (every tempo event, so rubato and tempo
+      # changes play at their recorded times; midi-import-1); ConstantTempo
+      # keeps the first tempo for the whole file.
       #
       # Examples:
       #     src = MB::Sound::MIDI::FileSource.new('spec/test_data/midi.mid')
@@ -65,7 +66,7 @@ module MB
         def initialize(file, loop: false, tempo_map: nil)
           @midi_file = file.is_a?(MIDIFile) ? file : MIDIFile.new(file)
           seq = @midi_file.seq
-          @tempo_map = tempo_map || ConstantTempo.from_sequence(seq)
+          @tempo_map = tempo_map || @midi_file.tempo_map
           @loop = !!loop
           @offset = 0r
 

@@ -62,11 +62,20 @@ module MB
             },
             'MB::Sound::Sequence::Clip' => {
               reason: 'event readers and lineage (clips print through their recipes)',
-              names: %i[each edges edge_horizon event_at event_before events events_for length lineage rederive source stream value variations seed values value_at],
+              names: %i[each edges edge_horizon event_at event_before events events_for length lineage rederive source stream value variations seed values value_at
+                        controls control control_edges control_chase control_horizon],
             },
             'MB::Sound::Sequence::Seq' => {
               reason: 'readers',
               names: %i[steps beats],
+            },
+            'MB::Sound::Sequence::Rhythm' => {
+              reason: 'value readers (rhythms print through their recipes or as rhythm(...))',
+              names: %i[hits length onsets count each steps to_ruby],
+            },
+            'MB::Sound::Sequence::Groove' => {
+              reason: 'value readers (grooves print through their recipes or as groove_template(...))',
+              names: %i[grid offsets levels counts steps length target to_ruby],
             },
             'MB::Sound::Sequence::Kit' => {
               reason: 'iteration (rows taken with kit.rows or kit[:name] print as kit[:name])',
@@ -123,6 +132,7 @@ module MB
               midi_stream: 'a MIDI::Stream for live input', close_midi: 'closes live input',
               per_voice: 'returns a plain value for the current lane (lanes that differ print with per_voice)',
               cc: 'a MIDI::Param value (prints through its own recipe)',
+              midi_tracks: 'a listing of a file\'s tracks',
             },
             'SamplerMethods' => {
               bounce: 'returns a Sample (samples print as bundle assets or through their lineage)',
@@ -174,7 +184,7 @@ module MB
               MB::Sound::Tone, MB::Sound::Pitch, MB::Sound::Notes::NotePitch, MB::Sound::Notes,
               MB::Sound::GraphNode::Channels, MB::Sound::Sequence::Clip, MB::Sound::Sequence::Seq,
               MB::Sound::Envelope, MB::Sound::Notes::NoteEnvelope,
-              MB::Sound::Sequence::Kit, MB::Sound::Sample, MB::Sound::Sample::Slices, MB::Sound::Sampler::Instrument,
+              MB::Sound::Sequence::Kit, MB::Sound::Sequence::Rhythm, MB::Sound::Sequence::Groove, MB::Sound::Sample, MB::Sound::Sample::Slices, MB::Sound::Sampler::Instrument,
               MB::Sound::Unison::Pending, MB::Sound::Unison::PendingChannels,
             ]
           end

@@ -115,7 +115,7 @@ module MB
 
         # Methods that read files (allowed only with a path relative to the
         # document's directory; see Loader#check_file).
-        FILE_METHODS = Set[:file_input, :midi_file, :sfz, :sf2].freeze
+        FILE_METHODS = Set[:file_input, :midi_file, :midi_clip, :midi_kit, :sfz, :sf2].freeze
 
         # FILE_METHODS that get the document's file name rather than its
         # resolved path, after the check, so the files they name in turn

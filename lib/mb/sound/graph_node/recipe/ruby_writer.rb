@@ -70,6 +70,10 @@ module MB
           # .rack_definition), so the document loads where the rack isn't
           # defined.  +rack_defs+ (a Hash) collects them for an outer writer
           # instead (they aren't printed here).
+          # Recorded calls that read a file whose data graph documents keep
+          # instead (clips and kits of MIDI files).
+          FILE_DATA = Set[:midi_clip, :midi_kit].freeze
+
           def initialize(root, inputs: {}, seeds: false, knobs: {}, knob_nodes: {}, assets: nil, define_racks: false, rack_defs: nil)
             @root = root
             @define_racks = define_racks
@@ -420,6 +424,14 @@ module MB
             return unrecorded(o, indent, arith) unless c
 
             c = live_call(o, c)
+            if @seeds == :marked && FILE_DATA.include?(c.name)
+              # Graph documents keep what a MIDI file gave, not the file
+              # (midi-import-1): its clip as events, its kit as clip rows
+              case o
+              when MB::Sound::Sequence::Clip then return [clip_events_text(o, indent), ATOM]
+              when MB::Sound::Sequence::Kit then return [kit_rows_text(o, indent), ATOM]
+              end
+            end
             if @seeds && o.is_a?(MB::Sound::Sequence::Clip) && unprintable_seeds?(c) && o.variations.empty?
               # A clip whose recipe drew seeds that can't be given (e.g.
               # bake through humanize) is saved as the events it made
@@ -536,6 +548,9 @@ module MB
               # A clip without a recipe (captured, recorded, Clip.new):
               # its events
               return [clip_events_text(o, indent), ATOM]
+            when MB::Sound::Sequence::Rhythm, MB::Sound::Sequence::Groove
+              # (rhythm(...) / groove_template(...) values; midi-import-1)
+              return [o.to_ruby, ATOM]
             end
 
             [input_name(o), ATOM]
@@ -1254,20 +1269,51 @@ module MB
             kwargs[:seed] = clip.seed unless clip.seed == 0
             kwargs[:align] = clip.align unless clip.align == :timeline
             kwargs[:performed] = true if clip.performed?
+            kwargs[:controls] = clip.controls.to_h { |l| [l.name, l.to_spec] } if clip.controls?
             text = events_text(rows, kwargs, indent)
             text += ".named(#{clip.name.inspect})" if clip.named?
             text
           end
 
+          # grid(row: events(...), ...) of a Kit whose rows are clips
+          # without recipes (see SequenceMethods#grid).
+          def kit_rows_text(kit, indent)
+            inner = indent + '  '
+            rows = kit.rows.map { |name, clip| "#{key_text(name)} #{clip_events_text(clip, inner)}" }
+            "grid(\n#{rows.map { |r| "#{inner}#{r}" }.join(",\n")}\n#{indent})"
+          end
+
           # events(rows..., kwargs) with one event per line.
           def events_text(rows, kwargs, indent)
             row_texts = rows.map { |r| event_row_text(r, indent) }
-            kw = kwargs.map { |k, v| "#{key_text(k)} #{k == :length ? event_number(v) : value(v, indent)}" }
+            kw = kwargs.map { |k, v| "#{key_text(k)} #{k == :length ? event_number(v) : (k == :controls ? controls_text(v, indent) : value(v, indent))}" }
             parts = row_texts + (kw.empty? ? [] : [kw.join(', ')])
             return "events(#{parts.join(', ')})" if row_texts.length <= 2 && parts.join(', ').length < 80
 
             inner = indent + '  '
             "events(\n#{parts.map { |t| "#{inner}#{t}" }.join(",\n")}\n#{indent})"
+          end
+
+          # The controls: Hash of events(...): one lane per line, points
+          # as exact positions and values.
+          def controls_text(lanes, indent)
+            inner = indent + '    '
+            lines = lanes.map { |name, spec|
+              if spec.is_a?(Array)
+                "#{key_text(name)} #{points_text(spec, inner)}"
+              else
+                rest = spec.except(:points).map { |k, v| "#{key_text(k)} #{k == :resolution ? event_number(v) : value(v, inner)}" }
+                "#{key_text(name)} { #{(rest + ["points: #{points_text(spec[:points], inner)}"]).join(', ')} }"
+              end
+            }
+            "{\n#{lines.map { |l| "#{indent}  #{l}" }.join(",\n")}\n#{indent}}"
+          end
+
+          # [[position, value], ...], eight to a line.
+          def points_text(points, indent)
+            items = points.map { |p, v| "[#{event_number(p)}, #{event_number(v)}]" }
+            return "[#{items.join(', ')}]" if items.length <= 8
+            "[\n#{items.each_slice(8).map { |sl| "#{indent}  #{sl.join(', ')}" }.join(",\n")}\n#{indent}]"
           end
 
           def event_row_text(row, indent)

@@ -96,6 +96,15 @@ RSpec.describe(MB::Sound::MIDI::ClipSource, 'quiet reads') do
     expect_same(MB::Sound.seq(c4.n2.d, e4.n1).loop, seed: 18) # notes longer than the loop's step
   end
 
+  it 'gives the same events for clips with controller lanes (steps and curves) through seeks and swaps' do
+    lanes = { cc1: [[0r, 0.1], [3r/16, 0.6], [5r/8, 0.9]], cc74: { curve: :cubic, points: [[1r/8, 0.2], [1r/2, 0.8], [7r/8, 0.3]], resolution: 1r/64 } }
+    a = MB::Sound.events([0r, 1r/8, 60, 0.8], [1r/2, 1r/8, 64, 0.8], length: 1r, loop: true, controls: lanes)
+    b = MB::Sound.events([1r/4, 1r/8, 67, 0.8], length: 1r/2, loop: true, controls: { bend: { points: [[0r, -0.5], [1r/4, 0.5]], range: 12 } })
+    expect_same(a, seed: 21, min_quiet: 0.3)
+    expect_same(a, seed: 22, seek: 0.02, swaps: [a, b], min_quiet: 0.2, tempos: [97, 120, 172])
+    expect_same(MB::Sound.events(length: 1r, controls: lanes), seed: 23, min_quiet: 0.3) # (controllers only)
+  end
+
   it 'gives the same events for a one-shot clip to its end' do
     expect_same(MB::Sound.seq(c4, e4, g4).n4, seed: 19, reads: 120, min_quiet: 0.2)
   end

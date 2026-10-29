@@ -126,6 +126,42 @@ module MB
           end
         end
 
+        # Delays notes onto a feel template's positions on the timeline
+        # (see Stream#groove; the core is Sequence::Feel.groove_target,
+        # shared with Clip#groove) and scales their velocities toward its
+        # levels.
+        class Groove < NoteMap
+          def initialize(parent, template, amount: 1, velocity: nil, **options)
+            super(parent, **options)
+            raise ArgumentError, "groove takes a Groove or a Clip (got #{template.class})" unless template.is_a?(Sequence::Groove)
+            Sequence::Feel.check_fraction('Groove amount', amount)
+            velocity = amount if velocity.nil?
+            Sequence::Feel.check_fraction('Groove velocity', velocity)
+            @template = template
+            @amount = Sequence::Duration.rational(amount)
+            @velocity = velocity
+            @node_type_name = "groove(#{template.steps} steps#{", amount: #{amount}" if amount != 1})"
+          end
+
+          private
+
+          def tail_seconds
+            @template.grid * 2 / transport.whole_notes_per_second
+          end
+
+          def map_on(e)
+            target, i = @template.target(timeline_at(e.time), direction: :next)
+            delay = (stream_time_at(target) - e.time) * @amount
+            v = Sequence::Groove.level(e.velocity, @template.levels[i], @velocity)
+            e = e.with_velocity(v) if v != e.velocity
+            [[e, MB::M.max(delay, 0r)]]
+          end
+
+          def map_note(event)
+            event
+          end
+        end
+
         # Delays offbeat notes by the timeline grid (see Stream#swing; the
         # time warp is Sequence::Feel's, shared with Clip#swing).  Note-offs
         # go through the same warp, so lengths follow as in clips.

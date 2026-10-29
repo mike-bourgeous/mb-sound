@@ -956,7 +956,52 @@ module MB
       commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale
       dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord
       note :midi
-      see :record
+      see :record, :midi_files
+    end
+
+    Help.topic :midi_files, 'MIDI files as clips and kits', group: :perform do
+      about <<~TEXT
+        `midi_tracks 'song.mid'` lists a file's tracks (notes, range, mono
+        legato or chords, controller lanes).  `midi_clip 'song.mid',
+        track: 'Bass'` is that track as a looping clip in exact note
+        positions from the file's ticks (files without a tempo play at the
+        session tempo), over whole bars of the file's meter: `from: 16,
+        bars: 8` cuts a phrase.  A mono legato line keeps its overlaps as
+        slides (`~`); chords and ringing arpeggios stay notes.  The track's
+        CCs, bend (with its RPN range), and pressure come along as lanes
+        that voices read (`v.mod`, `v.cc(74)`, `v.bend`): `cc: :fit` turns
+        dense recorded steps into a few smooth keys, `cc: false` drops
+        them; a lane turns a knob too (`turn :vol,
+        clip.control(7).keyframes(0.0..1.0)`).  `timing: :performed`
+        keeps a rubato file's tempo map.
+        `midi_kit 'beat.mid'` makes the drum tracks a grid-like Kit for
+        tr808/tr909.  Saved graph documents keep the notes and lanes as
+        `events(...)`, not the file.
+      TEXT
+      commands :midi_tracks, :midi_clip, :midi_kit, :midi_file
+      note :midi
+      see :midi, :sequences
+    end
+
+    Help.topic :templates, 'Rhythm and feel templates', group: :perform do
+      about <<~TEXT
+        Any clip lends its rhythm or its feel.  `clip.rhythm` is which
+        steps play, how long and how loud, with accents and slides:
+        `.notes(C1, F1, [A1, E2], nil)` pours pitches in, cycling (Arrays
+        are chords, nil rests a hit), `.pitches(0, 2, 4, scale:
+        scale(:minor))` scale degrees, `.to_clip(36)` one note.
+        `take.groove` measures a played clip against a 16th grid (`grid:
+        8`, `triplets: true`): each step's mean timing offset and level;
+        `beat.groove(feel, amount: 0.6)` moves another clip or kit onto
+        those positions and levels (the quantize core; `velocity: 0` for
+        timing only), and `midi.groove(feel)` delays live notes the same
+        way.  Printed grooves and rhythms read back as `groove_template`
+        and `rhythm` calls.
+      TEXT
+      commands :rhythm, :groove_template, :midi_clip
+      dsl :rhythm, :groove, :quantize
+      note :sequences
+      see :midi_files, :sequences
     end
 
     Help.topic :key, 'The session key and modes', group: :time do

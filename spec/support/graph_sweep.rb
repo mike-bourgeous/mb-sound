@@ -360,6 +360,16 @@ module GraphSweep
       ['notes lfo and fade-in', ->(c) { c.notes.lfo(5, delay: 0.002) + c.notes.lfo(3, shape: :noise) + c.notes.hz.vibrato(5).sine }],
       ['synth', ->(c) { c.clip.synth(voices: 2) { |v, _i| v.hz.saw.filter(:lowpass, cutoff: v.cutoff(1000)) * v.amp_env(0.001, 0.002, 0.5, 0.002) } }],
       ['synth stereo voices', ->(c) { c.clip.synth(voices: 2) { |v, _i| (v.hz.saw * v.env).pan(0.3) } }],
+      # Controller lanes (midi-import-1): stepped and fitted CC lanes and a
+      # bend with an RPN range, read by synth voices
+      ['synth on a clip with controller lanes', ->(c) {
+        clip = c.s.events(
+          [0r, 1r/128, 60, 0.8], [1r/64, 1r/128, 64, 0.6, { slid: true }], [1r/32, 1r/64, 67, 0.9], length: 1r/16, loop: true,
+          controls: { cc1: [[0r, 0.1], [1r/128, 0.5], [3r/128, 0.9]], cc74: { curve: :cubic, points: [[0r, 0.2], [1r/64, 0.8], [1r/32, 0.4]], resolution: 1r/1024 },
+                      bend: { points: [[0r, 0.0], [1r/64, 0.3]], range: 12 } }
+        )
+        clip.synth(voices: 2) { |v, _i| v.hz.saw.filter(:lowpass, cutoff: v.cc(74).at(300..3000)) * v.mod * v.amp_env(0.001, 0.002, 0.5, 0.002) }
+      }],
       ['drums (Kit, Voice)', ->(c) { c.s.tr808(c.s.grid(16, bd: 'x.x.', snare: '.x..', hat: 'xxxx')) }],
       # Kit builder (Drums::Machine, Hit layers, Repeats bursts, Flams,
       # ChokeGate) and the TR-909 (sampled hats through SamplerVoice)

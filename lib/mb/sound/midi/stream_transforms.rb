@@ -30,7 +30,7 @@ module MB
           :select, :reject, :velocities, :map_notes, :vel, :rechannel, :to_channel,
           :note_length, :len, :shift, :rotate, :through,
           :swing, :chance, :maybe, :every, :legato, :ratchet, :ghost_chords,
-          :degrees, :lock,
+          :degrees, :lock, :groove,
         ].freeze
 
         # Transforms that Sequence::Clip mirrors, returning Streams of the
@@ -154,6 +154,21 @@ module MB
         # (same options) moves notes to the nearest step.
         def quantize(grid = Sequence::Feel::GRID, amount: 1, window: nil, ends: false, **options)
           Stream.new(Transform::Quantize.new(self, grid, amount: amount, window: window, ends: ends, **options))
+        end
+
+        # Moves notes onto a feel template's grid positions plus its offsets
+        # on the timeline, +amount+ of the way, and scales velocities toward
+        # its levels (+velocity:+, by default +amount+), like
+        # Sequence::Clip#groove (the same core, Feel.groove_target), except
+        # that streams only delay: a note goes to the next step's position
+        # (or stays, if that is already behind it).  +template+ is a
+        # Sequence::Groove or a Clip to measure one from (+grid:+,
+        # +triplets:+).
+        #
+        #     midi.groove(take.groove, amount: 0.5)
+        def groove(template, amount: 1, velocity: nil, grid: Sequence::Feel::GRID, triplets: false, **options)
+          template = Sequence::Groove.from_clip(template, grid: grid, triplets: triplets) if template.is_a?(Sequence::Clip)
+          Stream.new(Transform::Groove.new(self, template, amount: amount, velocity: velocity, **options))
         end
 
         # Swing on the timeline grid: within each pair of +grid+ steps (an
