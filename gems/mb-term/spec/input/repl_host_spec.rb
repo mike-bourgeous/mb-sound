@@ -1,7 +1,7 @@
 require 'pry'
 
 # The REPL pane's pty host (research-ui-4 option (a2)).
-RSpec.describe(MB::Sound::UI::Input::ReplHost, :aggregate_failures) do
+RSpec.describe(MB::Term::Input::ReplHost, :aggregate_failures) do
   after do
     @host&.stop
   end
@@ -14,8 +14,8 @@ RSpec.describe(MB::Sound::UI::Input::ReplHost, :aggregate_failures) do
     prompt = Pry::Prompt.new('host-spec', 'host spec', [proc { 'h> ' }, proc { 'h* ' }])
     @host = described_class.new(rows: 8, cols: 60, mode: :thread, pry: { prompt: prompt, color: false, pager: false })
     @host.start
-    d = MB::U.clock_now + 10
-    sleep 0.02 until @host.vt.text.include?('h> ') || MB::U.clock_now > d
+    d = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
+    sleep 0.02 until @host.vt.text.include?('h> ') || Process.clock_gettime(Process::CLOCK_MONOTONIC) > d
     expect(@host.vt.text).to include('h> ')
 
     held = Queue.new

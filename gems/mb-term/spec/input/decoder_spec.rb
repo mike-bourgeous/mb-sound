@@ -1,7 +1,7 @@
-RSpec.describe(MB::Sound::UI::Input::Decoder, :aggregate_failures) do
-  let(:d) { MB::Sound::UI::Input::Decoder.new }
-  let(:key) { MB::Sound::UI::Input::Key }
-  let(:input) { MB::Sound::UI::Input }
+RSpec.describe(MB::Term::Input::Decoder, :aggregate_failures) do
+  let(:d) { MB::Term::Input::Decoder.new }
+  let(:key) { MB::Term::Input::Key }
+  let(:input) { MB::Term::Input }
 
   def chords(events) = events.map { |e| e.is_a?(key) ? e.chord : e }
 

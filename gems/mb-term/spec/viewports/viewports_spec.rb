@@ -1,7 +1,7 @@
-RSpec.describe(MB::Sound::UI::Viewports, :aggregate_failures) do
+RSpec.describe(MB::Term::Viewports, :aggregate_failures) do
 
   let(:studio) do
-    MB::Sound::UI::Viewports.layout :studio, focus: :repl do
+    MB::Term::Viewports.layout :studio, focus: :repl do
       pane :transport, height: 1
       cols do
         pane :tracks, width: 28
@@ -30,12 +30,12 @@ RSpec.describe(MB::Sound::UI::Viewports, :aggregate_failures) do
   describe 'placement' do
     it 'places fixed sizes, weights, gaps, and the tab strip' do
       r = studio.rects(120, 40)
-      expect(r[:transport]).to eq(MB::Sound::UI::Viewports::Rect.new(0, 0, 120, 1))
-      expect(r[:tracks]).to eq(MB::Sound::UI::Viewports::Rect.new(0, 1, 28, 39))
+      expect(r[:transport]).to eq(MB::Term::Viewports::Rect.new(0, 0, 120, 1))
+      expect(r[:tracks]).to eq(MB::Term::Viewports::Rect.new(0, 1, 28, 39))
       # 120 - 28 - 2 gaps = 90 shared 2:1
-      expect(r[:repl]).to eq(MB::Sound::UI::Viewports::Rect.new(29, 1, 60, 30)) # a rule row below it
-      expect(r[:journal]).to eq(MB::Sound::UI::Viewports::Rect.new(29, 32, 60, 8))
-      expect(r[:scope]).to eq(MB::Sound::UI::Viewports::Rect.new(90, 2, 30, 38))
+      expect(r[:repl]).to eq(MB::Term::Viewports::Rect.new(29, 1, 60, 30)) # a rule row below it
+      expect(r[:journal]).to eq(MB::Term::Viewports::Rect.new(29, 32, 60, 8))
+      expect(r[:scope]).to eq(MB::Term::Viewports::Rect.new(90, 2, 30, 38))
       expect(r).not_to have_key(:meters)
       strip = studio.place(120, 40).find(&:tabs)
       expect(strip.tabs).to eq(%i[meters scope spectrum])
@@ -43,46 +43,39 @@ RSpec.describe(MB::Sound::UI::Viewports, :aggregate_failures) do
       expect_tiling(studio, 120, 40)
     end
 
-    it 'shows every built-in pane in the :wall layout at 200x60 (ux-1 item 13; the set\'s and sound design\'s panes have their own layouts)' do
-      rects = MB::Sound::UI.tile_layouts[:wall].rects(200, 59)
-      expect(rects.keys).to include(:repl, *(MB::Sound::UI.panes.keys - MB::Sound::UI::ON_DEMAND_PANES.keys - MB::Sound::UI::SESSION_PANES - MB::Sound::UI::SOUND_PANES))
-      rects.each_value { |r| expect(r.w * r.h).to be > 0 }
-      expect(rects[:repl].w).to be >= 90
-    end
-
     it 'shares by largest remainder, ties to the earlier child' do
-      kids = [MB::Sound::UI::Viewports::Pane.new(name: :a), MB::Sound::UI::Viewports::Pane.new(name: :b), MB::Sound::UI::Viewports::Pane.new(name: :c)]
-      expect(MB::Sound::UI::Viewports.shares(kids, 10)).to eq([4, 3, 3])
-      expect(MB::Sound::UI::Viewports.shares(kids, 11)).to eq([4, 4, 3])
+      kids = [MB::Term::Viewports::Pane.new(name: :a), MB::Term::Viewports::Pane.new(name: :b), MB::Term::Viewports::Pane.new(name: :c)]
+      expect(MB::Term::Viewports.shares(kids, 10)).to eq([4, 3, 3])
+      expect(MB::Term::Viewports.shares(kids, 11)).to eq([4, 4, 3])
     end
 
     it 'honors min: by taking from the largest flexible sibling' do
-      kids = [MB::Sound::UI::Viewports::Pane.new(name: :a, weight: 9), MB::Sound::UI::Viewports::Pane.new(name: :b, min: 5)]
-      expect(MB::Sound::UI::Viewports.shares(kids, 20)).to eq([15, 5])
+      kids = [MB::Term::Viewports::Pane.new(name: :a, weight: 9), MB::Term::Viewports::Pane.new(name: :b, min: 5)]
+      expect(MB::Term::Viewports.shares(kids, 20)).to eq([15, 5])
     end
 
     it 'shrinks overflowing fixed sizes from the end' do
-      kids = [MB::Sound::UI::Viewports::Pane.new(name: :a, size: 8), MB::Sound::UI::Viewports::Pane.new(name: :b, size: 8)]
-      expect(MB::Sound::UI::Viewports.shares(kids, 10)).to eq([8, 2])
+      kids = [MB::Term::Viewports::Pane.new(name: :a, size: 8), MB::Term::Viewports::Pane.new(name: :b, size: 8)]
+      expect(MB::Term::Viewports.shares(kids, 10)).to eq([8, 2])
     end
 
     it 'zooms one pane to the whole screen' do
       z = studio.with(zoom: :scope)
-      expect(z.rects(80, 24)).to eq(scope: MB::Sound::UI::Viewports::Rect.new(0, 0, 80, 24))
+      expect(z.rects(80, 24)).to eq(scope: MB::Term::Viewports::Rect.new(0, 0, 80, 24))
     end
   end
 
   describe 'the DSL' do
     it 'rejects a width in rows, naming the fix' do
-      expect { MB::Sound::UI::Viewports.layout(:x) { pane :a, width: 3 } }.to raise_error(MB::Sound::UI::Viewports::Error, /use height:/)
+      expect { MB::Term::Viewports.layout(:x) { pane :a, width: 3 } }.to raise_error(MB::Term::Viewports::Error, /use height:/)
     end
 
     it 'suggests a method for a typo' do
-      expect { MB::Sound::UI::Viewports.layout(:x) { colz { pane :a } } }.to raise_error(NoMethodError) { expect(_1.detailed_message).to include('Did you mean?  cols') }
+      expect { MB::Term::Viewports.layout(:x) { colz { pane :a } } }.to raise_error(NoMethodError) { expect(_1.detailed_message).to include('Did you mean?  cols') }
     end
 
     it 'rejects duplicate pane names' do
-      expect { MB::Sound::UI::Viewports.layout(:x) { pane :a; pane :a } }.to raise_error(MB::Sound::UI::Viewports::Error, /unique/)
+      expect { MB::Term::Viewports.layout(:x) { pane :a; pane :a } }.to raise_error(MB::Term::Viewports::Error, /unique/)
     end
   end
 
@@ -104,25 +97,25 @@ RSpec.describe(MB::Sound::UI::Viewports, :aggregate_failures) do
     end
 
     it 'loads what it prints into an equal layout' do
-      expect(MB::Sound::UI::Viewports::Loader.load(studio.to_ruby)).to eq(studio)
+      expect(MB::Term::Viewports::Loader.load(studio.to_ruby)).to eq(studio)
     end
 
     it 'prints tabs holding splits as a block' do
-      l = MB::Sound::UI::Viewports.layout(:t) { tabs(active: 1) { pane :mix; cols { pane :a; pane :b, width: 10 } } }
+      l = MB::Term::Viewports.layout(:t) { tabs(active: 1) { pane :mix; cols { pane :a; pane :b, width: 10 } } }
       expect(l.to_ruby).to include("tabs active: 1 do\n    pane :mix\n    cols do")
-      expect(MB::Sound::UI::Viewports::Loader.load(l.to_ruby)).to eq(l)
+      expect(MB::Term::Viewports::Loader.load(l.to_ruby)).to eq(l)
     end
 
     it 'refuses anything but layout calls and literals' do
-      expect { MB::Sound::UI::Viewports::Loader.load("layout :x do\n  system('ls')\nend\n") }.to raise_error(MB::Sound::UI::DataFile::LoadError, /system. isn't allowed here/)
-      expect { MB::Sound::UI::Viewports::Loader.load("layout :x do\n  pane :a, height: 1 + 1\nend\n") }.to raise_error(MB::Sound::UI::DataFile::LoadError, /only literal values/)
-      expect { MB::Sound::UI::Viewports::Loader.load("layout :x, evil: 1 do\n  pane :a\nend\n") }.to raise_error(MB::Sound::UI::DataFile::LoadError, /unknown layout option/)
-      expect { MB::Sound::UI::Viewports::Loader.load("layout :x do\n  pane :a, width: 3\nend\n") }.to raise_error(MB::Sound::UI::DataFile::LoadError, /use height:/)
+      expect { MB::Term::Viewports::Loader.load("layout :x do\n  system('ls')\nend\n") }.to raise_error(MB::Term::DataFile::LoadError, /system. isn't allowed here/)
+      expect { MB::Term::Viewports::Loader.load("layout :x do\n  pane :a, height: 1 + 1\nend\n") }.to raise_error(MB::Term::DataFile::LoadError, /only literal values/)
+      expect { MB::Term::Viewports::Loader.load("layout :x, evil: 1 do\n  pane :a\nend\n") }.to raise_error(MB::Term::DataFile::LoadError, /unknown layout option/)
+      expect { MB::Term::Viewports::Loader.load("layout :x do\n  pane :a, width: 3\nend\n") }.to raise_error(MB::Term::DataFile::LoadError, /use height:/)
     end
   end
 
-  describe MB::Sound::UI::Viewports::Tiler do
-    let(:t) { MB::Sound::UI::Viewports::Tiler.new(studio, 120, 40) }
+  describe MB::Term::Viewports::Tiler do
+    let(:t) { MB::Term::Viewports::Tiler.new(studio, 120, 40) }
 
     it 'splits beside (v) and below (s), focusing the new pane' do
       t.split(:repl, :cols, :knobs)
@@ -147,7 +140,7 @@ RSpec.describe(MB::Sound::UI::Viewports, :aggregate_failures) do
       expect(after[:scope].w).to eq(before[:scope].w - 7)
       expect(after[:tracks]).to eq(before[:tracks])
       expect(t.layout.to_ruby).to include('rows weight: 67 do')
-      expect(MB::Sound::UI::Viewports::Loader.load(t.layout.to_ruby)).to eq(t.layout)
+      expect(MB::Term::Viewports::Loader.load(t.layout.to_ruby)).to eq(t.layout)
     end
 
     it 'moves the far edge when there is no neighbor on that side' do
@@ -202,20 +195,20 @@ RSpec.describe(MB::Sound::UI::Viewports, :aggregate_failures) do
         case rng.rand(6)
         when 0 then t.split(names.sample(random: rng), %i[rows cols].sample(random: rng)) if names.length < 14
         when 1 then t.close(names.sample(random: rng)) if names.length > 2
-        when 2 then t.resize(names.sample(random: rng), MB::Sound::UI::Viewports::Tiler::DIRS.keys.sample(random: rng), rng.rand(1..6))
+        when 2 then t.resize(names.sample(random: rng), MB::Term::Viewports::Tiler::DIRS.keys.sample(random: rng), rng.rand(1..6))
         when 3 then t.swap(*names.sample(2, random: rng))
         when 4 then t.equalize(names.sample(random: rng))
         when 5 then t.undo
         end
         expect_tiling(t.layout, 120, 40)
-        expect(MB::Sound::UI::Viewports::Loader.load(t.layout.to_ruby)).to eq(t.layout)
+        expect(MB::Term::Viewports::Loader.load(t.layout.to_ruby)).to eq(t.layout)
       end
     end
   end
 
 
   describe 'more Tiler operations' do
-    let(:t) { MB::Sound::UI::Viewports::Tiler.new(studio, 120, 40) }
+    let(:t) { MB::Term::Viewports::Tiler.new(studio, 120, 40) }
 
     it 'focuses by direction and by number, and cycles focus' do
       t.focus!(:repl)
@@ -237,24 +230,24 @@ RSpec.describe(MB::Sound::UI::Viewports, :aggregate_failures) do
     end
 
     it 'names missing panes with a suggestion' do
-      expect { t.zoom(:jornal) }.to raise_error(MB::Sound::UI::Viewports::Error, /did you mean :journal/)
+      expect { t.zoom(:jornal) }.to raise_error(MB::Term::Viewports::Error, /did you mean :journal/)
     end
 
     it 'keeps pane options through edits, saving, and loading' do
-      l = MB::Sound::UI::Viewports.layout(:o) { cols { repl; pane :scope, width: 30, look: :scope, rate: 30, title: 'mix' } }
+      l = MB::Term::Viewports.layout(:o) { cols { repl; pane :scope, width: 30, look: :scope, rate: 30, title: 'mix' } }
       expect(l.to_ruby).to include('pane :scope, width: 30, look: :scope, rate: 30, title: "mix"')
-      expect(MB::Sound::UI::Viewports::Loader.load(l.to_ruby)).to eq(l)
+      expect(MB::Term::Viewports::Loader.load(l.to_ruby)).to eq(l)
       expect(l.place(80, 20).find { |p| p.name == :scope }.opts).to eq(look: :scope, rate: 30, title: 'mix')
-      t2 = MB::Sound::UI::Viewports::Tiler.new(l, 80, 20).swap(:repl, :scope)
+      t2 = MB::Term::Viewports::Tiler.new(l, 80, 20).swap(:repl, :scope)
       expect(t2.layout.options_of(:scope)).to eq(look: :scope, rate: 30, title: 'mix')
-      expect { MB::Sound::UI::Viewports.layout(:o) { pane :a, look: Object.new } }.to raise_error(MB::Sound::UI::Viewports::Error, /literals/)
+      expect { MB::Term::Viewports.layout(:o) { pane :a, look: Object.new } }.to raise_error(MB::Term::Viewports::Error, /literals/)
     end
 
     it 'reports the loader line and suggests calls' do
-      expect { MB::Sound::UI::Viewports::Loader.load("layout :x do\n  pane :a\n  colz do\n    pane :b\n  end\nend\n", 'x.rb') }
-        .to raise_error(MB::Sound::UI::DataFile::LoadError, /x\.rb:3: `colz` isn't allowed here \(did you mean `cols`\?\)/)
-      expect { MB::Sound::UI::Viewports::Loader.load("layout :x do\n  pane :a, Foo\nend\n", 'x.rb') }.to raise_error(MB::Sound::UI::DataFile::LoadError, /x\.rb:2: constant Foo/)
-      expect { MB::Sound::UI::Viewports::Loader.load("layout :x do\n  pane :a, height: -1\nend\n", 'x.rb') }.to raise_error(MB::Sound::UI::DataFile::LoadError, /x\.rb:2: Sizes are positive/)
+      expect { MB::Term::Viewports::Loader.load("layout :x do\n  pane :a\n  colz do\n    pane :b\n  end\nend\n", 'x.rb') }
+        .to raise_error(MB::Term::DataFile::LoadError, /x\.rb:3: `colz` isn't allowed here \(did you mean `cols`\?\)/)
+      expect { MB::Term::Viewports::Loader.load("layout :x do\n  pane :a, Foo\nend\n", 'x.rb') }.to raise_error(MB::Term::DataFile::LoadError, /x\.rb:2: constant Foo/)
+      expect { MB::Term::Viewports::Loader.load("layout :x do\n  pane :a, height: -1\nend\n", 'x.rb') }.to raise_error(MB::Term::DataFile::LoadError, /x\.rb:2: Sizes are positive/)
     end
   end
 end

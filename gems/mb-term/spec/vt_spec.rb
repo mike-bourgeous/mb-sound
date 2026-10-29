@@ -1,15 +1,13 @@
-require_relative '../../../../support/ui_helpers'
-
-RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
-  let(:vt) { MB::Sound::UI::VT.new(5, 10) }
-  let(:cells) { MB::Sound::Plot::Text::Cells }
+RSpec.describe(MB::Term::VT, :aggregate_failures) do
+  let(:vt) { MB::Term::VT.new(5, 10) }
+  let(:cells) { MB::Term::Cells }
 
   def rows(v = vt) = v.lines.map(&:rstrip)
 
-  it 'uses the same palette-index bit as Plot::Text::Cells' do
-    expect(MB::Sound::UI::VT::INDEXED).to eq(cells::INDEXED)
-    expect(MB::Sound::UI::VT::UNDERLINE).to eq(cells::UNDERLINE)
-    expect(MB::Sound::UI::VT::DIM).to eq(cells::DIM)
+  it 'uses the same palette-index bit as Cells' do
+    expect(MB::Term::VT::INDEXED).to eq(cells::INDEXED)
+    expect(MB::Term::VT::UNDERLINE).to eq(cells::UNDERLINE)
+    expect(MB::Term::VT::DIM).to eq(cells::DIM)
   end
 
   it 'writes text, wraps with a pending wrap, and scrolls lines into the scrollback' do
@@ -19,7 +17,7 @@ RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
     expect(vt.scrollback.last.wrapped).to eq(true)
     expect(vt.text_between(1, 3)).to eq("abcdefghijKL\n3")
 
-    v = MB::Sound::UI::VT.new(2, 4)
+    v = MB::Term::VT.new(2, 4)
     v.feed('abcd')
     expect([v.row, v.col]).to eq([0, 3]) # pending wrap: still on the last column
     v.feed("\r")
@@ -27,7 +25,7 @@ RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
   end
 
   it 'keeps at most the scrollback limit, with stable absolute line numbers' do
-    v = MB::Sound::UI::VT.new(2, 5, scrollback: 3)
+    v = MB::Term::VT.new(2, 5, scrollback: 3)
     10.times { |i| v.feed("#{i}\r\n") }
     expect(v.scrollback.map(&:to_s)).to eq(%w[6 7 8])
     expect(v.dropped).to eq(6)
@@ -41,7 +39,7 @@ RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
     vt.feed("1mred\e[0m \xE4".b)
     vt.feed("\xB8\xAD".b)
     expect(rows[0]).to eq('red 中')
-    expect(vt.screen[0].fg_at(0)).to eq(MB::Sound::UI::VT::INDEXED | 1)
+    expect(vt.screen[0].fg_at(0)).to eq(MB::Term::VT::INDEXED | 1)
     expect(vt.screen[0].fg_at(3)).to be_nil
   end
 
@@ -58,11 +56,11 @@ RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
   it 'reads SGR colors and attributes' do
     vt.feed("\e[1;4;38;5;200;48;2;1;2;3mA\e[22;24;39;49;7mB\e[0;93;2;3mC")
     r = vt.screen[0]
-    expect(r.attr_at(0)).to eq(MB::Sound::UI::VT::BOLD | MB::Sound::UI::VT::UNDERLINE)
-    expect(r.fg_at(0)).to eq(MB::Sound::UI::VT::INDEXED | 200)
+    expect(r.attr_at(0)).to eq(MB::Term::VT::BOLD | MB::Term::VT::UNDERLINE)
+    expect(r.fg_at(0)).to eq(MB::Term::VT::INDEXED | 200)
     expect(r.bg_at(0)).to eq(0x010203)
-    expect([r.attr_at(1), r.fg_at(1), r.bg_at(1)]).to eq([MB::Sound::UI::VT::REVERSE, nil, nil])
-    expect([r.attr_at(2), r.fg_at(2)]).to eq([MB::Sound::UI::VT::DIM | MB::Sound::UI::VT::ITALIC, MB::Sound::UI::VT::INDEXED | 11])
+    expect([r.attr_at(1), r.fg_at(1), r.bg_at(1)]).to eq([MB::Term::VT::REVERSE, nil, nil])
+    expect([r.attr_at(2), r.fg_at(2)]).to eq([MB::Term::VT::DIM | MB::Term::VT::ITALIC, MB::Term::VT::INDEXED | 11])
   end
 
   it 'puts wide characters in two cells and wraps them whole' do
@@ -130,14 +128,10 @@ RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
     expect(vt.search(/b.ta/, from: 0, backward: false)).to eq([1, 0, 4])
   end
 
-  it 'draws only changed rows, the scrolled-back view, and marks, the same into Cells and NativeCells' do
+  it 'draws only changed rows, the scrolled-back view, and marks, into a grid' do
     vt.feed("\e[31mred\e[0m plain\r\n\e[44mblue\e[0m 中x")
     a = cells.new(12, 5)
-    b = MB::Sound::Plot::Text::NativeCells.new(12, 5)
     expect(vt.draw(a, 1, 0, 11, 5)).to eq(5)
-    vt.invalidate
-    vt.draw(b, 1, 0, 11, 5)
-    expect(b.lines(:ansi256)).to eq(a.lines(:ansi256))
     expect(a.lines(:none)[1]).to eq(' blue 中x   ')
     expect(a.lines(:ansi16)[0]).to start_with(" \e[31mred\e[0m")
     expect(vt.dirty?).to eq(false)
@@ -145,16 +139,16 @@ RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
     vt.feed("\e[1;1Hx")
     expect(vt.draw(a, 1, 0, 11, 5)).to eq(1)
 
-    vt.draw(a, 1, 0, 11, 5, marks: [[0, 0, 2, MB::Sound::UI::VT::REVERSE]])
+    vt.draw(a, 1, 0, 11, 5, marks: [[0, 0, 2, MB::Term::VT::REVERSE]])
     expect(a.lines(:ansi16)[0]).to start_with(" \e[7mx\e[0m")
   end
 
   it 'keeps up with long output (10 000 lines)' do
-    v = MB::Sound::UI::VT.new(40, 120)
+    v = MB::Term::VT.new(40, 120)
     text = (1..10_000).map { |i| "line #{i} \e[32m#{'x' * 60}\e[0m" }.join("\r\n")
-    t = MB::U.clock_now
+    t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     v.feed(text)
-    elapsed = MB::U.clock_now - t
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t
     expect(v.scrollback.length).to eq(9960)
     expect(v.lines.last.rstrip).to eq("line 10000 #{'x' * 60}")
     expect(elapsed).to be < 2.0 # ~0.15 s on the Mac container
@@ -162,7 +156,7 @@ RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
   # ui-api-1 (maintainer, 2026-10-18: `ui :off` lost color: "The history
   # text copied from the panel to the terminal")
   it 'gives a row back as text with SGR for its styles, changing only where the style does' do
-    vt = MB::Sound::UI::VT.new(3, 40)
+    vt = MB::Term::VT.new(3, 40)
     vt.feed("plain \e[1;31mbold red\e[0m mid \e[38;5;208mor\e[48;2;1;2;3mange\e[0m   \r\n")
     vt.feed("no style at all\r\n")
     row = vt.line_at(vt.dropped + vt.scrollback.length)
@@ -170,22 +164,10 @@ RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
     expect(row.to_s).to eq('plain bold red mid orange')
     expect(vt.line_at(vt.dropped + vt.scrollback.length + 1).to_sgr).to eq('no style at all')
     # (what the terminal shows from it is the VT's own row again)
-    vt2 = MB::Sound::UI::VT.new(3, 40)
+    vt2 = MB::Term::VT.new(3, 40)
     vt2.feed(row.to_sgr)
     r2 = vt2.line_at(vt2.dropped + vt2.scrollback.length)
     expect((0...row.length).map { |c| [r2.char(c), r2.fg_at(c), r2.bg_at(c), r2.attr_at(c)] }).to eq((0...row.length).map { |c| [row.char(c), row.fg_at(c), row.bg_at(c), row.attr_at(c)] })
   end
 
-  it 'copies the REPL pane\'s colored lines out of the tiles with their colors (UI::Switch)' do
-    @tiles, @term = ui_tiles(:tiles)
-    expect(@term.wait_for('t> ')).to eq(true)
-    @tiles.host.vt.feed("\e[32mgreen\e[0m and plain\r\n") # (colored console output, as the pane holds it)
-    lines = MB::Sound::UI::Switch.repl_lines(@tiles, color: true)
-    expect(lines.join("\n")).to include("\e[0;32mgreen\e[0m and plain")
-    expect(MB::Sound::UI::Switch.repl_lines(@tiles, color: false).join("\n")).to include("green and plain")
-    expect(MB::Sound::UI::Switch.repl_lines(@tiles, color: false).join).not_to include("\e[")
-  ensure
-    @tiles&.stop
-    @term&.close
-  end
 end

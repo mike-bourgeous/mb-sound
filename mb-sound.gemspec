@@ -21,7 +21,7 @@ Gem::Specification.new do |spec|
   # Specify which files should be added to the gem when it is released.
   # The `git ls-files -z` loads the files in the RubyGem that have been added into git.
   spec.files         = Dir.chdir(File.expand_path('..', __FILE__)) do
-    `git ls-files -z`.split("\x0").reject { |f| f.match(%r{^(test|spec|features|sounds|tmp|coverage)/}) }
+    `git ls-files -z`.split("\x0").reject { |f| f.match(%r{^(test|spec|features|sounds|tmp|coverage|gems)/}) }
   end
   spec.require_paths = ["lib"]
   spec.bindir        = "bin"
@@ -43,6 +43,7 @@ Gem::Specification.new do |spec|
 
   spec.add_runtime_dependency 'mb-math', '>= 0.5.0.usegit'
   spec.add_runtime_dependency 'mb-util', '>= 0.1.29.usegit'
+  spec.add_runtime_dependency 'mb-term', '~> 0.1.0'
 
   # For generating MIDI controller templates for ACID
   spec.add_runtime_dependency 'builder', '~> 3.2.4'

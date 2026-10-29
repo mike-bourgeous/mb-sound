@@ -1,10 +1,8 @@
-require 'mb/sound'
-
 # The Router as an explicit state machine (ux-1 round 3, item 12): every
 # (state, event) pair is declared, each does what its table row says, and
 # random walks keep the invariants.
-RSpec.describe(MB::Sound::UI::Input::Router, :aggregate_failures) do
-  let(:input) { MB::Sound::UI::Input }
+RSpec.describe(MB::Term::Input::Router, :aggregate_failures) do
+  let(:input) { MB::Term::Input }
   let(:key) { input::Key }
   let(:router_class) { described_class }
 
@@ -71,6 +69,12 @@ RSpec.describe(MB::Sound::UI::Input::Router, :aggregate_failures) do
     [r, host]
   end
 
+  it 'calls only the host methods it lists (HOST_METHODS; mb-sound checks Tiles has them all)' do
+    calls = File.read(File.expand_path('../../lib/mb/term/input/router.rb', __dir__)).scan(/@host\.(?:respond_to\?\(:)?([a-z_]+[?]?)/).flatten.uniq
+    expect(calls).to include('once_target', 'act', 'pane_keymap')
+    expect(calls - %w[respond_to?] - router_class::HOST_METHODS.map(&:to_s)).to eq([])
+  end
+
   # Puts router +r+ into +state+ (from :repl).
   def enter(r, state)
     case state
@@ -84,15 +88,6 @@ RSpec.describe(MB::Sound::UI::Input::Router, :aggregate_failures) do
     when :pane then r.mode = :pane
     when :play then nil
     end
-  end
-
-  it 'finds every host method public on Tiles (an optional one that is private would be skipped silently)' do
-    router_class::HOST_METHODS.each do |m|
-      expect(MB::Sound::UI::Tiles.public_method_defined?(m)).to eq(true), "Tiles##{m} is not public"
-    end
-    calls = File.read(File.expand_path('../../../../../lib/mb/sound/ui/input/router.rb', __dir__)).scan(/@host\.(?:respond_to\?\(:)?([a-z_]+[?]?)/).flatten.uniq
-    expect(calls).to include('once_target', 'act', 'pane_keymap')
-    expect(calls - %w[respond_to?] - router_class::HOST_METHODS.map(&:to_s)).to eq([])
   end
 
   it 'declares every (state, event) pair, with a handler it has and a description' do

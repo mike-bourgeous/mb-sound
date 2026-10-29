@@ -1,429 +1,427 @@
 require_relative 'tree'
 
 module MB
-  module Sound
-    module UI
-      module Viewports
-        # Interactive state: a layout at a screen size, with undo and redo.
-        # Every operation replaces #layout with a new tree and returns self
-        # (so they chain: t.split(...).resize(...)).  Not thread-safe by
-        # itself: the screen that owns it serializes calls.
-        class Tiler
-          DIRS = { left: [:cols, -1], right: [:cols, 1], up: [:rows, -1], down: [:rows, 1] }.freeze
+  module Term
+    module Viewports
+      # Interactive state: a layout at a screen size, with undo and redo.
+      # Every operation replaces #layout with a new tree and returns self
+      # (so they chain: t.split(...).resize(...)).  Not thread-safe by
+      # itself: the screen that owns it serializes calls.
+      class Tiler
+        DIRS = { left: [:cols, -1], right: [:cols, 1], up: [:rows, -1], down: [:rows, 1] }.freeze
 
-          # Undo steps kept.
-          UNDO = 100
+        # Undo steps kept.
+        UNDO = 100
 
-          attr_reader :layout, :w, :h
+        attr_reader :layout, :w, :h
 
-          # True puts a rule under one-row panes too (the screen decides by
-          # its size; see Viewports.place).  Not an undo step: it belongs to
-          # the screen, not the tree.
-          attr_accessor :header_rule
+        # True puts a rule under one-row panes too (the screen decides by
+        # its size; see Viewports.place).  Not an undo step: it belongs to
+        # the screen, not the tree.
+        attr_accessor :header_rule
 
-          # The smallest sizes of panes (a Proc of a pane name and an axis,
-          # :rows or :cols, returning cells or nil), which placement never
-          # goes under while the screen has room (see Viewports.shares).
-          attr_accessor :mins
+        # The smallest sizes of panes (a Proc of a pane name and an axis,
+        # :rows or :cols, returning cells or nil), which placement never
+        # goes under while the screen has room (see Viewports.shares).
+        attr_accessor :mins
 
-          # A temporary pane opened by #open_temporary: its +name+, the
-          # layout +before+ it opened and +after+ (to know whether anything
-          # changed the tree since).
-          Temporary = Data.define(:name, :before, :after)
+        # A temporary pane opened by #open_temporary: its +name+, the
+        # layout +before+ it opened and +after+ (to know whether anything
+        # changed the tree since).
+        Temporary = Data.define(:name, :before, :after)
 
-          def initialize(layout, w, h)
-            @layout = layout
-            @w = w
-            @h = h
-            @undo = []
-            @redo = []
-            @counter = 0
-            @header_rule = false
-            @mins = nil
-          end
+        def initialize(layout, w, h)
+          @layout = layout
+          @w = w
+          @h = h
+          @undo = []
+          @redo = []
+          @counter = 0
+          @header_rule = false
+          @mins = nil
+        end
 
-          # A new screen size (placement follows; the tree is unchanged).
-          def resize_screen(w, h)
-            @w = w
-            @h = h
-            self
-          end
+        # A new screen size (placement follows; the tree is unchanged).
+        def resize_screen(w, h)
+          @w = w
+          @h = h
+          self
+        end
 
-          # Replaces the layout (undoable).
-          def layout=(layout)
-            record(layout)
-          end
+        # Replaces the layout (undoable).
+        def layout=(layout)
+          record(layout)
+        end
 
-          def rects = @layout.rects(@w, @h, header_rule: @header_rule, mins: @mins)
-          def placed = @layout.place(@w, @h, header_rule: @header_rule, mins: @mins)
+        def rects = @layout.rects(@w, @h, header_rule: @header_rule, mins: @mins)
+        def placed = @layout.place(@w, @h, header_rule: @header_rule, mins: @mins)
 
-          # The focused pane (the layout's focus, else the first pane).
-          def focus = @layout.focus || @layout.panes.first
+        # The focused pane (the layout's focus, else the first pane).
+        def focus = @layout.focus || @layout.panes.first
 
-          # True if there are steps to undo / redo.
-          def undo? = !@undo.empty?
-          def redo? = !@redo.empty?
+        # True if there are steps to undo / redo.
+        def undo? = !@undo.empty?
+        def redo? = !@redo.empty?
 
-          # Splits +name+ along +axis+ (:cols puts the new pane beside it,
-          # like vim's Ctrl-W v; :rows below it, Ctrl-W s), halving its
-          # space.  The new pane is +new_name+ (default :empty1, :empty2,
-          # ...) and gets focus.
-          def split(name = focus, axis = :cols, new_name = nil)
-            raise Error, "Split axes are :cols (beside) or :rows (below) (got #{axis.inspect})" unless %i[cols rows].include?(axis)
-            find!(name)
-            raise Error, "#{new_name.inspect} is already shown" if new_name && @layout.panes.include?(new_name)
-            new_name ||= :"empty#{@counter += 1}" while new_name.nil? || @layout.panes.include?(new_name)
-            change(focus: new_name, zoom: nil) do |root|
-              edit(root, name) do |leaf, parent_axis|
-                if parent_axis == axis
-                  # Same direction as the parent: become two siblings
-                  half = leaf.size ? [leaf.size / 2, 1].max : nil
-                  [leaf.with(size: half ? leaf.size - half : nil), Pane.new(name: new_name, size: half, weight: leaf.weight)]
-                else
-                  [Split.new(axis: axis, children: [leaf.with(size: nil, weight: 1, min: nil), Pane.new(name: new_name)], size: leaf.size, weight: leaf.weight, min: leaf.min)]
-                end
+        # Splits +name+ along +axis+ (:cols puts the new pane beside it,
+        # like vim's Ctrl-W v; :rows below it, Ctrl-W s), halving its
+        # space.  The new pane is +new_name+ (default :empty1, :empty2,
+        # ...) and gets focus.
+        def split(name = focus, axis = :cols, new_name = nil)
+          raise Error, "Split axes are :cols (beside) or :rows (below) (got #{axis.inspect})" unless %i[cols rows].include?(axis)
+          find!(name)
+          raise Error, "#{new_name.inspect} is already shown" if new_name && @layout.panes.include?(new_name)
+          new_name ||= :"empty#{@counter += 1}" while new_name.nil? || @layout.panes.include?(new_name)
+          change(focus: new_name, zoom: nil) do |root|
+            edit(root, name) do |leaf, parent_axis|
+              if parent_axis == axis
+                # Same direction as the parent: become two siblings
+                half = leaf.size ? [leaf.size / 2, 1].max : nil
+                [leaf.with(size: half ? leaf.size - half : nil), Pane.new(name: new_name, size: half, weight: leaf.weight)]
+              else
+                [Split.new(axis: axis, children: [leaf.with(size: nil, weight: 1, min: nil), Pane.new(name: new_name)], size: leaf.size, weight: leaf.weight, min: leaf.min)]
               end
             end
           end
+        end
 
-          # Removes +name+; a split left with one child is replaced by it.
-          def close(name = focus)
-            find!(name)
-            raise Error, 'The last pane stays' if @layout.panes.length == 1
+        # Removes +name+; a split left with one child is replaced by it.
+        def close(name = focus)
+          find!(name)
+          raise Error, 'The last pane stays' if @layout.panes.length == 1
 
-            left = @layout.panes - [name]
-            change(focus: left.include?(@layout.focus) ? @layout.focus : neighbor_of(name, left), zoom: (@layout.zoom == name ? nil : @layout.zoom)) do |root|
-              remove_leaf(root, name)
+          left = @layout.panes - [name]
+          change(focus: left.include?(@layout.focus) ? @layout.focus : neighbor_of(name, left), zoom: (@layout.zoom == name ? nil : @layout.zoom)) do |root|
+            remove_leaf(root, name)
+          end
+        end
+
+        # Moves +name+'s edge in +dir+ (:left, :right, :up, :down) by
+        # +cells+: the edge on that side if there is a neighbor there, else
+        # the opposite edge (so the pane shrinks), like tmux's
+        # resize-pane.  Siblings' sizes are rewritten as their current
+        # cells (fixed sizes stay fixed; weights become cell counts divided
+        # by their gcd), so placing at this screen size gives exactly the
+        # moved edge, and other sizes keep the proportions.
+        def resize(name, dir, cells = 1)
+          axis, sign = DIRS.fetch(dir) { raise Error, "Directions are #{DIRS.keys.map(&:inspect).join(', ')} (got #{dir.inspect})" }
+          path = path_to(@layout.root, name)
+          chosen = nil
+          path.each_cons(2).reverse_each do |parent, child|
+            next unless parent.is_a?(Split) && parent.axis == axis
+
+            i = parent.children.index { |c| c.equal?(child) }
+            j = i + sign
+            j = i - sign unless (0...parent.children.length).cover?(j)
+            next unless (0...parent.children.length).cover?(j)
+
+            chosen = [parent, i, j]
+            break
+          end
+          return self unless chosen
+
+          parent, i, j = chosen
+          grow = (j > i) == (sign > 0) ? cells : -cells
+          current = cells_of(parent)
+          grow = grow.clamp(-(current[i] - 1), current[j] - 1)
+          return self if grow == 0
+          current[i] += grow
+          current[j] -= grow
+          flex = parent.children.each_index.reject { |k| parent.children[k].size }
+          div = flex.map { |k| current[k] }.reduce(0) { |a, b| a.gcd(b) }
+          div = 1 if div.zero?
+          kids = parent.children.each_with_index.map do |c, k|
+            c.size ? c.with(size: current[k]) : c.with(weight: current[k] / div)
+          end
+          change { |root| replace(root, parent, parent.with(children: kids)) }
+        end
+
+        # Equal shares for +name+'s siblings (vim's Ctrl-W =, one level).
+        def equalize(name = focus)
+          parent = path_to(@layout.root, name)[-2]
+          change { |root| replace(root, parent, parent.with(children: parent.children.map { |c| c.with(size: nil, weight: 1) })) }
+        end
+
+        # Swaps panes +a+ and +b+ (sizes stay with the slots, like tmux's
+        # swap-pane).
+        def swap(a, b = focus)
+          find!(a)
+          find!(b)
+          change { |root| rename(root, { a => b, b => a }) }
+        end
+
+        # Puts pane +new_name+ where +at+ was; if +new_name+ is already
+        # shown, the two swap.
+        def show(new_name, at: focus)
+          find!(at)
+          return swap(new_name, at).focus!(new_name) if @layout.panes.include?(new_name)
+
+          change(focus: new_name, zoom: @layout.zoom == at ? new_name : @layout.zoom) { |root| rename(root, { at => new_name }) }
+        end
+
+        # Toggles zooming +name+ to the whole screen.
+        def zoom(name = focus)
+          find!(name)
+          change(zoom: @layout.zoom == name ? nil : name, focus: name)
+        end
+
+        # Sets pane +name+'s option +key+ (a literal; nil removes it): the
+        # pane's settings for this placement (`look: :scope`), saved with
+        # the layout.  Not an undo step.
+        def set_option(name, key, value)
+          find!(name)
+          raise Error, "Pane options are literals (got #{value.inspect})" unless Viewports.literal?(value)
+          change(record: false) do |root|
+            edit(root, name) { |leaf, _| [leaf.with(opts: value.nil? ? leaf.opts.except(key) : leaf.opts.merge(key => value))] }
+          end
+        end
+
+        # Focuses +name+ (not an undo step).
+        def focus!(name)
+          find!(name)
+          change(focus: name, record: false)
+        end
+
+        # Panes in reading order (top to bottom, then left to right): the
+        # numbers NAV mode shows.
+        def numbered = rects.sort_by { |_, r| [r.y, r.x] }.map(&:first)
+
+        # Focus by number (1-based, see #numbered).
+        def focus_index(n) = (name = numbered[n - 1]) ? focus!(name) : self
+
+        # Focus the next (+dir+ 1) or previous (-1) pane in reading order.
+        def focus_next(dir = 1)
+          names = numbered
+          return self if names.empty?
+          focus!(names[((names.index(focus) || 0) + dir) % names.length])
+        end
+
+        # Focus the nearest pane in direction +dir+ (:left, :right, :up,
+        # :down) that overlaps the focused pane's span.
+        def focus_dir(dir)
+          r = rects
+          me = r[focus] or return self
+          best = r.reject { |n, _| n == focus }.select { |_, o|
+            case dir
+            when :left then o.x + o.w <= me.x && o.y < me.y + me.h && me.y < o.y + o.h
+            when :right then o.x >= me.x + me.w && o.y < me.y + me.h && me.y < o.y + o.h
+            when :up then o.y + o.h <= me.y && o.x < me.x + me.w && me.x < o.x + o.w
+            when :down then o.y >= me.y + me.h && o.x < me.x + me.w && me.x < o.x + o.w
+            else raise Error, "Directions are #{DIRS.keys.map(&:inspect).join(', ')} (got #{dir.inspect})"
             end
-          end
-
-          # Moves +name+'s edge in +dir+ (:left, :right, :up, :down) by
-          # +cells+: the edge on that side if there is a neighbor there, else
-          # the opposite edge (so the pane shrinks), like tmux's
-          # resize-pane.  Siblings' sizes are rewritten as their current
-          # cells (fixed sizes stay fixed; weights become cell counts divided
-          # by their gcd), so placing at this screen size gives exactly the
-          # moved edge, and other sizes keep the proportions.
-          def resize(name, dir, cells = 1)
-            axis, sign = DIRS.fetch(dir) { raise Error, "Directions are #{DIRS.keys.map(&:inspect).join(', ')} (got #{dir.inspect})" }
-            path = path_to(@layout.root, name)
-            chosen = nil
-            path.each_cons(2).reverse_each do |parent, child|
-              next unless parent.is_a?(Split) && parent.axis == axis
-
-              i = parent.children.index { |c| c.equal?(child) }
-              j = i + sign
-              j = i - sign unless (0...parent.children.length).cover?(j)
-              next unless (0...parent.children.length).cover?(j)
-
-              chosen = [parent, i, j]
-              break
+          }.min_by { |_, o|
+            case dir
+            when :left then [me.x - (o.x + o.w), (o.y - me.y).abs]
+            when :right then [o.x - (me.x + me.w), (o.y - me.y).abs]
+            when :up then [me.y - (o.y + o.h), (o.x - me.x).abs]
+            else [o.y - (me.y + me.h), (o.x - me.x).abs]
             end
-            return self unless chosen
+          }
+          best ? focus!(best[0]) : self
+        end
 
-            parent, i, j = chosen
-            grow = (j > i) == (sign > 0) ? cells : -cells
-            current = cells_of(parent)
-            grow = grow.clamp(-(current[i] - 1), current[j] - 1)
-            return self if grow == 0
-            current[i] += grow
-            current[j] -= grow
-            flex = parent.children.each_index.reject { |k| parent.children[k].size }
-            div = flex.map { |k| current[k] }.reduce(0) { |a, b| a.gcd(b) }
-            div = 1 if div.zero?
-            kids = parent.children.each_with_index.map do |c, k|
-              c.size ? c.with(size: current[k]) : c.with(weight: current[k] / div)
-            end
-            change { |root| replace(root, parent, parent.with(children: kids)) }
-          end
+        # The next (+dir+ 1) or previous tab of the tabs holding +name+.
+        def tab(dir = 1, name = focus)
+          tabs = path_to(@layout.root, name).reverse.find { |n| n.is_a?(Tabs) }
+          return self unless tabs
 
-          # Equal shares for +name+'s siblings (vim's Ctrl-W =, one level).
-          def equalize(name = focus)
-            parent = path_to(@layout.root, name)[-2]
-            change { |root| replace(root, parent, parent.with(children: parent.children.map { |c| c.with(size: nil, weight: 1) })) }
-          end
+          nt = tabs.with(active: (tabs.active + dir) % tabs.children.length)
+          change(focus: nt.children[nt.active].panes.first) { |root| replace(root, tabs, nt) }
+        end
 
-          # Swaps panes +a+ and +b+ (sizes stay with the slots, like tmux's
-          # swap-pane).
-          def swap(a, b = focus)
-            find!(a)
-            find!(b)
-            change { |root| rename(root, { a => b, b => a }) }
-          end
-
-          # Puts pane +new_name+ where +at+ was; if +new_name+ is already
-          # shown, the two swap.
-          def show(new_name, at: focus)
-            find!(at)
-            return swap(new_name, at).focus!(new_name) if @layout.panes.include?(new_name)
-
-            change(focus: new_name, zoom: @layout.zoom == at ? new_name : @layout.zoom) { |root| rename(root, { at => new_name }) }
-          end
-
-          # Toggles zooming +name+ to the whole screen.
-          def zoom(name = focus)
-            find!(name)
-            change(zoom: @layout.zoom == name ? nil : name, focus: name)
-          end
-
-          # Sets pane +name+'s option +key+ (a literal; nil removes it): the
-          # pane's settings for this placement (`look: :scope`), saved with
-          # the layout.  Not an undo step.
-          def set_option(name, key, value)
-            find!(name)
-            raise Error, "Pane options are literals (got #{value.inspect})" unless Viewports.literal?(value)
-            change(record: false) do |root|
-              edit(root, name) { |leaf, _| [leaf.with(opts: value.nil? ? leaf.opts.except(key) : leaf.opts.merge(key => value))] }
-            end
-          end
-
-          # Focuses +name+ (not an undo step).
-          def focus!(name)
-            find!(name)
-            change(focus: name, record: false)
-          end
-
-          # Panes in reading order (top to bottom, then left to right): the
-          # numbers NAV mode shows.
-          def numbered = rects.sort_by { |_, r| [r.y, r.x] }.map(&:first)
-
-          # Focus by number (1-based, see #numbered).
-          def focus_index(n) = (name = numbered[n - 1]) ? focus!(name) : self
-
-          # Focus the next (+dir+ 1) or previous (-1) pane in reading order.
-          def focus_next(dir = 1)
-            names = numbered
-            return self if names.empty?
-            focus!(names[((names.index(focus) || 0) + dir) % names.length])
-          end
-
-          # Focus the nearest pane in direction +dir+ (:left, :right, :up,
-          # :down) that overlaps the focused pane's span.
-          def focus_dir(dir)
-            r = rects
-            me = r[focus] or return self
-            best = r.reject { |n, _| n == focus }.select { |_, o|
-              case dir
-              when :left then o.x + o.w <= me.x && o.y < me.y + me.h && me.y < o.y + o.h
-              when :right then o.x >= me.x + me.w && o.y < me.y + me.h && me.y < o.y + o.h
-              when :up then o.y + o.h <= me.y && o.x < me.x + me.w && me.x < o.x + o.w
-              when :down then o.y >= me.y + me.h && o.x < me.x + me.w && me.x < o.x + o.w
-              else raise Error, "Directions are #{DIRS.keys.map(&:inspect).join(', ')} (got #{dir.inspect})"
-              end
-            }.min_by { |_, o|
-              case dir
-              when :left then [me.x - (o.x + o.w), (o.y - me.y).abs]
-              when :right then [o.x - (me.x + me.w), (o.y - me.y).abs]
-              when :up then [me.y - (o.y + o.h), (o.x - me.x).abs]
-              else [o.y - (me.y + me.h), (o.x - me.x).abs]
-              end
-            }
-            best ? focus!(best[0]) : self
-          end
-
-          # The next (+dir+ 1) or previous tab of the tabs holding +name+.
-          def tab(dir = 1, name = focus)
-            tabs = path_to(@layout.root, name).reverse.find { |n| n.is_a?(Tabs) }
-            return self unless tabs
-
-            nt = tabs.with(active: (tabs.active + dir) % tabs.children.length)
-            change(focus: nt.children[nt.active].panes.first) { |root| replace(root, tabs, nt) }
-          end
-
-          # Opens pane +name+ for a while (a plot, the messages pane), +rows+
-          # tall, below the pane it takes the rows from: the largest pane
-          # (by area) that is flexible (no fixed size), not in +keep+ (the
-          # REPL, the keyboard), and has the rows to spare above its
-          # minimum; else +fallback+ (when shown), else the largest of all.
-          # The focus stays.  Not an undo step.  Returns a Temporary for
-          # #close_temporary, or nil if +name+ is already shown.
-          def open_temporary(name, rows, keep: [], fallback: nil, prefer: nil)
-            return nil if @layout.panes.include?(name)
-            before = @layout
-            target = prefer && temporary_room?(prefer, rows) ? prefer : temporary_target(rows, keep, fallback)
-            change(record: false) do |root|
-              edit(root, target) do |leaf, parent_axis|
-                if parent_axis == :rows
-                  [leaf, Pane.new(name: name, size: rows)]
-                else
-                  [Split.new(axis: :rows, children: [leaf.with(size: nil, weight: 1, min: nil), Pane.new(name: name, size: rows)], size: leaf.size, weight: leaf.weight, min: leaf.min)]
-                end
-              end
-            end
-            Temporary.new(name: name, before: before, after: @layout)
-          end
-
-          # Closes a pane opened by #open_temporary: the tree comes back
-          # exactly as it was before (sizes, weights, focus) when nothing
-          # changed it meanwhile; otherwise only the pane goes (if still
-          # there), its slot going back to its neighbor.  Not an undo step.
-          def close_temporary(temp)
-            return self unless temp
-            if @layout == temp.after
-              @layout = temp.before
-            elsif @layout.with(focus: temp.after.focus) == temp.after && temp.before.panes.include?(@layout.focus)
-              # Only the focus moved (onto a pane that stays)
-              @layout = temp.before.with(focus: @layout.focus)
-            elsif @layout.panes.include?(temp.name) && @layout.panes.length > 1
-              left = @layout.panes - [temp.name]
-              change(focus: left.include?(@layout.focus) ? @layout.focus : neighbor_of(temp.name, left), zoom: (@layout.zoom == temp.name ? nil : @layout.zoom), record: false) do |root|
-                remove_leaf(root, temp.name)
+        # Opens pane +name+ for a while (a plot, the messages pane), +rows+
+        # tall, below the pane it takes the rows from: the largest pane
+        # (by area) that is flexible (no fixed size), not in +keep+ (the
+        # REPL, the keyboard), and has the rows to spare above its
+        # minimum; else +fallback+ (when shown), else the largest of all.
+        # The focus stays.  Not an undo step.  Returns a Temporary for
+        # #close_temporary, or nil if +name+ is already shown.
+        def open_temporary(name, rows, keep: [], fallback: nil, prefer: nil)
+          return nil if @layout.panes.include?(name)
+          before = @layout
+          target = prefer && temporary_room?(prefer, rows) ? prefer : temporary_target(rows, keep, fallback)
+          change(record: false) do |root|
+            edit(root, target) do |leaf, parent_axis|
+              if parent_axis == :rows
+                [leaf, Pane.new(name: name, size: rows)]
+              else
+                [Split.new(axis: :rows, children: [leaf.with(size: nil, weight: 1, min: nil), Pane.new(name: name, size: rows)], size: leaf.size, weight: leaf.weight, min: leaf.min)]
               end
             end
-            self
           end
+          Temporary.new(name: name, before: before, after: @layout)
+        end
 
-          def undo
-            return self if @undo.empty?
-
-            @redo << @layout
-            @layout = @undo.pop
-            self
+        # Closes a pane opened by #open_temporary: the tree comes back
+        # exactly as it was before (sizes, weights, focus) when nothing
+        # changed it meanwhile; otherwise only the pane goes (if still
+        # there), its slot going back to its neighbor.  Not an undo step.
+        def close_temporary(temp)
+          return self unless temp
+          if @layout == temp.after
+            @layout = temp.before
+          elsif @layout.with(focus: temp.after.focus) == temp.after && temp.before.panes.include?(@layout.focus)
+            # Only the focus moved (onto a pane that stays)
+            @layout = temp.before.with(focus: @layout.focus)
+          elsif @layout.panes.include?(temp.name) && @layout.panes.length > 1
+            left = @layout.panes - [temp.name]
+            change(focus: left.include?(@layout.focus) ? @layout.focus : neighbor_of(temp.name, left), zoom: (@layout.zoom == temp.name ? nil : @layout.zoom), record: false) do |root|
+              remove_leaf(root, temp.name)
+            end
           end
+          self
+        end
 
-          def redo
-            return self if @redo.empty?
+        def undo
+          return self if @undo.empty?
 
-            @undo << @layout
-            @layout = @redo.pop
-            self
-          end
+          @redo << @layout
+          @layout = @undo.pop
+          self
+        end
 
-          def inspect = "#<UI::Viewports::Tiler #{@layout.name.inspect} #{@w}x#{@h} focus #{focus.inspect}#{@layout.zoom ? " zoom #{@layout.zoom.inspect}" : ''}, #{@undo.length} undo>"
+        def redo
+          return self if @redo.empty?
 
-          private
+          @undo << @layout
+          @layout = @redo.pop
+          self
+        end
 
-          def record(new)
-            return self if new == @layout
-            @undo << @layout
-            @undo.shift if @undo.length > UNDO
-            @redo.clear
+        def inspect = "#<MB::Term::Viewports::Tiler #{@layout.name.inspect} #{@w}x#{@h} focus #{focus.inspect}#{@layout.zoom ? " zoom #{@layout.zoom.inspect}" : ''}, #{@undo.length} undo>"
+
+        private
+
+        def record(new)
+          return self if new == @layout
+          @undo << @layout
+          @undo.shift if @undo.length > UNDO
+          @redo.clear
+          @layout = new
+          self
+        end
+
+        def change(focus: @layout.focus, zoom: @layout.zoom, record: true)
+          root = block_given? ? yield(@layout.root) : @layout.root
+          root = Viewports.normalize(root)
+          new = Layout.new(name: @layout.name, root: root, focus: focus, zoom: zoom, gap: @layout.gap)
+          return self if new == @layout
+
+          if record
+            record(new)
+          else
             @layout = new
-            self
+          end
+          self
+        end
+
+        def find!(name)
+          return if @layout.panes.include?(name)
+          hint = DidYouMean::SpellChecker.new(dictionary: @layout.panes.map(&:to_s)).correct(name.to_s).first
+          raise Error, "No pane #{name.inspect} in the layout#{hint ? " (did you mean :#{hint}?)" : ''} (panes: #{@layout.panes.map(&:inspect).join(', ')})"
+        end
+
+        # The pane a temporary pane of +rows+ takes its rows from (see
+        # #open_temporary).
+        # True if pane +name+ is shown, flexible, and has +rows+ to spare
+        # above its minimum (open_temporary's +prefer:+).
+        def temporary_room?(name, rows)
+          rect = rects[name] or return false
+          leaf = Viewports.find_leaf(@layout.root, name)
+          return false if leaf.nil? || !leaf.size.nil?
+          rect.h - rows - @layout.gap >= (leaf.min || @mins&.call(name, :rows) || 1)
+        end
+
+        def temporary_target(rows, keep, fallback)
+          r = rects
+          fixed = {}
+          walk = ->(n) { n.is_a?(Pane) ? (fixed[n.name] = !n.size.nil?) : n.children.each(&walk) }
+          walk.(@layout.root)
+          least = ->(name) { Viewports.find_leaf(@layout.root, name)&.min || @mins&.call(name, :rows) || 1 }
+          ok = r.reject { |name, rect| keep.include?(name) || fixed[name] || rect.h - rows - @layout.gap < least.(name) }
+          best = ok.max_by { |name, rect| [rect.area, -numbered.index(name).to_i] }
+          return best[0] if best
+          return fallback if fallback && r.key?(fallback)
+          r.max_by { |_, rect| rect.area }&.first || @layout.panes.first
+        end
+
+        # The pane nearest +name+ in reading order among +left+.
+        def neighbor_of(name, left)
+          order = numbered
+          i = order.index(name) || 0
+          (order[0...i].reverse + order[(i + 1)..]).find { |n| left.include?(n) } || left.first
+        end
+
+        # Current cells of +parent+'s children along its axis at this size
+        # (zoom ignored).
+        def cells_of(parent)
+          slots = {}.compare_by_identity
+          Viewports.place(@layout.root, Rect.new(0, 0, @w, @h), @layout.gap, [], slots, header_rule: @header_rule, mins: @mins)
+          parent.children.map { |c| (r = slots[c]) ? (parent.axis == :cols ? r.w : r.h) : 1 }
+        end
+
+        def path_to(node, name, path = [])
+          path += [node]
+          return path if node.is_a?(Pane) && node.name == name
+          return nil if node.is_a?(Pane)
+
+          node.children.each do |c|
+            found = path_to(c, name, path)
+            return found if found
+          end
+          find!(name) if path.length == 1
+          nil
+        end
+
+        # Replaces the leaf +name+ by the Array the block returns (given
+        # the leaf and its parent's axis).
+        def edit(node, name, &block)
+          return node if node.is_a?(Pane)
+
+          axis = node.is_a?(Split) ? node.axis : :tabs
+          kids = node.children.flat_map do |c|
+            c.is_a?(Pane) && c.name == name ? block.call(c, axis) : [edit(c, name, &block)]
+          end
+          node.with(children: kids)
+        end
+
+        # +node+ without leaf +name+.  When every sibling left in its split
+        # has a fixed size, the neighbor before it (else after) becomes
+        # flexible and takes the space (maintainer, 2026-10-18: closing
+        # the :wall's messages pane left a lined grid where it was; "the
+        # other panels should expand to take the space"; undo brings the
+        # pane back in its slot).
+        def remove_leaf(node, name)
+          return node if node.is_a?(Pane)
+
+          i = node.children.index { |c| c.is_a?(Pane) && c.name == name }
+          return node.with(children: node.children.map { |c| remove_leaf(c, name) }) unless i
+
+          kids = node.children.dup
+          kids.delete_at(i)
+          if node.is_a?(Split) && !kids.empty? && kids.none? { |c| c.size.nil? }
+            j = i > 0 ? i - 1 : 0
+            kids[j] = kids[j].with(size: nil, weight: 1)
+          end
+          node.with(children: kids)
+        end
+
+        def replace(node, old, new)
+          return new if node.equal?(old)
+          return node if node.is_a?(Pane)
+
+          node.with(children: node.children.map { |c| replace(c, old, new) })
+        end
+
+        # Renames leaves (+names+ old => new); options follow the pane.
+        def rename(node, names)
+          if node.is_a?(Pane)
+            return node unless names.key?(node.name)
+            other = Viewports.find_leaf(@layout.root, names[node.name])
+            return node.with(name: names[node.name], opts: other ? other.opts : {})
           end
 
-          def change(focus: @layout.focus, zoom: @layout.zoom, record: true)
-            root = block_given? ? yield(@layout.root) : @layout.root
-            root = Viewports.normalize(root)
-            new = Layout.new(name: @layout.name, root: root, focus: focus, zoom: zoom, gap: @layout.gap)
-            return self if new == @layout
-
-            if record
-              record(new)
-            else
-              @layout = new
-            end
-            self
-          end
-
-          def find!(name)
-            return if @layout.panes.include?(name)
-            hint = DidYouMean::SpellChecker.new(dictionary: @layout.panes.map(&:to_s)).correct(name.to_s).first
-            raise Error, "No pane #{name.inspect} in the layout#{hint ? " (did you mean :#{hint}?)" : ''} (panes: #{@layout.panes.map(&:inspect).join(', ')})"
-          end
-
-          # The pane a temporary pane of +rows+ takes its rows from (see
-          # #open_temporary).
-          # True if pane +name+ is shown, flexible, and has +rows+ to spare
-          # above its minimum (open_temporary's +prefer:+).
-          def temporary_room?(name, rows)
-            rect = rects[name] or return false
-            leaf = Viewports.find_leaf(@layout.root, name)
-            return false if leaf.nil? || !leaf.size.nil?
-            rect.h - rows - @layout.gap >= (leaf.min || @mins&.call(name, :rows) || 1)
-          end
-
-          def temporary_target(rows, keep, fallback)
-            r = rects
-            fixed = {}
-            walk = ->(n) { n.is_a?(Pane) ? (fixed[n.name] = !n.size.nil?) : n.children.each(&walk) }
-            walk.(@layout.root)
-            least = ->(name) { Viewports.find_leaf(@layout.root, name)&.min || @mins&.call(name, :rows) || 1 }
-            ok = r.reject { |name, rect| keep.include?(name) || fixed[name] || rect.h - rows - @layout.gap < least.(name) }
-            best = ok.max_by { |name, rect| [rect.area, -numbered.index(name).to_i] }
-            return best[0] if best
-            return fallback if fallback && r.key?(fallback)
-            r.max_by { |_, rect| rect.area }&.first || @layout.panes.first
-          end
-
-          # The pane nearest +name+ in reading order among +left+.
-          def neighbor_of(name, left)
-            order = numbered
-            i = order.index(name) || 0
-            (order[0...i].reverse + order[(i + 1)..]).find { |n| left.include?(n) } || left.first
-          end
-
-          # Current cells of +parent+'s children along its axis at this size
-          # (zoom ignored).
-          def cells_of(parent)
-            slots = {}.compare_by_identity
-            Viewports.place(@layout.root, Rect.new(0, 0, @w, @h), @layout.gap, [], slots, header_rule: @header_rule, mins: @mins)
-            parent.children.map { |c| (r = slots[c]) ? (parent.axis == :cols ? r.w : r.h) : 1 }
-          end
-
-          def path_to(node, name, path = [])
-            path += [node]
-            return path if node.is_a?(Pane) && node.name == name
-            return nil if node.is_a?(Pane)
-
-            node.children.each do |c|
-              found = path_to(c, name, path)
-              return found if found
-            end
-            find!(name) if path.length == 1
-            nil
-          end
-
-          # Replaces the leaf +name+ by the Array the block returns (given
-          # the leaf and its parent's axis).
-          def edit(node, name, &block)
-            return node if node.is_a?(Pane)
-
-            axis = node.is_a?(Split) ? node.axis : :tabs
-            kids = node.children.flat_map do |c|
-              c.is_a?(Pane) && c.name == name ? block.call(c, axis) : [edit(c, name, &block)]
-            end
-            node.with(children: kids)
-          end
-
-          # +node+ without leaf +name+.  When every sibling left in its split
-          # has a fixed size, the neighbor before it (else after) becomes
-          # flexible and takes the space (maintainer, 2026-10-18: closing
-          # the :wall's messages pane left a lined grid where it was; "the
-          # other panels should expand to take the space"; undo brings the
-          # pane back in its slot).
-          def remove_leaf(node, name)
-            return node if node.is_a?(Pane)
-
-            i = node.children.index { |c| c.is_a?(Pane) && c.name == name }
-            return node.with(children: node.children.map { |c| remove_leaf(c, name) }) unless i
-
-            kids = node.children.dup
-            kids.delete_at(i)
-            if node.is_a?(Split) && !kids.empty? && kids.none? { |c| c.size.nil? }
-              j = i > 0 ? i - 1 : 0
-              kids[j] = kids[j].with(size: nil, weight: 1)
-            end
-            node.with(children: kids)
-          end
-
-          def replace(node, old, new)
-            return new if node.equal?(old)
-            return node if node.is_a?(Pane)
-
-            node.with(children: node.children.map { |c| replace(c, old, new) })
-          end
-
-          # Renames leaves (+names+ old => new); options follow the pane.
-          def rename(node, names)
-            if node.is_a?(Pane)
-              return node unless names.key?(node.name)
-              other = Viewports.find_leaf(@layout.root, names[node.name])
-              return node.with(name: names[node.name], opts: other ? other.opts : {})
-            end
-
-            node.with(children: node.children.map { |c| rename(c, names) })
-          end
+          node.with(children: node.children.map { |c| rename(c, names) })
         end
       end
     end

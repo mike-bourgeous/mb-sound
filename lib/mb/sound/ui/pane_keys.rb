@@ -1,4 +1,4 @@
-require_relative 'input/events'
+require_relative 'term_aliases'
 
 module MB
   module Sound

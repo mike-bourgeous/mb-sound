@@ -8,6 +8,9 @@ require 'numo/narray'
 require 'mb-math'
 require 'mb-util'
 
+# The terminal UI's generic layers (gems/mb-term)
+require 'mb/term'
+
 # RANDOM_SEED makes random sounds repeatable (e.g. for bin/null_test.rb):
 # Kernel#rand here, and the root seed (RandomMethods), which Tone#rnd,
 # Tone#noise, and spectral Noise draw from.

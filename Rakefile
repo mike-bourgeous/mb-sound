@@ -418,12 +418,29 @@ namespace :memcheck do
   end
 end
 
+# The specs of the gems in gems/ (mb-term: the terminal UI's generic
+# layers), each in its own rspec process from its own directory, so they run
+# without mb-sound loaded.  Returns true if they all pass.
+GEM_SPEC_DIRS = %w[gems/mb-term].freeze
+def run_gem_specs
+  GEM_SPEC_DIRS.all? do |dir|
+    puts "spec: #{dir}"
+    system('bundle', 'exec', 'rspec', chdir: File.join(__dir__, dir))
+  end
+end
+
 namespace :spec do
-  desc 'Run the specs in PARALLEL rspec processes (default: half the CPUs, capped by available memory), then list the slowest files and examples (SPECS="spec/lib ..." for a subset)'
+  desc "The specs of the gems in gems/ (mb-term), each in its own process without mb-sound (spec:parallel, spec:quick, and spec:full run them too)"
+  task :gems do
+    abort 'spec:gems: failures' unless run_gem_specs
+  end
+
+  desc 'Run the specs in PARALLEL rspec processes (default: half the CPUs, capped by available memory), then list the slowest files and examples (SPECS="spec/lib ..." for a subset; the gems/ specs too without SPECS)'
   task :parallel do
     require_relative 'spec/parallel_specs'
     ok = ParallelSpecs.run_default(patterns: ENV['SPECS'].to_s.split)
-    abort 'spec:parallel: failures' unless ok
+    gems_ok = ENV['SPECS'].to_s.empty? ? run_gem_specs : true
+    abort 'spec:parallel: failures' unless ok && gems_ok
   end
 
   desc 'The everyday subset: the 95% covering set, ALWAYS guards, and the specs of units changed since master-ai (spec/quick_selection.rb; QUICK_DRY=1 lists, BASE=ref)'
@@ -435,7 +452,8 @@ namespace :spec do
     next if ENV['QUICK_DRY'] == '1'
 
     ok = ParallelSpecs.run_default(patterns: sel.specs)
-    abort 'spec:quick: failures' unless ok
+    gems_ok = run_gem_specs # (a few seconds)
+    abort 'spec:quick: failures' unless ok && gems_ok
   end
 
   namespace :quick do
