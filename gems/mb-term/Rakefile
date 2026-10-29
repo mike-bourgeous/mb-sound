@@ -1,0 +1,12 @@
+# Standalone builds of mb-term (inside mb-sound, its Rakefile builds
+# fast_term with the other extensions).
+require 'rake/extensiontask'
+
+Rake::ExtensionTask.new 'fast_term' do |ext|
+  ext.ext_dir = 'ext/mb/term/fast_term'
+  ext.lib_dir = 'lib/mb/term'
+end
+
+desc 'Run the specs'
+task(:spec) { sh 'rspec' }
+task default: %i[compile spec]

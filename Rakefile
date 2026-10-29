@@ -216,6 +216,13 @@ Rake::ExtensionTask.new 'mb-sound-fast_reverb' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+# mb-term's native grid (gems/mb-term; fast_ui's Grid subclasses it)
+Rake::ExtensionTask.new 'mb-term-fast_term' do |ext|
+  ext.name = 'fast_term'
+  ext.ext_dir = 'gems/mb-term/ext/mb/term/fast_term'
+  ext.lib_dir = 'gems/mb-term/lib/mb/term'
+end
+
 
 # Valgrind memcheck of the C extensions (`bundle exec rake memcheck`), using
 # ruby_memcheck, which runs rspec under Valgrind and filters out Ruby's own
@@ -293,12 +300,13 @@ begin
   # the value is used in this project's extensions, or in a library they
   # called (libm, libsamplerate, ...), before control returns to libruby.
   module MemcheckUndefFilter
-    EXT_DIR = File.join(__dir__, 'lib', '')
+    # (and the gems/ extensions: mb-term's fast_term)
+    EXT_DIRS = [File.join(__dir__, 'lib', ''), *Dir[File.join(__dir__, 'gems', '*', 'lib', '')]].freeze
 
     def skip?
       return super unless kind.start_with?('Uninit')
 
-      stack.frames.take_while { |f| !f.in_ruby? }.none? { |f| f.obj.to_s.start_with?(EXT_DIR) }
+      stack.frames.take_while { |f| !f.in_ruby? }.none? { |f| EXT_DIRS.any? { |d| f.obj.to_s.start_with?(d) } }
     end
   end
   RubyMemcheck::ValgrindError.prepend(MemcheckUndefFilter)

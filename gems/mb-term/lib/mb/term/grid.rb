@@ -3,8 +3,9 @@ require_relative 'cells'
 module MB
   module Term
     # Which cell grid class to make: Cells (pure Ruby), or a native grid
-    # with the same interface and output, registered by an adapter (for
-    # example mb-sound's MB::Sound::Plot::Text::NativeCells):
+    # with the same interface and output: NativeCells (C, when fast_term is
+    # compiled), or one an adapter registers (mb-sound registers its
+    # MB::Sound::Plot::Text::NativeCells, a NativeCells subclass):
     #
     #     MB::Term::Grid.native = MyNativeGrid
     #     g = MB::Term::Grid.new(80, 24)              # native when registered

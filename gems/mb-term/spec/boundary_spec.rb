@@ -49,6 +49,8 @@ RSpec.describe('mb-term boundary') do
   it 'reads only its own constants and Ruby\'s, and requires only itself and the standard library' do
     trees = files.to_h { |f| [f, Prism.parse_file(f).value] }
     own = trees.values.flat_map { |t| defined_names(t) }.uniq + %w[MB Term]
+    # (and what the C extension defines)
+    own += Dir[File.expand_path('../ext/**/*.c', __dir__)].flat_map { |f| File.read(f).scan(/rb_define_(?:module|class)(?:_under)?\([^;]*?"(\w+)"/).flatten }
 
     problems = []
     trees.each do |file, tree|
@@ -79,7 +81,7 @@ RSpec.describe('mb-term boundary') do
   # (Without Bundler: the parent repository's bundle loads mb-sound's gemspec,
   # which defines MB::Sound::VERSION.)
   it 'loads in a Ruby without mb-sound or Bundler, without warnings' do
-    code = 'require "mb/term"; abort "MB::Sound defined" if defined?(MB::Sound); MB::Term::VT.new(2, 4).feed("x"); print MB::Term::Grid.new(2, 1).class'
+    code = 'require "mb/term"; abort "MB::Sound defined" if defined?(MB::Sound); MB::Term::VT.new(2, 4).feed("x"); print MB::Term::Grid.new(2, 1, native: false).class'
     run = -> { IO.popen([RbConfig.ruby, '-W2', '-I', lib, '-e', code, err: %i[child out]], &:read) }
     out = defined?(Bundler) ? Bundler.with_unbundled_env(&run) : run.call
     expect(out).to eq('MB::Term::Cells')

@@ -1,6 +1,7 @@
 require_relative 'term/version'
 require_relative 'term/cells'
 require_relative 'term/grid'
+require_relative 'term/native'
 require_relative 'term/screen'
 require_relative 'term/vt'
 require_relative 'term/data_file'

@@ -157,47 +157,11 @@ module MB
         # the Ruby grid; MB::Term::ANSI, SGR color codes).
         Cells = MB::Term::Cells
 
-        # Cells in C (MB::Sound::FastUI::Grid) with Cells' interface; the
-        # plot area's dots become characters in Grid#compose.
+        # Cells in C with Cells' interface: mb-term's native grid
+        # (MB::Term::FastTerm::Grid, NativeMethods) plus MB::Sound::FastUI::Grid's
+        # #compose, which turns the plot area's dots into characters.
         class NativeCells < FastUI::Grid
-          # Sets one cell.
-          def set(x, y, ch, fg: nil, bg: nil, bold: false, reverse: false)
-            set_cell(x, y, ch, Cells.pack(fg), Cells.pack(bg), (bold ? Cells::BOLD : 0) | (reverse ? Cells::REVERSE : 0))
-          end
-
-          # Sets the cell at index +i+.
-          def put(i, ch, fg, bg, attr)
-            y, x = i.divmod(width)
-            set_cell(x, y, ch, Cells.pack(fg), Cells.pack(bg), attr)
-          end
-
-          # Writes +str+ from (+x+, +y+), clipped to the grid (and to +max+
-          # columns).
-          def text(x, y, str, fg: nil, bold: false, max: nil)
-            put_text(x, y, str, Cells.pack(fg), bold ? Cells::BOLD : 0, max)
-          end
-
-          # The lines, with SGR codes for +mode+ (see Cells#lines).
-          def lines(mode)
-            super(Cells::MODES.fetch(mode, 3))
-          end
-
-          # The lines joined by newlines.
-          def to_text(mode)
-            super(Cells::MODES.fetch(mode, 3))
-          end
-
-          # Terminal bytes for the cells, all or those that differ from
-          # +prev+ (see Cells#frame).
-          def frame(prev, mode, row: 1, col: 1, sync: true)
-            super(prev, Cells::MODES.fetch(mode, 3), row, col, sync)
-          end
-
-          # Writes #frame to +io+ without holding the GVL; returns the bytes
-          # written.
-          def write_frame(io, prev, mode, row: 1, col: 1, sync: true)
-            super(io, prev, Cells::MODES.fetch(mode, 3), row, col, sync)
-          end
+          include MB::Term::NativeMethods
         end
 
         # The adapter: mb-term grids made with MB::Term::Grid.new are these.

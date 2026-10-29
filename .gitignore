@@ -17,6 +17,8 @@
 .gdb_history
 /lib/**/*.so
 /lib/**/*.bundle
+/gems/*/lib/**/*.so
+/gems/*/lib/**/*.bundle
 .byebug_history
 
 /*.c
