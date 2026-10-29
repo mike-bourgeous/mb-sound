@@ -60,6 +60,47 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
       end
     end
 
+    # (omnibus16: lp4 and diode counted as wires; a string through
+    # lp4(2000) at a 1000-sample period was 15 cents flat, lp4(500) 65)
+    # (within 0.3 cents at 8x, 1 at 4x: a steep lowpass moves a decaying
+    # mode off the frequency where the loop's phase is whole, as an SVF's
+    # does by 0.02-0.18 cents; the exact-phase example below checks the
+    # compensation itself)
+    [[:lp4, 8, 0.0], [:lp4, 4, 0.0], [:diode, 8, 0.0], [:diode, 4, 0.0]].each do |mode, damp, res|
+      [110, 440].each do |f|
+        it "tunes a string through #{mode} at #{damp}x the pitch (resonance #{res}) at #{f} Hz" do
+          exc = MB::Sound.noise(seed: 1).at(0.5) * MB::Sound.adsr(0, 0.002, 0, 0.002, hold: false)
+          l = exc.feedback { |fb, input|
+            d = fb.delay((48000.0 / f).samples, smoothing: false) * 0.995
+            input + (mode == :diode ? d.diode(f * damp, resonance: res) : d.lp4(f * damp, resonance: res))
+          }
+          d = l.sample(96000)[4800...(4800 + 65536)]
+          expect(cents(pitch(d, f), f).abs).to be < (damp == 8 ? 0.3 : 1.0)
+        end
+      end
+    end
+
+    it "compensates a four-pole's phase delay at the pitch exactly (its linear response)" do
+      [[:lp4, 2000, 0.0], [:lp4, 500, 0.0], [:lp4, 1000, 0.9], [:lp2, 1500, 0.3], [:diode, 2000, 0.0], [:diode, 800, 0.7]].each do |mode, fc, r|
+        f = MB::Sound::Filter::FourPole.new(cutoff: fc, resonance: r, mode: mode)
+        w = 2 * Math::PI / 1000
+        exact = -Math.atan2(f.response(w).imag, f.response(w).real) / w
+        imp = PlanSpecHelpers::Source.new(kind: :impulses, at: [0])
+        l = imp.feedback { |fb, x| x + (fb.delay(1000.samples, smoothing: false) * 0.5).lp4(fc, resonance: r, mode: mode) }
+        l.sample(800)
+        expect(l.latency).to be_within(0.01).of(exact), "#{mode} #{fc} #{r}"
+      end
+    end
+
+    it 'keeps echoes through an lp4 in a feedback loop one period apart' do
+      imp = PlanSpecHelpers::Source.new(kind: :impulses, at: [0])
+      out = Numo::DFloat.cast(imp.feedback { |fb, x| (x + fb.delay(1000.samples) * 0.6).lp4(500) }.sample(4000))
+      c = (1..3).map { |k| e = out[(k * 1000 - 500)...(k * 1000 + 500)]**2; (e * Numo::DFloat.new(1000).seq).sum / e.sum }
+      # (each window starts a period later: equal centers are a period apart)
+      expect((c[1] - c[0]).abs).to be < 0.2
+      expect((c[2] - c[1]).abs).to be < 0.2
+    end
+
     it 'leaves an uncompensated string flat by the extra half sample' do
       d = ks(440, compensate: false).sample(96000)[4800...(4800 + 65536)]
       expected = cents(48000.0 / (48000.0 / 440 + 0.5), 440)

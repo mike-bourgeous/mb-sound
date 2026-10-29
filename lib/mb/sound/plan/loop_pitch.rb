@@ -15,7 +15,7 @@ module MB
           PITCH_VALUE_KINDS = { const: 0, src: 1, mul: 2, add: 3, div: 4, pow: 5 }.freeze
 
           # Kinds of #response_program's entries (loop_pitch.c's RK_*).
-          PITCH_RESPONSE_KINDS = { one_a: 0, one_b: 1, add: 2, scale: 3, copy: 4, delay: 5, half: 6, svf: 7 }.freeze
+          PITCH_RESPONSE_KINDS = { one_a: 0, one_b: 1, add: 2, scale: 3, copy: 4, delay: 5, half: 6, svf: 7, four_pole: 8 }.freeze
 
           # #pitch_track through the C kernel.  Checks whether anything moved
           # before calling it (the same test as #pitch_track_ruby: frozen
@@ -195,6 +195,17 @@ module MB
                   scalars << op.filter.sample_rate.to_f
                   w[7] = scalars.length - 1
                   rates << [w[7], op.filter]
+                when :four_pole
+                  # (loop_pitch.c's RK_FOUR_POLE words and scalars)
+                  op = e[3]
+                  f = op.filter
+                  w[3] = venc.call(op.cutoff)
+                  w[4] = venc.call(op.resonance)
+                  w[5] = scalars.length
+                  scalars << f.sample_rate.to_f << f.k_max.to_f << f.compensation.to_f
+                  f.instance_variable_get(:@mix).each { |x| scalars << x.to_f }
+                  w[6] = f.send(:kernel_options)[0] | (f.diode? && f.normalize? ? 4 : 0) | (f.diode? ? 8 : 0) | (f.instance_variable_get(:@tuning_number) << 4)
+                  rates << [w[5], f]
                 end
                 w
               }
