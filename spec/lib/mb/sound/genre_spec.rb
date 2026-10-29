@@ -104,6 +104,8 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
           expect(v.form.sections[sec.name]&.fill).to eq(sec.fill) if sec.fill && v.form.sections.key?(sec.name)
         end
         expect(v.form.phrase_fills).to eq(t.form.phrase_fills)
+        # short scales the generated lengths too
+        expect(v.short(30).seconds).to be < v.seconds if v.seconds > 60
         others = (1..6).map { |sd| t.generative(seed: sd).form.plan(seed: 0, bar_length: t.bar_length).first(300).map { |p| [p.section, p.length] } }
         expect(others.uniq.length).to be > 2
         # The template prints its generator and comes back equal
