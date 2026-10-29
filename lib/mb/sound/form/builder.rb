@@ -150,6 +150,74 @@ module MB
           nil
         end
 
+        # Plays sections drawn from +source+ (a markov or lsystem; see
+        # Form::Generate) as the flow plays: one per pass, each decided at
+        # the commit point before it, until the source ends (or +sections+
+        # per visit).  +bars:+ (or keywords) gives sections their lengths
+        # (bars, Durations, Ranges of bars or Arrays drawn per occurrence),
+        # declaring the ones the flow hasn't declared:
+        #
+        #     label :top
+        #     generate moods, still: 6, drift: 4..8, bloom: [8, 12]
+        #     goto :top
+        #
+        # A length may come with section options for sections the flow
+        # hasn't declared: `breakdown: { length: [8, 16], fill: [:riser, 4]
+        # }` (+length:+, then +times:+, +fill:+, +scene:+, +fade:+, knob
+        # values).
+        def generate(source, bars: {}, sections: nil, **lengths)
+          given = bars.merge(lengths)
+          specs = {}
+          options = {}
+          given.each do |name, spec|
+            if spec.is_a?(::Hash)
+              ::Kernel.raise ::ArgumentError, "generate: #{name}: { ... } needs length: (got #{spec.inspect})" unless spec.key?(:length)
+              specs[name] = spec[:length]
+              options[name] = spec.reject { |k, _| k == :length }
+            else
+              specs[name] = spec
+            end
+          end
+          declares = []
+          step = nil
+          specs.each do |name, spec|
+            __adopt__(name)
+            if @sections.key?(name)
+              ::Kernel.raise ::ArgumentError, "generate: #{name.inspect} is declared already; give its options where it is declared" if options[name] && !options[name].empty?
+              next
+            end
+            ::Kernel.raise ::ArgumentError, "generate: #{name.inspect} can't be a section name" if (STEP_NAMES + SOURCE_NAMES).include?(name)
+            opts = options[name] || {}
+            __check_options__(name, opts)
+            Form.check_length_spec(name, spec)
+            @sections[name] = Section.new(
+              name: name, length: Form.default_length(spec), times: opts.fetch(:times, 1),
+              fill: Fill.from(opts[:fill], section: name), scene: opts[:scene], fade: opts[:fade],
+              knobs: Form.section_options(name, opts)[1]
+            )
+            declares << name
+            __define__(name)
+          end
+          step = Generate.new(source: source, lengths: specs, sections: sections, declares: declares)
+          @stack.last << step
+          nil
+        end
+
+        # Sources and params for generate steps, so a printed flow
+        # (`generate markov(...), bars: { ... }`) builds again as it reads:
+        # these call MB::Sound's methods (and can't be section names).
+        def markov(*args, **kwargs)
+          ::MB::Sound.markov(*args, **kwargs)
+        end
+
+        def lsystem(*args, **kwargs)
+          ::MB::Sound.lsystem(*args, **kwargs)
+        end
+
+        def knob(*args, **kwargs)
+          ::MB::Sound.knob(*args, **kwargs)
+        end
+
         # The Form built so far.  (Named so it can't be a section name.)
         def __form__
           Form.new(sections: @sections, order: @order, phrase_fills: @phrase_fills)
@@ -244,32 +312,47 @@ module MB
           return if sc.method_defined?(name)
 
           sc.define_method(name) do |*args, **options|
-            unless args.empty?
-              # The same declaration again just plays it again
-              builder.__send__(:__check_options__, name, options)
-              same = builder.__send__(:__same__?, name, args, options)
-              ::Kernel.raise ::ArgumentError, "#{name} is already declared differently; call it bare to play it again (`#{name}` or `#{name} times: 2`)" unless same
-              next builder.__send__(:__play__, name, {})
-            end
+            # Again with a length: plays it for that length this time (the
+            # same declaration again plays it as declared)
+            next builder.__send__(:__replay__, name, args, options) unless args.empty?
             unknown = options.keys - [:times]
             ::Kernel.raise ::ArgumentError, "#{name}: a repeated section only takes times: (got #{unknown.map(&:inspect).join(', ')}); give other options where it is declared" unless unknown.empty?
             builder.__send__(:__play__, name, options)
           end
         end
 
-        # True if +args+ and +options+ declare section +name+ exactly as it
-        # was declared.
-        def __same__?(name, args, options)
+        # Plays declared section +name+ again with a length (+args+): for
+        # that length this time (G4: `chorus 16` ... `chorus 8`), with
+        # +times:+ for this play.  Other options must be as declared (they
+        # belong to the section wherever it plays); options left out keep
+        # the declaration's.
+        def __replay__(name, args, options)
+          unless args.length == 1 && Form.length?(args.first)
+            ::Kernel.raise ::ArgumentError, "#{name}: the first argument must be a length (got #{args.first.inspect}); call it bare to play it as declared"
+          end
+          __check_options__(name, options)
           s = @sections[name]
-          args.length == 1 && args.first == s.length && s.times == options.fetch(:times, 1) &&
-            s.fill == Fill.from(options[:fill], section: name) && s.scene == options[:scene] && s.fade == options[:fade] &&
-            s.knobs == Form.section_options(name, options)[1]
+          knobs = Form.section_options(name, options)[1]
+          differ = []
+          differ << :fill if options.key?(:fill) && Fill.from(options[:fill], section: name) != s.fill
+          differ << :scene if options.key?(:scene) && options[:scene] != s.scene
+          differ << :fade if options.key?(:fade) && options[:fade] != s.fade
+          differ.concat(knobs.keys.reject { |k| s.knobs.key?(k) && s.knobs[k] == knobs[k] })
+          unless differ.empty?
+            ::Kernel.raise ::ArgumentError, "#{name} is already declared with other #{differ.map { |k| "#{k}:" }.join(', ')}; " \
+              "a section plays the same way wherever it appears (only its length and times: may change: `#{name} 4` or `#{name} times: 2`), " \
+              'so give the other version its own name'
+          end
+          length = Form.same_length?(args.first, s.length) ? nil : args.first
+          times = options[:times]
+          times = nil if times == s.times
+          __play__(name, { times: times }, length: length)
         end
 
-        def __play__(name, options)
+        def __play__(name, options, length: nil)
           times = options[:times]
           ::Kernel.raise ::ArgumentError, "#{name}: times: must be a positive Integer (got #{times.inspect})" unless times.nil? || (times.is_a?(::Integer) && times > 0)
-          @stack.last << Play.new(name: name, times: times)
+          @stack.last << Play.new(name: name, times: times, length: length)
           nil
         end
       end

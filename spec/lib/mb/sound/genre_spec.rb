@@ -82,6 +82,66 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
     end
   end
 
+  describe 'generated forms (G4)' do
+    MB::Sound::Genre.names.each do |name|
+      it "writes #{name}'s form from its generator: the same sections, lengths per occurrence, fills kept, another form per seed" do
+        t = genre[name]
+        g = t.generator
+        expect(g).not_to be_nil
+        v = t.generative
+        expect(v.form).to be_generative
+        passes = v.form.plan(seed: 0, bar_length: t.bar_length).first(300)
+        # Finite songs (the source ends or the generator's count)
+        expect(passes.length).to be < 300
+        expect(passes.map(&:section) - t.scenes.keys).to eq([])
+        passes.each do |p|
+          spec = g.bars.fetch(p.section) { t.form.sections[p.section].length }
+          allowed = spec.is_a?(Range) || spec.is_a?(Array) ? spec.to_a : [spec]
+          expect(allowed).to include(p.length), "#{p.section} #{p.length} not in #{spec.inspect}"
+        end
+        # Fills of the written form's sections carry over
+        t.form.sections.each_value do |sec|
+          expect(v.form.sections[sec.name]&.fill).to eq(sec.fill) if sec.fill && v.form.sections.key?(sec.name)
+        end
+        expect(v.form.phrase_fills).to eq(t.form.phrase_fills)
+        # short scales the generated lengths too
+        expect(v.short(30).seconds).to be < v.seconds if v.seconds > 60
+        others = (1..6).map { |sd| t.generative(seed: sd).form.plan(seed: 0, bar_length: t.bar_length).first(300).map { |p| [p.section, p.length] } }
+        expect(others.uniq.length).to be > 2
+        # The template prints its generator and comes back equal
+        expect(t.to_ruby).to include("  generator #{g.source.to_ruby}")
+        # The generated copy's form prints back as a flow that builds again
+        again = in_sound(v.form.to_ruby.sub('flow do', 'MB::Sound::Form.build do'))
+        expect(again).to eq(v.form)
+      end
+    end
+
+    it 'plays the ambient template forever, its key walking under the moods (genre(:ambient).endless)' do
+      t = genre[:ambient]
+      e = t.endless
+      plan = e.form.plan(seed: 0)
+      expect(plan.first(500).length).to eq(500) # (no end)
+      expect(plan.first(500).map(&:section).tally.keys).to contain_exactly(:emerge, :drift, :bloom, :hush, :tide, :dissolve)
+      # The walking material plays where the scenes played :drone, :motif, :harp
+      expect(e.scenes[:bloom]).to include(drone: :drone_walk, motif: :motif_walk, harp: :harp_walk)
+      expect(t.scenes[:bloom]).to include(drone: :drone, motif: :motif, harp: :harp)
+      # The drone follows the key: one root per 16 bars, D, G, A, or E
+      roots = (0...24).map { |k| t.clips[:drone_walk].events_for(2 * k).map(&:value).uniq }
+      expect(roots.flatten.uniq - [38, 31, 33, 40]).to eq([]) # (D2, G1, A1, E2)
+      expect(roots.flatten.uniq.length).to be > 1
+      expect(t.generative.form.plan(seed: 0).first(100).length).to eq(12)
+    end
+
+    it 'checks generators: sources, scenes, lengths, and swaps' do
+      expect { genre.template(:x) { like :dnb; generator :nope } }.to raise_error(ArgumentError, /generator needs a markov/)
+      expect { genre.template(:x) { like :dnb; generator markov(intro: { dropp: 1 }, dropp: { intro: 1 }, seed: 1), bars: { dropp: 8 } } }
+        .to raise_error(ArgumentError, /generator section :dropp has no scene :dropp.*Did you mean\?\s+:drop/m)
+      expect { genre.template(:x) { like :dnb; generator markov(intro: { drop: 1 }, drop: { intro: 1 }, seed: 1), use: { riff: :rif } } }
+        .to raise_error(ArgumentError, /use: names :rif, which is no kit or clip/)
+      expect { genre[:funk].with { generator nil }.generative }.to raise_error(ArgumentError, /has no generator/)
+    end
+  end
+
   describe 'composing' do
     it 'overrides fields with keywords and parts with a builder block' do
       t = MB::Sound.genre(:dnb, tempo: 172)

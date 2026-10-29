@@ -2,6 +2,8 @@ require 'did_you_mean'
 
 require_relative 'form/builder'
 require_relative 'form/state'
+require_relative 'form/walking'
+require_relative 'form/plan'
 require_relative 'form/playback'
 
 module MB
@@ -44,7 +46,11 @@ module MB
       FILL_ON = [:pass, :leave].freeze
 
       # Names the flow builder uses for its own steps (not section names).
-      STEP_NAMES = [:repeat, :fill, :label, :goto, :pick].freeze
+      STEP_NAMES = [:repeat, :fill, :label, :goto, :pick, :generate].freeze
+
+      # Methods the flow builder calls on MB::Sound for generate steps'
+      # sources (not section names either).
+      SOURCE_NAMES = [:markov, :lsystem, :knob].freeze
 
       # The goto target that carries on to the next step (`goto top: 3,
       # next: 1`); not a label name.
@@ -177,8 +183,8 @@ module MB
       end
 
       # Entries in the play order:
-      # - Play: a section played (+name+, with a per-step +times+ or nil for
-      #   the section's).
+      # - Play: a section played (+name+, with a per-step +times+ and
+      #   +length+, or nil for the section's).
       # - Repeat: a group of entries (+steps+) played +count+ times.
       # - Label: a named position (+name+) that gotos jump to; takes no time.
       # - Goto: jumps to a label (+target+: a label, a Hash from labels to
@@ -190,12 +196,124 @@ module MB
       #   pass of the bigger one).
       # - Pick: plays one of its +options+ (Options: a +weight+ and the
       #   +steps+ to play, which may be empty), then carries on after it.
-      Play = Data.define(:name, :times)
+      Play = Data.define(:name, :times, :length) do
+        # +length+ is this play's own length (nil for the section's): the
+        # same section may play for different lengths at different places
+        # in the order (`chorus 16` ... `chorus 8`, G4).
+        def initialize(name:, times: nil, length: nil)
+          Form.check_length(name, length) unless length.nil?
+          super
+        end
+      end
       Repeat = Data.define(:count, :steps)
       Label = Data.define(:name)
       Goto = Data.define(:target, :times)
       Pick = Data.define(:options)
       Option = Data.define(:weight, :steps)
+
+      # A generate step (G4): plays sections drawn from +source+ (a
+      # Generative::Markov or LSystem, or anything with the same form
+      # source methods: #form_start, #form_next, #form_states,
+      # #nonterminal?, #form_force, #steered?, #seed, #to_ruby) one at a
+      # time as the flow plays, each decided at the commit point before it
+      # (so a steered chain reads its knobs there), until the source ends
+      # (a chain's end state, a word's last symbol) or, with +sections+,
+      # that many per visit; then the flow carries on.  +lengths+ gives
+      # sections their lengths per occurrence (bars, Durations, Ranges of
+      # bars or Arrays drawn per occurrence from the source's seed);
+      # sections without one play their declared length.  +declares+
+      # names the sections the step declared (those it gave lengths to
+      # that the flow hadn't declared; printed with their options).  Every visit
+      # continues the source where the last one left it (a chain's draws
+      # keep counting), so `label :top; generate moods; goto :top` plays
+      # on forever.
+      Generate = Data.define(:source, :lengths, :sections, :declares) do
+        def initialize(source:, lengths: {}, sections: nil, declares: [])
+          unless %i[form_start form_next form_states nonterminal? seed to_ruby].all? { |m| source.respond_to?(m) }
+            raise ArgumentError, "generate needs a section source: markov(...) or lsystem(...) (got #{source.inspect})"
+          end
+          raise ArgumentError, "generate's lengths are a Hash of section => length (got #{lengths.inspect})" unless lengths.is_a?(Hash)
+          lengths.each { |name, len| Form.check_length_spec(name, len) }
+          raise ArgumentError, "generate sections: must be a positive Integer or nil (got #{sections.inspect})" unless sections.nil? || (sections.is_a?(Integer) && sections > 0)
+          super(source: source, lengths: lengths.dup.freeze, sections: sections, declares: declares.dup.freeze)
+        end
+
+        # The length of section +name+ for the source's draw +n+ (its own
+        # length spec drawn, else +default+).
+        def length_for(name, n, default)
+          spec = lengths[name]
+          spec.nil? ? default : Form.draw_length(spec, source.seed, n)
+        end
+
+        # The step as a flow line; +form_sections+ (the form's) gives the
+        # options of the sections it declared (`breakdown: { length: [8,
+        # 16], fill: [:riser, 4] }`).
+        def to_ruby(form_sections = {})
+          parts = [source.to_ruby]
+          unless lengths.empty?
+            bars = lengths.to_h { |name, spec|
+              opts = declares.include?(name) && form_sections[name] ? form_sections[name].options : {}
+              [name, opts.empty? ? spec : { length: spec, **opts }]
+            }
+            parts << "bars: #{Form.ruby_value(bars)}"
+          end
+          parts << "sections: #{sections}" if sections
+          "generate #{parts.join(', ')}"
+        end
+      end
+
+      # Raises unless +spec+ is a generated section's length: a length, a
+      # Range of whole bars, or an Array of lengths.
+      def self.check_length_spec(name, spec)
+        case spec
+        when Range
+          ok = spec.begin.is_a?(Integer) && spec.end.is_a?(Integer) && spec.begin > 0 && spec.size > 0
+          raise ArgumentError, "#{name}: a Range of lengths is whole bars (4..8; got #{spec.inspect})" unless ok
+        when Array
+          raise ArgumentError, "#{name}: an Array of lengths needs at least one (got #{spec.inspect})" if spec.empty?
+          spec.each { |l| check_length(name, l) }
+        else
+          check_length(name, spec)
+        end
+      end
+
+      # A length from +spec+ (see #check_length_spec) for draw +n+ of a
+      # source seeded with +seed+: Ranges and Arrays are drawn (counter-
+      # based, so occurrence n always gets the same length).
+      def self.draw_length(spec, seed, n)
+        case spec
+        when Range then Generative::Dice.new(seed, :length).int(spec, n)
+        when Array then Generative::Dice.new(seed, :length).pick(spec, n)
+        else spec
+        end
+      end
+
+      # The declared length for a length spec (a Range's first bar count,
+      # an Array's first length).
+      def self.default_length(spec)
+        case spec
+        when Range then spec.begin
+        when Array then spec.first
+        else spec
+        end
+      end
+
+      # A linear Form of sections in order (each declared where it first
+      # plays) from +list+, [name, draw] pairs, with lengths from +lengths+
+      # (name => length spec, drawn for each pair's draw number with
+      # +seed+, as a generate step draws them).  For Markov#flow and
+      # LSystem#flow.
+      def self.linear(list, lengths, seed:)
+        missing = list.map(&:first).uniq - lengths.keys
+        raise ArgumentError, "No length for #{missing.map(&:inspect).join(', ')} (give each section a length: #{missing.first}: 8)" unless missing.empty?
+        sections = {}
+        order = list.map { |name, i|
+          len = draw_length(lengths[name], seed, i)
+          sections[name] ||= Section.new(name: name, length: len)
+          Play.new(name: name, times: nil, length: same_length?(len, sections[name].length) ? nil : len)
+        }
+        new(sections: sections, order: order)
+      end
 
       # Raises unless +length+ is a section length (a positive Duration or
       # number of bars).
@@ -207,6 +325,12 @@ module MB
       # True if +value+ looks like a length (a Duration or a Numeric).
       def self.length?(value)
         value.is_a?(Sequence::Duration) || (value.is_a?(Numeric) && !value.is_a?(Complex))
+      end
+
+      # True if section lengths +a+ and +b+ are the same (the same kind
+      # too: 8 bars counted through the meter map aren't 8.bars).
+      def self.same_length?(a, b)
+        a.class == b.class && a == b
       end
 
       # Raises unless +weights+ is a Hash of name => weight pairs (for goto
@@ -281,7 +405,8 @@ module MB
       attr_reader :phrase_fills
 
       # The play order compiled for Playback: a frozen Array of
-      # instructions, each a frozen Array: [:play, name, times], [:label,
+      # instructions, each a frozen Array: [:play, name, times, length]
+      # (the play's own length, else the section's), [:label,
       # name], [:goto, target, times], [:pick, [[weight, index], ...],
       # end_index], or [:jump, index].  Repeats are unrolled; each pick
       # option ends with a jump past the pick.
@@ -303,16 +428,39 @@ module MB
       # The order straight through, as an Array of [section name, times]:
       # repeats unrolled, gotos not taken, the first option of each pick.
       def steps
+        straight.map { |i| @program[i][1..2] }
+      end
+
+      # Like #steps, with each play's length: [section name, times, length]
+      # (lengths differ per play when a section plays for different lengths
+      # in different places: `chorus 16` ... `chorus 8`).
+      def plays
         straight.map { |i| @program[i].drop(1) }
       end
 
-      # The total length in bars of #steps, counting Durations at
+      # The total length in bars of #plays, counting Durations at
       # +bar_length+ (whole notes per bar).
       def bars(bar_length: 1r)
-        steps.sum { |name, times|
-          len = @sections[name].length
+        plays.sum { |_name, times, len|
           (len.is_a?(Sequence::Duration) ? len.to_r / bar_length : len.to_r) * times
         }
+      end
+
+      # A copy with every section, play, fill, and phrase fill length
+      # passed through the block (`form.map_lengths { |len| ... }`; the
+      # block gets each length and what it belongs to: :section, :play,
+      # :fill, :every (a phrase fill's period), or :phrase_fill).
+      def map_lengths(&block)
+        sections = @sections.transform_values { |s|
+          s.with(length: block.call(s.length, :section), fill: s.fill && s.fill.with(length: block.call(s.fill.length, :fill)))
+        }
+        fills = @phrase_fills.map { |f| f.with(every: block.call(f.every, :every), length: block.call(f.length, :phrase_fill)) }
+        Form.new(sections: sections, order: map_order_lengths(@order, block), phrase_fills: fills)
+      end
+
+      # True if the form has generate steps (sections decided as it plays).
+      def generative?
+        @program.any? { |ins| ins[0] == :generate }
       end
 
       def ==(other)
@@ -366,10 +514,24 @@ module MB
             raise ArgumentError, 'label :next is reserved (`goto top: 3, next: 1` means carry on to the next step); give the label another name (e.g. :onward)' if e.name == NEXT
           when Goto
             Form.check_goto(e.target, e.times)
+          when Generate
+            check_generate(e)
           else
-            raise ArgumentError, "Form order entries are Play, Repeat, Label, Goto, or Pick (got #{e.inspect})"
+            raise ArgumentError, "Form order entries are Play, Repeat, Label, Goto, Pick, or Generate (got #{e.inspect})"
           end
         end
+      end
+
+      # A generate step's sections: every name its source may give is a
+      # section of the form (declared, or given a length in the step),
+      # except nonterminals (an L-system's rewritten symbols) without one.
+      def check_generate(e)
+        e.lengths.each_key { |n| check_section(n) }
+        names = e.source.form_states.reject { |n| e.source.nonterminal?(n) && !@sections.key?(n) }
+        missing = names.reject { |n| @sections.key?(n) }
+        return if missing.empty?
+        raise ArgumentError, "generate #{e.source.to_ruby}: no length for #{missing.map(&:inspect).join(', ')} " \
+          "(give it one: generate ..., bars: { #{missing.first}: 8 }, or declare it in the flow)"
       end
 
       def check_section(name)
@@ -403,7 +565,7 @@ module MB
               raise ArgumentError, "goto #{t.inspect}: no label #{t.inspect} in the form#{hint}"
             end
             li = labels[t]
-            if li <= i && @program[li...i].none? { |x| x[0] == :play }
+            if li <= i && @program[li...i].none? { |x| x[0] == :play || x[0] == :generate }
               raise ArgumentError, "goto #{t.inspect} would loop forever without playing a section"
             end
           end
@@ -417,13 +579,15 @@ module MB
         entries.each do |e|
           case e
           when Play
-            out << [:play, e.name, e.times || @sections[e.name].times].freeze
+            out << [:play, e.name, e.times || @sections[e.name].times, e.length || @sections[e.name].length].freeze
           when Repeat
             e.count.times { compile(e.steps, out) }
           when Label
             out << [:label, e.name].freeze
           when Goto
             out << [:goto, e.target, e.times].freeze
+          when Generate
+            out << [:generate, e].freeze
           when Pick
             at = out.length
             out << nil
@@ -471,19 +635,48 @@ module MB
             lines << "#{indent}#{goto_ruby(e)}"
           when Pick
             emit_pick(e, declared, lines, indent)
+          when Generate
+            lines << "#{indent}#{e.to_ruby(@sections)}"
+            # (the step declares the sections it gives lengths to)
+            e.lengths.each_key { |n| declared[n] ||= @sections[n].length }
           when Play
-            if declared[e.name]
-              lines << "#{indent}#{e.name}#{e.times ? " times: #{e.times}" : ''}"
+            s = @sections[e.name]
+            len = e.length || s.length
+            if declared.key?(e.name)
+              # (a length where this play's differs from the declared one)
+              parts = Form.same_length?(len, declared[e.name]) ? [] : [Form.ruby_value(len)]
+              parts << "times: #{e.times}" if e.times
+              lines << "#{indent}#{e.name}#{" #{parts.join(', ')}" unless parts.empty?}"
             else
-              declared[e.name] = true
-              s = @sections[e.name]
+              # Declared where it first plays, with that play's length
+              declared[e.name] = len
               opts = s.options
               opts[:times] = e.times if e.times
-              parts = [Form.ruby_value(s.length), *opts.map { |k, v| "#{k}: #{Form.ruby_value(v)}" }]
+              parts = [Form.ruby_value(len), *opts.map { |k, v| "#{k}: #{Form.ruby_value(v)}" }]
               lines << "#{indent}#{e.name} #{parts.join(', ')}"
             end
           end
         end
+      end
+
+      # +entries+ with every Play's own length passed through +block+.
+      def map_order_lengths(entries, block)
+        entries.map { |e|
+          case e
+          when Play then e.length ? e.with(length: block.call(e.length, :play)) : e
+          when Repeat then e.with(steps: map_order_lengths(e.steps, block).freeze)
+          when Pick then e.with(options: e.options.map { |o| o.with(steps: map_order_lengths(o.steps, block).freeze) }.freeze)
+          when Generate
+            e.with(lengths: e.lengths.transform_values { |spec|
+              case spec
+              when Range then (block.call(spec.begin, :generate)..block.call(spec.end, :generate))
+              when Array then spec.map { |l| block.call(l, :generate) }
+              else block.call(spec, :generate)
+              end
+            })
+          else e
+          end
+        }
       end
 
       def goto_ruby(e)
@@ -501,7 +694,11 @@ module MB
 
       # A pick as `pick :a, :b`, `pick a: 3, b: 1`, or a block of options.
       def emit_pick(e, declared, lines, indent)
-        simple = e.options.all? { |o| o.steps.length == 1 && o.steps[0].is_a?(Play) && o.steps[0].times.nil? && declared[o.steps[0].name] }
+        simple = e.options.all? { |o|
+          st = o.steps[0]
+          o.steps.length == 1 && st.is_a?(Play) && st.times.nil? && declared.key?(st.name) &&
+            Form.same_length?(st.length || @sections[st.name].length, declared[st.name])
+        }
         names = e.options.map { |o| o.steps[0]&.name }
         if simple && e.options.all? { |o| o.weight == 1 }
           lines << "#{indent}pick #{names.map(&:inspect).join(', ')}"

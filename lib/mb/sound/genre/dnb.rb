@@ -23,6 +23,17 @@ module MB
         drop2     32
         outro     32
       end
+      # A generated form (G4, generative-g4): the same sections as a
+      # stochastic L-system, so each seed grows another DJ-friendly roller:
+      # one to three build-drop cycles, each drop turning through a
+      # breakdown and pull-up into the next (phrases stay on 8 and 16 bars:
+      # breakdowns of 7 or 15 plus the pull-up bar).
+      # `genre(:dnb).generative(seed: 3).play`
+      generator lsystem(%i[intro body outro],
+                        body: { %i[build drop turn body] => 2, %i[build drop turn] => 1 },
+                        turn: { %i[breakdown pullup drop2] => 2, %i[breakdown pullup drop] => 1 },
+                        generations: 3, seed: 174),
+                bars: { intro: [16, 32], build: 8, drop: [16, 32], breakdown: [7, 15], pullup: 1, drop2: [16, 32], outro: [16, 32] }
 
       two_step = 'X.........X.....'
       hats = '7.4.7.4.7.4.7.45'

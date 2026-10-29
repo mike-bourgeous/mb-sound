@@ -235,7 +235,7 @@ module MB
 
       # A linear Form of a form playback's passes.
       def form_from_history(pb)
-        runs = pb.history.chunk_while { |a, b| a == b }.map { |r| [r.first, r.length] }
+        runs = pb.played.chunk_while { |a, b| a == b }.map { |r| [*r.first, r.length] }
         linear_form(runs) { |name| pb.form.sections[name] }
       end
 
@@ -250,25 +250,26 @@ module MB
         ends = launches.drop(1).map(&:last) + [[t.position, launches.last.last].max]
         lengths = launches.zip(ends).map { |(name, from), to| [name, t.bar_at(to) - t.bar_at(from)] }
         sections = {}
+        # (one section per scene, each launch for its own length)
         runs = lengths.map { |name, bars|
           bars = bars.denominator == 1 ? bars.to_i : bars
-          key = sections.find { |_, s| s.name == name && s.length == bars }&.first
-          key ||= sections.key?(name) ? :"#{name}_#{sections.length}" : name
-          sections[key] ||= Form::Section.new(name: key, length: bars.zero? ? 1 : bars, scene: key == name ? nil : name)
-          [key, 1]
+          bars = 1 if bars.zero?
+          sections[name] ||= Form::Section.new(name: name, length: bars)
+          [name, bars, 1]
         }
         linear_form(runs) { |name| sections[name] }
       end
 
-      # Builds a linear Form from [name, passes] runs, taking each section's
+      # Builds a linear Form from [name, length, passes] runs, taking each section's
       # length, fill, scene, and fade from the block's Section (with
       # the flow's gotos and picks resolved: the form plays as it was
       # played).
       def linear_form(runs)
         sections = {}
-        order = runs.map { |name, count|
-          sections[name] ||= yield(name).with(times: count)
-          Form::Play.new(name: name, times: count == sections[name].times ? nil : count)
+        order = runs.map { |name, length, count|
+          sections[name] ||= yield(name).with(times: count, length: length)
+          own = Form.same_length?(length, sections[name].length) ? nil : length
+          Form::Play.new(name: name, times: count == sections[name].times ? nil : count, length: own)
         }
         Form.new(sections: sections, order: order)
       end

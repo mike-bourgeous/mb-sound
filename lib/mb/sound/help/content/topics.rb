@@ -584,7 +584,7 @@ module MB
       TEXT
       commands :tones, :chord, :weights, :harmony, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
       note :generative
-      see :sequences, :random
+      see :sequences, :random, :long_form
       example 'a melody that blurs and changes key' do
         h = harmony(0 => scale(:dorian, :d), 1.bar => scale(:major, :f), loop: 2.bars).blur(0.2)
         line = melody(h, 8, range: A3..A5, vary: true).loop
@@ -723,7 +723,7 @@ module MB
       TEXT
       commands :flow, :start, :pause, :play_form, :section, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter
       note :arrangement
-      see :sets
+      see :sets, :long_form
       example 'a tiny song form' do
         track(:try_lead, q: 1) { |c| c.tone.triangle.at(-12.db) * c.amp_env }
         scene :try_intro, try_lead: seq(A4, E4).n4.loop
@@ -735,6 +735,45 @@ module MB
           try_verse 2
           goto :top, times: 1
           try_outro 1
+        end
+      end
+    end
+
+    Help.topic :long_form, 'Long forms: markov, lsystem, generate', group: :arrange do
+      about <<~TEXT
+        Forms that write themselves.  `markov(still: { drift: 3, hush: 1 },
+        drift: { bloom: 3, still: 1 }, ...)` is a chain of section names
+        (weights pick what follows; `outro: {}` ends it and the next draw
+        starts over; `[a, b] => { ... }` rules make it second order;
+        weights may be knobs, read where the flow decides).  `lsystem(%i[intro
+        body outro], body: { %i[build drop body] => 2, %i[build drop] => 1 })`
+        rewrites a word a few `generations:`, so the song grows self-similar.
+        Both are pure functions of their seed.  `chain.flow(still: 6, drift:
+        4..8)` plays forever (`sections: 12` writes the first 12 out);
+        `lsys.flow(...)` writes the word out.  Inside a flow, `generate
+        chain, still: 6, drift: 4..8` plays one drawn section per pass,
+        decided at each commit point (Ranges and Arrays draw lengths per
+        occurrence; `sections: 4` per visit; `goto :hush` forces a state).
+        A section may play for different lengths (`chorus 16` ... `chorus
+        8`).  `seek 1000` in a generated flow plays what an uninterrupted
+        run plays there (`form.plan(seed: 1).at(999)` shows it).
+      TEXT
+      commands :markov, :lsystem
+      note :generative
+      see :flow, :generative, :genres
+      example 'a chain and a growing word', sound: false do
+        moods = markov(still: { drift: 3, hush: 1 }, drift: { bloom: 3, still: 1 }, bloom: { hush: 2, drift: 1 }, hush: { still: 1 }, seed: 7)
+        song = lsystem(%i[intro body outro], body: { %i[verse chorus body] => 2, %i[bridge chorus] => 1 }, generations: 3, seed: 2)
+        [moods.take(8), song.word]
+      end
+      example 'a form that decides itself as it plays' do
+        track(:try_lead, q: 1) { |c| c.tone.triangle.at(-12.db) * c.amp_env }
+        scene :try_low, try_lead: seq(A3, E4).n4.loop
+        scene :try_high, try_lead: seq(A4, C5, E5, C5).n8.loop
+        scene :try_end, try_lead: seq(A4).n2.loop
+        ways = markov(try_low: { try_high: 2, try_low: 1 }, try_high: { try_low: 1, try_end: 1 }, try_end: {}, seed: 4)
+        flow do
+          generate ways, try_low: 1, try_high: 1..2, try_end: 1
         end
       end
     end

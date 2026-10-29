@@ -778,7 +778,7 @@ module MB
         steps = nil
         MB::Sound.with_seed(0) do
           steps = rehearse_pass(names) { |section, bar_length| rehearsal_form(form, section, bar_length) }
-          first = form.steps.first[0]
+          first = rehearsal_steps(form).first[0]
           rehearse_pass(names) { |section, bar_length|
             rehearsal_form(Form.new(sections: form.sections, order: [Form::Play.new(name: first, times: 1)]), section, bar_length)
           }
@@ -810,6 +810,17 @@ module MB
         box&.close
       end
 
+      # The sections a rehearsal plays: the form's straight order, or, for a
+      # form with generate steps (G4), the first REHEARSAL_GENERATED passes
+      # its plan decides (seed 0).
+      def rehearsal_steps(form)
+        return form.steps unless form.generative?
+        form.plan(seed: 0).first(REHEARSAL_GENERATED).map { |p| [p.section, 1] }
+      end
+
+      # Passes of a generated form's plan a rehearsal plays.
+      REHEARSAL_GENERATED = 12
+
       # A copy of +form+ for #rehearse: its straight order, every section
       # +length+ long (a Duration; fills half that, phrase fills every
       # other section, counting +bar_length+ whole notes a bar), at most
@@ -817,7 +828,7 @@ module MB
       def rehearsal_form(form, length, bar_length)
         half = Sequence::Duration.new(length.to_r / 2)
         sections = form.sections.transform_values { |sec| sec.with(length: length, fill: sec.fill&.with(length: half)) }
-        order = form.steps.map { |name, times| Form::Play.new(name: name, times: [times, REHEARSAL_PASSES].min) }
+        order = rehearsal_steps(form).map { |name, times| Form::Play.new(name: name, times: [times, REHEARSAL_PASSES].min) }
         fills = form.phrase_fills.map { |f| f.with(every: 2 * length.to_r / bar_length, length: half) }
         Form.new(sections: sections, order: order, phrase_fills: fills)
       end

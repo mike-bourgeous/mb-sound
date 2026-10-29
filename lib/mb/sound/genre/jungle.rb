@@ -24,6 +24,14 @@ module MB
         drop2     32
         outro     16
       end
+      # A generated form (G4): a stochastic L-system over the sections (rolls
+      # into drops, breakdowns into the second drop), another arrangement
+      # for each seed.  `genre(:jungle).generative(seed: 2).play`
+      generator lsystem(%i[intro lift body outro],
+                        body: { %i[roll drop turn body] => 2, %i[roll drop turn] => 2, %i[drop turn] => 1 },
+                        turn: { %i[breakdown drop2] => 3, %i[breakdown drop] => 1 },
+                        generations: 3, seed: 165),
+                bars: { intro: [8, 16], lift: 16, roll: [8, 16], drop: [16, 32], breakdown: [8, 16], drop2: [16, 32], outro: 16 }
 
       # The chop is the instrument (genre-fixes, 2026-10-18; Nev: "You
       # built the sampler and the template didn't move in"): the shipped

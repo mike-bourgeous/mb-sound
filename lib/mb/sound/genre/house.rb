@@ -31,6 +31,13 @@ module MB
         outro      8
         outro2     8
       end
+      # A generated form (G4): a stochastic L-system over the sections, one
+      # to three breakdown-drop cycles between the groove and the outros
+      # (16-bar phrases kept).  `genre(:house).generative(seed: 2).play`
+      generator lsystem(%i[intro groove body outro outro2],
+                        body: { %i[breakdown drop pickup body] => 2, %i[breakdown drop pickup] => 1, %i[breakdown2 drop2] => 1, %i[breakdown drop2] => 1 },
+                        generations: 3, seed: 124),
+                bars: { intro: 16, groove: [16, 32], breakdown: [8, 16], drop: 16, pickup: [8, 16], breakdown2: 8, drop2: [16, 32], outro: 8, outro2: 8 }
 
       four = 'X...X...X...X...'
       offbeat = '..6...6...6...6.'

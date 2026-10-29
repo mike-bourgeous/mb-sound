@@ -139,6 +139,34 @@ module MB
         end
       end
 
+      # A template's generative form (G4; Builder#generator): +source+ (a
+      # markov or lsystem over the template's section names), +bars+
+      # (section => length spec: bars, a Range of bars, or an Array drawn
+      # per occurrence), +sections+ (how many Template#generative plays
+      # when the source doesn't end by itself), +use+ (material swaps in
+      # every scene for the generated form: `{ drone: :drone_walk }` plays
+      # clip :drone_walk wherever a scene plays :drone), and +scenes+
+      # (values added to scenes: `{ bloom: { space: 0.7 } }`).
+      Generator = Data.define(:source, :bars, :sections, :use, :scenes) do
+        def initialize(source:, bars: {}, sections: nil, use: {}, scenes: {})
+          unless source.respond_to?(:form_next) && source.respond_to?(:reseed)
+            raise ArgumentError, "generator needs a markov(...) or lsystem(...) over section names (got #{source.inspect})"
+          end
+          bars.each { |n, spec| Form.check_length_spec(n, spec) }
+          raise ArgumentError, "generator sections: must be a positive Integer or nil (got #{sections.inspect})" unless sections.nil? || (sections.is_a?(Integer) && sections > 0)
+          super(source: source, bars: bars.dup.freeze, sections: sections, use: use.dup.freeze, scenes: scenes.transform_values { |v| v.dup.freeze }.freeze)
+        end
+
+        # The builder line (see Builder#generator).
+        def ruby
+          parts = [source.to_ruby, "bars: #{Genre.ruby(bars)}"]
+          parts << "sections: #{sections}" if sections
+          parts << "use: #{Genre.ruby(use)}" unless use.empty?
+          parts << "scenes: #{Genre.ruby(scenes)}" unless scenes.empty?
+          "generator #{parts.join(', ')}"
+        end
+      end
+
       # Scene keys that are scene options rather than tracks or knobs.
       SCENE_OPTIONS = [:q, :fade, :others].freeze
 
@@ -294,19 +322,19 @@ module MB
           done.keys
         end
 
-        # A copy of +form+ with every plain-number section, fill, and phrase
-        # fill length divided by +divisor+ (rounded, at least 1 bar; phrase
+        # A copy of +form+ with every plain-number section, play, fill, and
+        # phrase fill length divided by +divisor+ (rounded, at least 1 bar; phrase
         # fills at least every 2 bars).
         def scale_form(form, divisor)
           return form if divisor == 1
           shrink = ->(len, min = 1) { len.is_a?(Numeric) ? [(len.to_r / divisor).round, min].max : len }
-          sections = form.sections.transform_values { |s|
-            length = shrink.(s.length)
-            fill = s.fill && s.fill.with(length: [shrink.(s.fill.length), length].then { |f, l| f.is_a?(Numeric) && l.is_a?(Numeric) ? [f, l].min : f })
-            s.with(length: length, fill: fill)
+          scaled = form.map_lengths { |len, what| what == :every ? shrink.(len, 2) : shrink.(len) }
+          # (fills no longer than their sections)
+          sections = scaled.sections.transform_values { |s|
+            next s unless s.fill && s.fill.length.is_a?(Numeric) && s.length.is_a?(Numeric)
+            s.with(fill: s.fill.with(length: [s.fill.length, s.length].min))
           }
-          phrase = form.phrase_fills.map { |f| f.with(every: shrink.(f.every, 2), length: shrink.(f.length)) }
-          Form.new(sections: sections, order: form.order, phrase_fills: phrase)
+          Form.new(sections: sections, order: scaled.order, phrase_fills: scaled.phrase_fills)
         end
       end
 
@@ -314,7 +342,7 @@ module MB
       # value; #with (or Genre.template with +base:+) makes changed copies.
       Template = Data.define(
         :name, :title, :about, :tempo, :tempo_range, :meter, :phrases, :key, :form,
-        :kits, :clips, :roles, :scenes, :knobs, :buses, :sidechain, :mix, :tips
+        :kits, :clips, :roles, :scenes, :knobs, :buses, :sidechain, :mix, :tips, :generator
       ) do
         # Data#with, plus an optional builder block applied on top:
         # `t.with(tempo: 170) { role :bass, :jungle_reese }`.
@@ -333,15 +361,85 @@ module MB
           Rational(meter[0], meter[1])
         end
 
-        # The form's length in bars, played straight through.
+        # The form's length in bars, played straight through (a form with
+        # generate steps: its first GENERATED_BARS_PASSES planned passes, or
+        # to its end).
         def bars
-          form.bars(bar_length: bar_length)
+          return form.bars(bar_length: bar_length) unless form.generative?
+          form.plan(seed: 0, bar_length: bar_length).first(GENERATED_BARS_PASSES).sum { |p| p.stop - p.start } / bar_length
+        end
+
+        # Passes of a generated form #bars (and so #seconds and #short)
+        # count.
+        GENERATED_BARS_PASSES = 64
+
+        # A copy whose form the template's generator writes as it plays
+        # (G4): its source's sections one at a time (a word to its end, a
+        # chain until it ends, or +sections+ of them: the generator's own
+        # count by default), with lengths drawn per occurrence, keeping the
+        # form's section options (fills) and phrase fills, and the
+        # generator's material swaps and scene values.  +seed+ reseeds the
+        # source (another song from the same grammar).
+        #
+        #     genre(:dnb).generative.play
+        #     genre(:dnb).generative(seed: 3).short.play
+        def generative(seed: nil, sections: nil)
+          g, src, lengths, fills = generated_parts(seed)
+          count = sections || g.sections
+          f = Form.build {
+            fills.each { |pf| fill pf.name, every: pf.every, length: pf.length, layer: pf.layer }
+            generate src, bars: lengths, sections: count
+          }
+          with(form: f, scenes: generated_scenes(g))
+        end
+
+        # A copy whose form plays the template's generator forever (G4):
+        # `label :top; generate source, bars: ...; goto :top`; a chain that
+        # ends starts over (a new song each time), a word grows again (new
+        # words with an lsystem's vary: true).  See #generative.
+        #
+        #     genre(:ambient).endless.play
+        def endless(seed: nil)
+          g, src, lengths, fills = generated_parts(seed)
+          f = Form.build {
+            fills.each { |pf| fill pf.name, every: pf.every, length: pf.length, layer: pf.layer }
+            label :top
+            generate src, bars: lengths
+            goto :top
+          }
+          with(form: f, scenes: generated_scenes(g))
         end
 
         # The form's length in seconds at the template's tempo.
         def seconds
           bars * bar_length * 4 * 60 / tempo.to_r
         end
+
+        # [generator, source (reseeded), lengths (with the form's section
+        # options), phrase fills] for #generative and #endless.
+        def generated_parts(seed)
+          g = generator or raise ArgumentError, "Genre #{name.inspect} has no generator (give it one: generator markov(...) or lsystem(...), bars: { ... })"
+          src = seed.nil? ? g.source : g.source.reseed(Integer(seed))
+          names = (src.form_states.reject { |n| src.nonterminal?(n) && !g.bars.key?(n) } + g.bars.keys).uniq
+          lengths = names.to_h { |n|
+            sec = form.sections[n]
+            spec = g.bars.fetch(n) { sec&.length or raise ArgumentError, "Genre #{name.inspect}: generator section #{n.inspect} has no length (bars: { #{n}: 8 })" }
+            opts = sec ? sec.options.except(:times) : {}
+            [n, opts.empty? ? spec : { length: spec, **opts }]
+          }
+          [g, src, lengths, form.phrase_fills]
+        end
+        private :generated_parts
+
+        # The scenes with the generator's material swaps and values.
+        def generated_scenes(g)
+          return scenes if g.use.empty? && g.scenes.empty?
+          scenes.to_h { |n, values|
+            swapped = values.to_h { |k, v| [k, v.is_a?(Symbol) && !SCENE_OPTIONS.include?(k) ? g.use.fetch(v, v) : v] }
+            [n, swapped.merge(g.scenes.fetch(n, {}))]
+          }
+        end
+        private :generated_scenes
 
         # The values of scene +name+ for Arrangement#scene: kit and clip
         # names resolved to the template's Kits and Clips; knob values and
@@ -486,6 +584,7 @@ module MB
           l << "  phrases #{phrases.join(', ')}" unless phrases.empty?
           l << "  key #{key.map(&:inspect).join(', ')}" if key
           form.to_ruby.each_line(chomp: true) { |line| l << "  #{line}" }
+          l << "  #{generator.ruby}" if generator
           kits.each { |n, k| l << "  kit #{n.inspect}, #{k.to_ruby}" }
           clips.each { |n, c| l << "  clip #{n.inspect}, #{c.to_ruby}" }
           knobs.each { |n, (d, o)| l << "  knob #{n.inspect}, #{Genre.ruby(d)}#{", #{Genre.kwargs(o)}" unless o.empty?}" }
@@ -527,8 +626,11 @@ module MB
           lines << "genre #{name.inspect}: #{title}"
           lines << "  #{Genre.ruby(tempo)} BPM#{" (#{tempo_range})" if tempo_range}, #{meter.join('/')}" \
                    "#{", #{key[1].to_s.capitalize.sub('s', '#')} #{key[0]}" if key}, phrases of #{phrases.join('/')} bars"
-          lines << "  form: #{form.steps.map { |n, t| "#{n} #{form.sections[n].length}#{" x#{t}" if t > 1}" }.join(', ')} " \
+          plays = form.generative? ? form.plan(seed: 0, bar_length: bar_length).first(8).map { |p| [p.section, 1, p.length] } : form.plays
+          lines << "  form#{' (generated as it plays; first passes)' if form.generative?}: " \
+                   "#{plays.map { |n, t, len| "#{n} #{len}#{" x#{t}" if t > 1}" }.join(', ')}#{' ...' if form.generative?} " \
                    "(#{Genre.ruby(bars)} bars, #{(secs / 60).floor}:#{format('%02d', secs.round % 60)})"
+          lines << "  generator: #{generator.source.class.name.split('::').last.downcase} over #{generator.source.form_states.length} sections (.generative, .endless)" if generator && !form.generative?
           lines << "  roles: #{roles.map { |n, r| "#{n} (#{r.patch}#{", #{r.level.to_db.round(1)} dB" if r.level}#{', ducked' if r.duck})" }.join(', ')}"
           lines << "  kits: #{kits.keys.join(', ')}" unless kits.empty?
           lines << "  buses: #{buses.map { |n, b| "#{n}#{" (to #{b.to})" if b.to}" }.join(', ')}" unless buses.empty?
@@ -574,6 +676,7 @@ module MB
           @sidechain = nil
           @mix = {}
           @tips = []
+          @generator = nil
           like(base) if base
           @title = title if title
         end
@@ -588,6 +691,7 @@ module MB
           @kits, @clips, @roles, @scenes, @knobs, @buses = t.kits.dup, t.clips.dup, t.roles.dup, t.scenes.dup, t.knobs.dup, t.buses.dup
           @mix = t.mix.to_h.compact
           @tips = t.tips.dup
+          @generator = t.generator
           nil
         end
 
@@ -629,6 +733,21 @@ module MB
           @form = Form.build(&block)
         end
         alias form flow
+
+        # The template's generative form (G4; see Generator,
+        # Template#generative, and Template#endless): a markov or lsystem
+        # over the form's section names, each section's length per
+        # occurrence (+bars+, or keywords; sections of the form left out
+        # keep their length), +sections+ for Template#generative when the
+        # source doesn't end by itself, material swaps (+use+) and scene
+        # values (+scenes+) for the generated form.  `generator nil`
+        # removes it.
+        #
+        #     generator lsystem(%i[intro body outro], body: { %i[build drop body] => 1, %i[build drop] => 2 }, generations: 3, seed: 1),
+        #               bars: { intro: 16, build: 8, drop: [16, 32], outro: 16 }
+        def generator(source, bars: {}, sections: nil, use: {}, scenes: {}, **more)
+          @generator = source && Generator.new(source: source, bars: bars.merge(more), sections: sections, use: use, scenes: scenes)
+        end
 
         # A drum Kit (e.g. `kit :drop, grid(16, kick: 'X.........X.....')`).
         def kit(name, kit)
@@ -798,6 +917,7 @@ module MB
         BUILDER_METHODS = [
           :like, :title, :about, :tempo, :meter, :phrases, :key, :flow, :form, :kit, :clip, :role, :knob,
           :scene, :layers, :bus, :sidechain, :pump, :loudness, :true_peak, :mono_below, :master, :master_gain, :tip, :without,
+          :generator,
         ].freeze
 
         def method_missing(name, *args, **kwargs, &block)
@@ -823,7 +943,7 @@ module MB
             key: @key&.dup&.freeze, form: @form, kits: @kits.dup.freeze, clips: @clips.dup.freeze,
             roles: @roles.dup.freeze, scenes: @scenes.dup.freeze, knobs: @knobs.dup.freeze,
             buses: @buses.dup.freeze, sidechain: @sidechain,
-            mix: Mix.new(**@mix), tips: @tips.dup.freeze
+            mix: Mix.new(**@mix), tips: @tips.dup.freeze, generator: @generator
           )
           __check__(t)
           t
@@ -855,6 +975,26 @@ module MB
             next if sec.scene == false
             scene = sec.scene || sec.name
             raise ArgumentError, "#{where}: form section #{sec.name.inspect} has no scene #{scene.inspect}#{Form.suggest(scene, t.scenes.keys)}" unless t.scenes.key?(scene)
+          end
+          if (g = t.generator)
+            g.source.form_states.each do |n|
+              next if g.source.nonterminal?(n) && !g.bars.key?(n)
+              scene = t.form.sections[n]&.scene
+              next if scene == false
+              scene ||= n
+              raise ArgumentError, "#{where}: generator section #{n.inspect} has no scene #{scene.inspect}#{Form.suggest(scene, t.scenes.keys)}" unless t.scenes.key?(scene)
+              unless g.bars.key?(n) || t.form.sections.key?(n)
+                raise ArgumentError, "#{where}: generator section #{n.inspect} has no length (bars: { #{n}: 8 }, or a section of the form)"
+              end
+            end
+            g.use.each do |from, to|
+              [from, to].each do |m|
+                raise ArgumentError, "#{where}: generator use: names #{m.inspect}, which is no kit or clip#{Form.suggest(m, t.kits.keys + t.clips.keys)}" unless t.kits.key?(m) || t.clips.key?(m)
+              end
+            end
+            g.scenes.each_key do |s|
+              raise ArgumentError, "#{where}: generator scenes: names #{s.inspect}, which is no scene#{Form.suggest(s, t.scenes.keys)}" unless t.scenes.key?(s)
+            end
           end
           if (k = t.trigger_track)
             if t.roles.key?(k) || t.knobs.key?(k) || t.buses.key?(k)
