@@ -57,6 +57,14 @@ RSpec.describe(MB::Sound::UI::Inspect, :aggregate_failures) do
       expect(walked[:voice_knobs][:kick]).to include(:tune, :decay)
       expect(Ractor.shareable?(walked[:voice_knobs])).to eq(true)
       expect(walked[:nodes].reject { |n| n.section == :plumbing }.map(&:voice).uniq.compact).to eq(walked[:voices])
+      # (sound-design-2: each voice opens on its body, its resonator or
+      # source, not its first filter)
+      walked[:voices].each do |v|
+        i = inspect.default_node(walked[:nodes], v, objects: walked[:objects])
+        n = walked[:nodes][i]
+        expect([v, nil]).to include(n.voice)
+        expect(walked[:objects][i].is_a?(MB::Sound::GraphNode::Resonator) || n.section == :source).to eq(true), "#{kit} #{v} opens on #{n.label} (#{n.section})"
+      end
     ensure
       session&.close
       MB::Sound.rewind

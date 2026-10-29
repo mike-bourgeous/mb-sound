@@ -162,7 +162,7 @@ module MB
             voice = voices.include?(target[:voice]) ? target[:voice] : voices.first
             sel = target[:node]
             sel = nil if sel && voice && (v = nodes[sel.clamp(0, [nodes.length - 1, 0].max)]&.voice) && v != voice
-            sel = Inspect.default_node(nodes, voice) if sel.nil?
+            sel = Inspect.default_node(nodes, voice, objects: entry[:objects]) if sel.nil?
             sel = sel.clamp(0, nodes.length - 1) if sel && !nodes.empty?
             sel = nil if nodes.empty?
             # (the selected node's snapshot again: its knob-driven values
@@ -387,11 +387,51 @@ module MB
         # first filter (the maintainer: designing a sound starts at its
         # filter; not an envelope in FILTER), else the first SOURCE row, else the
         # first shown row; nil without rows.
-        def default_node(nodes, voice = nil)
+        #
+        # A kit's voice (+voice+ given and the row is that voice's) opens on
+        # its body instead (sound-design-2; sound-design-nav-1's question 2):
+        # its resonator (a `ping` or `resonate` row; +objects+ are the rows'
+        # nodes), else its first SOURCE row (an oscillator, noise, or ROM
+        # sample), so a 909 kick opens on its ping, not its click's highpass.
+        def default_node(nodes, voice = nil, objects: nil)
           mine = nodes.each_index.select { |i| nodes[i].section != :plumbing && (voice.nil? || nodes[i].voice.nil? || nodes[i].voice == voice) }
+          if voice
+            own = mine.select { |i| nodes[i].voice == voice }
+            body = ->(i) { objects ? objects[i].is_a?(GraphNode::Resonator) : %w[ping resonate].include?(nodes[i].label) }
+            found = own.find(&body) || own.find { |i| nodes[i].section == :source }
+            # (a body the kit's voices share, a row of no voice: the 808's
+            # metal bank under its hats and cymbal)
+            shared = mine.select { |i| nodes[i].voice.nil? }
+            found ||= objects && upstream_body(own, shared, nodes, objects, body)
+            return found if found
+          end
           filters = mine.select { |i| nodes[i].section == :filter && nodes[i].what.nil? }
           filters.find { |i| !nodes[i].knobs.empty? } || filters.first || mine.find { |i| nodes[i].section == :filter } ||
             mine.find { |i| nodes[i].section == :source } || mine.first || (nodes.empty? ? nil : 0)
+        end
+
+        # The first of rows +among+ upstream of rows +own+ (through main
+        # inputs; +objects+ are the rows' nodes) that +body+ accepts or that
+        # is in SOURCE, or nil.
+        def upstream_body(own, among, nodes, objects, body)
+          row = {}
+          objects.each_with_index { |o, i| row[o.__id__] ||= i }
+          seen = {}
+          queue = own.map { |i| objects[i] }
+          steps = 0
+          until queue.empty? || (steps += 1) > 400
+            n = queue.shift
+            next if seen[n.__id__]
+            seen[n.__id__] = true
+            i = row[n.__id__]
+            return i if i && among.include?(i) && (body.(i) || nodes[i].section == :source)
+            next unless n.respond_to?(:sources)
+            n.sources.each do |name, src|
+              next if src.is_a?(Numeric) || (n.respond_to?(:port_role) && n.port_role(name) != :main)
+              queue << GraphNode.climb_tee_tree(src)
+            end
+          end
+          nil
         end
 
         # The knob each param of +node+ reads through arithmetic (`cut *
