@@ -106,9 +106,13 @@ RSpec.describe(MB::Sound::Plot::Panels::EnvelopeView, :aggregate_failures) do
     end
     g = MB::Sound::UI::Inspect::Gatherer.new
     6.times { s.process_buffer }
-    info = g.call(s, { track: :bass, node: 0 })
+    info = g.call(s, { track: :bass, node: nil })
     expect(info.nodes.map(&:label)).to include('amp_env', 'filter_env')
-    expect(info.nodes.map(&:label)).not_to include('gm_time', 'GmTime')
+    expect(info.nodes.reject { |n| n.section == :plumbing }.map(&:label)).not_to include('gm_time', 'GmTime')
+    # (in sections since sound-design-nav-1: the amp envelope in AMP, the filter envelope in FILTER)
+    expect(info.nodes.find { |n| n.label == 'amp_env' }.section).to eq(:amp)
+    expect(info.nodes.find { |n| n.label == 'filter_env' }.section).to eq(:filter)
+    info = g.call(s, { track: :bass, node: info.nodes.index { |n| n.label == 'amp_env' } })
     amp = info.selected
     expect(amp.label).to eq('amp_env')
     expect(amp.live).to include(stage: :segment, segment: 1)
