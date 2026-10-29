@@ -34,7 +34,7 @@ RSpec.describe('session fuzzing') do
   it 'generates valid songs that use every kind of command' do
     songs = (1..40).map { |s| SessionFuzz.generate(Random.new(s)).code }
     all = songs.join("\n")
-    %w[track( scene go swap stop mute unmute solo turn tween .freq tr808( tr909( launch tweak meter L.inst. :dnb_sub bus( feed master flow( markov(].each do |word|
+    %w[track( scene go swap stop mute unmute solo turn tween .freq tr808( tr909( launch tweak meter L.inst. :dnb_sub bus( feed master flow( markov( seek].each do |word|
       expect(all).to include(word)
     end
     songs.each { |code| expect { Prism.parse(code).errors.then { |e| raise e.map(&:message).join(', ') unless e.empty? } }.not_to raise_error }
@@ -76,6 +76,14 @@ RSpec.describe('session fuzzing') do
         'at_bar(2) { bg :t1, seq(A4, C5).n8.loop, on: :now; cue :t1 }',
         'at_bar(2, beat: 3) { launch :t1 }',
       ], 3,
+    ],
+    # (omnibus16: a started player waiting after a seek back played again
+    # from the start of the span holding its start, not its own sample)
+    'a clipless part after a seek back before its start' => [
+      :buffer_size, ['bpm 120'], [
+        'at_bar(1, beat: 2) { bg :held, 0.05.constant, in: 1/8r }',
+        'at_bar(1, beat: 4) { seek 1, 2.25 }',
+      ], 2,
     ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do

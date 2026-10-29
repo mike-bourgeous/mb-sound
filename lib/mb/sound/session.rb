@@ -1550,11 +1550,20 @@ module MB
           catch_up_started(p, offset) # a graph that waited to start
         end
 
-        if p.waited
-          # Clocked clips and loops resync to their clocks where it plays
-          # again (the timeline jumped back before its start)
+        if p.waited || p.start > from
+          # The timeline jumped back before its start (in an earlier span,
+          # or just before it in this one): it plays again from the sample
+          # holding its start, as on its first start (a clipless graph
+          # started at the span's start before omnibus16, so a 367-frame
+          # replay played it up to a buffer early), and clocked clips and
+          # loops resync to their clocks there
           p.waited = false
-          p.timeline_nodes.each { |n| n.clock_resync(from) if n.respond_to?(:clock_resync) }
+          offset = MB::M.max(((p.start - from) / per_sample).floor, 0)
+          again = from + offset * per_sample
+          if offset > 0
+            p.timeline_nodes.each { |n| n.start_at(again, origin: p.start, launch: p.launch, transport: @transport) }
+          end
+          p.timeline_nodes.each { |n| n.clock_resync(again) if n.respond_to?(:clock_resync) }
         end
 
         ringing = p.ring&.active && !p.fade_out
