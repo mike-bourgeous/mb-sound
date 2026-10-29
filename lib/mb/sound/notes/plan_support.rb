@@ -19,7 +19,6 @@ module MB
           :@feedback_sources, :@internal_tee, :@handled_spies, :@curve, :@gm_time,
           :@delay, :@delay_buf, :@time_node, :@time_buf, :@spec, :@first_fill, :@uniform, :@render_offset, :@segment_start, :@adding, :@from,
           :@glide_bufs, # (scratch, see Glide#fill)
-          :@carried, # (Node#skip_start_chase!)
         ].freeze
 
         def plan_inputs
