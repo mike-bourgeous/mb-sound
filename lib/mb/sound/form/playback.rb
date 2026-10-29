@@ -80,6 +80,7 @@ module MB
           @program = form.program
           @lock = Monitor.new
           @history = []
+          @played = []
           @counters = {}.freeze
           @where = {}
           @looping = false
@@ -130,6 +131,13 @@ module MB
         # The sections played so far, one name per pass (frozen copy).
         def history
           @lock.synchronize { @history.dup.freeze }
+        end
+
+        # The passes played so far as [section name, length] pairs (the
+        # pass's own length: sections may play for different lengths; for
+        # take.form), frozen.
+        def played
+          @lock.synchronize { @played.dup.freeze }
         end
 
         # A read-only snapshot for goto Procs (see State).
@@ -475,8 +483,7 @@ module MB
             result[i] = pos
             case ins[0]
             when :play
-              len = @form.sections[ins[1]].length
-              ins[2].times { pos += length_from(len, pos) }
+              ins[2].times { pos += length_from(ins[3], pos) }
             when :pick
               picks << { start: pos, finish: ins[2], after: nil }
             when :jump
@@ -515,7 +522,10 @@ module MB
             @section = name
             @pass = pass
             @pass_start = time
-            @history << name if record
+            if record
+              @history << name
+              @played << [name, @program[index][3]].freeze
+            end
             @committed = false
             @commit_record = nil
             @next = nil
@@ -535,7 +545,8 @@ module MB
             end
             @pass_seqs = first_seq...@session.journal.next_seq
 
-            @boundary = time + length_from(sec.length, time)
+            # (this play's length: a section may play for different lengths)
+            @boundary = time + length_from(@program[index][3], time)
             @session.markers.set(name, kind: :section, pos: time)
             @where[name] = [index, time]
 
@@ -557,7 +568,10 @@ module MB
         # commit, a scene launch still queued, and a pass whose start the
         # scheduler ran early (it never played, so it leaves the history).
         def drop_pending_pass
-          @history.pop if @pass_start && @pass_start >= @transport.position
+          if @pass_start && @pass_start >= @transport.position
+            @history.pop
+            @played.pop
+          end
           @gen += 1
           undo_commit
           cancel_pass_changes

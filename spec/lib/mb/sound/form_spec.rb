@@ -106,12 +106,87 @@ RSpec.describe(MB::Sound::Form) do
 
     it 'raises for a bare unknown name, a second declaration, and bad options' do
       expect { described_class.build { verse } }.to raise_error(NoMethodError, /give its length the first time/)
-      expect { described_class.build { verse 8.bars; verse 4.bars } }.to raise_error(ArgumentError, /already declared/)
+      expect { described_class.build { verse 8.bars; verse 4.bars, fill: :x } }.to raise_error(ArgumentError, /already declared with other fill:.*own name/)
       expect { described_class.build { verse 8.bars; verse fill: :x } }.to raise_error(ArgumentError, /only takes times:/)
       expect { described_class.build { verse 8.bars, then: :end } }.to raise_error(ArgumentError, /unknown options :then/)
       expect { described_class.build { verse 8.bars, fil: :x } }.to raise_error(ArgumentError, /unknown options :fil.*Did you mean\?\s+:fill/m)
       expect { described_class.build { verse 8.bars, next: :chorus } }.to raise_error(ArgumentError, /no longer take next:.*goto :label.*pick/)
       expect { described_class.build { verse 'x' } }.to raise_error(NoMethodError, /must be a length/)
+    end
+
+    describe 'per-occurrence lengths (G4)' do
+      let(:form) {
+        described_class.build do
+          chorus 16, fill: :roll
+          verse  8
+          chorus 8
+          chorus 16, times: 2
+          pick do |p|
+            p.option(1) { verse 4 }
+            p.option(1) { chorus }
+          end
+        end
+      }
+
+      it 'plays a section again for another length, keeping its other options' do
+        expect(form.plays).to eq([[:chorus, 1, 16], [:verse, 1, 8], [:chorus, 1, 8], [:chorus, 2, 16], [:verse, 1, 4]])
+        expect(form.steps).to eq([[:chorus, 1], [:verse, 1], [:chorus, 1], [:chorus, 2], [:verse, 1]])
+        expect(form.bars).to eq(16 + 8 + 8 + 32 + 4)
+        expect(form.sections[:chorus].length).to eq(16)
+        expect(form.sections[:chorus].fill.names).to eq([:roll])
+        expect(form.order[2]).to eq(MB::Sound::Form::Play.new(name: :chorus, times: nil, length: 8))
+      end
+
+      it 'prints and rebuilds the lengths (Form#to_ruby round trip)' do
+        expect(form.to_ruby).to eq(<<~RUBY.chomp)
+          flow do
+            chorus 16, fill: :roll
+            verse 8
+            chorus 8
+            chorus times: 2
+            pick do |p|
+              p.option(1) { verse 4 }
+              p.option(1) { chorus }
+            end
+          end
+        RUBY
+        again = MB::Sound.module_eval(form.to_ruby.sub('flow do', 'MB::Sound::Form.build do'))
+        expect(again).to eq(form)
+        expect(again.plays).to eq(form.plays)
+      end
+
+      it 'keeps Durations and bar counts apart (8 bars is not 8.bars)' do
+        f = described_class.build { a 8; a 8.bars }
+        expect(f.plays.map(&:last)).to eq([8, 8.bars])
+        expect(f.to_ruby).to eq("flow do\n  a 8\n  a 8.bars\nend")
+      end
+
+      it 'refuses other options that differ from the declaration' do
+        expect { described_class.build { drop 16, fill: :riser; drop 8, fill: :riser } }.not_to raise_error
+        expect { described_class.build { drop 16, scene: :x; drop 8, scene: :y } }.to raise_error(ArgumentError, /already declared with other scene:/)
+        expect { described_class.build { drop 16; drop 'x' } }.to raise_error(ArgumentError, /first argument must be a length/)
+      end
+
+      it 'scales play lengths with the section lengths (Genre.scale_form)' do
+        short = MB::Sound::Genre.scale_form(form, 4)
+        expect(short.plays.map(&:last)).to eq([4, 2, 2, 4, 1])
+        expect(short.sections[:chorus].fill.length).to eq(1)
+      end
+
+      it 'plays each pass for its own length' do
+        setup_scenes(:a, :b)
+        t = MB::Sound::Take.new(session: session)
+        flow do
+          a 2
+          b 1
+          a 1
+          b
+        end
+        data = run_bars(5)
+        expect(changes(data).first(4)).to eq([[0, 48], [2 * bar, 50], [3 * bar, 48], [4 * bar, 50]])
+        expect(set.playback.played).to eq([[:a, 2], [:b, 1], [:a, 1], [:b, 1]])
+        expect(t.form.to_ruby).to eq("flow do\n  a 2\n  b 1\n  a 1\n  b\nend")
+      end
     end
 
     it 'treats verse 8.bars * 2 as one 16-bar verse (the documented trap)' do

@@ -294,19 +294,19 @@ module MB
           done.keys
         end
 
-        # A copy of +form+ with every plain-number section, fill, and phrase
-        # fill length divided by +divisor+ (rounded, at least 1 bar; phrase
+        # A copy of +form+ with every plain-number section, play, fill, and
+        # phrase fill length divided by +divisor+ (rounded, at least 1 bar; phrase
         # fills at least every 2 bars).
         def scale_form(form, divisor)
           return form if divisor == 1
           shrink = ->(len, min = 1) { len.is_a?(Numeric) ? [(len.to_r / divisor).round, min].max : len }
-          sections = form.sections.transform_values { |s|
-            length = shrink.(s.length)
-            fill = s.fill && s.fill.with(length: [shrink.(s.fill.length), length].then { |f, l| f.is_a?(Numeric) && l.is_a?(Numeric) ? [f, l].min : f })
-            s.with(length: length, fill: fill)
+          scaled = form.map_lengths { |len, what| what == :every ? shrink.(len, 2) : shrink.(len) }
+          # (fills no longer than their sections)
+          sections = scaled.sections.transform_values { |s|
+            next s unless s.fill && s.fill.length.is_a?(Numeric) && s.length.is_a?(Numeric)
+            s.with(fill: s.fill.with(length: [s.fill.length, s.length].min))
           }
-          phrase = form.phrase_fills.map { |f| f.with(every: shrink.(f.every, 2), length: shrink.(f.length)) }
-          Form.new(sections: sections, order: form.order, phrase_fills: phrase)
+          Form.new(sections: sections, order: scaled.order, phrase_fills: scaled.phrase_fills)
         end
       end
 
@@ -527,7 +527,7 @@ module MB
           lines << "genre #{name.inspect}: #{title}"
           lines << "  #{Genre.ruby(tempo)} BPM#{" (#{tempo_range})" if tempo_range}, #{meter.join('/')}" \
                    "#{", #{key[1].to_s.capitalize.sub('s', '#')} #{key[0]}" if key}, phrases of #{phrases.join('/')} bars"
-          lines << "  form: #{form.steps.map { |n, t| "#{n} #{form.sections[n].length}#{" x#{t}" if t > 1}" }.join(', ')} " \
+          lines << "  form: #{form.plays.map { |n, t, len| "#{n} #{len}#{" x#{t}" if t > 1}" }.join(', ')} " \
                    "(#{Genre.ruby(bars)} bars, #{(secs / 60).floor}:#{format('%02d', secs.round % 60)})"
           lines << "  roles: #{roles.map { |n, r| "#{n} (#{r.patch}#{", #{r.level.to_db.round(1)} dB" if r.level}#{', ducked' if r.duck})" }.join(', ')}"
           lines << "  kits: #{kits.keys.join(', ')}" unless kits.empty?

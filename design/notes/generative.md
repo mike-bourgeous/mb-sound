@@ -13,7 +13,7 @@ Maintainer, 2026-10-15: "Start G1 now"; on the proposal's four design choices, "
 3. Knobs are read at a decision point one beat before each cycle (per-generator `lead:`) — built in G3 (Steering, below).
 
 Maintainer, 2026-10-16: "Start G2 now": phrase memory (motifs, a a b a forms, answers, mutation every few passes) on the G1 dice, a same-register melody A/B, and dense/granular blur demos (the proposal's G3 phrase memory moved up; knob steering stays G3, long form later).  Listening Bench verdicts that shaped it: the spike's "Phrase memory vs a fresh walk" went to "a2 phrases, no blur" (so the demo plays no blur by default); G1's "melody(scale) vs melody(harmony)" went to the old lead, with "New is higher so comparison isn't as easy" (so every demo lead now plays in one register); G1 blur: "much more audible with a much higher density or a granular sampler" (`bin/songs/generative_blur.rb`).
-4. Forms allow the same section name with different lengths — **G3/G4, not built**.
+4. Forms allow the same section name with different lengths — built in G4 (generative-g4, 2026-10-29; arrangement.md, "Song forms").
 
 ## Pieces (`lib/mb/sound/generative.rb`, `generative/`, `generative_methods.rb`)
 

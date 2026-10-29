@@ -177,8 +177,8 @@ module MB
       end
 
       # Entries in the play order:
-      # - Play: a section played (+name+, with a per-step +times+ or nil for
-      #   the section's).
+      # - Play: a section played (+name+, with a per-step +times+ and
+      #   +length+, or nil for the section's).
       # - Repeat: a group of entries (+steps+) played +count+ times.
       # - Label: a named position (+name+) that gotos jump to; takes no time.
       # - Goto: jumps to a label (+target+: a label, a Hash from labels to
@@ -190,7 +190,15 @@ module MB
       #   pass of the bigger one).
       # - Pick: plays one of its +options+ (Options: a +weight+ and the
       #   +steps+ to play, which may be empty), then carries on after it.
-      Play = Data.define(:name, :times)
+      Play = Data.define(:name, :times, :length) do
+        # +length+ is this play's own length (nil for the section's): the
+        # same section may play for different lengths at different places
+        # in the order (`chorus 16` ... `chorus 8`, G4).
+        def initialize(name:, times: nil, length: nil)
+          Form.check_length(name, length) unless length.nil?
+          super
+        end
+      end
       Repeat = Data.define(:count, :steps)
       Label = Data.define(:name)
       Goto = Data.define(:target, :times)
@@ -207,6 +215,12 @@ module MB
       # True if +value+ looks like a length (a Duration or a Numeric).
       def self.length?(value)
         value.is_a?(Sequence::Duration) || (value.is_a?(Numeric) && !value.is_a?(Complex))
+      end
+
+      # True if section lengths +a+ and +b+ are the same (the same kind
+      # too: 8 bars counted through the meter map aren't 8.bars).
+      def self.same_length?(a, b)
+        a.class == b.class && a == b
       end
 
       # Raises unless +weights+ is a Hash of name => weight pairs (for goto
@@ -281,7 +295,8 @@ module MB
       attr_reader :phrase_fills
 
       # The play order compiled for Playback: a frozen Array of
-      # instructions, each a frozen Array: [:play, name, times], [:label,
+      # instructions, each a frozen Array: [:play, name, times, length]
+      # (the play's own length, else the section's), [:label,
       # name], [:goto, target, times], [:pick, [[weight, index], ...],
       # end_index], or [:jump, index].  Repeats are unrolled; each pick
       # option ends with a jump past the pick.
@@ -303,16 +318,34 @@ module MB
       # The order straight through, as an Array of [section name, times]:
       # repeats unrolled, gotos not taken, the first option of each pick.
       def steps
+        straight.map { |i| @program[i][1..2] }
+      end
+
+      # Like #steps, with each play's length: [section name, times, length]
+      # (lengths differ per play when a section plays for different lengths
+      # in different places: `chorus 16` ... `chorus 8`).
+      def plays
         straight.map { |i| @program[i].drop(1) }
       end
 
-      # The total length in bars of #steps, counting Durations at
+      # The total length in bars of #plays, counting Durations at
       # +bar_length+ (whole notes per bar).
       def bars(bar_length: 1r)
-        steps.sum { |name, times|
-          len = @sections[name].length
+        plays.sum { |_name, times, len|
           (len.is_a?(Sequence::Duration) ? len.to_r / bar_length : len.to_r) * times
         }
+      end
+
+      # A copy with every section, play, fill, and phrase fill length
+      # passed through the block (`form.map_lengths { |len| ... }`; the
+      # block gets each length and what it belongs to: :section, :play,
+      # :fill, :every (a phrase fill's period), or :phrase_fill).
+      def map_lengths(&block)
+        sections = @sections.transform_values { |s|
+          s.with(length: block.call(s.length, :section), fill: s.fill && s.fill.with(length: block.call(s.fill.length, :fill)))
+        }
+        fills = @phrase_fills.map { |f| f.with(every: block.call(f.every, :every), length: block.call(f.length, :phrase_fill)) }
+        Form.new(sections: sections, order: map_order_lengths(@order, block), phrase_fills: fills)
       end
 
       def ==(other)
@@ -417,7 +450,7 @@ module MB
         entries.each do |e|
           case e
           when Play
-            out << [:play, e.name, e.times || @sections[e.name].times].freeze
+            out << [:play, e.name, e.times || @sections[e.name].times, e.length || @sections[e.name].length].freeze
           when Repeat
             e.count.times { compile(e.steps, out) }
           when Label
@@ -472,18 +505,35 @@ module MB
           when Pick
             emit_pick(e, declared, lines, indent)
           when Play
-            if declared[e.name]
-              lines << "#{indent}#{e.name}#{e.times ? " times: #{e.times}" : ''}"
+            s = @sections[e.name]
+            len = e.length || s.length
+            if declared.key?(e.name)
+              # (a length where this play's differs from the declared one)
+              parts = Form.same_length?(len, declared[e.name]) ? [] : [Form.ruby_value(len)]
+              parts << "times: #{e.times}" if e.times
+              lines << "#{indent}#{e.name}#{" #{parts.join(', ')}" unless parts.empty?}"
             else
-              declared[e.name] = true
-              s = @sections[e.name]
+              # Declared where it first plays, with that play's length
+              declared[e.name] = len
               opts = s.options
               opts[:times] = e.times if e.times
-              parts = [Form.ruby_value(s.length), *opts.map { |k, v| "#{k}: #{Form.ruby_value(v)}" }]
+              parts = [Form.ruby_value(len), *opts.map { |k, v| "#{k}: #{Form.ruby_value(v)}" }]
               lines << "#{indent}#{e.name} #{parts.join(', ')}"
             end
           end
         end
+      end
+
+      # +entries+ with every Play's own length passed through +block+.
+      def map_order_lengths(entries, block)
+        entries.map { |e|
+          case e
+          when Play then e.length ? e.with(length: block.call(e.length, :play)) : e
+          when Repeat then e.with(steps: map_order_lengths(e.steps, block).freeze)
+          when Pick then e.with(options: e.options.map { |o| o.with(steps: map_order_lengths(o.steps, block).freeze) }.freeze)
+          else e
+          end
+        }
       end
 
       def goto_ruby(e)
@@ -501,7 +551,11 @@ module MB
 
       # A pick as `pick :a, :b`, `pick a: 3, b: 1`, or a block of options.
       def emit_pick(e, declared, lines, indent)
-        simple = e.options.all? { |o| o.steps.length == 1 && o.steps[0].is_a?(Play) && o.steps[0].times.nil? && declared[o.steps[0].name] }
+        simple = e.options.all? { |o|
+          st = o.steps[0]
+          o.steps.length == 1 && st.is_a?(Play) && st.times.nil? && declared.key?(st.name) &&
+            Form.same_length?(st.length || @sections[st.name].length, declared[st.name])
+        }
         names = e.options.map { |o| o.steps[0]&.name }
         if simple && e.options.all? { |o| o.weight == 1 }
           lines << "#{indent}pick #{names.map(&:inspect).join(', ')}"
