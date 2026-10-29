@@ -150,6 +150,35 @@ module MB
           "#{super} -- #{@filter}"
         end
 
+        # The filter's settings for its response preview (Plot::Panels,
+        # registered for this class; sound-design-nav-1): mode, cutoff and
+        # resonance (numbers, knobs, and constants at their values; other
+        # nodes at the last value the filter read, listed in +:moving+ so
+        # copies with the same settings still group), tuning, resonance
+        # curve, normalization, self-oscillation, compensation, drive, and
+        # the sample rate.
+        def preview_data
+          f = @filter
+          moving = []
+          value = ->(key, v) {
+            next v.to_f if v.is_a?(Numeric)
+            known = GraphNode::Traversable.describe_param(v).value
+            next known.to_f if known.is_a?(Numeric)
+            moving << key
+            (@last[key] || (key == :cutoff ? f.cutoff : f.resonance)).to_f
+          }
+          cutoff = value.(:cutoff, @cutoff)
+          resonance = value.(:resonance, @resonance)
+          word = f.mode == :lp4 ? 'lp4' : f.diode? ? 'diode' : "lp4 #{f.mode}"
+          {
+            kind: :four_pole, mode: f.mode, cutoff: cutoff, resonance: resonance, tuning: f.tuning,
+            resonance_curve: f.resonance_curve, normalize: f.normalize?, self_oscillate: f.self_oscillate?,
+            compensation: f.compensation, drive: f.drive, drive_mode: f.drive_mode, clip: f.clip,
+            sample_rate: @sample_rate.to_f, moving: moving.freeze,
+            label: "#{word} #{moving.include?(:cutoff) ? '~' : ''}#{Plot::Panels.hz_text(cutoff)} reso #{moving.include?(:resonance) ? '~' : ''}#{format('%.3g', resonance)}#{f.tuning == :musical ? '' : " #{f.tuning}"}",
+          }
+        end
+
         private
 
         # A parameter as a number or a Value (its real part), keeping its

@@ -462,7 +462,10 @@ module MB
           # What tells copies apart (settings, not identity).
           def settings_sig(n)
             info = n.respond_to?(:param_info) ? (n.param_info rescue {}) : {}
-            [info.map { |k, v| [k, v.value, v.label] }, preview(n)].hash
+            d = preview(n)
+            # (values a preview reads from a moving input differ per copy)
+            d = d.reject { |k, _| d[:moving].include?(k) } if d.is_a?(Hash) && d[:moving].is_a?(Array) && !d[:moving].empty?
+            [info.map { |k, v| [k, v.value, v.label] }, d].hash
           end
 
           # Knobs read only through hidden arithmetic (an oscillator mix, a
