@@ -184,7 +184,7 @@ module SceneProfile
   # Times render buffers (without scheduled blocks run inline or the
   # output's write) and each player in them.
   module SessionHook
-    def process_buffer(count = buffer_size)
+    def process_buffer(count = buffer_size, **kw)
       return super unless output.is_a?(EmuOutput) || output.is_a?(CountingOutput)
 
       nb = SceneProfile.blocks.length
