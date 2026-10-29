@@ -345,7 +345,12 @@ module MB
         # monotone cubic in the knob's scale, or by +curve:+ (:linear,
         # :step, or a Curve name per segment; see MB::Sound::Gesture).  A
         # racks-pane gesture's line (#gesture_line) is this form.
-        def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, start_time: nil, **keys)
+        #
+        # A build knob (one a track's patch reads while building, such as
+        # the init voice's sync; Arrangement::BuildKnobs) takes plain values
+        # only, and turning it rebuilds those tracks at their launch points
+        # (+build: true+ is that rebuild's own turn).
+        def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, start_time: nil, build: false, **keys)
           name = control_name(name)
           if name.is_a?(Symbol) && (members = racks.group_members(name))
             offset = binding.local_variable_get(:in)
@@ -354,6 +359,17 @@ module MB
           check_turn_keywords(keys)
           point = LaunchPoint.of(binding) or return nil
           k = knob!(name)
+          if !build && @arrangement&.build_knob?(k.name) && !(rebuilds = @arrangement.build_knob_tracks(k.name)).empty?
+            unless keys.empty? && over.nil? && follow.nil? && from.nil? && value.is_a?(Numeric)
+              now = k.value.to_f == k.value.round ? k.value.round : k.value
+              return MB::Sound.live_error(ArgumentError.new("#{k.name.inspect} is read when #{rebuilds.join(', ')} build#{'s' if rebuilds.length == 1}, so it takes plain values (turn #{k.name.inspect}, #{now}): each turn rebuilds"))
+            end
+            value = knob_value(k, value)
+            check_turn_value(k, value)
+            warn_clamp(k, value)
+            # (to the value it has: a plain turn, nothing to rebuild)
+            return @arrangement.turn_build_knob(k, k.spec.clamp(value), rebuilds, point: point) unless k.spec.clamp(value) == k.value
+          end
           unless keys.empty?
             raise ArgumentError, "Turn #{k.name.inspect} with keyframes (0 => a, 1.n8 => b) or a value, not both" unless value.nil? && over.nil? && follow.nil? && from.nil?
             return turn_keys(k, keys, curve, point, start_time)

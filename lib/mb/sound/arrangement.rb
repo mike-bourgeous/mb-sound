@@ -102,6 +102,8 @@ module MB
         @rehearsable = {} # (#warm_up: track name => its patch if every build played, else false)
         @rehearsal = nil # (#warm_up: sections rehearsed)
         @exercise_skipped = [] # (#warm_up: tracks whose exercise raised)
+        @build_knobs = {} # (BuildKnobs: knob name => tracks whose patches read it while building)
+        @build_knob_lock = Mutex.new
       end
 
       # Calls +block+ with each Form #play_form is about to start, before

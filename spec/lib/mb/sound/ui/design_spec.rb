@@ -48,8 +48,16 @@ RSpec.describe(MB::Sound::UI::Design, :aggregate_failures) do
     @session.process_buffer
   end
 
-  it 'refuses a new track without an instrument, naming the form that makes one' do
-    expect { run { design :lead } }.to raise_error(ArgumentError, /no track :lead yet; give it an instrument: design :lead, L.inst/)
+  it 'starts a new track without an instrument on the init voice (sound-design-2)' do
+    r = run { design :lead }
+    expect(r.to_s).to start_with('design :lead: init on track :lead (new), plays G4 (its role\'s note) on MAIN')
+    expect(@session.arrangement.tracks[:lead].patch?).to eq(true)
+    expect(@session.knobs.keys).to include(:"lead/wave1", :"lead/sync", :"lead/cutoff", :"lead/glide")
+    run { stop :lead, on: :now }
+    @session.process_buffer
+  end
+
+  it 'refuses design without a track name and with two instruments' do
     expect { run { design } }.to raise_error(ArgumentError, /design names a track/)
     expect { run { design :bass, :dnb_reese, :dnb_pad } }.to raise_error(ArgumentError, /one instrument/)
   end

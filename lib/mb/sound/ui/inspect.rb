@@ -79,12 +79,16 @@ module MB
         # +document+ (the graph document's name when the graph is a preset:
         # its numbers are fixed, its params are the track's knobs),
         # +voice_knobs+ (a kit's knob values per voice: { kick: { tune:
-        # 50.0, ... } }).
-        InspectInfo = Data.define(:track, :tracks, :knobs, :nodes, :node, :code, :error, :loose, :hidden, :voices, :voice, :unfit, :document, :voice_knobs) do
+        # 50.0, ... } }), +build_knobs+ (the knobs read while the graph
+        # built, such as the init voice's sync: turning one rebuilds the
+        # track, so the inspector turns them a step a key, never as a held
+        # sweep; Arrangement::BuildKnobs).
+        InspectInfo = Data.define(:track, :tracks, :knobs, :nodes, :node, :code, :error, :loose, :hidden, :voices, :voice, :unfit, :document, :voice_knobs,
+                                  :build_knobs) do
           def initialize(track:, tracks:, knobs:, nodes:, node:, code:, error:, loose: nil, hidden: {}.freeze, voices: [].freeze, voice: nil, unfit: 0, document: nil,
-                         voice_knobs: {}.freeze)
+                         voice_knobs: {}.freeze, build_knobs: [].freeze)
             super(track: track, tracks: tracks, knobs: knobs, nodes: nodes, node: node, code: code, error: error, loose: loose || knobs,
-                  hidden: hidden, voices: voices, voice: voice, unfit: unfit, document: document, voice_knobs: voice_knobs)
+                  hidden: hidden, voices: voices, voice: voice, unfit: unfit, document: document, voice_knobs: voice_knobs, build_knobs: build_knobs)
           end
 
           # The selected NodeInfo, or nil.
@@ -170,7 +174,7 @@ module MB
             end
             InspectInfo.new(track: track, tracks: tracks, knobs: entry[:knobs], nodes: nodes, node: sel, code: entry[:code], error: nil,
                             loose: entry[:loose], hidden: entry[:hidden], voices: voices, voice: voice, unfit: entry[:unfit], document: entry[:document],
-                            voice_knobs: entry[:voice_knobs])
+                            voice_knobs: entry[:voice_knobs], build_knobs: entry[:build_knobs] || [].freeze)
           rescue StandardError => e
             info = InspectInfo.new(track: track, tracks: tracks || [].freeze, knobs: entry&.[](:knobs) || [].freeze, nodes: entry&.[](:nodes) || [].freeze,
                                    node: nil, code: entry&.[](:code), error: "#{e.class}: #{e.message}".freeze)
@@ -279,19 +283,45 @@ module MB
         def walk(roots)
           cls = Classify.call(roots)
           knobs = []
+          readers = {}
           cls.plumbing.each do |_, n|
             k = n.is_a?(GraphNode::Knob::Reader) ? n.knob : n.is_a?(GraphNode::Knob) ? n : nil
-            knobs << k.name if k&.name && !knobs.include?(k.name)
+            next unless k&.name
+            knobs << k.name unless knobs.include?(k.name)
+            readers[k.name] ||= n if n.is_a?(GraphNode::Knob::Reader)
           end
-          rows = cls.rows.first(MAX_NODES).map { |r|
+          # (switches read while the graph built: Tone#sync's enabled:)
+          build_knobs = []
+          cls.rows.each do |r|
+            sw = r.nodes.first.respond_to?(:sync_switch) && GraphNode.climb_tee_tree(r.nodes.first.sync_switch)
+            k = sw.is_a?(GraphNode::Knob::Reader) ? sw.knob : nil
+            next unless k&.name
+            knobs << k.name unless knobs.include?(k.name)
+            build_knobs << k.name unless build_knobs.include?(k.name)
+          end
+          # (knobs a row reads that no row's shown params name: an
+          # oscillator's pitch offset through note plumbing, an FM depth
+          # inside its frequency; sound-design-2: the init voice's tune2 and
+          # fm) join the first row reading them as knob params
+          kept = cls.rows.first(MAX_NODES)
+          unseen = kept.map { |r| unshown_knobs(r.nodes.first, r.knobs) }
+          seen = kept.each_with_index.flat_map { |r, i| Inspect.knobs_read(r.nodes.first) - unseen[i] + r.knobs.map { |_, rd| rd.knob.name } }.uniq
+          claimed = seen.to_h { |kn| [kn, true] }
+          rows = kept.each_with_index.map { |r, i|
             n = r.nodes.first
             label = r.label
-            snap = Inspect.snapshot(n, r.knobs)
             pk = Inspect.param_knobs(n)
-            read = (Inspect.knobs_read(n) + r.knobs.map { |_, rd| rd.knob.name }).uniq.freeze
+            extras = r.knobs
+            mine = unseen[i].reject { |kn| claimed[kn] }
+            unless mine.empty?
+              extras = r.knobs + mine.filter_map { |kn| readers[kn] && [kn.to_s.split('/').last.to_sym, readers[kn]] }
+              mine.each { |kn| claimed[kn] = true }
+            end
+            snap = Inspect.snapshot(n, extras)
+            read = (Inspect.knobs_read(n) + extras.map { |_, rd| rd.knob.name }).uniq.freeze
             info = NodeInfo.new(key: 0, label: label, role: role_of(n, label), count: r.copies, params: snap, preview: preview?(n), knobs: read,
                                 section: r.section == :other ? nil : r.section, what: r.what, dest: r.dest, voice: r.voice, channels: r.channels, param_knobs: pk)
-            [n, info, r.nodes, r.knobs]
+            [n, info, r.nodes, extras]
           }
 
           # (hidden nodes with settings, for the p key: grouped by settings)
@@ -330,9 +360,26 @@ module MB
           {
             nodes: nodes, objects: rows.map(&:first).freeze, groups: rows.map { |r| r[2] }.freeze, extras: rows.map(&:last).freeze,
             knobs: knobs.freeze, loose: knobs.reject { |k| shown[k] }.freeze, hidden: cls.hidden, voices: voices, unfit: cls.unfit.length,
-            code: code.empty? ? nil : code, capped: capped, voice_knobs: cls.voice_knobs,
+            code: code.empty? ? nil : code, capped: capped, voice_knobs: cls.voice_knobs, build_knobs: build_knobs.freeze,
             document: roots.lazy.filter_map { |r| GraphIO.document_of(r) rescue nil }.first&.name&.then { |n| "#{n}".freeze }, # (a new String: a name from document text carries GraphIO::FileGuard's mark)
           }
+        end
+
+        # Params the sound panes leave out while a node feeds them (note
+        # plumbing: a voice's gate, frequency, phase, ...).
+        NOTE_PARAMS = %i[gate trigger velocity choke frequency phase reset release_at timeline_jumps timeline_phase].freeze
+
+        # The knobs +node+ reads (knobs_read, depth 3) that neither its
+        # shown params (a knob's own label, a param_knobs entry outside
+        # NOTE_PARAMS) nor +extras+ ([[param, reader], ...]) show.
+        def unshown_knobs(node, extras, pk = param_knobs(node))
+          read = knobs_read(node)
+          return [] if read.empty?
+          info = (node.respond_to?(:param_info) ? node.param_info : {}) rescue {}
+          seen = extras.map { |_, rd| rd.knob.name }
+          info.each { |name, v| seen << v.label if v.label.is_a?(Symbol) }
+          pk.each { |name, kn| seen << kn unless NOTE_PARAMS.include?(name) }
+          read - seen
         end
 
         # The row the inspector opens on in +nodes+ (of drum voice +voice+,

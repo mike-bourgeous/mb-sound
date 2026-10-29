@@ -38,6 +38,8 @@ RSpec.describe('bin/save_presets.rb') do
         expect(doc.description).to include("from #{script}", 'sq80-lib-1')
       elsif wave
         expect(doc.description).to include("from #{script}", 'research-sq80 prototype', 'protos-1')
+      elsif script.end_with?('init_voice.rb')
+        expect(doc.description).to include("from #{script}", 'sound-design-2')
       else
         expect(doc.description).to include("from #{script}", 'persona panel experiment')
       end

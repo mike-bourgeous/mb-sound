@@ -26,6 +26,10 @@ module MB
           def inspect = "#<#{self}>"
         end
 
+        # The instrument a new track starts from when `design` gets none:
+        # the init voice (presets/init.mbg.rb, bin/synths/init_voice.rb).
+        BLANK = :init
+
         class << self
           # The last track designed (`design` alone opens it again).
           attr_reader :last
@@ -46,10 +50,10 @@ module MB
             existing = arr.tracks[name]
             created = existing.nil?
             if instrument || existing.nil?
-              unless instrument
-                raise ArgumentError, "design #{name.inspect}: no track #{name.inspect} yet; give it an instrument: design #{name.inspect}, L.inst.dnb.dnb_reese, riff " \
-                  '(a blank voice to start from is not built yet)'
-              end
+              # (a new track without an instrument starts from the init
+              # voice: sound-design-2, the maintainer's "Init, based on 2osc
+              # morph with optional am/fm/sync")
+              instrument ||= BLANK
               MB::Sound.track(name, instrument) or return nil
             end
             tr = arr.tracks[name]
@@ -150,13 +154,15 @@ module MB
         # turn, Enter types or binds, P the panel), playing it on MAIN if
         # it isn't playing.  `design :bass, L.inst.dnb.dnb_reese, riff`
         # makes the track with that instrument first (either order; any
-        # instrument `track` takes), and plays riff (else its clip, else its
-        # role's note).  `design` alone opens the last one again; `design
+        # instrument `track` takes; a new track without one starts from the
+        # init voice, `preset :init`), and plays riff (else its clip, else
+        # its role's note).  `design` alone opens the last one again; `design
         # off` puts back the screen that was up before.  Returns what it
         # did (one line).
         #
         #     bass = seq(E1, E1, G1, A1).n8.loop
         #     design :bass, L.inst.dnb.dnb_reese, bass
+        #     design :lead              # a new track on the init voice
         #     design off
         def design(name = nil, *values)
           return UI::Design.close if name == :off || name == false

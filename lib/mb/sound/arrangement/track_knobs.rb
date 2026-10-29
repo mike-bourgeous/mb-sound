@@ -63,6 +63,15 @@ module MB
           [name, Session.context&.[](:session) || session]
         end
 
+        # Notes that the building track's patch read knob +knob+ while
+        # building (GraphNode.build_value; see Arrangement::BuildKnobs), so
+        # turning it rebuilds the track.  Nothing outside a track's build.
+        def note_build_read(knob)
+          track, session = current
+          return unless track && session && knob.name
+          session.arrangement.note_build_knob(track, knob.name)
+        end
+
         # The knob name for param +param+ of track +track+'s preset.
         def knob_name(track, param)
           :"#{track}/#{param}"

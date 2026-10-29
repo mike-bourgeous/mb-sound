@@ -74,7 +74,7 @@ module MB
 
           # Params a section row leaves out (note plumbing: they come from
           # the notes, nothing to turn) when no number is set.
-          NOTE_PARAMS = %i[gate trigger velocity choke frequency phase reset release_at timeline_jumps timeline_phase].freeze
+          NOTE_PARAMS = Inspect::NOTE_PARAMS
 
           # Short names for row summaries and panel cells.
           SHORTS = { resonance: 'reso', attack: 'A', decay: 'D', sustain: 'S', release: 'R', quality: 'q', cutoff: 'cut', frequency: 'freq' }.freeze
@@ -103,7 +103,26 @@ module MB
               return "make #{pp[0]} knob #{b.knob.inspect}: rebuilds #{track} at its launch point (voices and tails start fresh)"
             end
             cell = picked(state)
-            cell ? "type #{cell[0]}'s value" : nil
+            return nil unless cell
+            info = state[:snap]&.inspector
+            if info&.build_knobs&.include?(cell[0])
+              return "type #{cell[0]}'s value: read when #{info.track} builds, so each turn rebuilds it at its launch point"
+            end
+            "type #{cell[0]}'s value"
+          end
+
+          # A turn key on a build knob (read while the track builds: the
+          # init voice's sync) is one `turn` line a step (each rebuilds the
+          # track), never a held sweep; other knobs turn as in KnobTurns.
+          def key_turn(state, step)
+            cell = picked(state)
+            info = state[:snap]&.inspector
+            return super unless cell && info&.build_knobs&.include?(cell[0])
+            kn, k = cell
+            v, = shown_value(state, kn, k)
+            to = KnobTurns.turned(k.spec, v, step)
+            return nil if to == v.to_f
+            set(state, kn, to.to_f == to.round ? to.round : to)
           end
 
           def draw_body(c, s, state)

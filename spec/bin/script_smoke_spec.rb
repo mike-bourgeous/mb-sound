@@ -148,6 +148,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/synths/fm_kick.rb' => [],
     'bin/synths/fm_synth.rb' => [],
     'bin/synths/funk.rb' => ['-p', 'choir', '-d', '1'],
+    'bin/synths/init_voice.rb' => ['--sync', '1', '--tune2', '12', '--fm', '0.5', '--am', '0.5'],
     'bin/synths/jungle.rb' => ['-p', 'breaks', '-c', '4000'],
     'bin/synths/pluck.rb' => ['--stretch', '1', '--damping', '4'],
     'bin/synths/sinewave.rb' => [],

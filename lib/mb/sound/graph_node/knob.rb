@@ -394,6 +394,17 @@ module MB
         # The value on the last frame rendered (the default before any).
         attr_reader :value
 
+        # The value a graph building now reads (GraphNode.build_value): the
+        # value a turn of a build knob is heading to (#build_value=, set by
+        # Session#turn before the rebuild it causes, which may build before
+        # the turn lands), else #value.
+        def build_value
+          @build_value.nil? ? @value : @build_value
+        end
+
+        # See #build_value (nil: #value).
+        attr_writer :build_value
+
         # The next frame to render.
         attr_reader :next_frame
 
@@ -459,6 +470,7 @@ module MB
           @decisions = {} # timeline position => value decided there (see ValueAt)
           @stepped = nil # read through #choose (see #stepped?)
           @implicit = false
+          @build_value = nil
         end
 
         # True for a knob a live graph read before it was defined
