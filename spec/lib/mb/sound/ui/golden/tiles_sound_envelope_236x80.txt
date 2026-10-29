@@ -1,25 +1,25 @@
 ▶ 17:3   128 bpm 4/4  load  31% ▃  xruns 0                                                                            │drop 1 ████▌    5/8  → break 21:1
 ─ TRACKS ───────────────── 3 ─┬─ SOUND ───────────────────────────────────────────────────────────────────────────────┴────────── 4 ─┬─ CODE ─────────────────────────────────────────────────────────────────────────────────────────── 5 ─
 ● drums  beat_a               │bass  2/3                                                                                             │knob :cut, (100.0..8000.0).at(2400.0), curve: :exp, unit: "Hz"
-● bass   bass_a               │SOURCE s ──────────────────────────────────────────────────────────────────────────────────────────── │
-● lead   rec →21:1            │ saw ×6         phase 0                                                                               │# bass: the graph it plays (to_ruby)
-● pad    stopping chords      │  phase      0                                                                                        │synth(riff, voices: 1) { |v|
-                              │FILTER f ──────────────────────────────────────────────────────────────────────────────────────────── │  saws = v.hz.unison(6, detune: 0.32) { |p, _i| p.saw }
-                              │ lp4            stereo  cut 2400 Hz  reso 0.25                                                        │  saws.lp4(knob(:cut), resonance: 0.25).softclip(0.35, 0.95).filter(:highpass, cutoff: 150, quality:
-                              │  cutoff     ███████████▋     2400 Hz  cut                                                            │      0.7)
-─ LIBRARY ──────────────── 6 ─┤  resonance  0.25  ·                                                                                  │}
-find ▏                        │AMP a ─────────────────────────────────────────────────────────────────────────────────────────────── │
-                              │ softclip       stereo                                                                                │
-the library picker goes here: │▸amp_env        amp env  → amp  A 20ms  D 300ms  S 0.6  R 500ms                                       │
-find-as-you-type, then        │  attack     20ms                                                                                     │
-Enter: the likely action      │  decay      300ms                                                                                    │
-(named on the status line),   │  sustain    0.6                                                                                      │
-a key per action, auditions   │  release    500ms                                                                                    ├─ RENDER ───────────────────────────────────────────────────────────────────────────────────────── 7 ─
-on CUE only.                  │FX x ──────────────────────────────────────────────────────────────────────────────────────────────── │bass  -22.2 LUFS  peak -11.2  rms -20.8  first note C3, settled 15 ms, 24 kHz, 0 ms
-                              │ highpass ×2    post-amp EQ  stereo  cut 150 Hz  q 0.7                                                │ 0.2┤⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡅⡀⡀⡀⣀⣠⡤⡖⡒⡉⡉⡉⡍⡓⡒⡤⣤⣀⡀⡀⡀⡀⡀⡀⡅⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀
-                              │  cutoff     150 Hz                                                                                   │    │         ⢀⣀⡠⠥⠒⠊⠉⠁       ⠅     ⠉⠉⠒⠢⠤⣀⣅           ⠨           ⠨           ⠨           ⠨
-                              │  quality    0.7                                                                                      │    │   ⢀⣀⠤⠴⠒⠋⠉  ⠅           ⠅           ⠍⠉⠓⠒⠤⢄⣀     ⠨           ⠨           ⠨           ⠨
-                              │                                                                                                      │ 0.0┤⠔⠖⠍⠅⠄⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠍⠝⠖⠦⠤⣬⣄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⣄⣤⠤⠄⠄⠄⠄⠄
+● bass   bass_a               │notes → saw ×6 → lp4 → softclip → amp → highpass ×2 → out                                             │
+● lead   rec →21:1            │SOURCE s ──────────────────────────────────────────────────────────────────────────────────────────── │# bass: the graph it plays (to_ruby)
+● pad    stopping chords      │ saw ×6         phase 0                                                                               │synth(riff, voices: 1) { |v|
+                              │  phase      0                                                                                        │  saws = v.hz.unison(6, detune: 0.32) { |p, _i| p.saw }
+                              │FILTER f ──────────────────────────────────────────────────────────────────────────────────────────── │  saws.lp4(knob(:cut), resonance: 0.25).softclip(0.35, 0.95).filter(:highpass, cutoff: 150, quality:
+                              │ lp4            stereo  cut 2400 Hz  reso 0.25                                                        │      0.7)
+─ LIBRARY ──────────────── 6 ─┤  cutoff     ███████████▋     2400 Hz  cut                                                            │}
+find ▏                        │  resonance  0.25  ·                                                                                  │
+                              │AMP a ─────────────────────────────────────────────────────────────────────────────────────────────── │
+the library picker goes here: │ softclip       stereo                                                                                │
+find-as-you-type, then        │▸amp_env        amp env  → amp  A 20ms  D 300ms  S 0.6  R 500ms                                       │
+Enter: the likely action      │  attack     20ms                                                                                     │
+(named on the status line),   │  decay      300ms                                                                                    │
+a key per action, auditions   │  sustain    0.6                                                                                      ├─ RENDER ───────────────────────────────────────────────────────────────────────────────────────── 7 ─
+on CUE only.                  │  release    500ms                                                                                    │bass  -22.2 LUFS  peak -11.2  rms -20.8  first note C3, settled 15 ms, 24 kHz, 0 ms
+                              │FX x ──────────────────────────────────────────────────────────────────────────────────────────────── │ 0.2┤⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡅⡀⡀⡀⣀⣠⡤⡖⡒⡉⡉⡉⡍⡓⡒⡤⣤⣀⡀⡀⡀⡀⡀⡀⡅⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀
+                              │ highpass ×2    post-amp EQ  stereo  cut 150 Hz  q 0.7                                                │    │         ⢀⣀⡠⠥⠒⠊⠉⠁       ⠅     ⠉⠉⠒⠢⠤⣀⣅           ⠨           ⠨           ⠨           ⠨
+                              │  cutoff     150 Hz                                                                                   │    │   ⢀⣀⠤⠴⠒⠋⠉  ⠅           ⠅           ⠍⠉⠓⠒⠤⢄⣀     ⠨           ⠨           ⠨           ⠨
+                              │  quality    0.7                                                                                      │ 0.0┤⠔⠖⠍⠅⠄⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠍⠝⠖⠦⠤⣬⣄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⣄⣤⠤⠄⠄⠄⠄⠄
                               │                                                                                                      │    │            ⠅           ⠅           ⠅           ⠨⠈⠉⠓⠒⠤⢄⣀⡀   ⠨           ⠨         ⢀⣀⡬⠴⠒⠊⠉
                               │                                                                                                      │    │            ⠅           ⠅           ⠅           ⠨       ⠉⠙⠒⠢⠬⣀⣀         ⠨   ⣀⣠⠤⠖⠒⠉⠁ ⠨
                               │                                                                                                      │-0.2┤⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠩⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠩⠁⠉⠉⠓⠓⠥⠥⣁⣁⡥⠥⠽⠓⠋⠉⠁⠁⠁⠁⠁⠁⠁⠁⠩⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁

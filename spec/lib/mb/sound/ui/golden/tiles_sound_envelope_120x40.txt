@@ -1,9 +1,9 @@
 ▶ 17:3   128 bpm 4/4  load  31% ▃  xruns 0                  │drop 1 ████▌    5/8  → break 21:1
 ─ TRACKS ───────────── 3 ─┬─ SOUND ─────────────────────────┴──────── 4 ─┬─ CODE ─────────────────────────────────── 5 ─
 ● drums  beat_a           │bass  2/3                                     │knob :cut, (100.0..8000.0).at(2400.0), curve:
-● bass   bass_a           │SOURCE s saw ×6                               │    :exp, unit: "Hz"
-● lead   rec →21:1        │FILTER f ──────────────────────────────────── │
-● pad    stopping chords  │ lp4            stereo  cut 2400 Hz  reso 0.25│# bass: the graph it plays (to_ruby)
+● bass   bass_a           │notes → saw ×6 → lp4 → softclip → amp → highp…│    :exp, unit: "Hz"
+● lead   rec →21:1        │SOURCE s saw ×6                               │
+● pad    stopping chords  │FILTER f lp4                                  │# bass: the graph it plays (to_ruby)
                           │AMP a ─────────────────────────────────────── │synth(riff, voices: 1) { |v|
                           │ softclip       stereo                        │  saws = v.hz.unison(6, detune: 0.32) { |p,
                           │▸amp_env        amp env  → amp  A 20ms  D 300…│      _i| p.saw }

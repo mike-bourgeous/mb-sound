@@ -1,17 +1,17 @@
 ▶ 17:3   128 bpm 4/4  load  31% ▃  xruns 0                  │drop 1 ████▌    5/8  → break 21:1
 ─ TRACKS ───────────── 3 ─┬─ SOUND ─────────────────────────┴──────── 4 ─┬─ CODE ─────────────────────────────────── 5 ─
 ● drums  beat_a           │bass  2/3                                     │knob :cut, (100.0..8000.0).at(2400.0), curve:
-● bass   bass_a           │SOURCE s ──────────────────────────────────── │    :exp, unit: "Hz"
-● lead   rec →21:1        │ saw ×6         phase 0                       │
-● pad    stopping chords  │FILTER f ──────────────────────────────────── │# bass: the graph it plays (to_ruby)
-                          │ lp4            stereo  cut 2400 Hz  reso 0.25│synth(riff, voices: 1) { |v|
-                          │AMP a ─────────────────────────────────────── │  saws = v.hz.unison(6, detune: 0.32) { |p,
-                          │ softclip       stereo                        │      _i| p.saw }
-                          │FX x ──────────────────────────────────────── │  saws.lp4(knob(:cut), resonance:        more
-                          │▸highpass ×2    post-amp EQ  stereo  cut 150 …├─ RENDER ───────────────────────────────── 6 ─
-                          │  cutoff     150 Hz                           │bass  -22.2 LUFS  peak -11.2  rms -20.8  fi…
-                          │  quality    0.7                              │ 0.2┤⠄⠄⠄⠄⠄⢄⣄⠴⠞⠍⠝⠖⠤⣄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄
-                          │                                              │    │  ⣀⠤⠚⠉    ⠅  ⠈⠉⠲⢤⣀  ⠨         ⠨
+● bass   bass_a           │notes → saw ×6 → lp4 → softclip → highpass ×2…│    :exp, unit: "Hz"
+● lead   rec →21:1        │SOURCE s ──────────────────────────────────── │
+● pad    stopping chords  │ saw ×6         phase 0                       │# bass: the graph it plays (to_ruby)
+                          │FILTER f ──────────────────────────────────── │synth(riff, voices: 1) { |v|
+                          │ lp4            stereo  cut 2400 Hz  reso 0.25│  saws = v.hz.unison(6, detune: 0.32) { |p,
+                          │AMP a ─────────────────────────────────────── │      _i| p.saw }
+                          │ softclip       stereo                        │  saws.lp4(knob(:cut), resonance:        more
+                          │FX x ──────────────────────────────────────── ├─ RENDER ───────────────────────────────── 6 ─
+                          │▸highpass ×2    post-amp EQ  stereo  cut 150 …│bass  -22.2 LUFS  peak -11.2  rms -20.8  fi…
+                          │  cutoff     150 Hz                           │ 0.2┤⠄⠄⠄⠄⠄⢄⣄⠴⠞⠍⠝⠖⠤⣄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄
+                          │  quality    0.7                              │    │  ⣀⠤⠚⠉    ⠅  ⠈⠉⠲⢤⣀  ⠨         ⠨
                           │                                              │ 0.0┤⠖⠏⠅⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠌⠕⠦⢬⡄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⣤⠤⠄⠄
                           │61 plumbing nodes hidden (p shows)            │    │          ⠅         ⠨⠉⠑⠲⣄⡀    ⠨  ⣀⡴⠒⠉⠁
                           ├─ PREVIEW ──────────────────────────────── 7 ─┤-0.2┤⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠪⠂⠂⠂⠂⠊⠛⠦⢆⣢⠮⠖⠋⠂⠂⠂⠂⠂⠂⠂⠂

@@ -76,6 +76,13 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(draw(:inspector, empty)[0]).to include('nothing to inspect')
     end
 
+    it 'draws the signal chain on one line over the sections when there is room, the amp where the amp envelope is' do
+      env = snap.with(slow: snap.slow.with(inspector: ui_fake_envelope_inspector))
+      lines = draw(:inspector, env, { title_in_rule: true }, w: 80, h: 20)
+      expect(lines[1]).to eq('notes → saw ×6 → lp4 → softclip → amp → highpass ×2 → out')
+      expect(draw(:inspector, env, { title_in_rule: true }, w: 80, h: 12)[1]).not_to start_with('notes') # (short: the sections only)
+    end
+
     it 'draws the front panel with P: knobs and literals as cells by section, the picked row\'s first cell picked' do
       st = { title_in_rule: true, mode: true, view: :panel }
       lp4 = snap.with(slow: snap.slow.with(inspector: snap.inspector.with(node: 0)))

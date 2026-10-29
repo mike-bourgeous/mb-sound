@@ -190,6 +190,7 @@ module MB
           def draw_sections(c, info, knobs, list, pick, state)
             keys = Inspect::SECTIONS.map { |sec| Inspect::SECTION_KEYS[sec] }.join(' ')
             y = draw_header(c, info, state, "#{keys}  n N rows  P panel")
+            y = draw_chain(c, info, y) if c.h >= 14
             loose = info.loose
             y = draw_knob_rows(c, y, loose, knobs, pick, state, 0, bottom: c.h - 3) unless loose.empty?
 
@@ -267,6 +268,39 @@ module MB
               end
             end
             c.text(0, c.h - 1, c.fit("#{hidden} plumbing nodes hidden (p shows)", c.w), :dim) if foot == 1
+          end
+
+          # The one-line signal chain over the sections (the spike's strip:
+          # `notes → saw ×6 → lp4 → softclip → amp → highpass ×2 → out`):
+          # the audio path's rows in section order, the amp where an amp
+          # envelope is, the picked row bright.  Returns the next row.
+          def draw_chain(c, info, y)
+            rows = info.shown.sort_by { |j| [Inspect::SECTIONS.index(info.nodes[j].section) || 99, j] }
+            blocks = []
+            amp = false
+            rows.each do |j|
+              n = info.nodes[j]
+              next if n.section == :mod || n.label == 'unison' || ['pitch', 'FM operator'].include?(n.what)
+              if n.what.to_s.end_with?(' env') || n.what == 'bursts'
+                amp ||= n.what == 'amp env'
+                next
+              end
+              blocks << [:amp, nil, nil] if n.section == :fx && amp && blocks.none? { |b, _, _| b == :amp }
+              blocks << [row_title(n), j, n.section]
+            end
+            blocks << [:amp, nil, nil] if amp && blocks.none? { |b, _, _| b == :amp }
+            return y if blocks.length < 2
+            x = c.text(0, y, 'notes', :dim)
+            prev = nil
+            blocks.each do |b, j, sec|
+              # (sources side by side are layers: +, not a chain)
+              x = c.text(x, y, prev == :source && sec == :source ? ' + ' : " #{c.glyph(:arrow)} ", :dim)
+              x = c.text(x, y, b == :amp ? 'amp' : b, j && j == info.node ? :key : :name)
+              prev = sec
+              break if x >= c.w
+            end
+            c.text(x, y, " #{c.glyph(:arrow)} out", :dim) if x < c.w
+            y + 1
           end
 
           # A row's title: its DSL words and copies ("saw ×6", "lp4").
