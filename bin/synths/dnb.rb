@@ -94,19 +94,19 @@ module MB::Sound
   # at 2x and 3x after the lowpass, phase-locked to the sub, scaled to keep
   # its RMS, so the sub carries on speakers that can't play its
   # fundamental.
-  def self.dnb_sub_voice(midi, cutoff: 110, glide: 0.035, harmonics: true)
+  def self.dnb_sub_voice(midi, cutoff: 110, glide: 0.035, harmonics: true, release: 0.05)
     harmonics = DNB_SUB_HARMONICS if harmonics == true
     h2, h3 = harmonics || [0, 0]
     unless h2 > 0 || h3 > 0
       return synth(midi, voices: 1) { |v|
         pitch = v.hz.glide(glide, legato: true)
-        (pitch.sine * v.env(0.003, 0.3, 0.9, 0.05, gm: false).legato).filter(:lowpass, cutoff: cutoff, quality: 0.7)
+        (pitch.sine * v.env(0.003, 0.3, 0.9, release, gm: false).legato).filter(:lowpass, cutoff: cutoff, quality: 0.7)
       }
     end
 
     synth(midi, voices: 1) { |v|
       pitch = v.hz.glide(glide, legato: true)
-      env = v.env(0.003, 0.3, 0.9, 0.05, gm: false).legato
+      env = v.env(0.003, 0.3, 0.9, release, gm: false).legato
       upper = pitch.transpose(12).sine * h2 + pitch.transpose(12 * Math.log2(3)).sine * h3
       ((pitch.sine * env).filter(:lowpass, cutoff: cutoff, quality: 0.7) + upper * env) * (1 / Math.sqrt(1 + h2**2 + h3**2))
     }
@@ -140,13 +140,13 @@ module MB::Sound
   # +noise+  noise amplitude-modulated by a pulse train at the note's
   #          pitch (a buzzy, pitched hiss like a hard-driven reed),
   #          highpassed at 3 kHz
-  def self.dnb_neuro_voice(midi, grit: 0.25, cutoff: 600, resonance: 0.55, squeeze: 0.7, highpass: 140, sync: DNB_NEURO_TOP[:sync], fold: 0, noise: DNB_NEURO_TOP[:noise])
+  def self.dnb_neuro_voice(midi, grit: 0.25, cutoff: 600, resonance: 0.55, squeeze: 0.7, highpass: 140, sync: DNB_NEURO_TOP[:sync], fold: 0, noise: DNB_NEURO_TOP[:noise], decay: 0.12)
     synth(midi, voices: 1) { |v|
       pitch = v.hz.glide(0.02, legato: true)
       src = pitch.unison(3, detune: 0.18) { |p, _i| p.saw } + pitch.transpose(12).square * 0.4
       lfo = v.lfo(1.n16, shape: :square, depth: 1.3)
       jump = 2 ** lfo
-      env = v.env(0.002, 0.12, 0.6, 0.04, gm: false)
+      env = v.env(0.002, decay, 0.6, 0.04, gm: false)
       ladder = src.diode(cutoff * jump * (2 ** (env * 2)), resonance: resonance)
       talk = ladder.formant(:o, :a, :i, voice: :bass, morph: v.lfo(1.n8, shape: :triangle, unipolar: true) * 2)
       # (each layer's level: a little under the talk's RMS at 1)
@@ -169,10 +169,10 @@ module MB::Sound
 
   # Minor 9th pads: three detuned saws per note, slow swell, a lowpass at
   # +cutoff+, highpassed at 200 Hz, a hall (+hall+ wet).  Stereo.
-  def self.dnb_pad_voice(midi, cutoff: 2600, hall: 0.35, voices: 10)
+  def self.dnb_pad_voice(midi, cutoff: 2600, hall: 0.35, voices: 10, attack: 0.6, release: 1.2)
     pad = synth(midi, voices: voices) { |v|
       saws = v.hz.unison(3, detune: 0.12) { |p, _i| p.saw }
-      (saws.lp4(cutoff, resonance: 0.1) * v.env(0.6, 0.5, 0.8, 1.2, gm: false) * 0.25)
+      (saws.lp4(cutoff, resonance: 0.1) * v.env(attack, 0.5, 0.8, release, gm: false) * 0.25)
     }.filter(:highpass, cutoff: 200, quality: 0.7)
     hall ? pad.reverb(:hall, mix: hall, output_channels: 2) : pad # (hall: nil: dry, for a reverb bus)
   end
@@ -181,11 +181,11 @@ module MB::Sound
   # dotted-eighth delay (+send+ wet, a number or a node; +feedback+), a
   # plate (+plate+ wet).  Stereo.  +send: nil, plate: nil+ is the dry
   # pluck (mono), for delay and reverb buses.
-  def self.dnb_pluck_voice(midi, send: 0.4, feedback: 0.4, plate: 0.25)
+  def self.dnb_pluck_voice(midi, send: 0.4, feedback: 0.4, plate: 0.25, cutoff: 500, decay: 0.35)
     pluck = synth(midi, voices: 2) { |v|
       fenv = v.env(0.001, 0.18, 0.0, 0.1, gm: false)
-      tone = v.hz.square.lp4(500 * (2 ** (fenv * 3)), resonance: 0.3)
-      tone * v.env(0.002, 0.35, 0.0, 0.15, gm: false) * 0.5
+      tone = v.hz.square.lp4(cutoff * (2 ** (fenv * 3)), resonance: 0.3)
+      tone * v.env(0.002, decay, 0.0, 0.15, gm: false) * 0.5
     }
     pluck = pluck.delay(1.n8.dotted, feedback: feedback, wet: send, dry: 1) if send
     plate ? pluck.reverb(:plate, mix: plate, output_channels: 2) : pluck
@@ -193,10 +193,10 @@ module MB::Sound
 
   # The impact: a sine falling +drop+ octaves onto the note in 0.25 s,
   # softclipped, into a hall.  Stereo.
-  def self.dnb_boom_voice(midi, drop: 2, level: 0.4)
+  def self.dnb_boom_voice(midi, drop: 2, level: 0.4, decay: 1.2)
     synth(midi, voices: 1) { |n|
       dive = n.env(0, 0.25, 0, 0.1, curve: :linear, gm: false)
-      ((n.freq * (2 ** (dive * drop))).tone * n.env(0.001, 1.2, 0, 0.3, gm: false) * 1.4).softclip(0.5, 0.95)
+      ((n.freq * (2 ** (dive * drop))).tone * n.env(0.001, decay, 0, 0.3, gm: false) * 1.4).softclip(0.5, 0.95)
     }.reverb(:hall, mix: 0.2, highpass: 200, output_channels: 2) * level
   end
 
@@ -312,16 +312,33 @@ module MB::Sound
     (glued * gain).softclip(0.6, 1.0).limit(ceiling: ceiling.db, release: 0.06)
   end
 
-  # The script's patches by name (see the header), with the script's
-  # parameters as named Constants (so --save makes them preset params).
-  def self.dnb_patch(midi, patch = :reese, cutoff: 2400.0, grit: 0.25, echo: 0.4)
+  # The knobs each patch's preset has (library-instruments-1, 2026-10-28:
+  # the maintainer's "Params become knobs + curated"): the settings a
+  # sound designer reaches for, at each patch's own values (the voices'
+  # defaults), given to the voice as named Constants so --save makes them
+  # the document's params (bin/save_presets.rb passes them).  Values are
+  # the voice methods' defaults, so the presets sound as before.
+  DNB_KNOBS = {
+    reese: { cutoff: 2400.0, resonance: 0.25, drive: 2.2, glide: 0.035 },
+    sub: { cutoff: 110.0, release: 0.05 },
+    neuro: { grit: 0.25, cutoff: 600.0, decay: 0.12 },
+    pad: { cutoff: 2600.0, attack: 0.6, release: 1.2 },
+    pluck: { echo: 0.4, cutoff: 500.0, decay: 0.35 },
+    boom: { drop: 2.0, decay: 1.2 },
+  }.freeze
+
+  # The script's patches by name (see the header), with the patch's knobs
+  # (DNB_KNOBS, overridden by the script's options) as named Constants (so
+  # --save makes them preset params).
+  def self.dnb_patch(midi, patch = :reese, **opts)
+    k = (DNB_KNOBS[patch] || {}).to_h { |name, v| [name, (opts[name] || v).to_f.constant.named(name.to_s)] }
     case patch
-    when :reese then dnb_reese_voice(midi, cutoff: cutoff.constant.named('cutoff'))
-    when :sub then dnb_sub_voice(midi)
-    when :neuro then dnb_neuro_voice(midi, grit: grit.constant.named('grit'))
-    when :pad then dnb_pad_voice(midi)
-    when :pluck then dnb_pluck_voice(midi, send: echo.constant.named('echo'))
-    when :boom then dnb_boom_voice(midi)
+    when :reese then dnb_reese_voice(midi, **k)
+    when :sub then dnb_sub_voice(midi, **k)
+    when :neuro then dnb_neuro_voice(midi, **k)
+    when :pad then dnb_pad_voice(midi, **k)
+    when :pluck then dnb_pluck_voice(midi, send: k[:echo], cutoff: k[:cutoff], decay: k[:decay])
+    when :boom then dnb_boom_voice(midi, **k)
     when :drums then dnb_drums(midi)
     else raise ArgumentError, "Unknown patch #{patch.inspect}"
     end
@@ -341,11 +358,18 @@ module MB::Sound
     synth_script(
       description: ->(p) { dnb_description(p.patch) },
       patch: [:reese, Symbol, '-p', 'Patch to play', [:reese, :sub, :neuro, :pad, :pluck, :boom, :drums]],
-      cutoff: [2400.0, Float, '-c', 'Reese lowpass center in Hz', 150.0..8000.0],
-      grit: [0.25, Float, '-G', 'Neuro crusher wet share 0..1', 0.0..1.0],
-      echo: [0.4, Float, '-e', 'Pluck delay send (echo level) 0..1', 0.0..1.0],
+      cutoff: [nil, Float, '-c', 'Lowpass cutoff in Hz (reese 2400 around its LFO, sub 110, neuro 600 and pluck 500 under their envelopes, pad 2600)', 20.0..10000.0],
+      resonance: [nil, Float, 'Reese lowpass resonance 0..1 (0.25)', 0.0..1.0],
+      drive: [nil, Float, 'Reese drive into the softclipper (2.2)', 0.5..8.0],
+      glide: [nil, Float, 'Reese legato glide in seconds (0.035)', 0.0..0.5],
+      attack: [nil, Float, 'Pad attack in seconds (0.6)', 0.001..8.0],
+      decay: [nil, Float, 'Amplitude decay in seconds (neuro 0.12: its filter envelope too; pluck 0.35, boom 1.2)', 0.01..8.0],
+      release: [nil, Float, 'Release in seconds (sub 0.05, pad 1.2)', 0.001..10.0],
+      grit: [nil, Float, '-G', 'Neuro crusher wet share 0..1 (0.25)', 0.0..1.0],
+      echo: [nil, Float, '-e', 'Pluck delay send (echo level) 0..1 (0.4)', 0.0..1.0],
+      drop: [nil, Float, 'Boom pitch dive in octaves onto the note (2)', 0.0..4.0],
     ) { |midi, p|
-      dnb_patch(midi, p.patch, cutoff: p.cutoff, grit: p.grit, echo: p.echo)
+      dnb_patch(midi, p.patch, **DNB_KNOBS.values.flat_map(&:keys).uniq.to_h { |n| [n, p[n]] })
     }
   end
 end

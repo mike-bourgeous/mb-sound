@@ -299,11 +299,11 @@ module MB::Sound
   # sounds more like a koto or a hammered string): a sine carrier, a 1:1
   # modulator whose index falls (the body), and a faint 7:1 tine; through
   # a small room (+space+), recorded on worn tape (+wear+).
-  def self.ambient_koto_voice(midi, wear: 0.6, space: 0.5, level: 0.11, pan: -0.15)
+  def self.ambient_koto_voice(midi, wear: 0.6, space: 0.5, level: 0.11, pan: -0.15, decay: 3.2)
     keys = synth(midi, voices: 4) { |v|
       body = v.hz.transpose(0).sine.at(0.9) * v.env(0.002, 1.8, 0.15, 1.5, gm: false)
       tine = v.hz.transpose(12 * Math.log2(7)).sine.at(0.25) * v.env(0.001, 0.25, 0, 0.2, gm: false)
-      v.hz.pm(body + tine) * v.env(0.004, 3.2, 0.0, 1.6, gm: false) * (v.velocity * 0.5 + 0.5)
+      v.hz.pm(body + tine) * v.env(0.004, decay, 0.0, 1.6, gm: false) * (v.velocity * 0.5 + 0.5)
     }
     ambient_tape(ambient_room((keys * level).pan(pan), space: space, decay: 6, room_size: 0.7), wear: wear)
   end
@@ -352,18 +352,33 @@ module MB::Sound
     stick * level
   end
 
+  # The knobs each instrument's preset has beyond the script's shared
+  # options (space, wear, tune, spread; library-instruments-1, see
+  # bin/synths/dnb.rb's DNB_KNOBS): each instrument's own values, given as
+  # named Constants so --save makes them params.
+  AMBIENT_KNOBS = {
+    bowl: { decay: 24.0 },
+    rin: { decay: 24.0 },
+    koto: { decay: 3.2 },
+    drone: { attack: 3.0, release: 4.0 },
+    rainstick: { tip: 2.8 },
+  }.freeze
+
   # The script's instruments by name (see the header), with the script's
-  # parameters as named Constants (so --save makes them preset params).
-  def self.ambient_patch(midi, patch = :bowl, space: 0.5, wear: 0.6, tune: AMBIENT_GONG_TUNE.to_f, spread: AMBIENT_GONG_SPREAD)
+  # parameters and the instrument's knobs (AMBIENT_KNOBS, overridden by
+  # the script's options) as named Constants (so --save makes them preset
+  # params).
+  def self.ambient_patch(midi, patch = :bowl, space: 0.5, wear: 0.6, tune: AMBIENT_GONG_TUNE.to_f, spread: AMBIENT_GONG_SPREAD, **opts)
+    k = (AMBIENT_KNOBS[patch] || {}).to_h { |name, v| [name, (opts[name] || v).to_f.constant.named(name.to_s)] }
     case patch
-    when :bowl then ambient_bowl_voice(midi, space: space.constant.named('space'))
-    when :rin then ambient_rin_voice(midi, space: space.constant.named('space'))
+    when :bowl then ambient_bowl_voice(midi, space: space.constant.named('space'), **k)
+    when :rin then ambient_rin_voice(midi, space: space.constant.named('space'), **k)
     when :gong
       ambient_gong_voice(midi, space: space.constant.named('space'), tune: tune.constant.named('tune'), spread: spread.constant.named('spread'))
-    when :koto then ambient_koto_voice(midi, wear: wear.constant.named('wear'), space: space.constant.named('space'))
+    when :koto then ambient_koto_voice(midi, wear: wear.constant.named('wear'), space: space.constant.named('space'), **k)
     when :harp then ambient_harp_voice(midi, wear: wear.constant.named('wear'), space: space.constant.named('space'))
-    when :drone then ambient_drone_voice(midi)
-    when :rainstick then ambient_rainstick_voice(midi)
+    when :drone then ambient_drone_voice(midi, **k)
+    when :rainstick then ambient_rainstick_voice(midi, **k)
     else raise ArgumentError, "Unknown patch #{patch.inspect}"
     end
   end
@@ -386,8 +401,12 @@ module MB::Sound
       wear: [0.6, Float, '-w', 'Tape wear 0..1 (koto, harp): 12 bits of grain at 0, 10 at 0.6, 7 at 1', 0.0..1.0],
       tune: [AMBIENT_GONG_TUNE.to_f, Float, '-t', 'Gong shimmer tuning in semitones (the shimmer partials and their noise band)', -24.0..12.0],
       spread: [AMBIENT_GONG_SPREAD, Float, '-S', 'Gong shimmer stereo width: 0 mono, 1 every other partial hard left and right', 0.0..1.0],
+      decay: [nil, Float, 'Decay in seconds (bowl and rin 24, koto 3.2)', 0.1..60.0],
+      attack: [nil, Float, 'Drone swell in seconds (3)', 0.01..20.0],
+      release: [nil, Float, 'Drone release in seconds (4)', 0.01..30.0],
+      tip: [nil, Float, 'Rain stick swell in seconds (2.8)', 0.1..10.0],
     ) { |midi, p|
-      ambient_patch(midi, p.patch, space: p.space, wear: p.wear, tune: p.tune, spread: p.spread)
+      ambient_patch(midi, p.patch, space: p.space, wear: p.wear, tune: p.tune, spread: p.spread, **AMBIENT_KNOBS.values.flat_map(&:keys).uniq.to_h { |n| [n, p[n]] })
     }
   end
 end

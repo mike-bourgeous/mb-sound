@@ -98,12 +98,15 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     expect((turned[bound.length..] - ref[bound.length..]).abs.max).to be > 0.01
   end
 
-  it 'binds a graph document\'s param like a preset keyword' do
+  it 'binds a graph document\'s param like a preset keyword (already a knob on its track: TrackKnobs)' do
     reese = ->(c) { MB::Sound.preset(:dnb_reese, midi: c) }
     clip = MB::Sound.seq(MB::Sound::E1, MB::Sound::G1).n4.loop
-    s, bound, entry = play(->(_) { MB::Sound.bind(:bass, :cutoff) }, track: :bass, patch: reese, clip: clip)
-    _, ref, = play(REBUILD, track: :bass, patch: reese, clip: clip)
-    expect(entry.to_s).to eq('bg :bass lands 2:1 (queued)')
+    s, bound, kn = nil
+    expect {
+      s, bound, kn = play(->(_) { MB::Sound.bind(:bass, :cutoff) }, track: :bass, patch: reese, clip: clip)
+    }.to output(/already knob :"bass\/cutoff"/).to_stdout
+    _, ref, = play(nil, track: :bass, patch: reese, clip: clip) # (nothing to rebuild)
+    expect(kn).to eq(:"bass/cutoff")
     expect(s.knobs[:"bass/cutoff"].value).to eq(2400.0)
     expect(code_of(s, :bass)).to include('lp4(knob(:"bass/cutoff") * lfo')
     expect((bound - ref).abs.max).to eq(0.0)

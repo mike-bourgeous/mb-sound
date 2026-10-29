@@ -71,6 +71,9 @@ module SessionFuzz
     'tween([200.0, 1000.0], 1.bar, curve: :linear) * 0.0005', 'tween([300.0, 3000.0, 800.0], [1.beat, 3.beats]) * 0.0002',
     'tween([0.0, 1.0, 0.3], 2.beats, curve: :bounce) * 0.5', 'tween([100.0, 900.0], 3.beats, curve: :elastic) * 0.0005',
   ].freeze
+  # Library instruments for `track :t1, ...` (light ones: one voice each)
+  INSTRUMENTS = [':dnb_sub', 'L.inst.jungle.jungle_sub', ':dnb_sub'].freeze
+
   # Clips whose frequency is a function of the timeline position alone
   FREQ_CLIPS = ['seq(C4, E4, G4).n8.loop', 'seq(A3, C4.n4, E4).n8.loop', 'seq(G3.n4, D4.n8.dotted, B3.n16).loop'].freeze
 
@@ -89,6 +92,7 @@ module SessionFuzz
     lines << 'knob :cut, 1200.0, range: 200.0..4000.0' if knob
 
     tracks = {}
+    instruments = nil
     rng.rand(1..3).times do |i|
       name = :"t#{i + 1}"
       q = pick(rng, ['1', '1/4r', '1/2r'])
@@ -96,6 +100,11 @@ module SessionFuzz
         kit = rng.rand < 0.75 ? 'tr808' : 'tr909'
         tracks[name] = :drums
         lines << "track(:#{name}, q: #{q}) { |kit| #{kit}(kit) * 0.5 }"
+      elsif rng.rand < 0.2
+        # A library instrument as the patch (library-instruments-1)
+        tracks[name] = :synth
+        (instruments ||= []) << name
+        lines << "track :#{name}, #{pick(rng, INSTRUMENTS)}, q: #{q}"
       else
         tracks[name] = :synth
         cut = knob && rng.rand < 0.5 ? '.filter(:lowpass, cutoff: knob(:cut), quality: 2)' : ''
@@ -129,7 +138,7 @@ module SessionFuzz
       on = rng.rand < 0.5 ? ', on: :now' : ''
       t = pick(rng, names)
       cmd =
-        case rng.rand(13)
+        case rng.rand(14)
         when 0 then "go :#{pick(rng, scenes)}#{on}"
         when 1, 2
           next if swappable.empty?
@@ -145,6 +154,11 @@ module SessionFuzz
 
           t = pick(rng, swappable)
           rng.rand < 0.5 ? "launch :#{t}, 0#{on}" : "tweak :#{t}, #{pick(rng, ['transpose: 2', ':reverse', ':halftime'])}#{on}"
+        when 12
+          # (a library instrument track given another instrument: rebuilt at its launch point)
+          next unless instruments
+
+          "track :#{pick(rng, instruments)}, #{pick(rng, INSTRUMENTS)}"
         when 6 then rng.rand < 0.5 ? "solo :#{t}#{on}" : "solo#{on.sub(",", "")}"
         when 7
           next unless knob

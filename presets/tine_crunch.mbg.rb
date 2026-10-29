@@ -3,14 +3,16 @@
 graph 5,
   name: "tine_crunch",
   kind: :synth,
-  saved: "2026-10-24T18:49:54Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-28T06:22:40Z",
+  mb_sound: "0.12.0.usegit (b7efc32b)",
   from: "bin/synths/electric_pianos.rb",
   description: "Tine piano (Rhodes-style FM) through a crunchy amp (amp 4) from bin/synths/electric_pianos.rb, made in patches-2 (2026-10-13) as a closer-to-physical alternative to the jungle keys (jungle_keys_voice in bin/synths/jungle.rb, from the persona panel experiment).",
   options: { patch: :crunch, tremolo: 0.3 }
 inputs midi: :notes
 param :bark, (0.0..2.0).at(1.0), description: "Velocity-driven bark (FM index and pickup growl) scale"
 param :pickup, (0.0..3.0).at(0.5), description: "Pickup drive scale (follows velocity; the reed also grows on low keys; default tine 0.5, reed 1.0)"
+param :decay, (0.1..20.0).at(4.5), description: "Amplitude decay in seconds (tine 4.5, reed 2.6)"
+param :release, (0.01..5.0).at(0.35), description: "Release in seconds (tine 0.35, reed 0.18)"
 param :amp, (0.25..8.0).at(4.0), description: "Tine amp drive: 1 clean, 1.5 a warm edge, 2 crunch, 4-8 broken up (quiet notes keep their level; default tine 1, crunch 4)"
 
 ((synth(midi, voices: 8, retrigger: :string) { |v|
@@ -21,6 +23,6 @@ param :amp, (0.25..8.0).at(4.0), description: "Tine amp drive: 1 clean, 1.5 a wa
   body = f.sine.free(true).pm(f.sine.free(true) * index)
   bell = f.sine.free(true).pm(f.transpose(45.68825906469125).sine.free(true) * v.env(0, 0.12, 0, 0.05, gm: false).no_velocity * (sig * 0.25))
   bar = f.transpose(12).sine.free(true) * v.env(0.001, 1.4, 0, 0.3, gm: false).no_velocity * 0.12
-  x = (body + bell * 0.3 + bar) * v.amp_env(0.001, 4.5, 0, 0.35, curve: [12, 40, 40])
+  x = (body + bell * 0.3 + bar) * v.amp_env(0.001, decay, 0, release, curve: [12, 40, 40])
   x * (x * (sig * pickup * (0.5 * bark)) + 1)
 }.filter(:highpass, cutoff: 30, quality: 0.7) * (amp * 0.18)).softclip(0.8, 0.95) * (1.8 / amp)).pan(4.8.hz.lfo.at(0.3))

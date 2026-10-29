@@ -133,6 +133,22 @@ module MB
           method(:call).to_proc
         end
 
+        # Strikes a resonator once (a resonator effect or a struck
+        # instrument; see MB::Sound::Struck): `L.fx.bar.ping(C5)`,
+        # `L.fx.bell.ping(C4, E4, G4)` (a chord), `L.inst.bowl.ping` (its
+        # typical pitch).  Returns the graph (it ends when the ring does).
+        def ping(*pitches)
+          MB::Sound::Struck.ping(self, pitches)
+        end
+
+        # What `play entry` plays (see MB::Sound::Playable): an instrument
+        # on a demo phrase (struck ones near their typical pitch), a kit's
+        # voices once each, a resonator effect's strike; other effects
+        # raise with how to use them.
+        def to_playable
+          Library::Audition.playable(self)
+        end
+
         # A label for messages: "reverb :hall" or "preset :dnb_reese".
         def label
           "#{family} #{name.inspect}"

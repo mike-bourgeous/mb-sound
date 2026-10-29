@@ -28,43 +28,54 @@ require 'bundler/setup'
 require 'fileutils'
 require 'mb-sound'
 require_relative 'synths/wave_voices' # (its patches' settings; guarded by main_script?)
+require_relative 'synths/dnb' # (its patches' knobs, DNB_KNOBS; the same for the scripts below)
+require_relative 'synths/jungle'
+require_relative 'synths/funk'
+require_relative 'synths/ambient'
+require_relative 'synths/electric_pianos'
 
 module MB::Sound
+  # Command-line options giving a patch's curated knobs (a Hash: name =>
+  # value; library-instruments-1), so --save makes each one a param.
+  def self.preset_knob_args(knobs)
+    knobs.flat_map { |k, v| ["--#{k.to_s.tr('_', '-')}", v.to_s] }
+  end
+
   # The library's preset sources: { name => [script, patch, extra args] }
   # for script patches (saved with --save from spec/test_data/c_major.mid).
   LIBRARY_PRESET_PATCHES = {
-    dnb_reese: ['bin/synths/dnb.rb', :reese],
-    dnb_sub: ['bin/synths/dnb.rb', :sub],
-    dnb_neuro: ['bin/synths/dnb.rb', :neuro],
-    dnb_pad: ['bin/synths/dnb.rb', :pad],
-    dnb_pluck: ['bin/synths/dnb.rb', :pluck],
-    dnb_boom: ['bin/synths/dnb.rb', :boom],
+    dnb_reese: ['bin/synths/dnb.rb', :reese, *preset_knob_args(DNB_KNOBS[:reese])],
+    dnb_sub: ['bin/synths/dnb.rb', :sub, *preset_knob_args(DNB_KNOBS[:sub])],
+    dnb_neuro: ['bin/synths/dnb.rb', :neuro, *preset_knob_args(DNB_KNOBS[:neuro])],
+    dnb_pad: ['bin/synths/dnb.rb', :pad, *preset_knob_args(DNB_KNOBS[:pad])],
+    dnb_pluck: ['bin/synths/dnb.rb', :pluck, *preset_knob_args(DNB_KNOBS[:pluck])],
+    dnb_boom: ['bin/synths/dnb.rb', :boom, *preset_knob_args(DNB_KNOBS[:boom])],
     dnb_drums: ['bin/synths/dnb.rb', :drums],
-    jungle_breaks: ['bin/synths/jungle.rb', :breaks],
-    jungle_sub: ['bin/synths/jungle.rb', :sub],
-    jungle_reese: ['bin/synths/jungle.rb', :reese],
-    jungle_keys: ['bin/synths/jungle.rb', :keys],
-    jungle_pad: ['bin/synths/jungle.rb', :pad],
-    jungle_flute: ['bin/synths/jungle.rb', :flute],
+    jungle_breaks: ['bin/synths/jungle.rb', :breaks, *preset_knob_args(JUNGLE_KNOBS[:breaks])],
+    jungle_sub: ['bin/synths/jungle.rb', :sub, *preset_knob_args(JUNGLE_KNOBS[:sub])],
+    jungle_reese: ['bin/synths/jungle.rb', :reese, *preset_knob_args(JUNGLE_KNOBS[:reese])],
+    jungle_keys: ['bin/synths/jungle.rb', :keys, *preset_knob_args(JUNGLE_KNOBS[:keys])],
+    jungle_pad: ['bin/synths/jungle.rb', :pad, *preset_knob_args(JUNGLE_KNOBS[:pad])],
+    jungle_flute: ['bin/synths/jungle.rb', :flute, *preset_knob_args(JUNGLE_KNOBS[:flute])],
     jungle_perc: ['bin/synths/jungle.rb', :perc],
-    ambient_bowl: ['bin/synths/ambient.rb', :bowl],
-    ambient_rin: ['bin/synths/ambient.rb', :rin],
+    ambient_bowl: ['bin/synths/ambient.rb', :bowl, *preset_knob_args(AMBIENT_KNOBS[:bowl])],
+    ambient_rin: ['bin/synths/ambient.rb', :rin, *preset_knob_args(AMBIENT_KNOBS[:rin])],
     ambient_gong: ['bin/synths/ambient.rb', :gong],
-    ambient_koto: ['bin/synths/ambient.rb', :koto],
+    ambient_koto: ['bin/synths/ambient.rb', :koto, *preset_knob_args(AMBIENT_KNOBS[:koto])],
     ambient_harp: ['bin/synths/ambient.rb', :harp],
-    ambient_drone: ['bin/synths/ambient.rb', :drone],
-    ambient_rainstick: ['bin/synths/ambient.rb', :rainstick],
+    ambient_drone: ['bin/synths/ambient.rb', :drone, *preset_knob_args(AMBIENT_KNOBS[:drone])],
+    ambient_rainstick: ['bin/synths/ambient.rb', :rainstick, *preset_knob_args(AMBIENT_KNOBS[:rainstick])],
     funk_beat: ['bin/synths/funk.rb', :beat],
     funk_perc: ['bin/synths/funk.rb', :perc],
-    funk_bass: ['bin/synths/funk.rb', :bass],
-    funk_keys: ['bin/synths/funk.rb', :keys],
-    funk_clav: ['bin/synths/funk.rb', :clav],
-    funk_talkbox: ['bin/synths/funk.rb', :talkbox],
-    funk_choir: ['bin/synths/funk.rb', :choir],
+    funk_bass: ['bin/synths/funk.rb', :bass, *preset_knob_args(FUNK_KNOBS[:bass])],
+    funk_keys: ['bin/synths/funk.rb', :keys, *preset_knob_args(FUNK_KNOBS[:keys])],
+    funk_clav: ['bin/synths/funk.rb', :clav, *preset_knob_args(FUNK_KNOBS[:clav])],
+    funk_talkbox: ['bin/synths/funk.rb', :talkbox, *preset_knob_args(FUNK_KNOBS[:talkbox])],
+    funk_choir: ['bin/synths/funk.rb', :choir, *preset_knob_args(FUNK_KNOBS[:choir])],
     # (--pickup and --amp given, so they save as params: the script's defaults are each patch's own, nil)
-    tine_piano: ['bin/synths/electric_pianos.rb', :tine, '--pickup', '0.5', '--amp', '1'],
-    tine_crunch: ['bin/synths/electric_pianos.rb', :crunch, '--pickup', '0.5', '--amp', '4'],
-    reed_piano: ['bin/synths/electric_pianos.rb', :reed, '--pickup', '1.0'],
+    tine_piano: ['bin/synths/electric_pianos.rb', :tine, '--pickup', '0.5', '--amp', '1', *preset_knob_args(ELECTRIC_PIANO_KNOBS[:tine])],
+    tine_crunch: ['bin/synths/electric_pianos.rb', :crunch, '--pickup', '0.5', '--amp', '4', *preset_knob_args(ELECTRIC_PIANO_KNOBS[:tine])],
+    reed_piano: ['bin/synths/electric_pianos.rb', :reed, '--pickup', '1.0', *preset_knob_args(ELECTRIC_PIANO_KNOBS[:reed])],
   }.merge(
     # The wave voices (protos-1, 2026-10-23: the research-sq80 prototype
     # patches of 2026-10-06), with each patch's cutoff, resonance, and grit

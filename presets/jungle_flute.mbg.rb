@@ -3,16 +3,18 @@
 graph 5,
   name: "jungle_flute",
   kind: :synth,
-  saved: "2026-10-24T18:49:20Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-28T06:21:54Z",
+  mb_sound: "0.12.0.usegit (b7efc32b)",
   from: "bin/synths/jungle.rb",
   description: "90s jungle patch :flute from bin/synths/jungle.rb, first made by Nev Ashdown (Skylark Junction), a fictional 90s atmospheric jungle producer, for the song \"Memory Card\" (bin/songs/memory_card.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-jungle).",
-  options: { patch: :flute, cutoff: 16000.0 }
+  options: { patch: :flute, cutoff: nil, grit: nil, decay: nil, release: nil }
 inputs midi: :notes
-param :echo, (0.0..1.0).at(0.3), description: "Flute echo send 0..1"
+param :glide, (0.0..0.5).at(0.04), description: "Legato glide in seconds (reese 0.06, flute 0.04)"
+param :attack, (0.001..8.0).at(0.04), description: "Attack in seconds (pad 1.2, flute 0.04)"
+param :echo, (0.0..1.0).at(0.3), description: "Flute echo send 0..1 (0.3)"
 
 (synth(midi, voices: 1, seed: drawn_seed(900450186894289455)) { |v|
-  p = v.hz.glide(0.04, legato: true).vibrato(5.2, depth: 15.cents, delay: 0.25)
+  p = v.hz.glide(glide, legato: true).vibrato(5.2, depth: 15.cents, delay: 0.25)
   air = noise.filter(:bandpass, cutoff: 2600, quality: 1.2) * 0.05
-  (p.triangle.free(true) * 0.6 + p.sine.free(true) * 0.5 + air) * v.env(0.04, 0.3, 0.8, 0.25, gm: false)
+  (p.triangle.free(true) * 0.6 + p.sine.free(true) * 0.5 + air) * v.env(attack, 0.3, 0.8, 0.25, gm: false)
 } * 0.17).delay(1.n8.dotted, feedback: 0.35, wet: echo, dry: 1).reverb(:hall, mix: 0.25)

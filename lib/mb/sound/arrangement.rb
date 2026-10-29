@@ -260,10 +260,11 @@ module MB
       # +trigger: true+ makes it a trigger track (SidechainMethods#sidechain): heard
       # only by readers such as `duck(:name)`, never mixed (see
       # Session::Buses#route); +to:+ and +send:+ don't apply.
-      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, trigger: false, &patch)
+      def track(name, *values, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, trigger: false, &patch)
         raise ArgumentError, "Track names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
-        raise ArgumentError, 'Give a track a patch block or a graph, not both' if graph && patch
-        raise ArgumentError, "Give track #{name.inspect} a patch block or a graph" unless graph || patch
+        values = track_values(name, values, patch) or return nil
+        graph, clip, entry = values
+        patch = InstrumentPatch.patch(entry) if entry
         check_quant(q) if q
         lead = 1.attack if lead == :attack
         check_offset(:lead, lead) unless lead.is_a?(Length::Attack)
@@ -274,9 +275,10 @@ module MB
         clock = Sequence::Clocked.check_name(clock) if clock.is_a?(Symbol)
         clock = MB::Sound::Clock.coerce(clock) unless clock.nil? || clock.is_a?(Symbol)
         graph = Sequence::Clocked.apply(graph, clock) if graph && clock
+        patch = Arrangement.counted(patch, track: name, session: @session) if patch
         # Built once now, so a broken patch fails here (see PatchCheck)
         begin
-          ok = check_patch(name, patch, @mutex.synchronize { @tracks[name]&.clip })
+          ok = check_patch(name, patch, clip || @mutex.synchronize { @tracks[name]&.clip })
         rescue PatchCheck::PatchError => e
           note_failed_track(name, e)
           raise
@@ -291,14 +293,67 @@ module MB
         @session.route(name, to: to || :keep, send: send) if to || send
 
         tr = nil
-        patch = Arrangement.counted(patch) if patch
+        old = nil
+        before = entry && undo_state
         @mutex.synchronize {
           old = @tracks[name]
-          tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false, clock: clock, clocked: nil, trigger: !!trigger)
+          tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: clip || old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false, clock: clock, clocked: nil, trigger: !!trigger)
         }
         set_ahead(tr, graph) if graph || !lead.is_a?(Length::Attack)
         refresh_monitor(tr)
+        change_instrument(tr, entry, before) if entry && old&.patch? && tr.clip && @session.playing_after_queue?(name)
         name
+      end
+
+      # The track's positional +values+ (see #track) sorted into [graph,
+      # clip, entry]: a Clip or Kit (or a clip Entry) is the clip it plays,
+      # an instrument Entry or a Symbol naming one is its instrument (see
+      # InstrumentPatch), anything else its graph.  At most one of each,
+      # and an instrument or graph, or the +patch+ block.  Nil (after
+      # MB::Sound.live_error) for a value that can't be an instrument.
+      def track_values(name, values, patch)
+        graph = clip = entry = nil
+        values.each do |v|
+          if v.is_a?(Library::Entry) && v.kind == :clip && v.builder
+            v = v.call
+          end
+          if v.is_a?(Sequence::Clip) || v.is_a?(Sequence::Kit)
+            raise ArgumentError, "track #{name.inspect}: give it one clip (got two)" if clip
+            clip = v
+          elsif InstrumentPatch.instrument?(v)
+            raise ArgumentError, "track #{name.inspect}: give it one instrument (got two)" if entry
+            begin
+              entry = InstrumentPatch.entry_for(v, track: name)
+            rescue InstrumentPatch::Error => e
+              return MB::Sound.live_error(e)
+            end
+          else
+            raise ArgumentError, "track #{name.inspect}: give it one graph (got two)" if graph
+            graph = v
+          end
+        end
+        # (a clip alone plays as a graph, on what plays it: Playable.graph)
+        graph, clip = clip, nil if clip && !graph && !entry && !patch
+        raise ArgumentError, "track #{name.inspect}: give it an instrument or a graph, not both" if entry && graph
+        raise ArgumentError, 'Give a track a patch block or a graph, not both' if graph && patch
+        raise ArgumentError, "track #{name.inspect}: give it an instrument or a patch block, not both" if entry && patch
+        unless graph || patch || entry
+          raise ArgumentError, "Give track #{name.inspect} a patch block, an instrument, or a graph (track #{name.inspect}, L.inst.dnb.dnb_reese; " \
+            "track(#{name.inspect}) { |clip| ... }; track #{name.inspect}, riff, :dnb_reese)"
+        end
+        [graph, clip, entry]
+      end
+
+      # Track +tr+, playing, was given a new instrument (+entry+): built
+      # again with its clip at its launch point, keeping its routing (one
+      # Session#command: journaled, one undo step; +before+ is the Set
+      # state before the redefinition).
+      def change_instrument(tr, entry, before)
+        @session.command("track #{tr.name.inspect} -> #{entry.head_path}") {
+          time = resolve(tr.q || @quant, tr, LaunchPoint::NONE)
+          start_track(tr, tr.clip, time, nil)
+          @session.note_undo_extra(self, before, undo_state)
+        }
       end
 
       # +patch+ (a track's patch block) counting its top-level recorded
@@ -306,9 +361,14 @@ module MB
       # the graph it built can be named by where its call was made and
       # bound to a knob (LiteralBinding).  A block like the patch: arity,
       # parameters, lambda?, and source location are the patch's.
-      def self.counted(patch)
+      #
+      # +track+ and +session+ name the track whose patch it is: the build
+      # runs in TrackKnobs.building, so a graph document the patch loads
+      # makes its params the track's knobs.
+      def self.counted(patch, track: nil, session: nil)
         return patch if patch.respond_to?(:unbound_patch) || patch.respond_to?(:counted_patch)
-        wrapped = proc { |*a, **kw, &b| GraphNode::Recipe.counting { kw.empty? ? patch.call(*a, &b) : patch.call(*a, **kw, &b) } }
+        build = ->(&blk) { track ? TrackKnobs.building(track, session) { GraphNode::Recipe.counting(&blk) } : GraphNode::Recipe.counting(&blk) }
+        wrapped = proc { |*a, **kw, &b| build.() { kw.empty? ? patch.call(*a, &b) : patch.call(*a, **kw, &b) } }
         wrapped.define_singleton_method(:arity) { patch.arity }
         wrapped.define_singleton_method(:parameters) { |**k| patch.parameters(**k) }
         wrapped.define_singleton_method(:lambda?) { patch.lambda? }
@@ -317,7 +377,7 @@ module MB
         # (writers that wrap the user's block themselves, e.g. a set
         # document's, run it in #patch_context)
         wrapped.define_singleton_method(:patch_block) { patch }
-        wrapped.define_singleton_method(:patch_context) { |&blk| GraphNode::Recipe.counting(&blk) }
+        wrapped.define_singleton_method(:patch_context) { |&blk| build.(&blk) }
         wrapped
       end
 

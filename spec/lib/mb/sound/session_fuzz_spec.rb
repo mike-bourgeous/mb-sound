@@ -33,7 +33,7 @@ RSpec.describe('session fuzzing') do
   it 'generates valid songs that use every kind of command' do
     songs = (1..40).map { |s| SessionFuzz.generate(Random.new(s)).code }
     all = songs.join("\n")
-    %w[track( scene go swap stop mute unmute solo turn tween .freq tr808( tr909( launch tweak meter].each do |word|
+    %w[track( scene go swap stop mute unmute solo turn tween .freq tr808( tr909( launch tweak meter L.inst. :dnb_sub].each do |word|
       expect(all).to include(word)
     end
     songs.each { |code| expect { Prism.parse(code).errors.then { |e| raise e.map(&:message).join(', ') unless e.empty? } }.not_to raise_error }

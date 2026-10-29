@@ -668,6 +668,8 @@ module MB
         # (params a live literal bound to knobs: Arrangement::LiteralBinding)
         bound = Arrangement::LiteralBinding.document_params(doc.name)
         params = params.merge(bound.slice(*doc.params.keys)) if bound
+        # (in a track's patch, the params left become the track's knobs: Arrangement::TrackKnobs)
+        params = params.merge(Arrangement::TrackKnobs.params_for(doc, params))
         graph = GraphIO.load(path, inputs: inputs, params: params, trust: trust, seeds: seeds, racks: racks)
 
         session = Session.existing if session.nil?

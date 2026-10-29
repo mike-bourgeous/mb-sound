@@ -117,6 +117,7 @@ module MB
             'GenerationMethods' => {},
             'DrumMethods' => {},
             'SQ80Methods' => { sq80_patches: 'a listing' },
+            'StruckMethods' => {},
             'MidiMethods' => {
               midi: 'live MIDI input (printed as an input)',
               midi_stream: 'a MIDI::Stream for live input', close_midi: 'closes live input',

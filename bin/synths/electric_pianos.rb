@@ -95,7 +95,7 @@ module MB::Sound
   # clean at 1, a warm edge at 1.3-1.5 (residue -30 to -25 dB under the
   # clean chord), crunch at 2 (-18 dB), a broken-up suitcase at 4-8 (-8
   # to -4 dB)), +tremolo+ the stereo tremolo depth at +rate+ Hz.  Stereo.
-  def self.tine_piano_voice(midi, bark: 1.0, tremolo: 0.3, rate: 4.8, level: 1.8, voices: 8, drive: 0.18, amp: 1.0, pickup: TINE_PIANO_PICKUP, pickup_velocity: 1.0, pickup_key: 0.0)
+  def self.tine_piano_voice(midi, bark: 1.0, tremolo: 0.3, rate: 4.8, level: 1.8, voices: 8, drive: 0.18, amp: 1.0, pickup: TINE_PIANO_PICKUP, pickup_velocity: 1.0, pickup_key: 0.0, decay: 4.5, release: 0.35)
     keys = synth(midi, voices: voices, retrigger: :string) { |v|
       f = v.hz
       vel2 = v.velocity * v.velocity
@@ -106,7 +106,7 @@ module MB::Sound
       bell = f.sine.free.pm(f.transpose(12 * Math.log2(14)).sine.free * v.env(0, 0.12, 0, 0.05, gm: false).no_velocity * (v.velocity * 0.25))
       # The tonebar: a quiet partial an octave up that dies sooner
       bar = f.transpose(12).sine.free * v.env(0.001, 1.4, 0, 0.3, gm: false).no_velocity * 0.12
-      x = (body + bell * 0.3 + bar) * v.amp_env(0.001, 4.5, 0, 0.35, curve: [12, 40, 40])
+      x = (body + bell * 0.3 + bar) * v.amp_env(0.001, decay, 0, release, curve: [12, 40, 40])
       # The pickup: an asymmetric (squared) term, larger for harder strikes
       x * (x * (electric_piano_pickup(v, pickup, pickup_velocity, pickup_key) * (0.5 * bark)) + 1)
     }
@@ -133,14 +133,14 @@ module MB::Sound
   # node), +pickup_velocity+, and +pickup_key+ the pickup's drive (see
   # .electric_piano_pickup), +tremolo+ the amplitude tremolo depth at
   # +rate+ Hz.  Mono.
-  def self.reed_piano_voice(midi, bark: 1.0, tremolo: 0.3, rate: 5.6, level: 0.4, voices: 8, pickup: 1.0, pickup_velocity: 1.0, pickup_key: REED_PIANO_PICKUP_KEY)
+  def self.reed_piano_voice(midi, bark: 1.0, tremolo: 0.3, rate: 5.6, level: 0.4, voices: 8, pickup: 1.0, pickup_velocity: 1.0, pickup_key: REED_PIANO_PICKUP_KEY, decay: 2.6, release: 0.18)
     keys = synth(midi, voices: voices, retrigger: :string) { |v|
       f = v.hz
       vel2 = v.velocity * v.velocity
       # 2:1 FM: sidebands at 1, 3, 5, ... times the note (odd harmonics)
       index = v.env(0, 0.8, 0.25, 0.3, gm: false).no_velocity * (vel2 * (0.22 * bark) + 0.04)
       reed = f.sine.free.pm(f.transpose(12).sine.free * index)
-      amp = v.amp_env(0.002, 2.6, 0, 0.18, curve: [12, 30, 40])
+      amp = v.amp_env(0.002, decay, 0, release, curve: [12, 30, 40])
       # The pickup: symmetric saturation (odd harmonics), driven by velocity
       drive = electric_piano_pickup(v, pickup, pickup_velocity, pickup_key) * (2.5 * bark) + 1
       (reed * amp * drive).softclip(0.4, 0.95) * (1.0 / 1.6)
@@ -173,17 +173,29 @@ module MB::Sound
   # +pickup+ nil is the patch's own default (TINE_PIANO_PICKUP, or the
   # reed's 1.0); +amp+ is the tine's amp drive (nil: 1 for :tine,
   # TINE_PIANO_CRUNCH for :crunch).
-  def self.electric_pianos_patch(midi, patch = :tine, bark: 1.0, tremolo: 0.3, pickup: nil, amp: nil)
+  #
+  # +decay+ and +release+ (nil: the patch's own, ELECTRIC_PIANO_KNOBS) are
+  # the amplitude envelope's (library-instruments-1: curated knobs).
+  def self.electric_pianos_patch(midi, patch = :tine, bark: 1.0, tremolo: 0.3, pickup: nil, amp: nil, decay: nil, release: nil)
     bark = bark.constant.named('bark')
     pickup = (pickup || (patch == :reed ? 1.0 : TINE_PIANO_PICKUP)).constant.named('pickup')
+    own = ELECTRIC_PIANO_KNOBS[patch == :crunch ? :tine : patch] || {}
+    env = { decay: (decay || own[:decay]).to_f.constant.named('decay'), release: (release || own[:release]).to_f.constant.named('release') }
     case patch
     when :tine, :crunch
       amp ||= patch == :crunch ? TINE_PIANO_CRUNCH : 1.0
-      tine_piano_voice(midi, bark: bark, tremolo: tremolo, pickup: pickup, amp: amp.constant.named('amp'))
-    when :reed then reed_piano_voice(midi, bark: bark, tremolo: tremolo, pickup: pickup)
+      tine_piano_voice(midi, bark: bark, tremolo: tremolo, pickup: pickup, amp: amp.constant.named('amp'), **env)
+    when :reed then reed_piano_voice(midi, bark: bark, tremolo: tremolo, pickup: pickup, **env)
     else raise ArgumentError, "Unknown patch #{patch.inspect}"
     end
   end
+
+  # The amplitude envelopes' knobs of each piano (library-instruments-1;
+  # see bin/synths/dnb.rb's DNB_KNOBS): the voices' own values.
+  ELECTRIC_PIANO_KNOBS = {
+    tine: { decay: 4.5, release: 0.35 },
+    reed: { decay: 2.6, release: 0.18 },
+  }.freeze
 
   # What each patch is, for preset descriptions (--save writes it into the
   # document): +what+ is the patch (a Symbol) or a phrase.
@@ -203,9 +215,11 @@ module MB::Sound
       bark: [1.0, Float, '-b', 'Velocity-driven bark (FM index and pickup growl) scale', 0.0..2.0],
       tremolo: [0.3, Float, '-t', 'Tremolo depth 0..1 (0 for none)', 0.0..1.0],
       pickup: [nil, Float, '-k', 'Pickup drive scale (follows velocity; the reed also grows on low keys; default tine 0.5, reed 1.0)', 0.0..3.0],
+      decay: [nil, Float, 'Amplitude decay in seconds (tine 4.5, reed 2.6)', 0.1..20.0],
+      release: [nil, Float, 'Release in seconds (tine 0.35, reed 0.18)', 0.01..5.0],
       amp: [nil, Float, '-a', 'Tine amp drive: 1 clean, 1.5 a warm edge, 2 crunch, 4-8 broken up (quiet notes keep their level; default tine 1, crunch 4)', 0.25..8.0],
     ) { |midi, p|
-      electric_pianos_patch(midi, p.patch, bark: p.bark, tremolo: p.tremolo, pickup: p.pickup, amp: p.amp)
+      electric_pianos_patch(midi, p.patch, bark: p.bark, tremolo: p.tremolo, pickup: p.pickup, amp: p.amp, decay: p.decay, release: p.release)
     }
   end
 end
