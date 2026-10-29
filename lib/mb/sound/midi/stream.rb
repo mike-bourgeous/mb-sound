@@ -405,7 +405,13 @@ module MB
         end
 
         def sources
-          return { source: @source } unless @source.is_a?(Transform)
+          unless @source.is_a?(Transform)
+            # A steered generator clip's knobs (documents' knob headers,
+            # Sessions adopting them; see Generative::Steer)
+            nodes = @source.respond_to?(:param_nodes) ? @source.param_nodes : []
+            return { source: @source } if nodes.empty?
+            return { source: @source, **nodes.each_with_index.to_h { |n, i| [:"param_#{i + 1}", n] } }
+          end
           @source.is_a?(Sequence::TimelineNode) ? { transform: @source } : @source.sources
         end
 

@@ -1401,6 +1401,9 @@ module MB
             raise error(node, "building took longer than #{@limits[:build_seconds]} seconds")
           end
 
+          if receiver.is_a?(Array) && name == :* && args[0].is_a?(Integer) && receiver.length * args[0] > @limits[:steps]
+            raise error(node, "an Array of #{receiver.length} repeated #{args[0]} times is longer than #{@limits[:steps]}")
+          end
           if receiver.is_a?(Integer) && name == :** && args[0].is_a?(Integer) && receiver.abs > 1 && args[0] > 64
             raise error(node, "#{receiver} ** #{args[0]} is too large")
           end

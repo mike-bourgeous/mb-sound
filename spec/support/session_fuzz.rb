@@ -60,10 +60,14 @@ module SessionFuzz
   MELODIC = [
     'seq(C4, E4, G4).n8.loop', 'seq(A3, R, C4.n4, E4).n16.loop', 'seq(C3.n4, G3.n8.dotted, Eb3.n16).loop',
     'seq(C5, D5).n8', 'seq(F3, A3, C4, E4).n4.loop', 'seq(G4.n16, B4.n16, D5.n8).loop',
+    # Generators steered by the knob :busy (G3: read at each cycle's decision point)
+    'melody(scale(:minor, :a).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop',
+    'motifs(scale(:dorian, :d).weights, 8, density: knob(:busy), mutate: knob(:busy), evolve: 1, seed: 4)',
   ].freeze
   DRUMS = [
     "grid(16, kick: 'x...x...', snare: '....x...').loop", "grid(16, cymbal: 'X')", "grid(8, kick: 'x.x.', hat: 'xxxx').loop",
     "grid(16, clap: '..x.')", "grid(16, kick: 'X..x..x.', hat: '.x.x.x.x', open_hat: '...x').loop",
+    'beats(16, energy: knob(:busy), hold: 2, seed: 2) { kick [1, 0, 0, 0] * 4; hat euclid(10, 16), mutate: 0.5; fill every: 2, snare: 0.6 }',
   ].freeze
   # Looping tweens (timeline-aligned): their output is a function of the
   # timeline position alone (with gains that bring them near 0.5)
@@ -87,6 +91,7 @@ module SessionFuzz
     bpm = pick(rng, TEMPOS)
     header = ["bpm #{bpm}"]
     header << 'meter 3, 4' if rng.rand < 0.15
+    header << 'knob :busy, 0.5' # (steered generators read it)
     lines = []
     knob = rng.rand < 0.5
     lines << 'knob :cut, 1200.0, range: 200.0..4000.0' if knob
@@ -168,9 +173,11 @@ module SessionFuzz
           end
         when 6 then rng.rand < 0.5 ? "solo :#{t}#{on}" : "solo#{on.sub(",", "")}"
         when 7
-          next unless knob
-
-          "turn :cut, #{pick(rng, [300.0, 2500.0, 3800.0])}#{[', over: 1', ', over: 1/2r', ''][rng.rand(3)]}#{on}"
+          if knob && rng.rand < 0.5
+            "turn :cut, #{pick(rng, [300.0, 2500.0, 3800.0])}#{[', over: 1', ', over: 1/2r', ''][rng.rand(3)]}#{on}"
+          else
+            "turn :busy, #{pick(rng, [0.1, 0.4, 0.9])}#{[', over: 1', ', over: 1/2r', ''][rng.rand(3)]}#{on}"
+          end
         when 8 then "bg :x#{bgs += 1}, #{pick(rng, TWEENS)}, on: :now"
         when 9 then "bg :x#{bgs += 1}, #{pick(rng, FREQ_CLIPS)}.freq * 0.001, on: :now"
         when 10 then "bg :x#{bgs += 1}, tr808(#{pick(rng, DRUMS)}) * 0.5#{on}"

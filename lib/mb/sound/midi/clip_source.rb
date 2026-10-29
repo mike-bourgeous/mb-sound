@@ -34,6 +34,16 @@ module MB
         # The Clip being played.
         attr_reader :clip
 
+        # The graph nodes (knobs, tempo LFOs) the steered generator clips
+        # this source has played read (Sequence::Clip#param_nodes): every
+        # clip's since the source was made, so the graph's node set changes
+        # only when a swapped-in clip brings new ones (announced with
+        # Plan.changed), never when a clip leaves (a ring-out's silent
+        # clip, a swap back).
+        def param_nodes
+          @param_nodes
+        end
+
         # The MIDI channel (0-based) given to the clip's events.
         attr_reader :channel
 
@@ -49,6 +59,7 @@ module MB
         def initialize(clip, channel: 0, transport: nil)
           raise ArgumentError, "Expected a Clip (got #{clip.class})" unless clip.is_a?(Sequence::Clip)
           @clip = clip
+          @param_nodes = clip.param_nodes.freeze
           @channel = channel
           @transport = transport
           @clip_position = 0r
@@ -214,6 +225,7 @@ module MB
           else
             @pending_swap = nil
             @clip = clip
+            note_param_nodes(clip)
             reset_flams
           end
           self
@@ -291,6 +303,32 @@ module MB
         # +previous+ and the stream seconds since it started at the current
         # tempo as +elapsed+.
         def chase_at(time)
+          return steering { chase_at_position(time) } if @clip.steered?
+          chase_at_position(time)
+        end
+
+        # Runs the block with Generative::Steer.origin set to where this
+        # source's clip position 0 is on the timeline, so a steered
+        # generator reads its knobs at its decision points' timeline
+        # positions (:clocked for a clip on its own clock).
+        def steering
+          prev = Thread.current[:mb_steer_origin]
+          Generative::Steer.origin = @clock ? :clocked : @origin
+          yield
+        ensure
+          Generative::Steer.origin = prev
+        end
+
+        # Adds the param nodes of +clip+ (see #param_nodes), announcing a
+        # structure change when there are new ones.
+        def note_param_nodes(clip)
+          more = clip.param_nodes - @param_nodes
+          return if more.empty?
+          @param_nodes = (@param_nodes + more).freeze
+          Plan.changed(self)
+        end
+
+        def chase_at_position(time)
           pos = clip_position
           e = @clip.event_at(pos) or return nil
           looping = @clip.looping? && @clip.length > 0
@@ -452,6 +490,7 @@ module MB
         # +split+), on its clock if it has one.
         def apply_swap(clip, swap_time, split)
           @clip = clip
+          note_param_nodes(clip)
           @swap_anchor = clip.launch_aligned? ? swap_time : nil
           if clip.clocking
             clock_rf = @clock ? clock_rf_of(split) : nil
@@ -719,7 +758,11 @@ module MB
           end
           start = @flam_lead && @flam_start
 
-          found = @clip.edges(wn_from, wn_to, early: early, fills: fills)
+          found = if @clip.steered?
+                    steering { @clip.edges(wn_from, wn_to, early: early, fills: fills) }
+                  else
+                    @clip.edges(wn_from, wn_to, early: early, fills: fills)
+                  end
           arm_quiet(to, wn_to, wnps) if @flam_lead.nil? && @clock.nil? && self.class.quiet_reads
           out = found.empty? ? Stream::NO_EVENTS : found.filter_map { |time, type, event, cycle|
             t = from + (time - wn_from) / wnps

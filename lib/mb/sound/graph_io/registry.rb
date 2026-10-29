@@ -69,6 +69,8 @@ module MB
           # Instruments built region by region (in Instrument.new's block)
           'MB::Sound::Sampler::Instrument' => %i[region],
           'MB::Sound::Drums::Builder' => %i[voice choke tr808 tr909],
+          # Evolving rhythm rows (in MB::Sound#beats' block)
+          'MB::Sound::Generative::Beats::Builder' => MB::Sound::Generative::Beats::Builder::NAMES.keys + %i[row euclid fill],
           'MB::Sound::Drums::Hit' => MB::Sound::Drums::Hit::METHODS - %i[knobs name machine],
           # Curve variants (Curve#to_ruby)
           'MB::Sound::Curve' => %i[reverse in out in_out out_in],
@@ -92,6 +94,11 @@ module MB
           # A rack's knobs with modulation around them (racks R2)
           'MB::Sound::GraphNode::Knob' => %i[mod choose],
         }.freeze
+
+        # Array value methods: patterns written as `[1, 0, 0, 0] * 4` or
+        # `a + b` (beats rows; repeats limited by LIMITS[:steps] in the
+        # loader).
+        ARRAY_VALUES = Set[:*, :+].freeze
 
         # Methods of bundles that hand out channels; the iterating ones
         # (each, map, zip) take blocks and stay out of documents.
@@ -132,10 +139,11 @@ module MB
 
         # Methods whose blocks build graphs (run once per call as document
         # code) rather than run while sampling.
-        # Drum kit blocks (DrumMethods#kit, Drums::Builder#voice) print as
+        # Drum kit blocks (DrumMethods#kit, Drums::Builder#voice) and
+        # rhythm rows (GenerativeMethods#beats) print as
         # their source (runtime blocks to the recorder) and load as build
         # blocks, whose parameterless forms run on the builder or hit.
-        BUILD_BLOCKS = (MB::Sound::GraphNode::Recipe::BUILD_BLOCKS | Set[:wet, :kit, :drum_kit, :voice]).freeze
+        BUILD_BLOCKS = (MB::Sound::GraphNode::Recipe::BUILD_BLOCKS | Set[:wet, :kit, :drum_kit, :voice, :beats]).freeze
 
         # Methods allowed in the safe subset of runtime blocks (proc bodies
         # and lambda values, run while sampling): arithmetic and math on
@@ -184,7 +192,7 @@ module MB
           def names_for(obj)
             case obj
             when Numeric then numeric
-            when Array then wrapped.fetch(:array, Set.new).to_set
+            when Array then wrapped.fetch(:array, Set.new).to_set | ARRAY_VALUES
             when Module then class_methods(obj)
             else instance_names(obj)
             end

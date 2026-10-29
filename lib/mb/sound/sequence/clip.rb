@@ -136,6 +136,36 @@ module MB
           # And how many later cycles can start early (variations may move
           # events up to a cycle before their own, see Variation).
           @lookahead = @variations.empty? ? 0 : 1
+          # Steered generators (Generative::Steer) decide each cycle at a
+          # decision point +lead+ before it: their cycles aren't read
+          # earlier (#edges), and caches are per Session epoch
+          @steer_lead = @variations.filter_map { |v|
+            v.block.lead if v.block.is_a?(Generative::Producer) && v.block.steered?
+          }.max
+        end
+
+        # True if a generator of this clip reads moving options at decision
+        # points (Generative::Steer): its cycles are decided when playback
+        # reaches each cycle's decision point.
+        def steered?
+          !@steer_lead.nil?
+        end
+
+        # The graph nodes (knobs, tempo LFOs) the steered generators of this
+        # clip read (Generative::Steer#nodes), for documents and Sessions.
+        def param_nodes
+          return [] unless @steer_lead
+          @variations.flat_map { |v|
+            b = v.block
+            b = b.generator while b.is_a?(Generative::Mapped)
+            b.is_a?(Generative::Generator) && b.steer ? b.steer.nodes : []
+          }.uniq
+        end
+
+        # The decision lead of a steered clip in whole notes (the longest of
+        # its generators'), or nil.
+        def steer_lead
+          @steer_lead
         end
 
         # Changes applied anew in every loop cycle (Variations), e.g. from
@@ -151,12 +181,13 @@ module MB
         def events_for(cycle)
           return @events if @variations.empty?
 
-          cached = @cycle_cache[cycle]
+          key = @steer_lead ? Generative::Steer.key(cycle) : cycle
+          cached = @cycle_cache[key]
           return cached if cached
 
           @cycle_cache.shift if @cycle_cache.length >= 8
           list = @variations.reduce(@events) { |evs, v| v.block.call(evs, cycle, self) }
-          @cycle_cache[cycle] = list.sort_by(&:start).freeze
+          @cycle_cache[key] = list.sort_by(&:start).freeze
         end
 
         # The values (note numbers) this clip may play: the +:values+ it was
@@ -644,6 +675,12 @@ module MB
           out = nil
           cycle = first
           while cycle <= last
+            # A steered cycle is decided only once the read reaches its
+            # decision point (nothing of it starts before that)
+            if @steer_lead && to <= cycle * @length - @steer_lead
+              cycle += 1
+              next
+            end
             table = edge_table(cycle)
             if table.hi >= from && table.lo < to
               offset = table.offset
@@ -720,7 +757,13 @@ module MB
           end
 
           while first <= last
-            table = @edge_tables[first] or return nil
+            if @steer_lead && pos < (d = first * @length - @steer_lead)
+              # Undecided: its decision point is where #edges reads it next
+              best = d if best.nil? || d < best
+              first += 1
+              next
+            end
+            table = @edge_tables[@steer_lead ? Generative::Steer.key(first) : first] or return nil
             if table.hi >= pos
               ons = table.ons
               offs = table.offs
@@ -1166,7 +1209,8 @@ module MB
         # The EdgeTable of loop +cycle+ (see #edges), cached for the last
         # few cycles.
         def edge_table(cycle)
-          table = @edge_tables[cycle]
+          key = @steer_lead ? Generative::Steer.key(cycle) : cycle
+          table = @edge_tables[key]
           return table if table
 
           offset = cycle * @length
@@ -1176,7 +1220,7 @@ module MB
           lo = ons.min || offset
           hi = offs.max || offset - 1
           @edge_tables.shift if @edge_tables.length >= 16
-          @edge_tables[cycle] = EdgeTable.new(cycle: cycle, offset: offset, events: events, ons: ons, offs: offs, lo: lo, hi: hi)
+          @edge_tables[key] = EdgeTable.new(cycle: cycle, offset: offset, events: events, ons: ons, offs: offs, lo: lo, hi: hi)
         end
 
         # The glide time for #tween: +time+ as given (a Duration becomes a

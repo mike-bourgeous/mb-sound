@@ -71,10 +71,11 @@ module MB
       # [start, length, velocity], plus a Hash of marks (accented:, slid:)
       # when it has any; starts and lengths in whole notes (exact).  How a
       # rhythm without a recipe prints; `clip.rhythm` takes one from a
-      # clip.
+      # clip.  (Named like #groove_template; `rhythm` is the evolving-rhythm
+      # generator, GenerativeMethods#rhythm.)
       #
-      #     rhythm([0r, 1r/8, 0.9, { accented: true }], [3r/8, 1r/8, 0.7], length: 1r, loop: true).notes(A1, C2)
-      def rhythm(*rows, length:, loop: false)
+      #     rhythm_template([0r, 1r/8, 0.9, { accented: true }], [3r/8, 1r/8, 0.7], length: 1r, loop: true).notes(A1, C2)
+      def rhythm_template(*rows, length:, loop: false)
         hits = rows.map { |row|
           raise ArgumentError, "Rhythm rows are Arrays [start, length, velocity, { marks }] (got #{row.inspect})" unless row.is_a?(Array) && row.length.between?(3, 4)
           start, len, velocity, marks = row
@@ -168,11 +169,24 @@ module MB
       #     melody(scale(:dorian, D3), rhythm: euclid(5, 8, D3), leap: 2).loop
       #     melody(scale(:major, :c), 16, vary: true).loop   # new every bar
       #     melody(scale(:dorian, :d).weights.blur(0.2), 8, range: A3..A5, vary: true).loop
-      def melody(scale = nil, count = 8, step: 16, rhythm: nil, start: nil, leap: 3, range: nil, weights: nil, rest: 0, seed: nil, vary: false)
+      #
+      # Steering (G3): a probability-scale melody with +vary: true+ takes
+      # knobs and other params for +rest:+ and +leap:+ (rounded), and a
+      # choice of ranges for +range:+ (`knob(:reg).choose(A2..A4,
+      # A3..A5)`), read once per cycle at its decision point, +lead:+ (one
+      # beat) before it (Generative::Steer).
+      #
+      #     melody(h, 8, range: knob(:reg).choose(A2..A4, A3..A5), rest: knob(:space), vary: true).loop
+      def melody(scale = nil, count = 8, step: 16, rhythm: nil, start: nil, leap: 3, range: nil, weights: nil, rest: 0, seed: nil, vary: false, lead: nil)
         probability = [Generative::Weights, Generative::Harmony, Generative::Field, Generative::FieldTimeline].any? { |c| scale.is_a?(c) }
         seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
-        raise ArgumentError, "Melody rest must be from 0 to 1 (got #{rest.inspect})" unless rest.is_a?(Numeric) && rest.between?(0, 1)
-        raise ArgumentError, "Melody leap must be a positive Integer (got #{leap.inspect})" unless leap.is_a?(Integer) && leap > 0
+        steered = { rest: rest, leap: leap, range: range }.select { |_, v| MIDI::Param.param?(v) }
+        unless steered.empty?
+          raise ArgumentError, "Steered melodies (#{steered.keys.map { |k| "#{k}:" }.join(', ')}) draw from probability scales (Weights, a Harmony, a Field)" unless probability
+          raise ArgumentError, 'Steered melodies are generators: pass vary: true' unless vary
+        end
+        raise ArgumentError, "Melody rest must be from 0 to 1 (got #{rest.inspect})" unless steered.key?(:rest) || (rest.is_a?(Numeric) && rest.between?(0, 1))
+        raise ArgumentError, "Melody leap must be a positive Integer (got #{leap.inspect})" unless steered.key?(:leap) || (leap.is_a?(Integer) && leap > 0)
 
         slots = if rhythm
                   Sequence::Clip.from(rhythm).events
@@ -188,11 +202,19 @@ module MB
           if range && (scale.is_a?(Generative::Field) || scale.is_a?(Generative::FieldTimeline))
             raise ArgumentError, 'A Field has its own range; leave out range: (or pass the Weights or Harmony)'
           end
-          field = Generative.field(scale, range: range || Generative::DEFAULT_RANGE)
+          ranges = Generative.steered_ranges(range, 'melody')
+          field = Generative.field(scale, range: (ranges ? ranges.first : range) || Generative::DEFAULT_RANGE)
           notes = Generative.notes_of(field)
           raise ArgumentError, 'The melody\'s field has no notes' if notes.empty?
           start = start.nil? ? (notes.first + notes.last) / 2 : Scale.root_number(start)
-          walk = Generative::Melody.new(field, slots, length: length, leap: leap, rest: rest, start: start)
+          walk = Generative::Melody.new(field, slots, length: length, leap: steered.key?(:leap) ? 3 : leap, rest: steered.key?(:rest) ? 0 : rest, start: start,
+            fields: ranges && ->(r) { f = Generative.field(scale, range: r); n = Generative.notes_of(f); [f, (n.first + n.last) / 2] })
+          unless steered.empty?
+            values = ranges ? ranges.flat_map { |r| Generative.notes_of(Generative.field(scale, range: r)) }.uniq.sort : notes
+            return Sequence::Clip.generate(length, values: values, seed: seed, name: "melody(seed: #{seed})", reach: reach, loop: false, lead: lead, params: steered) { |cycle, dice, **v|
+              walk.events(cycle, dice, **v)
+            }
+          end
           gen = Sequence::Clip.generate(length, values: notes, seed: seed, name: "melody(seed: #{seed})", reach: reach, loop: false) { |cycle, dice| walk.events(cycle, dice) }
           return vary ? gen : Sequence::Clip.new(gen.events, length: length, seed: seed)
         end

@@ -39,13 +39,31 @@ module MB
         #     arp = Clip.generate(1.bar, values: notes) { |cycle, dice|
         #       Array.new(8) { |i| [i * 1r/8, 1r/16, dice.pick(notes, i), 0.7] }
         #     }
-        def generate(length, values: nil, seed: nil, name: nil, align: :timeline, reach: nil, loop: true, events: nil, &block)
+        #
+        # +params+ (G3) are options the block reads as keywords, decided
+        # once per cycle at its decision point, +lead+ (a length, one beat
+        # by default) before the cycle: knobs, `cc`, tempo LFOs, choices,
+        # or plain values (see Steer).
+        #
+        #     knob :busy, 0.3
+        #     Clip.generate(1.bar, busy: knob(:busy)) { |cycle, dice, busy:|
+        #       Array.new(16) { |i| [i * 1r/16, 1r/16, A3, 0.7] if dice.rand(:on, i) < busy }.compact
+        #     }
+        def generate(length, values: nil, seed: nil, name: nil, align: :timeline, reach: nil, loop: true, events: nil, lead: nil, params: {}, &block)
           length = Generative.length_of(length, :length, divisions: false)
           seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
           reach = reach && Generative.length_of(reach, :reach, divisions: false)
-          gen = Generator.new(length, seed: seed, name: name&.to_s || "generate(seed: #{seed})", reach: reach, &block)
+          label = name&.to_s || "generate(seed: #{seed})"
+          steer = Steer.build(params, length: length, what: label, lead: lead)
+          if steer.nil? && !params.empty?
+            # Nothing moves: the block gets the plain values every cycle
+            fixed = params.transform_keys(&:to_sym).freeze
+            inner = block
+            block = ->(cycle, dice) { inner.call(cycle, dice, **fixed) }
+          end
+          gen = Generator.new(length, seed: seed, name: label, reach: reach, steer: steer, &block)
           values = values&.map { |v| v.is_a?(Integer) || !v.respond_to?(:to_midi) ? v : Scale.root_number(v) }
-          Sequence::Clip.new(events || gen.events(0), length: length, loop: loop, seed: seed, align: align,
+          Sequence::Clip.new(events || gen.preview(0), length: length, loop: loop, seed: seed, align: align,
             variations: [Sequence::Clip::Variation.new(name: gen.name, block: gen)], values: values)
         end
       end

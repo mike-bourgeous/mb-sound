@@ -40,11 +40,17 @@ module MB
         # start (see .new).
         attr_reader :reach
 
+        # The Steer reading the generator's moving options at each cycle's
+        # decision point, or nil (see Steer).
+        attr_reader :steer
+
         # +length+ is the cycle length in whole notes; +reach+ the latest
         # end of any event from its cycle's start (2 cycles by default:
         # notes up to a cycle long), which tells clips how far back to look
-        # for note-offs.
-        def initialize(length, seed:, name: nil, reach: nil, &block)
+        # for note-offs.  +steer+ (a Steer, or nil) makes the generator
+        # steered: the block is also called with the values decided for the
+        # cycle as keywords (`{ |cycle, dice, density:| }`).
+        def initialize(length, seed:, name: nil, reach: nil, steer: nil, &block)
           raise ArgumentError, 'A generator needs a block: { |cycle, dice| events }' unless block
           @length = length
           @reach = reach ? reach.to_r : length * 2
@@ -52,6 +58,7 @@ module MB
           @seed = Integer(seed)
           @name = name || "generate(seed: #{@seed})"
           @block = block
+          @steer = steer
           @cache = {}
           @mutex = Mutex.new
           @stats = { cycles: 0, notes: 0, seconds: 0.0, worst: 0.0, worst_cycle: nil }
@@ -59,21 +66,55 @@ module MB
 
         # The Events of +cycle+ (frozen, sorted by start), computed once and
         # cached; asks Ahead to compute the next cycle in the background.
-        def events(cycle)
+        # A steered generator decides +cycle+'s values first (Steer#decide;
+        # +clip_length+ is the length of the clip's cycles, which sets
+        # where its decision points are).
+        def events(cycle, clip_length = nil)
+          return steered_events(cycle, clip_length || @length) if @steer
+
           list = @mutex.synchronize { @cache[cycle] }
           Ahead.request(self, cycle + 1)
           list || compute(cycle)
         end
 
-        # True if +cycle+ is cached.
-        def cached?(cycle)
-          @mutex.synchronize { @cache.key?(cycle) }
+        # True if this generator reads moving options at decision points.
+        def steered?
+          !@steer.nil?
         end
 
-        # Computes and caches +cycle+ (used by #events and Ahead).
-        def compute(cycle)
+        # The decision lead in whole notes (nil unless steered).
+        def lead
+          @steer&.lead
+        end
+
+        # The events +cycle+ would have if decided now (nothing decided):
+        # what a steered clip lists as its own events.
+        def preview(cycle)
+          return events(cycle) unless @steer
+          values = @steer.peek(cycle, @length, Steer.origin)
+          @mutex.synchronize { @cache[[cycle, values]] } || compute(cycle, values)
+        end
+
+        # True if +cycle+ is cached (with +values+ for a steered generator).
+        def cached?(cycle, values = nil)
+          key = values ? [cycle, values] : cycle
+          @mutex.synchronize { @cache.key?(key) }
+        end
+
+        # Computes the next cycle ahead of time (Ahead): a steered
+        # generator with the values its params have now (+data+ is
+        # [clip length, Steer.origin]), else as #compute.
+        def compute_ahead(cycle, data = nil)
+          return compute(cycle) unless @steer && data
+          values = @steer.peek(cycle, data[0], data[1])
+          compute(cycle, values) unless cached?(cycle, values)
+        end
+
+        # Computes and caches +cycle+ (used by #events and Ahead), with the
+        # decided +values+ for a steered generator.
+        def compute(cycle, values = nil)
           t0 = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID)
-          raw = @block.call(cycle, Dice.new(@seed, cycle))
+          raw = values ? @block.call(cycle, Dice.new(@seed, cycle), **values) : @block.call(cycle, Dice.new(@seed, cycle))
           list = Generator.normalize(raw, @name).sort_by(&:start).freeze
           list.each { |e| check_reach(e, cycle) }
           dt = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID) - t0
@@ -86,7 +127,7 @@ module MB
               @stats[:worst_cycle] = cycle
             end
             @cache.shift while @cache.length >= CACHE_CYCLES
-            @cache[cycle] ||= list
+            @cache[values ? [cycle, values] : cycle] ||= list
           }
         end
 
@@ -144,7 +185,17 @@ module MB
 
         private
 
+        def steered_events(cycle, clip_length)
+          values = @steer.decide(cycle, clip_length)
+          list = @mutex.synchronize { @cache[[cycle, values]] }
+          Ahead.request(self, cycle + 1, [clip_length, Steer.origin])
+          list || compute(cycle, values)
+        end
+
         def check_reach(e, cycle)
+          if @steer && e.start < -@steer.lead
+            raise ArgumentError, "#{@name} made #{e} in cycle #{cycle}: a steered generator's events start at most its lead (#{Sequence::Duration.format(@steer.lead)}) before their cycle, after the decision point"
+          end
           return if e.start >= -@length && e.start < @length * 2 && e.end_time <= @reach
           raise ArgumentError, "#{@name} made #{e} in cycle #{cycle}: events start from one cycle early to two cycles in and end by #{Sequence::Duration.format(@reach)} (pass reach: for longer notes)"
         end

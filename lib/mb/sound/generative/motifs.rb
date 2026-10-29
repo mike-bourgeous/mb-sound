@@ -58,19 +58,27 @@ module MB
         # The cycle length in whole notes (one phrase).
         attr_reader :length
 
+        # The motif density a steered density thins and fills around (see
+        # #steer_density).
+        CORE_DENSITY = 0.5
+
         # +field+ is a Field or FieldTimeline; +around+ the note number the
         # motifs center on; +step+ a Rational; the rest as MB::Sound#motifs.
-        def initialize(field, steps:, step:, form:, answer:, density:, vary:, mutate:, evolve:, leap:, around:, velocity:, legato:, seed:)
+        # +fields+ (for a steered +range:+) gives [field, around] for a
+        # range.  A steered +density+ (G3) builds motifs at CORE_DENSITY.
+        def initialize(field, steps:, step:, form:, answer:, density:, vary:, mutate:, evolve:, leap:, around:, velocity:, legato:, seed:, fields: nil)
           @field = field
+          @fields = fields
+          @by_range = {}
           @steps = steps
           @step = step
           @length = step * steps
           @form = form
           @answer = answer
           @calls = answer.values.uniq.freeze
-          @density = density.to_f
-          @vary = vary.to_f
-          @mutate = mutate.to_f
+          @density = density.is_a?(Numeric) ? density.to_f : CORE_DENSITY
+          @vary = vary.is_a?(Numeric) ? vary.to_f : 0.0
+          @mutate = mutate.is_a?(Numeric) ? mutate.to_f : 0.0
           @evolve = evolve
           @moves = MOVES.select { |d, _| d.abs <= leap }
           @move_steps = @moves.keys.freeze
@@ -95,25 +103,66 @@ module MB
           [@form[pos], pass, pass.div(@evolve), pos]
         end
 
-        # The events of +cycle+ with the cycle's +dice+ (Dice.new(seed, cycle)).
-        def events(cycle, dice)
+        # The events of +cycle+ with the cycle's +dice+ (Dice.new(seed,
+        # cycle)).  Steered options (G3; MB::Sound#motifs) come decided for
+        # the cycle: +density+ thins or fills the motifs' rhythms around
+        # CORE_DENSITY (the same draws every cycle, so a density brings the
+        # same notes back and raising it only adds notes), +vary+ and
+        # +mutate+ replace the numbers, +range+ picks the register.
+        def events(cycle, dice, density: nil, vary: @vary, mutate: @mutate, range: nil)
           letter, _pass, gen, pos = position(cycle)
           return [] unless letter
 
+          field, around = range ? field_for(range) : [@field, @around]
           source = @answer[letter]
-          m = motif(source || letter, gen)
+          m = motif(source || letter, gen, mutate.to_f.clamp(0.0, 1.0))
+          m = steer_density(source || letter, m, density.to_f.clamp(0.0, 1.0)) if density
           notes = notes_of(m)
           notes = answer_of(notes) if source
           repeat = @form[0...pos].include?(letter)
-          notes = vary(notes, dice) if repeat && @vary > 0 && source.nil?
-          realize(cycle, notes, m.anchor, answer: source ? true : false, call: @calls.include?(letter), dice: dice)
+          vary = vary.to_f.clamp(0.0, 1.0)
+          notes = vary(notes, dice, vary) if repeat && vary > 0 && source.nil?
+          realize(cycle, notes, m.anchor, answer: source ? true : false, call: @calls.include?(letter), dice: dice, field: field, around: around)
         end
 
-        # Motif +letter+ in generation +gen+ (see the class comment).
-        def motif(letter, gen)
+        # Motif +m+ of +letter+ thinned or filled to +density+ (G3): below
+        # CORE_DENSITY each note after the first stays with probability
+        # density / CORE_DENSITY, above it each rest fills with a passing
+        # note with probability (density - CORE_DENSITY) / (1 -
+        # CORE_DENSITY), its contour on a run between its neighbors'.  The draws are
+        # per letter and step, so the same density gives the same rhythm.
+        def steer_density(letter, m, density)
+          return m if density == CORE_DENSITY
+          d = Dice.new(@seed, :density, letter)
+          u = d.rands(@steps)
+          on = m.on.dup
+          contour = m.contour.dup
+          if density < CORE_DENSITY
+            keep = density / CORE_DENSITY
+            (1...@steps).each { |s| (on[s] = false; contour[s] = nil) if on[s] && u[s] >= keep }
+          else
+            fill = (density - CORE_DENSITY) / (1 - CORE_DENSITY)
+            filled = (1...@steps).select { |s| !on[s] && u[s] < fill }
+            return m if filled.empty?
+            filled.each { |s| on[s] = true }
+            filled.each do |s|
+              prev = (s - 1).downto(0).find { |k| m.on[k] && m.contour[k] }
+              nxt = (s + 1...@steps).find { |k| m.on[k] && m.contour[k] }
+              a = m.contour[prev]
+              z = nxt ? m.contour[nxt] : a
+              # A run between the neighbors (a turn when they are equal)
+              contour[s] = a == z ? a + (d.rand(:dir, s) < 0.5 ? -1 : 1) : (a + (z - a) * Rational(s - prev, (nxt || @steps) - prev)).round
+            end
+          end
+          Motif.new(on.freeze, contour.freeze, m.velocity, m.anchor).freeze
+        end
+
+        # Motif +letter+ in generation +gen+ (see the class comment), with
+        # mutation chance +mutate+ (the motifs' own by default).
+        def motif(letter, gen, mutate = @mutate)
           return base(letter) if gen < 1
 
-          key = [letter, gen]
+          key = mutate == @mutate ? [letter, gen] : [letter, gen, mutate]
           hit = @mutex.synchronize { @motifs[key] }
           return hit if hit
 
@@ -124,7 +173,7 @@ module MB
           passing = []
           s = 1
           while s < @steps
-            g = latest_mutation(letter, s, gen)
+            g = latest_mutation(letter, s, gen, mutate)
             if g
               d = Dice.new(@seed, :mutation, letter, s, g)
               case @kinds[Dice.index(@kind_weights, d.rand(:kind))]
@@ -197,7 +246,7 @@ module MB
         # The latest generation in (gen - MEMORY, gen] (from 1) in which
         # slot +s+ of +letter+ mutated, or nil.  Draws come in blocks of 64
         # generations (one call into C each).
-        def latest_mutation(letter, s, gen)
+        def latest_mutation(letter, s, gen, mutate)
           lo = MB::M.max(gen - MEMORY + 1, 1)
           g = gen
           while g >= lo
@@ -206,7 +255,7 @@ module MB
             first = blk << 6
             i = g - first
             while i >= 0 && first + i >= lo
-              return first + i if u[i] < @mutate
+              return first + i if u[i] < mutate
               i -= 1
             end
             g = first - 1
@@ -248,30 +297,41 @@ module MB
 
         # A repeat within a pass: middle notes now and then dropped or moved
         # a step (by +vary+, from the cycle's dice).
-        def vary(notes, dice)
+        def vary(notes, dice, amount)
           last = notes.length - 1
           notes.each_with_index.filter_map { |n, i|
             next n if i == 0 || i == last
             u = dice.rand(:vary, n[0])
-            next n if u >= @vary
-            next nil if u < @vary / 3
-            [n[0], n[1] + (u < @vary * 2 / 3 ? 1 : -1), n[2], n[3]]
+            next n if u >= amount
+            next nil if u < amount / 3
+            [n[0], n[1] + (u < amount * 2 / 3 ? 1 : -1), n[2], n[3]]
           }.then { |list|
             # dropped notes: the note before holds through the gap
             list.each_with_index.map { |(s, c, v, _len), i| [s, c, v, (list[i + 1]&.first || @steps) - s] }
           }
         end
 
-        def realize(cycle, notes, anchor, answer:, call:, dice:)
+        # [field, around] for a steered +range+ (cached).
+        def field_for(range)
+          @mutex.synchronize { @by_range[range] } || begin
+            pair = @fields.call(range).freeze
+            @mutex.synchronize {
+              @by_range.shift while @by_range.length >= 16
+              @by_range[range] ||= pair
+            }
+          end
+        end
+
+        def realize(cycle, notes, anchor, answer:, call:, dice:, field: @field, around: @around)
           start = cycle * @length
-          f0 = Generative.field_at(@field, start)
+          f0 = Generative.field_at(field, start)
           t0 = tonal(f0)
           return [] if t0.empty?
-          center = t0[(nearest(t0, @around) + anchor).clamp(0, t0.length - 1)]
+          center = t0[(nearest(t0, around) + anchor).clamp(0, t0.length - 1)]
           last = notes.length - 1
 
           notes.each_with_index.filter_map { |(s, c, v, len), i|
-            f = Generative.field_at(@field, start + @step * s)
+            f = Generative.field_at(field, start + @step * s)
             t = tonal(f)
             next nil if t.empty?
             target = t[(nearest(t, center) + c).clamp(0, t.length - 1)]

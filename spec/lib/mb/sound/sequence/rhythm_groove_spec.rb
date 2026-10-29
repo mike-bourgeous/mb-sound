@@ -48,7 +48,7 @@ RSpec.describe('rhythm and groove templates') do
       expect(line.events.map(&:value)).to eq([24, 29, 33, 31])
       expect(line.to_ruby).to eq(%(midi_clip(#{path.inspect}, track: 1, bars: 2).rhythm.notes(C1, F1, A1, G1)))
       text = MB::Sound::Sequence::Rhythm.new(r.hits, length: r.length, loop: true).to_ruby
-      expect(text).to start_with('rhythm([0r, 1r/2, ')
+      expect(text).to start_with('rhythm_template([0r, 1r/2, ')
       expect(MB::Sound::GraphIO.load(text)).to eq(r)
     end
   end

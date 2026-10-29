@@ -33,8 +33,10 @@ module MB
             @mutex.synchronize { @runners.last }
           end
 
-          # Queues +cycle+ of +generator+ unless it's cached or queued.
-          def request(generator, cycle)
+          # Queues +cycle+ of +generator+ unless it's cached or queued
+          # (+data+ goes to Generator#compute_ahead: a steered generator's
+          # clip length and origin).
+          def request(generator, cycle, data = nil)
             r = nil
             key = [generator, cycle]
             @mutex.synchronize {
@@ -42,14 +44,18 @@ module MB
               return false if r.nil? || @pending.key?(key)
               @pending[key] = true
             }
-            if generator.cached?(cycle)
+            if data.nil? && generator.cached?(cycle)
               @mutex.synchronize { @pending.delete(key) }
               return false
             end
 
             queued = r.background {
               begin
-                generator.compute(cycle) unless generator.cached?(cycle)
+                if data
+                  generator.compute_ahead(cycle, data)
+                elsif !generator.cached?(cycle)
+                  generator.compute(cycle)
+                end
                 @mutex.synchronize { @computed += 1 }
               rescue StandardError => e
                 warn "Generator #{generator} failed computing cycle #{cycle} ahead: #{e.class}: #{e.message}"

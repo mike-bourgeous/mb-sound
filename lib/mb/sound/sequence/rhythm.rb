@@ -15,7 +15,7 @@ module MB
       #     groove.to_clip(36)                    # every hit on one note
       #
       # Rhythms are values (their parts frozen); they print as `clip.rhythm` through
-      # recipes, else as `rhythm([start, length, velocity, { marks }], ...,
+      # recipes, else as `rhythm_template([start, length, velocity, { marks }], ...,
       # length:, loop:)` (MB::Sound#rhythm).
       class Rhythm
         include Enumerable
@@ -156,7 +156,7 @@ module MB
           }
           kw = ["length: #{writer.literal(@length)}"]
           kw << 'loop: true' if @loop
-          "rhythm(#{(rows + kw).join(', ')})"
+          "rhythm_template(#{(rows + kw).join(', ')})"
         end
 
         # Pitches for #notes: each argument as a note number, an Array of
