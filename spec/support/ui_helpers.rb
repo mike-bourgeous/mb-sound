@@ -280,6 +280,16 @@ module UIHelpers
     # FIONREAD (io/wait's #nread is gone in Ruby 4)
     FIONREAD = RUBY_PLATFORM.include?('darwin') ? 0x4004667F : 0x541B
 
+    # Output of the screen this terminal hasn't handled yet (bytes waiting
+    # on its side of the pty, plus 1 while its reader feeds the VT and
+    # writes the VT's replies): a query the screen just wrote is answered
+    # only after this reaches 0 (see #wait_input_idle).
+    def output_pending
+      buf = [0].pack('l')
+      @master.ioctl(FIONREAD, buf)
+      buf.unpack1('l') + (@lock.locked? ? 1 : 0)
+    end
+
     # Bytes written to the terminal that the screen hasn't read yet.
     def unread
       buf = [0].pack('l')
@@ -372,8 +382,18 @@ module UIHelpers
     decoder = tiles.instance_variable_get(:@decoder)
     lock = tiles.instance_variable_get(:@input_lock)
     locked = -> { lock.respond_to?(:mon_locked?) ? lock.mon_locked? : lock.locked? }
-    idle = -> { term.unread.zero? && !decoder.pending? && reader&.status == 'sleep' && !locked.call }
-    return true if wait_until(timeout: timeout) { idle.call && (sleep(0.005); idle.call) }
+    # (the terminal's side too: a reply to a query the screen just wrote,
+    # e.g. Reline's cursor report after Ctrl-Z hands it the screen, lands
+    # after the screen's side looked idle; omnibus16: 2 of 200 loaded walks
+    # failed that way, reported as "after 5 s" by a third check)
+    pending = term.respond_to?(:output_pending) ? -> { term.output_pending.zero? } : -> { true }
+    idle = -> { pending.call && term.unread.zero? && !decoder.pending? && reader&.status == 'sleep' && !locked.call }
+    deadline = MB::U.clock_now + timeout
+    until MB::U.clock_now > deadline
+      return true if idle.call && (sleep(0.005); idle.call)
+
+      sleep 0.01
+    end
 
     # Not idle: what was still going on, so the failure says (omnibus13:
     # tiles_keys_spec's walk timed out in 2 of 4 loaded suites without a
