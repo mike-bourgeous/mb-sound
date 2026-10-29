@@ -285,6 +285,41 @@ module MB
         Sequence::Clip.generate(length, values: Generative.notes_of(source), seed: seed, name: "strikes(seed: #{seed})", align: align,
           reach: MB::M.max(length * 2, length + note)) { |cycle, dice| s.events(cycle, dice) }
       end
+
+      # A Markov chain over section names for long forms (G4;
+      # Generative::Markov): each state with the states that may follow it
+      # and their weights (`outro: {}` ends the chain; pair keys
+      # `[before, state] => { ... }` make it second order; weights may be
+      # knobs, read where the form decides).  +start+ is the first state
+      # (the first rule's by default).  Counter-based draws: a pure
+      # function of +seed+.
+      #
+      #     moods = markov(still: { drift: 3, hush: 1 }, drift: { bloom: 3, still: 1 },
+      #                    bloom: { hush: 2, drift: 1 }, hush: { still: 1 }, seed: 7)
+      #     moods.take(8)                                       # the first 8 states
+      #     play_form moods.flow(still: 6, drift: 4..8, bloom: 8, hush: 4)   # forever
+      #     flow { intro 8; generate moods, sections: 6, still: 6, drift: 8, bloom: 8, hush: 4; outro 8 }
+      def markov(rules = nil, start: nil, seed: nil, **more_rules)
+        rules = (rules || {}).merge(more_rules)
+        Generative::Markov.new(rules, start: start, seed: seed.nil? ? MB::Sound.next_seed : seed)
+      end
+
+      # A stochastic L-system over section names (G4; Generative::LSystem):
+      # +axiom+ (a word: an Array of Symbols) rewritten +generations+
+      # times by +rules+ (symbol => a word, or a Hash of words => weights),
+      # self-similar like a plant.  Symbols left with a rule (nonterminals)
+      # and no length are skipped in flows.  +vary: true+ grows a new word
+      # for each visit of a flow's generate step.
+      #
+      #     song = lsystem(%i[intro body outro],
+      #                    body: { %i[build drop body] => 2, %i[build drop breakdown drop2] => 1 },
+      #                    generations: 3, seed: 5)
+      #     song.word
+      #     play_form song.flow(intro: 16, build: 8, drop: [16, 32], breakdown: 16, drop2: 32, outro: 16)
+      def lsystem(axiom, rules = nil, generations: 2, seed: nil, vary: false, **more_rules)
+        rules = (rules || {}).merge(more_rules)
+        Generative::LSystem.new(axiom, rules, generations: generations, seed: seed.nil? ? MB::Sound.next_seed : seed, vary: vary)
+      end
     end
   end
 end

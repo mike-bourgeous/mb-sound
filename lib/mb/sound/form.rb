@@ -2,6 +2,8 @@ require 'did_you_mean'
 
 require_relative 'form/builder'
 require_relative 'form/state'
+require_relative 'form/walking'
+require_relative 'form/plan'
 require_relative 'form/playback'
 
 module MB
@@ -44,7 +46,11 @@ module MB
       FILL_ON = [:pass, :leave].freeze
 
       # Names the flow builder uses for its own steps (not section names).
-      STEP_NAMES = [:repeat, :fill, :label, :goto, :pick].freeze
+      STEP_NAMES = [:repeat, :fill, :label, :goto, :pick, :generate].freeze
+
+      # Methods the flow builder calls on MB::Sound for generate steps'
+      # sources (not section names either).
+      SOURCE_NAMES = [:markov, :lsystem, :knob].freeze
 
       # The goto target that carries on to the next step (`goto top: 3,
       # next: 1`); not a label name.
@@ -205,6 +211,99 @@ module MB
       Pick = Data.define(:options)
       Option = Data.define(:weight, :steps)
 
+      # A generate step (G4): plays sections drawn from +source+ (a
+      # Generative::Markov or LSystem, or anything with the same form
+      # source methods: #form_start, #form_next, #form_states,
+      # #nonterminal?, #form_force, #steered?, #seed, #to_ruby) one at a
+      # time as the flow plays, each decided at the commit point before it
+      # (so a steered chain reads its knobs there), until the source ends
+      # (a chain's end state, a word's last symbol) or, with +sections+,
+      # that many per visit; then the flow carries on.  +lengths+ gives
+      # sections their lengths per occurrence (bars, Durations, Ranges of
+      # bars or Arrays drawn per occurrence from the source's seed);
+      # sections without one play their declared length.  Every visit
+      # continues the source where the last one left it (a chain's draws
+      # keep counting), so `label :top; generate moods; goto :top` plays
+      # on forever.
+      Generate = Data.define(:source, :lengths, :sections) do
+        def initialize(source:, lengths: {}, sections: nil)
+          unless %i[form_start form_next form_states nonterminal? seed to_ruby].all? { |m| source.respond_to?(m) }
+            raise ArgumentError, "generate needs a section source: markov(...) or lsystem(...) (got #{source.inspect})"
+          end
+          raise ArgumentError, "generate's lengths are a Hash of section => length (got #{lengths.inspect})" unless lengths.is_a?(Hash)
+          lengths.each { |name, len| Form.check_length_spec(name, len) }
+          raise ArgumentError, "generate sections: must be a positive Integer or nil (got #{sections.inspect})" unless sections.nil? || (sections.is_a?(Integer) && sections > 0)
+          super(source: source, lengths: lengths.dup.freeze, sections: sections)
+        end
+
+        # The length of section +name+ for the source's draw +n+ (its own
+        # length spec drawn, else +default+).
+        def length_for(name, n, default)
+          spec = lengths[name]
+          spec.nil? ? default : Form.draw_length(spec, source.seed, n)
+        end
+
+        def to_ruby
+          parts = [source.to_ruby]
+          parts << "bars: #{Form.ruby_value(lengths)}" unless lengths.empty?
+          parts << "sections: #{sections}" if sections
+          "generate #{parts.join(', ')}"
+        end
+      end
+
+      # Raises unless +spec+ is a generated section's length: a length, a
+      # Range of whole bars, or an Array of lengths.
+      def self.check_length_spec(name, spec)
+        case spec
+        when Range
+          ok = spec.begin.is_a?(Integer) && spec.end.is_a?(Integer) && spec.begin > 0 && spec.size > 0
+          raise ArgumentError, "#{name}: a Range of lengths is whole bars (4..8; got #{spec.inspect})" unless ok
+        when Array
+          raise ArgumentError, "#{name}: an Array of lengths needs at least one (got #{spec.inspect})" if spec.empty?
+          spec.each { |l| check_length(name, l) }
+        else
+          check_length(name, spec)
+        end
+      end
+
+      # A length from +spec+ (see #check_length_spec) for draw +n+ of a
+      # source seeded with +seed+: Ranges and Arrays are drawn (counter-
+      # based, so occurrence n always gets the same length).
+      def self.draw_length(spec, seed, n)
+        case spec
+        when Range then Generative::Dice.new(seed, :length).int(spec, n)
+        when Array then Generative::Dice.new(seed, :length).pick(spec, n)
+        else spec
+        end
+      end
+
+      # The declared length for a length spec (a Range's first bar count,
+      # an Array's first length).
+      def self.default_length(spec)
+        case spec
+        when Range then spec.begin
+        when Array then spec.first
+        else spec
+        end
+      end
+
+      # A linear Form of sections in order (each declared where it first
+      # plays) from +list+, [name, draw] pairs, with lengths from +lengths+
+      # (name => length spec, drawn for each pair's draw number with
+      # +seed+, as a generate step draws them).  For Markov#flow and
+      # LSystem#flow.
+      def self.linear(list, lengths, seed:)
+        missing = list.map(&:first).uniq - lengths.keys
+        raise ArgumentError, "No length for #{missing.map(&:inspect).join(', ')} (give each section a length: #{missing.first}: 8)" unless missing.empty?
+        sections = {}
+        order = list.map { |name, i|
+          len = draw_length(lengths[name], seed, i)
+          sections[name] ||= Section.new(name: name, length: len)
+          Play.new(name: name, times: nil, length: same_length?(len, sections[name].length) ? nil : len)
+        }
+        new(sections: sections, order: order)
+      end
+
       # Raises unless +length+ is a section length (a positive Duration or
       # number of bars).
       def self.check_length(name, length)
@@ -348,6 +447,11 @@ module MB
         Form.new(sections: sections, order: map_order_lengths(@order, block), phrase_fills: fills)
       end
 
+      # True if the form has generate steps (sections decided as it plays).
+      def generative?
+        @program.any? { |ins| ins[0] == :generate }
+      end
+
       def ==(other)
         other.is_a?(Form) && to_ruby == other.to_ruby
       end
@@ -399,10 +503,24 @@ module MB
             raise ArgumentError, 'label :next is reserved (`goto top: 3, next: 1` means carry on to the next step); give the label another name (e.g. :onward)' if e.name == NEXT
           when Goto
             Form.check_goto(e.target, e.times)
+          when Generate
+            check_generate(e)
           else
-            raise ArgumentError, "Form order entries are Play, Repeat, Label, Goto, or Pick (got #{e.inspect})"
+            raise ArgumentError, "Form order entries are Play, Repeat, Label, Goto, Pick, or Generate (got #{e.inspect})"
           end
         end
+      end
+
+      # A generate step's sections: every name its source may give is a
+      # section of the form (declared, or given a length in the step),
+      # except nonterminals (an L-system's rewritten symbols) without one.
+      def check_generate(e)
+        e.lengths.each_key { |n| check_section(n) }
+        names = e.source.form_states.reject { |n| e.source.nonterminal?(n) && !@sections.key?(n) }
+        missing = names.reject { |n| @sections.key?(n) }
+        return if missing.empty?
+        raise ArgumentError, "generate #{e.source.to_ruby}: no length for #{missing.map(&:inspect).join(', ')} " \
+          "(give it one: generate ..., bars: { #{missing.first}: 8 }, or declare it in the flow)"
       end
 
       def check_section(name)
@@ -436,7 +554,7 @@ module MB
               raise ArgumentError, "goto #{t.inspect}: no label #{t.inspect} in the form#{hint}"
             end
             li = labels[t]
-            if li <= i && @program[li...i].none? { |x| x[0] == :play }
+            if li <= i && @program[li...i].none? { |x| x[0] == :play || x[0] == :generate }
               raise ArgumentError, "goto #{t.inspect} would loop forever without playing a section"
             end
           end
@@ -457,6 +575,8 @@ module MB
             out << [:label, e.name].freeze
           when Goto
             out << [:goto, e.target, e.times].freeze
+          when Generate
+            out << [:generate, e].freeze
           when Pick
             at = out.length
             out << nil
@@ -504,6 +624,10 @@ module MB
             lines << "#{indent}#{goto_ruby(e)}"
           when Pick
             emit_pick(e, declared, lines, indent)
+          when Generate
+            lines << "#{indent}#{e.to_ruby}"
+            # (the step declares the sections it gives lengths to)
+            e.lengths.each_key { |n| declared[n] ||= @sections[n].length }
           when Play
             s = @sections[e.name]
             len = e.length || s.length
@@ -531,6 +655,14 @@ module MB
           when Play then e.length ? e.with(length: block.call(e.length, :play)) : e
           when Repeat then e.with(steps: map_order_lengths(e.steps, block).freeze)
           when Pick then e.with(options: e.options.map { |o| o.with(steps: map_order_lengths(o.steps, block).freeze) }.freeze)
+          when Generate
+            e.with(lengths: e.lengths.transform_values { |spec|
+              case spec
+              when Range then (block.call(spec.begin, :generate)..block.call(spec.end, :generate))
+              when Array then spec.map { |l| block.call(l, :generate) }
+              else block.call(spec, :generate)
+              end
+            })
           else e
           end
         }

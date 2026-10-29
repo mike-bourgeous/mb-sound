@@ -150,6 +150,45 @@ module MB
           nil
         end
 
+        # Plays sections drawn from +source+ (a markov or lsystem; see
+        # Form::Generate) as the flow plays: one per pass, each decided at
+        # the commit point before it, until the source ends (or +sections+
+        # per visit).  +bars:+ (or keywords) gives sections their lengths
+        # (bars, Durations, Ranges of bars or Arrays drawn per occurrence),
+        # declaring the ones the flow hasn't declared:
+        #
+        #     label :top
+        #     generate moods, still: 6, drift: 4..8, bloom: [8, 12]
+        #     goto :top
+        def generate(source, bars: {}, sections: nil, **lengths)
+          lengths = bars.merge(lengths)
+          step = Generate.new(source: source, lengths: lengths, sections: sections)
+          lengths.each do |name, spec|
+            __adopt__(name)
+            next if @sections.key?(name)
+            ::Kernel.raise ::ArgumentError, "generate: #{name.inspect} can't be a section name" if (STEP_NAMES + SOURCE_NAMES).include?(name)
+            @sections[name] = Section.new(name: name, length: Form.default_length(spec))
+            __define__(name)
+          end
+          @stack.last << step
+          nil
+        end
+
+        # Sources and params for generate steps, so a printed flow
+        # (`generate markov(...), bars: { ... }`) builds again as it reads:
+        # these call MB::Sound's methods (and can't be section names).
+        def markov(*args, **kwargs)
+          ::MB::Sound.markov(*args, **kwargs)
+        end
+
+        def lsystem(*args, **kwargs)
+          ::MB::Sound.lsystem(*args, **kwargs)
+        end
+
+        def knob(*args, **kwargs)
+          ::MB::Sound.knob(*args, **kwargs)
+        end
+
         # The Form built so far.  (Named so it can't be a section name.)
         def __form__
           Form.new(sections: @sections, order: @order, phrase_fills: @phrase_fills)

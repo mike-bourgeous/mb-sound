@@ -11,7 +11,9 @@ module MB
       # Targets: a bar number (counting from 1, through the meter map), a
       # section or label of the song form playing (the form plays on from
       # there, see Form::Playback#seek_now), or another marker.  Positions
-      # are resolved when the seek lands.
+      # are resolved when the seek lands; a position inside a playing form
+      # plays the form on from the pass an uninterrupted run plays there
+      # (Form::Playback#seek_position).
       #
       # Undo puts the timeline back where it was when the seek landed (and
       # the form back in the pass it was playing), through a :restore
@@ -132,14 +134,20 @@ module MB
         # timeline, not each track).
         def apply_seek(target)
           @epoch = epoch + 1
-          without_command {
+          without_command_or_line {
             pb = arrangement.playback
             if target.is_a?(Symbol) && pb && !pb.ended? && (pb.form.sections.key?(target) || pb.form.labels.key?(target))
               pb.seek_now(target)
             else
               pos = target.is_a?(Symbol) ? markers.position(target) : seek_position(target)
               raise ArgumentError, "No marker #{target.inspect}" if pos.nil?
-              @transport.seek(pos)
+              if pb && pb.started? && !pb.ended? && pos >= pb.start_time
+                # The form plays on from the pass playing there in an
+                # uninterrupted run (G4; Form::Playback#seek_position)
+                pb.seek_position(pos)
+              else
+                @transport.seek(pos)
+              end
             end
           }
         end
@@ -153,11 +161,30 @@ module MB
         def restore_timeline(state)
           raise 'Nothing to restore for the timeline' unless state.is_a?(TimelineState)
           @epoch = epoch + 1
-          without_command {
+          without_command_or_line {
             @transport.seek(state.pos)
             pb = arrangement.playback
             pb.restore_seek(state.form) if state.form && pb && !pb.ended?
           }
+        end
+
+        # #without_command, and outside the take line being typed (a seek
+        # that lands right away restarts the form inside the line: the
+        # scene launches it makes belong to the seek, in the next epoch,
+        # and a replay makes them again when the seek lands, so the line
+        # mustn't count them as its own landings, which would make the
+        # replay run it early).
+        # While a take replays the same holds for the replayed line: its
+        # recorded landings and issue time aren't the form's.
+        def without_command_or_line(&block)
+          line = Thread.current[:mb_sound_take_line]
+          perform = Thread.current[:mb_sound_session_perform]
+          Thread.current[:mb_sound_take_line] = nil
+          Thread.current[:mb_sound_session_perform] = perform&.except(:forced, :now, :line)
+          without_command(&block)
+        ensure
+          Thread.current[:mb_sound_take_line] = line
+          Thread.current[:mb_sound_session_perform] = perform
         end
 
         # Runs the block in a throwaway undo group: changes made inside it

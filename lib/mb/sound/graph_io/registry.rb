@@ -135,7 +135,7 @@ module MB
         # rack's own knobs, inside rack blocks only, see Loader; breakbeat:
         # a break that ships with mb-sound, read from the library, never a
         # document path).
-        TOP_EXTRA = (Set[:per_voice, :per_channel, :scale, :tones, :weights, :harmony, :knob, :cc, :modes, :breakbeat] | MB::Sound::Rack::CONSTRUCTORS).freeze
+        TOP_EXTRA = (Set[:per_voice, :per_channel, :scale, :tones, :weights, :harmony, :markov, :lsystem, :knob, :cc, :modes, :breakbeat] | MB::Sound::Rack::CONSTRUCTORS).freeze
 
         # Methods whose blocks build graphs (run once per call as document
         # code) rather than run while sampling.

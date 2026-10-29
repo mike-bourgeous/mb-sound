@@ -47,7 +47,8 @@ module MB
 
         if (f = TransportMethods.loaded_flow(arr))
           pb = arr.play_form(f, at: point) or return nil
-          return Status.new(:started, s.stamp(pb.start_time), "flow #{f.steps.map(&:first).uniq.first(6).join(' ')}#{' ...' if f.steps.map(&:first).uniq.length > 6}")
+          names = f.generative? ? f.sections.keys : f.steps.map(&:first).uniq
+          return Status.new(:started, s.stamp(pb.start_time), "flow #{names.first(6).join(' ')}#{' ...' if names.length > 6}")
         end
 
         return Status.new(:playing, s.stamp(s.now), "players #{s.players.keys.map(&:inspect).join(' ')}") unless s.idle?

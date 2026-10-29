@@ -50,16 +50,10 @@ module MB
           end
         end
 
-        # A decision inside the playback: the section that plays next
-        # (+section+ at instruction +index+ of the form's program, pass
-        # +pass+; nil section for the end), the goto counts after getting
-        # there (+counters+, adopted when the pass starts, so a re-decided
-        # commit starts from the same counts), and the +labels+ passed.
-        Step = Data.define(:index, :section, :pass, :counters, :labels)
+        include Walking
 
-        # The most instructions one decision follows before giving up (a
-        # loop of gotos and picks that never reaches a section).
-        WALK_LIMIT = 10_000
+        # A decision inside the playback (see Form::Step).
+        Step = Form::Step
 
         attr_reader :form, :seed
 
@@ -94,6 +88,11 @@ module MB
           @started = false
           @gen = 0
           @end_at = nil # (#end_at: no section begins at or after it)
+          @decision_offset = 0 # (see #decision_count)
+          @length = nil # (the current pass's length and times)
+          @times = nil
+          @start_time = nil
+          @pass_start = nil
           check_form
         end
 
@@ -103,7 +102,7 @@ module MB
             raise 'This form has already started' if @started
             @started = true
             @start_time = time.to_r
-            raise ArgumentError, 'The form has no sections' unless @program.any? { |ins| ins[0] == :play }
+            raise ArgumentError, 'The form has no sections' unless @program.any? { |ins| ins[0] == :play || ins[0] == :generate }
             if @start_time <= @session.now
               # Starting now: launch the first section right away (a
               # scheduled block would run a buffer later when idle)
@@ -121,6 +120,11 @@ module MB
         # True once the form has played its end (or was stopped).
         def ended?
           @ended
+        end
+
+        # True once #start was called.
+        def started?
+          @started
         end
 
         # True while the current section repeats until #onward.
@@ -182,6 +186,7 @@ module MB
         # Goes to the last section of the play order (the ending) at the
         # next uncommitted boundary.
         def finish
+          # (a flow of only generate steps has no last section: it ends)
           control(after: :later) { @control = [:index, last_play] }
         end
 
@@ -229,7 +234,14 @@ module MB
           target = control_target(name)
           @lock.synchronize {
             raise 'The form has ended' if @ended
-            index, pos = @where[name] || [target[0] == :label ? @form.labels[name] : first_play(name), nil]
+            index, pos, length = @where[name]
+            if index.nil? && target[0] == :section && first_play(name).nil?
+              # Only a generate step plays it: where the plan from here
+              # (decided as the form would decide) first plays it
+              found = find_ahead(name) or raise ArgumentError, "#{name.inspect} doesn't come up in the next #{PLAN_SEARCH} passes of the form"
+              return seek_to_pass(*found)
+            end
+            index ||= target[0] == :label ? @form.labels[name] : first_play(name)
             pos ||= score_positions[index]
 
             drop_pending_pass
@@ -237,17 +249,51 @@ module MB
             @looping = false
             @transport.seek(pos)
 
-            step = @program[index][0] == :label ? walk(index) : Step.new(index: index, section: name, pass: 1, counters: @counters, labels: [].freeze)
+            step = case @program[index][0]
+                   when :label then walk(index, time: pos)
+                   when :generate
+                     forced_generate_step(name).then { |st| length ? st.with(length: length) : st }
+                   else play_step(index, @counters)
+                   end
             Session.with_context(session: @session, time: pos, source: Session.context&.[](:source) || :set) {
               set_label_markers(step.labels, pos)
               if step.section
                 @counters = step.counters
-                begin_pass(step.index, step.section, 1, pos)
+                begin_pass(step, pos)
               else
                 finish_form(pos)
               end
             }
             Decision.new(section: step.section, at: @session.stamp(pos), committed: true)
+          }
+        end
+
+        # How many passes ahead #seek_now looks for a section only a
+        # generate step plays.
+        PLAN_SEARCH = 10_000
+
+        # Moves the timeline to +pos+ (whole notes) and plays the form on
+        # from the pass playing there in an uninterrupted run of the form
+        # from its start (G4: the same decisions, worked out by a
+        # Form::Plan, so a seek into a long generated piece plays what the
+        # piece plays there; performer controls aren't replayed).  The
+        # pass's scene launches at +pos+, mid-section; the pass ends where
+        # it would.  The action of a :seek change to a bar or other
+        # position (see Session::Seeks).  Returns the Decision.
+        def seek_position(pos)
+          pos = pos.to_r
+          @lock.synchronize {
+            raise 'The form has ended' if @ended
+            plan = Plan.new(@form, seed: @seed, transport: @transport, start: @start_time)
+            pass = plan.at(pos)
+            unless pass
+              drop_pending_pass
+              @transport.fills.remove_owner(self, after: pos)
+              @transport.seek(pos)
+              Session.with_context(session: @session, time: pos, source: Session.context&.[](:source) || :set) { finish_form(pos) }
+              return Decision.new(section: nil, at: @session.stamp(pos), committed: true)
+            end
+            seek_to_pass(pass, plan.history.first(pass.number), at: pos)
           }
         end
 
@@ -271,8 +317,10 @@ module MB
             @transport.fills.remove_owner(self, after: snap[:pass_start])
             @counters = snap[:counters]
             @looping = snap[:looping]
+            step = Step.new(index: snap[:index], section: snap[:section], pass: snap[:pass], counters: snap[:counters], labels: [].freeze,
+                            length: snap[:length], times: snap[:times])
             Session.with_context(session: @session, time: snap[:pass_start], source: Session.context&.[](:source) || :set) {
-              begin_pass(snap[:index], snap[:section], snap[:pass], snap[:pass_start], record: false)
+              begin_pass(step, snap[:pass_start], record: false)
             }
           }
         end
@@ -350,7 +398,7 @@ module MB
           @lock.synchronize {
             return 'form (not started)' unless @section || @ended
             return "form ended after #{@history.length} passes" if @ended
-            times = @program[@index][2]
+            times = @times
             bar_now = (@transport.bar_at(@session.now) - @transport.bar_at(@pass_start)).floor + 1
             bars = (@transport.bar_at(@boundary) - @transport.bar_at(@pass_start))
             bars = bars.denominator == 1 ? bars.to_i : bars.to_f.round(2)
@@ -367,8 +415,16 @@ module MB
         # sections in order with the one playing in brackets, and how to
         # steer and end it.
         def show
-          names = @form.steps.map { |name, times| "#{name}#{" x#{times}" if times != 1}" }
-          names = @form.steps.each_with_index.map { |(name, _), i| name == @section && !@ended ? "[#{names[i]}]" : names[i] }
+          if @form.generative?
+            # (sections decided as it plays: the last few passes, then more)
+            played = @lock.synchronize { @played.last(6) }
+            names = played.each_with_index.map { |(name, len), i| t = "#{name} #{Form.ruby_value(len)}"; i == played.length - 1 && !@ended ? "[#{t}]" : t }
+            names.unshift('…') if @history.length > played.length
+            names << '… (generated as it plays)' unless @ended
+          else
+            names = @form.steps.map { |name, times| "#{name}#{" x#{times}" if times != 1}" }
+            names = @form.steps.each_with_index.map { |(name, _), i| name == @section && !@ended ? "[#{names[i]}]" : names[i] }
+          end
           lines = ["flow #{self}#{", ends at #{@session.stamp(@end_at)}" if @end_at && !@ended}"]
           lines << "  #{names.join(' · ')}"
           if @ended
@@ -445,19 +501,6 @@ module MB
           @session.schedule(time, description: "form: #{what}", owner: :form, &block)
         end
 
-        # The length in whole notes of a section length (a Duration, or bars
-        # counted from +from+).
-        def length_from(length, from)
-          length.is_a?(Sequence::Duration) ? length.to_r : @transport.bars_length(from, length)
-        end
-
-        # The length in whole notes of +length+ (a Duration, or bars)
-        # ending at +to+.
-        def length_before(length, to)
-          return length.to_r if length.is_a?(Sequence::Duration)
-          to - @transport.bar_position(@transport.bar_at(to) - length.to_r)
-        end
-
         # The index of the last section in the program (for #finish).
         def last_play
           @program.rindex { |ins| ins[0] == :play }
@@ -484,6 +527,8 @@ module MB
             case ins[0]
             when :play
               ins[2].times { pos += length_from(ins[3], pos) }
+              # (a generate step's sections are decided as it plays: none
+              # counted here)
             when :pick
               picks << { start: pos, finish: ins[2], after: nil }
             when :jump
@@ -501,30 +546,35 @@ module MB
         def begin_first
           @lock.synchronize {
             return if @ended
-            step = walk(0)
+            step = walk(0, time: @start_time)
             set_label_markers(step.labels, @start_time)
             @counters = step.counters
-            step.section ? begin_pass(step.index, step.section, 1, @start_time) : finish_form(@start_time)
+            step.section ? begin_pass(step, @start_time) : finish_form(@start_time)
           }
         end
 
-        # Starts pass +pass+ of section +name+ (instruction +index+) at
-        # +time+: launches its scene, sets phrase fills and markers, and
-        # schedules its commit point and boundary.  Runs in a scheduled
-        # block at +time+.  +record+ false leaves the history alone (a pass
-        # resumed by undo).
-        def begin_pass(index, name, pass, time, record: true)
+        # Starts the pass of +step+ (a Step: its section, instruction index,
+        # pass, length, and times) at +time+: launches its scene, sets
+        # phrase fills and markers, and schedules its commit point and
+        # boundary.  Runs in a scheduled block at +time+ (or, for a seek
+        # into a pass, at the seek's position, after +time+).  +record+
+        # false leaves the history alone (a pass resumed by undo).
+        def begin_pass(step, time, record: true)
           @lock.synchronize {
             return if @ended
 
+            name = step.section
+            index = step.index
             sec = @form.sections[name]
             @index = index
             @section = name
-            @pass = pass
+            @pass = step.pass
+            @length = step.length
+            @times = step.times
             @pass_start = time
             if record
               @history << name
-              @played << [name, @program[index][3]].freeze
+              @played << [name, step.length].freeze
             end
             @committed = false
             @commit_record = nil
@@ -540,15 +590,17 @@ module MB
             first_seq = @session.journal.next_seq
             launch(scene, fade: sec.fade) if scene && @arrangement.scenes.key?(scene)
             # The section's knob values, after its scene's (they win)
+            # (a pass a seek enters mid-way turns them where the seek lands)
+            turn_at = [time, @session.now].max
             sec.knobs.each do |k, v|
-              @session.send(:without_command) { @arrangement.send(:turn_knob, k, v, time) }
+              @session.send(:without_command) { @arrangement.send(:turn_knob, k, v, turn_at) }
             end
             @pass_seqs = first_seq...@session.journal.next_seq
 
-            # (this play's length: a section may play for different lengths)
-            @boundary = time + length_from(@program[index][3], time)
+            # (this pass's length: a section may play for different lengths)
+            @boundary = time + length_from(@length, time)
             @session.markers.set(name, kind: :section, pos: time)
-            @where[name] = [index, time]
+            @where[name] = [index, time, @length]
 
             @transport.fills.prune(time - 1) # fills that ended over a whole note ago
             add_phrase_fills(time, @boundary)
@@ -561,6 +613,49 @@ module MB
             boundary = @boundary
             schedule(boundary, "#{name} ends") { cross(boundary) if gen == @gen }
           }
+        end
+
+        # The number of passes chance decisions count (seeding each
+        # decision's generator): the passes played, plus the difference a
+        # seek into a Form::Plan made (the passes an uninterrupted run had
+        # played there).
+        def decision_count
+          @history.length + @decision_offset
+        end
+
+        # The pass of an uninterrupted run (a Form::Plan from the form's
+        # start) that next plays section +name+ after the current pass, and
+        # the names played before it, or nil.
+        def find_ahead(name)
+          plan = Plan.new(@form, seed: @seed, transport: @transport, start: @start_time)
+          now = [@pass_start || @start_time, @transport.position].max
+          from = 0
+          from += 1 while (p = plan[from]) && p.start <= now && from < PLAN_SEARCH
+          pass = plan.find(name, from: from, limit: PLAN_SEARCH) or return nil
+          [pass, plan.history.first(pass.number)]
+        end
+
+        # Moves the timeline to +at+ (the pass's start by default) and plays
+        # Plan pass +pass+ from there, counting decisions from the passes an
+        # uninterrupted run played before it (so the passes after it draw
+        # what that run draws; the run's names, +_history+, are for goto
+        # Procs, which see what actually played).  Returns the Decision.
+        def seek_to_pass(pass, _history, at: nil)
+          pos = at || pass.start
+          drop_pending_pass
+          @transport.fills.remove_owner(self, after: pos)
+          @looping = false
+          @transport.seek(pos)
+          # Decisions count passes as the uninterrupted run did (the history
+          # stays what played)
+          @decision_offset = pass.number - @history.length
+          @counters = pass.counters
+          step = Step.new(index: pass.index, section: pass.section, pass: pass.pass, counters: pass.counters, labels: [].freeze,
+                          length: pass.length, times: pass.times)
+          Session.with_context(session: @session, time: pos, source: Session.context&.[](:source) || :set) {
+            begin_pass(step, pass.start)
+          }
+          Decision.new(section: pass.section, at: @session.stamp(pos), committed: true)
         end
 
         # Drops what the form scheduled and launched ahead for the pass
@@ -659,7 +754,7 @@ module MB
           set_label_markers(@next.labels, @boundary)
           if @next.section
             @session.markers.set(@next.section, kind: :section, pos: @boundary)
-            @where[@next.section] = [@next.index, @boundary]
+            @where[@next.section] = [@next.index, @boundary, @next.length]
           end
           @commit_record = record
         end
@@ -694,7 +789,8 @@ module MB
 
         # The current pass for #seek_snapshot.
         def pass_snapshot
-          { index: @index, section: @section, pass: @pass, pass_start: @pass_start, counters: @counters, looping: @looping }.freeze
+          { index: @index, section: @section, pass: @pass, pass_start: @pass_start, counters: @counters, looping: @looping,
+            length: @length, times: @times }.freeze
         end
 
         # At a boundary: the next pass, or the end.
@@ -717,7 +813,7 @@ module MB
           if nxt.section.nil?
             finish_form(time)
           else
-            begin_pass(nxt.index, nxt.section, nxt.pass, time)
+            begin_pass(nxt, time)
           end
         end
 
@@ -744,99 +840,20 @@ module MB
         # or calling Procs (for #upcoming).  With +skip+, leaves the
         # section even if it has passes left (for #skip).
         def decide_unlocked(peek: false, skip: false)
+          time = @commit_time || @start_time
           case @control&.first
           when :section then return goto_section(@control[1])
-          when :label then return walk(@form.labels[@control[1]], peek: peek)
-          when :index then return Step.new(index: @control[1], section: @program[@control[1]][1], pass: 1, counters: @counters, labels: [].freeze)
+          when :label then return walk(@form.labels[@control[1]], peek: peek, time: time)
+          when :index
+            return Step.new(index: nil, section: nil, pass: nil, counters: @counters, labels: [].freeze) if @control[1].nil?
+            return play_step(@control[1], @counters)
           end
           return nil if @section.nil?
-          return Step.new(index: @index, section: @section, pass: @pass + 1, counters: @counters, labels: [].freeze) if @looping && !skip
-          return Step.new(index: @index, section: @section, pass: @pass + 1, counters: @counters, labels: [].freeze) if @pass < @program[@index][2] && !skip
-          walk(@index + 1, peek: peek)
-        end
-
-        # Follows the program from instruction +i+ (through labels, gotos,
-        # picks, and jumps) to the next section, returning a Step.  Gotos
-        # count in a copy of the counters; chance draws from one generator
-        # per decision.
-        def walk(i, peek: false)
-          counters = @counters.dup
-          labels = []
-          rng = nil
-          WALK_LIMIT.times do
-            ins = @program[i]
-            if ins.nil?
-              return Step.new(index: nil, section: nil, pass: nil, counters: counters.freeze, labels: labels.freeze)
-            end
-
-            case ins[0]
-            when :play
-              return Step.new(index: i, section: ins[1], pass: 1, counters: counters.freeze, labels: labels.freeze)
-            when :label
-              labels << ins[1]
-              i += 1
-            when :jump
-              i = ins[1]
-            when :pick
-              options = ins[1]
-              if options.length == 1
-                i = options[0][1]
-              else
-                return nil if peek
-                rng ||= decision_rng
-                i = weighted(options, rng)
-              end
-            when :goto
-              _, target, times = ins
-              n = counters[i] || 0
-              if times && n >= times
-                counters.delete(i) # fell through: the count starts over
-                i += 1
-                next
-              end
-
-              label = case target
-                      when Symbol
-                        target
-                      when Hash
-                        return nil if peek
-                        rng ||= decision_rng
-                        weighted(target, rng)
-                      when Proc
-                        return nil if peek
-                        goto_proc(target)
-                      end
-
-              if label.nil? || label == Form::NEXT
-                i += 1
-              else
-                counters[i] = n + 1 if times
-                i = @form.labels.fetch(label)
-              end
-            end
-          end
-          raise "The flow went #{WALK_LIMIT} steps without reaching a section (gotos and picks with nothing to play?)"
-        end
-
-        # The random number generator for one decision.
-        def decision_rng
-          Random.new(@seed * 1_000_003 + @history.length)
-        end
-
-        # Picks a key of +weights+ (pairs of [key, weight] or [weight,
-        # value] for picks) by weight.
-        def weighted(weights, rng)
-          pairs = weights.is_a?(Hash) ? weights.map { |k, w| [w, k] } : weights
-          total = pairs.sum(&:first).to_f
-          r = rng.rand * total
-          pairs.find { |w, _| (r -= w) < 0 }&.last || pairs.last.last
-        end
-
-        # Calls a goto Proc, checking that it returns a label or nil.
-        def goto_proc(target)
-          label = target.call(state_unlocked)
-          return label if label.nil? || label == Form::NEXT || @form.labels.key?(label)
-          raise ArgumentError, "A goto Proc returned #{label.inspect}; return a label of the form (#{@form.labels.keys.map(&:inspect).join(', ')}) or nil (or :next) to carry on#{Form.suggest(label, @form.labels.keys)}"
+          again = Step.new(index: @index, section: @section, pass: @pass + 1, counters: @counters, labels: [].freeze, length: @length, times: @times)
+          return again if @looping && !skip
+          return again if @pass < @times && !skip
+          # (a generate step plays its next section, or lets the flow carry on)
+          walk(@program[@index][0] == :generate ? @index : @index + 1, peek: peek, time: time)
         end
 
         # The next appearance of section +name+ in the program after the
@@ -847,9 +864,11 @@ module MB
           (1..n).each do |k|
             i = (from + k) % n
             ins = @program[i]
-            return Step.new(index: i, section: name, pass: 1, counters: @counters, labels: [].freeze) if ins[0] == :play && ins[1] == name
+            return play_step(i, @counters) if ins[0] == :play && ins[1] == name
           end
-          raise ArgumentError, "No section #{name.inspect} in the form"
+          # Only a generate step plays it: that step plays it next, and its
+          # source carries on from there (a chain from that state)
+          forced_generate_step(name) or raise ArgumentError, "No section #{name.inspect} in the form"
         end
       end
     end
