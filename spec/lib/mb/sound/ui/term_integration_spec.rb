@@ -6,16 +6,22 @@ require_relative '../../../../support/ui_helpers'
 RSpec.describe('mb-term in mb-sound', :aggregate_failures) do
   include UIHelpers
 
-  it 'keeps the old UI names as the gem\'s (until the follow-up removes them)' do
-    expect(MB::Sound::UI::VT).to equal(MB::Term::VT)
-    expect(MB::Sound::UI::Term).to equal(MB::Term::Terminal)
-    expect(MB::Sound::UI::Input::Router).to equal(MB::Term::Input::Router)
-    expect(MB::Sound::UI::Viewports::Tiler).to equal(MB::Term::Viewports::Tiler)
-    expect(MB::Sound::UI::Themes).to equal(MB::Term::Themes)
-    expect(MB::Sound::UI::DataFile::LoadError).to equal(MB::Term::DataFile::LoadError)
-    expect(MB::Sound::UI::Screen).to equal(MB::Term::Screen)
-    expect(MB::Sound::Plot::Text::Cells).to equal(MB::Term::Cells)
-    expect(MB::Sound::Plot::Text::ANSI).to equal(MB::Term::ANSI)
+  # (omnibus16 removed the aliases term-extract-1 kept; no legacy names)
+  it 'has no aliases of the gem\'s names left on the mb-sound side' do
+    %i[VT Term Screen Input Viewports Themes DataFile].each do |name|
+      expect(MB::Sound::UI.const_defined?(name, false)).to eq(false), "MB::Sound::UI::#{name}"
+    end
+    %i[Cells ANSI].each do |name|
+      expect(MB::Sound::Plot::Text.const_defined?(name, false)).to eq(false), "MB::Sound::Plot::Text::#{name}"
+    end
+    root = File.expand_path('../../../../..', __dir__)
+    old = /\b(?:UI|ui)::(VT|Term|Screen|Input|Viewports|Themes|DataFile)\b|\bText::(Cells|ANSI)\b/
+    hits = Dir[File.join(root, '{lib,bin,spec}/**/*.rb')].flat_map { |f|
+      next [] if f == __FILE__
+
+      File.readlines(f).each_with_index.filter_map { |l, i| "#{f.delete_prefix("#{root}/")}:#{i + 1}" if l.match?(old) }
+    }
+    expect(hits).to eq([]), "old names (use MB::Term::*): #{hits.first(10).join(', ')}"
   end
 
   it 'registers its native cells as the gem\'s native grid (the adapter)' do

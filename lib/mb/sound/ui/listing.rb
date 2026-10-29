@@ -107,7 +107,7 @@ module MB
         def pane_catalog
           used = Hash.new { |h, k| h[k] = [] }
           { **layouts, **tile_layouts, **show_layouts }.each do |lname, l|
-            names = l.is_a?(Viewports::Layout) ? l.panes : walk_names(l)
+            names = l.is_a?(MB::Term::Viewports::Layout) ? l.panes : walk_names(l)
             names.each { |n| used[n] << lname }
           end
           entries = panes.values.map do |p|

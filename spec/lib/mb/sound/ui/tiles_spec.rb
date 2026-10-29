@@ -1,6 +1,6 @@
 require_relative '../../../../support/ui_helpers'
 
-# The tiled console, headless: a FakeTerminal (a pty read by a UI::VT) is
+# The tiled console, headless: a FakeTerminal (a pty read by a MB::Term::VT) is
 # the terminal, and the REPL is a real Pry and Reline on the screen's own
 # pty (in a thread here; the console adopts its main-thread Pry instead).
 RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
@@ -93,7 +93,7 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     expect(@term.wait_for('KNOBS')).to eq(true)
     expect(@tiles.tiler.layout.panes).to include(:knobs)
     @term.type('1') # transport is pane 1 (reading order); back to the REPL with h/l
-    @tiles.act(MB::Sound::UI::Input::Action.of(:focus_index, @tiles.tiler.numbered.index(:repl) + 1))
+    @tiles.act(MB::Term::Input::Action.of(:focus_index, @tiles.tiler.numbered.index(:repl) + 1))
     before = repl_rect.w
     @term.write("\e[1;2C\e[1;2C\e[1;6C") # shift-right, shift-right, ctrl-shift-right: 7 cells
     @term.settle
@@ -256,7 +256,7 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     @term.type('z')
     expect(wait_until { @tiles.tiler.layout.zoom.nil? }).to eq(true)
     # Focus elsewhere: only NAV's keys
-    @tiles.act(MB::Sound::UI::Input::Action.of(:focus_index, @tiles.tiler.numbered.index(:repl) + 1))
+    @tiles.act(MB::Term::Input::Action.of(:focus_index, @tiles.tiler.numbered.index(:repl) + 1))
     @term.type('?')
     expect(@term.wait_for('keys (Esc closes')).to eq(true)
     expect(@term.text).not_to include('capture into the armed tracks')

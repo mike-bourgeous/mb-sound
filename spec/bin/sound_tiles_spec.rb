@@ -1,6 +1,6 @@
 require_relative '../support/ui_helpers'
 
-# The console in a terminal (a pty read by UI::VT), entering the tiled
+# The console in a terminal (a pty read by MB::Term::VT), entering the tiled
 # screen: the running Pry moves into the REPL pane (:adopt), output from
 # `puts`, stderr, and Ctrl-C behave as in a terminal, NAV keys work, and
 # `ui off` and `exit` give the terminal back.
@@ -9,7 +9,7 @@ RSpec.describe('bin/sound.rb with ui :tiles', :aggregate_failures) do
     require 'pty'
     # (scrollback kept: the Ctrl-Z note below may scroll off the top when
     # more output follows it under load; omnibus15)
-    vt = MB::Sound::UI::VT.new(30, 110, scrollback: 500)
+    vt = MB::Term::VT.new(30, 110, scrollback: 500)
     lock = Mutex.new
     env = { 'MB_SOUND_HELP_DIR' => tmp_path('help'), 'COLUMNS' => '110', 'LINES' => '30', 'OUTPUT_TYPE' => 'null' }
     r, w, pid = PTY.spawn(env, 'bin/sound.rb')

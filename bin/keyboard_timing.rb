@@ -105,7 +105,7 @@ module MB::Sound
         break if !ready && !dec.pending? && !times.empty?
         return [times, shared, :timeout] if !ready && times.empty?
         events = ready ? dec.feed(io.read_nonblock(4096, exception: false).to_s) : dec.flush
-        keys = events.select { |e| e.is_a?(UI::Input::Key) && e.press? }
+        keys = events.select { |e| e.is_a?(MB::Term::Input::Key) && e.press? }
         return [times, shared, :quit] if keys.any? { |k| k.key == 'q' || k.key == :escape || (k.key == 'c' && k.mods.include?(:ctrl)) }
         shared += keys.length if keys.length > 1
         keys.each { times << now }
@@ -165,7 +165,7 @@ module MB::Sound
         end
         trials = { chord: [], arp: [], run: [] }
         puts 'Play on the lower row (z x c v b ...).  Each trial ends 0.6 s after your last key; q or Esc stops early.'
-        dec = UI::Input::Decoder.new
+        dec = MB::Term::Input::Decoder.new
         quit = false
         $stdin.raw(intr: true) do |io|
           kt::TRIALS.each do |kind, prompt|

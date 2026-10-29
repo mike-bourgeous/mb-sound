@@ -1,13 +1,13 @@
 require_relative '../support/ui_helpers'
 
 # UI keys where Reline reads the keyboard itself (ux-1 round 3 items 17,
-# 18): bin/sound.rb in a pty (read by a UI::VT).  Ctrl-] in the plain
+# 18): bin/sound.rb in a pty (read by a MB::Term::VT).  Ctrl-] in the plain
 # console and under the band switches to the tiled screen in NAV with the
 # line being typed kept; the IDE editing keys edit the line.
 RSpec.describe('bin/sound.rb console keys', :aggregate_failures) do
   it 'edits with Ctrl-Backspace and Ctrl-Delete, and Ctrl-] from the console and the band opens the tiles in NAV keeping the line' do
     require 'pty'
-    vt = MB::Sound::UI::VT.new(30, 110, scrollback: 0)
+    vt = MB::Term::VT.new(30, 110, scrollback: 0)
     lock = Mutex.new
     env = { 'MB_SOUND_HELP_DIR' => tmp_path('help'), 'COLUMNS' => '110', 'LINES' => '30', 'OUTPUT_TYPE' => 'null', 'INPUTRC' => tmp_path('inputrc') }
     File.write(env['INPUTRC'], "# empty\n")

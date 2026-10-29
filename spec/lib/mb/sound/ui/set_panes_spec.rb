@@ -9,7 +9,7 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
   let(:snap) { ui_fake_snapshot(rack_knobs: true) }
 
   def draw(name, snap, state = { title_in_rule: true }, w: 60, h: 8)
-    grid = MB::Sound::Plot::Text::Cells.new(w, h)
+    grid = MB::Term::Cells.new(w, h)
     ui.panes.fetch(name).draw(ui::Canvas.new(grid, 0, 0, w, h), snap, state)
     grid.to_text(:none).lines.map(&:rstrip)
   end

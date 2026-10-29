@@ -9,7 +9,7 @@ module MB
     # rule, the first column in the key color, rules between columns in the
     # dim color (box drawing, or | - + with UI.glyphs :ascii), every other
     # row shaded on wide tables.  Colors come from the UI theme
-    # (UI::Themes) and print only to a terminal without NO_COLOR.
+    # (MB::Term::Themes) and print only to a terminal without NO_COLOR.
     #
     #     Table.new([[1, 'a'], [2.5, 'b']], header: %w[x name]).print
     #     Table.new({ x: [1, 2], y: [3, 4] })          # a Hash: columns
@@ -114,10 +114,10 @@ module MB
       # +text+ in the UI theme's +role+ color (256 colors), bold, on a dim
       # shade for +bg+.
       def sgr(text, role, bold, bg)
-        fg = UI::Themes.rgb(role)
+        fg = MB::Term::Themes.rgb(role)
         codes = []
-        codes << 1 if bold || UI::Themes.bold?(role)
-        codes << Plot::Text::ANSI.color(fg, :ansi256, false) if fg
+        codes << 1 if bold || MB::Term::Themes.bold?(role)
+        codes << MB::Term::ANSI.color(fg, :ansi256, false) if fg
         codes << "48;5;236" if bg
         return text if codes.empty?
         "\e[#{codes.join(';')}m#{text}\e[0m"

@@ -5,7 +5,7 @@ require_relative 'ui/bus_meter'
 require_relative 'ui/poll'
 require_relative 'ui/inspect'
 require_relative 'ui/patch_render'
-require_relative 'ui/term_aliases'
+require 'mb/term'
 require_relative 'ui/canvas'
 require_relative 'ui/sections'
 require_relative 'ui/density'
@@ -84,7 +84,7 @@ module MB
         attr_accessor :prompt_status_enabled
       end
       self.glyphs = ENV['MB_SOUND_UI_GLYPHS'] == 'ascii' ? :ascii : :unicode
-      Themes.dir = -> { File.join(UI.layouts_dir, 'themes') }
+      MB::Term::Themes.dir = -> { File.join(UI.layouts_dir, 'themes') }
       self.default_layout = :band
       self.prompt_status_enabled = true
       install_messages! # (only acts while a screen is up; see UI::Messages)
@@ -152,8 +152,8 @@ module MB
         names = (layouts.keys + tile_layouts.keys + show_layouts.keys + saved_layouts).uniq
         names.filter_map do |name|
           l = show_layouts[name] || (layout_named(name) rescue nil) or next
-          kind = show_layouts.key?(name) ? :script : l.is_a?(Viewports::Layout) ? :tiles : :band
-          panes = l.is_a?(Viewports::Layout) ? l.panes : l.pane_names
+          kind = show_layouts.key?(name) ? :script : l.is_a?(MB::Term::Viewports::Layout) ? :tiles : :band
+          panes = l.is_a?(MB::Term::Viewports::Layout) ? l.panes : l.pane_names
           desc, size = LAYOUT_NOTES[name] || [saved_layouts.include?(name) ? "saved in #{layouts_dir}" : 'defined with layout', nil]
           [name, kind, desc, size, panes, name == current]
         end
@@ -168,14 +168,14 @@ module MB
       # defined with `layout`, or saved).
       def self.tile_layouts
         @tile_layouts ||= {
-          tiles: Viewports.layout(:tiles, focus: :repl) {
+          tiles: MB::Term::Viewports.layout(:tiles, focus: :repl) {
             cols(height: 1) { pane :transport; pane :form }
             cols {
               repl
               rows(width: 46) { pane :tracks; pane :queue, height: 5; pane :meters, height: 6; pane :scope, height: 8 }
             }
           },
-          keys: Viewports.layout(:keys, focus: :keyboard) {
+          keys: MB::Term::Viewports.layout(:keys, focus: :keyboard) {
             cols(height: 1) { pane :transport; pane :form }
             cols {
               rows { repl; pane :keyboard, height: 8 }
@@ -183,7 +183,7 @@ module MB
             }
           },
           # For big terminals (about 200x60 and up): the performance panes at once (the set panes: ui :session)
-          wall: Viewports.layout(:wall, focus: :repl) {
+          wall: MB::Term::Viewports.layout(:wall, focus: :repl) {
             cols(height: 1) { pane :transport; pane :form }
             cols {
               rows(width: 40) { pane :tracks; pane :queue, height: 8; pane :knobs, height: 10; pane :cpu, height: 10 }
@@ -191,7 +191,7 @@ module MB
               rows(width: 60) { pane :meters, height: 6; pane :scope, height: 14; pane :spectrum, height: 14; pane :messages }
             }
           },
-          studio: Viewports.layout(:studio, focus: :repl) {
+          studio: MB::Term::Viewports.layout(:studio, focus: :repl) {
             cols(height: 1) { pane :transport; pane :form }
             cols {
               rows(width: 32) { pane :tracks; pane :queue, height: 6 }
@@ -203,7 +203,7 @@ module MB
           # what landed, the clips, buses and sends, MIDI, around the console
           # (ux-r4: the clip matrix and the clip under its cursor below the
           # console, racks with their knobs at the left)
-          session: Viewports.layout(:session, focus: :repl) {
+          session: MB::Term::Viewports.layout(:session, focus: :repl) {
             cols(height: 1) { pane :transport; pane :form }
             pane :lane, height: 4
             cols {
@@ -217,7 +217,7 @@ module MB
           # offline render (sound-design-ui-2), the library picker
           # (a placeholder until the library index) and the tracks at the
           # left, the CUE line and the console below at full width
-          sound: Viewports.layout(:sound, focus: :repl) {
+          sound: MB::Term::Viewports.layout(:sound, focus: :repl) {
             cols(height: 1) { pane :transport; pane :form }
             cols(weight: 5) {
               rows(width: 30) { pane :tracks, height: 7; pane :picker }
@@ -229,7 +229,7 @@ module MB
           },
           # The mix (ux-r4): buses with their input, output, and send
           # meters beside the master's, the console over a scope
-          mixer: Viewports.layout(:mixer, focus: :repl) {
+          mixer: MB::Term::Viewports.layout(:mixer, focus: :repl) {
             cols(height: 1) { pane :transport; pane :form }
             cols {
               rows(weight: 3) { repl; pane :scope, height: 8 }
@@ -250,7 +250,7 @@ module MB
           sound: {
             # 80x24: the voice (its panel by default), the picked row's
             # preview, the console
-            compact: Viewports.layout(:sound, focus: :repl) {
+            compact: MB::Term::Viewports.layout(:sound, focus: :repl) {
               cols(height: 1) { pane :transport; pane :form }
               pane :inspector, weight: 3, min: 6
               pane :preview, height: 6
@@ -259,7 +259,7 @@ module MB
             # 120x40: the tracks, the voice in sections over its preview,
             # the code over the render, the CUE line, the console (the
             # picker placeholder and the keys pane only on big screens)
-            normal: Viewports.layout(:sound, focus: :repl) {
+            normal: MB::Term::Viewports.layout(:sound, focus: :repl) {
               cols(height: 1) { pane :transport; pane :form }
               cols(weight: 5) {
                 pane :tracks, width: 26
@@ -285,7 +285,7 @@ module MB
       def self.show_layouts
         @show_layouts ||= {
           # A song: where it is, the tracks, a big scope and spectrum, meters, knobs
-          show: Viewports.layout(:show) {
+          show: MB::Term::Viewports.layout(:show) {
             cols(height: 1) { pane :transport; pane :form }
             cols {
               rows(width: 36) { pane :tracks; pane :queue, height: 6; pane :knobs, height: 8 }
@@ -294,7 +294,7 @@ module MB
             }
           },
           # A synth or effect: the keyboard, scope, spectrum, meters
-          play: Viewports.layout(:play, focus: :keyboard) {
+          play: MB::Term::Viewports.layout(:play, focus: :keyboard) {
             cols(height: 1) { pane :transport; pane :form }
             cols {
               rows(weight: 3) { pane :scope; pane :spectrum, height: 10; pane :keyboard, height: 10 }
@@ -304,12 +304,12 @@ module MB
         }
       end
 
-      # The tiled layout named +name+ (a Viewports::Layout with a repl
+      # The tiled layout named +name+ (a MB::Term::Viewports::Layout with a repl
       # pane): defined, built in, or saved.  Raises with suggestions.
       def self.tiles_layout_named(name)
-        return name if name.is_a?(Viewports::Layout)
+        return name if name.is_a?(MB::Term::Viewports::Layout)
         l = layout_named(name)
-        raise ArgumentError, "Layout #{name.inspect} has no repl pane, so it shows as a band (`ui #{name.inspect}`); a tiled layout needs `repl`" unless l.is_a?(Viewports::Layout)
+        raise ArgumentError, "Layout #{name.inspect} has no repl pane, so it shows as a band (`ui #{name.inspect}`); a tiled layout needs `repl`" unless l.is_a?(MB::Term::Viewports::Layout)
         l
       end
 
@@ -414,7 +414,7 @@ module MB
       # The layout named +name+: defined, built in, or saved in
       # .layouts_dir (loaded with LayoutLoader).  Raises with suggestions.
       def self.layout_named(name)
-        return name if name.is_a?(Layout) || name.is_a?(Viewports::Layout)
+        return name if name.is_a?(Layout) || name.is_a?(MB::Term::Viewports::Layout)
         raise ArgumentError, "Layout names are Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
 
         path = File.join(layouts_dir, "#{name}.rb")
@@ -424,7 +424,7 @@ module MB
 
         if File.file?(path)
           text = File.read(path)
-          tiled, opts = Viewports::Loader.parse(text, path, extra: %i[at color look]) rescue nil
+          tiled, opts = MB::Term::Viewports::Loader.parse(text, path, extra: %i[at color look]) rescue nil
           @layout_mtimes[path] = File.mtime(path)
           if tiled&.repl?
             layouts.delete(name)
@@ -461,7 +461,7 @@ module MB
         end
 
         layout = layout_named(name || (@tiles&.active? ? @tiles.layout_name : @band&.active? ? @band.layout.name : default_layout))
-        return show_tiles(layout, **opts) if layout.is_a?(Viewports::Layout)
+        return show_tiles(layout, **opts) if layout.is_a?(MB::Term::Viewports::Layout)
         # (out of the tiles: their REPL lines printed again, by the console
         # itself when asked from the palette; see Switch)
         return Switch.defer_to_console(Switch.console_line(name || layout.name, opts)) if Switch.defer?
@@ -489,7 +489,7 @@ module MB
         @band
       end
 
-      # Shows the tiled screen with Viewports::Layout +layout+ (or switches
+      # Shows the tiled screen with MB::Term::Viewports::Layout +layout+ (or switches
       # the one on screen to it).  Options as for Tiles.new.
       def self.show_tiles(layout, at: nil, **opts)
         if @tiles&.hidden?
@@ -564,8 +564,8 @@ module MB
         errors = []
         panes_defined = PaneFiles.reload(errors)
         theme = begin
-          Themes.reload_changed
-        rescue DataFile::LoadError, ArgumentError => e
+          MB::Term::Themes.reload_changed
+        rescue MB::Term::DataFile::LoadError, ArgumentError => e
           errors << e.message
           false
         end
@@ -576,7 +576,7 @@ module MB
           begin
             layout_named(name)
             layouts << name
-          rescue DataFile::LoadError, LayoutLoader::LoadError, ArgumentError => e
+          rescue MB::Term::DataFile::LoadError, LayoutLoader::LoadError, ArgumentError => e
             @layout_mtimes[path] = File.mtime(path)
             errors << e.message
           end
@@ -597,8 +597,8 @@ module MB
       # of that name.
       def self.define_layout(name, **opts, &block)
         tiled = begin
-          Viewports.layout(name, **opts.slice(:focus, :zoom, :gap), &block)
-        rescue Viewports::Error, NoMethodError, ArgumentError
+          MB::Term::Viewports.layout(name, **opts.slice(:focus, :zoom, :gap), &block)
+        rescue MB::Term::Viewports::Error, NoMethodError, ArgumentError
           nil
         end
         if tiled&.repl?

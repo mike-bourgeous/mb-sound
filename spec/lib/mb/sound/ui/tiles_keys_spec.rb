@@ -397,7 +397,7 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
   end
 
   it 'reads control characters given as Strings as their keys (Key.of("\\t") is Tab)' do
-    k = MB::Sound::UI::Input::Key
+    k = MB::Term::Input::Key
     expect(k.of("\t").key).to eq(:tab)
     expect(k.of("\r").key).to eq(:enter)
     expect(k.of('z').key).to eq('z')

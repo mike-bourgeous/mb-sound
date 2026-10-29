@@ -112,7 +112,7 @@ module MB
         end
 
         def basic(k)
-          Color.hex(Text::ANSI::BASIC[k])
+          Color.hex(MB::Term::ANSI::BASIC[k])
         end
 
         def xterm(n)

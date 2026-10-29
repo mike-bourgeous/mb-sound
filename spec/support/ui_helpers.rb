@@ -205,7 +205,7 @@ module UIHelpers
   end
 
   # A terminal for headless :tiles specs: a pty pair whose slave is the
-  # "real" terminal the screen owns, and a UI::VT reading the master (what
+  # "real" terminal the screen owns, and a MB::Term::VT reading the master (what
   # the screen wrote), answering its queries.
   class FakeTerminal
     attr_reader :vt, :master, :slave
@@ -214,7 +214,7 @@ module UIHelpers
       require 'pty'
       @master, @slave = PTY.open
       @slave.winsize = [rows, cols]
-      @vt = MB::Sound::UI::VT.new(rows, cols, scrollback: 0)
+      @vt = MB::Term::VT.new(rows, cols, scrollback: 0)
       @lock = Mutex.new
       @bytes = 0
       @replies = [] # the last few [time, bytes] the VT answered (for #wait_input_idle's failures)

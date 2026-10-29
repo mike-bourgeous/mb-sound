@@ -60,13 +60,13 @@ module MB
         # frame for color); +look+ the scope panes' Plot look; +size+
         # [rows, cols] for a non-terminal +io+; +clock+ a Proc returning
         # seconds (for specs); +native+ false draws into the Ruby mirror
-        # grid (Plot::Text::Cells); +source+ a Proc returning the Snapshot
+        # grid (MB::Term::Cells); +source+ a Proc returning the Snapshot
         # to draw instead of following a Session (specs, captures).
         def initialize(layout:, io: $stdout, session: nil, at: :bottom, color: :ansi256, look: :auto, glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil)
           # (Every instance variable set up front, in one order: one object shape)
           @stopping = @thread = @first_refresh = @reasserted_at = @full = @resized = @rows = @cols = @density = @shown_layout = @boxed = @height = @placed = @rule_row = @grid = @shown = @chrome = @size_checked_at = @old_winch = @winch_installed = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = @heard = @starter = nil
           raise ArgumentError, "at: is :top or :bottom (got #{at.inspect})" unless %i[top bottom].include?(at)
-          raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
+          raise ArgumentError, "Unknown color mode #{color.inspect}" unless MB::Term::Cells::MODES.key?(color)
 
           @layout = layout
           @winch = nil
@@ -353,7 +353,7 @@ module MB
           @placed.map do |p|
             f = @chrome.frames[p.pane.name]
             PaneOnScreen.new(number: nil, name: p.pane.name, kind: p.pane.class.name.split('::').last.downcase.to_sym, title: p.pane.title,
-                             rect: Viewports::Rect.new(p.x, p.y, p.w, p.h), focused: false, zoomed: false, rate: @rates.rate(PaneRates.priority_of(p.pane.name, p.pane), p.pane.rate),
+                             rect: MB::Term::Viewports::Rect.new(p.x, p.y, p.w, p.h), focused: false, zoomed: false, rate: @rates.rate(PaneRates.priority_of(p.pane.name, p.pane), p.pane.rate),
                              look: p.pane.plot? ? (p.state[:look] || @look) : nil, title_at: f&.at)
           end
         end
@@ -374,7 +374,7 @@ module MB
         private
 
         # The bytes Cells#frame gives when no cell changed, per color mode.
-        EMPTY_FRAMES = Plot::Text::Cells::MODES.keys.to_h { |m| [m, m == :none ? '' : "\e[0m"] }.freeze
+        EMPTY_FRAMES = MB::Term::Cells::MODES.keys.to_h { |m| [m, m == :none ? '' : "\e[0m"] }.freeze
 
         def thread_cpu
           Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID)
@@ -442,12 +442,12 @@ module MB
             @placed = @shown_layout.place(cols, @panes, y: body_y)
             @rule_row = @density.rule ? (top? ? @height - 1 : 0) : nil
           end
-          klass = @native ? Plot::Text::NativeCells : Plot::Text::Cells
+          klass = @native ? Plot::Text::NativeCells : MB::Term::Cells
           @grid = klass.new(cols, @height)
           @shown = klass.new(cols, @height)
           @chrome = chrome_plan
           @placed.each do |p|
-            p.state[:inner] = @chrome.frames[p.pane.name]&.inner || Viewports::Rect.new(p.x, p.y, p.w, p.h)
+            p.state[:inner] = @chrome.frames[p.pane.name]&.inner || MB::Term::Viewports::Rect.new(p.x, p.y, p.w, p.h)
             p.state[:title_in_rule] = true # (the chrome draws titles)
           end
           paint_chrome
@@ -458,7 +458,7 @@ module MB
         # The chrome of the placed panes (UI::Chrome): titles on their own
         # rows, and with boxes, the frame and rules with titles set in.
         def chrome_plan
-          items = @placed.map { |p| Chrome::Item.new(name: p.pane.name, rect: Viewports::Rect.new(p.x, p.y, p.w, p.h), title: p.pane.title) }
+          items = @placed.map { |p| Chrome::Item.new(name: p.pane.name, rect: MB::Term::Viewports::Rect.new(p.x, p.y, p.w, p.h), title: p.pane.title) }
           Chrome.plan(items, w: @cols, h: @height, rules: @boxed, inside: true)
         end
 

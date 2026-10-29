@@ -6,7 +6,7 @@ require 'mb/sound'
 RSpec.describe(MB::Sound::UI::Keys, :aggregate_failures) do
   let(:ui) { MB::Sound::UI }
   let(:maps) {
-    [ui::Input::Router::NAV, ui::Keys::NAV_EXTRA, ui::Keys::REPL_DEFAULTS, ui::Keyboard::KEYMAP,
+    [MB::Term::Input::Router::NAV, ui::Keys::NAV_EXTRA, ui::Keys::REPL_DEFAULTS, ui::Keyboard::KEYMAP,
      ui::Keys::SONG_SCREEN, ui::Keys::SYNTH_SCREEN]
   }
 
@@ -39,7 +39,7 @@ RSpec.describe(MB::Sound::UI::Keys, :aggregate_failures) do
     names = ui::Keys::ELSEWHERE.map(&:first).join(' ')
     repl_keys = ['Ctrl-]', 'F2', 'Ctrl-W', 'Alt-PgUp', 'Ctrl-BkSp', 'Ctrl-Del', 'Ctrl-S-Del', 'Ctrl-C', 'Ctrl-Z']
     repl_keys.each { |k| expect(names).to include(k) }
-    ui::Keys::REPL_DEFAULTS.entries.each { |b| expect(names).to include(ui::Input::Keymap.chord_name(b.chord)) }
+    ui::Keys::REPL_DEFAULTS.entries.each { |b| expect(names).to include(MB::Term::Input::Keymap.chord_name(b.chord)) }
     # Ctrl-] and F2 are Reline bindings there (UI::ConsoleKeys)
     seqs = ui::ConsoleKeys::BINDINGS.to_h { |s, f| [f, s] }
     expect(seqs[:mb_sound_ui_nav]).to include("\x1d")

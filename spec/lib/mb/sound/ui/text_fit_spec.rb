@@ -33,7 +33,7 @@ RSpec.describe('UI text fitting', :aggregate_failures) do
 
   # The pane's rows drawn into a +w+ x +h+ canvas.
   def draw(pane, snap, w, h)
-    grid = MB::Sound::Plot::Text::Cells.new(w, h)
+    grid = MB::Term::Cells.new(w, h)
     pane.draw(ui::Canvas.new(grid, 0, 0, w, h), snap, { title_in_rule: true })
     grid.to_text(:none).lines.map(&:chomp)
   end

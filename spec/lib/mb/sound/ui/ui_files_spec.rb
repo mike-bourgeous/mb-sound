@@ -14,8 +14,8 @@ RSpec.describe('UI data files', :aggregate_failures) do
     ex.run
   ensure
     ENV['MB_SOUND_UI_DIR'] = old
-    ui::Themes.use(:default)
-    ui::Themes.all.delete(:mine)
+    MB::Term::Themes.use(:default)
+    MB::Term::Themes.all.delete(:mine)
     %i[mix notes cutoff patch].each { |n| ui.panes.delete(n) }
     ui.tile_layouts.delete(:saved_one)
   end
@@ -40,41 +40,41 @@ RSpec.describe('UI data files', :aggregate_failures) do
           end
         end
       RUBY
-      t = ui::Themes.use(:mine)
+      t = MB::Term::Themes.use(:mine)
       expect(t.roles[:title]).to eq([[16, 32, 48], true])
-      expect(ui::Themes.rgb(:dim)).to eq(245)
-      expect(ui::Themes.rgb(:warn)).to eq(11)
-      expect(ui::Themes.rgb(:key)).to eq([1, 2, 3])
-      expect(ui::Themes.rgb(:ok)).to eq(ui::Themes.all[:phosphor].roles[:ok][0])
-      expect(ui::Themes.glyphs(:unicode)[:play]).to eq('⏵')
-      expect(ui::Themes.glyphs(:unicode)[:rec]).to eq('●')
-      expect(ui::Themes.glyphs(:ascii)[:play]).to eq('>')
-      expect(ui::Themes.bold?(:title)).to eq(true)
+      expect(MB::Term::Themes.rgb(:dim)).to eq(245)
+      expect(MB::Term::Themes.rgb(:warn)).to eq(11)
+      expect(MB::Term::Themes.rgb(:key)).to eq([1, 2, 3])
+      expect(MB::Term::Themes.rgb(:ok)).to eq(MB::Term::Themes.all[:phosphor].roles[:ok][0])
+      expect(MB::Term::Themes.glyphs(:unicode)[:play]).to eq('⏵')
+      expect(MB::Term::Themes.glyphs(:unicode)[:rec]).to eq('●')
+      expect(MB::Term::Themes.glyphs(:ascii)[:play]).to eq('>')
+      expect(MB::Term::Themes.bold?(:title)).to eq(true)
 
       # Canvases draw with the theme: a palette index stays an index
-      g = MB::Sound::Plot::Text::Cells.new(10, 1)
+      g = MB::Term::Cells.new(10, 1)
       ui::Canvas.new(g, 0, 0, 10, 1).text(0, 0, 'hi', :dim)
       expect(g.lines(:ansi256).first).to start_with("\e[38;5;245mhi")
     end
 
     it 'reloads the theme in use when its file changes' do
       write('themes/mine.rb', "theme :mine do\n  role :dim, 1\nend\n", mtime: Time.now - 10)
-      ui::Themes.use(:mine)
-      expect(ui::Themes.rgb(:dim)).to eq(1)
+      MB::Term::Themes.use(:mine)
+      expect(MB::Term::Themes.rgb(:dim)).to eq(1)
       write('themes/mine.rb', "theme :mine do\n  role :dim, 2\nend\n")
       expect(ui.reload_files[:theme]).to eq(true)
-      expect(ui::Themes.rgb(:dim)).to eq(2)
+      expect(MB::Term::Themes.rgb(:dim)).to eq(2)
     end
 
     it 'refuses code, unknown calls, and bad colors with the file and line' do
       write('themes/mine.rb', "theme :mine do\n  role :dim, 1\n  system 'ls'\nend\n")
-      expect { ui::Themes.named(:mine) }.to raise_error(ui::DataFile::LoadError, /mine\.rb:3: `system` isn't allowed here/)
+      expect { MB::Term::Themes.named(:mine) }.to raise_error(MB::Term::DataFile::LoadError, /mine\.rb:3: `system` isn't allowed here/)
       write('themes/mine.rb', "theme :mine do\n  glyphs :unicode do\n    instance_eval 'x'\n  end\nend\n")
-      expect { ui::Themes.named(:mine) }.to raise_error(ui::DataFile::LoadError, /mine\.rb:3: `instance_eval` isn't allowed/)
+      expect { MB::Term::Themes.named(:mine) }.to raise_error(MB::Term::DataFile::LoadError, /mine\.rb:3: `instance_eval` isn't allowed/)
       write('themes/mine.rb', "theme :mine do\n  role :dim, :purpel\nend\n")
-      expect { ui::Themes.named(:mine) }.to raise_error(ui::DataFile::LoadError, /No color :purpel/)
+      expect { MB::Term::Themes.named(:mine) }.to raise_error(MB::Term::DataFile::LoadError, /No color :purpel/)
       write('themes/mine.rb', "theme :mine do\n  rol :dim, 1\nend\n")
-      expect { ui::Themes.named(:mine) }.to raise_error(ui::DataFile::LoadError, /mine\.rb:2: `rol` isn't allowed here \(did you mean `role`\?\)/)
+      expect { MB::Term::Themes.named(:mine) }.to raise_error(MB::Term::DataFile::LoadError, /mine\.rb:2: `rol` isn't allowed here \(did you mean `role`\?\)/)
     end
   end
 
@@ -131,14 +131,14 @@ RSpec.describe('UI data files', :aggregate_failures) do
       expect(File.read(path)).to include('layout :saved_one, focus: :repl do', 'repl', 'tabs :meters, :knobs, :cpu')
       ui.tile_layouts.delete(:saved_one)
       l = ui.layout_named(:saved_one)
-      expect(l).to be_a(ui::Viewports::Layout)
+      expect(l).to be_a(MB::Term::Viewports::Layout)
       expect(l.root).to eq(tiles.tiler.layout.root)
       expect(ui.saved_layouts).to include(:saved_one)
     end
 
     it 'defines tiled layouts with `layout` when they have a repl pane' do
       l = MB::Sound.layout(:spec_tiled, focus: :repl) { cols { repl; pane :meters, width: 30 } }
-      expect(l).to be_a(ui::Viewports::Layout)
+      expect(l).to be_a(MB::Term::Viewports::Layout)
       expect(ui.tile_layouts[:spec_tiled]).to eq(l)
       band = MB::Sound.layout(:spec_band) { cols { pane :transport; pane :meters } }
       expect(band).to be_a(ui::Layout)

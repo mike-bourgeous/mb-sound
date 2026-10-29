@@ -1,6 +1,6 @@
 # Scale lock for the virtual keyboard (ux-r3 item 44).
 RSpec.describe(MB::Sound::UI::Keyboard::ScaleLock, :aggregate_failures) do
-  let(:key) { MB::Sound::UI::Input::Key }
+  let(:key) { MB::Term::Input::Key }
   let(:log) { [] }
   let(:out) {
     l = log

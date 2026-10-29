@@ -19,7 +19,7 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
     end
   end
 
-  let(:key) { MB::Sound::UI::Input::Key }
+  let(:key) { MB::Term::Input::Key }
   let(:out) { KeyboardRecorder.new }
   let(:kb) { MB::Sound::UI::Keyboard.new(out: out, clock: -> { 0.0 }, tempo: -> { 2.0 }) }
 
@@ -344,7 +344,7 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       kb.releases = true
       press('z', 0.0)
       press('e', 0.0)
-      grid = MB::Sound::Plot::Text::Cells.new(60, 8)
+      grid = MB::Term::Cells.new(60, 8)
       c = MB::Sound::UI::Canvas.new(grid, 0, 0, 60, 8)
       pane = MB::Sound::UI::Panes::Keyboard.new(kb)
       pane.draw(c, nil, {})
@@ -357,11 +357,11 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       expect(lines[5]).to eq('z  x  c  v  b  n  m  ,q .w /e r  t  y  u  i  o  p  [  ]  \\')
       expect(lines[6]).to eq('played C3 E4')
       # Held keys fill from the bottom by velocity (96 of 127: 4 of 5 rows)
-      armed = "38;2;#{MB::Sound::UI::Themes.rgb(:armed).join(';')}"
+      armed = "38;2;#{MB::Term::Themes.rgb(:armed).join(';')}"
       colored = grid.lines(:truecolor).map { |l| l.include?(armed) }
       expect(colored[1..5]).to eq([false, true, true, true, true])
       # A narrow pane falls back to the compact strip
-      small = MB::Sound::Plot::Text::Cells.new(36, 8)
+      small = MB::Term::Cells.new(36, 8)
       pane.draw(MB::Sound::UI::Canvas.new(small, 0, 0, 36, 8), nil, {})
       expect(small.to_text(:none).lines.map(&:rstrip)[4]).to eq('zsxdc vgbhnjm ,l.;/')
 
@@ -377,7 +377,7 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
     it 'fills a zoomed pane by its sections: taller keys, the chord held, a roll of recent notes, the armed tracks (ux-1 r3 item 31)' do
       kb.releases = true
       %w[z c b].each { |k| press(k, 0.0) } # C3 E3 G3
-      grid = MB::Sound::Plot::Text::Cells.new(100, 36)
+      grid = MB::Term::Cells.new(100, 36)
       c = MB::Sound::UI::Canvas.new(grid, 0, 0, 100, 36)
       pane = MB::Sound::UI::Panes::Keyboard.new(kb)
       state = {}

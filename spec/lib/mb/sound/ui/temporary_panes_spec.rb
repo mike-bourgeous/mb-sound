@@ -8,7 +8,7 @@ RSpec.describe('UI temporary panes and pane minimums', :aggregate_failures) do
   let(:mins) { ->(name, axis) { axis == :rows ? ui.panes[name]&.min_height || (name == :repl ? 4 : nil) : nil } }
 
   def tiler(name, w, h)
-    t = MB::Sound::UI::Viewports::Tiler.new(ui.tile_layouts.fetch(name), w, h)
+    t = MB::Term::Viewports::Tiler.new(ui.tile_layouts.fetch(name), w, h)
     t.mins = mins
     t.header_rule = h >= 24
     t
@@ -24,7 +24,7 @@ RSpec.describe('UI temporary panes and pane minimums', :aggregate_failures) do
     when 3 then t.equalize(panes.sample(random: rng))
     else t.focus!(panes.sample(random: rng))
     end
-  rescue MB::Sound::UI::Viewports::Error
+  rescue MB::Term::Viewports::Error
     nil
   end
 
@@ -79,7 +79,7 @@ RSpec.describe('UI temporary panes and pane minimums', :aggregate_failures) do
       t = tiler(%i[tiles studio keys wall].sample(random: rng), rng.rand(80..240), rng.rand(22..80))
       rng.rand(0..3).times { random_edit(t, rng) }
       root = t.layout.root
-      next if MB::Sound::UI::Viewports.min_of(root, :rows, mins) > t.h # (the screen can't hold them all)
+      next if MB::Term::Viewports.min_of(root, :rows, mins) > t.h # (the screen can't hold them all)
       t.placed.each do |p|
         next unless p.name
         least = mins.(p.name, :rows) || 1
@@ -165,9 +165,9 @@ RSpec.describe('UI temporary panes and pane minimums', :aggregate_failures) do
   it 'lets siblings take the space of a closed pane, and undo puts it back in its slot' do
     rng = Random.new(RSpec.configuration.seed)
     flexible = ->(node) {
-      next true if node.is_a?(ui::Viewports::Pane)
+      next true if node.is_a?(MB::Term::Viewports::Pane)
       kids = node.children
-      (node.is_a?(ui::Viewports::Split) ? kids.any? { |c| c.size.nil? } : true) && kids.all? { |c| flexible.(c) }
+      (node.is_a?(MB::Term::Viewports::Split) ? kids.any? { |c| c.size.nil? } : true) && kids.all? { |c| flexible.(c) }
     }
     40.times do
       name = %i[tiles studio keys wall session mixer].sample(random: rng)

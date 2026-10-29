@@ -95,7 +95,7 @@ module MB
         # of the current layout.
         attr_reader :density, :chrome
 
-        # +layout+ a Viewports::Layout with a repl pane; +input+/+output+
+        # +layout+ a MB::Term::Viewports::Layout with a repl pane; +input+/+output+
         # the terminal (dup'd, so they keep reaching it after :adopt
         # reopens the process's streams); +repl+ :adopt (the console's
         # Pry) or :thread (a Pry of its own, for specs and tools);
@@ -107,12 +107,12 @@ module MB
         # options as for Band.
         def initialize(layout:, input: STDIN, output: STDOUT, session: nil, repl: :adopt, color: :ansi256, look: :auto,
                        glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil,
-                       mouse: false, nav_esc: nil, kitty: false, context: nil, probe: true, scrollback: VT::SCROLLBACK, pry: {},
+                       mouse: false, nav_esc: nil, kitty: false, context: nil, probe: true, scrollback: MB::Term::VT::SCROLLBACK, pry: {},
                        keyboard: nil, keys_kitty: nil, on_key: nil, hints: nil, play_keys: nil, on_action: nil, nav_once: true)
           # (Every instance variable set up front, in one order: one object shape)
           @term = @ambiguous = @host = @stopping = @full = @painter = @reader = @hidden = @relayout = @repl_full = @match = @search = @flash = @reloaded_at = @size_checked_at = @resized = @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = @line_cursor = @old_winch = @signals = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = @heard = nil
           raise ArgumentError, "Layout #{layout.name.inspect} has no repl pane (`repl` in the layout block)" unless layout.repl? || repl == :none
-          raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
+          raise ArgumentError, "Unknown color mode #{color.inspect}" unless MB::Term::Cells::MODES.key?(color)
 
           @layout_name = layout.name
           # (every instance variable from the start, nil until used: one
@@ -167,7 +167,7 @@ module MB
           @chrome = nil
           @density = nil
           @rows, @cols = @fixed_size || [24, 80]
-          @tiler = Viewports::Tiler.new(layout, @cols, @rows - 1)
+          @tiler = MB::Term::Viewports::Tiler.new(layout, @cols, @rows - 1)
           # Panes' declared minimum heights (UI::Pane#min_height), and widths:
           # the console keeps REPL_MIN_COLS (ux-fix-1: `ui :studio` at 80x24
           # left it 12 columns between fixed-width panes, which give way
@@ -179,12 +179,12 @@ module MB
               name == :repl ? Tiles.repl_min_cols(@cols) : PANE_MIN_COLS
             end
           }
-          @router = Input::Router.new(self, nav_esc: nav_esc, console: repl != :none, nav_once: nav_once,
+          @router = MB::Term::Input::Router.new(self, nav_esc: nav_esc, console: repl != :none, nav_once: nav_once,
                                       repl_keys: play_keys || (repl == :none ? nil : Keys.repl_keymap))
           @router.add_keymap(NAV_EXTRA)
           @router.add_keymap(Keys.user[:nav], first: true)
           # Jump letters panes declare (`jump 'a'`), for the panes on screen
-          @jump_map = Input::Keymap.new(:jumps) { group 'Jump' }
+          @jump_map = MB::Term::Input::Keymap.new(:jumps) { group 'Jump' }
           @router.add_keymap(@jump_map)
           @on_action = on_action
           @focus_last = nil
@@ -195,7 +195,7 @@ module MB
           @winch = nil
           @stray_warned = false
           @messages_seen = UI.messages.seq
-          @decoder = Input::Decoder.new
+          @decoder = MB::Term::Input::Decoder.new
           @keyboard = keyboard || UI.keyboard
           @keys_kitty = keys_kitty
           @states[:keyboard][:keyboard] = @keyboard
@@ -225,7 +225,7 @@ module MB
           return self if @active
           return show_again if @hidden
 
-          @term = Term.new(input: @input.dup, output: @output.dup)
+          @term = MB::Term::Terminal.new(input: @input.dup, output: @output.dup)
           @term.enter(mouse: @mouse, kitty: @kitty)
           features = @probe ? @term.probe : {}
           @ambiguous = features[:ambiguous] || (::Reline.core.instance_variable_get(:@ambiguous_width) rescue nil) || 1
@@ -234,8 +234,8 @@ module MB
           @tiler.resize_screen(@cols, @rows - 1)
           relayout
           unless @repl_mode == :none
-            r = repl_rect || Viewports::Rect.new(0, 0, [@cols, 20].min, [@rows - 1, 5].max)
-            @host = Input::ReplHost.new(rows: r.h, cols: r.w, mode: @repl_mode, scrollback: @scrollback, ambiguous_width: @ambiguous,
+            r = repl_rect || MB::Term::Viewports::Rect.new(0, 0, [@cols, 20].min, [@rows - 1, 5].max)
+            @host = MB::Term::Input::ReplHost.new(rows: r.h, cols: r.w, mode: @repl_mode, scrollback: @scrollback, ambiguous_width: @ambiguous,
                                         target: @context || TOPLEVEL_BINDING, pry: @pry_opts)
             @host.start
             # A Pry of our own (:thread) reads through the global Reline,
@@ -451,7 +451,7 @@ module MB
         def close(name = nil)
           tile do |t|
             name ||= t.focus
-            raise Viewports::Error, 'The REPL pane stays (z zooms another pane over it)' if name == :repl
+            raise MB::Term::Viewports::Error, 'The REPL pane stays (z zooms another pane over it)' if name == :repl
             t.close(name)
           end
         end
@@ -567,7 +567,7 @@ module MB
         # What opened the page pane (see #page), or nil.
         attr_reader :page_opener
 
-        # Esc in a pane's own mode (Input::Router#pane_key): the page pane
+        # Esc in a pane's own mode (MB::Term::Input::Router#pane_key): the page pane
         # goes back to what opened it (true: handled); other panes to NAV.
         def pane_escape
           return false unless @tiler.focus == :page && @page_opener
@@ -580,7 +580,7 @@ module MB
         private def back_from_page
           to = @page_opener
           if to == :repl || !@tiler.layout.panes.include?(to)
-            return @host ? act(Input::Action.of(:mode, :repl)) : (@router.mode = :nav)
+            return @host ? act(MB::Term::Input::Action.of(:mode, :repl)) : (@router.mode = :nav)
           end
           enter(to)
         end
@@ -612,7 +612,7 @@ module MB
         # UI.layouts_dir.  Returns the path.
         def save(name = @tiler.layout.name)
           l = @tiler.layout
-          l = Viewports::Layout.new(name: name, root: l.root, focus: l.focus, zoom: nil, gap: l.gap) unless name == l.name && l.zoom.nil?
+          l = MB::Term::Viewports::Layout.new(name: name, root: l.root, focus: l.focus, zoom: nil, gap: l.gap) unless name == l.name && l.zoom.nil?
           path = UI.save_layout_text(name, l.to_ruby)
           UI.tile_layouts[name] = l
           flash("saved #{path}", :ok)
@@ -620,11 +620,11 @@ module MB
         end
 
         # Changes the theme (:default, :paper, :phosphor, :mono, or one in
-        # UI.layouts_dir/themes; see UI::Themes).  Without a name, the
+        # UI.layouts_dir/themes; see MB::Term::Themes).  Without a name, the
         # theme in use.
         def theme(name = nil)
-          return Themes.current if name.nil?
-          Themes.use(name)
+          return MB::Term::Themes.current if name.nil?
+          MB::Term::Themes.use(name)
           @full = true
           self
         end
@@ -770,7 +770,7 @@ module MB
         # a while (a plot from PlaybackMethods#visualize, the messages
         # pane): nothing if the layout shows it, else a slot of +height+
         # rows taken from the largest flexible pane that isn't the REPL or
-        # the keyboard (UI::Viewports::Tiler#open_temporary; the focus
+        # the keyboard (MB::Term::Viewports::Tiler#open_temporary; the focus
         # stays).  Returns a Proc that closes the slot again, putting the
         # split tree back exactly as it was if nothing else changed it
         # (ux-1 r3 item 30), or nil if nothing changed.
@@ -828,7 +828,7 @@ module MB
           end
           out << "overlay #{@overlay ? 'shown' : 'hidden'} in #{@router.state} state" if @overlay.nil? == (@router.state == :overlay)
           out << "a prompt line in #{@router.state} state" if @router.line && !(@router.mode == :line || (%i[nav overlay once].include?(@router.mode) && @router.nav_return == :line))
-          out << "one-shot NAV from #{@router.once_return.inspect}" if @router.mode == :once && !Input::Router::ONCE_FROM.include?(@router.once_return)
+          out << "one-shot NAV from #{@router.once_return.inspect}" if @router.mode == :once && !MB::Term::Input::Router::ONCE_FROM.include?(@router.once_return)
           out << "no prompt line in line mode" if @router.mode == :line && @router.line.nil?
           if @host
             out << 'no REPL pane' unless @tiler.layout.panes.include?(:repl)
@@ -931,7 +931,7 @@ module MB
           tile(pin: false) { |t| t.focus!(name) } if name && name != @tiler.focus
           name = @tiler.focus
           case into(name)
-          when :repl then act(Input::Action.of(:mode, :repl))
+          when :repl then act(MB::Term::Input::Action.of(:mode, :repl))
           when :grab then keys_unlocked(true, off: nil, step: nil, patch: :keep)
           when :pane then @router.mode = :pane
           else
@@ -964,7 +964,7 @@ module MB
           target = jump_target(name)
           if target.nil?
             return keys_unlocked(true, off: nil, step: nil, patch: :keep) if name == :keyboard
-            return act(Input::Action.of(:mode, :repl)) if name == :repl && @host
+            return act(MB::Term::Input::Action.of(:mode, :repl)) if name == :repl && @host
             return flash("no #{name} pane here (: show :#{name})", :dim)
           end
           enter_unlocked(target)
@@ -1146,7 +1146,7 @@ module MB
               respond_to?(a.name) ? run_safely { public_send(a.name, *a.args) } : flash("unknown action #{a.name.inspect}", :warn)
             end
           end
-        rescue Viewports::Error, ArgumentError => e
+        rescue MB::Term::Viewports::Error, ArgumentError => e
           flash(e.message, :bad)
         end
 
@@ -1293,7 +1293,7 @@ module MB
           # (a pane's own mode ends when the focus leaves it, whatever moved it)
           @router.mode = :nav if @router.mode == :pane && (@tiler.focus != @mode_pane || into(@tiler.focus) != :pane)
           self
-        rescue Viewports::Error => e
+        rescue MB::Term::Viewports::Error => e
           flash(e.message, :bad)
           self
         end
@@ -1413,7 +1413,7 @@ module MB
                 back_from_page
                 @page_opener = nil
               elsif @host
-                act(Input::Action.of(:mode, :repl))
+                act(MB::Term::Input::Action.of(:mode, :repl))
               end
             end
           end
@@ -1482,7 +1482,7 @@ module MB
         # it), for hints.
         def scroll_key_name
           b = @router.repl_keys.entries.find { |e| e.action == :scroll && e.args == [:page_up] }
-          b ? Input::Keymap.chord_name(b.chord) : 'Ctrl-] PgUp'
+          b ? MB::Term::Input::Keymap.chord_name(b.chord) : 'Ctrl-] PgUp'
         end
 
         # A new warning or error opens the messages pane below the REPL
@@ -1612,7 +1612,7 @@ module MB
 
         def event(e)
           case e
-          when Input::Mouse
+          when MB::Term::Input::Mouse
             r = repl_rect
             if e.button >= 64 && r&.contains?(e.x, e.y)
               scroll(e.button == 64 ? 3 : -3)
@@ -1620,7 +1620,7 @@ module MB
               name, = @tiler.rects.find { |_, rr| rr.contains?(e.x, e.y) }
               tile { |t| t.focus!(name) } if name
             end
-          when Input::Focus
+          when MB::Term::Input::Focus
             @full = true if e.in
             # Key releases go to the focused window: notes off on the way out
             @keyboard.all_off(mono_now) unless e.in
@@ -1689,7 +1689,7 @@ module MB
             relay_event(e)
             return
           end
-          @enter_mark = repl_lines if @host && e.is_a?(Input::Key) && e.key == :enter && e.mods.empty? && @router.state == :repl
+          @enter_mark = repl_lines if @host && e.is_a?(MB::Term::Input::Key) && e.key == :enter && e.mods.empty? && @router.state == :repl
           # Every key goes through the Router's table (Ctrl-C, Ctrl-Z, F2,
           # the overlay, prefixes included): one owner for input
           @router.event(e)
@@ -1700,16 +1700,16 @@ module MB
         # While hidden, input goes to the REPL's pty as typed (Ctrl-C
         # interrupts; Ctrl-Z shows the tiles again).
         def relay_event(e)
-          return if e.is_a?(Input::Key) && e.release?
+          return if e.is_a?(MB::Term::Input::Key) && e.release?
 
           case e
-          when Input::Key
+          when MB::Term::Input::Key
             case e.chord
             when ['c', [:ctrl]] then @host.interrupt
             when ['z', [:ctrl]] then show_again
             else @host.key(e)
             end
-          when Input::Paste then @host.paste(e.text)
+          when MB::Term::Input::Paste then @host.paste(e.text)
           end
         end
 
@@ -1767,7 +1767,7 @@ module MB
           level_layout
           @placed = @tiler.placed
           @placed_layout = @tiler.layout
-          klass = @native ? Plot::Text::NativeCells : Plot::Text::Cells
+          klass = @native ? Plot::Text::NativeCells : MB::Term::Cells
           if @grid.nil? || @grid.width != @cols || @grid.height != @rows
             @grid = klass.new(@cols, @rows)
             @shown = klass.new(@cols, @rows)
@@ -1944,7 +1944,7 @@ module MB
           changed = @host.changed!
           return false unless full || changed || @repl_full
           r = p.rect
-          marks = @match ? [[@match[0], @match[1], @match[2], VT::REVERSE | VT::UNDERLINE]] : nil
+          marks = @match ? [[@match[0], @match[1], @match[2], MB::Term::VT::REVERSE | MB::Term::VT::UNDERLINE]] : nil
           @host.synchronize do
             @host.vt.invalidate if full || @repl_full
             @scroll = @scroll.clamp(0, @host.vt.scrollback.length)
@@ -1952,7 +1952,7 @@ module MB
           end
           if @scroll > 0
             tag = @router.mode == :repl ? " #{@scroll} lines up (typing: live) " : " #{@scroll} lines up (G: live) "
-            @grid.put_run(r.x + [r.w - tag.length, 0].max, r.y, tag[0, r.w], Plot::Text::Cells.pack(Theme.rgb(:queued)), nil, Plot::Text::Cells::REVERSE)
+            @grid.put_run(r.x + [r.w - tag.length, 0].max, r.y, tag[0, r.w], MB::Term::Cells.pack(Theme.rgb(:queued)), nil, MB::Term::Cells::REVERSE)
           end
           @repl_full = false
           true
@@ -1974,7 +1974,7 @@ module MB
           p.tabs.each_with_index do |name, i|
             label = " #{name} "
             role = i == p.active ? :key : :dim
-            @grid.put_run(x, r.y, label[0, [r.x + r.w - x, 0].max], Plot::Text::Cells.pack(Theme.rgb(role)), nil, i == p.active ? Plot::Text::Cells::REVERSE : 0)
+            @grid.put_run(x, r.y, label[0, [r.x + r.w - x, 0].max], MB::Term::Cells.pack(Theme.rgb(role)), nil, i == p.active ? MB::Term::Cells::REVERSE : 0)
             x += label.length + 1
             break if x >= r.x + r.w
           end
@@ -2029,7 +2029,7 @@ module MB
           y0 = [(@rows - 1 - box_h) / 2, 0].max
           c = Canvas.new(@grid, x0, y0, box_w, box_h, glyphs: @glyphs).clear
           rule = @glyphs == :ascii ? ['+', '-', '|'] : ['┼', '─', '│']
-          border = Plot::Text::Cells.pack(Theme.rgb(:key))
+          border = MB::Term::Cells.pack(Theme.rgb(:key))
           @grid.put_run(x0, y0, (@glyphs == :ascii ? '+' : '┌') + rule[1] * (box_w - 2) + (@glyphs == :ascii ? '+' : '┐'), border, nil, 0)
           @grid.put_run(x0, y0 + box_h - 1, (@glyphs == :ascii ? '+' : '└') + rule[1] * (box_w - 2) + (@glyphs == :ascii ? '+' : '┘'), border, nil, 0)
           (1...(box_h - 1)).each do |dy|
@@ -2073,7 +2073,7 @@ module MB
           step = mode == :grab && @keyboard.entry == :step
           badge = mode == :once || (mode == :overlay && @router.once_return) ? ' ^W ' : %i[nav overlay].include?(mode) ? ' NAV ' : mode == :grab ? (step ? ' STEP ' : ' KEYS ') : mode == :pane ? " #{@tiler.focus.to_s.upcase} " : @host ? ' REPL ' : ' PLAY '
           role = %i[nav overlay once].include?(mode) ? :armed : mode == :grab ? (step ? :queued : :rec) : mode == :pane ? :queued : :key
-          @grid.put_run(0, y, badge, Plot::Text::Cells.pack(Theme.rgb(role)), nil, Plot::Text::Cells::REVERSE | Plot::Text::Cells::BOLD)
+          @grid.put_run(0, y, badge, MB::Term::Cells.pack(Theme.rgb(role)), nil, MB::Term::Cells::REVERSE | MB::Term::Cells::BOLD)
           x = badge.length + 1
           right = snap ? "#{snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} " : ''
           right = "#{frame_rate[:text]}  #{right}" if @show_fps
@@ -2091,7 +2091,7 @@ module MB
             c.text(x + 1, 0, c.fit(flash[0], room), flash[1])
           else
             hint =
-              if @router.state == :pending then "#{Input::Keymap.chord_name(@router.prefix.key.chord)} ..."
+              if @router.state == :pending then "#{MB::Term::Input::Keymap.chord_name(@router.prefix.key.chord)} ..."
               elsif mode == :play then @note || @hints || ''
               elsif mode == :pane then "#{enter_hint}Esc nav  ? keys  #{(m = @panes[@tiler.focus]&.mode_keymap) ? Keys.hints(m) : ''}"
               else HINTS[step ? :step : mode] || ''

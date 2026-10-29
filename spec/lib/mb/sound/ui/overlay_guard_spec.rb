@@ -18,7 +18,7 @@ RSpec.describe('UI overlays over every pane kind', :aggregate_failures) do
   # A console-less screen of +name+ alone, its snapshots moving with @k.
   def screen_of(name)
     term = UIHelpers::FakeTerminal.new(30, 100)
-    layout = ui::Viewports.layout(:"guard_#{name}") { pane name }
+    layout = MB::Term::Viewports.layout(:"guard_#{name}") { pane name }
     tiles = ui::Tiles.new(layout: layout, input: term.slave, output: term.slave, repl: :none, probe: false, size: [30, 100],
                           clock: -> { @k.to_f }, source: -> { ui_fake_snapshot(t: @k * 0.04, seq: @k + 1, scope_phase: @k * 0.13) },
                           keyboard: ui::Keyboard.new(out: UIHelpers::NullKeyboardOut.new))
@@ -130,7 +130,7 @@ RSpec.describe('UI overlays over every pane kind', :aggregate_failures) do
       band, io = ui_fake_band(layout) { ui_fake_snapshot(t: k * 0.04, seq: k + 1, scope_phase: k * 0.13) }
       band.start(thread: false)
       band.plot_pane(:spectrum) if layout == :mini
-      screen = MB::Sound::UI::Screen.new(30, 120)
+      screen = MB::Term::Screen.new(30, 120)
       6.times do |i|
         k = i
         band.refresh(i.to_f)

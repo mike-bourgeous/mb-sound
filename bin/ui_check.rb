@@ -94,7 +94,7 @@ module MB::Sound
         next
       end
 
-      term = UI::Term.new(input: $stdin.dup, output: $stdout.dup)
+      term = MB::Term::Terminal.new(input: $stdin.dup, output: $stdout.dup)
       raw = nil
       begin
         term.enter
@@ -114,8 +114,8 @@ module MB::Sound
       end
 
       if p.keys
-        puts 'Keys (q twice quits): each key as UI::Input::Decoder reads it, with its bytes.'
-        dec = UI::Input::Decoder.new
+        puts 'Keys (q twice quits): each key as MB::Term::Input::Decoder reads it, with its bytes.'
+        dec = MB::Term::Input::Decoder.new
         $stdin.raw do |io|
           qs = 0
           last = MB::U.clock_now
@@ -124,9 +124,9 @@ module MB::Sound
             events = ready ? dec.feed(io.read_nonblock(4096, exception: false).to_s) : (dec.pending? ? dec.flush : [])
             events.each do |e|
               last = MB::U.clock_now
-              desc = e.is_a?(UI::Input::Key) ? "#{e}  #{e.bytes.inspect}#{e.chord == UI::Input::Router::NAV_KEY.chord ? '  (the NAV key)' : ''}" : e.inspect
+              desc = e.is_a?(MB::Term::Input::Key) ? "#{e}  #{e.bytes.inspect}#{e.chord == MB::Term::Input::Router::NAV_KEY.chord ? '  (the NAV key)' : ''}" : e.inspect
               $stdout.write("#{desc}\r\n")
-              qs = e.is_a?(UI::Input::Key) && e.key == 'q' ? qs + 1 : 0
+              qs = e.is_a?(MB::Term::Input::Key) && e.key == 'q' ? qs + 1 : 0
             end
             break if qs >= 2 || MB::U.clock_now - last > 30
           end
