@@ -443,7 +443,19 @@ module MB
         # They are read at the Tees' own rate (a branch pinned to an
         # oversample region's rate starts its resampler there).
         def catch_up_started(p, offset)
-          w = @waiting_graphs.delete(p.input) unless @waiting_graphs.empty?
+          catch_up_graph(p.input, offset)
+        end
+
+        # #catch_up_started for a master or bus chain starting +offset+
+        # frames into its first buffer (see Master#render_master_chain_from).
+        def catch_up_chain(c, offset)
+          catch_up_graph(c.chain_graph, offset)
+        end
+
+        # Reads the shared branches of waiting graph +input+ for the
+        # +offset+ frames before it starts inside a buffer.
+        def catch_up_graph(input, offset)
+          w = @waiting_graphs.delete(input) unless @waiting_graphs.empty?
           return unless w && offset > 0
 
           asleep_reads(w).each { |b| b.internal_raw_sample(offset) }

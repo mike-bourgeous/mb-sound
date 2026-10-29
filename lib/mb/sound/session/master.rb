@@ -39,6 +39,13 @@ module MB
         # are the frames where the chain's input starts and stops, and
         # +ramp_from+ is the frame where its gain starts changing.
         #
+        # +skip+ is the frame where a chain starts in its first buffer (nil
+        # after it, or when it starts on the buffer's first frame): it is
+        # sampled from there, so its state (softclip's ADAA and half-sample
+        # allpass, filters) starts from its first real input, as for a
+        # chain landing on a buffer edge (omnibus16: zeros before its start
+        # primed it, 8 frames differing between buffer sizes).
+        #
         # +read_to+ is the session frame a bus's chain has read its branches
         # of shared nodes up to (nil before its first span; see
         # Buses#bus_read_shared).
@@ -56,7 +63,7 @@ module MB
           :block, :source, :nodes, :timeline_nodes, :description,
           :start, :launch, :started, :mode, :fade, :feeding, :gain, :gain_step,
           :tail_frames, :quiet_frames, :slow_warned, :loads,
-          :input_from, :input_until, :ramp_from, :read_to, :cpu,
+          :input_from, :input_until, :ramp_from, :skip, :read_to, :cpu,
           :preset, :mastering, :capture, :rng,
           keyword_init: true
         ) do
@@ -392,7 +399,10 @@ module MB
             # Like players' clips: timeline loops follow the new position,
             # launch-aligned loops keep their anchor, and non-looping clips
             # count from the chain's start
-            c.timeline_nodes.each { |n| n.start_at(from, origin: c.start, launch: c.launch, transport: @transport) } if resync && c.feeding
+            if resync && c.feeding
+              at = c.skip ? from + c.skip * per_sample : from
+              c.timeline_nodes.each { |n| n.start_at(at, origin: c.start, launch: c.launch, transport: @transport) }
+            end
 
             # Tempo-synced LFOs freeze while the timeline is paused
             c.timeline_nodes.each(&:pause_timeline) unless playing
@@ -445,7 +455,8 @@ module MB
             start = from + offset * per_sample
             launch = chain.start >= to ? start : MB::M.max(chain.start, start)
             start_master_chain(chain, start, launch: launch)
-            chain.timeline_nodes.each { |n| n.start_at(from, origin: start, launch: launch, transport: @transport) }
+            chain.skip = offset > 0 ? offset : nil
+            chain.timeline_nodes.each { |n| n.start_at(start, origin: start, launch: launch, transport: @transport) }
 
             mode = chain.mode
             if mode != :cut && @realtime && (@load || 0) > OVERLOAD
@@ -478,6 +489,7 @@ module MB
         # Renders one chain's output into +out+.
         def render_master_chain(c, mix, out, count, rate)
           return unless c.started
+          return render_master_chain_from(c, mix, out, count) if c.skip
 
           input = mix
           if c.input_from || c.input_until
@@ -508,6 +520,39 @@ module MB
           end
 
           track_master_tail(c, data, count, rate) unless c.feeding || c.input_until
+          c.input_from = c.input_until = c.ramp_from = nil
+        end
+
+        # #render_master_chain for a chain's first buffer when it starts
+        # inside it (Chain#skip): its nodes are sampled from the start frame
+        # on (the frames before it get nothing from the chain; a spillover
+        # chain's input started there, a fading or cutting chain's gain was
+        # 0 before it), and its shared branches catch up with the frames
+        # before it, as a player starting inside a buffer does (see
+        # Strip#catch_up_started).  A first-pass capture records the part
+        # from the start frame, so Mastering::Targeting runs it the same way.
+        def render_master_chain_from(c, mix, out, count)
+          skip = c.skip
+          c.skip = nil
+          n = count - skip
+          input = mix.map { |m| m[skip..].dup }
+          if c.input_until && c.input_until < count
+            input.each { |d| d[[c.input_until - skip, 0].max..] = 0 }
+          end
+          catch_up_chain(c, skip)
+
+          data = master_chain_output(c, input, n)
+          ramp = master_ramp(c, n, [(c.ramp_from || 0) - skip, 0].max)
+          if c.capture
+            c.capture.add(@frame + skip, input, data, ramp)
+            @mastering_capture&.note_sections(self, @frame, count, @span.pos)
+          end
+          data.each_with_index do |d, idx|
+            o = out[idx]
+            next if d.length == n && (ramp.nil? || ramp.length == n) && FastArithmetic.add_at(o, skip, d, n, ramp)
+            d = d * ramp if ramp
+            o[skip..].inplace + d
+          end
           c.input_from = c.input_until = c.ramp_from = nil
         end
 

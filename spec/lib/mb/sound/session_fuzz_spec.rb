@@ -77,6 +77,17 @@ RSpec.describe('session fuzzing') do
         'at_bar(2, beat: 3) { launch :t1 }',
       ], 3,
     ],
+    # (omnibus16: dropouts-2's seeds 11 and 28; a master chain landing
+    # inside a buffer was sampled from the buffer's start, zeros before its
+    # start priming softclip's ADAA state)
+    'a master chain landing inside a buffer' => [
+      :buffer_size, ['bpm 120'], [
+        'track(:t1, q: 1) { |clip| clip.synth(voices: 2) { |v| v.hz.saw * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t1: seq(G4.n16, B4.n16, D5.n8).loop',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 3) { master { |m| m.softclip(0, 0.9) } }',
+      ], 1,
+    ],
     # (omnibus16: a started player waiting after a seek back played again
     # from the start of the span holding its start, not its own sample)
     'a clipless part after a seek back before its start' => [

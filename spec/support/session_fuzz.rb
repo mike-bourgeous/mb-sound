@@ -41,17 +41,9 @@ module SessionFuzz
     # (seed 116's uneven-step tween launched where a step starts between
     # samples, and seed 1194's tr808 revived after a ring-out, are fixed
     # since omnibus13; session_fuzz_spec keeps their shrunk songs)
-    buffer_size: [
-      # dropouts-2 (2026-10-28), found when the generator gained master
-      # chains (FUZZ=30 seeds 11 and 28): a master chain landing inside
-      # a buffer gets zeros for the frames before its start
-      # (Master#render_master_chain's input_from), which prime softclip's
-      # ADAA state (FastClip.shape's first-sample flag) from 0 instead of
-      # the first real input sample, as a chain landing on a buffer edge
-      # does: 8 frames differ, up to -32 dB, at the landing only.  Fix:
-      # sample a chain's first buffer from its start frame.
-      [/master \{ \|m\| m\.softclip/, 'master chain landing mid-buffer primes ADAA state from zeros'],
-    ],
+    # (dropouts-2's master chain landing mid-buffer, which primed
+    # softclip's ADAA state from zeros, is fixed since omnibus16;
+    # session_fuzz_spec keeps a shrunk song)
   }.freeze
 
   # A generated song: +header+ lines (tempo, meter) always kept, +lines+
