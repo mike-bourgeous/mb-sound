@@ -2041,7 +2041,10 @@ module MB
           snapshot = snapshot.reject { |k, _| k == :zone_table }
         end
         fresh = State.new(**snapshot)
-        fresh.instance_variables.each { |iv| @state.instance_variable_set(iv, fresh.instance_variable_get(iv)) }
+        # (#state: a tone that hasn't played yet makes its State here, e.g.
+        # a rebuilt graph taking the old one's state; Session::Carry)
+        st = state
+        fresh.instance_variables.each { |iv| st.instance_variable_set(iv, fresh.instance_variable_get(iv)) }
       end
 
       # See GraphNode#sources.  Returns the frequency, phase modulation, and

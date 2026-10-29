@@ -151,6 +151,18 @@ module MB
           )
         end
 
+        # The random streams and the points and position (for a graph that
+        # replaces this one; Session::Carry).
+        def plan_snapshot
+          { rng: @rng.dup, state: @state.dup }
+        end
+
+        def plan_restore(snapshot)
+          return unless snapshot
+          @rng[0..] = snapshot[:rng]
+          @state = snapshot[:state].dup
+        end
+
         def sources
           s = rate_sources
           [@hold_lo, @hold_hi].uniq.each_with_index do |h, i|

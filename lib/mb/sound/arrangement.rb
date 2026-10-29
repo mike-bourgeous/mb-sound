@@ -103,6 +103,7 @@ module MB
         @rehearsal = nil # (#warm_up: sections rehearsed)
         @exercise_skipped = [] # (#warm_up: tracks whose exercise raised)
         @build_knobs = {} # (BuildKnobs: knob name => tracks whose patches read it while building)
+        @build_rngs = {} # (#build_patch: track name => [root generator, seed] its last build started from)
         @build_knob_lock = Mutex.new
       end
 
@@ -1205,7 +1206,7 @@ module MB
 
       # Starts track +tr+ with +clip+ at +time+: builds its patch, or plays
       # its graph (resuming it if it was stopped).
-      def start_track(tr, clip, time, fade)
+      def start_track(tr, clip, time, fade, carry: false)
         musical = time
         time = early(tr, time)
         if tr.patch? && clip && clip.equal?(tr.clip) && @session.ringing?(tr.name)
@@ -1213,12 +1214,12 @@ module MB
           @session.resume(tr.name, start_time: time, fade: 0)
         elsif tr.patch?
           raise ArgumentError, "Track #{tr.name.inspect} has a patch; give it a clip to play" if clip.nil?
-          graph = GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(clip) }
+          graph = build_patch(tr, clip, carry)
           @mutex.synchronize { (@built ||= {})[tr.name] = graph }
           set_ahead(tr, graph)
           time = early(tr, musical) # (an attack lead is measured on the new graph)
           @session.add(graph, name: tr.name, start_time: time, fade: fade || 0, description: "#{tr.name}: #{name_of(clip)}",
-                       warm: -> { GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(clip) } })
+                       warm: -> { GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(clip) } }, carry: carry)
           @mutex.synchronize { tr.clip = clip }
         elsif @session.resumable?(tr.name)
           @session.resume(tr.name, start_time: time, fade: fade || 0)
@@ -1229,6 +1230,29 @@ module MB
         end
         @mutex.synchronize { tr.clip = clip } if clip
         last_change(tr.name)
+      end
+
+      # Builds track +tr+'s patch for +clip+.  Each build remembers the
+      # random generator's state it started from; a rebuild that carries
+      # the running state (+carry+: a bind's or a build knob's; see
+      # Session::Carry) builds from that same state, outside the root
+      # generator's stream, so the seeds it draws (unison layouts, random
+      # phases, noise) are the replaced graph's and its voices continue
+      # where those left off (sound-design-2).
+      def build_patch(tr, clip, carry = false)
+        build = -> { GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(clip) } }
+        saved = carry && @mutex.synchronize { @build_rngs[tr.name] }
+        if saved
+          rng, seed = saved
+          return MB::Sound.keeping_random_state {
+            Internal.restore_rng(rng.dup, seed)
+            build.call
+          }
+        end
+        start = [Internal.root_rng.dup, Internal.root_seed]
+        graph = build.call
+        @mutex.synchronize { @build_rngs[tr.name] = start }
+        graph
       end
 
       # The last change made for +name+ by the command running now.

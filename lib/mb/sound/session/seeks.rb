@@ -44,6 +44,13 @@ module MB
 
         # True for changes that move the timeline (they land on exact frames
         # at the start of a span of a buffer; see #process_buffer).
+        # True for a graph swap that carries running state (Carry): the
+        # buffer splits on its frame, so the old graph's state is taken
+        # exactly there, at any buffer size.
+        def carry_change?(c)
+          c.split
+        end
+
         def timeline_change?(c)
           c.kind == :seek || c.kind == :tempo || (c.kind == :restore && (c.subject == :timeline || c.subject == :tempo))
         end
@@ -189,7 +196,7 @@ module MB
         # The number of frames (1 to +count+ - 1) before the next timeline
         # change inside the next +count+ frames, or nil if none lands there.
         def frames_before_seek(count, per_sample)
-          c = @changes.find { |x| timeline_change?(x) } or return nil
+          c = @changes.find { |x| timeline_change?(x) || carry_change?(x) } or return nil
           from = @transport.position
           return nil unless c.time > from && c.time < from + count * per_sample
           k = ((c.time - from) / per_sample).ceil

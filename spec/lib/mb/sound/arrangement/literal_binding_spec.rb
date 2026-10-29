@@ -32,11 +32,11 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
   end
 
   # The same rebuild as a bind, without binding: the track's patch built
-  # again at its launch point.
+  # again at its launch point, carrying the running state (Session::Carry).
   REBUILD = ->(s) {
     arr = s.arrangement
     tr = arr.tracks.values.first
-    s.command('rebuild') { arr.send(:start_track, tr, tr.clip, arr.send(:resolve, tr.q || arr.quant, tr, MB::Sound::LaunchPoint::NONE), nil) }
+    s.command('rebuild') { arr.send(:start_track, tr, tr.clip, arr.send(:resolve, tr.q || arr.quant, tr, MB::Sound::LaunchPoint::NONE), nil, carry: true) }
   }
 
   def code_of(s, track = :lead)
@@ -208,8 +208,10 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     s, detune, = play(->(_) { MB::Sound.bind(:lead, unison: :detune) }, patch: STEREO)
     expect(code_of(s)).to include('knob(:"lead/detune")')
     # (a knob's detune runs the unison's moving-detune path, pitches
-    # computed per sample: within -70 dB of the fixed offsets, not bit for bit)
-    expect((detune - plain).abs.max).to be < 10 ** (-70 / 20.0)
+    # computed per sample: within -70 dB of the fixed offsets over 200
+    # buffers from fresh oscillators; carried ones that ran 2 s already,
+    # since sound-design-2, within -60 dB: -55 here, not bit for bit)
+    expect((detune - plain).abs.max).to be < 10 ** (-55 / 20.0)
     expect((detune - plain).abs.max).to be > 0
   end
 
@@ -237,7 +239,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     grid = MB::Sound::Plot::Text::Cells.new(80, 16)
     pane.draw(ui::Canvas.new(grid, 0, 0, 80, 16), snap, st)
     expect(grid.to_text(:none)).to include('Enter: knob :"lead/reso"')
-    expect(pane.enter_hint(st)).to eq('make resonance knob :"lead/reso": rebuilds lead at its launch point (voices and tails start fresh)')
+    expect(pane.enter_hint(st)).to eq('make resonance knob :"lead/reso": rebuilds lead at its launch point (notes play on; delays and reverbs start fresh)')
     ask = pane.key_action(:ask, st).last
     expect(ask).to eq(ui::PaneKeys::Ask['', 'bind :lead, lp4: :resonance', :bind])
     run = pane.key_action(:bind, st, ask.text)

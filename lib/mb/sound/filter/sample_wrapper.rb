@@ -200,27 +200,50 @@ module MB
         PLAN_BIQUAD_IVARS = [:@omega, :@b0, :@b1, :@b2, :@a1, :@a2, :@x1, :@x2, :@y1, :@y2, :@quality, :@center_frequency, :@cutoff].freeze
 
         def plan_snapshot
-          f = @base_filter
-          return PLAN_BIQUAD_IVARS.map { |v| f.instance_variable_get(v) } if f.is_a?(MB::Sound::Filter::Cookbook)
-          return nil unless f.is_a?(MB::Sound::Filter::SVF)
-
-          [f.instance_variable_get(:@state).dup, f.cutoff, f.quality, f.gain]
+          SampleWrapper.filter_state(@base_filter)
         end
 
         def plan_restore(snapshot)
-          return unless snapshot
+          SampleWrapper.restore_filter_state(@base_filter, snapshot) if snapshot
+        end
 
-          f = @base_filter
-          if f.is_a?(MB::Sound::Filter::Cookbook)
-            PLAN_BIQUAD_IVARS.each_with_index { |v, i| f.instance_variable_set(v, snapshot[i]) }
-            return
+        # The running state of filter +f+ as plain values (a cookbook
+        # biquad's, an SVF's, or every filter's of a FilterChain: `peq`
+        # bands, since sound-design-2's Session::Carry), or nil for other
+        # filters.
+        def self.filter_state(f)
+          case f
+          when MB::Sound::Filter::Cookbook then PLAN_BIQUAD_IVARS.map { |v| f.instance_variable_get(v) }
+          when MB::Sound::Filter::SVF then [f.instance_variable_get(:@state).dup, f.cutoff, f.quality, f.gain]
+          when MB::Sound::Filter::FilterChain
+            states = f.filters.map { |x| filter_state(x) }
+            states.include?(nil) ? nil : [:chain, states]
           end
+        end
 
-          state, cutoff, quality, gain = snapshot
-          f.instance_variable_get(:@state).replace(state)
-          f.instance_variable_set(:@cutoff, cutoff)
-          f.instance_variable_set(:@quality, quality)
-          f.instance_variable_set(:@gain, gain)
+        # True if .filter_state keeps filter +f+'s state.
+        def self.filter_state?(f)
+          case f
+          when MB::Sound::Filter::Cookbook, MB::Sound::Filter::SVF then true
+          when MB::Sound::Filter::FilterChain then f.filters.all? { |x| filter_state?(x) }
+          else false
+          end
+        end
+
+        # Puts back a .filter_state.
+        def self.restore_filter_state(f, snapshot)
+          case f
+          when MB::Sound::Filter::Cookbook
+            PLAN_BIQUAD_IVARS.each_with_index { |v, i| f.instance_variable_set(v, snapshot[i]) }
+          when MB::Sound::Filter::FilterChain
+            f.filters.zip(snapshot[1]).each { |x, st| restore_filter_state(x, st) }
+          else
+            state, cutoff, quality, gain = snapshot
+            f.instance_variable_get(:@state).replace(state)
+            f.instance_variable_set(:@cutoff, cutoff)
+            f.instance_variable_set(:@quality, quality)
+            f.instance_variable_set(:@gain, gain)
+          end
         end
 
         # See GraphNode#sources.

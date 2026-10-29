@@ -100,7 +100,7 @@ module MB
               return nil unless b
               return "#{pp[0]}: #{b.reason}" unless b.line
               track = state[:snap]&.inspector&.track
-              return "make #{pp[0]} knob #{b.knob.inspect}: rebuilds #{track} at its launch point (voices and tails start fresh)"
+              return "make #{pp[0]} knob #{b.knob.inspect}: rebuilds #{track} at its launch point (notes play on; delays and reverbs start fresh)"
             end
             cell = picked(state)
             return nil unless cell

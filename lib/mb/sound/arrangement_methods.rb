@@ -154,8 +154,11 @@ module MB
       # param, holding the literal's value), and the patch built again with
       # `knob(:"bass/reso")` in that argument's place, swapped in at the
       # track's launch point (`on:`, `in:`, `at:`) keeping its routing.
-      # The new graph sounds the same at the knob's starting value; its
-      # voices and tails start fresh.  +what+ is { method => param } (the
+      # The new graph sounds the same at the knob's starting value, and it
+      # takes the old one's running state on the swap frame (held notes,
+      # phases, envelope levels, filter states; Session::Carry): where every
+      # stateful node matched, bit for bit; delays and reverbs start fresh
+      # behind a 5 ms crossfade.  +what+ is { method => param } (the
       # DSL method that took the literal: lp4, amp_env, filter, ...; `nth:`
       # which of the patch's calls of it, in the order the patch makes them) or a graph
       # document param's name (a preset's param no knob drives).  One undo

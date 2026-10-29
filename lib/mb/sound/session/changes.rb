@@ -32,9 +32,11 @@ module MB
         # behind it).  +graph+ is the graph input a :bg change starts, or
         # the Master::ChainGraph of a master chain a :master (or master
         # :restore) change starts (kept in step with shared nodes while it
-        # waits; see Strip#catch_up_waiting).
+        # waits; see Strip#catch_up_waiting).  +split+ is true for a change
+        # that splits the buffer on its frame (a graph swap carrying
+        # running state; see Carry).
         Change = Struct.new(
-          :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts, :graph,
+          :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts, :graph, :split,
           keyword_init: true
         )
 
@@ -95,7 +97,7 @@ module MB
         #
         # While a take replays, the landing time comes from the take instead
         # (see Take).
-        def change(kind, subject, time, data: {}, undoes: nil, starts: nil, graph: nil, &action)
+        def change(kind, subject, time, data: {}, undoes: nil, starts: nil, graph: nil, split: false, &action)
           raise IOError, 'Session is closed' if @closed
           raise ArgumentError, 'Pass a block to apply the change' unless action
 
@@ -131,7 +133,7 @@ module MB
             pos = @transport.position
             check_late(kind, subject, time, pos) unless perform&.[](:forced)
             seq = @journal.next_seq
-            c = Change.new(seq: seq, kind: kind, subject: subject, time: time, action: action, starts: starts, graph: graph)
+            c = Change.new(seq: seq, kind: kind, subject: subject, time: time, action: action, starts: starts, graph: graph, split: split)
 
             c.entry = @journal.add(Journal::Entry.new(
               seq: seq, kind: kind, subject: subject,

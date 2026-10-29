@@ -79,6 +79,7 @@ module MB
           @frames_read = 0
           @grid_end = nil
           @grid_generation = nil
+          @carried = false # (#skip_start_chase!)
 
           # Set later (here so every node has one instance variable layout;
           # see GraphNode::IvarPreset)
@@ -180,6 +181,16 @@ module MB
 
         def to_s
           "#{node_type_name}"
+        end
+
+        # Skips the chase of the stream's notes when the node first reads
+        # (Session::Carry: the node took the state of a node in the graph it
+        # replaces, so it holds those notes already; the new stream's start
+        # would chase the notes in progress, moving a released voice's
+        # pitch).  Only the first block: later jumps chase as usual.
+        def skip_start_chase!
+          @carried = true
+          self
         end
 
         private
@@ -412,10 +423,14 @@ module MB
         # time +to+, if the content jumped (see the class description).
         def take_chase(to)
           gen = @reader.generation
+          carried = @carried
+          @carried = false
           if gen != @generation
             @generation = gen
             c = @stream.chase
-            @pending_chase = c && c.generation == gen ? c : nil
+            # (a node holding a replaced graph's notes doesn't chase its new
+            # stream's start: Session::Carry)
+            @pending_chase = c && c.generation == gen && !carried ? c : nil
           end
 
           c = @pending_chase

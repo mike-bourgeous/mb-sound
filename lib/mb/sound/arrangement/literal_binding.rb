@@ -15,9 +15,10 @@ module MB
       # call was made).  A document param is bound like a `preset` keyword
       # (`preset :dnb_reese, midi: c, cutoff: :"bass/cutoff"`).
       #
-      # The new graph starts fresh (the old one's voices, filter states,
-      # and tails don't carry over), which the inspector says before
-      # Enter binds.
+      # The new graph takes the old one's running state on the swap frame
+      # (Session::Carry, sound-design-2: held notes play on with their
+      # phases, envelope stages and levels, and filter states; delays and
+      # reverbs start fresh behind a short crossfade).
       module LiteralBinding
         # Where a literal is: +kind+ :call (an argument of a recorded DSL
         # call: +call_name+ its method's name, +nth+ which of the patch's calls of that
@@ -389,7 +390,7 @@ module MB
           before = undo_state
           @mutex.synchronize { tr.patch = LiteralBinding.wrap(tr.patch, t, kname) }
           time = resolve(tr.q || @quant, tr, point)
-          entry = start_track(tr, tr.clip, time, fade)
+          entry = start_track(tr, tr.clip, time, fade, carry: true)
           @session.note_undo_extra(self, before, undo_state)
         }
         entry && @session.journal[entry.seq]

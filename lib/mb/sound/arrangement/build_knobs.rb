@@ -50,7 +50,7 @@ module MB
                 tr = @tracks[name] or next
                 time = resolve(tr.q || @quant, tr, point)
                 first ||= time
-                entries << start_track(tr, tr.clip, time, fade)
+                entries << start_track(tr, tr.clip, time, fade, carry: true)
               end
             ensure
               k.build_value = nil
