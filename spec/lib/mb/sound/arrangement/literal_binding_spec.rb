@@ -193,6 +193,26 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     expect((data[0...live.length] - live).abs.max).to eq(0)
   end
 
+  # sound-design-nav-1 (found by research-sound-design-nav): a unison's
+  # call is recorded on the bundle it returns, and calls run per channel
+  # on a stereo bundle on the bundle they return, so the mixer and the
+  # per-channel lp4s had no call to bind (ChannelMixer::Unison#recipe_bundle,
+  # ChannelGroup#bundle)
+  STEREO = ->(c) { c.synth(voices: 2) { |v| v.hz.unison(4, detune: 0.3, spread: 0.5) { |p, _| p.saw }.lp4(1200.hz, resonance: 0.25) * v.amp_env(0.05, 0.2, 0.5, 0.3) } }
+
+  it 'binds a unison\'s detune and a stereo lp4\'s resonance, the same samples at their starting values' do
+    _, plain, = play(REBUILD, patch: STEREO)
+    s, reso, = play(->(_) { MB::Sound.bind(:lead, lp4: :resonance) }, patch: STEREO)
+    expect(code_of(s)).to include('knob(:"lead/reso")')
+    expect((reso - plain).abs.max).to eq(0)
+    s, detune, = play(->(_) { MB::Sound.bind(:lead, unison: :detune) }, patch: STEREO)
+    expect(code_of(s)).to include('knob(:"lead/detune")')
+    # (a knob's detune runs the unison's moving-detune path, pitches
+    # computed per sample: within -70 dB of the fixed offsets, not bit for bit)
+    expect((detune - plain).abs.max).to be < 10 ** (-70 / 20.0)
+    expect((detune - plain).abs.max).to be > 0
+  end
+
   it 'lets the inspector bind a picked literal param with Enter, naming what it rebuilds first' do
     ui = MB::Sound::UI
     s, = play(nil, buffers: 2)

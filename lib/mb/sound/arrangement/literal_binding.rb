@@ -60,9 +60,26 @@ module MB
         end
 
         # The recorded Call that made +node+, or nil.
+        #
+        # A node a per-channel call made (an lp4 on a stereo bundle: the
+        # call is recorded on the bundle it returned) gives that bundle's
+        # call, and a unison's mixer its unison call (sound-design-nav-1;
+        # GraphNode::ChannelGroup#bundle, ChannelMixer::Unison#recipe_bundle).
         def call_of(node)
-          return nil unless node.instance_variable_defined?(:@graph_recipe)
-          node.instance_variable_get(:@graph_recipe)&.call
+          own_call_of(node) || bundle_call_of(node)
+        end
+
+        # True if +node+ has a recorded call of its own (not its bundle's).
+        def own_call?(node) = !own_call_of(node).nil?
+
+        def own_call_of(node)
+          node.instance_variable_defined?(:@graph_recipe) ? node.instance_variable_get(:@graph_recipe)&.call : nil
+        end
+
+        def bundle_call_of(node)
+          bundle = node.respond_to?(:recipe_bundle) ? node.recipe_bundle : node.respond_to?(:channel_group) && node.channel_group&.bundle
+          return nil unless bundle && !bundle.equal?(node) && bundle.instance_variable_defined?(:@graph_recipe)
+          bundle.instance_variable_get(:@graph_recipe)&.call
         end
 
         # The call keys of +method+'s calls in graph +roots+, in the order
@@ -89,6 +106,9 @@ module MB
           end
 
           call = call_of(node) or raise Error, unrecorded(roots, param)
+          # (a call reached through a bundle inside a graph document: the
+          # document's numbers are fixed, its params bind)
+          raise Error, unrecorded(roots, param) if !own_call?(node) && roots.any? { |r| GraphIO.document_of(r) }
           key = GraphNode::Recipe.key_of(call) or raise Error, "#{param}: this graph wasn't built by a track's patch (track :x { |clip| ... } makes one)"
           method = call.written || call.name
           slot = slot_of(call, param) or raise Error, "#{param} isn't an argument of #{method}(...) (a setting a chained call or a list gave)"
@@ -145,8 +165,14 @@ module MB
         # The positional parameter names of +call+'s DSL method (past the
         # recorders, whose parameters are *args, **kwargs).
         def positional_names(call)
-          m = call.receiver.method(call.written || call.name) rescue (return nil)
+          name = call.written || call.name
+          m = call.receiver.method(name) rescue (return nil)
           m = m.super_method while m.super_method && m.parameters.map(&:first) == %i[rest keyrest block]
+          if m.parameters.map(&:first) == %i[rest keyrest block] && call.receiver.is_a?(GraphNode::Channels)
+            # (a per-channel call on a bundle: the node method it runs)
+            m = GraphNode.instance_method(name) rescue (return nil)
+            m = m.super_method while m.super_method && m.parameters.map(&:first) == %i[rest keyrest block]
+          end
           m.parameters.select { |type, _| type == :req || type == :opt }.map(&:last)
         end
 

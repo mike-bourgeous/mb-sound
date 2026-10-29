@@ -213,7 +213,7 @@ module MB
           offsets: changing ? nil : offsets,
           sample_rate: pitch.sample_rate
         )
-        stereo ? GraphNode::Channels.new(mixer.outputs) : mixer.outputs[0]
+        mixer.recipe_bundle = stereo ? GraphNode::Channels.new(mixer.outputs) : mixer.outputs[0]
       end
     end
   end

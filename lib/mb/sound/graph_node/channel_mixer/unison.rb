@@ -66,8 +66,15 @@ module MB
           # Without +centers:+ every input is a center input (+mix+ changes
           # nothing).
           def initialize(inputs, slots: nil, spread: 0, mix: 1, centers: nil, stereo: true, normalize: :power, offsets: nil, sample_rate: nil)
+            @recipe_bundle = nil
             super(inputs, sample_rate: sample_rate, slots: slots, spread: spread, mix: mix, centers: centers, stereo: stereo, normalize: normalize, offsets: offsets)
           end
+
+          # What the unison call returned (a Channels of the outputs, or the
+          # one output), where its recipe is recorded: the inspector reaches
+          # the call's literals (detune:) through it
+          # (Arrangement::LiteralBinding.call_of; sound-design-nav-1).
+          attr_accessor :recipe_bundle
 
           # True if the mixer has two outputs.
           def stereo?
