@@ -392,6 +392,52 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
     end
   end
 
+  describe '#delay echo arrivals (compensate: :echo)' do
+    # Energy centers of the first +n+ echoes of a one-sample impulse
+    # through +l+, relative to k * +t+ (samples)
+    def centers(l, t, n = 4)
+      out = Numo::DFloat.cast(l.sample(t * (n + 1)))
+      Array.new(n) { |i|
+        k = i + 1
+        e = out[(k * t - t / 2)...(k * t + t / 2)]**2
+        (e * Numo::DFloat.new(t).seq).sum / e.sum - t / 2
+      }
+    end
+
+    def impulse = PlanSpecHelpers::Source.new(kind: :impulses, at: [0])
+
+    # (omnibus16: the :pitch mode measured the loop's phase at 1 / T, a few
+    # Hz, where a low cut leads by up to 180 degrees: the tape insert's
+    # echoes landed 2326, -2342, -145, and 2184 samples off at 0.1 s)
+    {
+      'the tape insert (low cut, high cut, softclip)' => ->(fb) { fb.filter(200.hz.highpass(quality: 0.5)).filter(3000.hz.lowpass(quality: 0.5)).softclip(0, 0.5) },
+      'a low cut alone' => ->(fb) { fb.filter(80.hz.highpass(quality: 0.707)) },
+      'a band (500 Hz to 2 kHz)' => ->(fb) { fb.filter(500.hz.highpass(quality: 0.707)).filter(2000.hz.lowpass(quality: 0.707)) },
+      'a bandpass' => ->(fb) { fb.filter(:bandpass, cutoff: 1000, quality: 1) },
+      'a biquad low cut' => ->(fb) { fb.filter(200.hz.highpass(quality: 0.5), structure: :biquad) },
+      'a d.fb pipeline with a low cut' => ->(d) { d.fb { |fb| fb.filter(200.hz.highpass(quality: 0.5)).filter(3000.hz.lowpass(quality: 0.5)) } },
+    }.each do |name, insert|
+      it "lands echoes through #{name} on time at 0.1 and 0.05 s" do
+        [4800, 2400].each do |t|
+          c = centers(impulse.delay(t.samples, feedback: 0.5, smoothing: false, &insert), t)
+          c.each_with_index { |x, i| expect(x.abs).to be < 15 * (i + 1), "echo #{i + 1} at #{t} samples #{x.round(1)} off (#{c.map { |v| v.round(1) }})" }
+        end
+      end
+    end
+
+    it 'keeps a short comb through a lowpass tuned as the :pitch mode does (bit for bit)' do
+      a = impulse.delay(96.samples, feedback: 0.98, smoothing: false) { |fb| fb.filter(:lowpass, cutoff: 1000, quality: 0.707) }
+      b = impulse.feedback(sustain: false) { |fb, input| (input + fb * 0.98).delay(96.samples, smoothing: false).filter(:lowpass, cutoff: 1000, quality: 0.707) }
+      expect(a.sample(4800)).to eq(b.sample(4800))
+    end
+
+    it 'accepts compensate: :echo on any loop' do
+      l = impulse.feedback(compensate: :echo) { |fb, input| input + fb.delay(100.samples) * 0.5 }
+      expect(l.compensate).to eq(:echo)
+      expect { impulse.feedback(compensate: :eco) { |fb, input| input + fb } }.to raise_error(ArgumentError, /:pitch\), :echo, :dc, or false/)
+    end
+  end
+
   describe '#delay with an insert pipeline (d.fb, d.wet)' do
     def impulse = PlanSpecHelpers::Source.new(kind: :impulses, at: [0])
 

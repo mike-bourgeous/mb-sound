@@ -414,8 +414,9 @@ module MB
           # last point #pitch_track evaluated (1.0 before or without sustain).
           attr_reader :sustain_ratio
 
-          def initialize(ops:, inputs:, params:, rings:, histories:, output:, history:, title: nil, sustain: nil)
+          def initialize(ops:, inputs:, params:, rings:, histories:, output:, history:, title: nil, sustain: nil, echo: false)
             @sustain = sustain
+            @echo = echo
             @sustain_ratio = 1.0
             @ops = ops.freeze
             @inputs = inputs.freeze
@@ -711,6 +712,20 @@ module MB
             @lat_gens = @lat_key.map { |x| x.is_a?(Numo::NArray) ? GraphNode::FrozenView.generation(x) : 0 }
             @lat_value = l
           end
+
+          # SVF types that count as wires in an echo loop's response at the
+          # pitch (FeedbackLoop's `compensate: :echo`, which #delay's insert
+          # loops use; omnibus16): filters without gain at DC.  Their phase at
+          # an echo's 1 / T (a few Hz, far below their passband) leads by up
+          # to 180 degrees, which put repeats up to half an echo off; the
+          # repeats' energy is in the passband, where that phase is small
+          # (#latency's moments count them as no latency, as here).  Other
+          # filters keep their phase at 1 / T, so a short #delay comb through
+          # a lowpass stays in tune as in the :pitch mode.
+          ECHO_WIRES = [:highpass, :bandpass, :bandpass_skirt].freeze
+
+          # True for an echo loop (see ECHO_WIRES).
+          attr_reader :echo
 
           # Samples between the points where #pitch_track evaluates the
           # loop's response at the pitch (it ramps linearly between points).
@@ -1180,7 +1195,11 @@ module MB
                       x && op.shaper.antialias ? emit.call([:half, nil, x]) : x
                     when Op::Svf
                       x = build.call(op.a)
-                      x && emit.call([:svf, nil, x, op])
+                      if @echo && ECHO_WIRES.include?(op.filter.filter_type)
+                        x # (an echo loop's low cut: see ECHO_WIRES)
+                      else
+                        x && emit.call([:svf, nil, x, op])
+                      end
                     when Plan::Op::FourPole
                       # (counted as a wire: no latency estimate yet)
                       build.call(op.a)

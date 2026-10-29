@@ -33,13 +33,14 @@ module MB
         FLUTTER_RATE = 6.5
 
         # Latency compensation of the echo loops: the group delay at DC
-        # (FeedbackLoop's compensate: :dc).  The default :pitch mode
-        # measures the loop's phase at 1 / time, a few Hz for an echo,
-        # where the tape's highpass leads by up to 180 degrees: repeats
-        # landed up to half an echo late (measured on master-ai 8c7c1c24:
-        # `delay(0.1, feedback: 0.5) { |fb| fb.filter(200.hz.highpass(quality:
-        # 0.5)).filter(3000.hz.lowpass(quality: 0.5)) }` puts its first echo
-        # 2321 samples late; :dc within a few samples).
+        # (FeedbackLoop's compensate: :dc).  The :pitch mode measures the
+        # loop's phase at 1 / time, a few Hz for an echo, where the tape's
+        # highpass leads by up to 180 degrees: repeats landed up to half an
+        # echo late (measured on master-ai 8c7c1c24: `delay(0.1, feedback:
+        # 0.5) { |fb| fb.filter(200.hz.highpass(quality: 0.5)).filter(3000.hz.lowpass(quality: 0.5)) }`
+        # put its first echo 2321 samples late; #delay's insert loops use
+        # :echo since omnibus16, which lands the same echoes as :dc).  :dc
+        # costs less than :echo while the wobbling delay time moves.
         COMPENSATE = :dc
 
         # Delay time smoothing: off, since #delay's default smoothing starts
