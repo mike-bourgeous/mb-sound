@@ -53,6 +53,9 @@ RSpec.describe(MB::Sound::UI::Inspect, :aggregate_failures) do
       walked = inspect.walk(inspect.roots(input))
       expect_sections(walked)
       expect(walked[:voices]).to include(:kick, :snare)
+      expect(walked[:voice_knobs].keys).to match_array(walked[:voices]) # (each voice's knob values, for the strip under the voices)
+      expect(walked[:voice_knobs][:kick]).to include(:tune, :decay)
+      expect(Ractor.shareable?(walked[:voice_knobs])).to eq(true)
       expect(walked[:nodes].reject { |n| n.section == :plumbing }.map(&:voice).uniq.compact).to eq(walked[:voices])
     ensure
       session&.close

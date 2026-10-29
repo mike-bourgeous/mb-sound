@@ -145,6 +145,13 @@ module MB
               end
               c.text(x, y, c.fit('  v V', [c.w - x, 0].max), :dim)
               y += 1
+              # (the voice's knob values: the kit's per-voice settings,
+              # `tr909(clip, kick: { decay: 0.4 })`)
+              if (vk = info.voice_knobs[info.voice]) && !vk.empty? && y < c.h - 2
+                text = vk.map { |k, v| "#{k} #{v.is_a?(Float) ? Panes.fmt(v) : v}" }.join('  ')
+                c.text(1, y, c.fit("#{info.voice}: #{text}", c.w - 1), :dim)
+                y += 1
+              end
             end
             y
           end
@@ -361,7 +368,8 @@ module MB
             keys = Inspect::SECTIONS.map { |sec| Inspect::SECTION_KEYS[sec] }.join(' ')
             y = draw_header(c, info, state, "#{keys}  P sections")
             if list.empty?
-              c.text(0, y, c.fit('no knobs or literals to show (P: the sections, p: every node)', c.w), :dim)
+              text = info.voices.length > 1 ? "no knobs: the voice's settings are above (a kit's knob Hash: #{info.voice}: { decay: 0.4 }); P the sections" : 'no knobs or literals to show (P: the sections, p: every node)'
+              c.text(0, y, c.fit(text, c.w), :dim)
               return
             end
             groups = list.each_with_index.group_by { |e, _| cell_section(info, e) }

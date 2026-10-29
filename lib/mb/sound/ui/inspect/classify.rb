@@ -38,7 +38,9 @@ module MB
           # +plumbing+ ([[reason, node], ...] of the hidden nodes), +unfit+
           # (nodes in no section), +total+ (nodes walked), +lanes+ (synth
           # lanes).
-          Result = Data.define(:rows, :hidden, :plumbing, :unfit, :total, :lanes) do
+          # +voice_knobs+ ({ voice => { knob => value } }: a kit's knob values
+          # per drum voice, Drums::Voice#knobs).
+          Result = Data.define(:rows, :hidden, :plumbing, :unfit, :total, :lanes, :voice_knobs) do
             def by_section = rows.group_by(&:section)
           end
 
@@ -353,7 +355,11 @@ module MB
             order = SECTIONS + [:other]
             rows.sort_by!.with_index { |r, i| [r.voice.to_s, order.index(r.section) || 99, r.stage, i] }
             rows = attach_knobs(all, users, rows)
-            Result.new(rows: rows.freeze, hidden: hidden.freeze, plumbing: plumbing.freeze, unfit: unfit.freeze, total: all.length, lanes: lanes)
+            voice_knobs = all.each_with_object({}) { |n, h|
+              next unless short_class(n) == 'Drums::Voice' && n.respond_to?(:knobs) && n.knobs.is_a?(Hash)
+              h[n.name] ||= Ractor.make_shareable(n.knobs.select { |_, v| v.is_a?(Numeric) || v.is_a?(Symbol) }.transform_values { |v| v.is_a?(Numeric) ? v.to_f : v })
+            }.freeze
+            Result.new(rows: rows.freeze, hidden: hidden.freeze, plumbing: plumbing.freeze, unfit: unfit.freeze, total: all.length, lanes: lanes, voice_knobs: voice_knobs)
           end
 
           # True if Tone +n+ only feeds `lfo` nodes (an LFO's inner tone).
