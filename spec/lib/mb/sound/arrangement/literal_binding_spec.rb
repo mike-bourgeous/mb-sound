@@ -114,11 +114,11 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     # A preset's literals are fixed in its text: the reason names the
     # preset and its params, never a node class (the inspector shows it)
     MB::Sound::Session.with_context(session: s) do
-      expect { MB::Sound.bind(:bass, filter: :quality) }.to raise_error(described_class::Error, 'quality is fixed in the dnb_reese preset; bind its param instead: cutoff')
+      expect { MB::Sound.bind(:bass, filter: :quality) }.to raise_error(described_class::Error, 'quality is fixed in the dnb_reese preset; bind its params instead: cutoff, resonance, drive, glide')
     end
     roots = Array(s.arrangement.instance_variable_get(:@built)[:bass])
     wrapper = roots.flat_map { |r| MB::Sound::GraphNode.graph(r) }.grep(MB::Sound::Filter::SampleWrapper).first
-    expect { described_class.target(roots, wrapper, :quality) }.to raise_error(described_class::Error, 'quality is fixed in the dnb_reese preset; bind its param instead: cutoff')
+    expect { described_class.target(roots, wrapper, :quality) }.to raise_error(described_class::Error, 'quality is fixed in the dnb_reese preset; bind its params instead: cutoff, resonance, drive, glide')
   end
 
   it 'is one undo step: the old patch and graph come back' do
