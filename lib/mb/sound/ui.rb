@@ -31,6 +31,7 @@ require_relative 'ui/signals'
 require_relative 'ui/band'
 require_relative 'ui/reline_guard'
 require_relative 'ui/console'
+require_relative 'ui/design'
 require_relative 'ui/library_popup'
 require_relative 'ui/prompt'
 require_relative 'ui/messages'
@@ -149,7 +150,7 @@ module MB
         session: ['the set: launch lane, the clip matrix and clip detail, racks, landed changes, buses, MIDI, around the console', '160x45 and up'],
         mixer: ['the mix: buses with input, output, and send meters, the master meters, CPU, the console over a scope', '120x40 and up'],
         keys: ['the console over the keyboard, starting in KEYS mode', '100x30 and up'],
-        sound: ['sound design: the patch inspector (a track\'s knobs to turn, its nodes\' params), the node\'s preview, the graph\'s code, an offline render of the patch, the library picker (placeholder), the CUE line, the console below', '120x40 and up'],
+        sound: ['sound design: the voice in sections or as a front panel (a track\'s knobs and params to turn), the picked row\'s preview, the graph\'s code, a render of one note, the CUE line, the console below; fewer panes on smaller screens (80x24: the panel, its preview, the console; the picker and keys from 160x50)', '80x24 and up'],
         wall: ['the performance panes at once (tracks, queue, knobs, cpu, the keyboard, meters, scope, spectrum, messages; the set panes are on ui :session), for big terminals', '200x60 and up'],
         show: ['song_script --ui: a big scope and spectrum, no console', '120x40 and up'],
         play: ['synth_script --ui: the keyboard, scope, spectrum, no console', '120x40 and up'],
@@ -248,6 +249,47 @@ module MB
             }
           },
         }
+      end
+
+      # Smaller versions of built-in tiled layouts for UI::Density levels
+      # below :big ({ name => { level => layout } }; sound-design-nav-1, the
+      # maintainer's "ui :sound with density rules"): the tiles show the
+      # one for the screen's level while the layout on screen is one of
+      # them as built (a split, a resize, or a pane closed keeps it as the
+      # user left it).  `ui.list` names them.
+      def self.tile_layout_levels
+        @tile_layout_levels ||= {
+          sound: {
+            # 80x24: the voice (its panel by default), the picked row's
+            # preview, the console
+            compact: Viewports.layout(:sound, focus: :repl) {
+              cols(height: 1) { pane :transport; pane :form }
+              pane :inspector, weight: 3, min: 6
+              pane :preview, height: 6
+              repl weight: 2, min: 4
+            },
+            # 120x40: the tracks, the voice in sections over its preview,
+            # the code over the render, the CUE line, the console (the
+            # picker placeholder and the keys pane only on big screens)
+            normal: Viewports.layout(:sound, focus: :repl) {
+              cols(height: 1) { pane :transport; pane :form }
+              cols(weight: 5) {
+                pane :tracks, width: 26
+                rows(weight: 3) { pane :inspector, weight: 3; pane :preview, weight: 2, min: 8 }
+                rows(weight: 3) { pane :code; pane :render, weight: 2, min: 8 }
+              }
+              pane :audition, height: 1
+              repl weight: 2, min: 8
+            },
+          },
+        }
+      end
+
+      # Layout +name+ for Density +level+: its smaller version, else the
+      # built-in one itself (big terminals), else nil (no versions).
+      def self.tile_layout_at(name, level)
+        versions = tile_layout_levels[name] or return nil
+        versions[level] || tile_layouts[name]
       end
 
       # Tiled layouts without a console, for scripts' screens (song_script

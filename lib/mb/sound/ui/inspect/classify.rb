@@ -464,7 +464,7 @@ module MB
             info = n.respond_to?(:param_info) ? (n.param_info rescue {}) : {}
             d = preview(n)
             # (values a preview reads from a moving input differ per copy)
-            d = d.reject { |k, _| d[:moving].include?(k) } if d.is_a?(Hash) && d[:moving].is_a?(Array) && !d[:moving].empty?
+            d = d.reject { |k, _| k == :label || d[:moving].include?(k) } if d.is_a?(Hash) && d[:moving].is_a?(Array) && !d[:moving].empty?
             [info.map { |k, v| [k, v.value, v.label] }, d].hash
           end
 

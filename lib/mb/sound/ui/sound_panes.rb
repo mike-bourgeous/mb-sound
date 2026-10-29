@@ -115,6 +115,8 @@ module MB
             end
             knobs = s.knobs.to_h { |k| [k.name, k] }
             list = pick_list(state, info)
+            # (nothing picked yet: the panel starts on the picked row's first cell)
+            state[:pick] ||= list.index { |e| e[0] == :param && e[3] == info.node } if view(state, info) == :panel
             pick = list.empty? ? nil : (state[:pick] = state[:pick].to_i.clamp(0, list.length - 1))
             case view(state, info)
             when :plumbing then draw_plumbing(c, info, knobs, list, pick, state)
@@ -126,7 +128,7 @@ module MB
           # The track line: name, which of the tracks, and the keys.
           def draw_header(c, info, state, hint)
             idx = info.tracks.index(info.track)
-            x = c.line(0, [info.track.to_s, :name], ["  #{idx ? idx + 1 : '?'}/#{info.tracks.length}", :dim])
+            x = c.line(0, [info.track.to_s, :name], [info.document ? "  #{info.document}" : '', :text], ["  #{idx ? idx + 1 : '?'}/#{info.tracks.length}", :dim])
             c.text(x, 0, c.fit(state[:mode] ? "  #{hint}" : '', [c.w - x, 0].max), :dim)
             y = 1
             if info.error
@@ -345,9 +347,107 @@ module MB
             vals.reject { |name, v| v.value.nil? && NOTE_PARAMS.include?(name) }
           end
 
-          # The front panel (scope 3 fills it in): until then, the sections.
+          # Columns of a panel cell, at least.
+          CELL = 24
+
+          # The front panel (P; the default at 80x24): each section's knobs
+          # and bindable literals as cells side by side (name, a meter for a
+          # knob, dim dots for a literal, the value), like a synth's panel;
+          # when the pane is too short for every section, the picked one is
+          # open and the others are one line each.  Up/Down step the cells
+          # (the row a cell belongs to becomes the picked row: its preview
+          # follows), Left/Right turn, Enter types or binds.
           def draw_panel(c, info, knobs, list, pick, state)
-            draw_sections(c, info, knobs, list, pick, state)
+            keys = Inspect::SECTIONS.map { |sec| Inspect::SECTION_KEYS[sec] }.join(' ')
+            y = draw_header(c, info, state, "#{keys}  P sections")
+            if list.empty?
+              c.text(0, y, c.fit('no knobs or literals to show (P: the sections, p: every node)', c.w), :dim)
+              return
+            end
+            groups = list.each_with_index.group_by { |e, _| cell_section(info, e) }
+            order = [nil, *Inspect::SECTIONS].select { |sec| groups.key?(sec) }
+            per = [c.w / CELL, 1].max
+            cw = c.w / per
+            room = c.h - y
+            cur = pick && cell_section(info, list[pick])
+            need = order.sum { |sec| 1 + (groups[sec].length + per - 1) / per }
+            tight = need > room
+            psel = state[:mode] ? pick : nil
+            order.each do |sec|
+              break if y >= c.h
+              cells = groups[sec]
+              title = sec ? Inspect::SECTION_TITLES[sec] : 'KNOBS'
+              key = sec ? Inspect::SECTION_KEYS[sec] : ''
+              names = cell_names(info, cells.map(&:first))
+              if tight && sec != cur
+                x = c.text(0, y, c.pad(title, 7), :title)
+                x = c.text(x, y, "#{key} ", :key) unless key.empty?
+                summary = cells.each_with_index.map { |(e, _), j| "#{names[j]} #{cell_value_text(info, e, knobs, state)}" }.join('  ')
+                c.text(x, y, c.fit(summary, [c.w - x, 0].max), :dim)
+                y += 1
+                next
+              end
+              x = c.text(0, y, "#{title} ", sec == cur ? :key : :title)
+              x = c.text(x, y, key, :key) unless key.empty?
+              c.text(x, y, " #{'─' * [c.w - x - 2, 0].max}", :dim)
+              y += 1
+              cells.each_slice(per).with_index do |slice, si|
+                break if y >= c.h
+                slice.each_with_index do |(e, idx), j|
+                  draw_cell(c.sub(j * cw, y, cw - 1, 1), info, e, names[si * per + j], knobs, state, idx == psel)
+                end
+                y += 1
+              end
+            end
+          end
+
+          # The section a panel entry goes in (nil: a knob no row shows).
+          def cell_section(info, e)
+            e[0] == :knob ? nil : info.nodes[e[3]]&.section
+          end
+
+          # Cell names for +entries+ of one section: the param's short name,
+          # with its row's title before it where two rows share it (an amp
+          # env's and a layer env's attack).
+          def cell_names(info, entries)
+            base = entries.map { |e|
+              kn = e[0] == :knob ? e[1] : info.nodes[e[3]].knob_of(e[1])
+              # (a knob's cell is named after the knob: bass/glide is glide, not time)
+              kn ? kn.to_s.split('/').last : (SHORTS[e[1]] || e[1]).to_s
+            }
+            dup = base.tally.select { |_, n| n > 1 }.keys
+            entries.each_with_index.map { |e, i|
+              next base[i] unless e[0] == :param && dup.include?(base[i])
+              "#{row_title(info.nodes[e[3]]).split(' ').first}.#{base[i]}"
+            }
+          end
+
+          # A panel entry's value as text ("2400 Hz", "4ms").
+          def cell_value_text(info, e, knobs, state)
+            kn = e[0] == :knob ? e[1] : info.nodes[e[3]].knob_of(e[1])
+            if kn && (k = knobs[kn])&.spec
+              value, = shown_value(state, kn, k)
+              v = e[0] == :param ? e[2] : GraphNode::Traversable::ParamValue.new(value: value, type: :control, unit: nil, range: nil, label: kn, detail: nil)
+              return value_text(v.unit ? v : v.with(unit: Panes.unit_of(k.spec, e[1])), value) || Panes.fmt(value)
+            end
+            e[0] == :param ? (value_text(e[2]) || '-') : '-'
+          end
+
+          # One panel cell on +c+ (a one-row canvas): name, a meter (a knob)
+          # or dots (a literal), the value.
+          def draw_cell(c, info, e, name, knobs, state, sel)
+            x = c.run(0, 0, c.pad(name, 8), sel ? :key : :name, reverse: sel)
+            kn = e[0] == :knob ? e[1] : info.nodes[e[3]].knob_of(e[1])
+            vtext = cell_value_text(info, e, knobs, state)
+            mw = (c.w - x - vtext.length - 2).clamp(2, 10)
+            if kn && (k = knobs[kn])&.spec
+              value, turning = shown_value(state, kn, k)
+              x = c.meter(k.spec.position(value.to_f).to_f, width: mw, x: x + 1, y: 0, role: :key)
+              c.text(x + 1, 0, c.fit(vtext, [c.w - x - 1, 0].max), turning ? :queued : :text)
+            else
+              x = c.text(x + 1, 0, '·' * mw, :dim)
+              c.text(x + 1, 0, c.fit(vtext, [c.w - x - 1, 0].max), :dim)
+            end
           end
 
           # The plumbing view (p): every knob the graph reads as knob rows,
@@ -419,6 +519,15 @@ module MB
           def key_pick(state, d)
             out = flush(state)
             state[:pick] = state[:pick].to_i + d
+            # (the panel: the picked cell's row becomes the picked row, so
+            # the preview follows and its literals' bind lines are ready)
+            info = state[:snap]&.inspector
+            if info && view(state, info) == :panel
+              list = pick_list(state, info)
+              state[:pick] = state[:pick].clamp(0, [list.length - 1, 0].max)
+              e = list[state[:pick]]
+              Inspect.target = { track: info.track, node: e[3], voice: info.voice }.freeze if e && e[0] == :param && e[3] != info.node
+            end
             out
           end
 
@@ -461,7 +570,7 @@ module MB
             return 'no tracks playing' if info.tracks.empty?
             i = info.tracks.index(info.track) || 0
             t = info.tracks[(i + d) % info.tracks.length]
-            state[:pick] = 0
+            state[:pick] = nil
             Inspect.target = { track: t, node: nil }.freeze
             [*flush(state), "inspecting #{t}"]
           end
@@ -502,14 +611,14 @@ module MB
             now = view(state, info)
             state[:plumbing] = nil
             state[:view] = now == :panel ? :sections : :panel
-            state[:pick] = 0
+            state[:pick] = nil
             "#{state[:view]} view (P flips)"
           end
 
           # p: the plumbing view (every node as chips) or back.
           def key_plumbing(state)
             state[:plumbing] = !state[:plumbing]
-            state[:pick] = 0
+            state[:pick] = nil
             state[:plumbing] ? 'every node, plumbing too (p: back to the sections)' : 'sections'
           end
 
@@ -520,7 +629,12 @@ module MB
           # Picks row +i+ (the inspector, preview, and code follow).
           def pick_row(state, info, i)
             n = info.nodes[i]
-            state[:pick] = view(state, info) == :plumbing ? info.knobs.length : info.loose.length
+            state[:pick] =
+              case view(state, info)
+              when :plumbing then info.knobs.length
+              when :panel then pick_list(state, info).index { |e| e[0] == :param && e[3] == i } || state[:pick]
+              else info.loose.length
+              end
             Inspect.target = { track: info.track, node: i, voice: info.voice }.freeze
             sec = n.section && n.section != :plumbing ? "#{Inspect::SECTION_TITLES[n.section]} " : ''
             "#{sec}#{row_title(n)}#{n.what ? " (#{n.what})" : ''}"
@@ -529,18 +643,34 @@ module MB
           # What Up/Down step through: [[:knob, name], ...] then [[:param,
           # name, ParamValue], ...] of the selected row (the plumbing view:
           # every knob; the others: the knobs no row shows).
+          #
+          # Entries are [:knob, name] or [:param, name, ParamValue, row].  The
+          # panel's are every shown row's knob-driven and literal params, in
+          # section order (they don't depend on the picked row).
           def pick_list(state, info)
             n = info.selected
-            if view(state, info) == :plumbing
-              info.knobs.map { |k| [:knob, k] } + (n ? n.params.values.map { |name, v| [:param, name, v] } : [])
+            case view(state, info)
+            when :plumbing
+              info.knobs.map { |k| [:knob, k] } + (n ? n.params.values.map { |name, v| [:param, name, v, info.node] } : [])
+            when :panel
+              rows = info.shown.sort_by { |j| [Inspect::SECTIONS.index(info.nodes[j].section) || 99, j] }
+              info.loose.map { |k| [:knob, k] } + rows.flat_map { |j|
+                m = info.nodes[j]
+                shown_params(m).filter_map { |name, v|
+                  # (counts stay out: read once while the patch builds, never knobs)
+                  # (and a preset's numbers: fixed in its document, its params are the knobs)
+                  [:param, name, v, j] if m.knob_of(name) || (!info.document && v.detail == Inspect::LITERAL && !Arrangement::LiteralBinding.count?(name, v.value))
+                }
+              }
             else
-              info.loose.map { |k| [:knob, k] } + (n ? shown_params(n).map { |name, v| [:param, name, v] } : [])
+              info.loose.map { |k| [:knob, k] } + (n ? shown_params(n).map { |name, v| [:param, name, v, info.node] } : [])
             end
           end
 
-          # The knob param row +pp+ ([name, ParamValue, Bind]) turns, or nil.
+          # The knob param row +pp+ ([name, ParamValue, Bind, row]) turns, or
+          # nil.
           def knob_of(state, pp)
-            n = state[:snap]&.inspector&.selected
+            n = state[:snap]&.inspector&.nodes&.[](pp[3])
             n&.knob_of(pp[0]) || (pp[1].label.is_a?(Symbol) ? pp[1].label : nil)
           end
 
@@ -552,7 +682,7 @@ module MB
             list = pick_list(state, info)
             return nil if list.empty?
             e = list[state[:pick].to_i.clamp(0, list.length - 1)]
-            kn = e[0] == :knob ? e[1] : knob_of(state, [e[1], e[2]])
+            kn = e[0] == :knob ? e[1] : knob_of(state, [e[1], e[2], nil, e[3]])
             return nil unless kn
             k = s.knobs.find { |kv| kv.name == kn } or return nil
             [kn, k]
@@ -566,7 +696,7 @@ module MB
             return nil if list.empty?
             e = list[state[:pick].to_i.clamp(0, list.length - 1)]
             return nil unless e[0] == :param
-            [e[1], e[2], info.selected&.binds&.[](e[1])]
+            [e[1], e[2], info.nodes[e[3]]&.binds&.[](e[1]), e[3]]
           end
         end
 

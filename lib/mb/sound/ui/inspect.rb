@@ -75,11 +75,13 @@ module MB
         # params show: listed above the sections), +hidden+ ({ reason =>
         # count } of plumbing nodes), +voices+ (a kit's drum voices, in
         # order; empty for synths), +voice+ (the voice shown), +unfit+
-        # (nodes no section takes: 0 for every shipped instrument).
-        InspectInfo = Data.define(:track, :tracks, :knobs, :nodes, :node, :code, :error, :loose, :hidden, :voices, :voice, :unfit) do
-          def initialize(track:, tracks:, knobs:, nodes:, node:, code:, error:, loose: nil, hidden: {}.freeze, voices: [].freeze, voice: nil, unfit: 0)
+        # (nodes no section takes: 0 for every shipped instrument),
+        # +document+ (the graph document's name when the graph is a preset:
+        # its numbers are fixed, its params are the track's knobs).
+        InspectInfo = Data.define(:track, :tracks, :knobs, :nodes, :node, :code, :error, :loose, :hidden, :voices, :voice, :unfit, :document) do
+          def initialize(track:, tracks:, knobs:, nodes:, node:, code:, error:, loose: nil, hidden: {}.freeze, voices: [].freeze, voice: nil, unfit: 0, document: nil)
             super(track: track, tracks: tracks, knobs: knobs, nodes: nodes, node: node, code: code, error: error, loose: loose || knobs,
-                  hidden: hidden, voices: voices, voice: voice, unfit: unfit)
+                  hidden: hidden, voices: voices, voice: voice, unfit: unfit, document: document)
           end
 
           # The selected NodeInfo, or nil.
@@ -164,7 +166,7 @@ module MB
               nodes.freeze
             end
             InspectInfo.new(track: track, tracks: tracks, knobs: entry[:knobs], nodes: nodes, node: sel, code: entry[:code], error: nil,
-                            loose: entry[:loose], hidden: entry[:hidden], voices: voices, voice: voice, unfit: entry[:unfit])
+                            loose: entry[:loose], hidden: entry[:hidden], voices: voices, voice: voice, unfit: entry[:unfit], document: entry[:document])
           rescue StandardError => e
             info = InspectInfo.new(track: track, tracks: tracks || [].freeze, knobs: entry&.[](:knobs) || [].freeze, nodes: entry&.[](:nodes) || [].freeze,
                                    node: nil, code: entry&.[](:code), error: "#{e.class}: #{e.message}".freeze)
@@ -325,6 +327,7 @@ module MB
             nodes: nodes, objects: rows.map(&:first).freeze, groups: rows.map { |r| r[2] }.freeze, extras: rows.map(&:last).freeze,
             knobs: knobs.freeze, loose: knobs.reject { |k| shown[k] }.freeze, hidden: cls.hidden, voices: voices, unfit: cls.unfit.length,
             code: code.empty? ? nil : code, capped: capped,
+            document: roots.lazy.filter_map { |r| GraphIO.document_of(r) rescue nil }.first&.name&.then { |n| "#{n}".freeze }, # (a new String: a name from document text carries GraphIO::FileGuard's mark)
           }
         end
 

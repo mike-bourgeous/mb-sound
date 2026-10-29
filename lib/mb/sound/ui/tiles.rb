@@ -1764,6 +1764,7 @@ module MB
         def relayout(*)
           @density = Density.decide(:tiles, @rows, @cols)
           @tiler.header_rule = @density.header_rule
+          level_layout
           @placed = @tiler.placed
           @placed_layout = @tiler.layout
           klass = @native ? Plot::Text::NativeCells : Plot::Text::Cells
@@ -1790,6 +1791,17 @@ module MB
           @repl_full = true
           r = repl_rect
           @host&.resize(r.h, r.w) if r && r.w > 0 && r.h > 0
+        end
+
+        # A built-in layout with smaller versions (UI.tile_layout_levels)
+        # shown at the version for the screen's Density level, while the
+        # layout on screen is one of its versions as built.
+        def level_layout
+          want = UI.tile_layout_at(@layout_name, @density.level) or return
+          now = @tiler.layout
+          return if now == want
+          versions = [UI.tile_layouts[@layout_name], *UI.tile_layout_levels[@layout_name].values]
+          @tiler.layout = want if versions.include?(now)
         end
 
         # Jump letters for the panes on screen ({name => letter}: Keys::JUMPS

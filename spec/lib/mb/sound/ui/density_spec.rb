@@ -86,6 +86,37 @@ RSpec.describe(MB::Sound::UI::Density, :aggregate_failures) do
     end
   end
 
+  # sound-design-nav-1 (the maintainer: "ui :sound with density rules"):
+  # the sound screen's built-in layout in fewer panes on smaller screens,
+  # switching on a resize while it is as built, and the inspector's view by
+  # the screen's level (the panel at 80x24, sections from 120x40)
+  it 'shows ui :sound in fewer panes on smaller screens, as built, with the panel at 80x24' do
+    small = tiles_capture(:sound, 24, 80)
+    expect(small.tiler.layout.panes).to eq(%i[transport form inspector preview repl])
+    expect(small.to_text).to include('SOUND', 'PREVIEW')
+    expect(small.to_text).not_to include('LIBRARY', 'KEYS', 'TRACKS')
+    expect(MB::Sound::UI.panes[:inspector].view(small.instance_variable_get(:@states)[:inspector])).to eq(:panel)
+    mid = tiles_capture(:sound, 40, 120)
+    expect(mid.tiler.layout.panes).to include(:tracks, :inspector, :preview, :code, :render, :audition)
+    expect(mid.tiler.layout.panes).not_to include(:picker, :sound_keys)
+    expect(MB::Sound::UI.panes[:inspector].view(mid.instance_variable_get(:@states)[:inspector])).to eq(:sections)
+    expect(tiles_capture(:sound, 80, 236).tiler.layout).to eq(MB::Sound::UI.tile_layouts[:sound])
+
+    # A resize moves between the versions; a layout the user changed stays
+    t = tiles_capture(:sound, 24, 80)
+    t.instance_variable_set(:@fixed_size, [40, 120])
+    t.instance_variable_set(:@resized, true)
+    t.refresh(1.0)
+    expect(t.tiler.layout).to eq(MB::Sound::UI.tile_layout_at(:sound, :normal))
+    t.close(:audition)
+    t.refresh(2.0)
+    edited = t.tiler.layout
+    t.instance_variable_set(:@fixed_size, [24, 80])
+    t.instance_variable_set(:@resized, true)
+    t.refresh(3.0)
+    expect(t.tiler.layout).to eq(edited)
+  end
+
   # ux-fix-1 (maintainer: help pages "as ui overlay when ui is up"): the
   # page pane under the console, scrolled with its keys, q closes it
   it 'shows a help page in a temporary page pane under the console, scrolls it, and q gives the layout back' do

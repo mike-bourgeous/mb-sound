@@ -76,6 +76,29 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(draw(:inspector, empty)[0]).to include('nothing to inspect')
     end
 
+    it 'draws the front panel with P: knobs and literals as cells by section, the picked row\'s first cell picked' do
+      st = { title_in_rule: true, mode: true, view: :panel }
+      lp4 = snap.with(slow: snap.slow.with(inspector: snap.inspector.with(node: 0)))
+      lines = draw(:inspector, lp4, st, w: 80, h: 10)
+      text = lines.join("\n")
+      expect(lines[0]).to include('P sections')
+      expect(text).to include('FILTER f')
+      expect(text).to match(/cut +█+.*2400 Hz/) # (the knob's cell: meter and value)
+      expect(text).to match(/reso +·+ 0.25/) # (a literal's cell: dots, dim)
+      expect(text).not_to include('saw', 'phase') # (only knobs and literals)
+      pane = ui.panes.fetch(:inspector)
+      expect(pane.enter_hint(st)).to eq("type cut's value")
+      key(:inspector, st, :pick, 1)
+      expect(st[:pick]).to eq(1)
+      expect(pane.send(:picked_param, st)[0]).to eq(:resonance)
+      # P back, p the chips
+      expect(key(:inspector, st, :view)).to eq('sections view (P flips)')
+      expect(pane.view(st)).to eq(:sections)
+      expect(pane.view({ level: :compact })).to eq(:panel) # (by the screen's size when not flipped)
+      expect(key(:inspector, st, :plumbing)).to include('every node')
+      expect(pane.view(st)).to eq(:plumbing)
+    end
+
     it 'draws every node as chips with p (the plumbing view, the old list)' do
       text = draw(:inspector, snap, { title_in_rule: true, plumbing: true }).join("\n")
       expect(text).to include('bass  2/3', 'cut', '2400 Hz', '100..8000 exp', 'nodes lp4 highpass×2 softclip saw×6')

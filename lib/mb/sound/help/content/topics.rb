@@ -1370,43 +1370,37 @@ module MB
 
     Help.topic :inspector, 'Sound design: the patch inspector', group: :look do
       about <<~TEXT
-        `ui :sound` is the sound-design screen: the patch inspector beside
-        a preview of the node it shows and the graph's code, with the
-        console along the bottom.  The inspector follows a playing track
-        (the clip matrix's, else the first; t/T pick another) and lists the
-        knobs its graph reads as knob rows (a meter along the knob's curve,
-        value, unit, range), then the nodes it is made of (synth lanes and
-        unison copies counted once, ×n) and the params of the one picked
-        (n/N), knob-driven ones naming their knob.  NAV d goes into it:
-        Up/Down pick a knob, Left/Right turn it (Shift or H/L fine; a held
-        key is a live sweep you hear, one `turn :cut, 0 => 0.3, 1.n8 =>
-        0.5` line when you let go), Enter types a value (`turn :cut, ` on
-        the prompt line: `3000.hz`), 0 its default, m learns a MIDI
-        controller (`learn :cut`).  Every change is one console line,
-        printed in the console: journaled, undoable, in your take.  The
-        preview pane draws a filter's response, a shaper's curve, or an
-        envelope's note (the sustain a third of the plot, the breakpoints
-        named in ms and dB, a playhead while a note sounds) and follows the
-        knob; the code pane (NAV c, arrows scroll) shows the knob lines at
-        their values now and the graph's Ruby.  Down past the knobs picks
-        the node's params: a number no knob drives (`resonance: 0.25`, an
-        envelope's attack, a preset's param) becomes one with Enter, which
-        offers `bind :bass, lp4: :resonance`: a knob :"bass/reso" at that
-        value, and the patch rebuilt reading it at the track's launch
-        point (it sounds the same until you turn it; its voices start
-        fresh; undo brings the number back).  The render pane (NAV w) keeps a second
-        copy of the track's voice and plays one note through it (the clip's
-        first, else a guess from the track's role: a low bass note, a held
-        pad) from a reset state: one cycle once the filters settle (a few
-        for detuned unison), its spectrum, and half a second of the note's
-        envelope, with LUFS, peak, and RMS and the render before it faintly
-        behind; it renders again a tenth of a second after the knobs it
-        reads stop moving, never touching what you hear.  In it, s picks
-        the views, o the previous render, p the guessed note, + and - the
-        envelope's length, r renders again.  The library picker
-        and auditions on CUE come with the library.
+        `design :bass` opens a track for sound design: `ui :sound` with the
+        inspector on the track's filter and its keys live, the track playing
+        on MAIN (`design :bass, L.inst.dnb.dnb_reese, riff` makes the track
+        first; `design off` puts the screen back).  The inspector shows the
+        voice in sections, the way a synth's panel is laid out: SOURCE
+        (oscillators, samples, glide), FILTER, AMP (drive, the amp
+        envelope), MOD (LFOs), FX, each envelope in the section it shapes.
+        s f a o x jump to a section (again: its next row), n/N step rows,
+        Up/Down pick the open row's params, Left/Right turn the knob a
+        param reads (Shift or H/L fine; a held key is a live sweep, one
+        `turn` line when you let go), Enter types a value, 0 its default, m
+        learns a MIDI controller.  P flips to the front panel (only the
+        knobs and literals, side by side; the default at 80x24), p shows
+        every node, plumbing too; a kit picks its voice with v/V.
+
+        A number no knob drives (`resonance: 0.25`, an envelope's attack)
+        shows dim with a dot: Enter offers `bind :bass, lp4: :resonance`, a
+        knob at that value and the patch rebuilt reading it at the track's
+        launch point (the same sound until you turn it; voices start
+        fresh; undo brings the number back).  A preset's numbers are fixed;
+        its params are the track's knobs already.  Every change is one
+        console line: journaled, undoable, in your take.  The preview draws
+        the picked row: a filter's response (lp4 and diode too, with their
+        resonance and tuning), a shaper's curve, an envelope's note with a
+        playhead.  The code pane (NAV c) shows the knob lines and the
+        graph's Ruby; the render pane (NAV w) plays one note through a copy
+        of the voice (a settled cycle, its spectrum, half a second of
+        envelope) after the knobs stop moving.  Small screens get fewer
+        panes: the voice, its preview, and the console at 80x24.
       TEXT
-      commands :ui, :knob, :turn, :learn, :bind
+      commands :design, :ui, :knob, :turn, :learn, :bind
       note :sound_design_ui
       see :ui, :knobs, :cue, :presets
     end
