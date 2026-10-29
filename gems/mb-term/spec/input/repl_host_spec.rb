@@ -36,3 +36,54 @@ RSpec.describe(MB::Term::Input::ReplHost, :aggregate_failures) do
     expect(@host.sync_output).to eq(false)
   end
 end
+
+RSpec.describe('MB::Term::Input::ReplHost :command', :aggregate_failures) do
+  after { @host&.stop }
+
+  def wait_for(timeout = 10)
+    d = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+    sleep 0.01 until yield || Process.clock_gettime(Process::CLOCK_MONOTONIC) > d
+    yield
+  end
+
+  it 'runs a program on the pty at the host\'s size, feeding the VT and a mirror, and sees it end' do
+    mirrored = +''.b
+    mirror = Object.new
+    mirror.define_singleton_method(:write) { |b| mirrored << b }
+    @host = MB::Term::Input::ReplHost.new(rows: 7, cols: 33, mode: :command, command: ['sh', '-c', 'stty size; read line; echo "got $line"'])
+    @host.mirror = mirror
+    @host.start
+    expect(wait_for { @host.vt.text.include?('7 33') }).to eq(true)
+    @host.write("hello\r")
+    expect(wait_for { @host.vt.text.include?('got hello') }).to eq(true)
+    expect(wait_for { @host.exited? }).to eq(true)
+    expect(@host.status.success?).to eq(true)
+    expect(mirrored).to include('7 33', 'got hello')
+  end
+
+  it 'interrupts with ^C through the line discipline and hangs up on #stop' do
+    @host = MB::Term::Input::ReplHost.new(rows: 5, cols: 40, mode: :command, command: ['sh', '-c', 'trap "echo caught" INT; echo ready; while :; do sleep 0.05; done'])
+    @host.start
+    expect(wait_for { @host.vt.text.include?('ready') }).to eq(true)
+    @host.interrupt
+    expect(wait_for { @host.vt.text.include?('caught') }).to eq(true)
+    @host.stop
+    expect(@host.active?).to eq(false)
+  end
+
+  it 'needs a command' do
+    expect { MB::Term::Input::ReplHost.new(rows: 5, cols: 40, mode: :command) }.to raise_error(ArgumentError, /needs a command/)
+  end
+end
+
+RSpec.describe('MB::Term::Input::ReplHost :command replies', :aggregate_failures) do
+  after { @host&.stop }
+
+  it 'answers a program\'s cursor position query through the pty' do
+    @host = MB::Term::Input::ReplHost.new(rows: 6, cols: 60, mode: :command, command: ['sh', '-c', 'printf "abc"; stty raw -echo; printf "\033[6n"; dd bs=1 count=6 2>/dev/null | od -c | head -1; stty sane'])
+    @host.start
+    d = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
+    sleep 0.01 until @host.vt.text.include?('033') || Process.clock_gettime(Process::CLOCK_MONOTONIC) > d
+    expect(@host.vt.text).to include('033   [   1   ;   4   R')
+  end
+end

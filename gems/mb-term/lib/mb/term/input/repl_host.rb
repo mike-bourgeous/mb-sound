@@ -21,6 +21,10 @@ module MB
       #   the process, exactly as the terminal's line discipline would.
       # - :thread (specs, tools): a Pry of its own on a thread, reading
       #   through Reline on the slave; Ctrl-C raises Interrupt in it.
+      # - :command (any program: a shell, irb, another process's Pry):
+      #   +command+ runs with the slave as its controlling terminal
+      #   (PTY.spawn); Ctrl-C is ^C through its line discipline, #stop
+      #   hangs it up, #exited? says when it ended.
       #
       # Generic: no MB::Sound types.
       class ReplHost
@@ -53,6 +57,15 @@ module MB
         # scrollback but doesn't answer queries (the terminal does).
         attr_reader :relay
 
+        # An object with #write that also gets everything the program
+        # writes, unchanged, after the VT has it (from the reader thread).
+        # Unlike #relay, the VT keeps answering the program's queries: for
+        # sharing a session with other terminals (examples/share_repl.rb).
+        attr_accessor :mirror
+
+        # The process of a :command host (nil otherwise).
+        attr_reader :pid
+
         def relay=(io)
           @lock.synchronize do
             @relay = io
@@ -60,11 +73,19 @@ module MB
           end
         end
 
-        # +rows+ x +cols+ the pane's size; +mode+ :adopt or :thread;
-        # +target+ the binding or object a :thread Pry starts in; +pry+
-        # options for a :thread Pry.
-        def initialize(rows:, cols:, mode: :adopt, scrollback: VT::SCROLLBACK, ambiguous_width: 1, target: TOPLEVEL_BINDING, pry: {})
-          raise ArgumentError, "ReplHost modes are :adopt and :thread (got #{mode.inspect})" unless %i[adopt thread].include?(mode)
+        # +rows+ x +cols+ the pane's size; +mode+ :adopt, :thread, or
+        # :command; +target+ the binding or object a :thread Pry starts in;
+        # +pry+ options for a :thread Pry; +command+ (an Array of words or
+        # a String for the shell) and +env+ for :command.
+        def initialize(rows:, cols:, mode: :adopt, scrollback: VT::SCROLLBACK, ambiguous_width: 1, target: TOPLEVEL_BINDING, pry: {}, command: nil, env: {})
+          raise ArgumentError, "ReplHost modes are :adopt, :thread, and :command (got #{mode.inspect})" unless %i[adopt thread command].include?(mode)
+          raise ArgumentError, 'A :command ReplHost needs a command' if mode == :command && (command.nil? || command.empty?)
+          @command = command
+          @env = env
+          @pid = nil
+          @waiter = nil
+          @writer = nil
+          @mirror = nil
           @rows = rows
           @cols = cols
           @mode = mode
@@ -100,6 +121,10 @@ module MB
         def start
           return self if active?
 
+          if @mode == :command
+            start_command
+            return self
+          end
           @master, @slave = PTY.open
           @slave.winsize = [@rows, @cols]
           @master.sync = true
@@ -121,7 +146,9 @@ module MB
           return self unless active?
 
           @stopping = true
-          if @mode == :adopt
+          if @mode == :command
+            stop_command
+          elsif @mode == :adopt
             unadopt
           else
             @thread&.kill
@@ -133,8 +160,9 @@ module MB
           @slave.close rescue nil
           @reader&.join(1)
           @master.close rescue nil
+          @writer&.close rescue nil
           @reader&.kill
-          @master = @slave = @reader = nil
+          @master = @slave = @reader = @writer = nil
           self
         end
 
@@ -170,7 +198,7 @@ module MB
           return unless @master
           bytes = bytes.b
           bytes = bytes.gsub(/\e\[([ABCDHF])/n, "\eO\\1") if @vt.app_cursor?
-          @master.write(bytes)
+          (@writer || @master).write(bytes)
         rescue IOError, SystemCallError
           nil
         end
@@ -209,6 +237,8 @@ module MB
         def interrupt
           if @mode == :adopt
             Process.kill(:INT, Process.pid)
+          elsif @mode == :command
+            write("\x03")
           else
             @thread&.raise(Interrupt)
           end
@@ -224,13 +254,23 @@ module MB
           @lock.synchronize { @vt.resize(rows, cols) }
           return unless @slave
           @slave.winsize = [rows, cols]
-          Process.kill(:WINCH, Process.pid)
+          Process.kill(:WINCH, @pid || Process.pid) # (a :command's kernel signal comes only for a new size)
         rescue SystemCallError, IOError
           nil
         end
 
         # The size [rows, cols].
         def size = [@rows, @cols]
+
+        # True once a :command host's program has ended.
+        def exited?
+          @mode == :command && !@waiter.nil? && !@waiter.alive?
+        end
+
+        # A :command program's Process::Status once it ended, else nil.
+        def status
+          exited? ? @waiter.value : nil
+        end
 
         def inspect = "#<MB::Term::Input::ReplHost #{@mode} #{@rows}x#{@cols}#{active? ? '' : ' (stopped)'}>"
 
@@ -258,6 +298,38 @@ module MB
           @real_in = @real_out = @real_err = nil
         end
 
+        def start_command
+          cmd = @command.is_a?(Array) ? @command : [@command]
+          @master, @writer, @pid = PTY.spawn(@env, *cmd) # (PTY.spawn's reader is read-only)
+          @master.sync = true
+          @writer.sync = true
+          # The slave, held for the size and sync marks (O_NOCTTY: never
+          # this process's controlling terminal)
+          @slave = File.open(@master.path, File::RDWR | File::NOCTTY)
+          @slave.winsize = [@rows, @cols]
+          Process.kill(:WINCH, @pid) rescue nil
+          @stopping = false
+          @reader = Thread.new { read_loop }
+          pid = @pid
+          slave = @slave
+          @waiter = Thread.new do
+            Thread.current.name = 'MB::Term command'
+            st = Process.wait2(pid)[1]
+            slave.close rescue nil # (the master reads EIO: the reader ends)
+            st
+          end
+        end
+
+        def stop_command
+          if @waiter&.alive?
+            Process.kill(:HUP, @pid) rescue nil
+            unless @waiter.join(2)
+              Process.kill(:KILL, @pid) rescue nil
+              @waiter.join(2)
+            end
+          end
+        end
+
         def start_pry
           require 'pry'
           slave = @slave
@@ -277,6 +349,7 @@ module MB
           Thread.current.name = 'MB::Term pty'
           Thread.current.priority = -1
           master = @master
+          writer = @writer || master
           loop do
             data = master.readpartial(65_536)
             @bytes_read += data.bytesize
@@ -292,11 +365,16 @@ module MB
                 r = @vt.take_replies
                 [@relay ? '' : r, @relay]
               }
-              master.write(replies) unless replies.empty?
+              writer.write(replies) unless replies.empty?
               begin
                 relay&.write(piece)
               rescue IOError, SystemCallError
                 nil
+              end
+              begin
+                @mirror&.write(piece)
+              rescue StandardError => e
+                warn "MB::Term::Input::ReplHost mirror: #{e.class}: #{e.message}" # (the reader keeps going)
               end
               Thread.pass if pos < data.bytesize
             end
