@@ -565,6 +565,7 @@ module MB
         @keep_dc = false
         @sync_source = nil
         @soft_sync = false
+        @sync_switch = nil # (#sync's enabled: when a param or knob; #param_info)
         @noise = 0
         @amplitude_set = false
         @phase_mod = nil
@@ -952,17 +953,43 @@ module MB
       # sync.  A synced tone can't also have phase modulation or a reset
       # input.  Only ramp, square, triangle, sine, and parabola can be
       # synced.  See #softsync.
-      def sync(master = nil, ratio: nil)
+      #
+      # +enabled:+ (true by default) is read once while the graph builds (a
+      # number, a param, or a knob: GraphNode.build_value): off (0, false)
+      # leaves the tone unsynced, as if #sync weren't called, so a patch can
+      # keep sync as a switch without the synced kernel's cost while it's
+      # off (the init voice's sync param; a track's knob for it rebuilds
+      # the track when turned).
+      #
+      #     osc2 = f.wavetable(:basic_norm, scan: 1).sync(osc1, enabled: sync)
+      def sync(master = nil, ratio: nil, enabled: true)
+        note_sync_switch(enabled)
+        return self unless GraphNode.build_flag?(enabled)
         set_sync(master, ratio, false)
       end
 
       # Soft sync: like #sync, but each master cycle reverses the direction
       # of this tone's phase instead of restarting it (a gentler, more
-      # metallic sound).
+      # metallic sound).  +enabled:+ as for #sync.
       #
       #     play C2.triangle.softsync(ratio: 1.5.hz.lfo.at(1.5..3))
-      def softsync(master = nil, ratio: nil)
+      def softsync(master = nil, ratio: nil, enabled: true)
+        note_sync_switch(enabled)
+        return self unless GraphNode.build_flag?(enabled)
         set_sync(master, ratio, true)
+      end
+
+      # The node (a param or a knob) #sync's +enabled:+ read while the graph
+      # built, or nil (a number, or no switch).  The inspector shows it as
+      # the tone's sync param (#param_info), on or off.
+      attr_reader :sync_switch
+
+      # #param_info, with #sync's switch as param :sync (in place of the
+      # sync pulses' node) when +enabled:+ was a param or a knob.
+      def param_info
+        info = super
+        return info unless @sync_switch
+        info.merge(sync: GraphNode::Traversable.describe_param(@sync_switch)).freeze
       end
 
       # Changes the waveform to a band-limited pulse that is high for +width+
@@ -2014,7 +2041,10 @@ module MB
           snapshot = snapshot.reject { |k, _| k == :zone_table }
         end
         fresh = State.new(**snapshot)
-        fresh.instance_variables.each { |iv| @state.instance_variable_set(iv, fresh.instance_variable_get(iv)) }
+        # (#state: a tone that hasn't played yet makes its State here, e.g.
+        # a rebuilt graph taking the old one's state; Session::Carry)
+        st = state
+        fresh.instance_variables.each { |iv| st.instance_variable_set(iv, fresh.instance_variable_get(iv)) }
       end
 
       # See GraphNode#sources.  Returns the frequency, phase modulation, and
@@ -3165,6 +3195,11 @@ module MB
           @sync_source = pulses.respond_to?(:get_sampler) ? pulses.get_sampler : pulses
           @soft_sync = soft
         end
+      end
+
+      # Remembers #sync's +enabled:+ if it's a node (see #sync_switch).
+      def note_sync_switch(enabled)
+        @sync_switch = enabled.respond_to?(:sample) ? enabled : nil
       end
 
       # Sets the wave type and whether it's band-limited (see #ramp, #aramp).

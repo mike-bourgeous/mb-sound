@@ -32,6 +32,7 @@ require_relative 'session/buses'
 require_relative 'session/racks'
 require_relative 'session/ui_feed'
 require_relative 'session/warming'
+require_relative 'session/carry'
 
 module MB
   module Sound
@@ -337,6 +338,7 @@ module MB
 
         @players = {}
         @stopped = {}
+        @last_carry = nil # (the last swap's Carry::Plan; see #last_carry)
         @taps = []
         @master_chains = []
         @order = []
@@ -417,6 +419,10 @@ module MB
         @arrangement ||= Arrangement.new(self)
       end
 
+      # The Carry::Plan of the last graph swap that carried running state
+      # (a bind's or a build knob's rebuild), or nil: what matched.
+      attr_reader :last_carry
+
       # True if a player named +name+ will be playing once the changes
       # waiting in the change queue have landed.
       def playing_after_queue?(name)
@@ -486,7 +492,7 @@ module MB
       # +:warm+ is a Proc that builds a copy of the graph (a track's patch
       # again), for warming its code before it lands (see Warming; without
       # it, a copy is loaded from the graph's recipe).
-      def add(sound, at: nil, on: nil, in: nil, name: nil, fade: nil, description: nil, start_time: nil, to: :keep, send: nil, warm: nil)
+      def add(sound, at: nil, on: nil, in: nil, name: nil, fade: nil, description: nil, start_time: nil, to: :keep, send: nil, warm: nil, carry: false)
         raise IOError, 'Session is closed' if @closed
         point = LaunchPoint.of(binding) or return nil
         raise ArgumentError, "Player names must be Symbols or Integers (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol) || name.is_a?(Integer)
@@ -516,6 +522,14 @@ module MB
 
         time = start_time ? start_time.to_r : launch_time(point, timeline_nodes)
 
+        # The running state to carry from the graph this one replaces (see
+        # Carry): matched here, copied on the swap frame
+        carried = nil
+        if carry && name
+          old = @mutex.synchronize { @players.each_value.find { |p| p.name == name && p.current? } }
+          carried = Carry.plan(old.input, nodes) if old
+        end
+
         @render_lock.synchronize {
           name = @mutex.synchronize {
             name ||= (1..).find { |i| !names_in_use.include?(i) }
@@ -530,8 +544,9 @@ module MB
           bind_bus_taps(nodes, name) or return nil
           attach_bus_spies(name, nodes) if @bus_only.key?(name)
 
-          change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes, graph: input) { |t|
-            add_now(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: t, fade: fade, explicit_fade: explicit_fade)
+          change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes, graph: input, split: !carried.nil?) { |t|
+            add_now(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: t, fade: fade, explicit_fade: explicit_fade,
+                    carry: carried)
           }
           end_cue_at_start(name, time) # (see Cue)
         }
@@ -1264,7 +1279,7 @@ module MB
 
       # Starts a graph built by #add at timeline position +start+, handing
       # over from the graph it replaces (applied by the change queue).
-      def add_now(name:, input:, description:, timeline_nodes:, start:, fade:, explicit_fade:)
+      def add_now(name:, input:, description:, timeline_nodes:, start:, fade:, explicit_fade:, carry: nil)
         @mutex.synchronize {
           @stopped.delete(name)
 
@@ -1273,6 +1288,17 @@ module MB
           # frames, like undo's restores; ux-r3 item 5: a hard cut between
           # two unrelated graphs clicked), unless given a fade (0: cut)
           fade = replacing ? (replace_declick ? declick_bars : nil) : @fade_in unless explicit_fade
+
+          # Carried state (see Carry): the old graph has played up to this
+          # frame (the change split the buffer here); when every stateful
+          # node matched, the new graph continues its samples (a cut), else
+          # the two crossfade over the declick time
+          if carry && replacing && @players.each_value.any? { |p| p.name == name && p.current? && p.started && p.input.equal?(carry.old_input) && !p.asleep }
+            Carry.apply(carry)
+            # (else the declick crossfade: the nodes that start fresh)
+            fade = carry.full? ? nil : declick_bars
+            @last_carry = carry
+          end
 
           # Hand over from the graph being replaced at the new start time
           @players.each_value do |p|

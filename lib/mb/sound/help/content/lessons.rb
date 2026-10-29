@@ -71,6 +71,88 @@ module MB
       end
     end
 
+    Help.lesson :design, 'Designing a sound', minutes: 5 do
+      about 'The init voice, its knobs, a build switch, and your own patch\'s numbers as knobs.'
+
+      step 'A blank voice' do
+        say <<~TEXT
+          `design` opens a track for sound design: `ui :sound` on its voice,
+          the inspector's keys live (s f a o x the sections, arrows turn), the
+          track playing on MAIN.  A new track starts from the init voice: two
+          oscillators that morph sine, triangle, square, saw, a mix, FM, AM,
+          and sync (all off), a filter with its envelope, an ADSR, glide.
+        TEXT
+        type { design :l_lead, seq(A3, C4, E4, G4).n8.loop }
+        check('a track :l_lead on the init voice') { tracks.key?(:l_lead) && knobs.key?(:"l_lead/wave1") }
+      end
+
+      step 'Turn its knobs' do
+        say <<~TEXT
+          Every number of the init voice is a knob of the track
+          (:"l_lead/cutoff", :"l_lead/wave2", ...): the inspector's arrows
+          turn them, and so does `turn`.  Here OSC2 becomes a sine and OSC1
+          bends its frequency: a two-operator FM bell.
+        TEXT
+        type do
+          turn :"l_lead/wave1", 0.0
+          turn :"l_lead/wave2", 0.0
+          turn :"l_lead/fm", 1.5, over: 1.bar
+        end
+        check('FM turned up') { Session.current.journal.changes.any? { |e| e.kind == :turn && e.subject == :"l_lead/fm" } }
+      end
+
+      step 'A build switch' do
+        say <<~TEXT
+          sync is read when the voice builds (off costs nothing), so turning
+          it rebuilds the track at its launch point, carrying the running
+          voices over: the notes play on.  Then sweep OSC2 up for the
+          classic sync lead.
+        TEXT
+        type do
+          turn :"l_lead/fm", 0.0
+          turn :"l_lead/sync", 1
+          turn :"l_lead/tune2", 12.0, over: 2.bars
+        end
+        check('sync turned on') { Session.current.journal.changes.any? { |e| e.kind == :turn && e.subject == :"l_lead/sync" } }
+      end
+
+      step 'Your own patch' do
+        say <<~TEXT
+          A patch of your own shows its numbers in the inspector, dim with a
+          dot: an envelope's points here.
+        TEXT
+        type do
+          track(:l_pad) { |c| c.synth(voices: 4) { |v| v.hz.saw.at(-12.db).lp4(900.hz) * v.env([[1, 0.02], [0.6, 0.3], [0, 0.6]], release_at: 2) } }
+          design :l_pad, seq([A3, C4, E4], [G3, B3, D4]).n2.loop
+        end
+        check('a track :l_pad playing') { tracks.key?(:l_pad) && players.key?(:l_pad) }
+      end
+
+      step 'A number becomes a knob' do
+        say <<~TEXT
+          `bind` makes one of them a knob (in the inspector: Enter, or the
+          arrows, which bind it now and turn it): the second point's time.
+          The patch rebuilds reading the knob, the same sound until you turn
+          it.  `env: :t2_level` is its level, `curve: :release` a chained
+          `.curve(release: 30)`.
+        TEXT
+        type do
+          bind :l_pad, env: :t2
+          turn :"l_pad/t2", 1.2, over: 2.bars
+        end
+        check('a knob :"l_pad/t2"') { knobs.key?(:"l_pad/t2") }
+      end
+
+      step 'Out' do
+        say '`design off` puts your screen back.  Stop both parts when you like.'
+        type do
+          stop :l_lead, fade: 0
+          stop :l_pad, fade: 0
+        end
+        check('the parts stopped') { !players.key?(:l_lead) && !players.key?(:l_pad) }
+      end
+    end
+
     Help.lesson :chop, 'Chopping a break', minutes: 4 do
       about 'Press a record, cut it into slices, and play a chop pattern from it.'
 

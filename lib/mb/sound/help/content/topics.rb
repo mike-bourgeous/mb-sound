@@ -1373,7 +1373,9 @@ module MB
         `design :bass` opens a track for sound design: `ui :sound` with the
         inspector on the track's filter and its keys live, the track playing
         on MAIN (`design :bass, L.inst.dnb.dnb_reese, riff` makes the track
-        first; `design off` puts the screen back).  The inspector shows the
+        first; `design :lead` alone starts a new track from the init voice:
+        two morphing oscillators, FM, AM, and sync, a filter, every number a
+        knob; `design off` puts the screen back).  The inspector shows the
         voice in sections, the way a synth's panel is laid out: SOURCE
         (oscillators, samples, glide), FILTER, AMP (drive, the amp
         envelope), MOD (LFOs), FX, each envelope in the section it shapes.
@@ -1385,11 +1387,15 @@ module MB
         knobs and literals, side by side; the default at 80x24), p shows
         every node, plumbing too; a kit picks its voice with v/V.
 
-        A number no knob drives (`resonance: 0.25`, an envelope's attack)
-        shows dim with a dot: Enter offers `bind :bass, lp4: :resonance`, a
-        knob at that value and the patch rebuilt reading it at the track's
-        launch point (the same sound until you turn it; voices start
-        fresh; undo brings the number back).  A preset's numbers are fixed;
+        A number no knob drives (`resonance: 0.25`, an envelope's attack, a
+        point of `env([[1, 0.01], [0.6, 0.3]])`, a chained `.curve(release:
+        30)`) shows dim with a dot: Enter offers `bind :bass, lp4:
+        :resonance` (`env: :t2`, `curve: :release`), a knob at that value
+        and the patch rebuilt reading it at the track's launch point (the
+        same sound until you turn it; held notes play on with their phases
+        and envelope levels; undo brings the number back), and Left/Right
+        bind it right away and turn it: an envelope's points move under
+        your arrows, the preview marking the picked one.  A preset's numbers are fixed;
         its params are the track's knobs already.  Every change is one
         console line: journaled, undoable, in your take.  The preview draws
         the picked row: a filter's response (lp4 and diode too, with their

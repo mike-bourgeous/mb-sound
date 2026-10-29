@@ -452,7 +452,9 @@ module MB
           end
 
           # The drum voice each node belongs to ({ node id => name }): the
-          # nodes of each Drums::Voice's graph.
+          # nodes of each Drums::Voice's graph.  Nodes in several voices'
+          # graphs (the 808's metal bank, under its hats and cymbal) belong
+          # to none: shared rows show with every voice (sound-design-2).
           def drum_voices(all)
             out = {}
             all.each do |v|
@@ -460,9 +462,14 @@ module MB
               name = v.respond_to?(:name) ? v.name : :voice
               g = v.respond_to?(:graph) ? v.graph : nil
               next unless g
-              [g].flatten.each { |x| (x.respond_to?(:graph) ? x.graph : [x]).each { |y| out[y.__id__] ||= name } }
+              [g].flatten.each { |x|
+                (x.respond_to?(:graph) ? x.graph : [x]).each { |y|
+                  had = out.fetch(y.__id__, name)
+                  out[y.__id__] = had == name ? name : nil
+                }
+              }
             end
-            out
+            out.compact
           end
 
           # What tells copies apart (settings, not identity).

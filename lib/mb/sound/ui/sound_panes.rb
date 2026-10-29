@@ -74,7 +74,7 @@ module MB
 
           # Params a section row leaves out (note plumbing: they come from
           # the notes, nothing to turn) when no number is set.
-          NOTE_PARAMS = %i[gate trigger velocity choke frequency phase reset release_at timeline_jumps timeline_phase].freeze
+          NOTE_PARAMS = Inspect::NOTE_PARAMS
 
           # Short names for row summaries and panel cells.
           SHORTS = { resonance: 'reso', attack: 'A', decay: 'D', sustain: 'S', release: 'R', quality: 'q', cutoff: 'cut', frequency: 'freq' }.freeze
@@ -100,10 +100,55 @@ module MB
               return nil unless b
               return "#{pp[0]}: #{b.reason}" unless b.line
               track = state[:snap]&.inspector&.track
-              return "make #{pp[0]} knob #{b.knob.inspect}: rebuilds #{track} at its launch point (voices and tails start fresh)"
+              return "make #{pp[0]} knob #{b.knob.inspect}: rebuilds #{track} at its launch point (notes play on; delays and reverbs start fresh; Left/Right bind it now and turn)"
             end
             cell = picked(state)
-            cell ? "type #{cell[0]}'s value" : nil
+            return nil unless cell
+            info = state[:snap]&.inspector
+            if info&.build_knobs&.include?(cell[0])
+              return "type #{cell[0]}'s value: read when #{info.track} builds, so each turn rebuilds it at its launch point"
+            end
+            "type #{cell[0]}'s value"
+          end
+
+          # A turn key on a build knob (read while the track builds: the
+          # init voice's sync) is one `turn` line a step (each rebuilds the
+          # track), never a held sweep; other knobs turn as in KnobTurns.
+          def key_turn(state, step)
+            cell = picked(state)
+            info = state[:snap]&.inspector
+            return literal_turn(state, step) || super if cell.nil?
+            return super unless info&.build_knobs&.include?(cell[0])
+            kn, k = cell
+            v, = shown_value(state, kn, k)
+            to = KnobTurns.turned(k.spec, v, step)
+            return nil if to == v.to_f
+            set(state, kn, to.to_f == to.round ? to.round : to)
+          end
+
+          # A turn key on a literal param that can be bound (sound-design-2,
+          # the envelope editor: an envelope's point, a segment list's time
+          # or level, a chained `.curve(release: 30)`): the first press binds
+          # it now (`bind ..., on: :now`: the patch rebuilds on the next
+          # buffer, its running state carried, so notes play on) and turns
+          # the new knob one step; later presses turn that knob (`turn`
+          # lines) until the inspector shows it.  Nil for other params.
+          def literal_turn(state, step)
+            pp = picked_param(state) or return nil
+            name, v, b = pp
+            return nil unless b&.line && v.value.is_a?(Numeric)
+            kn = b.knob
+            bound = (state[:bound] ||= {})
+            if (spec = bound[kn])
+              last, = state[:pending]&.[](kn)
+              to = KnobTurns.turned(spec, last || spec.default, step)
+              return set(state, kn, to)
+            end
+            spec = GraphNode::Knob::Spec.new(name: kn, default: Arrangement::LiteralBinding.knob_default(name, v.value))
+            bound[kn] = spec
+            to = KnobTurns.turned(spec, v.value.to_f, step)
+            (state[:pending] ||= {})[kn] = [to, self.class.clock.call]
+            PaneKeys::Run["#{b.line}, on: :now; turn #{kn.inspect}, #{TurnGesture.number(to)}", "#{name} -> knob #{kn}"]
           end
 
           def draw_body(c, s, state)
@@ -568,7 +613,15 @@ module MB
               list = pick_list(state, info)
               state[:pick] = state[:pick].clamp(0, [list.length - 1, 0].max)
               e = list[state[:pick]]
-              Inspect.target = { track: info.track, node: e[3], voice: info.voice }.freeze if e && e[0] == :param && e[3] != info.node
+              Inspect.target = { track: info.track, node: e[3], voice: info.voice, param: e[1] }.freeze if e && e[0] == :param
+            elsif info
+              # (the picked param, which the preview marks: an envelope's point)
+              list = pick_list(state, info)
+              e = list[state[:pick].to_i.clamp(0, [list.length - 1, 0].max)]
+              param = e && e[0] == :param ? e[1] : nil
+              if (Inspect.target || {})[:param] != param
+                Inspect.target = { track: info.track, node: info.node, voice: info.voice, param: param }.compact.freeze
+              end
             end
             out
           end
@@ -812,6 +865,9 @@ module MB
           # change.
           def chart_for(n, state)
             live = live_now(n.live)
+            # (the inspector's picked param: an envelope marks its point)
+            focus = Inspect.target&.[](:param)
+            live = (live || {}).merge(focus: focus) if focus
             key = [n.params, live]
             return state[:chart] if state[:chart_of] == key
             b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)

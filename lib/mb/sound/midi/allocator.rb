@@ -498,6 +498,7 @@ module MB
           @held = {}
           @seq = 0
           @chokes = nil
+          @injected = nil # (#inject: events processed with the input's, by time)
           @node_type_name = "allocator(#{voices} voices)"
         end
 
@@ -577,10 +578,33 @@ module MB
 
           events = @input.events(@read_to, to)
           @read_to = to
+          events = merge_injected(events, to) if @injected
           events.each do |e| process(e) end
         end
 
+        # Adds +events+ (MIDI::Events at stream times from #read_to on) to
+        # be processed with the input's, in time order (at the same time,
+        # injected note-offs first).  A Synth taking over another's voices
+        # (Session::Carry) gets the note-offs of the notes it carried this
+        # way, since its own source never started them.
+        def inject(events)
+          return self if events.empty?
+          @injected = ((@injected || []) + events).sort_by.with_index { |e, i| [e.time, i] }
+          self
+        end
+
         private
+
+        # +events+ (the input's, up to +to+) with the injected ones before
+        # +to+ (see #inject), in time order.
+        def merge_injected(events, to)
+          n = @injected.index { |e| e.time >= to } || @injected.length
+          return events if n == 0
+          due = @injected.shift(n)
+          @injected = nil if @injected.empty?
+          return due if events.empty?
+          (due.each_with_index.map { |e, i| [e.time, 0, i, e] } + events.each_with_index.map { |e, i| [e.time, 1, i, e] }).sort!.map(&:last)
+        end
 
         # Sends +event+ to lane +voice+.
         def send_to(voice, event)

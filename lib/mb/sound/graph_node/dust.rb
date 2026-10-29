@@ -145,6 +145,18 @@ module MB
           MB::Sound::FastTexture.dust(@buf, r, @rng, @sample_rate, @range.begin, @range.end, gap, @since)
         end
 
+        # The random stream and the samples since the last impulse (for a
+        # graph that replaces this one; Session::Carry).
+        def plan_snapshot
+          { rng: @rng.dup, since: @since.dup }
+        end
+
+        def plan_restore(snapshot)
+          return unless snapshot
+          @rng[0..] = snapshot[:rng]
+          @since[0..] = snapshot[:since]
+        end
+
         def sources
           s = rate_sources
           s[:min_gap] = @gap.node if @gap&.node?

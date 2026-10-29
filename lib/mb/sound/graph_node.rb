@@ -160,6 +160,36 @@ module MB
         size
       end
 
+      # The value of +v+ while a graph builds (sound-design-2: settings that
+      # choose the graph's structure, such as Tone#sync's +enabled:+): a
+      # number as it is, a Constant's value, a Knob's (or Knob::Reader's)
+      # value, true/false as 1/0, nil as nil.  A knob read here can't follow
+      # turns (the graph doesn't sample it), so inside a track's patch build
+      # the knob is remembered as a build knob of that track: turning it
+      # rebuilds the track (Arrangement#build_knob_turned).  Raises
+      # ArgumentError for other nodes.
+      def self.build_value(v)
+        v = climb_tee_tree(v) if v.is_a?(GraphNode)
+        case v
+        when nil, Numeric then v
+        when true then 1
+        when false then 0
+        when Constant then v.constant
+        when Knob::Reader, Knob
+          k = v.is_a?(Knob::Reader) ? v.knob : v
+          MB::Sound::Arrangement::TrackKnobs.note_build_read(k)
+          k.build_value
+        else
+          raise ArgumentError, "A setting read while the graph builds must be a number, a param, or a knob (got #{v.class.name.split('::').last})"
+        end
+      end
+
+      # True if +v+ (see .build_value) is on (nonzero); +default+ for nil.
+      def self.build_flag?(v, default: true)
+        b = build_value(v)
+        b.nil? ? default : b != 0
+      end
+
       # Walk up sources until a "real" node is found, skipping over
       # housekeeping nodes like Tee::Branch.  Used by #graph.
       def self.climb_tee_tree(branch)

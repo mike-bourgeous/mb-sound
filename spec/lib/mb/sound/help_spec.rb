@@ -694,7 +694,8 @@ RSpec.describe MB::Sound::Help do
     end
 
     it 'points method pages to the lessons that use them' do
-      expect(text(MB::Sound.help(:turn))).to match(/Learn it in: lesson :knobs \(step \d+ of \d+\)/)
+      expect(text(MB::Sound.help(:turn))).to match(/Learn it in: .*lesson :knobs \(step \d+ of \d+\)/)
+      expect(text(MB::Sound.help(:bind))).to match(/Learn it in: lesson :design \(step \d+ of \d+\)/)
       expect(MB::Sound::Help.lessons_using([:capture]).map(&:first)).to include(:record)
     end
 

@@ -49,14 +49,16 @@ module MB
           super
         end
 
-        def sync(master = nil, ratio: nil)
-          drop_key_sync
-          super
+        def sync(master = nil, ratio: nil, enabled: true)
+          drop_key_sync if GraphNode.build_flag?(enabled)
+          # (only the keywords given, so the recorded call prints as written)
+          super(master, **{ ratio: ratio, enabled: enabled }.reject { |k, v| k == :ratio ? v.nil? : v.equal?(true) })
         end
 
-        def softsync(master = nil, ratio: nil)
-          drop_key_sync
-          super
+        def softsync(master = nil, ratio: nil, enabled: true)
+          drop_key_sync if GraphNode.build_flag?(enabled)
+          # (only the keywords given, so the recorded call prints as written)
+          super(master, **{ ratio: ratio, enabled: enabled }.reject { |k, v| k == :ratio ? v.nil? : v.equal?(true) })
         end
 
         private

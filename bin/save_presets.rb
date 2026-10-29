@@ -33,6 +33,7 @@ require_relative 'synths/jungle'
 require_relative 'synths/funk'
 require_relative 'synths/ambient'
 require_relative 'synths/electric_pianos'
+require_relative 'synths/init_voice'
 
 module MB::Sound
   # Command-line options giving a patch's curated knobs (a Hash: name =>
@@ -76,6 +77,8 @@ module MB::Sound
     tine_piano: ['bin/synths/electric_pianos.rb', :tine, '--pickup', '0.5', '--amp', '1', *preset_knob_args(ELECTRIC_PIANO_KNOBS[:tine])],
     tine_crunch: ['bin/synths/electric_pianos.rb', :crunch, '--pickup', '0.5', '--amp', '4', *preset_knob_args(ELECTRIC_PIANO_KNOBS[:tine])],
     reed_piano: ['bin/synths/electric_pianos.rb', :reed, '--pickup', '1.0', *preset_knob_args(ELECTRIC_PIANO_KNOBS[:reed])],
+    # The init voice (sound-design-2): the blank patch, every knob a param
+    init: ['bin/synths/init_voice.rb', :init, *preset_knob_args(INIT_KNOBS.transform_values(&:first))],
   }.merge(
     # The wave voices (protos-1, 2026-10-23: the research-sq80 prototype
     # patches of 2026-10-06), with each patch's cutoff, resonance, and grit

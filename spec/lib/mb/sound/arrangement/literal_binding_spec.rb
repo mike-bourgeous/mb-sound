@@ -32,11 +32,11 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
   end
 
   # The same rebuild as a bind, without binding: the track's patch built
-  # again at its launch point.
+  # again at its launch point, carrying the running state (Session::Carry).
   REBUILD = ->(s) {
     arr = s.arrangement
     tr = arr.tracks.values.first
-    s.command('rebuild') { arr.send(:start_track, tr, tr.clip, arr.send(:resolve, tr.q || arr.quant, tr, MB::Sound::LaunchPoint::NONE), nil) }
+    s.command('rebuild') { arr.send(:start_track, tr, tr.clip, arr.send(:resolve, tr.q || arr.quant, tr, MB::Sound::LaunchPoint::NONE), nil, carry: true) }
   }
 
   def code_of(s, track = :lead)
@@ -208,8 +208,10 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     s, detune, = play(->(_) { MB::Sound.bind(:lead, unison: :detune) }, patch: STEREO)
     expect(code_of(s)).to include('knob(:"lead/detune")')
     # (a knob's detune runs the unison's moving-detune path, pitches
-    # computed per sample: within -70 dB of the fixed offsets, not bit for bit)
-    expect((detune - plain).abs.max).to be < 10 ** (-70 / 20.0)
+    # computed per sample: within -70 dB of the fixed offsets over 200
+    # buffers from fresh oscillators; carried ones that ran 2 s already,
+    # since sound-design-2, within -60 dB: -55 here, not bit for bit)
+    expect((detune - plain).abs.max).to be < 10 ** (-55 / 20.0)
     expect((detune - plain).abs.max).to be > 0
   end
 
@@ -237,7 +239,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     grid = MB::Sound::Plot::Text::Cells.new(80, 16)
     pane.draw(ui::Canvas.new(grid, 0, 0, 80, 16), snap, st)
     expect(grid.to_text(:none)).to include('Enter: knob :"lead/reso"')
-    expect(pane.enter_hint(st)).to eq('make resonance knob :"lead/reso": rebuilds lead at its launch point (voices and tails start fresh)')
+    expect(pane.enter_hint(st)).to eq('make resonance knob :"lead/reso": rebuilds lead at its launch point (notes play on; delays and reverbs start fresh; Left/Right bind it now and turn)')
     ask = pane.key_action(:ask, st).last
     expect(ask).to eq(ui::PaneKeys::Ask['', 'bind :lead, lp4: :resonance', :bind])
     run = pane.key_action(:bind, st, ask.text)
@@ -255,5 +257,72 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     expect(pad.track).to eq(:pad), pad.tracks.inspect
     pad = g.call(s, { track: :pad, node: pad.nodes.index { |n| n.label == 'lp4' } })
     expect(pad.selected.binds[:resonance].reason).to include('pad plays a graph, not a patch')
+  end
+
+  # sound-design-2, the envelope editor: literals inside a segment list
+  # (`env([[level, time, curve], ...])`: :t2, :t2_level, :t1_curve) and a
+  # chained setter's (`.curve(release: 30)`: :release_curve) bind like
+  # any literal, carried across the rebuild (Session::Carry), and the
+  # inspector's arrows on one bind it now and turn it
+  POINTS = ->(c) { c.synth(voices: 2) { |v| v.hz.saw.lp4(1200.hz) * v.env([[1.0, 0.01, 20], [0.6, 0.3], [0.0, 0.25]], release_at: 2).curve(release: 30) } }
+
+  it 'binds an envelope\'s list points and chained setters, the same samples at their starting values' do
+    _, plain, = play(REBUILD, patch: POINTS)
+    [
+      [{ env: :t2 }, :"lead/t2", 0.3, '[knob(:"lead/t2_level"), 0.3]'],
+      [{ env: :t2_level }, :"lead/t2_level", 0.6, '[knob(:"lead/t2_level"), 0.3]'],
+      [{ env: :t1_curve }, :"lead/t1_curve", 20.0, '[1.0, 0.01, knob(:"lead/t1_curve")]'],
+      [{ curve: :release }, :"lead/release_curve", 30.0, '.curve(release: knob(:"lead/release_curve"))'],
+    ].each do |what, kname, value, code|
+      s, bound, = play(->(_) { MB::Sound.bind(:lead, what) }, patch: POINTS)
+      expect(s.knobs[kname].value).to be_within(1e-12).of(value), what.inspect
+      expect(code_of(s)).to include(code.sub('knob(:"lead/t2_level")', what[:env] == :t2_level ? 'knob(:"lead/t2_level")' : '0.6').sub(', 0.3]', what[:env] == :t2 ? ', knob(:"lead/t2")]' : ', 0.3]')), what.inspect
+      expect((bound - plain).abs.max).to be < 1e-6, "#{what}: #{(bound - plain).abs.max}"
+      expect(s.last_carry.matched).to eq(s.last_carry.stateful)
+    end
+    s, = play(->(_) { MB::Sound.bind(:lead, env: :t2) }, patch: POINTS)
+    expect(s.knobs[:"lead/t2"].spec.range).to eq(0.0001..10.0) # (an attack's range)
+    s, = play(->(_) { MB::Sound.bind(:lead, curve: :release) }, patch: POINTS)
+    expect(s.knobs[:"lead/release_curve"].spec.range).to eq(-60.0..60.0)
+    MB::Sound::Session.with_context(session: s) do
+      expect { MB::Sound.bind(:lead, env: :t9) }.to raise_error(described_class::Error, /t9 isn't an argument of env/)
+    end
+  end
+
+  it 'turns an envelope point with the inspector\'s arrows: the first press binds it now, and the preview marks it' do
+    ui = MB::Sound::UI
+    s, = play(nil, patch: POINTS, buffers: 2)
+    g = ui::Inspect::Gatherer.new
+    info = g.call(s, { track: :lead, node: nil })
+    i = info.nodes.index { |n| n.what == 'amp env' } || info.nodes.index { |n| n.label == 'env' }
+    info = g.call(s, { track: :lead, node: i })
+    env = info.selected
+    expect(env.params.values.keys).to include(:t2, :t2_level, :t1_curve, :release_curve)
+    expect(env.binds[:t2].line).to eq('bind :lead, env: :t2')
+    expect(env.binds[:release_curve].line).to eq('bind :lead, curve: :release')
+
+    snap = ui_fake_snapshot
+    snap = snap.with(slow: snap.slow.with(inspector: info), knobs: [].freeze)
+    pane = ui.panes.fetch(:inspector)
+    st = { title_in_rule: true, mode: true, snap: snap, view: :sections }
+    st[:pick] = pane.send(:pick_list, st, info).index { |e| e[0] == :param && e[1] == :t2 }
+    run = pane.key_action(:turn, st, ui::KnobTurns::STEP)
+    expect(run.code).to match(/\Abind :lead, env: :t2, on: :now; turn :"lead\/t2", 0\.3\d+\z/)
+    again = pane.key_action(:turn, st, ui::KnobTurns::STEP)
+    expect(again.code).to match(/\Aturn :"lead\/t2", 0\.4\d+\z/) # (the knob it made, a step on, until the inspector shows it)
+    ui.run_line(run.code, s)
+    4.times { s.process_buffer }
+    expect(code_of(s)).to include('knob(:"lead/t2")')
+    expect(s.last_carry.matched).to eq(s.last_carry.stateful) # (bound now, mid-note: notes play on)
+
+    # The preview marks the picked point
+    pane.key_action(:pick, st, 0)
+    expect(ui::Inspect.target[:param]).to eq(:t2)
+    chart = MB::Sound::Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
+    MB::Sound::Plot::Panels.preview(env.params.node_class, env.params, chart, live: { focus: :t2 })
+    built = chart.build
+    expect(built.title).to start_with('▸t2 ')
+  ensure
+    ui::Inspect.target = nil
   end
 end

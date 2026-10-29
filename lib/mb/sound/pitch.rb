@@ -317,8 +317,8 @@ module MB
       alias fm_fb fm_feedback
       alias fmfb fm_feedback
       def lfo = tone.lfo
-      def sync(master = nil, ratio: nil) = tone.sync(master, ratio: ratio)
-      def softsync(master = nil, ratio: nil) = tone.softsync(master, ratio: ratio)
+      def sync(master = nil, ratio: nil, enabled: true) = tone.sync(master, ratio: ratio, enabled: enabled)
+      def softsync(master = nil, ratio: nil, enabled: true) = tone.softsync(master, ratio: ratio, enabled: enabled)
       def wraps = signal.wraps
       def increment = signal.increment
       def pwm(width, dc: false, pivot: nil) = tone.pwm(width, dc: dc, pivot: pivot)
