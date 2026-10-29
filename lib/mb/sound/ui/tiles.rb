@@ -526,19 +526,32 @@ module MB
           self
         end
 
-        # Shows +text+ (a help page; see Help.show) in the page pane: split
-        # off the console's slot below it (the console keeps
-        # REPL_MIN_ROWS), focused and scrolling with its own keys (UI::
-        # Panes::Page: j k, PgUp PgDn, g G), q closing it and going back to
-        # the console.  `ui.page false` closes it.  Returns self.
-        def page(text = nil, title: nil)
+        # Shows +text+ in the page pane: split off the console's slot below
+        # it (the console keeps REPL_MIN_ROWS), focused and in its view
+        # mode (UI::Panes::Page: j k, PgUp PgDn, g G, / search, y copy;
+        # omnibus15, the maintainer: "help in the UI should change focus to
+        # the pager where help is displayed").  Esc and q go back to what
+        # opened the page (+opener+: the focused pane, the REPL while
+        # typing at it; the REPL if that pane has closed), q closing it;
+        # Ctrl-] is NAV as anywhere.  +help+ pages (Help.show) are titled
+        # "HELP · <title>" (plain "HELP" without one); other text keeps
+        # +title+ (`ui.page text, title:`).  `ui.page false` closes it.
+        # Returns self.
+        def page(text = nil, title: nil, help: false, opener: nil)
           if text.nil? || text == false
             @page_close&.call
             @page_close = nil
+            @page_opener = nil
             @full = true
             return self
           end
-          @panes[:page].show(text, title: title) if @panes[:page].respond_to?(:show)
+          if @panes[:page].respond_to?(:show)
+            label = help ? ['HELP', title].compact.reject { |t| t.to_s.empty? }.join(' · ') : title
+            @panes[:page].show(text, title: label)
+          end
+          unless @tiler.focus == :page
+            @page_opener = opener || (@router.mode == :repl || @tiler.focus.nil? ? :repl : @tiler.focus)
+          end
           unless @page_close
             repl = @tiler.rects[:repl] || @tiler.rects.values.max_by(&:area)
             rows = [(repl ? repl.h : @rows) - REPL_MIN_ROWS - 1, 3].max
@@ -549,6 +562,27 @@ module MB
           enter(:page) if @tiler.layout.panes.include?(:page)
           @full = true
           self
+        end
+
+        # What opened the page pane (see #page), or nil.
+        attr_reader :page_opener
+
+        # Esc in a pane's own mode (Input::Router#pane_key): the page pane
+        # goes back to what opened it (true: handled); other panes to NAV.
+        def pane_escape
+          return false unless @tiler.focus == :page && @page_opener
+          back_from_page
+          true
+        end
+
+        # Focus back to the page's opener: the REPL, or a pane still on
+        # screen (into its own mode if it has one), else the REPL.
+        private def back_from_page
+          to = @page_opener
+          if to == :repl || !@tiler.layout.panes.include?(to)
+            return @host ? act(Input::Action.of(:mode, :repl)) : (@router.mode = :nav)
+          end
+          enter(to)
         end
 
         # Undoes the last layout change (split, close, resize, ...; 100 steps).
@@ -660,8 +694,13 @@ module MB
         # the text.
         def copy_pane(name = @tiler.focus)
           r = @tiler.rects[name] or return flash("#{name}: not on screen", :warn) && nil
-          lines = @lock.synchronize { @grid.to_text(:none) }.split("\n", -1)
-          text = lines[r.y, r.h].to_a.map { |l| l[r.x, r.w].to_s.rstrip }.join("\n").sub(/\n+\z/, '')
+          if @panes[name].respond_to?(:full_text)
+            # (a page: all of it, not only the rows shown)
+            text = @panes[name].full_text
+          else
+            lines = @lock.synchronize { @grid.to_text(:none) }.split("\n", -1)
+            text = lines[r.y, r.h].to_a.map { |l| l[r.x, r.w].to_s.rstrip }.join("\n").sub(/\n+\z/, '')
+          end
           @term&.copy(text)
           flash("copied #{text.length} characters of #{name} (OSC 52)", :ok)
           text
@@ -887,7 +926,9 @@ module MB
         end
 
         private def enter_unlocked(name)
-          tile { |t| t.focus!(name) } if name && name != @tiler.focus
+          # (not pinned to the REPL: going into a pane leaves REPL mode, e.g.
+          # a help page opened from the console)
+          tile(pin: false) { |t| t.focus!(name) } if name && name != @tiler.focus
           name = @tiler.focus
           case into(name)
           when :repl then act(Input::Action.of(:mode, :repl))
@@ -1237,14 +1278,14 @@ module MB
           @router.mode == :grab ? (@router.mode = :repl) : leave_keys
         end
 
-        def tile
+        def tile(pin: true)
           @lock.synchronize do
             was = @tiler.focus
             yield @tiler
             # Keys go where the focus is: in REPL mode the REPL keeps it, in
             # KEYS the keyboard (a split or `show` from the console doesn't
-            # take it; NAV moves it)
-            pin = { repl: (:repl if @host), grab: :keyboard }[@router.mode]
+            # take it; NAV moves it; #enter does, +pin+ false)
+            pin = pin ? { repl: (:repl if @host), grab: :keyboard }[@router.mode] : nil
             @tiler.focus!(pin) if pin && @tiler.focus != pin && @tiler.layout.panes.include?(pin)
             @focus_last = was if @tiler.focus != was && @tiler.layout.panes.include?(was)
             @relayout = true
@@ -1363,9 +1404,17 @@ module MB
             when String
               flash(x, :key)
             when :close
-              # (a pane asking to be closed: the page pane's q)
-              page(false) if name == :page
-              act(Input::Action.of(:mode, :repl)) if @host
+              # (a pane asking to be closed: the page pane's q, back to what
+              # opened it)
+              if name == :page
+                opener = @page_opener
+                page(false)
+                @page_opener = opener
+                back_from_page
+                @page_opener = nil
+              elsif @host
+                act(Input::Action.of(:mode, :repl))
+              end
             end
           end
           pane = @panes[name]

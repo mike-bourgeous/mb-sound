@@ -229,6 +229,30 @@ module MB
           !@clip.looping? && !@lazy_from && @clip_position > @clip.length
         end
 
+        # True if this source plays a non-looping clip that has ended, or
+        # will have ended by timeline position +time+ (whole notes, as given
+        # to #swap_clip; nil: now), with no swap or ring-out waiting: a swap
+        # landing then would never be read (the voices reading an ended clip
+        # end for good; see Session#clips_over_by?).  Clocked clips are
+        # estimated at the clock's current speed.
+        def over_by?(time)
+          return false if @ring_clip || @pending_swap || @clip.looping?
+          return true if ended?
+          return false if time.nil?
+          t = transport
+          remaining = (@clip.length - clip_position) / clip_wnps.to_r
+          remaining <= (time.to_r - t.position) / t.whole_notes_per_second.to_r
+        end
+
+        # Like #over_by?, for a source not playing yet that starts its
+        # one-shot clip from the beginning at timeline position +start+
+        # (whole notes; nil: now): true if the clip will have ended by
+        # +time+.  False for clocked clips (their speed isn't known yet).
+        def over_from_by?(start, time)
+          return false if @ring_clip || @pending_swap || @clip.looping? || @clip.clocking || time.nil?
+          (start || transport.position).to_r + @clip.length <= time.to_r
+        end
+
         # The stream time at which a non-looping clip ends (estimated at the
         # current tempo), or nil for looping clips.
         def music_end

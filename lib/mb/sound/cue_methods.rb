@@ -71,11 +71,47 @@ module MB
       # +ref+, plays a clip slot of track +name+ (see
       # ArrangementMethods#launch).  Returns the journal entry.
       #
+      # With no name, launches the one part cued (an error naming them when
+      # several are, or none).  A pre-listened part (`cue :pad` on a
+      # playing part) already plays on MAIN: its pre-listen ends, with a
+      # note saying so (omnibus15, from the maintainer's take: "it thinks I
+      # didn't cue pad?").  A name nothing answers to suggests the cued and
+      # track names (`launch :pd`: did you mean :pad?).
+      #
       #     launch :acid                 # the cue
+      #     launch                       # the one cued part
       #     launch :bass, :bass_b        # a clip slot
-      def launch(name, ref = nil, at: nil, on: nil, in: nil, fade: nil)
+      def launch(name = nil, ref = nil, at: nil, on: nil, in: nil, fade: nil)
         point = LaunchPoint.of(binding) or return nil
         return super(name, ref, at: point, fade: fade) unless ref.nil?
+
+        session = Session.current
+        if name.nil?
+          cued = session.cued_names
+          if cued.length != 1
+            return MB::Sound.live_error(ArgumentError.new(
+              cued.empty? ? 'launch: nothing is cued (`cue :name, sound` plays a part on CUE; `launch :name` brings it to MAIN)' :
+                            "launch which? #{cued.map(&:inspect).join(', ')} are cued: `launch #{cued.first.inspect}`"
+            ))
+          end
+          name = cued.first
+        end
+
+        if session.pfl_after_queue?(name) && !session.cued?(name)
+          # (already on MAIN: launching it means the phones stop pre-listening)
+          entry = uncue(name, at: point.given? ? point : nil, fade: fade)
+          $stdout.puts "launch #{name.inspect}: #{name.inspect} already plays on MAIN (`cue #{name.inspect}` pre-listened it); its pre-listen ended" if MB::Sound.live?
+          return entry
+        end
+
+        unless session.cued?(name) || session.arrangement.tracks[name] || session.arrangement.scenes.key?(name)
+          names = (session.cued_names + session.arrangement.tracks.keys + session.arrangement.scenes.keys).uniq
+          near = DidYouMean::SpellChecker.new(dictionary: names.map(&:to_s)).correct(name.to_s).first(2)
+          # (short names: one letter off, `launch :pd` for :pad)
+          near = names.map(&:to_s).select { |n| DidYouMean::Levenshtein.distance(n, name.to_s) <= 1 }.first(2) if near.empty?
+          hint = near.empty? ? '' : " (did you mean #{near.map { |n| n.to_sym.inspect }.join(' or ')}?)"
+          return MB::Sound.live_error(ArgumentError.new("Nothing cued as #{name.inspect}#{hint}; cue it first (`cue #{name.inspect}, sound`)"))
+        end
 
         cue_command("launch #{name.inspect}") { |s, time|
           at = point.given? ? point : (time ? LaunchPoint.on(:now) : nil)

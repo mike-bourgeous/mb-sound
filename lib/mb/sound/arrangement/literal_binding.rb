@@ -88,7 +88,7 @@ module MB
             return doc
           end
 
-          call = call_of(node) or raise Error, "#{param} of this #{short(node)} has no recorded call to rebuild"
+          call = call_of(node) or raise Error, unrecorded(roots, param)
           key = GraphNode::Recipe.key_of(call) or raise Error, "#{param}: this graph wasn't built by a track's patch (track :x { |clip| ... } makes one)"
           method = call.written || call.name
           slot = slot_of(call, param) or raise Error, "#{param} isn't an argument of #{method}(...) (a setting a chained call or a list gave)"
@@ -106,7 +106,7 @@ module MB
         # The Target for the +nth+ call of +method+ in graph +roots+ and its
         # param +param+ (what `bind :bass, lp4: :resonance, nth: 1` names).
         def find(roots, method, param, nth = 0)
-          key = keys_of(roots, method)[nth] or raise Error, "no #{method}#{" ##{nth}" if nth > 0} in the track's graph#{suggestion(roots, method)}"
+          key = keys_of(roots, method)[nth] or raise Error, missing(roots, method, param, nth)
           node = nodes(roots).find { |n| (c = call_of(n)) && GraphNode::Recipe.key_of(c) == key }
           target(roots, node, param)
         end
@@ -251,8 +251,22 @@ module MB
         end
 
         # A short description of +node+ for messages.
-        def short(node)
-          (c = call_of(node)) ? (c.written || c.name).to_s : node.class.name.split('::').last
+        # Why the +nth+ call of +method+ isn't found: a preset's text
+        # (whose calls aren't recorded) or a name not in the graph.
+        def missing(roots, method, param, nth)
+          return unrecorded(roots, param) if keys_of(roots, method).empty? && roots.any? { |r| GraphIO.document_of(r) }
+          "no #{method}#{" ##{nth}" if nth > 0} in the track's graph#{suggestion(roots, method)}"
+        end
+
+        # Why +param+ of a node with no recorded call can't be bound, in
+        # the user's terms (never a node class name): a preset's literals
+        # are fixed in its text, and only its params bind.
+        def unrecorded(roots, param)
+          doc = roots.lazy.filter_map { |r| GraphIO.document_of(r) }.first
+          return "#{param}: not set by the track's code (nothing to bind)" unless doc
+          params = doc.params.keys
+          bind = params.empty? ? 'it has no params to bind' : "bind its param#{params.length == 1 ? '' : 's'} instead: #{params.join(', ')}"
+          "#{param} is fixed in the #{doc.name} preset; #{bind}"
         end
 
         def suggestion(roots, method)

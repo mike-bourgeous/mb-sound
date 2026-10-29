@@ -364,6 +364,26 @@ module MB
         end
 
         # " (did you mean ...?)" for +name+ among +candidates+, or "".
+        # How to use +name+ when it is a setting of a family of presets (a
+        # chorus's :lush, a reverb's :hall) or a family's name, from the
+        # Library index: "`:lush` is a chorus setting: `it.chorus(:lush)`
+        # (L.fx.chorus.lush)"; nil otherwise.
+        def family_hint(name)
+          name = name.to_sym
+          all = Library.index.entries.reject { |e| e.family == :preset }
+          if (e = all.find { |x| x.name == name })
+            use = GraphNode.method_defined?(e.family) ? "`it.#{e.family}(#{name.inspect})` in a chain or patch (#{e.head_path})" : e.head_path
+            return "#{name.inspect} is a #{e.family} setting: #{use}"
+          end
+          fam = all.select { |x| x.family == name }
+          return nil if fam.empty?
+          example = GraphNode.method_defined?(name) ? "`it.#{name}(#{fam.first.name.inspect})`" : fam.first.head_path
+          "#{name.inspect} is a family of #{fam.first.kind} settings (#{fam.map(&:name).first(6).join(', ')}#{fam.length > 6 ? ', ...' : ''}): #{example}, " \
+            "or `L.#{Library::HEADS.key(fam.first.kind) || 'all'}.#{name}` lists them"
+        rescue StandardError
+          nil
+        end
+
         def suggest(name, candidates)
           require 'did_you_mean'
           found = DidYouMean::SpellChecker.new(dictionary: candidates.map(&:to_s)).correct(name.to_s)
@@ -615,6 +635,11 @@ module MB
         end
         unless path
           names = GraphIO.presets.values.flatten + Library.index.entries(family: :preset, documents: false).map(&:name)
+          if (hint = GraphIO.family_hint(name))
+            # (`bus(:chorus) { preset :lush }`: a setting of an effect
+            # family, not a document; omnibus15, from the take)
+            raise GraphIO::LoadError, "no preset #{name}: #{hint}"
+          end
           raise GraphIO::LoadError, "no preset #{name}#{GraphIO.suggest(name, names)} (looked in #{GraphIO.preset_dirs.join(', ')})"
         end
         Library.index.note_path(path)

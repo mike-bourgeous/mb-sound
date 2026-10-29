@@ -132,6 +132,7 @@ module MB
         }.freeze
 
         def self.install
+          LibraryPopup.install # (find-as-you-type for L. chains: a Reline dialog)
           return unless defined?(::Pry::InputCompleter)
           ::Pry::InputCompleter.prepend(self) unless ::Pry::InputCompleter.ancestors.include?(self)
         end

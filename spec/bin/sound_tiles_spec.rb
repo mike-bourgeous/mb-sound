@@ -7,7 +7,9 @@ require_relative '../support/ui_helpers'
 RSpec.describe('bin/sound.rb with ui :tiles', :aggregate_failures) do
   it 'moves the console into the REPL pane and back' do
     require 'pty'
-    vt = MB::Sound::UI::VT.new(30, 110, scrollback: 0)
+    # (scrollback kept: the Ctrl-Z note below may scroll off the top when
+    # more output follows it under load; omnibus15)
+    vt = MB::Sound::UI::VT.new(30, 110, scrollback: 500)
     lock = Mutex.new
     env = { 'MB_SOUND_HELP_DIR' => tmp_path('help'), 'COLUMNS' => '110', 'LINES' => '30', 'OUTPUT_TYPE' => 'null' }
     r, w, pid = PTY.spawn(env, 'bin/sound.rb')
@@ -26,10 +28,12 @@ RSpec.describe('bin/sound.rb with ui :tiles', :aggregate_failures) do
     end
 
     text = -> { lock.synchronize { vt.text } }
-    wait = lambda { |what, t = 20|
+    # The screen and the lines scrolled off it
+    all_text = -> { lock.synchronize { (vt.scrollback.map { |row| row.text.delete("\0") } + vt.lines).join("\n") } }
+    wait = lambda { |what, t = 20, of: text|
       d = MB::U.clock_now + t
       until MB::U.clock_now > d
-        s = text.call
+        s = of.call
         return true if what.is_a?(Regexp) ? s.match?(what) : s.include?(what)
         sleep 0.03
       end
@@ -62,12 +66,14 @@ RSpec.describe('bin/sound.rb with ui :tiles', :aggregate_failures) do
 
     # Ctrl-Z hides the tiles (the session plays on); `fg` brings them back
     type.("bg :hum, 110.hz.triangle.at(-30.db)\r")
-    expect(wait.(/bg :hum/)).to eq(true), text.call
+    expect(wait.(/bg :hum lands|bg :hum landed/)).to eq(true), text.call # (the command's result: Ctrl-Z after the line ran)
     w.write("\x1a")
     d = MB::U.clock_now + 10
     sleep 0.05 while lock.synchronize { vt.alt? } && MB::U.clock_now < d
     expect(lock.synchronize { vt.alt? }).to eq(false), text.call
-    expect(wait.('tiles hidden; the session plays on')).to eq(true), text.call
+    # (on the screen or scrolled off it: under load, warnings printed after
+    # it pushed it off a scrollback-less VT, sound-design-ui-2's spec:full)
+    expect(wait.('tiles hidden; the session plays on', of: all_text)).to eq(true), all_text.call.lines.last(40).join
     type.("players.keys\r")
     expect(wait.('[:hum]')).to eq(true), text.call # still playing
     type.("jobs\r")

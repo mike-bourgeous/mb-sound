@@ -39,7 +39,7 @@ RSpec.describe('session fuzzing') do
     songs.each { |code| expect { Prism.parse(code).errors.then { |e| raise e.map(&:message).join(', ') unless e.empty? } }.not_to raise_error }
   end
 
-  # Shrunk songs of fixed finds (omnibus13), kept so they stay fixed
+  # Shrunk songs of fixed finds (omnibus13, omnibus15), kept so they stay fixed
   {
     'an uneven-step tween launched where a step starts between samples (seed 116)' => [
       :timeline, ['bpm 174'], ['at_bar(1, beat: 2) { bg :x1, tween([300.0, 3000.0, 800.0], [1.beat, 3.beats]) * 0.0002, on: :now }'], 2,
@@ -52,6 +52,29 @@ RSpec.describe('session fuzzing') do
         'at_bar(3, beat: 2) { go :s1 }',
         'at_bar(1, beat: 2) { stop :t1, ring: true }',
       ], 4,
+    ],
+    # (omnibus15: a scene restarting the track stopped its cue, and the
+    # launch landing after it raised on the render thread)
+    'a launch landing after a scene restarted the cued track (seed 6)' => [
+      :runs, ['bpm 126'], [
+        'track(:t2, q: 1/4r) { |clip| clip.synth(voices: 1) { |v| v.hz.triangle * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t2: seq(C5, D5).n8, others: :keep',
+        'at_bar(2, beat: 2) { go :s1, on: :now }',
+        'at_bar(2) { cue :t2, seq(A4, C5).n8.loop }',
+        'at_bar(2, beat: 3) { launch }',
+      ], 2,
+    ],
+    # (omnibus15: a cue of a playing part in a scheduled block is a
+    # pre-listen still queued when the launch decides; seed 34)
+    'a pre-listen launched while it is still queued (seed 34)' => [
+      :runs, ['bpm 120'], [
+        'track(:t1, q: 1) { |clip| clip.synth(voices: 3) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        "track(:t2, q: 1/2r) { |kit| tr808(kit) * 0.5 }",
+        "scene :s1, t2: grid(16, kick: 'X..x..x.', hat: '.x.x.x.x', open_hat: '...x').loop, others: :keep",
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(2) { bg :t1, seq(A4, C5).n8.loop, on: :now; cue :t1 }',
+        'at_bar(2, beat: 3) { launch :t1 }',
+      ], 3,
     ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do

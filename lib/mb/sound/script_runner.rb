@@ -139,6 +139,8 @@ module MB
         param.param = MB::Sound::Param.declare(
           name.to_sym, param.default, range: param.allowed, description: param.description, type: param.default.nil? ? type : nil
         )
+        # (units once: a range of plain numbers beside a typed default takes its unit)
+        param.allowed = param.param.range if param.allowed.is_a?(Range)
 
         if param.short && COMMON_SHORT_OPTIONS[kind].include?(param.short)
           raise ArgumentError, "Parameter #{name} can't use #{param.short}, a common option for #{kind} scripts"

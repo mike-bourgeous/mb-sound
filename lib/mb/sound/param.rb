@@ -101,8 +101,9 @@ module MB
       # declaration's to check: `clamp: false` lets it leave the range).
       class Ranged < Data.define(:range, :default)
         def initialize(range:, default:)
+          range, default = Param.unify_units(range, default)
           Param.check_range!(nil, range, default, inside: false)
-          super
+          super(range: range, default: default)
         end
 
         # The canonical spelling: (lo..hi).at(default).
@@ -273,12 +274,55 @@ module MB
           when MB::Sound::Length::Seconds then MB::Sound::Length::Seconds.new(number.to_f)
           when MB::Sound::Length::Samples then MB::Sound::Length::Samples.new(number)
           when MB::Sound::Decibels then MB::Sound::Decibels.new((20 * Math.log10(number.to_f)).round(9))
-          when MB::Sound::Sequence::Duration then MB::Sound::Sequence::Duration.rational(number.to_r)
+          when MB::Sound::Sequence::Duration then MB::Sound::Sequence::Duration.new(number.to_r)
           when MB::Sound::Interval then number.to_f.semitones
           when MB::Sound::Phase then number.to_f.cycles
           when MB::Sound::Tempo then number.to_f.bpm
           else number
           end
+        end
+
+        # Units once (omnibus15; maintainer, 2026-10-28: "I'd like to
+        # specify the unit only once as long as it's not ambiguous or
+        # contradictory"): when the ends of +range+ and +default+ hold
+        # values of exactly one unit type besides plain numbers, the plain
+        # numbers take it (`(100..8000).at(150.hz)`, `(100.hz..8000).at(150)`
+        # and `150.hz.in(100..8000)` are all 100.hz..8000.hz at 150.hz; the
+        # canonical form prints every value typed).  Plain numbers beside
+        # Decibels are linear gains (the db rule), so a plain 0 or below
+        # raises; two unit types are left for #check_range! to name.
+        # Returns [range, default].
+        def unify_units(range, default, name = nil)
+          return [range, default] unless range.is_a?(Range)
+          vals = [range.begin, range.end, default].compact
+          # (Rationals are plain beside other units: (1/16r..1).at(1.n8))
+          rational = vals.any? { |v| !plain_number?(v) && !v.is_a?(Rational) }
+          plain = ->(v) { plain_number?(v) || (rational && v.is_a?(Rational)) }
+          typed = vals.reject(&plain)
+          return [range, default] if typed.empty? || typed.length == vals.length
+          kinds = typed.uniq { |v| type_of(v) }
+          if kinds.length > 1
+            raise Error.new("#{name ? "#{name}: " : ''}#{literal(range)} with #{literal(default)} mixes " \
+                            "#{kinds.map { |v| "#{describe_type(type_of(v)).sub(/ \(.*\)\z/, '')} (#{literal(v)})" }.join(' and ')}; give one unit (plain numbers take it)")
+          end
+          sample = typed.first
+          return [range, default] if plain_number?(retype(sample, 1.0))
+
+          conv = ->(v) {
+            next v unless plain.(v)
+            if sample.is_a?(MB::Sound::Decibels) && v <= 0
+              raise Error.new("#{name ? "#{name}: " : ''}plain numbers beside #{literal(sample)} are linear gains, so #{v.inspect} has no level; " \
+                              "write it in dB too (#{v.zero? ? '-60' : v}.db)")
+            end
+            retype(sample, v)
+          }
+          [Range.new(conv.(range.begin), conv.(range.end), range.exclude_end?), conv.(default)]
+        end
+
+        # True for Integers and Floats (not unit values, which may be
+        # Numeric too: Decibels).
+        def plain_number?(v)
+          v.is_a?(Integer) || v.instance_of?(Float)
         end
 
         # Words for a +type+ (ArgTypes' or EXTRA_TYPES).
@@ -360,6 +404,7 @@ module MB
         if range.is_a?(Set)
           range = range.to_a
         end
+        range, default = Param.unify_units(range, default, name)
 
         unless type.nil? || ArgTypes.type_names.include?(type) || EXTRA_TYPES.key?(type)
           raise Error.new("#{name}: unknown type #{type.inspect}", DidYouMean::SpellChecker.new(dictionary: (ArgTypes.type_names + EXTRA_TYPES.keys).map(&:to_s)).correct(type.to_s).first(2).map { |t| ":#{t}" })

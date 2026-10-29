@@ -31,7 +31,12 @@ module MB
       #
       #     bus(:verb) { |sig| sig.reverb(:hall, mix: 1) }
       #     pad.compress(sidechain: bus(:drums))
-      def bus(name, to: nil, only: nil, at: nil, on: nil, in: nil, fade: nil, &block)
+      def bus(name = nil, to: nil, only: nil, at: nil, on: nil, in: nil, fade: nil, &block)
+        if name.nil?
+          # (`bus` alone, from the take; omnibus15)
+          raise ArgumentError, 'bus needs a name: `bus(:verb) { |sig| sig.reverb(:hall, mix: 1) }` makes one, ' \
+                               '`track :keys, send: { verb: -12.db }` feeds it, `bus(:verb)` alone reads it, `buses` lists them'
+        end
         point = LaunchPoint.of(binding) or return nil
         if block.nil? && to.nil?
           raise ArgumentError, 'Pass a block or to: to define a bus (bus(:name) alone reads it)' if point.given? || !fade.nil?

@@ -56,6 +56,14 @@ module MB
         @exact / other
       end
 
+      # Tempos compare by their exact BPM, so they make Ranges
+      # (`0.5.bpm..2.bpm`, `(90.bpm..180.bpm).at(120.bpm)`; omnibus15).
+      include Comparable
+
+      def <=>(other)
+        other.is_a?(Tempo) ? @exact <=> other.to_r : nil
+      end
+
       def ==(other)
         other.is_a?(Tempo) && other.to_r == @exact
       end

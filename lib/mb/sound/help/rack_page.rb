@@ -7,6 +7,8 @@ module MB
       # Rack#info / Session::Racks#rack_info (the data a rack pane reads).
       class RackPage
         include Page
+
+        def title = "rack #{(@rack.name rescue nil) || ''}".strip
         include Text
 
         def initialize(rack, index)

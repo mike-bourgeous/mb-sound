@@ -342,7 +342,7 @@ clock :tide, 31.1.seconds                    # a loop period (one cycle of the c
 clock :reese, 138.75.bpm                     # a tempo of its own
 clock :lag, 5/4r                             # a ratio of the session tempo (follows tempo changes)
 gear :reese, 165 => 138.75                   # the same as clock :reese, 37/44r
-clock :tide, 31.1.seconds, speed: :tide_speed   # speed from a knob (or a number, or cc(1, 0.5..2))
+clock :tide, 31.1.seconds, speed: :tide_speed   # speed from a knob (or a number, cc(1, 0.5..2), or a tempo LFO: 4.bars.lfo.at(0.5..2), read per cell; omnibus15)
 track :bowl, clock: :tide do |c| c.trigger.resonate(:bowl) end
 bg :bass, bassline, clock: :reese            # play ..., clock: too
 bowl.clocked(19.7.seconds)                   # canonical; aliases clock, clocked_at

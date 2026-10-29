@@ -92,14 +92,14 @@ RSpec.describe(MB::Sound::Param) do
 
     it 'checks the default against its range, with the description and a spelling that works' do
       expect { described_class.declare(:cutoff, 9000.hz, range: 150.hz..8000.hz, description: 'Lowpass') }.to raise_error(described_class::Error, /cutoff: the default 9000.hz is outside 150.hz..8000.hz \(Lowpass\)/)
-      expect { described_class.declare(:cutoff, 2400, range: 150.hz..8000.hz) }.to raise_error(described_class::Error) { |e|
-        expect(e.message).to match(/isn't a frequency/)
-        expect(e.suggestions).to eq(['2400.hz'])
-      }
+      # (units once, omnibus15: a plain default beside a typed range takes its unit)
+      expect(described_class.declare(:cutoff, 2400, range: 150.hz..8000.hz).to_ruby).to eq('param :cutoff, (150.hz..8000.hz).at(2400.hz)')
+      expect { described_class.declare(:cutoff, 2400, range: 150.0.semitones..8000.0.semitones, type: :frequency) }.to raise_error(described_class::Error)
       expect { described_class.declare(:mix, 1.5) }.to raise_error(described_class::Error, /mix: the default 1.5 is outside 0.0..1.0; limited to 1.0 \(clamp: false lets it leave the range\)/)
       expect { described_class.declare(:x, (0.0..1.0).at(2.0)) }.to raise_error(described_class::Error, /outside/)
       expect((0.0..1.0).at(2.0).default).to eq(2.0) # (the declaration checks; clamp: false may allow it)
-      expect { (0.0..1.0).at(2.hz) }.to raise_error(described_class::Error, /isn't/)
+      expect((0.0..1.0).at(2.hz).to_ruby).to eq('(0.hz..1.hz).at(2.hz)') # (units once)
+      expect { (0.0.semitones..1.0.semitones).at(2.hz) }.to raise_error(described_class::Error, /isn't|mixes/)
     end
 
     it 'limits defaults outside their range live, and lets clamp: false params leave it' do

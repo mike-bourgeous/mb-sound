@@ -46,11 +46,41 @@ module MB
           count = planned_swaps(name, nodes, clips, warn: true).length
 
           time = stopped ? nil : (start_time ? start_time.to_r : launch_time(point, nodes))
+          if !stopped && clips_over_by?(name, time)
+            # (the voices reading an ended one-shot clip have ended, so the
+            # swap would land unheard and the player end with its tail;
+            # Arrangement tracks build their patch again instead: omnibus15)
+            raise ClipsOver, "#{name.inspect}'s clip has ended (only its tail is ringing), so a swap would never be heard: start it again with `bg #{name.inspect}, ...`"
+          end
           change(:swap, name, time, data: { clip: clip_label(clips) }) { |t|
             swap_now(name, clips, stopped ? nil : t)
           }
 
           count
+        end
+
+        # Raised by #swap when the player's clips are one-shots that have
+        # ended (or will have by the swap's time).
+        class ClipsOver < ArgumentError; end
+
+        # True if the player named +name+ (the current one, else the one a
+        # queued change starts) plays clips, and every one of them is a
+        # one-shot that has ended or will have ended by timeline position
+        # +time+ (whole notes; see MIDI::ClipSource#over_by?), with no swap
+        # queued for it: a swap there would never be heard.
+        def clips_over_by?(name, time)
+          @render_lock.synchronize {
+            @mutex.synchronize {
+              next false if @changes.any? { |c| c.subject == name && c.kind == :swap }
+
+              player = @players.values.select { |p| p.name == name && p.current? }.last
+              start = player ? nil : @changes.select { |c| c.subject == name && c.starts }.last
+              next false if start&.kind == :restore # (an undo's player: its clip positions are its own)
+
+              nodes = (player ? player.timeline_nodes : start&.starts || []).grep(MIDI::ClipSource)
+              !nodes.empty? && nodes.all? { |n| player ? n.over_by?(time) : n.over_from_by?(start.time, time) }
+            }
+          }
         end
 
         private

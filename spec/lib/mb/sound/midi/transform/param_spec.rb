@@ -111,6 +111,28 @@ RSpec.describe('MIDI transforms with moving parameters (MIDI::Param)', :midi_tra
     end
   end
 
+  describe 'legato by a param (omnibus15)' do
+    it 'reads the fraction at each note-on, note-offs following' do
+      # n = 1 for the first half bar (1 s at 120 BPM), 2 after: later notes ring twice as long
+      out = read_all(run_stream.legato(MB::Sound.seq(1, 2).n2.loop, transport: transport))
+      expect_balanced(out)
+      lengths = ons(out).map { |e| out.find { |o| o[0] == :note_off && o[1] == e[1] && o[2] > e[2] }[2] - e[2] }
+      expect(lengths.first(8).uniq).to eq([1/16r])
+      expect(lengths.last(8).uniq).to eq([1/8r])
+    end
+
+    it 'shortens hinted notes by the fraction at their note-on' do
+      notes = [0r, 1r].flat_map { |t| [ev.note_on(60, time: t).with_length_hint(1/2r), ev.note_off(60, time: t + 1/2r)] }
+      out = read_all(list_stream(*notes).legato(MB::Sound.seq(0.5, 0.25).n2.loop, transport: transport))
+      expect_balanced(out)
+      expect(out.select { |e| e[0] == :note_off }.map { |e| e[2] }).to eq([1/4r, 1r + 1/8r])
+    end
+
+    it 'suggests a tempo LFO for a Hz LFO' do
+      expect { MB::Sound.seq(60).n1.loop.legato(0.1.hz.lfo.at(0.25..1)) }.to raise_error(MB::Sound::MIDI::Param::NotAParam, /write 5\.bars\.lfo\.at\(\.\.\.\) for 0\.1\.hz\.lfo/)
+    end
+  end
+
   describe 'per step' do
     it 'arp reads its rate at each step' do
       s = list_stream(ev.note_on(60, time: 0r), ev.note_on(64, time: 0r), ev.note_off(60, time: 2r), ev.note_off(64, time: 2r))
@@ -157,6 +179,17 @@ RSpec.describe('MIDI transforms with moving parameters (MIDI::Param)', :midi_tra
       h = riff.humanize(0.01 + 0 * 2.bars.lfo, seed: 3)
       expect(h.events_for(2)).to eq(h.events_for(2))
       expect(h.events_for(2).map(&:start)).not_to eq(riff.events.map(&:start))
+    end
+
+    it 'legato by the fraction at each event, per cycle, keeping slides (omnibus15)' do
+      bass = MB::Sound.seq(MB::Sound::C2, MB::Sound::F1, ~MB::Sound::A1, MB::Sound::G1).n1.loop
+      c = bass.legato(4.bars.lfo.triangle.at(0.25..1))
+      lengths = c.events_for(0).map(&:length)
+      expect(lengths[2]).to eq(bass.events[2].length) # (the slide keeps its overlap)
+      expect(lengths.values_at(0, 1, 3).uniq.length).to eq(3)
+      expect(c.events_for(1).map(&:length)).to eq(lengths)
+      expect(c.to_ruby).to eq('seq(C2, F1, ~A1, G1).n1.loop.legato(4.bars.hz.lfo.triangle.at(0.25..1))')
+      expect(MB::Sound.seq(60).n4.legato(MB::Sound.seq(0.5).n1.loop).events_for(0).map(&:length)).to eq([1/8r])
     end
 
     it 'every reads n at each cycle start' do

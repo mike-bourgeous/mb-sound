@@ -142,6 +142,18 @@ module MB
       # clock: :reese`, `bg :bowl, strike, clock: 19.7.seconds`.
       def bg(name_or_sound, sound = nil, at: nil, on: nil, in: nil, fade: nil, to: nil, send: nil, clock: nil)
         point = LaunchPoint.of(binding) or return nil
+        # `bg :pad` with a track's name: the track plays its clip again
+        # (from the take of 2026-10-27; omnibus15)
+        if sound.nil? && name_or_sound.is_a?(Symbol) && (s = Session.current).arrangement.tracks[name_or_sound]
+          name = name_or_sound
+          tr = s.arrangement.tracks[name]
+          return MB::Sound.live_error(ArgumentError.new("bg #{name.inspect}: the track has no clip yet; give it one (`bg #{name.inspect}, clip`)")) if tr.patch? && tr.clip.nil?
+          if s.playing_after_queue?(name)
+            $stdout.puts "bg #{name.inspect}: #{name.inspect} is already playing (`bg #{name.inspect}, clip` changes its clip)" if MB::Sound.live?
+            return nil
+          end
+          return s.arrangement.play(name, :on, at: point.given? ? point : nil, fade: fade)
+        end
         name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
         sound = Sequence::Clocked.apply(sound, clock) if clock
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all

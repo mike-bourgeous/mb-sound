@@ -348,4 +348,67 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
   ensure
     session&.close
   end
+  # omnibus15 (maintainer 2026-10-28: "help in the UI should change focus
+  # to the pager where help is displayed", "escape from pager should maybe
+  # go back to repl", the pager titled HELP; from his take: "show-doc
+  # should go in page if it can", "the pry cat command ... could go into
+  # the pager pane")
+  describe 'help pages and Pry output in the page pane' do
+    before do
+      require 'mb/sound/help'
+      MB::Sound::UI::PryPages.install
+    end
+    after { MB::Sound::UI.instance_variable_set(:@tiles, nil) }
+
+    def state = [@tiles.tiler.focus, @tiles.router.mode]
+    def page_pane = @tiles.instance_variable_get(:@panes)[:page]
+
+    it 'focuses the page, Esc and q going back to what opened it, titled HELP · page' do
+      start(:studio, rows: 40, cols: 120)
+      MB::Sound::UI.instance_variable_set(:@tiles, @tiles) # (UI.screen, as `ui :studio` sets it)
+
+      @term.type("MB::Sound::Help.show(MB::Sound::Help.page_for(:knobs))\r")
+      expect(wait_settled(@tiles) { state == %i[page pane] }).to eq(true), state.inspect
+      expect(@term.wait_for('HELP · KNOBS')).to eq(true), @term.text
+      @term.type('/turn')
+      @term.write("\r")
+      expect(wait_until { page_pane.offset > 0 }).to eq(true) # (searched down the page)
+      @term.write("\e")
+      expect(wait_settled(@tiles) { state == %i[repl repl] }).to eq(true), state.inspect
+      expect(@tiles.tiler.layout.panes).to include(:page) # (Esc keeps it; q closes it)
+      @term.type("6 * 7\r")
+      expect(@term.wait_for('=> 42')).to eq(true) # (typing goes to the prompt again)
+
+      # A page opened from a pane goes back to that pane
+      @tiles.enter(:tracks)
+      @tiles.page("one\ntwo", title: 'notes')
+      expect(@tiles.page_opener).to eq(:tracks)
+      expect(@term.wait_for(' NOTES ')).to eq(true), @term.text # (ui.page keeps a caller's title)
+      @term.write('q')
+      expect(wait_settled(@tiles) { @tiles.tiler.focus == :tracks && !@tiles.tiler.layout.panes.include?(:page) }).to eq(true), state.inspect
+    end
+
+    it "shows Pry's show-source and long output in the page pane, and short output in the REPL" do
+      start(:studio, rows: 40, cols: 120)
+      MB::Sound::UI.instance_variable_set(:@tiles, @tiles)
+      @term.type("show-source MB::Sound::Decibels#to_f\r")
+      expect(wait_settled(@tiles) { state == %i[page pane] }).to eq(true), state.inspect
+      expect(@term.wait_for('SHOW-SOURCE MB::SOUND::DECIBELS#TO_F')).to eq(true), @term.text
+      expect(page_pane.full_text).to include('def to_f')
+      @term.write('q')
+      expect(wait_settled(@tiles) { state == %i[repl repl] }).to eq(true), state.inspect
+
+      @term.type("omnibus15_x = 1\r")
+      @term.type("ls -l\r") # (short: one local)
+      expect(@term.wait_for(/omnibus15_x/)).to eq(true)
+      expect(wait_settled(@tiles) { true }).to eq(true)
+      expect(@tiles.tiler.layout.panes).not_to include(:page)
+
+      # Tiles down: Pry pages as before
+      MB::Sound::UI.instance_variable_set(:@tiles, nil)
+      @term.type("show-source MB::Sound::Decibels#to_f\r")
+      expect(@term.wait_for(/def to_f/)).to eq(true)
+      expect(@tiles.tiler.layout.panes).not_to include(:page)
+    end
+  end
 end

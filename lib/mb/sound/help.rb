@@ -61,6 +61,7 @@ module MB
           SearchPage.new(/#{Regexp.escape(subject.to_s)}/i, index)
         when Method, UnboundMethod
           MethodPage.new(index.find_all(subject.name), index)
+        when Pitch then topic_page(:pitch) # (`help 440.hz`, `help C4`: the values, not a graph)
         when GraphNode, GraphNode::Channels then GraphPage.new(subject, index)
         when Rack then RackPage.new(subject, index)
         else
@@ -85,8 +86,12 @@ module MB
         text = Help.for_output(page.to_s, output)
         screen = defined?(UI) && UI.respond_to?(:screen) ? UI.screen : nil
         if screen.respond_to?(:page)
-          title = page.respond_to?(:title) ? page.title : nil
-          screen.page(MB::U.remove_ansi(text), title: title)
+          title = page.respond_to?(:title) && page.method(:title).arity.zero? ? page.title : nil
+          if screen.method(:page).parameters.any? { |_, n| n == :help }
+            screen.page(MB::U.remove_ansi(text), title: title, help: true)
+          else
+            screen.page(MB::U.remove_ansi(text), title: title)
+          end
         elsif pry && ColorPolicy.animate?(output) && Pry.config.pager
           Pry::Pager.new(pry).page(text.end_with?("\n") ? text : "#{text}\n")
         else

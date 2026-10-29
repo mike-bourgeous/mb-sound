@@ -108,7 +108,7 @@ RSpec.describe(MB::Sound::Plot::Panels::EnvelopeView, :aggregate_failures) do
     6.times { s.process_buffer }
     info = g.call(s, { track: :bass, node: 0 })
     expect(info.nodes.map(&:label)).to include('amp_env', 'filter_env')
-    expect(info.nodes.map(&:kind)).not_to include('GmTime')
+    expect(info.nodes.map(&:label)).not_to include('gm_time', 'GmTime')
     amp = info.selected
     expect(amp.label).to eq('amp_env')
     expect(amp.live).to include(stage: :segment, segment: 1)

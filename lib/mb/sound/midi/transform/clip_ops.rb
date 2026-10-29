@@ -18,42 +18,83 @@ module MB
         # scripts; maintainer, 2026-10-16: "length hints, else pass +
         # live_error").
         class Legato < NoteMap
+          # How many note-on fractions a moving fraction remembers for
+          # note-offs still to come (oldest dropped first).
+          MAX_HELD = 256
+
+          # The smallest fraction a moving fraction is read as (a param
+          # passing 0 or below would end notes at their note-on).
+          MIN_FRACTION = 1/64r
+
           def initialize(parent, fraction, **options)
             super(parent, **options)
-            @fraction = Sequence::Clip.check_legato(fraction)
+            @fraction = Param.wrap(fraction, 'Legato')
+            @fraction = Sequence::Clip.check_legato(fraction) unless Param.param?(@fraction)
             @noticed = false
-            @node_type_name = "legato(#{fraction})"
+            @node_type_name = "legato(#{Param.label(fraction)})"
+            # (a moving fraction is read at each note-on and kept for its
+            # note-off: played note-on time => fraction)
+            @note_fraction = nil
+            @held = {}
           end
 
           private
 
+          # Reads a moving fraction at the note-on (midi-consol-2's decision
+          # points), for its outputs' planned length, hint, and note-off.
+          def note_on(e)
+            if Param.param?(@fraction)
+              f = param_at(@fraction, e.time)
+              f = f.to_f.finite? && f > MIN_FRACTION ? Sequence::Duration.rational(f) : MIN_FRACTION
+              @held.delete(@held.first[0]) if @held.length >= MAX_HELD
+              @held[e.time] = f
+              @note_fraction = f
+            else
+              @note_fraction = @fraction
+            end
+            super
+          end
+
+          # The fraction a note played at +on_time+ got.
+          def fraction_of(on_time)
+            Param.param?(@fraction) ? (@held[on_time] || @note_fraction || 1r) : @fraction
+          end
+
           def note_off_time(time, delay, on_time)
-            return super if @fraction < 1
+            f = fraction_of(on_time)
+            return super if f < 1
 
             start = on_time + delay
-            MB::M.max(start + (time - on_time) * @fraction, time)
+            MB::M.max(start + (time - on_time) * f, time)
           end
 
           def planned_length(out)
-            return nil if @fraction >= 1
+            f = @note_fraction
+            return nil if f >= 1
 
             hint = out.length_hint
             if hint.nil?
               unless @noticed
                 @noticed = true
-                MB::Sound.live_error(ArgumentError.new("legato(#{@fraction.to_f}) on a stream shortens only notes with a length hint (from clips, arp, echo, ratchet, len); notes from live keys or files pass through unchanged"))
+                MB::Sound.live_error(ArgumentError.new("legato(#{Param.param?(@fraction) ? Param.label(@fraction) : f.to_f}) on a stream shortens only notes with a length hint (from clips, arp, echo, ratchet, len); notes from live keys or files pass through unchanged"))
               end
               return nil
             end
 
-            seconds_of(hint) * @fraction
+            seconds_of(hint) * f
           end
 
           # Hints scale (Durations stay Durations, so they follow the tempo).
           def output_hint(out, e, delay, planned)
             hint = out.length_hint
             return super unless hint
-            hint.is_a?(Sequence::Duration) ? Sequence::Duration.new(hint.whole_notes * @fraction) : hint * @fraction
+            f = @note_fraction
+            hint.is_a?(Sequence::Duration) ? Sequence::Duration.new(hint.whole_notes * f) : hint * f
+          end
+
+          def cut_state
+            super
+            @held.clear
           end
         end
 

@@ -31,6 +31,7 @@ require_relative 'ui/signals'
 require_relative 'ui/band'
 require_relative 'ui/reline_guard'
 require_relative 'ui/console'
+require_relative 'ui/library_popup'
 require_relative 'ui/prompt'
 require_relative 'ui/messages'
 require_relative 'ui/warm_up'
@@ -316,6 +317,55 @@ module MB
         ConsoleKeys.install # (Ctrl-], F2, and the IDE editing keys in the plain console and the band)
         return unless defined?(::Pry)
         ::Pry.config.hooks.add_hook(:before_eval, :mb_sound_ui) { |_code, pry| UI.console_binding = pry.current_binding }
+        PryPages.install
+      end
+
+      # Pry's paged output (show-doc, show-source, cat, ls, whereami, ...)
+      # in the tiled screen's page pane while the tiles are up (omnibus15;
+      # the maintainer's take: "show-doc should go in page if it can", "the
+      # pry cat command went into the repl pane; could go into the pager
+      # pane"), titled with the command line; in the REPL as before when
+      # the tiles are down.  show-doc, show-source, and cat always go there;
+      # other commands only when their text is taller than the REPL pane.
+      module PryPages
+        # Commands whose output always goes to the page pane.
+        ALWAYS = %w[show-doc show-source cat ri].freeze
+
+        # The running Pry command's line, for the pager (see #call_safely).
+        module CommandLine
+          def call_safely(*args)
+            was = Thread.current[:mb_sound_pry_command]
+            Thread.current[:mb_sound_pry_command] = [command_name, *args].join(' ').strip
+            super
+          ensure
+            Thread.current[:mb_sound_pry_command] = was
+          end
+        end
+
+        # Prepended to Pry::Pager.
+        module ToPage
+          def page(text)
+            line = Thread.current[:mb_sound_pry_command]
+            screen = UI.screen
+            return super unless line && screen.is_a?(Tiles) && PryPages.to_page?(line, text, screen)
+            screen.page(MB::U.remove_ansi(text.to_s), title: line)
+            nil
+          end
+        end
+
+        # True if Pry command +line+'s +text+ goes to +tiles+' page pane.
+        def self.to_page?(line, text, tiles)
+          return true if ALWAYS.include?(line.split(' ', 2).first)
+          rows = tiles.send(:repl_rect)&.h || tiles.rows
+          text.to_s.count("\n") + 1 > rows - 2
+        end
+
+        def self.install
+          return if @installed
+          ::Pry::Command.prepend(CommandLine)
+          ::Pry::Pager.prepend(ToPage)
+          @installed = true
+        end
       end
 
       # Where Band#save writes layouts: $MB_SOUND_UI_DIR, else the user data

@@ -67,7 +67,8 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       expect(u.default).to eq(5.0)
       expect(u.clamp(-3)).to eq(-3.0)
       expect(u.to_ruby).to eq('knob :x, (0.0..1.0).at(5.0), clamp: false')
-      expect { described_class::Spec.new(name: :cut, default: 800, range: 100.hz..8000.hz) }.to raise_error(ArgumentError, /Did you mean\?  800.hz/)
+      expect(described_class::Spec.new(name: :cut, default: 800, range: 100.hz..8000.hz).to_ruby).to eq('knob :cut, (100.hz..8000.hz).at(800.hz)') # (units once, omnibus15)
+      expect { described_class::Spec.new(name: :cut, default: 2.seconds, range: 100.hz..8000.hz) }.to raise_error(ArgumentError, /isn't a frequency|mixes/)
     end
 
     it 'takes typed values, ranged defaults, and names-table ranges from its Param' do

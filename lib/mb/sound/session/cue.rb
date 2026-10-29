@@ -193,6 +193,29 @@ module MB
           @render_lock.synchronize { @cue_clips[name] }
         end
 
+        # The names on CUE now or once the queued changes land (cue
+        # players playing or waiting to start, and pre-listens), for
+        # `launch` alone.
+        def cued_names
+          players = @mutex.synchronize { @players.values.select(&:current?).map(&:name) }
+          queued = @render_lock.synchronize { @changes.select { |c| Session::START_KINDS.include?(c.kind) }.map(&:subject) }
+          pfls = @render_lock.synchronize { @cue_pfl.to_a + @changes.filter_map { |c| c.subject if c.kind == :cue && c.entry&.data&.[](:pfl) } }
+          ((players + queued).filter_map { |n| n.is_a?(Symbol) && Cue.cued_name(n) } + pfls).uniq.select { |n| cued?(n) || pfl_after_queue?(n) }
+        end
+
+        # True if +name+ is pre-listened, or will be once the queued
+        # changes land (a `cue :x` of a playing part in a scheduled block).
+        def pfl_after_queue?(name)
+          @render_lock.synchronize {
+            on = @cue_pfl.include?(name)
+            @changes.each do |c|
+              next unless c.subject == name && %i[cue uncue].include?(c.kind) && c.entry&.data&.key?(:pfl)
+              on = c.entry.data[:pfl]
+            end
+            on
+          }
+        end
+
         # What plays on CUE: name => 'cue: description' or 'pfl'.
         def cue_info
           info = {}
@@ -313,7 +336,11 @@ module MB
           cname = Cue.cue_name(name)
           @mutex.synchronize {
             cp = @players.values.select { |p| p.name == cname && p.current? }.last
-            raise "Nothing cued as #{name.inspect}" unless cp
+            # (a later `bg`, `go`, or `tweak` started a new :name before the
+            # launch landed, stopping the cue as it does: the launch lands as
+            # nothing, never an error on the render thread; omnibus15, the
+            # session fuzz's cue/launch step, seeds 6 and 20)
+            return unless cp
             switch_cue_player(cp, name, time, fade || declick_bars)
           }
           apply_cue(fade)

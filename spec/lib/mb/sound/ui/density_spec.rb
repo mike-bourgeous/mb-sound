@@ -96,7 +96,7 @@ RSpec.describe(MB::Sound::UI::Density, :aggregate_failures) do
     expect(tiles.tiler.layout.panes).to include(:page)
     expect(tiles.tiler.rects[:repl].h).to be >= MB::Sound::UI::Tiles::REPL_MIN_ROWS
     tiles.refresh(0.0)
-    expect(tiles.to_text).to include('line 1 of the page', 'help :render  lines 1-')
+    expect(tiles.to_text).to include('line 1 of the page', 'HELP :RENDER', 'lines 1-')
     tiles.send(:pane_action, :page, :scroll, :bottom)
     tiles.refresh(1.0)
     expect(tiles.to_text).to include('line 80 of the page')

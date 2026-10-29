@@ -18,10 +18,11 @@ module MB
       #     riff.loop.chance(4.bars.lfo.at(0.3..1))
       #     riff.loop.transpose(seq(0, 5, 7, 5).n1.loop)   # one step per bar
       #     beat.loop.every(knob(:every).choose(1, 2, 4))
+      #     bass.loop.legato(5.bars.lfo.at(0.25..1))       # notes breathe longer and shorter
       class Clip
         # Clip operations that take params here (the stream versions read
         # theirs at note-ons; see MIDI::Stream).
-        PARAM_OPERATIONS = [:humanize, :quantize, :swing, :chance, :every, :transpose].freeze
+        PARAM_OPERATIONS = [:humanize, :quantize, :swing, :chance, :every, :transpose, :legato].freeze
 
         # Prepended over Clip's own operations: a param argument goes to the
         # param versions below, anything else to the original (so plain
@@ -67,6 +68,11 @@ module MB
           def transpose(*args, **kwargs)
             return super unless MIDI::Param.param?(args[0])
             transpose_param(args[0], kwargs[:scale], kwargs[:root])
+          end
+
+          def legato(*args, **kwargs)
+            return super unless MIDI::Param.param?(args[0])
+            legato_param(args[0])
           end
         end
         prepend ParamOperations
@@ -165,6 +171,20 @@ module MB
           param_variation("every(#{MIDI::Param.label(n)}#{", from: #{from}" if from != 1})") { |e, _pos, offset|
             k = MB::M.max(param_value(n, offset).to_f.round, 1)
             e.with(condition: Clip.check_condition(k, from))
+          }
+        end
+
+        # (a fraction read at each note's start; below
+        # MIDI::Transform::Legato::MIN_FRACTION it is that; slid notes keep
+        # their overlap, as in #legato)
+        def legato_param(fraction)
+          fraction = MIDI::Param.wrap(fraction, 'Legato')
+          param_variation("legato(#{MIDI::Param.label(fraction)})") { |e, pos|
+            next e if e.slid
+
+            f = param_value(fraction, pos).to_f
+            f = f.finite? && f > MIDI::Transform::Legato::MIN_FRACTION ? Duration.rational(f) : MIDI::Transform::Legato::MIN_FRACTION
+            e.with(length: e.length * f)
           }
         end
 

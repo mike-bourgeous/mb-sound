@@ -80,6 +80,32 @@ module MB
       end
     end
 
+    # (omnibus15: "No help for pitch?" from the maintainer's take)
+    Help.topic :pitch, 'Pitches, notes, and tuning', group: :sound do
+      about <<~TEXT
+        `440.hz` is a Pitch: used as a signal it plays a sine, and
+        oscillator methods make a Tone (`440.hz.saw`).  `C4` (60, middle C;
+        C3 is 48) is a Note, a Pitch that follows the session's `tuning`
+        (`tuning b4: 480`).  Change pitches by name, not arithmetic:
+        `pitch.transpose(7)` (semitones, or `7.semitones`, `1.octaves`,
+        `50.cents`), `up`/`dn`/`oct` for octaves, `(f * 2).hz` from a
+        number; `440.hz * 2` doubles the sine's amplitude.  `pitch.period`
+        is a length (one cycle), `pitch.frequency` the number in Hz,
+        `40.constant` a fixed value for arithmetic.
+      TEXT
+      commands :tuning
+      dsl :transpose, :up, :dn, :oct, :period, :frequency
+      note :numbers_lengths_phases
+      see :tones, :tempo, :key
+      example 'a fifth above, by name' do
+        bg :try, (220.hz.triangle + 220.hz.transpose(7).triangle).at(-24.db).until(1.bar)
+      end
+      example 'an octave below a note' do
+        bg :try, A4.dn.saw.lp4(800).at(-24.db).until(1.bar)
+      end
+    end
+    Help::TOPIC_ALIASES.merge!(pitches: :pitch, note: :pitch, hz: :pitch, tuning_and_notes: :pitch)
+
     Help.topic :wavetables, 'Wavetables and shape morphs', group: :sound do
       about <<~TEXT
         `pitch.wavetable(t, scan: x)` plays a table, morphing through its
@@ -561,12 +587,12 @@ module MB
 
     Help.topic :tempo, 'Tempo, tuning, and the timeline', group: :time do
       about <<~TEXT
-        One transport for everything: tempo, a meter map, and bar numbers
-        that stay stable.  Durations (`1.n8.dotted`, `2.bars`) follow the
+        One transport for everything: tempo (`bpm 174`, also `tempo 174`),
+        a meter map, and bar numbers that stay stable.  Durations (`1.n8.dotted`, `2.bars`) follow the
         tempo; `1.beat.hz` locks a tone to the beat; `tuning` moves every
         Note.
       TEXT
-      commands :bpm, :meter, :rewind, :seek, :bar, :transport, :tuning
+      commands :bpm, :tempo, :meter, :rewind, :seek, :bar, :transport, :tuning
       note :tempo_sync, :numbers_lengths_phases
       see :schedule
       example 'a tempo-locked wobble' do
