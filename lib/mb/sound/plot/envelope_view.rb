@@ -63,6 +63,8 @@ module MB
               scaled = peak && (peak - 1.0).abs > 0.005
               title = tr.label
               title += " pk #{level_db(peak)}" if scaled
+              focus = live && live[:focus] && focus_of(d, tr, live[:focus])
+              title = "▸#{live[:focus]} #{title}" if focus
               chart.title(title)
               chart.x Scale::Time.new(0.0..tr.total, divisions: 5)
               lo = [tr.level.min, 0.0].min
@@ -75,7 +77,29 @@ module MB
               chart.line tr.level * peak, x: tr.time, label: "velocity #{peak.round(2)}" if scaled
               t = live && playhead(tr, live)
               chart.rule(x: t, color: 3) if t
+              # (the point the inspector picked: sound-design-2's editor)
+              if focus
+                axis, at = focus
+                axis == :x ? chart.rule(x: at, color: 2) : chart.rule(y: at, color: 2)
+              end
               chart
+            end
+
+            # Where the inspector's picked param +name+ (+:focus+ in
+            # .draw's +live+) is on the plot: [:x, seconds] for a segment's
+            # time or curve (its end), [:y, level] for a level (:sustain,
+            # :t2_level), or nil for other params.
+            def focus_of(d, tr, name)
+              names = d[:names]
+              rel = tr.release_node
+              seg_end = ->(i) { tr.starts[i] + (d[:times][i] || UNKNOWN_TIME).to_f }
+              level = ->(i) { (d[:levels][i] || UNKNOWN_LEVEL).to_f }
+              n = name.to_s
+              if (i = names.index(name.to_sym)) then [:x, seg_end.(i)]
+              elsif n == 'sustain' && rel > 0 then [:y, level.(rel - 1)]
+              elsif (m = n.match(/\A(.+)_level\z/)) && (i = names.index(m[1].to_sym)) then [:y, level.(i)]
+              elsif (m = n.match(/\A(.+)_curve\z/)) && (i = names.index(m[1].to_sym)) then [:x, seg_end.(i)]
+              end
             end
 
             # The rendered copy for preview data +d+ (kept for the last few

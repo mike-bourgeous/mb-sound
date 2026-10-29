@@ -168,6 +168,9 @@ module MB
       #
       #     bind :bass, lp4: :resonance           # knob :"bass/reso"
       #     bind :bass, amp_env: :attack, as: :att
+      #     bind :bass, env: :t2                  # env([[1, 0.01], [0.6, 0.3]])'s second time: :"bass/t2"
+      #     bind :bass, env: :t2_level            # its level (:t1_curve a segment's curve)
+      #     bind :bass, curve: :release           # a chained .curve(release: 30): :"bass/release_curve"
       #     bind :bass, cutoff: :cut              # preset :dnb_reese's param follows knob :cut
       #
       # A track playing a graph document already has its params as knobs

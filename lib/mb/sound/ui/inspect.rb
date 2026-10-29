@@ -506,9 +506,7 @@ module MB
         # +values+ (see .snapshot), as { name => ParamValue }.
         def literal_params(node, values)
           lb = Arrangement::LiteralBinding
-          call = lb.call_of(node) or return {}
-          names = lb.positional_names(call) || []
-          found = call.args.each_with_index.filter_map { |v, i| names[i] && [names[i], v] } + call.kwargs.to_a
+          found = lb.literals(node)
           found.each_with_object({}) { |(name, v), h|
             next unless name.is_a?(Symbol) && !values.key?(name) && lb.literal?(v)
             num, unit =

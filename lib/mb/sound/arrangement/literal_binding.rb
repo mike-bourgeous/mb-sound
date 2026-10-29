@@ -25,7 +25,18 @@ module MB
         # name (in the order the patch makes them), +key+ (Recipe.key_of), +slot+ [:arg, index]
         # or [:kw, name]) or :document (a graph document's param: +document+
         # its name), +param+ the param's name, +value+ the literal.
-        Target = Data.define(:kind, :call_name, :nth, :key, :slot, :param, :value, :document)
+        #
+        # Since sound-design-2 a slot may end in a path into a list
+        # argument ([:arg, 0, [1, 1]]: the second segment's time of
+        # `env([[level, time, curve], ...])`), and the call may be a chained
+        # setter's (`.curve(release: 30)`, a config call of the node);
+        # +arg+ is the argument's name in the call (:release), +param+ the
+        # name the inspector and the knob use (:release_curve).
+        Target = Data.define(:kind, :call_name, :nth, :key, :slot, :param, :value, :document, :arg) do
+          def initialize(kind:, call_name:, nth:, key:, slot:, param:, value:, document:, arg: nil)
+            super(kind: kind, call_name: call_name, nth: nth, key: key, slot: slot, param: param, value: value, document: document, arg: arg || param)
+          end
+        end
 
         # A literal that can't be bound, with the reason.
         class Error < ArgumentError; end
@@ -89,12 +100,20 @@ module MB
         def keys_of(roots, method, all: nil)
           seqs = {}
           (all || nodes(roots)).each do |n|
-            c = call_of(n)
-            next unless c && (c.written || c.name) == method
-            k = GraphNode::Recipe.key_of(c) or next
-            seqs[k] = c.seq if seqs[k].nil? || c.seq < seqs[k]
+            calls_of(n).each do |c|
+              next unless (c.written || c.name) == method
+              k = GraphNode::Recipe.key_of(c) or next
+              seqs[k] = c.seq if seqs[k].nil? || c.seq < seqs[k]
+            end
           end
           seqs.sort_by { |_, seq| seq }.map(&:first)
+        end
+
+        # The recorded calls of +node+: the call that made it, then its
+        # chained setters' (config calls: `.curve(release: 30)`), in order.
+        def calls_of(node)
+          c = call_of(node) or return []
+          own_call?(node) ? [c, *GraphNode::Recipe.config_of(node)] : [c]
         end
 
         # The Target for param +param+ of +node+ in graph +roots+ (see
@@ -110,26 +129,96 @@ module MB
           # (a call reached through a bundle inside a graph document: the
           # document's numbers are fixed, its params bind)
           raise Error, unrecorded(roots, param) if !own_call?(node) && roots.any? { |r| GraphIO.document_of(r) }
+          # (a chained setter's argument: :release_curve is .curve(release: ...))
+          arg = param
+          unless slot_of(call, param)
+            calls_of(node).drop(1).reverse_each do |cc|
+              m = (cc.written || cc.name).to_s
+              next unless param.to_s.end_with?("_#{m}")
+              a = param.to_s.delete_suffix("_#{m}").to_sym
+              next unless slot_of(cc, a)
+              call = cc
+              arg = a
+              break
+            end
+          end
+          target_of_call(roots, call, param, arg, all: all)
+        end
+
+        # The Target for argument +arg+ of recorded +call+ (named +param+;
+        # see Target), or raises Error.
+        def target_of_call(roots, call, param, arg = param, all: nil)
           key = GraphNode::Recipe.key_of(call) or raise Error, "#{param}: this graph wasn't built by a track's patch (track :x { |clip| ... } makes one)"
           method = call.written || call.name
-          slot = slot_of(call, param) or raise Error, "#{param} isn't an argument of #{method}(...) (a setting a chained call or a list gave)"
-          value = slot[0] == :kw ? call.kwargs[slot[1]] : call.args[slot[1]]
+          slot = slot_of(call, arg) or raise Error, "#{param} isn't an argument of #{method}(...) (a setting a chained call gave without a name)"
+          value = slot_value(call, slot)
           unless LiteralBinding.literal?(value)
             raise Error, "#{param} of #{method} is #{value.is_a?(Sequence::Duration) ? 'a tempo length' : 'not a number'} (#{value.inspect[0, 40]}): only numbers become knobs"
           end
-          if LiteralBinding.count?(param, value)
+          if LiteralBinding.count?(arg, value)
             raise Error, "#{param} of #{method} is a count (#{value}; read once while the patch builds): shown read-only, no knob"
           end
           nth = keys_of(roots, method, all: all).index(key) or raise Error, "#{method} isn't in the track's graph"
-          Target.new(kind: :call, call_name: method, nth: nth, key: key, slot: slot, param: param, value: value, document: nil)
+          Target.new(kind: :call, call_name: method, nth: nth, key: key, slot: slot, param: param, value: value, document: nil, arg: arg)
+        end
+
+        # The value at +slot+ of +call+ (see Target).
+        def slot_value(call, slot)
+          kind, at, path = slot
+          v = kind == :kw ? call.kwargs[at] : call.args[at]
+          path ? v.dig(*path) : v
+        end
+
+        # +list+ (nested Arrays) with the value at +path+ replaced by +value+
+        # (copies along the path).
+        def replace_path(list, path, value)
+          i, *rest = path
+          list.dup.tap { |l| l[i] = rest.empty? ? value : replace_path(l[i], rest, value) }
+        end
+
+        # The literals a node's code wrote that #param_info doesn't name, as
+        # [[param, value], ...]: the arguments of its recorded call (by
+        # keyword or positional name), the curves of a segment list
+        # (`env([[1, 0.01, 30], ...])`: :t1_curve), and its chained setters'
+        # (`.curve(release: 30)`: :release_curve).  Values may be anything:
+        # callers keep the numbers (LiteralBinding.literal?).
+        def literals(node)
+          call = call_of(node) or return []
+          names = positional_names(call) || []
+          out = call.args.each_with_index.filter_map { |v, i| names[i] && [names[i], v] } + call.kwargs.to_a
+          if (segs = segment_list(call))
+            segs.each_with_index { |row, i| out << [:"t#{i + 1}_curve", row[2]] if row.is_a?(Array) && row.length > 2 }
+          end
+          if own_call?(node)
+            GraphNode::Recipe.config_of(node).each do |cc|
+              m = cc.written || cc.name
+              cn = positional_names(cc) || []
+              cc.args.each_with_index { |v, i| out << [:"#{cn[i]}_#{m}", v] if cn[i] }
+              cc.kwargs.each { |k, v| out << [:"#{k}_#{m}", v] }
+            end
+          end
+          out
+        end
+
+        # An envelope call's segment list (`env([[level, time, curve,
+        # shape], ...])`: its first argument, an Array of Arrays), or nil.
+        def segment_list(call)
+          a = call.args[0]
+          a.is_a?(Array) && !a.empty? && a.all? { |r| r.is_a?(Array) } ? a : nil
         end
 
         # The Target for the +nth+ call of +method+ in graph +roots+ and its
         # param +param+ (what `bind :bass, lp4: :resonance, nth: 1` names).
         def find(roots, method, param, nth = 0)
           key = keys_of(roots, method)[nth] or raise Error, missing(roots, method, param, nth)
-          node = nodes(roots).find { |n| (c = call_of(n)) && GraphNode::Recipe.key_of(c) == key }
-          target(roots, node, param)
+          node = call = nil
+          nodes(roots).each do |n|
+            call = calls_of(n).find { |c| GraphNode::Recipe.key_of(c) == key } and (node = n) and break
+          end
+          return target(roots, node, param) if call.equal?(call_of(node))
+          # (a chained setter's argument, named after it: .curve(release:) is :release_curve)
+          raise Error, unrecorded(roots, param) if roots.any? { |r| GraphIO.document_of(r) }
+          target_of_call(roots, call, :"#{param}_#{call.written || call.name}", param)
         end
 
         # A document param of the graph: +param+ of +node+ is a Constant
@@ -160,7 +249,14 @@ module MB
           return [:kw, param] if call.kwargs.key?(param)
           names = positional_names(call)
           i = names&.index(param)
-          i && i < call.args.length ? [:arg, i] : nil
+          return [:arg, i] if i && i < call.args.length
+          # (a segment list's level, time, or curve: :t2, :t2_level, :t2_curve)
+          if (segs = segment_list(call)) && (m = param.to_s.match(/\At(\d+)(_level|_curve)?\z/))
+            row = m[1].to_i - 1
+            col = { nil => 1, '_level' => 0, '_curve' => 2 }[m[2]]
+            return [:arg, 0, [row, col]] if row >= 0 && segs[row] && segs[row].length > col
+          end
+          nil
         end
 
         # The positional parameter names of +call+'s DSL method (past the
@@ -193,7 +289,7 @@ module MB
         def knob_default(param, value, range = nil)
           v = value.is_a?(Pitch) ? value.frequency.to_f.hz : value
           v = v.to_f if v.is_a?(Length::Samples) || (v.is_a?(Numeric) && !v.is_a?(Length) && !v.is_a?(Decibels))
-          entry = Param.name_entry(param)
+          entry = Param.name_entry(param) || envelope_entry(param)
           r = range || entry&.dig(:range)
           if r && !r.begin.is_a?(Float) && !r.begin.is_a?(Integer) && v.is_a?(Float)
             # (a typed range: the literal in its unit)
@@ -208,10 +304,22 @@ module MB
           r.at(v)
         end
 
+        # Ranges for envelope point literals no names-table entry covers
+        # (sound-design-2's envelope editor): a segment list's times (:t2,
+        # an attack's range), levels (:t2_level, 0..1, widened to hold the
+        # value), and curves (:t2_curve, :release_curve: -60..60 dB).
+        def envelope_entry(param)
+          case param.to_s
+          when /\At\d+\z/ then Param.name_entry(:attack)
+          when /\At\d+_level\z/ then { range: 0.0..1.0 }
+          when /_curve\z/ then { range: -60.0..60.0 }
+          end
+        end
+
         # The console line binding Target +t+ on track +track+.
         def line(track, t)
           return "bind #{track.inspect}, #{t.param.inspect}" if t.kind == :document
-          "bind #{track.inspect}, #{t.call_name}: #{t.param.inspect}#{", nth: #{t.nth}" if t.nth > 0}"
+          "bind #{track.inspect}, #{t.call_name}: #{t.arg.inspect}#{", nth: #{t.nth}" if t.nth > 0}"
         end
 
         # +patch+ (a track's patch block) built with Target +t+'s literal
@@ -232,10 +340,16 @@ module MB
             if tt.kind == :document
               (docs[tt.document] ||= {})[tt.param] = stand_in.(kn) || kn
             else
-              kind, at = tt.slot
+              kind, at, path = tt.slot
+              rule = subs[tt.key] # (two literals of one call: both)
               subs[tt.key] = ->(args, kwargs) {
+                args, kwargs = rule.call(args, kwargs) if rule
                 k = stand_in.(kn) || Session.current.knob(kn)
-                kind == :kw ? [args, kwargs.merge(at => k)] : [args.dup.tap { |a| a[at] = k }, kwargs]
+                if kind == :kw
+                  [args, kwargs.merge(at => path ? replace_path(kwargs[at], path, k) : k)]
+                else
+                  [args.dup.tap { |a| a[at] = path ? replace_path(a[at], path, k) : k }, kwargs]
+                end
               }
             end
           end
