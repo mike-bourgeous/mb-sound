@@ -128,6 +128,7 @@ module SessionFuzz
     clip_for = ->(name) { tracks[name] == :drums ? pick(rng, DRUMS) : pick(rng, MELODIC) }
 
     scenes = []
+    first_clips = nil # (the first scene's clips, for kit swaps)
     swappable = nil # (synth tracks the first scene starts with looping clips: swaps need a player, and take Clips, not Kits)
     rng.rand(1..2).times do |i|
       sname = :"s#{i + 1}"
@@ -136,6 +137,7 @@ module SessionFuzz
       extra = [', others: :keep', ', fade: 1/4r', ''][rng.rand(3)]
       clips = parts.to_h { |t| [t, clip_for.(t)] }
       swappable ||= clips.select { |t, c| tracks[t] == :synth && c.end_with?('.loop') }.keys
+      first_clips ||= clips
       lines << "scene :#{sname}, #{clips.map { |t, c| "#{t}: #{c}" }.join(', ')}#{extra}"
       scenes << sname
     end
@@ -208,6 +210,15 @@ module SessionFuzz
       lines << "at_bar(#{bar}, beat: 2) { bg :held, #{pick(rng, HELD)}, #{start} }"
       lines << "at_bar(#{bar}, beat: 4) { seek #{pick(rng, ["#{bar}", "#{bar}, 2", "#{bar}, 2.25", "#{bar}, 2.999"])} }"
     end
+    # (parity-1) a drum track playing a looping grid swapped to that grid
+    # transformed (Kit transforms run per row; drawn last, so every seed
+    # keeps the song it made before)
+    kits = first_clips.select { |t, c| tracks[t] == :drums && c.start_with?('grid(') && c.end_with?('.loop') }.keys
+    if !kits.empty? && rng.rand < 0.35
+      t = pick(rng, kits)
+      fx = pick(rng, KIT_TRANSFORMS)
+      lines << "at_bar(#{rng.rand(1..bars)}, beat: 3) { swap :#{t}, #{first_clips[t]}.#{fx} }"
+    end
     Song.new(header: header, lines: lines, bars: bars)
   end
 
@@ -277,6 +288,12 @@ module SessionFuzz
     },
     ->(s) { "bg :#{s.bg_name}, #{s.pick(MELODIC)}#{s.on}" },
     # (new commands go here, at the end)
+  ].freeze
+
+  # Kit transforms for #generate's kit swaps.
+  KIT_TRANSFORMS = [
+    'reverse', 'rotate(1.n16)', 'rotate(-1/8r)', 'shift(1.n8)', 'shift(-1/16r)', 'swing(0.6)', 'humanize(4.ms, velocity: 0.1)',
+    'chance(0.7)', 'every(2)', 'ratchet(2)', 'ratchet(2, rate: 1.n32)', 'permute', 'quantize(8, amount: 0.5)',
   ].freeze
 
   # Clipless sounds for #generate's seeks across starts.

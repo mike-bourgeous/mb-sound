@@ -421,9 +421,11 @@ module MB
         end
 
         # Returns a Seq whose notes play with probability +p+ in each loop
-        # cycle (see Step#chance).  Alias #maybe.
+        # cycle, multiplied with any probability they had (like
+        # Clip#chance; Step#chance marks one step).  Alias #maybe.
         def chance(p)
-          map_notes { |s| s.chance(p) }
+          Clip.check_probability(p)
+          map_notes { |s| Step.new(**s.to_h.merge(probability: (s.probability || 1) * p)) }
         end
         alias maybe chance
 

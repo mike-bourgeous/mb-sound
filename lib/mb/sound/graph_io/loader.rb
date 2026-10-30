@@ -155,6 +155,9 @@ module MB
           # Whether sums end with their first input (documents before
           # format 4; see GraphIO::FORMAT)
           @old_ring = false
+          # Whether clips' #shift means #rotate (documents before format 6;
+          # see GraphIO::FORMAT)
+          @old_shift = false
           @path = path
           @label = path || '(graph document)'
           @given_inputs = inputs.transform_keys(&:to_sym)
@@ -507,6 +510,7 @@ module MB
               @seed_marks = version >= 2
               @old_db = version < 3
               @old_ring = version < 4
+              @old_shift = version < 6
               @document.meta = kwargs
             when :inputs
               bad = args.reject { |a| a.is_a?(Symbol) }
@@ -1122,6 +1126,8 @@ module MB
           end
 
           args, kwargs = old_db_arguments(receiver, name, args, kwargs) if @old_db
+          # (before format 6, clip shift was rotate's alias)
+          name = :rotate if @old_shift && name == :shift && receiver.is_a?(Sequence::Clip)
 
           begin
             # Documents load without the dynamics "above full scale"

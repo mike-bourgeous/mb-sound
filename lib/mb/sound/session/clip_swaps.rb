@@ -201,22 +201,28 @@ module MB
         end
 
         # A mapping for swapping in Kit +kit+ (see #swap): from each played
-        # row's clip (the earliest clip in a source's lineage with a kit
-        # row name, so transforms made after it, like a machine's shuffle,
-        # are made again from the new row) to the new kit's row of that
-        # name, or a silent loop for rows the new kit lacks.
+        # row's clip (the nearest clip in a source's lineage with a kit row
+        # name: the row of the kit the player was given, so transforms the
+        # patch made after it, like a machine's shuffle, whose kits leave
+        # their rows unnamed, are made again from the new row, while kit
+        # transforms the user made, Kit#reverse, #halftime, ..., are
+        # replaced with the new kit's; parity-1, 2026-10-30: the earliest
+        # named clip made a swap after `swap :drums, beat.reverse` reverse
+        # the next kit too) to the new kit's row of that name, looped like
+        # the played row if it isn't, or a silent loop for rows the new
+        # kit lacks.
         def kit_swap_mapping(name, nodes, kit, warn: false)
           mapping = {}.compare_by_identity
           played = []
           nodes.each do |n|
             [n.ring_clip, n.pending_clip, n.clip].compact.each do |c|
-              root = c.lineage.reverse.find { |x| Sequence::Kit.row_name(x) } or next
+              root = c.lineage.find { |x| Sequence::Kit.row_name(x) } or next
               row = Sequence::Kit.row_name(root)
               played << row
               mapping[root] ||= kit.rows.fetch(row) {
                 # (a silent row keeps its name, so a later kit brings it back)
                 Sequence::Clip.new([], length: 1, loop: true).tap { |q| Sequence::Kit::ROW_NAMES[q] = row }
-              }
+              }.then { |r| root.looping? && !r.looping? ? r.loop(align: root.align).tap { |q| Sequence::Kit::ROW_NAMES[q] = row } : r }
             end
           end
           raise ArgumentError, "Player #{name.inspect} doesn't play a grid kit's rows; pass old_kit => new_kit" if mapping.empty?

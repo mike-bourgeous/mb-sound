@@ -112,10 +112,14 @@ module MB
           ROW_NAMES[clip]
         end
 
-        def initialize(rows)
+        # +row_names: false+ leaves the rows unnamed for Session#swap: for
+        # kits a patch makes from the kit it was given (a drum machine's
+        # shuffle), so a swap replaces the given kit's rows and makes the
+        # patch's transform again (see Session::ClipSwaps).
+        def initialize(rows, row_names: true)
           @instrument = nil # (see PlayedBy)
           @rows = rows.freeze
-          @rows.each { |name, clip| ROW_NAMES[clip] = name if clip.is_a?(Clip) }
+          @rows.each { |name, clip| ROW_NAMES[clip] = name if clip.is_a?(Clip) } if row_names
         end
 
         # Returns the Clip for the row with the given +name+.
@@ -157,6 +161,110 @@ module MB
         # Returns a Kit with every row's notes shortened (see Clip#legato).
         def legato(fraction)
           Kit.new(@rows.transform_values { |c| c.legato(fraction) })
+        end
+
+        # Kit transforms (parity-1, 2026-10-30): each runs the Clip method of
+        # the same name on every row, so a row of the result is the row
+        # transformed as a clip (the rows' own lengths, loops, and
+        # alignments; a polymetric row rotates within its own length).
+        # Seeded ones (#humanize, #permute) give each row its own seed,
+        # Kit.row_seed(seed, name), so rows don't move in lockstep:
+        # `kit.humanize(seed: 3)[:hat] == kit[:hat].humanize(seed:
+        # Kit.row_seed(3, :hat))`.
+
+        # The seed row +name+ draws from in seeded Kit transforms: +seed+
+        # (an Integer) mixed with the name (Generative::Dice's hash, the
+        # same in every process).
+        def self.row_seed(seed, name)
+          key = name.is_a?(Symbol) || name.is_a?(String) || name.is_a?(Integer) ? name : name.to_s
+          Generative::Dice.fold(Generative::Dice.start(Integer(seed)), :kit_row, key) & ((1 << 62) - 1)
+        end
+
+        # Returns a Kit with every row played backward (see Clip#reverse).
+        # Also #retrograde.
+        def reverse
+          Kit.new(@rows.transform_values(&:reverse))
+        end
+        alias retrograde reverse
+
+        # Returns a Kit with every row's hits moved +amount+ later (or
+        # earlier for a negative amount), wrapping around the row's length
+        # (see Clip#rotate).
+        #
+        #     beat.rotate(1.n16)     # the whole pattern a 16th later, wrapped
+        def rotate(amount)
+          Kit.new(@rows.transform_values { |c| c.rotate(amount) })
+        end
+
+        # Returns a Kit with every row's hits moved +amount+ later (or
+        # earlier) without wrapping: hits that leave a row drop out (see
+        # Clip#shift).
+        def shift(amount)
+          Kit.new(@rows.transform_values { |c| c.shift(amount) })
+        end
+
+        # Returns a Kit with every row's notes (velocities, probabilities,
+        # marks) moved among its hits (see Clip#permute): accents and
+        # ghost notes trade places, the rhythm stays.  +order+ is nil
+        # (random, from each row's seed, see Kit.row_seed) or an Array for
+        # every row; row keywords give rows their own orders, leaving the
+        # rows not named alone (`beat.permute(hat: [3, 2, 1, 0])`).  Also
+        # #shuffle.
+        def permute(order = nil, seed: nil, vary: false, **orders)
+          unknown = orders.keys - @rows.keys
+          raise ArgumentError, "No rows #{unknown.map(&:inspect).join(', ')} to permute (rows: #{@rows.keys.map(&:inspect).join(', ')})" unless unknown.empty?
+          raise ArgumentError, 'Give one order for every row or orders by row name, not both' if order && !orders.empty?
+
+          Kit.new(@rows.to_h { |name, c|
+            next [name, c] unless orders.empty? || orders.key?(name)
+
+            [name, c.permute(orders.fetch(name, order), seed: Kit.row_seed(seed || c.seed, name), vary: vary)]
+          })
+        end
+        alias shuffle permute
+
+        # Returns a Kit with every row humanized (see Clip#humanize), each
+        # row from its own seed (Kit.row_seed of +:seed+, else of the
+        # row's seed).
+        #
+        #     beat.loop.humanize(6.ms, velocity: 0.1)
+        def humanize(time = Clip::HUMANIZE_TIME, velocity: 0, seed: nil, vary: nil)
+          Kit.new(@rows.to_h { |name, c|
+            [name, c.humanize(time, velocity: velocity, seed: Kit.row_seed(seed || c.seed, name), vary: vary)]
+          })
+        end
+
+        # Returns a Kit with every row quantized (see Clip#quantize).
+        def quantize(grid = Feel::GRID, amount: 1, ends: false, window: nil)
+          Kit.new(@rows.transform_values { |c| c.quantize(grid, amount: amount, ends: ends, window: window) })
+        end
+
+        # Returns a Kit with every row swung (see Clip#swing).
+        #
+        #     beat.swing(0.6)
+        def swing(amount = Feel::SWING, grid = Feel::GRID)
+          Kit.new(@rows.transform_values { |c| c.swing(amount, grid) })
+        end
+
+        # Returns a Kit whose hits play with probability +p+ in each loop
+        # cycle (see Clip#chance).  Also #maybe.
+        def chance(p)
+          Kit.new(@rows.transform_values { |c| c.chance(p) })
+        end
+        alias maybe chance
+
+        # Returns a Kit whose hits play every +n+th loop cycle from cycle
+        # +from+ (see Clip#every).
+        def every(n, from: 1)
+          Kit.new(@rows.transform_values { |c| c.every(n, from: from) })
+        end
+
+        # Returns a Kit with every hit ratcheted into +count+ hits (see
+        # Clip#ratchet).
+        #
+        #     beat.ratchet(2, rate: 1.n32)
+        def ratchet(count, rate: nil, velocity: nil)
+          Kit.new(@rows.transform_values { |c| c.ratchet(count, rate: rate, velocity: velocity) })
         end
 
         # Returns a Kit that adds fill notes: rows (Clips, or a Kit or Hash

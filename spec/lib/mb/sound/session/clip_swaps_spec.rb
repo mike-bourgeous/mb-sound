@@ -91,6 +91,23 @@ RSpec.describe(MB::Sound::Session::ClipSwaps) do
     expect { session.swap(:drums, bass2) }.to raise_error(ArgumentError, /unrelated clips/)
   end
 
+  it 'swaps in a transformed Kit (parity-1: Kits transform per row)' do
+    beat = MB::Sound.grid(16, kick: 'x...', snare: '..x.', closed_hat: 'xx..').loop
+    session.add(beat[:kick].gate + beat[:snare].gate * 2 + beat[:closed_hat].gate * 4, name: :drums)
+    starts = -> { clips(:drums).map { |c| c.events.map(&:start) } }
+
+    expect(session.swap(:drums, beat.reverse, at: :now)).to eq(3)
+    run(800)
+    expect(starts.call).to contain_exactly([3/16r], [1/16r], [1/8r, 3/16r])
+    expect(session.swap(:drums, beat.rotate(1.n16), at: :now)).to eq(3)
+    run(800)
+    expect(starts.call).to contain_exactly([1/16r], [3/16r], [1/16r, 1/8r])
+    expect(session.swap(:drums, beat.shift(1.n8), at: :now)).to eq(3)
+    run(800)
+    expect(starts.call).to contain_exactly([1/8r], [], [1/8r, 3/16r])
+    expect(clips(:drums).map(&:looping?)).to eq([true, true, true])
+  end
+
   it 'swaps the clip of a synth, whose voices play the new chords' do
     chords = MB::Sound.seq(MB::Sound::A2, MB::Sound::F2, MB::Sound::C3).n1.loop
     session.add(chords.synth(voices: 2) { |v| v.number * v.gate }, name: :pad)

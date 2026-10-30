@@ -115,7 +115,7 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
   describe 'in sequences' do
     it 'keeps a fixed frequency while notes follow the tuning' do
       clip = MB::Sound.seq(MB::Sound::A4, 300.hz).n4.loop
-      expect(clip.events.map(&:to_s)).to eq(['69@0+n4', '300.0 Hz@1/4+n4'])
+      expect(clip.events.map(&:to_s)).to eq(['A4@0+n4', '300.0 Hz@1/4+n4'])
 
       MB::Sound.tuning a4: 432
       hz = clip.freq

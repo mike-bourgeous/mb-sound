@@ -31,6 +31,13 @@ module MB
             end
           end
 
+          # Chains are applied to streams, which can't rotate (see
+          # Stream#rotate): raises (live mode: warns and returns the chain
+          # unchanged).
+          def rotate(*, **)
+            MB::Sound.live_error(ArgumentError.new(Stream.rotate_message)) || self
+          end
+
           def to_s
             @steps.map { |name, args, kwargs, block|
               parts = args.map(&:to_s) + kwargs.map { |k, v| "#{k}: #{v.inspect}" }

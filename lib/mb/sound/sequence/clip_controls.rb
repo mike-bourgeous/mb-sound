@@ -7,7 +7,7 @@ module MB
       # controller Events so voices read them like live MIDI (`v.mod`,
       # `v.cc(1)`, `v.bend`).  MIDI files bring them (MidiMethods#midi_clip);
       # `events(..., controls:)` writes them; transforms that keep time keep
-      # them, and those that move time (stretch, rotate, reverse, repeat,
+      # them, and those that move time (stretch, rotate, shift, reverse, repeat,
       # truncate, |, &) move them along.  Note transforms (transpose,
       # legato, humanize, ...) leave them alone.  See design/notes/midi.md
       # (Clips from MIDI files).
@@ -189,6 +189,22 @@ module MB
             list << [0r, v]
           end
           lane.with_points(list)
+        end
+
+        # +lane+ moved +offset+ later within +length+ without wrapping (see
+        # #shift), or nil if no point is left: points moved outside
+        # 0...length drop, and a lane moved earlier gets the value it held
+        # at the new start at 0.
+        def self.shift_lane(lane, offset, length)
+          list = lane.points.filter_map { |p, v|
+            q = p + offset
+            [q, v] if q >= 0 && q < length
+          }
+          if offset < 0 && list.none? { |p, _| p == 0 }
+            v = lane.value_at(-offset)
+            list.unshift([0r, v]) unless v.nil?
+          end
+          list.empty? ? nil : lane.with_points(list)
         end
 
         # The fitted version of step lane +lane+ (see #fit_controls).

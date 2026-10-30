@@ -118,7 +118,7 @@ Texture nodes in `fast_texture` and `fast_resonator` (exact Ruby mirrors, the sa
 
 ### [Sequences](sequences.md)
 
-`lib/mb/sound/sequence/`: immutable `Clip`s of `Event`s in exact Rational whole notes, built with `seq(C4, E4, G4.n4).n8`, chord steps, `grid('x...x...')`, and note length methods; a clip is a MIDI source (`clip.stream`, `clip.notes`, `clip.synth(voices:) { |v, i| }`) whose edges land on exact samples at the shared `Transport`'s tempo.  Transforms (legato, transpose, ratchet, swing, humanize, chance, groove, ghost chords, ...) share their cores with the MIDI stream transforms (`Sequence::Feel`); clips carry controller lanes and note marks (accent `!A1`, slide `~A1`, flam), remember what plays them (`Sequence::PlayedBy`), and `swap` changes a player's clips on the next bar.  `!` is overridden only on Note and Step: test with `nil?`, never `!x`.
+`lib/mb/sound/sequence/`: immutable `Clip`s of `Event`s in exact Rational whole notes, built with `seq(C4, E4, G4.n4).n8`, chord steps, `grid('x...x...')`, and note length methods; a clip is a MIDI source (`clip.stream`, `clip.notes`, `clip.synth(voices:) { |v, i| }`) whose edges land on exact samples at the shared `Transport`'s tempo.  Transforms (legato, transpose, ratchet, swing, humanize, chance, groove, ghost chords, ...) share their cores with the MIDI stream transforms (`Sequence::Feel`) and run per row on grid Kits (`rotate` wraps, `shift` drops); `clip.show` draws them as text; clips carry controller lanes and note marks (accent `!A1`, slide `~A1`, flam), remember what plays them (`Sequence::PlayedBy`), and `swap` changes a player's clips on the next bar.  `!` is overridden only on Note and Step: test with `nil?`, never `!x`.
 
 ### [Generative music](generative.md)
 

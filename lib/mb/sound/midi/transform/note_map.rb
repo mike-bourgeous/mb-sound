@@ -344,7 +344,9 @@ module MB
           def initialize(parent, delay, **options)
             super(parent, **options)
             @delay = delay
-            raise ArgumentError, "Delay must not be negative (got #{delay})" if seconds_of(delay) < 0
+            if seconds_of(delay) < 0
+              raise ArgumentError, "a live stream can only shift notes later (got #{delay}): it can't play them before they arrive; clips shift both ways (clip.shift(-1.n8))"
+            end
             @node_type_name = "shift(#{delay})"
           end
 

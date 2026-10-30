@@ -39,7 +39,7 @@ RSpec.describe('rack documents') do
     it 'writes typed inputs, outputs, the kind, and the knobs as knob lines' do
       text = io.dump(dub)
       expect(text).to start_with('# mb-sound rack document')
-      expect(text).to match(/^graph 5, name: "dub", kind: :effect, rack: :arack, saved: /)
+      expect(text).to match(/^graph #{MB::Sound::GraphIO::FORMAT}, name: "dub", kind: :effect, rack: :arack, saved: /)
       expect(text).to include("inputs sig: :audio, side: :audio, depth: [:control, 0.5]\noutputs :audio\n")
       expect(text).to include(%(knob :space, 0.3\nknob :cut, (100..8000).at(800), curve: :exp, description: "Tone"\n))
       expect(text).to end_with("\nsig.filter(:lowpass, cutoff: cut.mod(0.5.hz.lfo, depth: 0.1)).delay(0.1, feedback: space * 0.5, wet: space) * depth + side\n")

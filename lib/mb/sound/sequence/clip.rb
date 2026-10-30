@@ -612,11 +612,12 @@ module MB
 
         # Returns a clip with its events moved +amount+ later (a Duration, or
         # a Numeric number of whole notes, which may be negative to move
-        # earlier), wrapping around the clip's length, which stays the same.
-        # Events pushed past the end start again from the beginning, so a
-        # looping clip plays the same cycle starting at a different point.
-        # Also #shift, the name of MIDI::Stream's version (which only delays,
-        # and has #rotate as its alias).
+        # earlier), wrapping around the clip's length, which stays the same:
+        # events pushed past the end start again from the beginning, so a
+        # looping clip plays the same cycle starting at a different point
+        # (like a rotate instruction; #shift drops what leaves instead).
+        # Grid Kits rotate every row (Kit#rotate).  Live streams can't wrap
+        # (MIDI::Stream#rotate raises; Stream#shift delays).
         #
         #     seq(C4, E4, G4, B4).n4.rotate(1.beat)        # B4, C4, E4, G4
         #     seq(C4, E4, G4, B4).n4.rotate(-1/4r)         # E4, G4, B4, C4
@@ -624,13 +625,45 @@ module MB
         def rotate(amount)
           raise ArgumentError, 'Cannot rotate a clip without a length' if @length <= 0
 
-          shift = amount.is_a?(Duration) ? amount.whole_notes : Duration.rational(amount)
-          shift %= @length
+          shift = Clip.offset_of(amount) % @length
           return with_events(@events) if shift == 0
 
           map_clip(controls: @controls.map { |l| Clip.rotate_lane(l, shift, @length) }) { |e| e.with(start: (e.start + shift) % @length) }
         end
-        alias shift rotate
+
+        # Returns a clip with its events moved +amount+ later (a Duration, or
+        # a Numeric number of whole notes; negative moves them earlier)
+        # without wrapping, like a shift instruction: events whose start
+        # moves past the end of the clip or before its start drop out, and
+        # the space they leave is empty.  The clip's length stays the same
+        # (notes keep their lengths, so one starting just before the end
+        # may ring past it, as in any clip).  Controller lanes move the
+        # same way (a lane moved earlier holds the value it had at the new
+        # start).  See #rotate to wrap; grid Kits shift every row
+        # (Kit#shift); MIDI::Stream#shift only delays.
+        #
+        #     seq(C4, E4, G4, B4).n4.shift(1.beat)         # rest, C4, E4, G4
+        #     seq(C4, E4, G4, B4).n4.shift(-1/4r)          # E4, G4, B4, rest
+        def shift(amount)
+          raise ArgumentError, 'Cannot shift a clip without a length' if @length <= 0
+
+          offset = Clip.offset_of(amount)
+          return with_events(@events) if offset == 0
+
+          length = @length
+          map_cycles(controls: @controls.filter_map { |l| Clip.shift_lane(l, offset, length) }) { |events, _cycle|
+            events.filter_map { |e|
+              start = e.start + offset
+              e.with(start: start) if start >= 0 && start < length
+            }
+          }
+        end
+
+        # A #rotate or #shift amount in whole notes: a Duration, or a
+        # Numeric number of whole notes (Floats rationalized).
+        def self.offset_of(amount)
+          amount.is_a?(Duration) ? amount.whole_notes : Duration.rational(amount)
+        end
 
         # Returns a clip with every event's velocity set to +velocity+ (0..1).
         def vel(velocity)
@@ -1136,12 +1169,21 @@ module MB
         def to_s
           vary = @variations.empty? ? '' : " varying #{@variations.map(&:name).join(', ')}"
           ctl = @controls.empty? ? '' : "; controls #{@controls.join(', ')}"
-          "#{self.class.name.rpartition('::').last}(#{Duration.format(@length)}#{' loop' if @loop}#{' from launch' if launch_aligned?}#{vary}: #{@events.map(&:to_s).join(', ')}#{ctl})"
+          "#{self.class.name.rpartition('::').last}(#{Duration.format(@length)}#{' loop' if @loop}#{' from launch' if launch_aligned?}#{vary}: #{events_text}#{ctl})"
         end
 
         def inspect
           "#<#{to_s}>"
         end
+
+        # The events as #to_s prints them: note names for note numbers
+        # unless some Integer value isn't one (Event.note_value?), so a
+        # clip prints all its values one way.
+        def events_text
+          names = @events.all? { |e| !e.value.is_a?(Integer) || Event.note_value?(e.value) }
+          @events.map { |e| e.to_s(names: names) }.join(', ')
+        end
+        private :events_text
 
         protected
 
