@@ -42,6 +42,7 @@ module QuickSelection
     spec/lib/mb/sound/ui/term_integration_spec.rb
     spec/lib/mb/sound/ui/overlay_guard_spec.rb
     spec/valgrind/memcheck_selection_spec.rb
+    spec/docs_index_spec.rb
   ].freeze
 
   Selection = Struct.new(:specs, :reasons, :changed, :map, keyword_init: true)

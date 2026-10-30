@@ -1,0 +1,2096 @@
+# Every backticked name of CLAUDE.md's Architecture section as of 2026-10-30
+# (594823b1), before docs-split-1 moved the architecture into design/notes/
+# and its generated index.  spec/docs_index_spec.rb fails while a term appears
+# in none of CLAUDE.md, design/notes/README.md, or a design note, so facts
+# aren't lost in moves.  A term that's gone on purpose (an API removed or
+# renamed) is deleted from this list in the branch that removes it.
+# Lines: "# " comments, "## " the CLAUDE.md subsection a term came from,
+# anything else a term (exact text).
+## Core Abstraction: GraphNode DSL
+design/notes/graph_nodes.md
+GraphNode
+lib/mb/sound/graph_node.rb
+#sample
+lib/mb/sound/graph_node/*_methods.rb
+lib/mb/sound/graph_node/
+lib/mb/sound/notes/
+Traversable
+node.at(x)
+a..b
+dsl_shadowing_spec.rb
+FourPole#kernel_filter
+Tone#pwm_width
+#soft_sync?
+Tee::Branch#owner_tee
+SQ80::TimeScale#time_seconds
+get_sampler
+Tee
+GraphNode::FrozenView::Key
+frozen_view_spec.rb
+buf.frozen?
+GraphNode::FrozenCopy
+MB_SOUND_CHECK_SHARED=1
+:check_shared
+MB_SOUND_SHARED_TEE=0
+oversample(m)
+Branch#resampled?
+Tee.pin_rates
+(a + b).ring(:first)
+Mixer.with_ring(:first) { }
+Session#ring
+render(ring: :first)
+drone + hit
+osc * env
+fast_arithmetic
+bin/graph_profile.rb [-n 32,128,800] [--profile] [--plan on|off|ruby|both] script.rb
+spec/test_data/dense_modulated.mid
+## Graph I/O: recipes, Ruby export, and graph documents
+design/notes/graph_io.md
+GraphNode::Recipe
+lib/mb/sound/graph_node/recipe.rb
+recipe/
+node.to_ruby(inputs: { midi: notes }, seeds: true)
+ruby node
+.named
+voice
+osc
+env
+fx
+sig
+out
+MB::Sound.with_seed
+seed:
+MB_SOUND_RECIPES=0
+Recipe::Surface
+Surface::EXEMPT
+Recipe::EXEMPT
+BUILD_BLOCKS
+*Methods
+per_voice(...)
+nil # FIXME(graph-io): ...
+recipe_spec.rb
+spec/bin/recipe_script_sweep_spec.rb
+--tag smoke
+Call#ordinal
+Recipe.counting
+Recipe.key_of
+[:top, :synth, 0, :lp4, 0]
+Recipe.substituting { }
+bind :bass, lp4: :resonance
+Session::Carry
+bind :bass, :cutoff
+Arrangement::LiteralBinding
+.mbg.rb
+lib/mb/sound/graph_io.rb
+graph_io/
+inputs :midi
+param :drive, 1.0, range:, description:, cc:
+knob :cut, 800.0, range:, curve:, cc:
+GraphIO::Loader
+GraphIO::Registry
+public_send
+GraphIO::LoadError
+GraphIO::LIMITS
+GraphIO::FileGuard
+Wavetable.from_file
+FFMPEGInput
+MIDI::MIDIFile
+..
+&named_proc(:x)
+MB::Sound.named_proc
+trust: :code
+TrustedCode
+GraphIO.load(path_or_text, inputs:, params:, trust:)
+.parse
+.dump(graph, name:, inputs:, params:, options:)
+.save
+.document_of(graph)
+doc[:drive] = 2
+save :dark_hall, g
+save!
+bump: true
+preset :dark_hall, input: mic, mix: 0.6
+presets
+knob
+preset
+cc:
+live_error
+preset :dnb_reese, midi: riff, cutoff: :cut
+Session#knobs
+$MB_SOUND_PRESETS
+presets/
+bin/save_presets.rb
+--check
+--save NAME
+options:
+Registry::FILE_METHODS
+Loader#check_limits
+graph-io-3
+!A1
+~C2
+.chance
+|
+&
+Clip.new
+events([start, length, value, velocity, { marks }], ..., length:, loop:)
+name.mbg/
+name.mbg.rb
+assets/
+asset "assets/x.flac", sha256:
+GraphIO::Assets
+save(..., bundle: true/false)
+save :gig, set
+kind: :set
+bus(:hall, to:) { |sig| ... }
+to:
+send:
+GraphIO::SetWriter
+preset :gig
+doc.form
+seeds: :fresh
+seed: drawn_seed(N)
+Loader::SCENE_COMMANDS
+{ meter 2, 4 }
+bg
+turn
+Recipe.wrap_block
+## Library
+design/notes/library.md
+research/library-design/
+Library::Entry
+Library::KINDS
+Library.index
+extend Presettable
+preset_family :reverb, kind:, keys:, apply:
+param
+preset :hall, ..., tags:, about:, aliases:
+X.presets
+.preset_settings(:hall)
+.preset_entry
+.from_preset
+Envelope.from_preset
+Envelope::Curves
+DynamicsMethods::Squeeze
+Mastering.from_preset
+.built_presets
+Library::Collision
+Library.shelves
+shelves
+$MB_SOUND_USER_PRESETS
+metadata['mb_sound_shelf']
+library_spec.rb
+*.rb
+Library::FileLoader < GraphIO::Loader
+library 1
+reverb :big_plate, decay: 3.5, tags: %i[bright]
+instrument :x do |midi| ... end
+chain :x do |sig| ... end
+clip :x, seq(...)
+preset :x
+GraphIO.presets_dir
+Library.reload!
+find 'dark bass'
+L.fx.reverb.hall
+L.inst.reese
+L.kit.tr909
+UI::Completion
+save
+_v2
+tags:
+about:
+collect
+promote :x, to: :user
+:library
+track :bass, L.inst.dnb.dnb_reese
+track :bass, :dnb_reese
+track :bass, riff, :dnb_reese
+Arrangement::InstrumentPatch
+:"bass/cutoff"
+Arrangement::TrackKnobs
+bind :bass, cutoff: :cut
+*_KNOBS
+struck(clip, :bar)
+L.inst.bar
+Struck::LEVELS
+L.fx.bar.ping(C5)
+play L.fx.bar
+play L.inst.x
+Library::Audition
+## Sound guards
+design/notes/sound_guards.md
+golden/set.rb
+rake golden:check
+MB::Sound::SoundGuard
+lib/mb/sound/sound_guard/
+golden/fingerprints/
+golden/calibration/
+tmp/golden/approved/
+MB_SOUND_GOLDEN_DIR
+rake golden:approve[name] RUN=dir
+## Plan layer
+design/notes/plan_layer.md
+lib/mb/sound/plan.rb
+plan/
+ext/mb/sound/fast_plan
+MB::Sound.precision :fast
+Synth
+Session#add
+MB_SOUND_PLAN=0
+=ruby
+MB_SOUND_PLAN_CHECK=1
+MB::Sound.precision
+lib/mb/sound/precision.rb
+:fast
+mb_vec_sine_osc.h
+Plan::VecSine
+mb_vec_exp2.h
+FastArithmetic.power_fast
+:exact
+MB_SOUND_PRECISION=exact
+Plan.precision
+Plan::Describable
+plan_describe(p)
+Plan::Builder
+p[handle]
+p.const
+p.tone
+p.param
+p.boundary
+plan_inputs
+plan_unsupported_reason
+plan_snapshot
+plan_restore
+Plan::Op::*
+#run_ruby
+Plan::Program
+UnaryFunction
+Op::Dynamics
+Plan::MultiDescribable
+Op::Mix
+Op::Output
+Op::PanGain
+Op::Decimate
+mb_decimate.h
+x ** 1.37
+ping
+resonate
+Op::Resonator
+mb_resonator.h
+#extra_dsts
+Op::Tap
+Plan.observe
+x
+x * c
+Plan::ScaleMatch
+x * 1
+fast_loop
+Plan::LaneGroup
+Program#signature
+FastPlan.run_lanes
+Synth#lane_fusable?
+Plan.install
+Region#swap_out!
+MB_SOUND_PLAN_LANES=0
+0 * x
+Plan.changed(node)
+structure: :ended
+Plan.explain(graph)
+plan/rebuild.rb
+Plan.rebuilds
+MB_SOUND_PLAN_REBUILDS
+:auto
+:inline
+:background
+:next_span
+Installation#held?
+Deferral#apply
+Installation#adopt
+@plan_excluded
+spec/lib/mb/sound/plan/
+plan_compare
+rake plan:full
+lib/mb/sound/plan*
+rake plan:changed
+spec/ext/mb/sound/fast_plan_spec.rb
+Result#unfused_blocks
+## Feedback loops
+design/notes/feedback_loops.md
+sig.feedback { |fb, input| input + fb.delay(5.ms) * 0.8 }
+fb
+GraphNode::FeedbackLoop
+sig.delay(t, feedback: g) { |fb| insert }
+{ |d| d.fb { ... }; d.wet { ... } }
+fb.delay(t)
+feedback:
+structure: :biquad
+MB::Sound.live_error
+compensate: true
+:pitch
+:dc
+:echo
+#delay
+false
+sustain: false
+pluck.rb
+bin/effects/tape_delay.rb
+bin/effects/flanger.rb
+bin/songs/feedback_song.rb
+## Numbers, lengths, intervals, phases
+design/notes/numbers_lengths_phases.md
+lib/mb/sound/numeric_sound_mixins.rb
+.hz
+.db
+.meters
+.bits
+-6.db
+Decibels
+lib/mb/sound/decibels.rb
+accent:
+duck:
+hiss:
+db_gain:
+Decibels.gain_of
+.db_of
+440.hz
+Pitch
+Tone
+Note < Pitch
+Tuning
+tuning b4: 480
+lib/mb/sound/tone.rb
+FrozenError
+Tone::State
+with_phase
+pm
+fm_feedback
+reset(to:)
+phase:
+MB::Sound::Phase
+0.25.cycles
+1.5.radians
+90.degrees
+Numeric#degrees
+30.degrees.to_f
+node.radians
+2.bars
+3.beats
+3.n16
+1.n8.dotted
+Sequence::Duration
+4.seconds
+250.ms
+5.samples
+MB::Sound::Length
+0.5.attack
+lead:
+with_buffer
+pitch.period
+Length::Seconds
+138.75.bpm
+MB::Sound::Tempo
+MB::Sound::ArgTypes
+design/notes/arg_types.md
+v.freq
+help :at
+:over
+MB::Sound::Interval
+4.octaves
+7.semitones
+50.cents
+transpose
+up
+dn
+oct
+MB::Sound::Scale
+scale(:minor, :a)
+Scale::CHROMATIC
+pitch:
+## Params
+design/notes/params.md
+MB::Sound::Param
+lib/mb/sound/param.rb
+MIDI::ControlSpec
+ArgTypes::Param
+2400.hz
+-12.db
+type:
+unit:
+:linear
+:exp
+:switch
+:exponential
+:log
+:db
+:enum
+Param.names
+(lo..hi).at(default)
+default.in(lo..hi)
+Param::Error
+#check
+clamp: false
+knob :cut, (150.hz..8000.hz).at(2400.hz)
+#position(value)
+#value(position)
+param_guard_spec.rb
+spec/bin/param_declarations_spec.rb
+## Oscillators and antialiasing
+design/notes/oscillators.md
+lib/mb/sound/band_limit.rb
+fast_synth
+a*
+asaw
+asquare
+.lfo
+bin/aliasing.rb 'p.saw' 'p.asaw'
+sine
+ramp
+saw
+square
+triangle
+pwm(w, pivot:)
+skew
+triangle.skew(w)
+w
+pivot: 0
+complex_*
+sync(ratio:)
+sync(master)
+softsync
+enabled:
+fm_feedback(amount, gain:)
+fmfb
+fm_fb
+tone.gain(g)
+clean
+tone.reset(trig, to:)
+.free
+.rnd
+MB::Sound.seed(n)
+next_seed
+mb_phase.h
+Tone.wrap_phase
+mb_grid_phase
+softclip
+clip
+abs
+quantize
+asoftclip
+tone.wraps
+.increment
+jumps
+sig.decimate(rate, jitter:, interpolation: :hold | :linear)
+crush_rate
+srr
+GraphNode::Decimator
+fast_lofi
+v.freq * n
+bin/synths/vocal_lead.rb
+bin/songs/vocal_lead_song.rb
+lib/mb/sound/wavetable.rb
+fast_wavetable
+Wavetable
+:half_octave
+440.hz.wavetable(t, scan:)
+wavetable_of(:sine, [1, 0.5], ->(p) { ... }, t)
+Wavetable.of
+help :wavetables
+KeyMap
+phase_table
+waveshape
+Pitch#harmonics
+bin/songs/wavetable_song.rb
+lib/mb/sound/unison.rb
+pitch.unison(n, detune:, spread:, mix:) { |p, i| p.saw }
+pitch.unison(n).saw
+pitch.saw.unison(n)
+Tone#unison
+pitch.swarm(...)
+bin/songs/unison_song.rb
+swarm_song.rb
+oversample
+gauss
+## Method Modules
+design/notes/method_modules.md
+MB::Sound
+bin/sound.rb
+IOMethods
+PlaybackMethods
+play
+input
+Session
+stop
+outro
+panic
+players
+resume
+swap
+master
+vis
+render
+stems: dir
+from: :drop, bars: 8
+to: :breakdown
+--from
+--to
+--seek
+--take FILE
+report: :tracks
+--report
+MixReport.last
+wait
+use_output
+bg :b lands 2:1 (queued)
+forget
+MultichannelMethods
+ScheduleMethods
+at_bar
+after
+every
+cancel
+reset_scheduler
+ArrangementMethods
+BusMethods
+bus
+buses
+feed
+routes
+PlotMethods
+FFTMethods
+ScriptingMethods
+GainMethods
+WindowMethods
+AnalysisMethods
+loudness
+Loudness::Result
+node.loudness_meter
+bin/loudness.rb
+render(loudness: :spotify)
+StructureMethods
+analyze_form
+LiveMethods
+live?
+write
+MB::Sound::Playable.graph
+lib/mb/sound/playable.rb
+instrument
+Playable::Unplayable
+detect_output
+root_rng
+MB::Sound::Internal
+HelpMethods
+help
+now
+lesson
+HelpAutoload
+TransportMethods
+start
+go
+pause
+flow
+stop :all
+go :scene
+seek
+pry-<name>
+Help.rename_pry_collisions!
+debug_dump
+## Console help
+design/notes/help.md
+lib/mb/sound/help.rb
+help/
+require 'mb/sound'
+pry-help
+help mix an effect in
+help :perform
+help :knobs
+help.knobs
+help.topics
+help :turn
+Method#parameters
+help /reson/
+help node
+help.tip
+help(:knobs).try(n)
+demo
+lesson :set
+:knobs
+:flow
+:record
+:design
+from: 4
+help/content/
+Help::Doc
+Help::Level
+help.level
+Help.data_dir
+$MB_SOUND_HELP_DIR
+Session::MonitorTrim
+monitor_gain
+monitor
+rec_audio
+help.md
+ColorPolicy.color?
+.animate?
+ErrorFormat
+Class: message (did you mean x?)
+#<Tone C4.saw>
+inspect_full
+Help.show
+Internal.warn_once_per_site
+spec/lib/mb/sound/help_spec.rb
+Help::Coverage::EXEMPT_MODULES
+EXEMPT
+help/content/topics.rb
+design/notes/help_tutorial.md
+## Plotting
+design/notes/plotting.md
+MB::Sound::Plot
+lib/mb/sound/plot/
+MB::M::Plot
+spec/support/no_gnuplot.rb
+Plot.chart(title:) { x :time, sample_rate: 48000; line data, label: 'saw' }
+Plot.figure { chart { ... } }
+Plot.waveform
+spectrum
+spectrogram
+envelope
+chart
+figure
+show
+to_s
+to_svg
+to_png
+save('x.svg' | .png | .txt | .ans | .html)
+Plot::Text::LOOKS
+:scope
+:blocks
+:mosaic
+:quad
+:spark
+:ascii
+PLOT_WIDTH
+PLOT_HEIGHT
+PLOT_COLOR
+PLOT_LOOK
+PLOT_THEME
+PLOT_IMAGES
+Plot::Terminal
+:paper
+:studio
+:phosphor
+plot/make_font.rb
+PlotMethods#plotter
+Plot::Plotter
+draw
+Plot::Live
+ui
+bin/plot_gallery.rb [--compact]
+fast_ui
+FastUI::Grid
+write_frame
+Plot.native = false
+MB_SOUND_PLOT=ruby
+decimate_ruby
+polyline_ruby
+area_ruby
+device_ruby
+MB::Term::Cells
+Plot::Live.new(width:, height:, look:)
+#redraw(chart)
+Text.render
+#frame(chart, row:, col:)
+#write(io, chart, ...)
+#draw(chart, grid, x:, y:)
+overlay_guard_spec.rb
+bin/plot_benchmark.rb
+--tty
+bin/plot_benchmark_native.sh
+## Terminal UI
+design/notes/terminal_ui.md
+lib/mb/sound/ui.rb
+ui/
+ui :deck
+ui :mini
+ui off
+at: :top
+UI::Snapshot
+Session#ui_feed
+UI::Feed
+UI::Poll
+Journal#subscribe
+UI::BusMeter
+FastLoudness.peak_sumsq
+MidiInput#held_notes
+Thread.pass
+pane :name, rate:, height:, needs: do |c, s| ... end
+UI::Canvas
+puts
+meter
+sparkline
+layout :name do cols { ... }; rows { ... } end
+ui.save
+Session#players
+#clock
+#strip_info
+ui.keys
+ui :keys
+:grab
+UI::Keyboard
+:release
+:tap
+:hold
+Keyboard::HoldTracker
+:legato
+Keyboard::Link
+MIDI::VirtualInput
+MidiInput#add_source
+:"keyboard/live"
+Keyboard::StepEntry
+seq(...)
+Arrangement#play
+UI::Density.decide(kind, rows, cols)
+MB_SOUND_UPDATE_GOLDEN=1
+UI::Chrome
+Tiler#open_temporary
+min_height
+description
+UI::Sections
+UI::Pacer
+Canvas
+ui.size
+ui.list
+ui.panes
+ui.look
+ui.message
+ui :session
+UI::HelpIndex
+y
+ui.target_fps
+ui.fps
+ui.written_fps
+UI::Prompt
+UI::EnterSubmits
+UI.warm_up
+bin/ui_demo.rb [--compare] [-L low]
+FastUI::GVLProbe
+MB::Term::Screen
+ui :sound
+design/notes/sound_design_ui.md
+design :bass[, instrument, clip]
+preset :init
+bin/synths/init_voice.rb
+:basic_norm
+Panes::Inspector
+UI::Inspect::Classify
+UI.tile_layout_levels
+PaneKeys::Ask
+learn
+UI::Inspect
+Session#ui_graphs
+:inspect
+Plot::Panels
+to_ruby
+UI::KnobTurns
+enter_hint
+Panes::Render
+UI::PatchRender
+Synth#voice_block
+NoteFeed
+ROLES
+PatchRender.cycle
+rate_for
+Session#frames_rendered
+PatchRender.slack
+rest
+Debounce
+ui :tiles
+repl
+UI::Tiles
+MB::Term::Viewports
+Input::ReplHost
+MB::Term::VT
+/
+ui.nav_esc 0.3
+mode_keys
+:pane
+jump 'a'
+UI::PaneRates
+:
+UI.install_pry!
+ui.on C1, :zoom
+MB::Term::Themes
+MB::Term::DataFile
+gems/mb-term/
+MB::Term
+rake spec:gems
+spec/boundary_spec.rb
+MB::Term::Grid.native
+bin/ui_check.rb
+bin/ui_demo.rb --tiles [--flood N]
+## C Extensions
+design/notes/c_extensions.md
+ext/mb/sound/
+ext/mb/fast_sound/
+lib/mb/sound/<name>.so
+gems/mb-term/ext/mb/term/fast_term
+mb/term
+-ffp-contract=off
+fast_sound
+static inline
+ext/mb/sound/include/mb_ext_helpers.h
+ext/mb/sound/include/mb_*.h
+.claude/collaboration.md
+depend
+rake depend:check
+rm -rf tmp/<platform>/<extension>
+## Envelopes
+design/notes/envelopes.md
+MB::Sound::Envelope
+fast_envelope
+Envelope.process_ruby
+curve: 60.db
+:analog
+:snappy
+:gentle
+:swell
+:dx
+:smooth
+:pad
+:s
+env([[level, time, curve, shape], ...], release_at:, loop:)
+sq80_env
+gate:
+trigger:
+velocity:
+sensitivity:
+choke:
+lift:
+retrigger: :add
+hold:
+hold_last: true
+.sensitivity(range | nil)
+.no_velocity
+adsr
+amp_env
+fm_env
+filter_env
+filt_env
+GraphNode#db
+10 ** (node / 20)
+bin/plot_envelope.rb
+Plot::Panels::EnvelopeView
+## SQ-80 voice
+design/notes/sq80.md
+sq80(source = nil, :patch, **settings)
+SQ80Methods
+lib/mb/sound/sq80/
+bin/synths/sq80_voice.rb
+SQ80::Waves
+midi
+SQ80::Voice::DEFAULTS
+SQ80::PATCHES
+sq80_patches
+preset :sq80_glass, midi:
+sq80
+sq80(clip, :chop, ...)
+sq80_voice_spec.rb
+SQ80::SysEx.read
+.write
+SQ80::Program
+research/sq80-sysex/README.md
+MB_SOUND_SQ80_SYX_DIR
+bin/synths/wave_voices.rb
+wave_voice(midi, :digibrass | :organ_reso | :square_bass, grit:)
+:digibrass
+:organ_reso
+:square_bass
+grit
+decimate(mix: grit)
+tuning: :hardware
+.with_phase(0.5)
+## Tweening curves
+design/notes/curves.md
+MB::Sound::Curve
+Curve[:elastic, overshoot:]
+Curve.db
+Curve.s
+bezier
+#lookup
+v.hz.glide(t, shape:)
+tween([300.hz, 3000.hz], 1.bar, curve:)
+smooth(t, curve:)
+sig.ease(curve, ...)
+aease
+bounce_hits(2.bars, count:, elasticity:, decay:)
+bin/songs/tween_song.rb
+bin/songs/bouncing_ball.rb
+## Filters
+design/notes/filters.md
+lib/mb/sound/filter/
+#process
+#reset
+Filter::Cookbook
+node.filter(:lowpass, cutoff:, quality:, gain:)
+filter(150.hz.highpass(quality: 4))
+peq
+Filter::SVF
+sig.lp4(cutoff, resonance:)
+four_pole
+tuning: :musical
+:hardware
+FourPole::Tuning
+self_oscillate: true
+drive:
+drive_mode:
+mode:
+quality:
+v.reso(...)
+:musical
+tuning:
+sig.diode(cutoff, resonance:)
+normalize: true
+MB_FLUSH_GRID
+mb_svf.h
+Filter::SVF::FLUSH_GRID
+sig.formant(:a, :o, morph:, voice:, shift:, width:)
+vowel
+GraphNode::Formant
+FastFilter.formant
+## Delays
+design/notes/delays.md
+Filter::Delay
+#multitap
+MB::Sound::DelayLine
+:sinc
+:cubic
+96.samples
+lfo.samples
+wet:
+dry:
+MB::Sound::RingOut
+bin/delay_gallery.rb
+bin/delay_benchmark.rb
+bin/delay_quality.rb
+FastDelay.network
+DelayLine.network_ruby
+GraphNode::DelayNetwork
+multitap(t1, t2, feedback: [g1, g2] | g)
+ping_pong(t, feedback:, spread:, mix:, input: :mono | :stereo)
+haas(15.ms, side:)
+sig.tape_echo(:reel | :slapback | :ping_pong | :dub, time:, feedback:, mix:, tone:, low_cut:, drive:, wow:, flutter:)
+GraphNode::TapeEcho
+:delay
+L.fx.delay.dub
+compensate: :dc
+## Chorus
+design/notes/chorus.md
+sig.chorus(:juno1 | :juno2 | :juno12 | :lush, rate:, depth:, mix:, bbd: false)
+GraphNode::Chorus
+bbd: true
+## Reverbs
+design/notes/reverbs.md
+#reverb
+GraphNode::Reverb
+fast_reverb
+MB_SOUND_REVERB=ruby
+[l, r].reverb(:hall)
+:room
+:hall
+:stadium
+:space
+:default
+:plate
+:shimmer
+:grit
+:lofi
+:gated
+:drone
+room_size:
+decay:
+damping:
+mix:
+mod:
+diffusion_mod:
+lowpass:
+highpass:
+crush:
+shimmer:
+freeze:
+stretch:
+show_internals: true
+## Dynamics
+design/notes/dynamics.md
+GraphNode::Dynamics
+fast_dynamics
+sidechain:
+Dynamics::Transfer
+upward_attack:
+lookahead:
+makeup:
+compress
+upward_threshold:
+upward_ratio:
+expand
+noise_gate
+duck(kick)
+amount: -12.db
+12.db
+compand(-60.db => -80.db, -40.db => -40.db, 0.db => -12.db, interpolation: :cubic)
+[[in, out, shape], ...]
+makeup
+min_gain
+max_gain
+gain
+MB::Sound::Decibels
+makeup: 2
+limit(ceiling: -1.db, lookahead: 1.5.ms, release:, true_peak: true)
+master { |mix| mix.limit }
+sidechain :pump, grid(16, 'x...x...').loop
+pump
+trigger_track
+trigger_line
+key
+duck(:pump)
+bus(:pump)
+compress(sidechain: :pump)
+Session::Buses#route(name, trigger: true)
+track(..., trigger: true)
+launch
+sidechain(:pump) { |clip| ... }
+shape: :gate
+:impulse
+attack: 0
+env(0, 0.08)
+tr808
+sidechains
+turn :"pump/level", 0
+"pump/level": 0
+stop :pump
+voice :trigger, silent: true
+duck(:drums, only: :trigger)
+sidechain :pump, clip
+genre(:dnb) { sidechain :pump, :pump }
+bands(200.hz, 2000) { |lo, mid, hi| [...] }
+mono_below(120)
+bands
+squeeze
+:eleven
+## Drum machines
+design/notes/drums.md
+tr808(source, **knobs)
+lib/mb/sound/drums.rb
+drums/
+Drums::Kit
+Sequence::Kit
+TR808::GM_MAP
+velocity_curve:
+Clip#performed?
+more_cowbell:
+outputs: :separate
+skip_idle
+Synth::SKIP_GRID
+spec/lib/mb/sound/buffer_size_invariance_synth_spec.rb
+bin/songs/drums_808.rb
+bin/synths/drums_808.rb
+kit { voice :kick, tune: 50 do |h| h.body(h.tune, sweep: 3) + h.click end; choke :open_hat, by: :closed_hat }
+Drums::Machine
+Builder
+Hit
+level
+ChokeGate
+shuffle:
+D2.flam
+.flam(25.ms)
+Event#flam
+MIDI::Event#flam
+Notes#flam_mark
+Drums::Flams
+tr909 :clap
+tr808 :cowbell
+machine.grid
+tr909(source, **knobs)
+TR909.rom
+bin/songs/drums_909.rb
+bin/synths/drums_909.rb
+bin/songs/kit_builder.rb
+## Sampler
+design/notes/sampler.md
+MB::Sound::Sample
+lib/mb/sound/sample.rb
+sample/
+:one_shot
+:no_loop
+:forward
+:ping_pong
+Sample['x.flac']
+Sample[narray]
+bounce(graph, 2.bars, bpm:)
+node.bounce(1.bar, root: F1)
+capture_audio(4.bars, from: :master | node)
+Session#capture_audio
+slices(16)
+slices(:onsets)
+.rev
+.at(7.n16)
+.looped
+.fade
+.gain
+.transpose
+.lofi(:s950 | :sp1200 | :mpc60)
+.stretch(r, cycle:)
+.mono
+Sample::Slices
+brk.name(k: 0..1)
+brk[:k]
+brk.keymap(from: C2)
+brk.chop(:k, T, [:s, 2], brk[:s].rev)
+Seq::Step#pitch
+MIDI::Event#pitch
+Notes#pitch_mark
+clip.transpose
+brk.keymap(from: C1, split: C4)
+Sampler::Instrument
+seq:
+rand:
+sfz(path, mips: :octave)
+Sampler::SFZ
+sf2(path, preset)
+Sampler::SF2
+sf2(path).presets
+[bank, program]
+Instrument.layered
+Sampler::ZoneMap
+GraphNode::ZoneValue
+spec/support/sf2_writer.rb
+inst.play(v)
+clip.sampler(brk)
+sample.node
+breakbeat(:jungle)
+GraphNode::SamplerVoice
+fast_sampler
+Sampler::KernelRuby
+interpolation: :none, mips: false
+GraphNode::SubLane
+midi.md
+steal_fade
+steal_fade: false
+help :sampler
+lesson :chop
+bin/songs/press_and_chop.rb
+## Textures
+design/notes/textures.md
+dust(rate, bipolar:, range:, min_gap:, seed:)
+GraphNode::Dust
+min_gap:
+drift(rate, range:, smooth: :cubic | :cosine | :linear | :step | any Curve, walk:, hold:, jitter:, from:, seed:)
+GraphNode::Drift
+jitter:
+trig.resonate(:bowl | :rin | :gong | :bell | :chime | :tubular | :bar | :marimba | :vibes | :glass | :plate | :membrane | modes, freq, decay:, beat:, spread:, glide:, glide_time:)
+GraphNode::ModalResonator < Resonator
+FastResonator.modes
+noise(:pink)
+noise(:brown)
+Filter::NoiseColor
+sig.sounding(hold:, fade:)
+GraphNode::Sounding
+fast_texture
+fast_resonator
+help :textures
+help :recipes
+bin/songs/critters.rb
+--binaural
+## Granular and spectral stretch
+design/notes/granular.md
+sample.grains(density:, size:, position:, scan:, spread:, pitch:, pitch_spread:, pan_spread:, reverse:, window:, jitter:, seed:, read:, max_grains:)
+granular
+cloud
+GraphNode::Grains
+position:
+scan:
+pitch: [0, 12, 19]
+normalize: :power
+:amplitude
+v.grains(sample, ...)
+FastSampler.grains
+fast_sampler/granular.c
+Granular::KernelRuby
+max_grains
+v.grains
+Sample#stretch(r, mode:)
+:cyclic
+:spectral
+Sample::Spectral.vocoder
+transients:
+:paul
+transients: true
+randomize:
+:slice
+mips: :octave
+help :granular
+bin/songs/granular_song.rb
+## Loop files and tempo-following loops
+design/notes/loops.md
+Sample['Funk/break_98bpm.wav']
+Sample::Riff
+acid
+smpl
+adtl
+sample.markers
+strc
+Sample::LoopInfo
+meta[:why]
+bpm
+beats
+bars
+meta_source
+Sample[path, detect: true]
+#detect_tempo
+stretch(r, mode: :slice, fill: :gap | :stretch, slices:)
+Sample::SliceStretch
+sample.follow(:stretch | :resample, stretch: :auto, align: :timeline | :launch)
+Sample#material
+GraphNode::LoopPlayer
+loops(dir, bpm:, key:, beats:)
+help :loops
+## Sequences
+design/notes/sequences.md
+lib/mb/sound/sequence/
+Clip
+Event
+seq(C4, E4, G4.n4).n8
+seq([C3, E3, G3], chord(:min7, root: :d))
+grid('x...x...')
+n4
+.d
+.t
+clip.stream
+clip.notes
+clip.env
+clip.tone
+clip.freq
+clip.gate
+clip.trigger
+n = clip.notes
+clip.synth(voices:) { |v, i| }
+Transport
+ClipSource
+align: :launch
+legato
+note_length
+reverse
+permute
+rotate
+shift
+transpose(step, scale:, root:)
+ratchet(n, rate:)
+halftime
+doubletime
+humanize
+swing
+chance
+maybe
+Clip::Variation
+vary: true
+bake(fx)
+euclid
+melody
+map_clip
+map_cycles
+Sequence::ControlLane
+events(..., controls: { cc1: [[pos, v], ...] })
+clip.controls
+#fit_controls
+:templates
+clip.rhythm.notes(C1, F1, [A1, E2], nil)
+.pitches(0, 2, 4, scale:)
+take.groove
+grid:
+triplets:
+beat.groove(feel, amount:, velocity:)
+Feel.groove_target
+Stream#groove
+Sequence::Feel
+ratchet
+rate:
+MIDI::Event#length_hint
+ghost_chords
+~A1
+Rest
+R
+Tie
+T
+Seq#acid
+acid(...)
+v.accent
+v.accent_sweep
+v.acid_env
+bin/synths/acid.rb
+bin/songs/acid_song.rb
+!
+nil?
+!x
+clip.ghost_chords(1, 4, 7, 6, per: 1.bar, scale: scale(:minor, :a), harmonic:, tie: :contour)
+scale:
+Sequence::PlayedBy
+brk.chop(...)
+played_by
+bg :x, chop
+play chop
+chop.sampler(brk)
+clip.played_by(sf2(...))
+swap :bass, bass2
+swap :drums, kit2
+bin/songs/sequence_demo.rb
+swap_song.rb
+## Generative music
+design/notes/generative.md
+research-generative
+Generative::Dice
+fast_generative
+Dice.mode = :ruby
+scale(:dorian, :d).weights.blur(0.1) + tones(D3, F3, A3) * 2
+chord(:min7, root: :d).weights
+chord
+root:
+Generative::Chord
+.blend(other, t)
+.over(A3..A5, around: E5)
+Field
+harmony(0 => a, 12.bars => b, curve:, loop:)
++ - * blend
+generate(1.bar, values:) { |cycle, dice| rows }
+Clip.generate
+strikes(field, every:, chance:, gap:)
+melody(weights_or_harmony, ...)
+Clip#values
+Generative::Producer
+motifs(h, 8, step: 1.n8, form: %i[a a b a], answer: { b: :a }, vary:, mutate:, evolve:, range:, around:)
+Generative::Motifs
+evolve
+bin/songs/generative_blur.rb
+--no-bass
+-c dense
+-c sparse
+-t slow
+-C 0
+-O 2
+Generative::Steer
+motifs(h, 8, density: knob(:busy), mutate: knob(:wander))
+range: knob(:reg).choose(A2..A4, A3..A5)
+strikes(chance:)
+beats(energy:)
+generate(1.bar, busy: knob(:busy)) { |cycle, dice, busy:| }
+Clip#steered?
+MIDI::Param.peek
+ClipSource#param_nodes
+beats(16, hold: 2, energy: knob(:energy)) { kick [1, 0, 0, 0] * 4, keep: [0, 4, 8, 12]; hat euclid(10, 16), mutate: 0.5; fill every: 8, snare: 0.7 }
+Generative::Beats
+rhythm(field, pattern)
+Scheduler#background
+Generative::Ahead
+bin/songs/generative_demo.rb
+bin/songs/generative_steer.rb
+--fixed
+help :generative
+markov(still: { drift: 3, hush: 1 }, ..., seed:)
+[a, b] =>
+outro: {}
+lsystem(%i[intro body outro], body: { %i[build drop body] => 2, ... }, generations: 3, seed:)
+take
+word
+.flow(bars)
+sections:
+flow { generate chain, still: 6, drift: 4..8 }
+goto :x
+Form::Plan
+form.plan(seed:).at(pos)
+Form::Walking
+render(from: 901, preroll: false)
+generator
+t.generative(seed:)
+t.endless
+bin/songs/endless.rb
+genre(:ambient).endless
+help :long_form
+## Tempo sync
+design/notes/tempo_sync.md
+1.beat.hz
+Sequence::TempoNode
+.freewheel
+sig.delay(1.n8.dotted)
+TimelineNode
+render(bars:)
+Transport#meter
+meters
+meter 7, 8
+bounce
+bake
+Sequence.current_transport
+Sequence::TempoMap
+bpm 140, over: 4.bars, curve:
+accel
+rit
+bpm :tempo
+bpm 4.bars.lfo.at(150..180)
+bpm: [160, over: 4]
+:tempo
+bpm 120
+Transport#tempo_map=
+TempoMap.steps
+bin/songs/tempo_song.rb
+## Multichannel
+design/notes/multichannel.md
+outputs
+channel_count
+GraphNode::Channels
+stereo(l, r)
+channels(a, b, c)
+per_channel(list | a..b)
+channels(...)
+spread(a..b)
+per_voice(list | a..b)
+reverb
+GraphNode::ChannelMixer
+pan
+balance
+width
+mono
+mid_side
+matrix
+place
+left
+right
+bin/songs/stereo_song.rb
+## Arrangement and Session groundwork
+design/notes/arrangement.md
+research-arrangement
+research-plan-interconnect
+Session::Stamp
+frame
+pos
+bar:beat
+Session::Journal
+Session#change
+Fades::Ramp
+Session#now
+session/strip.rb
+fade:
+mutes :breakdown, :drums, :bass
+session/undo.rb
+undo
+on: :now
+redo!
+changes
+MB::Sound::Arrangement
+Session#arrangement
+track :bass, q: 1 do |clip| ... end
+track
+scene
+arm
+Arrangement::PatchCheck
+scene :drop, bass: b, drums: beat
+others: :keep
+go :drop
+q:
+quant
+Arrangement::ClipMatrix
+launch :bass, :bass_b
+tweak :bass, transpose: 2
+:reverse
+:halftime
+:double
+Session#lookahead
+Session::LateChange
+Scheduler::LateBlock
+Session#late_blocks
+play_form
+Arrangement#warm_up
+flow(warm_up: false)
+warm_up(tracks: true)
+Arrangement#rehearse
+GC.start
+FastRecipe.frame_binding
+GraphNode::BranchWatch
+Tee.branch_changes
+bin/scene_profile.rb [-R] song.rb
+GCQuiet.during
+GC.config(rgengc_allow_full_mark: false)
+MB_SOUND_GC_QUIET=0
+Arrangement#warm_exercise
+Session::Warming
+warm_changes
+MB_SOUND_WARM=0
+warming_spec.rb
+:warm
+ivar_layout_spec.rb
+lib/mb/sound/launch_point.rb
+on:
+:now
+:beat
+:bar
+:clip
+in:
+at:
+bar(33)
+Session::Names
+lib/mb/sound/take.rb
+take.save
+repo: true
+sets/
+take.form
+bin/songs/night_bus_set.rb
+Session::Tails
+remove(ring: true)
+stop :x, ring: true
+MAX_TAIL_SECONDS
+others: :cut
+:cut
+lib/mb/sound/form.rb
+flow do intro 8; label :top; verse 8; chorus 8; pick verse: 3, chorus: 1; goto :top, times: 1; outro 8 end
+form
+chorus 16
+chorus 8
+generate chain, ...
+repeat n do
+fill :big, every: 16
+Form#to_ruby
+next:
+label
+goto :l
+goto :l, times: n
+goto a: 3, b: 1
+goto ->(f) { }
+pick :a, :b
+pick a: 3
+pick do |p| p.option(3) { ... } end
+loop!
+onward
+goto
+practice
+finish
+skip
+seek 17
+seek :top, on: :bar
+:seek
+Session#epoch
+session/seeks.rb
+goto top: 3, next: 1
+.named(:bass_a)
+Arrangement#label
+fill:
+FillMap
+C4.fill(:big)
+Clip#fill
+Kit#fill
+#nofill
+Session#markers
+marker :vo, at: bar(5)
+at_marker
+on_marker
+bin/songs/night_bus_flow.rb
+GraphNode::Knob
+session/knobs.rb
+KnobMethods
+knob :cut, 800, range: 100..8000, curve: :exp
+knob(:cut)
+knob :cut, ...
+Knob::Reader
+move
+over:
+from:
+cut: 8000
+[8000, over: 2]
+drop 8, cut: 8000
+snap
+recall
+xfade
+lead: 1.beat
+:attack
+nudge: 6.ms
+MIDI::ClipSource#ahead
+clock :tide, 31.1.seconds
+Numeric#bpm
+Tempo
+5/4r
+speed:
+gear :reese, 165 => 138.75
+clocks
+clip.clocked(x)
+clock
+clocked_at
+clip % x
+clip.at(x)
+clip.over(x)
+ArgTypes
+clocked
+track ..., clock:
+bg/play ..., clock:
+loop.clocked(19.7.seconds, fit: :stretch | :resample)
+follow(clock:)
+turn :space, 0 => 0.30, 1.n8 => 0.50, 1.n4 => 0.62
+curve:
+steps:
+Gesture.fit
+tolerance: 1e-4
+r.gestures
+smooth_gesture
+Session::MidiInput
+Session#midi_in(name)
+:cc
+arm :lead
+:"lead/live"
+LiveClip
+Arrangement::Arm
+rec 4
+:capture
+capture :lead
+capture :lead, 2
+quantize:
+humanize:
+captures
+MIDI::Capture.clip
+rec_audio 'x.flac'
+stop_rec_audio
+rec
+r.midi [...]
+Session#replay_midi!
+bin/songs/night_bus_capture.rb
+## Genre templates
+design/notes/genres.md
+genre :dnb
+GenreMethods
+lib/mb/sound/genre.rb
+genre/
+Genre::Template
+Form
+Kit
+:dnb_reese
+Genre::Patches
+:tr808
+level:
+params:
+filter:
+sidechain :drums, only: :kick
+pulse
+Mix
+mono_below
+report
+:dnb
+:jungle
+:ambient
+:funk
+:house
+:techno
+brk.chop
+clocked(19.7.seconds)
+:weather
+sounding
+genre(:dnb, tempo: 170)
+genre(:dnb) { role :bass, :jungle_reese }
+like
+without
+layers
+generator markov(...)|lsystem(...), bars:, use:
+-E song|endless -S seed
+Genre.define(:mine) { like :dnb }
+t.short(60)
+t.setup
+t.play
+t.to_ruby
+t.mix.report(loudness(...))
+bin/songs/genre_demo.rb -G dnb
+-g
+help :genres
+research/persona-panel-round2.md
+## Structure analysis
+design/notes/structure.md
+analyze_form(source)
+analyze_structure
+lib/mb/sound/structure.rb
+structure/
+Structure::Result
+tempo
+Beat(seconds, bar, beat)
+Bar(number, seconds, beats, end_seconds)
+Transport#meters
+transport
+meters_ruby
+research-structure-analysis
+:analysis
+bars:
+seconds:
+beats: :dp
+bpm:
+start:
+grid: false
+## Master effects
+design/notes/master_effects.md
+Session#master
+master { |mix| mix.softclip }
+GraphNode::MixSource
+fade: 0
+master nil
+Session::SafetyLimiter
+master_gain 2.db, post: true
+Session#master_gain_post
+resample
+lib/mb/sound/mastering.rb
+mastering/
+master :club
+air:
+measure: :loudest
+loudest_bars:
+clip: true
+air: :dynamic
+:band
+:streaming
+platform: :apple
+:quiet
+lufs: :ebu_r128
+:vinyl
+master(:club) { |mix| fx }
+mix.master(:club)
+masters
+Mastering::Preset
+Loudness::Target
+lufs: platform: ceiling: drive: ride: mono: glue: clip: de_ess:
+Mastering::Targeting
+render(master:, loudness:)
+loudness: false
+--master club
+--lufs
+ride: true
+GraphNode::Rider
+Mastering.codec_peaks
+## Buses and sends
+design/notes/buses.md
+bus(:verb) { |sig| sig.reverb(:hall, mix: 1) }
+Session::Buses
+Master::Chain
+track(:keys, send: { verb: -12.db })
+track(:kick, to: :drums)
+bg ..., send:
+feed :keys, :verb, -6.db, over: 2
+send_level
+fx_send
+send
+Object#send
+:send
+GraphNode::BusTap
+duck(:drums)
+duck(:drums, only: :kick)
+bus(:drums)
+render(stems:)
+bus_stems: true
+bin/songs/tunnel_vision.rb
+--no-buses
+## CUE and MAIN
+design/notes/cue.md
+cue :acid, sound
+CueMethods
+Session::Cue
+Arrangement::Cue
+:"acid/cue"
+launch :acid
+launch :x, ref
+:acid
+cue :bass, clip
+cue :drums
+uncue
+cues
+Player#cue
+Cue::Levels
+(cue * (1 - cue_mix) + main * cue_mix) * phones
+:phones
+:cue_mix
+mute :x
+:"x/cue"
+:cue
+:uncue
+:launch
+Cue::CueSubject
+cue :drop
+launch :drop
+bg :x
+:x
+START_KINDS
+cue_mix 0.3, save: true
+Cue::Prefs
+cue.json
+Internal.help_data_dir
+cue_output
+CUE_OUTPUT=ports
+output(channels: 4, cue: 2)
+out_1 out_2 cue_1 cue_2
+:split
+:off
+## Racks and typed ports
+design/notes/racks.md
+research-racks
+MB::Sound::Rack
+lib/mb/sound/rack.rb
+RackMethods
+:notes
+:audio
+:control
+mrack
+irack
+arack
+lrack
+amrack
+modrack
+rack(name, in:, out:, **ports)
+in: :auto
+src.then(&r)
+r.(src)
+stream.through(r)
+arack :dub, side: :audio do |sig, side:|
+with
+>>
+<<
+Session::Racks
+racks
+rack(:x)
+rack(:x).to_ruby
+src.then(&rack)
++
+Stream#+
+Notes#+
+adopt_knobs(sound, player:)
+:"dub/space"
+:"bass/dub/space"
+:"bass/space"
+share: true
+follow: :space
+rack(:dub).snap :wide
+recall :"dub/wide", only: [:space]
+except:
+knob.mod(lfo, depth:)
+inputs sig: :audio, side: :audio
+outputs :audio
+save :dub, rack(:dub)
+rack: :arack
+GraphIO::RackWriter
+preset :dub
+preset :dub, sig: mic
+Rack::Conflict
+racks: :session | :saved | :rename
+GraphIO.load
+GraphIO.rack_conflict_handler
+rack(:dub).using(seed: drawn_seed(N), space: 0.7)
+GraphNode.longest_path
+.graph
+Rack::RackInfo
+Session::Racks#rack_info
+help rack(:x)
+:dub_echo
+port_info
+{ in: [{ name:, type:, role: :main/:side/:param/:feedback, source:, active: }], out: [{ name:, type: }] }
+port_type
+port_role
+params
+param_info
+param_snapshot
+ParamValue
+Params
+kernel_params
+Plot::Panels.preview(klass, params, chart)
+node.plot_preview(chart)
+Plot.preview(node)
+spy(snapshot: true)
+MIDI::Stream#spy { |event, stamp| }
+Session.span
+bin/songs/rack_demo.rb
+help :racks
+## Audio I/O
+design/notes/audio_io.md
+fast_audio
+OUTPUT_TYPE
+INPUT_TYPE
+device
+ffmpeg
+null
+DeviceOutput
+:low
+:video
+:safe
+AUDIO_PROFILE
+-L
+latency :low
+AUDIO_BACKEND
+OUTPUT_DEVICE
+AUDIO_SAMPLE_RATE
+JACK_CLIENT_NAME
+mb_conceal.h
+MB::Sound::Concealment
+conceal: :silence
+AUDIO_CONCEAL=silence
+:repeat
+fixed
+end_stream
+jack_port_unregister
+jack_deactivate
+ExitClose
+at_exit
+exit_close_spec.rb
+RUBY_THREAD_TIMESLICE=10
+bin/audio_check.rb
+bin/audio_load_check.rb
+## Latency probe
+design/notes/latency_probe.md
+bin/latency_probe.rb -t 1h
+MB::Sound::LatencyProbe.start(dir:)
+FastLatency::Probe
+clock_nanosleep
+mach_wait_until
+LatencyProbe::Histogram
+#watch(session)
+Periodicity
+MB_SOUND_LATENCY_PROBE=1
+## Scripts
+design/notes/scripts.md
+ScriptRunner
+effect_script { |input, p| }
+Ringdown
+-m
+synth_script { |midi, p| }
+Notes
+song_script(bars:) { |p| }
+-b
+--bpm
+script(args:) { |args, p| }
+-o
+-f
+-P
+-q
+--ui [LAYOUT]
+MIDI_LOG=1
+MIDI_STUCK=s
+name: [default, 'description', '-x', Type, range]
+p.midi_cc(1, :hz, range:)
+if main_script?(__FILE__)
+Help.welcome
+Help.install_pry!
+pry-*
+detailed_message
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
+spec/bin/shebang_spec.rb
+MB::Sound::JIT::CALL_THRESHOLD
+lib/mb/sound/jit.rb
+MB_SOUND_YJIT_CALL_THRESHOLD=n
+RUBY_YJIT_ENABLE=1
+--yjit
+MB::Sound.warm_up
+ruby bin/x.rb
+## MIDI
+design/notes/midi.md
+lib/mb/sound/midi/
+MIDI::Event
+FileSource
+LiveSource
+MIDI_TIMING=exact
+MIDI::Stream
+MB::Sound::Notes
+v
+gate
+trigger
+number
+velocity
+freq
+bend
+pressure
+cc(n)
+mod
+v.hz
+.glide
+.vibrato
+.bend_range
+v.key_trigger
+v.cutoff
+v.reso
+v.lfo
+v.mod_sum
+mod_scale
+poly_pressure
+aftertouch
+MIDI::Allocator
+steal:
+retrigger:
+Synth.new(source, voices:, spares:, retrigger:, skip_idle:, exact_lanes:) { |v, i| }
+:string
+:ring
+ended?
+Synth#sub_lanes
+MB_SOUND_SUB_LANES=0
+wake:
+exact_lanes: true
+Session#exact_lanes
+render(exact_lanes: true)
+same_key: :restrike
+MIDI::Source#realtime_input?
+:count
+MIDI::Output
+NoteBalancer
+echo
+arp
+strum
+degrees
+lock
+select
+reject
+split
+merge
+Transform::Spec
+echo(...)
+stream.through(fx)
+clip.bake(fx)
+bin/songs/midi_transforms_song.rb
+MIDI::Param
+value_at(pos, transport:, stream:)
+cc(1, 0.5..0.7)
+Knob#value_at
+Session::Decisions
+knob(:x).choose(...)
+4.bars.lfo.at(0.5..0.66)
+transpose(seq(0, 5).n1.loop)
+bin/midi/moving_params.rb
+key :d, :dorian
+mode :lydian
+key:
+MusicalKey
+scale(:dorian)
+scale
+mode knob(:dark)
+modes(:lydian..:locrian, by:)
+MIDI::Lock
+degrees(layout: :flow | :fit, black: :passing | :silent | :lower)
+snap(:chord, from:, extend:, avoid:, bass:)
+lock :mash | :play | :along | :chord | :off
+stream.lock(:play)
+lock :play
+UI::Keyboard::ScaleLock
+micro: :mark
+micro: :note
+bin/midi/key_lock.rb
+:key
+:lock
+:params
+MIDI_API
+MIDI_DEVICE
+bin/midi_check.rb
+spec/support/jack_dummy.rb
+MIDI::ControlMap
+--acid-xml
+MidiInput
+midi_file(path)
+MIDI::Import
+:midi_files
+midi_tracks(path)
+midi_clip(path, track:, channel:, bars:, from:, loop: true, slides:, cc: :steps | :fit | false, timing: :score | :performed, sustain:)
+midi_kit(path)
+events(...)
+grid(row: events(...))
+MIDI::TempoMap
+spec/support/midi_writer.rb
+## Sibling Libraries
+mb-math
+mb-util

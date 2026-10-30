@@ -607,3 +607,35 @@ namespace :depend do
     puts "depend:check: #{MemcheckSelection.extensions.length} extensions OK"
   end
 end
+
+# design/notes/README.md and CLAUDE.md's topic map, generated from the notes'
+# summary blocks (spec/docs_index.rb; docs-split-1)
+namespace :docs do
+  desc "Write design/notes/README.md and CLAUDE.md's topic map from the notes' summary blocks"
+  task :index do
+    require_relative 'spec/docs_index'
+    DocsIndex.write!
+    puts "docs:index: #{DocsIndex.notes.length} notes in #{DocsIndex::GROUPS.length} groups"
+    warning = DocsIndex.size_warning
+    puts "WARNING: #{warning}" if warning
+  end
+
+  desc "Check the generated index and map, the notes' summaries, kept terms, and CLAUDE.md's size (warns over budget)"
+  task :check do
+    require_relative 'spec/docs_index'
+    problems = DocsIndex.note_problems + DocsIndex.stale_problems +
+      DocsIndex.missing_terms.map { |s, t| "term in no doc (#{s}): #{t}" } +
+      DocsIndex.dangling_references.map { |n| "CLAUDE.md names design/notes/#{n}.md, which doesn't exist" }
+    warning = DocsIndex.size_warning
+    puts "WARNING: #{warning}" if warning
+    abort("docs:check:\n  #{problems.join("\n  ")}") unless problems.empty?
+    puts "docs:check: OK (CLAUDE.md #{(DocsIndex.claude_text.bytesize / 1000.0).round(1)} KB of #{DocsIndex::BUDGET / 1000} KB)"
+  end
+
+  desc "CLAUDE.md's sections by size"
+  task :size do
+    require_relative 'spec/docs_index'
+    DocsIndex.sections.each { |h, b| puts format('%7d  %s', b, h) }
+    puts format('%7d  total (budget %d)', DocsIndex.claude_text.bytesize, DocsIndex::BUDGET)
+  end
+end
