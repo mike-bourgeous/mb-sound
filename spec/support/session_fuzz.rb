@@ -509,7 +509,15 @@ module SessionFuzz
     message.lines.first.sub(/ \(lib\/.*/, '').gsub(/\d+(\.\d+)?/, 'N')
   end
 
+  # (Its renders don't count toward the example's render budget: the
+  # example fails with the shrunk song anyway; see RenderBudget.uncounted.)
   def shrink(song, relation, message, limit: 60)
+    return RenderBudget.uncounted { shrink_counted(song, relation, message, limit: limit) } if defined?(RenderBudget)
+
+    shrink_counted(song, relation, message, limit: limit)
+  end
+
+  def shrink_counted(song, relation, message, limit:)
     want = kind(message)
     tries = 0
     fails = ->(s) {

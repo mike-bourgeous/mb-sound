@@ -1585,11 +1585,18 @@ module MB
           # holding its start, as on its first start (a clipless graph
           # started at the span's start before omnibus16, so a 367-frame
           # replay played it up to a buffer early), and clocked clips and
-          # loops resync to their clocks there
+          # loops resync to their clocks there.  Its timeline nodes restart
+          # there too when its start is a span's first sample: a waiting
+          # graph isn't read, so a loop the seek placed at the seek's target
+          # would play from there, behind the timeline by the time it
+          # waited (batch-fixes-1030: a scene's loop starting on an
+          # 800-frame buffer's edge after `seek 3` played a beat late, on
+          # time at 367 frames; SessionFuzz seed 766010)
+          waited = p.waited
           p.waited = false
           offset = MB::M.max(((p.start - from) / per_sample).floor, 0)
           again = from + offset * per_sample
-          if offset > 0
+          if offset > 0 || waited
             p.timeline_nodes.each { |n| n.start_at(again, origin: p.start, launch: p.launch, transport: @transport) }
           end
           p.timeline_nodes.each { |n| n.clock_resync(again) if n.respond_to?(:clock_resync) }
@@ -1614,6 +1621,22 @@ module MB
 
         frames = count - offset
         frames = MB::M.min(frames, ((p.stop_at - from) / per_sample).floor - offset) if p.stop_at && !p.fade_out && !ringing
+        # A fade out ends on its last frame: the graph stops there, not at
+        # the end of the buffer holding it, so its state when kept (resume,
+        # undo, a scene bringing it back) and what `only:` sidechain spies
+        # inside it wrote are the same at any buffer size (batch-fixes-1030:
+        # a scene's faded-out kit fed its kick's tail to `duck(:t1, only:
+        # :kick)` up to a buffer longer; SessionFuzz seed 766044)
+        if p.fading_out && p.ramp && p.ramp.to <= 0
+          fade_left = p.ramp.start + p.ramp.length - (base + offset)
+          frames = fade_left if fade_left < frames
+          if frames <= 0
+            p.gain = 0.0
+            p.ramp = nil
+            p.read_to = base + offset
+            return finish_player(p, false, base + offset)
+          end
+        end
         return retire(p, keep: p.keep) if frames <= 0
 
         # A muted player has nothing to ring out

@@ -33,6 +33,13 @@ RSpec.describe(RenderBudget) do
     RenderBudget.start(RSpec.current_example)
   end
 
+  it "doesn't count renders inside RenderBudget.uncounted" do
+    out = MB::Sound::NullOutput.new(channels: 1, sleep: false)
+    RenderBudget.uncounted { 100.times { out.write(buf) } }
+    out.write(buf)
+    expect(RenderBudget.used).to eq(1)
+  end
+
   it 'leaves paced outputs alone' do
     out = MB::Sound::NullOutput.new(channels: 1, sample_rate: 48000 * 1000) # a second of samples is a millisecond here
     120.times { out.write(buf) }
