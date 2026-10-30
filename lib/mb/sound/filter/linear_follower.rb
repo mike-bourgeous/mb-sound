@@ -93,8 +93,19 @@ module MB
 
         # Processes the given array of samples, updating the state of the
         # follower along the way.  Returns the velocity-limited result.
-        # Supports in-place processing of NArray.
+        # Supports in-place processing of NArray.  Real SFloat and DFloat
+        # data runs in C (FastControl.slew, mb_smooth.h); #process_ruby is
+        # its exact mirror (and handles anything else).
         def process(samples)
+          return process_ruby(samples) unless (samples.is_a?(Numo::SFloat) || samples.is_a?(Numo::DFloat)) && @s.is_a?(Numeric) && !@s.is_a?(Complex)
+
+          out = samples.inplace? && samples.contiguous? && !samples.frozen? ? samples : samples.dup
+          @s = MB::Sound::FastControl.slew(out, @s, @max_rise, @max_fall, @absolute)
+          out
+        end
+
+        # The Ruby mirror of #process's C kernel (also for other inputs).
+        def process_ruby(samples)
           samples.map { |s|
             s = s.abs if @absolute
 

@@ -14,7 +14,8 @@
  *
  * adaptive(x, out, from, to, state) and curve(x, out, from, to, state,
  * slots, table): Notes::Smoother's adaptive and curve kernels (see
- * mb_smooth.h).
+ * mb_smooth.h).  slew(data, s, max_rise, max_fall, absolute):
+ * Filter::LinearFollower's slew limiter (delay-time smoothing, clip_rate).
  *
  * The Ruby mirrors (Notes::Smoother.smooth_ruby and the others) give exactly the same
  * samples (specs check it), so keep the operations identical; built with
@@ -22,6 +23,7 @@
  * here, but the flag keeps that true if the code changes).
  */
 
+#include <math.h>
 #include <string.h>
 
 #include <ruby.h>
@@ -148,6 +150,27 @@ static VALUE ruby_curve(VALUE self, VALUE x, VALUE out, VALUE from_v, VALUE to_v
 	return out;
 }
 
+// slew(data, s, max_rise, max_fall, absolute): Filter::LinearFollower's
+// slew limiter over +data+ (a contiguous SFloat or DFloat, changed in
+// place) from the last output +s+, with per-sample limits (nil: none);
+// returns the new last output (see mb_slew_run).
+static VALUE ruby_slew(VALUE self, VALUE data, VALUE s_v, VALUE rise_v, VALUE fall_v, VALUE absolute)
+{
+	VALUE klass = CLASS_OF(data);
+	if ((klass != numo_cSFloat && klass != numo_cDFloat) || RNARRAY_NDIM(data) != 1 || !RTEST(nary_check_contiguous(data))) {
+		rb_raise(rb_eArgError, "Slew data must be a contiguous 1D SFloat or DFloat");
+	}
+	rb_check_frozen(data);
+	size_t n = RNARRAY_SHAPE(data)[0];
+	double s = NUM2DBL(s_v);
+	double rise = NIL_P(rise_v) ? INFINITY : NUM2DBL(rise_v);
+	double fall = NIL_P(fall_v) ? INFINITY : NUM2DBL(fall_v);
+	void *p = nary_get_pointer_for_write(data) + nary_get_offset(data);
+	mb_slew_run(p, p, n, klass == numo_cDFloat, &s, rise, fall, RTEST(absolute));
+	RB_GC_GUARD(data);
+	return DBL2NUM(s);
+}
+
 void Init_fast_control(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -157,4 +180,5 @@ void Init_fast_control(void)
 	rb_define_module_function(fast_control, "smooth", ruby_smooth, 7);
 	rb_define_module_function(fast_control, "adaptive", ruby_adaptive, 5);
 	rb_define_module_function(fast_control, "curve", ruby_curve, 7);
+	rb_define_module_function(fast_control, "slew", ruby_slew, 5);
 }

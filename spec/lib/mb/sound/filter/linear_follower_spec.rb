@@ -22,6 +22,40 @@ RSpec.describe(MB::Sound::Filter::LinearFollower) do
   end
 
   describe '#process' do
+    it 'runs in C exactly as its Ruby mirror' do
+      [Numo::SFloat, Numo::DFloat].each do |type|
+        [[2000, 1500, false], [nil, 900, true], [3000, nil, false], [nil, nil, true], [0, 0, false]].each do |rise, fall, abs|
+          data = type.new(3000).rand(-1, 1)
+          data[100] = -0.0
+          data[200...400] = 0.5
+          data[1000...1100] = Float::NAN if type == Numo::DFloat
+          c = MB::Sound::Filter::LinearFollower.new(sample_rate: 48000, max_rise: rise, max_fall: fall, absolute: abs)
+          r = MB::Sound::Filter::LinearFollower.new(sample_rate: 48000, max_rise: rise, max_fall: fall, absolute: abs)
+          c.reset(0.25)
+          r.reset(0.25)
+          a = [0...7, 7...800, 800...3000].map { |range| c.process(data[range].dup) }.reduce(:concatenate)
+          b = [0...7, 7...800, 800...3000].map { |range| r.process_ruby(data[range].dup) }.reduce(:concatenate)
+          expect(a.class).to eq(type)
+          expect(a.to_binary).to eq(b.to_binary), "#{type} #{rise.inspect} #{fall.inspect} #{abs}"
+          expect(c.peek.to_s).to eq(r.peek.to_s)
+        end
+      end
+    end
+
+    it 'processes in place only inplace data, and leaves frozen data alone' do
+      lf = MB::Sound::Filter::LinearFollower.new(sample_rate: 10, max_rise: 1, max_fall: 1)
+      d = Numo::SFloat[0, 1, 1]
+      out = lf.process(d)
+      expect(out).not_to equal(d)
+      expect(d).to eq(Numo::SFloat[0, 1, 1])
+
+      d2 = Numo::SFloat[1, 1, 1].inplace
+      expect(lf.process(d2)).to equal(d2)
+
+      f = Numo::SFloat[3, 3].freeze
+      expect(lf.process(f).frozen?).to eq(false)
+    end
+
     it 'does not limit rise when max_rise is nil' do
       lf = MB::Sound::Filter::LinearFollower.new(sample_rate: 10, max_rise: nil, max_fall: 1)
       data = Numo::SFloat[0, 100, 0, 0, 0, 0, 0, 0, 0, 0]

@@ -10,6 +10,7 @@
 #ifndef MB_SMOOTH_H
 #define MB_SMOOTH_H
 
+#include <math.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -221,6 +222,36 @@ static inline int mb_curve_smooth_run(const float *xp, float *op, long from, lon
 	st[7] = (double)head;
 
 	return 0;
+}
+
+// Slew limiting (Filter::LinearFollower#process; Ruby mirror
+// LinearFollower#process_ruby): the output follows each input value (its
+// absolute value if +absolute+) but moves at most +rise+ up and +fall+ down
+// per sample (pass INFINITY for no limit), from the state *s (the last
+// output).  +x+ and +out+ are float or double arrays (+is_double+) and may
+// be the same.
+static inline void mb_slew_run(const void *x, void *out, size_t n, int is_double, double *s, double rise, double fall, int absolute)
+{
+	double y = *s;
+	for (size_t i = 0; i < n; i++) {
+		double v = is_double ? ((const double *)x)[i] : (double)((const float *)x)[i];
+		if (absolute) v = fabs(v);
+		double hi = y + rise;
+		double lo = y - fall;
+		if (v > hi) {
+			y = hi;
+		} else if (v < lo) {
+			y = lo;
+		} else {
+			y = v;
+		}
+		if (is_double) {
+			((double *)out)[i] = y;
+		} else {
+			((float *)out)[i] = (float)y;
+		}
+	}
+	*s = y;
 }
 
 #endif
