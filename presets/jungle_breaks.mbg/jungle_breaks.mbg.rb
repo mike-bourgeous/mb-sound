@@ -3,15 +3,15 @@
 graph 7,
   name: "jungle_breaks",
   kind: :synth,
-  saved: "2026-10-30T06:33:17Z",
-  mb_sound: "0.12.0.usegit (28b121e2)",
+  saved: "2026-10-30T21:59:17Z",
+  mb_sound: "0.12.0.usegit (51ba3321)",
   from: "bin/synths/jungle.rb",
   description: "90s jungle patch :breaks from bin/synths/jungle.rb, first made by Nev Ashdown (Skylark Junction), a fictional 90s atmospheric jungle producer, for the song \"Memory Card\" (bin/songs/memory_card.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-jungle).",
   options: { patch: :breaks, glide: nil, attack: nil, decay: nil, release: nil, echo: nil }
 inputs midi: :notes
 param :cutoff, (20.0..16000.0).at(16000.0), description: "Lowpass cutoff in Hz (breaks 16000, pad 2400)"
 param :grit, (0.0..1.0).at(0.25), description: "Breaks crusher wet share 0..1 (0.25)"
-asset "assets/jungle_record.flac", sha256: "c12085b491e7bc732add4dd49016650b5e93affdf8b7ef5af4f4b5f64829bb96"
+asset "assets/jungle_record.flac", sha256: "2a8bdcc4728d39f010c9224c6a4a0c165a89595df698b306c4f763b585eec754"
 
 Sampler::Instrument.new { |i|
   i.region(Sample["assets/jungle_record.flac"].slices(at: [0.n16, 1.n16, 2.n16, 3.n16, 4.n16, 5.n16, 6.n16, 7.n16, 8.n16, 9.n16, 10.n16, 11.n16, 12.n16, 13.n16, 14.n16, 15.n16, 16.n16, 17.n16, 18.n16, 19.n16, 20.n16, 21.n16, 22.n16, 23.n16, 24.n16, 25.n16, 26.n16, 27.n16, 28.n16, 29.n16, 30.n16, 31.n16]).name(k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7..7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23, full: 0..31)[:k], keys: 2..12, root: 3.0)

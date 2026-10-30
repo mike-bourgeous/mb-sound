@@ -127,6 +127,26 @@ RSpec.describe('Sleeper random catch-up', :aggregate_failures) do
       expect(ref.abs.max).to be > 0.01
       expect_same(ref, got, 'kit')
     end
+
+    # delay-sleep-2: a kit bounced into a Sample (as jungle.rb's record,
+    # saved in presets/jungle_breaks.mbg) catches up as the same kit
+    # sampled directly does, so a preset's bounced asset and its script
+    # agree (save_presets_spec failed only because the asset was saved
+    # before the catch-up)
+    it 'catches a kit up the same inside a bounce as sampled directly' do
+      make = -> { m.tr808(m.grid(16, kick: 'X...x...', snare: '....X..x', hat: 'x.x.x.x.'), snare: { snappy: 0.75 }, seed: 5) }
+      m.seed(1)
+      bounced = m.bounce(2.bars, bpm: 140) { make.() }.data
+      m.seed(1)
+      old = m.bpm
+      m.bpm(140)
+      kit = make.()
+      direct = SpecBuffers.join(Array.new((bounced.length / 800.0).ceil) { kit.sample(800).dup })[0...bounced.length]
+      expect(kit.voices.values.any? { |v| (cu = v.instance_variable_get(:@catch_ups)) && !cu.empty? }).to eq(true) # (a voice slept and caught noise up)
+      expect_same(bounced, direct, 'bounced kit')
+    ensure
+      m.bpm(old) if old
+    end
   end
 
   describe 'sub-lanes' do
