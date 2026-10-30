@@ -413,10 +413,13 @@ module MB
         end
         alias shuffle permute
 
-        # Returns a Seq with every note's velocity set to +velocity+ (0..1).
+        # Returns a Seq with every note's velocity set to +velocity+
+        # (clamped to 0..1, like Clip#vel and MIDI::Stream#vel;
+        # Feel.fixed_velocity).
         def vel(velocity)
+          v = Feel.fixed_velocity(velocity)
           map_steps { |s|
-            s.to_h.merge(velocity: s.value && velocity.to_f, clip: s.clip&.vel(velocity))
+            s.to_h.merge(velocity: s.value && v, clip: s.clip&.vel(v))
           }
         end
 

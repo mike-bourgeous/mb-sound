@@ -339,9 +339,10 @@ module MB
           Stream.new(Transform::MapNotes.new(self, &block))
         end
 
-        # Every note-on at +velocity+ (0..1).
+        # Every note-on at +velocity+ (clamped to 0..1, like Clip#vel;
+        # Sequence::Feel.fixed_velocity).
         def vel(velocity)
-          v = MB::M.clamp(velocity.to_f, 0.0, 1.0)
+          v = Sequence::Feel.fixed_velocity(velocity)
           Stream.new(Transform::VelocityCurve.new(self, ->(_) { v }, name: "vel(#{velocity})"))
         end
 

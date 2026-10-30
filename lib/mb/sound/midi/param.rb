@@ -323,16 +323,17 @@ module MB
           end
 
           # The 0..1 position of the source at +pos+: a knob's position in
-          # its own range and scale, a cc's in its range, else the value
-          # itself (clamped to 0..1).
+          # its own range and scale, a cc's controller position along its
+          # curve (ControlSpec#position: where a knob learned on that cc
+          # sits, so both pick alike), else the value itself (clamped to
+          # 0..1).
           def position_at(pos, transport: nil, stream: nil)
             v = Param.value_at(@source, pos, transport: transport, stream: stream).to_f
             k = Choice.knob_of(@source)
             if k
               k.spec.position(v)
             elsif @source.is_a?(CC)
-              r = @source.spec.range
-              (v - r.begin) / (r.end - r.begin)
+              @source.spec.position(v)
             else
               v
             end.clamp(0.0, 1.0)

@@ -7,6 +7,27 @@ RSpec.describe(MB::Sound::MIDI::ControlSpec) do
       expect(described_class.new(number: 64, curve: :switch).value(63)).to eq(0)
     end
 
+    it 'gives the controller position of a value: the inverse of #value along every curve and center' do
+      specs = [
+        described_class.new(number: 1),
+        described_class.new(number: 1, range: 100.0..8000.0, curve: :exp),
+        described_class.new(number: 1, range: 8000.0..100.0, curve: :exp),
+        described_class.new(number: 1, range: 0.0..2.0, center: 1.0),
+        described_class.new(number: 74, range: 0.25..4.0, center: 1.0, curve: :exp),
+        described_class.new(number: 1, range: -1.0..3.0, center: 0.0),
+        described_class.bend(range: -12.0..12.0),
+        described_class.pressure(range: 1.0..0.0),
+      ]
+      specs.each do |sp|
+        top = sp.raw_max
+        [0, 1, 2, top / 3, top / 2, (top + 1) / 2, top - 1, top].uniq.each do |raw|
+          expect(sp.position(sp.value(raw))).to be_within(1e-9).of(raw / top.to_f), "#{sp.inspect} at #{raw}"
+        end
+      end
+      sw = described_class.new(number: 64, curve: :switch)
+      expect([sw.position(sw.value(0)), sw.position(sw.value(127))]).to eq([0.0, 1.0])
+    end
+
     it 'has a number, a status of 176, and a raw maximum of 127' do
       s = described_class.new(number: 7, name: 'Volume', default: 100)
       expect(s).to have_attributes(type: :cc, cc?: true, status: 176, raw_max: 127, key: [176, 7])

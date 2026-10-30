@@ -213,6 +213,19 @@ RSpec.describe(MB::Sound::MIDI::Lock, :midi_transforms) do
       expect(c.to_s).to eq('knob(:style).choose(:mash, :play, :along)')
     end
 
+    it 'chooses from a cc along its curve, as a knob learned on that cc would' do
+      choices = %i[a b c d e]
+      spec = MB::Sound::GraphNode::Knob::Spec.new(name: :style_cc, default: 100, range: 100..8000, curve: :exp)
+      picks = (0..127).map { |raw|
+        cc = MB::Sound::MIDI::Param::CC.new(1, 100..8000, curve: :exp, default: raw)
+        kn = session.knob(:"style_cc#{raw}", spec.value(raw / 127.0), range: 100..8000, curve: :exp)
+        [MB::Sound::MIDI::Param::Choice.new(cc, choices).value_at(nil), kn.choose(*choices).value_at(0r)]
+      }
+      expect(picks.map(&:first)).to eq(picks.map(&:last))
+      # (the old linear mapping chose :a for raw 0..81)
+      expect(picks.map(&:first).tally).to eq(choices.zip([26, 25, 26, 25, 26]).to_h)
+    end
+
     it 'walks the modes one degree at a time by brightness' do
       list = MB::Sound::MusicalKey::BRIGHTNESS.map { |m| MB::Sound::Scale[m].offsets }
       list.each_cons(2) { |a, b| expect((a - b).length).to eq(1) }

@@ -42,6 +42,23 @@ RSpec.describe('MIDI clip operations on streams', :midi_transforms, :aggregate_f
       expect(rows(hook.bake(fx))).to eq(rows(hook.ghost_chords(1, 4, 7, 6, scale: s.scale(:minor, :a))))
     end
 
+    it 'sets velocities alike, clamped to 0..1 (Feel.fixed_velocity)' do
+      seq = s.seq(s::C4, s::E4, s.seq(s::G4, s::B4).n16).n8
+      [-0.5, 0, 0.3, 1, 1.7, 3/4r].each do |v|
+        want = v.to_f.clamp(0.0, 1.0)
+        fx = MB::Sound::MIDI::Transform::Spec.new.vel(v)
+        expect(rows(riff.bake(fx))).to eq(rows(riff.vel(v)))
+        expect(rows(riff.vel(v)).map(&:last).uniq).to eq([want])
+        expect(rows(seq.vel(v)).map(&:last).uniq).to eq([want])
+        expect(ons(read_all(run_stream.vel(v))).map(&:last).uniq).to eq([want])
+      end
+      [nil, '0.5', Complex(0.5, 1), Float::NAN].each do |bad|
+        expect { riff.vel(bad) }.to raise_error(ArgumentError, /vel takes a velocity/)
+        expect { seq.vel(bad) }.to raise_error(ArgumentError, /vel takes a velocity/)
+        expect { run_stream.vel(bad) }.to raise_error(ArgumentError, /vel takes a velocity/)
+      end
+    end
+
     it 'transposes by scale degrees alike' do
       fx = MB::Sound::MIDI::Transform::Spec.new.transpose(2, scale: :minor, root: :a)
       expect(rows(riff.bake(fx))).to eq(rows(riff.transpose(2, scale: :minor, root: :a)))
