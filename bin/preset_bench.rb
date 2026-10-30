@@ -59,20 +59,28 @@ MB::Sound.script(
   quiet: [false, '-q', 'Print only the summary'],
 ) { |args, p|
   bench = MB::Sound::Library::Bench
+  # (a selection, material, set, or checkout that isn't there: one line)
+  user_error = lambda do |&block|
+    block.call
+  rescue bench::Error => e
+    raise MB::Sound::ScriptRunner::InputError, e.message
+  end
 
   if p.notes
-    raise ArgumentError, 'Pass the set id (or its directory) after --notes FILE' unless args.length == 1
-    notes = bench.read_notes(args[0], p.notes, root: p.dir)
+    raise MB::Sound::ScriptRunner::InputError, 'Pass the set id (or its directory) after --notes FILE' unless args.length == 1
+    notes = user_error.() { bench.read_notes(args[0], p.notes, root: p.dir) }
     puts p.json ? JSON.pretty_generate(notes.to_h) : notes
     next
   end
 
-  raise ArgumentError, 'Pass what to bench (a family like reverb, a kind, a head path, an entry), or --find' if args.empty? && p.find.nil?
+  raise MB::Sound::ScriptRunner::InputError, 'Pass what to bench (a family like reverb, a kind, a head path, an entry), or --find' if args.empty? && p.find.nil?
 
-  result = bench.run(
-    args, find: p.find, root: p.dir, id: p.id, title: p.title, materials: p.materials&.split(',')&.map(&:strip),
-    dry: p.dry, lufs: p.lufs, ceiling: p.ceiling, format: p.mp3 ? 'mp3' : 'flac', vs: p.vs, list: p.list,
-    io: p.quiet ? nil : $stdout
-  )
+  result = user_error.() {
+    bench.run(
+      args, find: p.find, root: p.dir, id: p.id, title: p.title, materials: p.materials&.split(',')&.map(&:strip),
+      dry: p.dry, lufs: p.lufs, ceiling: p.ceiling, format: p.mp3 ? 'mp3' : 'flac', vs: p.vs, list: p.list,
+      io: p.quiet ? nil : $stdout
+    )
+  }
   puts result if p.list || p.quiet
 }

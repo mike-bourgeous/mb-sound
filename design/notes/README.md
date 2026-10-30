@@ -16,7 +16,7 @@ Every graph remembers the DSL calls that built it (`GraphNode::Recipe`, `lib/mb/
 
 ### [The library: entries, index, shelves, heads](library.md)
 
-Every named thing (presets at every scale: effects, instruments, kits, clips, masters, sets) is a frozen `Library::Entry` in one `Library.index` (`lib/mb/sound/library.rb` + `library/`), found by name, by `find 'dark bass'`, or through the `L.fx`/`L.inst`/`L.kit` heads.  Classes with presets `extend Presettable` (one `preset` line each); shelves are searched session racks, project, user (a git repository), gems, then built-ins, and the first match wins.  `save` never replaces (`save!`, `bump: true`); library files load through `Library::FileLoader`, never eval; tracks take instrument entries as patches.
+Every named thing (presets at every scale: effects, instruments, kits, clips, masters, sets) is a frozen `Library::Entry` in one `Library.index` (`lib/mb/sound/library.rb` + `library/`), found by name, by `find 'dark bass'`, or through the `L.fx`/`L.inst`/`L.kit` heads.  Classes with presets `extend Presettable` (one `preset` line each); shelves are searched session racks, project, user (a git repository), gems, then built-ins, and the first match wins.  `save` never replaces (`save!`, `bump: true`); library files load through `Library::FileLoader`, never eval; tracks take instrument entries as patches.  `Library::Bench` (`L.fx.reverb.bench`, `bin/preset_bench.rb reverb`) renders presets on standard material, loudness-matched, as Listening Bench sets (`--vs` before/after, `--notes` reads verdicts back); `entry.audition(:break)` is one of those graphs.
 
 ### [Plan layer (fused regions)](plan_layer.md)
 

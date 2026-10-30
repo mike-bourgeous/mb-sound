@@ -81,7 +81,7 @@ module MB
                           when :pad
                             Sample[render_pad]
                           else
-                            raise ArgumentError, "no audio material #{key.inspect} (#{EFFECT_MATERIALS.join(', ')})"
+                            raise Error, "no audio material #{key.inspect} (#{EFFECT_MATERIALS.join(', ')})"
                           end
         end
 
@@ -146,7 +146,7 @@ module MB
             Material.new(key: :pad, title: 'Saw pad (Am, F)', about: 'two detuned saws through a lowpass, Am then F, a bar each at 120 BPM',
               bpm: 120, max_seconds: 8, source: -> { audio(:pad, files: files).node })
           else
-            raise ArgumentError, "no effect material #{key.inspect} (#{EFFECT_MATERIALS.join(', ')})"
+            raise Error, "no effect material #{key.inspect} (#{EFFECT_MATERIALS.join(', ')})"
           end
         end
 
@@ -193,7 +193,7 @@ module MB
               ['Struck phrase', "Struck.phrase: the demo phrase moved toward the resonator's typical pitch", 120, 12,
                -> { Struck.phrase(entry.name) }]
             else
-              raise ArgumentError, "no phrase #{key.inspect} (#{ROLE_MATERIALS.values.flatten.uniq.join(', ')}, template)"
+              raise Error, "no phrase #{key.inspect} (#{ROLE_MATERIALS.values.flatten.uniq.join(', ')}, template)"
             end
           Material.new(key: key, title: title, about: about, bpm: bpm, max_seconds: seconds, source: clip)
         end

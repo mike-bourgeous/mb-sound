@@ -28,6 +28,7 @@ bundle exec rspec spec/some_spec.rb        # Run a single test file
 bundle exec rspec spec/some_spec.rb:42     # Run a specific test line
 bundle exec rake                  # Default task (runs spec)
 bin/sound.rb                      # Launch interactive Pry console with MB::Sound context
+bin/preset_bench.rb reverb -d /app/tmp/listening  # library presets as a Listening Bench set, loudness-matched (--vs master-ai, --notes; library.md)
 bundle exec rake memcheck         # all C extension specs under Valgrind (~30 min on 2026-10-10, up to 1.3 GB; manual: pre-release or leak hunts; options in Rakefile)
 bundle exec rake memcheck:changed # only the memcheck specs for extensions changed since master-ai (MEMCHECK_DRY=1, FULL=1)
 bundle exec rake memcheck:status  # last full memcheck (a record; full runs are manual) and whether the map knows ext/

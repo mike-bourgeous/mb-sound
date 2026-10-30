@@ -44,7 +44,7 @@ module MB
             path = l.split(' ', 2)[1].strip if l.start_with?('worktree ')
             return path if l.strip == "branch refs/heads/#{ref}" && File.directory?(path.to_s)
           end
-          raise ArgumentError, "no worktree has #{ref} checked out; make one: git worktree add --detach /claude/worktrees/#{ref}-bench #{ref} && " \
+          raise Error, "no worktree has #{ref} checked out; make one: git worktree add --detach /claude/worktrees/#{ref}-bench #{ref} && " \
             "(cd /claude/worktrees/#{ref}-bench && bundle exec rake compile), then --vs /claude/worktrees/#{ref}-bench"
         end
 

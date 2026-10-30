@@ -38,7 +38,7 @@ RSpec.describe MB::Sound::Library::Bench do
     end
 
     it 'raises with suggestions for unknown words' do
-      expect { bench.select(:revreb) }.to raise_error(ArgumentError, /no family, kind, or entry name.*reverb/m)
+      expect { bench.select(:revreb) }.to raise_error(MB::Sound::Library::Bench::Error, /no family, kind, or entry name.*reverb/m)
       expect { bench.select('reverb.hal') }.to raise_error(ArgumentError, /no reverb :hal.*hall/m)
     end
   end

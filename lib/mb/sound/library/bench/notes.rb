@@ -97,7 +97,7 @@ module MB
           path = set.to_s
           path = File.join(root, path) unless File.exist?(path)
           path = File.join(path, 'set.json') if File.directory?(path)
-          raise ArgumentError, "no Bench set #{set.inspect} (looked for #{path})" unless File.file?(path)
+          raise Error, "no Bench set #{set.inspect} (looked for #{path})" unless File.file?(path)
           JSON.parse(File.read(path))
         end
 
@@ -115,7 +115,7 @@ module MB
             return note_docs(data[key]) if key
             return data.to_h { |id, doc| [id.to_s, doc.is_a?(Hash) && doc['data'].is_a?(Hash) ? doc['data'] : doc] }.select { |_, d| d.is_a?(Hash) }
           end
-          raise ArgumentError, "a notes export is a JSON object or array (got #{data.class})" unless data.is_a?(Array)
+          raise Error, "a notes export is a JSON object or array (got #{data.class})" unless data.is_a?(Array)
           data.each_with_object({}) do |d, h|
             next unless d.is_a?(Hash)
             doc = d['data'].is_a?(Hash) ? d['data'] : d
@@ -129,7 +129,7 @@ module MB
         def read_notes(set, notes, root: default_root)
           set = load_set(set, root: root) unless set.is_a?(Hash)
           docs = note_docs(notes)
-          items = set.dig('bench', 'items') or raise ArgumentError, "#{set['id']} is not a preset Bench set (no bench items)"
+          items = set.dig('bench', 'items') or raise Error, "#{set['id']} is not a preset Bench set (no bench items)"
           used = {}
           by_preset = {}
           dry = []

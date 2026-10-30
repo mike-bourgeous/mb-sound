@@ -27,6 +27,10 @@ module MB
       # material's tempo, a fresh seed 0), so a preset sounds the same in
       # any order and at any time; see design/notes/library.md.
       module Bench
+        # A selection, material, set, or checkout that isn't there (the
+        # script prints these as one line).
+        class Error < ArgumentError; end
+
         # The loudness every render is matched to (integrated LUFS).
         TARGET_LUFS = -20.0
 
@@ -69,31 +73,6 @@ module MB
           def missing? = silent || !error.nil?
 
           def to_h = super.transform_values { |v| v.is_a?(Float) ? v.round(3) : v }
-        end
-
-        # A collecting output for renders (no file, no clipping): float
-        # buffers, joined by #data.
-        class Capture
-          attr_reader :channels, :sample_rate, :buffer_size
-
-          def initialize(channels: 2, sample_rate: 48000, buffer_size: 800)
-            @channels = channels
-            @sample_rate = sample_rate
-            @buffer_size = buffer_size
-            @buffers = Array.new(channels) { [] }
-            @closed = false
-          end
-
-          def write(data)
-            data.each_with_index { |c, i| @buffers[i] << Numo::SFloat.cast(c) if i < @channels }
-          end
-
-          def data
-            @buffers.map { |list| list.empty? ? Numo::SFloat[] : Numo::SFloat.hstack(list) }
-          end
-
-          def close = (@closed = true)
-          def closed? = @closed
         end
 
         module_function
@@ -142,7 +121,7 @@ module MB
             return head_path("L.#{text}") if name && (HEADS.key?(fam.to_sym) || fam == 'all')
             if name
               e = entry(fam, name) or
-                raise ArgumentError, "no #{fam} :#{name} in the library#{Library.suggest(name.to_sym, Library.index.entries(family: fam.to_sym).map(&:name))}"
+                raise Error, "no #{fam} :#{name} in the library#{Library.suggest(name.to_sym, Library.index.entries(family: fam.to_sym).map(&:name))}"
               return [[e], true]
             end
             sym = text.to_sym
@@ -151,9 +130,9 @@ module MB
             by_name = Library.index.entries.select { |e| e.name == sym }
             return [by_name, true] unless by_name.empty?
             words = Library.families.keys + Library::KINDS + Library.index.entries.map(&:name)
-            raise ArgumentError, "#{text.inspect} is no family, kind, or entry name#{Library.suggest(sym, words.uniq)}"
+            raise Error, "#{text.inspect} is no family, kind, or entry name#{Library.suggest(sym, words.uniq)}"
           else
-            raise ArgumentError, "bench what? #{spec.inspect} (a family like :reverb, a kind like :effect, an entry, a head path, or find:)"
+            raise Error, "bench what? #{spec.inspect} (a family like :reverb, a kind like :effect, an entry, a head path, or find:)"
           end
         end
 
@@ -170,9 +149,11 @@ module MB
           words = text.sub(/\AMB::Sound::/, '').split('.').drop(1).map(&:to_sym)
           head = words.shift
           node = head == :all ? Heads::Root.new.all : (HEADS.key?(head) ? Heads::Root.new.public_send(head) : nil)
-          raise ArgumentError, "no head #{head.inspect} (#{[*HEADS.keys, :all].join(', ')})" unless node
+          raise Error, "no head #{head.inspect} (#{[*HEADS.keys, :all].join(', ')})" unless node
           words.each { |w| node = node.word(w) }
           node.is_a?(Entry) ? [[node], true] : [node.entries, false]
+        rescue KeyError => e
+          raise Error, e.message
         end
 
         # Why +entry+ isn't benched (nil if it is).
@@ -218,8 +199,8 @@ module MB
         # clips play on their instrument.
         def graph(entry, material = nil)
           material = materials_for(entry).first if material.nil?
-          material = (self.material(entry, material) or raise ArgumentError, "no #{material.inspect} material for #{entry.head_path} (#{materials_for(entry).map(&:key).join(', ')})") unless material.is_a?(Material)
-          raise ArgumentError, "#{entry.head_path} is a #{entry.kind}: Bench sets cover #{KINDS.join(', ')}" unless KINDS.include?(entry.kind)
+          material = (self.material(entry, material) or raise Error, "no #{material.inspect} material for #{entry.head_path} (#{materials_for(entry).map(&:key).join(', ')})") unless material.is_a?(Material)
+          raise Error, "#{entry.head_path} is a #{entry.kind}: Bench sets cover #{KINDS.join(', ')}" unless KINDS.include?(entry.kind)
           src = material.build
           case entry.kind
           when :clip then Playable.graph(src)
@@ -234,11 +215,12 @@ module MB
         # gain 0 dB.  Returns [channels, cut] (cut true if it ran to
         # max_seconds).
         def render_graph(graph = nil, bpm:, max_seconds:, &build)
-          out = Capture.new
+          # (a collecting output: no file, so nothing clips before matching)
+          out = Sampler::CaptureOutput.new(channels: 2)
           MB::Sound.render(out, gain: 1.0, bpm: bpm, max_seconds: max_seconds) do
             Session.current.add(graph || build.call, on: :now)
           end
-          data = out.data
+          data = out.captured
           [data, data[0].length >= (max_seconds * 48000).round - 800]
         end
 
@@ -357,10 +339,15 @@ module MB
         def run(what = nil, find: nil, root: default_root, id: nil, title: nil, materials: nil, dry: true, lufs: TARGET_LUFS, ceiling: CEILING,
                 format: 'flac', vs: nil, io: $stdout, list: false)
           entries, skipped = select(what, find: find)
-          raise ArgumentError, "nothing to bench#{skipped.empty? ? '' : " (skipped: #{skipped.map { |e, r| "#{e.respond_to?(:head_path) ? e.head_path : e}: #{r}" }.join('; ')})"}" if entries.empty?
+          raise Error, "nothing to bench#{skipped.empty? ? '' : " (skipped: #{skipped.map { |e, r| "#{e.respond_to?(:head_path) ? e.head_path : e}: #{r}" }.join('; ')})"}" if entries.empty?
           id ||= unique_id(root, "presets-#{slug(what, find)}-#{Date.today.iso8601}")
           dir = File.join(File.expand_path(root), id)
           jobs = plan(entries, set_id: id, materials: materials, dry: dry && entries.any? { |e| e.kind == :effect })
+          entries.each do |e|
+            next if jobs.any? { |j| j.entry.equal?(e) }
+            skipped << [e, "no material among #{materials.join(', ')} (its materials: #{materials_for(e).map(&:key).join(', ')})"]
+          end
+          raise Error, "nothing to bench: #{skipped.map { |e, r| "#{e.head_path}: #{r}" }.join('; ')}" if jobs.none?(&:entry)
           skipped.each { |e, r| io&.puts "skip #{e.respond_to?(:head_path) ? e.head_path : e}: #{r}" }
           return Result.new(id: id, dir: dir, jobs: jobs, measures: {}, before: {}, skipped: skipped, vs: vs, wall: 0.0) if list
 
