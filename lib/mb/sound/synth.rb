@@ -693,6 +693,7 @@ module MB
           @skip_idle && g.none? { |n| NodeTraits.blocks_sleep?(n) } && g.any? { |n| n.is_a?(Notes::Node) && n.notes.equal?(@notes[idx]) } &&
             !lane_fusable?(graphs, sets, idx)
         }
+        @skippable_base = Synth.prefer_lane_groups(@skippable_base, graphs, @parts)
 
         # The lane's own nodes with an idle check (NodeTraits), asked where
         # the lane could fall asleep (nodes shared with other lanes answer
@@ -751,6 +752,25 @@ module MB
         @lane_sets = sets
         @boundary_cache = Array.new(@lanes.length)
         @clock_node = @boundary.map { |own, _, _| own.find { |n| n.is_a?(Notes::Node) } }
+      end
+
+      # The lanes that may sleep (+base+, from #setup_idle_skipping), unless
+      # only the idle checks of long-memory nodes (delays, multitaps, delay
+      # networks, feedback loops: NodeTraits) let them: when no lane could
+      # sleep without those checks and the synth has no sub-lanes, its
+      # lanes could form plan lane groups (which compute every lane every
+      # buffer) as before the checks, so none sleeps.  The maintainer's
+      # "With the rule" (delay-sleep-1, 2026-10-30): a dense pluck synth's
+      # lane groups cost 33% of realtime at 128-sample buffers, sleeping
+      # instead of grouping 47%.  Decided from node types only (never from
+      # plan settings or installed regions), so plans never change which
+      # lanes sleep.  Synths with sub-lanes, or with some lane that sleeps
+      # anyway, form no lane groups, so their lanes holding delays sleep.
+      def self.prefer_lane_groups(base, graphs, parts)
+        return base unless base.any? && parts.all?(&:empty?)
+
+        without = base.each_with_index.map { |s, idx| s && graphs[idx].none? { |n| NodeTraits.of(n).memory == :long } }
+        without.none? ? without : base
       end
 
       # Readies lane graph +outs+ (lane Notes +v+) for idle skipping while
