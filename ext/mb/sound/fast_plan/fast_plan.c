@@ -57,6 +57,7 @@
 #include "mb_envelope.h"
 #include "mb_smooth.h"
 #include "mb_vec_exp2.h"
+#include "mb_jump_step.h"
 
 #include "plan_filters.h"
 
@@ -116,8 +117,8 @@ enum { TONE_NAIVE = 0, TONE_SYNTH = 1, TONE_WAVETABLE = 2 };
 
 typedef struct { float r, i; } mb_cf;
 
-static ID id_phase, id_blep, id_noise, id_jump_residual, id_last_freq, id_last_width;
-static ID id_plan_reset, id_plan_residual_used, id_note, id_frequency, id_state, id_ring1, id_ring2, id_table, id_plan_wavetable;
+static ID id_phase, id_blep, id_noise, id_jump_buffer, id_jump_left, id_last_freq, id_last_width;
+static ID id_plan_reset, id_note, id_frequency, id_state, id_ring1, id_ring2, id_table, id_plan_wavetable;
 static ID id_held, id_prev, id_plan_draw;
 
 // The register file of one call.
@@ -393,31 +394,28 @@ static void synth_segment(enum bl_wave wt, float *out, size_t length,
 	}
 }
 
-// Adds a queued band-limited phase jump step (State#jump_residual, a
-// DFloat) to +seg+, as Tone#add_jump_residual does, and lets the tone keep
-// the rest of it.
+// Adds a queued band-limited phase jump step (State's step buffer, a
+// DFloat with @jump_left samples pending; see mb_jump_step.h) to +seg+, as
+// Tone#add_jump_residual does, and drops what it added from the buffer.
 static void add_residual(VALUE tone, VALUE state, float *seg, size_t length, double g)
 {
-	VALUE res = rb_ivar_get(state, id_jump_residual);
-	if (NIL_P(res)) {
+	VALUE left_v = rb_ivar_get(state, id_jump_left);
+	long left = NIL_P(left_v) ? 0 : NUM2LONG(left_v);
+	if (left <= 0) {
 		return;
 	}
 
-	if (CLASS_OF(res) != numo_cDFloat || RNARRAY_NDIM(res) != 1 || !RTEST(nary_check_contiguous(res))) {
+	VALUE res = rb_ivar_get(state, id_jump_buffer);
+	if (CLASS_OF(res) != numo_cDFloat || RNARRAY_NDIM(res) != 1 || !RTEST(nary_check_contiguous(res)) ||
+			(size_t)left > RNARRAY_SHAPE(res)[0]) {
 		rb_raise(rb_eTypeError, "A planned tone's jump residual must be a contiguous DFloat");
 	}
 
-	size_t rl = RNARRAY_SHAPE(res)[0];
-	size_t m = length < rl ? length : rl;
-	const double *r = (const double *)(nary_get_pointer_for_read(res) + nary_get_offset(res));
-	for (size_t i = 0; i < m; i++) {
-		double s = r[i] * g;
-		double v = (double)seg[i] + s;
-		seg[i] = (float)v;
-	}
+	double *r = (double *)(nary_get_pointer_for_write(res) + nary_get_offset(res));
+	size_t m = mb_jump_add_float(seg, length, r, (size_t)left, g);
+	size_t rest = mb_jump_shift(r, (size_t)left, m);
+	rb_ivar_set(state, id_jump_left, SIZET2NUM(rest));
 	RB_GC_GUARD(res);
-
-	rb_funcall(tone, id_plan_residual_used, 1, SIZET2NUM(m));
 }
 
 /*
@@ -1891,11 +1889,11 @@ void Init_fast_plan(void)
 	id_phase = rb_intern("@phase");
 	id_blep = rb_intern("@blep");
 	id_noise = rb_intern("@noise");
-	id_jump_residual = rb_intern("@jump_residual");
+	id_jump_buffer = rb_intern("@jump_buffer");
+	id_jump_left = rb_intern("@jump_left");
 	id_last_freq = rb_intern("@last_freq");
 	id_last_width = rb_intern("@last_width");
 	id_plan_reset = rb_intern("plan_reset");
-	id_plan_residual_used = rb_intern("plan_residual_used");
 	id_note = rb_intern("note");
 	id_frequency = rb_intern("frequency");
 	id_state = rb_intern("@state");

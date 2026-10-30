@@ -52,6 +52,7 @@
 #include "mb_ext_helpers.h"
 #include "mb_bl_osc.h"
 #include "mb_phase.h"
+#include "mb_jump_step.h"
 
 static ID sym_ramp, sym_square, sym_triangle, sym_sine, sym_parabola;
 
@@ -1427,6 +1428,96 @@ static VALUE ruby_sync_running_phases(int argc, VALUE *argv, VALUE self)
 	return reuse ? out : rb_assoc_new(phases, incs);
 }
 
+// Checks that +v+ is a contiguous 1D DFloat, returning its data and length.
+static double *jump_dfloat(VALUE v, const char *name, size_t *length)
+{
+	if (CLASS_OF(v) != numo_cDFloat || RNARRAY_NDIM(v) != 1 || !RTEST(nary_check_contiguous(v))) {
+		rb_raise(rb_eArgError, "%s must be a contiguous 1D DFloat", name);
+	}
+	*length = RNARRAY_SHAPE(v)[0];
+	return (double *)(nary_get_pointer_for_read(v) + nary_get_offset(v));
+}
+
+// The pending count +left+ of a step buffer of +capacity+ samples.
+static size_t jump_left(VALUE left, size_t capacity)
+{
+	long l = NUM2LONG(left);
+	if (l < 0 || (size_t)l > capacity) {
+		rb_raise(rb_eArgError, "Pending count %ld is outside 0..%zu", l, capacity);
+	}
+	return (size_t)l;
+}
+
+/*
+ * call-seq:
+ *   MB::Sound::FastSynth.jump_queue(buffer, left, blep, blamp, area, dv, ds, k, c) -> Integer
+ *
+ * Queues a band-limited phase jump step into +buffer+ (a DFloat with
+ * +left+ samples pending) in place: the step's minBLEP/minBLAMP residual
+ * (+blep+ * +dv+ + +blamp+ * +ds+) with the area correction +area+ (scaled
+ * so the step's sum is +c+), times +k+ unless +k+ is nil, plus the pending
+ * samples.  Returns the new pending count.  The Ruby reference is
+ * Tone::State#queue_jump_ruby (see mb_jump_step.h).
+ */
+static VALUE ruby_jump_queue(VALUE self, VALUE buffer, VALUE left, VALUE blep, VALUE blamp, VALUE area,
+		VALUE dv, VALUE ds, VALUE k, VALUE c)
+{
+	size_t cap, n, nb, na;
+	double *buf = jump_dfloat(buffer, "Step buffer", &cap);
+	const double *bl = jump_dfloat(blep, "minBLEP table", &n);
+	const double *bm = jump_dfloat(blamp, "minBLAMP table", &nb);
+	const double *ar = jump_dfloat(area, "Area table", &na);
+	if (nb != n || na > n || n > MB_JUMP_MAX_TAPS || cap < n) {
+		rb_raise(rb_eArgError, "Step tables must be equal (at most %d taps), with the area table and buffer fitting", MB_JUMP_MAX_TAPS);
+	}
+	rb_check_frozen(buffer);
+	size_t l = jump_left(left, cap);
+
+	size_t out = mb_jump_queue(buf, l, bl, bm, n, ar, na, NUM2DBL(dv), NUM2DBL(ds), !NIL_P(k), NIL_P(k) ? 1.0 : NUM2DBL(k), NUM2DBL(c));
+	RB_GC_GUARD(buffer);
+	RB_GC_GUARD(blep);
+	RB_GC_GUARD(blamp);
+	RB_GC_GUARD(area);
+	return SIZET2NUM(out);
+}
+
+/*
+ * call-seq:
+ *   MB::Sound::FastSynth.jump_add(out, buffer, left, gain) -> Integer or nil
+ *
+ * Adds the first pending samples of step +buffer+ (+left+ of them) times
+ * +gain+ to +out+ (a contiguous 1D SFloat or DFloat) and drops them from
+ * +buffer+ in place.  Returns the new pending count, or nil (adding
+ * nothing) for other output types.  The Ruby reference is
+ * Tone::State#add_jump_ruby (see mb_jump_step.h).
+ */
+static VALUE ruby_jump_add(VALUE self, VALUE out, VALUE buffer, VALUE left, VALUE gain)
+{
+	size_t cap;
+	double *buf = jump_dfloat(buffer, "Step buffer", &cap);
+	size_t l = jump_left(left, cap);
+	if (RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
+		return Qnil;
+	}
+
+	rb_check_frozen(buffer);
+	double g = NUM2DBL(gain);
+	size_t length = RNARRAY_SHAPE(out)[0];
+	size_t m;
+	if (CLASS_OF(out) == numo_cSFloat) {
+		m = mb_jump_add_float(mb_sfloat_ptr(out), length, buf, l, g);
+	} else if (CLASS_OF(out) == numo_cDFloat) {
+		m = mb_jump_add_double((double *)(nary_get_pointer_for_write(out) + nary_get_offset(out)), length, buf, l, g);
+	} else {
+		return Qnil;
+	}
+
+	size_t rest = mb_jump_shift(buf, l, m);
+	RB_GC_GUARD(out);
+	RB_GC_GUARD(buffer);
+	return SIZET2NUM(rest);
+}
+
 void Init_fast_synth(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -1448,4 +1539,6 @@ void Init_fast_synth(void)
 	rb_define_module_function(fast_synth, "feedback_sine", ruby_feedback_sine, 11);
 	rb_define_module_function(fast_synth, "sync_pulse_edges", ruby_sync_pulse_edges, -1);
 	rb_define_module_function(fast_synth, "sync_running_phases", ruby_sync_running_phases, -1);
+	rb_define_module_function(fast_synth, "jump_queue", ruby_jump_queue, 9);
+	rb_define_module_function(fast_synth, "jump_add", ruby_jump_add, 4);
 }

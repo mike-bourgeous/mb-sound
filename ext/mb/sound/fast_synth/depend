@@ -1,1 +1,1 @@
-fast_synth.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_bl_osc.h $(srcdir)/../include/mb_phase.h
+fast_synth.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_bl_osc.h $(srcdir)/../include/mb_phase.h $(srcdir)/../include/mb_jump_step.h

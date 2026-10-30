@@ -38,7 +38,12 @@ module MB
       #
       # The other fields:
       # - +jump_residual+: the rest of a band-limited phase jump's step still
-      #   to be added to coming samples (a DFloat), or nil.
+      #   to be added to coming samples (a DFloat), or nil.  Kept in a
+      #   preallocated step buffer (#jump_buffer, BandLimit::SYNC_TAPS
+      #   samples, made at the first jump) with a count of pending samples
+      #   (#jump_left), so jumps allocate nothing (#queue_jump and
+      #   #add_jump in C: FastSynth.jump_queue/jump_add, mb_jump_step.h;
+      #   omnibus18).  #jump_residual reads the pending samples as a view.
       # - +last_freq+, +last_width+, +last_pivot+: frequency (Hz), warp
       #   width, and warp pivot (from a pivot node; nil for a constant) of
       #   the last sample played, where a jump between buffers is measured.
@@ -59,8 +64,14 @@ module MB
           :jump_residual, :last_freq, :last_width, :last_pivot, :seed, :draws, :reset_ended, :table, :feedback,
         ].freeze
 
-        attr_accessor(*(FIELDS - [:seed]))
+        attr_accessor(*(FIELDS - [:seed, :jump_residual]))
         attr_reader :seed # (#seed= below)
+
+        # The preallocated step buffer of the pending jump residual (a
+        # DFloat; a DComplex for complex wavetables), or nil before the
+        # first jump, and the number of its samples still pending (see
+        # #jump_residual).
+        attr_reader :jump_buffer, :jump_left
 
         # Scratch for the current frame's ports: [phase, frequency,
         # segments] (see the class description).
@@ -79,7 +90,8 @@ module MB
           @sync_ring = Numo::DFloat.zeros(BandLimit::SYNC_TAPS)
           @pulses = [0.0, 0.0, 0]
           @noise = nil
-          @jump_residual = nil
+          @jump_buffer = nil
+          @jump_left = 0
           @last_freq = 0.0
           @last_width = nil
           @last_pivot = nil
@@ -91,7 +103,9 @@ module MB
           @feedback = [0.0, 0.0, 0.0]
 
           fields.each do |k, v|
-            v = Numo::DFloat.cast(v) if (k == :sync_ring || k == :jump_residual) && v.is_a?(Array)
+            next self.jump_residual = v if k == :jump_residual
+
+            v = Numo::DFloat.cast(v) if k == :sync_ring && v.is_a?(Array)
             v = v.dup if v.is_a?(Array)
             instance_variable_set(:"@#{k}", v)
           end
@@ -128,6 +142,88 @@ module MB
           @rng.rand
         end
 
+        # The pending samples of a band-limited phase jump's step (a view
+        # of #jump_buffer), or nil if none are pending.
+        def jump_residual
+          @jump_left > 0 ? @jump_buffer[0...@jump_left] : nil
+        end
+
+        # True if samples of a phase jump's step are pending (the
+        # allocation-free test of #jump_residual).
+        def jump_pending?
+          @jump_left > 0
+        end
+
+        # Sets the pending step samples (a DFloat or DComplex, an Array of
+        # numbers, or nil for none), copying them into the step buffer.
+        def jump_residual=(residual)
+          residual = Numo::DFloat.cast(residual) if residual.is_a?(Array)
+          if residual.nil? || residual.empty?
+            @jump_buffer&.fill(0)
+            @jump_left = 0
+            return
+          end
+
+          n = residual.length
+          if @jump_buffer.nil? || @jump_buffer.class != residual.class || @jump_buffer.length < n
+            @jump_buffer = residual.class.zeros([n, BandLimit::SYNC_TAPS].max)
+          else
+            @jump_buffer.fill(0)
+          end
+          @jump_buffer[0...n] = residual
+          @jump_left = n
+        end
+
+        # Queues a band-limited phase jump step (Tone.jump_residual: value
+        # change +dv+, slope change per sample +ds+) times +k+ (unless nil)
+        # on top of the pending samples, in place in C for real steps (see
+        # FastSynth.jump_queue), else as #queue_jump_ruby.  +real+ keeps
+        # only the real part of a complex step (a complex table's jump into
+        # a real one).
+        def queue_jump(dv, ds, k = nil, real: false)
+          return queue_jump_ruby(dv, ds, k, real: real) unless dv.is_a?(Float) && ds.is_a?(Float) && (@jump_buffer.nil? || @jump_buffer.class == Numo::DFloat)
+
+          blep, blamp, area = Tone.jump_tables
+          @jump_buffer ||= Numo::DFloat.zeros(BandLimit::SYNC_TAPS)
+          c = Tone::JUMP_STEP_AREA * dv + Tone::JUMP_KINK_AREA * ds
+          @jump_left = FastSynth.jump_queue(@jump_buffer, @jump_left, blep, blamp, area, dv, ds, k, c)
+        end
+
+        # The Ruby reference of #queue_jump (Numo, as Tone#phase_jump and
+        # #table_jump did before omnibus18), also its path for complex
+        # steps.
+        def queue_jump_ruby(dv, ds, k = nil, real: false)
+          residual = Tone.jump_residual(dv, ds)
+          residual *= k if k
+          residual = residual.real if real && residual.is_a?(Numo::DComplex)
+          old = jump_residual
+          self.jump_residual = old ? residual + Tone.pad_residual(old, residual.length) : residual
+        end
+
+        # Adds the pending step samples to +buf+ (times +gain+) and drops
+        # what it added: in C for SFloat and DFloat buffers
+        # (FastSynth.jump_add), else as #add_jump_ruby.
+        def add_jump(buf, gain)
+          return unless @jump_left > 0
+
+          if @jump_buffer.class == Numo::DFloat
+            left = FastSynth.jump_add(buf, @jump_buffer, @jump_left, gain)
+            return @jump_left = left if left
+          end
+          add_jump_ruby(buf, gain)
+        end
+
+        # The Ruby reference of #add_jump (Numo, as Tone#add_jump_residual
+        # did before omnibus18), also its path for other types.
+        def add_jump_ruby(buf, gain)
+          residual = jump_residual
+          return unless residual
+
+          n = [buf.length, residual.length].min
+          buf[0...n] += residual[0...n] * gain
+          self.jump_residual = n < residual.length ? residual[n..].dup : nil
+        end
+
         # Forgets band-limiting history after a phase jump (the kernels
         # start fresh from the new phase).
         def unprime(sync: false)
@@ -151,7 +247,7 @@ module MB
             sync_ring: @sync_ring.to_a,
             pulses: @pulses.dup,
             noise: @noise&.dup,
-            jump_residual: @jump_residual&.to_a,
+            jump_residual: jump_residual&.to_a,
             last_freq: @last_freq,
             last_width: @last_width,
             last_pivot: @last_pivot,
