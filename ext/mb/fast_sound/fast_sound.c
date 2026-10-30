@@ -20,6 +20,7 @@
 #include "mb_vec_sine.h"
 #include "mb_vec_sine_osc.h"
 #include "mb_vec_exp2.h"
+#include "complex_synthesis.h"
 
 // MB::Sound.precision (FastSound.fast_math=): true (:fast, the default)
 // gives naive real sines without noise mb_vec_sine_osc.h's float
@@ -28,7 +29,6 @@
 // false (:exact) uses libm, as plans then do.
 static _Bool fast_math = 1;
 
-static ID sym_array_lookup;
 
 static ID sym_osc_sine;
 static ID sym_osc_complex_sine;
@@ -47,20 +47,6 @@ static double wrap(double x, double y)
 {
 	// this could instead be fmod(x, y) + y if x is negative
 	return x - y * floor(x / y);
-}
-
-// Wraps X to be between 0 and Y
-static ssize_t wrapsize(ssize_t x, ssize_t y)
-{
-	if (x >= 0 && x < y) {
-		return x;
-	}
-
-	if (x < 0) {
-		return x % y + y;
-	}
-
-	return x % y;
 }
 
 static double complex biquad_complex(
@@ -94,44 +80,6 @@ static double smoothstep(double x)
 static double smootherstep(double x)
 {
 	return 6*x*x*x*x*x - 15*x*x*x*x + 10*x*x*x;
-}
-
-static double adsr(
-		double time,
-		double attack,
-		double decay,
-		double sustain,
-		double release,
-		double peak,
-		_Bool on
-		)
-{
-	double release_start = attack + decay;
-	double total = attack + decay + release;
-
-	double value;
-
-	if (on) {
-		if (time < 0) {
-			value = 0.0;
-		} else if (time < attack) {
-			value = smoothstep(time / attack);
-		} else if (time < release_start) {
-			value = 1.0 - smoothstep((time - attack) / decay) * (1.0 - sustain);
-		} else {
-			value = sustain;
-		}
-	} else {
-		if (time < release_start) {
-			value = sustain;
-		} else if (time < total) {
-			value = (1.0 - smoothstep((time - release_start) / release)) * sustain;
-		} else {
-			value = 0.0;
-		}
-	}
-
-	return value * peak;
 }
 
 static void ensure_inplace_sfloat(VALUE *narray, _Bool *was_inplace)
@@ -252,95 +200,9 @@ static VALUE complex_to_num(double complex z)
 	return rb_dbl_complex_new(creal(z), cimag(z));
 }
 
-static VALUE ruby_csc_int(VALUE self, VALUE z)
-{
-	return complex_to_num(csc_int(num_to_complex(z)));
-}
-
-static VALUE ruby_csc_int_int(VALUE self, VALUE z)
-{
-	return complex_to_num(csc_int_int(num_to_complex(z)));
-}
-
-static VALUE ruby_cot_int(VALUE self, VALUE z)
-{
-	return complex_to_num(cot_int(num_to_complex(z)));
-}
-
 static VALUE ruby_smoothstep(VALUE self, VALUE x)
 {
 	return rb_float_new(smoothstep(NUM2DBL(x)));
-}
-
-static VALUE ruby_smootherstep(VALUE self, VALUE x)
-{
-	return rb_float_new(smootherstep(NUM2DBL(x)));
-}
-
-static VALUE ruby_fmod(VALUE self, VALUE x, VALUE y)
-{
-	return rb_float_new(fmod(NUM2DBL(x), NUM2DBL(y)));
-}
-
-static VALUE ruby_remainder(VALUE self, VALUE x, VALUE y)
-{
-	return rb_float_new(remainder(NUM2DBL(x), NUM2DBL(y)));
-}
-
-static VALUE ruby_wrap(VALUE self, VALUE x, VALUE y)
-{
-	return rb_float_new(wrap(NUM2DBL(x), NUM2DBL(y)));
-}
-
-static VALUE ruby_wrapsize(VALUE self, VALUE x, VALUE y)
-{
-	return SSIZET2NUM(wrapsize(NUM2SSIZET(x), NUM2SSIZET(y)));
-}
-
-static VALUE ruby_idiv(VALUE self, VALUE x, VALUE y)
-{
-	return SSIZET2NUM(NUM2SSIZET(x) / NUM2SSIZET(y));
-}
-
-static VALUE ruby_fdiv(VALUE self, VALUE x, VALUE y)
-{
-	return rb_float_new(NUM2DBL(x) / NUM2DBL(y));
-}
-
-static VALUE ruby_imod(VALUE self, VALUE x, VALUE y)
-{
-	return SSIZET2NUM(NUM2SSIZET(x) % NUM2SSIZET(y));
-}
-
-static VALUE ruby_f64to32(VALUE self, VALUE x)
-{
-	volatile float y = NUM2DBL(x);
-	return rb_float_new(y);
-}
-
-// Splits complex into real and imaginary
-static VALUE ruby_complex(VALUE self, VALUE z)
-{
-	double complex c = num_to_complex(z);
-
-	return rb_ary_new_from_args(2, rb_float_new(creal(c)), rb_float_new(cimag(c)));
-}
-
-static VALUE ruby_narray_to_array(VALUE self, VALUE narray)
-{
-	narray = rb_funcall(numo_cDComplex, rb_intern("cast"), 1, narray);
-	size_t length = RNARRAY_SHAPE(narray)[0];
-	VALUE out = rb_ary_new_capa(length);
-
-	rb_funcall(narray, rb_intern("debug_info"), 0);
-	rb_warn("Size is %zu, ndim is %d, length is %zu\n", RNARRAY_SIZE(narray), RNARRAY_NDIM(narray), length);
-
-	double complex *ptr = (double complex *)(nary_get_pointer_for_read(narray) + nary_get_offset(narray));
-	for(size_t i = 0; i < length; i++) {
-		rb_ary_store(out, i, complex_to_num(ptr[i]));
-	}
-
-	return out;
 }
 
 static VALUE fill_narray_with_function(VALUE narray, double (*func)(double))
@@ -1133,96 +995,6 @@ static VALUE ruby_dynamic_biquad(VALUE self, VALUE samples, VALUE cutoffs, VALUE
 	return samples;
 }
 
-VALUE ruby_adsr(VALUE self, VALUE time, VALUE attack, VALUE decay, VALUE sustain, VALUE release, VALUE peak, VALUE on)
-{
-	return rb_float_new(adsr(
-				NUM2DBL(time),
-				NUM2DBL(attack),
-				NUM2DBL(decay),
-				NUM2DBL(sustain),
-				NUM2DBL(release),
-				NUM2DBL(peak),
-				RTEST(on)
-				));
-}
-
-// Extracted loop from ruby_adsr_narray for both float and double
-#define adsr_loop do { \
-	for(size_t i = 0; i < length; i++) { \
-		double t = current_frame / sample_rate; \
-		data[i] = adsr(t, a, d, s, r, p, o); \
-		current_frame += 1; \
-		\
-		if (o && ar >= 0 && current_frame >= auto_release_start) { \
-			/* auto-release (basically what the Ruby release function does) */ \
-			o = 0; \
-			current_frame = release_start; \
-			p = 1.0; \
-			s = (float)data[i]; \
-		} \
-		if (ar >= 0 && current_frame >= release_end && data[i] == 0) { \
-			/* end of release */ \
-			length = i + 1; \
-			break; \
-		} \
-	} \
-} while(0)
-
-VALUE ruby_adsr_narray(VALUE self, VALUE narray, VALUE frame, VALUE rate, VALUE attack, VALUE decay, VALUE sustain, VALUE release, VALUE peak, VALUE on, VALUE auto_release, VALUE filter_ringdown)
-{
-	if (CLASS_OF(narray) != numo_cDFloat && CLASS_OF(narray) != numo_cSFloat) {
-		narray = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, narray);
-	}
-
-	int dim = RNARRAY_NDIM(narray);
-	if (dim != 1) {
-		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
-	}
-
-	_Bool was_inplace = !!TEST_INPLACE(narray);
-
-	if (!RTEST(nary_check_contiguous(narray)) || !was_inplace) {
-		narray = nary_dup(narray);
-		SET_INPLACE(narray);
-		was_inplace = 0;
-	}
-
-	size_t length = RNARRAY_SHAPE(narray)[0];
-
-	ssize_t current_frame = NUM2SSIZET(frame);
-	double sample_rate = NUM2DBL(rate);
-
-	// ADSR
-	double a = NUM2DBL(attack);
-	double d = NUM2DBL(decay);
-	double s = NUM2DBL(sustain);
-	double r = NUM2DBL(release);
-
-	// Peak, on, auto-release, filter ringdown
-	double p = NUM2DBL(peak);
-	_Bool o = RTEST(on);
-	double ar = RTEST(auto_release) ? NUM2DBL(auto_release) : -1;
-	double fr = NUM2DBL(filter_ringdown);
-
-	ssize_t auto_release_start = lrint(ar * sample_rate);
-	ssize_t release_start = lrint((a + d) * sample_rate);
-	ssize_t release_end = lrint((a + d + r + fr) * sample_rate);
-
-	if (CLASS_OF(narray) == numo_cSFloat) {
-		float *data = (float *)(nary_get_pointer_for_write(narray) + nary_get_offset(narray));
-		adsr_loop;
-	} else if (CLASS_OF(narray) == numo_cDFloat) {
-		double *data = (double *)(nary_get_pointer_for_write(narray) + nary_get_offset(narray));
-		adsr_loop;
-	}
-
-	RB_GC_GUARD(narray);
-
-	VALUE narray_subset = rb_funcall(narray, sym_array_lookup, 1, rb_range_new(INT2FIX(0), SSIZET2NUM(length), 1));
-
-	return rb_ary_new_from_args(6, narray_subset, SSIZET2NUM(current_frame), DBL2NUM(current_frame / sample_rate), o ? Qtrue : Qfalse, DBL2NUM(p), DBL2NUM(s));
-}
-
 // C conversion from MIDI note number to frequency.
 static double num2freq(double number, double tune_note, double tune_freq)
 {
@@ -1392,8 +1164,6 @@ void Init_fast_sound(void)
 	VALUE mb = rb_define_module("MB");
 	VALUE fast_sound = rb_define_module_under(mb, "FastSound");
 
-	sym_array_lookup = rb_intern("[]");
-
 	sym_osc_sine = rb_intern("sine");
 	sym_osc_complex_sine = rb_intern("complex_sine");
 	sym_osc_triangle = rb_intern("triangle");
@@ -1421,17 +1191,7 @@ void Init_fast_sound(void)
 	// Mixing functions
 	rb_define_module_function(fast_sound, "matrix_mix", ruby_matrix_mix, 3);
 
-	// Envelope functions
-	rb_define_module_function(fast_sound, "adsr", ruby_adsr, 7);
-	rb_define_module_function(fast_sound, "adsr_narray", ruby_adsr_narray, 11);
-
-	// Faster implementations of functions from mb-math
-	rb_define_module_function(fast_sound, "cot_int", ruby_cot_int, 1);
-	rb_define_module_function(fast_sound, "csc_int", ruby_csc_int, 1);
-	rb_define_module_function(fast_sound, "csc_int_int", ruby_csc_int_int, 1);
-
 	rb_define_module_function(fast_sound, "smoothstep", ruby_smoothstep, 1);
-	rb_define_module_function(fast_sound, "smootherstep", ruby_smootherstep, 1);
 
 	// Fills a given NArray with a smoothstep curve from 0 to 1
 	rb_define_module_function(fast_sound, "smoothstep_buf", ruby_smoothstep_buf, 1);
@@ -1442,24 +1202,11 @@ void Init_fast_sound(void)
 	rb_define_module_function(fast_sound, "narray_log2", ruby_narray_log2, 1);
 	rb_define_module_function(fast_sound, "narray_log10", ruby_narray_log10, 1);
 
-	// Functions used when comparing C and Ruby's behavior for integer
-	// division (C rounds to zero, Ruby rounds downward) and modulus (-1 %
-	// 3 in Ruby is 2, in C it's -1)
-	rb_define_module_function(fast_sound, "fmod", ruby_fmod, 2);
-	rb_define_module_function(fast_sound, "remainder", ruby_remainder, 2);
-	rb_define_module_function(fast_sound, "wrap", ruby_wrap, 2);
-	rb_define_module_function(fast_sound, "wrapsize", ruby_wrapsize, 2);
-	rb_define_module_function(fast_sound, "idiv", ruby_idiv, 2);
-	rb_define_module_function(fast_sound, "fdiv", ruby_fdiv, 2);
-	rb_define_module_function(fast_sound, "imod", ruby_imod, 2);
-	rb_define_module_function(fast_sound, "f64to32", ruby_f64to32, 1);
-
-	// Functions to test conversion to and from Ruby complex datatypes
-	rb_define_module_function(fast_sound, "complex", ruby_complex, 1);
-	rb_define_module_function(fast_sound, "narray_to_array", ruby_narray_to_array, 1);
-
 	// Functions for converting between frequency and note number
 	rb_define_module_function(fast_sound, "number_to_freq", ruby_number_to_freq, 3);
 	rb_define_module_function(fast_sound, "fast_math=", ruby_set_fast_math, 1);
 	rb_define_module_function(fast_sound, "fast_math?", ruby_fast_math_p, 0);
+
+	// The complex synthesis functions as Ruby methods (complex_synthesis.c)
+	mb_complex_synthesis_init(fast_sound);
 }
