@@ -651,6 +651,22 @@ module MB
           }
         end
 
+        # The full name of the existing knob that short name +name+ stands for
+        # (Session::Name.full_name: :"bass/resonance" for :"bass/reso"), or
+        # nil.  Notes the first use of each short name (knobs are named in
+        # full; console commands resolve the name before journaling it, so
+        # listings, documents, and takes show the full name).
+        def full_knob_name(name)
+          full = Name.full_name(name) or return nil
+          return nil unless @knob_lock.synchronize { @knobs.key?(full) }
+          @alias_noted ||= {}
+          unless @alias_noted[name]
+            @alias_noted[name] = true
+            warn "knob #{name.inspect} is #{full.inspect} (knobs take their params' full names)"
+          end
+          full
+        end
+
         private
 
         def init_knobs
@@ -664,21 +680,6 @@ module MB
           @committing_gesture = nil
           @alias_noted = nil
           @clamp_warned = nil
-        end
-
-        # The full name of existing knob that short name +name+ stands for
-        # (Session::Name.full_name: :"bass/resonance" for :"bass/reso"), or
-        # nil.  Notes the first use of each short name (knobs are named in
-        # full; listings, documents, and takes show the full name).
-        def full_knob_name(name)
-          full = Name.full_name(name) or return nil
-          return nil unless @knob_lock.synchronize { @knobs.key?(full) }
-          @alias_noted ||= {}
-          unless @alias_noted[name]
-            @alias_noted[name] = true
-            warn "knob #{name.inspect} is #{full.inspect} (knobs take their params' full names)"
-          end
-          full
         end
 
         def knob_suggestion(name, define: false)

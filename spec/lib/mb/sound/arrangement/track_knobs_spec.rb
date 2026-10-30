@@ -134,8 +134,14 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
     }.to output(/knob :"a\/reso" is :"a\/resonance"/).to_stderr
     s.process_buffer
     expect(s.knobs[:"a/resonance"].value).to eq(0.6)
-    # (noted once per name)
-    expect { MB::Sound::Session.with_context(session: s) { MB::Sound.turn(:"a/reso", 0.5) } }.not_to output.to_stderr
+    # (noted once per name; the journal, takes, and scenes keep the full name)
+    entry = nil
+    expect { MB::Sound::Session.with_context(session: s) { entry = MB::Sound.turn(:"a/reso", 0.5) } }.not_to output.to_stderr
+    expect(entry.to_s).to include('a/resonance')
+    MB::Sound::Session.with_context(session: s) { MB::Sound.scene(:soft, "a/reso": 0.3) }
+    expect(s.arrangement.scenes[:soft].values.keys).to eq([:"a/resonance"])
+    MB::Sound::Session.with_context(session: s) { MB::Sound.section(:verse, 4, "a/reso": 0.4) }
+    expect(s.arrangement.sections[:verse].knobs.keys).to eq([:"a/resonance"])
     expect(s.knob!(:"a/reso")).to equal(s.knobs[:"a/resonance"])
     expect(s.knob(:"a/reso")).to equal(s.knobs[:"a/resonance"])
   end

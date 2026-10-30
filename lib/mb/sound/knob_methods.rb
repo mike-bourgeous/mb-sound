@@ -140,9 +140,12 @@ module MB
 
       private
 
-      # A knob name given to a command: a Symbol, or a knob.
+      # A knob name given to a command: a Symbol (a short alias of a knob's
+      # full name resolves to it; Session::Knobs#full_knob_name), or a knob.
       def knob_name(name)
-        ValueSource.knob_of(name)&.name || name
+        k = ValueSource.knob_of(name)
+        return k.name if k
+        (name.is_a?(Symbol) && Session.current.full_knob_name(name)) || name
       end
 
       # Points knobs at the session's MIDI input (see

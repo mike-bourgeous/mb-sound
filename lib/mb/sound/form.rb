@@ -64,10 +64,14 @@ module MB
       # (keys that are knobs of the current Session).  Raises for anything
       # else, with suggestions.
       def self.section_options(name, options)
+        # (a knob's short name, :"bass/reso", is its full name here:
+        # Session::Knobs#full_knob_name)
+        session = Session.current
+        options = options.transform_keys { |k| (k.is_a?(Symbol) && !SECTION_OPTIONS.include?(k) && session.full_knob_name(k)) || k }
         unknown = options.keys - SECTION_OPTIONS
         # (knob names, and names standing for a control: a trigger track's
         # level, `drop 8, pump: 0`; Session::Knobs#control_name)
-        knob_names = (Session.current.control_names + Arrangement::KEY_VALUES + Arrangement::TEMPO_VALUES).uniq
+        knob_names = (session.control_names + Arrangement::KEY_VALUES + Arrangement::TEMPO_VALUES).uniq
         knobs = options.slice(*(unknown & knob_names))
         unknown -= knob_names
         unless unknown.empty?

@@ -435,6 +435,9 @@ module MB
         raise ArgumentError, "Scene names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
         raise ArgumentError, "others: must be :stop (or :ring), :cut, or :keep (got #{others.inspect})" unless [*STOP_MODES, :keep].include?(others)
         check_quant(q) if q
+        # (a knob's short name, :"bass/reso", is the knob's full name in the
+        # scene: Session::Knobs#full_knob_name)
+        values = values.transform_keys { |k| (k.is_a?(Symbol) && @session.full_knob_name(k)) || k }
 
         values.each do |k, v|
           if KEY_VALUES.include?(k)
