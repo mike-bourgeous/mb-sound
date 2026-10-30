@@ -98,8 +98,14 @@ module MB
             raise ArgumentError, "smooth: must be 0 or more seconds (got #{smooth})" unless smooth >= 0
 
             unit = param.unit || (MB::Sound::Param::TYPE_UNITS[param.type] if param.type != :number)
+            @scale = MB::Sound::Param::Scale.new(lo: lo, hi: hi, curve: c)
             super(name: name, default: default, range: (lo..hi).freeze, curve: c, unit: unit&.to_s&.freeze, cc: param.cc, takeover: takeover, smooth: smooth, param: param)
           end
+
+          # The knob's MB::Sound::Param::Scale (#range along #curve): the one
+          # range mapping its positions, ramps, crossfades, controller moves,
+          # and #mod read.
+          attr_reader :scale
 
           # True when the declaration was a typed value (2400.hz rather
           # than 2400.0): #to_ruby prints it typed.
@@ -130,31 +136,16 @@ module MB
             Spec.new(name: name, takeover: takeover, smooth: smooth, **fields.merge(decl))
           end
 
-          # The 0..1 position of +value+ in the range (beyond 0..1 outside
-          # it).
+          # The 0..1 position of +value+ (a number or a Numo::DFloat) in the
+          # range (beyond 0..1 outside it; Param::Scale.position).
           def position(value)
-            lo = range.begin
-            hi = range.end
-            curve == :exp ? Math.log(value.to_f / lo) / Math.log(hi / lo) : (value.to_f - lo) / (hi - lo)
+            MB::Sound::Param::Scale.position(value, range.begin, range.end, curve)
           end
 
-          # The 0..1 positions of a Numo::DFloat of +values+ (see
-          # #position).
-          def positions(values)
-            lo = range.begin
-            hi = range.end
-            curve == :exp ? Numo::NMath.log(values / lo) / Math.log(hi / lo) : (values - lo) / (hi - lo)
-          end
-
-          # The value at position +pos+ (a Float or a Numo::DFloat).
+          # The value at position +pos+ (a Float or a Numo::DFloat;
+          # Param::Scale.value).
           def value(pos)
-            lo = range.begin
-            hi = range.end
-            if curve == :exp
-              pos.is_a?(Numo::NArray) ? Numo::NMath.exp(pos * Math.log(hi / lo)) * lo : lo * Math.exp(pos * Math.log(hi / lo))
-            else
-              pos * (hi - lo) + lo
-            end
+            MB::Sound::Param::Scale.value(pos, range.begin, range.end, curve)
           end
 
           # A range holding +value+ (for the hint when a default or a turn
@@ -227,7 +218,9 @@ module MB
         # MB::Sound::Curve or nil for linear).  +from+ is the value on the
         # frame before +start+, filled in when the ramp begins (unless
         # given).
-        Ramp = Struct.new(:start, :length, :to, :curve, :from)
+        # +terms+ are the ramp's Param::Scale#ramp_terms, filled in when it
+        # first renders.
+        Ramp = Struct.new(:start, :length, :to, :curve, :from, :terms)
 
         # Follows +source+ (a sampler) from frame +start+ on.  +map+ (a
         # Proc given each buffer as a Numo::DFloat) turns its output into
@@ -474,6 +467,8 @@ module MB
         # e.g. when a knob is defined again.  +options+ as for Spec.
         def respec(**options)
           @spec = @spec.respec(**options)
+          # (ramps in progress move in the new scale)
+          [@segment, *@pending].each { |seg| seg.terms = nil if seg.is_a?(Ramp) }
           @cc = @spec.cc if options.key?(:cc)
           self
         end
@@ -496,15 +491,8 @@ module MB
           raise ArgumentError, "depth: must be a number (got #{depth.inspect})" unless depth.is_a?(Numeric) && depth.real?
 
           Recipe.call(self, :mod, [source], { depth: depth }, nil) { |_|
-            lo = range.begin
-            hi = range.end
-            base = get_sampler
-            moved = if @spec.curve == :exp
-                      base * (2.0 ** (source * (depth.to_f * Math.log2(hi / lo))))
-                    else
-                      base + source * (depth.to_f * (hi - lo))
-                    end
-            @spec.clamp? ? moved.aclip(lo, hi) : moved
+            moved = @spec.scale.shift(get_sampler, source, depth)
+            @spec.clamp? ? moved.aclip(range.begin, range.end) : moved
           }
         end
 
@@ -970,17 +958,14 @@ module MB
           t.inplace.clip(0.0, 1.0) if ends
           # (in place but on the last frames, which read t again below)
           c = seg.curve ? (ends ? seg.curve.map(t) : seg.curve.map!(t, ramp_scratch(n))) : t
+          k, a, b = ramp_terms(seg)
+          c = c.dup if c.equal?(t) && ends
+          c.inplace * k
           if @spec.curve == :exp
-            p0 = @spec.position(seg.from)
-            p1 = @spec.position(seg.to)
-            c = c.dup if c.equal?(t) && ends
-            c.inplace * (Math.log(@spec.range.end / @spec.range.begin) * (p1 - p0))
-            c.inplace + Math.log(@spec.range.begin) + p0 * Math.log(@spec.range.end / @spec.range.begin)
+            c.inplace + a + b
             v = Numo::NMath.exp(c.inplace)
           else
-            c = c.dup if c.equal?(t) && ends
-            c.inplace * (seg.to - seg.from)
-            v = c.inplace + seg.from
+            v = c.inplace + a
           end
           if ends
             done = t.ge(1.0)
@@ -997,14 +982,13 @@ module MB
           kind = cv.nil? || cv.equal?(MB::Sound::Curve.linear) ? 0 : (cv.equal?(MB::Sound::Curve.smoothstep) ? 1 : nil)
           return false unless kind
 
-          if @spec.curve == :exp
-            p0 = @spec.position(seg.from)
-            p1 = @spec.position(seg.to)
-            r = Math.log(@spec.range.end / @spec.range.begin)
-            !!MB::Sound::FastArithmetic.knob_ramp(out, pos, n, f - seg.start, seg.length, kind, true, r * (p1 - p0), Math.log(@spec.range.begin), p0 * r, seg.to)
-          else
-            !!MB::Sound::FastArithmetic.knob_ramp(out, pos, n, f - seg.start, seg.length, kind, false, seg.to - seg.from, seg.from, 0.0, seg.to)
-          end
+          k, a, b = ramp_terms(seg)
+          !!MB::Sound::FastArithmetic.knob_ramp(out, pos, n, f - seg.start, seg.length, kind, @spec.curve == :exp, k, a, b, seg.to)
+        end
+
+        # Ramp +seg+'s Param::Scale#ramp_terms (computed once per ramp).
+        def ramp_terms(seg)
+          seg.terms ||= @spec.scale.ramp_terms(seg.from, seg.to).freeze
         end
 
         # A reused DFloat of +n+ samples for Curve#map! in #ramp_values.

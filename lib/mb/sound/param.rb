@@ -588,11 +588,7 @@ module MB
         return value ? 1.0 : 0.0 if type == :boolean
         lo, hi = position_ends
         v = value.is_a?(Numeric) && !value.is_a?(MB::Sound::Decibels) ? value.to_f : Param.magnitude(value).to_f
-        if curve == :exp
-          Math.log(v / lo) / Math.log(hi / lo)
-        else
-          (v - lo) / (hi - lo)
-        end
+        Scale.position(v, lo, hi, curve)
       end
 
       # The value at +position+ (see #position; 0 is the range's start, 1
@@ -607,7 +603,7 @@ module MB
         end
         return pos >= 0.5 if type == :boolean
         lo, hi = position_ends
-        v = curve == :exp ? lo * Math.exp(pos * Math.log(hi / lo)) : lo + pos * (hi - lo)
+        v = Scale.value(pos, lo, hi, curve)
         return v.round if stepped?
         typed(v)
       end
@@ -736,6 +732,8 @@ module MB
 
     # ArgTypes signatures take the same record.
     ArgTypes::Param = Param
+
+    require_relative 'param/scale'
 
     ::Range.include(Param::RangeAt)
     ::Numeric.include(Param::ValueIn)

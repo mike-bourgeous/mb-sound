@@ -332,7 +332,7 @@ module MB
           end
           from = src.spec
           to = k.spec
-          map = ->(x) { to.value(from.positions(x).clip(0.0, 1.0)) }
+          map = ->(x) { to.value(from.position(x).clip(0.0, 1.0)) }
           k.follow(src, frame: @frame, map: map, label: "knob(#{src_name.inspect}) through #{to.range.begin}..#{to.range.end}")
         end
 
@@ -550,10 +550,10 @@ module MB
               va = snapshot_value(a, kn) || kn.value
               vb = snapshot_value(b, kn) || kn.value
               if source.is_a?(Numeric)
-                apply_turn(kn, crossfade_value(kn.spec, va, vb, source.to_f), frame, t, over: over, curve: curve, smooth: smooth)
+                apply_turn(kn, kn.spec.scale.between(va, vb, source.to_f), frame, t, over: over, curve: curve, smooth: smooth)
               else
-                spec = kn.spec
-                map = ->(x) { crossfade_values(spec, va, vb, x.clip(0.0, 1.0)) }
+                scale = kn.spec.scale
+                map = ->(x) { scale.between(va, vb, x.clip(0.0, 1.0)) }
                 kn.follow(source, frame: frame, map: map, time: t, transport: @transport, label: "xfade #{a.inspect}..#{b.inspect} by #{GraphNode::Knob.label_of(source)}")
               end
             }
@@ -805,20 +805,6 @@ module MB
         # Knob +k+'s value in snapshot +name+ when it lands, or nil.
         def snapshot_value(name, k)
           @knob_lock.synchronize { @snapshots[name]&.[](k.name) }
-        end
-
-        # +amount+ of the way from +a+ to +b+ in +spec+'s scale.
-        def crossfade_value(spec, a, b, amount)
-          return a + (b - a) * amount if spec.curve == :linear
-          pa = spec.position(a)
-          spec.value(pa + (spec.position(b) - pa) * amount)
-        end
-
-        # #crossfade_value for a Numo::DFloat of amounts.
-        def crossfade_values(spec, a, b, amount)
-          return amount * (b - a) + a if spec.curve == :linear
-          pa = spec.position(a)
-          spec.value(amount * (spec.position(b) - pa) + pa)
         end
 
         # A knob's state just before the change landing now (for undo).

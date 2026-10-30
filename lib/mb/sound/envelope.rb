@@ -1397,7 +1397,7 @@ module MB
       def self.velocity_peak(v, low, high, db)
         v = 0.0 unless v >= 0
         v = 1.0 if v > 1
-        db ? low * (high / low) ** v : low + (high - low) * v
+        Param::Scale.value(v, low, high, db ? :exp : :linear) # (the one range mapping; C env_peak computes the same)
       end
 
       # Mirror of the C env_add_peak: the peak of a note that starts at

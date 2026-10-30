@@ -57,7 +57,7 @@ module MB
           top = info[:raw].end
           lo = r.begin.to_f
           hi = r.end.to_f
-          pos = param.curve == :exp ? Math.log(v.to_f / lo) / Math.log(hi / lo) : (v.to_f - lo) / (hi - lo)
+          pos = MB::Sound::Param::Scale.position(v, lo, hi, param.curve)
           raw = (pos * top).round.clamp(0, top)
           new(
             type: type, number: type == :cc ? number : nil, name: name || param.name.to_s, range: r, default: raw,
@@ -71,14 +71,13 @@ module MB
           mid = (top + 1) / 2
           return raw >= mid ? hi : lo if curve == :switch
 
+          # (Param::Scale, the one range mapping: a centered controller is
+          # two scales, from the center out to each end)
           if center
             c = raw < mid ? (raw - mid) / mid.to_f : (raw - mid) / (top - mid).to_f
-            far = c < 0 ? lo : hi
-            c = c.abs
-            curve == :exp ? center * (far / center) ** c : center + (far - center) * c
+            MB::Sound::Param::Scale.value(c.abs, center, c < 0 ? lo : hi, curve)
           else
-            f = raw / top.to_f
-            curve == :exp ? lo * (hi / lo) ** f : lo + (hi - lo) * f
+            MB::Sound::Param::Scale.value(raw / top.to_f, lo, hi, curve)
           end
         end
 
@@ -182,14 +181,13 @@ module MB
           hi = range.end
           v = value.to_f
           return v == hi ? 1.0 : 0.0 if curve == :switch
-          return curve == :exp ? Math.log(v / lo) / Math.log(hi / lo) : (v - lo) / (hi - lo) unless center
+          return MB::Sound::Param::Scale.position(v, lo, hi, curve) unless center
 
           top = raw_max
           mid = (top + 1) / 2
           # The half from the center toward the value
           upper = (v - center) * (hi - center) >= 0
-          far = upper ? hi : lo
-          c = curve == :exp ? Math.log(v / center) / Math.log(far / center) : (v - center) / (far - center)
+          c = MB::Sound::Param::Scale.position(v, center, upper ? hi : lo, curve)
           c = 0.0 unless c.finite?
           raw = upper ? mid + c * (top - mid) : mid - c * mid
           raw / top.to_f

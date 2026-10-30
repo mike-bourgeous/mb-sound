@@ -158,14 +158,7 @@ module MB
 
               t = (j + 1).to_f / seg.length
               c = seg.curve ? seg.curve.map([t])[0] : t
-              if @spec.curve == :exp
-                p0 = @spec.position(from)
-                p1 = @spec.position(seg.to)
-                scale = Math.log(@spec.range.end / @spec.range.begin)
-                Math.exp(c * (scale * (p1 - p0)) + Math.log(@spec.range.begin) + p0 * scale)
-              else
-                c * (seg.to - from) + from
-              end
+              @spec.scale.between(from, seg.to, c) # (the ramp's formula: Param::Scale#ramp_terms)
             when Follow
               # Never extrapolated: the latest value while following, or the
               # value before a follow that hasn't started
