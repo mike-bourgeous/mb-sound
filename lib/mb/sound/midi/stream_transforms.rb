@@ -18,7 +18,7 @@ module MB
         # listed.
         #
         # The feel and clip operations (humanize, quantize, swing, chance,
-        # every, legato, ratchet, ghost_chords, transpose, rotate/shift)
+        # every, legato, ratchet, ghost_chords, transpose, shift; clips also rotate)
         # share their option names and cores with the Clip methods of the
         # same names (midi-consol-1, maintainer decision 1, 2026-10-16:
         # "shared core, two front ends"; see Sequence::Feel): clips know
@@ -359,13 +359,29 @@ module MB
         end
         alias len note_length
 
-        # Every event +delay+ later (seconds, a Length, or a Duration).
-        # Also #rotate, the name of Sequence::Clip's version, which wraps
-        # its events around the loop (Clip#shift is the same).
+        # Every event +delay+ later (seconds, a Length, or a Duration; not
+        # negative: a live stream can't play notes before they arrive).
+        # Sequence::Clip#shift is the clip version (which may also move
+        # notes earlier, dropping what leaves the clip).
         def shift(delay, **options)
           Stream.new(Transform::Shift.new(self, delay, **options))
         end
-        alias rotate shift
+
+        # Streams can't rotate: wrapping notes around a loop needs notes a
+        # live stream hasn't played yet.  Raises (through
+        # MB::Sound.live_error: in live mode it warns and returns the
+        # stream unchanged), pointing to #shift (a delay) and
+        # Sequence::Clip#rotate.
+        def rotate(_amount = nil, **_options)
+          MB::Sound.live_error(ArgumentError.new(Stream.rotate_message)) || self
+        end
+
+        # The explanation #rotate raises with (also for unattached chains,
+        # Transform::Spec#rotate).
+        def self.rotate_message
+          "a live stream can't rotate (wrapping notes around a loop needs notes that haven't played yet) " \
+            '(did you mean shift?): stream.shift(1.n8) delays every note; clips rotate (clip.rotate(1.n8))'
+        end
 
         # Returns [below, at and above]: two streams splitting the notes at
         # +point+ (a Note or note number); channel-wide events go to both.

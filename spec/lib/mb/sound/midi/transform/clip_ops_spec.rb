@@ -263,11 +263,44 @@ RSpec.describe('MIDI clip operations on streams', :midi_transforms, :aggregate_f
     end
   end
 
-  describe 'aliases' do
-    it 'rotates a stream as shift (later only) and shifts a clip as rotate (wrapping)' do
-      expect(read_all(run_stream.rotate(0.1))).to eq(read_all(run_stream.shift(0.1)))
-      expect(rows(riff.shift(1.n8))).to eq(rows(riff.rotate(1.n8)))
+  describe 'rotate and shift (parity-1, maintainer 2026-10-30: rotate wraps, shift shifts)' do
+    it 'wraps a clip with rotate and drops what leaves it with shift' do
+      clip = s.seq(s::C4, s::E4, s::G4, s::B4).n4
+      expect(rows(clip.rotate(1.n4)).map(&:first)).to eq([71, 60, 64, 67])
+      expect(rows(clip.rotate(1.n4)).map { |r| r[1] }).to eq([0r, 1/4r, 1/2r, 3/4r])
+      expect(rows(clip.shift(1.n4))).to eq([[60, 1/4r, 1/4r, 0.75], [64, 1/2r, 1/4r, 0.75], [67, 3/4r, 1/4r, 0.75]])
+      expect(rows(clip.shift(-1/4r))).to eq([[64, 0r, 1/4r, 0.75], [67, 1/4r, 1/4r, 0.75], [71, 1/2r, 1/4r, 0.75]])
+      expect(clip.shift(1.n4).length).to eq(1r)
+      expect(clip.shift(2r).events).to be_empty
       expect(riff.shift(1.n8).source).to eq(riff)
+      expect(riff.rotate(1.n8).source).to eq(riff)
+      expect { MB::Sound::Sequence::Clip.new([]).shift(1/4r) }.to raise_error(ArgumentError, /length/)
+    end
+
+    it 'shifts a stream later only, and refuses to rotate one, pointing to shift' do
+      out = read_all(run_stream.shift(0.1))
+      expect(ons(out).map { |e| e[2] }).to eq(8.times.map { |i| i / 4r + 0.1 })
+      expect { run_stream.shift(-0.1) }.to raise_error(ArgumentError, /only shift notes later/)
+      expect { run_stream.rotate(0.1) }.to raise_error(ArgumentError, /can't rotate.*did you mean shift/)
+      expect { s.echo(1.n8, 1).rotate(1.n8) }.to raise_error(ArgumentError, /did you mean shift/)
+    end
+
+    it 'warns in live mode and plays the stream unchanged' do
+      MB::Sound.live = true
+      stream = run_stream
+      result = nil
+      expect { result = stream.rotate(0.1) }.to output(/can't rotate.*live mode: ignored/).to_stderr
+      expect(result).to equal(stream)
+    ensure
+      MB::Sound.live = false
+    end
+
+    it 'loads clip shift in documents before format 6 as rotate (it was its alias)' do
+      body = "seq(C4, E4, G4, B4).n4.shift(1.n4).synth { |v| v.hz.saw }\n"
+      old = MB::Sound::GraphIO.load("graph 5\n#{body}")
+      now = MB::Sound::GraphIO.load("graph 6\n#{body}")
+      expect(old.to_ruby).to include('.rotate(1.n4)')
+      expect(now.to_ruby).to include('.shift(1.n4)')
     end
   end
 
@@ -361,7 +394,7 @@ RSpec.describe('MIDI clip operations on streams', :midi_transforms, :aggregate_f
 
     it 'round-trips clip operations through recipes and graph documents' do
       c = s.seq(s::C4, s::E4).n8.loop.transpose(2, scale: s.scale(:minor, :a)).shift(1.n16).ratchet(2, rate: 1.n32).legato(1.n32)
-      expect(c.to_ruby).to eq('seq(C4, E4).n8.loop.transpose(2, scale: scale(:minor, A4)).rotate(1.n16).ratchet(2, rate: 1.n32).legato(1.n32)')
+      expect(c.to_ruby).to eq('seq(C4, E4).n8.loop.transpose(2, scale: scale(:minor, A4)).shift(1.n16).ratchet(2, rate: 1.n32).legato(1.n32)')
       text = "graph 3\nseq(C4, E4).n8.loop.bake(echo(1.n8, 1).swing(0.6).ratchet(2, rate: 1.n32).ghost_chords(1, 4)).synth { |v| v.hz.saw }\n"
       g = MB::Sound::GraphIO.load(text)
       expect(g.to_ruby).to include('bake(echo(1.n8, 1).swing(0.6).ratchet(2, rate: 1.n32).ghost_chords(1, 4))')

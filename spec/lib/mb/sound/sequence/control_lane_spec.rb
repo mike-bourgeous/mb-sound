@@ -72,6 +72,9 @@ RSpec.describe(MB::Sound::Sequence::ControlLane) do
     it 'move lanes with time transforms' do
       expect(clip.stretch(2).control(1).points).to eq([[0r, 0.0], [1/2r, 0.5], [1r, 1.0]])
       expect(clip.rotate(1/8r).control(1).points).to eq([[0r, 1.0], [1/8r, 0.0], [3/8r, 0.5], [5/8r, 1.0]])
+      expect(clip.shift(1/8r).control(1).points).to eq([[1/8r, 0.0], [3/8r, 0.5], [5/8r, 1.0]])
+      expect(clip.shift(-1/8r).control(1).points).to eq([[0r, 0.0], [1/8r, 0.5], [3/8r, 1.0]])
+      expect(clip.shift(1r).controls).to be_empty
       expect(clip.reverse.control(1).points).to eq([[0r, 1.0], [1/2r, 0.5], [3/4r, 0.0]])
       expect(clip.truncate(1/2r).control(1).points).to eq([[0r, 0.0], [1/4r, 0.5]])
       two = nil

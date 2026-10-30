@@ -221,9 +221,11 @@ module MB::Sound
   end
 
   # The text of a preset document without the lines that change on every
-  # save (the time and the library version), for comparisons.
+  # save (the time and the library version) and with its format version
+  # left out (a format bump alone doesn't make every preset out of date),
+  # for comparisons.
   def self.preset_body(path)
-    File.read(path).lines.reject { |l| l.match?(/^\s*(saved|mb_sound):/) }.join
+    File.read(path).lines.reject { |l| l.match?(/^\s*(saved|mb_sound):/) }.join.sub(/^graph \d+,/, 'graph N,')
   end
 
   if main_script?(__FILE__)

@@ -57,8 +57,12 @@ module MB
       # (param-1, 2026-10-24) writes `param` and `knob` lines as
       # MB::Sound::Params print them: typed values (2400.hz, -12.db) and
       # ranged defaults (`knob :cut, (150.hz..8000.hz).at(2400.hz)`), plus
-      # `clamp: false`; older documents' `range:` lines still load.
-      FORMAT = 5
+      # `clamp: false`; older documents' `range:` lines still load.  Format
+      # 6 (parity-1, 2026-10-30) gives clips' (and Seqs') #shift its own
+      # meaning: it moves notes without wrapping (dropping those that leave
+      # the clip), where it was an alias of #rotate (wrapping); `.shift(`
+      # calls on clips in older documents load as `.rotate(`.
+      FORMAT = 6
 
       # The file extension of graph documents.
       EXTENSION = '.mbg.rb'

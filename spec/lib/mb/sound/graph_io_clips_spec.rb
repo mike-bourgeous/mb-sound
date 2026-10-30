@@ -136,7 +136,7 @@ RSpec.describe('graph documents with clips', :aggregate_failures) do
 
     it 'marks drawn seeds and leaves seeds the code gave as they were written' do
       expect(doc).to start_with("# mb-sound graph document").and include("graph #{io::FORMAT},")
-      expect(io::FORMAT).to eq(5)
+      expect(io::FORMAT).to eq(6)
       expect(doc).to include('melody(scale(:minor, A4), 8, seed: 3).named(:pinned)')
       expect(doc).to match(/melody\(scale\(:minor, A4\), 8, seed: drawn_seed\(\d+\)\)\.named\(:drawn\)/)
       expect(doc).to match(/noise\(seed: drawn_seed\(\d+\)\)/)
