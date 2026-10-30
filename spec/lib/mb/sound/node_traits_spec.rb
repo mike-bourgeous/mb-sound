@@ -10,7 +10,7 @@
 # declarations agree with what the class does.
 RSpec.describe(MB::Sound::NodeTraits, :aggregate_failures) do
   def self.library_classes
-    Dir[File.expand_path('../../../../lib/mb/sound/**/*.rb', __dir__)].sort.each { |f| require f }
+    LibraryFiles.require_all
     g = MB::Sound::GraphNode
     ObjectSpace.each_object(Class).select { |c|
       c.name&.start_with?('MB::Sound::') &&

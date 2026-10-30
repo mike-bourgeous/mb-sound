@@ -70,7 +70,7 @@ RSpec.describe('graph sweep (memcheck light)', :check_shared) do
 
   describe 'coverage guard' do
     def library_classes
-      Dir[File.expand_path('../../../../lib/mb/sound/**/*.rb', __dir__)].sort.each { |f| require f }
+      LibraryFiles.require_all
       g = MB::Sound::GraphNode
       ObjectSpace.each_object(Class).select { |c|
         c.name&.start_with?('MB::Sound::') && (c.include?(g) || c.include?(g::MultiOutput) || c <= MB::Sound::Filter)

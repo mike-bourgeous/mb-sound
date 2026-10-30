@@ -39,11 +39,7 @@ module KernelsGuard
   # Loads every lib/ file, so every kernel is registered and every
   # extension loaded.
   def load_library
-    Dir[File.join(ROOT, 'lib/mb/sound/**/*.rb')].sort.each do |f|
-      next if f.include?('/four_pole/make_tuning.rb') # (a generator script)
-
-      require f
-    end
+    LibraryFiles.require_all
   end
 
   # The Fast* extension modules (MB::FastSound, MB::Sound::Fast*,
