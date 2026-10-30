@@ -1061,6 +1061,7 @@ module MB
         when :onsets, :transients then [slice_onsets, :onsets]
         when :grid then slice_cuts(1.n16)
         when Sequence::Duration
+          slices.check_length('A slice grid')
           raise ArgumentError, 'A grid of slices needs the sample\'s bpm (Sample[..., bpm: 98])' unless @bpm
           step = position(slices).to_f
           [Array.new((length / step).ceil) { |i| (i * step).round }, :grid]

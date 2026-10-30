@@ -86,7 +86,8 @@ RSpec.describe(MB::Sound::Sequence::Duration) do
       expect { 1.bar + 1 }.to raise_error(ArgumentError, /Durations/)
       expect { 1 + 1.bar }.to raise_error(TypeError, /Duration/)
       expect { 1.bar * 1.bar }.to raise_error(ArgumentError, /numbers/)
-      expect { MB::Sound::Sequence::Duration.new(-1) }.to raise_error(ArgumentError, /negative/)
+      expect { MB::Sound::Sequence::Duration.new(Float::INFINITY) }.to raise_error(ArgumentError, /finite real/)
+      expect { MB::Sound::Sequence::Duration.new(1i) }.to raise_error(ArgumentError, /finite real/)
     end
 
     it 'converts to seconds at the current tempo' do
@@ -101,6 +102,80 @@ RSpec.describe(MB::Sound::Sequence::Duration) do
       expect(MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).len(3.n16).length).to eq(3/8r)
       expect(described_class.bars(2.beats, 1)).to eq(1/2r)
       expect(described_class.bars(3, 1)).to eq(3)
+    end
+  end
+
+  # fixes-1030: `-1.n8` (the literal (-1).n8) and `-len` are offsets for
+  # shift and rotate; lengths of time refuse them with one line.
+  describe 'negative durations' do
+    let(:s) { MB::Sound }
+
+    it 'are made by negative numbers and unary minus, printing and reading back' do
+      expect((-1.n8).whole_notes).to eq(-1/8r)
+      expect(-(3.n16)).to eq(-3.n16)
+      expect((1.n8 - 1.n4).whole_notes).to eq(-1/8r)
+      expect(-(-(1.n8))).to eq(1.n8)
+      expect((-1.n8).abs).to eq(1.n8)
+      expect(-1.n8).to be_negative
+      expect(1.n8).to be_positive
+      expect([(-1.n8).to_s, (-(2.bars)).to_s, (-1.beat).to_s, (-(1.n8.dotted)).to_s]).to eq(['-n8', '-2 bars', '-1 beat', '-dotted n8'])
+      [-1.n8, -(3.n16), -(2.bars), -1.5.bars, -(1.n8.dotted)].each do |d|
+        text = MB::Sound::RubyValue.to_ruby(d)
+        expect(MB::Sound.module_eval(text).whole_notes).to eq(d.whole_notes), text
+      end
+    end
+
+    it 'shift and rotate clips and kits earlier, like negative whole notes' do
+      clip = s.seq(s::C4, s::E4, s::G4, s::B4).n4
+      expect(clip.shift(-1.beat).events.map(&:value)).to eq(clip.shift(-1/4r).events.map(&:value))
+      expect(clip.shift(-1.beat).events.map(&:start)).to eq([0r, 1/4r, 1/2r])
+      expect(clip.rotate(-(1.beat)).events.map(&:value)).to eq([s::E4, s::G4, s::B4, s::C4].map(&:number))
+      kit = s.grid(16, kick: 'x...x...', hat: '..x...x.')
+      expect(kit.shift(-2.n16)[:hat].events.map(&:start)).to eq([0r, 1/4r])
+      expect(clip.shift(-1.n8).to_ruby).to include('.shift(-1.n8)')
+      expect(s::GraphIO.load("graph #{s::GraphIO::FORMAT}\nseq(C4, E4).n4.shift(-1.n8)\n").events.map(&:start)).to eq([1/8r])
+    end
+
+    it 'reads seconds offsets at the current tempo' do
+      clip = s.seq(s::C4, s::E4).n4
+      wn = MB::Sound::Sequence::Duration.rational(0.25 * MB::Sound::Sequence.transport.whole_notes_per_second)
+      expect(clip.shift(-0.25.seconds).events.map(&:start)).to eq([1/4r - wn])
+    end
+
+    it 'are refused with one line by lengths of time' do
+      clip = s.seq(s::C4, s::E4).n4
+      sig = 220.hz.saw
+      {
+        'note length' => -> { clip.note_length(-1.n8) },
+        'legato' => -> { clip.legato(-1.n8) },
+        'quantize grid' => -> { clip.quantize(-1.n16) },
+        'humanize time' => -> { clip.humanize(-1.n64) },
+        'ratchet rate' => -> { clip.ratchet(2, rate: -1.n32) },
+        'delay' => -> { sig.delay(-1.n8) },
+        'delay in seconds' => -> { sig.delay(-5.ms) },
+        'multitap' => -> { sig.multitap(-1.n8, 0.1) },
+        'envelope time' => -> { s.adsr(-1.n16, 0.1, 0.5, 0.1) },
+        'envelope seconds' => -> { s.adsr(-0.01.seconds, 0.1, 0.5, 0.1) },
+        'smooth' => -> { sig.smooth(-1.n32) },
+        'tempo LFO' => -> { (-1.bar).lfo },
+        'echo' => -> { clip.stream.echo(-1.n8) },
+        'stream note length' => -> { clip.stream.note_length(-1.n8) },
+        'events length' => -> { s.events([0, 1/4r, 60, 1], length: -1.bar) },
+        'harmony key' => -> { s.harmony(0 => s.scale(:minor, :a).weights, -2.bars => s.scale(:major, :c).weights) },
+      }.each do |what, code|
+        expect { code.call }.to raise_error(ArgumentError, /can't be negative|must be|lengths from 0/), what
+        begin
+          code.call
+        rescue ArgumentError => e
+          expect(e.message.lines.count).to eq(1), "#{what}: #{e.message}"
+        end
+      end
+    end
+
+    it 'are refused as launch offsets and alignments' do
+      expect { MB::Sound::LaunchPoint.build(at: nil, on: nil, offset: -1.bar) }.to raise_error(ArgumentError, /in: must be/)
+      expect { MB::Sound::LaunchPoint.build(at: nil, on: -1.n4, offset: nil) }.to raise_error(ArgumentError, /on: must be/)
+      expect { MB::Sound::LaunchPoint.build(at: nil, on: nil, offset: -5.ms) }.to raise_error(ArgumentError, /in: must be/)
     end
   end
 end

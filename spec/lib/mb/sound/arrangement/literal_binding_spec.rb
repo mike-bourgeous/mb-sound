@@ -167,6 +167,72 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     end
   end
 
+  # A sweep (fixes-1030; settings from research-snapshot-mutability's
+  # probe_live.rb): every effect setting either binds (the rebuilt patch
+  # reads the knob; effects returning bundles, ping_pong, multitap, chorus,
+  # are found through their outputs) or is refused with one line saying it
+  # is fixed when the patch builds (never a raw NoMethodError).  A new
+  # effect, or a setting that becomes live, goes in this table.
+  BIND_SWEEP = {
+    'reverb(:hall, ...)' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.reverb(:hall, **o) } }, :reverb,
+      { lowpass: 8000, highpass: 100, drive: 0.5, crush: 0.2, shimmer: 0.3, stretch: 1.2 },
+      { mix: 0.3, wet: 0.5, dry: 1, level: 1, predelay: 0.02 }],
+    'reverb(room_size:, decay:)' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.reverb(**{ room_size: 0.5, decay: 2.0, damping: 0.4 }.merge(o)) } }, :reverb,
+      {}, { room_size: 0.5, decay: 2.0, damping: 0.4 }],
+    'delay' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.delay(0.3, **o) } }, :delay,
+      { feedback: 0.5, wet: 0.5, dry: 1 }, {}],
+    'ping_pong' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.ping_pong(0.25, **o) } }, :ping_pong,
+      { feedback: 0.5, spread: 1, mix: 0.5 }, {}],
+    'ping_pong into a reverb' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.ping_pong(0.25, **o).reverb(:room, mix: 0.2) } }, :ping_pong,
+      { feedback: 0.5 }, {}],
+    'multitap with feedback' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.multitap(0.2, 0.3, **o) } }, :multitap,
+      { feedback: 0.3 }, {}],
+    'tape_echo(:dub, ...)' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.tape_echo(:dub, **o) } }, :tape_echo,
+      { time: 0.3, feedback: 0.6, mix: 0.5 }, { tone: 0.5, low_cut: 100, drive: 0.5, wow: 0.3, flutter: 0.3 }],
+    'chorus(:juno2, ...)' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.chorus(:juno2, **o) } }, :chorus,
+      { rate: 0.5, depth: 0.5, mix: 0.5 }, {}],
+    'formant(:a, :o, ...)' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.formant(:a, :o, **o) } }, :formant,
+      { morph: 0.5, shift: 2, width: 1 }, {}],
+    'lp4' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw.lp4(1000, **o) * v.amp_env(0.01, 0.1, 0.5, 0.1) } } }, :lp4,
+      { resonance: 0.3 }, { drive: 1.5 }],
+    'compress' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.compress(**o) } }, :compress,
+      { attack: 0.01, release: 0.1 }, { threshold: -20.db, ratio: 4, mix: 0.8 }],
+  }.freeze
+
+  it 'binds every live effect setting and refuses fixed ones with one line (sweep)' do
+    BIND_SWEEP.each do |label, (patch, method, live, fixed)|
+      live.merge(fixed).each do |setting, value|
+        s, _, result = play(->(_) {
+          begin
+            MB::Sound.bind(:fx, method => setting)
+          rescue described_class::Error => e
+            e
+          end
+        }, track: :fx, patch: patch.({ setting => value }), buffers: 2)
+        what = "#{label} #{setting}"
+        if live.key?(setting)
+          expect(result).not_to be_a(Exception), "#{what}: #{result.inspect}"
+          expect(s.knobs.keys.grep(/\Afx\//)).not_to be_empty, what
+        else
+          expect(result).to be_a(described_class::Error), "#{what}: #{result.inspect}"
+          expect(result.message).to match(/\Abind :fx, #{method}: :#{setting}: #{setting} of #{method} is fixed when the patch builds, so a knob can't move it; .* \(nothing was changed\)\z/), what
+          expect(result.message.lines.count).to eq(1), what
+        end
+        s.close
+        @sessions.delete(s)
+      end
+    end
+  end
+
+  it 'points a reverb\'s wet level to a bus send' do
+    patch = ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.reverb(:hall, mix: 0.3) }
+    s, = play(nil, track: :pad, patch: patch, buffers: 2)
+    MB::Sound::Session.with_context(session: s) do
+      expect { MB::Sound.bind(:pad, reverb: :mix) }.to raise_error(described_class::Error, /mix of reverb is fixed when the patch builds.*turn a bus send instead \(bus :verb \{ \|sig\| sig\.reverb\(\.\.\., mix: 1\) \}; feed :pad, :verb, -12\.db\)/)
+      expect(s.knobs).not_to have_key(:"pad/mix")
+    end
+  end
+
   it 'replays from a take bit for bit' do
     lines = {
       0 => ['track(:lead) { |c| c.synth(voices: 2) { |v| v.hz.saw.lp4(1200.hz, resonance: 0.25) * v.amp_env(0.05, 0.2, 0.5, 0.3) } }', 'bg :lead, seq(E3, G3).n4.loop'],

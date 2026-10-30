@@ -129,7 +129,7 @@ module MB
           # and smaller numbers whole notes.
           def self.rate_of(v)
             case v
-            when Sequence::Duration then v.whole_notes
+            when Sequence::Duration then v.check_length('An arp rate').whole_notes
             when Integer then Rational(1, MB::M.max(v, 1))
             when Float then v >= 1 ? Rational(1, v.round) : Sequence::Duration.rational(MB::M.max(v, 1 / 128.0))
             when Rational then v >= 1 ? Rational(1, v.round) : v

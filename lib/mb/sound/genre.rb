@@ -518,6 +518,18 @@ module MB
           MB::Sound.transport.bar_length = bar_length unless meter == [4, 4]
           MB::Sound.quant(1)
           knobs.each { |n, (default, options)| MB::Sound.knob(n, default, **options) }
+          setup_master
+          template = self
+          Genre.bus_order(buses).each { |n| MB::Sound.bus(n, to: buses[n].to || :master) { |sig| template.bus_chain(n, sig) } }
+          MB::Sound.sidechain(trigger_track, shape: sidechain[3]) if trigger_track
+          setup_roles
+        end
+
+        # The master gain and chain of #setup (the template's knobs must
+        # exist): the template's mono_below and measure go into its
+        # mastering preset, and a last mastering preset is the master
+        # call's own (see below).
+        def setup_master
           MB::Sound.master_gain(mix.gain) if mix.gain
           unless mix.master.empty? && !mix.mono_below
             chain = mix.master
@@ -537,11 +549,29 @@ module MB
               chain = chain.dup
               chain[i] = [name, args, mix.measure.merge(params)]
             end
-            MB::Sound.master { |m| Genre.master_chain(mono ? m.mono_below(mono) : m, chain) }
+            # A last mastering preset is the master call's own preset (the
+            # chain's end), so a script's --master or a render's master:
+            # replaces it rather than following it (fixes-1030: --master
+            # streaming on ambient ran :quiet then :streaming, two loudness
+            # targets, and the trim was found approximately)
+            if chain.last && Mastering.preset?(chain.last[0])
+              name, args, params = chain.last
+              raise ArgumentError, "master #{name.inspect} takes options only (got #{args.inspect})" unless args.empty?
+              rest = chain[0...-1]
+              if rest.empty? && !mono
+                MB::Sound.master(name, **params)
+              else
+                MB::Sound.master(name, **params) { |m| Genre.master_chain(mono ? m.mono_below(mono) : m, rest) }
+              end
+            else
+              MB::Sound.master { |m| Genre.master_chain(mono ? m.mono_below(mono) : m, chain) }
+            end
           end
+        end
+
+        # The tracks and scenes of #setup.
+        def setup_roles
           template = self
-          Genre.bus_order(buses).each { |n| MB::Sound.bus(n, to: buses[n].to || :master) { |sig| template.bus_chain(n, sig) } }
-          MB::Sound.sidechain(trigger_track, shape: sidechain[3]) if trigger_track
           roles.each { |n, r|
             MB::Sound.track(n, q: r.q, fade: r.fade, to: r.to, send: (r.sends unless r.sends.empty?)) { |c| template.patch(n, c) }
           }

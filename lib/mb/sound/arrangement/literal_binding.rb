@@ -90,6 +90,7 @@ module MB
 
         def bundle_call_of(node)
           bundle = node.respond_to?(:recipe_bundle) ? node.recipe_bundle : node.respond_to?(:channel_group) && node.channel_group&.bundle
+          bundle ||= GraphNode::Recipe.bundle_of(node)
           return nil unless bundle && !bundle.equal?(node) && bundle.instance_variable_defined?(:@graph_recipe)
           bundle.instance_variable_get(:@graph_recipe)&.call
         end
@@ -100,13 +101,30 @@ module MB
         def keys_of(roots, method, all: nil)
           seqs = {}
           (all || nodes(roots)).each do |n|
-            calls_of(n).each do |c|
+            (calls_of(n) + bundle_calls(n)).each do |c|
               next unless (c.written || c.name) == method
               k = GraphNode::Recipe.key_of(c) or next
               seqs[k] = c.seq if seqs[k].nil? || c.seq < seqs[k]
             end
           end
           seqs.sort_by { |_, seq| seq }.map(&:first)
+        end
+
+        # The recorded calls of bundles +node+ was made from, nearest first:
+        # a call whose receiver is a recorded bundle (Channels, or a
+        # multi-output result) leads to the call that made the bundle, and
+        # so on.  Calls returning bundles (ping_pong, multitap, chorus, a
+        # stereo softclip) are recorded on the bundle, which isn't in the
+        # graph, so bind finds them through the nodes made from them
+        # (fixes-1030: "no ping_pong in the track's graph").
+        def bundle_calls(node)
+          out = []
+          c = call_of(node)
+          while c && (r = c.receiver) && !r.is_a?(GraphNode) && (rc = own_call_of(r)) && !out.any? { |x| x.equal?(rc) }
+            out << rc
+            c = rc
+          end
+          out
         end
 
         # The recorded calls of +node+: the call that made it, then its
@@ -212,8 +230,14 @@ module MB
         def find(roots, method, param, nth = 0)
           key = keys_of(roots, method)[nth] or raise Error, missing(roots, method, param, nth)
           node = call = nil
+          bundled = false
           nodes(roots).each do |n|
             call = calls_of(n).find { |c| GraphNode::Recipe.key_of(c) == key } and (node = n) and break
+            call = bundle_calls(n).find { |c| GraphNode::Recipe.key_of(c) == key } and (node = n) and (bundled = true) and break
+          end
+          if bundled
+            raise Error, unrecorded(roots, param) if roots.any? { |r| GraphIO.document_of(r) }
+            return target_of_call(roots, call, param)
           end
           return target(roots, node, param) if call.equal?(call_of(node))
           # (a chained setter's argument, named after it: .curve(release:) is :release_curve)
@@ -320,6 +344,29 @@ module MB
         def line(track, t)
           return "bind #{track.inspect}, #{t.param.inspect}" if t.kind == :document
           "bind #{track.inspect}, #{t.call_name}: #{t.arg.inspect}#{", nth: #{t.nth}" if t.nth > 0}"
+        end
+
+        # What to do instead of binding a setting fixed when the patch
+        # builds, by method and argument (others: change the code).  A
+        # reverb's own mix is set once; a bus send is the turnable wet level.
+        FIXED_HINTS = {
+          reverb: {
+            %i[mix wet dry level] => ->(track, call) {
+              "turn a bus send instead (bus :verb { |sig| sig.#{call}(..., mix: 1) }; feed #{track.inspect}, :verb, -12.db)"
+            },
+          },
+        }.freeze
+
+        # The one-line refusal for Target +t+ of track +track+ whose
+        # setting a knob can't move (the patch raised with a knob there, or
+        # never read it): fixed when the patch builds, and what to do
+        # instead (fixes-1030; before, a raw NoMethodError: undefined
+        # method 'to_f').
+        def fixed_message(track, t)
+          what = t.kind == :document ? "#{t.param} of the #{t.document} preset" : "#{t.arg} of #{t.call_name}"
+          hint = t.kind == :call && FIXED_HINTS[t.call_name.to_sym]&.find { |args, _| args.include?(t.arg) }&.last
+          instead = hint ? hint.call(track, t.call_name) : "change it in the track's code instead"
+          "#{line(track, t)}: #{what} is fixed when the patch builds, so a knob can't move it; #{instead} (nothing was changed)"
         end
 
         # +patch+ (a track's patch block) built with Target +t+'s literal
@@ -485,12 +532,15 @@ module MB
               GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { LiteralBinding.wrap(tr.patch, t, kname, knob: probe).call(tr.clip) }
             }
           }
-        rescue ScriptError, StandardError => e
-          return MB::Sound.live_error(LiteralBinding::Error.new("#{LiteralBinding.line(name, t)}: the patch raised #{e.class} with #{t.param} as a knob (#{e.message.lines.first.to_s.chomp}); nothing was changed"))
+        rescue ScriptError, StandardError
+          # (the patch built with the number, so the knob is what it can't
+          # take: a setting read once while building; the error stays the
+          # refusal's #cause)
+          return MB::Sound.live_error(LiteralBinding::Error.new(LiteralBinding.fixed_message(name, t)))
         end
         broots = built.is_a?(GraphNode::Channels) ? built.to_a : [built]
         unless LiteralBinding.nodes(broots).any? { |n| GraphNode.climb_tee_tree(n).equal?(probe) || (n.is_a?(GraphNode::Knob::Reader) && n.knob.equal?(probe)) }
-          return MB::Sound.live_error(LiteralBinding::Error.new("#{LiteralBinding.line(name, t)}: #{t.param} is read once while the patch builds, so a knob can't move it; nothing was changed"))
+          return MB::Sound.live_error(LiteralBinding::Error.new(LiteralBinding.fixed_message(name, t)))
         end
         (@session.knob(kname, default) or return nil) unless k
 

@@ -114,7 +114,10 @@ RSpec.describe(MB::Sound::Session::Warming) do
 
   # The point of it (dropouts-2): with YJIT, a new bus's landing buffer
   # compiled ~60 ms of code on the render thread (offline, 256 frames).
-  # Measured in a subprocess with YJIT (specs run without it).
+  # Measured in a subprocess with YJIT (specs run without it) as YJIT's
+  # compiled block count, which doesn't depend on machine load the way
+  # compile milliseconds do (fixes-1030: 13-16 ms under suite load vs 7
+  # alone).
   it 'leaves almost nothing for YJIT to compile where a warmed bus lands' do
     skip 'needs YJIT' unless defined?(RubyVM::YJIT) && RubyVM::YJIT.respond_to?(:enable)
 
@@ -122,24 +125,25 @@ RSpec.describe(MB::Sound::Session::Warming) do
       require 'mb/sound'
       s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false, buffer_size: 256, channels: 2)
       s.warm_changes = ENV['WARM'] == '1'
-      compiled = -> { RubyVM::YJIT.runtime_stats(:compile_time_ns) / 1e6 }
+      compiled = -> { RubyVM::YJIT.runtime_stats[:compiled_block_count] }
       MB::Sound::Session.with_context(session: s) do
         MB::Sound.bg(:pad, 220.hz.saw.lp4(800, resonance: 0.3).at(0.1))
         200.times { s.process_buffer }
         MB::Sound.bus(:verb) { |sig| sig.reverb(:hall, mix: 1) }
         MB::Sound.feed(:pad, :verb, -6.db, on: :bar)
         worst = 200.times.map { c = compiled.call; s.process_buffer; compiled.call - c }.max
-        puts "worst #{worst.round(2)}"
+        puts "worst #{worst}"
       end
       s.close
     RUBY
     worst = %w[0 1].map { |w|
       out, status = Open3.capture2e({ 'MB_SOUND_YJIT' => '1', 'WARM' => w }, RbConfig.ruby, '-I', File.expand_path('../../../../../lib', __dir__), '-e', script)
       expect(status).to be_success, out
-      Float(out[/worst ([\d.]+)/, 1])
+      Integer(out[/worst (\d+)/, 1])
     }
-    # (Mac container, 2026-10-28: cold ~70 ms, warm ~8 ms, the rest the
-    # feed's undo snapshot and knob glide)
-    expect(worst[1]).to be < [12, worst[0] / 3].min
+    # (Mac container, 2026-10-30, the same at any load: cold 1735 blocks
+    # (~70 ms), warm 184 (~7 ms), the rest the feed's undo snapshot and
+    # knob glide)
+    expect(worst[1]).to be < [400, worst[0] / 4].min
   end
 end

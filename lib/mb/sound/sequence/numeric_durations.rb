@@ -15,13 +15,13 @@ module MB
         # Returns a Duration of this many bars, using the bar length of the
         # current transport (see Sequence.current_transport).
         def bars
-          Duration.new(Duration.rational(self) * Sequence.current_transport.bar_length, label: "#{self} #{self == 1 ? 'bar' : 'bars'}")
+          Duration.new(Duration.rational(self) * Sequence.current_transport.bar_length, label: "#{self} #{self.abs == 1 ? 'bar' : 'bars'}")
         end
         alias bar bars
 
         # Returns a Duration of this many quarter-note beats.
         def beats
-          Duration.new(Duration.rational(self) / 4, label: "#{self} #{self == 1 ? 'beat' : 'beats'}")
+          Duration.new(Duration.rational(self) / 4, label: "#{self} #{self.abs == 1 ? 'beat' : 'beats'}")
         end
         alias beat beats
 
@@ -31,7 +31,7 @@ module MB
         def n(k)
           k = Integer(k)
           raise ArgumentError, "Note division must be positive (got #{k})" unless k > 0
-          Duration.new(Duration.rational(self) / k, label: self == 1 ? "n#{k}" : "#{self} × n#{k}")
+          Duration.new(Duration.rational(self) / k, label: self == 1 ? "n#{k}" : (self == -1 ? "-n#{k}" : "#{self} × n#{k}"))
         end
 
         Duration::DIVISIONS.each do |k|

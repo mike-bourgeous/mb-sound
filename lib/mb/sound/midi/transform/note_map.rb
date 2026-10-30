@@ -332,6 +332,7 @@ module MB
         # Fixed note lengths (see Stream#note_length).
         class NoteLength < NoteMap
           def initialize(parent, length, **options)
+            Length.check_time(length, 'A note length')
             seconds_check = Length.seconds(length) rescue nil
             raise ArgumentError, "Note length must be a positive length (got #{length.inspect})" unless length.is_a?(Sequence::Duration) || (seconds_check.is_a?(Numeric) && seconds_check > 0)
             super(parent, length: length, **options)

@@ -199,6 +199,28 @@ module MB
         true
       end
 
+      # True if +value+ is a fixed length or number below zero (`-1.n8`,
+      # `-5.ms`, -0.5); false for nodes and anything else.
+      def self.negative?(value)
+        case value
+        when Sequence::Duration then value.negative?
+        when Quantity then value.fixed? && value.value.real? && value.value < 0
+        when Numeric then value.real? && value < 0
+        else false
+        end
+      end
+
+      # Returns +value+, raising ArgumentError with one line if it is a
+      # negative fixed length (see .negative?): for times that can't run
+      # backwards (delays, envelope and smoothing times, note lengths).
+      # +what+ names the time in the message.  Negative Durations are
+      # offsets (Clip#shift, Clip#rotate).
+      def self.check_time(value, what = 'A length of time')
+        return value unless negative?(value)
+
+        raise ArgumentError, "#{what} can't be negative (got #{value.is_a?(Length) ? value : value.inspect}); negative lengths are offsets for shift, rotate, and the like"
+      end
+
       # Returns +value+ in seconds: plain numbers are already seconds; lengths
       # convert at +sample_rate+ and +transport+'s tempo.  Raises an error for
       # graph nodes.
@@ -242,6 +264,7 @@ module MB
         attr_reader :tempo_node
 
         def initialize(length)
+          Length.check_time(length)
           @length = length
           @unit = :seconds
           @value = nil

@@ -95,7 +95,7 @@ module MB
         # warning.  +what+ names the argument in messages.
         def self.position(pos, what = 'positions')
           case pos
-          when Sequence::Duration then pos.whole_notes
+          when Sequence::Duration then pos.check_length("Harmony #{what}").whole_notes
           when Numeric
             raise ArgumentError, "Harmony #{what} are lengths from 0 (got #{pos})" unless pos.real? && pos >= 0
             return 0r if pos.zero?

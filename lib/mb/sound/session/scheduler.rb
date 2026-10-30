@@ -239,7 +239,7 @@ module MB
 
         # See #lookahead.
         def lookahead=(value)
-          unless value == :auto || (value.is_a?(Numeric) && value.real? && value > 0) || value.is_a?(Sequence::Duration)
+          unless value == :auto || (value.is_a?(Numeric) && value.real? && value > 0) || (value.is_a?(Sequence::Duration) && value.positive?)
             raise ArgumentError, "Lookahead must be :auto, a positive number of bars, or a Duration (got #{value.inspect})"
           end
           @lookahead = value

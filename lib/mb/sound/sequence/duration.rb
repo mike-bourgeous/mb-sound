@@ -8,6 +8,12 @@ module MB
       # anywhere a musical length is (launch points, fades, sequence lengths,
       # scheduling).
       #
+      # A Duration may be negative (`-1.n8`, `-(3.n16)`, `1.n8 - 1.n4`) for
+      # offsets that move earlier (Clip#shift, Clip#rotate, Kit transforms);
+      # lengths of time (note lengths, delays, envelope times, the rates and
+      # grids of feel transforms) refuse negatives with one line (see
+      # .whole_notes and #check_length).
+      #
       # The class methods are helpers for methods that accept a duration as
       # an Integer note division (4 for a quarter note, 6 for a half note
       # triplet, 16 for a sixteenth note), a Rational/Float fraction of a
@@ -49,7 +55,7 @@ module MB
         def self.whole_notes(duration)
           case duration
           when Duration
-            duration.whole_notes
+            duration.check_length.whole_notes
 
           when Integer
             raise ArgumentError, "Note division must be positive (got #{duration})" unless duration > 0
@@ -112,10 +118,47 @@ module MB
         # are rationalized as in .rational).  +:label+ is used by #to_s
         # instead of the default description (e.g. "2 bars").
         def initialize(whole_notes, label: nil)
-          raise ArgumentError, "Duration must be a Numeric number of whole notes (got #{whole_notes.inspect})" unless whole_notes.is_a?(Numeric)
+          unless whole_notes.is_a?(Numeric) && whole_notes.real? && !(whole_notes.is_a?(Float) && !whole_notes.finite?)
+            raise ArgumentError, "Duration must be a finite real number of whole notes (got #{whole_notes.inspect})"
+          end
           @whole_notes = Duration.rational(whole_notes)
-          raise ArgumentError, "Duration must not be negative (got #{whole_notes})" if @whole_notes < 0
           @label = label
+        end
+
+        # Returns this Duration, raising ArgumentError with one line if it is
+        # negative: for methods that take a length of time rather than an
+        # offset (+what+ names it in the message).
+        def check_length(what = 'A length of time')
+          Length.check_time(self, what)
+        end
+
+        # True if this Duration moves earlier (an offset below zero).
+        def negative?
+          @whole_notes < 0
+        end
+
+        # True if this Duration is longer than zero.
+        def positive?
+          @whole_notes > 0
+        end
+
+        def zero?
+          @whole_notes == 0
+        end
+
+        # The same length moving the other way (`-1.n8` is the literal
+        # (-1).n8; this is for `-len`).
+        def -@
+          Duration.new(-@whole_notes, label: @label && (@label.start_with?('-') ? @label[1..] : "-#{@label}"))
+        end
+
+        def +@
+          self
+        end
+
+        # The length without its sign.
+        def abs
+          negative? ? -self : self
         end
 
         # Returns this duration stretched by 3/2.  Also available as #d.
@@ -282,6 +325,7 @@ module MB
           return '0' if @whole_notes == 0
           num = @whole_notes.numerator
           den = @whole_notes.denominator
+          return "-#{(-self).send(:default_label)}" if num < 0
           num == 1 ? "n#{den}" : "#{num} × n#{den}"
         end
       end

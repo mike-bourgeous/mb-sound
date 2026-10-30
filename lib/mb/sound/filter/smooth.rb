@@ -45,6 +45,7 @@ module MB
         # See the class description.
         def initialize(length, sample_rate:, curve: nil, from: nil)
           raise ArgumentError, "Smoothing length must be positive (got #{length.inspect})" if length.is_a?(Numeric) && !(length > 0)
+          MB::Sound::Length.check_time(length, 'A smoothing length')
           raise ArgumentError, "Smoothing start must be a number (got #{from.inspect})" unless from.nil? || from.is_a?(Numeric)
 
           @length = length
