@@ -7,10 +7,11 @@ module MB
     #     require 'mb/sound/dsl'     # (or require 'mb-sound/dsl')
     #
     #     bpm 124
-    #     track :bass, seq(A1, R, A1, C2).n8.loop do |clip|
-    #       clip.synth { |v| v.hz.saw.lp4(v.cutoff(900)) * v.amp_env }
-    #     end
-    #     play 220.hz.saw.at(-20.db).until(1.bar)
+    #     bass = seq(A1, R, A1, C2, R, E2, D2, R).n8.repeat(4)
+    #     bg :bass, bass.synth(voices: 1) { |v| v.hz.saw.lp4(v.cutoff(900)) * v.amp_env }.at(-6.db)
+    #     bg :hat, grid(16, 'x.x.x.x.x.x.x.xx').repeat(4)
+    #
+    # (`ruby song.rb` plays it and ends after the four bars ring out.)
     #
     # bin/sound.rb evaluates in MB::Sound, so every MB::Sound method and
     # constant is in reach there.  Requiring this file gives the requiring

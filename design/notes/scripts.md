@@ -22,12 +22,12 @@ Every persona in both panel rounds wanted a plain Ruby file that starts with one
 require 'mb/sound/dsl'
 
 bpm 124
-bass = seq(A1, R, A1, C2, R, E2, D2, R).n8.loop
+bass = seq(A1, R, A1, C2, R, E2, D2, R).n8.repeat(4)
 bg :bass, bass.synth(voices: 1) { |v| v.hz.saw.lp4(v.cutoff(900), resonance: 0.4) * v.amp_env }.at(-6.db)
-bg :hat, grid(16, '..x...x...x...xx').loop.at(-12.db)
+bg :hat, grid(16, 'x.x.x.x.x.x.x.xx').repeat(4)
 ```
 
-`ruby song.rb` plays it and ends when everything has rung out.
+`ruby song.rb` plays its four bars and ends when everything has rung out (looping clips play until Ctrl-C, as with `wait`).
 
 - Methods: `main` (Ruby's top-level object) is extended with `MB::Sound::DSL`, generated forwarders `def play(...) = ::MB::Sound.play(...)` for every public command of MB::Sound's own modules (no setters, no Module/Object methods; none of them shadow a Kernel method, checked when it was written).  State stays on MB::Sound, so the console, scripts, and DSL files share one model.  Commands added later (HelpMethods on first `help`) are forwarded by `method_missing`, which defines their forwarders.  Nothing else changes: other objects, classes, and modules see no new methods.
 - Constants: `MB::Sound::DSL::Constants` is prepended to Object's singleton class; a constant missing at lexical top level (`self.equal?(Object)`, blocks included) resolves to the Note (`C4`, `Ab3`) or the MB::Sound constant (`R`, `T`, `Session`).  Lookups inside other classes and modules raise as before; `Object.const_get(:C4)` resolves too (Ruby can't tell it from a top-level lookup).
