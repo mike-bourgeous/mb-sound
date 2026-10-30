@@ -80,9 +80,13 @@ module MB
         end
 
         # #cue_output as it applies to the open output (:auto resolved).
+        # :auto never puts CUE into a file a render writes (omnibus17, Kez's
+        # K14: a take replayed to a file, or any render with a `cue`, carried
+        # the phones on its right channel from the cue's frame, :split).
         def cue_mode
           return @cue_output unless @cue_output == :auto
           return :off unless output_open?
+          return :off if rendering_to_file?
           n = output_channel_count
           return :ports if n >= @channels * 2
           @cue_split_from && n == 2 ? :split : :off
@@ -242,6 +246,7 @@ module MB
           return if @cue_warned || !MB::Sound.live?
 
           @cue_warned = true
+          return if @cue_output == :auto && rendering_to_file? # (a render: CUE is for the live outputs)
           n = output_channel_count
           if @cue_output == :auto && n == 2 && @channels == 2
             # Once per user (maintainer 2026-10-18: "Split with a first
@@ -255,6 +260,15 @@ module MB
             warn "CUE isn't heard on this output (cue_output :#{@cue_output}, #{n} channels): " \
               "start with CUE_OUTPUT=ports and a 4-channel output, or try cue_output :split or :phones"
           end
+        end
+
+        # True when this Session renders into a file (a non-realtime
+        # Session whose output #writes_file?: `render`, a take replayed to a
+        # file), which :auto keeps CUE out of (see #cue_mode).
+        def rendering_to_file?
+          return false if @realtime || !output_open?
+          o = output
+          o.respond_to?(:writes_file?) && o.writes_file?
         end
 
         # Notes the frame where CUE is first used (a cue player starting or

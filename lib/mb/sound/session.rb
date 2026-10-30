@@ -1423,6 +1423,7 @@ module MB
       # Creates and registers a Player.  Called with @mutex held.  Returns
       # the name.
       def start_player(name:, input:, description:, timeline_nodes:, start:, fade:)
+        start_player_spies(name, input) # (readers' spies; see Buses)
         @next_serial += 1
         @players[@next_serial] = Player.new(
           serial: @next_serial,

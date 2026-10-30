@@ -220,6 +220,19 @@ RSpec.describe(MB::Sound::Drums::Machine, :aggregate_failures) do
       expect { MB::Sound.kit { voice(:kick, smp) { t } } }.to raise_error(ArgumentError, /not both/)
     end
 
+    # Kez's K5 and Odile's F12 (panel 2): a stereo Sample as a voice raised
+    # "undefined method 'get_sampler' for Channels"
+    it 'plays a stereo Sample as a voice mixed down, like the Sample mixed down' do
+      l = Numo::SFloat.new(2400).seq(1, -1 / 2400.0)
+      st = MB::Sound::Sample[[l, l * -0.5]]
+      expect(st.channel_count).to eq(2)
+      g = -> { MB::Sound.grid(16, kick: 'X...', snare: '..X.') }
+      both = collect(MB::Sound.kit(g.()) { voice :kick, st; voice(:snare) { |h| h.sample(st) + h.click } }, 0.5)
+      mono = collect(MB::Sound.kit(g.()) { voice :kick, st.mono; voice(:snare) { |h| h.sample(st.mono) + h.click } }, 0.5)
+      expect(both.abs.max).to be > 0.2
+      expect((both - mono).abs.max).to be < 1e-6
+    end
+
     it 'keeps voices awake through a sample\'s quiet start and late repeats' do
       quiet_start = MB::Sound::Sample.new(Numo::SFloat.zeros(9600).concatenate(Numo::SFloat.ones(2400)))
       kit = MB::Sound.kit(MB::Sound.grid(16, kick: 'X...', snare: 'X...')) {

@@ -259,6 +259,26 @@ module SessionFuzz
         lines << "at_bar(#{bars}, beat: 2) { go :lv }"
       end
     end
+    # (omnibus17, Munro's M3) a drums track given a kit with new rows on a
+    # launch point as a part ducked by its kick starts there: both graphs
+    # queue, and the duck must read the new kit (drawn last, so every seed
+    # keeps the song it made before)
+    drums = tracks.select { |_, k| k == :drums }.keys
+    if !drums.empty? && rng.rand < 0.3
+      t = pick(rng, drums)
+      on = pick(rng, ['on: :bar', 'on: :beat', 'in: 1/4r'])
+      lines << "at_bar(#{rng.rand(1..bars)}, beat: 2) { bg :#{t}, grid(16, kick: 'x...x...', open_hat: '..x...x.').loop, #{on}; " \
+               "bg :ducked, 0.2.constant.duck(:#{t}, only: :kick, amount: -12.db), #{on} }"
+    end
+    # (omnibus17, Munro's M5) a trigger track ducking a part, through full
+    # scenes that don't name it (it keeps pumping) and sometimes `pump:
+    # :off` (drawn last, so every seed keeps the song it made before)
+    if rng.rand < 0.25
+      lines << "sidechain :pump, grid(16, '#{pick(rng, ['x...x...x...x...', 'x..x..x.x..x..x.'])}').loop, on: :now"
+      lines << "bg :pumped, 0.2.constant.duck(:pump, amount: -12.db), on: :now"
+      lines << "scene :nopump, others: :keep, pump: :off" if rng.rand < 0.5
+      lines << "at_bar(#{bars}, beat: 3) { go :nopump }" if lines.last.start_with?('scene :nopump')
+    end
     Song.new(header: header, lines: lines, bars: bars)
   end
 
@@ -301,7 +321,11 @@ module SessionFuzz
   # Warnings a generated song may cause on purpose (commands for players
   # a scene or a one-shot clip has already ended); anything else printed
   # during a render fails :runs.
-  EXPECTED_WARNINGS = [/\ANo background player :\w+ is playing/].freeze
+  EXPECTED_WARNINGS = [
+    /\ANo background player :\w+ is playing/,
+    # (a scene giving a kick-ducked drums track a kit without a kick)
+    /has no node named :kick for a sidechain/,
+  ].freeze
 
   # Errors that make a generated song invalid rather than show a bug
   # (commands for players other commands ended first)

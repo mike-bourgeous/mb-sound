@@ -158,6 +158,24 @@ RSpec.describe(MB::Sound::SidechainMethods) do
       expect(data[2 * 96000..].abs.max).to eq(0)
     end
 
+    # Munro's M5 (panel 2): a full scene that didn't name the pump stopped
+    # it, so a hand-built set pumped only until its first `go`
+    it 'keep playing through full scenes that don\'t name them, and stop for `pump: :off`' do
+      data = run(3 * 96000) { |ss|
+        MB::Sound.sidechain(:pump, line, on: :now)
+        ss.add(MB::Sound.bus(:pump), name: :probe, on: :now)
+        MB::Sound.track(:pad, 0.1.constant)
+        MB::Sound.scene(:a, pad: :on)
+        MB::Sound.scene(:quiet, pad: :on, pump: :off)
+        MB::Sound.at_bar(2) { MB::Sound.go(:a) }
+        MB::Sound.at_bar(3) { MB::Sound.go(:quiet) }
+      }
+      hits = ->(r) { r.select { |i| data[i] > 0.5 && data[i - 1] <= 0.5 } }
+      expect(hits.(96000...192000).length).to eq(5) # (the pump plays on under :a)
+      expect(hits.(192000...288000)).to be_empty
+      expect(session.arrangement.track_info[:pump]).to include('stopped')
+    end
+
     it 'leave no stems and keep stems summing to the mix' do
       dir = tmp_path('stems')
       path = tmp_path('mix.flac')

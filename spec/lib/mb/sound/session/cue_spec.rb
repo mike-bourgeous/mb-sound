@@ -182,6 +182,35 @@ RSpec.describe(MB::Sound::Session::Cue, :aggregate_failures) do
       outs.drop(1).each { |o| o.zip(outs[0]).each { |a, b| expect(a).to eq(b) } }
     end
 
+    # Kez's K14 (panel 2): a render with a `cue` (or a take replayed to a
+    # file) carried the phones on its right channel from the cue's frame
+    it 'keeps CUE out of files that renders and take replays write' do
+      path = tmp_path('cue.flac')
+      MB::Sound.render(path, bars: 1, gain: 1) do
+        MB::Sound.bg(:a, MB::Sound.stereo(0.5.constant, 0.25.constant).until(1.bar), on: :now)
+        MB::Sound.at_bar(1, beat: 2) { MB::Sound.cue(:b, 0.125.constant) }
+      end
+      l, r = MB::Sound.read(path)
+      expect(l.to_a.uniq).to eq([0.5])
+      expect(r.to_a.uniq).to eq([0.25])
+
+      s = new_session(output_channels: 2)
+      take = MB::Sound::Take.new(session: s)
+      b = MB::Sound::Take.console_binding
+      MB::Sound::Session.with_context(session: s) do
+        take.line("bg :a, stereo(0.5.constant, 0.25.constant), on: :now", b)
+        10.times { s.process_buffer }
+        take.line('cue :b, 0.125.constant', b)
+        20.times { s.process_buffer }
+      end
+      expect(s.cue_mode).to eq(:split) # (live: split from the cue)
+      out = tmp_path('replay.flac')
+      take.replay.render(out, tail: 0)
+      l, r = MB::Sound.read(out)
+      expect(l.to_a.uniq).to eq([0.5 * s.master_gain].map { |x| Numo::SFloat.cast([x])[0] })
+      expect(r.to_a.uniq).to eq([0.25 * s.master_gain].map { |x| Numo::SFloat.cast([x])[0] })
+    end
+
     it 'warns once per user, in the console, the first time CUE splits a 2-channel output' do
       ENV['MB_SOUND_HELP_DIR'] = tmp_path('help')
       MB::Sound.live = true

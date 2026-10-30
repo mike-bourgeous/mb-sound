@@ -490,6 +490,8 @@ module MB
           end
 
           # Graphs already playing under a name an `only:` reader names
+          # (graphs starting later get theirs as they start: see
+          # #start_player_spies)
           taps.select(&:only).each do |t|
             players = @mutex.synchronize { @players.values.select { |p| p.name == t.source_name } + [@stopped[t.source_name]].compact }
             players.each { |p| attach_bus_spies(t.source_name, p.input.nodes) }
@@ -498,9 +500,10 @@ module MB
         end
 
         # Attaches spies for `only:` readers of +name+ to the nodes they name
-        # in +nodes+ (a graph about to play under +name+).
-        def attach_bus_spies(name, nodes)
-          onlys = @mutex.synchronize { @bus_only.key?(name) ? @bus_only[name].to_a : [] }
+        # in +nodes+ (a graph about to play under +name+).  +locked+ when
+        # called with @mutex held.
+        def attach_bus_spies(name, nodes, locked: false)
+          onlys = locked ? (@bus_only.key?(name) ? @bus_only[name].to_a : []) : @mutex.synchronize { @bus_only.key?(name) ? @bus_only[name].to_a : [] }
           return if onlys.empty?
 
           all = nodes.flat_map { |n| [n, *n.graph] }.uniq
@@ -518,6 +521,20 @@ module MB
             node.spy(handle: [:bus_tap, name, only], phase: :pre) { |count| @bus_only_pending[key] = count }
             node.spy(handle: [:bus_tap, name, only], phase: :post) { |data| bus_only_write(key, data) }
           end
+        end
+
+        # Attaches the spies of `only:` readers of +name+ to graph +input+
+        # as it starts playing under that name (Session#start_player, with
+        # @mutex held): every graph that starts under a read name gets them
+        # (idempotent), whatever queued it.  Before (omnibus17), spies were
+        # attached when a graph was queued and when a reader was bound to
+        # the graphs then playing, so a graph queued before its reader
+        # (a scene swapping the drums' kit on the bar as it starts the
+        # ducked bass) or kept for undo/resume played unread: `duck(:drums,
+        # only: :kick)` read silence after the swap (Munro's M3).
+        def start_player_spies(name, input)
+          return unless @bus_only.key?(name) && input.respond_to?(:nodes)
+          attach_bus_spies(name, input.nodes, locked: true)
         end
 
         # True if graph node +n+ is the one `only: name` means.

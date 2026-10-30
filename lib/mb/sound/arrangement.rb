@@ -519,7 +519,7 @@ module MB
 
           tracks.each_value do |tr|
             # (a trigger track given a number: its level turns, the line plays on)
-            value = knob_values.key?(tr.name) ? :keep : sc.values.key?(tr.name) ? sc.values[tr.name] : (sc.others == :keep ? :keep : :off)
+            value = knob_values.key?(tr.name) ? :keep : sc.values.key?(tr.name) ? sc.values[tr.name] : unnamed_value(sc, tr)
             next if value == :keep
             stop = sc.others == :cut ? :cut : :ring
             set_track(tr, value, resolve(tr.q || sc.q || @quant, tr, point), fade: fade.nil? ? sc.fade : fade, stop: stop)
@@ -554,6 +554,15 @@ module MB
           @session.note_undo_extra(self, before, undo_state)
         }
         result && @session.journal[result.seq]
+      end
+
+      # What scene +sc+ does to track +tr+ when it doesn't name it: :keep
+      # with `others: :keep`, and for trigger tracks always (omnibus17,
+      # Munro's M5: a full scene stopped the pump of a hand-built set, so it
+      # pumped only until the first `go`; templates named it in every
+      # scene; `pump: :off` still stops one), else :off.
+      def unnamed_value(sc, tr)
+        sc.others == :keep || tr.trigger ? :keep : :off
       end
 
       # A listing of the tracks: name => "q:1 bass_a (playing)".

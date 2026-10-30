@@ -287,7 +287,7 @@ module MB
           scene_infos = arr.scenes.map { |sname, sc|
             values = sc.values || {}
             cells = tracks.keys.to_h { |t|
-              v = values.key?(t) ? values[t] : (sc.others == :keep ? :keep : :stop)
+              v = values.key?(t) ? values[t] : arr.unnamed_value(sc, tracks[t])
               cell = case v
                      when :keep, :on, true then :keep
                      when :off, :cut, :stop, false, nil then :stop

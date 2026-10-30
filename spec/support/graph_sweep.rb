@@ -414,8 +414,11 @@ module GraphSweep
         c.s.tr909(c.s.grid(32, bd: 'x.x.', clap: '.x..', hat: 'x.x.', oh: 'xx..', ride: '..x.', snare: '..f.'), flam: 0.001, shuffle: 2)
       }],
       ['drums kit builder', ->(c) {
-        c.s.kit(c.s.grid(32, kick: 'x.x.', snare: '.x.x', hat: 'xx..', oh: '..xx')) {
+        # (a stereo Sample as a voice plays mixed down: omnibus17, K5/F12)
+        wood = MB::Sound::Sample[[Numo::SFloat.new(300).seq.map { |i| Math.sin(i * 0.3) * 0.99**i }, Numo::SFloat.new(300).seq.map { |i| Math.sin(i * 0.2) * 0.98**i }]]
+        c.s.kit(c.s.grid(32, kick: 'x.x.', snare: '.x.x', hat: 'xx..', oh: '..xx', clap: 'x..x')) {
           voice(:kick) { |h| h.body(50, sweep: 2, drop: 0.3).softclip(0.6) + h.click }
+          voice(:clap) { |h| h.sample(wood) }
           voice(:snare) { |h| h.fm(200, index_decay: 0.01) + h.noise(bandpass: 2000) + h.bursts(3, 0.0003) }
           voice(:closed_hat) { metal * env(0.01) * velocity }
           tr808 :open_hat
