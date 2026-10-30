@@ -366,11 +366,7 @@ module MB
         # The running Pry command's line, for the pager (see #call_safely).
         module CommandLine
           def call_safely(*args)
-            was = Thread.current[:mb_sound_pry_command]
-            Thread.current[:mb_sound_pry_command] = [command_name, *args].join(' ').strip
-            super
-          ensure
-            Thread.current[:mb_sound_pry_command] = was
+            Internal.with_local(:mb_sound_pry_command, [command_name, *args].join(' ').strip) { super }
           end
         end
 

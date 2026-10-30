@@ -95,7 +95,7 @@ module MB
         # A param's length value in whole notes (see the class comment).
         def param_whole_notes(v)
           case v
-          when Numeric then Duration.rational(v.to_f * Sequence.current_transport.whole_notes_per_second)
+          when Numeric then Duration.rational(Sequence.current_transport.whole_notes_of(v.to_f))
           else Duration.whole_notes(v)
           end
         end

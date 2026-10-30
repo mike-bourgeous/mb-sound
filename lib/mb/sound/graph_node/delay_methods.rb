@@ -328,12 +328,8 @@ module MB
 
         # Runs the block without .seconds_keyword's deprecation warning
         # (for graph document loading).
-        def self.quiet_seconds
-          old = Thread.current[:mb_sound_quiet_seconds]
-          Thread.current[:mb_sound_quiet_seconds] = true
-          yield
-        ensure
-          Thread.current[:mb_sound_quiet_seconds] = old
+        def self.quiet_seconds(&block)
+          Internal.with_local(:mb_sound_quiet_seconds, true, &block)
         end
 
         # The delay smoothing from +:smooth+ and its older spelling

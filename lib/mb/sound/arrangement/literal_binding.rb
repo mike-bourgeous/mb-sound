@@ -378,12 +378,7 @@ module MB
         def with_documents(docs)
           return yield if docs.empty?
           old = Thread.current[:mb_sound_bound_document_params]
-          Thread.current[:mb_sound_bound_document_params] = old ? old.merge(docs) { |_, a, b| a.merge(b) } : docs
-          begin
-            yield
-          ensure
-            Thread.current[:mb_sound_bound_document_params] = old
-          end
+          Internal.with_local(:mb_sound_bound_document_params, old ? old.merge(docs) { |_, a, b| a.merge(b) } : docs) { yield }
         end
 
         # The bound params for document +name+ (see .with_documents), or nil.

@@ -62,7 +62,7 @@ module MB
         def self.ring_mode
           return Thread.current[:mb_sound_mixer_ring] if Thread.current[:mb_sound_mixer_ring]
 
-          session = MB::Sound::Session.context&.[](:session)
+          session = MB::Sound::Session.context&.session
           (session.respond_to?(:ring) && session.ring) || :all
         end
 
@@ -73,12 +73,7 @@ module MB
         #
         #     g = Mixer.with_ring(:first) { drone + hit }   # ends with the hit
         def self.with_ring(mode)
-          mode = ring_value(mode)
-          old = Thread.current[:mb_sound_mixer_ring]
-          Thread.current[:mb_sound_mixer_ring] = mode
-          yield
-        ensure
-          Thread.current[:mb_sound_mixer_ring] = old
+          Internal.with_local(:mb_sound_mixer_ring, ring_value(mode)) { yield }
         end
 
         # Returns +mode+ as a ring mode (see RING_MODES; true is :all, false

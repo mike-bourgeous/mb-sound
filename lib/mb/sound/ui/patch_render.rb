@@ -292,7 +292,7 @@ module MB
             ev = guess ? nil : first_note(source.clip)
             if ev
               n = note_number(ev.value)
-              len = ev.length.to_r * 240 / source.bpm.to_f
+              len = Sequence::TempoMap.seconds_at(ev.length.to_r, source.bpm.to_f)
               return Input.new(note: n, velocity: ev.velocity.to_f, hold: len, kind: :clip_note, role: nil, text: "first note #{note_name(n)}".freeze,
                                id: [:note, n, ev.velocity.to_f, len.round(6)].freeze)
             end

@@ -24,6 +24,11 @@ module MB
         # without a form).
         TimelineState = Struct.new(:pos, :form, keyword_init: true)
 
+        # Undo subject of seeks and timeline restores (a TimelineState).
+        TimelineSubject = Data.define
+        Undo.subject TimelineSubject, snapshot: :timeline_snapshot, restore: :restore_timeline_change, symbol: :timeline
+        Undo.claim :seek_undo_subject, order: 30
+
         # How many timeline changes (seeks and their undos) have landed: the
         # number of the current pass over the timeline, for take replays
         # (see Scheduler::Entry and Take::Replay).
@@ -58,11 +63,9 @@ module MB
           c.kind == :seek || c.kind == :tempo || (c.kind == :restore && (c.subject == :timeline || c.subject == :tempo))
         end
 
-        # The subject whose state a change snapshots for undo.
-        def snapshot_subject(c)
-          return :timeline if c.kind == :seek
-          return Knobs::KnobSubject.new(c.subject) if knob_change?(c)
-          c.subject
+        # The undo subject of a seek (see Undo#snapshot_subject).
+        def seek_undo_subject(c)
+          c.kind == :seek ? TimelineSubject.new : nil
         end
 
         # A seek target given as a length (`12.bars`, `32.seconds`), which
@@ -174,8 +177,13 @@ module MB
         end
 
         # Snapshots the timeline for undo (see TimelineState).
-        def timeline_snapshot
+        def timeline_snapshot(_subject)
           TimelineState.new(pos: @transport.position, form: arrangement.playback&.seek_snapshot)
+        end
+
+        # Seeks back to before +original+ at +time+.
+        def restore_timeline_change(_subject, original, time)
+          change(:restore, :timeline, time, data: {}, undoes: original.seq) { |_t| restore_timeline(original.before) }
         end
 
         # Puts the timeline (and the form) back to +state+ (a TimelineState).
@@ -198,25 +206,14 @@ module MB
         # While a take replays the same holds for the replayed line: its
         # recorded landings and issue time aren't the form's.
         def without_command_or_line(&block)
-          line = Thread.current[:mb_sound_take_line]
-          perform = Thread.current[:mb_sound_session_perform]
-          Thread.current[:mb_sound_take_line] = nil
-          Thread.current[:mb_sound_session_perform] = perform&.except(:forced, :now, :line)
-          without_command(&block)
-        ensure
-          Thread.current[:mb_sound_take_line] = line
-          Thread.current[:mb_sound_session_perform] = perform
+          Session.with_context_fields(take_line: nil, forced: nil, now: nil) { without_command(&block) }
         end
 
         # Runs the block in a throwaway undo group: changes made inside it
         # (and commands nested in it, like a scene launch) are not undo
         # steps of their own or part of the console command around it.
-        def without_command
-          old = Thread.current[:mb_sound_command]
-          Thread.current[:mb_sound_command] = { session: self, changes: [], extras: [] }
-          yield
-        ensure
-          Thread.current[:mb_sound_command] = old
+        def without_command(&block)
+          Session.with_context_fields(command: Undo::CommandGroup.new(self), &block)
         end
 
         # Commits timeline changes due at the current position (at the start
@@ -239,7 +236,7 @@ module MB
         def frames_before_seek(count, per_sample)
           c = @changes.find { |x| timeline_change?(x) || carry_change?(x) } or return nil
           from = @transport.position
-          return nil unless c.time > from && c.time < from + count * per_sample
+          return nil unless c.time > from && c.time < Sequence::Transport.position_at(from, count, per_sample)
           k = ((c.time - from) / per_sample).ceil
           k > 0 && k < count ? k : nil
         end

@@ -60,13 +60,14 @@ module MB
       # block) left bounces and build-time lengths at the old tempo.
       def self.current_transport
         context = MB::Sound::Session.context
-        current = context&.[](:session)&.transport || transport
-        pending = context&.[](:pending_bpm)
+        current = context&.session&.transport || transport
+        batch = context&.batch
+        pending = batch&.pending_bpm
         return current if pending.nil? || pending == current.bpm
 
-        cached = context[:pending_transport]
+        cached = batch.pending_transport
         if cached.nil? || cached.bpm != pending || cached.bar_length != current.bar_length
-          cached = context[:pending_transport] = Transport.new(bpm: pending, bar_length: current.bar_length)
+          cached = batch.pending_transport = Transport.new(bpm: pending, bar_length: current.bar_length)
         end
         cached
       end

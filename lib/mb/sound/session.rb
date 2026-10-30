@@ -4,12 +4,13 @@ require_relative 'launch_point'
 require_relative 'gc_quiet'
 
 require_relative 'session/journal'
+require_relative 'session/context'
 require_relative 'session/names'
 require_relative 'session/changes'
 require_relative 'session/fades'
+require_relative 'session/undo' # (before the modules registering undo subjects)
 require_relative 'session/strip'
 require_relative 'session/faders'
-require_relative 'session/undo'
 require_relative 'session/master'
 require_relative 'session/tails'
 require_relative 'session/markers'
@@ -94,8 +95,8 @@ module MB
       include SafetyLimiter
       include UIFeed
       include Warming
-      include Buses # it extends Strip, Undo, and Seeks through super
-      include Cue # last: it extends Strip, Undo, Seeks, and Buses through super
+      include Buses # it extends Strip's audible_unlocked? and apply_strip through super
+      include Cue # after Buses: it extends audible_unlocked? through super (undo subjects are registered: Undo.subject)
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
@@ -192,60 +193,24 @@ module MB
         @default = output && new(output: output, fade_in: DEFAULT_FADE_IN, fade_out: DEFAULT_FADE_OUT)
       end
 
-      # The playback context of the current thread, set by #with_context: a
-      # Hash with the +:session+ that commands like PlaybackMethods#bg should
-      # use, and while a scheduled block runs, its +:time+ and a +:batch+
-      # Array that collects the block's actions.  Nil outside any context.
-      def self.context
-        Thread.current[:mb_sound_session_context]
-      end
-
-      # Sets the current thread's playback context (see .context) while the
-      # block runs.
-      def self.with_context(**context)
-        old = Thread.current[:mb_sound_session_context]
-        Thread.current[:mb_sound_session_context] = context
-        yield
-      ensure
-        Thread.current[:mb_sound_session_context] = old
-      end
-
       # The session that commands like PlaybackMethods#bg use in the current
-      # thread: the context's session, or the default session.
+      # thread: the context's session (see .with_context), or the default
+      # session.
       def self.current
-        context&.[](:session) || default
+        context&.session || default
       end
 
       # The session #current would return, without creating the default
       # session: nil if there is none (or it is closed).
       def self.existing
-        context&.[](:session) || (@default unless @default&.closed?)
-      end
-
-      # The performance context of the current thread, set by
-      # #with_perform while a take replays (see Take): a Hash with the
-      # +:session+, the +:forced+ landing times of the line's changes, the
-      # logical +:now+ (the line's recorded issue time), the +:source+ of
-      # changes, and the take +:line+ id.  Nil outside a replay or undo.
-      def self.perform
-        Thread.current[:mb_sound_session_perform]
-      end
-
-      # Merges +settings+ into the current thread's performance context
-      # (see .perform) while the block runs.
-      def self.with_perform(**settings)
-        old = Thread.current[:mb_sound_session_perform]
-        Thread.current[:mb_sound_session_perform] = (old || {}).merge(settings)
-        yield
-      ensure
-        Thread.current[:mb_sound_session_perform] = old
+        context&.session || (@default unless @default&.closed?)
       end
 
       # Adds a change to the undoable command running on this thread, if
       # any (see Undo#command).  Called by Changes#change.
       def self.note_command_change(session, change)
-        group = Thread.current[:mb_sound_command]
-        group[:changes] << change if group && group[:session].equal?(session)
+        group = context&.command
+        group.changes << change if group && group.session.equal?(session)
       end
 
       # The Sequence::Transport whose timeline this session advances.
@@ -311,7 +276,7 @@ module MB
       #                     (see SafetyLimiter; by default when +:realtime+).
       def initialize(output: nil, transport: Sequence.transport, tuning: Tuning.default, master_gain: DEFAULT_MASTER_GAIN, master_gain_post: false, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil, monitor: nil, cue_output: nil, safety_limiter: nil)
         @transport = transport
-        @per_sample_cache = nil # (see #span_per_sample)
+
         @span_mix_bufs = nil # (see #span_mix)
         @reuse_mix = false # (see #process_buffer)
         @tail_range = nil # (see Tails#abs_peak)
@@ -1100,7 +1065,7 @@ module MB
       # Called with the render lock held.
       def render_span(count, per_sample, to = nil)
         from = @transport.position
-        to ||= from + count * per_sample
+        to ||= Sequence::Transport.position_at(from, count, per_sample)
         old_span = Thread.current[:mb_sound_span]
         old_deferral = Thread.current[:mb_sound_plan_deferral]
         @span.frame = @frame
@@ -1256,11 +1221,7 @@ module MB
       # Whole notes per output sample at the transport's tempo (exact;
       # kept until the tempo or the output rate changes).
       def span_per_sample
-        wnps = @transport.whole_notes_per_second
-        rate = output.sample_rate
-        c = @per_sample_cache
-        return c[2] if c && c[0].equal?(wnps) && c[1] == rate
-        (@per_sample_cache = [wnps, rate, wnps / rate.to_r].freeze)[2]
+        @transport.whole_notes_per_frame(output.sample_rate)
       end
       private :span_per_sample
 
@@ -1273,7 +1234,7 @@ module MB
       Span = Struct.new(:session, :frame, :pos, :per_sample, :moving, :sample_rate, :run) do
         # A Stamp for the sample +offset+ frames into the span.
         def stamp(offset = 0)
-          Stamp.at(moving ? pos + offset * per_sample : pos, session.transport, frame: frame + offset)
+          Stamp.at(moving ? Sequence::Transport.position_at(pos, offset, per_sample) : pos, session.transport, frame: frame + offset)
         end
       end
 
@@ -1519,7 +1480,7 @@ module MB
         point ||= LaunchPoint::NONE
         point = LaunchPoint.on(point) if point.is_a?(Symbol)
         default = @players.empty? && !queued_start? ? :now : :bar if default == :auto
-        replay = Session.perform&.[](:source) == :replay
+        replay = Session.context&.replaying?
         point.resolve(now: now, transport: @transport, default: default, clip_grid: -> { clip_grid(timeline_nodes) }, replay: replay)
       end
 
@@ -1568,8 +1529,8 @@ module MB
         # replaced graph stops before that sample
         offset = 0
         unless p.started
-          offset = MB::M.max(((p.start - from) / per_sample).floor, 0)
-          start = from + offset * per_sample
+          offset = MB::M.max(Sequence::Transport.frame_at(p.start, from, per_sample), 0)
+          start = Sequence::Transport.position_at(from, offset, per_sample)
           p.timeline_nodes.each { |n| n.start_at(start, origin: start, launch: p.launch, transport: @transport) }
           p.start = start
           p.started = true
@@ -1587,8 +1548,8 @@ module MB
           # replay played it up to a buffer early), and clocked clips and
           # loops resync to their clocks there
           p.waited = false
-          offset = MB::M.max(((p.start - from) / per_sample).floor, 0)
-          again = from + offset * per_sample
+          offset = MB::M.max(Sequence::Transport.frame_at(p.start, from, per_sample), 0)
+          again = Sequence::Transport.position_at(from, offset, per_sample)
           if offset > 0
             p.timeline_nodes.each { |n| n.start_at(again, origin: p.start, launch: p.launch, transport: @transport) }
           end
@@ -1600,11 +1561,11 @@ module MB
           if ringing
             # Stops its notes on the exact sample of its stop time, then
             # rings out (see Tails)
-            begin_ring(p, base, MB::M.max(((p.stop_at - from) / per_sample).floor, offset)) if p.ring.stop_frame.nil?
+            begin_ring(p, base, MB::M.max(Sequence::Transport.frame_at(p.stop_at, from, per_sample), offset)) if p.ring.stop_frame.nil?
           elsif p.fade_out
             # Fades out from the exact sample of its stop time
             unless p.fading_out
-              stop_idx = MB::M.max(((p.stop_at - from) / per_sample).floor, offset)
+              stop_idx = MB::M.max(Sequence::Transport.frame_at(p.stop_at, from, per_sample), offset)
               start_fade_out(p, base + stop_idx, p.fade_out, rate)
             end
           elsif p.stop_at <= from
@@ -1613,7 +1574,7 @@ module MB
         end
 
         frames = count - offset
-        frames = MB::M.min(frames, ((p.stop_at - from) / per_sample).floor - offset) if p.stop_at && !p.fade_out && !ringing
+        frames = MB::M.min(frames, Sequence::Transport.frame_at(p.stop_at, from, per_sample) - offset) if p.stop_at && !p.fade_out && !ringing
         return retire(p, keep: p.keep) if frames <= 0
 
         # A muted player has nothing to ring out
@@ -1623,7 +1584,7 @@ module MB
         # Buses#bus_source?), waking here if it slept before
         sidechained = @routed_span && bus_source?(p.name)
         if sidechained && p.asleep
-          wake_pos = from + offset * per_sample
+          wake_pos = Sequence::Transport.position_at(from, offset, per_sample)
           p.timeline_nodes.each { |n| n.start_at(wake_pos, origin: p.start, launch: p.launch, transport: @transport) }
           p.asleep = false
         end
@@ -1641,7 +1602,7 @@ module MB
           end
 
           if p.asleep || wake > offset
-            wake_pos = from + wake * per_sample
+            wake_pos = Sequence::Transport.position_at(from, wake, per_sample)
             p.timeline_nodes.each { |n| n.start_at(wake_pos, origin: p.start, launch: p.launch, transport: @transport) }
             p.asleep = false
           end

@@ -42,10 +42,10 @@ module MB
           pb = arrangement.playback
           return pb if pb && !pb.ended?
           if (f = TransportMethods.loaded_flow(arrangement))
-            puts "\e[2mflow (not playing#{pb ? ': it ended' : ''}; start or play plays it):\e[0m" unless Session.context&.[](:time)
+            puts "\e[2mflow (not playing#{pb ? ': it ended' : ''}; start or play plays it):\e[0m" unless Session.context&.time
             return f
           end
-          puts "\e[2mno flow yet: flow do intro 8; verse 8 end builds and plays one (help :flow)\e[0m" unless Session.context&.[](:time)
+          puts "\e[2mno flow yet: flow do intro 8; verse 8 end builds and plays one (help :flow)\e[0m" unless Session.context&.time
           return pb
         end
 

@@ -153,11 +153,11 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       times = []
       within do
         MB::Sound.bg(0.constant)
-        MB::Sound.after(1) { times << MB::Sound::Session.context[:time] }
-        MB::Sound.after(2) { times << MB::Sound::Session.context[:time] }
+        MB::Sound.after(1) { times << MB::Sound::Session.context.time }
+        MB::Sound.after(2) { times << MB::Sound::Session.context.time }
       end
       run(4000)
-      within { MB::Sound.after(1) { times << MB::Sound::Session.context[:time] } }
+      within { MB::Sound.after(1) { times << MB::Sound::Session.context.time } }
       run(96000 * 2)
       expect(times).to eq([0, 1, 1])
     end
@@ -166,7 +166,7 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       times = []
       within do
         MB::Sound.bg(0.constant)
-        MB::Sound.after(2.bars) { times << MB::Sound::Session.context[:time] }
+        MB::Sound.after(2.bars) { times << MB::Sound::Session.context.time }
       end
       run(96000 * 2)
       expect(times).to eq([1])
@@ -178,7 +178,7 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       times = []
       within do
         MB::Sound.bg(0.constant)
-        MB::Sound.every(4, offset: 3) { times << MB::Sound::Session.context[:time] }
+        MB::Sound.every(4, offset: 3) { times << MB::Sound::Session.context.time }
       end
       run(96000 * 9)
       expect(times).to eq([3, 7])
@@ -190,7 +190,7 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       times = []
       within do
         MB::Sound.bg(0.constant)
-        MB::Sound.every(2.beats, offset: 1.beat) { times << MB::Sound::Session.context[:time] }
+        MB::Sound.every(2.beats, offset: 1.beat) { times << MB::Sound::Session.context.time }
       end
       run(96000)
       expect(times.first(3)).to eq([1/4r, 3/4r, 5/4r]) # blocks run up to half a bar ahead
@@ -200,7 +200,7 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       times = []
       within do
         MB::Sound.bg(0.constant)
-        MB::Sound.every(2) { times << MB::Sound::Session.context[:time] }
+        MB::Sound.every(2) { times << MB::Sound::Session.context.time }
       end
       run(96000 * 3)
       transport.seek(10.5)
@@ -264,12 +264,12 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       times = {}
       within do
         MB::Sound.bg(:a, 0.constant)
-        expect(MB::Sound.at_bar(in: 3.beats) { times[:in] = MB::Sound::Session.context[:time] }.to_s).to eq('at_bar in: 3 beats runs 1:4')
-        MB::Sound.at_bar(at: MB::Sound.bar(2, beat: 2)) { times[:at] = MB::Sound::Session.context[:time] }
-        MB::Sound.at_bar(2, on: 1.n2) { times[:on] = MB::Sound::Session.context[:time] }
+        expect(MB::Sound.at_bar(in: 3.beats) { times[:in] = MB::Sound::Session.context.time }.to_s).to eq('at_bar in: 3 beats runs 1:4')
+        MB::Sound.at_bar(at: MB::Sound.bar(2, beat: 2)) { times[:at] = MB::Sound::Session.context.time }
+        MB::Sound.at_bar(2, on: 1.n2) { times[:on] = MB::Sound::Session.context.time }
       end
       run(800)
-      within { MB::Sound.at_bar(on: :beat) { times[:beat] = MB::Sound::Session.context[:time] } }
+      within { MB::Sound.at_bar(on: :beat) { times[:beat] = MB::Sound::Session.context.time } }
       run(96000 * 2)
       expect(times).to eq(in: 3/4r, at: 5/4r, on: 1r, beat: 1/4r)
     end
@@ -278,8 +278,8 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       times = []
       within do
         MB::Sound.bg(:a, 0.constant)
-        MB::Sound.after(in: 1.n8) { times << MB::Sound::Session.context[:time] }
-        MB::Sound.after(2, on: :beat) { times << MB::Sound::Session.context[:time] }
+        MB::Sound.after(in: 1.n8) { times << MB::Sound::Session.context.time }
+        MB::Sound.after(2, on: :beat) { times << MB::Sound::Session.context.time }
       end
       run(96000 * 2)
       expect(times).to eq([1/8r, 1r])
@@ -289,7 +289,7 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       times = []
       within do
         MB::Sound.bg(:a, 0.constant)
-        h = MB::Sound.every(1, at: MB::Sound.bar(2, beat: 3)) { times << MB::Sound::Session.context[:time] }
+        h = MB::Sound.every(1, at: MB::Sound.bar(2, beat: 3)) { times << MB::Sound::Session.context.time }
         expect(h.to_s).to eq('every 1, at: bar(2, beat: 3) runs next 2:3')
       end
       run(96000 * 3)
@@ -359,7 +359,7 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
         MB::Sound.at_bar(2) do
           MB::Sound.bg(:b, 2.constant)
           transport.advance(1) # simulate the block taking longer than a bar
-          session.add(3.constant, name: :c, start_time: MB::Sound::Session.context[:time]) if direct
+          session.add(3.constant, name: :c, start_time: MB::Sound::Session.context.time) if direct
         end
       end
     end
@@ -390,7 +390,7 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
           MB::Sound.bg(:a, 1.constant)
           MB::Sound.at_bar(2) do
             transport.advance(1)
-            strict.add(3.constant, name: :c, start_time: MB::Sound::Session.context[:time])
+            strict.add(3.constant, name: :c, start_time: MB::Sound::Session.context.time)
           end
         end
         expect { Array.new(120) { strict.process_buffer } }.to raise_error(MB::Sound::Session::LateChange, /bg :c for 2:1 would land 9\d\d ms late: the scheduled block for bar 2 was still running/)

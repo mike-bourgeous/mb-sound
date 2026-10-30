@@ -76,7 +76,7 @@ module MB
 
         # The id of the console line being evaluated on this thread, or nil.
         def current_line_id
-          Thread.current[:mb_sound_take_line]&.last&.id
+          Session.context&.take_line&.last&.id
         end
 
         # Records +choice+ for question +kind+ about +key+ (e.g. :rack,
@@ -84,21 +84,21 @@ module MB
         # so its replay gets the same answer without asking (see
         # .replay_choice).
         def note_choice(kind, key, choice)
-          _take, line = Thread.current[:mb_sound_take_line]
+          _take, line = Session.context&.take_line
           line.choices << [kind, key, choice] if line
         end
 
         # The choice a replaying take line recorded for +kind+ and +key+, or
         # nil (not replaying, or not recorded).
         def replay_choice(kind, key)
-          Thread.current[:mb_sound_replay_choices]&.reverse_each { |k, n, c| return c if k == kind && n == key }
+          Session.context&.choices&.reverse_each { |k, n, c| return c if k == kind && n == key }
           nil
         end
 
         # Records where a change landed in the console line being evaluated
         # on this thread (see Session::Changes#change).
         def note_change(session, change)
-          take, line = Thread.current[:mb_sound_take_line]
+          take, line = Session.context&.take_line
           return unless line && take.session_ok?(session)
           land = change.lands&.pos
           if change.entry&.data&.[](:gesture)
@@ -198,7 +198,7 @@ module MB
           Line.new(id: @next_id, code: code.to_s, issued: session.clock, lands: [], skipped: foreground?(code), epoch: session.epoch - @start_epoch, choices: [])
         }
         @mutex.synchronize { @lines << line }
-        Thread.current[:mb_sound_take_line] = [self, line]
+        Session.set_context_fields(take_line: [self, line])
         line
       end
 
@@ -210,7 +210,7 @@ module MB
 
       # Stops recording the current line (Pry's :after_eval hook).
       def end_line
-        Thread.current[:mb_sound_take_line] = nil
+        Session.set_context_fields(take_line: nil)
       end
 
       # Evaluates +code+ in +binding+ as a console line (for scripts and

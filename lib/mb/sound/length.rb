@@ -148,7 +148,7 @@ module MB
         end
 
         def to_whole_notes(sample_rate: 48000, transport: Sequence.current_transport)
-          Sequence::Duration.rational(numeric_value * transport.whole_notes_per_second)
+          Sequence::Duration.rational(transport.whole_notes_of(numeric_value))
         end
 
         def to_s
@@ -172,7 +172,7 @@ module MB
         end
 
         def to_whole_notes(sample_rate: 48000, transport: Sequence.current_transport)
-          Sequence::Duration.rational(to_seconds(sample_rate: sample_rate) * transport.whole_notes_per_second)
+          Sequence::Duration.rational(transport.whole_notes_of(to_seconds(sample_rate: sample_rate)))
         end
 
         # Rounds to whole samples.

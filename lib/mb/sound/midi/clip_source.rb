@@ -106,7 +106,7 @@ module MB
         def clip_position
           return @clip_position unless @lazy_from
           # Quiet reads since stream time @lazy_from moved it at one tempo
-          @clip_position + (position - @lazy_from) * @quiet_wnps
+          @clip_position + Sequence::TempoMap.whole_notes_for(position - @lazy_from, @quiet_wnps)
         end
 
         # Puts the clip playing now on +clock+ unless it has a clock of its own (see
@@ -252,8 +252,8 @@ module MB
           return true if ended?
           return false if time.nil?
           t = transport
-          remaining = (@clip.length - clip_position) / clip_wnps.to_r
-          remaining <= (time.to_r - t.position) / t.whole_notes_per_second.to_r
+          remaining = Sequence::TempoMap.seconds_for(@clip.length - clip_position, clip_wnps.to_r)
+          remaining <= t.seconds_of(time.to_r - t.position)
         end
 
         # Like #over_by?, for a source not playing yet that starts its
@@ -269,7 +269,7 @@ module MB
         # current tempo), or nil for looping clips.
         def music_end
           return nil if @clip.looping?
-          position + (@clip.length - clip_position) / clip_wnps
+          position + Sequence::TempoMap.seconds_for(@clip.length - clip_position, clip_wnps)
         end
 
         def to_s
@@ -341,7 +341,7 @@ module MB
           event = note_event(e, time)&.with_length_hint(Sequence::Duration.new(MB::M.max(e.length - since, 0r)))
           Chase.new(
             generation: @generation, time: time, event: event, starts: since == 0,
-            previous: note_event(prev, time), elapsed: since / transport.whole_notes_per_second
+            previous: note_event(prev, time), elapsed: transport.seconds_of(since)
           )
         end
 
@@ -352,7 +352,7 @@ module MB
 
         # Seeks to +time+ seconds into the clip at the current tempo.
         def seek_to(time)
-          set_clip_position(time * transport.whole_notes_per_second)
+          set_clip_position(transport.whole_notes_of(time))
         end
 
         # Starts at timeline position +time+ for a graph launched at
@@ -431,7 +431,7 @@ module MB
             end
           end
           if @lazy_from
-            @clip_position += (from - @lazy_from) * @quiet_wnps
+            @clip_position += Sequence::TempoMap.whole_notes_for(from - @lazy_from, @quiet_wnps)
             @lazy_from = nil
           end
           @quiet_frame = nil
@@ -479,9 +479,9 @@ module MB
             wnps = transport.whole_notes_per_second
             start = @clip_position + @origin
             time ||= start
-            stop = start + (to - from) * wnps
+            stop = start + Sequence::TempoMap.whole_notes_for(to - from, wnps)
             return nil unless time < stop
-            split = time > start ? from + (time - start) / wnps : from
+            split = time > start ? from + Sequence::TempoMap.seconds_for(time - start, wnps) : from
             [split, MB::M.max(time, start)]
           end
         end
@@ -540,7 +540,7 @@ module MB
 
               seconds = event.flam.is_a?(Numeric) && event.flam > 0 ? event.flam.to_f : @flam_lead
               lead = MB::M.max((seconds * @flam_rate).round, 1) / @flam_rate
-              step = from + (time - wn_from) / wnps
+              step = from + Sequence::TempoMap.seconds_for(time - wn_from, wnps)
               e = Event.note_on(event.value, event.velocity, channel: @channel, time: MB::M.max(step - lead, from), pitch: event.pitch, flam: event.flam)
               @flam_queue << [e, step]
             end
@@ -634,9 +634,9 @@ module MB
         def clock_timeline(t)
           span = Session.span
           if span && span.session.equal?(@clock_ctx)
-            span.pos + (clock_rf_of(t) - span.run) * span.per_sample
+            Sequence::Transport.position_at(span.pos, clock_rf_of(t) - span.run, span.per_sample)
           else
-            @clock_anchor[2] + (t.to_r - @clock_anchor[0]) * transport.whole_notes_per_second
+            @clock_anchor[2] + transport.whole_notes_of(t.to_r - @clock_anchor[0])
           end
         end
 
@@ -647,7 +647,7 @@ module MB
           if span && span.session.equal?(@clock_ctx) && span.per_sample > 0
             clock_stream_of(span.run + (pos.to_r - span.pos) / span.per_sample)
           else
-            @clock_anchor[0] + (pos.to_r - @clock_anchor[2]) / transport.whole_notes_per_second
+            @clock_anchor[0] + transport.seconds_of(pos.to_r - @clock_anchor[2])
           end
         end
 
@@ -694,9 +694,9 @@ module MB
           end
 
           r = QUIET_BASE_RATE.lcm(to.denominator)
-          q = edge && ((to + (edge - wn) / wnps) * r).floor
+          q = edge && ((to + Sequence::TempoMap.seconds_for(edge - wn, wnps)) * r).floor
           if cap
-            c = ((to + (cap - wn) / wnps) * r).ceil - 1
+            c = ((to + Sequence::TempoMap.seconds_for(cap - wn, wnps)) * r).ceil - 1
             q = c if q.nil? || c < q
           end
 
@@ -722,7 +722,7 @@ module MB
           list = fresh ? @clip.controls.flat_map { |l| l.setup_events(channel: @channel, time: from) } : []
           chase.each { |lane, v| list << lane.event(v, channel: @channel, time: from) }
           return notes if list.empty? && ctl.empty?
-          ctl.each { |time, lane, v| list << lane.event(v, channel: @channel, time: from + (time - wn_from) / wnps) }
+          ctl.each { |time, lane, v| list << lane.event(v, channel: @channel, time: from + Sequence::TempoMap.seconds_for(time - wn_from, wnps)) }
           return list if notes.empty?
 
           # (both lists are sorted by time; controllers first at equal times)
@@ -744,7 +744,7 @@ module MB
         # advances the clip position.
         def edges(from, to, wnps)
           wn_from = @clip_position
-          wn_to = wn_from + (to - from) * wnps
+          wn_to = wn_from + Sequence::TempoMap.whole_notes_for(to - from, wnps)
           @clip_position = wn_to
           early = @early
           @early = false
@@ -753,7 +753,7 @@ module MB
 
           # Flams at or after @flam_start play early (see #play_flams_early)
           if @flam_lead && @flam_start.nil?
-            @flam_start = wn_from + flam_window * wnps
+            @flam_start = wn_from + Sequence::TempoMap.whole_notes_for(flam_window, wnps)
             @flam_to = @flam_start
           end
           start = @flam_lead && @flam_start
@@ -765,7 +765,7 @@ module MB
                   end
           arm_quiet(to, wn_to, wnps) if @flam_lead.nil? && @clock.nil? && self.class.quiet_reads
           out = found.empty? ? Stream::NO_EVENTS : found.filter_map { |time, type, event, cycle|
-            t = from + (time - wn_from) / wnps
+            t = from + Sequence::TempoMap.seconds_for(time - wn_from, wnps)
             if type == :on
               next if start && event.flam && time >= start
               # The note's length from here (its note-on may have moved to
@@ -780,7 +780,7 @@ module MB
           return out unless start
 
           # Not past a pending swap (its clip may have no flams there)
-          look_to = wn_to + flam_window * wnps
+          look_to = wn_to + Sequence::TempoMap.whole_notes_for(flam_window, wnps)
           if (swap = @pending_swap)
             look_to = MB::M.min(look_to, swap[1] ? swap[1] - @origin : wn_to)
           end

@@ -709,7 +709,7 @@ module MB
           attach_knob_midi(session, joined)
           joined.each do |n, _k|
             next unless before[n] && params[n].is_a?(Numeric) # (knob names and nodes bind; see Loader#bound_param)
-            if Session.context&.[](:session).equal?(session)
+            if Session.context&.session.equal?(session)
               turn(n, params[n])
             else
               Session.with_context(session: session) { turn(n, params[n]) }

@@ -29,6 +29,11 @@ module MB
         # are switched with a cut instead of running two chains at once.
         OVERLOAD = 0.6
 
+        # Undo subject of the master chain's changes (subject :master): its
+        # Undo::MasterState.
+        MasterSubject = Data.define
+        Undo.subject MasterSubject, snapshot: :master_undo_snapshot, restore: :restore_master_change, symbol: :master
+
         # A master effects chain.  +nodes+ has one node per channel (nil for
         # a bypass chain, which passes the mix through).  +mode+ is how it
         # takes over from older chains: :spill, :fade, or :cut.  +feeding+
@@ -257,6 +262,25 @@ module MB
 
         private
 
+        # The master chain's state for undo (see Undo::MasterState).
+        def master_undo_snapshot(_subject)
+          chain = @mutex.synchronize { @master_chains&.last }
+          Undo::MasterState.new(block: chain&.block, description: chain&.description || 'bypass', preset: chain&.preset)
+        end
+
+        # Rebuilds the chain from before +original+ and starts it at +time+.
+        def restore_master_change(_subject, original, time)
+          state = original.before
+          chain = state.is_a?(Undo::MasterState) ? build_master(state.block, description: state.description, preset: state.preset) : nil
+          change(:restore, :master, time, data: { description: state&.description }, undoes: original.seq, graph: chain&.chain_graph) { |t|
+            if chain.nil?
+              st = original.before
+              chain = build_master(st&.block, description: st&.description, preset: st&.preset)
+            end
+            start_master(chain, t)
+          }
+        end
+
         # Hands a chain built by #master to the mix at timeline position
         # +time+ (applied by the change queue).
         def start_master(chain, time)
@@ -404,7 +428,7 @@ module MB
             # launch-aligned loops keep their anchor, and non-looping clips
             # count from the chain's start
             if resync && c.feeding
-              at = c.skip ? from + c.skip * per_sample : from
+              at = c.skip ? Sequence::Transport.position_at(from, c.skip, per_sample) : from
               c.timeline_nodes.each { |n| n.start_at(at, origin: c.start, launch: c.launch, transport: @transport) }
             end
 
@@ -455,8 +479,8 @@ module MB
             return if chain.started || (chain.start >= to && @players.any?)
 
             # While idle the timeline doesn't advance, so start right away
-            offset = chain.start >= to ? 0 : MB::M.max(((chain.start - from) / per_sample).floor, 0)
-            start = from + offset * per_sample
+            offset = chain.start >= to ? 0 : MB::M.max(Sequence::Transport.frame_at(chain.start, from, per_sample), 0)
+            start = Sequence::Transport.position_at(from, offset, per_sample)
             launch = chain.start >= to ? start : MB::M.max(chain.start, start)
             start_master_chain(chain, start, launch: launch)
             chain.skip = offset > 0 ? offset : nil

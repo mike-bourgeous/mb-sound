@@ -24,14 +24,14 @@ module MB
           # at the current tempo from the last read on.
           def timeline_at(time)
             timeline_anchor
-            @timeline_wn + (time - @timeline_time) * transport.whole_notes_per_second
+            @timeline_wn + transport.whole_notes_of(time - @timeline_time)
           end
 
           # The stream time (seconds) at which the timeline reaches +wn+
           # whole notes at the current tempo.
           def stream_time_at(wn)
             timeline_anchor
-            @timeline_time + (wn - @timeline_wn) / transport.whole_notes_per_second
+            @timeline_time + transport.seconds_of(wn - @timeline_wn)
           end
 
           # Converts a length to Rational seconds at the current tempo: a
@@ -39,7 +39,7 @@ module MB
           # Samples are counted at 48 kHz (streams have no sample rate).
           def seconds_of(length)
             case length
-            when Sequence::Duration then length.whole_notes / transport.whole_notes_per_second
+            when Sequence::Duration then transport.seconds_of(length.whole_notes)
             when Length then Sequence::Duration.rational(length.to_seconds(transport: transport))
             when Numeric then Sequence::Duration.rational(length)
             else raise ArgumentError, "Expected a length of time (seconds, a Length, or a Duration such as 1.n16; got #{length.inspect})"

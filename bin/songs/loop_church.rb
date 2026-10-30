@@ -97,7 +97,7 @@ module MB::Sound
   # 16ths, velocity]; odd 16ths are swung by +swing+ (0.5 straight), and
   # each instrument has its own lateness and looseness in ms.
   def self.loop_church_hands(bpm: LOOP_CHURCH_BPM, swing: 0.57, seed: 96)
-    bar = 240.0 / bpm
+    bar = MB::Sound::Sequence::TempoMap.seconds_at(1.0, bpm)
     step = bar / 16
     rnd = Random.new(seed)
 

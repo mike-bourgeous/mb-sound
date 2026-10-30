@@ -469,13 +469,9 @@ module MB
         # +tilt+ is the tilt correction (dB per octave) for presets that
         # measure one (:match; see Preset#measured_tilt?).
         def building(trim: nil, capture: false, tilt: nil)
-          old = Thread.current[:mb_sound_mastering]
           state = { trim: trim, built: [], capture: capture, tilt: tilt }
-          Thread.current[:mb_sound_mastering] = state
-          value = yield
+          value = Internal.with_local(:mb_sound_mastering, state) { yield }
           [value, capture ? state[:built] : state[:built].map(&:preset)]
-        ensure
-          Thread.current[:mb_sound_mastering] = old
         end
 
         # A preset built while capturing (see .building): the Preset, the

@@ -46,6 +46,8 @@ module MB
 
         # Undo subject of PFL and launch changes for player name +name+.
         CueSubject = Data.define(:name)
+        Undo.subject CueSubject, snapshot: :cue_undo_snapshot, restore: :restore_cue_change
+        Undo.claim :cue_undo_subject, order: 10
 
         # A name around a cue change, for undo: whether it was pre-listened
         # (+pfl+), the serial of its cue player (+cue_serial+, nil for
@@ -517,21 +519,23 @@ module MB
           !@muted.include?(name) && !@muted.include?(base)
         end
 
-        def snapshot_subject(c)
-          return CueSubject.new(c.subject) if KINDS.include?(c.kind) || c.entry.data[:cue]
-          super
+        # The undo subject of a cue, uncue, or launch change, or a change
+        # marked as one (see Undo#snapshot_subject).
+        def cue_undo_subject(c)
+          KINDS.include?(c.kind) || c.entry.data[:cue] ? CueSubject.new(c.subject) : nil
         end
 
-        def undo_snapshot(subject)
-          return super unless subject.is_a?(CueSubject)
+        # A name's CUE state, for undo (a CueState; its MAIN player's
+        # PlayerState too).
+        def cue_undo_snapshot(subject)
           name = subject.name
           cname = Session::Name.cue(name)
           serial = @mutex.synchronize { @players.values.select { |p| p.name == cname && p.current? }.last&.serial }
-          CueState.new(pfl: @cue_pfl.include?(name), cue_serial: serial, main: super(name))
+          CueState.new(pfl: @cue_pfl.include?(name), cue_serial: serial, main: player_undo_snapshot(Undo::PlayerSubject.new(name)))
         end
 
-        def restore_change(subject, original, time)
-          return super unless subject.is_a?(CueSubject)
+        # Puts a name's CUE back to before +original+ at +time+.
+        def restore_cue_change(subject, original, time)
           state = original.before
           full = original.kind == :launch || original.entry.data[:cue] == :full
           change(:restore, subject.name, time, data: { cue: full ? :full : :pfl }, undoes: original.seq) { |t|

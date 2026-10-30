@@ -662,7 +662,7 @@ module MB
         # SECTION_RAMP as frames at +transport+'s tempo (a quarter note;
         # 0.25 s without a transport).
         def self.ramp_frames(transport, sample_rate)
-          seconds = transport ? (SECTION_RAMP / transport.whole_notes_per_second).to_f : 0.25
+          seconds = transport ? transport.seconds_of(SECTION_RAMP).to_f : 0.25
           (seconds * sample_rate).round
         end
 
@@ -815,16 +815,15 @@ module MB
             return { seconds: bars * 2.0, hop: 1.0 } # (4/4 at 120 BPM)
           end
 
-          wnps = transport.whole_notes_per_second
-          start_pos = Rational(origin, sample_rate.to_i) * wnps
-          end_pos = Rational(origin + length, sample_rate.to_i) * wnps
+          start_pos = transport.whole_notes_of(Rational(origin, sample_rate.to_i))
+          end_pos = transport.whole_notes_of(Rational(origin + length, sample_rate.to_i))
           b = transport.bar_at(start_pos).ceil
           ranges = []
           loop do
             from = transport.bar_position(b)
             to = transport.bar_position(b + bars)
             break if to > end_pos
-            ranges << [((from - start_pos) / wnps).to_f, ((to - start_pos) / wnps).to_f]
+            ranges << [transport.seconds_of(from - start_pos).to_f, transport.seconds_of(to - start_pos).to_f]
             b += 1
           end
           { ranges: ranges }

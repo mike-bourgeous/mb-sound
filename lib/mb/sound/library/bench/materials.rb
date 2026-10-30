@@ -248,7 +248,7 @@ module MB
               next unless name.is_a?(Symbol)
               part = t.kits[name] || t.clips[name]
               next unless part
-              bar = 240.0 / t.tempo
+              bar = Sequence::TempoMap.seconds_at(1.0, t.tempo)
               len = part.is_a?(Sequence::Kit) ? part.rows.values.map(&:length).max : part.length
               seconds = len.to_f * bar
               count = (8.0 / seconds).round.clamp(1, 8)

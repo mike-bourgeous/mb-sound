@@ -109,7 +109,7 @@ module MB
         # A marker's timeline position (seconds converted at the current
         # tempo).
         def pos_of(m)
-          m.pos || m.seconds.to_r * @session.transport.whole_notes_per_second
+          m.pos || @session.transport.whole_notes_of(m.seconds.to_r)
         end
       end
     end

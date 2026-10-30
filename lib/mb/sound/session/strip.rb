@@ -17,6 +17,11 @@ module MB
       # oscillators, envelopes, delays, and reverbs carry on from where they
       # stopped.
       module Strip
+        # Undo subject of changes to every mute and solo flag at once
+        # (subject :strip, e.g. `solo` with no names): an Undo::StripState.
+        StripSubject = Data.define
+        Undo.subject StripSubject, snapshot: :strip_undo_snapshot, restore: :restore_strip_change, symbol: :strip
+
         # A graph kept for #resume or #undo that still reads its branches of
         # shared nodes (see #read_kept_graphs): +read_to+ is the session
         # frame it has read up to, +asleep_reads+ the cache of
@@ -177,6 +182,16 @@ module MB
           fade = bars_or_nil(fade) if fade
           time = start_time ? start_time.to_r : launch_time(at, [], default: nil)
           [change(kind, :strip, time, data: { fade: fade }) { |_t| update.call; apply_strip(fade) }]
+        end
+
+        # Every mute and solo flag, for undo.
+        def strip_undo_snapshot(_subject)
+          Undo::StripState.new(muted: @muted.dup, soloed: @soloed.dup)
+        end
+
+        # Puts the flags back to before +original+ at +time+.
+        def restore_strip_change(_subject, original, time)
+          change(:restore, :strip, time, data: {}, undoes: original.seq) { |_t| restore_strip(original.before) }
         end
 
         # Puts every mute and solo flag back to a StripState (for undo).

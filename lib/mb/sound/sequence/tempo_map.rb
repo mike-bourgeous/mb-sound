@@ -38,6 +38,49 @@ module MB
         MIN_BPM = 1
         MAX_BPM = 999
 
+        # Seconds a whole note lasts at 1 BPM (4 beats of 60 s): the one
+        # place this number lives.  Every conversion between tempos,
+        # seconds, whole notes, and frames goes through the methods below
+        # or Transport's (design/notes/tempo_sync.md, "Time math"; guarded
+        # by spec/lib/mb/sound/sequence/time_math_guard_spec.rb).  They keep
+        # their arguments' types (exact for Rationals; Floats in, Floats
+        # out, in the same order of operations as the copies they replaced).
+        WHOLE_NOTE_SECONDS_AT_1_BPM = 240
+
+        # Whole notes per second at +bpm+ (exact).
+        def self.whole_notes_per_second(bpm)
+          bpm.to_r / WHOLE_NOTE_SECONDS_AT_1_BPM
+        end
+
+        # The tempo in BPM of +wnps+ whole notes per second.
+        def self.bpm_of(wnps)
+          wnps * WHOLE_NOTE_SECONDS_AT_1_BPM
+        end
+
+        # Seconds that +whole_notes+ last at +bpm+ (`seconds_at(1.0, bpm)`
+        # is a 4/4 bar in Float seconds).
+        def self.seconds_at(whole_notes, bpm)
+          whole_notes * WHOLE_NOTE_SECONDS_AT_1_BPM / bpm
+        end
+
+        # Whole notes that pass in +seconds+ at +bpm+ (the inverse of
+        # .seconds_at).
+        def self.whole_notes_at(seconds, bpm)
+          seconds * bpm / WHOLE_NOTE_SECONDS_AT_1_BPM
+        end
+
+        # Seconds that +whole_notes+ last at a rate of +wnps+ whole notes
+        # per second (a transport's, or a clock's: ClipSource).
+        def self.seconds_for(whole_notes, wnps)
+          whole_notes / wnps
+        end
+
+        # Whole notes that pass in +seconds+ at +wnps+ whole notes per
+        # second.
+        def self.whole_notes_for(seconds, wnps)
+          seconds * wnps
+        end
+
         Step = Data.define(:pos, :bpm) do
           def varying? = false
           def end_pos = pos
@@ -220,7 +263,7 @@ module MB
           sum = f.(0.0) + f.(1.0)
           (1...n).each { |i| sum += (i.odd? ? 4 : 2) * f.(i.to_f / n) }
           mean = sum / (3.0 * n)
-          (seconds.to_f / (240.0 * mean)).rationalize(Rational(1, 1_000_000))
+          (seconds.to_f / (WHOLE_NOTE_SECONDS_AT_1_BPM * mean)).rationalize(Rational(1, 1_000_000))
         end
 
         # +bpm+ (a number or a Tempo) as an exact Rational, raising for

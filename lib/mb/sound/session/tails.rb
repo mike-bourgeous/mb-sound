@@ -138,7 +138,7 @@ module MB
         # at session frame +frame+ (during #render_player).
         def note_rung_out(p, frame, rate)
           ring = p.ring
-          pos = @transport.position + (frame - @frame) * @transport.whole_notes_per_second / rate.to_r
+          pos = Sequence::Transport.position_at(@transport.position, frame - @frame, @transport.whole_notes_per_frame(rate))
           seconds = ((frame - ring.stop_frame) / rate.to_f).round(3)
           @journal.note_entry(
             kind: :rung_out, subject: p.name, lands: stamp(pos, frame: frame),

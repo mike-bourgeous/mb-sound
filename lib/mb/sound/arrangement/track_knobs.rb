@@ -46,21 +46,17 @@ module MB
 
         # Runs the block as track +name+'s patch build in +session+ (see
         # .current).
-        def building(name, session)
-          old = Thread.current[:mb_sound_patch_track]
-          Thread.current[:mb_sound_patch_track] = [name, session]
-          yield
-        ensure
-          Thread.current[:mb_sound_patch_track] = old
+        def building(name, session, &block)
+          Session.with_context_fields(patch_track: [name, session], &block)
         end
 
         # [track name, Session] of the track patch building on this thread,
         # or nil.  The Session is the context's (a rehearsal sandbox's
         # copies), else the track's.
         def current
-          name, session = Thread.current[:mb_sound_patch_track]
+          name, session = Session.context&.patch_track
           return nil unless name
-          [name, Session.context&.[](:session) || session]
+          [name, Session.context.session || session]
         end
 
         # Notes that the building track's patch read knob +knob+ while

@@ -37,6 +37,76 @@ module MB
         # :strip, e.g. `solo` with no names).
         StripState = Struct.new(:muted, :soloed, keyword_init: true)
 
+        # Undo subject of a player name's changes (#bg, #stop, #swap, ...):
+        # its PlayerState.
+        PlayerSubject = Data.define(:name)
+
+        # The undo group of a running command (see #command, Context#command):
+        # its Session, the changes it made, and Set-level extras
+        # ([participant, before, after]).
+        CommandGroup = Struct.new(:session, :changes, :extras) do
+          def initialize(session)
+            super(session, [], [])
+          end
+        end
+
+        # How undo snapshots and restores one subject type: +snapshot+ and
+        # +restore+ name Session methods, called as
+        # `snapshot(subject)` (returns the state) and
+        # `restore(subject, original_change, time)` (issues the change that
+        # puts the state back; see #restore_change).
+        SubjectKind = Data.define(:type, :snapshot, :restore)
+
+        # A Session method `(change) -> subject or nil` that claims changes
+        # for its subject type before the Symbol and player lookups (see
+        # #snapshot_subject), tried in +order+.
+        Claim = Data.define(:name, :order)
+
+        @subject_kinds = {}
+        @symbol_subjects = {}
+        @claims = [].freeze
+
+        # Undo subjects (session-core-1, design/notes/arrangement.md,
+        # "Undo"): each module owning an undoable kind of state registers
+        # its subject type here, next to the methods that snapshot and
+        # restore it, so Undo dispatches through this table instead of
+        # super chains (include order doesn't matter).  +symbol+ maps
+        # changes whose subject is that Symbol (e.g. :master) to the
+        # subject +type+.new.
+        def self.subject(type, snapshot:, restore:, symbol: nil)
+          raise ArgumentError, "#{type} is already an undo subject" if @subject_kinds.key?(type)
+          @subject_kinds[type] = SubjectKind.new(type: type, snapshot: snapshot, restore: restore)
+          @symbol_subjects[symbol] = type.new if symbol
+        end
+
+        # Registers +method+ as a claim (see Claim).
+        def self.claim(method, order:)
+          @claims = (@claims + [Claim.new(name: method, order: order)]).sort_by(&:order).freeze
+        end
+
+        # The registered SubjectKind of +subject+.
+        def self.subject_kind(subject)
+          @subject_kinds.fetch(subject.class) { raise ArgumentError, "Not an undo subject: #{subject.inspect}" }
+        end
+
+        # The registered subject for change subject +name+ if it is one of
+        # the registered Symbols, else nil.
+        def self.symbol_subject(name)
+          name.is_a?(Symbol) ? @symbol_subjects[name] : nil
+        end
+
+        # The claims in order.
+        def self.claims
+          @claims
+        end
+
+        # The registered subject types (for specs).
+        def self.subject_types
+          @subject_kinds.keys
+        end
+
+        subject PlayerSubject, snapshot: :player_undo_snapshot, restore: :restore_player_change
+
         # One undo step: the changes one command made (see Changes::Change),
         # Set-level state around it (+extras+: [participant, before, after]
         # triples), and +cancelled+ changes (a step that undid queued
@@ -91,34 +161,28 @@ module MB
         # one undo step.  Nested commands join the outer one.  Returns the
         # block's value and the changes made, as [value, changes].
         def command(label)
-          group = Thread.current[:mb_sound_command]
-          return [yield, nil] if group && group[:session].equal?(self)
+          group = Session.context&.command
+          return [yield, nil] if group && group.session.equal?(self)
 
-          group = { session: self, changes: [], extras: [] }
-          old = Thread.current[:mb_sound_command]
-          Thread.current[:mb_sound_command] = group
-          begin
-            value = yield
-          ensure
-            Thread.current[:mb_sound_command] = old
-          end
+          group = CommandGroup.new(self)
+          value = Session.with_context_fields(command: group) { yield }
 
-          push_step(label, group[:changes], group[:extras]) unless group[:changes].empty? && group[:extras].empty?
+          push_step(label, group.changes, group.extras) unless group.changes.empty? && group.extras.empty?
           @arrangement&.sync_arms # (arm states follow the monitors' players; see Arrangement::Arm)
-          [value, group[:changes]]
+          [value, group.changes]
         end
 
         # Records Set-level state around the current command (see #command)
         # for undo: +participant+ must respond to #restore_undo_state(state).
         def note_undo_extra(participant, before, after)
-          group = Thread.current[:mb_sound_command]
-          return unless group && group[:session].equal?(self)
+          group = Session.context&.command
+          return unless group && group.session.equal?(self)
 
-          existing = group[:extras].find { |p, _, _| p.equal?(participant) }
+          existing = group.extras.find { |p, _, _| p.equal?(participant) }
           if existing
             existing[2] = after
           else
-            group[:extras] << [participant, before, after]
+            group.extras << [participant, before, after]
           end
         end
 
@@ -244,73 +308,56 @@ module MB
           Step.new(label: label, changes: restores, extras: extras, cancelled: waiting.empty? ? nil : waiting, line: Take.current_line_id)
         end
 
-        # Issues a change that puts +subject+ back the way it was before
-        # +original+ (its +before+ snapshot, taken when it landed) at +time+.
-        def restore_change(subject, original, time)
-          if subject == :master
-            state = original.before
-            chain = state.is_a?(MasterState) ? build_master(state.block, description: state.description, preset: state.preset) : nil
-            return change(:restore, :master, time, data: { description: state&.description }, undoes: original.seq, graph: chain&.chain_graph) { |t|
-              if chain.nil?
-                st = original.before
-                chain = build_master(st&.block, description: st&.description, preset: st&.preset)
-              end
-              start_master(chain, t)
-            }
+        # The subject whose state change +c+ snapshots for undo (a subject
+        # type registered with Undo.subject): the first registered claim
+        # that takes the change (CUE, buses and sends, seeks, knobs), else
+        # the type registered for its subject Symbol (:master, :strip,
+        # :timeline, :tempo, :key), else the player name (PlayerSubject).
+        def snapshot_subject(c)
+          Undo.claims.each do |claim|
+            subject = __send__(claim.name, c)
+            return subject if subject
           end
-
-          if subject == :strip
-            return change(:restore, :strip, time, data: {}, undoes: original.seq) { |_t| restore_strip(original.before) }
-          end
-
-          if subject == :timeline
-            return change(:restore, :timeline, time, data: {}, undoes: original.seq) { |_t| restore_timeline(original.before) }
-          end
-
-          if subject.is_a?(Knobs::KnobSubject)
-            return change(:restore, subject.name, time, data: { knob: true }, undoes: original.seq) { |_t| restore_knob(subject.name, original.before) }
-          end
-
-          if subject == :tempo
-            return change(:restore, :tempo, time, data: {}, undoes: original.seq) { |_t| restore_tempo(original.before) }
-          end
-
-          if subject == :key
-            return change(:restore, :key, time, data: { key: original.before&.key.to_s }, undoes: original.seq) { |t| restore_key(original.before, t) }
-          end
-
-          state = original.before
-          starts = state.is_a?(PlayerState) && state.player ? state.player.timeline_nodes : nil
-          change(:restore, subject, time, data: {}, undoes: original.seq, starts: starts) { |t|
-            restore_player(subject, original.before, t)
-          }
+          Undo.symbol_subject(c.subject) || PlayerSubject.new(c.subject)
         end
 
-        # Snapshots a change's subject (see PlayerState and MasterState).
-        # Called with @render_lock held.
+        # Snapshots +subject+ (see #snapshot_subject) through its registered
+        # snapshot method.  Called with @render_lock held.
         def undo_snapshot(subject)
-          return knob_snapshot(subject) if subject.is_a?(Knobs::KnobSubject)
-          return StripState.new(muted: @muted.dup, soloed: @soloed.dup) if subject == :strip
-          return timeline_snapshot if subject == :timeline
-          return key_snapshot if subject == :key
-          return tempo_snapshot if subject == :tempo
+          __send__(Undo.subject_kind(subject).snapshot, subject)
+        end
 
-          if subject == :master
-            chain = @mutex.synchronize { @master_chains&.last }
-            return MasterState.new(block: chain&.block, description: chain&.description || 'bypass', preset: chain&.preset)
-          end
+        # Issues a change that puts +subject+ back the way it was before
+        # +original+ (its +before+ snapshot, taken when it landed) at +time+,
+        # through the subject's registered restore method.
+        def restore_change(subject, original, time)
+          __send__(Undo.subject_kind(subject).restore, subject, original, time)
+        end
 
+        # A player name's state (see PlayerState).  Called with
+        # @render_lock held.
+        def player_undo_snapshot(subject)
+          name = subject.name
           @mutex.synchronize {
-            player = @players.values.select { |p| p.name == subject && p.current? }.last
-            stopped = @stopped[subject]
+            player = @players.values.select { |p| p.name == name && p.current? }.last
+            stopped = @stopped[name]
             nodes = (player || stopped)&.timeline_nodes&.grep(MIDI::ClipSource) || []
             PlayerState.new(
               player: player,
               stopped: stopped,
               clips: nodes.to_h { |n| [n, n.ring_clip || n.pending_clip || n.clip] }.compare_by_identity,
-              muted: @muted.include?(subject),
-              soloed: @soloed.include?(subject)
+              muted: @muted.include?(name),
+              soloed: @soloed.include?(name)
             )
+          }
+        end
+
+        # Restores a player name (see #restore_player).
+        def restore_player_change(subject, original, time)
+          state = original.before
+          starts = state.is_a?(PlayerState) && state.player ? state.player.timeline_nodes : nil
+          change(:restore, subject.name, time, data: {}, undoes: original.seq, starts: starts) { |t|
+            restore_player(subject.name, original.before, t)
           }
         end
 

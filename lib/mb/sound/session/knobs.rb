@@ -19,6 +19,8 @@ module MB
         # the namespace with tracks, but a raw `bg :name` player could use
         # one).
         KnobSubject = Data.define(:name)
+        Undo.subject KnobSubject, snapshot: :knob_snapshot, restore: :restore_knob_change
+        Undo.claim :knob_undo_subject, order: 40
 
         # A knob's state around a change, for undo (see Knob#state_at).
         KnobState = Struct.new(:mode, :value, keyword_init: true)
@@ -423,7 +425,7 @@ module MB
         # #smooth_gesture).
         def turn_keys(k, keys, curve, point, start_time)
           g = @render_lock.synchronize { @knob_gestures[k.name] }
-          per_sample = g&.per_sample || (@transport.whole_notes_per_second / clock_rate)
+          per_sample = g&.per_sample || @transport.whole_notes_per_frame(clock_rate)
           gesture = Gesture.from_hash(keys, curve: curve, per_sample: per_sample, rate: clock_rate, bar_length: @transport.bar_length)
           gesture.keys.each { |_, v| warn_clamp(k, v) }
           data = { value: gesture.keys.last[1], keys: gesture.keys.length }
@@ -602,7 +604,7 @@ module MB
             unless g
               mode, before = k.state_at(f)
               g = @knob_gestures[k.name] = KnobGesture.new(name: k.name, frame: f, pos: @transport.position, before: KnobState.new(mode: mode, value: before), steps: [],
-                                                           per_sample: @transport.whole_notes_per_second / clock_rate, fitted: nil)
+                                                           per_sample: @transport.whole_notes_per_frame(clock_rate), fitted: nil)
             end
             off = f - g.frame
             g.steps.last&.first == off ? (g.steps[-1] = [off, v]) : (g.steps << [off, v])
@@ -848,6 +850,16 @@ module MB
         # True if +c+ changes a knob (a turn, or the undo of one).
         def knob_change?(c)
           c.kind == :turn || (c.kind == :restore && c.entry&.data&.[](:knob))
+        end
+
+        # The undo subject of a knob change (see Undo#snapshot_subject).
+        def knob_undo_subject(c)
+          knob_change?(c) ? KnobSubject.new(c.subject) : nil
+        end
+
+        # Puts the knob back to before +original+ at +time+.
+        def restore_knob_change(subject, original, time)
+          change(:restore, subject.name, time, data: { knob: true }, undoes: original.seq) { |_t| restore_knob(subject.name, original.before) }
         end
       end
     end

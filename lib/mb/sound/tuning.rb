@@ -28,7 +28,7 @@ module MB
       # without arguments, without allocating its keyword Hash (for nodes
       # that check it every buffer).
       def self.current
-        MB::Sound::Session.context&.[](:session)&.tuning || default
+        MB::Sound::Session.context&.session&.tuning || default
       end
 
       # The reference MIDI note number and its frequency in Hz.
@@ -109,10 +109,10 @@ module MB
         context = MB::Sound::Session.context
         current = Tuning.current
 
-        if reference.any? && context&.[](:batch)
+        if reference.any? && context&.batch
           Tuning.new.set(**reference) # raises for invalid references now
-          session, time = context[:session], context[:time]
-          context[:batch] << -> { session.at_time(time) { current.set(**reference) } }
+          session, time = context.session, context.time
+          context.batch << -> { session.at_time(time) { current.set(**reference) } }
         elsif reference.any?
           current.set(**reference)
         end

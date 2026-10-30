@@ -61,7 +61,7 @@ module MB
           # Transport's).
           def initialize(keyboard, tempo: nil)
             @keyboard = keyboard
-            @tempo = tempo || -> { 240.0 / Sequence.transport.bpm }
+            @tempo = tempo || -> { Sequence::TempoMap.seconds_at(1.0, Sequence.transport.bpm) }
             @steps = []
             @div = 8
             @dotted = false

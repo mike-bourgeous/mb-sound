@@ -64,6 +64,9 @@ module MB
         # Undo subjects: a bus's chain, and one send of a player name.
         BusSubject = Data.define(:name)
         SendSubject = Data.define(:name, :bus)
+        Undo.subject BusSubject, snapshot: :bus_undo_snapshot, restore: :restore_bus_change
+        Undo.subject SendSubject, snapshot: :send_undo_snapshot, restore: :restore_send_change
+        Undo.claim :bus_undo_subject, order: 20
 
         # A bus around a change, for undo: its chain's block (nil for
         # none), description, and destination.
@@ -963,7 +966,7 @@ module MB
             b.quiet_from = frame + s
             # Clips and tempo-synced nodes in the chain catch up with the
             # timeline, as players do when they wake
-            pos = from + s * per_sample
+            pos = Sequence::Transport.position_at(from, s, per_sample)
             b.chains.each { |c| c.timeline_nodes.each { |n| n.start_at(pos, origin: c.start, launch: c.launch, transport: @transport) } if c.started }
           end
 
@@ -976,7 +979,7 @@ module MB
           # Keep clips in the chains on the timeline, which pauses while idle
           resync = (playing && !b.playing)
           b.playing = playing
-          pos0 = s == 0 ? from : from + s * per_sample # (no Rationals for the usual whole span)
+          pos0 = s == 0 ? from : Sequence::Transport.position_at(from, s, per_sample) # (no Rationals for the usual whole span)
           b.chains.each do |c|
             c.timeline_nodes.each { |n| n.start_at(pos0, origin: c.start, launch: c.launch, transport: @transport) } if resync && c.started && c.feeding
             c.timeline_nodes.each(&:pause_timeline) unless playing
@@ -1173,8 +1176,8 @@ module MB
           end
 
           # (the span's own ends where the segment has them: no Rationals)
-          seg_from = p0 == 0 ? from : from + p0 * per_sample
-          seg_to = to && p1 == @bus_span_count ? to : from + p1 * per_sample
+          seg_from = p0 == 0 ? from : Sequence::Transport.position_at(from, p0, per_sample)
+          seg_to = to && p1 == @bus_span_count ? to : Sequence::Transport.position_at(from, p1, per_sample)
           activate_master(chains, seg_from, seg_to, per_sample, rate)
           # Shared branches catch up with frames the chains didn't read
           # (asleep, or not started yet) before the segment
@@ -1280,7 +1283,7 @@ module MB
           end
         end
 
-        # --- Overrides (Strip, Undo, Seeks) ---
+        # --- Overrides (Strip) and undo subjects ---
 
         # Solo in place through the routing (see design/notes/buses.md): a
         # soloed track keeps the buses it feeds audible, and a soloed bus
@@ -1332,50 +1335,51 @@ module MB
           end
         end
 
-        def snapshot_subject(c)
-          return BusSubject.new(c.subject) if c.kind == :bus
-          return SendSubject.new(c.subject, c.entry.data[:bus]) if c.kind == :send
-          super
+        # The undo subject of a bus or send change (see
+        # Undo#snapshot_subject).
+        def bus_undo_subject(c)
+          case c.kind
+          when :bus then BusSubject.new(c.subject)
+          when :send then SendSubject.new(c.subject, c.entry.data[:bus])
+          end
         end
 
-        def undo_snapshot(subject)
-          case subject
-          when BusSubject
-            b = @mutex.synchronize { @buses[subject.name] }
-            chain = b&.chains&.last
-            BusState.new(block: b&.block, description: chain&.description || 'bypass', to: b&.to)
-          when SendSubject
+        # A bus's chain and destination, for undo (a BusState).
+        def bus_undo_snapshot(subject)
+          b = @mutex.synchronize { @buses[subject.name] }
+          chain = b&.chains&.last
+          BusState.new(block: b&.block, description: chain&.description || 'bypass', to: b&.to)
+        end
+
+        # Rebuilds the bus chain from before +original+ at +time+.
+        def restore_bus_change(subject, original, time)
+          state = original.before
+          chain = build_master(state&.block, description: state&.description, label: subject.name.to_s)
+          prepare_bus_chain(subject.name, chain)
+          change(:bus, subject.name, time, data: { description: state&.description, to: state&.to || :master }, undoes: original.seq, graph: chain.chain_graph) { |t|
+            @mutex.synchronize { b = @buses[subject.name]; b.to = state&.to if b; @bus_order = nil }
+            start_bus_chain(subject.name, chain, state&.block, t)
+          }
+        end
+
+        # A send level's knob state, for undo (nil without the send).
+        def send_undo_snapshot(subject)
+          k = @mutex.synchronize { @routes[subject.name]&.sends&.[](subject.bus) }
+          return nil unless k
+          mode, value = k.state_at(@landing_frame || @frame)
+          Knobs::KnobState.new(mode: mode, value: value)
+        end
+
+        # Puts a send level back to before +original+ at +time+.
+        def restore_send_change(subject, original, time)
+          state = original.before
+          change(:send, subject.name, time, data: { bus: subject.bus }, undoes: original.seq) { |_t|
             k = @mutex.synchronize { @routes[subject.name]&.sends&.[](subject.bus) }
-            return nil unless k
-            mode, value = k.state_at(@landing_frame || @frame)
-            Knobs::KnobState.new(mode: mode, value: value)
-          else
-            super
-          end
-        end
-
-        def restore_change(subject, original, time)
-          case subject
-          when BusSubject
-            state = original.before
-            chain = build_master(state&.block, description: state&.description, label: subject.name.to_s)
-            prepare_bus_chain(subject.name, chain)
-            change(:bus, subject.name, time, data: { description: state&.description, to: state&.to || :master }, undoes: original.seq, graph: chain.chain_graph) { |t|
-              @mutex.synchronize { b = @buses[subject.name]; b.to = state&.to if b; @bus_order = nil }
-              start_bus_chain(subject.name, chain, state&.block, t)
-            }
-          when SendSubject
-            state = original.before
-            change(:send, subject.name, time, data: { bus: subject.bus }, undoes: original.seq) { |_t|
-              k = @mutex.synchronize { @routes[subject.name]&.sends&.[](subject.bus) }
-              if k && state
-                frame = @landing_frame || @frame
-                state.mode == :follow ? k.refollow(state.value, frame: frame) : k.set(state.value, frame: frame)
-              end
-            }
-          else
-            super
-          end
+            if k && state
+              frame = @landing_frame || @frame
+              state.mode == :follow ? k.refollow(state.value, frame: frame) : k.set(state.value, frame: frame)
+            end
+          }
         end
       end
     end

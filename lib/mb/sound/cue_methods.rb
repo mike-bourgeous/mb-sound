@@ -163,9 +163,9 @@ module MB
       def cue_command(label, &block)
         context = Session.context
         session = Session.current
-        time = context&.[](:time)
-        if context&.[](:batch)
-          context[:batch] << -> { block.call(session, time) }
+        time = context&.time
+        if context&.batch
+          context.batch << -> { block.call(session, time) }
           return nil
         end
 

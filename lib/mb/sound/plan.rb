@@ -149,12 +149,8 @@ module MB
         end
 
         # Runs the block with +deferral+ as Plan.deferral on this thread.
-        def with_deferral(deferral)
-          old = Thread.current[:mb_sound_plan_deferral]
-          Thread.current[:mb_sound_plan_deferral] = deferral
-          yield
-        ensure
-          Thread.current[:mb_sound_plan_deferral] = old
+        def with_deferral(deferral, &block)
+          Internal.with_local(:mb_sound_plan_deferral, deferral, &block)
         end
 
         # Whether structurally identical regions (e.g. a Synth's lanes) run

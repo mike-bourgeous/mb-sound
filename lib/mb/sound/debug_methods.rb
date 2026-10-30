@@ -36,6 +36,8 @@ module MB
         part.('terminal.txt') { TerminalInfo.report }
         part.('now.txt') { defined?(Help::Now) ? Help::Now.new.to_s.gsub(/\e\[[0-9;]*m/, '') : '(help not loaded: bin/sound.rb loads it)' }
         part.('players.txt') { session ? session.players.map { |n, d| "#{n.inspect}: #{d}" }.join("\n") : 'no session' }
+        # (each thread's command context: Session.context)
+        part.('contexts.txt') { Thread.list.map { |t| "#{t.name || t.inspect}: #{t[:mb_sound_context]&.inspect || 'none'}" }.join("\n") }
         part.('changes.txt') { session ? session.journal.changes.map(&:to_s).join("\n") : 'no session' }
         if session
           session.debug_graphs.each do |name, graph|

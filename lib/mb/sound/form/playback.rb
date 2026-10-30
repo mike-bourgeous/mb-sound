@@ -109,7 +109,7 @@ module MB
             if @start_time <= @session.now
               # Starting now: launch the first section right away (a
               # scheduled block would run a buffer later when idle)
-              Session.with_context(session: @session, time: @start_time, source: Session.context&.[](:source) || :set) {
+              Session.with_context(session: @session, time: @start_time, source: Session.context&.source || :set) {
                 begin_first
               }
             else
@@ -258,7 +258,7 @@ module MB
                      forced_generate_step(name).then { |st| length ? st.with(length: length) : st }
                    else play_step(index, @counters)
                    end
-            Session.with_context(session: @session, time: pos, source: Session.context&.[](:source) || :set) {
+            Session.with_context(session: @session, time: pos, source: Session.context&.source || :set) {
               set_label_markers(step.labels, pos)
               if step.section
                 @counters = step.counters
@@ -323,7 +323,7 @@ module MB
               drop_pending_pass
               @transport.fills.remove_owner(self, after: pos)
               @transport.seek(pos)
-              Session.with_context(session: @session, time: pos, source: Session.context&.[](:source) || :set) { finish_form(pos) }
+              Session.with_context(session: @session, time: pos, source: Session.context&.source || :set) { finish_form(pos) }
               return Decision.new(section: nil, at: @session.stamp(pos), committed: true)
             end
             seek_to_pass(pass, plan.history.first(pass.number), at: pos)
@@ -352,7 +352,7 @@ module MB
             @looping = snap[:looping]
             step = Step.new(index: snap[:index], section: snap[:section], pass: snap[:pass], counters: snap[:counters], labels: [].freeze,
                             length: snap[:length], times: snap[:times])
-            Session.with_context(session: @session, time: snap[:pass_start], source: Session.context&.[](:source) || :set) {
+            Session.with_context(session: @session, time: snap[:pass_start], source: Session.context&.source || :set) {
               begin_pass(step, snap[:pass_start], record: false)
             }
           }
@@ -685,7 +685,7 @@ module MB
           @counters = pass.counters
           step = Step.new(index: pass.index, section: pass.section, pass: pass.pass, counters: pass.counters, labels: [].freeze,
                           length: pass.length, times: pass.times)
-          Session.with_context(session: @session, time: pos, source: Session.context&.[](:source) || :set) {
+          Session.with_context(session: @session, time: pos, source: Session.context&.source || :set) {
             begin_pass(step, pass.start)
           }
           Decision.new(section: pass.section, at: @session.stamp(pos), committed: true)

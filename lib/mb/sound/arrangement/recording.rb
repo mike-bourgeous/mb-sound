@@ -241,7 +241,7 @@ module MB
             before = undo_state
             entries = trs.map { |tr|
               hub = @session.midi_in(input || armed[tr.name])
-              if Session.perform&.[](:source) != :replay && hub.note_positions.none? { |_, type| type == :note_on }
+              if !Session.context&.replaying? && hub.note_positions.none? { |_, type| type == :note_on }
                 MB::Sound.live_error(ArgumentError.new("Nothing played on #{hub} to capture")) or next
               end
               close = resolve(tr.q || @quant, tr, point)

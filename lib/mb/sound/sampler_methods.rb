@@ -80,7 +80,7 @@ module MB
 
         cap = Sampler::AudioCapture.new(frames, root: root, bpm: session.transport.bpm, channels: from == :master ? session.channels : 1)
         if from == :master
-          session.capture_audio(frames, output: cap, at: point, start_time: point.given? ? nil : Session.context&.[](:time))
+          session.capture_audio(frames, output: cap, at: point, start_time: point.given? ? nil : Session.context&.time)
           session.ensure_running
         else
           raise ArgumentError, "capture_audio records :master or a graph node (got #{from.inspect})" unless from.respond_to?(:sample)

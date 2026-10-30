@@ -81,11 +81,7 @@ module MB
         # recorded issue time while a take replays, and the transport
         # position otherwise.
         def now
-          perform = Session.perform
-          return perform[:now] if perform&.[](:now) && perform[:session].equal?(self)
-          context = Session.context
-          return context[:time] if context&.[](:time) && context[:session].equal?(self)
-          @transport.position
+          Session.context&.now_for(self) || @transport.position
         end
 
         # Records a change to the subject +subject+ (a player name, :master,
@@ -101,13 +97,14 @@ module MB
           raise IOError, 'Session is closed' if @closed
           raise ArgumentError, 'Pass a block to apply the change' unless action
 
-          perform = Session.perform
-          perform = nil unless perform&.[](:session).equal?(self)
-          if perform&.[](:forced)
-            forced = perform[:forced].shift
+          context = Session.context
+          performing = context&.perform_session.equal?(self) # (a take replay or undo of this Session)
+          queue = performing ? context.forced : nil
+          if queue
+            forced = queue.shift
             if forced.nil?
-              warn "Replay: #{kind} #{subject.inspect} wasn't in the take; it lands where it resolves now" unless perform[:overrun_warned]
-              perform[:overrun_warned] = true
+              warn "Replay: #{kind} #{subject.inspect} wasn't in the take; it lands where it resolves now" unless queue.warned
+              queue.warned = true
             elsif forced.is_a?(Array)
               # Landed at forced[0] for an earlier time forced[1] (e.g. a
               # track with lead: launched now): the action gets the
@@ -122,8 +119,8 @@ module MB
           end
           time = time&.to_r
 
-          source = perform&.[](:source) || Session.context&.[](:source) || :console
-          line = perform&.[](:line) || Take.current_line_id
+          source = context ? context.source_for(self) : :console
+          line = Take.current_line_id
 
           c = nil
           @render_lock.synchronize {
@@ -131,13 +128,13 @@ module MB
             # after land first, in queue order (see #commit_queued_due)
             commit_queued_due if time.nil? || time <= @transport.position
             pos = @transport.position
-            check_late(kind, subject, time, pos) unless perform&.[](:forced)
+            check_late(kind, subject, time, pos) unless queue
             seq = @journal.next_seq
             c = Change.new(seq: seq, kind: kind, subject: subject, time: time, action: action, starts: starts, graph: graph, split: split)
 
             c.entry = @journal.add(Journal::Entry.new(
               seq: seq, kind: kind, subject: subject,
-              issued: Stamp.at(perform&.[](:now) || now_unlocked(pos), @transport, frame: @frame),
+              issued: Stamp.at((performing ? context.now : nil) || now_unlocked(pos), @transport, frame: @frame),
               commits: nil,
               lands: stamp(time.nil? || time < pos ? pos : time),
               status: :queued, source: source, line: line, data: data.freeze, undoes: undoes
@@ -198,8 +195,7 @@ module MB
         # The transport position or a scheduled block's time, without the
         # lock (see #now).
         def now_unlocked(pos)
-          context = Session.context
-          context&.[](:time) && context[:session].equal?(self) ? context[:time] : pos
+          Session.context&.time_for(self) || pos
         end
 
         def transport_record_for(playing)
@@ -246,7 +242,7 @@ module MB
           # #process_buffer and Seeks); later changes wait behind them
           until @changes.empty? || @changes.first.time >= to || timeline_change?(@changes.first)
             c = @changes.shift
-            idx = MB::M.max(((c.time - from) / per_sample).floor, 0)
+            idx = MB::M.max(Sequence::Transport.frame_at(c.time, from, per_sample), 0)
             commit_change(c, land_pos: MB::M.max(c.time, from), land_frame: @frame + idx, commits: stamp(from, frame: @frame), immediate: false)
           end
         end
@@ -293,10 +289,10 @@ module MB
         # +raise_errors+).  Changes of blocks that run when their time has
         # already come (nothing was playing) land now as usual.
         def check_late(kind, subject, time, pos)
-          late = Thread.current[:mb_sound_schedule_deadline]
+          late = Session.context&.deadline
           return unless late && late[0].equal?(self) && time && time < pos
 
-          ms = ((pos - time) / @transport.whole_notes_per_second * 1000).to_f.round
+          ms = (@transport.seconds_of(pos - time) * 1000).to_f.round
           MB::Sound.live_error(LateChange.new(
             "#{kind} #{subject.inspect} for #{Stamp.at(time, @transport)} would land #{ms} ms late: the scheduled block for #{late[1]} " \
             "was still running at its time (lookahead #{MB::M.sigfigs((@scheduler.lookahead_whole_notes / @transport.bar_length).to_f, 3)} bars; " \

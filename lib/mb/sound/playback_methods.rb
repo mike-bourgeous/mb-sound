@@ -47,7 +47,7 @@ module MB
         point = LaunchPoint.of(binding) or return nil
         return start(at: point) if no_sound
         sound = Sequence::Clocked.apply(sound, clock) if clock
-        foreground = Session.context.nil? && Session.current.realtime?
+        foreground = Session.context&.session.nil? && Session.current.realtime?
 
         if sound.is_a?(Genre::Template) || (sound.is_a?(Symbol) && Genre.names.include?(sound) && !GraphIO.find_preset(sound))
           return play_genre(sound.is_a?(Symbol) ? Genre[sound] : sound, foreground: foreground, quiet: quiet, plot: plot, graphical: graphical, spectrum: spectrum)
@@ -165,7 +165,7 @@ module MB
           if session.arrangement.tracks[name]
             return session.arrangement.play(name, sound, at: point, fade: fade) if point.given?
 
-            time = Session.context&.[](:time)
+            time = Session.context&.time
             time = session.send(:launch_time, nil, []) if time.nil? && !session.arrangement.tracks[name].q
             return session.arrangement.play(name, sound, start_time: time, fade: fade)
           end
@@ -299,7 +299,7 @@ module MB
             disarmed = session.arrangement.panic_disarm
           }
         }
-        return stops if Session.context&.[](:batch)
+        return stops if Session.context&.batch
 
         stopped = Array(stops).grep(Session::Journal::Entry)
         warn "panic: #{panic_summary(stopped.length, cancelled.length, message, disarmed)}"
@@ -315,7 +315,7 @@ module MB
         pb = session.arrangement.playback
         return unless pb && !pb.ended?
         at = pb.end_at(time || session.now)
-        puts "\e[2m#{what}: the flow ends at #{at} too\e[0m" unless Session.context&.[](:batch)
+        puts "\e[2m#{what}: the flow ends at #{at} too\e[0m" unless Session.context&.batch
       end
 
       # The one line #panic prints: players stopped, changes cancelled, and
@@ -737,7 +737,7 @@ module MB
       #     my_song
       #     wait
       def wait(timeout: nil)
-        raise 'Cannot wait inside a scheduled block (it would block the scheduler)' if Session.context&.[](:batch)
+        raise 'Cannot wait inside a scheduled block (it would block the scheduler)' if Session.context&.batch
 
         session = Session.current
         return true unless session.running?
@@ -1145,7 +1145,7 @@ module MB
             # count land just above it, e.g. 204.00000000000003, so ceil
             # rendered one frame past the end bar at some buffer sizes;
             # fuzz-fixes-1's Session fuzzer)
-            left = MB::M.min(left, to_go <= 0 ? 0 : (to_go / transport.whole_notes_per_second * Rational(rate)).ceil)
+            left = MB::M.min(left, to_go <= 0 ? 0 : transport.frames_of(to_go, Rational(rate)).ceil)
           end
           left
         }
@@ -1275,10 +1275,10 @@ module MB
       def session_command(result, label: nil, kind: nil, all: false, &command)
         context = Session.context
         session = Session.current
-        time = context&.[](:time)
+        time = context&.time
 
-        if context&.[](:batch)
-          context[:batch] << -> { command.call(session, time) }
+        if context&.batch
+          context.batch << -> { command.call(session, time) }
           result
         else
           value, changes = session.command(label) { command.call(session, time) }

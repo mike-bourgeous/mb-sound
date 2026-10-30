@@ -113,7 +113,7 @@ module MB
         # A declick length (DECLICK_SECONDS) in bars at the current tempo,
         # for fades that should be as short as possible without clicking.
         def declick_bars
-          Rational(DECLICK_SECONDS.to_r * @transport.whole_notes_per_second, @transport.bar_length)
+          Rational(@transport.whole_notes_of(DECLICK_SECONDS.to_r), @transport.bar_length)
         end
 
         private

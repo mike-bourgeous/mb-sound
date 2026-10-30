@@ -277,11 +277,8 @@ RSpec.describe('rack documents') do
         expect(line.choices).to eq([[:rack, :twice, :session]])
         expect(take.to_ruby).to include(', choices: [[:rack, :twice, :session]]')
 
-        Thread.current[:mb_sound_replay_choices] = line.choices
-        begin
+        MB::Sound::Session.with_context_fields(choices: line.choices) do
           expect(io.load(text).sample(4)[0]).to eq(3) # (no racks:, no error: the take's choice)
-        ensure
-          Thread.current[:mb_sound_replay_choices] = nil
         end
       end
     end

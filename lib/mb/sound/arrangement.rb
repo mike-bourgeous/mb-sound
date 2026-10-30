@@ -589,7 +589,7 @@ module MB
           k = @session.fader(tr.name)
           state += ", level #{@session.level(tr.name).inspect}" if k && k.value.to_f != 1
           what = tr.patch? ? (tr.clip ? name_of(tr.clip) : 'no clip') : 'graph'
-          lead = tr.ahead && !tr.ahead.zero? ? " #{tr.ahead > 0 ? 'ahead' : 'behind'} #{MB::M.sigfigs((tr.ahead.abs / @session.transport.whole_notes_per_second * 1000).to_f, 3)} ms" : ''
+          lead = tr.ahead && !tr.ahead.zero? ? " #{tr.ahead > 0 ? 'ahead' : 'behind'} #{MB::M.sigfigs((@session.transport.seconds_of(tr.ahead.abs) * 1000).to_f, 3)} ms" : ''
           lead += ' (attack capped)' if tr.capped
           "#{pair(:q, (tr.q || @quant).inspect)} #{what}#{lead} (#{state})"
         }
@@ -818,7 +818,7 @@ module MB
       def rehearse_pass(names)
         box = warm_sandbox
         t = box.transport
-        n16 = (1/16r / t.whole_notes_per_second * box.sample_rate).to_f
+        n16 = t.frames_of(1/16r, box.sample_rate).to_f
         section = 1.n16 * [(REHEARSAL_BUFFERS * box.buffer_size / n16).ceil, 1].max
         short = yield(section, t.bar_length)
         steps = short.steps.sum { |_, times| times }
@@ -826,7 +826,7 @@ module MB
           rehearsal_setup(box, names, section)
           box.arrangement.launch_form(short, LaunchPoint::NONE, 0)
         }
-        frames = ((steps + 1/2r) * section.to_r / t.whole_notes_per_second * box.sample_rate).to_f
+        frames = t.frames_of((steps + 1/2r) * section.to_r, box.sample_rate).to_f
         (frames / box.buffer_size).ceil.times { box.process_buffer }
         steps
       ensure
@@ -909,7 +909,7 @@ module MB
         box = boxes[0]
         box.add(graphs[0], on: :now)
         if play && contained
-          bar = (box.transport.bar_length / box.transport.whole_notes_per_second * box.sample_rate).to_f
+          bar = box.transport.frames_of(box.transport.bar_length, box.sample_rate).to_f
           (bar * WARM_UP_BARS / box.buffer_size).ceil.times { box.process_buffer }
         end
         contained ? :played : :built
@@ -955,7 +955,7 @@ module MB
         box = warm_sandbox
         graph = Session.with_context(session: box) { tr.patch.call(exercise) }
         box.add(graph, on: :now)
-        bar = (box.transport.bar_length / box.transport.whole_notes_per_second * box.sample_rate).to_f
+        bar = box.transport.frames_of(box.transport.bar_length, box.sample_rate).to_f
         (bar * WARM_UP_BARS / box.buffer_size).ceil.times { box.process_buffer }
         true
       rescue StandardError
@@ -1227,7 +1227,7 @@ module MB
         case v
         when nil then 0r
         when Sequence::Duration then v.to_r
-        when Length then Sequence::Duration.rational(Length.seconds(v, transport: t) * t.whole_notes_per_second)
+        when Length then Sequence::Duration.rational(t.whole_notes_of(Length.seconds(v, transport: t)))
         else Sequence::Duration.rational(v) * t.bar_length
         end
       end
@@ -1291,8 +1291,8 @@ module MB
 
       # The last change made for +name+ by the command running now.
       def last_change(name)
-        group = Thread.current[:mb_sound_command]
-        group && group[:changes].reverse.find { |c| c.subject == name }
+        group = Session.context&.command
+        group && group.changes.reverse.find { |c| c.subject == name }
       end
 
       # True if +value+ is a Kit with rows +old+ doesn't have (a patch built

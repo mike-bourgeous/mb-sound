@@ -193,7 +193,7 @@ module MB
             box.add(warm_noise, name: :warm_to, start_time: later, to: name)
             box.add(warm_noise, name: :warm_send, start_time: later, send: { name => 0.5 })
             # (and a send's change landing: a feed usually follows a new bus)
-            box.feed(:warm_to, name, 0.5, start_time: later + WARM_BUFFERS / 4 * Rational(box.buffer_size, box.sample_rate) * box.transport.whole_notes_per_second)
+            box.feed(:warm_to, name, 0.5, start_time: later + box.transport.whole_notes_of(WARM_BUFFERS / 4 * Rational(box.buffer_size, box.sample_rate)))
             :played
           }
         end
@@ -309,7 +309,7 @@ module MB
           # (inside a buffer, as changes landing on a bar line do, and
           # where the change is expected to land live, so clips that
           # follow the timeline start where they will: mid-loop, say)
-          per_buffer = Rational(box.buffer_size, box.sample_rate) * box.transport.whole_notes_per_second
+          per_buffer = box.transport.whole_notes_of(Rational(box.buffer_size, box.sample_rate))
           lead = (WARM_LEAD + 1/2r) * per_buffer
           land = at && at > lead ? at : lead
           box.transport.seek(land - lead)
@@ -332,7 +332,7 @@ module MB
               # (a graph's notes: half a bar reaches a clip's next notes,
               # voices reused and released, as Arrangement#warm_up plays;
               # the second round only needs the graph's first buffers)
-              bar = box.transport.bar_length / box.transport.whole_notes_per_second * box.sample_rate
+              bar = box.transport.frames_of(box.transport.bar_length, box.sample_rate)
               after = MB::M.max(after, (bar * GRAPH_BARS / box.buffer_size).ceil)
             end
             (WARM_LEAD + after).times { box.process_buffer }
@@ -358,9 +358,8 @@ module MB
         # Seconds of timeline left before the time of the scheduled block
         # running on this thread for this session (nil outside one).
         def scheduled_time_left
-          ctx = Session.context
-          return nil unless ctx && ctx[:time] && ctx[:session].equal?(self)
-          ((ctx[:time].to_r - @transport.position) / @transport.whole_notes_per_second).to_f
+          time = Session.context&.time_for(self) or return nil
+          @transport.seconds_of(time.to_r - @transport.position).to_f
         end
 
         def note_warm(w)
