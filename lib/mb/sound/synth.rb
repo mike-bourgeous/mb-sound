@@ -109,7 +109,9 @@ module MB
     class Synth
       include GraphNode
       include GraphNode::SampleRateHelper
-      node_traits memory: :short, carry: :own
+      # (lane seeds are drawn while building; the lanes' nodes draw their
+      # own, caught up while they sleep: #setup_idle_skipping)
+      node_traits memory: :short, carry: :own, random: false
 
       # Output controls (see the class description).
       CONTROLS = [:volume, :expression, :pan].freeze
@@ -244,6 +246,9 @@ module MB
         @zeros = nil
         @skippable_base = nil
         @idle_nodes = nil
+        @catch_base = nil
+        @catch_ups = nil
+        @slept = nil
         @boundary = nil
         @lane_sets = nil
         @boundary_cache = nil
@@ -479,9 +484,9 @@ module MB
       end
 
       # The indices of lanes that may be skipped while idle: with
-      # +:skip_idle+ on (the default), lanes whose graphs have no delays,
-      # reverbs, FIR filters, or tempo-following nodes (see
-      # #setup_idle_skipping).
+      # +:skip_idle+ on (the default), lanes whose graphs have no node that
+      # blocks sleeping (reverbs, FIR filters, tempo-following nodes:
+      # NodeTraits; see #setup_idle_skipping).
       def skippable_lanes
         @skippable.each_index.select { |idx| @skippable[idx] }
       end
@@ -636,8 +641,9 @@ module MB
       #   envelopes, sampler voices, drum repeats) says it may sleep,
       # and its graph has no node that blocks sleeping (NodeTraits'
       # blocks_sleep?: state holding sound that comes back after a silent
-      # stretch, like delays, reverbs, and long FIR filters, without an idle
-      # check of its own, or a signal following the timeline, like tempo
+      # stretch, like reverbs and long FIR filters, without an idle check of
+      # its own (delays and feedback loops have one), or a signal following
+      # the timeline, like tempo
       # LFOs; MIDI transforms upstream of the allocator and clip sources
       # follow the timeline too but only make events, which wake lanes, so
       # clip synths skip idle lanes since 2026-10-10, user decision "yes,
@@ -654,8 +660,12 @@ module MB
       # free-running oscillators and LFOs in a skipped lane pause instead of
       # advancing, key-synced oscillators reset from where they paused (the
       # band-limited reset step starts from a different value), and filter
-      # states keep the residue they had below -120 dB.  Pass +skip_idle:
-      # false+ for exact rendering.
+      # states keep the residue they had below -120 dB (or, between noise
+      # and the lane's envelope, the state from before the sleep).  Random
+      # streams don't pause: the lane's own noise, dust, drift, and grains
+      # catch up by the frames it slept (NodeTraits' +random+ trait; see
+      # #catch_up_lane), so it draws what it would have drawn awake.  Pass
+      # +skip_idle: false+ for exact rendering.
       def setup_idle_skipping(enabled)
         @skip_idle = !!enabled
         @skipping = Array.new(@lanes.length, false)
@@ -683,6 +693,7 @@ module MB
           @skip_idle && g.none? { |n| NodeTraits.blocks_sleep?(n) } && g.any? { |n| n.is_a?(Notes::Node) && n.notes.equal?(@notes[idx]) } &&
             !lane_fusable?(graphs, sets, idx)
         }
+        @skippable_base = Synth.prefer_lane_groups(@skippable_base, graphs, @parts)
 
         # The lane's own nodes with an idle check (NodeTraits), asked where
         # the lane could fall asleep (nodes shared with other lanes answer
@@ -692,6 +703,21 @@ module MB
 
           NodeTraits.idle_checked(g.reject { |n| sets.each_with_index.any? { |set, j| j != idx && set[n.__id__] } })
         }
+
+        # The lane's own nodes drawing random numbers as they render
+        # (NodeTraits' +random+ trait: noise, dust, drift, grains), caught
+        # up for the frames the lane slept (#catch_up_lane), so a lane that
+        # slept draws what it would have drawn awake.  Nodes shared with
+        # other lanes keep running while it sleeps, as do nodes read
+        # through the Tee branches it keeps reading (#boundary leaves those
+        # out of @catch_ups).
+        @catch_base = graphs.each_with_index.map { |g, idx|
+          next [].freeze unless @skippable_base[idx]
+
+          NodeTraits.catching_up(g.reject { |n| sets.each_with_index.any? { |s, j| j != idx && s[n.__id__] } })
+        }
+        @catch_ups = @catch_base.dup
+        @slept = Array.new(@lanes.length, 0)
 
         # So lanes are grouped only if none of them may be skipped;
         # otherwise (e.g. unison oscillators outside the regions) the lanes
@@ -726,6 +752,25 @@ module MB
         @lane_sets = sets
         @boundary_cache = Array.new(@lanes.length)
         @clock_node = @boundary.map { |own, _, _| own.find { |n| n.is_a?(Notes::Node) } }
+      end
+
+      # The lanes that may sleep (+base+, from #setup_idle_skipping), unless
+      # only the idle checks of long-memory nodes (delays, multitaps, delay
+      # networks, feedback loops: NodeTraits) let them: when no lane could
+      # sleep without those checks and the synth has no sub-lanes, its
+      # lanes could form plan lane groups (which compute every lane every
+      # buffer) as before the checks, so none sleeps.  The maintainer's
+      # "With the rule" (delay-sleep-1, 2026-10-30): a dense pluck synth's
+      # lane groups cost 33% of realtime at 128-sample buffers, sleeping
+      # instead of grouping 47%.  Decided from node types only (never from
+      # plan settings or installed regions), so plans never change which
+      # lanes sleep.  Synths with sub-lanes, or with some lane that sleeps
+      # anyway, form no lane groups, so their lanes holding delays sleep.
+      def self.prefer_lane_groups(base, graphs, parts)
+        return base unless base.any? && parts.all?(&:empty?)
+
+        without = base.each_with_index.map { |s, idx| s && graphs[idx].none? { |n| NodeTraits.of(n).memory == :long } }
+        without.none? ? without : base
       end
 
       # Readies lane graph +outs+ (lane Notes +v+) for idle skipping while
@@ -768,6 +813,13 @@ module MB
         }
         list = own + shared + knobs
         @boundary_cache[idx] = [watch, list]
+
+        # (the random streams read through the shared branches keep
+        # running; the frames slept so far go to the nodes that slept them)
+        catch_up_lane(idx)
+        read = {}.compare_by_identity
+        shared.each { |n| n.graph(include_tees: true).each { |u| read[u] = true } }
+        @catch_ups[idx] = read.empty? ? @catch_base[idx] : @catch_base[idx].reject { |n, _| read[n] }.freeze
         list
       end
 
@@ -805,8 +857,33 @@ module MB
       def update_skippable
         grouped = @lane_groups ? @lane_groups.grouped_lanes : []
         @skippable = @skippable_base.each_with_index.map { |s, idx| s && !grouped.include?(idx) }
-        @skippable.each_with_index { |s, idx| @skipping[idx] = false unless s }
+        @skippable.each_with_index do |s, idx|
+          next if s
+
+          catch_up_lane(idx) if @skipping[idx]
+          @skipping[idx] = false
+        end
       end
+
+      # Moves lane +idx+'s random streams (see #setup_idle_skipping) on
+      # over the frames it slept since they last caught up.
+      def catch_up_lane(idx)
+        n = @slept[idx]
+        return if n == 0
+
+        @slept[idx] = 0
+        NodeTraits.catch_up(@catch_ups[idx], n)
+      end
+
+      # Catches every sleeping lane's random streams up to now (before
+      # Session::Carry copies their states into a rebuilt graph).
+      def catch_up_sleepers
+        return unless @slept
+
+        @slept.each_index { |idx| catch_up_lane(idx) }
+        nil
+      end
+      public :catch_up_sleepers
 
       # Records the level of lane +idx+'s channel buffers +bufs+ (for
       # Notes#level), and whether the lane is quiet (QUIET; see
@@ -937,6 +1014,13 @@ module MB
         while i < parts.length
           parts[i].lane_skipped(count)
           i += 1
+        end
+
+        # (random streams catch up at the wake, or every CATCH_UP_CHUNK
+        # frames of a long sleep, so no one call does much)
+        unless @catch_ups[idx].empty?
+          @slept[idx] += count
+          catch_up_lane(idx) if @slept[idx] >= NodeTraits::CATCH_UP_CHUNK
         end
 
         :skipped
@@ -1171,6 +1255,7 @@ module MB
             next if wake.nil?
 
             @skipping[idx] = false
+            catch_up_lane(idx)
             @lane_runs[idx].reset(pos + o)
           end
 

@@ -37,7 +37,7 @@ module MB
         # ones paired), +old_input+ (the replaced player's GraphNodeInput).
         # +uncarried+ counts the new graph's nodes with memory no snapshot
         # holds (delays, reverbs, sampler voices: see .uncarried?).
-        Plan = Data.define(:pairs, :synths, :stateful, :matched, :uncarried, :old_input) do
+        Plan = Data.define(:pairs, :synths, :stateful, :matched, :uncarried, :old_input, :sleepers) do
           # True if every stateful node of the new graph has a partner and
           # none holds uncarried memory (the swap can cut instead of
           # crossfading).
@@ -134,8 +134,15 @@ module MB
 
           stateful = all.select { |x| stateful?(x) }
           in_all = stateful.to_h { |x| [x.__id__, true] }
+
+          # Old sleepers (Synths, drum voices) catch their random streams up
+          # before their nodes' states are copied (NodeTraits' +random+
+          # trait: a sleeping voice's noise is behind until it wakes)
+          old_all ||= graph_nodes(old_nodes)
+          sleepers = old_all.select { |x| x.respond_to?(:catch_up_sleepers) }
+
           Plan.new(pairs: pairs.freeze, synths: synths.freeze, stateful: stateful.length, matched: pairs.count { |_, x| in_all[x.__id__] },
-                   uncarried: all.count { |x| uncarried?(x) }, old_input: old_input)
+                   uncarried: all.count { |x| uncarried?(x) }, old_input: old_input, sleepers: sleepers.freeze)
         end
 
         # Every node of graph +roots+, once.
@@ -173,6 +180,7 @@ module MB
         # up to it and the new one hasn't played.  Returns the number of
         # nodes whose state was copied.
         def apply(plan)
+          plan.sleepers.each(&:catch_up_sleepers)
           shifts = {}
           plan.synths.each do |o, n|
             shift = carry_synth(o, n)

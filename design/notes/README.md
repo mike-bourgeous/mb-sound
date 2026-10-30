@@ -96,7 +96,7 @@ One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a dB
 
 ### [Drum machines](drums.md)
 
-`tr808(source, **knobs)` and `tr909(source, **knobs)` (`lib/mb/sound/drums.rb`, `drums/`) are `Drums::Kit`s of resonator, metal-bank, noise, and sample voices, played by a grid `Sequence::Kit` or any MIDI source, with per-voice knob Hashes, accents, chokes, flams, and `outputs: :separate`.  The kit builder (`kit { voice :kick do |h| ... end; choke ... }`, `Drums::Machine`/`Builder`/`Hit`) makes custom kits that tracks, recording, and swaps treat like an 808.  Idle voices sleep only on the 800-sample `Synth::SKIP_GRID` and wake on the exact hit, so output is the same at any buffer size.
+`tr808(source, **knobs)` and `tr909(source, **knobs)` (`lib/mb/sound/drums.rb`, `drums/`) are `Drums::Kit`s of resonator, metal-bank, noise, and sample voices, played by a grid `Sequence::Kit` or any MIDI source, with per-voice knob Hashes, accents, chokes, flams, and `outputs: :separate`.  The kit builder (`kit { voice :kick do |h| ... end; choke ... }`, `Drums::Machine`/`Builder`/`Hit`) makes custom kits that tracks, recording, and swaps treat like an 808.  Idle voices sleep only on the 800-sample `Synth::SKIP_GRID` and wake on the exact hit, so output is the same at any buffer size; their noise (and other random streams) catches up by the frames they slept, so a hit draws the noise it would have drawn awake (delay-sleep-1, 2026-10-30; filters between the noise and the envelope keep their pre-sleep state).
 
 ### [Sampler](sampler.md)
 
@@ -104,7 +104,7 @@ One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a dB
 
 ### [Textures: dust, drift, modal resonators](textures.md)
 
-Texture nodes in `fast_texture` and `fast_resonator` (exact Ruby mirrors, the same at any buffer size): `dust` sparse random impulses, `drift` random points joined smoothly (B-spline, holds, jitter, any Curve), `trig.resonate(:bowl | :gong | :bell | ...)` modal banks with physically motivated ratios and beating doublets (`GraphNode::ModalResonator`), `noise(:pink)`/`noise(:brown)`, and `sig.sounding(hold:, fade:)`, a gate open while a sound is above -90 dB.  Randomness is splitmix64, seeded per node.  Help `help :textures`, `help :recipes`; demo `bin/songs/critters.rb`.
+Texture nodes in `fast_texture` and `fast_resonator` (exact Ruby mirrors, the same at any buffer size): `dust` sparse random impulses, `drift` random points joined smoothly (B-spline, holds, jitter, any Curve), `trig.resonate(:bowl | :gong | :bell | ...)` modal banks with physically motivated ratios and beating doublets (`GraphNode::ModalResonator`), `noise(:pink)`/`noise(:brown)`, and `sig.sounding(hold:, fade:)`, a gate open while a sound is above -90 dB.  Randomness is splitmix64, seeded per node; in a sleeping voice (Synth lane, sub-lane, drum voice) dust, drift, and noise catch up by the frames slept, at their inputs' last values (`catch_up_draws`, delay-sleep-1; graph_nodes.md, Node traits).  Help `help :textures`, `help :recipes`; demo `bin/songs/critters.rb`.
 
 ### [Granular synthesis and spectral time-stretching](granular.md)
 

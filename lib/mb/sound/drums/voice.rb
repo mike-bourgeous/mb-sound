@@ -17,8 +17,10 @@ module MB
       # NodeTraits; so a reversed sample's quiet start or a late burst still
       # plays), the voice stops sampling its graph (giving
       # zeros) until its next hit, like Synth's idle lanes.  Not exactly
-      # the same as rendering every sample (free-running oscillators and
-      # noise pause while skipped, which only changes their phase), but the
+      # the same as rendering every sample (free-running oscillators pause
+      # while skipped, which only changes their phase, and filters after
+      # noise keep their state; the noise itself, and other random streams,
+      # catch up by the frames slept: #catch_up), but the
       # same at any buffer size: the voice falls asleep only on its own
       # grid of Synth::SKIP_GRID samples (after SLEEP_TIME rounded up to
       # whole grid cells of silence), splitting a buffer there if needed,
@@ -128,6 +130,8 @@ module MB
           @skip_idle = !!skip_idle
           @skippable = nil
           @built = built
+          @slept = 0 # (frames slept since the random streams caught up; #catch_up)
+          @catch_ups = nil
         end
 
         def sample(count)
@@ -237,6 +241,10 @@ module MB
               stop = hit || count
               if stop > o
                 boundary.each { |n| n.sample(stop - o) }
+                unless @catch_ups.empty?
+                  @slept += stop - o
+                  catch_up if @slept >= MB::Sound::NodeTraits::CATCH_UP_CHUNK
+                end
                 if o == 0 && hit.nil?
                   whole = zeros(count)
                 else
@@ -247,6 +255,7 @@ module MB
               next if hit.nil?
 
               @sleeping = false
+              catch_up
               run.reset(pos + o)
             end
 
@@ -278,6 +287,21 @@ module MB
           @position += count
           whole || @out
         end
+
+        # Moves the random streams of the voice's own nodes (noise, dust,
+        # drift, grains: NodeTraits' +random+ trait) on over the frames it
+        # slept since they last caught up, so a voice that slept draws what
+        # it would have drawn awake (see #boundary).  Session::Carry calls
+        # it before copying a sleeping voice's states.
+        def catch_up
+          n = @slept
+          return if n == 0
+
+          @slept = 0
+          MB::Sound::NodeTraits.catch_up(@catch_ups, n)
+        end
+        alias catch_up_sleepers catch_up
+        public :catch_up_sleepers
 
         # The reused output buffer for buffers read in pieces.
         def out_buf(count)
@@ -385,6 +409,14 @@ module MB
           notes_nodes.reject! { |n| upstream[n.__id__] }
 
           list = shared + notes_nodes
+
+          # The random streams that pause with the voice (not read through
+          # the list above; see #catch_up)
+          catch_up # (frames slept so far go to the nodes that slept them)
+          read = {}.compare_by_identity
+          list.each { |n| n.graph(include_tees: true).each { |u| read[u] = true } }
+          @catch_ups = MB::Sound::NodeTraits.catching_up(@graph.graph(include_tees: true).reject { |n| read[n] })
+
           @boundary_cache = [watch, list]
           list
         end

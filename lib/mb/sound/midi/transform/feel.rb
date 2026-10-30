@@ -213,6 +213,8 @@ module MB
         # per cycle and note.
         class Chance < NoteMap
           include Seeded
+          # (decided per note, upstream of the voices)
+          node_traits random: :events
 
           def initialize(parent, probability, seed: nil, **options)
             super(parent, **options)

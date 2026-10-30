@@ -833,14 +833,62 @@ RSpec.describe(MB::Sound::Synth) do
       expect(s.skippable_lanes).to eq([])
     end
 
-    it 'never skips lanes with delays or reverbs, or with skip_idle: false' do
-      s = described_class.new(source(*notes), voices: 2, spares: 0) { |v| (v.hz.saw * v.amp_env).delay(0.1) }
-      expect(s.skippable_lanes).to eq([])
+    it 'never skips lanes with reverbs, or with skip_idle: false' do
       s = described_class.new(source(*notes), voices: 2, spares: 0) { |v| [v.hz.saw * v.amp_env].reverb(:room) }
       expect(s.skippable_lanes).to eq([])
       s = described_class.new(source(*notes), voices: 2, skip_idle: false, &patch)
       expect(s.skippable_lanes).to eq([])
       expect(run(s, 30)[1].flatten).to be_empty
+    end
+
+    # node-traits-1 (the maintainer: "Can a node just have a way of
+    # declaring itself idle?"): a delay answers from its line, so a lane
+    # sleeps once its echoes have died away below -90 dB, and a looper
+    # holding its loop keeps its lane awake.  (Lanes that only these checks
+    # let sleep keep forming lane groups instead when they could, the next
+    # example; a sub-lane in the voice rules lane groups out here.)
+    it 'skips lanes with delays once their echoes die away, never while a loop holds a sound' do
+      voice = ->(v, feedback) {
+        tone = MB::Sound::GraphNode::SubLane.new(v.hz.asaw * v.amp_env(0.002, 0.01, 0, 0.01), notes: v).outputs[0]
+        tone.delay(0.02, feedback: feedback)
+      }
+      echo = described_class.new(source(*notes), voices: 2, spares: 0) { |v| voice.(v, 0.3) }
+      expect(echo.skippable_lanes).to eq([0, 1])
+      out, skipped = run(echo, 100)
+      expect(skipped.flatten).not_to be_empty
+      expect(out.abs.max).to be > 0.1
+
+      # (each echo stays on: the lane wakes on its next note, never mid-echo)
+      exact = described_class.new(source(*notes), voices: 2, spares: 0, skip_idle: false) { |v| voice.(v, 0.3) }
+      plain, = run(exact, 100)
+      expect((out - plain).abs.max).to be < 1e-4
+
+      looper = described_class.new(source(ev.note_on(48), ev.note_off(48, time: 0.05r)), voices: 1, spares: 0) { |v| voice.(v, 1) }
+      expect(looper.skippable_lanes).to eq([0])
+      loop_out, held = run(looper, 100)
+      expect(held.flatten).to be_empty
+      expect(loop_out[-4800..].abs.max).to be > 0.1
+    end
+
+    # delay-sleep-1 (the maintainer's "With the rule", 2026-10-30): lanes
+    # that only delays' and loops' idle checks would let sleep keep forming
+    # plan lane groups as before the checks (a dense 6-voice pluck synth:
+    # 33% of realtime at 128-sample buffers grouped, 47% sleeping instead),
+    # decided from the node types alone, so plans never change which lanes
+    # sleep
+    it 'prefers lane groups over sleeping for lanes only delays keep awake' do
+      echo = ->(**opts) { described_class.new(source(*notes), voices: 2, spares: 0, **opts) { |v| (v.hz.asaw * v.amp_env(0.002, 0.01, 0, 0.01)).delay(0.02, feedback: 0.3) } }
+      grouped = echo.()
+      expect(grouped.skippable_lanes).to eq([])
+      expect(grouped.instance_variable_get(:@lane_groups)).not_to be_nil if MB::Sound::Plan.lanes && MB::Sound::Plan.enabled
+      expect(run(grouped, 30)[1].flatten).to be_empty
+
+      # (a lane that sleeps without the checks: the others sleep with them)
+      base = [true, true]
+      graphs = [[100.hz.saw], [100.hz.saw.delay(0.01)]]
+      expect(described_class.prefer_lane_groups(base, graphs, [[], []])).to eq([true, true])
+      expect(described_class.prefer_lane_groups(base, [graphs[1], graphs[1]], [[], []])).to eq([false, false])
+      expect(described_class.prefer_lane_groups(base, [graphs[1], graphs[1]], [[:sub_lane], []])).to eq([true, true])
     end
 
     it 'keeps shared controller and glide inputs in step while lanes are skipped' do

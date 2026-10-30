@@ -44,6 +44,17 @@ module MB
     #   of their grid where they could fall asleep (Synth::SKIP_GRID), never
     #   per sample.  A +:long+ memory node without one keeps every sleeper
     #   it is in awake (.blocks_sleep?).
+    # - +random+: the random numbers the node draws as it renders, so a
+    #   sleeper holding it keeps them in step (delay-sleep-1: a voice that
+    #   slept draws the noise it would have drawn awake).  +false+ (none,
+    #   or only while it is built), +:events+ (only at input events, which
+    #   wake sleepers first: a sampler's round robins, Tone#rnd resets,
+    #   random sample and hold), +:blocks+ (draws a sleeper can't know
+    #   without rendering: keeps every sleeper it is in awake), or the name
+    #   of a method taking a frame count that moves its random streams (and
+    #   whatever they drive) on by that many frames, as if it had rendered
+    #   them with its inputs holding the values they last had: a sleeper
+    #   calls it for the frames it slept (NodeTraits.catch_up).
     # - +wiring+: true for fan-out wiring the plan layer sees through (Tees
     #   and their branches), which Synth#lane_fusable? skips.
     # - +carry+: how Session::Carry moves the node's state into a rebuilt
@@ -62,15 +73,30 @@ module MB
       MEMORY = %i[none short long].freeze
       TIMELINE = [false, true, :events].freeze
       CARRY = %i[none snapshot own fresh].freeze
-      KEYS = %i[memory timeline idle_check wiring carry].freeze
+      KEYS = %i[memory timeline idle_check random wiring carry].freeze
+
+      # The +random+ values that aren't catch-up method names.
+      RANDOM = [false, :events, :blocks].freeze
+
+      # The most frames one catch-up call moves on (NodeTraits.catch_up
+      # splits longer stretches), so a voice waking after a long sleep
+      # spreads no more than this much work over one call.
+      CATCH_UP_CHUNK = 4096
 
       # The traits of one node kind (see NodeTraits).  +owner+ is the class
       # or module whose declaration gave +memory+ (nil for the defaults).
-      Traits = Data.define(:memory, :timeline, :idle_check, :wiring, :carry, :owner) do
+      Traits = Data.define(:memory, :timeline, :idle_check, :random, :wiring, :carry, :owner) do
         # True if a sleeper holding this node can never sleep: it follows the
-        # timeline, or remembers sound without a way to say it is idle.
+        # timeline, remembers sound without a way to say it is idle, or
+        # draws random numbers it can't catch up.
         def blocks_sleep?
-          timeline == true || (memory == :long && idle_check.nil?)
+          timeline == true || (memory == :long && idle_check.nil?) || random == :blocks
+        end
+
+        # The name of the method moving the node's random streams on by a
+        # number of frames (see NodeTraits), or nil.
+        def catch_up
+          random.is_a?(Symbol) && !RANDOM.include?(random) ? random : nil
         end
 
         # True for running state Session::Carry can't copy (the swap
@@ -86,13 +112,15 @@ module MB
       end
 
       # Traits of objects that aren't node kinds (MIDI streams, numbers).
-      NONE = Traits.new(memory: :none, timeline: false, idle_check: nil, wiring: false, carry: :none, owner: nil)
+      NONE = Traits.new(memory: :none, timeline: false, idle_check: nil, random: false, wiring: false, carry: :none, owner: nil)
 
       # Where the default (stateless: nil) plan_snapshot is defined (see
       # .derived_carry); filled in by plan.rb once those modules load.
       @stateless_snapshot_owners = []
       @declared = {}.compare_by_identity
       @cache = {}.compare_by_identity
+      @scratch = [nil, nil]
+      @variants = {}
 
       class << self
         attr_reader :stateless_snapshot_owners
@@ -102,6 +130,7 @@ module MB
         def stateless_snapshot_owners=(list)
           @stateless_snapshot_owners = list.compact.freeze
           @cache.clear
+          @variants.clear
         end
 
         # Gives +base+ (GraphNode, MultiOutput, TimelineNode, Filter) and
@@ -124,8 +153,12 @@ module MB
           if traits.key?(:idle_check) && !(traits[:idle_check].nil? || traits[:idle_check].is_a?(Symbol))
             raise ArgumentError, "#{mod}'s idle_check must be a method name (a Symbol), not #{traits[:idle_check].inspect}"
           end
+          if traits.key?(:random) && !(RANDOM.include?(traits[:random]) || traits[:random].is_a?(Symbol))
+            raise ArgumentError, "#{mod}'s random trait must be one of #{RANDOM.inspect} or a catch-up method name, not #{traits[:random].inspect}"
+          end
           (@declared[mod] ||= {}).merge!(traits)
           @cache.clear
+          @variants.clear
           mod
         end
 
@@ -157,6 +190,7 @@ module MB
               memory: memory,
               timeline: found.fetch(:timeline, false),
               idle_check: found[:idle_check],
+              random: found.fetch(:random, false),
               wiring: found.fetch(:wiring, false),
               carry: found.fetch(:carry) { derived_carry(klass, memory) },
               owner: owner
@@ -179,9 +213,63 @@ module MB
           of(node).blocks_sleep?
         end
 
+        # Class +klass+'s Traits with +changes+ (e.g. random: :blocks), for
+        # nodes whose answer depends on their settings (an instance
+        # +node_traits+ method; see NodeTraits); memoized.
+        def variant(klass, **changes)
+          base = for_class(klass)
+          (@variants[[base, changes]] ||= base.with(**changes))
+        end
+
         # The nodes of +nodes+ with an idle check (see NodeTraits).
         def idle_checked(nodes)
           nodes.select { |n| of(n).idle_check }
+        end
+
+        # The nodes of +nodes+ that catch up their random streams, with
+        # their catch-up methods: a frozen Array of [node, method name]
+        # pairs for .catch_up (see NodeTraits' +random+ trait).
+        def catching_up(nodes)
+          nodes.filter_map { |n| (m = of(n).catch_up) && [n, m].freeze }.freeze
+        end
+
+        # Moves the random streams of the +pairs+ from .catching_up on by
+        # +frames+, as if their nodes had rendered them: what a sleeper
+        # calls for the frames it slept, in calls of at most
+        # CATCH_UP_CHUNK frames each.
+        def catch_up(pairs, frames)
+          return if frames <= 0 || pairs.empty?
+
+          while frames > 0
+            n = frames > CATCH_UP_CHUNK ? CATCH_UP_CHUNK : frames
+            i = 0
+            while i < pairs.length
+              p = pairs[i]
+              p[0].public_send(p[1], n)
+              i += 1
+            end
+            frames -= n
+          end
+          nil
+        end
+
+        # A scratch output buffer of +n+ samples (at most CATCH_UP_CHUNK)
+        # for a catch-up that runs a node's kernel and drops what it
+        # renders: +which+ 0 or 1 (two for stereo kernels).  Shared by every
+        # node (the output is never read), inplace, so kernels write it
+        # where it is.
+        def scratch(n, which = 0)
+          raise ArgumentError, "A catch-up scratch holds at most #{CATCH_UP_CHUNK} samples (asked for #{n})" if n > CATCH_UP_CHUNK
+
+          buf = (@scratch[which] ||= Numo::SFloat.zeros(CATCH_UP_CHUNK).inplace!)
+          n == CATCH_UP_CHUNK ? buf : buf[0...n].inplace!
+        end
+
+        # The value a catch-up holds input +x+ at: +x+ itself for numbers
+        # (and nil), the last sample of a buffer (see NodeTraits' +random+
+        # trait: inputs hold the values they last had).
+        def held(x)
+          x.is_a?(Numo::NArray) ? (x.empty? ? nil : x[-1]) : x
         end
 
         # True if every node of +nodes+ (from .idle_checked) says it may

@@ -64,7 +64,8 @@ module MB
         include GraphNode
         include SampleRateHelper
         include TextureRate
-        node_traits memory: :short
+        # (draws per point, caught up by sleepers: #catch_up_draws)
+        node_traits memory: :short, random: :catch_up_draws
 
         # Interpolation names and the kernel's mode numbers (4 is a Curve).
         SMOOTH = { step: 0, linear: 1, cosine: 2, cubic: 3 }.freeze
@@ -112,6 +113,7 @@ module MB
           init_seed(seed)
           @sample_rate = sample_rate.to_f
           @buf = nil
+          @held_inputs = [nil, nil, nil, nil] # (rate, holds, jitter last read, for #catch_up_draws)
           @node_type_name = 'Drift'
           reset
         end
@@ -146,10 +148,30 @@ module MB
           return nil if @jitter_node && jitter.nil?
 
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
+          h = @held_inputs
+          h[0] = NodeTraits.held(r)
+          h[1] = NodeTraits.held(hold_lo)
+          h[2] = NodeTraits.held(hold_hi)
+          h[3] = NodeTraits.held(jitter)
           Kernels.drift(
             @buf, r, @state, @rng, @sample_rate, @range.begin, @range.end, @mode, @walk,
             @table, hold_lo, hold_hi, @hold_kind == :samples ? 1 : 0, jitter
           )
+        end
+
+        # NodeTraits' catch-up: renders (and drops) +frames+ samples at the
+        # rate, holds, and jitter last read, so a voice that slept moves on
+        # through the points it would have moved through awake (exact while
+        # they hold still, as constants do).
+        def catch_up_draws(frames)
+          h = @held_inputs
+          return if h[0].nil?
+
+          Kernels.drift(
+            NodeTraits.scratch(frames), h[0], @state, @rng, @sample_rate, @range.begin, @range.end, @mode, @walk,
+            @table, h[1], h[2], @hold_kind == :samples ? 1 : 0, h[3]
+          )
+          nil
         end
 
         # The random streams and the points and position (for a graph that

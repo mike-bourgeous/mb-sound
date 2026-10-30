@@ -60,6 +60,57 @@ RSpec.describe(MB::Sound::NodeTraits, :aggregate_failures) do
       end
     end
 
+    # Code that draws random numbers: a node class whose own code (in any
+    # file reopening it, nested classes left out) matches must say how
+    # sleepers keep its draws in step (NodeTraits' +random+ trait, on the
+    # class or an ancestor), unless it keeps sleepers awake anyway
+    # (delay-sleep-1: a voice that slept draws what it would have drawn
+    # awake).
+    RANDOM_CODE = /\b(noise_random|next_seed|splitmix|Random\.new|rand|@rng)\b/
+
+    # The code of each class in lib/ (Prism; nested classes and modules
+    # left out, comments dropped), by name.
+    def self.class_code
+      require 'prism'
+      texts = Hash.new { |h, k| h[k] = +'' }
+      walk = lambda do |node, prefix|
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = node.constant_path.slice
+          full = name.start_with?('::') ? name[2..] : (prefix.empty? ? name : "#{prefix}::#{name}")
+          (node.body&.compact_child_nodes || []).each do |ch|
+            if ch.is_a?(Prism::ClassNode) || ch.is_a?(Prism::ModuleNode)
+              walk.(ch, full)
+            else
+              texts[full] << ch.location.slice << "\n" if node.is_a?(Prism::ClassNode)
+              ch.compact_child_nodes.each { |c| walk.(c, full) }
+            end
+          end
+        else
+          node.compact_child_nodes.each { |c| walk.(c, prefix) }
+        end
+      end
+      Dir[File.expand_path('../../../../lib/mb/sound/**/*.rb', __dir__)].each { |f| walk.(Prism.parse(File.read(f)).value, '') }
+      texts.transform_values { |t| t.lines.reject { |l| l.strip.start_with?('#') }.join }
+    end
+
+    it 'says how sleepers keep every random draw in step' do
+      code = self.class.class_code
+      declared = ->(c) { c.ancestors.any? { |a| described_class.declaration(a)&.key?(:random) } }
+      drawing = classes.select { |c| code[c.name]&.match?(RANDOM_CODE) }
+      expect(drawing.map(&:name)).to include('MB::Sound::Tone', 'MB::Sound::GraphNode::Dust', 'MB::Sound::GraphNode::Drift', 'MB::Sound::GraphNode::Grains')
+      missing = drawing.reject { |c| declared.(c) || c.node_traits.blocks_sleep? }.map(&:name)
+      expect(missing).to eq([]), "declare `node_traits random: false | :events | :blocks | :catch_up_method` on: #{missing.join(', ')}"
+    end
+
+    it 'names catch-up methods the class defines, taking a frame count' do
+      classes.each do |c|
+        m = c.node_traits.catch_up or next
+        expect(c.method_defined?(m)).to eq(true), "#{c}'s random catch-up #{m} isn't a method of it"
+        expect(c.instance_method(m).arity).to eq(1), "#{c}##{m} takes the frame count"
+      end
+    end
+
     it 'keeps the long-memory kinds that idle skipping and carries must know about' do
       long = classes.select { |c| c.node_traits.memory == :long }.map(&:name)
       expect(long).to include(
@@ -93,8 +144,20 @@ RSpec.describe(MB::Sound::NodeTraits, :aggregate_failures) do
       expect(described_class.blocks_sleep?(100.hz.saw)).to eq(false)
     end
 
+    it 'answers random traits per instance where settings decide them' do
+      noise = MB::Sound.noise
+      expect(described_class.of(noise).catch_up).to eq(:catch_up_noise)
+      expect(described_class.of(100.hz.saw).random).to eq(:events) # (random phases at resets only)
+      expect(described_class.of(100.hz.saw).catch_up).to eq(nil)
+      expect(described_class.blocks_sleep?(100.hz.saw.decimate(3000))).to eq(false)
+      expect(described_class.blocks_sleep?(100.hz.saw.decimate(3000, jitter: 0.3))).to eq(true)
+      expect(described_class.of(MB::Sound.dust(10)).catch_up).to eq(:catch_up_draws)
+      expect(described_class.catching_up([noise, 100.hz.saw])).to eq([[noise, :catch_up_noise]])
+    end
+
     it 'checks declarations' do
       k = Class.new { include MB::Sound::GraphNode }
+      expect { k.node_traits(random: 5) }.to raise_error(ArgumentError, /random trait must be one of/)
       expect { k.node_traits(memory: :forever) }.to raise_error(ArgumentError, /memory trait must be one of/)
       expect { k.node_traits(sleep: true) }.to raise_error(ArgumentError, /Unknown node traits/)
       expect(k.node_traits.memory).to eq(:short) # (undeclared: short, carried fresh)

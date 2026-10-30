@@ -54,9 +54,21 @@
  * and p3 as well); hold and speed are NaN until the first sample draws
  * them.
  *
+ * noise_skip(phase, noise, frequency, advance, random_advance, count): moves
+ * a noise Tone's phase (+phase+, a Ruby Array whose first element is the
+ * phase in cycles, Tone::State#phase) and splitmix64 generator state
+ * (+noise+, an Array of one Integer, Tone::State#noise) on by +count+
+ * samples at the constant +frequency+, as the noise path of
+ * FastSound.phasor/oscillate (and the plan executor's naive tones) would
+ * render them: each sample draws u and adds frequency * (advance + u *
+ * random_advance) to the phase, wrapped to 0...1.  For a sleeping voice's
+ * catch-up (Tone#catch_up_noise, NodeTraits' +random+ trait), so a voice
+ * that slept draws the noise it would have drawn awake.
+ *
  * The Ruby mirrors (GraphNode::Dust.process_ruby, GraphNode::Drift
- * .process_ruby) give exactly the same samples (specs check it), so keep the
- * operations identical; built with -ffp-contract=off.
+ * .process_ruby, Tone.noise_skip_ruby) give exactly the same samples (specs
+ * check it), so keep the operations identical; built with
+ * -ffp-contract=off.
  */
 
 #include <math.h>
@@ -391,6 +403,40 @@ static VALUE ruby_drift(VALUE self, VALUE out, VALUE rate, VALUE state, VALUE rn
 	return out;
 }
 
+/*
+ * See noise_skip at the top of the file.  Returns nil.
+ */
+static VALUE ruby_noise_skip(VALUE self, VALUE phase, VALUE noise, VALUE frequency, VALUE advance, VALUE random_advance, VALUE count)
+{
+	Check_Type(phase, T_ARRAY);
+	Check_Type(noise, T_ARRAY);
+	if (RARRAY_LEN(phase) < 1 || RARRAY_LEN(noise) != 1) {
+		rb_raise(rb_eArgError, "noise_skip needs a phase state Array and a one-Integer noise state Array");
+	}
+	long n = NUM2LONG(count);
+	if (n < 0) {
+		rb_raise(rb_eArgError, "noise_skip count must not be negative (got %ld)", n);
+	}
+
+	double phi = NUM2DBL(rb_ary_entry(phase, 0));
+	uint64_t rng = NUM2ULL(rb_ary_entry(noise, 0));
+	double freq = NUM2DBL(frequency);
+	double adv = NUM2DBL(advance);
+	double rndadv = NUM2DBL(random_advance);
+
+	for (long i = 0; i < n; i++) {
+		// (phasor_increment in mb_osc_shapes.h, in separate statements)
+		double r = texture_random(&rng) * rndadv;
+		double a = adv + r;
+		double inc = freq * a;
+		phi = mb_wrap(phi + inc, 1.0);
+	}
+
+	rb_ary_store(phase, 0, rb_float_new(mb_wrap(phi, 1.0)));
+	rb_ary_store(noise, 0, ULL2NUM(rng));
+	return Qnil;
+}
+
 void Init_fast_texture(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -399,4 +445,5 @@ void Init_fast_texture(void)
 
 	rb_define_module_function(fast_texture, "dust", ruby_dust, 8);
 	rb_define_module_function(fast_texture, "drift", ruby_drift, 14);
+	rb_define_module_function(fast_texture, "noise_skip", ruby_noise_skip, 6);
 }

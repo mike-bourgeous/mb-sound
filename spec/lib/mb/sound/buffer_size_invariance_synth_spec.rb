@@ -96,6 +96,18 @@ RSpec.describe 'Buffer size invariance (samplers, drums, Synth lanes)' do
       'skipped noise (a Ruby block)' => ->(v) {
         (MB::Sound.noise.filter(:highpass, cutoff: 5000, quality: 0.7) * v.env(0.001, 0.05, 0, 0.05)).proc { |x| x }
       },
+      # Delays and loops in a lane let it sleep once their lines hold only
+      # silence (NodeTraits' idle checks, node-traits-1); the sub-lane
+      # rules out lane groups, which such lanes prefer (Synth
+      # .prefer_lane_groups, delay-sleep-1)
+      'echoing saw (a delay with feedback)' => ->(v) {
+        MB::Sound::GraphNode::SubLane.new(v.hz.saw * v.amp_env(0.001, 0.05, 0, 0.02), notes: v).outputs[0].delay(0.013, feedback: 0.4)
+      },
+      'multitap and a feedback loop' => ->(v) {
+        dry = MB::Sound::GraphNode::SubLane.new(v.hz.asaw * v.env(0.001, 0.02, 0, 0.01), notes: v).outputs[0]
+        taps = dry.multitap(0.004, 0.009)
+        taps[0] + taps[1] * 0.5 + dry.feedback { |fb, input| input + fb.delay(3.ms) * 0.5 } * 0.3
+      },
     }
 
     [true, false].each do |lanes|
@@ -112,6 +124,7 @@ RSpec.describe 'Buffer size invariance (samplers, drums, Synth lanes)' do
           # (Tones with a frequency signal, v.hz, keep a running phase
           # wrapped every sample since fixes-6, so these are exact too)
           expect_invariant(make, seconds: 3)
+          expect(skipped.first.skippable_lanes).not_to be_empty if name.start_with?('echoing', 'multitap')
         ensure
           MB::Sound::Plan.lanes = old
         end

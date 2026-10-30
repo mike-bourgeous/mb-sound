@@ -38,7 +38,8 @@ module MB
       class SamplerVoice
         include GraphNode
         include SampleRateHelper
-        node_traits memory: :short, idle_check: :idle?
+        # (round robins are drawn at note-ons)
+        node_traits memory: :short, idle_check: :idle?, random: :events
 
         # The instrument played.
         attr_reader :instrument

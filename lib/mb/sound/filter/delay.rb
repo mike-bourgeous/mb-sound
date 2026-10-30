@@ -7,7 +7,9 @@ module MB
       # See bin/flanger.rb and bin/tape_delay.rb for examples.
       class Delay < Filter
         include GraphNode::SampleRateHelper
-        node_traits memory: :long
+        # (its line holds sound for up to its longest delay; it may sleep once
+        # that holds only silence: #sleep_ready?)
+        node_traits memory: :long, idle_check: :sleep_ready?
 
         # The default delay-time smoothing rate in seconds per second.
         DEFAULT_SMOOTHING_RATE = 0.5
@@ -95,6 +97,8 @@ module MB
           @ring_zeros = nil
           @frozen_copy = nil
           @loop_offset = nil
+          @longest_read = 0.0 # (see #sleep_ready?)
+          @longest_range = [0.0, 0.0]
         end
 
         # The size of the delay buffer in samples.
@@ -348,6 +352,19 @@ module MB
           keep && keep < out.length ? out[0...keep] : out
         end
 
+        # NodeTraits' idle check (may a sleeper holding this delay sleep
+        # now?): true when what its line holds within the longest delay it
+        # has read (plus the interpolation reach) is below -90 dB
+        # (QuietRun::QUIET), so nothing louder can come out of it later: an
+        # echo that has died away, or a delay that never got a signal.  A
+        # looper holding its loop (feedback near 1) never is.  Asked only
+        # where a sleeper (a Synth lane, a drum voice) could fall asleep;
+        # the longest read is the same at any buffer size, so the answer is
+        # too.
+        def sleep_ready?
+          @line.holds_quiet?(@longest_read.ceil + MB::Sound::DelayLine::MARGIN)
+        end
+
         # True if the delay rings out after its input ends (the default; see
         # #ring_out), false if it ends with its input.
         def rings_out?
@@ -453,6 +470,26 @@ module MB
         # constant target, the filter is skipped (it would output the
         # target unchanged), so settled delays read as constant delays.
         def delay_buffer(count)
+          d = compute_delay_buffer(count)
+          note_longest(d) unless d.equal?(:end)
+          d
+        end
+
+        # Keeps the longest delay read so far (see #sleep_ready?).
+        def note_longest(delays)
+          m = if delays.is_a?(Numeric)
+                delays
+              elsif (r = MB::Sound::Kernels.min_max(delays, @longest_range))
+                r[1]
+              else
+                delays.real.max
+              end
+          m = m.to_f
+          @longest_read = m if m.finite? && m > @longest_read
+        end
+
+        # See #delay_buffer.
+        def compute_delay_buffer(count)
           settled = @smoothing && @filter.is_a?(MB::Sound::Filter::LinearFollower)
 
           if @time.node?
