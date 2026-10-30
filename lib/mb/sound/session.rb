@@ -8,6 +8,7 @@ require_relative 'session/names'
 require_relative 'session/changes'
 require_relative 'session/fades'
 require_relative 'session/strip'
+require_relative 'session/faders'
 require_relative 'session/undo'
 require_relative 'session/master'
 require_relative 'session/tails'
@@ -73,6 +74,7 @@ module MB
       include Changes
       include Fades
       include Strip
+      include Faders
       include Undo
       include Master
       include Tails
@@ -122,6 +124,7 @@ module MB
         :serial, :name, :input, :description, :start, :launch, :stop_at, :timeline_nodes,
         :started, :slow_warned, :loads, :gain, :ramp, :fade_in, :fade_out, :fading_out, :keep,
         :strip_level, :strip_ramp, :asleep, :ring, :asleep_reads, :read_to, :cpu, :cue, :waited,
+        :level_buf, # ([value, frozen SFloat] of a steady level; Faders#fader_levels)
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
@@ -352,6 +355,7 @@ module MB
 
         init_changes
         init_strip
+        init_faders
         init_undo
         init_knobs
         init_clocks
@@ -618,7 +622,7 @@ module MB
         # A disarmed track's monitor stays stopped (see Arrangement::Arm:
         # it plays exactly while its track is armed); `arm` starts it
         if name && disarmed_monitor?(name)
-          track = Arrangement::Recording.monitored_track(name)
+          track = Session::Name.monitored(name)
           return MB::Sound.live_error(ArgumentError.new("#{name.inspect} is track #{track.inspect}'s live monitor, which plays while the track is armed (arm #{track.inspect})"))
         end
 
@@ -644,9 +648,9 @@ module MB
       end
 
       # True if +name+ is the live monitor of a track that isn't armed (see
-      # Arrangement::Recording.monitor_name).
+      # Session::Name.monitor).
       private def disarmed_monitor?(name)
-        track = Arrangement::Recording.monitored_track(name)
+        track = Session::Name.monitored(name)
         !track.nil? && !(@arrangement&.armed?(track))
       end
 
@@ -1420,6 +1424,7 @@ module MB
       # Creates and registers a Player.  Called with @mutex held.  Returns
       # the name.
       def start_player(name:, input:, description:, timeline_nodes:, start:, fade:)
+        start_player_spies(name, input) # (readers' spies; see Buses)
         @next_serial += 1
         @players[@next_serial] = Player.new(
           serial: @next_serial,
@@ -1726,7 +1731,11 @@ module MB
             end
           end
 
+          # The strip (contract K7): fade, then level (Faders), then
+          # mute/solo; readers hear it before the mute (+fade:+ below)
           fade = fade_ramp(p, base + offset, frames)
+          level = fader_levels(p, base + offset, frames)
+          fade = fade ? (level ? fade * level : fade) : level
           strip = ramp_levels(p, :strip_level, :strip_ramp, base + offset, frames)
           ramp = fade ? (strip ? fade * strip : fade) : strip
           # The route: CUE gets its share, MAIN the rest (see Cue)

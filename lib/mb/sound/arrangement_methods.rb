@@ -203,6 +203,31 @@ module MB
         strip_command(:mute, names, point, fade: fade)
       end
 
+      # Sets the level of track or player +name+ (its fader: the strip's
+      # gain stage, after its fades and before its mute) to +value+: a
+      # linear gain (`-6.db`, 0.5, 0 for silence, up to +12 dB), a knob
+      # name, or a node to follow; right away with a short glide, at a
+      # launch point (+on:+, +in:+, +at:+), or over +over:+ (bars, a
+      # Duration, or a Length; shaped by +curve:+, from where it is or
+      # +from:+).  The level is the knob :"name/level" (made at unity the
+      # first time), so scenes take `bass: -6.db` and `turn :bass, 0.5`
+      # works too.  Journaled, undoable, replayed by takes, saved by set
+      # documents.  Returns the journal entry.  With only a name, returns
+      # the level (a Decibels); with nothing, every level set so far.
+      #
+      #     level :bass, -6.db
+      #     level :pad, 0, over: 8, on: :bar     # an 8-bar fade-out that stays
+      def level(name = nil, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, smooth: nil)
+        session = Session.current
+        return session.levels if name.nil?
+        name = player_name(name)
+        return session.level(name) if value.nil?
+        point = LaunchPoint.of(binding) or return nil
+        session_command(name, label: "level #{name.inspect}", kind: :turn) { |s, time|
+          s.level(name, value, at: point, over: over, curve: curve, from: from, smooth: smooth, start_time: point.given? ? nil : time)
+        }
+      end
+
       # Unmutes players (every muted player if none are named).  See #mute.
       def unmute(*names, at: nil, on: nil, in: nil, fade: nil)
         point = LaunchPoint.of(binding) or return nil

@@ -219,6 +219,49 @@ module SessionFuzz
       fx = pick(rng, KIT_TRANSFORMS)
       lines << "at_bar(#{rng.rand(1..bars)}, beat: 3) { swap :#{t}, #{first_clips[t]}.#{fx} }"
     end
+    # (omnibus17) track levels (the strip's fader): set now, at a launch
+    # point, or over a ramp, and from a scene value (drawn last, so every
+    # seed keeps the song it made before)
+    if rng.rand < 0.35
+      t = pick(rng, names)
+      value = pick(rng, ['-6.db', '0.25', '0', '2.db'])
+      how = pick(rng, ['', ', over: 1/2r', ', over: 3.beats, on: :beat', ', on: :bar'])
+      lines << "at_bar(#{rng.rand(1..bars)}, beat: #{rng.rand(2..beats)}) { level :#{t}, #{value}#{how} }"
+      if rng.rand < 0.5
+        lines << "scene :lv, #{t}: #{pick(rng, ['-12.db', '[0.5, over: 1/4r]'])}, others: :keep"
+        lines << "at_bar(#{bars}, beat: 2) { go :lv }"
+      end
+    end
+    # (omnibus17, Munro's M3) a drums track given a kit with new rows on a
+    # launch point as a part ducked by its kick starts there: both graphs
+    # queue, and the duck must read the new kit (drawn last, so every seed
+    # keeps the song it made before)
+    drums = tracks.select { |_, k| k == :drums }.keys
+    if !drums.empty? && rng.rand < 0.3
+      t = pick(rng, drums)
+      on = pick(rng, ['on: :bar', 'on: :beat', 'in: 1/4r'])
+      lines << "at_bar(#{rng.rand(1..bars)}, beat: 2) { bg :#{t}, grid(16, kick: 'x...x...', open_hat: '..x...x.').loop, #{on}; " \
+               "bg :ducked, 0.2.constant.duck(:#{t}, only: :kick, amount: -12.db), #{on} }"
+    end
+    # (omnibus17, Munro's M5) a trigger track ducking a part, through full
+    # scenes that don't name it (it keeps pumping) and sometimes `pump:
+    # :off` (drawn last, so every seed keeps the song it made before)
+    if rng.rand < 0.25
+      lines << "sidechain :pump, grid(16, '#{pick(rng, ['x...x...x...x...', 'x..x..x.x..x..x.'])}').loop, on: :now"
+      lines << "bg :pumped, 0.2.constant.duck(:pump, amount: -12.db), on: :now"
+      lines << "scene :nopump, others: :keep, pump: :off" if rng.rand < 0.5
+      lines << "at_bar(#{bars}, beat: 3) { go :nopump }" if lines.last.start_with?('scene :nopump')
+    end
+    # (omnibus17, Kez's K10) a bus chain through a Synth reading the bus
+    # input, with a send turned up after the bus slept: lanes wake inside
+    # buffers and read the input in windows (drawn last, so every seed
+    # keeps the song it made before)
+    if rng.rand < 0.2
+      lines << "knob :tint, 0, range: 0..1"
+      lines << "bus(:colour) { |sig| seq([E2, G2, B2], [C2, E2, G2]).n1.loop.synth(voices: 4) { |v| (sig * 0.01).resonate(:bar, v.freq, decay: 0.3) * v.gate.smooth(4.ms) } }"
+      lines << "at_bar(1) { feed :#{pick(rng, names)}, :colour, :tint }"
+      lines << "at_bar(#{rng.rand(1..bars)}, beat: #{rng.rand(2..beats)}) { turn :tint, 1 }"
+    end
     Song.new(header: header, lines: lines, bars: bars)
   end
 
@@ -335,7 +378,11 @@ module SessionFuzz
   # Warnings a generated song may cause on purpose (commands for players
   # a scene or a one-shot clip has already ended); anything else printed
   # during a render fails :runs.
-  EXPECTED_WARNINGS = [/\ANo background player :\w+ is playing/].freeze
+  EXPECTED_WARNINGS = [
+    /\ANo background player :\w+ is playing/,
+    # (a scene giving a kick-ducked drums track a kit without a kick)
+    /has no node named :kick for a sidechain/,
+  ].freeze
 
   # Errors that make a generated song invalid rather than show a bug
   # (commands for players other commands ended first)

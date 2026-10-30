@@ -434,7 +434,7 @@ module MB
             next
           end
           kind = @session.names.kind(k)
-          if kind == :knob || control_value?(k, v)
+          if kind == :knob || control_value?(k, v) || @session.track_level_name?(k)
             check_knob_value(name, k, v) or return nil
             next
           end
@@ -494,7 +494,7 @@ module MB
           return MB::Sound.live_error(ArgumentError.new("No scene #{name.inspect}#{known.empty? ? '' : " (scenes: #{known.map(&:inspect).join(', ')})"}"))
         end
 
-        knob_values = sc.values.select { |k, v| KEY_VALUES.include?(k) || tempo_value?(k) || @session.names.kind(k) == :knob || control_value?(k, v) }
+        knob_values = sc.values.select { |k, v| KEY_VALUES.include?(k) || tempo_value?(k) || @session.names.kind(k) == :knob || control_value?(k, v) || @session.track_level_name?(k) }
         unknown = sc.values.keys - tracks.keys - knob_values.keys
         unless unknown.empty?
           why = @mutex.synchronize { unknown.filter_map { |u| "#{u.inspect}: #{@failed_tracks[u]}" if @failed_tracks[u] } }
@@ -519,7 +519,7 @@ module MB
 
           tracks.each_value do |tr|
             # (a trigger track given a number: its level turns, the line plays on)
-            value = knob_values.key?(tr.name) ? :keep : sc.values.key?(tr.name) ? sc.values[tr.name] : (sc.others == :keep ? :keep : :off)
+            value = knob_values.key?(tr.name) ? :keep : sc.values.key?(tr.name) ? sc.values[tr.name] : unnamed_value(sc, tr)
             next if value == :keep
             stop = sc.others == :cut ? :cut : :ring
             set_track(tr, value, resolve(tr.q || sc.q || @quant, tr, point), fade: fade.nil? ? sc.fade : fade, stop: stop)
@@ -556,6 +556,15 @@ module MB
         result && @session.journal[result.seq]
       end
 
+      # What scene +sc+ does to track +tr+ when it doesn't name it: :keep
+      # with `others: :keep`, and for trigger tracks always (omnibus17,
+      # Munro's M5: a full scene stopped the pump of a hand-built set, so it
+      # pumped only until the first `go`; templates named it in every
+      # scene; `pump: :off` still stops one), else :off.
+      def unnamed_value(sc, tr)
+        sc.others == :keep || tr.trigger ? :keep : :off
+      end
+
       # A listing of the tracks: name => "q:1 bass_a (playing)".
       def track_info
         tracks.transform_values { |tr|
@@ -565,6 +574,8 @@ module MB
           arm = arms[tr.name]
           state += arm.monitoring? ? ', armed' : ', armed (no monitor)' if arm
           state = "trigger, #{state}" if tr.trigger
+          k = @session.fader(tr.name)
+          state += ", level #{@session.level(tr.name).inspect}" if k && k.value.to_f != 1
           what = tr.patch? ? (tr.clip ? name_of(tr.clip) : 'no clip') : 'graph'
           lead = tr.ahead && !tr.ahead.zero? ? " #{tr.ahead > 0 ? 'ahead' : 'behind'} #{MB::M.sigfigs((tr.ahead.abs / @session.transport.whole_notes_per_second * 1000).to_f, 3)} ms" : ''
           lead += ' (attack capped)' if tr.capped

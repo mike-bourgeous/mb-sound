@@ -9,6 +9,16 @@ module MB
       # lock).  Session#players, #strip_info, and #clock are avoided (render
       # lock); players and their states come from the per-buffer Snapshot.
       class Poll
+        # Session +s+'s level for player name +name+ in dB (a Float), or nil
+        # at unity or with no level set (Session::Faders; read without the
+        # render lock).
+        def self.level_db(s, name)
+          k = s.fader(name) or return nil
+          g = k.value.to_f
+          return nil if g == 1
+          g > 0 ? (20 * Math.log10(g)).round(1) : -Float::INFINITY
+        end
+
         # Queued changes kept.
         QUEUED = 8
 
@@ -67,7 +77,7 @@ module MB
           arr = s.arrangement
           armed = arr.armed.keys.freeze
           tracks = arr.tracks.map { |name, tr|
-            TrackInfo.new(name: name, q: (tr.q || arr.quant).inspect.freeze, clip: (tr.patch? ? (tr.clip ? arr.name_of(tr.clip) : 'no clip') : 'graph').freeze, armed: armed.include?(name), trigger: tr.trigger || false)
+            TrackInfo.new(name: name, q: (tr.q || arr.quant).inspect.freeze, clip: (tr.patch? ? (tr.clip ? arr.name_of(tr.clip) : 'no clip') : 'graph').freeze, armed: armed.include?(name), trigger: tr.trigger || false, level: Poll.level_db(s, name))
           }.freeze
 
           s.journal.fold # new entries reach #note
@@ -277,7 +287,7 @@ module MB
           scene_infos = arr.scenes.map { |sname, sc|
             values = sc.values || {}
             cells = tracks.keys.to_h { |t|
-              v = values.key?(t) ? values[t] : (sc.others == :keep ? :keep : :stop)
+              v = values.key?(t) ? values[t] : arr.unnamed_value(sc, tracks[t])
               cell = case v
                      when :keep, :on, true then :keep
                      when :off, :cut, :stop, false, nil then :stop

@@ -885,16 +885,24 @@ module MB
       end
     end
 
-    Help.topic :mixing, 'Mute, solo, master', group: :perform do
+    Help.topic :mixing, 'Levels, mute, solo, master', group: :perform do
       about <<~TEXT
-        Mute and solo with a 5 ms declick or synced fades (muted players
-        sleep); master effects run on the whole mix and swap at launch
-        points.  The master gain comes before the master chain (a limiter
-        keeps its ceiling); `master_gain 2.db, post: true` moves it after.
+        Each track's level is its fader: `level :bass, -6.db` (now, at a
+        launch point, or `over: 4`), unity until set, after its fades and
+        before its mute; scenes take `bass: -6.db` and `turn :bass, 0.5`
+        works too (the level is the knob :"bass/level").  Mute and solo
+        with a 5 ms declick or synced fades (muted players sleep); master
+        effects run on the whole mix and swap at launch points.  The
+        master gain comes before the master chain (a limiter keeps its
+        ceiling); `master_gain 2.db, post: true` moves it after.
       TEXT
-      commands :mute, :unmute, :solo, :unsolo, :mutes, :master, :master_gain, :monitor_gain
+      commands :level, :mute, :unmute, :solo, :unsolo, :mutes, :master, :master_gain, :monitor_gain
       note :arrangement, :master_effects
       see :buses, :dynamics, :mastering
+      example 'a level down over a bar' do
+        bg :try, 110.hz.saw.at(-20.db).until(2.bars)
+        level :try, -12.db, over: 1
+      end
       example 'a quick master chain' do
         bg :try, 110.hz.saw.at(-20.db).until(2.bars)
         master { |mix| mix.softclip.limit(ceiling: -1.db) }
@@ -948,9 +956,9 @@ module MB
         nobody hears: `duck(:pump)` reads it, scenes and `launch` play it
         like any track, and it never reaches the mix, stems, or CUE
         (`shape: env(0, 0.08)`, or a block: closed hats as the key; also
-        `pump`).  `turn :pump, 0` turns the pump off (its on/off level,
-        knob :"pump/level"; scenes and sections take `pump: 0`, `pump: 1`),
-        or `stop :pump`.  In a kit,
+        `pump`).  `level :pump, 0` turns the pump off (its level, like any
+        track's; scenes and sections take `pump: 0`, `pump: 1`), or `stop
+        :pump`.  In a kit,
         `voice :trigger, silent: true` plays a row only for
         `duck(:drums, only: :trigger)`.
       TEXT

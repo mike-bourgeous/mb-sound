@@ -478,6 +478,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
         'ArrayInput' => 'NArray data (P3: assets)',
         'MixSource (master chain input)' => 'a node class defined in the spec (an input)',
         'sampler voices (SamplerVoice)' => 'Samples made from NArrays (bundles save them as assets; see sampler_graph_io_spec.rb)',
+        'drums kit builder, stereo sample voices' => 'Samples made from NArrays (bundles save them as assets; see sampler_graph_io_spec.rb)',
         'grains (Grains)' => 'Samples made from NArrays (bundles save them as assets; see sampler_graph_io_spec.rb)',
         'sampler zone values (ZoneValue), pans, layers' => 'Samples made from NArrays (bundles save them as assets; see sf2_spec.rb)',
         'sampler choke groups (SamplerVoice choke)' => 'Samples made from NArrays (bundles save them as assets; see sampler_graph_io_spec.rb)',

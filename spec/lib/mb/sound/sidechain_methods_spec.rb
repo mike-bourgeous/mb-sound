@@ -158,6 +158,24 @@ RSpec.describe(MB::Sound::SidechainMethods) do
       expect(data[2 * 96000..].abs.max).to eq(0)
     end
 
+    # Munro's M5 (panel 2): a full scene that didn't name the pump stopped
+    # it, so a hand-built set pumped only until its first `go`
+    it 'keep playing through full scenes that don\'t name them, and stop for `pump: :off`' do
+      data = run(3 * 96000) { |ss|
+        MB::Sound.sidechain(:pump, line, on: :now)
+        ss.add(MB::Sound.bus(:pump), name: :probe, on: :now)
+        MB::Sound.track(:pad, 0.1.constant)
+        MB::Sound.scene(:a, pad: :on)
+        MB::Sound.scene(:quiet, pad: :on, pump: :off)
+        MB::Sound.at_bar(2) { MB::Sound.go(:a) }
+        MB::Sound.at_bar(3) { MB::Sound.go(:quiet) }
+      }
+      hits = ->(r) { r.select { |i| data[i] > 0.5 && data[i - 1] <= 0.5 } }
+      expect(hits.(96000...192000).length).to eq(5) # (the pump plays on under :a)
+      expect(hits.(192000...288000)).to be_empty
+      expect(session.arrangement.track_info[:pump]).to include('stopped')
+    end
+
     it 'leave no stems and keep stems summing to the mix' do
       dir = tmp_path('stems')
       path = tmp_path('mix.flac')
@@ -190,7 +208,7 @@ RSpec.describe(MB::Sound::SidechainMethods) do
     end
 
     # ux-fix-1 (maintainer: "Context"): the track's name stands for its
-    # on/off level wherever a knob is meant (Session::Knobs#control_name)
+    # level wherever a knob is meant (Session::Knobs#control_name)
     it 'turn on and off by the track\'s own name in turn, scenes, sections, snapshots, and learn' do
       run(3 * 96000) { |ss|
         MB::Sound.sidechain(:pump, line, on: :now)
@@ -216,7 +234,7 @@ RSpec.describe(MB::Sound::SidechainMethods) do
     it 'print a hint on mute (mute doesn\'t stop a pump) pointing to the level knob and stop' do
       MB::Sound::Session.with_context(session: session) do
         MB::Sound.sidechain(:pump, line)
-        expect { MB::Sound.mute(:pump) }.to output(/trigger track: .*turn :pump, 0 \(its on\/off level\) or stop :pump/).to_stdout
+        expect { MB::Sound.mute(:pump) }.to output(/trigger track: .*level :pump, 0 or stop :pump/).to_stdout
         expect { MB::Sound.unmute(:pump) }.not_to output.to_stdout
       end
     end

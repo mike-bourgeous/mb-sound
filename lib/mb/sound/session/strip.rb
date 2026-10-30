@@ -2,7 +2,7 @@ module MB
   module Sound
     class Session
       # Mute and solo for Session players: the mute/solo stage of each
-      # player's strip (contract K7: fade, then gain, then mute/solo).
+      # player's strip (contract K7: fade, then gain (Faders), then mute/solo).
       #
       # Mutes and solos belong to player names, so a graph replacing a muted
       # one starts muted.  An armed track's monitor player follows its
@@ -192,7 +192,7 @@ module MB
         # own: `mute :lead` silences the keyboard through :lead's patch
         # too, and `solo :lead` keeps it (omnibus6, agreed 2026-10-12).
         def audible_unlocked?(name)
-          track = Arrangement::Recording.monitored_track(name)
+          track = Session::Name.monitored(name)
           return false if @muted.include?(name) || (track && @muted.include?(track))
           @soloed.empty? || @soloed.include?(name) || (!track.nil? && @soloed.include?(track))
         end

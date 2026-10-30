@@ -46,6 +46,20 @@ RSpec.describe(MB::Sound::Plan::Op::Resonator) do
     plan_compare(fallbacks: true) { (src.new(kind: :impulses, at: [0, 400], ends_at: 900) * 1).ping(440, decay: 0.01) * 1 }
   end
 
+  # Kaede's 22 (panel 2): a gong's tension glide (a ping of its own) or any
+  # frequency or decay node ending ended the resonator with it
+  it 'holds the last value of a frequency or decay node that ends, ringing on' do
+    plan_compare(fallbacks: true) {
+      f = (src.new(kind: :steps, seed: 6, every: 50, scale: 300, offset: 400, ends_at: 700) * 1)
+      d = (src.new(kind: :steps, seed: 7, every: 80, scale: 0.02, offset: 0.05, ends_at: 1100) * 1)
+      (hits * 1).ping(f, decay: d) * 1 + (hits * 0.5).resonate(:gong, 220, decay: 0.3, glide_time: 0.004) * 1
+    }
+    node = (src.new(kind: :impulses, at: [0], value: 1, ends_at: 10) * 1).ping(src.new(kind: :steps, seed: 8, every: 50, scale: 1, offset: 440, ends_at: 300), decay: 0.02)
+    lengths = []
+    while (b = node.sample(256)); lengths << b.length; end
+    expect(lengths.sum).to be > 0.02 * 48000 # (rang out past the frequency node's end at 300)
+  end
+
   it 'runs with the Ruby mirrors (Resonator.process_ruby and ModalResonator.process_ruby)' do
     r = plan_compare(engines: [:ruby]) {
       f = src.new(kind: :steps, seed: 5, every: 70, scale: 200, offset: 300) * 1

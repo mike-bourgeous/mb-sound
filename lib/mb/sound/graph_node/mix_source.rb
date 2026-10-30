@@ -8,9 +8,12 @@ module MB
       # Call #write with each new buffer before sampling the chain.  Every
       # channel returns a copy of its channel of the latest buffer, so graphs
       # may sample a channel more than once and modify what they get.  The
-      # chain must ask for exactly the number of frames that was written, so
-      # nodes that change the sample count (e.g. #resample or #oversample)
-      # can't be used downstream.
+      # chain must ask for the number of frames that was written, or for
+      # consecutive pieces of it (a Synth reading its lanes in windows split
+      # at its grid; omnibus17, Kez's K10: a bus chain through a Synth
+      # raised "asked for 799 samples" with plans off, which fused regions
+      # had hidden since fuse-more-1), so nodes that change the sample
+      # count (e.g. #resample or #oversample) can't be used downstream.
       #
       # Example:
       #     src = MB::Sound::GraphNode::MixSource.new(channels: 2)
@@ -66,6 +69,7 @@ module MB
           @outputs = Array.new(channels) { |i| Channel.new(self, i) }.freeze
           @data = Array.new(channels) { Numo::SFloat[] }
           @copies = Array.new(channels) # (reused by #channel_data)
+          @offsets = Array.new(channels, 0) # (where the next piece starts; see #channel_data)
         end
 
         # A MixSource has no upstream nodes.
@@ -78,12 +82,17 @@ module MB
         def write(data)
           raise ArgumentError, "Expected #{@outputs.length} channels (got #{data.length})" unless data.length == @outputs.length
           @data = data
+          @offsets.fill(0)
         end
 
         # For internal use by Channel#sample.  Returns a copy of one channel of
         # the latest buffer (in a buffer of its own, reused every span).
+        #
+        # A read of fewer samples than the buffer holds is the next piece of
+        # it (the reads of a span must add up to the buffer).
         def channel_data(index, count)
           d = @data[index]
+          return channel_piece(index, d, count) if count < d.length && count > 0
           unless count == d.length
             raise ArgumentError, "A master effects chain asked for #{count} samples, but the mix buffer has #{d.length}; nodes that change the sample count (e.g. resample or oversample) can't be used here"
           end
@@ -93,6 +102,19 @@ module MB
           return c if c && c.class == d.class && c.length == d.length && MB::Sound::FastArithmetic.copy(c, d)
           @copies[index] = d.dup
         end
+
+        # The next +count+ samples of buffer +d+ for channel +index+ (see
+        # #channel_data).
+        def channel_piece(index, d, count)
+          off = @offsets[index]
+          if off + count > d.length
+            raise ArgumentError, "A master effects chain asked for #{count} samples #{off} samples into a #{d.length}-sample mix buffer; " \
+              "nodes that change the sample count (e.g. resample or oversample) can't be used here"
+          end
+          @offsets[index] = off + count == d.length ? 0 : off + count
+          d[off...(off + count)].dup
+        end
+        private :channel_piece
 
         # Raises an error unless +rate+ matches this mix's sample rate.
         def sample_rate=(rate)

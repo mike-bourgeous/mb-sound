@@ -80,12 +80,17 @@ module MB
           @input_ended = false
           @rung_out = false
           @buf = nil
+          @last = {} # (the last values of the frequency and decay nodes; see #read_param)
+          @plan_ended = nil # (see #plan_input_ended)
           @node_type_name = 'Resonator'
         end
 
         # Returns +count+ samples of the ringing, or nil once the input has
-        # ended and the ringing has died away (or the frequency or decay
-        # node ended).  After the input ends, the last buffer stops on the
+        # ended and the ringing has died away.  A frequency or decay node
+        # that ends holds its last value (omnibus17, Kaede's 22: a gong's
+        # tension glide, a ping of its own, ended the resonator with it at
+        # 4.9 s of a 20 s decay; a short last buffer is padded with its
+        # last sample).  After the input ends, the last buffer stops on the
         # exact sample where the ringing falls below QUIET, so the end is
         # the same at any buffer size (2026-10-13; it used to end at the
         # first buffer start below QUIET).  A short input buffer is the
@@ -112,15 +117,10 @@ module MB
             count = x.length
           end
 
-          f = @freq.is_a?(Numeric) ? @freq : @freq.sample(count)
-          return nil if f.nil? || (f.is_a?(Numo::NArray) && f.empty?)
-          d = @decay_source.samples(count, @sample_rate)
+          f = @freq.is_a?(Numeric) ? @freq : read_param(:freq, count) { @freq.sample(count) }
+          return nil if f.nil?
+          d = @decay_source.node? ? read_param(:decay, count) { @decay_source.samples(count, @sample_rate) } : @decay_source.samples(count, @sample_rate)
           return nil if d.nil?
-
-          if f.is_a?(Numo::NArray) && f.length < count
-            count = f.length
-            x = x[0...count] if x.is_a?(Numo::NArray)
-          end
 
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
           return run_kernel(@buf, x, f, d) unless @input_ended
@@ -162,6 +162,24 @@ module MB
 
           run_kernel(@buf[0...hi], slice(x, hi), slice(f, hi), slice(d, hi))
         end
+
+        # A frequency or decay node's buffer (the block reads it) fitted to
+        # +count+: padded with its last value when short, and its last value
+        # (a Float) once it has ended; nil if it ended before giving any.
+        def read_param(key, count)
+          data = yield
+          return @last[key] if data.nil? || data.empty?
+
+          data = data.real if data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex)
+          @last[key] = data[-1].to_f
+          return data if data.length == count
+          return data[0...count] if data.length > count
+
+          padded = Numo::SFloat.new(count).fill(@last[key])
+          padded[0...data.length] = data
+          padded
+        end
+        private :read_param
 
         # Runs the kernel into +out+ (see #sample).
         def run_kernel(out, x, f, d)
@@ -207,16 +225,50 @@ module MB
         include Plan::Describable
 
         def plan_describe(p)
-          freq = @freq.is_a?(Numeric) ? @freq : p[@freq]
+          freq = @freq.is_a?(Numeric) ? @freq : plan_param(p, :freq, @freq)
           src = @decay_source
           decay =
             if src.node?
-              v = p[src.node]
-              src.unit == :seconds ? v * @sample_rate : v
+              plan_param(p, :decay, src.node) { |v| src.unit == :seconds ? v * @sample_rate : v }
             else
               src.constant_samples(@sample_rate)
             end
           p.resonator(self, p[@input], freq, decay)
+        end
+
+        # A frequency or decay node as an optional input (it may end without
+        # ending the node: the block replays unfused, see #sample, and its
+        # last value is a number from the next plan on), keeping its last
+        # value (in samples for the decay) for #sample.  The block converts
+        # the node's Value (seconds to samples).
+        def plan_param(p, key, node)
+          return @last.fetch(key) if @plan_ended&.key?(Plan.origin(node)) && @last.key?(key)
+
+          v = p.optional(node)
+          v = v.real if v.complex?
+          v = yield v if block_given?
+          p.keep_last(v, @last, key)
+          v
+        end
+        private :plan_param
+
+        def plan_inputs
+          [@input, @freq, @decay_source.node].select { |v| v.respond_to?(:sample) }
+        end
+
+        # Called by a region when the optional input +source+ (the frequency
+        # or decay node) ended: the block replays unfused, and the parameter
+        # is its last value from the next plan on.
+        def plan_input_ended(source)
+          (@plan_ended ||= {}.compare_by_identity)[source] = true
+          Plan.changed(self, structure: :ended)
+          :replay
+        end
+
+        # True: short parameter buffers are padded with their last value
+        # (see #read_param), so a block with one runs unfused.
+        def plan_pads_inputs?
+          true
         end
 
         def plan_unsupported_reason
@@ -233,12 +285,13 @@ module MB
         end
 
         def plan_snapshot
-          [@state.to_a, @input_ended, @rung_out]
+          [@state.to_a, @input_ended, @rung_out, @last.dup]
         end
 
         def plan_restore(snapshot)
-          state, @input_ended, @rung_out = snapshot
+          state, @input_ended, @rung_out, last = snapshot
           @state[0..] = state
+          @last.replace(last)
         end
 
         # The exact Ruby mirror of MB::Sound::FastResonator.ping (same

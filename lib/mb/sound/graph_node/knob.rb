@@ -203,7 +203,11 @@ module MB
             v = param.typed(value)
             v = v.round if param.stepped? && v.is_a?(Float) && v == v.round
             parts = [name.to_sym.inspect]
-            parts << (param.range && !param.implied ? "(#{lit.(param.range)}).at(#{lit.(v)})" : lit.(v))
+            # (a plain-number knob's value prints as a plain number: the
+            # writer prints Floats that are exact tenths of a dB as -6.db,
+            # which a plain range's check refuses on load; omnibus17)
+            val = param.type == :number && v.is_a?(Float) && v.finite? ? v.inspect : lit.(v)
+            parts << (param.range && !param.implied ? "(#{lit.(param.range)}).at(#{val})" : val)
             parts << "curve: #{param.curve.inspect}" unless param.curve == param.default_curve || (param.implied && MB::Sound::Param.name_entry(param.name)&.dig(:curve) == param.curve)
             parts << "unit: #{lit.(param.unit)}" if param.unit && param.unit != MB::Sound::Param::TYPE_UNITS[param.type]
             parts << "cc: #{cc}" if cc

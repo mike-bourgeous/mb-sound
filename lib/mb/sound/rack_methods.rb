@@ -160,7 +160,7 @@ module MB
         end
 
         rack = app.rack
-        full = share ? name : (rack.name ? :"#{rack.name}/#{name}" : name)
+        full = share ? name : (rack.name ? Session::Name.join(rack.name, name) : name)
         info = Rack::KnobInfo.new(rack: rack, knob: name, application: app, share: share, follow: follow, description: description)
         start = share || follow ? nil : app.start[name] # (a saved instance's value; see Rack#using)
         k = GraphNode::Knob.new(full, default, rack_knob: info, initial: start, description: description, **spec)

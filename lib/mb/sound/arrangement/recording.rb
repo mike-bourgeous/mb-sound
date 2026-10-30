@@ -65,12 +65,12 @@ module MB
           a = arms
           tracks.each_key do |name|
             next if a.key?(name)
-            mon = Recording.monitor_name(name)
+            mon = Session::Name.monitor(name)
             @session.remove(mon, fade: @session.declick_bars) if @session.playing_after_queue?(mon)
           end
 
           a.each do |name, arm|
-            playing = @session.playing_after_queue?(Recording.monitor_name(name))
+            playing = @session.playing_after_queue?(Session::Name.monitor(name))
             if arm.monitoring? && !playing
               arm_event(name, :monitor_lost)
             elsif !arm.monitoring? && playing
@@ -88,13 +88,13 @@ module MB
         def arm_problems
           a = arms
           problems = a.filter_map { |name, arm|
-            playing = @session.playing_after_queue?(Recording.monitor_name(name))
+            playing = @session.playing_after_queue?(Session::Name.monitor(name))
             next if arm.monitoring? == playing
             "#{name.inspect} is #{arm.state} but its monitor is #{playing ? '' : 'not '}playing"
           }
           tracks.each_key do |name|
             next if a.key?(name)
-            problems << "#{name.inspect} is disarmed but its monitor plays" if @session.playing_after_queue?(Recording.monitor_name(name))
+            problems << "#{name.inspect} is disarmed but its monitor plays" if @session.playing_after_queue?(Session::Name.monitor(name))
           end
           problems
         end
@@ -121,18 +121,6 @@ module MB
           armed.key?(name)
         end
 
-        # The name of the player that monitors armed track +name+.
-        def self.monitor_name(name)
-          :"#{name}/live"
-        end
-
-        # The track whose monitor player is +name+ (see .monitor_name), or
-        # nil if +name+ isn't a monitor's name.
-        def self.monitored_track(name)
-          return nil unless name.is_a?(Symbol)
-          s = name.name
-          s.end_with?('/live') && s.length > 5 ? s[0...-5].to_sym : nil
-        end
 
         # Arms tracks: #record and #capture without names record into
         # them, and (+monitor: true+, the default) each track's patch also
@@ -179,7 +167,7 @@ module MB
             # earlier, which cut the end of the monitored phrase; the looper persona, 2026-10-13)
             time = @session.now
             entries = names.map { |n|
-              mon = Recording.monitor_name(n)
+              mon = Session::Name.monitor(n)
               @session.remove(mon, fade: @session.declick_bars, time: time) if @session.playing_after_queue?(mon)
               arm_event(n, :disarm)
               @session.change(:disarm, n, time) { |_t| }
@@ -401,7 +389,7 @@ module MB
         def refresh_monitor(tr)
           return unless tr.patch?
           arm = arms[tr.name]
-          return unless arm&.monitoring? && @session.playing_after_queue?(Recording.monitor_name(tr.name))
+          return unless arm&.monitoring? && @session.playing_after_queue?(Session::Name.monitor(tr.name))
           # (a patch that fails to build leaves the old monitor playing)
           arm_event(tr.name, :redefine) if start_monitor(tr, arm.input)
         end
@@ -418,7 +406,7 @@ module MB
                     notice_patch_problem("Track #{tr.name.inspect} can't monitor live MIDI (#{e.class}: #{e.message}#{where ? " at #{where}" : ''}); recording still works")
                     return nil
                   end
-          @session.add(graph, name: Recording.monitor_name(tr.name), on: :now, fade: 0, description: "#{tr.name}: live monitor (armed; #{input ? "MIDI input #{input.inspect}" : 'live MIDI'})")
+          @session.add(graph, name: Session::Name.monitor(tr.name), on: :now, fade: 0, description: "#{tr.name}: live monitor (armed; #{input ? "MIDI input #{input.inspect}" : 'live MIDI'})")
         end
       end
     end

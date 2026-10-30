@@ -425,7 +425,7 @@ module MB
           def self.knobs(racks, knobs)
             names = knobs.to_h { |k| [k.name, k] }
             racks.flat_map { |r|
-              r.knobs.filter_map { |kn| names[kn] && [kn, kn.to_s.split('/').last.to_sym, r] }
+              r.knobs.filter_map { |kn| names[kn] && [kn, Session::Name[kn].leaf, r] }
             }
           end
 
@@ -456,7 +456,7 @@ module MB
               r.knobs.each do |kn|
                 break if y >= c.h
                 k = knobs[kn]
-                short = kn.to_s.split('/').last
+                short = Session::Name[kn].leaf.to_s
                 spec = k&.spec || r.knob_specs[short.to_sym]
                 value, turning = shown_value(state, kn, k)
                 value ||= spec&.default

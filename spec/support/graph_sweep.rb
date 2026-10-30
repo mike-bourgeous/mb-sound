@@ -422,6 +422,16 @@ module GraphSweep
           choke :open_hat, :closed_hat
         }
       }],
+      # (omnibus17, Kez's K5 and Odile's F12: stereo Samples as voices play
+      # mixed down; they raised in Drums::Voice#initialize)
+      ['drums kit builder, stereo sample voices', ->(c) {
+        l = Numo::SFloat.cast(Array.new(300) { |i| Math.sin(i * 0.3) * 0.99**i })
+        wood = MB::Sound::Sample[[l, l * -0.5]]
+        c.s.kit(c.s.grid(32, kick: 'x.x.', clap: '.x.x')) {
+          voice :kick, wood
+          voice(:clap) { |h| h.sample(wood, tune: 3) + h.click }
+        }
+      }],
 
       # Plan lane groups (Plan::LaneGroup: FastPlan.run_lanes with the
       # lane-major SVF, four-pole, diode, and biquad kernels, wavetable

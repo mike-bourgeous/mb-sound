@@ -34,7 +34,7 @@ module MB
             out << "  #{c(:dim, 'none (knob :name, value, range: lo..hi inside the block)')}"
           else
             info.knob_specs.each do |n, spec|
-              knobs = infos.select(&:path).flat_map(&:knobs).select { |k| k.to_s.split('/').last == n.to_s }
+              knobs = infos.select(&:path).flat_map(&:knobs).select { |k| Session::Name[k].leaf == n.to_sym }
               where = knobs.empty? ? 'not playing' : knobs.map(&:inspect).join(', ')
               out << "  #{pad(c(:key, Session::Racks.spec_text(n, spec)), 34)} #{c(:dim, where)}"
             end

@@ -276,6 +276,59 @@ RSpec.describe(MB::Sound::Session::Buses) do
       expect(kick.abs.max).to be > 0.1
     end
 
+    # Kez's K10 (panel 2): a bus chain running its input through a Synth
+    # failed ("A master effects chain asked for 799 samples, but the mix
+    # buffer has 800"): a lane waking inside a buffer (the send turned up
+    # after the bus slept) is read in a window, and the bus input (a
+    # MixSource) took only whole buffers.  Fused plans hid it from
+    # fuse-more-1 (3ee3c039) on; plans off it failed until omnibus17.
+    it 'runs a bus chain through a Synth whose lanes read the bus input in windows, plans on and off' do
+      results = [true, false].map do |plans|
+        old = MB::Sound::Plan.enabled
+        MB::Sound::Plan.enabled = plans
+        s = new_session(transport: MB::Sound::Sequence::Transport.new(bpm: 172))
+        MB::Sound::Session.with_context(session: s) do
+          MB::Sound.knob(:tint, 0, range: 0..1)
+          n = MB::Sound
+          chords = n.seq([n::E2, n::G2, n::B2], [n::C2, n::E2, n::G2], [n::A1, n::C2, n::E2], [n::B1, n::D2, n::F2]).n1.loop
+          MB::Sound.bus(:colour) { |sig| chords.synth(voices: 5) { |v, _| (sig * 0.004).resonate([[1, 1, 1], [2, 0.45, 0.7]], v.freq, decay: 0.3) * v.gate.smooth(4.ms) } }
+          MB::Sound.track(:growl, send: { colour: :tint }) { |clip| clip.notes.hz.saw * clip.notes.gate * 0.5 }
+          MB::Sound.scene(:a, growl: n.seq(n::E2, n::G2, n::B2, n::D3).n8.loop)
+          MB::Sound.go(:a, on: :now)
+          MB::Sound.at_bar(2) { MB::Sound.turn(:tint, 1) }
+          MB::Sound.at_bar(3) { MB::Sound.turn(:tint, 0) }
+          MB::Sound.at_bar(4) { MB::Sound.turn(:tint, 1) }
+          run(5 * 48000 * 60 * 4 / 172, s: s)
+        end
+      ensure
+        s&.close
+        MB::Sound::Plan.enabled = old
+      end
+      expect(results[0].abs.max).to be > 0.1
+      expect((results[0] - results[1]).abs.max).to be < 1e-4 # (the windows read the bus input's next samples)
+    end
+
+    # Munro's M3 (panel 2): a scene swapping the drums' kit (new rows: the
+    # patch rebuilds) as it starts the ducked bass queued both graphs on the
+    # bar, and the reader bound before the new kit played attached its spy
+    # only to the old kit: the bass wasn't ducked after the swap.
+    it 'reads only: a node of a graph queued under the name when the reader is bound (a kit swapped as the ducked part starts)' do
+      MB::Sound::Session.with_context(session: session) do
+        four = MB::Sound.grid(16, kick: 'X...X...X...X...').loop(align: :launch)
+        hats = MB::Sound.grid(16, kick: 'X...X...X...X...', closed_hat: '5.5.5.5.5.5.5.5.').loop(align: :launch)
+        bass = MB::Sound.seq(MB::Sound::A1).n4.loop(align: :launch)
+        MB::Sound.track(:drums) { |kit| MB::Sound.tr808(kit) * 0 }
+        MB::Sound.track(:bass) { |c| (c.notes.gate * 0.5).duck(:drums, only: :kick, amount: -24.db, release: 1.n16) }
+        MB::Sound.scene(:a, drums: four)
+        MB::Sound.scene(:b, drums: hats, bass: bass)
+        MB::Sound.go(:a, on: :now)
+        MB::Sound.go(:b, at: MB::Sound.bar(2)) # (queued: both graphs wait for the bar)
+        data = run(3 * 96000)
+        expect(data[96000 + 1200]).to be_within(1e-6).of(0.5 * -24.db) # (ducked right after the swap's first kick)
+        expect(data[96000 + 23999]).to be > 2 * data[96000 + 1200] # (rising again before the next kick)
+      end
+    end
+
     it 'ducks by a bus or a track by name, as a duck by the node itself would' do
       kick_graph = -> { MB::Sound.grid(4, 'x...').loop.trigger.ping(50, decay: 0.3) }
       ref = new_session

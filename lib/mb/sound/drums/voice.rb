@@ -97,7 +97,15 @@ module MB
         # GraphNode::Tee.collect_branches around the graph's build) tells
         # branches made while building the graph and left unread from
         # readers elsewhere (see #boundary).
+        #
+        # Kits are mono: a voice whose graph has several channels (a stereo
+        # Sample, `h.sample(Sample['snare.flac'])` or `voice :thud,
+        # Sample['wood.flac']`) plays them mixed down (Channels#mono, the
+        # average), as a sampler's mono outs would (omnibus17: it raised
+        # "undefined method 'get_sampler' for Channels", Kez's K5 and
+        # Odile's F12).  Pan or widen the kit after it.
         def initialize(graph, name:, machine:, inputs:, notes: [], knobs: {}, skip_idle: true, sample_rate: 48000, built: nil)
+          graph = graph.mono if graph.is_a?(GraphNode::Channels) || (graph.respond_to?(:channel_count) && graph.channel_count > 1)
           @graph = graph.get_sampler
           @name = name
           @bufs = []

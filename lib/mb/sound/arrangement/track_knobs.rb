@@ -74,7 +74,7 @@ module MB
 
         # The knob name for param +param+ of track +track+'s preset.
         def knob_name(track, param)
-          :"#{track}/#{param}"
+          Session::Name.param(track, param)
         end
 
         # { param => GraphNode::Knob } for the params of graph Document

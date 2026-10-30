@@ -500,7 +500,7 @@ module MB
             base = entries.map { |e|
               kn = e[0] == :knob ? e[1] : info.nodes[e[3]].knob_of(e[1])
               # (a knob's cell is named after the knob: bass/glide is glide, not time)
-              kn ? kn.to_s.split('/').last : (SHORTS[e[1]] || e[1]).to_s
+              kn ? Session::Name[kn].leaf.to_s : (SHORTS[e[1]] || e[1]).to_s
             }
             dup = base.tally.select { |_, n| n > 1 }.keys
             entries.each_with_index.map { |e, i|
@@ -1225,7 +1225,7 @@ module MB
 
           def draw_body(c, s, _state)
             return c.text(0, 0, 'CUE  no session', :dim) unless s
-            cued = s.players.select { |p| p.name.to_s.end_with?('/cue') }.map { |p| p.name.to_s.delete_suffix('/cue') }
+            cued = s.players.filter_map { |p| Session::Name.cued(p.name)&.to_s }
             k = s.knobs.to_h { |kv| [kv.name, kv] }
             x = c.line(0, ['CUE ', :title], [cued.empty? ? c.glyph(:off) : c.glyph(:on), cued.empty? ? :dim : :ok], ' ')
             x = c.text(x, 0, cued.empty? ? 'nothing cued' : cued.join(' '), cued.empty? ? :dim : :name)

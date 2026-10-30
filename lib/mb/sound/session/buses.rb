@@ -57,9 +57,9 @@ module MB
         # A player name's routing: +to+ is the bus its main out feeds (nil
         # for the master), +sends+ a Hash from bus name to the send's level
         # knob (a GraphNode::Knob), +trigger+ true for a trigger track (a sidechain
-        # line: heard by readers only, never mixed; see #route).
-        # +level+ is a trigger track's level knob (see #trigger_level_name).
-        Route = Struct.new(:to, :sends, :trigger, :level, keyword_init: true)
+        # line: heard by readers only, never mixed; see #route).  Its level
+        # is the player's level knob, like any player's (Faders).
+        Route = Struct.new(:to, :sends, :trigger, keyword_init: true)
 
         # Undo subjects: a bus's chain, and one send of a player name.
         BusSubject = Data.define(:name)
@@ -172,14 +172,6 @@ module MB
           @mutex.synchronize { route_of(name)&.trigger } || false
         end
 
-        # The name of trigger track +name+'s level knob: :"pump/level" (0..1,
-        # default 1; see #route).  `turn :"pump/level", 0` stops the pump
-        # (journaled, undoable, exact in takes); scenes and sections take
-        # `"pump/level": 0` like any knob value.
-        def trigger_level_name(name)
-          :"#{name}/level"
-        end
-
         # The shape a trigger track was defined with (SidechainMethods
         # #sidechain's +shape:+; nil for a patch block), for warnings.
         def trigger_shape(name)
@@ -258,17 +250,16 @@ module MB
 
           old = nil
           dropped = nil
-          # A trigger track's level: a Session knob (turn, scenes, sections,
-          # undo, and takes as for any knob), made before the routes lock
-          level_knob = trigger ? (knob(trigger_level_name(name), 1.0, range: 0.0..1.0) or return nil) : nil
+          # A trigger track's level (Faders): `level :pump, 0` stops the
+          # pump, so it is made with the route (before the routes lock)
+          (fader!(name) or return nil) if trigger
           @mutex.synchronize {
             old = @routes[name]
-            r = Route.new(to: old&.to, sends: (old&.sends || {}).dup, trigger: old&.trigger || false, level: old&.level)
+            r = Route.new(to: old&.to, sends: (old&.sends || {}).dup, trigger: old&.trigger || false)
             r.to = to unless to == :keep
             r.sends = knobs if knobs
             unless trigger.nil?
               r.trigger = trigger
-              r.level = trigger ? level_knob : nil
               if trigger
                 dropped = r.sends.values
                 r.to = nil
@@ -449,7 +440,7 @@ module MB
           rate = output_open? ? sample_rate : 48000
           k = nil
           @render_lock.synchronize {
-            k = GraphNode::Knob.new(:"#{name}>#{bus}", 0.0, session: self, sample_rate: rate, frame: @frame, range: 0.0..MAX_SEND)
+            k = GraphNode::Knob.new(Name.send_knob(name, bus), 0.0, session: self, sample_rate: rate, frame: @frame, range: 0.0..MAX_SEND)
             if level.is_a?(Numeric)
               k.set(level.to_f, frame: @frame, smooth: 0)
             else
@@ -499,6 +490,8 @@ module MB
           end
 
           # Graphs already playing under a name an `only:` reader names
+          # (graphs starting later get theirs as they start: see
+          # #start_player_spies)
           taps.select(&:only).each do |t|
             players = @mutex.synchronize { @players.values.select { |p| p.name == t.source_name } + [@stopped[t.source_name]].compact }
             players.each { |p| attach_bus_spies(t.source_name, p.input.nodes) }
@@ -507,9 +500,10 @@ module MB
         end
 
         # Attaches spies for `only:` readers of +name+ to the nodes they name
-        # in +nodes+ (a graph about to play under +name+).
-        def attach_bus_spies(name, nodes)
-          onlys = @mutex.synchronize { @bus_only.key?(name) ? @bus_only[name].to_a : [] }
+        # in +nodes+ (a graph about to play under +name+).  +locked+ when
+        # called with @mutex held.
+        def attach_bus_spies(name, nodes, locked: false)
+          onlys = locked ? (@bus_only.key?(name) ? @bus_only[name].to_a : []) : @mutex.synchronize { @bus_only.key?(name) ? @bus_only[name].to_a : [] }
           return if onlys.empty?
 
           all = nodes.flat_map { |n| [n, *n.graph] }.uniq
@@ -527,6 +521,20 @@ module MB
             node.spy(handle: [:bus_tap, name, only], phase: :pre) { |count| @bus_only_pending[key] = count }
             node.spy(handle: [:bus_tap, name, only], phase: :post) { |data| bus_only_write(key, data) }
           end
+        end
+
+        # Attaches the spies of `only:` readers of +name+ to graph +input+
+        # as it starts playing under that name (Session#start_player, with
+        # @mutex held): every graph that starts under a read name gets them
+        # (idempotent), whatever queued it.  Before (omnibus17), spies were
+        # attached when a graph was queued and when a reader was bound to
+        # the graphs then playing, so a graph queued before its reader
+        # (a scene swapping the drums' kit on the bar as it starts the
+        # ducked bass) or kept for undo/resume played unread: `duck(:drums,
+        # only: :kick)` read silence after the swap (Munro's M3).
+        def start_player_spies(name, input)
+          return unless @bus_only.key?(name) && input.respond_to?(:nodes)
+          attach_bus_spies(name, input.nodes, locked: true)
         end
 
         # True if graph node +n+ is the one `only: name` means.
@@ -606,7 +614,7 @@ module MB
         # The routing of player name +name+ (an armed track's monitor uses
         # its track's), or nil.
         def route_of(name)
-          @routes[name] || ((t = Arrangement::Recording.monitored_track(name)) && @routes[t])
+          @routes[name] || ((t = Session::Name.monitored(name)) && @routes[t])
         end
 
         # Before a graph read in the span (a player at +offset+ frames in, a
@@ -723,7 +731,7 @@ module MB
         end
 
         def rank_of(ranks, name)
-          ranks[name] || ((t = Arrangement::Recording.monitored_track(name)) && ranks[t]) || 0
+          ranks[name] || ((t = Session::Name.monitored(name)) && ranks[t]) || 0
         end
 
         # Renders a span's players and buses in routing order (see the
@@ -909,15 +917,11 @@ module MB
         end
 
         # A trigger track's buffer (see #route's +trigger:+) goes only to its
-        # readers' signal (after its fades and times its level knob, before
-        # its mute, like any player's): no mix, bus, send, stem, or meter.
+        # readers' signal (after its fades and level, before its mute, like
+        # any player's): no mix, bus, send, stem, or meter.
         def deliver_trigger(p, route, data, offset, frames, fade)
           return unless bus_tapped?(p.name)
           tap = bus_signal_buffer(p.name)
-          level = route.level&.read(@frame + offset, frames)
-          unless level.nil? || (level.is_a?(Numeric) && level == 1)
-            fade = fade ? fade[0...frames] * level : level
-          end
           tap.each_with_index do |t, c|
             d = data[c % data.length]
             next if d.nil? || d.empty?
@@ -1283,7 +1287,7 @@ module MB
         # keeps what feeds it audible.
         def audible_unlocked?(name)
           return super if @soloed.empty? || (@buses.empty? && @routes.empty?)
-          track = Arrangement::Recording.monitored_track(name)
+          track = Session::Name.monitored(name)
           return false if @muted.include?(name) || (track && @muted.include?(track))
           return true if super
           reach = solo_reach

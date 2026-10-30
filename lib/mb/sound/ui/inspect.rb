@@ -146,7 +146,7 @@ module MB
           def call(session, target = Inspect.target)
             target ||= {}
             graphs = session.respond_to?(:ui_graphs) ? session.ui_graphs : {}
-            tracks = graphs.keys.reject { |n| n.to_s.end_with?('/live') }.freeze
+            tracks = graphs.keys.reject { |n| Session::Name.monitored(n) }.freeze
             track = pick_track(target[:track], tracks)
             return InspectInfo.new(track: nil, tracks: tracks, knobs: [].freeze, nodes: [].freeze, node: nil, code: nil, error: nil) unless track
 
@@ -314,7 +314,7 @@ module MB
             extras = r.knobs
             mine = unseen[i].reject { |kn| claimed[kn] }
             unless mine.empty?
-              extras = r.knobs + mine.filter_map { |kn| readers[kn] && [kn.to_s.split('/').last.to_sym, readers[kn]] }
+              extras = r.knobs + mine.filter_map { |kn| readers[kn] && [Session::Name[kn].leaf, readers[kn]] }
               mine.each { |kn| claimed[kn] = true }
             end
             snap = Inspect.snapshot(n, extras)

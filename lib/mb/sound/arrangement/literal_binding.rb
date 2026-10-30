@@ -279,7 +279,7 @@ module MB
         SHORT = { resonance: :reso, frequency: :freq, quality: :q }.freeze
 
         def knob_name(track, param)
-          :"#{track}/#{SHORT[param] || param}"
+          Session::Name.param(track, SHORT[param] || param)
         end
 
         # The knob default for literal +value+ of param +param+: a ranged

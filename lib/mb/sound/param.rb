@@ -1,4 +1,5 @@
 require 'did_you_mean'
+require_relative 'session/names' # (Session::Name: rack knob names' leaves)
 
 module MB
   module Sound
@@ -160,7 +161,7 @@ module MB
         # :"dub/space" looks up :space), or nil.
         def name_entry(name)
           return nil unless name.is_a?(Symbol) || name.is_a?(String)
-          key = NAME_KEYS.include?(name.to_sym) ? name.to_sym : name.to_s.split('/').last.to_sym
+          key = NAME_KEYS.include?(name.to_sym) ? name.to_sym : Session::Name[name.to_sym].leaf
           # (checked first, so declarations made while mb-sound loads
           # don't build the table before its unit classes exist)
           return nil unless NAME_KEYS.include?(key)

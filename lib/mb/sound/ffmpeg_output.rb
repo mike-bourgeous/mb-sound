@@ -15,6 +15,12 @@ module MB
 
       attr_reader :filename
 
+      # True: this output writes a file (Session::Cue keeps CUE out of
+      # renders into one; render wrappers such as RenderPeak pass it on).
+      def writes_file?
+        true
+      end
+
       # Starts an FFMPEG process to write audio to the given +filename+.  The
       # +filename+ must point to a writable directory, unless a +format+
       # override is specified (to allow using ffmpeg's virtual output formats,
