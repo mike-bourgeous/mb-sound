@@ -170,7 +170,7 @@ RSpec.describe(MemcheckSelection) do
     end
 
     it 'ignores changes to the selection tooling' do
-      expect(select('spec/valgrind/memcheck_map.json', 'spec/valgrind/memcheck_selection.rb').empty?).to eq(true)
+      expect(select('spec/valgrind/memcheck_map.json', 'spec/valgrind/memcheck_selection.rb', 'spec/valgrind/memcheck_parallel.rb').empty?).to eq(true)
     end
 
     it 'runs specs that are not in the map yet' do
