@@ -67,9 +67,39 @@ module QuickSelection
 
   def camel(s) = s.split('_').map(&:capitalize).join
 
-  # Spec files of the unit at +path+ (a lib/, bin/, or ext/ path)
+  # Files outside lib/, bin/, and ext/ that no unit name points at, with
+  # the spec files or directories that check them (test-infra-1,
+  # 2026-10-30: term-extract-1's Rakefile change broke the Rakefile text
+  # guard in parallel_specs_spec.rb, which nothing selected).
+  PATH_RULES = [
+    [%r{\ARakefile\z}, %w[spec/parallel_specs_spec.rb spec/quick_selection_spec.rb spec/merge_gate_spec.rb spec/valgrind/memcheck_selection_spec.rb]],
+    [%r{\Aspec/spec_helper\.rb\z}, %w[spec/spec_hygiene_spec.rb spec/warning_guard_spec.rb spec/stale_extensions_spec.rb]],
+    [%r{\Aspec/time_budgets\.yml\z|\Aspec/host_speed_bench\.rb\z}, %w[spec/parallel_specs_spec.rb]],
+    [%r{\Aspec/quick_map\.json\z}, %w[spec/quick_selection_spec.rb]],
+    [%r{\Aspec/valgrind/}, %w[spec/valgrind/memcheck_selection_spec.rb]],
+    [%r{\Aspec/support/plan_helpers\.rb\z}, %w[spec/lib/mb/sound/plan]],
+    [%r{\Aspec/support/(fork_script|smoke_runs|subprocess_\w+)\.rb\z|\Aspec/subprocess_\w+\.rb\z}, %w[spec/bin]],
+    [%r{\Apresets/}, %w[spec/lib/mb/sound/library_spec.rb spec/bin/save_presets_spec.rb]],
+    [%r{\Agolden/}, %w[spec/lib/mb/sound/sound_guard_spec.rb]],
+    [%r{\Agems/mb-term/}, %w[spec/lib/mb/sound/ui/term_integration_spec.rb]],
+  ].freeze
+
+  # Spec files of the unit at +path+: a lib/, bin/, or ext/ path, a spec
+  # helper (spec/support/x.rb or spec/x.rb -> spec files named x or x_*),
+  # or a PATH_RULES path
   def direct(path, specs = spec_files)
+    ruled = PATH_RULES.select { |re, _| path.match?(re) }.flat_map { |_, list| list }
+    ruled = ruled.flat_map { |p| p.end_with?('_spec.rb') ? [p] : specs.select { |s| s.start_with?("#{p}/") } } & specs
+    ruled | direct_unit(path, specs)
+  end
+
+  def direct_unit(path, specs)
     case path
+    when %r{\Aspec/(?:support/|valgrind/)?(\w+)\.rb\z}
+      base = $1
+      return [] if base.end_with?('_spec')
+
+      specs.select { |s| sb = File.basename(s, '_spec.rb'); sb == base || sb.start_with?("#{base}_") }
     when %r{\Abin/(.+)\.rb\z}
       ["spec/bin/#{$1}_spec.rb"] & specs
     when %r{\Aext/mb/(sound/)?(fast_\w+)/}, %r{\Aext/mb/(sound/)?(fast_\w+)\z}

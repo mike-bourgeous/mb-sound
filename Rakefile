@@ -514,6 +514,22 @@ namespace :spec do
   end
 end
 
+# The merge train (spec/merge_gate.rb; the maintainer's choice, 2026-10-30):
+# a short gate per merge, one full run per batch of merges.
+namespace :merge do
+  desc 'Per-merge gate: compile, the specs of units changed on either side of the merge (from the merge-base of its parents), ALWAYS, guards, gem specs (no args: the merge in progress or HEAD; [sha]: that merge commit; [ours,theirs]: two sides, working tree as the result; MERGE_DRY=1 lists)'
+  task :gate, [:merge, :theirs] => :compile do |_, args|
+    require_relative 'spec/merge_gate'
+    abort 'merge:gate: FAILED' unless MergeGate.run(merge: args[:merge], theirs: args[:theirs])
+  end
+
+  desc 'Batch end, once per batch of merges: spec:full (SLOW=1), smoke, golden:check, and a fuzz soak (SOAK_SESSION=24, SOAK_RELATION=200, SOAK_BASE=n; BATCH_STEPS=suite,smoke,golden,soak; OUT=dir)'
+  task batch: :compile do
+    require_relative 'spec/merge_gate'
+    abort 'merge:batch: FAILED' unless MergeGate.batch
+  end
+end
+
 # The plan layer's full block-size sweep (user decision 2026-10-10: not run
 # before every merge, only for branches that change the plan layer itself).
 # The default suite runs plan comparisons at block sizes 1, 7, 128, 800, and
