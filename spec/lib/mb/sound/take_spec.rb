@@ -345,7 +345,7 @@ RSpec.describe(MB::Sound::Take) do
         'sidechain(:hats, q: 1) { |c| c.env(0, 0.05) }',
         'bg :pad, 0.2.constant.duck(:pump, amount: -12.db).duck(:hats, amount: -3.db)',
         'scene :one, pump: a, hats: b',
-        'scene :two, pump: b',
+        'scene :two, pump: b, hats: :off', # (trigger tracks play on through scenes that don't name them: omnibus17, M5)
         'go :one, at: :now',
       ],
       97 => ['go :two'],

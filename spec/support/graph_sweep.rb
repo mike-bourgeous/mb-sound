@@ -414,15 +414,22 @@ module GraphSweep
         c.s.tr909(c.s.grid(32, bd: 'x.x.', clap: '.x..', hat: 'x.x.', oh: 'xx..', ride: '..x.', snare: '..f.'), flam: 0.001, shuffle: 2)
       }],
       ['drums kit builder', ->(c) {
-        # (a stereo Sample as a voice plays mixed down: omnibus17, K5/F12)
-        wood = MB::Sound::Sample[[Numo::SFloat.new(300).seq.map { |i| Math.sin(i * 0.3) * 0.99**i }, Numo::SFloat.new(300).seq.map { |i| Math.sin(i * 0.2) * 0.98**i }]]
-        c.s.kit(c.s.grid(32, kick: 'x.x.', snare: '.x.x', hat: 'xx..', oh: '..xx', clap: 'x..x')) {
+        c.s.kit(c.s.grid(32, kick: 'x.x.', snare: '.x.x', hat: 'xx..', oh: '..xx')) {
           voice(:kick) { |h| h.body(50, sweep: 2, drop: 0.3).softclip(0.6) + h.click }
-          voice(:clap) { |h| h.sample(wood) }
           voice(:snare) { |h| h.fm(200, index_decay: 0.01) + h.noise(bandpass: 2000) + h.bursts(3, 0.0003) }
           voice(:closed_hat) { metal * env(0.01) * velocity }
           tr808 :open_hat
           choke :open_hat, :closed_hat
+        }
+      }],
+      # (omnibus17, Kez's K5 and Odile's F12: stereo Samples as voices play
+      # mixed down; they raised in Drums::Voice#initialize)
+      ['drums kit builder, stereo sample voices', ->(c) {
+        l = Numo::SFloat.cast(Array.new(300) { |i| Math.sin(i * 0.3) * 0.99**i })
+        wood = MB::Sound::Sample[[l, l * -0.5]]
+        c.s.kit(c.s.grid(32, kick: 'x.x.', clap: '.x.x')) {
+          voice :kick, wood
+          voice(:clap) { |h| h.sample(wood, tune: 3) + h.click }
         }
       }],
 

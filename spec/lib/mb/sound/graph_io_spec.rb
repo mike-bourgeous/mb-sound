@@ -127,6 +127,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       'ArrayInput' => "can't print a Numo::SFloat",
       'MixSource (master chain input)' => 'a class defined outside the library',
       'sampler voices (SamplerVoice)' => 'a Sample made from audio in memory',
+      'drums kit builder, stereo sample voices' => 'the kit block uses wood from the code around it',
       'grains (Grains)' => 'a Sample made from audio in memory',
       'sampler zone values (ZoneValue), pans, layers' => 'a Sample made from audio in memory',
       'sampler choke groups (SamplerVoice choke)' => 'a Sample made from audio in memory',
