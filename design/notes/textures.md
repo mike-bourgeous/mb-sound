@@ -426,7 +426,7 @@ verified).
 Round 2 (the maintainer's answers, 2026-10-16): the tape stops with the
 sound and ends with its source.  `GraphNode#sounding(hold:, fade:)`
 (`GraphNode::Sounding`) is a gate: 1 while its source is above
-`RingOut::THRESHOLD` (-90 dB) and for `hold` after its last loud sample,
+`QuietRun::QUIET` (-90 dB) and for `hold` after its last loud sample,
 then a linear fade to 0; it starts closed, and when the source ends (nil
 or a short last read) it plays on as if the source were silent and ends
 on the sample where it closes, the way delays ring out.  Each value
