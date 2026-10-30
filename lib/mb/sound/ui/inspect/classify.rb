@@ -40,9 +40,7 @@ module MB
           # lanes).
           # +voice_knobs+ ({ voice => { knob => value } }: a kit's knob values
           # per drum voice, Drums::Voice#knobs).
-          Result = Data.define(:rows, :hidden, :plumbing, :unfit, :total, :lanes, :voice_knobs) do
-            def by_section = rows.group_by(&:section)
-          end
+          Result = Data.define(:rows, :hidden, :plumbing, :unfit, :total, :lanes, :voice_knobs)
 
           # Classes that are never shown (their settings are other nodes'
           # params), with the reason the hidden counts list them under.

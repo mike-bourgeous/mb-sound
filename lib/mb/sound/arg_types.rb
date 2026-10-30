@@ -75,13 +75,6 @@ module MB
         node
       end
 
-      # The tag of +node+ (see #tag), or nil.
-      def self.tag_of(node)
-        TAGS[node]
-      rescue StandardError
-        nil
-      end
-
       # True if +v+ is a frequency: a Pitch (Notes included), a
       # Notes::Frequency, or a node tagged :frequency.
       def self.frequency?(v)

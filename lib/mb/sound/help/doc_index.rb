@@ -124,12 +124,6 @@ module MB
           pry_commands & names
         end
 
-        # Example lines from a module's own comment (the block after a line
-        # starting "Example", or indented lines).
-        def module_examples(mod)
-          DocIndex.examples_in(module_comment(mod))
-        end
-
         # The comment above `module Name` in the file defining +mod+'s
         # methods (method_source doesn't read module comments).
         def module_comment(mod)

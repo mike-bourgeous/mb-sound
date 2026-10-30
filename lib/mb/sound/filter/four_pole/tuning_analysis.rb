@@ -156,12 +156,6 @@ module MB
             return 1.0 if x >= 1.0
             1.0 / target(mode, x)
           end
-
-          # The response of +mode+ at +x+ with the musical tuning at +w+
-          # (units of the cutoff), in dB.
-          def self.tuned_db(mode, x, w, m = scale(mode, x))
-            db(mode, x, w / m)
-          end
         end
       end
     end

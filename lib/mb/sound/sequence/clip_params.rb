@@ -20,10 +20,6 @@ module MB
       #     beat.loop.every(knob(:every).choose(1, 2, 4))
       #     bass.loop.legato(5.bars.lfo.at(0.25..1))       # notes breathe longer and shorter
       class Clip
-        # Clip operations that take params here (the stream versions read
-        # theirs at note-ons; see MIDI::Stream).
-        PARAM_OPERATIONS = [:humanize, :quantize, :swing, :chance, :every, :transpose, :legato].freeze
-
         # Prepended over Clip's own operations: a param argument goes to the
         # param versions below, anything else to the original (so plain
         # values give the same clips as before).

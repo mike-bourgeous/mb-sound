@@ -53,9 +53,6 @@ module MB
           end
         end
 
-        # Options every kind takes (Pane#configured).
-        COMMON = Pane::CONFIG
-
         module_function
 
         # The kinds: {kind => Proc(name, **opts) -> Pane}.

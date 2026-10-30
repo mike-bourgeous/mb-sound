@@ -82,11 +82,6 @@ module MB
           names.uniq.freeze
         end
 
-        # True if any fill plays at +pos+.
-        def fill?(pos)
-          !names_at(pos).empty?
-        end
-
         def to_s
           "FillMap(#{@entries.map { |e| "#{e.name}@#{e.from}...#{e.to}" }.join(', ')})"
         end

@@ -640,12 +640,6 @@ module MB
         optional.to_h { |k| [k, nil] }
       end
 
-      # Block parameter names, in order: the main input's, then the extra
-      # ports' (for printing an application's block).
-      def param_names
-        [@input.name, *@ports.keys]
-      end
-
       # The block's parameter list as text: "sig, side:, depth: 0.5" (an
       # optional port's default from the block's source, see
       # #port_defaults; nil when it isn't found).

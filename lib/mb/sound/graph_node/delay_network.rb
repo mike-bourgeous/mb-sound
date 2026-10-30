@@ -229,11 +229,6 @@ module MB
         end
         alias at_rate sample_rate=
 
-        # The number of delay lines.
-        def line_count
-          @lines.length
-        end
-
         # True once the network has rung out after its inputs ended.
         def rung_out?
           @ring_done

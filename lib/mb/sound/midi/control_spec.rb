@@ -36,9 +36,6 @@ module MB
       # names: canonical :linear, :exp, :switch, with :exponential (and
       # :log, :db) accepted as aliases of :exp.
       class ControlSpec < Data.define(:type, :number, :name, :range, :default, :description, :center, :curve, :param)
-        # Canonical curve names (see MB::Sound::Param::CURVES for aliases).
-        CURVES = [:linear, :exp, :switch].freeze
-
         # Controller types, with their raw value ranges, default names, and
         # MIDI status bytes (on channel 1).
         TYPES = {

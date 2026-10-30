@@ -104,10 +104,6 @@ module MB
           self
         end
 
-        def decision_rows
-          @decisions
-        end
-
         # The recorded MIDI (a Hash from input name to rows; see #midi).
         def midi_events
           @midi

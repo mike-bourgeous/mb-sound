@@ -184,11 +184,6 @@ module MB
             [Const.new(other), self]
           end
 
-          # The value at +pos+ as a Float (for options that need numbers).
-          def to_f_at(pos, transport: nil, stream: nil)
-            value_at(pos, transport: transport, stream: stream).to_f
-          end
-
           def to_s
             to_ruby
           end

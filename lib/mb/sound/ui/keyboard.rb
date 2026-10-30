@@ -415,16 +415,6 @@ module MB
           @releases ? OFF_MODES : OFF_MODES - [:release]
         end
 
-        # How #off_mode works now, in a few words (for the pane and help).
-        def off_mode_text
-          case resolved_mode
-          when :release then 'key-up ends notes'
-          when :hold then "no key-up here: notes hold while keys repeat (taps ~#{format('%.1f', @tracker.delay + HoldTracker::FIRST_SLACK)} s)"
-          when :tap then "no key-up here: every note #{format('%.2f', @tap)} s (` for :hold)"
-          when :legato then 'each note holds until the next'
-          end
-        end
-
         def inspect
           "#<UI::Keyboard #{@entry} #{resolved_mode} z=#{note_name(@base)} vel #{@velocity} ch #{@channel + 1}#{@held.empty? ? '' : " held #{held.map { |n| note_name(n) }.join(' ')}"}>"
         end
@@ -446,11 +436,6 @@ module MB
         # Sends a note-off for +key+'s note (used by StepEntry).
         def release(key, now)
           note_off(key, now) if @held.key?(key)
-        end
-
-        # Sends a controller change (used by panic).
-        def send_cc(index, value, now)
-          @out&.cc(index, value, channel: @channel, time: now)
         end
 
         private

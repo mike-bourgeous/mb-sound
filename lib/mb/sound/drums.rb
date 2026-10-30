@@ -42,13 +42,6 @@ module MB
         MB::Sound::Notes.new(source, sustain: false)
       end
 
-      # The trigger signal of a +source+ (see .notes_for): Notes#trigger, or
-      # the node itself.
-      def trigger_for(source)
-        notes = notes_for(source)
-        notes ? notes.trigger : source
-      end
-
       # Maps the impulse heights (normalized velocities) of +trigger+
       # through a power curve, velocity ** e, chosen so the +curve+'s
       # reference velocity plays +accent+ dB below full level (velocity 1):

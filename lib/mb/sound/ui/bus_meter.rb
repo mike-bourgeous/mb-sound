@@ -11,9 +11,6 @@ module MB
           inf = Array.new(channels, -Float::INFINITY).freeze
           new(peak: inf, rms: inf, short: -Float::INFINITY)
         end
-
-        # The loudest channel's peak (dBFS).
-        def max_peak = peak.max || -Float::INFINITY
       end
 
       # A bus's levels: what reached it (+input+: main outs routed to it
