@@ -203,7 +203,9 @@ module MB
           raise Error, "#{entry.head_path} is a #{entry.kind}: Bench sets cover #{KINDS.join(', ')}" unless KINDS.include?(entry.kind)
           src = material.build
           case entry.kind
-          when :clip then Playable.graph(src)
+          when :clip
+            nodes = Playable.graph(src).nodes
+            nodes.length == 1 ? nodes[0] : MB::Sound.channels(*nodes)
           when :instrument then entry.(src.is_a?(Sequence::Kit) ? src.to_clip : src)
           else entry.(src)
           end

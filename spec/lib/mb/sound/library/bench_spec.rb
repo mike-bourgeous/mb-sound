@@ -79,6 +79,14 @@ RSpec.describe MB::Sound::Library::Bench do
       expect { MB::Sound::L.fx.reverb.hall.audition(:bass_riff) }.to raise_error(ArgumentError, /no :bass_riff material.*arp, break, pad/)
     end
 
+    it 'plays clip entries on their instrument' do
+      clip = MB::Sound::Library::Entry.new(name: :walk, kind: :clip, family: :clip, builder: -> { MB::Sound.seq(MB::Sound::A2, MB::Sound::C3).n8.loop })
+      expect(bench.materials_for(clip).map(&:key)).to eq([:clip])
+      g = clip.audition
+      expect(g).to respond_to(:sample)
+      expect((1..400).find { g.sample(800).nil? }).not_to be_nil # (finite: the loop plays twice)
+    end
+
     it 'makes `play L.fx.x` play the effect on the arp' do
       g = MB::Sound::Library::Audition.playable(MB::Sound::L.fx.chorus.juno1)
       expect(g.to_s).to include('on the A7 arp')
