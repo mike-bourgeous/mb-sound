@@ -34,7 +34,7 @@ bundle exec rake depend:check     # ext depend files against the headers the sou
 bundle exec rake plan:full        # plan specs over the full 21 block sizes (MB_SOUND_PLAN_FULL=1; ~35 s)
 bundle exec rake plan:changed     # plan:full if the branch changed the plan layer by 50+ lines since master-ai (PLAN_DRY=1)
 bundle exec rake golden:check     # sound guards: render the golden set, compare fingerprints (golden:check[techno], golden:approve[name] RUN=dir, golden:list)
-bundle exec rake merge:gate       # per-merge gate (~1.5-2 min): specs of units changed on either side of the merge + ALWAYS + guards + gem specs (MERGE_DRY=1; merge:gate[sha], [ours,theirs]; spec/merge_gate.rb)
+bundle exec rake merge:gate       # per-merge gate (~1-3 min): specs of units changed on either side of the merge + ALWAYS + guards + gem specs (MERGE_DRY=1; merge:gate[sha], [ours,theirs]; spec/merge_gate.rb)
 bundle exec rake merge:batch      # end of a merge batch: spec:full + smoke + golden:check + a fuzz soak (OUT=dir, BATCH_STEPS=suite,smoke,golden,soak)
 ```
 

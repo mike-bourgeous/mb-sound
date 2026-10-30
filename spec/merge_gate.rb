@@ -1,6 +1,6 @@
 # The merge train (test-infra-1, 2026-10-30; the maintainer's choice of
 # option 2 on the review queue page): each merge into master-ai runs a gate
-# of about 1.5-2 minutes instead of the full suite and smoke, and the batch
+# of 1-3 minutes instead of the full suite and smoke, and the batch
 # of merges ends with one full run (MergeGate.batch).
 #
 # The gate (`rake merge:gate`, after compiling):
@@ -17,8 +17,14 @@
 # with time budgets reported, not failing (MB_SOUND_SPEC_BUDGET=report:
 # merges run on a loaded machine).  It prints what it chose and why.
 #
-# Replayed on the 2026-10-29 batch, the gate selects every problem that
-# batch's seven full suites found (design/notes/test_gates.md).
+# Replayed on the 2026-10-29 batch (7 merges, Mac container, PARALLEL=8):
+# 52-175 spec files a merge, 0.6-2.7 min each (the longest file sets the
+# floor: help_spec alone ran 108 s under load), and it finds what that
+# batch's seven full suites and hand-picked runs found: literal_binding_spec
+# at ced1a1d8, the Rakefile text guard at 2538134d (PATH_RULES), the
+# `rhythm` clash (name_clash_guard_spec, in ALWAYS) in that merge rebuilt
+# without its fix, and the stale libraries at 00dd9a0f (rebuilt by the
+# compile first).  merge_gate_spec.rb keeps the selection replays.
 #
 # The batch end (`rake merge:batch`, once per batch, in the background):
 # the full suite with the slow tier (spec:full), smoke, golden:check, and a
