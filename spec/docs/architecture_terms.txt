@@ -687,7 +687,6 @@ bin/plot_gallery.rb [--compact]
 fast_ui
 FastUI::Grid
 write_frame
-Plot.native = false
 MB_SOUND_PLOT=ruby
 decimate_ruby
 polyline_ruby
@@ -1345,7 +1344,6 @@ design/notes/generative.md
 research-generative
 Generative::Dice
 fast_generative
-Dice.mode = :ruby
 scale(:dorian, :d).weights.blur(0.1) + tones(D3, F3, A3) * 2
 chord(:min7, root: :d).weights
 chord

@@ -14,7 +14,7 @@ module MB
         # (#map! computes the same products: -2x + 3 is 3 - 2x exactly)
         @smoothstep ||= new(:smoothstep, kind: :in_out, monotonic: true, generic: ->(x, _m) { x * x * (3.0 - 2.0 * x) }, form: [:poly, [0.0, 0.0, 3.0, -2.0]],
                                          inplace: ->(x, s) {
-                                           s[0..] = x unless MB::Sound::FastArithmetic.copy(s, x)
+                                           s[0..] = x unless MB::Sound::Kernels.copy(s, x)
                                            s.inplace * -2.0
                                            s.inplace + 3.0
                                            x.inplace * x

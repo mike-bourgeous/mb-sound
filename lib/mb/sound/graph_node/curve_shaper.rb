@@ -112,7 +112,7 @@ module MB
           @plain_x = nil # (reused by #plain)
           @plain_scratch = nil
           # The exact shaper in C for linear and smoothstep curves
-          # (FastArithmetic.ease_plain, the same values; dropouts-2)
+          # (Kernels.ease_plain, the same values; dropouts-2)
           @ease_kind = !@antialias && !@symmetric && %i[clamp raw none].include?(@edges) ?
             (@curve.equal?(MB::Sound::Curve.linear) ? 0 : (@curve.equal?(MB::Sound::Curve.smoothstep) ? 1 : nil)) : nil
           @node_type_name = "#{'a' unless @antialias}ease"
@@ -148,9 +148,9 @@ module MB
             return @buf
           end
 
-          @buf[0..] = data unless MB::Sound::FastArithmetic.copy(@buf, data)
+          @buf[0..] = data unless MB::Sound::Kernels.copy(@buf, data)
           p = @params
-          MB::Sound::FastClip.shape_curve(@buf.inplace!, p[:form], p[:coeffs], p[:ti], p[:tfl], p[:tfr], p[:map], p[:edges], @symmetric, @state).not_inplace!
+          Kernels.shape_curve(@buf.inplace!, p[:form], p[:coeffs], p[:ti], p[:tfl], p[:tfr], p[:map], p[:edges], @symmetric, @state).not_inplace!
         end
 
         def to_s
@@ -175,7 +175,7 @@ module MB
 
         # @buf[0..] = plain(data), in C for linear and smoothstep curves.
         def plain_into(buf, data)
-          return if @ease_kind && MB::Sound::FastArithmetic.ease_plain(buf, data, @in_lo, @in_scale, @ease_kind, @edges == :clamp, @out_scale, @out_lo)
+          return if @ease_kind && MB::Sound::Kernels.ease_plain(buf, data, @in_lo, @in_scale, @ease_kind, @edges == :clamp, @out_scale, @out_lo)
 
           buf[0..] = plain(data)
         end
@@ -188,7 +188,7 @@ module MB
           x = @plain_x = Numo::DFloat.zeros(n) if x.nil? || x.length != n
           sc = @plain_scratch
           sc = @plain_scratch = Numo::DFloat.zeros(n) if sc.nil? || sc.length != n
-          x[0..] = data unless MB::Sound::FastArithmetic.copy(x, data)
+          x[0..] = data unless MB::Sound::Kernels.copy(x, data)
           x.inplace - @in_lo
           x.inplace * @in_scale
           y = @curve.map_edges!(x, @edges, sc)
@@ -396,7 +396,16 @@ module MB
           state.replace([x1, ap_x1, ap_y1, 1]) if data.length > 0
           out
         end
+
+        # The Ruby mirror with FastClip.shape_curve's arguments (the shaped
+        # buffer written in place like the C kernel).
+        def self.shape_curve_ruby(buf, form, coeffs, ti, tfl, tfr, map, edges, symmetric, state)
+          params = { form: form, coeffs: coeffs, ti: ti, tfl: tfl, tfr: tfr, map: map, edges: edges }
+          Kernels.inplace_result(buf, shape_ruby(buf, params, symmetric, state))
+        end
       end
+
+      Kernels.register :shape_curve, c: FastClip.method(:shape_curve), ruby: CurveShaper.method(:shape_curve_ruby)
     end
   end
 end

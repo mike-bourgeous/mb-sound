@@ -8,7 +8,7 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
     b = make.call
     buffers.times do |i|
       ca = a.sample(count)
-      rb = b.sample_ruby(count)
+      rb = sample_with(:ruby, b, count)
       expect(rb.to_a).to eq(ca.to_a), "buffer #{i}: max difference #{(ca - rb).abs.max}"
     end
   end

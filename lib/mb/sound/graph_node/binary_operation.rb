@@ -86,10 +86,10 @@ module MB
         # +a+ (op) +b+, in place in +a+ where FastArithmetic can.
         def compute(a, b)
           if @operator == '/'
-            MB::Sound::FastArithmetic.divide(a, b) || a / b
+            MB::Sound::Kernels.divide(a, b) || a / b
           else
-            (@fast_power_base && Precision.fast? && MB::Sound::FastArithmetic.power_fast(a, b)) ||
-              MB::Sound::FastArithmetic.power(a, b) || a ** b
+            (@fast_power_base && Precision.fast? && MB::Sound::Kernels.power_fast(a, b)) ||
+              MB::Sound::Kernels.power(a, b) || a ** b
           end
         end
 

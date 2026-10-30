@@ -26,7 +26,7 @@ RSpec.describe(MB::Sound::Precision) do
       make = -> { 220.hz.fm(330.hz.at(500)).pm(3.hz.lfo.at(0.2)).at(0.7) }
       c = make.call
       r = make.call
-      bufs = [800, 7, 128].map { |n| [c.sample(n).dup, r.sample_ruby(n).dup] }
+      bufs = [800, 7, 128].map { |n| [c.sample(n).dup, sample_with(:ruby, r, n).dup] }
       bufs.each { |x, y| expect(x.to_binary).to eq(Numo::SFloat.cast(y).to_binary) }
     end
   end

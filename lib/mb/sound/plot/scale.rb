@@ -311,8 +311,15 @@ module MB
 
           def forward(v)
             if v.is_a?(Numo::NArray)
-              v = Numo::DFloat.cast(v)
-              v[v <= 0] = Float::NAN
+              x = Numo::DFloat.cast(v)
+              # (a copy before marking values <= 0: the caller's data stays
+              # as it was; kernels-1's check mode found a frozen input)
+              bad = x <= 0
+              if bad.any?
+                x = x.dup if x.equal?(v)
+                x[bad] = Float::NAN
+              end
+              v = x
               (Numo::NMath.log10(v) - @llo) / @lspan
             else
               v > 0 ? (Math.log10(v) - @llo) / @lspan : Float::NAN

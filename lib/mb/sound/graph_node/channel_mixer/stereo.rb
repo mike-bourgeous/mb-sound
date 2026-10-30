@@ -18,7 +18,7 @@ module MB
           end
 
           # A moving position: the law's gains (Plan::Op::PanGain) times the
-          # input, as FastArithmetic.pan computes them.
+          # input, as Kernels.pan computes them.
           def plan_moving_reason = nil
 
           def plan_describe_moving(p, terms)
@@ -29,7 +29,7 @@ module MB
 
           private
 
-          # Law numbers for MB::Sound::FastArithmetic.pan.
+          # Law numbers for MB::Sound::Kernels.pan.
           FAST_LAWS = { equal_power: 0, linear: 1, minus_4_5db: 2 }.freeze
 
           # A moving position with single-precision buffers pans in C
@@ -49,7 +49,7 @@ module MB
             end
             @pan_outputs = @pan_output_sets.reverse!.first
 
-            return nil unless MB::Sound::FastArithmetic.pan(FAST_LAWS.fetch(option(:law)), position, input, @pan_gains, @pan_outputs)
+            return nil unless MB::Sound::Kernels.pan(FAST_LAWS.fetch(option(:law)), position, input, @pan_gains, @pan_outputs)
 
             @last_gains = @pan_rows
             @pan_outputs

@@ -277,7 +277,7 @@ module MB
           if into.nil? || into.length != @output_channels || into.any? { |o| o.length != length || !o.is_a?(Numo::SFloat) || !o.contiguous? }
             into = Array.new(@output_channels) { Numo::SFloat.zeros(length) }
           end
-          return MB::FastSound.matrix_mix(@fast_matrix, data, into)
+          return MB::Sound::Kernels.matrix_mix(@fast_matrix, data, into)
         end
 
         (@matrix * Vector[*data]).to_a

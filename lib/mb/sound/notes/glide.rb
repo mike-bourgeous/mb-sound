@@ -193,15 +193,15 @@ module MB
           t.inplace.clip(0.0, 1.0)
           return fill_curve(buf, from, to, t) if @curve
 
-          shaped[0..] = t unless MB::Sound::FastArithmetic.copy(shaped, t)
+          shaped[0..] = t unless MB::Sound::Kernels.copy(shaped, t)
           shaped.inplace * -2
           shaped.inplace + 3
-          sq[0..] = t unless MB::Sound::FastArithmetic.copy(sq, t)
+          sq[0..] = t unless MB::Sound::Kernels.copy(sq, t)
           sq.inplace * t
           shaped.inplace * sq
           if @overshoot_k != 0
             # + k t³ (1 - t)²
-            bump[0..] = t unless MB::Sound::FastArithmetic.copy(bump, t)
+            bump[0..] = t unless MB::Sound::Kernels.copy(bump, t)
             bump.inplace * -1
             bump.inplace + 1
             bump.inplace * bump

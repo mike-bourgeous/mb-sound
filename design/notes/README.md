@@ -20,7 +20,7 @@ Every named thing (presets at every scale: effects, instruments, kits, clips, ma
 
 ### [Plan layer (fused regions)](plan_layer.md)
 
-`lib/mb/sound/plan.rb` + `plan/` (executor `ext/mb/sound/fast_plan`) runs connected regions of a graph as one op list per block in C, installed automatically by `Synth` and `Session#add`: an as-if transformation (the same samples bit for bit, the user's graph untouched, node state kept in the nodes), with lane groups across same-shape regions and rebuilds off the render thread.  Nodes join through `Plan::Describable` (`plan_describe`, `plan_inputs`, snapshots); call `Plan.changed(node)` after structural edits, and `Plan.explain(graph)` says why nodes stay unfused.  `MB_SOUND_PLAN=0|ruby`, `MB_SOUND_PLAN_CHECK=1`; specs use `plan_compare`, `rake plan:changed` decides on the 21-size sweep.
+`lib/mb/sound/plan.rb` + `plan/` (executor `ext/mb/sound/fast_plan`) runs connected regions of a graph as one op list per block in C, installed automatically by `Synth` and `Session#add`: an as-if transformation (the same samples bit for bit, the user's graph untouched, node state kept in the nodes), with lane groups across same-shape regions and rebuilds off the render thread.  Nodes join through `Plan::Describable` (`plan_describe`, `plan_inputs`, snapshots); call `Plan.changed(node)` after structural edits, and `Plan.explain(graph)` says why nodes stay unfused.  `MB_SOUND_PLAN=0`, `MB_SOUND_KERNELS=fast_plan=ruby` (the Ruby mirror), `MB_SOUND_PLAN_CHECK=1`; specs use `plan_compare`, `rake plan:changed` decides on the 21-size sweep.
 
 ### [Feedback loops](feedback_loops.md)
 
@@ -28,7 +28,11 @@ Every named thing (presets at every scale: effects, instruments, kits, clips, ma
 
 ### [C Extensions (compiled via rake-compiler)](c_extensions.md)
 
-25 C extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/` and mb-term's `fast_term`), each building `lib/mb/sound/<name>.so` (`rake compile`).  New C code goes in purpose-specific extensions, not `fast_sound`; shared helpers are `static inline` in `ext/mb/sound/include/mb_ext_helpers.h` and shared kernels in `ext/mb/sound/include/mb_*.h`.  Every kernel has a Ruby reference that specs compare with it (existing ones exact mirrors, several built with `-ffp-contract=off`; new ones may use a stated tolerance).  `depend` files list each extension's headers (`rake depend:check`); a change to ext/ structure refreshes the memcheck map.  `rake memcheck`/`memcheck:changed` run their spec files in parallel Valgrind processes (`MEMCHECK_PARALLEL=N`; about 10 min for the full list at 8 on the Mac, estimated).
+25 C extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/` and mb-term's `fast_term`), each building `lib/mb/sound/<name>.so` (`rake compile`).  New C code goes in purpose-specific extensions, not `fast_sound`; shared helpers are `static inline` in `ext/mb/sound/include/mb_ext_helpers.h` and shared kernels in `ext/mb/sound/include/mb_*.h`.  Every kernel has a Ruby reference that specs compare with it (existing ones exact mirrors, several built with `-ffp-contract=off`; new ones may use a stated tolerance), registered in MB::Sound::Kernels (kernels.md).  `depend` files list each extension's headers (`rake depend:check`); a change to ext/ structure refreshes the memcheck map.  `rake memcheck`/`memcheck:changed` run their spec files in parallel Valgrind processes (`MEMCHECK_PARALLEL=N`; about 10 min for the full list at 8 on the Mac, estimated).
+
+### [Kernel registry (C kernels and their Ruby mirrors)](kernels.md)
+
+`MB::Sound::Kernels` (`lib/mb/sound/kernels.rb`, kernels-1) registers every C kernel beside its Ruby mirror, and one switch picks which runs: `MB::Sound.kernels = :c` (default) `| :ruby | :check`, `Kernels.set(fast_plan: :ruby)` per kernel or group, `Kernels.with(:ruby) { ... }`, `MB_SOUND_KERNELS=ruby` (or `check`, `c,fast_ui=ruby`).  `:check` runs the mirror on deep copies, then C on the originals (so results are `:c`'s), and raises `Kernels::Mismatch` on any difference (exact unless the entry's tolerance).  Call sites dispatch through `Kernels.svf(...)` or the owner's method (`Tone#run_kernel`); lib/ calls C only from `*_c` methods.  Guards: `kernels_guard_spec.rb` (every Fast* function registered or in `UNMIRRORED` with a reason), `kernels_check_spec.rb` (check mode over the graph sweep and extra scenes).
 
 ### [Sound guards: the golden set and perceptual fingerprints](sound_guards.md)
 
@@ -84,7 +88,7 @@ Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`
 
 ### [Reverbs](reverbs.md)
 
-`#reverb` (`GraphNode::Reverb`, kernel `fast_reverb`, mirror `MB_SOUND_REVERB=ruby`) is the one reverb: `[l, r].reverb(:hall)` runs inputs through diffusion, a per-sample FDN, and output taps with energy-normalized gains.  Presets `:room`, `:hall`, `:stadium`, `:space`, `:plate`, `:shimmer`, `:gated`, `:drone`, ...; the friendly form takes `room_size:`, `decay:`, `damping:`, `mix:`; options for modulation, in-loop filters, drive, crush, shimmer, freeze, and stretch, plus `duck:` and `gate:` after the network.  Unlike other DSL calls on bundles, one reverb serves all channels.
+`#reverb` (`GraphNode::Reverb`, kernel `fast_reverb`, mirror `MB_SOUND_KERNELS=reverb_network=ruby`) is the one reverb: `[l, r].reverb(:hall)` runs inputs through diffusion, a per-sample FDN, and output taps with energy-normalized gains.  Presets `:room`, `:hall`, `:stadium`, `:space`, `:plate`, `:shimmer`, `:gated`, `:drone`, ...; the friendly form takes `room_size:`, `decay:`, `damping:`, `mix:`; options for modulation, in-loop filters, drive, crush, shimmer, freeze, and stretch, plus `duck:` and `gate:` after the network.  Unlike other DSL calls on bundles, one reverb serves all channels.
 
 ### [Dynamics (compressor, compander, ducking, limiter, multiband)](dynamics.md)
 
@@ -185,7 +189,7 @@ A design, not yet built, for a full vimtutor-style tutorial in the live console:
 
 ### [Plotting](plotting.md)
 
-`MB::Sound::Plot` (`lib/mb/sound/plot/`) draws every plot in pure Ruby (no gnuplot; `spec/support/no_gnuplot.rb` fails specs that start it): Scales -> Coords -> Marks -> guides -> Chart/Figure -> renderers for terminal text (looks `Plot::Text::LOOKS`, Braille `:scope` by default), SVG, PNG, and inline images.  Build with `Plot.chart { x :time; line data }`, `Plot.figure { chart { ... } }`, the presets (`Plot.waveform`, `spectrum`, ...), or the console's `chart`/`figure`/`plot`; charts `show`, `to_svg`, and `save('x.svg' | .png | .txt | .ans | .html)`.  Live panes use `Plot::Live` over the C text kernels in `fast_ui` (exact mirrors of the Ruby; `MB_SOUND_PLOT=ruby`), and UI panes never write their own bytes.
+`MB::Sound::Plot` (`lib/mb/sound/plot/`) draws every plot in pure Ruby (no gnuplot; `spec/support/no_gnuplot.rb` fails specs that start it): Scales -> Coords -> Marks -> guides -> Chart/Figure -> renderers for terminal text (looks `Plot::Text::LOOKS`, Braille `:scope` by default), SVG, PNG, and inline images.  Build with `Plot.chart { x :time; line data }`, `Plot.figure { chart { ... } }`, the presets (`Plot.waveform`, `spectrum`, ...), or the console's `chart`/`figure`/`plot`; charts `show`, `to_svg`, and `save('x.svg' | .png | .txt | .ans | .html)`.  Live panes use `Plot::Live` over the C text kernels in `fast_ui` (exact mirrors of the Ruby; `MB_SOUND_KERNELS=fast_ui=ruby`, kernels.md), and UI panes never write their own bytes.
 
 ### [Terminal UI](terminal_ui.md)
 

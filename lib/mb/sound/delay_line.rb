@@ -198,7 +198,7 @@ module MB
       # back with #read.
       def write(data)
         @block_start = @write_offset
-        MB::Sound::FastArithmetic.circular_write(@buffer, data, @write_offset) || MB::M.circular_write(@buffer, data, @write_offset)
+        MB::Sound::Kernels.circular_write(@buffer, data, @write_offset) || MB::M.circular_write(@buffer, data, @write_offset)
         @write_offset = (@write_offset + data.length) % capacity
         self
       end
@@ -218,7 +218,7 @@ module MB
         raise ArgumentError, "Delay #{delay} is longer than the buffer (#{capacity})" if delay > capacity
 
         start = (@write_offset - delay) % capacity
-        if out && out.length == count && MB::Sound::FastArithmetic.circular_read(@buffer, start, count, out)
+        if out && out.length == count && MB::Sound::Kernels.circular_read(@buffer, start, count, out)
           return out
         end
 
@@ -242,13 +242,41 @@ module MB
       # +out+ is an optional NArray to read into instead of a new one (used
       # if it has the buffer's type and +count+ samples; every sample is
       # overwritten), so a reader can reuse its buffer.
-      def read(count, delay, interpolation: :linear, state: nil, out: nil)
-        out = @buffer.class.zeros(count) unless out && out.class == @buffer.class && out.length == count && !out.frozen?
+      #
+      # (#read is the :delay_read kernel's dispatcher: #read_c, or the Ruby
+      # mirror #read_ruby; see MB::Sound::Kernels.)
+      def read_c(count, delay, interpolation: :linear, state: nil, out: nil)
+        out = @buffer.class.zeros(count) unless reusable_out?(out, count)
         MB::Sound::FastDelay.read(@buffer, out, @block_start, real_delay(delay), mode(interpolation), SINC_KERNEL, state)
       end
 
-      # The Ruby version of #read.
-      def read_ruby(count, delay, interpolation: :linear, state: nil)
+      # The Ruby version of #read (into +out+ as #read_c reads into it).
+      def read_ruby(count, delay, interpolation: :linear, state: nil, out: nil)
+        result = read_values_ruby(count, delay, interpolation, state)
+        return result unless reusable_out?(out, count)
+
+        out[true] = result
+        out
+      end
+
+      # True if #read can read into +out+.
+      def reusable_out?(out, count)
+        out && out.class == @buffer.class && out.length == count && !out.frozen?
+      end
+
+      # A copy of this line for a kernel check (MB::Sound::Kernels.copy).
+      def kernel_copy
+        c = dup
+        c.instance_variable_set(:@buffer, @buffer.dup)
+        c
+      end
+
+      # What a kernel check compares of a line.
+      def kernel_state
+        [@buffer, @write_offset, @block_start]
+      end
+
+      def read_values_ruby(count, delay, interpolation, state)
         m = mode(interpolation)
         delay = real_delay(delay)
 
@@ -292,7 +320,10 @@ module MB
       # +states+ is an Array of read-state Arrays (one per tap, see #read),
       # +outs+ an Array of SFloat buffers (one per tap, at least +count+
       # long) the taps are written into.  Returns +outs+.
-      def self.network(lines, inputs, tap_lines, delays, gains, count, interpolation: :linear, states: nil, outs:)
+      #
+      # (.network is the :delay_network kernel's dispatcher: .network_c, or
+      # the Ruby mirror .network_ruby.)
+      def self.network_c(lines, inputs, tap_lines, delays, gains, count, interpolation: :linear, states: nil, outs:)
         m = lines[0].send(:mode, interpolation)
         lines.each(&:begin_network_block)
         offsets = MB::Sound::FastDelay.network(
@@ -303,9 +334,17 @@ module MB
         outs
       end
 
-      # The Ruby version of .network (the same arguments without +outs+;
-      # returns new SFloat tap outputs).
-      def self.network_ruby(lines, inputs, tap_lines, delays, gains, count, interpolation: :linear, states: nil)
+      # The Ruby version of .network (new SFloat tap outputs, copied into
+      # +outs+ when given, which it then returns).
+      def self.network_ruby(lines, inputs, tap_lines, delays, gains, count, interpolation: :linear, states: nil, outs: nil)
+        result = network_values_ruby(lines, inputs, tap_lines, delays, gains, count, interpolation, states)
+        return result unless outs
+
+        outs.each_with_index { |o, t| o[0...count] = result[t] }
+        outs
+      end
+
+      def self.network_values_ruby(lines, inputs, tap_lines, delays, gains, count, interpolation, states)
         m = lines[0].send(:mode, interpolation)
         lines.each(&:begin_network_block)
         sinc = INTERPOLATION[:sinc]
@@ -567,6 +606,10 @@ module MB
           delay
         end
       end
+
+      Kernels.register :delay_read, on: DelayLine, as: :read, c: :read_c, ruby: :read_ruby, covers: %w[FastDelay.read]
+      Kernels.register :delay_network, on: DelayLine.singleton_class, as: :network, c: :network_c, ruby: :network_ruby,
+        covers: %w[FastDelay.network]
     end
   end
 end

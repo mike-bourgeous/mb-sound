@@ -126,9 +126,12 @@ module MB
         # read as its exact dB (`db_gain: 6.db` is 6 dB).
         def set_parameters(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           db_gain = db_gain.db_value if db_gain.is_a?(Decibels)
-          set_parameters_c(filter_type, f_samp, f_center, db_gain: db_gain, quality: quality, bandwidth_oct: bandwidth_oct, shelf_slope: shelf_slope)
+          set_coefficients(filter_type, f_samp, f_center, db_gain: db_gain, quality: quality, bandwidth_oct: bandwidth_oct, shelf_slope: shelf_slope)
           self
         end
+
+        # (#set_coefficients is the :cookbook kernel's dispatcher:
+        # #set_parameters_c or #set_parameters_ruby.)
 
         def set_parameters_c(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           raise ArgumentError, "Invalid filter type #{filter_type.inspect}" unless FILTER_TYPE_IDS.include?(filter_type)
@@ -155,6 +158,7 @@ module MB
           )
 
           calc_quality
+          nil
         end
 
         # Recalculates filter coefficients based on the given filter parameters.
@@ -179,24 +183,20 @@ module MB
           cosine = Math.cos(omega)
           sine = Math.sin(omega)
 
+          # (the same bookkeeping as #set_parameters_c; the kernel uses the
+          # first of quality, bandwidth, and slope given, else a quality of 1)
+          quality = 1e-10 if quality && quality < 1e-10
+          @quality = quality
+          @bandwidth_oct = bandwidth_oct
+          @shelf_slope = shelf_slope
           if quality
-            quality = 1e-10 if quality < 1e-10
-            @quality = quality
-            @bandwidth_oct = nil
-            @shelf_slope = nil
             alpha = sine / (2.0 * quality)
           elsif bandwidth_oct
-            @bandwidth_oct = bandwidth_oct
-            @quality = nil
-            @shelf_slope = nil
             alpha = sine * Math.sinh(Math.log(2.0) / 2.0 * bandwidth_oct * omega / sine)
           elsif shelf_slope
-            @shelf_slope = shelf_slope
-            @quality = nil
-            @bandwidth_oct = nil
             alpha = sine * 0.5 * Math.sqrt((amp + 1.0 / amp) * (1.0 / shelf_slope - 1) + 2)
           else
-            raise "Missing quality/bandwidth_oct/shelf_slope"
+            alpha = sine / 2.0
           end
 
           case filter_type
@@ -291,6 +291,7 @@ module MB
           end
 
           calc_quality
+          nil
         end
 
         # Updates @quality/@bandwidth_oct/@shelf_slope from each other
@@ -319,9 +320,8 @@ module MB
         # and quality to the values given for each sample processed.  Only
         # works with real data, not complex, and will perform best (no
         # duplication of data) with SFloat.
-        def dynamic_process(samples, cutoff:, quality:)
-          dynamic_process_c(samples, cutoff: cutoff, quality: quality)
-        end
+        # (#dynamic_process is the :cookbook_dynamic kernel's dispatcher:
+        # #dynamic_process_c or #dynamic_process_ruby.)
 
         def dynamic_process_c(samples, cutoff:, quality:)
           raise 'Missing cutoff array' if cutoff.nil?
@@ -384,37 +384,51 @@ module MB
           copied ? result.not_inplace! : result
         end
 
-        def dynamic_process_ruby_c(samples, cutoff:, quality:)
+        # The Ruby mirror of #dynamic_process_c: per sample, the cookbook
+        # coefficients (#set_parameters) and one biquad step (Kernels.biquad),
+        # filtering an inplace SFloat in place like the C kernel.
+        def dynamic_process_ruby(samples, cutoff:, quality:)
           raise 'Missing cutoff array' if cutoff.nil?
           raise 'Missing quality array' if quality.nil?
 
           samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
           cutoff = cutoff.real if cutoff.is_a?(Numo::SComplex) || cutoff.is_a?(Numo::DComplex)
           quality = quality.real if quality.is_a?(Numo::SComplex) || quality.is_a?(Numo::DComplex)
+          cutoff = Numo::SFloat.new(samples.length).fill(cutoff) if cutoff.is_a?(Numeric)
+          quality = Numo::SFloat.new(samples.length).fill(quality) if quality.is_a?(Numeric)
 
           y1 = @y1
           y2 = @y2
           x1 = @x1
           x2 = @x2
 
-          samples.map_with_index { |x0, idx|
+          out = samples.is_a?(Numo::SFloat) && samples.inplace? ? samples : Numo::SFloat.cast(samples).dup
+          out.length.times do |idx|
+            x0 = out[idx]
             f0 = cutoff[idx]
             f0 = DYNAMIC_MIN_CUTOFF unless f0 >= DYNAMIC_MIN_CUTOFF
             set_parameters(@filter_type, @sample_rate, f0, db_gain: @db_gain, quality: quality[idx])
-            out = MB::FastSound.biquad(@b0, @b1, @b2, @a1, @a2, x0, x1, x2, y1, y2)
+            y0 = Kernels.biquad(@b0, @b1, @b2, @a1, @a2, x0, x1, x2, y1, y2)
+            out[idx] = y0
             y2 = y1
-            y1 = out
+            y1 = y0
             x2 = x1
             x1 = x0
-            out
-          }.tap {
-            @x1 = x1
-            @x2 = x2
-            @y1 = y1
-            @y2 = y2
-          }
+          end
+          @x1 = x1
+          @x2 = x2
+          @y1 = y1
+          @y2 = y2
+          out
         end
       end
+
+      Kernels.register :cookbook, on: Cookbook, as: :set_coefficients, c: :set_parameters_c, ruby: :set_parameters_ruby,
+        covers: %w[FastSound.cookbook], tolerance: 1e-9,
+        state: %i[@filter_type @sample_rate @center_frequency @db_gain @amp @quality @bandwidth_oct @shelf_slope @omega @b0 @b1 @b2 @a1 @a2]
+      Kernels.register :cookbook_dynamic, on: Cookbook, as: :dynamic_process, c: :dynamic_process_c, ruby: :dynamic_process_ruby,
+        covers: %w[FastSound.dynamic_biquad], tolerance: 1e-6,
+        state: %i[@center_frequency @quality @omega @b0 @b1 @b2 @a1 @a2 @x1 @x2 @y1 @y2]
     end
   end
 end

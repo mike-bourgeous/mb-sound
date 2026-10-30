@@ -9,8 +9,9 @@ module MB
       # three) or after cycles 0..516.  See design/notes/generative.md.
       #
       # The hashing is splitmix64's finalizer over the seed, then over
-      # (state ^ key) for each key in turn (FastGenerative, in C; an exact
-      # Ruby mirror runs with Dice.mode = :ruby or MB_SOUND_DICE=ruby).
+      # (state ^ key) for each key in turn (FastGenerative, in C; its exact
+      # Ruby mirrors run with MB::Sound.kernels = :ruby, or
+      # MB_SOUND_KERNELS=fast_generative=ruby; see MB::Sound::Kernels).
       # Symbols and Strings hash with FNV-1a, since Symbol#hash changes per
       # process.
       #
@@ -33,49 +34,37 @@ module MB
         FNV_OFFSET = 0xcbf29ce484222325
         FNV_PRIME = 0x100000001b3
 
-        MODES = [:c, :ruby].freeze
-
-        @mode = ENV['MB_SOUND_DICE'] == 'ruby' ? :ruby : :c
-
         class << self
-          # :c (FastGenerative, the default) or :ruby (the exact mirror).
-          attr_reader :mode
-
-          def mode=(mode)
-            raise ArgumentError, "Dice.mode is one of #{MODES.map(&:inspect).join(', ')} (got #{mode.inspect})" unless MODES.include?(mode)
-            @mode = mode
-          end
-
           # The state for +seed+ (an Integer): mix(seed's low 64 bits).
           def start(seed)
-            @mode == :c ? FastGenerative.start(seed) : start_ruby(seed)
+            Kernels.dice_start(seed)
           end
 
           # The 64-bit key of +k+.
           def key(k)
-            @mode == :c ? FastGenerative.key(k) : key_ruby(k)
+            Kernels.dice_key(k)
           end
 
           # The state after folding +keys+ into +state+.
           def fold(state, *keys)
-            @mode == :c ? FastGenerative.fold(state, *keys) : fold_ruby(state, *keys)
+            Kernels.dice_fold(state, *keys)
           end
 
           # A Float in 0...1 from +state+ and +keys+.
           def unit(state, *keys)
-            @mode == :c ? FastGenerative.rand(state, *keys) : unit_ruby(state, *keys)
+            Kernels.dice_unit(state, *keys)
           end
 
           # unit(state, i) for i in 0...count, as an Array.
           def units(state, count)
-            @mode == :c ? FastGenerative.rands(state, count) : units_ruby(state, count)
+            Kernels.dice_units(state, count)
           end
 
           # The index where +u+ (0...1) times the sum of +weights+ (an
           # Array of Floats) falls, or nil when nothing can be picked
           # (no positive weight, or rounding at the very end).
           def index(weights, u)
-            i = @mode == :c ? FastGenerative.pick(weights, u) : pick_ruby(weights, u)
+            i = Kernels.dice_pick(weights, u)
             i < 0 ? nil : i
           end
 
@@ -247,6 +236,13 @@ module MB
           weights.rindex { |w| w.to_f > 0 }
         end
       end
+
+      Kernels.register :dice_start, c: FastGenerative.method(:start), ruby: Dice.method(:start_ruby)
+      Kernels.register :dice_key, c: FastGenerative.method(:key), ruby: Dice.method(:key_ruby)
+      Kernels.register :dice_fold, c: FastGenerative.method(:fold), ruby: Dice.method(:fold_ruby)
+      Kernels.register :dice_unit, c: FastGenerative.method(:rand), ruby: Dice.method(:unit_ruby)
+      Kernels.register :dice_units, c: FastGenerative.method(:rands), ruby: Dice.method(:units_ruby)
+      Kernels.register :dice_pick, c: FastGenerative.method(:pick), ruby: Dice.method(:pick_ruby)
     end
   end
 end

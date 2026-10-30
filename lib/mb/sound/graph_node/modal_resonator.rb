@@ -319,9 +319,11 @@ module MB
         private
 
         def run_kernel(out, x, f, d)
-          MB::Sound::FastResonator.modes(out, x, f, d, @table, @state, @sample_rate)
+          Kernels.modes(out, x, f, d, @table, @state, @sample_rate)
         end
       end
+
+      Kernels.register :modes, c: FastResonator.method(:modes), ruby: ModalResonator.method(:process_ruby)
     end
   end
 end

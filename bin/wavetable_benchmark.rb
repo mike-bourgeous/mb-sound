@@ -46,7 +46,7 @@ MB::Sound.script(
 
     bench.report("pure ruby oscillator (#{ruby_samples} samples)") do
       t = 100.hz.wavetable(table, scan: 0.3)
-      (ruby_samples / 800).times { t.sample_ruby(800) }
+      MB::Sound::Kernels.with(:ruby) { (ruby_samples / 800).times { t.sample(800) } }
     end
   end
 }

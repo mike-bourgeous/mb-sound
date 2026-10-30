@@ -185,7 +185,7 @@ module MB
 
         # a ** b (see Op::Pow); real Values only.  A Float exponent
         # (GraphNode#** of a number, e.g. a drum accent's velocity curve)
-        # is filled into a register first: FastArithmetic.power raises an
+        # is filled into a register first: Kernels.power raises an
         # SFloat to (float)e with C's double pow, as OP_POW does with a
         # filled exponent.  Integer exponents stay unsupported (Numo raises
         # to them by repeated multiplication).

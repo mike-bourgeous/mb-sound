@@ -297,7 +297,7 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
     it 'has classic shapes that match the naive Tone shapes away from their edges' do
       { saw: :ramp, square: :square, triangle: :triangle }.each do |name, wave|
         [0.1, 0.2, 0.3, 0.6, 0.85].each do |ph|
-          expect(w[name].value_at(ph)).to be_within(0.005).of(MB::Sound::Tone.value_at_ruby(wave, ph)), "#{name} at #{ph}"
+          expect(w[name].value_at(ph)).to be_within(0.005).of(MB::Sound::Kernels.with(:ruby) { MB::Sound::Tone.value_at(wave, ph) }), "#{name} at #{ph}"
         end
       end
     end

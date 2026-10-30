@@ -101,7 +101,7 @@ module MB
           # A copy (nodes may work on it in place) in a buffer reused
           # every span, like any node's #sample buffer
           c = @copies[index]
-          return c if c && c.class == d.class && c.length == d.length && MB::Sound::FastArithmetic.copy(c, d)
+          return c if c && c.class == d.class && c.length == d.length && MB::Sound::Kernels.copy(c, d)
           @copies[index] = d.dup
         end
 

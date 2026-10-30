@@ -168,7 +168,7 @@ module MB
               local_buf = @buf[sample...next_sample]
 
               if smoothing && @constant != @old_constant
-                local_buf[] = MB::FastSound.smoothstep_buf(local_buf)
+                local_buf[] = MB::Sound::Kernels.smoothstep_buf(local_buf)
                 local_buf.inplace! * (@constant - @old_constant)
                 local_buf.inplace! + @old_constant
               else

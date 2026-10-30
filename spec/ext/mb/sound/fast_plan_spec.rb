@@ -52,7 +52,7 @@ RSpec.describe(MB::Sound::FastPlan) do
         t6.real * 2
       }
       out = Numo::SFloat.zeros(n)
-      prog.run(n, [x, y, z, w, d], [], out)
+      prog.run_c(n, [x, y, z, w, d], [], out)
       expect(out.to_binary).to eq(prog.run_ruby(n, [x, y, z, w, d], []).to_binary)
     end
   end
@@ -64,7 +64,7 @@ RSpec.describe(MB::Sound::FastPlan) do
     prog = program([x], [c1, c2]) { |b, a, p1, p2| (a * p1 + p2).imag + p1 }
     [[0.5, Complex(1, 2)], [real(64, 7), cplx(64, 8)], [3, Complex(0, -1)]].each do |params|
       out = Numo::SFloat.zeros(64)
-      prog.run(64, [x], params, out)
+      prog.run_c(64, [x], params, out)
       expect(out.to_binary).to eq(prog.run_ruby(64, [x], params).to_binary)
     end
   end
@@ -73,7 +73,7 @@ RSpec.describe(MB::Sound::FastPlan) do
     x = real(100, 1)
     prog = program([x]) { |b, a| (1..12).reduce(a * 0.5) { |s, k| s + a * k } }
     out = Numo::SFloat.zeros(100)
-    prog.run(100, [x], [], out)
+    prog.run_c(100, [x], [], out)
     expect(out.to_binary).to eq(prog.run_ruby(100, [x], []).to_binary)
     expect(prog.lower[3]).to be <= 3 # 24 values
   end
@@ -82,7 +82,7 @@ RSpec.describe(MB::Sound::FastPlan) do
     x = real(10, 1)
     prog = program([x]) { |b, a| a }
     out = Numo::SFloat.zeros(10)
-    prog.run(10, [x], [], out)
+    prog.run_c(10, [x], [], out)
     expect(out.to_a).to eq(x.to_a)
   end
 
@@ -91,18 +91,18 @@ RSpec.describe(MB::Sound::FastPlan) do
     let(:prog) { program([x]) { |b, a| a * 2 * a } }
 
     it 'raises for an input of the wrong type or length' do
-      expect { prog.run(16, [real(8, 1)], [], Numo::SFloat.zeros(16)) }.to raise_error(ArgumentError, /input 0/)
-      expect { prog.run(16, [cplx(16, 1)], [], Numo::SFloat.zeros(16)) }.to raise_error(ArgumentError, /input 0/)
-      expect { prog.run(16, [Numo::DFloat.cast(x)], [], Numo::SFloat.zeros(16)) }.to raise_error(ArgumentError, /input 0/)
+      expect { prog.run_c(16, [real(8, 1)], [], Numo::SFloat.zeros(16)) }.to raise_error(ArgumentError, /input 0/)
+      expect { prog.run_c(16, [cplx(16, 1)], [], Numo::SFloat.zeros(16)) }.to raise_error(ArgumentError, /input 0/)
+      expect { prog.run_c(16, [Numo::DFloat.cast(x)], [], Numo::SFloat.zeros(16)) }.to raise_error(ArgumentError, /input 0/)
     end
 
     it 'raises for an output of the wrong type or length' do
-      expect { prog.run(16, [x], [], Numo::SFloat.zeros(8)) }.to raise_error(ArgumentError, /output/)
-      expect { prog.run(16, [x], [], Numo::SComplex.zeros(16)) }.to raise_error(ArgumentError, /output/)
+      expect { prog.run_c(16, [x], [], Numo::SFloat.zeros(8)) }.to raise_error(ArgumentError, /output/)
+      expect { prog.run_c(16, [x], [], Numo::SComplex.zeros(16)) }.to raise_error(ArgumentError, /output/)
     end
 
     it 'raises for a missing input read by an arithmetic op' do
-      expect { prog.run(16, [nil], [], Numo::SFloat.zeros(16)) }.to raise_error(ArgumentError, /operand/)
+      expect { prog.run_c(16, [nil], [], Numo::SFloat.zeros(16)) }.to raise_error(ArgumentError, /operand/)
     end
 
     it 'raises for bad words, scalars, and scratch' do
@@ -145,7 +145,7 @@ RSpec.describe(MB::Sound::FastPlan) do
         prog = prog_class.new(ops: b.ops, inputs: b.inputs, params: b.params, output: v)
         t2.plan_start
         out = (v.complex? ? Numo::SComplex : Numo::SFloat).zeros(300)
-        prog.run(300, [trig], [], out)
+        prog.run_c(300, [trig], [], out)
 
         t1.reset(MB::Sound::ArrayInput.new(data: [trig]))
         expect(out.to_binary).to eq(t1.sample(300).to_binary), wave.to_s
@@ -181,7 +181,7 @@ RSpec.describe(MB::Sound::FastPlan) do
         ]
         cases.each do |make|
           make.call
-          c = prog.run(n, [], [], Numo::SFloat.zeros(n))
+          c = prog.run_c(n, [], [], Numo::SFloat.zeros(n))
           r = prog.run_ruby(n, [], [])
           expect(c.to_a).to eq(r.to_a)
         end
@@ -204,7 +204,7 @@ RSpec.describe(MB::Sound::FastPlan) do
         [sm1, sm2].each { |sm| sm.plan_start(0.25) }
         jumps = [n / 3, n / 2].uniq
         prog = ->(sm) { program([x, y]) { |b, xi, yi| b.max(b.smooth(xi, sm, jumps), yi) } }
-        c = prog.(sm1).run(n, [x, y], [], Numo::SFloat.zeros(n))
+        c = prog.(sm1).run_c(n, [x, y], [], Numo::SFloat.zeros(n))
         r = prog.(sm2).run_ruby(n, [x, y], [])
         expect(c.to_a).to eq(r.to_a)
         expect(sm1.plan_snapshot).to eq(sm2.plan_snapshot)
@@ -216,7 +216,7 @@ RSpec.describe(MB::Sound::FastPlan) do
       target = Object.new
       h = {}
       prog = program([x]) { |b, a| b.keep_last(a, target, :@kept); b.keep_last(a, h, :k); a * 2 }
-      prog.run(9, [x], [], Numo::SFloat.zeros(9))
+      prog.run_c(9, [x], [], Numo::SFloat.zeros(9))
       expect(target.instance_variable_get(:@kept)).to eq(x[-1])
       expect(h[:k]).to eq(x[-1])
     end
@@ -233,7 +233,7 @@ RSpec.describe(MB::Sound::FastPlan) do
           b.envelope(e1, times: [96.0, 144.0, 192.0], curves: [3.0, 30.0, 20.0], levels: [1.0, 0.4, 0.0], hold: Float::INFINITY,
                      gate: gi, trigger: nil, velocity: vi, choke: nil, lift: nil, octaves: nil)
         }
-        c = prog.run(n, [g, v], [], Numo::SFloat.zeros(n))
+        c = prog.run_c(n, [g, v], [], Numo::SFloat.zeros(n))
         args = e2.send(:kernel_args)
         out = Numo::SFloat.zeros(n)
         MB::Sound::FastEnvelope.process(out, e2.plan_state, args[0], args[1], args[2], args[5], [g, nil, v, nil, nil, nil], args[4], args[6])
@@ -248,16 +248,16 @@ RSpec.describe(MB::Sound::FastPlan) do
       out = Numo::SFloat.zeros(8)
       list.held!.fill(0, 8, 1)
       list.data[0] = 5
-      expect { prog.run(8, [], [], out) }.to raise_error(ArgumentError, /mode/)
+      expect { prog.run_c(8, [], [], out) }.to raise_error(ArgumentError, /mode/)
       list.held!.fill(0, 8, 1)
       list.data[1] = 9
-      expect { prog.run(8, [], [], out) }.to raise_error(ArgumentError, /kind/)
+      expect { prog.run_c(8, [], [], out) }.to raise_error(ArgumentError, /kind/)
       list.held!.buffer(0, 8, Numo::DFloat.zeros(8))
-      expect { prog.run(8, [], [], out) }.to raise_error(ArgumentError, /buffer/)
+      expect { prog.run_c(8, [], [], out) }.to raise_error(ArgumentError, /buffer/)
       list.held!.fill(4, 2, 1)
-      expect { prog.run(8, [], [], out) }.to raise_error(ArgumentError, /entry/)
+      expect { prog.run_c(8, [], [], out) }.to raise_error(ArgumentError, /entry/)
       list.held!.data.push(1)
-      expect { prog.run(8, [], [], out) }.to raise_error(ArgumentError, /length/)
+      expect { prog.run_c(8, [], [], out) }.to raise_error(ArgumentError, /length/)
 
       e = MB::Sound.adsr(0.002, 0.003, 0.4, 0.004, gate: 0)
       eprog = program([]) { |b| b.envelope(e, times: [1.0, 2.0, 3.0], curves: [0.0, 0.0, 0.0], levels: [1.0, 0.5, 0.0], hold: 1.0, gate: nil, trigger: nil, velocity: nil, choke: nil, lift: nil, octaves: nil) * 1 }

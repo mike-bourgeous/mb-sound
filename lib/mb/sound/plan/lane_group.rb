@@ -23,7 +23,8 @@ module MB
       # run alone; members sampled while the group is gathering (a member
       # reading another member's output) run as soon as they're asked for.
       #
-      # The Ruby engine (Plan.engine :ruby) runs each member's mirror.
+      # With the :plan_lanes kernel in Ruby (MB::Sound::Kernels), each
+      # member runs its program's mirror.
       class LaneGroup
         # The most members FastPlan.run_lanes takes (MB_PLAN_MAX_LANES in
         # fast_plan.c); larger buckets are split into groups of at most this
@@ -321,8 +322,10 @@ module MB
           @lane_runs += together.length
         end
 
-        # One FastPlan.run_lanes call for members +lanes+ (indices).
-        def run_lanes(lanes, count)
+        # One FastPlan.run_lanes call for members +lanes+ (indices); #run_lanes
+        # is the :plan_lanes kernel (C, or #run_lanes_ruby, each lane's Ruby
+        # mirror; see MB::Sound::Kernels).
+        def run_lanes_c(lanes, count)
           scalars, objects, inputs, params, outs = @lists
           @lists.each(&:clear)
           words = nil
@@ -353,6 +356,27 @@ module MB
           # The C side divides the scratch evenly among the lanes
           scratch = @scratch.length == need ? @scratch : (@scratch_views[need] ||= @scratch[0...need])
           MB::Sound::FastPlan.run_lanes(words, scalars, objects, inputs, params, scratch, outs, count)
+          outs
+        end
+
+        # The Ruby mirror of #run_lanes_c: each lane's program mirror into
+        # its output view.
+        def run_lanes_ruby(lanes, count)
+          lanes.map do |i|
+            r = @members[i]
+            r.program.taps.each { |t| t.reserve(count) }
+            r.run_program_ruby(count)
+          end
+        end
+
+        # The members' node states, for the :plan_lanes kernel's check mode.
+        def kernel_state
+          @members.map(&:kernel_state)
+        end
+
+        # Restores #kernel_state.
+        def restore_kernel_state(states)
+          @members.each_with_index { |r, i| r.restore_kernel_state(states[i]) }
         end
       end
 
@@ -525,6 +549,9 @@ module MB
           false
         end
       end
+
+      Kernels.register :plan_lanes, on: LaneGroup, as: :run_lanes, c: :run_lanes_c, ruby: :run_lanes_ruby,
+        state: %i[kernel_state restore_kernel_state], covers: %w[FastPlan.run_lanes]
     end
   end
 end

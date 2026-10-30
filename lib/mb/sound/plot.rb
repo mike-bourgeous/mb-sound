@@ -35,13 +35,9 @@ module MB
     module Plot
       class PlotError < RuntimeError; end
 
-      class << self
-        # True (the default) to draw text plots with the C kernels of
-        # MB::Sound::FastUI, false for their exact Ruby mirrors (also
-        # MB_SOUND_PLOT=ruby in the environment).  Both give the same text.
-        attr_accessor :native
-      end
-      self.native = ENV['MB_SOUND_PLOT'] != 'ruby'
+      # (Text plots draw with the C kernels of MB::Sound::FastUI or their
+      # exact Ruby mirrors, as MB::Sound::Kernels chooses: group :fast_ui,
+      # e.g. MB_SOUND_KERNELS=fast_ui=ruby.  Both give the same text.)
     end
   end
 end

@@ -194,7 +194,7 @@ module MB
           fast = arithmetic_fast?(count, sampled, @constant)
           if fast
             retbuf = arithmetic_view(@buf, count, :buf)
-            return retbuf.not_inplace! if MB::Sound::FastArithmetic.mix(retbuf, @constant, sampled)
+            return retbuf.not_inplace! if MB::Sound::Kernels.mix(retbuf, @constant, sampled)
           end
 
           if fast && @tmpbuf.class == @buf.class && @tmpbuf.length >= count

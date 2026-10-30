@@ -302,7 +302,7 @@ module MB
           # buffer
           if wet.is_a?(Numeric) && dry.is_a?(Numeric) && data.length == length
             target = data.inplace? && !data.frozen? ? data : (@result_buf = reuse_buffer(@result_buf, data))
-            return target if target && MB::Sound::FastArithmetic.wet_dry(target, delayed, wet, data, dry != 0 ? dry : nil)
+            return target if target && MB::Sound::Kernels.wet_dry(target, delayed, wet, data, dry != 0 ? dry : nil)
           end
 
           # Moving gains on SFloat buffers: the same products and sums in
@@ -383,16 +383,16 @@ module MB
           return nil if wet.is_a?(Numeric) && !wet.real?
           return nil if dry.is_a?(Numeric) && !dry.real?
 
-          # (FastArithmetic.scale and .accumulate: the same float steps as
+          # (Kernels.scale and .accumulate: the same float steps as
           # Numo's, without its temporaries)
           r = @result_buf = reuse_buffer(@result_buf, data)
-          return nil unless MB::Sound::FastArithmetic.copy(r, delayed) && MB::Sound::FastArithmetic.scale(r, wet)
+          return nil unless MB::Sound::Kernels.copy(r, delayed) && MB::Sound::Kernels.scale(r, wet)
           if dry.is_a?(Numo::NArray) || dry != 0
-            r.inplace + data * dry unless length == 0 || MB::Sound::FastArithmetic.accumulate(r, 0, data, 0, length, dry, 0, nil, 0)
+            r.inplace + data * dry unless length == 0 || MB::Sound::Kernels.accumulate(r, 0, data, 0, length, dry, 0, nil, 0)
           end
           return r unless data.inplace? && !data.frozen?
 
-          data[true] = r unless MB::Sound::FastArithmetic.copy(data, r)
+          data[true] = r unless MB::Sound::Kernels.copy(data, r)
           data
         end
 
@@ -402,11 +402,11 @@ module MB
         end
 
         # delays.minmax, as Floats, without allocating for real buffers
-        # (FastArithmetic.min_max matches Numo's minmax except for all-NaN
+        # (Kernels.min_max matches Numo's minmax except for all-NaN
         # buffers, which take Numo's path).
         def delays_minmax(delays)
           r = (@delay_range ||= [0.0, 0.0])
-          if MB::Sound::FastArithmetic.min_max(delays, r) && !r[0].nan?
+          if MB::Sound::Kernels.min_max(delays, r) && !r[0].nan?
             return r
           end
           delays.minmax
@@ -470,7 +470,7 @@ module MB
             end
 
             if settled
-              min, max = MB::Sound::FastArithmetic.min_max(delays, @minmax) || delays.minmax
+              min, max = MB::Sound::Kernels.min_max(delays, @minmax) || delays.minmax
               return apply_loop_offset(min.to_f) if min == max && min == @filter.peek
             end
           else

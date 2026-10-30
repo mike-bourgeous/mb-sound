@@ -32,8 +32,10 @@ module MB
     # becomes a region boundary, computed by its own #sample.
     #
     # Settings (environment variables, read at load; also writable):
-    # - MB_SOUND_PLAN=0 turns plans off (Plan.enabled = false); =ruby runs
-    #   them with the Ruby mirror (Plan.engine = :ruby) for debugging.
+    # - MB_SOUND_PLAN=0 turns plans off (Plan.enabled = false).  Programs
+    #   run in C or with their Ruby mirrors as MB::Sound::Kernels chooses
+    #   (the :plan and :plan_lanes kernels, group :fast_plan;
+    #   MB_SOUND_KERNELS=fast_plan=ruby for debugging).
     # - MB_SOUND_PLAN_CHECK=1 (or raise / warn) runs every planned block
     #   both ways, planned and unfused (Plan.check = :raise or :warn), and
     #   compares samples and oscillator states: :raise in scripts and specs,
@@ -101,10 +103,6 @@ module MB
       class << self
         # Whether Plan.install builds plans (MB_SOUND_PLAN=0 turns it off).
         attr_accessor :enabled
-
-        # :c (the default) or :ruby (MB_SOUND_PLAN=ruby): which executor
-        # runs plans.
-        attr_accessor :engine
 
         # nil, :raise, or :warn: whether to check every planned block
         # against the unfused graph (see the module description).
@@ -189,7 +187,7 @@ module MB
         # returns the Installation (nil when plans are off or nothing could
         # be planned).  +unread+ is a predicate for Tee branches that nothing
         # reads (see Installation#live_branches).
-        def install(*outputs, engine: self.engine, check: self.check, lanes: self.lanes, unread: nil)
+        def install(*outputs, check: self.check, lanes: self.lanes, unread: nil)
           return nil unless enabled
 
           inst = Installation.new(outputs.flatten.flat_map { |o| o.respond_to?(:outputs) ? o.outputs.to_a : [o] }, engine: engine, check: check, unread: unread)
@@ -273,6 +271,13 @@ module MB
           @watch ||= ObjectSpace::WeakKeyMap.new
         end
 
+        # :c, or :ruby when the :plan kernel runs its Ruby mirror (see
+        # MB::Sound::Kernels): new installations then skip lowering programs
+        # and grouping lanes.
+        def engine
+          Kernels.mode_of(:plan) == :ruby ? :ruby : :c
+        end
+
         # A listing of how +outputs+ would be planned (regions, ops, and
         # why each other node isn't fused), without installing anything.
         def explain(*outputs)
@@ -284,7 +289,6 @@ module MB
 
       self.enabled = ENV['MB_SOUND_PLAN'] != '0'
       self.rebuilds = (ENV['MB_SOUND_PLAN_REBUILDS'] || 'auto').to_sym
-      self.engine = ENV['MB_SOUND_PLAN'] == 'ruby' ? :ruby : :c
       self.check = case ENV['MB_SOUND_PLAN_CHECK']
                    when nil, '', '0' then nil
                    when 'warn' then :warn

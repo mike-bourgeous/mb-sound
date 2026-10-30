@@ -539,7 +539,7 @@ module MB
           while (idx += 1) < out.length # (no each_with_index: an imemo a call)
             o = out[idx]
             d = data[idx]
-            next if d.length == count && (ramp.nil? || ramp.length == count) && FastArithmetic.add_at(o, 0, d, count, ramp)
+            next if d.length == count && (ramp.nil? || ramp.length == count) && Kernels.add_at(o, 0, d, count, ramp)
             d = d * ramp if ramp
             o.inplace + d
           end
@@ -574,7 +574,7 @@ module MB
           end
           data.each_with_index do |d, idx|
             o = out[idx]
-            next if d.length == n && (ramp.nil? || ramp.length == n) && FastArithmetic.add_at(o, skip, d, n, ramp)
+            next if d.length == n && (ramp.nil? || ramp.length == n) && Kernels.add_at(o, skip, d, n, ramp)
             d = d * ramp if ramp
             o[skip..].inplace + d
           end

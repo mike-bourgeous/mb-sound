@@ -93,7 +93,7 @@ module MB
           # takes inputs it can't read directly
           if arithmetic_fast?(count, sampled, @constant)
             retbuf = arithmetic_view(@buf, count, :buf)
-            unless MB::Sound::FastArithmetic.product(retbuf, @constant, sampled)
+            unless MB::Sound::Kernels.product(retbuf, @constant, sampled)
               BufferHelper.fill(retbuf, @constant)
               sampled.each { |v, _| retbuf.inplace * v }
             end

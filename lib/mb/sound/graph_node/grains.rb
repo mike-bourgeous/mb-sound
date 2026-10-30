@@ -173,11 +173,6 @@ module MB
           @out[index]
         end
 
-        # Both outputs for +count+ samples through the Ruby mirror (specs).
-        def sample_ruby(count)
-          compute(count, ruby: true)
-        end
-
         def sources
           @inputs.reject { |_, v| v.nil? || v.is_a?(Numeric) }
         end
@@ -192,7 +187,7 @@ module MB
 
         private
 
-        def compute(count, ruby: false)
+        def compute(count)
           values = INPUTS.map { |k|
             v = @inputs[k]
             next v if v.nil? || v.is_a?(Numeric)
@@ -207,11 +202,7 @@ module MB
           @bufs = Array.new(2) { Array.new(2) { Numo::SFloat.zeros(count) } } if @bufs.nil? || @bufs[0][0].length != count
           @flip ^= 1
           l, r = @bufs[@flip]
-          if ruby
-            Granular::KernelRuby.grains(l, r, @specs, @slots, @state, @rng, @window, values, config)
-          else
-            MB::Sound::FastSampler.grains(l, r, @specs, @slots, @state, @rng, @window, values, config)
-          end
+          Kernels.grains(l, r, @specs, @slots, @state, @rng, @window, values, config)
           [l, r]
         end
 

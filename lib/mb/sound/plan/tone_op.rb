@@ -17,7 +17,7 @@ module MB
         #   band-limited step queued in State#jump_residual), so resets cost
         #   what they cost unplanned, with no fallback; queued steps are
         #   added in C (Tone#add_jump_residual's arithmetic);
-        # - the #gain input multiplies the result (FastArithmetic.scale's
+        # - the #gain input multiplies the result (Kernels.scale's
         #   arithmetic).
         #
         # P1 covers the :naive and :synth kernels (every naive shape, noise,
@@ -30,7 +30,8 @@ module MB
         # BLIT, clean resets, sample-mode or complex tables stay unplanned
         # (Tone#plan_unsupported_reason).
         #
-        # The Ruby mirror is the Tone's own Ruby path (Tone#compute_ruby).
+        # The Ruby mirror is the Tone's own path (Tone#compute, through its
+        # kernel's mode; see MB::Sound::Kernels).
         class Tone < Base
           # Kernel numbers in the C executor.
           KERNELS = { naive: 0, synth: 1, wavetable: 2 }.freeze
@@ -98,7 +99,7 @@ module MB
           def run_ruby(env, count)
             reset = @reset && env[@reset] # nil once the input ended
             @tone.plan_fast_shapes = @fast
-            env[@dst] = @tone.compute_ruby(
+            env[@dst] = @tone.compute(
               count, input(env, @frequency), input(env, @phase_mod), @width && input(env, @width),
               nil, reset, @target && input(env, @target), nil, nil, @scan && input(env, @scan), nil, nil, @gain && input(env, @gain)
             )

@@ -123,13 +123,6 @@ module MB
       ).freeze
 
       class << self
-        # Whether Notes nodes and envelopes take their fast paths for
-        # buffers without events (constant frozen buffers, envelope times
-        # as numbers; see Notes::Node#sample).  On unless the environment
-        # sets MB_SOUND_NOTES_FAST=0.  The output is the same either way;
-        # specs compare the two.
-        attr_accessor :fast_paths
-
         # The default smoothing time of controller nodes (#cc, the GM-named
         # controls, #pressure, #poly_pressure, #aftertouch; seconds or a
         # Length, :adaptive or a Range of times for adaptive smoothing, or
@@ -188,7 +181,13 @@ module MB
           t.is_a?(Length) || (t.is_a?(Numeric) && t > 0)
         end
       end
-      self.fast_paths = ENV['MB_SOUND_NOTES_FAST'] != '0'
+      # Notes nodes and envelopes take their fast paths for buffers without
+      # events (constant frozen buffers, envelope times as numbers; see
+      # Notes::Node#sample) unless the :notes_fast path is :ruby (the
+      # reference path; MB::Sound::Kernels, MB_SOUND_KERNELS=notes_fast=ruby).
+      # The output is the same either way; specs compare the two.
+      Kernels.register :notes_fast, path: true,
+        about: 'Notes nodes and envelopes: steady and constant buffers without events'
 
       # The default smoothing time of controllers and pressure (see
       # .control_smoothing): each MIDI value step becomes a 10 ms S-shaped
@@ -1205,11 +1204,11 @@ module MB
       end
 
       # The gate, trigger, velocity, and choke inputs for a new envelope:
-      # with Notes.fast_paths, one EnvelopeInputs node of its own (one
+      # with the Notes fast paths (Kernels.notes_fast?), one EnvelopeInputs node of its own (one
       # reader instead of four shared nodes and their Tees), else #gate,
       # #trigger, #velocity, and #choke (the same samples).
       def envelope_inputs
-        return { gate: gate, trigger: trigger, velocity: velocity, choke: choke } unless Notes.fast_paths
+        return { gate: gate, trigger: trigger, velocity: velocity, choke: choke } unless Kernels.notes_fast?
 
         node = memo([:envelope_inputs, @envelopes.length]) { EnvelopeInputs.new(note_stream, notes: self, sample_rate: @sample_rate) }
         { gate: node, trigger: node.trigger, velocity: node.velocity, choke: node.choke }

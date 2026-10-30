@@ -467,7 +467,7 @@ module MB
         # default Annex 2).  Runs in C (MB::Sound::FastLoudness), about 25x
         # faster than the Ruby mirror.
         def self.oversampled_max(ext, n, phases = MATRICES[:annex2])
-          MB::Sound::FastLoudness.true_peak(ext, n, phases)
+          Kernels.true_peak(ext, n, phases)
         end
 
         # Exact Ruby mirror of FastLoudness.true_peak (specs compare them):
@@ -825,6 +825,8 @@ module MB
           )
         end
       end
+
+      Kernels.register :true_peak, c: FastLoudness.method(:true_peak), ruby: TruePeak.method(:oversampled_max_ruby)
     end
   end
 end

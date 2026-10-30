@@ -229,10 +229,11 @@ module UIHelpers
 
   # A Band on a StringIO, +size+ [rows, cols], painting only on #refresh,
   # drawing ui_fake_snapshot (or the block's snapshot for each refresh).
-  def ui_fake_band(layout = :band, size: [30, 120], native: true, at: :top, color: :ansi256, &snap)
+  # +cells+ is the grid class (the Ruby mirror: MB::Term::Cells).
+  def ui_fake_band(layout = :band, size: [30, 120], cells: MB::Sound::Plot::Text::NativeCells, at: :top, color: :ansi256, &snap)
     io = StringIO.new
     snap ||= -> { ui_fake_snapshot }
-    band = UI::Band.new(layout: UI.layout_named(layout), io: io, size: size, native: native, at: at, color: color, clock: -> { 0.0 }, source: snap)
+    band = UI::Band.new(layout: UI.layout_named(layout), io: io, size: size, cells: cells, at: at, color: color, clock: -> { 0.0 }, source: snap)
     [band, io]
   end
 

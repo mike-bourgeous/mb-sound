@@ -188,6 +188,8 @@ module MB
           nq
         end
       end
+
+      Kernels.register :grains, c: FastSampler.method(:grains), ruby: KernelRuby.method(:grains)
     end
   end
 end

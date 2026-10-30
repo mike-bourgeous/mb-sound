@@ -97,8 +97,9 @@ module MB
         # follower along the way.  Returns the velocity-limited result.
         # Supports in-place processing of NArray.  Real SFloat and DFloat
         # data runs in C (FastControl.slew, mb_smooth.h); #process_ruby is
-        # its exact mirror (and handles anything else).
-        def process(samples)
+        # its exact mirror (and handles anything else).  (#process is the
+        # :slew kernel's dispatcher; see MB::Sound::Kernels.)
+        def process_c(samples)
           return process_ruby(samples) unless (samples.is_a?(Numo::SFloat) || samples.is_a?(Numo::DFloat)) && @s.is_a?(Numeric) && !@s.is_a?(Complex)
 
           out = samples.inplace? && samples.contiguous? && !samples.frozen? ? samples : samples.dup
@@ -106,9 +107,10 @@ module MB
           out
         end
 
-        # The Ruby mirror of #process's C kernel (also for other inputs).
+        # The Ruby mirror of #process's C kernel (also for other inputs),
+        # in place where the kernel works in place.
         def process_ruby(samples)
-          samples.map { |s|
+          values = samples.map { |s|
             s = s.abs if @absolute
 
             rise = @max_rise && @s + @max_rise
@@ -122,6 +124,10 @@ module MB
               @s = s
             end
           }
+          return values unless samples.is_a?(Numo::NArray) && samples.inplace? && samples.contiguous? && !samples.frozen?
+
+          samples[true] = values
+          samples
         end
 
         # Returns the current output value without changing the filter state.
@@ -133,6 +139,8 @@ module MB
           "LinearFollower\nmax_rise: #{@max_rise}\nmax_fall: #{@max_fall}\nabs?: #{@absolute}"
         end
       end
+
+      Kernels.register :slew, on: LinearFollower, as: :process, c: :process_c, ruby: :process_ruby, state: %i[@s], covers: %w[FastControl.slew]
     end
   end
 end

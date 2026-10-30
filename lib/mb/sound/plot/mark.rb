@@ -80,10 +80,11 @@ module MB
             [v.min, v.max]
           end
 
-          # Device coordinates of data points (FastUI.project for Cartesian
-          # coordinates on linear and log scales when Plot.native is set).
-          def device(surface, coord, xs, ys)
-            if Plot.native && !coord.polar?
+          # Device coordinates of data points (the :plot_project kernel:
+          # #device_c, FastUI.project for Cartesian coordinates on linear and
+          # log scales, or the Ruby mirror #device_ruby).
+          def device_c(surface, coord, xs, ys)
+            unless coord.polar?
               px = coord.x.projection
               py = coord.y.projection
               if px && py
@@ -374,6 +375,8 @@ module MB
           end
         end
       end
+
+      Kernels.register :plot_project, on: Mark::Base, as: :device, c: :device_c, ruby: :device_ruby, covers: %w[FastUI.project]
     end
   end
 end

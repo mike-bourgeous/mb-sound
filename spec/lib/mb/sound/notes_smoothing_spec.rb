@@ -118,7 +118,7 @@ RSpec.describe('MB::Sound::Notes controller smoothing', :check_shared) do
         v = (v * 7 + 0.37) % 1.3 - 0.4
       end
 
-      runs = [true, false].map { |c|
+      runs = [:c, :ruby].map { |c|
         s = MB::Sound::Notes::Smoother.new(5.ms..100.ms, sample_rate: 48000)
         expect(s).to be_adaptive
         expect(s.kernel_samples).to eq(4800)
@@ -130,7 +130,7 @@ RSpec.describe('MB::Sound::Notes controller smoothing', :check_shared) do
           s.send(:settle_at, b[0]) unless s.plan_arrays[0]
           o = Numo::SFloat.zeros(b.length)
           jumps = pos == 12800 ? [5] : nil
-          MB::Sound::Notes::Smoother.run(b, o, 0, b.length, s.plan_arrays[0], s.plan_arrays[1], s.plan_arrays[2], jumps, c: c)
+          MB::Sound::Kernels.with(c) { MB::Sound::Notes::Smoother.run(b, o, 0, b.length, s.plan_arrays[0], s.plan_arrays[1], s.plan_arrays[2], jumps) }
           out << o
           pos += n
         end
@@ -318,15 +318,12 @@ RSpec.describe('MB::Sound::Notes controller smoothing', :check_shared) do
     end
 
     it 'gives the same samples with Notes fast paths off' do
-      old = MB::Sound::Notes.fast_paths
       runs = [true, false].map { |fast|
-        MB::Sound::Notes.fast_paths = fast
+        MB::Sound::Kernels.set(notes_fast: fast ? :c : :ruby)
         v = notes_for(*gesture)
         read(v.pressure + v.mod * 0 + v.bend, 48000, [128, 300, 64])
       }
       expect(runs[0].to_a).to eq(runs[1].to_a)
-    ensure
-      MB::Sound::Notes.fast_paths = old
     end
 
     it 'returns the same frozen constant buffer, without extra allocations, once settled' do

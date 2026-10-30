@@ -2,9 +2,9 @@ RSpec.describe('Tone#fm_feedback (operator self-feedback)') do
   let(:rate) { 48000 }
 
   # Samples +tone+ in pieces of the given +lengths+ with +method+
-  # (:sample_c or :sample_ruby), returning every sample.
+  # (kernels :c or :ruby), returning every sample.
   def pieces(tone, method, lengths)
-    out = lengths.map { |n| tone.public_send(method, n)&.dup }.compact
+    out = lengths.map { |n| sample_with(method, tone, n)&.dup }.compact
     Numo::SFloat.zeros(0).concatenate(*out)
   end
 
@@ -60,10 +60,10 @@ RSpec.describe('Tone#fm_feedback (operator self-feedback)') do
       it "gives the same samples with #{name}" do
         MB::Sound.seed(1)
         a = make.call
-        c = pieces(a, :sample_c, lengths)
+        c = pieces(a, :c, lengths)
         MB::Sound.seed(1)
         b = make.call
-        r = pieces(b, :sample_ruby, lengths)
+        r = pieces(b, :ruby, lengths)
         expect(c.length).to eq(r.length)
         expect(c).to eq(r)
         expect(a.state.feedback).to eq(b.state.feedback)
@@ -189,7 +189,7 @@ RSpec.describe('Tone#fm_feedback (operator self-feedback)') do
 
   it 'carries state across buffers' do
     a = 211.hz.fm_feedback(1.7.radians).sample(1000).dup
-    b = pieces(211.hz.fm_feedback(1.7.radians), :sample, [3, 500, 497])
+    b = pieces(211.hz.fm_feedback(1.7.radians), :c, [3, 500, 497])
     expect(b).to eq(a)
   end
 

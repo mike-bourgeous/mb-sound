@@ -176,7 +176,7 @@ module MB
           w = w[0...n] unless w.is_a?(Float) || w.length == n
 
           @out = Numo::SFloat.zeros(n) if @out.nil? || @out.length != n
-          MB::Sound::FastFilter.formant(@out, x, @tables, m, s, w, @state, @sample_rate, @normalize)
+          Kernels.formant(@out, x, @tables, m, s, w, @state, @sample_rate, @normalize)
         end
 
         def sources
@@ -369,6 +369,8 @@ module MB
           formants.map { |f, db, bw| [f, db + offset, bw] }
         end
       end
+
+      Kernels.register :formant, c: FastFilter.method(:formant), ruby: Formant.method(:process_ruby)
     end
   end
 end

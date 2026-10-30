@@ -461,15 +461,10 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
   end
 
   describe 'Ruby mirror' do
-    it 'sounds the same as the C kernel (MB_SOUND_REVERB=ruby)' do
+    it 'sounds the same as the C kernel' do
       params = { room_size: 0.1, decay: 0.2, channels: 4, stages: 2, mod: :lush, diffusion_mod: :subtle, shimmer: 0.3, drive: 2, highpass: 50 }
       c = impulse(total: 1200, outputs: 2, **params)
-      begin
-        ENV['MB_SOUND_REVERB'] = 'ruby'
-        r = impulse(total: 1200, outputs: 2, **params)
-      ensure
-        ENV.delete('MB_SOUND_REVERB')
-      end
+      r = MB::Sound::Kernels.with(reverb_network: :ruby) { impulse(total: 1200, outputs: 2, **params) }
       expect(r).to eq(c)
     end
   end
@@ -515,13 +510,10 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       chunks.transpose.map { |c| c[0].concatenate(*c[1..]) }
     end
 
-    [nil, 'ruby'].each do |kernel|
-      context "with the #{kernel || 'C'} kernel" do
+    [:c, :ruby].each do |kernel|
+      context "with the #{kernel} kernel" do
         around do |ex|
-          kernel ? ENV['MB_SOUND_REVERB'] = kernel : ENV.delete('MB_SOUND_REVERB')
-          ex.run
-        ensure
-          ENV.delete('MB_SOUND_REVERB')
+          MB::Sound::Kernels.with(reverb_network: kernel) { ex.run }
         end
 
         it 'plays on after one input ends, ending with the last plus extra_time' do

@@ -16,7 +16,8 @@ module MB
       # and the loop reads them per sample.
       #
       # The body runs one sample at a time in C (MB::Sound::FastLoop; exact
-      # Ruby mirror with MB_SOUND_PLAN=ruby or Plan.engine = :ruby), so the
+      # Ruby mirror with MB::Sound.kernels = :ruby, or MB_SOUND_KERNELS=
+      # fast_loop=ruby; see MB::Sound::Kernels), so the
       # output is the same whatever the block size (the point of per-sample
       # loops) and short loops (Karplus-Strong strings, flangers, filters
       # built from nodes) work.  See Plan::Loop for the details.
@@ -221,7 +222,6 @@ module MB
           @body_handle = body.get_sampler
           @fallback = nil
           @latency = nil
-          @check_failed = false
           @out = nil
           @out_views = {}
           # (reused every block; dropouts-2)
@@ -437,7 +437,7 @@ module MB
 
             d = d[0...n] if d.is_a?(Numo::NArray) && d.length > n
             max = if d.is_a?(Numo::NArray)
-                    MB::Sound::FastArithmetic.min_max(d, @range) ? @range[1] : d.max.to_f
+                    MB::Sound::Kernels.min_max(d, @range) ? @range[1] : d.max.to_f
                   else
                     d.to_f
                   end
@@ -472,7 +472,7 @@ module MB
         def mix_output(out, data)
           wet, dry, _ = @mix
           data = data[0...out.length] if data.length > out.length
-          return out if MB::Sound::FastArithmetic.wet_dry(out, out, wet, data, dry == 0 ? nil : dry)
+          return out if MB::Sound::Kernels.wet_dry(out, out, wet, data, dry == 0 ? nil : dry)
 
           out[true] = out * wet + data * dry
           out
@@ -584,7 +584,7 @@ module MB
 
           buf = @delay_casts[i]
           buf = @delay_casts[i] = Numo::DFloat.zeros(d.length) if buf.nil? || buf.length != d.length
-          buf[0..] = d unless MB::Sound::FastArithmetic.cast_copy(buf, d)
+          buf[0..] = d unless MB::Sound::Kernels.cast_copy(buf, d)
           buf
         end
 
@@ -595,11 +595,11 @@ module MB
           buf = @comp_buf
           buf = @comp_buf = Numo::DFloat.zeros(n) if buf.nil? || buf.length != n
           if d.is_a?(Numo::NArray)
-            buf[0..] = d unless MB::Sound::FastArithmetic.copy(buf, d)
+            buf[0..] = d unless MB::Sound::Kernels.copy(buf, d)
             buf.inplace - l
           else
             # (d - l as -l + d: the same rounding)
-            buf[0..] = l unless MB::Sound::FastArithmetic.copy(buf, l)
+            buf[0..] = l unless MB::Sound::Kernels.copy(buf, l)
             buf.inplace * -1.0
             buf.inplace + d
           end
@@ -610,7 +610,7 @@ module MB
         def sustain_cast(index, v)
           buf = @sustain_bufs[index]
           buf = @sustain_bufs[index] = Numo::SFloat.zeros(v.length) if buf.nil? || buf.length != v.length
-          buf[0..] = v unless MB::Sound::FastArithmetic.cast_copy(buf, v)
+          buf[0..] = v unless MB::Sound::Kernels.cast_copy(buf, v)
           buf
         end
 
@@ -633,22 +633,10 @@ module MB
           out[0...(start + keep)]
         end
 
-        # Program#pitch_track for a block of +n+ samples; in check mode the C
-        # kernel and its Ruby mirror from the same state, compared bit for bit.
+        # Program#pitch_track for a block of +n+ samples (the :loop_pitch
+        # kernel: C, or the exact Ruby mirror; see MB::Sound::Kernels).
         def pitch_track(n)
-          unless MB::Sound::Plan.check && !@check_failed && MB::Sound::Plan.engine != :ruby
-            return @program.pitch_track(@values, n)
-          end
-
-          track, problem = @program.pitch_track_check(@values, n)
-          return track unless problem
-
-          message = "Feedback loop check failed: #{problem}\n#{@program}"
-          raise Plan::CheckFailed, message if Plan.check == :raise
-
-          warn "#{message}\nNot checking this loop from now on."
-          @check_failed = true
-          track
+          @program.pitch_track(@values, n)
         end
 
         # Sets the sustain shelf's params for a block of +n+ samples from
@@ -674,60 +662,30 @@ module MB
         end
 
         def run(n)
-          out = out_view(n)
-          if MB::Sound::Plan.check && !@check_failed
-            check_run(n, out)
-          elsif MB::Sound::Plan.engine == :ruby
-            out[true] = @program.run_ruby(n, @inputs, @params, @delays)
-          else
-            @program.run(n, @inputs, @params, @delays, out)
-          end
+          run_program(n, out_view(n))
+        end
+
+        # One block of the loop program in C (FastLoop.run) into +out+;
+        # #run_program is the :loop kernel (C, or #run_program_ruby, its
+        # exact mirror; see MB::Sound::Kernels).
+        def run_program_c(n, out)
+          @program.run_c(n, @inputs, @params, @delays, out)
+        end
+
+        # The exact Ruby mirror of #run_program_c.
+        def run_program_ruby(n, out)
+          out[true] = @program.run_ruby(n, @inputs, @params, @delays)
           out
         end
 
-        # Check mode (MB_SOUND_PLAN_CHECK): runs the block in C, then from
-        # the same state with the Ruby mirror, and compares the samples and
-        # the state: bit for bit, except that a zero's sign may differ (the
-        # C decoder drops x + 0, so a -0 can stay -0 where the mirror gives
-        # +0: equal values, accepted by the user 2026-10-10; the state's
-        # Floats compare by value too).
-        def check_run(n, out)
-          before = snapshot
-          @program.run(n, @inputs, @params, @delays, out)
-          c_out = out.dup
-          c_state = snapshot
-          restore(before)
-          r_out = @program.run_ruby(n, @inputs, @params, @delays)
-          r_state = snapshot
-
-          problem = nil
-          if c_out.to_binary != r_out.to_binary
-            c = Numo::DFloat.cast(c_out)
-            r = Numo::DFloat.cast(r_out)
-            differ = c.ne(r) & ~(c.isnan & r.isnan)
-            if differ.count_true > 0
-              diff = (c - r).abs
-              problem = "samples differ by up to #{diff[differ].max} (first at #{differ.where.to_a.first})"
-            end
-          end
-          if problem.nil? && !same_state?(c_state, r_state)
-            problem = 'the loop state differs'
-          end
-          return unless problem
-
-          message = "Feedback loop check failed: #{problem}\n#{@program}"
-          raise Plan::CheckFailed, message if Plan.check == :raise
-
-          warn "#{message}\nNot checking this loop from now on."
-          @check_failed = true
-        end
-
         # The loop's state (delay lines, shaper/SVF states, histories) as
-        # plain values, for check mode.
+        # plain values, for the :loop kernel's check mode (compared by value:
+        # a zero's sign may differ, as the C decoder drops x + 0 where the
+        # mirror gives +0; accepted by the user 2026-10-10).
         def snapshot
           rings = @program.rings.map { |g|
             line = g.line
-            [line.instance_variable_get(:@buffer).to_binary, line.instance_variable_get(:@write_offset),
+            [line.instance_variable_get(:@buffer).dup, line.instance_variable_get(:@write_offset),
              line.instance_variable_get(:@block_start), g.read_state.dup]
           }
           states = @program.ops.filter_map { |op|
@@ -742,35 +700,13 @@ module MB
           [rings, states]
         end
 
-        # True if loop states +a+ and +b+ (see #snapshot) hold equal values
-        # (delay lines compared by value, so a zero's sign may differ; see
-        # #check_run).
-        def same_state?(a, b)
-          return true if a == b
-
-          ra, sa = a
-          rb, sb = b
-          return false unless sa == sb && ra.length == rb.length
-
-          ra.each_with_index.all? { |(bin, w, bs, rs), i|
-            bin2, w2, bs2, rs2 = rb[i]
-            next false unless w == w2 && bs == bs2 && rs == rs2
-            next true if bin == bin2
-
-            cls = @program.rings[i].line.instance_variable_get(:@buffer).class
-            x = cls.from_binary(bin)
-            y = cls.from_binary(bin2)
-            (x.ne(y) & ~(x.isnan & y.isnan)).count_true == 0
-          }
-        end
-
         def restore(snap)
           rings, states = snap
           @program.rings.each_with_index do |g, i|
-            bin, w, bs, rs = rings[i]
+            saved, w, bs, rs = rings[i]
             line = g.line
             buf = line.instance_variable_get(:@buffer)
-            buf[true] = buf.class.from_binary(bin)
+            buf[true] = saved
             line.instance_variable_set(:@write_offset, w)
             line.instance_variable_set(:@block_start, bs)
             g.read_state.replace(rs)
@@ -1127,6 +1063,9 @@ module MB
           end
         end
       end
+
+      Kernels.register :loop, on: FeedbackLoop, as: :run_program, c: :run_program_c, ruby: :run_program_ruby, state: %i[snapshot restore],
+        covers: %w[FastLoop.run], about: "a feedback loop's per-sample program (Plan::Loop::Program)"
     end
   end
 end

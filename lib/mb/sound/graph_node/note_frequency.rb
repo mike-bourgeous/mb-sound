@@ -34,7 +34,7 @@ module MB
         # buffer is never modified and nothing is allocated per buffer.
         def apply(data)
           data = @copier.copy(data).inplace! if data.is_a?(Numo::SFloat)
-          MB::FastSound.number_to_freq(data, @tuning.note, @tuning.frequency)
+          MB::Sound::Kernels.number_to_freq(data, @tuning.note, @tuning.frequency)
         end
 
         # What GraphNode#make_source_name shows for this node: the note for

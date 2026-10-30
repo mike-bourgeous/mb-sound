@@ -248,7 +248,7 @@ module MB
 
         # Fades +clip+ in or out in-place.  For .slice_frames.
         def fade(clip, fade_in)
-          fade = MB::FastSound.smootherstep_buf(Numo::SFloat.zeros(clip.length))
+          fade = MB::Sound::Kernels.smootherstep_buf(Numo::SFloat.zeros(clip.length))
           fade = 1 - fade.inplace unless fade_in
           clip.inplace * fade.not_inplace!
         end
@@ -281,7 +281,7 @@ module MB
           fade_cols = cols / 64
           fade_cols = 4 if fade_cols < 4
 
-          fade_buf = MB::FastSound.smootherstep_buf(Numo::SFloat.zeros(fade_cols * 2))
+          fade_buf = MB::Sound::Kernels.smootherstep_buf(Numo::SFloat.zeros(fade_cols * 2))
           fade_in_buf = (fade_buf[fade_cols..-1].inplace! * 2 - 1).not_inplace!
           fade_out_buf = (1 - fade_buf[0...fade_cols].inplace! * 2).not_inplace!
 

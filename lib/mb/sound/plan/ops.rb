@@ -218,7 +218,7 @@ module MB
           end
         end
 
-        # a / b, real only (the / of GraphNode arithmetic: FastArithmetic.divide).
+        # a / b, real only (the / of GraphNode arithmetic: Kernels.divide).
         class Div < Binary
           def symbol = '/'
           def opcode = :div
@@ -228,13 +228,13 @@ module MB
             out[true] = operand_buffer(env, @a, count, false)
             out.inplace!
             b = @b.is_a?(Const) ? @b.value : env.fetch(@b)
-            MB::Sound::FastArithmetic.divide(out, b) || (out / b)
+            MB::Sound::Kernels.divide(out, b) || (out / b)
             env[@dst] = out.not_inplace!
           end
         end
 
         # a ** b, real only, both Values (the ** of GraphNode arithmetic:
-        # FastArithmetic.power, C's double pow rounded to float32).
+        # Kernels.power, C's double pow rounded to float32).
         class Pow < Binary
           # True when this op uses the vectorized 2^(b log2 a) (see
           # Plan::VecExp2): MB::Sound.precision :fast and a Constant or Knob
@@ -326,7 +326,7 @@ module MB
           def opcode = :shape
 
           def run_ruby(env, count)
-            env[@dst] = MB::Sound::Shaper.shape_ruby(env.fetch(@a), @shaper.mode, @shaper.p1, @shaper.p2, @shaper.antialias, @shaper.plan_state)
+            env[@dst] = Kernels.shape(env.fetch(@a).dup, @shaper.mode, @shaper.p1, @shaper.p2, @shaper.antialias, @shaper.plan_state)
           end
         end
 
@@ -366,7 +366,7 @@ module MB
             end
 
             v = Numo::SFloat.cast(env.fetch(@a)).dup.inplace!
-            env[@dst] = MB::FastSound.number_to_freq(v, @tuning.note, @tuning.frequency).not_inplace!
+            env[@dst] = MB::Sound::Kernels.number_to_freq(v, @tuning.note, @tuning.frequency).not_inplace!
           end
         end
 

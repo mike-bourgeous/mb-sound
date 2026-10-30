@@ -323,7 +323,7 @@ module MB
         # +buf+ (seconds) times +sample_rate+, as Numo's buf * sample_rate:
         # when the same frozen buffer comes back (a steady node), one frozen
         # result (so consumers can cache it by identity); otherwise a reused
-        # buffer (FastArithmetic.product, which multiplies the same way), so
+        # buffer (Kernels.product, which multiplies the same way), so
         # nothing is allocated per buffer.
         private def scaled(buf, sample_rate)
           from = (@scaled_from ||= GraphNode::FrozenView::Key.new)
@@ -338,7 +338,7 @@ module MB
           out = @scaled_buf = buf.class.new(buf.length) if out.nil? || out.class != buf.class || out.length != buf.length
           pair = (@scaled_pair ||= [[nil, nil]])
           pair[0][0] = buf
-          return out if MB::Sound::FastArithmetic.product(out, sample_rate, pair)
+          return out if MB::Sound::Kernels.product(out, sample_rate, pair)
 
           buf * sample_rate
         end

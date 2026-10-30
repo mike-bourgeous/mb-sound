@@ -178,7 +178,7 @@ RSpec.describe(MB::Sound::Filter::SVF, :aggregate_failures) do
       a = SVFF.new(:lowshelf, 48000, 200, quality: 0.7, db_gain: 6)
       b = SVFF.new(:lowshelf, 48000, 200, quality: 0.7, db_gain: 6)
       cut = Numo::SFloat.linspace(200, 2000, 1000)
-      expect(a.dynamic_process(sine[0...1000].dup, cutoff: cut, quality: 0.7)).to eq(b.dynamic_process_ruby(sine[0...1000].dup, cutoff: cut, quality: 0.7))
+      expect(a.dynamic_process(sine[0...1000].dup, cutoff: cut, quality: 0.7)).to eq(MB::Sound::Kernels.with(:ruby) { b.dynamic_process(sine[0...1000].dup, cutoff: cut, quality: 0.7) })
       expect(a.state).to eq(b.state)
     end
   end

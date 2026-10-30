@@ -1,13 +1,6 @@
 RSpec.describe(MB::Sound::Generative::Dice, :aggregate_failures) do
   let(:dice) { described_class.new(3) }
 
-  around do |ex|
-    mode = described_class.mode
-    ex.run
-  ensure
-    described_class.mode = mode
-  end
-
   it 'draws the same numbers whenever they are asked for' do
     a = dice.rand(:kick, 5)
     100.times { |i| dice.rand(:other, i) }
@@ -32,10 +25,10 @@ RSpec.describe(MB::Sound::Generative::Dice, :aggregate_failures) do
   it 'gives the same draws in C and in the Ruby mirror' do
     keys = [[], [:kick], [:kick, 5], ['s', 3r/4, nil, -2], [2**70]]
     c = keys.map { |k| [dice.rand(*k), described_class.new(3, *k).state, dice.int(1..6, *k), dice.pick({ a: 1, b: 2, c: 0.5 }, *k)] }
-    described_class.mode = :ruby
-    r = keys.map { |k| [dice.rand(*k), described_class.new(3, *k).state, dice.int(1..6, *k), dice.pick({ a: 1, b: 2, c: 0.5 }, *k)] }
+    r = MB::Sound::Kernels.with(fast_generative: :ruby) do
+      keys.map { |k| [dice.rand(*k), described_class.new(3, *k).state, dice.int(1..6, *k), dice.pick({ a: 1, b: 2, c: 0.5 }, *k)] }
+    end
     expect(r).to eq(c)
-    expect { described_class.mode = :fast }.to raise_error(ArgumentError, /:c, :ruby/)
   end
 
   it 'draws Integers, chances, and choices' do

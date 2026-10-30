@@ -151,10 +151,7 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
   end
 
   it 'gives the same samples with the Ruby mirror' do
-    old = MB::Sound::Plan.engine
-    MB::Sound::Plan.engine = :ruby
-    a = render(make_synth, sizes.first(10))
-    MB::Sound::Plan.engine = old
+    a = MB::Sound::Kernels.with(fast_plan: :ruby) { render(make_synth, sizes.first(10)) }
     b = render(make_synth(lanes: false), sizes.first(10))
     expect(a.length).to eq(b.length)
     expect((Numo::DFloat.cast(a) - Numo::DFloat.cast(b)).abs.max).to be <= 1e-6
@@ -398,9 +395,9 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
           MB::Sound.rewind
           (220.hz.saw.at(0.5) + 0.1.constant.until(400.samples)).pan(0.076).sample_hold(MB::Sound.stereo(trig.(), trig.()))
         }
-        old = [MB::Sound::Plan.engine, MB::Sound::Plan.enabled]
+        old = MB::Sound::Plan.enabled
         MB::Sound::Plan.lanes = true
-        MB::Sound::Plan.engine = engine
+        MB::Sound::Kernels.set(fast_plan: engine)
         MB::Sound::Plan.enabled = false
         ref = (g = build.(); 6.times.map { g.outputs.map { |o| o.sample(800).to_a } })
         MB::Sound::Plan.enabled = true
@@ -411,7 +408,7 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
         expect(got).to eq(ref)
         expect(inst.lane_groups.groups.sum(&:lane_runs)).to be > 0 if engine == :c
       ensure
-        MB::Sound::Plan.engine, MB::Sound::Plan.enabled = old
+        MB::Sound::Plan.enabled = old
         MB::Sound.rewind
       end
     end

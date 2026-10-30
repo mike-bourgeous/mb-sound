@@ -35,7 +35,7 @@ RSpec.describe(MB::Sound::BandLimit) do
             c = oscillator(wave, rate: rate, frequency: 3001.7)
             r = oscillator(wave, rate: rate, frequency: 3001.7)
             [1, 7, 333, 800, 2].each do |count|
-              expect(c.sample_c(count)).to eq(r.sample_ruby(count))
+              expect(c.sample(count)).to eq(sample_with(:ruby, r, count))
             end
           end
 
@@ -50,7 +50,7 @@ RSpec.describe(MB::Sound::BandLimit) do
             c = make.call
             r = make.call
             10.times do
-              expect(c.sample_c(480)).to eq(r.sample_ruby(480))
+              expect(c.sample(480)).to eq(sample_with(:ruby, r, 480))
             end
           end
 
@@ -59,7 +59,7 @@ RSpec.describe(MB::Sound::BandLimit) do
             c = oscillator(wave, rate: rate, frequency: fm.call, band_limit: 15..30)
             r = oscillator(wave, rate: rate, frequency: fm.call, band_limit: 15..30)
             6.times do
-              expect(c.sample_c(800)).to eq(r.sample_ruby(800))
+              expect(c.sample(800)).to eq(sample_with(:ruby, r, 800))
             end
           end
         end
@@ -203,7 +203,7 @@ RSpec.describe(MB::Sound::BandLimit) do
           it "gives identical C and Ruby samples for a #{bl ? 'band-limited' : 'naive'} #{wave} at #{rate} Hz, fixed and modulated" do
             c = oscillator(wave, rate: rate, frequency: 1234.5, width: 0.3, band_limit: bl)
             r = oscillator(wave, rate: rate, frequency: 1234.5, width: 0.3, band_limit: bl)
-            3.times { expect(c.sample_c(333)).to eq(r.sample_ruby(333)) }
+            3.times { expect(c.sample(333)).to eq(sample_with(:ruby, r, 333)) }
 
             make = -> {
               w = MB::Sound::ArrayInput.new(data: [Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| 0.5 + 0.49 * Math.sin(i / 97.0) })], sample_rate: rate).with_buffer(480)
@@ -211,7 +211,7 @@ RSpec.describe(MB::Sound::BandLimit) do
             }
             c = make.call
             r = make.call
-            5.times { expect(c.sample_c(480)).to eq(r.sample_ruby(480)) }
+            5.times { expect(c.sample(480)).to eq(sample_with(:ruby, r, 480)) }
           end
         end
       end
@@ -313,7 +313,7 @@ RSpec.describe(MB::Sound::BandLimit) do
           [0.1, 0.25, 0.5, 0.6, 0.93, 1.25, -0.25].each do |o|
             c = pivoted(wave, pivot: o, band_limit: bl)
             r = pivoted(wave, pivot: o, band_limit: bl)
-            [333, 1, 128].each { |n| expect(c.sample_c(n)).to eq(r.sample_ruby(n)), "pivot #{o}" }
+            [333, 1, 128].each { |n| expect(c.sample(n)).to eq(sample_with(:ruby, r, n)), "pivot #{o}" }
           end
 
           make = -> {
@@ -321,7 +321,7 @@ RSpec.describe(MB::Sound::BandLimit) do
           }
           c = make.call
           r = make.call
-          5.times { expect(c.sample_c(480)).to eq(r.sample_ruby(480)) }
+          5.times { expect(c.sample(480)).to eq(sample_with(:ruby, r, 480)) }
         end
 
         it "gives identical C and Ruby samples for a hard- and soft-synced #{bl ? 'band-limited' : 'naive'} #{wave} with a pivot" do
@@ -333,7 +333,7 @@ RSpec.describe(MB::Sound::BandLimit) do
               }
               c = make.call
               r = make.call
-              [800, 333, 1].each { |n| expect(c.sample_c(n)).to eq(r.sample_ruby(n)), "soft #{soft}, pivot #{o}" }
+              [800, 333, 1].each { |n| expect(c.sample(n)).to eq(sample_with(:ruby, r, n)), "soft #{soft}, pivot #{o}" }
             end
 
             make = -> {
@@ -343,7 +343,7 @@ RSpec.describe(MB::Sound::BandLimit) do
             }
             c = make.call
             r = make.call
-            5.times { expect(c.sample_c(480)).to eq(r.sample_ruby(480)), "soft #{soft}, moving" }
+            5.times { expect(c.sample(480)).to eq(sample_with(:ruby, r, 480)), "soft #{soft}, moving" }
           end
         end
       end
@@ -357,7 +357,7 @@ RSpec.describe(MB::Sound::BandLimit) do
           }
           c = make.call
           r = make.call
-          10.times { expect(c.sample_c(240)).to eq(r.sample_ruby(240)), "clean #{clean}" }
+          10.times { expect(c.sample(240)).to eq(sample_with(:ruby, r, 240)), "clean #{clean}" }
         end
       end
     end
@@ -443,12 +443,12 @@ RSpec.describe(MB::Sound::BandLimit) do
         it "gives identical C and Ruby samples for #{wave} at #{rate} Hz, fixed and modulated" do
           c = blit_osc(wave, rate: rate, frequency: 1234.5)
           r = blit_osc(wave, rate: rate, frequency: 1234.5)
-          [333, 1, 800].each { |n| expect(c.sample_c(n)).to eq(r.sample_ruby(n)) }
+          [333, 1, 800].each { |n| expect(c.sample(n)).to eq(sample_with(:ruby, r, n)) }
 
           make = -> { blit_osc(wave, rate: rate, frequency: MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(4800).seq * 3 + 50], sample_rate: rate).with_buffer(480)) }
           c = make.call
           r = make.call
-          5.times { expect(c.sample_c(480)).to eq(r.sample_ruby(480)) }
+          5.times { expect(c.sample(480)).to eq(sample_with(:ruby, r, 480)) }
         end
       end
     end
@@ -539,7 +539,7 @@ RSpec.describe(MB::Sound::BandLimit) do
         ].each do |make|
           c = make.call
           r = make.call
-          3.times { expect(c.sample_c(300)).to eq(r.sample_ruby(300)) }
+          3.times { expect(c.sample(300)).to eq(sample_with(:ruby, r, 300)) }
         end
       end
     end
@@ -647,7 +647,7 @@ RSpec.describe(MB::Sound::BandLimit) do
             }
             c = make.call
             r = make.call
-            [800, 333, 1].each { |n| expect(c.sample_c(n)).to eq(r.sample_ruby(n)) }
+            [800, 333, 1].each { |n| expect(c.sample(n)).to eq(sample_with(:ruby, r, n)) }
           end
         end
       end
@@ -819,7 +819,7 @@ RSpec.describe(MB::Sound::BandLimit) do
 
     it 'starts a tone as if it had always run (a square on its edge plays the midpoint first)' do
       expect(1000.hz.square.sample(3).to_a).to eq([0.0, 1.0, 1.0])
-      expect(1000.hz.square.sample_ruby(3).to_a).to eq([0.0, 1.0, 1.0])
+      expect(sample_with(:ruby, 1000.hz.square, 3).to_a).to eq([0.0, 1.0, 1.0])
       expect(1000.hz.ramp.with_phase(0.5).sample(1)[0]).to be_within(1e-6).of(0) # on the ramp's edge
       expect(1000.hz.asquare.sample(1)[0]).to eq(1) # naive tones start on the edge's right side
       expect(1000.hz.lfo.square.at(1).send(:band_limit_setting)).to be_a(Range)
@@ -882,7 +882,7 @@ RSpec.describe(MB::Sound::BandLimit) do
     it 'gives the same step in C and Ruby' do
       c = bl_osc.reset(trig(80, 30))
       r = bl_osc.reset(trig(80, 30))
-      expect(c.sample_c(80)).to eq(r.sample_ruby(80))
+      expect(c.sample(80)).to eq(sample_with(:ruby, r, 80))
     end
 
     it 'smooths timeline jumps (tempo-synced phase locks)' do
@@ -903,7 +903,7 @@ RSpec.describe(MB::Sound::BandLimit) do
       p2 = prev.dup
       phi2 = phi.is_a?(Array) ? phi.dup : phi
       a = MB::Sound::BandLimit.sync_pulses(phi, freq, 1 / 48000.0, count, p1)
-      b = MB::Sound::BandLimit.sync_pulses_ruby(phi2, freq, 1 / 48000.0, count, p2)
+      b = MB::Sound::Kernels.with(:ruby) { MB::Sound::BandLimit.sync_pulses(phi2, freq, 1 / 48000.0, count, p2) }
       [a, b, p1, p2]
     end
 

@@ -98,27 +98,6 @@ module MB
             ramped ? outs : @pitch_b
           end
 
-          # Check mode (MB_SOUND_PLAN_CHECK): #pitch_track in C, then from the
-          # same state in Ruby; returns [the C result, nil or a description
-          # of the difference].
-          def pitch_track_check(values, count)
-            before = pitch_state
-            c = pitch_track_c(values, count)
-            c = c.map { |x| x.is_a?(Numo::NArray) ? x.dup : x }
-            c_state = pitch_state
-            restore_pitch_state(before)
-            r = pitch_track_ruby(values, count)
-            r_state = pitch_state
-
-            problem = nil
-            if pitch_dump(c) != pitch_dump(r)
-              problem = "pitch tracking differs: C #{c.inspect[0, 300]} vs Ruby #{r.inspect[0, 300]}"
-            elsif pitch_dump(c_state) != pitch_dump(r_state)
-              problem = "pitch tracking state differs: C #{c_state.inspect} vs Ruby #{r_state.inspect}"
-            end
-            [c, problem]
-          end
-
           # The encoded response program for FastLoop.pitch_track: a Hash with
           # :words (Int32), :scalars (DFloat), :leaves (boundary input and
           # param Values whose block data are sources), :rings (delays whose
@@ -245,16 +224,6 @@ module MB
             @pitch_a, @pitch_b, @pitch_pos, @pitch_t, @stretch, @sustain_ratio = s
           end
 
-          # Floats and NArrays as bytes (so -0.0 and 0.0 differ).
-          def pitch_dump(x)
-            case x
-            when Array then x.map { |y| pitch_dump(y) }
-            when Numo::NArray then [x.class.name, x.shape, x.to_binary]
-            when Float then [x].pack('G')
-            else x
-            end
-          end
-
           # True if +a+ and +b+ hold the same Float bits element by element
           # (as their pack('G') bytes, without the Strings for usual values).
           def same_floats?(a, b)
@@ -275,6 +244,9 @@ module MB
           end
         end
       end
+
+      Kernels.register :loop_pitch, on: Loop::Program, as: :pitch_track, c: :pitch_track_c, ruby: :pitch_track_ruby,
+        state: %i[pitch_state restore_pitch_state], covers: %w[FastLoop.pitch_track]
     end
   end
 end

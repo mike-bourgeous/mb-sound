@@ -16,22 +16,6 @@ require 'mb/term'
 # Tone#noise, and spectral Noise draw from.
 srand(Integer(ENV['RANDOM_SEED'])) if ENV['RANDOM_SEED']
 
-require_relative 'sound/ruby_value'
-require_relative 'sound/length'
-require_relative 'sound/interval'
-require_relative 'sound/phase'
-require_relative 'sound/curve'
-require_relative 'sound/decibels'
-require_relative 'sound/numeric_sound_mixins'
-require_relative 'sound/tempo'
-require_relative 'sound/arg_types'
-require_relative 'sound/param'
-require_relative 'sound/value_source'
-require_relative 'sound/library'
-require_relative 'sound/clock'
-require_relative 'sound/gesture'
-require_relative 'sound/source_mismatch'
-
 # Load C extensions
 require_relative 'fast_sound'
 require_relative 'sound/fast_resample'
@@ -56,6 +40,25 @@ require_relative 'sound/fast_audio'
 require_relative 'sound/fast_midi'
 require_relative 'sound/fast_recipe'
 require_relative 'sound/fast_latency'
+# The kernel registry and its one switch (MB::Sound.kernels)
+require_relative 'sound/kernels'
+
+require_relative 'sound/ruby_value'
+require_relative 'sound/length'
+require_relative 'sound/interval'
+require_relative 'sound/phase'
+require_relative 'sound/curve'
+require_relative 'sound/decibels'
+require_relative 'sound/numeric_sound_mixins'
+require_relative 'sound/tempo'
+require_relative 'sound/arg_types'
+require_relative 'sound/param'
+require_relative 'sound/value_source'
+require_relative 'sound/library'
+require_relative 'sound/clock'
+require_relative 'sound/gesture'
+require_relative 'sound/source_mismatch'
+
 require_relative 'sound/precision'
 
 require_relative 'sound/version'

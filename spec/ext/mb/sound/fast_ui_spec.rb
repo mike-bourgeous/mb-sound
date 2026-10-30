@@ -5,14 +5,6 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
   let(:plot) { MB::Sound::Plot }
   let(:geometry) { MB::Sound::Plot::Geometry }
 
-  around do |example|
-    old = MB::Sound::Plot.native
-    MB::Sound::Plot.native = true
-    example.run
-  ensure
-    MB::Sound::Plot.native = old
-  end
-
   # (fast_ui links mb-term's fast_term at load time: mb/term comes first)
   it 'loads when the GC runs at every allocation' do
     so = File.expand_path('../../../../lib/mb/sound/fast_ui.so', __dir__)
@@ -197,9 +189,9 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
       ]
       plot::Text::LOOKS.each_key do |look|
         charts.each do |c|
-          plot.native = true
+          MB::Sound::Kernels.set(fast_ui: :c)
           a = plot::Text.render(c, width: 41, height: 12, look: look, color: :truecolor)
-          plot.native = false
+          MB::Sound::Kernels.set(fast_ui: :ruby)
           b = plot::Text.render(c, width: 41, height: 12, look: look, color: :truecolor)
           expect(a).to eq(b), "#{look} #{c.inspect}"
         end

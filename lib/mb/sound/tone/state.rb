@@ -105,7 +105,9 @@ module MB
           fields.each do |k, v|
             next self.jump_residual = v if k == :jump_residual
 
-            v = Numo::DFloat.cast(v) if k == :sync_ring && v.is_a?(Array)
+            # (a complex table's ring is complex: kernels-1 found restoring it
+            # as DFloat raised)
+            v = (v.any?(Complex) ? Numo::DComplex : Numo::DFloat).cast(v) if k == :sync_ring && v.is_a?(Array)
             v = v.dup if v.is_a?(Array)
             instance_variable_set(:"@#{k}", v)
           end
@@ -157,7 +159,7 @@ module MB
         # Sets the pending step samples (a DFloat or DComplex, an Array of
         # numbers, or nil for none), copying them into the step buffer.
         def jump_residual=(residual)
-          residual = Numo::DFloat.cast(residual) if residual.is_a?(Array)
+          residual = (residual.any?(Complex) ? Numo::DComplex : Numo::DFloat).cast(residual) if residual.is_a?(Array)
           if residual.nil? || residual.empty?
             @jump_buffer&.fill(0)
             @jump_left = 0
@@ -179,14 +181,16 @@ module MB
         # on top of the pending samples, in place in C for real steps (see
         # FastSynth.jump_queue), else as #queue_jump_ruby.  +real+ keeps
         # only the real part of a complex step (a complex table's jump into
-        # a real one).
-        def queue_jump(dv, ds, k = nil, real: false)
+        # a real one).  (#queue_jump is the :jump_queue kernel's dispatcher:
+        # #queue_jump_c or #queue_jump_ruby; see MB::Sound::Kernels.)
+        def queue_jump_c(dv, ds, k = nil, real: false)
           return queue_jump_ruby(dv, ds, k, real: real) unless dv.is_a?(Float) && ds.is_a?(Float) && (@jump_buffer.nil? || @jump_buffer.class == Numo::DFloat)
 
           blep, blamp, area = Tone.jump_tables
           @jump_buffer ||= Numo::DFloat.zeros(BandLimit::SYNC_TAPS)
           c = Tone::JUMP_STEP_AREA * dv + Tone::JUMP_KINK_AREA * ds
           @jump_left = FastSynth.jump_queue(@jump_buffer, @jump_left, blep, blamp, area, dv, ds, k, c)
+          nil
         end
 
         # The Ruby reference of #queue_jump (Numo, as Tone#phase_jump and
@@ -198,17 +202,19 @@ module MB
           residual = residual.real if real && residual.is_a?(Numo::DComplex)
           old = jump_residual
           self.jump_residual = old ? residual + Tone.pad_residual(old, residual.length) : residual
+          nil
         end
 
         # Adds the pending step samples to +buf+ (times +gain+) and drops
         # what it added: in C for SFloat and DFloat buffers
-        # (FastSynth.jump_add), else as #add_jump_ruby.
-        def add_jump(buf, gain)
+        # (FastSynth.jump_add), else as #add_jump_ruby.  (#add_jump is the
+        # :jump_add kernel's dispatcher.)
+        def add_jump_c(buf, gain)
           return unless @jump_left > 0
 
           if @jump_buffer.class == Numo::DFloat
             left = FastSynth.jump_add(buf, @jump_buffer, @jump_left, gain)
-            return @jump_left = left if left
+            return (@jump_left = left; nil) if left
           end
           add_jump_ruby(buf, gain)
         end
@@ -222,6 +228,17 @@ module MB
           n = [buf.length, residual.length].min
           buf[0...n] += residual[0...n] * gain
           self.jump_residual = n < residual.length ? residual[n..].dup : nil
+          nil
+        end
+
+        # The pending jump step, for the jump kernels' check mode.
+        def jump_state
+          [jump_residual&.dup, @jump_left]
+        end
+
+        # Restores #jump_state.
+        def restore_jump_state(saved)
+          self.jump_residual = saved[0]
         end
 
         # Forgets band-limiting history after a phase jump (the kernels
@@ -271,6 +288,11 @@ module MB
           @draws.times { @rng.rand }
         end
       end
+
+      Kernels.register :jump_queue, on: State, as: :queue_jump, c: :queue_jump_c, ruby: :queue_jump_ruby,
+        state: %i[jump_state restore_jump_state], covers: %w[FastSynth.jump_queue]
+      Kernels.register :jump_add, on: State, as: :add_jump, c: :add_jump_c, ruby: :add_jump_ruby,
+        state: %i[jump_state restore_jump_state], covers: %w[FastSynth.jump_add]
     end
   end
 end

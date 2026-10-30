@@ -71,4 +71,15 @@ RSpec.describe(MB::Sound::Plot::Scale) do
     expect(s.build(:db, -60..0).lo).to eq(-60)
     expect { s.build(:bogus) }.to raise_error(ArgumentError, /Unknown scale/)
   end
+
+  # kernels-1: forward marked values <= 0 as NaN in the caller's own DFloat
+  # (check mode found it through a frozen copy)
+  it 'leaves the data a log scale maps alone, frozen or not' do
+    sc = s::Log.new(1..10_000)
+    data = Numo::DFloat[-1, 0, 10, 1000]
+    copy = data.dup
+    expect(sc.map(data)[2]).to be_within(1e-12).of(0.25)
+    expect(data).to eq(copy)
+    expect(sc.map(data.freeze)[0].nan?).to eq(true)
+  end
 end

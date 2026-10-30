@@ -18,12 +18,13 @@ module MB
         attr_reader :width, :height
 
         # +look+, +color+, and +theme+ are as for Plot::Text.render (nil for
-        # the terminal's defaults); +native+ the cells' class (NativeCells
-        # or Cells: the class of the grid #draw paints into).
-        def initialize(width:, height:, look: nil, color: nil, theme: nil, native: Plot.native)
+        # the terminal's defaults); +cells+ the cells' class (NativeCells
+        # or Cells: the class of the grid #draw paints into; by default the
+        # :cell_grid kernel's, see MB::Sound::Kernels).
+        def initialize(width:, height:, look: nil, color: nil, theme: nil, cells: Kernels.cell_grid)
           @width = width
           @height = height
-          @frame = Text::Frame.new(width: width, height: height, look: look, color: color, theme: theme, native: native)
+          @frame = Text::Frame.new(width: width, height: height, look: look, color: color, theme: theme, cells: cells)
           @shown = nil
         end
 

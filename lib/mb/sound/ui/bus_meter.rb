@@ -56,7 +56,7 @@ module MB
           def add(c, x)
             return if x.nil? || x.empty?
             x = Numo::SFloat.cast(x) unless x.is_a?(Numo::SFloat)
-            peak, sumsq = BusMeter.native ? FastLoudness.peak_sumsq(x, 1.0) : BusMeter.peak_sumsq_ruby(x, 1.0)
+            peak, sumsq = Kernels.peak_sumsq(x, 1.0)
             @peak[c] = peak if peak > @peak[c]
             @sumsq[c] += sumsq
             @frames[c] += x.length
@@ -93,13 +93,6 @@ module MB
             @frames = Array.new(@channels, 0)
           end
         end
-
-        class << self
-          # False to use the Ruby mirror (.peak_sumsq_ruby) instead of
-          # FastLoudness.peak_sumsq.
-          attr_accessor :native
-        end
-        self.native = true
 
         # The exact Ruby mirror of FastLoudness.peak_sumsq: the peak and
         # the sum of squares of SFloat +x+ times +gain+, in double
@@ -211,6 +204,8 @@ module MB
           [levels, send_levels]
         end
       end
+
+      Kernels.register :peak_sumsq, c: FastLoudness.method(:peak_sumsq), ruby: BusMeter.method(:peak_sumsq_ruby)
     end
   end
 end

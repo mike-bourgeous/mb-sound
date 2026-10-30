@@ -85,3 +85,5 @@ if File.exist?(tables)
     MB::Sound::Filter::FourPole::Tuning::TABLES.fetch(m, nil) # (nil until make_tuning.rb writes it)
   }.freeze
 end
+
+MB::Sound::Kernels.register :tuning_scale, c: MB::Sound::FastFilter.method(:tuning_scale), ruby: MB::Sound::Filter::FourPole::Tuning.method(:scale)

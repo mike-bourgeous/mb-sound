@@ -167,18 +167,17 @@ module MB
         end
 
         # Processes +samples+ through the filter, updating the internal state
-        # along the way.  If +reset+ is given, the internal state is reset to the
-        # first sample before processing.
+        # along the way (the biquad_process kernel: #process_c, or its Ruby
+        # mirror #process_ruby; see MB::Sound::Kernels).
         #
         # If +samples+ is a Numo::NArray in in-place mode, then the samples will
         # be processed in-place, saving an array allocation.
-        def process(samples)
-          process_c(samples)
-        end
+        # (#process is the dispatcher of the :biquad_process kernel, registered
+        # below.)
 
         # Process a single real (not Complex) sample through the filter.
         def process_one(sample)
-          out = MB::FastSound.biquad(@b0, @b1, @b2, @a1, @a2, sample, @x1, @x2, @y1, @y2)
+          out = Kernels.biquad(@b0, @b1, @b2, @a1, @a2, sample, @x1, @x2, @y1, @y2)
           @y2 = @y1
           @y1 = out
           @x2 = @x1
@@ -186,7 +185,7 @@ module MB
           out
         end
 
-        # C loop, C math (much faster than pure Ruby)
+        # C loop, C math (FastSound.biquad_narray).
         def process_c(samples)
           # FIXME: convert to SComplex/DComplex if coefficients are complex
           result, @x1, @x2, @y1, @y2 = MB::FastSound.biquad_narray(
@@ -197,42 +196,62 @@ module MB
           result
         end
 
-        # Ruby outer loop, C math (slightly faster than pure Ruby)
-        def process_ruby_c(samples)
-          if samples.is_a?(Numo::DComplex) || samples.is_a?(Numo::SComplex) || samples[0].is_a?(Complex)
-            # Direct Form I
-            samples.map do |x0|
-              out = MB::FastSound.biquad_complex(@b0, @b1, @b2, @a1, @a2, x0, @x1, @x2, @y1, @y2)
-              @y2 = @y1
-              @y1 = out
-              @x2 = @x1
-              @x1 = x0
-              out
-            end
-          else
-            samples.map do |x0|
-              out = MB::FastSound.biquad(@b0, @b1, @b2, @a1, @a2, x0, @x1, @x2, @y1, @y2)
-              @y2 = @y1
-              @y1 = out
-              @x2 = @x1
-              @x1 = x0
-              out
-            end
+        # The Ruby mirror of #process_c: the same casts, in-place rule (an
+        # inplace contiguous NArray is filtered in place, anything else in a
+        # copy), and per-sample step (Kernels.biquad, .biquad_complex).
+        def process_ruby(samples)
+          buf = samples
+          buf = Numo::NArray.cast(buf) unless FLOAT_TYPES.include?(buf.class)
+          buf = Numo::DFloat.cast(buf) unless FLOAT_TYPES.include?(buf.class)
+          raise ArgumentError, "Only 1D NArrays may be processed (got #{buf.ndim} dimensions)" unless buf.ndim == 1
+
+          buf = buf.dup unless buf.inplace? && buf.contiguous?
+          complex = buf.is_a?(Numo::SComplex) || buf.is_a?(Numo::DComplex)
+          conv = complex ? ->(v) { Complex(v.real.to_f, v.imag.to_f) } : ->(v) { v.to_f }
+          x1 = conv.(@x1)
+          x2 = conv.(@x2)
+          y1 = conv.(@y1)
+          y2 = conv.(@y2)
+          b0, b1, b2, a1, a2 = [@b0, @b1, @b2, @a1, @a2].map(&conv)
+          buf.length.times do |i|
+            x0 = complex ? Complex(buf[i].real.to_f, buf[i].imag.to_f) : buf[i].to_f
+            y0 = complex ? Kernels.biquad_complex(b0, b1, b2, a1, a2, x0, x1, x2, y1, y2) : Kernels.biquad(b0, b1, b2, a1, a2, x0, x1, x2, y1, y2)
+            buf[i] = y0
+            y2 = y1
+            y1 = y0
+            x2 = x1
+            x1 = x0
           end
+          @x1, @x2, @y1, @y2 = x1, x2, y1, y2
+          buf
         end
 
-        # Ruby outer loop, Ruby math
-        def process_ruby(samples)
-          # Direct Form I
-          samples.map do |x0|
-            out = @b0 * x0 + @b1 * @x1 + @b2 * @x2 - @a1 * @y1 - @a2 * @y2
-            out = 0 if out.abs < 1e-18 && @y2.abs < 1e-18 && @y1.abs < 1e-18
-            @y2 = @y1
-            @y1 = out
-            @x2 = @x1
-            @x1 = x0
-            out
-          end
+        FLOAT_TYPES = [Numo::DComplex, Numo::SComplex, Numo::SFloat, Numo::DFloat].freeze
+
+        # The Ruby mirror of FastSound.biquad: one direct form I step in
+        # doubles, flushing tiny outputs after tiny outputs to 0.
+        def self.step_ruby(b0, b1, b2, a1, a2, x0, x1, x2, y1, y2)
+          out = b0.to_f * x0.to_f + b1.to_f * x1.to_f + b2.to_f * x2.to_f - a1.to_f * y1.to_f - a2.to_f * y2.to_f
+          out = 0.0 if tiny?(out) && tiny?(y1.to_f) && tiny?(y2.to_f)
+          out
+        end
+
+        # The Ruby mirror of FastSound.biquad_complex: the step in complex
+        # doubles, flushing each part like .step_ruby.
+        def self.step_complex_ruby(b0, b1, b2, a1, a2, x0, x1, x2, y1, y2)
+          c = ->(v) { v.is_a?(Complex) ? Complex(v.real.to_f, v.imag.to_f) : Complex(v.to_f, 0.0) }
+          y1 = c.(y1)
+          y2 = c.(y2)
+          out = c.(b0) * c.(x0) + c.(b1) * c.(x1) + c.(b2) * c.(x2) - c.(a1) * y1 - c.(a2) * y2
+          re = out.real.to_f
+          im = out.imag.to_f
+          re = 0.0 if tiny?(re) && tiny?(y1.real) && tiny?(y2.real)
+          im = 0.0 if tiny?(im) && tiny?(y1.imag) && tiny?(y2.imag)
+          Complex(re, im)
+        end
+
+        def self.tiny?(v)
+          v < 1e-18 && v > -1e-18
         end
 
         # Processes one +sample+ through the filter, with +strength+ (a value
@@ -252,6 +271,11 @@ module MB
           out
         end
       end
+
+      Kernels.register :biquad, c: MB::FastSound.method(:biquad), ruby: Biquad.method(:step_ruby)
+      Kernels.register :biquad_complex, c: MB::FastSound.method(:biquad_complex), ruby: Biquad.method(:step_complex_ruby)
+      Kernels.register :biquad_process, on: Biquad, as: :process, c: :process_c, ruby: :process_ruby, covers: %w[FastSound.biquad_narray],
+        state: %i[@x1 @x2 @y1 @y2]
     end
   end
 end

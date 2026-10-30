@@ -516,7 +516,7 @@ module MB
             if into.nil? || into.length != @fast_gains.shape[0] || into.any? { |o| !o.is_a?(Numo::SFloat) || o.length != length }
               into = Array.new(@fast_gains.shape[0]) { Numo::SFloat.zeros(length) }
             end
-            return @own_output = MB::FastSound.matrix_mix(@fast_gains, data, into)
+            return @own_output = MB::Sound::Kernels.matrix_mix(@fast_gains, data, into)
           end
 
           real_out = @complex && @inputs.none? { |inp| inp.complex_input? }

@@ -4,7 +4,7 @@ module MB
       # The Ruby mirror of mb_vec_exp2.h, the vectorizable 2^x of
       # MB::Sound.precision :fast (the default) for note frequencies
       # (Op::NoteFreq, FastSound.number_to_freq) and powers of a constant
-      # base (Op::Pow, FastArithmetic.power_fast): the same double
+      # base (Op::Pow, Kernels.power_fast): the same double
       # operations with Numo DFloat arithmetic, so it gives the C kernel's
       # floats exactly.  Matched libm's pow on every float tested (see the
       # header).

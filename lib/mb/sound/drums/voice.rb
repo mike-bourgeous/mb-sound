@@ -301,7 +301,7 @@ module MB
         # nil.
         def first_hit(b, from)
           rest = from == 0 ? b : b[from..]
-          r = MB::Sound::FastArithmetic.min_max(rest, @range)
+          r = MB::Sound::Kernels.min_max(rest, @range)
           return nil if r ? (r[0] == 0 && r[1] == 0) : rest.abs.max == 0
 
           rest.ne(0).where[0] + from

@@ -691,7 +691,7 @@ module MB
       # key-synced reset).  In C (FastWavetable.shape; ~170 us per 128
       # samples of dense MIDI were these in Ruby, found by sound-design-1);
       # #shape_at_ruby is the mirror.  Complex tables give Complexes.
-      def shape_at(phase, scan: 0, increment: 0, sample_rate: 48000, interpolation: nil, scan_wrap: false)
+      def shape_at_c(phase, scan: 0, increment: 0, sample_rate: 48000, interpolation: nil, scan_wrap: false)
         raise ArgumentError, 'Only cycle-mode tables have a shape' unless @mode == :cycle
 
         o = (Thread.current[:mb_wavetable_shape] ||= Numo::DFloat.zeros(4))
@@ -733,7 +733,7 @@ module MB
       # warp's DC offset; a nonzero +random_advance+ (cycles per Hz) adds
       # noise to each increment from the generator state +noise+ (see
       # Tone#noise).  See Tone#wavetable.
-      def oscillate(out, freq, advance, gain, offset, state, tstate, phase_mod, width, scan, interpolation, sample_rate, remove_dc, random_advance = 0.0, noise = nil, scan_wrap: false)
+      def oscillate_c(out, freq, advance, gain, offset, state, tstate, phase_mod, width, scan, interpolation, sample_rate, remove_dc, random_advance = 0.0, noise = nil, scan_wrap: false)
         MB::Sound::FastWavetable.oscillate(
           out, kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, state, tstate,
           phase_mod, width, scan, interpolation_code(interpolation), !!remove_dc, sinc_kernel(interpolation),
@@ -744,7 +744,7 @@ module MB
       # Ruby mirror of #oscillate (the same samples), returning +out+.
       def oscillate_ruby(out, freq, advance, gain, offset, state, tstate, phase_mod, width, scan, interpolation, sample_rate, remove_dc, random_advance = 0.0, noise = nil, scan_wrap: false)
         KernelRuby.oscillate(
-          out, kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, state, tstate,
+          Kernels.inplace_buffer(out, @complex ? Numo::SComplex : Numo::SFloat), kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, state, tstate,
           phase_mod, width, scan, interpolation_code(interpolation), !!remove_dc, random_advance.to_f, noise
         )
       end
@@ -758,7 +758,7 @@ module MB
       # at every sync event and phase warp corner (see FastWavetable.sync).
       # +reset_phase+ (cycles) is where hard sync events put the phase (0
       # by default).  See Tone#sync.
-      def sync(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false, reset_phase: nil)
+      def sync_c(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false, reset_phase: nil)
         MB::Sound::FastWavetable.sync(
           out, kernel_spec(sample_rate, interpolation, sync: band_limit, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
           pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, *Wavetable.sync_filter,
@@ -769,7 +769,7 @@ module MB
       # Ruby mirror of #sync.
       def sync_ruby(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false, reset_phase: nil)
         KernelRuby.sync(
-          out, kernel_spec(sample_rate, interpolation, sync: band_limit, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
+          Kernels.inplace_buffer(out, @complex ? Numo::SComplex : Numo::SFloat), kernel_spec(sample_rate, interpolation, sync: band_limit, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
           pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, *Wavetable.sync_filter,
           BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, reset_phase
         )
@@ -805,7 +805,7 @@ module MB
       # lookup state +lstate+ ([last phase, primed, peak, hold])), +scan+,
       # and the +wrap+ mode for phases outside 0...1 (see WRAP_MODES; :shape
       # spreads -1..1 across the cycle).  See GraphNode::Wavetable.
-      def lookup(out, phase, increments, scan, interpolation, sample_rate, wrap, lstate = nil, scan_wrap: false)
+      def lookup_c(out, phase, increments, scan, interpolation, sample_rate, wrap, lstate = nil, scan_wrap: false)
         MB::Sound::FastWavetable.lookup(
           out, kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), phase, increments, scan, interpolation_code(interpolation),
           wrap_code(wrap), sinc_kernel(interpolation), lstate
@@ -814,14 +814,14 @@ module MB
 
       # Ruby mirror of #lookup.
       def lookup_ruby(out, phase, increments, scan, interpolation, sample_rate, wrap, lstate = nil, scan_wrap: false)
-        KernelRuby.lookup(out, kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), phase, increments, scan, interpolation_code(interpolation), wrap_code(wrap), lstate)
+        KernelRuby.lookup(Kernels.inplace_buffer(out, @complex ? Numo::SComplex : Numo::SFloat), kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), phase, increments, scan, interpolation_code(interpolation), wrap_code(wrap), lstate)
       end
 
       # Sample mode player in C: fills +out+ at +freq+ (Hz), advancing the
       # phase in +state+ like #oscillate (for ports and resets) and the
       # position in source samples (+tstate+[0]) by freq * +speed+ per
       # sample (see #speed), wrapping in the loop.
-      def play(out, freq, advance, speed, gain, offset, state, tstate, interpolation, sample_rate)
+      def play_c(out, freq, advance, speed, gain, offset, state, tstate, interpolation, sample_rate)
         MB::Sound::FastWavetable.play(
           out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, speed.to_f, gain.to_f, offset.to_f, state, tstate,
           interpolation_code(interpolation), sinc_kernel(interpolation)
@@ -831,7 +831,7 @@ module MB
       # Ruby mirror of #play.
       def play_ruby(out, freq, advance, speed, gain, offset, state, tstate, interpolation, sample_rate)
         KernelRuby.play(
-          out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, speed.to_f, gain.to_f, offset.to_f, state, tstate,
+          Kernels.inplace_buffer(out, @complex ? Numo::SComplex : Numo::SFloat), kernel_spec(sample_rate, interpolation), freq, advance.to_f, speed.to_f, gain.to_f, offset.to_f, state, tstate,
           interpolation_code(interpolation)
         )
       end
@@ -1081,6 +1081,14 @@ module MB
 
       def sinc_kernel(interpolation)
         (interpolation || @interpolation) == :sinc ? SINC_KERNEL : nil
+      end
+
+      # The table kernels: #shape_at, #oscillate, #sync, #lookup, and #play
+      # dispatch to their C methods (FastWavetable) or Ruby mirrors
+      # (Wavetable::KernelRuby; see MB::Sound::Kernels).
+      %i[shape_at oscillate sync lookup play].each do |m|
+        Kernels.register :"wavetable_#{m}", on: Wavetable, as: m, c: :"#{m}_c", ruby: :"#{m}_ruby",
+          covers: ["FastWavetable.#{m == :shape_at ? :shape : m}"]
       end
     end
   end

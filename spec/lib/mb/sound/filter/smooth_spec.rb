@@ -167,8 +167,8 @@ RSpec.describe(MB::Sound::Filter::Smooth) do
         b.plan_start(x[0])
         want = Numo::SFloat.zeros(2000)
         st, r1, r2 = b.plan_arrays
-        MB::Sound::Notes::Smoother.run(x, want, 0, 700, st, r1, r2, reset[0...700].ne(0).where.to_a, c: false)
-        MB::Sound::Notes::Smoother.run(x, want, 700, 2000, st, r1, r2, (reset[700...2000].ne(0).where + 700).to_a, c: false)
+        MB::Sound::Kernels.with(:ruby) { MB::Sound::Notes::Smoother.run(x, want, 0, 700, st, r1, r2, reset[0...700].ne(0).where.to_a) }
+        MB::Sound::Kernels.with(:ruby) { MB::Sound::Notes::Smoother.run(x, want, 700, 2000, st, r1, r2, (reset[700...2000].ne(0).where + 700).to_a) }
         expect(got).to eq(want), [len, curve].inspect
       end
     end

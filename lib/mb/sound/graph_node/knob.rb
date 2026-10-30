@@ -911,7 +911,7 @@ module MB
             n = stop - pos
             case seg
             when Hold
-              out[pos...stop] = seg.value unless MB::Sound::FastArithmetic.fill_range(out, pos, stop, seg.value)
+              out[pos...stop] = seg.value unless MB::Sound::Kernels.fill_range(out, pos, stop, seg.value)
               @value = seg.value
             when Ramp
               out[pos...stop] = ramp_values(seg, f, n) unless ramp_into(out, pos, seg, f, n)
@@ -924,7 +924,7 @@ module MB
               end
             when Follow
               v = follow_values(seg, n)
-              out[pos...stop] = v unless v.is_a?(Numo::SFloat) && MB::Sound::FastArithmetic.copy_range(out, pos, v, 0, n)
+              out[pos...stop] = v unless v.is_a?(Numo::SFloat) && MB::Sound::Kernels.copy_range(out, pos, v, 0, n)
               @value = out[stop - 1]
             end
 
@@ -987,7 +987,7 @@ module MB
           v
         end
 
-        # #ramp_values written into out[pos, n] in C (FastArithmetic.knob_ramp:
+        # #ramp_values written into out[pos, n] in C (Kernels.knob_ramp:
         # the same values) for ramps without a curve or with a linear or
         # smoothstep one; false for others.
         def ramp_into(out, pos, seg, f, n)
@@ -996,7 +996,7 @@ module MB
           return false unless kind
 
           k, a, b = ramp_terms(seg)
-          !!MB::Sound::FastArithmetic.knob_ramp(out, pos, n, f - seg.start, seg.length, kind, @spec.curve == :exp, k, a, b, seg.to)
+          !!MB::Sound::Kernels.knob_ramp(out, pos, n, f - seg.start, seg.length, kind, @spec.curve == :exp, k, a, b, seg.to)
         end
 
         # Ramp +seg+'s Param::Scale#ramp_terms (computed once per ramp).
@@ -1033,13 +1033,13 @@ module MB
           lo = @spec.range.begin
           hi = @spec.range.end
           r = (@follow_range ||= [0.0, 0.0])
-          return buf if MB::Sound::FastArithmetic.min_max(buf, r) && r[0] >= lo && r[1] <= hi
+          return buf if MB::Sound::Kernels.min_max(buf, r) && r[0] >= lo && r[1] <= hi
 
           # (clipped in a reused copy of the same type: the same values as
           # buf.clip)
           c = @follow_buf
           c = @follow_buf = buf.class.new(n) if c.nil? || c.class != buf.class || c.length != n
-          c[0..] = buf unless MB::Sound::FastArithmetic.copy(c, buf)
+          c[0..] = buf unless MB::Sound::Kernels.copy(c, buf)
           c.inplace.clip(lo, hi)
           c
         end

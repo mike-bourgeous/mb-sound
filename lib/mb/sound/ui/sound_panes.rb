@@ -847,12 +847,12 @@ module MB
               c.text(0, 0, c.fit(n ? "#{n.label}: no preview (filters, shapers, and envelopes have one)" : 'no node selected (the inspector: n)', w), :dim)
               return
             end
-            native = c.grid.is_a?(FastUI::Grid)
+            cells = c.grid.class
             lk = look && look != :auto ? look : Scope.auto_look(w, h)
             live = state[:live]
-            if live.nil? || live.width != w || live.height != h || state[:native] != native || state[:look] != lk
-              live = state[:live] = Plot::Live.new(width: w, height: h, look: lk, native: native)
-              state[:native] = native
+            if live.nil? || live.width != w || live.height != h || state[:cells] != cells || state[:look] != lk
+              live = state[:live] = Plot::Live.new(width: w, height: h, look: lk, cells: cells)
+              state[:cells] = cells
               state[:look] = lk
             end
             live.draw(chart, c.grid, x: c.x, y: c.y)
@@ -997,13 +997,13 @@ module MB
 
           # Draws +chart+ into +body+ through a Plot::Live kept per view.
           def plot(body, chart, state, view, look)
-            native = body.grid.is_a?(FastUI::Grid)
+            cells = body.grid.class
             lk = look && look != :auto ? look : Scope.auto_look(body.w, body.h)
             lives = (state[:lives] ||= {})
             live, was = lives[view]
-            if live.nil? || live.width != body.w || live.height != body.h || was != [native, lk]
-              live = Plot::Live.new(width: body.w, height: body.h, look: lk, native: native)
-              lives[view] = [live, [native, lk]]
+            if live.nil? || live.width != body.w || live.height != body.h || was != [cells, lk]
+              live = Plot::Live.new(width: body.w, height: body.h, look: lk, cells: cells)
+              lives[view] = [live, [cells, lk]]
             end
             live.draw(chart, body.grid, x: body.x, y: body.y)
           end

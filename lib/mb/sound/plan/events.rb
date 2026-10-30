@@ -386,7 +386,7 @@ module MB
             @smoother.plan_start(x[0]) if @smoother.plan_unstarted? && count > 0
             st, r1, r2 = @smoother.plan_arrays
             jumps = @reset ? env.fetch(@reset)[0...count].ne(0).where.to_a : @jumps
-            MB::Sound::Notes::Smoother.run(x, out, 0, count, st, r1, r2, jumps, c: false)
+            MB::Sound::Notes::Smoother.run(x, out, 0, count, st, r1, r2, jumps)
             env[@dst] = out
           end
         end

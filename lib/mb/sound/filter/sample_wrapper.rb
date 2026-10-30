@@ -109,7 +109,7 @@ module MB
             # of the wrapper's own, instead of a new output each buffer
             # (the same values; the source's buffer stays untouched)
             @own_buf = Numo::SFloat.zeros(buf.length) if @own_buf.nil? || @own_buf.length != buf.length
-            buf = MB::Sound::FastArithmetic.copy(@own_buf, buf)&.inplace! || buf
+            buf = MB::Sound::Kernels.copy(@own_buf, buf)&.inplace! || buf
           end
           buf = SampleWrapper.call_filter(@base_filter, buf, @inputs, scratch: (@sampled_inputs ||= {}))
           buf&.not_inplace!

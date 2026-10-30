@@ -34,7 +34,7 @@ RSpec.describe('MB::Sound::FastSampler.grains', :aggregate_failures) do
     sizes.each do |n|
       l = a.outputs[0].sample(n).dup
       r = a.outputs[1].sample(n).dup
-      rl, rr = b.sample_ruby(n)
+      rl, rr = MB::Sound::Kernels.with(:ruby) { [b.outputs[0].sample(n).dup, b.outputs[1].sample(n).dup] }
       expect(l.to_a).to eq(rl.to_a)
       expect(r.to_a).to eq(rr.to_a)
       out[0].concat(l.to_a)

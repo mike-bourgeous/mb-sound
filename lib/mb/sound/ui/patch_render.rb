@@ -717,7 +717,7 @@ module MB
           # Samples +frames+ frames of the copy's outputs in CHUNK blocks:
           # into +into+ (an SFloat per output, from +at+, at least +frames+
           # rounded up to whole blocks long), else new SFloats.  Each block
-          # is copied without views (FastArithmetic.copy_range), so a block
+          # is copied without views (Kernels.copy_range), so a block
           # makes no objects of its own.  Pauses after each block (.rest).
           def run(copy, frames, pace, into: nil, at: 0)
             outs = copy.outputs
@@ -729,7 +729,7 @@ module MB
               outs.each_with_index do |o, i|
                 d = o.sample(CHUNK)
                 next if d.nil?
-                FastArithmetic.copy_range(into[i], off, d, 0, CHUNK) || (into[i][off...(off + CHUNK)] = d)
+                Kernels.copy_range(into[i], off, d, 0, CHUNK) || (into[i][off...(off + CHUNK)] = d)
               end
               rest(pace, MB::U.clock_now - t)
             end

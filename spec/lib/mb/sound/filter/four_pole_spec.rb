@@ -396,13 +396,13 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       end
     end
 
-    it 'gives identical C and Ruby samples through #dynamic_process_ruby in every mode' do
+    it 'gives identical C and Ruby samples through the Ruby mirror in every mode' do
       input = Numo::SFloat.new(2000).rand(-3, 3)
       fc = Numo::SFloat.new(2000).seq(100, 10)
       [[:stages, :soft], [:feedback, :soft], [:feedback, :hard]].each do |mode, clip|
         a = FP.new(cutoff: 500, resonance: 0.9, drive: 2, drive_mode: mode, clip: clip, self_oscillate: true)
         b = FP.new(cutoff: 500, resonance: 0.9, drive: 2, drive_mode: mode, clip: clip, self_oscillate: true)
-        expect(a.dynamic_process(input, cutoff: fc, resonance: 0.9)).to eq(b.dynamic_process_ruby(input, cutoff: fc, resonance: 0.9))
+        expect(a.dynamic_process(input, cutoff: fc, resonance: 0.9)).to eq(MB::Sound::Kernels.with(:ruby) { b.dynamic_process(input, cutoff: fc, resonance: 0.9) })
         expect(a.state).to eq(b.state)
       end
     end
@@ -546,13 +546,13 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
     expect { FP.new(drive: -1) }.to raise_error(ArgumentError, /Drive/)
   end
 
-  describe '#dynamic_process_ruby' do
+  describe '#dynamic_process with Ruby kernels' do
     it 'matches #dynamic_process' do
       a = FP.new(cutoff: 500, resonance: 0.7, drive: 2)
       b = FP.new(cutoff: 500, resonance: 0.7, drive: 2)
       input = Numo::SFloat.new(1000).rand(-1, 1)
       fc = Numo::SFloat.new(1000).seq(100, 10)
-      expect(a.dynamic_process(input, cutoff: fc, resonance: 0.7)).to eq(b.dynamic_process_ruby(input, cutoff: fc, resonance: 0.7))
+      expect(a.dynamic_process(input, cutoff: fc, resonance: 0.7)).to eq(MB::Sound::Kernels.with(:ruby) { b.dynamic_process(input, cutoff: fc, resonance: 0.7) })
       expect(a.state).to eq(b.state)
       expect(a.cutoff).to eq(fc[-1])
     end

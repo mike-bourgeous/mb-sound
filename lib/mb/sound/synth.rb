@@ -875,7 +875,7 @@ module MB
       end
 
       # The smallest and largest samples of +buf+ (magnitudes if complex),
-      # in an Array reused by every call (FastArithmetic.min_max for real
+      # in an Array reused by every call (Kernels.min_max for real
       # buffers, so nothing is allocated).
       def range_of(buf)
         r = (@range ||= [0.0, 0.0])
@@ -884,7 +884,7 @@ module MB
           return r
         end
 
-        return r if MB::Sound::FastArithmetic.min_max(buf, r)
+        return r if MB::Sound::Kernels.min_max(buf, r)
 
         buf = buf.abs if buf.is_a?(Numo::SComplex) || buf.is_a?(Numo::DComplex)
         r[0] = buf.min.to_f
@@ -1439,7 +1439,7 @@ module MB
       # narrower lanes repeating) into +out+ (zeroed first).  Shorter
       # buffers add to the start.  Returns +out+, or a new buffer if a lane
       # promoted the type (e.g. complex).  Full buffers of out's type take
-      # MB::Sound::FastArithmetic.mix (the same additions, no allocations).
+      # MB::Sound::Kernels.mix (the same additions, no allocations).
       def sum_into(out, data, channel = nil)
         pairs = (@sum_pairs ||= [])
         pool = (@sum_pool ||= [])
@@ -1460,7 +1460,7 @@ module MB
         end
         if fast
           pairs.pop while pairs.length > n
-          return out if MB::Sound::FastArithmetic.mix(out, 0, pairs)
+          return out if MB::Sound::Kernels.mix(out, 0, pairs)
         end
 
         BufferHelper.zero(out)

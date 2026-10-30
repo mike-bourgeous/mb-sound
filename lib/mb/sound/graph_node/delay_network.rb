@@ -387,7 +387,7 @@ module MB
         # delays.max.real without allocating for real buffers.
         def delays_max(delays)
           r = (@delay_range ||= [0.0, 0.0])
-          MB::Sound::FastArithmetic.min_max(delays, r) ? r[1] : delays.max.real
+          MB::Sound::Kernels.min_max(delays, r) ? r[1] : delays.max.real
         end
       end
     end

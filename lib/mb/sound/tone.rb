@@ -39,7 +39,8 @@ module MB
     #
     # Each buffer runs these steps (the shape planned for fused plans; see
     # the plan-layer notes), each a C kernel with an exact Ruby mirror
-    # (#sample_c and #sample_ruby):
+    # (Tone#kernel_c and #kernel_ruby, the :tone kernel; see
+    # MB::Sound::Kernels):
     #
     # 1. Inputs: read +count+ samples of each input node (frequency, phase
     #    modulation, width, sync pulses, reset triggers, reset targets, and
@@ -73,7 +74,7 @@ module MB
     #      fused plan keeps it as one sequential op.
     # 5. GAIN (fused into the kernel): y = v * gain + offset, from #at;
     #    then (after the JUMP residual) y *= the #gain input, if any
-    #    (FastArithmetic.scale on the output buffer, the same samples as a
+    #    (Kernels.scale on the output buffer, the same samples as a
     #    following Multiplier).
     # 6. JUMP: a phase jump (reset input, timeline lock) of a #clean tone on
     #    the SYNC kernel (reset_sync?) is a sync event on its sample; for
@@ -273,12 +274,7 @@ module MB
       # Returns the value of +wave_type+ at +phase+ (cycles, or a Phase;
       # e.g. 0.25 is the top of a sine), from -1 to 1 (C).
       def self.value_at(wave_type, phase)
-        MB::FastSound.osc(wave_type, Phase.cycles(phase) * TWOPI)
-      end
-
-      # Ruby version of .value_at.
-      def self.value_at_ruby(wave_type, phase)
-        radians_value_ruby(wave_type, Phase.cycles(phase) * TWOPI)
+        Kernels.osc(wave_type, Phase.cycles(phase) * TWOPI)
       end
 
       # Naive shapes' jumps: a wrapped phase within this many radians (1e-9
@@ -305,7 +301,7 @@ module MB
         end
       end
 
-      # The formulas of .value_at_ruby, at +phi+ radians (the unit of the
+      # The formulas of .value_at (Ruby: the :osc kernel's mirror), at +phi+ radians (the unit of the
       # shapes' math; FastSound.osc's osc_sample in C).
       def self.radians_value_ruby(wave_type, phi)
         case wave_type
@@ -485,7 +481,7 @@ module MB
           s.clip(-3, 3)
 
         when :complex_triangle, :complex_square, :complex_ramp
-          # These use complex integrals per sample (see .value_at_ruby)
+          # These use complex integrals per sample (see .radians_value_ruby)
           Numo::DComplex.cast(radians.to_a.map { |phi| radians_value_ruby(wave_type, phi) })
 
         else
@@ -1829,13 +1825,14 @@ module MB
         return nil if count <= 0
 
         count = count.round
-        return sample_c(count) if @ports.nil?
+        return sample_frame(count) if @ports.nil?
 
-        port_frame(count) { sample_c(count) }
+        port_frame(count) { sample_frame(count) }
       end
 
-      # The tone in C (see the class description for the steps).
-      def sample_c(count)
+      # One frame of the tone (see the class description for the steps):
+      # reads the inputs, then #compute.
+      def sample_frame(count)
         start unless @started
         return nil if one_shot_ended?
 
@@ -1843,13 +1840,24 @@ module MB
         return nil if missing_input?(freq, phase, width, pulses, resets, targets, scan, fb, fb_gain, out_gain)
         return nil if pivot_missing?(pivot)
 
-        state = @state
         if @ports
+          state = @state
           state.frame_phase = state.phase.dup # (with its grid; see BandLimit.sync_pulses)
           state.frame_freq = freq
           state.frame_segments = nil
         end
 
+        compute(count, freq, phase, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain, pivot)
+      end
+
+      # The samples of #sample_frame from inputs already read (the inputs
+      # are as #get_upstream_inputs returns them), through the tone kernel
+      # (#run_kernel: #kernel_c, or its Ruby mirror #kernel_ruby; see
+      # MB::Sound::Kernels).  Also the Ruby mirror of the plan layer's tone
+      # op (Plan::Op::Tone).  +pivot+ is the warp's pivot (nil: #warp_pivot,
+      # a constant in plans).
+      def compute(count, freq, phase, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain, pivot = nil)
+        pivot = warp_pivot if pivot.nil? && warped?
         pick_zone(freq) if @table.is_a?(MB::Sound::Wavetable::KeyMap) && (@zone_table.nil? || @reset.nil?)
         build_buffer(count)
 
@@ -1857,58 +1865,18 @@ module MB
         locks = lock_points(jumps)
         if points || locks
           buf = sample_segments(count, freq, phase, width, points, targets, locks, jump_phase, scan, fb, fb_gain, pivot: pivot) do |out, f, ph, w, sc, fbs, fgs, pv|
-            kernel_c(out, f, ph, w, nil, sc, fbs, fgs, pivot: pv)
+            run_kernel(out, f, ph, w, nil, sc, fbs, fgs, pivot: pv)
           end
         else
-          buf = kernel_c(osc_view(count), freq, phase, width, pulses, scan, fb, fb_gain, pivot: pivot)
-          add_jump_residual(buf) if state.jump_pending?
+          buf = run_kernel(osc_view(count), freq, phase, width, pulses, scan, fb, fb_gain, pivot: pivot)
+          add_jump_residual(buf) if @state.jump_pending?
         end
         apply_output_gain(buf, out_gain) if out_gain
 
+        state = @state
         state.last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
         state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
         state.last_pivot = pivot[-1] if pivot.is_a?(Numo::NArray)
-
-        buf.not_inplace!
-      end
-
-      # The tone in Ruby: the same samples as #sample_c (except noise),
-      # from the kernels' Ruby mirrors.
-      def sample_ruby(count)
-        start unless @started
-        return nil if one_shot_ended?
-
-        count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain, pivot = get_upstream_inputs(count)
-        return nil if missing_input?(freq_table, phase_table, width, pulses, resets, targets, scan, fb, fb_gain, out_gain)
-        return nil if pivot_missing?(pivot)
-
-        compute_ruby(count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain, pivot)
-      end
-
-      # The samples of #sample_ruby from inputs already read (the inputs
-      # are as #get_upstream_inputs returns them).  Also the Ruby mirror of
-      # the plan layer's tone op (Plan::Op::Tone).  +pivot+ is the warp's
-      # pivot (nil: #warp_pivot, a constant in plans).
-      def compute_ruby(count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain, pivot = nil)
-        pivot = warp_pivot if pivot.nil? && warped?
-        pick_zone(freq_table) if @table.is_a?(MB::Sound::Wavetable::KeyMap) && (@zone_table.nil? || @reset.nil?)
-        build_buffer(count)
-
-        points = reset_points(resets)
-        locks = lock_points(jumps)
-        if points || locks
-          buf = sample_segments(count, freq_table, phase_table, width, points, targets, locks, jump_phase, scan, fb, fb_gain, pivot: pivot) do |out, f, ph, w, sc, fbs, fgs, pv|
-            kernel_ruby(out, f, ph, w, nil, sc, fbs, fgs, pivot: pv)
-          end
-        else
-          buf = kernel_ruby(osc_view(count), freq_table, phase_table, width, pulses, scan, fb, fb_gain, pivot: pivot)
-          add_jump_residual(buf)
-        end
-        scale_output(buf, out_gain) if out_gain # Numo: the mirror of FastArithmetic.scale
-
-        @state.last_freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[-1]
-        @state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
-        @state.last_pivot = pivot[-1] if pivot.is_a?(Numo::NArray)
 
         buf.not_inplace!
       end
@@ -1964,7 +1932,7 @@ module MB
       end
 
       # For plans (Plan::Op::Tone on the wavetable kernel, in C): picks a
-      # key zone from the frequency +freq+ (Hz) as #sample_c does at the
+      # key zone from the frequency +freq+ (Hz) as #compute does at the
       # start of a block (KeyMaps without a reset input, or before the
       # first pick), unless +freq+ is nil (after a reset, which picked
       # one), and returns the kernel arguments of the table the tone plays
@@ -2026,7 +1994,7 @@ module MB
       end
 
       # The State as plain values, plus a KeyMap's picked zone (the table
-      # #sample_c picks at resets and blocks; not part of the State).
+      # #compute picks at resets and blocks; not part of the State).
       def plan_snapshot
         return nil unless @state
 
@@ -2370,10 +2338,10 @@ module MB
       end
 
       # Multiplies +buf+ (the output view) by the #gain input in place: in C
-      # (FastArithmetic.scale, no allocation) when it can, else with Numo;
+      # (Kernels.scale, no allocation) when it can, else with Numo;
       # both give the same values as a following Multiplier.
       def apply_output_gain(buf, out_gain)
-        return if MB::Sound::FastArithmetic.scale(buf, out_gain)
+        return if Kernels.scale(buf, out_gain)
 
         scale_output(buf, out_gain)
       end
@@ -2473,8 +2441,8 @@ module MB
       # see #reset), jumping the phase before each of those samples (a
       # timeline jump first, then a reset, at the same sample).  Each jump
       # is band-limited at that sample's frequency, phase modulation, and
-      # width (see #phase_jump).  The block runs a kernel (#kernel_c or
-      # #kernel_ruby) on a view of the output buffer with the matching
+      # width (see #phase_jump).  The block runs the kernel (#run_kernel)
+      # on a view of the output buffer with the matching
       # slices of the frequency, phase modulation, and width inputs, and
       # returns the samples.  Returns a view of the output buffer.
       def sample_segments(count, freq, phase, width, points, targets, locks = nil, jump_phase = nil, scan = nil, fb = nil, fb_gain = nil, pivot: nil)
@@ -2897,7 +2865,7 @@ module MB
 
       # The main output for GraphNode::Ports.
       def sample_main(count)
-        sample_c(count)
+        sample_frame(count)
       end
 
       # Port data from the phases of the frame just computed (the phase,
@@ -3260,6 +3228,52 @@ module MB
         src = src.get_sampler if src.respond_to?(:get_sampler)
         src
       end
+
+      # Whether check mode compares the kernel and its mirror for this tone
+      # (noise draws differ between C and Ruby).
+      def kernel_checkable?
+        @random_advance == 0 && @state.noise.nil?
+      end
+
+      # What the tone kernel changes (the State, a key zone, and a pending
+      # clean reset target), for check mode.
+      def kernel_state
+        [plan_snapshot, @sync_reset]
+      end
+
+      # Restores #kernel_state.
+      def restore_kernel_state(saved)
+        plan_restore(saved[0])
+        @sync_reset = saved[1]
+      end
+
+      # The check tolerance of this tone's kernel: exact for real shapes;
+      # complex shapes' C and Ruby formulas round differently (C's sin and
+      # cos of the phase, Ruby's complex exponential), within 1e-15.
+      def kernel_tolerance
+        @wave_type.to_s.start_with?('complex') ? 1e-15 : 0
+      end
+
+      # FastSound.shape's arguments for .shape_ruby (the shaper half of the
+      # naive kernel; Tone uses FastSound.oscillate, the fused loop).
+      def self.shape_kernel_ruby(buf, wave_type, phases, increments, phase_mod, gain, offset)
+        d = ->(x) { x.is_a?(Numo::NArray) ? Numo::DFloat.cast(Numo::SFloat.cast(x)) : x }
+        v = shape_ruby(wave_type, d.(phases), d.(increments), d.(phase_mod)) * gain + offset
+        v = v.real if !buf.is_a?(Numo::SComplex) && v.is_a?(Numo::DComplex)
+        buf[true] = v
+        buf
+      end
+
+      Kernels.register :osc, c: MB::FastSound.method(:osc), ruby: Tone.method(:radians_value_ruby)
+      Kernels.register :fast_shape, c: MB::FastSound.method(:shape), ruby: Tone.method(:shape_kernel_ruby),
+        check: 'edges land on either side of a rounding (tone_phasor_spec compares within 1e-4 away from jumps)'
+      Kernels.register :tone, on: Tone, as: :run_kernel, c: :kernel_c, ruby: :kernel_ruby, group: :tone,
+        state: %i[kernel_state restore_kernel_state], check_if: :kernel_checkable?, tolerance: :kernel_tolerance,
+        covers: %w[
+          FastSynth.feedback_sine FastSynth.oscillate_sync FastSynth.blit FastSynth.oscillate_bl
+          FastSound.phasor FastSound.oscillate
+        ],
+        about: 'one buffer of a Tone (every shape kernel; wavetables through the Wavetable kernels)'
     end
   end
 end

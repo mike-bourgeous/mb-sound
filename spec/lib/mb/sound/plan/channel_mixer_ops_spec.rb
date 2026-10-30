@@ -39,7 +39,7 @@ RSpec.describe(MB::Sound::GraphNode::ChannelMixer, 'plan ops') do
           prog = MB::Sound::Plan::Program.new(ops: b.ops, inputs: b.inputs, params: b.params, output: out)
 
           got = Numo::SFloat.zeros(n)
-          prog.run(n, xs, [], got)
+          prog.run_c(n, xs, [], got)
           expect(got.to_binary).to eq(expected[j].to_binary), "row #{j} in C"
           expect(prog.run_ruby(n, xs, []).to_binary).to eq(expected[j].to_binary), "row #{j} in Ruby"
         end

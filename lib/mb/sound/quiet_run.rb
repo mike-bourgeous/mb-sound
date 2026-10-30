@@ -274,7 +274,7 @@ module MB
       # The index (from +from+) of the last loud one of +length+ samples of
       # +buf+, or nil.
       def last_loud(buf, from, length)
-        i = MB::Sound::FastArithmetic.last_at_least(buf, from, length, @loud)
+        i = MB::Sound::Kernels.last_at_least(buf, from, length, @loud)
         return (i < 0 ? nil : i) if i
 
         x = from == 0 && length == buf.length ? buf : buf[from...(from + length)]
@@ -286,7 +286,7 @@ module MB
       # The loud indices of +written+ (for #advance).
       def loud_indices(written)
         r = (@range ||= [0.0, 0.0])
-        if MB::Sound::FastArithmetic.min_max(written, r)
+        if MB::Sound::Kernels.min_max(written, r)
           return nil if r[1] < @loud && -r[0] < @loud
         end
         written = written.abs if written.is_a?(Numo::SComplex) || written.is_a?(Numo::DComplex)

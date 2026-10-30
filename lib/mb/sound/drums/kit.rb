@@ -68,7 +68,7 @@ module MB
             next any = true if @silent.include?(name) # (played for its readers, never mixed)
 
             any = true
-            if FastArithmetic.add_at(@buf, 0, data, data.length, nil)
+            if Kernels.add_at(@buf, 0, data, data.length, nil)
               # (allocation-free; else the Numo mirror below)
             elsif data.length == count
               @buf.inplace + data

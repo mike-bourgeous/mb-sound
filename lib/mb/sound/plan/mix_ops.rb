@@ -61,7 +61,7 @@ module MB
         end
 
         # One side's gain of a pan law (GraphNode::ChannelMixer::PanLaws)
-        # for a moving position, as FastArithmetic.pan and Numo compute it
+        # for a moving position, as Kernels.pan and Numo compute it
         # on float32 buffers (fast_plan's OP_PAN_GAIN): the position
         # (optionally scaled first: (float)scale * position, a unison slot
         # times its spread) clipped to -1..1, then :equal_power cos or sin of
@@ -72,7 +72,7 @@ module MB
         # balances, and unison spreads multiply their inputs by these
         # (plan-fusion-2).  The mirror is PanLaws itself.
         class PanGain < Base
-          # Law numbers (FastArithmetic.pan's, plus :balance).
+          # Law numbers (Kernels.pan's, plus :balance).
           LAWS = { equal_power: 0, linear: 1, minus_4_5db: 2, balance: 3 }.freeze
 
           attr_reader :a, :law, :side, :scale

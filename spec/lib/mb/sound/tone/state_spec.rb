@@ -126,4 +126,17 @@ RSpec.describe(MB::Sound::Tone::State) do
       expect(out[0].real).not_to eq(0)
     end
   end
+
+  # kernels-1: a complex tone's pending jump residual came back from #to_h as
+  # Complexes, and the constructor cast them to a DFloat (RangeError), so
+  # Tone#plan_restore failed for complex tones mid-jump (check mode found it)
+  it 'restores a complex jump residual and ring from #to_h' do
+    s = described_class.new(phase: 0.1)
+    s.jump_residual = Numo::DComplex[Complex(0.5, -0.25), Complex(0.1, 0)]
+    s.sync_ring = Numo::DComplex.zeros(4) + Complex(0, 1)
+    r = described_class.new(**s.to_h)
+    expect(r.jump_residual).to be_a(Numo::DComplex)
+    expect(r.jump_residual.to_a).to eq(s.jump_residual.to_a)
+    expect(r.sync_ring.to_a).to eq(s.sync_ring.to_a)
+  end
 end

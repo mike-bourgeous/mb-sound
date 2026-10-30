@@ -298,21 +298,9 @@ module MB
         def dynamic_process(samples, cutoff:, resonance:)
           samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
           out = if diode?
-                  MB::Sound::FastFilter.diode_ladder(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, *kernel_options, diode_normalize, @tuning_number)
+                  Kernels.diode_ladder(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, *kernel_options, diode_normalize, @tuning_number)
                 else
-                  MB::Sound::FastFilter.four_pole(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix, *kernel_options, @tuning_number)
-                end
-          remember(cutoff, resonance)
-          out
-        end
-
-        # Same as #dynamic_process, through the Ruby mirror (slow; for specs).
-        def dynamic_process_ruby(samples, cutoff:, resonance:)
-          samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
-          out = if diode?
-                  self.class.diode_process_ruby(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, *kernel_options, diode_normalize, @tuning_number)
-                else
-                  self.class.process_ruby(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix, *kernel_options, @tuning_number)
+                  Kernels.four_pole(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix, *kernel_options, @tuning_number)
                 end
           remember(cutoff, resonance)
           out
@@ -544,7 +532,7 @@ module MB
           [s0, s1, s2, s3].each_with_index { |s, j| state[j] = s }
           state[4] = fk.to_f
 
-          out
+          Kernels.inplace_result(buffer, out)
         end
 
         # The Ruby mirror of MB::Sound::FastFilter.diode_ladder (the diode
@@ -697,7 +685,7 @@ module MB
           [s0, s1, s2, s3].each_with_index { |s, j| state[j] = s }
           state[4] = fk.to_f
 
-          out
+          Kernels.inplace_result(buffer, out)
         end
 
         # The diode ladder's dB resonance curve: k / DIODE_CURVE_K for
@@ -1067,6 +1055,21 @@ module MB
           (v.is_a?(Numo::NArray) ? v[-1].real : v).to_f
         end
       end
+
+      # The kernels and the curve helpers they share with Ruby (the helpers
+      # are exposed for specs; lib/ calls the Ruby versions at build time).
+      Kernels.register :four_pole, c: FastFilter.method(:four_pole), ruby: FourPole.method(:process_ruby)
+      Kernels.register :diode_ladder, c: FastFilter.method(:diode_ladder), ruby: FourPole.method(:diode_process_ruby)
+      Kernels.register :filter_tan, c: FastFilter.method(:tan), ruby: FourPole.method(:tan)
+      Kernels.register :filter_tanh, c: FastFilter.method(:tanh), ruby: FourPole.method(:tanh)
+      Kernels.register :filter_secant, c: FastFilter.method(:secant), ruby: FourPole.method(:secant)
+      Kernels.register :resonance_curve, c: FastFilter.method(:resonance_curve), ruby: FourPole.method(:resonance_curve)
+      Kernels.register :self_osc_gain, c: FastFilter.method(:self_osc_gain), ruby: FourPole.method(:self_oscillate_gain)
+      Kernels.register :diode_compensation, c: FastFilter.method(:diode_compensation), ruby: FourPole.method(:diode_compensation)
+      Kernels.register :diode_cutoff_scale, c: FastFilter.method(:diode_cutoff_scale), ruby: FourPole.method(:diode_cutoff_scale)
+      Kernels.register :diode_headroom, c: FastFilter.method(:diode_headroom), ruby: FourPole.method(:diode_headroom)
+      Kernels.register :diode_loop_gain, c: FastFilter.method(:diode_loop_gain), ruby: FourPole.method(:diode_loop_gain)
+      Kernels.register :diode_resonance_curve, c: FastFilter.method(:diode_resonance_curve), ruby: FourPole.method(:diode_resonance_curve)
     end
   end
 end
