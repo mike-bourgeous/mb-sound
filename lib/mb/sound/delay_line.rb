@@ -420,6 +420,21 @@ module MB
         @write_offset = offset
       end
 
+      # True if none of the last +window+ samples written has a magnitude of
+      # at least +loud+ (a float bound, see QuietRun): the line holds only
+      # silence that a read up to +window+ samples back could return.  For a
+      # node's idle check (NodeTraits; asked only where a sleeper could fall
+      # asleep), without allocating for real lines.
+      def holds_quiet?(window, loud = QuietRun::QUIET_LOUD)
+        n = window.ceil
+        n = capacity if n > capacity
+        return true if n <= 0
+
+        start = (@write_offset - n) % capacity
+        first = MB::M.min(n, capacity - start)
+        quiet_range?(start, first, loud) && (first == n || quiet_range?(0, n - first, loud))
+      end
+
       # Returns a copy of the buffer rotated so the oldest sample is first
       # and the newest is last.
       def unwrapped
@@ -427,6 +442,14 @@ module MB
       end
 
       private
+
+      # True if none of +n+ buffer samples from +start+ is at least +loud+.
+      def quiet_range?(start, n, loud)
+        i = MB::Sound::FastArithmetic.last_at_least(@buffer, start, n, loud)
+        return i < 0 if i
+
+        @buffer[start...(start + n)].abs.lt(loud).all?
+      end
 
       # Returns the C number for an interpolation mode name.
       def mode(interpolation)

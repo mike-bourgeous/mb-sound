@@ -483,9 +483,9 @@ module MB
       end
 
       # The indices of lanes that may be skipped while idle: with
-      # +:skip_idle+ on (the default), lanes whose graphs have no delays,
-      # reverbs, FIR filters, or tempo-following nodes (see
-      # #setup_idle_skipping).
+      # +:skip_idle+ on (the default), lanes whose graphs have no node that
+      # blocks sleeping (reverbs, FIR filters, tempo-following nodes:
+      # NodeTraits; see #setup_idle_skipping).
       def skippable_lanes
         @skippable.each_index.select { |idx| @skippable[idx] }
       end
@@ -640,8 +640,9 @@ module MB
       #   envelopes, sampler voices, drum repeats) says it may sleep,
       # and its graph has no node that blocks sleeping (NodeTraits'
       # blocks_sleep?: state holding sound that comes back after a silent
-      # stretch, like delays, reverbs, and long FIR filters, without an idle
-      # check of its own, or a signal following the timeline, like tempo
+      # stretch, like reverbs and long FIR filters, without an idle check of
+      # its own (delays and feedback loops have one), or a signal following
+      # the timeline, like tempo
       # LFOs; MIDI transforms upstream of the allocator and clip sources
       # follow the timeline too but only make events, which wake lanes, so
       # clip synths skip idle lanes since 2026-10-10, user decision "yes,

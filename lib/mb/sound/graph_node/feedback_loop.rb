@@ -116,7 +116,8 @@ module MB
       class FeedbackLoop
         include GraphNode
         include GraphNode::SampleRateHelper
-        node_traits memory: :long
+        # (it may sleep once its delays hold only silence: #sleep_ready?)
+        node_traits memory: :long, idle_check: :sleep_ready?
 
         # The loop variable (+fb+ in the examples): the loop's output (see the
         # class description).  Its #sample is only used by the fallback.
@@ -247,6 +248,19 @@ module MB
           src[:input] = @input if @input.respond_to?(:sample)
           src[:body] = @body
           src
+        end
+
+        # NodeTraits' idle check: true when every delay of the loop holds
+        # only silence (below -90 dB) within its longest delay
+        # (Filter::Delay#sleep_ready?), so what the loop feeds back has died
+        # away; a loop holding a sound (a looper, feedback near 1) never is.
+        # A loop running as a block graph (live fallback) keeps sleepers
+        # awake.
+        def sleep_ready?
+          return false if @fallback
+          return true if @program.nil?
+
+          @program.rings.all? { |g| g.delay.sleep_ready? }
         end
 
         # The inputs the plan layer may fuse upstream (Plan::Installation):

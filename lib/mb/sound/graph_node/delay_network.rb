@@ -34,7 +34,8 @@ module MB
       class DelayNetwork
         include SampleRateHelper
         include MultiOutput
-        node_traits memory: :long
+        # (it may sleep once its lines hold only silence: #sleep_ready?)
+        node_traits memory: :long, idle_check: :sleep_ready?
 
         # One output tap of a DelayNetwork.
         class Tap
@@ -239,6 +240,15 @@ module MB
         # True once the network has rung out after its inputs ended.
         def rung_out?
           @ring_done
+        end
+
+        # NodeTraits' idle check: true when every line holds only silence
+        # (below -90 dB) within the longest delay read so far, plus the
+        # interpolation reach, so nothing can recirculate (see
+        # Filter::Delay#sleep_ready?).
+        def sleep_ready?
+          window = (@longest.finite? ? @longest.ceil : 0) + MB::Sound::DelayLine::MARGIN
+          @lines.all? { |l| l.holds_quiet?(window) }
         end
 
         # Do not use directly.  Called by Tap#sample: the first tap read in a
