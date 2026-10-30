@@ -2045,7 +2045,6 @@ stream.through(fx)
 clip.bake(fx)
 bin/songs/midi_transforms_song.rb
 MIDI::Param
-value_at(pos, transport:, stream:)
 cc(1, 0.5..0.7)
 Knob#value_at
 Session::Decisions

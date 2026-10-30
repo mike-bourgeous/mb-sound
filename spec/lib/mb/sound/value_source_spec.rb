@@ -3,7 +3,7 @@
 # sends, scene values, rack control ports, document params, clock speeds,
 # followed tempos, MIDI params).
 RSpec.describe(MB::Sound::ValueSource, :aggregate_failures) do
-  let(:session) { MB::Sound::Session.new(realtime: false) }
+  let(:session) { MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: :virtual), realtime: false) }
   after { session.close }
 
   describe '.coerce' do
