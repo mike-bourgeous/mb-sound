@@ -97,11 +97,18 @@ module MB
         # Sample::LoopInfo): ACID chunks (tempo, beats, meter, root,
         # one-shot), `smpl` (root, loop), cue points (markers), FLAC tags,
         # then tempo and key words in the file and folder names.  With
-        # +detect+ true a sample whose tempo is still unknown gets one from
-        # tempo detection (#detect_tempo).
+        # +detect+ true a sample whose tempo or key is still unknown gets
+        # one from detection (#detect_tempo, #detect_key); +detect: :bpm+
+        # or +:key+ (or an Array) detects only those.
         def from_file(path, detect: false, **options)
           path = path.to_s
-          return from_file(path, **options).then { |s| s.bpm ? s : s.detect_tempo } if detect
+          list = detect_list(detect)
+          unless list.empty?
+            s = from_file(path, **options)
+            s = s.detect_tempo if list.include?(:bpm) && !s.bpm
+            s = s.detect_key if list.include?(:key) && !s.key
+            return s
+          end
 
           key = cache_key(path, options)
           cached = key && @cache&.[](key)
@@ -1109,6 +1116,66 @@ module MB
         b = seconds * bpm / 60.0
         bpm = b.round * 60.0 / seconds if b.round > 0 && (b - b.round).abs <= 0.05 * b
         with(bpm: bpm, meta_source: meta_source.merge(bpm: :detected, beats: :detected).freeze)
+      end
+
+      # The key of the sample's audio by the Krumhansl-Schmuckler method
+      # (Analysis::Key: the chromagram folded over the whole region,
+      # correlated with 24 key profiles): an Analysis::Key::Result with the
+      # key, its correlation, the runner-up, and every score.  Cached per
+      # audio and region.  +profile+ is :krumhansl (default) or :temperley;
+      # +options+ go to Analysis::Chroma.new (n_fft:, hop:, range:,
+      # tuning:).
+      #
+      #     Sample['pad.wav'].key_analysis   # => A minor (r 0.90, next C major 0.77)
+      def key_analysis(profile: :krumhansl, **options)
+        @audio.edit([:key_analysis, @start, @stop, profile, options]) {
+          Analysis::Key.of(mono_mix, sample_rate: sample_rate, profile: profile, **options)
+        }
+      end
+
+      # The sample with a key from key detection (#key_analysis) when the
+      # pick is clear (Analysis::Key::Result#clear?: correlation at least
+      # Analysis::Key::MIN_CORRELATION and a margin over the runner-up)
+      # and the sound is tonal (#material: drum loops have no key, though
+      # a tuned kick folds onto one); otherwise the sample as it is.  The
+      # reason is in `meta[:why][:key]` either way ("detected A minor (r
+      # 0.90, next C major 0.77)", "no clear key: ...", "percussive ...: no
+      # key ...").  +force+ takes the best pick whatever the material and
+      # correlation.  `Sample[path, detect: true]` calls it for files
+      # without a key.
+      #
+      #     Sample['pad_loop.wav'].detect_key.key   # => :Am
+      def detect_key(force: false, **options)
+        k = key_analysis(**options)
+        m = force ? nil : material
+        why, found = if m&.kind == :percussive
+                       ["#{m.why}: no key (best #{k})", false]
+                     elsif !force && !k.clear?
+                       ["no clear key: #{k}", false]
+                     else
+                       ["detected #{k}", true]
+                     end
+        changes = { meta: meta.merge(why: (meta[:why] || {}).merge(key: why).freeze).freeze }
+        changes.merge!(key: k.key, meta_source: meta_source.merge(key: :detected).freeze) if found
+        with(**changes)
+      end
+
+      # What Sample.from_file's +detect:+ may name.
+      DETECT = %i[bpm key].freeze
+
+      # The DETECT names of a +detect:+ value: true (both), false or nil
+      # (none), :bpm, :key, or an Array of them.
+      def self.detect_list(detect)
+        list = case detect
+               when true then DETECT
+               when false, nil then []
+               else Array(detect)
+               end
+        bad = list - DETECT
+        unless bad.empty?
+          raise ArgumentError, "detect: is true, :bpm, :key, or an Array of them (got #{bad[0].inspect})#{Form.suggest(bad[0], DETECT)}"
+        end
+        list
       end
 
       # Stretch results longer than this (seconds) read with :octave level

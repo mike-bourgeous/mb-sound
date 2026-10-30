@@ -17,6 +17,10 @@ Maintainer's decisions (2026-10-12, all four of the spike's recommendations): se
 - S3: phrases under sections, energy cues (fades, risers, drops), a backbeat model (fixes drums_808 and the half-time downbeats below), guessed section names.
 - S4: other music (tempo drift, 3/4 and 6/8, repetition-based boundaries, an annotated corpus).
 
+## The shared analysis layer (`lib/mb/sound/analysis.rb` + `analysis/`, listen-1)
+
+The listening tools share one pure-Ruby layer (backlog 2026-10 item 9, "one analysis layer feeds four wishes"): `Analysis::STFT.each_chunk` (Hann frames centered on multiples of the hop, a chunk of 256 at a time so no spectrogram is kept), `Analysis::Chroma` (`.map`, the fold of STFT bins onto pitch classes; a chromagram with a tuning estimate for keys), `Analysis::Key` (Krumhansl-Schmuckler; loops.md), and `Analysis::Spectrum` (long-term spectra and their tilt; master_effects.md, `master :match`).  `Structure::Frames` reads its 2048-point frames through `STFT.each_chunk` and folds chroma with `Chroma.map` (bit-identical features to S1's own loop, checked when moving it).
+
 ## S1: tempo, beats, bars, meter (`lib/mb/sound/structure.rb`, `structure/`)
 
 Pure Ruby + Numo (Pocketfft), no new gems, no C (features are 85% of the time and still about 120x realtime).

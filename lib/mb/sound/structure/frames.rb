@@ -106,28 +106,19 @@ module MB
         private
 
         def compute(mono)
-          n = 1 + mono.length / HOP
-          x = Numo::DFloat.zeros(mono.length + N_FFT)
-          x[(N_FFT / 2)...(N_FFT / 2 + mono.length)] = mono
-
-          win = 0.5 - 0.5 * Numo::NMath.cos(2 * Math::PI * Numo::DFloat.new(N_FFT).seq / N_FFT)
+          n = Analysis::STFT.count(mono.length, HOP)
           fb = mel_filterbank
-          cm = Numo::DFloat.hstack([chroma_map(CHROMA_RANGE), chroma_map(BASS_CHROMA_RANGE)])
+          cm = Numo::DFloat.hstack([
+            Analysis::Chroma.map(N_FFT, @sample_rate, CHROMA_RANGE),
+            Analysis::Chroma.map(N_FFT, @sample_rate, BASS_CHROMA_RANGE),
+          ])
 
           mel = Numo::DFloat.zeros(n, N_MEL)
           chroma = Numo::DFloat.zeros(n, 24)
           energy = Numo::DFloat.zeros(n)
-          mag = Numo::DFloat.zeros(CHUNK, N_FFT / 2 + 1)
 
-          0.step(n - 1, CHUNK) do |start|
-            count = [CHUNK, n - start].min
-            count.times do |j|
-              i = (start + j) * HOP
-              mag[j, true] = Numo::Pocketfft.rfft(x[i...(i + N_FFT)] * win).abs
-            end
-            m = count == CHUNK ? mag : mag[0...count, true]
+          Analysis::STFT.each_chunk(mono, n_fft: N_FFT, hop: HOP, chunk: CHUNK) do |rows, m|
             power = m**2
-            rows = start...(start + count)
             mel[rows, true] = power.dot(fb)
             chroma[rows, true] = m.dot(cm)
             energy[rows] = power.sum(axis: 1)
@@ -153,7 +144,7 @@ module MB
         end
 
         def bin_freqs
-          Numo::DFloat.new(N_FFT / 2 + 1).seq * @sample_rate / N_FFT
+          Analysis::STFT.bin_freqs(N_FFT, @sample_rate)
         end
 
         def self.hz_to_mel(f) = 2595.0 * Math.log10(1 + f / 700.0)
@@ -175,21 +166,6 @@ module MB
             end
           end
           fb
-        end
-
-        # Chroma map (bins x 12) for bins in +range+ (Hz).
-        def chroma_map(range)
-          f = bin_freqs.to_a
-          m = Numo::DFloat.zeros(f.length, 12)
-          f.each_with_index do |fr, k|
-            next unless range.cover?(fr)
-            midi = 69 + 12 * Math.log2(fr / 440.0)
-            lo = midi.floor
-            w = midi - lo
-            m[k, lo % 12] += 1 - w
-            m[k, (lo + 1) % 12] += w
-          end
-          m
         end
 
         # DCT-II matrix (N_MEL x N_MFCC).

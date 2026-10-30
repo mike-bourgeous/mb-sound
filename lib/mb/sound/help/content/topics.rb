@@ -437,10 +437,12 @@ module MB
         decaying away) keep no name tempo.  `sample.bpm`, `.beats`,
         `.bars`, `.key`, `.meta_source` and `.meta[:why]` (where each came
         from, and why); `Sample[path, detect:
-        true]` (or `.detect_tempo`) finds a missing tempo.  `loops
+        true]` (or `.detect_tempo`, `.detect_key`) finds a missing tempo
+        and key (`sample.key_analysis` shows the key's scores).  `loops
         '~/Loops/Funk'` lists a folder (headers and names only, nothing
         decoded or written), filtered by `bpm: 90..100`, `key: :Am`,
-        `beats: 8`; `list[3].sample` reads one.
+        `beats: 8`; `detect: :key` decodes files without a key and
+        detects it; `list[3].sample` reads one.
 
         `sample.follow` plays a loop in time with the session: its beats
         fill the same span at any tempo, lined up with bar 1 (`align:
