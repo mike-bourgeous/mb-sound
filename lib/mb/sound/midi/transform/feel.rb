@@ -89,7 +89,7 @@ module MB
           private
 
           def tail_seconds
-            @grid / transport.whole_notes_per_second
+            transport.seconds_of(@grid)
           end
 
           def map_on(e)
@@ -110,7 +110,7 @@ module MB
             target = Sequence::Feel.quantize_step(timeline_at(time), @grid, direction: :next)
             off = time + (stream_time_at(target) - time) * amount
             start = on_time + delay
-            off = MB::M.max(off, start + @grid / transport.whole_notes_per_second) if amount == 1
+            off = MB::M.max(off, start + transport.seconds_of(@grid)) if amount == 1
             MB::M.max(off, time)
           end
 
@@ -146,7 +146,7 @@ module MB
           private
 
           def tail_seconds
-            @template.grid * 2 / transport.whole_notes_per_second
+            transport.seconds_of(@template.grid * 2)
           end
 
           def map_on(e)
@@ -178,7 +178,7 @@ module MB
           private
 
           def tail_seconds
-            @grid * 2 / transport.whole_notes_per_second
+            transport.seconds_of(@grid * 2)
           end
 
           def map_on(e)

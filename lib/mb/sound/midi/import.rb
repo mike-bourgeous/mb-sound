@@ -486,7 +486,7 @@ module MB
           wnps = (transport || Sequence.current_transport).whole_notes_per_second
           map = tempo_map
           t0 = map.seconds(start)
-          ->(t) { (map.seconds(t) - t0) * wnps }
+          ->(t) { Sequence::TempoMap.whole_notes_for(map.seconds(t) - t0, wnps) }
         end
 
         # A performed clip's length: whole bars of the session meter.

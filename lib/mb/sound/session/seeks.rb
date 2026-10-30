@@ -239,7 +239,7 @@ module MB
         def frames_before_seek(count, per_sample)
           c = @changes.find { |x| timeline_change?(x) || carry_change?(x) } or return nil
           from = @transport.position
-          return nil unless c.time > from && c.time < from + count * per_sample
+          return nil unless c.time > from && c.time < Sequence::Transport.position_at(from, count, per_sample)
           k = ((c.time - from) / per_sample).ceil
           k > 0 && k < count ? k : nil
         end

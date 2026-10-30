@@ -65,7 +65,7 @@ module MB
                           [time.range.begin.abs, time.range.end.abs].max
                         end
 
-          whole_notes && whole_notes.to_f * 240.0 / SLOWEST_BPM
+          whole_notes && TempoMap.seconds_at(whole_notes.to_f, SLOWEST_BPM)
         end
 
         # The Duration this node's output is based on.
@@ -146,7 +146,8 @@ module MB
             @value_wnps = wnps
             @value_duration = @duration
             @value_mode = @mode
-            @value = @mode == :hz ? (wnps / @duration.whole_notes).to_f : (@duration.whole_notes / wnps).to_f
+            seconds = TempoMap.seconds_for(@duration.whole_notes, wnps)
+            @value = @mode == :hz ? (1 / seconds).to_f : seconds.to_f
           end
 
           @value

@@ -400,7 +400,7 @@ module MB
             # launch-aligned loops keep their anchor, and non-looping clips
             # count from the chain's start
             if resync && c.feeding
-              at = c.skip ? from + c.skip * per_sample : from
+              at = c.skip ? Sequence::Transport.position_at(from, c.skip, per_sample) : from
               c.timeline_nodes.each { |n| n.start_at(at, origin: c.start, launch: c.launch, transport: @transport) }
             end
 
@@ -451,8 +451,8 @@ module MB
             return if chain.started || (chain.start >= to && @players.any?)
 
             # While idle the timeline doesn't advance, so start right away
-            offset = chain.start >= to ? 0 : MB::M.max(((chain.start - from) / per_sample).floor, 0)
-            start = from + offset * per_sample
+            offset = chain.start >= to ? 0 : MB::M.max(Sequence::Transport.frame_at(chain.start, from, per_sample), 0)
+            start = Sequence::Transport.position_at(from, offset, per_sample)
             launch = chain.start >= to ? start : MB::M.max(chain.start, start)
             start_master_chain(chain, start, launch: launch)
             chain.skip = offset > 0 ? offset : nil

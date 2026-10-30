@@ -48,7 +48,7 @@ module MB
 
       # Whole notes per second at this tempo (exact).
       def whole_notes_per_second
-        @exact / 240
+        Sequence::TempoMap.whole_notes_per_second(@exact)
       end
 
       # The ratio of this tempo to +other+ (a Tempo or a number of BPM), as

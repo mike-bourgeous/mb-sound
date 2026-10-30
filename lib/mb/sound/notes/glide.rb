@@ -361,7 +361,7 @@ module MB
                  when Sequence::Duration
                    src = @stream.source
                    tr = src.respond_to?(:transport) ? src.transport : Sequence.current_transport
-                   hint.whole_notes / tr.whole_notes_per_second
+                   tr.seconds_of(hint.whole_notes)
                  when Numeric then hint
                  else 0
                  end

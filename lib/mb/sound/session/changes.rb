@@ -251,7 +251,7 @@ module MB
           # #process_buffer and Seeks); later changes wait behind them
           until @changes.empty? || @changes.first.time >= to || timeline_change?(@changes.first)
             c = @changes.shift
-            idx = MB::M.max(((c.time - from) / per_sample).floor, 0)
+            idx = MB::M.max(Sequence::Transport.frame_at(c.time, from, per_sample), 0)
             commit_change(c, land_pos: MB::M.max(c.time, from), land_frame: @frame + idx, commits: stamp(from, frame: @frame), immediate: false)
           end
         end
@@ -301,7 +301,7 @@ module MB
           late = Thread.current[:mb_sound_schedule_deadline]
           return unless late && late[0].equal?(self) && time && time < pos
 
-          ms = ((pos - time) / @transport.whole_notes_per_second * 1000).to_f.round
+          ms = (@transport.seconds_of(pos - time) * 1000).to_f.round
           MB::Sound.live_error(LateChange.new(
             "#{kind} #{subject.inspect} for #{Stamp.at(time, @transport)} would land #{ms} ms late: the scheduled block for #{late[1]} " \
             "was still running at its time (lookahead #{MB::M.sigfigs((@scheduler.lookahead_whole_notes / @transport.bar_length).to_f, 3)} bars; " \

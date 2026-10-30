@@ -113,7 +113,7 @@ module MB
           private
 
           def tail_seconds
-            @rate * (@gate + 1) / transport.whole_notes_per_second
+            transport.seconds_of(@rate * (@gate + 1))
           end
 
           # The step length (whole notes) at timeline position +wn+: the
@@ -291,7 +291,7 @@ module MB
             offset = @offsets && @offsets[@index % @offsets.length]
             following = step_wn == @immediate ? hybrid_next(step_wn) : step_wn + (@rate_param ? rate_at(step_wn) : @rate)
             length = (stream_time_at(swung(following)) - step_time)
-            length = @rate / transport.whole_notes_per_second if length <= 0
+            length = transport.seconds_of(@rate) if length <= 0
             off_time = step_time + length * @gate
 
             chosen.each do |note, velocity, channel|

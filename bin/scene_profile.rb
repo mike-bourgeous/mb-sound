@@ -177,7 +177,7 @@ module SceneProfile
       b[:alloc] = GC.stat(:total_allocated_objects) - b[:a0]
       b[:yjit] = SceneProfile.ydelta(b[:y0], SceneProfile.yjit)
       b[:jit] = SceneProfile.jit_log_since(b[:w0]) if b[:yjit][:compile_time_ns].to_i > 1_000_000
-      b[:slack] = ((time - @transport.position) / @transport.whole_notes_per_second).to_f
+      b[:slack] = @transport.seconds_of(time - @transport.position).to_f
     end
   end
 

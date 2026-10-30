@@ -236,7 +236,7 @@ module MB
           reader = out.reader
 
           step = 1/4r # seconds per read
-          limit = (clip.length / wnps) + 600
+          limit = TempoMap.seconds_for(clip.length, wnps) + 600
           t = 0r
           open = Hash.new { |h, k| h[k] = [] }
           notes = []
@@ -248,14 +248,14 @@ module MB
               when :note_on then open[[e.channel, e.note]] << e
               when :note_off
                 on = open[[e.channel, e.note]].shift
-                notes << [on.time * wnps, (e.time - on.time) * wnps, on.note, on.velocity] if on
+                notes << [TempoMap.whole_notes_for(on.time, wnps), TempoMap.whole_notes_for(e.time - on.time, wnps), on.note, on.velocity] if on
               end
             end
             t += step
           end
-          open.each_value { |list| list.each { |on| notes << [on.time * wnps, (last - on.time) * wnps, on.note, on.velocity] } }
+          open.each_value { |list| list.each { |on| notes << [TempoMap.whole_notes_for(on.time, wnps), TempoMap.whole_notes_for(last - on.time, wnps), on.note, on.velocity] } }
 
-          [notes.sort_by.with_index { |n, i| [n[0], i] }, MB::M.max(last * wnps - clip.length, 0r)]
+          [notes.sort_by.with_index { |n, i| [n[0], i] }, MB::M.max(TempoMap.whole_notes_for(last, wnps) - clip.length, 0r)]
         end
 
         DERIVATIONS_FEEL = [:humanize, :quantize, :swing, :chance, :maybe, :every, :bake].freeze

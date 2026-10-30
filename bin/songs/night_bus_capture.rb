@@ -64,7 +64,7 @@ module MB::Sound
   # velocity 0..127] notes, loosened by up to 12 ms (seeded), and a CC 74
   # sweep.  Times are seconds from the start of bar 1 at 126 BPM.
   def self.night_bus_hands(bpm: 126)
-    bar = 240.0 / bpm
+    bar = MB::Sound::Sequence::TempoMap.seconds_at(1.0, bpm)
     step = bar / 16
     rnd = Random.new(7)
     riff = [

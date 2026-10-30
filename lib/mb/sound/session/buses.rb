@@ -963,7 +963,7 @@ module MB
             b.quiet_from = frame + s
             # Clips and tempo-synced nodes in the chain catch up with the
             # timeline, as players do when they wake
-            pos = from + s * per_sample
+            pos = Sequence::Transport.position_at(from, s, per_sample)
             b.chains.each { |c| c.timeline_nodes.each { |n| n.start_at(pos, origin: c.start, launch: c.launch, transport: @transport) } if c.started }
           end
 
@@ -976,7 +976,7 @@ module MB
           # Keep clips in the chains on the timeline, which pauses while idle
           resync = (playing && !b.playing)
           b.playing = playing
-          pos0 = s == 0 ? from : from + s * per_sample # (no Rationals for the usual whole span)
+          pos0 = s == 0 ? from : Sequence::Transport.position_at(from, s, per_sample) # (no Rationals for the usual whole span)
           b.chains.each do |c|
             c.timeline_nodes.each { |n| n.start_at(pos0, origin: c.start, launch: c.launch, transport: @transport) } if resync && c.started && c.feeding
             c.timeline_nodes.each(&:pause_timeline) unless playing
@@ -1173,8 +1173,8 @@ module MB
           end
 
           # (the span's own ends where the segment has them: no Rationals)
-          seg_from = p0 == 0 ? from : from + p0 * per_sample
-          seg_to = to && p1 == @bus_span_count ? to : from + p1 * per_sample
+          seg_from = p0 == 0 ? from : Sequence::Transport.position_at(from, p0, per_sample)
+          seg_to = to && p1 == @bus_span_count ? to : Sequence::Transport.position_at(from, p1, per_sample)
           activate_master(chains, seg_from, seg_to, per_sample, rate)
           # Shared branches catch up with frames the chains didn't read
           # (asleep, or not started yet) before the segment

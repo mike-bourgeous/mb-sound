@@ -8,7 +8,7 @@ module MB
         module_function
 
         def snapshot(t, seq: (t * 30).round + 1)
-          pos = (t * 128 / 240.0).rationalize(1/96r) + 16
+          pos = Sequence::TempoMap.whole_notes_at(t.to_f, 128).rationalize(1/96r) + 16
           stamp = Session::Stamp.new(pos: pos)
           wobble = Math.sin(t * 7.1) * 2.5
           phase = Numo::SFloat.new(Feed::SCOPE_LENGTH).seq * (2 * Math::PI * 110 / 48000) + 2 * Math::PI * t

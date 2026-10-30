@@ -113,7 +113,7 @@ module MB
 
         # Whole notes per sample at the current tempo, as a Rational.
         def whole_notes_per_sample
-          transport.whole_notes_per_second / @sample_rate.to_r
+          transport.whole_notes_per_frame(@sample_rate)
         end
 
         # The length counts from this node's first sample, not the graph's

@@ -113,11 +113,11 @@ module MB
             else
               base_frame = @session.frame
               base_pos = @session.transport.position
-              per_sample = @session.transport.whole_notes_per_second.to_r / @sample_rate.to_r
+              per_sample = @session.transport.whole_notes_per_frame(@sample_rate)
             end
             return base_frame if per_sample <= 0
 
-            base_frame + ((pos - base_pos) / per_sample).floor
+            base_frame + Sequence::Transport.frame_at(pos, base_pos, per_sample)
           end
 
           # Segments for the turns of this knob queued in the Session up to

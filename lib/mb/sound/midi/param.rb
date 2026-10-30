@@ -477,7 +477,7 @@ module MB
           # Ruby: "5.bars" (0.1 Hz at 120 BPM), else "3.beats".
           def self.tempo_lfo_for(hz)
             t = Sequence.current_transport
-            whole = t.whole_notes_per_second.to_f / hz
+            whole = t.whole_notes_of(1.0) / hz
             bars = whole / t.bar_length.to_f
             return (bars.round == 1 ? '1.bar' : "#{bars.round}.bars") if bars >= 0.75
             beats = MB::M.max((whole * 4).round, 1)

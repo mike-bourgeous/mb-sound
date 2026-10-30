@@ -54,6 +54,7 @@ module MB
           @fills = FillMap.new
           @keys = [KeyEntry.new(pos: -Float::INFINITY, key: MusicalKey.default)].freeze
           @tempo_map = nil
+          @wnps = @wnps_bpm = @per_frame_cache = nil # (see #whole_notes_per_second, #whole_notes_per_frame)
           self.bpm = bpm
           self.bar_length = bar_length
         end
@@ -233,14 +234,63 @@ module MB
           # allocate; any change to @bpm is seen
           unless @wnps && @wnps_bpm.eql?(@bpm)
             @wnps_bpm = @bpm
-            @wnps = @bpm.to_r / 240
+            @wnps = TempoMap.whole_notes_per_second(@bpm)
           end
           @wnps
         end
 
-        # Converts a number of whole notes to seconds at the current tempo.
+        # Converts a number of whole notes to Float seconds at the current
+        # tempo.
         def seconds(whole_notes)
           whole_notes.to_f / whole_notes_per_second
+        end
+
+        # The time math at the current (cell) tempo, for everything outside
+        # Transport and TempoMap (design/notes/tempo_sync.md, "Time math").
+        # Each keeps its arguments' types: exact for Rationals, and for
+        # Floats the same operations in the same order as the inline copies
+        # they replaced, so results are bit for bit the same.
+
+        # Seconds that +whole_notes+ last at the current tempo (exact for a
+        # Rational; see #seconds for Float seconds of any number).
+        def seconds_of(whole_notes)
+          whole_notes / whole_notes_per_second
+        end
+
+        # Whole notes that pass in +seconds+ at the current tempo.
+        def whole_notes_of(seconds)
+          seconds * whole_notes_per_second
+        end
+
+        # Frames at +rate+ (samples per second) that +whole_notes+ last at
+        # the current tempo (unrounded; pass a Rational rate for an exact
+        # result).
+        def frames_of(whole_notes, rate)
+          whole_notes / whole_notes_per_second * rate
+        end
+
+        # Whole notes per frame at +rate+ at the current tempo (exact; kept
+        # until the tempo or the rate changes, so readers every buffer don't
+        # allocate).
+        def whole_notes_per_frame(rate)
+          wnps = whole_notes_per_second
+          c = @per_frame_cache
+          return c[2] if c && c[0].equal?(wnps) && c[1] == rate
+          (@per_frame_cache = [wnps, rate, wnps / rate.to_r].freeze)[2]
+        end
+
+        # The timeline position +offset+ frames after +from+, at
+        # +per_frame+ whole notes per frame (see #whole_notes_per_frame):
+        # within one span of constant tempo, as Session renders.
+        def self.position_at(from, offset, per_frame)
+          from + offset * per_frame
+        end
+
+        # The frame offset after +from+ (floored) holding position +pos+, at
+        # +per_frame+ whole notes per frame: the inverse of .position_at
+        # (an edge on an exact frame lands on that frame).
+        def self.frame_at(pos, from, per_frame)
+          ((pos - from) / per_frame).floor
         end
 
         # Moves the timeline forward by +whole_notes+.  Called by Session.

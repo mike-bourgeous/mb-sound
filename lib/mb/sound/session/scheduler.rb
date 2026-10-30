@@ -263,7 +263,7 @@ module MB
           return c[3] if c && c[0] == bar && c[1] == slow && c[2] == wnps
 
           min = bar * MIN_LOOKAHEAD
-          wanted = (slow * SAFETY_FACTOR + SAFETY_SECONDS) * wnps
+          wanted = @transport.whole_notes_of(slow * SAFETY_FACTOR + SAFETY_SECONDS)
           value = MB::M.clamp(wanted.to_r, min, bar * MAX_LOOKAHEAD)
           @lookahead_cache = [bar, slow, wnps, value]
           value
@@ -596,7 +596,7 @@ module MB
         # Notes that the block for +entry+ (at +time+) finished after its
         # time (the timeline at +pos+).  Returns a message for LateBlock.
         def note_late(entry, time, pos, seconds)
-          late = ((pos - time) / @transport.whole_notes_per_second).to_f
+          late = @transport.seconds_of(pos - time).to_f
           @mutex.synchronize {
             @late << { description: entry.description, time: time, late: late, seconds: seconds }
             @late.shift while @late.length > RECENT_BLOCKS

@@ -169,7 +169,7 @@ module MB
       # frame (period).
       def base_step(rf, ctx)
         case @kind
-        when :tempo then @exact / 240 / ctx.clock_rate
+        when :tempo then Sequence::TempoMap.whole_notes_per_second(@exact) / ctx.clock_rate
         when :period then 1 / (@exact * ctx.clock_rate)
         else @exact * ctx.per_sample_at(rf)
         end
@@ -349,7 +349,7 @@ module MB
         end
 
         def per_sample_at(_rf)
-          transport.whole_notes_per_second / @clock_rate.to_r
+          transport.whole_notes_per_frame(@clock_rate)
         end
 
         def odometer_at(rf)

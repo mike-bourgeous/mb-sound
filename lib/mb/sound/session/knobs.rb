@@ -423,7 +423,7 @@ module MB
         # #smooth_gesture).
         def turn_keys(k, keys, curve, point, start_time)
           g = @render_lock.synchronize { @knob_gestures[k.name] }
-          per_sample = g&.per_sample || (@transport.whole_notes_per_second / clock_rate)
+          per_sample = g&.per_sample || @transport.whole_notes_per_frame(clock_rate)
           gesture = Gesture.from_hash(keys, curve: curve, per_sample: per_sample, rate: clock_rate, bar_length: @transport.bar_length)
           gesture.keys.each { |_, v| warn_clamp(k, v) }
           data = { value: gesture.keys.last[1], keys: gesture.keys.length }
@@ -602,7 +602,7 @@ module MB
             unless g
               mode, before = k.state_at(f)
               g = @knob_gestures[k.name] = KnobGesture.new(name: k.name, frame: f, pos: @transport.position, before: KnobState.new(mode: mode, value: before), steps: [],
-                                                           per_sample: @transport.whole_notes_per_second / clock_rate, fitted: nil)
+                                                           per_sample: @transport.whole_notes_per_frame(clock_rate), fitted: nil)
             end
             off = f - g.frame
             g.steps.last&.first == off ? (g.steps[-1] = [off, v]) : (g.steps << [off, v])

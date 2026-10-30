@@ -200,7 +200,7 @@ module MB
 
         # The tempo point for the current tempo from the current run frame.
         def current_tempo_point
-          ps = @transport.whole_notes_per_second / clock_rate.to_r
+          ps = @transport.whole_notes_per_frame(clock_rate)
           tp = @tempo_live
           return tp if tp && tp[2] == ps && tp[0] <= @run_frame
           [@run_frame, @odometer, ps]
@@ -212,7 +212,7 @@ module MB
           span = Session.span
           if span && span.session.equal?(self)
             off = rf.to_r - span.run
-            [span.frame + off.floor, span.pos + off * span.per_sample]
+            [span.frame + off.floor, Sequence::Transport.position_at(span.pos, off, span.per_sample)]
           else
             [@frame, @transport.position]
           end

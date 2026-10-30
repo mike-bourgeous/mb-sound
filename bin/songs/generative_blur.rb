@@ -173,7 +173,7 @@ module MB::Sound
         "cloud is :dense, :sparse, or grains a second from #{GENERATIVE_BLUR_CLOUD_RATES.begin} to #{GENERATIVE_BLUR_CLOUD_RATES.end} (got #{rate.inspect})"
     end
 
-    whole = 240.0 / GENERATIVE_BLUR_BPM
+    whole = MB::Sound::Sequence::TempoMap.seconds_at(1.0, GENERATIVE_BLUR_BPM)
     division = [128, 256, 512].find { |n| rate / (n / whole) <= 0.9 } || 512
     size = [0.35, 14.0 / rate].min
     overlap = [rate * size, 1.0].max

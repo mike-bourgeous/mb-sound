@@ -288,7 +288,7 @@ module MB
             reader.next(Rational(count, rate)).each { |e|
               next unless e.is_a?(MIDI::Event)
               off = ((e.time - start) * rate).floor.clamp(0, count - 1)
-              st = Stamped.new(frame: frame + off, pos: from + off * per_sample, epoch: epoch, event: e.at(Rational(frame + off, rate)))
+              st = Stamped.new(frame: frame + off, pos: Sequence::Transport.position_at(from, off, per_sample), epoch: epoch, event: e.at(Rational(frame + off, rate)))
               (@span_sources ||= {}.compare_by_identity)[st] = label unless label == :input
               out << st
             }
@@ -352,17 +352,17 @@ module MB
         # Recorded events due in this span: the epoch's events before its
         # end (and any from earlier epochs left behind, at its start).
         def replay_events(frame, count, from, per_sample, epoch)
-          to = from + count * per_sample
+          to = Sequence::Transport.position_at(from, count, per_sample)
           out = []
           while @replay_index < @replay.length
             ep, pos, bytes = @replay[@replay_index]
             break if ep > epoch || (ep == epoch && pos >= to)
             @replay_index += 1
 
-            off = ep == epoch ? ((pos - from) / per_sample).floor.clamp(0, count - 1) : 0
+            off = ep == epoch ? Sequence::Transport.frame_at(pos, from, per_sample).clamp(0, count - 1) : 0
             MIDI::Event.parse_all(bytes).each do |e|
               e = @bends.process(e)
-              out << Stamped.new(frame: frame + off, pos: from + off * per_sample, epoch: epoch, event: e.at(Rational(frame + off, @sample_rate)))
+              out << Stamped.new(frame: frame + off, pos: Sequence::Transport.position_at(from, off, per_sample), epoch: epoch, event: e.at(Rational(frame + off, @sample_rate)))
             end
           end
           out

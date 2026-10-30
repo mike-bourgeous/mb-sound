@@ -1141,7 +1141,7 @@ module MB
             # count land just above it, e.g. 204.00000000000003, so ceil
             # rendered one frame past the end bar at some buffer sizes;
             # fuzz-fixes-1's Session fuzzer)
-            left = MB::M.min(left, to_go <= 0 ? 0 : (to_go / transport.whole_notes_per_second * Rational(rate)).ceil)
+            left = MB::M.min(left, to_go <= 0 ? 0 : transport.frames_of(to_go, Rational(rate)).ceil)
           end
           left
         }

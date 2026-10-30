@@ -121,8 +121,7 @@ module MB
         loop do
           pos = position(session, from, start)
           if pos
-            per_sample = transport.whole_notes_per_second / rate.to_r
-            k = ((pos - transport.position) / per_sample).floor
+            k = Sequence::Transport.frame_at(pos, transport.position, transport.whole_notes_per_frame(rate))
             if k < 0
               raise "render(from: #{from.inspect}): the timeline passed #{session.stamp(pos)} before it was known " \
                 "(at #{session.stamp(transport.position)})"

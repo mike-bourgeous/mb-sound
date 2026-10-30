@@ -285,8 +285,7 @@ module MB
 
           name, start = @pending
           t = @session.transport
-          per_sample = t.whole_notes_per_second / @rate
-          k = ((start - (pos || t.position)) / per_sample).floor
+          k = Sequence::Transport.frame_at(start, pos || t.position, t.whole_notes_per_frame(@rate))
           return if k >= count # (not in this span yet)
 
           @pending = nil

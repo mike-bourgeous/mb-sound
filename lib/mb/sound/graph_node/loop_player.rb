@@ -133,7 +133,7 @@ module MB
         # nothing on the render thread.  Returns self.
         def prepare(*bpms)
           bpms = [transport.bpm] if bpms.empty?
-          bpms.flatten.each { |b| stretched(ratio_for(b.to_r / 240)) }
+          bpms.flatten.each { |b| stretched(ratio_for(Sequence::TempoMap.whole_notes_per_second(b))) }
           self
         end
 
@@ -144,7 +144,7 @@ module MB
 
           @pos ||= 0r
           wnps = transport.whole_notes_per_second
-          step = wnps / @sample_rate.to_r
+          step = transport.whole_notes_per_frame(@sample_rate)
           base = ((@pos - @zero) % @whole_notes) / @whole_notes
           phase = Numo::DFloat.new(count).seq * (step / @whole_notes).to_f + base.to_f
           phase -= phase.floor
@@ -180,9 +180,9 @@ module MB
         # The stretch ratio for a tempo of +wnps+ whole notes per second,
         # the tempo rounded to BPM_STEP.
         def ratio_for(wnps)
-          bpm = ((wnps * 240) / BPM_STEP).round * BPM_STEP
+          bpm = (Sequence::TempoMap.bpm_of(wnps) / BPM_STEP).round * BPM_STEP
           bpm = BPM_STEP if bpm <= 0
-          (@whole_notes * 240 / bpm).to_f / @loop_sample.seconds
+          Sequence::TempoMap.seconds_at(@whole_notes, bpm).to_f / @loop_sample.seconds
         end
 
         # The channel's data stretched by +ratio+ (cached).
