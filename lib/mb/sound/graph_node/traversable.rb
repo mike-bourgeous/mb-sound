@@ -389,6 +389,13 @@ module MB
             digraph << "  #{node.__id__.to_s.inspect} [label=#{desc.inspect}]\n"
           end
 
+          # Drawings of nodes' insides (Reverb with show_internals: true)
+          nodes.each do |node|
+            next unless node.respond_to?(:graphviz_internals) && !boxes[node]
+            inside = node.graphviz_internals(node.__id__.to_s)
+            digraph << inside if inside
+          end
+
           # Add one node per group of per-channel nodes
           boxes.values.uniq(&:__id__).each do |g|
             digraph << "  #{id.(g.members[0]).inspect} [label=#{g.label.inspect}, color=\"#2288aa\"];\n"
