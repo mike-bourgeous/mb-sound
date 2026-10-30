@@ -39,6 +39,7 @@ RSpec.describe(MB::Sound::Session::Context, :aggregate_failures) do
     mb_sound_quiet_seconds: 'DelayMethods.quiet_seconds: no deprecation warning',
     mb_sound_quiet_levels: 'Decibels.quietly: no above-full-scale warnings',
     mb_sound_mastering: 'Mastering.building: trims and captured presets',
+    mb_sound_knob_landings: 'Arrangement::TrackKnobs.deferring: knob values an instrument change turns at its launch point',
     mb_param_peek: 'MIDI::Param.peek: reads that decide nothing',
     scene_profile: 'bin/scene_profile.rb measurements',
   }.freeze

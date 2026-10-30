@@ -138,11 +138,7 @@ module MB
         # (see Arrangement#change_instrument, which turns them at the
         # track's launch point).
         def deferring(list = {})
-          old = Thread.current[:mb_sound_knob_landings]
-          Thread.current[:mb_sound_knob_landings] = list
-          yield list
-        ensure
-          Thread.current[:mb_sound_knob_landings] = old
+          Internal.with_local(:mb_sound_knob_landings, list) { yield list }
         end
 
         # The values TrackKnobs gave its knobs ({ knob => value }, weak), so

@@ -238,7 +238,7 @@ module MB
           origin = session.transport.bar_position(at)
           grid = transport if @tracker == :transport
           sections.zip(marker_names(prefix: prefix)).map { |s, name|
-            pos = grid ? grid.bar_position(s.first_bar) : Rational((s.seconds * @tempo / 240 * 3840).round, 3840)
+            pos = grid ? grid.bar_position(s.first_bar) : Rational((Sequence::TempoMap.whole_notes_at(s.seconds, @tempo) * 3840).round, 3840)
             table.set(name, kind: :analysis, pos: origin + pos)
           }
         end
