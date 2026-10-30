@@ -40,11 +40,28 @@ RSpec.describe('session fuzzing') do
     songs.each { |code| expect { Prism.parse(code).errors.then { |e| raise e.map(&:message).join(', ') unless e.empty? } }.not_to raise_error }
   end
 
+  it 'builds a command (or skips the step) from every entry of the append-only COMMANDS list' do
+    expect(SessionFuzz::COMMANDS.length).to be >= 15
+    rng = Random.new(3)
+    SessionFuzz::COMMANDS.each_with_index do |cmd, i|
+      [true, false].each do |full|
+        step = SessionFuzz::Step.new(rng: rng, t: :t1, on: ', on: :now', scenes: %i[s1 s2], swappable: full ? %i[t1] : [],
+                                     instruments: full ? %i[t2] : nil, knob: full, clip_for: ->(_) { 'seq(C4).n8.loop' }, bgs: 0)
+        code = cmd.call(step)
+        next expect(full).to(eq(false), "command #{i} skipped a step that has everything") if code.nil?
+
+        expect(code).to be_a(String)
+        expect(Prism.parse(code).errors).to eq([]), "command #{i}: #{code}"
+      end
+    end
+  end
+
   # The seeds that found the followed tempo LFO's end bar (omnibus16), as
-  # generated today (their songs gain later generation steps' lines)
+  # generated with the 15 commands of their day (their songs gain later
+  # generation steps' lines; SessionFuzz::COMMANDS is append-only)
   it 'renders seeds 52, 82, and 127 to the same end bar at 367 and 800 frames', render_budget: { seconds: 120, reason: 'three random songs at two buffer sizes' } do
     [52, 82, 127].each do |seed|
-      song = SessionFuzz.generate(Random.new(seed))
+      song = SessionFuzz.generate(Random.new(seed), commands: 15)
       expect(song.code).to match(/bpm \d+\.beats?\.lfo|bpm \d\.bars\.lfo/), "seed #{seed} no longer draws a tempo LFO"
       expect(SessionFuzz.check(:buffer_size, song)).to be_nil, "seed #{seed}"
     end

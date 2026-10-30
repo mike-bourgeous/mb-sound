@@ -202,12 +202,14 @@ RSpec.describe(MemcheckSelection) do
   end
 
   describe '.rakefile_section' do
-    it 'covers the memcheck section to the end of the file' do
+    it 'covers the memcheck section to its end marker' do
       content = File.read(MemcheckSelection.path('Rakefile'))
       range = MemcheckSelection.rakefile_section(content)
       lines = content.lines
       expect(lines[range.first - 1]).to start_with('# Valgrind memcheck')
-      expect(range.last).to eq(lines.length)
+      expect(lines[range.last]).to start_with('# (end of the memcheck section') # (the line after the range)
+      expect(range).to cover(lines.index { |l| l.include?("namespace :memcheck do") } + 1)
+      expect(range).not_to cover(lines.index { |l| l.include?('namespace :golden do') } + 1)
       expect(range).not_to cover(lines.index { |l| l.include?("ExtensionTask.new 'mb-fast_sound'") } + 1)
     end
   end

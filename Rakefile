@@ -426,6 +426,10 @@ namespace :memcheck do
   end
 end
 
+# (end of the memcheck section: changes above this line, from "# Valgrind
+# memcheck", make memcheck:changed run the full list; see
+# MemcheckSelection.rakefile_section)
+
 # The specs of the gems in gems/ (mb-term: the terminal UI's generic
 # layers), each in its own rspec process from its own directory, so they run
 # without mb-sound loaded.  Returns true if they all pass.
@@ -437,21 +441,26 @@ def run_gem_specs
   end
 end
 
+desc 'The suite in one rspec process (bundle exec rspec; the default task), after compiling'
+task spec: :compile do
+  sh 'bundle', 'exec', 'rspec'
+end
+
 namespace :spec do
   desc "The specs of the gems in gems/ (mb-term), each in its own process without mb-sound (spec:parallel, spec:quick, and spec:full run them too)"
-  task :gems do
+  task gems: :compile do
     abort 'spec:gems: failures' unless run_gem_specs
   end
 
   desc 'Run the specs in PARALLEL rspec processes (default: half the CPUs, capped by available memory), then list the slowest files and examples (SPECS="spec/lib ..." for a subset; the gems/ specs too without SPECS)'
-  task :parallel do
+  task parallel: :compile do
     require_relative 'spec/parallel_specs'
     ok = ParallelSpecs.run_default(patterns: ENV['SPECS'].to_s.split)
     abort 'spec:parallel: failures' unless ok & (ENV['SPECS'].to_s.empty? ? run_gem_specs : true) # (& runs the gems' specs either way)
   end
 
   desc 'The everyday subset: the 95% covering set, ALWAYS guards, and the specs of units changed since master-ai (spec/quick_selection.rb; QUICK_DRY=1 lists, BASE=ref)'
-  task :quick do
+  task quick: :compile do
     require_relative 'spec/parallel_specs'
     require_relative 'spec/quick_selection'
     sel = QuickSelection.select(base: ENV['BASE'])
@@ -464,7 +473,7 @@ namespace :spec do
 
   namespace :quick do
     desc 'Record the covering set for spec:quick (spec/quick_map.json): the suite once with per-file coverage (+50% time), then a greedy set cover'
-    task :map do
+    task map: :compile do
       require 'tmpdir'
       require_relative 'spec/parallel_specs'
       require_relative 'spec/quick_selection'
@@ -505,6 +514,22 @@ namespace :spec do
   end
 end
 
+# The merge train (spec/merge_gate.rb; the maintainer's choice, 2026-10-30):
+# a short gate per merge, one full run per batch of merges.
+namespace :merge do
+  desc 'Per-merge gate: compile, the specs of units changed on either side of the merge (from the merge-base of its parents), ALWAYS, guards, gem specs (no args: the merge in progress or HEAD; [sha]: that merge commit; [ours,theirs]: two sides, working tree as the result; MERGE_DRY=1 lists)'
+  task :gate, [:merge, :theirs] => :compile do |_, args|
+    require_relative 'spec/merge_gate'
+    abort 'merge:gate: FAILED' unless MergeGate.run(merge: args[:merge], theirs: args[:theirs])
+  end
+
+  desc 'Batch end, once per batch of merges: spec:full (SLOW=1), smoke, golden:check, and a fuzz soak (SOAK_SESSION=48, SOAK_RELATION=400 seeds, about a minute; SOAK_BASE=n; BATCH_STEPS=suite,smoke,golden,soak; OUT=dir)'
+  task batch: :compile do
+    require_relative 'spec/merge_gate'
+    abort 'merge:batch: FAILED' unless MergeGate.batch
+  end
+end
+
 # The plan layer's full block-size sweep (user decision 2026-10-10: not run
 # before every merge, only for branches that change the plan layer itself).
 # The default suite runs plan comparisons at block sizes 1, 7, 128, 800, and
@@ -528,7 +553,7 @@ PLAN_FULL_PATHS = %w[
 
 namespace :plan do
   desc 'Run the plan specs with the full 21-size block sweep (MB_SOUND_PLAN_FULL=1; ~1 min)'
-  task :full do
+  task full: :compile do
     sh({ 'MB_SOUND_PLAN_FULL' => '1' }, 'bundle', 'exec', 'rspec', *PLAN_FULL_SPECS)
   end
 
@@ -569,7 +594,7 @@ namespace :golden do
   end
 
   desc 'Render the golden set (or the named pieces) and compare with the approved fingerprints; failures get a Bench set'
-  task :check do |_, args|
+  task check: :compile do |_, args|
     set, pieces = golden_pieces.(args.extras)
     results = MB::Sound::SoundGuard::Runner.new(set).check(pieces, run_dir: ENV['RUN'])
     bad = results.reject { |r| r.status == :pass }
@@ -577,7 +602,7 @@ namespace :golden do
   end
 
   desc 'Render (or take from RUN=dir) and approve the named golden pieces (all when none named), writing their fingerprints'
-  task :approve do |_, args|
+  task approve: :compile do |_, args|
     set, pieces = golden_pieces.(args.extras)
     results = MB::Sound::SoundGuard::Runner.new(set).approve(pieces, run_dir: ENV['RUN'])
     abort 'golden:approve: some pieces failed to render' unless results.all?(&:ok?)

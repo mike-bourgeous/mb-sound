@@ -94,7 +94,9 @@ module SessionFuzz
 
   def pick(rng, list) = list[rng.rand(list.length)]
 
-  def generate(rng)
+  # +commands+: how many of COMMANDS the steps draw from (a seed found
+  # when the list was shorter makes its old song with the old length).
+  def generate(rng, commands: COMMANDS.length)
     bpm = pick(rng, TEMPOS)
     header = ["bpm #{bpm}"]
     header << 'meter 3, 4' if rng.rand < 0.15
@@ -142,54 +144,14 @@ module SessionFuzz
     beats = header.any? { |l| l.start_with?('meter 3') } ? 3 : 4
     lines << "at_bar(1) { go :#{scenes.first}, on: :now }"
     names = tracks.keys
-    bgs = 0
+    step = Step.new(rng: rng, scenes: scenes, swappable: swappable, instruments: instruments, knob: knob, clip_for: clip_for, bgs: 0)
     rng.rand(1..5).times do
       bar = rng.rand(1..bars)
       beat = rng.rand(1..beats)
       beat = 2 if bar == 1 && beat == 1 # (after the first scene's launch)
-      on = rng.rand < 0.5 ? ', on: :now' : ''
-      t = pick(rng, names)
-      cmd =
-        case rng.rand(15)
-        when 0 then "go :#{pick(rng, scenes)}#{on}"
-        when 1, 2
-          next if swappable.empty?
-
-          t = pick(rng, swappable)
-          "swap :#{t}, #{clip_for.(t)}#{on}"
-        when 3 then "stop :#{t}#{[', fade: 1/4r', ', ring: true', ''][rng.rand(3)]}"
-        when 4 then "mute :#{t}#{[', fade: 1/4r', ''][rng.rand(2)]}#{on}"
-        when 5 then "unmute :#{t}#{on}"
-        when 11
-          # (the clip matrix: slot 0 is the first clip a scene gave it)
-          next if swappable.empty?
-
-          t = pick(rng, swappable)
-          rng.rand < 0.5 ? "launch :#{t}, 0#{on}" : "tweak :#{t}, #{pick(rng, ['transpose: 2', ':reverse', ':halftime'])}#{on}"
-        when 12
-          # (a library instrument track given another instrument: rebuilt at its launch point)
-          next unless instruments
-
-          "track :#{pick(rng, instruments)}, #{pick(rng, INSTRUMENTS)}"
-        when 13
-          # (tempo-maps-1: a ramp from where the tempo is, or a followed tempo LFO)
-          if rng.rand < 0.75
-            "bpm #{pick(rng, [90, 140, 180])}, over: #{pick(rng, ['1', '1/2r', '3.beats'])}#{[', curve: :smooth', ''][rng.rand(2)]}#{on}"
-          else
-            "bpm #{pick(rng, ['1.bars.lfo.at(100..140)', '2.beats.lfo.at(150..170)'])}"
-          end
-        when 6 then rng.rand < 0.5 ? "solo :#{t}#{on}" : "solo#{on.sub(",", "")}"
-        when 7
-          if knob && rng.rand < 0.5
-            "turn :cut, #{pick(rng, [300.0, 2500.0, 3800.0])}#{[', over: 1', ', over: 1/2r', ''][rng.rand(3)]}#{on}"
-          else
-            "turn :busy, #{pick(rng, [0.1, 0.4, 0.9])}#{[', over: 1', ', over: 1/2r', ''][rng.rand(3)]}#{on}"
-          end
-        when 8 then "bg :x#{bgs += 1}, #{pick(rng, TWEENS)}, on: :now"
-        when 9 then "bg :x#{bgs += 1}, #{pick(rng, FREQ_CLIPS)}.freq * 0.001, on: :now"
-        when 10 then "bg :x#{bgs += 1}, tr808(#{pick(rng, DRUMS)}) * 0.5#{on}"
-        else "bg :x#{bgs += 1}, #{pick(rng, MELODIC)}#{on}"
-        end
+      step.on = rng.rand < 0.5 ? ', on: :now' : ''
+      step.t = pick(rng, names)
+      cmd = COMMANDS[rng.rand(commands)].call(step)
       next unless cmd
 
       lines << "at_bar(#{bar}#{beat == 1 ? '' : ", beat: #{beat}"}) { #{cmd} }"
@@ -248,6 +210,74 @@ module SessionFuzz
     end
     Song.new(header: header, lines: lines, bars: bars)
   end
+
+  # What a scheduled step of #generate can see: the RNG, the step's track
+  # (+t+) and launch-point suffix (+on+, ', on: :now' or ''), the song's
+  # scenes, swappable synth tracks, library-instrument tracks, whether the
+  # knob :cut exists, the clip picker, and the count of `bg :xN` players.
+  Step = Struct.new(:rng, :t, :on, :scenes, :swappable, :instruments, :knob, :clip_for, :bgs, keyword_init: true) do
+    def pick(list) = SessionFuzz.pick(rng, list)
+    def bg_name = "x#{self.bgs += 1}"
+  end
+
+  # The commands a scheduled step draws from (uniformly by index; a
+  # command listed twice is drawn twice as often): each takes a Step and
+  # returns the command's code, or nil to skip the step.  APPEND ONLY
+  # (test-infra-1, 2026-10-30): branches add commands at the end, so merges
+  # add lines instead of colliding over `when` numbers (two branches both
+  # claimed `when 12` on 2026-10-29).  Adding a command changes which song
+  # every seed makes (the draw is rng.rand(COMMANDS.length)), as a new
+  # `when` did, so a spec keeping a found seed passes the list's length
+  # when it was found (`generate(rng, commands: 15)`), or keeps the shrunk
+  # song as a script.  The first 15 are the old `case rng.rand(15)` arms
+  # in order: seeds 0-1999 made the same songs after the change to this
+  # list.
+  COMMANDS = [
+    ->(s) { "go :#{s.pick(s.scenes)}#{s.on}" },
+    *[->(s) {
+      next if s.swappable.empty?
+
+      t = s.pick(s.swappable)
+      "swap :#{t}, #{s.clip_for.(t)}#{s.on}"
+    }] * 2,
+    ->(s) { "stop :#{s.t}#{[', fade: 1/4r', ', ring: true', ''][s.rng.rand(3)]}" },
+    ->(s) { "mute :#{s.t}#{[', fade: 1/4r', ''][s.rng.rand(2)]}#{s.on}" },
+    ->(s) { "unmute :#{s.t}#{s.on}" },
+    ->(s) { s.rng.rand < 0.5 ? "solo :#{s.t}#{s.on}" : "solo#{s.on.sub(",", "")}" },
+    ->(s) {
+      if s.knob && s.rng.rand < 0.5
+        "turn :cut, #{s.pick([300.0, 2500.0, 3800.0])}#{[', over: 1', ', over: 1/2r', ''][s.rng.rand(3)]}#{s.on}"
+      else
+        "turn :busy, #{s.pick([0.1, 0.4, 0.9])}#{[', over: 1', ', over: 1/2r', ''][s.rng.rand(3)]}#{s.on}"
+      end
+    },
+    ->(s) { "bg :#{s.bg_name}, #{s.pick(TWEENS)}, on: :now" },
+    ->(s) { "bg :#{s.bg_name}, #{s.pick(FREQ_CLIPS)}.freq * 0.001, on: :now" },
+    ->(s) { "bg :#{s.bg_name}, tr808(#{s.pick(DRUMS)}) * 0.5#{s.on}" },
+    ->(s) {
+      # (the clip matrix: slot 0 is the first clip a scene gave it)
+      next if s.swappable.empty?
+
+      t = s.pick(s.swappable)
+      s.rng.rand < 0.5 ? "launch :#{t}, 0#{s.on}" : "tweak :#{t}, #{s.pick(['transpose: 2', ':reverse', ':halftime'])}#{s.on}"
+    },
+    ->(s) {
+      # (a library instrument track given another instrument: rebuilt at its launch point)
+      next unless s.instruments
+
+      "track :#{s.pick(s.instruments)}, #{s.pick(INSTRUMENTS)}"
+    },
+    ->(s) {
+      # (tempo-maps-1: a ramp from where the tempo is, or a followed tempo LFO)
+      if s.rng.rand < 0.75
+        "bpm #{s.pick([90, 140, 180])}, over: #{s.pick(['1', '1/2r', '3.beats'])}#{[', curve: :smooth', ''][s.rng.rand(2)]}#{s.on}"
+      else
+        "bpm #{s.pick(['1.bars.lfo.at(100..140)', '2.beats.lfo.at(150..170)'])}"
+      end
+    },
+    ->(s) { "bg :#{s.bg_name}, #{s.pick(MELODIC)}#{s.on}" },
+    # (new commands go here, at the end)
+  ].freeze
 
   # Clipless sounds for #generate's seeks across starts.
   HELD = ['0.05.constant', '0.05.constant.filter(:lowpass, cutoff: 800)', 'noise.at(0.02).lp4(600)'].freeze
