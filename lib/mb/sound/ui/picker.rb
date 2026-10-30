@@ -32,13 +32,41 @@ module MB
         # The index the picker reads (Library.index; specs give a fixed one).
         def index = Library.index
 
-        # The head path of +entry+ (Entry#head_path in the picker's index).
-        def path_of(entry) = entry.head_path(index)
+        # The head path of +entry+ (Entry#head_path in the picker's index;
+        # kept KEEP seconds: a head path reads the whole index, ~6 ms on the
+        # shipped library, and the status line asks for Enter's action every
+        # frame).
+        def path_of(entry)
+          c = cache
+          CACHE_LOCK.synchronize { c[:paths][entry] ||= entry.head_path(index).freeze }
+        end
 
-        # The heads that have entries now, in ORDER, then :all.
-        def heads(index = self.index)
-          kinds = index.entries.map(&:kind).uniq
-          ORDER.select { |h| kinds.include?(Library::HEADS[h]) } + [:all]
+        # The heads that have entries now, in ORDER, then :all (kept KEEP
+        # seconds).
+        def heads
+          c = cache
+          CACHE_LOCK.synchronize {
+            c[:heads] ||= begin
+              kinds = index.entries.map(&:kind).uniq
+              (ORDER.select { |h| kinds.include?(Library::HEADS[h]) } + [:all]).freeze
+            end
+          }
+        end
+
+        CACHE_LOCK = Mutex.new
+
+        # What #heads and #path_of keep: renewed when KEEP seconds old or
+        # the index is another one.
+        def cache
+          now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          idx = index
+          CACHE_LOCK.synchronize {
+            c = @cache
+            if c.nil? || now - c[:at] > KEEP || !c[:index].equal?(idx)
+              c = @cache = { at: now, index: idx, heads: nil, paths: {}.compare_by_identity }
+            end
+            c
+          }
         end
 
         # The entries under head +head+ (a Library::HEADS key or :all)
@@ -183,11 +211,17 @@ module MB
             [t, tr && tr.clip != 'graph' ? true : false]
           end
 
-          # Enter's Action for the picked entry, or nil.
+          # Enter's Action for the picked entry, or nil (kept while the
+          # entry and the target stay: the status line asks every frame).
           def action(state)
             e = picked(state) or return nil
             t, patch = target(state)
-            UI::Picker.action(e, track: t, patch: patch)
+            key = [e.__id__, t, patch]
+            a = state[:action]
+            return a[1] if a && a[0] == key
+            act = UI::Picker.action(e, track: t, patch: patch)
+            state[:action] = [key, act]
+            act
           end
 
           def enter_hint(state)
