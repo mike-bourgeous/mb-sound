@@ -84,7 +84,6 @@ end
 
 require_relative 'filter/sample_wrapper'
 require_relative 'filter/filter_set'
-require_relative 'filter/gain'
 require_relative 'filter/biquad'
 require_relative 'filter/first_order'
 require_relative 'filter/cookbook'
@@ -92,7 +91,6 @@ require_relative 'filter/filter_chain'
 require_relative 'filter/filter_bank'
 require_relative 'filter/filter_sum'
 require_relative 'filter/butterworth'
-require_relative 'filter/simple_envelope_follower'
 require_relative 'filter/fir'
 require_relative 'filter/linear_follower'
 require_relative 'filter/delay'
@@ -102,3 +100,6 @@ require_relative 'filter/four_pole'
 require_relative 'filter/four_pole/tuning'
 require_relative 'filter/svf'
 require_relative 'filter/noise_color'
+
+# A Filter that lives with the dynamics code (its base, Filter, loads here)
+require_relative 'graph_node/dynamics/simple_envelope_follower'

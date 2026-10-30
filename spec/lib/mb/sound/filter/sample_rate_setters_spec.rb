@@ -56,15 +56,8 @@ RSpec.describe('Filter#sample_rate=', :aggregate_failures) do
     expect(f.impulse).to eq(impulse)
   end
 
-  it 'keeps Gain' do
-    g = MB::Sound::Filter::Gain.new(0.5, sample_rate: 44100)
-    g.sample_rate = 48000
-    expect(g.sample_rate).to eq(48000)
-    expect(g.process(noise)).to eq(noise * 0.5)
-  end
-
   it 'keeps SimpleEnvelopeFollower decay times in seconds' do
-    expect_retuned_like_new(->(rate) { MB::Sound::Filter::SimpleEnvelopeFollower.new(sample_rate: rate, decay_s: 0.01) })
+    expect_retuned_like_new(->(rate) { MB::Sound::GraphNode::Dynamics::SimpleEnvelopeFollower.new(sample_rate: rate, decay_s: 0.01) })
   end
 
   it 'sets every filter in a FilterBank' do
