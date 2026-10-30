@@ -105,7 +105,13 @@ module MB
           v = k.read(frame, frames)
           if v.is_a?(Numeric)
             return nil if v == 1
-            return Numo::SFloat.new(frames).fill(v)
+            # (a steady level: one frozen buffer per player while the level
+            # and buffer size hold, so nothing is allocated per buffer)
+            cached = p.level_buf
+            return cached[1] if cached && cached[0] == v && cached[1].length == frames
+            buf = Numo::SFloat.new(frames).fill(v).freeze
+            p.level_buf = [v, buf]
+            return buf
           end
           v.is_a?(Numo::SFloat) ? v : Numo::SFloat.cast(v)
         end

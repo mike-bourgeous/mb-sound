@@ -124,6 +124,7 @@ module MB
         :serial, :name, :input, :description, :start, :launch, :stop_at, :timeline_nodes,
         :started, :slow_warned, :loads, :gain, :ramp, :fade_in, :fade_out, :fading_out, :keep,
         :strip_level, :strip_ramp, :asleep, :ring, :asleep_reads, :read_to, :cpu, :cue, :waited,
+        :level_buf, # ([value, frozen SFloat] of a steady level; Faders#fader_levels)
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
