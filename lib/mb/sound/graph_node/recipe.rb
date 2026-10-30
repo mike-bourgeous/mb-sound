@@ -387,11 +387,11 @@ module MB
           # (a DelayNetwork's taps: traversals climb over them).
           def note_outputs(bundle)
             bundle.instance_variable_get(:@outputs).each do |o|
-              next if o.frozen? || o.is_a?(Numeric)
+              next if o.is_a?(Numeric)
 
               @bundles[o] = bundle unless @bundles.key?(o)
               owner = GraphNode.climb_tee_tree(o)
-              @bundles[owner] = bundle unless owner.equal?(o) || owner.frozen? || @bundles.key?(owner)
+              @bundles[owner] = bundle unless @bundles.key?(owner)
             end
           end
 
