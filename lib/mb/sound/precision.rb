@@ -13,7 +13,7 @@ module MB
     # Constant or Knob base use a vectorized 2^x (mb_vec_exp2.h, Ruby mirror
     # Plan::VecExp2), in plans (Plan::Op::Tone, NoteFreq, Pow), in the
     # unfused C kernels (FastSound.oscillate, .number_to_freq,
-    # FastArithmetic.power_fast), and in the Tone's Ruby path, so planned
+    # Kernels.power_fast), and in the Tone's Ruby path, so planned
     # and unplanned graphs give the same samples by construction.  The fast
     # shapes drift from exact math where a sine is integrated (an FM
     # modulator into a carrier's frequency: about -110 dB after a second,

@@ -57,7 +57,7 @@ module MB
             pending = @current_sources[0].sample(count)
             if pending.is_a?(Numo::SFloat) && pending.length == count
               @pass_buf = Numo::SFloat.zeros(count) if @pass_buf.nil? || @pass_buf.length != count
-              return @pass_buf if MB::Sound::FastArithmetic.copy(@pass_buf, pending)
+              return @pass_buf if MB::Sound::Kernels.copy(@pass_buf, pending)
             end
           end
 

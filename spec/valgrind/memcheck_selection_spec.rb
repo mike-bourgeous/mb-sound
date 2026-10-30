@@ -146,6 +146,17 @@ RSpec.describe(MemcheckSelection) do
       expect(sel.empty?).to eq(true)
     end
 
+    # (kernels-1: call sites go through MB::Sound::Kernels, so their lines
+    # name the kernel, not the extension)
+    it 'selects the extension behind a kernel a changed line calls through MB::Sound::Kernels' do
+      sel = MemcheckSelection.select(
+        files: ['lib/mb/sound/graph_node/multiplier.rb'], map: map,
+        changes: { 'lib/mb/sound/graph_node/multiplier.rb' => "+    Kernels.product(out, c, sampled)\n" }
+      )
+      expect(sel.extensions.keys).to eq(['fast_arithmetic'])
+      expect(MemcheckSelection.kernel_modules).to include('svf' => ['FastFilter'], 'envelope' => ['FastEnvelope'])
+    end
+
     it 'uses only the changed lines of a lib file in a git diff' do
       # c5c2867a (op-feedback) changed tone.rb, which names four extensions,
       # but its changed lines name only FastSynth and FastArithmetic

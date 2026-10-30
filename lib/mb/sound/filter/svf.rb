@@ -193,15 +193,7 @@ module MB
         # sampled input nodes.
         def dynamic_process(samples, cutoff:, quality:, gain: @gain)
           samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
-          out = MB::Sound::FastFilter.svf(samples, cutoff, quality, gain, @type_id, @state, @sample_rate)
-          remember(cutoff, quality, gain)
-          out
-        end
-
-        # Same as #dynamic_process, through the Ruby mirror (slow; specs).
-        def dynamic_process_ruby(samples, cutoff:, quality:, gain: @gain)
-          samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
-          out = self.class.process_ruby(samples, cutoff, quality, gain, @type_id, @state, @sample_rate)
+          out = Kernels.svf(samples, cutoff, quality, gain, @type_id, @state, @sample_rate)
           remember(cutoff, quality, gain)
           out
         end
@@ -368,7 +360,7 @@ module MB
           state[1] = ic2
           state[2] = fk.to_f
 
-          Numo::SFloat.cast(out)
+          Kernels.inplace_result(buffer, out)
         end
 
         # Reads a signal input like mb_read_signal_input: an NArray (real
@@ -396,6 +388,9 @@ module MB
           (v.is_a?(Numo::NArray) ? v[-1].real : v).to_f
         end
       end
+
+      Kernels.register :svf, c: FastFilter.method(:svf), ruby: SVF.method(:process_ruby),
+        about: 'the graph cookbook SVF (mb_svf.h)'
     end
   end
 end

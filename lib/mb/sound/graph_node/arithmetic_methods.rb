@@ -114,7 +114,7 @@ module MB
           arithmetic_proc(other, '/') { |d1, d2|
             # In place without allocating for real buffers (the same
             # operations as Numo's)
-            MB::Sound::FastArithmetic.divide(d1, d2) || d1 / d2
+            MB::Sound::Kernels.divide(d1, d2) || d1 / d2
           }
         end
 
@@ -127,8 +127,8 @@ module MB
         def **(other)
           fast_base = is_a?(Constant) || is_a?(Knob) || is_a?(Knob::Reader)
           arithmetic_proc(other, '**') { |d1, d2|
-            (fast_base && Precision.fast? && MB::Sound::FastArithmetic.power_fast(d1, d2)) ||
-              MB::Sound::FastArithmetic.power(d1, d2) || d1 ** d2
+            (fast_base && Precision.fast? && MB::Sound::Kernels.power_fast(d1, d2)) ||
+              MB::Sound::Kernels.power(d1, d2) || d1 ** d2
           }.tap { |pr| pr.fast_power_base = fast_base }
         end
 

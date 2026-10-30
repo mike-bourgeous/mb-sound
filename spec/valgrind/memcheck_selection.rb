@@ -199,6 +199,30 @@ module MemcheckSelection
     @module_extensions ||= extensions.each_with_object({}) { |e, h| e.modules.each { |m| h[m] = e.name } }.freeze
   end
 
+  # The Fast* modules behind each MB::Sound::Kernels function name
+  # (kernels-1: call sites write Kernels.svf, not FastFilter.svf), found in
+  # lib/ without loading it: each `register :name, ...` statement's Fast*
+  # modules (its c: and covers:), and for a loop registering every method of
+  # a mirror module (`register m, c: FastX.method(m)`), every method its
+  # file defines.  {'svf' => ['FastFilter'], 'copy' => ['FastArithmetic'], ...}
+  def kernel_modules
+    @kernel_modules ||= begin
+      map = Hash.new { |h, k| h[k] = [] }
+      Dir[path('lib/**/*.rb')].sort.each do |f|
+        text = File.read(f).gsub(/^\s*#.*$/, '') # (code only: the registry's comments show examples)
+        next unless text.include?('register')
+
+        text.scan(/\bregister\s+:(\w+)(.*?)(?=^\s*(?:Kernels\.)?register\s|^\s*end\b|\z)/m) do |name, rest|
+          map[name] |= rest.scan(/\b(Fast[A-Z]\w*)\b/).flatten
+        end
+        text.scan(/\bregister\s+(\w+),\s*c:\s*(Fast[A-Z]\w*)\.method\(\1\)/).each do |_, mod|
+          text.scan(/^\s*def\s+(\w+)/).flatten.each { |m| map[m] |= [mod] }
+        end
+      end
+      map.reject { |_, v| v.empty? }.freeze
+    end
+  end
+
   def source_files(dir)
     Dir[File.join(dir, '*.{c,cpp,h,hpp}')].sort
   end
@@ -401,7 +425,10 @@ module MemcheckSelection
         content = lib_change_text(f, base, to, synthetic, changes)
         mods = content.to_s.scan(/\b(Fast[A-Z]\w*)\b/).flatten.uniq & module_extensions.keys
         mods.each { |m| exts[module_extensions[m]] << "#{f} (#{m})" }
-        ignored << f if mods.empty?
+        # (and kernel calls through MB::Sound::Kernels: Kernels.svf -> FastFilter)
+        kernel_mods = content.to_s.scan(/\bKernels\.(\w+)/).flatten.uniq.flat_map { |k| (kernel_modules[k] || []).map { |m| [k, m] } }
+        kernel_mods.each { |k, m| exts[module_extensions[m]] << "#{f} (Kernels.#{k}: #{m})" if module_extensions[m] }
+        ignored << f if mods.empty? && kernel_mods.empty?
       elsif list.include?(f)
         changed_specs << f
       else

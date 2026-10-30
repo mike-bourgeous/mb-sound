@@ -29,17 +29,17 @@ RSpec.describe('Tone reset inputs, free and random phases') do
     out = []
     lengths.each_with_index do |n, i|
       yield osc, i if i > 0
-      out << osc.public_send(method, n).dup
+      out << sample_with(method, osc, n).dup
     end
     Numo::SFloat.zeros(0).concatenate(*out)
   end
 
   describe 'reset inputs' do
-    [:sample_c, :sample_ruby].each do |method|
-      context "with #{method}" do
+    [:c, :ruby].each do |method|
+      context "with #{method} kernels" do
         it 'jumps at the exact samples, like phi= between pieces' do
           o = bl_osc(reset: input(triggers(100, 37, 80, value: 0.25)))
-          result = o.public_send(method, 100)
+          result = sample_with(method, o, 100)
 
           expected = pieces(bl_osc(reset: input(triggers(100))), method, [37, 43, 20]) { |osc| jump(osc, 0) }
           expect(result).to eq(expected)
@@ -47,7 +47,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
 
         it 'puts a naive oscillator at the target phase on the reset sample' do
           o = 1001.3.hz.asaw.reset(input(triggers(100, 37)), to: 0.25)
-          result = o.public_send(method, 100)
+          result = sample_with(method, o, 100)
 
           expect(result[36]).not_to be_within(0.1).of(0.5)
           expect(result[37]).to be_within(1e-6).of(0.5)
@@ -73,7 +73,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
         bl_osc(:square, frequency: input(fm), phase_mod: input(pm), width: input(width), reset: input(trig), to: 1.0.radians)
       }
 
-      expect(c.sample_c(256)).to eq(r.sample_ruby(256))
+      expect(c.sample(256)).to eq(sample_with(:ruby, r, 256))
     end
 
     it 'gives the same samples in C and Ruby through the synced kernel (resets, FM, a warp, targets)' do
@@ -86,7 +86,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
           bl_osc(wave, frequency: input(fm), width: input(width), reset: input(trig), to: input(targets)).clean
         }
         expect(c.send(:kernel)).to eq(:reset_sync)
-        expect(c.sample_c(256)).to eq(r.sample_ruby(256)), wave.to_s
+        expect(c.sample(256)).to eq(sample_with(:ruby, r, 256)), wave.to_s
         expect(c.state.to_h).to eq(r.state.to_h)
       end
     end
@@ -163,7 +163,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
     it 'keeps playing without resets after the reset input ends' do
       o = bl_osc(reset: input(triggers(100, 10))) # ends after 100 samples
       ref = bl_osc(reset: input(triggers(300, 10)))
-      expect(pieces(o, :sample, [100, 100, 100]) {}).to eq(pieces(ref, :sample, [100, 100, 100]) {})
+      expect(pieces(o, :c, [100, 100, 100]) {}).to eq(pieces(ref, :c, [100, 100, 100]) {})
     end
 
     it 'gives the same samples as no reset input when the trigger is always zero' do
@@ -187,7 +187,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       bufs = [quiet, quiet, triggers(100, 40).freeze, quiet]
       o = bl_osc(reset: MB::Sound::GraphNode::ProcNode.new(0.constant) { bufs.shift })
       ref = bl_osc(reset: input(triggers(400, 240)))
-      expect(pieces(o, :sample, [100] * 4) {}).to eq(ref.sample(400))
+      expect(pieces(o, :c, [100] * 4) {}).to eq(ref.sample(400))
     end
 
     it 'cannot be combined with sync' do

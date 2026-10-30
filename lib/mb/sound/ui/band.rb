@@ -59,10 +59,11 @@ module MB
         # Plot::Text color mode (:ansi256 by default: the fewest bytes per
         # frame for color); +look+ the scope panes' Plot look; +size+
         # [rows, cols] for a non-terminal +io+; +clock+ a Proc returning
-        # seconds (for specs); +native+ false draws into the Ruby mirror
-        # grid (MB::Term::Cells); +source+ a Proc returning the Snapshot
+        # seconds (for specs); +cells+ the grid class (the :cell_grid
+        # kernel's, MB::Sound::Kernels: NativeCells, or the Ruby mirror
+        # MB::Term::Cells); +source+ a Proc returning the Snapshot
         # to draw instead of following a Session (specs, captures).
-        def initialize(layout:, io: $stdout, session: nil, at: :bottom, color: :ansi256, look: :auto, glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil)
+        def initialize(layout:, io: $stdout, session: nil, at: :bottom, color: :ansi256, look: :auto, glyphs: UI.glyphs, size: nil, clock: nil, cells: Kernels.cell_grid, fps: 60, panes: UI.panes, source: nil)
           # (Every instance variable set up front, in one order: one object shape)
           @stopping = @thread = @first_refresh = @reasserted_at = @full = @resized = @rows = @cols = @density = @shown_layout = @boxed = @height = @placed = @rule_row = @grid = @shown = @chrome = @size_checked_at = @old_winch = @winch_installed = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = @heard = @starter = nil
           raise ArgumentError, "at: is :top or :bottom (got #{at.inspect})" unless %i[top bottom].include?(at)
@@ -79,7 +80,7 @@ module MB
           @glyphs = glyphs
           @fixed_size = size
           @clock = clock || -> { MB::U.clock_now }
-          @native = native
+          @cells_class = cells
           init_frame_rate(fps)
           @panes = panes
           @source = source
@@ -442,7 +443,7 @@ module MB
             @placed = @shown_layout.place(cols, @panes, y: body_y)
             @rule_row = @density.rule ? (top? ? @height - 1 : 0) : nil
           end
-          klass = @native ? Plot::Text::NativeCells : MB::Term::Cells
+          klass = @cells_class
           @grid = klass.new(cols, @height)
           @shown = klass.new(cols, @height)
           @chrome = chrome_plan

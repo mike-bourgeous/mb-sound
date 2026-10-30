@@ -364,7 +364,7 @@ module MB
 
         # A compiled loop body (see Loop): ops in sample order, ring writes and
         # the history write at the end, boundary inputs and Constant params,
-        # the output Value; lowers to FastLoop words, runs in C (#run) or Ruby
+        # the output Value; lowers to FastLoop words, runs in C (#run_c) or Ruby
         # (#run_ruby), and computes the loop's latency (#latency).
         class Program
           # Opcodes of the C executor (fast_loop.c; specs compare them with
@@ -611,7 +611,7 @@ module MB
           # order), +params+ (Numerics or SFloat buffers), +delays+ (per ring:
           # a Numeric or an NArray of delays in samples, compensated), into
           # +out+ (an SFloat of at least +count+).  Returns +out+.
-          def run(count, inputs, params, delays, out)
+          def run_c(count, inputs, params, delays, out)
             words, scalars, objects = lower
             objects_for(objects)
             MB::Sound::FastLoop.run(words, scalars, objects, inputs, params, delays, out, count)
@@ -619,7 +619,7 @@ module MB
             out
           end
 
-          # The exact Ruby mirror of #run (same arguments; returns a new
+          # The exact Ruby mirror of #run_c (same arguments; returns a new
           # SFloat).
           def run_ruby(count, inputs, params, delays)
             lower
@@ -793,13 +793,9 @@ module MB
           # while they hold still (exactly the values at the pitch), DFloats
           # per sample while they ramp.  +count+ is the block's length.
           #
-          # Runs in C (FastLoop.pitch_track, see loop_pitch.rb) unless the
-          # plan engine is :ruby; #pitch_track_ruby is its exact mirror.
-          def pitch_track(values, count)
-            return pitch_track_ruby(values, count) if Plan.engine == :ruby
-
-            pitch_track_c(values, count)
-          end
+          # The :loop_pitch kernel: in C (#pitch_track_c, FastLoop.pitch_track,
+          # see loop_pitch.rb), or #pitch_track_ruby, its exact mirror (see
+          # MB::Sound::Kernels).
 
           # The Ruby version of #pitch_track (the mirror of the C kernel).
           def pitch_track_ruby(values, count)
@@ -865,7 +861,7 @@ module MB
           def sustain_cutoff_into(t, buf)
             c = SUSTAIN_SHELF * @sustain[:filter].sample_rate.to_f
             return sustain_cutoff(t) unless t.is_a?(Numo::DFloat) && buf.is_a?(Numo::DFloat) && buf.length == t.length &&
-                                            MB::Sound::FastArithmetic.fill_range(buf, 0, buf.length, c) && MB::Sound::FastArithmetic.divide(buf, t)
+                                            MB::Sound::Kernels.fill_range(buf, 0, buf.length, c) && MB::Sound::Kernels.divide(buf, t)
             buf
           end
 
@@ -1346,18 +1342,18 @@ module MB
             when Plan::Op::Shape
               sh = op.shaper
               x = Numo::SFloat[regs[@reg[op.a]]]
-              MB::Sound::Shaper.shape_ruby(x, sh.mode, sh.p1, sh.p2, sh.antialias, sh.plan_state)[0]
+              MB::Sound::Kernels.shape(x, sh.mode, sh.p1, sh.p2, sh.antialias, sh.plan_state)[0]
             when Op::Biquad
               val = ->(v) { v.is_a?(Plan::Const) ? v.value.to_f : regs[@reg[v]] }
               op.cookbook.dynamic_process(Numo::SFloat[regs[@reg[op.a]]], cutoff: Numo::SFloat[val.(op.cutoff)], quality: Numo::SFloat[val.(op.quality)])[0]
             when Plan::Op::FourPole
               val = ->(v) { v.is_a?(Plan::Const) ? v.parts[0] : Numo::SFloat[regs[@reg[v]]] }
-              op.filter.dynamic_process_ruby(Numo::SFloat[regs[@reg[op.a]]], cutoff: val.(op.cutoff), resonance: val.(op.resonance))[0]
+              op.filter.dynamic_process(Numo::SFloat[regs[@reg[op.a]]], cutoff: val.(op.cutoff), resonance: val.(op.resonance))[0]
             when Op::Svf
               val = ->(v) { v.is_a?(Plan::Const) ? v.value.to_f : regs[@reg[v]] }
               f = op.filter
-              MB::Sound::Filter::SVF.process_ruby(Numo::SFloat[regs[@reg[op.a]]], val.(op.cutoff), val.(op.quality), val.(op.gain),
-                                                  f.type_id, f.instance_variable_get(:@state), f.sample_rate)[0]
+              MB::Sound::Kernels.svf(Numo::SFloat[regs[@reg[op.a]]], val.(op.cutoff), val.(op.quality), val.(op.gain),
+                                     f.type_id, f.instance_variable_get(:@state), f.sample_rate)[0]
             when Op::DelayRead
               st = rings[@rings.index { |g| g.equal?(op.ring) }]
               d = st[:delays].is_a?(Array) ? st[:delays][i].to_f : st[:delays].to_f

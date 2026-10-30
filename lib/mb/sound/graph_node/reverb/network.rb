@@ -4,8 +4,8 @@ module MB
       class Reverb
         # The diffusion stages and feedback delay network of a Reverb, run
         # one sample at a time in C (MB::Sound::FastReverb::Network; exact
-        # Ruby mirror RubyKernel, used when MB_SOUND_REVERB=ruby or
-        # +ruby: true+).  Built from a Layout (delays, polarities, shuffles,
+        # Ruby mirror RubyKernel: the :reverb_network kernel, see
+        # MB::Sound::Kernels, chosen when the network is built).  Built from a Layout (delays, polarities, shuffles,
         # gains) and live parameters (numbers or GraphNodes, sampled once per
         # block and read per sample by the kernel).
         class Network
@@ -83,7 +83,7 @@ module MB
           # +seed+ - seeds the random LFO targets.
           # +dynamics+ - true to run the ducking and gate stage (+:duck:+,
           #              +:gate:+, +:threshold:+).
-          def initialize(layout:, params:, sample_rate:, diffusion_mod: nil, feedback_mod: nil, drive_mode: :soft, shimmer_window: 0.05, max_stretch: 1, seed: 0, dynamics: false, ruby: ENV['MB_SOUND_REVERB'] == 'ruby')
+          def initialize(layout:, params:, sample_rate:, diffusion_mod: nil, feedback_mod: nil, drive_mode: :soft, shimmer_window: 0.05, max_stretch: 1, seed: 0, dynamics: false)
             @layout = layout
             @diffusion_mod = diffusion_mod
             @feedback_mod = feedback_mod
@@ -92,7 +92,6 @@ module MB
             @max_stretch = max_stretch.to_f
             @seed = seed
             @dynamics = dynamics
-            @ruby = ruby
 
             @params = PARAMS.map { |name, _| params[name] }
             @samplers = @params.map { |p| p.is_a?(GraphNode) ? p.get_sampler : p }
@@ -114,7 +113,7 @@ module MB
               s.sample_rate = @sample_rate if s.respond_to?(:sample_rate=) && s.respond_to?(:sample_rate) && s.sample_rate != @sample_rate
             end
             @kernel_config = kernel_config
-            @kernel = (@ruby ? RubyKernel : MB::Sound::FastReverb::Network).new(@kernel_config)
+            @kernel = Kernels.reverb_network.new(@kernel_config)
           end
 
           # The kernel's config Hash (see fast_reverb.c).

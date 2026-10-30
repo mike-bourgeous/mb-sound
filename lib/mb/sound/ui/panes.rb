@@ -497,13 +497,13 @@ module MB
             w = c.w
             h = c.h
             return if w <= 0 || h <= 0
-            native = c.grid.is_a?(FastUI::Grid)
+            cells = c.grid.class
             live = state[:live]
             lk = @look || look || :auto
             lk = Scope.auto_look(w, h) if lk == :auto
-            if live.nil? || live.width != w || live.height != h || state[:native] != native || state[:look] != lk
-              live = state[:live] = Plot::Live.new(width: w, height: h, look: lk, native: native)
-              state[:native] = native
+            if live.nil? || live.width != w || live.height != h || state[:cells] != cells || state[:look] != lk
+              live = state[:live] = Plot::Live.new(width: w, height: h, look: lk, cells: cells)
+              state[:cells] = cells
               state[:look] = lk
             end
             data = s&.scope

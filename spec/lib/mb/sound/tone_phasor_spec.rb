@@ -78,12 +78,12 @@ RSpec.describe('Tone#phasor', :aggregate_failures) do
   describe 'C and Ruby versions' do
     let(:random) { Random.new(12345) }
 
-    # Samples phasors made by the block with sample_c and sample_ruby.
+    # Samples phasors made by the block with C and Ruby kernels.
     def both(buffers, count = 800)
       c = yield
       r = yield
-      c_out = buffers.times.map { c.sample_c(count).dup }
-      r_out = buffers.times.map { r.sample_ruby(count).dup }
+      c_out = buffers.times.map { c.sample(count).dup }
+      r_out = buffers.times.map { sample_with(:ruby, r, count).dup }
       [c_out, r_out, c.state.phi, r.state.phi]
     end
 
@@ -214,7 +214,7 @@ RSpec.describe(MB::Sound::Tone, :aggregate_failures) do
     end
   end
 
-  describe '#sample_c and #sample_ruby' do
+  describe '#sample with C and Ruby kernels' do
     it 'match for FM and PM oscillators' do
       [:sine, :ramp, :complex_sine, :parabola].each do |wave|
         make = -> {
@@ -223,7 +223,7 @@ RSpec.describe(MB::Sound::Tone, :aggregate_failures) do
         c = make.call
         r = make.call
         3.times do
-          expect(c.sample_c(800).dup).to all_be_within(1e-4).of_array(r.sample_ruby(800).dup)
+          expect(c.sample(800).dup).to all_be_within(1e-4).of_array(sample_with(:ruby, r, 800).dup)
         end
       end
     end

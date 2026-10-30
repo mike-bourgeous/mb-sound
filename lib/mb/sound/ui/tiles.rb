@@ -106,7 +106,7 @@ module MB
         # in KEYS mode on or off (nil: if the probe found it); other
         # options as for Band.
         def initialize(layout:, input: STDIN, output: STDOUT, session: nil, repl: :adopt, color: :ansi256, look: :auto,
-                       glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil,
+                       glyphs: UI.glyphs, size: nil, clock: nil, cells: Kernels.cell_grid, fps: 60, panes: UI.panes, source: nil,
                        mouse: false, nav_esc: nil, kitty: false, context: nil, probe: true, scrollback: MB::Term::VT::SCROLLBACK, pry: {},
                        keyboard: nil, keys_kitty: nil, on_key: nil, hints: nil, play_keys: nil, on_action: nil, nav_once: true)
           # (Every instance variable set up front, in one order: one object shape)
@@ -133,7 +133,7 @@ module MB
           @glyphs = glyphs
           @fixed_size = size
           @clock = clock || -> { MB::U.clock_now }
-          @native = native
+          @cells_class = cells
           init_frame_rate(fps)
           @panes = panes
           @source = source
@@ -1843,7 +1843,7 @@ module MB
           level_layout
           @placed = @tiler.placed
           @placed_layout = @tiler.layout
-          klass = @native ? Plot::Text::NativeCells : MB::Term::Cells
+          klass = @cells_class
           if @grid.nil? || @grid.width != @cols || @grid.height != @rows
             @grid = klass.new(@cols, @rows)
             @shown = klass.new(@cols, @rows)

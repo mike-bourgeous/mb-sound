@@ -22,8 +22,8 @@ module MB
             'MB::Sound::Tone' => {
               reason: 'readers and sampling internals (the library reads them while sampling)',
               names: %i[
-                advance compute_ruby fm_feedback_amount fm_feedback_gain frequency last_freq noise_seed output_gain
-                phase phi period period_samples random_advance reset_input reset_to sample_c sample_ruby state
+                advance compute fm_feedback_amount fm_feedback_gain frequency last_freq noise_seed output_gain
+                phase phi period period_samples random_advance reset_input reset_to sample_frame state
                 sync_source table timeline to_midi to_note wave_type wavelength amplitude amplitude_set range seed
                 phase_mod scan pivot warp_pivot sync_switch param_info
               ],
@@ -47,7 +47,7 @@ module MB
               reason: 'readers, state, and plumbing (the setters that chain are recorded)',
               names: %i[
                 at_rate attack attack_time choke decay decay_time gate hold kernel_config level level_of lift loop_node
-                names octaves preset_name release release_node release_time reset retrigger_mode retrigger_peak sample_ruby segment_names
+                names octaves preset_name release release_node release_time reset retrigger_mode retrigger_peak segment_names
                 segments stage sustain sustain_level time trigger velocity velocity_high velocity_low velocity_peak
                 velocity_scale
               ],

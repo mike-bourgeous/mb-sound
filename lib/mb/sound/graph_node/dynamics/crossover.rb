@@ -157,7 +157,7 @@ module MB
               else
                 n = data.length
                 outs = Dynamics::Framed.next_buffers(self, @frequencies.length + 1, n)
-                MB::Sound::FastDynamics.crossover(outs, data, @program, @band_regs, @state, @registers)
+                Kernels.crossover(outs, data, @program, @band_regs, @state, @registers)
                 @frame = outs
               end
             end
@@ -276,6 +276,8 @@ module MB
           end
         end
       end
+
+      Kernels.register :crossover, c: FastDynamics.method(:crossover), ruby: Dynamics::Crossover.method(:process_ruby)
     end
   end
 end

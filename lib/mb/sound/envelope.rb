@@ -972,12 +972,7 @@ module MB
       # calls), or nil after a one-shot has ended (unless it holds its last
       # level; see #hold_last).
       def sample(count)
-        run(count.round, :c)
-      end
-
-      # Like #sample, using the Ruby mirror of the C kernel (for testing).
-      def sample_ruby(count)
-        run(count.round, :ruby)
+        run(count.round)
       end
 
       def sources
@@ -1435,8 +1430,9 @@ module MB
 
       private
 
-      # Runs the C or Ruby kernel for +count+ samples.
-      def run(count, kernel)
+      # Runs the kernel (Kernels.envelope: C, or the Ruby mirror) for
+      # +count+ samples.
+      def run(count)
         return nil if ended? && !@hold_last
 
         @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
@@ -1459,13 +1455,9 @@ module MB
         inputs[4] = read_input(:lift, @lift, count, nil) if @lift.respond_to?(:sample)
         inputs[5] = read_param(:octaves, @octaves, count) if @octaves.respond_to?(:sample)
 
-        if kernel == :ruby
-          self.class.process_ruby(@buf, @state, times, curves, levels, hold, inputs, config, shapes)
-        elsif quiet_idle?(inputs, config)
-          return idle_buffer(count)
-        else
-          MB::Sound::FastEnvelope.process(@buf, @state, times, curves, levels, hold, inputs, config, shapes)
-        end
+        return idle_buffer(count) if quiet_idle?(inputs, config)
+
+        Kernels.envelope(@buf, @state, times, curves, levels, hold, inputs, config, shapes)
 
         @buf
       end
@@ -1728,6 +1720,8 @@ module MB
         raise ArgumentError, "#{name} must be a graph node or number (got #{value.inspect})" unless value.respond_to?(:sample)
         value.get_sampler
       end
+
+      Kernels.register :envelope, c: FastEnvelope.method(:process), ruby: Envelope.method(:process_ruby)
     end
   end
 end

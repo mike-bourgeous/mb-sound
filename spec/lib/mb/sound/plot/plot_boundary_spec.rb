@@ -20,6 +20,9 @@ module PlotBoundary
       'mb/sound/plot.rb: require_relative fast_ui',
       'mb/sound/plot/mark.rb: FastUI', 'mb/sound/plot/raster.rb: FastUI', 'mb/sound/plot/text.rb: FastUI', 'mb/sound/plot/text.rb: FastUI::Grid',
     ],
+    "the plot kernels' and cell grid's one switch (MB::Sound::Kernels, kernels-1): an extracted plot gem would keep a registry of its own that mb-sound's drives, as mb-term's Grid.native is" => [
+      'mb/sound/plot/live.rb: Kernels', 'mb/sound/plot/mark.rb: Kernels', 'mb/sound/plot/raster.rb: Kernels', 'mb/sound/plot/text.rb: Kernels',
+    ],
     "plot.rb loads mb-sound's previews (MB_SOUND_SIDE); mb-sound would require them itself" => [
       'mb/sound/plot.rb: require_relative plot/panels', 'mb/sound/plot.rb: require_relative plot/presets',
     ],

@@ -199,7 +199,7 @@ module MB
 
           case @mode
           when :ruby_zoh, :ruby_linear
-            sample_ruby(count, @mode)
+            sample_interpolated(count, @mode)
 
           when :libsamplerate_best, :libsamplerate_fastest, :libsamplerate_zoh, :libsamplerate_linear
             @fast_resample ||= MB::Sound::FastResample.new(@ratio, @mode) do |size|
@@ -236,7 +236,7 @@ module MB
         private :apply_rate
 
         # Zero-order hold and linear interpolator in Ruby.  See #sample.
-        def sample_ruby(count, mode)
+        def sample_interpolated(count, mode)
           discard_samples(@startpoint.floor)
 
           exact_required = @inv_ratio * count

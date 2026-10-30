@@ -8,7 +8,7 @@ module MB
           # same double operations in the same order, rounding to float32
           # where the kernel stores floats (ring buffers and outputs), so
           # specs compare the two for exact equality.  About 1000x slower
-          # than C; for specs and MB_SOUND_REVERB=ruby.
+          # than C; the :reverb_network kernel's mirror (MB::Sound::Kernels).
           class RubyKernel
             LFO_STEP = 16
             PARAM_COUNT = 15
@@ -464,6 +464,8 @@ module MB
           end
         end
       end
+
+      Kernels.register :reverb_network, c: MB::Sound::FastReverb::Network, ruby: Reverb::Network::RubyKernel
     end
   end
 end

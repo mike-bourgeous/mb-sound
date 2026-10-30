@@ -55,8 +55,8 @@ module MB
           return complex_shape(data) if data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex)
 
           @buf = Numo::SFloat.zeros(data.length) if @buf.nil? || @buf.length != data.length
-          @buf[0..] = data unless MB::Sound::FastArithmetic.copy(@buf, data) # no allocation for SFloat input
-          MB::Sound::FastClip.shape(@buf.inplace!, @mode, @p1, @p2, @antialias, @state).not_inplace!
+          @buf[0..] = data unless MB::Sound::Kernels.copy(@buf, data) # no allocation for SFloat input
+          Kernels.shape(@buf.inplace!, @mode, @p1, @p2, @antialias, @state).not_inplace!
         end
 
         # Plan layer (see MB::Sound::Plan): one shaper op on this node's

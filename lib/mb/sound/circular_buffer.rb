@@ -293,10 +293,10 @@ module MB
       end
 
       # For internal use by Reader.  Copies like #direct_read into the start
-      # of +target+ without allocating (FastArithmetic.circular_read), or
+      # of +target+ without allocating (Kernels.circular_read), or
       # returns nil if it can't (then use #direct_read).
       def direct_copy(pos, count, target)
-        MB::Sound::FastArithmetic.circular_read(@buf, pos, count, target)
+        MB::Sound::Kernels.circular_read(@buf, pos, count, target)
       end
 
       # Appends the given +narray+ to the circular buffer, returning the new
@@ -331,7 +331,7 @@ module MB
 
         expand_buffer(narray, grow: false)
 
-        MB::Sound::FastArithmetic.circular_write(@buf, narray, @write_pos) || MB::M.circular_write(@buf, narray, @write_pos)
+        MB::Sound::Kernels.circular_write(@buf, narray, @write_pos) || MB::M.circular_write(@buf, narray, @write_pos)
         @write_pos = (@write_pos + narray.length) % @buffer_size
 
         # Update each reader in multi-reader mode

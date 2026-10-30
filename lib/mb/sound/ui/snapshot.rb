@@ -271,8 +271,8 @@ module MB
           c = 0
           while c < @channels
             buf = mix[c] || mix[0]
-            if MasterMeter.native && buf.is_a?(Numo::SFloat) && buf.contiguous?
-              # Allocation-free (FastLoudness.meter_block, the same values)
+            if buf.is_a?(Numo::SFloat) && buf.contiguous?
+              # Allocation-free (Kernels.meter_block: FastLoudness.meter_block)
               x = native_block(c, buf, n)
               peak, sumsq, tp = @result
             else
@@ -283,7 +283,7 @@ module MB
               sumsq = (x * x).sum
 
               ext = history_of(c).concatenate(x)
-              tp = FastLoudness.true_peak(ext, n, @phases)
+              tp = Kernels.true_peak(ext, n, @phases)
               @history[c] = ext[-@history_length..].dup
             end
             @peak[c] = peak if peak > @peak[c]
@@ -296,7 +296,7 @@ module MB
               shelf.process(x)
               highpass.process(x)
               x.not_inplace!
-              @block_energy += FastLoudness.sum_squares(x) * @weights[c]
+              @block_energy += Kernels.sum_squares(x) * @weights[c]
             end
             c += 1
           end
@@ -332,12 +332,40 @@ module MB
           levels
         end
 
-        class << self
-          # False to use the Numo path (the exact mirror of
-          # FastLoudness.meter_block) instead of the kernel.
-          attr_accessor :native
+        # The Ruby mirror of FastLoudness.meter_block (see #native_block):
+        # +buf+ widened into +x+ and after the history in +ext+, [peak, sum
+        # of squares, true peak] into +result+, then the last taps - 1
+        # samples of +ext+ moved to its start.
+        def self.meter_block_ruby(buf, ext, x, phases, result)
+          n = buf.length
+          history = phases.shape[1] - 1
+          v = Numo::DFloat.cast(buf)
+          x[true] = v
+          ext[history...(history + n)] = v if n > 0
+          peak = 0.0
+          sumsq = 0.0
+          v.each_with_index do |s, i|
+            a = s.abs
+            peak = a if a > peak || i == 0
+            sumsq += s * s
+          end
+          tp = Loudness::TruePeak.oversampled_max_ruby(ext[0...(history + n)], n, phases)
+          ext[0...history] = ext[n...(n + history)].dup if history > 0
+          result[0] = peak
+          result[1] = sumsq
+          result[2] = tp
+          result
         end
-        self.native = true
+
+        # The Ruby mirror of FastLoudness.sum_squares: the squares added in
+        # order.
+        def self.sum_squares_ruby(x)
+          raise ArgumentError, 'Values must be a contiguous one-dimensional Numo::DFloat' unless x.class == Numo::DFloat && x.ndim == 1 && x.contiguous?
+
+          sum = 0.0
+          x.each { |v| sum += v * v }
+          sum
+        end
 
         private
 
@@ -351,7 +379,7 @@ module MB
             ext[0...@history_length] = old
             @x[c] = Numo::DFloat.zeros(n)
           end
-          FastLoudness.meter_block(buf, ext, @x[c], @phases, @result)
+          Kernels.meter_block(buf, ext, @x[c], @phases, @result)
           @x[c]
         end
 
@@ -398,8 +426,8 @@ module MB
           while c < @rings.length
             r = @rings[c]
             m = mix[c] || mix[0]
-            # (FastArithmetic.circular_write: the same copy without views)
-            unless MB::Sound::FastArithmetic.circular_write(r, m, @pos)
+            # (Kernels.circular_write: the same copy without views)
+            unless MB::Sound::Kernels.circular_write(r, m, @pos)
               r[@pos...(@pos + first)] = m[0...first]
               r[0...(n - first)] = m[first...n] if first < n
             end
@@ -558,6 +586,9 @@ module MB
           @load_max = 0.0
         end
       end
+
+      Kernels.register :meter_block, c: FastLoudness.method(:meter_block), ruby: MasterMeter.method(:meter_block_ruby)
+      Kernels.register :sum_squares, c: FastLoudness.method(:sum_squares), ruby: MasterMeter.method(:sum_squares_ruby)
     end
   end
 end

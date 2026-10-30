@@ -1,122 +1,122 @@
 # Waveform values and sampling of Tone (formerly the Oscillator specs;
 # Oscillator was folded into Tone).
 RSpec.describe MB::Sound::Tone do
-  [:value_at, :value_at_ruby].each do |method|
-    describe ".#{method}" do
+  [:c, :ruby].each do |method|
+    describe ".value_at with #{method} kernels" do
       let(:method_name) { method }
 
-      # Calls Tone.value_at(wave, phase) as wave.send(method, phase) (cycles)
+      # Calls Tone.value_at(wave, phase) as wave.at(phase) (cycles) with the
+      # kernels of +method+ (value_at in C is the reference)
       def wave(type)
         m = method_name
         Struct.new(:type) do
-          # value_at is the reference; value_at_ruby is compared with it
-          define_method(:value_at) { |phi| MB::Sound::Tone.value_at(type, phi) } unless m == :value_at
-          define_method(m) { |phi| MB::Sound::Tone.public_send(m, type, phi) }
+          define_method(:value_at) { |phi| MB::Sound::Tone.value_at(type, phi) }
+          define_method(:at) { |phi| MB::Sound::Kernels.with(m) { MB::Sound::Tone.value_at(type, phi) } }
         end.new(type)
       end
 
       it 'returns expected sine wave values for given phases' do
         lfo = wave(:sine)
-        expect(lfo.send(method, 0).round(6)).to eq(0)
-        expect(lfo.send(method, 0.125).round(6)).to eq((0.5 ** 0.5).round(6))
-        expect(lfo.send(method, 0.25).round(6)).to eq(1)
-        expect(lfo.send(method, 0.5).round(6)).to eq(0)
-        expect(lfo.send(method, 0.625).round(6)).to eq(-(0.5 ** 0.5).round(6))
-        expect(lfo.send(method, 0.75).round(6)).to eq(-1)
+        expect(lfo.at(0).round(6)).to eq(0)
+        expect(lfo.at(0.125).round(6)).to eq((0.5 ** 0.5).round(6))
+        expect(lfo.at(0.25).round(6)).to eq(1)
+        expect(lfo.at(0.5).round(6)).to eq(0)
+        expect(lfo.at(0.625).round(6)).to eq(-(0.5 ** 0.5).round(6))
+        expect(lfo.at(0.75).round(6)).to eq(-1)
       end
 
       it 'returns expected triangle wave values for given phases' do
         lfo = wave(:triangle)
-        expect(lfo.send(method, 0).round(6)).to eq(0)
-        expect(lfo.send(method, 0.0625).round(6)).to eq(0.25)
-        expect(lfo.send(method, 0.125).round(6)).to eq(0.5)
-        expect(lfo.send(method, 0.25).round(6)).to eq(1)
-        expect(lfo.send(method, 0.375).round(6)).to eq(0.5)
-        expect(lfo.send(method, 0.5).round(6)).to eq(0)
-        expect(lfo.send(method, 0.625).round(6)).to eq(-0.5)
-        expect(lfo.send(method, 0.75).round(6)).to eq(-1)
-        expect(lfo.send(method, 0.875).round(6)).to eq(-0.5)
-        expect(lfo.send(method, 0.9375).round(6)).to eq(-0.25)
+        expect(lfo.at(0).round(6)).to eq(0)
+        expect(lfo.at(0.0625).round(6)).to eq(0.25)
+        expect(lfo.at(0.125).round(6)).to eq(0.5)
+        expect(lfo.at(0.25).round(6)).to eq(1)
+        expect(lfo.at(0.375).round(6)).to eq(0.5)
+        expect(lfo.at(0.5).round(6)).to eq(0)
+        expect(lfo.at(0.625).round(6)).to eq(-0.5)
+        expect(lfo.at(0.75).round(6)).to eq(-1)
+        expect(lfo.at(0.875).round(6)).to eq(-0.5)
+        expect(lfo.at(0.9375).round(6)).to eq(-0.25)
       end
 
       it 'returns expected ramp wave values for given phases' do
         lfo = wave(:ramp)
-        expect(lfo.send(method, 0).round(6)).to eq(0)
-        expect(lfo.send(method, 0.0625).round(6)).to eq(0.125)
-        expect(lfo.send(method, 0.125).round(6)).to eq(0.25)
-        expect(lfo.send(method, 0.25).round(6)).to eq(0.5)
-        expect(lfo.send(method, 0.375).round(6)).to eq(0.75)
-        expect(lfo.send(method, 0.4995).round(6)).to eq(0.999)
-        expect(lfo.send(method, 0.5).round(6)).to eq(-1)
-        expect(lfo.send(method, 0.625).round(6)).to eq(-0.75)
-        expect(lfo.send(method, 0.75).round(6)).to eq(-0.5)
-        expect(lfo.send(method, 0.9375).round(6)).to eq(-0.125)
-        expect(lfo.send(method, 0.9995).round(6)).to eq(-0.001)
+        expect(lfo.at(0).round(6)).to eq(0)
+        expect(lfo.at(0.0625).round(6)).to eq(0.125)
+        expect(lfo.at(0.125).round(6)).to eq(0.25)
+        expect(lfo.at(0.25).round(6)).to eq(0.5)
+        expect(lfo.at(0.375).round(6)).to eq(0.75)
+        expect(lfo.at(0.4995).round(6)).to eq(0.999)
+        expect(lfo.at(0.5).round(6)).to eq(-1)
+        expect(lfo.at(0.625).round(6)).to eq(-0.75)
+        expect(lfo.at(0.75).round(6)).to eq(-0.5)
+        expect(lfo.at(0.9375).round(6)).to eq(-0.125)
+        expect(lfo.at(0.9995).round(6)).to eq(-0.001)
       end
 
       it 'returns expected square wave values for given phases' do
         lfo = wave(:square)
-        expect(lfo.send(method, 0).round(6)).to eq(1)
-        expect(lfo.send(method, 0.0625).round(6)).to eq(1)
-        expect(lfo.send(method, 0.125).round(6)).to eq(1)
-        expect(lfo.send(method, 0.25).round(6)).to eq(1)
-        expect(lfo.send(method, 0.375).round(6)).to eq(1)
-        expect(lfo.send(method, 0.5).round(6)).to eq(-1)
-        expect(lfo.send(method, 0.625).round(6)).to eq(-1)
-        expect(lfo.send(method, 0.75).round(6)).to eq(-1)
-        expect(lfo.send(method, 0.9375).round(6)).to eq(-1)
+        expect(lfo.at(0).round(6)).to eq(1)
+        expect(lfo.at(0.0625).round(6)).to eq(1)
+        expect(lfo.at(0.125).round(6)).to eq(1)
+        expect(lfo.at(0.25).round(6)).to eq(1)
+        expect(lfo.at(0.375).round(6)).to eq(1)
+        expect(lfo.at(0.5).round(6)).to eq(-1)
+        expect(lfo.at(0.625).round(6)).to eq(-1)
+        expect(lfo.at(0.75).round(6)).to eq(-1)
+        expect(lfo.at(0.9375).round(6)).to eq(-1)
       end
 
       it 'returns expected complex sine values' do
         o = wave(:complex_sine)
-        expect(MB::M.round(o.send(method, 0), 6)).to eq(0-1i)
-        expect(MB::M.round(o.send(method, 0.125), 6)).to eq(MB::M.round(CMath.exp(-45i.degrees), 6))
-        expect(MB::M.round(o.send(method, 0.25), 6)).to eq(1+0i)
-        expect(MB::M.round(o.send(method, 0.5), 6)).to eq(0+1i)
-        expect(MB::M.round(o.send(method, 0.75), 6)).to eq(-1+0i)
+        expect(MB::M.round(o.at(0), 6)).to eq(0-1i)
+        expect(MB::M.round(o.at(0.125), 6)).to eq(MB::M.round(CMath.exp(-45i.degrees), 6))
+        expect(MB::M.round(o.at(0.25), 6)).to eq(1+0i)
+        expect(MB::M.round(o.at(0.5), 6)).to eq(0+1i)
+        expect(MB::M.round(o.at(0.75), 6)).to eq(-1+0i)
       end
 
       it 'returns expected complex square values' do
         o = wave(:complex_square)
-        expect(MB::M.round(o.send(method, 0.125), 6).real).to eq(1)
-        expect(MB::M.round(o.send(method, 0.125), 6).imag).to be < 0.25
+        expect(MB::M.round(o.at(0.125), 6).real).to eq(1)
+        expect(MB::M.round(o.at(0.125), 6).imag).to be < 0.25
 
-        expect(MB::M.round(o.send(method, 0.25), 6)).to eq(1)
+        expect(MB::M.round(o.at(0.25), 6)).to eq(1)
 
-        expect(MB::M.round(o.send(method, 0.375), 6).real).to eq(1)
-        expect(MB::M.round(o.send(method, 0.375), 6).imag).to be > 0.25
+        expect(MB::M.round(o.at(0.375), 6).real).to eq(1)
+        expect(MB::M.round(o.at(0.375), 6).imag).to be > 0.25
 
-        expect(MB::M.round(o.send(method, 0.625), 6).real).to eq(-1)
-        expect(MB::M.round(o.send(method, 0.625), 6).imag).to be > 0.25
+        expect(MB::M.round(o.at(0.625), 6).real).to eq(-1)
+        expect(MB::M.round(o.at(0.625), 6).imag).to be > 0.25
 
-        expect(MB::M.round(o.send(method, 0.75), 6)).to eq(-1)
+        expect(MB::M.round(o.at(0.75), 6)).to eq(-1)
 
-        expect(MB::M.round(o.send(method, 0.875), 6).real).to eq(-1)
-        expect(MB::M.round(o.send(method, 0.875), 6).imag).to be < -0.25
+        expect(MB::M.round(o.at(0.875), 6).real).to eq(-1)
+        expect(MB::M.round(o.at(0.875), 6).imag).to be < -0.25
       end
 
       it 'wraps around phase for triangle' do
         o = wave(:triangle)
-        expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 1.1), 6))
-        expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 0.9), 6))
+        expect(MB::M.round(o.at(0.1), 6)).to eq(MB::M.round(o.at(1.1), 6))
+        expect(MB::M.round(o.at(-0.1), 6)).to eq(MB::M.round(o.at(0.9), 6))
       end
 
       it 'wraps around phase for gauss' do
         o = wave(:gauss)
-        expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 1.1), 6))
-        expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 0.9), 6))
+        expect(MB::M.round(o.at(0.1), 6)).to eq(MB::M.round(o.at(1.1), 6))
+        expect(MB::M.round(o.at(-0.1), 6)).to eq(MB::M.round(o.at(0.9), 6))
       end
 
       it 'wraps around phase for square' do
         o = wave(:square)
-        expect(o.send(method, 0.1)).to eq(o.value_at(1.1))
-        expect(o.send(method, -0.1)).to eq(o.value_at(0.9))
+        expect(o.at(0.1)).to eq(o.value_at(1.1))
+        expect(o.at(-0.1)).to eq(o.value_at(0.9))
       end
 
       it 'wraps around phase for parabola' do
         o = wave(:parabola)
-        expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 1.1), 6))
-        expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 0.9), 6))
+        expect(MB::M.round(o.at(0.1), 6)).to eq(MB::M.round(o.at(1.1), 6))
+        expect(MB::M.round(o.at(-0.1), 6)).to eq(MB::M.round(o.at(0.9), 6))
       end
 
       pending 'returns expected gauss values'
@@ -124,8 +124,8 @@ RSpec.describe MB::Sound::Tone do
     end
   end
 
-  [:sample, :sample_ruby, :sample_c].each do |method|
-    describe "##{method}" do
+  [:c, :ruby].each do |method|
+    describe "#sample with #{method} kernels" do
       # A naive tone at 1 Hz and +rate+ samples per second, so each sample
       # advances by 1 / rate cycles.
       def slow(wave, rate, **opts)
@@ -133,7 +133,7 @@ RSpec.describe MB::Sound::Tone do
       end
 
       def one(tone, method)
-        tone.send(method, 1)[0]
+        sample_with(method, tone, 1)[0]
       end
 
       it 'returns a different value on subsequent calls' do
@@ -174,7 +174,7 @@ RSpec.describe MB::Sound::Tone do
 
       it 'can generate more than one sample' do
         oscil = 100.hz.sine
-        data = oscil.send(method, 48000)
+        data = sample_with(method, oscil, 48000)
         expect(data.length).to eq(48000)
         expect(data.min.round(3)).to eq(-1)
         expect(data.max.round(3)).to eq(1)
@@ -183,23 +183,23 @@ RSpec.describe MB::Sound::Tone do
 
       it 'produces expected square wave output for a low sample rate' do
         oscil = 1.hz.asquare.at(0.5).at_rate(50)
-        expect(oscil.send(method, 25)).to eq(Numo::SFloat.zeros(25).fill(0.5))
-        expect(oscil.send(method, 25)).to eq(Numo::SFloat.zeros(25).fill(-0.5))
-        expect(oscil.send(method, 25)).to eq(Numo::SFloat.zeros(25).fill(0.5))
-        expect(oscil.send(method, 25)).to eq(Numo::SFloat.zeros(25).fill(-0.5))
+        expect(sample_with(method, oscil, 25)).to eq(Numo::SFloat.zeros(25).fill(0.5))
+        expect(sample_with(method, oscil, 25)).to eq(Numo::SFloat.zeros(25).fill(-0.5))
+        expect(sample_with(method, oscil, 25)).to eq(Numo::SFloat.zeros(25).fill(0.5))
+        expect(sample_with(method, oscil, 25)).to eq(Numo::SFloat.zeros(25).fill(-0.5))
       end
 
       it 'produces expected square wave output for a moderate sample rate' do
         oscil = 1.hz.asquare.at_rate(1600).at(1)
-        expect(oscil.send(method, 800)).to eq(Numo::SFloat.zeros(800).fill(1))
-        expect(oscil.send(method, 800)).to eq(Numo::SFloat.zeros(800).fill(-1))
-        expect(oscil.send(method, 800)).to eq(Numo::SFloat.zeros(800).fill(1))
-        expect(oscil.send(method, 800)).to eq(Numo::SFloat.zeros(800).fill(-1))
+        expect(sample_with(method, oscil, 800)).to eq(Numo::SFloat.zeros(800).fill(1))
+        expect(sample_with(method, oscil, 800)).to eq(Numo::SFloat.zeros(800).fill(-1))
+        expect(sample_with(method, oscil, 800)).to eq(Numo::SFloat.zeros(800).fill(1))
+        expect(sample_with(method, oscil, 800)).to eq(Numo::SFloat.zeros(800).fill(-1))
       end
 
       it 'matches the analytic signal for a complex sine wave' do
         oscil = 240.hz.complex_sine.at(1)
-        result = oscil.send(method, 1600)
+        result = sample_with(method, oscil, 1600)
         target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.at(1).sample(1600)))
 
         expect(MB::M.round(result, 5)).to eq(MB::M.round(target, 5))
@@ -207,7 +207,7 @@ RSpec.describe MB::Sound::Tone do
 
       it 'matches the analytic signal for a complex square wave (approximately)' do
         oscil = 240.hz.acomplex_square.at(1)
-        result = oscil.send(method, 1600)
+        result = sample_with(method, oscil, 1600)
         # 240Hz at 48kHz puts square wave transitions exactly on samples, so
         # sample 6400 + i of the reference has the same phase as sample i
         target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.asquare.at(1).sample(16000))[6400...8000])
@@ -222,7 +222,7 @@ RSpec.describe MB::Sound::Tone do
 
       it 'matches the analytic signal for a complex triangle wave (approximately)' do
         oscil = 240.hz.acomplex_triangle.at(1)
-        result = oscil.send(method, 1600)
+        result = sample_with(method, oscil, 1600)
         target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.atriangle.at(1).sample(16000))[6400...8000])
 
         expect(MB::M.round(result.real, 6)).to eq(MB::M.round(target.real, 6))
@@ -235,7 +235,7 @@ RSpec.describe MB::Sound::Tone do
 
       it 'matches the analytic signal for a complex ramp wave (approximately)' do
         oscil = 240.hz.acomplex_saw.at(1)
-        result = oscil.send(method, 1600)
+        result = sample_with(method, oscil, 1600)
 
         base = MB::Sound.analytic_signal(120.hz.asaw.at(1).sample(32000)).reshape(16000, 2)[nil, 1] # shift 240hz by half sample
         target = Numo::SComplex.cast(base)[6400...8000]
@@ -249,11 +249,11 @@ RSpec.describe MB::Sound::Tone do
       end
 
       it 'truncates output for short reads on frequency' do
-        expect(0.constant.until(0.0001).tone.send(method, 48000)).to eq(Numo::SFloat.zeros(5))
+        expect(sample_with(method, 0.constant.until(0.0001).tone, 48000)).to eq(Numo::SFloat.zeros(5))
       end
 
       it 'truncates output for short reads on phase' do
-        expect(0.hz.pm(0.constant.until(0.0001)).send(method, 48000)).to eq(Numo::SFloat.zeros(5))
+        expect(sample_with(method, 0.hz.pm(0.constant.until(0.0001)), 48000)).to eq(Numo::SFloat.zeros(5))
       end
 
       it 'raises an error if truncation happens twice' do

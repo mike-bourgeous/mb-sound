@@ -39,9 +39,9 @@ module MB
           when :floor then data.floor
           when :ceil then data.ceil
           when :round then data.round
-          when :ln then MB::FastSound.narray_log(data)
-          when :log2 then MB::FastSound.narray_log2(data)
-          when :log10 then MB::FastSound.narray_log10(data)
+          when :ln then MB::Sound::Kernels.narray_log(data)
+          when :log2 then MB::Sound::Kernels.narray_log2(data)
+          when :log10 then MB::Sound::Kernels.narray_log10(data)
           end
         end
 

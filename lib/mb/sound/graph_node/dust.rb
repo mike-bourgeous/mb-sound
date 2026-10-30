@@ -142,7 +142,7 @@ module MB
           return nil if gap.nil?
 
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          MB::Sound::FastTexture.dust(@buf, r, @rng, @sample_rate, @range.begin, @range.end, gap, @since)
+          Kernels.dust(@buf, r, @rng, @sample_rate, @range.begin, @range.end, gap, @since)
         end
 
         # The random stream and the samples since the last impulse (for a
@@ -206,6 +206,8 @@ module MB
           out
         end
       end
+
+      Kernels.register :dust, c: FastTexture.method(:dust), ruby: Dust.method(:process_ruby)
     end
   end
 end

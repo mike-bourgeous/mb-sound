@@ -609,7 +609,7 @@ module MB
           return false if b.equal?(@zeros)
 
           r = (@range ||= [0.0, 0.0])
-          unless MB::Sound::FastArithmetic.min_max(b, r)
+          unless MB::Sound::Kernels.min_max(b, r)
             b = b.abs if b.is_a?(Numo::SComplex) || b.is_a?(Numo::DComplex)
             r[0] = b.min.to_f
             r[1] = b.max.to_f

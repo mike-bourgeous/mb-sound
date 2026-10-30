@@ -107,10 +107,10 @@ module MB
 
         # Creates a Detune node for copies at +fractions+ of +detune+ (a node
         # of semitones) around +frequency+ (Hz, a number or node).  See the
-        # class description for +mode+ and +control+.  +kernel+ is
-        # MB::Sound::FastUnison (C) or Detune::RubyKernel (its exact mirror;
-        # for specs and benchmarks).
-        def initialize(frequency, detune, fractions:, mode: :exact, control: DEFAULT_CONTROL, sample_rate: 48000, kernel: MB::Sound::FastUnison)
+        # class description for +mode+ and +control+.  The kernels are
+        # MB::Sound::FastUnison's (C) or Detune::RubyKernel's (their exact
+        # mirrors), as MB::Sound::Kernels chooses.
+        def initialize(frequency, detune, fractions:, mode: :exact, control: DEFAULT_CONTROL, sample_rate: 48000)
           raise ArgumentError, "Unknown detune mode #{mode.inspect} (use #{MODES.map(&:inspect).join(' or ')})" unless MODES.include?(mode)
           raise ArgumentError, "The detune control interval must be a positive Integer or nil (got #{control.inspect})" unless control.nil? || (control.is_a?(Integer) && control > 0)
           raise ArgumentError, 'Detune fractions must be numbers in -1..1' unless fractions.all? { |a| a.is_a?(Numeric) && (-1..1).cover?(a) }
@@ -122,7 +122,6 @@ module MB
           @positions = @fractions.map { |a| (a + 1) * 0.5 }.freeze
           @mode = mode
           @control = control
-          @kernel = kernel
 
           @outputs = Array.new(@fractions.length) { |i| Output.new(self, i) }.freeze
           @sampled = []
@@ -207,16 +206,16 @@ module MB
 
           if @mode == :exact
             if constant
-              @kernel.scale(@data, f, exact_ratios(min))
+              Kernels.unison_scale(@data, f, exact_ratios(min))
             else
-              @kernel.exact(@data, f, d, @fractions)
+              Kernels.unison_exact(@data, f, d, @fractions)
             end
           else
             unless @state
               r = Math.exp(d[0] * LOG_SEMITONE)
               @state = Numo::DFloat[r, r, 0]
             end
-            @kernel.interp(@data, f, d, @positions, @state, @control || 0)
+            Kernels.unison_interp(@data, f, d, @positions, @state, @control || 0)
           end
 
           @data
@@ -328,6 +327,10 @@ module MB
           end
         end
       end
+
+      Kernels.register :unison_exact, c: FastUnison.method(:exact), ruby: Detune::RubyKernel.method(:exact)
+      Kernels.register :unison_interp, c: FastUnison.method(:interp), ruby: Detune::RubyKernel.method(:interp)
+      Kernels.register :unison_scale, c: FastUnison.method(:scale), ruby: Detune::RubyKernel.method(:scale)
     end
   end
 end

@@ -61,11 +61,8 @@ RSpec.describe('MB::Sound generator clips', :aggregate_failures) do
       expect(edges(sweep, 517, 519)).to eq(cold)
       expect(cold).not_to be_empty
       # The same in the Ruby dice mirror
-      begin
-        MB::Sound::Generative::Dice.mode = :ruby
+      MB::Sound::Kernels.with(fast_generative: :ruby) do
         expect(arp.events_for(517)).to eq(seq[517])
-      ensure
-        MB::Sound::Generative::Dice.mode = :c
       end
     end
 

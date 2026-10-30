@@ -164,7 +164,7 @@ RSpec.describe(MB::Sound::GenerationMethods) do
       it "gives identical C and Ruby samples for #{name}" do
         c = make.call
         r = make.call
-        [800, 37, 1, 256].each { |n| expect(c.sample_c(n)).to eq(r.sample_ruby(n)) }
+        [800, 37, 1, 256].each { |n| expect(c.sample(n)).to eq(sample_with(:ruby, r, n)) }
       end
     end
   end

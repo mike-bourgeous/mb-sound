@@ -91,7 +91,9 @@ module MB
           @feedback = [0.0, 0.0, 0.0]
 
           fields.each do |k, v|
-            v = Numo::DFloat.cast(v) if (k == :sync_ring || k == :jump_residual) && v.is_a?(Array)
+            # (a complex tone's residual and ring are complex: kernels-1 found
+            # restoring them as DFloat raised)
+            v = (v.any?(Complex) ? Numo::DComplex : Numo::DFloat).cast(v) if (k == :sync_ring || k == :jump_residual) && v.is_a?(Array)
             v = v.dup if v.is_a?(Array)
             instance_variable_set(:"@#{k}", v)
           end

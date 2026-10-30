@@ -52,8 +52,8 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
   it 'gives the same text and bytes with the native grid and the Ruby mirror' do
     %i[band deck mini].each do |layout|
       %i[ansi256 truecolor none].each do |mode|
-        native, nio = ui_fake_band(layout, native: true, color: mode)
-        ruby, rio = ui_fake_band(layout, native: false, color: mode)
+        native, nio = ui_fake_band(layout, color: mode)
+        ruby, rio = ui_fake_band(layout, cells: MB::Term::Cells, color: mode)
         [native, ruby].each { |b| b.start(thread: false) }
         3.times do |i|
           snap = ui_fake_snapshot(t: i * 0.05, seq: i + 1, scope_phase: i * 0.1, peak: -8.1 - i)

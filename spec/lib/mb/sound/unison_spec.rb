@@ -397,8 +397,8 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
     it 'gives the same samples with the Ruby kernel' do
       [:exact, :interp].each do |mode|
         a = MB::Sound::Unison::Detune.new(220.hz.vibrato(5, depth: 0.2).freq, 2.hz.lfo.at(0..0.4), fractions: [-1, -0.3, 0.2, 1], mode: mode)
-        b = MB::Sound::Unison::Detune.new(220.hz.vibrato(5, depth: 0.2).freq, 2.hz.lfo.at(0..0.4), fractions: [-1, -0.3, 0.2, 1], mode: mode, kernel: MB::Sound::Unison::Detune::RubyKernel)
-        expect(copy_freqs(a, buffers: 5, buffer: 100)).to eq(copy_freqs(b, buffers: 5, buffer: 100))
+        b = MB::Sound::Unison::Detune.new(220.hz.vibrato(5, depth: 0.2).freq, 2.hz.lfo.at(0..0.4), fractions: [-1, -0.3, 0.2, 1], mode: mode)
+        expect(copy_freqs(a, buffers: 5, buffer: 100)).to eq(MB::Sound::Kernels.with(:ruby) { copy_freqs(b, buffers: 5, buffer: 100) })
       end
     end
 

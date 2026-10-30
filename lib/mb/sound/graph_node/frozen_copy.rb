@@ -6,7 +6,7 @@ module MB
       # (a Tee's shared buffer, a Constant's steady buffer) before changing
       # it (see Tee).  #copy reuses one buffer while the type and length
       # stay the same, so a frozen input costs no allocation per buffer
-      # (MB::Sound::FastArithmetic.copy).
+      # (MB::Sound::Kernels.copy).
       #
       # The copy is overwritten by the next call, like any node's output
       # buffer.
@@ -18,7 +18,7 @@ module MB
           c = @buf
           return @buf = buf.dup if c.nil? || c.class != buf.class || c.length != buf.length || c.frozen?
 
-          c[0..] = buf unless MB::Sound::FastArithmetic.copy(c, buf)
+          c[0..] = buf unless MB::Sound::Kernels.copy(c, buf)
           c
         end
       end

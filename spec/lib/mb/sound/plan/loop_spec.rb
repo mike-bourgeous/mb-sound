@@ -4,12 +4,8 @@
 RSpec.describe(MB::Sound::Plan::Loop) do
   let(:src) { PlanSpecHelpers::Source }
 
-  def with_engine(engine)
-    old = MB::Sound::Plan.engine
-    MB::Sound::Plan.engine = engine
-    yield
-  ensure
-    MB::Sound::Plan.engine = old
+  def with_engine(engine, &block)
+    MB::Sound::Kernels.with(fast_loop: engine, &block)
   end
 
   # Renders +total+ samples of the loop made by +build+, in blocks of

@@ -147,7 +147,7 @@ module MB
 
           n = x.length
           @buf = Numo::SFloat.zeros(n) if @buf.nil? || @buf.length != n
-          out = MB::Sound::FastLofi.decimate(@buf, x, r, @state, @rng, @sample_rate, @jitter, @mode)
+          out = Kernels.decimate(@buf, x, r, @state, @rng, @sample_rate, @jitter, @mode)
           m == 1.0 ? out : self.class.mix(out, x, m)
         end
 
@@ -266,6 +266,8 @@ module MB
         end
         private_class_method :signal_values
       end
+
+      Kernels.register :decimate, c: FastLofi.method(:decimate), ruby: Decimator.method(:process_ruby)
     end
   end
 end

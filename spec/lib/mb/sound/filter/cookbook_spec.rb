@@ -597,7 +597,7 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
     end
   end
 
-  [:dynamic_process, :dynamic_process_ruby_c].each do |m|
+  [:dynamic_process, :dynamic_process_ruby].each do |m|
     describe "##{m}" do
       it_behaves_like('#dynamic_process', m)
     end
@@ -639,7 +639,7 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
 end
 
 RSpec.describe(MB::Sound::Filter::Cookbook, 'with negative and NaN cutoffs') do
-  [:dynamic_process, :dynamic_process_ruby_c].each do |m|
+  [:dynamic_process, :dynamic_process_ruby].each do |m|
     it "clamps them to DYNAMIC_MIN_CUTOFF in #{m}, staying finite and recovering" do
       f = MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 1000, quality: 3)
       g = MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 1000, quality: 3)

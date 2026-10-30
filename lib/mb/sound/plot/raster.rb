@@ -14,15 +14,14 @@ module MB
         # (faster).  With +ends+, each group's two points sit at its first
         # and last x (smooth slopes for vector output); otherwise both sit
         # at its center (whole spans per column for text rasters).
-        # Returns [xs, ys].  Uses FastUI.decimate when Plot.native is set
-        # (exactly the same points as #decimate_ruby).
-        def decimate(xs, ys, columns, regular: false, ends: false)
+        # Returns [xs, ys].  The :plot_decimate kernel: FastUI.decimate
+        # (#decimate_c) or exactly the same points from #decimate_ruby.
+        def decimate_c(xs, ys, columns, regular: false, ends: false)
           return [xs, ys] if xs.length <= columns * 2 || columns < 1
 
-          if Plot.native
-            r = FastUI.decimate(xs, ys, columns, regular, ends)
-            return r if r
-          end
+          r = FastUI.decimate(xs, ys, columns, regular, ends)
+          return r if r
+
           decimate_ruby(xs, ys, columns, regular: regular, ends: ends)
         end
 
@@ -104,13 +103,12 @@ module MB
           [out_x.flatten, out_y.flatten]
         end
 
-        # True if +xs+ never decreases (NaNs aside).  Uses FastUI.monotonic
-        # when Plot.native is set.
-        def monotonic?(xs)
-          if Plot.native
-            r = FastUI.monotonic(xs)
-            return r unless r.nil?
-          end
+        # True if +xs+ never decreases (NaNs aside).  The :plot_monotonic
+        # kernel: FastUI.monotonic (#monotonic_c) or #monotonic_ruby.
+        def monotonic_c(xs)
+          r = FastUI.monotonic(xs)
+          return r unless r.nil?
+
           monotonic_ruby(xs)
         end
 
@@ -219,13 +217,33 @@ module MB
 
         # Draws a polyline (device units, y down) in color index +c+.
         # With +dash+ (e.g. [3, 2]), draws only the first dash[0] of every
-        # dash.sum dots along the line.  Uses FastUI.polyline when
-        # Plot.native is set (the same dots as #polyline_ruby).
-        def polyline(xs, ys, c, dash: nil)
-          if Plot.native && (dash.nil? || (dash.all?(Integer) && dash.sum > 0))
+        # dash.sum dots along the line.  The :plot_polyline kernel:
+        # FastUI.polyline (#polyline_c) or the same dots from
+        # #polyline_ruby.
+        def polyline_c(xs, ys, c, dash: nil)
+          if dash.nil? || (dash.all?(Integer) && dash.sum > 0)
             return if FastUI.polyline(@dots, xs, ys, c, dash ? dash[0] : 0, dash ? dash.sum : 0)
           end
           polyline_ruby(xs, ys, c, dash: dash)
+        end
+
+        # A copy of the raster for a kernel check (MB::Sound::Kernels).
+        def kernel_copy
+          c = dup
+          c.kernel_restore(self)
+          c
+        end
+
+        # What a kernel check compares.
+        def kernel_state
+          [@dots, @colors]
+        end
+
+        # Takes the dots and colors of +other+ (a #kernel_copy).
+        def kernel_restore(other)
+          @dots = other.dots.dup
+          @colors = other.colors.dup
+          @color_ids = other.instance_variable_get(:@color_ids).dup
         end
 
         # The Ruby mirror of FastUI.polyline (see #polyline).
@@ -237,6 +255,7 @@ module MB
             iy = iy[keep]
           end
           set(ix, iy, c)
+          nil
         end
 
         # Draws isolated points.
@@ -311,6 +330,10 @@ module MB
           [top, bot, has]
         end
       end
+
+      Kernels.register :plot_decimate, on: Geometry.singleton_class, as: :decimate, c: :decimate_c, ruby: :decimate_ruby, covers: %w[FastUI.decimate]
+      Kernels.register :plot_monotonic, on: Geometry.singleton_class, as: :monotonic?, c: :monotonic_c, ruby: :monotonic_ruby, covers: %w[FastUI.monotonic]
+      Kernels.register :plot_polyline, on: Raster, as: :polyline, c: :polyline_c, ruby: :polyline_ruby, state: %i[@dots], covers: %w[FastUI.polyline]
     end
   end
 end

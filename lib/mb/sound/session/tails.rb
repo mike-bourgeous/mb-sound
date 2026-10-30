@@ -147,10 +147,10 @@ module MB
         end
 
         # d.abs.max without allocating for real SFloat/DFloat buffers
-        # (FastArithmetic.min_max; dropouts-2), as a Float.
+        # (Kernels.min_max; dropouts-2), as a Float.
         def abs_peak(d)
           r = (@tail_range ||= [0.0, 0.0])
-          return d.abs.max unless MB::Sound::FastArithmetic.min_max(d, r)
+          return d.abs.max unless MB::Sound::Kernels.min_max(d, r)
           lo, hi = r
           p = -lo > hi ? -lo : hi
           p.nan? ? d.abs.max : p

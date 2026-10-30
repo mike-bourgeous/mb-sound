@@ -36,9 +36,9 @@ RSpec.describe('Tone#gain (output gain inside the oscillator)') do
 
       c = make.call.gain(env)
       r = []
-      [300, 1, 511].each { |n| r << c.sample_ruby(n).dup }
+      [300, 1, 511].each { |n| r << sample_with(:ruby, c, n).dup }
       d = make.call.gain(env)
-      e = [300, 1, 511].map { |n| d.sample_c(n).dup }
+      e = [300, 1, 511].map { |n| d.sample(n).dup }
       # (the naive complex sine's Ruby mirror differs by ~1e-16 already)
       if name == 'a complex sine'
         expect(r.zip(e).map { |x, y| (x - y).abs.max }.max).to be < 1e-6

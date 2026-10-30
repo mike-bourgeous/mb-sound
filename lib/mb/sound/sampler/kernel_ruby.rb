@@ -272,6 +272,8 @@ module MB
           v.active = v.pos >= start && v.pos < stop
         end
       end
+
+      Kernels.register :sampler_play, c: FastSampler.method(:play), ruby: KernelRuby.method(:play)
     end
   end
 end

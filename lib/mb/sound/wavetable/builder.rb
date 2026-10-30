@@ -51,7 +51,14 @@ module MB
         # with +amplitudes+ (an Array or 1D NArray, the first for harmonic 1,
         # or an Array of them for several frames) and +phases+ (radians, the
         # same shape, or nil for 0: every harmonic a sine starting at 0).
-        def spectra_from_harmonics(amplitudes, phases = nil)
+        def spectra_from_harmonics_c(amplitudes, phases = nil)
+          amps, phs = harmonic_rows(amplitudes, phases)
+          harmonics = amps.map(&:length).max
+          MB::Sound::FastWavetable.harmonic_spectra(Numo::DComplex.zeros(amps.length, harmonics + 1), amps, phs)
+        end
+
+        # The amplitude and phase rows of .spectra_from_harmonics, checked.
+        def harmonic_rows(amplitudes, phases)
           amps = to_rows(amplitudes)
           phs = phases.nil? ? amps.map { |r| Array.new(r.length, 0.0) } : to_rows(phases)
           raise ArgumentError, 'Amplitudes and phases need the same number of frames' unless phs.length == amps.length
@@ -59,16 +66,13 @@ module MB
           amps.each_with_index do |row, r|
             raise ArgumentError, "Frame #{r} has #{phs[r].length} phases for #{row.length} amplitudes" unless phs[r].length == row.length
           end
-
-          harmonics = amps.map(&:length).max
-          MB::Sound::FastWavetable.harmonic_spectra(Numo::DComplex.zeros(amps.length, harmonics + 1), amps, phs)
+          [amps, phs]
         end
 
         # Ruby mirror of FastWavetable.harmonic_spectra (see
         # .spectra_from_harmonics).
         def spectra_from_harmonics_ruby(amplitudes, phases = nil)
-          amps = to_rows(amplitudes)
-          phs = phases.nil? ? amps.map { |r| Array.new(r.length, 0.0) } : to_rows(phases)
+          amps, phs = harmonic_rows(amplitudes, phases)
           harmonics = amps.map(&:length).max
           spectra = Numo::DComplex.zeros(amps.length, harmonics + 1)
           amps.each_with_index do |row, r|
@@ -165,7 +169,7 @@ module MB
         # the second half, halved (DFloat [frames]): a phase warp of width w
         # moves a frame's DC offset by this times (2w - 1) (see
         # Tone#pwm).  Only odd harmonics count.
-        def half_means(spectra)
+        def half_means_c(spectra)
           rows = spectra.shape[0]
           out = Numo::DFloat.zeros(rows)
           return out if rows == 0
@@ -365,6 +369,11 @@ module MB
           [levels, loop_levels]
         end
       end
+
+      Kernels.register :harmonic_spectra, on: Builder.singleton_class, as: :spectra_from_harmonics,
+        c: :spectra_from_harmonics_c, ruby: :spectra_from_harmonics_ruby, covers: %w[FastWavetable.harmonic_spectra]
+      Kernels.register :half_means, on: Builder.singleton_class, as: :half_means, c: :half_means_c, ruby: :half_means_ruby,
+        covers: %w[FastWavetable.half_means]
     end
   end
 end

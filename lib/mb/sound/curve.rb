@@ -330,7 +330,21 @@ module MB
       # a contiguous Numo::DFloat; returns the values.  Used by glides.
       def lookup(t)
         t = Numo::DFloat.cast(t) unless t.is_a?(Numo::DFloat) && t.contiguous?
-        MB::Sound::FastClip.curve_lookup(t, *value_table)
+        Kernels.curve_lookup(t, *value_table)
+      end
+
+      # The Ruby mirror of FastClip.curve_lookup (its arguments: positions
+      # +t+, then the value table's four columns): .lookup_ruby for each
+      # position, written into +t+ when it is a contiguous DFloat.
+      def self.curve_lookup_ruby(t, fl, fr, dl, dr)
+        table = [fl, fr, dl, dr]
+        values = t.to_a.map { |x| lookup_ruby(table, x.to_f) }
+        if t.is_a?(Numo::DFloat) && t.contiguous?
+          t[true] = values
+          t
+        else
+          Numo::DFloat.cast(values)
+        end
       end
 
       # Ruby mirror of #lookup's C kernel (MB::Sound::FastClip.curve_lookup)
@@ -624,6 +638,8 @@ module MB
                     scalar: ->(x) { f.call(x * 0.5 + 0.5) * 2.0 - 1.0 }, vector: ->(x) { f.map(x * 0.5 + 0.5) * 2.0 - 1.0 })
         end
       end
+
+      Kernels.register :curve_lookup, c: FastClip.method(:curve_lookup), ruby: Curve.method(:curve_lookup_ruby)
     end
   end
 end

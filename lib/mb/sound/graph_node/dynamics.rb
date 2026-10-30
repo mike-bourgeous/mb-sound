@@ -550,7 +550,7 @@ module MB
           times.clear
           @times.each_value { |s| times << fit(s.samples(n, @sample_rate) || 0, n) }
           @params ||= kernel_params
-          MB::Sound::FastDynamics.compand(outs, data, sides, @transfer.table, @params, times, @state, @delay)
+          Kernels.compand(outs, data, sides, @transfer.table, @params, times, @state, @delay)
         end
 
         # +v+ as a kernel signal of +n+ samples: numbers and nil pass, long
@@ -692,6 +692,8 @@ module MB
         end
         node.outputs
       end
+
+      Kernels.register :compand, c: FastDynamics.method(:compand), ruby: Dynamics.method(:process_ruby)
     end
   end
 end

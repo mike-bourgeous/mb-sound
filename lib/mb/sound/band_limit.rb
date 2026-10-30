@@ -52,28 +52,17 @@ module MB
         return [Numo::SFloat[], Numo::SFloat[]] if count == 0
 
         phases, incs = sync_phases(phi, freq, advance, count, bufs&.[](0))
-        MB::Sound::FastSynth.sync_pulse_edges(phases, incs, prev, EPS, bufs&.[](1)) || sync_edges_ruby(phases, incs, prev, count)
-      end
-
-      # The Ruby mirror of .sync_pulses (FastSynth.sync_pulse_edges' Ruby
-      # half), for specs.
-      def self.sync_pulses_ruby(phi, freq, advance, count, prev)
-        return [Numo::SFloat[], Numo::SFloat[]] if count == 0
-
-        @ruby_phases = true
-        phases, incs = sync_phases(phi, freq, advance, count)
-        sync_edges_ruby(phases, incs, prev, count)
-      ensure
-        @ruby_phases = false
+        Kernels.sync_pulse_edges(phases, incs, prev, EPS, bufs&.[](1)) || sync_edges_ruby(phases, incs, prev, count)
       end
 
       # The phases and increments (DFloats) .sync_pulses finds pulses in.
       # (+out+: reused [phases, increments] DFloats for the C kernel; see
       # .sync_pulses)
       def self.sync_phases(phi, freq, advance, count, out = nil)
-        # (a frequency signal in C when it can: FastSynth.sync_running_phases)
-        if freq.is_a?(Numo::SFloat) && freq.length == count && !@ruby_phases
-          r = MB::Sound::FastSynth.sync_running_phases(freq, advance, phi.is_a?(Array) ? phi[0].to_f : phi, out)
+        # (a frequency signal through the kernel when it can:
+        # FastSynth.sync_running_phases or its mirror)
+        if freq.is_a?(Numo::SFloat) && freq.length == count
+          r = Kernels.sync_running_phases(freq, advance, phi.is_a?(Array) ? phi[0].to_f : phi, out)
           return r if r
         end
 
@@ -103,6 +92,58 @@ module MB
         incs = Numo::DFloat.cast(incs) unless incs.is_a?(Numo::DFloat)
 
         [phases, incs]
+      end
+
+      # The Ruby mirror of FastSynth.sync_running_phases: the increments
+      # (float frequencies times +advance+) and the running phase from
+      # +phase+ (Tone.wrap_phase after each step), as new DFloats or into
+      # +out+ (two writable contiguous DFloats as long as +freq+); nil where
+      # the kernel declines.
+      def self.sync_running_phases_ruby(freq, advance, phase, out = nil)
+        return nil unless freq.class == Numo::SFloat && freq.ndim == 1 && freq.contiguous? && freq.size > 0
+        return nil unless (advance.is_a?(Float) || advance.is_a?(Integer)) && (phase.is_a?(Float) || phase.is_a?(Integer))
+
+        n = freq.size
+        incs = Numo::DFloat.cast(freq) * advance.to_f
+        phases = Numo::DFloat.zeros(n)
+        ph = Tone.wrap_phase(phase.to_f)
+        n.times do |i|
+          phases[i] = ph
+          ph = Tone.wrap_phase(ph + incs[i])
+        end
+        return [phases, incs] unless out_pair?(out, Numo::DFloat, n)
+
+        out[0][true] = phases
+        out[1][true] = incs
+        out
+      end
+
+      # The Ruby mirror of FastSynth.sync_pulse_edges (the same declines; the
+      # edges from .sync_edges_ruby, written into +out+ like the kernel).
+      def self.sync_pulse_edges_ruby(phases, incs, prev, eps, out = nil)
+        return nil unless phases.class == Numo::DFloat && incs.class == Numo::DFloat && prev.is_a?(Array) && prev.length == 3
+        return nil unless phases.ndim == 1 && incs.ndim == 1 && phases.contiguous? && incs.contiguous?
+
+        n = phases.size
+        return nil if n == 0 || incs.size != n || phases.frozen?
+
+        pv, iv, mv = prev
+        return nil unless (pv.is_a?(Float) || pv.is_a?(Integer)) && (iv.is_a?(Float) || iv.is_a?(Integer)) && mv.is_a?(Integer)
+        raise ArgumentError, 'BandLimit::EPS is the only edge tolerance' unless eps == EPS
+
+        pulses, incs_out = sync_edges_ruby(phases, incs, prev, n)
+        return [pulses, incs_out] unless out_pair?(out, Numo::SFloat, n)
+
+        out[0][true] = pulses
+        out[1][true] = incs_out
+        out
+      end
+
+      # True if +out+ is two writable contiguous +klass+ NArrays of +n+
+      # values (the kernels' reused output pair).
+      def self.out_pair?(out, klass, n)
+        out.is_a?(Array) && out.length == 2 &&
+          out.all? { |b| b.class == klass && b.ndim == 1 && b.size == n && !b.frozen? && b.contiguous? }
       end
 
       # The edge part of .sync_pulses in Numo (see
@@ -1273,6 +1314,10 @@ module MB
 
         out
       end
+
+      Kernels.register :sync_pulse_edges, c: FastSynth.method(:sync_pulse_edges), ruby: BandLimit.method(:sync_pulse_edges_ruby), declines: true
+      Kernels.register :sync_running_phases, c: FastSynth.method(:sync_running_phases), ruby: BandLimit.method(:sync_running_phases_ruby),
+        declines: true
     end
   end
 end

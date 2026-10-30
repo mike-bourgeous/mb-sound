@@ -12,7 +12,7 @@ module MB
       #
       # Like the separate nodes, buffers without events (or whose events
       # leave an output unchanged) are constant frozen buffers with
-      # Notes.fast_paths on.
+      # Kernels.notes_fast? on.
       class EnvelopeInputs < NoteNode
         # One of the extra outputs of an EnvelopeInputs (see there).
         class Port
@@ -163,7 +163,7 @@ module MB
 
           fill.(start, count) if start < count
 
-          fast = Notes.fast_paths
+          fast = Kernels.notes_fast?
           @outs[:trigger] = fast && quiet_trigger ? constant_buffer(count, 0.0, :trigger) : trig
           @outs[:velocity] = fast && vel_uniform && vel_first.is_a?(Float) ? constant_buffer(count, vel_first, :velocity) : vel
           @outs[:choke] = fast && quiet_choke ? constant_buffer(count, 0.0, :choke) : chk

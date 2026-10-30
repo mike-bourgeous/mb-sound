@@ -258,12 +258,12 @@ RSpec.describe 'Buffer size invariance' do
       'cycle wavetable' => ->(f) { f.tone.wavetable(MB::Sound::Wavetable.from_harmonics([1, 0.5], size: 64)) },
     }.each do |name, make|
       it "gives the Ruby mirror's samples for a #{name} with wild frequencies" do
-        tones = [:sample_c, :sample_ruby].map { |m|
+        tones = [:c, :ruby].map { |m|
           MB::Sound.seed(5)
           [m, make.(MB::Sound.noise.at(150_000) + 300.hz.at(400))]
         }
         [128, 37, 800].each do |n|
-          a, b = tones.map { |m, t| t.public_send(m, n).dup }
+          a, b = tones.map { |m, t| sample_with(m, t, n).dup }
           expect(b.to_a).to eq(a.to_a)
         end
       end
@@ -332,12 +332,12 @@ RSpec.describe 'Buffer size invariance' do
       },
     }.each do |name, make|
       it "gives the Ruby mirror's samples and state for a #{name} across grid points" do
-        tones = [:sample_c, :sample_ruby].map { |m|
+        tones = [:c, :ruby].map { |m|
           MB::Sound.seed(5)
           [m, make.()]
         }
         [367, 1, 1031, 800, 433].each do |n|
-          a, b = tones.map { |m, t| t.public_send(m, n).dup }
+          a, b = tones.map { |m, t| sample_with(m, t, n).dup }
           expect(b.to_a).to eq(a.to_a)
           expect(tones[1][1].state.phase).to eq(tones[0][1].state.phase)
           expect(tones[1][1].state.table).to eq(tones[0][1].state.table)

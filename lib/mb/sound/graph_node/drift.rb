@@ -145,7 +145,7 @@ module MB
           return nil if @jitter_node && jitter.nil?
 
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          MB::Sound::FastTexture.drift(
+          Kernels.drift(
             @buf, r, @state, @rng, @sample_rate, @range.begin, @range.end, @mode, @walk,
             @table, hold_lo, hold_hi, @hold_kind == :samples ? 1 : 0, jitter
           )
@@ -403,6 +403,8 @@ module MB
           end
         end
       end
+
+      Kernels.register :drift, c: FastTexture.method(:drift), ruby: Drift.method(:process_ruby)
     end
   end
 end

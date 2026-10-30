@@ -555,7 +555,7 @@ module MB
           if n > 0 && data
             m = MB::M.min(n, data.length)
             # (without views for SFloat data; dropouts-2)
-            if m > 0 && !MB::Sound::FastArithmetic.copy_range(buf, pos, data, 0, m)
+            if m > 0 && !MB::Sound::Kernels.copy_range(buf, pos, data, 0, m)
               d = data[0...m]
               d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
               buf[pos...(pos + m)] = d
@@ -882,7 +882,7 @@ module MB
         end
 
         # #deliver_player's additions for one channel without Numo views or
-        # temporaries (FastArithmetic.accumulate: the same float steps as
+        # temporaries (Kernels.accumulate: the same float steps as
         # its Numo code), for SFloat data, ramps, and send levels that are
         # Floats, Integers, or SFloats.  Returns false (having added
         # nothing) for anything else.
@@ -908,7 +908,7 @@ module MB
         # out[offset, len] += d[0, len] * a[0, len] * b[b_offset, len]
         # (factors nil, numbers, or SFloats), with Numo if the kernel can't.
         def acc_add(out, offset, d, len, a, b, b_offset)
-          return if FastArithmetic.accumulate(out, offset, d, 0, len, a, 0, b, b_offset)
+          return if Kernels.accumulate(out, offset, d, 0, len, a, 0, b, b_offset)
 
           x = d[0...len]
           x = x * (a.is_a?(Numeric) ? a : a[0...len]) if a
@@ -1009,7 +1009,7 @@ module MB
             while (c += 1) < out.length # (no each_with_index: an imemo a call)
               o = out[c]
               acc_add(tap[c], p0, o, n, nil, nil, 0) if tap # (readers hear it before its mute)
-              (FastArithmetic.scale(o, ramp) || o.inplace * ramp) if ramp
+              (Kernels.scale(o, ramp) || o.inplace * ramp) if ramp
               acc_add(dest[c], p0, o, n, nil, nil, 0)
               acc_add(stem[c], p0, o, n, nil, nil, 0) if stem
               meter&.bus_output(b.name, c, o)
@@ -1141,7 +1141,7 @@ module MB
         # The index (from +p0+) of the last of +n+ samples of +x+ from +p0+
         # at or above Master::TAIL_THRESHOLD, or nil.
         def bus_last_loud(x, p0, n)
-          i = FastArithmetic.last_at_least(x, p0, n, Master::TAIL_THRESHOLD)
+          i = Kernels.last_at_least(x, p0, n, Master::TAIL_THRESHOLD)
           if i.nil?
             idx = x[p0...(p0 + n)].abs.ge(Master::TAIL_THRESHOLD).where
             return idx.length > 0 ? idx[-1] : nil

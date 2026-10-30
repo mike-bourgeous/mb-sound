@@ -173,9 +173,9 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
       fast2 = described_class.new(1.n128, mode: :hz, transport: MB::Sound::Sequence::Transport.new(bpm: 1920))
       r = MB::Sound::Pitch.new(fast2).saw
       [fast, fast2].each { |f| f.start_at(0) }
-      expect(c.sample_c(100)).to eq(r.sample_ruby(100))
+      expect(c.sample(100)).to eq(sample_with(:ruby, r, 100))
       [fast, fast2].each { |f| f.start_at(1/3r) }
-      expect(c.sample_c(100)).to eq(r.sample_ruby(100))
+      expect(c.sample(100)).to eq(sample_with(:ruby, r, 100))
     end
 
     it 'freewheels the tempo node from a tone without searching the graph' do

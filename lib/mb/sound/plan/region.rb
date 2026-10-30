@@ -70,6 +70,7 @@ module MB
           members.each { |m| add_member(m) }
           @unfused = false
           @program = nil
+          @kernel_stateful = nil
           @disabled = nil
           @types = {}
           @planned_blocks = 0
@@ -234,6 +235,7 @@ module MB
 
         rescue Unsupported => e
           @program = nil
+          @kernel_stateful = nil
           @installation.unsupported!(e.node, e.message)
           nil
         end
@@ -251,6 +253,7 @@ module MB
 
           @pads = pads
           @program = nil
+          @kernel_stateful = nil
           @recompile = false
           compile(start: false)
         end
@@ -275,6 +278,7 @@ module MB
           if @recompile
             @recompile = false
             @program = nil
+          @kernel_stateful = nil
           end
           compile(start: false)
         end
@@ -392,6 +396,7 @@ module MB
           if @recompile
             @recompile = false
             @program = nil
+          @kernel_stateful = nil
           end
 
           unless @program || compile
@@ -678,6 +683,7 @@ module MB
 
           if mismatch
             @program = nil
+          @kernel_stateful = nil
             return :mismatch
           end
 
@@ -700,6 +706,7 @@ module MB
             c = op.constant
             if c.plan_complex? && !op.dst.complex?
               @program = nil
+          @kernel_stateful = nil
               return :mismatch
             end
             params[k] = c.plan_param(count) # as its readers would sample it
@@ -721,14 +728,33 @@ module MB
             k += 1
           end
 
-          if @installation.engine == :ruby
-            result = @program.run_ruby(n, @inputs, @params)
-            out = out_view(n)
-            out[true] = result
-            out
-          else
-            @program.run(n, @inputs, @params, out_view(n))
-          end
+          run_program(n)
+        end
+
+        # The program in C (FastPlan.run) for +n+ samples into #out_view;
+        # #run_program is the :plan kernel (C, or #run_program_ruby, its
+        # Ruby mirror; see MB::Sound::Kernels).
+        def run_program_c(n)
+          @program.run_c(n, @inputs, @params, out_view(n))
+        end
+
+        # The Ruby mirror of #run_program_c (each op's #run_ruby).
+        def run_program_ruby(n)
+          result = @program.run_ruby(n, @inputs, @params)
+          out = out_view(n)
+          out[true] = result
+          out
+        end
+
+        # The region's node states, for the :plan kernel's check mode.
+        def kernel_state
+          @kernel_stateful ||= @members.select { |m| m.respond_to?(:plan_snapshot) }
+          @kernel_stateful.map(&:plan_snapshot)
+        end
+
+        # Restores #kernel_state.
+        def restore_kernel_state(states)
+          @kernel_stateful.each_with_index { |m, i| m.plan_restore(states[i]) }
         end
 
         # The output buffer's first +n+ samples (a view reused while +n+
@@ -867,6 +893,9 @@ module MB
           reference
         end
       end
+
+      Kernels.register :plan, on: Region, as: :run_program, c: :run_program_c, ruby: :run_program_ruby,
+        state: %i[kernel_state restore_kernel_state], covers: %w[FastPlan.run], about: "a fused region's op list (Plan::Program)"
     end
   end
 end

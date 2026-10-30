@@ -119,7 +119,7 @@ module MB
 
         # True for a '**' ProcNode whose base is a Constant or Knob (a patch
         # constant): at MB::Sound.precision :fast it raises with the fast
-        # 2^(b log2 a) (FastArithmetic.power_fast), as its plan op does
+        # 2^(b log2 a) (Kernels.power_fast), as its plan op does
         # (Plan::Op::Pow#fast).
         attr_accessor :fast_power_base
 

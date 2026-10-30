@@ -135,10 +135,10 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       expect(st2).to eq(st)
     end
 
-    it 'gives identical samples through #dynamic_process_ruby' do
+    it 'gives identical samples through the Ruby mirror' do
       f1 = diode(cutoff: 500, resonance: 0.8, drive: 2)
       f2 = diode(cutoff: 500, resonance: 0.8, drive: 2)
-      expect(f1.dynamic_process(noise, cutoff: cutoffs, resonance: 0.7)).to eq(f2.dynamic_process_ruby(noise, cutoff: cutoffs, resonance: 0.7))
+      expect(f1.dynamic_process(noise, cutoff: cutoffs, resonance: 0.7)).to eq(MB::Sound::Kernels.with(:ruby) { f2.dynamic_process(noise, cutoff: cutoffs, resonance: 0.7) })
       expect(f1.state).to eq(f2.state)
     end
   end

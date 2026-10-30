@@ -185,8 +185,10 @@ module PlanSpecHelpers
     end
 
     installations = {}
+    # (the :ruby copy runs the plan kernels' Ruby mirrors: MB::Sound::Kernels)
+    in_engine = ->(e, &blk) { e == :ruby ? MB::Sound::Kernels.with(fast_plan: :ruby, &blk) : blk.call }
     engines.each do |e|
-      inst = MB::Sound::Plan.install(graphs[e], engine: e, check: check)
+      inst = in_engine.(e) { MB::Sound::Plan.install(graphs[e], check: check) }
       expect(inst).not_to be_nil, "expected a plan for #{graphs[e]}"
       installations[e] = inst
     end
@@ -195,8 +197,8 @@ module PlanSpecHelpers
     sizes.each_with_index do |n, i|
       copies.each do |e, ctx|
         ctx.events[i].each { |ev| ev.call }
-        out = graphs[e].sample(n)
-        outputs[e] << out&.dup
+        out = in_engine.(e) { graphs[e].sample(n)&.dup }
+        outputs[e] << out
       end
 
       ref = outputs[:unfused].last

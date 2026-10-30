@@ -118,14 +118,14 @@ module MB
           events = @reader.events(from, to)
           chase = take_chase(to)
 
-          out = (events.empty? && chase.nil? && Notes.fast_paths && steady_buffer(count))
+          out = (events.empty? && chase.nil? && Kernels.notes_fast? && steady_buffer(count))
           unless out
             @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
             uniform = render(@buf, items(events, chase, from, @rate_r, count))
 
             # Events that left the output constant (e.g. note events seen by
             # a controller) give the constant buffer too
-            out = uniform.is_a?(Float) && Notes.fast_paths ? constant_buffer(count, uniform) : @buf
+            out = uniform.is_a?(Float) && Kernels.notes_fast? ? constant_buffer(count, uniform) : @buf
           end
 
           out = smooth_output(out) if @smoother
@@ -516,7 +516,7 @@ module MB
               @uniform = false
             end
 
-            buf[from...to] = value unless FastArithmetic.fill_range(buf, from, to, value)
+            buf[from...to] = value unless Kernels.fill_range(buf, from, to, value)
           end
 
           def steady_buffer(count)

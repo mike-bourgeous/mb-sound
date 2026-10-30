@@ -207,13 +207,14 @@ RSpec.describe(MB::Sound::Plan::Installation) do
       ops = prog.ops.map { |op| op.equal?(mul) ? bad.new(op.dst, op.node, op.a, op.b) : op }
       tampered = MB::Sound::Plan::Program.new(ops: ops, inputs: prog.inputs, params: prog.params, output: prog.output)
       inst.regions[0].instance_variable_set(:@program, tampered)
-      inst.instance_variable_set(:@engine, :ruby)
+      MB::Sound::Kernels.set(plan: :ruby)
       expect { g.sample(16) }.to raise_error(MB::Sound::Plan::CheckFailed, /samples differ/)
     end
 
     it 'warns and stops planning the region with :warn' do
       g = 220.hz.sine * src.new(seed: 1) * 2
-      inst = MB::Sound::Plan.install(g, check: :warn, engine: :ruby)
+      MB::Sound::Kernels.set(plan: :ruby)
+      inst = MB::Sound::Plan.install(g, check: :warn)
       g.sample(16)
       prog = inst.regions[0].program
       mul = prog.ops.grep(MB::Sound::Plan::Op::Mul).last

@@ -85,7 +85,7 @@ RSpec.describe(MB::Sound::Filter::Biquad, :aggregate_failures) do
     end
   end
 
-  [:process_c, :process_ruby_c].each do |m|
+  [:process_c, :process_ruby].each do |m|
     describe "##{m}" do
       [Numo::SFloat, Numo::DFloat].each do |c|
         context "with #{c}" do

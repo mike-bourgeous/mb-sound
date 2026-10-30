@@ -78,15 +78,14 @@ RSpec.describe('UI round 4 feed') do
     end
 
     it 'gives the same levels with the Ruby mirror' do
-      levels = [true, false].map do |native|
-        MB::Sound::UI::BusMeter.native = native
-        s, feed = bus_session
-        snap = run(s, feed, 12)
-        [snap.bus_levels, snap.send_levels]
+      levels = [:c, :ruby].map do |mode|
+        MB::Sound::Kernels.with(mode, peak_sumsq: mode) do
+          s, feed = bus_session
+          snap = run(s, feed, 12)
+          [snap.bus_levels, snap.send_levels]
+        end
       end
       expect(levels[0]).to eq(levels[1])
-    ensure
-      MB::Sound::UI::BusMeter.native = true
     end
 
     it 'publishes nothing for buses unless a pane needs them' do

@@ -343,7 +343,7 @@ end
 # and installs plans on it as a Session would.
 def capture_with_plans(script, args, mode)
   MB::Sound::Plan.enabled = mode != :off
-  MB::Sound::Plan.engine = mode == :ruby ? :ruby : :c
+  MB::Sound::Kernels.set(fast_plan: mode == :ruby ? :ruby : :c)
   graph = capture_graph(script, args)
   outputs = outputs_of(graph)
   MB::Sound::Plan.install(outputs) if mode != :off

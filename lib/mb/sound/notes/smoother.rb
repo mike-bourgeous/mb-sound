@@ -199,14 +199,15 @@ module MB
 
           buf = Numo::SFloat.cast(buf) unless buf.is_a?(Numo::SFloat) && buf.contiguous?
           @out = Numo::SFloat.zeros(count) if @out.nil? || @out.length != count
-          self.class.run(buf, @out, 0, count, st, @ring1, @ring2, jumps, c: true)
+          self.class.run(buf, @out, 0, count, st, @ring1, @ring2, jumps)
           @out
         end
 
         # Like #process (no constant shortcut), jumping to the input at
         # every nonzero sample of +reset+ (GraphNode#smooth's reset:), in C
         # (FastControl.reset_run); the same as #process with the reset's
-        # nonzero offsets as jumps.
+        # nonzero offsets as jumps (the Ruby mirror, .reset_run_ruby, is
+        # that).
         def process_reset(buf, reset)
           count = buf.length
           settle_at(buf[0]) if @state.nil?
@@ -217,9 +218,9 @@ module MB
           return @out if count == 0
 
           if reset.length < count
-            self.class.run(buf, @out, 0, count, @state, @ring1, @ring2, reset.ne(0).where.to_a, c: true)
+            self.class.run(buf, @out, 0, count, @state, @ring1, @ring2, reset.ne(0).where.to_a)
           else
-            FastControl.reset_run(buf, @out, @state, @ring1, @ring2, reset)
+            Kernels.smooth_reset_run(buf, @out, @state, @ring1, @ring2, reset)
           end
           @out
         end
@@ -227,29 +228,36 @@ module MB
         # Smooths x[from...to] into out[from...to] with +state+ and the rings
         # (the fixed kernel's, or the adaptive one's for an ADAPTIVE_STATE
         # state), jumping to the input at the offsets in +jumps+ (sorted;
-        # others ignored), in C or (+c+ false) with the Ruby mirrors.  Plans
-        # (Plan::Op::Smooth) run the same steps.
-        def self.run(x, out, from, to, state, ring1, ring2, jumps, c: true)
+        # others ignored), through the kernels (FastControl, or the Ruby
+        # mirrors; see MB::Sound::Kernels).  Plans (Plan::Op::Smooth) run the
+        # same steps.
+        def self.run(x, out, from, to, state, ring1, ring2, jumps)
           start = from
           jumps&.each do |j|
             next if j < start || j >= to
-            segment(x, out, start, j, state, ring1, ring2, c) if j > start
+            segment(x, out, start, j, state, ring1, ring2) if j > start
             jump(state, x[j], ring1, ring2)
             start = j
           end
-          segment(x, out, start, to, state, ring1, ring2, c) if start < to
+          segment(x, out, start, to, state, ring1, ring2) if start < to
           out
         end
 
         # Runs one kernel over x[from...to] (see .run).
-        def self.segment(x, out, from, to, state, ring1, ring2, c)
+        def self.segment(x, out, from, to, state, ring1, ring2)
           if state.length == ADAPTIVE_STATE
-            c ? FastControl.adaptive(x, out, from, to, state) : adaptive_ruby(x, out, from, to, state)
+            Kernels.smooth_adaptive(x, out, from, to, state)
           elsif state.length == CURVE_STATE
-            c ? FastControl.curve(x, out, from, to, state, ring1, ring2) : curve_ruby(x, out, from, to, state, ring1, ring2)
+            Kernels.smooth_curve(x, out, from, to, state, ring1, ring2)
           else
-            c ? FastControl.smooth(x, out, from, to, state, ring1, ring2) : smooth_ruby(x, out, from, to, state, ring1, ring2)
+            Kernels.smooth(x, out, from, to, state, ring1, ring2)
           end
+        end
+
+        # The Ruby mirror of FastControl.reset_run: .run with a jump at every
+        # nonzero sample of +reset+.
+        def self.reset_run_ruby(x, out, state, ring1, ring2, reset)
+          run(x, out, 0, x.length, state, ring1, ring2, reset[0...x.length].ne(0).where.to_a)
         end
 
         # Makes the output jump to +value+ (the input at a jump offset):
@@ -529,6 +537,11 @@ module MB
           end
         end
       end
+
+      Kernels.register :smooth, c: FastControl.method(:smooth), ruby: Smoother.method(:smooth_ruby)
+      Kernels.register :smooth_adaptive, c: FastControl.method(:adaptive), ruby: Smoother.method(:adaptive_ruby)
+      Kernels.register :smooth_curve, c: FastControl.method(:curve), ruby: Smoother.method(:curve_ruby)
+      Kernels.register :smooth_reset_run, c: FastControl.method(:reset_run), ruby: Smoother.method(:reset_run_ruby)
     end
   end
 end

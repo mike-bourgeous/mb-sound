@@ -48,12 +48,12 @@ module MB
         #
         # While the note number and offset nodes return the same frozen
         # buffers (Notes nodes without events) and the tuning is the same,
-        # returns the same frozen buffer (see Notes.fast_paths).
+        # returns the same frozen buffer (see Kernels.notes_fast?).
         def sample(count)
           n = @number.sample(count)
           return nil if n.nil?
 
-          return steady(n) if Notes.fast_paths && n.frozen?
+          return steady(n) if Kernels.notes_fast? && n.frozen?
 
           compute(n)
         end
@@ -130,7 +130,7 @@ module MB
           end
 
           tuning = Tuning.current
-          @buf = MB::FastSound.number_to_freq(@buf.inplace!, tuning.note, tuning.frequency)
+          @buf = MB::Sound::Kernels.number_to_freq(@buf.inplace!, tuning.note, tuning.frequency)
           @buf.not_inplace!
           @value = @buf[-1]
           @buf

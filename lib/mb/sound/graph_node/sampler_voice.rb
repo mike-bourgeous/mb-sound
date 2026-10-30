@@ -141,20 +141,7 @@ module MB
           choke = @choke && (read(@choke, count) or return nil)
 
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          MB::Sound::FastSampler.play(@buf, @specs, @regions, @state, @counters, @rng, [trig, num, freq, gate, start, shift, choke], config)
-        end
-
-        # The same samples through the Ruby mirror (for specs).
-        def sample_ruby(count)
-          trig = read(@trigger, count) or return nil
-          num = read(@number, count) or return nil
-          freq = @freq && (read(@freq, count) or return nil)
-          gate = @gate && (read(@gate, count) or return nil)
-          start = read(@start, count) or return nil
-          shift = read(@shift, count) or return nil
-          choke = @choke && (read(@choke, count) or return nil)
-          out = Numo::SFloat.zeros(count)
-          Sampler::KernelRuby.play(out, @specs, @regions, @state, @counters, @rng, [trig, num, freq, gate, start, shift, choke], config)
+          Kernels.sampler_play(@buf, @specs, @regions, @state, @counters, @rng, [trig, num, freq, gate, start, shift, choke], config)
         end
 
         def sources

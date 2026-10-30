@@ -133,11 +133,11 @@ module MB
         private
 
         # The real (or +imag+inary) parts of complex +data+ in a reused
-        # buffer (FastArithmetic.complex_part), or nil to use Numo.
+        # buffer (Kernels.complex_part), or nil to use Numo.
         def part(data, imag)
           cls = data.is_a?(Numo::SComplex) ? Numo::SFloat : Numo::DFloat
           @part_buf = cls.zeros(data.length) unless @part_buf && @part_buf.class == cls && @part_buf.length == data.length
-          MB::Sound::FastArithmetic.complex_part(@part_buf, data, imag)
+          MB::Sound::Kernels.complex_part(@part_buf, data, imag)
         end
       end
     end

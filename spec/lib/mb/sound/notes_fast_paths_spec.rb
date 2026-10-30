@@ -1,14 +1,7 @@
 # Null tests for the fast paths of Notes nodes, NoteEnvelopes, and Synth
-# (MB::Sound::Notes.fast_paths): the same synth must give exactly the same
-# samples with them on and off.
+# (MB::Sound::Kernels' :notes_fast path): the same synth must give exactly
+# the same samples with them on and off.
 RSpec.describe('MB::Sound::Notes fast paths', :check_shared) do
-  around do |example|
-    old = MB::Sound::Notes.fast_paths
-    example.run
-  ensure
-    MB::Sound::Notes.fast_paths = old
-  end
-
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 150) }
 
   # A patch using every kind of Notes node: note nodes, channel nodes,
@@ -28,7 +21,7 @@ RSpec.describe('MB::Sound::Notes fast paths', :check_shared) do
   # Renders a synth from +source+ (made by the block, once per run) with
   # buffers of +sizes+ in turn, for +seconds+.
   def render(fast, seconds:, sizes: [128], voices: 3, spares: 0, skip_idle: false, &source)
-    MB::Sound::Notes.fast_paths = fast
+    MB::Sound::Kernels.set(notes_fast: fast ? :c : :ruby)
     synth = MB::Sound::Synth.new(source.call, voices: voices, spares: spares, seed: 3, tail: 0, skip_idle: skip_idle, &patch)
     out = []
     total = 0
@@ -105,7 +98,7 @@ RSpec.describe('MB::Sound::Notes fast paths', :check_shared) do
     clip = MB::Sound.seq(MB::Sound::C3, MB::Sound::E3, MB::Sound::G3.n4, MB::Sound::B3).n8.loop
 
     [true, false].map { |fast|
-      MB::Sound::Notes.fast_paths = fast
+      MB::Sound::Kernels.set(notes_fast: fast ? :c : :ruby)
       src = MB::Sound::MIDI::ClipSource.new(clip, transport: transport)
       synth = MB::Sound::Synth.new(src, voices: 2, spares: 1, seed: 3, &patch)
       SpecBuffers.join(30.times.map { |i|

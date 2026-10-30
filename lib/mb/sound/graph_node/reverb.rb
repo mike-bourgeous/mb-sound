@@ -963,7 +963,7 @@ module MB
 
         # Output +index+'s wet group sum times the wet gain plus its dry group
         # sum, as #sample_internal's Numo expression (Array#sum adds to 0 in
-        # order), in reused buffers without allocating (FastArithmetic.mix
+        # order), in reused buffers without allocating (Kernels.mix
         # and .wet_dry), or nil to use Numo.
         def mix_output(index)
           wet = @output_groups[index]
@@ -977,8 +977,8 @@ module MB
           wet_pairs = unity_pairs(bufs[2], wet)
           dry_pairs = unity_pairs(bufs[3], dry)
 
-          return nil unless MB::Sound::FastArithmetic.mix(bufs[0], 0, wet_pairs) && MB::Sound::FastArithmetic.mix(bufs[1], 0, dry_pairs)
-          MB::Sound::FastArithmetic.wet_dry(bufs[0], bufs[0], @wet * @level * @output_scales[index], bufs[1], 1)
+          return nil unless MB::Sound::Kernels.mix(bufs[0], 0, wet_pairs) && MB::Sound::Kernels.mix(bufs[1], 0, dry_pairs)
+          MB::Sound::Kernels.wet_dry(bufs[0], bufs[0], @wet * @level * @output_scales[index], bufs[1], 1)
         end
 
         # Fills reused [buffer, 1] pairs in +pairs+ for each of +bufs+.
@@ -994,7 +994,7 @@ module MB
 
         # Returns dry channel +c+ (input +idx+) times the dry gain: in place,
         # or for a frozen buffer into a reused one, with
-        # FastArithmetic.wet_dry for SFloat buffers and Numeric gains (the
+        # Kernels.wet_dry for SFloat buffers and Numeric gains (the
         # same product as Numo's, (float)dry * x), else with Numo.
         def scale_dry(c, idx)
           target = c
@@ -1003,7 +1003,7 @@ module MB
             target = bufs[idx]
             target = bufs[idx] = c.class.zeros(c.length) unless target && target.class == c.class && target.length == c.length
           end
-          return target if MB::Sound::FastArithmetic.wet_dry(target, c, @dry, c, nil)
+          return target if MB::Sound::Kernels.wet_dry(target, c, @dry, c, nil)
 
           ((c.frozen? ? c.dup : c).inplace * @dry).not_inplace!
         end

@@ -125,7 +125,7 @@ module MB
 
           def process(outs, data, n)
             @params ||= kernel_params
-            MB::Sound::FastDynamics.limit(outs, data, @params, @state, @rings, Limiter.phases)
+            Kernels.limit(outs, data, @params, @state, @rings, Limiter.phases)
           end
 
           public
@@ -229,6 +229,8 @@ module MB
           end
         end
       end
+
+      Kernels.register :limit, c: FastDynamics.method(:limit), ruby: Dynamics::Limiter.method(:process_ruby)
     end
   end
 end

@@ -42,14 +42,16 @@ RSpec.describe(MB::Sound::Envelope) do
     a
   end
 
-  # Samples +count+ values in +buffer+-sized chunks, using +method+ (:sample
-  # or :sample_ruby), stopping at nil.
-  def collect(env, count, buffer: 800, method: :sample)
+  # Samples +count+ values in +buffer+-sized chunks with +kernels+ (:c or
+  # :ruby, see MB::Sound::Kernels), stopping at nil.
+  def collect(env, count, buffer: 800, kernels: :c)
     out = []
-    (count.to_f / buffer).ceil.times do
-      buf = env.send(method, buffer)
-      break if buf.nil?
-      out << buf.dup
+    MB::Sound::Kernels.with(kernels) do
+      (count.to_f / buffer).ceil.times do
+        buf = env.sample(buffer)
+        break if buf.nil?
+        out << buf.dup
+      end
     end
     out.empty? ? Numo::SFloat[] : Numo::SFloat.zeros(0).concatenate(*out)[0...[count, out.sum(&:length)].min]
   end
@@ -269,7 +271,7 @@ RSpec.describe(MB::Sound::Envelope) do
       }
 
       a = collect(make.(nil), 6000, buffer: 333)
-      b = collect(make.(nil), 6000, buffer: 333, method: :sample_ruby)
+      b = collect(make.(nil), 6000, buffer: 333, kernels: :ruby)
       expect(a.to_a).to eq(b.to_a)
       expect(a.max).to be > 0.5
     end
@@ -343,13 +345,13 @@ RSpec.describe(MB::Sound::Envelope) do
     end
 
     it 'holds the level where the last segment landed, from the landing sample on, in C and Ruby' do
-      [:sample, :sample_ruby].each do |method|
+      [:c, :ruby].each do |kernels|
         [1, 7, 128, 800].each do |buffer|
           env = dive(pulses(1000, 0...200), hold_last: true)
-          out = collect(env, 1000, buffer: buffer, method: method)
+          out = collect(env, 1000, buffer: buffer, kernels: kernels)
           expect(out[0...200].to_a.uniq).to eq([0])
           expect(out[250]).to be_within(1e-6).of(-0.5)
-          expect(out[300..].to_a.uniq).to eq([-1]), "#{method} at #{buffer}"
+          expect(out[300..].to_a.uniq).to eq([-1]), "#{kernels} at #{buffer}"
           expect(env.stage).to eq(:idle)
           expect(env.idle?).to eq(true)
           expect(env.level).to eq(-1)
@@ -603,7 +605,7 @@ RSpec.describe(MB::Sound::Envelope) do
       gates = [quiet, quiet, on, off, quiet, quiet, quiet, quiet, quiet, quiet]
       trigs = [quiet, quiet, quiet, quiet, quiet, trig, quiet, quiet, quiet, quiet]
 
-      envs = [:sample, :sample_ruby].map { |method|
+      envs = [:c, :ruby].map { |kernels|
         g = gates.dup
         tr = trigs.dup
         env = described_class.new(
@@ -611,7 +613,7 @@ RSpec.describe(MB::Sound::Envelope) do
           gate: MB::Sound::GraphNode::ProcNode.new(0.constant) { g.shift },
           trigger: MB::Sound::GraphNode::ProcNode.new(0.constant) { tr.shift }
         )
-        data = SpecBuffers.join(gates.length.times.map { env.public_send(method, 100).dup })
+        data = MB::Sound::Kernels.with(kernels) { SpecBuffers.join(gates.length.times.map { env.sample(100).dup }) }
         [data, env.instance_variable_get(:@state).to_a]
       }
 
@@ -809,7 +811,7 @@ RSpec.describe(MB::Sound::Envelope) do
   describe 'retrigger modes' do
     # A ringing envelope (attack 0, decay 1000 samples to 0, linear) struck
     # at sample 0 with velocity 1 and at sample 500 with +second+.
-    def strikes(second, mode, kernel: :sample)
+    def strikes(second, mode, kernels: :c)
       vel = Numo::SFloat.zeros(1000)
       vel[0...500] = 1
       vel[500..] = second
@@ -818,7 +820,7 @@ RSpec.describe(MB::Sound::Envelope) do
         trigger: array_node_class.new(pulses(1000, 0, 500)), velocity: array_node_class.new(vel),
         retrigger: mode
       )
-      env.public_send(kernel, 1000)
+      MB::Sound::Kernels.with(kernels) { env.sample(1000) }
     end
 
     it 'defaults to :restart, attacking to the new peak even when lower' do
@@ -886,7 +888,7 @@ RSpec.describe(MB::Sound::Envelope) do
 
     it 'gives the same samples in C and Ruby' do
       [0.1, 0.5, 1].each do |v|
-        expect(strikes(v, :add).to_a).to eq(strikes(v, :add, kernel: :sample_ruby).to_a)
+        expect(strikes(v, :add).to_a).to eq(strikes(v, :add, kernels: :ruby).to_a)
       end
     end
 
@@ -1143,7 +1145,7 @@ RSpec.describe(MB::Sound::Envelope) do
       expect(y[999] - y[1000..1100].min).to be <= 0.01 * (peak - level)
       expect(y[1400..].max).to be_within(1e-9).of(peak)
 
-      expect(collect(make.(nil), 3000, buffer: 77).to_a).to eq(collect(make.(nil), 3000, buffer: 77, method: :sample_ruby).to_a)
+      expect(collect(make.(nil), 3000, buffer: 77).to_a).to eq(collect(make.(nil), 3000, buffer: 77, kernels: :ruby).to_a)
     end
 
     it 'chokes linearly as before' do
@@ -1176,7 +1178,7 @@ RSpec.describe(MB::Sound::Envelope) do
       }
 
       a = collect(make.(nil), 6000, buffer: 333)
-      b = collect(make.(nil), 6000, buffer: 333, method: :sample_ruby)
+      b = collect(make.(nil), 6000, buffer: 333, kernels: :ruby)
       expect(a.to_a).to eq(b.to_a)
       expect(a.max).to be > 0.5
     end

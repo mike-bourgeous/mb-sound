@@ -131,6 +131,10 @@ module MB
           @counts.each_with_index.filter_map { |c, i| [self.class.floor(i), c] if c > 0 }
         end
       end
+
+      Kernels.register :latency_bucket, c: FastLatency.method(:bucket), ruby: Histogram.method(:bucket)
+      Kernels.register :latency_bucket_floor, c: FastLatency.method(:bucket_floor), ruby: Histogram.method(:floor)
+      Kernels.register :latency_percentile, c: FastLatency.method(:percentile), ruby: Histogram.method(:percentile)
     end
   end
 end

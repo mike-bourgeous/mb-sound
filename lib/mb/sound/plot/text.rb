@@ -70,13 +70,14 @@ module MB
           # The cells of the last frame drawn (Cells or NativeCells).
           attr_reader :cells
 
-          # +native+ picks the cells' class (NativeCells or Cells), e.g.
-          # to match a screen grid they are blitted into.
-          def initialize(width:, height:, look: nil, color: nil, theme: nil, native: Plot.native)
+          # +cells+ is the cells' class: NativeCells or MB::Term::Cells (by
+          # default the :cell_grid kernel's; see MB::Sound::Kernels), e.g. to
+          # match a screen grid they are blitted into.
+          def initialize(width:, height:, look: nil, color: nil, theme: nil, cells: Kernels.cell_grid)
             @width = width
             @height = height
             @look, @color, @theme = Text.options(look, color, theme)
-            @native = native
+            @cells_class = cells
             @layouts = 0
             @key = nil
           end
@@ -102,7 +103,7 @@ module MB
           private
 
           def new_cells
-            @native ? NativeCells.new(@width, @height) : MB::Term::Cells.new(@width, @height)
+            @cells_class.new(@width, @height)
           end
 
           # Lays out (or reuses the layout) and paints the marks into @cells
@@ -163,8 +164,14 @@ module MB
           include MB::Term::NativeMethods
         end
 
-        # The adapter: mb-term grids made with MB::Term::Grid.new are these.
-        MB::Term::Grid.native = NativeCells
+        # The cell grid kernel (check mode draws with C: grids blit into
+        # grids, which a pair of grids can't), and the adapter: mb-term grids
+        # made with MB::Term::Grid.new are NativeCells unless it is :ruby.
+        Kernels.register :cell_grid, c: NativeCells, ruby: MB::Term::Cells, group: :fast_ui,
+          covers: %w[FastUI::Grid Term::FastTerm::Grid],
+          check: 'grids blit into grids (a pair of grids cannot); the plot, UI, and mb-term specs compare them'
+        Kernels.on_change { |e, mode| MB::Term::Grid.native = mode == :ruby ? nil : NativeCells if e.name == :cell_grid }
+        MB::Term::Grid.native = NativeCells unless Kernels.mode_of(:cell_grid) == :ruby
 
         # The drawing surface for marks (see Mark): a Raster of line dots,
         # plus a half-block image layer for heatmaps.
@@ -220,12 +227,13 @@ module MB
             @raster.points(xs, ys, color(rgb, 3))
           end
 
-          def area(xs, ys, base, rgb)
-            if Plot.native
-              fc = color(fill_color(rgb, 0.45), 2)
-              lc = color(rgb, 3)
-              return if FastUI.area(@raster.dots, xs, ys, base, fc, lc)
-            end
+          # (#area is the :plot_area kernel: #area_c, FastUI.area, or the
+          # Ruby mirror #area_ruby.)
+          def area_c(xs, ys, base, rgb)
+            fc = color(fill_color(rgb, 0.45), 2)
+            lc = color(rgb, 3)
+            return if FastUI.area(@raster.dots, xs, ys, base, fc, lc)
+
             area_ruby(xs, ys, base, rgb)
           end
 
@@ -234,6 +242,7 @@ module MB
             mask = @raster.line_mask(xs, ys)
             @raster.fill_between(mask, color(fill_color(rgb, 0.45), 2), base: base)
             @raster.dots[mask.eq(1)] = color(rgb, 3)
+            nil
           end
 
           def band(xs, lo, hi, rgb)
@@ -870,6 +879,8 @@ module MB
           end
         end
       end
+
+      Kernels.register :plot_area, on: Text::Surface, as: :area, c: :area_c, ruby: :area_ruby, state: %i[@raster @prio], covers: %w[FastUI.area]
     end
   end
 end

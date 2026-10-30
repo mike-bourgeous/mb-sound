@@ -45,8 +45,8 @@ module MB
             c = par.(@cutoff)
             q = par.(@quality)
             g = par.(@gain)
-            out = Filter::SVF.process_ruby(Numo::SFloat.cast(env.fetch(@a)), c, q, g, f.instance_variable_get(:@type_id),
-                                           f.instance_variable_get(:@state), f.sample_rate)
+            out = Kernels.svf(Numo::SFloat.cast(env.fetch(@a)).dup, c, q, g, f.instance_variable_get(:@type_id),
+                                f.instance_variable_get(:@state), f.sample_rate)
             f.send(:remember, c, q, @gain_input ? g : nil)
             env[@dst] = out
           end
@@ -91,7 +91,7 @@ module MB
           end
 
           def run_ruby(env, count)
-            env[@dst] = @filter.dynamic_process(Numo::SFloat.cast(env.fetch(@a)), cutoff: env.fetch(@cutoff), quality: env.fetch(@quality))
+            env[@dst] = @filter.dynamic_process(Numo::SFloat.cast(env.fetch(@a)).dup, cutoff: env.fetch(@cutoff), quality: env.fetch(@quality))
           end
         end
 
@@ -204,7 +204,7 @@ module MB
 
           def run_ruby(env, count)
             par = ->(v) { v.is_a?(Const) ? v.parts[0] : env.fetch(v) }
-            env[@dst] = @filter.dynamic_process_ruby(Numo::SFloat.cast(env.fetch(@a)), cutoff: par.(@cutoff), resonance: par.(@resonance))
+            env[@dst] = @filter.dynamic_process(Numo::SFloat.cast(env.fetch(@a)).dup, cutoff: par.(@cutoff), resonance: par.(@resonance))
           end
         end
       end

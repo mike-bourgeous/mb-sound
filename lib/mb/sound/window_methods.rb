@@ -446,12 +446,12 @@ module MB
         audio = audio.dup.inplace! unless audio.inplace?
 
         if rise > 0
-          rise_buf = MB::FastSound.smootherstep_buf(Numo::DFloat.zeros(rise).inplace!)
+          rise_buf = MB::Sound::Kernels.smootherstep_buf(Numo::DFloat.zeros(rise).inplace!)
           audio[0...rise].inplace * rise_buf.not_inplace!
         end
 
         if fall > 0
-          fall_buf = 1.0 - MB::FastSound.smootherstep_buf(Numo::DFloat.zeros(fall).inplace!)
+          fall_buf = 1.0 - MB::Sound::Kernels.smootherstep_buf(Numo::DFloat.zeros(fall).inplace!)
           audio[-fall..-1].inplace * fall_buf.not_inplace!
         end
 

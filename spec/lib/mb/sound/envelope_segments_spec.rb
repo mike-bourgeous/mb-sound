@@ -1,12 +1,14 @@
 RSpec.describe(MB::Sound::Envelope, 'multi-segment envelopes') do
   # Samples +count+ values in +buffer+-sized chunks with +method+, stopping
   # at nil.
-  def collect(env, count, buffer: 800, method: :sample)
+  def collect(env, count, buffer: 800, kernels: :c)
     out = []
-    (count.to_f / buffer).ceil.times do
-      buf = env.send(method, buffer)
-      break if buf.nil?
-      out << buf.dup
+    MB::Sound::Kernels.with(kernels) do
+      (count.to_f / buffer).ceil.times do
+        buf = env.sample(buffer)
+        break if buf.nil?
+        out << buf.dup
+      end
     end
     out.empty? ? Numo::SFloat[] : Numo::SFloat.zeros(0).concatenate(*out)[0...[count, out.sum(&:length)].min]
   end
@@ -191,7 +193,7 @@ RSpec.describe(MB::Sound::Envelope, 'multi-segment envelopes') do
       [:exp, :s].each do |shape|
         a = MB::Sound.adsr(0.05, 0.1, 0.6, 0.2, gate: regate, retrigger: :zero, shape: shape)
         b = MB::Sound.adsr(0.05, 0.1, 0.6, 0.2, gate: regate, retrigger: :zero, shape: shape)
-        expect(collect(a, 48000).to_a).to eq(collect(b, 48000, method: :sample_ruby).to_a), shape.to_s
+        expect(collect(a, 48000).to_a).to eq(collect(b, 48000, kernels: :ruby).to_a), shape.to_s
       end
     end
 

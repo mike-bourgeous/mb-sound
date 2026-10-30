@@ -89,7 +89,7 @@ module MB
           # copies the input first), so convert a reused copy instead of a
           # new one every buffer
           v = copier.copy(v).inplace! if v.is_a?(Numo::SFloat)
-          MB::FastSound.number_to_freq(v, tuning.note, tuning.frequency)
+          MB::Sound::Kernels.number_to_freq(v, tuning.note, tuning.frequency)
         }.tap { |pr|
           # The plan layer runs this block as an op (Plan::Op::NoteFreq)
           pr.plan_operator = :note_freq

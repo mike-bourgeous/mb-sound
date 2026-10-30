@@ -189,7 +189,7 @@ module MB
           @idle_at_start = idle?
           @time = @notes.note_stream.advance(@time, count, @sample_rate)
           @frames += count
-          run(count, :c)
+          run(count)
         end
 
         # #sample for a buffer from frame +start+ that may hold the graph's
@@ -206,7 +206,7 @@ module MB
           o = 0
           while o < limit
             stop = MB::M.min(g - start, limit)
-            piece = run(stop - o, :c)
+            piece = run(stop - o)
             return o == 0 ? nil : out[0...o] if piece.nil?
 
             out[o...(o + piece.length)] = piece
@@ -256,10 +256,10 @@ module MB
         end
 
         # Reads GM-scaled fixed times through GmTime#length_samples (a
-        # number while the controller holds still) with Notes.fast_paths.
+        # number while the controller holds still) with Kernels.notes_fast?.
         def read_length(key, source, count)
           gm = @gm_nodes[key]
-          return super unless gm.is_a?(GmTime) && Notes.fast_paths
+          return super unless gm.is_a?(GmTime) && Kernels.notes_fast?
           fit(key, gm.length_samples(count, @sample_rate), count)
         end
 

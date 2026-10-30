@@ -183,7 +183,7 @@ module MB
 
         # Runs the kernel into +out+ (see #sample).
         def run_kernel(out, x, f, d)
-          MB::Sound::FastResonator.ping(out, x, f, d, @state, @sample_rate, @cos_phase, @sin_phase)
+          Kernels.ping(out, x, f, d, @state, @sample_rate, @cos_phase, @sin_phase)
         end
         private :run_kernel
 
@@ -357,6 +357,8 @@ module MB
         end
         private_class_method :signal_values
       end
+
+      Kernels.register :ping, c: FastResonator.method(:ping), ruby: Resonator.method(:process_ruby)
     end
   end
 end

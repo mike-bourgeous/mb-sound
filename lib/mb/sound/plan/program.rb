@@ -3,7 +3,7 @@ module MB
     module Plan
       # A described plan: its ops (in order), boundary inputs, Constant
       # params, and output Value.  Prints as a listing (#to_s), runs in C
-      # (#run, through MB::Sound::FastPlan.run on the lowered form) or in
+      # (#run_c, through MB::Sound::FastPlan.run on the lowered form) or in
       # Ruby (#run_ruby, each op's exact mirror).
       #
       # Lowering gives every Value a register: boundary inputs and changing
@@ -123,7 +123,7 @@ module MB
         # #params order), and +out+ an SFloat or SComplex of at least
         # +count+ samples (by #output_type) that receives the output.
         # Returns +out+.
-        def run(count, inputs, params, out)
+        def run_c(count, inputs, params, out)
           words, scalars, objects, nslots = lower
           stride = 2 * count
           if nslots > 0 && (@scratch.nil? || @scratch.length < nslots * stride)
@@ -135,7 +135,7 @@ module MB
         end
 
         # Runs the program with each op's Ruby mirror for +count+ samples
-        # (+inputs+ and +params+ as for #run), returning the output buffer.
+        # (+inputs+ and +params+ as for #run_c), returning the output buffer.
         def run_ruby(count, inputs, params)
           env = {}
           @ops.each do |op|

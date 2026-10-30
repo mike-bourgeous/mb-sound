@@ -3,13 +3,6 @@ RSpec.describe(MB::Sound::Plot::Live, :aggregate_failures) do
   let(:looks) { MB::Sound::Plot::Text::LOOKS.keys }
   let(:modes) { %i[truecolor ansi256 ansi16 none] }
 
-  around do |example|
-    old = MB::Sound::Plot.native
-    example.run
-  ensure
-    MB::Sound::Plot.native = old
-  end
-
   # Charts of every mark kind, scale kind, and layout feature
   def corpus
     rng = Random.new(7)
@@ -57,14 +50,14 @@ RSpec.describe(MB::Sound::Plot::Live, :aggregate_failures) do
           next if look == :ascii && mode != :none
           next if !%i[scope blocks].include?(look) && !%i[truecolor none].include?(mode)
 
-          native = charts.map { |c| plot.native = true; plot::Text.render(c, width: w, height: h, look: look, color: mode) }
-          ruby = charts.map { |c| plot.native = false; plot::Text.render(c, width: w, height: h, look: look, color: mode) }
+          native = charts.map { |c| MB::Sound::Kernels.set(fast_ui: :c); plot::Text.render(c, width: w, height: h, look: look, color: mode) }
+          ruby = charts.map { |c| MB::Sound::Kernels.set(fast_ui: :ruby); plot::Text.render(c, width: w, height: h, look: look, color: mode) }
           charts.each_index do |i|
             expect(native[i]).to eq(ruby[i]), "chart #{i} #{w}x#{h} #{look} #{mode}"
           end
 
           [true, false].each do |nat|
-            plot.native = nat
+            MB::Sound::Kernels.set(fast_ui: nat ? :c : :ruby)
             live = described_class.new(width: w, height: h, look: look, color: mode)
             # Each chart twice (the second reuses the layout), in order
             (charts + charts.reverse).each do |c|
@@ -121,7 +114,7 @@ RSpec.describe(MB::Sound::Plot::Live, :aggregate_failures) do
 
   it 'sends only changed cells that rebuild the screen exactly' do
     [true, false].each do |nat|
-      plot.native = nat
+      MB::Sound::Kernels.set(fast_ui: nat ? :c : :ruby)
       look = :scope
       live = described_class.new(width: 50, height: 12, look: look, color: :truecolor)
       plain = described_class.new(width: 50, height: 12, look: look, color: :none)
@@ -152,7 +145,7 @@ RSpec.describe(MB::Sound::Plot::Live, :aggregate_failures) do
 
   it 'writes frames to an IO' do
     [true, false].each do |nat|
-      plot.native = nat
+      MB::Sound::Kernels.set(fast_ui: nat ? :c : :ruby)
       live = described_class.new(width: 30, height: 8, look: :blocks, color: :ansi256)
       other = described_class.new(width: 30, height: 8, look: :blocks, color: :ansi256)
       chart = plot.waveform(Numo::DFloat.new(100).seq.map { |j| Math.sin(j * 0.1) }, range: -1.0..1.0)

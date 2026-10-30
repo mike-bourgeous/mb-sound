@@ -319,7 +319,7 @@ module MB
         end
 
         # The smallest float above SILENCE: for float samples, |x| > SILENCE
-        # exactly when |x| >= LOUD_FLOAT (FastArithmetic.last_at_least's
+        # exactly when |x| >= LOUD_FLOAT (Kernels.last_at_least's
         # comparison).
         LOUD_FLOAT = begin
           f = [SILENCE].pack('e').unpack1('e')
@@ -328,13 +328,13 @@ module MB
 
         # #loud? of +n+ samples of +b+ from +i+, without a view (dropouts-2).
         def loud_range?(b, i, n)
-          r = MB::Sound::FastArithmetic.last_at_least(b, i, n, LOUD_FLOAT)
+          r = MB::Sound::Kernels.last_at_least(b, i, n, LOUD_FLOAT)
           r ? r >= 0 : loud?(b[i...(i + n)])
         end
 
         # True if +b+ has a sample beyond SILENCE.
         def loud?(b)
-          r = MB::Sound::FastArithmetic.min_max(b, @range)
+          r = MB::Sound::Kernels.min_max(b, @range)
           r ? (r[1] > SILENCE || r[0] < -SILENCE) : b.abs.max > SILENCE
         end
 
@@ -342,7 +342,7 @@ module MB
         # nil.
         def first_hit(b, from)
           rest = from == 0 ? b : b[from..]
-          r = MB::Sound::FastArithmetic.min_max(rest, @range)
+          r = MB::Sound::Kernels.min_max(rest, @range)
           return nil if r ? (r[0] == 0 && r[1] == 0) : rest.abs.max == 0
 
           rest.ne(0).where[0] + from

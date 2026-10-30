@@ -138,8 +138,10 @@ module MB
         end
 
         state.replace([x1, ap_x1, ap_y1, 1]) if antialias && data.length > 0
-        out
+        Kernels.inplace_result(data, out)
       end
+
+      Kernels.register :shape, c: FastClip.method(:shape), ruby: Shaper.method(:shape_ruby)
     end
   end
 end

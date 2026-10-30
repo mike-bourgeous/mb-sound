@@ -122,12 +122,10 @@ RSpec.describe(MB::Sound::UI::Feed, :aggregate_failures) do
       results = [true, false, :mixed].map do |mode|
         m = described_class.new(2, 48000)
         bufs.each_with_index.map { |b, i|
-          described_class.native = mode == :mixed ? i.odd? : mode
+          MB::Sound::Kernels.set(meter_block: (mode == :mixed ? i.odd? : mode) ? :c : :ruby)
           m.process(b)
           m.take.to_h
         }
-      ensure
-        described_class.native = true
       end
       expect(results[0]).to eq(results[1])
       expect(results[2]).to eq(results[1])
