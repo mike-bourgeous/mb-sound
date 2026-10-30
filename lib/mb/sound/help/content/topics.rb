@@ -1283,7 +1283,11 @@ module MB
     Help.topic :analysis, 'Analysis', group: :look do
       about <<~TEXT
         Pitch, peaks, and correlation of sounds and arrays, and the form of
-        a render or a file (tempo, beats, bars).
+        a render or a file: tempo, beats, bars, and sections with letter
+        labels (`s = analyze_form('song.flac')`, `s.sections`, `puts
+        s.flow_ruby`, `s.markers!` for `seek :"analysis/b_1"`, and
+        `s.compare(take.form)` to check a render against the flow that
+        played).  Keys: `Sample['pad.wav'].key_analysis`.
       TEXT
       commands :freq_estimate, :peaks, :autocorrelate, :crosscorrelate, :peak_correlation, :analyze_form, :loudness
       note :structure

@@ -2,8 +2,10 @@ module MB
   module Sound
     # Console methods for music structure analysis (see MB::Sound::Structure).
     module StructureMethods
-      # Analyzes the tempo, beats, bars, and meter of +source+ and returns a
-      # Structure::Result (phase S1; sections and forms come in S2).
+      # Analyzes the tempo, beats, bars, meter, and sections of +source+ and
+      # returns a Structure::Result (sections, letter labels, the song as a
+      # flow, :analysis markers, and a comparison with the form that played
+      # are computed when first asked for).
       #
       # +source+ is a sound filename, audio data (an Array of channels or a
       # Numo array at +:sample_rate+), or a graph (a GraphNode or Channels
@@ -28,6 +30,10 @@ module MB
       #     puts s.meters_ruby      # meter 2, 4, at: bar(33) ...
       #     analyze_form(groove, bars: 4, bpm: 112).beats.first(4)
       #     analyze_form(bars: 8) { bg :drums, beat; meter 2, 4, at: bar(5) }
+      #     s.sections              # Structure::Section entries: A, B, A', ...
+      #     puts s.flow_ruby        # bpm, meters, and a flow block with comments
+      #     s.markers!              # :analysis markers: seek :"analysis/b_1"
+      #     s.compare(take.form)    # boundaries and labels against the flow played
       def analyze_form(source = nil, bars: nil, seconds: nil, bpm: nil, grid: :auto, sample_rate: 48000, **options, &block)
         if source.is_a?(GraphNode) || source.is_a?(GraphNode::Channels) || (source.nil? && block)
           raise ArgumentError, 'Pass bars: or seconds: to analyze a graph (it may play forever)' if bars.nil? && seconds.nil? && !block

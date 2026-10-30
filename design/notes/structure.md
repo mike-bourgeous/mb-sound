@@ -1,7 +1,7 @@
 # Structure analysis (music information retrieval)
 
 <!-- summary -->
-`analyze_form(source)` (alias `analyze_structure`; `StructureMethods`, `lib/mb/sound/structure.rb` + `structure/`, pure Ruby + Numo, ~120x realtime) finds tempo, beats, bars, and meters in a file, audio data, or a graph and returns a `Structure::Result` (`transport`, `meters_ruby`).  Our own renders use the render's exact grid; imported audio is tracked (comb-autocorrelation tempo, a constant-tempo beat grid, a downbeat Viterbi allowing 2- and 3-beat bars).  Phase S1 is built; sections, letter labels, and `:analysis` markers are S2.
+`analyze_form(source)` (alias `analyze_structure`; `StructureMethods`, `lib/mb/sound/structure.rb` + `structure/`, pure Ruby + Numo) finds tempo, beats, bars, and meters in a file, audio data, or a graph and returns a `Structure::Result`: our renders use the render's exact grid, imported audio is tracked (comb-autocorrelation tempo, a constant-tempo grid, a downbeat Viterbi allowing 2- and 3-beat bars).  Phase S2: `sections` with letter labels (bar-feature SSM, Foote novelty, DP over bar lines), `form`/`flow_ruby`, `markers!` (`:analysis` markers), `compare(take.form)`.  Shares `MB::Sound::Analysis` (STFT, chroma, keys, spectra) with the other listening tools.
 <!-- /summary -->
 
 The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
@@ -13,7 +13,7 @@ Maintainer's decisions (2026-10-12, all four of the spike's recommendations): se
 ## Phases
 
 - **S1 (branch `structure-1`, 2026-10-12): grid and meter.**  Built; below.
-- S2: bar features, self-similarity, novelty, DP segmentation with the 4/8/16-bar prior, letter labels, `form` / `markers!` (`:analysis` kind) / `meters!`, a rendered flow analyzed back to its boundaries, `take.form` comparison.
+- **S2 (branch `listen-1`, 2026-10-30): sections.**  Built; below.  Not built from the plan: `meters!` (apply the analyzed meter map to a Session; `meters_ruby` prints the lines).
 - S3: phrases under sections, energy cues (fades, risers, drops), a backbeat model (fixes drums_808 and the half-time downbeats below), guessed section names.
 - S4: other music (tempo drift, 3/4 and 6/8, repetition-based boundaries, an annotated corpus).
 
@@ -58,3 +58,27 @@ Generated grooves (`spec/lib/mb/sound/structure_spec.rb`; an 808 kit with kick o
 - Half time (kick on 1 and the and of 3, clap on 3, at 140 BPM): tempo and beats exact, downbeats a beat early.  The kick's long tail makes beat 4's timbre like beat 1's, and the drums outweigh the bass in chroma.  Spec'd for tempo and beats only.
 - One constant tempo; 4/4 with occasional 2- and 3-beat bars unless `beats_per_bar:` says otherwise; downbeats need a harmonic or bass change at bar lines (drum-only loops with kicks on 1 and 3 are ambiguous).
 - `at_bar(n)` blocks are scheduled at the timeline position bar n had when scheduled, so in a render whose earlier `at_bar` block changes the meter, a later `at_bar` lands elsewhere; the specs set meters up front with `meter 2, 4, at: bar(5)` (a scheduling gotcha seen while writing the specs, not a structure issue).
+
+## S2: sections, labels, forms, markers (`structure/sections.rb`, `structure/comparison.rb`, listen-1)
+
+The spike's method (its README, steps 6-9), moved into the library with three changes measured below.
+
+- `Result#sections(**options)`: `Structure::Section(label, name, first_bar, bars, seconds, end_seconds, beats)` from the first bar to the last (`label` "A", "A'"; `name` :a, :a2; `#letter`, `#bar_range`); without options the default segmentation, computed once on first use (`section_details`: features, SSM, novelty per bar line, boundaries); options `cost:` (0.1 per boundary), `prior:`/`other:` (the length prior: 8 and 16 bars free, 4 and 32 -0.05, 12 and 24 -0.1, 2 -0.15, 1 -0.2, others -0.25), `meter_bonus:` (0.1 at an irregular bar's edges), `max_length:` (32), `scales:` ([2, 4, 8]), `same:`/`variant:` (0.8/0.5 label cosines).  `labels`, and `to_s` lists them once computed.
+- Method (`Structure::Sections`): per bar, timbre (mean MFCC 1..13 and energy), harmony (mean chroma over its peak), rhythm (16 steps x 3 onset bands, log of the flux peak near each step); each column centered and divided by its spread over the song, at least `SCALE_FLOORS` (1.0 MFCC units, 0.1 of the chroma peak, 0.3 log flux), each group weighted 1/sqrt(width); a cosine SSM with each row's norm regularized by `SSM_EPSILON` (1.0); Foote novelty with a Gaussian taper at half widths 2, 4, 8 bars, each only where its kernel fits; DP over bar lines with the prior, except that **the last section's length is free** (and may pass `max_length`): songs end in tails and ring-outs of any length (the 4-bar test song's outro came out 1 + 3 bars with its one-bar tail judged by the prior); labels in order by the cosine of each section's mean features to each earlier label's first section.
+- `Result#form` is a linear `Form` (one section per name, its bars; runs as `times:`, a section back at another length with its own length), `flow_ruby` prints `bpm`, `meters_ruby`, and the flow with `# A    bar 9, 0:15.24` comments (built back by `Form.build` in the spec).
+- `Result#markers!(session: Session.current, at: 1, prefix: :analysis)` puts each section in the Session's marker table as kind `:analysis` (new in `Session::Markers::KINDS`) named `:"analysis/a_1"`, `:"analysis/b_1"`, `:"analysis/a_2"` (`marker_names`): the maintainer's 2026-10-12 decision (prefixed names, so they never clash with a playing form's).  Positions: on the render grid the bar's exact position, on tracked audio its time at the analyzed tempo (1/3840 whole note), counted from session bar `at:`; a session tempo more than 0.5% off the analysis' warns (the markers then don't line up).  Earlier markers with the prefix are replaced.  `seek`, `at_marker`, and `render(from:)` take them.
+- `Result#compare(form_or_list, from: 1, tolerance: 1)` is a `Structure::Comparison` (the spike's scoring as a value): boundaries (section starts after the first, inside the analyzed bars) matched one to one within `tolerance` bars (`matched`, `missed`, `extra`, `precision`, `recall`, `f`, `exact?`), and pairwise labels (same section name vs the same letter, primes ignored: `label_precision`/`label_recall`/`label_f`); `to_s` prints the two lists side by side.  It takes `take.form`, any Form (`plays`, repeats unrolled), or `[[name, bars], ...]`.
+- S1 fix found here: on a known grid, a beat on the audio's last instant counted, so audio exactly N bars long got an N+1th bar of nothing (`Structure.transport_grid`; the synthetic spec's last section came out 9 bars).
+
+Measured (2026-10-30, Mac container, one process):
+
+| input | boundaries P / R / F (+-1 bar) | labels F | missed / extra |
+|---|---|---|---|
+| synthetic Numo sections a8 b8 a8 c4 b8 at 240 BPM (spec) | 1 / 1 / 1 | 1.0 | |
+| rendered flow intro 8, verse 8, chorus 8, verse, outro 8 at 240 BPM (spec, `take.form`) | 1 / 1 / 1 | label recall 1.0 | (chorus labeled B', a variant of the verse it adds to) |
+| night bus (`bin/songs/night_bus_flow.rb` today, 173 s), exact grid | 1.00 / 0.80 / 0.89 | 0.79 | pickup (42), lift (58) |
+| the same, tracked | 1.00 / 0.80 / 0.89 | 0.79 | pickup, lift (S1 put the 2/4 bar at 48 instead of 33 on this render; bars 34-47 half a bar off) |
+
+Before the floors and the regularized SSM (the spike's z-scores and plain cosine): an 8-bar loop of random noise hats got 3 boundaries (novelty up to 0.32 against the 0.1 cost: z-scoring blows bar-to-bar noise up to unit variance; with them 0.08, one section), a 16-bar kick + chord loop 4-6; the night bus grid run F 0.82 with extras at 29 (the build's riser half), 86 and 88 (the outro's crossfade and fade).  The regularization lowers every novelty value (real changes about 30%, noise 75%): with it, 4-bar sections no longer pay for the prior's 4-bar penalty (the 4-bar test song merged verse and chorus), so the spec song uses 8-bar sections; a novelty gain of 1.5-1.7 brought the 4-bar song back but the night bus's extras too (F 0.76-0.82).  Speed: night bus analysis 3.6-3.8 s (features 2.5 s; 45x realtime here, 120x in S1's Linux measurement), sections 0.02-0.05 s.
+
+Not yet: phrases under sections and energy cues (S3), section names, a plot of the SSM and novelty (the data is in `section_details`), `meters!`.

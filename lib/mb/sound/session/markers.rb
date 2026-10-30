@@ -7,7 +7,9 @@ module MB
       # bar(5, beat: 2)`), and later imported marker files.
       #
       # Markers keep their kind: :section, :label (a form's labels, set
-      # where the flow passes them), and :position markers are
+      # where the flow passes them), :analysis (sections found by structure
+      # analysis, Structure::Result#markers!, named :"analysis/a_1" so
+      # they never clash with a playing form's), and :position markers are
       # timeline positions (whole notes; they follow the tempo), :time
       # markers are absolute times in seconds of timeline (they don't move
       # when the tempo changes; converted at the tempo in effect when they
@@ -17,10 +19,10 @@ module MB
       # marker is next set to a time that hasn't passed.
       class Markers
         # Marker kinds.
-        KINDS = [:section, :label, :position, :time].freeze
+        KINDS = [:section, :label, :analysis, :position, :time].freeze
 
         # A marker: +name+, +kind+ (see KINDS), and either +pos+ (whole
-        # notes, for :section, :label, and :position) or +seconds+ (for
+        # notes, for :section, :label, :analysis, and :position) or +seconds+ (for
         # :time).
         Marker = Data.define(:name, :kind, :pos, :seconds) do
           def to_s

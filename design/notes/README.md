@@ -132,7 +132,7 @@ Live MIDI uses JACK ports when a server answers, else bundled RtMidi; specs use 
 
 ### [Structure analysis (music information retrieval)](structure.md)
 
-`analyze_form(source)` (alias `analyze_structure`; `StructureMethods`, `lib/mb/sound/structure.rb` + `structure/`, pure Ruby + Numo, ~120x realtime) finds tempo, beats, bars, and meters in a file, audio data, or a graph and returns a `Structure::Result` (`transport`, `meters_ruby`).  Our own renders use the render's exact grid; imported audio is tracked (comb-autocorrelation tempo, a constant-tempo beat grid, a downbeat Viterbi allowing 2- and 3-beat bars).  Phase S1 is built; sections, letter labels, and `:analysis` markers are S2.
+`analyze_form(source)` (alias `analyze_structure`; `StructureMethods`, `lib/mb/sound/structure.rb` + `structure/`, pure Ruby + Numo) finds tempo, beats, bars, and meters in a file, audio data, or a graph and returns a `Structure::Result`: our renders use the render's exact grid, imported audio is tracked (comb-autocorrelation tempo, a constant-tempo grid, a downbeat Viterbi allowing 2- and 3-beat bars).  Phase S2: `sections` with letter labels (bar-feature SSM, Foote novelty, DP over bar lines), `form`/`flow_ruby`, `markers!` (`:analysis` markers), `compare(take.form)`.  Shares `MB::Sound::Analysis` (STFT, chroma, keys, spectra) with the other listening tools.
 
 ## Session and set
 
