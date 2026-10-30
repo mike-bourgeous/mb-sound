@@ -4,12 +4,15 @@ require_relative '../../../support/ruby_value_check'
 # value prints in one spelling (Rationals as 3/4r and 3r) and reloads as an
 # equal value of the same class, and no code outside it formats Rationals
 # as Ruby itself.
+# (constants in a module of their own: spec files share the top level)
+module RubyValueSpec; end
+
 RSpec.describe(MB::Sound::RubyValue, :aggregate_failures) do
   let(:rv) { MB::Sound::RubyValue }
 
   # [source, printed] pairs: each source builds a value inside MB::Sound
   # that prints as +printed+.
-  CASES = [
+  RubyValueSpec::CASES = [
     ['3/4r', '3/4r'], ['3r', '3r'], ['-3/4r', '-3/4r'], ['-3r', '-3r'], ['Rational(1, 192)', '1/192r'],
     ['0.5', '0.5'], ['2', '2'], ['-2', '-2'], ['1.0e-05', '1.0e-05'], ['2.0', '2.0'],
     ['Float::INFINITY', 'Float::INFINITY'], ['-Float::INFINITY', '-Float::INFINITY'], ['Complex(1, 2)', 'Complex(1, 2)'],
@@ -30,7 +33,7 @@ RSpec.describe(MB::Sound::RubyValue, :aggregate_failures) do
     ['Curve[:back, overshoot: 0.3]', 'Curve[:back, overshoot: 0.3]'],
   ].freeze
 
-  CASES.each do |source, printed|
+  RubyValueSpec::CASES.each do |source, printed|
     it "prints #{source} as #{printed}, which reloads as the same value" do
       v = RubyValueCheck.reload(source)
       text = rv.to_ruby(v)
@@ -40,7 +43,7 @@ RSpec.describe(MB::Sound::RubyValue, :aggregate_failures) do
   end
 
   it 'reloads every printed case through the graph document loader (no eval)' do
-    CASES.each do |source, printed|
+    RubyValueSpec::CASES.each do |source, printed|
       v = RubyValueCheck.reload(source)
       got = RubyValueCheck.load_value(printed)
       expect(RubyValueCheck.same?(got, v)).to eq(true), "#{source}: #{printed} loads as #{got.inspect} (#{got.class})"
@@ -77,7 +80,7 @@ RSpec.describe(MB::Sound::RubyValue, :aggregate_failures) do
   describe 'guard' do
     # Files outside RubyValue that format Rationals themselves, and why
     # they may.
-    ALLOWED = {
+    RubyValueSpec::ALLOWED = {
       'lib/mb/sound/table.rb' => 'table cells for people (3/4, no r), not Ruby',
       'lib/mb/sound/sequence/transport.rb' => 'time signature labels ("7/8"), not Ruby',
       'lib/mb/sound/clock.rb' => 'describe: "5/4 of the session tempo", words, not Ruby',
@@ -85,7 +88,7 @@ RSpec.describe(MB::Sound::RubyValue, :aggregate_failures) do
 
     # Private Rational spellings: `"#{r.numerator}r"`, `"#{n}r/#{d}"`,
     # `"#{n}/#{d}r"`, and whole Rationals printed as their numerator.
-    PATTERNS = [
+    RubyValueSpec::PATTERNS = [
       /numerator\}r/,
       /\}r\/#\{/,
       /denominator\}r/,
@@ -98,10 +101,10 @@ RSpec.describe(MB::Sound::RubyValue, :aggregate_failures) do
       files = Dir[File.join(root, '{lib,bin}/**/*.rb')] - [File.join(root, 'lib/mb/sound/ruby_value.rb')]
       found = files.flat_map { |f|
         rel = f.delete_prefix("#{root}/")
-        next [] if ALLOWED.key?(rel)
+        next [] if RubyValueSpec::ALLOWED.key?(rel)
         File.readlines(f).each_with_index.filter_map { |line, i|
           next if line.strip.start_with?('#')
-          "#{rel}:#{i + 1}: #{line.strip}" if PATTERNS.any? { |p| line.match?(p) }
+          "#{rel}:#{i + 1}: #{line.strip}" if RubyValueSpec::PATTERNS.any? { |p| line.match?(p) }
         }
       }
       expect(found).to eq([]), "print values with MB::Sound::RubyValue (to_ruby, number, rational, unit) instead:\n#{found.join("\n")}"
