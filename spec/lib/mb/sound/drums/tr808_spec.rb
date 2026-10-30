@@ -18,11 +18,6 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
     data[(from * 48000).round...(to * 48000).round].abs.max
   end
 
-  def rms(data, from, to)
-    d = data[(from * 48000).round...(to * 48000).round]
-    Math.sqrt((d**2).mean)
-  end
-
   # Frequency from zero crossings between +from+ and +to+ seconds.
   def frequency(data, from, to)
     d = data[(from * 48000).round...(to * 48000).round]
@@ -40,10 +35,7 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
         # The snare at snappy 0.3 (the user's pick) peaks lower: its noise
         # no longer stacks on the heads' first peak
         expect(accent).to be_between(name == :snare ? 0.6 : 0.7, 1.1)
-        # (the clap is noise, whose peaks move by +-2 dB with the noise
-        # drawn: its first 100 ms by RMS, -4.6 to -6.7 dB over seeds)
-        ratio = name == :clap ? rms(data, 1, 1.1) / rms(data, 0, 0.1) : plain / accent
-        expect(ratio.to_db).to be_between(-8.5, -3.5)
+        expect((plain / accent).to_db).to be_between(-8.5, -3.5)
         expect(data.length).to be < 48000 * (2 + defaults[:decay] * 1.3 + 0.5)
         expect(data[-4800..].abs.max).to be < 1e-3
       end
@@ -271,12 +263,10 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
       expect(kick.sleeping?).to eq(true)
     end
 
-    # (node-traits-1: a delay answers from its line, NodeTraits)
-    it 'skips graphs with delays once their lines hold only silence' do
+    it 'never skips graphs with delays' do
       clap = tr808.clap(MB::Sound.grid(4, 'x...').loop)
-      collect(clap, 0.4)
-      expect(clap.skippable?).to eq(true)
-      expect(clap.sleeping?).to eq(true)
+      collect(clap, 0.1)
+      expect(clap.skippable?).to eq(false)
     end
 
     it 'describes itself' do

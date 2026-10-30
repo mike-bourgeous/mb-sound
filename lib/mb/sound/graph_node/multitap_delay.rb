@@ -10,8 +10,7 @@ module MB
       class MultitapDelay
         include SampleRateHelper
         include MultiOutput
-        # (it may sleep once its line holds only silence: #sleep_ready?)
-        node_traits memory: :long, idle_check: :sleep_ready?
+        node_traits memory: :long
 
         # One output tap from the multitap delay.
         class DelayTap
@@ -188,13 +187,6 @@ module MB
         # container.
         def named?
           @named
-        end
-
-        # NodeTraits' idle check: true when the line holds only silence
-        # (below -90 dB) within the longest delay a tap has read, plus the
-        # interpolation reach (see Filter::Delay#sleep_ready?).
-        def sleep_ready?
-          @line.holds_quiet?(@longest.ceil + MB::Sound::DelayLine::MARGIN)
         end
 
         # Changes the sample rate of the delay and all upstream nodes.

@@ -96,14 +96,6 @@ RSpec.describe 'Buffer size invariance (samplers, drums, Synth lanes)' do
       'skipped noise (a Ruby block)' => ->(v) {
         (MB::Sound.noise.filter(:highpass, cutoff: 5000, quality: 0.7) * v.env(0.001, 0.05, 0, 0.05)).proc { |x| x }
       },
-      # Delays and loops in a lane let it sleep once their lines hold only
-      # silence (NodeTraits' idle checks, node-traits-1)
-      'echoing saw (a delay with feedback)' => ->(v) { (v.hz.saw * v.amp_env(0.001, 0.05, 0, 0.02)).delay(0.013, feedback: 0.4) },
-      'multitap and a feedback loop' => ->(v) {
-        dry = v.hz.asaw * v.env(0.001, 0.02, 0, 0.01)
-        taps = dry.multitap(0.004, 0.009)
-        taps[0] + taps[1] * 0.5 + dry.feedback { |fb, input| input + fb.delay(3.ms) * 0.5 } * 0.3
-      },
     }
 
     [true, false].each do |lanes|
