@@ -75,6 +75,8 @@ module MB
           end
 
           if default.nil? && spec.empty?
+            full = full_knob_name(name)
+            return @knob_lock.synchronize { @knobs[full] } if full
             return implicit_knob(name) if MB::Sound.live?
             raise ArgumentError, "No knob #{name.inspect}#{knob_suggestion(name, define: true)}"
           end
@@ -129,10 +131,15 @@ module MB
         # taking knob names (turn, snap knobs:, recall only:/except:, xfade,
         # learn, bind_cc, scene and section values) resolves through here
         # or #knob!.  Other values pass through.
+        #
+        # Knobs are named in full (knobs-1, D5: :"bass/resonance"); a short
+        # name the Param names table aliases (:"bass/reso", :"bass/freq",
+        # :"bass/q") stands for the full one when that knob exists, with a
+        # one-line note the first time (#full_knob_name).
         def control_name(name)
           return name unless name.is_a?(Symbol)
           return name if @knob_lock.synchronize { @knobs.key?(name) }
-          primary_control(name) || name
+          full_knob_name(name) || primary_control(name) || name
         end
 
         # True if +name+ names a track's level knob (:"bass/level"), made
@@ -164,8 +171,8 @@ module MB
         # The knob named +name+ (or the control it stands for: see
         # #control_name), raising with suggestions if there is none.
         def knob!(name)
-          return name.knob if name.is_a?(GraphNode::Knob::Reader)
-          return name if name.is_a?(GraphNode::Knob)
+          known = ValueSource.knob_of(name)
+          return known if known
           name = control_name(name)
           k = @knob_lock.synchronize { @knobs[name] }
           # (a track's level knob is made at unity when first used; Faders)
@@ -334,7 +341,7 @@ module MB
           end
           from = src.spec
           to = k.spec
-          map = ->(x) { to.value(from.positions(x).clip(0.0, 1.0)) }
+          map = ->(x) { to.value(from.position(x).clip(0.0, 1.0)) }
           k.follow(src, frame: @frame, map: map, label: "knob(#{src_name.inspect}) through #{to.range.begin}..#{to.range.end}")
         end
 
@@ -389,7 +396,6 @@ module MB
           end
           return turn_keys(k, { 0 => value }, nil, point, start_time) if gesture_for?(k, value, over, follow, point)
           value = follow unless follow.nil?
-          raise ArgumentError, "Turn #{k.name.inspect} to a number or a node (got nil)" if value.nil?
           value = knob_value(k, value)
           check_turn_value(k, value)
           raise ArgumentError, "from: needs over: (a ramp)" if from && !over
@@ -552,10 +558,10 @@ module MB
               va = snapshot_value(a, kn) || kn.value
               vb = snapshot_value(b, kn) || kn.value
               if source.is_a?(Numeric)
-                apply_turn(kn, crossfade_value(kn.spec, va, vb, source.to_f), frame, t, over: over, curve: curve, smooth: smooth)
+                apply_turn(kn, kn.spec.scale.between(va, vb, source.to_f), frame, t, over: over, curve: curve, smooth: smooth)
               else
-                spec = kn.spec
-                map = ->(x) { crossfade_values(spec, va, vb, x.clip(0.0, 1.0)) }
+                scale = kn.spec.scale
+                map = ->(x) { scale.between(va, vb, x.clip(0.0, 1.0)) }
                 kn.follow(source, frame: frame, map: map, time: t, transport: @transport, label: "xfade #{a.inspect}..#{b.inspect} by #{GraphNode::Knob.label_of(source)}")
               end
             }
@@ -647,6 +653,22 @@ module MB
           }
         end
 
+        # The full name of the existing knob that short name +name+ stands for
+        # (Session::Name.full_name: :"bass/resonance" for :"bass/reso"), or
+        # nil.  Notes the first use of each short name (knobs are named in
+        # full; console commands resolve the name before journaling it, so
+        # listings, documents, and takes show the full name).
+        def full_knob_name(name)
+          full = Name.full_name(name) or return nil
+          return nil unless @knob_lock.synchronize { @knobs.key?(full) }
+          @alias_noted ||= {}
+          unless @alias_noted[name]
+            @alias_noted[name] = true
+            warn "knob #{name.inspect} is #{full.inspect} (knobs take their params' full names)"
+          end
+          full
+        end
+
         private
 
         def init_knobs
@@ -658,6 +680,8 @@ module MB
           @knob_midi = nil
           @knob_gestures = {}
           @committing_gesture = nil
+          @alias_noted = nil
+          @clamp_warned = nil
         end
 
         def knob_suggestion(name, define: false)
@@ -687,14 +711,7 @@ module MB
         end
 
         def check_turn_value(k, value)
-          case value
-          when Numeric
-            raise ArgumentError, "Turn #{k.name.inspect} to a real number (got #{value.inspect})" unless value.real? && value.finite?
-          when Symbol
-            knob!(value)
-          else
-            raise ArgumentError, "Turn #{k.name.inspect} to a number or a node (got #{value.inspect})" unless value.respond_to?(:sample) && value.respond_to?(:get_sampler)
-          end
+          ValueSource.coerce(value, "turn #{k.name.inspect}", names: :check, knobs: self)
         end
 
         # A turn past a knob's range (ux-1 item 30: `turn :drive, 100` on a
@@ -807,20 +824,6 @@ module MB
         # Knob +k+'s value in snapshot +name+ when it lands, or nil.
         def snapshot_value(name, k)
           @knob_lock.synchronize { @snapshots[name]&.[](k.name) }
-        end
-
-        # +amount+ of the way from +a+ to +b+ in +spec+'s scale.
-        def crossfade_value(spec, a, b, amount)
-          return a + (b - a) * amount if spec.curve == :linear
-          pa = spec.position(a)
-          spec.value(pa + (spec.position(b) - pa) * amount)
-        end
-
-        # #crossfade_value for a Numo::DFloat of amounts.
-        def crossfade_values(spec, a, b, amount)
-          return amount * (b - a) + a if spec.curve == :linear
-          pa = spec.position(a)
-          spec.value(amount * (spec.position(b) - pa) + pa)
         end
 
         # A knob's state just before the change landing now (for undo).

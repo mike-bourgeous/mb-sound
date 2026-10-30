@@ -101,7 +101,7 @@ module MB
           # what this transform has seen on its input (see MIDI::Param).
           def param_at(x, time)
             return x unless x.respond_to?(:value_at)
-            x.value_at(timeline_at(time), transport: transport, stream: @reading)
+            ValueSource.value_at(x, timeline_at(time), transport: transport, stream: @reading)
           end
 
           # Unlike stateless transforms, this runs every read (queued events

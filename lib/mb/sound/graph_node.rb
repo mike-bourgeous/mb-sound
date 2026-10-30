@@ -176,7 +176,7 @@ module MB
         when false then 0
         when Constant then v.constant
         when Knob::Reader, Knob
-          k = v.is_a?(Knob::Reader) ? v.knob : v
+          k = ValueSource.knob_of(v)
           MB::Sound::Arrangement::TrackKnobs.note_build_read(k)
           k.build_value
         else

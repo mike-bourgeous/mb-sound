@@ -9,16 +9,18 @@ module MB
       # and transpose, at each step for arp and ratchet, and at each cycle or
       # bar start for every and generators.
       #
-      # The protocol is one method:
+      # The protocol is one method, shared by every value that moves
+      # (MB::Sound::ValueSource: knobs, clock speeds, followed tempos):
       #
-      #     value_at(pos, transport:, stream:)
+      #     value_at(pos, frame: nil, transport: nil, stream: nil)
       #
-      # +pos+ is a timeline position (Rational whole notes), +transport+ the
-      # transform's Sequence::Transport, and +stream+ the transform's
+      # +pos+ is a timeline position (Rational whole notes), +frame+ the
+      # Session frame when the reader knows it (knobs read there), +transport+
+      # the transform's Sequence::Transport, and +stream+ the transform's
       # Param::Reading (what it has seen on its input, for #cc).  Plain
       # values (numbers, Durations, Intervals, Lengths, Symbols, Scales)
-      # answer themselves through Param.value_at, which allocates nothing
-      # for them.
+      # answer themselves through ValueSource.value_at, which allocates
+      # nothing for them.
       #
       # Params:
       # - `cc(1, 0.3..0.95, curve: :linear)` (Param::CC): the last value of
@@ -41,12 +43,6 @@ module MB
       module Param
         # Raised for values that can't be read as params.
         class NotAParam < ArgumentError; end
-
-        # The value of +x+ at timeline position +pos+: +x+.value_at for
-        # params, else +x+ itself.
-        def self.value_at(x, pos, transport: nil, stream: nil)
-          x.respond_to?(:value_at) ? x.value_at(pos, transport: transport, stream: stream) : x
-        end
 
         # Runs the block with param reads as peeks (G3, Generative::Steer
         # speculating on the next cycle): knobs answer what they know
@@ -98,9 +94,8 @@ module MB
           case x
           when CC then [x.spec.range.begin.abs, x.spec.range.end.abs].max
           when Graph
-            n = Graph.unwrap(x.node)
-            n = n.knob if n.is_a?(GraphNode::Knob::Reader)
-            n.is_a?(GraphNode::Knob) ? [n.range.begin.abs, n.range.end.abs].max : fallback
+            n = ValueSource.knob_of(Graph.unwrap(x.node))
+            n ? [n.range.begin.abs, n.range.end.abs].max : fallback
           when Numeric then x
           else fallback
           end
@@ -151,7 +146,7 @@ module MB
           include Generative::Value
 
           # The value at timeline position +pos+ (see Param).
-          def value_at(pos, transport: nil, stream: nil)
+          def value_at(pos, frame: nil, transport: nil, stream: nil)
             raise NotImplementedError, "#{self.class} must implement #value_at"
           end
 
@@ -211,7 +206,7 @@ module MB
             freeze
           end
 
-          def value_at(_pos, transport: nil, stream: nil)
+          def value_at(_pos, frame: nil, transport: nil, stream: nil)
             @value
           end
 
@@ -231,9 +226,9 @@ module MB
             with_recipe(a.is_a?(Const) ? a.value : a, op, [b])
           end
 
-          def value_at(pos, transport: nil, stream: nil)
-            x = Param.value_at(@a, pos, transport: transport, stream: stream)
-            y = Param.value_at(@b, pos, transport: transport, stream: stream)
+          def value_at(pos, frame: nil, transport: nil, stream: nil)
+            x = ValueSource.value_at(@a, pos, frame: frame, transport: transport, stream: stream)
+            y = ValueSource.value_at(@b, pos, frame: frame, transport: transport, stream: stream)
             x = x.to_f if x.is_a?(Rational) && y.is_a?(Float)
             x.public_send(@op, y)
           end
@@ -273,7 +268,7 @@ module MB
             @spec.number
           end
 
-          def value_at(pos, transport: nil, stream: nil)
+          def value_at(pos, frame: nil, transport: nil, stream: nil)
             raw = stream&.cc(number, channel: @channel)
             raw ||= Param.session_cc(number, pos, channel: @channel) if pos
             @spec.value(raw || @spec.default)
@@ -317,8 +312,8 @@ module MB
           # curve (ControlSpec#position: where a knob learned on that cc
           # sits, so both pick alike), else the value itself (clamped to
           # 0..1).
-          def position_at(pos, transport: nil, stream: nil)
-            v = Param.value_at(@source, pos, transport: transport, stream: stream).to_f
+          def position_at(pos, frame: nil, transport: nil, stream: nil)
+            v = ValueSource.value_at(@source, pos, frame: frame, transport: transport, stream: stream).to_f
             k = Choice.knob_of(@source)
             if k
               k.spec.position(v)
@@ -329,8 +324,8 @@ module MB
             end.clamp(0.0, 1.0)
           end
 
-          def value_at(pos, transport: nil, stream: nil)
-            @choices[index_at(position_at(pos, transport: transport, stream: stream))]
+          def value_at(pos, frame: nil, transport: nil, stream: nil)
+            @choices[index_at(position_at(pos, frame: frame, transport: transport, stream: stream))]
           end
 
           # The choice index for 0..1 position +x+, with hysteresis.
@@ -362,9 +357,7 @@ module MB
           # The knob behind +source+ (a Knob, a Reader, or a Graph of one),
           # or nil.
           def self.knob_of(source)
-            node = source.is_a?(Graph) ? Graph.unwrap(source.node) : source
-            node = node.knob if node.is_a?(GraphNode::Knob::Reader)
-            node.is_a?(GraphNode::Knob) ? node : nil
+            ValueSource.knob_of(source.is_a?(Graph) ? Graph.unwrap(source.node) : source)
           end
         end
 
@@ -379,7 +372,7 @@ module MB
             freeze
           end
 
-          def value_at(pos, transport: nil, stream: nil)
+          def value_at(pos, frame: nil, transport: nil, stream: nil)
             @clip.value_at(pos)
           end
 
@@ -405,8 +398,8 @@ module MB
             freeze
           end
 
-          def value_at(pos, transport: nil, stream: nil)
-            Graph.eval(@node, pos)
+          def value_at(pos, frame: nil, transport: nil, stream: nil)
+            Graph.eval(@node, pos, frame)
           end
 
           def control_specs
@@ -475,17 +468,17 @@ module MB
             beats == 1 ? '1.beat' : "#{beats}.beats"
           end
 
-          # The value of the tree at +pos+.
-          def self.eval(node, pos)
+          # The value of the tree at +pos+ (knobs at Session frame +frame+
+          # when given).
+          def self.eval(node, pos, frame = nil)
             node = unwrap(node)
             case node
             when GraphNode::Constant then node.constant
-            when GraphNode::Knob then node.value_at(pos)
-            when GraphNode::Knob::Reader then node.knob.value_at(pos)
+            when GraphNode::Knob, GraphNode::Knob::Reader then node.value_at(pos, frame: frame)
             when GraphNode::Mixer
-              node.summands.sum(node.constant.to_f) { |s| node[s] * eval(s, pos) }
+              node.summands.sum(node.constant.to_f) { |s| node[s] * eval(s, pos, frame) }
             when GraphNode::Multiplier
-              node.multiplicand_counts.reduce(node.constant.to_f) { |p, (m, k)| p * eval(m, pos)**k }
+              node.multiplicand_counts.reduce(node.constant.to_f) { |p, (m, k)| p * eval(m, pos, frame)**k }
             when Tone then lfo_value(node, pos)
             else raise NotAParam, "Can't read #{node} as a param"
             end

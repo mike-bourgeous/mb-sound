@@ -42,7 +42,7 @@ Every named thing (presets at every scale: effects, instruments, kits, clips, ma
 
 ### [Params: one declaration record (`MB::Sound::Param`)](params.md)
 
-`MB::Sound::Param` (`lib/mb/sound/param.rb`) is the one frozen declaration record: knob specs, MIDI control specs, script options, graph-document `param`/`knob` lines, rack knobs, ChannelMixer params, and ArgTypes signatures all build one.  Types and units come from the values (`2400.hz`, `-12.db`), names imply ranges, `(lo..hi).at(default)` is the canonical ranged default, Integer ranges are steps; `#position`/`#value` map along range and curve.  Checks run at declaration, load, build, and turn (never per sample), through `live_error`; a guard spec checks every declaration in lib/, presets/, and bin/.
+`MB::Sound::Param` (`lib/mb/sound/param.rb`) is the one frozen declaration record: knob specs, MIDI control specs, script options, graph-document `param`/`knob` lines, rack knobs, ChannelMixer params, and ArgTypes signatures all build one.  Types and units come from the values (`2400.hz`, `-12.db`), names imply ranges, `(lo..hi).at(default)` is the canonical ranged default, Integer ranges are steps; one range mapping, `Param::Scale`, maps positions along range and curve for params, knobs, controllers, ramps, crossfades, and velocity peaks, and `MB::Sound::ValueSource` is the one coercer and reader of values that move (numbers, knob names, knobs, nodes, params; one `value_at(pos, frame:, transport:, stream:)`).  Checks run at declaration, load, build, and turn (never per sample), through `live_error`; a guard spec checks every declaration in lib/, presets/, and bin/.
 
 ### [Type-dispatched parameters (`MB::Sound::ArgTypes`)](arg_types.md)
 

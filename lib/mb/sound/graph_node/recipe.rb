@@ -474,7 +474,7 @@ module MB
           # with some calls' arguments given as something else: +subs+ is
           # a Hash { call key (.key_of) => callable(args, kwargs) returning
           # [args, kwargs] }.  The calls record the arguments they were
-          # given (so `lp4(1200, resonance: knob(:"bass/reso"))` prints).
+          # given (so `lp4(1200, resonance: knob(:"bass/resonance"))` prints).
           # Used by live literals (Arrangement::LiteralBinding).
           def substituting(subs)
             st = state

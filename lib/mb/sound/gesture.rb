@@ -196,9 +196,7 @@ module MB
         c = segs[k][4]
         u = (frame - fa).to_f / (fb - fa)
         s = c ? c.call(u) : u
-        pa = spec.position(va)
-        pb = spec.position(vb)
-        spec.value(pa + (pb - pa) * s)
+        spec.scale.between(va, vb, s) # (the knob ramp's own formula)
       end
 
       # The `turn` line: `turn :space, 0 => 0.3, 1.n8 => 0.5, 1.n4 => 0.62`

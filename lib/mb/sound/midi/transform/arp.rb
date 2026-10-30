@@ -121,7 +121,7 @@ module MB
           # it once, at its own position; see MIDI::Param).
           def rate_at(wn)
             return @rate unless @rate_param
-            @rate = Arp.rate_of(Param.value_at(@rate_param, wn, transport: transport, stream: @reading))
+            @rate = Arp.rate_of(ValueSource.value_at(@rate_param, wn, transport: transport, stream: @reading))
           end
 
           # A rate param's value as whole notes: Integers and Floats of 1 or

@@ -200,7 +200,7 @@ module MB
                   else
                     begin
                       t = lb.target(entry[:roots], n, name, all: all)
-                      Bind.new(line: lb.line(track, t).freeze, knob: lb.knob_name(track, t.param), reason: nil)
+                      Bind.new(line: lb.line(track, t).freeze, knob: Session::Name.param(track, t.param), reason: nil)
                     rescue StandardError => e
                       Bind.new(line: nil, knob: nil, reason: (e.is_a?(lb::Error) ? e.message : "#{e.class}: #{e.message}").dup.freeze)
                     end
@@ -286,7 +286,7 @@ module MB
           knobs = []
           readers = {}
           cls.plumbing.each do |_, n|
-            k = n.is_a?(GraphNode::Knob::Reader) ? n.knob : n.is_a?(GraphNode::Knob) ? n : nil
+            k = ValueSource.knob_of(n)
             next unless k&.name
             knobs << k.name unless knobs.include?(k.name)
             readers[k.name] ||= n if n.is_a?(GraphNode::Knob::Reader)
@@ -550,7 +550,7 @@ module MB
             nxt = []
             frontier.each do |s|
               s = GraphNode.climb_tee_tree(s)
-              k = s.is_a?(GraphNode::Knob::Reader) ? s.knob : s.is_a?(GraphNode::Knob) ? s : nil
+              k = ValueSource.knob_of(s)
               if k
                 out << k.name if k.name && !out.include?(k.name)
                 next

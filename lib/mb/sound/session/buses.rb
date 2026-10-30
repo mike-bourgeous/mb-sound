@@ -162,7 +162,7 @@ module MB
             sends = r.sends.transform_values { |k|
               mode, v = k.queued_state
               next v if mode == :hold
-              v = v.knob if v.is_a?(GraphNode::Knob::Reader)
+              v = ValueSource.knob_of(v) || v
               knobs.key(v) || v
             }
             r.trigger ? { to: nil, send: {}, trigger: true } : { to: r.to, send: sends }
@@ -424,16 +424,7 @@ module MB
         end
 
         def check_send_level(value)
-          case value
-          when Numeric
-            unless value.real? && value.finite? && value >= 0 && value <= MAX_SEND
-              raise ArgumentError, "Send levels are linear gains from 0 to #{MAX_SEND.round} (write -6.db for -6 dB; got #{value.inspect})"
-            end
-          when Symbol
-            knob!(value)
-          else
-            raise ArgumentError, "A send level is a gain (e.g. -6.db), a knob name, or a node (got #{value.inspect})" unless value.respond_to?(:sample) && value.respond_to?(:get_sampler)
-          end
+          ValueSource.coerce(value, 'A send level', numbers: 0..MAX_SEND, number_hint: "is a linear gain from 0 to #{MAX_SEND.round} (write -6.db for -6 dB)", names: :check, knobs: self)
         end
 
         # A new level knob for the send from +name+ to +bus+ at +level+ (see

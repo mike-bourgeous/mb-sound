@@ -198,7 +198,7 @@ module MB
           when Constant
             ParamValue.new(value: v.constant, type: :control, unit: f.(v.unit), range: range || v.range, label: nil, detail: nil)
           when Knob::Reader, Knob
-            k = v.is_a?(Knob::Reader) ? v.knob : v
+            k = ValueSource.knob_of(v)
             ParamValue.new(value: k.value, type: :control, unit: f.(k.spec.unit), range: range || k.spec.range, label: k.name, detail: k.to_s.dup.freeze)
           else
             type = port_type_of(v)

@@ -435,6 +435,9 @@ module MB
         raise ArgumentError, "Scene names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
         raise ArgumentError, "others: must be :stop (or :ring), :cut, or :keep (got #{others.inspect})" unless [*STOP_MODES, :keep].include?(others)
         check_quant(q) if q
+        # (a knob's short name, :"bass/reso", is the knob's full name in the
+        # scene: Session::Knobs#full_knob_name)
+        values = values.transform_keys { |k| (k.is_a?(Symbol) && @session.full_knob_name(k)) || k }
 
         values.each do |k, v|
           if KEY_VALUES.include?(k)
@@ -1099,7 +1102,12 @@ module MB
       # live_error) if it can't be used.
       def check_knob_value(owner, name, value)
         v, options = knob_value(value)
-        ok = v.is_a?(Numeric) || v.is_a?(Symbol) || v.respond_to?(:sample)
+        ok = begin
+               ValueSource.coerce(v, "knob #{name.inspect}")
+               true
+             rescue ArgumentError
+               false
+             end
         extra = value.is_a?(Array) ? ((value[1] || {}).keys - [:over, :curve, :smooth, :from]) : []
         ok &&= extra.empty? && (!value.is_a?(Array) || value.length <= 2) && options.is_a?(Hash)
         return true if ok

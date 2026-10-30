@@ -98,7 +98,7 @@ module MB
           @lock.synchronize {
             draws, tail = @walk_tail || [0, form_start]
             while @walk.length <= n
-              name, tail = form_next(tail, draws, ->(w) { MIDI::Param.peek { MIDI::Param.value_at(w, now) } })
+              name, tail = form_next(tail, draws, ->(w) { MIDI::Param.peek { ValueSource.value_at(w, now) } })
               draws += 1
               @walk << [name, draws - 1].freeze if name
             end

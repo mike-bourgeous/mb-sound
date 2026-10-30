@@ -1,7 +1,7 @@
 # Params: one declaration record (`MB::Sound::Param`)
 
 <!-- summary -->
-`MB::Sound::Param` (`lib/mb/sound/param.rb`) is the one frozen declaration record: knob specs, MIDI control specs, script options, graph-document `param`/`knob` lines, rack knobs, ChannelMixer params, and ArgTypes signatures all build one.  Types and units come from the values (`2400.hz`, `-12.db`), names imply ranges, `(lo..hi).at(default)` is the canonical ranged default, Integer ranges are steps; `#position`/`#value` map along range and curve.  Checks run at declaration, load, build, and turn (never per sample), through `live_error`; a guard spec checks every declaration in lib/, presets/, and bin/.
+`MB::Sound::Param` (`lib/mb/sound/param.rb`) is the one frozen declaration record: knob specs, MIDI control specs, script options, graph-document `param`/`knob` lines, rack knobs, ChannelMixer params, and ArgTypes signatures all build one.  Types and units come from the values (`2400.hz`, `-12.db`), names imply ranges, `(lo..hi).at(default)` is the canonical ranged default, Integer ranges are steps; one range mapping, `Param::Scale`, maps positions along range and curve for params, knobs, controllers, ramps, crossfades, and velocity peaks, and `MB::Sound::ValueSource` is the one coercer and reader of values that move (numbers, knob names, knobs, nodes, params; one `value_at(pos, frame:, transport:, stream:)`).  Checks run at declaration, load, build, and turn (never per sample), through `live_error`; a guard spec checks every declaration in lib/, presets/, and bin/.
 <!-- /summary -->
 
 The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
@@ -46,7 +46,7 @@ Built by param-1 (2026-10-24), phase 1 of the library design's critical path ("P
 | form | now |
 |---|---|
 | `ArgTypes::Param` | is `MB::Sound::Param` |
-| `Knob::Spec` | builds and carries `#param` (validation, typed values, names-table ranges); keeps its Float fields for the hot paths; typed knobs print typed; `#respec` keeps the declaration when only takeover/smooth change |
+| `Knob::Spec` | builds and carries `#param` (validation, typed values, names-table ranges) and its `#scale` (`Param::Scale` over its Float range: the hot paths' numbers; 0..1 and linear when the declaration has no range, :switch read as linear); adds only takeover and smooth; typed knobs print typed through `Param#declaration_args`; `#respec` keeps the declaration when only takeover/smooth change |
 | graph-document `param`/`knob` lines | build Params at load (`spec[:param]`, `Document#declarations`; `spec[:value]` the base-unit number); format 5 writes the canonical spelling with typed values (`knob :cut, (150.hz..8000.hz).at(2400.hz)`), format 4 `range:` lines still load |
 | rack knobs (`knob :space, 0.3, ...` in a rack block; `macro` was renamed in ux-r4b) | through Knob::Spec, description in the Param |
 | `ScriptRunner::Param` | carries `#param`; help text and option checks read its range (names-table ranges included); typed defaults parse; `ScriptRunner.declarations_of(path)` reads a script's declarations without running it |
@@ -61,6 +61,31 @@ GraphIO::FORMAT is 5: `param`/`knob` lines print as Params do, typed as declared
 ## Positions (library-core-1, 2026-10-26)
 
 `Param#position(value)` and `#value(position)` map values to 0..1 along the range and curve and back (the DYK mark "try": morph, randomize, and macros will work in position space, so a cutoff moves evenly in pitch): `:exp` logarithmic (Decibels: even in dB), linear and stepped linear (stepped values round), choices by index, booleans at 0.5; outside 0..1 gives values outside the range.  Presettable classes declare Params with `param` (built on first read; see library.md), and each preset entry carries them with the preset's values as defaults.
+
+## One range mapping (`Param::Scale`, knobs-1, 2026-10-30)
+
+arch-session (section 1) counted nine copies of the exp/linear range math; a knob, a controller, and a param on one range could answer differently.  `Param::Scale` (`lib/mb/sound/param/scale.rb`) is the one: a span `lo..hi` (may fall: inverted controllers, falling velocity ranges) along `:exp` or linear.  Class functions `.value(pos, lo, hi, curve)` and `.position(v, lo, hi, curve)` (Floats or DFloats, no allocation) serve hot paths; a Scale adds `#ramp_terms(from, to)` (`[k, a, b]`: the value `t` of the way is `exp((t * k + a) + b)` or `t * k + a`; what `FastArithmetic.knob_ramp`, `Knob#ramp_values`, and `Knob#value_at` compute, now once per ramp, `Knob::Ramp#terms`), `#between(a, b, t)` (crossfades, `xfade` crossfaders, `Gesture#value_at`, rack follow maps), and `#shift(x, by, amount)` (`Knob#mod`, numbers or nodes).
+
+| user | through |
+|---|---|
+| `Param#position`/`#value` | `Scale.position`/`.value` (choices, booleans, steps, and typing on top) |
+| `Knob::Spec#position`/`#value` | its `#scale` (`#positions` folded into `#position`, which takes DFloats) |
+| `MIDI::ControlSpec.map`/`#position`/`.from_param` | `Scale.value`/`.position`; a centered controller is two scales from its center |
+| knob ramps (C and Ruby), `Knob#value_at` ramps | `#ramp_terms` |
+| crossfades, gestures | `#between` |
+| `Knob#mod` | `#shift` |
+| `Envelope.velocity_peak` (the C `env_peak`'s mirror) | `Scale.value` |
+
+Formulas are the ones the kernels and the controller map used: `value` is `lo * (hi / lo) ** pos` on `:exp` (the controller map's and `env_peak`'s), `lo + (hi - lo) * pos` linear; `position` `log(v / lo) / log(hi / lo)` or `(v - lo) / (hi - lo)`.  Ramps, controller values, and velocity peaks kept their bits.  `Knob::Spec#value` and `Param#value` used `lo * exp(pos * log(hi / lo))` before: CC moves and UI steps on exp knobs, exp crossfades, and gesture points moved by an ulp or so (and position 1 now lands exactly on the range's end; the exp form missed 8000 by 3e-12).  `spec/lib/mb/sound/param/scale_spec.rb` sweeps seeded ranges through Param, Knob::Spec, ControlSpec, and velocity peaks (the same values at the same positions) and checks the C ramp against `#between`.
+
+## Values that move (`ValueSource`, knobs-1)
+
+`MB::Sound::ValueSource` (`lib/mb/sound/value_source.rb`) replaced the checkers that each took "a number, a knob name, a knob, a Reader, or a node" their own way (turn values, send levels, scene and section knob values, rack control ports, document params bound to caller values, clock speeds, followed tempos):
+
+- `.coerce(value, what, read: :sample | :decision, numbers: (Range, Proc, or false), number_hint:, names: :keep | :check | :knob | false, knobs: session, channels:)`: numbers real, finite, and within `numbers`; knob names kept, checked, or resolved through `Session#knob!` (so aliases, track levels, primary controls, and did-you-mean come along); Knobs and Readers as they are; nodes followed per sample (`:sample`), or wrapped by `MIDI::Param.wrap` (`:decision`: knobs, tempo LFOs, constants, sums and products, clips, params; audio-rate nodes raise `NotAParam` with the follow-a-knob hint).  One message: `turn :cut takes a number, a knob name, knob(:x), or a node (got nil)`.
+- `.value_at(x, pos, frame:, transport:, stream:, knobs:, now:)`: the one reader (`MIDI::Param.value_at` is gone).  Symbols are plain values (lock styles, modes) unless `knobs:` names a Session whose knobs they are; `now: true` reads knobs at their current value (`Clock::Free`, a clock outside a Session).
+- One signature for everything that moves: `value_at(pos, frame: nil, transport: nil, stream: nil)` (Knob, Knob::Reader, every `MIDI::Param` class, `Clip#value_at`); `Param::Graph` passes `frame:` to the knobs in its tree, so `knob(:x) * 2` as a clock speed reads its knob at the exact frame like a bare knob.
+- Not folded in: the per-node "must be a number or a node" checks inside DSL methods (their messages name the method's own argument) and `Knob::Reader` unwrapping outside these readers (`ValueSource.knob_of` for new code).
 
 ## Guard
 

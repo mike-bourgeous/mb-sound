@@ -69,7 +69,7 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
       clip = n.to_s.match?(/drum|beat|perc/) ? DRUM_GRID : BASS_RIFF
       _, *ref = run(->(_s) { MB::Sound.track(:t) { |c| MB::Sound.preset(n, midi: c, **defaults) }; MB::Sound.bg(:t, clip) }, buffers: 30)
       s, *got = run(->(_s) { MB::Sound.track(:t, n); MB::Sound.bg(:t, clip) }, buffers: 30)
-      expect(s.knobs.keys).to eq(defaults.keys.map { |k| :"t/#{k}" })
+      expect(s.knobs.keys).to eq(defaults.keys.map { |k| MB::Sound::Session::Name.param(:t, k) })
       expect(got).to eq(ref)
       expect(ref[0].abs.max).to be > 0.001
       expect(s.knobs.values.map(&:value)).to eq(doc.declarations.values_at(*defaults.keys).map { |p| MB::Sound::Param.magnitude(p.default).to_f })
@@ -113,7 +113,37 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
       MB::Sound.bg(:pad, MB::Sound.preset(:dnb_reese, midi: BASS_RIFF))
       MB::Sound.bg(:a, BASS_RIFF)
     }, buffers: 4)
-    expect(s.knobs.keys).to contain_exactly(:cut, :"a/reso")
+    expect(s.knobs.keys).to contain_exactly(:cut, :"a/resonance")
+  end
+
+  # knobs-1 (D5): knobs are named in full, whatever short alias a document
+  # or a literal used (digibrass declares `param :reso`); the short name
+  # still turns it, with a one-line note the first time.
+  it 'names params in full and resolves short names with a note' do
+    s, = run(->(_s) { MB::Sound.track(:a, :digibrass); MB::Sound.bg(:a, BASS_RIFF) }, buffers: 2)
+    expect(s.knobs.keys).to include(:"a/resonance")
+    expect(s.knobs.keys).not_to include(:"a/reso")
+    expect(MB::Sound::Session::Name.param(:a, :reso)).to eq(:"a/resonance")
+    expect(MB::Sound::Session::Name.param(:a, :q)).to eq(:"a/quality")
+    expect(MB::Sound::Session::Name.full_name(:"a/freq")).to eq(:"a/frequency")
+    expect(MB::Sound::Session::Name.full_name(:"a/cutoff")).to be_nil
+    expect(MB::Sound::Session::Name.full_name(:reso)).to be_nil # (plain names are the user's own)
+
+    expect {
+      MB::Sound::Session.with_context(session: s) { MB::Sound.turn(:"a/reso", 0.6) }
+    }.to output(/knob :"a\/reso" is :"a\/resonance"/).to_stderr
+    s.process_buffer
+    expect(s.knobs[:"a/resonance"].value).to eq(0.6)
+    # (noted once per name; the journal, takes, and scenes keep the full name)
+    entry = nil
+    expect { MB::Sound::Session.with_context(session: s) { entry = MB::Sound.turn(:"a/reso", 0.5) } }.not_to output.to_stderr
+    expect(entry.to_s).to include('a/resonance')
+    MB::Sound::Session.with_context(session: s) { MB::Sound.scene(:soft, "a/reso": 0.3) }
+    expect(s.arrangement.scenes[:soft].values.keys).to eq([:"a/resonance"])
+    MB::Sound::Session.with_context(session: s) { MB::Sound.section(:verse, 4, "a/reso": 0.4) }
+    expect(s.arrangement.sections[:verse].knobs.keys).to eq([:"a/resonance"])
+    expect(s.knob!(:"a/reso")).to equal(s.knobs[:"a/resonance"])
+    expect(s.knob(:"a/reso")).to equal(s.knobs[:"a/resonance"])
   end
 
   # ui-scaffold-1 (the library picker loads one instrument after another
@@ -215,6 +245,6 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
 
     s2, = run(->(_s) { MB::Sound.track(:bass, :digibrass); MB::Sound.bg(:bass, clip) }, buffers: 4)
     info = MB::Sound::UI::Inspect::Gatherer.new.call(s2, { track: :bass, node: nil })
-    expect(info.knobs).to contain_exactly(:"bass/grit", :"bass/cutoff", :"bass/reso")
+    expect(info.knobs).to contain_exactly(:"bass/grit", :"bass/cutoff", :"bass/resonance")
   end
 end

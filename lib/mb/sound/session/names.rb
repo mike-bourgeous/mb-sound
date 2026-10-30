@@ -143,12 +143,28 @@ module MB
           # #level?), which a track param's knob can't take.
           RESERVED_LEAVES = [MONITOR, CUE, LEVEL].freeze
 
-          # Track +track+'s knob for patch param +param+ (:"bass/cutoff";
-          # a param named like a reserved leaf gets a prefix:
-          # :"bass/patch_level", since :"bass/level" is the track's level).
+          # Track +track+'s knob for patch param +param+ (:"bass/cutoff"):
+          # the one knob name rule for preset params, bound literals, and
+          # library entry params (knobs-1, D5: knobs are named in full, so a
+          # param written with a short alias of the Param names table, like
+          # a document's `param :reso`, is :"bass/resonance"; #full_name).
+          # A param named like a reserved leaf gets a prefix:
+          # :"bass/patch_level", since :"bass/level" is the track's level.
           def param(track, param)
-            leaf = param.to_s
+            leaf = MB::Sound::Param.full_name(param.to_sym).to_s
             join(track, RESERVED_LEAVES.include?(leaf) ? "patch_#{leaf}" : leaf)
+          end
+
+          # The full knob name a short one stands for (:"bass/resonance"
+          # for :"bass/reso": the leaf through Param::NAME_ALIASES), or nil
+          # when +name+'s leaf is no alias (or +name+ is plain or not a
+          # Symbol).  Session::Knobs resolves typed short names through it.
+          def full_name(name)
+            return nil unless name.is_a?(Symbol)
+            nm = self[name]
+            return nil if nm.plain?
+            full = MB::Sound::Param::NAME_ALIASES[nm.leaf] or return nil
+            join(nm.base, full)
           end
 
           # The hidden knob name of the send from player +name+ to bus

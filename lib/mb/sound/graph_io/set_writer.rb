@@ -87,8 +87,8 @@ module MB
           @lit = GraphNode::Recipe::RubyWriter.new(nil)
           @knobs = @session.knobs
           # (knobs print as the names the set's `knob` lines define; a name
-          # that isn't a Ruby identifier, like a bound literal's :"bass/reso",
-          # as knob(:"bass/reso"))
+          # that isn't a Ruby identifier, like a bound literal's :"bass/resonance",
+          # as knob(:"bass/resonance"))
           @knob_nodes = @knobs.each_with_object({}.compare_by_identity) { |(n, k), h| h[k] = n.to_s.match?(/\A[a-z_][A-Za-z0-9_]*\z/) ? n.to_s : "knob(#{n.inspect})" }
           @used = Set.new(@knobs.keys.map(&:to_s))
 

@@ -68,7 +68,7 @@ module MB
         # (MIDI::Param: a knob's #choose, a clip of scale names) is read at
         # +pos+ and resolved the same way.
         def self.scale_at(x, pos, transport:, stream: nil)
-          x = x.value_at(pos, transport: transport, stream: stream) if x.is_a?(Param::Base)
+          x = ValueSource.value_at(x, pos, transport: transport, stream: stream) if x.is_a?(Param::Base)
           case x
           when Scale then x
           when MusicalKey then x.scale(pos, transport: transport)
@@ -330,7 +330,7 @@ module MB
 
           # Voiced chord notes of +from+ at +pos+ (see the class comment).
           def self.voiced(from, pos, transport:, stream: nil, per: nil, scale: nil)
-            from = Param.value_at(from, pos, transport: transport, stream: stream) if from.is_a?(Param::Base)
+            from = ValueSource.value_at(from, pos, transport: transport, stream: stream) if from.is_a?(Param::Base)
             case from
             when nil
               sc = Lock.anchored(Lock.scale_at(scale, pos, transport: transport))
@@ -495,7 +495,7 @@ module MB
           # The fixed Style in effect at +pos+ (itself unless moving).
           def at(pos, transport:, stream: nil)
             return self unless @styles
-            v = @name.value_at(pos, transport: transport, stream: stream)
+            v = ValueSource.value_at(@name, pos, transport: transport, stream: stream)
             v = v.to_sym if v.is_a?(String)
             @styles[v] ||= Style.new(v, **@overrides)
           end

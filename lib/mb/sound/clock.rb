@@ -104,20 +104,10 @@ module MB
 
       # Checks a speed: a non-negative number, a knob name, a Knob or
       # reader, or a MIDI::Param.
+      # (A tempo LFO, `4.bars.lfo.at(0.5..2)`, is read per 800-frame cell
+      # like any param; Hz LFOs raise naming the tempo LFO; omnibus15.)
       def self.check_speed(speed)
-        case speed
-        when Numeric
-          raise ArgumentError, "A clock speed is a number from 0 up (got #{speed.inspect})" unless speed.real? && speed.finite? && speed >= 0
-          speed
-        when Symbol, GraphNode::Knob, GraphNode::Knob::Reader then speed
-        when GraphNode
-          # (a tempo LFO, `4.bars.lfo.at(0.5..2)`, read per 800-frame cell
-          # like any param; Hz LFOs raise naming the tempo LFO; omnibus15)
-          MIDI::Param.wrap(speed, 'A clock speed')
-        else
-          return speed if speed.respond_to?(:value_at)
-          raise ArgumentError, "A clock speed is a number, a knob name, knob(:x), or a param like cc(1, 0.5..2) (got #{speed.inspect})"
-        end
+        ValueSource.coerce(speed, 'A clock speed', read: :decision, numbers: ->(n) { n >= 0 }, number_hint: 'is a number from 0 up')
       end
 
       # True if the speed changes while playing (a knob or a param).
@@ -368,15 +358,10 @@ module MB
         end
 
         def clock_speed_value(speed, rf)
-          pos = rf.to_r * per_sample_at(rf)
-          case speed
-          when Symbol
-            s = Session.existing or raise ArgumentError, "The clock speed knob #{speed.inspect} needs a Session"
-            s.knob!(speed).value
-          when GraphNode::Knob then speed.value
-          when GraphNode::Knob::Reader then speed.knob.value
-          else speed.value_at(pos, transport: transport, stream: nil)
+          if speed.is_a?(Symbol) && Session.existing.nil?
+            raise ArgumentError, "The clock speed knob #{speed.inspect} needs a Session"
           end
+          ValueSource.value_at(speed, rf.to_r * per_sample_at(rf), transport: transport, knobs: Session.existing, now: true)
         end
       end
 

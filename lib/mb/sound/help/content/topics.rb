@@ -702,7 +702,9 @@ module MB
         (`turn :"bass/cutoff", 900.hz`; scenes take `"bass/cutoff": 3000`),
         `bind :bass, cutoff: :cut` makes one follow another knob, and
         `track :bass, L.inst.jungle_reese` again changes the instrument at
-        its launch point (one undo step).
+        its launch point (one undo step).  Track knobs take their params'
+        full names (`:"bass/resonance"`); a short one (`:"bass/reso"`,
+        `/freq`, `/q`) finds it too, with a note.
       TEXT
       commands :track, :tracks, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement

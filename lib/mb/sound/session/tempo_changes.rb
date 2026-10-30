@@ -66,19 +66,7 @@ module MB
         # params, clips, sums of those).  Audio-rate nodes raise, pointing
         # at a knob that follows them.
         def check_tempo_source(source)
-          case source
-          when Symbol
-            knob!(source)
-            source
-          when GraphNode::Knob, GraphNode::Knob::Reader
-            source
-          when MIDI::Param::Base
-            source
-          when GraphNode, Sequence::Clip
-            MIDI::Param.wrap(source, 'bpm')
-          else
-            raise ArgumentError, "bpm follows a knob name (bpm :tempo), knob(:tempo), or a param like 4.bars.lfo.at(150..180) (got #{ArgTypes.describe_value(source) rescue source.inspect})"
-          end
+          ValueSource.coerce(source, 'bpm', read: :decision, numbers: false, names: :check, knobs: self)
         rescue MIDI::Param::NotAParam => e
           raise ArgumentError, "#{e.message}; for a tempo, make a knob follow it and follow the knob: knob :tempo, 120, range: 60..200; turn :tempo, follow: node; bpm :tempo"
         end
@@ -88,12 +76,7 @@ module MB
         # Reads a followed tempo source at timeline position +pos+ (the
         # first frame of the span about to render).
         def read_tempo_source(source, pos)
-          case source
-          when Symbol then knob!(source).value_at(pos, frame: @frame)
-          when GraphNode::Knob then source.value_at(pos, frame: @frame)
-          when GraphNode::Knob::Reader then source.knob.value_at(pos, frame: @frame)
-          else source.value_at(pos, transport: @transport, stream: nil)
-          end
+          ValueSource.value_at(source, pos, frame: @frame, transport: @transport, knobs: self)
         end
 
         def check_ramp_length(over)

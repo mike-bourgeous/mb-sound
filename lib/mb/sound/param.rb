@@ -78,6 +78,16 @@ module MB
       # Types whose default curve is :exp (frequencies and times).
       EXP_TYPES = %i[frequency seconds samples duration tempo decibels].freeze
 
+      # Short names of the names table's params (the table takes both; knobs
+      # are named in full: Session::Name.param, knobs-1 D5).
+      NAME_ALIASES = { reso: :resonance, freq: :frequency, q: :quality }.freeze
+
+      # The full name of a param written with a short alias (:resonance for
+      # :reso; see NAME_ALIASES), else +name+.
+      def self.full_name(name)
+        NAME_ALIASES[name] || name
+      end
+
       # The names in the names table (Param.names), aliases included.
       NAME_KEYS = %i[
         cutoff frequency freq resonance reso quality q drive mix detune voices attack decay sustain release
@@ -385,7 +395,7 @@ module MB
             feedback: [-1.0..1.0, 'Feedback gain'],
           }
           table = rows.to_h { |n, (range, desc, curve)| [n, { range: range, curve: curve, description: desc }.compact.freeze] }
-          { reso: :resonance, freq: :frequency, q: :quality }.each { |a, n| table[a] = table[n] }
+          NAME_ALIASES.each { |a, n| table[a] = table[n] }
           raise 'Param::NAME_KEYS is out of date' unless table.keys.sort == NAME_KEYS.sort
           table.freeze
         end
@@ -588,11 +598,7 @@ module MB
         return value ? 1.0 : 0.0 if type == :boolean
         lo, hi = position_ends
         v = value.is_a?(Numeric) && !value.is_a?(MB::Sound::Decibels) ? value.to_f : Param.magnitude(value).to_f
-        if curve == :exp
-          Math.log(v / lo) / Math.log(hi / lo)
-        else
-          (v - lo) / (hi - lo)
-        end
+        Scale.position(v, lo, hi, curve)
       end
 
       # The value at +position+ (see #position; 0 is the range's start, 1
@@ -607,7 +613,7 @@ module MB
         end
         return pos >= 0.5 if type == :boolean
         lo, hi = position_ends
-        v = curve == :exp ? lo * Math.exp(pos * Math.log(hi / lo)) : lo + pos * (hi - lo)
+        v = Scale.value(pos, lo, hi, curve)
         return v.round if stepped?
         typed(v)
       end
@@ -736,6 +742,8 @@ module MB
 
     # ArgTypes signatures take the same record.
     ArgTypes::Param = Param
+
+    require_relative 'param/scale'
 
     ::Range.include(Param::RangeAt)
     ::Numeric.include(Param::ValueIn)

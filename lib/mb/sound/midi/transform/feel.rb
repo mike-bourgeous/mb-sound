@@ -265,7 +265,7 @@ module MB
             return @condition if @condition
 
             bar_start = transport.bar_position(transport.bar_at(timeline_at(time)).floor)
-            n = Param.value_at(@n, bar_start, transport: transport, stream: @reading).to_f.round
+            n = ValueSource.value_at(@n, bar_start, transport: transport, stream: @reading).to_f.round
             Sequence::Clip.check_condition(MB::M.max(n, 1), @from)
           end
         end
