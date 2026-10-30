@@ -510,7 +510,8 @@ module MB
           n = JUMP_AREA_TAPS
           area = Numo::DFloat.cast(Array.new(n) { |i| Math.sin(Math::PI * (i + 1) / (n + 1))**2 })
           area /= area.sum
-          [blep[steps].freeze, blamp[steps].freeze, area.freeze].freeze
+          # (contiguous copies: FastSynth.jump_queue reads them)
+          [blep[steps].dup.freeze, blamp[steps].dup.freeze, area.freeze].freeze
         end
       end
 
@@ -539,6 +540,13 @@ module MB
         residual = blep * dv + blamp * ds
         residual[0...area.length] += area * ((JUMP_STEP_AREA * dv + JUMP_KINK_AREA * ds) - residual.sum)
         residual
+      end
+
+      # +r+ (pending step samples) padded with zeros or cut to +length+.
+      def self.pad_residual(r, length)
+        return r[0...length] if r.length >= length
+
+        r.class.zeros(length).tap { |z| z[0...r.length] = r }
       end
 
       # Initializes an oscillator node with a simple generated waveform,
@@ -1852,7 +1860,7 @@ module MB
           end
         else
           buf = kernel_c(osc_view(count), freq, phase, width, pulses, scan, fb, fb_gain, pivot: pivot)
-          add_jump_residual(buf) if state.jump_residual
+          add_jump_residual(buf) if state.jump_pending?
         end
         apply_output_gain(buf, out_gain) if out_gain
 
@@ -2009,13 +2017,6 @@ module MB
         jump_args = { freq: freq, width: width, phase_mod: phase_mod }
         jump_args[:scan] = scan if table_kernel?
         reset_jump(jump_args, reset_target_value(target))
-      end
-
-      # For plans: the executor added the first +n+ samples of the queued
-      # jump step (see #add_jump_residual).
-      def plan_residual_used(n)
-        residual = @state.jump_residual
-        @state.jump_residual = n < residual.length ? residual[n..].dup : nil
       end
 
       # For plans: the reset input (whose origin is +source+) ended.
@@ -2301,8 +2302,7 @@ module MB
         k = 0.0 unless band_limited?
         return if k == 0
 
-        residual = Tone.jump_residual(v1 - v0, (s1 - s0) * inc) * k
-        state.jump_residual = state.jump_residual ? residual + pad_residual(state.jump_residual, residual.length) : residual
+        state.queue_jump(v1 - v0, (s1 - s0) * inc, k)
       end
 
       # [value, slope per cycle] of the old waveform at phase +p+ (cycles)
@@ -2326,11 +2326,6 @@ module MB
         forward ? [v - dv, s - ds] : [v, s]
       end
 
-      def pad_residual(r, length)
-        return r[0...length] if r.length >= length
-
-        r.class.zeros(length).tap { |z| z[0...r.length] = r }
-      end
 
       # Queues a band-limited step (see #phase_jump) for a wavetable tone
       # whose phase jumped from +before+ to +after+ (cycles; sample mode:
@@ -2354,9 +2349,7 @@ module MB
           v1, s1 = table_shape(table, after + pm, w, inc, scan)
         end
 
-        residual = Tone.jump_residual(v1 - v0, (s1 - s0) * inc)
-        residual = residual.real if residual.is_a?(Numo::DComplex) && !table.complex?
-        @state.jump_residual = @state.jump_residual ? residual + pad_residual(@state.jump_residual, residual.length) : residual
+        @state.queue_jump(v1 - v0, (s1 - s0) * inc, real: !table.complex?)
       end
 
       # [value, slope per cycle] of a cycle-mode +table+ at phase +e+ (cycles,
@@ -2399,12 +2392,7 @@ module MB
       # Adds any queued phase jump step (see #phase_jump) to +buf+, scaled
       # by the output gain.
       def add_jump_residual(buf)
-        residual = @state.jump_residual
-        return unless residual
-
-        n = [buf.length, residual.length].min
-        buf[0...n] += residual[0...n] * @gain
-        @state.jump_residual = n < residual.length ? residual[n..].dup : nil
+        @state.add_jump(buf, @gain)
       end
 
       # True if the warp's pivot node (see #pwm) ended.

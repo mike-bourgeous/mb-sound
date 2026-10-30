@@ -40,9 +40,7 @@ module MB
           # lanes).
           # +voice_knobs+ ({ voice => { knob => value } }: a kit's knob values
           # per drum voice, Drums::Voice#knobs).
-          Result = Data.define(:rows, :hidden, :plumbing, :unfit, :total, :lanes, :voice_knobs) do
-            def by_section = rows.group_by(&:section)
-          end
+          Result = Data.define(:rows, :hidden, :plumbing, :unfit, :total, :lanes, :voice_knobs)
 
           # Classes that are never shown (their settings are other nodes'
           # params), with the reason the hidden counts list them under.
@@ -50,6 +48,7 @@ module MB
             'GraphNode::Tee' => 'tees', 'GraphNode::Tee::Branch' => 'tees',
             'GraphNode::Constant' => 'constants', 'GraphNode::Knob' => 'knobs', 'GraphNode::Knob::Reader' => 'knobs',
             'GraphNode::Multiplier' => 'arithmetic', 'GraphNode::Mixer' => 'arithmetic', 'GraphNode::ProcNode' => 'arithmetic',
+            'GraphNode::BinaryOperation' => 'arithmetic', 'GraphNode::QualityResonance' => 'arithmetic', 'GraphNode::NoteFrequency' => 'note plumbing',
             'GraphNode::Silence' => 'sequencing', 'GraphNode::NodeSequence' => 'sequencing',
             'GraphNode::Ports::Port' => 'ports', 'Notes::EnvelopeInputs' => 'note plumbing', 'Notes::EnvelopeInputs::Port' => 'note plumbing',
             'Notes::Frequency' => 'note plumbing', 'Notes::Number' => 'note plumbing', 'Notes::Trigger' => 'note plumbing',
@@ -81,7 +80,7 @@ module MB
             GraphNode::Reverb GraphNode::Chorus GraphNode::MultitapDelay GraphNode::FeedbackLoop GraphNode::Dynamics
             GraphNode::Dynamics::Crossover::Band GraphNode::Decimator GraphNode::Sounding GraphNode::Limiter
           ].freeze
-          ARITHMETIC = %w[GraphNode::Multiplier GraphNode::Mixer GraphNode::ProcNode].freeze
+          ARITHMETIC = %w[GraphNode::Multiplier GraphNode::Mixer GraphNode::ProcNode GraphNode::BinaryOperation].freeze
           TRIGGERS = %w[Notes::Trigger Notes::KeyTrigger GraphNode::Dust].freeze
           # (always control signals, wherever they are)
           CONTROL = %w[

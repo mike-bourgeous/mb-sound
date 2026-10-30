@@ -432,7 +432,7 @@ module MB
         # TODO: interpolate gain
         attr_accessor :wet, :dry
 
-        # The network (Reverb::Network), nil with +:show_internals:+.
+        # The network (Reverb::Network).
         attr_reader :network
 
         # See GraphNode#reverb -- this method just allows passing an input
@@ -611,11 +611,14 @@ module MB
         # +:seed+ - Random seed Integer for reproducibility of random delays
         #           and modulation.  Try different seeds if you get unwanted
         #           ringing or echo.
-        # +:show_internals+ - If true, the network runs as a graph of delay
-        #                     and matrix nodes that #sources (and
-        #                     graphviz) show; same sound (within float32
-        #                     rounding), slower, and without modulation or
-        #                     loop processing.
+        # +:show_internals+ - If true, graphviz drawings (GraphNode#graphviz,
+        #                     --graphviz) show the network's layout inside
+        #                     the reverb: its input gains, diffusion stages
+        #                     (delays, polarities, Hadamard mixing, shuffle),
+        #                     and feedback lines (delays, loop gains, taps,
+        #                     Householder feedback), drawn from
+        #                     Reverb::Network's Layout (see
+        #                     #graphviz_internals).  The sound is unchanged.
         #
         # Modulation (feedback stage +:modulation:+ / alias +:mod:+ in
         # #reverb; diffusion stages +:diffusion_modulation:+): nil/false
@@ -679,8 +682,6 @@ module MB
           # Set in only some configurations, or later (here so every Reverb
           # has one instance variable layout; see GraphNode::IvarPreset)
           @padded_inputs = nil
-          @diffusers = nil
-          @fdn_history = nil
           @line_samplers = nil
           @network = nil
           @feedback_mod = nil
@@ -802,59 +803,42 @@ module MB
             Math.sqrt(@channels.to_f / g.length) * @channel_trim
           }
 
-          if @show_internals
-            unsupported = {
-              damping: damping, lowpass: lowpass, highpass: highpass, drive: drive, crush: crush, shimmer: shimmer,
-              freeze: freeze, stretch: stretch, modulation: modulation, diffusion_modulation: diffusion_modulation,
-            }.select { |_, v| v && v != 0 && v != false }
-            unless unsupported.empty?
-              raise ArgumentError, "show_internals can't show #{unsupported.keys.join(', ')} (only the network's delays and matrices)"
-            end
+          @line_samplers = @line_inputs.uniq(&:object_id).map { |n| [n.object_id, n.get_sampler] }.to_h
 
-            @last_stage = @line_inputs.map.with_index { |u, idx| u * @input_gains[idx] }
-            @diffusers = @layout.diffusion.each_with_index.map { |st, idx|
-              @last_stage = make_diffuser(st, @last_stage, idx)
-            }
-            @last_stage = make_fdn(@last_stage) if @feedback_enabled
+          if stretch.is_a?(GraphNode)
+            max_stretch ||= 2
           else
-            @line_samplers = @line_inputs.uniq(&:object_id).map { |n| [n.object_id, n.get_sampler] }.to_h
-            @last_stage = []
-
-            if stretch.is_a?(GraphNode)
-              max_stretch ||= 2
-            else
-              stretch = (stretch || 1).to_f
-              max_stretch ||= [stretch, 1].max
-            end
-
-            shimmer_pitch = shimmer_pitch.to_semitones if shimmer_pitch.respond_to?(:to_semitones)
-            @network = Network.new(
-              layout: @layout,
-              sample_rate: @sample_rate,
-              params: {
-                lowpass: hz(lowpass),
-                highpass: hz(highpass),
-                drive: drive || 0,
-                shimmer: shimmer || 0,
-                shimmer_ratio: 2.0 ** (shimmer_pitch.to_f / 12),
-                freeze: freeze == true ? 1 : (freeze || 0),
-                stretch: stretch,
-                crush: crush || 0,
-                duck: duck_db(duck),
-                gate: gate.is_a?(GraphNode) ? gate : MB::Sound::Length.seconds(gate || 0, sample_rate: @sample_rate).to_f,
-                threshold: threshold,
-                **modulation_params(modulation, MODULATION, ''),
-                **modulation_params(diffusion_modulation, DIFFUSION_MODULATION, 'diffusion_'),
-              },
-              diffusion_mod: @diffusion_mod,
-              feedback_mod: @feedback_enabled ? @feedback_mod : nil,
-              drive_mode: drive_mode,
-              shimmer_window: MB::Sound::Length.seconds(shimmer_window, sample_rate: @sample_rate).to_f,
-              max_stretch: max_stretch,
-              seed: (seed || 0) * 1_000_003 + 0x5EED,
-              dynamics: [duck_db(duck), gate].any? { |v| v.is_a?(GraphNode) || (v && v != 0) },
-            )
+            stretch = (stretch || 1).to_f
+            max_stretch ||= [stretch, 1].max
           end
+
+          shimmer_pitch = shimmer_pitch.to_semitones if shimmer_pitch.respond_to?(:to_semitones)
+          @network = Network.new(
+            layout: @layout,
+            sample_rate: @sample_rate,
+            params: {
+              lowpass: hz(lowpass),
+              highpass: hz(highpass),
+              drive: drive || 0,
+              shimmer: shimmer || 0,
+              shimmer_ratio: 2.0 ** (shimmer_pitch.to_f / 12),
+              freeze: freeze == true ? 1 : (freeze || 0),
+              stretch: stretch,
+              crush: crush || 0,
+              duck: duck_db(duck),
+              gate: gate.is_a?(GraphNode) ? gate : MB::Sound::Length.seconds(gate || 0, sample_rate: @sample_rate).to_f,
+              threshold: threshold,
+              **modulation_params(modulation, MODULATION, ''),
+              **modulation_params(diffusion_modulation, DIFFUSION_MODULATION, 'diffusion_'),
+            },
+            diffusion_mod: @diffusion_mod,
+            feedback_mod: @feedback_enabled ? @feedback_mod : nil,
+            drive_mode: drive_mode,
+            shimmer_window: MB::Sound::Length.seconds(shimmer_window, sample_rate: @sample_rate).to_f,
+            max_stretch: max_stretch,
+            seed: (seed || 0) * 1_000_003 + 0x5EED,
+            dynamics: [duck_db(duck), gate].any? { |v| v.is_a?(GraphNode) || (v && v != 0) },
+          )
 
           @parameters = {
             channels: @channels,
@@ -884,15 +868,13 @@ module MB
           -3 * loop / @sample_rate / Math.log10(@gains[idx])
         end
 
-        # Returns the input source, and if +:internal+ is true, the feedback
-        # and diffusion network.
-        def sources(internal: @show_internals)
+        # Returns the input sources and the network's live parameter nodes.
+        def sources
           {
             **@upstreams.map.with_index { |u, idx|
               ["input_#{idx + 1}", u]
             }.to_h,
-            **(@network ? @network.sources : {}),
-            **(internal ? @last_stage.map.with_index { |v, idx| [:"channel_#{idx + 1}", v] }.to_h : {})
+            **@network.sources,
           }
         end
 
@@ -908,39 +890,17 @@ module MB
           @sample_rate = rate.to_f
           @feedback_delays = nil
 
-          unless @show_internals
-            @network.sample_rate = @sample_rate
-            @line_samplers.each_value do |c|
-              c.sample_rate = @sample_rate unless c.sample_rate == @sample_rate
-            end
-            return self
-          end
-
-          @diffusers.each do |stage|
-            stage.each do |c|
-              c.sample_rate = @sample_rate unless c.sample_rate == @sample_rate
-            end
-          end
-
-          @last_stage.each do |c|
+          @network.sample_rate = @sample_rate
+          @line_samplers.each_value do |c|
             c.sample_rate = @sample_rate unless c.sample_rate == @sample_rate
           end
-
           self
         end
 
         # For internal use.  Generates the next +count+ samples without
-        # downmixing.  In graph mode (+:show_internals:+), buffers longer
-        # than the shortest feedback loop (see #feedback_delays) run in
-        # pieces, since the feedback for a sample must already have been
-        # computed.
+        # downmixing.
         def update(count)
-          limit = @show_internals && @feedback_enabled ? feedback_delays.min : nil
-          if limit && count > limit
-            dry, wet = render_pieces(count, limit)
-          else
-            dry, wet = render_block(count)
-          end
+          dry, wet = render_block(count)
 
           if dry.nil? || wet.any?(&:nil?)
             @pipeline_output = wet
@@ -1021,7 +981,7 @@ module MB
             dry << ups[i].sample(count)
             i += 1
           end
-          wet = @show_internals ? @last_stage.map { |c| c.sample(count) } : network_wet(count)
+          wet = network_wet(count)
 
           # After every input's source has ended (the ended ones padded with
           # silence; see PaddedInput), the output ends where the last of
@@ -1098,28 +1058,6 @@ module MB
           @network.process(inputs, n) || [nil]
         end
 
-        # For internal use.  Like #render_block, in pieces of at most +limit+
-        # samples, joined.  Stops early (a shorter or nil result) if the
-        # input ends.
-        def render_pieces(count, limit)
-          pieces = []
-          done = 0
-          while done < count
-            n = MB::M.min(limit, count - done)
-            dry, wet = render_block(n)
-            break if dry.any?(&:nil?) || wet.any?(&:nil?)
-
-            pieces << [dry.map(&:dup), wet.map(&:dup)]
-            done += n
-            break if (dry + wet).any? { |c| c.length < n }
-          end
-
-          return [nil, [nil]] if pieces.empty?
-
-          join = ->(lists) { lists.transpose.map { |bufs| bufs[0].concatenate(*bufs[1..]) } }
-          [join.(pieces.map(&:first)), join.(pieces.map(&:last))]
-        end
-
         # For internal use by ReverbOutput#sample.
         def sample_internal(count, index:)
           if @sampled_set.include?(index)
@@ -1156,6 +1094,67 @@ module MB
             wet = @pipeline_output.sum * (@wet * @level * @output_scales[0])
             (wet.inplace + @dry_output.sum).not_inplace!
           end
+        end
+
+        # The network's layout as a GraphViz cluster (DOT lines) for
+        # Traversable#graphviz when +:show_internals:+ is true (else nil):
+        # the inputs feeding each line and their gains, each diffusion stage
+        # (delays in ms, polarities, the normalized Hadamard mix and the
+        # shuffle), the feedback lines (loop delays in ms, loop gains, the
+        # Householder reflection feeding them back, damping if any), and the
+        # lines each output sums, drawn from the Layout the network runs
+        # (Reverb::Network::Layout), with a dashed edge from this reverb's
+        # box (+id+, its DOT node id).  Until omnibus18 (2026-10-30) the
+        # option built a third copy of the network out of delay and matrix
+        # nodes so graphviz could show them (without modulation or loop
+        # processing); the maintainer: "Draw from the network."
+        def graphviz_internals(id)
+          return nil unless @show_internals
+
+          ms = ->(t) { format('%.1f', t * 1000) }
+          num = ->(v) { MB::M.sigfigs(v.to_f, 3).to_s }
+          row = ->(label, items) { "#{label}: #{items.join(' ')}" }
+          node = ->(name, title, rows, color = '#2266ee') {
+            text = [title, *rows].map { |t| t.to_s.gsub(/[{}|<>"]/, '') }.join('|')
+            "    #{"#{id}/#{name}".inspect} [label=#{text.inspect}, color=#{color.inspect}];\n" # (fields stack top to bottom: rankdir LR)
+          }
+          name = ->(n) { "#{id}/#{n}".inspect }
+
+          lines = @layout.lines
+          inputs = partition_outputs((0...@upstreams.length).to_a, lines)
+          dot = +"  subgraph #{"cluster_#{id}".inspect} {\n"
+          dot << "    label=#{"Reverb network: #{lines} lines".inspect}; fontcolor=\"#ffffff\"; color=\"#888888\"; style=\"dashed\";\n"
+          dot << node.('inputs', 'inputs to lines', inputs.each_with_index.map { |g, i| "line #{i + 1}: in #{g.map { |x| x + 1 }.join('+')} x #{num.(@input_gains[i])}" })
+
+          chain = ['inputs']
+          @layout.diffusion.each_with_index do |st, k|
+            dot << node.("diffusion_#{k + 1}", "diffusion #{k + 1}", [
+              row.('delays ms', st[:delays].map(&ms)),
+              row.('polarity', st[:polarity].map { |v| v < 0 ? '-' : '+' }),
+              'Hadamard mix / sqrt(lines)',
+              row.('shuffle', st[:order].map { |o| o + 1 }),
+            ], '#2288aa')
+            chain << "diffusion_#{k + 1}"
+          end
+
+          if @layout.taps
+            loops = @layout.taps.map { |t| t + @layout.loop_extra }
+            rows = loops.each_with_index.map { |t, i| "line #{i + 1}: #{ms.(t)} ms, gain #{num.(@layout.gains[i])}" }
+            rows << row.('damping', @layout.damping.map(&num)) if @layout.damping
+            dot << node.('feedback', 'feedback lines (loop delay, loop gain)', rows, '#aa4422')
+            dot << node.('householder', 'Householder reflection', [row.('order', @layout.order.map { |o| o + 1 })], '#aa4422')
+            chain << 'feedback'
+            dot << "    #{name.('feedback')} -> #{name.('householder')} [color=red, constraint=false];\n"
+            dot << "    #{name.('householder')} -> #{name.('feedback')} [color=red, label=\"feedback\", constraint=false];\n"
+          end
+
+          outs = partition_outputs((0...lines).to_a, @output_channels)
+          dot << node.('outputs', 'outputs (lines summed)', outs.each_with_index.map { |g, i| "out #{i + 1}: lines #{g.map { |x| x + 1 }.join(' ')} x #{num.(@output_scales[i])}" })
+          chain << 'outputs'
+          chain.each_cons(2) { |a, b| dot << "    #{name.(a)} -> #{name.(b)};\n" }
+          dot << "  }\n"
+          dot << "  #{id.inspect} -> #{name.('inputs')} [style=dashed, label=\"inside\", constraint=false];\n"
+          dot
         end
 
         private
@@ -1347,78 +1346,6 @@ module MB
           else
             raise ArgumentError, "Unknown damping design #{design.inspect} (:jot or :exact)"
           end
-        end
-
-        # For internal use (+:show_internals:+).  A diffusion stage as
-        # graph nodes: delays, a normalized Hadamard matrix with the
-        # polarities folded into its columns, and the shuffle.
-        def make_diffuser(stage, input, idx)
-          max = stage[:delays].max
-          buffer_time = MB::M.max(max + 0.2, 1.0)
-          nodes = Array.new(@channels) do |c|
-            input[c]
-              .delay((stage[:delays][c] * @sample_rate).round.samples, smooth: false, max_delay: buffer_time, ring_out: false)
-              .named("Diffuse #{idx + 1} #{c + 1}")
-          end
-
-          scale = 1.0 / Math.sqrt(@channels)
-          hadamard = MB::M.hadamard(@channels).map { |row|
-            row.map.with_index { |v, col| v * stage[:polarity][col] * scale }
-          }
-          matrix = ChannelMixer::Matrix.new(nodes, matrix: hadamard, sample_rate: @sample_rate)
-            .named("Hadamard #{idx + 1}")
-          stage[:order].map { |o| matrix.outputs[o] }
-        end
-
-        # For internal use (+:show_internals:+).  The feedback delay
-        # network as graph nodes, reading its feedback from the lines'
-        # inputs (see #feedback_delays).
-        def make_fdn(inputs)
-          buffer_time = MB::M.max(@layout.taps.max + @loop_extra + 0.2, 1.0)
-
-          # The inputs of the feedback delays, kept to read the feedback at
-          # each loop delay (see #feedback_delays)
-          @fdn_history = Array.new(inputs.length) { MB::Sound::DelayLine.new((@sample_rate * buffer_time).ceil) }
-
-          # Add feedback from the feedback delays' inputs
-          feedback = inputs.map.with_index { |inp, idx|
-            inp
-              .proc { |v| (@fdn_history[idx].past(v.length, feedback_delays[idx]).inplace * @gains[idx] + v).not_inplace! }
-              .named("Feedback return #{idx + 1}")
-          }
-
-          normal = @layout.normal
-          householder = Array.new(@channels) { |r|
-            Array.new(@channels) { |c| (r == c ? 1.0 : 0.0) - 2.0 * normal[r] * normal[c] }
-          }
-          hhmx = ChannelMixer::Matrix.new(feedback, matrix: householder, sample_rate: @sample_rate)
-            .named("Householder matrix")
-          hhmx.singleton_class.define_method(:reverb) do @reverb end
-          hhmx.instance_variable_set(:@reverb, self)
-
-          delays = @layout.order.map.with_index { |o, idx|
-            hhmx.outputs[o]
-              .proc { |v| record_feedback_input(idx, v) }
-              .named("Feedback tap #{idx + 1}")
-              .delay((@layout.taps[idx] * @sample_rate).round.samples, smooth: false, max_delay: buffer_time, ring_out: false)
-              .named("Feedback delay #{idx + 1}")
-          }
-
-          # Add feedback annotation for visualization
-          delays.each_with_index do |d, idx|
-            feedback[idx].with_feedback(feedback: d)
-          end
-
-          delays
-        end
-
-        # For internal use.  Records the input of feedback delay +idx+ (graph
-        # mode; see #make_fdn) and passes it on.
-        def record_feedback_input(idx, v)
-          line = @fdn_history[idx]
-          line.prepare(v.length, feedback_delays[idx])
-          line.write(v)
-          v
         end
 
         # Returns a series of randomly spaced delay times, ensuring a

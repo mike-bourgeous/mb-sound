@@ -199,6 +199,7 @@ A design, not yet built, for a full vimtutor-style tutorial in the live console:
 
 Every bin/ script except the console `bin/sound.rb` uses a `ScriptingMethods` helper backed by `ScriptRunner`: `effect_script { |input, p| }`, `synth_script { |midi, p| }`, `song_script(bars:) { |p| }`, or `script(args:) { |args, p| }`, sharing `-o`, `-f`, `-g`, `-P`, `-q`, `-L`, `--ui [LAYOUT]`.
 Parameters are options only (`name: [default, 'description', '-x', Type, range]`); graph-building code goes inside the block, loadable scripts are guarded with `if main_script?(__FILE__)`, and every script starts with the `RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1` shebang (`spec/bin/shebang_spec.rb`), never `RUBY_YJIT_ENABLE=1`/`--yjit`.
+Plain song files start with `require 'mb/sound/dsl'` (`MB::Sound::DSL`): the console's commands and note names at the program's top level, waiting for background playback at its end.
 
 ## Audio I/O
 

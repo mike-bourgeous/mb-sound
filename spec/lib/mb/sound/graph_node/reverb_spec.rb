@@ -1,3 +1,5 @@
+require 'open3'
+
 RSpec.describe(MB::Sound::GraphNode::Reverb) do
   # Renders +total+ samples of an impulse on input 0 (of +inputs+) through a
   # reverb (wet only), read in +block+-sample buffers.  Returns one SFloat
@@ -37,37 +39,43 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     -60.0 / slope
   end
 
-  it 'has feedback sources if show_internals is true' do
-    # Using fewer channels and stages to reduce the exponential path explosion that causes warnings about infinite loops
-    expect(100.hz.reverb(channels: 2, stages: 1, show_internals: true).graph_edges(feedback: true)).not_to be_empty
-  end
-
-  it 'does not have feedback sources if show_internals is false' do
+  it 'has no node-graph feedback edges (the network runs in C either way)' do
     expect(100.hz.reverb.graph_edges(feedback: true)).to be_empty
+    expect(100.hz.reverb(show_internals: true).graph_edges(feedback: true)).to be_empty
   end
 
-  describe 'show_internals (the network as a node graph)' do
-    [
-      [:hall, 1, 1, {}],
-      [:space, 2, 2, { predelay: 0.02 }],
-      [:default, 3, 5, {}],
-      [:room, 1, 2, { feedback_enabled: false }],
-      [:hall, 2, 1, { stages: 0 }],
-      [:room, 1, 2, { loop_extra: 0, decay: 0.3 }],
-    ].each do |preset, inputs, outputs, params|
-      it "sounds like the kernel for #{preset} with #{inputs} in, #{outputs} out, #{params}" do
-        graph = impulse(preset, inputs: inputs, outputs: outputs, total: 9600, show_internals: true, **params)
-        kernel = impulse(preset, inputs: inputs, outputs: outputs, total: 9600, **params)
-        graph.zip(kernel).each do |g, k|
-          expect(k.abs.max).to be > 1e-4
-          expect((g - k).abs.max).to be < k.abs.max * 1e-4
-        end
+  describe 'show_internals (graphviz draws the network from its layout)' do
+    it 'draws inputs, every diffusion stage, the feedback lines, and the outputs, sounding the same' do
+      drawn = MB::Sound::GraphNode::Channels.new([100.hz.saw, 150.hz.saw]).reverb(:hall, show_internals: true, mod: true, lowpass: 3000)
+      plain = MB::Sound::GraphNode::Channels.new([100.hz.saw, 150.hz.saw]).reverb(:hall, mod: true, lowpass: 3000)
+      dot = drawn[0].graphviz
+      rev = drawn[0].graph.find { |n| n.is_a?(MB::Sound::GraphNode::Reverb) }
+      layout = rev.layout
+
+      expect(dot).to include('subgraph "cluster_', "Reverb network: #{layout.lines} lines", 'inputs to lines', 'outputs (lines summed)')
+      expect(dot.scan(/diffusion \d+"?/).grep(/\A[^"]+\z/).uniq.length).to eq(layout.diffusion.length)
+      d1 = layout.diffusion[0][:delays].map { |t| format('%.1f', t * 1000) }.join(' ')
+      expect(dot).to include("delays ms: #{d1}")
+      g = layout.gains.map { |v| MB::M.sigfigs(v, 3) }
+      expect(dot).to include("line 1: #{format('%.1f', (layout.taps[0] + layout.loop_extra) * 1000)} ms, gain #{g[0]}", 'Householder reflection', 'label="feedback"')
+      expect(dot).to include("-> \"#{rev.__id__}/inputs\" [style=dashed, label=\"inside\"")
+      expect(plain[0].graphviz).not_to include('cluster_')
+      if system('which dot > /dev/null 2>&1') # (graphviz parses it)
+        out, status = Open3.capture2e('dot', '-Tsvg', stdin_data: dot)
+        expect(status).to be_success, out
+      end
+
+      2.times do
+        a = drawn.map { |c| c.sample(800) }
+        b = plain.map { |c| c.sample(800) }
+        a.zip(b).each { |x, y| expect(x).to eq(y) }
       end
     end
 
-    it 'refuses modulation and loop processing' do
-      expect { 100.hz.reverb(:room, show_internals: true, mod: true) }.to raise_error(ArgumentError, /modulation/)
-      expect { 100.hz.reverb(:room, show_internals: true, lowpass: 3000, drive: 2) }.to raise_error(ArgumentError, /lowpass, drive/)
+    it 'draws a reverb without a feedback network' do
+      dot = 100.hz.reverb(:room, show_internals: true, feedback_enabled: false).graphviz
+      expect(dot).to include('diffusion 1', 'outputs (lines summed)')
+      expect(dot).not_to include('Householder')
     end
   end
 

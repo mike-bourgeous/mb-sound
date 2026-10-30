@@ -82,19 +82,7 @@ module MB
       # frequencies in Hz with this tuning, as it is when each buffer is
       # computed (see GraphNode::SynthesisMethods#freq).
       def freq(node)
-        tuning = self
-        copier = GraphNode::FrozenCopy.new
-        node.proc(type_name: 'Number to frequency') { |v|
-          # number_to_freq converts an inplace SFloat where it is (else it
-          # copies the input first), so convert a reused copy instead of a
-          # new one every buffer
-          v = copier.copy(v).inplace! if v.is_a?(Numo::SFloat)
-          MB::FastSound.number_to_freq(v, tuning.note, tuning.frequency)
-        }.tap { |pr|
-          # The plan layer runs this block as an op (Plan::Op::NoteFreq)
-          pr.plan_operator = :note_freq
-          pr.plan_tuning = tuning
-        }
+        GraphNode::NoteFrequency.new(node, tuning: self)
       end
 
       def to_s

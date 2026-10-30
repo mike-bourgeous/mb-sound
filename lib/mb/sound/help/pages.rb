@@ -202,8 +202,6 @@ module MB
 
         private
 
-        def doc_plain(s) = s
-
         def aliases_of(e)
           (e.owner.public_instance_methods(false) - [e.name]).select { |m|
             e.owner.instance_method(m).original_name == e.name
@@ -377,30 +375,6 @@ module MB
           blocks.reject { |b| b.first == :blank }
         end
       end
-
-      # Rewraps doc comment paragraphs to the terminal, keeping indented
-      # code and list items as written.
-      module Rewrap
-        def rewrap(text)
-          blocks = []
-          text.each_line do |l|
-            if l.strip.empty? then blocks << :blank
-            elsif l =~ /^( {2,}|[-*] )/ || blocks.last.is_a?(Array) && blocks.last.first == :keep && l =~ /^ /
-              blocks << [:keep, l.chomp]
-            elsif blocks.last.is_a?(String) then blocks.last << ' ' << l.strip
-            else blocks << l.strip.dup
-            end
-          end
-          blocks.map { |b|
-            case b
-            when :blank then ''
-            when Array then b.last
-            else Text.wrap(b, indent: 0, width: Text.width - 2)
-            end
-          }.join("\n")
-        end
-      end
-      MethodPage.include(Rewrap)
 
       # Search results (`help /reson/`) for a Regexp over names and doc comments.
       class SearchPage

@@ -24,11 +24,14 @@ module MB
         (one by one), clips (on their instrument, e.g. a chop's slices, or
         a soft saw), grids (a TR-909, or a TR-808 for its own voices like
         cowbell), envelopes (on a triangle with noise), instruments and SF2/SFZ files (a
-        demo phrase), wavetables (one note), and presets by name.
+        demo phrase), wavetables (one note), and presets by name.  A plain
+        Ruby file gets every console command and note name at its top level
+        with `require 'mb/sound/dsl'` (run it with `ruby song.rb`; at its end
+        it waits for what plays in the background, like `wait`).
       TEXT
       commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up
       dsl :at, :until, :for, :and_then
-      note :method_modules
+      note :method_modules, :scripts
       see :sets, :now, :files
       example 'a quiet triangle that stops itself' do
         bg :try, 220.hz.triangle.at(-20.db).until(2.bars)

@@ -240,7 +240,7 @@ module MB
           # Plan::VecExp2): MB::Sound.precision :fast and a Constant or Knob
           # base (a patch constant, so the per-block cost doesn't depend on
           # the notes played), decided by the node as its unfused block
-          # decides (ProcNode#fast_power_base), so the op is exact at either
+          # decides (BinaryOperation#fast_power_base), so the op is exact at either
           # precision.
           attr_reader :fast
 

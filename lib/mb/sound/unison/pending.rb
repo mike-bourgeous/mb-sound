@@ -62,11 +62,6 @@ module MB
             @pending.then_call(:gain, [gain], {}, nil)
           end
         end
-
-        # The pitch the unison was made from.
-        def unison_pitch
-          @pending.pitch
-        end
       end
 
       # What a blockless Pitch#unison was given, built on first use (see

@@ -111,25 +111,17 @@ module MB
         # signal graph.  For signal graphs, each numerator value is divided
         # by the corresponding denominator value at the same index.
         def /(other)
-          arithmetic_proc(other, '/') { |d1, d2|
-            # In place without allocating for real buffers (the same
-            # operations as Numo's)
-            MB::Sound::FastArithmetic.divide(d1, d2) || d1 / d2
-          }
+          BinaryOperation.new(self, other, operator: '/')
         end
 
         # Appends a node that raises the incoming values to +other+, which should
-        # be either a numeric or another signal graph.
+        # be either a numeric or another signal graph (a BinaryOperation).
         #
         # With a Constant or Knob base (e.g. 10 ** (lfo / 20)) and
         # MB::Sound.precision :fast, raises with the plan layer's fast 2^x
         # (see MB::Sound::Precision), so planned and unplanned agree.
         def **(other)
-          fast_base = is_a?(Constant) || is_a?(Knob) || is_a?(Knob::Reader)
-          arithmetic_proc(other, '**') { |d1, d2|
-            (fast_base && Precision.fast? && MB::Sound::FastArithmetic.power_fast(d1, d2)) ||
-              MB::Sound::FastArithmetic.power(d1, d2) || d1 ** d2
-          }.tap { |pr| pr.fast_power_base = fast_base }
+          BinaryOperation.new(self, other, operator: '**', fast_power_base: is_a?(Constant) || is_a?(Knob) || is_a?(Knob::Reader))
         end
 
         # Appends a node that returns the real value of a complex signal, or the
@@ -214,66 +206,6 @@ module MB
         def at_error(message)
           MB::Sound.live_error(ArgumentError.new(message))
           self
-        end
-
-        # Setup/boilerplate buffer management used by #/ and #**.
-        def arithmetic_proc(other, name)
-          copier = FrozenCopy.new
-          if other.respond_to?(:sample)
-            other = other.get_sampler
-
-            pr = self.proc({operand: other}, type_name: "#{name} (dynamic)") { |v|
-              next nil if v.nil? || v.empty?
-
-              data = other.sample(v.length)
-
-              if data.nil? || data.empty?
-                nil
-              else
-                if data.length != v.length
-                  # TODO: allow choosing between padding and truncation (e.g. stop_early)?
-                  min_length = MB::M.min(data.length, v.length)
-                  data = data[0...min_length]
-                  v = v[0...min_length]
-                end
-
-                # We can't return v in case types differ, as the type promotion
-                # will create a new object, so we grab the yielded value.
-                # TODO: should we be operating in place here?  This could modify
-                # the source of an upstream ArrayInput for example.
-                # A frozen buffer (a Tee's shared buffer, a Constant) is
-                # copied (see Tee)
-                v = copier.copy(v) if v.frozen?
-                v.inplace!
-                ret = yield v, data
-                ret.not_inplace!
-              end
-            }.named("#{climb_tee_tree(self).name_or_id} #{name} #{climb_tee_tree(other).name_or_id}")
-          else
-            pr = self.proc({operand: other}, type_name: "#{name} (constant)") { |v|
-              if v.nil? || v.empty?
-                nil
-              else
-                v = copier.copy(v) if v.frozen?
-                v.inplace!
-                ret = yield v, other
-                ret.not_inplace!
-              end
-            }.named("#{climb_tee_tree(self).name_or_id} #{name} #{other}")
-          end
-
-          pr.tap { |pr|
-            pr.instance_variable_set(:@operator, name)
-            pr.plan_operator = name
-            def pr.arithmetic_string(separator = ' ')
-              src = climb_tee_tree(@sources.values[0])
-              dest = climb_tee_tree(@sources.values[1])
-              a = make_source_name(src)
-              b = make_source_name(dest)
-
-              "#{a} #{@operator}#{separator}#{b}"
-            end
-          }
         end
       end
     end

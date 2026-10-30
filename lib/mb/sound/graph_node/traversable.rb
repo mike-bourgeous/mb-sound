@@ -222,9 +222,9 @@ module MB
           else
             # (`2 ** lfo`, `x / 3`: the operands' words, never the node ids
             # of their generated names; sound-design-nav-1)
-            if v.is_a?(ProcNode) && %w[** /].include?(v.plan_operator) && v.sources.key?(:operand) && v.graph_node_name.to_s.include?('id=')
+            if v.is_a?(BinaryOperation) && !v.named?
               a, b = v.sources.values_at(:input, :operand)
-              return depth > 0 ? "#{words_of(a, depth - 1)} #{v.plan_operator} #{words_of(b, depth - 1)}" : (v.plan_operator == '**' ? 'a power' : 'a quotient')
+              return depth > 0 ? "#{words_of(a, depth - 1)} #{v.operator} #{words_of(b, depth - 1)}" : (v.operator == '**' ? 'a power' : 'a quotient')
             end
             return v.graph_node_name.to_s if v.respond_to?(:named?) && v.named?
             if depth > 0 && (v.is_a?(Multiplier) || v.is_a?(Mixer))
@@ -387,6 +387,13 @@ module MB
             next if node.is_a?(Numeric) || boxes[node]
             desc = node.respond_to?(:to_s_graphviz) ? node.to_s_graphviz : node.to_s
             digraph << "  #{node.__id__.to_s.inspect} [label=#{desc.inspect}]\n"
+          end
+
+          # Drawings of nodes' insides (Reverb with show_internals: true)
+          nodes.each do |node|
+            next unless node.respond_to?(:graphviz_internals) && !boxes[node]
+            inside = node.graphviz_internals(node.__id__.to_s)
+            digraph << inside if inside
           end
 
           # Add one node per group of per-channel nodes

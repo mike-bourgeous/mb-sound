@@ -124,6 +124,16 @@ RSpec.describe('render-path allocations') do
       expect_budget(objects: 150, bytes: 11_000, warm: 400, buffers: 300) # (before: 172.5, 10.1 kB; alloc-2: 138.5, 9.2 kB; dropouts-2: 126.5, 8.6 kB; MIDI events' Rationals lead)
     end
 
+    it 'key-synced 7-voice unison saws on 32nds (a band-limited phase jump per copy and note)' do
+      ctx do
+        riff = MB::Sound.seq(MB::Sound::A2, MB::Sound::C3, MB::Sound::E3, MB::Sound::G3).n32.loop
+        MB::Sound.bg(:reese, riff.synth(voices: 2) { |v|
+          v.hz.unison(7, detune: 0.2) { |p, _| p.saw.reset(v.key_trigger) } * v.amp_env(0.005, 0.1, 0.6, 0.05) * 0.2
+        })
+      end
+      expect_budget(objects: 36, bytes: 3_100) # (omnibus18: before 43.4 objects, 3.7 kB: Tone.jump_residual per reset; after 30.1, 2.6 kB)
+    end
+
     it 'a hard-synced lead through a delay (sync pulses, delay lines)' do
       ctx do
         lead = MB::Sound.seq(MB::Sound::A3, MB::Sound::C4, MB::Sound::E4).n8.loop.synth(voices: 2) { |v|

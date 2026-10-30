@@ -113,7 +113,8 @@ module MB
         SKIP = %w[
           MB::Sound::GraphNode::Constant MB::Sound::GraphNode::Knob MB::Sound::GraphNode::Knob::Reader
           MB::Sound::GraphNode::Tee MB::Sound::GraphNode::Tee::Branch MB::Sound::GraphNode::Multiplier
-          MB::Sound::GraphNode::Mixer MB::Sound::GraphNode::ProcNode MB::Sound::Notes::Frequency
+          MB::Sound::GraphNode::Mixer MB::Sound::GraphNode::ProcNode MB::Sound::GraphNode::BinaryOperation
+          MB::Sound::GraphNode::NoteFrequency MB::Sound::GraphNode::QualityResonance MB::Sound::Notes::Frequency
           MB::Sound::Synth::Output MB::Sound::GraphNodeInput MB::Sound::Notes::NoteEnvelope::GmTime
         ].freeze
 
@@ -538,7 +539,8 @@ module MB
         end
 
         # The knob names +src+ is or reads through +depth+ nodes (only
-        # through Multipliers, Mixers, and ProcNodes with +arithmetic+: a
+        # through Multipliers, Mixers, BinaryOperations, and ProcNodes with
+        # +arithmetic+: a
         # glide reading a knob for its time doesn't make the frequency it
         # moves that knob's).
         def knobs_in(src, depth, arithmetic: false)
@@ -553,7 +555,7 @@ module MB
                 out << k.name if k.name && !out.include?(k.name)
                 next
               end
-              next if arithmetic && !(s.is_a?(GraphNode::Multiplier) || s.is_a?(GraphNode::Mixer) || s.is_a?(GraphNode::ProcNode))
+              next if arithmetic && !(s.is_a?(GraphNode::Multiplier) || s.is_a?(GraphNode::Mixer) || s.is_a?(GraphNode::BinaryOperation) || s.is_a?(GraphNode::ProcNode))
               nxt.concat(s.sources.values.reject { |v| v.is_a?(Numeric) }) if s.respond_to?(:sources)
             end
             frontier = nxt

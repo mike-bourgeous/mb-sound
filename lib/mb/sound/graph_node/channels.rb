@@ -259,12 +259,6 @@ module MB
         end
         alias position place
 
-        # Returns [left gain, right gain] for balancing a stereo signal to
-        # +position+ (see ChannelMixer::PanLaws.balance).
-        def self.balance_gains(position)
-          ChannelMixer::PanLaws.balance(position)
-        end
-
         # Allows numbers first in arithmetic with bundles (e.g. `2 * bundle`).
         def coerce(numeric)
           [numeric.constant(sample_rate: sample_rate), self]

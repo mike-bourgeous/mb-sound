@@ -3,7 +3,10 @@ module MB
     module GraphNode
       # A signal-processing graph node that calls a given Ruby Proc with each
       # buffer retrieved from the source, with the result of the Proc returned
-      # from the #sample method.
+      # from the #sample method (GraphNode#proc: the escape hatch for code
+      # the DSL has no node for; never fused by plans).  The library's own uses became node
+      # types (MathFunction, BinaryOperation for #/ and #**, NoteFrequency
+      # for Tuning#freq, QualityResonance; omnibus18 for the last three).
       class ProcNode
         include GraphNode
         include SampleRateHelper
@@ -67,28 +70,6 @@ module MB
           # for the graph's life)
           @callers = Internal.creation_trace(skip: [__FILE__])
           @cb = block
-
-          # Set by ArithmeticMethods and Tuning after construction (here so
-          # every ProcNode has one instance variable layout; see
-          # GraphNode::IvarPreset)
-          @operator = nil
-          @plan_operator = nil
-          @plan_tuning = nil
-          @fast_power_base = nil
-        end
-
-        # What GraphNode#make_source_name shows for this node when it isn't
-        # named: the note for Tuning#freq of a constant note number (C4),
-        # hz(...) of other note numbers; nil for other blocks (shown by id).
-        def display_label
-          return nil unless @plan_operator == :note_freq
-
-          src = climb_tee_tree(@source)
-          if src.is_a?(Constant) && src.constant.is_a?(Numeric) && src.constant.real? && src.constant == src.constant.round
-            Note.new(src.constant.round).to_s
-          else
-            "hz(#{make_source_name(src)})"
-          end
         end
 
         # See GraphNode#to_s_graphviz (adds where the block was written).
@@ -104,47 +85,11 @@ module MB
           @cb.call(data)
         end
 
-        # Plan layer (see MB::Sound::Plan): GraphNode#/ and #** make
-        # ProcNodes whose operation is known (+plan_operator+, set by
-        # ArithmeticMethods); other procs run Ruby blocks and stay unfused.
+        # Plan layer (see MB::Sound::Plan): a Ruby block is never fused.
         include Plan::Describable
 
-        # The operation of a ProcNode whose block is known to the plan
-        # layer: '/' or '**' (GraphNode#/ and #**), or :note_freq
-        # (Tuning#freq, with +plan_tuning+); nil for other blocks.
-        attr_accessor :plan_operator
-
-        # The Tuning of a :note_freq ProcNode.
-        attr_accessor :plan_tuning
-
-        # True for a '**' ProcNode whose base is a Constant or Knob (a patch
-        # constant): at MB::Sound.precision :fast it raises with the fast
-        # 2^(b log2 a) (FastArithmetic.power_fast), as its plan op does
-        # (Plan::Op::Pow#fast).
-        attr_accessor :fast_power_base
-
-        def plan_describe(p)
-          a = p[@source]
-          return p.note_freq(a, @plan_tuning) if @plan_operator == :note_freq
-
-          b = p[@sources[:operand]]
-          @plan_operator == '/' ? a / b : a ** b
-        end
-
-        def plan_inputs
-          [@source, @sources[:operand]].select { |s| s.respond_to?(:sample) }
-        end
-
         def plan_unsupported_reason
-          return nil if @plan_operator == :note_freq && @plan_tuning
-          return 'a Ruby block' unless @plan_operator == '/' || @plan_operator == '**'
-
-          operand = @sources[:operand]
-          # (a Float exponent is filled into a register; see Plan::Builder#pow)
-          return "a #{operand.class} exponent (Numo multiplies)" if @plan_operator == '**' && !operand.respond_to?(:sample) && !operand.is_a?(Float)
-          return "a #{operand.class} divisor" if @plan_operator == '/' && operand.is_a?(Numeric) && !operand.is_a?(Float) && !operand.is_a?(Integer)
-
-          nil
+          'a Ruby block'
         end
       end
     end

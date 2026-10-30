@@ -177,11 +177,6 @@ module MB
           }
         end
 
-        # True if a change with +seq+ is still waiting in the queue.
-        def queued_change?(seq)
-          @render_lock.synchronize { @changes.any? { |c| c.seq == seq } }
-        end
-
         # Runs the block under the render lock (between buffers), e.g. to
         # move the timeline and launch what plays there as one step (see
         # Form::Playback#seek).  Returns the block's value.

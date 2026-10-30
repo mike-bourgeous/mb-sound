@@ -28,6 +28,16 @@ module MB
         DIRECTIONS = [:nearest, :next].freeze
 
         class << self
+          # The fixed velocity of Clip#vel, Seq#vel, and MIDI::Stream#vel
+          # (one rule for both front ends): +velocity+ as a Float clamped to
+          # 0..1.  Raises ArgumentError for anything but a real number.
+          def fixed_velocity(velocity)
+            unless velocity.is_a?(Numeric) && velocity.real? && !velocity.to_f.nan?
+              raise ArgumentError, "vel takes a velocity from 0 to 1 (got #{velocity.inspect})"
+            end
+            velocity.to_f.clamp(0.0, 1.0)
+          end
+
           # Validates a 0..1 amount (quantize's +:amount+, humanize's
           # +:velocity+), returning it.
           def check_fraction(name, value)

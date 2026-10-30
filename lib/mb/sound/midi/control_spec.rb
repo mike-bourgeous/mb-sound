@@ -36,9 +36,6 @@ module MB
       # names: canonical :linear, :exp, :switch, with :exponential (and
       # :log, :db) accepted as aliases of :exp.
       class ControlSpec < Data.define(:type, :number, :name, :range, :default, :description, :center, :curve, :param)
-        # Canonical curve names (see MB::Sound::Param::CURVES for aliases).
-        CURVES = [:linear, :exp, :switch].freeze
-
         # Controller types, with their raw value ranges, default names, and
         # MIDI status bytes (on channel 1).
         TYPES = {
@@ -172,6 +169,30 @@ module MB
         # the class description).
         def value(raw)
           ControlSpec.map(raw, range.begin, range.end, raw_max, center, curve)
+        end
+
+        # The 0..1 controller position (raw / #raw_max) that gives +value+:
+        # the inverse of #value along its curve and center, which is where a
+        # knob learned on the same controller sits (Knob moves by raw /
+        # #raw_max), so MIDI::Param::Choice on a cc and a knob on that cc
+        # pick alike.  Values outside the range give positions outside
+        # 0..1; :switch gives 1.0 for the range's end, else 0.0.
+        def position(value)
+          lo = range.begin
+          hi = range.end
+          v = value.to_f
+          return v == hi ? 1.0 : 0.0 if curve == :switch
+          return curve == :exp ? Math.log(v / lo) / Math.log(hi / lo) : (v - lo) / (hi - lo) unless center
+
+          top = raw_max
+          mid = (top + 1) / 2
+          # The half from the center toward the value
+          upper = (v - center) * (hi - center) >= 0
+          far = upper ? hi : lo
+          c = curve == :exp ? Math.log(v / center) / Math.log(far / center) : (v - center) / (far - center)
+          c = 0.0 unless c.finite?
+          raw = upper ? mid + c * (top - mid) : mid - c * mid
+          raw / top.to_f
         end
 
         # The value at the default raw value.

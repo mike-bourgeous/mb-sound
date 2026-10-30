@@ -73,11 +73,6 @@ module MB
             @zeros = nil
           end
 
-          # True once the input has ended (the hiss is fading or off).
-          def fading?
-            !@faded.nil?
-          end
-
           def sample(count)
             if @faded.nil?
               return @source.sample(count) unless @inputs.all?(&:input_ended?) || (!@enders.empty? && @enders.all?(&:ended?))

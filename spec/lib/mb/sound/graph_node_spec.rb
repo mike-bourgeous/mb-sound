@@ -504,7 +504,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       it 'raises for unknown structures and filters without a structure' do
         expect { 110.hz.saw.filter(:lowpass, cutoff: 900, structure: :ladder) }.to raise_error(ArgumentError, /structure/)
         expect { 110.hz.saw.filter(:lp4, cutoff: 900, structure: :biquad) }.to raise_error(ArgumentError, /structure/)
-        expect { 110.hz.saw.filter(MB::Sound::Filter::Gain.new(2, sample_rate: 48000), structure: :biquad) }.to raise_error(ArgumentError, /structure/)
+        expect { 110.hz.saw.filter(MB::Sound::Filter::LinearFollower.new(sample_rate: 48000, max_rise: 100, max_fall: 50), structure: :biquad) }.to raise_error(ArgumentError, /structure/)
         expect { 110.hz.saw.filter(:bogus, cutoff: 900) }.to raise_error(ArgumentError, /type/)
       end
 

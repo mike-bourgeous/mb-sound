@@ -665,9 +665,11 @@ module MB
           amount.is_a?(Duration) ? amount.whole_notes : Duration.rational(amount)
         end
 
-        # Returns a clip with every event's velocity set to +velocity+ (0..1).
+        # Returns a clip with every event's velocity set to +velocity+
+        # (clamped to 0..1, like MIDI::Stream#vel; Feel.fixed_velocity).
         def vel(velocity)
-          map_clip { |e| e.with(velocity: velocity.to_f) }
+          v = Feel.fixed_velocity(velocity)
+          map_clip { |e| e.with(velocity: v) }
         end
 
         # Returns note-on and note-off edges between +from+ (inclusive) and +to+

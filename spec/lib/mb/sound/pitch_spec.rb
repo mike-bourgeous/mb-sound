@@ -37,6 +37,39 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
     end
   end
 
+  describe 'Tone shortcuts' do
+    # The method a class defines itself under +name+ (past the recipe
+    # recorders prepended to the DSL surface).
+    def own(klass, name)
+      m = klass.instance_method(name)
+      m = m.super_method while m.owner != klass && m.super_method
+      m
+    end
+
+    # Pitch methods named like Tone methods that differ on purpose.
+    different = {
+      phasor: 'Pitch#phasor(phase:) makes the phasor Tone; Tone#phasor turns a tone into one',
+    }.freeze
+
+    it "takes Tone's parameters wherever a Pitch method has a Tone method's name (forwarders can't drift)" do
+      common = (described_class.public_instance_methods & MB::Sound::Tone.public_instance_methods).select { |n|
+        own(described_class, n).owner == described_class && own(MB::Sound::Tone, n).owner == MB::Sound::Tone
+      }
+      expect(common.length).to be > 40
+      (common - different.keys).each do |n|
+        expect(own(described_class, n).parameters).to eq(own(MB::Sound::Tone, n).parameters), "Pitch##{n} vs Tone##{n}"
+      end
+    end
+
+    it 'passes clean: and seed: through #pwm and #reset' do
+      expect(440.hz.pwm(0.3, clean: true).clean?).to eq(true)
+      trig = 2.hz.square.lfo
+      expect(440.hz.saw.reset(trig, clean: true).clean?).to eq(true)
+      expect(440.hz.reset(trig, clean: true).clean?).to eq(true)
+      expect(440.hz.reset(trig, seed: 3).to_ruby).to include('seed: 3')
+    end
+  end
+
   describe 'as a signal' do
     it 'plays as a full-scale sine' do
       data = 1000.hz.sample(48)

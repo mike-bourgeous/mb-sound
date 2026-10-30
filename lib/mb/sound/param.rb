@@ -612,9 +612,6 @@ module MB
         typed(v)
       end
 
-      # The ArgTypes::Signature view (see ArgTypes::Param): this record.
-      def to_arg_param = self
-
       # A GraphNode::Knob::Spec for this param (+options+: takeover:,
       # smooth:, or a different default:).
       def knob_spec(**options)

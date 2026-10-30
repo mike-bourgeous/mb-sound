@@ -3,6 +3,7 @@
 <!-- summary -->
 Every bin/ script except the console `bin/sound.rb` uses a `ScriptingMethods` helper backed by `ScriptRunner`: `effect_script { |input, p| }`, `synth_script { |midi, p| }`, `song_script(bars:) { |p| }`, or `script(args:) { |args, p| }`, sharing `-o`, `-f`, `-g`, `-P`, `-q`, `-L`, `--ui [LAYOUT]`.
 Parameters are options only (`name: [default, 'description', '-x', Type, range]`); graph-building code goes inside the block, loadable scripts are guarded with `if main_script?(__FILE__)`, and every script starts with the `RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1` shebang (`spec/bin/shebang_spec.rb`), never `RUBY_YJIT_ENABLE=1`/`--yjit`.
+Plain song files start with `require 'mb/sound/dsl'` (`MB::Sound::DSL`): the console's commands and note names at the program's top level, waiting for background playback at its end.
 <!-- /summary -->
 
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
@@ -24,6 +25,27 @@ Persona panel patches (patches-1, 2026-10-13; named for their genres in patches-
 ## The console (`bin/sound.rb`)
 
 `bin/sound.rb` is the console, not a script helper: it shows `Help.welcome`, runs `Help.install_pry!` (Pry's help, play, reset, hist and other colliding commands become `pry-*`; help.md), installs the take hooks (arrangement.md, Takes), and carries a did_you_mean workaround in its exception handler until mb-util prints `detailed_message`.
+
+## Plain song files: `require 'mb/sound/dsl'` (omnibus18, 2026-10-30)
+
+Every persona in both panel rounds wanted a plain Ruby file that starts with one require and then writes console code at its top level.  `require 'mb/sound/dsl'` (also `require 'mb-sound/dsl'`, the guess next to the gem's `require 'mb-sound'`; `lib/mb/sound/dsl.rb`, `MB::Sound::DSL`) loads mb-sound and gives the requiring program's top level what bin/sound.rb's console has (it evaluates in `MB::Sound`):
+
+```ruby
+require 'mb/sound/dsl'
+
+bpm 124
+bass = seq(A1, R, A1, C2, R, E2, D2, R).n8.repeat(4)
+bg :bass, bass.synth(voices: 1) { |v| v.hz.saw.lp4(v.cutoff(900), resonance: 0.4) * v.amp_env }.at(-6.db)
+bg :hat, grid(16, 'x.x.x.x.x.x.x.xx').repeat(4)
+```
+
+`ruby song.rb` plays its four bars and ends when everything has rung out (looping clips play until Ctrl-C, as with `wait`).
+
+- Methods: `main` (Ruby's top-level object) is extended with `MB::Sound::DSL`, generated forwarders `def play(...) = ::MB::Sound.play(...)` for every public command of MB::Sound's own modules (no setters, no Module/Object methods; none of them shadow a Kernel method, checked when it was written).  State stays on MB::Sound, so the console, scripts, and DSL files share one model.  Commands added later (HelpMethods on first `help`) are forwarded by `method_missing`, which defines their forwarders.  Nothing else changes: other objects, classes, and modules see no new methods.
+- Constants: `MB::Sound::DSL::Constants` is prepended to Object's singleton class; a constant missing at lexical top level (`self.equal?(Object)`, blocks included) resolves to the Note (`C4`, `Ab3`) or the MB::Sound constant (`R`, `T`, `Session`).  Lookups inside other classes and modules raise as before; `Object.const_get(:C4)` resolves too (Ruby can't tell it from a top-level lookup).
+- The end: `DSL::ExitWait` is registered with `ExitClose.register(..., first: true)` (closed before the Sessions, which ExitClose closes latest first): when the program ends normally while the background Session plays or has something queued, it calls `MB::Sound.wait` (tails included).  An explicit `wait` at the end leaves nothing to wait for; an exception, `exit`, or Ctrl-C ends the program right away; `MB::Sound::DSL.wait_at_exit = false` turns it off.
+- Script rules stay: `MB::Sound.live` is false (errors raise), and the helpers work at the top level (`song_script(bars: 4) { |p| ... }` with `-o out.flac`, `main_script?(__FILE__)`).  bin/ scripts keep `require 'mb-sound'` and `module MB::Sound` blocks (constants in their bodies, `MB::Sound` methods there).
+- Spec: `spec/lib/mb/sound/dsl_spec.rb` runs song files as real processes (never in the spec process: specs' top-level blocks would then resolve note names).
 
 ## Input checks and errors (ux-fix-1, 2026-10-18)
 

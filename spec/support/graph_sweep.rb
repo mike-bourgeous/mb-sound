@@ -150,9 +150,8 @@ module GraphSweep
       ['FirstOrder', ->(c) { c.sig.filter(f::FirstOrder.new(:lowpass, 48000, 500)) }],
       ['FirstOrder highpass', ->(c) { c.sig.filter(f::FirstOrder.new(:highpass, 48000, 500)) }],
       ['HilbertIIR', ->(c) { c.sig.filter(f::HilbertIIR.new) }],
-      ['Gain', ->(c) { c.sig.filter(f::Gain.new(0.5, sample_rate: 48000)) }],
       ['LinearFollower', ->(c) { c.sig.filter(f::LinearFollower.new(sample_rate: 48000, max_rise: 100, max_fall: 50, absolute: true)) }],
-      ['SimpleEnvelopeFollower', ->(c) { c.sig.filter(f::SimpleEnvelopeFollower.new(sample_rate: 48000)) }],
+      ['SimpleEnvelopeFollower', ->(c) { c.sig.filter(MB::Sound::GraphNode::Dynamics::SimpleEnvelopeFollower.new(sample_rate: 48000)) }],
       ['Smooth', ->(c) { c.sig.filter(f::Smooth.new(40.samples, sample_rate: 48000)) }],
       ['Smooth with a curve', ->(c) { c.sig.filter(f::Smooth.new(300.samples, sample_rate: 48000, curve: :elastic)) }],
       ['Biquad', ->(c) { c.sig.filter(f::Biquad.new(0.2, 0.4, 0.2, -0.3, 0.1, sample_rate: 48000)) }],
@@ -207,6 +206,7 @@ module GraphSweep
 
       # Arithmetic and routing
       ['arithmetic', ->(c) { (c.sig * c.mod(0, 1) + 0.1.constant - c.sig(55) / 2.constant.+(c.mod(0, 1))) }],
+      ['note numbers to Hz (NoteFrequency)', ->(c) { c.mod(48, 60).freq.tone.ramp * 0.5 + c.s::C4.saw * 0.1 }],
       ['power, abs, rounding, logs', ->(c) { (c.mod(0.1, 2) ** 2.constant) + c.sig.aabs + c.sig.abs + (c.mod(0.5, 3).log + c.mod(1, 4).log2 + c.mod(1, 4).log10).floor + c.sig.round + c.sig.ceil }],
       ['complex parts', ->(c) { c.sig.real + 200.hz.complex_sine.imag + 200.hz.complex_sine.arg }],
       ['constant smooth', ->(c) { 0.5.constant(smoothing: 0.01) + c.sig }],

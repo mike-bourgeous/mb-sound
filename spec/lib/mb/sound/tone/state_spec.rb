@@ -60,4 +60,70 @@ RSpec.describe(MB::Sound::Tone::State) do
   it 'rejects unknown fields' do
     expect { described_class.new(volume: 1) }.to raise_error(ArgumentError, /volume/)
   end
+
+  describe 'jump steps (mb_jump_step.h and its Ruby reference)' do
+    it 'queues and adds steps in C exactly as the Numo reference does, without allocating' do
+      rng = Random.new(3)
+      [Numo::SFloat, Numo::DFloat].each do |type|
+        c = described_class.new
+        r = described_class.new
+        out_c = type.zeros(800)
+        out_r = type.zeros(800)
+        200.times do |i|
+          case rng.rand(3)
+          when 0
+            dv = (rng.rand - 0.5) * 4
+            ds = (rng.rand - 0.5) * 0.2
+            k = [nil, 1.0, rng.rand].sample(random: rng)
+            c.queue_jump(dv, ds, k)
+            r.queue_jump_ruby(dv, ds, k)
+          else
+            len = [1, 7, 32, 40, rng.rand(1..60)].sample(random: rng)
+            from = rng.rand(0..(800 - len))
+            gain = rng.rand * 2 - 1
+            c.add_jump(out_c[from...(from + len)], gain)
+            r.add_jump_ruby(out_r[from...(from + len)], gain)
+          end
+          expect(c.jump_left).to eq(r.jump_left), "step #{i}"
+          expect(c.to_h[:jump_residual]).to eq(r.to_h[:jump_residual]), "step #{i}"
+        end
+        expect(out_c.to_binary).to eq(out_r.to_binary), type.name # (bit for bit)
+        expect(out_c.abs.max).to be > 0.1
+      end
+
+      # Steady state: queueing and adding allocate no objects
+      st = described_class.new
+      out = Numo::SFloat.zeros(128)
+      st.queue_jump(0.5, 0.01, 0.9)
+      st.add_jump(out, 1.0)
+      # (GC.stat itself may allocate: compare with an empty loop)
+      counts = [0, 100].map { |times|
+        i = 0
+        before = GC.stat(:total_allocated_objects)
+        while i < times
+          st.queue_jump(0.5, 0.01, 0.9)
+          st.add_jump(out, 1.0)
+          i += 1
+        end
+        GC.stat(:total_allocated_objects) - before
+      }
+      expect(counts[1]).to be <= counts[0]
+    end
+
+    it 'keeps complex steps and other buffer types on the Numo path' do
+      st = described_class.new
+      st.queue_jump(Complex(0.5, 0.25), 0.0)
+      expect(st.jump_buffer).to be_a(Numo::DComplex)
+      st.queue_jump(0.25, 0.0)
+      ref = MB::Sound::Tone.jump_residual(Complex(0.5, 0.25), 0.0) + MB::Sound::Tone.jump_residual(0.25, 0.0)
+      expect(st.jump_residual.to_a).to eq(ref.to_a)
+
+      st.queue_jump(Complex(0.5, 0.25), 0.0, real: true)
+      expect(st.jump_buffer).to be_a(Numo::DComplex) # (the pending complex samples stay complex)
+      out = Numo::SComplex.zeros(40)
+      st.add_jump(out, 1.0)
+      expect(st.jump_pending?).to eq(false)
+      expect(out[0].real).not_to eq(0)
+    end
+  end
 end

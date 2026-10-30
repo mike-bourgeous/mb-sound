@@ -62,11 +62,6 @@ module MB
           midi_inputs.each_value(&:end_replay)
         end
 
-        # True for Sessions replaying a take (see #replay_midi!).
-        def replay_mode?
-          !!@replay_mode
-        end
-
         # True if the Session renders in a background thread (see #add).
         def realtime?
           @realtime

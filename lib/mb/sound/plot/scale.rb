@@ -64,11 +64,6 @@ module MB
             }
           end
 
-          # A copy with another axis title.
-          def with_label(label)
-            copy { |s| s.instance_variable_set(:@label, label) }
-          end
-
           # Maps +v+ (Numeric or Numo::NArray) to 0..1 over the domain (values
           # outside the domain map outside 0..1).
           def map(v)

@@ -22,17 +22,23 @@ module MB
       @serial = 0
       @hook = false
 
+      # Added to the serial of objects registered with +first: true+.
+      FIRST = 1 << 60
+
       class << self
         # Closes +object+ (calling its #close) at exit unless it was
         # collected or #unregister-ed first.  Holds +object+ weakly.
+        # +:first+ objects close before all others (latest first among
+        # themselves): the top-level DSL's wait for background playback
+        # (DSL::ExitWait) must run before the Session it waits for closes.
         # Returns +object+.
-        def register(object)
+        def register(object, first: false)
           @mutex.synchronize do
             unless @hook
               @hook = true
               at_exit { close_all }
             end
-            @registry[object] = (@serial += 1) unless @registry.key?(object)
+            @registry[object] = (@serial += 1) + (first ? FIRST : 0) unless @registry.key?(object)
           end
           object
         end

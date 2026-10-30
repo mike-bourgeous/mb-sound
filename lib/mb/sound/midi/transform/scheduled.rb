@@ -88,11 +88,6 @@ module MB
             @queue.length
           end
 
-          # The number of output notes sounding (sent and not ended).
-          def sounding_count
-            @sounding.sum { |_, ids| ids.length }
-          end
-
           private
 
           # How long after the input's last event this transform may still

@@ -276,11 +276,6 @@ module MB
           @mutex.synchronize { @late.dup }
         end
 
-        # Durations in seconds of the last RECENT_BLOCKS blocks.
-        def recent_durations
-          @mutex.synchronize { @recent.dup }
-        end
-
         # See Session#schedule.  Returns a Handle.
         def schedule(time, period: nil, description: nil, epoch: nil, owner: :user, label: nil, exact: false, &block)
           raise ArgumentError, 'Pass a block to schedule' unless block
