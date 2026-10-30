@@ -267,6 +267,39 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(data[0].length).to be_within(48).of((3 * 4 * 60 / 96.0 * 48000).round)
     end
 
+    # fixes-1030 (listen-1's finding): a template's last mastering preset
+    # is the master call's own preset, so --master / render(master:)
+    # replaces it (one loudness target, the chain ending with it: exact
+    # targeting) instead of following it.  Every shipped template.
+    it 'ends the master chain with its preset, which an override replaces' do
+      genre.names.each do |name|
+        t = genre[name]
+        last = t.mix.master.last
+        [nil, :streaming].each do |override|
+          s = MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), channels: 2,
+                                     transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+          s.mastering_override = override
+          MB::Sound::Session.with_context(session: s) { t.knobs.each { |n, (d, o)| MB::Sound.knob(n, d, **o) }; t.setup_master }
+          preset = s.master_preset
+          if override
+            expect(preset&.name).to eq(:streaming), "#{name} with --master streaming"
+          elsif last && MB::Sound::Mastering.preset?(last[0])
+            expect(preset&.name).to eq(last[0]), name.inspect
+          else
+            expect(preset).to be_nil, name.inspect
+          end
+          block = s.master_block
+          if block
+            chain = MB::Sound::Session.with_context(session: s) { block.call(MB::Sound.stereo(0.constant, 0.constant)) }
+            text = chain.respond_to?(:to_ruby) ? chain.to_ruby : chain.map(&:to_ruby).join("\n")
+            expect(text).not_to include('.master('), "#{name}: a mastering preset inside the block"
+          end
+        ensure
+          s&.close
+        end
+      end
+    end
+
     it 'sets up buses and routes, and saves them in a set document that loads to the same text' do
       new_session = -> {
         MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), channels: 2,
