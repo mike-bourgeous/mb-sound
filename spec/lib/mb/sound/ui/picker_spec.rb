@@ -119,6 +119,19 @@ RSpec.describe(MB::Sound::UI::Picker, :aggregate_failures) do
     expect(@tiles.tiler.layout).to eq(before)
   end
 
+  # e on a real console (Pry on the tiles' pty): the action's line typed
+  # onto the REPL's prompt, not run, and the screen back in REPL mode
+  it 'puts the action\'s line on the console to edit (e)' do
+    @tiles, @term = ui_tiles(:sound, rows: 40, cols: 120, source: -> { ui_fake_snapshot.with(slow: ui_fake_snapshot.slow.with(inspector: nil)) })
+    expect(wait_until { @term.text.include?('t> ') }).to be_truthy
+    @tiles.jump(:picker)
+    expect(wait_mode(@tiles, :pane)).to eq(true)
+    @term.write('e')
+    expect(wait_mode(@tiles, :repl)).to eq(true)
+    expect(wait_until { @term.text.include?('t> audition L.inst.dnb_reese') }).to be_truthy # (nothing inspected: Enter's action auditions)
+    expect(@term.text).not_to include('=> #<audition') # (typed, not run)
+  end
+
   # A load from the picker on a real Session (the shipped library): the
   # Enter line runs through UI.run_line as a console line would, the
   # instrument changes at the track's launch point, one undo step.
