@@ -58,6 +58,6 @@ RSpec.describe(MergeGate) do
     steps = MergeGate.batch_steps(base: 5000)
     expect(steps.map(&:first)).to eq(%w[suite smoke golden soak])
     expect(steps.first[1]).to include('SLOW' => '1')
-    expect(steps.last.last).to eq([:soak, 24, 200, 5000])
+    expect(steps.last.last).to eq([:soak, 48, 400, 5000])
   end
 end

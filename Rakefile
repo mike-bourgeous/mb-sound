@@ -523,7 +523,7 @@ namespace :merge do
     abort 'merge:gate: FAILED' unless MergeGate.run(merge: args[:merge], theirs: args[:theirs])
   end
 
-  desc 'Batch end, once per batch of merges: spec:full (SLOW=1), smoke, golden:check, and a fuzz soak (SOAK_SESSION=24, SOAK_RELATION=200, SOAK_BASE=n; BATCH_STEPS=suite,smoke,golden,soak; OUT=dir)'
+  desc 'Batch end, once per batch of merges: spec:full (SLOW=1), smoke, golden:check, and a fuzz soak (SOAK_SESSION=48, SOAK_RELATION=400 seeds, about a minute; SOAK_BASE=n; BATCH_STEPS=suite,smoke,golden,soak; OUT=dir)'
   task batch: :compile do
     require_relative 'spec/merge_gate'
     abort 'merge:batch: FAILED' unless MergeGate.batch

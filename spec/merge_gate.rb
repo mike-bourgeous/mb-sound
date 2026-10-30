@@ -177,6 +177,7 @@ module MergeGate
   # everything passed.
   def run(merge: nil, theirs: nil, compile: false, dry: ENV['MERGE_DRY'] == '1')
     require_relative 'parallel_specs'
+    $stdout.sync = true
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     sel = select(merge: merge, theirs: theirs)
     describe(sel, times: ParallelSpecs.known_times)
@@ -214,7 +215,7 @@ module MergeGate
   end
 
   # The batch end's steps, in order: [name, env, command].
-  def batch_steps(soak_session: Integer(ENV['SOAK_SESSION'] || 24), soak_relation: Integer(ENV['SOAK_RELATION'] || 200), base: nil)
+  def batch_steps(soak_session: Integer(ENV['SOAK_SESSION'] || 48), soak_relation: Integer(ENV['SOAK_RELATION'] || 400), base: nil)
     base ||= Integer(ENV['SOAK_BASE'] || (Time.now.to_i / 86_400 % 1000) * 1000 + 10_000)
     rake = %w[bundle exec rake -f Rakefile]
     [
@@ -252,6 +253,7 @@ module MergeGate
   # passed.
   def batch(dir: ENV['OUT'] || File.join(ROOT, 'tmp', 'merge_batch', Time.now.strftime('%Y%m%d-%H%M%S')), steps: ENV['BATCH_STEPS'].to_s.split(','))
     FileUtils.mkdir_p(dir)
+    $stdout.sync = true # (lines in order with rake's abort message on stderr)
     puts "merge:batch: output in #{dir}"
     results = batch_steps.filter_map do |name, env, cmd|
       next if !steps.empty? && !steps.include?(name)
@@ -266,7 +268,9 @@ module MergeGate
           system(env, *cmd, chdir: ROOT, out: out, err: %i[child out])
         end
       mins = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) / 60
-      summary = File.exist?(out) ? File.foreach(out).grep(/examples, \d+ failure|not passing|golden:check|spec:parallel: \d+ examples/).last&.strip : nil
+      # (the suite's own summary line, not the gems' specs after it)
+      lines = File.exist?(out) ? File.readlines(out) : []
+      summary = [/^spec:parallel: \d+ examples/, /^golden:check|not passing/, /^\d+ examples, \d+ failure/].lazy.filter_map { |re| lines.grep(re).last }.first&.strip
       puts format('merge:batch: %-6s %s in %.1f min %s', name, ok ? 'passed' : 'FAILED', mins, summary)
       File.foreach(out).grep(/^rspec /).first(10).each { |l| puts "  #{l}" } if !ok && File.exist?(out)
       [name, ok]
