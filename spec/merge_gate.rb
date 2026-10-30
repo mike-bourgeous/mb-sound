@@ -49,6 +49,8 @@ module MergeGate
     spec/lib/mb/sound/graph_node/frozen_view_spec.rb
     spec/lib/mb/sound/output_api_guard_spec.rb
     spec/lib/mb/sound/render_path_guard_spec.rb
+    spec/lib/mb/sound/audio_io_boundary_spec.rb
+    spec/lib/mb/sound/plot/plot_boundary_spec.rb
     spec/stale_extensions_spec.rb
     spec/merge_gate_spec.rb
   ].freeze
