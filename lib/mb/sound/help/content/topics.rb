@@ -1244,14 +1244,18 @@ module MB
 
         Instruments play on tracks (`track :bass, L.inst.dnb.dnb_reese`;
         `help :sets`) and from `play L.inst.x` (a demo phrase).  Effects
-        go after a sound: `sig.then(&L.fx.hall)`, or on a bus.  The
+        go after a sound: `sig.then(&L.fx.hall)`, or on a bus; `play
+        L.fx.hall` plays a demo phrase through one.  `audition L.inst.x`
+        plays an entry as the player :audition: on CUE when the output has
+        it, else on MAIN 6 dB down; another replaces it, `audition off`
+        stops it (the library picker in `ui :sound` runs it on `a`).  The
         resonator effects are instruments too: `L.inst.bar` strikes the
         :bar resonator from notes (`struck(clip, :bar)`; every resonator
         preset has one, built from it), `L.fx.bar.ping(C5)` strikes it
         once, `play L.fx.bar` plays a strike, and a library file line
         `struck :my_bell, resonator: :bell, decay: 8` makes another.
       TEXT
-      commands :find, :shelves, :save, :save!, :collect, :promote, :promote!, :struck
+      commands :find, :audition, :shelves, :save, :save!, :collect, :promote, :promote!, :struck
       note :library
       see :presets, :racks
       example 'find bright effects', sound: false do
