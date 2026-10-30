@@ -98,9 +98,8 @@ module MB
           case x
           when CC then [x.spec.range.begin.abs, x.spec.range.end.abs].max
           when Graph
-            n = Graph.unwrap(x.node)
-            n = n.knob if n.is_a?(GraphNode::Knob::Reader)
-            n.is_a?(GraphNode::Knob) ? [n.range.begin.abs, n.range.end.abs].max : fallback
+            n = ValueSource.knob_of(Graph.unwrap(x.node))
+            n ? [n.range.begin.abs, n.range.end.abs].max : fallback
           when Numeric then x
           else fallback
           end
@@ -362,9 +361,7 @@ module MB
           # The knob behind +source+ (a Knob, a Reader, or a Graph of one),
           # or nil.
           def self.knob_of(source)
-            node = source.is_a?(Graph) ? Graph.unwrap(source.node) : source
-            node = node.knob if node.is_a?(GraphNode::Knob::Reader)
-            node.is_a?(GraphNode::Knob) ? node : nil
+            ValueSource.knob_of(source.is_a?(Graph) ? Graph.unwrap(source.node) : source)
           end
         end
 

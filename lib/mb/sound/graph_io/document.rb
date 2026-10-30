@@ -286,8 +286,7 @@ module MB
             next unless root.respond_to?(:graph)
 
             root.graph.each do |n|
-              k = n.is_a?(GraphNode::Knob::Reader) ? n.knob : n
-              next unless k.is_a?(GraphNode::Knob)
+              k = ValueSource.knob_of(n) or next
               # A rack's knobs print inside its block (knob(:space, ...))
               next if k.rack_knob
 

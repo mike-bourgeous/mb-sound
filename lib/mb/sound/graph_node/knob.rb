@@ -66,7 +66,7 @@ module MB
         #
         # The default may be a typed value or a ranged default:
         # `Spec.new(name: :cut, default: (150.hz..8000.hz).at(2400.hz))`.
-        class Spec < Data.define(:name, :default, :range, :curve, :unit, :cc, :takeover, :smooth, :param)
+        class Spec < Data.define(:name, :default, :unit, :cc, :takeover, :smooth, :param)
           def initialize(name:, default: nil, range: nil, curve: nil, unit: nil, cc: nil, takeover: :pickup, smooth: Session::Fades::DECLICK_SECONDS, description: nil, clamp: true, param: nil)
             raise ArgumentError, "Knob names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
             if curve && !CURVES.key?(curve)
@@ -99,13 +99,24 @@ module MB
 
             unit = param.unit || (MB::Sound::Param::TYPE_UNITS[param.type] if param.type != :number)
             @scale = MB::Sound::Param::Scale.new(lo: lo, hi: hi, curve: c)
-            super(name: name, default: default, range: (lo..hi).freeze, curve: c, unit: unit&.to_s&.freeze, cc: param.cc, takeover: takeover, smooth: smooth, param: param)
+            @range = (lo..hi).freeze
+            super(name: name, default: default, unit: unit&.to_s&.freeze, cc: param.cc, takeover: takeover, smooth: smooth, param: param)
           end
 
           # The knob's MB::Sound::Param::Scale (#range along #curve): the one
           # range mapping its positions, ramps, crossfades, controller moves,
           # and #mod read.
           attr_reader :scale
+
+          # The range in the param's base unit (a Range of Floats; 0..1 when
+          # the declaration has none): the #scale's span.
+          attr_reader :range
+
+          # :exp or :linear (a :switch declaration turns linearly): the
+          # #scale's curve.
+          def curve
+            @scale.curve
+          end
 
           # True when the declaration was a typed value (2400.hz rather
           # than 2400.0): #to_ruby prints it typed.

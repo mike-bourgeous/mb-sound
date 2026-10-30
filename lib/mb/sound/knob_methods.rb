@@ -142,9 +142,7 @@ module MB
 
       # A knob name given to a command: a Symbol, or a knob.
       def knob_name(name)
-        return name.knob.name if name.is_a?(GraphNode::Knob::Reader)
-        return name.name if name.is_a?(GraphNode::Knob)
-        name
+        ValueSource.knob_of(name)&.name || name
       end
 
       # Points knobs at the session's MIDI input (see

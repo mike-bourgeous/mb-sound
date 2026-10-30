@@ -577,7 +577,7 @@ module MB
           # knob call that makes it (inside its rack's block, each
           # knob(:name, ...) of one application returns the same knob).
           def knob_text(o)
-            k = o.is_a?(Knob::Reader) ? o.knob : o
+            k = ValueSource.knob_of(o)
             return rack_knob_text(k) if k.rack_knob
             "knob(#{k.name.to_sym.inspect})"
           end

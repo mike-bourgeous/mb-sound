@@ -159,7 +159,7 @@ module MB
             sends = r.sends.transform_values { |k|
               mode, v = k.queued_state
               next v if mode == :hold
-              v = v.knob if v.is_a?(GraphNode::Knob::Reader)
+              v = ValueSource.knob_of(v) || v
               knobs.key(v) || v
             }
             r.trigger ? { to: nil, send: {}, trigger: true } : { to: r.to, send: sends }

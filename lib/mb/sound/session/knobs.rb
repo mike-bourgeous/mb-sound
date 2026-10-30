@@ -169,8 +169,8 @@ module MB
         # The knob named +name+ (or the control it stands for: see
         # #control_name), raising with suggestions if there is none.
         def knob!(name)
-          return name.knob if name.is_a?(GraphNode::Knob::Reader)
-          return name if name.is_a?(GraphNode::Knob)
+          known = ValueSource.knob_of(name)
+          return known if known
           name = control_name(name)
           k = @knob_lock.synchronize { @knobs[name] }
           # (a track's level knob is made at unity when first used; Faders)
