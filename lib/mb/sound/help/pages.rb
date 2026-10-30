@@ -176,7 +176,10 @@ module MB
           d.heading('Commands').rows(console) unless console.empty?
           d.heading('Node and value methods').rows(dsl) unless dsl.empty?
           extra_sections(d)
-          Help.ui_section(d, UI::HelpIndex.named(@topic.name))
+          # (its aliases' too: help note is the pitch topic, and ui.note's
+          # entry shows there)
+          names = [@topic.name, *TOPIC_ALIASES.select { |_, t| t == @topic.name }.keys]
+          Help.ui_section(d, names.flat_map { |n| UI::HelpIndex.named(n) }.uniq)
           unless @topic.examples.empty?
             d.heading('Examples')
             @topic.examples.each_with_index do |ex, i|

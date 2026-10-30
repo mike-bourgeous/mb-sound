@@ -58,6 +58,22 @@ module MB
         # Turns the screen off (as `ui off`).
         def off = UI.off
 
+        # Saves a UI note for the next refinement round: +text+ with the
+        # screen (layout, focused pane, a plain-text capture), what plays
+        # (players, tracks, the form's section, the scene, the position),
+        # and the last console lines, appended to today's Markdown file
+        # (UI::NoteLog: $MB_SOUND_UI_NOTES, else the user data directory).
+        # NAV # opens a prompt line for one while the set plays.
+        #
+        #     ui.note 'the cutoff turns too slowly at the bottom'
+        def note(text) = NoteLog.save(text)
+
+        # The UI notes of +day+ (:today, a Date, or "2026-10-30"), one line
+        # each (UI::NoteLog::Listing).
+        #
+        #     ui.notes
+        def notes(day = :today) = NoteLog.list(day)
+
         def respond_to_missing?(name, include_private = false)
           Tiles.public_method_defined?(name) || Band.public_method_defined?(name) || super
         end

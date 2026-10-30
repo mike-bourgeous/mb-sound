@@ -204,7 +204,8 @@ module MB
           @start_keys = layout.focus == :keyboard
           @on_key = on_key
           @hints = hints || (play_keys && Keys.hints(play_keys))
-          @note = nil
+          @status_note = nil
+          @note_capture = nil # (UI::NoteLog.capture when NAV # opened its prompt)
         end
 
         # The virtual keyboard (UI::Keyboard) KEYS mode plays.
@@ -908,8 +909,9 @@ module MB
         end
 
         # A note that stays on the status line instead of the hints (nil:
-        # none), e.g. "song ended: q quits" for a script's screen.
-        attr_accessor :note
+        # none), e.g. "song ended: q quits" for a script's screen.  (Was
+        # #note until ui-scaffold-1, when `ui.note` became the UI notes.)
+        attr_accessor :status_note
 
         # True while the key overlay shows.
         def key_help? = @router.state == :overlay
@@ -979,6 +981,26 @@ module MB
           enter_unlocked(target)
         end
 
+        # NAV #: a prompt line for a UI note (UI::NoteLog), the screen as it
+        # is now kept for it (what was looked at, not the prompt).
+        def note_prompt
+          @note_capture = NoteLog.capture(self)
+          @router.open_line(:ui_note, 'ui note: ')
+        end
+
+        # The UI note's text (nil: cancelled), saved with the capture.
+        def note_done(text)
+          capture = @note_capture
+          @note_capture = nil
+          return flash('no note saved', :dim) if text.nil? || text.strip.empty?
+          n = NoteLog.save(text, capture: capture, session: @session || Session.existing)
+          flash(Tiles.one_line("note saved to #{n.path} (ui.notes lists today's)"), :ok)
+        rescue StandardError => e
+          flash(Tiles.one_line("ui note: #{e.class}: #{e.message}"), :bad)
+        end
+
+        private :note_prompt, :note_done
+
         # Panes a temporary jump takes rows from first (else the largest
         # flexible pane).
         TEMPORARY_PREFER = { picker: :inspector }.freeze
@@ -992,6 +1014,7 @@ module MB
           @full = true
           @router.mode
         end
+        private :close_temporary_jump
 
         # The pane on screen for jump name +name+ (its own name first,
         # then the first pane of that kind), or nil.
@@ -1094,6 +1117,7 @@ module MB
         def line_done(kind, text)
           @full = true
           return answer_pane(text) if kind == :pane_value
+          return note_done(text) if kind == :ui_note
           return if text.nil? || text.strip.empty?
           case kind
           when :palette then run_palette(text)
@@ -1152,6 +1176,7 @@ module MB
           when :enter then enter
           when :jump then jump(a.args[0])
           when :key_help then key_help
+          when :ui_note then note_prompt
           when :messages then messages
           when :show_fps then show_fps(!@show_fps)
           when :call then run_safely { a.args[0].call }
@@ -2151,11 +2176,11 @@ module MB
           else
             hint =
               if @router.state == :pending then "#{MB::Term::Input::Keymap.chord_name(@router.prefix.key.chord)} ..."
-              elsif mode == :play then @note || @hints || ''
+              elsif mode == :play then @status_note || @hints || ''
               elsif mode == :pane then "#{enter_hint}Esc nav  ? keys  #{(m = @panes[@tiler.focus]&.mode_keymap) ? Keys.hints(m) : ''}"
               else HINTS[step ? :step : mode] || ''
               end
-            c.text(x + 1, 0, c.fit(hint, room), @note && mode == :play ? :key : :dim)
+            c.text(x + 1, 0, c.fit(hint, room), @status_note && mode == :play ? :key : :dim)
           end
           c.text(@cols - right.length, 0, right, :key) unless right.empty?
           c.text(warn_at, 0, badge_w, :warn) if warn_at

@@ -33,6 +33,7 @@ module MB
           on ' ', :pause, help: 'play / pause (starts the flow if nothing played yet)', label: 'Space'
           on 'm', :messages, help: 'messages (warnings) pane, again: away'
           on 'f', :show_fps, help: 'frame rate on the status line'
+          on '#', :ui_note, help: 'a UI note for the next refinement round (a prompt; ui.notes lists them)'
           on '?', :key_help, help: 'this help (a key listed here closes it and acts)'
           doc 'Ctrl-]', 'back to where NAV came from (REPL, KEYS, a prompt)'
           doc 'Ctrl-Z', 'hide the tiles (the set plays on; Ctrl-Z or ui: back)'

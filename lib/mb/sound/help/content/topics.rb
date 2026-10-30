@@ -1347,6 +1347,12 @@ module MB
         `ui.target_fps` the painter's rate; meters and scopes run at it and
         everything slows in steps when the CPU is busy).
 
+        `ui.note 'the cutoff turns too slowly'` keeps a note for the next
+        UI refinement round with the screen as text, the layout and focused
+        pane, what plays, and your last console lines (one Markdown file a
+        day; NAV # opens a prompt for one while the set plays); `ui.notes`
+        lists today's.
+
         Your own panes: `pane :name do |c, s| ... end` (s a snapshot of the
         session, c the pane's canvas); arrange them with `layout`, keep a
         layout with `ui.save`.  `ui.split :v`, `ui.zoom`, `ui.show :cpu`,
