@@ -439,7 +439,7 @@ module MB
 
       # True if none of +n+ buffer samples from +start+ is at least +loud+.
       def quiet_range?(start, n, loud)
-        i = MB::Sound::FastArithmetic.last_at_least(@buffer, start, n, loud)
+        i = MB::Sound::Kernels.last_at_least(@buffer, start, n, loud)
         return i < 0 if i
 
         @buffer[start...(start + n)].abs.lt(loud).all?

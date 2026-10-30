@@ -479,7 +479,7 @@ module MB
         def note_longest(delays)
           m = if delays.is_a?(Numeric)
                 delays
-              elsif (r = MB::Sound::FastArithmetic.min_max(delays, @longest_range))
+              elsif (r = MB::Sound::Kernels.min_max(delays, @longest_range))
                 r[1]
               else
                 delays.real.max

@@ -160,7 +160,7 @@ RSpec.describe('Sleeper random catch-up', :aggregate_failures) do
   end
 
   describe 'kernel' do
-    it 'moves noise on exactly as rendering it would, in C and the Ruby mirror' do
+    it 'moves noise on exactly as rendering it would, in C and the Ruby mirror (Kernels.noise_skip)' do
       make = -> { m.seed(3); 2000.hz.ramp.noise }
       a = make.()
       a.sample(300)
