@@ -37,7 +37,12 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       expect(runner(:song, ['--master', 'match', '--reference', 'ref.flac']).send(:mastering_option).name).to eq(:match)
       expect { runner(:song, ['--master', 'match']).send(:mastering_option) }.to raise_error(described_class::InputError, /needs --reference FILE/)
       expect { runner(:song, ['--reference', 'ref.flac', '--master', 'club']).send(:mastering_option) }.to raise_error(described_class::InputError, /goes with --master match/)
-      expect(runner(:song, []).instance_variable_get(:@parser).to_s).to include('--reference FILE')
+      expect(runner(:song, []).instance_variable_get(:@parser).to_s).to include('--reference FILE', '--tilt TILT')
+      expect(runner(:song, ['--reference', 'ref.flac', '--tilt', 'off']).send(:mastering_option).steps.map(&:first)).not_to include(:tilt)
+      expect(runner(:song, ['--reference', 'ref.flac', '--tilt', '0.5']).send(:mastering_option).fixed_tilt).to eq(0.5)
+      expect(runner(:song, ['--reference', 'ref.flac', '--tilt', 'auto']).send(:mastering_option)).to be_measured_tilt
+      expect { runner(:song, ['--tilt', 'off']).run_song { nil } }.to raise_error(described_class::InputError, /--tilt goes with --reference/)
+      expect { runner(:song, ['--reference', 'ref.flac', '--tilt', 'up']) }.to raise_error(described_class::InputError, /auto, off, or dB per octave/)
     end
 
     it 'accepts short options, types, and allowed values after the default' do

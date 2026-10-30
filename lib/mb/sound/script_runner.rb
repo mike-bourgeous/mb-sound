@@ -212,7 +212,7 @@ module MB
 
       # Long options of song scripts, which parameters can't be named
       # (acid_song's old `master:` parameter shadowed --master).
-      COMMON_SONG_LONG_OPTIONS = %w[bars bpm from to report master reference lufs ride seek take stems stem_gain].freeze
+      COMMON_SONG_LONG_OPTIONS = %w[bars bpm from to report master reference tilt lufs ride seek take stems stem_gain].freeze
 
       # Raised for invalid command-line arguments.  #help has the option
       # list, which ScriptingMethods prints before exiting.
@@ -460,6 +460,7 @@ module MB
       def run_song(bars: nil, &block)
         raise InputError, 'Pass --to or --bars, not both' if @options[:to] && @options[:bars]
         raise InputError, '--seek goes with --from' if @options[:seek] && !@options[:from]
+        raise InputError, '--tilt goes with --reference FILE' if @options.key?(:tilt) && !@options[:reference]
         raise InputError, '--take records a whole run (not with --from or --to)' if @options[:take] && (@options[:from] || @options[:to])
         window_targets.each { |what, target| check_window_target(Session.current, target, what) unless target.is_a?(Symbol) }
         raise InputError, '--stems needs a render (-o FILE or an output file name)' if @options[:stems] && !@options[:output]
@@ -527,6 +528,9 @@ module MB
         if @options[:reference]
           raise InputError, "--reference goes with --master match (got --master #{m})" unless m == :match
           options[:reference] = @options[:reference]
+          options[:tilt] = @options[:tilt] if @options.key?(:tilt)
+        elsif @options.key?(:tilt)
+          raise InputError, '--tilt goes with --reference FILE'
         elsif m == :match
           raise InputError, '--master match needs --reference FILE (the track to match)'
         end
@@ -783,6 +787,14 @@ module MB
             o.on('--reference FILE', 'Master like a reference track (--master match: its loudness, true peak, and spectral tilt; implies --master match)') { |v|
               @options[:reference] = v
               @options[:master] ||= :match
+            }
+            o.on('--tilt TILT', 'With --reference: the tilt EQ, auto (measured in renders; the default), off, or a correction in dB per octave') { |v|
+              @options[:tilt] = case v
+                                when 'auto' then true
+                                when 'off' then false
+                                else
+                                  Float(v, exception: false) or raise InputError, "--tilt takes auto, off, or dB per octave (got #{v.inspect})"
+                                end
             }
             o.on('--ride', 'With --master: ride the gain toward the target live (a slow rider; renders then run once instead of measuring)') { @options[:ride] = true }
             o.on('--lufs LUFS', 'Loudness target for a render (LUFS, or a name like spotify): the mastering preset\'s, else normalizes the file') { |v|
