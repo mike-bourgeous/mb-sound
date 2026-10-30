@@ -1169,12 +1169,21 @@ module MB
         def to_s
           vary = @variations.empty? ? '' : " varying #{@variations.map(&:name).join(', ')}"
           ctl = @controls.empty? ? '' : "; controls #{@controls.join(', ')}"
-          "#{self.class.name.rpartition('::').last}(#{Duration.format(@length)}#{' loop' if @loop}#{' from launch' if launch_aligned?}#{vary}: #{@events.map(&:to_s).join(', ')}#{ctl})"
+          "#{self.class.name.rpartition('::').last}(#{Duration.format(@length)}#{' loop' if @loop}#{' from launch' if launch_aligned?}#{vary}: #{events_text}#{ctl})"
         end
 
         def inspect
           "#<#{to_s}>"
         end
+
+        # The events as #to_s prints them: note names for note numbers
+        # unless some Integer value isn't one (Event.note_value?), so a
+        # clip prints all its values one way.
+        def events_text
+          names = @events.all? { |e| !e.value.is_a?(Integer) || Event.note_value?(e.value) }
+          @events.map { |e| e.to_s(names: names) }.join(', ')
+        end
+        private :events_text
 
         protected
 

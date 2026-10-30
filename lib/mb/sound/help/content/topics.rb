@@ -542,14 +542,28 @@ module MB
         `seq([C3, E3, G3], chord(:min7, root: :d)).n2` (chord steps),
         `grid('x...')` (sixteenths; `grid(8, 'x.x.')`); a clip is a MIDI source (`clip.tone`, `clip.env`,
         `clip.synth`) and has transforms (transpose, swing, chance, ...).
+        `rotate(1.n8)` wraps notes around the clip, `shift(1.n8)` moves
+        them without wrapping (notes that leave drop out; live streams only
+        shift later).  Grid kits take the same transforms, row by row
+        (`beat.reverse`, `beat.swing(0.6)`, `beat.humanize`).
+        `clip.show` prints a clip as text: `:grid` (grid characters, so a
+        kit's `show.rows` parse back), `:roll` (a piano roll), or
+        `:degrees` (scale degrees in the session key).
       TEXT
       commands :seq, :grid, :events, :rest, :euclid, :melody, :acid, :chord, :arp, :strum, :echo, :scale
-      dsl :loop, :n8, :n16, :transpose, :swing, :humanize, :chance, :every, :reverse, :halftime, :doubletime, :synth, :tone, :amp_env, :swap
+      dsl :loop, :n8, :n16, :transpose, :swing, :humanize, :chance, :every, :reverse, :rotate, :shift, :halftime, :doubletime, :synth, :tone, :amp_env, :swap
       note :sequences
       see :tempo, :sets
       example 'a looping arpeggio' do
         clip = seq(A3, C4, E4, G4).n16.loop
         bg :try, clip.tone.triangle.at(-12.db) * clip.amp_env
+      end
+      example 'a beat turned around, swung, and printed as a grid', sound: false do
+        beat = grid(16, kick: 'X...x...x..x....', snare: '....X.......X..?', hat: 'x.x.x.x.x.x.x.x.')
+        puts beat.rotate(1.n8).swing(0.6).show
+      end
+      example 'a riff as scale degrees in A minor', sound: false do
+        puts seq(A3, C4, E4, G4, A4.n4, E4.n4).n8.show(:degrees, scale: scale(:minor, :a))
       end
     end
 

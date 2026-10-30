@@ -61,8 +61,8 @@ module MB
               names: %i[channel_index length size names to_h],
             },
             'MB::Sound::Sequence::Clip' => {
-              reason: 'event readers and lineage (clips print through their recipes)',
-              names: %i[each edges edge_horizon event_at event_before events events_for length lineage rederive source stream value variations seed values value_at
+              reason: 'event readers, lineage, and text views (clips print through their recipes; #show is a Sequence::View)',
+              names: %i[show each edges edge_horizon event_at event_before events events_for length lineage rederive source stream value variations seed values value_at
                         controls control control_edges control_chase control_horizon param_nodes steered? steer_lead],
             },
             'MB::Sound::Sequence::Seq' => {
@@ -78,8 +78,8 @@ module MB
               names: %i[grid offsets levels counts steps length target to_ruby],
             },
             'MB::Sound::Sequence::Kit' => {
-              reason: 'iteration (rows taken with kit.rows or kit[:name] print as kit[:name])',
-              names: %i[each],
+              reason: 'iteration and text views (rows taken with kit.rows or kit[:name] print as kit[:name]; #show is a Sequence::View)',
+              names: %i[each show],
             },
             'MB::Sound::Sample' => {
               reason: 'value readers and views (Samples print through their lineage; GraphIO::Registry::VALUES lets documents call the views)',

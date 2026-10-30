@@ -150,7 +150,7 @@ RSpec.describe(MB::Sound::Sequence::Seq) do
   end
 
   it 'can be displayed' do
-    expect(MB::Sound.seq(MB::Sound::C4, nil).n8.inspect).to eq('#<Seq(n4: 60@0+n8)>')
+    expect(MB::Sound.seq(MB::Sound::C4, nil).n8.inspect).to eq('#<Seq(n4: C4@0+n8)>')
   end
 
   describe '#reverse and #permute' do

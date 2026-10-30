@@ -298,7 +298,7 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(@term.wait_for(' REPL ')).to eq(true)
     expect(@term.wait_for('t> seq(C3, D3, E3.n4).n8')).to eq(true), @term.text
     @term.type("\r")
-    expect(@term.wait_for(/=> #<Seq\(n2: 48@0\+n8, 50@1\/8\+n8, 52@1\/4\+n4\)>/)).to eq(true), @term.text
+    expect(@term.wait_for(/=> #<Seq\(n2: C3@0\+n8, D3@1\/8\+n8, E3@1\/4\+n4\)>/)).to eq(true), @term.text
     expect(@keyboard.clip.to_ruby).to eq('seq(C3, D3, E3.n4).n8')
     expect(out.sounding).to be_empty
   end

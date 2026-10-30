@@ -33,6 +33,19 @@ module MB
           mode == :fill ? active : !active
         end
 
+        # True for values Event#to_s prints as note names: Integers from
+        # 12 (C0) to 127 (G9).  Lower ones are more often semitone or
+        # degree offsets (a transpose clip) than notes below 16 Hz.
+        def self.note_value?(v)
+          v.is_a?(Integer) && v >= 12 && v <= 127
+        end
+
+        # The name of MIDI note +number+ (an Integer 0..127), e.g. "Fs2",
+        # as MB::Sound::Note spells it (the constant you would type).
+        def self.note_name(number)
+          (@note_names ||= Array.new(128) { |n| MB::Sound::Note.new(n).name.freeze }.freeze)[number]
+        end
+
         # The time at which the event ends, in whole notes.
         def end_time
           start + length
@@ -43,9 +56,23 @@ module MB
           dup.tap { |e| changes.each { |k, v| e[k] = v } }
         end
 
-        def to_s
+        # The event as text, e.g. "C4@1/4+n8 v1.0 !": the value (a note
+        # name for note numbers, see Event.note_value?), @ the start in
+        # whole notes, + the length, then velocity and marks.  +names:+
+        # nil decides per value; true or false names every Integer value
+        # or none (Clip#to_s decides once per clip, so a clip of
+        # semitone offsets like seq(0, 7, 12) prints numbers throughout).
+        def to_s(names: nil)
           t = start.denominator == 1 ? start.numerator : start
-          s = "#{value.is_a?(Numeric) ? MB::M.sigfigs(value, 6) : (value.is_a?(MB::Sound::Pitch) ? value.to_s : value.inspect)}@#{t}+#{Duration.format(length)}"
+          v = value
+          text = if v.is_a?(MB::Sound::Pitch)
+                   v.to_s
+                 elsif v.is_a?(Numeric)
+                   (names.nil? ? Event.note_value?(v) : names && v.is_a?(Integer) && v.between?(0, 127)) ? Event.note_name(v) : MB::M.sigfigs(v, 6)
+                 else
+                   v.inspect
+                 end
+          s = "#{text}@#{t}+#{Duration.format(length)}"
           s << " v#{MB::M.sigfigs(velocity, 3)}" if velocity != Clip::DEFAULT_VELOCITY
           s << " p#{probability}" if probability
           s << " #{condition[1]}:#{condition[0]}" if condition
@@ -55,6 +82,10 @@ module MB
           s << " pitch#{pitch >= 0 ? '+' : ''}#{MB::M.sigfigs(pitch, 4)}" if pitch
           s << (flam == true ? ' flam' : " flam#{MB::M.sigfigs(flam * 1000, 3)}ms") if flam
           s
+        end
+
+        def inspect
+          "#<Event #{self}>"
         end
       end
     end

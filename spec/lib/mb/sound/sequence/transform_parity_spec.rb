@@ -143,8 +143,17 @@ RSpec.describe('Clip and Kit transform parity', :aggregate_failures) do
     expect(missing.sort).to eq([]), "Clip methods missing from Kit (add them to Kit and #transforms, or to #kit_exempt with a reason): #{missing.sort.join(' ')}"
     swept = transforms.map { |_, code, _| code[/\A\w+/].to_sym }.uniq
     mirrored = kit_class.public_instance_methods(false) & clip_methods
-    unswept = mirrored - swept - %i[each loop stretch halftime half_time doubletime double_time legato fill nofill groove maybe shuffle retrograde]
+    unswept = mirrored - swept - %i[each show loop stretch halftime half_time doubletime double_time legato fill nofill groove maybe shuffle retrograde]
     expect(unswept.sort).to eq([]), "Kit transforms the parity sweep doesn't run: #{unswept.sort.join(' ')}"
+  end
+
+  it 'shows random kits as grid rows that parse back to the same rows' do
+    rng = Random.new(RSpec.configuration.seed + 3)
+    12.times do
+      kit = random_kit(rng, polymeter: rng.rand < 0.5)
+      again = s.grid(16, **kit.show.rows)
+      kit.each { |name, row| expect(rows(again[name])).to eq(rows(row)), "#{kit.show}" }
+    end
   end
 
   it 'loads Kit transforms from graph documents' do
