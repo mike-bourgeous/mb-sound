@@ -330,6 +330,15 @@ module SessionFuzz
       end
     },
     ->(s) { "bg :#{s.bg_name}, #{s.pick(MELODIC)}#{s.on}" },
+    ->(s) {
+      # (session-core-1: the time math moved into Transport/TempoMap)
+      # stream transforms converting between stream seconds and the
+      # timeline, a glide over each note's length hint, and a musical time
+      # limit, under the song's tempo (ramps and LFOs from the bpm command)
+      fx = s.pick(['echo(1.n16, 2)', 'arp(:up, 16)', 'quantize(16)', 'swing(0.6)', 'humanize(4.ms, seed: 3)'])
+      "bg :#{s.bg_name}, #{s.pick(MELODIC)}.notes.#{fx}.synth(voices: 2) { |v| v.hz.glide(:length).triangle * v.amp_env(0.002, 0.05, 0.6, 0.02) * 0.2 }" \
+        ".until(#{s.pick(['1.bars', '3.beats'])})#{s.on}"
+    },
     # (new commands go here, at the end)
   ].freeze
 
