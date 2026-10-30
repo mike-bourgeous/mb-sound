@@ -44,6 +44,11 @@ module MB
         # How close to the target .solve gets (LU).
         TOLERANCE = 0.01
 
+        # :match: rounds refining the tilt correction on the chain's
+        # output, and how close to the reference's tilt they stop (dB/oct).
+        TILT_ROUNDS = 2
+        TILT_TOLERANCE = 0.1
+
         # The farthest the trim may move from the first pass's (dB).
         RANGE = 36.0
 
@@ -460,25 +465,45 @@ module MB
           eval = ->(db, peak = !limited) { measure(output.(db), session.sample_rate, true_peak: peak, loudest: window) }
 
           drive = presets.last.drive
-          x0 = drive.db_value
-          f0 = first
-          x1 = (x0 + (target.lufs - f0)).clamp(x0 - RANGE, x0 + RANGE)
-          f1, tp = eval.(x1)
-          MAX_STEPS.times do
-            break if !f1.finite? || (f1 - target.lufs).abs <= TOLERANCE
-            slope = (f1 - f0) / (x1 - x0)
-            # The limiters are saturated (more trim no longer adds
-            # loudness): keep the smaller trim and report the miss
-            if x1 > x0 && slope.finite? && slope < 0.05
-              x1, f1 = x0, f0 if f0.finite? && f1 <= f0 + 0.05
-              tp = nil
-              break
-            end
-            slope = 1.0 if !slope.finite? || slope < 0.05
-            x2 = (x1 + (target.lufs - f1) / slope).clamp(x0 - RANGE, x0 + RANGE)
-            x0, f0 = x1, f1
-            x1 = x2
+          # Secant steps on the trim from (x0, f0) toward the target:
+          # [trim, its loudness, its true peak]
+          secant = ->(x0, f0) {
+            x1 = (x0 + (target.lufs - f0)).clamp(x0 - RANGE, x0 + RANGE)
             f1, tp = eval.(x1)
+            MAX_STEPS.times do
+              break if !f1.finite? || (f1 - target.lufs).abs <= TOLERANCE
+              slope = (f1 - f0) / (x1 - x0)
+              # The limiters are saturated (more trim no longer adds
+              # loudness): keep the smaller trim and report the miss
+              if x1 > x0 && slope.finite? && slope < 0.05
+                x1, f1 = x0, f0 if f0.finite? && f1 <= f0 + 0.05
+                tp = nil
+                break
+              end
+              slope = 1.0 if !slope.finite? || slope < 0.05
+              x2 = (x1 + (target.lufs - f1) / slope).clamp(x0 - RANGE, x0 + RANGE)
+              x0, f0 = x1, f1
+              x1 = x2
+              f1, tp = eval.(x1)
+            end
+            [x1, f1, tp]
+          }
+          x1, f1, tp = secant.(drive.db_value, first)
+
+          # :match: the chain itself moves the tilt (limiting a mix pushed
+          # 16 LU louder took the night bus 0.5 dB/oct brighter), so the
+          # correction is refined on the chain's output, the trim found
+          # again after each change (TILT_ROUNDS)
+          if tilt
+            TILT_ROUNDS.times do
+              out_tilt = Analysis::Spectrum.new(output.(x1), sample_rate: session.sample_rate).tilt
+              err = presets.last.reference.tilt - out_tilt
+              moved = (tilt + err).clamp(-Mastering::MAX_TILT, Mastering::MAX_TILT).round(3)
+              break if err.abs <= TILT_TOLERANCE || moved == tilt
+              tilt = moved
+              f_at, = eval.(x1)
+              x1, f1, tp = secant.(x1, f_at)
+            end
           end
 
           trims = nil
