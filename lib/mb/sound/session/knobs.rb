@@ -130,25 +130,43 @@ module MB
         def control_name(name)
           return name unless name.is_a?(Symbol)
           return name if @knob_lock.synchronize { @knobs.key?(name) }
-          primary_control(name) || name
+          if (level = primary_control(name))
+            fader!(name) # (a track's level knob is made when first used; Faders)
+            return level
+          end
+          # A track's level knob by its own name (:"bass/level"), made
+          # when first used
+          if track_level_name?(name)
+            fader!(Name[name].owner)
+            return name
+          end
+          name
+        end
+
+        # True if +name+ names a track's level knob (:"bass/level"), made
+        # yet or not (see Faders).
+        def track_level_name?(name)
+          return false unless name.is_a?(Symbol)
+          nm = Name[name]
+          nm.level? && @names.kind(nm.owner) == :track
         end
 
         # The knob name of the primary control of +name+'s owner (see
-        # #control_name), or nil: a trigger track's on/off level
-        # (Buses#trigger_level_name).  Other owners have none yet: a
-        # bus's or player's level is a mix decision (feed, master_gain),
-        # not one control.
+        # #control_name), or nil: a track's level (Faders: :"bass/level",
+        # whether or not it was made yet), so `turn :bass, 0.5` and scene
+        # values `bass: -6.db` set it, and a trigger track's `pump: 0`
+        # turns its pump off.  Buses have none (their chain is the level).
         def primary_control(name)
-          return nil unless name.is_a?(Symbol) && @names.kind(name) == :track && trigger_track?(name)
-          level = trigger_level_name(name)
-          @knob_lock.synchronize { @knobs.key?(level) } ? level : nil
+          return nil unless name.is_a?(Symbol) && @names.kind(name) == :track
+          level_name(name)
         end
 
         # Names that stand for controls (#control_name): the knobs and the
         # owners with a primary control (scenes and sections take both).
         def control_names
           names = @knob_lock.synchronize { @knobs.keys }
-          names + @names.to_h.keys.select { |n| primary_control(n) }
+          owners = @names.to_h.keys.select { |n| primary_control(n) }
+          (names + owners + owners.map { |n| level_name(n) }).uniq
         end
 
         # The knob named +name+ (or the control it stands for: see
@@ -709,6 +727,10 @@ module MB
         # follow, when the knob is a frequency.)
         def knob_value(k, value)
           t = Param.type_of(value)
+          # (a gain like -6.db turning a plain-number knob, e.g. a level:
+          # the knob holds the Float gain, so set documents print a number
+          # its range can read; omnibus17)
+          return value.to_f if t == :decibels && k.spec.param.type == :number
           return value if t.nil? || t == :number || t == :node || t == :name || t != k.spec.param.type
           Param.magnitude(value).to_f
         end

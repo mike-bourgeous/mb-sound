@@ -34,6 +34,14 @@ RSpec.describe('UI session panes', :aggregate_failures) do
     expect(draw(:buses, snap_with(buses: [].freeze)).first).to start_with('no buses')
   end
 
+  it 'shows track levels set away from unity in the tracks pane (omnibus17)' do
+    tracks = [ui::TrackInfo.new(name: :bass, q: '1', clip: 'bass_a', armed: false, level: -6.0),
+              ui::TrackInfo.new(name: :pad, q: '1', clip: 'chords', armed: false)].freeze
+    text = draw(:tracks, snap_with(tracks: tracks), 40, 4).join("\n")
+    expect(text).to match(/bass\s+-6 dB bass_a/)
+    expect(text).to match(/pad\s+stopping chords/) # (no level shown at unity)
+  end
+
   it 'logs landed changes newest at the bottom' do
     landed = [ui::LandedInfo.new(seq: 1, kind: :add, subject: :bass, lands: '9:1', pos: 8r, at: nil),
               ui::LandedInfo.new(seq: 2, kind: :mute, subject: :pad, lands: '17:1', pos: 16r, at: nil)].freeze

@@ -62,6 +62,160 @@ module MB
           parts.join('/')
         end
       end
+
+      # A name with structure (s-names, omnibus17): Session names join
+      # parts with a slash, the first part being the owner (a track,
+      # player, or rack), the last the leaf:
+      #
+      # | name                | what it is                                  |
+      # |---------------------|---------------------------------------------|
+      # | :"lead/live"        | track :lead's monitor player (#monitor?)    |
+      # | :"lead/cue"         | track :lead's cue player (#cue?)            |
+      # | :"bass/level"       | player :bass's level knob (#level?)         |
+      # | :"bass/cutoff"      | a track knob (a patch param, a live literal)|
+      # | :"dub/space"        | rack :dub's knob :space                     |
+      # | :"bass/dub/space"   | that knob's instance in player :bass        |
+      #
+      # Name[x] parses a Symbol (or passes an Integer player name through:
+      # its owner and leaf are itself) into this frozen value, cached per
+      # name, so render paths can ask without allocating.  Every place that
+      # builds or takes apart such a name goes through here (a guard spec,
+      # spec/lib/mb/sound/session/name_spec.rb, fails on hand parsing).
+      class Name
+        # The leaf of a track's monitor player (Arrangement::Recording).
+        MONITOR = 'live'
+
+        # The leaf of a track's cue player (Session::Cue).
+        CUE = 'cue'
+
+        # The leaf of a player's level knob (Session::Faders).
+        LEVEL = 'level'
+
+        # (parsed names; cleared when it grows past CACHE_LIMIT)
+        @cache = {}
+        CACHE_LIMIT = 4096
+
+        class << self
+          # The parsed Name of +name+ (a Symbol or Integer; Strings are
+          # read as Symbols).
+          def [](name)
+            return name if name.is_a?(Name)
+            hit = @cache[name]
+            return hit if hit
+            @cache.clear if @cache.size >= CACHE_LIMIT
+            @cache[name] = new(name)
+          end
+
+          # Joins +parts+ into a name: join(:bass, :cutoff) is
+          # :"bass/cutoff" (an Integer player name joins as its digits).
+          def join(*parts)
+            parts.join('/').to_sym
+          end
+
+          # Track +track+'s monitor player name (:"lead/live").
+          def monitor(track)
+            join(track, MONITOR)
+          end
+
+          # Player +name+'s cue player name (:"lead/cue").
+          def cue(name)
+            join(name, CUE)
+          end
+
+          # Player +name+'s level knob name (:"bass/level").
+          def level(name)
+            join(name, LEVEL)
+          end
+        end
+
+        # The name as given (a Symbol, or an Integer player name).
+        attr_reader :symbol
+
+        # The parts (frozen Strings; one for a plain name).
+        attr_reader :parts
+
+        def initialize(name)
+          name = name.to_sym if name.is_a?(String)
+          raise ArgumentError, "Names are Symbols or Integers (got #{name.inspect})" unless name.is_a?(Symbol) || name.is_a?(Integer)
+          @symbol = name
+          @parts = (name.is_a?(Symbol) ? name.name.split('/', -1) : [name.to_s]).map(&:freeze).freeze
+          @parts = [name.to_s.freeze].freeze if @parts.empty? || @parts.any?(&:empty?)
+          @owner = @parts.length == 1 ? name : @parts.first.to_sym
+          @leaf = @parts.length == 1 ? name : @parts.last.to_sym
+          @base = @parts.length == 1 ? nil : @parts[0...-1].join('/').to_sym
+          freeze
+        end
+
+        # The first part as a name (:bass for :"bass/dub/space"; the name
+        # itself for a plain name).
+        attr_reader :owner
+
+        # The last part (:space for :"bass/dub/space"; the name itself for
+        # a plain name).
+        attr_reader :leaf
+
+        # Everything before the leaf (:"bass/dub" for :"bass/dub/space"),
+        # or nil for a plain name.
+        attr_reader :base
+
+        # True for a plain name (one part).
+        def plain?
+          @parts.length == 1
+        end
+
+        # True for a track's monitor player name (:"lead/live").
+        def monitor?
+          !plain? && @parts.last == MONITOR
+        end
+
+        # True for a cue player name (:"lead/cue").
+        def cue?
+          !plain? && @parts.last == CUE
+        end
+
+        # True for a player's level knob name (:"bass/level").
+        def level?
+          @parts.length == 2 && @parts.last == LEVEL
+        end
+
+        # The track whose monitor player this is (:lead for :"lead/live"),
+        # or nil.
+        def monitored
+          monitor? ? @base : nil
+        end
+
+        # The name whose cue player this is (:lead for :"lead/cue"), or nil.
+        def cued
+          cue? ? @base : nil
+        end
+
+        # The player name whose strip (mute, solo, level, routes) this
+        # player follows: a monitor's or cue player's track, else itself.
+        def strip_owner
+          monitored || cued || @symbol
+        end
+
+        def to_sym
+          @symbol
+        end
+
+        def to_s
+          @symbol.to_s
+        end
+
+        def inspect
+          "#<Session::Name #{@symbol.inspect}>"
+        end
+
+        def ==(other)
+          other.is_a?(Name) && other.symbol == @symbol
+        end
+        alias eql? ==
+
+        def hash
+          @symbol.hash
+        end
+      end
     end
   end
 end

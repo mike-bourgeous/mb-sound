@@ -27,7 +27,7 @@ Launching what was cued (omnibus15, from the maintainer's take of 2026-10-27: `c
 
 ## Routing
 
-- A player's strip (contract K7) is fade, mute/solo, then the **route**: two gains, MAIN and CUE (`Session::Cue::Levels`, exact `Fades::Ramp`s counted in session frames).  Players with neither (every player unless cued) take the old path unchanged (`Player#cue` nil).
+- A player's strip (contract K7) is fade, level (arrangement.md "Track levels"; a cue player plays at its track's level), mute/solo, then the **route**: two gains, MAIN and CUE (`Session::Cue::Levels`, exact `Fades::Ramp`s counted in session frames).  Players with neither (every player unless cued) take the old path unchanged (`Player#cue` nil).
 - `cue` starts right away unless given a launch point (`on:`/`in:`/`at:`): clips follow the timeline, so the part is in time anyway, and a `bg`-style next-bar default would leave a `cue` then `launch` in the same bar never heard (found by `cue_spec`).
 - Cue players are named `:"name/cue"` (like armed monitors' `:"name/live"`): MAIN 0, CUE 1.  So a cued replacement for a playing `:bass` runs next to it, and listings show both.  `mute :bass` mutes `:"bass/cue"` too; solos don't silence cue players (a solo is about MAIN).
 - MAIN 0 also zeroes everything the player sends: buses, `to:`, readers.  So renders, stems, `rec_audio`, taps, and the UI's mix ignore CUE (cue players add exactly nothing to MAIN).

@@ -57,9 +57,9 @@ module MB
         # A player name's routing: +to+ is the bus its main out feeds (nil
         # for the master), +sends+ a Hash from bus name to the send's level
         # knob (a GraphNode::Knob), +trigger+ true for a trigger track (a sidechain
-        # line: heard by readers only, never mixed; see #route).
-        # +level+ is a trigger track's level knob (see #trigger_level_name).
-        Route = Struct.new(:to, :sends, :trigger, :level, keyword_init: true)
+        # line: heard by readers only, never mixed; see #route).  Its level
+        # is the player's level knob, like any player's (Faders).
+        Route = Struct.new(:to, :sends, :trigger, keyword_init: true)
 
         # Undo subjects: a bus's chain, and one send of a player name.
         BusSubject = Data.define(:name)
@@ -172,14 +172,6 @@ module MB
           @mutex.synchronize { route_of(name)&.trigger } || false
         end
 
-        # The name of trigger track +name+'s level knob: :"pump/level" (0..1,
-        # default 1; see #route).  `turn :"pump/level", 0` stops the pump
-        # (journaled, undoable, exact in takes); scenes and sections take
-        # `"pump/level": 0` like any knob value.
-        def trigger_level_name(name)
-          :"#{name}/level"
-        end
-
         # The shape a trigger track was defined with (SidechainMethods
         # #sidechain's +shape:+; nil for a patch block), for warnings.
         def trigger_shape(name)
@@ -258,17 +250,16 @@ module MB
 
           old = nil
           dropped = nil
-          # A trigger track's level: a Session knob (turn, scenes, sections,
-          # undo, and takes as for any knob), made before the routes lock
-          level_knob = trigger ? (knob(trigger_level_name(name), 1.0, range: 0.0..1.0) or return nil) : nil
+          # A trigger track's level (Faders): `level :pump, 0` stops the
+          # pump, so it is made with the route (before the routes lock)
+          (fader!(name) or return nil) if trigger
           @mutex.synchronize {
             old = @routes[name]
-            r = Route.new(to: old&.to, sends: (old&.sends || {}).dup, trigger: old&.trigger || false, level: old&.level)
+            r = Route.new(to: old&.to, sends: (old&.sends || {}).dup, trigger: old&.trigger || false)
             r.to = to unless to == :keep
             r.sends = knobs if knobs
             unless trigger.nil?
               r.trigger = trigger
-              r.level = trigger ? level_knob : nil
               if trigger
                 dropped = r.sends.values
                 r.to = nil
@@ -909,15 +900,11 @@ module MB
         end
 
         # A trigger track's buffer (see #route's +trigger:+) goes only to its
-        # readers' signal (after its fades and times its level knob, before
-        # its mute, like any player's): no mix, bus, send, stem, or meter.
+        # readers' signal (after its fades and level, before its mute, like
+        # any player's): no mix, bus, send, stem, or meter.
         def deliver_trigger(p, route, data, offset, frames, fade)
           return unless bus_tapped?(p.name)
           tap = bus_signal_buffer(p.name)
-          level = route.level&.read(@frame + offset, frames)
-          unless level.nil? || (level.is_a?(Numeric) && level == 1)
-            fade = fade ? fade[0...frames] * level : level
-          end
           tap.each_with_index do |t, c|
             d = data[c % data.length]
             next if d.nil? || d.empty?

@@ -434,7 +434,7 @@ module MB
             next
           end
           kind = @session.names.kind(k)
-          if kind == :knob || control_value?(k, v)
+          if kind == :knob || control_value?(k, v) || @session.track_level_name?(k)
             check_knob_value(name, k, v) or return nil
             next
           end
@@ -494,7 +494,7 @@ module MB
           return MB::Sound.live_error(ArgumentError.new("No scene #{name.inspect}#{known.empty? ? '' : " (scenes: #{known.map(&:inspect).join(', ')})"}"))
         end
 
-        knob_values = sc.values.select { |k, v| KEY_VALUES.include?(k) || tempo_value?(k) || @session.names.kind(k) == :knob || control_value?(k, v) }
+        knob_values = sc.values.select { |k, v| KEY_VALUES.include?(k) || tempo_value?(k) || @session.names.kind(k) == :knob || control_value?(k, v) || @session.track_level_name?(k) }
         unknown = sc.values.keys - tracks.keys - knob_values.keys
         unless unknown.empty?
           why = @mutex.synchronize { unknown.filter_map { |u| "#{u.inspect}: #{@failed_tracks[u]}" if @failed_tracks[u] } }
@@ -565,6 +565,8 @@ module MB
           arm = arms[tr.name]
           state += arm.monitoring? ? ', armed' : ', armed (no monitor)' if arm
           state = "trigger, #{state}" if tr.trigger
+          k = @session.fader(tr.name)
+          state += ", level #{@session.level(tr.name).inspect}" if k && k.value.to_f != 1
           what = tr.patch? ? (tr.clip ? name_of(tr.clip) : 'no clip') : 'graph'
           lead = tr.ahead && !tr.ahead.zero? ? " #{tr.ahead > 0 ? 'ahead' : 'behind'} #{MB::M.sigfigs((tr.ahead.abs / @session.transport.whole_notes_per_second * 1000).to_f, 3)} ms" : ''
           lead += ' (attack capped)' if tr.capped

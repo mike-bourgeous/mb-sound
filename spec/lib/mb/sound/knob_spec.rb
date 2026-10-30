@@ -67,6 +67,10 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       expect(u.default).to eq(5.0)
       expect(u.clamp(-3)).to eq(-3.0)
       expect(u.to_ruby).to eq('knob :x, (0.0..1.0).at(5.0), clamp: false')
+      # (omnibus17: a plain knob at a Float that is an exact tenth of a dB
+      # printed as -6.db, which its plain range refused on load)
+      g = described_class::Spec.new(name: :g, default: -6.db.to_f, range: 0.0..4.0)
+      expect(g.to_ruby).to eq('knob :g, (0.0..4.0).at(0.5011872336272722)')
       expect(described_class::Spec.new(name: :cut, default: 800, range: 100.hz..8000.hz).to_ruby).to eq('knob :cut, (100.hz..8000.hz).at(800.hz)') # (units once, omnibus15)
       expect { described_class::Spec.new(name: :cut, default: 2.seconds, range: 100.hz..8000.hz) }.to raise_error(ArgumentError, /isn't a frequency|mixes/)
     end

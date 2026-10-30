@@ -190,7 +190,7 @@ RSpec.describe(MB::Sound::SidechainMethods) do
     end
 
     # ux-fix-1 (maintainer: "Context"): the track's name stands for its
-    # on/off level wherever a knob is meant (Session::Knobs#control_name)
+    # level wherever a knob is meant (Session::Knobs#control_name)
     it 'turn on and off by the track\'s own name in turn, scenes, sections, snapshots, and learn' do
       run(3 * 96000) { |ss|
         MB::Sound.sidechain(:pump, line, on: :now)
@@ -216,7 +216,7 @@ RSpec.describe(MB::Sound::SidechainMethods) do
     it 'print a hint on mute (mute doesn\'t stop a pump) pointing to the level knob and stop' do
       MB::Sound::Session.with_context(session: session) do
         MB::Sound.sidechain(:pump, line)
-        expect { MB::Sound.mute(:pump) }.to output(/trigger track: .*turn :pump, 0 \(its on\/off level\) or stop :pump/).to_stdout
+        expect { MB::Sound.mute(:pump) }.to output(/trigger track: .*level :pump, 0 or stop :pump/).to_stdout
         expect { MB::Sound.unmute(:pump) }.not_to output.to_stdout
       end
     end

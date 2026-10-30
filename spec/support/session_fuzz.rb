@@ -246,6 +246,19 @@ module SessionFuzz
       lines << "at_bar(#{bar}, beat: 2) { bg :held, #{pick(rng, HELD)}, #{start} }"
       lines << "at_bar(#{bar}, beat: 4) { seek #{pick(rng, ["#{bar}", "#{bar}, 2", "#{bar}, 2.25", "#{bar}, 2.999"])} }"
     end
+    # (omnibus17) track levels (the strip's fader): set now, at a launch
+    # point, or over a ramp, and from a scene value (drawn last, so every
+    # seed keeps the song it made before)
+    if rng.rand < 0.35
+      t = pick(rng, names)
+      value = pick(rng, ['-6.db', '0.25', '0', '2.db'])
+      how = pick(rng, ['', ', over: 1/2r', ', over: 3.beats, on: :beat', ', on: :bar'])
+      lines << "at_bar(#{rng.rand(1..bars)}, beat: #{rng.rand(2..beats)}) { level :#{t}, #{value}#{how} }"
+      if rng.rand < 0.5
+        lines << "scene :lv, #{t}: #{pick(rng, ['-12.db', '[0.5, over: 1/4r]'])}, others: :keep"
+        lines << "at_bar(#{bars}, beat: 2) { go :lv }"
+      end
+    end
     Song.new(header: header, lines: lines, bars: bars)
   end
 

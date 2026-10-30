@@ -8,6 +8,7 @@ require_relative 'session/names'
 require_relative 'session/changes'
 require_relative 'session/fades'
 require_relative 'session/strip'
+require_relative 'session/faders'
 require_relative 'session/undo'
 require_relative 'session/master'
 require_relative 'session/tails'
@@ -73,6 +74,7 @@ module MB
       include Changes
       include Fades
       include Strip
+      include Faders
       include Undo
       include Master
       include Tails
@@ -352,6 +354,7 @@ module MB
 
         init_changes
         init_strip
+        init_faders
         init_undo
         init_knobs
         init_clocks
@@ -1726,7 +1729,11 @@ module MB
             end
           end
 
+          # The strip (contract K7): fade, then level (Faders), then
+          # mute/solo; readers hear it before the mute (+fade:+ below)
           fade = fade_ramp(p, base + offset, frames)
+          level = fader_levels(p, base + offset, frames)
+          fade = fade ? (level ? fade * level : fade) : level
           strip = ramp_levels(p, :strip_level, :strip_ramp, base + offset, frames)
           ramp = fade ? (strip ? fade * strip : fade) : strip
           # The route: CUE gets its share, MAIN the rest (see Cue)

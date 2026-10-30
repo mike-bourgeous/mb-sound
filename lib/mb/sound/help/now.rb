@@ -33,6 +33,8 @@ module MB
               flags = []
               flags << c(:warn, 'muted') if strip[:muted].include?(name)
               flags << c(:ok, 'solo') if strip[:soloed].include?(name)
+              k = tracks[name] ? nil : @s.fader(name) # (tracks list theirs in track_info)
+              flags << c(:key, "level #{@s.level(name).inspect}") if k && k.value.to_f != 1
               kind = tracks[name] ? "track #{tracks[name]}" : short(desc)
               out << "  #{pad(c(:name, name.inspect), 14)} #{kind[0, w - 30]} #{flags.join(' ')}"
             end

@@ -16,7 +16,7 @@ module MB
     #     sidechain(:hats, hat_line) { |c| tr808(c) }         # a sounding patch, never heard
     #     bass.compress(sidechain: :pump, threshold: -30.db)
     #     master { |mix| mix.duck(:pump, amount: -3.db) }
-    #     turn :pump, 0                                       # the pump off (its on/off level)
+    #     level :pump, 0                                      # the pump off (its level)
     #     sidechains                                          # lists them
     #
     # A trigger track is an Arrangement track (Session::Buses#route with
@@ -26,11 +26,12 @@ module MB
     # sends, stems, CUE, or recordings of the mix; readers (`duck(:pump)`,
     # `bus(:pump)`, `compress(sidechain: :pump)`) hear it on the exact
     # sample at any buffer size, after its fades and before its mute, like
-    # any sidechain source, times its level knob :"pump/level" (0..1; see
-    # Session::Buses#trigger_level_name), which the track's name stands for
-    # where a knob is meant (Session::Knobs#control_name): `turn :pump, 0`
-    # stops the pump, journaled and undoable, and scenes and sections take
-    # `pump: 0` (a number: the level; a clip: the line) and `pump: 1`.
+    # any sidechain source, times its level (the track's fader, the knob
+    # :"pump/level" like every track's; Session::Faders), which the track's
+    # name stands for where a knob is meant (Session::Knobs#control_name):
+    # `level :pump, 0` (or `turn :pump, 0`) stops the pump, journaled and
+    # undoable, and scenes and sections take `pump: 0` (a number: the
+    # level; a clip: the line) and `pump: 1`.
     # Mute doesn't (readers hear sources before their mute), so `mute
     # :pump` prints a hint.
     module SidechainMethods
@@ -63,8 +64,8 @@ module MB
       # key: `nudge: -5.ms` ducks just before the beat).  Also available as
       # #pump, #trigger_track, and #trigger_line (`key` is the session key).
       #
-      # Its level is the knob :"name/level" (0..1, default 1): turn it to 0
-      # to stop the pump (the trigger then never reaches a duck's
+      # Its level (Session::Faders; default 1): `level :name, 0` stops the
+      # pump (the trigger then never reaches a duck's
       # threshold), or `stop :name`.
       def sidechain(name, source = nil, shape: nil, q: nil, fade: nil, nudge: nil, at: nil, on: nil, in: nil, &patch)
         point = LaunchPoint.of(binding) or return nil
@@ -115,7 +116,7 @@ module MB
         keys = names.flatten.select { |n| n.is_a?(Symbol) && s.trigger_track?(n) }
         return nil if keys.empty?
         n = keys.first
-        "#{keys.map(&:inspect).join(', ')} #{keys.length == 1 ? 'is a trigger track' : 'are trigger tracks'}: mute doesn't stop a pump (ducks read it before its mute); turn #{n.inspect}, 0 (its on/off level) or stop #{n.inspect}"
+        "#{keys.map(&:inspect).join(', ')} #{keys.length == 1 ? 'is a trigger track' : 'are trigger tracks'}: mute doesn't stop a pump (ducks read it before its mute); level #{n.inspect}, 0 or stop #{n.inspect}"
       end
 
       # The patch block for +shape+ (see #sidechain).

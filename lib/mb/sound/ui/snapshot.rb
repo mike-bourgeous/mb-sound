@@ -107,9 +107,10 @@ module MB
 
       # A track: +name+, +q+ (its launch quantization, as text), +clip+ (the
       # clip's name, or "graph"), +armed+, +trigger+ (true for a trigger track,
-      # heard only by sidechains; SidechainMethods#sidechain).
-      TrackInfo = Data.define(:name, :q, :clip, :armed, :trigger) do
-        def initialize(name:, q:, clip:, armed:, trigger: false)
+      # heard only by sidechains; SidechainMethods#sidechain), +level+ (its
+      # level in dB, a Float, when set away from unity; Session::Faders).
+      TrackInfo = Data.define(:name, :q, :clip, :armed, :trigger, :level) do
+        def initialize(name:, q:, clip:, armed:, trigger: false, level: nil)
           super
         end
       end
