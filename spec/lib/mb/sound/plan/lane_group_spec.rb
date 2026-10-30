@@ -95,11 +95,16 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
     expect(s.skippable_lanes).not_to be_empty
   end
 
+  # (a FIR filter: long memory without an idle check, NodeTraits; delays
+  # answer from their lines since node-traits-1, so they no longer keep
+  # lanes awake)
+  LANE_GROUP_FIR = -> { MB::Sound::Filter::FIR.new({ 0 => 1, 20_000 => 1, 24_000 => 0 }, filter_length: 16) }
+
   it 'groups lanes that are never skipped anyway (long-memory nodes) even with unfused work' do
     MB::Sound::Plan.lanes = true
     MB::Sound.seed(0)
     s = MB::Sound.synth('spec/test_data/c_major.mid', voices: 3) { |v|
-      (v.hz.saw.filter(:lowpass, cutoff: 900) * v.amp_env).proc { |x| x }.delay(0.001) * 0.5
+      (v.hz.saw.filter(:lowpass, cutoff: 900) * v.amp_env).proc { |x| x }.filter(LANE_GROUP_FIR.call) * 0.5
     }
     expect(s.skippable_lanes).to be_empty
     expect(s.lane_groups&.groups.to_a).not_to be_empty
@@ -114,7 +119,7 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       MB::Sound.seed(0)
       MB::Sound.synth('spec/test_data/dense_modulated.mid', voices: 3, spares: 1) { |v|
         f = v.freq
-        (f.tone.saw * v.amp_env).proc { |x| x } * 0.1 + (f / 1000.constant).delay(0.001) * 0.01
+        (f.tone.saw * v.amp_env).proc { |x| x } * 0.1 + (f / 1000.constant).filter(LANE_GROUP_FIR.call) * 0.01
       }
     }
     s = build.(true)
