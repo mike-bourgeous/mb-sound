@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 5,
+graph 7,
   name: "organ_reso",
   kind: :synth,
-  saved: "2026-10-25T21:25:48Z",
-  mb_sound: "0.12.0.usegit (269e6153)",
+  saved: "2026-10-30T04:11:57Z",
+  mb_sound: "0.12.0.usegit (e04cc138)",
   from: "bin/synths/wave_voices.rb",
   description: "Wave voice :organ_reso: Resonant organ for chords and comping: drawbar harmonics plus SYNTH 3 an octave up through a resonant, nearly closed 4-pole that blips open on each key; grit 0..1 holds the oscillators at the Ensoniq DOC's 38.46 kHz (from bin/synths/wave_voices.rb: the research-sq80 prototype voice of 2026-10-06, rebuilt from library nodes in protos-1, 2026-10-23)",
   options: { patch: :organ_reso, voices: nil }

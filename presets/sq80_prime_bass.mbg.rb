@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 5,
+graph 7,
   name: "sq80_prime_bass",
   kind: :synth,
-  saved: "2026-10-24T18:50:13Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-30T04:12:39Z",
+  mb_sound: "0.12.0.usegit (e04cc138)",
   from: "bin/synths/sq80_voice.rb",
   description: "SQ-80 voice :prime_bass: A bass: PRIME an octave down and SYNTH 3 without vibrato, input drive, a snappy filter envelope that velocity opens. (from bin/synths/sq80_voice.rb: the voice since 2026-10-07, patches since sq80-lib-1, 2026-10-17)",
   options: { patch: :prime_bass, voices: nil, drive_mode: nil, drive: nil, chop: nil, flutter: nil, second_release: false }

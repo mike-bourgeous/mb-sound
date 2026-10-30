@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 5,
+graph 7,
   name: "sq80_classic",
   kind: :synth,
-  saved: "2026-10-24T18:50:05Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-30T04:12:11Z",
+  mb_sound: "0.12.0.usegit (e04cc138)",
   from: "bin/synths/sq80_voice.rb",
   description: "SQ-80 voice :classic: The voice as first built (bin/synths/sq80_voice.rb), an octave down: a formant wave, a SYNTH 3-style wave a few cents up, and a blipped PRIME an octave below them into a driven four-pole; 32nd-note filter chop and poly pressure flutter. (from bin/synths/sq80_voice.rb: the voice since 2026-10-07, patches since sq80-lib-1, 2026-10-17)",
   options: { patch: :classic, voices: nil, drive_mode: nil, drive: nil, second_release: false }

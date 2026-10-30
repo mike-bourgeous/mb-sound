@@ -1,10 +1,10 @@
 # mb-sound set document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 5,
+graph 7,
   name: "night_bus",
   kind: :set,
-  saved: "2026-10-24T18:50:17Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-30T04:12:50Z",
+  mb_sound: "0.12.0.usegit (e04cc138)",
   from: "bin/songs/night_bus_flow.rb",
   description: "Set :night_bus from bin/songs/night_bus_flow.rb (\"Night Bus: Last Stop\", tech house at 126 BPM in A minor): drums, sub, bass, hooks, plucks, pad, riser; scenes intro..outro; knobs :cut, :space, :echo, :air, :morph; its flow (play_form doc.form).  `demo` loads it."
 knob :cut, (200.hz..6000.hz).at(700.hz)
@@ -175,7 +175,7 @@ track(:pad, lead: 0.5.attack) { |clip|
   }.softclip(0.4, 0.9)
   stereo(fx, fx.delay(0.012)) * 0.25
 }
-track(:riser, fade: 1r/8) { |_clip|
+track(:riser, fade: 1/8r) { |_clip|
   noise(seed: drawn_seed(1255200654889945937)).filter(:highpass, cutoff: tween([250, 8000], 4.bars, log: true, loop: false), quality: 3) * tween([0.06, 0.12], 4.bars, loop: false)
 }
 scene :intro, drums: kit_intro

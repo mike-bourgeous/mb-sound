@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 5,
+graph 7,
   name: "sq80_glass",
   kind: :synth,
-  saved: "2026-10-24T18:50:16Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-30T04:12:47Z",
+  mb_sound: "0.12.0.usegit (e04cc138)",
   from: "bin/synths/sq80_voice.rb",
   description: "SQ-80 voice :glass: Glassy keys: SYNTH 3 an octave up over a little formant and the PRIME blip, decaying to nothing with a second-release tail. (from bin/synths/sq80_voice.rb: the voice since 2026-10-07, patches since sq80-lib-1, 2026-10-17)",
   options: { patch: :glass, voices: nil, drive_mode: nil, drive: nil, chop: nil, second_release: false }

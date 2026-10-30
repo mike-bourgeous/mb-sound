@@ -218,7 +218,7 @@ module MB
       # 2026-10-18: never mixed): note lengths (1.n8, 3.n16, 1.n12) when
       # every key is exactly on the grid at +per_sample+ whole notes per
       # frame, else milliseconds when every key is a whole millisecond at
-      # +rate+, else exact seconds (`(1r/60).seconds`).  0 stays 0.
+      # +rate+, else exact seconds (`(1/60r).seconds`).  0 stays 0.
       def self.times_text(frames, per_sample, rate)
         rate = rate.to_r
         wns = frames.map { |f| f * per_sample.to_r }

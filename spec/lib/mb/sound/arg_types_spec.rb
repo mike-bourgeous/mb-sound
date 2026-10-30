@@ -130,7 +130,7 @@ RSpec.describe(MB::Sound::ArgTypes) do
     it 'prints every preposition as clocked' do
       clip = receiver_for(:clip)
       [clip % 1.5.seconds, clip.at(5/4r), clip.over(1.5.seconds), clip.clock(138.75.bpm), clip.clocked_at(:tide)].each do |c|
-        expect(c.notes.gate.to_ruby).to match(/\.clocked\((1\.5\.seconds|5r\/4|138\.75\.bpm|:tide)\)\.notes\.gate/)
+        expect(c.notes.gate.to_ruby).to match(/\.clocked\((1\.5\.seconds|5\/4r|138\.75\.bpm|:tide)\)\.notes\.gate/)
       end
     end
   end

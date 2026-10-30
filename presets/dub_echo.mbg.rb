@@ -1,11 +1,11 @@
 # mb-sound rack document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 5,
+graph 7,
   name: "dub_echo",
   kind: :effect,
   rack: :arack,
-  saved: "2026-10-24T18:50:16Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-30T04:12:47Z",
+  mb_sound: "0.12.0.usegit (e04cc138)",
   from: "bin/songs/rack_demo.rb",
   description: "Rack :dub_echo from bin/songs/rack_demo.rb (racks-r2, 2026-10-17): dub echoes of the input, knob :space (echo level and feedback) and :tone (the echoes' lowpass, swinging slowly around the knob)"
 inputs sig: :audio

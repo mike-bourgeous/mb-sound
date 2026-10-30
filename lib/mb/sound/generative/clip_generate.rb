@@ -37,7 +37,7 @@ module MB
         #
         #     notes = scale(:minor, :a).notes(A3..A5)
         #     arp = Clip.generate(1.bar, values: notes) { |cycle, dice|
-        #       Array.new(8) { |i| [i * 1r/8, 1r/16, dice.pick(notes, i), 0.7] }
+        #       Array.new(8) { |i| [i * 1/8r, 1/16r, dice.pick(notes, i), 0.7] }
         #     }
         #
         # +params+ (G3) are options the block reads as keywords, decided
@@ -47,7 +47,7 @@ module MB
         #
         #     knob :busy, 0.3
         #     Clip.generate(1.bar, busy: knob(:busy)) { |cycle, dice, busy:|
-        #       Array.new(16) { |i| [i * 1r/16, 1r/16, A3, 0.7] if dice.rand(:on, i) < busy }.compact
+        #       Array.new(16) { |i| [i * 1/16r, 1/16r, A3, 0.7] if dice.rand(:on, i) < busy }.compact
         #     }
         def generate(length, values: nil, seed: nil, name: nil, align: :timeline, reach: nil, loop: true, events: nil, lead: nil, params: {}, &block)
           length = Generative.length_of(length, :length, divisions: false)

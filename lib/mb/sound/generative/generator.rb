@@ -165,7 +165,7 @@ module MB
           case t
           when Sequence::Duration then t.whole_notes
           when Integer, Rational then t.to_r
-          else raise ArgumentError, "#{name} made a time of #{t.inspect}: event times are whole notes (Rationals, like 1r/8, or Durations, like 1.n8)"
+          else raise ArgumentError, "#{name} made a time of #{t.inspect}: event times are whole notes (Rationals, like 1/8r, or Durations, like 1.n8)"
           end
         end
 

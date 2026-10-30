@@ -42,7 +42,7 @@
 #     turn :energy, 0 => 0.1, 4.bars => 0.95     # a gesture: the beat grows from nothing
 #     knob :busy, 0.3
 #     bg :h, tr909(generate(1.bar, busy: knob(:busy), values: [F2s]) { |cycle, dice, busy:|
-#       16.times.filter_map { |i| [i * 1r/16, 1r/32, F2s, 0.6] if dice.rand(:hat, i) < busy }
+#       16.times.filter_map { |i| [i * 1/16r, 1/32r, F2s, 0.6] if dice.rand(:hat, i) < busy }
 #     })
 
 require 'bundler/setup'

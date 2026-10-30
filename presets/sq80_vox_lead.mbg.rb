@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 5,
+graph 7,
   name: "sq80_vox_lead",
   kind: :synth,
-  saved: "2026-10-24T18:50:11Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-30T04:12:32Z",
+  mb_sound: "0.12.0.usegit (e04cc138)",
   from: "bin/synths/sq80_voice.rb",
   description: "SQ-80 voice :vox_lead: A vowel lead: the formant wave up front with a slightly flat SYNTH 3, input drive, deeper delayed vibrato. (from bin/synths/sq80_voice.rb: the voice since 2026-10-07, patches since sq80-lib-1, 2026-10-17)",
   options: { patch: :vox_lead, voices: nil, drive_mode: nil, drive: nil, chop: nil, second_release: false }

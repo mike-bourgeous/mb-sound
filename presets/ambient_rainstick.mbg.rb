@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 5,
+graph 7,
   name: "ambient_rainstick",
   kind: :synth,
-  saved: "2026-10-28T06:22:16Z",
-  mb_sound: "0.12.0.usegit (b7efc32b)",
+  saved: "2026-10-30T04:10:32Z",
+  mb_sound: "0.12.0.usegit (e04cc138)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :rainstick from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
   options: { patch: :rainstick, decay: nil, attack: nil, release: nil, space: 0.5, wear: 0.6, tune: -7.0, spread: 0.7 }

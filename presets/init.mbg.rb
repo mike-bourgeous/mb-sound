@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 5,
+graph 7,
   name: "init",
   kind: :synth,
-  saved: "2026-10-29T17:42:22Z",
-  mb_sound: "0.12.0.usegit (08f4759c)",
+  saved: "2026-10-30T04:11:42Z",
+  mb_sound: "0.12.0.usegit (e04cc138)",
   from: "bin/synths/init_voice.rb",
   description: "Init: the blank voice to start a sound from: two morphing oscillators (sine, triangle, square, saw), a mix, optional FM, AM, and hard sync of OSC2 by OSC1 (each off by default), a four-pole lowpass with its envelope, an amp ADSR, and glide; every number a knob (from bin/synths/init_voice.rb, sound-design-2, 2026-10-29)",
   options: { patch: :init, voices: 8 }
