@@ -77,8 +77,8 @@ RSpec.describe(MB::Sound::GraphNode::DelayNetwork) do
       la, = render_outputs([a], [128], 48000)
       # The line gets 0.5^n at 100 n; 0.5^14 (sample 1400) is the last
       # write above -90 dB, then one more delay plus the margin
-      expect(0.5**14).to be > MB::Sound::RingOut::THRESHOLD
-      expect(0.5**15).to be < MB::Sound::RingOut::THRESHOLD
+      expect(0.5**14).to be > MB::Sound::QuietRun::QUIET
+      expect(0.5**15).to be < MB::Sound::QuietRun::QUIET
       expect(la.length).to eq(1401 + 100 + MB::Sound::DelayLine::MARGIN)
     end
 

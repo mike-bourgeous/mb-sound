@@ -387,7 +387,7 @@ module MB
       # renders it at unity master gain (0 dB, not the -10 dB session
       # default).  File inputs ring out, so after the file ends (and
       # repeats, with --repeat), the effect keeps playing until its output
-      # has been quiet for Session::TAIL_QUIET_SECONDS.
+      # has been quiet for QuietRun::QUIET_SECONDS.
       def run_effect(&block)
         check_inputs
         path = @options[:input]
@@ -423,7 +423,7 @@ module MB
       # (a MB::Sound::Notes; see below) and the parameters, then plays or
       # renders it.  MIDI files ring out, so after the last event, the synth
       # keeps playing until its output has been quiet for
-      # Session::TAIL_QUIET_SECONDS (see Synth#ended? and Notes#ended?).
+      # QuietRun::QUIET_SECONDS (see Synth#ended? and Notes#ended?).
       #
       # The MIDI comes from a MIDI file (a non-audio argument or --input), or
       # from live input (a port given the same way, connected by part of its
@@ -1296,21 +1296,20 @@ module MB
 
       # Stops the script's player once every node in +ringdowns+ has ended
       # (see #ending_nodes) and the mix has been quiet for
-      # Session::TAIL_QUIET_SECONDS, or fades it out over
+      # QuietRun::QUIET_SECONDS, or fades it out over
       # Session::TAIL_FADE_SECONDS after Session::MAX_TAIL_SECONDS of tail.
       # Does nothing if +ringdowns+ is empty (e.g. live input).
       def stop_after_ringdown(session, ringdowns)
         return if ringdowns.empty?
 
         rate = session.output.sample_rate
-        quiet = 0
+        quiet = QuietRun.new(QuietRun::QUIET_SECONDS * rate, mode: :buffer)
         tail = 0
         tap = nil
         tap = session.add_tap { |mix|
           next unless ringdowns.all?(&:ended?)
           tail += mix[0].length
-          quiet = session.quiet?(mix) ? quiet + mix[0].length : 0
-          if quiet >= Session::TAIL_QUIET_SECONDS * rate
+          if quiet.advance_buffer(mix[0].length, !session.quiet?(mix))
             session.remove(:script, fade: 0)
             session.remove_tap(tap)
           elsif tail >= Session::MAX_TAIL_SECONDS * rate

@@ -12,11 +12,8 @@ module MB
       # MAX_TAIL_SECONDS).  A +:fade+ crossfades the two chains' outputs
       # instead, both fed the mix; 0 cuts over on the switch sample.
       module Master
-        # Output level below which a tail counts as silent (-90dB).
-        TAIL_THRESHOLD = 10 ** (-90 / 20.0)
-
-        # How long a tail must stay below TAIL_THRESHOLD to count as ended.
-        TAIL_QUIET_SECONDS = 1
+        # (A tail counts as ended once it has stayed below QuietRun::QUIET,
+        # -90 dB, for QuietRun::QUIET_SECONDS.)
 
         # The longest a replaced chain may spill over, or #render may add
         # after the last player stops.
@@ -62,7 +59,7 @@ module MB
         Chain = Struct.new(
           :block, :source, :nodes, :timeline_nodes, :description,
           :start, :launch, :started, :mode, :fade, :feeding, :gain, :gain_step,
-          :tail_frames, :quiet_frames, :slow_warned, :loads,
+          :tail_frames, :quiet, :slow_warned, :loads,
           :input_from, :input_until, :ramp_from, :skip, :read_to, :cpu,
           :preset, :mastering, :capture, :rng,
           keyword_init: true
@@ -246,9 +243,9 @@ module MB
           @mutex.synchronize { !!@master_chains&.any? { |c| !c.bypass? } }
         end
 
-        # Returns true if every channel of +data+ is below TAIL_THRESHOLD.
+        # Returns true if every channel of +data+ is below QuietRun::QUIET.
         def quiet?(data)
-          data.all? { |d| d.empty? || abs_peak(d) < TAIL_THRESHOLD } # (no Numo temporaries; Tails#abs_peak)
+          data.all? { |d| d.empty? || abs_peak(d) < QuietRun::QUIET } # (no Numo temporaries; Tails#abs_peak)
         end
 
         private
@@ -286,7 +283,7 @@ module MB
             gain: 1.0,
             gain_step: 0.0,
             tail_frames: 0,
-            quiet_frames: 0,
+            quiet: QuietRun.new(QuietRun::QUIET_SECONDS * output.sample_rate, mode: :buffer),
             slow_warned: false,
             preset: preset,
             rng: rng
@@ -613,7 +610,7 @@ module MB
         # has been quiet, fading it out if it rings too long.
         def track_master_tail(c, data, count, rate)
           c.tail_frames += count
-          c.quiet_frames = quiet?(data) ? c.quiet_frames + count : 0
+          c.quiet.advance_buffer(count, !quiet?(data))
 
           if c.tail_frames >= MAX_TAIL_SECONDS * rate && c.gain_step >= 0
             c.gain_step = -1.0 / (TAIL_FADE_SECONDS * rate)
@@ -627,7 +624,7 @@ module MB
           return false if c.equal?(list.last) || !c.started
 
           faded = c.gain <= 0 && c.gain_step < 0
-          silent = !c.feeding && (c.bypass? || c.quiet_frames >= TAIL_QUIET_SECONDS * output.sample_rate)
+          silent = !c.feeding && (c.bypass? || c.quiet.done?)
           faded || silent
         end
 

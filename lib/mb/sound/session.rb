@@ -1676,12 +1676,12 @@ module MB
         # revived graph (a scene relaunching the track) continues from the
         # same state at any buffer size (omnibus13: kits revived after a
         # ring-out differed by buffer size, SessionFuzz seed 1194)
-        quiet = ringing && p.ring.stop_frame ? (RING_QUIET_SECONDS * rate).round : nil
+        quiet = ringing && p.ring.stop_frame ? p.ring.quiet : nil
         total = frames
         while true # (not loop do: its break and return allocated an imemo per player per buffer)
           frames = total
           if quiet
-            ending = p.ring.quiet_from + quiet - base
+            ending = quiet.ends_at - base
             if ending <= offset
               note_rung_out(p, base + offset, rate)
               return retire(p, keep: true)
@@ -1721,7 +1721,7 @@ module MB
           if quiet
             cap_ring(p, base + offset + frames, rate)
             keep = follow_ring(p, data, base + offset, frames, rate)
-            if keep < frames || p.ring.quiet_from + quiet <= base + offset + frames
+            if keep < frames || quiet.ends_at <= base + offset + frames
               rung_out = true
               frames = keep
               if frames == 0

@@ -24,7 +24,7 @@ module MB
       #
       # When every input has ended (nil or a short buffer), the network
       # rings out: silence goes in and the taps play until what the lines
-      # get back has stayed below -90 dB (MB::Sound::RingOut) for the
+      # get back has stayed below -90 dB (MB::Sound::QuietRun#advance) for the
       # longest delay plus the interpolation reach, ending on that exact
       # sample (with no feedback, one longest delay after the input, as for
       # MultitapDelay).  A loop gain of 1 or more never ends.
@@ -370,7 +370,7 @@ module MB
         # on came after every input ended): returns nil to keep going, or
         # the number of samples to keep.
         def ring_out(n, start)
-          @ring ||= MB::Sound::RingOut.new
+          @ring ||= MB::Sound::QuietRun.new(0) # (the ring-out form: QuietRun#advance)
           len = n - start
           return nil if len <= 0
 

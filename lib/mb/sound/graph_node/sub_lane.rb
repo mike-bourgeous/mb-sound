@@ -194,7 +194,8 @@ module MB
           @analysis = nil
           @asleep = false
           @ended = false
-          @cell_loud = false
+          # (a run of exactly silent cells of the synth's skip grid)
+          @sleep_run = QuietRun.new(Synth::SKIP_GRID, loud: QuietRun::NONZERO_LOUD, mode: :cells, grid: Synth::SKIP_GRID)
           @generation = nil
           @reader = nil
           @serial = nil
@@ -419,7 +420,7 @@ module MB
               next if wake.nil?
 
               @asleep = false
-              @cell_loud = false
+              @sleep_run.reset(pos + o)
               @wakes += 1
             end
             catch_up(a)
@@ -567,12 +568,8 @@ module MB
         # otherwise split every buffer crossing a grid point, which takes its
         # Tees out of lockstep).
         def sleep_candidate(a, pos, o, count)
-          grid = Synth::SKIP_GRID
-          g = ((pos + o) / grid + 1) * grid - pos
-          return count if g > count
-
-          g += grid if @cell_loud
-          return count if g > count
+          g = @sleep_run.split_point(pos, o, count)
+          return count if g >= count
 
           if a[:idle].any? { |n| n.respond_to?(:sustaining?) && n.sustaining? }
             from = @clock_lag == 0 ? @reader.cursor : @lane.advance(@reader.cursor, @clock_lag, @rate)
@@ -582,43 +579,23 @@ module MB
           g
         end
 
-        # Notes whether the output was nonzero in each grid cell, and falls
-        # asleep at a grid point ending a silent cell with every envelope and
-        # voice idle (only at the end of the buffers, where #sleep_candidate
-        # split the block).
+        # Moves the run of exactly silent grid cells past the output +bufs+
+        # (from synth sample +start+), and falls asleep at a grid point
+        # ending a silent cell with every idle-checked node idle (only at
+        # the end of the buffers, where #sleep_candidate split the block).
         def track_cells(a, bufs, start)
-          grid = Synth::SKIP_GRID
-          len = bufs[0].length
-          # (the usual awake case: already loud, no grid point reached)
-          return if @cell_loud && start + len < (start / grid + 1) * grid
-
-          i = 0
-          while i < len
-            g = (start + i) / grid * grid + grid
-            stop = MB::M.min(g - start, len)
-            @cell_loud ||= bufs.any? { |b| nonzero?(i == 0 && stop == len ? b : b[i...stop]) }
-            if start + stop == g
-              silent = !@cell_loud
-              @cell_loud = false
-              if silent && stop == len && NodeTraits.all_idle?(a[:idle])
-                @asleep = true
-                @generation = @lane.generation
-              end
-            end
-            i = stop
+          run = @sleep_run
+          c = 0
+          while c < bufs.length
+            b = bufs[c]
+            run.track(b, start) unless b.equal?(@zeros)
+            c += 1
           end
-        end
 
-        def nonzero?(b)
-          return false if b.equal?(@zeros)
-
-          r = (@range ||= [0.0, 0.0])
-          unless MB::Sound::FastArithmetic.min_max(b, r)
-            b = b.abs if b.is_a?(Numo::SComplex) || b.is_a?(Numo::DComplex)
-            r[0] = b.min.to_f
-            r[1] = b.max.to_f
+          if run.sleep_due?(start + bufs[0].length) && NodeTraits.all_idle?(a[:idle])
+            @asleep = true
+            @generation = @lane.generation
           end
-          r[0] != 0 || r[1] != 0
         end
 
         def zeros(count)

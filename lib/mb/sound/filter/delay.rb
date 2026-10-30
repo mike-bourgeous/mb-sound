@@ -351,12 +351,12 @@ module MB
         # #process once its source ends): processes +count+ samples of
         # silence and returns the output, shortened to end on the exact
         # sample where the delay line has held only silence (below -90 dB,
-        # see MB::Sound::RingOut) for the longest delay plus the
+        # see MB::Sound::QuietRun#advance) for the longest delay plus the
         # interpolation reach, then nil.  A plain delay plays its last echo;
         # with feedback, the repeats decay away.  A loop gain of 1 or more
         # never ends.
         def ring_out(count)
-          @ring ||= MB::Sound::RingOut.new
+          @ring ||= MB::Sound::QuietRun.new(0) # (the ring-out form: QuietRun#advance)
           return nil if @ring.done?
 
           @ring_zeros = Numo::SFloat.zeros(count) if @ring_zeros.nil? || @ring_zeros.length != count

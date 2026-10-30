@@ -137,7 +137,7 @@ RSpec.describe('render path code guards') do
   end
 
   # `0.5 < -90.db` goes through Decibels#coerce, an Array per comparison
-  # (alloc-2: Synth::QUIET_GAIN).  Render paths compare Floats.  A name on
+  # (alloc-2: Synth::QUIET, now QuietRun::QUIET).  Render paths compare Floats.  A name on
   # the right of a comparison counts if it is a Decibels constant: defined
   # as one in the same file (unqualified), or resolving to one (X::NAME).
   it 'compares no Decibels constant on the right of a comparison' do
@@ -159,7 +159,7 @@ RSpec.describe('render path code guards') do
       }
     }
     expect(found).to eq([]), "Float compared with a Decibels constant (compare with its #to_f, e.g. a Float constant):\n#{report(found)}"
-    expect(MB::Sound::Synth::QUIET).to be_a(MB::Sound::Decibels) # (the scan's premise)
+    expect(MB::Sound::Session::SafetyLimiter::SAFETY_CEILING).to be_a(MB::Sound::Decibels) # (the scan's premise)
     expect(0.6 < -6.db).to eq(false) # (still works, through coerce)
   end
 

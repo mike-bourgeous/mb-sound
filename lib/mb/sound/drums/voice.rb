@@ -30,18 +30,15 @@ module MB
       # metal bank) are still read while skipped.
       class Voice
         include GraphNode
+        # (its idle sleeping state starts fresh in a rebuilt graph)
         node_traits memory: :short, carry: :fresh
 
-        # Below this peak (-90 dB) a voice counts as quiet (for ending).
-        QUIET = 10 ** (-90 / 20.0)
-
-        # How long a voice must stay quiet after its sources ended.
+        # How long a voice must stay below QuietRun::QUIET (-90 dB) after its
+        # sources ended (for ending).
         QUIET_TIME = 0.1
 
-        # Below this peak (-120 dB) a voice counts as silent (for skipping).
-        SILENCE = 1e-6
-
-        # How long a voice must stay silent before it is skipped.
+        # How long a voice must stay within QuietRun::SILENCE (-120 dB)
+        # before it is skipped.
         SLEEP_TIME = 0.05
 
         # Hands one buffer of a source the Voice read to the voice's graph.
@@ -118,10 +115,10 @@ module MB
           @notes = Array(notes).freeze
           @knobs = knobs.dup.freeze
           @sample_rate = sample_rate.to_f
-          @quiet_samples = 0
           @position = 0
-          @silent_cells = 0
-          @cell_loud = false
+          # (see #check_end and #sample_skipping)
+          @end_run = QuietRun.new(QUIET_TIME * @sample_rate, mode: :buffer)
+          @sleep_run = QuietRun.new(Synth::SKIP_GRID, loud: QuietRun::SILENCE_LOUD, mode: :cells, grid: Synth::SKIP_GRID)
           @sleeping = false
           @out = nil
           @range = [0.0, 0.0]
@@ -192,6 +189,7 @@ module MB
           @graph.sample_rate = rate
           @inputs.each { |src, tap| src.sample_rate = rate; tap.sample_rate = rate }
           @sample_rate = rate.to_f
+          @end_run.window = QUIET_TIME * @sample_rate
           self
         end
 
@@ -208,18 +206,13 @@ module MB
         private
 
         # Returns +buf+, or nil once the sources have ended and the voice has
-        # been quiet for QUIET_TIME.
+        # been quiet for QUIET_TIME (whole buffers: QuietRun's :buffer mode).
         def check_end(buf)
           return buf if @notes.empty? || !@notes.all?(&:ended?)
 
-          if buf.abs.max < QUIET
-            @quiet_samples += buf.length
-            if @quiet_samples >= QUIET_TIME * @sample_rate
-              @ended = true
-              return nil
-            end
-          else
-            @quiet_samples = 0
+          if @end_run.advance_buffer(buf.length, @end_run.loud?(buf))
+            @ended = true
+            return nil
           end
 
           buf
@@ -232,7 +225,8 @@ module MB
         # or wakes (a hit).  Returns nil if the graph ended.
         def sample_skipping(count, bufs)
           grid = MB::Sound::Synth::SKIP_GRID
-          need = (SLEEP_TIME * @sample_rate / grid).ceil
+          run = @sleep_run
+          run.window = (SLEEP_TIME * @sample_rate / grid).ceil * grid # (whole silent cells)
           pos = @position
           whole = nil
           o = 0
@@ -253,23 +247,12 @@ module MB
               next if hit.nil?
 
               @sleeping = false
-              @silent_cells = 0
-              @cell_loud = false
+              run.reset(pos + o)
             end
 
             # The earliest grid point where the voice could fall asleep
             # (cells not yet rendered might be silent)
-            stop = count
-            cells = @cell_loud ? -1 : @silent_cells
-            g = ((pos + o) / grid + 1) * grid - pos
-            while g <= count
-              cells += 1
-              if cells >= need
-                stop = g
-                break
-              end
-              g += grid
-            end
+            stop = run.split_point(pos, o, count)
 
             if o == 0 && stop == count
               b = @graph.sample(count)
@@ -283,7 +266,7 @@ module MB
             end
             raise "#{@node_type_name} gave #{b.length} samples, not #{stop - o}" if b.length != stop - o
 
-            track_cells(b, pos + o, grid, need)
+            track_cells(b, pos + o)
             if o == 0 && stop == count
               whole = b
             else
@@ -302,44 +285,16 @@ module MB
           @out
         end
 
-        # Updates the silent cell count (see #sample_skipping) for graph
-        # output +b+ starting at voice sample +start+, falling asleep at a
-        # grid point that ends +need+ silent cells.
-        def track_cells(b, start, grid, need)
-          i = 0
-          while i < b.length
-            g = (start + i) / grid * grid + grid
-            stop = [g - start, b.length].min
-            @cell_loud ||= i == 0 && stop == b.length ? loud?(b) : loud_range?(b, i, stop - i)
-            if start + stop == g
-              @silent_cells = @cell_loud ? 0 : @silent_cells + 1
-              @cell_loud = false
-              # Nodes with sound to come (a reversed sample's quiet start,
-              # a late burst) keep the voice awake
-              @sleeping = true if @silent_cells >= need && MB::Sound::NodeTraits.all_idle?(@busy)
-            end
-            i = stop
-          end
-        end
-
-        # The smallest float above SILENCE: for float samples, |x| > SILENCE
-        # exactly when |x| >= LOUD_FLOAT (FastArithmetic.last_at_least's
-        # comparison).
-        LOUD_FLOAT = begin
-          f = [SILENCE].pack('e').unpack1('e')
-          f > SILENCE ? f : [[f].pack('e').unpack1('L') + 1].pack('L').unpack1('e')
-        end
-
-        # #loud? of +n+ samples of +b+ from +i+, without a view (dropouts-2).
-        def loud_range?(b, i, n)
-          r = MB::Sound::FastArithmetic.last_at_least(b, i, n, LOUD_FLOAT)
-          r ? r >= 0 : loud?(b[i...(i + n)])
-        end
-
-        # True if +b+ has a sample beyond SILENCE.
-        def loud?(b)
-          r = MB::Sound::FastArithmetic.min_max(b, @range)
-          r ? (r[1] > SILENCE || r[0] < -SILENCE) : b.abs.max > SILENCE
+        # Moves the silent cell run (see #sample_skipping) past graph output
+        # +b+ starting at voice sample +start+, falling asleep at a grid
+        # point at its end that completes the run (#sample_skipping splits
+        # the block there) if every idle-checked node agrees: nodes with
+        # sound to come (a reversed sample's quiet start, a late burst) keep
+        # the voice awake.
+        def track_cells(b, start)
+          run = @sleep_run
+          run.track(b, start)
+          @sleeping = true if run.sleep_due?(start + b.length) && MB::Sound::NodeTraits.all_idle?(@busy)
         end
 
         # The index of the first nonzero sample of +b+ at or after +from+, or

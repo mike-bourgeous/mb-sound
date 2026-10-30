@@ -177,7 +177,7 @@ end
 require_relative 'sound/buffer_helper'
 require_relative 'sound/circular_buffer'
 require_relative 'sound/delay_line'
-require_relative 'sound/ring_out'
+require_relative 'sound/quiet_run'
 require_relative 'sound/node_traits'
 require_relative 'sound/wavetable'
 require_relative 'sound/plan'

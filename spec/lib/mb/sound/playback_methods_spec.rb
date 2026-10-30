@@ -504,7 +504,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound.wait).to eq(true)
       end
       expect(session).to be_idle
-      expect(frames).to be >= (48000 * (0.1 + MB::Sound::Session::TAIL_QUIET_SECONDS)).round # (exact on the virtual clock)
+      expect(frames).to be >= (48000 * (0.1 + MB::Sound::QuietRun::QUIET_SECONDS)).round # (exact on the virtual clock)
     end
 
     it 'stops waiting for a tail that never ends after the tail limit' do

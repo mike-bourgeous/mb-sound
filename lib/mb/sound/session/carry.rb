@@ -247,16 +247,17 @@ module MB
           # same grid of the synth's own time)
           SYNTH_STATE.each do |iv|
             v = o.instance_variable_get(iv)
-            n.instance_variable_set(iv, v.is_a?(Array) ? Marshal.load(Marshal.dump(v)) : v)
+            n.instance_variable_set(iv, v.frozen? ? v : Marshal.load(Marshal.dump(v))) # (Arrays, QuietRuns: copies)
           end
           shift
         end
 
         # A Synth's idle-skipping and lane measuring state, carried as it
-        # is (frame counts of the synth's own time and per-lane flags).
+        # is (frame counts of the synth's own time, per-lane flags, and the
+        # lanes' QuietRuns).
         SYNTH_STATE = %i[
-          @skipping @skip_generation @cell_loud @skip_position @grid_offset @grid_started @quiet @quiet_pos @peaks
-          @cell_lo @cell_hi @cell_fresh @done @last_loud
+          @skipping @skip_generation @lane_runs @skip_position @grid_offset @grid_started @quiet @quiet_pos @peaks
+          @cell_lo @cell_hi @cell_fresh @done @end_quiet
         ].freeze
 
         # Seconds of the old source read ahead for the held notes'

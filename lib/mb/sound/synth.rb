@@ -242,7 +242,7 @@ module MB
         @skip_idle = nil
         @skipping = nil
         @skip_generation = nil
-        @cell_loud = nil
+        @lane_runs = nil
         @skip_position = nil
         @grid_offset = nil
         @zeros = nil
@@ -284,7 +284,7 @@ module MB
         @tail = Length.seconds(tail).to_f
         @out_position = 0 # frames returned (see #end_frame)
         @last_event_frame = nil # where the stream's last event lands (see #tail_mode?)
-        @last_loud = 0 # frame after the lanes' last loud sample since then
+        @end_quiet = QuietRun.new(SKIP_GRID) # the lanes' quiet run since then (see #check_end)
         @end_frame = nil
         @seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
 
@@ -615,31 +615,26 @@ module MB
 
       # Level below which a released lane counts as quiet, so it can be
       # reused and a finished source can end (-90 dB, like the master
-      # effects tails of Session; see #quiet_lanes).
-      QUIET = -90.db
-      # QUIET as a Float, for comparisons on the render path (a Float
-      # compared with a Decibels goes through #coerce, an Array each time;
-      # alloc-2).
-      QUIET_GAIN = QUIET.to_f
-
-      # Level below which a lane's output counts as silent for idle lane
-      # skipping (-120 dB; stricter than QUIET because skipping changes the
-      # output; see #setup_idle_skipping).
-      SILENCE = 1e-6
+      # effects tails of Session; see #quiet_lanes).  A Float, for
+      # comparisons on the render path (a Float compared with a Decibels
+      # goes through #coerce, an Array each time; alloc-2).
+      QUIET = QuietRun::QUIET
 
       # Idle skipping's grid (samples of the synth's own time, counted from
       # its first sample): lanes (and Drums::Voice) fall asleep only on
-      # its points, so the same samples are skipped at any buffer size, and
-      # a run of 800-sample buffers starting with the synth sleeps as it
-      # did before the grid (see #setup_idle_skipping).
-      SKIP_GRID = 800
+      # its points (QuietRun's :cells mode), so the same samples are skipped
+      # at any buffer size, and a run of 800-sample buffers starting with
+      # the synth sleeps as it did before the grid (see
+      # #setup_idle_skipping).
+      SKIP_GRID = QuietRun::GRID
 
       # Idle lane skipping (+:skip_idle+, on by default).  A lane is skipped
       # (its graph isn't sampled, and it outputs zeros) from a point of the
       # SKIP_GRID (every 800 samples of the synth's own time) where
       # - its Notes is idle (Notes#voice_idle?: no held note, every
       #   envelope made through it idle), and
-      # - every output channel of the lane stayed within -120 dB (SILENCE)
+      # - every output channel of the lane stayed within -120 dB
+      #   (QuietRun::SILENCE; a QuietRun of whole silent cells per lane)
       #   over the grid cell before it,
       # - every node of the lane's own with an idle check (NodeTraits:
       #   envelopes, sampler voices, drum repeats) says it may sleep,
@@ -669,7 +664,7 @@ module MB
         @skip_idle = !!enabled
         @skipping = Array.new(@lanes.length, false)
         @skip_generation = Array.new(@lanes.length)
-        @cell_loud = Array.new(@lanes.length, false)
+        @lane_runs = Array.new(@lanes.length) { QuietRun.new(SKIP_GRID, loud: QuietRun::SILENCE_LOUD, mode: :cells, grid: SKIP_GRID) }
         @skip_position = 0
         @grid_offset = 0 # where the measuring grid starts (see #align_grid)
         @zeros = nil
@@ -819,7 +814,7 @@ module MB
 
       # Records the level of lane +idx+'s channel buffers +bufs+ (for
       # Notes#level), and whether the lane is quiet (QUIET; see
-      # #quiet_lanes) and silent (SILENCE; see #start_skipping?).  Quiet
+      # #quiet_lanes) and silent (QuietRun::SILENCE; see #start_skipping?).  Quiet
       # and the level use half the peak-to-peak range, ignoring a constant
       # offset (e.g. a waveshaper's output for silence, which would keep a
       # lane busy forever); silent uses the absolute peak, since skipping
@@ -859,7 +854,7 @@ module MB
         hi = @cell_hi[idx]
         c = 0
         while c < lo.length
-          return false if (hi[c] - lo[c]) * 0.5 > QUIET_GAIN
+          return false if (hi[c] - lo[c]) * 0.5 > QUIET
           c += 1
         end
         true
@@ -874,7 +869,7 @@ module MB
           swing = sw if swing.nil? || sw > swing
         end
         @peaks[idx] = swing
-        @quiet[idx] = @notes[idx].voice_idle? && swing <= QUIET_GAIN
+        @quiet[idx] = @notes[idx].voice_idle? && swing <= QUIET
       end
 
       # Marks lane +idx+ as ended (silent from now on).
@@ -1116,7 +1111,7 @@ module MB
           end
           @cell_fresh[idx] = true
           @peaks[idx] = swing
-          @quiet[idx] = @notes[idx].voice_idle? && swing <= QUIET_GAIN
+          @quiet[idx] = @notes[idx].voice_idle? && swing <= QUIET
           @quiet_pos[idx] = @allocator.lanes[idx].source.position
         end
       end
@@ -1180,7 +1175,7 @@ module MB
             next if wake.nil?
 
             @skipping[idx] = false
-            @cell_loud[idx] = false
+            @lane_runs[idx].reset(pos + o)
           end
 
           stop = sleep_candidate(idx, pos, o, count)
@@ -1260,15 +1255,13 @@ module MB
       # The end of the piece of the block starting at offset +o+ (of
       # +count+, the synth at sample +pos+ at offset 0) that lane +idx+
       # renders before it may fall asleep: the first grid point
-      # (SKIP_GRID) whose cell may be silent, or the end of the block.  A
-      # lane holding a note with no event for it in the block can't become
-      # idle, so it renders the whole block.
+      # (SKIP_GRID) ending a silent cell if the rest of this one is silent
+      # (QuietRun#split_point), or the end of the block.  A lane holding a
+      # note with no event for it in the block can't become idle, so it
+      # renders the whole block.
       def sleep_candidate(idx, pos, o, count)
-        g = ((pos + o) / SKIP_GRID + 1) * SKIP_GRID - pos
-        return count if g > count
-
-        g += SKIP_GRID if @cell_loud[idx]
-        return count if g > count
+        g = @lane_runs[idx].split_point(pos, o, count)
+        return count if g >= count
 
         if @notes[idx].held?
           clock = @clock_node[idx]
@@ -1284,30 +1277,19 @@ module MB
       # with the lane idle there (only the end of +bufs+, where
       # #sleep_candidate split the block; idle is known there).
       def track_lane_cells(idx, bufs, start)
-        len = bufs[0].length
-        i = 0
-        while i < len
-          g = (start + i) / SKIP_GRID * SKIP_GRID + SKIP_GRID
-          stop = [g - start, len].min
-          @cell_loud[idx] ||= bufs.any? { |b| lane_loud?(i == 0 && stop == len ? b : b[i...stop]) }
-          if start + stop == g
-            silent = !@cell_loud[idx]
-            @cell_loud[idx] = false
-            if silent && stop == len && @notes[idx].voice_idle? && NodeTraits.all_idle?(@idle_nodes[idx])
-              @skipping[idx] = true
-              @skip_generation[idx] = @allocator.lanes[idx].generation
-            end
-          end
-          i = stop
+        run = @lane_runs[idx]
+        c = 0
+        while c < bufs.length
+          b = bufs[c]
+          run.track(b, start) unless b.equal?(@zeros)
+          c += 1
         end
-      end
 
-      # True if channel buffer +b+ has a sample beyond SILENCE.
-      def lane_loud?(b)
-        return false if b.equal?(@zeros)
-
-        lo, hi = range_of(b)
-        hi > SILENCE || lo < -SILENCE
+        stop = start + bufs[0].length
+        if run.sleep_due?(stop) && @notes[idx].voice_idle? && NodeTraits.all_idle?(@idle_nodes[idx])
+          @skipping[idx] = true
+          @skip_generation[idx] = @allocator.lanes[idx].generation
+        end
       end
 
             # Sums the lanes into one buffer, with the output gain.
@@ -1369,7 +1351,7 @@ module MB
       # #check_end would have found), and after the stream's last event,
       # plus the +:tail+.
       def fallback_end(start)
-        @end_frame ||= grid_end([@last_loud + SKIP_GRID, (@last_event_frame || 0) + 1, start].max)
+        @end_frame ||= grid_end([@end_quiet.ends_at, (@last_event_frame || 0) + 1, start].max)
       end
 
       # The first point of the measuring grid (SKIP_GRID, aligned like
@@ -1390,7 +1372,7 @@ module MB
         if gen != @tail_generation
           @tail_generation = gen
           @last_event_frame = nil
-          @last_loud = 0
+          @end_quiet.reset(0)
           @end_frame = nil if @end_frame && @out_position - count < @end_frame
         end
         return true if @last_event_frame
@@ -1417,8 +1399,8 @@ module MB
       end
 
       # After a piece of #sample_lanes in #tail_mode? (+data+, the lanes'
-      # entries) from synth frame +from+ to +pos+: notes the lanes' last loud
-      # sample (above QUIET), and at a grid point after the stream's last
+      # entries) from synth frame +from+ to +pos+: moves the lanes' quiet
+      # run (above QUIET is loud) past their last loud sample, and at a grid point after the stream's last
       # event decides the synth's end (#end_frame) if every lane that
       # hasn't ended is idle there (Notes#voice_idle?: its notes released
       # and its envelopes idle, exactly at the point, since blocks are
@@ -1433,21 +1415,12 @@ module MB
           next if d.nil?
 
           (d.is_a?(Array) ? d : [d]).each do |b|
-            next if b.empty?
-
-            mn, mx = range_of(b)
-            next if mx <= QUIET_GAIN && mn >= -QUIET_GAIN
-
-            loud = b.abs.gt(QUIET_GAIN).where
-            next if loud.empty?
-
-            e = from + loud[-1] + 1
-            @last_loud = e if e > @last_loud
+            @end_quiet.track(b, from) unless b.empty?
           end
         end
 
         return if @end_frame || pos <= @last_event_frame || (pos + @grid_offset) % SKIP_GRID != 0
-        return if @last_loud > pos - SKIP_GRID
+        return unless @end_quiet.complete_at?(pos)
         return unless @notes.each_index.all? { |idx| @done[idx] || @notes[idx].voice_idle? }
 
         @end_frame = grid_end(pos)

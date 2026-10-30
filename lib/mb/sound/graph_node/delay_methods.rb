@@ -36,7 +36,7 @@ module MB
         #
         # When the input ends, the delay rings out: its last echo plays, and
         # with feedback the repeats go on until they fall below -90 dB (see
-        # MB::Sound::RingOut); then the delay ends.  Pass `ring_out: false`
+        # MB::Sound::QuietRun#advance); then the delay ends.  Pass `ring_out: false`
         # to end with the input instead (e.g. inside a structure with its own
         # tail handling, like Reverb's extra_time).
         #

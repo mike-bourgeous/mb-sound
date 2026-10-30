@@ -351,7 +351,7 @@ module MB
             end
             if buf.nil? || buf.length < count
               (@ended_inputs ||= [])[i] = true
-              @ring ||= MB::Sound::RingOut.new
+              @ring ||= MB::Sound::QuietRun.new(0) # (the ring-out form: QuietRun#advance)
               len = buf ? buf.length : 0
               ring_start = len if ring_start.nil? || len < ring_start
               padded = (buf ? buf.class : Numo::SFloat).zeros(count)
@@ -462,7 +462,7 @@ module MB
 
         # After an input ends, the loop rings out until its output (what it
         # feeds back) has stayed below -90 dB for its longest delay plus the
-        # interpolation reach (see MB::Sound::RingOut), ending on that exact
+        # interpolation reach (see MB::Sound::QuietRun#advance), ending on that exact
         # sample.  The quiet run counts from +start+ in the block +out+.
         def ring_out(out, start)
           longest = @program.rings.map { |g|
