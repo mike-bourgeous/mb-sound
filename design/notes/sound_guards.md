@@ -1,6 +1,10 @@
 # Sound guards: the golden set and perceptual fingerprints
 
-CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+<!-- summary -->
+"Ears win": sound is the test, exactness only where it is heard or a workflow needs it.  The golden set (`golden/set.rb`: song scripts and presets across the maintainer's genres) is re-rendered by `rake golden:check` and compared by perceptual fingerprints (`MB::Sound::SoundGuard`, `lib/mb/sound/sound_guard/`) against calibrated thresholds.  Changes to DSP, presets, or the plan layer run it; a failure goes to the maintainer as a Bench set and only his verdict re-approves (`rake golden:approve[name] RUN=dir`), never an agent.
+<!-- /summary -->
+
+The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 ## Why (maintainer, 2026-10-22)
 
@@ -41,6 +45,8 @@ About 6.3 minutes of audio; one render pass takes about 2 minutes at PARALLEL=2 
 No SQ-80 patch is in the set while the ban (2026-10-19) stands.  The factory bank joins later, a piece per patch family.
 
 ## Fingerprints (`MB::Sound::SoundGuard::Fingerprint`, FORMAT 1)
+
+The guard code is `lib/mb/sound/sound_guard.rb` plus `lib/mb/sound/sound_guard/` (`fingerprint.rb`, `comparison.rb`, `golden_set.rb`, `runner.rb`).
 
 Measured on the render as a listener gets it (the mix after the master), with the library's own analysis: BS.1770 loudness (`MB::Sound.loudness`) and `Structure::Frames` (2048-point Hann STFT every 512 samples, 64 mel bands 30 Hz-16 kHz, onset envelope).
 
@@ -92,7 +98,7 @@ So the guard catches a 1 dB level change anywhere and a filter retune or 10% cut
 - Approved renders: `<main checkout>/tmp/golden/approved/<name>.flac` plus `<name>.json` (command, commit), shared by every worktree (the main checkout is found through `git rev-parse --git-common-dir`); `MB_SOUND_GOLDEN_DIR` overrides.  Never in git.
 - Runs: `tmp/golden/runs/<UTC stamp>-<check|approve>-<commit>/`: each render and its log, `report.txt`, `results.json` (distances per piece), and for failures `bench/` (320 kbps MP3s, levels as rendered: a level change is what is being judged) plus `bench_set.py` (a Listening Bench set, approved vs new, each variant's `code` the git checkout and render command) for the main session to publish.
 - `bundle exec rake golden:check` (all) or `golden:check[techno,dnb]` (or `PIECES=`), exit status nonzero unless everything passes; `RUN=dir` re-fingerprints a run's renders instead of rendering.
-- `rake golden:approve[name]` renders and approves (fingerprint into `golden/fingerprints/`, render into `approved/`); `RUN=dir` approves a check run's renders (after the maintainer's Bench verdict) without rendering again.  Commit the fingerprints.
+- `rake golden:approve[name]` (with a run: `rake golden:approve[name] RUN=dir`) renders and approves (fingerprint into `golden/fingerprints/`, render into `approved/`); `RUN=dir` approves a check run's renders (after the maintainer's Bench verdict) without rendering again.  Commit the fingerprints.
 - `rake golden:list`, `rake golden:refingerprint`.
 - `golden/calibration/calibrate.rb` re-runs the calibration (perturbations through `golden/calibration/perturb.rb`, loaded with RUBYOPT into the render processes) and writes `golden/calibration/results.json`.
 - Specs: `spec/lib/mb/sound/sound_guard_spec.rb` (synthetic signals for the extractor and each distance; a two-piece runner round trip with `spec/test_data/golden_tone.rb`; a guard that every piece in the set has a committed fingerprint in the current format and no SQ-80).  The set itself is never rendered by the suite.

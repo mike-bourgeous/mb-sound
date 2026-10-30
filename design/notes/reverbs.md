@@ -1,6 +1,10 @@
 # Reverbs
 
-Detailed notes moved from CLAUDE.md (2026-10-10); CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+<!-- summary -->
+`#reverb` (`GraphNode::Reverb`, kernel `fast_reverb`, mirror `MB_SOUND_REVERB=ruby`) is the one reverb: `[l, r].reverb(:hall)` runs inputs through diffusion, a per-sample FDN, and output taps with energy-normalized gains.  Presets `:room`, `:hall`, `:stadium`, `:space`, `:plate`, `:shimmer`, `:gated`, `:drone`, ...; the friendly form takes `room_size:`, `decay:`, `damping:`, `mix:`; options for modulation, in-loop filters, drive, crush, shimmer, freeze, and stretch, plus `duck:` and `gate:` after the network.  Unlike other DSL calls on bundles, one reverb serves all channels.
+<!-- /summary -->
+
+Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 
 `GraphNode::Reverb` / `#reverb` (`lib/mb/sound/graph_node/reverb.rb`, from the reverb video; `[l, r].reverb(:hall)` / `mix.reverb` take one input per channel) is the one reverb (`FdnReverb`/`#fdn_reverb` were removed 2026-10-10; their room_size/decay/damping contract is `#reverb`'s friendly form).  Its network (inputs → diffusion stages → feedback delay network → output taps) runs in C (`ext/mb/sound/fast_reverb`, `Reverb::Network` over `FastReverb::Network`, exact Ruby mirror `Reverb::Network::RubyKernel`, `MB_SOUND_REVERB=ruby`): diffusion stages a block at a time (no feedback), the FDN one sample at a time, so loops are exactly the line delays at every buffer size and any buffer runs without splitting.  `show_internals: true` builds the same network as nodes for graphviz (same sound within float32 rounding; no modulation or loop processing).

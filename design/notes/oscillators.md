@@ -1,6 +1,19 @@
 # Oscillators and antialiasing
 
-Detailed notes moved from CLAUDE.md (2026-10-10); CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+<!-- summary -->
+`Tone` waveforms are antialiased by default (`lib/mb/sound/band_limit.rb`, `fast_synth`: PolyBLEP/PolyBLAMP saws, squares, triangles, minBLEP sync, closed-form `complex_*` trains), each with a naive `a*` twin (`asaw`, ...) for lo-fi and control signals; plain sines are naive, `.lfo` fades band-limiting in.  Wavetables (`lib/mb/sound/wavetable.rb`, `fast_wavetable`), unison and swarms (`lib/mb/sound/unison.rb`), FM feedback, PWM/skew, and deliberate aliasing (`decimate`) live here too.  Phases are in cycles; randomness comes from `MB::Sound.seed`; tones give the same samples at any block size; measure with `bin/aliasing.rb`.
+<!-- /summary -->
+
+Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
+
+## Quick reference (from CLAUDE.md, 2026-10-30)
+
+- Shapes: `ramp`/`saw`, `square`, `triangle` (PolyBLEP/PolyBLAMP); `pwm(w, pivot:)` (alias `skew`) warps any shape around a per-shape pivot; `sync(ratio:)` / `sync(master)` / `softsync` (minBLEP, ~2.78 samples delay, `enabled:` read at build); `fm_feedback(amount, gain:)` (aliases `fmfb`, `fm_fb`; sines only); `tone.gain(g)` multiplies inside the Tone.
+- Phase jumps are band-limited steps (`clean` makes them hard-sync events, ~2x CPU); `tone.reset(trig, to:)` jumps at nonzero trigger samples; `.free` never resets; `.rnd` random phases.
+- `softclip`, `clip`, `abs`, `quantize` use ADAA (antiderivative antialiasing) plus a half-sample allpass; `asoftclip` etc. are exact.
+- `sig.decimate(rate, jitter:, interpolation: :hold | :linear)` (`crush_rate`, `srr`): sample-rate reduction on purpose, the rate a number or a per-sample node (`v.freq * n`).
+- Wavetables: `440.hz.wavetable(t, scan:)`, `wavetable_of(:sine, [1, 0.5], ->(p) { ... }, t)` (`Wavetable.of`; prints and saves as the call; `help :wavetables`).
+- Unison: `pitch.unison(n, detune:, spread:, mix:) { |p, i| p.saw }`, also `pitch.unison(n).saw` (a pending unison whose oscillator methods chain) and `pitch.saw.unison(n)` (`Tone#unison`), bit for bit the same; `pitch.swarm(...)` per-copy glides.  Still aliasing: FM/PM sidebands (use `oversample`), `gauss`, naive shapes.
 
 
 Tone waveforms are antialiased by default (`lib/mb/sound/band_limit.rb`, kernels in the `fast_synth` extension); every shape has a naive (aliased) `a*` twin for lo-fi sounds and control signals.  Measure any expression with `bin/aliasing.rb 'p.saw' 'p.asaw'` (coherent-sampling aliasing table and cost; `--render DIR` writes 100 Hz-8 kHz sweeps with spectrograms).

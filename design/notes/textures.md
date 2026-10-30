@@ -1,11 +1,24 @@
 # Textures: dust, drift, modal resonators
 
+<!-- summary -->
+Texture nodes in `fast_texture` and `fast_resonator` (exact Ruby mirrors, the same at any buffer size): `dust` sparse random impulses, `drift` random points joined smoothly (B-spline, holds, jitter, any Curve), `trig.resonate(:bowl | :gong | :bell | ...)` modal banks with physically motivated ratios and beating doublets (`GraphNode::ModalResonator`), `noise(:pink)`/`noise(:brown)`, and `sig.sounding(hold:, fade:)`, a gate open while a sound is above -90 dB.  Randomness is splitmix64, seeded per node.  Help `help :textures`, `help :recipes`; demo `bin/songs/critters.rb`.
+<!-- /summary -->
+
 Built on branch textures-1 (2026-10-14) from the persona panel's requests
 (Kaede Rowntree, the ambient persona: friction items F2, F9, F10, F19 on
 `research-persona-zen` 88580e49; panel transcript on
 `research-persona-panel` 0c08a17d).  The ambient patches in
 `bin/synths/ambient.rb` had hand-rolled the same three things
 (`ambient_dust`, `ambient_walk`, `ambient_bowl` as a sum of pings).
+
+At a glance (the sections below have the details):
+
+- `dust(rate, bipolar:, range:, min_gap:, seed:)` (`GraphNode::Dust`): sparse random impulses, one splitmix64 draw per sample (so exact at any buffer size); rate in Hz or a length between hits; `min_gap:` a refractory time keeping the average rate.
+- `drift(rate, range:, smooth: :cubic | :cosine | :linear | :step | any Curve, walk:, hold:, jitter:, from:, seed:)` (`GraphNode::Drift`): random points joined smoothly (the B-spline never leaves the range; overshooting Curves do, unclamped); `hold:` a share, time, Range, or node per point; `jitter:` uneven spacing; points, holds, and spacing each come from their own stream, so all modes share the points.
+- `trig.resonate(:bowl | :rin | :gong | :bell | :chime | :tubular | :bar | :marimba | :vibes | :glass | :plate | :membrane | modes, freq, decay:, beat:, spread:, glide:, glide_time:)` (`GraphNode::ModalResonator < Resonator`, `FastResonator.modes`): normalized to peak at most the strike; presets have typical pitches (freq optional); :gong has a tension glide and blooming upper modes (bloom twins).
+- `noise(:pink)`/`noise(:brown)` (`Filter::NoiseColor`, biquads; RMS 0.2).
+- `sig.sounding(hold:, fade:)` (`GraphNode::Sounding`): a 0..1 gate open while sig is above -90 dB, held and faded after, ending after sig ends (the ambient tape's hiss stops with the sound).
+- Kernels in `fast_texture` and `fast_resonator`, exact mirrors.  Console help `help :textures`, `help :recipes`; demo `bin/songs/critters.rb` (a fly whose wings follow its effort, a mouse; `--binaural` spherical-head option).
 
 ## dust (`GraphNode::Dust`, `FastTexture.dust`)
 
@@ -100,7 +113,7 @@ output moves from p1 to p2 over a step.
 
 Plan layer (fuse-more-1, 2026-10-25): `Resonator` and `ModalResonator` are `Plan::Op::Resonator` (FastResonator's `ping` and `modes` loops moved into `include/mb_resonator.h`, shared by fast_resonator and fast_plan's `plan_resonator.c`), bit for bit on the node's own state; frequency nodes are described, decay nodes scaled to samples by a Mul; when the input ends the node rings out unfused (`#plan_tail?`), finding its exact end as before.  So drum voices' bodies and struck textures fuse with what plays and follows them.
 
-`sig.resonate(preset, freq, decay:, beat:, spread:, normalize: true)`
+`sig.resonate(preset, freq, decay:, beat:, spread:, normalize: true, glide:, glide_time:)`
 (preset and frequency in either order).  Every impulse rings all modes of a
 struck object: complex one-pole pings as `Resonator` (frequency and decay
 may move every sample without changing the ringing level) at freq × ratio
