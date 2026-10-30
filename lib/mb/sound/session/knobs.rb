@@ -387,7 +387,6 @@ module MB
           end
           return turn_keys(k, { 0 => value }, nil, point, start_time) if gesture_for?(k, value, over, follow, point)
           value = follow unless follow.nil?
-          raise ArgumentError, "Turn #{k.name.inspect} to a number or a node (got nil)" if value.nil?
           value = knob_value(k, value)
           check_turn_value(k, value)
           raise ArgumentError, "from: needs over: (a ramp)" if from && !over
@@ -685,14 +684,7 @@ module MB
         end
 
         def check_turn_value(k, value)
-          case value
-          when Numeric
-            raise ArgumentError, "Turn #{k.name.inspect} to a real number (got #{value.inspect})" unless value.real? && value.finite?
-          when Symbol
-            knob!(value)
-          else
-            raise ArgumentError, "Turn #{k.name.inspect} to a number or a node (got #{value.inspect})" unless value.respond_to?(:sample) && value.respond_to?(:get_sampler)
-          end
+          ValueSource.coerce(value, "turn #{k.name.inspect}", names: :check, knobs: self)
         end
 
         # A turn past a knob's range (ux-1 item 30: `turn :drive, 100` on a

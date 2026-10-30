@@ -846,7 +846,7 @@ module MB
         # (#event_at; a looping clip follows the timeline from 0), or nil
         # before the first one.  `midi.transpose(seq(0, -4, 3, -2).n1.loop)`
         # moves played notes by a step per bar.
-        def value_at(position, transport: nil, stream: nil)
+        def value_at(position, frame: nil, transport: nil, stream: nil)
           event_at(position.to_r)&.value
         end
 

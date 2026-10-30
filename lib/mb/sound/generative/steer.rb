@@ -141,7 +141,7 @@ module MB
                else
                  pos + origin
                end
-          @params.transform_values { |v| MIDI::Param.value_at(v, tl) }.freeze
+          @params.transform_values { |v| ValueSource.value_at(v, tl) }.freeze
         end
       end
     end

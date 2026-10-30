@@ -730,18 +730,10 @@ module MB
         # or a Symbol naming a knob of the Session (the loader's, else the
         # current context's or default one, never created here), else nil.
         def bound_param(name, value)
-          case value
-          when Symbol
-            session = @session || Session.existing
-            knob = session&.knobs&.[](value)
-            unless knob
-              names = session ? session.knobs.keys : []
-              raise LoadError.new("#{@label}: param #{name} names knob #{value.inspect}, but #{session ? 'the session has no such knob' : 'there is no session'}#{GraphIO.suggest(value, names)} (knobs: #{names.empty? ? 'none' : names.join(', ')})", path: @path)
-            end
-            knob
-          when GraphNode, GraphNode::Channels
-            value
-          end
+          return nil unless value.is_a?(Symbol) || value.is_a?(GraphNode) || value.is_a?(GraphNode::Channels)
+          ValueSource.coerce(value, "param #{name}", numbers: false, names: :knob, knobs: @session || Session.existing, channels: true)
+        rescue ArgumentError => e
+          raise LoadError.new("#{@label}: #{e.message}", path: @path)
         end
 
         # True for a set document (kind: :set).
@@ -1067,7 +1059,7 @@ module MB
             return named_proc(node, scope) if name == :named_proc
             return bus_reader(node, scope) if name == :bus
             return drawn_seed(node, scope) if name == :drawn_seed
-            # knob(:"bass/reso") reads a knob the header defined whose name
+            # knob(:"bass/resonance") reads a knob the header defined whose name
             # isn't a Ruby identifier (as a bare name reads the others)
             if name == :knob && !@header && !MB::Sound::Rack.application && node.block.nil? && (a = node.arguments&.arguments)&.length == 1 && a[0].is_a?(Prism::SymbolNode) && @knobs&.key?(a[0].unescaped.to_sym)
               return knob(a[0].unescaped.to_sym)

@@ -309,7 +309,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
         expect(knob.value).to eq(0)
 
         expect { io.load(doc, inputs: { input: 1.constant }, params: { depth: :wobbel }, session: session) }
-          .to raise_error(io::LoadError, /param depth names knob :wobbel, but the session has no such knob.*did you mean.*wobble/m)
+          .to raise_error(io::LoadError, /param depth: No knob :wobbel.*Did you mean\?.*wobble/m)
       end
 
       it 'binds a knob line to the Session knob instead of making its own' do

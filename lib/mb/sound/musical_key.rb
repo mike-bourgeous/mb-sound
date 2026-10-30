@@ -101,7 +101,7 @@ module MB
         m = mode
         if m.is_a?(MIDI::Param::Base)
           pos ||= transport&.position || 0r
-          m = MusicalKey.check_mode(m.value_at(pos, transport: transport))
+          m = MusicalKey.check_mode(ValueSource.value_at(m, pos, transport: transport))
         end
         SCALES[[m, root]] ||= Scale[m, root]
       end

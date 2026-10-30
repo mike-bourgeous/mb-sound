@@ -12,8 +12,8 @@ RSpec.describe('MIDI transforms with moving parameters (MIDI::Param)', :midi_tra
 
   describe MB::Sound::MIDI::Param do
     it 'lets plain values answer themselves' do
-      expect(described_class.value_at(0.5, 3r)).to eq(0.5)
-      expect(described_class.value_at(1.n16, 3r)).to eq(1.n16)
+      expect(MB::Sound::ValueSource.value_at(0.5, 3r)).to eq(0.5)
+      expect(MB::Sound::ValueSource.value_at(1.n16, 3r)).to eq(1.n16)
       expect(described_class.wrap(0.5)).to eq(0.5)
       expect(described_class.wrap(0.25.constant)).to eq(0.25)
     end

@@ -112,7 +112,7 @@ module MB
 
           gkey = [:gen, i]
           n, tail = counters[gkey] || [0, g.source.form_start]
-          read = ->(w) { MIDI::Param.value_at(w, time || 0, transport: @transport) }
+          read = ->(w) { ValueSource.value_at(w, time || 0, transport: @transport) }
           WALK_LIMIT.times do
             name, tail = g.source.form_next(tail, n, read)
             n += 1

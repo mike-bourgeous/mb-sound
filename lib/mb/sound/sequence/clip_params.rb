@@ -89,7 +89,7 @@ module MB
 
         # +x+'s value at clip position +pos+ (see MIDI::Param).
         def param_value(x, pos)
-          MIDI::Param.value_at(x, pos, transport: Sequence.current_transport)
+          ValueSource.value_at(x, pos, transport: Sequence.current_transport)
         end
 
         # A param's length value in whole notes (see the class comment).

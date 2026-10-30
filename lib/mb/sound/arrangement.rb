@@ -1099,7 +1099,12 @@ module MB
       # live_error) if it can't be used.
       def check_knob_value(owner, name, value)
         v, options = knob_value(value)
-        ok = v.is_a?(Numeric) || v.is_a?(Symbol) || v.respond_to?(:sample)
+        ok = begin
+               ValueSource.coerce(v, "knob #{name.inspect}")
+               true
+             rescue ArgumentError
+               false
+             end
         extra = value.is_a?(Array) ? ((value[1] || {}).keys - [:over, :curve, :smooth, :from]) : []
         ok &&= extra.empty? && (!value.is_a?(Array) || value.length <= 2) && options.is_a?(Hash)
         return true if ok

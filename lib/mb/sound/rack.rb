@@ -269,11 +269,15 @@ module MB
           TYPE = :control
 
           def coerce(value, rack)
-            case value
-            when GraphNode then value
-            when Numeric then value.constant
-            when Symbol then MB::Sound.knob(value)
-            else mismatch(rack, value, 'control (a number, graph node, or knob name)')
+            v = begin
+                  ValueSource.coerce(value, "#{@name}")
+                rescue ArgumentError
+                  return mismatch(rack, value, 'control (a number, graph node, or knob name)')
+                end
+            case v
+            when Numeric then v.constant
+            when Symbol then MB::Sound.knob(v)
+            else v
             end
           end
 

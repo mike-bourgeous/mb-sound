@@ -119,12 +119,7 @@ module MB
         # or a MIDI::Param at its timeline position.
         def clock_speed_value(speed, rf)
           frame, pos = session_point_of(rf)
-          case speed
-          when Symbol then knob!(speed).value_at(pos, frame: frame)
-          when GraphNode::Knob then speed.value_at(pos, frame: frame)
-          when GraphNode::Knob::Reader then speed.knob.value_at(pos, frame: frame)
-          else speed.value_at(pos, transport: @transport, stream: nil)
-          end
+          ValueSource.value_at(speed, pos, frame: frame, transport: @transport, knobs: self)
         end
 
         # The run frame where a clock defined now starts counting (its
