@@ -1249,7 +1249,7 @@ Sample::SliceStretch
 sample.follow(:stretch | :resample, stretch: :auto, align: :timeline | :launch)
 Sample#material
 GraphNode::LoopPlayer
-loops(dir, bpm:, key:, beats:)
+loops(dir, bpm:, key:, beats:, detect:)
 help :loops
 ## Sequences
 design/notes/sequences.md

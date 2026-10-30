@@ -58,6 +58,8 @@ module MB
             parts << (why[:bpm] || sources[:bpm]&.to_s) if bpm || why[:bpm]
             kind = why[:one_shot] || sources[:one_shot]&.to_s
             parts << "#{one_shot ? 'one-shot' : 'loop'}: #{kind}" if kind && !one_shot.nil? && sources[:one_shot] != :tempo
+            # Key detection (LoopInfo.list's detect:) says what it found or why not
+            parts << "key #{why[:key]}" if why[:key]
             parts.compact.join('; ')
           end
         end
@@ -579,15 +581,60 @@ module MB
 
         # A List of the sound files in +dir+ whose metadata matches: +bpm+
         # (a number, within 1%, or a Range), +key+ (a key Symbol or an
-        # Array of them; :Am, :"F#"), +beats+ (a number or Range).  Reads
-        # headers and names only.
-        def list(dir = '.', bpm: nil, key: nil, beats: nil, recursive: true)
+        # Array of them; :Am, :"F#"; enharmonic spellings match, :"A#m"
+        # finds :Bbm), +beats+ (a number or Range).  Reads headers and names
+        # only, unless +detect+ (true, :bpm, :key, or an Array; see
+        # Sample.from_file) decodes the files whose tempo (loops only) or
+        # key nothing gave and detects them (Sample#detect_tempo,
+        # Sample#detect_key; remembered per file, size, and time for the
+        # process, so listing again is quick).
+        def list(dir = '.', bpm: nil, key: nil, beats: nil, recursive: true, detect: false)
+          wanted = Sample.detect_list(detect)
+          if key
+            keys = Array(key).map { |k|
+              Analysis::Key.parse(k) or raise ArgumentError, "key: takes key names like :Am, :\"F#\", :Eb (got #{k.inspect})"
+            }
+          end
           entries = scan(dir, recursive: recursive)
+          entries = entries.map { |e| detected(e, wanted) } unless wanted.empty?
           entries = entries.select { |e| e.bpm && (bpm.is_a?(Range) ? bpm.cover?(e.bpm) : (e.bpm - bpm).abs <= bpm * 0.01) } if bpm
-          keys = Array(key).map { |k| k.to_s.tr('♯♭', '#b').to_sym } if key
-          entries = entries.select { |e| keys.include?(e.key) } if key
+          entries = entries.select { |e| e.key && keys.include?(Analysis::Key.parse(e.key)) } if key
           entries = entries.select { |e| e.beats && (beats.is_a?(Range) ? beats.cover?(e.beats) : e.beats == beats) } if beats
           List.new(File.expand_path(dir.to_s), entries)
+        end
+
+        # +entry+ with the fields in +wanted+ (:bpm, :key) that nothing
+        # gave detected from its audio (a tempo for loops only; see .list).
+        def detected(entry, wanted)
+          need = wanted.select { |w| w == :bpm ? entry.bpm.nil? && !entry.one_shot : entry.key.nil? }
+          return entry if need.empty?
+
+          stat = File.stat(entry.path)
+          id = [entry.path, stat.size, stat.mtime.to_f, need].freeze
+          found = (@detected ||= {})[id] ||= begin
+            s = Sample.from_file(entry.path)
+            out = { why: {} }
+            if need.include?(:bpm)
+              s = s.detect_tempo
+              out[:bpm] = s.bpm
+              out[:beats] = s.beats
+              out[:why][:bpm] = "detected #{format('%.2f', s.bpm).sub(/\.?0+\z/, '')}"
+            end
+            if need.include?(:key)
+              s = s.detect_key
+              out[:key] = s.key
+              out[:why][:key] = s.meta.dig(:why, :key)
+            end
+            out.freeze
+          rescue StandardError => e
+            { why: need.to_h { |w| [w, "detection failed: #{e.message.lines.first&.strip}"] } }.freeze
+          end
+
+          sources = entry.sources.dup
+          sources[:bpm] = sources[:beats] = :detected if found[:bpm]
+          sources[:key] = :detected if found[:key]
+          entry.with(bpm: found[:bpm] || entry.bpm, beats: found[:bpm] ? found[:beats] : entry.beats, key: found[:key] || entry.key,
+            sources: sources.freeze, why: entry.why.merge(found[:why]).freeze)
         end
 
         # Every sound file under +dir+ (recursively), as Entries, sorted by

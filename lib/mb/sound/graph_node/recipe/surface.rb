@@ -86,7 +86,7 @@ module MB
               names: %i[
                 [] at audio bits bpm channel_count chops data duration fade fade_in fade_out file gain interpolation length level lineage lofi loop_mode
                 loop_points looped mips mono name normalize one_shot onsets origin peak position read_as rev reverse root save seconds size slice slices
-                start stop stretch tags to_a to_instrument transport transpose trim tune with beats bars meter key markers meta_source detect_tempo
+                start stop stretch tags to_a to_instrument transport transpose trim tune with beats bars meter key markers meta_source detect_tempo detect_key key_analysis
               ],
             },
             'MB::Sound::Sample::Slices' => {

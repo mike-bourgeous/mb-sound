@@ -3,12 +3,16 @@ require_relative 'structure/tempo'
 require_relative 'structure/beats'
 require_relative 'structure/meter'
 require_relative 'structure/result'
+require_relative 'structure/sections'
+require_relative 'structure/comparison'
 
 module MB
   module Sound
     # Music structure analysis: audio in, its tempo, beats, bars, and meter
-    # out (phase S1; phase S2 adds sections, labels, forms, and markers).
-    # Pure Ruby + Numo; a three-minute song takes about a second and a half.
+    # out (phase S1), then its sections with letter labels, the song as a
+    # flow, :analysis markers, and a comparison with the form that played
+    # (phase S2: Structure::Sections, Result#sections/#form/#markers!/
+    # #compare).  Pure Ruby + Numo; a three-minute song takes a few seconds.
     # Most code uses StructureMethods#analyze_form.
     #
     # The method (from the research spike on branch
@@ -113,6 +117,13 @@ module MB
           tracker: beats, duration: duration, sample_rate: sample_rate, timings: timings, frames: frames)
       end
 
+      # "m:ss.cc" for +seconds+ (negative times, a hair before the start,
+      # read 0:00.00).
+      def self.clock(seconds)
+        cs = (seconds.to_f * 100).round.clamp(0, nil)
+        format('%d:%05.2f', cs / 6000, (cs % 6000) / 100.0)
+      end
+
       # A mono Numo::DFloat mix of +data+ (see .analyze).
       def self.mixdown(data, sample_rate)
         data = MB::Sound.read(data, sample_rate: sample_rate) if data.is_a?(String)
@@ -130,7 +141,8 @@ module MB
       def self.transport_grid(transport, onset, fps, start, duration)
         spb = 60.0 / transport.bpm
         first = -(start / spb).floor
-        last = ((duration - start) / spb).floor
+        # (a beat on the audio's last instant has nothing after it)
+        last = ((duration - start) / spb).ceil - 1
         ks = (first..last).to_a
         frames = ks.map { |k| (start + k * spb) * fps }
         active = Beats.active(onset, frames, spb * fps)

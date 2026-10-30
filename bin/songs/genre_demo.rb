@@ -43,7 +43,7 @@ module MB::Sound
       full: [false, '-F', 'Play the whole form instead of about --seconds'],
       seconds: [60.0, Float, '-s', 'About how long the short form plays (seconds)', 5.0..3600.0],
       show: [false, 'Print the template as Ruby first'],
-      mastering: [:template, Symbol, '-M', "Master with a mastering preset instead of the template's chain (the template's mono_below and loudness range stay)", [:template, *Mastering.names]],
+      mastering: [:template, Symbol, '-M', "Master with a mastering preset instead of the template's chain (the template's mono_below and loudness range stay)", [:template, *Mastering.standalone_names]],
       clip: [false, "With -M club or vinyl: the preset's clip: true (club: a soft clipper in place of the fast limiter; vinyl: a soft clipper after the trim, so peaky mixes reach the target)"],
       pump: [false, '-K', "Key the ducks from the template's :pump line, a trigger track nobody hears (dnb's ghost-kick pump), instead of its sidechain"],
       generate: [:none, Symbol, '-E', "Play a form the template's generator writes as it plays (G4): song (one generated song, full length) or endless (forever; render with -b)", %i[none song endless]],

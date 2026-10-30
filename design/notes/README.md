@@ -108,7 +108,7 @@ Texture nodes in `fast_texture` and `fast_resonator` (exact Ruby mirrors, the sa
 
 ### [Loop files, slice stretch, tempo-following loops](loops.md)
 
-`Sample['loop.wav']` reads loop metadata without ffmpeg's help (`Sample::Riff`: ACID tempo/beats/meter/root, `smpl` loops, cue labels as `sample.markers`), then FLAC tags, then tempo and key words in file and folder names (`Sample::LoopInfo`, reasons in `meta[:why]`), or detects the tempo (`detect: true`).  `stretch(r, mode: :slice)` (`Sample::SliceStretch`) moves slices to scaled times with exact attacks; `sample.follow` (`GraphNode::LoopPlayer`, a TimelineNode and plan boundary) plays a loop in time with the session tempo (slice stretch for percussive loops, spectral for tonal ones).  Console `loops(dir, bpm:, key:, beats:)` lists a folder from headers and names only.  Help `help :loops`.
+`Sample['loop.wav']` reads loop metadata without ffmpeg's help (`Sample::Riff`: ACID tempo/beats/meter/root, `smpl` loops, cue labels as `sample.markers`), then FLAC tags, then tempo and key words in file and folder names (`Sample::LoopInfo`, reasons in `meta[:why]`), or detects the tempo and key (`detect: true`; `#detect_key`, Krumhansl-Schmuckler on a chromagram fold, `Analysis::Key`).  `stretch(r, mode: :slice)` (`Sample::SliceStretch`) moves slices to scaled times with exact attacks; `sample.follow` (`GraphNode::LoopPlayer`, a TimelineNode and plan boundary) plays a loop in time with the session tempo (slice stretch for percussive loops, spectral for tonal ones).  Console `loops(dir, bpm:, key:, beats:, detect:)` lists a folder from headers and names only (`detect:` decodes files missing a tempo or key; keys match enharmonically).  Help `help :loops`.
 
 ### [SQ-80 voice, patches, and (designed) SysEx import](sq80.md)
 
@@ -132,7 +132,7 @@ Live MIDI uses JACK ports when a server answers, else bundled RtMidi; specs use 
 
 ### [Structure analysis (music information retrieval)](structure.md)
 
-`analyze_form(source)` (alias `analyze_structure`; `StructureMethods`, `lib/mb/sound/structure.rb` + `structure/`, pure Ruby + Numo, ~120x realtime) finds tempo, beats, bars, and meters in a file, audio data, or a graph and returns a `Structure::Result` (`transport`, `meters_ruby`).  Our own renders use the render's exact grid; imported audio is tracked (comb-autocorrelation tempo, a constant-tempo beat grid, a downbeat Viterbi allowing 2- and 3-beat bars).  Phase S1 is built; sections, letter labels, and `:analysis` markers are S2.
+`analyze_form(source)` (alias `analyze_structure`; `StructureMethods`, `lib/mb/sound/structure.rb` + `structure/`, pure Ruby + Numo) finds tempo, beats, bars, and meters in a file, audio data, or a graph and returns a `Structure::Result`: our renders use the render's exact grid, imported audio is tracked (comb-autocorrelation tempo, a constant-tempo grid, a downbeat Viterbi allowing 2- and 3-beat bars).  Phase S2: `sections` with letter labels (bar-feature SSM, Foote novelty, DP over bar lines), `form`/`flow_ruby`, `markers!` (`:analysis` markers), `compare(take.form)`.  Shares `MB::Sound::Analysis` (STFT, chroma, keys, spectra) with the other listening tools.
 
 ## Session and set
 
@@ -146,7 +146,7 @@ Rules: changes go through `Session#change`; scene graphs build on the scheduler 
 
 `Session#master` / console `master { |mix| mix.softclip }` runs the mix through a chain of `GraphNode::MixSource` channels; new chains start at launch points with the old one spilling over (`fade:` crossfades), `master nil` bypasses, and the master gain applies before the chain (`post: true` after it).
 Without a chain, realtime live output ends in a transparent -1 dBFS `Session::SafetyLimiter` (never in renders, stems, takes, taps).
-Mastering presets (`master :club`, `:streaming`, `:quiet`, `:vinyl`; `mix.master(:club)` anywhere; `masters`) are frozen `Mastering::Preset` values: renders reach their loudness target exactly in two passes (`Mastering::Targeting`), live uses the preset's drive or `ride: true`.
+Mastering presets (`master :club`, `:streaming`, `:quiet`, `:vinyl`, `:hot`, `:match, reference:`; `mix.master(:club)` anywhere; `masters`) are frozen `Mastering::Preset` values: renders reach their loudness target exactly in two passes (`Mastering::Targeting`), live uses the preset's drive or `ride: true`; `:match` takes a reference track's loudness, true peak, and (renders) spectral tilt.
 
 ### [Buses, sends, and bus sidechains](buses.md)
 

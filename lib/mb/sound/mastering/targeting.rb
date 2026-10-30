@@ -44,6 +44,11 @@ module MB
         # How close to the target .solve gets (LU).
         TOLERANCE = 0.01
 
+        # :match: rounds refining the tilt correction on the chain's
+        # output, and how close to the reference's tilt they stop (dB/oct).
+        TILT_ROUNDS = 2
+        TILT_TOLERANCE = 0.1
+
         # The farthest the trim may move from the first pass's (dB).
         RANGE = 36.0
 
@@ -314,11 +319,16 @@ module MB
         # :bars: +loudest+ is then the level +percentile+ of the bars sit
         # at or under; see Mastering::MEASURES).  +drive+ (Decibels) is the trim the
         # first pass used (the preset's drive).
+        #
+        # :match (Mastering::Reference): +reference+, +tilt+ (the tilt EQ's
+        # correction, dB per octave, nil unless measured), +tilt_in+ (the
+        # mix's tilt at the trim), and +tilt_out+ (the render's).
         Result = Data.define(:preset, :trim, :target, :ceiling, :integrated, :short_term_max, :range, :true_peak, :side, :side_hz,
                              :first_pass, :runs, :held, :codec_peaks, :measure, :loudest, :loudest_bars, :drive, :percentile, :side_in,
-                             :trims, :sections, :energy) do
-          def initialize(drive: nil, percentile: nil, side_in: nil, trims: nil, sections: nil, energy: nil, **rest)
-            super(drive: drive, percentile: percentile, side_in: side_in, trims: trims, sections: sections, energy: energy, **rest)
+                             :trims, :sections, :energy, :reference, :tilt, :tilt_in, :tilt_out) do
+          def initialize(drive: nil, percentile: nil, side_in: nil, trims: nil, sections: nil, energy: nil, reference: nil, tilt: nil, tilt_in: nil, tilt_out: nil, **rest)
+            super(drive: drive, percentile: percentile, side_in: side_in, trims: trims, sections: sections, energy: energy,
+              reference: reference, tilt: tilt, tilt_in: tilt_in, tilt_out: tilt_out, **rest)
           end
 
           # The loudness the target was reached with (integrated, the
@@ -369,6 +379,12 @@ module MB
             # whether the lows were mono already)
             side_text = side_in ? "#{db_text.(side_in)} in the mix, #{db_text.(side)} mastered" : db_text.(side)
             lines << format('  true peak %.2f dBTP (ceiling %.1f), side below %d Hz %s re mid', true_peak, ceiling.db_value, side_hz, side_text)
+            if reference
+              lines << format('  like %s (%.1f LUFS, %.1f dBTP); tilt: reference %+.2f dB/oct, mix %s, EQ %s, mastered %s',
+                              reference.name, reference.lufs, reference.true_peak, reference.tilt,
+                              tilt_in ? format('%+.2f', tilt_in) : 'not measured', tilt ? format('%+.2f', tilt) : 'none',
+                              tilt_out ? format('%+.2f', tilt_out) : 'n/a')
+            end
             if sections
               lines << '  sections (mix LUFS -> target, mastered, trim):'
               num = ->(v) { v&.finite? ? format('%6.1f', v) : '     -' }
@@ -414,6 +430,11 @@ module MB
           end
 
           base, length = mix_from(capture, origin, session.channels)
+          # :match: the tilt EQ's correction from the mix entering the trim
+          tilt = tilt_in = nil
+          if presets.last.measured_tilt?
+            tilt, tilt_in = Mastering.tilt_correction(presets.last.reference, trim_input(records.last, origin, length), sample_rate: session.sample_rate)
+          end
           # What the target measures (Mastering::MEASURES): with :loudest,
           # the loudest +loudest_bars+ bars, windows starting on bar lines;
           # with :bars, a percentile of the single bars' levels
@@ -438,31 +459,51 @@ module MB
             runs += 1
             out = base.map(&:dup)
             gain = db.is_a?(TrimCurve) ? db : db.db.to_f
-            records.each { |r| add_chain(session, r, gain, out, origin, length, post_gain) }
+            records.each { |r| add_chain(session, r, gain, out, origin, length, post_gain, tilt: tilt) }
             out
           }
           eval = ->(db, peak = !limited) { measure(output.(db), session.sample_rate, true_peak: peak, loudest: window) }
 
           drive = presets.last.drive
-          x0 = drive.db_value
-          f0 = first
-          x1 = (x0 + (target.lufs - f0)).clamp(x0 - RANGE, x0 + RANGE)
-          f1, tp = eval.(x1)
-          MAX_STEPS.times do
-            break if !f1.finite? || (f1 - target.lufs).abs <= TOLERANCE
-            slope = (f1 - f0) / (x1 - x0)
-            # The limiters are saturated (more trim no longer adds
-            # loudness): keep the smaller trim and report the miss
-            if x1 > x0 && slope.finite? && slope < 0.05
-              x1, f1 = x0, f0 if f0.finite? && f1 <= f0 + 0.05
-              tp = nil
-              break
-            end
-            slope = 1.0 if !slope.finite? || slope < 0.05
-            x2 = (x1 + (target.lufs - f1) / slope).clamp(x0 - RANGE, x0 + RANGE)
-            x0, f0 = x1, f1
-            x1 = x2
+          # Secant steps on the trim from (x0, f0) toward the target:
+          # [trim, its loudness, its true peak]
+          secant = ->(x0, f0) {
+            x1 = (x0 + (target.lufs - f0)).clamp(x0 - RANGE, x0 + RANGE)
             f1, tp = eval.(x1)
+            MAX_STEPS.times do
+              break if !f1.finite? || (f1 - target.lufs).abs <= TOLERANCE
+              slope = (f1 - f0) / (x1 - x0)
+              # The limiters are saturated (more trim no longer adds
+              # loudness): keep the smaller trim and report the miss
+              if x1 > x0 && slope.finite? && slope < 0.05
+                x1, f1 = x0, f0 if f0.finite? && f1 <= f0 + 0.05
+                tp = nil
+                break
+              end
+              slope = 1.0 if !slope.finite? || slope < 0.05
+              x2 = (x1 + (target.lufs - f1) / slope).clamp(x0 - RANGE, x0 + RANGE)
+              x0, f0 = x1, f1
+              x1 = x2
+              f1, tp = eval.(x1)
+            end
+            [x1, f1, tp]
+          }
+          x1, f1, tp = secant.(drive.db_value, first)
+
+          # :match: the chain itself moves the tilt (limiting a mix pushed
+          # 16 LU louder took the night bus 0.5 dB/oct brighter), so the
+          # correction is refined on the chain's output, the trim found
+          # again after each change (TILT_ROUNDS)
+          if tilt
+            TILT_ROUNDS.times do
+              out_tilt = Analysis::Spectrum.new(output.(x1), sample_rate: session.sample_rate).tilt
+              err = presets.last.reference.tilt - out_tilt
+              moved = (tilt + err).clamp(-Mastering::MAX_TILT, Mastering::MAX_TILT).round(3)
+              break if err.abs <= TILT_TOLERANCE || moved == tilt
+              tilt = moved
+              f_at, = eval.(x1)
+              x1, f1, tp = secant.(x1, f_at)
+            end
           end
 
           trims = nil
@@ -510,7 +551,9 @@ module MB
             side: side, side_hz: hz, first_pass: first, runs: runs, held: held, codec_peaks: nil,
             measure: mode, loudest: window ? loudest_of(a, window) : nil, loudest_bars: mode == :loudest ? bars : nil,
             drive: drive, percentile: mode == :bars ? presets.last.percentile : nil, side_in: side_in,
-            trims: trims, sections: rows&.map(&:freeze)&.freeze, energy: mode == :sections ? presets.last.energy : nil
+            trims: trims, sections: rows&.map(&:freeze)&.freeze, energy: mode == :sections ? presets.last.energy : nil,
+            reference: presets.last.reference, tilt: tilt, tilt_in: tilt_in,
+            tilt_out: presets.last.reference ? Analysis::Spectrum.new(out, sample_rate: session.sample_rate).tilt : nil
           )
         end
 
@@ -640,6 +683,27 @@ module MB
           out
         end
 
+        # What +record+'s preset received at its trim from frame +origin+,
+        # +length+ frames, as channels (the Tap's buffers when the chain
+        # ends with the preset, else the chain's input).
+        def self.trim_input(record, origin, length)
+          b = tail_of(record)
+          return input_from(record, origin, length) unless b
+
+          out = Array.new(b.tap.buffers[0]&.length || 0) { Numo::SFloat.zeros(length) }
+          record.frames.each_with_index do |frame, i|
+            data = b.tap.buffers[i]
+            count = data[0].length
+            next if frame + count <= origin || frame - origin >= length
+
+            skip = [origin - frame, 0].max
+            at = frame + skip - origin
+            n = [count - skip, length - at].min
+            data.each_with_index { |d, ch| out[ch][at...(at + n)] = d[skip...(skip + n)] }
+          end
+          out
+        end
+
         # The recorded mix from frame +origin+ as full-length channels.
         # Returns [channels, length].
         def self.mix_from(capture, origin, channels)
@@ -675,10 +739,11 @@ module MB
         # recorded inputs (same random seeds; nodes that read knobs, buses,
         # or players see their state after the first pass, so such chains
         # are approximate: see .solve's check).
-        def self.add_chain(session, record, gain, out, origin, length, post_gain)
+        def self.add_chain(session, record, gain, out, origin, length, post_gain, tilt: nil)
           if (b = tail_of(record))
             src = GraphNode::MixSource.new(channels: b.tap.outputs.length, sample_rate: session.sample_rate)
-            result = b.preset.apply(GraphNode::Channels.new(src.outputs), trim: gain, from_trim: true, session: session)
+            result = b.preset.apply(GraphNode::Channels.new(src.outputs), trim: gain, from_trim: true, session: session,
+              tilt: b.preset.measured_tilt? ? tilt : nil)
             nodes = result.respond_to?(:outputs) ? result.outputs : [result]
             nodes *= record.chain.nodes.length if nodes.length == 1
             run = ->(i, count) {
@@ -688,17 +753,20 @@ module MB
             }
           else
             old = session.mastering_trim
+            old_tilt = session.mastering_tilt
             old_capture = session.mastering_capture
             c = nil
             begin
               MB::Sound.keeping_random_state do
                 Internal.restore_rng(record.chain.rng.dup) if record.chain.rng
                 session.mastering_trim = gain
+                session.mastering_tilt = tilt
                 session.mastering_capture = nil
                 Session.with_context(session: session) { c = session.send(:build_master, record.chain.block, preset: record.chain.preset) }
               end
             ensure
               session.mastering_trim = old
+              session.mastering_tilt = old_tilt
               session.mastering_capture = old_capture
             end
             run = ->(i, count) { session.send(:master_chain_output, c, record.inputs[i], count) }

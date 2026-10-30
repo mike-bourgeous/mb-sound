@@ -46,15 +46,20 @@ module MB
       # Lists the loop files in +dir+ (recursively) with their tempo,
       # beats, and key from ACID chunks, tags, and file and folder names,
       # without decoding any audio (Sample::LoopInfo); filters by +bpm+ (a
-      # number within 1%, or a Range), +key+ (:Am, or an Array), and
-      # +beats+.  Reads only: never writes to the files.  Returns a
-      # Sample::LoopInfo::List: `list[3].sample` reads one as a Sample.
+      # number within 1%, or a Range), +key+ (:Am, or an Array; any
+      # spelling: :"A#m" finds :Bbm), and +beats+.  +detect: true+ (or
+      # :bpm, :key) decodes the files whose tempo or key nothing gave and
+      # detects them (Sample#detect_tempo, Sample#detect_key; slow on a big
+      # folder the first time, remembered after).  Reads only: never writes
+      # to the files.  Returns a Sample::LoopInfo::List: `list[3].sample`
+      # reads one as a Sample.
       #
       #     loops '~/Loops/Funk'
       #     l = loops('~/Loops', bpm: 90..100, key: [:Am, :C])
+      #     loops('~/Loops/Pads', key: :Am, detect: :key)   # keys from the audio too
       #     bg :brk, l[0].sample.follow
-      def loops(dir = '.', bpm: nil, key: nil, beats: nil, recursive: true)
-        Sample::LoopInfo.list(dir, bpm: bpm, key: key, beats: beats, recursive: recursive)
+      def loops(dir = '.', bpm: nil, key: nil, beats: nil, recursive: true, detect: false)
+        Sample::LoopInfo.list(dir, bpm: bpm, key: key, beats: beats, recursive: recursive, detect: detect)
       end
 
       # Records live audio into a Sample from a launch point (now by

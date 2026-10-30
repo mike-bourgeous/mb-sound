@@ -440,10 +440,12 @@ module MB
         decaying away) keep no name tempo.  `sample.bpm`, `.beats`,
         `.bars`, `.key`, `.meta_source` and `.meta[:why]` (where each came
         from, and why); `Sample[path, detect:
-        true]` (or `.detect_tempo`) finds a missing tempo.  `loops
+        true]` (or `.detect_tempo`, `.detect_key`) finds a missing tempo
+        and key (`sample.key_analysis` shows the key's scores).  `loops
         '~/Loops/Funk'` lists a folder (headers and names only, nothing
         decoded or written), filtered by `bpm: 90..100`, `key: :Am`,
-        `beats: 8`; `list[3].sample` reads one.
+        `beats: 8`; `detect: :key` decodes files without a key and
+        detects it; `list[3].sample` reads one.
 
         `sample.follow` plays a loop in time with the session: its beats
         fill the same span at any tempo, lined up with bar 1 (`align:
@@ -931,7 +933,11 @@ module MB
         the song form its own trim: the loudest reaches the target, the
         others keep `energy:` (0..1) of their distance under it in the mix.
         `master :vinyl, clip: true` rounds off peaks so a kick-led mix can
-        reach its target; options a preset would ignore raise.
+        reach its target; options a preset would ignore raise.  `master
+        :match, reference: 'their_track.flac'` masters like a reference:
+        its loudness and true peak, and renders turn the mix's spectral
+        tilt toward the reference's (scripts: `--reference FILE`;
+        `Mastering.reference(path)` shows what it measured).
         Without a master chain the live output (not renders or recordings)
         ends in a transparent safety limiter at -1 dBFS; `master` says so,
         and any chain or preset replaces it.
@@ -1326,7 +1332,11 @@ module MB
     Help.topic :analysis, 'Analysis', group: :look do
       about <<~TEXT
         Pitch, peaks, and correlation of sounds and arrays, and the form of
-        a render or a file (tempo, beats, bars).
+        a render or a file: tempo, beats, bars, and sections with letter
+        labels (`s = analyze_form('song.flac')`, `s.sections`, `puts
+        s.flow_ruby`, `s.markers!` for `seek :"analysis/b_1"`, and
+        `s.compare(take.form)` to check a render against the flow that
+        played).  Keys: `Sample['pad.wav'].key_analysis`.
       TEXT
       commands :freq_estimate, :peaks, :autocorrelate, :crosscorrelate, :peak_correlation, :analyze_form, :loudness
       note :structure

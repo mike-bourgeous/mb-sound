@@ -221,6 +221,10 @@ module MB
         # Mastering::Targeting), or nil for their drive.
         attr_accessor :mastering_trim
 
+        # The tilt correction (dB per octave) renders give presets that
+        # measure one (:match), or nil for none.
+        attr_accessor :mastering_tilt
+
         # A Mastering::Targeting::Capture recording what targeted master
         # chains get and give (a render's first pass), or nil.
         attr_accessor :mastering_capture
@@ -299,7 +303,7 @@ module MB
 
           chans = source.outputs
           capturing = !@mastering_capture.nil?
-          result, built = Mastering.building(trim: @mastering_trim, capture: capturing) {
+          result, built = Mastering.building(trim: @mastering_trim, tilt: @mastering_tilt, capture: capturing) {
             r = begin
                   if block.nil?
                     GraphNode::Channels.new(chans)

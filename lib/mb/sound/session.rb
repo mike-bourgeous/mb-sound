@@ -383,6 +383,7 @@ module MB
         @master_preset = nil
         @mastering_override = nil
         @mastering_trim = nil
+        @mastering_tilt = nil
         @mastering_capture = nil
         @master_playing = nil
         @markers = nil
