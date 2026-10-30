@@ -1,6 +1,7 @@
 require_relative 'analysis/stft'
 require_relative 'analysis/chroma'
 require_relative 'analysis/key'
+require_relative 'analysis/spectrum'
 
 module MB
   module Sound

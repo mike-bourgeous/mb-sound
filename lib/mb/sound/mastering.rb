@@ -43,8 +43,9 @@ module MB
       # trim), +drive+ (the live trim, Decibels), +fixed+ (true when
       # +drive+ was given: renders keep it instead of measuring), +ride+
       # (nil, or the rider's settings), +options+ (the options it was made
-      # with, for printing), +notes+, and +source+.
-      Preset = Data.define(:name, :title, :steps, :target, :ceiling, :limiter, :drive, :fixed, :ride, :options, :notes, :source) do
+      # with, for printing), +notes+, +source+, and +reference+ (the
+      # Mastering::Reference of :match, else nil).
+      Preset = Data.define(:name, :title, :steps, :target, :ceiling, :limiter, :drive, :fixed, :ride, :options, :notes, :source, :reference) do
         # Applies the chain to +mix+ (a node or bundle), with +trim+ (a gain,
         # Decibels or linear) instead of the preset's drive if given.
         # Returns a node (one channel) or a bundle.  +tap+ (a callable)
@@ -55,7 +56,11 @@ module MB
         #
         # +trim+ may be a Targeting::TrimCurve (measure: :sections), read
         # at +session+'s frame.
-        def apply(mix, trim: nil, tap: nil, from_trim: false, session: nil)
+        #
+        # +tilt+ is the tilt EQ's slope in dB per octave (:match; a
+        # render's measured correction), instead of the preset's own (a
+        # number given as +tilt:+, else none).
+        def apply(mix, trim: nil, tap: nil, from_trim: false, session: nil, tilt: nil)
           gain = trim || drive
           list = from_trim ? steps.drop_while { |st| st[0] != :trim } : steps
           list.reduce(mix) { |m, (method, args, kwargs)|
@@ -87,6 +92,8 @@ module MB
               }
             when :highpass
               m.filter(:highpass, cutoff: args[0], quality: kwargs.fetch(:quality, 0.7071))
+            when :tilt
+              Mastering.tilt_eq(m, tilt || fixed_tilt || 0)
             else
               m.public_send(method, *args, **kwargs)
             end
@@ -133,6 +140,18 @@ module MB
           !fixed && !ride
         end
 
+        # :match's +tilt:+ given as a number (dB per octave), else nil.
+        def fixed_tilt
+          t = options[:tilt]
+          t.is_a?(Numeric) ? t.to_f : nil
+        end
+
+        # True if renders measure the tilt correction (:match with tilt:
+        # true, the default, on a targeted render).
+        def measured_tilt?
+          !reference.nil? && targeted? && options.fetch(:tilt, true) == true
+        end
+
         # The call that makes this preset, e.g. `:club` or
         # `:club, lufs: -8` (for #to_ruby and set documents).
         def call_ruby
@@ -151,7 +170,8 @@ module MB
           tp = format('%.1f dBTP', ceiling.db_value)
           chain = steps.map(&:first).join(' -> ')
           drive_text = fixed ? ", drive #{format('%+.1f', drive.db_value)} dB" : ''
-          "#{name}: #{format('%.1f', target.lufs)} LUFS#{measure_text ? " (#{measure_text})" : ''}, #{tp}#{limiter ? '' : ' (no limiter)'}#{drive_text}#{ride ? ', riding' : ''}; #{chain}"
+          ref_text = reference ? ", like #{reference.name} (tilt #{format('%+.2f', reference.tilt)} dB/oct)" : ''
+          "#{name}: #{format('%.1f', target.lufs)} LUFS#{measure_text ? " (#{measure_text})" : ''}, #{tp}#{limiter ? '' : ' (no limiter)'}#{drive_text}#{ride ? ', riding' : ''}#{ref_text}; #{chain}"
         end
 
         def to_s
@@ -221,13 +241,23 @@ module MB
                'render exactly.',
         source: 'Kez Volta, persona panel 2026-10-13 (research-persona-edm); maintainer\'s omnibus9 Bench pick ' \
                 '(2026-10-18: "I like the direction but now the breakdown is too quiet")'
+      preset :match, about: 'Match: a reference track\'s loudness and tilt', tags: %i[reference],
+        defaults: { mono: false, glue: true, tilt: true },
+        notes: 'Reference mastering: `master :match, reference: \'their_track.flac\'` reaches the reference\'s integrated ' \
+               'loudness (lufs: overrides) under a ceiling at its true peak (within -3..-0.5 dBTP; ceiling: overrides), and ' \
+               'turns the mix\'s long-term spectrum toward the reference\'s tilt (dB per octave, 100 Hz to 10 kHz) with seven ' \
+               'octave-spaced high shelves after the trim: renders measure the mix in their first pass (within 1.5 dB/oct); ' \
+               'live there is no measurement, so tilt: takes a number (dB/oct) or false.  Then gentle glue (1.5:1 RMS, 5 dB ' \
+               'over the target) and the club\'s two limiters.',
+        source: 'Long-term average spectrum matching as in reference-matching mastering tools (the tilt only: a slope, not ' \
+                'a matching EQ curve); BS.1770-4 (loudness, true peak); listen-1 (2026-10-30)'
 
       # Options of .from_preset: every preset takes COMMON_OPTIONS, and some
       # their own (PRESET_OPTIONS); an option a preset would ignore raises
       # (decks-1, 2026-10-22; Nev's N14: `master(:vinyl, clip: true)` was
       # accepted and did nothing).
       COMMON_OPTIONS = %i[lufs platform ceiling drive ride mono glue measure loudest_bars percentile energy].freeze
-      PRESET_OPTIONS = { club: %i[clip air], vinyl: %i[clip de_ess] }.freeze
+      PRESET_OPTIONS = { club: %i[clip air], vinyl: %i[clip de_ess], match: %i[reference tilt] }.freeze
       OPTIONS = (COMMON_OPTIONS + PRESET_OPTIONS.values.flatten).uniq.freeze
 
       # What a render's target measures (+measure:+): the song's integrated
@@ -282,15 +312,25 @@ module MB
       # times as there).
       RIDE_DEFAULTS = { range: 9.db, down: 3.0, up: 10.0, gate: 10.0 }.freeze
 
+      # Options a preset can't be built without (:match's reference:).
+      REQUIRED_OPTIONS = { match: %i[reference] }.freeze
+
       class << self
         # The preset names.
         def names
           preset_names
         end
 
-        # Every preset built at its defaults (Preset values), by name.
+        # The preset names that build at their defaults (not :match, which
+        # needs a reference; see REQUIRED_OPTIONS).
+        def standalone_names
+          names.reject { |n| REQUIRED_OPTIONS.key?(n) }
+        end
+
+        # Every preset that builds at its defaults (Preset values), by name
+        # (see .standalone_names).
         def built_presets
-          names.to_h { |n| [n, from_preset(n)] }
+          standalone_names.to_h { |n| [n, from_preset(n)] }
         end
 
         # A Preset: +name+ (:club, :streaming, :quiet, :vinyl, or a Preset,
@@ -371,10 +411,26 @@ module MB
 
           o = defaults.merge(options)
           o[:lufs] = o.delete(:platform) if o.key?(:platform)
+          reference = nil
+          if chain == :match
+            raise ArgumentError, "master #{key.inspect} needs reference: the track to match (a sound file, a Sample, or audio)" unless o[:reference]
+            unless [true, false].include?(o[:tilt]) || o[:tilt].is_a?(Numeric)
+              raise ArgumentError, "tilt: is true (measured in renders), false, or a correction in dB per octave (got #{o[:tilt].inspect})"
+            end
+            reference = Mastering.reference(o[:reference])
+            o[:lufs] = reference.lufs unless o.key?(:lufs)
+          end
           target = target_of(o[:lufs])
           # An explicit ceiling, else the preset's own (club, vinyl), else
-          # the target's (platforms, broadcast)
-          ceiling = options.fetch(:ceiling) { defaults[:ceiling] || (target.true_peak || Loudness::DEFAULT_TRUE_PEAK).db }
+          # the reference's true peak (match), else the target's
+          # (platforms, broadcast)
+          ceiling = options.fetch(:ceiling) {
+            if reference
+              reference.true_peak.clamp(MATCH_CEILING.begin, MATCH_CEILING.end).round(1).db
+            else
+              defaults[:ceiling] || (target.true_peak || Loudness::DEFAULT_TRUE_PEAK).db
+            end
+          }
           ceiling = Decibels.new(Decibels.db_of(ceiling, 'ceiling')) unless ceiling.is_a?(Decibels)
           raise ArgumentError, "ceiling: must be at most 0 dBTP (got #{ceiling.inspect})" if ceiling.db_value > 0
 
@@ -398,7 +454,7 @@ module MB
           Preset.new(
             name: key, title: entry.about, steps: steps, target: target, ceiling: ceiling,
             limiter: steps.any? { |s| s[0] == :limit }, drive: drive, fixed: fixed, ride: ride,
-            options: options.dup.freeze, notes: definition[:notes], source: definition[:source]
+            options: options.dup.freeze, notes: definition[:notes], source: definition[:source], reference: reference
           )
         end
 
@@ -409,9 +465,12 @@ module MB
         #
         # With +capture+, every preset records the signal entering its trim
         # (Targeting::Tap), and the presets come back as Built values.
-        def building(trim: nil, capture: false)
+        #
+        # +tilt+ is the tilt correction (dB per octave) for presets that
+        # measure one (:match; see Preset#measured_tilt?).
+        def building(trim: nil, capture: false, tilt: nil)
           old = Thread.current[:mb_sound_mastering]
-          state = { trim: trim, built: [], capture: capture }
+          state = { trim: trim, built: [], capture: capture, tilt: tilt }
           Thread.current[:mb_sound_mastering] = state
           value = yield
           [value, capture ? state[:built] : state[:built].map(&:preset)]
@@ -431,10 +490,11 @@ module MB
         def build(preset, mix)
           state = Thread.current[:mb_sound_mastering]
           trim = preset.targeted? ? state&.dig(:trim) : nil
-          return (preset.apply(mix, trim: trim).tap { state&.dig(:built)&.push(Built.new(preset, nil, nil)) }) unless state&.dig(:capture)
+          tilt = preset.measured_tilt? ? state&.dig(:tilt) : nil
+          return (preset.apply(mix, trim: trim, tilt: tilt).tap { state&.dig(:built)&.push(Built.new(preset, nil, nil)) }) unless state&.dig(:capture)
 
           built = Built.new(preset, nil, nil)
-          built.output = preset.apply(mix, trim: trim, tap: ->(m) { built.tap = Targeting::Tap.new(m.outputs) })
+          built.output = preset.apply(mix, trim: trim, tilt: tilt, tap: ->(m) { built.tap = Targeting::Tap.new(m.outputs) })
           state[:built] << built
           built.output
         end
@@ -453,6 +513,9 @@ module MB
         # Ruby text for an option value.
         def ruby(value)
           case value
+          when Reference then value.path ? value.path.inspect : "nil # FIXME(graph-io): the reference #{value.name} isn't a file"
+          when Sample then value.file ? value.file.inspect : "nil # FIXME(graph-io): the reference sample #{value.name} isn't a file"
+          when Array, Numo::NArray then 'nil # FIXME(graph-io): reference audio given as data'
           when Decibels then value.inspect
           when Loudness::Target then value.key ? value.key.inspect : format('%g', value.lufs)
           when Hash then "{ #{value.map { |k, v| "#{k}: #{ruby(v)}" }.join(', ')} }"
@@ -537,6 +600,19 @@ module MB
           else
             raise ArgumentError, "air: is :static, :dynamic, :band, or false (got #{air.inspect})"
           end
+        end
+
+        # Reference mastering (see Mastering::Reference): the trim, the
+        # tilt EQ (after the trim, so a render's first pass records the
+        # mix before it and the trim search runs through it), gentle glue,
+        # and the club's two limiters.
+        def match_steps(o, target, ceiling)
+          steps = mono_steps(o)
+          steps << [:trim, [], {}]
+          steps << [:tilt, [], {}] if o[:tilt]
+          steps << glue_step(target, over: 5, ratio: 1.5, attack: 0.02, release: 0.25) if o[:glue]
+          steps << [:limit, [], { ceiling: (ceiling.db_value + 2).db, lookahead: 0.001, release: 0.02 }]
+          steps << [:limit, [], { ceiling: ceiling, release: 0.06 }]
         end
 
         def streaming_steps(o, target, ceiling)

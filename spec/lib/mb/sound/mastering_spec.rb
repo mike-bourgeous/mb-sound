@@ -51,7 +51,9 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
 
   describe '.preset' do
     it 'makes the four presets with their targets and ceilings' do
-      expect(described_class.names).to eq(%i[club streaming quiet vinyl hot])
+      expect(described_class.names).to eq(%i[club streaming quiet vinyl hot match])
+      expect(described_class.standalone_names).to eq(%i[club streaming quiet vinyl hot])
+      expect(described_class.built_presets.keys).to eq(described_class.standalone_names)
       club = described_class.from_preset(:club)
       expect(club.target.lufs).to eq(-8.5)
       expect(club.ceiling.db_value).to eq(-0.5)
@@ -134,7 +136,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
     end
 
     it 'lists the presets from the console' do
-      expect { expect(MB::Sound.masters).to eq(described_class.names) }.to output(/:club .*-8\.5 LUFS \(loudest 16 bars\), -0\.5 dBTP/).to_stdout
+      expect { expect(MB::Sound.masters).to eq(described_class.names) }.to output(/:club .*-8\.5 LUFS \(loudest 16 bars\), -0\.5 dBTP.*\n  :match .*\(needs reference:\)\n\z/m).to_stdout
       expect(MB::Sound.masters(:vinyl).notes).to match(/RIAA/)
     end
   end

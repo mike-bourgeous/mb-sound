@@ -908,7 +908,11 @@ module MB
         the song form its own trim: the loudest reaches the target, the
         others keep `energy:` (0..1) of their distance under it in the mix.
         `master :vinyl, clip: true` rounds off peaks so a kick-led mix can
-        reach its target; options a preset would ignore raise.
+        reach its target; options a preset would ignore raise.  `master
+        :match, reference: 'their_track.flac'` masters like a reference:
+        its loudness and true peak, and renders turn the mix's spectral
+        tilt toward the reference's (scripts: `--reference FILE`;
+        `Mastering.reference(path)` shows what it measured).
         Without a master chain the live output (not renders or recordings)
         ends in a transparent safety limiter at -1 dBFS; `master` says so,
         and any chain or preset replaces it.

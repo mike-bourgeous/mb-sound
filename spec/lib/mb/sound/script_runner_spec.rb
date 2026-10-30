@@ -27,6 +27,19 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       expect { runner(:effect, ['--bogus']) }.to raise_error(described_class::UsageError, /invalid option: --bogus/) { |e| expect(e.help).to include('--output FILE') }
     end
 
+    it 'takes --reference for --master match (listen-1)' do
+      ref = MB::Sound::Mastering::Reference.new(name: 'r', path: nil, lufs: -10.0, true_peak: -1.0, short_term_max: -9, range: 3,
+        tilt: 0.0, bands: {}, seconds: 1)
+      allow(MB::Sound::Mastering).to receive(:reference).and_call_original
+      allow(MB::Sound::Mastering).to receive(:reference).with('ref.flac').and_return(ref)
+      p = runner(:song, ['--reference', 'ref.flac']).send(:mastering_option)
+      expect([p.name, p.reference, p.target.lufs]).to eq([:match, ref, -10.0])
+      expect(runner(:song, ['--master', 'match', '--reference', 'ref.flac']).send(:mastering_option).name).to eq(:match)
+      expect { runner(:song, ['--master', 'match']).send(:mastering_option) }.to raise_error(described_class::InputError, /needs --reference FILE/)
+      expect { runner(:song, ['--reference', 'ref.flac', '--master', 'club']).send(:mastering_option) }.to raise_error(described_class::InputError, /goes with --master match/)
+      expect(runner(:song, []).instance_variable_get(:@parser).to_s).to include('--reference FILE')
+    end
+
     it 'accepts short options, types, and allowed values after the default' do
       params = {
         count: [2, 'Repeats', 2.., '-n'],

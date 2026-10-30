@@ -487,6 +487,9 @@ module MB
         Mastering.built_presets.each_value do |p|
           puts format('  %-11s %-44s %s', p.name.inspect, p.title, p.summary.sub(/\A\w+: /, ''))
         end
+        Mastering::REQUIRED_OPTIONS.each do |n, opts|
+          puts format('  %-11s %-44s (needs %s)', n.inspect, Mastering.preset_entry(n).about, opts.map { |o| "#{o}:" }.join(', '))
+        end
         Mastering.names
       end
 
@@ -963,7 +966,7 @@ module MB
         Mastering::Targeting.last = result
 
         Internal.restore_rng(rng.dup, seed)
-        second = { override: override, trim: result.trims || result.trim.to_f, check: capture, defer_report: true, pass: 'pass 2/2, mastered' }
+        second = { override: override, trim: result.trims || result.trim.to_f, tilt: result.tilt, check: capture, defer_report: true, pass: 'pass 2/2, mastered' }
         # The second pass replays the first exactly: what the song's blocks
         # print (scheduled-command logs) was printed by the first already
         seconds = Internal.without_stdout {
@@ -1022,7 +1025,7 @@ module MB
 
       # Renders without normalization (see #render).  +mastering+ (a Hash)
       # passes a render's mastering settings to its Session (+:override+,
-      # +:trim+, +:capture+ for the first pass, +:check+ for the second; see
+      # +:trim+, +:tilt+, +:capture+ for the first pass, +:check+ for the second; see
       # Mastering::Targeting), gets back +:session+ and +:origin+ (the frame
       # where the file starts), and with +:defer_report+ leaves printing the
       # report to the caller.
@@ -1045,6 +1048,7 @@ module MB
         session.ring = ring
         session.mastering_override = mastering[:override]
         session.mastering_trim = mastering[:trim]
+        session.mastering_tilt = mastering[:tilt]
         if (capture = mastering[:capture])
           session.mastering_capture = capture
           session.add_tap { |mix| capture.add_mix(session.frame - (mix[0]&.length || 0), mix) }

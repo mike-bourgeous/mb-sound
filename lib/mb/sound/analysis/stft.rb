@@ -29,6 +29,19 @@ module MB
           Numo::DFloat.new(n_fft / 2 + 1).seq * sample_rate.to_f / n_fft
         end
 
+        # The energy (sum of squares) of each windowed frame of +mono+, as
+        # #each_chunk frames it (a Numo::DFloat of #count values), from the
+        # samples: by Parseval, each frame's spectral power sum times
+        # 1 / n_fft.
+        def self.frame_energies(mono, n_fft:, hop:)
+          mono = Numo::DFloat.cast(mono)
+          n = count(mono.length, hop)
+          x = Numo::DFloat.zeros(mono.length + n_fft)
+          x[(n_fft / 2)...(n_fft / 2 + mono.length)] = mono
+          w2 = hann(n_fft)**2
+          Numo::DFloat.cast(Array.new(n) { |i| (x[(i * hop)...(i * hop + n_fft)]**2 * w2).sum })
+        end
+
         # Yields (+rows+, +mag+) for each chunk of frames of +mono+ (a Numo
         # array): +rows+ the Range of frame indices, +mag+ a DFloat of
         # rows.size x (n_fft / 2 + 1) magnitudes (a buffer reused between

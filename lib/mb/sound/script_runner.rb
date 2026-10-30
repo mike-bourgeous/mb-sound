@@ -212,7 +212,7 @@ module MB
 
       # Long options of song scripts, which parameters can't be named
       # (acid_song's old `master:` parameter shadowed --master).
-      COMMON_SONG_LONG_OPTIONS = %w[bars bpm from to report master lufs ride seek take stems stem_gain].freeze
+      COMMON_SONG_LONG_OPTIONS = %w[bars bpm from to report master reference lufs ride seek take stems stem_gain].freeze
 
       # Raised for invalid command-line arguments.  #help has the option
       # list, which ScriptingMethods prints before exiting.
@@ -518,12 +518,18 @@ module MB
       private
 
       # The --master preset (a Mastering::Preset, with --ride and, when
-      # riding, --lufs) or false for none.
+      # riding, --lufs; --reference for :match) or false for none.
       def mastering_option
         m = @options[:master]
         return false if m == :none
         raise ArgumentError, "Unknown mastering preset #{m.inspect} for --master (#{Mastering.names.join(', ')}, or none)" unless Mastering.preset?(m)
         options = {}
+        if @options[:reference]
+          raise InputError, "--reference goes with --master match (got --master #{m})" unless m == :match
+          options[:reference] = @options[:reference]
+        elsif m == :match
+          raise InputError, '--master match needs --reference FILE (the track to match)'
+        end
         if @options[:ride]
           options[:ride] = true
           options[:lufs] = @options[:lufs] if @options.key?(:lufs)
@@ -774,6 +780,10 @@ module MB
               "Master through a mastering preset (#{Mastering.names.join(', ')}; after the song's own master effects, replacing " \
               'its preset if it has one; none drops presets); renders reach its loudness target'
             ) { |v| @options[:master] = v.to_sym }
+            o.on('--reference FILE', 'Master like a reference track (--master match: its loudness, true peak, and spectral tilt; implies --master match)') { |v|
+              @options[:reference] = v
+              @options[:master] ||= :match
+            }
             o.on('--ride', 'With --master: ride the gain toward the target live (a slow rider; renders then run once instead of measuring)') { @options[:ride] = true }
             o.on('--lufs LUFS', 'Loudness target for a render (LUFS, or a name like spotify): the mastering preset\'s, else normalizes the file') { |v|
               @options[:lufs] = v.match?(/\A[-+]?\d/) ? Float(v) : v.to_sym

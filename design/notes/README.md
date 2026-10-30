@@ -146,7 +146,7 @@ Rules: changes go through `Session#change`; scene graphs build on the scheduler 
 
 `Session#master` / console `master { |mix| mix.softclip }` runs the mix through a chain of `GraphNode::MixSource` channels; new chains start at launch points with the old one spilling over (`fade:` crossfades), `master nil` bypasses, and the master gain applies before the chain (`post: true` after it).
 Without a chain, realtime live output ends in a transparent -1 dBFS `Session::SafetyLimiter` (never in renders, stems, takes, taps).
-Mastering presets (`master :club`, `:streaming`, `:quiet`, `:vinyl`; `mix.master(:club)` anywhere; `masters`) are frozen `Mastering::Preset` values: renders reach their loudness target exactly in two passes (`Mastering::Targeting`), live uses the preset's drive or `ride: true`.
+Mastering presets (`master :club`, `:streaming`, `:quiet`, `:vinyl`, `:hot`, `:match, reference:`; `mix.master(:club)` anywhere; `masters`) are frozen `Mastering::Preset` values: renders reach their loudness target exactly in two passes (`Mastering::Targeting`), live uses the preset's drive or `ride: true`; `:match` takes a reference track's loudness, true peak, and (renders) spectral tilt.
 
 ### [Buses, sends, and bus sidechains](buses.md)
 
