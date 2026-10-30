@@ -26,7 +26,8 @@ module MB
       # (held notes, note numbers, velocities, controllers, glides), and the
       # Synth's allocator (which lane holds which note).  What doesn't:
       # delay lines, reverbs, choruses, sampler voices, grains, and other
-      # nodes without plan snapshots (their tails start fresh).  Times are
+      # nodes without plan snapshots (their tails start fresh).  Each node
+      # kind says which it is (NodeTraits' +memory+ and +carry+).  Times are
       # moved to the new graph's stream time (graphs count stream time from
       # their own start).
       module Carry
@@ -48,17 +49,10 @@ module MB
           end
         end
 
-        # Node classes whose snapshots aren't running state (values the
-        # graph reads from outside: knobs, constants).
-        SKIP = [GraphNode::Constant, GraphNode::Knob, GraphNode::Knob::Reader].freeze
-
         # Notes node instance variables kept from the new node on a carry:
         # its own stream's position and generation, frame counts, and grid
         # bookkeeping (the rest is the old node's held notes and values).
         NOTES_KEEP = %i[@generation @frames_read @tail @grid_end @grid_generation @smooth_generation].freeze
-
-        # Where the default (stateless: nil) plan_snapshot is defined.
-        STATELESS_OWNERS = [MB::Sound::Plan::Describable, (MB::Sound::Plan::Describing if defined?(MB::Sound::Plan::Describing))].compact.freeze
 
         module_function
 
@@ -149,35 +143,16 @@ module MB
           roots.flat_map { |r| [r, *(r.respond_to?(:graph) ? r.graph : [])] }.uniq(&:__id__)
         end
 
-        # Node classes with no running state of their own (wiring,
-        # arithmetic, mixing, values from outside, note plumbing whose state
-        # is its Notes nodes'), by name so the list loads before them.
-        STATELESS = %w[
-          MB::Sound::GraphNode::Tee MB::Sound::GraphNode::Tee::Branch MB::Sound::GraphNode::NodeOutput
-          MB::Sound::GraphNode::Mixer MB::Sound::GraphNode::Multiplier MB::Sound::GraphNode::ProcNode
-          MB::Sound::GraphNode::BinaryOperation MB::Sound::GraphNode::NoteFrequency MB::Sound::GraphNode::QualityResonance
-          MB::Sound::GraphNode::Constant MB::Sound::GraphNode::Knob MB::Sound::GraphNode::Knob::Reader
-          MB::Sound::GraphNode::ChannelMixer MB::Sound::GraphNode::ChannelMixer::Output MB::Sound::GraphNode::Ports::Port
-          MB::Sound::GraphNode::UnaryFunction MB::Sound::GraphNode::MathFunction MB::Sound::GraphNode::ComplexNode
-          MB::Sound::GraphNode::BusTap MB::Sound::GraphNode::Channels MB::Sound::GraphNode::ZoneValue
-          MB::Sound::Synth MB::Sound::Synth::Output MB::Sound::Sequence::TempoNode MB::Sound::MIDI::ClipSource
-          MB::Sound::Notes::EnvelopeInputs::Port MB::Sound::Notes::NoteEnvelope::GmTime MB::Sound::Notes::NotePitch
-          MB::Sound::Notes::Resonance MB::Sound::Notes::Aftertouch MB::Sound::SQ80::TimeScale
-        ].freeze
-
         # True if +node+ (a graph node) has running state a carry doesn't
-        # copy: no plan snapshot and not a STATELESS kind (delay lines,
-        # reverbs, feedback loops, choruses, formants, crossovers, sampler
-        # voices, grains, loop players, ...), filters other than SVFs,
-        # cookbook biquads, and chains of them, and drum kit voices (their
-        # idle sleeping; their hits' nodes carry).  Unknown kinds count:
-        # the swap then crossfades rather than cut.
+        # copy (NodeTraits: memory other than :none, carry :fresh): delay
+        # lines, reverbs, feedback loops, choruses, formants, crossovers,
+        # limiters, sampler voices, grains, loop players, ..., filters other
+        # than SVFs, cookbook biquads, and chains of them, and drum kit
+        # voices (their idle sleeping; their hits' nodes carry).  Unknown
+        # node kinds (classes that declare no traits) count: the swap then
+        # crossfades rather than cut.
         def uncarried?(node)
-          return false unless node.is_a?(GraphNode) || node.is_a?(Drums::Voice)
-          return true if node.is_a?(Filter::SampleWrapper) && !Filter::SampleWrapper.filter_state?(node.base_filter)
-          return true if node.is_a?(Drums::Voice)
-          return false if stateful?(node)
-          node.class.ancestors.none? { |c| STATELESS.include?(c.name) }
+          NodeTraits.of(node).uncarried?
         end
 
         # True for a voice's note-following nodes (Notes nodes, note
@@ -186,10 +161,11 @@ module MB
           node.class.name.to_s.start_with?('MB::Sound::Notes::')
         end
 
-        # True if +node+ keeps running state that carries (see SKIP).
+        # True if +node+ keeps running state that carries through its plan
+        # snapshot (NodeTraits' carry :snapshot; values the graph reads from
+        # outside, knobs and constants, have memory :none).
         def stateful?(node)
-          node.respond_to?(:plan_snapshot) && node.respond_to?(:plan_restore) && SKIP.none? { |k| node.is_a?(k) } &&
-            !STATELESS_OWNERS.include?(node.method(:plan_snapshot).owner)
+          NodeTraits.of(node).snapshot?
         end
 
         # Copies the state of +plan+'s old nodes into the new ones (see the
@@ -271,16 +247,17 @@ module MB
           # same grid of the synth's own time)
           SYNTH_STATE.each do |iv|
             v = o.instance_variable_get(iv)
-            n.instance_variable_set(iv, v.is_a?(Array) ? Marshal.load(Marshal.dump(v)) : v)
+            n.instance_variable_set(iv, v.frozen? ? v : Marshal.load(Marshal.dump(v))) # (Arrays, QuietRuns: copies)
           end
           shift
         end
 
         # A Synth's idle-skipping and lane measuring state, carried as it
-        # is (frame counts of the synth's own time and per-lane flags).
+        # is (frame counts of the synth's own time, per-lane flags, and the
+        # lanes' QuietRuns).
         SYNTH_STATE = %i[
-          @skipping @skip_generation @cell_loud @skip_position @grid_offset @grid_started @quiet @quiet_pos @peaks
-          @cell_lo @cell_hi @cell_fresh @done @last_loud
+          @skipping @skip_generation @lane_runs @skip_position @grid_offset @grid_started @quiet @quiet_pos @peaks
+          @cell_lo @cell_hi @cell_fresh @done @end_quiet
         ].freeze
 
         # Seconds of the old source read ahead for the held notes'

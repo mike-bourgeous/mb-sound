@@ -62,7 +62,7 @@ RSpec.describe('mb/sound/dsl') do
     expect(out).to include('[MB::Sound::Note, true, "MB::Sound::Session", true, false]')
     expect(out).to include('class: NameError', 'module: NameError', 'foo bg: mine', 'object: false')
     expect(out).to include('later: 4 true', 'note: 56 false')
-    # The 0.25 s part and its quiet second (Session::TAIL_QUIET_SECONDS)
+    # The 0.25 s part and its quiet second (QuietRun::QUIET_SECONDS)
     # played before the program ended
     expect(Integer(out[/frames (\d+)/, 1])).to be >= 1.25 * 48000
   end

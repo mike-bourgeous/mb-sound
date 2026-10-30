@@ -8,7 +8,7 @@ One note per subsystem: the design decisions with their dates, measurements, res
 
 ### [Core Abstraction: GraphNode DSL](graph_nodes.md)
 
-`GraphNode` (`lib/mb/sound/graph_node.rb`) is mixed into any class with `#sample` and gives the fluent DSL (`123.hz.saw.lp4(800).softclip`); DSL methods live in `lib/mb/sound/graph_node/*_methods.rb`, node types in `lib/mb/sound/graph_node/`, traversal in `Traversable`.  Every consumer calls `get_sampler` on the nodes it stores, so shared nodes branch through a `Tee` (lockstep branches share one frozen buffer: copy a buffer before modifying it only if `buf.frozen?`).  Sums ring until every input ends (`.ring(:first)` opts out), products end with their first input; `node.at(x)` scales any node; DSL names are reserved on node classes.
+`GraphNode` (`lib/mb/sound/graph_node.rb`) is mixed into any class with `#sample` and gives the fluent DSL (`123.hz.saw.lp4(800).softclip`); DSL methods live in `lib/mb/sound/graph_node/*_methods.rb`, node types in `lib/mb/sound/graph_node/`, traversal in `Traversable`.  Every consumer calls `get_sampler` on the nodes it stores, so shared nodes branch through a `Tee` (lockstep branches share one frozen buffer: copy a buffer before modifying it only if `buf.frozen?`).  Sums ring until every input ends (`.ring(:first)` opts out), products end with their first input; `node.at(x)` scales any node; DSL names are reserved on node classes; every node class declares `node_traits` (memory, timeline, idle check; `NodeTraits`), and sleepers and tails share one `QuietRun`.
 
 ### [Graph I/O (recipes and Ruby export)](graph_io.md)
 
@@ -76,7 +76,7 @@ Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`
 
 ### [Delays](delays.md)
 
-`#delay` (`Filter::Delay`) and `#multitap` share `MB::Sound::DelayLine` (C reads, exact mirrors; `:sinc` interpolation by default, `:cubic`, `:linear`); times are any length or node (`96.samples`, `3.n16`, `lfo.samples`), `feedback:`/`wet:`/`dry:` numbers or nodes, and delays ring out after their input ends (`MB::Sound::RingOut`).  Delay networks (`FastDelay.network`) build `multitap(t1, t2, feedback: [g1, g2] | g)`, `ping_pong(t, feedback:, spread:, mix:, input: :mono | :stereo)`, and `haas(15.ms, side:)`; tape echoes are `sig.tape_echo(:reel | :slapback | :ping_pong | :dub, time:, feedback:, mix:, tone:, low_cut:, drive:, wow:, flutter:)` (library family `:delay`).  Same output at any buffer size.
+`#delay` (`Filter::Delay`) and `#multitap` share `MB::Sound::DelayLine` (C reads, exact mirrors; `:sinc` interpolation by default, `:cubic`, `:linear`); times are any length or node (`96.samples`, `3.n16`, `lfo.samples`), `feedback:`/`wet:`/`dry:` numbers or nodes, and delays ring out after their input ends (`MB::Sound::QuietRun#advance`).  Delay networks (`FastDelay.network`) build `multitap(t1, t2, feedback: [g1, g2] | g)`, `ping_pong(t, feedback:, spread:, mix:, input: :mono | :stereo)`, and `haas(15.ms, side:)`; tape echoes are `sig.tape_echo(:reel | :slapback | :ping_pong | :dub, time:, feedback:, mix:, tone:, low_cut:, drive:, wow:, flutter:)` (library family `:delay`).  Same output at any buffer size.
 
 ### [Chorus](chorus.md)
 

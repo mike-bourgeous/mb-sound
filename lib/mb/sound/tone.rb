@@ -93,6 +93,7 @@ module MB
       include GraphNode
       include GraphNode::SampleRateHelper
       include GraphNode::Ports
+      node_traits memory: :short
 
       port :wraps, 'Sync pulses: 0 except just after the phase wraps, where the value 1 - d (0 < 1 - d <= 1) says the wrap was d samples earlier; negative when moving backward; 1 after a jump (reset or sync)'
       port :increment, 'The phase increment of each sample, in cycles'

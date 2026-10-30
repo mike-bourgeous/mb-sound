@@ -17,7 +17,7 @@ module MB
       # output goes into the master mix or another bus.  It keeps
       # processing after its senders stop, so tails ring out, and sleeps
       # (no CPU) once its input and output have been quiet for
-      # Master::TAIL_QUIET_SECONDS, deciding on a fixed frame grid so its
+      # QuietRun::QUIET_SECONDS, deciding on a fixed frame grid so its
       # output is the same at any buffer size.
       #
       # Routing belongs to player names, like mutes: each name has a main
@@ -32,7 +32,7 @@ module MB
         # Frames between the moments a quiet bus may fall asleep (the same
         # grid as idle Synth lanes), so sleeping is the same at any buffer
         # size.
-        SLEEP_GRID = Synth::SKIP_GRID
+        SLEEP_GRID = QuietRun::GRID
 
         # The loudest send level (+24 dB).
         MAX_SEND = 16.0
@@ -44,13 +44,15 @@ module MB
         # +chains+ its effect chains (Master::Chain, the newest last), +input+
         # the span's input (one SFloat per channel, nil if nothing was sent),
         # +strip_level+/+strip_ramp+ its mute/solo level (see Strip),
-        # +asleep+ true while it isn't processed, +quiet_from+ the session
-        # frame where its current quiet stretch began, +wake_at+ a frame to
+        # +asleep+ true while it isn't processed, +quiet+ the QuietRun of its
+        # input and output (session frames: it may fall asleep once both have
+        # been quiet for QuietRun::QUIET_SECONDS, on the SLEEP_GRID; see
+        # #new_bus_quiet), +wake_at+ a frame to
         # wake on (a chain change landing while it sleeps), and +playing+
         # whether the timeline moved last span (for its clips).
         Bus = Struct.new(
           :name, :to, :chains, :block, :input, :strip_level, :strip_ramp,
-          :asleep, :quiet_from, :wake_at, :playing, :frames, :out_bufs, :in_bufs,
+          :asleep, :quiet, :wake_at, :playing, :frames, :out_bufs, :in_bufs,
           keyword_init: true
         )
 
@@ -103,7 +105,7 @@ module MB
               created = true
               b = @buses[name] = Bus.new(
                 name: name, to: to, chains: [], block: nil, input: nil,
-                strip_level: 1.0, strip_ramp: nil, asleep: false, quiet_from: @frame,
+                strip_level: 1.0, strip_ramp: nil, asleep: false, quiet: new_bus_quiet,
                 wake_at: nil, playing: false, frames: nil
               )
             end
@@ -954,7 +956,7 @@ module MB
             s = wake
             b.asleep = false
             b.wake_at = nil
-            b.quiet_from = frame + s
+            b.quiet.reset(frame + s)
             # Clips and tempo-synced nodes in the chain catch up with the
             # timeline, as players do when they wake
             pos = Sequence::Transport.position_at(from, s, per_sample)
@@ -976,7 +978,6 @@ module MB
             c.timeline_nodes.each(&:pause_timeline) unless playing
           end
 
-          quiet = (Master::TAIL_QUIET_SECONDS * rate).round
           dest = into || (b.to ? (bus_input(b.to) || mix) : mix)
           tap = read ? bus_signal_buffer(b.name) : nil
           stem = parts && @stems.buses ? Array.new(@channels) { Numo::SFloat.zeros(count) } : nil
@@ -984,14 +985,13 @@ module MB
           p0 = s
           while p0 < e
             f = frame + p0
-            if f % SLEEP_GRID == 0 && f - b.quiet_from >= quiet && bus_settled?(b)
+            if b.quiet.complete_at?(f) && bus_settled?(b)
               b.asleep = true
               break
             end
 
             # Split at the first grid frame where it could fall asleep
-            g = MB::M.max(f + 1, b.quiet_from + quiet)
-            g = ((g + SLEEP_GRID - 1) / SLEEP_GRID) * SLEEP_GRID
+            g = b.quiet.next_point(f)
             p1 = g < frame + e ? g - frame : e
 
             out = run_bus_chains(b, input, p0, p1, from, per_sample, rate, to)
@@ -1075,7 +1075,7 @@ module MB
           block = chain&.block
           sh = Bus.new(
             name: bus, to: b.to, chains: [], block: block, input: nil,
-            strip_level: b.strip_level, strip_ramp: b.strip_ramp, asleep: false, quiet_from: @frame,
+            strip_level: b.strip_level, strip_ramp: b.strip_ramp, asleep: false, quiet: new_bus_quiet,
             wake_at: nil, playing: b.playing, frames: nil
           )
           # (built on the render thread: commands in the block use this Session)
@@ -1089,7 +1089,7 @@ module MB
         end
 
         # Where a sleeping bus wakes in this span: its first input frame at
-        # or above Master::TAIL_THRESHOLD, an unmute ramp's start, or a chain
+        # or above QuietRun::QUIET, an unmute ramp's start, or a chain
         # change's landing frame; nil to keep sleeping.
         def bus_wake_index(b, input, frame, count)
           candidates = []
@@ -1103,7 +1103,7 @@ module MB
           candidates << MB::M.max(b.wake_at - frame, 0) if b.wake_at
           if input
             input.each do |x|
-              idx = x.abs.ge(Master::TAIL_THRESHOLD).where
+              idx = x.abs.ge(QuietRun::QUIET).where
               candidates << idx[0] if idx.length > 0
             end
           end
@@ -1120,27 +1120,14 @@ module MB
         # Moves bus +b+'s quiet stretch past any loud input or output frame
         # in [+p0+, +p1+) of the span starting at session frame +frame+.
         def track_bus_quiet(b, input, out, p0, p1, frame)
-          last = nil
-          input&.each do |x|
-            i = bus_last_loud(x, p0, p1 - p0)
-            last = i if i && (last.nil? || i > last)
-          end
-          out.each do |x|
-            i = bus_last_loud(x, 0, x.length)
-            last = i if i && (last.nil? || i > last)
-          end
-          b.quiet_from = MB::M.max(b.quiet_from, frame + p0 + last + 1) if last
+          q = b.quiet
+          input&.each { |x| q.track(x, frame + p0, p0, p1 - p0) }
+          out.each { |x| q.track(x, frame + p0) }
         end
 
-        # The index (from +p0+) of the last of +n+ samples of +x+ from +p0+
-        # at or above Master::TAIL_THRESHOLD, or nil.
-        def bus_last_loud(x, p0, n)
-          i = FastArithmetic.last_at_least(x, p0, n, Master::TAIL_THRESHOLD)
-          if i.nil?
-            idx = x[p0...(p0 + n)].abs.ge(Master::TAIL_THRESHOLD).where
-            return idx.length > 0 ? idx[-1] : nil
-          end
-          i < 0 ? nil : i
+        # A bus's QuietRun (see Bus), quiet from now.
+        def new_bus_quiet
+          QuietRun.new((QuietRun::QUIET_SECONDS * output.sample_rate).round, grid: SLEEP_GRID, from: @frame)
         end
 
         # Runs bus +b+'s chains over frames [+p0+, +p1+) of the span and

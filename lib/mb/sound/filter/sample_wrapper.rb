@@ -15,6 +15,7 @@ module MB
         extend Forwardable
         include MB::Sound::GraphNode
         include MB::Sound::GraphNode::SampleRateHelper
+        node_traits memory: :short
 
         class WrapperArgumentError < ArgumentError
           def initialize(msg = nil, field: nil, source: nil)
@@ -232,6 +233,25 @@ module MB
             states = f.filters.map { |x| filter_state(x) }
             states.include?(nil) ? nil : [:chain, states]
           end
+        end
+
+        # The wrapper's NodeTraits answer for the filter it wraps: long memory
+        # for a delay or FIR filter (their traits), else short, and carried
+        # by the wrapper's snapshot only where .filter_state keeps the
+        # filter's state (cookbook biquads, SVFs, and chains of them; other
+        # filters start fresh, so a rebuild crossfades).
+        def node_traits
+          f = NodeTraits.of(@base_filter)
+          self.class.node_traits.with(
+            memory: f.memory == :long ? :long : :short,
+            idle_check: f.idle_check && :filter_idle?,
+            carry: SampleWrapper.filter_state?(@base_filter) ? :snapshot : :fresh
+          )
+        end
+
+        # The wrapped filter's idle check (see #node_traits).
+        def filter_idle?
+          @base_filter.public_send(NodeTraits.of(@base_filter).idle_check)
         end
 
         # True if .filter_state keeps filter +f+'s state.

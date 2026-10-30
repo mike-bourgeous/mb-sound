@@ -12,6 +12,7 @@ module MB
         include BufferHelper
         include SampleRateHelper
         include ArithmeticNodeHelper
+        node_traits memory: :none
 
         # The constant value by which the output will be multiplied.
         attr_reader :constant

@@ -2,13 +2,13 @@ module MB
   module Sound
     module GraphNode
       # A gate that follows whether its source is making sound: 1 while the
-      # source is above MB::Sound::RingOut::THRESHOLD (-90 dB) and for
+      # source is above MB::Sound::QuietRun::QUIET (-90 dB) and for
       # +hold+ seconds after it falls below, then a linear fade to 0 over
       # +fade+ seconds; back to 1 on the first loud sample.  It starts
       # closed (0) until the source first sounds.  When the source ends, the
       # gate plays on as if the source were silent and ends where its fade
       # reaches 0 (at once if already closed), the way delays ring out
-      # (MB::Sound::RingOut), so a graph it feeds ends after its source.
+      # (MB::Sound::QuietRun#advance), so a graph it feeds ends after its source.
       #
       # Each sample's value depends only on how many samples have passed
       # since the source's last loud sample, so the gate (and where it ends)
@@ -24,6 +24,7 @@ module MB
       class Sounding
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         # The source node (or Channels bundle).
         attr_reader :source
@@ -82,10 +83,10 @@ module MB
 
           loud = nil
           if reads.length == 1
-            loud = (reads[0].abs > MB::Sound::RingOut::THRESHOLD).where
+            loud = (reads[0].abs > MB::Sound::QuietRun::QUIET).where
           elsif n > 0
             mask = Numo::Bit.zeros(count)
-            reads.each { |d| mask[0...d.length] = mask[0...d.length] | (d.abs > MB::Sound::RingOut::THRESHOLD) }
+            reads.each { |d| mask[0...d.length] = mask[0...d.length] | (d.abs > MB::Sound::QuietRun::QUIET) }
             loud = mask.where
           end
           return sample_loud(count, loud) if !@ended && loud && !loud.empty? && @hold >= count

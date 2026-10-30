@@ -45,6 +45,7 @@ module MB
       class Node
         include GraphNode
         include GraphNode::SampleRateHelper
+        node_traits memory: :short
 
         # Seconds after the stream ends before #ends_graph? nodes return nil
         # even if envelopes are still sounding (the old MIDI file nodes'

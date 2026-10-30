@@ -6,8 +6,8 @@ module MB
       # sending notes on the exact sample of its stop time, but keeps
       # rendering, so envelopes release and delays and reverbs inside the
       # graph ring out naturally.  It sleeps (is kept for #resume, like any
-      # stopped player) once its output has stayed below
-      # Master::TAIL_THRESHOLD (-90 dB) for RING_QUIET_SECONDS, cut on the
+      # stopped player) once its output has stayed below QuietRun::QUIET
+      # (-90 dB) for RING_QUIET_SECONDS (a QuietRun), cut on the
       # exact sample where that quiet stretch ends (so the result is the
       # same at any buffer size; the graph is read in pieces ending there,
       # so it sleeps having rendered exactly that far and a revived graph
@@ -27,20 +27,20 @@ module MB
       # starting a second copy of it, so its notes come back in time with
       # the graph's state intact.
       module Tails
-        # How long a ringing tail must stay below Master::TAIL_THRESHOLD
-        # before the player sleeps.
-        RING_QUIET_SECONDS = Master::TAIL_QUIET_SECONDS
+        # How long a ringing tail must stay below QuietRun::QUIET before the
+        # player sleeps.
+        RING_QUIET_SECONDS = QuietRun::QUIET_SECONDS
 
         # Bars to fade a graph that has no clips to stop (see the module
         # comment).
         RING_DRONE_FADE = 1/4r
 
         # A ringing player's state: +stop_frame+ is the session frame of the
-        # stop sample (nil until the stop lands in a buffer); +quiet_from+
-        # the session frame where the current quiet stretch began; +sources+
+        # stop sample (nil until the stop lands in a buffer); +quiet+ the
+        # QuietRun following its output from there (session frames); +sources+
         # the clip sources silenced; +capped+ true once the cap fade began;
         # +active+ false once another stop (a fade or cut) took over.
-        Ring = Struct.new(:stop_frame, :quiet_from, :sources, :capped, :active, keyword_init: true)
+        Ring = Struct.new(:stop_frame, :quiet, :sources, :capped, :active, keyword_init: true)
 
         # True if the player named +name+ is ringing out (see the module
         # comment).
@@ -73,7 +73,8 @@ module MB
           p.stop_at = time
           p.fade_out = nil
           p.fading_out = false
-          p.ring = Ring.new(stop_frame: nil, quiet_from: nil, sources: sources, capped: false, active: true)
+          quiet = QuietRun.new((RING_QUIET_SECONDS * output.sample_rate).round)
+          p.ring = Ring.new(stop_frame: nil, quiet: quiet, sources: sources, capped: false, active: true)
           true
         end
 
@@ -82,7 +83,7 @@ module MB
         def begin_ring(p, base, stop_idx)
           ring = p.ring
           ring.stop_frame = base + stop_idx
-          ring.quiet_from = ring.stop_frame
+          ring.quiet.reset(ring.stop_frame)
           ring.sources.each { |s| s.ring_out(p.stop_at) }
         end
 
@@ -157,64 +158,23 @@ module MB
         end
 
         # Follows a ringing player's output +data+ (+frames+ frames from
-        # session frame +frame+), returning how many of those frames to mix:
-        # all of them, or fewer if the tail's quiet stretch reaches
-        # RING_QUIET_SECONDS inside this buffer (the player then sleeps).
+        # session frame +frame+) with its QuietRun, returning how many of
+        # those frames to mix: all of them, or fewer if the tail's quiet
+        # stretch reaches RING_QUIET_SECONDS inside this buffer (the player
+        # then sleeps).  (#render_player reads a ringing graph in pieces
+        # that end where the quiet stretch would, so it completes only at a
+        # piece's end.)
         def follow_ring(p, data, frame, frames, rate)
-          ring = p.ring
-          quiet = (RING_QUIET_SECONDS * rate).round
-
-          chans = data.filter_map { |d|
+          run = p.ring.quiet
+          i = -1
+          while (i += 1) < data.length
+            d = data[i]
             next if d.nil? || d.empty?
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
-            d.length > frames ? d[0...frames] : d
-          }
-
-          # Fast paths for buffers shorter than the quiet stretch (no quiet
-          # stretch can start and end inside one): a silent buffer, or one
-          # whose last sample is loud (the tail is still going)
-          if frames < quiet
-            peak = 0
-            chans.each { |d| v = abs_peak(d); peak = v if v > peak }
-            if peak < Master::TAIL_THRESHOLD
-              ending = ring.quiet_from + quiet
-              return ending <= frame + frames ? MB::M.max(ending - frame, 0) : frames
-            elsif chans.any? { |d| d.length == frames && d[-1].abs >= Master::TAIL_THRESHOLD }
-              ring.quiet_from = MB::M.max(ring.quiet_from, frame + frames)
-              return frames
-            end
+            run.track(d, frame, 0, d.length > frames ? frames : d.length)
           end
 
-          loud = nil
-          chans.each do |d|
-            next if d.nil? || d.empty?
-            d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
-            m = d[0...MB::M.min(d.length, frames)].abs.ge(Master::TAIL_THRESHOLD)
-            loud = loud ? (loud | m) : m
-          end
-
-          # Gaps between loud samples (and from the quiet stretch's start to
-          # the first one, and from the last one to the buffer's end)
-          # (loud samples before the quiet stretch's start don't count)
-          idx = loud ? loud.where : Numo::Int32[]
-          rel = ring.quiet_from - frame
-          idx = idx[idx.ge(rel)] if rel > 0 && idx.length > 0
-          if idx.length > 0
-            first_gap = idx[0] - rel
-            if first_gap >= quiet
-              return MB::M.max(rel + quiet, 0)
-            end
-
-            if idx.length > 1
-              gaps = idx[1..] - idx[0...-1] - 1
-              long = gaps.ge(quiet).where
-              return idx[long[0]] + 1 + quiet unless long.empty?
-            end
-
-            ring.quiet_from = MB::M.max(ring.quiet_from, frame + idx[-1] + 1)
-          end
-
-          ending = ring.quiet_from + quiet
+          ending = run.ends_at
           ending <= frame + frames ? MB::M.max(ending - frame, 0) : frames
         end
       end

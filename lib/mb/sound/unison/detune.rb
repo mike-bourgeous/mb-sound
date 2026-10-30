@@ -40,6 +40,7 @@ module MB
         include GraphNode
         include GraphNode::SampleRateHelper
         include GraphNode::MultiOutput
+        node_traits memory: :short
 
         # Ways to compute the copies' frequencies (see the class
         # description).
@@ -56,6 +57,7 @@ module MB
         class Output
           include GraphNode
           include GraphNode::NodeOutput
+          node_traits memory: :none
 
           # The copy's index.
           attr_reader :index

@@ -29,7 +29,7 @@ RSpec.describe('Delays ringing out after their input ends') do
     ref = yield
     data = SpecBuffers.join(Array.new((out.length + 3 * 48000) / 800 + 1) { ref.sample(800).dup })
     expect((data[0...out.length] - out).abs.max).to be <= tolerance
-    expect(data[out.length..].abs.max).to be < MB::Sound::RingOut::THRESHOLD
+    expect(data[out.length..].abs.max).to be < MB::Sound::QuietRun::QUIET
   end
 
   # The same length at another buffer size, and the same samples but for
@@ -44,22 +44,25 @@ RSpec.describe('Delays ringing out after their input ends') do
     drain(pluck).length
   end
 
-  describe MB::Sound::RingOut do
+  describe 'the ring-out form of MB::Sound::QuietRun' do
     it 'ends where a quiet run reaches the window, wherever the loud samples fall' do
-      r = MB::Sound::RingOut.new
+      r = MB::Sound::QuietRun.new(0)
       expect(r.advance(Numo::SFloat[1, 0, 0, 0, 0], 5, 10)).to eq(nil)
-      expect(r.quiet).to eq(4)
+      expect(r.quiet_for(r.at)).to eq(4)
       expect(r.advance(nil, 8, 10)).to eq(6)
       expect(r).to be_done
 
-      r = MB::Sound::RingOut.new
+      r = MB::Sound::QuietRun.new(0)
       expect(r.advance(Numo::SFloat[0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0], 12, 3)).to eq(6)
-      expect(MB::Sound::RingOut.new.advance(Numo::SFloat[0, 0, 0, 1], 4, 3)).to eq(3)
-      expect(MB::Sound::RingOut.new.advance(Numo::SFloat[1, 0, 0, 0], 4, 3)).to eq(4)
+      expect(MB::Sound::QuietRun.new(0).advance(Numo::SFloat[0, 0, 0, 1], 4, 3)).to eq(3)
+      expect(MB::Sound::QuietRun.new(0).advance(Numo::SFloat[1, 0, 0, 0], 4, 3)).to eq(4)
     end
 
     it 'counts -90 dB as silent, like Session tails' do
-      expect(MB::Sound::RingOut::THRESHOLD).to eq(MB::Sound::Session::Master::TAIL_THRESHOLD)
+      r = MB::Sound::QuietRun.new(0)
+      expect(r.advance(Numo::SFloat[MB::Sound::QuietRun::QUIET * 0.99, 0], 2, 2)).to eq(2)
+      r = MB::Sound::QuietRun.new(0)
+      expect(r.advance(Numo::SFloat[MB::Sound::QuietRun::QUIET * 1.01, 0], 2, 2)).to eq(nil)
     end
   end
 

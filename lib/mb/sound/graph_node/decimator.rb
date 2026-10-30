@@ -45,6 +45,7 @@ module MB
       class Decimator
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         # The largest jitter (each period may shrink or grow by this
         # fraction).

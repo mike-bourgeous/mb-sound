@@ -6,6 +6,7 @@ module MB
       class Constant
         include GraphNode
         include BufferHelper
+        node_traits memory: :none
 
         module NumericConstantMethods
           # Converts this numeric value into a MB::Sound::GraphNode::Constant

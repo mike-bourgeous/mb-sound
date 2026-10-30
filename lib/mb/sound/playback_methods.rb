@@ -726,7 +726,7 @@ module MB
 
       # Waits until everything playing in the background (see #bg) has ended,
       # including master effects tails: nothing is playing or waiting to
-      # start, and the mix has been quiet for Session::TAIL_QUIET_SECONDS
+      # start, and the mix has been quiet for QuietRun::QUIET_SECONDS
       # (after at most Session::MAX_TAIL_SECONDS of tail).  Returns true, or
       # false if +:timeout+ seconds pass first.  Returns right away if the
       # background session isn't running.
@@ -743,19 +743,20 @@ module MB
         return true unless session.running?
 
         rate = session.output.sample_rate
-        quiet = 0
+        quiet = QuietRun.new(QuietRun::QUIET_SECONDS * rate, mode: :buffer)
         tail = 0
         tap = session.add_tap { |mix|
           if session.idle? && !session.schedule_due?
             tail += mix[0].length
-            quiet = session.quiet?(mix) ? quiet + mix[0].length : 0
+            quiet.advance_buffer(mix[0].length, !session.quiet?(mix))
           else
-            tail = quiet = 0
+            tail = 0
+            quiet.reset(quiet.at)
           end
         }
 
         deadline = timeout && MB::U.clock_now + timeout
-        until quiet >= Session::TAIL_QUIET_SECONDS * rate || tail >= Session::MAX_TAIL_SECONDS * rate
+        until quiet.done? || tail >= Session::MAX_TAIL_SECONDS * rate
           return false if deadline && MB::U.clock_now > deadline
           return true unless session.running?
           Internal.wait_audio(session, 0.05)
@@ -1248,15 +1249,14 @@ module MB
 
         rate = session.output.sample_rate
         max_frames = MB::M.min(max_frames, (Session::MAX_TAIL_SECONDS * rate).round)
-        quiet_frames = Session::TAIL_QUIET_SECONDS * rate
+        quiet = QuietRun.new(QuietRun::QUIET_SECONDS * rate, mode: :buffer)
 
         frames = 0
-        quiet = 0
-        while frames < max_frames && quiet < quiet_frames
+        while frames < max_frames && !quiet.done?
           count = MB::M.min(buffer_size, max_frames - frames)
           mix = session.process_buffer(count)
           frames += count
-          quiet = session.quiet?(mix) ? quiet + count : 0
+          quiet.advance_buffer(count, !session.quiet?(mix))
         end
 
         frames

@@ -10,6 +10,7 @@ module MB
       class ProcNode
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :none
 
         attr_reader :sources, :source, :callers
 

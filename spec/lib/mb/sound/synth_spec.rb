@@ -833,14 +833,37 @@ RSpec.describe(MB::Sound::Synth) do
       expect(s.skippable_lanes).to eq([])
     end
 
-    it 'never skips lanes with delays or reverbs, or with skip_idle: false' do
-      s = described_class.new(source(*notes), voices: 2, spares: 0) { |v| (v.hz.saw * v.amp_env).delay(0.1) }
-      expect(s.skippable_lanes).to eq([])
+    it 'never skips lanes with reverbs, or with skip_idle: false' do
       s = described_class.new(source(*notes), voices: 2, spares: 0) { |v| [v.hz.saw * v.amp_env].reverb(:room) }
       expect(s.skippable_lanes).to eq([])
       s = described_class.new(source(*notes), voices: 2, skip_idle: false, &patch)
       expect(s.skippable_lanes).to eq([])
       expect(run(s, 30)[1].flatten).to be_empty
+    end
+
+    # node-traits-1 (the maintainer: "Can a node just have a way of
+    # declaring itself idle?"): a delay answers from its line, so a lane
+    # sleeps once its echoes have died away below -90 dB, and a looper
+    # holding its loop keeps its lane awake
+    it 'skips lanes with delays once their echoes die away, never while a loop holds a sound' do
+      echo = described_class.new(source(*notes), voices: 2, spares: 0) { |v| (v.hz.asaw * v.amp_env(0.002, 0.01, 0, 0.01)).delay(0.02, feedback: 0.3) }
+      expect(echo.skippable_lanes).to eq([0, 1])
+      out, skipped = run(echo, 100)
+      expect(skipped.flatten).not_to be_empty
+      expect(out.abs.max).to be > 0.1
+
+      # (each echo stays on: the lane wakes on its next note, never mid-echo)
+      exact = described_class.new(source(*notes), voices: 2, spares: 0, skip_idle: false) { |v| (v.hz.asaw * v.amp_env(0.002, 0.01, 0, 0.01)).delay(0.02, feedback: 0.3) }
+      plain, = run(exact, 100)
+      expect((out - plain).abs.max).to be < 1e-4
+
+      looper = described_class.new(source(ev.note_on(48), ev.note_off(48, time: 0.05r)), voices: 1, spares: 0) { |v|
+        (v.hz.asaw * v.amp_env(0.002, 0.01, 0, 0.01)).delay(0.02, feedback: 1)
+      }
+      expect(looper.skippable_lanes).to eq([0])
+      loop_out, held = run(looper, 100)
+      expect(held.flatten).to be_empty
+      expect(loop_out[-4800..].abs.max).to be > 0.1
     end
 
     it 'keeps shared controller and glide inputs in step while lanes are skipped' do

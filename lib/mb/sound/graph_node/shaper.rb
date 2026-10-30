@@ -12,6 +12,7 @@ module MB
       class Shaper
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         # :softclip, :clip, :abs, or :quantize.
         attr_reader :mode

@@ -1,4 +1,5 @@
 require_relative 'inspect'
+require_relative '../node_traits'
 
 module MB
   module Sound
@@ -36,3 +37,5 @@ module MB
     end
   end
 end
+
+MB::Sound::NodeTraits.attach(MB::Sound::GraphNode::MultiOutput)

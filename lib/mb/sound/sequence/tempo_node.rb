@@ -27,6 +27,7 @@ module MB
         include GraphNode::SampleRateHelper
         include GraphNode::Ports
         include TimelineNode
+        node_traits memory: :none, timeline: true
 
         port :jumps, '1 on the first sample after the timeline jumped (start, seek, resume) in :hz mode, else 0; none while freewheeling'
         port :jump_phase, 'On jump samples, the timeline position in cycles of the duration (0...1, double precision); 0 elsewhere'

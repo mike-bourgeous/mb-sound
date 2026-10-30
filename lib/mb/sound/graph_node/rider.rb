@@ -25,10 +25,13 @@ module MB
       #     mix.ride(-14)                                 # into a limiter: .limit(ceiling: -1.db)
       #     mix.ride(-9, start: 6.db, range: 6.db, down: 2, up: 8)
       class Rider < Channels
+        node_traits memory: :short
+
         # One output of a Rider.
         class Output
           include GraphNode
           include GraphNode::NodeOutput
+          node_traits memory: :none
 
           # The index of this output.
           attr_reader :index

@@ -19,6 +19,7 @@ module MB
       # playing, and when its source can't render before it (a cycle).
       class BusTap
         include MultiOutput
+        node_traits memory: :none
 
         # One channel of a BusTap.
         class Channel
@@ -26,6 +27,7 @@ module MB
 
           include GraphNode
           include NodeOutput
+          node_traits memory: :none
 
           def_delegators :@owner, :sample_rate
 

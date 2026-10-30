@@ -8,6 +8,7 @@ module MB
         class Tail
           include GraphNode
           include SampleRateHelper
+          node_traits memory: :short
 
           # The source node.
           attr_reader :source
@@ -59,6 +60,7 @@ module MB
         class HissGate
           include GraphNode
           include SampleRateHelper
+          node_traits memory: :short
 
           # The noise source.
           attr_reader :source

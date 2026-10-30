@@ -14,6 +14,7 @@ module MB
       class Ringdown
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         # The source node.
         attr_reader :source

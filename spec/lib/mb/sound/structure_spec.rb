@@ -151,7 +151,10 @@ RSpec.describe(MB::Sound::Structure, :aggregate_failures) do
 
       half = data.map { |c| Numo::SFloat.cast(c[(0..-1) % 2]) } # 24 kHz by decimation (aliased, but onsets survive)
       r2 = MB::Sound.analyze_form(half, sample_rate: 24000)
-      expect(r2.tempo).to be_within(0.05).of(112)
+      # (0.026-0.054 BPM high over seeds 1-6 on master-ai 4d35ee8d, 0.007-
+      # 0.051 once the clap's voice sleeps between hits, node-traits-1: the
+      # noise drawn moves it)
+      expect(r2.tempo).to be_within(0.06).of(112)
       expect(r2.downbeats.first(2)).to all(be < 2.2)
     end
 

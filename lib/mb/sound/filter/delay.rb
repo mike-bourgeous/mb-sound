@@ -7,6 +7,9 @@ module MB
       # See bin/flanger.rb and bin/tape_delay.rb for examples.
       class Delay < Filter
         include GraphNode::SampleRateHelper
+        # (its line holds sound for up to its longest delay; it may sleep once
+        # that holds only silence: #sleep_ready?)
+        node_traits memory: :long, idle_check: :sleep_ready?
 
         # The default delay-time smoothing rate in seconds per second.
         DEFAULT_SMOOTHING_RATE = 0.5
@@ -94,6 +97,8 @@ module MB
           @ring_zeros = nil
           @frozen_copy = nil
           @loop_offset = nil
+          @longest_read = 0.0 # (see #sleep_ready?)
+          @longest_range = [0.0, 0.0]
         end
 
         # The size of the delay buffer in samples.
@@ -330,10 +335,10 @@ module MB
         # #process once its source ends): processes +count+ samples of
         # silence and returns the output, shortened to end on the exact
         # sample where the delay line has held only silence (below -90 dB,
-        # see MB::Sound::RingOut) for the longest delay plus the
+        # see MB::Sound::QuietRun#advance) for the longest delay plus the
         # interpolation reach, then nil: the delay plays its last echo.
         def ring_out(count)
-          @ring ||= MB::Sound::RingOut.new
+          @ring ||= MB::Sound::QuietRun.new(0) # (the ring-out form: QuietRun#advance)
           return nil if @ring.done?
 
           @ring_zeros = Numo::SFloat.zeros(count) if @ring_zeros.nil? || @ring_zeros.length != count
@@ -345,6 +350,19 @@ module MB
           window = (@max_delay_samples.to_f.finite? ? @max_delay_samples.to_f.ceil : 0) + MB::Sound::DelayLine::MARGIN
           keep = @ring.advance(nil, out.length, window)
           keep && keep < out.length ? out[0...keep] : out
+        end
+
+        # NodeTraits' idle check (may a sleeper holding this delay sleep
+        # now?): true when what its line holds within the longest delay it
+        # has read (plus the interpolation reach) is below -90 dB
+        # (QuietRun::QUIET), so nothing louder can come out of it later: an
+        # echo that has died away, or a delay that never got a signal.  A
+        # looper holding its loop (feedback near 1) never is.  Asked only
+        # where a sleeper (a Synth lane, a drum voice) could fall asleep;
+        # the longest read is the same at any buffer size, so the answer is
+        # too.
+        def sleep_ready?
+          @line.holds_quiet?(@longest_read.ceil + MB::Sound::DelayLine::MARGIN)
         end
 
         # True if the delay rings out after its input ends (the default; see
@@ -452,6 +470,26 @@ module MB
         # constant target, the filter is skipped (it would output the
         # target unchanged), so settled delays read as constant delays.
         def delay_buffer(count)
+          d = compute_delay_buffer(count)
+          note_longest(d) unless d.equal?(:end)
+          d
+        end
+
+        # Keeps the longest delay read so far (see #sleep_ready?).
+        def note_longest(delays)
+          m = if delays.is_a?(Numeric)
+                delays
+              elsif (r = MB::Sound::FastArithmetic.min_max(delays, @longest_range))
+                r[1]
+              else
+                delays.real.max
+              end
+          m = m.to_f
+          @longest_read = m if m.finite? && m > @longest_read
+        end
+
+        # See #delay_buffer.
+        def compute_delay_buffer(count)
           settled = @smoothing && @filter.is_a?(MB::Sound::Filter::LinearFollower)
 
           if @time.node?

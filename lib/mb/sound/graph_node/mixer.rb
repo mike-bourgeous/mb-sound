@@ -16,6 +16,7 @@ module MB
         include BufferHelper
         include SampleRateHelper
         include ArithmeticNodeHelper
+        node_traits memory: :none
 
         # The constant value added to the output sum before any summands.
         attr_reader :constant

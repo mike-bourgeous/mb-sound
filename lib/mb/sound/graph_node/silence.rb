@@ -12,6 +12,7 @@ module MB
       class Silence
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         # The length as given: seconds (Numeric), a Length (e.g. 480.samples),
         # or a Duration (converted at the current tempo).

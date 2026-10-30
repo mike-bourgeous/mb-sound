@@ -296,7 +296,7 @@ RSpec.describe(MB::Sound::ScriptRunner) do
 
       # The synth (sustain pedal on) rings past the file's end, then stops
       # after a second below Session's -90 dB quiet threshold
-      quiet = MB::Sound::Session::TAIL_THRESHOLD
+      quiet = MB::Sound::QuietRun::QUIET
       data = MB::Sound.read(outfile)[0]
       last_sound = (0...data.length).select { |i| data[i].abs >= quiet }.last / 48000.0
       expect(last_sound).to be > music_end

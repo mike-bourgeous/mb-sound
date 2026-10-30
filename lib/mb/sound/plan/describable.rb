@@ -1,3 +1,5 @@
+require_relative '../node_traits'
+
 module MB
   module Sound
     module Plan
@@ -141,3 +143,6 @@ module MB
     end
   end
 end
+
+# (their default plan_snapshot is no running state: NodeTraits' derived carry)
+MB::Sound::NodeTraits.stateless_snapshot_owners = [MB::Sound::Plan::Describable, MB::Sound::Plan::Describing]

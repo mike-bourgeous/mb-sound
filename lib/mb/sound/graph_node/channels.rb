@@ -35,6 +35,7 @@ module MB
         include DynamicsMethods
         include BlendMethods
         include MasteringMethods
+        node_traits memory: :none
 
         # The channel nodes.
         attr_reader :outputs

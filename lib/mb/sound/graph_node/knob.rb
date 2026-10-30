@@ -36,6 +36,7 @@ module MB
       #     cut.ramp_to(3000, frames: 96000, frame: cut.next_frame)   # (Session#turn does this)
       class Knob
         include GraphNode
+        node_traits memory: :none
 
         # How a knob's value relates to a 0..1 position (its scale for
         # ramps, MIDI controllers, and snapshot crossfades): MB::Sound::Param's
@@ -250,6 +251,7 @@ module MB
         # next frames by its own count.
         class Reader
           include GraphNode
+          node_traits memory: :none
 
           # The Knob read.
           attr_reader :knob

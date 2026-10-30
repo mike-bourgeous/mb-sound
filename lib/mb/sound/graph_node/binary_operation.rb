@@ -20,6 +20,8 @@ module MB
       class BinaryOperation
         include GraphNode
         include SampleRateHelper
+        # (arithmetic on its inputs: no running state)
+        node_traits memory: :none
 
         # The operators.
         OPERATORS = ['/', '**'].freeze

@@ -109,6 +109,7 @@ module MB
       class CaptureTap
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         def initialize(source, capture, sample_rate: nil)
           @source = source.get_sampler

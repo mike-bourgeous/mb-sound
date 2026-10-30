@@ -4,6 +4,10 @@ require 'shellwords'
 # layout (see IvarPreset).
 require_relative 'graph_node/ivar_preset'
 MB::Sound::GraphNode::IvarPreset.attach(MB::Sound::GraphNode)
+# Every class that includes GraphNode declares its node traits (see
+# NodeTraits; node_traits_spec.rb guards it).
+require_relative 'node_traits'
+MB::Sound::NodeTraits.attach(MB::Sound::GraphNode)
 
 require_relative 'graph_node/nameable'
 require_relative 'graph_node/traversable'

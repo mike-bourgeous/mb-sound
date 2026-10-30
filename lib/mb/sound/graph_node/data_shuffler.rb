@@ -4,6 +4,7 @@ module MB
       # Seamlessly plays samples in a random order over and over.
       class DataShuffler
         include GraphNode
+        node_traits memory: :short
 
         # TODO: should the data be resampled if we get a new sample rate?
         attr_accessor :sample_rate

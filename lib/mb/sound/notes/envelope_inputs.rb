@@ -18,6 +18,7 @@ module MB
         class Port
           include GraphNode
           include GraphNode::SampleRateHelper
+          node_traits memory: :none
 
           # The output's name: :trigger, :velocity, or :choke.
           attr_reader :output

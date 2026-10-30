@@ -29,6 +29,8 @@ module MB
       # out 29.6 dB lower and 80 ms late) and on a turned knob it lagged a
       # whole step behind (see design/notes/curves.md).
       class Smooth < Filter
+        node_traits memory: :short
+
         # The smoothing time as given (seconds, a Length, or a Range).
         attr_reader :length
 

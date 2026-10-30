@@ -17,6 +17,7 @@ module MB
       class ZoneValue
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :none
 
         # The zone table indices (key × 128 + velocity) of a voice's notes,
         # read once per buffer for every ZoneValue sharing it: each reader

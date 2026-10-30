@@ -20,6 +20,7 @@ module MB
       class Wavetable
         include GraphNode
         include GraphNode::SampleRateHelper
+        node_traits memory: :short
 
         # Valid values for the constructor's +:wrap+ parameter (see
         # MB::Sound::Wavetable::WRAP_MODES).

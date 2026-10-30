@@ -966,7 +966,6 @@ MB::Sound::DelayLine
 lfo.samples
 wet:
 dry:
-MB::Sound::RingOut
 bin/delay_gallery.rb
 bin/delay_benchmark.rb
 bin/delay_quality.rb

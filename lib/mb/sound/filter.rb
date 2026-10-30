@@ -4,6 +4,12 @@ module MB
     # implement.  For implementation examples see MB::Sound::Filter::Biquad or
     # MB::Sound::Filter::FilterChain.
     class Filter
+      # Filters declare their node traits (NodeTraits), which a
+      # Filter::SampleWrapper answers with; a filter's state is carried by
+      # its wrapper's snapshot (Filter::SampleWrapper.filter_state?).
+      NodeTraits.attach(self)
+      node_traits carry: :own
+
       # Should accept either a Float or a Numo::NArray (e.g. Numo::SFloat) and
       # return the single sample or array of samples as processed through the
       # filter.  Subclasses may also accept Complex values; check their

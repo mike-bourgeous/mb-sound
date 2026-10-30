@@ -19,6 +19,8 @@ module MB
       # kind of like a low-pass filter plus distortion, where the distortion
       # goes up and the cutoff frequency goes down as a signal gets louder.
       class LinearFollower < Filter
+        node_traits memory: :short
+
         # The sample rate given to the constructor or to #sample_rate=, in Hz.
         attr_reader :sample_rate
 

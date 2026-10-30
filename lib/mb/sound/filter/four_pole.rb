@@ -105,6 +105,8 @@ module MB
       #   without resonance, about 1.5-2 octaves darker than lp4) and
       #   self-oscillation 13 dB below lp4's.
       class FourPole < Filter
+        node_traits memory: :short
+
         # Loop gain at full resonance by default (no self-oscillation).
         MAX_K = 3.9
 

@@ -10,6 +10,8 @@ module MB
       # See https://www.earlevel.com/main/2013/10/13/biquad-calculator-v2/
       # See http://rs-met.com/documents/dsp/BasicDigitalFilters.pdf
       class Biquad < Filter
+        node_traits memory: :short
+
         attr_reader :b0, :b1, :b2, :a1, :a2
 
         # The sample rate for which the biquad's coefficients were generated,

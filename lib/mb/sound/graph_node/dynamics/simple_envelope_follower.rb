@@ -14,6 +14,8 @@ module MB
         # compander's own detector (peak/RMS in dB, in fast_dynamics) is a
         # different design, so nothing duplicates it today.
         class SimpleEnvelopeFollower < MB::Sound::Filter
+          node_traits memory: :short
+
           attr_reader :decay_db, :decay_s, :decay_per_sample, :sample_rate
 
           # Initializes a simple envelope follower.  Peaks decay +:decay_db+

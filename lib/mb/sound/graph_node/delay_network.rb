@@ -24,7 +24,7 @@ module MB
       #
       # When every input has ended (nil or a short buffer), the network
       # rings out: silence goes in and the taps play until what the lines
-      # get back has stayed below -90 dB (MB::Sound::RingOut) for the
+      # get back has stayed below -90 dB (MB::Sound::QuietRun#advance) for the
       # longest delay plus the interpolation reach, ending on that exact
       # sample (with no feedback, one longest delay after the input, as for
       # MultitapDelay).  A loop gain of 1 or more never ends.
@@ -34,6 +34,8 @@ module MB
       class DelayNetwork
         include SampleRateHelper
         include MultiOutput
+        # (it may sleep once its lines hold only silence: #sleep_ready?)
+        node_traits memory: :long, idle_check: :sleep_ready?
 
         # One output tap of a DelayNetwork.
         class Tap
@@ -42,6 +44,7 @@ module MB
           include GraphNode
           include SampleRateHelper
           include NodeOutput
+          node_traits memory: :none
 
           # The delay time node (if any) and the network.
           attr_reader :sources
@@ -234,6 +237,15 @@ module MB
           @ring_done
         end
 
+        # NodeTraits' idle check: true when every line holds only silence
+        # (below -90 dB) within the longest delay read so far, plus the
+        # interpolation reach, so nothing can recirculate (see
+        # Filter::Delay#sleep_ready?).
+        def sleep_ready?
+          window = (@longest.finite? ? @longest.ceil : 0) + MB::Sound::DelayLine::MARGIN
+          @lines.all? { |l| l.holds_quiet?(window) }
+        end
+
         # Do not use directly.  Called by Tap#sample: the first tap read in a
         # graph frame runs the network for every tap; each tap returns its
         # own output.
@@ -363,7 +375,7 @@ module MB
         # on came after every input ended): returns nil to keep going, or
         # the number of samples to keep.
         def ring_out(n, start)
-          @ring ||= MB::Sound::RingOut.new
+          @ring ||= MB::Sound::QuietRun.new(0) # (the ring-out form: QuietRun#advance)
           len = n - start
           return nil if len <= 0
 

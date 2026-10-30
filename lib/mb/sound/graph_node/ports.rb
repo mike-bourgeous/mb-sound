@@ -32,6 +32,7 @@ module MB
         # One port of a node (see Ports).
         class Port
           include GraphNode
+          node_traits memory: :none
 
           # The node this is a port of.
           attr_reader :owner

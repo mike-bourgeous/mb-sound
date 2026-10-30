@@ -19,6 +19,8 @@ module MB
       # -1..1, RMS 0.577) come out at RMS 0.2 (-14 dBFS): Gaussian-like
       # peaks pass full scale about once per 1.7 million samples (35 s).
       class NoiseColor < Filter
+        node_traits memory: :short
+
         COLORS = [:pink, :brown].freeze
         ALIASES = { red: :brown }.freeze
 

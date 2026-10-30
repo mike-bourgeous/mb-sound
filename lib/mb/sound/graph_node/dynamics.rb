@@ -35,10 +35,13 @@ module MB
       # It is a Channels bundle (one output per input channel); sample every
       # output once per buffer, as a Session does.
       class Dynamics < Channels
+        node_traits memory: :short
+
         # One output channel of a dynamics node.
         class Output
           include GraphNode
           include GraphNode::NodeOutput
+          node_traits memory: :short
 
           # The index of this output.
           attr_reader :index

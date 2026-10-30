@@ -116,11 +116,14 @@ module MB
       class FeedbackLoop
         include GraphNode
         include GraphNode::SampleRateHelper
+        # (it may sleep once its delays hold only silence: #sleep_ready?)
+        node_traits memory: :long, idle_check: :sleep_ready?
 
         # The loop variable (+fb+ in the examples): the loop's output (see the
         # class description).  Its #sample is only used by the fallback.
         class Variable
           include GraphNode
+          node_traits memory: :short
 
           def initialize(loop)
             @loop = loop
@@ -280,6 +283,19 @@ module MB
           src
         end
 
+        # NodeTraits' idle check: true when every delay of the loop holds
+        # only silence (below -90 dB) within its longest delay
+        # (Filter::Delay#sleep_ready?), so what the loop feeds back has died
+        # away; a loop holding a sound (a looper, feedback near 1) never is.
+        # A loop running as a block graph (live fallback) keeps sleepers
+        # awake.
+        def sleep_ready?
+          return false if @fallback
+          return true if @program.nil?
+
+          @program.rings.all? { |g| g.delay.sleep_ready? }
+        end
+
         # The inputs the plan layer may fuse upstream (Plan::Installation):
         # the loop's boundary inputs, not the body (which only runs here).
         def plan_sources
@@ -382,7 +398,7 @@ module MB
             end
             if buf.nil? || buf.length < count
               (@ended_inputs ||= [])[i] = true
-              @ring ||= MB::Sound::RingOut.new
+              @ring ||= MB::Sound::QuietRun.new(0) # (the ring-out form: QuietRun#advance)
               len = buf ? buf.length : 0
               ring_start = len if ring_start.nil? || len < ring_start
               padded = (buf ? buf.class : Numo::SFloat).zeros(count)
@@ -614,7 +630,7 @@ module MB
 
         # After an input ends, the loop rings out until its output (what it
         # feeds back) has stayed below -90 dB for its longest delay plus the
-        # interpolation reach (see MB::Sound::RingOut), ending on that exact
+        # interpolation reach (see MB::Sound::QuietRun#advance), ending on that exact
         # sample.  The quiet run counts from +start+ in the block +out+.
         def ring_out(out, start)
           longest = @program.rings.map { |g|

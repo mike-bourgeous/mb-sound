@@ -39,6 +39,7 @@ module MB
         include GraphNode
         include GraphNode::SampleRateHelper
         include MultiOutput
+        node_traits memory: :long
 
         # The extra loop time (samples at FEEDBACK_BLOCK_RATE) of the
         # classic presets: until 2026-10-10 the feedback network read its
@@ -315,6 +316,7 @@ module MB
           extend Forwardable
           include GraphNode
           include NodeOutput
+          node_traits memory: :none
 
           def_delegators :@reverb, :sample_rate, :sample_rate=, :at_rate
 
@@ -359,6 +361,7 @@ module MB
         class PaddedInput
           include GraphNode
           include SampleRateHelper
+          node_traits memory: :short
 
           # One PaddedInput per source, sharing their ended flags.
           def self.group(sources)

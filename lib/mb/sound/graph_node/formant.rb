@@ -38,6 +38,7 @@ module MB
       class Formant
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         # Formant tables from the Csound manual's "Formant Values" appendix
         # (https://csound.com/docs/manual/MiscFormants.html; the same tables
