@@ -24,6 +24,11 @@ module MB
         # without a form).
         TimelineState = Struct.new(:pos, :form, keyword_init: true)
 
+        # Undo subject of seeks and timeline restores (a TimelineState).
+        TimelineSubject = Data.define
+        Undo.subject TimelineSubject, snapshot: :timeline_snapshot, restore: :restore_timeline_change, symbol: :timeline
+        Undo.claim :seek_undo_subject, order: 30
+
         # How many timeline changes (seeks and their undos) have landed: the
         # number of the current pass over the timeline, for take replays
         # (see Scheduler::Entry and Take::Replay).
@@ -58,11 +63,9 @@ module MB
           c.kind == :seek || c.kind == :tempo || (c.kind == :restore && (c.subject == :timeline || c.subject == :tempo))
         end
 
-        # The subject whose state a change snapshots for undo.
-        def snapshot_subject(c)
-          return :timeline if c.kind == :seek
-          return Knobs::KnobSubject.new(c.subject) if knob_change?(c)
-          c.subject
+        # The undo subject of a seek (see Undo#snapshot_subject).
+        def seek_undo_subject(c)
+          c.kind == :seek ? TimelineSubject.new : nil
         end
 
         # A seek target given as a length (`12.bars`, `32.seconds`), which
@@ -174,8 +177,13 @@ module MB
         end
 
         # Snapshots the timeline for undo (see TimelineState).
-        def timeline_snapshot
+        def timeline_snapshot(_subject)
           TimelineState.new(pos: @transport.position, form: arrangement.playback&.seek_snapshot)
+        end
+
+        # Seeks back to before +original+ at +time+.
+        def restore_timeline_change(_subject, original, time)
+          change(:restore, :timeline, time, data: {}, undoes: original.seq) { |_t| restore_timeline(original.before) }
         end
 
         # Puts the timeline (and the form) back to +state+ (a TimelineState).

@@ -11,6 +11,10 @@ module MB
         # The key before a change, for undo.
         KeyState = Data.define(:key)
 
+        # Undo subject of key and mode changes (subject :key).
+        KeySubject = Data.define
+        Undo.subject KeySubject, snapshot: :key_snapshot, restore: :restore_key_change, symbol: :key
+
         # The session key now (a MusicalKey).
         def key
           @transport.key
@@ -52,8 +56,12 @@ module MB
 
         private
 
-        def key_snapshot
+        def key_snapshot(_subject)
           KeyState.new(key: @transport.key)
+        end
+
+        def restore_key_change(_subject, original, time)
+          change(:restore, :key, time, data: { key: original.before&.key.to_s }, undoes: original.seq) { |t| restore_key(original.before, t) }
         end
 
         def restore_key(state, time)

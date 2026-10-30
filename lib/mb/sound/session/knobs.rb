@@ -19,6 +19,8 @@ module MB
         # the namespace with tracks, but a raw `bg :name` player could use
         # one).
         KnobSubject = Data.define(:name)
+        Undo.subject KnobSubject, snapshot: :knob_snapshot, restore: :restore_knob_change
+        Undo.claim :knob_undo_subject, order: 40
 
         # A knob's state around a change, for undo (see Knob#state_at).
         KnobState = Struct.new(:mode, :value, keyword_init: true)
@@ -848,6 +850,16 @@ module MB
         # True if +c+ changes a knob (a turn, or the undo of one).
         def knob_change?(c)
           c.kind == :turn || (c.kind == :restore && c.entry&.data&.[](:knob))
+        end
+
+        # The undo subject of a knob change (see Undo#snapshot_subject).
+        def knob_undo_subject(c)
+          knob_change?(c) ? KnobSubject.new(c.subject) : nil
+        end
+
+        # Puts the knob back to before +original+ at +time+.
+        def restore_knob_change(subject, original, time)
+          change(:restore, subject.name, time, data: { knob: true }, undoes: original.seq) { |_t| restore_knob(subject.name, original.before) }
         end
       end
     end

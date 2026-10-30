@@ -7,9 +7,9 @@ require_relative 'session/journal'
 require_relative 'session/names'
 require_relative 'session/changes'
 require_relative 'session/fades'
+require_relative 'session/undo' # (before the modules registering undo subjects)
 require_relative 'session/strip'
 require_relative 'session/faders'
-require_relative 'session/undo'
 require_relative 'session/master'
 require_relative 'session/tails'
 require_relative 'session/markers'
@@ -94,8 +94,8 @@ module MB
       include SafetyLimiter
       include UIFeed
       include Warming
-      include Buses # it extends Strip, Undo, and Seeks through super
-      include Cue # last: it extends Strip, Undo, Seeks, and Buses through super
+      include Buses # it extends Strip's audible_unlocked? and apply_strip through super
+      include Cue # after Buses: it extends audible_unlocked? through super (undo subjects are registered: Undo.subject)
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.

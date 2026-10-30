@@ -17,6 +17,10 @@ module MB
         # The tempo map before a change, for undo.
         TempoState = Data.define(:map, :bpm)
 
+        # Undo subject of tempo changes (subject :tempo).
+        TempoSubject = Data.define
+        Undo.subject TempoSubject, snapshot: :tempo_snapshot, restore: :restore_tempo_change, symbol: :tempo
+
         # Changes the tempo at the launch point (+at+, a LaunchPoint; now by
         # default) or +start_time+ (whole notes): to +bpm+ (a number or a
         # Tempo) right there, or ramping to it over +over+ (bars through the
@@ -151,8 +155,12 @@ module MB
           limit && limit < count ? limit : nil
         end
 
-        def tempo_snapshot
+        def tempo_snapshot(_subject)
           TempoState.new(map: @transport.tempo_map, bpm: @transport.bpm)
+        end
+
+        def restore_tempo_change(_subject, original, time)
+          change(:restore, :tempo, time, data: {}, undoes: original.seq) { |_t| restore_tempo(original.before) }
         end
 
         def restore_tempo(state)
