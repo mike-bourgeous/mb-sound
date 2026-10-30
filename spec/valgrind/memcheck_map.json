@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-29",
+  "generated": "2026-10-30",
   "specs": {
     "gems/mb-term/spec/native_spec.rb": {
       "fast_term": [
@@ -143,7 +143,6 @@
     },
     "spec/ext/mb/sound/fast_delay_spec.rb": {
       "fast_delay": [
-        "FastDelay.feedback",
         "FastDelay.read"
       ]
     },
@@ -456,7 +455,6 @@
         "FastArithmetic.circular_write"
       ],
       "fast_delay": [
-        "FastDelay.feedback",
         "FastDelay.network",
         "FastDelay.read"
       ]
@@ -564,17 +562,23 @@
     },
     "spec/lib/mb/sound/filter/delay_spec.rb": {
       "fast_arithmetic": [
-        "FastArithmetic.accumulate",
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
         "FastArithmetic.min_max",
+        "FastArithmetic.mix",
         "FastArithmetic.product",
         "FastArithmetic.scale",
         "FastArithmetic.wet_dry"
       ],
+      "fast_control": [
+        "FastControl.slew"
+      ],
       "fast_delay": [
-        "FastDelay.feedback",
         "FastDelay.read"
+      ],
+      "fast_loop": [
+        "FastLoop.pitch_track",
+        "FastLoop.run"
       ],
       "fast_resample": [
         "FastResample#initialize",
@@ -622,11 +626,6 @@
         "FastSound.oscillate"
       ]
     },
-    "spec/lib/mb/sound/filter/smoothstep_spec.rb": {
-      "fast_sound": [
-        "FastSound.smoothstep"
-      ]
-    },
     "spec/lib/mb/sound/filter/svf_spec.rb": {
       "fast_filter": [
         "FastFilter.svf"
@@ -651,8 +650,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -741,6 +738,7 @@
       "fast_arithmetic": [
         "FastArithmetic.cast_copy",
         "FastArithmetic.circular_write",
+        "FastArithmetic.complex_part",
         "FastArithmetic.copy",
         "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
@@ -748,8 +746,10 @@
         "FastArithmetic.product",
         "FastArithmetic.wet_dry"
       ],
+      "fast_control": [
+        "FastControl.slew"
+      ],
       "fast_delay": [
-        "FastDelay.feedback",
         "FastDelay.read"
       ],
       "fast_envelope": [
@@ -782,6 +782,7 @@
         "FastSound.smoothstep_buf"
       ],
       "fast_synth": [
+        "FastSynth.blit",
         "FastSynth.oscillate_bl"
       ]
     },
@@ -832,6 +833,9 @@
         "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.product"
+      ],
+      "fast_control": [
+        "FastControl.slew"
       ],
       "fast_delay": [
         "FastDelay.read"
@@ -970,10 +974,13 @@
         "FastClip.shape_curve"
       ],
       "fast_control": [
+        "FastControl.adaptive",
+        "FastControl.curve",
+        "FastControl.reset_run",
+        "FastControl.slew",
         "FastControl.smooth"
       ],
       "fast_delay": [
-        "FastDelay.feedback",
         "FastDelay.network",
         "FastDelay.read"
       ],
@@ -1036,8 +1043,7 @@
         "FastSound.narray_log2",
         "FastSound.number_to_freq",
         "FastSound.oscillate",
-        "FastSound.phasor",
-        "FastSound.smoothstep"
+        "FastSound.phasor"
       ],
       "fast_synth": [
         "FastSynth.blit",
@@ -1456,6 +1462,7 @@
       ],
       "fast_wavetable": [
         "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1469,6 +1476,9 @@
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.product"
+      ],
+      "fast_control": [
+        "FastControl.slew"
       ],
       "fast_loop": [
         "FastLoop.constants",
@@ -1677,6 +1687,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
