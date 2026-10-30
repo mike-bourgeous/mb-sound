@@ -115,6 +115,11 @@ module MB
           ))
         end
 
+        # True if +v+ is a plain real level (a number, Decibels included).
+        def self.level?(v)
+          v.is_a?(Numeric) && v.real?
+        end
+
         # True if +feedback+ (#delay's feedback: gain) makes a feedback loop:
         # a node, or a nonzero real number (complex gains raise: feedback
         # loops are real; false, nil, and 0 are a plain delay).
@@ -162,6 +167,12 @@ module MB
             echoes = DelayMethods.ring_sum(self, loop * feedback).delay(time, **delay_opts)
           end
           echoes = pipeline.apply_wet(echoes) if pipeline.pipeline?
+
+          # Numeric levels on the loop itself: mixed in C after each block
+          # (FeedbackLoop#output_mix), without a Tee and a Mixer
+          if echoes.equal?(loop) && DelayMethods.level?(wet) && DelayMethods.level?(dry) && loop.output_mix(wet, dry)
+            return loop
+          end
 
           out = wet.is_a?(Numeric) && wet == 1 ? echoes : echoes * wet
           out = DelayMethods.ring_sum(out, self * dry) unless dry.is_a?(Numeric) && dry == 0

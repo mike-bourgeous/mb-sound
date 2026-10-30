@@ -88,8 +88,7 @@ module MB
         # gliding (and any glide in progress stops), e.g. to glide only
         # between legato notes.  Used by GraphNode#smooth with +reset:+.
         def dynamic_process(samples, reset:)
-          reset = reset[0...samples.length] if reset.length > samples.length
-          @smoother.process(real(samples), nil, reset.ne(0).where.to_a)
+          @smoother.process_reset(real(samples), reset)
         end
 
         def to_s

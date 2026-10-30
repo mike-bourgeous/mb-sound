@@ -234,8 +234,27 @@ module MB
           @complex_parts = nil
           @complex_seen = nil
           @complex_out = nil
+          @mix = nil
 
           compile
+        end
+
+        # Makes the loop's node output +wet+ times the loop plus +dry+ times
+        # its input (numbers), mixed in C after each block (FastArithmetic
+        # .wet_dry, the kernel Filter::Delay mixes with) instead of through a
+        # Multiplier, a Tee, and a Mixer: #delay's echo loops (smoothing-1;
+        # at 128-sample blocks the nodes cost more than the loop).  Returns
+        # false (and changes nothing) for a loop that couldn't compile or
+        # doesn't read its input.
+        def output_mix(wet, dry)
+          return false if @fallback || @input.nil?
+          return true if wet == 1 && dry == 0
+
+          i = @input_ops.index { |op| op.source.equal?(@input) }
+          return false unless i
+
+          @mix = [wet.to_f, dry.to_f, i]
+          true
         end
 
         # Returns +count+ samples of the loop's output (a reused buffer), or
@@ -435,9 +454,18 @@ module MB
           return run_complex(n, ringing ? 0 : (ring_start || 0)) if @complex_parts || @imag_state
 
           out = run(n)
-          return out unless @ring
+          out = ring_out(out, ringing ? 0 : (ring_start || 0)) if @ring
+          @mix ? mix_output(out, @inputs[@mix[2]]) : out
+        end
 
-          ring_out(out, ringing ? 0 : (ring_start || 0))
+        # Applies #output_mix to +out+ (in place) with the input +data+.
+        def mix_output(out, data)
+          wet, dry, _ = @mix
+          data = data[0...out.length] if data.length > out.length
+          return out if MB::Sound::FastArithmetic.wet_dry(out, out, wet, data, dry == 0 ? nil : dry)
+
+          out[true] = out * wet + data * dry
+          out
         end
 
         # A block with complex inputs (smoothing-1: `delay(t, feedback:)` on
@@ -462,6 +490,7 @@ module MB
 
           re = run(n).dup
           real_inputs = @inputs.dup
+          mix_in = @mix && @inputs[@mix[2]]
           @input_ops.each_index do |i|
             part = @complex_parts&.[](i)
             @inputs[i] = part.length > n ? part[0...n].dup : part if part
@@ -476,19 +505,23 @@ module MB
               g.line.prepare(n, max + 2, Numo::SFloat)
             end
             im = run(n).dup
+            mix_im = @mix && @inputs[@mix[2]]
           ensure
             swap_imag_state
             @inputs.replace(real_inputs)
             @complex_parts&.clear
           end
 
+          keep = n
+          keep = ring_out(Numo::SFloat.maximum(re.abs, im.abs), ring_start).length if @ring
+          if @mix
+            mix_output(re, mix_in)
+            mix_output(im, mix_im)
+          end
+
           @complex_out = Numo::SComplex.zeros(n) if @complex_out.nil? || @complex_out.length != n
           out = @complex_out
           out[true] = re + im * 1i
-          return out unless @ring
-
-          level = Numo::SFloat.maximum(re.abs, im.abs)
-          keep = ring_out(level, ring_start).length
           keep < n ? out[0...keep] : out
         end
 

@@ -156,6 +156,23 @@ RSpec.describe(MB::Sound::Filter::Smooth) do
       expect(a).to eq(b)
     end
 
+    it 'runs resets in C (FastControl.reset_run) as the Ruby mirror with jumps does, for every kernel' do
+      x = Numo::SFloat.new(2000).rand(-1, 1)
+      x[0...1000] = (x[0...1000] * 3).round
+      reset = Numo::SFloat.zeros(2000).tap { |r| r[[0, 5, 6, 400, 1999]] = 1 }
+      [[300.samples, nil], [2.ms..20.ms, nil], [300.samples, :elastic], [20.samples, :back]].each do |len, curve|
+        a = MB::Sound::Notes::Smoother.new(len, sample_rate: 48000, curve: curve)
+        b = MB::Sound::Notes::Smoother.new(len, sample_rate: 48000, curve: curve)
+        got = SpecBuffers.join([0...700, 700...2000].map { |r| a.process_reset(x[r].dup, reset[r].dup).dup })
+        b.plan_start(x[0])
+        want = Numo::SFloat.zeros(2000)
+        st, r1, r2 = b.plan_arrays
+        MB::Sound::Notes::Smoother.run(x, want, 0, 700, st, r1, r2, reset[0...700].ne(0).where.to_a, c: false)
+        MB::Sound::Notes::Smoother.run(x, want, 700, 2000, st, r1, r2, (reset[700...2000].ne(0).where + 700).to_a, c: false)
+        expect(got).to eq(want), [len, curve].inspect
+      end
+    end
+
     it 'rejects a non-node reset' do
       expect { arr(data).smooth(0.1, reset: 1) }.to raise_error(ArgumentError)
     end

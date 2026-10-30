@@ -203,6 +203,27 @@ module MB
           @out
         end
 
+        # Like #process (no constant shortcut), jumping to the input at
+        # every nonzero sample of +reset+ (GraphNode#smooth's reset:), in C
+        # (FastControl.reset_run); the same as #process with the reset's
+        # nonzero offsets as jumps.
+        def process_reset(buf, reset)
+          count = buf.length
+          settle_at(buf[0]) if @state.nil?
+          buf = Numo::SFloat.cast(buf) unless buf.is_a?(Numo::SFloat) && buf.contiguous?
+          reset = reset[0...count] if reset.length > count
+          reset = Numo::SFloat.cast(reset) unless reset.is_a?(Numo::SFloat) && reset.contiguous?
+          @out = Numo::SFloat.zeros(count) if @out.nil? || @out.length != count
+          return @out if count == 0
+
+          if reset.length < count
+            self.class.run(buf, @out, 0, count, @state, @ring1, @ring2, reset.ne(0).where.to_a, c: true)
+          else
+            FastControl.reset_run(buf, @out, @state, @ring1, @ring2, reset)
+          end
+          @out
+        end
+
         # Smooths x[from...to] into out[from...to] with +state+ and the rings
         # (the fixed kernel's, or the adaptive one's for an ADAPTIVE_STATE
         # state), jumping to the input at the offsets in +jumps+ (sorted;

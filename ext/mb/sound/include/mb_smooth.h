@@ -254,4 +254,55 @@ static inline void mb_slew_run(const void *x, void *out, size_t n, int is_double
 	*s = y;
 }
 
+// One segment of Notes::Smoother's kernels by state length +sl+ (7 the
+// B-spline FIR, 8 adaptive, 9 curve; see Notes::Smoother.segment).  The
+// rings are the fixed kernel's moving averages, or the curve kernel's
+// slots and table (unused by the adaptive kernel).  Returns 0, or -1 for a
+// bad state.
+static inline int mb_smoother_segment(size_t sl, const float *xp, float *op, long from, long to, double *st, double *r1, size_t n1, double *r2, size_t n2)
+{
+	switch (sl) {
+		case 7: return mb_smooth_run(xp, op, from, to, st, r1, n1, r2, n2);
+		case 8: mb_adaptive_run(xp, op, from, to, st); return 0;
+		case 9: return mb_curve_smooth_run(xp, op, from, to, st, r1, n1, r2, n2);
+		default: return -1;
+	}
+}
+
+// Notes::Smoother.jump: the output jumps to +v+ (the input at a jump) and
+// holds it with nothing moving.
+static inline void mb_smoother_jump(size_t sl, double *st, double v, size_t n1, size_t n2)
+{
+	if (sl == 8) {
+		st[0] = st[1] = st[2] = v;
+		st[3] = 0.0;
+		st[5] = st[4];
+	} else if (sl == 9) {
+		st[0] = st[1] = st[2] = v;
+		st[3] = st[4];
+		st[6] = 0.0;
+		st[7] = 0.0;
+	} else {
+		st[1] = v;
+		st[6] = (double)(n1 + n2 - 2);
+	}
+}
+
+// Smooths xp[0...n] into op with a jump at every nonzero sample of +rp+
+// (GraphNode#smooth's reset:; rp NULL for none).  Returns 0 or -1.
+static inline int mb_smoother_reset_run(size_t sl, const float *xp, float *op, const float *rp, long n, double *st, double *r1, size_t n1, double *r2, size_t n2)
+{
+	long start = 0;
+	if (rp) {
+		for (long j = 0; j < n; j++) {
+			if (rp[j] == 0) continue;
+			if (j > start && mb_smoother_segment(sl, xp, op, start, j, st, r1, n1, r2, n2) != 0) return -1;
+			mb_smoother_jump(sl, st, xp[j], n1, n2);
+			start = j;
+		}
+	}
+	if (start < n && mb_smoother_segment(sl, xp, op, start, n, st, r1, n1, r2, n2) != 0) return -1;
+	return 0;
+}
+
 #endif

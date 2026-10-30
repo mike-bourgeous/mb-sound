@@ -745,63 +745,29 @@ static void run_smooth(float *D, const float *A, const float *R, VALUE obj, size
 	}
 	VALUE ring1 = rb_ivar_get(smoother, id_ring1);
 	VALUE ring2 = rb_ivar_get(smoother, id_ring2);
-	size_t sl, n1, n2;
+	size_t sl, n1 = 0, n2 = 0;
 	double *st = smooth_array(state, 7, &sl, "state");
 	double *r1 = NULL, *r2 = NULL;
-	double settle = 0.0;
 	if (sl == 7 || sl == 9) {
 		r1 = smooth_array(ring1, 1, &n1, "ring 1");
 		r2 = smooth_array(ring2, 1, &n2, "ring 2");
-		settle = (double)(n1 + n2 - 2);
 	} else if (sl != 8) {
 		rb_raise(rb_eArgError, "A planned smoother's state must have 7, 8, or 9 values (got %zu)", sl);
 	}
 
-	long start = 0;
-	long nj = R ? (long)n : RARRAY_LEN(jumps);
-	for (long k = 0; k < nj; k++) {
-		long j;
-		if (R) {
-			if (R[k] == 0) continue;
-			j = k;
-		} else {
-			j = NUM2LONG(rb_ary_entry(jumps, k));
+	if (R) {
+		if (mb_smoother_reset_run(sl, A, D, R, (long)n, st, r1, n1, r2, n2) != 0) rb_raise(rb_eArgError, "Bad plan smoother state");
+	} else {
+		long start = 0;
+		long nj = RARRAY_LEN(jumps);
+		for (long k = 0; k < nj; k++) {
+			long j = NUM2LONG(rb_ary_entry(jumps, k));
+			if (j < start || j >= (long)n) continue;
+			if (j > start && mb_smoother_segment(sl, A, D, start, j, st, r1, n1, r2, n2) != 0) rb_raise(rb_eArgError, "Bad plan smoother state");
+			mb_smoother_jump(sl, st, A[j], n1, n2);
+			start = j;
 		}
-		if (j < start || j >= (long)n) continue;
-		if (j > start) {
-			if (sl == 8) {
-				mb_adaptive_run(A, D, start, j, st);
-			} else if (sl == 9) {
-				if (mb_curve_smooth_run(A, D, start, j, st, r1, n1, r2, n2) != 0) rb_raise(rb_eArgError, "Bad plan curve smoother state");
-			} else if (mb_smooth_run(A, D, start, j, st, r1, n1, r2, n2) != 0) {
-				rb_raise(rb_eArgError, "Bad plan smoother ring positions");
-			}
-		}
-		// The jump (Notes::Smoother.jump)
-		double v = A[j];
-		if (sl == 8) {
-			st[0] = st[1] = st[2] = v;
-			st[3] = 0.0;
-			st[5] = st[4];
-		} else if (sl == 9) {
-			st[0] = st[1] = st[2] = v;
-			st[3] = st[4];
-			st[6] = 0.0;
-			st[7] = 0.0;
-		} else {
-			st[1] = v;
-			st[6] = settle;
-		}
-		start = j;
-	}
-	if (start < (long)n) {
-		if (sl == 8) {
-			mb_adaptive_run(A, D, start, (long)n, st);
-		} else if (sl == 9) {
-			if (mb_curve_smooth_run(A, D, start, (long)n, st, r1, n1, r2, n2) != 0) rb_raise(rb_eArgError, "Bad plan curve smoother state");
-		} else if (mb_smooth_run(A, D, start, (long)n, st, r1, n1, r2, n2) != 0) {
-			rb_raise(rb_eArgError, "Bad plan smoother ring positions");
-		}
+		if (start < (long)n && mb_smoother_segment(sl, A, D, start, (long)n, st, r1, n1, r2, n2) != 0) rb_raise(rb_eArgError, "Bad plan smoother state");
 	}
 
 	RB_GC_GUARD(state);

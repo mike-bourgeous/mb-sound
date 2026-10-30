@@ -171,6 +171,45 @@ static VALUE ruby_slew(VALUE self, VALUE data, VALUE s_v, VALUE rise_v, VALUE fa
 	return DBL2NUM(s);
 }
 
+// reset_run(x, out, state, ring1, ring2, reset): Notes::Smoother over all
+// of x into out (SFloat) with the kernel the state's length picks, jumping
+// to the input at every nonzero sample of +reset+ (an SFloat at least as
+// long, or nil): Filter::Smooth#dynamic_process (GraphNode#smooth with
+// reset:), as the plan op runs it (mb_smoother_reset_run; mirror
+// Notes::Smoother.run with the reset's nonzero offsets as jumps).
+static VALUE ruby_reset_run(VALUE self, VALUE x, VALUE out, VALUE state, VALUE ring1, VALUE ring2, VALUE reset)
+{
+	size_t length = check_array(x, numo_cSFloat, 0, "The input");
+	if (check_array(out, numo_cSFloat, 0, "The output") != length) {
+		rb_raise(rb_eArgError, "The output must have as many values as the input");
+	}
+	size_t sl = check_array(state, numo_cDFloat, STATE_LENGTH, "The state");
+	if (sl != STATE_LENGTH && sl != ADAPTIVE_STATE_LENGTH && sl != CURVE_STATE_LENGTH) {
+		rb_raise(rb_eArgError, "The state must have 7, 8, or 9 values (got %zu)", sl);
+	}
+	size_t n1 = check_array(ring1, numo_cDFloat, 1, "Ring 1");
+	size_t n2 = check_array(ring2, numo_cDFloat, 1, "Ring 2");
+	const float *rp = NULL;
+	if (!NIL_P(reset)) {
+		if (check_array(reset, numo_cSFloat, length, "The reset") < length) {
+			rb_raise(rb_eArgError, "The reset must be at least as long as the input");
+		}
+		rp = (const float *)(nary_get_pointer_for_read(reset) + nary_get_offset(reset));
+	}
+	rb_check_frozen(out);
+	rb_check_frozen(state);
+	rb_check_frozen(ring1);
+	rb_check_frozen(ring2);
+
+	const float *xp = (const float *)(nary_get_pointer_for_read(x) + nary_get_offset(x));
+	if (mb_smoother_reset_run(sl, xp, mb_sfloat_ptr(out), rp, (long)length, dfloat_ptr(state), dfloat_ptr(ring1), n1, dfloat_ptr(ring2), n2) != 0) {
+		rb_raise(rb_eArgError, "The smoother state doesn't fit its rings");
+	}
+
+	RB_GC_GUARD(reset);
+	return out;
+}
+
 void Init_fast_control(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -181,4 +220,5 @@ void Init_fast_control(void)
 	rb_define_module_function(fast_control, "adaptive", ruby_adaptive, 5);
 	rb_define_module_function(fast_control, "curve", ruby_curve, 7);
 	rb_define_module_function(fast_control, "slew", ruby_slew, 5);
+	rb_define_module_function(fast_control, "reset_run", ruby_reset_run, 6);
 }
