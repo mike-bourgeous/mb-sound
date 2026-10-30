@@ -200,7 +200,7 @@ module MB
                   else
                     begin
                       t = lb.target(entry[:roots], n, name, all: all)
-                      Bind.new(line: lb.line(track, t).freeze, knob: lb.knob_name(track, t.param), reason: nil)
+                      Bind.new(line: lb.line(track, t).freeze, knob: Session::Name.param(track, t.param), reason: nil)
                     rescue StandardError => e
                       Bind.new(line: nil, knob: nil, reason: (e.is_a?(lb::Error) ? e.message : "#{e.class}: #{e.message}").dup.freeze)
                     end

@@ -73,6 +73,8 @@ module MB
           end
 
           if default.nil? && spec.empty?
+            full = full_knob_name(name)
+            return @knob_lock.synchronize { @knobs[full] } if full
             return implicit_knob(name) if MB::Sound.live?
             raise ArgumentError, "No knob #{name.inspect}#{knob_suggestion(name, define: true)}"
           end
@@ -127,10 +129,15 @@ module MB
         # taking knob names (turn, snap knobs:, recall only:/except:, xfade,
         # learn, bind_cc, scene and section values) resolves through here
         # or #knob!.  Other values pass through.
+        #
+        # Knobs are named in full (knobs-1, D5: :"bass/resonance"); a short
+        # name the Param names table aliases (:"bass/reso", :"bass/freq",
+        # :"bass/q") stands for the full one when that knob exists, with a
+        # one-line note the first time (#full_knob_name).
         def control_name(name)
           return name unless name.is_a?(Symbol)
           return name if @knob_lock.synchronize { @knobs.key?(name) }
-          primary_control(name) || name
+          full_knob_name(name) || primary_control(name) || name
         end
 
         # True if +name+ names a track's level knob (:"bass/level"), made
@@ -655,6 +662,23 @@ module MB
           @knob_midi = nil
           @knob_gestures = {}
           @committing_gesture = nil
+          @alias_noted = nil
+          @clamp_warned = nil
+        end
+
+        # The full name of existing knob that short name +name+ stands for
+        # (Session::Name.full_name: :"bass/resonance" for :"bass/reso"), or
+        # nil.  Notes the first use of each short name (knobs are named in
+        # full; listings, documents, and takes show the full name).
+        def full_knob_name(name)
+          full = Name.full_name(name) or return nil
+          return nil unless @knob_lock.synchronize { @knobs.key?(full) }
+          @alias_noted ||= {}
+          unless @alias_noted[name]
+            @alias_noted[name] = true
+            warn "knob #{name.inspect} is #{full.inspect} (knobs take their params' full names)"
+          end
+          full
         end
 
         def knob_suggestion(name, define: false)

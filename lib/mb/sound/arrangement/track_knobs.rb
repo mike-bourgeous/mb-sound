@@ -72,11 +72,6 @@ module MB
           session.arrangement.note_build_knob(track, knob.name)
         end
 
-        # The knob name for param +param+ of track +track+'s preset.
-        def knob_name(track, param)
-          Session::Name.param(track, param)
-        end
-
         # { param => GraphNode::Knob } for the params of graph Document
         # +doc+ (parsed) that +given+ (the params the patch gave) leaves
         # out, made or found in the building track's Session (see .knob_for);
@@ -111,7 +106,7 @@ module MB
         # old instrument plays on until then).  Nil if the name is taken by
         # something else.
         def knob_for(session, track, param)
-          kname = knob_name(track, param.name)
+          kname = Session::Name.param(track, param.name)
           default = knob_default(param)
           opts = { curve: curve_of(param), description: param.description, clamp: param.clamp }
           spec = GraphNode::Knob::Spec.new(name: kname, default: default, **opts)

@@ -5,9 +5,9 @@ module MB
       # Live literals): a number written in a track's patch (a literal
       # like `resonance: 0.25`, an envelope time) or a graph document's
       # param that no knob drives becomes turnable.  `bind :bass, lp4:
-      # :resonance` makes a knob (:"bass/reso", ranged from the Param
+      # :resonance` makes a knob (:"bass/resonance", ranged from the Param
       # names table at the literal's value), and the track's patch is
-      # built again with `knob(:"bass/reso")` in that argument's place
+      # built again with `knob(:"bass/resonance")` in that argument's place
       # (Recipe.substituting: the same block runs, the call gets the knob)
       # and swapped in at the track's launch point, keeping its routing,
       # through the journal (undoable: the old patch and graph come back;
@@ -273,15 +273,6 @@ module MB
           m.parameters.select { |type, _| type == :req || type == :opt }.map(&:last)
         end
 
-        # The knob name for a binding of +param+ on track +track+:
-        # :"bass/reso" (the Param names table's short alias where it has
-        # one: resonance -> reso, frequency -> freq, quality -> q).
-        SHORT = { resonance: :reso, frequency: :freq, quality: :q }.freeze
-
-        def knob_name(track, param)
-          Session::Name.param(track, SHORT[param] || param)
-        end
-
         # The knob default for literal +value+ of param +param+: a ranged
         # default `(lo..hi).at(value)` from the Param names table (the
         # value given its unit: seconds for times, Hz for pitches), widened
@@ -445,8 +436,8 @@ module MB
             return MB::Sound.live_error(LiteralBinding::Error.new("bind #{name.inspect}, #{what.keys.first}: #{follow.inspect}: no knob #{follow.inspect}#{GraphIO.suggest(follow, @session.knobs.keys)} (knob #{follow.inspect}, ... makes one)"))
           end
           what = what.keys.first.to_sym
-        elsif what.is_a?(Symbol) && doc && doc.params.key?(what) && reads_knob?(roots, TrackKnobs.knob_name(name, what))
-          kn = TrackKnobs.knob_name(name, what)
+        elsif what.is_a?(Symbol) && doc && doc.params.key?(what) && reads_knob?(roots, Session::Name.param(name, what))
+          kn = Session::Name.param(name, what)
           puts "\e[2m#{name}'s #{what} is already knob #{kn.inspect}: turn #{kn.inspect}, ...; bind #{name.inspect}, #{what}: :other follows another knob\e[0m"
           return kn
         elsif what.is_a?(Symbol) && doc && !doc.params.key?(what) && @session.knobs[what] && !doc.params.empty?
@@ -471,7 +462,7 @@ module MB
             return MB::Sound.live_error(e)
           end
 
-        kname = (follow || as || LiteralBinding.knob_name(name, t.param)).to_sym
+        kname = (follow || as || Session::Name.param(name, t.param)).to_sym
         default = LiteralBinding.knob_default(t.param, t.value, range)
         k = @session.knobs[kname]
         if k && !follow && (k.value - Param.magnitude(default.default).to_f).abs > 1e-9 * [1.0, k.value.abs].max

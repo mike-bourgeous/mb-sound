@@ -67,7 +67,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
 
   it 'binds a literal to a new knob: the same samples at its starting value, then turning moves them' do
     [
-      [{ lp4: :resonance }, :"lead/reso", 0.25, 'resonance: knob(:"lead/reso")'],
+      [{ lp4: :resonance }, :"lead/resonance", 0.25, 'resonance: knob(:"lead/resonance")'],
       [{ lp4: :cutoff }, :"lead/cutoff", 1200.0, 'lp4(knob(:"lead/cutoff"), resonance: 0.25)'],
       [{ amp_env: :attack }, :"lead/attack", 0.05, 'amp_env(knob(:"lead/attack"), 0.2, 0.5, 0.3)'],
       [{ amp_env: :sustain }, :"lead/sustain", 0.5, 'amp_env(0.05, 0.2, knob(:"lead/sustain"), 0.3)'],
@@ -91,7 +91,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     # Turning moves it
     s, bound, = play(->(_) { MB::Sound.bind(:lead, lp4: :resonance) })
     _, ref, = play(REBUILD, buffers: 260)
-    MB::Sound::Session.with_context(session: s) { MB::Sound.turn(:"lead/reso", 0.9) }
+    MB::Sound::Session.with_context(session: s) { MB::Sound.turn(:"lead/resonance", 0.9) }
     60.times { s.process_buffer }
     turned = Numo::DFloat.cast(s.output.captured[0])
     expect((turned[0...bound.length] - ref[0...bound.length]).abs.max).to eq(0.0)
@@ -123,7 +123,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
 
   it 'is one undo step: the old patch and graph come back' do
     s, = play(->(_) { MB::Sound.bind(:lead, lp4: :resonance) })
-    expect(code_of(s)).to include('knob(:"lead/reso")')
+    expect(code_of(s)).to include('knob(:"lead/resonance")')
     expect(s.arrangement.tracks[:lead].patch).to respond_to(:literal_bindings)
     MB::Sound::Session.with_context(session: s) { MB::Sound.undo(on: :now) }
     4.times { s.process_buffer }
@@ -135,12 +135,12 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
       MB::Sound.bind(:lead, amp_env: :release, on: :now)
     end
     4.times { s.process_buffer }
-    expect(code_of(s)).to include('knob(:"lead/reso")', 'knob(:"lead/release")')
+    expect(code_of(s)).to include('knob(:"lead/resonance")', 'knob(:"lead/release")')
 
     # A set document saves the patch reading the knobs (the user's block,
     # built with the bindings)
     text = MB::Sound::GraphIO.dump(s.arrangement, name: 'bound')
-    expect(text).to include('knob :"lead/reso"', 'track(:lead) { |c|', 'lp4(1200.hz, resonance: knob(:"lead/reso"))', 'knob(:"lead/release")')
+    expect(text).to include('knob :"lead/resonance"', 'track(:lead) { |c|', 'lp4(1200.hz, resonance: knob(:"lead/resonance"))', 'knob(:"lead/release")')
     s2 = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
     @sessions << s2
     doc = MB::Sound::GraphIO.load(text, session: s2)
@@ -171,7 +171,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     lines = {
       0 => ['track(:lead) { |c| c.synth(voices: 2) { |v| v.hz.saw.lp4(1200.hz, resonance: 0.25) * v.amp_env(0.05, 0.2, 0.5, 0.3) } }', 'bg :lead, seq(E3, G3).n4.loop'],
       30 => ['bind :lead, lp4: :resonance'],
-      200 => ['turn :"lead/reso", 0.8, over: 1'],
+      200 => ['turn :"lead/resonance", 0.8, over: 1'],
       300 => ['undo'],
     }
     session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), channels: 2, buffer_size: 800, realtime: false, raise_errors: true)
@@ -203,7 +203,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
   it 'binds a unison\'s detune and a stereo lp4\'s resonance, the same samples at their starting values' do
     _, plain, = play(REBUILD, patch: STEREO)
     s, reso, = play(->(_) { MB::Sound.bind(:lead, lp4: :resonance) }, patch: STEREO)
-    expect(code_of(s)).to include('knob(:"lead/reso")')
+    expect(code_of(s)).to include('knob(:"lead/resonance")')
     expect((reso - plain).abs.max).to eq(0)
     s, detune, = play(->(_) { MB::Sound.bind(:lead, unison: :detune) }, patch: STEREO)
     expect(code_of(s)).to include('knob(:"lead/detune")')
@@ -223,7 +223,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     i = info.nodes.index { |n| n.label == 'lp4' }
     info = g.call(s, { track: :lead, node: i })
     lp4 = info.selected
-    expect(lp4.binds[:resonance]).to have_attributes(line: 'bind :lead, lp4: :resonance', knob: :"lead/reso", reason: nil)
+    expect(lp4.binds[:resonance]).to have_attributes(line: 'bind :lead, lp4: :resonance', knob: :"lead/resonance", reason: nil)
     expect(lp4.binds[:cutoff].line).to eq('bind :lead, lp4: :cutoff')
     synth = g.call(s, { track: :lead, node: info.nodes.index { |n| n.label == 'synth' } }).selected
     expect(synth.params.values[:voices].value).to eq(2) # (shown, read-only)
@@ -238,15 +238,15 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     st[:pick] = names.index(:resonance) # (no knobs: the params come first)
     grid = MB::Term::Cells.new(80, 16)
     pane.draw(ui::Canvas.new(grid, 0, 0, 80, 16), snap, st)
-    expect(grid.to_text(:none)).to include('Enter: knob :"lead/reso"')
-    expect(pane.enter_hint(st)).to eq('make resonance knob :"lead/reso": rebuilds lead at its launch point (notes play on; delays and reverbs start fresh; Left/Right bind it now and turn)')
+    expect(grid.to_text(:none)).to include('Enter: knob :"lead/resonance"')
+    expect(pane.enter_hint(st)).to eq('make resonance knob :"lead/resonance": rebuilds lead at its launch point (notes play on; delays and reverbs start fresh; Left/Right bind it now and turn)')
     ask = pane.key_action(:ask, st).last
     expect(ask).to eq(ui::PaneKeys::Ask['', 'bind :lead, lp4: :resonance', :bind])
     run = pane.key_action(:bind, st, ask.text)
     expect(run.code).to eq('bind :lead, lp4: :resonance')
     ui.run_line(run.code, s)
     300.times { s.process_buffer }
-    expect(code_of(s)).to include('knob(:"lead/reso")')
+    expect(code_of(s)).to include('knob(:"lead/resonance")')
 
     # A param a knob drives turns its knob; a graph track's literal says why not
     info = g.call(s, { track: :lead, node: i })

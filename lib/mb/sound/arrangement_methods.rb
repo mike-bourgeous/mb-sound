@@ -149,10 +149,10 @@ module MB
       end
 
       # Makes a number in track +name+'s patch turnable (live literals): a
-      # new knob, :"bass/reso" for `lp4: :resonance` (`as:` names it,
+      # new knob, :"bass/resonance" for `lp4: :resonance` (`as:` names it,
       # `range:` ranges it; else the Param names table's range for the
       # param, holding the literal's value), and the patch built again with
-      # `knob(:"bass/reso")` in that argument's place, swapped in at the
+      # `knob(:"bass/resonance")` in that argument's place, swapped in at the
       # track's launch point (`on:`, `in:`, `at:`) keeping its routing.
       # The new graph sounds the same at the knob's starting value, and it
       # takes the old one's running state on the swap frame (held notes,
@@ -166,7 +166,7 @@ module MB
       # Returns the swap's journal entry.  The inspector (ui :sound) runs
       # it for a picked param on Enter.
       #
-      #     bind :bass, lp4: :resonance           # knob :"bass/reso"
+      #     bind :bass, lp4: :resonance           # knob :"bass/resonance"
       #     bind :bass, amp_env: :attack, as: :att
       #     bind :bass, env: :t2                  # env([[1, 0.01], [0.6, 0.3]])'s second time: :"bass/t2"
       #     bind :bass, env: :t2_level            # its level (:t1_curve a segment's curve)
