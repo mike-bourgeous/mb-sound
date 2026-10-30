@@ -149,6 +149,25 @@ module MB
           Library::Audition.playable(self)
         end
 
+        # The graph the entry plays on its Listening Bench +material+ (see
+        # Library::Bench): an effect on :arp (default), :break, or :pad; an
+        # instrument on its role's phrases (`L.inst.dnb_reese.audition`,
+        # `.audition(:template)`, its genre template's phrase); a kit on
+        # :drums_beat or :drums_busy.  Finite, so `play` ends by itself:
+        # `play L.fx.reverb.hall.audition(:break)`.
+        def audition(material = nil)
+          Library::Bench.graph(self, material)
+        end
+
+        # The materials #audition takes for this entry.
+        def auditions = Library::Bench.materials_for(self).map(&:key)
+
+        # Renders a Listening Bench set of this entry (see Library::Bench.run
+        # for the options): `L.fx.reverb.hall.bench`.
+        def bench(**options)
+          Library::Bench.run(self, **options)
+        end
+
         # A label for messages: "reverb :hall" or "preset :dnb_reese".
         def label
           "#{family} #{name.inspect}"

@@ -21,7 +21,7 @@ module MB
 
           # Query's own methods (words with these names are reached with
           # #[]).
-          OWN = %i[entries names words find each first size length empty? inspect to_s path kind chosen word].freeze
+          OWN = %i[entries names words find each first size length empty? inspect to_s path kind chosen word bench].freeze
 
           attr_reader :kind, :chosen, :path
 
@@ -73,6 +73,13 @@ module MB
             hits = Library.index.find(query, kind: @kind, limit: 10_000)
             keep = @pool.to_h { |e| [[e.family, e.name, e.shelf], true] }
             Index::Results.new(hits.query, hits.hits.select { |h| keep[[h.entry.family, h.entry.name, h.entry.shelf]] }.first(limit))
+          end
+
+          # Renders a Listening Bench set of the entries left (see
+          # Library::Bench.run for the options): `L.fx.reverb.bench`,
+          # `L.inst.dnb.bench(materials: [:template])`.
+          def bench(**options)
+            Library::Bench.run(self, **options)
           end
 
           # A table of what is left.
@@ -143,8 +150,8 @@ module MB
           end
           words = case node
                   when Root then [*HEADS.keys, :all, :find]
-                  when Query then node.words.reject { |w| Query::OWN.include?(w) } + %i[entries names find]
-                  else %i[call to_ruby about tags params head_path]
+                  when Query then node.words.reject { |w| Query::OWN.include?(w) } + %i[entries names find bench]
+                  else %i[call to_ruby about tags params head_path audition auditions bench]
                   end
           words.map(&:to_s).select { |w| w.start_with?(prefix) }.sort.map { |w| "#{path}.#{w}" }
         rescue KeyError, StandardError
