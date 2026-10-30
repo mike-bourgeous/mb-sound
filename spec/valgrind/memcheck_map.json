@@ -64,6 +64,7 @@
         "FastAudio::Concealer#state",
         "FastAudio::Playback#captured",
         "FastAudio::Playback#close",
+        "FastAudio::Playback#device_channels",
         "FastAudio::Playback#end_stream",
         "FastAudio::Playback#initialize",
         "FastAudio::Playback#stats",
@@ -222,6 +223,9 @@
     "spec/ext/mb/sound/fast_plan_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.divide"
+      ],
+      "fast_control": [
+        "FastControl.smooth"
       ],
       "fast_envelope": [
         "FastEnvelope.process"
@@ -666,6 +670,7 @@
     "spec/lib/mb/sound/granular_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.fill_range",
+        "FastArithmetic.last_at_least",
         "FastArithmetic.min_max",
         "FastArithmetic.mix"
       ],
@@ -970,6 +975,7 @@
         "FastArithmetic.ease_plain",
         "FastArithmetic.fill_range",
         "FastArithmetic.knob_ramp",
+        "FastArithmetic.last_at_least",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.pan",
@@ -1203,6 +1209,7 @@
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
         "FastArithmetic.fill_range",
+        "FastArithmetic.last_at_least",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.product"
@@ -1500,8 +1507,16 @@
         "FastArithmetic.mix",
         "FastArithmetic.product"
       ],
+      "fast_clip": [
+        "FastClip.shape"
+      ],
       "fast_control": [
         "FastControl.slew"
+      ],
+      "fast_filter": [
+        "FastFilter.diode_ladder",
+        "FastFilter.four_pole",
+        "FastFilter.svf"
       ],
       "fast_loop": [
         "FastLoop.constants",
@@ -1527,6 +1542,7 @@
         "FastArithmetic.complex_part",
         "FastArithmetic.copy",
         "FastArithmetic.fill_range",
+        "FastArithmetic.last_at_least",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.product"
@@ -1574,6 +1590,7 @@
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
         "FastArithmetic.fill_range",
+        "FastArithmetic.last_at_least",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.product",
@@ -1606,7 +1623,7 @@
         "FastArithmetic.add_at",
         "FastArithmetic.copy",
         "FastArithmetic.fill_range",
-        "FastArithmetic.min_max",
+        "FastArithmetic.last_at_least",
         "FastArithmetic.mix",
         "FastArithmetic.power",
         "FastArithmetic.product"
@@ -1638,6 +1655,7 @@
         "FastArithmetic.copy",
         "FastArithmetic.divide",
         "FastArithmetic.fill_range",
+        "FastArithmetic.last_at_least",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.power",
@@ -1717,8 +1735,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1730,6 +1746,7 @@
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
         "FastArithmetic.fill_range",
+        "FastArithmetic.last_at_least",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.scale"
@@ -1805,6 +1822,8 @@
         "FastSynth.sync_pulse_edges"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -1843,6 +1862,7 @@
         "FastArithmetic.product"
       ],
       "fast_sound": [
+        "FastSound.fast_math?",
         "FastSound.number_to_freq",
         "FastSound.oscillate",
         "FastSound.phasor"
