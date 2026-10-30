@@ -31,6 +31,19 @@ RSpec.describe(MB::Sound::GraphNode::MixSource) do
     expect { source.outputs[0].sample(4) }.to raise_error(ArgumentError, /asked for 4 samples.*has 3/)
   end
 
+  # Kez's K10: a Synth reads its lanes in windows (a lane waking inside a
+  # buffer), so a bus chain through one read its input in pieces
+  it 'returns consecutive pieces of the buffer to reads of fewer samples, starting over at each write' do
+    source.write(data)
+    expect(source.outputs[0].sample(1)).to eq(Numo::SFloat[1])
+    expect(source.outputs[0].sample(2)).to eq(Numo::SFloat[2, 3])
+    expect(source.outputs[1].sample(2)).to eq(Numo::SFloat[-1, -2])
+    expect { source.outputs[1].sample(2) }.to raise_error(ArgumentError, /asked for 2 samples 2 samples into a 3-sample/)
+    source.write(data)
+    expect(source.outputs[1].sample(2)).to eq(Numo::SFloat[-1, -2])
+    expect(source.outputs[0].sample(3)).to eq(data[0]) # (whole reads as before)
+  end
+
   it 'raises an error if given the wrong number of channels' do
     expect { source.write([data[0]]) }.to raise_error(ArgumentError, /Expected 2 channels/)
   end

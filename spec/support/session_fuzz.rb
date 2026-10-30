@@ -279,6 +279,16 @@ module SessionFuzz
       lines << "scene :nopump, others: :keep, pump: :off" if rng.rand < 0.5
       lines << "at_bar(#{bars}, beat: 3) { go :nopump }" if lines.last.start_with?('scene :nopump')
     end
+    # (omnibus17, Kez's K10) a bus chain through a Synth reading the bus
+    # input, with a send turned up after the bus slept: lanes wake inside
+    # buffers and read the input in windows (drawn last, so every seed
+    # keeps the song it made before)
+    if rng.rand < 0.2
+      lines << "knob :tint, 0, range: 0..1"
+      lines << "bus(:colour) { |sig| seq([E2, G2, B2], [C2, E2, G2]).n1.loop.synth(voices: 4) { |v| (sig * 0.01).resonate(:bar, v.freq, decay: 0.3) * v.gate.smooth(4.ms) } }"
+      lines << "at_bar(1) { feed :#{pick(rng, names)}, :colour, :tint }"
+      lines << "at_bar(#{rng.rand(1..bars)}, beat: #{rng.rand(2..beats)}) { turn :tint, 1 }"
+    end
     Song.new(header: header, lines: lines, bars: bars)
   end
 
