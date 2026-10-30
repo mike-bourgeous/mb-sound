@@ -215,7 +215,7 @@ module MB
         # first; numbers keep a name's passes apart).
         def marker_names(prefix: :analysis)
           count = Hash.new(0)
-          sections.map { |s| :"#{prefix}/#{s.name}_#{count[s.name] += 1}" }
+          sections.map { |s| Session::Name.join(prefix, "#{s.name}_#{count[s.name] += 1}") }
         end
 
         # Puts the sections into +session+'s marker table as :analysis
