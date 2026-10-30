@@ -94,7 +94,9 @@ module MB
       include GraphNode
       include GraphNode::SampleRateHelper
       include GraphNode::Ports
-      node_traits memory: :short
+      # (random phases at resets are drawn at events; noise per sample:
+      # #node_traits)
+      node_traits memory: :short, random: :events
 
       port :wraps, 'Sync pulses: 0 except just after the phase wraps, where the value 1 - d (0 < 1 - d <= 1) says the wrap was d samples earlier; negative when moving backward; 1 after a jump (reset or sync)'
       port :increment, 'The phase increment of each sample, in cycles'
@@ -1805,6 +1807,53 @@ module MB
         @state ? @state.last_freq : 0.0
       end
 
+      # NodeTraits for this tone: noise (#noise) draws a random number per
+      # sample, which a sleeping voice catches up (#catch_up_noise), except
+      # in a wavetable's kernel, whose catch-up isn't written yet (its
+      # noise keeps sleepers awake); other tones draw only random phases
+      # at resets (+random: :events+).
+      def node_traits
+        return self.class.node_traits if @noise.nil? || @noise == 0
+
+        NodeTraits.variant(self.class, random: kernel == :wavetable ? :blocks : :catch_up_noise)
+      end
+
+      # NodeTraits' catch-up for noise: moves the phase and the noise
+      # generator on by +frames+ samples as the kernel would have rendered
+      # them at the last frequency it read (exact while the frequency holds
+      # still, as constants and an idle voice's note frequency do), so a
+      # voice that slept draws the noise it would have drawn awake.
+      def catch_up_noise(frames)
+        state = @state or return
+        noise = state.noise or return
+        return if @random_advance.nil? || @random_advance == 0
+
+        Kernels.noise_skip(state.phase, noise, state.last_freq.to_f, @advance, @random_advance, frames)
+        nil
+      end
+
+      # Ruby mirror of FastTexture.noise_skip (see fast_texture.c): moves
+      # the phase state +phase+ (Array, first element in cycles) and noise
+      # generator state +noise+ (Array of one Integer) on by +count+
+      # samples at +freq+.
+      def self.noise_skip_ruby(phase, noise, freq, adv, rndadv, count)
+        raise ArgumentError, "noise_skip count must not be negative (got #{count})" if count < 0
+
+        phi = phase[0].to_f
+        rng = [noise[0]]
+        freq = freq.to_f
+        count.times do
+          r = noise_random(rng) * rndadv
+          a = adv + r
+          inc = freq * a
+          x = phi + inc
+          phi = x - x.floor.to_f
+        end
+        phase[0] = phi - phi.floor.to_f
+        noise[0] = rng[0]
+        nil
+      end
+
       # The phase advance per sample per Hz, in cycles (normally 1 /
       # sample_rate; a little less with #noise, which adds a random
       # advance).
@@ -3265,6 +3314,7 @@ module MB
       end
 
       Kernels.register :osc, c: MB::FastSound.method(:osc), ruby: Tone.method(:radians_value_ruby)
+      Kernels.register :noise_skip, c: MB::Sound::FastTexture.method(:noise_skip), ruby: Tone.method(:noise_skip_ruby)
       Kernels.register :fast_shape, c: MB::FastSound.method(:shape), ruby: Tone.method(:shape_kernel_ruby),
         check: 'edges land on either side of a rounding (tone_phasor_spec compares within 1e-4 away from jumps)'
       Kernels.register :tone, on: Tone, as: :run_kernel, c: :kernel_c, ruby: :kernel_ruby, group: :tone,

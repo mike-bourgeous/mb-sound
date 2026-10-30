@@ -40,6 +40,8 @@ module MB
         # (+:overlap+, +:jump+).
         class Arp < Scheduled
           include Seeded
+          # (random steps are drawn per note, upstream of the voices)
+          node_traits random: :events
 
           # Arpeggio modes (see Stream#arp).
           MODES = [

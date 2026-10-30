@@ -90,7 +90,8 @@ module MB
         include GraphNode
         include SampleRateHelper
         include TextureRate
-        node_traits memory: :short
+        # (one draw per sample, caught up by sleepers: #catch_up_draws)
+        node_traits memory: :short, random: :catch_up_draws
 
         # The random seed.
         attr_reader :seed
@@ -123,6 +124,8 @@ module MB
           init_seed(seed)
           @sample_rate = sample_rate.to_f
           @buf = nil
+          @last_rate = nil # (the inputs' last values, for #catch_up_draws)
+          @last_gap = nil
           @node_type_name = 'Dust'
           reset
         end
@@ -143,7 +146,20 @@ module MB
           return nil if gap.nil?
 
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
+          @last_rate = NodeTraits.held(r)
+          @last_gap = NodeTraits.held(gap)
           Kernels.dust(@buf, r, @rng, @sample_rate, @range.begin, @range.end, gap, @since)
+        end
+
+        # NodeTraits' catch-up: draws (and drops) +frames+ samples of
+        # impulses at the rate and gap last read, so a voice that slept
+        # draws what it would have drawn awake (exact while they hold
+        # still, as constants do).
+        def catch_up_draws(frames)
+          return if @last_rate.nil?
+
+          Kernels.dust(NodeTraits.scratch(frames), @last_rate, @rng, @sample_rate, @range.begin, @range.end, @last_gap, @since)
+          nil
         end
 
         # The random stream and the samples since the last impulse (for a

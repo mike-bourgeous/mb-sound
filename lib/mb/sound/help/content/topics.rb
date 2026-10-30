@@ -47,7 +47,7 @@ module MB
         play Sample['sounds/drums_short.flac'].trim(...2.seconds), gain: -8.db
       end
       example 'play a grid on a TR-909' do
-        play grid(16, kick: 'X...x...', snare: '....x...', hat: 'x.x.x.x.'), gain: -13.db
+        play grid(16, kick: 'X...x...', snare: '....x...', hat: 'x.x.x.x.'), gain: -13.5.db
       end
     end
 

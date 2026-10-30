@@ -19,7 +19,8 @@ module MB
       class Grains
         include MultiOutput
         include Nameable
-        node_traits memory: :short
+        # (draws per onset, caught up by sleepers: #catch_up_grains)
+        node_traits memory: :short, random: :catch_up_grains
 
         # One output channel (0 left, 1 right).
         class Output
@@ -131,6 +132,7 @@ module MB
           @sampled = []
           @bufs = nil
           @flip = 0
+          @held_values = Array.new(INPUTS.length) # (inputs last read, for #catch_up_grains)
           build_tables
           reset
         end
@@ -202,9 +204,32 @@ module MB
           @bufs = Array.new(2) { Array.new(2) { Numo::SFloat.zeros(count) } } if @bufs.nil? || @bufs[0][0].length != count
           @flip ^= 1
           l, r = @bufs[@flip]
+          held = @held_values
+          i = 0
+          while i < values.length
+            held[i] = NodeTraits.held(values[i])
+            i += 1
+          end
+          held[0] = 0.0 unless held[0].nil? # (no triggers while asleep)
           Kernels.grains(l, r, @specs, @slots, @state, @rng, @window, values, config)
           [l, r]
         end
+
+        public
+
+        # NodeTraits' catch-up: renders (and drops) +frames+ samples of the
+        # cloud with its inputs at the values last read (no triggers), so
+        # a voice that slept starts the grains, draws, and playhead it
+        # would have awake (exact while the inputs hold still, as constants
+        # and an idle voice's values do).
+        def catch_up_grains(frames)
+          return if @held_values[1].nil? # (never rendered)
+
+          Kernels.grains(NodeTraits.scratch(frames, 0), NodeTraits.scratch(frames, 1), @specs, @slots, @state, @rng, @window, @held_values, config)
+          nil
+        end
+
+        private
 
         def config
           a4 = MB::Sound.tuning.frequency_of(69).to_f

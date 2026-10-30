@@ -45,7 +45,8 @@ module MB
       class Decimator
         include GraphNode
         include SampleRateHelper
-        node_traits memory: :short
+        # (a jittered decimator draws per held step: #node_traits)
+        node_traits memory: :short, random: false
 
         # The largest jitter (each period may shrink or grow by this
         # fraction).
@@ -175,6 +176,15 @@ module MB
           j += ', linear' if @mode == 1
           j += @mix.is_a?(Numeric) ? (@mix == 1 ? '' : ", mix #{MB::M.sigfigs(@mix, 3)}") : ', mix node'
           "Decimator #{r}#{j}"
+        end
+
+        # NodeTraits for this decimator: with +jitter:+ it draws a random
+        # period at each held step, whose times and held values follow its
+        # input and rate, which a sleeping voice can't know without
+        # rendering, so it keeps sleepers awake (+random: :blocks+;
+        # delay-sleep-1).  Without jitter it draws nothing.
+        def node_traits
+          @jitter > 0 ? NodeTraits.variant(self.class, random: :blocks) : self.class.node_traits
         end
 
         # Plan layer (see MB::Sound::Plan and Plan::Op::Decimate): the hold

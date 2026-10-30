@@ -205,6 +205,7 @@ module MB
           @skipped_samples = 0
           @wakes = 0
           @env_lag = 0
+          @random_lag = 0 # (frames slept alone since the random streams caught up; #catch_up)
           @clock_lag = 0
         end
 
@@ -309,6 +310,7 @@ module MB
 
         # See #attach.
         def analyze
+          catch_up_random(@analysis) if @analysis # (the frames slept so far go to the nodes that slept them)
           # (before reading the Tees' branches)
           watch = BranchWatch.new(GraphNode.graph(self, include_tees: true).select { |n| n.is_a?(Tee) })
           lane_set = {}.compare_by_identity
@@ -346,6 +348,13 @@ module MB
           own.each { |n| n.graph(include_tees: true).each { |u| upstream[u] = true unless u.equal?(n) } }
           branches = nodes.select { |n| n.is_a?(Tee::Branch) && !excl[n.owner_tee] && !upstream[n] }
 
+          # Random streams that pause with the sub-lane (NodeTraits'
+          # +random+ trait), caught up when it wakes; what the branches and
+          # advanced nodes above read keeps running
+          read = {}.compare_by_identity
+          (own + branches).each { |n| n.graph(include_tees: true).each { |u| read[u] = true } }
+          catch_ups = NodeTraits.catching_up(nodes.reject { |n| read[n] })
+
           @analysis = {
             watch: watch,
             nodes: nodes,
@@ -353,6 +362,7 @@ module MB
             branches: branches,
             envelopes: nodes.select { |n| n.is_a?(MB::Sound::Notes::NoteEnvelope) },
             idle: NodeTraits.idle_checked(nodes),
+            catch_ups: catch_ups,
           }
           @reason = reason
           if reason && @asleep
@@ -519,6 +529,11 @@ module MB
           # (idle envelopes catch up at the wake: their stream time only
           # answers questions about sounding envelopes; see #catch_up)
           @env_lag += count
+          # (and random streams, every CATCH_UP_CHUNK frames of a long sleep)
+          unless a[:catch_ups].empty?
+            @random_lag += count
+            catch_up_random(a) if @random_lag >= NodeTraits::CATCH_UP_CHUNK
+          end
           advance_clock(count)
           @skipped_samples += count
         end
@@ -535,10 +550,23 @@ module MB
         # Moves the paused Notes envelopes' bookkeeping over the samples
         # skipped since they last rendered (Notes::NoteEnvelope#advance).
         def catch_up(a)
+          catch_up_random(a)
           return if @env_lag == 0
 
           a[:envelopes].each { |e| e.advance(@env_lag) }
           @env_lag = 0
+        end
+
+        # Moves the random streams of the sub-lane's own nodes on over the
+        # frames it slept alone (while its whole lane sleeps, the Synth
+        # catches them up with the lane's: Synth#catch_up_lane), so a
+        # sub-lane that slept draws what it would have drawn awake.
+        def catch_up_random(a)
+          n = @random_lag
+          return if n == 0
+
+          @random_lag = 0
+          NodeTraits.catch_up(a[:catch_ups], n)
         end
 
         # Moves the sub-lane's own reader of the lane +count+ samples on.

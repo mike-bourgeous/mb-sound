@@ -4,7 +4,9 @@ module MB
       # Seamlessly plays samples in a random order over and over.
       class DataShuffler
         include GraphNode
-        node_traits memory: :short
+        # (draws a new order as it plays, caught up by sleepers:
+        # #catch_up_shuffle)
+        node_traits memory: :short, random: :catch_up_shuffle
 
         # TODO: should the data be resampled if we get a new sample rate?
         attr_accessor :sample_rate
@@ -41,6 +43,14 @@ module MB
           end
 
           @cbuf.read(count)
+        end
+
+        # NodeTraits' catch-up: plays (and drops) +frames+ samples, so a
+        # voice that slept goes on with the clips and orders it would have
+        # drawn awake.
+        def catch_up_shuffle(frames)
+          sample(frames)
+          nil
         end
       end
     end
