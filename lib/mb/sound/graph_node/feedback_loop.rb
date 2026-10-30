@@ -239,6 +239,14 @@ module MB
           compile
         end
 
+        # Turns latency compensation off after building, for loops with
+        # nothing to compensate (#delay's plain feedback loops: a delay, a
+        # gain, and a sum), saving the per-block pitch tracking.
+        def skip_compensation!
+          @compensate = false unless @program&.sustain
+          self
+        end
+
         # Makes the loop's node output +wet+ times the loop plus +dry+ times
         # its input (numbers), mixed in C after each block (FastArithmetic
         # .wet_dry, the kernel Filter::Delay mixes with) instead of through a

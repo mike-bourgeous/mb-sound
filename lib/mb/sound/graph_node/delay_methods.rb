@@ -150,14 +150,21 @@ module MB
           # (echo loops: no sustain shelf, whose pitch would be 1 / time,
           # and the echo compensation, where low cuts count as wires; see
           # Plan::Loop::Program::ECHO_WIRES)
+          bare = false
           loop = self.feedback(sustain: false, compensate: :echo) do |fb, input|
             delayed = (input + fb * feedback).delay(time, **delay_opts)
             pipeline = InsertPipeline.new(delayed)
             out = pipeline.call(insert)
             raise ArgumentError, "The delay's insert block must return a graph node (got #{out.inspect})" unless out.respond_to?(:sample)
 
+            bare = out.equal?(delayed)
             out
           end
+          # Nothing but the gain and the sum around the delay: no latency to
+          # compensate (the same samples, measured over constant, negative,
+          # and sign-changing gains and moving times), so the loop skips the
+          # per-block pitch tracking (smoothing-1)
+          loop.skip_compensation! if bare
 
           echoes = loop
           if pipeline.pipeline? && pipeline.fb_insert
