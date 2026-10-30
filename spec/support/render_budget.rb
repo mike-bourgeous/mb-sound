@@ -27,6 +27,7 @@ module RenderBudget
   @exceeded = nil
   @report = ENV['MB_SOUND_RENDER_BUDGET'] == 'report'
   @over = []
+  @uncounted = 0
 
   class << self
     attr_reader :used, :over
@@ -64,11 +65,22 @@ module RenderBudget
       end
     end
 
+    # Runs the block without counting what it renders: for work an example
+    # does only after it has already failed (SessionFuzz shrinking a failing
+    # song, whose renders once went over the soak's budget and buried the
+    # failure under RenderBudget::Exceeded; batch-fixes-1030).
+    def uncounted
+      @mutex.synchronize { @uncounted += 1 }
+      yield
+    ensure
+      @mutex.synchronize { @uncounted -= 1 }
+    end
+
     # Counts +frames+ at +rate+ written to an unpaced output; raises past the
     # budget.
     def count(frames, rate)
       error = @mutex.synchronize do
-        next nil if @limit.nil?
+        next nil if @limit.nil? || @uncounted > 0
 
         @used += frames / rate
         next nil if @used <= @limit || @exceeded

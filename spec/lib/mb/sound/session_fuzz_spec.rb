@@ -68,6 +68,17 @@ RSpec.describe('session fuzzing') do
     end
   end
 
+  # The 2026-10-30 batch soak's finds (batch-fixes-1030), as generated with
+  # the 16 commands of their day: every relation, as the soak checked them
+  it 'holds every relation for seeds 766010 and 766044', :slow, render_budget: { seconds: 200, reason: 'two random songs, every relation' } do
+    [766010, 766044].each do |seed|
+      song = SessionFuzz.generate(Random.new(seed), commands: 16)
+      SessionFuzz::RELATIONS.each do |rel|
+        expect(SessionFuzz.check(rel, song)).to be_nil.or(eq(:skip)), "seed #{seed} #{rel}"
+      end
+    end
+  end
+
   # Shrunk songs of fixed finds (omnibus13, omnibus15), kept so they stay fixed
   {
     'an uneven-step tween launched where a step starts between samples (seed 116)' => [
@@ -131,6 +142,34 @@ RSpec.describe('session fuzzing') do
       :buffer_size, ['bpm 120'], [
         'at_bar(1, beat: 2) { bg :held, 0.05.constant, in: 1/8r }',
         'at_bar(1, beat: 4) { seek 1, 2.25 }',
+      ], 2,
+    ],
+    # (batch-fixes-1030, the 2026-10-30 batch soak's seed 766010: a player
+    # waiting after a seek back restarted its timeline nodes only when its
+    # start fell inside a span, so a scene's loop starting on an 800-frame
+    # buffer's edge played from where the seek put it, a beat late)
+    'a loop starting on a buffer edge after a seek back (seed 766010)' => [
+      :buffer_size, ['bpm 150'], [
+        'knob :busy, 0.5',
+        'track :t2, :dnb_sub, q: 1',
+        'scene :s1, t2: seq(A3, R, C4.n4, E4).n16.loop, fade: 1/4r',
+        'at_bar(3, beat: 2) { bg :t2, seq(C5, D5).n16, on: :now; bg :t2, seq(E5, G5).n8.loop, in: 1/4r }',
+        'at_bar(2, beat: 2) { flow(seed: 22, on: :beat) { generate markov(s1: { s1: 3 }, seed: 67), s1: [1, 2.beats] } }',
+        'at_bar(3, beat: 4) { seek 3 }',
+      ], 3,
+    ],
+    # (batch-fixes-1030, seed 766044: a player fading out rendered to the
+    # end of the buffer holding its fade's end, so the kick inside a
+    # scene's faded-out kit fed `duck(:t1, only: :kick)` up to a buffer
+    # longer)
+    'a kick sidechain inside a kit a scene fades out (seed 766044)' => [
+      :buffer_size, ['bpm 137.5'], [
+        'knob :busy, 0.5',
+        'track(:t1, q: 1) { |kit| tr808(kit) * 0.5 }',
+        "scene :s1, t1: grid(16, kick: 'x...x...', snare: '....x...').loop, others: :keep",
+        "scene :s2, t1: grid(16, cymbal: 'X'), fade: 1/4r",
+        'at_bar(2) { flow(seed: 28, on: :beat) { generate markov(s1: { s1: 3, s2: 3 }, s2: { s1: knob(:busy), s2: 2 }, seed: 71), s1: [1, 2.beats], s2: [1, 2.beats] } }',
+        "at_bar(1, beat: 2) { bg :t1, grid(16, kick: 'x...x...', open_hat: '..x...x.').loop, in: 1/4r; bg :ducked, 0.2.constant.duck(:t1, only: :kick, amount: -12.db), in: 1/4r }",
       ], 2,
     ],
   }.each do |name, (relation, header, lines, bars)|
