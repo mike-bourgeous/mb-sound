@@ -22,7 +22,10 @@ module MB
                     layout_name placed failures active? owns_terminal? hidden? listed_panes listing_mode listing_layout
                     resized! to_text key_help? mode_problems density chrome shown_layout height position band_top region
                     stats frame_rate pacer target_fps fps start stop hide act grab_key line_done mode_changed repl_key repl_paste
-                    note top? plot_pane say].freeze
+                    status_note top? plot_pane say].freeze
+
+        # `ui.*` methods of the facade itself (any screen or none).
+        FACADE = %i[note notes].freeze
 
         module_function
 
@@ -54,8 +57,9 @@ module MB
           @ui_methods ||= begin
             names = (Tiles.public_instance_methods - Object.public_instance_methods) | (Band.public_instance_methods - Object.public_instance_methods)
             names = names.reject { |m| HIDDEN.include?(m) || m.to_s.end_with?('=') }
+            names |= FACADE # (the facade's own: work with any screen or none)
             names.sort.map { |m|
-              owner = Tiles.method_defined?(m) ? Tiles : Band
+              owner = FACADE.include?(m) ? Facade : Tiles.method_defined?(m) ? Tiles : Band
               [m, summary(owner.instance_method(m))]
             }.freeze
           end

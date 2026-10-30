@@ -20,7 +20,7 @@ module UIHelpers
     UI::Slow.new(
       tracks: [
         UI::TrackInfo.new(name: :drums, q: '1', clip: 'beat_a', armed: false),
-        UI::TrackInfo.new(name: :bass, q: '1', clip: 'bass_a', armed: false),
+        UI::TrackInfo.new(name: :bass, q: '1', clip: 'bass_a', armed: false, instrument: ui_fake_library.entries.find { |e| e.name == :dnb_reese }),
         UI::TrackInfo.new(name: :lead, q: '1', clip: 'no clip', armed: true),
         UI::TrackInfo.new(name: :pad, q: '1', clip: 'chords', armed: false),
       ].freeze,
@@ -78,6 +78,38 @@ module UIHelpers
   # 0.1 s into the decay at peak 0.7 (+live+ false: no note), read at
   # monotonic time 0 (envelope-view-1).
   FAKE_ENVELOPE = MB::Sound.amp_env(0.02, 0.3, 0.6, 0.5)
+
+  # A small fixed library for the picker's captures and specs
+  # (ui-scaffold-1): the shipped library grows with every preset, which
+  # would change the golden captures each time.  Only these entries (no
+  # shelf files or documents); stub MB::Sound::Library.index with it.
+  class FakeLibraryIndex < MB::Sound::Library::Index
+    def all_entries(documents: true) = @lock.synchronize { @code.values }
+  end
+
+  def ui_fake_library
+    @ui_fake_library ||= begin
+      idx = FakeLibraryIndex.new
+      shelf = MB::Sound::Library.builtin_shelf
+      cut = MB::Sound::Param.new(name: :cutoff, default: 2400.0, range: 20.0..10000.0)
+      [
+        [:dnb_reese, :instrument, :preset, %i[dnb bass], 'A detuned saw Reese through a driven lp4', { cutoff: cut }],
+        [:dnb_sub, :instrument, :preset, %i[dnb bass sub], 'A sine sub under a lowpass', { cutoff: cut }],
+        [:glass_keys, :instrument, :preset, %i[keys bright], 'Triangle keys with a slow release', {}],
+        [:init, :instrument, :preset, %i[init], 'Two morphing oscillators, a filter, an envelope: start here', {}],
+        [:jungle_reese, :instrument, :preset, %i[jungle bass], 'A wide Reese with glide', {}],
+        [:tr909, :kit, :machine, %i[drums], 'A TR-909-flavored kit', {}],
+        [:hall, :effect, :reverb, %i[big], 'A large hall', {}],
+        [:plate, :effect, :reverb, %i[bright], 'A bright plate', {}],
+        [:juno1, :effect, :chorus, %i[gentle], 'Juno-60 chorus I', {}],
+        [:club, :master, :mastering, %i[loud], 'Two limiters for club play', {}],
+        [:walk_a, :clip, :clip, %i[bass walking], 'A walking bass line', {}],
+      ].each do |name, kind, family, tags, about, params|
+        idx.register(MB::Sound::Library::Entry.new(name: name, kind: kind, family: family, tags: tags, about: about, params: params, shelf: shelf, location: "fake:#{name}"))
+      end
+      idx
+    end
+  end
 
   def ui_fake_envelope_inspector(live: true)
     info = ui_fake_inspector

@@ -8,14 +8,14 @@
                               │FILTER f ──────────────────────────────────────────────────────────────────────────────────────────── │  saws.lp4(knob(:cut), resonance: 0.25).softclip(0.35, 0.95).filter(:highpass, cutoff: 150, quality:
                               │ lp4            stereo  cut 2400 Hz  reso 0.25                                                        │      0.7)
 ─ LIBRARY ──────────────── 6 ─┤  cutoff     ███████████▋     2400 Hz  cut                                                            │}
-find ▏                        │  resonance  0.25  ·                                                                                  │
-                              │AMP a ─────────────────────────────────────────────────────────────────────────────────────────────── │
-the library picker goes here: │ softclip       stereo                                                                                │
-find-as-you-type, then        │FX x ──────────────────────────────────────────────────────────────────────────────────────────────── │
-Enter: the likely action      │▸highpass ×2    post-amp EQ  stereo  cut 150 Hz  q 0.7                                                │
-(named on the status line),   │  cutoff     150 Hz                                                                                   │
-a key per action, auditions   │  quality    0.7                                                                                      ├─ RENDER ───────────────────────────────────────────────────────────────────────────────────────── 7 ─
-on CUE only.                  │                                                                                                      │bass  -22.2 LUFS  peak -11.2  rms -20.8  first note C3, settled 15 ms, 24 kHz, 0 ms
+inst fx kit seq master  → bass│  resonance  0.25  ·                                                                                  │
+/ find (in: NAV l)            │AMP a ─────────────────────────────────────────────────────────────────────────────────────────────── │
+▸●dnb_reese    dnb bass       │ softclip       stereo                                                                                │
+  dnb_sub      dnb bass sub   │FX x ──────────────────────────────────────────────────────────────────────────────────────────────── │
+  glass_keys   keys bright    │▸highpass ×2    post-amp EQ  stereo  cut 150 Hz  q 0.7                                                │
+  init         init           │  cutoff     150 Hz                                                                                   │
+  jungle_reese jungle bass    │  quality    0.7                                                                                      ├─ RENDER ───────────────────────────────────────────────────────────────────────────────────────── 7 ─
+                              │                                                                                                      │bass  -22.2 LUFS  peak -11.2  rms -20.8  first note C3, settled 15 ms, 24 kHz, 0 ms
                               │                                                                                                      │ 0.2┤⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡅⡀⡀⡀⣀⣠⡤⡖⡒⡉⡉⡉⡍⡓⡒⡤⣤⣀⡀⡀⡀⡀⡀⡀⡅⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀
                               │                                                                                                      │    │         ⢀⣀⡠⠥⠒⠊⠉⠁       ⠅     ⠉⠉⠒⠢⠤⣀⣅           ⠨           ⠨           ⠨           ⠨
                               │                                                                                                      │    │   ⢀⣀⠤⠴⠒⠋⠉  ⠅           ⠅           ⠍⠉⠓⠒⠤⢄⣀     ⠨           ⠨           ⠨           ⠨
@@ -44,17 +44,17 @@ on CUE only.                  │                                               
                               │   │      ⢀⡠⠒⠁            ⠅                               ⠅                              ⠨            │    └┬────────┬─────────┬─────────┬────────┬─────────┬─────────┬────────┬─────────┬─────────┬────────┬
                               │-30┤⡀⡀⡀⣀⡤⡚⡁⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡅⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡅⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀│     0       50        100       150      200       250       300      350       400         time (ms)
                               │   │ ⡠⠜⠁                  ⠅                               ⠅                              ⠨            ├─ KEYS ─────────────────────────────────────────────────────────────────────────────────────────── 9 ─
-                              │   │⠉                     ⠅                               ⠅                              ⠨            │Up Down    previous param or knob / next param or knob
-                              │-40┤⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠪⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂│Left Right turn the knob up / turn the knob down
+                              │   │⠉                     ⠅                               ⠅                              ⠨            │l          library: / find, a audition, Enter load into the track, e edit the line
+                              │-40┤⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠪⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂│Up Down    previous param or knob / next param or knob
+                              │   │                      ⠅                               ⠅                              ⠨            │Left Right turn the knob up / turn the knob down
                               │   │                      ⠅                               ⠅                              ⠨            │Enter      type a value, or bind a literal param
-                              │   │                      ⠅                               ⠅                              ⠨            │0          the knob's default
-                              │-50┤⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠩⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁│m          learn a MIDI controller for the knob
-                              │   │                      ⠅                               ⠅                              ⠨            │s f        SOURCE: oscillators, samples, glide / FILTER: filters and the filter envelope / AMP: drive…
-                              │-60┤                      ⠅                               ⠅                              ⠨            │n N        the next row / the previous row
-                              │   └┴────┴───┴──┴──┴─┴─┴┴─┬────────┴─────┴───┴──┴──┴─┴┴─┴─┬────────┴─────┴───┴──┴─┴─┴─┴─┴┬─────────┴──│t T        the next track / the previous track
-                              │                         100                             1k                             frequency (Hz)│v V        a kit's next voice / a kit's previous voice
+                              │-50┤⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠩⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁│0          the knob's default
+──────────────────────────────│   │                      ⠅                               ⠅                              ⠨            │m          learn a MIDI controller for the knob
+A detuned saw Reese through a…│-60┤                      ⠅                               ⠅                              ⠨            │s f        SOURCE: oscillators, samples, glide / FILTER: filters and the filter envelope / AMP: drive…
+tags dnb bass  params cutoff  │   └┴────┴───┴──┴──┴─┴─┴┴─┬────────┴─────┴───┴──┴──┴─┴┴─┴─┬────────┴─────┴───┴──┴─┴─┴─┴─┴┬─────────┴──│n N        the next row / the previous row
+L.inst.dnb_reese  builtin     │                         100                             1k                             frequency (Hz)│t T        the next track / the previous track
 ─ AUDITION ───────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────── 10 ─
-CUE ○ nothing cued  │ audition: the picker's entry plays here (cue :x, sound)
+CUE ○ nothing cued  │ audition: the library picker's a plays on MAIN -6 dB
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 11 ─
 
 

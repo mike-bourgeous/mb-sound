@@ -279,9 +279,14 @@ module MB
         clock = MB::Sound::Clock.coerce(clock) unless clock.nil? || clock.is_a?(Symbol)
         graph = Sequence::Clocked.apply(graph, clock) if graph && clock
         patch = Arrangement.counted(patch, track: name, session: @session) if patch
+        # (a playing track given a new instrument: the knobs its params
+        # reuse take their new values at its launch point; TrackKnobs)
+        playing = entry && @mutex.synchronize { @tracks[name] }&.patch? && @session.playing_after_queue?(name)
+        landings = {}
+        defer = playing ? ->(&b) { TrackKnobs.deferring(landings) { b.call } } : ->(&b) { b.call }
         # Built once now, so a broken patch fails here (see PatchCheck)
         begin
-          ok = check_patch(name, patch, clip || @mutex.synchronize { @tracks[name]&.clip })
+          ok = defer.call { check_patch(name, patch, clip || @mutex.synchronize { @tracks[name]&.clip }) }
         rescue PatchCheck::PatchError => e
           note_failed_track(name, e)
           raise
@@ -304,7 +309,12 @@ module MB
         }
         set_ahead(tr, graph) if graph || !lead.is_a?(Length::Attack)
         refresh_monitor(tr)
-        change_instrument(tr, entry, before) if entry && old&.patch? && tr.clip && @session.playing_after_queue?(name)
+        if entry && old&.patch? && tr.clip && @session.playing_after_queue?(name)
+          defer.call { change_instrument(tr, entry, before, landings) }
+        else
+          # (not playing after all: the knobs take their values now)
+          landings.each { |k, v| k.set(v, frame: k.next_frame) unless v == k.value }
+        end
         name
       end
 
@@ -348,13 +358,15 @@ module MB
       end
 
       # Track +tr+, playing, was given a new instrument (+entry+): built
-      # again with its clip at its launch point, keeping its routing (one
-      # Session#command: journaled, one undo step; +before+ is the Set
-      # state before the redefinition).
-      def change_instrument(tr, entry, before)
+      # again with its clip at its launch point, keeping its routing, its
+      # reused param knobs (+landings+, { knob => value } from
+      # TrackKnobs.deferring) turned there (one Session#command: journaled,
+      # one undo step; +before+ is the Set state before the redefinition).
+      def change_instrument(tr, entry, before, landings = {})
         @session.command("track #{tr.name.inspect} -> #{entry.head_path}") {
           time = resolve(tr.q || @quant, tr, LaunchPoint::NONE)
           start_track(tr, tr.clip, time, nil)
+          landings.each { |k, v| @session.turn(k.name, v, start_time: time, build: true) unless v == k.value }
           @session.note_undo_extra(self, before, undo_state)
         }
       end

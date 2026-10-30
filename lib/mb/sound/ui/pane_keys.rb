@@ -54,7 +54,8 @@ module MB
       # key_ method may return several results as an Array: Runs, a
       # Preview (a live unjournaled knob move), a Commit (a gesture's
       # line, from the Session), an Ask (a value to type on a prompt
-      # line, handed to key_<answer>).
+      # line, handed to key_<answer>), a Paste (a line onto the REPL's
+      # prompt, not run).
       module PaneKeys
         def self.included(base)
           base.extend(ClassMethods)
@@ -129,9 +130,20 @@ module MB
         # A value a pane key asks the user to type (the inspector's Enter):
         # the screen opens a prompt line (+prompt+, starting with +text+),
         # and on Enter calls the pane's key_<+answer+>(state, typed text),
-        # whose result it handles like a key's.  Esc cancels.
-        Ask = Data.define(:prompt, :text, :answer) do
-          def self.[](prompt, text, answer) = new(prompt: prompt.freeze, text: text.to_s.freeze, answer: answer)
+        # whose result it handles like a key's.  Esc cancels.  With
+        # +changed+ (find-as-you-type: the library picker's /), each edit of
+        # the line also calls key_<+changed+>(state, text so far), and Esc
+        # calls it with the starting text again.
+        Ask = Data.define(:prompt, :text, :answer, :changed) do
+          def self.[](prompt, text, answer, changed: nil) = new(prompt: prompt.freeze, text: text.to_s.freeze, answer: answer, changed: changed)
+        end
+
+        # Console Ruby a pane key puts on the REPL's line, not run (the
+        # library picker's e: a line to edit first, like step entry's
+        # Enter): the screen goes to the REPL with +code+ typed in; +note+
+        # for the status line.
+        Paste = Data.define(:code, :note) do
+          def self.[](code, note = nil) = new(code: code.freeze, note: note&.freeze)
         end
 
         # The pane's keymap (its kind's), or nil.

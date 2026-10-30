@@ -92,6 +92,17 @@ module MB
           @cue_split_from && n == 2 ? :split : :off
         end
 
+        # True if CUE reaches the phones without changing MAIN: its own
+        # channels (:ports), or a 2-channel mode chosen or already engaged
+        # (:split, :phones).  An :auto output of 2 channels that hasn't cued
+        # anything yet is false: its first cue would put MAIN in mono on the
+        # left (see #cue_output), which an audition shouldn't do.  The
+        # library picker's auditions (LibraryMethods#audition) play on CUE
+        # when this is true, else on MAIN.
+        def cue_heard?
+          %i[ports split phones].include?(cue_mode)
+        end
+
         # The phones knobs [:phones, :cue_mix], made on first use (a knob
         # already defined under either name is used as it is).
         def cue_knobs

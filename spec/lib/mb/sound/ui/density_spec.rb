@@ -7,6 +7,9 @@ require_relative '../../../../support/golden'
 RSpec.describe(MB::Sound::UI::Density, :aggregate_failures) do
   golden_sizes = [[24, 80], [40, 120], [80, 236]]
 
+  # (the library picker's entries: a fixed fake library, not the shipped one)
+  before { allow(MB::Sound::UI::Picker).to receive(:index).and_return(ui_fake_library) }
+
   it 'decides rules, boxes, and levels by size' do
     expect(described_class.decide(:band, 24, 80)).to have_attributes(level: :compact, rule: false, boxes: false, max_band_rows: nil)
     expect(described_class.decide(:band, 25, 80)).to have_attributes(level: :normal, rule: true, boxes: false)
@@ -98,7 +101,8 @@ RSpec.describe(MB::Sound::UI::Density, :aggregate_failures) do
     expect(MB::Sound::UI.panes[:inspector].view(small.instance_variable_get(:@states)[:inspector])).to eq(:panel)
     mid = tiles_capture(:sound, 40, 120)
     expect(mid.tiler.layout.panes).to include(:tracks, :inspector, :preview, :code, :render, :audition)
-    expect(mid.tiler.layout.panes).not_to include(:picker, :sound_keys)
+    expect(mid.tiler.layout.panes).to include(:picker) # (ui-scaffold-1: the library picker under the tracks)
+    expect(mid.tiler.layout.panes).not_to include(:sound_keys)
     expect(MB::Sound::UI.panes[:inspector].view(mid.instance_variable_get(:@states)[:inspector])).to eq(:sections)
     expect(tiles_capture(:sound, 80, 236).tiler.layout).to eq(MB::Sound::UI.tile_layouts[:sound])
 

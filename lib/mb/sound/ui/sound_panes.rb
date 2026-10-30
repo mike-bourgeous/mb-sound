@@ -4,9 +4,8 @@ module MB
       # The sound-design screen's panes (sound-design-ui-1; `ui :sound`,
       # design/notes/sound_design_ui.md): the patch inspector (a track's
       # knobs to turn and its nodes' params), the selected node's preview,
-      # the graph's code, and, until the library index lands
-      # (library-core-1), placeholders for the picker and the audition
-      # line.  Every pane draws from Slow#inspector (Inspect, gathered by
+      # the graph's code, the render, the CUE line, and the keys (the
+      # library picker is in ui/picker.rb).  Every pane draws from Slow#inspector (Inspect, gathered by
       # Poll while a pane needs :inspect) and the snapshot's knobs; keys
       # change the set only through console lines (PaneKeys::Run).
       module Panes
@@ -1194,30 +1193,6 @@ module MB
           def full_text(state) = (state[:lines] || []).join("\n")
         end
 
-        # Where the library picker goes (library-core-1 builds the index;
-        # this screen's design: find-as-you-type, Enter does the likely
-        # action named on the status line, a shortcut per action, a side
-        # panel with description, tags, facts, and crosslinks).  A
-        # placeholder until the index lands: the inspector never needs it.
-        class Picker < Pane
-          def initialize = super(:picker, rate: 1, height: 10, width: 30, title: 'library', min_height: 2,
-                                          description: 'the library picker (placeholder until the library index lands)')
-
-          LINES = [
-            ['the library picker goes here:', :dim],
-            ['find-as-you-type, then', :dim],
-            ['Enter: the likely action', :dim],
-            ['(named on the status line),', :dim],
-            ['a key per action, auditions', :dim],
-            ['on CUE only.', :dim],
-          ].freeze
-
-          def draw_body(c, _s, _state)
-            c.line(0, ['find ', :dim], ['▏', :key])
-            LINES.each_with_index { |(t, r), i| c.text(0, i + 2, c.fit(t, c.w), r) if i + 2 < c.h }
-          end
-        end
-
         # One line about CUE (the phones): parts on CUE, the phones level
         # and CUE/MAIN blend knobs, and what an audition would play.
         class Audition < Pane
@@ -1235,7 +1210,13 @@ module MB
             if (mx = k[:cue_mix])
               x = c.line(0, ['  cue_mix ', :dim], [Panes.fmt(mx.value), :text], x: x)
             end
-            c.line(0, ["  #{c.glyph(:sep)} audition: ", :dim], ['the picker\'s entry plays here (cue :x, sound)', :dim], x: x)
+            aud = s.players.find { |p| %i[audition audition/cue].include?(p.name) }
+            where = s.cue_heard ? 'on CUE' : 'on MAIN -6 dB'
+            if aud
+              c.line(0, ["  #{c.glyph(:sep)} audition ", :dim], ['playing ', :ok], [where, :text], ['  (a again or audition off: stop)', :dim], x: x)
+            else
+              c.line(0, ["  #{c.glyph(:sep)} audition: ", :dim], ["the library picker's a plays #{where}", :dim], x: x)
+            end
           end
         end
 
@@ -1244,13 +1225,16 @@ module MB
         # later).
         class SoundKeys < Pane
           def initialize = super(:sound_keys, rate: 1, height: 9, width: 40, title: 'keys', min_height: 2,
-                                              description: 'the sound-design screen\'s keys: the inspector\'s and the planned ones')
+                                              description: 'the sound-design screen\'s keys: the inspector\'s, the library picker\'s, and the planned ones')
 
           # Keys the design plans but this build doesn't have yet.
           PLANNED = [
-            ['/', 'find in the library'], ['a', 'audition on CUE'], ['Enter', "the picker's likely action"],
             ['S', 'save (name, tags, params)'], ['b', 'A/B against the loaded preset'], ['*', 'favourite'],
           ].freeze
+
+          # The library picker's keys in one line (NAV l goes in; its own
+          # keys are in the ? overlay there).
+          PICKER = ['l', 'library: / find, a audition, Enter load into the track, e edit the line'].freeze
 
           # [built, planned]: [[keys, help], ...] each; the inspector's
           # bindings grouped by their label ("Up Down": "previous knob /
@@ -1262,7 +1246,7 @@ module MB
               label = keys.split.length > 2 ? keys.split.first(2).join(' ') : keys
               (groups[label] ||= []) << help.sub(/ \(.*\z/, '')
             end
-            [groups.map { |label, helps| [label, helps.uniq.join(' / ')] }, PLANNED]
+            [[PICKER] + groups.map { |label, helps| [label, helps.uniq.join(' / ')] }, PLANNED]
           end
 
           def draw_body(c, _s, _state)

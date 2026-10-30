@@ -95,25 +95,83 @@ module MB
         end
 
         # The Session knob :"track/param" for +param+ (a document param's
-        # Param): an existing knob of that name with the same range and
-        # curve is used as it is (keeping its value: a scene's or a turn's,
-        # or a set document's knob line); one with another range or curve
-        # (the track's new instrument has a param of that name) is
-        # respecified and set to the param's value; else a new knob at the
-        # param's value.  Nil if the name is taken by something else.
+        # Param), made at the param's value, or reused when the track had
+        # one of that name (its instrument built again, or a new instrument
+        # with a param of that name: the library picker's loads,
+        # ui-scaffold-1).  A reused knob takes the new range and curve, and:
+        # - left where its last instrument put it (untouched since
+        #   TrackKnobs set it): the new param's value, so each instrument
+        #   loaded sounds as designed (dnb_sub's 110 Hz cutoff doesn't
+        #   carry into dnb_reese);
+        # - turned (or set by a scene, a snapshot, a set document's knob
+        #   line): keeps its value when the new range holds it, else the
+        #   param's value.
+        # While .deferring (a playing track given a new instrument), the
+        # values are collected for its launch point instead of set now (the
+        # old instrument plays on until then).  Nil if the name is taken by
+        # something else.
         def knob_for(session, track, param)
           kname = knob_name(track, param.name)
           default = knob_default(param)
           opts = { curve: curve_of(param), description: param.description, clamp: param.clamp }
           spec = GraphNode::Knob::Spec.new(name: kname, default: default, **opts)
           existing = session.knobs[kname]
-          if existing
-            return existing if existing.spec.range == spec.range && existing.spec.curve == spec.curve
-            k = session.knob(kname, default, **opts) or return nil
-            k.set(spec.default, frame: k.next_frame)
+          unless existing
+            k = session.knob(kname, default, **opts)
+            preset_values[k] = spec.default if k
             return k
           end
-          session.knob(kname, default, **opts)
+
+          pending = Thread.current[:mb_sound_knob_landings]
+          carry = !pending&.key?(existing) && !untouched?(existing) && existing.value.is_a?(Numeric) && spec.range.cover?(existing.value)
+          same = existing.spec.range == spec.range && existing.spec.curve == spec.curve
+          k = same ? existing : (session.knob(kname, default, range: nil, **opts) or return nil) # (range: nil: the default's range replaces the old one)
+          if pending&.key?(k)
+            # (the same build again: its value was decided)
+          elsif carry
+            place(k, k.value) if pending # (noted, so a second build of the patch keeps it)
+          else
+            place(k, spec.default)
+            preset_values[k] = spec.default
+          end
+          k
+        end
+
+        # Runs the block collecting the values .knob_for gives reused knobs
+        # into +list+ ({ knob => value }, yielded) instead of setting them
+        # (see Arrangement#change_instrument, which turns them at the
+        # track's launch point).
+        def deferring(list = {})
+          old = Thread.current[:mb_sound_knob_landings]
+          Thread.current[:mb_sound_knob_landings] = list
+          yield list
+        ensure
+          Thread.current[:mb_sound_knob_landings] = old
+        end
+
+        # The values TrackKnobs gave its knobs ({ knob => value }, weak), so
+        # .knob_for can tell a knob left where an instrument put it from a
+        # turned one.
+        def preset_values
+          @preset_values ||= ObjectSpace::WeakKeyMap.new
+        end
+
+        # True if knob +k+ is where TrackKnobs last put it.
+        def untouched?(k)
+          v = preset_values[k]
+          return false if v.nil? || !k.value.is_a?(Numeric)
+          (k.value.to_f - v.to_f).abs <= 1e-9 * [v.to_f.abs, 1.0].max
+        end
+
+        # Gives knob +k+ +value+: now (its next frame), or into the
+        # .deferring list (which turns only values that differ).
+        def place(k, value)
+          pending = Thread.current[:mb_sound_knob_landings]
+          if pending
+            pending[k] = value
+          elsif value != k.value
+            k.set(value, frame: k.next_frame)
+          end
         end
 
         # The knob curve for +param+: its own, except that a plain-number

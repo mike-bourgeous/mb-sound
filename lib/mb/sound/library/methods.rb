@@ -70,6 +70,47 @@ module MB
         done
       end
 
+      # Plays library entry +entry+ (an Entry, or its name) for a listen,
+      # as player :audition: an instrument's demo phrase, a kit's beat, an
+      # effect or mastering chain on a demo phrase, a resonator's strike
+      # (Library::Audition).  On CUE when the output has it
+      # (Session#cue_heard?: CUE channels, or cue_output :split/:phones),
+      # else on MAIN at Audition::MAIN_GAIN (-6 dB), starting now.  Another
+      # audition replaces it; `audition off` stops it.  The library
+      # picker's `a` key runs this line (ui :sound).  Returns an
+      # Audition::Started (one line), or the stop's journal entries.
+      #
+      #     audition L.inst.dnb.dnb_reese
+      #     audition L.fx.reverb.hall
+      #     audition :tr909
+      #     audition off
+      def audition(entry = :off)
+        s = Session.current
+        playing = s.players.keys & %i[audition audition/cue]
+        if entry.nil? || entry == :off || entry == false
+          return 'audition: nothing playing' if playing.empty?
+          out = []
+          out.concat(Array(uncue(:audition))) if playing.include?(:"audition/cue")
+          out.concat(Array(stop(:audition))) if playing.include?(:audition)
+          return out
+        end
+
+        e = Library::Audition.entry_for(entry)
+        g = Playable.graph(Library::Audition.playable(e))
+        if s.cue_heard?
+          stop(:audition) if playing.include?(:audition)
+          change = cue(:audition, g)
+          where = :cue
+        else
+          uncue(:audition) if playing.include?(:"audition/cue")
+          gain = Library::Audition::MAIN_GAIN.to_f
+          quiet = Playable::Graph.new(nodes: g.nodes.map { |n| n * gain }, description: g.description, ends: g.ends, note: g.note)
+          change = bg(:audition, quiet, on: :now)
+          where = :main
+        end
+        Library::Audition::Started.new(path: e.head_path, what: g.description.delete_prefix("#{e.head_path} "), where: where, change: change)
+      end
+
       # Copies preset +name+ (an Entry, or a name found first on the
       # project or $MB_SOUND_PRESETS shelf, else anywhere; +family:+ for
       # class presets like :reverb) onto shelf +to:+ (:user, :gem: the

@@ -330,6 +330,13 @@ module SessionFuzz
       end
     },
     ->(s) { "bg :#{s.bg_name}, #{s.pick(MELODIC)}#{s.on}" },
+    ->(s) {
+      # (ui-scaffold-1: an instrument track's param knob turned, so a later
+      # instrument change carries it instead of resetting it)
+      next unless s.instruments
+
+      "turn :\"#{s.pick(s.instruments)}/release\", #{s.pick([0.02, 0.3])}#{s.on}"
+    },
     # (new commands go here, at the end)
   ].freeze
 

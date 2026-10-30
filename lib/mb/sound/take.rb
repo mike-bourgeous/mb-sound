@@ -202,6 +202,12 @@ module MB
         line
       end
 
+      # The code of the last +n+ console lines, oldest first ([[Stamp
+      # issued, code], ...]; ui.note keeps them with each UI note).
+      def recent_lines(n = 8)
+        @mutex.synchronize { @lines.last(n).map { |l| [l.issued, l.code] } }
+      end
+
       # Stops recording the current line (Pry's :after_eval hook).
       def end_line
         Thread.current[:mb_sound_take_line] = nil

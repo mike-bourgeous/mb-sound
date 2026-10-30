@@ -70,6 +70,8 @@ require_relative 'support/spec_tmp'
 # the specs run inherit it), so specs never read or write the user's own
 # presets (design/notes/library.md)
 ENV['MB_SOUND_USER_PRESETS'] = File.join(SpecTmp::ROOT, 'user-presets')
+# (and UI notes, ui.note, go to one too)
+ENV['MB_SOUND_UI_NOTES'] = File.join(SpecTmp::ROOT, 'ui-notes')
 require_relative 'support/spec_buffers'
 require_relative 'support/slow_tier'
 require_relative 'support/buffer_size_helpers'

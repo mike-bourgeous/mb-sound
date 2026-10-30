@@ -1208,7 +1208,7 @@ module MB
             tiles.say(panic.key("\e") == :sound_off ? 'all sound off (CC 120)' : 'all notes off (Esc again: all sound off)', :warn)
           when :pause
             session.paused = !session.paused?
-            tiles.note = session.paused? ? 'paused: Space plays on, q quits' : nil
+            tiles.status_note = session.paused? ? 'paused: Space plays on, q quits' : nil
           when :bar_back then ui_section(tiles) { tiles.say("bar #{scrub.press(:left)}", :dim) }
           when :bar_forward then ui_section(tiles) { tiles.say("bar #{scrub.press(:right)}", :dim) }
           when :section_prev then ui_section(tiles) { ui_section_back(tiles, session) }
@@ -1229,7 +1229,7 @@ module MB
         until quit
           if !ended && !waiter.alive?
             ended = true
-            tiles.note = 'ended: q quits'
+            tiles.status_note = 'ended: q quits'
           end
           sleep 0.05
         end

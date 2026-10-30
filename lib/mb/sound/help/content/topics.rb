@@ -1266,7 +1266,14 @@ module MB
 
         Instruments play on tracks (`track :bass, L.inst.dnb.dnb_reese`;
         `help :sets`) and from `play L.inst.x` (a demo phrase).  Effects
-        go after a sound: `sig.then(&L.fx.hall)`, or on a bus.  The
+        go after a sound: `sig.then(&L.fx.hall)`, or on a bus; `play
+        L.fx.hall` plays a demo phrase through one.  `audition L.inst.x`
+        plays an entry as the player :audition: on CUE when the output has
+        it, else on MAIN 6 dB down; another replaces it, `audition off`
+        stops it.  In `ui :sound` the library picker (NAV l) does the same
+        from the keys: / finds as you type, a auditions, Enter loads the
+        entry into the inspected track at its launch point (knobs you
+        turned carry), e puts the line on the console to edit.  The
         resonator effects are instruments too: `L.inst.bar` strikes the
         :bar resonator from notes (`struck(clip, :bar)`; every resonator
         preset has one, built from it), `L.fx.bar.ping(C5)` strikes it
@@ -1283,7 +1290,7 @@ module MB
         `.auditions` lists an entry's materials, and `play L.fx.hall`
         plays an effect on the arp.
       TEXT
-      commands :find, :shelves, :save, :save!, :collect, :promote, :promote!, :struck
+      commands :find, :audition, :shelves, :save, :save!, :collect, :promote, :promote!, :struck
       note :library
       see :presets, :racks
       example 'find bright effects', sound: false do
@@ -1374,6 +1381,12 @@ module MB
         pane's rate beside its number (`ui.fps` is what was drawn,
         `ui.target_fps` the painter's rate; meters and scopes run at it and
         everything slows in steps when the CPU is busy).
+
+        `ui.note 'the cutoff turns too slowly'` keeps a note for the next
+        UI refinement round with the screen as text, the layout and focused
+        pane, what plays, and your last console lines (one Markdown file a
+        day; NAV # opens a prompt for one while the set plays); `ui.notes`
+        lists today's.
 
         Your own panes: `pane :name do |c, s| ... end` (s a snapshot of the
         session, c the pane's canvas); arrange them with `layout`, keep a

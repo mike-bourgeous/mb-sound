@@ -215,8 +215,10 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
     it 'lists the inspector\'s keys from its keymap and the planned ones, and the CUE line' do
       built, planned = ui::Panes::SoundKeys.rows
       expect(built.map(&:first)).to include('Up Down', 'Left Right', 'Enter', '0', 'm', 't T', 'n N')
-      expect(planned.map(&:first)).to include('/', 'a', 'S')
-      expect(draw(:sound_keys, snap, w: 50).join("\n")).to include('Enter      type a value', '(later)')
+      expect(built.first).to eq(ui::Panes::SoundKeys::PICKER) # (ui-scaffold-1: the library picker's keys in one line)
+      expect(planned.map(&:first)).to eq(%w[S b *])
+      expect(draw(:sound_keys, snap, w: 50).join("\n")).to include('l          library: / find', 'Enter      type a value')
+      expect(draw(:sound_keys, snap, w: 50, h: 30).join("\n")).to include('(later)')
       cue = snap.with(parts: [ui::PartLoad.new(name: :"acid/cue", kind: :player, state: :playing, load: 0.0)].freeze)
       expect(draw(:audition, cue, w: 90)[0]).to include('CUE ● acid')
     end
