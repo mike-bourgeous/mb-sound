@@ -219,9 +219,10 @@ module MB
         end
 
         # +a+ smoothed by +smoother+ (a Notes::Smoother) with the jump
-        # offsets in +jumps+ (see Op::Smooth).
-        def smooth(a, smoother, jumps)
-          emit(Op::Smooth.new(value(:real), node, self[a], smoother, jumps))
+        # offsets in +jumps+, or jumping at every nonzero sample of +reset+
+        # (see Op::Smooth).
+        def smooth(a, smoother, jumps, reset: nil)
+          emit(Op::Smooth.new(value(:real), node, self[a], smoother, jumps, reset && self[reset]))
         end
 
         # The larger of +a+ and +b+ (see Op::Max).

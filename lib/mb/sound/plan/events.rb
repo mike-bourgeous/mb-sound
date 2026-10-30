@@ -344,41 +344,49 @@ module MB
         end
 
         # A Notes::Smoother on a Value (a smoothed controller node's
-        # events), with the smoother's own state Arrays and the block's jump
-        # offsets (the node's feed fills them; see Notes::Node).  The kernel
-        # is FastControl.smooth's (mb_smooth.h); the mirror
-        # Notes::Smoother.smooth_ruby.
+        # events, or GraphNode#smooth's input), with the smoother's own state
+        # Arrays and the block's jump offsets (the node's feed fills them;
+        # see Notes::Node), or a reset Value (GraphNode#smooth's reset:
+        # jumps at its nonzero samples).  The kernels are FastControl's
+        # (mb_smooth.h); the mirrors Notes::Smoother's.  A smoother that
+        # hasn't started starts held at the input's first sample.
         class Smooth < Base
-          attr_reader :a, :smoother, :jumps
+          attr_reader :a, :smoother, :jumps, :reset
 
-          def initialize(dst, node, a, smoother, jumps)
+          def initialize(dst, node, a, smoother, jumps, reset = nil)
             super(dst, node)
             raise Unsupported.new(node, 'complex smoothing') if a.complex?
+            raise Unsupported.new(node, 'a constant smoothing reset') if reset && !reset.is_a?(Value)
+            raise Unsupported.new(node, 'a complex smoothing reset') if reset&.complex?
 
             @a = a
             @smoother = smoother
             @jumps = jumps
+            @reset = reset
           end
 
           def operands
-            [@a]
+            @reset ? [@a, @reset] : [@a]
           end
 
           def expression
-            kind = @smoother.adaptive? ? 'adaptive, up to ' : ''
-            "smooth(#{@a}, #{kind}#{MB::M.sigfigs(@smoother.kernel_samples, 4)} samples)"
+            kind = @smoother.adaptive? ? 'adaptive, up to ' : (@smoother.curve? ? "#{@smoother.curve}, " : '')
+            "smooth(#{@a}, #{kind}#{MB::M.sigfigs(@smoother.kernel_samples, 4)} samples#{", reset: #{@reset}" if @reset})"
           end
 
           def opcode = :smooth
 
-          # Notes::Smoother#process's segments between jumps (the fixed or
-          # adaptive kernel, by the state's length), with the Ruby mirrors.
+          # Notes::Smoother#process's segments between jumps (the fixed,
+          # adaptive, or curve kernel, by the state's length), with the
+          # Ruby mirrors.
           def run_ruby(env, count)
             x = env.fetch(@a)
             x = x[0...count] if x.length > count
             out = Numo::SFloat.zeros(count)
+            @smoother.plan_start(x[0]) if @smoother.plan_unstarted? && count > 0
             st, r1, r2 = @smoother.plan_arrays
-            MB::Sound::Notes::Smoother.run(x, out, 0, count, st, r1, r2, @jumps, c: false)
+            jumps = @reset ? env.fetch(@reset)[0...count].ne(0).where.to_a : @jumps
+            MB::Sound::Notes::Smoother.run(x, out, 0, count, st, r1, r2, jumps, c: false)
             env[@dst] = out
           end
         end

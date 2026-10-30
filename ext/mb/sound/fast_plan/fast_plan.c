@@ -84,7 +84,7 @@ enum {
 	OP_EVENTS,    // dst, object, 0              dst = the event list object rendered (see run_events)
 	OP_KEEP,      // dst, a, object              object [target, name]: target's ivar name (or Hash key) = last sample of a; dst unused
 	OP_ENVELOPE,  // see run_envelope
-	OP_SMOOTH,    // dst, a, object              dst = a smoothed (see run_smooth); object [smoother, jumps]
+	OP_SMOOTH,    // dst, a, object, reset       dst = a smoothed (see run_smooth); object [smoother, jumps]; reset a register or -1
 	OP_MAX,       // dst, a, b                   dst = Numo::SFloat.maximum(a, b) (real)
 	OP_POWF,      // dst, a, b                   dst = a ** b by mb_vec_pow (MB::Sound.precision :fast, a Constant or Knob base)
 	OP_SVF,       // dst, a, fc, q, g, object, sc  dst = Filter::SVF on a (plan_filters.c); fc/q/g registers or -1 (scalars sc[0..2]); sc[3]: remember the gain; object: the Filter::SVF
@@ -117,7 +117,7 @@ enum { TONE_NAIVE = 0, TONE_SYNTH = 1, TONE_WAVETABLE = 2 };
 typedef struct { float r, i; } mb_cf;
 
 static ID id_phase, id_blep, id_noise, id_jump_residual, id_last_freq, id_last_width;
-static ID id_plan_reset, id_plan_residual_used, id_note, id_frequency, id_state, id_ring1, id_ring2, id_table, id_plan_wavetable;
+static ID id_plan_start, id_plan_reset, id_plan_residual_used, id_note, id_frequency, id_state, id_ring1, id_ring2, id_table, id_plan_wavetable;
 static ID id_held, id_prev, id_plan_draw;
 
 // The register file of one call.
@@ -725,54 +725,84 @@ static double *smooth_array(VALUE v, size_t min, size_t *len, const char *what)
  * OP_SMOOTH: Notes::Smoother#process on +n+ samples of A into D, with the
  * smoother's own state and rings (its @state, @ring1, @ring2, read each
  * block since a rate change replaces them) and the block's jump offsets
- * (an Array of Integers: the output jumps to the input there).
+ * (an Array of Integers: the output jumps to the input there), or, with a
+ * reset register R (GraphNode#smooth's reset:), a jump at every nonzero
+ * sample of R.  The state's length picks the kernel (7 the B-spline FIR, 8
+ * adaptive, 9 curve; see mb_smooth.h).  A smoother that hasn't started
+ * (GraphNode#smooth's, before its first block) starts held at A[0], as
+ * Notes::Smoother#process does.
  */
-static void run_smooth(float *D, const float *A, VALUE obj, size_t n)
+static void run_smooth(float *D, const float *A, const float *R, VALUE obj, size_t n)
 {
 	VALUE smoother = rb_ary_entry(obj, 0);
 	VALUE jumps = rb_ary_entry(obj, 1);
 	Check_Type(jumps, T_ARRAY);
 	VALUE state = rb_ivar_get(smoother, id_state);
+	if (NIL_P(state)) {
+		if (n == 0) return;
+		rb_funcall(smoother, id_plan_start, 1, DBL2NUM(A[0]));
+		state = rb_ivar_get(smoother, id_state);
+	}
 	VALUE ring1 = rb_ivar_get(smoother, id_ring1);
 	VALUE ring2 = rb_ivar_get(smoother, id_ring2);
 	size_t sl, n1, n2;
 	double *st = smooth_array(state, 7, &sl, "state");
-
-	if (sl == 8) {
-		// Adaptive smoothing (Notes::Smoother::ADAPTIVE_STATE; jumps as
-		// Notes::Smoother.jump)
-		long start = 0;
-		long nj = RARRAY_LEN(jumps);
-		for (long k = 0; k < nj; k++) {
-			long j = NUM2LONG(rb_ary_entry(jumps, k));
-			if (j < start || j >= (long)n) continue;
-			if (j > start) mb_adaptive_run(A, D, start, j, st);
-			st[0] = st[1] = st[2] = A[j];
-			st[3] = 0.0;
-			st[5] = st[4];
-			start = j;
-		}
-		if (start < (long)n) mb_adaptive_run(A, D, start, (long)n, st);
-		RB_GC_GUARD(state);
-		RB_GC_GUARD(obj);
-		return;
+	double *r1 = NULL, *r2 = NULL;
+	double settle = 0.0;
+	if (sl == 7 || sl == 9) {
+		r1 = smooth_array(ring1, 1, &n1, "ring 1");
+		r2 = smooth_array(ring2, 1, &n2, "ring 2");
+		settle = (double)(n1 + n2 - 2);
+	} else if (sl != 8) {
+		rb_raise(rb_eArgError, "A planned smoother's state must have 7, 8, or 9 values (got %zu)", sl);
 	}
-
-	double *r1 = smooth_array(ring1, 1, &n1, "ring 1");
-	double *r2 = smooth_array(ring2, 1, &n2, "ring 2");
-	double settle = (double)(n1 + n2 - 2);
 
 	long start = 0;
-	long nj = RARRAY_LEN(jumps);
+	long nj = R ? (long)n : RARRAY_LEN(jumps);
 	for (long k = 0; k < nj; k++) {
-		long j = NUM2LONG(rb_ary_entry(jumps, k));
+		long j;
+		if (R) {
+			if (R[k] == 0) continue;
+			j = k;
+		} else {
+			j = NUM2LONG(rb_ary_entry(jumps, k));
+		}
 		if (j < start || j >= (long)n) continue;
-		if (j > start && mb_smooth_run(A, D, start, j, st, r1, n1, r2, n2) != 0) rb_raise(rb_eArgError, "Bad plan smoother ring positions");
-		st[1] = A[j];
-		st[6] = settle;
+		if (j > start) {
+			if (sl == 8) {
+				mb_adaptive_run(A, D, start, j, st);
+			} else if (sl == 9) {
+				if (mb_curve_smooth_run(A, D, start, j, st, r1, n1, r2, n2) != 0) rb_raise(rb_eArgError, "Bad plan curve smoother state");
+			} else if (mb_smooth_run(A, D, start, j, st, r1, n1, r2, n2) != 0) {
+				rb_raise(rb_eArgError, "Bad plan smoother ring positions");
+			}
+		}
+		// The jump (Notes::Smoother.jump)
+		double v = A[j];
+		if (sl == 8) {
+			st[0] = st[1] = st[2] = v;
+			st[3] = 0.0;
+			st[5] = st[4];
+		} else if (sl == 9) {
+			st[0] = st[1] = st[2] = v;
+			st[3] = st[4];
+			st[6] = 0.0;
+			st[7] = 0.0;
+		} else {
+			st[1] = v;
+			st[6] = settle;
+		}
 		start = j;
 	}
-	if (start < (long)n && mb_smooth_run(A, D, start, (long)n, st, r1, n1, r2, n2) != 0) rb_raise(rb_eArgError, "Bad plan smoother ring positions");
+	if (start < (long)n) {
+		if (sl == 8) {
+			mb_adaptive_run(A, D, start, (long)n, st);
+		} else if (sl == 9) {
+			if (mb_curve_smooth_run(A, D, start, (long)n, st, r1, n1, r2, n2) != 0) rb_raise(rb_eArgError, "Bad plan curve smoother state");
+		} else if (mb_smooth_run(A, D, start, (long)n, st, r1, n1, r2, n2) != 0) {
+			rb_raise(rb_eArgError, "Bad plan smoother ring positions");
+		}
+	}
 
 	RB_GC_GUARD(state);
 	RB_GC_GUARD(ring1);
@@ -992,8 +1022,11 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 		case OP_SHAPE: case OP_NOTE_FREQ:
 			len = 5;
 			break;
-		case OP_EVENTS: case OP_KEEP: case OP_SMOOTH: case OP_MAX: case OP_TAP:
+		case OP_EVENTS: case OP_KEEP: case OP_MAX: case OP_TAP:
 			len = 4;
+			break;
+		case OP_SMOOTH:
+			len = 5;
 			break;
 		case OP_SVF:
 			len = 8;
@@ -1541,7 +1574,8 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 		case OP_SMOOTH:
 			if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan smoothing is real only");
 			if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan smoother object at word %zu", pc);
-			run_smooth(ptrs[d], ptrs[op[2]], rb_ary_entry(objects, op[3]), n);
+			if (op[4] >= nregs || (op[4] >= 0 && (cplx[op[4]] || !ptrs[op[4]]))) rb_raise(rb_eArgError, "Bad plan smoother reset register at word %zu", pc);
+			run_smooth(ptrs[d], ptrs[op[2]], op[4] >= 0 ? ptrs[op[4]] : NULL, rb_ary_entry(objects, op[3]), n);
 			break;
 
 		case OP_MAX: {
@@ -1899,6 +1933,7 @@ void Init_fast_plan(void)
 	id_note = rb_intern("note");
 	id_frequency = rb_intern("frequency");
 	id_state = rb_intern("@state");
+	id_plan_start = rb_intern("plan_start");
 	id_ring1 = rb_intern("@ring1");
 	id_ring2 = rb_intern("@ring2");
 	id_table = rb_intern("@table");

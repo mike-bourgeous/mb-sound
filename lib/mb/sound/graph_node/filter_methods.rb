@@ -415,9 +415,14 @@ module MB
           filter(MB::Sound::Filter::HilbertIIR.new(sample_rate: sample_rate))
         end
 
-        # Adds a MB::Sound::Filter::Smoothstep filter to the chain, smoothing
-        # over +length+: seconds or any length (e.g. `60.samples`, `100.ms`,
-        # `1.n16` at the current tempo).
+        # Smooths this node over +length+: seconds or any length (e.g.
+        # `60.samples`, `100.ms`, `1.n16` at the current tempo), with
+        # MB::Sound::Filter::Smooth, the MIDI controllers' smoother: a linear
+        # filter whose step response is an S-curve (a quadratic B-spline)
+        # over +length+, so a step glides over +length+, a stream of steps
+        # (note numbers, a turned 7-bit knob) becomes a smooth line, and a
+        # moving signal passes delayed by half the length.  The output
+        # starts on this node's first value, or on +from+.
         #
         # With +reset:+ (a graph node of triggers, e.g. a note-on trigger), the
         # output jumps to the input at every nonzero sample of +reset+ instead
@@ -425,23 +430,20 @@ module MB
         # for legato notes only).
         #
         # With +curve:+ (an MB::Sound::Curve name such as :elastic, :bounce,
-        # :back, :squiggle, a Curve, or a Proc), each change follows that
-        # curve instead of the smoothstep, e.g. a springy knob.
+        # :back, :smoothstep, a Curve, or a Proc), the step response is that
+        # curve instead: a jump follows it exactly, and overlapping changes
+        # add up (a knob turned quickly overshoots more), e.g. a springy
+        # knob.  A Range +length+ (5.ms..200.ms) smooths adaptively like
+        # `smooth: :adaptive` controllers.
         #
         # Examples:
         #     midi.number.smooth(0.1)
         #     120.hz.square.smooth(60.samples)
         #     clip.number.smooth(0.05, reset: clip.trigger)
         #     midi.cc(74).smooth(300.ms, curve: :elastic)   # an elastic knob
-        #
-        # TODO: instead of reacting to step changes in the input, use an FIR
-        # filter whose step response is the smoothstep function.
-        def smooth(length, reset: nil, curve: nil)
-          if length.is_a?(MB::Sound::Length::Samples)
-            f = MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, samples: length.value, curve: curve)
-          else
-            f = MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, seconds: MB::Sound::Length.seconds(length, sample_rate: sample_rate), curve: curve)
-          end
+        #     4.hz.lfo.square.sample_hold.smooth(0.25, from: 0)   # a smooth walk from 0
+        def smooth(length, reset: nil, curve: nil, from: nil)
+          f = MB::Sound::Filter::Smooth.new(length, sample_rate: sample_rate, curve: curve, from: from)
 
           return filter(f) if reset.nil?
 

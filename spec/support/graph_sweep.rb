@@ -153,7 +153,8 @@ module GraphSweep
       ['Gain', ->(c) { c.sig.filter(f::Gain.new(0.5, sample_rate: 48000)) }],
       ['LinearFollower', ->(c) { c.sig.filter(f::LinearFollower.new(sample_rate: 48000, max_rise: 100, max_fall: 50, absolute: true)) }],
       ['SimpleEnvelopeFollower', ->(c) { c.sig.filter(f::SimpleEnvelopeFollower.new(sample_rate: 48000)) }],
-      ['Smoothstep', ->(c) { c.sig.filter(f::Smoothstep.new(sample_rate: 48000, samples: 40)) }],
+      ['Smooth', ->(c) { c.sig.filter(f::Smooth.new(40.samples, sample_rate: 48000)) }],
+      ['Smooth with a curve', ->(c) { c.sig.filter(f::Smooth.new(300.samples, sample_rate: 48000, curve: :elastic)) }],
       ['Biquad', ->(c) { c.sig.filter(f::Biquad.new(0.2, 0.4, 0.2, -0.3, 0.1, sample_rate: 48000)) }],
       ['Cookbook object', ->(c) { c.sig.filter(f::Cookbook.new(:peak, 48000, 1000, quality: 2, db_gain: 6)) }],
       ['Cookbook object as biquad', ->(c) { c.sig.filter(f::Cookbook.new(:lowpass, 48000, 1000, quality: 2), structure: :biquad) }],
@@ -209,6 +210,10 @@ module GraphSweep
       ['power, abs, rounding, logs', ->(c) { (c.mod(0.1, 2) ** 2.constant) + c.sig.aabs + c.sig.abs + (c.mod(0.5, 3).log + c.mod(1, 4).log2 + c.mod(1, 4).log10).floor + c.sig.round + c.sig.ceil }],
       ['complex parts', ->(c) { c.sig.real + 200.hz.complex_sine.imag + 200.hz.complex_sine.arg }],
       ['constant smooth', ->(c) { 0.5.constant(smoothing: 0.01) + c.sig }],
+      ['smooth (B-spline, curve, adaptive, reset)', ->(c) {
+        c.mod(0, 1).smooth(0.002) + c.sig.smooth(0.004, curve: :back, from: 0) + c.mod(-1, 1).smooth(1.ms..5.ms) +
+          c.notes.number.smooth(0.003, reset: c.notes.trigger) * 0.01
+      }],
       ['proc', ->(c) { c.sig.proc { |buf| buf * 0.5 } }],
       ['tee and branches', ->(c) { t = c.sig; t.softclip + t.delay(10.samples) + t }],
       ['with_buffer (BufferAdapter)', ->(c) { c.sig.with_buffer(37.samples) }],
