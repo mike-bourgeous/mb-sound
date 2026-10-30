@@ -60,6 +60,18 @@ RSpec.describe(MB::Sound::ExitClose) do
     described_class.unregister(b) if b
   end
 
+  it 'closes objects registered first: true before all others' do
+    a = Object.new
+    first = Object.new
+    b = Object.new
+    described_class.register(a)
+    described_class.register(first, first: true)
+    described_class.register(b)
+    expect(described_class.objects & [a, first, b]).to eq([first, b, a])
+  ensure
+    [a, first, b].each { |o| described_class.unregister(o) if o }
+  end
+
   it 'is the only way library code closes things at exit' do
     # A block given to at_exit is a GC root: whatever it refers to lives
     # until the process exits.  Register objects with ExitClose instead.
