@@ -517,7 +517,7 @@ module MB
               taken[name] = true
               next unless target
               next if own[target].include?(name) || rows.each_with_index.any? { |r, i| i != target && own[i].include?(name) && r.voice == rows[target].voice }
-              extra[target] << [name.to_s.split('/').last.to_sym, rd]
+              extra[target] << [Session::Name[name].leaf, rd]
             end
             rows.each_with_index.map { |r, i| extra.key?(i) ? r.with(knobs: extra[i].uniq(&:first).freeze) : r }
           end

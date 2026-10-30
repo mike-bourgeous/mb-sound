@@ -132,7 +132,7 @@ module MB
             rows = s.tracks.map { |t| [t.name, t.clip, parts[t.name]&.state || :stopped, t.armed, t.trigger, t.level] }
             names = s.tracks.map(&:name)
             parts.each_value do |p|
-              next if names.include?(p.name) || Arrangement::Recording.monitored_track(p.name)
+              next if names.include?(p.name) || Session::Name.monitored(p.name)
               rows << [p.name, 'bg', p.state, false]
             end
             if rows.empty?

@@ -440,7 +440,7 @@ module MB
           rate = output_open? ? sample_rate : 48000
           k = nil
           @render_lock.synchronize {
-            k = GraphNode::Knob.new(:"#{name}>#{bus}", 0.0, session: self, sample_rate: rate, frame: @frame, range: 0.0..MAX_SEND)
+            k = GraphNode::Knob.new(Name.send_knob(name, bus), 0.0, session: self, sample_rate: rate, frame: @frame, range: 0.0..MAX_SEND)
             if level.is_a?(Numeric)
               k.set(level.to_f, frame: @frame, smooth: 0)
             else
@@ -597,7 +597,7 @@ module MB
         # The routing of player name +name+ (an armed track's monitor uses
         # its track's), or nil.
         def route_of(name)
-          @routes[name] || ((t = Arrangement::Recording.monitored_track(name)) && @routes[t])
+          @routes[name] || ((t = Session::Name.monitored(name)) && @routes[t])
         end
 
         # Before a graph read in the span (a player at +offset+ frames in, a
@@ -714,7 +714,7 @@ module MB
         end
 
         def rank_of(ranks, name)
-          ranks[name] || ((t = Arrangement::Recording.monitored_track(name)) && ranks[t]) || 0
+          ranks[name] || ((t = Session::Name.monitored(name)) && ranks[t]) || 0
         end
 
         # Renders a span's players and buses in routing order (see the
@@ -1270,7 +1270,7 @@ module MB
         # keeps what feeds it audible.
         def audible_unlocked?(name)
           return super if @soloed.empty? || (@buses.empty? && @routes.empty?)
-          track = Arrangement::Recording.monitored_track(name)
+          track = Session::Name.monitored(name)
           return false if @muted.include?(name) || (track && @muted.include?(track))
           return true if super
           reach = solo_reach

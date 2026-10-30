@@ -16,7 +16,7 @@ module MB
         # * v.amp_env }`).
         class Link
           # The default patch's player.
-          MONITOR = :'keyboard/live'
+          MONITOR = Session::Name.monitor(:keyboard)
 
           # The default patch: play's soft filtered saw (one patch for
           # notes without a sound of their own; see Playable::PATCH).

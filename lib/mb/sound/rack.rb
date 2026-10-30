@@ -532,7 +532,7 @@ module MB
         raise ArgumentError, "#{label}: snapshots belong to named racks" unless @name
         names = Session.current.racks.knob_names(@name)
         raise ArgumentError, "#{label} has no knobs in the session yet (apply it in a graph that plays)" if names.empty?
-        MB::Sound.snap(:"#{@name}/#{snap}", knobs: names, **opts)
+        MB::Sound.snap(Session::Name.join(@name, snap), knobs: names, **opts)
       end
 
       # Recalls this rack's snapshot +snap+ (see #snap and
@@ -540,7 +540,7 @@ module MB
       # +except:+).
       def recall(snap, **opts)
         raise ArgumentError, "#{label}: snapshots belong to named racks" unless @name
-        MB::Sound.recall(:"#{@name}/#{snap}", **opts)
+        MB::Sound.recall(Session::Name.join(@name, snap), **opts)
       end
 
       # The samples this rack delays its main input by, from a stand-in

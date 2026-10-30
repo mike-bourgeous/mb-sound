@@ -112,6 +112,18 @@ module MB
             parts.join('/').to_sym
           end
 
+          # The track whose monitor player +name+ is (:lead for
+          # :"lead/live"), or nil (also for anything not a Symbol).
+          def monitored(name)
+            name.is_a?(Symbol) ? self[name].monitored : nil
+          end
+
+          # The name whose cue player +name+ is (:lead for :"lead/cue"), or
+          # nil (also for anything not a Symbol).
+          def cued(name)
+            name.is_a?(Symbol) ? self[name].cued : nil
+          end
+
           # Track +track+'s monitor player name (:"lead/live").
           def monitor(track)
             join(track, MONITOR)
@@ -125,6 +137,24 @@ module MB
           # Player +name+'s level knob name (:"bass/level").
           def level(name)
             join(name, LEVEL)
+          end
+
+          # Leaves that mean something of their own (#monitor?, #cue?,
+          # #level?), which a track param's knob can't take.
+          RESERVED_LEAVES = [MONITOR, CUE, LEVEL].freeze
+
+          # Track +track+'s knob for patch param +param+ (:"bass/cutoff";
+          # a param named like a reserved leaf gets a prefix:
+          # :"bass/patch_level", since :"bass/level" is the track's level).
+          def param(track, param)
+            leaf = param.to_s
+            join(track, RESERVED_LEAVES.include?(leaf) ? "patch_#{leaf}" : leaf)
+          end
+
+          # The hidden knob name of the send from player +name+ to bus
+          # +bus+ (:"keys>verb"; Session::Buses).
+          def send_knob(name, bus)
+            :"#{name}>#{bus}"
           end
         end
 

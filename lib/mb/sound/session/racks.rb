@@ -155,7 +155,7 @@ module MB
                     else
                       instances.map { |key, knobs|
                         names = knobs.values.map(&:name)
-                        path = names.first.to_s.split('/')[0..-2].join('/').to_sym
+                        path = Name[names.first].base
                         r.info(path: path, knobs: names, specs: specs, out: e.out)
                       }
                     end
@@ -233,7 +233,7 @@ module MB
               name = if rack.nil?
                        anonymous_name(key, info.knob)
                      elsif !@per_instance[rack]
-                       :"#{rack}/#{info.knob}"
+                       Name.join(rack, info.knob)
                      else
                        instance_name(rack, key, keys, info.knob)
                      end
@@ -251,7 +251,7 @@ module MB
           @mutex.synchronize {
             (@instance_knobs[[rack, key]] ||= {})[short] = knob
             next nil unless rack && @per_instance[rack]
-            group = :"#{rack}/#{short}"
+            group = Name.join(rack, short)
             next nil if @knob_groups.key?(group)
             @knob_groups[group] = [rack, short]
             group
@@ -314,8 +314,8 @@ module MB
         # :"dub.1/space").
         def instance_name(rack, key, keys, short)
           player, ord = key
-          return :"#{rack}.#{keys.index(key) + 1}/#{short}" if player.nil?
-          :"#{player}/#{rack}#{ord > 0 ? ".#{ord + 1}" : ''}/#{short}"
+          return Name.join("#{rack}.#{keys.index(key) + 1}", short) if player.nil?
+          Name.join(player, "#{rack}#{ord > 0 ? ".#{ord + 1}" : ''}", short)
         end
 
         # An anonymous rack's knob name: the player's (:"bass/space",
@@ -324,7 +324,7 @@ module MB
           player, ord = key
           parts = [player || 'rack']
           parts << "rack.#{ord + 1}" if ord > 0
-          :"#{parts.join('/')}/#{short}"
+          Name.join(*parts, short)
         end
 
         # Names of the current players whose graphs hold an instance of

@@ -130,17 +130,7 @@ module MB
         def control_name(name)
           return name unless name.is_a?(Symbol)
           return name if @knob_lock.synchronize { @knobs.key?(name) }
-          if (level = primary_control(name))
-            fader!(name) # (a track's level knob is made when first used; Faders)
-            return level
-          end
-          # A track's level knob by its own name (:"bass/level"), made
-          # when first used
-          if track_level_name?(name)
-            fader!(Name[name].owner)
-            return name
-          end
-          name
+          primary_control(name) || name
         end
 
         # True if +name+ names a track's level knob (:"bass/level"), made
@@ -175,7 +165,10 @@ module MB
           return name.knob if name.is_a?(GraphNode::Knob::Reader)
           return name if name.is_a?(GraphNode::Knob)
           name = control_name(name)
-          @knob_lock.synchronize { @knobs[name] } or raise ArgumentError, "No knob #{name.inspect}#{knob_suggestion(name, define: true)}"
+          k = @knob_lock.synchronize { @knobs[name] }
+          # (a track's level knob is made at unity when first used; Faders)
+          k ||= fader!(Name[name].owner) if track_level_name?(name)
+          k or raise ArgumentError, "No knob #{name.inspect}#{knob_suggestion(name, define: true)}"
         end
 
         # The knobs (a Hash from name to GraphNode::Knob).
@@ -796,7 +789,7 @@ module MB
           match = ->(n, list) {
             Array(list).any? { |x|
               x = control_name(x.to_sym)
-              n == x || (n.to_s.include?('/') && n.to_s.split('/').last == x.to_s)
+              n == x || (!Name[n].plain? && Name[n].leaf == x)
             }
           }
           if only

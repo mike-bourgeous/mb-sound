@@ -621,7 +621,7 @@ module MB
         # A disarmed track's monitor stays stopped (see Arrangement::Arm:
         # it plays exactly while its track is armed); `arm` starts it
         if name && disarmed_monitor?(name)
-          track = Arrangement::Recording.monitored_track(name)
+          track = Session::Name.monitored(name)
           return MB::Sound.live_error(ArgumentError.new("#{name.inspect} is track #{track.inspect}'s live monitor, which plays while the track is armed (arm #{track.inspect})"))
         end
 
@@ -647,9 +647,9 @@ module MB
       end
 
       # True if +name+ is the live monitor of a track that isn't armed (see
-      # Arrangement::Recording.monitor_name).
+      # Session::Name.monitor).
       private def disarmed_monitor?(name)
-        track = Arrangement::Recording.monitored_track(name)
+        track = Session::Name.monitored(name)
         !track.nil? && !(@arrangement&.armed?(track))
       end
 

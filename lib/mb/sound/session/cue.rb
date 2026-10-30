@@ -37,9 +37,6 @@ module MB
         # Where CUE goes (see #cue_output=).
         OUTPUT_MODES = [:auto, :ports, :split, :phones, :off].freeze
 
-        # The suffix of cue player names (:"lead/cue").
-        SUFFIX = '/cue'
-
         # Change kinds of the CUE route (undone through CueSubject).
         KINDS = [:cue, :uncue, :launch].freeze
 
@@ -54,19 +51,6 @@ module MB
         # (+pfl+), the serial of its cue player (+cue_serial+, nil for
         # none), and its MAIN player's PlayerState (+main+).
         CueState = Struct.new(:pfl, :cue_serial, :main, keyword_init: true)
-
-        # The cue player name for +name+ (:lead -> :"lead/cue").
-        def self.cue_name(name)
-          :"#{name}#{SUFFIX}"
-        end
-
-        # The name a cue player name stands for (:"lead/cue" -> :lead), or
-        # nil.
-        def self.cued_name(name)
-          return nil unless name.is_a?(Symbol)
-          s = name.name
-          s.end_with?(SUFFIX) && s.length > SUFFIX.length ? s[0...-SUFFIX.length].to_sym : nil
-        end
 
         # Where CUE goes: :auto (CUE on channels 3-4 when the output has
         # twice the Session's channels, else nowhere), :ports (those
@@ -121,7 +105,7 @@ module MB
           check_cue_name(name)
           cue_ready
           options[:at] = :now if options[:at].nil? && options[:on].nil? && options[:in].nil? && options[:start_time].nil?
-          add(sound, name: Cue.cue_name(name), **options)
+          add(sound, name: Session::Name.cue(name), **options)
         end
 
         # Pre-listens player name +name+ (+on+) or ends it, at timeline
@@ -145,7 +129,7 @@ module MB
 
         # True if a cue player for +name+ is playing or waiting to start.
         def cued?(name)
-          cname = Cue.cue_name(name)
+          cname = Session::Name.cue(name)
           @mutex.synchronize { @players.each_value.any? { |p| p.name == cname && p.current? } } || queued_start?(cname)
         end
 
@@ -156,11 +140,11 @@ module MB
           names = names.flatten
           if names.empty?
             players = @mutex.synchronize { @players.values.map(&:name) } + @changes.map(&:subject)
-            names = (players.filter_map { |n| Cue.cued_name(n) } + @render_lock.synchronize { @cue_pfl.to_a }).uniq
+            names = (players.filter_map { |n| Session::Name.cued(n) } + @render_lock.synchronize { @cue_pfl.to_a }).uniq
           end
           names.select { |n|
             cued = cued?(n)
-            remove(Cue.cue_name(n), fade: fade.nil? ? declick_bars : fade, time: time) if cued
+            remove(Session::Name.cue(n), fade: fade.nil? ? declick_bars : fade, time: time) if cued
             listened = pfl?(n)
             pfl(n, false, time: time, fade: fade) if listened
             cued || listened
@@ -178,7 +162,7 @@ module MB
             return MB::Sound.live_error(ArgumentError.new("Nothing cued as #{name.inspect}; cue it first (`cue #{name.inspect}, sound`)"))
           end
           fade = bars_or_nil(fade) if fade
-          description = @mutex.synchronize { @players.values.select { |p| p.name == Cue.cue_name(name) && p.current? }.last&.description }
+          description = @mutex.synchronize { @players.values.select { |p| p.name == Session::Name.cue(name) && p.current? }.last&.description }
           change(:launch, name, time, data: { fade: fade, description: description }) { |t| land_launch(name, t, fade) }
         end
 
@@ -200,7 +184,7 @@ module MB
           players = @mutex.synchronize { @players.values.select(&:current?).map(&:name) }
           queued = @render_lock.synchronize { @changes.select { |c| Session::START_KINDS.include?(c.kind) }.map(&:subject) }
           pfls = @render_lock.synchronize { @cue_pfl.to_a + @changes.filter_map { |c| c.subject if c.kind == :cue && c.entry&.data&.[](:pfl) } }
-          ((players + queued).filter_map { |n| n.is_a?(Symbol) && Cue.cued_name(n) } + pfls).uniq.select { |n| cued?(n) || pfl_after_queue?(n) }
+          ((players + queued).filter_map { |n| n.is_a?(Symbol) && Session::Name.cued(n) } + pfls).uniq.select { |n| cued?(n) || pfl_after_queue?(n) }
         end
 
         # True if +name+ is pre-listened, or will be once the queued
@@ -220,7 +204,7 @@ module MB
         def cue_info
           info = {}
           @mutex.synchronize { @players.values }.each do |p|
-            n = Cue.cued_name(p.name)
+            n = Session::Name.cued(p.name)
             info[n] = "cue: #{p.description}" if n && p.current?
           end
           @render_lock.synchronize { @cue_pfl.to_a }.each { |n| info[n] ||= 'pfl' }
@@ -248,7 +232,7 @@ module MB
 
         def check_cue_name(name)
           raise ArgumentError, "Cue names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
-          raise ArgumentError, "#{name.inspect} is already a cue player name; cue #{Cue.cued_name(name).inspect}" if Cue.cued_name(name)
+          raise ArgumentError, "#{name.inspect} is already a cue player name; cue #{Session::Name.cued(name).inspect}" if Session::Name.cued(name)
           raise ArgumentError, "#{name.inspect} is a trigger track (a sidechain line heard only by readers such as duck(#{name.inspect})), so it never plays on CUE" if trigger_track?(name)
         end
 
@@ -283,8 +267,8 @@ module MB
         # player at the same time (`bg :x` or `go` replacing :x; maintainer
         # 2026-10-18).  Called by Session#add after queuing the start.
         def end_cue_at_start(name, time)
-          return unless name.is_a?(Symbol) && Cue.cued_name(name).nil? && cued?(name)
-          remove(Cue.cue_name(name), fade: declick_bars, time: time)
+          return unless name.is_a?(Symbol) && Session::Name.cued(name).nil? && cued?(name)
+          remove(Session::Name.cue(name), fade: declick_bars, time: time)
         end
 
         # The output channels and cue channels for opening the output (see
@@ -303,7 +287,7 @@ module MB
         # The starting route of a new player named +name+ (nil for MAIN
         # only).
         def initial_cue_levels(name)
-          cue = Cue.cued_name(name)
+          cue = Session::Name.cued(name)
           return nil unless cue || @cue_pfl.include?(name)
           engage_split
           Levels.new(cue ? 0.0 : 1.0, nil, 1.0, nil)
@@ -318,7 +302,7 @@ module MB
           length = fade ? fade_frames(fade, rate) : MB::M.max((Fades::DECLICK_SECONDS * rate).round, 1)
 
           @mutex.synchronize { @players.values }.each do |p|
-            cue = !Cue.cued_name(p.name).nil?
+            cue = !Session::Name.cued(p.name).nil?
             main_t = cue ? 0.0 : 1.0
             cue_t = cue || @cue_pfl.include?(p.name) ? 1.0 : 0.0
             l = p.cue
@@ -335,7 +319,7 @@ module MB
 
         # The :launch change's action (see #launch_cue).
         def land_launch(name, time, fade)
-          cname = Cue.cue_name(name)
+          cname = Session::Name.cue(name)
           @mutex.synchronize {
             cp = @players.values.select { |p| p.name == cname && p.current? }.last
             # (a later `bg`, `go`, or `tweak` started a new :name before the
@@ -503,7 +487,7 @@ module MB
         # Cue players ignore solos (a solo is about MAIN); `mute :x` mutes
         # :"x/cue" too.
         def audible_unlocked?(name)
-          base = Cue.cued_name(name)
+          base = Session::Name.cued(name)
           return super unless base
           !@muted.include?(name) && !@muted.include?(base)
         end
@@ -516,7 +500,7 @@ module MB
         def undo_snapshot(subject)
           return super unless subject.is_a?(CueSubject)
           name = subject.name
-          cname = Cue.cue_name(name)
+          cname = Session::Name.cue(name)
           serial = @mutex.synchronize { @players.values.select { |p| p.name == cname && p.current? }.last&.serial }
           CueState.new(pfl: @cue_pfl.include?(name), cue_serial: serial, main: super(name))
         end
@@ -536,7 +520,7 @@ module MB
         def restore_cue(name, state, time, full)
           state.pfl ? @cue_pfl << name : @cue_pfl.delete(name)
           if full
-            cname = Cue.cue_name(name)
+            cname = Session::Name.cue(name)
             declick = declick_bars
             restored = false
             @mutex.synchronize {
