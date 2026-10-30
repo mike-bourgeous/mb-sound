@@ -335,11 +335,15 @@ module MemcheckSelection
   end
 
   # Line range of the memcheck section of the Rakefile (from its heading
-  # comment to the end of the file).
+  # comment to its end marker, else the end of the file; the spec, plan,
+  # and golden tasks after the marker don't make memcheck runs full).
   def rakefile_section(content)
     lines = content.to_s.lines
     first = lines.index { |l| l.start_with?('# Valgrind memcheck') }
-    first ? ((first + 1)..lines.length) : nil
+    return nil unless first
+
+    last = lines.index { |l| l.start_with?('# (end of the memcheck section') }
+    (first + 1)..(last && last > first ? last : lines.length)
   end
 
   # --- Selection -----------------------------------------------------------

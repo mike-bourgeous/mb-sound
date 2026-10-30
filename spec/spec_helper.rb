@@ -3,6 +3,11 @@ require_relative 'support/per_file_coverage' if ENV['MB_SOUND_COVERAGE_PER_FILE'
 
 require 'fileutils'
 
+# C extensions older than their sources stop the run before they load
+# (support/stale_extensions.rb; the rake spec tasks compile first)
+require_relative 'support/stale_extensions'
+StaleExtensions.check!
+
 # Ruby warnings fail the example that printed them (or the run, for
 # warnings outside examples); see support/warning_guard.rb.  Installed
 # first, so warnings from loading the library count too (verbose-only
