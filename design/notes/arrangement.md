@@ -205,7 +205,7 @@ Measured (Mac container, offline Session, 256 frames, a dnb_reese track and a pa
 | `bg :lead, preset(:digibrass, midi: clip)` | 152 / 139 -> 26 / 13 | 187 / 159 -> 30 / 12 | 0.9 -> 2.3 s |
 | a track's first launch (digibrass patch) | 138 / 127 -> 9 / 2.5 | 172 / 147 -> 16 / 2 | 0.46 -> 1.2 s |
 
-The cost moves to the prompt (most of it the same compiling, plus building the copies twice and, for graphs, loading a recipe copy: digibrass's `GraphIO.load` ~300 ms).  Forms rehearse already, so their scheduled scene builds mostly skip warm-ups (night_bus_flow: 1 played, 6 skipped).  Left: `feed`'s undo snapshot and knob glide still compile ~8 ms where a first send lands.
+The cost moves to the prompt (most of it the same compiling, plus building the copies twice and, for graphs, loading a recipe copy: digibrass's `GraphIO.load` ~300 ms).  Forms rehearse already, so their scheduled scene builds mostly skip warm-ups (night_bus_flow: 1 played, 6 skipped).  Left: `feed`'s undo snapshot and knob glide still compile ~8 ms where a first send lands.  `warming_spec.rb` guards the landing by YJIT's `compiled_block_count` in its worst buffer (cold 1735 blocks, warm 184, the same at any machine load; fixes-1030), not compile milliseconds, which doubled under suite load.
 
 ## Live allocation and GC off (branch `dropouts-2`, 2026-10-28)
 
