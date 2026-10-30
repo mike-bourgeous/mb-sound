@@ -356,7 +356,8 @@ module MB
 
           case source
           when Sequence::Kit
-            Sequence::Kit.new(source.rows.transform_values { |c| c.swing(amount, 16) })
+            # (unnamed rows: a swap replaces the given rows and swings the new ones)
+            Sequence::Kit.new(source.rows.transform_values { |c| c.swing(amount, 16) }, row_names: false)
           when Sequence::Clip
             source.swing(amount, 16)
           else

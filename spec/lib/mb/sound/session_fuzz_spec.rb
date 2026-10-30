@@ -37,6 +37,7 @@ RSpec.describe('session fuzzing') do
     %w[track( scene go swap stop mute unmute solo turn tween .freq tr808( tr909( launch tweak meter L.inst. :dnb_sub bus( feed master flow( markov( seek].each do |word|
       expect(all).to include(word)
     end
+    expect(all).to match(/\{ swap :t\d, grid\(.*\)\.loop\.\w+/) # (parity-1: a kit swapped to a Kit transform)
     songs.each { |code| expect { Prism.parse(code).errors.then { |e| raise e.map(&:message).join(', ') unless e.empty? } }.not_to raise_error }
   end
 
