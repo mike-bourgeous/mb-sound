@@ -169,15 +169,6 @@ RSpec.describe(MB::Sound::DelayLine, :aggregate_failures) do
     end
   end
 
-  describe '#feedback' do
-    it 'feeds the delayed signal back into the delay' do
-      line = described_class.new(32)
-      impulse = Numo::SFloat.zeros(12).tap { |d| d[0] = 1 }
-      out = line.feedback(impulse, 4, 0.5)
-      expect(out.to_a).to eq([0, 0, 0, 0, 1, 0, 0, 0, 0.5, 0, 0, 0])
-    end
-  end
-
   describe 'C and Ruby versions' do
     # Two identical delay lines holding +capacity+ samples of random audio
     def lines(capacity, type)
@@ -220,28 +211,9 @@ RSpec.describe(MB::Sound::DelayLine, :aggregate_failures) do
               end
             end
 
-            it "feed back the same for #{desc} (#{mode})" do
-              c, r = lines(1000, type)
-              gain = type == Numo::SComplex ? 0.3 - 0.4i : -0.7
-              cs = []
-              rs = []
-              2.times do
-                expect(c.feedback(block, delay, gain, interpolation: mode, state: cs)).to eq(r.feedback_ruby(block, delay, gain, interpolation: mode, state: rs))
-                expect(c.buffer).to eq(r.buffer)
-                expect(c.write_offset).to eq(r.write_offset)
-                expect(cs).to eq(rs)
-              end
-            end
           end
         end
 
-        it 'feed back the same with per-sample gains' do
-          c, r = lines(500, type)
-          gains = Numo::SFloat.new(160).rand(-0.9, 0.9)
-          delays = Numo::SFloat.new(160).rand(0, 120)
-          expect(c.feedback(block, delays, gains)).to eq(r.feedback_ruby(block, delays, gains))
-          expect(c.buffer).to eq(r.buffer)
-        end
       end
     end
   end
@@ -251,17 +223,6 @@ RSpec.describe(MB::Sound::DelayLine, :aggregate_failures) do
     let(:moving) { Numo::DFloat.new(600).seq * 0.04 + 10.3 }
 
     [:linear, :cubic, :sinc].each do |interp|
-      it "matches DelayLine#feedback exactly with one line and one tap (#{interp})" do
-        a = MB::Sound::DelayLine.new(200)
-        b = MB::Sound::DelayLine.new(200)
-        [a, b].each { |l| l.prepare(600, 40) }
-        expected = a.feedback(input, moving, 0.7, interpolation: interp, state: [])
-        out = [Numo::SFloat.zeros(600)]
-        MB::Sound::DelayLine.network([b], [input], [0], [moving], [[0.7]], 600, interpolation: interp, states: [[]], outs: out)
-        expect(out[0]).to eq(expected)
-        expect(b.unwrapped).to eq(a.unwrapped)
-      end
-
       it "matches its Ruby mirror exactly with two lines, three taps, and per-sample gains (#{interp})" do
         gain = Numo::SFloat.new(600).seq(0, 0.0005)
         make = ->(ls) { [ls, [input, nil], [0, 1, 0], [17, moving, 33.5], [[nil, 0.6, gain], [0.5, nil, 0.1]], 600] }

@@ -1,7 +1,7 @@
 RSpec.describe(MB::Sound::Filter::Smooth) do
   def arr(data) = MB::Sound::ArrayInput.new(data: [data])
   def trig(count, *indices) = Numo::SFloat.zeros(count).tap { |t| indices.each { |i| t[i] = 1 } }
-  def blocks(node, sizes) = sizes.map { |n| node.sample(n).dup }.reduce(:concatenate)
+  def blocks(node, sizes) = SpecBuffers.join(sizes.map { |n| node.sample(n).dup })
 
   it 'is what GraphNode#smooth builds' do
     f = 120.hz.square.smooth(60.samples)

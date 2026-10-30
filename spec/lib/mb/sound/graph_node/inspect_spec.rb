@@ -8,7 +8,7 @@ RSpec.describe(MB::Sound::GraphNode::Inspect) do
 
   it 'prints a node as its type and the Ruby that builds it' do
     node = 261.63.hz.saw.delay(0.125, feedback: 0.4)
-    expect(node.inspect).to match(/\A#<SampleWrapper 261\.63\.hz\.saw\.delay\(0\.125, feedback: 0\.4\)>\z/)
+    expect(node.inspect).to match(/\A#<FeedbackLoop 261\.63\.hz\.saw\.delay\(0\.125, feedback: 0\.4\)>\z/)
   end
 
   it 'prints the same line through pp (Pry uses it)' do

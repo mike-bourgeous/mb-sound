@@ -133,8 +133,8 @@ module MB
           case @base_filter
           when MB::Sound::Filter::Delay
             d = @base_filter
-            unless d.feedback == false && d.wet == 1 && d.dry == 0
-              raise Plan::Unsupported.new(self, 'a delay inside a feedback loop takes no feedback:, wet:, or dry: of its own (build them into the loop)')
+            unless d.wet == 1 && d.dry == 0
+              raise Plan::Unsupported.new(self, 'a delay inside a feedback loop takes no wet: or dry: of its own (build them into the loop)')
             end
 
             ring = Plan::Loop::Ring.new(self)

@@ -228,6 +228,12 @@ module MB
           @sustain_bufs = {}
           @cutoff_buf = nil
           @range = [0.0, 0.0]
+          # Complex inputs (see #run_complex): the imaginary part's loop
+          # state, and which inputs gave complex buffers this block
+          @imag_state = nil
+          @complex_parts = nil
+          @complex_seen = nil
+          @complex_out = nil
 
           compile
         end
@@ -359,7 +365,10 @@ module MB
 
             unless buf.is_a?(Numo::SFloat)
               if buf.is_a?(Numo::SComplex) || buf.is_a?(Numo::DComplex)
-                raise ArgumentError, "Feedback loops are real only (#{Plan.node_label(op.source)} gave a complex buffer)"
+                # The real part now, the imaginary part in #run_complex
+                (@complex_parts ||= [])[i] = Numo::SFloat.cast(buf.imag)
+                (@complex_seen ||= [])[i] = true
+                buf = buf.real
               end
               buf = Numo::SFloat.cast(buf)
             end
@@ -367,6 +376,14 @@ module MB
             n = buf.length if buf.length < n
             @inputs[i] = buf
             @values[op.dst] = buf
+          end
+
+          # An input that was complex before and isn't now (or has ended)
+          # gives an imaginary part of 0
+          @complex_seen&.each_with_index do |seen, i|
+            next unless seen && @complex_parts[i].nil?
+
+            @complex_parts[i] = (@ring_zeros ||= {})[count] ||= Numo::SFloat.zeros(count)
           end
 
           @param_ops.each_with_index do |op, i|
@@ -415,10 +432,106 @@ module MB
             end
           end
 
+          return run_complex(n, ringing ? 0 : (ring_start || 0)) if @complex_parts || @imag_state
+
           out = run(n)
           return out unless @ring
 
           ring_out(out, ringing ? 0 : (ring_start || 0))
+        end
+
+        # A block with complex inputs (smoothing-1: `delay(t, feedback:)` on
+        # a complex signal): the loop is real, so it runs twice, on the real
+        # parts and then on the imaginary parts with a second loop state
+        # (delay lines, histories, SVF states), and the output is their
+        # complex sum.  Real inputs (gains, delay times, cutoffs) are read
+        # as they are in both runs, so a real signal summed into a complex
+        # loop would count in both parts.  That is the complex loop exactly
+        # for loops of delays, real gains, sums, and filters (linear with
+        # real coefficients) on complex signals; antialiased shapers,
+        # biquads, and four-poles raise.  Once an input has been complex the
+        # loop stays complex (an imaginary tail rings on; a real input then
+        # gives an imaginary part of 0).
+        def run_complex(n, ring_start)
+          unless @imag_state
+            bad = @program.ops.find { |op| op.is_a?(Plan::Op::Shape) || op.is_a?(Plan::Loop::Op::Biquad) || op.is_a?(Plan::Op::FourPole) }
+            raise ArgumentError, "Feedback loops take complex signals only through delays, gains, sums, and SVF filters (not #{Plan.node_label(bad.node)})" if bad
+
+            @imag_state = initial_imag_state
+          end
+
+          re = run(n).dup
+          real_inputs = @inputs.dup
+          @input_ops.each_index do |i|
+            part = @complex_parts&.[](i)
+            @inputs[i] = part.length > n ? part[0...n].dup : part if part
+          end
+
+          swap_imag_state
+          begin
+            @program.rings.each_with_index do |g, i|
+              d = @delays[i]
+              max = d.is_a?(Numo::NArray) ? d.max.to_f : d.to_f
+              max = 0.0 unless max.finite?
+              g.line.prepare(n, max + 2, Numo::SFloat)
+            end
+            im = run(n).dup
+          ensure
+            swap_imag_state
+            @inputs.replace(real_inputs)
+            @complex_parts&.clear
+          end
+
+          @complex_out = Numo::SComplex.zeros(n) if @complex_out.nil? || @complex_out.length != n
+          out = @complex_out
+          out[true] = re + im * 1i
+          return out unless @ring
+
+          level = Numo::SFloat.maximum(re.abs, im.abs)
+          keep = ring_out(level, ring_start).length
+          keep < n ? out[0...keep] : out
+        end
+
+        # The imaginary part's starting loop state: silent delay lines of
+        # the same sizes, zero histories and filter states (see
+        # #run_complex).
+        def initial_imag_state
+          rings = @program.rings.map { |g|
+            line = g.line
+            buf = line.instance_variable_get(:@buffer)
+            [Numo::SFloat.zeros(buf.length), line.instance_variable_get(:@write_offset), line.instance_variable_get(:@block_start), g.read_state.dup]
+          }
+          states = complex_state_arrays.map { |a| a.is_a?(Numo::NArray) ? a.class.zeros(*a.shape) : a.map { 0.0 } }
+          [rings, states]
+        end
+
+        # The state Arrays (or NArrays) of the ops #run_complex keeps twice.
+        def complex_state_arrays
+          @program.ops.filter_map { |op|
+            case op
+            when Plan::Loop::Op::Svf then op.filter.instance_variable_get(:@state)
+            when Plan::Loop::Op::LoopHistory then op.state
+            end
+          }
+        end
+
+        # Exchanges the loop's state with @imag_state.
+        def swap_imag_state
+          rings, states = @imag_state
+          @program.rings.each_with_index do |g, i|
+            line = g.line
+            buf, w, bs, rs = rings[i]
+            rings[i] = [line.instance_variable_get(:@buffer), line.instance_variable_get(:@write_offset), line.instance_variable_get(:@block_start), g.read_state.dup]
+            line.instance_variable_set(:@buffer, buf)
+            line.instance_variable_set(:@write_offset, w)
+            line.instance_variable_set(:@block_start, bs)
+            g.read_state.replace(rs)
+          end
+          complex_state_arrays.each_with_index do |a, k|
+            other = states[k]
+            states[k] = a.dup
+            a.is_a?(Array) ? a.replace(other.to_a) : a[true] = other
+          end
         end
 
         # Delay times +d+ for ring +i+ as a DFloat: +d+ itself if it is one
@@ -669,6 +782,7 @@ module MB
             @sustain = sustain
 
             traverse
+            check_nested
             check_readers
             describe
           end
@@ -732,6 +846,16 @@ module MB
               handles_of(node).any? { |h| direct.call(origin(h)) }
             end
             @history = direct.call(body)
+          end
+
+          # A loop on the loop (a delay with feedback: of its own inside
+          # another loop, which #delay builds as a FeedbackLoop) isn't
+          # supported yet.
+          def check_nested
+            inner = @cycle.each_key.find { |n| n.is_a?(FeedbackLoop) }
+            return unless inner
+
+            raise Plan::Unsupported.new(inner, 'a feedback loop inside a feedback loop (a delay with feedback: of its own takes no feedback: inside a loop; build the feedback into the outer loop)')
           end
 
           # Nodes on the loop must be read only by other nodes on the loop
@@ -847,6 +971,13 @@ module MB
 
             if node.is_a?(GraphNode::Constant) && !handle.is_a?(GraphNode::Tee::Branch)
               return @params[node] ||= b.param(node)
+            end
+
+            # A knob read (a reader per consumer, no Tee), e.g. a feedback
+            # gain `knob(:space) * 0.6`: a param read every block, as plans
+            # read knobs (smoothing-1: such gains failed in loops)
+            if node.is_a?(GraphNode::Knob::Reader) && !handle.is_a?(GraphNode::Tee::Branch)
+              return @params[node] ||= b.param(node, complex: false)
             end
 
             op = @boundaries[node]

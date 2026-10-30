@@ -51,17 +51,4 @@ RSpec.describe('MB::Sound::FastDelay', :aggregate_failures) do
     end
   end
 
-  describe '.feedback' do
-    it 'returns the new write offset' do
-      buffer = Numo::SFloat.zeros(64)
-      out = Numo::SFloat.zeros(10)
-      expect(MB::Sound::FastDelay.feedback(buffer, 60, Numo::SFloat.ones(10), out, 3, 0.5, 0, nil, nil)).to eq(6)
-    end
-
-    it 'rejects complex feedback on a real buffer' do
-      expect {
-        MB::Sound::FastDelay.feedback(Numo::SFloat.zeros(64), 0, Numo::SFloat.ones(4), Numo::SFloat.zeros(4), 1, 0.5i, 0, nil, nil)
-      }.to raise_error(ArgumentError, /complex/i)
-    end
-  end
 end

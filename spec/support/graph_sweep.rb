@@ -161,7 +161,7 @@ module GraphSweep
       ['SVF object', ->(c) { c.sig.filter(f::SVF.new(:notch, 48000, 1000, quality: 2)) }],
       ['FilterChain', ->(c) { c.sig.filter(f::FilterChain.new(f::FirstOrder.new(:lowpass, 48000, 2000), f::Cookbook.new(:highpass, 48000, 100, quality: 0.7))) }],
       ['FilterSum', ->(c) { c.sig.filter(f::FilterSum.new(f::FirstOrder.new(:lowpass, 48000, 400), f::FirstOrder.new(:highpass, 48000, 4000))) }],
-      ['Filter::Delay object', ->(c) { c.sig.filter(f::Delay.new(delay: 0.003, sample_rate: 48000, feedback: 0.5, wet: 0.5, dry: 1)) }],
+      ['Filter::Delay object', ->(c) { c.sig.filter(f::Delay.new(delay: 0.003, sample_rate: 48000, wet: 0.5, dry: 1)) }],
       ['NoiseColor pink', ->(c) { c.sig.filter(f::NoiseColor.new(:pink)) }],
       ['NoiseColor brown', ->(c) { c.sig.filter(f::NoiseColor.new(:brown)) }],
     ]
@@ -228,6 +228,13 @@ module GraphSweep
         k.set(500, frame: 1500, smooth: 0)
         k.follow(c.mod(100, 3000), frame: 2400)
         c.sig.filter(:lowpass, cutoff: k, quality: 2) + k * 0.0001
+      }],
+      # (smoothing-1: delay(t, feedback:) is a feedback loop; a knob-read
+      # gain was a loop input it couldn't read, and complex signals loop
+      # their parts separately)
+      ['delay feedback loops (knob gain, node gain and time, complex)', ->(c) {
+        c.sig.delay(0.002, feedback: MB::Sound::GraphNode::Knob.new(:space, 0.5, range: 0.0..0.9) * 0.9, dry: 1) + c.sig.delay(c.mod(0.001, 0.0015), feedback: c.mod(-0.5, 0.5), wet: 0.5) +
+          (c.sig + c.sig.delay(7.samples) * 1i).delay(30.samples, feedback: 0.4).real
       }],
       ['ArrayInput', ->(c) { MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(3000).rand(-1, 1)], repeat: 2) }],
       ['NullInput', ->(c) { MB::Sound::NullInput.new(sample_rate: 48000, channels: 2) }],

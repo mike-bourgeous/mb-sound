@@ -33,8 +33,8 @@ RSpec.describe(MB::Sound::Filter::LinearFollower) do
           r = MB::Sound::Filter::LinearFollower.new(sample_rate: 48000, max_rise: rise, max_fall: fall, absolute: abs)
           c.reset(0.25)
           r.reset(0.25)
-          a = [0...7, 7...800, 800...3000].map { |range| c.process(data[range].dup) }.reduce(:concatenate)
-          b = [0...7, 7...800, 800...3000].map { |range| r.process_ruby(data[range].dup) }.reduce(:concatenate)
+          a = SpecBuffers.join([0...7, 7...800, 800...3000].map { |range| c.process(data[range].dup) })
+          b = SpecBuffers.join([0...7, 7...800, 800...3000].map { |range| r.process_ruby(data[range].dup) })
           expect(a.class).to eq(type)
           expect(a.to_binary).to eq(b.to_binary), "#{type} #{rise.inspect} #{fall.inspect} #{abs}"
           expect(c.peek.to_s).to eq(r.peek.to_s)

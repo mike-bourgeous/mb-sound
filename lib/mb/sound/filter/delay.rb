@@ -21,9 +21,10 @@ module MB
         # to #process.  May not be an integer.
         attr_reader :min_delay_samples, :max_delay_samples, :last_delay_samples
 
-        # The feedback gain, wet level, and dry level: numbers or graph nodes
-        # (see #feedback=, #wet=, #dry=).
-        attr_reader :feedback, :wet, :dry
+        # The wet level and dry level: numbers or graph nodes (see #wet=,
+        # #dry=).  (Feedback is GraphNode#delay's: a FeedbackLoop around a
+        # Delay since smoothing-1.)
+        attr_reader :wet, :dry
 
         # How fractional delays are interpolated (see
         # MB::Sound::DelayLine::INTERPOLATION).
@@ -50,16 +51,16 @@ module MB
         # MB::Sound::Filter::Delay::DEFAULT_SMOOTHING_RATE.
         #
         # The output is +:wet+ times the delayed signal plus +:dry+ times the
-        # input.  A +:feedback+ gain feeds the delayed signal back into the
-        # delay.  Each may be a number or a graph node (e.g. an LFO or a MIDI
-        # CC) giving a value per sample.
+        # input.  Each may be a number or a graph node (e.g. an LFO or a MIDI
+        # CC) giving a value per sample.  (Feedback: GraphNode#delay's
+        # feedback:, a FeedbackLoop.)
         #
         # +:interpolation+ chooses how fractional delays are read: :linear,
         # :cubic, or :sinc (see MB::Sound::DelayLine).
         #
         # With +:ring_out+ (the default), a SampleWrapper keeps playing the
         # delay's tail after its input ends (see #ring_out).
-        def initialize(delay: 0, sample_rate: 48000, delay_buffer_size: 48000, smoothing: true, feedback: false, wet: 1, dry: 0, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true)
+        def initialize(delay: 0, sample_rate: 48000, delay_buffer_size: 48000, smoothing: true, wet: 1, dry: 0, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true)
           @sample_rate = sample_rate.to_f
           @ring_out = ring_out
           @smooth_limit = nil
@@ -77,7 +78,6 @@ module MB
 
           @filter_buf = Numo::SFloat.zeros(1)
 
-          self.feedback = feedback
           self.dry = dry
           self.wet = wet
 
@@ -87,8 +87,6 @@ module MB
           # variable layout; see GraphNode::IvarPreset)
           @delay_range = nil
           @read_buf = nil
-          @ring_read = nil
-          @ring_feedback = nil
           @result_buf = nil
           @dry_buf = nil # (see #gains_reused)
           @minmax = [0.0, 0.0] # (reused by #delay_buffer)
@@ -234,12 +232,6 @@ module MB
           @interpolation = mode
         end
 
-        # Sets the feedback gain: a number (false or nil for none) or a graph
-        # node giving a gain per sample.
-        def feedback=(gain)
-          @feedback = control(gain, 'feedback') || false
-        end
-
         # Sets the wet (delayed signal) level: a number or a graph node.
         def wet=(level)
           @wet = control(level, 'wet')
@@ -262,7 +254,7 @@ module MB
         # #delay_samples=).  See GraphNode#sources.
         def sources
           (@time.node? ? { delay: @time.node } : {}).merge(
-            { feedback: @feedback, wet: @wet, dry: @dry }.select { |_, v| v.respond_to?(:sample) }
+            { wet: @wet, dry: @dry }.select { |_, v| v.respond_to?(:sample) }
           )
         end
 
@@ -286,14 +278,12 @@ module MB
             max_delay = @max_delay_samples
           end
 
-          feedback = control_values(@feedback, data.length)
           wet = control_values(@wet, data.length)
           dry = control_values(@dry, data.length)
-          return nil if feedback.nil? || wet.nil? || dry.nil?
+          return nil if wet.nil? || dry.nil?
 
           # (the shortest input, without Arrays)
           length = data.length
-          length = feedback.length if feedback.respond_to?(:length) && feedback.length < length
           length = wet.length if wet.respond_to?(:length) && wet.length < length
           length = dry.length if dry.respond_to?(:length) && dry.length < length
           if length < data.length
@@ -301,20 +291,10 @@ module MB
             delays = delays[0...length] if delays.respond_to?(:length)
           end
 
-          complex = complex_value?(data) || complex_value?(feedback)
-          @line.prepare(data.length, max_delay, complex ? Numo::SComplex : data.class)
-
-          if feedback && feedback != 0
-            @read_buf = @line.buffer_class.zeros(data.length) unless @read_buf && @read_buf.class == @line.buffer_class && @read_buf.length == data.length
-            fb = feedback.is_a?(Numo::NArray) && feedback.length != length ? feedback[0...length] : feedback # (no view for the whole block)
-            delayed = @line.feedback(data, delays, fb, interpolation: @interpolation, state: @read_state, out: @read_buf)
-          else
-            @line.write(data)
-            @read_buf = @line.buffer_class.zeros(data.length) unless @read_buf && @read_buf.class == @line.buffer_class && @read_buf.length == data.length
-            delayed = @line.read(data.length, delays, interpolation: @interpolation, state: @read_state, out: @read_buf)
-          end
-          @ring_read = delayed
-          @ring_feedback = feedback
+          @line.prepare(data.length, max_delay, complex_value?(data) ? Numo::SComplex : data.class)
+          @line.write(data)
+          @read_buf = @line.buffer_class.zeros(data.length) unless @read_buf && @read_buf.class == @line.buffer_class && @read_buf.length == data.length
+          delayed = @line.read(data.length, delays, interpolation: @interpolation, state: @read_state, out: @read_buf)
 
           # Numeric gains on SFloat buffers: the same products and sum in
           # one allocation-free pass, into the input (as below) or a reused
@@ -351,9 +331,7 @@ module MB
         # silence and returns the output, shortened to end on the exact
         # sample where the delay line has held only silence (below -90 dB,
         # see MB::Sound::RingOut) for the longest delay plus the
-        # interpolation reach, then nil.  A plain delay plays its last echo;
-        # with feedback, the repeats decay away.  A loop gain of 1 or more
-        # never ends.
+        # interpolation reach, then nil: the delay plays its last echo.
         def ring_out(count)
           @ring ||= MB::Sound::RingOut.new
           return nil if @ring.done?
@@ -363,11 +341,9 @@ module MB
           out = process(@ring_zeros)
           return nil if out.nil?
 
-          # The delay line now holds the feedback (the input is silent)
-          fb = @ring_feedback
-          written = fb && fb != 0 ? @ring_read * fb : nil
+          # The delay line now holds only silence (the input is silent)
           window = (@max_delay_samples.to_f.finite? ? @max_delay_samples.to_f.ceil : 0) + MB::Sound::DelayLine::MARGIN
-          keep = @ring.advance(written, out.length, window)
+          keep = @ring.advance(nil, out.length, window)
           keep && keep < out.length ? out[0...keep] : out
         end
 
@@ -387,11 +363,11 @@ module MB
         end
 
         def to_s
-          "Delay -- interpolation=#{@interpolation} smoothing=#{@smoothing} smooth_limit=#{@smooth_limit} feedback=#{level(@feedback, false)} dry=#{level(@dry)} wet=#{level(@wet)}"
+          "Delay -- interpolation=#{@interpolation} smoothing=#{@smoothing} smooth_limit=#{@smooth_limit} dry=#{level(@dry)} wet=#{level(@wet)}"
         end
 
         def to_s_graphviz
-          "Delay\ninterpolation: #{@interpolation}\nsmoothing: #{@smoothing}\nsmooth_limit: #{@smooth_limit}\nfeedback: #{level(@feedback, false)}\ndry: #{level(@dry)}\nwet: #{level(@wet)}"
+          "Delay\ninterpolation: #{@interpolation}\nsmoothing: #{@smoothing}\nsmooth_limit: #{@smooth_limit}\ndry: #{level(@dry)}\nwet: #{level(@wet)}"
         end
 
         private
@@ -435,15 +411,15 @@ module MB
           delays.minmax
         end
 
-        # Checks a feedback/wet/dry value: a graph node (sampled per buffer,
-        # through get_sampler) or a number (false/nil allowed for feedback).
+        # Checks a wet/dry value: a graph node (sampled per buffer, through
+        # get_sampler) or a number.
         def control(value, name)
           if value.respond_to?(:sample)
             value = value.get_sampler
             check_rate(value, name)
             value
           elsif value.nil? || value == false
-            name == 'feedback' ? false : raise(ArgumentError, "#{name} must be a number or a graph node")
+            raise ArgumentError, "#{name} must be a number or a graph node"
           elsif value.is_a?(Numeric)
             value.is_a?(Complex) ? value : value.to_f
           else
