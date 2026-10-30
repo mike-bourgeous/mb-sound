@@ -25,6 +25,20 @@ module MB
         end
       end
 
+      # Sets the thread-local (fiber-local, like Thread#[]) +key+ to
+      # +value+ while the block runs, then puts the old value back: the
+      # save/set/restore of a thread-local setting in one place
+      # (session-core-1).  Commands' provenance (who issued them, when, in
+      # which undo group or take line) is Session.context instead.
+      # Returns the block's value.
+      def with_local(key, value)
+        old = Thread.current[key]
+        Thread.current[key] = value
+        yield
+      ensure
+        Thread.current[key] = old
+      end
+
       # Runs the block with $stdout going nowhere (e.g. a render's second
       # pass, whose blocks print what the first pass printed).  Returns the
       # block's value.

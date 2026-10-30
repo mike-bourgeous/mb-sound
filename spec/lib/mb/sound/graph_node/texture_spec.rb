@@ -87,12 +87,15 @@ RSpec.describe('texture nodes', :aggregate_failures) do
         expect(hits.each_cons(2).map { |a, b| b - a }.min).to be >= 12000
         expect(hits.length).to be_within(25).of(120)
       end
-      MB::Sound::Sequence::Transport.new(bpm: 120).then do |tr|
-        MB::Sound::Session.with_context(transport: tr) do
+      MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), realtime: false).then do |s|
+        # (built at the context Session's tempo; with_context(transport:) read nothing before session-core-1)
+        MB::Sound::Session.with_context(session: s) do
           out = collect(MB::Sound.dust(8, min_gap: 1.n8, seed: 5), 48000 * 10) # 0.25 s at 120 BPM
           hits = out.ne(0).where.to_a
           expect(hits.each_cons(2).map { |a, b| b - a }.min).to be >= 12000
         end
+      ensure
+        s&.close
       end
     end
 

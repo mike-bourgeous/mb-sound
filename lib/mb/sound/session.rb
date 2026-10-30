@@ -4,6 +4,7 @@ require_relative 'launch_point'
 require_relative 'gc_quiet'
 
 require_relative 'session/journal'
+require_relative 'session/context'
 require_relative 'session/names'
 require_relative 'session/changes'
 require_relative 'session/fades'
@@ -192,60 +193,24 @@ module MB
         @default = output && new(output: output, fade_in: DEFAULT_FADE_IN, fade_out: DEFAULT_FADE_OUT)
       end
 
-      # The playback context of the current thread, set by #with_context: a
-      # Hash with the +:session+ that commands like PlaybackMethods#bg should
-      # use, and while a scheduled block runs, its +:time+ and a +:batch+
-      # Array that collects the block's actions.  Nil outside any context.
-      def self.context
-        Thread.current[:mb_sound_session_context]
-      end
-
-      # Sets the current thread's playback context (see .context) while the
-      # block runs.
-      def self.with_context(**context)
-        old = Thread.current[:mb_sound_session_context]
-        Thread.current[:mb_sound_session_context] = context
-        yield
-      ensure
-        Thread.current[:mb_sound_session_context] = old
-      end
-
       # The session that commands like PlaybackMethods#bg use in the current
-      # thread: the context's session, or the default session.
+      # thread: the context's session (see .with_context), or the default
+      # session.
       def self.current
-        context&.[](:session) || default
+        context&.session || default
       end
 
       # The session #current would return, without creating the default
       # session: nil if there is none (or it is closed).
       def self.existing
-        context&.[](:session) || (@default unless @default&.closed?)
-      end
-
-      # The performance context of the current thread, set by
-      # #with_perform while a take replays (see Take): a Hash with the
-      # +:session+, the +:forced+ landing times of the line's changes, the
-      # logical +:now+ (the line's recorded issue time), the +:source+ of
-      # changes, and the take +:line+ id.  Nil outside a replay or undo.
-      def self.perform
-        Thread.current[:mb_sound_session_perform]
-      end
-
-      # Merges +settings+ into the current thread's performance context
-      # (see .perform) while the block runs.
-      def self.with_perform(**settings)
-        old = Thread.current[:mb_sound_session_perform]
-        Thread.current[:mb_sound_session_perform] = (old || {}).merge(settings)
-        yield
-      ensure
-        Thread.current[:mb_sound_session_perform] = old
+        context&.session || (@default unless @default&.closed?)
       end
 
       # Adds a change to the undoable command running on this thread, if
       # any (see Undo#command).  Called by Changes#change.
       def self.note_command_change(session, change)
-        group = Thread.current[:mb_sound_command]
-        group[:changes] << change if group && group[:session].equal?(session)
+        group = context&.command
+        group.changes << change if group && group.session.equal?(session)
       end
 
       # The Sequence::Transport whose timeline this session advances.
@@ -1514,7 +1479,7 @@ module MB
         point ||= LaunchPoint::NONE
         point = LaunchPoint.on(point) if point.is_a?(Symbol)
         default = @players.empty? && !queued_start? ? :now : :bar if default == :auto
-        replay = Session.perform&.[](:source) == :replay
+        replay = Session.context&.replaying?
         point.resolve(now: now, transport: @transport, default: default, clip_grid: -> { clip_grid(timeline_nodes) }, replay: replay)
       end
 

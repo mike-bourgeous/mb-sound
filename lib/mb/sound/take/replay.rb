@@ -307,12 +307,8 @@ module MB
         def run_line(session, binding, line, index)
           Session.with_context(session: session, time: line.issued, source: :replay) do
             Session.with_perform(session: session, forced: line.lands.dup, now: line.issued, source: :replay) do
-              old = Thread.current[:mb_sound_replay_choices]
-              Thread.current[:mb_sound_replay_choices] = line.choices
-              begin
+              Session.with_context_fields(choices: line.choices) do
                 binding.eval(line.code, "take line #{index + 1}")
-              ensure
-                Thread.current[:mb_sound_replay_choices] = old
               end
             end
           end

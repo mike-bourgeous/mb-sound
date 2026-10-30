@@ -542,21 +542,20 @@ module MB
           }
 
           started = MB::U.clock_now
-          batch = []
-          # Changes the block makes directly whose time has passed by then
-          # are late (see Changes#check_late)
-          old_deadline = Thread.current[:mb_sound_schedule_deadline]
-          Thread.current[:mb_sound_schedule_deadline] = deadline && [@session, entry.description]
+          batch = Batch.new
           begin
             # (builds allocate in bursts: no major GC stopping the render
             # thread meanwhile; see GCQuiet)
             GCQuiet.during do
-              Session.with_context(session: @session, time: time, batch: batch, source: :schedule) do
-                entry.block.call
+              # Changes the block makes directly whose time has passed by
+              # then are late (see Changes#check_late)
+              Session.with_context_fields(deadline: deadline && [@session, entry.description]) do
+                Session.with_context(session: @session, time: time, batch: batch, source: :schedule) do
+                  entry.block.call
+                end
               end
             end
           ensure
-            Thread.current[:mb_sound_schedule_deadline] = old_deadline
             note_duration(MB::U.clock_now - started)
           end
 

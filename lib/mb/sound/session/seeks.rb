@@ -206,25 +206,14 @@ module MB
         # While a take replays the same holds for the replayed line: its
         # recorded landings and issue time aren't the form's.
         def without_command_or_line(&block)
-          line = Thread.current[:mb_sound_take_line]
-          perform = Thread.current[:mb_sound_session_perform]
-          Thread.current[:mb_sound_take_line] = nil
-          Thread.current[:mb_sound_session_perform] = perform&.except(:forced, :now, :line)
-          without_command(&block)
-        ensure
-          Thread.current[:mb_sound_take_line] = line
-          Thread.current[:mb_sound_session_perform] = perform
+          Session.with_context_fields(take_line: nil, forced: nil, now: nil) { without_command(&block) }
         end
 
         # Runs the block in a throwaway undo group: changes made inside it
         # (and commands nested in it, like a scene launch) are not undo
         # steps of their own or part of the console command around it.
-        def without_command
-          old = Thread.current[:mb_sound_command]
-          Thread.current[:mb_sound_command] = { session: self, changes: [], extras: [] }
-          yield
-        ensure
-          Thread.current[:mb_sound_command] = old
+        def without_command(&block)
+          Session.with_context_fields(command: Undo::CommandGroup.new(self), &block)
         end
 
         # Commits timeline changes due at the current position (at the start

@@ -358,9 +358,8 @@ module MB
         # Seconds of timeline left before the time of the scheduled block
         # running on this thread for this session (nil outside one).
         def scheduled_time_left
-          ctx = Session.context
-          return nil unless ctx && ctx[:time] && ctx[:session].equal?(self)
-          @transport.seconds_of(ctx[:time].to_r - @transport.position).to_f
+          time = Session.context&.time_for(self) or return nil
+          @transport.seconds_of(time.to_r - @transport.position).to_f
         end
 
         def note_warm(w)

@@ -215,12 +215,8 @@ module MB
       end
 
       # Runs the block with .current_lane returning [+index+, +count+].
-      def self.with_lane(index, count)
-        old = Thread.current[:mb_sound_synth_lane]
-        Thread.current[:mb_sound_synth_lane] = [index, count].freeze
-        yield
-      ensure
-        Thread.current[:mb_sound_synth_lane] = old
+      def self.with_lane(index, count, &block)
+        Internal.with_local(:mb_sound_synth_lane, [index, count].freeze, &block)
       end
 
       # See the class description.

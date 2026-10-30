@@ -41,6 +41,15 @@ module MB
         # its PlayerState.
         PlayerSubject = Data.define(:name)
 
+        # The undo group of a running command (see #command, Context#command):
+        # its Session, the changes it made, and Set-level extras
+        # ([participant, before, after]).
+        CommandGroup = Struct.new(:session, :changes, :extras) do
+          def initialize(session)
+            super(session, [], [])
+          end
+        end
+
         # How undo snapshots and restores one subject type: +snapshot+ and
         # +restore+ name Session methods, called as
         # `snapshot(subject)` (returns the state) and
@@ -152,34 +161,28 @@ module MB
         # one undo step.  Nested commands join the outer one.  Returns the
         # block's value and the changes made, as [value, changes].
         def command(label)
-          group = Thread.current[:mb_sound_command]
-          return [yield, nil] if group && group[:session].equal?(self)
+          group = Session.context&.command
+          return [yield, nil] if group && group.session.equal?(self)
 
-          group = { session: self, changes: [], extras: [] }
-          old = Thread.current[:mb_sound_command]
-          Thread.current[:mb_sound_command] = group
-          begin
-            value = yield
-          ensure
-            Thread.current[:mb_sound_command] = old
-          end
+          group = CommandGroup.new(self)
+          value = Session.with_context_fields(command: group) { yield }
 
-          push_step(label, group[:changes], group[:extras]) unless group[:changes].empty? && group[:extras].empty?
+          push_step(label, group.changes, group.extras) unless group.changes.empty? && group.extras.empty?
           @arrangement&.sync_arms # (arm states follow the monitors' players; see Arrangement::Arm)
-          [value, group[:changes]]
+          [value, group.changes]
         end
 
         # Records Set-level state around the current command (see #command)
         # for undo: +participant+ must respond to #restore_undo_state(state).
         def note_undo_extra(participant, before, after)
-          group = Thread.current[:mb_sound_command]
-          return unless group && group[:session].equal?(self)
+          group = Session.context&.command
+          return unless group && group.session.equal?(self)
 
-          existing = group[:extras].find { |p, _, _| p.equal?(participant) }
+          existing = group.extras.find { |p, _, _| p.equal?(participant) }
           if existing
             existing[2] = after
           else
-            group[:extras] << [participant, before, after]
+            group.extras << [participant, before, after]
           end
         end
 

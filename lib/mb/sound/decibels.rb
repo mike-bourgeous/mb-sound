@@ -192,12 +192,8 @@ module MB
 
         # Runs the block without the "above full scale" warnings (graph
         # documents load quietly).
-        def quietly
-          old = Thread.current[:mb_sound_quiet_levels]
-          Thread.current[:mb_sound_quiet_levels] = true
-          yield
-        ensure
-          Thread.current[:mb_sound_quiet_levels] = old
+        def quietly(&block)
+          Internal.with_local(:mb_sound_quiet_levels, true, &block)
         end
 
         # The library's own directory, skipped when looking for call sites.

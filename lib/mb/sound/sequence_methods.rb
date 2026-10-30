@@ -460,7 +460,7 @@ module MB
       # in node graphs: the default transport, or the rendering session's
       # transport inside a PlaybackMethods#render block.
       def transport
-        MB::Sound::Session.context&.[](:session)&.transport || Sequence.transport
+        MB::Sound::Session.context&.session&.transport || Sequence.transport
       end
 
       # Moves the background playback timeline (see PlaybackMethods#bg) to
@@ -554,15 +554,15 @@ module MB
         context = MB::Sound::Session.context
         beats_per_minute = beats_per_minute.bpm if beats_per_minute.is_a?(MB::Sound::Tempo)
         beats_per_minute = transport.scaled_bpm(beats_per_minute) if beats_per_minute
-        if beats_per_minute && context&.[](:batch)
-          session, time = context[:session], context[:time]
-          context[:batch] << -> { session.change_tempo(beats_per_minute, time: time) }
-          context[:pending_bpm] = beats_per_minute
+        if beats_per_minute && context&.batch
+          session, time = context.session, context.time
+          context.batch << -> { session.change_tempo(beats_per_minute, time: time) }
+          context.batch.pending_bpm = beats_per_minute
           return beats_per_minute
         end
 
         transport.bpm = beats_per_minute if beats_per_minute
-        context&.[](:pending_bpm) || transport.bpm
+        context&.batch&.pending_bpm || transport.bpm
       end
       alias_method :tempo, :bpm
 

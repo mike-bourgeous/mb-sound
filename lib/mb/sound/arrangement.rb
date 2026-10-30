@@ -1279,8 +1279,8 @@ module MB
 
       # The last change made for +name+ by the command running now.
       def last_change(name)
-        group = Thread.current[:mb_sound_command]
-        group && group[:changes].reverse.find { |c| c.subject == name }
+        group = Session.context&.command
+        group && group.changes.reverse.find { |c| c.subject == name }
       end
 
       # True if +value+ is a Kit with rows +old+ doesn't have (a patch built

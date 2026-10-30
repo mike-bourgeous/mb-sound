@@ -73,7 +73,7 @@ module MB
         # .replay_song), or nil: ScriptingMethods#main_script? is true for
         # it, and its song_script only registers its block.
         def song_replay_file
-          Thread.current[:mb_sound_song_replay]
+          Session.context&.song_replay
         end
 
         # Runs the song of script +path+ (relative to mb-sound's root, or
@@ -85,14 +85,10 @@ module MB
         # its song.  Returns the block's result.
         def replay_song(path, params = {}, bpm: nil)
           file = script_path(path)
-          entry = @songs[file] || begin
-            old = Thread.current[:mb_sound_song_replay]
-            Thread.current[:mb_sound_song_replay] = file
+          entry = @songs[file] || Session.with_context_fields(song_replay: file) {
             load file
             @songs[file] or raise ArgumentError, "#{path} calls no song_script"
-          ensure
-            Thread.current[:mb_sound_song_replay] = old
-          end
+          }
 
           decls, block = entry
           runner = new(:song, decls, argv: [], script: file)
@@ -174,14 +170,12 @@ module MB
       # else.  nil if the file calls no helper.
       def self.declarations_of(path)
         file = File.expand_path(path)
-        old = Thread.current[:mb_sound_script_declarations]
-        Thread.current[:mb_sound_script_declarations] = file
-        catch(:mb_sound_script_declarations) do
-          load file
-          nil
+        Internal.with_local(:mb_sound_script_declarations, file) do
+          catch(:mb_sound_script_declarations) do
+            load file
+            nil
+          end
         end
-      ensure
-        Thread.current[:mb_sound_script_declarations] = old
       end
 
       # mb-sound's root directory (scripts in take lines are relative to it).

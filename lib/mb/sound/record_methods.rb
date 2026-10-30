@@ -163,8 +163,7 @@ module MB
 
       # The scheduled block's time inside one (see Session::Changes#now).
       def schedule_time(session)
-        context = Session.context
-        context && context[:session].equal?(session) ? context[:time] : nil
+        Session.context&.time_for(session)
       end
 
       def record_audio_file(session, path, point, repo:, overwrite:)
@@ -173,7 +172,7 @@ module MB
         dir ||= Take.current.home || (repo ? File.expand_path('../../../sets', __dir__) : Take.data_dir)
         path ||= File.join(dir, "rec_#{Time.now.strftime('%Y%m%d_%H%M%S')}.flac")
         path = File.expand_path(path)
-        replay = Session.perform&.[](:source) == :replay
+        replay = Session.context&.replaying?
         unless replay
           FileUtils.mkdir_p(File.dirname(path))
           if File.exist?(path) && !overwrite

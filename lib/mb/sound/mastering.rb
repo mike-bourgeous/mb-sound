@@ -410,13 +410,9 @@ module MB
         # With +capture+, every preset records the signal entering its trim
         # (Targeting::Tap), and the presets come back as Built values.
         def building(trim: nil, capture: false)
-          old = Thread.current[:mb_sound_mastering]
           state = { trim: trim, built: [], capture: capture }
-          Thread.current[:mb_sound_mastering] = state
-          value = yield
+          value = Internal.with_local(:mb_sound_mastering, state) { yield }
           [value, capture ? state[:built] : state[:built].map(&:preset)]
-        ensure
-          Thread.current[:mb_sound_mastering] = old
         end
 
         # A preset built while capturing (see .building): the Preset, the

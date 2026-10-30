@@ -89,7 +89,7 @@ module MB
 
         arr = Session.current.arrangement
         pb = arr.playback
-        console = pb && !pb.ended? && Session.context&.[](:time).nil?
+        console = pb && !pb.ended? && Session.context&.time.nil?
         if section
           return MB::Sound.live_error(ArgumentError.new("go #{name.inspect}, section: #{section.inspect}: no flow is playing")) unless pb && !pb.ended?
           choices = pb.sections_for_scene(name)

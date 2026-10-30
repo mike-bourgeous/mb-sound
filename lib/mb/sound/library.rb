@@ -234,7 +234,7 @@ module MB
         # session's; a different one settles as a rack conflict).  Returns
         # the rack to use.
         def place(rack, source: nil)
-          session = Session.context&.[](:session) || Session.current
+          session = Session.context&.session || Session.current
           GraphIO.place_rack(session, rack, source: source)
         end
 

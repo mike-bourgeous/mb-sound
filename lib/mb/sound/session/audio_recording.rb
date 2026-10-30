@@ -110,7 +110,7 @@ module MB
           point = at || LaunchPoint::NONE
           time = start_time && !point.given? ? start_time.to_r : launch_time(point, [], default: nil)
 
-          if Session.perform&.[](:source) == :replay
+          if Session.context&.replaying?
             return change(:record, :audio, time, data: { path: path.to_s, replay: true }) { |_t| }
           end
 

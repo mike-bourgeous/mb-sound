@@ -53,12 +53,8 @@ module MB
         # without deciding (no decision remembered or logged for takes) and
         # choices keep their hysteresis state, so a peek never changes what
         # a later read answers.  Returns the block's value.
-        def self.peek
-          prev = Thread.current[:mb_param_peek]
-          Thread.current[:mb_param_peek] = true
-          yield
-        ensure
-          Thread.current[:mb_param_peek] = prev
+        def self.peek(&block)
+          Internal.with_local(:mb_param_peek, true, &block)
         end
 
         # True inside Param.peek on this thread.
