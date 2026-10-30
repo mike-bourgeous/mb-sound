@@ -251,8 +251,7 @@ module MB
         end
 
         def self.number_ruby(x)
-          return x.to_s unless x.is_a?(Rational)
-          x.denominator == 1 ? x.numerator.to_s : "#{x.numerator}/#{x.denominator}r"
+          RubyValue.number(x)
         end
 
         def self.source_ruby(source)

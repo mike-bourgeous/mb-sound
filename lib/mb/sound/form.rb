@@ -369,29 +369,11 @@ module MB
         Builder.build(sections: sections, &block)
       end
 
-      # Ruby code for a length or option value (see #to_ruby).
+      # Ruby code for a length or option value (see #to_ruby; values
+      # through MB::Sound::RubyValue, Procs as a placeholder lambda).
       def self.ruby_value(value)
-        case value
-        when Sequence::Duration
-          label = value.instance_variable_get(:@label).to_s
-          if (m = label.match(/\A(-?[\d.\/]+) (bar|bars|beat|beats)\z/))
-            n = m[1]
-            n = "(#{n}r)" if n.include?('/')
-            "#{n}.#{m[2]}"
-          else
-            "MB::Sound::Sequence::Duration.new(#{ruby_value(value.to_r)})"
-          end
-        when Rational
-          value.denominator == 1 ? value.numerator.to_s : "#{value.numerator}/#{value.denominator}r"
-        when Hash
-          value.empty? ? '{}' : "{ #{value.map { |k, v| "#{k}: #{ruby_value(v)}" }.join(', ')} }"
-        when Array
-          "[#{value.map { |v| ruby_value(v) }.join(', ')}]"
-        when Proc
-          '->(f) { nil }'
-        else
-          value.inspect
-        end
+        return '->(f) { nil }' if value.is_a?(Proc)
+        RubyValue.text(value) { |v| ruby_value(v) } || value.inspect
       end
 
       # The sections by name (a frozen Hash).

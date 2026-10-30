@@ -202,8 +202,7 @@ module MB
           # that built them.
           def to_ruby(&value_text)
             return super if value_text
-            writer = GraphNode::Recipe::RubyWriter.new(nil)
-            super() { |v| v.is_a?(GraphNode) || v.is_a?(GraphNode::Knob::Reader) ? Param.label(v) : writer.literal(v) }
+            super() { |v| v.is_a?(GraphNode) || v.is_a?(GraphNode::Knob::Reader) ? Param.label(v) : RubyValue.to_ruby(v, gains: true) }
           end
 
           # Params print without a recipe as their class name.

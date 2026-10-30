@@ -191,26 +191,19 @@ module MB
 
           # The arguments that declare this knob at +value+ (its default
           # unless given; a base-unit number), as text (+literal+ prints
-          # values; Param.literal unless given): the name (+name+ unless
-          # nil), the value typed as declared, in a ranged default when the
-          # declaration has a range (`(150.hz..8000.hz).at(2400.hz)`), and
-          # the options that differ from their defaults (+cc+ the knob's
-          # controller, learned or declared; the description when
-          # +description+).  The same spelling for the console, recipes,
-          # and graph documents (format 5).
+          # values; Param.literal unless given): Param#declaration_args with
+          # the name (+name+ unless nil), +cc+ (the knob's controller,
+          # learned or declared), the knob's takeover: and smooth: when they
+          # aren't the defaults, and the description when +description+.
+          # The same spelling for the console, recipes, and graph documents
+          # (format 5).
           def call_args(value: default, cc: self.cc, literal: nil, name: self.name, description: false)
             lit = literal || MB::Sound::Param.method(:literal)
-            v = param.typed(value)
-            v = v.round if param.stepped? && v.is_a?(Float) && v == v.round
-            parts = [name.to_sym.inspect]
-            parts << (param.range && !param.implied ? "(#{lit.(param.range)}).at(#{lit.(v)})" : lit.(v))
-            parts << "curve: #{param.curve.inspect}" unless param.curve == param.default_curve || (param.implied && MB::Sound::Param.name_entry(param.name)&.dig(:curve) == param.curve)
-            parts << "unit: #{lit.(param.unit)}" if param.unit && param.unit != MB::Sound::Param::TYPE_UNITS[param.type]
-            parts << "cc: #{cc}" if cc
-            parts << "takeover: #{takeover.inspect}" unless takeover == :pickup
-            parts << "smooth: #{lit.(smooth)}" unless smooth == Session::Fades::DECLICK_SECONDS
-            parts << 'clamp: false' unless param.clamp
-            parts << "description: #{lit.(param.description)}" if description && param.description
+            options = []
+            options << "takeover: #{takeover.inspect}" unless takeover == :pickup
+            options << "smooth: #{lit.(smooth)}" unless smooth == Session::Fades::DECLICK_SECONDS
+            parts = param.declaration_args(value: param.typed(value), literal: lit, cc: cc, description: description, options: options)
+            parts[0] = name.to_sym.inspect
             parts
           end
 

@@ -81,15 +81,13 @@ module MB
         [Tempo, @exact].hash
       end
 
-      # Ruby code for this tempo: `138.75.bpm`, `(555/4r).bpm`.
+      # Ruby code for this tempo: `138.75.bpm`, `(555/4r).bpm`, `140.bpm`
+      # (MB::Sound::RubyValue; whole Floats print as Integers, an equal
+      # Tempo).
       def to_ruby
         b = @bpm
-        t = case b
-            when Rational then b.denominator == 1 ? b.numerator.to_s : "(#{b.numerator}/#{b.denominator}r)"
-            when Float then b == b.round && b.abs < 1e15 ? b.round.to_s : b.to_s
-            else b.to_s
-            end
-        "#{t}.bpm"
+        b = b.round if b.is_a?(Float) && b == b.round && b.abs < 1e15 # (an equal Tempo: 140.bpm)
+        RubyValue.unit(b, 'bpm')
       end
       alias to_s to_ruby
       alias inspect to_ruby

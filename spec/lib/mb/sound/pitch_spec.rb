@@ -84,7 +84,7 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
       expect(1.constant.delay(MB::Sound::A4.period_samples).to_ruby).to eq('1.constant.delay(A4.period_samples)')
       osc = 110.hz.sine
       expect((osc + 1.constant.delay(osc.period)).to_ruby).to include('osc.period')
-      expect(1.constant.delay((1r / 110).seconds).to_ruby).to eq('1.constant.delay((1r/110).seconds)') # a typed Rational
+      expect(1.constant.delay((1r / 110).seconds).to_ruby).to eq('1.constant.delay((1/110r).seconds)') # a typed Rational
     end
   end
 

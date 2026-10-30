@@ -23,10 +23,7 @@ module MB
         # values (Scales, Notes, numbers); used by the recipe writer.  Plain
         # inspect-based printing without a block.
         def to_ruby(&value_text)
-          unless value_text
-            writer = GraphNode::Recipe::RubyWriter.new(nil)
-            value_text = ->(v) { writer.literal(v) }
-          end
+          value_text ||= ->(v) { RubyValue.to_ruby(v, gains: true) }
           Value.text(self, value_text)
         end
 

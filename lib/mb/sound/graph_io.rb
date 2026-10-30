@@ -57,8 +57,32 @@ module MB
       # (param-1, 2026-10-24) writes `param` and `knob` lines as
       # MB::Sound::Params print them: typed values (2400.hz, -12.db) and
       # ranged defaults (`knob :cut, (150.hz..8000.hz).at(2400.hz)`), plus
-      # `clamp: false`; older documents' `range:` lines still load.
-      FORMAT = 5
+      # `clamp: false`; older documents' `range:` lines still load.  Format
+      # 6 is parity-1's (clip `shift`).  Format 7 (printers-1, 2026-10-30)
+      # prints every value through MB::Sound::RubyValue: Rationals as
+      # `3/4r` and whole ones as `3r` (forms, tempo maps, and genre values
+      # printed whole Rationals as Integers), rack `using` knob values
+      # exactly; older documents load as before (`3r/4` and `3/4r` are the
+      # same Rational, and their Integers stay Integers).
+      #
+      # FORMATS names the change each version made, so loaders gate on a
+      # name (GraphIO.since?) and branches adding versions touch only this
+      # table.
+      FORMATS = {
+        2 => :seed_marks,
+        3 => :linear_gains,
+        4 => :ring_all_typed_inputs,
+        5 => :typed_params,
+        7 => :ruby_values,
+      }.freeze
+      FORMAT = FORMATS.keys.max
+
+      # Whether documents of format +version+ have the change named
+      # +feature+ (a FORMATS value).
+      def self.since?(version, feature)
+        first = FORMATS.key(feature) or raise KeyError, "no format change named #{feature.inspect}"
+        version >= first
+      end
 
       # The file extension of graph documents.
       EXTENSION = '.mbg.rb'

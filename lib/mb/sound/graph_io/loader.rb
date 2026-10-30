@@ -504,9 +504,9 @@ module MB
                 raise error(node, "the document is format #{version}, newer than this mb-sound reads (#{GraphIO::FORMAT}); update mb-sound")
               end
               @document.format = version
-              @seed_marks = version >= 2
-              @old_db = version < 3
-              @old_ring = version < 4
+              @seed_marks = GraphIO.since?(version, :seed_marks)
+              @old_db = !GraphIO.since?(version, :linear_gains)
+              @old_ring = !GraphIO.since?(version, :ring_all_typed_inputs)
               @document.meta = kwargs
             when :inputs
               bad = args.reject { |a| a.is_a?(Symbol) }

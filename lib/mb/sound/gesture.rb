@@ -223,7 +223,7 @@ module MB
         rate = rate.to_r
         wns = frames.map { |f| f * per_sample.to_r }
         if wns.all? { |wn| (wn * 64).denominator == 1 || (wn * 24).denominator == 1 }
-          return wns.map { |wn| wn == 0 ? '0' : writer.literal(Sequence::Duration.new(wn)) }
+          return wns.map { |wn| wn == 0 ? '0' : RubyValue.duration(Sequence::Duration.new(wn)) }
         end
         secs = frames.map { |f| f / rate }
         if secs.all? { |x| (x * 1000).denominator == 1 }
@@ -231,12 +231,9 @@ module MB
         end
         secs.map { |x|
           next '0' if x == 0
-          x.denominator == 1 ? "#{x.to_i}.seconds" : "(#{x.numerator}r/#{x.denominator}).seconds"
+          RubyValue.unit(x.denominator == 1 ? x.to_i : x, 'seconds')
         }
       end
-
-      # (prints note lengths)
-      def self.writer = (@writer ||= GraphNode::Recipe::RubyWriter.new(nil))
 
       # A Gesture from a `turn` Hash ({ time => value }; times as 0, note
       # lengths and Durations, Lengths (480.samples, 250.ms), or plain

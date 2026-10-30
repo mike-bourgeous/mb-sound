@@ -268,12 +268,11 @@ module MB
       # Ruby text for a base value.
       def self.base_ruby(base)
         case base
-        when Rational then base.denominator == 1 ? "#{base.numerator}r" : "#{base.numerator}/#{base.denominator}r"
         when MB::Sound::Length::Seconds
           v = base.value
           v = v.to_i if v.is_a?(Float) && v == v.round && v.abs < 1e12
-          v.is_a?(Rational) ? "(#{v.numerator}/#{v.denominator}r).seconds" : "#{v}.seconds"
-        else base.respond_to?(:to_ruby) ? base.to_ruby : base.inspect
+          RubyValue.unit(v, 'seconds')
+        else RubyValue.text(base) || (base.respond_to?(:to_ruby) ? base.to_ruby : base.inspect)
         end
       end
 

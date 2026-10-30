@@ -96,7 +96,7 @@ RSpec.describe(MB::Sound::Gesture, :aggregate_failures) do
       expect(g.to_ruby(:space, per_sample: per_sample)).to eq('turn :space, 0 => 0.3, 10.ms => 0.5, 250.ms => 0.62')
       g = described_class.new([[0, 0.3], [800, 0.5], [12000, 0.62]])
       line = g.to_ruby(:space, per_sample: per_sample)
-      expect(line).to eq('turn :space, 0 => 0.3, (1r/60).seconds => 0.5, (1r/4).seconds => 0.62')
+      expect(line).to eq('turn :space, 0 => 0.3, (1/60r).seconds => 0.5, (1/4r).seconds => 0.62')
       keys = MB::Sound::Take.console_binding.eval("{ #{line.delete_prefix('turn :space, ')} }")
       expect(described_class.from_hash(keys, per_sample: per_sample, rate: 48000).keys).to eq(g.keys)
       expect(described_class.new([[0, 0.42]]).to_ruby(:space, per_sample: per_sample)).to eq('turn :space, 0.42')
@@ -194,7 +194,7 @@ RSpec.describe(MB::Sound::Gesture, :aggregate_failures) do
       s.preview_turn(:mode, 0.5)
       s.process_buffer
       s.preview_turn(:mode, 0.9)
-      expect(s.gesture_line(:mode)).to eq('turn :mode, 0 => 0.2, (1r/60).seconds => 0.5, (1r/30).seconds => 0.9, curve: :step')
+      expect(s.gesture_line(:mode)).to eq('turn :mode, 0 => 0.2, (1/60r).seconds => 0.5, (1/30r).seconds => 0.9, curve: :step')
     end
   end
 end

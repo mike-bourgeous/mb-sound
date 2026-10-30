@@ -594,14 +594,9 @@ module MB
 
       # Ruby source for a parameter value in a take line.
       def ruby_literal(v)
-        case v
-        when Hash then "{ #{v.map { |k, x| "#{k}: #{ruby_literal(x)}" }.join(', ')} }"
-        when Array then "[#{v.map { |x| ruby_literal(x) }.join(', ')}]"
-        when Rational then v.denominator == 1 ? "#{v.numerator}r" : "#{v.numerator}/#{v.denominator}r"
-        when Float, Integer, Symbol, String, true, false, nil then v.inspect
-        when Range then "(#{ruby_literal(v.begin)}#{v.exclude_end? ? '...' : '..'}#{ruby_literal(v.end)})"
-        else raise ArgumentError, "--take can't write parameter value #{v.inspect} into a take line"
-        end
+        RubyValue.to_ruby(v)
+      rescue RubyValue::Unprintable
+        raise ArgumentError, "--take can't write parameter value #{v.inspect} into a take line"
       end
 
       # Returns the effect's MIDI as a Notes (see Values#midi and #midi_cc),

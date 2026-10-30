@@ -51,7 +51,7 @@ RSpec.describe(MB::Sound::Decibels, :aggregate_failures) do
   it 'prints as Ruby that makes it, and as its gain in strings' do
     expect(d.inspect).to eq('-6.db')
     expect(-6.5.db.inspect).to eq('-6.5.db')
-    expect((13r / 2).db.inspect).to eq('(13r/2).db')
+    expect((13r / 2).db.inspect).to eq('(13/2r).db')
     expect("#{d}").to eq(gain.to_s)
     expect(Marshal.load(Marshal.dump(d))).to eql(d)
   end
@@ -79,7 +79,7 @@ RSpec.describe(MB::Sound::Decibels, :aggregate_failures) do
   it 'prints back as k.db in graph export and loads back in graph documents' do
     g = 220.hz.saw.at(-6.db) * -6.5.db * (13r / 2).db
     code = g.to_ruby
-    expect(code).to eq('220.hz.saw.at(-6.db) * -6.5.db * (13r/2).db')
+    expect(code).to eq('220.hz.saw.at(-6.db) * -6.5.db * (13/2r).db')
 
     h = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g, name: 'db'))
     expect(h.to_ruby).to eq(code)

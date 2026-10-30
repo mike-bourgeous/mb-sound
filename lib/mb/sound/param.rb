@@ -216,10 +216,10 @@ module MB
           end
         end
 
-        # Ruby text for +v+ (unit values print themselves: 2400.hz,
-        # -12.db).
+        # Ruby text for +v+ (MB::Sound::RubyValue with gains: unit values
+        # print themselves: 2400.hz, -12.db), else its inspect.
         def literal(v)
-          (@writer ||= GraphNode::Recipe::RubyWriter.new(nil)).literal(v)
+          RubyValue.text(v, gains: true) || v.inspect
         end
 
         # Checks +range+ (a Range, an Array of choices, or nil) and
@@ -633,6 +633,16 @@ module MB
       # prints typed as declared), values printed by +literal+
       # (Param.literal unless given).
       def to_ruby(head = 'param', value: default, literal: nil)
+        "#{head} #{declaration_args(value: value, literal: literal).join(', ')}"
+      end
+
+      # The arguments of the declaration line (see #to_ruby) as texts: the
+      # name, the value (ranged unless implied), and the options that
+      # differ from their defaults, with +options+ (texts, e.g. a knob's
+      # takeover:) after cc:, +cc+ (this param's unless given), and the
+      # description unless +description+ is false.  Knob::Spec#call_args
+      # prints knobs with it.
+      def declaration_args(value: default, literal: nil, cc: self.cc, description: true, options: [])
         lit = literal || Param.method(:literal)
         v = Param.type_of(value) == :number ? typed(value) : value
         v = v.round if stepped? && v.is_a?(Float) && v == v.round
@@ -643,7 +653,7 @@ module MB
                else
                  lit.(v)
                end
-        "#{head} #{name.inspect}, #{text}#{extras_text(lit)}"
+        [name.inspect, text, *extras(lit, cc: cc, description: description, options: options)]
       end
 
       # The graph-document header line (format 5, the canonical spelling:
@@ -694,14 +704,15 @@ module MB
 
       private
 
-      def extras_text(lit = Param.method(:literal))
+      def extras(lit, cc:, description:, options:)
         parts = []
         parts << "curve: #{curve.inspect}" if curve != default_curve && !(implied && Param.name_entry(name)&.dig(:curve) == curve)
         parts << "unit: #{lit.(unit)}" if unit && unit != TYPE_UNITS[type]
         parts << "cc: #{cc}" if cc
+        parts.concat(options)
         parts << 'clamp: false' unless clamp
-        parts << "description: #{lit.(description)}" if description
-        parts.empty? ? '' : ", #{parts.join(', ')}"
+        parts << "description: #{lit.(self.description)}" if description && self.description
+        parts
       end
 
       # The range's ends as base-unit Floats (for #position and #value).

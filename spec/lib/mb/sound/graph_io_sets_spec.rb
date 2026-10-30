@@ -91,7 +91,7 @@ RSpec.describe('set documents', :aggregate_failures) do
     within(s) { MB::Sound.seed(3); MB::Sound::GraphIOSetSpec.build }
     text = io.dump(s.arrangement, name: 'demo')
     expect(text).to start_with('# mb-sound set document')
-    expect(text).to include('graph 5, name: "demo", kind: :set')
+    expect(text).to include(%(graph #{io::FORMAT}, name: "demo", kind: :set))
     expect(text).to include(<<~RUBY)
       knob :cut, (100..8000).at(900), curve: :exp, unit: "Hz"
 
@@ -99,7 +99,7 @@ RSpec.describe('set documents', :aggregate_failures) do
       master_gain 1.0
       bass_a = acid(A1, Rest, !A1, ~C2, Rest, G1, E1, Rest).loop.named(:bass_a)
       bass_b = bass_a.transpose(5).named(:bass_b)
-      lead_1 = events([0r, 1r/8, 69, 0.8], [3r/8, 1r/8, 72, 0.6], length: 1r/2, loop: true).named(:lead_1)
+      lead_1 = events([0r, 1/8r, 69, 0.8], [3/8r, 1/8r, 72, 0.6], length: 1/2r, loop: true).named(:lead_1)
       beat = grid(16, kick: "x...x...x...x...", hat: "..x...x...x...x.").loop.named(:beat)
       master { |mix|
         mix.softclip(0.5, 0.97)
@@ -186,6 +186,35 @@ RSpec.describe('set documents', :aggregate_failures) do
     y = play(c, doc2.form, 300)
     expect(x[0].abs.max).to be > 0.05
     expect(RecipeHelpers.max_diff(x, y)).to eq(0)
+  end
+
+  it 'prints Rationals as 3/4r and whole ones as 3r, which load again as Rationals (printers-1)' do
+    a = session
+    within(a) {
+      MB::Sound.instance_exec do
+        bpm 132
+        track :lead, 220.hz.triangle.at(-24.db)
+        scene :a, lead: :on, q: 1/2r
+        scene :b, lead: :on, fade: 2r
+        flow(play: false) do
+          a 3/2r
+          b 2r
+          a 4
+        end
+      end
+    }
+    text = io.dump(a.arrangement, name: 'rationals')
+    expect(text).to include('a 3/2r').and include('b 2r').and include('a 4')
+    expect(text).to include('q: 1/2r').and include('fade: 2r')
+    expect(text).not_to match(%r{\d+r/\d})
+
+    b = session
+    doc = io.load(text, session: b)
+    again = io.dump(b.arrangement, name: 'rationals')
+    expect(stable(again)).to eq(stable(text))
+    expect(b.arrangement.scenes[:a].q).to eql(1/2r)
+    expect(b.arrangement.scenes[:b].fade).to eql(2r)
+    expect(doc.form.to_ruby).to include('b 2r')
   end
 
   it 'saves buses, sends (gains and knob names), and to: routes, loading them to play bit for bit like the original' do
@@ -396,7 +425,7 @@ RSpec.describe('set documents', :aggregate_failures) do
 
     # Saved again as format 4: the sum says how it ends
     text = io.dump(s.arrangement, name: 'old')
-    expect(text).to include('graph 5, name: "old", kind: :set')
+    expect(text).to include(%(graph #{io::FORMAT}, name: "old", kind: :set))
     expect(text).to include('(110.hz.sine.at(0.1) + hit).ring(:first)')
     expect(text).to include('track :pad, (55.hz.triangle.at(0.1) + 82.5.hz.triangle.at(0.1)).ring(:first)')
 

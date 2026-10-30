@@ -27,7 +27,7 @@ module MB
         Node = Struct.new(:kind, :name, :children, :opts) do
           def to_ruby(indent = 1)
             pad = '  ' * indent
-            opts_s = opts.map { |k, v| "#{k}: #{v.inspect}" }
+            opts_s = opts.map { |k, v| "#{k}: #{RubyValue.text(v) || v.inspect}" }
             if kind == :pane
               "#{pad}pane #{[name.inspect, *opts_s].join(', ')}"
             else
@@ -155,7 +155,7 @@ module MB
 
         # The layout as Ruby (a `layout` call that recreates it).
         def to_ruby(**options)
-          opts = options.map { |k, v| ", #{k}: #{v.inspect}" }.join
+          opts = options.map { |k, v| ", #{k}: #{RubyValue.text(v) || v.inspect}" }.join
           "layout #{@name.inspect}#{opts} do\n#{@root.children.map(&:to_ruby).join("\n")}\nend\n"
         end
 

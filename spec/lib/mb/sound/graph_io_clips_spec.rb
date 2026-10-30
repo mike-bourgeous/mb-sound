@@ -17,7 +17,7 @@ module MB::Sound
       'seq with lengths' => [-> { seq(C4, E4, G4.n4).n8.loop.tone.saw }, 'seq(C4, E4, G4.n4).n8.loop'],
       'note marks' => [
         -> { seq(!A1, ~C2, Rest, C3.n4, Tie, G2.chance(0.5), ~!E2.every(2, from: 2), A1.fill(:big), (!A1).n8, A1.slide(1.1).acc).n16.loop.tone },
-        'seq(!A1, ~C2, Rest, C3.n4, Tie, G2.chance(0.5), ~!E2.every(2, from: 2), A1.fill(:big), (!A1).n8, (!A1).slide(11r/10)).n16.loop',
+        'seq(!A1, ~C2, Rest, C3.n4, Tie, G2.chance(0.5), ~!E2.every(2, from: 2), A1.fill(:big), (!A1).n8, (!A1).slide(11/10r)).n16.loop',
       ],
       'acid' => [-> { acid(A1, !C2, ~A2, R, A1.up).loop.tone.saw }, 'acid(A1, !C2, ~A2, Rest, A1.up).loop'],
       'operators' => [-> { c = seq(C4, E4, G4).n16; ((c | c.transpose(7)) & seq(C3).n2).reverse.loop.tone }, '((clip | clip.transpose(7)) & seq(C3).n2).reverse.loop'],
@@ -37,9 +37,9 @@ module MB::Sound
       ],
       'Clip.new events' => [
         -> { Sequence::Clip.new([MB::Sound::Sequence::Event.new(start: 0r, length: 1/8r, value: 60, velocity: 0.787), MB::Sound::Sequence::Event.new(start: 1/4r, length: 1/8r, value: 64, velocity: 1.0, accented: true, probability: 0.5)], length: 1/2r).loop.tone },
-        "events(\n  [0r, 1r/8, 60, 0.787],\n  [1r/4, 1r/8, 64, 1.0, { probability: 0.5, accented: true }],\n  length: 1r/2\n).loop",
+        "events(\n  [0r, 1/8r, 60, 0.787],\n  [1/4r, 1/8r, 64, 1.0, { probability: 0.5, accented: true }],\n  length: 1/2r\n).loop",
       ],
-      'baked transforms (saved as events)' => [-> { seq(C4, E4).n8.loop.bake(echo(1.n16, 2, velocity: 0.5).strum(20.ms)).tone }, "events(\n  [0r, 1r/16, 60, 0.75],"],
+      'baked transforms (saved as events)' => [-> { seq(C4, E4).n8.loop.bake(echo(1.n16, 2, velocity: 0.5).strum(20.ms)).tone }, "events(\n  [0r, 1/16r, 60, 0.75],"],
       'MIDI transform chains' => [-> { seq(C4, E4).n8.loop.notes.echo(1.n16, 2).tone }, 'seq(C4, E4).n8.loop.notes.echo(1.n16, 2)'],
       'clip synth' => [-> { seq(C4, E4, G4).n8.loop.synth(voices: 2) { |v| v.tone.saw * v.env(0, 0.1, 0.5, 0.1) } }, 'seq(C4, E4, G4).n8.loop.synth(voices: 2)'],
     }.freeze
@@ -84,9 +84,9 @@ RSpec.describe('graph documents with clips', :aggregate_failures) do
     doc = io.dump(graph)
     expect(doc).to include(<<~RUBY.chomp)
       events(
-        [0r, 1r/8, 60, 0.7874015748031497],
-        [1r/4, 1r/8, 67, 0.5],
-        [1r/2, 31r/64, 64, 0.5],
+        [0r, 1/8r, 60, 0.7874015748031497],
+        [1/4r, 1/8r, 67, 0.5],
+        [1/2r, 31/64r, 64, 0.5],
         length: 1r, loop: true, performed: true
       ).named(:lead_1).hz.saw
     RUBY
@@ -136,7 +136,7 @@ RSpec.describe('graph documents with clips', :aggregate_failures) do
 
     it 'marks drawn seeds and leaves seeds the code gave as they were written' do
       expect(doc).to start_with("# mb-sound graph document").and include("graph #{io::FORMAT},")
-      expect(io::FORMAT).to eq(5)
+      expect(io).to be_since(io::FORMAT, :seed_marks)
       expect(doc).to include('melody(scale(:minor, A4), 8, seed: 3).named(:pinned)')
       expect(doc).to match(/melody\(scale\(:minor, A4\), 8, seed: drawn_seed\(\d+\)\)\.named\(:drawn\)/)
       expect(doc).to match(/noise\(seed: drawn_seed\(\d+\)\)/)
