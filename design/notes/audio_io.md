@@ -1,6 +1,12 @@
 # Audio I/O
 
-Detailed notes moved from CLAUDE.md (2026-10-10); CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+<!-- summary -->
+Device I/O goes through bundled miniaudio (`fast_audio`) plus a small JACK backend (one client per process, ports added any time); `OUTPUT_TYPE`/`INPUT_TYPE` pick `device`, `ffmpeg`, or `null`.
+`DeviceOutput` writes a lock-free ring drained on the device thread (Ruby never on the audio thread), with latency profiles (`AUDIO_PROFILE`, `-L`, `latency :low`), resampling to the card's rate, and underrun concealment (`:repeat` by default).
+Rules: never `jack_port_unregister` on an active JACK client; things closed at exit register with `ExitClose`, never their own `at_exit` block; bin/ scripts set `RUBY_THREAD_TIMESLICE=10` in their shebang.
+<!-- /summary -->
+
+Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 
 Device I/O goes through miniaudio (the old JackFFI, Jack/Alsa outputs and inputs, and the mb-sound-jackffi gem are gone; ffmpeg stays for files and ffmpeg outputs).  `OUTPUT_TYPE`/`INPUT_TYPE` are `device` (default), `ffmpeg` (output only), or `null`; unknown types raise.  `MB::Sound::DeviceOutput` (`lib/mb/sound/device_output.rb`) writes into a lock-free ring that a C callback on miniaudio's device thread drains (`FastAudio::Playback`); Ruby never runs on the audio thread.  `#write` keeps at most `AUDIO_LATENCY` seconds queued: a write that doesn't fit queues what fits and waits without the GVL until the rest fits, so the sound card's clock paces the Session one buffer at a time, with evenly spaced writes (and live MIDI reads) and the queue within about a period of full (2026-10-04, JACK dummy, period 128: `:default` write spacing 10.67 ms, sd 0.3 ms).  `MB::Sound::DeviceInput` (`lib/mb/sound/device_input.rb`, `INPUT_DEVICE`) records through `FastAudio::Capture`: `#read` waits without the GVL, skips the oldest audio beyond the queue limit so live input stays near real time, and resamples from the card's rate; `test_pattern: true` records a frame counter on the null device for specs.

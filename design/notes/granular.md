@@ -1,5 +1,9 @@
 # Granular synthesis and spectral time-stretching
 
+<!-- summary -->
+`sample.grains(density:, size:, position:, scan:, pitch:, ...)` (aliases `granular`, `cloud`; `GraphNode::Grains`, a stereo MultiOutput and a plan boundary) plays a cloud of windowed reads of a Sample's band-limited levels, every option a number, Length, knob, or node read per grain onset; `v.grains(sample, ...)` key-tracks in synth voices.  Kernel `FastSampler.grains` (exact mirror `Granular::KernelRuby`): onsets on exact samples, six splitmix64 draws per onset, a fixed number of slots.  `Sample#stretch(r, mode:)` offers `:cyclic` (S950), `:spectral` (phase vocoder with identity phase locking and kept transients), `:paul` (Paulstretch), and `:slice` (loops.md), with `randomize:` between vocoder and Paulstretch phases.  Help `help :granular`.
+<!-- /summary -->
+
 Branch `granular-1` (2026-10-14).  The maintainer picked "Granular + spectral stretch" from the Did You Know notes "Granular synthesis" and "The four families of time-stretching" (both "note for later" until then).  Builds on the sampler (`sampler.md`: `Sample`, its band-limited playback levels, `fast_sampler`) and the cyclic `Sample#stretch` (`fit: :auto`).
 
 ## API
@@ -22,6 +26,7 @@ pad.stretch(2)                         # the cyclic S950 stretch (mode: :cyclic,
 
 ## Granular node (`GraphNode::Grains`)
 
+- Signature: `sample.grains(density:, size:, position:, scan:, spread:, pitch:, pitch_spread:, pan_spread:, reverse:, window:, jitter:, seed:, read:, max_grains:)` (aliases `granular`, `cloud`); in voices `v.grains(sample, ...)`.
 - `Sample#grains(**options)` returns a stereo `Channels` bundle of a `GraphNode::Grains` (MultiOutput, two outputs; alternates two sets of output buffers like ChannelMixer, so a Tee may share the last frame's).  `Notes#grains(sample, **options)` (`v.grains`) adds the voice's `freq:` (key tracking: each grain's speed times freq / the sample's root frequency) and `trigger:` (a note-on restarts the scan playhead and starts a grain on its exact sample).
 - Every parameter is a number, Length/Interval where it fits, Knob, or node, read per sample; a grain reads the values on its onset sample and keeps them (the classic per-grain parameters):
   - `density:` grains per second (20; a Pitch or a node of Hz; a Duration (`1.n16`) is tempo-synced through its TempoNode frequency).
@@ -45,7 +50,7 @@ pad.stretch(2)                         # the cyclic S950 stretch (mode: :cyclic,
 
 ## Spectral and Paulstretch modes (`Sample::Spectral`)
 
-Offline edits like the cyclic stretch (baked into a new Sample, cached per audio and arguments; `Sample::EDITS`).  `Sample#stretch(ratio, mode: :cyclic | :spectral | :paul, ...)`; `:pv`/`:vocoder` alias `:spectral`, `:paulstretch` aliases `:paul`.
+Offline edits like the cyclic stretch (baked into a new Sample, cached per audio and arguments; `Sample::EDITS`).  `Sample#stretch(ratio, mode: :cyclic | :spectral | :paul, ...)` (short: `Sample#stretch(r, mode:)`; `:cyclic` is the default, the S950 stretch; `:slice` stretches by slices, `loops.md`); `:pv`/`:vocoder` alias `:spectral`, `:paulstretch` aliases `:paul`.  `:spectral` is `Sample::Spectral.vocoder` (about 25-50x realtime per output second, below).  Results over 30 s read with `mips: :octave` (round 2).  Help `help :granular`; demo `bin/songs/granular_song.rb`.
 
 - `:spectral`: a phase vocoder (Hann windows of `window:` 4096 samples, `overlap:` 4, i.e. a fixed synthesis hop N/4 and analysis hops N/4 / ratio; FFTs through Numo::Pocketfft on copies) with Laroche & Dolson (1999) identity phase locking: peaks are bins above their two neighbours on each side; each peak's phase advances by its instantaneous frequency over the synthesis hop; every other bin keeps its analysis phase offset from the peak whose region it is in (regions split midway between peaks).  Channels are locked together: the phase rotation is computed on the channels' mix and applied to every channel, so the stereo image doesn't wander.  Transients (`transients: true`): each onset from `Sample::Onsets` lands at ratio × its input time, with an unstretched span (a window and a hop before it, half a window after: every frame holding the attack) and the input between spans stretched to fill the time between them; frames holding an onset reset the phases of bins rising 6 dB (`RESET_RISE`) to their analysis phases (granular-2; see below).  Output length round(ratio × length), aligned with the input's start (frames padded by half a window).
 - `:paul`: Paulstretch (Nasca Paul): windows of `window:` 0.25 s, synthesis hop N / `overlap:` (4), analysis hop that / ratio, magnitudes kept and every phase replaced by a random one.  Random phases come from a counter-based splitmix64 hash of (seed, frame, bin) computed with Numo (vectorized, the same at any chunking), `seed:` 0 by default (stretching the same sample the same way gives the same audio, and the edit cache stays meaningful); all channels share the phases (the image keeps its level panning).  For extreme ratios (8x-1000x+).

@@ -1,6 +1,10 @@
 # Tweening curves
 
-Detailed notes moved from CLAUDE.md (2026-10-10); CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+<!-- summary -->
+`MB::Sound::Curve` (`Curve[:elastic, overshoot:]`, many named easings with `_in`/`_out` variants, `Curve.db`/`Curve.s`, `bezier`, Procs; `#lookup` tables in C) maps progress 0..1 and is shared by glides (`v.hz.glide(t, shape:)`), tweens (`tween([300.hz, 3000.hz], 1.bar, curve:)`: the length is per step between keyframes, not the total), `smooth(t, curve:)`, and the antialiased shaper `sig.ease(curve, ...)` (`aease` exact).  `bounce_hits(2.bars, count:, elasticity:, decay:)` makes bouncing-ball rhythms.  Demos `bin/songs/tween_song.rb`, `bin/songs/bouncing_ball.rb`.
+<!-- /summary -->
+
+Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 
 `MB::Sound::Curve` (`lib/mb/sound/curve.rb`, `curve/library.rb`) maps progress 0..1 to 0..1 (overshoot allowed), shared by glides, tweens, smoothing, shapers, and TimelineInterpolator blends: `Curve[:elastic, overshoot: 0.4, cycles: 4]`, names `linear smoothstep(:smooth,:s) smootherstep sine(_in/_out) quad..quint exp back anticipate elastic squiggle bounce steps ease(_in/_out/_in_out)`, any name with `_in/_out/_in_out/_out_in`, `Curve.db(d)`/`Curve.s(d)` (Envelope's signed-dB curve and :s shape, specs check they match), `Curve.power`, `Curve.bezier`, Procs; `reverse`, `in`/`out`/`in_out`, `>>`, `blend`, `steps`.  `#call` and `#map` (Numo) give identical values; `#lookup` evaluates a 2048-cell Hermite value table in C (`FastClip.curve_lookup`, ~4 us per 512 positions for any curve, within 1e-7 of `#map` except at bounce contacts (1e-4) and vertical end slopes), used by glides.  `bin/plot_curves.rb` plots or tabulates them.

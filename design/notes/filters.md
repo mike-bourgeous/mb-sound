@@ -1,6 +1,10 @@
 # Filter System
 
-Detailed notes moved from CLAUDE.md (2026-10-10); CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+<!-- summary -->
+`lib/mb/sound/filter/` has 16+ filter types (`#process`/`#reset`; `Filter::Cookbook` designs).  Graph cookbook filters (`node.filter(:lowpass, cutoff:, quality:)`, `peq`) build `Filter::SVF`, whose parameters may move every sample (`structure: :biquad` for the old biquad); `sig.lp4(cutoff, resonance:)` is a CEM3379-style 4-pole and `sig.diode(...)` a TB-303-style ladder with the same knobs (`v.reso(...)` in voices); `sig.formant(:a, :o, morph:, voice:, shift:, width:)` five vowel bandpasses.  Convention: where mb-sound departs from its hardware model the playable version is `:musical` (default) and the faithful one `:hardware`.  Filter states flush denormals on an 800-sample grid of their own time, so tails match at any buffer size.
+<!-- /summary -->
+
+Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 
 `lib/mb/sound/filter/` contains 16+ filter types (Biquad, FIR, Butterworth, Hilbert, Delay, etc.). Filters implement `#process` / `#reset`. `Filter::Cookbook` provides standard designs (lowpass, highpass, bandpass, etc.).

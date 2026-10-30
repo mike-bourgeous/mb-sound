@@ -1,6 +1,10 @@
 # Loop files, slice stretch, tempo-following loops
 
-CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+<!-- summary -->
+`Sample['loop.wav']` reads loop metadata without ffmpeg's help (`Sample::Riff`: ACID tempo/beats/meter/root, `smpl` loops, cue labels as `sample.markers`), then FLAC tags, then tempo and key words in file and folder names (`Sample::LoopInfo`, reasons in `meta[:why]`), or detects the tempo (`detect: true`).  `stretch(r, mode: :slice)` (`Sample::SliceStretch`) moves slices to scaled times with exact attacks; `sample.follow` (`GraphNode::LoopPlayer`, a TimelineNode and plan boundary) plays a loop in time with the session tempo (slice stretch for percussive loops, spectral for tonal ones).  Console `loops(dir, bpm:, key:, beats:)` lists a folder from headers and names only.  Help `help :loops`.
+<!-- /summary -->
+
+The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 Branch `loops-1` (2026-10-15).  The maintainer: "If we add a slice-based stretch, could we start loading ACID metadata?  I have a large loop library."  Builds on the sampler (`sampler.md`: `Sample`, onsets, the cyclic stretch) and the spectral stretches (`granular.md`).
 
@@ -21,6 +25,8 @@ brk.node(follow: true)                         # the same as follow
 loops '~/Loops/Funk'                           # a listing (no audio decoded)
 loops('~/Loops', bpm: 90..100, key: [:Am, :C], beats: 8)[0].sample.follow
 ```
+
+Signatures: `Sample['Funk/break_98bpm.wav']` (`sample.markers`, `bpm`, `beats`, `bars`, `meter`, `key`, `meta_source`); `Sample[path, detect: true]` / `#detect_tempo` (Structure on the loop tiled to 8 s, cached); `stretch(r, mode: :slice, fill: :gap | :stretch, slices:)` (ratio 1 is exact; 4 ms fades and pre-rolls at every discontinuity); `sample.follow(:stretch | :resample, stretch: :auto, align: :timeline | :launch)` (restretched per 1/4 BPM, cached); `loops(dir, bpm:, key:, beats:)` (never writes).  Every stretch divides `bpm` by its ratio.  Help `help :loops`.
 
 ## RIFF chunks (`Sample::Riff`)
 

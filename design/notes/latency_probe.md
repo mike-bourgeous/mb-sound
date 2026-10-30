@@ -1,5 +1,10 @@
 # Latency probe (`fast_latency`, `MB::Sound::LatencyProbe`, `bin/latency_probe.rb`)
 
+<!-- summary -->
+`bin/latency_probe.rb -t 1h` / `MB::Sound::LatencyProbe.start(dir:)` tells system stalls from mb-sound's own: `FastLatency::Probe` is a pthread outside the GVL on an absolute-deadline 1 ms loop timing a memory walk and a CPU loop, with per-second aggregates, histograms, and stall episodes in C, drained through a lock-free ring by a Ruby consumer; a Ruby ticker sees GVL/GC/YJIT stalls too, and `#watch(session)` logs slow buffers and underruns.
+Reports give percentiles, top stalls with wall times, periodicity (":59.9 of each minute"), Ruby stalls by cause, and plots; `MB_SOUND_LATENCY_PROBE=1` probes any live script.
+<!-- /summary -->
+
 Branch `latency-probe-1`, 2026-10-25.  The maintainer: "Before all else, build and merge a latency detector that uses a GVL-free C thread on a short wakeup loop to detect system stalls and passes data through a queue to another C thread that pulls the data into Ruby for storage and analysis. Incorporate whatever ideas the jit agent used for detecting system latency, and if necessary ask me questions and add your own understanding of the space to extend the feature set in ways we are likely to need. I want to be able to leave this running for, say, an hour or more and get a histogram and time plot of latencies, etc."  Then: "also track free memory, load average and/or CPU percentage, as metrics on the plots where useful."
 
 Why: scene-jit-1 (2026-10-24, `design/notes/arrangement.md`, Transition compiling) found the Mac's Docker VM slows memory-touching work ~10x at the top of every wall-clock minute (:59.8-:00.8; its probe3.rb: 33 ms of work took 357 ms) while a CPU-only probe missed it, and container underruns couldn't be told apart from mb-sound's own stalls (YJIT compiles, GC, GVL holds).  A thread outside the GVL sees only the system; a Ruby thread in the same process sees the system plus the GVL, GC, and YJIT; the difference attributes each stall.
@@ -17,7 +22,7 @@ Why: scene-jit-1 (2026-10-24, `design/notes/arrangement.md`, Transition compilin
 
 ## Priorities
 
-`boost: true` (default): macOS `THREAD_TIME_CONSTRAINT_POLICY` (period = the probe's period, computation half of it up to 50 ms, constraint = period, preemptible; no privileges needed), else user-interactive QoS; Linux `SCHED_FIFO` priority `rt_priority` (10), else `setpriority` on the thread's tid to `nice` (-10), else normal.  What was obtained (with the errors) is `stats[:priority]`, printed at start and in the report.  In the Mac container (root without CAP_SYS_NICE): "normal (SCHED_FIFO 10: Operation not permitted; nice -10: Permission denied)".  Optional `pin_cpu:` (Linux `pthread_setaffinity_np`) and `mlock:` (the work buffer and the ring).
+`boost: true` (default): macOS `THREAD_TIME_CONSTRAINT_POLICY` (period = the probe's period, computation half of it up to 50 ms, constraint = period, preemptible; no privileges needed), else user-interactive QoS; Linux `SCHED_FIFO` priority `rt_priority` (10), else `setpriority` on the thread's tid to `nice` (-10), else normal.  What was obtained (with the errors) is `stats[:priority]`, printed at start and in the report.  Until 2026-10-26 the Mac container ran as root without CAP_SYS_NICE ("normal (SCHED_FIFO 10: Operation not permitted; nice -10: Permission denied)"); both containers have CAP_SYS_NICE since then (checked 2026-10-30 in the Mac container: `CapEff` 0xa88425fb includes it, and `chrt -f 10` and `nice -n -5` succeed), so the probe gets `SCHED_FIFO` there now.  Optional `pin_cpu:` (Linux `pthread_setaffinity_np`) and `mlock:` (the work buffer and the ring).
 
 ## Per-second rows, files, memory bounds
 
@@ -35,7 +40,7 @@ Plots (`Report#plots`, MB::Sound::Plot; `save` writes .svg, .png, .txt): `time` 
 
 ## Script and hooks
 
-`bin/latency_probe.rb -t 1h [-o DIR] [--period 1ms] [--threshold 2ms] [--memory 64MB] [--touch 128KB] [--no-memory] [--no-cpu] [--ruby-period 2ms] [--no-ruby] [--no-boost] [--rt-priority N] [--pin CPU] [--mlock] [--with-session] [--flush 10] [--formats svg,png,txt]`; `-t 0` (default) runs until Ctrl-C; `--report DIR` writes the report and plots again from a saved or crashed run (`LatencyProbe.load(dir)`, `LatencyProbe::Saved`: the files read back with the readers Report uses; histograms.json keeps exact maxima); a status line every second on a terminal (`\r`), every 10 s into a pipe; `--compare DIR1,DIR2` prints both runs' tables from their histograms.json/meta.json.  `MB_SOUND_LATENCY_PROBE=DIR` (or `1` for `tmp/latency_probe/<script>-<time>/`) makes `ScriptRunner#live` probe any live script with its Session watched (SVG and text plots at the end).
+`bin/latency_probe.rb -t 1h [-o DIR] [--period 1ms] [--threshold 2ms] [--memory 64MB] [--touch 128KB] [--no-memory] [--no-cpu] [--ruby-period 2ms] [--no-ruby] [--no-boost] [--rt-priority N] [--pin CPU] [--mlock] [--with-session] [--flush 10] [--formats svg,png,txt]`; `-t 0` (default) runs until Ctrl-C; `--report DIR` writes the report and plots again from a saved or crashed run (`LatencyProbe.load(dir)`, `LatencyProbe::Saved`: the files read back with the readers Report uses; histograms.json keeps exact maxima); a status line every second on a terminal (`\r`), every 10 s into a pipe; `--compare DIR1,DIR2` prints both runs' tables from their histograms.json/meta.json.  `MB::Sound::LatencyProbe.start(dir:)` (any of the probe's options) starts the same probe from Ruby.  `MB_SOUND_LATENCY_PROBE=DIR` (`MB_SOUND_LATENCY_PROBE=1` for `tmp/latency_probe/<script>-<time>/`) makes `ScriptRunner#live` probe any live script with its Session watched (SVG and text plots at the end).
 
 Cost (Mac container): ~6% of one core at the defaults (thread CPU per second ~60 ms: ~16 µs memory walk, ~14 µs CPU loop, clock reads); `--no-memory --no-cpu` is wake-only.
 
@@ -43,7 +48,7 @@ Cost (Mac container): ~6% of one core at the defaults (thread CPU per second ~60
 
 16-minute soak, defaults (`bin/latency_probe.rb -t 16m`, YJIT; plots in `/tmp/claude-0/latency-probe-1/soak1/`, re-reported with the tiered periodicity in `soak1-rereport/`), another session's suite loading the VM from minute 10.5 to 15 (CPU busy ~55%, load 8):
 
-- Priority: none obtainable in the container (no CAP_SYS_NICE).  Baselines: memory walk 24 µs, CPU loop 24 µs.  954k ticks, 6083 missed, ring overflow 0, 322 episodes.
+- Priority: none obtainable in the container then (no CAP_SYS_NICE until 2026-10-26).  Baselines: memory walk 24 µs, CPU loop 24 µs.  954k ticks, 6083 missed, ring overflow 0, 322 episodes.
 - Wake lateness p50 0.19 ms, p99 0.61, p99.9 1.6, p99.99 10.7, max 14.4 ms (the VM's timer wakes run ~0.2-0.6 ms late at all times).  Ruby ticker p99 0.67 ms, max 23.6 ms.
 - **The minute stall**: "stalls cluster at :00.2 of each minute (72% of stall episodes; in 13 of 16 minutes), among the 18 episodes of at least 10 ms".  Each is ~330 ms long (from :00.2 to :00.55; 20-35 ticks over the threshold), and within it single ticks of the 128 KiB memory walk take ~10.5 ms (460x its baseline) with the thread's CPU time equal to the wall time, and often the CPU-only loop takes ~10.6 ms too: the vCPU itself runs slow (it isn't descheduled; steal stays 0), memory work most of all, then the next deadline is ~12-14 ms late.  scene-jit-1 saw 5-10x slower CPU from :59.8 to :00.8 with a 33 ms memory workload.
 - Other big episodes at random seconds (:41.3, :06.5, :15, :48) look the same (~10.5 ms walks).

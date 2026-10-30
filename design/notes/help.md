@@ -1,6 +1,18 @@
 # Console help
 
-Console help for `bin/sound.rb` (branch help-1, 2026-10-13), built on the research spike `research-help` (commit 45dedbc8, `research/help/README.md`: inventory, four designs, captures).  CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+<!-- summary -->
+Console help (`lib/mb/sound/help.rb` + `help/`, loaded by bin/sound.rb or on first use): `help` (the one-screen sheet), `help :knobs` (topics), `help :turn` (method pages from doc comments), `help /reson/` (search), `help node`, `now`, `demo`, and `lesson :set` (runnable lessons); every page is built with `Help::Doc` and shown through `Help.show`.  `help.level` sets the listening level as the live-only monitor trim.  The guard spec `spec/lib/mb/sound/help_spec.rb` requires every public console command to be in a topic (`help/content/topics.rb`), on the sheet, or exempt with a reason, and every example to play near the level tone.
+<!-- /summary -->
+
+## Current state (the overview CLAUDE.md carried until 2026-10-30)
+
+- Commands: `help` (the one-screen sheet), `help :perform` (a section of the sheet in detail), `help :knobs` (a topic; also `help.knobs`, `help.topics`), `help :turn` (a method page from doc comments and `Method#parameters`), `help /reson/` (search: topics first, then methods), `help node` (a graph's page: its `to_ruby`, node types, `Plan.explain`), `help.tip`, `help(:knobs).try(n)`, `now` (one-shot state plus the commands that apply), `demo` (the Night Bus set document from mb-sound's presets/, loaded paused at bar 1; `lib/mb/sound/demo_methods.rb`), `lesson :set` (`:knobs`, `:flow`, `:record`, `:design`; checks run after each console line, `from: 4` replays earlier steps).  `help` and `lesson` are also Pry commands taking plain words (`help mix an effect in`, ux-1); Pry's own help is `pry-help`.
+- Hand-written content is Ruby in `help/content/` (`help/content/topics.rb`, sheet lines, sections, lessons); the welcome screen is a few lines plus one random tip.  A new console command needs a topic entry in `help/content/topics.rb` or an exemption (`Help::Coverage::EXEMPT_MODULES` for whole modules, `EXEMPT` for single commands, each with a reason).
+- The listening level is saved in `Help.data_dir` (`$MB_SOUND_HELP_DIR`, else the user data dir).
+- Output: errors print as `Class: message (did you mean x?)` (`ErrorFormat`), nodes inspect as one line (`#<Tone C4.saw>`; `inspect_full` for the dump; graph_nodes.md), help pages go through `Help.show`.
+- The full vimtutor-style tutorial is designed in `design/notes/help_tutorial.md`.
+
+Console help for `bin/sound.rb` (branch help-1, 2026-10-13), built on the research spike `research-help` (commit 45dedbc8, `research/help/README.md`: inventory, four designs, captures).  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 ## The maintainer's decisions (2026-10-13)
 

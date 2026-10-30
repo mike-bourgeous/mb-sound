@@ -1,6 +1,10 @@
 # Envelopes
 
-Detailed notes moved from CLAUDE.md (2026-10-10); CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+<!-- summary -->
+`MB::Sound::Envelope` (`fast_envelope`, mirror `Envelope.process_ruby`) is a state machine over curved segments landing exactly on target at whole samples: curves in signed dB (presets `:analog` default, `:snappy`, `:pad`, ...), shapes `:exp`/`:s`, multi-segment `env([[level, time, curve, shape], ...], release_at:, loop:)`, inputs `gate:`/`trigger:`/`velocity:`/`choke:`, and `.sensitivity(range | nil)` / `.no_velocity` in chains.  Constructors `adsr`, `env`, `amp_env`, `fm_env`, `filter_env`, `sq80_env`.  Kernel "runs" specialize only on constants of the patch (user rule).
+<!-- /summary -->
+
+Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 
 `MB::Sound::Envelope` (`lib/mb/sound/envelope.rb`; kernel in `fast_envelope`, exact Ruby mirror `Envelope.process_ruby`) is a state machine (idle, attack, decay, sustain, release, choke, ended) over curved segments (a segment list with a release node, ready for multi-segment envelopes) that land exactly on their targets at their times (whole samples).  Curves are signed dB (bare numbers, or Decibels read as their dB: `curve: 60.db`), SuperCollider's curvature (`c = -d ln 10 / 20`): +60 falls like a 60 dB exponential, 0 is linear, negative swells; presets `:linear`, `:analog` [12, 60, 60] (default), `:snappy`, `:gentle`, `:swell`, `:dx`; `curve: 60`, `{ release: 30 }`, `[a, d, r]`, or `.curve(...)`; +30 is about the old `adsr(...).db(30)` (`GraphNode#db` is gone: write `10 ** (node / 20)` to turn dB into gain; `Numeric#db` stays).

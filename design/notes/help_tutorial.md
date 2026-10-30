@@ -1,5 +1,9 @@
 # The mb-sound tutorial (design for a later phase)
 
+<!-- summary -->
+A design, not yet built, for a full vimtutor-style tutorial in the live console: a `tutorial` command whose chapters are lessons on the existing `Help.lesson` framework (help.md), one small A-minor piece grown from a single tone to a form with knobs and a recording, and checks that listen (`playing?`, `level_of`, knob values, landed changes) after every line typed.  Part 1 (sound basics) is about 30 minutes, the whole 2-3 hours.
+<!-- /summary -->
+
 Design only (help-1, 2026-10-13); nothing here is built yet beyond the lesson framework in `help.md`.  The maintainer: "Start light but then a full vimtutor-like tutorial is warranted."
 
 ## What vimtutor gets right, and what carries over

@@ -1,6 +1,10 @@
 # Type-dispatched parameters (`MB::Sound::ArgTypes`)
 
-Built by time-automation (2026-10-18) for clocks (`clip.clocked(x)`, `clip.at(x)`, `clip.over(x)`, `clip % x`), designed as a reusable library piece for the toolkit methods to come (maintainer via the Mac, 2026-10-18; notes in `/app/workbench/research/au5-color-bass/toolkit-ideas.md`: `rain.peq(h, midi.freq)` knowing `h` is a partial series and `midi.freq` a frequency; `.resonate`, `.peq`, ...).  CLAUDE.md keeps a summary line.
+<!-- summary -->
+`MB::Sound::ArgTypes` (`lib/mb/sound/arg_types.rb`) classifies argument values by type (tempo, ratio, seconds, samples, frequency including tagged `v.freq`, name, ...) from one ordered table, matches them against Signatures (keyword > type > position; canonical forms print keywords), and dispatches one method name to meanings by type through per-receiver Dispatch tables (`clip.clocked(x)`, `clip.at(x)`, `clip.over(x)`).  Errors and `help :at`/`:over` pages come from the tables, and a guard spec covers every row; the toolkit methods will adopt it ("Adopting it in a method" below).
+<!-- /summary -->
+
+Built by time-automation (2026-10-18) for clocks (`clip.clocked(x)`, `clip.at(x)`, `clip.over(x)`, `clip % x`), designed as a reusable library piece for the toolkit methods to come (maintainer via the Mac, 2026-10-18; notes in `/app/workbench/research/au5-color-bass/toolkit-ideas.md`: `rain.peq(h, midi.freq)` knowing `h` is a partial series and `midi.freq` a frequency; `.resonate`, `.peq`, ...).  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).
 
 ## The classifier
 

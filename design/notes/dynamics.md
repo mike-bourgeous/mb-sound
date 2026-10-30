@@ -1,6 +1,17 @@
 # Dynamics (compressor, compander, ducking, limiter, multiband)
 
-Branch dynamics-1 (2026-10-11).  CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+<!-- summary -->
+One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a dB peak/RMS detector (linked, any `sidechain:`), a transfer curve, a log-domain smoother, `lookahead:`, `makeup:`, `mix:`; same output at any buffer size.  Faces `compress`, `expand`, `noise_gate`, `duck(kick)`, `compand(...)`, `limit(ceiling: -1.db, lookahead: 1.5.ms, release:, true_peak: true)`, `bands(200.hz, 2000) { |lo, mid, hi| [...] }` crossovers, `mono_below`, and `squeeze`; trigger tracks (`sidechain :pump, clip`) key ducks with a line nobody hears.  Levels and gains are written `-12.db` (exact dB); bare numbers are linear gains and bare negatives raise.
+<!-- /summary -->
+
+Quick reference (the overview CLAUDE.md carried until 2026-10-30; details below):
+- `compress(threshold:, ratio:, upward_threshold:, upward_ratio:)` (upward + downward in one), `compand(-60.db => -80.db, -40.db => -40.db, 0.db => -12.db, interpolation: :cubic)` (or `[[in, out, shape], ...]` rows, or a block mapping dB numbers), `duck(kick)` (defaults -18 dB, 20 ms hold, 1/16 release; `amount: -12.db` or `12.db` both duck by 12 dB, never boosting).
+- `limit(ceiling: -1.db, lookahead: 1.5.ms, release:, true_peak: true)`: lookahead brickwall with Annex 2 true peaks, latency lookahead + 6 samples, master-chain ready (`master { |mix| mix.limit }`).
+- Trigger tracks: `sidechain :pump, grid(16, 'x...x...').loop` (aliases `pump`, `trigger_track`, `trigger_line`) is heard only by readers: `duck(:pump)`, `bus(:pump)`, `compress(sidechain: :pump)`; set documents print `sidechain(:pump) { |clip| ... }`; `shape: :gate` is the default; templates write `sidechain :pump, clip` (dnb's `genre(:dnb) { sidechain :pump, :pump }`).
+- dB rule (db-1, 2026-10-14): graph documents before format 3 load bare dynamics levels and gains with the old dB meaning and a warning.
+- Cost per stereo 800-sample buffer (Measurements below): ~0.2% of realtime for a compressor, 0.4% for the limiter, 0.7% for squeeze.
+
+Branch dynamics-1 (2026-10-11).  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 Maintainer's asks: a limiter for the master chain (oscillators are full scale, the master bus is -10 dB), lookahead brickwall and true-peak aware, plus a clipper-style option; a classic feed-forward compressor with a sidechain input as a node; tech house ducking ("bass needs to be louder"); multiband OTT-style upward + downward compression on Linkwitz-Riley crossovers; an arbitrary piecewise compander (2026-10-11), with monotone cubic segments.
 
