@@ -62,13 +62,15 @@ module MB
             # TODO: only allow GraphNodes as sources?
             next unless src.respond_to?(:sample_rate)
 
-            unless src.respond_to?(:sample_rate=)
+            # (a source already at the rate needs no change: a Knob or its
+            # Reader under a chorus's at_rate(input rate); fixes-1030)
+            unless src.respond_to?(:sample_rate=) || src.sample_rate == new_rate
               raise SampleRateSupportError.new(src)
             end
           end
 
           sources.each do |_, src|
-            next unless src.respond_to?(:sample_rate)
+            next unless src.respond_to?(:sample_rate) && src.respond_to?(:sample_rate=)
             src.send(:sample_rate=, new_rate)
           end
 

@@ -161,6 +161,7 @@ module MB
         # (a TracePoint, the old way; MB_SOUND_RECIPE_LOCALS=trace).
         @locals_mode = ENV['MB_SOUND_RECIPE_LOCALS'] == 'trace' ? :trace : :frame
         @block_iseqs = ObjectSpace::WeakKeyMap.new
+        @bundles = ObjectSpace::WeakKeyMap.new
         @seq = 0
         @wrapped = Hash.new { |h, k| h[k] = Set.new }
 
@@ -198,6 +199,16 @@ module MB
             return nil unless obj.instance_variable_defined?(:@graph_recipe)
             rec = obj.instance_variable_get(:@graph_recipe)
             rec&.owner.equal?(obj) ? rec : nil
+          end
+
+          # The recorded bundle (a Channels a recorded call returned:
+          # ping_pong, multitap, chorus) whose output +node+ is, or nil.
+          # Kept beside the nodes (a weak map; no instance variable, so
+          # node shapes don't vary), so bind and the inspector find a
+          # bundle's call from its outputs when nothing took them by index
+          # (#note_elements; fixes-1030).
+          def bundle_of(node)
+            @bundles[node]
           end
 
           # The Call that made +obj+ as seen from block scope +scope+ (the
@@ -364,8 +375,23 @@ module MB
               else
                 result.instance_variable_set(:@graph_recipe, Record.new(result, call))
               end
+              note_outputs(result) if result.is_a?(Channels)
             elsif rec.call.scope != call.scope
               (rec.scoped ||= {}.compare_by_identity)[call.scope] ||= call
+            end
+          end
+
+          # Remembers +bundle+ as the bundle of each of its outputs that
+          # isn't already another recorded bundle's (see .bundle_of), and of
+          # the multi-output node behind outputs that are its NodeOutputs
+          # (a DelayNetwork's taps: traversals climb over them).
+          def note_outputs(bundle)
+            bundle.instance_variable_get(:@outputs).each do |o|
+              next if o.frozen? || o.is_a?(Numeric)
+
+              @bundles[o] = bundle unless @bundles.key?(o)
+              owner = GraphNode.climb_tee_tree(o)
+              @bundles[owner] = bundle unless owner.equal?(o) || owner.frozen? || @bundles.key?(owner)
             end
           end
 

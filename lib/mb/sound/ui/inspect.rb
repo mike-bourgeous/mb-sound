@@ -255,7 +255,7 @@ module MB
           n
         end
 
-        def recipe?(n) = n.instance_variable_defined?(:@graph_recipe) && !n.instance_variable_get(:@graph_recipe).nil?
+        def recipe?(n) = (n.instance_variable_defined?(:@graph_recipe) && !n.instance_variable_get(:@graph_recipe).nil?) || !GraphNode::Recipe.bundle_of(n).nil?
 
         # The nodes +root+ reads, itself first: its #graph, or for a root
         # that isn't a GraphNode but has sources (a ChannelMixer: Pan,
