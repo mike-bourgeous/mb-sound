@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 5,
+graph 7,
   name: "reed_piano",
   kind: :synth,
-  saved: "2026-10-28T06:22:43Z",
-  mb_sound: "0.12.0.usegit (b7efc32b)",
+  saved: "2026-10-30T06:34:38Z",
+  mb_sound: "0.12.0.usegit (28b121e2)",
   from: "bin/synths/electric_pianos.rb",
   description: "Reed piano (Wurlitzer-style FM) from bin/synths/electric_pianos.rb, made in patches-2 (2026-10-13) as a closer-to-physical alternative to the jungle keys (jungle_keys_voice in bin/synths/jungle.rb, from the persona panel experiment).",
   options: { patch: :reed, amp: nil, tremolo: 0.3 }

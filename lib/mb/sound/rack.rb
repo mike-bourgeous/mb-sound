@@ -606,7 +606,7 @@ module MB
         text = "#{@constructor}#{"(#{args.join(', ')})" unless args.empty?} #{src}"
         unless @bound.empty?
           text = "(#{text})" if text.include?(' do')
-          text += ".with(#{@bound.map { |k, v| "#{k}: #{v.inspect}" }.join(', ')})"
+          text += ".with(#{@bound.map { |k, v| "#{k}: #{RubyValue.text(v) || v.inspect}" }.join(', ')})"
         end
         text
       end

@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 5,
+graph 7,
   name: "sq80_chop",
   kind: :synth,
-  saved: "2026-10-24T18:50:09Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-30T06:35:06Z",
+  mb_sound: "0.12.0.usegit (28b121e2)",
   from: "bin/synths/sq80_voice.rb",
   description: "SQ-80 voice :chop: Rhythm from the chop envelope: a dark, resonant filter opened in 32nd notes while keys are held, restarting with each note, so chords stagger. (from bin/synths/sq80_voice.rb: the voice since 2026-10-07, patches since sq80-lib-1, 2026-10-17)",
   options: { patch: :chop, voices: nil, drive_mode: nil, drive: nil, flutter: nil, second_release: false }

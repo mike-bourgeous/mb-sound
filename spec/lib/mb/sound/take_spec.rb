@@ -1,3 +1,5 @@
+require_relative '../../../support/ruby_value_check'
+
 RSpec.describe(MB::Sound::Take) do
   # 120 BPM at 48kHz: one bar (a whole note) is 96000 frames
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
@@ -58,6 +60,24 @@ RSpec.describe(MB::Sound::Take) do
     out = []
     replay.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_sizes: sizes, tail: 0) { |mix| out << mix[0].dup }
     SpecBuffers.join(out)
+  end
+
+  it 'writes values as MB::Sound::RubyValue prints them, which the script reads back as the same values (printers-1)' do
+    _, t = perform(tones: false, buffers: 400)
+    text = t.to_ruby
+    expect(text).to match(/^  r\.line \d+(\/\d+)?r, \[/)
+    expect(text).to include("  bar_length: 1r,\n")
+    expect(text).to include('fade: 1/4r')
+    expect(text).not_to match(%r{\d+r/\d})
+
+    # (a take is a trusted script: eval is how it runs)
+    script = eval(text.sub(/\.main\(ARGV, __FILE__\)\n\z/, "\n")[/^MB::Sound::Take::Replay\.new.*/m], TOPLEVEL_BINDING) # rubocop:disable Security/Eval
+    direct = t.replay
+    start = ->(r) { r.instance_variable_get(:@start) }
+    start.(direct).each { |k, v| expect(RubyValueCheck.same?(start.(script)[k], v)).to eq(true), "#{k}: #{v.inspect} read back as #{start.(script)[k].inspect}" }
+    rows = ->(r) { r.lines.map { |l| l.to_h.merge(code: l.code.chomp) } } # (heredocs end lines)
+    expect(rows.(script)).to eq(rows.(direct))
+    expect(script.ends).to eql(direct.ends)
   end
 
   it 'records lines with their issue times and where their changes landed' do

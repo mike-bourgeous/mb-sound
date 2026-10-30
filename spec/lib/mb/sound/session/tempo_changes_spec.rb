@@ -85,7 +85,7 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
     end
 
     it 'prints its segments' do
-      expect(map.ramp(140, at: 4, length: 2).to_s).to include('ramp(4, 120 => 140, length: 2)')
+      expect(map.ramp(140, at: 4, length: 2).to_s).to include('ramp(4r, 120r => 140r, length: 2r)') # (exact Rationals, printers-1)
     end
   end
 

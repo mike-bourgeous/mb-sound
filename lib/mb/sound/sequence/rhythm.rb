@@ -149,12 +149,12 @@ module MB
 
         # The `rhythm(...)` text that makes this rhythm (MB::Sound#rhythm).
         def to_ruby
-          writer = GraphNode::Recipe::RubyWriter.new(nil)
+          lit = ->(x) { RubyValue.to_ruby(x, gains: true) }
           rows = @hits.map { |h|
             marks = MARKS.select { |m| h.public_send(m) }.to_h { |m| [m, true] }
-            "[#{[h.start, h.length, h.velocity].map { |x| writer.literal(x) }.join(', ')}#{", #{writer.literal(marks)}" unless marks.empty?}]"
+            "[#{[h.start, h.length, h.velocity].map(&lit).join(', ')}#{", #{lit.(marks)}" unless marks.empty?}]"
           }
-          kw = ["length: #{writer.literal(@length)}"]
+          kw = ["length: #{lit.(@length)}"]
           kw << 'loop: true' if @loop
           "rhythm_template(#{(rows + kw).join(', ')})"
         end

@@ -168,7 +168,7 @@ RSpec.describe('rack documents') do
       session.process_buffer(800)
       text = io.dump(g, name: 'pad')
       expect(text).to include("arack(:wobbly) { |sig|\n").and include('knob(:level, 0.5)')
-      uses = text.scan(/rack\(:wobbly\)\.using\(seed: drawn_seed\((\d+)\), tone: 900, level: 0\.8\)/)
+      uses = text.scan(/rack\(:wobbly\)\.using\(seed: drawn_seed\((\d+)\), tone: 900\.0, level: 0\.8\)/)
       expect(uses.length).to eq(2)
       expect(uses.uniq.length).to eq(2) # (each instance its own seed)
       want = 6.times.map { session.process_buffer(800)[0].dup }

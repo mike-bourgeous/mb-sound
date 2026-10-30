@@ -16,6 +16,7 @@ require 'mb/term'
 # Tone#noise, and spectral Noise draw from.
 srand(Integer(ENV['RANDOM_SEED'])) if ENV['RANDOM_SEED']
 
+require_relative 'sound/ruby_value'
 require_relative 'sound/length'
 require_relative 'sound/interval'
 require_relative 'sound/phase'

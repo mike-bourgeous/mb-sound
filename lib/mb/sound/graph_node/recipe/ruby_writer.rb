@@ -465,10 +465,20 @@ module MB
           def operand(v, indent)
             if Recipe.graph_object?(v)
               expr_p(v, indent: indent, arith: true)
-            elsif v.is_a?(Numeric) && v.real? && v.negative?
-              [num(v), UNARY]
+            elsif v.is_a?(Numeric) && num_prec(v) < ATOM
+              [num(v), num_prec(v)]
             else
               [value(v, indent), ATOM]
+            end
+          end
+
+          # How a number's text binds (see MB::Sound::RubyValue.precedence):
+          # `-3` as a unary minus, `3/4r` as a quotient.
+          def num_prec(v)
+            case MB::Sound::RubyValue.precedence(v)
+            when :unary then UNARY
+            when :quotient then PREC[:/]
+            else ATOM
             end
           end
 
@@ -477,7 +487,7 @@ module MB
             return nil if r.equal?(MB::Sound)
             return class_name(r) if r.is_a?(Module)
 
-            t, p = Recipe.graph_object?(r) ? expr_p(r, indent: indent) : [value(r, indent), r.is_a?(Numeric) && r.real? && r.negative? ? UNARY : ATOM]
+            t, p = Recipe.graph_object?(r) ? expr_p(r, indent: indent) : [value(r, indent), r.is_a?(Numeric) ? num_prec(r) : ATOM]
             # Unary note marks bind after calls: (!A1).n8
             p < ATOM || t.match?(/\A[!~]/) ? "(#{t})" : t
           end
@@ -522,10 +532,8 @@ module MB
             when Constant
               v = live_constant(o)
               t = num(v)
-              if arith
-                return [t, v.is_a?(Numeric) && v.real? && v.negative? ? UNARY : ATOM]
-              end
-              return ["#{v.is_a?(Numeric) && v.real? && v.negative? ? "(#{t})" : t}.constant", ATOM]
+              return [t, v.is_a?(Numeric) ? num_prec(v) : ATOM] if arith
+              return ["#{v.is_a?(Numeric) && num_prec(v) < ATOM ? "(#{t})" : t}.constant", ATOM]
             when Knob, Knob::Reader
               # A Session knob (or a graph document's, without knob_nodes):
               # each knob(:name) is its own reader, so it prints inline
@@ -582,15 +590,10 @@ module MB
             "knob(#{Recipe::RubyWriter.knob_args(k, method(:literal)).join(', ')})"
           end
 
-          # A knob setting as text: numbers as Knob.number prints them (800,
-          # 0.3), ranges of numbers alike (100..8000), others as literals.
+          # A knob setting as text: numbers exactly (never as dB; see
+          # MB::Sound::RubyValue), others as literals.
           def knob_literal(v)
-            case v
-            when Float, Integer then Knob.number(v)
-            when Range
-              v.begin.is_a?(Numeric) && v.end.is_a?(Numeric) ? "#{Knob.number(v.begin)}#{v.exclude_end? ? '...' : '..'}#{Knob.number(v.end)}" : leaf(v, '')
-            else leaf(v, '')
-            end
+            v.is_a?(Numeric) && !v.is_a?(MB::Sound::Decibels) ? MB::Sound::RubyValue.number(v) : leaf(v, '')
           end
 
           # The arguments that make knob +k+ again (name or a knob's own
@@ -798,7 +801,7 @@ module MB
 
           # The text of Hash key +k+ (`name:` or `"odd name":`).
           def key_text(k)
-            k.is_a?(Symbol) && k.to_s.match?(/\A[a-z_][a-zA-Z0-9_]*[?!]?\z/) ? "#{k}:" : "#{k.to_s.inspect}:"
+            MB::Sound::RubyValue.key(k)
           end
 
           private
@@ -1011,46 +1014,46 @@ module MB
             end
           end
 
+          # Writer-only values first (assets, lengths read from graph
+          # objects, files, instruments, steps, blocks), then MB::Sound::
+          # RubyValue for plain values, nested values printed by #value.
           def leaf(v, indent)
             case v
-            when Integer, Float, Rational, Complex, MB::Sound::Decibels then num(v)
-            when nil, true, false, Symbol then v.inspect
+            when Integer, Float, Rational, Complex, MB::Sound::Decibels then return num(v)
             when String
               # A file name, in a bundle: the asset's name
-              (@assets && @assets.file(v))&.inspect || v.inspect
-            when Range
-              b = v.begin.nil? ? '' : range_end(v.begin, indent)
-              e = v.end.nil? ? '' : range_end(v.end, indent)
-              "#{b}#{v.exclude_end? ? '...' : '..'}#{e}"
-            when Array then "[#{v.map { |x| value(x, indent) }.join(', ')}]"
-            when Hash then "{ #{v.map { |k, x| k.is_a?(Symbol) ? "#{key_text(k)} #{value(x, indent)}" : "#{value(k, indent)} => #{value(x, indent)}" }.join(', ')} }"
-            when MB::Sound::Length::Samples then v.origin ? origin_text(v, indent) : unit_value(v.value, 'samples', indent)
-            when MB::Sound::Length::Seconds then v.origin ? origin_text(v, indent) : seconds_text(v, indent)
-            when MB::Sound::Interval then interval_text(v)
-            when MB::Sound::Sequence::Duration then duration_text(v)
-            when MB::Sound::Phase then phase_text(v, indent)
-            when MB::Sound::Pitch then pitch_text(v)
-            when ChannelValues then "per_channel(#{v.values.map { |x| value(x, indent) }.join(', ')})"
-            when ChannelSpread then "per_channel(#{leaf(v.range, indent)})"
-            when Module then class_name(v)
-            when MB::Sound::Wavetable then wavetable_text(v, indent)
-            when MB::Sound::Sample then sample_text(v, indent)
-            when MB::Sound::Sample::Slices then slices_text(v, indent)
-            when MB::Sound::Sampler::Instrument then instrument_text(v, indent)
-            when MB::Sound::Sampler::ZoneMap then zone_map_text(v, indent)
-            when MB::Sound::Scale then scale_text(v)
-            when MB::Sound::Generative::Value then v.to_ruby { |x| value(x, indent) }
-            when MB::Sound::Generative::Dice then "dice(#{[v.seed, *v.path].map { |x| value(x, indent) }.join(', ')})"
-            when MB::Sound::Sequence::Seq::Step then step_text(v)
-            when MB::Sound::Length::Attack then v.to_ruby
-            when MB::Sound::Tempo, MB::Sound::Clock then v.to_ruby
-            when MB::Sound::Curve then v.to_ruby || fixme("a Curve that doesn't print as Ruby (#{v})")
-            when MB::Sound::MIDI::Transform::Spec then transform_spec_text(v, indent)
-            when Proc then ((n = proc_name(v)) && "named_proc(#{n.inspect})") || Recipe.block_source(v, nil) || fixme("a #{v.lambda? ? 'lambda' : 'proc'} whose source wasn't found")
-            when MB::Sound::Param::Ranged then "(#{value(v.range, indent)}).at(#{value(v.default, indent)})"
-            when Data
-              fields = v.to_h.map { |k, x| "#{key_text(k)} #{value(x, indent)}" }
-              "#{class_name(v.class)}.new(#{fields.join(', ')})"
+              return (@assets && @assets.file(v))&.inspect || v.inspect
+            when MB::Sound::Length::Samples, MB::Sound::Length::Seconds
+              return origin_text(v, indent) if v.origin
+              unless v.value.is_a?(Numeric)
+                unit = v.is_a?(MB::Sound::Length::Samples) ? 'samples' : 'seconds'
+                return unit_value(v.value, unit, indent)
+              end
+            when MB::Sound::Phase
+              return phase_text(v, indent)
+            when ChannelValues then return "per_channel(#{v.values.map { |x| value(x, indent) }.join(', ')})"
+            when ChannelSpread then return "per_channel(#{leaf(v.range, indent)})"
+            when Module then return class_name(v)
+            when MB::Sound::Wavetable then return wavetable_text(v, indent)
+            when MB::Sound::Sample then return sample_text(v, indent)
+            when MB::Sound::Sample::Slices then return slices_text(v, indent)
+            when MB::Sound::Sampler::Instrument then return instrument_text(v, indent)
+            when MB::Sound::Sampler::ZoneMap then return zone_map_text(v, indent)
+            when MB::Sound::Generative::Dice then return "dice(#{[v.seed, *v.path].map { |x| value(x, indent) }.join(', ')})"
+            when MB::Sound::Sequence::Seq::Step then return step_text(v)
+            when MB::Sound::MIDI::Transform::Spec then return transform_spec_text(v, indent)
+            when Proc then return ((n = proc_name(v)) && "named_proc(#{n.inspect})") || Recipe.block_source(v, nil) || fixme("a #{v.lambda? ? 'lambda' : 'proc'} whose source wasn't found")
+            end
+
+            text = MB::Sound::RubyValue.text(v, gains: true) { |x| value(x, indent) }
+            return text if text
+
+            case v
+            when MB::Sound::Interval then fixme("an Interval of #{v.semitones.inspect} semitones")
+            when MB::Sound::Pitch then fixme("a #{v.class} with a node frequency")
+            when MB::Sound::Scale then fixme("a Scale with a period of #{v.period}")
+            when MB::Sound::Curve then fixme("a Curve that doesn't print as Ruby (#{v})")
+            when Data then fixme("anonymous class #{v.class.inspect}")
             else fixme("can't print a #{v.class}")
             end
           end
@@ -1061,14 +1064,9 @@ module MB
           end
 
           def unit_value(x, unit, indent)
-            if x.is_a?(Numeric)
-              t = num(x)
-              t = "(#{t})" if (x.real? && x.negative?) || t.include?('/') # (1r/110).seconds
-              "#{t}.#{unit}"
-            else
-              t, p = expr_p(x, indent: indent)
-              p < ATOM ? "(#{t}).#{unit}" : "#{t}.#{unit}"
-            end
+            return MB::Sound::RubyValue.unit(x, unit) if x.is_a?(Numeric)
+            t, p = expr_p(x, indent: indent)
+            p < ATOM ? "(#{t}).#{unit}" : "#{t}.#{unit}"
           end
 
           # A length read from an object (Length::Quantity#origin), printed as
@@ -1086,58 +1084,15 @@ module MB
 
           def seconds_text(v, indent)
             s = v.value
-            return unit_value(s, 'seconds', indent) unless s.is_a?(Numeric)
-
-            ms = (s * 1000).round
-            return unit_value(ms, 'ms', indent) if s.is_a?(Float) && ms.ms.value == s && ms != 0
-            unit_value(s, 'seconds', indent)
+            s.is_a?(Numeric) ? MB::Sound::RubyValue.seconds(s) : unit_value(s, 'seconds', indent)
           end
 
           def interval_text(v)
-            unit = v.instance_variable_get(:@unit)
-            st = v.semitones
-            candidates =
-              case unit
-              when :octaves then [[st / 12r, 'oct'], [st / 12.0, 'oct']]
-              when :cents then [[(st * 100).to_r, 'cents'], [st * 100.0, 'cents']]
-              else []
-              end
-            candidates << [st, 'st']
-            candidates.each do |n, u|
-              n = n.to_i if n.is_a?(Rational) && n.denominator == 1
-              n = n.to_i if n.is_a?(Float) && n == n.round && n.abs < 1e15 && !(st.is_a?(Float))
-              iv = n.public_send(u)
-              next unless iv.semitones == st && iv.semitones.class == st.class
-              t = num(n)
-              return n.negative? ? "(#{t}).#{u}" : "#{t}.#{u}"
-            end
-            fixme("an Interval of #{st.inspect} semitones")
+            MB::Sound::RubyValue.interval(v) || fixme("an Interval of #{v.semitones.inspect} semitones")
           end
 
-          DURATION_DENOMINATORS = [1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 24, 32, 64, 128].freeze
-
-          DURATION_MODS = { 'dotted' => 'dotted', 'double dotted' => 'dd', 'triplet' => 'triplet' }.freeze
-
           def duration_text(v)
-            r = v.whole_notes
-            # The spelling it was made with, when that rebuilds it exactly
-            # (a label like n192 names no method: Duration.new(1/192r))
-            if (m = v.to_s.match(/\A(?:(dotted|double dotted|triplet) )?(?:(\d+) × )?n(\d+)\z/)) && 1.respond_to?("n#{m[3]}")
-              k = (m[2] || 1).to_i
-              d = k.public_send("n#{m[3]}")
-              d = d.public_send(DURATION_MODS[m[1]]) if m[1]
-              return "#{k}.n#{m[3]}#{".#{DURATION_MODS[m[1]]}" if m[1]}" if d.whole_notes == r
-            elsif (m = v.to_s.match(/\A(\d+) (bar|beat)s?\z/))
-              unit = m[1] == '1' ? m[2] : "#{m[2]}s"
-              return "#{m[1]}.#{unit}" if m[1].to_i.public_send(unit).whole_notes == r
-            end
-
-            DURATION_DENOMINATORS.each do |n|
-              k = r * n
-              next unless k.denominator == 1
-              return "#{k.to_i}.n#{n}"
-            end
-            "Sequence::Duration.new(#{num(r)})"
+            MB::Sound::RubyValue.duration(v)
           end
 
           def phase_text(v, indent)
@@ -1150,14 +1105,9 @@ module MB
             end
           end
 
-          # A Note's name (A3, Cs4) when it rebuilds the same note, else
-          # its frequency in Hz.
           # A Scale as the top-level call that makes it: `scale(:minor, A4)`.
           def scale_text(s)
-            return fixme("a Scale with a period of #{s.period}") unless s.period == 12
-            list = s.name && MB::Sound::Scale::OFFSETS[MB::Sound::Scale::ALIASES.fetch(s.name, s.name)] == s.offsets ? s.name.inspect : leaf(s.offsets, '')
-            root = s.root.is_a?(Integer) ? pitch_text(MB::Sound::Note.new(s.root)) : num(s.root)
-            "scale(#{list}, #{root})"
+            MB::Sound::RubyValue.scale(s) || fixme("a Scale with a period of #{s.period}")
           end
 
           # A rest or tie step, or a note with marks (`!A1`, `~C2`,
@@ -1331,31 +1281,7 @@ module MB
           end
 
           def pitch_text(p)
-            if p.instance_of?(MB::Sound::Note)
-              name = p.to_s
-              if name.match?(/\A[A-G][sb]?\d+\z/)
-                n = MB::Sound::Note.new(name) rescue nil
-                return name if n && n.frequency == p.frequency
-              elsif name.match?(/\A[A-G][sb]?-\d+\z/) && p.number == p.number.round
-                # Octave -1 has no constant (Fs-1 would be Fs minus 1)
-                n = MB::Sound::Note.new(p.number.round)
-                return "Note.new(#{p.number.round})" if n.frequency == p.frequency
-              end
-            end
-            unless p.constant?
-              # A tempo-synced pitch (`1.bar.hz`) prints as its duration (it
-              # printed its frequency at the current tempo before
-              # 2026-10-13, losing the tempo sync; patches-1)
-              src = p.freq
-              if src.is_a?(MB::Sound::Sequence::TempoNode) && src.mode == :hz && !src.freewheel?
-                return "#{duration_text(src.duration)}.hz"
-              end
-              return fixme("a #{p.class} with a node frequency") unless src.is_a?(Constant)
-            end
-            f = p.frequency
-            return fixme("a #{p.class} with a node frequency") unless f.is_a?(Numeric)
-            f = f.to_i if f.is_a?(Float) && f == f.round && f.abs < 1e15 && f.to_i.hz.frequency.eql?(f)
-            "#{num(f)}.hz"
+            MB::Sound::RubyValue.pitch(p) || fixme("a #{p.class} with a node frequency")
           end
 
           def wavetable_text(t, indent = '')
@@ -1482,30 +1408,10 @@ module MB
             list.empty? ? ".#{name}" : ".#{name}(#{list.join(', ')})"
           end
 
-          # A number: Decibels as k.db, and Float gains that are exactly k/10
-          # dB as k.db too.
+          # A number (see MB::Sound::RubyValue.number): Decibels as k.db, and
+          # Float gains that are exactly k/10 dB as k.db too.
           def num(n)
-            case n
-            when Integer then n.to_s
-            when Float
-              return 'Float::INFINITY' if n == Float::INFINITY
-              return '-Float::INFINITY' if n == -Float::INFINITY
-              return 'Float::NAN' if n.nan?
-              if n > 0 && n.to_s.length > 8 && (db = (20 * Math.log10(n) * 10).round / 10.0) && db.db == n
-                db = db.to_i if db == db.to_i
-                "#{db}.db"
-              else
-                n.to_s
-              end
-            when Rational
-              n.denominator == 1 ? "#{n.numerator}r" : "#{n.numerator}r/#{n.denominator}"
-            when MB::Sound::Decibels
-              d = num(n.decibels)
-              d.include?('/') || d.include?('::') ? "(#{d}).db" : "#{d}.db"
-            when Complex
-              "Complex(#{num(n.real)}, #{num(n.imaginary)})"
-            else n.inspect
-            end
+            MB::Sound::RubyValue.number(n, gains: true)
           end
         end
 

@@ -3,6 +3,7 @@
 # evaluate the printed code (our own output; the later loader won't eval)
 # and compare renders sample for sample.
 require_relative '../../../../support/graph_sweep'
+require_relative '../../../../support/ruby_value_check'
 
 RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
   let(:recipe) { MB::Sound::GraphNode::Recipe }
@@ -507,6 +508,15 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
           end
           expect(code).not_to include('FIXME')
           expect(code).not_to start_with('# inputs')
+
+          # Every plain value in the recorded calls prints (RubyValue) as
+          # an equal value of the same class, in the console and through
+          # the document loader (printers-1)
+          RubyValueCheck.leaves(graph).each do |call, v|
+            text = MB::Sound::RubyValue.to_ruby(v)
+            expect(RubyValueCheck.same?(RubyValueCheck.reload(text), v)).to eq(true), "#{call}: #{v.inspect} (#{v.class}) prints as #{text}"
+            expect(RubyValueCheck.same?(RubyValueCheck.load_value(text), v)).to eq(true), "#{call}: #{v.inspect} (#{v.class}) loads from #{text}"
+          end
 
           ref = RecipeHelpers.render(graph, buffers: 6, size: 128)
           MB::Sound.seed(code.include?('MB::Sound.seed') ? 1 : 77)

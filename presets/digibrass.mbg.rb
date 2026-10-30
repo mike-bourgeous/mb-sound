@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 5,
+graph 7,
   name: "digibrass",
   kind: :synth,
-  saved: "2026-10-25T21:25:54Z",
-  mb_sound: "0.12.0.usegit (269e6153)",
+  saved: "2026-10-30T06:34:47Z",
+  mb_sound: "0.12.0.usegit (28b121e2)",
   from: "bin/synths/wave_voices.rb",
   description: "Wave voice :digibrass: Digital brass for stabs and swells: a saw and a bright formant wave 7 cents apart plus a noise-and-chirp attack, a resonant 4-pole opening 3.5 octaves on each note, slight vibrato; grit 0..1 holds the oscillators at the Ensoniq DOC's 38.46 kHz (from bin/synths/wave_voices.rb: the research-sq80 prototype voice of 2026-10-06, rebuilt from library nodes in protos-1, 2026-10-23)",
   options: { patch: :digibrass, voices: nil }

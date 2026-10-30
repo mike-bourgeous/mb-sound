@@ -333,7 +333,7 @@ module MB
         g = gestures
         unless g.empty?
           out << "  r.gestures [\n"
-          g.each { |name, epoch, pos, steps| out << "    [#{name.inspect}, #{epoch}, #{ruby_value(pos)}, #{steps.map { |f, v| [f, GraphNode::Knob.number(v)] }.inspect.delete('"')}],\n" }
+          g.each { |name, epoch, pos, steps| out << "    [#{name.inspect}, #{epoch}, #{ruby_value(pos)}, #{ruby_value(steps)}],\n" }
           out << "  ]\n"
         end
         rows = decisions
@@ -492,11 +492,7 @@ module MB
 
       # Ruby source for a value in the replay script.
       def ruby_value(v)
-        case v
-        when Rational then v.denominator == 1 ? "#{v.numerator}r" : "#{v.numerator}/#{v.denominator}r"
-        when Array then "[#{v.map { |x| ruby_value(x) }.join(', ')}]"
-        else v.inspect
-        end
+        RubyValue.to_ruby(v)
       end
     end
   end

@@ -61,8 +61,33 @@ module MB
       # 6 (parity-1, 2026-10-30) gives clips' (and Seqs') #shift its own
       # meaning: it moves notes without wrapping (dropping those that leave
       # the clip), where it was an alias of #rotate (wrapping); `.shift(`
-      # calls on clips in older documents load as `.rotate(`.
-      FORMAT = 6
+      # calls on clips in older documents load as `.rotate(`.  Format 7
+      # (printers-1, 2026-10-30) prints every value through
+      # MB::Sound::RubyValue: Rationals as `3/4r` and whole ones as `3r`
+      # (forms, tempo maps, and genre values printed whole Rationals as
+      # Integers), rack `using` knob values exactly; older documents load
+      # as before (`3r/4` and `3/4r` are the same Rational, and their
+      # Integers stay Integers).
+      #
+      # FORMATS names the change each version made, so loaders gate on a
+      # name (GraphIO.since?) and branches adding versions touch only this
+      # table.
+      FORMATS = {
+        2 => :seed_marks,
+        3 => :linear_gains,
+        4 => :ring_all_typed_inputs,
+        5 => :typed_params,
+        6 => :clip_shift,
+        7 => :ruby_values,
+      }.freeze
+      FORMAT = FORMATS.keys.max
+
+      # Whether documents of format +version+ have the change named
+      # +feature+ (a FORMATS value).
+      def self.since?(version, feature)
+        first = FORMATS.key(feature) or raise KeyError, "no format change named #{feature.inspect}"
+        version >= first
+      end
 
       # The file extension of graph documents.
       EXTENSION = '.mbg.rb'

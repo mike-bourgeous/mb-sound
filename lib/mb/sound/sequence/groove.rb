@@ -154,10 +154,9 @@ module MB
 
         # The `groove_template(...)` text making this groove.
         def to_ruby
-          w = GraphNode::Recipe::RubyWriter.new(nil)
           div = (1 / @grid)
-          grid = div.denominator == 1 ? div.to_i.to_s : w.literal(@grid)
-          "groove_template(#{grid}, offsets: [#{@offsets.map { |o| w.literal(o) }.join(', ')}], levels: [#{@levels.map { |l| w.literal(l) }.join(', ')}])"
+          grid = div.denominator == 1 ? div.to_i.to_s : RubyValue.to_ruby(@grid)
+          "groove_template(#{grid}, offsets: #{RubyValue.to_ruby(@offsets, gains: true)}, levels: #{RubyValue.to_ruby(@levels, gains: true)})"
         end
       end
 

@@ -57,7 +57,7 @@ module MB
       # Dice for that cycle.  See Sequence::Clip.generate.
       #
       #     arp = generate(1.bar, values: scale(:minor, :a).notes(A3..A5)) { |cycle, dice|
-      #       Array.new(8) { |i| [i * 1r/8, 1r/16, dice.pick(scale(:minor, :a).notes(A3..A5), :n, i), 0.7] }
+      #       Array.new(8) { |i| [i * 1/8r, 1/16r, dice.pick(scale(:minor, :a).notes(A3..A5), :n, i), 0.7] }
       #     }
       #
       # Other keywords are options the block reads as keywords, decided
@@ -67,7 +67,7 @@ module MB
       #
       #     knob :busy, 0.3
       #     hats = generate(1.bar, busy: knob(:busy), values: [F2s]) { |cycle, dice, busy:|
-      #       16.times.filter_map { |i| [i * 1r/16, 1r/32, F2s, 0.6] if dice.rand(:hat, i) < busy }
+      #       16.times.filter_map { |i| [i * 1/16r, 1/32r, F2s, 0.6] if dice.rand(:hat, i) < busy }
       #     }
       #     turn :busy, 0.9, over: 8     # the hats fill in over 8 bars, a cycle at a time
       def generate(length, values: nil, seed: nil, name: nil, align: :timeline, reach: nil, lead: nil, **params, &block)

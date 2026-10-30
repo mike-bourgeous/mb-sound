@@ -31,7 +31,7 @@ RSpec.describe('Session knob gestures', :aggregate_failures) do
         before = SpecBuffers.join(out)
         expect(session.journal.changes.count { |e| e.kind == :turn }).to eq(0)
         code = session.gesture_line(:g)
-        expect(code).to eq('turn :g, 0 => 0.32, (1r/60).seconds => 0.36, (1r/30).seconds => 0.38, (1r/6).seconds => 0.5') # (one unit per line: a key off the grid prints them all in seconds)
+        expect(code).to eq('turn :g, 0 => 0.32, (1/60r).seconds => 0.36, (1/30r).seconds => 0.38, (1/6r).seconds => 0.5') # (one unit per line: a key off the grid prints them all in seconds)
         line.(code)
       end
       out << session.process_buffer[0].dup

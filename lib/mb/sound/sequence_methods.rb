@@ -43,8 +43,8 @@ module MB
       # value], ...] sent as steps, or { points:, curve: :cubic | :linear }
       # for fitted curves (e.g. from #midi_clip).
       #
-      #     events([0r, 1r/8, 57, 0.75], [1r/4, 1r/8, 60, 1.0, { accented: true }], length: 1r/2, loop: true)
-      #     events([0r, 1r/2, 36, 0.8], length: 1r, loop: true, controls: { cc1: [[0r, 0.0], [1r/2, 1.0]] })
+      #     events([0r, 1/8r, 57, 0.75], [1/4r, 1/8r, 60, 1.0, { accented: true }], length: 1/2r, loop: true)
+      #     events([0r, 1/2r, 36, 0.8], length: 1r, loop: true, controls: { cc1: [[0r, 0.0], [1/2r, 1.0]] })
       def events(*rows, length: nil, loop: false, seed: 0, align: :timeline, performed: false, controls: nil)
         list = rows.map { |row|
           raise ArgumentError, "Event rows are Arrays [start, length, value, velocity, { marks }] (got #{row.inspect})" unless row.is_a?(Array) && row.length.between?(4, 5)
@@ -74,7 +74,7 @@ module MB
       # clip.  (Named like #groove_template; `rhythm` is the evolving-rhythm
       # generator, GenerativeMethods#rhythm.)
       #
-      #     rhythm_template([0r, 1r/8, 0.9, { accented: true }], [3r/8, 1r/8, 0.7], length: 1r, loop: true).notes(A1, C2)
+      #     rhythm_template([0r, 1/8r, 0.9, { accented: true }], [3/8r, 1/8r, 0.7], length: 1r, loop: true).notes(A1, C2)
       def rhythm_template(*rows, length:, loop: false)
         hits = rows.map { |row|
           raise ArgumentError, "Rhythm rows are Arrays [start, length, velocity, { marks }] (got #{row.inspect})" unless row.is_a?(Array) && row.length.between?(3, 4)
@@ -97,7 +97,7 @@ module MB
       # (velocity scales, 1.0 by default).  How a groove without a recipe
       # prints; `clip.groove` measures one from a played clip.
       #
-      #     feel = groove_template(16, offsets: [0r, 1r/256, 0r, -1r/512], levels: [1.1, 0.8, 1.0, 0.9])
+      #     feel = groove_template(16, offsets: [0r, 1/256r, 0r, -1/512r], levels: [1.1, 0.8, 1.0, 0.9])
       #     beat.groove(feel, amount: 0.5)
       def groove_template(grid, offsets:, levels: nil)
         Sequence::Groove.new(Sequence::Duration.whole_notes(grid), offsets, levels)

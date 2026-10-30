@@ -453,10 +453,8 @@ module MB
         # Ruby text for an option value.
         def ruby(value)
           case value
-          when Decibels then value.inspect
           when Loudness::Target then value.key ? value.key.inspect : format('%g', value.lufs)
-          when Hash then "{ #{value.map { |k, v| "#{k}: #{ruby(v)}" }.join(', ')} }"
-          else value.inspect
+          else RubyValue.text(value) { |v| ruby(v) } || value.inspect
           end
         end
 

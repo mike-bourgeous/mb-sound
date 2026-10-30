@@ -48,7 +48,7 @@ RSpec.describe('rhythm and groove templates') do
       expect(line.events.map(&:value)).to eq([24, 29, 33, 31])
       expect(line.to_ruby).to eq(%(midi_clip(#{path.inspect}, track: 1, bars: 2).rhythm.notes(C1, F1, A1, G1)))
       text = MB::Sound::Sequence::Rhythm.new(r.hits, length: r.length, loop: true).to_ruby
-      expect(text).to start_with('rhythm_template([0r, 1r/2, ')
+      expect(text).to start_with('rhythm_template([0r, 1/2r, ')
       expect(MB::Sound::GraphIO.load(text)).to eq(r)
     end
   end
@@ -108,7 +108,7 @@ RSpec.describe('rhythm and groove templates') do
       feel = take.groove
       expect(s.grid(16, 'xxxx').loop.groove(feel).to_ruby).to include('.groove(events(')
       text = MB::Sound::Sequence::Groove.new(feel.grid, feel.offsets, feel.levels).to_ruby
-      expect(text).to start_with('groove_template(16, offsets: [-1r/512, 1r/128,')
+      expect(text).to start_with('groove_template(16, offsets: [-1/512r, 1/128r,')
       expect(MB::Sound::GraphIO.load(text)).to eq(feel)
       expect { s.groove_template(16, offsets: [1/8r]) }.to raise_error(ArgumentError, /within half a step/)
     end

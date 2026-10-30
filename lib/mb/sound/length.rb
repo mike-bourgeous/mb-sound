@@ -384,7 +384,7 @@ module MB
         def to_ruby
           f = @fraction
           f = f.to_i if f.is_a?(Float) && f == f.to_i
-          f.is_a?(Rational) ? "(#{f.numerator}/#{f.denominator}r).attack" : "#{f}.attack"
+          RubyValue.unit(f, 'attack')
         end
         alias to_s to_ruby
         alias inspect to_ruby

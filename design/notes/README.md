@@ -12,7 +12,7 @@ One note per subsystem: the design decisions with their dates, measurements, res
 
 ### [Graph I/O (recipes and Ruby export)](graph_io.md)
 
-Every graph remembers the DSL calls that built it (`GraphNode::Recipe`, `lib/mb/sound/graph_node/recipe.rb`), so `node.to_ruby` prints it back as Ruby, and graph documents (`.mbg.rb`, `lib/mb/sound/graph_io.rb` + `graph_io/`: `save`, `preset`, `GraphIO.load`/`.dump`) save graphs, clips, bundles with assets, racks, and whole sets.  Documents load by walking the Prism tree through `GraphIO::Registry`, never eval; file reads go through `GraphIO::FileGuard`.  A new DSL method taking a build block goes in `BUILD_BLOCKS`; one that reads files or allocates by an argument goes in `Registry::FILE_METHODS` or `Loader#check_limits`.
+Every graph remembers the DSL calls that built it (`GraphNode::Recipe`, `lib/mb/sound/graph_node/recipe.rb`), so `node.to_ruby` prints it back as Ruby, and graph documents (`.mbg.rb`, `lib/mb/sound/graph_io.rb` + `graph_io/`: `save`, `preset`, `GraphIO.load`/`.dump`) save graphs, clips, bundles with assets, racks, and whole sets.  Documents load by walking the Prism tree through `GraphIO::Registry`, never eval; file reads go through `GraphIO::FileGuard`.  Every plain value prints through one printer, `MB::Sound::RubyValue` (Rationals as `3/4r` and `3r`; graph document format 7).  A new DSL method taking a build block goes in `BUILD_BLOCKS`; one that reads files or allocates by an argument goes in `Registry::FILE_METHODS` or `Loader#check_limits`.
 
 ### [The library: entries, index, shelves, heads](library.md)
 

@@ -214,34 +214,16 @@ module MB
           Builder.build(name, title, base: base, &block)
         end
 
-        # Ruby code for a template value (Decibels as -6.db, Ranges,
-        # Rationals as 3/4r, Durations, Hashes with Symbol keys).
+        # Ruby code for a template value (MB::Sound::RubyValue: Decibels as
+        # -6.db, Ranges, Rationals as 3/4r, Durations, Hashes with Symbol
+        # keys), else its inspect.
         def ruby(value)
-          case value
-          when Decibels
-            value.inspect
-          when Range
-            "#{ruby(value.begin)}#{value.exclude_end? ? '...' : '..'}#{ruby(value.end)}"
-          when Rational
-            value.denominator == 1 ? value.numerator.to_s : "#{value.numerator}/#{value.denominator}r"
-          when Hash
-            return '{}' if value.empty?
-            "{ #{kwargs(value)} }"
-          when Array
-            "[#{value.map { |v| ruby(v) }.join(', ')}]"
-          when Sequence::Duration
-            text = Form.ruby_value(value)
-            text.start_with?('MB::') ? GraphNode::Recipe::RubyWriter.new(nil).literal(value) : text # (1.n8)
-          when MB::Sound::Param::Ranged, MB::Sound::Pitch, MB::Sound::Length::Seconds, MB::Sound::Interval
-            MB::Sound::Param.literal(value) # ((150.hz..8000.hz).at(2400.hz))
-          else
-            value.inspect
-          end
+          RubyValue.text(value) { |v| ruby(v) } || value.inspect
         end
 
         # +hash+ as keyword arguments (`a: 1, b: :x`).
         def kwargs(hash)
-          hash.map { |k, v| "#{k}: #{ruby(v)}" }.join(', ')
+          RubyValue.kwargs(hash) { |v| ruby(v) }
         end
 
         # The node a role's +patch+ makes from +source+ (a clip, kit, or

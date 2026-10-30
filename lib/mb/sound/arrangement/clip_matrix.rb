@@ -249,7 +249,7 @@ module MB
         # "quantize: true".
         def tweak_text(kind, value)
           return kind.inspect if value.nil?
-          v = value.is_a?(Rational) ? "#{value.numerator}/#{value.denominator}r" : value.inspect
+          v = RubyValue.text(value) || value.inspect
           "#{kind}: #{v}"
         end
 

@@ -1,10 +1,10 @@
 # mb-sound set document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 5,
+graph 7,
   name: "tunnel_vision",
   kind: :set,
-  saved: "2026-10-24T18:50:17Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-30T06:35:20Z",
+  mb_sound: "0.12.0.usegit (28b121e2)",
   from: "bin/songs/tunnel_vision.rb",
   description: "Set :tunnel_vision from bin/songs/tunnel_vision.rb (\"Tunnel Vision\", Kez Volta's drum & bass at 174 BPM in F minor, the buses demo): drums, Reese, sub, neuro, boom, riser, pad, pluck; a :hall bus (ducked by the kick) and an :echo bus with sends, the basses ducked by the drums' kick voice; scenes intro..tail; knobs :cut, :grit, :space, :air, :lift; its flow (play_form doc.form).  `demo :tunnel_vision` loads it."
 knob :cut, (150.hz..8000.hz).at(2400.hz)
@@ -108,7 +108,7 @@ track(:boom, send: { hall: 0.1 }) { |clip|
     ((n.freq * 2 ** (dive * 2)).tone * n.env(0.001, 1.2, 0, 0.3, gm: false) * 1.4).softclip(0.5, 0.95)
   }.reverb(:hall, mix: 0.2, highpass: 200, output_channels: 2) * 0.4
 }
-track(:riser, fade: 1r/8, send: { hall: -18.db }) { |_clip|
+track(:riser, fade: 1/8r, send: { hall: -18.db }) { |_clip|
   noise(seed: drawn_seed(2615250280207662552)).filter(:bandpass, cutoff: tween([250, 10000], 8.bars, log: true, loop: false), quality: 3) * tween([0.03, 0.25], 8.bars, loop: false)
 }
 scene :intro, drums: kit_intro, pad: pad, reese: bar, neuro: bar, cut: 250, air: 20

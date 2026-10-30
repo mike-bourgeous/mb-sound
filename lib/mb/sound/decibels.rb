@@ -66,9 +66,7 @@ module MB
 
       # Prints as Ruby that makes this value: `-6.db`.
       def inspect
-        d = @decibels
-        s = d.is_a?(Rational) ? "(#{d.numerator}r/#{d.denominator})" : d.to_s
-        "#{s}.db"
+        RubyValue.number(self)
       end
 
       # The gain as text, like the Float it stands for (so interpolated
