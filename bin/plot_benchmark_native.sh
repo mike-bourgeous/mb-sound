@@ -11,7 +11,7 @@
 # Steps: compiles the extensions (a native build, as `rake compile` does
 # on this machine), then
 # 1. in memory, YJIT off and on: the old path (Plot::Text.render with the
-#    Ruby kernels, MB_SOUND_PLOT=ruby: close to master-ai) and the new one
+#    Ruby kernels, MB_SOUND_KERNELS=fast_ui=ruby: close to master-ai) and the new one
 #    (Plot::Live with FastUI);
 # 2. in this terminal: every look on the scope, spectrum, and 120x45
 #    two-channel vis panes, changed cells only, then full redraws, then
@@ -41,7 +41,7 @@ fi
   echo "Terminal: ${TERM_PROGRAM:-?} ${TERM_PROGRAM_VERSION:-} ${KONSOLE_VERSION:+Konsole $KONSOLE_VERSION} TERM=${TERM:-?}, window $(tput cols)x$(tput lines)"
   echo
   echo "## In memory: before (Ruby kernels, Text.render)"
-  MB_SOUND_PLOT=ruby bin/plot_benchmark.rb --yjit both --api render -n "$frames" -l "$looks" -c "$colors" -j "$out/before.json"
+  MB_SOUND_KERNELS=fast_ui=ruby bin/plot_benchmark.rb --yjit both --api render -n "$frames" -l "$looks" -c "$colors" -j "$out/before.json"
   echo
   echo "## In memory: after (FastUI, Plot::Live)"
   bin/plot_benchmark.rb --yjit both --api live -n "$frames" -l "$looks" -c "$colors" -j "$out/after.json" -B "$out/before.json"
@@ -57,7 +57,7 @@ bin/plot_benchmark.rb --tty --full -p scope,vis -l scope,blocks,quad,ascii -c tr
 echo "## In this terminal: changed cells, no synchronized output" >>"$s"
 bin/plot_benchmark.rb --tty --no-sync -p vis -l scope,blocks,ascii -c truecolor -n "$tty_frames" -j "$out/tty_nosync.json" -R "$s"
 echo "## In this terminal: the old path for comparison (Ruby kernels, full redraws)" >>"$s"
-MB_SOUND_PLOT=ruby bin/plot_benchmark.rb --tty --full -p vis -l scope,blocks -c truecolor -n 200 -j "$out/tty_before.json" -R "$s"
+MB_SOUND_KERNELS=fast_ui=ruby bin/plot_benchmark.rb --tty --full -p vis -l scope,blocks -c truecolor -n 200 -j "$out/tty_before.json" -R "$s"
 
 echo
 echo "Saved in $out (summary.md has every table)."

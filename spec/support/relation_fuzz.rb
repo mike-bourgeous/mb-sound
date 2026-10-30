@@ -10,6 +10,8 @@
 # - :plan_check: Plan.install(check: :raise) at :fast (MB_SOUND_PLAN_CHECK's
 #   comparison: every block planned, then unfused from restored state;
 #   samples and node states compared)
+# - :kernel_check: every C kernel beside its Ruby mirror in MB::Sound::Kernels'
+#   check mode (kernels-1): no Kernels::Mismatch, and C's samples
 # - :recipe: to_ruby(seeds: true), evaluated again, renders the same samples
 # - :document: GraphIO.dump, then GraphIO.load, renders the same samples
 # - :buffer_size: the same render at 800-sample and [367, 368] buffers
@@ -27,7 +29,7 @@ require_relative 'graph_sweep'
 require_relative 'recipe_helpers'
 
 module RelationFuzz
-  RELATIONS = %i[plan_exact plan_fast plan_check recipe document buffer_size].freeze
+  RELATIONS = %i[plan_exact plan_fast plan_check kernel_check recipe document buffer_size].freeze
 
   # Samples per render (a little over a 0.1 s, past the clips' first notes)
   FRAMES = 4800
@@ -318,6 +320,14 @@ module RelationFuzz
         render(g)
       }
       nil
+    when :kernel_check
+      # Every C kernel beside its Ruby mirror (MB::Sound::Kernels' check
+      # mode, kernels-1): no Kernels::Mismatch, and C's samples (check mode
+      # returns them)
+      planned = ->() { g = build(code); MB::Sound::Plan.install(g); render(g) }
+      ref = with_plan(&planned)
+      got = MB::Sound::Kernels.with(:check) { with_plan(&planned) }
+      compare(ref, got, label: 'kernels in check mode vs C')
     when :recipe
       g = build(code)
       text = g.to_ruby(seeds: true)

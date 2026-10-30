@@ -35,7 +35,7 @@ module DocsIndex
   GROUPS = {
     'Signal graph' => {
       'graph_nodes' => 'GraphNode DSL', 'graph_io' => 'Graph I/O: recipes, Ruby export, documents', 'library' => 'Library',
-      'plan_layer' => 'Plan layer', 'feedback_loops' => 'Feedback loops', 'c_extensions' => 'C extensions', 'sound_guards' => 'Sound guards',
+      'plan_layer' => 'Plan layer', 'feedback_loops' => 'Feedback loops', 'c_extensions' => 'C extensions', 'kernels' => 'Kernel registry', 'sound_guards' => 'Sound guards',
     },
     'Values, time, and channels' => {
       'numbers_lengths_phases' => 'Numbers, lengths, intervals, phases', 'params' => 'Params', 'arg_types' => 'Type-dispatched parameters',
