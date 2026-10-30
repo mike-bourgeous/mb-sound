@@ -24,6 +24,8 @@ RSpec.describe('Clip and Kit transform parity', :aggregate_failures) do
     ['ratchet at a rate', 'ratchet(3, rate: 1.n32, velocity: 1.0..0.5)', false],
     ['humanize', 'humanize(1.n64, velocity: 0.2%s)', true],
     ['permute', 'permute(%s)', true],
+    ['vel', 'vel(0.7)', false],
+    ['vel clamped', 'vel(1.5)', false],
   ].freeze
 
   def chars = %w[x X . . . ? 5]
@@ -133,7 +135,6 @@ RSpec.describe('Clip and Kit transform parity', :aggregate_failures) do
       'pitch moves: a kit row is a drum voice, so moving its note moves it to another voice' => %i[transpose ghost_chords],
       'combining and resizing clips (kits combine with Kit#fill, rows by name)' => %i[& | * repeat truncate bake roll],
       'note lengths: drum voices ignore them (Kit#legato is there for gated kits)' => %i[d dd dotted double_dotted t triplet note_length staccato],
-      'vel (omnibus18 is changing its clamping; add Kit#vel there)' => %i[vel],
     }
   end
 

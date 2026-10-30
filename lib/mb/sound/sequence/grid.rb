@@ -259,6 +259,15 @@ module MB
           Kit.new(@rows.transform_values { |c| c.every(n, from: from) })
         end
 
+        # Returns a Kit with every hit's velocity set to +velocity+ (see
+        # Clip#vel; clamped to 0..1 by Feel.fixed_velocity).
+        #
+        #     beat.vel(0.7)
+        def vel(velocity)
+          v = Feel.fixed_velocity(velocity)
+          Kit.new(@rows.transform_values { |c| c.vel(v) })
+        end
+
         # Returns a Kit with every hit ratcheted into +count+ hits (see
         # Clip#ratchet).
         #
