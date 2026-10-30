@@ -688,6 +688,10 @@ module MB
           reset_phase = reset_phase.nil? ? 0.0 : reset_phase.to_f
           count = out.length
           cs = spec[2][0].is_a?(Numo::SComplex) ? 2 : 1
+          # (the kernel's check, so the mirror raises the same error)
+          unless taps >= 1 && os >= 1 && ring.class == Numo::DFloat && ring.ndim == 1 && ring.shape[0] == taps * cs && ring.contiguous?
+            raise ArgumentError, 'Ring must be a contiguous DFloat of taps (complex tables: 2 * taps) elements'
+          end
           f_s, f_a = signal(freq, count)
           pu_s, pu_a = signal(pulses, count)
           pu_s = 0.0 unless pu_a

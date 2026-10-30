@@ -64,7 +64,7 @@ Without a mirror (`Kernels::UNMIRRORED`, with reasons): FastAudio (device and JA
 ## Guards
 
 - `spec/lib/mb/sound/kernels_guard_spec.rb` (`spec/support/kernels_guard.rb`): loads lib/, lists every C function and class of every Fast* module (MB::FastSound, MB::Sound::Fast*, MB::Term::FastTerm), and fails for one neither covered by an entry nor in UNMIRRORED (and for stale names in either); walks lib/ with Prism and fails for a C call outside a method named `*_c` (the C path of a registered kernel, or a helper it calls: Program#run_c, Wavetable#oscillate_c, ...); requires every kernel the check sweep doesn't reach to name the spec that compares it (`KernelsGuard::COMPARED_ELSEWHERE`).
-- `spec/lib/mb/sound/kernels_check_spec.rb`: every graph sweep factory, planned and unplanned, at 128-sample buffers (7 and 800 in the slow tier) under `Kernels.with(:check)`, plus scenes the sweep doesn't build (a session with buses, plots of every mark kind, the UI meters, dice, wavetable sync and sample playback, unison detune modes, biquad steps); then that every checkable kernel was compared (`checked`, `declined`, `nested`) or is listed.  About 25 s on the Mac container, against 30 s for the plain graph sweep at three buffer sizes.
+- `spec/lib/mb/sound/kernels_check_spec.rb`: every graph sweep factory, planned and unplanned, at 128-sample buffers (7 and 800 in the slow tier) under `Kernels.with(:check)`, plus scenes the sweep doesn't build (a session with buses, plots of every mark kind, the UI meters, dice, wavetable sync and sample playback, unison detune modes, biquad steps); then that every checkable kernel was compared (`checked`, `declined`, `nested`) or is listed.  About 25 s on the Mac container (the plain graph sweep: 10 s at its three buffer sizes).
 - `spec/valgrind/memcheck_selection.rb` maps `Kernels.<name>` in changed lib/ lines to the extension behind the kernel (`MemcheckSelection.kernel_modules`, read from the registrations without loading lib/), since call sites no longer name the Fast* module.
 
 ## What check mode found (kernels-1)
@@ -74,7 +74,16 @@ Without a mirror (`Kernels::UNMIRRORED`, with reasons): FastAudio (device and JA
 - `Tone::State.new` restored a complex tone's jump residual as a DFloat (raised `RangeError`): a real bug in `plan_restore` for complex tones with a pending phase jump (Session::Carry), fixed.
 - The tone kernel also consumes a pending clean reset target (`@sync_reset`), now part of its check state.
 - Mirrors that returned values the C side doesn't (plot polylines and areas returning the last assignment) now return nil like C.
+- A check-mode run of the node, session, UI, and extension specs (2753 examples): `Plot::Scale::Log#forward` wrote NaNs into the caller's data (a real bug, also on master-ai), the wavetable mirrors wrote into non-inplace outputs (`Kernels.inplace_buffer`), the sync mirror skipped the kernel's ring check, `Kernels::Arithmetic.accumulate` compared an NArray with a Symbol, and `harmonic_spectra`'s mirror is within 1e-16, not exact, for most phases.  What else failed there is timing and allocation budgets, which check mode changes by design.
 
 ## Costs
 
-`:c` mode: function kernels one extra Ruby frame per call (no allocation; the allocation budget spec is unchanged), method and class kernels nothing.  `:ruby` and `:check` are reference modes: Ruby mirrors are 10-100x slower per buffer (check mode adds deep copies and comparisons), fine for specs, sweeps, and debugging, not for playing.
+Measured 2026-10-30 on the Mac container (i9-9880H, under the heavy-run lock, other agents running):
+
+- `:c` mode is the old code path plus one Ruby frame per function-kernel call: every graph sweep factory, planned and unplanned, at 128- and 37-sample buffers (1020 cases) gives bit-identical samples on the branch and on master-ai 61eb4353; `bin/graph_profile.rb` objects per buffer are identical (fm_bass 88.1 at 128 frames, 394.8 at 800; dnb 84.2 / 365.8) and CPU within run-to-run noise in alternating runs (fm_bass at 128 frames 24.4-28.3% of realtime on master-ai, 21.3-25.1% on the branch; dnb 5.4-7.1% vs 5.6-5.9%).
+- Over the graph sweep factories at 128-sample buffers, three buffers, planned and unplanned (CPU seconds): `:c` 1.46, `:ruby` 6.4-7.0 (4.6x), `:check` 10.8-11.1 (7.5x).  Fine for specs, sweeps, and debugging, not for playing.
+- The relation fuzz's `:kernel_check` relation over 80 more seeds (1000-1079): no mismatches.
+
+## Found with the full-Ruby mode, not fixed here
+
+`MB_SOUND_KERNELS=ruby` over the graph sweep fails one factory, "drums kit builder" at 1-sample buffers, planned: `Tee::SharedBufferModified` downstream of a Notes trigger.  The `notes_fast` path alone does it, and so does master-ai with `MB_SOUND_NOTES_FAST=0`: a Notes reference-path bug (its reused buffer rewritten while a Tee shares it), not a kernel mirror.  (The sweep's coverage guard also misses Notes::EnvelopeInputs in that mode, since only the fast path builds it.)

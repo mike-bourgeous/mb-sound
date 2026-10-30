@@ -371,7 +371,8 @@ module MB
       end
 
       Kernels.register :harmonic_spectra, on: Builder.singleton_class, as: :spectra_from_harmonics,
-        c: :spectra_from_harmonics_c, ruby: :spectra_from_harmonics_ruby, covers: %w[FastWavetable.harmonic_spectra]
+        c: :spectra_from_harmonics_c, ruby: :spectra_from_harmonics_ruby, covers: %w[FastWavetable.harmonic_spectra],
+        tolerance: 1e-15 # (C's sin and cos of a phase vs Complex.polar: exact for the phases builder_spec uses, within 1e-16 for others)
       Kernels.register :half_means, on: Builder.singleton_class, as: :half_means, c: :half_means_c, ruby: :half_means_ruby,
         covers: %w[FastWavetable.half_means]
     end

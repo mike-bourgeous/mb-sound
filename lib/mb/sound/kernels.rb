@@ -383,6 +383,18 @@ module MB
           end
         end
 
+        # The buffer the mirror of a kernel that writes +out+ with
+        # mb_ensure_inplace_sfloat (or the SComplex twin) writes into: +out+
+        # cast to +type+, itself when it was an inplace contiguous one, else
+        # a copy (so a non-inplace +out+ stays as it was, as with C).
+        def inplace_buffer(out, type = Numo::SFloat)
+          inplace = out.inplace?
+          buf = type.cast(out)
+          return buf if inplace && buf.contiguous? && buf.equal?(out)
+
+          buf.equal?(out) || !buf.contiguous? ? buf.dup : buf
+        end
+
         # A deep copy of +x+ for the mirror's half of a check: NArrays,
         # Arrays, Hashes, and Strings are copied (keeping frozen and inplace
         # flags, and objects appearing twice appear twice in the copy),

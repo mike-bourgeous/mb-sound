@@ -383,7 +383,7 @@ module MB
 
           fa = factor(a, a_off, length)
           fb = factor(b, b_off, length)
-          return nil if fa == :bad || fb == :bad
+          return nil if fa.equal?(:bad) || fb.equal?(:bad)
 
           d = data[doff...(doff + length)]
           d = d * fa if fa

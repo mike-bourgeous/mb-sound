@@ -744,7 +744,7 @@ module MB
       # Ruby mirror of #oscillate (the same samples), returning +out+.
       def oscillate_ruby(out, freq, advance, gain, offset, state, tstate, phase_mod, width, scan, interpolation, sample_rate, remove_dc, random_advance = 0.0, noise = nil, scan_wrap: false)
         KernelRuby.oscillate(
-          out, kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, state, tstate,
+          Kernels.inplace_buffer(out, @complex ? Numo::SComplex : Numo::SFloat), kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, state, tstate,
           phase_mod, width, scan, interpolation_code(interpolation), !!remove_dc, random_advance.to_f, noise
         )
       end
@@ -769,7 +769,7 @@ module MB
       # Ruby mirror of #sync.
       def sync_ruby(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false, reset_phase: nil)
         KernelRuby.sync(
-          out, kernel_spec(sample_rate, interpolation, sync: band_limit, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
+          Kernels.inplace_buffer(out, @complex ? Numo::SComplex : Numo::SFloat), kernel_spec(sample_rate, interpolation, sync: band_limit, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
           pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, *Wavetable.sync_filter,
           BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, reset_phase
         )
@@ -814,7 +814,7 @@ module MB
 
       # Ruby mirror of #lookup.
       def lookup_ruby(out, phase, increments, scan, interpolation, sample_rate, wrap, lstate = nil, scan_wrap: false)
-        KernelRuby.lookup(out, kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), phase, increments, scan, interpolation_code(interpolation), wrap_code(wrap), lstate)
+        KernelRuby.lookup(Kernels.inplace_buffer(out, @complex ? Numo::SComplex : Numo::SFloat), kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), phase, increments, scan, interpolation_code(interpolation), wrap_code(wrap), lstate)
       end
 
       # Sample mode player in C: fills +out+ at +freq+ (Hz), advancing the
@@ -831,7 +831,7 @@ module MB
       # Ruby mirror of #play.
       def play_ruby(out, freq, advance, speed, gain, offset, state, tstate, interpolation, sample_rate)
         KernelRuby.play(
-          out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, speed.to_f, gain.to_f, offset.to_f, state, tstate,
+          Kernels.inplace_buffer(out, @complex ? Numo::SComplex : Numo::SFloat), kernel_spec(sample_rate, interpolation), freq, advance.to_f, speed.to_f, gain.to_f, offset.to_f, state, tstate,
           interpolation_code(interpolation)
         )
       end
