@@ -1,8 +1,11 @@
 require 'shellwords'
+require_relative '../../../support/device_capture'
 
 # These use miniaudio's null backend: a timer-driven device thread that runs
 # the real callback path at the real rate without hardware.
 RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
+  include DeviceCapture
+
   let(:rate) { 48000 }
 
   describe '.boost_thread_priority' do
@@ -20,16 +23,18 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
       [:null], -1, 'mb-sound-spec', in_channels, out_channels, sample_rate, device_rate, 0, queue, capture, quality, false, max_queue
     ).tap { |p|
       @playbacks << p
+      remember_capture(p, capture)
     }
   end
 
   # The captured frames as an Array of per-channel SFloats, starting at the
   # first nonzero sample (the null device plays silence before the first
-  # write).
+  # write; wait for the frames an example reads with #wait_for_played, see
+  # spec/support/device_capture.rb).
   def captured(pb)
-    frames = Numo::SFloat.from_binary(pb.captured).reshape(true, pb.device_channels)
-    start = (0...frames.shape[0]).find { |i| frames[i, true].ne(0).any? }
+    x, start = capture_and_start(pb)
     raise 'Nothing was played' if start.nil?
+    frames = x.reshape(true, pb.device_channels)
     pb.device_channels.times.map { |c| frames[start..., c].dup }
   end
 
@@ -130,13 +135,15 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
       end
 
       it 'resamples written audio to the device rate' do
-        pb = playback(sample_rate: 48000, device_rate: 44100, capture: 60000)
+        data = sine # (made before the device starts: under Valgrind the map takes seconds)
+        pb = playback(sample_rate: 48000, device_rate: 44100, capture: DeviceCapture.size(44100))
         expect(pb.sample_rate).to eq(48000)
         expect(pb.device_rate).to eq(44100)
         expect(pb.resampling?).to eq(true)
 
-        write_all(pb, sine, 777) # odd sizes cross libsamplerate's chunks
+        write_all(pb, data, 777) # odd sizes cross libsamplerate's chunks
         wait_until { pb.stats[:queued] == 0 }
+        wait_for_played(pb, 42000)
 
         # One second at 48k is one second at 44.1k (less the converter's delay)
         expect(pb.stats[:frames_written]).to be_within(200).of(44100)
@@ -180,16 +187,16 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
     end
 
     it 'plays exactly what was written, in any buffer sizes' do
-      pb = playback(capture: 12000)
       l = Numo::SFloat.new(9000).rand(-1, 1)
       r = Numo::SFloat.new(9000).rand(-1, 1)
+      pb = playback(capture: DeviceCapture.size(9000))
 
       [0...1, 1...800, 800...5001, 5001...9000].each do |range|
         expect(pb.write([l[range], r[range]])).to eq(range.size)
       end
 
       wait_until { pb.stats[:queued] == 0 }
-      wait_until { pb.captured.bytesize >= 12000 * 8 }
+      wait_for_played(pb, 9000)
       cl, cr = captured(pb)
       expect(cl[0...9000]).to eq(l)
       expect(cr[0...9000]).to eq(r)
@@ -197,17 +204,17 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
     end
 
     it 'converts other NArray types and views to float' do
-      pb = playback(in_channels: 1, out_channels: 1, capture: 4000)
+      pb = playback(in_channels: 1, out_channels: 1, capture: DeviceCapture.size(100))
       data = Numo::DFloat.linspace(-0.5, 0.5, 200)
       pb.write([data[(0..) % 2]])
-      wait_until { pb.stats[:queued] == 0 }
+      wait_for_played(pb, 100)
       expect(captured(pb)[0][0...100].to_a).to eq(Numo::SFloat.cast(data[(0..) % 2]).to_a)
     end
 
     it 'fans a mono input out to every device channel' do
-      pb = playback(in_channels: 1, out_channels: 2, capture: 4000)
+      pb = playback(in_channels: 1, out_channels: 2, capture: DeviceCapture.size(4))
       pb.write([Numo::SFloat[0.1, 0.2, 0.3, 0.4]])
-      wait_until { pb.stats[:queued] == 0 }
+      wait_for_played(pb, 4)
 
       l, r = captured(pb)
       expect(l[0...4].to_a).to eq(Numo::SFloat[0.1, 0.2, 0.3, 0.4].to_a)

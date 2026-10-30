@@ -1,6 +1,8 @@
 # Underrun concealment (ext/mb/sound/fast_audio/mb_conceal.h): the C kernel
 # on synthetic ring states against its Ruby reference, what it plays, and
 # the Playback device path on miniaudio's null backend.
+require_relative '../../../support/device_capture'
+
 RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
   # The C kernel and the Ruby reference run the same operations in the same
   # order (float32 history and output, double arithmetic), so they agree to
@@ -232,10 +234,12 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
   end
 
   describe 'Playback (null backend)' do
-    def playback(conceal_settings, capture: 48000)
+    include DeviceCapture
+
+    def playback(conceal_settings, capture: DeviceCapture.size(48000))
       MB::Sound::FastAudio::Playback.new(
         [:null], -1, 'mb-sound-spec', 1, 1, rate, 0, 0, 4096, capture, 2, false, 0, nil, conceal_settings
-      ).tap { |p| @playbacks << p }
+      ).tap { |p| @playbacks << p; remember_capture(p, capture) }
     end
 
     def wait_until(timeout: 3)
@@ -246,9 +250,11 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
     before { @playbacks = [] }
     after { @playbacks.each(&:close) }
 
+    # The capture from its first nonzero sample (wait for the frames an
+    # example reads with #wait_for_played: spec/support/device_capture.rb)
     def captured(pb)
-      x = Numo::SFloat.from_binary(pb.captured)
-      start = (0...x.length).find { |i| x[i] != 0 }
+      x, start = capture_and_start(pb)
+      raise 'Nothing was played' if start.nil?
       x[start..]
     end
 
@@ -261,6 +267,7 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
       pb.write([b])
       wait_until { pb.stats[:queued] == 0 && pb.stats[:concealed_gaps] >= 2 }
       pb.end_stream
+      wait_for_capture(pb)
 
       x = captured(pb)
       stats = pb.stats
@@ -275,11 +282,12 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
 
     it 'plays silence after the audio with :silence and after end_stream' do
       [[conceal.settings(:silence), false], [conceal.settings(:repeat), true]].each do |settings, mark|
-        pb = playback(settings, capture: 24000)
-        pb.write([signal(0, 2400, 1)[0]])
+        a = signal(0, 2400, 1)[0]
+        pb = playback(settings, capture: DeviceCapture.size(24000))
+        pb.write([a])
         pb.end_stream if mark
         wait_until { pb.stats[:queued] == 0 }
-        wait_until { pb.captured.bytesize >= 24000 * 4 }
+        wait_for_played(pb, 24000)
         x = captured(pb)
         expect(x[2400..].abs.max).to eq(0)
         expect(pb.stats[:concealed]).to eq(0)
