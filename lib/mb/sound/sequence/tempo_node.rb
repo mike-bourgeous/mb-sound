@@ -77,7 +77,8 @@ module MB
         def initialize(duration, mode:, transport: nil, sample_rate: 48000)
           raise ArgumentError, "Mode must be one of #{MODES.inspect} (got #{mode.inspect})" unless MODES.include?(mode)
           raise ArgumentError, "Expected a Duration (got #{duration.inspect})" unless duration.is_a?(Duration)
-          raise ArgumentError, 'Duration must be longer than zero' unless duration.whole_notes > 0
+          Length.check_time(duration, 'A tempo-synced length')
+          raise ArgumentError, "A tempo-synced length must be longer than zero (got #{duration})" unless duration.whole_notes > 0
 
           @duration = duration
           @mode = mode

@@ -342,7 +342,7 @@ module SessionFuzz
 
   # Kit transforms for #generate's kit swaps.
   KIT_TRANSFORMS = [
-    'reverse', 'rotate(1.n16)', 'rotate(-1/8r)', 'shift(1.n8)', 'shift(-1/16r)', 'swing(0.6)', 'humanize(4.ms, velocity: 0.1)',
+    'reverse', 'rotate(1.n16)', 'rotate(-1.n8)', 'shift(1.n8)', 'shift(-1.n16)', 'swing(0.6)', 'humanize(4.ms, velocity: 0.1)',
     'chance(0.7)', 'every(2)', 'ratchet(2)', 'ratchet(2, rate: 1.n32)', 'permute', 'quantize(8, amount: 0.5)',
   ].freeze
 

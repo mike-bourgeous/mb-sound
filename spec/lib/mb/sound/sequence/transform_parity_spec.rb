@@ -15,6 +15,8 @@ RSpec.describe('Clip and Kit transform parity', :aggregate_failures) do
     ['rotate earlier', 'rotate(-3/16r)', false],
     ['shift later', 'shift(1.n8)', false],
     ['shift earlier', 'shift(-1/16r)', false],
+    ['shift earlier by a negative Duration', 'shift(-1.n16)', false],
+    ['rotate earlier by a negated Duration', 'rotate(-(1.n8.dotted))', false],
     ['swing', 'swing(0.6)', false],
     ['swing 8ths', 'swing(2/3r, 8)', false],
     ['quantize', 'quantize(8, amount: 0.5)', false],

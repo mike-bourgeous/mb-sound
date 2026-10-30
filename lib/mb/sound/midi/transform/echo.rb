@@ -39,7 +39,7 @@ module MB
             super(parent, overlap: overlap, jump: jump, transport: transport)
 
             raise ArgumentError, "Echo count must be a non-negative Integer (got #{count.inspect})" unless count.is_a?(Integer) && count >= 0
-            seconds_of(delay) # validates
+            raise ArgumentError, "An echo delay can't be negative (got #{delay.is_a?(Length) ? delay : delay.inspect})" if seconds_of(delay) < 0
             unless gate.nil? || (gate.is_a?(Numeric) && gate > 0) || gate.is_a?(Length)
               raise ArgumentError, "Echo gate must be nil, a positive fraction of the delay, or a Length (got #{gate.inspect})"
             end

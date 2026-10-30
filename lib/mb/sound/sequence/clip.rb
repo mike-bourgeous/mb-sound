@@ -620,7 +620,7 @@ module MB
         # (MIDI::Stream#rotate raises; Stream#shift delays).
         #
         #     seq(C4, E4, G4, B4).n4.rotate(1.beat)        # B4, C4, E4, G4
-        #     seq(C4, E4, G4, B4).n4.rotate(-1/4r)         # E4, G4, B4, C4
+        #     seq(C4, E4, G4, B4).n4.rotate(-1.beat)       # E4, G4, B4, C4
         #     ball.loop.rotate(2.bars)                     # a loop that starts on bar 3 (from 1)
         def rotate(amount)
           raise ArgumentError, 'Cannot rotate a clip without a length' if @length <= 0
@@ -643,7 +643,7 @@ module MB
         # (Kit#shift); MIDI::Stream#shift only delays.
         #
         #     seq(C4, E4, G4, B4).n4.shift(1.beat)         # rest, C4, E4, G4
-        #     seq(C4, E4, G4, B4).n4.shift(-1/4r)          # E4, G4, B4, rest
+        #     seq(C4, E4, G4, B4).n4.shift(-1.beat)        # E4, G4, B4, rest
         def shift(amount)
           raise ArgumentError, 'Cannot shift a clip without a length' if @length <= 0
 
@@ -659,10 +659,24 @@ module MB
           }
         end
 
-        # A #rotate or #shift amount in whole notes: a Duration, or a
+        # A #rotate or #shift amount in whole notes: a Duration (negative
+        # ones move earlier: `-1.n8`), another Length (seconds or samples,
+        # at the current tempo, as Duration.whole_notes reads them), or a
         # Numeric number of whole notes (Floats rationalized).
         def self.offset_of(amount)
-          amount.is_a?(Duration) ? amount.whole_notes : Duration.rational(amount)
+          case amount
+          when Duration then amount.whole_notes
+          when MB::Sound::Length
+            raise ArgumentError, "A shift or rotate amount is a fixed length (got #{amount})" unless amount.fixed?
+
+            amount.to_whole_notes(transport: Sequence.current_transport)
+          when Numeric
+            raise ArgumentError, "A shift or rotate amount is a real number of whole notes or a length like -1.n8 (got #{amount.inspect})" unless amount.real?
+
+            Duration.rational(amount)
+          else
+            raise ArgumentError, "A shift or rotate amount is a length like 1.n8 or -1.beat, or whole notes (got #{amount.inspect})"
+          end
         end
 
         # Returns a clip with every event's velocity set to +velocity+

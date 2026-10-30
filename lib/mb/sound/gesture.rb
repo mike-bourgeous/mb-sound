@@ -251,7 +251,7 @@ module MB
       # Frames after a gesture's start for time +t+ (see .from_hash).
       def self.frames_of(t, per_sample:, rate:, bar_length: 1)
         f = case t
-            when Sequence::Duration then t.whole_notes / per_sample.to_r
+            when Sequence::Duration then t.check_length('A gesture time').whole_notes / per_sample.to_r
             when Length::Samples then t.value.to_r
             when Length::Seconds then t.value.to_r * rate
             when Numeric

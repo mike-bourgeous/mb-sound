@@ -61,7 +61,7 @@ module MB
           raise ArgumentError, "Unknown event marks #{unknown.map(&:inspect).join(', ')} (#{EVENT_MARKS.join(', ')})" unless unknown.empty?
           Sequence::Event.new(start: start.to_r, length: len.to_r, value: value, velocity: velocity, **marks)
         }
-        length = length.whole_notes if length.is_a?(Sequence::Duration)
+        length = length.check_length("events' length:").whole_notes if length.is_a?(Sequence::Duration)
         raise ArgumentError, "events' controls: is a Hash of lanes by name (cc1: [[0r, 0.5], ...]; got #{controls.inspect})" unless controls.nil? || controls.is_a?(Hash)
         lanes = controls&.map { |name, spec| Sequence::ControlLane.from_spec(name, spec) }
         Sequence::Clip.new(list, length: length&.to_r, loop: loop, seed: seed, align: align, performed: performed, controls: lanes)

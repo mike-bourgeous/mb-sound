@@ -112,7 +112,7 @@ module MB
 
         return error('Give at: (an absolute position) or in: (an offset from now), not both') if at && offset
 
-        unless offset.nil? || length_like?(offset) || (offset.is_a?(Numeric) && offset >= 0)
+        unless offset.nil? || (length_like?(offset) && !Length.negative?(offset)) || (offset.is_a?(Numeric) && offset >= 0)
           hint = offset.is_a?(Bar) ? ' (bar(n) is a position; use at:)' : ''
           return error("in: must be a number of bars (at least 0), a Duration, or a Length (got #{offset.inspect})#{hint}")
         end
@@ -120,7 +120,7 @@ module MB
         on = :now if on.is_a?(Numeric) && on == 0
         if on.is_a?(Symbol)
           return error("Unknown launch point #{on.inspect} (use #{ALIGNMENTS.map(&:inspect).join(', ')}, a number of bars, or a note length)") unless ALIGNMENTS.include?(on)
-        elsif !(on.nil? || length_like?(on) || (on.is_a?(Numeric) && on > 0))
+        elsif !(on.nil? || (length_like?(on) && !Length.negative?(on)) || (on.is_a?(Numeric) && on > 0))
           return error("on: must be #{ALIGNMENTS.map(&:inspect).join(', ')}, a number of bars, or a Duration or Length (got #{on.inspect})")
         end
 
