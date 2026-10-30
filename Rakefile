@@ -230,6 +230,16 @@ end
 # when an extension's code is on the allocation stack.  Needs valgrind >=
 # 3.20 (apt install valgrind).  Takes several minutes.
 #
+# The spec files run in several Valgrind processes at once, split by their
+# last memcheck times (spec/valgrind/memcheck_parallel.rb: logs in
+# tmp/memcheck/, merged per-example times in tmp/memcheck_times.json,
+# per-file times shared by every worktree in the main checkout's
+# tmp/memcheck_file_times.json).
+#
+#   MEMCHECK_PARALLEL=N                             N Valgrind processes (default:
+#                                                   the fewest near the best expected
+#                                                   time, at most half the CPUs and one
+#                                                   per 2.5 GB of available memory)
 #   MEMCHECK_SPECS="spec/a_spec.rb spec/b_spec.rb"  run other specs
 #   MEMCHECK_GEN_SUPPRESSIONS=1                     print suppressions for errors
 #   MEMCHECK_GC_STRESS=1                           GC.stress during each extension call
@@ -311,10 +321,13 @@ begin
   end
   RubyMemcheck::ValgrindError.prepend(MemcheckUndefFilter)
 
-  # Built when the task runs: RubyMemcheck::Configuration creates a temp
+  # Built when the task runs, one per Valgrind process (its own temp
+  # directory for the per-PID XML and loaded-features file; +io+ collects
+  # its error report).  RubyMemcheck::Configuration creates the temp
   # directory, which would otherwise be left behind by every rake command.
-  memcheck_config = lambda do
+  memcheck_config = lambda do |io|
     RubyMemcheck::Configuration.new(
+      output_io: io,
       valgrind_options: [
         *RubyMemcheck::Configuration::DEFAULT_VALGRIND_OPTIONS,
         *(ENV['MEMCHECK_UNDEF'] == '1' ? ['--undef-value-errors=yes', '--track-origins=yes'] : []),
@@ -337,34 +350,25 @@ begin
     )
   end
 
-  # Runs +specs+ under Valgrind; a full run (the whole list) then writes the
-  # full-run stamp and refreshes the spec map (MEMCHECK_MAP=0 skips that).
+  # Runs +specs+ under Valgrind in parallel processes (MemcheckParallel);
+  # a full run (the whole list) then writes the full-run stamp and refreshes
+  # the spec map (MEMCHECK_MAP=0 skips that).  Specs shrink their inputs and
+  # skip memcheck_skip examples under Valgrind (MB_SOUND_MEMCHECK=1:
+  # SPEC_MEMCHECK in spec/spec_helper.rb); per-example times go to
+  # tmp/memcheck_times.json (for finding what to trim next).
   run_memcheck = lambda do |specs, full:|
-    config = memcheck_config.call
-    task_name = :"memcheck_rspec_#{Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)}"
-    # Specs shrink their inputs and skip memcheck_skip examples under
-    # Valgrind (SPEC_MEMCHECK in spec/spec_helper.rb); per-example times go to
-    # tmp/memcheck_times.json (for finding what to trim next).
-    ENV['MB_SOUND_MEMCHECK'] = '1'
-    RubyMemcheck::RSpec::RakeTask.new(config, task_name) do |t|
-      t.pattern = specs
-      t.rspec_opts = ['--format', 'progress', '--format', 'json', '--out', 'tmp/memcheck_times.json']
-      t.rspec_opts += ['--require', './spec/valgrind/gc_stress_calls.rb'] if ENV['MEMCHECK_GC_STRESS'] == '1'
-    end
-    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    begin
-      Rake::Task[task_name].invoke
-    ensure
-      ENV.delete('MB_SOUND_MEMCHECK')
-    end
-    puts format('memcheck: %d spec files clean in %.1f min', Array(specs).length, (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) / 60)
+    require_relative 'spec/valgrind/memcheck_parallel'
+    MemcheckParallel.run(
+      specs,
+      config_for: memcheck_config,
+      env: { 'MB_SOUND_MEMCHECK' => '1' },
+      rspec_opts: ENV['MEMCHECK_GC_STRESS'] == '1' ? ['--require', './spec/valgrind/gc_stress_calls.rb'] : [],
+    )
     if full
       stamp = MemcheckSelection.write_stamp
       puts "memcheck: full run recorded in #{MemcheckSelection.stamp_path} (#{stamp['commit'][0, 10]}#{stamp['dirty'] ? ', uncommitted changes' : ''})"
       Rake::Task['memcheck:map'].invoke unless ENV['MEMCHECK_MAP'] == '0'
     end
-  ensure
-    FileUtils.rm_rf(config.temp_dir) if config
   end
 
   desc 'Run the C extension specs under Valgrind memcheck (MEMCHECK_SPECS=... for others)'

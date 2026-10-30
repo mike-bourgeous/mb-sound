@@ -131,9 +131,13 @@ module MemcheckSelection
     "#{INCLUDE_DIR}/mb_ext_helpers.h",
   ].freeze
 
-  # The selection tooling itself doesn't change what memcheck checks.
+  # The selection and runner tooling itself doesn't change what memcheck
+  # checks (the parallel runner's plumbing has its own spec with a stand-in
+  # Valgrind in the normal suite).
   TOOL_FILES = %w[
     spec/valgrind/README
+    spec/valgrind/memcheck_parallel.rb
+    spec/valgrind/memcheck_parallel_spec.rb
     spec/valgrind/memcheck_selection.rb
     spec/valgrind/memcheck_selection_spec.rb
     spec/valgrind/memcheck_map_recorder.rb
