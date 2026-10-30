@@ -48,6 +48,7 @@ module MB
             'GraphNode::Tee' => 'tees', 'GraphNode::Tee::Branch' => 'tees',
             'GraphNode::Constant' => 'constants', 'GraphNode::Knob' => 'knobs', 'GraphNode::Knob::Reader' => 'knobs',
             'GraphNode::Multiplier' => 'arithmetic', 'GraphNode::Mixer' => 'arithmetic', 'GraphNode::ProcNode' => 'arithmetic',
+            'GraphNode::BinaryOperation' => 'arithmetic', 'GraphNode::QualityResonance' => 'arithmetic', 'GraphNode::NoteFrequency' => 'note plumbing',
             'GraphNode::Silence' => 'sequencing', 'GraphNode::NodeSequence' => 'sequencing',
             'GraphNode::Ports::Port' => 'ports', 'Notes::EnvelopeInputs' => 'note plumbing', 'Notes::EnvelopeInputs::Port' => 'note plumbing',
             'Notes::Frequency' => 'note plumbing', 'Notes::Number' => 'note plumbing', 'Notes::Trigger' => 'note plumbing',
@@ -79,7 +80,7 @@ module MB
             GraphNode::Reverb GraphNode::Chorus GraphNode::MultitapDelay GraphNode::FeedbackLoop GraphNode::Dynamics
             GraphNode::Dynamics::Crossover::Band GraphNode::Decimator GraphNode::Sounding GraphNode::Limiter
           ].freeze
-          ARITHMETIC = %w[GraphNode::Multiplier GraphNode::Mixer GraphNode::ProcNode].freeze
+          ARITHMETIC = %w[GraphNode::Multiplier GraphNode::Mixer GraphNode::ProcNode GraphNode::BinaryOperation].freeze
           TRIGGERS = %w[Notes::Trigger Notes::KeyTrigger GraphNode::Dust].freeze
           # (always control signals, wherever they are)
           CONTROL = %w[

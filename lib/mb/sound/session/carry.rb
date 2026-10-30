@@ -155,6 +155,7 @@ module MB
         STATELESS = %w[
           MB::Sound::GraphNode::Tee MB::Sound::GraphNode::Tee::Branch MB::Sound::GraphNode::NodeOutput
           MB::Sound::GraphNode::Mixer MB::Sound::GraphNode::Multiplier MB::Sound::GraphNode::ProcNode
+          MB::Sound::GraphNode::BinaryOperation MB::Sound::GraphNode::NoteFrequency MB::Sound::GraphNode::QualityResonance
           MB::Sound::GraphNode::Constant MB::Sound::GraphNode::Knob MB::Sound::GraphNode::Knob::Reader
           MB::Sound::GraphNode::ChannelMixer MB::Sound::GraphNode::ChannelMixer::Output MB::Sound::GraphNode::Ports::Port
           MB::Sound::GraphNode::UnaryFunction MB::Sound::GraphNode::MathFunction MB::Sound::GraphNode::ComplexNode
