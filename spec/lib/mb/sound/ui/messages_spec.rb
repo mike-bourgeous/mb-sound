@@ -34,7 +34,9 @@ RSpec.describe(MB::Sound::UI::Messages, :aggregate_failures) do
     expect(MB::Sound::UI.messages.recent(1)[0].count).to eq(2)
     expect(@term.wait_for('×2 spec warning: something clipped')).to eq(true), @term.text
     expect(@tiles.tiler.layout.panes).to include(:messages)
-    expect(@term.text).to include('warn: spec warning: something clipped')
+    # (the pane may draw a frame after the flash: wait for it too; a Mac
+    # spec:quick run under load, 2026-10-30, read the screen in between)
+    expect(@term.wait_for('warn: spec warning: something clipped')).to eq(true), @term.text
     expect(@term.text).not_to include(' ! 1 (m) ')
     @term.write("\x1d")
     expect(@term.wait_for(' NAV ')).to eq(true)
