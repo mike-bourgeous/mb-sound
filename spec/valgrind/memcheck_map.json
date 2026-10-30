@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-29",
+  "generated": "2026-10-30",
   "specs": {
     "gems/mb-term/spec/native_spec.rb": {
       "fast_term": [
@@ -15,6 +15,13 @@
         "FastTerm::Grid#set_cell",
         "FastTerm::Grid#to_text",
         "FastTerm::Grid#write_frame"
+      ]
+    },
+    "spec/ext/mb/fast_sound/complex_synthesis_spec.rb": {
+      "fast_sound": [
+        "FastSound::ComplexSynthesis.cot_int",
+        "FastSound::ComplexSynthesis.csc_int",
+        "FastSound::ComplexSynthesis.csc_int_int"
       ]
     },
     "spec/ext/mb/fast_sound_spec.rb": {
@@ -229,6 +236,8 @@
         "FastSound.oscillate"
       ],
       "fast_synth": [
+        "FastSynth.jump_add",
+        "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
       ]
     },
@@ -426,6 +435,8 @@
       ],
       "fast_synth": [
         "FastSynth.blit",
+        "FastSynth.jump_add",
+        "FastSynth.jump_queue",
         "FastSynth.oscillate_bl",
         "FastSynth.oscillate_sync",
         "FastSynth.sync_pulse_edges",
@@ -651,8 +662,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -889,7 +898,6 @@
         "FastArithmetic.copy",
         "FastArithmetic.fill_range",
         "FastArithmetic.mix",
-        "FastArithmetic.product",
         "FastArithmetic.wet_dry"
       ],
       "fast_delay": [
@@ -903,8 +911,10 @@
       "fast_sound": [
         "FastSound.biquad_narray",
         "FastSound.cookbook",
-        "FastSound.matrix_mix",
         "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
       ]
     },
     "spec/lib/mb/sound/graph_node/texture_spec.rb": {
@@ -1042,6 +1052,8 @@
       "fast_synth": [
         "FastSynth.blit",
         "FastSynth.feedback_sine",
+        "FastSynth.jump_add",
+        "FastSynth.jump_queue",
         "FastSynth.oscillate_bl",
         "FastSynth.oscillate_sync",
         "FastSynth.sync_pulse_edges"
@@ -1209,6 +1221,7 @@
         "FastSound.oscillate"
       ],
       "fast_synth": [
+        "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
       ]
     },
@@ -1288,6 +1301,8 @@
         "FastSound.oscillate"
       ],
       "fast_synth": [
+        "FastSynth.jump_add",
+        "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
       ]
     },
@@ -1374,6 +1389,8 @@
         "FastSound.oscillate"
       ],
       "fast_synth": [
+        "FastSynth.jump_add",
+        "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
       ]
     },
@@ -1422,6 +1439,8 @@
         "FastSound.oscillate"
       ],
       "fast_synth": [
+        "FastSynth.jump_add",
+        "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
       ]
     },
@@ -1454,8 +1473,13 @@
         "FastSound.fast_math=",
         "FastSound.number_to_freq"
       ],
+      "fast_synth": [
+        "FastSynth.jump_add",
+        "FastSynth.jump_queue"
+      ],
       "fast_wavetable": [
         "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1525,6 +1549,8 @@
         "FastSound.oscillate"
       ],
       "fast_synth": [
+        "FastSynth.jump_add",
+        "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
@@ -1633,6 +1659,7 @@
         "FastSound.oscillate"
       ],
       "fast_synth": [
+        "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
       ]
     },
@@ -1654,6 +1681,8 @@
         "FastSound.number_to_freq"
       ],
       "fast_synth": [
+        "FastSynth.jump_add",
+        "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
       ]
     },
@@ -1674,9 +1703,13 @@
         "FastSound.smoothstep_buf"
       ],
       "fast_synth": [
+        "FastSynth.jump_add",
+        "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1756,6 +1789,8 @@
       "fast_synth": [
         "FastSynth.blit",
         "FastSynth.feedback_sine",
+        "FastSynth.jump_add",
+        "FastSynth.jump_queue",
         "FastSynth.oscillate_bl",
         "FastSynth.oscillate_sync",
         "FastSynth.sync_pulse_edges"
@@ -1787,6 +1822,8 @@
         "FastSound.oscillate"
       ],
       "fast_synth": [
+        "FastSynth.jump_add",
+        "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
       ]
     },
@@ -1802,6 +1839,8 @@
         "FastSound.phasor"
       ],
       "fast_synth": [
+        "FastSynth.jump_add",
+        "FastSynth.jump_queue",
         "FastSynth.oscillate_bl",
         "FastSynth.oscillate_sync",
         "FastSynth.sync_pulse_edges",
@@ -2165,6 +2204,7 @@
         "ext/mb/sound/include/mb_ext_helpers.h",
         "ext/mb/sound/include/mb_four_pole.h",
         "ext/mb/sound/include/mb_four_pole_tuning.h",
+        "ext/mb/sound/include/mb_jump_step.h",
         "ext/mb/sound/include/mb_osc_shapes.h",
         "ext/mb/sound/include/mb_phase.h",
         "ext/mb/sound/include/mb_resonator.h",
@@ -2182,6 +2222,7 @@
           "ext/mb/sound/include/mb_clip_shape.h",
           "ext/mb/sound/include/mb_envelope.h",
           "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_jump_step.h",
           "ext/mb/sound/include/mb_osc_shapes.h",
           "ext/mb/sound/include/mb_phase.h",
           "ext/mb/sound/include/mb_smooth.h",
@@ -2315,12 +2356,15 @@
     "fast_sound": {
       "dir": "ext/mb/fast_sound",
       "sources": [
+        "complex_synthesis.c",
+        "complex_synthesis.h",
         "fast_sound.c"
       ],
       "modules": [
         "FastSound"
       ],
       "includes": [
+        "ext/mb/fast_sound/complex_synthesis.h",
         "ext/mb/sound/include/mb_biquad.h",
         "ext/mb/sound/include/mb_ext_helpers.h",
         "ext/mb/sound/include/mb_osc_shapes.h",
@@ -2330,7 +2374,13 @@
         "ext/mb/sound/include/mb_vec_sine_osc.h"
       ],
       "depend": {
+        "complex_synthesis.o": [
+          "ext/mb/fast_sound/complex_synthesis.h",
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_osc_shapes.h"
+        ],
         "fast_sound.o": [
+          "ext/mb/fast_sound/complex_synthesis.h",
           "ext/mb/sound/include/mb_biquad.h",
           "ext/mb/sound/include/mb_ext_helpers.h",
           "ext/mb/sound/include/mb_osc_shapes.h",
@@ -2352,12 +2402,14 @@
       "includes": [
         "ext/mb/sound/include/mb_bl_osc.h",
         "ext/mb/sound/include/mb_ext_helpers.h",
+        "ext/mb/sound/include/mb_jump_step.h",
         "ext/mb/sound/include/mb_phase.h"
       ],
       "depend": {
         "fast_synth.o": [
           "ext/mb/sound/include/mb_bl_osc.h",
           "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_jump_step.h",
           "ext/mb/sound/include/mb_phase.h"
         ]
       }
