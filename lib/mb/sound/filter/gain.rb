@@ -5,6 +5,8 @@ module MB
       #
       # TODO: do we need this?  this might be superseded by the graph node system and its mixer and multiplier nodes
       class Gain < Filter
+        node_traits memory: :none
+
         # The filter gain (should be an integer or float).
         attr_accessor :gain
 

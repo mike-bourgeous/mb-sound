@@ -7,6 +7,7 @@ module MB
     class IOInput < IOBase
       include GraphNode
       include GraphNode::IOSampleMixin
+      node_traits memory: :short
 
       attr_reader :frames_read
 

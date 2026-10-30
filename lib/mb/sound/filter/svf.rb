@@ -31,6 +31,8 @@ module MB
       #     # In a graph (cutoff and quality may be nodes):
       #     play 110.hz.saw.filter(:lowpass, cutoff: 0.5.hz.lfo.at(200..3000), quality: 4)
       class SVF < Filter
+        node_traits memory: :short
+
         # Filter types, in the kernel's order (Cookbook::FILTER_TYPES, which
         # has the same order).
         FILTER_TYPES = [

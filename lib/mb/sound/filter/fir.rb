@@ -31,6 +31,8 @@ module MB
       #     rotation = Complex.polar(1, Math::PI / 4)
       #     MB::Sound::Filter::FIR.new(gains: { 20 => rotation, 100 => rotation })
       class FIR < Filter
+        node_traits memory: :long
+
         attr_reader :filter_length, :window_length, :sample_rate, :gain_map, :filter_fft, :gains, :impulse
 
         # The processing delay of the filter.  This delay allows the filter to

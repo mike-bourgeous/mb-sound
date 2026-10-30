@@ -57,6 +57,7 @@ module MB
         include Nameable
         include Traversable
         include MultiOutput
+        node_traits memory: :none, wiring: true
 
         # Raised when reading from a branch after its internal buffer
         # overflows.  This could happen if the downstream buffer size is
@@ -195,6 +196,7 @@ module MB
 
           include GraphNode
           include NodeOutput
+          node_traits memory: :none, wiring: true
 
           # Values for internal use by Tee.
           attr_reader :index, :reader

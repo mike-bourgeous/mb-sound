@@ -26,6 +26,7 @@ module MB
       class HarmonicTable
         include GraphNode
         include GraphNode::SampleRateHelper
+        node_traits memory: :short
 
         # The default number of samples between table rebuilds (about 11 ms
         # at 48 kHz).  Each rebuild builds a two-frame Wavetable (about 100 us

@@ -36,6 +36,7 @@ module MB
       class Resonator
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         # ln(1000), as in the C kernel: the state falls 60 dB in +decay+.
         LN_1000 = 6.907755278982137

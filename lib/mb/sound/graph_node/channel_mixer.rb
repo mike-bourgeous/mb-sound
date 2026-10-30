@@ -39,6 +39,7 @@ module MB
       class ChannelMixer
         include MultiOutput
         include Nameable
+        node_traits memory: :none
 
         # One output channel of a ChannelMixer.
         class Output
@@ -47,6 +48,7 @@ module MB
           include GraphNode
           include GraphNode::SampleRateHelper
           include GraphNode::NodeOutput
+          node_traits memory: :none
 
           def_delegators :@mixer, :sample_rate
 
@@ -90,6 +92,7 @@ module MB
         class Analytic
           include GraphNode
           include GraphNode::SampleRateHelper
+          node_traits memory: :short
 
           def initialize(source, sample_rate:)
             @source = source.get_sampler

@@ -90,6 +90,7 @@ module MB
       class Aftertouch
         include GraphNode
         include GraphNode::SampleRateHelper
+        node_traits memory: :none
 
         # The poly and channel pressure nodes (sampler branches).
         attr_reader :poly, :channel

@@ -10,6 +10,7 @@ module MB
       class NodeSequence
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         # The 0-based index of the active node in the sequence.
         attr_reader :current_node

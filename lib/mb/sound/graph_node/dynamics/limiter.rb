@@ -18,6 +18,7 @@ module MB
         # .process_ruby.  Built by DynamicsMethods#limit.
         class Limiter < Channels
           include Framed
+          node_traits memory: :short
 
           # Samples of delay added by the true-peak detector.
           TRUE_PEAK_DELAY = 6

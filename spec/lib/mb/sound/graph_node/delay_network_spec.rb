@@ -136,8 +136,10 @@ RSpec.describe(MB::Sound::GraphNode::DelayNetwork) do
     end
   end
 
-  it 'keeps synth lanes using it awake (long memory)' do
+  it 'declares long memory that a carry starts fresh (NodeTraits)' do
     net = impulse.multitap(0.1, feedback: 0.5).outputs[0]
-    expect(MB::Sound::Synth.long_memory?(net.instance_variable_get(:@owner))).to eq(true)
+    traits = MB::Sound::NodeTraits.of(net.instance_variable_get(:@owner))
+    expect(traits.memory).to eq(:long)
+    expect(traits).to be_uncarried
   end
 end

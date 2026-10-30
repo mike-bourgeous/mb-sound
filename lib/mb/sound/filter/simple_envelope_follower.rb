@@ -4,6 +4,8 @@ module MB
       # Implements a very simple envelope follower based on instant rise and
       # exponential decay.
       class SimpleEnvelopeFollower < Filter
+        node_traits memory: :short
+
         attr_reader :decay_db, :decay_s, :decay_per_sample, :sample_rate
 
         # Initializes a simple envelope follower.  Peaks decay +:decay_db+

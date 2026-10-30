@@ -13,6 +13,7 @@ module MB
       class FourPole
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         # The MB::Sound::Filter::FourPole holding the state and options (not
         # +filter+, which is the DSL method that adds another filter).

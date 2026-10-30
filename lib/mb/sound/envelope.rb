@@ -123,6 +123,7 @@ module MB
     class Envelope
       include GraphNode
       include GraphNode::SampleRateHelper
+      node_traits memory: :short, idle_check: :sleep_ready?
 
       # Seconds a choke takes to release to 0 (linearly).
       CHOKE_TIME = 0.003
@@ -944,6 +945,16 @@ module MB
       # and won't move until the next note).
       def idle?
         @state[STATE_STAGE] == STAGE_IDLE && (@hold_last || @state[STATE_LEVEL] == 0)
+      end
+
+      # NodeTraits' idle check (may a sleeper holding this envelope sleep
+      # now?): true when the envelope's output stays where it is until its
+      # next input event: #idle?, ended, or sustaining at a level of exactly
+      # 0 (a triggered drum envelope with no sustain, which stays there
+      # until the next hit).  Asked only where a sleeper could fall asleep.
+      def sleep_ready?
+        stage = @state[STATE_STAGE]
+        idle? || stage == STAGE_ENDED || (stage == STAGE_SUSTAIN && @state[STATE_LEVEL] == 0)
       end
 
       # True when a one-shot has finished (see the class description).

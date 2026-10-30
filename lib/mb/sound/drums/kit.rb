@@ -11,6 +11,7 @@ module MB
       #     kit.voices     # { kick: Voice, closed_hat: Voice }
       class Kit
         include GraphNode
+        node_traits memory: :short
 
         # The machine name (e.g. :tr808).
         attr_reader :machine

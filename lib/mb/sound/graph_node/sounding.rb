@@ -24,6 +24,7 @@ module MB
       class Sounding
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         # The source node (or Channels bundle).
         attr_reader :source

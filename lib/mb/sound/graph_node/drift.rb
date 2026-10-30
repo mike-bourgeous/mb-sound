@@ -64,6 +64,7 @@ module MB
         include GraphNode
         include SampleRateHelper
         include TextureRate
+        node_traits memory: :short
 
         # Interpolation names and the kernel's mode numbers (4 is a Curve).
         SMOOTH = { step: 0, linear: 1, cosine: 2, cubic: 3 }.freeze

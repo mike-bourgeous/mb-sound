@@ -93,4 +93,20 @@ RSpec.describe(MB::Sound::Session::Carry, :aggregate_failures) do
     expect(plan).not_to be_full
     expect(plan.to_s).to include('with memory that starts fresh (crossfaded)')
   end
+
+  # (research-snapshot-mutability: multitap and ping_pong aren't GraphNodes,
+  # so Carry counted them as carried and cut their echoes with no declick;
+  # every node kind now declares its memory, NodeTraits)
+  it 'crossfades a patch whose only memory is a multitap or a ping-pong' do
+    [->(c) { CARRY_LEAD.(c).multitap(0.2, 0.35) }, ->(c) { CARRY_LEAD.(c).ping_pong(0.25, feedback: 0.5) }].each do |patch|
+      plain, = play(patch: patch, frames: 100_000)
+      carried, plan = play(->(s) { CARRY_REBUILD.(s) }, patch: patch, frames: 100_000)
+      expect(plan).not_to be_full
+      expect(plan.uncarried).to eq(1)
+      expect(plan.matched).to eq(plan.stateful)
+      # (no click: the swap's largest step between samples is the sound's own size)
+      steps = carried[(CARRY_SWAP - 480)...(CARRY_SWAP + 480)].diff.abs.max
+      expect(steps).to be < 2 * plain[(CARRY_SWAP - 4800)...CARRY_SWAP].diff.abs.max
+    end
+  end
 end

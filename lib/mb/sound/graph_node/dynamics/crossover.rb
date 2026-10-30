@@ -19,6 +19,8 @@ module MB
         # MB::Sound::FastDynamics.crossover, exact Ruby mirror
         # .process_ruby.  Built by DynamicsMethods#bands.
         class Crossover < Channels
+          node_traits memory: :short
+
           # Crossover op kinds (as in the kernel).
           SPLIT = 0
           LOW = 1
@@ -40,6 +42,7 @@ module MB
           class Band
             include GraphNode
             include GraphNode::NodeOutput
+            node_traits memory: :none
 
             # The band index (0 lowest).
             attr_reader :index

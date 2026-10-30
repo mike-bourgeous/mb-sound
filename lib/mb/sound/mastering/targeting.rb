@@ -211,6 +211,7 @@ module MB
           class Node
             include GraphNode
             include GraphNode::SampleRateHelper
+            node_traits memory: :short
 
             def initialize(input, curve, session)
               @input = input.get_sampler
@@ -243,10 +244,13 @@ module MB
         # and the steps after it again without the rest of the chain (which
         # may read knobs, buses, or players, and draw random seeds).
         class Tap < GraphNode::Channels
+          node_traits memory: :none
+
           # One output of a Tap.
           class Output
             include GraphNode
             include GraphNode::NodeOutput
+            node_traits memory: :none
 
             def initialize(tap:, index:, input:)
               @owner = tap

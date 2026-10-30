@@ -26,6 +26,7 @@ module MB
     #     filter(noise, 1000.hz.lowpass)    # a filter at the pitch's frequency
     class Pitch
       include GraphNode
+      node_traits memory: :short
 
       # Creates a Pitch from a frequency in Hz, a wavelength (e.g.
       # `2.meters`), or a node producing Hz.

@@ -19,6 +19,7 @@ module MB
         # of every read at the tempo of that read, like ClipSource.
         module Timeline
           include Sequence::TimelineNode
+          node_traits memory: :none, timeline: :events
 
           # The timeline position (whole notes) at stream +time+ (seconds),
           # at the current tempo from the last read on.

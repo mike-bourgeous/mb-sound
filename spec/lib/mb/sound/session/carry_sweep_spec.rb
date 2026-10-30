@@ -65,4 +65,51 @@ RSpec.describe('Session::Carry over the shipped presets', :aggregate_failures) d
       end
     end
   end
+
+  # Effects after a voice, each with state no carry copies yet (NodeTraits'
+  # carry :fresh): the swap must crossfade, never cut.  Multi-output effects
+  # (multitap, ping_pong) once counted as fully carried because they aren't
+  # GraphNodes, so their echoes stopped on a hard cut (research-snapshot-
+  # mutability); a new effect kind belongs in this list.
+  SWEEP_VOICE = ->(c) { c.synth(voices: 2) { |v| v.hz.saw.lp4(1500.hz, resonance: 0.2) * v.amp_env(0.01, 0.2, 0.6, 0.3) } }
+  SWEEP_EFFECTS = {
+    multitap: ->(x) { x.multitap(0.2, 0.35) },
+    multitap_feedback: ->(x) { x.multitap(0.2, 0.35, feedback: 0.4) },
+    ping_pong: ->(x) { x.ping_pong(0.25, feedback: 0.5) },
+    delay: ->(x) { x.delay(0.3, feedback: 0.6) },
+    reverb: ->(x) { x.reverb(:hall, mix: 0.5) },
+    chorus: ->(x) { x.chorus(:juno2) },
+    tape_echo: ->(x) { x.tape_echo(:dub) },
+    formant: ->(x) { x.formant(:a, :o) },
+  }.freeze
+
+  def play_patch(patch, rebuild)
+    MB::Sound.rewind
+    MB::Sound.seed(1)
+    out = MB::Sound::Sampler::CaptureOutput.new(channels: 2, buffer_size: 800)
+    s = MB::Sound::Session.new(output: out, realtime: false)
+    MB::Sound::Session.with_context(session: s) do
+      MB::Sound.track(:lead, &patch)
+      MB::Sound.bg(:lead, SWEEP_NOTES)
+    end
+    4.times { s.process_buffer }
+    MB::Sound::Session.with_context(session: s) { SWEEP_REBUILD.(s) } if rebuild
+    150.times { s.process_buffer }
+    [Numo::DFloat.cast(out.captured[0]), s.last_carry]
+  ensure
+    s&.close
+  end
+
+  SWEEP_EFFECTS.each do |name, fx|
+    it "crossfades a voice through #{name} (state no carry copies)" do
+      patch = ->(c) { fx.(SWEEP_VOICE.(c)) }
+      plain, = play_patch(patch, false)
+      carried, plan = play_patch(patch, true)
+      expect(plan).not_to be_full, "#{name}: #{plan}"
+      expect(plan.uncarried).to be > 0
+      expect(plan.matched).to eq(plan.stateful), "#{name} (#{plan})"
+      expect(carried[0...SWEEP_SWAP]).to eq(plain[0...SWEEP_SWAP])
+      expect(carried.isnan.count_true).to eq(0)
+    end
+  end
 end

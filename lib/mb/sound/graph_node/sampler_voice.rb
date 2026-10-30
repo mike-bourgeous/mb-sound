@@ -38,6 +38,7 @@ module MB
       class SamplerVoice
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short, idle_check: :idle?
 
         # The instrument played.
         attr_reader :instrument

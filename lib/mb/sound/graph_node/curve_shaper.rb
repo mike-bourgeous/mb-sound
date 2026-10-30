@@ -38,6 +38,7 @@ module MB
       class CurveShaper
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         # Curve sources of the C kernel.
         FORMS = { table: 0, poly: 1, cos: 2, exp: 3 }.freeze

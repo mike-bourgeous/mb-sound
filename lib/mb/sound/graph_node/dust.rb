@@ -90,6 +90,7 @@ module MB
         include GraphNode
         include SampleRateHelper
         include TextureRate
+        node_traits memory: :short
 
         # The random seed.
         attr_reader :seed

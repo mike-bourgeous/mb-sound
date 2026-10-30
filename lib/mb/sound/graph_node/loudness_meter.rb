@@ -24,10 +24,13 @@ module MB
       #     m = file_input('song.flac').loudness_meter   # a stereo bundle
       #     bg m.softclip   # chain on as usual; the meter sees the input
       class LoudnessMeter < Channels
+        node_traits memory: :none
+
         # One pass-through output of a LoudnessMeter.
         class Output
           include GraphNode
           include GraphNode::NodeOutput
+          node_traits memory: :none
 
           # The index of this output.
           attr_reader :index

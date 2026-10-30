@@ -26,6 +26,7 @@ module MB
         include GraphNode
         include SampleRateHelper
         include Sequence::TimelineNode
+        node_traits memory: :short, timeline: true
 
         # The source node.
         attr_reader :source

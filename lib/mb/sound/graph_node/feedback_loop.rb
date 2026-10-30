@@ -116,11 +116,13 @@ module MB
       class FeedbackLoop
         include GraphNode
         include GraphNode::SampleRateHelper
+        node_traits memory: :long
 
         # The loop variable (+fb+ in the examples): the loop's output (see the
         # class description).  Its #sample is only used by the fallback.
         class Variable
           include GraphNode
+          node_traits memory: :short
 
           def initialize(loop)
             @loop = loop

@@ -12,6 +12,7 @@ module MB
       class Frequency
         include GraphNode
         include GraphNode::SampleRateHelper
+        node_traits memory: :short
 
         # The note number node.
         attr_reader :number

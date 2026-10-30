@@ -10,6 +10,7 @@ module MB
       class SemitoneShift
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         def initialize(frequency, semitones, sample_rate: 48000)
           @sample_rate = sample_rate.to_f

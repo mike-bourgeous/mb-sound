@@ -109,6 +109,7 @@ module MB
     class Synth
       include GraphNode
       include GraphNode::SampleRateHelper
+      node_traits memory: :short, carry: :own
 
       # Output controls (see the class description).
       CONTROLS = [:volume, :expression, :pan].freeze
@@ -134,6 +135,7 @@ module MB
       class Output
         include GraphNode
         include GraphNode::SampleRateHelper
+        node_traits memory: :none
 
         # The channel index.
         attr_reader :index
@@ -245,6 +247,7 @@ module MB
         @grid_offset = nil
         @zeros = nil
         @skippable_base = nil
+        @idle_nodes = nil
         @boundary = nil
         @lane_sets = nil
         @boundary_cache = nil
@@ -631,21 +634,6 @@ module MB
       # did before the grid (see #setup_idle_skipping).
       SKIP_GRID = 800
 
-      # Node classes whose state can hold sound that comes back after a
-      # silent stretch (delays, reverbs, long FIR filters) or that follow
-      # the timeline (tempo LFOs), so lanes using them are never skipped.
-      # MIDI transforms upstream of the allocator (echo, arp, ...) and clip
-      # sources follow the timeline too but only make events, which wake
-      # lanes, so they don't count (clip synths skip idle lanes since
-      # 2026-10-10, user decision "yes, for now").
-      def self.long_memory?(node)
-        node.is_a?(GraphNode::Reverb) || node.is_a?(GraphNode::MultitapDelay) || node.is_a?(GraphNode::DelayNetwork) ||
-          node.is_a?(GraphNode::FeedbackLoop) ||
-          (node.is_a?(Sequence::TimelineNode) && !node.is_a?(MIDI::Transform) && !node.is_a?(MIDI::ClipSource)) ||
-          (node.respond_to?(:base_filter) && (node.base_filter.is_a?(Filter::Delay) || node.base_filter.is_a?(Filter::FIR))) ||
-          node.is_a?(Filter::Delay) || node.is_a?(Filter::FIR)
-      end
-
       # Idle lane skipping (+:skip_idle+, on by default).  A lane is skipped
       # (its graph isn't sampled, and it outputs zeros) from a point of the
       # SKIP_GRID (every 800 samples of the synth's own time) where
@@ -653,7 +641,16 @@ module MB
       #   envelope made through it idle), and
       # - every output channel of the lane stayed within -120 dB (SILENCE)
       #   over the grid cell before it,
-      # and its graph has no long-memory nodes (see .long_memory?).  Blocks
+      # - every node of the lane's own with an idle check (NodeTraits:
+      #   envelopes, sampler voices, drum repeats) says it may sleep,
+      # and its graph has no node that blocks sleeping (NodeTraits'
+      # blocks_sleep?: state holding sound that comes back after a silent
+      # stretch, like delays, reverbs, and long FIR filters, without an idle
+      # check of its own, or a signal following the timeline, like tempo
+      # LFOs; MIDI transforms upstream of the allocator and clip sources
+      # follow the timeline too but only make events, which wake lanes, so
+      # clip synths skip idle lanes since 2026-10-10, user decision "yes,
+      # for now").  Blocks
       # are split at grid points where a lane may fall asleep (see
       # #sleep_candidate), so the same samples are skipped at any buffer
       # size.  While skipped, the lane's own Notes nodes and its branches of
@@ -692,8 +689,17 @@ module MB
         # in the other).  Decided once from the node types, not from the
         # installed regions (which MB_SOUND_PLAN and rebuilds change).
         @skippable_base = graphs.each_with_index.map { |g, idx|
-          @skip_idle && g.none? { |n| Synth.long_memory?(n) } && g.any? { |n| n.is_a?(Notes::Node) && n.notes.equal?(@notes[idx]) } &&
+          @skip_idle && g.none? { |n| NodeTraits.blocks_sleep?(n) } && g.any? { |n| n.is_a?(Notes::Node) && n.notes.equal?(@notes[idx]) } &&
             !lane_fusable?(graphs, sets, idx)
+        }
+
+        # The lane's own nodes with an idle check (NodeTraits), asked where
+        # the lane could fall asleep (nodes shared with other lanes answer
+        # for those lanes too, so they don't keep this one awake)
+        @idle_nodes = graphs.each_with_index.map { |g, idx|
+          next [] unless @skippable_base[idx]
+
+          NodeTraits.idle_checked(g.reject { |n| sets.each_with_index.any? { |set, j| j != idx && set[n.__id__] } })
         }
 
         # So lanes are grouped only if none of them may be skipped;
@@ -787,14 +793,15 @@ module MB
       end
 
       # True if every graph node of lane +idx+'s graph (+graphs+, with the
-      # id sets +sets+; MIDI streams aren't graph nodes) other than Tees
-      # and nodes shared with other lanes is of a type plans can fuse in
+      # id sets +sets+; MIDI streams aren't graph nodes) other than wiring
+      # (Tees and their branches: NodeTraits' +wiring+) and nodes shared
+      # with other lanes is of a type plans can fuse in
       # its current settings (Plan.fusable_type?), whether or not plans are
       # on: such lanes are never skipped while idle (see
       # #setup_idle_skipping).
       def lane_fusable?(graphs, sets, idx)
         graphs[idx].all? { |n|
-          !n.is_a?(GraphNode) || n.is_a?(GraphNode::Tee) || n.is_a?(GraphNode::Tee::Branch) ||
+          !n.is_a?(GraphNode) || NodeTraits.of(n).wiring ||
             sets.each_with_index.any? { |set, j| j != idx && set[n.__id__] } ||
             Plan.fusable_type?(n)
         }
@@ -1286,7 +1293,7 @@ module MB
           if start + stop == g
             silent = !@cell_loud[idx]
             @cell_loud[idx] = false
-            if silent && stop == len && @notes[idx].voice_idle?
+            if silent && stop == len && @notes[idx].voice_idle? && NodeTraits.all_idle?(@idle_nodes[idx])
               @skipping[idx] = true
               @skip_generation[idx] = @allocator.lanes[idx].generation
             end

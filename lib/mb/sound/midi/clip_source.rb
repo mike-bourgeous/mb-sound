@@ -30,6 +30,7 @@ module MB
       class ClipSource
         include Source
         include Sequence::TimelineNode
+        node_traits memory: :none, timeline: :events
 
         # The Clip being played.
         attr_reader :clip

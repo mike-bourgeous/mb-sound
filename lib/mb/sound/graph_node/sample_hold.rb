@@ -19,6 +19,7 @@ module MB
       class SampleHold
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         # The source (a sampler branch), or nil for random values.
         attr_reader :source

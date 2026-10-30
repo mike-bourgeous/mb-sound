@@ -159,6 +159,7 @@ module MB
       class TimeScale
         include GraphNode
         include GraphNode::SampleRateHelper
+        node_traits memory: :none
 
         KINDS = [:velocity, :key].freeze
 

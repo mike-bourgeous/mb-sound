@@ -6,6 +6,7 @@ module MB
       class Quantize
         include GraphNode
         include SampleRateHelper
+        node_traits memory: :short
 
         # Sample rate (does not affect behavior of this node).
         attr_reader :sample_rate

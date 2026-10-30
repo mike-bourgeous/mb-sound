@@ -19,6 +19,7 @@ module MB
         extend Forwardable
 
         include MultiOutput
+        node_traits memory: :none
 
         # Raised when any channel's internal buffer overflows.  This would
         # happen if the downstream buffer size is significantly larger than the
@@ -35,6 +36,7 @@ module MB
 
           include GraphNode
           include NodeOutput
+          node_traits memory: :none
 
           def_delegators :@split, :sample_rate, :sample_rate=, :at_rate, :sources, :buffer_size, :original_source
 

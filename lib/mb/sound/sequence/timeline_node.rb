@@ -1,3 +1,5 @@
+require_relative '../node_traits'
+
 module MB
   module Sound
     module Sequence
@@ -63,3 +65,6 @@ module MB
     end
   end
 end
+
+# Timeline nodes say how they follow the timeline (NodeTraits' +timeline+).
+MB::Sound::NodeTraits.attach(MB::Sound::Sequence::TimelineNode)

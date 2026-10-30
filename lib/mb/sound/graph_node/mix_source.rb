@@ -22,6 +22,7 @@ module MB
       #     chain.map { |c| c.sample(3) }
       class MixSource
         include MultiOutput
+        node_traits memory: :none
 
         # One channel of a MixSource.
         class Channel
@@ -29,6 +30,7 @@ module MB
 
           include GraphNode
           include NodeOutput
+          node_traits memory: :none
 
           def_delegators :@owner, :sample_rate, :sources
 

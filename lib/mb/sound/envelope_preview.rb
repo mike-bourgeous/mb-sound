@@ -122,6 +122,7 @@ module MB
       # of the envelope preview's copy (Plot::Panels::EnvelopeView).
       class PreviewGate
         include GraphNode
+        node_traits memory: :short
 
         def initialize(on, sample_rate)
           @on = on

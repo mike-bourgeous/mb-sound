@@ -9,6 +9,8 @@ module MB
       #
       # TODO: Use an FIR filter instead of triggering on step changes?
       class Smoothstep < Filter
+        node_traits memory: :short
+
         # The sample rate given to the constructor, in Hz.
         attr_reader :sample_rate
 

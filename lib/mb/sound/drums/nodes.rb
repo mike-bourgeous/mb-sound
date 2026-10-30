@@ -12,6 +12,7 @@ module MB
       class Repeats
         include GraphNode
         include GraphNode::SampleRateHelper
+        node_traits memory: :short, idle_check: :idle?
 
         # The repeats as [seconds, gain] pairs.
         attr_reader :taps
@@ -95,6 +96,7 @@ module MB
       class ChokeGate
         include GraphNode
         include GraphNode::SampleRateHelper
+        node_traits memory: :short
 
         def initialize(trigger, choke, sample_rate: 48000)
           @trigger = trigger.get_sampler
@@ -201,6 +203,7 @@ module MB
       class Flams
         include GraphNode
         include GraphNode::SampleRateHelper
+        node_traits memory: :short, idle_check: :idle?
 
         # The grace stroke's share of the hit's velocity.
         GRACE = 0.6

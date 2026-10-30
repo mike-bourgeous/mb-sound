@@ -4,6 +4,8 @@ module MB
       # An array of identical filters.  When called with an array of data to
       # process, each filter receives its corresponding element of the array.
       class FilterBank < Filter
+        node_traits memory: :short
+
         class << self
           # Used by #butterworth and #cookbook to scale filter frequency across
           # the filter bank.  Yields the index and scaled f_center for the index,

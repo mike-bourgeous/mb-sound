@@ -14,6 +14,7 @@ module MB
         extend Forwardable
 
         include GraphNode
+        node_traits memory: :short
 
         # The size of the buffer that will be used upstream.
         attr_reader :upstream_count

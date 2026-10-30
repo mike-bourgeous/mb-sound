@@ -10,6 +10,7 @@ module MB
 
       include GraphNode
       include GraphNode::IOSampleMixin
+      node_traits memory: :short
 
       def_delegators :@output, :sample_rate, :channels, :closed?
 

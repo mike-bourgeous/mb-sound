@@ -41,6 +41,7 @@ module MB
         include GraphNode
         include SampleRateHelper
         include Sequence::TimelineNode
+        node_traits memory: :short, timeline: true
 
         MODES = [:stretch, :resample].freeze
         ALIGNS = [:timeline, :launch].freeze

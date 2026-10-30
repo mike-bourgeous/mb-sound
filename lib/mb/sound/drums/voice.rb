@@ -12,9 +12,10 @@ module MB
       # never end by themselves); looping clips and live MIDI play forever.
       #
       # Idle skipping (+skip_idle: true+, the default): after SLEEP_TIME of
-      # output within -120 dB (and with every sampler voice and Repeats in
-      # its graph idle, so a reversed sample's quiet start or a late burst
-      # still plays), the voice stops sampling its graph (giving
+      # output within -120 dB (and with every node in its graph that has an
+      # idle check idle: sampler voices, Repeats, flams, envelopes; see
+      # NodeTraits; so a reversed sample's quiet start or a late burst still
+      # plays), the voice stops sampling its graph (giving
       # zeros) until its next hit, like Synth's idle lanes.  Not exactly
       # the same as rendering every sample (free-running oscillators and
       # noise pause while skipped, which only changes their phase), but the
@@ -22,12 +23,14 @@ module MB
       # grid of Synth::SKIP_GRID samples (after SLEEP_TIME rounded up to
       # whole grid cells of silence), splitting a buffer there if needed,
       # and wakes on the exact sample of the hit (2026-10-13; before, both
-      # moved with the buffer edges).  Graphs with delays, reverbs, FIR
-      # filters, or tempo nodes are never skipped (see
-      # Synth.long_memory?); nodes shared with other voices (e.g. a kit's
+      # moved with the buffer edges).  Graphs with a node that blocks
+      # sleeping (delays, reverbs, FIR filters without an idle check, or
+      # tempo nodes: NodeTraits' blocks_sleep?) are never skipped; nodes
+      # shared with other voices (e.g. a kit's
       # metal bank) are still read while skipped.
       class Voice
         include GraphNode
+        node_traits memory: :short, carry: :fresh
 
         # Below this peak (-90 dB) a voice counts as quiet (for ending).
         QUIET = 10 ** (-90 / 20.0)
@@ -44,6 +47,7 @@ module MB
         # Hands one buffer of a source the Voice read to the voice's graph.
         class Tap
           include GraphNode
+          node_traits memory: :short
 
           attr_reader :sample_rate
 
@@ -310,9 +314,9 @@ module MB
             if start + stop == g
               @silent_cells = @cell_loud ? 0 : @silent_cells + 1
               @cell_loud = false
-              # Samplers and repeats with sound to come (a reversed
-              # sample's quiet start, a late burst) keep the voice awake
-              @sleeping = true if @silent_cells >= need && @busy.all?(&:idle?)
+              # Nodes with sound to come (a reversed sample's quiet start,
+              # a late burst) keep the voice awake
+              @sleeping = true if @silent_cells >= need && MB::Sound::NodeTraits.all_idle?(@busy)
             end
             i = stop
           end
@@ -367,15 +371,15 @@ module MB
         # do), leaving out nodes that others of these read.
         def setup_skipping(enabled)
           nodes = @graph.graph(include_tees: true)
-          # Clip sources are read through Notes nodes, which stay in step
-          skippable = !!enabled && nodes.none? { |n| MB::Sound::Synth.long_memory?(n) && !n.is_a?(MB::Sound::MIDI::Source) }
+          # (clip sources only make events: NodeTraits' timeline :events)
+          skippable = !!enabled && nodes.none? { |n| MB::Sound::NodeTraits.blocks_sleep?(n) }
           unless skippable
             @busy = []
             @skippable = false
             return
           end
 
-          @busy = nodes.select { |n| n.is_a?(GraphNode::SamplerVoice) || n.is_a?(Repeats) }
+          @busy = MB::Sound::NodeTraits.idle_checked(nodes)
 
           set = nodes.to_h { |n| [n.__id__, true] }
           set[@graph.__id__] = true

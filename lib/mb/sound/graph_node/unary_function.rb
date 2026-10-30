@@ -17,6 +17,7 @@ module MB
       # complex magnitude, not GraphNode#abs, the antialiased shaper).
       class UnaryFunction
         include GraphNode
+        node_traits memory: :none
 
         # The function (a key of the subclass's FUNCTIONS).
         attr_reader :function

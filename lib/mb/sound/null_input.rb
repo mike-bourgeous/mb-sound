@@ -8,6 +8,7 @@ module MB
     class NullInput
       include GraphNode
       include GraphNode::IOSampleMixin
+      node_traits memory: :short
 
       attr_reader :channels, :length, :remaining, :samples_read, :sample_rate, :buffer_size
 

@@ -283,6 +283,7 @@ module MB
         class GmTime
           include GraphNode
           include GraphNode::SampleRateHelper
+          node_traits memory: :none
 
           # The controller node (a sampler branch).
           attr_reader :factor

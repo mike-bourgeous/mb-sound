@@ -34,6 +34,7 @@ module MB
       class DelayNetwork
         include SampleRateHelper
         include MultiOutput
+        node_traits memory: :long
 
         # One output tap of a DelayNetwork.
         class Tap
@@ -42,6 +43,7 @@ module MB
           include GraphNode
           include SampleRateHelper
           include NodeOutput
+          node_traits memory: :none
 
           # The delay time node (if any) and the network.
           attr_reader :sources

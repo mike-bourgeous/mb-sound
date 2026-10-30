@@ -19,12 +19,14 @@ module MB
       class Grains
         include MultiOutput
         include Nameable
+        node_traits memory: :short
 
         # One output channel (0 left, 1 right).
         class Output
           include GraphNode
           include GraphNode::SampleRateHelper
           include GraphNode::NodeOutput
+          node_traits memory: :none
 
           attr_reader :index
 

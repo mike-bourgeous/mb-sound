@@ -100,6 +100,8 @@ module MB
       #     play v.hz.saw * v.amp_env
       #     play (v.hz.saw + v.hz.transpose(-1.oct).square.free) * v.amp_env
       class NotePitch < MB::Sound::Pitch
+        node_traits memory: :none
+
         # The Notes instance this pitch follows.
         attr_reader :notes
 

@@ -4,6 +4,8 @@ module MB
       # Subclass for multi-filter classes like FilterChain and FilterSum with
       # helpers for managing extra inputs, calling multiple filters, etc.
       class FilterSet < Filter
+        node_traits memory: :short
+
         class FilterCycleError < RuntimeError; end
         class FilterSampleRateError < RuntimeError; end
 

@@ -11,8 +11,9 @@ module MB
       #
       # A sub-lane falls asleep at a point of the Synth's skip grid
       # (Synth::SKIP_GRID, 800 samples of the synth's own time) after a
-      # whole grid cell whose output was exactly zero, with every envelope
-      # and sampler voice inside it idle (#idle_nodes), and wakes on the
+      # whole grid cell whose output was exactly zero, with every node inside
+      # it that has an idle check (NodeTraits: envelopes, sampler voices)
+      # idle, and wakes on the
       # exact sample of the next lane event for which +wake+ (a Proc taking
       # a MIDI::Event; nil for every event) is true, or at a content jump
       # (a new stream generation: seeks, restarts).  While asleep its
@@ -33,18 +34,21 @@ module MB
       # Sub-lanes skip only in a Synth lane whose Notes is +notes+ (outside
       # one, or with Synth.sub_lanes off, they pass their inputs through),
       # and only if every node inside reads nodes shared with the rest of
-      # the lane through Tees, has no long-memory node (Synth.long_memory?),
+      # the lane through Tees, has no node that blocks sleeping
+      # (NodeTraits' blocks_sleep?: delays, reverbs, tempo nodes, ...),
       # and shares its zone value indices with no node outside (see
       # #skippable? and #reason).  A plan boundary.
       class SubLane
         include MultiOutput
         include Nameable
+        node_traits memory: :none
 
         # One output channel of a SubLane.
         class Output
           include GraphNode
           include GraphNode::SampleRateHelper
           include GraphNode::NodeOutput
+          node_traits memory: :none
 
           attr_reader :index
 
@@ -322,7 +326,7 @@ module MB
               reason ||= "#{n} reads #{s} without a Tee"
             end
           end
-          reason ||= nodes.find { |n| Synth.long_memory?(n) }&.then { |n| "#{n} remembers sound (#{n.class})" }
+          reason ||= nodes.find { |n| NodeTraits.blocks_sleep?(n) }&.then { |n| "#{n} remembers sound or follows the timeline (#{n.class})" }
 
           # Zone value indices must be read by this sub-lane only
           zones = @lane_graph.select { |n| n.is_a?(ZoneValue) }
@@ -347,7 +351,7 @@ module MB
             advance: own,
             branches: branches,
             envelopes: nodes.select { |n| n.is_a?(MB::Sound::Notes::NoteEnvelope) },
-            idle: nodes.select { |n| n.respond_to?(:idle?) && (n.is_a?(MB::Sound::Envelope) || n.is_a?(SamplerVoice)) },
+            idle: NodeTraits.idle_checked(nodes),
           }
           @reason = reason
           if reason && @asleep
@@ -596,7 +600,7 @@ module MB
             if start + stop == g
               silent = !@cell_loud
               @cell_loud = false
-              if silent && stop == len && a[:idle].all?(&:idle?)
+              if silent && stop == len && NodeTraits.all_idle?(a[:idle])
                 @asleep = true
                 @generation = @lane.generation
               end

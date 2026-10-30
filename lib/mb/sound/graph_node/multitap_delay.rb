@@ -10,6 +10,7 @@ module MB
       class MultitapDelay
         include SampleRateHelper
         include MultiOutput
+        node_traits memory: :long
 
         # One output tap from the multitap delay.
         class DelayTap
@@ -18,6 +19,7 @@ module MB
           include GraphNode
           include SampleRateHelper
           include NodeOutput
+          node_traits memory: :none
 
           # Graph nodes or numeric values that feed into this delay tap for
           # audio or delay time.

@@ -7,6 +7,7 @@ module MB
       # See bin/flanger.rb and bin/tape_delay.rb for examples.
       class Delay < Filter
         include GraphNode::SampleRateHelper
+        node_traits memory: :long
 
         # The default delay-time smoothing rate in seconds per second.
         DEFAULT_SMOOTHING_RATE = 0.5
