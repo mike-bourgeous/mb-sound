@@ -28,7 +28,7 @@ Every named thing (presets at every scale: effects, instruments, kits, clips, ma
 
 ### [C Extensions (compiled via rake-compiler)](c_extensions.md)
 
-25 C extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/` and mb-term's `fast_term`), each building `lib/mb/sound/<name>.so` (`rake compile`).  New C code goes in purpose-specific extensions, not `fast_sound`; shared helpers are `static inline` in `ext/mb/sound/include/mb_ext_helpers.h` and shared kernels in `ext/mb/sound/include/mb_*.h`.  Every kernel has a Ruby reference that specs compare with it (existing ones exact mirrors, several built with `-ffp-contract=off`; new ones may use a stated tolerance).  `depend` files list each extension's headers (`rake depend:check`); a change to ext/ structure refreshes the memcheck map.
+25 C extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/` and mb-term's `fast_term`), each building `lib/mb/sound/<name>.so` (`rake compile`).  New C code goes in purpose-specific extensions, not `fast_sound`; shared helpers are `static inline` in `ext/mb/sound/include/mb_ext_helpers.h` and shared kernels in `ext/mb/sound/include/mb_*.h`.  Every kernel has a Ruby reference that specs compare with it (existing ones exact mirrors, several built with `-ffp-contract=off`; new ones may use a stated tolerance).  `depend` files list each extension's headers (`rake depend:check`); a change to ext/ structure refreshes the memcheck map.  `rake memcheck`/`memcheck:changed` run their spec files in parallel Valgrind processes (`MEMCHECK_PARALLEL=N`; about 10 min for the full list at 8 on the Mac, estimated).
 
 ### [Sound guards: the golden set and perceptual fingerprints](sound_guards.md)
 

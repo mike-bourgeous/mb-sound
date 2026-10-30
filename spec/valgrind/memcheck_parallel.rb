@@ -45,14 +45,14 @@ module MemcheckParallel
   TIMES_PATH = File.join(ROOT, 'tmp', 'memcheck_times.json')
   TABLE_NAME = 'memcheck_file_times.json'
 
-  # Measured (2026-10-30, Mac container): peaks of a Valgrind rspec process
-  # tree; see design/notes/c_extensions.md.  Each process may take this much
-  # MemAvailable.
+  # Each process may take this much MemAvailable: Valgrind rspec process
+  # trees peaked at 0.9-1.3 GB on 2026-10-30 (Mac container; table in
+  # design/notes/c_extensions.md), one at 3.3 GB on 2026-10-09.
   MEMORY_PER_PROCESS = 2.5 * 1024**3
 
   # Seconds a Valgrind process spends outside examples (Ruby, mb-sound,
   # and the spec files loading, at_exit leak checks), until the table has
-  # a measured value
+  # a measured value (55-65 s on 2026-10-30)
   STARTUP_SECONDS = 60.0
 
   # Valgrind's slowdown over native rspec for files with no memcheck time,
@@ -98,14 +98,20 @@ module MemcheckParallel
     }
   end
 
-  # The shared table ({ 'files' => {...}, 'startup' => s }), seeded from a
-  # tmp/memcheck_times.json (the worktree's, else the main checkout's) when
-  # it doesn't exist yet.
+  # The shared table ({ 'files' => {...}, 'startup' => s }), seeded when
+  # it doesn't exist yet from the tmp/memcheck_times.json files of the
+  # main checkout and this worktree (older runs first, each file's latest
+  # time kept: a selective run's file knows only its own files).
   def load_table(path = table_path)
     return JSON.parse(File.read(path)) if File.file?(path)
 
-    seed = [TIMES_PATH, File.join(shared_tmp, 'memcheck_times.json')].find { |f| File.file?(f) }
-    { 'files' => seed ? file_times_from_json(JSON.parse(File.read(seed))) : {} }
+    seeds = [File.join(shared_tmp, 'memcheck_times.json'), TIMES_PATH].uniq.select { |f| File.file?(f) }
+    files = seeds.sort_by { |f| File.mtime(f) }.each_with_object({}) do |f, h|
+      h.merge!(file_times_from_json(JSON.parse(File.read(f))))
+    rescue JSON::ParserError
+      next
+    end
+    { 'files' => files }
   rescue JSON::ParserError
     { 'files' => {} }
   end
@@ -247,7 +253,6 @@ module MemcheckParallel
   def run(patterns, config_for:, rspec_opts: [], env: {}, count: nil, out: $stdout,
           out_dir: OUT_DIR, times_path: TIMES_PATH, table_path: self.table_path)
     require 'ruby_memcheck'
-    require 'ruby_memcheck/rspec/rake_task'
 
     files = expand(patterns)
     raise Failed, 'memcheck: no spec files match' if files.empty?
@@ -275,7 +280,8 @@ module MemcheckParallel
     begin
       groups.each { |g| spawn_group(g, config_for, rspec_opts, env) }
       wait_all(groups, started, out)
-    rescue Exception # rubocop:disable Lint/RescueException (Ctrl-C included: stop every Valgrind)
+    # Any exception, Ctrl-C included, stops every Valgrind process group
+    rescue Exception # rubocop:disable Lint/RescueException
       groups.each { |g| Process.kill('TERM', -g.pid) if g.pid && !g.status rescue nil }
       groups.each { |g| Process.wait(g.pid) if g.pid && !g.status rescue nil }
       groups.each { |g| FileUtils.rm_rf(g.config.temp_dir) if g.config }
