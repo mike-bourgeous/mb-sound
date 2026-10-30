@@ -97,10 +97,42 @@ module MB
             )
           end
 
+          if DelayMethods.feedback?(feedback)
+            # The feedback-loop engine (fast_loop), with nothing in the loop
+            # but the gain: the samples Filter::Delay's own feedback kernel
+            # gave, about 40% cheaper (smoothing-1)
+            raise ArgumentError, "ring_out: false isn't supported with feedback: (the feedback loop rings out)" unless ring_out
+
+            return feedback_delay(
+              time, smooth: smoothing, max_delay: max_delay, feedback: feedback,
+              dry: dry, wet: wet, interpolation: interpolation
+            ) { |d| d }
+          end
+
           filter(MB::Sound::GraphNode::DelayMethods.delay_filter(
             time, smooth: smoothing, max_delay: max_delay,
-            feedback: feedback, dry: dry, wet: wet, interpolation: interpolation, ring_out: ring_out
+            dry: dry, wet: wet, interpolation: interpolation, ring_out: ring_out
           ))
+        end
+
+        # True if +v+ is a plain real level (a number, Decibels included).
+        def self.level?(v)
+          v.is_a?(Numeric) && v.real?
+        end
+
+        # True if +feedback+ (#delay's feedback: gain) makes a feedback loop:
+        # a node, or a nonzero real number (complex gains raise: feedback
+        # loops are real; false, nil, and 0 are a plain delay).
+        def self.feedback?(feedback)
+          return false if feedback.nil? || feedback == false
+          if feedback.is_a?(Numeric)
+            raise ArgumentError, "Delay feedback gains must be real (got #{feedback.inspect}); feedback loops are real (a complex signal's parts loop separately)" unless feedback.real?
+
+            return feedback != 0
+          end
+          raise ArgumentError, "Delay feedback is a number or a graph node (got #{feedback.inspect})" unless feedback.respond_to?(:sample)
+
+          true
         end
 
         # #delay with a feedback insert block (see #delay).
@@ -118,14 +150,21 @@ module MB
           # (echo loops: no sustain shelf, whose pitch would be 1 / time,
           # and the echo compensation, where low cuts count as wires; see
           # Plan::Loop::Program::ECHO_WIRES)
+          bare = false
           loop = self.feedback(sustain: false, compensate: :echo) do |fb, input|
             delayed = (input + fb * feedback).delay(time, **delay_opts)
             pipeline = InsertPipeline.new(delayed)
             out = pipeline.call(insert)
             raise ArgumentError, "The delay's insert block must return a graph node (got #{out.inspect})" unless out.respond_to?(:sample)
 
+            bare = out.equal?(delayed)
             out
           end
+          # Nothing but the gain and the sum around the delay: no latency to
+          # compensate (the same samples, measured over constant, negative,
+          # and sign-changing gains and moving times), so the loop skips the
+          # per-block pitch tracking (smoothing-1)
+          loop.skip_compensation! if bare
 
           echoes = loop
           if pipeline.pipeline? && pipeline.fb_insert
@@ -135,6 +174,12 @@ module MB
             echoes = DelayMethods.ring_sum(self, loop * feedback).delay(time, **delay_opts)
           end
           echoes = pipeline.apply_wet(echoes) if pipeline.pipeline?
+
+          # Numeric levels on the loop itself: mixed in C after each block
+          # (FeedbackLoop#output_mix), without a Tee and a Mixer
+          if echoes.equal?(loop) && DelayMethods.level?(wet) && DelayMethods.level?(dry) && loop.output_mix(wet, dry)
+            return loop
+          end
 
           out = wet.is_a?(Numeric) && wet == 1 ? echoes : echoes * wet
           out = DelayMethods.ring_sum(out, self * dry) unless dry.is_a?(Numeric) && dry == 0
@@ -301,14 +346,15 @@ module MB
         end
 
         # Builds the MB::Sound::Filter::Delay for #delay and
-        # Sequence::Duration#delay (see #delay for parameters).
-        def self.delay_filter(time = nil, seconds: nil, smooth: nil, smoothing: nil, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true)
+        # Sequence::Duration#delay (see #delay for parameters; feedback is
+        # #delay's, a FeedbackLoop around the delay).
+        def self.delay_filter(time = nil, seconds: nil, smooth: nil, smoothing: nil, max_delay: 1.0, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true)
           time = seconds_keyword(time, seconds) || 0
           smoothing = smooth_keyword(smooth, smoothing, true)
 
           MB::Sound::Filter::Delay.new(
             delay: time, smoothing: smoothing,
-            delay_buffer_size: MB::Sound::Length.samples(max_delay, sample_rate: 48000).ceil, feedback: feedback,
+            delay_buffer_size: MB::Sound::Length.samples(max_delay, sample_rate: 48000).ceil,
             dry: dry, wet: wet, interpolation: interpolation, ring_out: ring_out
           )
         end

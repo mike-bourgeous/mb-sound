@@ -50,7 +50,7 @@ RSpec.describe('Tempo-synced delays') do
     end
 
     it 'starts at its tempo-synced time when sampled directly, outside a Session' do
-      node = 1.constant.delay(3.n16, feedback: 0.5)
+      node = 1.constant.delay(3.n16)
       expect(node.base_filter.delay_samples).to be_a(MB::Sound::GraphNode) # a TempoNode branch
 
       # At 120 BPM (a fresh transport), 3/16 is 18000 samples of silence

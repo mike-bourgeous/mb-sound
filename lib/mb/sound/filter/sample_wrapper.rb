@@ -133,8 +133,8 @@ module MB
           case @base_filter
           when MB::Sound::Filter::Delay
             d = @base_filter
-            unless d.feedback == false && d.wet == 1 && d.dry == 0
-              raise Plan::Unsupported.new(self, 'a delay inside a feedback loop takes no feedback:, wet:, or dry: of its own (build them into the loop)')
+            unless d.wet == 1 && d.dry == 0
+              raise Plan::Unsupported.new(self, 'a delay inside a feedback loop takes no wet: or dry: of its own (build them into the loop)')
             end
 
             ring = Plan::Loop::Ring.new(self)
@@ -163,10 +163,14 @@ module MB
         include Plan::Describable
 
         # Plan layer (see Plan::Describable): SVF filters with their cutoff,
-        # quality, and gain inputs (Plan::Op::FilterSvf).
+        # quality, and gain inputs (Plan::Op::FilterSvf), cookbook biquads,
+        # and GraphNode#smooth (Filter::Smooth, Plan::Op::Smooth).
         def plan_describe(p)
           f = @base_filter
           case f
+          when MB::Sound::Filter::Smooth
+            reset = @inputs[:reset]
+            p.smooth(p[@source], f.smoother, NO_JUMPS, reset: reset && p[reset])
           when MB::Sound::Filter::SVF
             gain_node = @inputs[:gain]
             gain = gain_node ? p[gain_node] : p.const(f.gain || 1.0)
@@ -179,8 +183,16 @@ module MB
           end
         end
 
+        # Filter::Smooth's jump offsets in plans (none: resets come from the
+        # reset input).
+        NO_JUMPS = [].freeze
+
         def plan_unsupported_reason
           case @base_filter
+          when MB::Sound::Filter::Smooth
+            return 'smoothing with inputs other than reset' unless (@inputs.keys - [:reset]).empty?
+
+            nil
           when MB::Sound::Filter::SVF
             return 'an SVF without cutoff and quality inputs' unless @inputs.key?(:cutoff) && @inputs.key?(:quality)
             return 'an SVF with inputs other than cutoff, quality, and gain' unless (@inputs.keys - [:cutoff, :quality, :gain]).empty?
@@ -215,6 +227,7 @@ module MB
           case f
           when MB::Sound::Filter::Cookbook then PLAN_BIQUAD_IVARS.map { |v| f.instance_variable_get(v) }
           when MB::Sound::Filter::SVF then [f.instance_variable_get(:@state).dup, f.cutoff, f.quality, f.gain]
+          when MB::Sound::Filter::Smooth then [:smooth, f.smoother.plan_snapshot]
           when MB::Sound::Filter::FilterChain
             states = f.filters.map { |x| filter_state(x) }
             states.include?(nil) ? nil : [:chain, states]
@@ -224,7 +237,7 @@ module MB
         # True if .filter_state keeps filter +f+'s state.
         def self.filter_state?(f)
           case f
-          when MB::Sound::Filter::Cookbook, MB::Sound::Filter::SVF then true
+          when MB::Sound::Filter::Cookbook, MB::Sound::Filter::SVF, MB::Sound::Filter::Smooth then true
           when MB::Sound::Filter::FilterChain then f.filters.all? { |x| filter_state?(x) }
           else false
           end
@@ -237,6 +250,8 @@ module MB
             PLAN_BIQUAD_IVARS.each_with_index { |v, i| f.instance_variable_set(v, snapshot[i]) }
           when MB::Sound::Filter::FilterChain
             f.filters.zip(snapshot[1]).each { |x, st| restore_filter_state(x, st) }
+          when MB::Sound::Filter::Smooth
+            f.smoother.plan_restore(snapshot[1])
           else
             state, cutoff, quality, gain = snapshot
             f.instance_variable_get(:@state).replace(state)

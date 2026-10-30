@@ -27,9 +27,11 @@ module MB
     # would be newer read the current sample, so very short delays (under
     # SINC_HALF samples for :sinc) are interpolated less accurately.
     #
-    # #read and #feedback run in C (MB::Sound::FastDelay.read and .feedback,
-    # in the fast_delay extension); #read_ruby and #feedback_ruby are the same math in
-    # Ruby, and specs check that both give exactly the same values.
+    # #read runs in C (MB::Sound::FastDelay.read, in the fast_delay
+    # extension); #read_ruby is the same math in Ruby, and specs check that
+    # both give exactly the same values.  Delays with feedback are feedback
+    # loops (GraphNode::FeedbackLoop, fast_loop, reading lines like #read)
+    # or delay networks (.network).
     #
     # The buffer grows when a block plus the longest delay doesn't fit
     # (see #prepare), keeping the stored audio: growing unwraps it oldest
@@ -276,63 +278,16 @@ module MB
         end
       end
 
-      # Runs +data+ through a feedback loop one sample at a time: writes
-      # each input sample plus +feedback+ times the delayed output, and
-      # returns the delayed output (without the input).  The +delay+ is a
-      # Numeric or an NArray with one delay per sample, as for #read, and
-      # +feedback+ is a Numeric or an NArray with one gain per sample.
-      # +:out+, if given, is a buffer of the line's type and the data's
-      # length to write the output into (every sample is written).
-      def feedback(data, delay, feedback, interpolation: :linear, state: nil, out: nil)
-        @block_start = @write_offset
-        out = @buffer.class.zeros(data.length) unless out && out.class == @buffer.class && out.length == data.length
-        @write_offset = MB::Sound::FastDelay.feedback(@buffer, @write_offset, data, out, real_delay(delay), feedback, mode(interpolation), SINC_KERNEL, state)
-        out
-      end
-
-      # The Ruby version of #feedback.
-      def feedback_ruby(data, delay, feedback, interpolation: :linear, state: nil)
-        m = mode(interpolation)
-        delay = real_delay(delay)
-        @block_start = @write_offset
-        cap = capacity
-        buf = @buffer
-        out = buf.class.zeros(data.length)
-        prev = state&.[](0)
-
-        data.length.times do |i|
-          d = clamp(delay.is_a?(Numeric) ? delay : delay[i], m)
-          rate = prev && !delay.is_a?(Numeric) ? (1.0 - (d - prev)).abs : 1.0
-          prev = d
-
-          w = (@write_offset + i) % cap
-          buf[w] = data[i]
-
-          if d == d.floor && m != INTERPOLATION[:sinc]
-            v = buf[(w - d.to_i) % cap]
-          else
-            v = interpolate(w, d, m, rate)
-          end
-
-          buf[w] += (feedback.is_a?(Numeric) ? feedback : feedback[i]) * v
-          out[i] = v
-        end
-
-        state[0] = prev.to_f if state && prev
-        @write_offset = (@write_offset + data.length) % cap
-        out
-      end
-
       # Runs a delay network (GraphNode::DelayNetwork) for +count+ samples,
       # one sample at a time: +lines+ (real DelayLines, each prepared for
       # the block), +inputs+ (one SFloat or nil per line), +tap_lines+ (the
       # line index each tap reads), +delays+ (per tap: delays in samples, a
       # Numeric or an NArray per sample), +gains+ (per line, an Array with
       # a gain per tap: a Numeric, an NArray per sample, or nil for none).
-      # Each sample writes every line's input, reads every tap (as
-      # #feedback reads its one tap), then adds each line's gains times the
-      # taps to what it wrote.  One line with one tap and gains [[g]] gives
-      # #feedback's samples exactly.
+      # Each sample writes every line's input, reads every tap (whole-sample
+      # delays directly unless sinc, the sinc read speed from the tap's
+      # previous delay, as #read), then adds each line's gains times the
+      # taps to what it wrote, in double precision.
       #
       # +states+ is an Array of read-state Arrays (one per tap, see #read),
       # +outs+ an Array of SFloat buffers (one per tap, at least +count+

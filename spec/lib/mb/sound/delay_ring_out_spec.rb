@@ -83,7 +83,9 @@ RSpec.describe('Delays ringing out after their input ends') do
     end
 
     it 'ends with its input given ring_out: false (for structures with their own tails)' do
-      expect(drain(pluck.delay(0.1, feedback: 0.5, ring_out: false)).length).to eq(source_length)
+      expect(drain(pluck.delay(0.1, ring_out: false)).length).to eq(source_length)
+      # (feedback delays are feedback loops, which ring out; smoothing-1)
+      expect { pluck.delay(0.1, feedback: 0.5, ring_out: false) }.to raise_error(ArgumentError, /ring_out/)
       expect { pluck.delay(0.1, feedback: 0.5, ring_out: false) { |fb| fb } }.to raise_error(ArgumentError, /ring_out/)
     end
 

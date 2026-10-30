@@ -301,36 +301,47 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
 
   describe 'wet, dry, and feedback' do
     let(:impulse) { Numo::SFloat.zeros(12).tap { |d| d[0] = 1 } }
+    def arr(data) = MB::Sound::ArrayInput.new(data: [data])
 
     it 'applies dry and wet levels on every path' do
-      [
-        { smoothing: false },
-        { smoothing: true },
-        { smoothing: false, feedback: 0.5 },
-      ].each do |opts|
+      [{ smoothing: false }, { smoothing: true }].each do |opts|
         d = MB::Sound::Filter::Delay.new(delay: 4, sample_rate: 1, delay_buffer_size: 20, wet: 0.5, dry: 0.25, **opts)
         out = d.process(impulse.dup).to_a
         expect(out[0]).to eq(0.25), opts.inspect
         expect(out[4]).to eq(0.5), opts.inspect
-        expect(out[8]).to eq(opts[:feedback] ? 0.25 : 0), opts.inspect
+        expect(out[8]).to eq(0), opts.inspect
       end
+
+      out = arr(impulse).delay(4.samples, smooth: false, feedback: 0.5, wet: 0.5, dry: 0.25).sample(12).to_a
+      expect(out.values_at(0, 4, 8)).to eq([0.25, 0.5, 0.25])
     end
 
-    it 'feeds back the delayed signal' do
-      d = MB::Sound::Filter::Delay.new(delay: 4, sample_rate: 1, delay_buffer_size: 20, smoothing: false, feedback: -0.5)
-      expect(d.process(impulse).to_a).to eq([0, 0, 0, 0, 1, 0, 0, 0, -0.5, 0, 0, 0])
+    it 'feeds back the delayed signal through a feedback loop (GraphNode#delay)' do
+      g = arr(impulse).delay(4.samples, smooth: false, feedback: -0.5)
+      expect(g.graph).to include(an_instance_of(MB::Sound::GraphNode::FeedbackLoop))
+      expect(g.sample(12).to_a).to eq([0, 0, 0, 0, 1, 0, 0, 0, -0.5, 0, 0, 0])
+    end
+
+    it 'leaves feedback to GraphNode#delay' do
+      expect { MB::Sound::Filter::Delay.new(delay: 4, feedback: 0.5) }.to raise_error(ArgumentError, /feedback/)
+      expect { 1.n8.delay(feedback: 0.5) }.to raise_error(ArgumentError, /feedback/)
+      expect { arr(impulse).delay(0.01, feedback: 0.5i) }.to raise_error(ArgumentError, /real/)
+      expect(arr(impulse).delay(4.samples, feedback: 0).base_filter).to be_a(MB::Sound::Filter::Delay)
     end
 
     it 'reads feedback, wet, and dry from graph nodes' do
-      fb = MB::Sound::ArrayInput.new(data: [Numo::SFloat[0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0, 0, 0]], sample_rate: 1)
-      wet = MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(12) * 2], sample_rate: 1)
-      dry = MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(12).seq / 10], sample_rate: 1)
-      d = MB::Sound::Filter::Delay.new(delay: 4, sample_rate: 1, delay_buffer_size: 20, smoothing: false, feedback: fb, wet: wet, dry: dry)
+      fb = arr(Numo::SFloat[0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0, 0, 0])
+      wet = arr(Numo::SFloat.ones(12) * 2)
+      dry = arr(Numo::SFloat.new(12).seq / 10)
+      g = arr(impulse).delay(4.samples, smooth: false, feedback: fb, wet: wet, dry: dry)
 
-      expect(d.sources.keys).to include(:feedback, :wet, :dry)
       # The echo at 4 is fed back at 0.5 (the gain at sample 4), so it
       # repeats at 8; wet doubles both, and dry is 0 at the impulse
-      expect(d.process(impulse).to_a).to eq([0, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0])
+      out = g.sample(12).to_a
+      expect(out.values_at(0, 4, 8)).to eq([0, 2, 1])
+
+      d = MB::Sound::Filter::Delay.new(delay: 4.samples, sample_rate: 48000, delay_buffer_size: 20, smoothing: false, wet: wet, dry: dry)
+      expect(d.sources.keys).to include(:wet, :dry)
     end
 
     it 'ends when a level node ends' do

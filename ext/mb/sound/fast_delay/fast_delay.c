@@ -1,10 +1,12 @@
 /*
- * Delay line kernels for MB::Sound::DelayLine (Filter::Delay and
- * GraphNode::MultitapDelay): reading a circular buffer at constant or
- * per-sample fractional delays with linear, cubic, or windowed-sinc
- * interpolation, and running input through a feedback loop.  The Ruby
- * versions are DelayLine#read_ruby and #feedback_ruby, and specs check that
- * both give exactly the same values.
+ * Delay line kernels for MB::Sound::DelayLine (Filter::Delay,
+ * GraphNode::MultitapDelay, GraphNode::DelayNetwork): reading a circular
+ * buffer at constant or per-sample fractional delays with linear, cubic, or
+ * windowed-sinc interpolation, and delay networks (lines, taps, and a gain
+ * matrix one sample at a time).  The Ruby versions are DelayLine#read_ruby
+ * and .network_ruby, and specs check that both give exactly the same
+ * values.  (Single delays with feedback are feedback loops, fast_loop,
+ * since smoothing-1.)
  * (C)2026 Mike Bourgeous
  */
 #include <stdlib.h>
@@ -27,21 +29,6 @@ static void ensure_sfloat(VALUE *narray)
 	}
 
 	*narray = rb_funcall(numo_cSFloat, rb_intern("cast"), 1, *narray);
-
-	if (!RTEST(nary_check_contiguous(*narray))) {
-		*narray = nary_dup(*narray);
-	}
-}
-
-// Casts *narray to a contiguous 1D SComplex NArray.
-static void ensure_scomplex(VALUE *narray)
-{
-	int dim = RNARRAY_NDIM(*narray);
-	if (dim != 1) {
-		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
-	}
-
-	*narray = rb_funcall(numo_cSComplex, rb_intern("cast"), 1, *narray);
 
 	if (!RTEST(nary_check_contiguous(*narray))) {
 		*narray = nary_dup(*narray);
@@ -297,88 +284,6 @@ static VALUE ruby_delay_read(VALUE self, VALUE buffer, VALUE target, VALUE block
 	return target;
 }
 
-/*
- * Runs +input+ through a feedback loop one sample at a time: writes each
- * input sample into the delay line +buffer+ at +write_offset+, reads the
- * delayed sample (+delay+, a number or a per-sample NArray, interpolated
- * as for read), adds +feedback+ (a number or a per-sample NArray)
- * times the delayed sample to the written sample, and stores the delayed
- * sample in +out+.  Returns the new write offset.  MB::Sound::FastDelay.feedback; see DelayLine#feedback.
- */
-static VALUE ruby_delay_feedback(VALUE self, VALUE buffer, VALUE write_offset, VALUE input, VALUE out, VALUE delay, VALUE feedback, VALUE mode, VALUE kernel, VALUE state)
-{
-	_Bool complex_buffer = check_delay_buffer(buffer, "Buffer");
-	if (CLASS_OF(out) != CLASS_OF(buffer) || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
-		rb_raise(rb_eArgError, "Output must be a contiguous 1D NArray of the buffer's type");
-	}
-
-	int m;
-	struct sinc_kernel k;
-	double prev;
-	_Bool have_prev;
-	read_interpolation(mode, kernel, state, &m, &k, &prev, &have_prev);
-
-	long capacity = RNARRAY_SHAPE(buffer)[0];
-	double max = capacity - 1 - delay_margin(m, &k);
-	if (max < 0) {
-		rb_raise(rb_eArgError, "The delay buffer is too small for this interpolation mode");
-	}
-	size_t count = RNARRAY_SHAPE(out)[0];
-	long offset = NUM2LONG(write_offset);
-
-	if (complex_buffer) {
-		ensure_scomplex(&input);
-	} else {
-		ensure_sfloat(&input);
-	}
-	if (RNARRAY_SHAPE(input)[0] < count) {
-		rb_raise(rb_eArgError, "Input must be at least as long as the output");
-	}
-
-	struct control_input delays, gains;
-	read_control_input(&delay, count, "Delay", &delays);
-	read_control_input(&feedback, count, "Feedback", &gains);
-	if (!complex_buffer && (gains.c || cimag(gains.scalar) != 0)) {
-		rb_raise(rb_eArgError, "Complex feedback needs a complex buffer");
-	}
-
-	void *in = nary_get_pointer_for_read(input) + nary_get_offset(input);
-	void *buf = nary_get_pointer_for_write(buffer) + nary_get_offset(buffer);
-	void *outp = nary_get_pointer_for_write(out) + nary_get_offset(out);
-
-	for (size_t i = 0; i < count; i++) {
-		double d = delay_value(&delays, i, max);
-		double rate = delay_rate(d, &prev, &have_prev, delays.f || delays.d || delays.c);
-		long w = wrap_index(offset + (long)i, capacity);
-		_Bool whole = d == floor(d) && m != DELAY_SINC;
-
-		if (complex_buffer) {
-			float complex *b = buf;
-			b[w] = ((const float complex *)in)[i];
-			double complex v = whole ? (double complex)b[wrap_index(w - (long)d, capacity)] : delay_interp_complex(b, capacity, w, d, m, &k, rate);
-			b[w] = (double complex)b[w] + control_value(&gains, i) * v;
-			((float complex *)outp)[i] = v;
-		} else {
-			float *b = buf;
-			b[w] = ((const float *)in)[i];
-			double v = whole ? (double)b[wrap_index(w - (long)d, capacity)] : delay_interp_real(b, capacity, w, d, m, &k, rate);
-			b[w] = (double)b[w] + creal(control_value(&gains, i)) * v;
-			((float *)outp)[i] = v;
-		}
-	}
-
-	if (RTEST(state) && have_prev) {
-		rb_ary_store(state, 0, DBL2NUM(prev));
-	}
-
-	RB_GC_GUARD(input);
-	RB_GC_GUARD(delay);
-	RB_GC_GUARD(feedback);
-	RB_GC_GUARD(kernel);
-
-	return LONG2NUM(wrap_index(offset + (long)count, capacity));
-}
-
 // The most lines and taps FastDelay.network takes.
 #define NETWORK_MAX 64
 
@@ -392,7 +297,7 @@ static VALUE ruby_delay_feedback(VALUE self, VALUE buffer, VALUE write_offset, V
  * in samples: numbers or per-sample NArrays), +gains+ (an Array of L Arrays
  * of T gains: numbers, per-sample NArrays, or nil for none), +states+ (an
  * Array of T read-state Arrays, as for read; or nil).  Each sample writes
- * every line's input, reads every tap (as #feedback reads its one tap:
+ * every line's input, reads every tap (as read does:
  * whole-sample delays directly unless sinc), then adds each line's gains
  * times the taps (in tap order, in double precision) to what it wrote, and
  * stores each tap's value in its output.  Returns an Array of the new
@@ -589,6 +494,5 @@ void Init_fast_delay(void)
 	VALUE fast_delay = rb_define_module_under(sound, "FastDelay");
 
 	rb_define_module_function(fast_delay, "read", ruby_delay_read, 7);
-	rb_define_module_function(fast_delay, "feedback", ruby_delay_feedback, 9);
 	rb_define_module_function(fast_delay, "network", ruby_delay_network, 11);
 }

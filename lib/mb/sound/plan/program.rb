@@ -342,7 +342,7 @@ module MB
               encode_envelope(op)
             when Op::Smooth
               @objects << [op.smoother, op.jumps].freeze
-              [OPCODES[:smooth], reg(op.dst), reg(op.a), @objects.length - 1]
+              [OPCODES[:smooth], reg(op.dst), reg(op.a), @objects.length - 1, op.reset ? reg(op.reset) : -1]
             when Op::Max
               [OPCODES[:max], reg(op.dst), reg(op.a), reg(op.b)]
             when Op::FilterSvf

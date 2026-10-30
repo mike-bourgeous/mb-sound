@@ -410,15 +410,26 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
   end
 
   describe '#delay with a block' do
-    it 'is the plain feedback delay with an identity insert (within float32 rounding)' do
-      # FastDelay.feedback adds the feedback in double precision; loops
-      # round each op to float32
+    it 'is the plain feedback delay with an identity insert (the same loop since smoothing-1)' do
       a = PlanSpecHelpers::Source.new(seed: 4, scale: 0.3).delay(123.samples, feedback: 0.6, smoothing: false) { |fb| fb }
       b = PlanSpecHelpers::Source.new(seed: 4, scale: 0.3).delay(123.samples, feedback: 0.6, smoothing: false)
-      x = Array.new(30) { a.sample(100).to_a }.flatten
-      y = Array.new(30) { b.sample(100).to_a }.flatten
-      expect(x.zip(y).map { |u, v| (u - v).abs }.max).to be < 1e-6
-      expect(y.map(&:abs).max).to be > 0.2
+      expect(b.graph).to include(an_instance_of(MB::Sound::GraphNode::FeedbackLoop))
+      x = SpecBuffers.join(Array.new(30) { a.sample(100).dup })
+      y = SpecBuffers.join(Array.new(30) { b.sample(100).dup })
+      expect(x).to eq(y)
+      expect(y.abs.max).to be > 0.2
+    end
+
+    it 'loops complex signals as two real loops (real and imaginary parts)' do
+      mk = ->(s) { s.delay(0.5.hz.lfo.at(0.003..0.004), feedback: 0.3.hz.lfo.at(0.3..0.6), dry: 1) }
+      run = ->(g) { SpecBuffers.join([800, 7, 1, 367, 128].cycle.first(40).map { |n| g.sample(n).dup }) }
+      c = run.(mk.(330.hz.complex_ramp.at(0.15)))
+      expect(c).to be_a(Numo::SComplex)
+      expect(c.real).to eq(run.(mk.(330.hz.complex_ramp.at(0.15).real)))
+      expect(c.imag).to eq(run.(mk.(330.hz.complex_ramp.at(0.15).imag)))
+      expect(c.imag.abs.max).to be > 0.1
+
+      expect { run.(330.hz.complex_ramp.feedback { |fb, input| input + fb.delay(0.01).softclip * 0.5 }) }.to raise_error(ArgumentError, /complex/)
     end
 
     it 'mixes wet and dry, with node levels' do

@@ -37,8 +37,12 @@ RSpec.describe('Tweening reference outputs') do
     expect(digest(mel.synth(voices: 1) { |v| v.hz.swarm(5, seed: 4) }.mono)).to eq('d92266a8028ae4a3')
   end
 
+  # The smoothing digest was re-recorded 2026-10-30 for smoothing-1:
+  # GraphNode#smooth became Notes::Smoother's B-spline FIR (a linear filter;
+  # the old Filter::Smoothstep restarted a smoothstep on every change) and
+  # starts on the input's first value instead of gliding up from 0.
   it 'keeps smoothing and envelopes unchanged' do
-    expect(digest(mel.number.smooth(0.05))).to eq('b44a742c3afe127f')
+    expect(digest(mel.number.smooth(0.05))).to eq('e2a373f8875d6018')
     env = MB::Sound::Envelope.new(attack: 0.05, decay: 0.2, sustain: 0.5, release: 0.3, curve: :analog, shape: [:s, :exp, :s], hold: 0.5, sample_rate: 48000)
     expect(digest(env, 40)).to eq('64a4e0b90eebadff')
     expect(digest(mel.amp_env(0.01, 0.1, 0.6, 0.2))).to eq('32ea2015ce640f56')

@@ -165,9 +165,9 @@ module MB
 
         # Returns a delay Filter with this length as its delay time, following
         # the tempo, to apply with GraphNode#filter (e.g.
-        # `sig.filter(3.n16.delay(feedback: -6.db, dry: 1))`).  Takes the
-        # same options as GraphNode#delay, which is usually simpler:
-        # `sig.delay(3.n16, feedback: -6.db, dry: 1)`.
+        # `sig.filter(3.n16.delay(wet: 0.5, dry: 1))`).  Takes the options of
+        # GraphNode#delay except feedback:, which is a feedback loop around
+        # the delay: write `sig.delay(3.n16, feedback: -6.db, dry: 1)`.
         def delay(**options)
           GraphNode::DelayMethods.delay_filter(self, **options)
         end

@@ -74,12 +74,12 @@ module MB::Sound
   end
 
   # A slow random walk between +lo+ and +hi+: a new random target +rate+
-  # times a second, glided over one step (a smoothstep), starting from the
-  # middle.  (The persona's hand-made walk; the tape and the drone use
+  # times a second, glided over one step (`smooth`'s S-curve; a smoothstep
+  # until smoothing-1, 2026-10-30), starting from the middle.  (The persona's hand-made walk; the tape and the drone use
   # .ambient_drift since textures-2; the gong's shimmer band and
   # bin/songs/tin_roof.rb still use this one.)
   def self.ambient_walk(rate, lo, hi)
-    rate.hz.lfo.square.sample_hold.smooth(1.0 / rate).at(lo..hi)
+    rate.hz.lfo.square.sample_hold.smooth(1.0 / rate, from: 0).at(lo..hi)
   end
 
   # The library's drift() in the shape of .ambient_walk: +rate+ new points

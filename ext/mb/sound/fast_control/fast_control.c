@@ -12,12 +12,18 @@
  * next change restarts the sums at zero with the held value as the
  * reference, so rounding never accumulates across settled stretches.
  *
- * The Ruby mirror (Notes::Smoother.smooth_ruby) gives exactly the same
+ * adaptive(x, out, from, to, state) and curve(x, out, from, to, state,
+ * slots, table): Notes::Smoother's adaptive and curve kernels (see
+ * mb_smooth.h).  slew(data, s, max_rise, max_fall, absolute):
+ * Filter::LinearFollower's slew limiter (delay-time smoothing, clip_rate).
+ *
+ * The Ruby mirrors (Notes::Smoother.smooth_ruby and the others) give exactly the same
  * samples (specs check it), so keep the operations identical; built with
  * -ffp-contract=off like the other kernels (there are no products to fuse
  * here, but the flag keeps that true if the code changes).
  */
 
+#include <math.h>
 #include <string.h>
 
 #include <ruby.h>
@@ -28,6 +34,7 @@
 
 #define STATE_LENGTH 7
 #define ADAPTIVE_STATE_LENGTH 8
+#define CURVE_STATE_LENGTH 9
 
 // Checks that +narray+ is a writable contiguous 1D NArray of class +klass+
 // with at least +min+ values; returns its length.
@@ -110,6 +117,99 @@ static VALUE ruby_adaptive(VALUE self, VALUE x, VALUE out, VALUE from_v, VALUE t
 	return out;
 }
 
+// curve(x, out, from, to, state, slots, table): Notes::Smoother's curve
+// kernel (mb_curve_smooth_run in mb_smooth.h; mirror
+// Notes::Smoother.curve_ruby).
+static VALUE ruby_curve(VALUE self, VALUE x, VALUE out, VALUE from_v, VALUE to_v, VALUE state, VALUE slots, VALUE table)
+{
+	size_t length = check_array(x, numo_cSFloat, 0, "The input");
+	if (check_array(out, numo_cSFloat, 0, "The output") != length) {
+		rb_raise(rb_eArgError, "The output must have as many values as the input");
+	}
+	if (check_array(state, numo_cDFloat, CURVE_STATE_LENGTH, "The state") != CURVE_STATE_LENGTH) {
+		rb_raise(rb_eArgError, "The curve state must have %d values", CURVE_STATE_LENGTH);
+	}
+	size_t nslots = check_array(slots, numo_cDFloat, 2, "The slots");
+	size_t ntable = check_array(table, numo_cDFloat, 1, "The table");
+	rb_check_frozen(out);
+	rb_check_frozen(state);
+	rb_check_frozen(slots);
+
+	long from = NUM2LONG(from_v);
+	long to = NUM2LONG(to_v);
+	if (from < 0 || to < from || (size_t)to > length) {
+		rb_raise(rb_eRangeError, "Range %ld...%ld is outside the %zu-sample buffer", from, to, length);
+	}
+
+	const float *xp = (const float *)(nary_get_pointer_for_read(x) + nary_get_offset(x));
+	const double *tp = (const double *)(nary_get_pointer_for_read(table) + nary_get_offset(table));
+	if (mb_curve_smooth_run(xp, mb_sfloat_ptr(out), from, to, dfloat_ptr(state), dfloat_ptr(slots), nslots, tp, ntable) != 0) {
+		rb_raise(rb_eArgError, "The curve state doesn't fit %zu slot values and a %zu-value table", nslots, ntable);
+	}
+
+	return out;
+}
+
+// slew(data, s, max_rise, max_fall, absolute): Filter::LinearFollower's
+// slew limiter over +data+ (a contiguous SFloat or DFloat, changed in
+// place) from the last output +s+, with per-sample limits (nil: none);
+// returns the new last output (see mb_slew_run).
+static VALUE ruby_slew(VALUE self, VALUE data, VALUE s_v, VALUE rise_v, VALUE fall_v, VALUE absolute)
+{
+	VALUE klass = CLASS_OF(data);
+	if ((klass != numo_cSFloat && klass != numo_cDFloat) || RNARRAY_NDIM(data) != 1 || !RTEST(nary_check_contiguous(data))) {
+		rb_raise(rb_eArgError, "Slew data must be a contiguous 1D SFloat or DFloat");
+	}
+	rb_check_frozen(data);
+	size_t n = RNARRAY_SHAPE(data)[0];
+	double s = NUM2DBL(s_v);
+	double rise = NIL_P(rise_v) ? INFINITY : NUM2DBL(rise_v);
+	double fall = NIL_P(fall_v) ? INFINITY : NUM2DBL(fall_v);
+	void *p = nary_get_pointer_for_write(data) + nary_get_offset(data);
+	mb_slew_run(p, p, n, klass == numo_cDFloat, &s, rise, fall, RTEST(absolute));
+	RB_GC_GUARD(data);
+	return DBL2NUM(s);
+}
+
+// reset_run(x, out, state, ring1, ring2, reset): Notes::Smoother over all
+// of x into out (SFloat) with the kernel the state's length picks, jumping
+// to the input at every nonzero sample of +reset+ (an SFloat at least as
+// long, or nil): Filter::Smooth#dynamic_process (GraphNode#smooth with
+// reset:), as the plan op runs it (mb_smoother_reset_run; mirror
+// Notes::Smoother.run with the reset's nonzero offsets as jumps).
+static VALUE ruby_reset_run(VALUE self, VALUE x, VALUE out, VALUE state, VALUE ring1, VALUE ring2, VALUE reset)
+{
+	size_t length = check_array(x, numo_cSFloat, 0, "The input");
+	if (check_array(out, numo_cSFloat, 0, "The output") != length) {
+		rb_raise(rb_eArgError, "The output must have as many values as the input");
+	}
+	size_t sl = check_array(state, numo_cDFloat, STATE_LENGTH, "The state");
+	if (sl != STATE_LENGTH && sl != ADAPTIVE_STATE_LENGTH && sl != CURVE_STATE_LENGTH) {
+		rb_raise(rb_eArgError, "The state must have 7, 8, or 9 values (got %zu)", sl);
+	}
+	size_t n1 = check_array(ring1, numo_cDFloat, 1, "Ring 1");
+	size_t n2 = check_array(ring2, numo_cDFloat, 1, "Ring 2");
+	const float *rp = NULL;
+	if (!NIL_P(reset)) {
+		if (check_array(reset, numo_cSFloat, length, "The reset") < length) {
+			rb_raise(rb_eArgError, "The reset must be at least as long as the input");
+		}
+		rp = (const float *)(nary_get_pointer_for_read(reset) + nary_get_offset(reset));
+	}
+	rb_check_frozen(out);
+	rb_check_frozen(state);
+	rb_check_frozen(ring1);
+	rb_check_frozen(ring2);
+
+	const float *xp = (const float *)(nary_get_pointer_for_read(x) + nary_get_offset(x));
+	if (mb_smoother_reset_run(sl, xp, mb_sfloat_ptr(out), rp, (long)length, dfloat_ptr(state), dfloat_ptr(ring1), n1, dfloat_ptr(ring2), n2) != 0) {
+		rb_raise(rb_eArgError, "The smoother state doesn't fit its rings");
+	}
+
+	RB_GC_GUARD(reset);
+	return out;
+}
+
 void Init_fast_control(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -118,4 +218,7 @@ void Init_fast_control(void)
 
 	rb_define_module_function(fast_control, "smooth", ruby_smooth, 7);
 	rb_define_module_function(fast_control, "adaptive", ruby_adaptive, 5);
+	rb_define_module_function(fast_control, "curve", ruby_curve, 7);
+	rb_define_module_function(fast_control, "slew", ruby_slew, 5);
+	rb_define_module_function(fast_control, "reset_run", ruby_reset_run, 6);
 }

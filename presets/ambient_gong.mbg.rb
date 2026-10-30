@@ -3,8 +3,8 @@
 graph 7,
   name: "ambient_gong",
   kind: :synth,
-  saved: "2026-10-30T06:33:48Z",
-  mb_sound: "0.12.0.usegit (28b121e2)",
+  saved: "2026-10-30T06:43:38Z",
+  mb_sound: "0.12.0.usegit (1a99c326)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :gong from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
   options: { patch: :gong, decay: nil, attack: nil, release: nil, tip: nil, wear: 0.6 }
@@ -21,7 +21,7 @@ voice = synth(midi, voices: 1, seed: drawn_seed(900450186894289455)) { |n|
   swell = n.env(2.2, 7, 0, 3, curve: :swell, gm: false)
   osc = noise
   sig2 = 0.7.hz.lfo.square.sample_hold
-  band = osc.filter(:bandpass, cutoff: sig2.smooth(1.4285714285714286).at(2400..5200) * sig, quality: 1.5)
+  band = osc.filter(:bandpass, cutoff: sig2.smooth(1.4285714285714286, from: 0).at(2400..5200) * sig, quality: 1.5)
   top = f * sig
   l = band.ping(top * 29.099999999999998 * (1 + fall * 0.05 * 0.6), decay: 1.148733053788381) + band.ping(top * 35.7130766541782 * (1 + fall * 0.05 * 1.2111456), decay: 1.036936063946216) + band.ping(top * 43.819919805739936 * (1 + fall * 0.05 * 1.0222912000000002), decay: 0.9361163335524968) + band.ping(top * 53.756187662795156 * (1 + fall * 0.05 * 0.8334368000000001), decay: 0.8451842229612515) + band.ping(top * 65.93262155349585 * (1 + fall * 0.05 * 0.6445824000000001), decay: 0.7631597202351307) + band.ping(top * 76.19092573456665 * (1 + fall * 0.05 * 1.2557280000000004), decay: 0.7099274795944917) + band.ping(top * 93.4907336690104 * (1 + fall * 0.05 * 1.0668736000000003), decay: 0.640886802177834) + band.ping(top * 114.69536486139891 * (1 + fall * 0.05 * 0.8780192), decay: 0.578618984214491)
   r = band.ping(top * 33.22808832649805 * (1 + fall * 0.05 * 0.9055728000000001), decay: 1.0750110641000725) + band.ping(top * 40.757677249770914 * (1 + fall * 0.05 * 0.7167184000000001), decay: 0.97064606717962) + band.ping(top * 47.087409686802715 * (1 + fall * 0.05 * 1.3278640000000002), decay: 0.9030529424979288) + band.ping(top * 57.78357500052922 * (1 + fall * 0.05 * 1.1390096), decay: 0.8151985685049313) + band.ping(top * 70.89490610355091 * (1 + fall * 0.05 * 0.9501552000000004), decay: 0.7359665846493756) + band.ping(top * 86.96393168532218 * (1 + fall * 0.05 * 0.7613008000000001), decay: 0.6645015970903764) + band.ping(top * 100.4540607371625 * (1 + fall * 0.05 * 1.3724464000000005), decay: 0.6182752525826966) + band.ping(top * 123.27882500000001 * (1 + fall * 0.05 * 1.1835920000000002), decay: 0.5581120110415778)

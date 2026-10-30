@@ -36,6 +36,20 @@ module MB
       # the maximum); the first step after a rest takes the maximum.  Kernel
       # FastControl.adaptive (mb_smooth.h), exact mirror .adaptive_ruby.
       #
+      # Curve smoothing (+curve:+, anything MB::Sound::Curve.from takes:
+      # :elastic, :bounce, :smoothstep, a Curve, a Proc): a linear filter
+      # whose step response is the curve over +length+ (GraphNode#smooth's
+      # `curve:`, e.g. an elastic knob), so a single step follows the
+      # curve exactly and a stream of steps (a turned knob, an already
+      # smooth signal) sums their curves, the way a spring follows a
+      # dragged end.  It sums the steps still moving each sample, starting
+      # one at most every `length / CURVE_SLOTS` samples (later changes
+      # wait for it: at most CURVE_SLOTS steps move at once, so a moving
+      # input costs about CURVE_SLOTS table reads a sample, a still one
+      # none).  Kernel FastControl.curve (mb_smooth.h), exact mirror
+      # .curve_ruby; the table holds the curve at each of the length's
+      # samples (Curve#map, as the old Filter::Smoothstep drew them).
+      #
       # A smoother whose length is nil or false passes its input through
       # unchanged (a kernel of one sample); Notes nodes that follow the
       # global defaults keep one so the defaults can change live (see
@@ -44,6 +58,16 @@ module MB
         # The adaptive kernel's state length (see .adaptive_ruby); the fixed
         # kernel's state has 7 values.
         ADAPTIVE_STATE = 8
+
+        # The curve kernel's state length (see .curve_ruby).
+        CURVE_STATE = 9
+
+        # The most curve steps moving at once (see the class description).
+        CURVE_SLOTS = 64
+
+        # The step-response curve (an MB::Sound::Curve), or nil for the
+        # fixed (B-spline) or adaptive kernel.
+        attr_reader :curve
 
         # The smoothing time as given (seconds or a Length; a Range for
         # adaptive smoothing; nil when passing the input through).
@@ -56,16 +80,26 @@ module MB
 
         # Smooths over +length+ (seconds, or anything Length.samples takes;
         # a Range of them for adaptive smoothing; nil or false to pass the
-        # input through) at +sample_rate+.
-        def initialize(length, sample_rate:)
+        # input through) at +sample_rate+, with the B-spline kernel or (with
+        # +curve:+) the curve kernel (see the class description).
+        def initialize(length, sample_rate:, curve: nil)
           @length = length || nil
+          @curve = curve.nil? ? nil : MB::Sound::Curve.from(curve)
+          raise ArgumentError, 'Curve smoothing needs a length (not a Range or nil)' if @curve && (@length.nil? || adaptive?)
+
           @state = nil
+          @out = nil
           self.sample_rate = sample_rate
         end
 
         # True for adaptive smoothing (a Range length).
         def adaptive?
           @length.is_a?(Range)
+        end
+
+        # True for curve smoothing (see the class description).
+        def curve?
+          !@curve.nil?
         end
 
         # True if the output is the input (a nil or false length).
@@ -85,6 +119,8 @@ module MB
             y = current_output
             last = @state[1]
           end
+          raise ArgumentError, 'Curve smoothing needs a length (not a Range or nil)' if @curve && (length.nil? || length.is_a?(Range))
+
           @length = length
           @state = nil
           self.sample_rate = @rate
@@ -98,7 +134,15 @@ module MB
         # settling at the current value.
         def sample_rate=(rate)
           @rate = rate.to_f
-          if adaptive?
+          if curve?
+            n = [Length.samples(@length, sample_rate: @rate).round, 1].max
+            @kernel_samples = n
+            @settle = 0
+            @curve_gap = (n.to_f / CURVE_SLOTS).ceil.to_f
+            @ring1 = Numo::DFloat.zeros(2 * CURVE_SLOTS)
+            @ring2 = @curve.map((Numo::DFloat.new(n).seq + 1) / n)
+            @ring2 = Numo::DFloat.cast(@ring2) unless @ring2.is_a?(Numo::DFloat)
+          elsif adaptive?
             lo = [Length.samples(@length.begin, sample_rate: @rate).round, 1].max
             hi = [Length.samples(@length.end, sample_rate: @rate).round, lo].max
             @adaptive_range = [lo.to_f, hi.to_f]
@@ -132,6 +176,7 @@ module MB
         # True if the output equals the input (nothing is moving).
         def settled?
           return true if @state.nil?
+          return @state[6] == 0 && @state[2] == @state[1] if curve?
 
           adaptive? ? @state[5] >= @state[4] : @state[6] >= @settle
         end
@@ -145,14 +190,37 @@ module MB
           settle_at(constant || buf[0]) if @state.nil?
           st = @state
           if constant && constant == st[1] && settled? && (jumps.nil? || jumps.empty?)
-            # The adaptive kernel counts the samples since the last step
+            # The adaptive kernel counts the samples since the last step, the
+            # curve kernel since its newest step (up to its gap)
             st[3] = [st[3] + count, st[7]].min if st.length == ADAPTIVE_STATE
+            st[3] = [st[3] + count, st[4]].min if st.length == CURVE_STATE
             return buf
           end
 
           buf = Numo::SFloat.cast(buf) unless buf.is_a?(Numo::SFloat) && buf.contiguous?
           @out = Numo::SFloat.zeros(count) if @out.nil? || @out.length != count
           self.class.run(buf, @out, 0, count, st, @ring1, @ring2, jumps, c: true)
+          @out
+        end
+
+        # Like #process (no constant shortcut), jumping to the input at
+        # every nonzero sample of +reset+ (GraphNode#smooth's reset:), in C
+        # (FastControl.reset_run); the same as #process with the reset's
+        # nonzero offsets as jumps.
+        def process_reset(buf, reset)
+          count = buf.length
+          settle_at(buf[0]) if @state.nil?
+          buf = Numo::SFloat.cast(buf) unless buf.is_a?(Numo::SFloat) && buf.contiguous?
+          reset = reset[0...count] if reset.length > count
+          reset = Numo::SFloat.cast(reset) unless reset.is_a?(Numo::SFloat) && reset.contiguous?
+          @out = Numo::SFloat.zeros(count) if @out.nil? || @out.length != count
+          return @out if count == 0
+
+          if reset.length < count
+            self.class.run(buf, @out, 0, count, @state, @ring1, @ring2, reset.ne(0).where.to_a, c: true)
+          else
+            FastControl.reset_run(buf, @out, @state, @ring1, @ring2, reset)
+          end
           @out
         end
 
@@ -177,6 +245,8 @@ module MB
         def self.segment(x, out, from, to, state, ring1, ring2, c)
           if state.length == ADAPTIVE_STATE
             c ? FastControl.adaptive(x, out, from, to, state) : adaptive_ruby(x, out, from, to, state)
+          elsif state.length == CURVE_STATE
+            c ? FastControl.curve(x, out, from, to, state, ring1, ring2) : curve_ruby(x, out, from, to, state, ring1, ring2)
           else
             c ? FastControl.smooth(x, out, from, to, state, ring1, ring2) : smooth_ruby(x, out, from, to, state, ring1, ring2)
           end
@@ -191,6 +261,13 @@ module MB
             state[2] = value
             state[3] = 0.0
             state[5] = state[4]
+          elsif state.length == CURVE_STATE
+            state[0] = value
+            state[1] = value
+            state[2] = value
+            state[3] = state[4]
+            state[6] = 0.0
+            state[7] = 0.0
           else
             state[1] = value
             state[6] = (ring1.length + ring2.length - 2).to_f
@@ -226,6 +303,72 @@ module MB
           end
 
           state[0...8] = [y, last, start, since, t, pos, lo, hi]
+          out
+        end
+
+        # The Ruby mirror of FastControl.curve (mb_curve_smooth_run in
+        # mb_smooth.h): curve smoothing (see the class description) of
+        # x[from...to] into out[from...to] with +state+ [base, last input,
+        # newest target, samples since the newest step, gap, length, count,
+        # head, slot capacity], +slots+ ([age, target] pairs), and +table+
+        # (the curve at (k + 1) / length).
+        def self.curve_ruby(x, out, from, to, state, slots, table)
+          base, last, newest, since, gap, n, count, head, cap = state.to_a
+          n = n.to_i
+          count = count.to_i
+          head = head.to_i
+          cap = cap.to_i
+          raise ArgumentError, 'Bad curve smoother state' if n < 1 || n > table.length || cap < 1 || cap * 2 > slots.length || count > cap || head >= cap
+
+          (from...to).each do |i|
+            v = x[i]
+            last = v
+
+            while count > 0 && slots[2 * head] >= n
+              base = slots[2 * head + 1]
+              head = head + 1 == cap ? 0 : head + 1
+              count -= 1
+            end
+
+            if v != newest && since >= gap
+              if count == cap
+                base = slots[2 * head + 1]
+                head = head + 1 == cap ? 0 : head + 1
+                count -= 1
+              end
+              j = head + count
+              j -= cap if j >= cap
+              slots[2 * j] = 0.0
+              slots[2 * j + 1] = v
+              count += 1
+              newest = v
+              since = 0.0
+            end
+
+            y = base
+            prev = base
+            j = head
+            k = 0
+            while k < count
+              age = slots[2 * j]
+              target = slots[2 * j + 1]
+              y += (target - prev) * table[age.to_i]
+              prev = target
+              slots[2 * j] = age + 1.0
+              j = j + 1 == cap ? 0 : j + 1
+              k += 1
+            end
+
+            since += 1.0 if since < gap
+            out[i] = y
+          end
+
+          state[0] = base
+          state[1] = last
+          state[2] = newest
+          state[3] = since
+          state[6] = count.to_f
+          state[7] = head.to_f
           out
         end
 
@@ -300,9 +443,10 @@ module MB
           [@state, @ring1, @ring2]
         end
 
-        # For check mode: the length and state as plain values.
+        # For check mode: the length and state as plain values (a curve's
+        # table never changes, so it isn't kept).
         def plan_snapshot
-          [@length, @state&.to_a, @ring1.to_a, @ring2.to_a]
+          [@length, @state&.to_a, @ring1.to_a, curve? ? nil : @ring2.to_a]
         end
 
         # For check mode: restores #plan_snapshot.
@@ -321,7 +465,7 @@ module MB
 
           @state = Numo::DFloat.cast(state)
           @ring1 = Numo::DFloat.cast(ring1)
-          @ring2 = Numo::DFloat.cast(ring2)
+          @ring2 = Numo::DFloat.cast(ring2) if ring2
         end
 
         private
@@ -331,6 +475,17 @@ module MB
           st = @state
           if st.length == ADAPTIVE_STATE
             st[0]
+          elsif st.length == CURVE_STATE
+            y = st[0]
+            prev = st[0]
+            head = st[7].to_i
+            st[6].to_i.times do |k|
+              j = (head + k) % CURVE_SLOTS
+              age = [@ring1[2 * j].to_i, @kernel_samples - 1].min
+              y += (@ring1[2 * j + 1] - prev) * @ring2[age]
+              prev = @ring1[2 * j + 1]
+            end
+            y
           elsif st[6] >= (@ring1.length + @ring2.length - 2)
             st[1]
           else
@@ -340,7 +495,10 @@ module MB
 
         # Holds +value+ with nothing moving.
         def settle_at(value)
-          if adaptive?
+          if curve?
+            @state = Numo::DFloat[value, value, value, @curve_gap, @curve_gap, @kernel_samples, 0, 0, CURVE_SLOTS]
+            @ring1.fill(0)
+          elsif adaptive?
             lo, hi = @adaptive_range
             @state = Numo::DFloat[value, value, value, hi, lo, lo, lo, hi]
           else
@@ -357,7 +515,11 @@ module MB
           last = @state[1]
           return if y == last
 
-          if adaptive?
+          if curve?
+            # Held at y; the next sample starts a step to the input
+            @state = Numo::DFloat[y, y, y, @curve_gap, @curve_gap, @kernel_samples, 0, 0, CURVE_SLOTS]
+            @ring1.fill(0)
+          elsif adaptive?
             lo, hi = @adaptive_range
             @state = Numo::DFloat[y, last, y, 0, lo, 0, lo, hi]
           else
