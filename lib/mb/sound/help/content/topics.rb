@@ -1248,7 +1248,10 @@ module MB
         L.fx.hall` plays a demo phrase through one.  `audition L.inst.x`
         plays an entry as the player :audition: on CUE when the output has
         it, else on MAIN 6 dB down; another replaces it, `audition off`
-        stops it (the library picker in `ui :sound` runs it on `a`).  The
+        stops it.  In `ui :sound` the library picker (NAV l) does the same
+        from the keys: / finds as you type, a auditions, Enter loads the
+        entry into the inspected track at its launch point (knobs you
+        turned carry), e puts the line on the console to edit.  The
         resonator effects are instruments too: `L.inst.bar` strikes the
         :bar resonator from notes (`struck(clip, :bar)`; every resonator
         preset has one, built from it), `L.fx.bar.ping(C5)` strikes it

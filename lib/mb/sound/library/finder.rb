@@ -63,7 +63,7 @@ module MB
           head, *rest = chain
           return nil unless HEADS.key?(head) || head == :all
 
-          node = head == :all ? Heads::Query.new(nil, path: "#{root}.all") : Heads::Query.new(HEADS[head], path: "#{root}.#{head}")
+          node = head == :all ? Heads::Query.new(nil, path: "#{root}.all", pool: index.entries) : Heads::Query.new(HEADS[head], path: "#{root}.#{head}", pool: index.entries(kind: HEADS[head]))
           rest.each do |w|
             node = node.word(w)
             return nil unless node.is_a?(Heads::Query)

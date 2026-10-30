@@ -95,6 +95,12 @@ module MB
           copy
         end
 
+        # Rows the pane takes when its jump letter puts it, for a while, on
+        # a screen whose layout (pane names +names+) lacks it (Tiles#jump;
+        # the library picker beside the inspector on ui :sound's 80x24
+        # layout), or nil: its jump letter isn't bound there.
+        def temporary_rows(_names) = nil
+
         # True for Plot::Live panes (scope, spectrum), whose look can change
         # (`ui.look`) and whose #draw takes the screen's look as +look:+.
         # Every pane, plot panes too, draws only into its Canvas: the

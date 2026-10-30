@@ -188,6 +188,14 @@ module SessionFuzz
         when 8 then "bg :x#{bgs += 1}, #{pick(rng, TWEENS)}, on: :now"
         when 9 then "bg :x#{bgs += 1}, #{pick(rng, FREQ_CLIPS)}.freq * 0.001, on: :now"
         when 10 then "bg :x#{bgs += 1}, tr808(#{pick(rng, DRUMS)}) * 0.5#{on}"
+        when 14
+          # (ui-scaffold-1: an instrument track's param knob turned, so a
+          # later instrument change carries it instead of resetting it)
+          if instruments
+            "turn :\"#{pick(rng, instruments)}/release\", #{pick(rng, [0.02, 0.3])}#{on}"
+          else
+            "bg :x#{bgs += 1}, #{pick(rng, MELODIC)}#{on}"
+          end
         else "bg :x#{bgs += 1}, #{pick(rng, MELODIC)}#{on}"
         end
       next unless cmd

@@ -6,7 +6,7 @@ module MB
       # the painter thread by Poll from public APIs that never take the
       # render lock.  Frozen plain data.
       Slow = Data.define(:tracks, :scenes, :scene, :queued, :recording, :armed, :form, :knob_specs, :buses, :routes, :landed, :clips, :midi,
-                         :matrix, :racks, :clocks, :inspector, :render_source) do
+                         :matrix, :racks, :clocks, :inspector, :render_source, :cue_heard) do
         # (The fields ux-1 r3 added default to empty: +buses+ BusInfos,
         # +routes+ (player => { to:, send: { bus => level } }), +landed+
         # LandedInfos (newest last), +clips+ ClipInfos, +midi+ a MidiInfo;
@@ -14,9 +14,11 @@ module MB
         # time-automation: +clocks+ ClockInfos; sound-design-ui-1: +inspector+
         # an Inspect::InspectInfo while a pane needs :inspect, else nil;
         # sound-design-ui-2: +render_source+ the inspected track's
-        # PatchRender::Source while a pane needs :render, else nil)
+        # PatchRender::Source while a pane needs :render, else nil;
+        # ui-scaffold-1: +cue_heard+ Session#cue_heard?, where auditions play)
         def initialize(tracks:, scenes:, scene:, queued:, recording:, armed:, form:, knob_specs:, buses: [].freeze, routes: {}.freeze,
-                       landed: [].freeze, clips: [].freeze, midi: nil, matrix: nil, racks: [].freeze, clocks: [].freeze, inspector: nil, render_source: nil)
+                       landed: [].freeze, clips: [].freeze, midi: nil, matrix: nil, racks: [].freeze, clocks: [].freeze, inspector: nil, render_source: nil,
+                       cue_heard: false)
           super
         end
 
@@ -108,8 +110,11 @@ module MB
       # A track: +name+, +q+ (its launch quantization, as text), +clip+ (the
       # clip's name, or "graph"), +armed+, +trigger+ (true for a trigger track,
       # heard only by sidechains; SidechainMethods#sidechain).
-      TrackInfo = Data.define(:name, :q, :clip, :armed, :trigger) do
-        def initialize(name:, q:, clip:, armed:, trigger: false)
+      # +instrument+: the Library::Entry the track's patch plays (track
+      # :bass, L.inst.x; nil for patch blocks and graphs; ui-scaffold-1,
+      # the library picker marks it).
+      TrackInfo = Data.define(:name, :q, :clip, :armed, :trigger, :instrument) do
+        def initialize(name:, q:, clip:, armed:, trigger: false, instrument: nil)
           super
         end
       end
@@ -214,6 +219,7 @@ module MB
         def clocks = slow.clocks
         def inspector = slow.inspector
         def render_source = slow.render_source
+        def cue_heard = slow.cue_heard
 
         # Track +name+'s state for the clip matrix: the player's state this
         # buffer (#parts: :playing, :starting, :stopping, :ringing,

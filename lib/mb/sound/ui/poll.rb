@@ -67,7 +67,8 @@ module MB
           arr = s.arrangement
           armed = arr.armed.keys.freeze
           tracks = arr.tracks.map { |name, tr|
-            TrackInfo.new(name: name, q: (tr.q || arr.quant).inspect.freeze, clip: (tr.patch? ? (tr.clip ? arr.name_of(tr.clip) : 'no clip') : 'graph').freeze, armed: armed.include?(name), trigger: tr.trigger || false)
+            TrackInfo.new(name: name, q: (tr.q || arr.quant).inspect.freeze, clip: (tr.patch? ? (tr.clip ? arr.name_of(tr.clip) : 'no clip') : 'graph').freeze, armed: armed.include?(name), trigger: tr.trigger || false,
+                          instrument: tr.patch? ? Arrangement::InstrumentPatch.entry_of(tr.patch) : nil)
           }.freeze
 
           s.journal.fold # new entries reach #note
@@ -102,7 +103,8 @@ module MB
             racks: rack_infos(s),
             clocks: clock_infos(s),
             inspector: (info = needs&.include?(:inspect) ? (@inspector ||= Inspect::Gatherer.new).call(s) : nil),
-            render_source: needs&.include?(:render) ? render_source(s, arr, info) : nil
+            render_source: needs&.include?(:render) ? render_source(s, arr, info) : nil,
+            cue_heard: (s.cue_heard? rescue false)
           )
           [slow, knobs.to_a.freeze]
         end

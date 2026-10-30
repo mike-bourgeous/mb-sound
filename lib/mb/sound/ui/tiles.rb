@@ -123,6 +123,7 @@ module MB
           @line_cursor = @old_winch = @signals = @wake_r = @wake_w = nil
           @attached = @poll = @polled_at = @poll_warned = @last = nil
           @asking = nil # ([pane name, PaneKeys::Ask] while a pane's value prompt is open)
+          @temporary_jumps = {} # (pane name => the Proc that takes it away: panes put in by their jump letter)
           @input = input
           @output = output
           @session = session
@@ -965,9 +966,31 @@ module MB
           if target.nil?
             return keys_unlocked(true, off: nil, step: nil, patch: :keep) if name == :keyboard
             return act(MB::Term::Input::Action.of(:mode, :repl)) if name == :repl && @host
+            # (a pane kind that may come for a while: the library picker on
+            # ui :sound's smaller layouts; its q, or the jump again, takes
+            # it away)
+            if (rows = UI.panes[name]&.temporary_rows(@tiler.layout.panes))
+              @temporary_jumps[name] = plot_pane(name, height: [rows, @rows / 2].min, prefer: TEMPORARY_PREFER[name])
+              return enter_unlocked(name) if @tiler.layout.panes.include?(name)
+            end
             return flash("no #{name} pane here (: show :#{name})", :dim)
           end
+          return close_temporary_jump(name) if @temporary_jumps[name] && @tiler.focus == target && @router.mode == :pane
           enter_unlocked(target)
+        end
+
+        # Panes a temporary jump takes rows from first (else the largest
+        # flexible pane).
+        TEMPORARY_PREFER = { picker: :inspector }.freeze
+
+        # Takes away pane +name+ opened by its jump letter (#jump_unlocked):
+        # the layout comes back as it was, the focus where it was.
+        def close_temporary_jump(name)
+          restore = @temporary_jumps.delete(name) or return
+          act(MB::Term::Input::Action.of(:mode, :nav)) if @tiler.focus == name
+          restore.call
+          @full = true
+          @router.mode
         end
 
         # The pane on screen for jump name +name+ (its own name first,
@@ -1132,7 +1155,7 @@ module MB
           when :messages then messages
           when :show_fps then show_fps(!@show_fps)
           when :call then run_safely { a.args[0].call }
-          when :line_changed then nil
+          when :line_changed then pane_line_changed
           when :complete then complete_palette
           when :unbound
             flash(a.args[1] ? "#{a.args[1]} #{a.args[0]}: not a NAV key (the keys are listed here; Esc: back)" : "#{a.args[0]}: not a NAV key (? lists them; Esc or i: the REPL)", :dim)
@@ -1401,6 +1424,15 @@ module MB
               @asking = [name, x]
               @router.open_line(:pane_value, x.prompt)
               @router.line.insert(x.text) unless x.text.empty?
+            when PaneKeys::Paste
+              # (a line to edit on the REPL's prompt, not run: the REPL, the text typed in)
+              if @host
+                act(MB::Term::Input::Action.of(:mode, :repl))
+                @host.paste(x.code)
+                flash(Tiles.one_line(x.note || 'on the console line: Enter runs it'), :key)
+              else
+                flash(Tiles.one_line("no console here: #{x.code}"), :warn)
+              end
             when String
               flash(x, :key)
             when :close
@@ -1412,6 +1444,8 @@ module MB
                 @page_opener = opener
                 back_from_page
                 @page_opener = nil
+              elsif @temporary_jumps[name]
+                close_temporary_jump(name)
               elsif @host
                 act(MB::Term::Input::Action.of(:mode, :repl))
               end
@@ -1423,14 +1457,31 @@ module MB
         end
 
         # The typed answer (nil: cancelled) to the open PaneKeys::Ask: the
-        # asking pane's key_<answer>, handled like a key's result.
+        # asking pane's key_<answer>, handled like a key's result (a
+        # cancelled live Ask gets its key_<changed> with the starting text,
+        # so a find puts the list back).
         def answer_pane(text)
           name, ask = @asking
           @asking = nil
           return unless name
-          return flash('cancelled', :dim) if text.nil?
           pane = @panes[name] or return
+          if text.nil?
+            pane.key_action(ask.changed, @states[name], ask.text) if ask.changed
+            return flash('cancelled', :dim)
+          end
           pane_result(name, pane.key_action(ask.answer, @states[name], text))
+        end
+
+        # An edit of an open live Ask's line (PaneKeys::Ask +changed+: the
+        # library picker's find-as-you-type): the asking pane's
+        # key_<changed> with the text so far; a String it returns flashes.
+        def pane_line_changed
+          name, ask = @asking
+          return unless name && ask.changed && @router.line
+          pane = @panes[name] or return
+          r = pane.key_action(ask.changed, @states[name], @router.line.text)
+          flash(Tiles.one_line(r), :dim) if r.is_a?(String)
+          @full = true
         end
 
         # Seconds until a pane on screen has a line due (UI::PaneKeys
@@ -1831,6 +1882,14 @@ module MB
             @jumps[n] = letter
             next if Keys::JUMPS.value?(letter)
             @jump_map.on(letter, :jump, n, help: "#{pane&.title || n} (focus it, go in)")
+          end
+          # (panes a jump puts in for a while: Pane#temporary_rows)
+          UI.panes.each_value do |pane|
+            next if names.include?(pane.name) || !pane.temporary_rows(names)
+            letter = pane.jump
+            next unless letter && !@jumps.value?(letter) && !Keys::JUMPS.value?(letter)
+            @jumps[pane.name] = letter
+            @jump_map.on(letter, :jump, pane.name, help: "#{pane.title || pane.name} (put in for a while, go in; again: away)")
           end
         end
 

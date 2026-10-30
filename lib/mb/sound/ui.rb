@@ -19,6 +19,7 @@ require_relative 'ui/turn_gesture'
 require_relative 'ui/knob_turns'
 require_relative 'ui/set_panes'
 require_relative 'ui/sound_panes'
+require_relative 'ui/picker'
 require_relative 'ui/pane_files'
 require_relative 'ui/layout'
 require_relative 'ui/follow'
@@ -138,7 +139,7 @@ module MB
         session: ['the set: launch lane, the clip matrix and clip detail, racks, landed changes, buses, MIDI, around the console', '160x45 and up'],
         mixer: ['the mix: buses with input, output, and send meters, the master meters, CPU, the console over a scope', '120x40 and up'],
         keys: ['the console over the keyboard, starting in KEYS mode', '100x30 and up'],
-        sound: ['sound design: the voice in sections or as a front panel (a track\'s knobs and params to turn), the picked row\'s preview, the graph\'s code, a render of one note, the CUE line, the console below; fewer panes on smaller screens (80x24: the panel, its preview, the console; the picker and keys from 160x50)', '80x24 and up'],
+        sound: ['sound design: the voice in sections or as a front panel (a track\'s knobs and params to turn), the picked row\'s preview, the graph\'s code, a render of one note, the CUE line, the console below, the library picker beside the tracks; fewer panes on smaller screens (80x24: the panel, its preview, the console, NAV l the picker for a while; the keys pane from 160x50)', '80x24 and up'],
         wall: ['the performance panes at once (tracks, queue, knobs, cpu, the keyboard, meters, scope, spectrum, messages; the set panes are on ui :session), for big terminals', '200x60 and up'],
         show: ['song_script --ui: a big scope and spectrum, no console', '120x40 and up'],
         play: ['synth_script --ui: the keyboard, scope, spectrum, no console', '120x40 and up'],
@@ -215,8 +216,7 @@ module MB
           # Sound design (sound-design-ui-1): the patch inspector beside
           # the node's preview and the graph's code with the patch's
           # offline render (sound-design-ui-2), the library picker
-          # (a placeholder until the library index) and the tracks at the
-          # left, the CUE line and the console below at full width
+          # (ui-scaffold-1) and the tracks at the left, the CUE line and the console below at full width
           sound: MB::Term::Viewports.layout(:sound, focus: :repl) {
             cols(height: 1) { pane :transport; pane :form }
             cols(weight: 5) {
@@ -249,20 +249,21 @@ module MB
         @tile_layout_levels ||= {
           sound: {
             # 80x24: the voice (its panel by default), the picked row's
-            # preview, the console
+            # preview, the console (NAV l puts the library picker in for a
+            # while: Panes::Picker#temporary_rows)
             compact: MB::Term::Viewports.layout(:sound, focus: :repl) {
               cols(height: 1) { pane :transport; pane :form }
               pane :inspector, weight: 3, min: 6
               pane :preview, height: 6
               repl weight: 2, min: 4
             },
-            # 120x40: the tracks, the voice in sections over its preview,
-            # the code over the render, the CUE line, the console (the
-            # picker placeholder and the keys pane only on big screens)
+            # 120x40: the tracks over the library picker, the voice in
+            # sections over its preview, the code over the render, the
+            # CUE line, the console (the keys pane only on big screens)
             normal: MB::Term::Viewports.layout(:sound, focus: :repl) {
               cols(height: 1) { pane :transport; pane :form }
               cols(weight: 5) {
-                pane :tracks, width: 26
+                rows(width: 26) { pane :tracks, height: 7; pane :picker }
                 rows(weight: 3) { pane :inspector, weight: 3; pane :preview, weight: 2, min: 8 }
                 rows(weight: 3) { pane :code; pane :render, weight: 2, min: 8 }
               }

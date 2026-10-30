@@ -122,9 +122,9 @@ module MB
 
         # The head path that reaches it: "L.fx.hall" when the name is
         # unique under its head, else with the family ("L.fx.reverb.plate").
-        def head_path
+        def head_path(index = Library.index)
           head = HEADS.key(kind)
-          same = Library.index.entries(kind: kind).count { |e| e.name == name }
+          same = index.entries(kind: kind).count { |e| e.name == name }
           [*(head ? ['L', head] : ['L.all']), (family if same > 1 && family != :preset), name].compact.join('.')
         end
 
