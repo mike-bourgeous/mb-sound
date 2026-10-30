@@ -1264,6 +1264,16 @@ module MB
         preset has one, built from it), `L.fx.bar.ping(C5)` strikes it
         once, `play L.fx.bar` plays a strike, and a library file line
         `struck :my_bell, resonator: :bell, decay: 8` makes another.
+
+        Judging presets by ear: `L.fx.reverb.bench` renders every reverb on
+        the Listening Bench's material (the A7 arp, the jungle break, a saw
+        pad; instruments on phrases for their role and their genre
+        template's phrase), each matched to -20 LUFS, into a Bench set
+        folder (`bin/preset_bench.rb reverb` from a shell; `--vs master-ai`
+        for before/after, `--notes` reads the verdicts back).
+        `play L.fx.reverb.hall.audition(:break)` plays one of them;
+        `.auditions` lists an entry's materials, and `play L.fx.hall`
+        plays an effect on the arp.
       TEXT
       commands :find, :shelves, :save, :save!, :collect, :promote, :promote!, :struck
       note :library
@@ -1276,6 +1286,9 @@ module MB
       end
       example 'a struck resonator from notes' do
         bg :try, struck(seq(C5, E5, G5, C6).n8.loop, :marimba).at(-12.db)
+      end
+      example 'a plate reverb on the Bench arp' do
+        bg :try, L.fx.reverb.plate.audition(:arp).at(-14.db)
       end
     end
 

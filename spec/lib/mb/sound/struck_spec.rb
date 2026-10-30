@@ -58,10 +58,8 @@ RSpec.describe(MB::Sound::Struck, :aggregate_failures) do
     expect(pl.graph(MB::Sound::L.inst.bowl).description).to eq('L.inst.bowl playing a demo phrase')
     expect(pl.graph(MB::Sound::L.inst.dnb.dnb_sub).description).to eq('L.inst.dnb_sub playing a demo phrase')
     expect(pl.graph(MB::Sound::L.kit.tr909).description).to eq('L.kit.tr909 playing a beat')
-    err = nil
-    expect { pl.graph(MB::Sound::L.fx.hall) }.to raise_error(pl::Unplayable) { |e| err = e }
-    example = err.message[/e\.g\. play (.*)\z/, 1]
-    expect(pl.graph(MB::Sound.module_eval(example)).nodes.length).to be >= 1 # (the example runs)
+    # Other effects play on their Listening Bench material (audition-1)
+    expect(pl.graph(MB::Sound::L.fx.hall).description).to eq('L.fx.hall on the A7 arp (its Bench material)')
   end
 
   it 'plays on a track from a resonator effect, its decay the track knob' do

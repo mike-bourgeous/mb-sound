@@ -6,7 +6,8 @@ module MB
       # Instruments play a demo phrase (struck ones moved toward their
       # resonator's typical pitch), kits each voice once, resonator effects
       # one strike of their struck instrument (Struck), clips on their
-      # instrument; other effects say how to hear them.
+      # instrument, other effects their Listening Bench material, the A7
+      # arp (Library::Bench, audition-1).
       module Audition
         # A beat for kit entries.
         KIT_DEMO = { kick: 'x...x...x...x...', snare: '....x.......x...', closed_hat: 'x.x.x.x.x.x.x.xx' }.freeze
@@ -36,7 +37,8 @@ module MB
           when :clip
             entry.call
           when :effect
-            raise Playable::Unplayable, "#{path} is an effect: hear it on a sound, e.g. play 220.hz.saw.at(0.2).for(1).then(&#{path})"
+            Playable.wrap(entry.audition(:arp), "#{path} on the A7 arp (its Bench material)", true,
+              "an effect processes a sound: #{path}.audition(:break) or (:pad) for the other Bench materials, sig.then(&#{path}) on any sound")
           else
             raise Playable::Unplayable, "#{path} is a #{entry.kind} (#{entry.label}): nothing to play by itself"
           end

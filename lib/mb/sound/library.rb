@@ -289,6 +289,7 @@ require_relative 'library/methods'
 require_relative 'library/heads'
 require_relative 'library/finder'
 require_relative 'library/audition'
+require_relative 'library/bench'
 
 module MB
   module Sound
