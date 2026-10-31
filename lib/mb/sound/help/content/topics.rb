@@ -1274,7 +1274,8 @@ module MB
         (`L.inst.reese` lists both Reeses, Tab shows what is left), and
         `.(sig)` uses it: `sig.then(&L.fx.hall)`.  Heads: `L.inst`,
         `L.fx`, `L.kit`, `L.seq`, `L.master`, `L.set`, `L.env`, `L.edit`,
-        `L.all`.
+        `L.mfx` (note effects), `L.analyze` (audio to notes or control),
+        `L.mod`, `L.all`.
 
         Entries come from shelves, searched in order: the session's racks,
         the project's presets/ (your song), the user shelf (a git

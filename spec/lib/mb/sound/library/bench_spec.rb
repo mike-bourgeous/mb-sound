@@ -29,7 +29,7 @@ RSpec.describe MB::Sound::Library::Bench do
       entries, skipped = bench.select(:instrument)
       expect(entries.map(&:family)).not_to include(:sq80)
       expect(entries.map(&:name).grep(/\Asq80_/)).to be_empty
-      expect(skipped.map { |e, _| e.name }).to include(:classic, :sq80_glass)
+      expect(skipped.map { |e, _| e.name }).to include(:sq80_classic, :sq80_glass) # (SQ-80 patches are listed as their documents)
       expect(bench.select('sq80.glass')[0].map(&:name)).to eq([:glass])
 
       entries, skipped = bench.select(:mastering)

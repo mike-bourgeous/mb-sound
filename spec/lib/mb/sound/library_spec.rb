@@ -109,6 +109,20 @@ RSpec.describe MB::Sound::Library do
       end
     end
 
+    it 'name each instrument and kit once across families, the struck glass winning (maintainer, 2026-10-31)' do
+      listed = index.entries.select { |e| e.shelf.shipped? && %i[instrument kit].include?(e.kind) }
+      dups = listed.group_by(&:name).select { |_, l| l.length > 1 }.transform_values { |l| l.map(&:family) }
+      expect(dups).to eq({})
+      expect(MB::Sound::L.inst.glass.family).to eq(:struck)
+      expect(MB::Sound::L.inst.sq80_glass.location).to end_with('presets/sq80_glass.mbg.rb')
+      # SQ-80 patches answer under their documents' sq80_ names; every one has its document
+      sq80 = index.entries(family: :sq80).select { |e| e.shelf.shipped? }
+      expect(sq80.map(&:name)).to include(:classic, :glass)
+      sq80.each { |e| expect(listed.map(&:name)).to include(:"sq80_#{e.name}") }
+      expect(listed.map(&:family)).not_to include(:sq80)
+      expect(MB::Sound::SQ80.patch(:glass).name).to eq(:glass) # (the family's own lookups are unchanged)
+    end
+
     it 'keep the class presets as they were (bit for bit)' do
       g = MB::Sound::GraphNode
       expect(g::Reverb.preset_settings(:hall)[:wet]).to eq(-20.db)
@@ -312,10 +326,19 @@ RSpec.describe MB::Sound::Library do
       expect(l.fx.hall.head_path).to eq('L.fx.hall')
     end
 
+    it 'name note effects mfx and audio-to-notes/control racks analyze (maintainer, 2026-10-30)' do
+      expect(MB::Sound::Library::HEADS).to include(mfx: :note_fx, analyze: :listener)
+      expect(MB::Sound::Library::HEADS.keys).not_to include(:notes, :listen)
+      expect(l.mfx.kind).to eq(:note_fx)
+      expect(l.analyze.kind).to eq(:listener)
+      expect { l.notes }.to raise_error(NoMethodError)
+    end
+
     it 'complete the words of a chain without running it' do
       c = MB::Sound::Library::Heads
       expect(c.completions('L.fx.re')).to eq(%w[L.fx.reel L.fx.resonator L.fx.reverb]) # (:reel, a tape echo preset)
-      expect(c.completions('L.')).to include('L.inst', 'L.fx', 'L.all')
+      expect(c.completions('L.')).to include('L.inst', 'L.fx', 'L.mfx', 'L.analyze', 'L.mod', 'L.all')
+      expect(c.completions('L.')).not_to include('L.notes', 'L.listen') # (renamed in library-2)
       expect(c.completions('MB::Sound::L.kit.tr')).to eq(%w[MB::Sound::L.kit.tr808 MB::Sound::L.kit.tr909])
       expect(c.completions('L.inst.dnb.')).to include('L.inst.dnb.dnb_reese', 'L.inst.dnb.reese')
       expect(c.completions('L.fx.zzz.')).to be_nil

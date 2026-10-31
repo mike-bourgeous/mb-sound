@@ -15,7 +15,7 @@ module MB
       module Picker
         # The heads in the order the picker shows them (Library::HEADS
         # with entries, then :all).
-        ORDER = %i[inst fx kit seq master env set edit notes listen mod].freeze
+        ORDER = %i[inst fx kit seq master env set edit mfx analyze mod].freeze
 
         # How long results are kept before the index is read again (a save
         # or a shelf change shows within this).

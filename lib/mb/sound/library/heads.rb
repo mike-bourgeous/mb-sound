@@ -4,7 +4,7 @@ module MB
       # The heads under MB::Sound::L (maintainer, 2026-10-26: "S1", a short
       # root then full words, each call narrowing the search; the word
       # heads are provisional): `L.inst`, `L.fx`, `L.kit`, `L.seq`,
-      # `L.master`, `L.set`, `L.env`, `L.edit`, `L.notes`, `L.listen`,
+      # `L.master`, `L.set`, `L.env`, `L.edit`, `L.mfx`, `L.analyze`,
       # `L.mod` (HEADS), and `L.all`.  Each is a Query; each word after it
       # narrows by a family (`L.fx.reverb`), a tag (`L.fx.bright`), or a
       # word of entry names (`L.inst.reese`: dnb_reese and jungle_reese),

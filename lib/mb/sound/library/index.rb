@@ -87,9 +87,9 @@ module MB
         ### Families and registration (code)
 
         # Declares a family (see Family); returns it.
-        def define_family(name, kind:, about: nil, owner: nil, apply: nil, code: nil)
+        def define_family(name, kind:, about: nil, owner: nil, apply: nil, code: nil, document: nil)
           @lock.synchronize do
-            f = Family.new(name: name, kind: kind, about: about, owner: owner, apply: apply, code: code)
+            f = Family.new(name: name, kind: kind, about: about, owner: owner, apply: apply, code: code, document: document)
             old = @families[name]
             raise Collision, "family #{name.inspect} is declared twice (#{old.owner.inspect} and #{owner.inspect})" if old && old.owner && owner && !old.owner.equal?(owner)
             @families[name] = f
@@ -170,11 +170,15 @@ module MB
         # The winning entries (one per family and name), optionally only of
         # +kind+ or +family+; with +documents:+ (the default) the shelves'
         # graph documents too.  +shadowed: true+ includes the shadowed
-        # entries.
+        # entries.  Listings across families (no +family:+, documents
+        # included) leave out the shipped presets a shipped document
+        # stands for (Family#document: the SQ-80 patches, listed as their
+        # sq80_ documents).
         def entries(kind: nil, family: nil, documents: true, shadowed: false)
           all = all_entries(documents: documents)
           all = all.select { |e| e.kind == kind } if kind
           all = all.select { |e| e.family == family } if family
+          all = without_listed_documents(all) if documents && !family
           return all if shadowed
           seen = {}
           all.each { |e| seen[[e.family, e.name]] ||= e }
@@ -334,6 +338,21 @@ module MB
         end
 
         private
+
+        # +list+ without the shipped class presets whose family names a
+        # shipped graph document in +list+ standing for them.
+        def without_listed_documents(list)
+          stand_ins = @families.values.select(&:document)
+          return list if stand_ins.empty?
+          shipped = nil
+          list.reject { |e|
+            next false unless e.shelf.shipped? && e.family != :preset
+            f = @families[e.family]
+            next false unless f&.document
+            shipped ||= list.select { |d| d.family == :preset && d.shelf.shipped? }.to_h { |d| [d.name, true] }
+            shipped.key?(f.document.call(e.name).to_sym)
+          }
+        end
 
         def document_entry(path, shelf)
           st = File.stat(path)

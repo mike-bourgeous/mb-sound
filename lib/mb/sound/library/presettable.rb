@@ -27,12 +27,14 @@ module MB
       # +about+, +apply+ (called with the preset's name and Entry#call's
       # arguments: how a preset is used), +code+ (a Proc printing an
       # entry's code form), and +keys+ (the settings a preset may give, or
-      # nil for any; library files are checked against it).
-      def preset_family(name, kind:, label: nil, about: nil, apply: nil, code: nil, keys: nil)
+      # nil for any; library files are checked against it), and
+      # +document+ (a Proc giving the name of the shipped graph document
+      # listed in place of each shipped preset; see Library::Family).
+      def preset_family(name, kind:, label: nil, about: nil, apply: nil, code: nil, keys: nil, document: nil)
         @preset_family = name
         @preset_label = label || "#{name} preset"
         @preset_keys = keys&.map(&:to_sym)&.freeze
-        Library.index.define_family(name, kind: kind, about: about, owner: self, apply: apply, code: code)
+        Library.index.define_family(name, kind: kind, about: about, owner: self, apply: apply, code: code, document: document)
       end
 
       # The family name (inherited), or nil.
