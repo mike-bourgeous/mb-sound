@@ -271,6 +271,21 @@ module SessionFuzz
       lines << "at_bar(1) { feed :#{pick(rng, names)}, :colour, :tint }"
       lines << "at_bar(#{rng.rand(1..bars)}, beat: #{rng.rand(2..beats)}) { turn :tint, 1 }"
     end
+    # (session-2) readers hear their sources pre-fader: a ducked part's
+    # source gets a key level (now, on a beat, or over a ramp) and
+    # sometimes its fader pulled down, and a kit read by `only: :kick`
+    # crossfades into another (both graphs' kicks add up in the reader;
+    # drawn last, so every seed keeps the song it made before)
+    keyed = lines.flat_map { |l| l.scan(/duck\(:(\w+)/).flatten }.uniq
+    if !keyed.empty? && rng.rand < 0.35
+      t = pick(rng, keyed)
+      how = pick(rng, ['', ', over: 1/2r', ', on: :beat'])
+      lines << "at_bar(#{rng.rand(1..bars)}, beat: #{rng.rand(2..beats)}) { key_level :#{t}, #{pick(rng, ['-6.db', '0.5', '0', '2.db'])}#{how} }"
+      lines << "at_bar(#{rng.rand(1..bars)}, beat: #{rng.rand(2..beats)}) { level :#{t}, #{pick(rng, ['0', '-12.db'])} }" if rng.rand < 0.5
+      if drums.include?(t) && rng.rand < 0.5
+        lines << "at_bar(#{rng.rand(1..bars)}, beat: 2) { bg :#{t}, grid(16, kick: 'x..x..x.x..x..x.').loop, fade: 1/4r, on: :beat }"
+      end
+    end
     Song.new(header: header, lines: lines, bars: bars)
   end
 

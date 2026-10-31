@@ -54,9 +54,33 @@ RSpec.describe(MB::Sound::Session::Faders) do
     d = results[0]
     expect(d[0]).to eq(1)
     expect(d[6000 + 480]).to be_within(1e-6).of(-6.db) # (after the 5 ms glide)
-    expect(d[96000 + 12000]).to be_within(1e-4).of(-6.db / 2) # halfway down the ramp
+    expect(d[96000 + 12000]).to be_within(1e-4).of(-6.db / 4) # halfway down the ramp: half the travel, a quarter of the gain
     expect(d[96000 + 24000...192000].abs.max).to eq(0)
     expect(d[192000 + 480..].to_a.uniq).to eq([2.0])
+  end
+
+  it 'moves along a dB taper: 0 dB mid-travel, silence at the bottom, +12 dB at the top' do
+    MB::Sound::Session.with_context(session: session) do
+      session.add(1.constant, name: :a, on: :now)
+      session.level(:a, -6.db)
+      session.key_level(:a, -6.db)
+      [session.fader(:a), session.key_fader(:a)].each do |k|
+        expect(k.spec.curve).to eq(:fader)
+        expect(k.spec.position(1.0)).to eq(0.5)
+        expect(k.spec.value(0.0)).to eq(0)
+        expect(k.spec.value(1.0)).to eq(4.0)
+        # (each step of the travel is a step in dB: 12 dB per halving)
+        expect(20 * Math.log10(k.spec.value(0.25))).to be_within(1e-9).of(20 * Math.log10(4) + 40 * Math.log10(0.25))
+        expect(k.spec.to_ruby).to include('curve: :fader')
+      end
+      # (a knob line of a level saved without its curve loads on the taper too)
+      expect(session.knob(:"b/level", (0.0..4.0).at(0.5)).spec.curve).to eq(:fader)
+      # (MIDI controllers move it along the taper)
+      cs = MB::Sound::MIDI::ControlSpec.from_param(session.fader(:a).spec.param, number: 7)
+      expect(cs.value(127)).to eq(4.0)
+      expect(cs.value(0)).to eq(0)
+      expect(cs.value(64)).to be_within(0.02).of(1.0)
+    end
   end
 
   it 'turns by the track name, takes scene values in gains and level knob names, and lists them' do
@@ -94,7 +118,7 @@ RSpec.describe(MB::Sound::Session::Faders) do
     end
   end
 
-  it 'applies to monitors and cue players through their track, and to readers before the mute' do
+  it 'applies to monitors and cue players through their track; readers hear players pre-fader, before the mute' do
     data = run(48000) { |s|
       s.add(1.constant, name: :"lead/live", on: :now)
       s.add(0.5.constant, name: :kick, on: :now)
@@ -103,7 +127,70 @@ RSpec.describe(MB::Sound::Session::Faders) do
       s.level(:kick, 0.5)
       s.mute(:kick)
     }
-    expect(data[24000]).to be_within(1e-6).of(0.5 + 0.025) # monitor at :lead's level, probe reading the muted kick after its level
+    expect(data[24000]).to be_within(1e-6).of(0.5 + 0.05) # monitor at :lead's level, probe reading the muted kick before its level
+  end
+
+  it 'reads the key level, not the fader, for readers (whole-track and only:), on exact frames at any buffer size' do
+    results = [[800], *slow_tier([[367, 368], [7, 128, 333]])].map { |sizes|
+      s = new_session.tap { |x| @sessions << x }
+      run(2 * 96000, sizes, s: s) { |ss|
+        ss.add(0.5.constant, name: :kick, on: :now)
+        ss.add(MB::Sound.bus(:kick) * 0.1, name: :probe, on: :now)
+        ss.level(:kick, 0) # (the fader: the probe doesn't hear it)
+        ss.key_level(:kick, 0.5, start_time: 1/16r)
+        ss.key_level(:kick, 0, over: 1/4r, start_time: 1r)
+      }
+    }
+    results.each { |d| expect(d).to eq(results[0]) }
+    d = results[0]
+    expect(d[1000]).to be_within(1e-7).of(0.05) # (the kick itself at its level 0 after the glide)
+    expect(d[6000 + 480]).to be_within(1e-7).of(0.025)
+    expect(d[96000 + 12000]).to be_within(1e-5).of(0.00625) # (along the taper: a quarter of the key level halfway)
+    expect(d[96000 + 24000..].abs.max).to eq(0)
+    s = @sessions.first
+    expect(s.key_levels).to eq({ kick: MB::Sound::Decibels.new(-Float::INFINITY) })
+    expect(s.key_level(:kick)).to eq(MB::Sound::Decibels.new(-Float::INFINITY))
+    expect(s.key_level(:other)).to eq(0.db)
+    expect(s.knobs.keys).to contain_exactly(:"kick/level", :"kick/key")
+  end
+
+  def inner(v)
+    MB::Sound::GraphNode::Constant.new(v, sample_rate: 48000).named(:inner)
+  end
+
+  it 'scales only: readers by the key level, not the fader or the fade' do
+    data = run(48000) { |s|
+      s.add(inner(0.25) + 1, name: :src, on: :now)
+      s.add(s.bus_tap(:src, only: :inner) * -4, name: :rd, on: :now)
+      s.level(:src, 0.5)
+      MB::Sound.key_level(:src, 0.5)
+    }
+    # src at its level (1.25 * 0.5), the reader at the key level: -4 * 0.25 * 0.5
+    expect(data[24000]).to be_within(1e-6).of(0.625 - 0.5)
+  end
+
+  it 'sums same-named players crossfading into an only: reader' do
+    data = run(2 * 96000) { |s|
+      s.add(inner(0.25) * 0, name: :src, on: :now)
+      s.add(s.bus_tap(:src, only: :inner), name: :rd, on: :now)
+      s.add(inner(0.5) * 0, name: :src, start_time: 1r, fade: 1)
+    }
+    expect(data[48000]).to eq(0.25)
+    expect(data[96000 + 48000]).to be_within(1e-7).of(0.75) # both graphs, halfway through the crossfade
+  end
+
+  it 'turns key level knobs by name in scenes and with turn before they exist' do
+    data = run(2 * 96000) { |s|
+      MB::Sound.track(:kick, 0.5.constant)
+      MB::Sound.track(:probe, MB::Sound.bus(:kick) * 0.1)
+      MB::Sound.scene(:a, kick: :on, probe: :on)
+      MB::Sound.scene(:soft, "kick/key": 0.5, others: :keep)
+      MB::Sound.go(:a, on: :now)
+      MB::Sound.at_bar(2) { MB::Sound.go(:soft) }
+    }
+    expect(data[48000]).to be_within(1e-7).of(0.55)
+    expect(data[96000 + 48000]).to be_within(1e-7).of(0.525)
+    expect { session.knob!(:"other/key") }.to raise_error(ArgumentError, /No knob/)
   end
 
   it 'keeps a trigger track\'s level as its fader (`level :pump, 0` stops the pump)' do

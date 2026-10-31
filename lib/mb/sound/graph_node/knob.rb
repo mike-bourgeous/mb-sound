@@ -218,7 +218,7 @@ module MB
 
           def to_s
             "#{name.inspect} #{MB::M.sigfigs(range.begin, 4)}..#{MB::M.sigfigs(range.end, 4)}#{unit}" \
-              "#{curve == :exp ? ' exp' : ''}#{cc ? " cc#{cc}" : ''}"
+              "#{curve == :linear ? '' : " #{curve}"}#{cc ? " cc#{cc}" : ''}"
           end
         end
 
@@ -977,6 +977,8 @@ module MB
           if @spec.curve == :exp
             c.inplace + a + b
             v = Numo::NMath.exp(c.inplace)
+          elsif @spec.curve == :fader
+            v = @spec.scale.value(c.inplace + a)
           else
             v = c.inplace + a
           end
@@ -993,7 +995,7 @@ module MB
         def ramp_into(out, pos, seg, f, n)
           cv = seg.curve
           kind = cv.nil? || cv.equal?(MB::Sound::Curve.linear) ? 0 : (cv.equal?(MB::Sound::Curve.smoothstep) ? 1 : nil)
-          return false unless kind
+          return false unless kind && @spec.curve != :fader # (the taper's ramps: Ruby only)
 
           k, a, b = ramp_terms(seg)
           !!MB::Sound::Kernels.knob_ramp(out, pos, n, f - seg.start, seg.length, kind, @spec.curve == :exp, k, a, b, seg.to)

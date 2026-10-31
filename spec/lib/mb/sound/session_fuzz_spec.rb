@@ -35,7 +35,7 @@ RSpec.describe('session fuzzing') do
   it 'generates valid songs that use every kind of command' do
     songs = (1..40).map { |s| SessionFuzz.generate(Random.new(s)).code }
     all = songs.join("\n")
-    %w[track( scene go swap stop mute unmute solo turn tween .freq tr808( tr909( launch tweak meter L.inst. :dnb_sub bus( feed master flow( markov( seek glide(:length)].each do |word|
+    %w[track( scene go swap stop mute unmute solo turn tween .freq tr808( tr909( launch tweak meter L.inst. :dnb_sub bus( feed master flow( markov( seek glide(:length) key_level].each do |word|
       expect(all).to include(word)
     end
     expect(all).to match(/\{ swap :t\d, grid\(.*\)\.loop\.\w+/) # (parity-1: a kit swapped to a Kit transform)
@@ -172,6 +172,18 @@ RSpec.describe('session fuzzing') do
         'at_bar(2) { flow(seed: 28, on: :beat) { generate markov(s1: { s1: 3, s2: 3 }, s2: { s1: knob(:busy), s2: 2 }, seed: 71), s1: [1, 2.beats], s2: [1, 2.beats] } }',
         "at_bar(1, beat: 2) { bg :t1, grid(16, kick: 'x...x...', open_hat: '..x...x.').loop, in: 1/4r; bg :ducked, 0.2.constant.duck(:t1, only: :kick, amount: -12.db), in: 1/4r }",
       ], 2,
+    ],
+    # (session-2, FUZZ=60 seed 16: a bus quiet long enough to sleep on a
+    # grid frame slept through the rest of the span even when the send
+    # turned up there was loud, so the send reached it a buffer late)
+    'a send turned up on the grid frame where its bus falls asleep (seed 16)' => [
+      :buffer_size, ['bpm 120'], [
+        'knob :tint, 0, range: 0..1',
+        'bg :t1, 0.2.constant, on: :now',
+        'bus(:colour) { |sig| sig * 0.5 }',
+        'at_bar(1) { feed :t1, :colour, :tint }',
+        'at_bar(1, beat: 3) { turn :tint, 1 }',
+      ], 1,
     ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do

@@ -132,7 +132,7 @@ module MB
           span = range.begin <= range.end ? range : (range.end..range.begin)
           param ||= MB::Sound::Param.new(
             name: name.downcase.gsub(/[^a-z0-9]+/, '_').delete_suffix('_').to_sym, default: value.to_f.clamp(span.begin, span.end),
-            range: span, curve: c == :exp || c == :switch ? c : nil, description: description, cc: type == :cc ? number : nil
+            range: span, curve: c == :linear ? nil : c, description: description, cc: type == :cc ? number : nil
           )
 
           super(

@@ -228,6 +228,29 @@ module MB
         }
       end
 
+      # Sets the key level of track or player +name+ to +value+: how hard
+      # it drives the sidechain readers that read it (`duck(:kick)`,
+      # `bus(:kick)`, `duck(:drums, only: :kick)`).  Readers hear tracks
+      # pre-fader (a kick's #level doesn't change how hard it ducks), so
+      # this is the sidechain's own level, independent of the fader and
+      # fade.  The same values, launch points, and ramps as #level; the
+      # knob is :"name/key" (scenes take `"kick/key": 0.5`).  With only a
+      # name, returns the key level (a Decibels); with nothing, every key
+      # level set so far.
+      #
+      #     key_level :drums, -6.db              # the bass ducks less
+      #     key_level :drums, 0, over: 4         # the pump fades out
+      def key_level(name = nil, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, smooth: nil)
+        session = Session.current
+        return session.key_levels if name.nil?
+        name = player_name(name)
+        return session.key_level(name) if value.nil?
+        point = LaunchPoint.of(binding) or return nil
+        session_command(name, label: "key_level #{name.inspect}", kind: :turn) { |s, time|
+          s.key_level(name, value, at: point, over: over, curve: curve, from: from, smooth: smooth, start_time: point.given? ? nil : time)
+        }
+      end
+
       # Unmutes players (every muted player if none are named).  See #mute.
       def unmute(*names, at: nil, on: nil, in: nil, fade: nil)
         point = LaunchPoint.of(binding) or return nil

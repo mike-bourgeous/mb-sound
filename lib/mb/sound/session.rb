@@ -1861,17 +1861,19 @@ module MB
           end
 
           # The strip (contract K7): fade, then level (Faders), then
-          # mute/solo; readers hear it before the mute (+fade:+ below)
+          # mute/solo; readers hear it pre-fader, before the mute (+reader+
+          # below: its fade and key level; Faders#reader_levels)
           fade = fade_ramp(p, base + offset, frames)
           level = fader_levels(p, base + offset, frames)
-          fade = fade ? (level ? fade * level : fade) : level
+          gain = fade ? (level ? fade * level : fade) : level
           strip = ramp_levels(p, :strip_level, :strip_ramp, base + offset, frames)
-          ramp = fade ? (strip ? fade * strip : fade) : strip
+          ramp = gain ? (strip ? gain * strip : gain) : strip
           # The route: CUE gets its share, MAIN the rest (see Cue)
           ramp = cue_route(p, data, ramp, offset, frames, base + offset) if p.cue
 
           if routed
-            deliver_player(p, data, ramp, mix, stem, offset, frames, fade: fade)
+            reader = bus_tapped?(p.name) ? reader_levels(p, fade, level, base + offset, frames, route_of(p.name)&.trigger) : nil
+            deliver_player(p, data, ramp, mix, stem, offset, frames, reader: reader)
           else
             c = -1
             while (c += 1) < mix.length # (no each_with_index: an imemo per player per buffer)

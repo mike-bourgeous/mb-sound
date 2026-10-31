@@ -76,4 +76,31 @@ RSpec.describe(MB::Sound::Param::Scale, :aggregate_failures) do
       expect([param.position(v), cc.position(v)]).to all(eq(spec.position(v)))
     end
   end
+
+  # (session-2: level knobs' gain taper, the maintainer's "dB curve")
+  it 'maps the :fader taper: 0 dB mid-travel on 0..4, silence at the bottom, through every declaration form' do
+    f = described_class.new(lo: 0.0, hi: 4.0, curve: :fader)
+    expect(f).to be_fader
+    expect([0.0, 0.25, 0.5, 1.0].map { |p| f.value(p) }).to eq([0.0, 0.25, 1.0, 4.0])
+    expect([0.0, 0.25, 1.0, 4.0].map { |v| f.position(v) }).to eq([0.0, 0.25, 0.5, 1.0])
+    expect(f.value(-0.5)).to eq(-1.0) # (outside the range: odd, so positions stay monotonic)
+    expect(f.position(-1.0)).to eq(-0.5)
+    expect(f.value(Numo::DFloat[0.25, 0.5]).to_a).to eq([0.25, 1.0])
+    expect(f.position(Numo::DFloat[0.25, 1.0]).to_a).to eq([0.25, 0.5])
+    # ramps and crossfades move evenly in position
+    k, a, b = f.ramp_terms(1.0, 0.0)
+    expect([k, a, b]).to eq([-0.5, 0.5, 0.0])
+    expect(f.between(1.0, 0.0, 0.5)).to eq(0.25)
+    expect(f.shift(1.0, 0.25, 2)).to eq(4.0)
+
+    param = MB::Sound::Param.declare(:x, (0.0..4.0).at(1.0), curve: :fader)
+    spec = MB::Sound::GraphNode::Knob::Spec.new(name: :x, default: (0.0..4.0).at(1.0), curve: :fader)
+    cc = MB::Sound::MIDI::ControlSpec.new(number: 1, range: 0.0..4.0, curve: :fader)
+    [0, 31, 64, 100, 127].each do |raw|
+      want = f.value(raw / 127.0)
+      expect([param.value(raw / 127.0), spec.value(raw / 127.0), cc.value(raw)]).to all(eq(want))
+    end
+    expect([param.position(2.0), cc.position(2.0)]).to all(eq(spec.position(2.0)))
+    expect(spec.to_ruby).to eq('knob :x, (0.0..4.0).at(1.0), curve: :fader')
+  end
 end

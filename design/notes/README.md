@@ -156,7 +156,7 @@ Mastering presets (`master :club`, `:streaming`, `:quiet`, `:vinyl`, `:hot`, `:m
 
 `bus(:verb) { |sig| sig.reverb(:hall, mix: 1) }` (`Session::Buses`, console `BusMethods`: `bus`, `buses`, `feed`, `routes`) makes a named bus, a master-like chain (`Master::Chain` machinery) with its own input, into the master or another bus (`to:`; loops refused).
 Routing belongs to player names: `track(:keys, send: { verb: -12.db })`, `track(:kick, to: :drums)`, `bg ..., send:`; sends are post-fader, and `feed :keys, :verb, -6.db, over: 2` is a journaled, undoable `:send` change.
-Readers (`GraphNode::BusTap`: `duck(:drums)`, `duck(:drums, only: :kick)`, `bus(:drums)`) work anywhere; buses ring out and sleep on the 800-frame grid, so output is the same at any buffer size; `render(stems:)` stems sum to the pre-master mix.
+Readers (`GraphNode::BusTap`: `duck(:drums)`, `duck(:drums, only: :kick)`, `bus(:drums)`) work anywhere and hear tracks pre-fader (`key_level :kick, -6.db` sets how hard a track drives them); buses ring out and sleep on the 800-frame grid, so output is the same at any buffer size; `render(stems:)` stems sum to the pre-master mix.
 
 ### [CUE and MAIN: auditioning before launch](cue.md)
 

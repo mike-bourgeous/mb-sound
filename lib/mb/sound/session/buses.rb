@@ -539,8 +539,13 @@ module MB
           n.respond_to?(:named?) && n.named? && n.graph_node_name == name.to_s
         end
 
-        # Writes a spied node's buffer into its `only:` signal (see
-        # #attach_bus_spies), at the position of the read in progress.
+        # Adds a spied node's buffer to its `only:` signal (see
+        # #attach_bus_spies) at the position of the read in progress, times
+        # the track's key level (Faders#key_level).  Adding (the signal is
+        # zeroed on its first use in a span) makes same-named players
+        # playing at once, a crossfade's old and new graphs, sum into the
+        # reader (the maintainer, 2026-10-31: "Add them"); a player's own
+        # reads never overlap.
         def bus_only_write(key, data)
           count = @bus_only_pending.delete(key) || data&.length || 0
           pos = @bus_only_pos[key]
@@ -550,11 +555,15 @@ module MB
           n = MB::M.min(count, buf.length - pos)
           if n > 0 && data
             m = MB::M.min(n, data.length)
-            # (without views for SFloat data; dropouts-2)
-            if m > 0 && !MB::Sound::Kernels.copy_range(buf, pos, data, 0, m)
-              d = data[0...m]
-              d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
-              buf[pos...(pos + m)] = d
+            if m > 0
+              k = key_fader_levels(key[0], @frame, @bus_span_count)
+              # (without views for SFloat data; dropouts-2)
+              unless MB::Sound::Kernels.accumulate(buf, pos, data, 0, m, k, pos, nil, 0)
+                d = data[0...m]
+                d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
+                d = d * (k.is_a?(Numeric) ? k : k[pos...(pos + m)]) if k
+                buf[pos...(pos + m)] = buf[pos...(pos + m)] + d
+              end
             end
           end
           @bus_only_pos[key] = pos + count
@@ -804,17 +813,19 @@ module MB
         # to its destinations: its main out (+mix+ or a bus), its sends, a
         # reader's signal, and +stem+.  Called by #render_player.
         #
-        # A reader's signal hears the player before its mute and solo
-        # (+fade+: the fade ramp alone), so soloing a bass keeps it ducking
-        # by a muted kick.
+        # A reader's signal hears the player pre-fader, before its mute and
+        # solo (+reader+: its fade and key level, and a trigger track's
+        # fader; Faders#reader_levels), so soloing a bass keeps it ducking by
+        # a muted kick, and pulling the kick's fader down doesn't change the
+        # duck.
         #
         # With stems, +stem+ gets the player's main out if it goes to the
         # master; what it sends or plays into buses goes through its own
         # copies of those buses into its stem (see #stem_shadow), so each
         # stem is the track as heard before the master chain.
-        def deliver_player(p, data, ramp, mix, stem, offset, frames, fade: ramp)
+        def deliver_player(p, data, ramp, mix, stem, offset, frames, reader: nil)
           route = route_of(p.name)
-          return deliver_trigger(p, route, data, offset, frames, fade) if route&.trigger
+          return deliver_trigger(p, route, data, offset, frames, reader) if route&.trigger
           main_bus = route&.to && bus_input(route.to)
           dest = main_bus || mix
           tap = bus_tapped?(p.name) ? bus_signal_buffer(p.name) : nil
@@ -832,13 +843,13 @@ module MB
             next if d.nil? || d.empty?
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
             len = MB::M.min(d.length, frames)
-            next if meter.nil? && deliver_fast(d, len, ramp, fade, m, stem&.[](c), tap&.[](c), sends, c, offset)
+            next if meter.nil? && deliver_fast(d, len, ramp, reader, m, stem&.[](c), tap&.[](c), sends, c, offset)
             raw = d[0...len]
             d = ramp ? raw * ramp[0...len] : raw
             r = offset...(offset + len)
             m[r].inplace + d
             stem[c][r].inplace + d if stem
-            tap[c][r].inplace + (fade.equal?(ramp) ? d : (fade ? raw * fade[0...len] : raw)) if tap
+            tap[c][r].inplace + (reader.equal?(ramp) ? d : (reader.is_a?(Numeric) ? raw * reader : (reader ? raw * reader[0...len] : raw))) if tap
             sends.each do |input, v, shadow, bus|
               x = v.is_a?(Numeric) ? (v == 1 ? d : d * v) : d * v[r]
               input[c][r].inplace + x
@@ -882,13 +893,13 @@ module MB
         # its Numo code), for SFloat data, ramps, and send levels that are
         # Floats, Integers, or SFloats.  Returns false (having added
         # nothing) for anything else.
-        def deliver_fast(d, len, ramp, fade, m, stem, tap, sends, c, offset)
-          return false unless d.is_a?(Numo::SFloat) && acc_factor?(ramp) && acc_factor?(fade)
+        def deliver_fast(d, len, ramp, reader, m, stem, tap, sends, c, offset)
+          return false unless d.is_a?(Numo::SFloat) && acc_factor?(ramp) && acc_factor?(reader)
           return false unless sends.all? { |row| acc_factor?(row[1]) } # (not a return inside the block: an imemo each)
 
           acc_add(m, offset, d, len, ramp, nil, 0)
           acc_add(stem, offset, d, len, ramp, nil, 0) if stem
-          acc_add(tap, offset, d, len, fade, nil, 0) if tap
+          acc_add(tap, offset, d, len, reader, nil, 0) if tap
           sends.each do |input, v, shadow, _|
             g = v.is_a?(Numeric) && v == 1 ? nil : v
             acc_add(input[c], offset, d, len, ramp, g, offset)
@@ -913,9 +924,9 @@ module MB
         end
 
         # A trigger track's buffer (see #route's +trigger:+) goes only to its
-        # readers' signal (after its fades and level, before its mute, like
-        # any player's): no mix, bus, send, stem, or meter.
-        def deliver_trigger(p, route, data, offset, frames, fade)
+        # readers' signal (after its fades, level, and key level, before its
+        # mute: +reader+): no mix, bus, send, stem, or meter.
+        def deliver_trigger(p, route, data, offset, frames, reader)
           return unless bus_tapped?(p.name)
           tap = bus_signal_buffer(p.name)
           tap.each_with_index do |t, c|
@@ -923,7 +934,7 @@ module MB
             next if d.nil? || d.empty?
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
             len = MB::M.min(d.length, frames)
-            acc_add(t, offset, d, len, fade, nil, 0) # (t[offset, len] += d[0, len] * fade)
+            acc_add(t, offset, d, len, reader, nil, 0) # (t[offset, len] += d[0, len] * reader)
           end
         end
 
@@ -986,8 +997,23 @@ module MB
           while p0 < e
             f = frame + p0
             if b.quiet.complete_at?(f) && bus_settled?(b)
-              b.asleep = true
-              break
+              # Quiet long enough to sleep at this grid frame, but input
+              # from here on in the span wakes it on its first loud frame
+              # (session-2: it slept through the rest of the span, so a send
+              # turned up on a grid frame reached the bus a buffer late,
+              # where the next buffer started: SessionFuzz seed 16)
+              w = bus_wake_index(b, input, frame, count, from: p0)
+              if w.nil? || w >= e
+                b.asleep = true
+                break
+              end
+              b.quiet.reset(frame + w)
+              if w > p0
+                pos = Sequence::Transport.position_at(from, w, per_sample)
+                b.chains.each { |c| c.timeline_nodes.each { |n| n.start_at(pos, origin: c.start, launch: c.launch, transport: @transport) } if c.started }
+                p0 = w
+                next
+              end
             end
 
             # Split at the first grid frame where it could fall asleep
@@ -1090,8 +1116,9 @@ module MB
 
         # Where a sleeping bus wakes in this span: its first input frame at
         # or above QuietRun::QUIET, an unmute ramp's start, or a chain
-        # change's landing frame; nil to keep sleeping.
-        def bus_wake_index(b, input, frame, count)
+        # change's landing frame; nil to keep sleeping.  +from+: the first
+        # frame of the span to look at (a bus falling asleep inside it).
+        def bus_wake_index(b, input, frame, count, from: 0)
           candidates = []
           if b.strip_level <= 0
             # Muted: only the unmute ramp's start wakes it (input before it
@@ -1100,11 +1127,11 @@ module MB
             w = MB::M.max(b.strip_ramp.start - frame, 0)
             return w < count ? w : nil
           end
-          candidates << MB::M.max(b.wake_at - frame, 0) if b.wake_at
+          candidates << MB::M.max(b.wake_at - frame, 0) if b.wake_at && (from == 0 || b.wake_at - frame >= from)
           if input
             input.each do |x|
-              idx = x.abs.ge(QuietRun::QUIET).where
-              candidates << idx[0] if idx.length > 0
+              idx = (from == 0 ? x : x[from..]).abs.ge(QuietRun::QUIET).where
+              candidates << idx[0] + from if idx.length > 0
             end
           end
           w = candidates.min

@@ -15,10 +15,17 @@ module MB
       #
       # Levels belong to names like mute flags: a graph replacing :bass
       # plays at :bass's level, and an armed track's monitor (:"lead/live")
-      # and a cue player (:"lead/cue") play at their track's level.  Readers
-      # (`duck(:kick)`, `bus(:kick)`) hear the player after its level, before
-      # its mute: a trigger track's level is how much it pumps (`level :pump,
-      # 0` turns a pump off).
+      # and a cue player (:"lead/cue") play at their track's level.
+      #
+      # Readers (`duck(:kick)`, `bus(:kick)`, `duck(:drums, only: :kick)`)
+      # hear the player before its level (pre-fader, the maintainer's
+      # 2026-10-30 decision: pulling a kick's fader down doesn't change how
+      # hard it ducks the bass), except a trigger track, whose level is its
+      # only fader (`level :pump, 0` turns a pump off).  How hard a player
+      # drives its readers is its key level, the knob :"kick/key" (also a
+      # linear gain, 0..MAX_LEVEL, default 1, made when first set:
+      # #key_level), applied to every reader of the name, `only:` readers
+      # included.
       module Faders
         # The highest level: +12 dB.
         MAX_LEVEL = 4.0
@@ -74,6 +81,62 @@ module MB
           }
         end
 
+        # The name of player name +name+'s key level knob (:"kick/key").
+        def key_level_name(name)
+          Name.key(name)
+        end
+
+        # The key level knob of player name +name+ (of the track whose
+        # monitor or cue player it is), or nil if none was made.
+        def key_fader(name)
+          owner = Name[name].strip_owner
+          key = @key_fader_names[owner] ||= Name.key(owner)
+          @knob_lock.synchronize { @knobs[key] }
+        end
+
+        # The key level knob of player name +name+, made at unity if there
+        # is none.  Returns nil if the name is taken by something else
+        # (after MB::Sound.live_error).
+        def key_fader!(name)
+          raise ArgumentError, "Player names must be Symbols or Integers (got #{name.inspect})" unless name.is_a?(Symbol) || name.is_a?(Integer)
+          key_fader(name) || knob(key_level_name(Name[name].strip_owner), 1.0, range: LEVEL_RANGE)
+        end
+
+        # Sets player name +name+'s key level (see the module comment): how
+        # hard it drives the sidechain readers that read it (`duck(:kick)`,
+        # `bus(:kick)`, `duck(:drums, only: :kick)`), whatever its fader and
+        # fade say.  The same values and launch points as #level.  Without a
+        # value, returns the key level as a Decibels.
+        def key_level(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, smooth: nil, start_time: nil)
+          if value.nil?
+            k = key_fader(name)
+            return level_db(k ? k.value.to_f : 1.0)
+          end
+          point = LaunchPoint.of(binding) or return nil
+          check_level_value(value)
+          k = key_fader!(name) or return nil
+          turn(k.name, value, at: point, over: over, curve: curve, from: from, smooth: smooth, start_time: start_time)
+        end
+
+        # The key levels that were set: player name => Decibels.
+        def key_levels
+          @knob_lock.synchronize { @knobs.dup }.each_with_object({}) { |(n, k), h|
+            nm = Name[n]
+            h[nm.owner] = level_db(k.value.to_f) if nm.key?
+          }
+        end
+
+        # The strip knob that +name+ (:"bass/level" or :"kick/key") names,
+        # made at unity if it wasn't yet, or nil if +name+ is neither.
+        def strip_knob!(name)
+          nm = Name[name]
+          if nm.level?
+            fader!(nm.owner)
+          elsif nm.key?
+            key_fader!(nm.owner)
+          end
+        end
+
         private
 
         # Linear gain +g+ as Decibels (to 0.01 dB; -Infinity.db for 0).
@@ -83,6 +146,7 @@ module MB
 
         def init_faders
           @fader_names = {} # player name => its level knob's name (built once)
+          @key_fader_names = {} # player name => its key level knob's name
         end
 
         def check_level_value(value)
@@ -112,6 +176,29 @@ module MB
             buf = Numo::SFloat.new(frames).fill(v).freeze
             p.level_buf = [v, buf]
             return buf
+          end
+          v.is_a?(Numo::SFloat) ? v : Numo::SFloat.cast(v)
+        end
+
+        # What player +p+'s readers hear it through over the frames
+        # [+frame+, +frame+ + +frames+) (see the module comment): its +fade+
+        # (pre-fader), its fader +level+ too for a trigger track, times its
+        # key level; nil at unity.
+        def reader_levels(p, fade, level, frame, frames, trigger)
+          g = trigger ? (fade ? (level ? fade * level : fade) : level) : fade
+          key = key_fader_levels(p.name, frame, frames) or return g
+          g ? g * key : key
+        end
+
+        # Player name +name+'s key level over [+frame+, +frame+ + +frames+):
+        # nil at unity (or with no key level knob), a Float while it holds
+        # still, else an SFloat.
+        def key_fader_levels(name, frame, frames)
+          k = key_fader(name) or return nil
+          v = k.read(frame, frames)
+          if v.is_a?(Numeric)
+            return nil if v == 1
+            return v.to_f
           end
           v.is_a?(Numo::SFloat) ? v : Numo::SFloat.cast(v)
         end

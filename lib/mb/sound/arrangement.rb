@@ -470,7 +470,7 @@ module MB
             next
           end
           kind = @session.names.kind(k)
-          if kind == :knob || control_value?(k, v) || @session.track_level_name?(k)
+          if kind == :knob || control_value?(k, v) || @session.track_strip_knob?(k)
             check_knob_value(name, k, v) or return nil
             next
           end
@@ -530,7 +530,7 @@ module MB
           return MB::Sound.live_error(ArgumentError.new("No scene #{name.inspect}#{known.empty? ? '' : " (scenes: #{known.map(&:inspect).join(', ')})"}"))
         end
 
-        knob_values = sc.values.select { |k, v| KEY_VALUES.include?(k) || tempo_value?(k) || @session.names.kind(k) == :knob || control_value?(k, v) || @session.track_level_name?(k) }
+        knob_values = sc.values.select { |k, v| KEY_VALUES.include?(k) || tempo_value?(k) || @session.names.kind(k) == :knob || control_value?(k, v) || @session.track_strip_knob?(k) }
         unknown = sc.values.keys - tracks.keys - knob_values.keys
         unless unknown.empty?
           why = @mutex.synchronize { unknown.filter_map { |u| "#{u.inspect}: #{@failed_tracks[u]}" if @failed_tracks[u] } }
