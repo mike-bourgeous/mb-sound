@@ -11,8 +11,9 @@ module MB
       # preset of a family, kind, list, or find query on standard
       # material (Bench::Material: instruments on phrases for their role
       # and their genre template's phrase, kits on beats, effects on the
-      # A7 arp, the jungle break, and a saw pad), each matched to one
-      # loudness (TARGET_LUFS integrated, true peak at most CEILING), and
+      # A7 arp, the jungle break, and a saw pad), all matched to one
+      # loudness (the loudest every item reaches with its true peak at
+      # most CEILING: Bench.common_lufs), and
       # writes a Bench set directory: audio per material, `set.json` (the
       # set as the Bench's build_manifest.py reads it, plus a `bench` key
       # with per item measurements), and `bench_set.py` (the line
@@ -31,12 +32,12 @@ module MB
         # script prints these as one line).
         class Error < ArgumentError; end
 
-        # The loudness every render is matched to (integrated LUFS).
-        TARGET_LUFS = -20.0
-
-        # The highest true peak a render may have (dBTP); a render that
-        # would pass it at TARGET_LUFS is turned down to it instead (and
-        # marked peak-bound in the set).
+        # The highest true peak a render may have (dBTP).  A set's renders
+        # are matched to the loudest integrated loudness every one of them
+        # reaches under it (the maintainer, 2026-10-30: "Ceiling only";
+        # until library-2, -20 LUFS with the items that couldn't reach it
+        # turned down, "peak-bound"); an explicit +lufs:+ still matches to
+        # that, turning down the items that would pass the ceiling.
         CEILING = -1.0
 
         # Fade at the end of a render cut at its material's max_seconds.
@@ -60,12 +61,14 @@ module MB
 
         # What a render measured: integrated +lufs+ and +true_peak+ after
         # matching, the +gain+ applied (dB), +peak_bound+ (true if the
-        # ceiling, not the target, set the gain), +seconds+ of audio,
-        # +cut+ (true if it was cut at max_seconds and faded), and
+        # ceiling, not an explicit target, set the gain), +sets_level+
+        # (true if the render reaches the ceiling at the set's loudness:
+        # the loudest it can go sets the level of the set), +seconds+ of
+        # audio, +cut+ (true if it was cut at max_seconds and faded), and
         # +render_seconds+ (wall time).  +silent+ renders wrote no file.
         # +error+ is the message of a render that raised (no file either).
-        Measure = Data.define(:lufs, :true_peak, :gain, :peak_bound, :seconds, :cut, :render_seconds, :silent, :error) do
-          def initialize(lufs: nil, true_peak: nil, gain: nil, peak_bound: false, seconds: 0.0, cut: false, render_seconds: 0.0, silent: false, error: nil)
+        Measure = Data.define(:lufs, :true_peak, :gain, :peak_bound, :sets_level, :seconds, :cut, :render_seconds, :silent, :error) do
+          def initialize(lufs: nil, true_peak: nil, gain: nil, peak_bound: false, sets_level: false, seconds: 0.0, cut: false, render_seconds: 0.0, silent: false, error: nil)
             super
           end
 
@@ -75,13 +78,47 @@ module MB
           def to_h = super.transform_values { |v| v.is_a?(Float) ? v.round(3) : v }
         end
 
+        # A render before matching (Bench.render_raw): its channels
+        # (+data+, trimmed or faded), +cut+, +render_seconds+, its
+        # +integrated+ loudness and +true_peak+ as rendered, +silent+, or
+        # the +error+ of a render that raised.
+        Raw = Data.define(:data, :cut, :render_seconds, :integrated, :true_peak, :silent, :error) do
+          def initialize(data: nil, cut: false, render_seconds: 0.0, integrated: nil, true_peak: nil, silent: false, error: nil)
+            super
+          end
+
+          # True if there is something to match (not silent, not failed).
+          def usable? = !silent && error.nil? && !integrated.nil?
+
+          # The loudest integrated loudness this render reaches with its
+          # true peak at +ceiling+.
+          def reach(ceiling) = integrated + ceiling - true_peak
+        end
+
         module_function
 
         # Where Bench sets go when no directory is given: $MB_SOUND_BENCH_DIR,
-        # else tmp/listening in the project (GraphIO.project_dir) or the
-        # working directory.
+        # else tmp/listening in the main checkout of the repository the
+        # working directory is in (`git rev-parse --git-common-dir`'s
+        # parent, as golden's approved renders: so sets rendered in a
+        # worktree survive its removal; the maintainer, 2026-10-31), else
+        # in the project (GraphIO.project_dir) or the working directory.
         def default_root
-          ENV['MB_SOUND_BENCH_DIR'] || File.join(GraphIO.project_dir || Dir.pwd, 'tmp', 'listening')
+          env = ENV['MB_SOUND_BENCH_DIR']
+          return File.expand_path(env) unless env.nil? || env.empty?
+          base = GraphIO.project_dir || Dir.pwd
+          File.join(main_checkout(base) || base, 'tmp', 'listening')
+        end
+
+        # The main checkout of the git repository +dir+ is in (the parent
+        # of its common .git directory), or nil outside one.
+        def main_checkout(dir)
+          common, status = Open3.capture2('git', '-C', dir, 'rev-parse', '--path-format=absolute', '--git-common-dir', err: File::NULL)
+          return nil unless status.success?
+          common = common.strip
+          File.basename(common) == '.git' ? File.dirname(common) : nil
+        rescue SystemCallError
+          nil
         end
 
         # The entries for +specs+ (each a family, kind, or entry name
@@ -226,20 +263,49 @@ module MB
           [data, data[0].length >= (max_seconds * 48000).round - 800]
         end
 
-        # Matches +data+ to +lufs+ (true peak at most +ceiling+): trims a
-        # tail more than QUIET_DB below the peak (renders of graphs that
-        # never report their end run to max_seconds), else fades the end
-        # when +cut+.  Returns [data, Measure fields] (+:cut+ false when
-        # the trim found the end).
-        def match(data, lufs: TARGET_LUFS, ceiling: CEILING, cut: false)
+        # Matches +data+ to +lufs+ (true peak at most +ceiling+; nil: the
+        # loudest +data+ reaches under it): trims a tail more than QUIET_DB
+        # below the peak (renders of graphs that never report their end
+        # run to max_seconds), else fades the end when +cut+.  Returns
+        # [data, Measure fields] (+:cut+ false when the trim found the
+        # end).
+        def match(data, lufs: nil, ceiling: CEILING, cut: false)
+          data, cut = prepare(data, cut)
+          loud = MB::Sound.loudness(data)
+          return [data, { silent: true, cut: cut }] if quiet?(loud)
+          scale(data, loud.integrated, loud.true_peak, lufs: lufs, ceiling: ceiling, cut: cut)
+        end
+
+        # [data, cut]: +data+ copied, a quiet tail trimmed (see #trim), else
+        # faded at the end when +cut+.
+        def prepare(data, cut)
           data, trimmed = trim(data.map(&:dup))
           cut &&= !trimmed
           fade(data, FADE_SECONDS) if cut
-          before = MB::Sound.loudness(data)
-          return [data, { silent: true, cut: cut }] if before.integrated.nil? || !before.integrated.finite? || before.integrated < -70
-          gain = lufs - before.integrated
-          bound = before.true_peak && before.true_peak + gain > ceiling
-          gain = ceiling - before.true_peak if bound
+          [data, cut]
+        end
+
+        # True for a loudness measure of silence (or under -70 LUFS).
+        def quiet?(loud)
+          loud.integrated.nil? || !loud.integrated.finite? || loud.integrated < -70
+        end
+
+        # The loudness a set of Raw renders is matched to: the loudest
+        # every usable one reaches with its true peak at most +ceiling+
+        # (the lowest Raw#reach), or nil if none is usable.
+        def common_lufs(raws, ceiling = CEILING)
+          raws.select { |r| r.is_a?(Raw) && r.usable? }.map { |r| r.reach(ceiling) }.min
+        end
+
+        # [data, Measure fields]: +data+ (measured +integrated+ LUFS and
+        # +true_peak+ dBTP) scaled to +lufs+ (nil: its reach under
+        # +ceiling+), turned down to the ceiling where +lufs+ would pass it.
+        def scale(data, integrated, true_peak, lufs:, ceiling:, cut:)
+          reach = integrated + ceiling - true_peak
+          lufs ||= reach
+          gain = lufs - integrated
+          bound = true_peak && true_peak + gain > ceiling + 1e-9
+          gain = ceiling - true_peak if bound
           # (BS.1770's absolute gate at -70 LUFS isn't scale-invariant:
           # quiet tail blocks a gain lifts over it lower the integrated
           # loudness, so correct once or twice)
@@ -251,8 +317,8 @@ module MB
             break if bound || off.abs < 0.02 || after.true_peak + off > ceiling
             gain += off
           end
-          data = out
-          [data, { lufs: after.integrated, true_peak: after.true_peak, gain: gain, peak_bound: bound, silent: false, cut: cut }]
+          sets = !bound && after.true_peak >= ceiling - 0.05
+          [out, { lufs: after.integrated, true_peak: after.true_peak, gain: gain, peak_bound: bound, sets_level: sets, silent: false, cut: cut }]
         end
 
         # How far below the peak a tail counts as ended (see #trim).
@@ -283,17 +349,18 @@ module MB
           data.each { |c| c[-n..] = c[-n..] * ramp }
         end
 
-        # Renders +job+ into +dir+ (FLAC, or MP3 with +format+ 'mp3').
+        # Renders +job+ into +dir+ (FLAC, or MP3 with +format+ 'mp3'),
+        # matched to +lufs+ (nil: the loudest it reaches under +ceiling+).
         # Returns a Measure.
-        def render_job(job, dir, lufs: TARGET_LUFS, ceiling: CEILING, format: 'flac', files: nil, raise_errors: false)
-          t0 = MB::U.clock_now
-          render_job!(job, dir, t0, lufs: lufs, ceiling: ceiling, format: format, files: files)
-        rescue StandardError, ScriptError => e
-          raise if raise_errors
-          Measure.new(render_seconds: MB::U.clock_now - t0, error: "#{e.class}: #{e.message.lines.first&.strip}")
+        def render_job(job, dir, lufs: nil, ceiling: CEILING, format: 'flac', files: nil, raise_errors: false)
+          finish_job(job, render_raw(job, files: files, raise_errors: raise_errors), dir, lufs: lufs, ceiling: ceiling, format: format)
         end
 
-        def render_job!(job, dir, t0, lufs:, ceiling:, format:, files:)
+        # Renders +job+'s graph, unmatched: a Raw (trimmed or faded, with
+        # its loudness), or a Raw with the +error+ of a render that raised
+        # (unless +raise_errors+).
+        def render_raw(job, files: nil, raise_errors: false)
+          t0 = MB::U.clock_now
           m = job.material
           m = effect_material(m.key, files: files) if files && m.audio?
           data, cut = MB::Sound.with_seed(0) {
@@ -301,14 +368,28 @@ module MB
               job.entry ? graph(job.entry, m) : m.build
             }
           }
-          data, info = match(data, lufs: lufs, ceiling: ceiling, cut: cut)
+          data, cut = prepare(data, cut)
+          loud = MB::Sound.loudness(data)
+          t = MB::U.clock_now - t0
+          return Raw.new(data: data, cut: cut, render_seconds: t, silent: true) if quiet?(loud)
+          Raw.new(data: data, cut: cut, render_seconds: t, integrated: loud.integrated, true_peak: loud.true_peak)
+        rescue StandardError, ScriptError => e
+          raise if raise_errors
+          Raw.new(render_seconds: MB::U.clock_now - t0, error: "#{e.class}: #{e.message.lines.first&.strip}")
+        end
+
+        # Matches Raw +raw+ to +lufs+ (nil: its own reach under +ceiling+)
+        # and writes it into +dir+.  Returns a Measure.
+        def finish_job(job, raw, dir, lufs:, ceiling:, format:)
+          return Measure.new(render_seconds: raw.render_seconds, error: raw.error) if raw.error
+          seconds = raw.data ? raw.data[0].length / 48000.0 : 0.0
+          return Measure.new(seconds: seconds, cut: raw.cut, render_seconds: raw.render_seconds, silent: true) unless raw.usable?
+          data, info = scale(raw.data, raw.integrated, raw.true_peak, lufs: lufs, ceiling: ceiling, cut: raw.cut)
           path = File.join(dir, "#{job.file}.#{format}")
-          unless info[:silent]
-            FileUtils.mkdir_p(File.dirname(path))
-            write_audio(path, data)
-          end
-          Measure.new(lufs: info[:lufs], true_peak: info[:true_peak], gain: info[:gain], peak_bound: info[:peak_bound] || false,
-            seconds: data[0].length / 48000.0, cut: info[:cut], render_seconds: MB::U.clock_now - t0, silent: info[:silent])
+          FileUtils.mkdir_p(File.dirname(path))
+          write_audio(path, data)
+          Measure.new(lufs: info[:lufs], true_peak: info[:true_peak], gain: info[:gain], peak_bound: info[:peak_bound], sets_level: info[:sets_level],
+            seconds: seconds, cut: info[:cut], render_seconds: raw.render_seconds)
         end
 
         # Writes +data+ to +path+: FLAC as ffmpeg writes it, MP3 at 320 kbps.
@@ -334,11 +415,13 @@ module MB
         # Renders and writes a Bench set for +what+ (see #select; +find:+
         # adds a find query) into +root+/+id+ (default: "presets-<what>-<date>",
         # with -r2, -r3 ... when taken).  +materials+ limits the material
-        # keys, +lufs+/+ceiling+ set the match, +format+ 'flac' or 'mp3',
+        # keys, +ceiling+ sets the match (every render, both sides of a
+        # --vs run, at the loudest every one reaches under it; +lufs+ an
+        # explicit loudness instead), +format+ 'flac' or 'mp3',
         # +vs+ a git ref or worktree path rendering the same presets as the
         # "before" variants (see Bench.render_elsewhere), +io+ gets one line
         # per render.  Returns a Result.
-        def run(what = nil, find: nil, root: default_root, id: nil, title: nil, materials: nil, dry: true, lufs: TARGET_LUFS, ceiling: CEILING,
+        def run(what = nil, find: nil, root: default_root, id: nil, title: nil, materials: nil, dry: true, lufs: nil, ceiling: CEILING,
                 format: 'flac', vs: nil, io: $stdout, list: false)
           entries, skipped = select(what, find: find)
           raise Error, "nothing to bench#{skipped.empty? ? '' : " (skipped: #{skipped.map { |e, r| "#{e.respond_to?(:head_path) ? e.head_path : e}: #{r}" }.join('; ')})"}" if entries.empty?
@@ -351,19 +434,33 @@ module MB
           end
           raise Error, "nothing to bench: #{skipped.map { |e, r| "#{e.head_path}: #{r}" }.join('; ')}" if jobs.none?(&:entry)
           skipped.each { |e, r| io&.puts "skip #{e.respond_to?(:head_path) ? e.head_path : e}: #{r}" }
-          return Result.new(id: id, dir: dir, jobs: jobs, measures: {}, before: {}, skipped: skipped, vs: vs, wall: 0.0) if list
+          return Result.new(id: id, dir: dir, jobs: jobs, measures: {}, before: {}, skipped: skipped, vs: vs, wall: 0.0, lufs: lufs) if list
 
           FileUtils.mkdir_p(dir)
           t0 = MB::U.clock_now
           files = write_materials(dir, jobs.select { |j| j.material.audio? }.map { |j| j.material.key }.uniq)
-          measures = {}
-          jobs.each do |j|
-            measures[j.item] = render_job(j, vs && j.entry ? File.join(dir, 'after') : dir, lufs: lufs, ceiling: ceiling, format: format, files: files)
-            io&.puts "#{line(j, measures[j.item])}"
-          end
-          before = vs ? render_elsewhere(vs, jobs, dir, lufs: lufs, ceiling: ceiling, format: format, files: files, io: io) : {}
-          result = Result.new(id: id, dir: dir, jobs: jobs, measures: measures, before: before, skipped: skipped, vs: vs, wall: MB::U.clock_now - t0)
-          write_set(result, title: title, lufs: lufs, ceiling: ceiling, format: format, what: what, find: find)
+          # Every render first (unmatched), then the set's loudness: the
+          # loudest every one reaches under the ceiling, both sides of --vs
+          raws = jobs.to_h { |j|
+            r = render_raw(j, files: files)
+            io&.puts format('render %-34s %-10s %s', j.entry ? j.entry.head_path : 'dry', j.material.key, r.error ? "failed: #{r.error[0, 200]}" : format('%.1f s', r.render_seconds))
+            [j.item, r]
+          }
+          before_raws = vs ? render_elsewhere(vs, jobs, dir, ceiling: ceiling, files: files, io: io) : {}
+          target = lufs || common_lufs(raws.values + before_raws.values, ceiling)
+          measures = jobs.to_h { |j|
+            m = finish_job(j, raws.delete(j.item), vs && j.entry ? File.join(dir, 'after') : dir, lufs: target, ceiling: ceiling, format: format)
+            io&.puts line(j, m)
+            [j.item, m]
+          }
+          before = before_raws.to_h { |item, r|
+            next [item, r] unless r.is_a?(Raw)
+            job = jobs.find { |j| j.item == item }
+            [item, finish_job(job, r, File.join(dir, 'before'), lufs: target, ceiling: ceiling, format: format)]
+          }
+          FileUtils.rm_rf(File.join(dir, 'before', 'raw'))
+          result = Result.new(id: id, dir: dir, jobs: jobs, measures: measures, before: before, skipped: skipped, vs: vs, wall: MB::U.clock_now - t0, lufs: target)
+          write_set(result, title: title, lufs: target, ceiling: ceiling, format: format, what: what, find: find)
           io&.puts result.summary
           result
         end
@@ -394,8 +491,8 @@ module MB
           what = job.entry ? job.entry.head_path : 'dry'
           return format('%-34s %-10s failed: %s', what, job.material.key, m.error[0, 200]) if m.error
           return format('%-34s %-10s silent (no file)', what, job.material.key) if m.silent
-          format('%-34s %-10s %6.1f LUFS %5.1f dBTP %+5.1f dB%s%s  %.1f s in %.1f s', what, job.material.key, m.lufs, m.true_peak, m.gain,
-            m.peak_bound ? ' peak-bound' : '', m.cut ? ' cut' : '', m.seconds, m.render_seconds)
+          format('%-34s %-10s %6.1f LUFS %5.1f dBTP %+5.1f dB%s%s%s  %.1f s in %.1f s', what, job.material.key, m.lufs, m.true_peak, m.gain,
+            m.peak_bound ? ' peak-bound' : '', m.sets_level ? ' sets the level' : '', m.cut ? ' cut' : '', m.seconds, m.render_seconds)
         end
 
         # The console line playing +job+'s render (what the Bench code

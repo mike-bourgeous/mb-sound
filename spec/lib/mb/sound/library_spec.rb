@@ -266,7 +266,8 @@ RSpec.describe MB::Sound::Library do
         220.hz.saw.reverb(:hall)
         done = nil
         expect { done = MB::Sound.collect }.to output(/Collected reverb :big_plate from the user shelf to presets\/fx\/mine\.rb/).to_stdout
-        expect(done.map { |e, _| e.name }).to eq([:big_plate]) # (built-ins stay with the gem)
+        expect(done.map { |e, _| e.name }).to eq(%i[big_plate hall]) # (built-ins stay with the gem, pinned)
+        expect(done.last[1]).to eq(File.join(project, 'presets/pins.rb'))
         expect(File.read(File.join(project, 'presets/fx/mine.rb'))).to eq("library 1\n\nreverb :big_plate, room_size: 0.6, decay: 3.5, tags: %i[glassy]\n")
         expect { expect(index.lookup(:reverb, :big_plate).shelf.name).to eq(:project) }.not_to output.to_stderr
         expect { MB::Sound.collect }.to output(/Nothing to collect|already in/).to_stdout
@@ -285,6 +286,43 @@ RSpec.describe MB::Sound::Library do
         expect { expect(MB::Sound.promote(:song_juno, family: :chorus)).to be_nil }.to output(/Not copied: chorus :song_juno differs/).to_stderr
         expect { MB::Sound.promote!(:song_juno, family: :chorus) }.to output(/\(replaced\)/).to_stdout
         expect(File.read(File.join(user, 'fx/song.rb'))).to eq("library 1\n\nchorus :song_juno, rates: [0.3], min: 0.001, max: 0.004\n")
+      end
+    end
+
+    it 'pins the built-ins a song used, warning when one changed since (maintainer, 2026-10-31: "Pin instead")' do
+      Dir.chdir(project) do
+        lib.reload!
+        220.hz.saw.reverb(:hall)
+        MB::Sound.preset(:dnb_sub, midi: MB::Sound.seq(MB::Sound::C2).n8)
+        version = MB::Sound::GraphIO.library_version
+        expect { MB::Sound.collect }.to output(/Pinned built-in reverb :hall \(mb-sound #{Regexp.escape(version)}\) in presets\/pins\.rb\nPinned built-in preset :dnb_sub/).to_stdout
+        pins = File.join(project, 'presets/pins.rb')
+        text = File.read(pins)
+        expect(text).to start_with("library 1\n\n# Built-in presets this song used, pinned by collect")
+        hall = lib::Pins.fingerprint(MB::Sound::GraphNode::Reverb.presets[:hall])
+        expect(hall).to match(/\A\h{16}\z/)
+        expect(text).to include(%(pin :reverb, :hall, mb_sound: #{version.inspect}, fingerprint: "#{hall}"))
+        expect(text).to match(/pin :preset, :dnb_sub, mb_sound: .*, fingerprint: "\h{16}"/)
+        expect(index.pins.map(&:label).first(2)).to eq(['reverb :hall', 'preset :dnb_sub']) # (then what dnb_sub's voice looked up: envelope :env, ...)
+        expect { MB::Sound.collect }.to output(/Built-in reverb :hall is already pinned/).to_stdout
+        expect(File.read(pins)).to eq(text)
+
+        # The built-in changed since (here: the pin's fingerprint): loading warns once, collect pins it again
+        File.write(pins, text.sub(hall, '0123456789abcdef'))
+        lib.reload!
+        expect { MB::Sound::GraphNode::Reverb.preset_settings(:hall) }.to output(/Library: the built-in reverb :hall has changed since this song pinned it with mb-sound .*presets\/pins\.rb:4.*collect/).to_stderr
+        expect { MB::Sound.collect(only: [:hall]) }.to output(/Pinned built-in reverb :hall again .*has changed since/).to_stdout
+        expect(File.read(pins)).to eq(text)
+        lib.reload!
+        expect { index.pins }.not_to output.to_stderr
+
+        # One that no longer ships; builtin: true copies instead of pinning
+        File.write(pins, "#{text}pin :reverb, :gone_hall, mb_sound: \"0.1.0\", fingerprint: \"0123456789abcdef\"\n")
+        lib.reload!
+        expect { index.pins }.to output(/reverb :gone_hall .*no longer ships/).to_stderr
+        expect(lib::Pins.fingerprint(MB::Sound::Library.index.lookup(:machine, :tr808, note: false))).to be_nil # (pinned by version only)
+        expect(lib::Pins.fingerprint(MB::Sound::L.inst.acid)).to match(/\A\h{16}\z/) # (a genre patch: its method's source)
+        expect { MB::Sound.collect(builtin: true, only: [:hall]) }.to output(/Collected reverb :hall from the builtin shelf/).to_stdout
       end
     end
 

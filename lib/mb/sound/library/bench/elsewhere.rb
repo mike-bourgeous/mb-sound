@@ -49,15 +49,17 @@ module MB
         end
 
         # Renders +jobs+ (not the dry ones: the dry material is the same on
-        # both sides) in the checkout at +vs+ into +dir+/before, reading
-        # the effect materials from +files+.  Returns { item => Measure,
-        # or :missing (the other checkout has no such entry or material) }.
-        def render_elsewhere(vs, jobs, dir, lufs:, ceiling:, format:, files:, io: $stdout)
+        # both sides) in the checkout at +vs+, unmatched, as float WAVs in
+        # +dir+/before/raw, reading the effect materials from +files+
+        # (Bench.run matches them with this side's renders: one loudness
+        # for the set).  Returns { item => Raw (its data read back), or
+        # :missing (the other checkout has no such entry or material) }.
+        def render_elsewhere(vs, jobs, dir, ceiling:, files:, io: $stdout)
           path = worktree_for(vs)
           todo = jobs.select(&:entry)
           job_path = File.join(dir, 'before.jobs.json')
           File.write(job_path, JSON.pretty_generate(
-            lib: File.join(checkout_dir, 'lib'), out: File.join(dir, 'before'), lufs: lufs, ceiling: ceiling, format: format, files: files,
+            lib: File.join(checkout_dir, 'lib'), out: File.join(dir, 'before', 'raw'), ceiling: ceiling, files: files,
             jobs: todo.map { |j| { item: j.item, family: j.entry.family, name: j.entry.name, material: j.material.key, file: j.file } }
           ))
           env = { 'BUNDLE_GEMFILE' => File.join(path, 'Gemfile') }
@@ -72,11 +74,21 @@ module MB
           defined?(Bundler) ? Bundler.with_unbundled_env(&runner) : runner.call
           raise "rendering in #{path} failed (#{status})" unless status&.success?
           out = JSON.parse(File.read("#{job_path}.out.json"))
-          out.to_h { |item, m| [item, m['missing'] ? :missing : Measure.new(**m.transform_keys(&:to_sym))] }
+          out.to_h { |item, r| [item, r['missing'] ? :missing : raw_from(r, File.join(dir, 'before', 'raw'))] }
+        end
+
+        # The Raw a job file's result +r+ describes, its data read from the
+        # float WAV in +raw_dir+.
+        def raw_from(r, raw_dir)
+          fields = r.transform_keys(&:to_sym).slice(:cut, :render_seconds, :integrated, :true_peak, :silent, :error)
+          wav = r['wav'] && File.join(raw_dir, r['wav'])
+          data = wav && File.file?(wav) ? MB::Sound.read(wav).map { |c| Numo::SFloat.cast(c) } : nil
+          Raw.new(data: data, **fields)
         end
 
         # Runs a job file written by #render_elsewhere (in the child):
-        # renders each job and writes the measures to <file>.out.json.
+        # renders each job unmatched into the job file's +out+ directory
+        # (float WAVs) and writes their loudness to <file>.out.json.
         def run_job_file(path)
           job = JSON.parse(File.read(path))
           files = job['files']
@@ -90,9 +102,16 @@ module MB
               next
             end
             jb = Job.new(item: j['item'], entry: entry, material: material, file: j['file'])
-            m = render_job(jb, job['out'], lufs: job['lufs'], ceiling: job['ceiling'], format: job['format'], files: files)
-            results[j['item']] = m.to_h
-            puts line(jb, m)
+            r = render_raw(jb, files: files)
+            res = { cut: r.cut, render_seconds: r.render_seconds.round(3), integrated: r.integrated, true_peak: r.true_peak, silent: r.silent, error: r.error }
+            if r.data && r.usable?
+              res[:wav] = "#{jb.file}.wav"
+              out = File.join(job['out'], res[:wav])
+              FileUtils.mkdir_p(File.dirname(out))
+              MB::Sound.write(out, r.data, sample_rate: 48000, overwrite: true)
+            end
+            results[j['item']] = res
+            puts format('%-34s %-10s %s', entry.head_path, material.key, r.error ? "failed: #{r.error}" : r.usable? ? format('%.1f LUFS %.1f dBTP as rendered, %.1f s', r.integrated, r.true_peak, r.render_seconds) : 'silent')
           end
           File.write("#{path}.out.json", JSON.pretty_generate(results))
         end

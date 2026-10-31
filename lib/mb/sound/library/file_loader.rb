@@ -39,10 +39,16 @@ module MB
         # Keywords every entry line takes.
         ENTRY_KEYS = %i[tags about facets aliases].freeze
 
-        # The entries of the library file at +path+ on +shelf+ (an Array).
-        def self.load(path, shelf:)
-          new(File.read(path), path: path).entries(shelf)
+        # The entries of the library file at +path+ on +shelf+ (an Array);
+        # its `pin` lines (Library::Pins) are added to +pins+ if given.
+        def self.load(path, shelf:, pins: nil)
+          loader = new(File.read(path), path: path)
+          loader.entries(shelf).tap { pins&.concat(loader.pins) }
         end
+
+        # The file's `pin` lines (Library::Pins::Pin), once #entries has
+        # read it.
+        def pins = @pins || []
 
         # Parses the file and returns its entries.  Raises GraphIO::LoadError
         # (with the line) for anything outside the format.
@@ -50,6 +56,7 @@ module MB
           tree = parse
           @document = GraphIO::Document.new(path: @path)
           @shelf = shelf
+          @pins = []
           fresh_limits!
           scope = Scope.new
           @assigns = {}
@@ -69,6 +76,10 @@ module MB
               @assigns[st.name] = st.slice
               next
             end
+            if st.is_a?(Prism::CallNode) && st.receiver.nil? && st.name == :pin
+              @pins << pin(st, scope)
+              next
+            end
             unless st.is_a?(Prism::CallNode) && st.receiver.nil? && verb?(st.name)
               raise error(st, "a library file holds entries (#{verbs.join(', ')}) and local variables#{GraphIO.suggest(st.respond_to?(:name) ? st.name : '', verbs)}")
             end
@@ -81,7 +92,19 @@ module MB
         private
 
         def verbs
-          Library.families.values.select { |f| f.owner.is_a?(Module) && f.owner.respond_to?(:preset_family_name) }.map(&:name) + RACKS.keys + [:clip]
+          Library.families.values.select { |f| f.owner.is_a?(Module) && f.owner.respond_to?(:preset_family_name) }.map(&:name) + RACKS.keys + %i[clip pin]
+        end
+
+        # A `pin :family, :name, mb_sound: "...", fingerprint: "..."` line
+        # (see Library::Pins).
+        def pin(node, scope)
+          args, kwargs = call_args(node, scope)
+          unless args.length == 2 && args.all? { |a| a.is_a?(Symbol) } && (kwargs.keys - %i[mb_sound fingerprint]).empty? && kwargs[:mb_sound].is_a?(String) &&
+                 (kwargs[:fingerprint].nil? || kwargs[:fingerprint].is_a?(String)) && node.block.nil?
+            raise error(node, 'pin :family, :name, mb_sound: "version", fingerprint: "hex" (lines collect writes)')
+          end
+          Pins::Pin.new(family: args[0], name: args[1], mb_sound: String.new(kwargs[:mb_sound]), fingerprint: kwargs[:fingerprint] && String.new(kwargs[:fingerprint]),
+                        location: "#{@path}:#{node.location.start_line}")
         end
 
         def verb?(name)

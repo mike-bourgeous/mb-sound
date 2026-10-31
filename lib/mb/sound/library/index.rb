@@ -77,6 +77,7 @@ module MB
           @code = {} # [family, name] => Entry (class presets and code registrations)
           @files_key = nil
           @files = [] # library-file entries of the file shelves, in search order
+          @pins = [] # pin lines of the file shelves (Library::Pins)
           @problems = []
           @warned = Set.new
           @documents = {} # path => [mtime, size, Entry]
@@ -202,6 +203,13 @@ module MB
           entries(shadowed: true).group_by { |e| [e.family, e.name] }.select { |_, l| l.length > 1 }.transform_values { |l| l.drop(1) }
         end
 
+        # The `pin` lines of the file shelves (Library::Pins::Pin; collect
+        # writes them into a song's presets/pins.rb).
+        def pins
+          file_entries
+          @pins
+        end
+
         # Problems found in shipped files and unreadable files: [message].
         def problems
           file_entries
@@ -285,6 +293,7 @@ module MB
           @lock.synchronize do
             @files_key = nil
             @files = []
+            @pins = []
             @documents.clear
             @problems.clear
           end
@@ -304,17 +313,20 @@ module MB
             begin
               @problems.reject! { |p| p.start_with?('file ') }
               list = []
+              pins = []
               shelves.each do |shelf|
                 next unless shelf.dir && File.directory?(shelf.dir)
                 Library.library_files(shelf.dir).each do |path|
-                  list.concat(FileLoader.load(path, shelf: shelf))
+                  list.concat(FileLoader.load(path, shelf: shelf, pins: shelf.shipped? ? nil : pins))
                 rescue StandardError, ScriptError => e
                   problem(shelf, "file #{path}: #{e.message}")
                 end
               end
               @files = list.freeze
+              @pins = pins.freeze
               @files_key = key
               check_files(list)
+              check_pins(pins)
             ensure
               @loading = false
             end
@@ -409,6 +421,23 @@ module MB
             next unless clash
             e.shelf.shipped? ? problem(e.shelf, "file #{clash}") : once(clash)
           end
+        end
+
+        # Warns (once each) for pins whose built-in has changed since it
+        # was pinned, or is gone (Library::Pins#change_warning).
+        def check_pins(pins)
+          pins.each do |pin|
+            msg = Pins.change_warning(pin, shipped_entry(pin.family, pin.name))
+            once(msg) if msg
+          end
+        end
+
+        # The shipped entry of +family+ and +name+ (a built-in graph
+        # document for :preset), or nil.
+        def shipped_entry(family, name)
+          return @code[[family, name]] unless family == :preset
+          path = Library.document_path(Library.builtin_shelf.dir, name)
+          path && document_entry(path, Library.builtin_shelf)
         end
 
         # A message if +entry+'s name is a tag or family word of another

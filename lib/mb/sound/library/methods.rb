@@ -49,12 +49,16 @@ module MB
       # song's presets/ (the project shelf; +to:+ another directory), so
       # the song keeps sounding the same when those shelves change: the
       # copies come first in search order (a pinned copy equal to the
-      # entry it shadows doesn't warn).  +builtin: true+ copies mb-sound's
-      # built-ins too (they are pinned by the mb-sound version the song's
-      # Gemfile.lock names).  +only:+ names the entries to copy.  Never
-      # replaces a file that differs (it says so); prints what it copied.
-      # Returns [entry, path] pairs.  (Provisional name, after Ableton's
-      # Collect All and Save; maintainer, 2026-10-26.)
+      # entry it shadows doesn't warn).  The built-ins it used are pinned
+      # (the maintainer, 2026-10-31: "Pin instead"): presets/pins.rb gets
+      # the mb-sound version and a fingerprint of each one's settings
+      # (Library::Pins), and loading the song's shelf warns when one has
+      # changed since; collecting again pins it as it is now.  +builtin:
+      # true+ copies them instead.  +only:+ names the entries to copy or
+      # pin.  Never replaces a copied file that differs (it says so);
+      # prints what it copied and pinned.  Returns [entry, path] pairs
+      # (pins: the pins file).  (Provisional name, after Ableton's Collect
+      # All and Save; maintainer, 2026-10-26.)
       #
       #     collect
       #     collect only: %i[dark_hall], builtin: true
@@ -62,10 +66,13 @@ module MB
         dir = to ? File.expand_path(to.to_s) : collect_dir
         list = Library.index.uses.reject { |e|
           e.shelf.name == :session || (e.shelf.dir && File.expand_path(e.shelf.dir) == dir) ||
-            (e.shelf.shipped? && !builtin) || (only && !Array(only).map(&:to_sym).include?(e.name))
+            (only && !Array(only).map(&:to_sym).include?(e.name))
         }
-        done = list.filter_map { |e| copy_entry(e, dir, replace: false, verb: 'Collected') }
-        puts "Nothing to collect (#{Library.index.uses.empty? ? 'no presets used yet' : 'every preset used is on the project shelf or built in; builtin: true copies those'})" if done.empty?
+        builtins, others = list.partition { |e| e.shelf.shipped? }
+        others += builtins if builtin
+        done = others.filter_map { |e| copy_entry(e, dir, replace: false, verb: 'Collected') }
+        done += pin_entries(dir, builtins) unless builtin || builtins.empty?
+        puts "Nothing to collect (#{Library.index.uses.empty? ? 'no presets used yet' : 'every preset used is on the project shelf'})" if done.empty?
         Library.reload!
         done
       end
@@ -159,6 +166,21 @@ module MB
         list = Library.index.entries(family: family, shadowed: true, documents: family == :preset).select { |e| e.name == name }
         raise ArgumentError, "no #{family} #{name.inspect} in the library#{GraphIO.suggest(name, Library.index.names(family))}" if list.empty?
         list.find { |e| %i[env project].include?(e.shelf.name) } || list.first
+      end
+
+      # Pins built-in entries +list+ in +dir+'s pins file (Library::Pins),
+      # printing each; returns [entry, pins file] pairs.
+      def pin_entries(dir, list)
+        path = File.join(dir, Library::Pins::FILE)
+        shown = path.delete_prefix("#{Dir.pwd}/")
+        Library::Pins.write(dir, list).map { |e, status, old|
+          case status
+          when :pinned then puts "Pinned built-in #{e.label} (mb-sound #{GraphIO.library_version}) in #{shown}"
+          when :same then puts "Built-in #{e.label} is already pinned in #{shown}"
+          else puts "Pinned built-in #{e.label} again in #{shown} (it was pinned with mb-sound #{old.mb_sound}#{', and has changed since' if old.fingerprint != Library::Pins.fingerprint(e)})"
+          end
+          [e, path]
+        }
       end
 
       def copy_entry(e, dir, replace:, verb:)

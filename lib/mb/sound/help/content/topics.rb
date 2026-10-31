@@ -708,7 +708,10 @@ module MB
         `track :bass, L.inst.jungle_reese` again changes the instrument at
         its launch point (one undo step).  Track knobs take their params'
         full names (`:"bass/resonance"`); a short one (`:"bass/reso"`,
-        `/freq`, `/q`) finds it too, with a note.
+        `/freq`, `/q`) finds it too, with a note.  Genre patches' settings
+        become knobs the same way (`track :bass, L.inst.acid`:
+        `:"bass/cutoff"`), and so do a preset's params on a named player
+        (`bg :pad, preset(:dnb_pad, midi: riff)`: `:"pad/cutoff"`).
       TEXT
       commands :track, :tracks, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement
@@ -1284,8 +1287,11 @@ module MB
         lines: `reverb :big_plate, decay: 3.5, tags: %i[bright big]`,
         `instrument :keys do |midi| ... end`, `chain :dub do |sig| ...
         end`, `clip :walk, seq(A2, C3).n8.loop`.  `collect` copies the
-        presets a song used into its presets/, `promote :x, to: :user` a
-        song's preset onto your shelf.
+        presets a song used into its presets/ and pins the built-ins it
+        used (presets/pins.rb: the mb-sound version and a fingerprint of
+        each, so loading the song warns when one changed; `builtin: true`
+        copies them instead), `promote :x, to: :user` a song's preset onto
+        your shelf.
 
         Instruments play on tracks (`track :bass, L.inst.dnb.dnb_reese`;
         `help :sets`) and from `play L.inst.x` (a demo phrase).  Effects
@@ -1306,7 +1312,8 @@ module MB
         Judging presets by ear: `L.fx.reverb.bench` renders every reverb on
         the Listening Bench's material (the A7 arp, the jungle break, a saw
         pad; instruments on phrases for their role and their genre
-        template's phrase), each matched to -20 LUFS, into a Bench set
+        template's phrase), all matched to the loudest every render reaches
+        with its true peak at most -1 dBTP, into a Bench set
         folder (`bin/preset_bench.rb reverb` from a shell; `--vs master-ai`
         for before/after, `--notes` reads the verdicts back).
         `play L.fx.reverb.hall.audition(:break)` plays one of them;
