@@ -42,6 +42,18 @@ RSpec.describe(MB::Sound::GraphNode::DelayNetwork) do
       expect(nonzero(la, 3)).to eq([[100, 1.0], [200, 0.4], [300, 0.16]])
     end
 
+    # (the maintainer, 2026-10-30: "Per head"; a single number stays the
+    # loop's shared gain)
+    it 'prints per-head and shared gains back as Ruby, and a saved graph document plays the same samples' do
+      make = -> { MB::Sound.with_seed(2) { (220.hz.saw.at(0.3) * MB::Sound.adsr(0, 0.05, 0, 0)).multitap(0.01, 0.02, 0.03, feedback: [0.4, 0, 0.3]).mixdown } }
+      g = make.()
+      expect(g.to_ruby).to eq('(220.hz.saw.at(0.3) * adsr(0, 0.05, 0, 0)).multitap(0.01, 0.02, 0.03, feedback: [0.4, 0, 0.3]).mono')
+      expect(1.constant.multitap(0.1, 0.2, feedback: 0.5).mixdown.to_ruby).to eq('1.constant.multitap(0.1, 0.2, feedback: 0.5).mono')
+      loaded = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g))
+      ref = make.()
+      expect(Array.new(10) { loaded.sample(800).dup }).to eq(Array.new(10) { ref.sample(800).dup })
+    end
+
     it 'gives MultitapDelay samples and ending with zero gains' do
       make = ->(fb) {
         MB::Sound.seed(1)
