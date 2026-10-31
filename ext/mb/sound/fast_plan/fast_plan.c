@@ -102,6 +102,7 @@ enum {
 	OP_DECIMATE,  // dst, a, rate, mix, object, sc  dst = GraphNode::Decimator on a (see run_decimate; Plan::Op::Decimate)
 	OP_PAN_GAIN,  // dst, a, law, side, sc       dst = one side's pan law gain for positions a (see run_pan_gain; Plan::Op::PanGain)
 	OP_RESONATOR, // dst, a, freq, decay, object, sc, modal  dst = GraphNode::Resonator on a (see run_resonator; Plan::Op::Resonator)
+	OP_UNISON,    // dst, d, f, sc               dst = a Unison::Detune copy's frequency (see run_unison; Plan::Op::UnisonCopy)
 };
 
 // Functions of OP_UNARY (Plan::Op::Unary::FUNCTIONS)
@@ -1013,6 +1014,9 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 		case OP_PAN_GAIN:
 			len = 6;
 			break;
+		case OP_UNISON:
+			len = 5;
+			break;
 		case OP_RESONATOR:
 			len = 8;
 			break;
@@ -1329,6 +1333,40 @@ static void run_resonator(const int32_t *op, size_t pc, const struct regs *R, lo
 	mb_plan_resonator(R->p[op[1]], &in, &freq, &decay, op[7], rb_ary_entry(objects, op[5]), n);
 }
 
+// OP_UNISON: dst, d, f, sc: one copy's frequency of a Unison::Detune in
+// :exact mode, as FastUnison.exact computes it (and FastUnison.scale for a
+// constant detune: the ratio is the same exp of the same product):
+// (float)(f * exp(fraction * ((double)d * ln(2) / 12))), with the detune d
+// in semitones and the frequency f a register (read as float32) or, for f
+// -1, the double sc[1]; sc[0] is the copy's fraction.  exp runs only when d
+// changes (bit for bit the same: the same operands give the same result).
+#define UNISON_LOG_SEMITONE (0.69314718055994530942 / 12.0)
+static void run_unison(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, size_t n)
+{
+	int fr = op[3];
+	if (R->c[op[1]] || R->c[op[2]] || fr >= nregs || (fr >= 0 && (R->c[fr] || !R->p[fr]))) rb_raise(rb_eArgError, "Bad plan unison operands at word %zu", pc);
+	if (op[4] < 0 || (size_t)op[4] + 2 > nscalars) rb_raise(rb_eArgError, "Bad plan unison scalars at word %zu", pc);
+
+	float *D = R->p[op[1]];
+	const float *det = R->p[op[2]];
+	const float *F = fr >= 0 ? R->p[fr] : NULL;
+	const double frac = sc[op[4]], f_scalar = sc[op[4] + 1];
+
+	float last = 0.0f;
+	double ratio = 0.0;
+	_Bool have = 0;
+	for (size_t i = 0; i < n; i++) {
+		float d = det[i];
+		if (!have || d != last) {
+			ratio = exp(frac * ((double)d * UNISON_LOG_SEMITONE));
+			last = d;
+			have = 1;
+		}
+		double f = F ? (double)F[i] : f_scalar;
+		D[i] = (float)(f * ratio);
+	}
+}
+
 // OP_PAN_GAIN: dst, a, law, side, sc: one side's gain (side 0 left, 1
 // right) of a pan law for the real positions a, as FastArithmetic.pan and
 // Numo compute ChannelMixer::PanLaws on float32 buffers: the position (times
@@ -1585,6 +1623,10 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 
 		case OP_PAN_GAIN:
 			run_pan_gain(op, pc, R, sc, nscalars, n);
+			break;
+
+		case OP_UNISON:
+			run_unison(op, pc, R, nregs, sc, nscalars, n);
 			break;
 
 		case OP_RESONATOR:
@@ -1874,6 +1916,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("decimate")), INT2NUM(OP_DECIMATE));
 	rb_hash_aset(h, ID2SYM(rb_intern("pan_gain")), INT2NUM(OP_PAN_GAIN));
 	rb_hash_aset(h, ID2SYM(rb_intern("resonator")), INT2NUM(OP_RESONATOR));
+	rb_hash_aset(h, ID2SYM(rb_intern("unison")), INT2NUM(OP_UNISON));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));

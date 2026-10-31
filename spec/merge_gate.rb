@@ -42,6 +42,9 @@ module MergeGate
   # Cheap whole-library guards (each a few seconds at most) that the gate
   # runs whatever changed, besides QuickSelection::ALWAYS: they check
   # declarations, names, or boundaries that a change anywhere can break.
+  # (render_allocations_spec, ~12 s of examples: its per-buffer budgets
+  # catch a node falling out of plan fusion, as gen-midi-2's Detune did,
+  # from changes far from the graphs it renders; fix-alloc-1.)
   GUARDS = %w[
     spec/lib/mb/sound/graph_node/recipe_spec.rb
     spec/lib/mb/sound/param_guard_spec.rb
@@ -55,6 +58,7 @@ module MergeGate
     spec/lib/mb/sound/graph_node/frozen_view_spec.rb
     spec/lib/mb/sound/output_api_guard_spec.rb
     spec/lib/mb/sound/render_path_guard_spec.rb
+    spec/lib/mb/sound/render_allocations_spec.rb
     spec/lib/mb/sound/audio_io_boundary_spec.rb
     spec/lib/mb/sound/plot/plot_boundary_spec.rb
     spec/stale_extensions_spec.rb

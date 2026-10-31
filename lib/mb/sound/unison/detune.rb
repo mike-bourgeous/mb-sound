@@ -36,6 +36,16 @@ module MB
       # constant base frequency (e.g. `110.hz`) an unchanged detune (in
       # :interp mode once the ramp to it has finished) keeps the previous
       # frame.
+      #
+      # Plan layer (fix-alloc-1, 2026-10-31): in :exact mode the node is a
+      # Plan::MultiDescribable, computing every copy's frequency in a
+      # region of its own (one Plan::Op::UnisonCopy per copy, bit for bit
+      # the kernels' samples), so a synth voice's unison runs fused, as it
+      # did through per-copy Notes::Frequency nodes before gen-midi-2 gave
+      # fixed detunes this node (its lanes group again instead of running
+      # alone, about 50 objects per 128-frame buffer fewer in
+      # render_allocations_spec's unison graph).  :interp mode (a ramp
+      # state per control point) stays unfused.
       class Detune
         include GraphNode
         include GraphNode::SampleRateHelper
@@ -90,6 +100,13 @@ module MB
             { detune: @owner }
           end
 
+          # The Detune node, which the plan layer computes in a region of
+          # its own (see MB::Sound::Plan::MultiDescribable): this output is
+          # planned while it is.
+          def plan_owner
+            @owner
+          end
+
           def to_s
             "Unison copy #{@index + 1} of #{@owner.outputs.length}"
           end
@@ -131,15 +148,43 @@ module MB
           @data = nil
           @views = nil
 
-          # Exact ratios for a constant detune, and the inputs of an unchanged
-          # frame (a constant base frequency and detune)
+          # Exact ratios for a constant detune
           @ratios_for = nil
           @ratios = nil
-          @frame_key = nil
 
           # The :interp kernel's state ([previous ratio, current ratio, samples
           # since the control point]; nil before the first buffer)
           @state = nil
+
+          # The last frame (an Array of one buffer per copy: views of
+          # @data, or a plan region's outputs), and the unfused frames'
+          # reused state: the detune range, the steady detune buffer seen
+          # last (GraphNode::FrozenView::Key) and whether it was constant,
+          # the frame's sample count, the other frame size's data, views,
+          # and count (buffers split at events alternate a full and a
+          # shorter size), and the base frequency and detune of a frame a
+          # constant pitch and detune repeat
+          @frame = nil
+          @range = [nil, nil]
+          @steady_key = GraphNode::FrozenView::Key.new
+          @steady_constant = false
+          @frame_n = nil
+          @spare_data = nil
+          @spare_views = nil
+          @spare_n = nil
+          @frame_f = nil
+          @frame_d = nil
+
+          # Set by the plan layer (see MB::Sound::Plan::MultiDescribable),
+          # nil here so instances keep one object shape
+          @plan_bypass = nil
+          @plan_installations = nil
+          @plan_member = nil
+          @plan_region = nil
+          @plan_observed = nil
+          @plan_handoff = nil
+          @plan_restart = nil
+          @plan_excluded = nil
 
           @node_type_name = 'Unison Detune'
         end
@@ -150,7 +195,7 @@ module MB
 
         # The latest frequency of copy +index+ (Hz).
         def value(index)
-          return @data[index, -1] if @data
+          return @frame[index][-1] if @frame
 
           # Before the first buffer: the base frequency
           @frequency.is_a?(Numeric) ? @frequency : @frequency.value
@@ -161,13 +206,51 @@ module MB
         # and returns copy +index+'s buffer (reused; overwritten by the next
         # frame).
         def sample_output(count, index)
-          if @data.nil? || @sampled.include?(index)
+          if @frame.nil? || @sampled.include?(index)
             @sampled.clear
-            return nil if compute(count).nil?
+            return nil if (@frame = plan_frame(count)).nil?
           end
 
           @sampled << index
-          @views[index]
+          @frame[index]
+        end
+
+        # Plan layer (see the class description and
+        # Plan::MultiDescribable): one Op::UnisonCopy per copy, reading the
+        # base frequency (a Const for a number, used as a double as the
+        # kernels do) and the detune.
+        include Plan::MultiDescribable
+
+        def plan_unsupported_reason
+          return 'detune_mode: :interp (ramps between control points)' if @mode == :interp
+
+          nil
+        end
+
+        def plan_describe(p)
+          f = p[@frequency]
+          d = p[@detune]
+          @fractions.map { |a| p.unison_copy(d, f, a) }
+        end
+
+        # One frame of every copy's frequency (an Array of buffers, or nil
+        # once an input ended): from the plan region rooted here while it
+        # plans, else from this node's own kernels (#compute).
+        def plan_frame(count)
+          unless @plan_bypass
+            # A frame a lane group computed for this node's replaced region
+            # (see Plan::LaneGroup#hand_off)
+            if (handoff = @plan_handoff)
+              @plan_handoff = nil
+              buf = handoff[0].take_handoff(handoff[1], count)
+              return handoff[1].planned_frame(buf) unless buf.equal?(Plan::LaneGroup::NO_HANDOFF)
+            end
+
+            region = @plan_region
+            return region.sample_outputs(count) if region && !region.unfused
+          end
+
+          compute(count)
         end
 
         def to_s
@@ -185,18 +268,19 @@ module MB
         def plan_restore(snapshot)
           state, = snapshot
           @state = state && Numo::DFloat.cast(state)
-          @frame_key = nil
+          @frame_f = nil
         end
 
         private
 
-        # Computes the next frame into @data.  Returns nil at the end.
+        # Computes the next frame into @data, returning its views (one per
+        # copy), or nil at the end.
         def compute(count)
           f = @frequency.is_a?(Numeric) ? @frequency : @frequency.sample(count)
-          return @data = nil if f.nil?
+          return ended if f.nil?
 
           d = @detune.sample(count)
-          return @data = nil if d.nil?
+          return ended if d.nil?
 
           n = d.length
           unless f.is_a?(Numeric)
@@ -205,21 +289,21 @@ module MB
           end
           d = d[0...n] if d.length > n
 
-          min, max = d.minmax
-          constant = min == max
+          constant = constant_detune?(d)
+          min = @range[0]
           # In :interp mode only once the ramp to it has finished
           constant = false if @mode == :interp && !(@state && @state[0] == @state[1] && @state[1] == Math.exp(min * LOG_SEMITONE))
 
           # A constant pitch and detune repeat the last frame (keeping the
           # control points on their grid)
-          key = constant && f.is_a?(Numeric) ? [f, min] : nil
-          if key && key == @frame_key && @data.shape[1] == n
+          if constant && f.is_a?(Numeric) && f == @frame_f && min == @frame_d && @frame_n == n
             @state[2] = (@state[2].to_i + n) % @control if @state && @control
-            return @data
+            return @views
           end
 
-          @frame_key = key
           make_frame(n)
+          @frame_f = constant && f.is_a?(Numeric) ? f : nil
+          @frame_d = min
 
           if @mode == :exact
             if constant
@@ -235,11 +319,33 @@ module MB
             Kernels.unison_interp(@data, f, d, @positions, @state, @control || 0)
           end
 
-          @data
+          @views
+        end
+
+        # Forgets the frame at the end of an input (returns nil).
+        def ended
+          @data = nil
+          @frame_f = nil
+        end
+
+        # True if every value of the detune buffer +d+ is the same (its
+        # range in @range): checked once for a steady frozen buffer (a
+        # constant node's, an unmoving knob's; GraphNode::FrozenView::Key),
+        # without allocating (Kernels.min_max).
+        def constant_detune?(d)
+          return @steady_constant if @steady_key.match?(d)
+
+          r = @range
+          unless Kernels.min_max(d, r)
+            r[0] = d.min.to_f
+            r[1] = d.max.to_f
+          end
+          @steady_key.set(d)
+          @steady_constant = r[0] == r[1]
         end
 
         # Every copy's exact ratio for a detune of +d+ semitones (the same
-        # operations as the kernel's exact mode).
+        # operations as the kernel's exact mode), kept for the last detune.
         def exact_ratios(d)
           return @ratios if @ratios_for == d
 
@@ -248,13 +354,28 @@ module MB
           @ratios = @fractions.map { |a| Math.exp(a * x) }
         end
 
-        # Makes sure @data holds a count×n frame.
+        # Makes sure @data holds a count×n frame (keeping the other size's
+        # frame for the next buffer of that size).
         def make_frame(n)
-          return if @data && @data.shape[1] == n
+          return if @data && @frame_n == n
 
-          @data = Numo::SFloat.zeros(@fractions.length, n)
-          @views = Array.new(@fractions.length) { |i| @data[i, true] }
-          @frame_key = nil
+          data = @data
+          views = @views
+          old_n = @frame_n
+          if @spare_data && @spare_n == n
+            @data = @spare_data
+            @views = @spare_views
+          else
+            @data = Numo::SFloat.zeros(@fractions.length, n)
+            @views = Array.new(@fractions.length) { |i| @data[i, true] }
+          end
+          if data
+            @spare_data = data
+            @spare_views = views
+            @spare_n = old_n
+          end
+          @frame_n = n
+          @frame_f = nil
         end
 
         public
