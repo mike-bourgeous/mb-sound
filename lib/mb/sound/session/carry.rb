@@ -228,49 +228,80 @@ module MB
         # module description), on the swap frame: the old graph has played
         # up to it and the new one hasn't played.  Returns the number of
         # nodes whose state was copied.
-        def apply(plan)
+        #
+        # With +give_back+ (a spill-over whose voices all carried; see
+        # Session#add_now) the old nodes take the new ones' fresh snapshots
+        # in turn, so the old graph keeps only what didn't move (a reverb of
+        # another size, its tail) and its voices fall silent on the frame.
+        def apply(plan, give_back: false)
           plan.sleepers.each(&:catch_up_sleepers)
+          # (clip sources first: they take the old ones' notes in progress
+          # before anything reads the old streams ahead)
+          sources, adopts = plan.adopts.partition { |_, n| n.is_a?(MIDI::ClipSource) }
+          sources.each { |o, n| n.carry_adopt(o) }
+          adopted = sources.to_h { |o, _| [o.__id__, true] }
           shifts = {}
           plan.synths.each do |o, n|
-            shift = carry_synth(o, n)
+            shift = carry_synth(o, n, adopted)
             shifts[n.__id__] = shift if shift
           end
           count = 0
           plan.pairs.each do |o, n|
             snap = o.plan_snapshot or next
-            if n.is_a?(Notes::NoteEnvelope)
-              # (its stage and level; its stream time is the new graph's)
-              n.instance_variable_get(:@state)[0..] = snap.data[:@state]
-            elsif n.is_a?(Notes::Node)
-              reader = n.plan_reader
-              cursor = reader.cursor
-              keep = NOTES_KEEP.to_h { |iv| [iv, n.instance_variable_get(iv)] }
-              n.plan_restore(snap)
-              keep.each { |iv, v| n.instance_variable_set(iv, v) }
-              reader.cursor = cursor
-              # (no chase of the new stream's notes in progress: the node
-              # holds the old one's notes already)
-              n.instance_variable_set(:@pending_chase, nil)
-              n.skip_start_chase!
-            else
-              n.plan_restore(snap)
-            end
+            fresh = give_back ? n.plan_snapshot : nil
+            restore_carried(n, snap, chase: true)
+            restore_carried(o, fresh, chase: false) if fresh
             count += 1
           end
           # (adoption: the new node takes the old one's state holders, the
           # old one this one's fresh state; NodeTraits' +carry+)
-          plan.adopts.each do |o, n|
-            n.carry_adopt(o)
-            count += 1
+          adopts.each { |o, n| n.carry_adopt(o) }
+          count + plan.adopts.length
+        end
+
+        # The source at the root of MIDI stream +stream+ (through transforms
+        # and allocator lanes), or nil.
+        def stream_root(stream)
+          s = stream&.source
+          8.times do
+            p = s.is_a?(MIDI::Transform) && s.instance_variable_get(:@parent)
+            break unless p.respond_to?(:source)
+            s = p.source
           end
-          count
+          s
+        end
+
+        # Restores Carry snapshot +snap+ into node +n+: note envelopes their
+        # kernel state only, Notes nodes everything but their own stream's
+        # cursor, generation, and frame counts (with +chase+ false for a node
+        # handing its state back: its stream's chase is left as it is).
+        def restore_carried(n, snap, chase:)
+          if n.is_a?(Notes::NoteEnvelope)
+            # (its stage and level; its stream time is the new graph's)
+            n.instance_variable_get(:@state)[0..] = snap.data[:@state]
+          elsif n.is_a?(Notes::Node)
+            reader = n.plan_reader
+            cursor = reader.cursor
+            keep = NOTES_KEEP.to_h { |iv| [iv, n.instance_variable_get(iv)] }
+            n.plan_restore(snap)
+            keep.each { |iv, v| n.instance_variable_set(iv, v) }
+            reader.cursor = cursor
+            if chase
+              # (no chase of the new stream's notes in progress: the node
+              # holds the old one's notes already)
+              n.instance_variable_set(:@pending_chase, nil)
+              n.skip_start_chase!
+            end
+          else
+            n.plan_restore(snap)
+          end
         end
 
         # Carries Synth +o+'s voice allocation into Synth +n+ (the lanes
         # holding notes, the held keys, the mono note stack), with times
         # moved to +n+'s stream time.  Returns the shift (old time - new
         # time), or nil if the synths' lanes don't match.
-        def carry_synth(o, n)
+        def carry_synth(o, n, adopted = {})
           a = o.instance_variable_get(:@allocator)
           b = n.instance_variable_get(:@allocator)
           return nil unless a && b && a.lanes.length == b.lanes.length && a.mono? == b.mono?
@@ -303,8 +334,12 @@ module MB
 
           # The carried notes' note-offs: the new graph's source never
           # started them, so the old source's (read ahead from the swap)
-          # go into the new allocator at the same moments
-          b.inject(note_offs_ahead(a).map { |e| e.with(time: e.time - shift) })
+          # go into the new allocator at the same moments, unless the new
+          # source took over the old one's notes in progress
+          # (MIDI::ClipSource#carry_adopt), whose note-offs it plays itself
+          unless adopted[stream_root(a.stream)&.__id__]
+            b.inject(note_offs_ahead(a).map { |e| e.with(time: e.time - shift) })
+          end
 
           # The lanes' idle bookkeeping (asleep lanes stay asleep, on the
           # same grid of the synth's own time)

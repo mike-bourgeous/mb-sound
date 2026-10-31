@@ -427,11 +427,13 @@ module MB
           carried = @carried
           @carried = false
           if gen != @generation
+            # (a node holding a replaced graph's notes doesn't chase its new
+            # stream's start, Session::Carry, but does chase a jump after it
+            # in the same block: a clip swap landing with the rebuild, carry-1)
+            start = carried && gen == @generation + 1
             @generation = gen
             c = @stream.chase
-            # (a node holding a replaced graph's notes doesn't chase its new
-            # stream's start: Session::Carry)
-            @pending_chase = c && c.generation == gen && !carried ? c : nil
+            @pending_chase = c && c.generation == gen && !start ? c : nil
           end
 
           c = @pending_chase

@@ -79,7 +79,7 @@ module CarryCheck
 
   # The mono mix of a track playing +patch+ from +clip+ (see .compare),
   # with +act+ run in the Session's context after ACT_AT frames.  Returns
-  # [samples, Session#last_carry].
+  # [samples, Session#last_carry, Session#spills].
   def play(patch, clip: NOTES, act: nil, size: 800, frames: 160_000, bpm: nil)
     old_bpm = MB::Sound.bpm if bpm
     MB::Sound.rewind
@@ -94,7 +94,7 @@ module CarryCheck
     s.process_buffer while s.frame < ACT_AT
     MB::Sound::Session.with_context(session: s) { act.call(s) } if act
     s.process_buffer while s.frame < frames
-    [Numo::DFloat.cast(out.captured[0])[0...frames], s.last_carry]
+    [Numo::DFloat.cast(out.captured[0])[0...frames], s.last_carry, s.spills]
   ensure
     s&.close
     MB::Sound.bpm(old_bpm) if old_bpm
@@ -154,16 +154,18 @@ module CarryCheck
     nil
   end
 
-  # True if track +tr+ (+name+) of Session +s+ plays a started graph of
-  # its patch with no start of another queued (a rebuild while a launch
-  # waits replaces the launched graph without carrying: not what the
-  # relation checks).
+  # True if track +tr+ (+name+) of Session +s+ plays a graph of
+  # its patch with no start of another queued to land by the rebuild's
+  # landing (such a rebuild is dropped, or replaces the launched graph
+  # without carrying: not what the relation checks).
   def fuzz_rebuildable?(s, name, tr)
     return false unless tr&.patch?
 
-    started = s.instance_variable_get(:@mutex).synchronize { s.instance_variable_get(:@players).each_value.any? { |p| p.name == name && p.current? && p.started } }
+    arr = s.arrangement
+    time = arr.send(:early, tr, arr.send(:resolve, tr.q || arr.quant, tr, MB::Sound::LaunchPoint::NONE))
+    started = s.instance_variable_get(:@mutex).synchronize { s.instance_variable_get(:@players).each_value.any? { |p| p.name == name && p.current? } }
     queued = s.instance_variable_get(:@render_lock).synchronize {
-      s.instance_variable_get(:@changes).any? { |c| c.subject == name && MB::Sound::Session::START_KINDS.include?(c.kind) }
+      s.instance_variable_get(:@changes).any? { |c| c.subject == name && MB::Sound::Session::START_KINDS.include?(c.kind) && c.time <= time }
     }
     started && !queued
   end

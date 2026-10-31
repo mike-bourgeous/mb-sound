@@ -48,9 +48,9 @@ module MB
             begin
               tracks.each do |name|
                 tr = @tracks[name] or next
-                time = resolve(tr.q || @quant, tr, point)
-                first ||= time
-                entries << start_track(tr, tr.clip, time, fade, carry: true)
+                c = rebuild_track(tr, point, fade, carry: true)
+                first ||= c&.time || resolve(tr.q || @quant, tr, point)
+                entries << c
               end
             ensure
               k.build_value = nil

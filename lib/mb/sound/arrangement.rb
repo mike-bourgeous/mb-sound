@@ -283,7 +283,13 @@ module MB
         # reuse take their new values at its launch point; TrackKnobs)
         playing = entry && @mutex.synchronize { @tracks[name] }&.patch? && @session.playing_after_queue?(name)
         landings = {}
-        defer = playing ? ->(&b) { TrackKnobs.deferring(landings) { b.call } } : ->(&b) { b.call }
+        # (a new instrument starts every param knob at its own value; the
+        # maintainer, 2026-10-30: "Always reset")
+        had = @mutex.synchronize { @tracks[name] }
+        prior = InstrumentPatch.entry_of(had&.patch)
+        reset = entry && had && !(prior && prior.name == entry.name && prior.location == entry.location)
+        defer0 = playing ? ->(&b) { TrackKnobs.deferring(landings) { b.call } } : ->(&b) { b.call }
+        defer = reset ? ->(&b) { TrackKnobs.resetting { defer0.call(&b) } } : defer0
         # Built once now, so a broken patch fails here (see PatchCheck)
         begin
           ok = defer.call { check_patch(name, patch, clip || @mutex.synchronize { @tracks[name]&.clip }) }
@@ -302,7 +308,7 @@ module MB
 
         tr = nil
         old = nil
-        before = entry && undo_state
+        before = (entry || patch) && undo_state
         @mutex.synchronize {
           old = @tracks[name]
           tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: clip || old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false, clock: clock, clocked: nil, trigger: !!trigger)
@@ -311,6 +317,12 @@ module MB
         refresh_monitor(tr)
         if entry && old&.patch? && tr.clip && @session.playing_after_queue?(name)
           defer.call { change_instrument(tr, entry, before, landings) }
+        elsif patch && !entry && old&.patch? && tr.clip && @session.playing_after_queue?(name)
+          # A redefined patch block rebuilds the playing graph, carrying its
+          # state where it can and spilling over the rest (carry-1; the
+          # maintainer, 2026-10-30: "Immediately or within 1 beat if working
+          # on sound design; at the launch point if working from cue")
+          redefine_patch(tr, before)
         else
           # (not playing after all: the knobs take their values now)
           landings.each { |k, v| k.set(v, frame: k.next_frame) unless v == k.value }
@@ -362,10 +374,19 @@ module MB
       # reused param knobs (+landings+, { knob => value } from
       # TrackKnobs.deferring) turned there (one Session#command: journaled,
       # one undo step; +before+ is the Set state before the redefinition).
+      # Rebuilds track +tr+'s playing graph for its redefined patch block
+      # (see #track): one Session#command, one undo step.
+      def redefine_patch(tr, before)
+        @session.command("track #{tr.name.inspect} redefined") {
+          rebuild_track(tr, LaunchPoint::NONE, nil, carry: true, spill: true)
+          @session.note_undo_extra(self, before, undo_state)
+        }
+      end
+
       def change_instrument(tr, entry, before, landings = {})
         @session.command("track #{tr.name.inspect} -> #{entry.head_path}") {
-          time = resolve(tr.q || @quant, tr, LaunchPoint::NONE)
-          start_track(tr, tr.clip, time, nil)
+          c = rebuild_track(tr, LaunchPoint::NONE, nil, carry: false, spill: true)
+          time = c&.time || resolve(tr.q || @quant, tr, LaunchPoint::NONE)
           landings.each { |k, v| @session.turn(k.name, v, start_time: time, build: true) unless v == k.value }
           @session.note_undo_extra(self, before, undo_state)
         }
@@ -1248,7 +1269,16 @@ module MB
 
       # Starts track +tr+ with +clip+ at +time+: builds its patch, or plays
       # its graph (resuming it if it was stopped).
-      def start_track(tr, clip, time, fade, carry: false)
+      def start_track(tr, clip, time, fade, carry: false, spill: false, full_now: nil)
+        # A carrying rebuild (a bind's, a build knob's) builds for the clip
+        # the playing graph was built for (a launch waiting to land has
+        # already set the track's clip, and a kit's rows decide its voices;
+        # the rebuilt clip sources play on what the old ones played, swaps
+        # included: MIDI::ClipSource#carry_adopt), and leaves the track's
+        # clip as it is (carry-1; SessionFuzz's :carry relation)
+        if carry && (built = @session.built_clip(tr.name))
+          clip = built
+        end
         musical = time
         time = early(tr, time)
         if tr.patch? && clip && clip.equal?(tr.clip) && @session.ringing?(tr.name)
@@ -1261,8 +1291,9 @@ module MB
           set_ahead(tr, graph)
           time = early(tr, musical) # (an attack lead is measured on the new graph)
           @session.add(graph, name: tr.name, start_time: time, fade: fade || 0, description: "#{tr.name}: #{name_of(clip)}",
-                       warm: -> { GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(clip) } }, carry: carry)
-          @mutex.synchronize { tr.clip = clip }
+                       warm: -> { GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(clip) } }, carry: carry, clip: clip,
+                       spill: spill, full_now: full_now)
+          @mutex.synchronize { tr.clip = clip } unless carry
         elsif @session.resumable?(tr.name)
           @session.resume(tr.name, start_time: time, fade: fade || 0)
           @session.swap(tr.name, clip, start_time: time) if clip && !clip.equal?(tr.clip)
@@ -1270,8 +1301,35 @@ module MB
           @session.add(tr.graph, name: tr.name, start_time: time, fade: fade || 0)
           @session.swap(tr.name, clip, start_time: time) if clip
         end
-        @mutex.synchronize { tr.clip = clip } if clip
+        @mutex.synchronize { tr.clip = clip } if clip && !carry
         last_change(tr.name)
+      end
+
+      # Rebuilds track +tr+'s playing graph (a bind, a build knob's turn, a
+      # new instrument, a redefined patch block) at launch point +point+,
+      # by default the track's launch point, or, while the track is in
+      # sound design (UI::Design.designing?: `design :x`, the sound
+      # screen's track; the maintainer, 2026-10-30/31: "Next buffer in sound
+      # design only", "Immediately or within 1 beat if working on sound
+      # design"), on the next buffer when every state carries and the next
+      # beat otherwise.  +carry+ carries the running state (Session::Carry),
+      # +spill+ lets what can't carry ring out under the new graph.  Returns
+      # the Change (see #start_track).
+      def rebuild_track(tr, point, fade, carry:, spill: true)
+        point ||= LaunchPoint::NONE
+        if !point.given? && designing?(tr.name)
+          time = resolve(1/4r, tr, point)
+          now = @session.now
+        else
+          time = resolve(tr.q || @quant, tr, point)
+          now = nil
+        end
+        start_track(tr, tr.clip, time, fade, carry: carry, spill: spill, full_now: now)
+      end
+
+      # True while track +name+ is in sound design (see #rebuild_track).
+      def designing?(name)
+        UI::Design.designing?(name)
       end
 
       # Builds track +tr+'s patch for +clip+.  Each build remembers the

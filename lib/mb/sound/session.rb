@@ -126,6 +126,9 @@ module MB
         :started, :slow_warned, :loads, :gain, :ramp, :fade_in, :fade_out, :fading_out, :keep,
         :strip_level, :strip_ramp, :asleep, :ring, :asleep_reads, :read_to, :cpu, :cue, :waited,
         :level_buf, # ([value, frozen SFloat] of a steady level; Faders#fader_levels)
+        :carried, # ([start, launch] of the player a carrying rebuild replaced; see #render_player)
+        :handed, # (true for a player whose state a carrying rebuild took: it stops on the swap frame; see #remove_now)
+        :clip, # (the clip a track's patch was built for, or nil; see #built_clip)
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
@@ -307,6 +310,7 @@ module MB
         @players = {}
         @stopped = {}
         @last_carry = nil # (the last swap's Carry::Plan; see #last_carry)
+        @spills = 0 # (see #spills)
         @taps = []
         @master_chains = []
         @order = []
@@ -393,6 +397,25 @@ module MB
       # (a bind's or a build knob's rebuild), or nil: what matched.
       attr_reader :last_carry
 
+      # How many replaced graphs have spilled over (rung out under their
+      # replacements; see #add_now) in this Session.
+      attr_reader :spills
+
+      # Player fields a carrying rebuild's player takes from the one it
+      # replaces (see #add_now).
+      CARRIED_PLAYER_FIELDS = %i[strip_level strip_ramp cue].freeze
+
+      # The fields a cut (no crossfade) carries besides: the fade-in in
+      # progress.
+      CARRIED_CUT_FIELDS = (CARRIED_PLAYER_FIELDS + %i[gain ramp]).freeze
+
+      # The clip the current graph named +name+ was built for (Session#add's
+      # +:clip+, a track's patch's; nil if none was given): a carrying
+      # rebuild builds for it again (Arrangement#start_track).
+      def built_clip(name)
+        @mutex.synchronize { @players.each_value.find { |p| p.name == name && p.current? }&.clip }
+      end
+
       # True if a player named +name+ will be playing once the changes
       # waiting in the change queue have landed.
       def playing_after_queue?(name)
@@ -400,7 +423,9 @@ module MB
           playing = @mutex.synchronize { @players.each_value.any? { |p| p.name == name && p.current? } }
           @changes.each do |c|
             next unless c.subject == name
-            playing = true if START_KINDS.include?(c.kind) && c.kind != :restore
+            # (a carrying rebuild starts nothing: it only replaces a playing
+            # graph, or is dropped)
+            playing = true if START_KINDS.include?(c.kind) && c.kind != :restore && !c.split
             playing = false if c.kind == :stop
             # An undo's :restore puts back a player (its +starts+ are the
             # restored graph's timeline nodes) or none (nil +starts+), so
@@ -462,7 +487,8 @@ module MB
       # +:warm+ is a Proc that builds a copy of the graph (a track's patch
       # again), for warming its code before it lands (see Warming; without
       # it, a copy is loaded from the graph's recipe).
-      def add(sound, at: nil, on: nil, in: nil, name: nil, fade: nil, description: nil, start_time: nil, to: :keep, send: nil, warm: nil, carry: false)
+      def add(sound, at: nil, on: nil, in: nil, name: nil, fade: nil, description: nil, start_time: nil, to: :keep, send: nil, warm: nil, carry: false, clip: nil, spill: false,
+              full_now: nil)
         raise IOError, 'Session is closed' if @closed
         point = LaunchPoint.of(binding) or return nil
         raise ArgumentError, "Player names must be Symbols or Integers (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol) || name.is_a?(Integer)
@@ -498,13 +524,20 @@ module MB
         if carry && name
           old = @mutex.synchronize { @players.each_value.find { |p| p.name == name && p.current? } }
           carried = Carry.plan(old.input, nodes) if old
+          # (+full_now+: a time for a swap that cuts, sooner than +time+;
+          # Arrangement#rebuild_track in sound design)
+          time = full_now if full_now && carried&.full?
         end
 
         @render_lock.synchronize {
           name = @mutex.synchronize {
             name ||= (1..).find { |i| !names_in_use.include?(i) }
-            @order.delete(name)
-            @order << name
+            # (a carrying rebuild keeps the player's place in the mix order,
+            # so the mix sums in the same order: carry-1)
+            unless carried && @order.include?(name)
+              @order.delete(name)
+              @order << name
+            end
             name
           }
 
@@ -514,11 +547,11 @@ module MB
           bind_bus_taps(nodes, name) or return nil
           attach_bus_spies(name, nodes) if @bus_only.key?(name)
 
-          change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes, graph: input, split: !carried.nil?) { |t|
+          change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes, graph: input, split: !carried.nil?, spill: spill) { |t|
             add_now(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: t, fade: fade, explicit_fade: explicit_fade,
-                    carry: carried)
+                    carry: carried, clip: clip, spill: spill)
           }
-          end_cue_at_start(name, time) # (see Cue)
+          end_cue_at_start(name, time) unless carried # (see Cue; a rebuild of the name isn't a launch: its cue plays on)
         }
 
         if @realtime
@@ -1268,11 +1301,25 @@ module MB
 
       # Starts a graph built by #add at timeline position +start+, handing
       # over from the graph it replaces (applied by the change queue).
-      def add_now(name:, input:, description:, timeline_nodes:, start:, fade:, explicit_fade:, carry: nil)
+      def add_now(name:, input:, description:, timeline_nodes:, start:, fade:, explicit_fade:, carry: nil, clip: nil, spill: false)
         @mutex.synchronize {
-          @stopped.delete(name)
+          # (a carrying rebuild's player that hasn't played yet stands in for
+          # the one it replaced, which stopped on its frame: it is replaced
+          # as that one would have been)
+          replacing = @players.each_value.any? { |p| p.name == name && p.current? && (p.started || p.carried) }
 
-          replacing = @players.each_value.any? { |p| p.name == name && p.current? && p.started }
+          # A carrying rebuild (a bind's, a build knob's) replaces only the
+          # graph it was built from: if that one ended, stopped, or was
+          # replaced (a scene's launch) before the rebuild landed, it is
+          # dropped (carry-1: starting it played the track's clip again, a
+          # one-shot from its start, or put the old clip back over the
+          # launch; SessionFuzz's :carry relation)
+          if carry
+            cur = @players.each_value.find { |p| p.name == name && p.current? }
+            return if cur.nil? || !cur.input.equal?(carry.old_input)
+          end
+
+          @stopped.delete(name)
           # A replacement crossfades over the declick time (5 ms, exact
           # frames, like undo's restores; ux-r3 item 5: a hard cut between
           # two unrelated graphs clicked), unless given a fade (0: cut)
@@ -1280,28 +1327,100 @@ module MB
 
           # Carried state (see Carry): the old graph has played up to this
           # frame (the change split the buffer here); when every stateful
-          # node matched, the new graph continues its samples (a cut), else
-          # the two crossfade over the declick time
-          if carry && replacing && @players.each_value.any? { |p| p.name == name && p.current? && p.started && p.input.equal?(carry.old_input) && !p.asleep }
-            Carry.apply(carry)
-            # (else the declick crossfade: the nodes that start fresh)
-            fade = carry.full? ? nil : declick_bars
+          # node matched and moved, the new graph continues its samples (a
+          # cut).  Else, with spill-over (+spill+: a rebuild or a new
+          # instrument; carry-1, the maintainer's "Adopt + spill"), the old
+          # graph rings out under the new one with its notes choked on the
+          # frame (Tails; when every voice carried, its voice state goes
+          # back to fresh and the new graph cuts in, so only what didn't
+          # move rings on: a reverb of another size, its tail), and without
+          # it (or a graph without clips to stop) the two crossfade over the
+          # declick time.
+          # (a muted player asleep since its mute holds that moment's state:
+          # its replacement starts fresh, as before)
+          carried_from = carry && @players.each_value.find { |p| p.name == name && p.current? && p.started && !p.asleep && p.input.equal?(carry.old_input) }
+          spiller = nil
+          if carried_from
+            # (spill-over only where something can't carry: an unfit pair or
+            # a kind that starts fresh; voices that changed alone crossfade)
+            if !carry.full? && carry.uncarried > 0 && spill && spillable?(carried_from)
+              spiller = carried_from
+              voices = carry.matched == carry.stateful
+              Carry.apply(carry, give_back: voices)
+              # (the old voices choke over Envelope::CHOKE_TIME while the new
+              # ones fade in as long)
+              fade = voices ? nil : choke_bars
+            else
+              Carry.apply(carry)
+              carried_from.handed = true
+              # (else the declick crossfade: the nodes that start fresh)
+              fade = carry.full? ? nil : declick_bars
+            end
             @last_carry = carry
+          elsif spill && !carry
+            spiller = @players.each_value.find { |p| p.name == name && p.current? && p.started && spillable?(p) }
           end
 
           # Hand over from the graph being replaced at the new start time
+          after = nil
           @players.each_value do |p|
             next unless p.name == name && p.current?
-            if p.started
+            if p.equal?(spiller)
+              start_ringing(p, start, choke: true, spill: true)
+              @spills += 1
+              after = p.serial if carry
+            elsif p.started || p.carried
               p.stop_at = start
               p.fade_out = fade
+              after = p.serial if carry
             else
               @players.delete(p.serial)
             end
           end
 
-          start_player(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: start, fade: fade)
+          np = start_player(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: start, fade: fade, after: after,
+                            carried: carried_from && [carried_from.start, carried_from.launch].freeze, clip: clip)
+          if carried_from && (q = @players[@next_serial]) && q.name == name
+            # (a carried player goes on as the old one: from its start and
+            # launch, so a seek back before the swap doesn't leave it
+            # waiting; at its fader, mute ramps, and CUE levels, so a mute
+            # landing on the same frame ramps on; and on a cut its fade-in
+            # in progress)
+            q.start = carried_from.start
+            q.launch = carried_from.launch
+            copy_player_fields(q, carried_from, fade.nil? ? CARRIED_CUT_FIELDS : CARRIED_PLAYER_FIELDS)
+          end
+          # (a player that handed its state over on a cut plays no frame
+          # after the swap, even if a seek on the same frame moves the
+          # timeline back before it: it is retired here; one crossfading out
+          # plays its fade)
+          if carried_from&.handed && fade.nil?
+            @players.delete(carried_from.serial)
+            note_retired(carried_from)
+          end
+          np
         }
+      end
+
+      # Copies player +from+'s +fields+ into player +to+ (copies of mutable
+      # values: Levels and ramps aren't shared).
+      def copy_player_fields(to, from, fields)
+        fields.each do |f|
+          v = from[f]
+          to[f] = v.nil? || v.frozen? ? v : v.dup
+        end
+      end
+
+      # Envelope::CHOKE_TIME in bars at the current tempo (a spill-over's
+      # crossfade, see #add_now).
+      def choke_bars
+        Rational(@transport.whole_notes_of(Envelope::CHOKE_TIME.to_r), @transport.bar_length)
+      end
+
+      # True if player +p+ can spill over (see #add_now): its graph has clip
+      # sources to stop.
+      def spillable?(p)
+        p.timeline_nodes.any? { |n| n.is_a?(MIDI::ClipSource) }
       end
 
       # Stops (or starts fading out) the players named +name+ at +time+, or
@@ -1312,6 +1431,10 @@ module MB
         @mutex.synchronize {
           matches = @players.values.select { |p| p.name == name }
           matches.each do |p|
+            # (a player that handed its state to a carrying rebuild stops on
+            # the swap frame whatever comes: the rebuilt one stands in for it)
+            next if p.handed
+
             p.keep = true if p.current? && p.name.is_a?(Symbol)
 
             # Another stop takes over from ringing out (the clips stay
@@ -1320,7 +1443,7 @@ module MB
 
             if ring && p.ring
               # Already ringing out
-            elsif ring && p.current? && (p.started || (time && p.start < time))
+            elsif ring && p.current? && (p.started || p.carried || (time && p.start < time))
               unless start_ringing(p, time || @transport.position)
                 stop = time || @transport.position
                 p.stop_at = MB::M.min(p.stop_at || stop, stop)
@@ -1330,7 +1453,7 @@ module MB
             elsif ring && !p.current?
               # Being replaced: it stops at its replacement's start as before
             elsif time
-              if !p.started && p.start >= time
+              if !p.started && !p.carried && p.start >= time
                 # It would never have played
                 @players.delete(p.serial)
                 note_retired(p)
@@ -1339,9 +1462,10 @@ module MB
                 p.stop_at = MB::M.min(p.stop_at || time, time)
                 p.fade_out = fade
               end
-            elsif fade && p.started
+            elsif fade && (p.started || p.carried)
               # Fade from wherever the player is now, even if it was already
-              # being replaced or faded
+              # being replaced or faded (a rebuilt player that hasn't played
+              # yet stands in for the one it replaced)
               p.stop_at = MB::M.min(p.stop_at || @transport.position, @transport.position)
               p.fade_out = fade
               p.fading_out = false
@@ -1385,7 +1509,7 @@ module MB
 
       # Creates and registers a Player.  Called with @mutex held.  Returns
       # the name.
-      def start_player(name:, input:, description:, timeline_nodes:, start:, fade:)
+      def start_player(name:, input:, description:, timeline_nodes:, start:, fade:, after: nil, carried: nil, clip: nil)
         start_player_spies(name, input) # (readers' spies; see Buses)
         @next_serial += 1
         @players[@next_serial] = Player.new(
@@ -1407,8 +1531,25 @@ module MB
           strip_ramp: nil,
           asleep: false,
           ring: nil,
-          cue: initial_cue_levels(name) # (see Cue)
+          cue: initial_cue_levels(name), # (see Cue)
+          carried: carried,
+          clip: clip
         )
+
+        # A carrying rebuild's player takes the place of the one it
+        # replaces (+after+, its serial), in the players' order and the mix
+        # order, so the mix sums in the same order (carry-1: floats summed
+        # in another order differed by an ulp)
+        if after && @players.key?(after)
+          moved = @players.delete(@next_serial)
+          entries = @players.to_a
+          @players.clear
+          entries.each do |k, v|
+            @players[k] = v
+            @players[@next_serial] = moved if k == after
+          end
+          return name if @order.include?(name)
+        end
 
         @order.delete(name)
         @order << name
@@ -1531,8 +1672,17 @@ module MB
         unless p.started
           offset = MB::M.max(Sequence::Transport.frame_at(p.start, from, per_sample), 0)
           start = Sequence::Transport.position_at(from, offset, per_sample)
-          p.timeline_nodes.each { |n| n.start_at(start, origin: start, launch: p.launch, transport: @transport) }
-          p.start = start
+          if p.carried
+            # A carrying rebuild's graph goes on as the one it replaced (its
+            # start and launch, #add_now): its timeline nodes start from that
+            # graph's start, and a seek back before the rebuild plays it as
+            # that one would have played (carry-1; SessionFuzz's :carry
+            # relation)
+            p.timeline_nodes.each { |n| n.start_at(start, origin: p.start, launch: p.launch, transport: @transport) }
+          else
+            p.timeline_nodes.each { |n| n.start_at(start, origin: start, launch: p.launch, transport: @transport) }
+            p.start = start
+          end
           p.started = true
           p.ramp = Fades::Ramp.new(0.0, 1.0, base + offset, fade_frames(p.fade_in, rate)) if p.fade_in
           align_grids(p, base + offset)

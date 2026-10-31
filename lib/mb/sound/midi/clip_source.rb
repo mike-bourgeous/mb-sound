@@ -30,7 +30,9 @@ module MB
       class ClipSource
         include Source
         include Sequence::TimelineNode
-        node_traits memory: :none, timeline: :events
+        # (in a rebuilt graph it plays on from the replaced source's place:
+        # #carry_adopt)
+        node_traits memory: :none, timeline: :events, carry: :adopt
 
         # The Clip being played.
         attr_reader :clip
@@ -44,6 +46,9 @@ module MB
         def param_nodes
           @param_nodes
         end
+
+        # The controller of a spill-over's choke (see #ring_out).
+        ALL_SOUND_OFF = 120
 
         # The MIDI channel (0-based) given to the clip's events.
         attr_reader :channel
@@ -101,6 +106,10 @@ module MB
           @quiet_wnps = nil
           @quiet_clip = nil
           @lazy_from = nil
+          @carried_early = nil # (see #carry_adopt)
+          @carried_origin = nil
+          @choke_swap = nil # (see #ring_out)
+          @carried_sounding = nil
         end
 
         # The current clip position in whole notes (a Rational).
@@ -205,10 +214,14 @@ module MB
         # Stops sending notes from timeline position +time+ (notes in
         # progress get note-offs there), remembering the clip to play again
         # after #end_ring_out.  Used by Session when a player rings out (see
-        # Session::Tails).
-        def ring_out(time)
+        # Session::Tails).  With +choke+ the notes in progress are choked
+        # there too (an all-sound-off, CC 120, after the note-offs: voices
+        # fade over Envelope::CHOKE_TIME instead of releasing), for a
+        # spill-over, whose effects ring on (Session::Tails, carry-1).
+        def ring_out(time, choke: false)
           @ring_clip ||= pending_clip || @clip
           @pending_swap = [Sequence::Clip.silent, time && time.to_r + @ahead].freeze
+          @choke_swap = choke ? @pending_swap : nil
           self
         end
 
@@ -221,6 +234,7 @@ module MB
         def end_ring_out(time: nil)
           clip = @ring_clip or return self
           @ring_clip = nil
+          @choke_swap = nil
           if time
             swap_clip(clip, time: time)
           else
@@ -352,6 +366,50 @@ module MB
         end
 
         # Seeks to +time+ seconds into the clip at the current tempo.
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # +old+ plays the same channel.
+        def carry_fits?(old)
+          old.class == self.class && old.channel == @channel
+        end
+
+        # Plays on from source +old+'s place in a rebuilt graph (a bind's
+        # or a build knob's carrying rebuild, carry-1): its clip (a swap may
+        # have changed it since the track's clip was set), the swap waiting
+        # to land, a ring-out, and the anchor of its last swap; the Session
+        # starts the rebuilt graph's timeline nodes from the old graph's
+        # start and launch (Session#render_player), so the clip keeps its
+        # timing there and at later seeks.  Before, a rebuild started a
+        # one-shot clip again from its start and a launch-aligned loop from
+        # the rebuild (SessionFuzz's :carry relation).  The old source keeps
+        # its state (its graph stops).
+        def carry_adopt(old)
+          note_param_nodes(old.clip) unless old.clip.equal?(@clip)
+          @clip = old.clip
+          @pending_swap = old.instance_variable_get(:@pending_swap)
+          @ring_clip = old.instance_variable_get(:@ring_clip)
+          @swap_anchor = old.instance_variable_get(:@swap_anchor)
+          @graph_origin = old.instance_variable_get(:@graph_origin)
+          @carried_early = old.instance_variable_get(:@early)
+          @carried_origin = old.instance_variable_get(:@origin)
+          # (its notes in progress, kept past the start's jump: their
+          # note-offs, or a later jump's, end them)
+          s = old.instance_variable_get(:@sounding)
+          @carried_sounding = s ? s.dup : {}
+        end
+
+        # Source#balance, except at a carried source's start (see
+        # #carry_adopt): the start's jump ends none of the replaced source's
+        # notes in progress, which this source takes over.
+        def balance(events)
+          if (c = @carried_sounding) && events.first.is_a?(Jump)
+            @carried_sounding = nil
+            @sounding = c
+            events = events.drop(1)
+          end
+          super(events)
+        end
+        public :carry_fits?, :carry_adopt
+
         def seek_to(time)
           set_clip_position(transport.whole_notes_of(time))
         end
@@ -361,6 +419,23 @@ module MB
         # in phase with the timeline (clip position = +time+), non-looping
         # clips from their start at +origin+.
         def timeline_start(time, origin)
+          # The first start of a source carrying on from a replaced one
+          # (#carry_adopt): its clip where the old one had it, a swap's
+          # timing included (later starts and seeks time the clip as the old
+          # one would have); its start's jump ends none of the notes in
+          # progress, which end with their own note-offs (#balance)
+          if (c = @carried_origin)
+            @carried_origin = nil
+            unless @clip.clocking
+              @graph_origin = origin
+              @clock = nil
+              @clock_anchor = nil
+              @origin = c
+              set_clip_position(time - @origin)
+              return jumped
+            end
+          end
+
           # A new launch (rather than a seek of the same graph) forgets the
           # anchor of an earlier swap
           fresh = @graph_origin != origin
@@ -446,11 +521,14 @@ module MB
             if split
               out = split > from ? read_span(from, split) : []
               out = out.dup if out.frozen? # (no edges: Stream::NO_EVENTS)
+              choke = @choke_swap&.equal?(swap)
+              @choke_swap = nil if choke
               @pending_swap = nil
               apply_swap(clip, swap_time, split)
               @generation = generation + 1
               @chase = chase_at(split)
               out << Jump.new(split)
+              out << Event.cc(ALL_SOUND_OFF, 0, channel: @channel, time: split) if choke
               @early = true
               reset_flams(split)
               return out.concat(read_span(split, to))
@@ -510,6 +588,12 @@ module MB
         def jumped
           super
           @early = true
+          # (a rebuilt graph's source carrying on from a replaced one isn't
+          # a jump: the old one already played notes humanized early)
+          unless @carried_early.nil?
+            @early = @carried_early
+            @carried_early = nil
+          end
           reset_flams
         end
 

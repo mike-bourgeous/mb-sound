@@ -34,9 +34,11 @@ module MB
         # :restore) change starts (kept in step with shared nodes while it
         # waits; see Strip#catch_up_waiting).  +split+ is true for a change
         # that splits the buffer on its frame (a graph swap carrying
-        # running state; see Carry).
+        # running state; see Carry).  +spill+ is true for a graph swap whose
+        # replaced graph spills over (Session#add_now), so its undo spills
+        # back (Undo#restore_player).
         Change = Struct.new(
-          :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts, :graph, :split,
+          :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts, :graph, :split, :spill,
           keyword_init: true
         )
 
@@ -93,7 +95,7 @@ module MB
         #
         # While a take replays, the landing time comes from the take instead
         # (see Take).
-        def change(kind, subject, time, data: {}, undoes: nil, starts: nil, graph: nil, split: false, &action)
+        def change(kind, subject, time, data: {}, undoes: nil, starts: nil, graph: nil, split: false, spill: false, &action)
           raise IOError, 'Session is closed' if @closed
           raise ArgumentError, 'Pass a block to apply the change' unless action
 
@@ -130,7 +132,7 @@ module MB
             pos = @transport.position
             check_late(kind, subject, time, pos) unless queue
             seq = @journal.next_seq
-            c = Change.new(seq: seq, kind: kind, subject: subject, time: time, action: action, starts: starts, graph: graph, split: split)
+            c = Change.new(seq: seq, kind: kind, subject: subject, time: time, action: action, starts: starts, graph: graph, split: split, spill: spill)
 
             c.entry = @journal.add(Journal::Entry.new(
               seq: seq, kind: kind, subject: subject,
@@ -208,7 +210,7 @@ module MB
         # True if a change that starts a player is queued (with @render_lock
         # or @mutex held, or for an estimate).
         def queued_start?(name = nil)
-          @changes.any? { |c| START_KINDS.include?(c.kind) && (name.nil? || c.subject == name) && !knob_change?(c) }
+          @changes.any? { |c| START_KINDS.include?(c.kind) && !c.split && (name.nil? || c.subject == name) && !knob_change?(c) }
         end
 
         # Lands queued changes whose time has come (at or before the

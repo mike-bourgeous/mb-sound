@@ -147,10 +147,11 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
   end
 
   # ui-scaffold-1 (the library picker loads one instrument after another
-  # into a playing track): a knob left where the last instrument put it
-  # takes the new instrument's value, a turned one carries when the new
-  # range holds it; both at the track's launch point, one undo step
-  it 'gives a playing track\'s reused knobs the new instrument\'s values, carrying turned ones, at its launch point' do
+  # into a playing track): a reused knob takes the new instrument's value,
+  # at the track's launch point, one undo step; a turned one too since
+  # carry-1 (the maintainer, 2026-10-30: "Always reset"; it carried when
+  # the new range held it before)
+  it 'gives a playing track\'s reused knobs the new instrument\'s values, turned ones too, at its launch point' do
     s, = run(->(_s) { MB::Sound.track(:bass, :dnb_sub); MB::Sound.bg(:bass, BASS_RIFF) }, buffers: 10)
     cut = s.knobs[:"bass/cutoff"]
     expect(cut.value).to eq(110.0)
@@ -166,7 +167,7 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
       MB::Sound.track(:bass, :jungle_pad) # (another range: 20..16000)
       120.times { s.process_buffer }
       k = s.knobs[:"bass/cutoff"]
-      expect(k.value).to eq(3000.0) # (turned: carried)
+      expect(k.value).to eq(2400.0) # (turned, but a new instrument: jungle_pad's own)
       expect(k.spec.range).to eq(20.0..16000.0)
       expect(s.knobs[:"bass/release"].value).to eq(1.8) # (dnb_sub's 0.05 was untouched)
 
@@ -174,6 +175,13 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
       MB::Sound.undo(on: :now) # (one step: the instrument and its knobs)
       4.times { s.process_buffer }
       expect(MB::Sound::Arrangement::InstrumentPatch.entry_of(s.arrangement.tracks[:bass].patch).name).to eq(:jungle_pad)
+      expect(s.knobs[:"bass/cutoff"].value).to eq(2400.0)
+
+      # (the same instrument given again keeps a turned knob)
+      MB::Sound.turn(:"bass/cutoff", 3000.0, on: :now)
+      2.times { s.process_buffer }
+      MB::Sound.track(:bass, :jungle_pad)
+      120.times { s.process_buffer }
       expect(s.knobs[:"bass/cutoff"].value).to eq(3000.0)
     end
   end

@@ -114,6 +114,7 @@ Maintainer, 2026-10-10 ("Queue ringdown for p2"): when a scene drops a clip-driv
 - Launching the same graph while it rings (resume, undo, a scene bringing a patch track back with the same clip, a graph track) revives the ringing player (no second copy; its notes come back at the launch).  A later cut or fade takes over from a ringing tail; a muted ringing player sleeps right away.
 - Journal: the stop's data is `{ ring: true }`; a `:rung_out` entry (source `:session`, data `seconds:`, `capped:`) is noted from the render thread when the tail ends (`Journal#note_entry`).  `players` shows "(ringing out)".  Takes replay ring-outs exactly (the stop's landing is forced; the tail is the graph's own output).
 - Cost (2026-10-10, 800-frame stereo buffers): following one ringing player 12 us per buffer (fast paths for silent buffers and buffers ending loud; 42 us before them); the graph's own render as before.
+- Spill rings (carry-1, 2026-10-31): a rebuild or a new instrument that can't carry everything lets the replaced graph ring out under the new one (`Ring#spill`, `#choke`: its clips go silent with an all-sound-off, so its voices choke over 3 ms and its effects ring; sound_design_ui.md, State across a rebuild).  A spill ring isn't the name's ringing player (a launch of the name never revives it; only an undo bringing that graph back does, `revive_ringing(input:)`), and later stops of the name take over from it as from any ring.
 
 ## Scene builds (branch `scene-build`, 2026-10-12)
 

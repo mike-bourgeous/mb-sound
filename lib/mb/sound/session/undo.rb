@@ -357,13 +357,16 @@ module MB
           state = original.before
           starts = state.is_a?(PlayerState) && state.player ? state.player.timeline_nodes : nil
           change(:restore, subject.name, time, data: {}, undoes: original.seq, starts: starts) { |t|
-            restore_player(subject.name, original.before, t)
+            restore_player(subject.name, original.before, t, spill: !!original.spill)
           }
         end
 
         # Puts a player name back to +state+ at +time+ (applied by the change
-        # queue).  Graphs switch with a declick crossfade.
-        def restore_player(name, state, time)
+        # queue).  Graphs switch with a declick crossfade, or, undoing a
+        # change that spilled over (+spill+: a rebuild, a new instrument),
+        # the graph replaced rings out under the one coming back (carry-1:
+        # "Undo spills back"; a graph still spilling comes back as it is).
+        def restore_player(name, state, time, spill: false)
           raise "Nothing to restore for #{name.inspect}" unless state.is_a?(PlayerState)
           declick = declick_bars
 
@@ -375,7 +378,10 @@ module MB
                 @stopped.delete(name) if @stopped[name]&.input.equal?(state.player.input)
                 @players.each_value do |p|
                   next unless p.name == name && p.current?
-                  if p.started
+                  if spill && p.started && spillable?(p) && !p.input.equal?(state.player.input)
+                    start_ringing(p, time, choke: true, spill: true)
+                    @spills += 1
+                  elsif p.started || p.carried # (see Session#add_now)
                     p.stop_at = time
                     p.fade_out = declick
                   else

@@ -539,8 +539,7 @@ module MB
         @session.command("bind #{name.inspect} #{t.param} -> #{follow ? 'follows ' : ''}knob #{kname.inspect}") {
           before = undo_state
           @mutex.synchronize { tr.patch = LiteralBinding.wrap(tr.patch, t, kname) }
-          time = resolve(tr.q || @quant, tr, point)
-          entry = start_track(tr, tr.clip, time, fade, carry: true)
+          entry = rebuild_track(tr, point, fade, carry: true)
           @session.note_undo_extra(self, before, undo_state)
         }
         entry && @session.journal[entry.seq]
