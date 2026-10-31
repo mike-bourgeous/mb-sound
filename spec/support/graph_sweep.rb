@@ -487,6 +487,22 @@ module GraphSweep
     'MB::Sound::Filter::FilterBank' => 'parallel filters over Arrays of plain data, not used in graphs',
   }.freeze
 
+  # Buffer size and count of the Notes reference path pass (Kernels
+  # notes_fast: :ruby, the Ruby mirror of the Notes fast paths) for graphs
+  # with Notes nodes: one-sample buffers, where the reference path
+  # rewrites its reused buffers every block and the fast paths hand out
+  # frozen constants (cleanup-2: a drum Voice's Tap passed a Notes
+  # trigger's reused buffer to a Tee, which the trigger rewrote before the
+  # Tee's next frame).  As many buffers as the main pass's one-sample
+  # size (fewer under memcheck).
+  NOTES_REFERENCE = [1, SIZES[1]].freeze
+
+  # True if +graph+ (a node or bundle) has a Notes node.
+  def self.notes?(graph)
+    outs = graph.respond_to?(:outputs) ? graph.outputs.to_a : [graph]
+    outs.any? { |o| o.respond_to?(:graph) && o.graph.any? { |n| n.is_a?(MB::Sound::Notes::Node) } }
+  end
+
   # Samples every output of +graph+ in turn, +count+ samples per buffer, for
   # +buffers+ buffers; returns the number of finite-checked buffers.
   def self.run(graph, count, buffers)

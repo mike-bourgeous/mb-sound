@@ -172,6 +172,46 @@ RSpec.describe(MB::Sound::Drums::Kit, :aggregate_failures) do
     end
   end
 
+  describe MB::Sound::Drums::Voice::Tap do
+    # cleanup-2: a Tee over a Tap shared a view of a Notes trigger's reused
+    # buffer, which the Voice made the trigger rewrite before the Tee's
+    # next frame (the graph sweep's kit builder on the Notes reference path)
+    it 'gives the graph its own copy of a reused source buffer, rewritten only when sampled' do
+      tap = MB::Sound::Drums::Voice::Tap.new('t')
+      src = Numo::SFloat[1, 2, 3]
+      tap.buffer = src
+      out = tap.sample(3)
+      src[0] = 9
+      expect(out.to_a).to eq([1, 2, 3])
+      expect(tap.sample(3)).to equal(out)
+      expect(out.to_a).to eq([9, 2, 3])
+      expect(tap.sample(2).to_a).to eq([9, 2])
+
+      steady = Numo::SFloat[0.5, 0.5].freeze
+      tap.buffer = steady
+      expect(tap.sample(2)).to equal(steady)
+      tap.buffer = Numo::DFloat[0.25]
+      expect(tap.sample(1)).to be_a(Numo::DFloat)
+      expect { tap.sample(2) }.to raise_error(ArgumentError, /has 1 samples, not 2/)
+    end
+
+    it 'keeps a kit builder voice with teed triggers the same on the Notes reference path at one-sample buffers', :check_shared do
+      build = -> {
+        MB::Sound.seed(2)
+        MB::Sound.kit(MB::Sound.grid(32, hat: 'xx..', oh: '..xx')) {
+          voice(:closed_hat) { metal * env(0.01) * velocity }
+          tr808 :open_hat
+          choke :open_hat, :closed_hat
+        }
+      }
+      run = ->(kit) { Array.new(400) { kit.sample(1)[0] } }
+      fast = run.(build.())
+      reference = MB::Sound::Kernels.with(notes_fast: :ruby) { run.(build.()) }
+      expect(reference).to eq(fast)
+      expect(fast.map(&:abs).max).to be > 0.01
+    end
+  end
+
   describe 'sources that end inside a buffer' do
     # fixes-14: a full render of bin/songs/drums_808.rb crashed at bar 13
     # ("trigger has 685 samples, not 800"): a one-step crash clip launched
