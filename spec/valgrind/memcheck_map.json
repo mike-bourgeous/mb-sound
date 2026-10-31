@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-30",
+  "generated": "2026-10-31",
   "specs": {
     "gems/mb-term/spec/native_spec.rb": {
       "fast_term": [
@@ -15,6 +15,42 @@
         "FastTerm::Grid#set_cell",
         "FastTerm::Grid#to_text",
         "FastTerm::Grid#write_frame"
+      ]
+    },
+    "gems/mb-term/spec/vt_native_spec.rb": {
+      "fast_term": [
+        "FastTerm::Grid#initialize",
+        "FastTerm::Grid#lines",
+        "FastTerm::Grid#put_run",
+        "FastTerm::VT#alt?",
+        "FastTerm::VT#ambiguous_width",
+        "FastTerm::VT#ambiguous_width=",
+        "FastTerm::VT#app_cursor?",
+        "FastTerm::VT#bracketed_paste?",
+        "FastTerm::VT#bytes_fed",
+        "FastTerm::VT#col",
+        "FastTerm::VT#cols",
+        "FastTerm::VT#cursor_visible?",
+        "FastTerm::VT#debug_state",
+        "FastTerm::VT#dirty?",
+        "FastTerm::VT#draw_cells",
+        "FastTerm::VT#dropped",
+        "FastTerm::VT#feed",
+        "FastTerm::VT#initialize",
+        "FastTerm::VT#invalidate",
+        "FastTerm::VT#line_at",
+        "FastTerm::VT#line_text",
+        "FastTerm::VT#lines",
+        "FastTerm::VT#max_scrollback",
+        "FastTerm::VT#resize",
+        "FastTerm::VT#row",
+        "FastTerm::VT#rows",
+        "FastTerm::VT#screen",
+        "FastTerm::VT#scrollback_length",
+        "FastTerm::VT#scrolled",
+        "FastTerm::VT#sync_mark",
+        "FastTerm::VT#take_replies",
+        "FastTerm::VT#title"
       ]
     },
     "spec/ext/mb/fast_sound/complex_synthesis_spec.rb": {
@@ -1419,14 +1455,10 @@
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.power",
-        "FastArithmetic.product",
-        "FastArithmetic.wet_dry"
+        "FastArithmetic.product"
       ],
       "fast_control": [
         "FastControl.smooth"
-      ],
-      "fast_delay": [
-        "FastDelay.read"
       ],
       "fast_envelope": [
         "FastEnvelope.process"
@@ -1822,8 +1854,6 @@
         "FastSynth.sync_pulse_edges"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -2446,16 +2476,24 @@
     "fast_term": {
       "dir": "gems/mb-term/ext/mb/term/fast_term",
       "sources": [
-        "fast_term.c"
+        "fast_term.c",
+        "fast_term.h",
+        "vt.c"
       ],
       "modules": [
         "FastTerm"
       ],
       "includes": [
+        "gems/mb-term/ext/mb/term/fast_term/fast_term.h",
         "gems/mb-term/ext/mb/term/include/mb_term_grid.h"
       ],
       "depend": {
         "fast_term.o": [
+          "gems/mb-term/ext/mb/term/fast_term/fast_term.h",
+          "gems/mb-term/ext/mb/term/include/mb_term_grid.h"
+        ],
+        "vt.o": [
+          "gems/mb-term/ext/mb/term/fast_term/fast_term.h",
           "gems/mb-term/ext/mb/term/include/mb_term_grid.h"
         ]
       }

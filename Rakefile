@@ -216,12 +216,32 @@ Rake::ExtensionTask.new 'mb-sound-fast_reverb' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
-# mb-term's native grid (gems/mb-term; fast_ui's Grid subclasses it)
+# mb-term's native grid and VT (gems/mb-term; fast_ui's Grid subclasses
+# the grid)
 Rake::ExtensionTask.new 'mb-term-fast_term' do |ext|
   ext.name = 'fast_term'
   ext.ext_dir = 'gems/mb-term/ext/mb/term/fast_term'
   ext.lib_dir = 'gems/mb-term/lib/mb/term'
 end
+
+# A source added to or removed from an extension leaves its Makefile stale
+# (mkmf lists the sources extconf found; term-2, 2026-10-31: a new vt.c was
+# left out of fast_term.so, which then failed to load with an undefined
+# symbol).  Such Makefiles are deleted before compiling, so extconf runs
+# again.
+task :refresh_makefiles do
+  Dir[File.join(__dir__, 'tmp', RUBY_PLATFORM, '*', '*', 'Makefile')].each do |mk|
+    text = File.read(mk)
+    srcdir = text[/^srcdir = (.*)$/, 1] or next
+    listed = text[/^ORIG_SRCS = (.*)$/, 1].to_s.split
+    found = Dir[File.join(File.expand_path(srcdir, File.dirname(mk)), '*.{c,cc,cpp,cxx}')].map { |f| File.basename(f) }
+    next if listed.sort == found.sort
+
+    puts "compile: #{File.dirname(mk).delete_prefix("#{__dir__}/")}: sources changed (new: #{(found - listed).join(' ')}; gone: #{(listed - found).join(' ')}), extconf runs again"
+    File.delete(mk)
+  end
+end
+Rake::Task['compile'].prerequisites.unshift('refresh_makefiles')
 
 
 # Valgrind memcheck of the C extensions (`bundle exec rake memcheck`), using
@@ -435,15 +455,11 @@ end
 # MemcheckSelection.rakefile_section)
 
 # The specs of the gems in gems/ (mb-term: the terminal UI's generic
-# layers), each in its own rspec process from its own directory, so they run
-# without mb-sound loaded.  Returns true if they all pass.
-GEM_SPEC_DIRS = %w[gems/mb-term].freeze
-def run_gem_specs
-  GEM_SPEC_DIRS.all? do |dir|
-    puts "spec: #{dir}"
-    system('bundle', 'exec', 'rspec', chdir: File.join(__dir__, dir))
-  end
-end
+# layers), each in its own rspec process from its own directory with its own
+# bundle, so they run without mb-sound loaded (spec/gem_specs.rb).  Returns
+# true if they all pass.
+require_relative 'spec/gem_specs'
+def run_gem_specs = GemSpecs.run
 
 desc 'The suite in one rspec process (bundle exec rspec; the default task), after compiling'
 task spec: :compile do

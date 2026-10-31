@@ -654,7 +654,7 @@ module MB
         def scroll(how = nil)
           return @scroll if how.nil?
           h = (repl_rect&.h || 10)
-          max = @host ? @host.vt.scrollback.length : 0
+          max = @host ? @host.vt.scrollback_length : 0
           @scroll =
             case how
             when :page_up then @scroll + [h - 1, 1].max
@@ -680,8 +680,8 @@ module MB
           @match = m
           if m
             h = repl_rect&.h || 10
-            base = vt.dropped + vt.scrollback.length
-            @scroll = (base - m[0] + h / 2).clamp(0, vt.scrollback.length)
+            base = vt.dropped + vt.scrollback_length
+            @scroll = (base - m[0] + h / 2).clamp(0, vt.scrollback_length)
             @scroll = 0 if m[0] - base >= 0 && m[0] - base < h - h / 2 && @scroll <= h / 2
             flash("/#{pattern}", :key)
           else
@@ -718,7 +718,7 @@ module MB
               vt.text_between(@match[0], @match[0])
             else
               h = repl_rect&.h || vt.rows
-              last = vt.dropped + vt.scrollback.length + vt.rows - 1 - @scroll
+              last = vt.dropped + vt.scrollback_length + vt.rows - 1 - @scroll
               vt.text_between([last - h + 1, vt.dropped].max, last).rstrip
             end
           end
@@ -1593,7 +1593,7 @@ module MB
         # Lines the REPL's VT holds (scrollback and screen).
         def repl_lines
           vt = @host.vt
-          vt.dropped + vt.scrollback.length + vt.row
+          vt.dropped + vt.scrollback_length + vt.row
         end
 
         def run_safely
@@ -2031,7 +2031,7 @@ module MB
           marks = @match ? [[@match[0], @match[1], @match[2], MB::Term::VT::REVERSE | MB::Term::VT::UNDERLINE]] : nil
           @host.synchronize do
             @host.vt.invalidate if full || @repl_full
-            @scroll = @scroll.clamp(0, @host.vt.scrollback.length)
+            @scroll = @scroll.clamp(0, @host.vt.scrollback_length)
             @host.vt.draw(@grid, r.x, r.y, r.w, r.h, offset: @scroll, marks: marks)
           end
           if @scroll > 0

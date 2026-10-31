@@ -14,6 +14,12 @@ module MB
     # Not handled: left/right margins, insert mode, character sets,
     # double-width lines, combining characters (dropped).
     #
+    # Two implementations with the same state after the same bytes:
+    # NativeVT (C, in the fast_term extension; VT.new's default when it's
+    # compiled) and RubyVT (this file, the reference the C mirrors; specs
+    # compare them over captured streams and random bytes).
+    # MB_TERM_NATIVE=0 (or native: false) makes VT.new give a RubyVT.
+    #
     # Generic (no MB::Sound types): a pane draws it into any grid with
     # #put_run (MB::Term::Cells, or a native grid with its interface).
     #
@@ -21,7 +27,11 @@ module MB
     #     vt.feed("\e[31mhello\e[0m\r\n")
     #     vt.text           # => "hello\n\n..."
     #     vt.take_replies   # bytes to write back to the program
-    class VT
+    #
+    # Both classes include this module (its constants, Row, and the
+    # methods built on the others: #text, #total_lines, #search,
+    # #text_between, #inspect).
+    module VT
       # Packed colors with this bit are palette indexes (the same bit as
       # Cells::INDEXED; a spec checks).
       INDEXED = 0x1000000
@@ -35,12 +45,29 @@ module MB
       # Lines kept above the screen by default.
       SCROLLBACK = 10_000
 
+      # The OSC number of a sync mark: a host writes "\e]7765;N\a" after
+      # the program's output and knows the VT has everything written
+      # before it once #sync_mark reaches N (an unknown OSC, which a real
+      # terminal ignores).  See Input::ReplHost#sync_output.
+      SYNC_OSC = '7765'
+
+      # The largest CSI parameter: a parameter is its leading ASCII digits
+      # (none: 0; empty: the default), saturating here (as xterm caps
+      # them), so both implementations agree on any input.
+      PARAM_MAX = 65_535
+
+      # The largest sync mark (leading digits, saturating).
+      MARK_MAX = (1 << 62) - 1
+
       # One row of cells: a String with one character per cell ("\0" for
       # the right half of a wide character), and colors and attributes
       # per cell, allocated only once a cell is styled (most rows are
       # plain text, and the scrollback keeps thousands of them), plus
       # whether the row continued onto the next one (an automatic wrap;
       # joined when copying or searching).
+      #
+      # RubyVT's rows are its own (read them, never change them);
+      # NativeVT gives copies (#line_at, #screen).
       class Row
         # The cells' characters (one per cell).
         attr_reader :text
@@ -48,9 +75,13 @@ module MB
         attr_accessor :wrapped
 
         def initialize(cols)
-          @text = ' ' * cols
-          @fg = @bg = @attr = nil
-          @wrapped = false
+          setup(' ' * cols, nil, nil, nil, false)
+        end
+
+        # A row from its parts (NativeVT's copies): +fg+, +bg+, and +attr+
+        # are Arrays of one entry per cell, or all nil for a plain row.
+        def self.build(text, fg, bg, attr, wrapped)
+          allocate.tap { |r| r.send(:setup, text, fg, bg, attr, wrapped) }
         end
 
         # True when no cell has a color or attribute (drawn in one run).
@@ -180,16 +211,178 @@ module MB
           out << "\e[0m" if cur != [nil, nil, 0]
           out
         end
+
+        # [text, fg, bg, attr, wrapped] (styles nil for a plain row), for
+        # comparing implementations.
+        def to_a
+          [@text, @fg, @bg, @attr, @wrapped]
+        end
+
+        private
+
+        def setup(text, fg, bg, attr, wrapped)
+          @text = text
+          @fg = fg
+          @bg = bg
+          @attr = attr
+          @wrapped = wrapped
+        end
       end
 
-      attr_reader :rows, :cols, :row, :col, :scrollback, :title
+      @native = nil
+
+      class << self
+        # The native VT class VT.new makes (NativeVT once fast_term is
+        # loaded), or nil for RubyVT.  An adapter may turn it off (mb-sound's
+        # kernel switch: MB::Sound.kernels = :ruby), as with Grid.native.
+        attr_reader :native
+
+        def native=(klass)
+          raise ArgumentError, "#{klass} is not a VT" unless klass.nil? || klass <= VT
+          @native = klass
+        end
+
+        # True when a native VT is set and not turned off by
+        # MB_TERM_NATIVE=0.
+        def native?
+          !@native.nil? && ENV['MB_TERM_NATIVE'] != '0'
+        end
+
+        # The VT class for +native+: the native one when set and asked for,
+        # else RubyVT.
+        def class_for(native = native?)
+          native && @native ? @native : RubyVT
+        end
+
+        # A new +rows+ x +cols+ VT (NativeVT when compiled, unless +native+
+        # is false or MB_TERM_NATIVE=0).
+        def new(rows, cols, scrollback: SCROLLBACK, ambiguous_width: 1, native: native?)
+          class_for(native).new(rows, cols, scrollback: scrollback, ambiguous_width: ambiguous_width)
+        end
+
+        # The SGR sequence that sets exactly +fg+, +bg+ (packed colors, nil
+        # for the default), and +attr+ (BOLD | DIM ...), from a reset.
+        def sgr_for(fg, bg, attr)
+          codes = [0]
+          SGR_BASIC.each { |code, bit| codes << code if attr & bit != 0 }
+          codes.concat(color_codes(fg, 30, 90, 38)) if fg
+          codes.concat(color_codes(bg, 40, 100, 48)) if bg
+          "\e[#{codes.join(';')}m"
+        end
+
+        # SGR codes for packed color +c+ (base 30/40, bright 90/100,
+        # extended 38/48).
+        def color_codes(c, base, bright, ext)
+          if c & INDEXED != 0
+            n = c & 255
+            return [base + n] if n < 8
+            return [bright + n - 8] if n < 16
+            return [ext, 5, n]
+          end
+          [ext, 2, (c >> 16) & 255, (c >> 8) & 255, c & 255]
+        end
+
+        # The value of +str+'s leading ASCII digits (0 when there are none),
+        # saturating at +max+: how both implementations read CSI parameters
+        # and sync marks.
+        def leading_int(str, max = PARAM_MAX)
+          v = 0
+          i = 0
+          n = str.bytesize
+          while i < n
+            b = str.getbyte(i)
+            break if b < 48 || b > 57
+            v = v * 10 + b - 48
+            return max if v >= max
+            i += 1
+          end
+          v
+        end
+      end
+
+      SGR_BASIC = { 1 => BOLD, 2 => DIM, 3 => ITALIC, 4 => UNDERLINE, 7 => REVERSE }.freeze
+      SGR_OFF = { 21 => BOLD, 22 => BOLD | DIM, 23 => ITALIC, 24 => UNDERLINE, 27 => REVERSE }.freeze
+
+      # The screen as text, lines joined by newlines.
+      def text
+        lines.join("\n")
+      end
+
+      # Lines in the scrollback plus the screen (absolute numbers run
+      # from #dropped to #dropped + #total_lines - 1).
+      def total_lines
+        scrollback_length + rows
+      end
+
+      # Searches lines for +pattern+ (a Regexp or String, case-insensitive
+      # for a lowercase String) from absolute line +from+ (exclusive),
+      # backward (up) by default.  Returns [line, from column, to column]
+      # or nil.
+      def search(pattern, from: nil, backward: true)
+        re = pattern.is_a?(Regexp) ? pattern : Regexp.new(Regexp.escape(pattern.to_s), pattern.to_s == pattern.to_s.downcase ? Regexp::IGNORECASE : nil)
+        first = dropped
+        last = first + total_lines - 1
+        from ||= backward ? last + 1 : first - 1
+        range = backward ? (from - 1).downto(first) : (from + 1).upto(last)
+        range.each do |n|
+          row = line_text(n) or next
+          text, cols = text_columns(row)
+          m = re.match(text) or next
+          next if m[0].empty?
+          return [n, cols[m.begin(0)], cols[m.end(0) - 1] + (row[cols[m.end(0) - 1] + 1] == "\0" ? 2 : 1)]
+        end
+        nil
+      end
+
+      # The text of absolute lines +from+..+to+ (wrapped rows joined),
+      # columns +from_col+ on the first and up to +to_col+ (exclusive) on
+      # the last.
+      def text_between(from, to, from_col: 0, to_col: nil)
+        out = +''
+        from.upto(to) do |n|
+          row = line_at(n) or next
+          a = n == from ? from_col : 0
+          b = n == to && to_col ? to_col : row.length
+          seg = (row.text[a...b] || '').delete("\0")
+          seg = seg.rstrip unless row.wrapped && n != to
+          out << seg
+          out << "\n" unless n == to || row.wrapped
+        end
+        out
+      end
+
+      def inspect
+        "#<#{self.class.name} #{rows}x#{cols} cursor #{row + 1};#{col + 1}#{alt? ? ' alt' : ''}, #{scrollback_length} scrollback lines>"
+      end
+
+      private
+
+      # A row's text without the right halves of wide characters, and each
+      # character's starting column.
+      def text_columns(row)
+        text = +''
+        cols = []
+        row.each_char.with_index do |ch, c|
+          next if ch == "\0"
+          text << ch
+          cols << c
+        end
+        [text, cols]
+      end
+    end
+
+    # The VT in Ruby: the reference NativeVT mirrors (see VT).
+    class RubyVT
+      include VT
+
+      attr_reader :rows, :cols, :row, :col, :title
 
       # The scrollback's maximum length.
       attr_reader :max_scrollback
 
       # East Asian ambiguous characters' width (1 or 2): match the outer
       # terminal (and Reline.ambiguous_width).
-      attr_accessor :ambiguous_width
+      attr_reader :ambiguous_width
 
       # Lines dropped from the front of the scrollback so far (absolute
       # line numbers stay stable: see #line_at).
@@ -197,12 +390,6 @@ module MB
 
       # Counters: bytes fed, lines scrolled.
       attr_reader :bytes_fed, :scrolled
-
-      # The OSC number of a sync mark: a host writes "\e]7765;N\a" after
-      # the program's output and knows the VT has everything written
-      # before it once #sync_mark reaches N (an unknown OSC, which a real
-      # terminal ignores).  See Input::ReplHost#sync_output.
-      SYNC_OSC = '7765'
 
       # The newest sync mark fed (0: none).
       attr_reader :sync_mark
@@ -212,8 +399,9 @@ module MB
 
         @rows = rows
         @cols = cols
-        @max_scrollback = scrollback
-        @ambiguous_width = ambiguous_width
+        @max_scrollback = Integer(scrollback)
+        @ambiguous_width = Integer(ambiguous_width)
+        @widths = {}
         @scrollback = []
         @dropped = 0
         @main = Array.new(rows) { Row.new(cols) }
@@ -226,7 +414,18 @@ module MB
         @title = nil
         @dirty = Array.new(rows, true)
         @all_dirty = true
+        @saved_main = nil
         reset_state
+      end
+
+      def ambiguous_width=(w)
+        @ambiguous_width = Integer(w)
+        @widths = {} # (cached widths of ambiguous characters)
+      end
+
+      # Lines in the scrollback.
+      def scrollback_length
+        @scrollback.length
       end
 
       # Rows on screen (the alternate screen while a program uses it).
@@ -258,7 +457,7 @@ module MB
       # Bytes to send back to the program (cursor and mode reports);
       # cleared on read.
       def take_replies
-        return '' if @replies.empty?
+        return +'' if @replies.empty?
         r = @replies
         @replies = +''
         r
@@ -267,11 +466,6 @@ module MB
       # The screen's lines as text (trailing spaces kept).
       def lines
         screen.map { |r| r.text.delete("\0") }
-      end
-
-      # The screen as text, lines joined by newlines.
-      def text
-        lines.join("\n")
       end
 
       # True if anything changed since #clean!.
@@ -283,17 +477,13 @@ module MB
       def clean!
         @all_dirty = false
         @dirty.fill(false)
+        self
       end
 
       # Marks everything to be redrawn.
       def invalidate
         @all_dirty = true
-      end
-
-      # Lines in the scrollback plus the screen (absolute numbers run
-      # from #dropped to #dropped + #total_lines - 1).
-      def total_lines
-        @scrollback.length + @rows
+        self
       end
 
       # The Row at absolute line +n+ (scrollback, then screen), or nil.
@@ -304,12 +494,30 @@ module MB
         screen[i - @scrollback.length]
       end
 
+      # The text (one character per cell) of absolute line +n+, or nil.
+      def line_text(n)
+        line_at(n)&.text
+      end
+
+      # Everything the VT holds, for comparing implementations (specs).
+      def debug_state
+        {
+          rows: @rows, cols: @cols, row: @row, col: @col, top: @top, bottom: @bottom, wrap_pending: @wrap_pending,
+          fg: @fg, bg: @bg, attr: @attr, saved: @saved, saved_main: @saved_main,
+          origin: @origin, autowrap: @autowrap, cursor_visible: @cursor_visible, bracketed_paste: @bracketed_paste, app_cursor: @app_cursor,
+          tabs: @tabs.dup, main: @main.map(&:to_a), alt: @alt&.map(&:to_a), scrollback: @scrollback.map(&:to_a),
+          dropped: @dropped, scrolled: @scrolled, bytes_fed: @bytes_fed, sync_mark: @sync_mark, title: @title,
+          pending: @pending.b, replies: @replies.dup, dirty: @dirty.dup, all_dirty: @all_dirty,
+          max_scrollback: @max_scrollback, ambiguous_width: @ambiguous_width,
+        }
+      end
+
       # Changes the size.  Rows keep their cells (cut or padded; no
       # reflow); when the screen gets shorter, rows above the cursor go to
       # the scrollback, as xterm does.
       def resize(rows, cols)
         return self if rows == @rows && cols == @cols
-        raise ArgumentError, "A VT needs at least 1x1 cells (got #{rows}x#{cols})" unless rows > 0 && cols > 0
+        raise ArgumentError, "A VT needs at least 1x1 cells (got #{rows}x#{cols})" unless rows.is_a?(Integer) && cols.is_a?(Integer) && rows > 0 && cols > 0
 
         [@main, @alt].compact.each do |scr|
           scr.each { |r| r.resize(cols) }
@@ -351,14 +559,15 @@ module MB
         return self if bytes.nil? || bytes.empty?
         @bytes_fed += bytes.bytesize
         data = @pending.empty? ? bytes.b : (@pending << bytes.b)
-        @pending = +''.b
 
         # Hold back an incomplete UTF-8 character at the end
+        held = nil
         tail = incomplete_utf8_tail(data)
         if tail > 0
-          @pending = data.byteslice(-tail, tail)
+          held = data.byteslice(-tail, tail)
           data = data.byteslice(0, data.bytesize - tail)
         end
+        @pending = held || +''.b
 
         s = data.force_encoding(Encoding::UTF_8)
         s = s.scrub('?') unless s.valid_encoding?
@@ -374,8 +583,10 @@ module MB
           elsif o == 0x1B
             n = escape(s, i)
             if n.nil?
-              # Incomplete sequence: keep it for the next feed
+              # Incomplete sequence: keep it (and the held-back bytes) for
+              # the next feed
               @pending = s[i..].b
+              @pending << held if held
               break
             end
             i = n
@@ -414,53 +625,10 @@ module MB
         drawn
       end
 
-      # Searches lines for +pattern+ (a Regexp or String, case-insensitive
-      # for a lowercase String) from absolute line +from+ (exclusive),
-      # backward (up) by default.  Returns [line, from column, to column]
-      # or nil.
-      def search(pattern, from: nil, backward: true)
-        re = pattern.is_a?(Regexp) ? pattern : Regexp.new(Regexp.escape(pattern.to_s), pattern.to_s == pattern.to_s.downcase ? Regexp::IGNORECASE : nil)
-        last = @dropped + total_lines - 1
-        from ||= backward ? last + 1 : @dropped - 1
-        range = backward ? (from - 1).downto(@dropped) : (from + 1).upto(last)
-        range.each do |n|
-          row = line_at(n) or next
-          text, cols = row_text_columns(row)
-          m = re.match(text) or next
-          next if m[0].empty?
-          return [n, cols[m.begin(0)], cols[m.end(0) - 1] + (row.char(cols[m.end(0) - 1] + 1) == "\0" ? 2 : 1)]
-        end
-        nil
-      end
-
-      # The text of absolute lines +from+..+to+ (wrapped rows joined),
-      # columns +from_col+ on the first and up to +to_col+ (exclusive) on
-      # the last.
-      def text_between(from, to, from_col: 0, to_col: nil)
-        out = +''
-        from.upto(to) do |n|
-          row = line_at(n) or next
-          a = n == from ? from_col : 0
-          b = n == to && to_col ? to_col : row.length
-          seg = (row.text[a...b] || '').delete("\0")
-          seg = seg.rstrip unless row.wrapped && n != to
-          out << seg
-          out << "\n" unless n == to || row.wrapped
-        end
-        out
-      end
-
-      def inspect
-        "#<MB::Term::VT #{@rows}x#{@cols} cursor #{@row + 1};#{@col + 1}#{alt? ? ' alt' : ''}, #{@scrollback.length} scrollback lines>"
-      end
-
       private
 
       # C0 controls and DEL (where printable runs end).
       CONTROL = /[\x00-\x1f\x7f]/
-
-      SGR_BASIC = { 1 => BOLD, 2 => DIM, 3 => ITALIC, 4 => UNDERLINE, 7 => REVERSE }.freeze
-      SGR_OFF = { 21 => BOLD, 22 => BOLD | DIM, 23 => ITALIC, 24 => UNDERLINE, 27 => REVERSE }.freeze
 
       def reset_state
         @row = @col = 0
@@ -504,13 +672,12 @@ module MB
       def width_of(ch)
         o = ch.ord
         return 1 if o < 0x7F
-        w = (@widths ||= {})[o] ||= begin
+        @widths[o] ||= begin
           t = ::Reline::Unicode::EastAsianWidth
           k = t::CHUNK_LAST.bsearch_index { |last| o <= last }
           size = k ? t::CHUNK_WIDTH[k] : 1
           size == -1 ? @ambiguous_width : size
         end
-        w
       end
 
       # Printable text at the cursor, wrapping at the right edge.
@@ -546,6 +713,7 @@ module MB
         w = width_of(ch)
         return if w == 0 # combining marks and zero-width characters are dropped
         w = 1 if w > 2 || w < 0
+        return if w == 2 && @cols < 2 # (no room for both halves anywhere)
 
         wrap_now if @wrap_pending
         if w == 2 && @col == @cols - 1
@@ -665,7 +833,7 @@ module MB
           csi(s[(i + 2)...j], s[j])
           j + 1
         when ']', 'P', '_', '^', 'X'
-          # OSC (titles), DCS, APC, PM, SOS: to BEL or ST
+          # OSC (titles), DCS, APC, PM, and SOS strings: to BEL or ST
           j = s.index(/\a|\e\\/, i + 2)
           return nil if j.nil?
           osc(s[(i + 2)...j]) if c == ']'
@@ -707,8 +875,8 @@ module MB
 
       def osc(body)
         num, text = body.split(';', 2)
-        @title = text if %w[0 2].include?(num)
-        @sync_mark = text.to_i if num == SYNC_OSC
+        @title = text if num == '0' || num == '2'
+        @sync_mark = text ? VT.leading_int(text, MARK_MAX) : 0 if num == SYNC_OSC
       end
 
       def restore_cursor
@@ -731,7 +899,7 @@ module MB
           return # DECSCUSR, DECSCA, ...: ignored
         end
 
-        nums = params.split(';', -1).map { |p| p.empty? ? nil : p.to_i }
+        nums = params.split(';', -1).map { |p| p.empty? ? nil : VT.leading_int(p) }
         n = (nums[0] || 1)
         n = 1 if n < 1
         case final
@@ -757,8 +925,9 @@ module MB
         when 'S' then scroll_up(n)
         when 'T' then scroll_down(n)
         when 'r'
-          t = (nums[0] || 1) - 1
-          b = (nums[1] || @rows) - 1
+          # (0 or empty: the default, as xterm reads them)
+          t = (nums[0].nil? || nums[0] == 0 ? 1 : nums[0]) - 1
+          b = (nums[1].nil? || nums[1] == 0 ? @rows : nums[1]) - 1
           b = @rows - 1 if b >= @rows
           if t < b
             @top = t
@@ -790,7 +959,7 @@ module MB
 
       def private_csi(lead, params, final)
         if lead == '?' && final == 'p' && params.end_with?('$')
-          m = params.delete('$').to_i
+          m = VT.leading_int(params)
           v = case m
               when 1 then @app_cursor ? 1 : 2
               when 6 then @origin ? 1 : 2
@@ -811,7 +980,7 @@ module MB
 
         on = final == 'h'
         params.split(';').each do |p|
-          case p.to_i
+          case (m = VT.leading_int(p))
           when 1 then @app_cursor = on
           when 6
             @origin = on
@@ -820,7 +989,7 @@ module MB
           when 7 then @autowrap = on
           when 25 then @cursor_visible = on
           when 2004 then @bracketed_paste = on
-          when 47, 1047, 1049 then alt_screen(on, p.to_i == 1049)
+          when 47, 1047, 1049 then alt_screen(on, m == 1049)
           end
         end
       end
@@ -938,28 +1107,6 @@ module MB
         end
       end
 
-      # The SGR sequence that sets exactly +fg+, +bg+ (packed colors, nil
-      # for the default), and +attr+ (BOLD | DIM ...), from a reset.
-      def self.sgr_for(fg, bg, attr)
-        codes = [0]
-        SGR_BASIC.each { |code, bit| codes << code if attr & bit != 0 }
-        codes.concat(color_codes(fg, 30, 90, 38)) if fg
-        codes.concat(color_codes(bg, 40, 100, 48)) if bg
-        "\e[#{codes.join(';')}m"
-      end
-
-      # SGR codes for packed color +c+ (base 30/40, bright 90/100,
-      # extended 38/48).
-      def self.color_codes(c, base, bright, ext)
-        if c & INDEXED != 0
-          n = c & 255
-          return [base + n] if n < 8
-          return [bright + n - 8] if n < 16
-          return [ext, 5, n]
-        end
-        [ext, 2, (c >> 16) & 255, (c >> 8) & 255, c & 255]
-      end
-
       # [packed color, codes used] for 38/48's arguments at +k+.
       def extended(codes, k)
         case codes[k]
@@ -969,25 +1116,15 @@ module MB
         end
       end
 
-      # The row's text with each character's starting column.
-      def row_text_columns(row)
-        text = +''
-        cols = []
-        row.text.each_char.with_index do |ch, c|
-          next if ch == "\0"
-          text << ch
-          cols << c
-        end
-        [text, cols]
-      end
-
       def draw_row(grid, x, y, w, row, marks)
         text = row.text
         n = [w, text.length].min
         if row.plain? && (marks.nil? || marks.empty?)
           grid.put_run(x, y, n == text.length ? text : text[0, n], nil, nil, 0)
         else
-          fg, bg, at = row.styles
+          # (a plain row's styles without allocating them: drawing never
+          # changes the VT)
+          fg, bg, at = row.plain? ? [Array.new(n), Array.new(n), Array.new(n, 0)] : row.styles
           extra = Array.new(n, 0)
           marks&.each { |_, a, b, bits| (a...[b, n].min).each { |c| extra[c] |= bits if c >= 0 } }
           c = 0
@@ -1003,6 +1140,41 @@ module MB
         end
         grid.put_run(x + n, y, ' ' * (w - n), nil, nil, 0) if w > n
       end
+    end
+
+    if defined?(FastTerm::VT)
+      # The widths RubyVT reads (Reline's), for the C
+      FastTerm::VT.width_table = [::Reline::Unicode::EastAsianWidth::CHUNK_LAST, ::Reline::Unicode::EastAsianWidth::CHUNK_WIDTH]
+
+      # The VT in C (FastTerm::VT, the fast_term extension's vt.c) with
+      # RubyVT's interface: the same state after the same bytes, the same
+      # cells drawn (native grids get their cells written directly, other
+      # grids the same #put_run calls).  #line_at and #screen give copies
+      # of its rows.
+      class NativeVT < FastTerm::VT
+        include VT
+
+        def initialize(rows, cols, scrollback: SCROLLBACK, ambiguous_width: 1)
+          raise ArgumentError, "A VT needs at least 1x1 cells (got #{rows}x#{cols})" unless rows.is_a?(Integer) && cols.is_a?(Integer) && rows > 0 && cols > 0
+
+          super(rows, cols, Integer(scrollback), Integer(ambiguous_width))
+        end
+
+        # See RubyVT#resize.
+        def resize(rows, cols)
+          return self if rows == self.rows && cols == self.cols
+          raise ArgumentError, "A VT needs at least 1x1 cells (got #{rows}x#{cols})" unless rows.is_a?(Integer) && cols.is_a?(Integer) && rows > 0 && cols > 0
+
+          super
+        end
+
+        # See RubyVT#draw.
+        def draw(grid, x, y, w, h, offset: 0, all: false, marks: nil)
+          draw_cells(grid, x, y, w, h, offset, all, marks)
+        end
+      end
+
+      VT.native ||= NativeVT
     end
   end
 end

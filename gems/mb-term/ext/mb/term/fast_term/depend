@@ -1,1 +1,2 @@
-fast_term.o: $(srcdir)/../include/mb_term_grid.h
+fast_term.o: $(srcdir)/../include/mb_term_grid.h $(srcdir)/fast_term.h
+vt.o: $(srcdir)/../include/mb_term_grid.h $(srcdir)/fast_term.h

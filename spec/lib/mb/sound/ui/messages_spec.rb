@@ -95,7 +95,7 @@ RSpec.describe(MB::Sound::UI::Messages, :aggregate_failures) do
     expect(@term.wait_for(' NAV ')).to eq(true)
     @term.type(":puts((1..30).map { |i| \"pal \#{i}\" }); warn 'pal warn'; \"a\\nb\"\r")
     expect(wait_until { @tiles.host.vt.text.include?('pal 30') }).to eq(true), @tiles.host.vt.text
-    vt = @tiles.host.vt.text + @tiles.host.vt.scrollback.join("\n")
+    vt = @tiles.host.vt.then { |v| v.text_between(v.dropped, v.dropped + v.total_lines - 1) }
     expect(vt).to include('pal 1', 'pal warn', '=> "a\\nb"')
     @term.settle
     expect(@term.lines[status]).to include(' NAV ')

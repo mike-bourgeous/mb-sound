@@ -10,7 +10,7 @@ It lives in mb-sound's repository as a path gem (`gem 'mb-term', path:
 | `MB::Term::Cells` | A grid of character cells (one character per cell, the right half of a wide character `"\0"`), colors packed as `0xRRGGBB` or palette indexes (`Cells::INDEXED \| n`), attribute bits.  `#lines(mode)` gives text with SGR codes in `:truecolor`, `:ansi256`, `:ansi16`, or `:none`; `#frame(prev, mode, row:, col:, sync:)` gives the bytes that draw only the cells that differ from `prev` (cursor moves between runs, short gaps rewritten, DEC 2026 synchronized output). |
 | `MB::Term::Grid` | Which grid class to make: `Grid.new(w, h)` is `Cells`, or a native grid with the same interface and bytes once one is registered (`Grid.native = klass`; mb-sound registers its C grid).  `MB_TERM_NATIVE=0` forces Ruby. |
 | `MB::Term::ANSI` | SGR color parameters per color mode (nearest xterm-256 and 16-color matches). |
-| `MB::Term::VT` | A terminal model for what a program writes: rows of cells, scrollback with stable line numbers, the cursor, and the replies a terminal sends (cursor reports, device attributes, mode reports).  `#draw(grid, x, y, w, h)` copies changed rows into any grid. |
+| `MB::Term::VT` | A terminal model for what a program writes: rows of cells, scrollback with stable line numbers, the cursor, and the replies a terminal sends (cursor reports, device attributes, mode reports).  `#draw(grid, x, y, w, h)` copies changed rows into any grid.  `VT.new` makes a `NativeVT` (C) when fast_term is compiled, else a `RubyVT` (its reference: same state, same cells). |
 | `MB::Term::Screen` | A small emulator for replaying frames (cursor moves, scroll regions, erases, SGR) into Cells, for specs and captures. |
 | `MB::Term::Terminal` | The real terminal while a screen owns it: alternate screen, raw input, bracketed paste, mouse, focus, the kitty keyboard protocol, all undone by `#leave`; probes for DEC 2026, ambiguous width, kitty keys. |
 | `MB::Term::Input` | `Decoder` (bytes to Key, Paste, Mouse, Focus, Reply events, keeping each key's bytes), `Keymap`, `Router` (an explicit state machine of input modes: REPL, NAV, line prompts, grabs, overlays, prefixes), `ReplHost` (a REPL or command on a pty, drawn by a VT; `:thread` runs its own Pry, `:adopt` reopens fds 0/1/2 onto the pty), `RelineKeys`. |
@@ -62,7 +62,14 @@ Handled:
 - OSC 0 and 2 (title), and a private OSC used as a sync mark; DCS, APC,
   PM, and SOS strings are consumed and ignored.
 - Wide characters take two cells (widths from Reline's table, with the
-  ambiguous width as probed); pending wraps; tabs; resizes.
+  ambiguous width as probed; dropped in a one-column VT); pending wraps;
+  tabs; resizes.
+- Parameters are their leading digits (`3:9` reads as 3; none: 0),
+  saturating at 65535 (`VT::PARAM_MAX`); empty ones take their default,
+  and in `r` 0 does too (`CSI 0;0 r` is the whole screen, as in xterm).
+  Invalid UTF-8 becomes `?` as `String#scrub` replaces it.  Bytes split
+  anywhere between reads (inside sequences, characters, or invalid
+  bytes) give the state they give read at once.
 
 Not handled: left/right margins (DECSLRM), insert mode (IRM), character
 sets (line drawing via `ESC ( 0`), double-width or double-height lines,
@@ -72,59 +79,69 @@ and LEDs (ignored), cursor styles (DECSCUSR, ignored).
 
 ## Ruby and C
 
-The grid has two implementations with the same text and bytes:
-`MB::Term::Cells` (Ruby) and `MB::Term::NativeCells` (C, the `fast_term`
-extension: `rake compile`; without it the gem is pure Ruby).
-`MB::Term::Grid.new` picks the C one when it's compiled (`MB_TERM_NATIVE=0`
-for Ruby).  The VT, input, layouts, and themes are Ruby only.
+The grid and the VT each have two implementations with the same results:
+`MB::Term::Cells` and `MB::Term::NativeCells` (the same text and bytes),
+`MB::Term::RubyVT` and `MB::Term::NativeVT` (the same state after the same
+bytes, the same cells drawn).  The C ones are the `fast_term` extension
+(`rake compile`; without it the gem is pure Ruby); `MB::Term::Grid.new` and
+`MB::Term::VT.new` pick them when it's compiled (`MB_TERM_NATIVE=0` for
+Ruby).  The Ruby VT is the reference: `spec/vt_native_spec.rb` compares
+both over captured streams and seeded random bytes (`VT_FUZZ=N` for more,
+`VT_FUZZ_SEED=n` to repeat a case).  NativeVT's `#line_at` and `#screen`
+give copies of its rows.  Input, layouts, and themes are Ruby only.
 
-Measured with `bench/term_bench.rb 7` (2026-10-29, the Mac container:
-i9-9880H under Docker's Linux VM, Ruby 4.0.9; CPU time of one thread, Ruby
-and C alternating within each of 7 rounds, medians).  Screens come from a
+Measured with `bench/term_bench.rb 5` (2026-10-31, the Mac container:
+i9-9880H under Docker's Linux VM, Ruby 4.0.9; CPU time of one thread, the
+stacks alternating within each of 5 rounds, medians).  Screens come from a
 VT holding an `ls -la --color` style listing; "REPL refresh" is one line
 arriving: VT#feed, VT#draw of the changed rows, the frame, and copy_from.
+"Ruby VT, C grid" is mb-term before the C VT (term-2).
 
-| VT feed (Ruby only: the VT has no C) | bytes | plain ms | plain MB/s | YJIT ms | YJIT MB/s |
-|---|---|---|---|---|---|
-| Pry transcript | 1051250 | 787.9 | 1.3 | 625.6 | 1.7 |
-| ls -la burst | 1415182 | 310.3 | 4.6 | 263.7 | 5.4 |
-| full-screen redraws 236x80 | 1402989 | 2070.5 | 0.7 | 1966.2 | 0.7 |
+| VT feed, 4 KB pieces | bytes | Ruby MB/s | C MB/s | Ruby/C | Ruby +YJIT MB/s | C +YJIT MB/s | Ruby/C +YJIT |
+|---|---|---|---|---|---|---|---|
+| Pry transcript | 1051250 | 1.3 | 135.5 | 105x | 1.6 | 124.5 | 76x |
+| ls -la burst | 1415182 | 3.9 | 75.6 | 20x | 5.6 | 75.8 | 14x |
+| full-screen redraws 236x80 | 1402989 | 0.6 | 141.6 | 225x | 0.7 | 118.5 | 161x |
 
-| µs per call | size | Ruby | C | Ruby/C | Ruby +YJIT | C +YJIT | Ruby/C +YJIT | frame bytes |
-|---|---|---|---|---|---|---|---|---|
-| frame, every cell | 80x24 | 452.5 | 8.2 | 54.9x | 329.0 | 8.9 | 37.0x | 2297 |
-| frame, every cell | 120x40 | 1059.3 | 16.2 | 65.3x | 730.6 | 17.5 | 41.8x | 5377 |
-| frame, every cell | 236x80 | 3884.9 | 57.1 | 68.0x | 2924.4 | 58.8 | 49.7x | 19968 |
-| frame, 3 cells typed | 80x24 | 302.4 | 5.5 | 54.5x | 229.9 | 5.4 | 42.4x | 31 |
-| frame, 3 cells typed | 120x40 | 739.0 | 13.0 | 56.8x | 560.7 | 13.1 | 42.7x | 31 |
-| frame, 3 cells typed | 236x80 | 2924.3 | 50.7 | 57.6x | 2255.4 | 50.9 | 44.3x | 31 |
-| frame, one line scrolled in | 80x24 | 542.2 | 15.1 | 35.9x | 383.4 | 14.5 | 26.4x | 1590 |
-| frame, one line scrolled in | 120x40 | 1122.1 | 29.6 | 38.0x | 890.0 | 30.0 | 29.6x | 2632 |
-| frame, one line scrolled in | 236x80 | 4260.5 | 86.4 | 49.3x | 3134.8 | 86.0 | 36.4x | 5159 |
-| lines (truecolor) | 80x24 | 221.1 | 10.9 | 20.2x | 94.9 | 10.8 | 8.8x |  |
-| lines (truecolor) | 120x40 | 480.1 | 27.9 | 17.2x | 212.9 | 24.5 | 8.7x |  |
-| lines (truecolor) | 236x80 | 1825.4 | 91.3 | 20.0x | 774.3 | 90.4 | 8.6x |  |
-| VT#draw, every row | 80x24 | 771.7 | 168.5 | 4.6x | 513.9 | 72.2 | 7.1x |  |
-| VT#draw, every row | 120x40 | 1910.1 | 374.3 | 5.1x | 1275.2 | 153.0 | 8.3x |  |
-| VT#draw, every row | 236x80 | 7314.6 | 1185.5 | 6.2x | 5179.3 | 455.1 | 11.4x |  |
-| REPL refresh (feed + draw + frame + copy) | 80x24 | 1388.6 | 254.1 | 5.5x | 921.2 | 108.4 | 8.5x |  |
-| REPL refresh (feed + draw + frame + copy) | 120x40 | 3121.6 | 518.4 | 6.0x | 2243.3 | 213.3 | 10.5x |  |
-| REPL refresh (feed + draw + frame + copy) | 236x80 | 11774.4 | 1386.3 | 8.5x | 8429.7 | 566.6 | 14.9x |  |
+| µs per call, YJIT | size | Ruby | Ruby VT, C grid | C | Ruby/C | (Ruby VT, C grid)/C | frame bytes |
+|---|---|---|---|---|---|---|---|
+| frame, every cell | 80x24 | 331.3 | 13.1 | 12.2 | 27.2x | 1.1x | 2297 |
+| frame, every cell | 120x40 | 746.5 | 16.8 | 18.0 | 41.5x | 0.9x | 5377 |
+| frame, every cell | 236x80 | 2909.8 | 57.2 | 62.4 | 46.6x | 0.9x | 19968 |
+| frame, 3 cells typed | 80x24 | 234.5 | 5.4 | 5.4 | 43.1x | 1.0x | 31 |
+| frame, 3 cells typed | 120x40 | 572.0 | 13.3 | 13.1 | 43.7x | 1.0x | 31 |
+| frame, 3 cells typed | 236x80 | 2433.5 | 51.1 | 51.4 | 47.3x | 1.0x | 31 |
+| frame, one line scrolled in | 80x24 | 444.1 | 14.7 | 15.1 | 29.3x | 1.0x | 1590 |
+| frame, one line scrolled in | 120x40 | 895.1 | 29.9 | 29.7 | 30.2x | 1.0x | 2632 |
+| frame, one line scrolled in | 236x80 | 3408.5 | 85.6 | 86.2 | 39.5x | 1.0x | 5159 |
+| lines (truecolor) | 80x24 | 98.2 | 11.8 | 10.1 | 9.7x | 1.2x |  |
+| lines (truecolor) | 120x40 | 216.8 | 27.8 | 21.1 | 10.3x | 1.3x |  |
+| lines (truecolor) | 236x80 | 796.2 | 92.5 | 81.3 | 9.8x | 1.1x |  |
+| VT#draw, every row | 80x24 | 568.2 | 72.7 | 7.4 | 76.9x | 9.8x |  |
+| VT#draw, every row | 120x40 | 1403.6 | 148.3 | 15.0 | 93.6x | 9.9x |  |
+| VT#draw, every row | 236x80 | 5350.8 | 438.3 | 54.9 | 97.5x | 8.0x |  |
+| REPL refresh (feed + draw + frame + copy) | 80x24 | 1052.3 | 112.3 | 22.0 | 47.9x | 5.1x |  |
+| REPL refresh (feed + draw + frame + copy) | 120x40 | 2248.5 | 218.3 | 42.4 | 53.0x | 5.2x |  |
+| REPL refresh (feed + draw + frame + copy) | 236x80 | 9748.5 | 579.5 | 154.2 | 63.2x | 3.8x |  |
+
+Without YJIT (same run, plain Ruby): VT#draw of every row 6.2 / 14.6 /
+60.0 µs in C vs 169 / 373 / 1196 µs for the Ruby VT into the C grid
+(20-27x), a REPL refresh 18 / 42 / 151 µs vs 256 / 530 / 1432 µs (9-14x).
 
 Reading it:
 
-- Frame encoding in C is 26-68x faster than Ruby; a whole 236x80 screen
+- Frame encoding in C is 27-69x faster than Ruby; a whole 236x80 screen
   is 57 µs in C and 2.9-3.9 ms in Ruby.  Scanning for changed cells is
-  most of the cost of a small change (3 typed cells: 51 µs in C, 2.3-2.9
+  most of the cost of a small change (3 typed cells: 51 µs in C, 2.4-3.0
   ms in Ruby at 236x80), so the frame cost tracks the screen size, not
   the change.
-- With the C grid, the Ruby VT is the rest of a refresh: VT#draw is
-  ~80% of a REPL refresh in C (455 of 567 µs at 236x80 with YJIT), and
-  VT#feed tops out at 0.7 MB/s for full-screen repaints (a TUI repainting
-  236x80 cells in truecolor, ~70 KB each, could repaint ~10 times a
-  second), 1.3-1.7 MB/s for Pry's line editing, 4.6-5.4 MB/s for plain
-  listings.  A C parser for the VT would be the next step if sharing
-  full-screen programs matters.
+- The C VT reads 76-142 MB/s (a 236x80 truecolor repaint, ~70 KB, in
+  about 0.6 ms; the Ruby VT took 100 ms), 14-225x the Ruby VT; colored
+  listings are the slowest (75 MB/s: a scrolled line's row is trimmed
+  into the scrollback and a fresh one made).  With both in C, a REPL
+  refresh at 236x80 is 154 µs, mostly the frame (86 µs) and the redraw
+  of every row after a scroll (55 µs): 4-14x faster than the Ruby VT
+  with the C grid.
 - In mb-sound's tiled screen (`bin/ui_demo.rb --tiles -s 20 --size
   45x120`, "Last Stop", YJIT, alternating runs, realtime with NullOutput,
   so the wall-clock numbers depend on the machine's load): painter CPU
@@ -132,6 +149,11 @@ Reading it:
   3.76 ms with `MB_SOUND_PLOT=ruby` (p99 2.3 / 4.2 vs 9.5 / 9.6 ms);
   painter GVL holds over 2 ms 40 / 70 vs 1185 / 967 in 20 s.  That
   comparison includes mb-sound's plot kernels, which stay in mb-sound.
+- A REPL flood in the same screen (`bin/ui_demo.rb --tiles --flood 20000
+  -s 18`: Pry printing 20 000 lines, 1.57 MB, into the pane; 2026-10-31,
+  3 alternating runs each): the pty reader's CPU was 36-59 ms with the C
+  VT vs 163-193 ms with `MB_TERM_NATIVE=0`; Pry's printing sets the pace
+  (25 000-32 000 lines a second either way).
 
 ## Sharing a REPL over a network (a prototype)
 
@@ -178,14 +200,17 @@ with permissions) instead of plain TCP and shared tokens, per-user
 accounts and an audit log, resize negotiation (the host's size is fixed;
 smaller viewers see the screen clipped), scrollback and copy for viewers,
 exact raw-mode joins (a late raw viewer gets the cells and cursor, not
-the program's modes like scroll regions), and a C VT parser for
-full-screen programs (above).
+the program's modes like scroll regions).  The VT itself is no longer
+the limit for full-screen programs (the C VT reads 120-140 MB/s of
+repaints; above).
 
 ## Running the specs
 
-The gem's specs run on their own (no mb-sound): from this directory,
-`bundle exec rspec` (it uses the parent repository's bundle), or `bundle
-exec rake spec:gems` from mb-sound's root.  `spec/boundary_spec.rb`
+The gem has its own Gemfile and lockfile, and its specs run on their own
+(no mb-sound): from this directory, `bundle install` once, then `bundle
+exec rake compile` (the C extension) and `bundle exec rspec`; or `bundle
+exec rake spec:gems` from mb-sound's root (which builds fast_term with
+mb-sound's extensions and runs the specs under this directory's bundle).  `spec/boundary_spec.rb`
 checks that the code reads only its own constants and Ruby's, requires
 only itself and the standard library, and loads in a Ruby without
 mb-sound or Bundler.

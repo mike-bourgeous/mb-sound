@@ -1,8 +1,10 @@
-# mb-term's Ruby grid (Cells) against its C grid (NativeCells), offline (CPU
-# time on one thread, no terminal): VT feed throughput, VT#draw into each
-# grid, and changed-cell frame encoding at three screen sizes.  Ruby and C
-# alternate within every round (the order flips each round) and the tables
-# show medians, so load from other processes hits both alike.
+# mb-term's Ruby layers (RubyVT, Cells) against its C ones (NativeVT,
+# NativeCells), offline (CPU time on one thread, no terminal): VT feed
+# throughput, VT#draw into each grid, and changed-cell frame encoding at
+# three screen sizes, for three stacks: all Ruby, the Ruby VT with the C
+# grid (mb-term before term-2's C VT), and all C.  The stacks alternate
+# within every round (the order rotates each round) and the tables show
+# medians, so load from other processes hits them alike.
 #
 #     ruby bench/term_bench.rb [ROUNDS]          # plain Ruby
 #     ruby --yjit bench/term_bench.rb [ROUNDS]   # with YJIT (mb-sound's bin/ scripts use it)
@@ -14,7 +16,7 @@
 $LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
 require 'mb/term'
 
-abort 'fast_term is not compiled (rake compile)' unless defined?(MB::Term::NativeCells)
+abort 'fast_term is not compiled (rake compile)' unless defined?(MB::Term::NativeCells) && defined?(MB::Term::NativeVT)
 
 ROUNDS = Integer(ARGV[0] || 7)
 CLOCK = Process::CLOCK_THREAD_CPUTIME_ID
@@ -61,32 +63,45 @@ REDRAW = Array.new(20) { |f|
 }.join.b.freeze
 
 SIZES = [[80, 24], [120, 40], [236, 80]].freeze
-IMPLS = { ruby: MB::Term::Cells, c: MB::Term::NativeCells }.freeze
+# [grid class, VT class] per stack
+IMPLS = {
+  ruby: [MB::Term::Cells, MB::Term::RubyVT],
+  mixed: [MB::Term::NativeCells, MB::Term::RubyVT],
+  c: [MB::Term::NativeCells, MB::Term::NativeVT],
+}.freeze
+VTS = { ruby: MB::Term::RubyVT, c: MB::Term::NativeVT }.freeze
+
+def rotated(h, round)
+  a = h.to_a
+  a.rotate(round % a.length)
+end
 
 results = Hash.new { |h, k| h[k] = [] }
 
-# VT feed (pure Ruby: the VT has no C), in 4 KB pieces like ReplHost's reader
+# VT feed, Ruby and C, in 4 KB pieces like ReplHost's reader
 feeds = { 'Pry transcript' => PRY, 'ls -la burst' => LS, 'full-screen redraws 236x80' => REDRAW }
 feeds.each do |name, bytes|
-  ROUNDS.times do
-    rows, cols = name.include?('236x80') ? [80, 236] : [40, 120]
-    vt = MB::Term::VT.new(rows, cols)
-    GC.start
-    t = cpu
-    i = 0
-    while i < bytes.bytesize
-      vt.feed(bytes.byteslice(i, 4096))
-      i += 4096
+  ROUNDS.times do |round|
+    rotated(VTS, round).each do |impl, vtk|
+      rows, cols = name.include?('236x80') ? [80, 236] : [40, 120]
+      vt = vtk.new(rows, cols)
+      GC.start
+      t = cpu
+      i = 0
+      while i < bytes.bytesize
+        vt.feed(bytes.byteslice(i, 4096))
+        i += 4096
+      end
+      results[[:feed, name, impl]] << (cpu - t)
     end
-    results[[:feed, name]] << (cpu - t)
   end
 end
 
 # Screens to encode: a VT holding the end of the ls burst (colored names)
 # drawn into a grid, the same after one more line scrolled in, and after a
 # few typed characters.
-def screens(klass, w, h)
-  vt = MB::Term::VT.new(h, w)
+def screens(klass, vtk, w, h)
+  vt = vtk.new(h, w)
   vt.feed(LS.byteslice(0, 400_000))
   vt.feed("\e[1;32m[1] pry(main)>\e[0m ")
   a = klass.new(w, h)
@@ -103,10 +118,9 @@ def screens(klass, w, h)
 end
 
 ROUNDS.times do |round|
-  order = round.even? ? IMPLS.to_a : IMPLS.to_a.reverse
   SIZES.each do |w, h|
-    order.each do |impl, klass|
-      vt, a, typed, scrolled = screens(klass, w, h)
+    rotated(IMPLS, round).each do |impl, (klass, vtk)|
+      vt, a, typed, scrolled = screens(klass, vtk, w, h)
       n = w * h > 10_000 ? 20 : 60
       results[[:frame_full, w, h, impl]] << per_run(n) { a.frame(nil, :truecolor) }
       results[[:frame_typed, w, h, impl]] << per_run(n * 10) { typed.frame(a, :truecolor) }
@@ -137,15 +151,16 @@ end
 yjit = defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
 puts "mb-term bench: Ruby #{RUBY_VERSION}#{yjit ? ' +YJIT' : ''}, #{ROUNDS} rounds (medians), CPU time"
 puts
-puts '| VT feed (Ruby) | bytes | ms | MB/s |'
-puts '|---|---|---|---|'
+puts '| VT feed | bytes | Ruby ms | Ruby MB/s | C ms | C MB/s | Ruby / C |'
+puts '|---|---|---|---|---|---|---|'
 feeds.each do |name, bytes|
-  s = median(results[[:feed, name]])
-  puts format('| %s | %d | %.1f | %.1f |', name, bytes.bytesize, s * 1000, bytes.bytesize / s / 1e6)
+  r = median(results[[:feed, name, :ruby]])
+  c = median(results[[:feed, name, :c]])
+  puts format('| %s | %d | %.1f | %.1f | %.2f | %.1f | %.0fx |', name, bytes.bytesize, r * 1000, bytes.bytesize / r / 1e6, c * 1000, bytes.bytesize / c / 1e6, r / c)
 end
 puts
-puts '| per call, µs | size | Ruby | C | Ruby / C | bytes |'
-puts '|---|---|---|---|---|---|'
+puts '| per call, µs | size | Ruby | Ruby VT, C grid | C | Ruby / C | Ruby VT, C grid / C | bytes |'
+puts '|---|---|---|---|---|---|---|---|'
 labels = {
   frame_full: 'frame, every cell', frame_typed: 'frame, 3 cells typed', frame_scroll: 'frame, one line scrolled in',
   lines: 'lines (truecolor)', draw: 'VT#draw, every row', refresh: 'REPL refresh (feed + draw + frame + copy)',
@@ -153,8 +168,9 @@ labels = {
 labels.each do |key, label|
   SIZES.each do |w, h|
     r = median(results[[key, w, h, :ruby]]) * 1e6
+    m = median(results[[key, w, h, :mixed]]) * 1e6
     c = median(results[[key, w, h, :c]]) * 1e6
     bytes = results[[{ frame_full: :bytes_full, frame_typed: :bytes_typed, frame_scroll: :bytes_scroll }[key], w, h]]&.first
-    puts format('| %s | %dx%d | %.1f | %.1f | %.1fx | %s |', label, w, h, r, c, r / c, bytes || '')
+    puts format('| %s | %dx%d | %.1f | %.1f | %.1f | %.1fx | %.1fx | %s |', label, w, h, r, m, c, r / c, m / c, bytes || '')
   end
 end

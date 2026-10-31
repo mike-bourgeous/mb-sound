@@ -17,9 +17,11 @@ require_relative 'term/viewports/loader'
 require_relative 'term/terminal'
 
 module MB
-  # A terminal toolkit in pure Ruby: a cell grid with SGR encoding and
-  # changed-cell frames (Cells), a terminal model for what programs write
-  # (VT, plus Screen for replaying frames), the real terminal's modes
+  # A terminal toolkit in Ruby (with C twins of the grid and the VT, the
+  # fast_term extension, when compiled): a cell grid with SGR encoding and
+  # changed-cell frames (Cells, NativeCells), a terminal model for what
+  # programs write (VT: RubyVT, NativeVT; plus Screen for replaying
+  # frames), the real terminal's modes
   # (Terminal), input decoding and a mode router (Input), a pty host for a
   # REPL or any command (Input::ReplHost), split-tree layouts (Viewports),
   # color themes (Themes), and a Prism walker for data files (DataFile).

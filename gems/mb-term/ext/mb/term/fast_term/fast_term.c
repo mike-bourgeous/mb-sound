@@ -11,6 +11,9 @@
  * written to a file descriptor without the GVL).  MB::Term::NativeCells
  * (native.rb) gives it Cells' keyword interface.
  *
+ * FastTerm::VT (vt.c) is the native terminal model, the mirror of
+ * MB::Term::RubyVT (MB::Term::NativeVT in vt.rb).
+ *
  * Moved from mb-sound's fast_ui (term-extract-1, 2026-10-29), which keeps
  * the plot kernels and Grid#compose in a subclass (MB::Sound::FastUI::Grid).
  */
@@ -28,6 +31,7 @@
 #include <unistd.h>
 
 #include "mb_term_grid.h"
+#include "fast_term.h"
 
 static VALUE cGrid;
 
@@ -796,6 +800,14 @@ struct mb_term_grid *mb_term_grid_get(VALUE self)
 	return get_grid(self);
 }
 
+struct mb_term_grid *mb_term_grid_or_null(VALUE v)
+{
+	if (!rb_typeddata_is_kind_of(v, &grid_type)) {
+		return NULL;
+	}
+	return get_grid(v);
+}
+
 void Init_fast_term(void)
 {
 #ifdef HAVE_RB_EXT_RACTOR_SAFE
@@ -821,4 +833,6 @@ void Init_fast_term(void)
 	rb_define_method(cGrid, "to_text", grid_text, 1);
 	rb_define_method(cGrid, "frame", grid_frame, 5);
 	rb_define_method(cGrid, "write_frame", grid_write_frame, 6);
+
+	mb_term_init_vt(mFastTerm);
 }
