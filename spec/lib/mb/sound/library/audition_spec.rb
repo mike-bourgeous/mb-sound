@@ -60,6 +60,18 @@ RSpec.describe(MB::Sound::Library::Audition, :aggregate_failures) do
     end
   end
 
+  it 'starts on the next beat (maintainer, 2026-10-30)' do
+    s = session
+    MB::Sound::Session.with_context(session: s) do
+      MB::Sound.bg(:pulse, MB::Sound.seq(MB::Sound::C3).n4.loop.tone.sine.at(-30.db) * 1, on: :now)
+      5.times { s.process_buffer } # (0.083 s into the first beat at 120 BPM)
+      r = MB::Sound.audition(MB::Sound::L.inst.dnb.dnb_sub)
+      expect(r.change.to_s).to eq('bg :audition lands 1:2 (queued)')
+      expect(r.to_s).to include('on MAIN at -6 dB')
+      MB::Sound.audition(:off)
+    end
+  end
+
   it 'takes names, and explains ambiguous and unknown ones' do
     expect(described_class.entry_for(:tr909).head_path).to eq('L.kit.tr909')
     expect { described_class.entry_for(:dnb) }.to raise_error(ArgumentError, /audition :dnb: \d+ entries are named or tagged dnb \(L\./)

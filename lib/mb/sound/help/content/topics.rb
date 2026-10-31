@@ -1297,9 +1297,9 @@ module MB
         `help :sets`) and from `play L.inst.x` (a demo phrase).  Effects
         go after a sound: `sig.then(&L.fx.hall)`, or on a bus; `play
         L.fx.hall` plays a demo phrase through one.  `audition L.inst.x`
-        plays an entry as the player :audition: on CUE when the output has
-        it, else on MAIN 6 dB down; another replaces it, `audition off`
-        stops it.  In `ui :sound` the library picker (NAV l) does the same
+        plays an entry as the player :audition from the next beat: on CUE
+        when the output has it, else on MAIN 6 dB down; another replaces
+        it, `audition off` stops it.  In `ui :sound` the library picker (NAV l) does the same
         from the keys: / finds as you type, a auditions, Enter loads the
         entry into the inspected track at its launch point (knobs you
         turned carry), e puts the line on the console to edit.  The

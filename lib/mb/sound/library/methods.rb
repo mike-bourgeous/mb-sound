@@ -82,7 +82,8 @@ module MB
       # effect or mastering chain on a demo phrase, a resonator's strike
       # (Library::Audition).  On CUE when the output has it
       # (Session#cue_heard?: CUE channels, or cue_output :split/:phones),
-      # else on MAIN at Audition::MAIN_GAIN (-6 dB), starting now.  Another
+      # else on MAIN at Audition::MAIN_GAIN (-6 dB), starting on the next
+      # beat (the maintainer, 2026-10-30), so it plays in time with the set.  Another
       # audition replaces it; `audition off` stops it.  The library
       # picker's `a` key runs this line (ui :sound).  Returns an
       # Audition::Started (one line), or the stop's journal entries.
@@ -106,13 +107,13 @@ module MB
         g = Playable.graph(Library::Audition.playable(e))
         if s.cue_heard?
           stop(:audition) if playing.include?(:audition)
-          change = cue(:audition, g)
+          change = cue(:audition, g, on: :beat)
           where = :cue
         else
           uncue(:audition) if playing.include?(:"audition/cue")
           gain = Library::Audition::MAIN_GAIN.to_f
           quiet = Playable::Graph.new(nodes: g.nodes.map { |n| n * gain }, description: g.description, ends: g.ends, note: g.note)
-          change = bg(:audition, quiet, on: :now)
+          change = bg(:audition, quiet, on: :beat)
           where = :main
         end
         Library::Audition::Started.new(path: e.head_path, what: g.description.delete_prefix("#{e.head_path} "), where: where, change: change)
