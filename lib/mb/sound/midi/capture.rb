@@ -23,6 +23,16 @@ module MB
       # plays in phase; maintainer, 2026-10-13: keep timeline phase), less
       # the window's start otherwise (and for +align: :launch+ loops).  The clip is
       # Clip#performed? (its velocities are as played).
+      #
+      # Controllers (+cc:+, gen-midi-2; maintainer 2026-10-30: "Option to
+      # keep"): false (the default) keeps notes only; true or :steps keeps
+      # the window's CCs (except the sustain pedal while it holds notes, and
+      # Sequence::ControlLane::SKIPPED_CC), pitch bend, and pressure as
+      # Sequence::ControlLanes at the same clip positions as the notes,
+      # each lane's value from before the window (events before +from+ in
+      # +events+) chased to the window's start; :fit fits them
+      # (Clip#fit_controls); an Array keeps some (CC numbers and
+      # :bend/:pressure/:poly_pressure).
       module Capture
         # How early (whole notes) a note may start before the window and
         # still count as its downbeat: a 64th note (31 ms at 120 BPM).
@@ -36,7 +46,8 @@ module MB
         # (starts are positions mod +length+), or from where it launches
         # (starts are offsets into the window, so it plays what was played
         # first wherever and whenever it launches).
-        def self.clip(events, from:, length:, grace: GRACE, channel: nil, sustain: true, loop: true, align: :timeline)
+        def self.clip(events, from:, length:, grace: GRACE, channel: nil, sustain: true, loop: true, align: :timeline, cc: false)
+          raise ArgumentError, "cc: is false, true (or :steps), :fit, or an Array of CC numbers and :bend/:pressure/:poly_pressure (got #{cc.inspect})" unless Sequence::ControlLane.selection?(cc)
           from = from.to_r
           length = length.to_r
           grace = grace.to_r
@@ -80,7 +91,10 @@ module MB
               end
 
             when :cc
-              next unless sustain && e.note == 64
+              # (the pedal's state from before the window isn't known
+              # without controller history, so notes come out the same
+              # whatever +events+ holds from before)
+              next unless sustain && e.note == 64 && pos >= start
               down = e.value >= 0.5
               if pedal[e.channel] && !down
                 (pedaled[e.channel] || []).dup.each { |k| finish.call(k, pos) }
@@ -100,7 +114,9 @@ module MB
             # before, 2026-10-13); else offsets into the window
             Sequence::Event.new(start: (phase ? p : p - from) % length, length: MB::M.max(len, 0r), value: note, velocity: velocity)
           }
-          Sequence::Clip.new(seq_events, length: length, loop: loop, align: loop ? align : :timeline, performed: true)
+          lanes = cc ? Sequence::ControlLane.from_events(events, start, stop, cc: cc, sustain: sustain, channel: channel, length: length) { |p| (phase ? p : p - from) % length } : []
+          clip = Sequence::Clip.new(seq_events, length: length, loop: loop, align: loop ? align : :timeline, performed: true, controls: lanes)
+          cc == :fit ? clip.fit_controls : clip
         end
       end
     end

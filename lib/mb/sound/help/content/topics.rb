@@ -1221,7 +1221,9 @@ module MB
         The take logs every line and where each change landed (`take.save`
         replays it exactly).  `rec`/`capture` record MIDI into armed tracks
         (loops follow the timeline's phase; `align: :launch` starts from
-        what you played first); an armed track's live monitor is its own
+        what you played first; `cc: true` keeps the mod wheel, other CCs,
+        bend, and pressure in the clip, `cc: :split` in a clip of their own,
+        `captures[:lead_1_cc]`); an armed track's live monitor is its own
         player, :"name/live", which `stop :name` leaves playing and
         `disarm` stops.  `rec_audio` records the master bus to a file;
         `render` bounces graphs offline (`render 'drop.flac', from: :drop,

@@ -89,4 +89,83 @@ RSpec.describe(MB::Sound::MIDI::Capture) do
   it 'refuses empty windows' do
     expect { MB::Sound::MIDI::Capture.clip([], from: 0, length: 0) }.to raise_error(ArgumentError, /positive/)
   end
+
+  describe 'controller lanes (cc:, gen-midi-2)' do
+    def cc(number, raw, ch: 0)
+      ev.parse([0xb0 | ch, number, raw])
+    end
+
+    def bend(raw14)
+      ev.parse([0xe0, raw14 & 0x7f, raw14 >> 7])
+    end
+
+    def lanes(clip)
+      clip.controls.to_h { |l| [l.name, l.points.map { |p, v| [p, (v * 127).round] }] }
+    end
+
+    # Bar 2 of a 2-bar timeline loop (window 1...3): a CC 1 move before
+    # the window (chased), moves inside it, the pedal, a bend, and a
+    # bank select (skipped)
+    let(:events) {
+      [
+        [1/2r, cc(1, 20)], [1/2r, pedal(true)], [3/4r, pedal(false)],
+        [1r, on(60)], [1 + 1/4r, cc(1, 40)], [1 + 1/2r, off(60)], [1 + 1/2r, cc(0, 3)],
+        [2r, pedal(true)], [2 + 1/4r, cc(74, 100)], [2 + 1/2r, bend(12288)], [2 + 3/4r, pedal(false)], [2 + 3/4r, cc(1, 90)],
+      ]
+    }
+
+    it 'keeps notes only by default, and the same notes whatever it keeps' do
+      plain = MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2)
+      expect(plain.controls).to eq([])
+      [true, :steps, :fit, [1]].each do |opt|
+        with = MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2, cc: opt)
+        expect(summary(with)).to eq(summary(plain)), opt.inspect
+      end
+      # (the pedal held from before the window doesn't hold the window's notes, with or without lanes)
+      expect(summary(plain)).to eq([[1r, 1/2r, 60, 100 / 127.0]])
+    end
+
+    it 'keeps CCs, bend, and pressure at the notes\' clip positions with cc: true, chasing values from before the window and wrapping a timeline loop' do
+      clip = MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2, cc: true)
+      g = MB::Sound::MIDI::Capture::GRACE
+      # Positions are timeline phases (pos mod 2), like the notes: the
+      # window's start (1 - grace) is phase 1 - grace, so 1's chased 20
+      # lands there, and phase 0 gets what played at 2 (still 40)
+      expect(lanes(clip)).to eq(
+        cc1: [[0r, 40], [3/4r, 90], [1 - g, 20], [5/4r, 40]],
+        cc74: [[1/4r, 100]],
+        bend: [[1/2r, 64]],
+      )
+      expect(clip.controls.map(&:type)).to eq(%i[cc cc bend])
+      expect(clip.control(:bend).points.first.last).to be_within(1e-3).of(0.5)
+      # No pedal lane while the pedal holds notes; with sustain: false it is a lane
+      expect(clip.control(64)).to be_nil
+      dry = MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2, cc: true, sustain: false)
+      expect(lanes(dry)[:cc64]).to eq([[0r, 127], [3/4r, 0], [1 - g, 0]])
+
+      # A launch-aligned loop: offsets into the window, the chased value at 0
+      launch = MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2, cc: true, align: :launch)
+      expect(lanes(launch)[:cc1]).to eq([[0r, 20], [1/4r, 40], [7/4r, 90], [2 - g, 20]])
+      expect(lanes(launch)[:cc1].length).to eq(4)
+
+      # Some lanes, fitted lanes, and mistakes
+      expect(lanes(MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2, cc: [74, :bend])).keys).to eq(%i[cc74 bend])
+      expect(MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2, cc: :fit).controls.map(&:name)).to eq(%i[cc1 cc74 bend])
+      expect { MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2, cc: :split) }.to raise_error(ArgumentError, /cc: is false, true/)
+    end
+
+    it 'splits a clip into its notes and a clip of its lanes (Clip#split_controls)' do
+      clip = MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2, cc: true)
+      notes, moves = clip.split_controls
+      expect(notes.controls).to eq([])
+      expect(summary(notes)).to eq(summary(clip))
+      expect(moves.events).to eq([])
+      expect(moves.controls).to eq(clip.controls)
+      expect([moves.length, moves.looping?, moves.align]).to eq([clip.length, true, clip.align])
+      again = notes.with_controls(moves.controls)
+      expect([summary(again), again.controls]).to eq([summary(clip), clip.controls])
+      plain = MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2)
+      expect(plain.split_controls).to eq([plain, nil])
+    end
+  end
 end
