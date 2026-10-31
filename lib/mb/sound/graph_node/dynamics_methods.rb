@@ -123,6 +123,38 @@ module MB
           [args, kwargs, changed]
         end
 
+        # Live threshold and ratio (delays-2, 2026-10-31): a node threshold
+        # or ratio moves the compander's curve every sample (Dynamics'
+        # +shift:+ and +scale:+) instead of fixing it when the node builds.
+        # The curve is built at +ref_threshold+ (dB) for a node threshold,
+        # and at +ref_slope+ for a node ratio.  Returns [threshold dB,
+        # slope, shift, scale]: numbers for numbers (shift 0, scale 1:
+        # the curve as before, the same samples), else nodes.  A threshold
+        # node gives linear levels (a knob of `-20.db` reads 0.1); a ratio
+        # node gives ratios (+:compress+: 1/ratio, scaled from a flat top;
+        # +:expand+: the ratio below the threshold, scaled from 2:1).
+        def self.live_curve(threshold, ratio, kind)
+          live_t = threshold.respond_to?(:sample)
+          live_r = ratio.respond_to?(:sample)
+          t = live_t ? 0.0 : level_db(threshold, 'threshold')
+          shift = live_t ? threshold.aclip(Dynamics::FLOOR_LIN, Float::INFINITY).log10 * 20 : 0
+          case kind
+          when :compress
+            slope = live_r ? 0.0 : ratio_slope(ratio)
+            scale = live_r ? 1 - 1 / ratio.aclip(1, Float::INFINITY) : 1
+          when :expand
+            unless live_r || (ratio.is_a?(Numeric) && ratio >= 1 && ratio.finite?)
+              raise ArgumentError, "Expander ratio must be at least 1 (got #{ratio.inspect})"
+            end
+            slope = live_r ? 2.0 : ratio.to_f
+            scale = live_r ? ratio.aclip(1, Float::INFINITY) - 1 : 1
+          else
+            slope = nil
+            scale = 1
+          end
+          [t, slope, shift, scale]
+        end
+
         # A compressor ratio as a slope above the threshold (1/ratio).
         def self.ratio_slope(ratio, name = 'ratio')
           raise ArgumentError, "#{name} must be a number of at least 1 (got #{ratio.inspect})" unless ratio.is_a?(Numeric) && ratio >= 1
@@ -152,16 +184,24 @@ module MB
         # +mix+ (0..1, default 1) blends the compressed signal with the
         # plain one (parallel or "New York" compression), phase-aligned.
         #
+        # +threshold+, +ratio+, and +mix+ may be nodes (knobs; delays-2):
+        # read every sample, so a bound knob turns them without a rebuild
+        # (a threshold node gives linear levels, as a knob of `-20.db` does;
+        # not with upward compression).  +makeup: :auto+ follows them.
+        #
         # Examples (bin/sound.rb):
         #     play file_input('drums.flac').compress(threshold: -20.db, ratio: 4, attack: 10.ms, release: 100.ms, makeup: :auto)
         #     play voice.compress(threshold: -30.db, ratio: 3, upward_threshold: -50.db, upward_ratio: 2)
         def compress(threshold: -20.db, ratio: 4, knee: 6, attack: 0.005, release: 0.1, hold: 0, makeup: 0.db,
                      sidechain: nil, detector: :peak, rms: 0.01, link: true, lookahead: 0,
                      upward_threshold: nil, upward_ratio: 2, upward_attack: 0.001, max_gain: 24.db, mix: 1)
-          t = DynamicsMethods.level_db(threshold, 'threshold')
-          slope = DynamicsMethods.ratio_slope(ratio)
+          live = threshold.respond_to?(:sample) || ratio.respond_to?(:sample)
+          if live && upward_threshold
+            raise ArgumentError, 'compress: a threshold or ratio node (a knob) works without upward compression (give upward_threshold: nil, or numbers)'
+          end
+          t, slope, shift, scale = DynamicsMethods.live_curve(threshold, ratio, :compress)
           corners = [[t, 1.0, slope]]
-          desc = "#{dyn_fmt_db(t)} dB #{dyn_fmt_ratio(ratio)}"
+          desc = "#{threshold.respond_to?(:sample) ? 'live' : "#{dyn_fmt_db(t)} dB"} #{ratio.respond_to?(:sample) ? 'live ratio' : dyn_fmt_ratio(ratio)}"
           if upward_threshold
             tu = DynamicsMethods.level_db(upward_threshold, 'upward_threshold')
             raise ArgumentError, 'upward_threshold must be below threshold' unless tu < t
@@ -173,6 +213,7 @@ module MB
             outputs, transfer: transfer, down: attack, up: release, hold: hold, hold_up: true,
             detector: detector, rms: rms, link: link, sidechain: sidechain, lookahead: lookahead,
             makeup: dyn_makeup(makeup), max_gain: upward_threshold ? DynamicsMethods.gain_db(max_gain, 'max_gain') : 0.0, boost: upward_attack, mix: mix,
+            shift: shift, scale: scale,
           ))
         end
         alias compressor compress
@@ -186,15 +227,15 @@ module MB
         #     play noisy.expand(threshold: -45.db, ratio: 3, range: -30.db)
         def expand(threshold: -40.db, ratio: 2, knee: 6, range: -40.db, attack: 0.001, release: 0.1, hold: 0, makeup: 0.db,
                    sidechain: nil, detector: :peak, rms: 0.01, link: true, lookahead: 0, mix: 1)
-          t = DynamicsMethods.level_db(threshold, 'threshold')
-          raise ArgumentError, "Expander ratio must be at least 1 (got #{ratio.inspect})" unless ratio.is_a?(Numeric) && ratio >= 1 && ratio.finite?
+          t, slope, shift, scale = DynamicsMethods.live_curve(threshold, ratio, :expand)
           r = DynamicsMethods.level_db(range, 'range', zero: true)
           raise ArgumentError, 'range must be at most 0 dB' if r > 0
-          transfer = Dynamics::Transfer.corners(t, [[t, ratio.to_f, 1.0]], knee: knee, description: "expand #{dyn_fmt_db(t)} dB 1:#{dyn_fmt_ratio(ratio, false)}, range #{dyn_fmt_db(r)} dB")
+          desc = "expand #{threshold.respond_to?(:sample) ? 'live' : "#{dyn_fmt_db(t)} dB"} #{ratio.respond_to?(:sample) ? 'live ratio' : "1:#{dyn_fmt_ratio(ratio, false)}"}, range #{dyn_fmt_db(r)} dB"
+          transfer = Dynamics::Transfer.corners(t, [[t, slope, 1.0]], knee: knee, description: desc)
           finish_dynamics(Dynamics.new(
             outputs, transfer: transfer, down: release, up: attack, hold: hold, hold_up: false,
             detector: detector, rms: rms, link: link, sidechain: sidechain, lookahead: lookahead,
-            makeup: dyn_makeup(makeup), min_gain: r, max_gain: 0.0, mix: mix,
+            makeup: dyn_makeup(makeup), min_gain: r, max_gain: 0.0, mix: mix, shift: shift, scale: scale,
           ))
         end
         alias expander expand
@@ -246,12 +287,12 @@ module MB
           SidechainMethods.check_impulse_duck(sidechain, attack) if sidechain.is_a?(Symbol) && only.nil?
           sidechain = BusTap.from(sidechain, only: only) if sidechain.is_a?(Symbol)
           a = -Decibels.reduction_db(amount, 'amount')
-          t = DynamicsMethods.level_db(threshold, 'threshold')
-          transfer = Dynamics::Transfer.corners(t, [[t, 1.0, 0.0]], knee: knee, description: "duck #{dyn_fmt_db(a)} dB above #{dyn_fmt_db(t)} dB")
+          t, _, shift, = DynamicsMethods.live_curve(threshold, nil, :duck)
+          transfer = Dynamics::Transfer.corners(t, [[t, 1.0, 0.0]], knee: knee, description: "duck #{dyn_fmt_db(a)} dB above #{threshold.respond_to?(:sample) ? 'a live threshold' : "#{dyn_fmt_db(t)} dB"}")
           finish_dynamics(Dynamics.new(
             outputs, transfer: transfer, down: attack, up: release, hold: hold, hold_up: true,
             detector: detector, rms: rms, link: link, sidechain: sidechain, lookahead: lookahead,
-            min_gain: a, max_gain: 0.0,
+            min_gain: a, max_gain: 0.0, shift: shift,
           ))
         end
         alias sidechain_duck duck

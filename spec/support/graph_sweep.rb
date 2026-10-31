@@ -330,6 +330,12 @@ module GraphSweep
       ['reverb parameter nodes', ->(c) {
         c.sig.reverb(room_size: 0.2, decay: 0.4, mod: { depth: c.mod(0, 0.001), rate: c.mod(0.2, 2) }, lowpass: c.mod(500, 8000), freeze: c.mod(0, 1), stretch: c.mod(0.8, 1.2), shimmer: c.mod(0, 1), drive: c.mod(0, 3), drive_mode: :fold, duck: c.mod(0, 12), gate: c.mod(0, 0.1))
       }],
+      ['reverb gain nodes (live mix, wet, dry, level, predelay; delays-2)', ->(c) {
+        c.stereo_sig.reverb(:room, mix: c.mod(0, 1), level: c.mod(0.5, 1), predelay: c.mod(0.0005, 0.002)).mixdown + c.sig.reverb(:room, wet: c.mod(0, 1), dry: c.mod(0.2, 1))
+      }],
+      ['tape_echo live settings (tone, low_cut, drive, wow, flutter nodes; delays-2)', ->(c) {
+        c.sig.tape_echo(:reel, time: 0.002, tone: c.mod(800, 6000), low_cut: c.mod(50, 400), drive: c.mod(0, 3), wow: c.mod(0, 0.5), flutter: c.mod(0, 0.1))
+      }],
       ['chorus', ->(c) { c.stereo_sig.chorus(:juno2) }],
       ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60.db) }],
 
@@ -340,6 +346,9 @@ module GraphSweep
       }],
       ['compand cubic, expand, noise_gate, duck', ->(c) {
         c.sig.compand({ -60.db => -70.db, -20.db => -20.db, 0.db => -10.db }, interpolation: :cubic).expand(threshold: -30.db).noise_gate(threshold: -60.db).duck(c.trigger, amount: -6.db)
+      }],
+      ['compress, expand, duck with live threshold, ratio, mix (delays-2)', ->(c) {
+        c.stereo_sig.compress(threshold: c.mod(0.02, 0.3), ratio: c.mod(1, 8), mix: c.mod(0, 1), makeup: :auto).mixdown.expand(threshold: c.mod(0.001, 0.05), ratio: c.mod(1, 4)).duck(c.trigger, threshold: c.mod(0.01, 0.2))
       }],
       ['compand unlinked with shaped segments', ->(c) { c.stereo_sig.compand([[-60.db, -70.db, :smooth], [-20.db, -20.db], [0.db, -8.db]], link: false) }],
       ['limit (true peak, unlinked) after squeeze', ->(c) { c.stereo_sig.squeeze(:eleven, depth: 0.5).limit(ceiling: -3.db, link: false) }],

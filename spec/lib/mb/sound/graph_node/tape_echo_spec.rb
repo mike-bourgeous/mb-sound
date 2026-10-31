@@ -84,6 +84,21 @@ RSpec.describe(MB::Sound::GraphNode::TapeEcho) do
     expect(220.hz.saw.tape_echo(:ping_pong).channel_count).to eq(2)
   end
 
+  # (delays-2: live value settings, knobs turn them without a rebuild)
+  it 'takes nodes for tone, low_cut, drive, wow, and flutter: within float rounding of the numbers' do
+    make = ->(**o) { MB::Sound.with_seed(4) { render((220.hz.saw.at(0.5) * MB::Sound.adsr(0, 0.05, 0, 0)).tape_echo(:dub, time: 0.03, **o), [800], 12_000)[0] } }
+    ref = make.()
+    { tone: 1800.0, low_cut: 300.0, drive: 2.5, wow: 0.5, flutter: 0.08 }.each do |k, v|
+      out = make.(k => v.constant)
+      expect((out - ref).abs.max).to be < 1e-5, "#{k}: #{(out - ref).abs.max}"
+    end
+    darker = make.(tone: 600.constant)
+    expect((darker - ref).abs.max).to be > 0.01
+    # (a drive node at 0 is nearly clean, divided by at least MIN_LIVE_DRIVE)
+    clean = make.(drive: 0)
+    expect((make.(drive: 0.constant) - clean).abs.max).to be < 1e-2
+  end
+
   it 'prints itself back as Ruby' do
     expect(220.hz.saw.tape_echo(:dub, feedback: 0.6).to_ruby).to eq('220.hz.saw.tape_echo(:dub, feedback: 0.6)')
   end

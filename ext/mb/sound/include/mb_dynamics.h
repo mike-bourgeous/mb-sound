@@ -44,17 +44,24 @@ enum dyn_param {
 	DP_HOLD_UP, // 1: hold delays rising gain (compressors), 0: falling (gates)
 	DP_LINK, // 1: one detector for every channel
 	DP_LOOKAHEAD, // whole samples of audio delay
-	DP_MIX, // parallel mix: gain = mix * gain + (1 - mix)
+	DP_AUTO_MAKEUP, // 1: the makeup follows DT_SHIFT and DT_SCALE (half the gain change at 0 dBFS back), 0: DP_MAKEUP
 	DP_COUNT
 };
 
-// Compand time inputs, in samples (see ruby_compand).
+// Compand signal inputs (see ruby_compand): times in samples, then the
+// live controls (delays-2, 2026-10-31), read every sample.  A curve built
+// for one threshold and ratio moves with them: the gain at detector level
+// L is (curve(L - shift) - (L - shift)) * scale, so shift 0 and scale 1
+// (numbers) give the curve's own gains exactly.
 enum dyn_time {
 	DT_RMS,
 	DT_DOWN,
 	DT_UP,
 	DT_BOOST, // fall time while the gain is above 0 dB (an upward boost)
 	DT_HOLD,
+	DT_SHIFT, // dB the curve moves up (a threshold change)
+	DT_SCALE, // factor on the curve's gain change (a ratio change)
+	DT_MIX, // parallel mix, clamped to 0..1: gain = mix * gain + (1 - mix)
 	DT_COUNT
 };
 
@@ -105,7 +112,7 @@ static inline void mb_dyn_compand(float *const *out, long nch, const struct mb_s
 	int hold_up = par[DP_HOLD_UP] != 0;
 	int link = par[DP_LINK] != 0;
 	long la = (long)par[DP_LOOKAHEAD];
-	double mix = par[DP_MIX];
+	int auto_makeup = par[DP_AUTO_MAKEUP] != 0;
 	long ndet = link ? 1 : nch;
 	double gain[ndet];
 
@@ -119,7 +126,10 @@ static inline void mb_dyn_compand(float *const *out, long nch, const struct mb_s
 	double last_t[DT_COUNT] = { NAN, NAN, NAN, NAN, NAN };
 	double coef[DT_COUNT] = { 0, 0, 0, 0, 0 };
 	double last_gdb = NAN;
+	double last_mix = NAN;
 	double last_glin = 1.0;
+	double last_shift = NAN;
+	double last_scale = NAN;
 
 	for (long i = 0; i < n; i++) {
 		for (long t = 0; t < DT_HOLD; t++) {
@@ -130,6 +140,28 @@ static inline void mb_dyn_compand(float *const *out, long nch, const struct mb_s
 			}
 		}
 		double hold = mb_signal_at(&tim[DT_HOLD], i);
+		double shift = mb_signal_at(&tim[DT_SHIFT], i);
+		double scale = mb_signal_at(&tim[DT_SCALE], i);
+		double mix = mb_signal_at(&tim[DT_MIX], i);
+		if (!(mix >= 0.0)) {
+			mix = 0.0;
+		} else if (mix > 1.0) {
+			mix = 1.0;
+		}
+		if (auto_makeup && (shift != last_shift || scale != last_scale)) {
+			// Half the gain change at 0 dBFS back, as
+			// DynamicsMethods#dyn_makeup computes it for numbers
+			double g0 = (mb_dyn_curve(seg, nseg, -shift) + shift) * scale;
+			if (g0 < min_gain) {
+				g0 = min_gain;
+			}
+			if (g0 > max_gain) {
+				g0 = max_gain;
+			}
+			makeup = -0.5 * g0;
+		}
+		last_shift = shift;
+		last_scale = scale;
 
 		for (long d = 0; d < ndet; d++) {
 			double *ds = st + d * DYN_DET_STATE;
@@ -153,7 +185,8 @@ static inline void mb_dyn_compand(float *const *out, long nch, const struct mb_s
 				level = m > DYN_FLOOR_LIN ? 20.0 * log10(m) : DYN_FLOOR_DB;
 			}
 
-			double g = mb_dyn_curve(seg, nseg, level) - level;
+			double x = level - shift;
+			double g = (mb_dyn_curve(seg, nseg, x) - x) * scale;
 			if (g < min_gain) {
 				g = min_gain;
 			}
@@ -185,8 +218,9 @@ static inline void mb_dyn_compand(float *const *out, long nch, const struct mb_s
 			ds[1] = gs;
 
 			double gdb = gs + makeup;
-			if (gdb != last_gdb) {
+			if (gdb != last_gdb || mix != last_mix) {
 				last_gdb = gdb;
+				last_mix = mix;
 				last_glin = mix * pow(10.0, gdb / 20.0) + (1.0 - mix);
 			}
 			gain[d] = last_glin;

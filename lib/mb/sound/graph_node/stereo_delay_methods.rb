@@ -123,6 +123,11 @@ module MB
         # +:spread+ - the ping-pong's echo width (1 hard left and right)
         # +:seed+ - the wow drift's seed (default: drawn from MB::Sound.seed)
         #
+        # Every value setting (+:time+, +:feedback+, +:mix+, +:tone+,
+        # +:low_cut+, +:drive+, +:wow+, +:flutter+) also takes a node, so a
+        # bound knob turns it without a rebuild (delays-2; a +:drive+ node
+        # at 0 is nearly clean, see TapeEcho::MIN_LIVE_DRIVE).
+        #
         # Examples (bin/sound.rb):
         #     play keys.tape_echo                       # :reel
         #     play keys.tape_echo(:dub, feedback: 0.8)

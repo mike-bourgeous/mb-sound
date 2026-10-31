@@ -131,25 +131,55 @@ module MB
         # The delay time +time+ plus one wow and flutter wobble per seed in
         # +seeds+ (tape passes), in seconds (a Duration follows the tempo
         # through Sequence::TempoNode), or +time+ itself without wobble.
+        # Depths are ms: numbers, or nodes (knobs) that move them live
+        # (delays-2; a node depth always builds its wobble, scaling a
+        # unit-depth drift or sine).
         def self.wobbled(time, s, seeds)
-          wow = s[:wow].to_f / 1000.0
-          flutter = s[:flutter].to_f / 1000.0
-          return time unless wow > 0 || flutter > 0
+          wow = s[:wow]
+          flutter = s[:flutter]
+          live_wow = wow.respond_to?(:sample)
+          live_flutter = flutter.respond_to?(:sample)
+          wow = wow.to_f / 1000.0 unless live_wow
+          flutter = flutter.to_f / 1000.0 unless live_flutter
+          return time unless live_wow || live_flutter || wow > 0 || flutter > 0
 
           t = Sequence::TempoNode.seconds_source(time)
           seeds.each do |sd|
-            t = t + MB::Sound.drift(WOW_RATE, range: -wow..wow, seed: sd) if wow > 0
-            t = t + FLUTTER_RATE.hz.sine.at(flutter) if flutter > 0
+            if live_wow
+              t = t + MB::Sound.drift(WOW_RATE, range: -1.0..1.0, seed: sd) * (wow * 0.001)
+            elsif wow > 0
+              t = t + MB::Sound.drift(WOW_RATE, range: -wow..wow, seed: sd)
+            end
+            if live_flutter
+              t = t + FLUTTER_RATE.hz.sine * (flutter * 0.001)
+            elsif flutter > 0
+              t = t + FLUTTER_RATE.hz.sine.at(flutter)
+            end
           end
           t
         end
 
+        # The smallest drive a live +:drive:+ node divides by: drive 0 then
+        # reads as this nearly linear drive (softclip's small-signal gain is
+        # 1), where a number 0 leaves the saturation out.
+        MIN_LIVE_DRIVE = 1e-3
+
         # The tape's color on +sig+ (one pass): a highpass and a lowpass
-        # for its band, then saturation.
+        # for its band, then saturation.  Numbers fix a setting when the
+        # tape builds (0 or nil leaves that stage out); nodes (knobs) move
+        # it live (delays-2): cutoffs into the filters, a drive node into
+        # `(sig * drive).softclip / drive` (at least MIN_LIVE_DRIVE).
         def self.color(sig, s)
-          sig = sig.filter(:highpass, cutoff: s[:low_cut], quality: 0.5**0.5) if s[:low_cut] && s[:low_cut] > 0
-          sig = sig.filter(:lowpass, cutoff: s[:tone], quality: 0.5**0.5) if s[:tone] && s[:tone] > 0
-          drive = s[:drive].to_f
+          lc = s[:low_cut]
+          tone = s[:tone]
+          sig = sig.filter(:highpass, cutoff: lc, quality: 0.5**0.5) if lc.respond_to?(:sample) || (lc && lc > 0)
+          sig = sig.filter(:lowpass, cutoff: tone, quality: 0.5**0.5) if tone.respond_to?(:sample) || (tone && tone > 0)
+          drive = s[:drive]
+          if drive.respond_to?(:sample)
+            d = drive.aclip(MIN_LIVE_DRIVE, Float::INFINITY)
+            return (sig * d).softclip / d
+          end
+          drive = drive.to_f
           sig = (sig * drive).softclip * (1.0 / drive) if drive > 0
           sig
         end

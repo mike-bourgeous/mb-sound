@@ -442,12 +442,14 @@ module MB
         #   +:shimmer:+ (+:shimmer_pitch:+), +:freeze:+, +:stretch:+
         # - after the network: +:duck:+, +:gate:+, +:threshold:+
         #
-        # Live parameters (numbers or nodes, read every sample):
+        # Live parameters (numbers or nodes, read every sample, so a bound
+        # knob turns them without a rebuild): +:mix:+, +:wet:+, +:dry:+,
+        # +:level:+ (gains after the network; delays-2), +:predelay:+ (a
+        # node glides the read position at #delay's slew limit),
         # +:lowpass:+, +:highpass:+, +:drive:+, +:crush:+, +:shimmer:+,
         # +:freeze:+, +:stretch:+, +:duck:+, +:gate:+, +:threshold:+, and the
         # modulation depths and rates.  Fixed when built: +:room_size:+,
-        # +:decay:+, +:damping:+, +:shimmer_pitch:+, +:predelay:+, the layout,
-        # and +:wet:+/+:dry:+ (plain numbers, settable on the Reverb).
+        # +:decay:+, +:damping:+, +:shimmer_pitch:+, and the layout.
         #
         # If +:output_channels+ is greater than one, then this method returns a
         # channel bundle (GraphNode::Channels).  Otherwise it returns a single

@@ -17,6 +17,8 @@
 
 #include "plan_filters.h"
 
+_Static_assert(MB_PLAN_DYN_SIGNALS == DT_COUNT, "plan_filters.h's MB_PLAN_DYN_SIGNALS must be mb_dynamics.h's DT_COUNT");
+
 static ID id_params, id_plan_curve, id_state, id_delay;
 
 // A contiguous 1D DFloat ivar +id+ of +obj+ with at least +min+ elements.

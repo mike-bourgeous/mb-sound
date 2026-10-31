@@ -25,13 +25,15 @@ RSpec.describe('MB::Sound::FastDynamics', :aggregate_failures) do
       dyn::Transfer.corners(-40, [[-40, 2.0, 1.0], [-20, 1.0, 0.25]], knee: 6).table
     }
 
-    def params(mode: 0, min: -60.0, max: 12.0, makeup: 1.5, hold_up: 1, link: 1, la: 0, mix: 1.0)
-      Numo::DFloat[mode, min, max, makeup, hold_up, link, la, mix]
+    def params(mode: 0, min: -60.0, max: 12.0, makeup: 1.5, hold_up: 1, link: 1, la: 0, auto: 0)
+      Numo::DFloat[mode, min, max, makeup, hold_up, link, la, auto]
     end
 
     # Runs kernel and mirror in several blocks from the same state, expecting
     # identical samples, states, and delay lines.
-    def compare(nch, n, ins:, sides: nil, prm: params, times: [480.0, 24.0, 2400.0, 5.0, 0.0], ndet: 1, blocks: [n], crv: curve)
+    # (+controls+: the live shift, scale, and mix after the five times)
+    def compare(nch, n, ins:, sides: nil, prm: params, times: [480.0, 24.0, 2400.0, 5.0, 0.0], controls: [0.0, 1.0, 1.0], ndet: 1, blocks: [n], crv: curve)
+      times += controls
       la = prm[6].to_i
       sa = Numo::DFloat.zeros(ndet * 3 + 1)
       sb = sa.dup
@@ -66,7 +68,7 @@ RSpec.describe('MB::Sound::FastDynamics', :aggregate_failures) do
     it 'matches the Ruby mirror for an RMS detector, unlinked stereo, and lookahead' do
       l = bursty(600)
       r = bursty(600, level: 0.3)
-      compare(2, 600, ins: [l, r], prm: params(mode: 1, link: 0, la: 17, mix: 0.3), ndet: 2, blocks: [100, 500])
+      compare(2, 600, ins: [l, r], prm: params(mode: 1, link: 0, la: 17), controls: [0.0, 1.0, 0.3], ndet: 2, blocks: [100, 500])
     end
 
     it 'matches the Ruby mirror with a sidechain, holds in both directions, and per-sample times' do
@@ -92,6 +94,30 @@ RSpec.describe('MB::Sound::FastDynamics', :aggregate_failures) do
       compare(1, 800, ins: [x], crv: shaped, prm: params(mode: 1))
     end
 
+    it 'matches the Ruby mirror with live shift, scale, mix, and auto makeup (delays-2)' do
+      x = bursty(900)
+      shift = Numo::SFloat.linspace(-10, 12, 900)
+      scale = Numo::SFloat.linspace(0.2, 1.5, 900)
+      mix = Numo::SFloat.linspace(-0.2, 1.2, 900) # (clamped to 0..1)
+      a = compare(1, 900, ins: [x], controls: [shift, scale, mix], blocks: [1, 450, 449])
+      compare(1, 900, ins: [x], controls: [shift, 1.0, 1.0], prm: params(auto: 1), blocks: [300, 600])
+      compare(1, 900, ins: [x], controls: [-6.0, scale, 0.5], prm: params(auto: 1, mode: 1))
+      b = compare(1, 900, ins: [x], controls: [0.0, 1.0, mix.clip(0, 1)], blocks: [1, 450, 449])
+      expect(a).not_to eq(b)
+    end
+
+    it 'gives the curve\'s own gains at shift 0 and scale 1, and moves the curve by them' do
+      x = bursty(400)
+      plain = compare(1, 400, ins: [x])
+      expect(compare(1, 400, ins: [x], controls: [Numo::SFloat.zeros(400), Numo::SFloat.ones(400), Numo::SFloat.ones(400)])).to eq(plain)
+
+      # A 4:1 curve at -20 dB with no knee moved to -30 dB equals one built there
+      at = ->(t) { dyn::Transfer.corners(t, [[t, 1.0, 0.25]]).table }
+      moved = compare(1, 400, ins: [x], crv: at.(-20), controls: [-10.0, 1.0, 1.0])
+      built = compare(1, 400, ins: [x], crv: at.(-30))
+      expect(moved.flatten.zip(built.flatten).map { |m, b| (m - b).abs.max }.max).to be < 1e-6
+    end
+
     it 'treats nil inputs and sidechains as silence' do
       compare(2, 64, ins: [nil, bursty(64)], sides: [nil], prm: params(la: 3))
     end
@@ -99,7 +125,7 @@ RSpec.describe('MB::Sound::FastDynamics', :aggregate_failures) do
     it 'rejects bad arguments' do
       out = [Numo::SFloat.zeros(4)]
       st = Numo::DFloat.zeros(4)
-      t = [0, 0, 0, 0, 0]
+      t = [0, 0, 0, 0, 0, 0, 1, 1]
       expect { fast.compand(out, [nil, nil], [nil], curve, params, t, st, nil) }.to raise_error(ArgumentError, /inputs/)
       expect { fast.compand(out, [nil], [], curve, params, t, st, nil) }.to raise_error(ArgumentError, /sidechain/)
       expect { fast.compand(out, [nil], [nil], curve, params(la: 4), t, st, Numo::DFloat.zeros(2)) }.to raise_error(ArgumentError, /Delay/)

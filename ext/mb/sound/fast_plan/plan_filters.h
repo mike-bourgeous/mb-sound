@@ -74,9 +74,11 @@ void mb_plan_wavetable_segment(VALUE tinfo, float *out, size_t length, const str
 
 // OP_DYNAMICS: FastDynamics.compand (plan_dynamics.c, through
 // mb_dynamics.h) on the +nch+ inputs +in+ into +out+, with +nside+ detector
-// signals +side+ and DT_COUNT times +tim+ (in samples); +obj+ is the
-// GraphNode::Dynamics (its @params, @plan_curve, @state, and @delay are
-// read each block).  Raises on bad objects.
+// signals +side+ and MB_PLAN_DYN_SIGNALS signals +tim+ (DT_COUNT: the
+// times in samples, then the live threshold shift, ratio scale, and mix);
+// +obj+ is the GraphNode::Dynamics (its @params, @plan_curve, @state, and
+// @delay are read each block).  Raises on bad objects.
+#define MB_PLAN_DYN_SIGNALS 8
 struct mb_signal;
 void mb_plan_dynamics(float *const *out, long nch, const struct mb_signal *in, const struct mb_signal *side, long nside, const struct mb_signal *tim, VALUE obj, size_t n);
 

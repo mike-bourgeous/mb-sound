@@ -137,6 +137,56 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
       node = 1.constant.compress(threshold: -20.db, ratio: 3, knee: 0, makeup: :auto, attack: 0, release: 0)
       expect(db(node.sample(4)[-1])).to be_within(1e-4).of(-20 + 20 / 3.0 + (20 - 20 / 3.0) / 2)
     end
+
+    # (delays-2: the maintainer's live value settings, 2026-10-31)
+    describe 'live threshold, ratio, and mix (nodes, knobs)' do
+      it 'gives the same samples as numbers at a node\'s constant value' do
+        x = bursty(3000)
+        [
+          [{ threshold: -20.db }, { threshold: 0.1.constant }],
+          [{ ratio: 4 }, { ratio: 4.constant }],
+          [{ ratio: Float::INFINITY }, { ratio: Float::INFINITY.constant }],
+          [{ mix: 0.5 }, { mix: 0.5.constant }],
+        ].each do |a, b|
+          expect(render(arr(x).compress(**a), 3000, 128)[0]).to eq(render(arr(x).compress(**b), 3000, 128)[0]), a.inspect
+        end
+        # (auto makeup from the moved curve: the same within float rounding)
+        a = render(arr(x).compress(threshold: -24.db, ratio: 3, makeup: :auto), 3000)[0]
+        b = render(arr(x).compress(threshold: (-24.db).to_f.constant, ratio: 3.constant, makeup: :auto), 3000)[0]
+        expect((a - b).abs.max).to be < 1e-6
+      end
+
+      it 'follows the static curve as the threshold and ratio move' do
+        level = -10
+        c = 10.0**(level / 20.0)
+        [[-20, 4], [-30, 2], [-15, 8]].each do |t, r|
+          node = c.constant.compress(threshold: (10.0**(t / 20.0)).constant, ratio: r.constant, knee: 10, attack: 0, release: 0)
+          expect(db(node.sample(10)[-1])).to be_within(1e-3).of(knee_curve(level, t, r, 10)), "threshold #{t} ratio #{r}"
+        end
+        node = c.constant.compress(threshold: -20.db, ratio: 4, mix: 0.25.constant, knee: 0, attack: 0, release: 0)
+        expect(node.sample(4)[-1]).to be_within(1e-6).of(c * (0.25 * 10.0**(-7.5 / 20) + 0.75))
+      end
+
+      it 'moves the threshold within one buffer and the auto makeup with it' do
+        thr = MB::Sound::ArrayInput.new(data: [Numo::SFloat[*[0.1] * 400, *[0.01] * 400]])
+        node = 1.constant.compress(threshold: thr, ratio: 2, knee: 0, makeup: :auto, attack: 0, release: 0)
+        out = node.sample(800)
+        expect(db(out[399])).to be_within(1e-4).of(-10 + 5)
+        expect(db(out[799])).to be_within(1e-4).of(-20 + 10)
+      end
+
+      it 'refuses a live threshold or ratio with upward compression' do
+        expect { 1.constant.compress(threshold: 0.1.constant, upward_threshold: -40.db) }.to raise_error(ArgumentError, /without upward compression/)
+      end
+
+      it 'turns live for expanders, gates, and ducks too' do
+        x = bursty(2000, level: 0.1)
+        expect(render(arr(x).expand(threshold: 0.01.constant, ratio: 3.constant), 2000)[0]).to eq(render(arr(x).expand(threshold: -40.db, ratio: 3), 2000)[0])
+        expect(render(arr(x).noise_gate(threshold: 0.01.constant, mix: 0.5.constant), 2000)[0]).to eq(render(arr(x).noise_gate(threshold: -40.db, mix: 0.5), 2000)[0])
+        k = bursty(2000)
+        expect(render(arr(x).duck(arr(k), threshold: 0.1.constant), 2000)[0]).to eq(render(arr(x).duck(arr(k), threshold: -20.db), 2000)[0])
+      end
+    end
   end
 
   describe 'levels' do
