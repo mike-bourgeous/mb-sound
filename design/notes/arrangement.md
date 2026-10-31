@@ -9,6 +9,7 @@ Rules: changes go through `Session#change`; scene graphs build on the scheduler 
 ## Quick reference
 
 - Set commands: `track`, `scene`, `go`, `launch`, `tweak`, `flow`, `knob`, `turn`, `arm`, `rec`, `capture`; launch points `on:` / `in:` / `at:`; `undo`.
+- A track's effect insert: `track :keys, :tine_piano, fx: L.fx.hall`, `fx :keys, L.fx.dub` (at the launch point, notes carried, the old tail spilled), `fx :keys, :off` (`arrangement/fx.rb`).
 - Every change goes through `Session#change` (an exact sample, under the render lock); specs use `Session.new(realtime: false)` + `#process_buffer` and close sessions in `after` blocks.
 - Code `lib/mb/sound/session.rb` + `session/`, `lib/mb/sound/arrangement.rb`; specs `spec/lib/mb/sound/session_spec.rb`, `spec/lib/mb/sound/arrangement_spec.rb`, `spec/lib/mb/sound/take_spec.rb`; help `help :sets`, `help :flow`.
 
