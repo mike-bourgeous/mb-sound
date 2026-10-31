@@ -153,6 +153,8 @@ module SessionFuzz
       beat = 2 if bar == 1 && beat == 1 # (after the first scene's launch)
       step.on = rng.rand < 0.5 ? ', on: :now' : ''
       step.t = pick(rng, names)
+      step.bar = bar
+      step.beat = beat
       cmd = COMMANDS[rng.rand(commands)].call(step)
       next unless cmd
 
@@ -269,7 +271,7 @@ module SessionFuzz
   # (+t+) and launch-point suffix (+on+, ', on: :now' or ''), the song's
   # scenes, swappable synth tracks, library-instrument tracks, whether the
   # knob :cut exists, the clip picker, and the count of `bg :xN` players.
-  Step = Struct.new(:rng, :t, :on, :scenes, :swappable, :instruments, :knob, :clip_for, :bgs, keyword_init: true) do
+  Step = Struct.new(:rng, :t, :on, :scenes, :swappable, :instruments, :knob, :clip_for, :bgs, :bar, :beat, keyword_init: true) do
     def pick(list) = SessionFuzz.pick(rng, list)
     def bg_name = "x#{self.bgs += 1}"
   end
@@ -345,6 +347,15 @@ module SessionFuzz
       fx = s.pick(['echo(1.n16, 2)', 'arp(:up, 16)', 'quantize(16)', 'swing(0.6)', 'humanize(4.ms, seed: 3)'])
       "bg :#{s.bg_name}, #{s.pick(MELODIC)}.notes.#{fx}.synth(voices: 2) { |v| v.hz.glide(:length).triangle * v.amp_env(0.002, 0.05, 0.6, 0.02) * 0.2 }" \
         ".until(#{s.pick(['1.bars', '3.beats'])})#{s.on}"
+    },
+    ->(s) {
+      # (tempo-2) a ramp, then a seek back into it or to just before it:
+      # seeks read the tempo map at their target, so the ramp plays on
+      # again from there (or comes again where it began)
+      bar = s.bar || 1
+      beat = s.beat || 2
+      back = s.rng.rand < 0.6 ? beat + 1/2r : [beat - 1/2r, 1].max
+      "bpm #{s.pick([90, 160])}, over: #{s.pick(['1/2r', '3.beats'])}; after(in: 2.beats) { seek #{bar}, #{MB::Sound::RubyValue.number(back)} }"
     },
     # (new commands go here, at the end)
   ].freeze

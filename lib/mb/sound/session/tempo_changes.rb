@@ -26,7 +26,9 @@ module MB
         # Tempo) right there, or ramping to it over +over+ (bars through the
         # meter map, a Duration, or seconds) shaped by +curve+ (a Curve or
         # its name; linear in BPM by default) from the tempo in effect
-        # where it lands; or following +follow+ (a knob name, a Knob or
+        # where it lands (from where the form pass began, for a pass a seek
+        # entered mid-way: the seek hears what the ramp reaches there); or
+        # following +follow+ (a knob name, a Knob or
         # reader, or a MIDI::Param such as `4.bars.lfo.at(150..180)`) read
         # once per tempo cell.  Returns the Change.
         def change_tempo_map(bpm = nil, over: nil, curve: nil, follow: nil, at: nil, start_time: nil)
@@ -39,19 +41,21 @@ module MB
 
           point = at || LaunchPoint::NONE
           time = start_time && !point.given? ? start_time.to_r : launch_time(point, [], default: :now)
-          data = { bpm: bpm, over: over, curve: curve&.to_ruby, follow: follow && Sequence::TempoMap.source_ruby(follow) }.compact
+          anchor = over && tempo_anchor
+          data = { bpm: bpm, over: over, curve: curve&.to_ruby, follow: follow && Sequence::TempoMap.source_ruby(follow), anchor: anchor }.compact
           change(:tempo, :tempo, time, data: data) { |t|
             @transport.tempo_change(at: [t, @transport.position].max) { |map, pos|
               if follow
                 map.follow(follow, at: pos, last: @transport.bpm.to_r)
               elsif over
-                # (the map's tempo at the landing position, not the
-                # span's cell tempo: take replays run lines before or after
-                # a cell starts depending on buffer sizes)
+                # (the map's tempo at the ramp's start, not the span's cell
+                # tempo: take replays run lines before or after a cell
+                # starts depending on buffer sizes)
+                start = anchor && anchor < pos ? anchor : pos
                 @tempo_reader ||= method(:read_tempo_source)
-                from = map.bpm_at(pos, @tempo_reader)
-                length = ramp_length(over, pos, from, target, curve)
-                map.with(Sequence::TempoMap::Ramp.new(pos: pos, from: from, to: target, length: length, curve: curve))
+                from = map.bpm_at(start, @tempo_reader)
+                length = ramp_length(over, start, from, target, curve)
+                map.with(Sequence::TempoMap::Ramp.new(pos: start, from: from, to: target, length: length, curve: curve))
               else
                 map.step(target, at: pos)
               end
@@ -72,6 +76,14 @@ module MB
         end
 
         private
+
+        # Where a form pass that a seek entered mid-way began, for its tempo
+        # ramps (see Session::Context#tempo_anchor and
+        # Form::Playback#begin_pass), or nil.
+        def tempo_anchor
+          a = Session.context&.tempo_anchor
+          a && a[0].equal?(self) ? a[1] : nil
+        end
 
         # Reads a followed tempo source at timeline position +pos+ (the
         # first frame of the span about to render).
@@ -106,12 +118,12 @@ module MB
         def tempo_cell(count)
           return nil unless @transport.tempo_moves?
           map = @transport.tempo_map
-          unless map.fixed? || map.varying_at?(@transport.position) || map.next_break(@transport.position)
-            @transport.set_cell_bpm(map.bpm_at(@transport.position))
+          pos = @transport.position
+          if map.quiet_after?(pos)
+            @transport.set_cell_bpm(map.bpm_at(pos))
             @transport.settle_tempo
             return nil
           end
-          pos = @transport.position
           limit = nil
           if map.varying_at?(pos)
             # The tempo is read at the cell's start, or where the map, its

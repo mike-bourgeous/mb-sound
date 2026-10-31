@@ -104,7 +104,8 @@ module MB::Sound
   end
 
   def self.granular_song(part: :all, density: 1.0)
-    tempo = bpm(GRANULAR_SONG_BPM)
+    bpm GRANULAR_SONG_BPM
+    tempo = bpm # (the tempo it set, with --bpm's scaling)
     bowl, rain, voice, pad = granular_song_sources(bpm: tempo)
 
     # The bowl drone, on G (+pitch+ 0) or moved down a fourth to D (-5):

@@ -653,12 +653,6 @@ module MB
         name && remove(name, fade: fade, time: time, ring: ring).first
       end
 
-      # Changes the tempo to +bpm+ when the timeline reaches +time+ (whole
-      # notes), at the start of the buffer that contains it.
-      def change_tempo(bpm, time:)
-        @scheduler.change_tempo(bpm, time: time)
-      end
-
       # Runs the block when the timeline reaches +time+ (whole notes), at the
       # start of the buffer that contains it, on the render thread (so keep
       # it short).  Used for live changes from scheduled blocks, like

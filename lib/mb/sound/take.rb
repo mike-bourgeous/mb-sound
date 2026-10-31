@@ -487,7 +487,21 @@ module MB
           # Clocks count session run frames (see Session::Clocks): a take
           # starting after the timeline ran replays from the same count
           h.merge!(run_frame: s.run_frame, odometer: s.odometer) if s.run_frame > 0
+          # The tempo map's history (tempo-2): a ramp in progress plays on
+          # in the replay, and seeks read the tempo the live timeline had
+          # there (a followed source as the tempo it reads now)
+          h[:tempo_map] = tempo_rows(s.transport) unless s.transport.tempo_map.static?
         }
+      end
+
+      # The rows of +transport+'s tempo map for the start state (see
+      # Sequence::TempoMap#rows).
+      def tempo_rows(transport)
+        map = transport.tempo_map
+        rows = map.rows
+        i = map.segments.index { |x| x.equal?(map.segment_at(transport.position)) }
+        rows[i] = [rows[i][0], transport.bpm] if i && map.segments[i].is_a?(Sequence::TempoMap::Follow)
+        rows
       end
 
       # Ruby source for a value in the replay script.

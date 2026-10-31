@@ -67,12 +67,13 @@ RSpec.describe('API guesses from the 2026-10-27 take', :aggregate_failures) do
   end
 
   it 'takes tempo as bpm, and points drifting tempos at clocks with speed:' do
-    expect(run('tempo 180')).to eq(180)
+    expect(run('tempo 180').kind).to eq(:tempo) # (the journal entry: tempo-2)
     expect(session.transport.bpm).to eq(180)
     # (tempo-maps-1 supports moving tempos: a Hz LFO points at the tempo-LFO spelling, a range at ramps)
     expect(error_of('bpm 0.1.hz.lfo.at(90..180)').message).to match(/write \d+\.bars\.lfo\.at\(\.\.\.\) for 0\.1\.hz\.lfo.*bpm :tempo/)
-    expect(error_of('bpm 90..180').message).to include('a tempo is one value', 'bpm 140, over: 4.bars')
-    expect(run('bpm 120.bpm')).to eq(120.0) # (a Tempo value reads as its number)
+    expect(error_of('bpm 90..180').message).to include('a tempo is one value', 'bpm 90; bpm 180, over: 4.bars')
+    run('bpm 120.bpm') # (a Tempo value reads as its number)
+    expect(session.transport.bpm).to eq(120)
 
     expect(error_of('clock :woozy, 0.1.hz.lfo.at(0.5..2)').message).to include('a moving speed goes in speed:', '`clock :woozy, 1/1r, speed: 4.bars.lfo.at(0.5..2)`')
     c = run('clock :woozy, 1/1r, speed: 4.bars.lfo.at(0.5..2)')

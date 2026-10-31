@@ -31,8 +31,12 @@ module MB
       # - +patch_track+: [track name, session] whose patch is building
       #   (Arrangement::TrackKnobs)
       # - +song_replay+: the song script a take replays (ScriptRunner)
+      # - +tempo_anchor+: [session, position] where a form pass that a seek
+      #   entered mid-way began: its tempo ramps are placed from there
+      #   (TempoChanges#change_tempo_map), so the seek hears what the ramp
+      #   reaches where it lands
       Context = Data.define(:session, :time, :batch, :source, :perform_session, :perform_source, :forced, :now,
-                            :command, :take_line, :choices, :deadline, :patch_track, :song_replay) do
+                            :command, :take_line, :choices, :deadline, :patch_track, :song_replay, :tempo_anchor) do
         # The logical timeline position commands for +session+ resolve
         # launch points from, or nil to use its transport position: a
         # replayed line's issue time, else a scheduled block's time (see

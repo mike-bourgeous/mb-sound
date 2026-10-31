@@ -94,8 +94,13 @@ module MB
 
         raise ArgumentError, 'Give a number of bars or at:/in:, not both (on: aligns from the bars)' if point.at || point.offset
         label = "after #{bars.inspect}"
+        given = bars
         bars = Sequence::Duration.bars(bars, t.bar_length, transport: t)
-        raise ArgumentError, "Bars must be a number of at least 1 (got #{bars.inspect})" unless bars.is_a?(Numeric) && bars >= 1
+        unless bars.is_a?(Numeric) && bars >= 1
+          # (a length shorter than a bar: `after 2.beats` meant from now)
+          hint = given.is_a?(Sequence::Duration) && bars.is_a?(Numeric) && bars > 0 ? "; for a length from now: after in: #{RubyValue.text(given) || given}" : ''
+          raise ArgumentError, "Bars must be a number of at least 1 (got #{bars.inspect})#{hint}"
+        end
 
         first = t.next_bar_line(session.now)
         time = t.bar_position(t.bar_at(first) + bars.to_r - 1)
