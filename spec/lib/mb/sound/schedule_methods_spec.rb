@@ -171,6 +171,11 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       run(96000 * 2)
       expect(times).to eq([1])
     end
+
+    it 'points a length shorter than a bar at in: (tempo-2: session fuzz guessed `after 2.beats`)' do
+      expect { within { MB::Sound.after(2.beats) {} } }.to raise_error(ArgumentError, /at least 1 .*after in: 2\.beats\z/)
+      expect { within { MB::Sound.after(1/2r) {} } }.to raise_error(ArgumentError, /at least 1 \(got \(1\/2\)\)\z/)
+    end
   end
 
   describe '#every' do
