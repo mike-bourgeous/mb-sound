@@ -22,14 +22,24 @@ module MB
       # build (Arrangement.counted wraps every track patch in .building).
       module TrackKnobs
         # Library entry families whose params a track playing one gets as
-        # knobs, with the params that can be (read as nodes): struck
-        # instruments' decay (Struck::KNOB_PARAMS).  Other families'
-        # params stay numbers (their voices take numbers in places a knob
-        # can't follow, or would change their sound; graph documents' are
+        # knobs, with the params that can be (read as nodes), by entry:
+        # struck instruments' decay (Struck::KNOB_PARAMS), genre patches'
+        # settings (Genre::PATCH_KNOBS; library-2, the maintainer
+        # 2026-10-31: "Genre patches now").  Other families' params stay
+        # numbers (SQ-80's later, once its ban lifts; graph documents' are
         # all knobs, above).
-        ENTRY_PARAMS = { struck: %i[decay] }.freeze
+        ENTRY_PARAMS = {
+          struck: ->(_entry) { MB::Sound::Struck::KNOB_PARAMS },
+          genre_patch: ->(entry) { MB::Sound::Genre::PATCH_KNOBS.fetch(entry.name, {}).keys },
+        }.freeze
 
         module_function
+
+        # The params of library Entry +entry+ that a track playing it gets
+        # as knobs (ENTRY_PARAMS), or nil for families without.
+        def entry_params(entry)
+          ENTRY_PARAMS[entry.family]&.call(entry)
+        end
 
         # { param => GraphNode::Knob } for the +names+ params of library
         # Entry +entry+ in the building track (see .knob_for), or {}

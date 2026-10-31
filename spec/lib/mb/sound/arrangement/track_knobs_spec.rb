@@ -76,6 +76,40 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
     end
   end
 
+  # Genre patches' settings become track knobs (library-2; maintainer,
+  # 2026-10-31: "Genre patches now"): Genre::PATCH_KNOBS, read as signals,
+  # the same samples until turned (a few in the everyday tier).
+  [:house_bass, :acid, *SlowTier.slow_tier(MB::Sound::Genre::PATCH_KNOBS.keys - %i[house_bass acid], keep: 0)].each do |n|
+    it "plays genre patch #{n} bit for bit like the plain method, its settings the track's knobs" do
+      patches = MB::Sound::Genre::Patches
+      clip = n == :breaks ? MB::Sound.seq(MB::Sound::C2, MB::Sound::D2, MB::Sound::E2, MB::Sound::Fs2).n8.loop : BASS_RIFF # (the break's slices from C2)
+      _, *ref = run(->(_s) { MB::Sound.track(:t) { |c| patches.public_send(n, c) }; MB::Sound.bg(:t, clip) }, buffers: 40)
+      s, *got = run(->(_s) { MB::Sound.track(:t, MB::Sound::L.inst.genre_patch[n]); MB::Sound.bg(:t, clip) }, buffers: 40)
+      names = MB::Sound::Genre::PATCH_KNOBS[n].keys
+      expect(s.knobs.keys).to eq(names.map { |k| MB::Sound::Session::Name.param(:t, k) })
+      expect(got).to eq(ref)
+      expect(ref[0].abs.max).to be > 0.001
+      expect(s.knobs.values.map(&:value)).to eq(names.map { |k| MB::Sound::Genre.patch_defaults(n).fetch(k).to_f })
+    end
+  end
+
+  it 'gives genre roles\' patches their settings as knobs, except those the role gives' do
+    bpm = MB::Sound.transport.bpm
+    s, = begin
+      run(->(_s) { MB::Sound.genre(:techno).setup; MB::Sound.go(:peak2, on: :now) }, buffers: 4)
+    ensure
+      MB::Sound.bpm(bpm) # (the template's tempo; transport_guard)
+    end
+    expect(s.knobs.keys).to include(:"acid/cutoff", :"acid/env_mod", :"bass/cutoff", :"bass/tone")
+    expect(s.knobs.keys).not_to include(:"stab/cutoff") # (role :stab gives cutoff: :cut)
+    expect(MB::Sound::L.inst.acid.params[:cutoff].range).to eq(40.0..4000.0)
+    # The defaults are read from the methods themselves (Prism)
+    MB::Sound::Genre::PATCH_KNOBS.each do |n, knobs|
+      expect(MB::Sound::Genre.patch_defaults(n).keys).to include(*knobs.keys), n.inspect
+    end
+    expect(MB::Sound::Genre.patch_defaults(:acid)).to include(cutoff: 300, reso: 0.6)
+  end
+
   it 'gives each track its own knobs with the param\'s range and curve, turned, in scenes, and undone' do
     s, base = run(->(_s) { MB::Sound.track(:bass, :dnb_reese); MB::Sound.bg(:bass, BASS_RIFF) })
     k = s.knobs[:"bass/cutoff"]
