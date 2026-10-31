@@ -28,6 +28,10 @@ module MB
         #
         # The +:feedback+ gain and the +:wet+ and +:dry+ levels may be numbers
         # or graph nodes (e.g. an LFO or a MIDI CC), read every sample.
+        # +:mix+ (0..1, a number or node) crossfades dry and wet at equal
+        # power: dry * sqrt(1 - mix), wet * sqrt(mix), times +:dry+ (then
+        # 1 by default) and +:wet+ (delays-2, the maintainer's "Equal power",
+        # 2026-10-30; ping_pong and tape_echo mix the same way).
         #
         # +:interpolation+ chooses how fractional and moving delays are read:
         # :sinc (the default; band-limited, so sweeping delays don't dull
@@ -83,10 +87,11 @@ module MB
         # With d.fb the echoes come from a second delay line outside the
         # loop (the loop's own delay reads early by the insert's latency),
         # so pipeline delays cost about one more delay.
-        def delay(time = nil, seconds: nil, smooth: nil, smoothing: nil, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true, &insert)
+        def delay(time = nil, seconds: nil, smooth: nil, smoothing: nil, max_delay: 1.0, feedback: false, dry: nil, wet: 1, mix: nil, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true, &insert)
           time = DelayMethods.seconds_keyword(time, seconds)
           DelayMethods.check_plain_time(time)
           smoothing = DelayMethods.smooth_keyword(smooth, smoothing, true)
+          dry, wet = DelayMethods.mix_levels(dry.nil? ? (mix.nil? ? 0 : 1) : dry, wet, mix)
 
           if insert
             raise ArgumentError, "ring_out: false isn't supported with an insert block (the feedback loop rings out)" unless ring_out
@@ -113,6 +118,23 @@ module MB
             time, smooth: smoothing, max_delay: max_delay,
             dry: dry, wet: wet, interpolation: interpolation, ring_out: ring_out
           ))
+        end
+
+        # [dry, wet] levels for #delay, #ping_pong, and #tape_echo: +dry+ and
+        # +wet+ (numbers or nodes) as given without a +mix+, else times the
+        # equal-power crossfade of +mix+ (0..1, a number or node, clamped):
+        # dry * sqrt(1 - mix), wet * sqrt(mix) (BlendMethods.gains'
+        # :power law; until delays-2, 2026-10-31, the chorus's linear
+        # dry * (1 - mix), wet * mix: the maintainer's "Equal power").
+        def self.mix_levels(dry, wet, mix)
+          return [dry, wet] if mix.nil?
+
+          if mix.is_a?(Numeric)
+            raise ArgumentError, "A delay's mix: is 0..1 (0 dry, 1 wet; got #{mix.inspect})" unless mix.real?
+            mix = mix.to_f.clamp(0.0, 1.0)
+          end
+          dg, wg = BlendMethods.gains(mix, :power)
+          [StereoDelayMethods.level_product(dry, dg), StereoDelayMethods.level_product(wet, wg)]
         end
 
         # True if +v+ is a plain real level (a number, Decibels included).

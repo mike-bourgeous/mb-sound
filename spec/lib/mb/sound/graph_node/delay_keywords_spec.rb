@@ -26,6 +26,33 @@ RSpec.describe(MB::Sound::GraphNode::DelayMethods) do
     end
   end
 
+  # (delays-2: the maintainer's "Equal power", 2026-10-30)
+  describe 'mix:' do
+    def impulse_out(g, n = 300)
+      SpecBuffers.join(Array.new(n / 100) { g.sample(100)&.dup }.compact)
+    end
+
+    it 'crossfades dry and wet at equal power, with and without feedback, numbers or nodes' do
+      imp = -> { 1.constant.until(1.samples).and_then(MB::Sound.silence(0.01)) }
+      [{}, { feedback: 0.5 }].each do |fb|
+        out = impulse_out(imp.().delay(100.samples, mix: 0.25, **fb))
+        expect(out[0]).to be_within(1e-6).of(Math.sqrt(0.75)), fb.inspect
+        expect(out[100]).to be_within(1e-6).of(0.5), fb.inspect
+        node = impulse_out(imp.().delay(100.samples, mix: 0.25.constant, **fb))
+        expect((node - out).abs.max).to be < 1e-6, fb.inspect
+      end
+      # dry: and wet: scale the crossfade; mix: 0 and 1 are all dry and all wet
+      out = impulse_out(imp.().delay(100.samples, mix: 1, dry: 0.5, wet: 0.5))
+      expect([out[0], out[100]]).to eq([0, 0.5])
+      out = impulse_out(imp.().delay(100.samples, mix: 0))
+      expect([out[0], out[100]]).to eq([1, 0])
+    end
+
+    it 'prints back as given' do
+      expect(1.constant.delay(0.1, feedback: 0.4, mix: 0.3).to_ruby).to eq('1.constant.delay(0.1, feedback: 0.4, mix: 0.3)')
+    end
+  end
+
   describe 'smooth:' do
     it 'is the same option as smoothing:' do
       expect(1.constant.delay(0.1, smooth: false).base_filter.smoothing).to eq(false)

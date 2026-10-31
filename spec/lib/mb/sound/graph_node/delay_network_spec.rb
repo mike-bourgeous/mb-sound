@@ -119,9 +119,11 @@ RSpec.describe(MB::Sound::GraphNode::DelayNetwork) do
       expect(nonzero(r, 3)).to eq([[110, 0.5], [200, 0.5], [310, 0.125]])
     end
 
-    it 'crossfades dry and wet with mix:' do
+    it 'crossfades dry and wet at equal power with mix: (delays-2)' do
       l, = render_outputs(impulse.ping_pong(100.samples, feedback: 0.5, mix: 0.25).outputs, [128], 400)
-      expect(nonzero(l, 2)).to eq([[0, 0.75], [100, 0.25]])
+      expect(nonzero(l, 2)).to eq([[0, Math.sqrt(0.75).round(6)], [100, 0.5]])
+      l, = render_outputs(impulse.ping_pong(100.samples, feedback: 0.5, mix: 0.25.constant).outputs, [128], 400)
+      expect(nonzero(l, 2)).to eq([[0, Math.sqrt(0.75).round(6)], [100, 0.5]])
     end
 
     it 'prints itself back as Ruby' do

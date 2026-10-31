@@ -30,8 +30,10 @@ module MB
         # (ChannelMixer::Width; a number or node).
         #
         # +:dry+ and +:wet+ are levels (default 1 and 1); +:mix+ crossfades
-        # them as for #chorus (dry * (1 - mix), wet * mix; linear).  Numbers
-        # or nodes.  +:smooth+ and +:interpolation+ are as for #delay.
+        # them at equal power (dry * sqrt(1 - mix), wet * sqrt(mix), as
+        # #delay's +:mix+ and `blend(curve: :power)`; delays-2, the
+        # maintainer's "Equal power", 2026-10-30).  Numbers or nodes.
+        # +:smooth+ and +:interpolation+ are as for #delay.
         #
         # The echoes ring out after the input ends (see DelayNetwork).
         #
@@ -151,15 +153,10 @@ module MB
 
         # Stereo dry + wet: +dry_sides+ and +wet_sides+ (two nodes each),
         # with +dry+/+wet+ levels and an optional +mix+ crossfade (see
-        # #ping_pong).  The sums ring on after the dry signal ends.
+        # #ping_pong and DelayMethods.mix_levels).  The sums ring on after
+        # the dry signal ends.
         def self.wet_dry(dry_sides, wet_sides, dry:, wet:, mix:)
-          dg = dry
-          wg = wet
-          unless mix.nil?
-            mix = mix.is_a?(Numeric) ? mix.to_f.clamp(0.0, 1.0) : mix.clip(0, 1)
-            dg = level_product(dry, 1 - mix)
-            wg = level_product(wet, mix)
-          end
+          dg, wg = DelayMethods.mix_levels(dry, wet, mix)
 
           outs = dry_sides.zip(wet_sides).map { |d, w|
             dd = Chorus.scale(d, dg)
@@ -178,6 +175,7 @@ module MB
         # +level+ times +factor+ (numbers multiply; nodes make a product).
         def self.level_product(level, factor)
           return level * factor if level.is_a?(Numeric) && factor.is_a?(Numeric)
+          return factor if level.is_a?(Numeric) && level == 1
           return factor * level if level.is_a?(Numeric)
           level * factor
         end

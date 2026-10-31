@@ -80,7 +80,7 @@ Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`
 
 ### [Delays](delays.md)
 
-`#delay` (`Filter::Delay`) and `#multitap` share `MB::Sound::DelayLine` (C reads, exact mirrors; `:sinc` interpolation by default, `:cubic`, `:linear`); times are any length or node (`96.samples`, `3.n16`, `lfo.samples`), `feedback:`/`wet:`/`dry:` numbers or nodes, and delays ring out after their input ends (`MB::Sound::QuietRun#advance`).  Delay networks (`FastDelay.network`) build `multitap(t1, t2, feedback: [g1, g2] | g)`, `ping_pong(t, feedback:, spread:, mix:, input: :mono | :stereo)`, and `haas(15.ms, side:)`; tape echoes are `sig.tape_echo(:reel | :slapback | :ping_pong | :dub, time:, feedback:, mix:, tone:, low_cut:, drive:, wow:, flutter:)` (library family `:delay`).  Same output at any buffer size.
+`#delay` (`Filter::Delay`) and `#multitap` share `MB::Sound::DelayLine` (C reads, exact mirrors; `:sinc` interpolation by default, `:cubic`, `:linear`); times are any length or node (`96.samples`, `3.n16`, `lfo.samples`), `feedback:`/`wet:`/`dry:`/`mix:` numbers or nodes (`mix:` an equal-power crossfade for `#delay`, `ping_pong`, and `tape_echo`), and delays ring out after their input ends (`MB::Sound::QuietRun#advance`).  Delay networks (`FastDelay.network`) build `multitap(t1, t2, feedback: [g1, g2] | g)`, `ping_pong(t, feedback:, spread:, mix:, input: :mono | :stereo)`, and `haas(15.ms, side:)`; tape echoes are `sig.tape_echo(:reel | :slapback | :ping_pong | :dub, time:, feedback:, mix:, tone:, low_cut:, drive:, wow:, flutter:)` (library family `:delay`).  Same output at any buffer size.
 
 ### [Chorus](chorus.md)
 
