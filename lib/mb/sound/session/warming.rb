@@ -57,7 +57,8 @@ module MB
       # next buffer).  Scheduled blocks, buses, and master chains still
       # join their warm-ups (blocks run ahead on the scheduler thread, and
       # skip a warm-up they lack the time for).  #warm_background (:auto:
-      # realtime sessions; true for specs, false never) decides.
+      # realtime sessions in live mode, the console; true for specs, false
+      # never) decides.
       module Warming
         # Buffers a warm-up plays (enough for MB::Sound::JIT's call
         # threshold, 5, with room for code that runs every other buffer).
@@ -203,7 +204,9 @@ module MB
         end
 
         # Whether new graphs from console commands warm in the background
-        # (see Warming): :auto (realtime sessions), true, or false.
+        # (see Warming): :auto (realtime sessions in live mode, the
+        # bin/sound.rb console: scripts play their songs as written), true,
+        # or false.
         attr_reader :warm_background
 
         # Sets #warm_background.
@@ -306,7 +309,7 @@ module MB
         # outside scheduled blocks and replays.
         def warm_hold_for_add
           return nil unless warming?
-          return nil unless @warm_background == true || (@warm_background == :auto && @realtime)
+          return nil unless @warm_background == true || (@warm_background == :auto && @realtime && MB::Sound.live?)
           context = Session.context
           return nil if context&.time_for(self) || context&.replaying? || context&.batch
           group = context&.command
