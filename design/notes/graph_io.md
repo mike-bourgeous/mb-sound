@@ -4,9 +4,7 @@
 Every graph remembers the DSL calls that built it (`GraphNode::Recipe`, `lib/mb/sound/graph_node/recipe.rb`), so `node.to_ruby` prints it back as Ruby, and graph documents (`.mbg.rb`, `lib/mb/sound/graph_io.rb` + `graph_io/`: `save`, `preset`, `GraphIO.load`/`.dump`) save graphs, clips, bundles with assets, racks, and whole sets.  Documents load by walking the Prism tree through `GraphIO::Registry`, never eval; file reads go through `GraphIO::FileGuard`.  Every plain value prints through one printer, `MB::Sound::RubyValue` (Rationals as `3/4r` and `3r`; graph document format 7).  A new DSL method taking a build block goes in `BUILD_BLOCKS`; one that reads files or allocates by an argument goes in `Registry::FILE_METHODS` or `Loader#check_limits`.
 <!-- /summary -->
 
-Graph import/export, phase 1 (branch `graph-io-1`, 2026-10-10), phase 2, graph documents (branch `graph-io-2`, 2026-10-11), and phase 3, clips, bundles, and sets (branch `graph-io-3`, 2026-10-12).  The study is branch `research-graph-io` (`research/graph-io/README.md`, `proposal.html`); the maintainer's decisions of 2026-10-10 are summarized at the end.  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
-
-## Quick reference (from CLAUDE.md, 2026-10-30)
+## Quick reference
 
 - Printing: `node.to_ruby(inputs: { midi: notes }, seeds: true)` (seeds off by default), console `ruby node`; lanes that differ in values print `per_voice(...)`, anything unrepresentable `nil # FIXME(graph-io): ...`; no flow control.  Round trips: 210/220 graph sweep factories and 31/34 bin synth/effect scripts bit-identical (`spec/bin/recipe_script_sweep_spec.rb` runs under `--tag smoke`).
 - Call keys: `Recipe.key_of`, `Recipe.substituting { }` (below, "Call keys and substitutions").
@@ -14,6 +12,7 @@ Graph import/export, phase 1 (branch `graph-io-1`, 2026-10-10), phase 2, graph d
 - API: `GraphIO.load(path_or_text, inputs:, params:, trust:)`, `.parse` (header), `.dump(graph, name:, inputs:, params:, options:)`, `.save`, `.document_of(graph)` (`doc[:drive] = 2` sets every Constant of the param); console `save :dark_hall, g` (never replaces: `save!`, `bump: true`; library.md), `preset :dark_hall, input: mic, mix: 0.6`, `presets`.
 - Clips without a recipe save as `events([start, length, value, velocity, { marks }], ..., length:, loop:)` rows; graphs reading files save as bundles (`save(..., bundle: true/false)`); set documents print buses as `bus(:hall, to:) { |sig| ... }`.
 
+Graph import/export, phase 1 (branch `graph-io-1`, 2026-10-10), phase 2, graph documents (branch `graph-io-2`, 2026-10-11), and phase 3, clips, bundles, and sets (branch `graph-io-3`, 2026-10-12).  The study is branch `research-graph-io` (`research/graph-io/README.md`, `proposal.html`); the maintainer's decisions of 2026-10-10 are summarized at the end.  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 ## What it does
 

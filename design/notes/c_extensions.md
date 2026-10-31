@@ -4,6 +4,13 @@
 25 C extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/` and mb-term's `fast_term`), each building `lib/mb/sound/<name>.so` (`rake compile`).  New C code goes in purpose-specific extensions, not `fast_sound`; shared helpers are `static inline` in `ext/mb/sound/include/mb_ext_helpers.h` and shared kernels in `ext/mb/sound/include/mb_*.h`.  Every kernel has a Ruby reference that specs compare with it (existing ones exact mirrors, several built with `-ffp-contract=off`; new ones may use a stated tolerance), registered in MB::Sound::Kernels (kernels.md).  `depend` files list each extension's headers (`rake depend:check`); a change to ext/ structure refreshes the memcheck map.  `rake memcheck`/`memcheck:changed` run their spec files in parallel Valgrind processes (`MEMCHECK_PARALLEL=N`; about 10 min for the full list at 8 on the Mac, estimated).
 <!-- /summary -->
 
+## Quick reference
+
+- Build: `bundle exec rake compile` (`-j N`); after merges touching `ext/`, `rake clean compile`; after changing a `depend` file or removing a source, `rm -rf tmp/<platform>/<extension>`.
+- Check: `rake depend:check`; `rake memcheck:changed` before merging ext/ work; `rake memcheck:map` (and commit the map) when the ext/ structure changes.
+- New code in purpose-specific extensions; shared helpers `static inline` in `ext/mb/sound/include/mb_ext_helpers.h`; every kernel registered with its Ruby mirror in `MB::Sound::Kernels` (kernels.md).
+- Clang on the Mac fails on unused static functions in `.c` files: check every one is still called.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

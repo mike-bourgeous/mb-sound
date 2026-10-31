@@ -6,6 +6,11 @@ Named racks join `Session::Names`; `knob :space, 0.3` inside a rack block makes 
 Rack documents (`save :dub, rack(:dub)`, format 4) and graph documents carrying rack definitions reload bit for bit; every Traversable answers `port_info`, `params`, and frozen `param_info`/`param_snapshot` for UI threads.
 <!-- /summary -->
 
+## Quick reference
+
+- `mrack`, `irack`, `arack`, `lrack`/`amrack`, `modrack`, `rack(name, in:, out:, **ports)`; apply with `src.then(&r)`, `r.(src)`, `stream.through(r)`; `knob :space, 0.3` inside a block makes a rack knob.
+- `save :dub, rack(:dub)` writes a rack document; code `lib/mb/sound/rack.rb`; spec `spec/lib/mb/sound/rack_spec.rb`; demo `bin/songs/rack_demo.rb`; help `help :racks`.
+
 Branch racks-r1 (2026-10-17): phase R1 of the racks proposal; branch racks-r2 (2026-10-17): phase R2, rack knobs and rack documents (sections "Rack knobs" and "Rack documents" below) (research spike `research-racks`, `research/racks/PROPOSAL.md` + `README.md` + `survey/`; the maintainer approved the design 2026-10-17: "Racks look good; go ahead").  The proposal's section 0 holds the twelve decisions; section 7 the build order (R2 rack knobs and documents, R3 slots and live swaps, R4 MIDI parity, R5-R8 crossings and pitch shifting, V visualization).  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 ## API

@@ -6,6 +6,13 @@ Device I/O goes through bundled miniaudio (`fast_audio`) plus a small JACK backe
 Rules: never `jack_port_unregister` on an active JACK client; things closed at exit register with `ExitClose`, never their own `at_exit` block; bin/ scripts set `RUBY_THREAD_TIMESLICE=10` in their shebang.
 <!-- /summary -->
 
+## Quick reference
+
+- Pick the backend with `OUTPUT_TYPE` / `INPUT_TYPE` (`device`, `ffmpeg`, `null`; the container uses `null`); latency with `AUDIO_PROFILE`, a script's `-L`, or console `latency :low`.
+- Check a machine with `bin/audio_check.rb` and `bin/midi_check.rb`; stalls with `bin/latency_probe.rb` (latency_probe.md).
+- JACK: `spec/lib/mb/sound/jack_spec.rb` needs `jackd2` (skips without it); never `jack_port_unregister` on an active client.
+- Close things at exit through `ExitClose`, never an `at_exit` block of their own.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

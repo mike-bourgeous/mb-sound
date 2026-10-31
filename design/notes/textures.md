@@ -4,6 +4,11 @@
 Texture nodes in `fast_texture` and `fast_resonator` (exact Ruby mirrors, the same at any buffer size): `dust` sparse random impulses, `drift` random points joined smoothly (B-spline, holds, jitter, any Curve), `trig.resonate(:bowl | :gong | :bell | ...)` modal banks with physically motivated ratios and beating doublets (`GraphNode::ModalResonator`), `noise(:pink)`/`noise(:brown)`, and `sig.sounding(hold:, fade:)`, a gate open while a sound is above -90 dB.  Randomness is splitmix64, seeded per node; in a sleeping voice (Synth lane, sub-lane, drum voice) dust, drift, and noise catch up by the frames slept, at their inputs' last values (`catch_up_draws`, delay-sleep-1; graph_nodes.md, Node traits).  Help `help :textures`, `help :recipes`; demo `bin/songs/critters.rb`.
 <!-- /summary -->
 
+## Quick reference
+
+- `dust`, `drift`, `trig.resonate(:bowl | :gong | :bell)`, `noise(:pink)` / `noise(:brown)`, `sig.sounding(hold:, fade:)`.
+- Kernels in `fast_texture` and `fast_resonator` (exact mirrors); spec `spec/lib/mb/sound/graph_node/texture_spec.rb`; demo `bin/songs/critters.rb`; help `help :textures`, `help :recipes`.
+
 Built on branch textures-1 (2026-10-14) from the persona panel's requests
 (Kaede Rowntree, the ambient persona: friction items F2, F9, F10, F19 on
 `research-persona-zen` 88580e49; panel transcript on

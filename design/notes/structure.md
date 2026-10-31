@@ -4,6 +4,11 @@
 `analyze_form(source)` (alias `analyze_structure`; `StructureMethods`, `lib/mb/sound/structure.rb` + `structure/`, pure Ruby + Numo) finds tempo, beats, bars, and meters in a file, audio data, or a graph and returns a `Structure::Result`: our renders use the render's exact grid, imported audio is tracked (comb-autocorrelation tempo, a constant-tempo grid, a downbeat Viterbi allowing 2- and 3-beat bars).  Phase S2: `sections` with letter labels (bar-feature SSM, Foote novelty, DP over bar lines), `form`/`flow_ruby`, `markers!` (`:analysis` markers), `compare(take.form)`.  Shares `MB::Sound::Analysis` (STFT, chroma, keys, spectra) with the other listening tools.
 <!-- /summary -->
 
+## Quick reference
+
+- `analyze_form(source)` (alias `analyze_structure`) returns a `Structure::Result` (tempo, beats, bars, meters, `sections`, `form`, `flow_ruby`); `markers!`, `compare(take.form)`.
+- Code `lib/mb/sound/structure.rb` + `structure/`, shared analysis in `lib/mb/sound/analysis.rb`; spec `spec/lib/mb/sound/structure_spec.rb`; help `help :analysis`.
+
 The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 Audio in, song structure out, as a later arrangement phase (maintainer, 2026-10-11: "The music information retrieval idea for identifying structures is a great idea; let's build that at some point, maybe as a later arrangement phase").  Research spike: branch `research-structure-analysis` (45df0158), `research/structure-analysis/README.md` (method, results, phases S1-S4, the prototype `structure_analysis.rb`, ground truth and scoring in `ground_truth.rb`/`evaluate.rb`).

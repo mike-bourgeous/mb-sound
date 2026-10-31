@@ -6,6 +6,12 @@ Without a chain, realtime live output ends in a transparent -1 dBFS `Session::Sa
 Mastering presets (`master :club`, `:streaming`, `:quiet`, `:vinyl`, `:hot`, `:match, reference:`; `mix.master(:club)` anywhere; `masters`) are frozen `Mastering::Preset` values: renders reach their loudness target exactly in two passes (`Mastering::Targeting`), live uses the preset's drive or `ride: true`; `:match` takes a reference track's loudness (`measure: :integrated | :loudest | :histogram`, read in both alike), true peak, and (renders) spectral tilt.
 <!-- /summary -->
 
+## Quick reference
+
+- Chains: `master { |mix| mix.softclip }`, `master nil` (bypass), `post: true`; presets `master :club` (`:streaming`, `:quiet`, `:vinyl`, `:hot`, `:match, reference:`), `masters` lists them, `render 'x.flac', master: :club { song }`.
+- Targeting: `measure:` `:integrated` / `:loudest` / `:bars` / `:sections` (`:match`: `:integrated` / `:loudest` / `:histogram`); reports from `Mastering::Targeting.last`; `Mastering.reference(path)` shows a reference.
+- Code `lib/mb/sound/mastering.rb` + `mastering/`, `lib/mb/sound/session/master.rb`; specs `spec/lib/mb/sound/mastering_spec.rb`, `spec/lib/mb/sound/mastering_match_spec.rb`; help `help :mastering`.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

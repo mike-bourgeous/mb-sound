@@ -4,6 +4,12 @@
 `lib/mb/sound/filter/` has 16+ filter types (`#process`/`#reset`; `Filter::Cookbook` designs).  Graph cookbook filters (`node.filter(:lowpass, cutoff:, quality:)`, `peq`) build `Filter::SVF`, whose parameters may move every sample (`structure: :biquad` for the old biquad); `sig.lp4(cutoff, resonance:)` is a CEM3379-style 4-pole and `sig.diode(...)` a TB-303-style ladder with the same knobs (`v.reso(...)` in voices); `sig.formant(:a, :o, morph:, voice:, shift:, width:)` five vowel bandpasses.  Convention: where mb-sound departs from its hardware model the playable version is `:musical` (default) and the faithful one `:hardware`.  Filter states flush denormals on an 800-sample grid of their own time, so tails match at any buffer size.
 <!-- /summary -->
 
+## Quick reference
+
+- Graph filters: `node.filter(:lowpass, cutoff:, quality:)` (an SVF; `structure: :biquad` for the direct form), `peq`, `sig.lp4(cutoff, resonance:)`, `sig.diode(...)`, `v.reso(...)` in voices, `sig.formant(:a, :o, morph:)`.
+- Code `lib/mb/sound/filter/` (`#process`/`#reset`, `Filter::Cookbook` designs); spec `spec/lib/mb/sound/filter/svf_spec.rb` and its neighbors; help `help :filters`.
+- Pass `cutoff:` a node to move a cookbook filter from outside; `:musical` (default) vs `:hardware` modes where the model departs from the hardware.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

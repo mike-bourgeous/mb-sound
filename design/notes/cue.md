@@ -5,6 +5,12 @@
 CUE is dry (pre-bus, pre-master) and never reaches renders, stems, or taps; phones blend with knobs `:phones`/`:cue_mix`, and `cue_output` puts CUE on channels 3-4, split left/right, or off.
 <!-- /summary -->
 
+## Quick reference
+
+- `cue :acid, sound` (CUE only), `cue :drums` (pre-listen), `cue :drop` (a scene's changed tracks), `launch :acid` (to MAIN at the launch point), `uncue`, `cues`.
+- Phones: knobs `:phones` and `:cue_mix` (`cue_mix 0.3, save: true`); `cue_output :split` and the other outputs below.
+- CUE never reaches renders, stems, or taps.  Spec `spec/lib/mb/sound/session/cue_spec.rb`; help `help :cue`.
+
 Branch cue-1 (2026-10-18).  The maintainer picked "CUE/MAIN staging now" from the never-asked terminal UI study questions (`research-terminal-ui`, README "Staging: CUE and MAIN"): a DJ-style cue path, so a part can be heard in the headphones, in time with the set, before the audience hears it.  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 ## API

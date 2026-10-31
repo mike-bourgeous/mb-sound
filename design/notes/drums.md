@@ -4,6 +4,12 @@
 `tr808(source, **knobs)` and `tr909(source, **knobs)` (`lib/mb/sound/drums.rb`, `drums/`) are `Drums::Kit`s of resonator, metal-bank, noise, and sample voices, played by a grid `Sequence::Kit` or any MIDI source, with per-voice knob Hashes, accents, chokes, flams, and `outputs: :separate`.  The kit builder (`kit { voice :kick do |h| ... end; choke ... }`, `Drums::Machine`/`Builder`/`Hit`) makes custom kits that tracks, recording, and swaps treat like an 808.  Idle voices sleep only on the 800-sample `Synth::SKIP_GRID` and wake on the exact hit, so output is the same at any buffer size; their noise (and other random streams) catches up by the frames they slept, so a hit draws the noise it would have drawn awake (delay-sleep-1, 2026-10-30; filters between the noise and the envelope keep their pre-sleep state).
 <!-- /summary -->
 
+## Quick reference
+
+- `tr808(grid(16, bd: 'x...', snare: '..x.'), bd: { decay: 0.8 })`, `tr909(...)`, `outputs: :separate`; custom kits: `kit(source) { voice(:kick) { |h| h.body(50) + h.click }; tr808 :open_hat; choke :open_hat, :closed_hat }`.
+- Code `lib/mb/sound/drums.rb`, `lib/mb/sound/drums/` (`Kit`, `Voice` with its `Tap`s, `Machine`, `Builder`); spec `spec/lib/mb/sound/drums/kit_spec.rb`; demo `bin/songs/kit_builder.rb`; help `help :drums`.
+- Idle voices sleep on the 800-sample `Synth::SKIP_GRID` and catch their noise up, so output is the same at any buffer size.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

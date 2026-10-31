@@ -4,6 +4,12 @@
 "Ears win": sound is the test, exactness only where it is heard or a workflow needs it.  The golden set (`golden/set.rb`: song scripts and presets across the maintainer's genres) is re-rendered by `rake golden:check` and compared by perceptual fingerprints (`MB::Sound::SoundGuard`, `lib/mb/sound/sound_guard/`) against calibrated thresholds.  Changes to DSP, presets, or the plan layer run it; a failure goes to the maintainer as a Bench set and only his verdict re-approves (`rake golden:approve[name] RUN=dir`), never an agent.
 <!-- /summary -->
 
+## Quick reference
+
+- `rake golden:check` (or `golden:check[techno]`), `rake golden:list`; the set is `golden/set.rb`, fingerprints from `MB::Sound::SoundGuard`.
+- Run it for changes to DSP, presets, or the plan layer; a moved piece goes to the maintainer as a Bench set, and only his verdict re-approves (`rake golden:approve[name] RUN=dir`), never an agent.
+- Spec `spec/lib/mb/sound/sound_guard_spec.rb`.
+
 The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 ## Why (maintainer, 2026-10-22)

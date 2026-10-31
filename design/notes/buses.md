@@ -6,6 +6,12 @@ Routing belongs to player names: `track(:keys, send: { verb: -12.db })`, `track(
 Readers (`GraphNode::BusTap`: `duck(:drums)`, `duck(:drums, only: :kick)`, `bus(:drums)`) work anywhere; buses ring out and sleep on the 800-frame grid, so output is the same at any buffer size; `render(stems:)` stems sum to the pre-master mix.
 <!-- /summary -->
 
+## Quick reference
+
+- `bus(:verb) { |sig| sig.reverb(:hall, mix: 1) }`, `buses`, `routes`; routing on players: `track(:keys, send: { verb: -12.db })`, `track(:kick, to: :drums)`, `feed :keys, :verb, -6.db, over: 2` (undoable).
+- Readers anywhere: `duck(:drums)`, `duck(:drums, only: :kick)`, `bus(:drums)`; `render(stems:)` stems sum to the pre-master mix.
+- Spec `spec/lib/mb/sound/session/buses_spec.rb`; help `help :buses`.
+
 Branch buses-1 (2026-10-13).  The maintainer queued "Buses, sends, bus sidechain" (persona consensus B; Kez Volta asked for `duck(:drums, only: :kick)`; earlier: longer delay and reverb tails should come through "future effect sends" rather than delay discovery).  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 ## API

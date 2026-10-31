@@ -4,6 +4,12 @@
 A generator is a looping Clip whose events per cycle are a pure function of (seed, cycle): every draw is counter-based (`Generative::Dice`, splitmix64 over the seed and a key path, C `fast_generative` with an exact Ruby mirror), so cycles come out the same cold or in order (seeks, takes, documents, any buffer size).  Probability scales (`Weights`, `Chord`, `Field`, `Harmony`) are printable values with operators; `generate`, `strikes`, `melody`, `motifs` (phrase memory), and `beats` (evolving drum rows) make generator clips, steerable by knobs read once per cycle at a decision point; `markov` and `lsystem` write long forms that `flow { generate ... }` plays and `Form::Plan` works out ahead.  Help `help :generative`, `help :long_form`.
 <!-- /summary -->
 
+## Quick reference
+
+- Generators: `generate`, `strikes`, `melody`, `motifs`, `beats`; long forms `markov`, `lsystem` played by `flow { generate ... }`; scales `Weights`, `Chord`, `Field`, `Harmony`.
+- Every draw is counter-based (`Generative::Dice`, `fast_generative`); seeds come from `MB::Sound.seed` / `next_seed`.
+- Specs `spec/lib/mb/sound/generative/`; demo `bin/songs/generative_demo.rb`; help `help :generative`, `help :long_form`.
+
 The generative layer, phase G1 (branch `gen-1`, 2026-10-15; follow-ups `gen-2`), G2, phrase memory (branch `gen-3`, 2026-10-16), G3, knob steering and evolving rhythms (branch `generative-g3`, 2026-10-28), and G4, long form (branch `generative-g4`, 2026-10-29), built to the proposal of the research spike `research-generative` (commit be0a9e79, `research/generative/README.md` and `proposal.md`; never merged).  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 At a glance (compact forms; the sections below have the details):

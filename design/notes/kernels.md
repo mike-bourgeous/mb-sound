@@ -4,6 +4,12 @@
 `MB::Sound::Kernels` (`lib/mb/sound/kernels.rb`, kernels-1) registers every C kernel beside its Ruby mirror, and one switch picks which runs: `MB::Sound.kernels = :c` (default) `| :ruby | :check`, `Kernels.set(fast_plan: :ruby)` per kernel or group, `Kernels.with(:ruby) { ... }`, `MB_SOUND_KERNELS=ruby` (or `check`, `c,fast_ui=ruby`).  `:check` runs the mirror on deep copies, then C on the originals (so results are `:c`'s), and raises `Kernels::Mismatch` on any difference (exact unless the entry's tolerance).  Call sites dispatch through `Kernels.svf(...)` or the owner's method (`Tone#run_kernel`); lib/ calls C only from `*_c` methods.  Guards: `kernels_guard_spec.rb` (every Fast* function registered or in `UNMIRRORED` with a reason), `kernels_check_spec.rb` (check mode over the graph sweep and extra scenes).
 <!-- /summary -->
 
+## Quick reference
+
+- Switch: `MB::Sound.kernels = :c | :ruby | :check`, `Kernels.set(fast_plan: :ruby)`, `Kernels.with(:ruby) { ... }`, `MB_SOUND_KERNELS=check` (or `ruby`, `c,fast_ui=ruby`).
+- Register a new kernel with its mirror beside it (`Kernels.register :name, c:, ruby:`); lib/ calls C only from `*_c` methods.
+- Guards: `spec/lib/mb/sound/kernels_guard_spec.rb`, `spec/lib/mb/sound/kernels_check_spec.rb`.
+
 ## Why (kernels-1, 2026-10-30)
 
 The arch-core review (October, finding 6) counted seven ways mirrors were switched in (`MB_SOUND_PLAN=ruby`, `MB_SOUND_REVERB=ruby`, Reverb::Network's `ruby:` keyword, `Envelope#sample_ruby`, `Generative::Dice.mode`, `Plot.native`, `Notes.fast_paths`), plus more found while migrating (`Tone#sample_ruby`, `BusMeter.native`, `MasterMeter.native`, `Smoother.run(c:)`, `Unison::Detune`'s `kernel:` keyword, the per-object `native:` keywords of plots and UI screens), and no way to run everything in Ruby.  The maintainer: "I'd generally prefer avoiding split realities.  Change something once across the board."  So every kernel moved at once (option C of the review), and the old switches are gone (no compatibility aliases).

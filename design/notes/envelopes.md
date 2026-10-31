@@ -4,6 +4,11 @@
 `MB::Sound::Envelope` (`fast_envelope`, mirror `Envelope.process_ruby`) is a state machine over curved segments landing exactly on target at whole samples: curves in signed dB (presets `:analog` default, `:snappy`, `:pad`, ...), shapes `:exp`/`:s`, multi-segment `env([[level, time, curve, shape], ...], release_at:, loop:)`, inputs `gate:`/`trigger:`/`velocity:`/`choke:`, and `.sensitivity(range | nil)` / `.no_velocity` in chains.  Constructors `adsr`, `env`, `amp_env`, `fm_env`, `filter_env`, `sq80_env`.  Kernel "runs" specialize only on constants of the patch (user rule).
 <!-- /summary -->
 
+## Quick reference
+
+- `adsr`, `env([[level, time, curve, shape], ...], release_at:, loop:)`, `amp_env`, `fm_env`, `filter_env`, `sq80_env`; curves `:analog` (default), `:snappy`, `:pad`; shapes `:exp`, `:s`; inputs `gate:`, `trigger:`, `velocity:`, `choke:`; `.sensitivity(range)`, `.no_velocity`.
+- Code `lib/mb/sound/envelope.rb` (kernel `fast_envelope`, mirror `Envelope.process_ruby`); spec `spec/lib/mb/sound/envelope_spec.rb`; plot one with `bin/plot_envelope.rb`; help `help :envelopes`.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

@@ -4,6 +4,11 @@
 `sample.grains(density:, size:, position:, scan:, pitch:, ...)` (aliases `granular`, `cloud`; `GraphNode::Grains`, a stereo MultiOutput and a plan boundary) plays a cloud of windowed reads of a Sample's band-limited levels, every option a number, Length, knob, or node read per grain onset; `v.grains(sample, ...)` key-tracks in synth voices.  Kernel `FastSampler.grains` (exact mirror `Granular::KernelRuby`): onsets on exact samples, six splitmix64 draws per onset, a fixed number of slots.  `Sample#stretch(r, mode:)` offers `:cyclic` (S950), `:spectral` (phase vocoder with identity phase locking and kept transients), `:paul` (Paulstretch), and `:slice` (loops.md), with `randomize:` between vocoder and Paulstretch phases.  Help `help :granular`.
 <!-- /summary -->
 
+## Quick reference
+
+- `sample.grains(density:, size:, position:, scan:, pitch:)` (aliases `granular`, `cloud`; a stereo bundle), `v.grains(sample, ...)` in voices; `sample.stretch(r, mode: :cyclic | :spectral | :paul | :slice)`.
+- Kernel `FastSampler.grains` (mirror `Granular::KernelRuby`); spec `spec/lib/mb/sound/granular_spec.rb`; demo `bin/songs/granular_song.rb`; help `help :granular`.
+
 Branch `granular-1` (2026-10-14).  The maintainer picked "Granular + spectral stretch" from the Did You Know notes "Granular synthesis" and "The four families of time-stretching" (both "note for later" until then).  Builds on the sampler (`sampler.md`: `Sample`, its band-limited playback levels, `fast_sampler`) and the cyclic `Sample#stretch` (`fit: :auto`).
 
 ## API

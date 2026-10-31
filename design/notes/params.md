@@ -4,6 +4,12 @@
 `MB::Sound::Param` (`lib/mb/sound/param.rb`) is the one frozen declaration record: knob specs, MIDI control specs, script options, graph-document `param`/`knob` lines, rack knobs, ChannelMixer params, and ArgTypes signatures all build one.  Types and units come from the values (`2400.hz`, `-12.db`), names imply ranges, `(lo..hi).at(default)` is the canonical ranged default, Integer ranges are steps; one range mapping, `Param::Scale`, maps positions along range and curve for params, knobs, controllers, ramps, crossfades, and velocity peaks, and `MB::Sound::ValueSource` is the one coercer and reader of values that move (numbers, knob names, knobs, nodes, params; one `value_at(pos, frame:, transport:, stream:)`).  Checks run at declaration, load, build, and turn (never per sample), through `live_error`; a guard spec checks every declaration in lib/, presets/, and bin/.
 <!-- /summary -->
 
+## Quick reference
+
+- Declare with `MB::Sound::Param` (knobs, options, document `param`/`knob` lines, rack knobs): units from values (`2400.hz`, `-12.db`), `(lo..hi).at(default)` ranged defaults, `Param::Scale` for positions.
+- Read moving values through `MB::Sound::ValueSource` (`value_at(pos, frame:, transport:, stream:)`); checks run at declaration, load, build, and turn, never per sample.
+- Guard `spec/lib/mb/sound/param_guard_spec.rb` checks every declaration in lib/, presets/, and bin/.
+
 The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 Built by param-1 (2026-10-24), phase 1 of the library design's critical path ("Param record only"; the design is in the workbench, `research/library-design/design-draft.md`, Params section, and `typing-survey.md` sections 3-4).  Phase 2 (Presettable, Library::Index, instruments as racks, shelves) builds on it.

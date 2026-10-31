@@ -4,6 +4,11 @@
 `sig.chorus(:juno1 | :juno2 | :juno12 | :lush, rate:, depth:, mix:, bbd: false)` (`GraphNode::Chorus`, self-contained in `graph_node/chorus.rb` and `chorus_nodes.rb` for a later effects project) is a Juno-60-style two-tap chorus returning a stereo bundle: mono in like the Juno, clean by default, `bbd: true` adds the board's filters and hiss.
 <!-- /summary -->
 
+## Quick reference
+
+- `sig.chorus(:juno1 | :juno2 | :juno12 | :lush, rate:, depth:, mix:, bbd: false)` (alias `juno_chorus`) returns a stereo bundle from mono input.
+- Code `lib/mb/sound/graph_node/chorus.rb` and `chorus_nodes.rb` (self-contained); spec `spec/lib/mb/sound/graph_node/chorus_spec.rb`; help `help :effects`.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

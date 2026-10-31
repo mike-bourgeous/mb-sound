@@ -4,15 +4,15 @@
 Every named thing (presets at every scale: effects, instruments, kits, clips, masters, sets) is a frozen `Library::Entry` in one `Library.index` (`lib/mb/sound/library.rb` + `library/`), found by name, by `find 'dark bass'`, or through the `L.fx`/`L.inst`/`L.kit` heads.  Classes with presets `extend Presettable` (one `preset` line each); shelves are searched session racks, project, user (a git repository), gems, then built-ins, and the first match wins.  `save` never replaces (`save!`, `bump: true`); library files load through `Library::FileLoader`, never eval; tracks take instrument entries as patches.  `Library::Bench` (`L.fx.reverb.bench`, `bin/preset_bench.rb reverb`) renders presets on standard material, loudness-matched, as Listening Bench sets (`--vs` before/after, `--notes` reads verdicts back); `entry.audition(:break)` is one such graph.  `audition x` plays one (CUE, else MAIN).
 <!-- /summary -->
 
-Branch library-core-1 (2026-10-26): phase 2 of the sound-design path, "the library core".  The design conversation is in the workbench (`research/library-design/`: `STATE.md` holds the decisions with dates, `design-draft.md` the draft and the revisions from Teo's critique, `teo-critique/critique.md` the reasoning).  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
-
-## Quick reference (from CLAUDE.md, 2026-10-30)
+## Quick reference
 
 - Presettable classes: `extend Presettable`, `preset_family :reverb, kind:, keys:, apply:`, `param`, one `preset :hall, ..., tags:, about:, aliases:` line each; `X.presets`, `.preset_settings(:hall)`, `.preset_entry`.  Migrated: Reverb, Chorus, ModalResonator (`.from_preset`), Envelope (`Envelope.from_preset`, `Envelope::Curves`), Lofi, `DynamicsMethods::Squeeze`, Mastering (`Mastering.from_preset`, `.built_presets`), SQ80; Genre::Patches and tr808/tr909 register entries in code.
 - Library files: `library 1`, family lines (`reverb :big_plate, decay: 3.5, tags: %i[bright]`), `instrument :x do |midi| ... end` (irack), `chain :x do |sig| ... end` (arack), `clip :x, seq(...)`.
 - Console help: `help :library`.  Curated instrument knobs come from the synth scripts' `*_KNOBS` tables (bin/save_presets.rb).
 - Struck instruments: `struck(clip, :bar)`, `L.inst.bar` (every resonator preset by reference), `L.fx.bar.ping(C5)`; auditions: `play L.fx.bar` / `play L.inst.x` / `play L.fx.hall` (`Library::Audition`; effects on the Bench arp).
 - Bench sets: `bin/preset_bench.rb reverb -d /app/tmp/listening` (or `L.fx.reverb.bench`), `--vs master-ai`, `--notes export.json SET_ID`; `L.fx.hall.audition(:break)`, `.auditions` (below).  A playing track given another instrument rebuilds at its launch point, one undo step (arrangement.md, Library instruments).
+
+Branch library-core-1 (2026-10-26): phase 2 of the sound-design path, "the library core".  The design conversation is in the workbench (`research/library-design/`: `STATE.md` holds the decisions with dates, `design-draft.md` the draft and the revisions from Teo's critique, `teo-critique/critique.md` the reasoning).  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 ## What it is
 

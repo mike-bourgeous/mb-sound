@@ -4,6 +4,12 @@
 `GraphNode` (`lib/mb/sound/graph_node.rb`) is mixed into any class with `#sample` and gives the fluent DSL (`123.hz.saw.lp4(800).softclip`); DSL methods live in `lib/mb/sound/graph_node/*_methods.rb`, node types in `lib/mb/sound/graph_node/`, traversal in `Traversable`.  Every consumer calls `get_sampler` on the nodes it stores, so shared nodes branch through a `Tee` (lockstep branches share one frozen buffer: copy a buffer before modifying it only if `buf.frozen?`).  Sums ring until every input ends (`.ring(:first)` opts out), products end with their first input; `node.at(x)` scales any node; DSL names are reserved on node classes; every node class declares `node_traits` (memory, timeline, idle check; `NodeTraits`), and sleepers and tails share one `QuietRun`.
 <!-- /summary -->
 
+## Quick reference
+
+- DSL methods in `lib/mb/sound/graph_node/*_methods.rb`, node types in `lib/mb/sound/graph_node/`; consumers call `get_sampler` on stored inputs; copy a buffer before modifying it only if `buf.frozen?`.
+- New node classes declare `node_traits` and appear in the graph sweep (`spec/support/graph_sweep.rb`, `spec/lib/mb/sound/graph_sweep_spec.rb`) or its `EXEMPT` list.
+- Check: `MB_SOUND_CHECK_SHARED=1` (shared-buffer writes), `spec/lib/mb/sound/render_allocations_spec.rb` (allocation budgets), `bin/graph_profile.rb` (cost per node).
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 
