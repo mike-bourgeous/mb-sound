@@ -1188,7 +1188,7 @@ module MB
           # (asleep, or not started yet) before the segment
           bus_read_shared(b, @frame + p0, chains)
           begin_bus_read(p0)
-          chains.each { |c| render_master_chain(c, seg, out, n, rate) }
+          chains.each { |c| render_master_chain(c, seg, out, n, rate, @frame + p0) }
           chains.each { |c| c.read_to = @frame + p1 if c.started }
 
           @mutex.synchronize {

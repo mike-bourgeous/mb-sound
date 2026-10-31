@@ -295,12 +295,14 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       expect(seen.stream.source).to be_a(MB::Sound::MIDI::FileSource)
 
       # The synth (sustain pedal on) rings past the file's end, then stops
-      # after a second below Session's -90 dB quiet threshold
+      # a second after it ended (its lanes idle, a little after its last
+      # sound above Session's -90 dB quiet threshold; on the exact frame
+      # since session-2, so a second and a grid cell at most)
       quiet = MB::Sound::QuietRun::QUIET
       data = MB::Sound.read(outfile)[0]
       last_sound = (0...data.length).select { |i| data[i].abs >= quiet }.last / 48000.0
       expect(last_sound).to be > music_end
-      expect(data.length / 48000.0 - last_sound).to be_within(0.1).of(1)
+      expect(data.length / 48000.0 - last_sound).to be_between(1, 1.2)
 
       # A mono voice applies the sustain pedal too: the pedal lifts at the
       # file's end (0.6875 s), after the note-off at 0.5 s, and the voice

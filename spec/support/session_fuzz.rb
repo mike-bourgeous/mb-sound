@@ -444,16 +444,19 @@ module SessionFuzz
 
   def peak(mix) = mix.map { |c| c.length == 0 ? 0.0 : c.abs.max }.max || 0.0
 
-  def compare(ref, got, tolerance:, label:, from: 0)
+  def compare(ref, got, tolerance:, label:, from: 0, same_length: false)
     return "#{label}: #{got.length} channels, expected #{ref.length}" if ref.length != got.length
 
     ref.zip(got).each_with_index do |(r, g), i|
-      # (a render ending early, once every sound ended, stops at the end
-      # of the buffer after the one where they ended: lengths may differ by
-      # up to two 800-frame buffers of silence; seed 140: 131019 frames at
-      # 367, 132000 at 800)
+      # (renders end on the frame their sounds and tails ended at any
+      # buffer size since session-2, so +same_length+ renders must match
+      # in length; before, a render ending early stopped at the end of the
+      # buffer holding its end: seed 140, 131019 frames at 367, 132000 at
+      # 800; other relations may still differ by up to two 800-frame
+      # buffers of silence)
       n = [r.length, g.length].min
       longer = r.length > n ? r[n..] : (g.length > n ? g[n..] : nil)
+      return "#{label}: channel #{i} has #{g.length} frames, expected #{r.length}" if same_length && longer
       if longer && (longer.length > 1600 || longer.abs.max > tolerance)
         return "#{label}: channel #{i} has #{g.length} frames, expected #{r.length} (the extra frames peak at #{longer.abs.max})"
       end
@@ -541,7 +544,7 @@ module SessionFuzz
     when :buffer_size
       ref = render(code, song.bars)
       got = render(code, song.bars, buffer_size: 367)
-      compare(ref, got, tolerance: 1e-4 * [peak(ref), 1e-2].max, label: '367-frame buffers vs 800')
+      compare(ref, got, tolerance: 1e-4 * [peak(ref), 1e-2].max, label: '367-frame buffers vs 800', same_length: true)
     when :plan
       ref = render(code, song.bars, plans: false)
       got = render(code, song.bars)

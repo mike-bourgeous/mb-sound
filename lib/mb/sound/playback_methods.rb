@@ -1,5 +1,6 @@
 require_relative 'render_window'
 require_relative 'render_peak'
+require_relative 'render_hold'
 require_relative 'mix_report'
 
 module MB
@@ -743,20 +744,31 @@ module MB
         return true unless session.running?
 
         rate = session.output.sample_rate
-        quiet = QuietRun.new(QuietRun::QUIET_SECONDS * rate, mode: :buffer)
-        tail = 0
+        window = (QuietRun::QUIET_SECONDS * rate).round
+        max_tail = (Session::MAX_TAIL_SECONDS * rate).round
+        # (frame-exact, session-2: the quiet stretch counts from the frame
+        # the last sound ended, or its tail's last loud sample, not from
+        # whole buffers)
+        quiet = nil
+        tail_from = nil
+        done = false
         tap = session.add_tap { |mix|
+          n = mix[0]&.length || 0
+          f0 = session.frame - n
           if session.idle? && !session.schedule_due?
-            tail += mix[0].length
-            quiet.advance_buffer(mix[0].length, !session.quiet?(mix))
+            unless quiet
+              tail_from = MB::M.clamp(session.sound_end_frame, f0, session.frame)
+              quiet = QuietRun.new(window, from: tail_from)
+            end
+            quiet.track_all(mix, f0)
+            done = true if session.frame >= quiet.ends_at || session.frame - tail_from >= max_tail
           else
-            tail = 0
-            quiet.reset(quiet.at)
+            quiet = nil
           end
         }
 
         deadline = timeout && MB::U.clock_now + timeout
-        until quiet.done? || tail >= Session::MAX_TAIL_SECONDS * rate
+        until done
           return false if deadline && MB::U.clock_now > deadline
           return true unless session.running?
           Internal.wait_audio(session, 0.05)
@@ -1040,6 +1052,9 @@ module MB
         current = Sequence.current_transport
         transport = Sequence::Transport.new(bpm: bpm || current.bpm, bar_length: current.bar_length)
         output = filename.respond_to?(:write) ? filename : file_output(filename, channels: channels, overwrite: overwrite)
+        # The last buffer waits, so the render can end inside it, on the
+        # frame its sounds or tails ended (see #render_end)
+        output = hold = RenderHold.new(output)
         # Files keep their peak, to warn if the mix went over full scale
         output = peak_meter = RenderPeak.new(output) unless filename.respond_to?(:write)
         # A pre-roll plays the song up to +from+ without writing it
@@ -1161,6 +1176,7 @@ module MB
             session.schedule_waiting?(repeating: bounded ? true : false, before: end_time&.call)
         }
         session.advance_idle = true
+        mix = nil
         begin
           until frames_left.call <= 0 || (session.idle? && !waiting.call)
             # The end bar's frame is found in the span holding it (see
@@ -1187,13 +1203,18 @@ module MB
           where = filename.is_a?(String) ? "#{filename} keeps" : 'the output got'
           warn "render stopped at #{progress.clock(frames.to_f / rate)} (Ctrl-C): #{where} the #{(frames.to_f / rate).round(1)} seconds rendered so far"
         elsif frames_left.call > 0
-          frames += render_tail(session, frames_left.call, buffer_size)
+          # Every sound ended: the render ends on the frame the last one did
+          # (or where the tails after it went quiet), not at the end of the
+          # buffer holding it (session-2)
+          # (or the time of a scheduled block it kept time for)
+          ended = [session.sound_end_frame, session.schedule_ran_frame || 0].max
+          frames += render_end(session, hold, mix, ended, frames_left.call, buffer_size)
         elsif tail && (bars || seconds || to) && !interrupted
           # The song reached its end; stop anything still playing and let the
           # master effects ring out
           session.remove(fade: 0)
           # (up to Session::MAX_TAIL_SECONDS, or what max_seconds: leaves)
-          frames += render_tail(session, max_seconds ? (max_seconds * rate).round - frames : Float::INFINITY, buffer_size)
+          frames += render_end(session, hold, nil, session.frame, max_seconds ? (max_seconds * rate).round - frames : Float::INFINITY, buffer_size)
         end
 
         if !interrupted && bars.nil? && seconds.nil? && to.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
@@ -1212,7 +1233,7 @@ module MB
         end
 
         if meter
-          meter.finish(session.frame)
+          meter.finish(session.frame - (hold.trimmed || 0))
           MixReport.last = meter.report
           puts MixReport.last unless mastering[:defer_report]
         end
@@ -1223,7 +1244,8 @@ module MB
         failed = true
         raise
       ensure
-        session&.stems&.close(session.frame)
+        session&.stems&.close(session.frame - (hold&.trimmed || 0))
+        hold&.flush
         session&.close
         # An error before the first frame (a --from the song lacks, a patch
         # that raises) leaves no empty file behind (ux-fix-2)
@@ -1241,25 +1263,40 @@ module MB
         retarget_live_midi if respond_to?(:retarget_live_midi, true)
       end
 
-      # Renders the tail of a session's master effects after the last player
-      # stops (see #render), for up to +max_frames+.  Returns the number of
-      # frames rendered.
-      def render_tail(session, max_frames, buffer_size)
-        return 0 unless session.master_active? || session.buses_awake?
+      # Ends a render whose sounds ended at session frame +ended+ (see
+      # #render): renders the tail of the master effects and buses after
+      # it, if they are active (for up to +max_frames+ more, and
+      # Session::MAX_TAIL_SECONDS past +ended+), until
+      # the mix has been quiet for QuietRun::QUIET_SECONDS, ending on the
+      # exact frame where that quiet stretch completes; then drops the
+      # frames already rendered past the end from +hold+'s last buffer
+      # (session-2, the maintainer's "Exact frame": the file is the same
+      # length at any buffer size; before, the tail ran in whole buffers
+      # and a render ended at the end of the buffer holding its end).
+      # Returns the change in frames rendered (negative for a trim).
+      def render_end(session, hold, last_mix, ended, max_frames, buffer_size)
+        start = session.frame
+        ended = MB::M.clamp(ended, start - hold.held_frames, start)
+        finish = ended
+        if session.master_active? || session.buses_awake?
+          rate = session.output.sample_rate
+          limit = MB::M.min(start + max_frames, ended + (Session::MAX_TAIL_SECONDS * rate).round)
+          quiet = QuietRun.new((QuietRun::QUIET_SECONDS * rate).round, from: ended)
+          quiet.track_all(last_mix, start - last_mix[0].length) if last_mix && !last_mix.empty? # (the frames since +ended+ already rendered)
+          while true # (not loop do: see Session#render_player)
+            finish = MB::M.min(quiet.ends_at, limit)
+            break if session.frame >= finish
 
-        rate = session.output.sample_rate
-        max_frames = MB::M.min(max_frames, (Session::MAX_TAIL_SECONDS * rate).round)
-        quiet = QuietRun.new(QuietRun::QUIET_SECONDS * rate, mode: :buffer)
-
-        frames = 0
-        while frames < max_frames && !quiet.done?
-          count = MB::M.min(buffer_size, max_frames - frames)
-          mix = session.process_buffer(count)
-          frames += count
-          quiet.advance_buffer(count, !session.quiet?(mix))
+            count = MB::M.min(buffer_size, finish - session.frame)
+            mix = session.process_buffer(count)
+            break if mix.empty?
+            quiet.track_all(mix, session.frame - mix[0].length)
+          end
         end
 
-        frames
+        cut = session.frame - finish
+        hold.trimmed = hold.trim(cut) if cut > 0
+        session.frame - start - (hold.trimmed || 0)
       end
 
       # Runs a background playback command with the current session (see

@@ -124,10 +124,22 @@ module MB
           session = Session.existing
           return false unless session&.running? && (!session.idle? || session.schedule_due?)
 
+          (message = forever_message(session)) && warn(message)
           MB::Sound.wait
           true
         rescue Interrupt
           false
+        end
+
+        # The warning for a song file whose looping clips will play until
+        # Ctrl-C (the maintainer, 2026-10-30: "Warn"), or nil.
+        def self.forever_message(session)
+          names = session.looping_players
+          return nil if names.empty?
+
+          list = names.map(&:inspect).join(', ')
+          "#{File.basename($PROGRAM_NAME)}: #{list} #{names.length == 1 ? 'plays a looping clip' : 'play looping clips'}, so this plays until Ctrl-C " \
+            "(`.repeat(4)` instead of `.loop`, `.until(8.bars)`, or a scheduled stop: `at_bar(9) { stop #{names.first.inspect} }`)"
         end
       end
 

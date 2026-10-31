@@ -129,6 +129,7 @@ module MB
         :carried, # ([start, launch] of the player a carrying rebuild replaced; see #render_player)
         :handed, # (true for a player whose state a carrying rebuild took: it stops on the swap frame; see #remove_now)
         :clip, # (the clip a track's patch was built for, or nil; see #built_clip)
+        :ends_after, # (nodes whose ending starts its quiet ring-out; Tails#end_after)
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
@@ -364,6 +365,7 @@ module MB
         # Session.span; MIDI::Stream#spy)
         @span = Span.new(self, 0, 0r, 0r, false, 48000, 0)
         @player_frame = nil
+        @sound_end_frame = 0 # (see #sound_end_frame)
         @asleep_ids = nil # (unused since dropouts-2; see Strip#span_graphs)
         @span_graph_scratch = nil
         @kept_scratch = nil # (see Strip#read_kept_graphs)
@@ -449,6 +451,21 @@ module MB
           p = @mutex.synchronize { @players.values.select { |o| o.name == name && o.current? }.last || @stopped[name] }
           p&.timeline_nodes || @changes.select { |c| c.subject == name && c.starts }.last&.starts || []
         }
+      end
+
+      # The names of current players that loop until stopped: their graph
+      # plays a looping clip (a MIDI::ClipSource, e.g. `seq(...).loop`,
+      # `grid(...).loop`) with no time limit (`.until`) and no stop queued.
+      # DSL song files warn about them before waiting at the end (see
+      # DSL::ExitWait).
+      def looping_players
+        list = @render_lock.synchronize { @mutex.synchronize { @players.values.select(&:current?) } }
+        list.select { |p|
+          p.timeline_nodes.any? { |n| n.is_a?(MIDI::ClipSource) && n.looping? } &&
+            (p.input.respond_to?(:nodes) ? p.input.nodes : []).none? { |root|
+              [root, *root.graph].any?(GraphNode::TimeLimit)
+            }
+        }.map(&:name).uniq
       end
 
       # Adds a graph to play: a GraphNode, an Array of GraphNodes (one per
@@ -759,6 +776,16 @@ module MB
         }
       end
 
+      # The session frame of the latest time a scheduled block ran for, if
+      # that time has come (renders keep time up to it while idle; see
+      # PlaybackMethods#render), else nil.
+      def schedule_ran_frame
+        pos = @scheduler.ran_ahead_time or return nil
+        now = @transport.position
+        return nil if pos > now
+        @frame - @transport.frames_of(now - pos, Rational(output.sample_rate)).floor
+      end
+
       # True if this offline session's timeline keeps moving while nothing
       # is playing (see #advance_idle=).
       def advance_idle?
@@ -870,6 +897,12 @@ module MB
         @mutex.synchronize { @taps << block }
         block
       end
+
+      # The session frame after the last sample of the latest-ending player
+      # retired so far (0 before any): where a render whose sounds all
+      # ended stops, the same at any buffer size (PlaybackMethods#render
+      # trims the frames after it from its last buffer; session-2).
+      attr_reader :sound_end_frame
 
       # The session frame of the first sample the player being rendered
       # reads in this span (a player starting or waking partway through a
@@ -1567,7 +1600,13 @@ module MB
 
       # Removes one player by serial number, e.g. when it ends.  If +keep+ is
       # true and the player was stopped with #remove, it is kept for #resume.
-      def retire(p, keep: false)
+      #
+      # +at+ is the session frame after the player's last sample (its
+      # #read_to unless given: a graph that ended inside a read ends where
+      # its data did), kept as #sound_end_frame.
+      def retire(p, keep: false, at: nil)
+        e = at || p.read_to
+        @sound_end_frame = e if e && e > @sound_end_frame
         @mutex.synchronize {
           end_ring(p)
           @players.delete(p.serial)
@@ -1813,9 +1852,14 @@ module MB
             ending = quiet.ends_at - base
             if ending <= offset
               note_rung_out(p, base + offset, rate)
-              return retire(p, keep: true)
+              return retire(p, keep: true, at: base + offset)
             end
             frames = ending - offset if ending < offset + frames
+          elsif p.ends_after
+            # Waiting for its ending nodes: read in pieces ending on the
+            # sleep grid, where they are asked (see Tails#end_after)
+            g = ((base + offset) / QuietRun::GRID + 1) * QuietRun::GRID
+            frames = g - (base + offset) if base + offset + frames > g
           end
           last = frames == total
 
@@ -1840,7 +1884,7 @@ module MB
           p.read_to = base + offset + frames + (last ? asleep_after : 0)
 
           if data.nil? || data.empty? || data.all? { |d| d.nil? || d.empty? }
-            retire(p)
+            retire(p, at: base + offset)
             return
           end
 
@@ -1855,7 +1899,7 @@ module MB
               frames = keep
               if frames == 0
                 note_rung_out(p, base + offset, rate)
-                return retire(p, keep: true)
+                return retire(p, keep: true, at: base + offset)
               end
             end
           end
@@ -1892,13 +1936,21 @@ module MB
 
           if rung_out
             note_rung_out(p, base + offset + frames, rate)
-            return retire(p, keep: true)
+            return retire(p, keep: true, at: base + offset + frames)
           end
 
-          # A short read means the graph ended
-          ended = data.any? { |d| d.nil? || d.length < frames }
+          # Its ending nodes ended (asked on the grid): it rings out from
+          # here until quiet (see Tails#end_after)
+          quiet = start_quiet_ring(p, base + offset + frames) if p.ends_after && !quiet && (base + offset + frames) % QuietRun::GRID == 0 && p.ends_after.all?(&:ended?)
+
+          # A short read means the graph ended (GraphNodeInput pads a short
+          # read to the frames asked for: its #data_length says where the
+          # graph ended, so the player ends on its last sample, not a buffer
+          # later)
+          real = p.input.respond_to?(:data_length) ? MB::M.min(p.input.data_length, data_length(data)) : data_length(data)
+          ended = real < frames || data.any? { |d| d.nil? || d.length < frames }
           if last || ended
-            finish_player(p, ended, base + offset + frames, to: to)
+            finish_player(p, ended, base + offset + frames, to: to, end_frame: ended ? base + offset + real : nil)
             break
           end
           offset += frames
@@ -1932,14 +1984,17 @@ module MB
       # Retires a player after a buffer if it ended, was cut off by its
       # replacement, or has faded out; puts a fully muted player to sleep.
       # +frame+ is the session frame after its last rendered sample.
-      def finish_player(p, ended, frame, to: nil)
+      #
+      # +end_frame+: where a graph that ended stopped (the frame after its
+      # last sample).
+      def finish_player(p, ended, frame, to: nil, end_frame: nil)
         # A replaced graph ends at its replacement's start unless it is
         # fading; a fade out ends at silence
         cut = to && p.stop_at && p.stop_at < to && !p.fade_out && !p.ring&.active
         faded = p.fading_out && p.ramp.nil? && p.gain <= 0
 
         if ended
-          retire(p)
+          retire(p, at: end_frame)
         elsif cut
           retire(p, keep: p.keep)
         elsif faded
@@ -1948,6 +2003,13 @@ module MB
         elsif p.strip_level <= 0 && p.strip_ramp.nil? && !(@routed_span && bus_source?(p.name))
           p.asleep = true
         end
+      end
+
+      # The longest channel of a player's read (+data+), in frames.
+      def data_length(data)
+        n = 0
+        data.each { |d| n = d.length if d && d.length > n }
+        n
       end
 
       NO_TAPS = [].freeze

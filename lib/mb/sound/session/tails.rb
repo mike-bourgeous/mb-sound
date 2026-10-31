@@ -48,6 +48,33 @@ module MB
         # ringing player.
         Ring = Struct.new(:stop_frame, :quiet, :sources, :capped, :active, :choke, :spill, keyword_init: true)
 
+        # Ends the players named +name+ once every node of +nodes+ (nodes
+        # with #ended?: a file's GraphNode::Ringdown, a Synth playing a MIDI
+        # file) has ended and the player's output has then been quiet for
+        # RING_QUIET_SECONDS, on the exact sample where that quiet stretch
+        # completes (ScriptRunner's ring-down; session-2, the maintainer's
+        # "Exact frame": the same at any buffer size, where a tap stopped
+        # the player at the next buffer before).  The nodes are asked on
+        # the sleep grid (QuietRun::GRID session frames, the player read in
+        # pieces ending there), so the ring-out starts on the same frame
+        # whatever the buffer size; from there the player rings out like a
+        # stopped one (#follow_ring, capped after Master::MAX_TAIL_SECONDS)
+        # and is kept stopped when it sleeps.  Returns the number of players
+        # marked.
+        def end_after(name, nodes)
+          nodes = nodes.to_a
+          return 0 if nodes.empty?
+          raise ArgumentError, "end_after needs nodes with #ended? (got #{nodes.reject { |n| n.respond_to?(:ended?) }.map(&:class).uniq.join(', ')})" unless nodes.all? { |n| n.respond_to?(:ended?) }
+
+          @render_lock.synchronize {
+            @mutex.synchronize {
+              list = @players.each_value.select { |p| p.name == name && p.ring.nil? }
+              list.each { |p| p.ends_after = nodes.dup.freeze }
+              list.length
+            }
+          }
+        end
+
         # True if the player named +name+ is ringing out (see the module
         # comment).
         def ringing?(name)
@@ -82,6 +109,19 @@ module MB
           quiet = QuietRun.new((RING_QUIET_SECONDS * output.sample_rate).round)
           p.ring = Ring.new(stop_frame: nil, quiet: quiet, sources: sources, capped: false, active: true, choke: choke, spill: spill)
           true
+        end
+
+        # Starts player +p+'s quiet ring-out (see #end_after) at session
+        # frame +frame+, returning its QuietRun.  Quiet means below
+        # QuietRun::QUIET in the mix, after the master gain (as the
+        # script's ring-down measured it before, on the mix).
+        def start_quiet_ring(p, frame)
+          g = @master_gain.to_f
+          loud = g > 0 && g != 1 ? QuietRun.float_at_least(QuietRun::QUIET / g) : QuietRun::QUIET_LOUD
+          quiet = QuietRun.new((RING_QUIET_SECONDS * output.sample_rate).round, loud: loud, from: frame)
+          p.ring = Ring.new(stop_frame: frame, quiet: quiet, sources: [], capped: false, active: true, choke: false, spill: false)
+          p.ends_after = nil
+          quiet
         end
 
         # Silences a ringing player's clips at its stop time, in the buffer
