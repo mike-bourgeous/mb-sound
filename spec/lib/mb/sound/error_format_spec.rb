@@ -50,15 +50,23 @@ RSpec.describe(MB::Sound::ErrorFormat) do
     end
   end
 
-  describe '.unknown_keyword' do
+  describe '.argument_help' do
     it 'suggests keywords for every recorded DSL method' do
       expect { 261.63.hz.saw.lp4(800, resonanse: 0.3) }.to raise_error(ArgumentError, /\Alp4: unknown keyword: :resonanse\nDid you mean\?  resonance:/)
       expect { 261.63.hz.saw.delay(0.1, feedbak: 0.3) }.to raise_error(ArgumentError, /delay: unknown keyword: :feedbak\nDid you mean\?  feedback:/)
       expect { 261.63.hz.saw.lp4(800, zzzzzz: 1) }.to raise_error(ArgumentError, /lp4: unknown keyword: :zzzzzz \(lp4 takes .*resonance:/)
     end
 
+    it 'gives the signature for wrong arity (notes-fix-1)' do
+      expect { 261.63.hz.saw.lp4 }.to raise_error(ArgumentError, /\Alp4: wrong number of arguments \(given 0, expected 1\); lp4\(cutoff, resonance: nil, .*tuning: :musical\)\z/)
+      # (one line, though lp4's def spans two)
+      expect(MB::Sound::ErrorFormat.summary((261.63.hz.saw.lp4 rescue $!))).not_to include("\n")
+      clip = MB::Sound.seq(MB::Sound::C4).n8
+      expect { clip.ratchet }.to raise_error(ArgumentError, /\Aratchet: wrong number of arguments \(given 0, expected 1\); ratchet\(count, rate: nil, velocity: nil\)\z/)
+    end
+
     it 'leaves other ArgumentErrors alone' do
-      expect { 261.63.hz.saw.lp4 }.to raise_error(ArgumentError, /wrong number of arguments/)
+      expect { 261.63.hz.saw.lp4(800, mode: :zzz) }.to raise_error(ArgumentError) { |e| expect(e.message).not_to start_with('lp4: ') }
     end
   end
 

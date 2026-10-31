@@ -43,7 +43,7 @@ RSpec.describe(MB::Sound::Arrangement::PatchCheck) do
       line = __LINE__ + 2
       expect {
         in_session(s) { MB::Sound.track(:y) { it.synth(voices: 2) { |v| v.hz(ratio: 3).sine * v.amp_env } } }
-      }.to raise_error(error, /\Atrack :y: the patch raised ArgumentError: wrong number of arguments.*at spec\/lib\/mb\/sound\/arrangement\/patch_check_spec\.rb:#{line}, built from a test clip\); nothing was changed/)
+      }.to raise_error(error, /\Atrack :y: the patch raised ArgumentError: hz: wrong.*at spec\/lib\/mb\/sound\/arrangement\/patch_check_spec\.rb:#{line}, built from a test clip\); nothing was changed/)
       expect(s.arrangement.tracks).to be_empty
       expect(s.names.kind(:y)).to be_nil
     end

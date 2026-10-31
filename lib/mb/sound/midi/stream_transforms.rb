@@ -42,7 +42,8 @@ module MB
         ].freeze
 
         # Returns a stream that repeats each note +count+ times, +delay+
-        # apart (seconds, a Length, or a Duration such as 3.n16), each
+        # apart (seconds, a Length, or a Duration such as 3.n16; an eighth
+        # note by default, so `clip.echo` echoes eighths 3 times), each
         # repeat moved by +:pitch+ and scaled by +:velocity+ (see
         # Transform::Echo):
         # - +:pitch+: a step in scale degrees of +:scale+ (chromatic by
@@ -64,7 +65,7 @@ module MB
         #     stream.echo(3.n16, 4, pitch: 7.st, velocity: 0.7)
         #     stream.echo(1.n16, 11, pitch: 2, scale: :minor, root: :a, velocity: 0.86)
         #     stream.echo(1.n8.dotted, 8) { |e, i| i.odd? ? e.transpose(12) : e }
-        def echo(delay, count = 3, **options, &block)
+        def echo(delay = 1.n8, count = 3, **options, &block)
           Stream.new(Transform::Echo.new(self, delay, count, **options, &block))
         end
 
@@ -436,6 +437,83 @@ module MB
           s = MB::Sound::Synth.new(self, voices: voices, **options, &block)
           s.outputs.length > 1 ? GraphNode::Channels.new(s.outputs) : s
         end
+
+        # A working call of every transform, for argument errors (see
+        # Stream.argument_help; spec/lib/mb/sound/midi/transform_errors_spec.rb
+        # runs each on a clip).  #rotate always raises.
+        EXAMPLES = {
+          channel: 'channel(1)', keys: 'keys(C2..B2)', transpose: 'transpose(2, scale: :minor, root: :a)',
+          velocity_curve: 'velocity_curve(0.5..1.0)', bend_range: 'bend_range(2.st)',
+          echo: 'echo(3.n16, 3, pitch: 7.st, velocity: 0.7)', arp: 'arp(:up, 16, octaves: 2)', chord: 'chord(:min7)',
+          strum: 'strum(30.ms, :alternate)', humanize: 'humanize(5.ms, velocity: 0.1)', quantize: 'quantize(1.n16, amount: 0.5)',
+          snap: 'snap(:minor_pentatonic, :a)', select: 'select { |e| e.velocity > 0.5 }', reject: 'reject { |e| e.velocity < 0.2 }',
+          velocities: 'velocities(0.5..1.0)', map_notes: 'map_notes { |e| e.transpose(12) }', vel: 'vel(0.8)',
+          rechannel: 'rechannel(2)', to_channel: 'to_channel(2)', note_length: 'note_length(1.n16)', len: 'len(1.n16)',
+          shift: 'shift(1.n8)', rotate: nil, through: 'through(echo(3.n16, 2).strum(20.ms))',
+          swing: 'swing(0.6)', chance: 'chance(0.7)', maybe: 'maybe(0.7)', every: 'every(2, from: 1)', legato: 'legato(1.5)',
+          ratchet: 'ratchet(4, rate: 1.n32)', ghost_chords: 'ghost_chords(1, 4, 7, 6, scale: scale(:minor, :a))',
+          degrees: 'degrees(:minor_pentatonic, layout: :fit)', lock: 'lock(:play)', groove: 'groove(feel, amount: 0.6)',
+        }.freeze
+
+        # Other guesses at a transform's keywords, answered with the
+        # keyword (the maintainer, 2026-10-31: `echo(3, transpose: 5)`;
+        # echo's pitch: steps every repeat, so a transpose: alias would
+        # read as one shift).
+        KEYWORD_HINTS = {
+          echo: { transpose: :pitch, step: :pitch, steps: :pitch, interval: :pitch, feedback: :velocity, decay: :velocity },
+        }.freeze
+
+        # Frames between a transform's method and the error it raised that
+        # are its own argument handling (transform class constructors).
+        ARGUMENT_FRAMES = /\A(?:initialize|new|\[\])\z/
+
+        # For Ruby's arity or keyword ArgumentError +e+ from transform
+        # +name+'s own arguments (raised by the method, or by the
+        # constructors it passes its options to), a one-line error naming
+        # the transform with its signature, the keywords it takes, an
+        # example, and did_you_mean suggestions (see
+        # ErrorFormat.argument_help); else nil.  Every transform goes
+        # through it (notes-fix-1, 2026-10-31: `clip.echo()` said "wrong
+        # number of arguments (given 0, expected 1..2)" and
+        # `echo(3, transpose: 5)` "unknown keyword: :transpose").
+        def self.argument_help(e, name)
+          meth = Stream.instance_method(name).super_method or return nil
+          locs = e.backtrace_locations or return nil
+          own = "#{meth.owner.name}##{meth.original_name}"
+          at = locs.index { |l| l.label == own } or return nil
+          inner = locs[0...at]
+          return nil unless inner.all? { |l| l.base_label.match?(ARGUMENT_FRAMES) }
+
+          keys = inner.flat_map { |l| frame_keywords(l.label) }
+          example = EXAMPLES[name] && "riff.#{EXAMPLES[name]}"
+          ErrorFormat.argument_help(e, nil, name, method: meth, keys: keys, hints: KEYWORD_HINTS[name], example: example)
+        end
+
+        # The keywords of the method a backtrace label names
+        # ("MB::Sound::MIDI::Transform::Echo#initialize", "...Style.[]").
+        def self.frame_keywords(label)
+          m = label.match(/\A([\w:]+)([#.])(.+)\z/) or return []
+          owner = Object.const_get(m[1])
+          meth = m[2] == '#' ? owner.instance_method(m[3]) : owner.method(m[3])
+          ErrorFormat.keywords_of(meth)
+        rescue NameError
+          []
+        end
+
+        # Rewrites the transforms' own argument errors (see .argument_help),
+        # for Streams and everything mirroring them (Notes, Clip, unattached
+        # chains).  Anonymous, like the DSL's recorders, so introspection
+        # that skips wrappers finds the transform.
+        ARGUMENT_HELP = Module.new do
+          TRANSFORMS.each do |name|
+            define_method(name) do |*args, **kwargs, &block|
+              super(*args, **kwargs, &block)
+            rescue ArgumentError => e
+              raise Stream.argument_help(e, name) || e
+            end
+          end
+        end
+        prepend ARGUMENT_HELP
       end
     end
   end

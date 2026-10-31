@@ -637,7 +637,7 @@ module MB
                   callee = __callee__
                   Recipe.call(self, official[callee] || callee, args, kwargs, block, written: callee) { |b, a = args, kw = kwargs| super(*a, **kw, &b) }
                 rescue ArgumentError => e
-                  raise ErrorFormat.unknown_keyword(e, self, callee) || e
+                  raise ErrorFormat.argument_help(e, self, callee) || e
                 end
               end
               aliases.each { |a| mod.send(:alias_method, a, first) }
