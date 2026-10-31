@@ -231,10 +231,11 @@ RSpec.describe(MB::Sound::SequenceMethods) do
   describe '#bpm' do
     after { MB::Sound.bpm(120) }
 
-    it 'sets and returns the default tempo' do
+    it 'sets the default tempo (a journaled change: tempo-2) and returns it' do
       expect(MB::Sound.bpm).to eq(120)
-      expect(MB::Sound.bpm(90)).to eq(90)
+      expect(MB::Sound.bpm(90).kind).to eq(:tempo)
       expect(MB::Sound.transport.bpm).to eq(90)
+      expect(MB::Sound.bpm).to eq(90)
     end
 
     it 'rejects invalid tempos' do

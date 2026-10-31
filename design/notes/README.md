@@ -58,7 +58,7 @@ Every named thing (presets at every scale: effects, instruments, kits, clips, ma
 
 ### [Tempo sync](tempo_sync.md)
 
-`Sequence::Duration` lengths (`3.n16`, `2.bars`) work wherever lengths do; `1.beat.hz` is a Pitch from a `Sequence::TempoNode` whose tones lock their phase to the timeline, and `sig.delay(1.n8.dotted)` follows the tempo.  `Session` finds `TimelineNode`s in every graph.  The Transport's tempo is a `Sequence::TempoMap` of steps, ramps, and followed sources (`bpm 140, over: 4.bars`, `accel`/`rit`, `bpm :tempo`), journaled and undoable, rendered in 800-run-frame cells so it is the same at any buffer size; meters are a map too (`meter 7, 8`).  Build-time conversions read `Sequence.current_transport`.
+`Sequence::Duration` lengths (`3.n16`, `2.bars`) work wherever lengths do; `1.beat.hz` is a Pitch from a `Sequence::TempoNode` whose tones lock their phase to the timeline, and `sig.delay(1.n8.dotted)` follows the tempo.  `Session` finds `TimelineNode`s in every graph.  The Transport's tempo is a `Sequence::TempoMap` of steps, ramps, and followed sources (`bpm 140, over: 4.bars`, `accel`/`rit`, `bpm :tempo`), every change (a plain `bpm 120` too) journaled and undoable, landing on its exact frame, rendered in 800-run-frame cells so it is the same at any buffer size; seeks read the map at their target (into a ramp, the ramp plays on); meters are a map too (`meter 7, 8`).  Build-time conversions read `Sequence.current_transport`.
 
 ### [Multichannel](multichannel.md)
 

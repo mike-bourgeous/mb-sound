@@ -644,9 +644,11 @@ module MB
         `bpm :tempo` follows a knob (`knob :tempo, (90.bpm..180.bpm)
         .at(140.bpm)`), `bpm 4.bars.lfo.at(150..180)` a tempo LFO, read
         every 800 frames.  Scenes and sections take `bpm: [160, over:
-        4]`.  These are journaled and undoable, and takes replay them
-        exactly; a plain `bpm 120` sets one tempo right away and ends a
-        ramp.  Bars, launches, clips, delays, and LFOs all follow.
+        4]`.  Every tempo change, a plain `bpm 120` too, is journaled and
+        undoable, lands on its exact frame, and replays exactly from takes;
+        a new tempo ends a ramp from where it is.  A seek reads the tempo
+        there: into a ramp, the ramp plays on from that point.  Bars,
+        launches, clips, delays, and LFOs all follow.
       TEXT
       commands :bpm, :tempo, :accel, :rit, :meter, :rewind, :seek, :bar, :transport, :tuning
       note :tempo_sync, :numbers_lengths_phases

@@ -1,10 +1,10 @@
 module MB
   module Sound
     class Session
-      # Runs blocks at times on a Session's timeline and applies tempo changes
-      # at set times.  Created by Session; use Session#schedule, #cancel,
-      # #scheduled, and #change_tempo (or ScheduleMethods) instead of using
-      # this class directly.
+      # Runs blocks at times on a Session's timeline and applies timed
+      # changes (Session#at_time).  Created by Session; use
+      # Session#schedule, #cancel, #scheduled, and #at_time (or
+      # ScheduleMethods) instead of using this class directly.
       #
       # Blocks run a little ahead of their time (on a scheduler thread for a
       # realtime session, or inline when rendering; see #lookahead), inside a context (see
@@ -400,13 +400,6 @@ module MB
           report
         end
 
-        # See Session#change_tempo.
-        def change_tempo(bpm, time:)
-          raise ArgumentError, "BPM must be a positive number (got #{bpm.inspect})" unless bpm.is_a?(Numeric) && bpm.finite? && bpm > 0
-          at_time(time) { @transport.bpm = bpm }
-          bpm
-        end
-
         # See Session#at_time.
         def at_time(time, &action)
           raise ArgumentError, 'Pass a block to run at the time' unless action
@@ -414,7 +407,7 @@ module MB
           nil
         end
 
-        # Applies tempo changes and other timed changes (see #at_time) whose
+        # Applies timed changes (see #at_time) whose
         # time has come, in time order.  Called by Session at the start of
         # each buffer.
         def apply_timed_changes

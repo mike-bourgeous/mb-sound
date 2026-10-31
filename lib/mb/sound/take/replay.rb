@@ -53,9 +53,12 @@ module MB
         # 2026-10-13) don't give it, and played it after the master chain.
         # +:replace_declick+ likewise (see Session#replace_declick): takes
         # saved before 2026-10-17 don't give it, and switched replacements
-        # with a hard cut, so they replay exactly.
-        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, replace_declick: false, meters: [], key: nil, ends: nil, ends_epoch: 0, seconds: nil, run_frame: 0, odometer: 0)
-          @start = { bpm: bpm, bar_length: bar_length, meters: meters, key: key, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, replace_declick: replace_declick, rng: rng, run_frame: run_frame, odometer: odometer }
+        # with a hard cut, so they replay exactly.  +:tempo_map+ is the
+        # transport's tempo map as rows (Sequence::TempoMap#rows) when it
+        # wasn't one constant tempo (takes saved before tempo-2 don't give
+        # it, and replay from the tempo alone).
+        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, replace_declick: false, meters: [], key: nil, ends: nil, ends_epoch: 0, seconds: nil, run_frame: 0, odometer: 0, tempo_map: nil)
+          @start = { bpm: bpm, tempo_map: tempo_map, bar_length: bar_length, meters: meters, key: key, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, replace_declick: replace_declick, rng: rng, run_frame: run_frame, odometer: odometer }
           @ends = ends&.to_r
           @ends_epoch = ends_epoch
           @seconds = seconds
@@ -120,6 +123,7 @@ module MB
           root, mode = @start[:key] || ['C', :major]
           t.reset_key(MusicalKey.default.with_root(root).with_mode(mode))
           t.bpm = @start[:bpm]
+          t.tempo_map = Sequence::TempoMap.from_rows(@start[:tempo_map]) if @start[:tempo_map] # (tempo-2: ramps and history the take started with)
           session.master_gain = @start[:master_gain]
           session.master_gain_post = !!@start[:master_gain_post]
           session.fade_in = @start[:fade_in]

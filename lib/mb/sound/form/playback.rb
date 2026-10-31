@@ -621,13 +621,17 @@ module MB
             # bar), which the section's length in bars counts in
             scene = scene_of(sec)
             first_seq = @session.journal.next_seq
-            launch(scene, fade: sec.fade) if scene && @arrangement.scenes.key?(scene)
-            # The section's knob values, after its scene's (they win)
-            # (a pass a seek enters mid-way turns them where the seek lands)
+            # (a pass a seek, or its undo, enters mid-way turns knobs where
+            # the seek lands, but places tempo ramps from the pass's start,
+            # so the seek hears what the ramp reaches there: tempo-2)
             turn_at = [time, @session.now].max
-            sec.knobs.each do |k, v|
-              @session.send(:without_command) { @arrangement.send(:turn_knob, k, v, turn_at) }
-            end
+            Session.with_context_fields(tempo_anchor: time < @transport.position ? [@session, time] : nil) {
+              launch(scene, fade: sec.fade) if scene && @arrangement.scenes.key?(scene)
+              # The section's knob values, after its scene's (they win)
+              sec.knobs.each do |k, v|
+                @session.send(:without_command) { @arrangement.send(:turn_knob, k, v, turn_at) }
+              end
+            }
             @pass_seqs = first_seq...@session.journal.next_seq
 
             # (this pass's length: a section may play for different lengths)

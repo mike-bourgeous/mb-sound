@@ -128,13 +128,6 @@ module MB
         # The segments, earliest first (frozen).
         attr_reader :segments
 
-        # True for maps assigned whole (Transport#tempo_map=, e.g. from a
-        # MIDI file): seeks read them as a function of position instead of
-        # collapsing them to the tempo in effect (see Transport#seek).
-        def fixed?
-          @fixed
-        end
-
         # A map of one constant tempo.
         def self.constant(bpm)
           new([Step.new(pos: -Float::INFINITY, bpm: check_bpm(bpm))])
@@ -143,19 +136,18 @@ module MB
         # A map of tempo steps from [position (whole notes), BPM] pairs (the
         # first tempo also holds before the first position): the shape a
         # MIDI file's tempo events convert to (positions from ticks: ticks /
-        # (4 * ticks per quarter note)).  Fixed (see #fixed?).
+        # (4 * ticks per quarter note)).
         def self.steps(pairs)
           raise ArgumentError, 'A tempo map needs at least one [position, bpm] pair' if pairs.empty?
           sorted = pairs.map { |p, b| [p.to_r, check_bpm(b)] }.sort_by(&:first)
           first = Step.new(pos: -Float::INFINITY, bpm: sorted.first[1])
           rest = sorted.drop(1).map { |p, b| Step.new(pos: p, bpm: b) }
-          new([first, *rest], fixed: true)
+          new([first, *rest])
         end
 
-        def initialize(segments, fixed: false)
+        def initialize(segments)
           raise ArgumentError, 'A tempo map needs a segment' if segments.empty?
           @segments = segments.freeze
-          @fixed = fixed
           @static = segments.length == 1 && !segments[0].varying?
           freeze
         end
@@ -170,14 +162,20 @@ module MB
           @static
         end
 
-        # The segment in effect at position +pos+.
+        # The segment in effect at position +pos+ (segments are sorted by
+        # position; a ramp cut short by a later segment ends at its start).
         def segment_at(pos)
           s = @segments
           return s[0] if s.length == 1
-          i = s.length - 1
-          i -= 1 while i > 0 && s[i].pos > pos
-          s[i]
+          s[index_at(pos)]
         end
+
+        # The index of the segment in effect at +pos+.
+        def index_at(pos)
+          i = @segments.bsearch_index { |x| x.pos > pos } || @segments.length
+          i > 0 ? i - 1 : 0
+        end
+        private :index_at
 
         # The tempo at +pos+ (a Rational or Integer BPM), reading followed
         # sources through +reader+ (see Follow#bpm_at).
@@ -191,26 +189,36 @@ module MB
           seg.varying? && (seg.is_a?(Follow) || pos < seg.end_pos)
         end
 
-        # The next position after +pos+ where the map changes shape (a
-        # ramp's start or end, a later segment), or nil.
+        # The next position after +pos+ where the map changes shape (the
+        # end of the ramp in effect, the next segment's start), or nil.
         def next_break(pos)
-          best = nil
-          @segments.each do |s|
-            [s.pos, s.end_pos].each do |p|
-              next unless p.is_a?(Rational) || p.is_a?(Integer)
-              best = p if p > pos && (best.nil? || p < best)
-            end
-          end
-          best
+          s = @segments
+          i = s.length == 1 ? 0 : index_at(pos)
+          seg = s[i]
+          nxt = s[i + 1]&.pos
+          e = seg.end_pos
+          e = nil unless (e.is_a?(Rational) || e.is_a?(Integer)) && e > pos
+          return e if nxt.nil?
+          e && e < nxt ? e : nxt
         end
 
         # A new map with +segment+ from its position, forgetting segments
-        # at or after it (like the meter and key maps).  Not fixed.
+        # at or after it (like the meter and key maps; a ramp in effect
+        # there is cut short, see #segment_at).  The segments before it stay
+        # as history, which seeks read (Transport#seek), except that a step
+        # at or before position 0 (where timelines start) replaces them all,
+        # and a step to the tempo already in effect at a step adds nothing.
         def with(segment)
-          kept = @segments.reject { |s| s.pos >= segment.pos }
-          # (a ramp cut short by the new segment simply stops there: #segment_at
-          # reads the later segment from its position on)
+          if segment.is_a?(Step) && segment.pos <= 0
+            return TempoMap.constant(segment.bpm)
+          end
+
+          kept = @segments.reject { |x| x.pos >= segment.pos }
           kept = [Step.new(pos: -Float::INFINITY, bpm: segment_at(segment.pos).bpm_at(segment.pos))] if kept.empty?
+          if segment.is_a?(Step)
+            prev = kept.last
+            return TempoMap.new(kept) if prev.is_a?(Step) && prev.bpm == segment.bpm
+          end
           TempoMap.new([*kept, segment])
         end
 
@@ -235,23 +243,47 @@ module MB
           with(Follow.new(pos: at, source: source, last: last || bpm_at(at)))
         end
 
-        # This map, or a constant map when nothing moves at or after +pos+
-        # any more (a live map whose last segment is a step in effect, or a
-        # finished ramp), so the Session's constant-tempo path comes back.
-        # Fixed maps stay as they are.
-        def settled(pos)
-          return self if @fixed || @static || next_break(pos)
-          seg = segment_at(pos)
-          return self if seg.is_a?(Follow)
-          TempoMap.constant(seg.bpm_at(pos))
+        # True if the tempo stays what it is at +pos+ from there on (no
+        # ramp in progress or followed source, nothing later): the Session
+        # then renders on its constant-tempo path (Transport#settle_tempo).
+        def quiet_after?(pos)
+          !varying_at?(pos) && next_break(pos).nil?
         end
 
-        # The map collapsed to what is in effect at +pos+ (for seeks): one
-        # segment from -Infinity (a step at the tempo there, or the follow).
-        def collapse(pos, bpm)
-          seg = segment_at(pos)
-          first = seg.is_a?(Follow) ? seg.with(pos: -Float::INFINITY, last: bpm) : Step.new(pos: -Float::INFINITY, bpm: bpm)
-          TempoMap.new([first])
+        # The map as [position, BPM] and [position, from, to, length,
+        # curve] rows (position nil for the first segment's -Infinity), for
+        # a take's start state (see Take#start_state and .from_rows).  A
+        # followed source is written as a step at the tempo it last read.
+        def rows
+          @segments.map { |x|
+            pos = x.pos.is_a?(Float) ? nil : x.pos
+            case x
+            when Ramp then x.curve ? [pos, x.from, x.to, x.length, x.curve.to_ruby || x.curve.to_s] : [pos, x.from, x.to, x.length]
+            when Follow then [pos, x.last]
+            else [pos, x.bpm]
+            end
+          }
+        end
+
+        # A map from #rows.  Ramp curves are written as `Curve[:name]`
+        # code; curves that need more (options, Procs) come back linear,
+        # with a warning.
+        def self.from_rows(rows)
+          segments = rows.map { |pos, *v|
+            pos = pos.nil? ? -Float::INFINITY : pos.to_r
+            next Step.new(pos: pos, bpm: check_bpm(v[0])) if v.length == 1
+            from, to, length, curve = v
+            Ramp.new(pos: pos, from: check_bpm(from), to: check_bpm(to), length: length.to_r, curve: curve && row_curve(curve))
+          }
+          raise ArgumentError, 'A tempo map starts with a segment from -Infinity (position nil)' unless segments.first&.pos == -Float::INFINITY
+          new(segments)
+        end
+
+        def self.row_curve(text)
+          m = text.to_s.match(/\ACurve\[:([a-z_0-9]+)\]\z/)
+          return Curve[m[1].to_sym] if m && Curve.names.include?(m[1].to_sym)
+          warn "Tempo map: the ramp curve #{text} can't be restored from a take; the ramp plays linear"
+          nil
         end
 
         # The length in whole notes of a ramp from +from+ to +to+ BPM shaped
@@ -307,17 +339,17 @@ module MB
         end
 
         def ==(other)
-          other.is_a?(TempoMap) && other.segments == @segments && other.fixed? == @fixed
+          other.is_a?(TempoMap) && other.segments == @segments
         end
         alias eql? ==
 
         def hash
-          [TempoMap, @segments, @fixed].hash
+          [TempoMap, @segments].hash
         end
 
         # Ruby-like text of the segments (for inspection and take headers).
         def to_s
-          "#<TempoMap #{@segments.map(&:to_ruby).join(', ')}#{' (fixed)' if @fixed}>"
+          "#<TempoMap #{@segments.map(&:to_ruby).join(', ')}>"
         end
         alias inspect to_s
       end

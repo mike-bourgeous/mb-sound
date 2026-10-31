@@ -54,6 +54,7 @@ module MB
           @fills = FillMap.new
           @keys = [KeyEntry.new(pos: -Float::INFINITY, key: MusicalKey.default)].freeze
           @tempo_map = nil
+          @tempo_quiet = nil # (the seek generation the map went quiet in; see #settle_tempo)
           @wnps = @wnps_bpm = @per_frame_cache = nil # (see #whole_notes_per_second, #whole_notes_per_frame)
           self.bpm = bpm
           self.bar_length = bar_length
@@ -129,9 +130,12 @@ module MB
         end
 
 
-        # Changes the tempo in quarter notes per minute (a number or a
-        # Tempo), everywhere: the tempo map becomes this one constant tempo
-        # (ending a ramp or a followed tempo; see #tempo_map).
+        # Sets the tempo in quarter notes per minute (a number or a Tempo)
+        # everywhere: the tempo map becomes this one constant tempo (for a
+        # fresh timeline: a new transport, a take replay's start, a
+        # script's --bpm; songs and the console change the tempo through
+        # SequenceMethods#bpm, a journaled change that lands where the
+        # timeline is).
         def bpm=(bpm)
           bpm = bpm.bpm if bpm.is_a?(MB::Sound::Tempo)
           raise ArgumentError, "BPM must be a positive number (got #{bpm.inspect})" unless bpm.is_a?(Numeric) && bpm.finite? && bpm > 0
@@ -140,21 +144,23 @@ module MB
         end
 
         # The tempo map (Sequence::TempoMap): the tempo as a function of
-        # timeline position.  A constant tempo is a map of one step.
+        # timeline position, the history of the changes made so far
+        # included (seeks read it at their target; see #seek).  A constant
+        # tempo is a map of one step.
         def tempo_map
           @tempo_map ||= TempoMap.constant(@bpm)
         end
 
         # Replaces the tempo map with +map+ (a TempoMap, e.g. from a MIDI
-        # file's tempo events: TempoMap.steps(pairs)), read as a function of
-        # position from now on (seeks keep it; see #seek).  Sets the tempo
-        # to the map's tempo at the current position.
+        # file's tempo events: TempoMap.steps(pairs), or a take's start
+        # state).  Sets the tempo to the map's tempo at the current
+        # position.
         def tempo_map=(map)
           raise ArgumentError, "Expected a Sequence::TempoMap (got #{map.inspect})" unless map.is_a?(TempoMap)
-          map = TempoMap.new(map.segments, fixed: true) unless map.fixed? || map.static?
-          @tempo_map = map
-          @bpm = map.bpm_at(@position)
-          @bpm = @bpm.to_i if @bpm.is_a?(Rational) && @bpm.denominator == 1
+          @tempo_map = map.static? ? nil : map
+          @tempo_quiet = nil
+          bpm = map.bpm_at(@position)
+          @bpm = bpm.is_a?(Rational) && bpm.denominator == 1 ? bpm.to_i : bpm
         end
 
         # Changes the map from timeline position +at+ (whole notes; the
@@ -164,25 +170,27 @@ module MB
         def tempo_change(at: nil)
           at = at.nil? ? @position : at.to_r
           map = yield(tempo_map, at)
-          map = map.settled(@position) if at <= @position
           @tempo_map = map.static? ? nil : map
+          @tempo_quiet = nil
           set_cell_bpm(map.bpm_at(@position)) unless map.varying_at?(@position)
           map
         end
 
-        # True unless the tempo is one constant everywhere (the Session
-        # then splits spans into tempo cells; see TempoMap).
+        # True unless the tempo stays one constant from here on (the
+        # Session then splits spans into tempo cells; see TempoMap).
         def tempo_moves?
-          !(@tempo_map.nil? || @tempo_map.static?)
+          map = @tempo_map
+          return false if map.nil? || map.static?
+          @tempo_quiet != @generation
         end
 
-        # Drops a live tempo map that no longer moves (a ramp finished,
-        # nothing after it) for the constant-tempo path.  Called by
-        # Session between spans.
+        # Marks a tempo map that no longer moves from the current position
+        # on (a ramp finished, nothing after it) for the constant-tempo
+        # path, until the map changes or the timeline jumps (the map stays:
+        # seeks back read it).  Called by Session between spans.
         def settle_tempo
           return unless tempo_moves?
-          map = @tempo_map.settled(@position)
-          @tempo_map = nil if map.static?
+          @tempo_quiet = @generation if @tempo_map.quiet_after?(@position)
         end
 
         # Sets the tempo of the span about to render (a Rational BPM from
@@ -321,26 +329,39 @@ module MB
         # live isn't undone by jumping back before it; sections that set a
         # key set it again as they play).
         #
-        # The tempo map likewise collapses to the tempo (or followed source)
-        # in effect, unless it was assigned whole (#tempo_map=, e.g. from a
-        # MIDI file), which is read at the new position.
+        # The tempo map is read at the new position (tempo-2, maintainer
+        # 2026-10-30: "the tempo at a seek target is what the ramp reaches
+        # there, so seeks and takes agree"): a seek into a ramp plays the
+        # ramp on from there, a seek back before a tempo change plays the
+        # tempo before it, and the change again where it happened.  A
+        # followed source in effect there is read on the next tempo cell.
         def seek(whole_notes)
           current = key_at(@position)
           @keys = [KeyEntry.new(pos: -Float::INFINITY, key: current)].freeze unless @keys.length == 1 && @keys[0].key == current
-          if tempo_moves?
-            if @tempo_map.fixed?
-              set_cell_bpm(@tempo_map.bpm_at(whole_notes.to_r))
-            else
-              # (the map's tempo where the seek lands, not the span's cell
-              # tempo, so replays at any buffer size collapse alike)
-              @tempo_map = @tempo_map.collapse(@position, @tempo_map.segment_at(@position).is_a?(TempoMap::Follow) ? @bpm.to_r : @tempo_map.bpm_at(@position))
-              set_cell_bpm(@tempo_map.segments[0].bpm) if @tempo_map.static?
-              @tempo_map = nil if @tempo_map.static?
-            end
+          pos = whole_notes.to_r
+          map = @tempo_map
+          if map && !map.static?
+            seg = map.segment_at(pos)
+            set_cell_bpm(seg.bpm_at(pos)) unless seg.is_a?(TempoMap::Follow)
           end
-          @position = whole_notes.to_r
+          @position = pos
           @generation += 1
           self
+        end
+
+        # Moves the timeline back to the start as a reset (SequenceMethods#
+        # rewind; not a journaled seek): the tempo in effect stays, the
+        # map's history is dropped (a ramp in progress stops where it is; a
+        # followed source stays followed), so `bpm 140; rewind` plays at
+        # 140 from the start.
+        def rewind
+          map = @tempo_map
+          if map && !map.static?
+            seg = map.segment_at(@position)
+            @tempo_map = seg.is_a?(TempoMap::Follow) ? TempoMap.new([seg.with(pos: -Float::INFINITY)]) : nil
+            @tempo_quiet = nil
+          end
+          seek(0)
         end
 
         # The session key (a MusicalKey) at the current position, or at
@@ -379,11 +400,6 @@ module MB
         # fresh timeline (spec setup, a take replay's start).
         def reset_key(key = MusicalKey.default)
           @keys = [KeyEntry.new(pos: -Float::INFINITY, key: key)].freeze
-        end
-
-        # Jumps the timeline back to the start.
-        def rewind
-          seek(0)
         end
 
         # Returns the first timeline position at or after the current position
