@@ -16,8 +16,22 @@ module MB
           def audio? = EFFECT_MATERIALS.include?(key)
         end
 
-        # Audio materials for effects, in set order.
-        EFFECT_MATERIALS = %i[arp break pad].freeze
+        # Audio materials for effects, in set order (the first is what
+        # `play L.fx.x`, `audition`, and Entry#audition play by default).
+        EFFECT_MATERIALS = %i[mix arp break pad].freeze
+
+        # The effect audition mix, shipped in mb-sound's presets/ (the
+        # maintainer, 2026-10-30: "a new rendered file 4 bars long with one
+        # silent bar for tails and at least one dense bar for effects.
+        # Maybe 1 bar beat+bass, 1 bar pluck arp, 1 bar pad, 1 bar
+        # silent"): rendered from mb-sound's own sounds by Bench.write_mix
+        # (#mix_graph), 16-bit FLAC, 8 s at 120 BPM.
+        MIX_FILE = 'audition/effect_mix.flac'
+
+        # The mix's part levels (gains on each part's graph: bars 1-3 at
+        # -15.6, -15.7, -15.6 LUFS; the whole -15.7 LUFS, -2.7 dBTP, about
+        # the A7 arp material's -16.6).
+        MIX_GAINS = { beat: 0.5, bass: 1.0, pluck: 0.91, pad: 1.1 }.freeze
 
         # Phrases for instruments by role, two each (generic, written here,
         # in A minor at 120 BPM unless a material says otherwise), plus the
@@ -72,6 +86,8 @@ module MB
           @audio ||= {}
           return Sample[files[key.to_s] || files[key]].with(loop: nil) if files && (files[key.to_s] || files[key])
           @audio[key] ||= case key
+                          when :mix
+                            Sample[mix_path].with(loop: nil)
                           when :arp
                             arp = Sample[arp_path]
                             Sample[arp.to_a.map { |c| Numo::SFloat.hstack([c] * 4) }]
@@ -83,6 +99,64 @@ module MB
                           else
                             raise Error, "no audio material #{key.inspect} (#{EFFECT_MATERIALS.join(', ')})"
                           end
+        end
+
+        # The shipped effect audition mix (MIX_FILE).
+        def mix_path = File.join(GraphIO.library_presets_dir, MIX_FILE)
+
+        # The effect audition mix's graph at 120 BPM, A minor, all dry (no
+        # reverb or echo of its own, so an effect's tail is the effect's):
+        # bar 1 a tr909 beat (kick on the beats, snare on 2 and 4, busy
+        # closed hats) and a funk_bass sixteenth riff, bar 2 a pluck
+        # arpeggio (dnb_pluck's voice without its echo and plate: a square
+        # through lp4 opened by a fast envelope), bar 3 the Bench's saw pad
+        # (#pad_graph) on an Am chord for a dotted half, bar 4 silence for
+        # the effects' tails.  Built inside a render at 120 BPM
+        # (Bench.render_mix).
+        def mix_graph
+          s = MB::Sound
+          bar = s.seq(R).n1
+          kit = s.grid(16, kick: 'x...x...x...x...', snare: '....x.......x...', closed_hat: 'x.xxx.xxx.xxx.xx')
+          beat = Sequence::Kit.new(kit.rows.transform_values { |c| once(c, 1) })
+          bass = s.seq(A1, R, A1, A2, R, A1, C2, R, A1, R, G1, R, E1, R, G1, A1).n16 | bar | bar | bar
+          pluck = bar | s.seq(A3, C4, E4, G4, A4, E4, C4, E4, A3, C4, E4, G4, C5, G4, E4, C4).n16 | bar | bar
+          pad = bar | bar | s.seq([A2, E3, A3, C4, E4], R.n8).n2.dotted.legato(1.0) | bar
+          g = MIX_GAINS
+          s.tr909(beat) * g[:beat] + s.preset(:funk_bass, midi: bass) * g[:bass] + pluck_graph(pluck) * g[:pluck] + pad_graph(pad) * g[:pad]
+        end
+
+        # The mix's pluck voice (dnb_pluck's, dry): a square through a
+        # resonant four-pole opened three octaves above 500 Hz by a fast
+        # envelope, decaying over 0.35 s.
+        def pluck_graph(clip)
+          clip.synth(voices: 2) { |v|
+            fenv = v.env(0.001, 0.18, 0.0, 0.1, gm: false)
+            v.hz.square.lp4(500 * 2**(fenv * 3), resonance: 0.3) * v.env(0.002, 0.35, 0.0, 0.15, gm: false) * 0.5
+          }
+        end
+
+        # The mix rendered (seed 0, 120 BPM): two channels of exactly four
+        # bars (8 s at 48 kHz).
+        def render_mix
+          data, = MB::Sound.with_seed(0) { Bench.render_graph(bpm: 120, max_seconds: 8.25) { mix_graph } }
+          data.map { |c| c.length >= 384_000 ? c[0...384_000].dup : Numo::SFloat.zeros(384_000).tap { |z| z[0...c.length] = c } }
+        end
+
+        # Renders the mix into +path+ (MIX_FILE in presets/ by default) as
+        # 16-bit FLAC (ffmpeg): `bundle exec ruby -Ilib -e
+        # 'require "mb/sound"; MB::Sound::Library::Bench.write_mix'`.
+        # Returns the path.
+        def write_mix(path = mix_path)
+          data = render_mix
+          FileUtils.mkdir_p(File.dirname(path))
+          Dir.mktmpdir('mix-') do |dir|
+            wav = File.join(dir, 'mix.wav')
+            MB::Sound.write(wav, data, sample_rate: 48000, overwrite: true)
+            out, status = Open3.capture2e('ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', wav, '-c:a', 'flac', '-sample_fmt', 's16', path)
+            raise Error, "ffmpeg failed writing #{path}: #{out}" unless status.success?
+          end
+          @audio&.delete(:mix)
+          path
         end
 
         # spec/test_data/arp_a7.flac in this checkout of mb-sound.
@@ -136,6 +210,10 @@ module MB
         # An effect's audio material.
         def effect_material(key, files: nil)
           case key
+          when :mix
+            Material.new(key: :mix, title: 'Audition mix (beat and bass, pluck, pad, silence)',
+              about: "mb-sound's 4-bar effect audition mix at 120 BPM: a tr909 beat with a funk_bass riff, a dnb_pluck arpeggio, a dnb_pad chord, then a silent bar for tails",
+              bpm: 120, max_seconds: 12, source: -> { audio(:mix, files: files).node })
           when :arp
             Material.new(key: :arp, title: 'A7 arp (arp_a7.flac x4)', about: 'spec/test_data/arp_a7.flac four times: a stereo Am7/Amaj7 triangle arp',
               bpm: 120, max_seconds: 6, source: -> { audio(:arp, files: files).node })

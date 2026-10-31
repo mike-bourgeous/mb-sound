@@ -1,6 +1,8 @@
 require 'json'
 require 'fileutils'
 require 'time'
+require 'open3'
+require 'tmpdir'
 
 module MB
   module Sound
@@ -11,7 +13,8 @@ module MB
       # preset of a family, kind, list, or find query on standard
       # material (Bench::Material: instruments on phrases for their role
       # and their genre template's phrase, kits on beats, effects on the
-      # A7 arp, the jungle break, and a saw pad), all matched to one
+      # audition mix, the A7 arp, the jungle break, and a saw pad), all
+      # matched to one
       # loudness (the loudest every item reaches with its true peak at
       # most CEILING: Bench.common_lufs), and
       # writes a Bench set directory: audio per material, `set.json` (the

@@ -51,7 +51,7 @@ RSpec.describe(MB::Sound::Library::Audition, :aggregate_failures) do
       expect(s.cue_heard?).to eq(true)
       r = MB::Sound.audition(MB::Sound::L.fx.reverb.hall)
       expect(r.where).to eq(:cue)
-      expect(r.to_s).to include('on the A7 arp (its Bench material), on CUE')
+      expect(r.to_s).to include('on the audition mix (beat and bass, pluck, pad, then its tail), on CUE')
       s.process_buffer
       expect(s.players.keys).to eq([:"audition/cue"])
       MB::Sound.audition(:off)

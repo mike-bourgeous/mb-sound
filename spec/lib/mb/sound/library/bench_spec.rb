@@ -44,8 +44,34 @@ RSpec.describe MB::Sound::Library::Bench do
   end
 
   describe 'materials' do
-    it 'gives effects the arp, the break, and the pad' do
-      expect(bench.materials_for(entry(:reverb, :hall)).map(&:key)).to eq(%i[arp break pad])
+    it 'gives effects the audition mix, the arp, the break, and the pad' do
+      expect(bench.materials_for(entry(:reverb, :hall)).map(&:key)).to eq(%i[mix arp break pad])
+    end
+
+    # The effect audition mix (maintainer, 2026-10-30): 4 bars at 120 BPM,
+    # beat and bass, a pluck arp, a pad, then a silent bar for tails,
+    # shipped in presets/ (rendered from mb-sound's own sounds)
+    it 'ships a 4-bar audition mix: three bars of sound, then one for tails' do
+      path = bench.mix_path
+      expect(path).to start_with(MB::Sound::GraphIO.library_presets_dir)
+      expect(File.size(path)).to be < 500_000
+      data = MB::Sound.read(path).map { |c| Numo::SFloat.cast(c) }
+      expect(data.length).to eq(2)
+      expect(data[0].length).to eq(384_000) # (4 bars at 120 BPM)
+      bars = (0...4).map { |b| MB::Sound.loudness(data.map { |c| c[(b * 96_000)...((b + 1) * 96_000)] }).integrated }
+      expect(bars.first(3).max - bars.first(3).min).to be < 1
+      expect(bars.first(3)).to all(be_between(-18, -13))
+      expect(bars[3]).to be < -45 # (the pad's release, then silence)
+      expect(data.map { |c| c[312_000..].abs.max }.max).to eq(0) # (dry: nothing rings past half a second into bar 4)
+      expect(bench.effect_material(:mix).bpm).to eq(120)
+    end
+
+    it 'renders the shipped mix again from its graph (Bench.write_mix)', :slow do
+      fresh = bench.render_mix
+      shipped = MB::Sound.read(bench.mix_path).map { |c| Numo::SFloat.cast(c) }
+      expect(fresh.zip(shipped).map { |a, b| (a - b).abs.max }.max).to be < 2.0 / 32768, # (16-bit FLAC)
+        'the shipped audition mix no longer matches its graph: if the sound change is meant, write it again ' \
+        '(bundle exec ruby -Ilib -e \'require "mb/sound"; MB::Sound::Library::Bench.write_mix\') and Bench the effects on it'
     end
 
     it 'gives instruments the phrases of their role, then their genre template phrase' do
@@ -75,8 +101,8 @@ RSpec.describe MB::Sound::Library::Bench do
     it 'plays the phrases and audio as finite graphs (Entry#audition)' do
       g = MB::Sound::L.fx.reverb.hall.audition(:break)
       expect(g.channel_count).to eq(2)
-      expect(MB::Sound::L.fx.reverb.hall.auditions).to eq(%i[arp break pad])
-      expect { MB::Sound::L.fx.reverb.hall.audition(:bass_riff) }.to raise_error(ArgumentError, /no :bass_riff material.*arp, break, pad/)
+      expect(MB::Sound::L.fx.reverb.hall.auditions).to eq(%i[mix arp break pad])
+      expect { MB::Sound::L.fx.reverb.hall.audition(:bass_riff) }.to raise_error(ArgumentError, /no :bass_riff material.*mix, arp, break, pad/)
     end
 
     it 'plays clip entries on their instrument' do
@@ -87,9 +113,9 @@ RSpec.describe MB::Sound::Library::Bench do
       expect((1..400).find { g.sample(800).nil? }).not_to be_nil # (finite: the loop plays twice)
     end
 
-    it 'makes `play L.fx.x` play the effect on the arp' do
+    it 'makes `play L.fx.x` play the effect on the audition mix' do
       g = MB::Sound::Library::Audition.playable(MB::Sound::L.fx.chorus.juno1)
-      expect(g.to_s).to include('on the A7 arp')
+      expect(g.to_s).to include('on the audition mix')
     end
   end
 

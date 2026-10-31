@@ -150,7 +150,8 @@ module MB
         end
 
         # The graph the entry plays on its Listening Bench +material+ (see
-        # Library::Bench): an effect on :arp (default), :break, or :pad; an
+        # Library::Bench): an effect on :mix (default: the 4-bar audition
+        # mix), :arp, :break, or :pad; an
         # instrument on its role's phrases (`L.inst.dnb_reese.audition`,
         # `.audition(:template)`, its genre template's phrase); a kit on
         # :drums_beat or :drums_busy.  Finite, so `play` ends by itself:

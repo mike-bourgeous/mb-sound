@@ -60,11 +60,11 @@ module MB
           when :clip
             entry.call
           when :effect
-            Playable.wrap(entry.audition(:arp), "#{path} on the A7 arp (its Bench material)", true,
-              "an effect processes a sound: #{path}.audition(:break) or (:pad) for the other Bench materials, sig.then(&#{path}) on any sound")
+            Playable.wrap(entry.audition(:mix), "#{path} on the audition mix (beat and bass, pluck, pad, then its tail)", true,
+              "an effect processes a sound: #{path}.audition(:arp), (:break), or (:pad) for the other Bench materials, sig.then(&#{path}) on any sound")
           when :master
-            # (the Bench has no mastering sets: the effects' arp through the chain)
-            Playable.wrap(entry.(Bench.effect_material(:arp).build), "#{path} on the A7 arp", true,
+            # (the Bench has no mastering sets: the effects' audition mix through the chain)
+            Playable.wrap(entry.(Bench.effect_material(:mix).build), "#{path} on the audition mix", true,
               "a mastering chain ends the master: master #{entry.name.inspect}, or mix.then(&#{path})")
           when :envelope
             env = entry.family == :env_curve ? MB::Sound.adsr(*ENVELOPE_DEMO, curve: entry.name) : MB::Sound.public_send(entry.name, *ENVELOPE_DEMO)
