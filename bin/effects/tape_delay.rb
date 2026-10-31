@@ -32,7 +32,10 @@ require 'mb-sound'
 
 MB::Sound.effect_script(
   delay: [0.1, 'Delay in seconds'],
-  feedback: [0.75, 'Feedback gain'], # TODO: Allow controlling first delay amplitude separately
+  # (above 1 the repeats grow until the tape sim's saturation holds them,
+  # like a hardware tape echo run away; delays-2, the maintainer's "Widen
+  # range")
+  feedback: [0.75, 'Feedback gain (above 1 runs away into the tape saturation)', -1.5..1.5], # TODO: Allow controlling first delay amplitude separately
   dry: [1.0, 'Dry (input) level'],
   wet: [1.0, 'Wet (echo) level'],
   drive: [1.0, 'Input gain into the tape'],
