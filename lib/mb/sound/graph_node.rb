@@ -178,7 +178,7 @@ module MB
         when nil, Numeric then v
         when true then 1
         when false then 0
-        when Constant then v.constant
+        when Constant then v.build_value
         when Knob::Reader, Knob
           k = ValueSource.knob_of(v)
           MB::Sound::Arrangement::TrackKnobs.note_build_read(k)

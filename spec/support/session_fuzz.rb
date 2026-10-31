@@ -364,6 +364,13 @@ module SessionFuzz
       back = s.rng.rand < 0.6 ? beat + 1/2r : [beat - 1/2r, 1].max
       "bpm #{s.pick([90, 160])}, over: #{s.pick(['1/2r', '3.beats'])}; after(in: 2.beats) { seek #{bar}, #{MB::Sound::RubyValue.number(back)} }"
     },
+    ->(s) {
+      # (library-2) a preset on a named bg player: its params are the
+      # player's knobs (the document's Constants follow them); the other
+      # preset on :lib lands its own values with its graph; a turn of one
+      p = s.pick(%w[dnb_sub square_bass])
+      "bg :lib, preset(:#{p}, midi: #{s.pick(MELODIC)}).at(0.3)#{s.on}; turn :\"lib/cutoff\", #{s.pick([300.0, 900.0])}#{[', over: 1/2r', ''][s.rng.rand(2)]}#{s.on}"
+    },
     # (new commands go here, at the end)
   ].freeze
 

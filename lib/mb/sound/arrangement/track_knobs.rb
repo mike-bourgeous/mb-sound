@@ -15,8 +15,9 @@ module MB
       # Params the patch gives (`preset :x, cutoff: 800`, a knob name, a
       # node) and params `bind` made follow a knob are not knobs.  Each
       # track has its own (two tracks playing dnb_reese: :"bass/cutoff" and
-      # :"bass2/cutoff").  `preset` outside a track's patch (bg, plain
-      # graphs, scripts) makes none: the params stay numbers.
+      # :"bass2/cutoff").  `preset` outside a track's patch (plain graphs,
+      # scripts) makes none: the params stay numbers, until a named `bg`
+      # player plays the graph (.follow_params: :"pad/cutoff").
       #
       # The track's name and Session reach `preset` through the patch's
       # build (Arrangement.counted wraps every track patch in .building).
@@ -93,6 +94,72 @@ module MB
             k = knob_for(session, track, param)
             h[name] = k if k
           end
+        end
+
+        # A named player's knobs for the graph documents in +nodes+ (bg
+        # presets get param knobs like tracks; the maintainer, 2026-10-30:
+        # "Yes"): `bg :pad, preset(:dnb_pad, midi: clip)` makes each
+        # document param the load left to its value the Session knob
+        # :"pad/cutoff" (see .knob_for), and the param's Constants follow it
+        # (GraphNode::Constant#follow): the same samples until it is turned.
+        # Params given to `preset` (numbers, nodes, knob names), knob lines,
+        # params the graph read while building (a knob couldn't change
+        # them; GraphNode.build_value), and params already following are
+        # left alone.  A player given another document's graph starts its
+        # reused knobs at the new params' values ("Always reset", as a
+        # track's new instrument does); the same document again keeps
+        # turned ones.  While +name+ plays, reused knobs' new values are
+        # collected instead ({ knob => value }, returned) for the new
+        # graph's landing (see .land); otherwise they are set now and {} is
+        # returned.  Nothing for unnamed players, outside a Session, or for
+        # names with a "/" (CUE's :"acid/cue").
+        def follow_params(session, name, nodes)
+          return {} unless session && name.is_a?(Symbol) && !name.to_s.include?('/')
+          found = Array(nodes).flat_map { |n| n.respond_to?(:graph) ? [n, *n.graph] : [n] }
+          docs = found.grep(GraphNode::Constant).filter_map(&:param_of).uniq(&:object_id) # (also inside other nodes: preset(...).at(-6.db))
+          return {} if docs.empty?
+
+          free = docs.flat_map { |doc|
+            decl = (doc.declarations rescue nil) or next []
+            doc.params.filter_map { |pname, spec|
+              next if spec[:given] || spec[:bound] || spec[:knob]
+              param = decl[pname]
+              next unless param.is_a?(MB::Sound::Param) && param.numeric?
+              consts = (doc.knob_nodes[pname] || []).grep(GraphNode::Constant)
+              next if consts.empty? || consts.any? { |c| c.following || c.build_read? }
+              [param, consts]
+            }
+          }
+          return {} if free.empty?
+
+          paths = docs.map { |d| (d.path || d.name).to_s }.sort
+          seen = (player_documents[session] ||= {})
+          same = seen[name] == paths
+          seen[name] = paths
+          landings = {}
+          build = -> {
+            free.each { |param, consts|
+              k = knob_for(session, name, param) or next
+              consts.each { |c| c.follow(k) }
+            }
+          }
+          deferred = session.players.key?(name) ? -> { deferring(landings) { build.call } } : build
+          same ? deferred.call : resetting { deferred.call }
+          landings
+        end
+
+        # Turns the knobs in +landings+ (from .follow_params) to their
+        # values at whole note +time+ (the new graph's landing), each
+        # journaled in the command running now.
+        def land(session, landings, time)
+          landings.each { |k, v| session.turn(k.name, v, start_time: time, build: true) unless v == k.value }
+        end
+
+        # The documents each named player's knobs were made for ({ Session
+        # => { name => [paths] } }, weak), so a player given another
+        # document's graph resets its knobs.
+        def player_documents
+          @player_documents ||= ObjectSpace::WeakKeyMap.new
         end
 
         # The Session knob :"track/param" for +param+ (a document param's

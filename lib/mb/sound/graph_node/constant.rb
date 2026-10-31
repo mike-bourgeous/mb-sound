@@ -78,7 +78,15 @@ module MB
           @bufclass = nil
           @steady_value = nil
           @steady = nil
+
+          @follow = nil # (a Knob::Reader while following a knob: #follow)
+          @build_read = false
+          @param_of = nil
         end
+
+        # The GraphIO::Document whose param this constant plays (set by the
+        # loader for each use of a param), or nil.
+        attr_accessor :param_of
 
         # Prevent @changes or @buf from causing problems due to duplicated
         # copies of one node.
@@ -89,9 +97,41 @@ module MB
           }
         end
 
-        # Sets the constant value at the start of the next sample buffer.
+        # Sets the constant value at the start of the next sample buffer
+        # (while following a knob, turns the knob at its next frame).
         def constant=(value)
+          return @follow.knob.set(value, frame: @follow.knob.next_frame) if @follow
           timed_change(value, 0)
+        end
+
+        # The value while the graph builds (GraphNode.build_value): the
+        # constant, noting it was read, so a knob made later for it can
+        # tell turning it would do nothing (see #build_read?).
+        def build_value
+          @build_read = true
+          @constant
+        end
+
+        # True if the graph read this constant's value while it built
+        # (#build_value): a knob following it couldn't change that.
+        def build_read?
+          @build_read
+        end
+
+        # Plays knob +knob+'s values from now on instead of its own (a
+        # graph document's param that a named player's knob takes over:
+        # Arrangement::TrackKnobs.follow_params, `bg :pad, preset(...)`),
+        # through a Knob::Reader of its own, also in plans (the same param
+        # op, read every block).  The knob at the constant's value plays the
+        # same samples (both fill float32 buffers).  Returns self.
+        def follow(knob)
+          @follow = knob.get_sampler
+          self
+        end
+
+        # The knob this constant follows (see #follow), or nil.
+        def following
+          @follow&.knob
         end
 
         # Allows queuing changes at specific time offsets within a buffer,
@@ -124,6 +164,7 @@ module MB
           return nil if count == 0
 
           @elapsed_samples += count
+          return @follow.sample(count) if @follow
 
           if @changes.empty?
             @old_constant = @constant
@@ -267,6 +308,10 @@ module MB
         # buffer: returns the value (a Numeric) while it holds, or this
         # block's buffer (from #sample) while changes are queued.
         def plan_param(count)
+          if @follow
+            @elapsed_samples += count
+            return @follow.plan_param(count)
+          end
           unless @changes.empty?
             # #sample without Plan::Planned's hook, which would take this
             # read by the constant's own region for a reader outside the
@@ -287,12 +332,13 @@ module MB
         end
 
         def plan_snapshot
-          [@constant, @old_constant, @elapsed_samples, @changes.map(&:dup), @complex]
+          [@constant, @old_constant, @elapsed_samples, @changes.map(&:dup), @complex, @follow&.plan_snapshot]
         end
 
         def plan_restore(snapshot)
-          @constant, @old_constant, @elapsed_samples, changes, @complex = snapshot
+          @constant, @old_constant, @elapsed_samples, changes, @complex, follow = snapshot
           @changes.replace(changes.map(&:dup))
+          @follow&.plan_restore(follow) if follow
         end
 
         # See GraphNode#to_s

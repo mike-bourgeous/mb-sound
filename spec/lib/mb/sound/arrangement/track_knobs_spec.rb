@@ -140,14 +140,64 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
     expect(s3.knobs[:"bass/cutoff"].value).to eq(400.0)
   end
 
-  it 'makes no knobs for params the patch gives, nor for presets outside tracks' do
+  it 'makes no knobs for params the patch or the bg gives, nor for presets outside tracks and named players' do
     s, = run(->(s) {
       MB::Sound.knob(:cut, 2400.0, range: 150.0..8000.0)
       MB::Sound.track(:a) { |c| MB::Sound.preset(:digibrass, midi: c, cutoff: 800, grit: :cut) }
-      MB::Sound.bg(:pad, MB::Sound.preset(:dnb_reese, midi: BASS_RIFF))
+      MB::Sound.bg(:pad, MB::Sound.preset(:dnb_reese, midi: BASS_RIFF, cutoff: 900, drive: :cut))
+      MB::Sound.bg(MB::Sound.preset(:dnb_sub, midi: BASS_RIFF)) # (an unnamed player)
+      MB::Sound.preset(:funk_bass, midi: BASS_RIFF) # (a graph nothing plays)
       MB::Sound.bg(:a, BASS_RIFF)
     }, buffers: 4)
-    expect(s.knobs.keys).to contain_exactly(:cut, :"a/resonance")
+    expect(s.knobs.keys).to contain_exactly(:cut, :"a/resonance", :"pad/resonance", :"pad/glide")
+  end
+
+  # bg presets get param knobs like tracks (library-2; the maintainer,
+  # 2026-10-30: "Yes"): the document's param Constants follow the knob.
+  [:dnb_reese, :dnb_pad, *SlowTier.slow_tier(preset_names - %i[dnb_reese dnb_pad], keep: 0)].each do |n|
+    it "plays #{n} on a named bg player bit for bit like its params given as numbers, with them as the player's knobs" do
+      doc = MB::Sound::GraphIO.parse(MB::Sound::GraphIO.find_preset(n))
+      defaults = doc.params.transform_values { |v| v[:value] }
+      clip = n.to_s.match?(/drum|beat|perc/) ? DRUM_GRID : BASS_RIFF
+      _, *ref = run(->(_s) { MB::Sound.bg(:pad, MB::Sound.preset(n, midi: clip, **defaults)) }, buffers: 30)
+      s, *got = run(->(_s) { MB::Sound.bg(:pad, MB::Sound.preset(n, midi: clip)) }, buffers: 30)
+      expect(got).to eq(ref)
+      expect(ref[0].abs.max).to be > 0.001
+      build = n == :init ? %i[sync] : [] # (init's sync chooses the graph's structure: a build knob on tracks, a number here)
+      expect(s.knobs.keys).to eq((defaults.keys - build).map { |k| MB::Sound::Session::Name.param(:pad, k) })
+    end
+  end
+
+  it 'turns a bg player\'s knobs, and gives a new document\'s graph its own values where it lands' do
+    s, base = run(->(_s) { MB::Sound.bg(:pad, MB::Sound.preset(:dnb_reese, midi: BASS_RIFF)) })
+    expect(s.knobs[:"pad/cutoff"].spec.curve).to eq(:exp)
+    expect(MB::Sound::GraphIO.document_of(MB::Sound.preset(:dnb_reese, midi: BASS_RIFF)).params[:cutoff][:given]).to be_nil
+    _, turned = run(->(_s) { MB::Sound.bg(:pad, MB::Sound.preset(:dnb_reese, midi: BASS_RIFF)) },
+                    acts: { 30 => ->(_s) { MB::Sound.turn(:"pad/cutoff", 300.0) } })
+    expect(turned[0...24_000]).to eq(base[0...24_000])
+    expect((turned[30_000..] - base[30_000..]).abs.max).to be > 0.01
+
+    # Another document on the same player (dnb_sub's cutoff 110 Hz): the
+    # knob keeps dnb_reese's turned value until the new graph lands on the
+    # next bar, then starts at dnb_sub's
+    s2, = run(->(_s) { MB::Sound.bg(:pad, MB::Sound.preset(:dnb_reese, midi: BASS_RIFF)) },
+              acts: { 10 => ->(_s) { MB::Sound.turn(:"pad/cutoff", 300.0) }, 20 => ->(_s) { MB::Sound.bg(:pad, MB::Sound.preset(:dnb_sub, midi: BASS_RIFF)) } },
+              buffers: 22)
+    k = s2.knobs[:"pad/cutoff"]
+    expect(k.value).to be_within(1e-9).of(300.0)
+    expect(s2.journal.entries.last.to_s).to eq('turn :"pad/cutoff" lands 2:1 (queued)') # (the old graph keeps 300 Hz until then)
+    130.times { s2.process_buffer } # (to bar 2, 2 s at 120 BPM)
+    expect(k.value).to be_within(1e-6).of(MB::Sound::GraphIO.parse(MB::Sound::GraphIO.find_preset(:dnb_sub)).params[:cutoff][:value])
+
+    # Inside other nodes too (a stereo document under .at)
+    s4, = run(->(_s) { MB::Sound.bg(:wide, MB::Sound.preset(:dnb_pad, midi: BASS_RIFF).at(-6.db)) }, buffers: 2)
+    expect(s4.knobs.keys).to include(:"wide/cutoff", :"wide/attack", :"wide/release")
+
+    # Setting a document param turns the player's knob
+    s3, = run(->(_s) { MB::Sound.bg(:pad, @g = MB::Sound.preset(:dnb_reese, midi: BASS_RIFF)) }, buffers: 2)
+    MB::Sound::GraphIO.document_of(@g).set(:cutoff, 700.0)
+    3.times { s3.process_buffer }
+    expect(s3.knobs[:"pad/cutoff"].value).to be_within(1e-9).of(700.0)
   end
 
   # knobs-1 (D5): knobs are named in full, whatever short alias a document

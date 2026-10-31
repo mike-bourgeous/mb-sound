@@ -185,12 +185,19 @@ module MB
         GraphNode::RingHint.notice(playable.nodes) if playable.ends.nil? && MB::Sound.live?
 
         # Graph documents' knobs join the session (Session#add does this
-        # too); those with a controller get live MIDI input
+        # too); those with a controller get live MIDI input.  A named
+        # player's graph documents' params become its knobs, :"pad/cutoff"
+        # (Arrangement::TrackKnobs.follow_params; reused knobs' new values
+        # land with the graph)
         s = Session.current
+        landings = Arrangement::TrackKnobs.follow_params(s, name, playable.nodes)
         attach_knob_midi(s, s.adopt_knobs(playable.nodes, player: name))
 
         session_command(name, label: "bg #{name.inspect}", kind: :bg) { |session, time|
-          session.add(playable, at: point, name: name, fade: fade, start_time: point.given? ? nil : time, to: to || :keep, send: send)
+          land = landings.empty? ? nil : (time || session.send(:launch_time, point, session.timeline_nodes_in(playable)))
+          added = session.add(playable, at: point, name: name, fade: fade, start_time: point.given? ? nil : time, to: to || :keep, send: send)
+          Arrangement::TrackKnobs.land(session, landings, land) if land && added
+          added
         }
       end
 
