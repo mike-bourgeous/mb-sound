@@ -10,7 +10,7 @@ It lives in mb-sound's repository as a path gem (`gem 'mb-term', path:
 | `MB::Term::Cells` | A grid of character cells (one character per cell, the right half of a wide character `"\0"`), colors packed as `0xRRGGBB` or palette indexes (`Cells::INDEXED \| n`), attribute bits.  `#lines(mode)` gives text with SGR codes in `:truecolor`, `:ansi256`, `:ansi16`, or `:none`; `#frame(prev, mode, row:, col:, sync:)` gives the bytes that draw only the cells that differ from `prev` (cursor moves between runs, short gaps rewritten, DEC 2026 synchronized output). |
 | `MB::Term::Grid` | Which grid class to make: `Grid.new(w, h)` is `Cells`, or a native grid with the same interface and bytes once one is registered (`Grid.native = klass`; mb-sound registers its C grid).  `MB_TERM_NATIVE=0` forces Ruby. |
 | `MB::Term::ANSI` | SGR color parameters per color mode (nearest xterm-256 and 16-color matches). |
-| `MB::Term::VT` | A terminal model for what a program writes: rows of cells, scrollback with stable line numbers, the cursor, and the replies a terminal sends (cursor reports, device attributes, mode reports).  `#draw(grid, x, y, w, h)` copies changed rows into any grid. |
+| `MB::Term::VT` | A terminal model for what a program writes: rows of cells, scrollback with stable line numbers, the cursor, and the replies a terminal sends (cursor reports, device attributes, mode reports).  `#draw(grid, x, y, w, h)` copies changed rows into any grid.  `VT.new` makes a `NativeVT` (C) when fast_term is compiled, else a `RubyVT` (its reference: same state, same cells). |
 | `MB::Term::Screen` | A small emulator for replaying frames (cursor moves, scroll regions, erases, SGR) into Cells, for specs and captures. |
 | `MB::Term::Terminal` | The real terminal while a screen owns it: alternate screen, raw input, bracketed paste, mouse, focus, the kitty keyboard protocol, all undone by `#leave`; probes for DEC 2026, ambiguous width, kitty keys. |
 | `MB::Term::Input` | `Decoder` (bytes to Key, Paste, Mouse, Focus, Reply events, keeping each key's bytes), `Keymap`, `Router` (an explicit state machine of input modes: REPL, NAV, line prompts, grabs, overlays, prefixes), `ReplHost` (a REPL or command on a pty, drawn by a VT; `:thread` runs its own Pry, `:adopt` reopens fds 0/1/2 onto the pty), `RelineKeys`. |
@@ -62,7 +62,14 @@ Handled:
 - OSC 0 and 2 (title), and a private OSC used as a sync mark; DCS, APC,
   PM, and SOS strings are consumed and ignored.
 - Wide characters take two cells (widths from Reline's table, with the
-  ambiguous width as probed); pending wraps; tabs; resizes.
+  ambiguous width as probed; dropped in a one-column VT); pending wraps;
+  tabs; resizes.
+- Parameters are their leading digits (`3:9` reads as 3; none: 0),
+  saturating at 65535 (`VT::PARAM_MAX`); empty ones take their default,
+  and in `r` 0 does too (`CSI 0;0 r` is the whole screen, as in xterm).
+  Invalid UTF-8 becomes `?` as `String#scrub` replaces it.  Bytes split
+  anywhere between reads (inside sequences, characters, or invalid
+  bytes) give the state they give read at once.
 
 Not handled: left/right margins (DECSLRM), insert mode (IRM), character
 sets (line drawing via `ESC ( 0`), double-width or double-height lines,

@@ -135,7 +135,7 @@ module MB
             # at the prompt included, may still be in the pty: the reader
             # runs at a low priority)
             tiles.host.sync_output
-            last = vt.dropped + vt.scrollback.length + vt.row
+            last = vt.dropped + vt.scrollback_length + vt.row
             last -= 1 unless Thread.current.equal?(Thread.main)
             first = [vt.dropped, last - n + 1].max
             lines = (first..last).map { |i| (r = vt.line_at(i)) ? (color ? r.to_sgr : r.to_s) : '' }

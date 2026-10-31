@@ -102,9 +102,11 @@ module MemcheckSelection
     # Every node and filter type, planned and unplanned (memcheck light)
     'spec/lib/mb/sound/graph_sweep_spec.rb',
 
-    # mb-term's native grid against its Ruby Cells (run here under
-    # mb-sound's spec_helper; also in the gem's own specs)
+    # mb-term's native grid against its Ruby Cells, and its C VT against
+    # RubyVT (run here under mb-sound's spec_helper; also in the gem's own
+    # specs)
     'gems/mb-term/spec/native_spec.rb',
+    'gems/mb-term/spec/vt_native_spec.rb',
   ].freeze
 
   # Specs every selective run includes (when it runs anything): the graph

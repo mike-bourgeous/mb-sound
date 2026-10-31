@@ -29,7 +29,7 @@ RSpec.describe('bin/sound.rb with ui :tiles', :aggregate_failures) do
 
     text = -> { lock.synchronize { vt.text } }
     # The screen and the lines scrolled off it
-    all_text = -> { lock.synchronize { (vt.scrollback.map { |row| row.text.delete("\0") } + vt.lines).join("\n") } }
+    all_text = -> { lock.synchronize { vt.text_between(vt.dropped, vt.dropped + vt.total_lines - 1) } }
     wait = lambda { |what, t = 20, of: text|
       d = MB::U.clock_now + t
       until MB::U.clock_now > d
