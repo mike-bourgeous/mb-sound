@@ -1330,7 +1330,7 @@ module MB
         `struck :my_bell, resonator: :bell, decay: 8` makes another.
 
         Judging presets by ear: `L.fx.reverb.bench` renders every reverb on
-        the Listening Bench's material (the audition mix, the A7 arp, the
+        the Listening Bench's material (the audition mix, a slow pluck arp, the
         jungle break, a saw pad; instruments on phrases for their role and their genre
         template's phrase), all matched to the loudest every render reaches
         with its true peak at most -1 dBTP, into a Bench set

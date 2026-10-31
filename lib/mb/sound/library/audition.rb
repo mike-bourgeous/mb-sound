@@ -7,10 +7,10 @@ module MB
       # phrase (struck ones moved toward their resonator's typical pitch),
       # kits a beat, resonator effects one strike of their struck
       # instrument (Struck), clips on their instrument, other effects their
-      # Listening Bench material, the A7 arp (Library::Bench, audition-1),
-      # mastering chains the same arp through them, envelope presets a
-      # triangle and some noise shaped by them; the rest say what to do
-      # with them.
+      # first Listening Bench material, the audition mix (Library::Bench,
+      # audition-1, library-2), mastering chains the same mix through
+      # them, envelope presets a triangle and some noise shaped by them;
+      # the rest say what to do with them.
       module Audition
         # A beat for kit entries.
         KIT_DEMO = { kick: 'x...x...x...x...', snare: '....x.......x...', closed_hat: 'x.x.x.x.x.x.x.xx' }.freeze

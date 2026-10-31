@@ -103,7 +103,7 @@ module MB
         def summary_text(result, lufs, ceiling, here)
           s = "#{result.entries.length} presets on standard material, every render matched to #{lufs ? format('%.1f', lufs) : '?'} LUFS integrated, " \
               "the loudest every one reaches with its true peak at most #{format('%g', ceiling)} dBTP (the notes say which set it). "
-          s << 'Effects: the 4-bar audition mix (beat and bass, pluck, pad, a silent bar for tails), the A7 arp, the jungle break, and a saw pad, after a dry reference of each. ' if result.entries.any? { |e| e.kind == :effect }
+          s << 'Effects: the 4-bar audition mix (beat and bass, pluck, pad, a silent bar for tails), the slow pluck arp, the jungle break, and a saw pad, after a dry reference of each. ' if result.entries.any? { |e| e.kind == :effect }
           s << 'Instruments: two phrases for their role, then their genre template phrase. ' if result.entries.any? { |e| e.kind == :instrument }
           s << 'Kits: two beats, then a template beat. ' if result.entries.any? { |e| e.kind == :kit }
           s << "Before = #{result.vs}, after = #{here[:branch]} (matched together). " if result.vs
