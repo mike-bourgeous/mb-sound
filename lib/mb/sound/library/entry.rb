@@ -137,6 +137,9 @@ module MB
         # instrument; see MB::Sound::Struck): `L.fx.bar.ping(C5)`,
         # `L.fx.bell.ping(C4, E4, G4)` (a chord), `L.inst.bowl.ping` (its
         # typical pitch).  Returns the graph (it ends when the ring does).
+        # A clip (or other note source) plays as written, looping if it
+        # loops: `L.fx.bar.ping(seq(C2, A2, C3, G1).loop.n16)`, the same as
+        # `seq(...).loop.n16.then(&L.inst.bar)`.
         def ping(*pitches)
           MB::Sound::Struck.ping(self, pitches)
         end

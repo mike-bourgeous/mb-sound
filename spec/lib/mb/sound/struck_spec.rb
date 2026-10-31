@@ -53,6 +53,16 @@ RSpec.describe(MB::Sound::Struck, :aggregate_failures) do
     expect(MB::Sound::Struck.home_note(:bar).name).to eq('A6')
     expect { MB::Sound::L.fx.hall.ping }.to raise_error(ArgumentError, /isn't a resonator: ping strikes resonators/)
 
+    # A clip plays as written, looping if it loops (it was struck as one
+    # step of a one-shot clip, so a loop played once)
+    riff = MB::Sound.seq(MB::Sound::C2, MB::Sound::A2, MB::Sound::C3, MB::Sound::G1).loop.n16
+    late = samples(MB::Sound::L.fx.bar.ping(riff), 180)[0][150 * 800..].abs.max # 2.5-3 s: cycles 6 and 7 at 120 BPM
+    expect(late).to be > 0.3 # (still struck: about 0.8, as loud as its first cycle)
+    once = samples(MB::Sound::L.fx.bar.ping(MB::Sound.seq(MB::Sound::C2, MB::Sound::A2).n16), 180)[0]
+    expect(once[150 * 800..].abs.max).to be < late / 100 # (a one-shot clip only rings: about 0.002)
+    expect { MB::Sound::L.fx.bar.ping(MB::Sound::C5, riff) }.to raise_error(ArgumentError, /ping takes pitches \(L\.fx\.bar\.ping\(C4, E4\)\) or one clip .*got a note source among 2 arguments/)
+    expect(samples(MB::Sound::L.fx.bar.ping(MB::Sound::MIDI::Stream.for(riff.dup)), 4)[0].abs.max).to be > 0.05 # (other note sources too)
+
     pl = MB::Sound::Playable
     expect(pl.graph(MB::Sound::L.fx.bar).description).to eq('L.fx.bar struck once (L.inst.bar at A6)')
     expect(pl.graph(MB::Sound::L.inst.bowl).description).to eq('L.inst.bowl playing a demo phrase')

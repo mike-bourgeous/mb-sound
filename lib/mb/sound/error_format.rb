@@ -90,34 +90,103 @@ module MB
         text
       end
 
-      # For an "unknown keyword" ArgumentError +e+ raised by the method
+      # Ruby's own argument errors (arity and keywords), which
+      # #argument_help rewrites.
+      ARGUMENT_ERROR = /\A(?:wrong number of arguments \(.+\)|unknown keywords?: .+|missing keywords?: .+)\z/
+
+      # For Ruby's arity or keyword ArgumentError +e+ raised by the method
       # +name+ of +receiver+ itself (not by something it called), a new
-      # error naming the method with did_you_mean suggestions from its
-      # keywords (or the list of them); else nil.  The DSL's recorders call
-      # it (GraphNode::Recipe.record), so every recorded DSL method suggests
-      # (ux-fix-1: `lp4(800, resonanse: 0.3)`).
-      def unknown_keyword(e, receiver, name)
-        m = e.message.match(/\Aunknown keywords?: (.+)\z/) or return nil
-        loc = e.backtrace_locations&.first or return nil
-        meth = receiver.method(name)
-        meth = meth.super_method while meth && meth.source_location&.first != loc.path
-        return nil if meth.nil? || meth.name != loc.base_label.to_sym && meth.original_name != loc.base_label.to_sym
+      # error naming the method, with did_you_mean suggestions for unknown
+      # keywords from its keywords (or the list of them) and, for arity and
+      # missing keywords, its signature; else nil.  The DSL's recorders
+      # call it (GraphNode::Recipe.record), so every recorded DSL method
+      # suggests (ux-fix-1: `lp4(800, resonanse: 0.3)`) and says what it
+      # takes (notes-fix-1: `lp4` alone).
+      #
+      # +method+ (an UnboundMethod or Method) skips finding the raising
+      # method from the backtrace (MIDI::Stream's transforms, whose errors
+      # come from the transform classes they build); +keys+ adds keywords
+      # it takes through **options; +hints+ maps other guesses at a
+      # keyword to the keyword (`echo(transpose: 5)`: pitch:); +example+
+      # is a working call, added after "e.g.".
+      def argument_help(e, receiver, name, method: nil, keys: nil, hints: nil, example: nil)
+        return nil unless e.message.match?(ARGUMENT_ERROR)
+        meth = method || raising_method(e, receiver, name) or return nil
 
-        keys = meth.parameters.filter_map { |type, key| key if type == :key || type == :keyreq }
-        return nil if keys.empty?
-
-        unknown = m[1].scan(/:(\w+[?!]?)/).flatten
-        found = unknown.flat_map { |u| DidYouMean::SpellChecker.new(dictionary: keys.map(&:to_s)).correct(u) }.uniq
+        keys = (keywords_of(meth) + keys.to_a).uniq
         text = "#{name}: #{e.message}"
-        text << if found.empty?
-                  " (#{name} takes #{keys.map { |k| "#{k}:" }.join(', ')})"
-                else
-                  "\nDid you mean?  #{found.map { |k| "#{k}:" }.join("\n                ")}"
-                end
+        found = []
+        if (m = e.message.match(/\Aunknown keywords?: (.+)\z/))
+          return nil if keys.empty? && example.nil?
+          unknown = m[1].scan(/:(\w+[?!]?)/).flatten
+          found = unknown.flat_map { |u|
+            hint = hints&.[](u.to_sym)
+            hint ? [hint.to_s] : DidYouMean::SpellChecker.new(dictionary: keys.map(&:to_s)).correct(u)
+          }.uniq
+          text << " (#{name} takes #{keys.map { |k| "#{k}:" }.join(', ')})" if found.empty? && !keys.empty?
+        else
+          text << "; #{name}(#{signature(meth)})"
+        end
+        text << "; e.g. #{example}" if example
+        text << "\nDid you mean?  #{found.map { |k| "#{k}:" }.join("\n                ")}" unless found.empty?
         error = ArgumentError.new(text)
         error.set_backtrace(e.backtrace_locations || e.backtrace)
         error
       rescue StandardError
+        nil
+      end
+
+      # The method of +receiver+ named +name+ (or a super method) that
+      # raised +e+ itself, or nil.
+      def raising_method(e, receiver, name)
+        loc = e.backtrace_locations&.first or return nil
+        chain = []
+        meth = receiver.method(name)
+        (chain << meth; meth = meth.super_method) while meth
+        # (Ruby reports arity and keyword errors at the def line; wrappers
+        # defined in the same file may come first)
+        meth = chain.find { |m| m.source_location == [loc.path, loc.lineno] } || chain.find { |m| m.source_location&.first == loc.path }
+        return nil if meth.nil? || meth.name != loc.base_label.to_sym && meth.original_name != loc.base_label.to_sym
+
+        meth
+      end
+
+      # The keyword names +meth+ takes.
+      def keywords_of(meth)
+        meth.parameters.filter_map { |type, key| key if type == :key || type == :keyreq }
+      end
+
+      # The parameter list of +meth+ as written in its source (defaults
+      # included), or built from its parameters.
+      def signature(meth)
+        file, line = meth.source_location
+        if file && File.file?(file)
+          require 'prism'
+          node = find_def(Prism.parse_file(file).value, meth.original_name, line)
+          return node.parameters&.slice.to_s.gsub(/\s*\n\s*/, ' ') if node
+        end
+
+        meth.parameters.map { |type, n|
+          case type
+          when :req then n.to_s
+          when :opt then "#{n} = ..."
+          when :rest then "*#{n}"
+          when :keyreq then "#{n}:"
+          when :key then "#{n}: ..."
+          when :keyrest then "**#{n}"
+          when :block then "&#{n}"
+          end
+        }.compact.join(', ')
+      end
+
+      # The `def` of +name+ starting at +line+ under Prism +node+, or nil.
+      def find_def(node, name, line)
+        return node if node.is_a?(Prism::DefNode) && node.name == name && node.location.start_line == line
+
+        node.compact_child_nodes.each do |c|
+          next if c.location.start_line > line || c.location.end_line < line
+          found = find_def(c, name, line) and return found
+        end
         nil
       end
 

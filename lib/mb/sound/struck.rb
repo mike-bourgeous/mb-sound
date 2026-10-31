@@ -125,10 +125,24 @@ module MB
       end
 
       # A graph striking +pitches+ once on +entry+'s struck instrument (see
-      # Library::Entry#ping).
+      # Library::Entry#ping), or playing a note source given instead of
+      # pitches (a clip, MIDI stream, or MIDI file) as written, looping if
+      # it loops (`L.fx.bar.ping(seq(C2, A2).n16.loop)`, the same as
+      # `seq(C2, A2).n16.loop.then(&L.inst.bar)`).
       def ping(entry, pitches)
         e = entry_for(entry) or raise ArgumentError, "#{entry.head_path} isn't a resonator: ping strikes resonators (L.fx.bar.ping(C5)); `play #{entry.head_path}` plays a demo"
-        MB::Sound.struck(strike_clip(e.name, pitches), e.name)
+        source = pitches.length == 1 && note_source?(pitches[0]) ? pitches[0] : nil
+        if source.nil? && pitches.any? { |p| note_source?(p) }
+          raise ArgumentError, "ping takes pitches (#{entry.head_path}.ping(C4, E4)) or one clip (#{entry.head_path}.ping(seq(C2, A2).n16.loop)); got a note source among #{pitches.length} arguments"
+        end
+        MB::Sound.struck(source || strike_clip(e.name, pitches), e.name)
+      end
+
+      # True for what ping plays as written instead of striking: clips,
+      # MIDI streams, sources, inputs, and files (MIDI::Stream.for).
+      def note_source?(x)
+        x.is_a?(Sequence::Clip) || x.is_a?(MIDI::Stream) || x.is_a?(MIDI::Source) || x.is_a?(MIDI::Input) ||
+          x.is_a?(MIDI::MIDIFile) || x.respond_to?(:to_midi_stream)
       end
     end
   end
