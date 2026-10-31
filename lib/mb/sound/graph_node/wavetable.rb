@@ -20,7 +20,8 @@ module MB
       class Wavetable
         include GraphNode
         include GraphNode::SampleRateHelper
-        node_traits memory: :short
+        # (its interpolation state: #carry_adopt; the phase is its input's)
+        node_traits memory: :short, carry: :adopt
 
         # Valid values for the constructor's +:wrap+ parameter (see
         # MB::Sound::Wavetable::WRAP_MODES).
@@ -96,6 +97,20 @@ module MB
 
         # The inputs to this node: the phase, the scan position, the
         # increment, and the wrapping mode (if they are graph nodes).
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # +old+'s state fits this one.
+        def carry_fits?(old)
+          old.class == self.class && old.instance_variable_get(:@interpolation) == @interpolation
+        end
+
+        # Takes over +old+'s interpolation state (Session::Carry's adoption; the old
+        # one gets this one's fresh state).
+        def carry_adopt(old)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@lstate].freeze
+
         def sources
           {
             phase: @phase,

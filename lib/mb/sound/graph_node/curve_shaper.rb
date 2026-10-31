@@ -38,7 +38,8 @@ module MB
       class CurveShaper
         include GraphNode
         include SampleRateHelper
-        node_traits memory: :short
+        # (its antialiasing state moves to a rebuilt shaper: #carry_adopt)
+        node_traits memory: :short, carry: :adopt
 
         # Curve sources of the C kernel.
         FORMS = { table: 0, poly: 1, cos: 2, exp: 3 }.freeze
@@ -121,6 +122,21 @@ module MB
         def sources
           { input: @source }
         end
+
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # shaper +old+ antialiases alike (its state fits; the curve may
+        # differ).
+        def carry_fits?(old)
+          old.class == self.class && old.instance_variable_get(:@antialias) == @antialias
+        end
+
+        # Takes over shaper +old+'s antialiasing state (the previous input
+        # and its integral).
+        def carry_adopt(old)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@state].freeze
 
         def sample(count)
           data = @source.sample(count)

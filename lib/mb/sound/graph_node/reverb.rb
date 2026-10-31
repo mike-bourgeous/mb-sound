@@ -39,7 +39,9 @@ module MB
         include GraphNode
         include GraphNode::SampleRateHelper
         include MultiOutput
-        node_traits memory: :long
+        # (its network's kernel, input position, and predelays move to a
+        # rebuilt reverb of the same design: #carry_adopt)
+        node_traits memory: :long, carry: :adopt
 
         # The extra loop time (samples at FEEDBACK_BLOCK_RATE) of the
         # classic presets: until 2026-10-10 the feedback network read its
@@ -361,7 +363,8 @@ module MB
         class PaddedInput
           include GraphNode
           include SampleRateHelper
-          node_traits memory: :short
+          # (a position, moved by its Reverb's #carry_adopt)
+          node_traits memory: :short, carry: :none
 
           # One PaddedInput per source, sharing their ended flags.
           def self.group(sources)
@@ -373,6 +376,9 @@ module MB
           # or nil while it plays.  Positions count every sample returned,
           # so they stay right when a Tee reads ahead.
           attr_reader :end_position
+
+          # The ended flags shared by the group (see .group).
+          attr_reader :ended
 
           def initialize(source, ended:, index:)
             @source = source.get_sampler
@@ -387,6 +393,14 @@ module MB
           def sources
             { input: @source }
           end
+
+          # Swaps positions with padded input +old+ (Reverb#carry_adopt
+          # swaps the group's ended flags).
+          def carry_adopt(old)
+            NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+          end
+
+          ADOPT_IVARS = %i[@position @end_position].freeze
 
           # The source's next +count+ samples, or silence after it ends
           # while another input plays, else nil.
@@ -685,6 +699,7 @@ module MB
           # Set in only some configurations, or later (here so every Reverb
           # has one instance variable layout; see GraphNode::IvarPreset)
           @padded_inputs = nil
+          @predelays = nil
           @line_samplers = nil
           @network = nil
           @feedback_mod = nil
@@ -786,6 +801,7 @@ module MB
           predelayed = inputs.map.with_index { |u, idx|
             MB::Sound::Length.seconds(@predelay, sample_rate: @sample_rate) == 0 ? u : u.delay(@predelay, ring_out: false).named("Predelay #{idx}")
           }
+          @predelays = predelayed.reject.with_index { |u, idx| u.equal?(inputs[idx]) }.freeze # (see #carry_adopt)
 
           # Assign inputs to pipeline channels, at 1/sqrt(lines per input)
           # so the inputs' energy is kept
@@ -870,6 +886,41 @@ module MB
           loop = (@layout.taps[idx] * @sample_rate).round + (@loop_extra * @sample_rate).round
           -3 * loop / @sample_rate / Math.log10(@gains[idx])
         end
+
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # reverb +old+'s network runs the same kernel design (lines, delays,
+        # gains, modulation, seed) with as many inputs and predelays, so its
+        # state continues in this one.  Another room size or decay doesn't
+        # fit.
+        def carry_fits?(old)
+          return false unless old.class == self.class
+          a = old.network
+          b = @network
+          ip = old.instance_variable_get(:@padded_inputs)
+          a.config == b.config && ip&.length == @padded_inputs&.length &&
+            old.predelays.length == @predelays.length && old.predelays.zip(@predelays).all? { |x, y| y.carry_fits?(x) }
+        end
+
+        # Takes over reverb +old+'s network state (its kernel object: lines,
+        # modulation phases, smoothers), input position, padded inputs, and
+        # predelay lines; the old one gets this one's fresh state.  On the
+        # swap frame; O(1).
+        def carry_adopt(old)
+          @network.swap_kernel(old.network)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+          op = old.instance_variable_get(:@padded_inputs)
+          if @padded_inputs
+            @padded_inputs.zip(op).each { |a, b| a.carry_adopt(b) }
+            NodeTraits.swap_contents(@padded_inputs[0].ended, op[0].ended)
+          end
+          @predelays.zip(old.predelays).each { |a, b| a.carry_adopt(b) }
+        end
+
+        # The reverb's own running state #carry_adopt swaps.
+        ADOPT_IVARS = %i[@input_position].freeze
+
+        # The predelay nodes (an Array, empty without a predelay).
+        attr_reader :predelays
 
         # Returns the input sources and the network's live parameter nodes.
         def sources

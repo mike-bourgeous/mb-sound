@@ -4,7 +4,7 @@ module MB
     class ArrayInput
       include GraphNode
       include GraphNode::IOSampleMixin
-      node_traits memory: :short
+      node_traits memory: :short, fresh: 'an input: a rebuilt graph\'s copy plays its data from its own position'
 
       attr_reader :channels, :frames, :sample_rate, :offset, :remaining, :buffer_size, :repeat, :repeat_count, :duration
       alias length frames

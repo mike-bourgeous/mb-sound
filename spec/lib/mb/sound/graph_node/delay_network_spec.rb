@@ -136,10 +136,11 @@ RSpec.describe(MB::Sound::GraphNode::DelayNetwork) do
     end
   end
 
-  it 'declares long memory that a carry starts fresh (NodeTraits)' do
+  it 'declares long memory that a carry moves by adoption (NodeTraits)' do
     net = impulse.multitap(0.1, feedback: 0.5).outputs[0]
     traits = MB::Sound::NodeTraits.of(net.instance_variable_get(:@owner))
     expect(traits.memory).to eq(:long)
-    expect(traits).to be_uncarried
+    expect(traits).to be_adopt
+    expect(traits).not_to be_uncarried
   end
 end

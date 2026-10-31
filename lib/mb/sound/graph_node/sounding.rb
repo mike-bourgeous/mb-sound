@@ -24,10 +24,26 @@ module MB
       class Sounding
         include GraphNode
         include SampleRateHelper
-        node_traits memory: :short
+        # (its count since the last loud sample: #carry_adopt)
+        node_traits memory: :short, carry: :adopt
 
         # The source node (or Channels bundle).
         attr_reader :source
+
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # gate +old+ follows as many inputs.
+        def carry_fits?(old)
+          old.class == self.class && old.instance_variable_get(:@inputs).length == @inputs.length
+        end
+
+        # Takes over gate +old+'s count since its source's last loud sample
+        # and its ending.
+        def carry_adopt(old)
+          NodeTraits.swap_contents(@live, old.instance_variable_get(:@live))
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@ended @done @quiet].freeze
 
         # How long the gate stays open after the source falls silent, and
         # the fade to 0 after that (seconds or fixed Lengths, as given).

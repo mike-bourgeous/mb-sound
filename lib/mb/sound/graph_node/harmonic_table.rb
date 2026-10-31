@@ -26,7 +26,8 @@ module MB
       class HarmonicTable
         include GraphNode
         include GraphNode::SampleRateHelper
-        node_traits memory: :short
+        # (its phase, tables, and crossfade: #carry_adopt)
+        node_traits memory: :short, carry: :adopt
 
         # The default number of samples between table rebuilds (about 11 ms
         # at 48 kHz).  Each rebuild builds a two-frame Wavetable (about 100 us
@@ -84,6 +85,20 @@ module MB
         # The table read now (two frames: the previous spectrum and the
         # current one), or nil before the first sample.
         attr_reader :table
+
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # +old+'s state fits this one.
+        def carry_fits?(old)
+          old.class == self.class && old.instance_variable_get(:@update) == @update && old.instance_variable_get(:@interpolation) == @interpolation && old.instance_variable_get(:@spectrum).length == @spectrum.length
+        end
+
+        # Takes over +old+'s phase, tables, and table crossfade (Session::Carry's adoption; the old
+        # one gets this one's fresh state).
+        def carry_adopt(old)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@state @tstate @prev @current @table @countdown @fade @time].freeze
 
         def sources
           srcs = { frequency: (@frequency if @frequency.respond_to?(:sample)) }

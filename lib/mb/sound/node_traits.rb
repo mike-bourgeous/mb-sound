@@ -61,10 +61,17 @@ module MB
     #   graph: +:none+ (nothing to move), +:snapshot+ (its Plan::Describable
     #   plan_snapshot/plan_restore), +:own+ (a dedicated path: a Synth's
     #   voice allocation, Carry.carry_synth), or +:fresh+ (state no carry
-    #   copies yet: the swap crossfades).  Derived unless declared: +:none+
-    #   for +memory: :none+, +:snapshot+ for a class with a plan_snapshot of
-    #   its own, else +:fresh+.  (State adoption, research-snapshot-
-    #   mutability, would add an +:adopt+ kind here.)
+    #   copies yet: the swap crossfades), or +:adopt+ (state adoption,
+    #   carry-1: the class defines +carry_adopt(old)+, which swaps its state
+    #   holders (delay lines, kernels, read states) with +old+'s, its
+    #   partner in the replaced graph, on the swap frame, so the rebuilt
+    #   node continues the old one's samples and the old node holds fresh
+    #   state, and optionally +carry_fits?(old)+, asked on the building
+    #   thread: false when +old+'s state doesn't fit, e.g. a reverb of
+    #   another size; the pair then counts as uncarried).  Derived unless
+    #   declared: +:none+ for +memory: :none+, +:snapshot+ for a class with
+    #   a plan_snapshot of its own, else +:fresh+.  A class keeping +:fresh+
+    #   says why with +fresh:+ (a String; node_traits_spec.rb's guard).
     #
     # Nodes whose answer depends on their settings (a Filter::SampleWrapper
     # answers for the filter it wraps) define an instance method
@@ -72,8 +79,8 @@ module MB
     module NodeTraits
       MEMORY = %i[none short long].freeze
       TIMELINE = [false, true, :events].freeze
-      CARRY = %i[none snapshot own fresh].freeze
-      KEYS = %i[memory timeline idle_check random wiring carry].freeze
+      CARRY = %i[none snapshot own adopt fresh].freeze
+      KEYS = %i[memory timeline idle_check random wiring carry fresh].freeze
 
       # The +random+ values that aren't catch-up method names.
       RANDOM = [false, :events, :blocks].freeze
@@ -85,7 +92,7 @@ module MB
 
       # The traits of one node kind (see NodeTraits).  +owner+ is the class
       # or module whose declaration gave +memory+ (nil for the defaults).
-      Traits = Data.define(:memory, :timeline, :idle_check, :random, :wiring, :carry, :owner) do
+      Traits = Data.define(:memory, :timeline, :idle_check, :random, :wiring, :carry, :fresh, :owner) do
         # True if a sleeper holding this node can never sleep: it follows the
         # timeline, remembers sound without a way to say it is idle, or
         # draws random numbers it can't catch up.
@@ -109,10 +116,16 @@ module MB
         def snapshot?
           carry == :snapshot
         end
+
+        # True if Session::Carry moves the node's state by adoption (see
+        # NodeTraits' +carry+).
+        def adopt?
+          carry == :adopt
+        end
       end
 
       # Traits of objects that aren't node kinds (MIDI streams, numbers).
-      NONE = Traits.new(memory: :none, timeline: false, idle_check: nil, random: false, wiring: false, carry: :none, owner: nil)
+      NONE = Traits.new(memory: :none, timeline: false, idle_check: nil, random: false, wiring: false, carry: :none, fresh: nil, owner: nil)
 
       # Where the default (stateless: nil) plan_snapshot is defined (see
       # .derived_carry); filled in by plan.rb once those modules load.
@@ -152,6 +165,9 @@ module MB
           check(mod, :carry, traits, CARRY)
           if traits.key?(:idle_check) && !(traits[:idle_check].nil? || traits[:idle_check].is_a?(Symbol))
             raise ArgumentError, "#{mod}'s idle_check must be a method name (a Symbol), not #{traits[:idle_check].inspect}"
+          end
+          if traits.key?(:fresh) && !traits[:fresh].is_a?(String)
+            raise ArgumentError, "#{mod}'s fresh trait must say why its state starts fresh across a rebuild (a String), not #{traits[:fresh].inspect}"
           end
           if traits.key?(:random) && !(RANDOM.include?(traits[:random]) || traits[:random].is_a?(Symbol))
             raise ArgumentError, "#{mod}'s random trait must be one of #{RANDOM.inspect} or a catch-up method name, not #{traits[:random].inspect}"
@@ -193,6 +209,7 @@ module MB
               random: found.fetch(:random, false),
               wiring: found.fetch(:wiring, false),
               carry: found.fetch(:carry) { derived_carry(klass, memory) },
+              fresh: found[:fresh],
               owner: owner
             )
           end
@@ -282,6 +299,40 @@ module MB
             i += 1
           end
           true
+        end
+
+        # For +carry_adopt+ methods (see NodeTraits' +carry+): swaps the
+        # values of instance variables +names+ between objects +a+ and +b+
+        # (state holders: the objects stay where they are referenced from,
+        # their contents change hands).
+        def swap_ivars(a, b, names)
+          i = 0
+          while i < names.length
+            n = names[i]
+            x = a.instance_variable_get(n)
+            a.instance_variable_set(n, b.instance_variable_get(n))
+            b.instance_variable_set(n, x)
+            i += 1
+          end
+          nil
+        end
+
+        # For +carry_adopt+ methods: swaps the contents of Arrays (or
+        # NArrays of one shape) +a+ and +b+, keeping each object (state
+        # Arrays shared with kernels or other nodes, read states).
+        def swap_contents(a, b)
+          return if a.equal?(b)
+
+          if a.is_a?(Array)
+            t = a.dup
+            a.replace(b)
+            b.replace(t)
+          else
+            t = a.dup
+            a[true] = b
+            b[true] = t
+          end
+          nil
         end
 
         private

@@ -47,6 +47,22 @@ RSpec.describe(MB::Sound::NodeTraits, :aggregate_failures) do
       end
     end
 
+    # (carry-1: a class with per-sample memory says how a rebuild keeps it,
+    # adoption, a snapshot, its own path, or why it starts fresh)
+    it 'says how every class with running state carries across a rebuild' do
+      missing = classes.select { |c| (t = c.node_traits).memory != :none && t.carry == :fresh && t.fresh.nil? }.map(&:name)
+      expect(missing).to eq([]), "declare `node_traits carry: :adopt` (with #carry_adopt) or `fresh: 'why'` on: #{missing.join(', ')}"
+    end
+
+    it 'defines carry_adopt for every adopting class' do
+      classes.each do |c|
+        next unless c.node_traits.adopt?
+        expect(c.method_defined?(:carry_adopt)).to eq(true), "#{c} has carry :adopt without #carry_adopt"
+        expect(c.instance_method(:carry_adopt).arity).to eq(1), "#{c}#carry_adopt takes the old node"
+        expect(c.instance_method(:carry_fits?).arity).to eq(1) if c.method_defined?(:carry_fits?)
+      end
+    end
+
     it 'gives every timeline node a timeline trait, and only them' do
       tl = MB::Sound::Sequence::TimelineNode
       wrong = classes.select { |c| c.include?(tl) != (c.node_traits.timeline != false) }.map(&:name)
@@ -127,7 +143,8 @@ RSpec.describe(MB::Sound::NodeTraits, :aggregate_failures) do
       lowpass = sig.filter(:lowpass, cutoff: 500, quality: 0.7)
       fir = sig.filter(MB::Sound::Filter::FIR.new({ 0 => 1, 2000 => 1, 3000 => 0, 24000 => 0 }, filter_length: 64))
       expect(described_class.of(delay).memory).to eq(:long)
-      expect(described_class.of(delay)).to be_uncarried
+      expect(described_class.of(delay)).to be_adopt
+      expect(described_class.of(delay)).not_to be_uncarried
       expect(described_class.of(lowpass).memory).to eq(:short)
       expect(described_class.of(lowpass)).to be_snapshot
       expect(described_class.of(fir).memory).to eq(:long)

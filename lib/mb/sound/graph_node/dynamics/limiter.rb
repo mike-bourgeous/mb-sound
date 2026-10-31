@@ -18,7 +18,8 @@ module MB
         # .process_ruby.  Built by DynamicsMethods#limit.
         class Limiter < Channels
           include Framed
-          node_traits memory: :short
+          # (its gain, history, and lookahead delays: #carry_adopt)
+          node_traits memory: :short, carry: :adopt
 
           # Samples of delay added by the true-peak detector.
           TRUE_PEAK_DELAY = 6
@@ -96,6 +97,21 @@ module MB
             @params = nil
           end
           alias at_rate sample_rate=
+
+          # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+          # limiter +old+ has the same channels, detectors, and lookahead.
+          def carry_fits?(old)
+            old.class == self.class && old.instance_variable_get(:@rings).shape == @rings.shape &&
+              old.instance_variable_get(:@state).shape == @state.shape && old.instance_variable_get(:@lookahead) == @lookahead
+          end
+
+          # Takes over limiter +old+'s gain, history, lookahead delays, and
+          # ending.
+          def carry_adopt(old)
+            NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+          end
+
+          ADOPT_IVARS = %i[@state @rings @ended @flushing @flushed].freeze
 
           # Clears the gain, history, and delays.
           def reset_state

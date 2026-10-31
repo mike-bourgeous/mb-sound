@@ -40,7 +40,8 @@ module MB
         include GraphNode
         include GraphNode::SampleRateHelper
         include GraphNode::MultiOutput
-        node_traits memory: :short
+        # (its moving ratios' state: #carry_adopt)
+        node_traits memory: :short, carry: :adopt
 
         # Ways to compute the copies' frequencies (see the class
         # description).
@@ -142,6 +143,20 @@ module MB
 
           @node_type_name = 'Unison Detune'
         end
+
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # +old+'s state fits this one.
+        def carry_fits?(old)
+          old.class == self.class && old.instance_variable_get(:@fractions) == @fractions && old.instance_variable_get(:@mode) == @mode && old.instance_variable_get(:@control) == @control
+        end
+
+        # Takes over +old+'s moving ratios (Session::Carry's adoption; the old
+        # one gets this one's fresh state).
+        def carry_adopt(old)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@state].freeze
 
         def sources
           { frequency: @frequency, detune: @detune }

@@ -236,18 +236,32 @@ module MB
         end
 
         # The wrapper's NodeTraits answer for the filter it wraps: long memory
-        # for a delay or FIR filter (their traits), else short, and carried
-        # by the wrapper's snapshot only where .filter_state keeps the
-        # filter's state (cookbook biquads, SVFs, and chains of them; other
-        # filters start fresh, so a rebuild crossfades).
+        # for a delay or FIR filter (their traits), else short, carried by
+        # the wrapper's snapshot where .filter_state keeps the filter's state
+        # (cookbook biquads, SVFs, and chains of them), by adoption where the
+        # filter adopts (delays: #carry_adopt), else fresh (a rebuild
+        # crossfades).
         def node_traits
           f = NodeTraits.of(@base_filter)
-          self.class.node_traits.with(
-            memory: f.memory == :long ? :long : :short,
-            idle_check: f.idle_check && :filter_idle?,
-            carry: SampleWrapper.filter_state?(@base_filter) ? :snapshot : :fresh
-          )
+          carry = SampleWrapper.filter_state?(@base_filter) ? :snapshot : (f.adopt? ? :adopt : :fresh)
+          NodeTraits.variant(self.class, memory: f.memory == :long ? :long : :short, idle_check: f.idle_check && :filter_idle?, carry: carry)
         end
+
+        # Session::Carry's adoption (see #node_traits): true if wrapper
+        # +old+'s filter fits this one's (Filter::Delay#carry_fits?).
+        def carry_fits?(old)
+          old.class == self.class && old.base_filter.class == @base_filter.class && @base_filter.carry_fits?(old.base_filter)
+        end
+
+        # Takes over wrapper +old+'s filter state and ring-out (the old one
+        # gets this one's fresh state).
+        def carry_adopt(old)
+          @base_filter.carry_adopt(old.base_filter)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        # The wrapper's own running state #carry_adopt swaps.
+        ADOPT_IVARS = %i[@ringing].freeze
 
         # The wrapped filter's idle check (see #node_traits).
         def filter_idle?

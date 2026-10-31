@@ -201,6 +201,23 @@ module MB
             @kernel.position
           end
 
+          # Swaps kernels (every line, modulation phase, and smoother of the
+          # network) with network +other+, built from the same kernel
+          # config: Reverb#carry_adopt.
+          def swap_kernel(other)
+            raise ArgumentError, 'Reverb networks swap kernels only with the same kernel config' unless other.config == @kernel_config
+
+            NodeTraits.swap_ivars(self, other, KERNEL_IVARS)
+            self
+          end
+
+          KERNEL_IVARS = %i[@kernel].freeze
+
+          # The kernel's config (see #kernel_config) as built.
+          def config
+            @kernel_config
+          end
+
           # The kernel's LFO values ([diffusion, feedback]).
           def lfo_values
             @kernel.lfo_values

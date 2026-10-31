@@ -117,14 +117,18 @@ module MB
       class FeedbackLoop
         include GraphNode
         include GraphNode::SampleRateHelper
-        # (it may sleep once its delays hold only silence: #sleep_ready?)
-        node_traits memory: :long, idle_check: :sleep_ready?
+        # (it may sleep once its delays hold only silence: #sleep_ready?; its
+        # delay lines are its delay nodes', which Session::Carry adopts on
+        # their own, and the loop adopts its history, pitch tracking, and
+        # ring-out: #carry_adopt)
+        node_traits memory: :long, idle_check: :sleep_ready?, carry: :adopt
 
         # The loop variable (+fb+ in the examples): the loop's output (see the
         # class description).  Its #sample is only used by the fallback.
         class Variable
           include GraphNode
-          node_traits memory: :short
+          # (what it holds is the loop's: carried by FeedbackLoop#carry_adopt)
+          node_traits memory: :short, carry: :none
 
           def initialize(loop)
             @loop = loop
@@ -238,6 +242,10 @@ module MB
           @complex_seen = nil
           @complex_out = nil
           @mix = nil
+          # The ring-out after an input ends (see #sample_program)
+          @ring = nil
+          @ended_inputs = nil
+          @ring_zeros = nil
 
           compile
         end
@@ -295,6 +303,31 @@ module MB
 
           @program.rings.all? { |g| g.delay.sleep_ready? }
         end
+
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # loop +old+ runs a program of the same shape (the same ops and
+        # delays; neither running as a block graph).
+        def carry_fits?(old)
+          return false unless old.class == self.class && @program && !@fallback
+          op = old.instance_variable_get(:@program)
+          return false unless op && !old.instance_variable_get(:@fallback)
+
+          op.rings.length == @program.rings.length && op.ops.map(&:class) == @program.ops.map(&:class) &&
+            op.histories.length == @program.histories.length
+        end
+
+        # Takes over loop +old+'s one-sample history, pitch tracking, and
+        # ring-out (its delay lines move with its delay nodes, adopted as
+        # their own pairs).  On the swap frame; O(1).
+        def carry_adopt(old)
+          op = old.instance_variable_get(:@program)
+          @program.histories.zip(op.histories).each { |a, b| NodeTraits.swap_contents(a.state, b.state) }
+          @program.swap_carry_state(op)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        # The loop's own running state #carry_adopt swaps.
+        ADOPT_IVARS = %i[@ring @ended_inputs @latency @imag_state @complex_seen].freeze
 
         # The inputs the plan layer may fuse upstream (Plan::Installation):
         # the loop's boundary inputs, not the body (which only runs here).

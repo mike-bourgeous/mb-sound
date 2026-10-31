@@ -174,16 +174,19 @@ module MB
           nil
         end
 
-        # The random streams and the points and position (for a graph that
-        # replaces this one; Session::Carry).
+        # The random streams, the points and position, and the inputs the
+        # catch-up holds (for a graph that replaces this one; Session::Carry:
+        # a drift in a sleeping voice that never rendered in the new graph
+        # catches up at the old one's rate, carry-1).
         def plan_snapshot
-          { rng: @rng.dup, state: @state.dup }
+          { rng: @rng.dup, state: @state.dup, held: @held_inputs.dup }
         end
 
         def plan_restore(snapshot)
           return unless snapshot
           @rng[0..] = snapshot[:rng]
           @state = snapshot[:state].dup
+          @held_inputs.replace(snapshot[:held]) if snapshot[:held]
         end
 
         def sources

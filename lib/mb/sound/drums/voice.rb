@@ -32,8 +32,9 @@ module MB
       # metal bank) are still read while skipped.
       class Voice
         include GraphNode
-        # (its idle sleeping state starts fresh in a rebuilt graph)
-        node_traits memory: :short, carry: :fresh
+        # (its position, ending, and idle sleeping move to a rebuilt kit's
+        # voice: #carry_adopt; its graph's nodes are their own pairs)
+        node_traits memory: :short, carry: :adopt
 
         # How long a voice must stay below QuietRun::QUIET (-90 dB) after its
         # sources ended (for ending).
@@ -46,7 +47,8 @@ module MB
         # Hands one buffer of a source the Voice read to the voice's graph.
         class Tap
           include GraphNode
-          node_traits memory: :short
+          # (the buffer its voice gives it each block)
+          node_traits memory: :none
 
           attr_reader :sample_rate
 
@@ -196,6 +198,22 @@ module MB
           @end_run.window = QUIET_TIME * @sample_rate
           self
         end
+
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # voice +old+ is the same machine's voice of the same name, skipping
+        # alike.
+        def carry_fits?(old)
+          old.class == self.class && old.name == @name && old.machine == @machine && old.instance_variable_get(:@skip_idle) == @skip_idle
+        end
+
+        # Takes over voice +old+'s position, ending, and idle sleeping (on
+        # the same grid of the voice's own time); Carry catches up the old
+        # voice's random streams first (#catch_up_sleepers).
+        def carry_adopt(old)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@position @end_run @sleep_run @sleeping @ended @slept].freeze
 
         def sources
           s = { input: @graph }

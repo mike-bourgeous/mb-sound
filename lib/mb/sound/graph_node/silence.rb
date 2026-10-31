@@ -12,7 +12,8 @@ module MB
       class Silence
         include GraphNode
         include SampleRateHelper
-        node_traits memory: :short
+        # (a count, moved to a rebuilt silence: #carry_adopt)
+        node_traits memory: :short, carry: :adopt
 
         # The length as given: seconds (Numeric), a Length (e.g. 480.samples),
         # or a Duration (converted at the current tempo).
@@ -49,6 +50,14 @@ module MB
         def sources
           {}
         end
+
+        # Takes over silence +old+'s count of samples left (Session::Carry's
+        # adoption, NodeTraits' +carry+ :adopt).
+        def carry_adopt(old)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@remaining].freeze
       end
     end
   end

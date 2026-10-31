@@ -214,6 +214,19 @@ module MB
             end
           end
 
+          # Swaps the pitch tracking state (the last points, position, and
+          # stretch) with program +other+'s, for Session::Carry's adoption
+          # (GraphNode::FeedbackLoop#carry_adopt); both re-evaluate their
+          # latency inputs on their next block.
+          def swap_carry_state(other)
+            mine = pitch_state
+            restore_pitch_state(other.send(:pitch_state))
+            other.send(:restore_pitch_state, mine)
+            @pc_have = nil
+            other.instance_variable_set(:@pc_have, nil)
+            self
+          end
+
           private
 
           def pitch_state

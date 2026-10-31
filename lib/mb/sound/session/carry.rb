@@ -20,24 +20,39 @@ module MB
       # stateful node matched it is a cut, so the new graph continues the
       # old one's samples.
       #
-      # What carries: Tones, Envelopes and note envelopes (their stage and
-      # level), filters (SVF/biquad, four-pole, diode), resonators, shapers,
-      # companders, decimators, sample-and-holds, smoothers, Notes nodes
-      # (held notes, note numbers, velocities, controllers, glides), and the
-      # Synth's allocator (which lane holds which note).  What doesn't:
-      # delay lines, reverbs, choruses, sampler voices, grains, and other
-      # nodes without plan snapshots (their tails start fresh).  Each node
-      # kind says which it is (NodeTraits' +memory+ and +carry+).  Times are
-      # moved to the new graph's stream time (graphs count stream time from
-      # their own start).
+      # What carries by snapshot: Tones, Envelopes and note envelopes
+      # (their stage and level), filters (SVF/biquad, four-pole, diode),
+      # resonators, companders, decimators, sample-and-holds, smoothers,
+      # drifts and dust, Notes nodes (held notes, note numbers, velocities,
+      # controllers, glides), and the Synth's allocator (which lane holds
+      # which note).  What carries by adoption (carry-1, research-snapshot-
+      # mutability's option 1; NodeTraits' carry :adopt): the new node
+      # swaps state holders with its partner on the swap frame (O(1)): delay
+      # lines (delays, multitaps, delay networks, feedback loops and their
+      # rings, tape echoes), reverbs (their network kernels, predelays, and
+      # padded inputs), choruses' tails, formants, crossovers, limiters,
+      # drum kit voices and their repeats, flams, and chokes, sampler
+      # voices, curve shapers' antialiasing, gates, wavetables, time limits,
+      # and MIDI clip sources (the old one's clip and timing).  A pair whose
+      # state doesn't fit (#carry_fits?: a reverb of another size) starts
+      # fresh, and the swap crossfades.  What starts fresh: inputs, grains,
+      # loop players, resamplers, and the other kinds that say why
+      # (NodeTraits' +fresh+).  Times are moved to the new graph's stream
+      # time (graphs count stream time from their own start), and the new
+      # player goes on as the old one: its start and launch (for seeks), its
+      # place in the mix order, its fader, mute ramps, and CUE levels
+      # (Session#add_now).
       module Carry
         # What .plan found: +pairs+ ([[old node, new node], ...] with state
-        # to copy), +synths+ ([[old Synth, new Synth], ...]), +stateful+
+        # to copy), +adopts+ (pairs whose new node takes over the old one's
+        # state holders: NodeTraits' carry :adopt), +unfit+ (adopting pairs
+        # whose state doesn't fit, e.g. reverbs of other sizes: they start
+        # fresh), +synths+ ([[old Synth, new Synth], ...]), +stateful+
         # (nodes of the new graph with state), +matched+ (of those, the
         # ones paired), +old_input+ (the replaced player's GraphNodeInput).
-        # +uncarried+ counts the new graph's nodes with memory no snapshot
-        # holds (delays, reverbs, sampler voices: see .uncarried?).
-        Plan = Data.define(:pairs, :synths, :stateful, :matched, :uncarried, :old_input, :sleepers) do
+        # +uncarried+ counts the new graph's nodes with memory no carry
+        # moves (see .uncarried?) and the unfit pairs.
+        Plan = Data.define(:pairs, :adopts, :unfit, :synths, :stateful, :matched, :uncarried, :old_input, :sleepers) do
           # True if every stateful node of the new graph has a partner and
           # none holds uncarried memory (the swap can cut instead of
           # crossfading).
@@ -141,13 +156,33 @@ module MB
           old_all ||= graph_nodes(old_nodes)
           sleepers = old_all.select { |x| x.respond_to?(:catch_up_sleepers) }
 
-          Plan.new(pairs: pairs.freeze, synths: synths.freeze, stateful: stateful.length, matched: pairs.count { |_, x| in_all[x.__id__] },
-                   uncarried: all.count { |x| uncarried?(x) }, old_input: old_input, sleepers: sleepers.freeze)
+          # Adopting pairs (see NodeTraits' +carry+), unless the old node's
+          # state doesn't fit the new one's
+          adopts, pairs = pairs.partition { |_, n| adopt?(n) }
+          unfit = adopts.reject { |o, n| fits?(o, n) }
+          adopts -= unfit
+
+          Plan.new(pairs: pairs.freeze, adopts: adopts.freeze, unfit: unfit.freeze, synths: synths.freeze, stateful: stateful.length,
+                   matched: (pairs + adopts + unfit).count { |_, x| in_all[x.__id__] },
+                   uncarried: all.count { |x| uncarried?(x) } + unfit.length, old_input: old_input, sleepers: sleepers.freeze)
         end
 
-        # Every node of graph +roots+, once.
+        # Every node of graph +roots+, once, with the owners of multi-output
+        # nodes' outputs (a crossover's bands read their owner's input as
+        # their source, so the walk alone skips the owner and its state:
+        # carry-1's carry check found dnb_neuro's squeeze crossover cut with
+        # its filter state left behind).
         def graph_nodes(roots)
-          roots.flat_map { |r| [r, *(r.respond_to?(:graph) ? r.graph : [])] }.uniq(&:__id__)
+          list = roots.flat_map { |r| [r, *(r.respond_to?(:graph) ? r.graph : [])] }.uniq(&:__id__)
+          seen = list.to_h { |n| [n.__id__, true] }
+          list.each do |n|
+            next unless n.is_a?(GraphNode::NodeOutput) && !n.is_a?(GraphNode::Tee::Branch)
+            o = n.instance_variable_get(:@owner)
+            next if o.nil? || seen[o.__id__]
+            seen[o.__id__] = true
+            list << o
+          end
+          list
         end
 
         # True if +node+ (a graph node) has running state a carry doesn't
@@ -169,10 +204,24 @@ module MB
         end
 
         # True if +node+ keeps running state that carries through its plan
-        # snapshot (NodeTraits' carry :snapshot; values the graph reads from
-        # outside, knobs and constants, have memory :none).
+        # snapshot or by adoption (NodeTraits' carry :snapshot or :adopt;
+        # values the graph reads from outside, knobs and constants, have
+        # memory :none).
         def stateful?(node)
-          NodeTraits.of(node).snapshot?
+          t = NodeTraits.of(node)
+          t.snapshot? || t.adopt?
+        end
+
+        # True if +node+ takes over its partner's state holders (NodeTraits'
+        # carry :adopt).
+        def adopt?(node)
+          NodeTraits.of(node).adopt?
+        end
+
+        # True if +old+'s running state fits adopting node +new+ (its
+        # #carry_fits?, if it has one; else the same class).
+        def fits?(old, new)
+          new.respond_to?(:carry_fits?) ? new.carry_fits?(old) : old.class == new.class
         end
 
         # Copies the state of +plan+'s old nodes into the new ones (see the
@@ -206,6 +255,12 @@ module MB
             else
               n.plan_restore(snap)
             end
+            count += 1
+          end
+          # (adoption: the new node takes the old one's state holders, the
+          # old one this one's fresh state; NodeTraits' +carry+)
+          plan.adopts.each do |o, n|
+            n.carry_adopt(o)
             count += 1
           end
           count

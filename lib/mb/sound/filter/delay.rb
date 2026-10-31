@@ -9,7 +9,7 @@ module MB
         include GraphNode::SampleRateHelper
         # (its line holds sound for up to its longest delay; it may sleep once
         # that holds only silence: #sleep_ready?)
-        node_traits memory: :long, idle_check: :sleep_ready?
+        node_traits memory: :long, idle_check: :sleep_ready?, carry: :adopt
 
         # The default delay-time smoothing rate in seconds per second.
         DEFAULT_SMOOTHING_RATE = 0.5
@@ -364,6 +364,28 @@ module MB
         def sleep_ready?
           @line.holds_quiet?(@longest_read.ceil + MB::Sound::DelayLine::MARGIN)
         end
+
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # delay +old+'s running state fits this one (the same interpolation,
+        # whose read state it keeps, and the same time smoothing, whose
+        # follower it moves; the delay time may differ: the smoothed time
+        # glides from the old one's).
+        def carry_fits?(old)
+          old.class == self.class && old.interpolation == @interpolation && old.smooth_limit == @smooth_limit &&
+            !@smoothing_setting.respond_to?(:process) && !old.instance_variable_get(:@smoothing_setting).respond_to?(:process)
+        end
+
+        # Takes over delay +old+'s line, read state, smoothed time, and
+        # ring-out (the old one gets this one's fresh state).  On the swap
+        # frame; O(1).
+        def carry_adopt(old)
+          @line.swap_state(old.instance_variable_get(:@line))
+          NodeTraits.swap_contents(@read_state, old.instance_variable_get(:@read_state)) # (shared with feedback loop rings)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        # The running state #carry_adopt swaps besides the line and read state.
+        ADOPT_IVARS = %i[@filter @seed_node @min_delay_samples @max_delay_samples @last_delay_samples @ring @longest_read].freeze
 
         # True if the delay rings out after its input ends (the default; see
         # #ring_out), false if it ends with its input.

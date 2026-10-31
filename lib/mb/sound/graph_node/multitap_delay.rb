@@ -10,8 +10,10 @@ module MB
       class MultitapDelay
         include SampleRateHelper
         include MultiOutput
-        # (it may sleep once its line holds only silence: #sleep_ready?)
-        node_traits memory: :long, idle_check: :sleep_ready?
+        # (it may sleep once its line holds only silence: #sleep_ready?; its
+        # line and its taps' read states move to a rebuilt multitap:
+        # #carry_adopt)
+        node_traits memory: :long, idle_check: :sleep_ready?, carry: :adopt
 
         # One output tap from the multitap delay.
         class DelayTap
@@ -70,6 +72,18 @@ module MB
           def max_delay_samples(sample_rate)
             @time.max_samples(sample_rate)
           end
+
+          # The smoothing setting (see #initialize).
+          attr_reader :smoothing
+
+          # Swaps read states and smoothers with tap +old+ (for its
+          # MultitapDelay's #carry_adopt).
+          def carry_adopt(old)
+            NodeTraits.swap_contents(@read_state, old.instance_variable_get(:@read_state))
+            NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+          end
+
+          ADOPT_IVARS = %i[@smoother @smoother_started].freeze
 
           # Returns +count+ samples from this delay tap, based on the delay
           # that was given to MultitapDelay#initialize.
@@ -196,6 +210,25 @@ module MB
         def sleep_ready?
           @line.holds_quiet?(@longest.ceil + MB::Sound::DelayLine::MARGIN)
         end
+
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # multitap +old+ has as many taps, smoothed alike, and reads its line
+        # the same way (the tap times may differ: smoothed taps glide).
+        def carry_fits?(old)
+          old.class == self.class && old.interpolation == @interpolation && old.taps.length == @taps.length &&
+            old.taps.zip(@taps).all? { |a, b| a.smoothing == b.smoothing }
+        end
+
+        # Takes over multitap +old+'s line, its taps' read states and
+        # smoothers, and its ring-out; the old one gets this one's fresh
+        # state.  On the swap frame; O(1).
+        def carry_adopt(old)
+          @line.swap_state(old.instance_variable_get(:@line))
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+          @taps.zip(old.taps).each { |a, b| a.carry_adopt(b) }
+        end
+
+        ADOPT_IVARS = %i[@tail_left @longest].freeze
 
         # Changes the sample rate of the delay and all upstream nodes.
         def sample_rate=(new_rate)

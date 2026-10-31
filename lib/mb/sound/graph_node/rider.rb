@@ -25,7 +25,7 @@ module MB
       #     mix.ride(-14)                                 # into a limiter: .limit(ceiling: -1.db)
       #     mix.ride(-9, start: 6.db, range: 6.db, down: 2, up: 8)
       class Rider < Channels
-        node_traits memory: :short
+        node_traits memory: :short, fresh: 'a loudness rider\'s seconds of measurement (not moved yet)'
 
         # One output of a Rider.
         class Output

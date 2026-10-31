@@ -122,7 +122,7 @@ module MB
       # of the envelope preview's copy (Plot::Panels::EnvelopeView).
       class PreviewGate
         include GraphNode
-        node_traits memory: :short
+        node_traits memory: :short, fresh: 'the sound screen\'s envelope preview, rebuilt with its preview'
 
         def initialize(on, sample_rate)
           @on = on

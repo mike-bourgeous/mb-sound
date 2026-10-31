@@ -129,7 +129,8 @@ module MB
       class Pending
         include GraphNode
         include Shapes
-        node_traits memory: :short
+        # (it plays the unison it builds, which keeps the state)
+        node_traits memory: :none
 
         def initialize(spec)
           @pending = spec
@@ -162,7 +163,8 @@ module MB
       # One channel of a stereo PendingChannels (built on first use).
       class PendingChannel
         include GraphNode
-        node_traits memory: :short
+        # (it plays a channel of the unison it builds)
+        node_traits memory: :none
 
         def initialize(spec, index)
           @pending = spec

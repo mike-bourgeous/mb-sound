@@ -10,7 +10,7 @@ module MB
 
       include GraphNode
       include GraphNode::IOSampleMixin
-      node_traits memory: :short
+      node_traits memory: :short, fresh: 'a buffer wrapper for an output, outside the graph'
 
       def_delegators :@output, :sample_rate, :channels, :closed?
 

@@ -31,7 +31,7 @@ module MB
     class DeviceInput
       include GraphNode
       include GraphNode::IOSampleMixin
-      node_traits memory: :short
+      node_traits memory: :short, fresh: 'an input from a sound device, opened again by a rebuilt graph'
 
       # Lists the capture devices of the first working backend (see
       # DeviceOutput.backends): an Array of Hashes with :index, :name, and

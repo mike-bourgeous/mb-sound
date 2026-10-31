@@ -19,7 +19,8 @@ module MB
         # MB::Sound::FastDynamics.crossover, exact Ruby mirror
         # .process_ruby.  Built by DynamicsMethods#bands.
         class Crossover < Channels
-          node_traits memory: :short
+          # (its filter states move to a rebuilt crossover: #carry_adopt)
+          node_traits memory: :short, carry: :adopt
 
           # Crossover op kinds (as in the kernel).
           SPLIT = 0
@@ -137,6 +138,20 @@ module MB
             @state.fill(0)
             self
           end
+
+          # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+          # crossover +old+ splits at the same frequencies and order (its
+          # filter state fits).
+          def carry_fits?(old)
+            old.class == self.class && old.frequencies == @frequencies && old.order == @order && old.sample_rate == @sample_rate
+          end
+
+          # Takes over crossover +old+'s filter states.
+          def carry_adopt(old)
+            NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+          end
+
+          ADOPT_IVARS = %i[@state].freeze
 
           def to_s
             "LR#{@order} crossover at #{@frequencies.map { |f| "#{MB::M.sigfigs(f, 4)} Hz" }.join(', ')}"
