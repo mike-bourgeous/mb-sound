@@ -100,6 +100,14 @@ module SceneProfile
 
     def wall = Process.clock_gettime(Process::CLOCK_REALTIME)
 
+    # The CountingOutput (or EmuOutput) a Session writes to, through the
+    # wrappers render puts around its output (RenderHold, RenderPeak,
+    # RenderWindow::Gate: each has #output), or nil for other outputs.
+    def profiled_output(o)
+      o = o.output while !o.is_a?(CountingOutput) && o.respond_to?(:output)
+      o if o.is_a?(CountingOutput)
+    end
+
     def ydelta(a, b) = b.to_h { |k, v| [k, v - (a[k] || 0)] }
 
     # Times the block as phase +name+ when this thread is recording.
@@ -185,7 +193,10 @@ module SceneProfile
   # output's write) and each player in them.
   module SessionHook
     def process_buffer(count = buffer_size, **kw)
-      return super unless output.is_a?(EmuOutput) || output.is_a?(CountingOutput)
+      # (render wraps its output, e.g. in a RenderHold that keeps the last
+      # buffer back for an exact-frame end: the profiled output is inside)
+      out = SceneProfile.profiled_output(output)
+      return super unless out
 
       nb = SceneProfile.blocks.length
       # (in a module variable, not an instance variable of the Session: a
@@ -204,11 +215,11 @@ module SceneProfile
       r = super
       # Offline, scheduled blocks run inside the buffer (realtime, on the
       # scheduler thread)
-      offline = output.instance_of?(CountingOutput)
+      offline = out.instance_of?(CountingOutput)
       inline = offline ? SceneProfile.blocks[nb..].sum { |b| b[:secs] || 0 } : 0
       inline_cpu = offline ? SceneProfile.blocks[nb..].sum { |b| b[:cpu] || 0 } : 0
-      secs = SceneProfile.clock - t0 - inline - output.write_secs
-      cpu = SceneProfile.cpu - c0 - inline_cpu - output.write_cpu
+      secs = SceneProfile.clock - t0 - inline - out.write_secs
+      cpu = SceneProfile.cpu - c0 - inline_cpu - out.write_cpu
       yd = SceneProfile.ydelta(y0, SceneProfile.yjit)
       # (offline, the scheduled blocks' own compiling is theirs)
       yd[:compile_time_ns] -= SceneProfile.blocks[nb..].sum { |b| b[:yjit]&.[](:compile_time_ns).to_i } if offline && yd[:compile_time_ns]
@@ -449,7 +460,10 @@ module SceneProfile
     # compiling while a buffer rendered: the scheduler's, the painter's)
     def report_buffers(top, buffer, realtime: false)
       where = realtime ? 'while buffers rendered (any thread)' : 'on the render thread'
-      return if @buffers.empty?
+      # (a render that profiled no buffer is the hook missing its output,
+      # as when render began wrapping it in a RenderHold: fail, rather than
+      # leave the report without its buffer section; fix-batch-1031)
+      abort 'scene_profile: no render buffers were profiled (SessionHook found no CountingOutput in the Session\'s output; see SceneProfile.profiled_output)' if @buffers.empty?
       stats = ->(key) {
         t = @buffers.map { |b| b[key] }.sort
         [t.sum / t.length, t[(0.99 * (t.length - 1)).round], t.last]
