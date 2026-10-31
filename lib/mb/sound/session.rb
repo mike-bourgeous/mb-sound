@@ -530,10 +530,12 @@ module MB
         input.prime
         description = shorten(description || playable.description)
 
-        # Its code compiled here rather than where it lands (see Warming)
-        warm_graph(name, nodes, warm, warm_time(point, start_time))
+        # Its code compiled here rather than where it lands, or in the
+        # background, the change held until it is done (see Warming)
+        hold = warm_graph(name, nodes, warm, warm_time(point, start_time), background: warm_hold_for_add)
 
-        time = start_time ? start_time.to_r : launch_time(point, timeline_nodes)
+        default = @players.empty? && !queued_start? ? :now : :bar # (launch_time's :auto, kept for a held change's re-time)
+        time = start_time ? start_time.to_r : launch_time(point, timeline_nodes, default: default)
 
         # The running state to carry from the graph this one replaces (see
         # Carry): matched here, copied on the swap frame
@@ -564,10 +566,11 @@ module MB
           bind_bus_taps(nodes, name) or return nil
           attach_bus_spies(name, nodes) if @bus_only.key?(name)
 
-          change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes, graph: input, split: !carried.nil?, spill: spill) { |t|
+          c = change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes, graph: input, split: !carried.nil?, spill: spill, hold: hold) { |t|
             add_now(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: t, fade: fade, explicit_fade: explicit_fade,
                     carry: carried, clip: clip, spill: spill)
           }
+          hold&.hold(c, -> { start_time ? @transport.position : launch_time(point, timeline_nodes, default: default) })
           end_cue_at_start(name, time) unless carried # (see Cue; a rebuild of the name isn't a launch: its cue plays on)
         }
 

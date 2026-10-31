@@ -46,6 +46,18 @@ module MB
       # YJIT running; `session.warm_changes = true` warms offline or
       # without YJIT too (measurements, specs), false never;
       # MB_SOUND_WARM=0 turns :auto off.  #warmed lists the last warm-ups.
+      #
+      # New graphs (#add: `bg`, tracks, scenes) issued at the console of a
+      # realtime session warm in the background (session-2, the
+      # maintainer's "In background", 2026-10-30): the command returns at
+      # once with its change queued, held (a WarmHold, one per console
+      # command, so a scene's tracks land together) until the warm-up
+      # thread is done; a change whose time passed meanwhile lands at its
+      # launch point's next alignment (the next bar, say; `on: :now` the
+      # next buffer).  Scheduled blocks, buses, and master chains still
+      # join their warm-ups (blocks run ahead on the scheduler thread, and
+      # skip a warm-up they lack the time for).  #warm_background (:auto:
+      # realtime sessions; true for specs, false never) decides.
       module Warming
         # Buffers a warm-up plays (enough for MB::Sound::JIT's call
         # threshold, 5, with room for code that runs every other buffer).
@@ -87,6 +99,51 @@ module MB
         Warm = Data.define(:kind, :name, :ms, :result, :reason) do
           def to_s
             "warm #{kind} #{name.inspect}: #{result}#{" (#{reason})" if reason} #{ms.round(1)} ms"
+          end
+        end
+
+        # The changes one console command queued while its graphs warm in
+        # the background (see Warming): released, each change re-timed if
+        # its time has passed, once every warm-up thread added to it is
+        # done.
+        class WarmHold
+          def initialize
+            @lock = Mutex.new
+            @threads = 0
+            @changes = [] # [Change, retime Proc]
+            @released = false
+          end
+
+          # True once released (the changes may land).
+          def released?
+            @released
+          end
+
+          # Counts a warm-up thread started for this hold (held again if an
+          # earlier one had released it).
+          def started!
+            @lock.synchronize { @threads += 1; @released = false }
+          end
+
+          # Notes that a warm-up thread finished; true if it was the last.
+          def finished!
+            @lock.synchronize { (@threads -= 1) == 0 }
+          end
+
+          # Adds change +c+ (with +retime+, a Proc giving its landing time
+          # if its time has passed when released).
+          def hold(c, retime)
+            @lock.synchronize { @changes << [c, retime] }
+          end
+
+          # The held changes and their retime Procs.
+          def changes
+            @lock.synchronize { @changes.dup }
+          end
+
+          # Marks the hold released (see Session#release_warm_hold).
+          def release!
+            @released = true
           end
         end
 
@@ -145,6 +202,16 @@ module MB
           end
         end
 
+        # Whether new graphs from console commands warm in the background
+        # (see Warming): :auto (realtime sessions), true, or false.
+        attr_reader :warm_background
+
+        # Sets #warm_background.
+        def warm_background=(value)
+          raise ArgumentError, "warm_background must be :auto, true, or false (got #{value.inspect})" unless [:auto, true, false].include?(value)
+          @warm_background = value
+        end
+
         # The last warm-ups (Warm values, oldest first).
         def warmed
           @warm_lock.synchronize { @warm_log.dup }
@@ -173,6 +240,7 @@ module MB
           @warm_changes = :auto
           @warm_log = []
           @warm_lock = Mutex.new
+          @warm_background = :auto
         end
 
         # Marks this session as a sandbox, which never warms (see
@@ -214,9 +282,13 @@ module MB
         # start as +name+) before it lands, expected at +at+, playing a
         # copy built by +copy+ (a Proc; see Warming), else one from the
         # graph's recipe.
-        def warm_graph(name, nodes, copy, at)
+        #
+        # With +background+ (a WarmHold), a warm-up that runs (not one
+        # known or skipped) runs on its own thread, counted in the hold;
+        # returns the hold then, else nil.
+        def warm_graph(name, nodes, copy, at, background: nil)
           return unless warming?
-          warm(:graph, name, nodes, at) { |box, land, _, live|
+          w = warm(:graph, name, nodes, at, background: background) { |box, land, _, live|
             built = copy ? copy.call : recipe_copy(nodes)
             next [:failed, 'no recipe'] if built.nil?
             graph = Playable.graph(built, sample_rate: box.sample_rate)
@@ -224,6 +296,41 @@ module MB
             box.add(warm_noise, name: :warm_other, start_time: 0r)
             box.add(graph, name: name.is_a?(Symbol) ? name : :warm, start_time: land)
             :played
+          }
+          w.equal?(background) ? background : nil
+        end
+
+        # The WarmHold for a new graph #add starts now, or nil to warm it
+        # where the command runs (see Warming): the console command's hold
+        # (one per command) on a session that warms in the background,
+        # outside scheduled blocks and replays.
+        def warm_hold_for_add
+          return nil unless warming?
+          return nil unless @warm_background == true || (@warm_background == :auto && @realtime)
+          context = Session.context
+          return nil if context&.time_for(self) || context&.replaying? || context&.batch
+          group = context&.command
+          return WarmHold.new unless group && group.session.equal?(self)
+          group.warm_hold ||= WarmHold.new
+        end
+
+        # Lets the changes held by +hold+ land (on the warm-up thread, when
+        # its last warm-up is done): a change whose time has passed is
+        # re-timed by its Proc (the launch point's next alignment from now).
+        def release_warm_hold(hold)
+          @render_lock.synchronize {
+            hold.changes.each do |c, retime|
+              next unless @changes.include?(c) # (cancelled or undone meanwhile)
+              next unless c.time < @transport.position
+
+              t = retime.call.to_r
+              t = @transport.position if t < @transport.position
+              @changes.delete(c)
+              c.time = t
+              queue_change(c)
+              c.entry = @journal.add(c.entry.with(lands: stamp(t)))
+            end
+            hold.release!
           }
         end
 
@@ -263,7 +370,11 @@ module MB
         # senders start), and sets it up, returning
         # :played (then WARM_LEAD + WARM_BUFFERS buffers play), :built, or
         # [:failed, reason].  Notes and returns the Warm.
-        def warm(kind, name, nodes, at)
+        #
+        # With +background+ (a WarmHold), the warm-up thread isn't joined:
+        # it releases the hold when it and the hold's other warm-ups are
+        # done, and the hold is returned (see Warming).
+        def warm(kind, name, nodes, at, background: nil)
           # (never stall a render thread; offline renders run scheduled
           # blocks holding the render lock, which is fine)
           return note_warm(Warm.new(kind: kind, name: name, ms: 0.0, result: :skipped, reason: 'the render lock is held')) if @realtime && @render_lock.mon_owned?
@@ -293,6 +404,22 @@ module MB
             }
           }
           worker.priority = WARM_PRIORITY
+          if background
+            background.started!
+            Thread.new {
+              Thread.current.report_on_exception = false
+              Thread.current.name = 'mb-sound-warm-wait'
+              begin
+                worker.join
+              rescue StandardError
+                nil
+              ensure
+                note_warm(Warm.new(kind: kind, name: name, ms: (MB::U.clock_now - t0) * 1000, result: result || :failed, reason: reason))
+                release_warm_hold(background) if background.finished!
+              end
+            }
+            return background
+          end
           worker.join
           note_warm(Warm.new(kind: kind, name: name, ms: (MB::U.clock_now - t0) * 1000, result: result, reason: reason))
         end
