@@ -1,3 +1,4 @@
+require 'open3'
 require 'tempfile'
 
 module MB
@@ -297,6 +298,32 @@ module MB
           base = ENV['XDG_DATA_HOME'].to_s.empty? ? File.join(Dir.home, '.local', 'share') : ENV['XDG_DATA_HOME']
           File.join(base, 'mb-sound', 'help')
         end
+      end
+
+      # mb-sound's own directory (the gem's root: lib/'s parent).
+      GEM_ROOT = File.expand_path('../../..', __dir__)
+
+      # The main checkout of the git repository +dir+ is in (the parent of
+      # its common .git directory, so a worktree gives the main checkout),
+      # or nil outside a repository or for a bare one.  Used by
+      # Library::Bench.default_root and UI::NoteLog.dir.
+      def main_checkout(dir)
+        common, status = Open3.capture2('git', '-C', dir.to_s, 'rev-parse', '--path-format=absolute', '--git-common-dir', err: File::NULL)
+        return nil unless status.success?
+        common = common.strip
+        File.basename(common) == '.git' ? File.dirname(common) : nil
+      rescue SystemCallError
+        nil
+      end
+
+      # The tmp/ directory of the main checkout mb-sound runs from, when it
+      # runs from a git checkout (a worktree's main checkout, so the files
+      # outlive the worktree and the containers sharing /app see them), or
+      # nil for an installed gem.  Looked up once.
+      def checkout_tmp_dir
+        return @checkout_tmp_dir if defined?(@checkout_tmp_dir)
+        main = File.exist?(File.join(GEM_ROOT, '.git')) ? main_checkout(GEM_ROOT) : nil
+        @checkout_tmp_dir = main && File.join(main, 'tmp')
       end
 
       # Returns a Symbol describing the type of output that should be used:

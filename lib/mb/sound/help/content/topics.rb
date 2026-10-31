@@ -1244,7 +1244,7 @@ module MB
     Help.topic :record, 'Recording and takes', group: :keep do
       about <<~TEXT
         The take logs every line and where each change landed (`take.save`
-        replays it exactly).  `rec`/`capture` record MIDI into armed tracks
+        replays it exactly; `take.save :tmp, 'a note'` keeps a note in it).  `rec`/`capture` record MIDI into armed tracks
         (loops follow the timeline's phase; `align: :launch` starts from
         what you played first; `cc: true` keeps the mod wheel, other CCs,
         bend, and pressure in the clip, `cc: :split` in a clip of their own,
@@ -1440,8 +1440,10 @@ module MB
         `ui.note 'the cutoff turns too slowly'` keeps a note for the next
         UI refinement round with the screen as text, the layout and focused
         pane, what plays, and your last console lines (one Markdown file a
-        day; NAV # opens a prompt for one while the set plays); `ui.notes`
-        lists today's.
+        day, in tmp/ui-notes/ of the main checkout when mb-sound runs from
+        one, else the user data directory, or $MB_SOUND_UI_NOTES; it
+        prints the file's path; NAV # opens a prompt for one while the set
+        plays); `ui.notes` lists today's.
 
         Your own panes: `pane :name do |c, s| ... end` (s a snapshot of the
         session, c the pane's canvas); arrange them with `layout`, keep a

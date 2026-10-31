@@ -127,18 +127,7 @@ module MB
           env = ENV['MB_SOUND_BENCH_DIR']
           return File.expand_path(env) unless env.nil? || env.empty?
           base = GraphIO.project_dir || Dir.pwd
-          File.join(main_checkout(base) || base, 'tmp', 'listening')
-        end
-
-        # The main checkout of the git repository +dir+ is in (the parent
-        # of its common .git directory), or nil outside one.
-        def main_checkout(dir)
-          common, status = Open3.capture2('git', '-C', dir, 'rev-parse', '--path-format=absolute', '--git-common-dir', err: File::NULL)
-          return nil unless status.success?
-          common = common.strip
-          File.basename(common) == '.git' ? File.dirname(common) : nil
-        rescue SystemCallError
-          nil
+          File.join(Internal.main_checkout(base) || base, 'tmp', 'listening')
         end
 
         # The entries for +specs+ (each a family, kind, or entry name

@@ -62,7 +62,9 @@ module MB
         # screen (layout, focused pane, a plain-text capture), what plays
         # (players, tracks, the form's section, the scene, the position),
         # and the last console lines, appended to today's Markdown file
-        # (UI::NoteLog: $MB_SOUND_UI_NOTES, else the user data directory).
+        # (UI::NoteLog.dir: $MB_SOUND_UI_NOTES, else the main checkout's
+        # tmp/ui-notes/ from a git checkout, else the user data directory).
+        # Returns the Note, which prints the file's path.
         # NAV # opens a prompt line for one while the set plays.
         #
         #     ui.note 'the cutoff turns too slowly at the bottom'

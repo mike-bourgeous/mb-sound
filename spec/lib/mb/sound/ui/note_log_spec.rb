@@ -56,6 +56,20 @@ RSpec.describe(MB::Sound::UI::NoteLog, :aggregate_failures) do
     expect { described_class.save('  ') }.to raise_error(ArgumentError, /takes the note's text/)
   end
 
+  # (the maintainer, 2026-10-31: "The ui.note feature should save somewhere
+  # the container can see")
+  it 'defaults to the main checkout\'s tmp/ui-notes from a git checkout, else the user data directory; the env wins' do
+    expect(described_class.dir).to eq(@dir)
+    ENV['MB_SOUND_UI_NOTES'] = nil
+    main = MB::Sound::Internal.main_checkout(MB::Sound::Internal::GEM_ROOT)
+    expect(main).not_to be_nil
+    expect(described_class.dir).to eq(File.join(main, 'tmp', 'ui-notes'))
+    expect(File.directory?(File.join(main, '.git'))).to eq(true) # (the main checkout, also from a worktree)
+
+    allow(MB::Sound::Internal).to receive(:checkout_tmp_dir).and_return(nil)
+    expect(described_class.dir).to eq(File.join(File.dirname(MB::Sound::Internal.help_data_dir), 'ui-notes'))
+  end
+
   it 'is ui.note and ui.notes with no screen too, and a help entry' do
     n = ui.facade.note('works without a screen')
     expect(n.where).to eq('no screen')

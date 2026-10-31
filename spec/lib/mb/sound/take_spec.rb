@@ -672,6 +672,24 @@ RSpec.describe(MB::Sound::Take) do
     expect { take.save(:temp) }.to raise_error(ArgumentError, /:tmp/)
   end
 
+  # (ux-notes-1: the maintainer typed `take.save :tmp, 'UX friction'`)
+  it 'keeps a note in the header and the file name: take.save :tmp, "UX friction" (or note:)' do
+    allow(described_class).to receive(:tmp_dir).and_return(tmp_path('tmp_takes'))
+    path = nil
+    expect { path = take.save(:tmp, 'UX friction') }.to output(/Saved the take \(UX friction\) to .*take_\d+_\d+_ux_friction\.rb/).to_stdout
+    text = File.read(path)
+    expect(text.lines[1]).to start_with('# Replay of a live mb-sound take')
+    expect(text.lines[2]).to eq("# Note: UX friction\n")
+    expect(text).to eq(take.to_ruby(note: 'UX friction'))
+
+    other = tmp_path('x.rb')
+    expect { take.save(other, note: "two\nlines") }.to output(/Saved the take \(two\) to .*x\.rb/).to_stdout
+    expect(File.read(other).lines[2, 2]).to eq(["# Note: two\n", "#       lines\n"])
+    expect(described_class.file_words('  A/B: the  Bass!  ')).to eq('_a_b_the_bass')
+    expect(described_class.file_words(nil)).to eq('')
+    expect { take.save(:temp, 'x') }.to raise_error(ArgumentError, /then a note/)
+  end
+
   it 'autosaves to one file, keeping the newest AUTOSAVE_KEEP, and saves once more when stopped' do
     dir = tmp_path('auto')
     FileUtils.mkdir_p(dir)
