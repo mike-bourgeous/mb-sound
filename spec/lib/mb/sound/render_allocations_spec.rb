@@ -131,7 +131,7 @@ RSpec.describe('render-path allocations') do
           v.hz.unison(7, detune: 0.2) { |p, _| p.saw.reset(v.key_trigger) } * v.amp_env(0.005, 0.1, 0.6, 0.05) * 0.2
         })
       end
-      expect_budget(objects: 36, bytes: 3_100) # (omnibus18: before 43.4 objects, 3.7 kB: Tone.jump_residual per reset; after 30.1, 2.6 kB)
+      expect_budget(objects: 36, bytes: 3_100) # (omnibus18: before 43.4 objects, 3.7 kB: Tone.jump_residual per reset; after 30.1, 2.6 kB; gen-midi-2's unfused Unison::Detune 81, 6.3 kB; fix-alloc-1 planned it: 30.1, 2.6 kB)
     end
 
     it 'a hard-synced lead through a delay (sync pulses, delay lines)' do
