@@ -331,5 +331,13 @@ RSpec.describe('MB::Term::NativeVT', :aggregate_failures) do
     ensure
       ENV['MB_TERM_NATIVE'] = old
     end
+    begin
+      MB::Term::VT.native = nil # (an adapter's switch: mb-sound's kernels = :ruby)
+      expect(MB::Term::VT.native?).to eq(false)
+      expect(MB::Term::VT.new(2, 3)).to be_a(MB::Term::RubyVT)
+      expect { MB::Term::VT.native = String }.to raise_error(ArgumentError)
+    ensure
+      MB::Term::VT.native = MB::Term::NativeVT
+    end
   end
 end

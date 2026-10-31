@@ -47,6 +47,15 @@ require_relative 'ui/help_index'
 
 module MB
   module Sound
+    # The terminal model every MB::Term::VT.new makes (the REPL pane's
+    # ReplHost): mb-term's VT in C (NativeVT) or its Ruby mirror (RubyVT),
+    # driving mb-term's VT.native as :cell_grid drives Grid.native.
+    Kernels.register :term_vt, c: MB::Term::NativeVT, ruby: MB::Term::RubyVT, group: :fast_term,
+      covers: %w[Term::FastTerm::VT],
+      check: "a VT is a whole terminal model, not a call a pair can run; mb-term's vt_native_spec.rb compares both states over streams and fuzz"
+    Kernels.on_change { |e, mode| MB::Term::VT.native = mode == :ruby ? nil : MB::Term::NativeVT if e.name == :term_vt }
+    MB::Term::VT.native = nil if Kernels.mode_of(:term_vt) == :ruby
+
     # The live terminal UI (design/notes/terminal_ui.md), step 1: a
     # read-only dashboard band above (or below) the console, with Pry
     # unchanged in the scroll region below it.

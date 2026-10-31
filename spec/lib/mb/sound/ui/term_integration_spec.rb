@@ -29,7 +29,20 @@ RSpec.describe('mb-term in mb-sound', :aggregate_failures) do
     expect(MB::Term::Grid.new(4, 2, native: true)).to be_a(MB::Sound::Plot::Text::NativeCells)
   end
 
-  it 'draws a VT the same into Cells and NativeCells' do
+  it "makes the C VT for MB::Term::VT.new, and RubyVT while the term_vt kernel is :ruby (the adapter)" do
+    expect(MB::Term::VT.new(2, 3)).to be_a(MB::Term::NativeVT)
+    expect(MB::Sound::Kernels[:term_vt].covers).to include('Term::FastTerm::VT')
+    MB::Sound::Kernels.with(term_vt: :ruby) do
+      expect(MB::Term::VT.new(2, 3)).to be_a(MB::Term::RubyVT)
+    end
+    MB::Sound::Kernels.with(:ruby) do
+      expect(MB::Term::VT.new(2, 3)).to be_a(MB::Term::RubyVT)
+      expect(MB::Term::Grid.new(2, 1)).to be_a(MB::Term::Cells)
+    end
+    expect(MB::Term::VT.new(2, 3)).to be_a(MB::Term::NativeVT)
+  end
+
+  it 'draws a VT the same into Cells and NativeCells (from the C VT: cells written directly into NativeCells, #put_run calls on Cells)' do
     vt = MB::Term::VT.new(5, 10)
     vt.feed("\e[31mred\e[0m plain\r\n\e[44mblue\e[0m 中x")
     a = MB::Term::Cells.new(12, 5)

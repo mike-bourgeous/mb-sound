@@ -229,17 +229,29 @@ module MB
         end
       end
 
+      @native = nil
+
       class << self
-        # The VT class for +native+: NativeVT when compiled and asked for,
-        # else RubyVT.
-        def class_for(native = native?)
-          native && defined?(NativeVT) ? NativeVT : RubyVT
+        # The native VT class VT.new makes (NativeVT once fast_term is
+        # loaded), or nil for RubyVT.  An adapter may turn it off (mb-sound's
+        # kernel switch: MB::Sound.kernels = :ruby), as with Grid.native.
+        attr_reader :native
+
+        def native=(klass)
+          raise ArgumentError, "#{klass} is not a VT" unless klass.nil? || klass <= VT
+          @native = klass
         end
 
-        # True when NativeVT is compiled and not turned off by
+        # True when a native VT is set and not turned off by
         # MB_TERM_NATIVE=0.
         def native?
-          !!defined?(NativeVT) && ENV['MB_TERM_NATIVE'] != '0'
+          !@native.nil? && ENV['MB_TERM_NATIVE'] != '0'
+        end
+
+        # The VT class for +native+: the native one when set and asked for,
+        # else RubyVT.
+        def class_for(native = native?)
+          native && @native ? @native : RubyVT
         end
 
         # A new +rows+ x +cols+ VT (NativeVT when compiled, unless +native+
@@ -1161,6 +1173,8 @@ module MB
           draw_cells(grid, x, y, w, h, offset, all, marks)
         end
       end
+
+      VT.native ||= NativeVT
     end
   end
 end
