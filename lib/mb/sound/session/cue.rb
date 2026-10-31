@@ -511,11 +511,12 @@ module MB
           chans.reduce { |a, b| a + b } * (1.0 / chans.length)
         end
 
-        # Cue players ignore solos (a solo is about MAIN); `mute :x` mutes
-        # :"x/cue" too.
-        def audible_unlocked?(name)
-          base = Session::Name.cued(name)
-          return super unless base
+        Strip.rule :cue_strip_rule, order: 10
+
+        # Strip rule: cue players ignore solos (a solo is about MAIN); `mute
+        # :x` mutes :"x/cue" too.  Other names are left to the next rules.
+        def cue_strip_rule(name)
+          base = Session::Name.cued(name) or return nil
           !@muted.include?(name) && !@muted.include?(base)
         end
 

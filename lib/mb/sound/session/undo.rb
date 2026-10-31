@@ -44,9 +44,9 @@ module MB
         # The undo group of a running command (see #command, Context#command):
         # its Session, the changes it made, and Set-level extras
         # ([participant, before, after]).
-        CommandGroup = Struct.new(:session, :changes, :extras) do
+        CommandGroup = Struct.new(:session, :changes, :extras, :warm_hold) do
           def initialize(session)
-            super(session, [], [])
+            super(session, [], [], nil)
           end
         end
 

@@ -58,6 +58,7 @@ module MB
             @peaks = {}
             @outputs = {}
             @cursors = {}
+            @pending = {} # name => [data, frame]: the last part, held back (see #close)
             @paths = {}
             @origin = 0
             FileUtils.mkdir_p(dir)
@@ -69,7 +70,9 @@ module MB
           attr_accessor :origin
 
           # Adds +data+ (one Numo array per channel) for the stem +name+,
-          # starting at session frame +frame+.
+          # starting at session frame +frame+.  Each stem's last part waits
+          # until the next one or #close, which may end the stems inside it
+          # (a render ending on the frame its sounds ended, session-2).
           def add(name, data, frame)
             if frame < @origin
               skip = @origin - frame
@@ -77,20 +80,20 @@ module MB
               data = data.map { |d| d[skip..] }
               frame = @origin
             end
-            out = output_for(name)
-            pad(name, frame)
-            data = data.map { |d| d * @gain } if @gain != 1
+            output_for(name)
+            flush_pending(name)
+            data = @gain != 1 ? data.map { |d| d * @gain } : data.map(&:dup)
             peak = data.map { |d| d.abs.max }.max.to_f
             @peaks[name] = peak if peak > @peaks.fetch(name, 0.0)
-            out.write(data)
-            @cursors[name] += data[0].length
+            @pending[name] = [data, frame]
           end
 
-          # Pads every stem with silence to +frames+ and closes the files.
-          # Warns about stems that went over full scale (clipped in integer
-          # formats such as FLAC and WAV).
+          # Writes every stem up to +frames+ (the last parts cut there,
+          # silence padded up to it) and closes the files.  Warns about
+          # stems that went over full scale (clipped in integer formats such
+          # as FLAC and WAV).
           def close(frames)
-            @outputs.each_key { |name| pad(name, frames) }
+            @outputs.each_key { |name| flush_pending(name, frames); pad(name, frames) }
             @outputs.each_value(&:close)
             @outputs.clear
 
@@ -112,6 +115,22 @@ module MB
               @cursors[name] = @origin
               MB::Sound.file_output(path, channels: @channels, sample_rate: @sample_rate, overwrite: @overwrite)
             end
+          end
+
+          # Writes stem +name+'s held-back part (see #add), cut at session
+          # frame +upto+ if given.
+          def flush_pending(name, upto = nil)
+            data, frame = @pending.delete(name)
+            return unless data
+
+            n = data[0].length
+            n = MB::M.min(n, upto - frame) if upto
+            return if n <= 0
+
+            pad(name, frame)
+            data = data.map { |d| d[0...n] } if n < data[0].length
+            @outputs[name].write(data)
+            @cursors[name] += n
           end
 
           # Writes silence to stem +name+ up to session frame +frame+.

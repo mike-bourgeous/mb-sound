@@ -111,5 +111,20 @@ RSpec.describe(MB::Sound::UI::UIMethods, :aggregate_failures) do
       expect(c.names_for('', 'x = ', session)).to be_nil
       expect(c.names_for('fo', 'fo', session)).to be_nil
     end
+
+    # (session-2: pane_keys_spec's random keys, seed 55214, typed
+    # `seq(Tie).n8` and Tab; Reline's word `Tie).n8` sent Pry's completer
+    # to evaluate `Tie).methods`, and Ruby's parser warned about the
+    # half expression before raising)
+    it "doesn't hand Pry a receiver that isn't Ruby on its own" do
+      c = described_class
+      expect(%w[Tie).n8 a).b foo(1,.x].map { |w| c.receiver_parses?(w) }).to all(eq(false))
+      expect(%w[foo.ba Foo::Bar.x 1..2 x .x :sym seq(Tie).n8 L.inst.dn].map { |w| c.receiver_parses?(w) }).to all(eq(true))
+
+      c.install_pry
+      completer = Pry::InputCompleter.new(Reline, Pry.new(target: binding))
+      expect(completer.call('Tie).n8')).to eq([]) # (and no warning: WarningGuard fails the example on one)
+      expect(completer.call('MB::Soun')).to include('MB::Sound') # (Pry's completion still runs)
+    end
   end
 end

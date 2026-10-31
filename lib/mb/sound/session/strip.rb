@@ -17,6 +17,54 @@ module MB
       # oscillators, envelopes, delays, and reverbs carry on from where they
       # stopped.
       module Strip
+        # A Session method `(name) -> true, false, or nil` deciding whether
+        # player name +name+ is heard (true or false), or leaving it to the
+        # next rule (nil), tried in +order+ (see #audible_unlocked?).
+        Rule = Data.define(:name, :order)
+
+        # A Session method `(frame, length)` that ramps the mute/solo levels
+        # of what it owns toward #audible_unlocked? from +frame+ over
+        # +length+ frames, run in +order+ (see #apply_strip).
+        Step = Data.define(:name, :order)
+
+        @rules = [].freeze
+        @steps = [].freeze
+
+        class << self
+          # Strip registry (session-2, the maintainer's "Registry",
+          # 2026-10-31; design/notes/arrangement.md "Mute and solo"): each
+          # module with its own audibility rule or strip ramps registers
+          # them here, next to the methods, like Undo.claim, instead of
+          # extending #audible_unlocked? and #apply_strip through super
+          # (which worked in one include order only).  A guard
+          # (spec/lib/mb/sound/session/strip_registry_spec.rb) fails a
+          # *_strip_rule or *_strip_step method that isn't registered and a
+          # module defining the dispatching methods again.
+          def rule(method, order:)
+            raise ArgumentError, "#{method.inspect} is already a strip rule" if @rules.any? { |r| r.name == method }
+            @rules = (@rules + [Rule.new(name: method, order: order)]).sort_by(&:order).freeze
+          end
+
+          # Registers +method+ as a strip step (see Step).
+          def step(method, order:)
+            raise ArgumentError, "#{method.inspect} is already a strip step" if @steps.any? { |r| r.name == method }
+            @steps = (@steps + [Step.new(name: method, order: order)]).sort_by(&:order).freeze
+          end
+
+          # The rules in order.
+          attr_reader :rules
+
+          # The steps in order.
+          attr_reader :steps
+        end
+
+        # Strip's own rules: mutes (20), then solos (30); Cue's rule for cue
+        # players comes first (10), Buses' solo-in-place reach after (40).
+        # A name no rule answers for is silent (a solo elsewhere).
+        rule :mute_strip_rule, order: 20
+        rule :solo_strip_rule, order: 30
+        step :player_strip_step, order: 10
+
         # Undo subject of changes to every mute and solo flag at once
         # (subject :strip, e.g. `solo` with no names): an Undo::StripState.
         StripSubject = Data.define
@@ -206,20 +254,48 @@ module MB
         # Arrangement::Recording) follows its track's flags as well as its
         # own: `mute :lead` silences the keyboard through :lead's patch
         # too, and `solo :lead` keeps it (omnibus6, agreed 2026-10-12).
+        #
+        # The registered rules decide in order (see Strip.rule): the first
+        # true or false wins, and a name none decides is silent.
         def audible_unlocked?(name)
-          track = Session::Name.monitored(name)
-          return false if @muted.include?(name) || (track && @muted.include?(track))
-          @soloed.empty? || @soloed.include?(name) || (!track.nil? && @soloed.include?(track))
+          rules = Strip.rules
+          i = 0
+          while i < rules.length
+            v = __send__(rules[i].name, name)
+            return v unless v.nil?
+            i += 1
+          end
+          false
         end
 
-        # Ramps every player whose mute/solo level should change, starting
-        # at the frame where the current change lands (see
-        # Changes#commit_change), over +fade+ bars or DECLICK_SECONDS.
+        # Ramps every player and bus whose mute/solo level should change,
+        # starting at the frame where the current change lands (see
+        # Changes#commit_change), over +fade+ bars or DECLICK_SECONDS,
+        # through the registered steps (see Strip.step).
         def apply_strip(fade)
           frame = @landing_frame || @frame
           rate = output.sample_rate.to_f
           length = fade ? fade_frames(fade, rate) : MB::M.max((Fades::DECLICK_SECONDS * rate).round, 1)
+          Strip.steps.each { |st| __send__(st.name, frame, length) }
+        end
 
+        # Strip rule: a muted name (or a monitor of a muted track) is
+        # silent.
+        def mute_strip_rule(name)
+          track = Session::Name.monitored(name)
+          @muted.include?(name) || (track && @muted.include?(track)) ? false : nil
+        end
+
+        # Strip rule: with no solo, or soloed (itself or its monitor's
+        # track), a name is heard.
+        def solo_strip_rule(name)
+          return true if @soloed.empty? || @soloed.include?(name)
+          track = Session::Name.monitored(name)
+          !track.nil? && @soloed.include?(track) ? true : nil
+        end
+
+        # Strip step: the players' mute/solo ramps.
+        def player_strip_step(frame, length)
           @mutex.synchronize { @players.values }.each do |p|
             target = audible_unlocked?(p.name) ? 1.0 : 0.0
             current_target = p.strip_ramp ? p.strip_ramp.to : p.strip_level
@@ -228,6 +304,7 @@ module MB
             p.strip_ramp = Fades::Ramp.after(p.strip_ramp, p.strip_level, target, frame, length)
           end
         end
+        private :mute_strip_rule, :solo_strip_rule, :player_strip_step
 
         # Reads sleeping player +p+'s branches of nodes that other players
         # also play (see #asleep_reads) for +frames+ frames, so their Tees

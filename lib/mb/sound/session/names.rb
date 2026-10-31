@@ -72,6 +72,7 @@ module MB
       # | :"lead/live"        | track :lead's monitor player (#monitor?)    |
       # | :"lead/cue"         | track :lead's cue player (#cue?)            |
       # | :"bass/level"       | player :bass's level knob (#level?)         |
+      # | :"kick/key"         | player :kick's key level knob (#key?)       |
       # | :"bass/cutoff"      | a track knob (a patch param, a live literal)|
       # | :"dub/space"        | rack :dub's knob :space                     |
       # | :"bass/dub/space"   | that knob's instance in player :bass        |
@@ -90,6 +91,10 @@ module MB
 
         # The leaf of a player's level knob (Session::Faders).
         LEVEL = 'level'
+
+        # The leaf of a player's key level knob (Session::Faders): how hard
+        # it drives the sidechain readers that read it.
+        KEY = 'key'
 
         # (parsed names; cleared when it grows past CACHE_LIMIT)
         @cache = {}
@@ -139,9 +144,14 @@ module MB
             join(name, LEVEL)
           end
 
+          # Player +name+'s key level knob name (:"kick/key").
+          def key(name)
+            join(name, KEY)
+          end
+
           # Leaves that mean something of their own (#monitor?, #cue?,
-          # #level?), which a track param's knob can't take.
-          RESERVED_LEAVES = [MONITOR, CUE, LEVEL].freeze
+          # #level?, #key?), which a track param's knob can't take.
+          RESERVED_LEAVES = [MONITOR, CUE, LEVEL, KEY].freeze
 
           # Track +track+'s knob for patch param +param+ (:"bass/cutoff"):
           # the one knob name rule for preset params, bound literals, and
@@ -222,6 +232,11 @@ module MB
         # True for a player's level knob name (:"bass/level").
         def level?
           @parts.length == 2 && @parts.last == LEVEL
+        end
+
+        # True for a player's key level knob name (:"kick/key").
+        def key?
+          @parts.length == 2 && @parts.last == KEY
         end
 
         # The track whose monitor player this is (:lead for :"lead/live"),

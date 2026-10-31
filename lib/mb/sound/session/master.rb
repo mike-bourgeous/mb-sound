@@ -64,7 +64,7 @@ module MB
         Chain = Struct.new(
           :block, :source, :nodes, :timeline_nodes, :description,
           :start, :launch, :started, :mode, :fade, :feeding, :gain, :gain_step,
-          :tail_frames, :quiet, :slow_warned, :loads,
+          :tail_start, :quiet, :tail_done, :slow_warned, :loads,
           :input_from, :input_until, :ramp_from, :skip, :read_to, :cpu,
           :preset, :mastering, :capture, :rng,
           keyword_init: true
@@ -310,8 +310,9 @@ module MB
             feeding: true,
             gain: 1.0,
             gain_step: 0.0,
-            tail_frames: 0,
-            quiet: QuietRun.new(QuietRun::QUIET_SECONDS * output.sample_rate, mode: :buffer),
+            tail_start: nil,
+            quiet: nil,
+            tail_done: false,
             slow_warned: false,
             preset: preset,
             rng: rng
@@ -512,7 +513,10 @@ module MB
         end
 
         # Renders one chain's output into +out+.
-        def render_master_chain(c, mix, out, count, rate)
+        #
+        # +frame+ is the session frame of the first of +count+ frames (a bus
+        # renders its chains in segments of a span).
+        def render_master_chain(c, mix, out, count, rate, frame = @frame)
           return unless c.started
           return render_master_chain_from(c, mix, out, count) if c.skip
 
@@ -529,6 +533,8 @@ module MB
           end
 
           data = master_chain_output(c, input, count)
+          # (a spillover tail ends on its exact frame: see #track_master_tail)
+          n = c.feeding && !c.input_until ? count : track_master_tail(c, data, count, rate, frame)
 
           ramp = master_ramp(c, count, c.ramp_from || 0)
           if c.capture
@@ -539,12 +545,13 @@ module MB
           while (idx += 1) < out.length # (no each_with_index: an imemo a call)
             o = out[idx]
             d = data[idx]
-            next if d.length == count && (ramp.nil? || ramp.length == count) && Kernels.add_at(o, 0, d, count, ramp)
-            d = d * ramp if ramp
-            o.inplace + d
+            next if d.length == count && (ramp.nil? || ramp.length == count) && Kernels.add_at(o, 0, d, n, ramp)
+            next if n == 0
+            d = d[0...n] if n < d.length
+            d = d * (ramp.length == n ? ramp : ramp[0...n]) if ramp
+            o[0...n].inplace + d
           end
 
-          track_master_tail(c, data, count, rate) unless c.feeding || c.input_until
           c.input_from = c.input_until = c.ramp_from = nil
         end
 
@@ -634,15 +641,34 @@ module MB
           ramp
         end
 
-        # Counts how long a spillover chain has been ringing and how long it
-        # has been quiet, fading it out if it rings too long.
-        def track_master_tail(c, data, count, rate)
-          c.tail_frames += count
-          c.quiet.advance_buffer(count, !quiet?(data))
-
-          if c.tail_frames >= MAX_TAIL_SECONDS * rate && c.gain_step >= 0
-            c.gain_step = -1.0 / (TAIL_FADE_SECONDS * rate)
+        # Follows a spillover chain's tail (+data+, +count+ frames from
+        # session frame +frame+): it began where the chain's input stopped
+        # (Chain#input_until in the switch buffer), is done once it has been
+        # quiet for QuietRun::QUIET_SECONDS (a QuietRun on session frames,
+        # ending on the exact frame: session-2, the maintainer's "Exact
+        # frame"; whole buffers counted before), and fades out over
+        # TAIL_FADE_SECONDS from the exact frame it has rung
+        # MAX_TAIL_SECONDS.  Returns how many of the frames to mix: all of
+        # them, or fewer when the tail ends inside them (the chain is then
+        # dropped).
+        def track_master_tail(c, data, count, rate, frame)
+          unless c.tail_start
+            c.tail_start = frame + (c.input_until || 0)
+            c.quiet = QuietRun.new((QuietRun::QUIET_SECONDS * rate).round, from: c.tail_start)
           end
+
+          cap = c.tail_start + (MAX_TAIL_SECONDS * rate).round
+          if c.gain_step >= 0 && cap < frame + count
+            c.gain_step = -1.0 / (TAIL_FADE_SECONDS * rate)
+            c.ramp_from = MB::M.max(cap - frame, 0)
+          end
+
+          c.quiet.track_all(data, frame)
+          ends = c.quiet.ends_at
+          return count if ends > frame + count
+
+          c.tail_done = true
+          MB::M.max(ends - frame, 0)
         end
 
         # Returns true if a chain can be dropped: it was replaced and has
@@ -652,7 +678,7 @@ module MB
           return false if c.equal?(list.last) || !c.started
 
           faded = c.gain <= 0 && c.gain_step < 0
-          silent = !c.feeding && (c.bypass? || c.quiet.done?)
+          silent = !c.feeding && (c.bypass? || c.tail_done)
           faded || silent
         end
 

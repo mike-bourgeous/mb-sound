@@ -57,6 +57,9 @@ module MB
         # used by a track or group goes through MB::Sound.live_error).
         def knob(name, default = nil, **spec)
           raise ArgumentError, "Knob names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
+          # (level and key level knobs move along the fader taper, whoever
+          # makes them: Faders, a set document's knob line, a scene)
+          spec = spec.merge(curve: :fader) if !spec.key?(:curve) && (!spec.empty? || !default.nil?) && Name[name].then { |nm| nm.level? || nm.key? }
 
           existing = @knob_lock.synchronize { @knobs[name] }
           if existing
@@ -142,12 +145,12 @@ module MB
           full_knob_name(name) || primary_control(name) || name
         end
 
-        # True if +name+ names a track's level knob (:"bass/level"), made
-        # yet or not (see Faders).
-        def track_level_name?(name)
+        # True if +name+ names a track's level or key level knob
+        # (:"bass/level", :"kick/key"), made yet or not (see Faders).
+        def track_strip_knob?(name)
           return false unless name.is_a?(Symbol)
           nm = Name[name]
-          nm.level? && @names.kind(nm.owner) == :track
+          (nm.level? || nm.key?) && @names.kind(nm.owner) == :track
         end
 
         # The knob name of the primary control of +name+'s owner (see
@@ -175,8 +178,9 @@ module MB
           return known if known
           name = control_name(name)
           k = @knob_lock.synchronize { @knobs[name] }
-          # (a track's level knob is made at unity when first used; Faders)
-          k ||= fader!(Name[name].owner) if track_level_name?(name)
+          # (a track's level and key level knobs are made at unity when
+          # first used; Faders)
+          k ||= strip_knob!(name) if track_strip_knob?(name)
           k or raise ArgumentError, "No knob #{name.inspect}#{knob_suggestion(name, define: true)}"
         end
 
@@ -643,7 +647,7 @@ module MB
         # A listing of the knobs: name => "800 Hz (100..8000 exp) cc74 -> 3000".
         def knob_info
           knobs.transform_values { |k|
-            parts = [k.value_string, "(#{GraphNode::Knob.number(k.range.begin)}..#{GraphNode::Knob.number(k.range.end)}#{k.spec.curve == :exp ? ' exp' : ''})"]
+            parts = [k.value_string, "(#{GraphNode::Knob.number(k.range.begin)}..#{GraphNode::Knob.number(k.range.end)}#{k.spec.curve == :linear ? '' : " #{k.spec.curve}"})"]
             parts << "cc#{k.cc}" if k.cc
             parts << 'learning' if k.learning?
             parts << "-> #{GraphNode::Knob.number(MB::M.sigfigs(k.target, 4))}" if k.mode == :ramp

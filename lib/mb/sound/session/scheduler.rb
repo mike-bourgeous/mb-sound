@@ -331,6 +331,12 @@ module MB
           @mutex.synchronize { @entries.each_value.any? { |e| e.status == :pending && e.time <= @transport.position && (e.epoch.nil? || e.epoch == @session.epoch) } }
         end
 
+        # The latest time a block ran for (it may have run ahead of it), or
+        # nil (none since the last seek).
+        def ran_ahead_time
+          @mutex.synchronize { @ran_ahead }
+        end
+
         # Returns true if a block is still to come at or after timeline
         # position +position+ (see Session#schedule_waiting?): a block waiting
         # to run in the current epoch (any, or only one-shot blocks if

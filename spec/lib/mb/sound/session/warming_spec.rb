@@ -92,6 +92,85 @@ RSpec.describe(MB::Sound::Session::Warming) do
     s&.close
   end
 
+  # (session-2, the maintainer's "In background": the console returns at
+  # once; the change lands once warm)
+  describe 'in the background' do
+    # A session warming console commands' new graphs in the background,
+    # each warm-up round waiting for a token from the returned Queue.
+    def background_session
+      s = new_session(true)
+      s.warm_background = true
+      gate = Queue.new
+      allow(s).to receive(:warm_round).and_wrap_original { |m, *a, **k, &b| gate.pop; m.call(*a, **k, &b) }
+      [s, gate]
+    end
+
+    def landed?(s, name) = s.journal.changes.any? { |e| e.subject == name && e.kind == :bg && e.status == :landed }
+
+    # Waits (up to 10 s) until no queued change of +s+ waits for a warm-up
+    # and +name+'s warm-up is listed.
+    def wait_released(s, name)
+      deadline = MB::U.clock_now + 10
+      until s.warmed.any? { |w| w.name == name } && s.instance_variable_get(:@changes).none? { |c| s.send(:held?, c) }
+        raise 'the warm-up never finished' if MB::U.clock_now > deadline
+        sleep 0.01
+      end
+    end
+
+    it 'returns at once, holding the change until the warm-up is done, then lands it (one hold per command)' do
+      s, gate = background_session
+      MB::Sound::Session.with_context(session: s) do
+        entry = MB::Sound.bg(:pad, 220.hz.triangle.at(0.1))
+        expect(entry.to_s).to match(/bg :pad lands .* \(queued\)/)
+        mix = run(s, 10)
+        expect(mix[0].abs.max).to eq(0)
+        expect(s.queued(:pad).length).to eq(1)
+
+        2.times { gate << true } # (two rounds)
+        wait_released(s, :pad)
+        mix = run(s, 2)
+        expect(mix[0].abs.max).to be > 0.05
+        expect(s.warmed.find { |w| w.name == :pad }).to have_attributes(kind: :graph, result: :played)
+      end
+    ensure
+      s&.close
+    end
+
+    it 'lands a change whose time passed meanwhile on its launch point\'s next alignment' do
+      s, gate = background_session
+      MB::Sound::Session.with_context(session: s) do
+        s.warm_changes = false
+        s.add(0.0.constant, name: :clock, on: :now) # (keeps the timeline moving)
+        s.warm_changes = true
+        bar = 96000 / 256 # (buffers a bar at 120 BPM)
+        MB::Sound.bg(:pad, 220.hz.triangle.at(0.1), on: :bar)
+        (bar + 20).times { s.process_buffer } # (past the bar it was for)
+        expect(landed?(s, :pad)).to eq(false)
+        2.times { gate << true }
+        wait_released(s, :pad)
+        entry = s.queued(:pad).first
+        expect(entry.lands.to_s).to eq('3:1')
+        s.process_buffer until s.frame >= 2 * 96000 + 256
+        expect(landed?(s, :pad)).to eq(true)
+        expect(s.journal.changes.find { |e| e.subject == :pad }.lands.to_s).to eq('3:1')
+      end
+    ensure
+      s&.close
+    end
+
+    it 'warms in the foreground in scheduled blocks, offline (by default), and in replays' do
+      s = new_session(true)
+      expect(s.warm_background).to eq(:auto)
+      expect(s.send(:warm_hold_for_add)).to be_nil # (offline)
+      s.warm_background = true
+      MB::Sound::Session.with_context(session: s, time: 1r) { expect(s.send(:warm_hold_for_add)).to be_nil }
+      expect(s.send(:warm_hold_for_add)).to be_a(MB::Sound::Session::Warming::WarmHold)
+      expect { s.warm_background = :yes }.to raise_error(ArgumentError, /:auto, true, or false/)
+    ensure
+      s&.close
+    end
+  end
+
   it 'is on for realtime sessions with YJIT, off offline, and never in sandboxes' do
     s = new_session(:auto)
     expect(s.warming?).to eq(false)

@@ -56,7 +56,7 @@ RSpec.describe(MB::Sound::Param) do
       expect(described_class.declare(:x, 1.0, range: 0.1..10.0, curve: :db).curve).to eq(:exp)
       expect(described_class.declare(:x, 1.0, range: 0.1..10.0, curve: :lin).curve).to eq(:linear)
       expect(described_class.declare(:on, true, curve: :enum).curve).to eq(:switch)
-      expect(described_class::CURVES.values.uniq).to eq(%i[linear exp switch])
+      expect(described_class::CURVES.values.uniq).to eq(%i[linear exp switch fader])
     end
 
     it 'takes ranges and curves from the names table when the default has its type' do

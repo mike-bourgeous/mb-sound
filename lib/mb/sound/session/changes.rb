@@ -37,8 +37,11 @@ module MB
         # running state; see Carry).  +spill+ is true for a graph swap whose
         # replaced graph spills over (Session#add_now), so its undo spills
         # back (Undo#restore_player).
+        # +hold+ is a Warming::WarmHold while the graph it starts warms in
+        # the background (it waits in the queue, past its time if need be,
+        # until the warm-up is done; see Warming).
         Change = Struct.new(
-          :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts, :graph, :split, :spill,
+          :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts, :graph, :split, :spill, :hold,
           keyword_init: true
         )
 
@@ -95,7 +98,10 @@ module MB
         #
         # While a take replays, the landing time comes from the take instead
         # (see Take).
-        def change(kind, subject, time, data: {}, undoes: nil, starts: nil, graph: nil, split: false, spill: false, &action)
+        #
+        # With +hold+ (a Warming::WarmHold), the change waits in the queue
+        # until the hold is released, even if its time comes first.
+        def change(kind, subject, time, data: {}, undoes: nil, starts: nil, graph: nil, split: false, spill: false, hold: nil, &action)
           raise IOError, 'Session is closed' if @closed
           raise ArgumentError, 'Pass a block to apply the change' unless action
 
@@ -132,7 +138,7 @@ module MB
             pos = @transport.position
             check_late(kind, subject, time, pos) unless queue
             seq = @journal.next_seq
-            c = Change.new(seq: seq, kind: kind, subject: subject, time: time, action: action, starts: starts, graph: graph, split: split, spill: spill)
+            c = Change.new(seq: seq, kind: kind, subject: subject, time: time, action: action, starts: starts, graph: graph, split: split, spill: spill, hold: hold)
 
             c.entry = @journal.add(Journal::Entry.new(
               seq: seq, kind: kind, subject: subject,
@@ -142,11 +148,11 @@ module MB
               status: :queued, source: source, line: line, data: data.freeze, undoes: undoes
             ))
 
-            if time.nil? || time <= pos
+            if (time.nil? || time <= pos) && !hold
               commit_change(c, land_pos: pos, land_frame: @frame, commits: stamp(pos, frame: @frame), immediate: true)
             else
-              idx = @changes.bsearch_index { |q| q.time > time || (q.time == time && q.seq > seq) } || @changes.length
-              @changes.insert(idx, c)
+              c.time = pos if time.nil? || time < pos # (held: waits for its warm-up)
+              queue_change(c)
             end
           }
 
@@ -227,12 +233,31 @@ module MB
         def commit_queued_due
           return if @changes.empty? || @changes.first.time > @transport.position
           without_command do
-            while (c = @changes.first) && c.time <= @transport.position
-              @changes.shift
+            i = 0
+            while (c = @changes[i]) && c.time <= @transport.position
+              if held?(c) # (warming: see Warming)
+                i += 1
+                next
+              end
+              @changes.delete_at(i)
               pos = @transport.position
               commit_change(c, land_pos: pos, land_frame: @frame, commits: stamp(pos, frame: @frame), immediate: false)
             end
           end
+        end
+
+        # Inserts +c+ into the queue in time order (issue order for the
+        # same time).  Called with the render lock held.
+        def queue_change(c)
+          idx = @changes.bsearch_index { |q| q.time > c.time || (q.time == c.time && q.seq > c.seq) } || @changes.length
+          @changes.insert(idx, c)
+        end
+
+        # True if queued change +c+ waits for a background warm-up (see
+        # Warming::WarmHold).
+        def held?(c)
+          h = c.hold
+          !h.nil? && !h.released?
         end
 
         # Applies queued changes whose time is before +to+, each on its
@@ -242,8 +267,13 @@ module MB
         def commit_due(from, to, per_sample)
           # Timeline changes wait for the start of a span (see
           # #process_buffer and Seeks); later changes wait behind them
-          until @changes.empty? || @changes.first.time >= to || timeline_change?(@changes.first)
-            c = @changes.shift
+          i = 0
+          while (c = @changes[i]) && c.time < to && !timeline_change?(c)
+            if held?(c) # (warming: see Warming)
+              i += 1
+              next
+            end
+            @changes.delete_at(i)
             idx = MB::M.max(Sequence::Transport.frame_at(c.time, from, per_sample), 0)
             commit_change(c, land_pos: MB::M.max(c.time, from), land_frame: @frame + idx, commits: stamp(from, frame: @frame), immediate: false)
           end

@@ -20,6 +20,19 @@ module MB
       #     ramp      exp: exp((t * k + a) + b)       linear: t * k + a
       #               (k, a, b from #ramp_terms: the knob_ramp kernel's)
       #
+      # and the :fader curve of level knobs (session-2, the maintainer's
+      # "dB curve", 2026-10-30): a gain taper, the value growing with the
+      # square of the position, so on 0..4 (+12 dB) the middle of the travel
+      # is 1 (0 dB), the bottom silence, and every step moves in dB (12 dB
+      # per halving of the position: 0.75 is +7 dB, 0.25 -12 dB, 0.1 -28 dB):
+      #
+      #     value     fader: lo + (hi - lo) * pos * |pos|
+      #     position  fader: sqrt((v - lo) / (hi - lo))  (signed)
+      #     ramp      fader: value at the position t * k + a
+      #               (ramps and crossfades move evenly in position, so a
+      #               fade-out over 8 bars falls evenly in dB at first, then
+      #               to silence; Ruby only, the C kernel declines)
+      #
       # +lo+ may be above +hi+ (inverted controllers, velocity ranges that
       # fall); :exp needs both on the same side of 0.  Positions outside
       # 0..1 give values outside the span.  The class functions take the
@@ -30,6 +43,8 @@ module MB
         def self.value(pos, lo, hi, curve)
           if curve == :exp
             pos.is_a?(Numo::NArray) ? (hi / lo) ** pos * lo : lo * (hi / lo) ** pos
+          elsif curve == :fader
+            pos.is_a?(Numo::NArray) ? pos * pos.abs * (hi - lo) + lo : lo + (hi - lo) * pos * pos.abs
           else
             pos.is_a?(Numo::NArray) ? pos * (hi - lo) + lo : lo + (hi - lo) * pos
           end
@@ -40,6 +55,14 @@ module MB
         def self.position(v, lo, hi, curve)
           if curve == :exp
             v.is_a?(Numo::NArray) ? Numo::NMath.log(v / lo) / Math.log(hi / lo) : Math.log(v.to_f / lo) / Math.log(hi / lo)
+          elsif curve == :fader
+            if v.is_a?(Numo::NArray)
+              x = (v - lo) / (hi - lo)
+              Numo::NMath.sqrt(x.abs) * x.sign
+            else
+              x = (v.to_f - lo) / (hi - lo)
+              x < 0 ? -Math.sqrt(-x) : Math.sqrt(x)
+            end
           else
             v.is_a?(Numo::NArray) ? (v - lo) / (hi - lo) : (v.to_f - lo) / (hi - lo)
           end
@@ -48,7 +71,7 @@ module MB
         def initialize(lo:, hi:, curve: :linear)
           lo = lo.to_f
           hi = hi.to_f
-          c = curve == :exp ? :exp : :linear
+          c = curve == :exp || curve == :fader ? curve : :linear
           raise ArgumentError, "An exponential scale can't include or cross 0 (got #{lo}..#{hi})" if c == :exp && !(lo * hi > 0)
           super(lo: lo, hi: hi, curve: c)
         end
@@ -61,6 +84,11 @@ module MB
         # True for a logarithmic scale.
         def exp?
           curve == :exp
+        end
+
+        # True for a level knob's gain taper (see the class description).
+        def fader?
+          curve == :fader
         end
 
         # The span as a Range.
@@ -80,14 +108,18 @@ module MB
 
         # The terms [k, a, b] of a move from value +from+ to value +to+ in
         # this scale, so the value +t+ of the way there (0..1, a curve's
-        # output) is exp((t * k + a) + b) on an :exp scale and t * k + a on
-        # a linear one: what knob ramps compute (Knob#ramp_values, the C
-        # FastArithmetic.knob_ramp, Knob#value_at) and #between reads.
+        # output) is exp((t * k + a) + b) on an :exp scale, t * k + a on a
+        # linear one, and #value(t * k + a) on a :fader one: what knob
+        # ramps compute (Knob#ramp_values, the C FastArithmetic.knob_ramp,
+        # Knob#value_at) and #between reads.
         def ramp_terms(from, to)
           if curve == :exp
             r = Math.log(hi / lo)
             p0 = position(from)
             [r * (position(to) - p0), Math.log(lo), p0 * r]
+          elsif curve == :fader
+            p0 = position(from)
+            [position(to) - p0, p0, 0.0]
           else
             [to - from, from, 0.0]
           end
@@ -100,6 +132,8 @@ module MB
           k, x, y = ramp_terms(a, b)
           if curve == :exp
             t.is_a?(Numo::NArray) ? Numo::NMath.exp(t * k + x + y) : Math.exp(t * k + x + y)
+          elsif curve == :fader
+            value(t * k + x)
           else
             t * k + x
           end
@@ -109,10 +143,14 @@ module MB
         # e.g. an LFO) times +amount+ positions: multiplied by a power of
         # the span's ratio on an :exp scale (octaves for a knob over
         # 100..800 Hz moved by 1/3), shifted by a share of the span on a
-        # linear one.  Knob#mod's baseline plus modulation.
+        # linear one, along the taper on a :fader one (numbers; a node
+        # moves by a share of the span).  Knob#mod's baseline plus
+        # modulation.
         def shift(x, by, amount)
           if curve == :exp
             x * (2.0 ** (by * (amount.to_f * Math.log2(hi / lo))))
+          elsif curve == :fader && x.is_a?(Numeric) && by.is_a?(Numeric)
+            value(position(x) + by * amount.to_f)
           else
             x + by * (amount.to_f * (hi - lo))
           end

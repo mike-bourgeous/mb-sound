@@ -27,9 +27,12 @@ module MB
         demo phrase), wavetables (one note), and presets by name.  A plain
         Ruby file gets every console command and note name at its top level
         with `require 'mb/sound/dsl'` (run it with `ruby song.rb`; at its end
-        it waits for what plays in the background, like `wait`).
+        it waits for what plays in the background, like `wait`).  For a
+        live set, `gc :quiet` holds Ruby's major garbage collections off
+        (no 45-80 ms stalls; memory grows about 1-2 MB/s until `gc
+        :normal`; `now` shows it).
       TEXT
-      commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up
+      commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up, :gc
       dsl :at, :until, :for, :and_then
       note :method_modules, :scripts
       see :sets, :now, :files
@@ -903,13 +906,15 @@ module MB
         Each track's level is its fader: `level :bass, -6.db` (now, at a
         launch point, or `over: 4`), unity until set, after its fades and
         before its mute; scenes take `bass: -6.db` and `turn :bass, 0.5`
-        works too (the level is the knob :"bass/level").  Mute and solo
+        works too (the level is the knob :"bass/level").  Sidechain
+        readers hear tracks pre-fader; `key_level :kick, -6.db` sets how
+        hard a track drives them (the knob :"kick/key").  Mute and solo
         with a 5 ms declick or synced fades (muted players sleep); master
         effects run on the whole mix and swap at launch points.  The
         master gain comes before the master chain (a limiter keeps its
         ceiling); `master_gain 2.db, post: true` moves it after.
       TEXT
-      commands :level, :mute, :unmute, :solo, :unsolo, :mutes, :master, :master_gain, :monitor_gain
+      commands :level, :key_level, :mute, :unmute, :solo, :unsolo, :mutes, :master, :master_gain, :monitor_gain
       note :arrangement, :master_effects
       see :buses, :dynamics, :mastering
       example 'a level down over a bar' do
@@ -970,14 +975,16 @@ module MB
         (`send:`, `feed`) or play all of their sound into them (`to:`): one
         kind of bus for reverbs, groups, and returns alike.  They ring out on their own,
         sleeping when quiet.  `duck(:drums, only: :kick)` and `bus(:drums)`
-        read a bus or track by name on the exact sample.  Buses mute and
+        read a bus or track by name on the exact sample, pre-fader (a
+        track's `level` doesn't move the duck; `key_level :kick, -6.db`
+        does, and same-named players crossfading add up).  Buses mute and
         solo like tracks (a solo keeps the buses it feeds).  A trigger track
         (`sidechain :pump, grid(16, 'x...x...').loop`) is a sidechain line
         nobody hears: `duck(:pump)` reads it, scenes and `launch` play it
         like any track, and it never reaches the mix, stems, or CUE
         (`shape: env(0, 0.08)`, or a block: closed hats as the key; also
-        `pump`).  `level :pump, 0` turns the pump off (its level, like any
-        track's; scenes and sections take `pump: 0`, `pump: 1`), or `stop
+        `pump`).  `level :pump, 0` turns the pump off (a trigger track's
+        level is its only fader; scenes and sections take `pump: 0`, `pump: 1`), or `stop
         :pump`.  In a kit,
         `voice :trigger, silent: true` plays a row only for
         `duck(:drums, only: :trigger)`.

@@ -60,11 +60,14 @@ module MB
     class Param < Data.define(:name, :default, :range, :type, :curve, :unit, :description, :cc, :implied, :types, :keyword, :primary, :clamp)
       # Canonical curve names, and the aliases each accepts (Knob's old
       # :lin/:exponential/:log, ControlSpec's :exponential, and :db for
-      # dB-linear, which is :exp over gains).
+      # dB-linear, which is :exp over gains).  :fader is the level knobs'
+      # gain taper (0 dB mid-travel on 0..4, silence at the bottom; see
+      # Param::Scale).
       CURVES = {
         linear: :linear, lin: :linear,
         exp: :exp, exponential: :exp, log: :exp, db: :exp,
         switch: :switch, enum: :switch,
+        fader: :fader,
       }.freeze
 
       # Types from values beyond ArgTypes': true/false, Strings, and

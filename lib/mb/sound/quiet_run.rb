@@ -14,7 +14,8 @@ module MB
     # +loud+ (a float: .float_above gives the smallest float above a level).
     # Modes say where a loud sample moves the start:
     #
-    # - +:sample+ (buses, tails, ring-outs, a Synth's end): right after the
+    # - +:sample+ (buses, tails, ring-outs, a Synth's end, render ends,
+    #   +wait+, script ring-downs, master spillover tails): right after the
     #   loud sample, so the run is frame-exact and the same at any buffer
     #   size.  With a +grid+, the run completes only at grid frames
     #   (buses sleep on Session frames that are multiples of GRID).
@@ -24,11 +25,12 @@ module MB
     #   ending +window+ / +grid+ silent cells (and only if its nodes' idle
     #   checks agree, see NodeTraits), splitting its buffers there
     #   (#split_point), and resets the run where it wakes (#reset).
-    # - +:buffer+ (the master chain's tail, render_tail, wait, the script
-    #   ringdown, a drum voice's end): a buffer with any loud sample moves
-    #   the start to its end, counting on an internal clock (#advance_buffer);
-    #   these decide per buffer, as they always have (making them
-    #   frame-exact would move where renders end by up to a buffer).
+    # - +:buffer+ (a drum voice's end): a buffer with any loud sample moves
+    #   the start to its end, counting on an internal clock (#advance_buffer),
+    #   deciding per buffer.  (Render ends, +wait+, the script ring-down,
+    #   and the master chain's spillover tail used it until session-2, the
+    #   maintainer's "Exact frame", 2026-10-31: they end on the exact frame
+    #   now, so files are the same length at any buffer size.)
     #
     # #advance is the ring-out form (delays, multitaps, networks, feedback
     # loops after their input ends): it finds the exact sample where the run

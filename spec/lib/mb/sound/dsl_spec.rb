@@ -93,6 +93,33 @@ RSpec.describe('mb/sound/dsl') do
     expect(MB::U.clock_now - t).to be < 30 # (a forever tone: the wait would never end)
   end
 
+  it 'warns at the end when looping clips will play until Ctrl-C' do
+    out, status = run_song(<<~RUBY)
+      require 'mb/sound/dsl'
+      # (the exit's wait returns at once here: the loop would never end)
+      MB::Sound.singleton_class.prepend(Module.new { def wait(...) = puts('waited') })
+
+      bpm 140
+      bg :hat, grid(16, 'x.x.x.x.').loop
+      bg :bass, seq(A1, C2).n8.loop.synth(voices: 1) { |v| v.hz.saw * v.amp_env }
+      bg :lead, seq(A3, C4).n8.loop.synth(voices: 1) { |v| v.hz.saw * v.amp_env }.until(2.bars)
+      bg :once, seq(A3, C4).n8.synth(voices: 1) { |v| v.hz.saw * v.amp_env }
+    RUBY
+    expect(status).to be_success, out
+    expect(out).to include('song.rb: :hat, :bass play looping clips, so this plays until Ctrl-C')
+    expect(out).to include('at_bar(9) { stop :hat }')
+    expect(out).to include('waited')
+    expect(out).not_to include(':lead')
+    expect_script_warnings(/play looping clips, so this plays until Ctrl-C/)
+
+    out, status = run_song(<<~RUBY)
+      require 'mb/sound/dsl'
+      bg :lead, seq(A3, C4).n32.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.001, 0.01, 0.5, 0.01) }
+    RUBY
+    expect(status).to be_success, out
+    expect(out).not_to include('Ctrl-C')
+  end
+
   it 'runs a script helper at the top level' do
     out, status = run_song(<<~RUBY, name: 'helper_song.rb', args: %w[-o out.flac])
       require 'mb/sound/dsl'

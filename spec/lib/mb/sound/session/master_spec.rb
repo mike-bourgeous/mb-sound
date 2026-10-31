@@ -213,10 +213,12 @@ RSpec.describe(MB::Sound::Session::Master) do
       session.master(at: :now)
       expect(run(800)[0][0]).to eq(1)
 
-      # The old chain is kept until its (silent) tail has been quiet for a second
-      run(47200)
+      # The old chain is kept until its (silent) tail has been quiet for a
+      # second from the switch, to the frame (session-2)
+      run(46400)
+      session.process_buffer(799)
       expect(chains.length).to eq(2)
-      run(800)
+      session.process_buffer(1)
       expect(chains).to be_empty
       expect(session.master_active?).to eq(false)
     end

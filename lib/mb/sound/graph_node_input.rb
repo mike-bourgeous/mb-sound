@@ -34,6 +34,7 @@ module MB
 
         @output = Array.new(@channels)
         @data = Array.new(@nodes.length) # (reused by #read)
+        @data_length = 0 # (see #data_length)
 
         @handled_spies = {}
         @synths = nil
@@ -184,12 +185,19 @@ module MB
         self
       end
 
+      # The frames the nodes really gave in the last #read (the longest),
+      # before short reads were padded to +count+: fewer than asked when
+      # the graph ended inside the read (Session#render_player ends a
+      # player there, on its last sample; session-2).
+      attr_reader :data_length
+
       # Returns the nodes' outputs duplicated as needed to fill all channels.
       def read(count)
         call_spies(count, :pre)
 
         min_length = count
         max_length = count
+        real = 0
         data = @data
         i = 0
         while i < @nodes.length
@@ -198,11 +206,13 @@ module MB
             len = d.length
             min_length = len if len < min_length
             max_length = len if len > max_length
+            real = len if len > real
           end
           data[i] = d
           i += 1
         end
 
+        @data_length = real
         return nil if data.all? { |d| d.nil? || d.empty? }
 
         if min_length != max_length || data.any?(NilClass)
