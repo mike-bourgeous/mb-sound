@@ -84,15 +84,15 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
       seen = []
       220.hz.unison(3, detune: 10.cents, layout: :even) { |p, i| seen << [p, i]; p.saw }
       expect(seen.map(&:last)).to eq([0, 1, 2])
-      expect(seen.map { |p, _| p.frequency }).to eq([-0.1, 0, 0.1].map { |st| 220 * 2 ** (st / 12) })
-      expect(seen.map(&:first)).to all(be_constant)
+      seen.map { |p, _| p.frequency }.zip([-0.1, 0, 0.1].map { |st| 220 * 2 ** (st / 12) }) { |got, want| expect(got).to be_within(1e-6).of(want) }
+      expect(seen.map(&:first)).to all(be_a(MB::Sound::Unison::CopyPitch))
     end
 
     it 'detunes Notes in the session tuning' do
       seen = []
       MB::Sound::A4.unison(2, detune: 50.cents, layout: :even) { |p| seen << p; p.saw }
-      expect(seen).to all(be_a(MB::Sound::Note))
-      expect(seen.map(&:frequency)).to match([be_within(1e-9).of(440 * 2 ** (-0.5 / 12)), be_within(1e-9).of(440 * 2 ** (0.5 / 12))])
+      expect(seen.map { |p| p.base.number }).to all(eq(69))
+      expect(seen.map(&:frequency)).to match([be_within(1e-5).of(440 * 2 ** (-0.5 / 12)), be_within(1e-5).of(440 * 2 ** (0.5 / 12))])
     end
 
     it 'makes saws without a block, and accepts a Pitch from the block' do
@@ -189,7 +189,8 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
         MB::Sound.seed(2)
         b = mixer(110.hz.unison(5, detune: 20.cents, seed: 9))
         expect(a.offsets).to eq(b.offsets)
-        expect(a.offsets).to eq(described_class.offsets(5, 20.cents, rng: Random.new(9)))
+        expect(a.offsets).to eq(described_class.fractions(5, rng: Random.new(9)).map { |f| f * 0.2 })
+        described_class.offsets(5, 20.cents, rng: Random.new(9)).zip(a.offsets) { |want, got| expect(got).to be_within(1e-12).of(want) }
         expect(a.inputs.map { |i| i.original_source.seed }).to eq(b.inputs.map { |i| i.original_source.seed })
         expect(a.inputs.map { |i| i.original_source.seed }.uniq.length).to eq(5)
       end
@@ -280,12 +281,26 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
       Numo::NMath.log2(a / b) * 1200
     end
 
-    it 'leaves fixed detunes on plain transposed pitches (no Detune node)' do
+    it 'runs fixed detunes through the same Detune node with a constant detune (gen-midi-2: "Same math both ways")' do
       seen = []
-      node = 110.hz.unison(3, detune: 10.cents, detune_mode: :exact) { |p| seen << p; p.saw }
-      expect(detune_node(node)).to be_nil
-      expect(seen.map(&:class)).to all(eq(MB::Sound::Pitch))
-      expect(seen).to all(be_constant)
+      node = 110.hz.unison(3, detune: 10.cents, detune_mode: :exact, seed: 4) { |p| seen << p; p.saw }
+      det = detune_node(node)
+      expect(det.fractions).to eq(described_class.fractions(3, rng: Random.new(4)))
+      expect(seen.map(&:class)).to all(eq(MB::Sound::Unison::CopyPitch))
+      # A detune node holding the same value gives the same samples, so
+      # binding a fixed detune to a knob changes nothing until it turns
+      fixed = render(110.hz.unison(3, detune: 10.cents, seed: 4) { |p| p.saw })
+      held = render(110.hz.unison(3, detune: 0.1.constant, seed: 4) { |p| p.saw })
+      expect(held).to eq(fixed)
+      s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: false), realtime: false, channels: 1)
+      MB::Sound::Session.with_context(session: s) {
+        MB::Sound.knob :spec_detune, 0.1
+        knob = render(110.hz.unison(3, detune: MB::Sound.knob(:spec_detune), seed: 4) { |p| p.saw })
+        expect(knob).to eq(fixed)
+      }
+      s.close
+      # A detune of 0 draws no layout (copies' random settings as before)
+      expect(detune_node(110.hz.unison(3, detune: 0) { |p| p.saw }).fractions).to eq([-1.0, 0.0, 1.0])
     end
 
     it 'gives the block copies at fixed fractions of the detune, scaled by the node' do

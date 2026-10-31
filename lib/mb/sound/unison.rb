@@ -173,15 +173,31 @@ module MB
         seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
         rng = Random.new(seed)
         changing = detune.respond_to?(:sample) && !detune.is_a?(Array)
+        shown = nil
 
-        if changing
-          # A changing detune: fixed layout positions scaled by the node
-          offsets = fractions(count, layout: layout, rng: rng)
-          set = CopySet.new(pitch, detune, fractions: offsets, mode: detune_mode)
-          pitches = Array.new(count) { |i| CopyPitch.new(pitch, set: set, index: i) }
-        else
+        if detune.is_a?(Array)
+          # Fixed offsets as given (swarm chords)
           offsets = self.offsets(count, detune, layout: layout, rng: rng)
           pitches = offsets.map { |o| pitch.transpose(o) }
+        else
+          unless changing
+            # A fixed detune takes the changing detune's path with a
+            # constant node (gen-midi-2; maintainer 2026-10-30: "Same math
+            # both ways"): the same layout positions, the same float32
+            # detune, the same Unison::Detune kernels, so binding the
+            # detune to a knob (LiteralBinding) changes no sample until the
+            # knob turns.  (No layout draws for a detune of 0, as before.)
+            d = Interval.semitones(detune).to_f
+            raise ArgumentError, "Detune must not be negative (got #{detune})" if d < 0
+            raise ArgumentError, "Unknown unison layout #{layout.inspect} (use #{LAYOUTS.map(&:inspect).join(' or ')})" unless LAYOUTS.include?(layout)
+            layout = :even if d == 0
+            detune = GraphNode::Constant.new(d, smoothing: false, sample_rate: pitch.sample_rate)
+          end
+          # Fixed layout positions scaled by the detune node
+          offsets = fractions(count, layout: layout, rng: rng)
+          shown = offsets.map { |a| a * d } unless changing
+          set = CopySet.new(pitch, detune, fractions: offsets, mode: detune_mode)
+          pitches = Array.new(count) { |i| CopyPitch.new(pitch, set: set, index: i) }
         end
 
         # Per-copy random settings (see Unison::Copy), drawn after the
@@ -210,7 +226,7 @@ module MB
           centers: center_copies(offsets),
           stereo: stereo,
           normalize: normalize,
-          offsets: changing ? nil : offsets,
+          offsets: shown || (changing ? nil : offsets),
           sample_rate: pitch.sample_rate
         )
         mixer.recipe_bundle = stereo ? GraphNode::Channels.new(mixer.outputs) : mixer.outputs[0]

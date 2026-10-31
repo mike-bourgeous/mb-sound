@@ -55,6 +55,8 @@ module MB
             'Notes::KeyTrigger' => 'note plumbing', 'Notes::NoteEnvelope::GmTime' => 'note plumbing', 'Notes::Choke' => 'note plumbing',
             'Notes::FadeIn' => 'note plumbing', 'Notes::Gate' => 'note plumbing', 'Notes::PitchMark' => 'note plumbing',
             'Notes::FlamMark' => 'note plumbing', 'Notes::Lift' => 'note plumbing',
+            # (every unison's copy frequencies since gen-midi-2: its detune param is the unison row's)
+            'Unison::Detune' => 'unison detune', 'Unison::Detune::Output' => 'unison detune',
             'MIDI::Stream' => 'MIDI', 'MIDI::ClipSource' => 'MIDI', 'MIDI::Allocator' => 'MIDI', 'MIDI::Allocator::Lane' => 'MIDI',
             'Synth' => 'synth wiring', 'Synth::Output' => 'synth wiring', 'GraphNode::ChannelMixer::Output' => 'multi-output wiring',
             'GraphNode::Reverb::ReverbOutput' => 'multi-output wiring', 'GraphNode::Dynamics::Output' => 'multi-output wiring',
@@ -86,7 +88,7 @@ module MB
           CONTROL = %w[
             Notes::Glide Notes::Frequency Notes::Number Notes::Trigger Notes::KeyTrigger Sequence::TempoNode SQ80::TimeScale
             Notes::Gate Notes::PitchMark Notes::FlamMark Notes::Lift
-            GraphNode::Drift GraphNode::Constant GraphNode::Knob GraphNode::Knob::Reader
+            GraphNode::Drift GraphNode::Constant GraphNode::Knob GraphNode::Knob::Reader Unison::Detune Unison::Detune::Output
           ].freeze
 
           # DSL words for node classes without a recipe of their own.
