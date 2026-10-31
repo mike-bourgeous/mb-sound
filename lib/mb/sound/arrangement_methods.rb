@@ -45,10 +45,40 @@ module MB
       # instrument builds it again at its launch point (one undo step).
       # Resonator effects play as struck instruments (`track :bells,
       # L.fx.bell` is L.inst.bell); other effects raise with where they go.
-      def track(name, *values, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, trigger: false, &patch)
-        Session.current.arrangement.track(name, *values, q: q, fade: fade, lead: lead, nudge: nudge, lead_max: lead_max, to: to, send: send, clock: clock, trigger: trigger, &patch)
+      #
+      # +fx:+ is the track's effect insert (Arrangement::Fx): `track :keys,
+      # L.inst.tine_piano, fx: L.fx.reverb.hall`, a chain `fx: [:juno1,
+      # :hall]`; it stays through new instruments until given again (#fx
+      # swaps it on a playing track).
+      def track(name, *values, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, trigger: false, fx: Arrangement::KEEP_FX, &patch)
+        Session.current.arrangement.track(name, *values, q: q, fade: fade, lead: lead, nudge: nudge, lead_max: lead_max, to: to, send: send, clock: clock, trigger: trigger, fx: fx, &patch)
       end
       alias define_track track
+
+      # Gives track +name+ the effect insert +effects+ (Arrangement::Fx): a
+      # library effect (`L.fx.reverb.hall`, `:hall`, `{ reverb: :plate }`),
+      # a Proc taking the signal, or a list of those, processing what its
+      # instrument or patch plays; `:off` takes it out.  On a playing track
+      # it lands at the track's launch point (or +on:+/+in:+/+at:+), the
+      # instrument's notes carrying on and the old effect's tail ringing
+      # out: journaled, one undo step; returns the journal entry.  A
+      # stopped track plays it from its next launch.  With only a name,
+      # returns the track's insert (an Array; empty for none).
+      #
+      #     fx :keys, L.fx.reverb.hall
+      #     fx :keys, [:juno1, :hall], on: :bar
+      #     fx :keys, :off
+      def fx(name, effects = Arrangement::KEEP_FX, at: nil, on: nil, in: nil)
+        arrangement = Session.current.arrangement
+        if effects.equal?(Arrangement::KEEP_FX)
+          tr = arrangement.tracks[name] or raise ArgumentError, "fx #{name.inspect}: no track #{name.inspect}#{GraphIO.suggest(name, arrangement.tracks.keys)}"
+          return tr.fx || []
+        end
+        point = LaunchPoint.of(binding) or return nil
+        arrangement.fx(name, effects, point)
+      rescue Arrangement::Fx::Error => e
+        MB::Sound.live_error(e)
+      end
 
       # Lists the tracks: name => "q:1 bass_a (playing)".
       def tracks

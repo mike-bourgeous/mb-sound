@@ -22,7 +22,7 @@ module MB
           clip ||= tr.clip
           raise ArgumentError, "Track #{name.inspect} has no clip yet; cue it with one (`cue #{name.inspect}, clip`)" if clip.nil?
           check_clip(tr, clip)
-          graph = GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(clip) }
+          graph = GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.build(clip) }
           @session.note_cue_clip(name, clip)
           @session.cue_player(name, graph, at: at, fade: fade, description: "#{name}: #{name_of(clip)}")
         end

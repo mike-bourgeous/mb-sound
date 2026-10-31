@@ -712,8 +712,16 @@ module MB
         become knobs the same way (`track :bass, L.inst.acid`:
         `:"bass/cutoff"`), and so do a preset's params on a named player
         (`bg :pad, preset(:dnb_pad, midi: riff)`: `:"pad/cutoff"`).
+
+        A track's effect insert follows its instrument: `track :keys,
+        :tine_piano, fx: L.fx.reverb.hall` (or a chain, `fx: [:juno1,
+        :hall]`).  `fx :keys, L.fx.dub` swaps it at the launch point, the
+        notes playing on and the old effect's tail ringing out (one undo
+        step); `fx :keys, :off` takes it out, `fx :keys` says what it is.
+        In `ui :sound` the library picker's Enter on an effect does this
+        for the inspected track.
       TEXT
-      commands :track, :tracks, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
+      commands :track, :tracks, :fx, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement
       see :flow, :knobs, :now, :library
       example 'two scenes' do
@@ -727,6 +735,11 @@ module MB
         track :try_bass, :dnb_sub, q: 1
         bg :try_bass, seq(A1, rest, A1, A2).n8.loop
         turn :"try_bass/cutoff", 80.0, over: 2
+      end
+      example 'an effect insert on a library instrument, swapped at the next bar', sound: false do
+        track :try_keys, :funk_keys, q: 1, fx: L.fx.hall
+        bg :try_keys, seq(A3, C4, E4, G4).n8.loop
+        fx :try_keys, L.fx.dub
       end
       example 'launch and tweak a clip' do
         track(:try_bass, q: 1) { |c| c.tone.saw.at(-10.db).lp4(500, resonance: 0.3) * c.amp_env }

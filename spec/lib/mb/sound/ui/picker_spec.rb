@@ -51,6 +51,8 @@ RSpec.describe(MB::Sound::UI::Picker, :aggregate_failures) do
     expect(described_class.action(entry(:dnb_reese), track: nil)).to have_attributes(kind: :audition, code: 'audition L.inst.dnb_reese')
     expect(described_class.action(entry(:dnb_reese), track: :pad, patch: false)).to have_attributes(kind: :paste, code: 'track :pad, L.inst.dnb_reese; bg :pad, clip')
     expect(described_class.action(entry(:hall), track: :bass)).to have_attributes(kind: :paste, code: 'bus(:hall) { |sig| sig.then(&L.fx.hall) }; feed :bass, :hall, -12.db')
+    # (a patch track's effect insert: Arrangement::Fx, library-2)
+    expect(described_class.action(entry(:hall), track: :bass, patch: true)).to have_attributes(kind: :run, code: 'fx :bass, L.fx.hall')
     expect(described_class.action(entry(:walk_a), track: :bass)).to have_attributes(kind: :run, code: 'bg :bass, L.seq.walk_a.()')
     expect(described_class.action(entry(:club), track: :bass)).to have_attributes(kind: :paste, code: 'master :club')
   end

@@ -420,7 +420,7 @@ module MB
         def start_monitor(tr, input)
           live = Session::MidiInput::LiveClip.new(@session.midi_in(input))
           graph = begin
-                    GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(live) }
+                    GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.build(live) }
                   rescue => e
                     # (not a PatchError: a patch may play clips but not live
                     # MIDI, e.g. ghost_chords; the track still arms, silent)
