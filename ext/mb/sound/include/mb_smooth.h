@@ -2,10 +2,11 @@
  * MB::Sound::Notes::Smoother's filter (FastControl.smooth; see
  * fast_control.c for the algorithm), shared with the plan layer executor
  * (fast_plan) so a planned controller smooths exactly as the node does.
- * The Ruby mirrors are Notes::Smoother.smooth_ruby, .adaptive_ruby, and
- * .curve_ruby.  fast_control is built with -ffp-contract=off and fast_plan
- * isn't, so the curve kernel (the only one with products) starts with
- * MB_SMOOTH_NO_CONTRACT (clang; GCC's -std=c99 doesn't contract).
+ * The Ruby mirrors are Notes::Smoother.smooth_ruby, .adaptive_ruby,
+ * .curve_ruby, and .damped_ruby.  fast_control is built with
+ * -ffp-contract=off and fast_plan isn't, so the kernels with products (the
+ * curve and damped kernels) start with MB_SMOOTH_NO_CONTRACT (clang; GCC's
+ * -std=c99 doesn't contract).
  */
 #ifndef MB_SMOOTH_H
 #define MB_SMOOTH_H
@@ -254,8 +255,53 @@ static inline void mb_slew_run(const void *x, void *out, size_t n, int is_double
 	*s = y;
 }
 
+// Damped smoothing (Notes::Smoother with damped: true, GraphNode#smooth's
+// keep_up: false; Ruby mirror Notes::Smoother.damped_ruby): a critically
+// damped two-pole low-pass, two equal one-poles in series (pole p), so a
+// glide never quite keeps up with fast changes.  Once both stages are
+// within a relative 1e-7 of a held input they snap to it and the output is
+// the input exactly (settled) until the input changes.  State st (6
+// doubles): stage 1, last input, output (stage 2), p, unused, settled (1 or
+// 0).
+static inline void mb_damped_run(const float *xp, float *op, long from, long to, double *st)
+{
+	MB_SMOOTH_NO_CONTRACT
+	double y1 = st[0];
+	double last = st[1];
+	double y2 = st[2];
+	double p = st[3];
+	double settled = st[5];
+
+	for (long i = from; i < to; i++) {
+		double v = xp[i];
+		if (v != last) {
+			last = v;
+			settled = 0.0;
+		}
+		if (settled != 0.0) {
+			op[i] = (float)v;
+			continue;
+		}
+
+		y1 = v + p * (y1 - v);
+		y2 = y1 + p * (y2 - y1);
+		double tol = 1e-7 * (1.0 + fabs(v));
+		if (fabs(y1 - v) <= tol && fabs(y2 - v) <= tol) {
+			y1 = v;
+			y2 = v;
+			settled = 1.0;
+		}
+		op[i] = (float)y2;
+	}
+
+	st[0] = y1;
+	st[1] = last;
+	st[2] = y2;
+	st[5] = settled;
+}
+
 // One segment of Notes::Smoother's kernels by state length +sl+ (7 the
-// B-spline FIR, 8 adaptive, 9 curve; see Notes::Smoother.segment).  The
+// B-spline FIR, 8 adaptive, 9 curve, 6 damped; see Notes::Smoother.segment).  The
 // rings are the fixed kernel's moving averages, or the curve kernel's
 // slots and table (unused by the adaptive kernel).  Returns 0, or -1 for a
 // bad state.
@@ -265,6 +311,7 @@ static inline int mb_smoother_segment(size_t sl, const float *xp, float *op, lon
 		case 7: return mb_smooth_run(xp, op, from, to, st, r1, n1, r2, n2);
 		case 8: mb_adaptive_run(xp, op, from, to, st); return 0;
 		case 9: return mb_curve_smooth_run(xp, op, from, to, st, r1, n1, r2, n2);
+		case 6: mb_damped_run(xp, op, from, to, st); return 0;
 		default: return -1;
 	}
 }
@@ -282,6 +329,9 @@ static inline void mb_smoother_jump(size_t sl, double *st, double v, size_t n1, 
 		st[3] = st[4];
 		st[6] = 0.0;
 		st[7] = 0.0;
+	} else if (sl == 6) {
+		st[0] = st[1] = st[2] = v;
+		st[5] = 1.0;
 	} else {
 		st[1] = v;
 		st[6] = (double)(n1 + n2 - 2);

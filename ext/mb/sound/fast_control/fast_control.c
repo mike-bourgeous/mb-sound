@@ -12,9 +12,9 @@
  * next change restarts the sums at zero with the held value as the
  * reference, so rounding never accumulates across settled stretches.
  *
- * adaptive(x, out, from, to, state) and curve(x, out, from, to, state,
- * slots, table): Notes::Smoother's adaptive and curve kernels (see
- * mb_smooth.h).  slew(data, s, max_rise, max_fall, absolute):
+ * adaptive(x, out, from, to, state), curve(x, out, from, to, state,
+ * slots, table), and damped(x, out, from, to, state): Notes::Smoother's
+ * adaptive, curve, and damped kernels (see mb_smooth.h).  slew(data, s, max_rise, max_fall, absolute):
  * Filter::LinearFollower's slew limiter (delay-time smoothing, clip_rate).
  *
  * The Ruby mirrors (Notes::Smoother.smooth_ruby and the others) give exactly the same
@@ -35,6 +35,7 @@
 #define STATE_LENGTH 7
 #define ADAPTIVE_STATE_LENGTH 8
 #define CURVE_STATE_LENGTH 9
+#define DAMPED_STATE_LENGTH 6
 
 // Checks that +narray+ is a writable contiguous 1D NArray of class +klass+
 // with at least +min+ values; returns its length.
@@ -117,6 +118,32 @@ static VALUE ruby_adaptive(VALUE self, VALUE x, VALUE out, VALUE from_v, VALUE t
 	return out;
 }
 
+// damped(x, out, from, to, state): Notes::Smoother's damped kernel
+// (mb_damped_run in mb_smooth.h; mirror Notes::Smoother.damped_ruby).
+static VALUE ruby_damped(VALUE self, VALUE x, VALUE out, VALUE from_v, VALUE to_v, VALUE state)
+{
+	size_t length = check_array(x, numo_cSFloat, 0, "The input");
+	if (check_array(out, numo_cSFloat, 0, "The output") != length) {
+		rb_raise(rb_eArgError, "The output must have as many values as the input");
+	}
+	if (check_array(state, numo_cDFloat, DAMPED_STATE_LENGTH, "The state") != DAMPED_STATE_LENGTH) {
+		rb_raise(rb_eArgError, "The damped state must have %d values", DAMPED_STATE_LENGTH);
+	}
+	rb_check_frozen(out);
+	rb_check_frozen(state);
+
+	long from = NUM2LONG(from_v);
+	long to = NUM2LONG(to_v);
+	if (from < 0 || to < from || (size_t)to > length) {
+		rb_raise(rb_eRangeError, "Range %ld...%ld is outside the %zu-sample buffer", from, to, length);
+	}
+
+	const float *xp = (const float *)(nary_get_pointer_for_read(x) + nary_get_offset(x));
+	mb_damped_run(xp, mb_sfloat_ptr(out), from, to, dfloat_ptr(state));
+
+	return out;
+}
+
 // curve(x, out, from, to, state, slots, table): Notes::Smoother's curve
 // kernel (mb_curve_smooth_run in mb_smooth.h; mirror
 // Notes::Smoother.curve_ruby).
@@ -183,9 +210,9 @@ static VALUE ruby_reset_run(VALUE self, VALUE x, VALUE out, VALUE state, VALUE r
 	if (check_array(out, numo_cSFloat, 0, "The output") != length) {
 		rb_raise(rb_eArgError, "The output must have as many values as the input");
 	}
-	size_t sl = check_array(state, numo_cDFloat, STATE_LENGTH, "The state");
-	if (sl != STATE_LENGTH && sl != ADAPTIVE_STATE_LENGTH && sl != CURVE_STATE_LENGTH) {
-		rb_raise(rb_eArgError, "The state must have 7, 8, or 9 values (got %zu)", sl);
+	size_t sl = check_array(state, numo_cDFloat, DAMPED_STATE_LENGTH, "The state");
+	if (sl != STATE_LENGTH && sl != ADAPTIVE_STATE_LENGTH && sl != CURVE_STATE_LENGTH && sl != DAMPED_STATE_LENGTH) {
+		rb_raise(rb_eArgError, "The state must have 6, 7, 8, or 9 values (got %zu)", sl);
 	}
 	size_t n1 = check_array(ring1, numo_cDFloat, 1, "Ring 1");
 	size_t n2 = check_array(ring2, numo_cDFloat, 1, "Ring 2");
@@ -219,6 +246,7 @@ void Init_fast_control(void)
 	rb_define_module_function(fast_control, "smooth", ruby_smooth, 7);
 	rb_define_module_function(fast_control, "adaptive", ruby_adaptive, 5);
 	rb_define_module_function(fast_control, "curve", ruby_curve, 7);
+	rb_define_module_function(fast_control, "damped", ruby_damped, 5);
 	rb_define_module_function(fast_control, "slew", ruby_slew, 5);
 	rb_define_module_function(fast_control, "reset_run", ruby_reset_run, 6);
 }

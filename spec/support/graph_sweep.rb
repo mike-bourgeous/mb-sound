@@ -161,6 +161,7 @@ module GraphSweep
       ['SimpleEnvelopeFollower', ->(c) { c.sig.filter(MB::Sound::GraphNode::Dynamics::SimpleEnvelopeFollower.new(sample_rate: 48000)) }],
       ['Smooth', ->(c) { c.sig.filter(f::Smooth.new(40.samples, sample_rate: 48000)) }],
       ['Smooth with a curve', ->(c) { c.sig.filter(f::Smooth.new(300.samples, sample_rate: 48000, curve: :elastic)) }],
+      ['Smooth that lags (keep_up: false)', ->(c) { c.sig.filter(f::Smooth.new(200.samples, sample_rate: 48000, keep_up: false)) }],
       ['Biquad', ->(c) { c.sig.filter(f::Biquad.new(0.2, 0.4, 0.2, -0.3, 0.1, sample_rate: 48000)) }],
       ['Cookbook object', ->(c) { c.sig.filter(f::Cookbook.new(:peak, 48000, 1000, quality: 2, db_gain: 6)) }],
       ['Cookbook object as biquad', ->(c) { c.sig.filter(f::Cookbook.new(:lowpass, 48000, 1000, quality: 2), structure: :biquad) }],
