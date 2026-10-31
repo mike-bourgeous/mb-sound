@@ -123,7 +123,7 @@ RSpec.describe(ParallelSpecs) do
   describe 'time budgets' do
     let(:budgets) { tmp_path('budgets.yml') }
 
-    def budget_report(examples, yaml, env: nil, scale: 1.0, check: nil)
+    def budget_report(examples, yaml, env: nil, scale: 1.0, check: nil, load: nil)
       File.write(budgets, yaml)
       write_json(0, examples)
       old = ENV['MB_SOUND_SPEC_BUDGET']
@@ -133,7 +133,7 @@ RSpec.describe(ParallelSpecs) do
       result = nil
       output = capture_stdout {
         result = ParallelSpecs.report([examples.map { |e| e['file_path'].delete_prefix('./') }.uniq], [status], 1.5,
-                                      out_dir: out_dir, times_path: times_path, budgets_path: budgets, budget_scale: scale)
+                                      out_dir: out_dir, times_path: times_path, budgets_path: budgets, budget_scale: scale, load: load)
       }
       [result, output]
     ensure
@@ -171,6 +171,33 @@ RSpec.describe(ParallelSpecs) do
       ok, output = budget_report([example('spec/a_spec.rb', 3)], yaml, env: 'report')
       expect(ok).to eq(true)
       expect(output).to include('not failing')
+    end
+
+    # (session-2, the maintainer's "Fail when idle": merge:batch's suite)
+    it 'fails on them with MB_SOUND_SPEC_BUDGET=idle only when the machine stayed idle apart from the run' do
+      idle = ParallelSpecs::LoadWatch::Load.new(0.2, 300)
+      busy = ParallelSpecs::LoadWatch::Load.new(3.1, 300)
+      ok, output = budget_report([example('spec/a_spec.rb', 3)], yaml, env: 'idle', load: idle)
+      expect(ok).to eq(false)
+      expect(output).to include('MB_SOUND_SPEC_BUDGET=idle and other work used 0.20 cores on average over 300 s (idle below 0.5): failing')
+      ok, output = budget_report([example('spec/a_spec.rb', 3)], yaml, env: 'idle', load: busy)
+      expect(ok).to eq(true)
+      expect(output).to include('other work used 3.10 cores').and include('not failing')
+      ok, output = budget_report([example('spec/a_spec.rb', 3)], yaml, env: 'idle', load: ParallelSpecs::LoadWatch::Load.new(nil, 300))
+      expect(ok).to eq(true)
+      expect(output).to include('the load is unknown')
+    end
+
+    it 'measures the other work on the machine during a run (LoadWatch)' do
+      a = ParallelSpecs::LoadWatch.snapshot
+      x = 0
+      t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      x += 1 while Process.clock_gettime(Process::CLOCK_MONOTONIC) - t < 0.2 # (our own work doesn't count)
+      load = ParallelSpecs::LoadWatch.between(a, ParallelSpecs::LoadWatch.snapshot)
+      expect(load.wall).to be >= 0.2
+      skip 'no /proc/stat' if load.others.nil?
+      expect(load.others).to be >= 0
+      expect(load.to_s).to match(/other work used \d+\.\d\d cores/)
     end
 
     it 'only lists them under MB_SOUND_PLAN_CHECK (check mode reruns every block)' do

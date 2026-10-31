@@ -27,8 +27,9 @@
 # compile first).  merge_gate_spec.rb keeps the selection replays.
 #
 # The batch end (`rake merge:batch`, once per batch, in the background):
-# the full suite with the slow tier (spec:full), smoke, golden:check, and a
-# fuzz soak (session and relation fuzz in parallel processes on fresh
+# the full suite with the slow tier (spec:full; time budgets failing only
+# when the machine stayed idle apart from it, MB_SOUND_SPEC_BUDGET=idle),
+# smoke, golden:check, and a fuzz soak (session and relation fuzz in parallel processes on fresh
 # seeds).  A failure there is found at the end of the batch: run the
 # failing spec at each merge of the batch to find the merge it came from.
 require 'json'
@@ -214,7 +215,9 @@ module MergeGate
     base ||= Integer(ENV['SOAK_BASE'] || (Time.now.to_i / 86_400 % 1000) * 1000 + 10_000)
     rake = %w[bundle exec rake -f Rakefile]
     [
-      ['suite', { 'SLOW' => '1', 'MB_SOUND_SPEC_BUDGET' => 'report' }, [*rake, 'spec:parallel']],
+      # (time budgets fail only if the machine stayed idle apart from the
+      # suite: the maintainer, 2026-10-30, "Fail when idle")
+      ['suite', { 'SLOW' => '1', 'MB_SOUND_SPEC_BUDGET' => 'idle' }, [*rake, 'spec:parallel']],
       ['smoke', {}, %w[bundle exec rspec --tag smoke]],
       ['golden', {}, [*rake, 'golden:check']],
       ['soak', {}, [:soak, soak_session, soak_relation, base]],

@@ -151,6 +151,7 @@ module ParallelSpecs
 
   # Runs the groups, returns true if every process passed.
   def run(count: 4, patterns: nil, extra_args: [])
+    load_before = LoadWatch.snapshot
     files = spec_files(patterns)
     groups = partition(files, count)
     FileUtils.rm_rf(OUT_DIR)
@@ -171,7 +172,7 @@ module ParallelSpecs
     statuses = pids.map { |pid| Process.wait2(pid).last }
     wall = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
 
-    report(groups.map(&:first), statuses, wall, budget_scale: scale)
+    report(groups.map(&:first), statuses, wall, budget_scale: scale, load: LoadWatch.between(load_before, LoadWatch.snapshot))
   end
 
   # Prints the summary of a run of +groups+ (lists of files), whose
@@ -180,7 +181,10 @@ module ParallelSpecs
   # (e.g. a segfault in a C library): it's listed with its signal, files, and
   # log, and the other processes' times are still written.  Returns true if
   # every process passed.
-  def report(groups, statuses, wall, out_dir: OUT_DIR, times_path: TIMES_PATH, budgets_path: BUDGETS_PATH, budget_scale: 1.0)
+  #
+  # +load+ is the run's LoadWatch::Load (for MB_SOUND_SPEC_BUDGET=idle), or
+  # nil.
+  def report(groups, statuses, wall, out_dir: OUT_DIR, times_path: TIMES_PATH, budgets_path: BUDGETS_PATH, budget_scale: 1.0, load: nil)
     examples = []
     crashed = []
     outside = {} # (process index => errors outside examples, e.g. a spec file that doesn't load)
@@ -216,7 +220,7 @@ module ParallelSpecs
 
     report_rss(groups.length, out_dir)
     report_transport(groups.length, out_dir)
-    within_budget = check_budgets(file_times, examples, budgets_path, scale: budget_scale)
+    within_budget = check_budgets(file_times, examples, budgets_path, scale: budget_scale, load: load)
 
     failed.each { |e| puts "rspec #{e['file_path']}:#{e['line_number']} # #{e['full_description']}" }
     # (dropouts-2: a spec file with a syntax error printed "0 failures"; its
@@ -235,11 +239,14 @@ module ParallelSpecs
   # unless the file has its own entry, which needs a reason.  Lists what
   # went over and returns false then, so a file that grew slow fails the
   # run until it is made faster or its entry says why it needs the time
-  # (MB_SOUND_SPEC_BUDGET=report lists without failing: a loaded machine).
+  # (MB_SOUND_SPEC_BUDGET=report lists without failing: a loaded machine;
+  # =idle fails only when the machine stayed idle apart from this run,
+  # +load+ (a LoadWatch::Load) saying how busy it was: merge:batch's
+  # suite, the maintainer's "Fail when idle", 2026-10-30).
   # Budgets are in the reference machine's seconds, times +scale+ (this
   # machine's #budget_scale).  Returns true when everything is within its
   # budget.
-  def check_budgets(file_times, examples, path = BUDGETS_PATH, scale: 1.0)
+  def check_budgets(file_times, examples, path = BUDGETS_PATH, scale: 1.0, load: nil)
     return true unless File.exist?(path)
 
     budgets = YAML.safe_load_file(path)
@@ -269,13 +276,82 @@ module ParallelSpecs
     # (plan check mode reruns every planned block unfused: budgets are
     # for normal runs, so check-mode suites only list what went over)
     check_mode = !ENV['MB_SOUND_PLAN_CHECK'].to_s.empty? && ENV['MB_SOUND_PLAN_CHECK'] != '0'
-    report_only = ENV['MB_SOUND_SPEC_BUDGET'] == 'report' || check_mode
+    mode = ENV['MB_SOUND_SPEC_BUDGET']
+    busy = mode == 'idle' && !load&.idle?
+    report_only = mode == 'report' || busy || check_mode
     scaled = scale > 1 ? format('; scaled x%.2f for this machine', scale) : ''
-    why = check_mode ? '; MB_SOUND_PLAN_CHECK: not failing' : '; MB_SOUND_SPEC_BUDGET=report: not failing'
-    puts "Over their time budgets (#{display_path(path)}#{scaled}#{report_only ? why : ''}):"
+    why =
+      if check_mode then '; MB_SOUND_PLAN_CHECK: not failing'
+      elsif busy then "; MB_SOUND_SPEC_BUDGET=idle, but #{load ? load.to_s : 'the load is unknown'}: not failing"
+      elsif mode == 'idle' then "; MB_SOUND_SPEC_BUDGET=idle and #{load}: failing"
+      else '; MB_SOUND_SPEC_BUDGET=report: not failing'
+      end
+    why = '' if !report_only && mode != 'idle'
+    puts "Over their time budgets (#{display_path(path)}#{scaled}#{why}):"
     over.each { |l| puts l }
     puts '  Make them faster (see CLAUDE.md, Testing), or give the file an entry with the time it needs and why.' unless report_only
     report_only
+  end
+
+  # How busy the machine was with other work while a run went on
+  # (MB_SOUND_SPEC_BUDGET=idle): the CPU time every process on the machine
+  # used (/proc/stat), less what this process and its children (the spec
+  # processes, and theirs, once reaped) used (Process.times), over the
+  # run's wall time.  The machine stayed idle when the others averaged
+  # under IDLE_CPUS cores.  (In the Mac container /proc/stat is the Docker
+  # VM's: other containers' and sessions' work counts as busy.)
+  module LoadWatch
+    # Other work that still counts as an idle machine, in cores on
+    # average over the run (a session typing, a stray Ruby).
+    IDLE_CPUS = 0.5
+
+    Snapshot = Struct.new(:time, :busy, :own)
+
+    # A run's measured load: +others+ is the other processes' average use
+    # in cores (nil where /proc/stat can't be read).
+    Load = Struct.new(:others, :wall) do
+      def idle?
+        !others.nil? && others < IDLE_CPUS
+      end
+
+      def to_s
+        return 'the load is unknown (no /proc/stat)' if others.nil?
+
+        format('other work used %.2f cores on average over %.0f s (idle below %.1f)', others, wall, IDLE_CPUS)
+      end
+    end
+
+    module_function
+
+    # Busy CPU seconds of the whole machine (nil without /proc/stat).
+    def machine_busy
+      line = File.foreach('/proc/stat').first or return nil
+      f = line.split.drop(1).map(&:to_i) # user nice system idle iowait irq softirq steal ...
+      return nil if f.length < 8
+
+      (f[0] + f[1] + f[2] + f[5] + f[6] + f[7]) / Float(Etc.sysconf(Etc::SC_CLK_TCK))
+    rescue SystemCallError
+      nil
+    end
+
+    # CPU seconds of this process and its reaped children.
+    def own_cpu
+      t = Process.times
+      t.utime + t.stime + t.cutime + t.cstime
+    end
+
+    def snapshot
+      Snapshot.new(Process.clock_gettime(Process::CLOCK_MONOTONIC), machine_busy, own_cpu)
+    end
+
+    # The Load between snapshots +a+ and +b+.
+    def between(a, b)
+      wall = b.time - a.time
+      return Load.new(nil, wall) if a.busy.nil? || b.busy.nil? || wall <= 0
+
+      others = ((b.busy - a.busy) - (b.own - a.own)) / wall
+      Load.new([others, 0.0].max, wall)
+    end
   end
 
   # Lists the examples that grew their process's resident memory by more
