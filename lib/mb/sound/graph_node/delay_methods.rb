@@ -137,6 +137,47 @@ module MB
           [StereoDelayMethods.level_product(dry, dg), StereoDelayMethods.level_product(wet, wg)]
         end
 
+        # Delay times below this many seconds make #delay's insert loops
+        # audio-rate combs (tuned combs, Karplus-Strong-like strings, a
+        # flanger): they compensate their latency at the pitch 1 / time.
+        # Longer ones are echoes (see DelayMethods.compensation).
+        PITCH_COMPENSATION_BELOW = 0.02
+
+        # The latency compensation #delay's insert loops use for +time+ (the
+        # maintainer, 2026-10-31: "Pick by delay time"): :pitch below
+        # PITCH_COMPENSATION_BELOW (20 ms, 50 Hz: the loop is a pitched
+        # comb, and :pitch keeps its tuning exact through low cuts under the
+        # pitch, where :echo detuned a 200 Hz comb with a 20 Hz DC blocker
+        # by 38 cents), else :echo (low cuts count as wires, so echoes land
+        # on k * time; :pitch put them up to half an echo off).  A Duration
+        # is read at the build's tempo, a knob or constant node at its
+        # value; other nodes (LFOs) count as echoes (:echo and :pitch give
+        # the same samples unless the insert has a low cut or bandpass).
+        # Fixed when the loop builds.
+        def self.compensation(time, sample_rate)
+          seconds = delay_seconds(time, sample_rate)
+          seconds && seconds < PITCH_COMPENSATION_BELOW ? :pitch : :echo
+        end
+
+        # +time+ (a #delay time) in seconds at build time, or nil when it
+        # moves (a node other than a knob or constant).
+        def self.delay_seconds(time, sample_rate)
+          case time
+          when nil then nil
+          when Numeric then time.to_f
+          when Length::Samples, Length::Seconds
+            return Length.seconds(time, sample_rate: sample_rate).to_f if time.fixed?
+            v = Traversable.describe_param(time.node).value
+            v.is_a?(Numeric) ? (time.is_a?(Length::Samples) ? v.to_f / sample_rate : v.to_f) : nil
+          when Length then Length.seconds(time, sample_rate: sample_rate).to_f
+          else
+            v = time.respond_to?(:sample) ? Traversable.describe_param(time).value : nil
+            v.is_a?(Numeric) ? v.to_f : nil
+          end
+        rescue ArgumentError
+          nil
+        end
+
         # True if +v+ is a plain real level (a number, Decibels included).
         def self.level?(v)
           v.is_a?(Numeric) && v.real?
@@ -169,11 +210,10 @@ module MB
           delay_opts = { smooth: smoothing, max_delay: max_delay, interpolation: interpolation }
           pipeline = nil
 
-          # (echo loops: no sustain shelf, whose pitch would be 1 / time,
-          # and the echo compensation, where low cuts count as wires; see
-          # Plan::Loop::Program::ECHO_WIRES)
+          # (echo loops: no sustain shelf, whose pitch would be 1 / time;
+          # compensation by the delay time, see DelayMethods.compensation)
           bare = false
-          loop = self.feedback(sustain: false, compensate: :echo) do |fb, input|
+          loop = self.feedback(sustain: false, compensate: DelayMethods.compensation(time, sample_rate)) do |fb, input|
             delayed = (input + fb * feedback).delay(time, **delay_opts)
             pipeline = InsertPipeline.new(delayed)
             out = pipeline.call(insert)

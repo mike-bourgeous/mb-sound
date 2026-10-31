@@ -317,6 +317,10 @@ module GraphSweep
 
       # Delays and reverbs
       ['delay modulated', ->(c) { c.sig.delay(c.mod(0.001, 0.004, 3), feedback: c.mod(0, 0.6), wet: 0.5, dry: 0.5) }],
+      ['delay inserts compensated by time (:pitch comb, :echo echo; delays-2)', ->(c) {
+        c.sig.delay(96.samples, feedback: 0.7) { |fb| fb.filter(:highpass, cutoff: 30, quality: 0.7) } +
+          c.sig.delay(0.021, feedback: c.mod(0.2, 0.6)) { |fb| fb.filter(:highpass, cutoff: 200, quality: 0.5).filter(:lowpass, cutoff: 3000) }
+      }],
       ['delay cubic and linear', ->(c) { c.sig.delay(c.mod(0.001, 0.003), interpolation: :cubic) + c.sig.delay(0.0021, interpolation: :linear) }],
       ['multitap', ->(c) { c.sig.multitap(0.001, c.mod(0.002, 0.003), 37.samples).mixdown }],
       ['multitap feedback (DelayNetwork)', ->(c) { c.sig.multitap(0.001, c.mod(0.002, 0.003), 37.samples, feedback: [0.3, c.mod(0, 0.4), 0], smooth: true).mixdown }],
