@@ -35,7 +35,10 @@ module MB
       # first note of a legato pair is marked slid (`~`, Seq::Step#slide),
       # its length as played, so mono voices glide and legato envelopes
       # hold; chords and other overlaps stay unmarked notes.  +slides:
-      # true+ marks every overlap, +false+ none.
+      # true+ marks every overlap, +false+ none, and a number from 0 to 1
+      # is the :auto rule with that share of the first note in place of
+      # the half (LEGATO_SHARE; gen-midi-2, for the maintainer's A/B of
+      # tighter and looser rules: 0.25 tighter, 1 looser).
       #
       # Controllers (+cc:+): CCs (except bank select 0/32, the RPN/NRPN
       # messages 6/38/96-101, and channel mode messages 120-127), pitch
@@ -106,6 +109,11 @@ module MB
         # sustained arpeggios ring longer than half their note, the other
         # limit).
         LEGATO_MAX_OVERLAP = 1/8r
+
+        # The share of the first note of a legato pair its overlap with
+        # the next stays under (slides: :auto; a number for +slides:+
+        # replaces it).
+        LEGATO_SHARE = 1/2r
 
         # How long (whole notes) a drum hit of #kit lasts at most: drum
         # tracks' note lengths mean nothing to drum machines (they often
@@ -319,7 +327,9 @@ module MB
           raise ArgumentError, "channel: is a 0-based MIDI channel 0..15 (got #{channel.inspect})" unless channel.nil? || (channel.is_a?(Integer) && channel.between?(0, 15))
           raise ArgumentError, "bars: is a positive whole number of bars (got #{bars.inspect})" unless bars.nil? || (bars.is_a?(Integer) && bars > 0)
           raise ArgumentError, "from: is a bar offset from 0 (got #{from.inspect})" unless from.is_a?(Integer) && from >= 0
-          raise ArgumentError, "slides: is :auto, true, or false (got #{slides.inspect})" unless [:auto, true, false].include?(slides)
+          unless [:auto, true, false].include?(slides) || (slides.is_a?(Numeric) && slides.real? && slides > 0 && slides <= 1)
+            raise ArgumentError, "slides: is :auto, true, false, or the share of a note an overlap may reach (above 0, up to 1; :auto is 0.5) (got #{slides.inspect})"
+          end
           unless Sequence::ControlLane.selection?(cc)
             raise ArgumentError, "cc: is :steps (or true), :fit, false, or an Array of CC numbers and :bend/:pressure/:poly_pressure (got #{cc.inspect})"
           end
@@ -437,15 +447,16 @@ module MB
               nxt && nxt[0] < off && nxt[0] > on
             }
           end
-          legato_pairs(notes)
+          legato_pairs(notes, share: mode == :auto ? LEGATO_SHARE : mode)
         end
 
         # Per note of +notes+ (sorted by start), true if it and the next
         # note are a legato pair (see the class description): the next
         # starts LEGATO_GAP or more later, before this one ends, overlapping
-        # it by less than LEGATO_MAX_OVERLAP and less than half of this
-        # note, with no other note sounding during the overlap.
-        def legato_pairs(notes)
+        # it by less than LEGATO_MAX_OVERLAP and less than +share+ of this
+        # note (half by default), with no other note sounding during the
+        # overlap.
+        def legato_pairs(notes, share: LEGATO_SHARE)
           gap = (LEGATO_GAP / whole_notes_per_tick).ceil
           most = LEGATO_MAX_OVERLAP / whole_notes_per_tick
           # The number of notes sounding, as [[tick, count from there], ...]
@@ -461,7 +472,7 @@ module MB
             nxt = notes[i + 1] or next false
             on2 = nxt[0]
             overlap = off - on2
-            next false unless overlap > 0 && on2 - on >= gap && overlap < most && overlap * 2 < off - on
+            next false unless overlap > 0 && on2 - on >= gap && overlap < most && overlap < share * (off - on)
             # At most these two notes during the overlap [on2, off)
             k = (ticks.bsearch_index { |t| t > on2 } || ticks.length) - 1
             ok = true

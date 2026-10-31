@@ -93,6 +93,18 @@ RSpec.describe(MB::Sound::MIDI::Import) do
       expect(MB::Sound.midi_clip(mixed).events.map { |e| !!e.slid }).to eq([true, false, false, false, false])
     end
 
+    it 'takes the share of a note an overlap may reach as slides: (the :auto rule\'s half; gen-midi-2)' do
+      steps = (0...8).map { |i| i * q / 4 }
+      # Overlaps of a sixth of the note, and an arpeggio ringing half of each note into the next
+      legato = MidiWriter.write(tmp_path('legato.mid'), tracks: [{ notes: steps.each_with_index.map { |t, i| [t, t + q / 4 + q / 20, 46 + i % 3, 100] } }])
+      arp = MidiWriter.write(tmp_path('arp.mid'), tracks: [{ notes: steps.each_with_index.map { |t, i| [t, t + q / 2, [57, 60, 64, 69][i % 4], 100] } }])
+      expect([0.1, 0.25, 0.5, :auto].map { |sl| MB::Sound.midi_clip(legato, slides: sl).events.count(&:slid) }).to eq([0, 7, 7, 7])
+      expect([0.5, 1].map { |sl| MB::Sound.midi_clip(arp, slides: sl).events.count(&:slid) }).to eq([0, 7])
+      [0, 1.5, -1, :all].each do |bad|
+        expect { MB::Sound.midi_clip(legato, slides: bad) }.to raise_error(ArgumentError, /slides: is :auto, true, false, or the share/)
+      end
+    end
+
     it 'reads files without a tempo event in score time and rounds the loop up to whole bars' do
       path = MidiWriter.no_tempo_phrase(tmp_path('phrase.mid'))
       c = MB::Sound.midi_clip(path)
