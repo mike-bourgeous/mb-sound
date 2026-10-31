@@ -117,14 +117,24 @@ module CarryCheck
 
   # Records the Carry::Plans applied while the block runs (on any
   # thread); returns them.
+  #
+  # The block's carrying rebuilds that landed without carrying (a muted
+  # player asleep since its mute: its replacement starts fresh by design,
+  # sound_design_ui.md "State across a rebuild") are in .fresh_frames
+  # afterwards.
   def recording
     Recorder.install
     Recorder.start
     yield
     Recorder.plans
   ensure
+    @fresh_frames = Recorder.fresh
     Recorder.stop
   end
+
+  # The session frames where the last .recording's carrying rebuilds landed
+  # as fresh graphs (Session#add_now applied no plan; empty if none).
+  def fresh_frames = @fresh_frames || []
 
   # For SessionFuzz's :carry relation (a line of a generated song, run in a
   # scheduled block): the carrying rebuild a bind makes, of track +name+ of
@@ -171,26 +181,53 @@ module CarryCheck
   end
 
   # Prepended once to Session::Carry's singleton: notes each applied plan
-  # while recording.
+  # while recording; and to Session: notes the landing frame of each
+  # carrying rebuild whose graph landed with no plan applied (fix-batch-1031:
+  # SessionFuzz seed 767029's rebuild of a muted, sleeping track started
+  # fresh, as designed, and the :carry relation, seeing only the other
+  # tracks' full plans, compared it with the uninterrupted song).
   module Recorder
     @mutex = Mutex.new
     @plans = nil
+    @fresh = nil
 
     class << self
       def install
         MB::Sound::Session::Carry.singleton_class.prepend(Hook) unless MB::Sound::Session::Carry.singleton_class.include?(Hook)
+        MB::Sound::Session.prepend(SessionHook) unless MB::Sound::Session.include?(SessionHook)
       end
 
-      def start = @mutex.synchronize { @plans = [] }
-      def stop = @mutex.synchronize { @plans = nil }
+      def start = @mutex.synchronize { @plans = []; @fresh = [] }
+      def stop = @mutex.synchronize { @plans = nil; @fresh = nil }
       def plans = @mutex.synchronize { @plans.dup }
+      def fresh = @mutex.synchronize { @fresh.dup }
+      def recording? = @mutex.synchronize { !@plans.nil? }
       def note(plan) = @mutex.synchronize { @plans&.push(plan) }
+      def applied = @mutex.synchronize { @plans&.length || 0 }
+      def note_fresh(frame) = @mutex.synchronize { @fresh&.push(frame) }
     end
 
     module Hook
       def apply(plan, **options)
         Recorder.note(plan)
         super
+      end
+    end
+
+    module SessionHook
+      private
+
+      def add_now(**kw)
+        return super unless kw[:carry] && Recorder.recording?
+
+        before = Recorder.applied
+        frame = @landing_frame || @frame
+        r = super
+        if Recorder.applied == before
+          landed = @mutex.synchronize { @players.each_value.any? { |p| p.input.equal?(kw[:input]) } }
+          Recorder.note_fresh(frame) if landed
+        end
+        r
       end
     end
   end
