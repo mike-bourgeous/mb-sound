@@ -320,6 +320,10 @@ module MB
           end
           spec = knob.spec
           parts = spec.call_args(value: value, cc: knob.cc, literal: writer.method(:literal))
+          # (level and key level knobs take the fader taper from their
+          # names, Session::Knobs#knob, so their lines stay as they were)
+          nm = Session::Name[knob.name]
+          parts.delete('curve: :fader') if nm.level? || nm.key?
           desc = @params.dig(knob.name, :description) || spec.param.description
           parts << "description: #{writer.literal(desc)}" if desc
           lines << "knob #{parts.join(', ')}"

@@ -214,10 +214,11 @@ RSpec.describe(MB::Sound::Session::Faders) do
       MB::Sound.level(:pad, -6.db)
     }
     MB::Sound::Session.with_context(session: session) { text = MB::Sound::GraphIO::SetWriter.new(session.arrangement).to_s }
-    expect(text).to include('knob :"pad/level", (0.0..4.0).at(0.5011872336272722)')
+    expect(text.lines.map(&:strip)).to include('knob :"pad/level", (0.0..4.0).at(0.5011872336272722)') # (the taper is implied by the name)
     s2 = new_session.tap { |x| @sessions << x }
     data = run(9600, s: s2) { |s| MB::Sound::GraphIO.load(text, session: s); MB::Sound.go(:a, on: :now) }
     expect(data[4800]).to be_within(1e-6).of(-6.db)
+    expect(s2.fader(:pad).spec.curve).to eq(:fader)
   end
 
   it 'replays from takes bit for bit' do
