@@ -39,7 +39,9 @@ module MB
         include GraphNode
         include SampleRateHelper
         # (round robins are drawn at note-ons)
-        node_traits memory: :short, idle_check: :idle?, random: :events
+        # (its playing note, round robins, and random stream move to a
+        # rebuilt voice of the same instrument: #carry_adopt)
+        node_traits memory: :short, idle_check: :idle?, random: :events, carry: :adopt
 
         # The instrument played.
         attr_reader :instrument
@@ -101,6 +103,23 @@ module MB
           @sample_rate = rate.to_f
           build_tables
         end
+
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # voice +old+ plays the same regions (the same instrument channel at
+        # this rate, so its state's region and position fit).
+        def carry_fits?(old)
+          return false unless old.class == self.class && old.instance_variable_get(:@channel) == @channel
+          r = old.instance_variable_get(:@regions)
+          r.shape == @regions.shape && r.to_a == @regions.to_a
+        end
+
+        # Takes over voice +old+'s playing note (the kernel state), round
+        # robin counters, and random stream.
+        def carry_adopt(old)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@state @counters @rng @started].freeze
 
         # True when no note is sounding (Notes#register uses this, so a
         # synth keeps one-shot voices until their samples end).

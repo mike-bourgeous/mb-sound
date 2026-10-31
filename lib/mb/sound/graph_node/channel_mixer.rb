@@ -92,7 +92,15 @@ module MB
         class Analytic
           include GraphNode
           include GraphNode::SampleRateHelper
-          node_traits memory: :short
+          # (its Hilbert filter: #carry_adopt)
+          node_traits memory: :short, carry: :adopt
+
+          # Takes over +old+'s Hilbert filter (Session::Carry's adoption).
+          def carry_adopt(old)
+            NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+          end
+
+          ADOPT_IVARS = %i[@hilbert @complex_input].freeze
 
           def initialize(source, sample_rate:)
             @source = source.get_sampler

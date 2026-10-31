@@ -34,8 +34,10 @@ module MB
       class DelayNetwork
         include SampleRateHelper
         include MultiOutput
-        # (it may sleep once its lines hold only silence: #sleep_ready?)
-        node_traits memory: :long, idle_check: :sleep_ready?
+        # (it may sleep once its lines hold only silence: #sleep_ready?; its
+        # lines and its taps' read states move to a rebuilt network:
+        # #carry_adopt)
+        node_traits memory: :long, idle_check: :sleep_ready?, carry: :adopt
 
         # One output tap of a DelayNetwork.
         class Tap
@@ -109,6 +111,18 @@ module MB
           def network_read_state
             @read_state
           end
+
+          # The smoothing setting (see #initialize).
+          attr_reader :smoothing
+
+          # Swaps read states and smoothers with tap +old+ (for its
+          # DelayNetwork's #carry_adopt).
+          def carry_adopt(old)
+            NodeTraits.swap_contents(@read_state, old.network_read_state)
+            NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+          end
+
+          ADOPT_IVARS = %i[@smoother @smoother_started].freeze
 
           # Changes the sample rate of the whole network and its upstream
           # nodes.
@@ -241,6 +255,27 @@ module MB
         # (below -90 dB) within the longest delay read so far, plus the
         # interpolation reach, so nothing can recirculate (see
         # Filter::Delay#sleep_ready?).
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # network +old+ has as many lines, and taps reading the same lines,
+        # smoothed alike, the same way (tap times and gains may differ).
+        def carry_fits?(old)
+          ol = old.instance_variable_get(:@lines)
+          old.class == self.class && old.interpolation == @interpolation && ol.length == @lines.length && old.taps.length == @taps.length &&
+            old.taps.zip(@taps).all? { |a, b| a.line == b.line && a.smoothing == b.smoothing }
+        end
+
+        # Takes over network +old+'s lines, its taps' read states and
+        # smoothers, and its ring-out; the old one gets this one's fresh
+        # state.  On the swap frame; O(1).
+        def carry_adopt(old)
+          @lines.zip(old.instance_variable_get(:@lines)).each { |a, b| a.swap_state(b) }
+          NodeTraits.swap_contents(@ended, old.instance_variable_get(:@ended))
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+          @taps.zip(old.taps).each { |a, b| a.carry_adopt(b) }
+        end
+
+        ADOPT_IVARS = %i[@ring @ring_done @tail_start @longest].freeze
+
         def sleep_ready?
           window = (@longest.finite? ? @longest.ceil : 0) + MB::Sound::DelayLine::MARGIN
           @lines.all? { |l| l.holds_quiet?(window) }

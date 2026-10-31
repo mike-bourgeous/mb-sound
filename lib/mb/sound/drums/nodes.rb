@@ -12,7 +12,8 @@ module MB
       class Repeats
         include GraphNode
         include GraphNode::SampleRateHelper
-        node_traits memory: :short, idle_check: :idle?
+        # (its history of hits moves to a rebuilt kit's: #carry_adopt)
+        node_traits memory: :short, idle_check: :idle?, carry: :adopt
 
         # The repeats as [seconds, gain] pairs.
         attr_reader :taps
@@ -69,6 +70,19 @@ module MB
           @history_length == 0 || @history.ne(0).count_true == 0
         end
 
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # repeats +old+ have the same delays (their history fits).
+        def carry_fits?(old)
+          old.class == self.class && old.instance_variable_get(:@delays) == @delays
+        end
+
+        # Takes over repeats +old+'s history of hits.
+        def carry_adopt(old)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@history].freeze
+
         def sources
           { input: @input }
         end
@@ -96,7 +110,8 @@ module MB
       class ChokeGate
         include GraphNode
         include GraphNode::SampleRateHelper
-        node_traits memory: :short
+        # (its level and ramp: #carry_adopt)
+        node_traits memory: :short, carry: :adopt
 
         def initialize(trigger, choke, sample_rate: 48000)
           @trigger = trigger.get_sampler
@@ -146,6 +161,13 @@ module MB
           setup_ramp
           self
         end
+
+        # Takes over gate +old+'s level and ramp (Session::Carry's adoption).
+        def carry_adopt(old)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@level @ramp].freeze
 
         def sources
           { trigger: @trigger, choke: @choke }
@@ -203,7 +225,8 @@ module MB
       class Flams
         include GraphNode
         include GraphNode::SampleRateHelper
-        node_traits memory: :short, idle_check: :idle?
+        # (the strokes still to play: #carry_adopt)
+        node_traits memory: :short, idle_check: :idle?, carry: :adopt
 
         # The grace stroke's share of the hit's velocity.
         GRACE = 0.6
@@ -268,6 +291,14 @@ module MB
         def idle?
           @pending.empty?
         end
+
+        # Takes over +old+'s strokes still to play (Session::Carry's
+        # adoption).
+        def carry_adopt(old)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@pending].freeze
 
         def sources
           { trigger: @trigger, mark: @mark }

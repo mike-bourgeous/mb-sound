@@ -41,7 +41,7 @@ module MB
         include GraphNode
         include SampleRateHelper
         include Sequence::TimelineNode
-        node_traits memory: :short, timeline: true
+        node_traits memory: :short, timeline: true, fresh: 'it finds its place from the timeline in a rebuilt graph; its stretcher\'s slices start fresh (not moved yet)'
 
         MODES = [:stretch, :resample].freeze
         ALIGNS = [:timeline, :launch].freeze

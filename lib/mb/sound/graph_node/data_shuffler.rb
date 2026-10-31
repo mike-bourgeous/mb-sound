@@ -6,7 +6,7 @@ module MB
         include GraphNode
         # (draws a new order as it plays, caught up by sleepers:
         # #catch_up_shuffle)
-        node_traits memory: :short, random: :catch_up_shuffle
+        node_traits memory: :short, random: :catch_up_shuffle, fresh: 'its shuffled blocks and random stream (not moved yet)'
 
         # TODO: should the data be resampled if we get a new sample rate?
         attr_accessor :sample_rate

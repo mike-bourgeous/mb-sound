@@ -40,7 +40,13 @@ module MB
         # QuietRun following its output from there (session frames); +sources+
         # the clip sources silenced; +capped+ true once the cap fade began;
         # +active+ false once another stop (a fade or cut) took over.
-        Ring = Struct.new(:stop_frame, :quiet, :sources, :capped, :active, keyword_init: true)
+        # +choke+ chokes the notes in progress at the stop instead of
+        # releasing them, and +spill+ marks a spill-over (carry-1): the
+        # graph a rebuild or a new instrument replaced, ringing out under
+        # the new one; it is never revived by a launch of its name (only by
+        # an undo bringing that graph back) and not counted as the name's
+        # ringing player.
+        Ring = Struct.new(:stop_frame, :quiet, :sources, :capped, :active, :choke, :spill, keyword_init: true)
 
         # True if the player named +name+ is ringing out (see the module
         # comment).
@@ -59,14 +65,14 @@ module MB
         # The player named +name+ that is ringing out (not replaced by a
         # newer graph that is playing), or nil.  Called with @mutex held.
         def ringing_player(name)
-          @players.each_value.find { |p| p.name == name && p.ring&.active }
+          @players.each_value.find { |p| p.name == name && p.ring&.active && !p.ring.spill }
         end
 
         # Marks player +p+ to ring out from timeline position +time+
         # (applied by the change queue through #remove_now).  Returns false
         # (and does nothing) for players without clip sources.  Called with
         # @mutex held.
-        def start_ringing(p, time)
+        def start_ringing(p, time, choke: false, spill: false)
           sources = p.timeline_nodes.grep(MIDI::ClipSource)
           return false if sources.empty?
 
@@ -74,7 +80,7 @@ module MB
           p.fade_out = nil
           p.fading_out = false
           quiet = QuietRun.new((RING_QUIET_SECONDS * output.sample_rate).round)
-          p.ring = Ring.new(stop_frame: nil, quiet: quiet, sources: sources, capped: false, active: true)
+          p.ring = Ring.new(stop_frame: nil, quiet: quiet, sources: sources, capped: false, active: true, choke: choke, spill: spill)
           true
         end
 
@@ -84,7 +90,7 @@ module MB
           ring = p.ring
           ring.stop_frame = base + stop_idx
           ring.quiet.reset(ring.stop_frame)
-          ring.sources.each { |s| s.ring_out(p.stop_at) }
+          ring.sources.each { |s| s.ring_out(p.stop_at, choke: !!ring.choke) }
         end
 
         # Ends ringing for +p+ when it is retired or kept stopped: its clip
@@ -102,7 +108,8 @@ module MB
         # back up.  Returns the player, or nil if none is ringing.  Called
         # with @mutex held.
         def revive_ringing(name, start, input: nil)
-          p = ringing_player(name)
+          # (a spill-over comes back only as the graph an undo restores)
+          p = input ? @players.each_value.find { |x| x.name == name && x.ring&.active && x.input.equal?(input) } : ringing_player(name)
           return nil if p.nil? || (input && !p.input.equal?(input))
 
           ring = p.ring

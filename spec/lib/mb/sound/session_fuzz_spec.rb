@@ -2,7 +2,8 @@
 # renders finish without errors or unexpected warnings, buffer sizes give
 # the same mix within -80 dB, plans don't change it, and timeline-following
 # parts launched mid-song match the same parts from bar 1, and warming
-# changes before they land doesn't change it either.
+# changes before they land doesn't change it either, nor do carrying
+# rebuilds of the tracks (what a bind does; carry-1).
 # Everyday: SEEDS seeds from a fixed base plus one from RSpec's seed;
 # FUZZ=N runs N seeds (the long mode), FUZZ_SEED=n one seed (a repro),
 # FUZZ_BASE=n moves the fixed base.
@@ -175,6 +176,71 @@ RSpec.describe('session fuzzing') do
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil
+    end
+  end
+
+  # The :carry relation's finds (carry-1), shrunk: each song's carrying
+  # rebuilds come from its track lines and length (SessionFuzz.carry_lines)
+  {
+    'a rebuild landing between samples (137.5 BPM)' => [
+      ['bpm 137.5', 'knob :busy, 0.5'], [
+        'track(:t2, q: 1/4r) { |clip| clip.synth(voices: 3) { |v| v.hz.sine * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t2: seq(C4, E4, G4).n8.loop',
+        'at_bar(1) { go :s1, on: :now }',
+      ], 3, false,
+    ],
+    'one-shot clips and a seek back before the rebuilds' => [
+      ['bpm 174', 'knob :busy, 0.5'], [
+        'track(:t1, q: 1/2r) { |clip| clip.synth(voices: 1) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'track(:t2, q: 1/2r) { |clip| clip.synth(voices: 3) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'track(:t3, q: 1/2r) { |clip| clip.synth(voices: 2) { |v| v.hz.sine * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t1: seq(C5, D5).n8, t2: seq(C5, D5).n8, t3: seq(C3.n4, G3.n8.dotted, Eb3.n16).loop, fade: 1/4r',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 4) { seek 1, 2.25 }',
+      ], 1, false,
+    ],
+    'a kit rebuilt while a launch with other rows waits' => [
+      ['bpm 137.5', 'knob :busy, 0.5'], [
+        'track(:t1, q: 1/4r) { |kit| tr808(kit) * 0.5 }',
+        "scene :s1, t1: grid(16, kick: 'X..x..x.', hat: '.x.x.x.x', open_hat: '...x').loop, fade: 1/4r",
+        'at_bar(1) { go :s1, on: :now }',
+        "at_bar(1, beat: 2) { bg :t1, grid(16, kick: 'x...x...', open_hat: '..x...x.').loop, on: :bar }",
+      ], 1, false,
+    ],
+    'a mute landing with a rebuild' => [
+      ['bpm 112', 'knob :busy, 0.5'], [
+        'track(:t1, q: 1/4r) { |kit| tr808(kit) * 0.5 }',
+        'track(:t2, q: 1) { |clip| clip.synth(voices: 1) { |v| v.hz.triangle * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        "scene :s1, t1: grid(16, kick: 'X..x..x.', hat: '.x.x.x.x', open_hat: '...x').loop, t2: motifs(scale(:dorian, :d).weights, 8, density: knob(:busy), mutate: knob(:busy), evolve: 1, seed: 4), others: :keep",
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(2, beat: 2) { mute :t1 }',
+      ], 3, true,
+    ],
+    'a flow ringing a track out where its rebuild lands (seed 61)' => [
+      ['bpm 137.5', 'knob :busy, 0.5'], [
+        'knob :cut, 1200.0, range: 200.0..4000.0',
+        'track(:t1, q: 1/2r) { |clip| clip.synth(voices: 1) { |v| v.hz.sine * v.amp_env(0.002, 0.05, 0.6, 0.02) }.filter(:lowpass, cutoff: knob(:cut), quality: 2) * 0.3 }',
+        'track(:t2, q: 1) { |kit| tr808(kit) * 0.5 }',
+        'track :t3, :dnb_sub, q: 1',
+        'scene :s1, t1: motifs(scale(:dorian, :d).weights, 8, density: knob(:busy), mutate: knob(:busy), evolve: 1, seed: 4), t2: beats(16, energy: knob(:busy), hold: 2, seed: 2) { kick [1, 0, 0, 0] * 4; hat euclid(10, 16), mutate: 0.5; fill every: 2, snare: 0.6 }, t3: melody(scale(:minor, :a).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop',
+        'scene :s2, t1: seq(C4, E4, G4).n8.loop',
+        'at_bar(1) { flow(seed: 79, on: :beat) { generate markov(s1: { s1: 3, s2: 1 }, s2: { s1: 2, s2: 1 }, seed: 14), s1: 1..2, s2: 1 } }',
+      ], 3, true,
+    ],
+    'a flow replacing a kit before its rebuild lands (seed 132)' => [
+      ['bpm 120', 'meter 3, 4', 'knob :busy, 0.5'], [
+        'track(:t1, q: 1/4r) { |kit| tr909(kit) * 0.5 }',
+        'track(:t3, q: 1/4r) { |kit| tr808(kit) * 0.5 }',
+        "scene :s1, t1: grid(16, kick: 'X..x..x.', hat: '.x.x.x.x', open_hat: '...x').loop, t3: grid(16, kick: 'x...x...', snare: '....x...').loop",
+        "scene :s2, t1: grid(16, kick: 'X..x..x.', hat: '.x.x.x.x', open_hat: '...x').loop, t3: grid(16, clap: '..x.'), others: :keep",
+        'at_bar(1) { flow(seed: 43, on: :beat) { generate markov(s1: { s1: knob(:busy), s2: 1 }, s2: { s1: 3, s2: knob(:busy) }, seed: 86), s1: 1, s2: 2.beats } }',
+      ], 3, true,
+    ],
+  }.each do |name, (header, lines, bars, slow)|
+    it "holds carry for #{name}", *(slow ? [:slow] : []), render_budget: { seconds: 90, reason: 'a song rendered twice with and without its rebuilds' } do
+      song = SessionFuzz::Song.new(header: header, lines: lines, bars: bars)
+      expect(SessionFuzz.carry_lines(song)).not_to be_empty
+      expect(SessionFuzz.check(:carry, song)).to be_nil
     end
   end
 

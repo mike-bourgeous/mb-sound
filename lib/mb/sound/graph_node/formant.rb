@@ -38,7 +38,8 @@ module MB
       class Formant
         include GraphNode
         include SampleRateHelper
-        node_traits memory: :short
+        # (its sections' state moves to a rebuilt formant: #carry_adopt)
+        node_traits memory: :short, carry: :adopt
 
         # Formant tables from the Csound manual's "Formant Values" appendix
         # (https://csound.com/docs/manual/MiscFormants.html; the same tables
@@ -178,6 +179,15 @@ module MB
           @out = Numo::SFloat.zeros(n) if @out.nil? || @out.length != n
           Kernels.formant(@out, x, @tables, m, s, w, @state, @sample_rate, @normalize)
         end
+
+        # Takes over formant +old+'s section states (Session::Carry's
+        # adoption, NodeTraits' +carry+ :adopt: the vowels and settings may
+        # differ, the sections continue).
+        def carry_adopt(old)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@state].freeze
 
         def sources
           s = { input: @input }

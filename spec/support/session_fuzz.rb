@@ -21,6 +21,10 @@
 #   launch what it plays there when started at bar 1, within -80 dB
 # - :warm: warming every change before it lands (Session::Warming.always:
 #   copies built and played in sandboxes) gives the same mix, bit for bit
+# - :carry: a carrying rebuild of each patch track (what a bind or a build
+#   knob's turn does; Session::Carry, carry-1) at a point drawn from the
+#   song gives the same mix, bit for bit, when every swap was a cut
+#   (CarryCheck, spec/support/carry_check.rb)
 #
 # Renders use exact_lanes: true (synth lanes freed on the 800-frame grid,
 # so voice allocation is the same at any buffer size; see Synth).
@@ -30,10 +34,12 @@
 #   FUZZ_SEED=12 bundle exec rspec spec/lib/mb/sound/session_fuzz_spec.rb
 #   FUZZ=200 bundle exec rspec spec/lib/mb/sound/session_fuzz_spec.rb   # the long mode
 require 'stringio'
+require 'zlib'
 require_relative 'recipe_helpers'
+require_relative 'carry_check'
 
 module SessionFuzz
-  RELATIONS = %i[runs buffer_size plan timeline warm].freeze
+  RELATIONS = %i[runs buffer_size plan timeline warm carry].freeze
 
   # Relations known to fail for a reason recorded elsewhere, as
   # { relation => [[Regexp on the script, 'reason'], ...] }: skipped, counted.
@@ -334,8 +340,8 @@ module SessionFuzz
     },
     ->(s) { "bg :#{s.bg_name}, #{s.pick(MELODIC)}#{s.on}" },
     ->(s) {
-      # (ui-scaffold-1: an instrument track's param knob turned, so a later
-      # instrument change carries it instead of resetting it)
+      # (ui-scaffold-1: an instrument track's param knob turned, which a
+      # later instrument change resets since carry-1)
       next unless s.instruments
 
       "turn :\"#{s.pick(s.instruments)}/release\", #{s.pick([0.02, 0.3])}#{s.on}"
@@ -414,7 +420,9 @@ module SessionFuzz
 
   # Errors that make a generated song invalid rather than show a bug
   # (commands for players other commands ended first)
-  INVALID = [/No background player :\w+ is playing or stopped/, /doesn't play any of the clips being replaced/].freeze
+  # (a swap of a one-shot that has ended, ClipSwaps::ClipsOver: seed 104011
+  # on master-ai dec63343, found in carry-1's spec run)
+  INVALID = [/No background player :\w+ is playing or stopped/, /doesn't play any of the clips being replaced/, /so a swap would never be heard/].freeze
 
   # The unexpected lines the last #render printed to stderr.
   def warnings = @warnings || []
@@ -447,6 +455,21 @@ module SessionFuzz
     nil
   end
 
+  # Mixes +a+ and +b+ cut to the shorter length where the longer's extra
+  # frames are silent (else as they are, for #compare to report).
+  def trim_silent(a, b)
+    return [a, b] unless a.length == b.length
+
+    pairs = a.zip(b).map { |x, y|
+      n = [x.length, y.length].min
+      longer = x.length > n ? x[n..] : (y.length > n ? y[n..] : nil)
+      return [a, b] if longer && longer.abs.max > 0
+
+      [x[0...n], y[0...n]]
+    }
+    [pairs.map(&:first), pairs.map(&:last)]
+  end
+
   # The frame of bar +bar+, beat +beat+ at +bpm+ (4 or +beats+ beats a bar;
   # launches land on the floor sample of their time)
   def frame_of(bar, beat, bpm, beats)
@@ -464,6 +487,18 @@ module SessionFuzz
 
       [i, Integer(m[1]), Integer(m[2] || 1), sound]
     end
+  end
+
+  # The lines :carry adds to +song+: a carrying rebuild of each patch track
+  # at a bar and beat drawn from the track's line and the song's length
+  # (so shrinking, which drops other lines, keeps them).
+  def carry_lines(song)
+    beats = song.header.any? { |l| l.start_with?('meter 3') } ? 3 : 4
+    song.lines.filter_map { |l|
+      t = l[/\Atrack[( ]:(t\d+)/, 1] or next
+      rng = Random.new(Zlib.crc32("#{l} #{song.bars}"))
+      "at_bar(#{rng.rand(1..song.bars)}, beat: #{rng.rand(2..beats)}) { ::CarryCheck.fuzz_rebuild(:#{t}) }"
+    }.uniq
   end
 
   # Checks +relation+ for +song+: nil if it holds, :skip if it doesn't
@@ -499,6 +534,21 @@ module SessionFuzz
         compare(ref, render(code, song.bars, rebuilds: :next_span), tolerance: 0, label: 'planned with deferred rebuilds vs unplanned')
     when :warm
       compare(render(code, song.bars), render(code, song.bars, warm: true), tolerance: 0, label: 'warmed changes vs not')
+    when :carry
+      extra = carry_lines(song)
+      return :skip if extra.empty?
+
+      got = nil
+      plans = CarryCheck.recording { got = render((song.header + song.lines + extra).join("\n"), song.bars) }
+      # (crossfades start fresh state on purpose; no rebuild landed: nothing to check)
+      return :skip if plans.empty? || !plans.all?(&:full?)
+
+      plain = render((song.header + song.lines + extra.map { |l| l.sub('fuzz_rebuild', 'fuzz_split') }).join("\n"), song.bars)
+      # (a rebuild queued past the end keeps a render going; its extra
+      # frames must be silent; and graphs ending a buffer apart leave
+      # denormal tails: tolerance 1e-20)
+      plain, got = trim_silent(plain, got)
+      compare(plain, got, tolerance: 1e-20, label: "#{plans.length} carried rebuild#{'s' unless plans.length == 1} vs none")
     when :timeline
       parts = timeline_parts(song)
       return :skip if parts.empty?

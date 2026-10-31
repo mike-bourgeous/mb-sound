@@ -20,7 +20,7 @@ module MB
         include MultiOutput
         include Nameable
         # (draws per onset, caught up by sleepers: #catch_up_grains)
-        node_traits memory: :short, random: :catch_up_grains
+        node_traits memory: :short, random: :catch_up_grains, fresh: 'its grain slots and random stream (not moved yet)'
 
         # One output channel (0 left, 1 right).
         class Output

@@ -7,7 +7,7 @@ module MB
     class IOInput < IOBase
       include GraphNode
       include GraphNode::IOSampleMixin
-      node_traits memory: :short
+      node_traits memory: :short, fresh: 'an input from a file or a process, opened again by a rebuilt graph'
 
       attr_reader :frames_read
 

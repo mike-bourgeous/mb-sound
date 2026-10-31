@@ -10,7 +10,8 @@ module MB
       class NodeSequence
         include GraphNode
         include SampleRateHelper
-        node_traits memory: :short
+        # (which source plays, and what it buffered: #carry_adopt)
+        node_traits memory: :short, carry: :adopt
 
         # The 0-based index of the active node in the sequence.
         attr_reader :current_node
@@ -139,6 +140,26 @@ module MB
         end
 
         # See GraphNode#sources.
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # sequence +old+ has as many sources.
+        def carry_fits?(old)
+          old.class == self.class && old.instance_variable_get(:@node_count) == @node_count
+        end
+
+        # Takes over sequence +old+'s place (the source playing, the
+        # samples buffered); each keeps its own sources, from the other's
+        # place on.  The sources themselves are their own pairs.
+        def carry_adopt(old)
+          mine = @current_node
+          @current_node = old.current_node
+          old.instance_variable_set(:@current_node, mine)
+          @current_sources = @sources.drop(@current_node)
+          old.instance_variable_set(:@current_sources, old.instance_variable_get(:@sources).drop(mine))
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@circbuf @node_type_name].freeze
+
         def sources
           @sources.map.with_index { |src, idx|
             [:"input_#{idx + 1}", src]

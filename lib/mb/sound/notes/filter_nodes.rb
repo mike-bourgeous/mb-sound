@@ -72,7 +72,8 @@ module MB
       # .. 0.49 × the sample rate.
       class Cutoff
         include FilterParamNode
-        node_traits memory: :short
+        # (a product of its inputs, sample by sample)
+        node_traits memory: :none
 
         # The base cutoff (Hz or a node) and the key tracking amount.
         attr_reader :base, :keytrack
@@ -149,7 +150,8 @@ module MB
       # q × x0.5..x1..x4 (64 is neutral).
       class Quality
         include FilterParamNode
-        node_traits memory: :short
+        # (a product of its inputs, sample by sample)
+        node_traits memory: :none
 
         attr_reader :quality
 

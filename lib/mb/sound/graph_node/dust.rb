@@ -164,14 +164,16 @@ module MB
 
         # The random stream and the samples since the last impulse (for a
         # graph that replaces this one; Session::Carry).
+        # (with the inputs the catch-up holds: see Drift#plan_snapshot)
         def plan_snapshot
-          { rng: @rng.dup, since: @since.dup }
+          { rng: @rng.dup, since: @since.dup, held: [@last_rate, @last_gap] }
         end
 
         def plan_restore(snapshot)
           return unless snapshot
           @rng[0..] = snapshot[:rng]
           @since[0..] = snapshot[:since]
+          @last_rate, @last_gap = snapshot[:held] if snapshot[:held]
         end
 
         def sources

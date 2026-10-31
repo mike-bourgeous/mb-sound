@@ -216,7 +216,7 @@ module MB
           class Node
             include GraphNode
             include GraphNode::SampleRateHelper
-            node_traits memory: :short
+            node_traits memory: :short, fresh: 'a mastering pass\'s trim, built again for each pass'
 
             def initialize(input, curve, session)
               @input = input.get_sampler

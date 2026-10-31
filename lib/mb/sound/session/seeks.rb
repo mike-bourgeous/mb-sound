@@ -233,11 +233,17 @@ module MB
 
         # The number of frames (1 to +count+ - 1) before the next timeline
         # change inside the next +count+ frames, or nil if none lands there.
+        # A carrying swap splits where its graph starts, on the floor sample
+        # of its time as launches land (carry-1: with the ceiling, a swap
+        # between samples landed inside the first piece, so the state was
+        # copied up to a buffer before the old graph stopped; SessionFuzz's
+        # :carry relation found it at 137.5 BPM).
         def frames_before_seek(count, per_sample)
           c = @changes.find { |x| timeline_change?(x) || carry_change?(x) } or return nil
           from = @transport.position
           return nil unless c.time > from && c.time < Sequence::Transport.position_at(from, count, per_sample)
-          k = ((c.time - from) / per_sample).ceil
+          k = (c.time - from) / per_sample
+          k = timeline_change?(c) ? k.ceil : k.floor
           k > 0 && k < count ? k : nil
         end
       end

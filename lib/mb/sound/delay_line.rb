@@ -271,6 +271,18 @@ module MB
         c
       end
 
+      # Swaps what this line holds (its buffer, whatever its size, write
+      # offset, and last block) with line +other+'s, keeping both objects,
+      # so every reader of either reads the other's sound from now on (state
+      # adoption, Session::Carry; NodeTraits' +carry+ :adopt).
+      def swap_state(other)
+        NodeTraits.swap_ivars(self, other, SWAP_IVARS)
+        self
+      end
+
+      # The instance variables #swap_state swaps.
+      SWAP_IVARS = %i[@buffer @write_offset @block_start].freeze
+
       # What a kernel check compares of a line.
       def kernel_state
         [@buffer, @write_offset, @block_start]

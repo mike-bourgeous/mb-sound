@@ -8,7 +8,7 @@ module MB
       class Resample
         include GraphNode
         include BufferHelper
-        node_traits memory: :short
+        node_traits memory: :short, fresh: 'a resampler\'s filter history (not moved yet)'
 
         # Resampling modes supported by the class (pass to constructor's
         # +:mode+ parameter).

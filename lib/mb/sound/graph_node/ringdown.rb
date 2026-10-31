@@ -14,7 +14,8 @@ module MB
       class Ringdown
         include GraphNode
         include SampleRateHelper
-        node_traits memory: :short
+        # (whether its source ended: #carry_adopt)
+        node_traits memory: :short, carry: :adopt
 
         # The source node.
         attr_reader :source
@@ -49,6 +50,14 @@ module MB
 
           data
         end
+
+        # Takes over +old+'s ending (Session::Carry's adoption; the old
+        # one gets this one's fresh state).
+        def carry_adopt(old)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@ended].freeze
 
         def sources
           { input: @source }

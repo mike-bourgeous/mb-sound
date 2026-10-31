@@ -20,24 +20,39 @@ module MB
       # stateful node matched it is a cut, so the new graph continues the
       # old one's samples.
       #
-      # What carries: Tones, Envelopes and note envelopes (their stage and
-      # level), filters (SVF/biquad, four-pole, diode), resonators, shapers,
-      # companders, decimators, sample-and-holds, smoothers, Notes nodes
-      # (held notes, note numbers, velocities, controllers, glides), and the
-      # Synth's allocator (which lane holds which note).  What doesn't:
-      # delay lines, reverbs, choruses, sampler voices, grains, and other
-      # nodes without plan snapshots (their tails start fresh).  Each node
-      # kind says which it is (NodeTraits' +memory+ and +carry+).  Times are
-      # moved to the new graph's stream time (graphs count stream time from
-      # their own start).
+      # What carries by snapshot: Tones, Envelopes and note envelopes
+      # (their stage and level), filters (SVF/biquad, four-pole, diode),
+      # resonators, companders, decimators, sample-and-holds, smoothers,
+      # drifts and dust, Notes nodes (held notes, note numbers, velocities,
+      # controllers, glides), and the Synth's allocator (which lane holds
+      # which note).  What carries by adoption (carry-1, research-snapshot-
+      # mutability's option 1; NodeTraits' carry :adopt): the new node
+      # swaps state holders with its partner on the swap frame (O(1)): delay
+      # lines (delays, multitaps, delay networks, feedback loops and their
+      # rings, tape echoes), reverbs (their network kernels, predelays, and
+      # padded inputs), choruses' tails, formants, crossovers, limiters,
+      # drum kit voices and their repeats, flams, and chokes, sampler
+      # voices, curve shapers' antialiasing, gates, wavetables, time limits,
+      # and MIDI clip sources (the old one's clip and timing).  A pair whose
+      # state doesn't fit (#carry_fits?: a reverb of another size) starts
+      # fresh, and the swap crossfades.  What starts fresh: inputs, grains,
+      # loop players, resamplers, and the other kinds that say why
+      # (NodeTraits' +fresh+).  Times are moved to the new graph's stream
+      # time (graphs count stream time from their own start), and the new
+      # player goes on as the old one: its start and launch (for seeks), its
+      # place in the mix order, its fader, mute ramps, and CUE levels
+      # (Session#add_now).
       module Carry
         # What .plan found: +pairs+ ([[old node, new node], ...] with state
-        # to copy), +synths+ ([[old Synth, new Synth], ...]), +stateful+
+        # to copy), +adopts+ (pairs whose new node takes over the old one's
+        # state holders: NodeTraits' carry :adopt), +unfit+ (adopting pairs
+        # whose state doesn't fit, e.g. reverbs of other sizes: they start
+        # fresh), +synths+ ([[old Synth, new Synth], ...]), +stateful+
         # (nodes of the new graph with state), +matched+ (of those, the
         # ones paired), +old_input+ (the replaced player's GraphNodeInput).
-        # +uncarried+ counts the new graph's nodes with memory no snapshot
-        # holds (delays, reverbs, sampler voices: see .uncarried?).
-        Plan = Data.define(:pairs, :synths, :stateful, :matched, :uncarried, :old_input, :sleepers) do
+        # +uncarried+ counts the new graph's nodes with memory no carry
+        # moves (see .uncarried?) and the unfit pairs.
+        Plan = Data.define(:pairs, :adopts, :unfit, :synths, :stateful, :matched, :uncarried, :old_input, :sleepers) do
           # True if every stateful node of the new graph has a partner and
           # none holds uncarried memory (the swap can cut instead of
           # crossfading).
@@ -141,13 +156,33 @@ module MB
           old_all ||= graph_nodes(old_nodes)
           sleepers = old_all.select { |x| x.respond_to?(:catch_up_sleepers) }
 
-          Plan.new(pairs: pairs.freeze, synths: synths.freeze, stateful: stateful.length, matched: pairs.count { |_, x| in_all[x.__id__] },
-                   uncarried: all.count { |x| uncarried?(x) }, old_input: old_input, sleepers: sleepers.freeze)
+          # Adopting pairs (see NodeTraits' +carry+), unless the old node's
+          # state doesn't fit the new one's
+          adopts, pairs = pairs.partition { |_, n| adopt?(n) }
+          unfit = adopts.reject { |o, n| fits?(o, n) }
+          adopts -= unfit
+
+          Plan.new(pairs: pairs.freeze, adopts: adopts.freeze, unfit: unfit.freeze, synths: synths.freeze, stateful: stateful.length,
+                   matched: (pairs + adopts + unfit).count { |_, x| in_all[x.__id__] },
+                   uncarried: all.count { |x| uncarried?(x) } + unfit.length, old_input: old_input, sleepers: sleepers.freeze)
         end
 
-        # Every node of graph +roots+, once.
+        # Every node of graph +roots+, once, with the owners of multi-output
+        # nodes' outputs (a crossover's bands read their owner's input as
+        # their source, so the walk alone skips the owner and its state:
+        # carry-1's carry check found dnb_neuro's squeeze crossover cut with
+        # its filter state left behind).
         def graph_nodes(roots)
-          roots.flat_map { |r| [r, *(r.respond_to?(:graph) ? r.graph : [])] }.uniq(&:__id__)
+          list = roots.flat_map { |r| [r, *(r.respond_to?(:graph) ? r.graph : [])] }.uniq(&:__id__)
+          seen = list.to_h { |n| [n.__id__, true] }
+          list.each do |n|
+            next unless n.is_a?(GraphNode::NodeOutput) && !n.is_a?(GraphNode::Tee::Branch)
+            o = n.instance_variable_get(:@owner)
+            next if o.nil? || seen[o.__id__]
+            seen[o.__id__] = true
+            list << o
+          end
+          list
         end
 
         # True if +node+ (a graph node) has running state a carry doesn't
@@ -169,53 +204,104 @@ module MB
         end
 
         # True if +node+ keeps running state that carries through its plan
-        # snapshot (NodeTraits' carry :snapshot; values the graph reads from
-        # outside, knobs and constants, have memory :none).
+        # snapshot or by adoption (NodeTraits' carry :snapshot or :adopt;
+        # values the graph reads from outside, knobs and constants, have
+        # memory :none).
         def stateful?(node)
-          NodeTraits.of(node).snapshot?
+          t = NodeTraits.of(node)
+          t.snapshot? || t.adopt?
+        end
+
+        # True if +node+ takes over its partner's state holders (NodeTraits'
+        # carry :adopt).
+        def adopt?(node)
+          NodeTraits.of(node).adopt?
+        end
+
+        # True if +old+'s running state fits adopting node +new+ (its
+        # #carry_fits?, if it has one; else the same class).
+        def fits?(old, new)
+          new.respond_to?(:carry_fits?) ? new.carry_fits?(old) : old.class == new.class
         end
 
         # Copies the state of +plan+'s old nodes into the new ones (see the
         # module description), on the swap frame: the old graph has played
         # up to it and the new one hasn't played.  Returns the number of
         # nodes whose state was copied.
-        def apply(plan)
+        #
+        # With +give_back+ (a spill-over whose voices all carried; see
+        # Session#add_now) the old nodes take the new ones' fresh snapshots
+        # in turn, so the old graph keeps only what didn't move (a reverb of
+        # another size, its tail) and its voices fall silent on the frame.
+        def apply(plan, give_back: false)
           plan.sleepers.each(&:catch_up_sleepers)
+          # (clip sources first: they take the old ones' notes in progress
+          # before anything reads the old streams ahead)
+          sources, adopts = plan.adopts.partition { |_, n| n.is_a?(MIDI::ClipSource) }
+          sources.each { |o, n| n.carry_adopt(o) }
+          adopted = sources.to_h { |o, _| [o.__id__, true] }
           shifts = {}
           plan.synths.each do |o, n|
-            shift = carry_synth(o, n)
+            shift = carry_synth(o, n, adopted)
             shifts[n.__id__] = shift if shift
           end
           count = 0
           plan.pairs.each do |o, n|
             snap = o.plan_snapshot or next
-            if n.is_a?(Notes::NoteEnvelope)
-              # (its stage and level; its stream time is the new graph's)
-              n.instance_variable_get(:@state)[0..] = snap.data[:@state]
-            elsif n.is_a?(Notes::Node)
-              reader = n.plan_reader
-              cursor = reader.cursor
-              keep = NOTES_KEEP.to_h { |iv| [iv, n.instance_variable_get(iv)] }
-              n.plan_restore(snap)
-              keep.each { |iv, v| n.instance_variable_set(iv, v) }
-              reader.cursor = cursor
+            fresh = give_back ? n.plan_snapshot : nil
+            restore_carried(n, snap, chase: true)
+            restore_carried(o, fresh, chase: false) if fresh
+            count += 1
+          end
+          # (adoption: the new node takes the old one's state holders, the
+          # old one this one's fresh state; NodeTraits' +carry+)
+          adopts.each { |o, n| n.carry_adopt(o) }
+          count + plan.adopts.length
+        end
+
+        # The source at the root of MIDI stream +stream+ (through transforms
+        # and allocator lanes), or nil.
+        def stream_root(stream)
+          s = stream&.source
+          8.times do
+            p = s.is_a?(MIDI::Transform) && s.instance_variable_get(:@parent)
+            break unless p.respond_to?(:source)
+            s = p.source
+          end
+          s
+        end
+
+        # Restores Carry snapshot +snap+ into node +n+: note envelopes their
+        # kernel state only, Notes nodes everything but their own stream's
+        # cursor, generation, and frame counts (with +chase+ false for a node
+        # handing its state back: its stream's chase is left as it is).
+        def restore_carried(n, snap, chase:)
+          if n.is_a?(Notes::NoteEnvelope)
+            # (its stage and level; its stream time is the new graph's)
+            n.instance_variable_get(:@state)[0..] = snap.data[:@state]
+          elsif n.is_a?(Notes::Node)
+            reader = n.plan_reader
+            cursor = reader.cursor
+            keep = NOTES_KEEP.to_h { |iv| [iv, n.instance_variable_get(iv)] }
+            n.plan_restore(snap)
+            keep.each { |iv, v| n.instance_variable_set(iv, v) }
+            reader.cursor = cursor
+            if chase
               # (no chase of the new stream's notes in progress: the node
               # holds the old one's notes already)
               n.instance_variable_set(:@pending_chase, nil)
               n.skip_start_chase!
-            else
-              n.plan_restore(snap)
             end
-            count += 1
+          else
+            n.plan_restore(snap)
           end
-          count
         end
 
         # Carries Synth +o+'s voice allocation into Synth +n+ (the lanes
         # holding notes, the held keys, the mono note stack), with times
         # moved to +n+'s stream time.  Returns the shift (old time - new
         # time), or nil if the synths' lanes don't match.
-        def carry_synth(o, n)
+        def carry_synth(o, n, adopted = {})
           a = o.instance_variable_get(:@allocator)
           b = n.instance_variable_get(:@allocator)
           return nil unless a && b && a.lanes.length == b.lanes.length && a.mono? == b.mono?
@@ -248,8 +334,12 @@ module MB
 
           # The carried notes' note-offs: the new graph's source never
           # started them, so the old source's (read ahead from the swap)
-          # go into the new allocator at the same moments
-          b.inject(note_offs_ahead(a).map { |e| e.with(time: e.time - shift) })
+          # go into the new allocator at the same moments, unless the new
+          # source took over the old one's notes in progress
+          # (MIDI::ClipSource#carry_adopt), whose note-offs it plays itself
+          unless adopted[stream_root(a.stream)&.__id__]
+            b.inject(note_offs_ahead(a).map { |e| e.with(time: e.time - shift) })
+          end
 
           # The lanes' idle bookkeeping (asleep lanes stay asleep, on the
           # same grid of the synth's own time)

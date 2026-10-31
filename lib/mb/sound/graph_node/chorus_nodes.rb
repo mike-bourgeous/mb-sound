@@ -8,7 +8,8 @@ module MB
         class Tail
           include GraphNode
           include SampleRateHelper
-          node_traits memory: :short
+          # (its position after the input's end: #carry_adopt)
+          node_traits memory: :short, carry: :adopt
 
           # The source node.
           attr_reader :source
@@ -51,6 +52,13 @@ module MB
           def sources
             { input: @source }
           end
+
+          # Takes over tail +old+'s position (Session::Carry's adoption).
+          def carry_adopt(old)
+            NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+          end
+
+          ADOPT_IVARS = %i[@left @buf].freeze
         end
 
         # The BBD hiss: passes +noise+ until every chorus input (Tail) ended,
@@ -60,7 +68,8 @@ module MB
         class HissGate
           include GraphNode
           include SampleRateHelper
-          node_traits memory: :short
+          # (its fade after the inputs end: #carry_adopt)
+          node_traits memory: :short, carry: :adopt
 
           # The noise source.
           attr_reader :source
@@ -95,6 +104,13 @@ module MB
           def sources
             { input: @source }
           end
+
+          # Takes over gate +old+'s fade (Session::Carry's adoption).
+          def carry_adopt(old)
+            NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+          end
+
+          ADOPT_IVARS = %i[@faded].freeze
         end
       end
     end

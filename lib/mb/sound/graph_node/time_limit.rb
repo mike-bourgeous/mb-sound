@@ -26,7 +26,8 @@ module MB
         include GraphNode
         include SampleRateHelper
         include Sequence::TimelineNode
-        node_traits memory: :short, timeline: true
+        # (its count of time played: #carry_adopt)
+        node_traits memory: :short, timeline: true, carry: :adopt
 
         # The source node.
         attr_reader :source
@@ -83,6 +84,20 @@ module MB
           self
         end
         alias at_rate sample_rate=
+
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # +old+'s state fits this one.
+        def carry_fits?(old)
+          old.class == self.class && old.length == @length
+        end
+
+        # Takes over +old+'s time played so far (Session::Carry's adoption; the old
+        # one gets this one's fresh state).
+        def carry_adopt(old)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+        end
+
+        ADOPT_IVARS = %i[@elapsed @remaining].freeze
 
         def sources
           { input: @source }

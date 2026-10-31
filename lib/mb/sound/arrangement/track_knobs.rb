@@ -114,7 +114,8 @@ module MB
           end
 
           pending = Thread.current[:mb_sound_knob_landings]
-          carry = !pending&.key?(existing) && !untouched?(existing) && existing.value.is_a?(Numeric) && spec.range.cover?(existing.value)
+          carry = !Thread.current[:mb_sound_knob_reset] && !pending&.key?(existing) && !untouched?(existing) && existing.value.is_a?(Numeric) &&
+                  spec.range.cover?(existing.value)
           same = existing.spec.range == spec.range && existing.spec.curve == spec.curve
           k = same ? existing : (session.knob(kname, default, range: nil, **opts) or return nil) # (range: nil: the default's range replaces the old one)
           if pending&.key?(k)
@@ -126,6 +127,14 @@ module MB
             preset_values[k] = spec.default
           end
           k
+        end
+
+        # Runs the block with every reused knob .knob_for gives taking the
+        # param's value, turned or not (a track given another instrument;
+        # the maintainer, 2026-10-30: "Always reset"; before carry-1 a
+        # turned knob kept its value when the new range held it).
+        def resetting
+          Internal.with_local(:mb_sound_knob_reset, true) { yield }
         end
 
         # Runs the block collecting the values .knob_for gives reused knobs

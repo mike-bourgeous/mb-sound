@@ -66,6 +66,7 @@ module MB
             end
             entry = played ? MB::Sound.bg(name, clip) : nil
             @last = name
+            @open = true
 
             Inspect.target = { track: name, node: nil }.freeze
             show_screen
@@ -78,7 +79,24 @@ module MB
 
           # Puts back the screen that was up before `design` (ui off when
           # none was).  Returns a line saying so.
+          # True while track +name+ is in sound design: opened by `design`
+          # (until `design off`), or the track the sound screen inspects
+          # (`ui :sound`).  Its rebuilds land on the next buffer when every
+          # state carries, else on the next beat (Arrangement#rebuild_track;
+          # the maintainer, 2026-10-30/31).
+          def designing?(name)
+            return false if name.nil?
+            return true if @open && @last == name
+
+            t = UI.tiles
+            target = Inspect.target
+            !!(t&.active? && t.layout_name == :sound && target.is_a?(Hash) && target[:track] == name)
+          rescue StandardError
+            false
+          end
+
           def close
+            @open = false
             was = @before
             @before = nil
             kind, name = was
