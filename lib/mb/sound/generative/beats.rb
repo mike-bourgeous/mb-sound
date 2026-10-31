@@ -32,8 +32,9 @@ module MB
         Row = Data.define(:name, :note, :field, :pattern, :euclid, :keep, :drift, :mutate, :level, :energy, :length)
 
         # A phrase fill: in the last cycle of every +every+ cycles, steps
-        # from +from+ on add +rows+' probabilities (name => amount).
-        Fill = Data.define(:every, :from, :rows)
+        # from +from+ on add +rows+' probabilities (name => amount).  With
+        # +energy+ true the fill follows the energy (#fill_span).
+        Fill = Data.define(:every, :from, :rows, :energy)
 
         # A Euclidean row's pattern (see Builder#euclid).
         Euclid = Data.define(:hits, :steps, :rotate)
@@ -72,13 +73,13 @@ module MB
           keep = @keys[r.name]
           t = Rational(block, @over)
           d = Dice.new(@seed, :drift, r.name)
-          add = fill_amount(r, cycle)
+          add, from = fill_amount(r, cycle, e)
           Array.new(@steps) { |s|
             p = base[s % base.length].to_f
             anchored = keep[s]
             p = (p + r.drift * (d.smooth(t, s) * 2 - 1)).clamp(0.0, 1.0) if r.drift > 0 && !anchored
             p = Beats.energize(p, e) unless r.energy == false || (anchored && e > 0)
-            p = (p + add).clamp(0.0, 1.0) if add && s >= @fill.from
+            p = (p + add).clamp(0.0, 1.0) if add && s >= from
             p
           }
         end
@@ -137,11 +138,24 @@ module MB
           g.respond_to?(:call) ? g.call(Rational(s, @steps)).to_f : g[s % g.length].to_f
         end
 
-        # The added probability of row +r+ in +cycle+'s fill, or nil.
-        def fill_amount(r, cycle)
+        # The added probability of row +r+ in +cycle+'s fill at energy +e+
+        # and the step the fill starts on, or nil.
+        def fill_amount(r, cycle, e)
           f = @fill
           return nil unless f && (cycle + 1) % f.every == 0
-          f.rows[r.name]
+          a = f.rows[r.name]
+          return nil unless a
+          return [a, f.from] unless f.energy
+          a = Beats.energize(a, e)
+          a > 0 ? [a, @steps - Beats.fill_span(@steps - f.from, e, @steps)] : nil
+        end
+
+        # The steps a fill written over +span+ steps covers at energy +e+
+        # when it follows the energy (`fill every: 8, energy: true`): as
+        # written at 0.5, twice as long at 1, half at 0 (where its amounts,
+        # energized like the rows', reach 0), at most +steps+.
+        def self.fill_span(span, e, steps)
+          (span * 2.0**(2 * e - 1)).round.clamp(1, steps)
         end
 
         # A Euclidean row's pattern for hold block +block+: the hit count
@@ -255,8 +269,12 @@ module MB
           # Integer, or a length like 8.bars), the last +last+ of the cycle
           # (a length; a quarter of it by default) adds each row's amount
           # (`snare: 0.7`) to its probabilities.  Drums named here without
-          # a row of their own get one that plays only in fills.
-          def fill(every:, last: nil, **rows)
+          # a row of their own get one that plays only in fills.  With
+          # +energy: true+ the fill grows denser and longer as the energy
+          # rises (its amounts energized like the rows', its length as
+          # written at 0.5, doubled at 1, halved toward 0, where it fades
+          # out); by default it plays the same at any energy.
+          def fill(every:, last: nil, energy: false, **rows)
             ::Kernel.raise ::ArgumentError, 'Only one fill per beats block' if @fill
             cycles = every.is_a?(::Integer) ? every : Generative.length_of(every, :every, divisions: false) / @cycle_length
             ::Kernel.raise ::ArgumentError, "fill every: is a whole number of cycles (got #{every.inspect})" unless cycles.is_a?(::Integer) || cycles.denominator == 1
@@ -269,7 +287,8 @@ module MB
             rows.each do |name, amount|
               ::Kernel.raise ::ArgumentError, "fill's #{name}: is from 0 to 1 (got #{amount.inspect})" unless amount.is_a?(::Numeric) && amount.between?(0, 1)
             end
-            @fill = Fill.new(every: cycles, from: from, rows: rows.transform_values(&:to_f).freeze)
+            ::Kernel.raise ::ArgumentError, "fill's energy: is true or false (got #{energy.inspect})" unless energy == true || energy == false
+            @fill = Fill.new(every: cycles, from: from, rows: rows.transform_values(&:to_f).freeze, energy: energy)
             nil
           end
 
