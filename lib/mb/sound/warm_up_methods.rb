@@ -46,6 +46,35 @@ module MB
         end
       end
 
+      # Ruby's garbage collector for a live set: `gc :quiet` holds major
+      # (full) collections off until `gc :normal`, so none can stop the
+      # render thread for 45-80 ms in the middle of a song (scene builds
+      # already hold them off while they run; GCQuiet).  Off by default:
+      # while quiet, nothing new is promoted, so memory grows (about 1-2 MB
+      # a second while playing) and minor collections slow, until it is
+      # turned back to normal.  Without an argument, prints and returns
+      # the mode (:quiet or :normal).
+      #
+      #     gc :quiet       # for the set
+      #     gc :normal      # after it (a major may follow)
+      def gc(mode = nil)
+        case mode
+        when nil
+          puts GCQuiet.status
+          return GCQuiet.held? ? :quiet : :normal
+        when :quiet
+          raise ArgumentError, 'gc :quiet needs GC.config (Ruby 3.4+) and MB_SOUND_GC_QUIET not 0' unless GCQuiet::ENABLED
+          GCQuiet.hold
+        when :normal
+          GCQuiet.release
+        else
+          near = DidYouMean::SpellChecker.new(dictionary: %w[quiet normal]).correct(mode.to_s).first
+          raise ArgumentError, "gc takes :quiet or :normal (got #{mode.inspect})#{near ? " (did you mean :#{near}?)" : ''}"
+        end
+        puts GCQuiet.status
+        mode
+      end
+
       # Runs a throwaway graph of common node types (band-limited and naive
       # oscillators, FM, pwm, arithmetic, Tees, filters, delay, envelopes,
       # shapers, procs, clip-driven voices) for +calls+ buffers of +buffer+

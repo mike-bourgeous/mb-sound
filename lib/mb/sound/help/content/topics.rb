@@ -27,9 +27,12 @@ module MB
         demo phrase), wavetables (one note), and presets by name.  A plain
         Ruby file gets every console command and note name at its top level
         with `require 'mb/sound/dsl'` (run it with `ruby song.rb`; at its end
-        it waits for what plays in the background, like `wait`).
+        it waits for what plays in the background, like `wait`).  For a
+        live set, `gc :quiet` holds Ruby's major garbage collections off
+        (no 45-80 ms stalls; memory grows about 1-2 MB/s until `gc
+        :normal`; `now` shows it).
       TEXT
-      commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up
+      commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up, :gc
       dsl :at, :until, :for, :and_then
       note :method_modules, :scripts
       see :sets, :now, :files

@@ -22,6 +22,7 @@ module MB
           head = "#{c(:title, 'now')} #{c(:key, stamp.to_s.sub(/^#<Stamp (\S+).*/, 'bar \1'))}  #{c(:dim, "#{fmt(MB::Sound.bpm)} bpm")}"
           head << "  #{c(:dim, 'paused')}" if @s.players.empty?
           out << head
+          out << "  #{c(:dim, GCQuiet.status)}" if GCQuiet.held? # (gc :quiet: memory grows until gc :normal)
           out << "  #{c(:head, 'flow')} #{flow.inspect.lines.first.chomp.sub(/\A#<Form::Playback /, '').chomp('>')}" if flow
 
           players = @s.players
