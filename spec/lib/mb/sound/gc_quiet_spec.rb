@@ -1,3 +1,5 @@
+require 'mb/sound/help'
+
 RSpec.describe(MB::Sound::GCQuiet) do
   before { skip 'GC.config is not available' unless MB::Sound::GCQuiet::ENABLED }
 
