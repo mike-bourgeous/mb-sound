@@ -200,11 +200,6 @@ static VALUE complex_to_num(double complex z)
 	return rb_dbl_complex_new(creal(z), cimag(z));
 }
 
-static VALUE ruby_smoothstep(VALUE self, VALUE x)
-{
-	return rb_float_new(smoothstep(NUM2DBL(x)));
-}
-
 static VALUE fill_narray_with_function(VALUE narray, double (*func)(double))
 {
 	_Bool was_inplace;
@@ -1190,8 +1185,6 @@ void Init_fast_sound(void)
 
 	// Mixing functions
 	rb_define_module_function(fast_sound, "matrix_mix", ruby_matrix_mix, 3);
-
-	rb_define_module_function(fast_sound, "smoothstep", ruby_smoothstep, 1);
 
 	// Fills a given NArray with a smoothstep curve from 0 to 1
 	rb_define_module_function(fast_sound, "smoothstep_buf", ruby_smoothstep_buf, 1);

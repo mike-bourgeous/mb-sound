@@ -175,16 +175,6 @@ module MB
         # (#process is the dispatcher of the :biquad_process kernel, registered
         # below.)
 
-        # Process a single real (not Complex) sample through the filter.
-        def process_one(sample)
-          out = Kernels.biquad(@b0, @b1, @b2, @a1, @a2, sample, @x1, @x2, @y1, @y2)
-          @y2 = @y1
-          @y1 = out
-          @x2 = @x1
-          @x1 = sample
-          out
-        end
-
         # C loop, C math (FastSound.biquad_narray).
         def process_c(samples)
           # FIXME: convert to SComplex/DComplex if coefficients are complex

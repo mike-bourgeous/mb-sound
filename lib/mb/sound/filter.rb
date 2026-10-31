@@ -18,12 +18,6 @@ module MB
         raise NotImplementedError, 'Subclasses must override #process'
       end
 
-      # Should accept a Float (or maybe a Complex) and return the result of
-      # sending that value through the filter.
-      def process_one(value)
-        process(Numo::SFloat[value])[0]
-      end
-
       # If implemented, should reset filter to the given steady-state input.
       # Must return the steady-state output for the given input.
       def reset(value = 0)

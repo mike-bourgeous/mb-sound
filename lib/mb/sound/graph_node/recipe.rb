@@ -156,25 +156,12 @@ module MB
         }.freeze
 
         @enabled = ENV['MB_SOUND_RECIPES'] != '0'
-        # How build block locals are read (see #trace_locals): :frame (the
-        # block frame's Binding through FastRecipe, the default) or :trace
-        # (a TracePoint, the old way; MB_SOUND_RECIPE_LOCALS=trace).
-        @locals_mode = ENV['MB_SOUND_RECIPE_LOCALS'] == 'trace' ? :trace : :frame
         @block_iseqs = ObjectSpace::WeakKeyMap.new
         @bundles = ObjectSpace::WeakKeyMap.new
         @seq = 0
         @wrapped = Hash.new { |h, k| h[k] = Set.new }
 
         class << self
-          # How build block locals are read: :frame (default) or :trace (see
-          # #trace_locals).
-          attr_reader :locals_mode
-
-          def locals_mode=(mode)
-            raise ArgumentError, "Recipe.locals_mode must be :frame or :trace (got #{mode.inspect})" unless [:frame, :trace].include?(mode)
-            @locals_mode = mode
-          end
-
           # Whether calls are recorded (MB_SOUND_RECIPES=0 turns it off).
           attr_accessor :enabled
 
@@ -558,22 +545,15 @@ module MB
           # Runs the block, storing +block+'s local variables (as of its
           # last return) in +inv+'s locals.
           #
-          # By default (locals_mode :frame) the first recorded call made
-          # inside the block takes the Binding of the block's frame
-          # (FastRecipe.frame_binding, see #take_frame), and the locals are
-          # read from it after the block returns (a Binding shares its
-          # frame's environment, so it sees their final values).  The old
-          # way (:trace), a TracePoint(:b_return) targeted at the block,
-          # makes YJIT discard all of its compiled code whenever it is
-          # enabled, so each graph built while something plays made the
-          # render thread recompile everything (50-120 ms buffers after
-          # each scene change; scene-build branch, 2026-10-12).  The two
-          # differ only for locals of blocks and lambdas nested inside a
-          # build block, which the TracePoint also saw (it fired at their
-          # returns too) and the frame doesn't: of the 28 synth and effect
-          # scripts, only wavetable_bass.rb printed differently (a value
-          # passed to a `portamento = ->(pitch) { }` lambda was a `pitch`
-          # variable, now a chain).
+          # The first recorded call made inside the block takes the Binding
+          # of the block's frame (FastRecipe.frame_binding, see #take_frame),
+          # and the locals are read from it after the block returns (a
+          # Binding shares its frame's environment, so it sees their final
+          # values).  Locals of blocks and lambdas nested inside a build
+          # block aren't seen.  (The old TracePoint(:b_return) way made YJIT
+          # discard all of its compiled code whenever it was enabled, 50-120
+          # ms buffers after each scene change; scene-build branch,
+          # 2026-10-12; removed by cleanup-2, 2026-10-31.)
           def trace_locals(block, inv, &run)
             if block.respond_to?(:graph_io_locals)
               # A block loaded from a graph document (GraphIO::Loader) keeps
@@ -582,8 +562,6 @@ module MB
               block.graph_io_locals.each { |k, v| inv.locals[k] = v }
               return result
             end
-
-            return trace_locals_tracepoint(block, inv, &run) if @locals_mode == :trace
 
             iseq = block_iseq(block)
             return run.call unless iseq
@@ -595,20 +573,6 @@ module MB
               b = inv.frame
               inv.frame = nil
               b.local_variables.each { |v| inv.locals[v] = b.local_variable_get(v) } if b.is_a?(Binding)
-            end
-          end
-
-          # The old way of reading build block locals (see #trace_locals).
-          def trace_locals_tracepoint(block, inv, &run)
-            tp = TracePoint.new(:b_return) { |t|
-              b = t.binding
-              b.local_variables.each { |v| inv.locals[v] = b.local_variable_get(v) }
-            }
-            begin
-              tp.enable(target: block, &run)
-            rescue ArgumentError
-              # Not traceable (e.g. a block made from a Method): no names
-              run.call
             end
           end
 
