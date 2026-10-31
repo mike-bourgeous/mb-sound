@@ -164,8 +164,9 @@ module MB
         # A length may come with section options for sections the flow
         # hasn't declared: `breakdown: { length: [8, 16], fill: [:riser, 4]
         # }` (+length:+, then +times:+, +fill:+, +scene:+, +fade:+, knob
-        # values).
-        def generate(source, bars: {}, sections: nil, **lengths)
+        # values).  +length:+ (bars or a Duration) bounds an arc of the
+        # source: past it the source heads for its end (see Form::Generate).
+        def generate(source, bars: {}, sections: nil, length: nil, **lengths)
           given = bars.merge(lengths)
           specs = {}
           options = {}
@@ -198,7 +199,7 @@ module MB
             declares << name
             __define__(name)
           end
-          step = Generate.new(source: source, lengths: specs, sections: sections, declares: declares)
+          step = Generate.new(source: source, lengths: specs, sections: sections, declares: declares, length: length)
           @stack.last << step
           nil
         end

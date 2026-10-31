@@ -97,8 +97,10 @@ module MB
         end
 
         # The next section of generate step +g+ (instruction +i+), as a
-        # Step, updating +counters+ (the source's draws and tail under
-        # [:gen, i], this visit's count under [:visit, i]); nil when the
+        # Step, updating +counters+ (the source's draws, tail, and the bars
+        # of its arc so far under [:gen, i], this visit's count under
+        # [:visit, i]; past the step's +length+ the source heads for its
+        # end, Form::Generate); nil when the
         # visit is over (the source ended, or +sections+ played): the walk
         # then carries on.  :unknown for a peek at a steered source.
         def generate_step(i, g, counters, labels, peek, time)
@@ -111,25 +113,38 @@ module MB
           return :unknown if peek && g.source.steered?
 
           gkey = [:gen, i]
-          n, tail = counters[gkey] || [0, g.source.form_start]
+          n, tail, arc = counters[gkey] || [0, g.source.form_start, 0r]
+          arc ||= 0r
           read = ->(w) { ValueSource.value_at(w, time || 0, transport: @transport) }
           WALK_LIMIT.times do
-            name, tail = g.source.form_next(tail, n, read)
+            finish = g.length && arc >= arc_bars(g.length)
+            name, tail = finish ? g.source.form_finish(tail, n, read) : g.source.form_next(tail, n, read)
             n += 1
             if name.nil?
-              counters[gkey] = [n, tail].freeze
+              counters[gkey] = [n, tail, 0r].freeze
               counters.delete(vkey)
               return nil
             end
+            arc = 0r if g.length && g.source.respond_to?(:form_restart?) && g.source.form_restart?(tail)
             next if g.source.nonterminal?(name) && !@form.sections.key?(name)
 
-            counters[gkey] = [n, tail].freeze
-            counters[vkey] = visit + 1
             sec = @form.sections.fetch(name) { raise ArgumentError, "generate: #{name.inspect} isn't a section of the form" }
+            length = g.length_for(name, n - 1, sec.length)
+            arc += arc_bars(length) * (sec.times || 1) if g.length
+            counters[gkey] = [n, tail, arc].freeze
+            counters[vkey] = visit + 1
             return Step.new(index: i, section: name, pass: 1, counters: counters.freeze, labels: labels.freeze,
-                            length: g.length_for(name, n - 1, sec.length), times: sec.times)
+                            length: length, times: sec.times)
           end
           raise "generate #{g.source.to_ruby} drew #{WALK_LIMIT} symbols without a section"
+        end
+
+        # Bars of a section length for a generate step's +length:+ bound:
+        # plain numbers are bars, Durations count in the timeline's first
+        # meter (the same live and in plans).
+        def arc_bars(length)
+          return length.to_r unless length.is_a?(Sequence::Duration)
+          length.to_r / (@transport ? @transport.meter_at(0r).bar_length : 1r)
         end
 
         # A Step playing section +name+ of generate step +i+ next, as if its
@@ -141,10 +156,12 @@ module MB
           g = @program[i][1]
           counters = @counters.dup
           gkey = [:gen, i]
-          n, tail = counters[gkey] || [0, g.source.form_start]
-          counters[gkey] = [n + 1, g.source.form_force(tail, name)].freeze
+          n, tail, arc = counters[gkey] || [0, g.source.form_start, 0r]
+          length = g.length_for(name, n, sec.length)
+          arc = (arc || 0r) + arc_bars(length) * (sec.times || 1) if g.length
+          counters[gkey] = [n + 1, g.source.form_force(tail, name), arc].freeze
           counters[[:visit, i]] = (counters[[:visit, i]] || 0) + 1
-          Step.new(index: i, section: name, pass: 1, counters: counters.freeze, labels: [].freeze, length: g.length_for(name, n, sec.length), times: sec.times)
+          Step.new(index: i, section: name, pass: 1, counters: counters.freeze, labels: [].freeze, length: length, times: sec.times)
         end
 
         # The Step for the :play instruction at +index+ (pass 1).

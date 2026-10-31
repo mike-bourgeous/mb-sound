@@ -776,8 +776,10 @@ module MB
         `lsys.flow(...)` writes the word out.  Inside a flow, `generate
         chain, still: 6, drift: 4..8` plays one drawn section per pass,
         decided at each commit point (Ranges and Arrays draw lengths per
-        occurrence; `sections: 4` per visit; `goto :hush` forces a state).
-        A section may play for different lengths (`chorus 16` ... `chorus
+        occurrence; `sections: 4` per visit; `goto :hush` forces a state;
+        `length: 128` bounds a run: past 128 bars the chain heads for its
+        end the shortest way, as `genre(:techno).endless(length:
+        600.seconds)` does).  A section may play for different lengths (`chorus 16` ... `chorus
         8`).  `seek 1000` in a generated flow plays what an uninterrupted
         run plays there (`form.plan(seed: 1).at(999)` shows it).
       TEXT

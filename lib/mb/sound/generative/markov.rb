@@ -51,6 +51,7 @@ module MB
           check_states
           @walk = []
           @walk_tail = nil
+          @finish_distances = nil
           @lock = Mutex.new
         end
 
@@ -113,15 +114,18 @@ module MB
         # chain ends; +loop: true+ starts it over after an end, forever).
         # +bars+ (or keywords) gives each state's length: bars, a Duration,
         # a Range of bars or an Array drawn per occurrence (seeded).
-        def flow(bars = {}, sections: nil, loop: false, **more)
+        # +length:+ (bars) bounds each run of the chain: past it the chain
+        # heads for its end the shortest way (#form_finish).
+        def flow(bars = {}, sections: nil, loop: false, length: nil, **more)
           lengths = bars.merge(more)
           source = self
           if sections
+            raise ArgumentError, 'markov#flow: length: bounds a generated flow; sections: writes the first sections out (give one)' if length
             Form.linear(draws(sections), lengths, seed: @seed)
           elsif loop
-            Form.build { label :top; generate source, bars: lengths; goto :top }
+            Form.build { label :top; generate source, bars: lengths, length: length; goto :top }
           else
-            Form.build { generate source, bars: lengths }
+            Form.build { generate source, bars: lengths, length: length }
           end
         end
 
@@ -162,6 +166,46 @@ module MB
           [nxt, [state, nxt].freeze]
         end
 
+        # Draw +n+ like #form_next, heading for the chain's end by the
+        # shortest way (a generate step's +length:+ bound, gen-midi-2):
+        # among the next states with a weight above zero, only those
+        # closest to an end (or, for a chain with no end, to drawing
+        # +start+ again: the arch restarting) are drawn, by their weights.
+        # A tail already one draw from its end ends (or draws +start+).
+        def form_finish(tail, n, read)
+          before, state = tail
+          return form_next(tail, n, read) if state.nil?
+
+          dist = finish_distances
+          d = dist[tail]
+          return form_next(tail, n, read) if d.nil? # (no way out from here)
+          return [@start, [state, @start].freeze] if d == 0 && !ends?
+
+          rule = (@order == 2 && @rules[[before, state]]) || @rules[state]
+          return [nil, form_start] if rule.empty?
+
+          weights = steered? ? rule.transform_values { |w| read.call(w).to_f } : rule
+          weights = weights.select { |_, w| w.to_f > 0 }
+          return [nil, form_start] if weights.empty?
+          best = weights.keys.map { |x| dist[[state, x]] }.compact.min
+          return form_next(tail, n, read) if best.nil?
+          weights = weights.select { |x, _| dist[[state, x]] == best }
+          nxt = Dice.new(@seed, :markov).pick(weights, n)
+          [nxt, [state, nxt].freeze]
+        end
+
+        # True if +tail+ (after a draw) starts the chain's arc over, for a
+        # chain with no end: the draw gave +start+ (a generate step's
+        # +length:+ counts from there; a chain with an end counts from it).
+        def form_restart?(tail)
+          !ends? && tail[1] == @start
+        end
+
+        # True if the chain has an end (a state whose rule is empty).
+        def ends?
+          @rules.values.any?(&:empty?)
+        end
+
         # The tail after the form forced +name+ (a performer's `goto` to a
         # generated section): the chain carries on from there.
         def form_force(tail, name)
@@ -198,6 +242,35 @@ module MB
         end
 
         private
+
+        # Tail ([before, state]) => draws to the chain's end (0: the next
+        # draw ends it), for tails reachable from the start; a chain with
+        # no end counts to drawing +start+ again (0: the next draw may).
+        # Moving weights count as edges; zero weights don't.
+        def finish_distances
+          @finish_distances ||= begin
+            rule_of = ->(t) { (@order == 2 && @rules[t]) || @rules[t[1]] }
+            nexts = ->(t) { rule_of.(t).select { |_, w| MIDI::Param.param?(w) || w > 0 }.keys.map { |x| [t[1], x].freeze } }
+            tails = [[nil, @start].freeze]
+            seen = { tails[0] => true }
+            tails.each { |t| nexts.(t).each { |u| next if seen[u]; seen[u] = true; tails << u } }
+            target = ends? ? ->(t) { rule_of.(t).empty? } : ->(t) { nexts.(t).any? { |u| u[1] == @start } }
+            dist = {}
+            tails.each { |t| dist[t] = 0 if target.(t) }
+            loop do
+              changed = false
+              tails.each do |t|
+                next if dist.key?(t) && dist[t] == 0
+                best = nexts.(t).map { |u| dist[u] }.compact.min
+                next if best.nil? || (dist.key?(t) && dist[t] <= best + 1)
+                dist[t] = best + 1
+                changed = true
+              end
+              break unless changed
+            end
+            dist.freeze
+          end
+        end
 
         # The timeline position params are read at outside a form (the
         # default transport's).

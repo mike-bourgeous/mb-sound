@@ -132,6 +132,31 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(t.generative.form.plan(seed: 0).first(100).length).to eq(12)
     end
 
+    it 'bounds how long a chain runs before its shape repeats (endless(length:), the chain length knob)' do
+      t = genre[:techno]
+      bar_s = t.bar_length * 4 * 60 / t.tempo.to_r
+      songs = ->(v) { (0...20).map { |sd| v.call(sd).form.plan(seed: 0, bar_length: t.bar_length).first(300).sum { |p| (p.stop - p.start) / t.bar_length } } }
+      free = songs.(->(sd) { t.generative(seed: sd) })
+      cut = songs.(->(sd) { t.generative(seed: sd, length: 96) })
+      expect(free.max).to be > 300
+      expect(cut.max).to be < 96 + 140 # (the bound, then the shortest way out: a breakdown, build, peak, and the outro)
+      expect(cut.max).to be < free.max / 2
+      # Seconds convert at the template's tempo; the knob prints in the endless flow
+      e = t.endless(length: 600.seconds)
+      expect(e.form.to_ruby).to match(/\}, length: #{(600 / bar_s).ceil}$/)
+      expect(t.endless.form.to_ruby).not_to match(/\}, length: \d+$/)
+      # A template option: the generator's length is the default, printed back
+      t2 = genre.template(:techno_set) { like :techno; generator t.generator.source, bars: t.generator.bars, length: 300.seconds }
+      expect(t2.generator.length).to eq(300.seconds)
+      expect(t2.to_ruby).to include('length: 300.seconds')
+      expect(t2.endless.form.to_ruby).to include("length: #{(300 / bar_s).ceil}")
+      expect(t2.endless(length: nil).form.to_ruby).not_to match(/\}, length: \d+$/)
+      expect { t.endless(length: -3) }.to raise_error(ArgumentError, /length: is how long one arc/)
+      # Ambient's moods have no end: the arc heads back to emerge
+      arcs = genre[:ambient].endless(length: 32).form.plan(seed: 0).first(300).map(&:section).slice_before(:emerge).to_a
+      expect(arcs.length).to be > 10
+    end
+
     it 'checks generators: sources, scenes, lengths, and swaps' do
       expect { genre.template(:x) { like :dnb; generator :nope } }.to raise_error(ArgumentError, /generator needs a markov/)
       expect { genre.template(:x) { like :dnb; generator markov(intro: { dropp: 1 }, dropp: { intro: 1 }, seed: 1), bars: { dropp: 8 } } }

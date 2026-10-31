@@ -230,16 +230,25 @@ module MB
       # that the flow hadn't declared; printed with their options).  Every visit
       # continues the source where the last one left it (a chain's draws
       # keep counting), so `label :top; generate moods; goto :top` plays
-      # on forever.
-      Generate = Data.define(:source, :lengths, :sections, :declares) do
-        def initialize(source:, lengths: {}, sections: nil, declares: [])
+      # on forever.  +length+ (bars, or a Duration; gen-midi-2) bounds one
+      # arc of the source: once the sections drawn since the source last
+      # started over (a chain's end or its start state, a new word) reach
+      # it, the source heads for its end the shortest way
+      # (Markov#form_finish, LSystem#form_finish), so an endless flow's
+      # shape repeats within about +length+.
+      Generate = Data.define(:source, :lengths, :sections, :declares, :length) do
+        def initialize(source:, lengths: {}, sections: nil, declares: [], length: nil)
           unless %i[form_start form_next form_states nonterminal? seed to_ruby].all? { |m| source.respond_to?(m) }
             raise ArgumentError, "generate needs a section source: markov(...) or lsystem(...) (got #{source.inspect})"
+          end
+          unless length.nil?
+            raise ArgumentError, "generate length: is bars or a Duration, like 128 or 128.bars (got #{length.inspect})" unless Form.length?(length) && length.to_r > 0
+            raise ArgumentError, "generate length: needs a source that can head for its end (#form_finish; got #{source.class})" unless source.respond_to?(:form_finish)
           end
           raise ArgumentError, "generate's lengths are a Hash of section => length (got #{lengths.inspect})" unless lengths.is_a?(Hash)
           lengths.each { |name, len| Form.check_length_spec(name, len) }
           raise ArgumentError, "generate sections: must be a positive Integer or nil (got #{sections.inspect})" unless sections.nil? || (sections.is_a?(Integer) && sections > 0)
-          super(source: source, lengths: lengths.dup.freeze, sections: sections, declares: declares.dup.freeze)
+          super(source: source, lengths: lengths.dup.freeze, sections: sections, declares: declares.dup.freeze, length: length)
         end
 
         # The length of section +name+ for the source's draw +n+ (its own
@@ -262,6 +271,7 @@ module MB
             parts << "bars: #{Form.ruby_value(bars)}"
           end
           parts << "sections: #{sections}" if sections
+          parts << "length: #{Form.ruby_value(length)}" if length
           "generate #{parts.join(', ')}"
         end
       end
@@ -659,7 +669,7 @@ module MB
               when Array then spec.map { |l| block.call(l, :generate) }
               else block.call(spec, :generate)
               end
-            })
+            }, length: e.length && block.call(e.length, :generate))
           else e
           end
         }

@@ -106,6 +106,20 @@ module MB
           [w[pos], [visit, pos + 1].freeze]
         end
 
+        # Like #form_next, heading for the word's end (a generate step's
+        # +length:+ bound, gen-midi-2): the word's last symbol plays next
+        # (if it is a section; else the word ends).
+        def form_finish(tail, n, read)
+          visit, pos = tail
+          w = word(visit: visit)
+          form_next([visit, [pos, w.length - 1].max].freeze, n, read)
+        end
+
+        # True after the first symbol of a word (each word is a new arc).
+        def form_restart?(tail)
+          tail[1] == 1
+        end
+
         # A goto to a generated section plays it, then carries on in the
         # word where it was.
         def form_force(tail, _name)
