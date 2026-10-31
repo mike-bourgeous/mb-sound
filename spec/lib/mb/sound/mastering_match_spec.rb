@@ -67,6 +67,95 @@ RSpec.describe('MB::Sound::Mastering :match', :aggregate_failures) do
     end
   end
 
+  # measure: :integrated | :loudest | :histogram (maintainer, 2026-10-31:
+  # "Histogram, loudest, and integrated all as options")
+  describe 'measures' do
+    # 8 s of pink noise at 0.5, then 8 s at 0.25 (6 dB quieter, over the
+    # relative gate, so the integrated loudness reads both)
+    def loud_then_quiet
+      @loud_then_quiet ||= rendered((MB::Sound.noise(:pink) * 0.5).until(8).and_then(MB::Sound.noise(:pink) * 0.25), 16)
+    end
+
+    it 'read the reference whole, by its loudest window, or by the center of its bar histogram' do
+      MB::Sound.seed(3)
+      ref = MB::Sound::Mastering.reference(loud_then_quiet)
+      loud = MB::Sound::Mastering.reference(loud_then_quiet.map { |c| c[0...(rate * 8)] })
+      quiet = MB::Sound::Mastering.reference(loud_then_quiet.map { |c| c[(rate * 8)..] })
+      level = ->(m, **kw) { MB::Sound::Mastering.reference_level(ref, m, bar_seconds: 2.0, **kw) }
+
+      expect(level.(:integrated)).to eq(ref.lufs)
+      expect(level.(:loudest, bars: 2)).to be_within(0.2).of(loud.lufs)
+      expect(level.(:loudest, bars: 2, seconds: 1.0)).to be > level.(:loudest, bars: 2) - 0.5
+      # Four bars of each: the quantiles from 10 to 90% average to the
+      # middle of the two levels
+      expect(level.(:histogram)).to be_within(0.3).of((loud.lufs + quiet.lufs) / 2)
+      expect(quiet.lufs).to be < loud.lufs - 5
+      expect(ref.lufs).to be < loud.lufs - 1
+      # A track shorter than the window is measured whole
+      expect(level.(:loudest, bars: 16)).to be_within(0.01).of(ref.lufs)
+      expect(MB::Sound::Mastering.bar_ranges(16.0, 2.0).length).to eq(8)
+      expect(MB::Sound::Mastering.bar_ranges(1.5, 2.0)).to eq([[0.0, 1.5]])
+
+      expect { MB::Sound::Mastering.reference_level(ref.with(analyzer: nil), :histogram, bar_seconds: 2.0) }.to raise_error(ArgumentError, /no loudness blocks/)
+      expect { level.(:bars) }.to raise_error(ArgumentError, /measure: is :integrated, :loudest, :histogram for :match/)
+    end
+
+    it 'find the histogram center from interpolated quantiles, leaving out silence and bars 20 LU under the loudest' do
+      levels = [-10.0, -12.0, -14.0, -16.0, -18.0, nil, -Float::INFINITY, -45.0]
+      expect(MB::Sound::Mastering.histogram_quantiles(levels, [0.0, 0.5, 0.75, 1.0])).to eq([-18.0, -14.0, -12.0, -10.0])
+      expect(MB::Sound::Mastering.histogram_level(levels)).to be_within(1e-9).of(-14.0)
+      expect(MB::Sound::Mastering.histogram_level([nil])).to be_nil
+    end
+
+    it "set the preset's target, accepting only measures a reference has, and raise for :histogram on other presets" do
+      ref = MB::Sound::Mastering.reference(loud_then_quiet)
+      MB::Sound::Sequence.transport.bpm = 120
+      p = MB::Sound::Mastering.from_preset(:match, reference: ref, measure: :histogram)
+      expect(p.target.lufs).to eq(MB::Sound::Mastering.reference_level(ref, :histogram, bar_seconds: 2.0))
+      expect(p).to be_reference_target
+      expect(p.summary).to start_with(format('match: %.1f LUFS (the bar-loudness histogram)', p.target.lufs))
+      expect(MB::Sound::Mastering.from_preset(:match, reference: ref, measure: :loudest, loudest_bars: 2).target.lufs).to be > ref.lufs + 1
+      fixed = MB::Sound::Mastering.from_preset(:match, reference: ref, measure: :loudest, lufs: -12)
+      expect([fixed.target.lufs, fixed.reference_target?]).to eq([-12.0, false])
+
+      expect { MB::Sound::Mastering.from_preset(:match, reference: ref, measure: :bars) }.to raise_error(ArgumentError, /measures :integrated, :loudest, :histogram .*:histogram matches the bars' loudness/)
+      expect { MB::Sound::Mastering.from_preset(:match, reference: ref, measure: :histo) }.to raise_error(ArgumentError, /Did you mean\?  :histogram/)
+      expect { MB::Sound::Mastering.from_preset(:match, reference: ref, measure: :histogram, percentile: 0.5) }.to raise_error(ArgumentError, /percentile: goes with measure: :bars/)
+      expect { MB::Sound::Mastering.from_preset(:club, measure: :histogram) }.to raise_error(ArgumentError, /:histogram matches a reference's bar-loudness histogram: master :match/)
+      expect { MB::Sound::Mastering.from_preset(:club, measure: :loudst) }.to raise_error(ArgumentError, /Did you mean\?  :loudest/)
+    ensure
+      MB::Sound::Sequence.transport.bpm = 120
+    end
+
+    it "reach the reference's loudest window or histogram center in renders, with the render's bar length" do
+      ref_path = tmp_path('loud_quiet.flac')
+      MB::Sound.write(ref_path, loud_then_quiet)
+      ref = MB::Sound::Mastering.reference(ref_path)
+      # A mix with one quiet bar, then loud ones
+      mix = -> { MB::Sound.seed(4); (MB::Sound.noise(:pink) * 0.05).until(2).and_then(MB::Sound.noise(:pink) * 0.2) }
+      { loudest: { loudest_bars: 1 }, histogram: {} }.each do |m, kw|
+        expect {
+          MB::Sound.render(tmp_path("#{m}.flac"), seconds: 4) { MB::Sound.master :match, reference: ref_path, measure: m, **kw; MB::Sound.bg :x, mix.() }
+        }.to output(/mastering :match: pass/).to_stdout
+        r = MB::Sound::Mastering::Targeting.last
+        expected = MB::Sound::Mastering.reference_level(ref, m, bar_seconds: 2.0, bars: 1)
+        expect(r.reference_level).to eq(expected)
+        expect(r.target.lufs).to eq(expected)
+        expect(r.measure).to eq(m)
+        expect(r.loudest).to be_within(0.1).of(expected)
+        text = r.to_s
+        if m == :histogram
+          expect(text).to include(format('bar histogram center %.2f LUFS', r.loudest), format('bar histogram center %.1f, ', expected))
+          expect(text).to match(%r{bar loudness 10/50/90%: reference -\d+\.\d / -\d+\.\d / -\d+\.\d, mastered })
+          expect(r.histogram[:reference]).to eq(MB::Sound::Mastering.histogram_quantiles(ref.analyzer.loudness_in(MB::Sound::Mastering.bar_ranges(ref.seconds, 2.0))))
+        else
+          expect(text).to include(format('loudest 1 bars %.1f, ', expected))
+          expect(r.histogram).to be_nil
+        end
+      end
+    end
+  end
+
   describe 'the :match preset' do
     let(:ref) {
       MB::Sound::Mastering::Reference.new(name: 'ref', path: 'ref.flac', lufs: -9.3, true_peak: 0.4, short_term_max: -8, range: 4,

@@ -19,8 +19,15 @@ module MB
       # (nil for audio given as data), +lufs+ (integrated), +true_peak+
       # (dBTP), +short_term_max+, +range+ (LRA), +tilt+ (dB per octave,
       # Analysis::Spectrum#tilt), +bands+ (third-octave levels re the
-      # total, Analysis::Spectrum#bands), and +seconds+.
-      Reference = Data.define(:name, :path, :lufs, :true_peak, :short_term_max, :range, :tilt, :bands, :seconds) do
+      # total, Analysis::Spectrum#bands), +seconds+, and +analyzer+ (the
+      # Loudness::Analyzer that measured it, whose 400 ms blocks give the
+      # loudness of its windows for measure: :loudest and :histogram; nil
+      # for a Reference made by hand, which measures :integrated only).
+      Reference = Data.define(:name, :path, :lufs, :true_peak, :short_term_max, :range, :tilt, :bands, :seconds, :analyzer) do
+        def initialize(analyzer: nil, **rest)
+          super(analyzer: analyzer, **rest)
+        end
+
         def to_s
           format('%s: %.1f LUFS, %.1f dBTP, LRA %.1f LU, tilt %+.2f dB/oct', name, lufs, true_peak, range, tilt)
         end
@@ -48,6 +55,28 @@ module MB
       # these (dBTP).
       MATCH_CEILING = -3.0..-0.5
 
+      # What :match's +measure:+ reads, in the reference and in the song
+      # alike (maintainer, 2026-10-31: "Histogram, loudest, and integrated
+      # all as options"): :integrated (the default) the whole track's
+      # integrated loudness; :loudest the loudest +loudest_bars:+ bars (in
+      # the reference, its loudest window as long as that many of the
+      # song's bars, starting anywhere: its own bar lines aren't known);
+      # :histogram the center of the bar-loudness histogram (see
+      # .histogram_level; the reference cut into windows one of the song's
+      # bars long).  The other MEASURES (:bars, :sections) have no
+      # counterpart in a reference.
+      MATCH_MEASURES = %i[integrated loudest histogram].freeze
+
+      # The quantiles of the bar-loudness histogram whose mean is its
+      # center (measure: :histogram): one trim moves every bar's level by
+      # the same amount, so matching the mean of these quantiles is the
+      # least-squares fit of the song's histogram onto the reference's
+      # (through the chain, which compresses its loud end).
+      HISTOGRAM_QUANTILES = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9].freeze
+
+      # The quantiles a report prints for measure: :histogram.
+      REPORT_QUANTILES = [0.1, 0.5, 0.9].freeze
+
       class << self
         # A Reference for +source+: a sound file (measured once per path,
         # size, and time), a Sample, audio data (an Array of channels or a
@@ -73,6 +102,59 @@ module MB
           else
             raise ArgumentError, "reference: is a sound file, a Sample, audio (an Array of channels), or a Mastering::Reference (got #{source.class})"
           end
+        end
+
+        # The loudness (LUFS) of +reference+ as +measure+ (MATCH_MEASURES)
+        # reads it for a song whose bars last +bar_seconds+: its integrated
+        # loudness, the loudest window of +bars+ bars (+seconds+ instead,
+        # when given: a song shorter than the window is measured whole), or
+        # the center of its bar-loudness histogram.
+        def reference_level(reference, measure, bar_seconds:, bars: LOUDEST_BARS, seconds: nil)
+          return reference.lufs if measure == :integrated
+          raise ArgumentError, "measure: is #{MATCH_MEASURES.map(&:inspect).join(', ')} for :match (got #{measure.inspect})" unless MATCH_MEASURES.include?(measure)
+          a = reference.analyzer
+          unless a
+            raise ArgumentError, "The reference #{reference.name} has no loudness blocks for measure: #{measure.inspect} (measure it with Mastering.reference(file))"
+          end
+
+          case measure
+          when :loudest
+            a.loudest(seconds || bars * bar_seconds, hop: Loudness::STEP_SEGMENTS * Loudness::SEGMENT).round(2)
+          when :histogram
+            histogram_level(a.loudness_in(bar_ranges(reference.seconds, bar_seconds)))&.round(2) || reference.lufs
+          end
+        end
+
+        # [start, end] seconds of every whole window of +bar_seconds+ in
+        # +seconds+ (at least one, the whole, for a shorter track).
+        def bar_ranges(seconds, bar_seconds)
+          n = (seconds / bar_seconds + 1e-9).floor
+          return [[0.0, seconds.to_f]] if n < 1
+          Array.new(n) { |i| [i * bar_seconds, (i + 1) * bar_seconds] }
+        end
+
+        # The center of a bar-loudness histogram (measure: :histogram): the
+        # mean of the HISTOGRAM_QUANTILES of +levels+ (LUFS per bar; nil and
+        # silent bars, and bars more than BARS_RANGE LU under the loudest,
+        # left out), or nil when no bar has a level.
+        def histogram_level(levels)
+          q = histogram_quantiles(levels, HISTOGRAM_QUANTILES)
+          q && q.sum / q.length
+        end
+
+        # The +quantiles+ (0..1, linearly interpolated) of +levels+ as
+        # .histogram_level filters them, or nil.
+        def histogram_quantiles(levels, quantiles = REPORT_QUANTILES)
+          levels = levels.compact.select(&:finite?)
+          return nil if levels.empty?
+          top = levels.max
+          sorted = levels.select { |l| l >= top - BARS_RANGE }.sort
+          quantiles.map { |q|
+            pos = (sorted.length - 1) * q
+            lo = pos.floor
+            hi = [lo + 1, sorted.length - 1].min
+            sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo)
+          }
         end
 
         # Applies a tilt of +db_per_octave+ (see TILT_SHELVES) to +mix+ (a
@@ -107,7 +189,7 @@ module MB
           sp = Analysis::Spectrum.new(channels, sample_rate: sample_rate)
           Reference.new(name: name, path: path, lufs: r.integrated.round(2), true_peak: r.true_peak.round(2),
             short_term_max: r.short_term_max.round(2), range: r.range.round(2), tilt: sp.tilt, bands: sp.bands,
-            seconds: (channels[0].size.to_f / sample_rate).round(3))
+            seconds: (channels[0].size.to_f / sample_rate).round(3), analyzer: a)
         end
       end
     end

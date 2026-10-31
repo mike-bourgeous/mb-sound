@@ -100,8 +100,9 @@ module MB
           }
         end
 
-        # What a render's target measures: :integrated (the default) or
-        # :loudest (see MEASURES).
+        # What a render's target measures: :integrated (the default),
+        # :loudest, :bars, or :sections (see MEASURES); :match's
+        # :histogram (MATCH_MEASURES).
         def measure
           options.fetch(:measure) { Mastering.preset_settings(name).dig(:defaults, :measure) || :integrated }
         end
@@ -131,7 +132,15 @@ module MB
           when :loudest then "loudest #{loudest_bars} bars"
           when :bars then "bars at the #{Mastering.ordinal((percentile * 100).round)} percentile"
           when :sections then "each section, energy #{energy}"
+          when :histogram then 'the bar-loudness histogram'
           end
+        end
+
+        # True if the target is the reference's loudness as #measure reads
+        # it (:match without lufs:), which renders measure again with the
+        # song's own bar length (Mastering.reference_level).
+        def reference_target?
+          !reference.nil? && !options.key?(:lufs) && !options.key?(:platform)
         end
 
         # True if renders measure and set the trim (not with a fixed
@@ -248,7 +257,9 @@ module MB
                'turns the mix\'s long-term spectrum toward the reference\'s tilt (dB per octave, 100 Hz to 10 kHz) with seven ' \
                'octave-spaced high shelves after the trim: renders measure the mix in their first pass (within 1.5 dB/oct); ' \
                'live there is no measurement, so tilt: takes a number (dB/oct) or false.  Then gentle glue (1.5:1 RMS, 5 dB ' \
-               'over the target) and the club\'s two limiters.',
+               'over the target) and the club\'s two limiters.  measure: reads the song and the reference alike: ' \
+               ':integrated (the default), :loudest (loudest_bars: of the song\'s bars), or :histogram (the center of ' \
+               'the bars\' loudness distribution, the 10th to 90th percentiles averaged).',
         source: 'Long-term average spectrum matching as in reference-matching mastering tools (the tilt only: a slope, not ' \
                 'a matching EQ curve); BS.1770-4 (loudness, true peak); listen-1 (2026-10-30)'
 
@@ -286,6 +297,10 @@ module MB
       # loudest in the mix, so energy 1 keeps the mix's curve (quieter
       # sections come up by trim, never by the clipper) and less narrows it
       # (0.4: a breakdown 6 LU under the drop in the mix lands 2.4 LU under).
+      #
+      # :match measures its reference the same way as the song, so it takes
+      # MATCH_MEASURES instead (:integrated, :loudest, and :histogram; see
+      # mastering/match.rb).
       MEASURES = %i[integrated loudest bars sections].freeze
 
       # The default +energy:+ of +measure: :sections+.
@@ -303,6 +318,10 @@ module MB
       # Bars more than this many LU under the loudest bar don't count for
       # +measure: :bars+ (silence, tails, a lone fading hat).
       BARS_RANGE = 20.0
+
+      # A bar's length (seconds) for measurements without a transport (4/4
+      # at 120 BPM, as Targeting.loudest_windows assumes).
+      DEFAULT_BAR_SECONDS = 2.0
 
       # The default window (bars) of +measure: :loudest+ (genre templates
       # set their own from their phrase lengths: Genre::Mix#loudest_bars).
@@ -386,8 +405,17 @@ module MB
           if options.key?(:platform) && options.key?(:lufs)
             raise ArgumentError, 'Pass lufs: or platform:, not both'
           end
-          if options.key?(:measure) && !MEASURES.include?(options[:measure])
-            raise ArgumentError, "measure: is #{MEASURES.map(&:inspect).join(' or ')} (got #{options[:measure].inspect})"
+          if options.key?(:measure)
+            m = options[:measure]
+            if chain == :match && !MATCH_MEASURES.include?(m)
+              raise ArgumentError, "master #{key.inspect} measures #{MATCH_MEASURES.map(&:inspect).join(', ')} in the song and the reference alike " \
+                                   "(got #{m.inspect}#{MEASURES.include?(m) ? '; :histogram matches the bars\' loudness distribution)' : ")#{Form.suggest(m, MATCH_MEASURES)}"}"
+            elsif chain != :match && m == :histogram
+              raise ArgumentError, "measure: :histogram matches a reference's bar-loudness histogram: master :match, reference: 'their_track.flac', " \
+                                   "measure: :histogram (master #{key.inspect} measures #{MEASURES.map(&:inspect).join(', ')})"
+            elsif chain != :match && !MEASURES.include?(m)
+              raise ArgumentError, "measure: is #{MEASURES.map(&:inspect).join(' or ')} (got #{m.inspect})#{Form.suggest(m, MEASURES)}"
+            end
           end
           if options.key?(:loudest_bars) && !(options[:loudest_bars].is_a?(Integer) && options[:loudest_bars] > 0)
             raise ArgumentError, "loudest_bars: is a number of bars, a positive Integer (got #{options[:loudest_bars].inspect})"
@@ -418,7 +446,14 @@ module MB
               raise ArgumentError, "tilt: is true (measured in renders), false, or a correction in dB per octave (got #{o[:tilt].inspect})"
             end
             reference = Mastering.reference(o[:reference])
-            o[:lufs] = reference.lufs unless o.key?(:lufs)
+            # The reference's loudness as the song will be measured (live
+            # and the first pass: at the current tempo and meter; renders
+            # measure it again with the render's own bar length)
+            unless o.key?(:lufs)
+              t = Sequence.current_transport
+              o[:lufs] = Mastering.reference_level(reference, measure, bars: o[:loudest_bars] || LOUDEST_BARS,
+                bar_seconds: t ? t.seconds_of(t.bar_length).to_f : DEFAULT_BAR_SECONDS)
+            end
           end
           target = target_of(o[:lufs])
           # An explicit ceiling, else the preset's own (club, vinyl), else
