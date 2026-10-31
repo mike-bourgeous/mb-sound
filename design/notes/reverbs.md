@@ -4,6 +4,11 @@
 `#reverb` (`GraphNode::Reverb`, kernel `fast_reverb`, mirror `MB_SOUND_KERNELS=reverb_network=ruby`) is the one reverb: `[l, r].reverb(:hall)` runs inputs through diffusion, a per-sample FDN, and output taps with energy-normalized gains.  Presets `:room`, `:hall`, `:stadium`, `:space`, `:plate`, `:shimmer`, `:gated`, `:drone`, ...; the friendly form takes `room_size:`, `decay:`, `damping:`, `mix:`; options for modulation, in-loop filters, drive, crush, shimmer, freeze, and stretch, plus `duck:` and `gate:` after the network.  Unlike other DSL calls on bundles, one reverb serves all channels.
 <!-- /summary -->
 
+## Quick reference
+
+- `[l, r].reverb(:hall)` (`:room`, `:stadium`, `:space`, `:plate`, `:shimmer`, `:gated`, `:drone`, ...), or `reverb(room_size:, decay:, damping:, mix:)`; one reverb serves every channel.
+- Code `lib/mb/sound/graph_node/reverb.rb` (kernel `fast_reverb`, mirror `MB_SOUND_KERNELS=reverb_network=ruby`); spec `spec/lib/mb/sound/graph_node/reverb_spec.rb`; help `help :effects`.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

@@ -939,7 +939,10 @@ module MB
         :match, reference: 'their_track.flac'` masters like a reference:
         its loudness and true peak, and renders turn the mix's spectral
         tilt toward the reference's (scripts: `--reference FILE`;
-        `Mastering.reference(path)` shows what it measured).
+        `Mastering.reference(path)` shows what it measured).  Its
+        `measure:` reads the song and the reference alike: `:integrated`
+        (the default), `:loudest` (the loudest `loudest_bars:` bars), or
+        `:histogram` (the center of the bars' loudness distribution).
         Without a master chain the live output (not renders or recordings)
         ends in a transparent safety limiter at -1 dBFS; `master` says so,
         and any chain or preset replaces it.

@@ -103,11 +103,6 @@ module MB
         name.rpartition('::').last
       end
 
-      # Removes lowercase letters to generate a shorter window name.
-      def self.short_name
-        self.window_name.gsub(/[[:lower:]]/, '')
-      end
-
       private
 
       # Subclasses should override to generate a Numo::NArray for the pre-FFT

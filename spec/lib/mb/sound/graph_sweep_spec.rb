@@ -45,6 +45,17 @@ RSpec.describe('graph sweep (memcheck light)', :check_shared) do
           rescue => e
             raise e.class, "#{name} (#{planned ? 'planned' : 'unplanned'}, #{size}-sample buffers): #{e.message}", e.backtrace
           end
+          next unless size == GraphSweep::NOTES_REFERENCE[0] && GraphSweep.notes?(graph)
+
+          # The Notes reference path (see GraphSweep::NOTES_REFERENCE)
+          MB::Sound::Kernels.with(notes_fast: :ruby) do
+            MB::Sound.seed(1)
+            graph = factory.call(GraphSweep::Context.new)
+            MB::Sound::Plan.install(graph) if planned
+            GraphSweep.run(graph, *GraphSweep::NOTES_REFERENCE)
+          rescue => e
+            raise e.class, "#{name} (#{planned ? 'planned' : 'unplanned'}, Notes reference path, #{GraphSweep::NOTES_REFERENCE[0]}-sample buffers): #{e.message}", e.backtrace
+          end
         end
       end
     end

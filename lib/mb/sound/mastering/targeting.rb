@@ -326,17 +326,26 @@ module MB
         #
         # :match (Mastering::Reference): +reference+, +tilt+ (the tilt EQ's
         # correction, dB per octave, nil unless measured), +tilt_in+ (the
-        # mix's tilt at the trim), and +tilt_out+ (the render's).
+        # mix's tilt at the trim), and +tilt_out+ (the render's).  With
+        # measure: :histogram, +loudest+ is the center of the bars'
+        # loudness histogram (Mastering.histogram_level) and +histogram+
+        # the Mastering::REPORT_QUANTILES of the reference's bars and the
+        # render's ({ reference:, mastered: }).  +reference_level+ is the
+        # reference's loudness as +measure+ read it (Mastering.reference_level;
+        # the target unless lufs: was given).
         Result = Data.define(:preset, :trim, :target, :ceiling, :integrated, :short_term_max, :range, :true_peak, :side, :side_hz,
                              :first_pass, :runs, :held, :codec_peaks, :measure, :loudest, :loudest_bars, :drive, :percentile, :side_in,
-                             :trims, :sections, :energy, :reference, :tilt, :tilt_in, :tilt_out) do
-          def initialize(drive: nil, percentile: nil, side_in: nil, trims: nil, sections: nil, energy: nil, reference: nil, tilt: nil, tilt_in: nil, tilt_out: nil, **rest)
+                             :trims, :sections, :energy, :reference, :tilt, :tilt_in, :tilt_out, :histogram, :reference_level) do
+          def initialize(drive: nil, percentile: nil, side_in: nil, trims: nil, sections: nil, energy: nil, reference: nil, tilt: nil, tilt_in: nil, tilt_out: nil,
+                         histogram: nil, reference_level: nil, **rest)
             super(drive: drive, percentile: percentile, side_in: side_in, trims: trims, sections: sections, energy: energy,
-              reference: reference, tilt: tilt, tilt_in: tilt_in, tilt_out: tilt_out, **rest)
+              reference: reference, tilt: tilt, tilt_in: tilt_in, tilt_out: tilt_out, histogram: histogram,
+              reference_level: reference_level, **rest)
           end
 
           # The loudness the target was reached with (integrated, the
-          # loudest window's, or the bars' percentile level).
+          # loudest window's, the bars' percentile level, or the center of
+          # their histogram).
           def measured
             measure == :integrated ? integrated : loudest
           end
@@ -372,6 +381,7 @@ module MB
                           when :loudest then format('loudest %d bars %.2f LUFS, target %.1f', loudest_bars, loudest, target.lufs)
                           when :bars then format('bars at the %s percentile %.2f LUFS, target %.1f', Mastering.ordinal((percentile * 100).round), loudest, target.lufs)
                           when :sections then format('loudest section %.2f LUFS, target %.1f, energy %.2f', loudest, target.lufs, energy)
+                          when :histogram then format('bar histogram center %.2f LUFS, target %.1f', loudest, target.lufs)
                           else format('target %.1f', target.lufs)
                           end
             lines << format('  loudness %.2f LUFS (%s%s), short-term max %.1f, LRA %.1f LU, PLR %.1f LU',
@@ -384,10 +394,20 @@ module MB
             side_text = side_in ? "#{db_text.(side_in)} in the mix, #{db_text.(side)} mastered" : db_text.(side)
             lines << format('  true peak %.2f dBTP (ceiling %.1f), side below %d Hz %s re mid', true_peak, ceiling.db_value, side_hz, side_text)
             if reference
-              lines << format('  like %s (%.1f LUFS, %.1f dBTP); tilt: reference %+.2f dB/oct, mix %s, EQ %s, mastered %s',
-                              reference.name, reference.lufs, reference.true_peak, reference.tilt,
+              level = case (reference_level && measure)
+                      when :loudest then format(', loudest %d bars %.1f', loudest_bars, reference_level)
+                      when :histogram then format(', bar histogram center %.1f', reference_level)
+                      else ''
+                      end
+              lines << format('  like %s (%.1f LUFS%s, %.1f dBTP); tilt: reference %+.2f dB/oct, mix %s, EQ %s, mastered %s',
+                              reference.name, reference.lufs, level, reference.true_peak, reference.tilt,
                               tilt_in ? format('%+.2f', tilt_in) : 'not measured', tilt ? format('%+.2f', tilt) : 'none',
                               tilt_out ? format('%+.2f', tilt_out) : 'n/a')
+            end
+            if histogram
+              q = ->(list) { list ? list.map { |v| format('%.1f', v) }.join(' / ') : 'n/a' }
+              pct = Mastering::REPORT_QUANTILES.map { |p| (p * 100).round }.join('/')
+              lines << "  bar loudness #{pct}%: #{reference ? "reference #{q.(histogram[:reference])}, " : ''}mastered #{q.(histogram[:mastered])} LUFS"
             end
             if sections
               lines << '  sections (mix LUFS -> target, mastered, trim):'
@@ -424,6 +444,7 @@ module MB
           if targets.length > 1 && target.nil?
             warn "The render's mastering presets have different targets (#{targets.map { |t| format('%.1f', t) }.join(', ')} LUFS); using the last one's"
           end
+          given_target = target
           target ||= presets.last.target
           ceiling = presets.map(&:ceiling).min_by(&:db_value)
           limited = presets.all?(&:limiter)
@@ -454,8 +475,22 @@ module MB
           window = case mode
                    when :loudest then loudest_windows(session.transport, origin, length, session.sample_rate, bars)
                    when :bars then bar_windows(session.transport, origin, length, session.sample_rate, presets.last.percentile)
+                   when :histogram then bar_windows(session.transport, origin, length, session.sample_rate, nil).merge(histogram: true)
                    when :sections then { ranges: [sections[:ranges][sections[:loudest]]] }
                    end
+          # :match: the reference's loudness as the song is measured, with
+          # the render's bar length (the preset's target used the tempo at
+          # its build)
+          reference = presets.last.reference
+          tr = session.transport
+          bar_seconds = tr ? tr.seconds_of(tr.bar_length).to_f : Mastering::DEFAULT_BAR_SECONDS
+          ref_level = nil
+          if reference && (mode == :integrated || reference.analyzer) && Mastering::MATCH_MEASURES.include?(mode)
+            # A render shorter than the window is measured whole
+            whole = mode == :loudest && window[:ranges]&.empty? ? length.to_f / session.sample_rate : nil
+            ref_level = Mastering.reference_level(reference, mode, bar_seconds: bar_seconds, bars: bars, seconds: whole)
+            target = Loudness.target(ref_level) if given_target.nil? && presets.last.reference_target? && (ref_level - target.lufs).abs > 1e-9
+          end
           first = measure(base, session.sample_rate, true_peak: false, loudest: window)[0]
           runs = 0
           # +db+ is the trim in dB, or a TrimCurve
@@ -553,6 +588,7 @@ module MB
             preset: presets.last.name, trim: x1.db, target: target, ceiling: ceiling,
             integrated: r.integrated, short_term_max: r.short_term_max, range: r.range, true_peak: r.true_peak,
             side: side, side_hz: hz, first_pass: first, runs: runs, held: held, codec_peaks: nil,
+            histogram: mode == :histogram ? histogram_report(a, window, reference, bar_seconds) : nil, reference_level: ref_level,
             measure: mode, loudest: window ? loudest_of(a, window) : nil, loudest_bars: mode == :loudest ? bars : nil,
             drive: drive, percentile: mode == :bars ? presets.last.percentile : nil, side_in: side_in,
             trims: trims, sections: rows&.map(&:freeze)&.freeze, energy: mode == :sections ? presets.last.energy : nil,
@@ -833,9 +869,19 @@ module MB
           { ranges: ranges }
         end
 
+        # measure: :histogram's report: the Mastering::REPORT_QUANTILES of
+        # the bars' levels in the reference (bars of +bar_seconds+) and in
+        # the render (Analyzer +a+, the windows of +spec+), as { reference:,
+        # mastered: } Arrays of LUFS (nil entries when unmeasured).
+        def self.histogram_report(a, spec, reference, bar_seconds)
+          ref = reference&.analyzer && bar_seconds ? Mastering.histogram_quantiles(reference.analyzer.loudness_in(Mastering.bar_ranges(reference.seconds, bar_seconds))) : nil
+          { reference: ref, mastered: Mastering.histogram_quantiles(a.loudness_in(spec[:ranges])) }.freeze
+        end
+
         # The windows of measure: :bars (see Mastering::MEASURES): every
         # whole bar of the render (as .loudest_windows with one bar; 2 s
-        # steps without a transport) and the +percentile+.
+        # steps without a transport) and the +percentile+ (measure:
+        # :histogram: none).
         def self.bar_windows(transport, origin, length, sample_rate, percentile)
           spec = loudest_windows(transport, origin, length, sample_rate, 1)
           unless spec[:ranges]
@@ -852,6 +898,7 @@ module MB
         # loudness when no window holds a block).
         def self.loudest_of(a, spec)
           return a.loudest(spec[:seconds], hop: spec[:hop]) unless spec[:ranges]
+          return Mastering.histogram_level(a.loudness_in(spec[:ranges])) || a.integrated if spec[:histogram]
           return a.loudest_in(spec[:ranges]) unless spec[:percentile]
 
           levels = a.loudness_in(spec[:ranges]).compact.select(&:finite?)

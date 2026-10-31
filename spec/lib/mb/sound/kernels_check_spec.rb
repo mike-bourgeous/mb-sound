@@ -54,8 +54,7 @@ module KernelCheckExtras
       MB::Sound::Tone.value_at(:triangle, 0.3)
       [110.hz.unison(3, detune: 2.hz.lfo.at(0..0.3), detune_mode: :interp) { |p| p.saw },
        110.hz.unison(3, detune: 0.2.constant, detune_mode: :exact) { |p| p.saw }].each { |u| 3.times { u.sample(128) } }
-      f = MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 1000, quality: 0.7)
-      f.process_one(0.3)
+      MB::Sound::Kernels.biquad(0.2, 0.1, 0.05, -0.3, 0.1, 0.5, 0.1, 0.0, 0.2, 0.1)
       MB::Sound::Kernels.biquad_complex(0.2, 0.1, 0.05, -0.3, 0.1, Complex(0.5, 0.1), 0.1, 0.0, 0.2, 0.1)
     },
     'wavetable sync, sample playback, and key-synced resets' => -> {

@@ -14,6 +14,13 @@ RSpec.describe(MemcheckSelection) do
       expect(mapped.keys - MemcheckSelection.spec_files).to eq([])
     end
 
+    # A removed spec left in SPECS globs to nothing and silently drops its
+    # extension's coverage (filter/smoothstep_spec.rb stayed listed after
+    # smoothing-1 removed it; cleanup-2)
+    it 'lists only SPECS entries that match a spec file' do
+      expect(MemcheckSelection::SPECS.select { |g| Dir.glob(g, base: MemcheckSelection::ROOT).empty? }).to eq([])
+    end
+
     it 'names only existing extensions' do
       expect(mapped.values.flatten.uniq - MemcheckSelection.extension_names).to eq([])
     end

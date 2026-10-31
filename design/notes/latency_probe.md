@@ -5,6 +5,11 @@
 Reports give percentiles, top stalls with wall times, periodicity (":59.9 of each minute"), Ruby stalls by cause, and plots; `MB_SOUND_LATENCY_PROBE=1` probes any live script.
 <!-- /summary -->
 
+## Quick reference
+
+- `bin/latency_probe.rb -t 1h`, `MB::Sound::LatencyProbe.start(dir:)`, `#watch(session)`; `MB_SOUND_LATENCY_PROBE=1` probes any live script.
+- Reports: percentiles, top stalls, periodicity, Ruby stalls by cause, plots.  Specs `spec/lib/mb/sound/latency_probe_spec.rb`, `spec/bin/latency_probe_spec.rb`.
+
 Branch `latency-probe-1`, 2026-10-25.  The maintainer: "Before all else, build and merge a latency detector that uses a GVL-free C thread on a short wakeup loop to detect system stalls and passes data through a queue to another C thread that pulls the data into Ruby for storage and analysis. Incorporate whatever ideas the jit agent used for detecting system latency, and if necessary ask me questions and add your own understanding of the space to extend the feature set in ways we are likely to need. I want to be able to leave this running for, say, an hour or more and get a histogram and time plot of latencies, etc."  Then: "also track free memory, load average and/or CPU percentage, as metrics on the plots where useful."
 
 Why: scene-jit-1 (2026-10-24, `design/notes/arrangement.md`, Transition compiling) found the Mac's Docker VM slows memory-touching work ~10x at the top of every wall-clock minute (:59.8-:00.8; its probe3.rb: 33 ms of work took 357 ms) while a CPU-only probe missed it, and container underruns couldn't be told apart from mb-sound's own stalls (YJIT compiles, GC, GVL holds).  A thread outside the GVL sees only the system; a Ruby thread in the same process sees the system plus the GVL, GC, and YJIT; the difference attributes each stall.

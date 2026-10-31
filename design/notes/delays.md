@@ -4,6 +4,11 @@
 `#delay` (`Filter::Delay`) and `#multitap` share `MB::Sound::DelayLine` (C reads, exact mirrors; `:sinc` interpolation by default, `:cubic`, `:linear`); times are any length or node (`96.samples`, `3.n16`, `lfo.samples`), `feedback:`/`wet:`/`dry:` numbers or nodes, and delays ring out after their input ends (`MB::Sound::QuietRun#advance`).  Delay networks (`FastDelay.network`) build `multitap(t1, t2, feedback: [g1, g2] | g)`, `ping_pong(t, feedback:, spread:, mix:, input: :mono | :stereo)`, and `haas(15.ms, side:)`; tape echoes are `sig.tape_echo(:reel | :slapback | :ping_pong | :dub, time:, feedback:, mix:, tone:, low_cut:, drive:, wow:, flutter:)` (library family `:delay`).  Same output at any buffer size.
 <!-- /summary -->
 
+## Quick reference
+
+- `sig.delay(3.n16, feedback:, wet:, dry:)`, `multitap(t1, t2, feedback:)`, `ping_pong(t, feedback:, spread:)`, `haas(15.ms, side:)`, `sig.tape_echo(:dub, time:, feedback:)`; lengths as `96.samples`, `lfo.samples`.
+- Code `lib/mb/sound/delay_line.rb`, `lib/mb/sound/filter/delay.rb`; spec `spec/lib/mb/sound/filter/delay_spec.rb`; tools `bin/delay_gallery.rb`, `bin/delay_quality.rb`; help `help :effects`.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

@@ -6,6 +6,12 @@ Parameters are options only (`name: [default, 'description', '-x', Type, range]`
 Plain song files start with `require 'mb/sound/dsl'` (`MB::Sound::DSL`): the console's commands and note names at the program's top level, waiting for background playback at its end.
 <!-- /summary -->
 
+## Quick reference
+
+- Helpers: `effect_script { |input, p| }`, `synth_script { |midi, p| }`, `song_script(bars:) { |p| }`, `script(args:) { |args, p| }`; options only (`name: [default, 'description', '-x', Type, range]`), graph code inside the block.
+- Shebang `#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby` (`spec/bin/shebang_spec.rb`); plain song files `require 'mb/sound/dsl'`.
+- New scripts go in the smoke tables (`spec/bin/script_smoke_spec.rb`, `bundle exec rspec --tag smoke`); code `lib/mb/sound/script_runner.rb`.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

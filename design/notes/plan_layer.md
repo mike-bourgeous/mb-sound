@@ -4,6 +4,12 @@
 `lib/mb/sound/plan.rb` + `plan/` (executor `ext/mb/sound/fast_plan`) runs connected regions of a graph as one op list per block in C, installed automatically by `Synth` and `Session#add`: an as-if transformation (the same samples bit for bit, the user's graph untouched, node state kept in the nodes), with lane groups across same-shape regions and rebuilds off the render thread.  Nodes join through `Plan::Describable` (`plan_describe`, `plan_inputs`, snapshots); call `Plan.changed(node)` after structural edits, and `Plan.explain(graph)` says why nodes stay unfused.  `MB_SOUND_PLAN=0`, `MB_SOUND_KERNELS=fast_plan=ruby` (the Ruby mirror), `MB_SOUND_PLAN_CHECK=1`; specs use `plan_compare`, `rake plan:changed` decides on the 21-size sweep.
 <!-- /summary -->
 
+## Quick reference
+
+- Off and mirrors: `MB_SOUND_PLAN=0`, `MB_SOUND_KERNELS=fast_plan=ruby`, `MB_SOUND_PLAN_CHECK=1`; `Plan.explain(graph)` says why nodes stay unfused; call `Plan.changed(node)` after structural edits.
+- New ops: `Plan::Describable` (`plan_describe`, `plan_inputs`, snapshots), unfused samples bit for bit.
+- Tests: `plan_compare` (`spec/support/plan_helpers.rb`), `rake plan:changed` / `rake plan:full` (21 block sizes).
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

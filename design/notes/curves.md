@@ -4,6 +4,12 @@
 `MB::Sound::Curve` (`Curve[:elastic, overshoot:]`, many named easings with `_in`/`_out` variants, `Curve.db`/`Curve.s`, `bezier`, Procs; `#lookup` tables in C) maps progress 0..1 and is shared by glides (`v.hz.glide(t, shape:)`), tweens (`tween([300.hz, 3000.hz], 1.bar, curve:)`: the length is per step between keyframes, not the total), `smooth(t, curve:)`, and the antialiased shaper `sig.ease(curve, ...)` (`aease` exact).  `bounce_hits(2.bars, count:, elasticity:, decay:)` makes bouncing-ball rhythms.  Demos `bin/songs/tween_song.rb`, `bin/songs/bouncing_ball.rb`.
 <!-- /summary -->
 
+## Quick reference
+
+- `Curve[:elastic, overshoot: 0.4]`, `Curve.db(d)`, `Curve.bezier`, Procs; `#lookup` is the C table (`FastClip.curve_lookup`).
+- Users: `v.hz.glide(t, shape:)`, `tween([300.hz, 3000.hz], 1.bar, curve:)` (the length is per step), `sig.smooth(t, curve:)`, `sig.ease(curve)` (`aease` exact), `bounce_hits(2.bars, count:)`.
+- Plot or tabulate them with `bin/plot_curves.rb`; demos `bin/songs/tween_song.rb`, `bin/songs/bouncing_ball.rb`; specs `spec/lib/mb/sound/curve_spec.rb`, `spec/lib/mb/sound/tween_spec.rb`.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

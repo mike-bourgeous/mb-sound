@@ -82,12 +82,11 @@ module MB
         'FastLatency.system_sample' => 'system load and memory reads (instrumentation)',
         'FastLatency::Probe' => 'a pthread timing loop (instrumentation; its histograms are mirrored by LatencyProbe::Histogram)',
         'FastUI::GVLProbe' => 'a Ruby thread event hook (instrumentation)',
-        'FastRecipe.frame_binding' => "the VM's debug inspector (a block frame's Binding; no Ruby equivalent: a TracePoint, Recipe.locals_mode :trace, makes YJIT discard its code and also sees nested blocks' locals)",
+        'FastRecipe.frame_binding' => "the VM's debug inspector (a block frame's Binding; no Ruby equivalent: a TracePoint makes YJIT discard its code and also sees nested blocks' locals)",
         'FastPlan.enums' => 'op-code tables the Ruby lowering reads (no computation)',
         'FastLoop.constants' => 'op-code tables the Ruby lowering reads (no computation)',
         'FastSound.fast_math=' => 'sets the C side of MB::Sound.precision (no computation)',
         'FastSound.fast_math?' => 'reads the C side of MB::Sound.precision (no computation)',
-        'FastSound.smoothstep' => "not called by lib/: one of fast_sound's first scalar helpers (Ruby has smoothstep in mb-math)",
       }.freeze
 
       @entries = {}

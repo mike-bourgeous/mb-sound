@@ -88,7 +88,6 @@ module MemcheckSelection
     'spec/lib/mb/sound/graph_node/harmonic_table_spec.rb',
     'spec/lib/mb/sound/filter/biquad_spec.rb',       # FastSound.biquad*
     'spec/lib/mb/sound/filter/cookbook_spec.rb',     # FastSound.cookbook, dynamic_biquad
-    'spec/lib/mb/sound/filter/smoothstep_spec.rb',   # FastSound.smoothstep*
     'spec/lib/mb/sound/graph_node/resample_spec.rb', # FastResample (libsamplerate)
     'spec/lib/mb/sound/graph_node/constant_spec.rb', # FastSound.smootherstep_buf
     'spec/lib/mb/sound/device_output_spec.rb',       # FastAudio::Playback

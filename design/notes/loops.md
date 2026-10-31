@@ -4,6 +4,11 @@
 `Sample['loop.wav']` reads loop metadata without ffmpeg's help (`Sample::Riff`: ACID tempo/beats/meter/root, `smpl` loops, cue labels as `sample.markers`), then FLAC tags, then tempo and key words in file and folder names (`Sample::LoopInfo`, reasons in `meta[:why]`), or detects the tempo and key (`detect: true`; `#detect_key`, Krumhansl-Schmuckler on a chromagram fold, `Analysis::Key`).  `stretch(r, mode: :slice)` (`Sample::SliceStretch`) moves slices to scaled times with exact attacks; `sample.follow` (`GraphNode::LoopPlayer`, a TimelineNode and plan boundary) plays a loop in time with the session tempo (slice stretch for percussive loops, spectral for tonal ones).  Console `loops(dir, bpm:, key:, beats:, detect:)` lists a folder from headers and names only (`detect:` decodes files missing a tempo or key; keys match enharmonically).  Help `help :loops`.
 <!-- /summary -->
 
+## Quick reference
+
+- `Sample['loop.wav']` reads ACID/`smpl`/cue metadata, tags, and names (`sample.meta[:why]`); `detect: true` or `#detect_key` measures; `stretch(r, mode: :slice)`; `sample.follow` plays in time with the session tempo.
+- Console `loops(dir, bpm:, key:, beats:, detect:)`; help `help :loops`.
+
 The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 Branch `loops-1` (2026-10-15).  The maintainer: "If we add a slice-based stretch, could we start loading ACID metadata?  I have a large loop library."  Builds on the sampler (`sampler.md`: `Sample`, onsets, the cyclic stretch) and the spectral stretches (`granular.md`).

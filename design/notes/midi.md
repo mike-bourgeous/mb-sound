@@ -6,8 +6,6 @@ Moving parameters (`MIDI::Param`: `cc(...)`, knobs, tempo LFOs, clips) are read 
 Live MIDI uses JACK ports when a server answers, else bundled RtMidi; specs use synthetic MIDI files only (the maintainer's `tmp/music/` is private).
 <!-- /summary -->
 
-Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
-
 ## Quick reference
 
 - Notes (`v`): `gate`, `trigger`, `number`, `velocity`, `freq`, channel-wide controllers (`bend`, `pressure`, `cc(n)`, GM-named `mod`, ...; smoothed by default), envelopes with GM2 scaling, `v.hz` (`.glide`, `.vibrato`, `.bend_range`), `v.key_trigger`, `v.cutoff`, `v.reso`, `v.lfo`, `v.mod_sum`/`mod_scale`, `poly_pressure`, `aftertouch`.
@@ -16,6 +14,7 @@ Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds 
 - Session key and locks: `key :d, :dorian`, `mode :lydian`; streams `degrees(layout: :flow | :fit, black: :passing | :silent | :lower)`, `snap(:chord, from:, extend:, avoid:, bass:)`, `stream.lock(:play)`; styles `lock :mash | :play | :along | :chord | :off` (console `lock :play` locks the Session input); demo `bin/midi/key_lock.rb`; help topics `:key`, `:lock`, `:params`.
 - Console: `midi` (a Notes on live input through the Session's `MidiInput`), `midi_file(path)`; MIDI files as clips: `midi_tracks(path)`, `midi_clip(path, track:, channel:, bars:, from:, loop: true, slides:, cc: :steps | :fit | false, timing: :score | :performed, sustain:)`, `midi_kit(path)` (help `:midi_files`); documents save them as `events(...)` / `grid(row: events(...))` rows, not the file.
 
+Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 `lib/mb/sound/midi/` is a pull-based event layer, loaded from `midi/streams.rb` after Sequence: Sources make Events, Streams share them among readers, Notes turns them into signal nodes, and Synth allocates voices.  Nothing is pushed through callbacks, and nothing reads a clock except live input.
 

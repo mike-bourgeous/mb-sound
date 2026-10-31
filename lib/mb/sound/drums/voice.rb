@@ -44,6 +44,17 @@ module MB
         SLEEP_TIME = 0.05
 
         # Hands one buffer of a source the Voice read to the voice's graph.
+        #
+        # The source's buffer belongs to the source, which the Voice samples
+        # again before its graph's next buffer, so the Tap gives the graph
+        # its own copy, rewritten only when the graph samples the Tap
+        # (cleanup-2: a Tee over a Tap shared a view of a Notes trigger's
+        # reused buffer, which the trigger rewrote before the Tee's next
+        # frame; the full-Ruby graph sweep's kit builder at 1-sample buffers
+        # caught it, and a lagging branch would have read the next buffer).
+        # Frozen buffers (Notes nodes' steady constants, the Voice's zeros)
+        # are never rewritten and pass as they are, keeping steady-input
+        # caches steady.
         class Tap
           include GraphNode
           node_traits memory: :short
@@ -53,6 +64,7 @@ module MB
           def initialize(name, sample_rate: 48000)
             @sample_rate = sample_rate.to_f
             @buffer = nil
+            @copy = nil
             @node_type_name = name
           end
 
@@ -61,10 +73,17 @@ module MB
 
           def sample(count)
             b = @buffer
-            return b if b.length == count
-
             raise ArgumentError, "#{@node_type_name} has #{b.length} samples, not #{count}" if b.length < count
-            b[0...count]
+            if b.frozen?
+              return b if b.length == count
+              return b[0...count]
+            end
+
+            b = b[0...count] if b.length != count
+            # (the source's own type: trigger signals may be DFloat)
+            @copy = b.class.zeros(count) if @copy.nil? || @copy.length != count || !@copy.instance_of?(b.class)
+            @copy[0..] = b unless Kernels.copy(@copy, b)
+            @copy
           end
 
           def sample_rate=(rate)

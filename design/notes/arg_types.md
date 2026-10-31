@@ -4,6 +4,12 @@
 `MB::Sound::ArgTypes` (`lib/mb/sound/arg_types.rb`) classifies argument values by type (tempo, ratio, seconds, samples, frequency including tagged `v.freq`, name, ...) from one ordered table, matches them against Signatures (keyword > type > position; canonical forms print keywords), and dispatches one method name to meanings by type through per-receiver Dispatch tables (`clip.clocked(x)`, `clip.at(x)`, `clip.over(x)`).  Errors and `help :at`/`:over` pages come from the tables, and a guard spec covers every row; the toolkit methods will adopt it ("Adopting it in a method" below).
 <!-- /summary -->
 
+## Quick reference
+
+- `ArgTypes.classify(value)` names a value's type from `ArgTypes::TYPES`; `ArgTypes::Signature` binds arguments keyword > type > position; `ArgTypes::Dispatch` tables give one method name meanings by type (`clip.clocked(x)`, `clip.at(x)`, `clip.over(x)`).
+- Code `lib/mb/sound/arg_types.rb`; spec `spec/lib/mb/sound/arg_types_spec.rb` (a guard covers every table row).
+- Errors and the `help :at` / `help :over` pages come from the tables; new methods adopt it as in "Adopting it in a method" below.
+
 Built by time-automation (2026-10-18) for clocks (`clip.clocked(x)`, `clip.at(x)`, `clip.over(x)`, `clip % x`), designed as a reusable library piece for the toolkit methods to come (maintainer via the Mac, 2026-10-18; notes in `/app/workbench/research/au5-color-bass/toolkit-ideas.md`: `rain.peq(h, midi.freq)` knowing `h` is a partial series and `midi.freq` a frequency; `.resonate`, `.peq`, ...).  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).
 
 ## The classifier

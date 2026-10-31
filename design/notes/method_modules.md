@@ -4,6 +4,12 @@
 `MB::Sound` extends topic modules that make the console API of `bin/sound.rb`: `IOMethods`, `PlaybackMethods` (`play`, `bg`, the background `Session`, `render`), `ScheduleMethods`, `ArrangementMethods`, `TransportMethods`, `PlotMethods`, `AnalysisMethods`, and about 20 more (Generation, Envelope, Midi, Sequence, Knob, Rack, ...).  `play`/`bg`/`render`/`write` share one conversion, `MB::Sound::Playable.graph`, which turns graphs, files, samples, clips, instruments, wavetables, and presets into a graph or a friendly `Playable::Unplayable`.  Plumbing that isn't a console command goes in `MB::Sound::Internal` (not extended, so it stays out of tab completion).
 <!-- /summary -->
 
+## Quick reference
+
+- Console API: `MB::Sound` extends the topic `*Methods` modules (`PlaybackMethods`: `play`, `bg`, `render`; `ScheduleMethods`, `ArrangementMethods`, ...); `MB::Sound::Playable.graph` converts anything playable.
+- Plumbing that isn't a command goes in `MB::Sound::Internal`; before adding a command, check collisions with `MB::Sound` methods and Pry commands.
+- Specs `spec/lib/mb/sound/playable_spec.rb`, `spec/lib/mb/sound/help_spec.rb` (every command in a topic).
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

@@ -4,6 +4,11 @@
 `MB::Sound::Sample` (`lib/mb/sound/sample.rb`, `sample/`) is an immutable sound in memory (files, arrays, `bounce` of a graph, `capture_audio` live) with a root note, loop points, and cheap views (slices, reverse, loops, fades); edits (`bits`, `lofi`, `stretch`, `mono`) make new audio.  `Sample::Slices` name and chop breaks into clips with pitch marks; `Sampler::Instrument` maps regions to keys, velocities, and round robins, also from SFZ (`sfz`) and SoundFont 2 (`sf2`, pure Ruby).  `GraphNode::SamplerVoice` + `fast_sampler` (exact mirror `Sampler::KernelRuby`) plays them from the exact note-on sample, band-limited, with a 64-sample declick; a plan boundary.  Help `help :sampler`, `lesson :chop`.
 <!-- /summary -->
 
+## Quick reference
+
+- `Sample['x.flac']`, `bounce(graph)`, `capture_audio`; views `sample[a..b]`, `reverse`, `looped`, `fade`; edits `bits`, `lofi`, `stretch`, `mono`; `Sample::Slices` chops breaks into clips; instruments from `sfz` and `sf2`.
+- Code `lib/mb/sound/sample.rb` + `sample/`, `lib/mb/sound/sampler.rb`; specs `spec/lib/mb/sound/sample_spec.rb`, `spec/lib/mb/sound/sampler_spec.rb`; demo `bin/songs/press_and_chop.rb`; help `help :sampler`, `lesson :chop`.
+
 Sampler and audio capture, stage 1 of "Sampler + second drum machine" (maintainer, 2026-10-13; the persona panel's second request after exact takes: Nev Ashdown (jungle) and Tiko (looper) wanted it most, Kez (DnB) for resampling).  Branch `sampler-1`.  Stage 2 (`drums-2`: kit builder + TR-909) builds on the `Sample` type.
 
 The panel's asks, in their words (`research-persona-panel` 0c08a17d, jungle friction F1-F6): "`rec = bounce(drums, 2.bars, bpm: 138.75)` for the record, `rec.slices(16)` to cut it, slice and pitch kept as separate things, `rec.at(7.n16)` for tracker 9xx offsets, and reverse per hit"; "`node.bounce(1.bar, root: F1)`, then reverse and slices on top"; "build the sampler like a tracker, with slices you can see, offsets you can type, and pitch kept separate from slice, because in jungle the chop is the instrument"; S950-style lofi and a cyclic timestretch as the first effects; `help :sampler` and a chop lesson.

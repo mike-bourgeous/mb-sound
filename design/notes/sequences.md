@@ -4,6 +4,12 @@
 `lib/mb/sound/sequence/`: immutable `Clip`s of `Event`s in exact Rational whole notes, built with `seq(C4, E4, G4.n4).n8`, chord steps, `grid('x...x...')`, and note length methods; a clip is a MIDI source (`clip.stream`, `clip.notes`, `clip.synth(voices:) { |v, i| }`) whose edges land on exact samples at the shared `Transport`'s tempo.  Transforms (legato, transpose, ratchet, swing, humanize, chance, groove, ghost chords, ...) share their cores with the MIDI stream transforms (`Sequence::Feel`) and run per row on grid Kits (`rotate` wraps, `shift` drops); `clip.show` draws them as text; clips carry controller lanes and note marks (accent `!A1`, slide `~A1`, flam), remember what plays them (`Sequence::PlayedBy`), and `swap` changes a player's clips on the next bar.  `!` is overridden only on Note and Step: test with `nil?`, never `!x`.
 <!-- /summary -->
 
+## Quick reference
+
+- Clips: `seq(C4, E4, G4.n4).n8`, `grid('x...x...')`, `clip.stream`, `clip.notes`, `clip.synth(voices:) { |v, i| }`, `clip.show`; transforms (`legato`, `transpose`, `ratchet`, `swing`, `humanize`, `chance`, `groove`, ...); `swap` on the next bar.
+- Test values that may be notes with `nil?`, never `!x` (`!` is overridden on Note and Step).
+- Code `lib/mb/sound/sequence/`; spec `spec/lib/mb/sound/sequence/clip_spec.rb` and its neighbors; demo `bin/songs/sequence_demo.rb`; help `help :sequences`.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 At a glance (forms the sections below describe at length):

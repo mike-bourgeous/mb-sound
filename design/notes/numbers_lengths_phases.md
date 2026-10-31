@@ -4,6 +4,12 @@
 `lib/mb/sound/numeric_sound_mixins.rb` adds `.hz`, `.db`, `.meters`, `.bits` to Numeric: `440.hz` is a `Pitch` (a sine when used as a signal; `Note < Pitch` follows the session `Tuning`), `-6.db` a `Decibels` (the linear gain that remembers its dB).  One rule for dB-valued arguments: Decibels read exactly, bare numbers are linear gains, bare negatives raise (live mode: dB with a warning).  Phases are in cycles everywhere (`MB::Sound::Phase`); lengths (`2.bars`, `250.ms`, `5.samples`) work wherever lengths do, plain numbers in each method's usual unit; `Interval`s and `Scale`s for pitch steps.
 <!-- /summary -->
 
+## Quick reference
+
+- `440.hz` (a Pitch), `40.constant` (a value), `-6.db` (Decibels), `2.bars`, `250.ms`, `96.samples`, `0.25.cycles`, `7.semitones`.
+- dB arguments: Decibels exactly, bare numbers linear gains, bare negatives raise (`Decibels.gain_of`).
+- Code `lib/mb/sound/numeric_sound_mixins.rb`; specs `spec/lib/mb/sound/numeric_sound_mixins_spec.rb`, `spec/lib/mb/sound/decibels_spec.rb`, `spec/lib/mb/sound/phase_spec.rb`; help `help :tones`, `help :pitch`.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

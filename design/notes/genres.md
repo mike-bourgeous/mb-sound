@@ -4,6 +4,11 @@
 `genre :dnb` (`GenreMethods`, `lib/mb/sound/genre.rb` + `genre/`) is a frozen `Genre::Template` of what the persona panel learned about a genre: tempo and range, meter, phrases, key, a `Form`, drum `Kit`s with fills, material clips, roles (patches with levels, params, filters, ducks, bus routes), scenes, knobs, `Mix` targets, and tips, for `:dnb`, `:jungle`, `:ambient`, `:funk`, `:house`, `:techno`.  Templates compose (`genre(:dnb, tempo: 170)`, a builder block, `like`, `Genre.define`), set up and play a Session (`t.setup`, `t.play`, `t.short(60)`), print back (`t.to_ruby`), and grow generated forms (`t.generative(seed:)`, `t.endless`).  Demo `bin/songs/genre_demo.rb -G dnb`; help `help :genres`.
 <!-- /summary -->
 
+## Quick reference
+
+- `genre :dnb` (`:jungle`, `:ambient`, `:funk`, `:house`, `:techno`); `t = genre(:dnb, tempo: 170)`, `t.setup`, `t.play`, `t.short(60)`, `t.to_ruby`, `t.generative(seed:)`, `t.endless`; new ones with `Genre.define`.
+- Code `lib/mb/sound/genre.rb` + `genre/`; spec `spec/lib/mb/sound/genre_spec.rb`; demo `bin/songs/genre_demo.rb -G dnb`; help `help :genres`.
+
 Branch `genre-1` (2026-10-13).  Maintainer, after the persona panel: "The persona experiment was very useful. I'd like to capture the genre information as flow structures or something, and potentially repeat the experiment when there are more features."  Sources: the panel (`research-persona-panel` 0c08a17d: transcript, briefs), the personas' research notes and songs (`research-persona-edm`, `-jungle`, `-zen`, `-looper`), the merged songs (`bin/songs/tunnel_vision.rb`, `memory_card.rb`, `tin_roof.rb`, `loop_church.rb`), and their patch scripts (`bin/synths/dnb.rb`, `jungle.rb`, `ambient.rb`, `funk.rb`, `electric_pianos.rb`) and presets.
 
 ## What a template is

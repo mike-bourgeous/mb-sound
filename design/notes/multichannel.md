@@ -4,6 +4,12 @@
 Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`stereo(l, r)`, `channels(a, b, c)`; Array-like but deliberately not Enumerable: `.to_a` for `shuffle` etc.).  DSL calls on bundles run per channel with NumPy-style broadcasting (per-channel arguments via bundles or `per_channel(list | a..b)`; `per_voice` in synth voices); `reverb` is the exception (one reverb for all channels).  Conversions are `GraphNode::ChannelMixer` nodes (`pan`/`balance`, `width`, `mono`, `swap`, `mid_side`, `matrix`, `place`, `left`/`right`); sample all outputs of a mixer in turn.
 <!-- /summary -->
 
+## Quick reference
+
+- Bundles: `stereo(l, r)`, `channels(a, b, c)`, `[l, r].channels`, `per_channel(list | a..b)`, `per_voice` in voices; `.to_a` for Enumerable methods.
+- Mixers (`GraphNode::ChannelMixer`): `pan`, `balance`, `width`, `mono`, `swap`, `mid_side`, `matrix`, `place`, `left`/`right`.
+- Code `lib/mb/sound/graph_node/channels.rb`, `lib/mb/sound/graph_node/channel_mixer/`; spec `spec/lib/mb/sound/graph_node/channels_spec.rb`; demo `bin/songs/stereo_song.rb`; help `help :stereo`.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 
