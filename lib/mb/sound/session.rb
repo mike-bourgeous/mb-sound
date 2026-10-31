@@ -130,6 +130,7 @@ module MB
         :handed, # (true for a player whose state a carrying rebuild took: it stops on the swap frame; see #remove_now)
         :clip, # (the clip a track's patch was built for, or nil; see #built_clip)
         :ends_after, # (nodes whose ending starts its quiet ring-out; Tails#end_after)
+        :ends_tail, # (that ring-out's cap in seconds, nil for Master::MAX_TAIL_SECONDS; Tails#end_after)
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.

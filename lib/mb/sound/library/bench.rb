@@ -43,8 +43,23 @@ module MB
         # that, turning down the items that would pass the ceiling.
         CEILING = -1.0
 
-        # Fade at the end of a render cut at its material's max_seconds.
+        # Fade at the end of an instrument, kit, or clip render cut at its
+        # material's max_seconds.
         FADE_SECONDS = 0.5
+
+        # Effect renders ring out (bench-tails-1; the maintainer,
+        # 2026-10-31: "Until silent"): each runs until its output has
+        # stayed below QuietRun::QUIET (-90 dB) for QuietRun::QUIET_SECONDS
+        # after the dry audio ends, without a fade, for at most this many
+        # seconds (the audio included: the effect materials' max_seconds).
+        # Until then they stopped at 12 s with a 0.5 s fade, so hall,
+        # stadium, and space tails got about 4 s.
+        RING_SECONDS = 30
+
+        # The declick at the end of an effect render still sounding at
+        # RING_SECONDS (Session::Master::TAIL_FADE_SECONDS, the fade of a
+        # ringing track at its cap).
+        RING_CAP_FADE = 0.1
 
         # Families never auditioned unless named (feedback, 2026-10-19: no
         # SQ-80 in demos until the maintainer lifts the ban).
@@ -67,7 +82,8 @@ module MB
         # ceiling, not an explicit target, set the gain), +sets_level+
         # (true if the render reaches the ceiling at the set's loudness:
         # the loudest it can go sets the level of the set), +seconds+ of
-        # audio, +cut+ (true if it was cut at max_seconds and faded), and
+        # audio, +cut+ (true if it was cut at max_seconds and faded; for
+        # effects, still sounding at RING_SECONDS and declicked), and
         # +render_seconds+ (wall time).  +silent+ renders wrote no file.
         # +error+ is the message of a render that raised (no file either).
         Measure = Data.define(:lufs, :true_peak, :gain, :peak_bound, :sets_level, :seconds, :cut, :render_seconds, :silent, :error) do
@@ -83,10 +99,11 @@ module MB
 
         # A render before matching (Bench.render_raw): its channels
         # (+data+, trimmed or faded), +cut+, +render_seconds+, its
-        # +integrated+ loudness and +true_peak+ as rendered, +silent+, or
-        # the +error+ of a render that raised.
-        Raw = Data.define(:data, :cut, :render_seconds, :integrated, :true_peak, :silent, :error) do
-          def initialize(data: nil, cut: false, render_seconds: 0.0, integrated: nil, true_peak: nil, silent: false, error: nil)
+        # +integrated+ loudness (over its first +frames+, if given: an
+        # effect's dry audio length, see Bench.measure) and +true_peak+ as
+        # rendered, +silent+, or the +error+ of a render that raised.
+        Raw = Data.define(:data, :cut, :render_seconds, :integrated, :true_peak, :silent, :error, :frames) do
+          def initialize(data: nil, cut: false, render_seconds: 0.0, integrated: nil, true_peak: nil, silent: false, error: nil, frames: nil)
             super
           end
 
@@ -254,16 +271,65 @@ module MB
         # Renders +graph+ (or what +build+ returns, built inside the
         # render, so build-time lengths read the material's tempo) into
         # float channels: until it ends or +max_seconds+, at +bpm+, master
-        # gain 0 dB.  Returns [channels, cut] (cut true if it ran to
+        # gain 0 dB.  +ring_out+ (a Proc) is called with the render's
+        # Session and the player's name once the graph is added (see
+        # #ring_render).  Returns [channels, cut] (cut true if it ran to
         # max_seconds).
-        def render_graph(graph = nil, bpm:, max_seconds:, &build)
+        def render_graph(graph = nil, bpm:, max_seconds:, ring_out: nil, &build)
           # (a collecting output: no file, so nothing clips before matching)
           out = Sampler::CaptureOutput.new(channels: 2)
           MB::Sound.render(out, gain: 1.0, bpm: bpm, max_seconds: max_seconds) do
-            Session.current.add(graph || build.call, on: :now)
+            name = Session.current.add(graph || build.call, on: :now)
+            ring_out&.call(Session.current, name)
           end
           data = out.captured
           [data, data[0].length >= (max_seconds * 48000).round - 800]
+        end
+
+        # Renders effect +entry+ on audio material +material+ ringing out
+        # (RING_SECONDS; the maintainer, 2026-10-31: "Until silent"): the
+        # dry audio plays through a Ringdown (silence after its end, so the
+        # effect never sees its input end and cuts its own tail, as a
+        # Reverb's extra_time did: hall rang 6 s past the audio and was cut
+        # still above -90 dB), and Session#end_after ends the player once
+        # the audio ended and the output stayed below QuietRun::QUIET for
+        # QuietRun::QUIET_SECONDS (the script runner's ring-down, uncapped:
+        # the render stops at RING_SECONDS).  The result is then cut where
+        # #ring_end says, so it is the same at any buffer size and in a
+        # --vs checkout whose Session#end_after has no +max_tail:+ (it
+        # renders to RING_SECONDS instead).  +frames+ is the dry audio's
+        # length.  Returns [channels, cut] (cut true if still sounding at
+        # RING_SECONDS: declicked over RING_CAP_FADE, the only fade).
+        def ring_render(entry, material, frames)
+          ends = nil
+          early = Session.instance_method(:end_after).parameters.any? { |_, n| n == :max_tail } rescue false
+          stop = ->(session, name) { session.end_after(name, ends, max_tail: Float::INFINITY) if early && ends && !ends.empty? }
+          data, = render_graph(bpm: material.bpm, max_seconds: material.max_seconds, ring_out: stop) {
+            src = material.build.ringdown
+            ends = src.outputs.grep(GraphNode::Ringdown)
+            entry.(src)
+          }
+          finish = ring_end(data, frames)
+          return [data.map { |c| c[0...finish].dup }, false] if finish
+
+          cut = data[0].length >= (material.max_seconds * 48000).round - 800
+          data = data.map(&:dup)
+          fade(data, RING_CAP_FADE) if cut
+          [data, cut]
+        end
+
+        # The frame where a ringing render's quiet second completes: the
+        # output stays below QuietRun::QUIET for QuietRun::QUIET_SECONDS
+        # from the dry audio's end (+from+) or its last sample at or above
+        # QUIET after that, whichever is later (Session#end_after's rule,
+        # counted from the exact frame instead of the sleep grid); nil if
+        # +data+ ends first.
+        def ring_end(data, from)
+          n = data[0].length
+          from = n if from > n
+          run = QuietRun.new((QuietRun::QUIET_SECONDS * 48000).round, from: from)
+          run.track_all(data, from, from, n - from) if n > from
+          run.ends_at <= n ? run.ends_at : nil
         end
 
         # Matches +data+ to +lufs+ (true peak at most +ceiling+; nil: the
@@ -288,9 +354,32 @@ module MB
           [data, cut]
         end
 
-        # True for a loudness measure of silence (or under -70 LUFS).
+        # True for a loudness measure (or an integrated loudness) of
+        # silence (or under -70 LUFS).
         def quiet?(loud)
-          loud.integrated.nil? || !loud.integrated.finite? || loud.integrated < -70
+          lufs = loud.respond_to?(:integrated) ? loud.integrated : loud
+          lufs.nil? || !lufs.finite? || lufs < -70
+        end
+
+        # [integrated LUFS, true peak dBTP] of +data+: the integrated
+        # loudness over its first +frames+ (nil: all of it), the true peak
+        # over all of it.  Effect renders are measured over their dry
+        # audio's length, so the tail they ring out after it doesn't move
+        # the level they're matched to (the tail's blocks above BS.1770's
+        # relative gate would lower the integrated loudness, more for
+        # longer tails) while the ceiling still holds for the whole file.
+        def measure(data, frames = nil)
+          a = Loudness::Analyzer.new(channels: data.length, sample_rate: 48000)
+          n = data[0].length
+          if frames && frames < n
+            a.process(data.map { |c| c[0...frames].dup })
+            lufs = a.integrated
+            a.process(data.map { |c| c[frames..].dup })
+          else
+            a.process(data)
+            lufs = a.integrated
+          end
+          [lufs, a.true_peak]
         end
 
         # The loudness a set of Raw renders is matched to: the loudest
@@ -303,7 +392,8 @@ module MB
         # [data, Measure fields]: +data+ (measured +integrated+ LUFS and
         # +true_peak+ dBTP) scaled to +lufs+ (nil: its reach under
         # +ceiling+), turned down to the ceiling where +lufs+ would pass it.
-        def scale(data, integrated, true_peak, lufs:, ceiling:, cut:)
+        # +frames+ as for #measure (the integrated loudness's span).
+        def scale(data, integrated, true_peak, lufs:, ceiling:, cut:, frames: nil)
           reach = integrated + ceiling - true_peak
           lufs ||= reach
           gain = lufs - integrated
@@ -312,16 +402,16 @@ module MB
           # (BS.1770's absolute gate at -70 LUFS isn't scale-invariant:
           # quiet tail blocks a gain lifts over it lower the integrated
           # loudness, so correct once or twice)
-          out = after = nil
+          out = a_lufs = a_peak = nil
           3.times do
             out = data.map { |c| c * 10.0 ** (gain / 20.0) }
-            after = MB::Sound.loudness(out)
-            off = lufs - after.integrated
-            break if bound || off.abs < 0.02 || after.true_peak + off > ceiling
+            a_lufs, a_peak = measure(out, frames)
+            off = lufs - a_lufs
+            break if bound || off.abs < 0.02 || a_peak + off > ceiling
             gain += off
           end
-          sets = !bound && after.true_peak >= ceiling - 0.05
-          [out, { lufs: after.integrated, true_peak: after.true_peak, gain: gain, peak_bound: bound, sets_level: sets, silent: false, cut: cut }]
+          sets = !bound && a_peak >= ceiling - 0.05
+          [out, { lufs: a_lufs, true_peak: a_peak, gain: gain, peak_bound: bound, sets_level: sets, silent: false, cut: cut }]
         end
 
         # How far below the peak a tail counts as ended (see #trim).
@@ -361,21 +451,27 @@ module MB
 
         # Renders +job+'s graph, unmatched: a Raw (trimmed or faded, with
         # its loudness), or a Raw with the +error+ of a render that raised
-        # (unless +raise_errors+).
+        # (unless +raise_errors+).  Effects on audio materials ring out
+        # (#ring_render) and are measured over the dry audio's length; the
+        # dry references and everything else play to their own end or
+        # their material's max_seconds, a quiet tail trimmed (#prepare).
         def render_raw(job, files: nil, raise_errors: false)
           t0 = MB::U.clock_now
           m = job.material
           m = effect_material(m.key, files: files) if files && m.audio?
+          frames = nil
           data, cut = MB::Sound.with_seed(0) {
-            render_graph(bpm: m.bpm, max_seconds: m.max_seconds) {
-              job.entry ? graph(job.entry, m) : m.build
-            }
+            if job.entry && m.audio?
+              frames = audio(m.key, files: files).length
+              ring_render(job.entry, m, frames)
+            else
+              prepare(*render_graph(bpm: m.bpm, max_seconds: m.max_seconds) { job.entry ? graph(job.entry, m) : m.build })
+            end
           }
-          data, cut = prepare(data, cut)
-          loud = MB::Sound.loudness(data)
+          lufs, peak = measure(data, frames)
           t = MB::U.clock_now - t0
-          return Raw.new(data: data, cut: cut, render_seconds: t, silent: true) if quiet?(loud)
-          Raw.new(data: data, cut: cut, render_seconds: t, integrated: loud.integrated, true_peak: loud.true_peak)
+          return Raw.new(data: data, cut: cut, render_seconds: t, silent: true, frames: frames) if quiet?(lufs)
+          Raw.new(data: data, cut: cut, render_seconds: t, integrated: lufs, true_peak: peak, frames: frames)
         rescue StandardError, ScriptError => e
           raise if raise_errors
           Raw.new(render_seconds: MB::U.clock_now - t0, error: "#{e.class}: #{e.message.lines.first&.strip}")
@@ -387,7 +483,7 @@ module MB
           return Measure.new(render_seconds: raw.render_seconds, error: raw.error) if raw.error
           seconds = raw.data ? raw.data[0].length / 48000.0 : 0.0
           return Measure.new(seconds: seconds, cut: raw.cut, render_seconds: raw.render_seconds, silent: true) unless raw.usable?
-          data, info = scale(raw.data, raw.integrated, raw.true_peak, lufs: lufs, ceiling: ceiling, cut: raw.cut)
+          data, info = scale(raw.data, raw.integrated, raw.true_peak, lufs: lufs, ceiling: ceiling, cut: raw.cut, frames: raw.frames)
           path = File.join(dir, "#{job.file}.#{format}")
           FileUtils.mkdir_p(File.dirname(path))
           write_audio(path, data)

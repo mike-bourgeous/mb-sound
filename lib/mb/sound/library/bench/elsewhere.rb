@@ -80,7 +80,7 @@ module MB
         # The Raw a job file's result +r+ describes, its data read from the
         # float WAV in +raw_dir+.
         def raw_from(r, raw_dir)
-          fields = r.transform_keys(&:to_sym).slice(:cut, :render_seconds, :integrated, :true_peak, :silent, :error)
+          fields = r.transform_keys(&:to_sym).slice(:cut, :render_seconds, :integrated, :true_peak, :silent, :error, :frames)
           wav = r['wav'] && File.join(raw_dir, r['wav'])
           data = wav && File.file?(wav) ? MB::Sound.read(wav).map { |c| Numo::SFloat.cast(c) } : nil
           Raw.new(data: data, **fields)
@@ -103,7 +103,7 @@ module MB
             end
             jb = Job.new(item: j['item'], entry: entry, material: material, file: j['file'])
             r = render_raw(jb, files: files)
-            res = { cut: r.cut, render_seconds: r.render_seconds.round(3), integrated: r.integrated, true_peak: r.true_peak, silent: r.silent, error: r.error }
+            res = { cut: r.cut, render_seconds: r.render_seconds.round(3), integrated: r.integrated, true_peak: r.true_peak, silent: r.silent, error: r.error, frames: r.frames }
             if r.data && r.usable?
               res[:wav] = "#{jb.file}.wav"
               out = File.join(job['out'], res[:wav])
