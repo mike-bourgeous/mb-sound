@@ -89,6 +89,7 @@ RSpec.describe('render path code guards') do
   RenderPathGuard::LAST_ALLOWED = [
     ['lib/mb/sound/graph_node/four_pole.rb', 'data[-1]', 'remembers the last input to pad one that ends, not a parameter'],
     ['lib/mb/sound/graph_node/knob.rb', 'buf[-1]', 'holds a followed node\'s last value past its end'],
+    ['lib/mb/sound/graph_node/dynamics.rb', 'v[-1]', 'holds a live control node\'s last value past its end and pads a short buffer with it (delays-2), read per sample otherwise'],
     ['lib/mb/sound/graph_node/zone_value.rb', 'num[-1]', 'a whole-buffer check before ptp; per sample otherwise'],
     ['lib/mb/sound/graph_node/zone_value.rb', 'vel[-1]', 'a whole-buffer check before ptp; per sample otherwise'],
   ].freeze

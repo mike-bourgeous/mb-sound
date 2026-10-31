@@ -245,8 +245,9 @@ module MB
 
         The same by hand: `sig * 0.7 + sig.resonate(:plate) * 0.3` (using
         `sig` twice is fine: the graph branches it).  Some effects mix
-        themselves: `reverb(mix: 0.3)`, `chorus(mix:)`, `delay(dry:, wet:)`,
-        and the dynamics' `mix:` (parallel compression).  For one effect
+        themselves: `reverb(mix: 0.3)`, `chorus(mix:)`, `delay(dry:, wet:)`
+        or `delay(mix:)` (delays, `ping_pong`, and `tape_echo` crossfade at
+        equal power), and the dynamics' `mix:` (parallel compression).  For one effect
         shared by several tracks, send them to a bus (`bus(:verb) { |s|
         s.reverb(:hall, mix: 1) }`, then `track(:keys, send: { verb: -12.db
         })` or `feed :keys, :verb, -6.db`): the bus is all wet, and each

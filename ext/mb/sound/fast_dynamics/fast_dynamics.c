@@ -86,7 +86,10 @@ static long dyn_check_outputs(VALUE outs)
  * all feeding one detector; otherwise one per channel.  +curve+ is a
  * DFloat of segments [x0, y0, b, c, d] (sorted by x0; the transfer curve,
  * input level dB to output level dB).  +params+ is a DFloat of DP_COUNT
- * settings, +times+ an Array of DT_COUNT signals in samples.  +state+ is a
+ * settings, +times+ an Array of DT_COUNT signals: the five times in samples,
+ * then the live controls (the curve's shift in dB, the scale of its gain
+ * change, and the parallel mix; numbers 0, 1, and the mix leave the curve
+ * as it is; see mb_dynamics.h's dyn_time).  +state+ is a
  * DFloat of DYN_DET_STATE entries per detector plus the delay position;
  * +delay+ a DFloat of channels * lookahead samples (or nil without
  * lookahead).
@@ -103,7 +106,7 @@ static VALUE ruby_compand(VALUE self, VALUE outs, VALUE ins, VALUE sides, VALUE 
 		rb_raise(rb_eArgError, "Expected %ld inputs (got %ld)", nch, RARRAY_LEN(ins));
 	}
 	if (RARRAY_LEN(times) != DT_COUNT) {
-		rb_raise(rb_eArgError, "Expected %d times", DT_COUNT);
+		rb_raise(rb_eArgError, "Expected %d times and controls", DT_COUNT);
 	}
 
 	const double *par = dyn_dfloat_read(params, DP_COUNT, "Params");

@@ -22,4 +22,15 @@ RSpec.describe('bin/effects/tape_delay.rb') do
     expect(info[:format][:format_name]).to include('png')
     expect(info[:format][:size]).to be > 0
   end
+
+  # (delays-2, the maintainer's "Widen range": the header's runaway
+  # examples, --feedback 1.06 to 1.15, were refused by the names table's
+  # -1..1)
+  it 'takes feedback above 1 (a runaway held by the tape saturation)' do
+    output, status = fork_script('bin/effects/tape_delay.rb', '--quiet', '--feedback', '1.14', '--delay', '0.05', '--oversample', '1', 'spec/test_data/arp_a7.flac', outfile)
+    expect(status).to be_success, output
+    data = MB::Sound.read(outfile)
+    peak = data.map { |c| c.abs.max }.max
+    expect(peak).to be_between(0.05, 1.0) # (held by the softclips, not silent)
+  end
 end

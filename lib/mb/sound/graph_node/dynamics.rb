@@ -246,7 +246,13 @@ module MB
         attr_reader :sidechain_inputs
 
         # Settings.
-        attr_reader :detector, :link, :lookahead, :makeup, :min_gain, :max_gain, :hold_up, :mix
+        attr_reader :detector, :link, :lookahead, :makeup, :min_gain, :max_gain, :hold_up
+
+        # The live controls (numbers, or sampler branches of nodes read every
+        # sample; delays-2): the parallel mix (0..1), how far the curve moves
+        # up in dB (+:shift:+: a threshold change), and the factor on its
+        # gain change (+:scale:+: a ratio change).  See #initialize.
+        attr_reader :mix, :shift, :scale
 
         # The latest smoothed gain of each detector, in dB (without makeup).
         def gain_db
@@ -263,9 +269,18 @@ module MB
         # of them; one output per channel).  See the class comment and
         # DynamicsMethods for the parameters.  +makeup+ is dB or :auto (half
         # the curve's gain at 0 dBFS back).
+        #
+        # Live controls (numbers or nodes, read every sample; delays-2,
+        # 2026-10-31): +mix+ (0..1; a node is clamped to it), +shift+ (dB:
+        # the curve moves up by it, so the gain at level L is the curve's at
+        # L - shift; a threshold knob) and +scale+ (the curve's gain change
+        # times this; a ratio knob for a curve built at another ratio).
+        # Numbers 0 and 1 give the curve's own gains exactly.  With
+        # +makeup: :auto+ and a node shift or scale, the makeup follows
+        # them.
         def initialize(inputs, transfer:, down:, up:, hold: 0, hold_up: true, detector: :peak, rms: 0.01,
                        link: true, sidechain: nil, lookahead: 0, makeup: 0, min_gain: -Float::INFINITY,
-                       max_gain: Float::INFINITY, boost: nil, mix: 1, description: nil)
+                       max_gain: Float::INFINITY, boost: nil, mix: 1, shift: 0, scale: 1, description: nil)
           inputs = Array(inputs).flat_map { |n| GraphNode.dynamics_channels(n, 'Dynamics inputs') }
           raise ArgumentError, 'A dynamics node needs at least one channel' if inputs.empty?
           raise ArgumentError, "Detector must be one of #{DETECTORS.map(&:inspect).join(', ')} (got #{detector.inspect})" unless DETECTORS.include?(detector)
@@ -310,8 +325,13 @@ module MB
           @makeup = makeup == :auto ? -0.5 * [@transfer.gain(0), @min_gain].max.clamp(@min_gain, @max_gain) : DynamicsMethods.db_param(makeup).to_f
           raise ArgumentError, "Makeup must be dB or :auto (got #{makeup.inspect})" unless @makeup.finite?
 
-          raise ArgumentError, "Mix must be a number from 0 to 1 (got #{mix.inspect})" unless mix.is_a?(Numeric) && (0..1).cover?(mix)
-          @mix = mix.to_f
+          @mix = control(mix, 'Mix')
+          raise ArgumentError, "Mix must be a number from 0 to 1 or a node (got #{mix.inspect})" if @mix.is_a?(Float) && !(0..1).cover?(@mix)
+          @shift = control(shift, 'Shift')
+          @scale = control(scale, 'Scale')
+          @controls = { shift: @shift, scale: @scale, mix: @mix }
+          @auto_makeup = makeup == :auto && [@shift, @scale].any? { |c| c.respond_to?(:sample) }
+          @held = {} # (live controls' last values, held if a node ends)
           @detectors = @link ? 1 : @inputs.length
           @description = description || @transfer.to_s
           @sampled = Array.new(@inputs.length, false)
@@ -362,9 +382,9 @@ module MB
           self
         end
 
-        # Graph nodes giving times, for graph traversal.
+        # Graph nodes giving times and live controls, for graph traversal.
         def time_sources
-          @times.select { |_, s| s.node? }.transform_values(&:node)
+          @times.select { |_, s| s.node? }.transform_values(&:node).merge(@controls.select { |_, c| c.respond_to?(:sample) })
         end
 
         def to_s
@@ -426,14 +446,7 @@ module MB
           else
             channels
           end
-          times = @times.values.map { |src|
-            if src.node?
-              v = p.optional(src.node)
-              src.unit == :seconds ? v * @sample_rate : v
-            else
-              src.constant_samples(@sample_rate)
-            end
-          }
+          times = plan_signals(p)
           plan_params
           plan_curve
           p.dynamics_channels(self, channels, sides, times)
@@ -494,6 +507,15 @@ module MB
         def plan_describe_output(p, output)
           x = p[output.sources[:input]]
           sides = @sidechain_inputs ? @sidechain_inputs.map { |s| p.boundary(s, optional: true) } : [x]
+          times = plan_signals(p)
+          plan_params
+          plan_curve
+          p.dynamics(self, x, sides, times)
+        end
+
+        # The kernel's signals for the plan layer: the five times in samples
+        # and the three live controls (Values for nodes, numbers).
+        def plan_signals(p)
           times = @times.values.map { |src|
             if src.node?
               v = p.optional(src.node)
@@ -502,9 +524,7 @@ module MB
               src.constant_samples(@sample_rate)
             end
           }
-          plan_params
-          plan_curve
-          p.dynamics(self, x, sides, times)
+          times + @controls.values.map { |c| c.respond_to?(:sample) ? p.optional(c) : c }
         end
 
         # The transfer curve's segments as the kernel reads them (for the
@@ -534,7 +554,7 @@ module MB
         def kernel_params
           Numo::DFloat[
             @detector == :rms ? 1 : 0, @min_gain, @max_gain, @makeup,
-            @hold_up ? 1 : 0, @link ? 1 : 0, @lookahead, @mix
+            @hold_up ? 1 : 0, @link ? 1 : 0, @lookahead, @auto_makeup ? 1 : 0
           ]
         end
 
@@ -552,8 +572,36 @@ module MB
           times = (@times_list ||= [])
           times.clear
           @times.each_value { |s| times << fit(s.samples(n, @sample_rate) || 0, n) }
+          @controls.each_value { |c| times << (c.respond_to?(:sample) ? hold_control(c, n) : c) }
           @params ||= kernel_params
           Kernels.compand(outs, data, sides, @transfer.table, @params, times, @state, @delay)
+        end
+
+        # +n+ samples of live control +c+ (a sampler) for the kernel: an
+        # ended or short node holds its last value.
+        def hold_control(c, n)
+          v = c.sample(n)
+          held = @held[c.object_id]
+          return held || 0.0 if v.nil? || v.empty?
+          v = v[0...n] if v.length > n
+          if v.length < n
+            full = v.class.new(n).fill(v[-1])
+            full[0...v.length] = v
+            v = full
+          end
+          @held[c.object_id] = v[-1]
+          v
+        end
+
+        # A live control: a number (Float) or a node's sampler branch.
+        def control(value, name)
+          if value.respond_to?(:sample)
+            value.get_sampler
+          elsif value.is_a?(Numeric) && value.real?
+            value.to_f
+          else
+            raise ArgumentError, "#{name} must be a number or a graph node (got #{value.inspect})"
+          end
         end
 
         # +v+ as a kernel signal of +n+ samples: numbers and nil pass, long
@@ -581,7 +629,7 @@ module MB
           hold_up = params[4] != 0
           link = params[5] != 0
           la = params[6].to_i
-          mix = params[7]
+          auto_makeup = params[7] != 0
           ndet = link ? 1 : nch
           nside = sides.length
 
@@ -597,7 +645,10 @@ module MB
           last_t = [nil, nil, nil, nil, nil]
           coef = [0.0, 0.0, 0.0, 0.0, 0.0]
           last_gdb = nil
+          last_mix = nil
           last_glin = 1.0
+          last_shift = nil
+          last_scale = nil
           gain = Array.new(ndet, 1.0)
           at = ->(sig, i) { sig.is_a?(Array) ? sig[i] : sig }
 
@@ -610,6 +661,18 @@ module MB
               end
             end
             hold = at.(t_in[4], i)
+            shift = at.(t_in[5], i)
+            scale = at.(t_in[6], i)
+            mix = at.(t_in[7], i)
+            mix = !(mix >= 0.0) ? 0.0 : (mix > 1.0 ? 1.0 : mix)
+            if auto_makeup && (shift != last_shift || scale != last_scale)
+              g0 = (Transfer.evaluate(segments, -shift) + shift) * scale
+              g0 = min_gain if g0 < min_gain
+              g0 = max_gain if g0 > max_gain
+              makeup = -0.5 * g0
+            end
+            last_shift = shift
+            last_scale = scale
 
             ndet.times do |d|
               base = d * 3
@@ -627,7 +690,8 @@ module MB
                 level = m > FLOOR_LIN ? 20.0 * Math.log10(m) : FLOOR_DB
               end
 
-              g = Transfer.evaluate(segments, level) - level
+              x = level - shift
+              g = (Transfer.evaluate(segments, x) - x) * scale
               g = min_gain if g < min_gain
               g = max_gain if g > max_gain
 
@@ -647,8 +711,9 @@ module MB
               state[base + 1] = gs
 
               gdb = gs + makeup
-              if gdb != last_gdb
+              if gdb != last_gdb || mix != last_mix
                 last_gdb = gdb
+                last_mix = mix
                 last_glin = mix * 10.0 ** (gdb / 20.0) + (1.0 - mix)
               end
               gain[d] = last_glin

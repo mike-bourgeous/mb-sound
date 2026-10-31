@@ -431,9 +431,27 @@ module MB
         # The network's delays and gains (Reverb::Network::Layout).
         attr_reader :layout
 
-        # Wet/dry amount; large changes will cause discontinuity in audio
-        # TODO: interpolate gain
-        attr_accessor :wet, :dry
+        # The wet and dry gains (after +:mix:+ for numbers): numbers or
+        # sampler branches of graph nodes, read every sample.  A number
+        # jumps at the next buffer; a node (a knob, a smoothed control)
+        # moves the gain smoothly.
+        attr_reader :wet, :dry
+
+        # The overall wet level (a number or a node), and the +:mix:+ when it
+        # is a node or the wet or dry gain is (else nil: folded into them).
+        attr_reader :level, :mix
+
+        # Sets the wet gain (a number or a graph node; see #wet).
+        def wet=(gain)
+          @wet = gain_input(gain, 'wet')
+          update_live
+        end
+
+        # Sets the dry gain (a number or a graph node; see #dry).
+        def dry=(gain)
+          @dry = gain_input(gain, 'dry')
+          update_live
+        end
 
         # The network (Reverb::Network).
         attr_reader :network
@@ -607,10 +625,13 @@ module MB
         #            10 ** (-3 * loop / decay).
         # +:feedback_enabled+ - If true, feedback is included after diffusion.
         #                       If false, the feedback network is bypassed.
-        # +:predelay+ - The wet signal is delayed by this amount.  Default 0.
+        # +:predelay+ - The wet signal is delayed by this amount (any length,
+        #               or a node: the read position glides).  Default 0.
         # +:wet+ - The reverberated signal output level.  Usually 1.0.
         # +:dry+ - The original signal output level.  Usually 1.0.
         # +:mix+ - If given, dry * (1 - mix) and wet * mix (0..1).
+        #          +:wet+, +:dry+, +:mix+, and +:level+ are numbers or nodes
+        #          (knobs) read every sample after the network (delays-2).
         # +:seed+ - Random seed Integer for reproducibility of random delays
         #           and modulation.  Try different seeds if you get unwanted
         #           ringing or echo.
@@ -728,15 +749,31 @@ module MB
           @feedback_range = feedback_range
           @feedback_enabled = !!feedback_enabled
 
-          @level = level.to_f
-          @wet = wet.to_f
-          @dry = dry.to_f
+          # Output gains (delays-2, 2026-10-31: the maintainer's "Mix should
+          # just be a gain control that can be adjusted with a knob, no
+          # rebuild needed"): numbers or nodes read every sample after the
+          # network.  Numbers fold +:mix:+ into the wet and dry gains here,
+          # as always (the same samples as before); a node anywhere makes
+          # the gains per-sample buffers (see #live_gains).
+          @level = gain_input(level, 'level')
+          @wet = gain_input(wet, 'wet')
+          @dry = gain_input(dry, 'dry')
+          @mix = nil
+          @live_held = {} # (each gain node's last value, held if it ends, and its steady-buffer cache)
+          @live_range = [0.0, 0.0] # (reused by #gain_values)
+          @live_wet = nil
+          @live_dry = nil
           unless mix.nil?
-            mix = mix.to_f
-            raise ArgumentError, 'Mix must be a number from 0 to 1' unless mix.between?(0, 1)
-            @wet *= mix
-            @dry *= 1 - mix
+            mix = gain_input(mix, 'mix')
+            raise ArgumentError, 'Mix must be a number from 0 to 1' if mix.is_a?(Float) && !mix.between?(0, 1)
+            if [@level, @wet, @dry, mix].all?(Float)
+              @wet *= mix
+              @dry *= 1 - mix
+            else
+              @mix = mix
+            end
           end
+          update_live
 
           @predelay = predelay # seconds or any length
           @loop_extra = MB::Sound::Length.seconds(loop_extra || 0, sample_rate: @sample_rate).to_f
@@ -784,7 +821,9 @@ module MB
           # Apply predelay to input signal after dry/wet split but before
           # internal splitting/grouping
           predelayed = inputs.map.with_index { |u, idx|
-            MB::Sound::Length.seconds(@predelay, sample_rate: @sample_rate) == 0 ? u : u.delay(@predelay, ring_out: false).named("Predelay #{idx}")
+            # (a node predelay moves live: #delay's smoothed read position
+            # glides to each new time at its slew limit)
+            !@predelay.respond_to?(:sample) && MB::Sound::Length.seconds(@predelay, sample_rate: @sample_rate) == 0 ? u : u.delay(@predelay, ring_out: false).named("Predelay #{idx}")
           }
 
           # Assign inputs to pipeline channels, at 1/sqrt(lines per input)
@@ -852,8 +891,8 @@ module MB
             feedback_gain: @feedback_gain&.to_db,
             decay: @decay,
             loop_extra: @loop_extra,
-            wet: @wet.to_db,
-            dry: @dry.to_db,
+            wet: @wet.is_a?(Float) ? @wet.to_db : @wet.to_s,
+            dry: @dry.is_a?(Float) ? @dry.to_db : @dry.to_s,
             seed: seed,
             modulation: @feedback_mod&.to_h,
             diffusion_modulation: @diffusion_mod&.to_h,
@@ -878,6 +917,7 @@ module MB
               ["input_#{idx + 1}", u]
             }.to_h,
             **@network.sources,
+            **{ wet: @wet, dry: @dry, level: @level, mix: @mix, predelay: @predelay }.select { |_, v| v.respond_to?(:sample) },
           }
         end
 
@@ -913,6 +953,8 @@ module MB
 
           @pipeline_output = wet
 
+          live_gains(dry[0].length) if @live
+
           @output_groups = partition_reused(:wet, @pipeline_output, @output_channels)
 
           # (scales the dry input in place unless it's a frozen, shared
@@ -941,7 +983,98 @@ module MB
           dry_pairs = unity_pairs(bufs[3], dry)
 
           return nil unless MB::Sound::Kernels.mix(bufs[0], 0, wet_pairs) && MB::Sound::Kernels.mix(bufs[1], 0, dry_pairs)
-          MB::Sound::Kernels.wet_dry(bufs[0], bufs[0], @wet * @level * @output_scales[index], bufs[1], 1)
+          gain = wet_gain(index)
+          return MB::Sound::Kernels.wet_dry(bufs[0], bufs[0], gain, bufs[1], 1) if gain.is_a?(Numeric)
+
+          # (live gains: the same products, rounded to float, then the sum)
+          bufs[0].inplace * gain
+          (bufs[0].inplace + bufs[1]).not_inplace!
+        end
+
+        # Output +index+'s wet gain: a number, or with live gains (see
+        # #live_gains) a per-sample SFloat buffer.
+        def wet_gain(index)
+          return @wet * @level * @output_scales[index] unless @live
+
+          g = @live_wet * @output_scales[index]
+          g.is_a?(Numeric) ? g : Numo::SFloat.cast(g)
+        end
+
+        # The output gains as numbers or graph nodes' sampler branches
+        # (#initialize's +:wet:+, +:dry:+, +:level:+, +:mix:+).
+        def gain_input(value, name)
+          if value.respond_to?(:sample)
+            value = value.get_sampler
+            check_rate(value, name)
+            value
+          elsif value.is_a?(Numeric) && value.real?
+            value.to_f
+          else
+            raise ArgumentError, "Reverb #{name} must be a real number or a graph node (got #{value.inspect})"
+          end
+        end
+
+        # Whether any output gain is a node (read every sample).
+        def update_live
+          @live = [@wet, @dry, @level, @mix].any? { |v| v.respond_to?(:sample) }
+        end
+
+        # Computes the wet gain (+:wet:+ x +:mix:+ x +:level:+, before each
+        # output's scale) and the dry gain (+:dry:+ x (1 - +:mix:+)) for
+        # the next +n+ samples, each a number or a DFloat buffer, in the
+        # order the numbers fold (the same gains at a node's constant
+        # value; a node's float32 values may differ from a Ruby literal's).
+        # A +:mix:+ node is clamped to 0..1.
+        def live_gains(n)
+          w = gain_values(@wet, n)
+          d = gain_values(@dry, n)
+          l = gain_values(@level, n)
+          m = @mix.nil? ? nil : gain_values(@mix, n)
+          m = m.is_a?(Numeric) ? m.clamp(0.0, 1.0) : m.clip(0.0, 1.0) unless m.nil?
+          @live_wet = m.nil? ? w * l : w * m * l
+          @live_dry = m.nil? ? d : d * (1 - m)
+        end
+
+        # +n+ values of gain +src+: the number, or the node's next samples as
+        # a DFloat (a short or ended node holds its last value).  A node
+        # buffer whose samples are all one value (a knob at rest) gives that
+        # number, so steady knobs mix through the numeric path: the same
+        # samples, at a number's cost (a frozen buffer seen before is
+        # recognized by its GraphNode::FrozenView::Key without a scan).
+        def gain_values(src, n)
+          return src unless src.respond_to?(:sample)
+
+          held = @live_held[src.object_id]
+          buf = src.sample(n)
+          return held&.[](0) || 0.0 if buf.nil? || buf.empty?
+
+          buf = buf.real if buf.is_a?(Numo::SComplex) || buf.is_a?(Numo::DComplex)
+          held ||= (@live_held[src.object_id] = [0.0, FrozenView::Key.new, nil])
+          if buf.length >= n && held[1].match?(buf)
+            v = held[2]
+          else
+            held[1].set(buf)
+            r = @live_range
+            unless MB::Sound::Kernels.min_max(buf, r)
+              r[0] = buf.min.to_f
+              r[1] = buf.max.to_f
+            end
+            v = r[0] == r[1] ? r[0] : nil
+            held[2] = v
+          end
+          if v
+            held[0] = v
+            return v
+          end
+
+          v = Numo::DFloat.cast(buf.length > n ? buf[0...n] : buf)
+          if v.length < n
+            full = Numo::DFloat.new(n).fill(v[-1])
+            full[0...v.length] = v
+            v = full
+          end
+          held[0] = v[-1]
+          v
         end
 
         # Fills reused [buffer, 1] pairs in +pairs+ for each of +bufs+.
@@ -966,9 +1099,16 @@ module MB
             target = bufs[idx]
             target = bufs[idx] = c.class.zeros(c.length) unless target && target.class == c.class && target.length == c.length
           end
-          return target if MB::Sound::Kernels.wet_dry(target, c, @dry, c, nil)
+          gain = @live ? @live_dry : @dry
+          unless gain.is_a?(Numeric)
+            # (live gains: the gain rounded to float times each sample)
+            g = Numo::SFloat.cast(gain)
+            return c * g if c.frozen?
+            return (c.inplace * g).not_inplace!
+          end
+          return target if MB::Sound::Kernels.wet_dry(target, c, gain, c, nil)
 
-          ((c.frozen? ? c.dup : c).inplace * @dry).not_inplace!
+          ((c.frozen? ? c.dup : c).inplace * gain).not_inplace!
         end
 
         # For internal use.  Samples the dry inputs and the wet network for
@@ -1076,7 +1216,7 @@ module MB
           return nil if @dry_output.nil? || @pipeline_output.any?(&:nil?)
 
           mix_output(index) || begin
-            wet = @output_groups[index].sum * (@wet * @level * @output_scales[index])
+            wet = @output_groups[index].sum * wet_gain(index)
             (wet.inplace + @dry_groups[index].sum).not_inplace!
           end
         end
@@ -1094,7 +1234,7 @@ module MB
           @output_groups = [@pipeline_output]
           @dry_groups = [@dry_output]
           mix_output(0) || begin
-            wet = @pipeline_output.sum * (@wet * @level * @output_scales[0])
+            wet = @pipeline_output.sum * wet_gain(0)
             (wet.inplace + @dry_output.sum).not_inplace!
           end
         end

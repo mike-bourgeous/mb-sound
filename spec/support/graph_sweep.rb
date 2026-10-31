@@ -110,6 +110,9 @@ module GraphSweep
       }]
     }
     ladders << ['feedback diode', ->(c) { c.sig.delay(0.002, feedback: 0.6) { |fb| fb.diode(c.mod(400, 3000), resonance: 0.4) } }]
+    ladders << ['feedback lp4 and diode live drive (delays-2)', ->(c) {
+      c.sig.feedback { |fb, input| input + (fb.delay(40.samples).lp4(1500, resonance: 0.5, drive: c.mod(0, 3)) + fb.delay(31.samples).diode(1200, resonance: 0.4, drive: c.mod(0.5, 2), drive_mode: :feedback)) * 0.4 }
+    }]
     biquads + ladders
   end
 
@@ -136,6 +139,10 @@ module GraphSweep
       ['lp4 quality: node', ->(c) { c.sig.lp4(1000, quality: c.mod(0.7, 8)) }],
       ['lp4 linear curve', ->(c) { c.sig.lp4(1000, resonance: 0.5, resonance_curve: :linear) }],
       ['diode unnormalized', ->(c) { c.sig.diode(c.mod(200, 3000), resonance: 0.5, normalize: false) }],
+      ['lp4 and diode live drive nodes (delays-2)', ->(c) {
+        c.sig.lp4(c.mod(200, 3000), resonance: 0.7, drive: c.mod(0, 4)) + c.sig.lp4(900, resonance: 0.8, drive: c.mod(0, 3), drive_mode: :stages) +
+          c.sig.diode(1200, resonance: 0.6, drive: c.mod(0.5, 3)) + c.sig.diode(1200, resonance: 0.6, drive: c.mod(0, 3), normalize: false, drive_mode: :feedback, clip: :hard)
+      }],
     ]
     modes + drives + others
   end
@@ -310,6 +317,10 @@ module GraphSweep
 
       # Delays and reverbs
       ['delay modulated', ->(c) { c.sig.delay(c.mod(0.001, 0.004, 3), feedback: c.mod(0, 0.6), wet: 0.5, dry: 0.5) }],
+      ['delay inserts compensated by time (:pitch comb, :echo echo; delays-2)', ->(c) {
+        c.sig.delay(96.samples, feedback: 0.7) { |fb| fb.filter(:highpass, cutoff: 30, quality: 0.7) } +
+          c.sig.delay(0.021, feedback: c.mod(0.2, 0.6)) { |fb| fb.filter(:highpass, cutoff: 200, quality: 0.5).filter(:lowpass, cutoff: 3000) }
+      }],
       ['delay cubic and linear', ->(c) { c.sig.delay(c.mod(0.001, 0.003), interpolation: :cubic) + c.sig.delay(0.0021, interpolation: :linear) }],
       ['multitap', ->(c) { c.sig.multitap(0.001, c.mod(0.002, 0.003), 37.samples).mixdown }],
       ['multitap feedback (DelayNetwork)', ->(c) { c.sig.multitap(0.001, c.mod(0.002, 0.003), 37.samples, feedback: [0.3, c.mod(0, 0.4), 0], smooth: true).mixdown }],
@@ -330,6 +341,12 @@ module GraphSweep
       ['reverb parameter nodes', ->(c) {
         c.sig.reverb(room_size: 0.2, decay: 0.4, mod: { depth: c.mod(0, 0.001), rate: c.mod(0.2, 2) }, lowpass: c.mod(500, 8000), freeze: c.mod(0, 1), stretch: c.mod(0.8, 1.2), shimmer: c.mod(0, 1), drive: c.mod(0, 3), drive_mode: :fold, duck: c.mod(0, 12), gate: c.mod(0, 0.1))
       }],
+      ['reverb gain nodes (live mix, wet, dry, level, predelay; delays-2)', ->(c) {
+        c.stereo_sig.reverb(:room, mix: c.mod(0, 1), level: c.mod(0.5, 1), predelay: c.mod(0.0005, 0.002)).mixdown + c.sig.reverb(:room, wet: c.mod(0, 1), dry: c.mod(0.2, 1))
+      }],
+      ['tape_echo live settings (tone, low_cut, drive, wow, flutter nodes; delays-2)', ->(c) {
+        c.sig.tape_echo(:reel, time: 0.002, tone: c.mod(800, 6000), low_cut: c.mod(50, 400), drive: c.mod(0, 3), wow: c.mod(0, 0.5), flutter: c.mod(0, 0.1))
+      }],
       ['chorus', ->(c) { c.stereo_sig.chorus(:juno2) }],
       ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60.db) }],
 
@@ -340,6 +357,9 @@ module GraphSweep
       }],
       ['compand cubic, expand, noise_gate, duck', ->(c) {
         c.sig.compand({ -60.db => -70.db, -20.db => -20.db, 0.db => -10.db }, interpolation: :cubic).expand(threshold: -30.db).noise_gate(threshold: -60.db).duck(c.trigger, amount: -6.db)
+      }],
+      ['compress, expand, duck with live threshold, ratio, mix (delays-2)', ->(c) {
+        c.stereo_sig.compress(threshold: c.mod(0.02, 0.3), ratio: c.mod(1, 8), mix: c.mod(0, 1), makeup: :auto).mixdown.expand(threshold: c.mod(0.001, 0.05), ratio: c.mod(1, 4)).duck(c.trigger, threshold: c.mod(0.01, 0.2))
       }],
       ['compand unlinked with shaped segments', ->(c) { c.stereo_sig.compand([[-60.db, -70.db, :smooth], [-20.db, -20.db], [0.db, -8.db]], link: false) }],
       ['limit (true peak, unlinked) after squeeze', ->(c) { c.stereo_sig.squeeze(:eleven, depth: 0.5).limit(ceiling: -3.db, link: false) }],

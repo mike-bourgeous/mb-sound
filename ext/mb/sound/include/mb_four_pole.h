@@ -488,12 +488,33 @@ static inline double mb_fp_step(const struct mb_fp_args *args, const struct mb_f
 	return args->mix[0] * u + args->mix[1] * y1 + args->mix[2] * y2 + args->mix[3] * y3 + args->mix[4] * y4;
 }
 
+// A live drive (delays-2, 2026-10-31: a knob turns lp4's drive without a
+// rebuild): sets args->drive to +d+ (negative, NaN, or infinite: 0, linear)
+// with its inverse and whether it saturates, if it changed.  Returns
+// whether it changed.  The same values as a constant drive's.
+static inline _Bool mb_fp_drive_update(struct mb_fp_args *args, double d, double *inv_drive, _Bool *driven)
+{
+	if (!(d >= 0.0) || !isfinite(d)) {
+		d = 0.0;
+	}
+	if (d == args->drive) {
+		return 0;
+	}
+	args->drive = d;
+	*inv_drive = d > 0 ? 1.0 / d : 0.0;
+	*driven = d > 0;
+	return 1;
+}
+
 // Filters +length+ samples of +in+ into +out+ (may be the same buffer) with
 // the four-pole cascade (fast_filter.c's four_pole), updating the states
-// +st4+ and the flush grid count *fk (flushing on the grid).
-static inline void mb_four_pole_run(const struct mb_fp_args *args, const float *in, float *out, size_t length,
-		const struct mb_signal *fc_sig, const struct mb_signal *res_sig, double *st4, long *fk)
+// +st4+ and the flush grid count *fk (flushing on the grid).  +drive_sig+
+// (or NULL for args->drive) is a live drive read every sample.
+static inline void mb_four_pole_run(const struct mb_fp_args *args_in, const float *in, float *out, size_t length,
+		const struct mb_signal *fc_sig, const struct mb_signal *res_sig, const struct mb_signal *drive_sig, double *st4, long *fk)
 {
+	struct mb_fp_args a = *args_in;
+	const struct mb_fp_args *args = &a;
 	double rate = args->rate, drive = args->drive;
 	double st[4] = { st4[0], st4[1], st4[2], st4[3] };
 	struct mb_signal fc_in = *fc_sig, res_in = *res_sig;
@@ -509,6 +530,9 @@ static inline void mb_four_pole_run(const struct mb_fp_args *args, const float *
 	mb_fp_cache_init(&cc);
 
 	for (size_t i = 0; i < length; i++) {
+		if (drive_sig) {
+			mb_fp_drive_update(&a, mb_signal_at(drive_sig, i), &inv_drive, &driven);
+		}
 		mb_fp_coef_update(&cc, args, mb_signal_at(&fc_in, i), mb_signal_at(&res_in, i), pi_over_rate, fc_max);
 		out[i] = (float)mb_fp_step(args, &cc.c, inv_drive, driven, in[i], st);
 		mb_fp_flush_tick(fk, st);
@@ -525,9 +549,9 @@ static inline void mb_four_pole_run(const struct mb_fp_args *args, const float *
 // and back-substitution factors a1..a3, the response q1..q4 of the forward
 // pass to u, the loop gain k, 1 / (1 + k q4), the input gain, the
 // compensation (normalized or not), and the input saturator's drive and
-// its inverse (headroom included).
+// its inverse (headroom included; the headroom kept for a live drive).
 struct mb_dl_coef {
-	double g, r1, r2, r3, r4, a1, a2, a3, q1, q2, q3, q4, k, inv, in_gain, dcomp, sat_drive, sat_inv;
+	double g, r1, r2, r3, r4, a1, a2, a3, q1, q2, q3, q4, k, inv, in_gain, dcomp, sat_drive, sat_inv, headroom;
 };
 
 // ...and the parameters they were computed for, with the prewarped cutoff
@@ -547,6 +571,7 @@ static inline void mb_dl_cache_init(struct mb_dl_cache *cc, const struct mb_fp_a
 	struct mb_dl_coef *c = &cc->c;
 	c->sat_drive = drive;
 	c->sat_inv = drive > 0 ? 1.0 / drive : 0.0;
+	c->headroom = 1.0;
 	c->g = 0;
 	c->r1 = c->r2 = c->r3 = c->r4 = 1;
 	c->a1 = c->a2 = c->a3 = 0;
@@ -585,6 +610,7 @@ static inline void mb_dl_coef_update(struct mb_dl_cache *cc, const struct mb_fp_
 				double inv_drive = args->drive > 0 ? 1.0 / args->drive : 0.0;
 				c->sat_drive = args->drive / headroom;
 				c->sat_inv = headroom * inv_drive;
+				c->headroom = headroom;
 			}
 		}
 
@@ -658,12 +684,31 @@ static inline double mb_dl_step(const struct mb_fp_args *args, const struct mb_d
 	return y4;
 }
 
+// After a live drive change (mb_fp_drive_update on +args+): the input
+// saturator's drive and inverse, with the headroom of the last resonance
+// (as mb_dl_coef_update computes them; a headroom of 1 is exact).
+static inline void mb_dl_drive_update(struct mb_dl_cache *cc, const struct mb_fp_args *args)
+{
+	struct mb_dl_coef *c = &cc->c;
+	double inv_drive = args->drive > 0 ? 1.0 / args->drive : 0.0;
+	if (args->normalize) {
+		c->sat_drive = args->drive / c->headroom;
+		c->sat_inv = c->headroom * inv_drive;
+	} else {
+		c->sat_drive = args->drive;
+		c->sat_inv = inv_drive;
+	}
+}
+
 // Filters +length+ samples of +in+ into +out+ (may be the same buffer) with
 // the diode ladder (fast_filter.c's diode_ladder), updating the states +st4+
-// and the flush grid count *fk (flushing on the grid).
-static inline void mb_diode_ladder_run(const struct mb_fp_args *args, const float *in, float *out, size_t length,
-		const struct mb_signal *fc_sig, const struct mb_signal *res_sig, double *st4, long *fk)
+// and the flush grid count *fk (flushing on the grid).  +drive_sig+ (or
+// NULL for args->drive) is a live drive read every sample.
+static inline void mb_diode_ladder_run(const struct mb_fp_args *args_in, const float *in, float *out, size_t length,
+		const struct mb_signal *fc_sig, const struct mb_signal *res_sig, const struct mb_signal *drive_sig, double *st4, long *fk)
 {
+	struct mb_fp_args a = *args_in;
+	const struct mb_fp_args *args = &a;
 	double rate = args->rate;
 	double st[4] = { st4[0], st4[1], st4[2], st4[3] };
 	struct mb_signal fc_in = *fc_sig, res_in = *res_sig;
@@ -671,12 +716,16 @@ static inline void mb_diode_ladder_run(const struct mb_fp_args *args, const floa
 	double pi_over_rate = M_PI / rate;
 	double fc_max = rate * FP_MAX_CUTOFF_RATIO;
 	_Bool driven = args->drive > 0;
+	double inv_drive = 0.0;
 
 	// Coefficients, recomputed only when the cutoff or resonance changes
 	struct mb_dl_cache cc;
 	mb_dl_cache_init(&cc, args);
 
 	for (size_t i = 0; i < length; i++) {
+		if (drive_sig && mb_fp_drive_update(&a, mb_signal_at(drive_sig, i), &inv_drive, &driven)) {
+			mb_dl_drive_update(&cc, args);
+		}
 		mb_dl_coef_update(&cc, args, mb_signal_at(&fc_in, i), mb_signal_at(&res_in, i), pi_over_rate, fc_max);
 		out[i] = (float)mb_dl_step(args, &cc.c, driven, in[i], st);
 		mb_fp_flush_tick(fk, st);

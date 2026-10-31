@@ -116,6 +116,19 @@ RSpec.describe(MB::Sound::Plan, 'filter ops') do
       end
     end
 
+    # (delays-2: a knob turns lp4's drive without a rebuild)
+    fp::DRIVE_MODES.keys.each do |drive_mode|
+      it "matches a live drive node with drive_mode #{drive_mode} (lp4 and the diode ladder)" do
+        plan_compare(check: :raise) {
+          s = src.new(seed: 13) * 2
+          drive = src.new(seed: 14, kind: :steps, scale: 2, offset: 2.2, every: 53)
+          a = s.lp4(src.new(seed: 15, scale: 1000, offset: 1500), resonance: 0.8, drive: drive, drive_mode: drive_mode)
+          next a * 1 if drive_mode == :stages
+          a + s.diode(1200, resonance: 0.7, drive: drive, drive_mode: drive_mode, normalize: drive_mode == :input)
+        }
+      end
+    end
+
     it 'matches constant parameters, the linear curve, a quality node, and an unnormalized diode ladder' do
       r = plan_compare(check: :raise) {
         s = src.new(seed: 9) * 1

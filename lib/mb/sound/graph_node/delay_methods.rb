@@ -28,6 +28,10 @@ module MB
         #
         # The +:feedback+ gain and the +:wet+ and +:dry+ levels may be numbers
         # or graph nodes (e.g. an LFO or a MIDI CC), read every sample.
+        # +:mix+ (0..1, a number or node) crossfades dry and wet at equal
+        # power: dry * sqrt(1 - mix), wet * sqrt(mix), times +:dry+ (then
+        # 1 by default) and +:wet+ (delays-2, the maintainer's "Equal power",
+        # 2026-10-30; ping_pong and tape_echo mix the same way).
         #
         # +:interpolation+ chooses how fractional and moving delays are read:
         # :sinc (the default; band-limited, so sweeping delays don't dull
@@ -83,10 +87,11 @@ module MB
         # With d.fb the echoes come from a second delay line outside the
         # loop (the loop's own delay reads early by the insert's latency),
         # so pipeline delays cost about one more delay.
-        def delay(time = nil, seconds: nil, smooth: nil, smoothing: nil, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true, &insert)
+        def delay(time = nil, seconds: nil, smooth: nil, smoothing: nil, max_delay: 1.0, feedback: false, dry: nil, wet: 1, mix: nil, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true, &insert)
           time = DelayMethods.seconds_keyword(time, seconds)
           DelayMethods.check_plain_time(time)
           smoothing = DelayMethods.smooth_keyword(smooth, smoothing, true)
+          dry, wet = DelayMethods.mix_levels(dry.nil? ? (mix.nil? ? 0 : 1) : dry, wet, mix)
 
           if insert
             raise ArgumentError, "ring_out: false isn't supported with an insert block (the feedback loop rings out)" unless ring_out
@@ -113,6 +118,64 @@ module MB
             time, smooth: smoothing, max_delay: max_delay,
             dry: dry, wet: wet, interpolation: interpolation, ring_out: ring_out
           ))
+        end
+
+        # [dry, wet] levels for #delay, #ping_pong, and #tape_echo: +dry+ and
+        # +wet+ (numbers or nodes) as given without a +mix+, else times the
+        # equal-power crossfade of +mix+ (0..1, a number or node, clamped):
+        # dry * sqrt(1 - mix), wet * sqrt(mix) (BlendMethods.gains'
+        # :power law; until delays-2, 2026-10-31, the chorus's linear
+        # dry * (1 - mix), wet * mix: the maintainer's "Equal power").
+        def self.mix_levels(dry, wet, mix)
+          return [dry, wet] if mix.nil?
+
+          if mix.is_a?(Numeric)
+            raise ArgumentError, "A delay's mix: is 0..1 (0 dry, 1 wet; got #{mix.inspect})" unless mix.real?
+            mix = mix.to_f.clamp(0.0, 1.0)
+          end
+          dg, wg = BlendMethods.gains(mix, :power)
+          [StereoDelayMethods.level_product(dry, dg), StereoDelayMethods.level_product(wet, wg)]
+        end
+
+        # Delay times below this many seconds make #delay's insert loops
+        # audio-rate combs (tuned combs, Karplus-Strong-like strings, a
+        # flanger): they compensate their latency at the pitch 1 / time.
+        # Longer ones are echoes (see DelayMethods.compensation).
+        PITCH_COMPENSATION_BELOW = 0.02
+
+        # The latency compensation #delay's insert loops use for +time+ (the
+        # maintainer, 2026-10-31: "Pick by delay time"): :pitch below
+        # PITCH_COMPENSATION_BELOW (20 ms, 50 Hz: the loop is a pitched
+        # comb, and :pitch keeps its tuning exact through low cuts under the
+        # pitch, where :echo detuned a 200 Hz comb with a 20 Hz DC blocker
+        # by 38 cents), else :echo (low cuts count as wires, so echoes land
+        # on k * time; :pitch put them up to half an echo off).  A Duration
+        # is read at the build's tempo, a knob or constant node at its
+        # value; other nodes (LFOs) count as echoes (:echo and :pitch give
+        # the same samples unless the insert has a low cut or bandpass).
+        # Fixed when the loop builds.
+        def self.compensation(time, sample_rate)
+          seconds = delay_seconds(time, sample_rate)
+          seconds && seconds < PITCH_COMPENSATION_BELOW ? :pitch : :echo
+        end
+
+        # +time+ (a #delay time) in seconds at build time, or nil when it
+        # moves (a node other than a knob or constant).
+        def self.delay_seconds(time, sample_rate)
+          case time
+          when nil then nil
+          when Numeric then time.to_f
+          when Length::Samples, Length::Seconds
+            return Length.seconds(time, sample_rate: sample_rate).to_f if time.fixed?
+            v = Traversable.describe_param(time.node).value
+            v.is_a?(Numeric) ? (time.is_a?(Length::Samples) ? v.to_f / sample_rate : v.to_f) : nil
+          when Length then Length.seconds(time, sample_rate: sample_rate).to_f
+          else
+            v = time.respond_to?(:sample) ? Traversable.describe_param(time).value : nil
+            v.is_a?(Numeric) ? v.to_f : nil
+          end
+        rescue ArgumentError
+          nil
         end
 
         # True if +v+ is a plain real level (a number, Decibels included).
@@ -147,11 +210,10 @@ module MB
           delay_opts = { smooth: smoothing, max_delay: max_delay, interpolation: interpolation }
           pipeline = nil
 
-          # (echo loops: no sustain shelf, whose pitch would be 1 / time,
-          # and the echo compensation, where low cuts count as wires; see
-          # Plan::Loop::Program::ECHO_WIRES)
+          # (echo loops: no sustain shelf, whose pitch would be 1 / time;
+          # compensation by the delay time, see DelayMethods.compensation)
           bare = false
-          loop = self.feedback(sustain: false, compensate: :echo) do |fb, input|
+          loop = self.feedback(sustain: false, compensate: DelayMethods.compensation(time, sample_rate)) do |fb, input|
             delayed = (input + fb * feedback).delay(time, **delay_opts)
             pipeline = InsertPipeline.new(delayed)
             out = pipeline.call(insert)
@@ -442,12 +504,14 @@ module MB
         #   +:shimmer:+ (+:shimmer_pitch:+), +:freeze:+, +:stretch:+
         # - after the network: +:duck:+, +:gate:+, +:threshold:+
         #
-        # Live parameters (numbers or nodes, read every sample):
+        # Live parameters (numbers or nodes, read every sample, so a bound
+        # knob turns them without a rebuild): +:mix:+, +:wet:+, +:dry:+,
+        # +:level:+ (gains after the network; delays-2), +:predelay:+ (a
+        # node glides the read position at #delay's slew limit),
         # +:lowpass:+, +:highpass:+, +:drive:+, +:crush:+, +:shimmer:+,
         # +:freeze:+, +:stretch:+, +:duck:+, +:gate:+, +:threshold:+, and the
         # modulation depths and rates.  Fixed when built: +:room_size:+,
-        # +:decay:+, +:damping:+, +:shimmer_pitch:+, +:predelay:+, the layout,
-        # and +:wet:+/+:dry:+ (plain numbers, settable on the Reverb).
+        # +:decay:+, +:damping:+, +:shimmer_pitch:+, and the layout.
         #
         # If +:output_channels+ is greater than one, then this method returns a
         # channel bundle (GraphNode::Channels).  Otherwise it returns a single

@@ -41,6 +41,16 @@ RSpec.describe(MB::Sound::Plan, 'dynamics ops') do
     expect(dyn_ops(r).first.times.grep(MB::Sound::Plan::Value).length).to eq(2)
   end
 
+  it 'matches live threshold, ratio, mix, and auto makeup nodes (delays-2)' do
+    r = plan_compare {
+      x = src.new(seed: 8, scale: 0.9) * 1
+      thr = 0.03.constant + 70.hz.asaw.at(0..0.2)
+      x.compress(threshold: thr, ratio: 2.constant + 90.hz.asaw.at(0..6), mix: 0.6.constant + 40.hz.asaw.at(0..0.4), makeup: :auto).expand(threshold: 0.01.constant, ratio: 3.constant) * 1
+    }
+    expect(dyn_ops(r).length).to eq(2)
+    expect(dyn_ops(r).first.times.last(3).grep(MB::Sound::Plan::Value).length).to eq(3)
+  end
+
   it 'matches a duck with a sidechain read as a boundary input' do
     r = plan_compare {
       (src.new(seed: 5, scale: 0.5) * 1).duck(src.new(seed: 6, kind: :steps, every: 50), amount: -12.db, release: 0.003) * 1

@@ -6,9 +6,10 @@ module MB
         # duck, compand): FastDynamics.compand's kernel (shared through
         # mb_dynamics.h; fast_plan's OP_DYNAMICS) on the node's own state and
         # lookahead delay, reading its input, detector signals (the input,
-        # or the sidechain channels as boundary inputs), and times in
-        # samples (Consts for fixed lengths; Values for node times, already
-        # scaled to samples).  The mirror is Dynamics.process_ruby.
+        # or the sidechain channels as boundary inputs), times in samples
+        # (Consts for fixed lengths; Values for node times, already scaled
+        # to samples), and the live controls (shift, scale, mix; Consts or
+        # Values).  The mirror is Dynamics.process_ruby.
         class Dynamics < Base
           attr_reader :a, :sides, :times, :dynamics
 
@@ -24,7 +25,7 @@ module MB
           def initialize(dst, node, dynamics, channels, sides, times, extra_dsts: [])
             super(dst, node)
             channels = Array(channels)
-            raise ArgumentError, "Expected #{GraphNode::Dynamics::Transfer} times (5)" unless times.length == 5
+            raise ArgumentError, 'Expected eight signals (five times, then the shift, scale, and mix controls)' unless times.length == 8
             raise ArgumentError, 'Expected one destination per channel' unless extra_dsts.length == channels.length - 1
             raise Unsupported.new(node, 'a complex dynamics input') if (channels + sides + times).any? { |v| v.complex? }
             raise ArgumentError, 'A dynamics input must be a Value' unless channels.all?(Value) && sides.all?(Value)
@@ -71,8 +72,9 @@ module MB
 
       class Builder
         # +dynamics+ (a one-channel GraphNode::Dynamics) on +a+ with detector
-        # signals +sides+ and the five times +times+ in samples (Values,
-        # Consts, or numbers; see Op::Dynamics).
+        # signals +sides+ and the eight signals +times+ (five times in
+        # samples, then the shift, scale, and mix controls; Values, Consts,
+        # or numbers; see Op::Dynamics).
         def dynamics(dynamics, a, sides, times)
           emit(Op::Dynamics.new(value(:real), node, dynamics, [self[a]], sides.map { |s| self[s] }, times.map { |t| self[t] }))
         end

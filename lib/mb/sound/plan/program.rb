@@ -367,7 +367,7 @@ module MB
               @objects << op.filter
               cnum = ->(v) { v.is_a?(Const) ? v.parts[0] : 0.0 }
               [OPCODES[:four_pole], reg(op.dst), reg(op.a), value_reg(op.cutoff), value_reg(op.resonance),
-               @objects.length - 1, scalar(*op.settings, cnum.(op.cutoff), cnum.(op.resonance))]
+               @objects.length - 1, scalar(*op.settings, cnum.(op.cutoff), cnum.(op.resonance)), value_reg(op.drive)]
             else
               raise ArgumentError, "No lowering for #{op.class}"
             end

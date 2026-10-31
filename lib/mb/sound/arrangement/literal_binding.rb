@@ -337,27 +337,15 @@ module MB
           "bind #{track.inspect}, #{t.call_name}: #{t.arg.inspect}#{", nth: #{t.nth}" if t.nth > 0}"
         end
 
-        # What to do instead of binding a setting fixed when the patch
-        # builds, by method and argument (others: change the code).  A
-        # reverb's own mix is set once; a bus send is the turnable wet level.
-        FIXED_HINTS = {
-          reverb: {
-            %i[mix wet dry level] => ->(track, call) {
-              "turn a bus send instead (bus :verb { |sig| sig.#{call}(..., mix: 1) }; feed #{track.inspect}, :verb, -12.db)"
-            },
-          },
-        }.freeze
-
         # The one-line refusal for Target +t+ of track +track+ whose
         # setting a knob can't move (the patch raised with a knob there, or
         # never read it): fixed when the patch builds, and what to do
         # instead (fixes-1030; before, a raw NoMethodError: undefined
-        # method 'to_f').
+        # method 'to_f').  (A reverb's mix, wet, dry, and level pointed to
+        # a bus send until delays-2 made them live.)
         def fixed_message(track, t)
           what = t.kind == :document ? "#{t.param} of the #{t.document} preset" : "#{t.arg} of #{t.call_name}"
-          hint = t.kind == :call && FIXED_HINTS[t.call_name.to_sym]&.find { |args, _| args.include?(t.arg) }&.last
-          instead = hint ? hint.call(track, t.call_name) : "change it in the track's code instead"
-          "#{line(track, t)}: #{what} is fixed when the patch builds, so a knob can't move it; #{instead} (nothing was changed)"
+          "#{line(track, t)}: #{what} is fixed when the patch builds, so a knob can't move it; change it in the track's code instead (nothing was changed)"
         end
 
         # +patch+ (a track's patch block) built with Target +t+'s literal

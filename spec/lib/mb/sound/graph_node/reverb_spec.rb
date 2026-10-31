@@ -180,6 +180,29 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       expect(rev.dry).to eq(0.75)
       expect(rev.wet).to be_within(1e-9).of(0.25 * -10.db) # mix scales the preset's wet
     end
+
+    # (delays-2, 2026-10-31: the maintainer's "Mix should just be a gain
+    # control that can be adjusted with a knob, no rebuild needed")
+    it 'reads mix, wet, dry, level, and predelay nodes every sample: the same samples at their constant values' do
+      run = ->(**o) {
+        src = (220.hz.saw * MB::Sound.adsr(0.01, 0.1, 0.5, 0.2, hold: 0.1)).and_then(MB::Sound.silence(0.05))
+        rev = src.reverb(:hall, output_channels: 2, **o)
+        bufs = Array.new(12) { rev.outputs.map { |c| c.sample(800).dup } }
+        bufs.transpose.map { |b| SpecBuffers.join(b) }
+      }
+      [
+        [{ mix: 0.25 }, { mix: 0.25.constant }],
+        [{ wet: 0.5, dry: 0.75 }, { wet: 0.5.constant, dry: 0.75.constant }],
+        [{ level: 0.5, mix: 0.75 }, { level: 0.5.constant, mix: 0.75 }],
+        [{ predelay: 0.02 }, { predelay: 0.02.constant }],
+      ].each do |a, b|
+        expect(run.(**b)).to eq(run.(**a)), b.inspect
+      end
+      moving = run.(mix: MB::Sound::ArrayInput.new(data: [Numo::SFloat.linspace(0, 1, 9600)]))
+      expect(moving).not_to eq(run.(mix: 0.5))
+      expect((moving[0][0...100] - run.(mix: 0)[0][0...100]).abs.max).to be < 0.005 # (dry at the start: mix 0.01 by sample 100)
+      expect((moving[0][9000...9600] - run.(mix: 1)[0][9000...9600]).abs.max).to be < 0.01 # (wet at the end)
+    end
   end
 
   describe 'modulation' do

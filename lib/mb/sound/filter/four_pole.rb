@@ -125,6 +125,12 @@ module MB
         # Lowest cutoff in Hz, and highest as a fraction of the sample rate
         # (the kernel clamps to these).
         MIN_CUTOFF = 1.0
+
+        # The least drive a live drive node gives where the filter needs
+        # saturation (self-oscillation, drive_mode :stages or :feedback,
+        # whose number 0 means drive 1): -24 dB, the bottom of the drive
+        # knobs' range (Param's names table; delays-2).
+        MIN_LIVE_DRIVE = 10.0**(-24 / 20.0)
         MAX_CUTOFF_RATIO = 0.49
 
         # With +self_oscillate: true+, the first integrator starts (and
@@ -270,6 +276,13 @@ module MB
           @self_oscillate
         end
 
+        # Sets the drive (a number at least 0; 0 linear).
+        def drive=(d)
+          d = Float(d)
+          raise ArgumentError, "Drive must be a positive number or nil (got #{d.inspect})" unless d >= 0 && d.finite?
+          @drive = d
+        end
+
         # Sets the cutoff used by #process (Hz).
         def cutoff=(hz)
           @cutoff = Float(hz)
@@ -294,13 +307,16 @@ module MB
         end
 
         # Filters +samples+ with +cutoff+ and +resonance+ given as numbers or
-        # NArrays of the same length (read per sample).
-        def dynamic_process(samples, cutoff:, resonance:)
+        # NArrays of the same length (read per sample).  +drive+ (default
+        # the filter's #drive) may be an NArray too: a live drive read per
+        # sample (GraphNode::FourPole's drive node; delays-2).
+        def dynamic_process(samples, cutoff:, resonance:, drive: @drive)
           samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
+          drive = drive.real if drive.is_a?(Numo::SComplex) || drive.is_a?(Numo::DComplex)
           out = if diode?
-                  Kernels.diode_ladder(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, *kernel_options, diode_normalize, @tuning_number)
+                  Kernels.diode_ladder(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, drive, *kernel_options, diode_normalize, @tuning_number)
                 else
-                  Kernels.four_pole(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix, *kernel_options, @tuning_number)
+                  Kernels.four_pole(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, drive, @mix, *kernel_options, @tuning_number)
                 end
           remember(cutoff, resonance)
           out
@@ -388,7 +404,8 @@ module MB
           raise ArgumentError, 'Sample rate must be positive and finite' unless rate > 0 && rate.finite?
           k_max = k_max.to_f
           comp = comp.to_f
-          drive = drive.to_f
+          drive_arr = drive.is_a?(Numo::NArray) ? drive : nil # (a live drive, read per sample; delays-2)
+          drive = drive_arr ? 0.0 : drive.to_f
           raise ArgumentError, 'Filter parameters must be finite (and drive not negative)' unless k_max.finite? && comp.finite? && drive >= 0 && drive.finite?
           raise ArgumentError, 'Resonance curve must be 0 (linear), 1 (dB), 2 (self-oscillating linear), or 3 (self-oscillating dB)' unless [0, 1, 2, 3].include?(curve)
           raise ArgumentError, 'Drive mode must be 0 (input), 1 (stages), or 2 (feedback)' unless [0, 1, 2].include?(drive_mode)
@@ -410,6 +427,7 @@ module MB
           res_arr = signal_input(resonance, length, 'Resonance')
           fc_scalar = fc_arr ? nil : (cutoff.nil? ? 0.0 : cutoff.to_f)
           res_scalar = res_arr ? nil : (resonance.nil? ? 0.0 : resonance.to_f)
+          drive_arr = signal_input(drive_arr, length, 'Drive') if drive_arr
 
           pi_over_rate = Math::PI / rate
           fc_max = rate * MAX_CUTOFF_RATIO
@@ -431,6 +449,14 @@ module MB
           length.times do |i|
             fc = fc_arr ? fc_arr[i] : fc_scalar
             res = res_arr ? res_arr[i] : res_scalar
+            if drive_arr
+              d = live_drive(drive_arr[i])
+              if d != drive
+                drive = d
+                inv_drive = d > 0 ? 1.0 / d : 0.0
+                driven = d > 0
+              end
+            end
 
             if fc != last_fc || res != last_res
               # (NaN != NaN, like C, so NaN inputs recompute every sample)
@@ -544,7 +570,8 @@ module MB
           raise ArgumentError, 'Sample rate must be positive and finite' unless rate > 0 && rate.finite?
           k_max = k_max.to_f
           comp = comp.to_f
-          drive = drive.to_f
+          drive_arr = drive.is_a?(Numo::NArray) ? drive : nil # (a live drive, read per sample; delays-2)
+          drive = drive_arr ? 0.0 : drive.to_f
           raise ArgumentError, 'Filter parameters must be finite (and drive not negative)' unless k_max.finite? && comp.finite? && drive >= 0 && drive.finite?
           raise ArgumentError, 'Resonance curve must be 0 (linear), 1 (dB), 2 (self-oscillating linear), or 3 (self-oscillating dB)' unless [0, 1, 2, 3].include?(curve)
           raise ArgumentError, 'Diode ladder drive mode must be 0 (input) or 2 (feedback)' unless [0, 2].include?(drive_mode)
@@ -565,6 +592,7 @@ module MB
           res_arr = signal_input(resonance, length, 'Resonance')
           fc_scalar = fc_arr ? nil : (cutoff.nil? ? 0.0 : cutoff.to_f)
           res_scalar = res_arr ? nil : (resonance.nil? ? 0.0 : resonance.to_f)
+          drive_arr = signal_input(drive_arr, length, 'Drive') if drive_arr
 
           pi_over_rate = Math::PI / rate
           fc_max = rate * MAX_CUTOFF_RATIO
@@ -577,6 +605,7 @@ module MB
           scale = DIODE_INV_W180
           sat_drive = drive
           sat_inv = inv_drive
+          headroom = 1.0
           g = 0.0
           r1 = r2 = r3 = r4 = 1.0
           a1 = a2 = a3 = 0.0
@@ -589,6 +618,22 @@ module MB
           length.times do |i|
             fc = fc_arr ? fc_arr[i] : fc_scalar
             res = res_arr ? res_arr[i] : res_scalar
+            if drive_arr
+              d = live_drive(drive_arr[i])
+              if d != drive
+                # (mb_dl_drive_update: the saturator with the last headroom)
+                drive = d
+                inv_drive = d > 0 ? 1.0 / d : 0.0
+                driven = d > 0
+                if normalize == 1
+                  sat_drive = drive / headroom
+                  sat_inv = headroom * inv_drive
+                else
+                  sat_drive = drive
+                  sat_inv = inv_drive
+                end
+              end
+            end
 
             if fc != last_fc || res != last_res
               if res != last_res
@@ -687,6 +732,13 @@ module MB
 
           Kernels.inplace_result(buffer, out)
         end
+
+        # A live drive sample as the kernels read it (mb_fp_drive_update):
+        # negative, NaN, or infinite values read as 0 (linear).
+        def self.live_drive(d)
+          !(d >= 0.0) || !d.finite? ? 0.0 : d
+        end
+        private_class_method :live_drive
 
         # The diode ladder's dB resonance curve: k / DIODE_CURVE_K for
         # resonance +r+ (0..1).  Like .resonance_curve, the gain at the

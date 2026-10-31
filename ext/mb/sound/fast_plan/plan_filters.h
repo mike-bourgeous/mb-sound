@@ -39,9 +39,10 @@ void mb_plan_svf_lanes(int lanes, float *const *d, const float *const *a, const 
 // +d+; +cfg+ is [k_max, compensation, drive, mix (5), curve, drive mode,
 // clip, normalize, diode, tuning]; +obj+ the Filter::FourPole (its @state and
 // @sample_rate read each block, @cutoff and @resonance set to the last
-// values as #remember does).
+// values as #remember does).  +drive+ is a live drive register (its p
+// non-NULL; delays-2), else cfg's drive holds.
 void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *res,
-		const double *cfg, VALUE obj, size_t n);
+		const struct mb_plan_param *drive, const double *cfg, VALUE obj, size_t n);
 
 // OP_FOUR_POLE for several lanes at once (see mb_plan_svf_lanes): prm
 // holds each lane's cutoff and resonance (2 per lane), cfg[l] each lane's
@@ -74,9 +75,11 @@ void mb_plan_wavetable_segment(VALUE tinfo, float *out, size_t length, const str
 
 // OP_DYNAMICS: FastDynamics.compand (plan_dynamics.c, through
 // mb_dynamics.h) on the +nch+ inputs +in+ into +out+, with +nside+ detector
-// signals +side+ and DT_COUNT times +tim+ (in samples); +obj+ is the
-// GraphNode::Dynamics (its @params, @plan_curve, @state, and @delay are
-// read each block).  Raises on bad objects.
+// signals +side+ and MB_PLAN_DYN_SIGNALS signals +tim+ (DT_COUNT: the
+// times in samples, then the live threshold shift, ratio scale, and mix);
+// +obj+ is the GraphNode::Dynamics (its @params, @plan_curve, @state, and
+// @delay are read each block).  Raises on bad objects.
+#define MB_PLAN_DYN_SIGNALS 8
 struct mb_signal;
 void mb_plan_dynamics(float *const *out, long nch, const struct mb_signal *in, const struct mb_signal *side, long nside, const struct mb_signal *tim, VALUE obj, size_t n);
 

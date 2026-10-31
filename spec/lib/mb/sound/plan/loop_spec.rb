@@ -116,6 +116,14 @@ RSpec.describe(MB::Sound::Plan::Loop) do
         input + (a * 0.4 + b * 0.3 + c * 0.2)
       }
     },
+    'lp4 and diode ladders with live drive nodes (delays-2)' => ->(s) {
+      s.input.feedback { |fb, input|
+        d = fb.delay(173.samples, smoothing: false)
+        a = d.lp4(1500, resonance: 0.5, drive: 1.7.hz.lfo.at(0.5..4))
+        b = d.diode(1800, resonance: 0.3, drive: 0.9.hz.lfo.at(1..3), drive_mode: :feedback)
+        input + (a * 0.4 + b * 0.3)
+      }
+    },
     'a gain node on a parallel path (latency per sample)' => ->(s) {
       s.input(3, 0.1).feedback { |fb, input|
         d = fb.delay(90.25.samples, smoothing: false)

@@ -348,7 +348,7 @@ static void pf_fp_write(struct pf_fp_lane *f, const struct mb_plan_param *fc, co
 }
 
 void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *res,
-		const double *cfg, VALUE obj, size_t n)
+		const struct mb_plan_param *drive, const double *cfg, VALUE obj, size_t n)
 {
 	pf_ids();
 	struct pf_fp_lane f;
@@ -356,11 +356,17 @@ void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc,
 
 	struct mb_signal fc_sig = { .scalar = fc->scalar, .ptr = fc->p, .step = 1 };
 	struct mb_signal res_sig = { .scalar = res->scalar, .ptr = res->p, .step = 1 };
+	struct mb_signal drive_sig = { .scalar = 0.0, .ptr = drive ? drive->p : NULL, .step = 1 };
+	const struct mb_signal *live = drive && drive->p ? &drive_sig : NULL;
+	if (live) {
+		// (as FastFilter's live drive: starting linear, set by the first sample)
+		f.args.drive = 0.0;
+	}
 
 	if (f.diode) {
-		mb_diode_ladder_run(&f.args, a, d, n, &fc_sig, &res_sig, f.st, &f.fk);
+		mb_diode_ladder_run(&f.args, a, d, n, &fc_sig, &res_sig, live, f.st, &f.fk);
 	} else {
-		mb_four_pole_run(&f.args, a, d, n, &fc_sig, &res_sig, f.st, &f.fk);
+		mb_four_pole_run(&f.args, a, d, n, &fc_sig, &res_sig, live, f.st, &f.fk);
 	}
 
 	pf_fp_write(&f, fc, res, n);

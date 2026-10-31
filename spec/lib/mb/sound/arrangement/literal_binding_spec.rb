@@ -175,8 +175,8 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
   # effect, or a setting that becomes live, goes in this table.
   BIND_SWEEP = {
     'reverb(:hall, ...)' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.reverb(:hall, **o) } }, :reverb,
-      { lowpass: 8000, highpass: 100, drive: 0.5, crush: 0.2, shimmer: 0.3, stretch: 1.2 },
-      { mix: 0.3, wet: 0.5, dry: 1, level: 1, predelay: 0.02 }],
+      { lowpass: 8000, highpass: 100, drive: 0.5, crush: 0.2, shimmer: 0.3, stretch: 1.2, mix: 0.3, wet: 0.5, dry: 1, level: 1, predelay: 0.02 },
+      {}],
     'reverb(room_size:, decay:)' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.reverb(**{ room_size: 0.5, decay: 2.0, damping: 0.4 }.merge(o)) } }, :reverb,
       {}, { room_size: 0.5, decay: 2.0, damping: 0.4 }],
     'delay' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.delay(0.3, **o) } }, :delay,
@@ -188,15 +188,15 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     'multitap with feedback' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.multitap(0.2, 0.3, **o) } }, :multitap,
       { feedback: 0.3 }, {}],
     'tape_echo(:dub, ...)' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.tape_echo(:dub, **o) } }, :tape_echo,
-      { time: 0.3, feedback: 0.6, mix: 0.5 }, { tone: 0.5, low_cut: 100, drive: 0.5, wow: 0.3, flutter: 0.3 }],
+      { time: 0.3, feedback: 0.6, mix: 0.5, tone: 2000, low_cut: 100, drive: 0.5, wow: 0.3, flutter: 0.3 }, {}],
     'chorus(:juno2, ...)' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.chorus(:juno2, **o) } }, :chorus,
       { rate: 0.5, depth: 0.5, mix: 0.5 }, {}],
     'formant(:a, :o, ...)' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.formant(:a, :o, **o) } }, :formant,
       { morph: 0.5, shift: 2, width: 1 }, {}],
     'lp4' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw.lp4(1000, **o) * v.amp_env(0.01, 0.1, 0.5, 0.1) } } }, :lp4,
-      { resonance: 0.3 }, { drive: 1.5 }],
+      { resonance: 0.3, drive: 1.5 }, {}],
     'compress' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.compress(**o) } }, :compress,
-      { attack: 0.01, release: 0.1 }, { threshold: -20.db, ratio: 4, mix: 0.8 }],
+      { attack: 0.01, release: 0.1, threshold: -20.db, ratio: 4, mix: 0.8 }, {}],
   }.freeze
 
   it 'binds every live effect setting and refuses fixed ones with one line (sweep)' do
@@ -224,13 +224,23 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     end
   end
 
-  it 'points a reverb\'s wet level to a bus send' do
-    patch = ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.reverb(:hall, mix: 0.3) }
-    s, = play(nil, track: :pad, patch: patch, buffers: 2)
-    MB::Sound::Session.with_context(session: s) do
-      expect { MB::Sound.bind(:pad, reverb: :mix) }.to raise_error(described_class::Error, /mix of reverb is fixed when the patch builds.*turn a bus send instead \(bus :verb \{ \|sig\| sig\.reverb\(\.\.\., mix: 1\) \}; feed :pad, :verb, -12\.db\)/)
-      expect(s.knobs).not_to have_key(:"pad/mix")
-    end
+  # (delays-2, 2026-10-31: the maintainer's "Mix should just be a gain
+  # control that can be adjusted with a knob, no rebuild needed")
+  it 'binds a reverb\'s mix: the same samples at its starting value, then turning moves them without a rebuild' do
+    patch = ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.reverb(:hall, mix: 0.25) }
+    s, bound, = play(->(_) { MB::Sound.bind(:pad, reverb: :mix) }, track: :pad, patch: patch, buffers: 120)
+    _, ref, = play(REBUILD, track: :pad, patch: patch, buffers: 180)
+    expect(s.knobs[:"pad/mix"].value).to eq(0.25)
+    expect(code_of(s, :pad)).to include('reverb(:hall, mix: knob(:"pad/mix"))')
+    expect((bound - ref[0...bound.length]).abs.max).to eq(0.0)
+
+    graph = s.ui_graphs[:pad]
+    MB::Sound::Session.with_context(session: s) { MB::Sound.turn(:"pad/mix", 0.9) }
+    60.times { s.process_buffer }
+    expect(s.ui_graphs[:pad]).to equal(graph) # (no rebuild)
+    turned = Numo::DFloat.cast(s.output.captured[0])
+    expect((turned[0...bound.length] - ref[0...bound.length]).abs.max).to eq(0.0)
+    expect((turned[bound.length..] - ref[bound.length..]).abs.max).to be > 0.01
   end
 
   it 'replays from a take bit for bit' do

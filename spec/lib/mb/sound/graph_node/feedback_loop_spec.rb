@@ -483,6 +483,24 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
       expect(a.sample(4800)).to eq(b.sample(4800))
     end
 
+    # (delays-2, the maintainer's "Pick by delay time", 2026-10-31)
+    it 'compensates at the pitch below 20 ms (tuned combs) and as echoes from 20 ms up' do
+      dm = MB::Sound::GraphNode::DelayMethods
+      blocker = ->(fb) { fb.filter(:highpass, cutoff: 20, quality: 0.707) }
+      expect(impulse.delay(240.samples, feedback: 0.9, smoothing: false, &blocker).compensate).to eq(:pitch)
+      expect(impulse.delay(0.0199, feedback: 0.9, &blocker).compensate).to eq(:pitch)
+      expect(impulse.delay(0.02, feedback: 0.9, &blocker).compensate).to eq(:echo)
+      expect(impulse.delay(1.n8, feedback: 0.5, &blocker).compensate).to eq(:echo)
+      expect(impulse.delay(0.005.constant, feedback: 0.5, &blocker).compensate).to eq(:pitch) # (a constant node at its value)
+      expect(impulse.delay(3.hz.lfo.at(0.001..0.005), feedback: 0.5, &blocker).compensate).to eq(:echo) # (moving: an echo)
+      expect(dm::PITCH_COMPENSATION_BELOW).to eq(0.02)
+
+      # A 200 Hz comb through a DC blocker: :echo left it 38 cents sharp
+      a = impulse.delay(240.samples, feedback: 0.98, smoothing: false, &blocker)
+      b = impulse.feedback(sustain: false, compensate: :pitch) { |fb, input| blocker.((input + fb * 0.98).delay(240.samples, smoothing: false)) }
+      expect(a.sample(4800)).to eq(b.sample(4800))
+    end
+
     it 'accepts compensate: :echo on any loop' do
       l = impulse.feedback(compensate: :echo) { |fb, input| input + fb.delay(100.samples) * 0.5 }
       expect(l.compensate).to eq(:echo)
