@@ -95,8 +95,8 @@ module MB
       include SafetyLimiter
       include UIFeed
       include Warming
-      include Buses # it extends Strip's audible_unlocked? and apply_strip through super
-      include Cue # after Buses: it extends audible_unlocked? through super (undo subjects are registered: Undo.subject)
+      include Buses # (strip rules and steps, undo subjects: registered, so include order doesn't matter)
+      include Cue
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.

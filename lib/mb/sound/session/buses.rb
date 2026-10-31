@@ -1288,18 +1288,20 @@ module MB
           end
         end
 
-        # --- Overrides (Strip) and undo subjects ---
+        # --- Strip rules and steps (Strip.rule/.step), undo subjects ---
 
-        # Solo in place through the routing (see design/notes/buses.md): a
-        # soloed track keeps the buses it feeds audible, and a soloed bus
-        # keeps what feeds it audible.
-        def audible_unlocked?(name)
-          return super if @soloed.empty? || (@buses.empty? && @routes.empty?)
+        Strip.rule :bus_solo_strip_rule, order: 40
+        Strip.step :bus_strip_step, order: 20
+
+        # Strip rule: solo in place through the routing (see
+        # design/notes/buses.md): a soloed track keeps the buses it feeds
+        # audible, and a soloed bus keeps what feeds it audible (after the
+        # mute and solo rules, so only for names they left silent).
+        def bus_solo_strip_rule(name)
+          return nil if @soloed.empty? || (@buses.empty? && @routes.empty?)
           track = Session::Name.monitored(name)
-          return false if @muted.include?(name) || (track && @muted.include?(track))
-          return true if super
           reach = solo_reach
-          reach.include?(name) || (!track.nil? && reach.include?(track))
+          reach.include?(name) || (!track.nil? && reach.include?(track)) ? true : nil
         end
 
         # Names audible because of a solo elsewhere in the routing: buses
@@ -1324,14 +1326,10 @@ module MB
           reach
         end
 
-        # Strip ramps for buses too.
-        def apply_strip(fade)
-          super
+        # Strip step: the buses' mute/solo ramps.
+        def bus_strip_step(frame, length)
           return if @buses.empty?
 
-          frame = @landing_frame || @frame
-          rate = output.sample_rate.to_f
-          length = fade ? fade_frames(fade, rate) : MB::M.max((Fades::DECLICK_SECONDS * rate).round, 1)
           @mutex.synchronize { @buses.values }.each do |b|
             target = audible_unlocked?(b.name) ? 1.0 : 0.0
             current = b.strip_ramp ? b.strip_ramp.to : b.strip_level
