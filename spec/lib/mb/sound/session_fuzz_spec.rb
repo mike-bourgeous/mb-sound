@@ -248,12 +248,35 @@ RSpec.describe('session fuzzing') do
         'at_bar(1) { flow(seed: 43, on: :beat) { generate markov(s1: { s1: knob(:busy), s2: 1 }, s2: { s1: 3, s2: knob(:busy) }, seed: 86), s1: 1, s2: 2.beats } }',
       ], 3, true,
     ],
+    # (t3's rebuild lands on bar 3 while it sleeps muted, a frame before
+    # its unmute: it starts fresh by design, so the mixes are compared up
+    # to its landing, past t1's carried rebuild on bar 2; the batch-end
+    # soak of omnibus19 found it, fix-batch-1031)
+    'a muted, sleeping track rebuilt before its unmute (seed 767029)' => [
+      ['bpm 112', 'knob :busy, 0.5'], sleeping_rebuild = [
+        'knob :cut, 1200.0, range: 200.0..4000.0',
+        'track :t1, :dnb_sub, q: 1',
+        'track(:t2, q: 1/2r) { |clip| clip.synth(voices: 3) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) }.filter(:lowpass, cutoff: knob(:cut), quality: 2) * 0.3 }',
+        'track(:t3, q: 1/2r) { |clip| clip.synth(voices: 2) { |v| v.hz.triangle * v.amp_env(0.002, 0.05, 0.6, 0.02) }.filter(:lowpass, cutoff: knob(:cut), quality: 2) * 0.3 }',
+        'scene :s1, t1: seq(F3, A3, C4, E4).n4.loop, t2: seq(C3.n4, G3.n8.dotted, Eb3.n16).loop, t3: seq(A3, R, C4.n4, E4).n16.loop',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(3) { unmute :t3, on: :now }',
+        'at_bar(1, beat: 2) { mute :t3 }',
+      ].freeze, 3, false,
+    ],
   }.each do |name, (header, lines, bars, slow)|
     it "holds carry for #{name}", *(slow ? [:slow] : []), render_budget: { seconds: 90, reason: 'a song rendered twice with and without its rebuilds' } do
       song = SessionFuzz::Song.new(header: header, lines: lines, bars: bars)
       expect(SessionFuzz.carry_lines(song)).not_to be_empty
       expect(SessionFuzz.check(:carry, song)).to be_nil
     end
+  end
+
+  it 'notes where a carrying rebuild of a sleeping track landed fresh', render_budget: { seconds: 90, reason: 'a song rendered twice with and without its rebuilds' } do
+    song = SessionFuzz::Song.new(header: ['bpm 112', 'knob :busy, 0.5'], lines: sleeping_rebuild, bars: 3)
+    expect(SessionFuzz.check(:carry, song)).to be_nil
+    # (bar 3 at 112 BPM: the floor of 2 bars' 205714.29 frames)
+    expect(CarryCheck.fresh_frames).to eq([(2 * 4 * 60 * 48000r / 112).floor])
   end
 
   it 'shrinks a failing song to the lines that fail' do

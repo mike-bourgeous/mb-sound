@@ -24,7 +24,8 @@
 # - :carry: a carrying rebuild of each patch track (what a bind or a build
 #   knob's turn does; Session::Carry, carry-1) at a point drawn from the
 #   song gives the same mix, bit for bit, when every swap was a cut
-#   (CarryCheck, spec/support/carry_check.rb)
+#   (CarryCheck, spec/support/carry_check.rb), up to the first rebuild
+#   that landed fresh (a muted track asleep since its mute: by design)
 #
 # Renders use exact_lanes: true (synth lanes freed on the 800-frame grid,
 # so voice allocation is the same at any buffer size; see Synth).
@@ -582,11 +583,21 @@ module SessionFuzz
       return :skip if plans.empty? || !plans.all?(&:full?)
 
       plain = render((song.header + song.lines + extra.map { |l| l.sub('fuzz_rebuild', 'fuzz_split') }).join("\n"), song.bars)
+      # (a rebuild of a muted track asleep since its mute starts fresh by
+      # design (Session#add_now; sound_design_ui.md), so on its unmute the
+      # song differs from the uninterrupted one: the mixes are compared up
+      # to the first such landing; seed 767029)
+      fresh = CarryCheck.fresh_frames.min
+      if fresh
+        return :skip if fresh <= 0
+
+        plain, got = [plain, got].map { |m| m.map { |c| c[0...[fresh, c.length].min] } }
+      end
       # (a rebuild queued past the end keeps a render going; its extra
       # frames must be silent; and graphs ending a buffer apart leave
       # denormal tails: tolerance 1e-20)
       plain, got = trim_silent(plain, got)
-      compare(plain, got, tolerance: 1e-20, label: "#{plans.length} carried rebuild#{'s' unless plans.length == 1} vs none")
+      compare(plain, got, tolerance: 1e-20, label: "#{plans.length} carried rebuild#{'s' unless plans.length == 1} vs none#{" (up to frame #{fresh}, where a sleeping track's rebuild started fresh)" if fresh}")
     when :timeline
       parts = timeline_parts(song)
       return :skip if parts.empty?
