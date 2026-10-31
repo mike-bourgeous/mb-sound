@@ -173,6 +173,20 @@ module MB
           "Unison detune (#{@fractions.length} copies, #{@mode}#{@control ? ", control every #{@control}" : ''})"
         end
 
+        # For Session::Carry (a rebuilt graph continues this one): the
+        # :interp kernel's ramp state (nil in :exact mode, whose frames
+        # depend only on the inputs).
+        def plan_snapshot
+          [@state&.to_a]
+        end
+
+        # Restores #plan_snapshot.
+        def plan_restore(snapshot)
+          state, = snapshot
+          @state = state && Numo::DFloat.cast(state)
+          @frame_key = nil
+        end
+
         private
 
         # Computes the next frame into @data.  Returns nil at the end.

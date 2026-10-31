@@ -35,14 +35,17 @@ module MB
       # first note of a legato pair is marked slid (`~`, Seq::Step#slide),
       # its length as played, so mono voices glide and legato envelopes
       # hold; chords and other overlaps stay unmarked notes.  +slides:
-      # true+ marks every overlap, +false+ none.
+      # true+ marks every overlap, +false+ none, and a number from 0 to 1
+      # is the :auto rule with that share of the first note in place of
+      # the half (LEGATO_SHARE; gen-midi-2, for the maintainer's A/B of
+      # tighter and looser rules: 0.25 tighter, 1 looser).
       #
       # Controllers (+cc:+): CCs (except bank select 0/32, the RPN/NRPN
       # messages 6/38/96-101, and channel mode messages 120-127), pitch
       # bend (with the bend range the file set with RPN 0, kept on the
       # lane: ControlLane#range), channel and poly pressure in the
-      # selection become Sequence::ControlLanes at exact positions (:steps,
-      # the default), fitted curves (:fit, Clip#fit_controls), only some
+      # selection become Sequence::ControlLanes at exact positions (:steps
+      # or true, the default), fitted curves (:fit, Clip#fit_controls), only some
       # (an Array of CC numbers and :bend/:pressure/:poly_pressure), or
       # none (false).  A lane's value at the window's start is chased: it
       # gets a point at 0 if the file set the controller earlier.
@@ -107,6 +110,11 @@ module MB
         # limit).
         LEGATO_MAX_OVERLAP = 1/8r
 
+        # The share of the first note of a legato pair its overlap with
+        # the next stays under (slides: :auto; a number for +slides:+
+        # replaces it).
+        LEGATO_SHARE = 1/2r
+
         # How long (whole notes) a drum hit of #kit lasts at most: drum
         # tracks' note lengths mean nothing to drum machines (they often
         # overlap the next hit), so hits are this long, or up to the next
@@ -116,11 +124,6 @@ module MB
         # How far (whole notes) a note may end past a bar line without
         # adding a bar to the clip (see the class description).
         END_GRACE = 1/32r
-
-        # Controllers never kept as lanes: bank select, data entry and
-        # (N)RPN selection (RPN 0, the bend range, goes on the bend lane),
-        # and channel mode messages.
-        SKIPPED_CC = [0, 32, 6, 38, *96..101, *120..127].freeze
 
         # Track names that mark drum tracks besides channel 10.
         DRUM_NAMES = /kick|snare|hat|drum|perc|tom|cymbal|crash|ride|clap|rim|shaker|conga|bongo|cowbell/i
@@ -324,9 +327,11 @@ module MB
           raise ArgumentError, "channel: is a 0-based MIDI channel 0..15 (got #{channel.inspect})" unless channel.nil? || (channel.is_a?(Integer) && channel.between?(0, 15))
           raise ArgumentError, "bars: is a positive whole number of bars (got #{bars.inspect})" unless bars.nil? || (bars.is_a?(Integer) && bars > 0)
           raise ArgumentError, "from: is a bar offset from 0 (got #{from.inspect})" unless from.is_a?(Integer) && from >= 0
-          raise ArgumentError, "slides: is :auto, true, or false (got #{slides.inspect})" unless [:auto, true, false].include?(slides)
-          unless [:steps, :fit, false, nil].include?(cc) || (cc.is_a?(Array) && cc.all? { |c| (c.is_a?(Integer) && c.between?(0, 127)) || %i[bend pressure poly_pressure].include?(c) })
-            raise ArgumentError, "cc: is :steps, :fit, false, or an Array of CC numbers and :bend/:pressure/:poly_pressure (got #{cc.inspect})"
+          unless [:auto, true, false].include?(slides) || (slides.is_a?(Numeric) && slides.real? && slides > 0 && slides <= 1)
+            raise ArgumentError, "slides: is :auto, true, false, or the share of a note an overlap may reach (above 0, up to 1; :auto is 0.5) (got #{slides.inspect})"
+          end
+          unless Sequence::ControlLane.selection?(cc)
+            raise ArgumentError, "cc: is :steps (or true), :fit, false, or an Array of CC numbers and :bend/:pressure/:poly_pressure (got #{cc.inspect})"
           end
           unless %i[score performed].include?(timing)
             hint = DidYouMean::SpellChecker.new(dictionary: %w[score performed]).correct(timing.to_s).first
@@ -442,15 +447,16 @@ module MB
               nxt && nxt[0] < off && nxt[0] > on
             }
           end
-          legato_pairs(notes)
+          legato_pairs(notes, share: mode == :auto ? LEGATO_SHARE : mode)
         end
 
         # Per note of +notes+ (sorted by start), true if it and the next
         # note are a legato pair (see the class description): the next
         # starts LEGATO_GAP or more later, before this one ends, overlapping
-        # it by less than LEGATO_MAX_OVERLAP and less than half of this
-        # note, with no other note sounding during the overlap.
-        def legato_pairs(notes)
+        # it by less than LEGATO_MAX_OVERLAP and less than +share+ of this
+        # note (half by default), with no other note sounding during the
+        # overlap.
+        def legato_pairs(notes, share: LEGATO_SHARE)
           gap = (LEGATO_GAP / whole_notes_per_tick).ceil
           most = LEGATO_MAX_OVERLAP / whole_notes_per_tick
           # The number of notes sounding, as [[tick, count from there], ...]
@@ -466,7 +472,7 @@ module MB
             nxt = notes[i + 1] or next false
             on2 = nxt[0]
             overlap = off - on2
-            next false unless overlap > 0 && on2 - on >= gap && overlap < most && overlap * 2 < off - on
+            next false unless overlap > 0 && on2 - on >= gap && overlap < most && overlap < share * (off - on)
             # At most these two notes during the overlap [on2, off)
             k = (ticks.bsearch_index { |t| t > on2 } || ticks.length) - 1
             ok = true
@@ -496,16 +502,10 @@ module MB
           (n < 1 ? 1 : n) * bar
         end
 
-        # The lane key [type, number] of controller event +e+, or nil.
+        # The lane key [type, number] of controller event +e+, or nil
+        # (Sequence::ControlLane.key_for).
         def lane_key(e, sustain:)
-          case e.type
-          when :cc
-            return nil if SKIPPED_CC.include?(e.note) || (sustain && e.note == 64)
-            [:cc, e.note]
-          when :bend then [:bend, nil]
-          when :channel_pressure then [:pressure, nil]
-          when :poly_pressure then [:poly_pressure, e.note]
-          end
+          Sequence::ControlLane.key_for(e, sustain: sustain)
         end
 
         # The pitch bend range (semitones) the file sets with RPN 0
@@ -531,24 +531,9 @@ module MB
         # The ControlLanes of +evs+ in [start, stop) (see the class
         # description).
         def lanes(evs, start, stop, pos, cc, sustain:)
-          before = {}
-          inside = Hash.new { |h, k| h[k] = [] }
-          evs.each do |tick, e|
-            key = lane_key(e, sustain: sustain) or next
-            next if cc.is_a?(Array) && !cc.include?(key[0] == :cc ? key[1] : key[0])
-            break if tick >= stop
-            if tick < start
-              before[key] = e.value
-            else
-              inside[key] << [pos.call(tick), e.value]
-            end
-          end
-          keys = (before.keys + inside.keys).uniq.sort_by { |t, n| [Sequence::ControlLane::TYPES.index(t), n || 0] }
           ranges = bend_ranges(evs, stop)
-          keys.map { |key|
-            pts = inside.fetch(key, [])
-            pts = [[0r, before[key]]] + pts if before.key?(key) && pts.none? { |p, _| p == 0 }
-            Sequence::ControlLane.new(key[0], key[1], pts, range: key[0] == :bend ? ranges : nil)
+          Sequence::ControlLane.from_events(evs, start, stop, cc: cc, sustain: sustain) { |tick| pos.call(tick) }.map { |l|
+            l.type == :bend && ranges ? Sequence::ControlLane.new(:bend, nil, l.points, range: ranges) : l
           }
         end
       end

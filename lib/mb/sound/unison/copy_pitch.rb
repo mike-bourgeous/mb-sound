@@ -36,6 +36,27 @@ module MB
           node.outputs[index]
         end
 
+        # Copy +index+'s frequency (Hz) now: for a fixed detune (a constant
+        # node, see Unison.build) the base pitch's frequency at the copy's
+        # ratio, as the Detune kernels compute it (float32 detune, exp of
+        # fraction times detune times ln 2 / 12); else the Detune output's
+        # latest value.
+        def frequency_value(index)
+          return node.outputs[index].value unless @detune.is_a?(GraphNode::Constant)
+
+          d = Numo::SFloat[@detune.constant][0]
+          @base.frequency * Math.exp(@fractions[index] * (d * Detune::LOG_SEMITONE))
+        end
+
+        # Copy +index+'s offset in semitones now: its fraction times the
+        # detune's current value (float32, as the detune node gives it).
+        def offset_value(index)
+          d = @detune.is_a?(GraphNode::Constant) ? @detune.constant : @detune.value
+          Numo::SFloat[d][0] * @fractions[index]
+        rescue NoMethodError, ArgumentError
+          0.0
+        end
+
         # A node of copy +index+'s offset in semitones (its fraction times
         # the detune; made once per copy), or nil for a copy at fraction 0.
         def offset(index)
@@ -97,7 +118,7 @@ module MB
         def frequency
           return super unless @set
 
-          @set.frequency(@index).value * 2 ** (@shift / 12.0)
+          @set.frequency_value(@index) * 2 ** (@shift / 12.0)
         end
 
         def constant?
@@ -120,8 +141,14 @@ module MB
         end
 
         # On a copy of a Notes pitch, Notes::NotePitch#glide for this copy.
-        def glide(time, legato: false, from: nil, overshoot: 0)
-          notes_pitch!(:glide).glide(time, legato: legato, from: from, overshoot: overshoot)
+        def glide(time, legato: false, from: nil, overshoot: nil, shape: nil, cycles: nil)
+          notes_pitch!(:glide).glide(time, legato: legato, from: from, overshoot: overshoot, shape: shape, cycles: cycles)
+        end
+
+        # The copy's detune offset in semitones now (its fraction times the
+        # detune's value; 0 for the center copy), plus its fixed #shift.
+        def offset_value
+          @set ? @set.offset_value(@index) + @shift : @shift
         end
 
         # On a copy of a Notes pitch, Notes::NotePitch#bend_range for this

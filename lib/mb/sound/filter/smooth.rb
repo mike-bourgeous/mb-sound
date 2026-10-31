@@ -21,6 +21,12 @@ module MB
       # A Range +length+ (5.ms..200.ms) is the controllers' adaptive
       # smoothing.
       #
+      # With +keep_up: false+ it is a critically damped two-pole low-pass
+      # instead (Notes::Smoother's damped kernel; gen-midi-2): half-way at
+      # half the length like the default, then an exponential approach, so
+      # a glide over fast notes lags behind them rather than landing on
+      # each (the old analog-style portamento feel).
+      #
       # The output starts on the input's first sample, or on +from+.
       #
       # Replaced Filter::Smoothstep (smoothing-1, 2026-10-30), which
@@ -44,15 +50,23 @@ module MB
         # The Notes::Smoother doing the work.
         attr_reader :smoother
 
+        # False for the damped kernel (see the class description).
+        def keep_up
+          !@smoother.damped?
+        end
+
         # See the class description.
-        def initialize(length, sample_rate:, curve: nil, from: nil)
+        def initialize(length, sample_rate:, curve: nil, from: nil, keep_up: true)
           raise ArgumentError, "Smoothing length must be positive (got #{length.inspect})" if length.is_a?(Numeric) && !(length > 0)
           MB::Sound::Length.check_time(length, 'A smoothing length')
           raise ArgumentError, "Smoothing start must be a number (got #{from.inspect})" unless from.nil? || from.is_a?(Numeric)
+          raise ArgumentError, "smooth's keep_up: is true or false (got #{keep_up.inspect})" unless keep_up == true || keep_up == false
+          raise ArgumentError, 'smooth with keep_up: false needs a time, not a Range (adaptive smoothing keeps up)' if !keep_up && length.is_a?(Range)
+          raise ArgumentError, 'smooth takes keep_up: false or a curve:, not both' if !keep_up && curve
 
           @length = length
           @from = from&.to_f
-          @smoother = MB::Sound::Notes::Smoother.new(length, sample_rate: sample_rate, curve: curve)
+          @smoother = MB::Sound::Notes::Smoother.new(length, sample_rate: sample_rate, curve: curve, damped: !keep_up)
           @curve = @smoother.curve
           @smoother.plan_start(@from) if @from
         end
@@ -95,7 +109,7 @@ module MB
         end
 
         def to_s
-          "Smooth(#{@length.inspect}#{", curve: #{@curve}" if @curve})"
+          "Smooth(#{@length.inspect}#{", curve: #{@curve}" if @curve}#{', keep_up: false' if @smoother.damped?})"
         end
 
         private

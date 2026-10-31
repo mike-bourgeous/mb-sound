@@ -187,13 +187,19 @@ module MB
         # for Clip#quantize, e.g. 16 or 1.n16, or [grid, {amount:}]) and
         # +humanize:+ (a time for Clip#humanize, or [time, {velocity:}])
         # clean up or loosen the clip; +channel:+ keeps one channel's notes;
-        # +sustain: false+ ignores the sustain pedal.  The loop follows the
+        # +sustain: false+ ignores the sustain pedal.  +cc:+ keeps the
+        # controllers played (MIDI::Capture: false, the default, keeps
+        # notes only; true or :steps keeps CCs, bend, and pressure as
+        # controller lanes in the clip; :fit fits them; an Array keeps
+        # some; :split keeps them as steps in a clip of their own, saved in
+        # #captures as `<name>_cc` beside the notes clip the track plays;
+        # see Clip#split_controls).  The loop follows the
         # timeline's phase (a 2-bar loop recorded from bar 2 plays the bar
         # recorded first on even bars; see MIDI::Capture), or with +align:
         # :launch+ starts from what was played first where it closes or is
         # launched (see Sequence::Clip#loop).  Returns the :rec journal
         # entries (one, or an Array).
-        def record(length, *names, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true, align: :timeline)
+        def record(length, *names, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true, align: :timeline, cc: false)
           point = LaunchPoint.of(binding) or return nil
           names = names.flatten
           names = armed.keys if names.empty?
@@ -201,6 +207,7 @@ module MB
           trs = names.map { |n| recording_track(n) or return nil }
           len = recording_length(length) or return nil
           recording_align(align) or return nil
+          recording_cc(cc) or return nil
 
           entries = nil
           @session.command("rec #{names.map(&:inspect).join(', ')}") {
@@ -209,7 +216,7 @@ module MB
               hub = @session.midi_in(input || armed[tr.name])
               start = resolve(tr.q || @quant, tr, point)
               rec = @session.change(:rec, tr.name, start, data: { length: len, ends: @session.stamp(start + len) }) { |_t| }
-              capture_into(tr, hub, close: start + len, length: len, from: start, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align)
+              capture_into(tr, hub, close: start + len, length: len, from: start, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align, cc: cc)
               rec
             }
             @session.note_undo_extra(self, before, undo_state)
@@ -226,7 +233,7 @@ module MB
         # rounded up to 1, 2, 4, 8, or 16 bars) becomes a looping clip on
         # the track, playing on in phase with the timeline.  Options as in
         # #record.  Returns the :capture journal entries.
-        def capture(*names, length: nil, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true, align: :timeline)
+        def capture(*names, length: nil, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true, align: :timeline, cc: false)
           point = LaunchPoint.of(binding) or return nil
           names = names.flatten
           names = armed.keys if names.empty?
@@ -234,6 +241,7 @@ module MB
           trs = names.map { |n| recording_track(n) or return nil }
           len = length && (recording_length(length) or return nil)
           recording_align(align) or return nil
+          recording_cc(cc) or return nil
 
           entries = nil
           failed = []
@@ -248,7 +256,7 @@ module MB
               # One track's failure (a patch that doesn't build) leaves the
               # others captured (ux-1 round 2), and is reported below
               begin
-                capture_into(tr, hub, close: close, length: len, from: len && close - len, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align)
+                capture_into(tr, hub, close: close, length: len, from: len && close - len, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align, cc: cc)
               rescue StandardError, ScriptError => e
                 failed << [tr.name, e]
                 nil
@@ -329,6 +337,14 @@ module MB
           len
         end
 
+        # True if +cc+ is a capture's controller option (see #record), else
+        # nil (after live_error).
+        def recording_cc(cc)
+          return true if cc == :split || Sequence::ControlLane.selection?(cc)
+          hint = cc.is_a?(Symbol) && DidYouMean::SpellChecker.new(dictionary: %w[steps fit split]).correct(cc.to_s).first
+          MB::Sound.live_error(ArgumentError.new("cc: is false (notes only), true or :steps (controller lanes in the clip), :fit (fitted lanes), :split (lanes in a clip of their own), or an Array of CC numbers and :bend/:pressure/:poly_pressure (got #{cc.inspect}#{"; did you mean :#{hint}?" if hint})"))
+        end
+
         # +align+ if it is a loop alignment, else nil (after live_error).
         def recording_align(align)
           return align if Sequence::Clip::ALIGNMENTS.include?(align)
@@ -339,20 +355,25 @@ module MB
         # notes) and the :capture change that fills it with the clip of
         # what +hub+ saw from +from+ for +length+ (both nil for the last
         # phrase, found when it lands).  Returns the :capture Change.
-        def capture_into(tr, hub, close:, length:, from:, quantize:, humanize:, channel:, sustain:, align:)
+        def capture_into(tr, hub, close:, length:, from:, quantize:, humanize:, channel:, sustain:, align:, cc: false)
           # (performed, like the clip it stands for, so a drum kit built for it
           # plays any recorded note at live velocities; see TR808.kit)
           placeholder = Sequence::Clip.new([], length: length || @session.transport.bar_length, loop: true, performed: true).named(:"#{tr.name}_rec")
           set_track(tr, placeholder, close, fade: nil, slot: false)
 
-          data = { length: length || :phrase, from: from && @session.stamp(from) }.compact
+          data = { length: length || :phrase, from: from && @session.stamp(from), cc: cc || nil }.compact
           @session.change(:capture, tr.name, early(tr, close), data: data) { |t|
             len = length || phrase_length(hub, close)
             raise ArgumentError, "Nothing played on #{hub} to capture" if len.nil?
             start = from || close - len
 
             g = MIDI::Capture::GRACE
-            clip = MIDI::Capture.clip(hub.history(start - g, start + len - g), from: start, length: len, channel: channel, sustain: sustain, align: align)
+            # (controllers chase their values from before the window, so
+            # their history goes back as far as the input keeps it)
+            back = cc ? Session::MidiInput::HISTORY : 0
+            clip = MIDI::Capture.clip(hub.history(start - g - back, start + len - g), from: start, length: len, channel: channel, sustain: sustain, align: align,
+                                      cc: cc == :split ? :steps : cc)
+            clip, moves = clip.split_controls if cc == :split
             clip = feel(clip, :quantize, quantize) if quantize
             clip = feel(clip, :humanize, humanize) if humanize
 
@@ -360,6 +381,7 @@ module MB
               @captures ||= {}
               n = (1..).find { |i| !@captures.key?(:"#{tr.name}_#{i}") }
               @captures[:"#{tr.name}_#{n}"] = clip.named(:"#{tr.name}_#{n}")
+              @captures[:"#{tr.name}_#{n}_cc"] = moves.named(:"#{tr.name}_#{n}_cc") if moves
               tr.clip = clip if tr.clip.equal?(placeholder)
               slot_index_unlocked(tr.name, clip, true) # (ClipMatrix)
               clip.name

@@ -145,22 +145,28 @@ module MB
       # per occurrence), +sections+ (how many Template#generative plays
       # when the source doesn't end by itself), +use+ (material swaps in
       # every scene for the generated form: `{ drone: :drone_walk }` plays
-      # clip :drone_walk wherever a scene plays :drone), and +scenes+
-      # (values added to scenes: `{ bloom: { space: 0.7 } }`).
-      Generator = Data.define(:source, :bars, :sections, :use, :scenes) do
-        def initialize(source:, bars: {}, sections: nil, use: {}, scenes: {})
+      # a clip :drone_walk wherever a scene plays :drone), +scenes+
+      # (values added to scenes: `{ bloom: { space: 0.7 } }`), and +length+
+      # (bars, a Duration, or seconds like 480.seconds; nil for none: how
+      # long one arc of the source runs before it heads for its end, see
+      # Template#endless).
+      Generator = Data.define(:source, :bars, :sections, :use, :scenes, :length) do
+        def initialize(source:, bars: {}, sections: nil, use: {}, scenes: {}, length: nil)
           unless source.respond_to?(:form_next) && source.respond_to?(:reseed)
             raise ArgumentError, "generator needs a markov(...) or lsystem(...) over section names (got #{source.inspect})"
           end
           bars.each { |n, spec| Form.check_length_spec(n, spec) }
           raise ArgumentError, "generator sections: must be a positive Integer or nil (got #{sections.inspect})" unless sections.nil? || (sections.is_a?(Integer) && sections > 0)
-          super(source: source, bars: bars.dup.freeze, sections: sections, use: use.dup.freeze, scenes: scenes.transform_values { |v| v.dup.freeze }.freeze)
+          Genre.check_arc_length(length, 'generator')
+          super(source: source, bars: bars.dup.freeze, sections: sections, use: use.dup.freeze, scenes: scenes.transform_values { |v| v.dup.freeze }.freeze,
+                length: length)
         end
 
         # The builder line (see Builder#generator).
         def ruby
           parts = [source.to_ruby, "bars: #{Genre.ruby(bars)}"]
           parts << "sections: #{sections}" if sections
+          parts << "length: #{Genre.ruby(length)}" if length
           parts << "use: #{Genre.ruby(use)}" unless use.empty?
           parts << "scenes: #{Genre.ruby(scenes)}" unless scenes.empty?
           "generator #{parts.join(', ')}"
@@ -219,6 +225,15 @@ module MB
         # keys), else its inspect.
         def ruby(value)
           RubyValue.text(value) { |v| ruby(v) } || value.inspect
+        end
+
+        # Raises unless +length+ is a generated form's arc length: nil,
+        # bars, a Duration, or seconds (Length::Seconds).
+        def check_arc_length(length, what)
+          return if length.nil?
+          return if length.is_a?(Length::Seconds) && length.to_seconds > 0
+          return if Form.length?(length) && length.to_r > 0
+          raise ArgumentError, "#{what}: is how long one arc of the generator runs: bars, a Duration, or seconds like 480.seconds (got #{length.inspect})"
         end
 
         # +hash+ as keyword arguments (`a: 1, b: :x`).
@@ -363,14 +378,19 @@ module MB
         # generator's material swaps and scene values.  +seed+ reseeds the
         # source (another song from the same grammar).
         #
+        # +length+ (bars, a Duration, or seconds like 480.seconds; the
+        # generator's own by default) bounds the song: past it the source
+        # heads for its end the shortest way (see #endless).
+        #
         #     genre(:dnb).generative.play
         #     genre(:dnb).generative(seed: 3).short.play
-        def generative(seed: nil, sections: nil)
+        def generative(seed: nil, sections: nil, length: :default)
           g, src, lengths, fills = generated_parts(seed)
           count = sections || g.sections
+          arc = arc_length(length == :default ? g.length : length)
           f = Form.build {
             fills.each { |pf| fill pf.name, every: pf.every, length: pf.length, layer: pf.layer }
-            generate src, bars: lengths, sections: count
+            generate src, bars: lengths, sections: count, length: arc
           }
           with(form: f, scenes: generated_scenes(g))
         end
@@ -380,17 +400,38 @@ module MB
         # ends starts over (a new song each time), a word grows again (new
         # words with an lsystem's vary: true).  See #generative.
         #
+        # +length+ (the chain length knob; bars, a Duration, or seconds
+        # like 480.seconds, converted at the template's tempo and meter;
+        # the generator's own by default, nil for none) bounds how long one
+        # run of the source plays before its shape repeats: once its
+        # sections reach it, a chain heads for its end by the shortest way
+        # (choosing among the closest next sections by their weights; a
+        # chain with no end, like ambient's moods, heads back to its start
+        # state), a word plays its last section, and the next arc starts.
+        #
         #     genre(:ambient).endless.play
-        def endless(seed: nil)
+        #     genre(:techno).endless(length: 600.seconds).play   # a new set about every 10 minutes
+        def endless(seed: nil, length: :default)
           g, src, lengths, fills = generated_parts(seed)
+          arc = arc_length(length == :default ? g.length : length)
           f = Form.build {
             fills.each { |pf| fill pf.name, every: pf.every, length: pf.length, layer: pf.layer }
             label :top
-            generate src, bars: lengths
+            generate src, bars: lengths, length: arc
             goto :top
           }
           with(form: f, scenes: generated_scenes(g))
         end
+
+        # A generated form's arc length (Form::Generate#length) for a
+        # generator +length+: bars and Durations as they are, seconds as
+        # whole bars at the template's tempo and meter (rounded up).
+        def arc_length(length)
+          Genre.check_arc_length(length, 'length')
+          return length unless length.is_a?(Length::Seconds)
+          (length.to_seconds / (bar_length * 4 * 60 / tempo.to_r)).ceil
+        end
+        private :arc_length
 
         # The form's length in seconds at the template's tempo.
         def seconds
@@ -757,8 +798,8 @@ module MB
         #
         #     generator lsystem(%i[intro body outro], body: { %i[build drop body] => 1, %i[build drop] => 2 }, generations: 3, seed: 1),
         #               bars: { intro: 16, build: 8, drop: [16, 32], outro: 16 }
-        def generator(source, bars: {}, sections: nil, use: {}, scenes: {}, **more)
-          @generator = source && Generator.new(source: source, bars: bars.merge(more), sections: sections, use: use, scenes: scenes)
+        def generator(source, bars: {}, sections: nil, use: {}, scenes: {}, length: nil, **more)
+          @generator = source && Generator.new(source: source, bars: bars.merge(more), sections: sections, use: use, scenes: scenes, length: length)
         end
 
         # A drum Kit (e.g. `kit :drop, grid(16, kick: 'X.........X.....')`).

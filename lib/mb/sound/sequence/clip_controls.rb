@@ -52,6 +52,26 @@ module MB
           @controls.empty? ? self : with_controls([])
         end
 
+        # The clip split in two (gen-midi-2; maintainer 2026-10-30: "split
+        # controls off to a different object"): [the notes without
+        # controller lanes, a clip of only the lanes] (the same length,
+        # looping, and alignment), so the controls can play on a track of
+        # their own (a patch reading `v.cc(1)`, a knob gesture) or go back
+        # on these or other notes: `notes.with_controls(controls.controls)`.
+        # The controls clip is nil when there are no lanes.
+        #
+        #     notes, moves = captures[:lead_1].split_controls
+        def split_controls
+          return [self, nil] if @controls.empty?
+          [without_controls, controls_clip]
+        end
+
+        # A clip of only this clip's controller lanes (no notes; see
+        # #split_controls).
+        def controls_clip
+          with_events([], variations: [], values: nil, controls: @controls)
+        end
+
         # A copy whose step lanes are fitted curves (Gesture.fit: the fewest
         # keys of a monotone cubic or straight lines, whichever needs fewer,
         # passing within +tolerance+ of every step, as a share of the

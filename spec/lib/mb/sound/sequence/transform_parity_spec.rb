@@ -126,7 +126,7 @@ RSpec.describe('Clip and Kit transform parity', :aggregate_failures) do
       'readers, playback plumbing, and lineage' => %i[
         align control control_chase control_edges control_horizon controls controls? edge_horizon edges event_at event_before events
         events_for launch_aligned? length lineage looping? param_nodes performed? plays? rederive seed source steer_lead steered? stream
-        value value_at values variations with_controls without_controls fit_controls rhythm
+        value value_at values variations with_controls without_controls fit_controls split_controls controls_clip rhythm
       ],
       'signal nodes of one note stream (a kit plays through a drum machine: tr808(kit), kit.to_clip.gate)' => %i[
         amp_env amp_envelope env envelope filt_env filter_env filter_envelope fm_env fm_envelope freq frequency gate hz notes number

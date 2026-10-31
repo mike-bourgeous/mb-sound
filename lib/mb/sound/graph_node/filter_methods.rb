@@ -446,14 +446,22 @@ module MB
         # knob.  A Range +length+ (5.ms..200.ms) smooths adaptively like
         # `smooth: :adaptive` controllers.
         #
+        # With +keep_up: false+ it lags instead: a critically damped
+        # two-pole low-pass, half-way at half the length like the default
+        # but approaching exponentially (99% after about twice the length),
+        # so a glide over fast notes blurs behind them instead of landing on
+        # each, like an analog portamento (`midi.number.smooth(0.08,
+        # keep_up: false)`).
+        #
         # Examples:
         #     midi.number.smooth(0.1)
         #     120.hz.square.smooth(60.samples)
         #     clip.number.smooth(0.05, reset: clip.trigger)
         #     midi.cc(74).smooth(300.ms, curve: :elastic)   # an elastic knob
         #     4.hz.lfo.square.sample_hold.smooth(0.25, from: 0)   # a smooth walk from 0
-        def smooth(length, reset: nil, curve: nil, from: nil)
-          f = MB::Sound::Filter::Smooth.new(length, sample_rate: sample_rate, curve: curve, from: from)
+        #     clip.number.smooth(0.08, keep_up: false)             # a glide that lags on fast notes
+        def smooth(length, reset: nil, curve: nil, from: nil, keep_up: true)
+          f = MB::Sound::Filter::Smooth.new(length, sample_rate: sample_rate, curve: curve, from: from, keep_up: keep_up)
 
           return filter(f) if reset.nil?
 

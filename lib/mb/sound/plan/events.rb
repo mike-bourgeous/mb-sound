@@ -370,7 +370,7 @@ module MB
           end
 
           def expression
-            kind = @smoother.adaptive? ? 'adaptive, up to ' : (@smoother.curve? ? "#{@smoother.curve}, " : '')
+            kind = @smoother.adaptive? ? 'adaptive, up to ' : (@smoother.curve? ? "#{@smoother.curve}, " : (@smoother.damped? ? 'damped, ' : ''))
             "smooth(#{@a}, #{kind}#{MB::M.sigfigs(@smoother.kernel_samples, 4)} samples#{", reset: #{@reset}" if @reset})"
           end
 

@@ -38,10 +38,13 @@ module MB
       # several tracks have notes (`midi_tracks(path)` lists them);
       # +channel:+ (0-based) keeps one channel; +from:+ skips that many
       # bars and +bars:+ sets the length (else up to the bar line after the
-      # last note); +loop: false+ for a one-shot; +slides:+ :auto, true, or
-      # false; +cc:+ :steps (as recorded), :fit (fitted curves: a few
-      # keys that play smoothly, Clip#fit_controls), false, or an Array of
-      # CC numbers and :bend/:pressure; +timing: :performed+ keeps the
+      # last note); +loop: false+ for a one-shot.
+      #
+      # +slides:+ :auto, true, false, or a share of the note for the :auto
+      # rule's half (0.25 tighter, 1 looser); +cc:+ :steps (as recorded),
+      # :fit (fitted curves: a few keys that play smoothly,
+      # Clip#fit_controls), false, or an Array of CC numbers and
+      # :bend/:pressure; +timing: :performed+ keeps the
       # file's tempo map (rubato) at the session tempo instead of the
       # score's bars; +sustain: false+ ignores the sustain pedal (keeping
       # it as a lane).

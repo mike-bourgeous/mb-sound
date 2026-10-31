@@ -63,6 +63,44 @@ RSpec.describe('MB::Sound#beats (evolving rhythms)', :aggregate_failures) do
     hits(g, 7).select { |n, _| n == 45 }.each { |_, s| expect(s).to be >= 12 }
   end
 
+  it 'grows a fill denser and longer with the energy when the fill follows it (energy: true)' do
+    energized = ->(e, seed: 5) {
+      MB::Sound.beats(16, hold: 1, energy: e, seed: seed) do
+        kick [1, 0, 0, 0] * 4, keep: [0, 4, 8, 12], energy: false
+        fill every: 4, energy: true, snare: 0.6, low_tom: 0.4
+      end
+    }
+    toms = ->(g, c) { hits(g, c).reject { |n, _| n == 36 } }
+    # As written at 0.5: the same fill as one that ignores the energy
+    plain = MB::Sound.beats(16, hold: 1, energy: 0.5, seed: 5) do
+      kick [1, 0, 0, 0] * 4, keep: [0, 4, 8, 12], energy: false
+      fill every: 4, snare: 0.6, low_tom: 0.4
+    end
+    half = energized.(0.5)
+    (0..40).each { |c| expect(hits(half, c)).to eq(hits(plain, c)), "cycle #{c}" }
+
+    levels = [0.0, 0.2, 0.5, 0.8, 1.0]
+    clips = levels.map { |e| energized.(e) }
+    fills = (0..39).select { |c| (c + 1) % 4 == 0 }
+    counts = clips.map { |g| fills.sum { |c| toms.(g, c).length } }
+    expect(counts.first).to eq(0) # (fades out at 0)
+    expect(counts.each_cons(2).all? { |a, b| a <= b }).to be(true), counts.inspect
+    expect(counts.last).to be > counts[2] * 1.5
+    fills.each do |c|
+      # Only adds hits as the energy rises
+      clips.map { |g| toms.(g, c) }.each_cons(2) { |a, b| expect(a - b).to be_empty, "cycle #{c}" }
+      # Longer: at 1 the fill covers the last half bar, at 0.5 the last beat
+      expect(toms.(clips.last, c).map(&:last).min || 8).to be >= 8
+      expect(toms.(half, c).map(&:last).min || 12).to be >= 12
+    end
+    expect(fills.flat_map { |c| toms.(clips.last, c).map(&:last) }.min).to be < 12
+    expect(((0..39).to_a - fills).flat_map { |c| toms.(clips.last, c) }).to be_empty
+    expect(MB::Sound::Generative::Beats.fill_span(4, 1.0, 16)).to eq(8)
+    expect(MB::Sound::Generative::Beats.fill_span(4, 0.0, 16)).to eq(2)
+    expect(MB::Sound::Generative::Beats.fill_span(12, 1.0, 16)).to eq(16)
+    expect { MB::Sound.beats { kick [1]; fill every: 4, energy: 1, snare: 0.5 } }.to raise_error(ArgumentError, /energy: is true or false/)
+  end
+
   it 'swings odd steps and takes groove velocities' do
     g = MB::Sound.beats(8, step: 1.n8, swing: 0.6, groove: [1.0, 0.5], humanize: 0, seed: 1) { hat [1] * 8 }
     ev = g.events_for(0)

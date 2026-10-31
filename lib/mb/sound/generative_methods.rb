@@ -175,7 +175,8 @@ module MB
       # `row :name, pattern, note: C2` or `notes: field` names other rows
       # (melodic rows walk the field's scale notes).  `fill every: 8,
       # snare: 0.7, low_tom: 0.3` raises those rows in the last beat of
-      # every 8th cycle (`last:` a length).
+      # every 8th cycle (`last:` a length; `energy: true` makes it longer
+      # and denser as the energy rises).
       #
       # +energy+ (0..1; a number, a lambda of the cycle, or a knob) thins
       # below 0.5 and fills above it; draws are fixed per +hold+ block, so

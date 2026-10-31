@@ -50,6 +50,19 @@ module MB
       # .curve_ruby; the table holds the curve at each of the length's
       # samples (Curve#map, as the old Filter::Smoothstep drew them).
       #
+      # Damped smoothing (+damped: true+; GraphNode#smooth's +keep_up:
+      # false+, gen-midi-2): a critically damped two-pole low-pass (two equal
+      # one-poles in series) whose step response is half-way at half the
+      # length, as the B-spline's is, but approaches the new value
+      # exponentially (99% after about twice the length), so on changes
+      # faster than the length a glide never quite arrives: fast notes
+      # blur into a lagging line instead of each landing (the maintainer,
+      # 2026-10-30: "a critically damped low-pass filter on note number
+      # does mostly what I want").  The output snaps to a held input once
+      # both stages are within a relative 1e-7 of it.  Kernel
+      # FastControl.damped (mb_damped_run in mb_smooth.h), exact mirror
+      # .damped_ruby.
+      #
       # A smoother whose length is nil or false passes its input through
       # unchanged (a kernel of one sample); Notes nodes that follow the
       # global defaults keep one so the defaults can change live (see
@@ -61,6 +74,13 @@ module MB
 
         # The curve kernel's state length (see .curve_ruby).
         CURVE_STATE = 9
+
+        # The damped kernel's state length (see .damped_ruby).
+        DAMPED_STATE = 6
+
+        # The damped kernel's time constant per length: a step is half-way
+        # (1 - (1 + u) e^-u = 0.5 at u = 1.678347) at half the length.
+        DAMPED_HALF = 1.678347
 
         # The most curve steps moving at once (see the class description).
         CURVE_SLOTS = 64
@@ -80,15 +100,29 @@ module MB
 
         # Smooths over +length+ (seconds, or anything Length.samples takes;
         # a Range of them for adaptive smoothing; nil or false to pass the
-        # input through) at +sample_rate+, with the B-spline kernel or (with
-        # +curve:+) the curve kernel (see the class description).
-        def initialize(length, sample_rate:, curve: nil)
+        # input through) at +sample_rate+, with the B-spline kernel, (with
+        # +curve:+) the curve kernel, or (with +damped: true+) the damped
+        # kernel (see the class description).
+        def initialize(length, sample_rate:, curve: nil, damped: false)
           @length = length || nil
           @curve = curve.nil? ? nil : MB::Sound::Curve.from(curve)
+          @damped = damped ? true : false
           raise ArgumentError, 'Curve smoothing needs a length (not a Range or nil)' if @curve && (@length.nil? || adaptive?)
+          raise ArgumentError, 'Damped smoothing needs a length (not a Range or nil)' if @damped && (@length.nil? || adaptive?)
+          raise ArgumentError, 'Smoothing is damped or follows a curve, not both' if @damped && @curve
 
           @state = nil
           @out = nil
+          # (every instance variable set here first, in one order, so
+          # smoothers keep one shape whatever their kernel)
+          @rate = nil
+          @kernel_samples = nil
+          @settle = nil
+          @curve_gap = nil
+          @adaptive_range = nil
+          @damped_pole = nil
+          @ring1 = nil
+          @ring2 = nil
           self.sample_rate = sample_rate
         end
 
@@ -100,6 +134,11 @@ module MB
         # True for curve smoothing (see the class description).
         def curve?
           !@curve.nil?
+        end
+
+        # True for damped smoothing (see the class description).
+        def damped?
+          @damped
         end
 
         # True if the output is the input (a nil or false length).
@@ -120,6 +159,7 @@ module MB
             last = @state[1]
           end
           raise ArgumentError, 'Curve smoothing needs a length (not a Range or nil)' if @curve && (length.nil? || length.is_a?(Range))
+          raise ArgumentError, 'Damped smoothing needs a length (not a Range or nil)' if @damped && (length.nil? || length.is_a?(Range))
 
           @length = length
           @state = nil
@@ -142,6 +182,13 @@ module MB
             @ring1 = Numo::DFloat.zeros(2 * CURVE_SLOTS)
             @ring2 = @curve.map((Numo::DFloat.new(n).seq + 1) / n)
             @ring2 = Numo::DFloat.cast(@ring2) unless @ring2.is_a?(Numo::DFloat)
+          elsif damped?
+            n = [Length.samples(@length, sample_rate: @rate).to_f, 1.0].max
+            @damped_pole = Math.exp(-2 * DAMPED_HALF / n)
+            @kernel_samples = n.round
+            @settle = 0
+            @ring1 = Numo::DFloat.zeros(1)
+            @ring2 = Numo::DFloat.zeros(1)
           elsif adaptive?
             lo = [Length.samples(@length.begin, sample_rate: @rate).round, 1].max
             hi = [Length.samples(@length.end, sample_rate: @rate).round, lo].max
@@ -177,6 +224,7 @@ module MB
         def settled?
           return true if @state.nil?
           return @state[6] == 0 && @state[2] == @state[1] if curve?
+          return @state[5] != 0 if damped?
 
           adaptive? ? @state[5] >= @state[4] : @state[6] >= @settle
         end
@@ -249,6 +297,8 @@ module MB
             Kernels.smooth_adaptive(x, out, from, to, state)
           elsif state.length == CURVE_STATE
             Kernels.smooth_curve(x, out, from, to, state, ring1, ring2)
+          elsif state.length == DAMPED_STATE
+            Kernels.smooth_damped(x, out, from, to, state)
           else
             Kernels.smooth(x, out, from, to, state, ring1, ring2)
           end
@@ -276,6 +326,11 @@ module MB
             state[3] = state[4]
             state[6] = 0.0
             state[7] = 0.0
+          elsif state.length == DAMPED_STATE
+            state[0] = value
+            state[1] = value
+            state[2] = value
+            state[5] = 1.0
           else
             state[1] = value
             state[6] = (ring1.length + ring2.length - 2).to_f
@@ -311,6 +366,42 @@ module MB
           end
 
           state[0...8] = [y, last, start, since, t, pos, lo, hi]
+          out
+        end
+
+        # The Ruby mirror of FastControl.damped (mb_damped_run in
+        # mb_smooth.h): damped smoothing (see the class description) of
+        # x[from...to] into out[from...to] with +state+ [stage 1, last
+        # input, output, pole, unused, settled].
+        def self.damped_ruby(x, out, from, to, state)
+          y1, last, y2, p, _, settled = state.to_a
+
+          (from...to).each do |i|
+            v = x[i]
+            if v != last
+              last = v
+              settled = 0.0
+            end
+            if settled != 0.0
+              out[i] = v
+              next
+            end
+
+            y1 = v + p * (y1 - v)
+            y2 = y1 + p * (y2 - y1)
+            tol = 1e-7 * (1.0 + v.abs)
+            if (y1 - v).abs <= tol && (y2 - v).abs <= tol
+              y1 = v
+              y2 = v
+              settled = 1.0
+            end
+            out[i] = y2
+          end
+
+          state[0] = y1
+          state[1] = last
+          state[2] = y2
+          state[5] = settled
           out
         end
 
@@ -483,6 +574,8 @@ module MB
           st = @state
           if st.length == ADAPTIVE_STATE
             st[0]
+          elsif st.length == DAMPED_STATE
+            st[2]
           elsif st.length == CURVE_STATE
             y = st[0]
             prev = st[0]
@@ -506,6 +599,8 @@ module MB
           if curve?
             @state = Numo::DFloat[value, value, value, @curve_gap, @curve_gap, @kernel_samples, 0, 0, CURVE_SLOTS]
             @ring1.fill(0)
+          elsif damped?
+            @state = Numo::DFloat[value, value, value, @damped_pole, 0, 1]
           elsif adaptive?
             lo, hi = @adaptive_range
             @state = Numo::DFloat[value, value, value, hi, lo, lo, lo, hi]
@@ -527,6 +622,8 @@ module MB
             # Held at y; the next sample starts a step to the input
             @state = Numo::DFloat[y, y, y, @curve_gap, @curve_gap, @kernel_samples, 0, 0, CURVE_SLOTS]
             @ring1.fill(0)
+          elsif damped?
+            @state = Numo::DFloat[y, last, y, @damped_pole, 0, 0]
           elsif adaptive?
             lo, hi = @adaptive_range
             @state = Numo::DFloat[y, last, y, 0, lo, 0, lo, hi]
@@ -541,6 +638,7 @@ module MB
       Kernels.register :smooth, c: FastControl.method(:smooth), ruby: Smoother.method(:smooth_ruby)
       Kernels.register :smooth_adaptive, c: FastControl.method(:adaptive), ruby: Smoother.method(:adaptive_ruby)
       Kernels.register :smooth_curve, c: FastControl.method(:curve), ruby: Smoother.method(:curve_ruby)
+      Kernels.register :smooth_damped, c: FastControl.method(:damped), ruby: Smoother.method(:damped_ruby)
       Kernels.register :smooth_reset_run, c: FastControl.method(:reset_run), ruby: Smoother.method(:reset_run_ruby)
     end
   end

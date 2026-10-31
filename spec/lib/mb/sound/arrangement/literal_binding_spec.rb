@@ -283,12 +283,10 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     expect((reso - plain).abs.max).to eq(0)
     s, detune, = play(->(_) { MB::Sound.bind(:lead, unison: :detune) }, patch: STEREO)
     expect(code_of(s)).to include('knob(:"lead/detune")')
-    # (a knob's detune runs the unison's moving-detune path, pitches
-    # computed per sample: within -70 dB of the fixed offsets over 200
-    # buffers from fresh oscillators; carried ones that ran 2 s already,
-    # since sound-design-2, within -60 dB: -55 here, not bit for bit)
-    expect((detune - plain).abs.max).to be < 10 ** (-55 / 20.0)
-    expect((detune - plain).abs.max).to be > 0
+    # (bit for bit since gen-midi-2: a fixed detune runs the same Detune
+    # node with a constant detune, "Same math both ways"; before, the
+    # knob's moving-detune path was within -55 dB of the fixed offsets)
+    expect((detune - plain).abs.max).to eq(0)
   end
 
   it 'lets the inspector bind a picked literal param with Enter, naming what it rebuilds first' do

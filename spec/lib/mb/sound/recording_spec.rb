@@ -272,6 +272,66 @@ RSpec.describe(MB::Sound::RecordMethods) do
       expect(clip.events.map { |e| [e.start, e.value] }).to eq([[1/20r, 60], [3/10r, 64], [13/20r, 67]])
     end
 
+    describe 'controllers (cc:, gen-midi-2)' do
+      # The keyboard of RECORDING_PLAYED with a mod wheel: 30 before the
+      # captured bar (chased), 64 and 100 inside it, and a bend
+      def wheel_keyboard
+        notes = RECORDING_PLAYED.flat_map { |n, on, off| [ev.parse([0x90, n, 100], time: on.to_r), ev.parse([0x80, n, 64], time: off.to_r)] }
+        moves = [[1.0r, [0xb0, 1, 30]], [2.5r, [0xb0, 1, 64]], [3.5r, [0xb0, 1, 100]], [3.0r, [0xe0, 0, 0x60]]]
+        events = (notes + moves.map { |t, b| ev.parse(b, time: t) }).sort_by(&:time)
+        MB::Sound::MIDI::Stream.new(MIDIListSource.new(*events))
+      end
+
+      it 'keeps the controllers in the captured clip with cc: true, at any buffer size' do
+        clips = RECORDING_SIZES.map { |sizes|
+          s = new_session
+          s.midi_in.input = wheel_keyboard
+          setup_lead(s)
+          perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 200 => ['capture :lead, 1, cc: true'] }, 96000 * 4, sizes)
+          s.arrangement.captures[:lead_1]
+        }
+        clip = clips.first
+        expect(clip.events.map { |e| [e.start, e.value] }).to eq([[1/20r, 60], [3/10r, 64], [13/20r, 67]])
+        g = MB::Sound::MIDI::Capture::GRACE
+        # (bar 2 is positions 1...2: phase 0 still has the 30 played at 1 s)
+        expect(clip.control(1).points.map { |p, v| [p, (v * 127).round] }).to eq([[0r, 30], [1/4r, 64], [3/4r, 100], [1 - g, 30]])
+        expect(clip.control(:bend)).not_to be_nil
+        clips.each { |c| expect(c.controls).to eq(clip.controls) }
+
+        # Notes only by default
+        s = new_session
+        s.midi_in.input = wheel_keyboard
+        setup_lead(s)
+        perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 200 => ['capture :lead, 1'] }, 96000 * 4)
+        expect(s.arrangement.captures[:lead_1].controls).to eq([])
+        expect(s.arrangement.captures[:lead_1].events).to eq(clip.events)
+      end
+
+      it 'splits the controllers off into a clip of their own with cc: :split (the track plays the notes)' do
+        s = new_session
+        s.midi_in.input = wheel_keyboard
+        setup_lead(s)
+        perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 200 => ['capture :lead, 1, cc: :split'] }, 96000 * 4)
+        caps = s.arrangement.captures
+        expect(caps.keys).to eq(%i[lead_1 lead_1_cc])
+        expect(caps[:lead_1].controls).to eq([])
+        expect(caps[:lead_1].events.map(&:value)).to eq([60, 64, 67])
+        expect(caps[:lead_1_cc].events).to eq([])
+        expect(caps[:lead_1_cc].controls.map(&:name)).to eq(%i[cc1 bend])
+        expect(caps[:lead_1_cc].name).to eq(:lead_1_cc)
+        expect(caps[:lead_1_cc].length).to eq(caps[:lead_1].length)
+        # The next capture numbers on from lead_1 (its lanes hold the chased wheel and bend)
+        perform(s, { 0 => ['capture :lead, 1, cc: :split'] }, 96000 * 2)
+        expect(s.arrangement.captures.keys).to eq(%i[lead_1 lead_1_cc lead_2 lead_2_cc])
+        expect(s.arrangement.captures[:lead_2_cc].control(1).points.map { |p, v| [p, (v * 127).round] }).to eq([[0r, 100]])
+
+        MB::Sound::Session.with_context(session: s) do
+          expect { MB::Sound.capture(:lead, cc: :splt) }.to raise_error(ArgumentError, /cc: is false.*did you mean :split/)
+          expect { MB::Sound.rec(1, :lead, cc: 3) }.to raise_error(ArgumentError, /cc: is false/)
+        end
+      end
+    end
+
     it 'raises when nothing was played' do
       s = new_session
       s.midi_in.input = keyboard

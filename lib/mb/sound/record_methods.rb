@@ -51,10 +51,13 @@ module MB
       # 4.bars) from the next launch point of each armed track (or the
       # tracks named after the length, or before it: `rec :lead, 4`), which
       # swaps into the track when it closes (see Arrangement#record for
-      # +quantize:+, +humanize:+, +channel:+, +sustain:+; the loop follows
-      # the timeline's phase, or with +align: :launch+ starts from what was
-      # played first).  Audio is #rec_audio.  Returns the journal entry.  Also available as #record.
-      def rec(*args, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true, align: :timeline)
+      # +quantize:+, +humanize:+, +channel:+, +sustain:+, and +cc:+; the
+      # loop follows the timeline's phase, or with +align: :launch+ starts
+      # from what was played first).  +cc: true+ keeps the controllers
+      # played (CCs, bend, pressure) as lanes in the clip, +cc: :split+ in a
+      # clip of their own (`captures[:lead_1_cc]`).  Audio is #rec_audio.
+      # Returns the journal entry.  Also available as #record.
+      def rec(*args, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true, align: :timeline, cc: false)
         point = LaunchPoint.of(binding) or return nil
         session = Session.current
 
@@ -72,7 +75,7 @@ module MB
         end
 
         attach_recording_midi(session, input, names)
-        session.arrangement.record(length, *names, at: point, input: input, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align)
+        session.arrangement.record(length, *names, at: point, input: input, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align, cc: cc)
       end
       alias record rec
 
@@ -106,9 +109,12 @@ module MB
       # Captures what was just played into tracks (the armed ones if none
       # are named): from the next launch point of each track the last
       # +length+ bars (or a Duration; by default the last phrase, see
-      # Arrangement#capture) loop on it.  Options as in #rec.  Returns the
+      # Arrangement#capture) loop on it.  Options as in #rec (`capture
+      # :lead, cc: true` keeps the controllers played as lanes in the clip;
+      # `cc: :split` in a clip of their own, captures[:lead_1_cc], to play
+      # on another track or put back with with_controls).  Returns the
       # :capture journal entry.  Also available as #capture_midi.
-      def capture(*names, length: nil, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true, align: :timeline)
+      def capture(*names, length: nil, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true, align: :timeline, cc: false)
         point = LaunchPoint.of(binding) or return nil
         number = names.find { |a| a.is_a?(Numeric) || a.is_a?(Sequence::Duration) }
         if number
@@ -119,7 +125,7 @@ module MB
 
         session = Session.current
         attach_recording_midi(session, input, names)
-        session.arrangement.capture(*names, length: length, at: point, input: input, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align)
+        session.arrangement.capture(*names, length: length, at: point, input: input, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align, cc: cc)
       end
       alias capture_midi capture
 

@@ -85,6 +85,95 @@ module MB
           freeze
         end
 
+        # Controllers never kept as lanes (MIDI imports and captures):
+        # bank select, data entry and (N)RPN selection (RPN 0, the bend
+        # range, goes on an imported bend lane), and channel mode messages.
+        SKIPPED_CC = [0, 32, 6, 38, *96..101, *120..127].freeze
+
+        # Lane selections other than an Array (MIDI::Import#clip's and
+        # captures' +cc:+): true and :steps keep lanes as recorded, :fit
+        # fits curves (Clip#fit_controls), false and nil keep none.
+        SELECTIONS = [true, :steps, :fit, false, nil].freeze
+
+        # The lane key [type, number] of controller Event +e+ (a MIDI::Event),
+        # or nil for notes, skipped CCs (SKIPPED_CC), and the sustain pedal
+        # when +sustain+ (it holds notes instead).
+        def self.key_for(e, sustain:)
+          case e.type
+          when :cc
+            return nil if SKIPPED_CC.include?(e.note) || (sustain && e.note == 64)
+            [:cc, e.note]
+          when :bend then [:bend, nil]
+          when :channel_pressure then [:pressure, nil]
+          when :poly_pressure then [:poly_pressure, e.note]
+          end
+        end
+
+        # True if +key+ is in selection +cc+ (see SELECTIONS; an Array names
+        # CC numbers and :bend/:pressure/:poly_pressure).
+        def self.selected?(key, cc)
+          return false unless cc
+          return true unless cc.is_a?(Array)
+          cc.include?(key[0] == :cc ? key[1] : key[0])
+        end
+
+        # True if +cc+ is a lane selection (SELECTIONS or an Array of CC
+        # numbers and :bend/:pressure/:poly_pressure).
+        def self.selection?(cc)
+          SELECTIONS.include?(cc) || (cc.is_a?(Array) && cc.all? { |c| (c.is_a?(Integer) && c.between?(0, 127)) || %i[bend pressure poly_pressure].include?(c) })
+        end
+
+        # Lanes for the controller events of +events+ ([pos, MIDI::Event]
+        # pairs, sorted by pos) in the window [+start+, +stop+), at clip
+        # positions +pos+ (a lambda of an event position), each lane's
+        # value from before the window chased to the window's start (a
+        # point at pos(start) unless one is there), selected by +cc+ (see
+        # .selected?).  Sorted by type and number.  The window's start maps
+        # wherever +pos+ puts it: a timeline-phase loop wraps (see
+        # MIDI::Capture), so its lanes are rotated to begin at 0.
+        # +length+ (the clip's, for wrapping positions) gives clip position
+        # 0 the value in effect where the window maps to it.
+        def self.from_events(events, start, stop, cc:, sustain:, channel: nil, length: nil, &pos)
+          before = {}
+          inside = Hash.new { |h, k| h[k] = [] }
+          events.each do |t, e|
+            next unless e.respond_to?(:type) && e.channel
+            next if channel && e.channel != channel
+            key = key_for(e, sustain: sustain) or next
+            next unless selected?(key, cc)
+            break if t >= stop
+            if t < start
+              before[key] = e.value
+            else
+              inside[key] << [t, e.value]
+            end
+          end
+          keys = (before.keys + inside.keys).uniq.sort_by { |type, n| [TYPES.index(type), n || 0] }
+          keys.map { |key|
+            pts = inside.fetch(key, [])
+            chased = before.key?(key) && pts.none? { |t, _| t == start }
+            pts = [[start, before[key]]] + pts if chased
+            mapped = pts.map { |t, v| [pos.call(t), v] }
+            if length && !mapped.empty? && mapped.none? { |p, _| p == 0 }
+              # (a wrapped loop: clip position 0 gets the value in effect
+              # at the window time that maps to 0)
+              t0 = start + (length - pos.call(start)) % length
+              at = pts.reverse_each.find { |t, _| t <= t0 }
+              if at
+                mapped << [0r, at[1]]
+                # (the chased point is then redundant if the lane already
+                # holds its value where it lands)
+                if chased
+                  c = mapped.first
+                  prev = mapped.select { |p, _| p < c[0] }.max_by(&:first)
+                  mapped.shift if prev && prev[1] == c[1]
+                end
+              end
+            end
+            new(key[0], key[1], mapped)
+          }
+        end
+
         # A short name: :cc1, :bend, :pressure, :poly_pressure60.
         def name
           @number ? :"#{@type}#{@number}" : @type

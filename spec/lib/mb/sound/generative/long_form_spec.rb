@@ -198,6 +198,68 @@ RSpec.describe('MB::Sound generative long form (G4)', :aggregate_failures) do
       expect(pb.ended?).to eq(true)
     end
 
+    describe 'length: (bounding one arc of the source; gen-midi-2)' do
+      # Songs (runs between a chain's ends) of +names+ ending at :end
+      def songs(names)
+        names.slice_after(:end).to_a
+      end
+
+      it 'heads a chain for its end the shortest way once a song reaches its length, the same live as planned' do
+        # a mostly loops on itself; b may end; c is a detour
+        m = MB::Sound.markov(a: { a: 6, b: 1, c: 1 }, b: { a: 2, end: 1 }, c: { a: 1 }, end: {}, seed: 3)
+        free = MB::Sound::Form.build { label :top; generate m, a: 1, b: 1, c: 1, end: 1; goto :top }
+        bound = MB::Sound::Form.build { label :top; generate m, a: 1, b: 1, c: 1, end: 1, length: 4; goto :top }
+        long = songs(free.plan(seed: 1).first(400).map(&:section))
+        expect(long[0...-1].map(&:length).max).to be > 12
+        list = bound.plan(seed: 1).first(400).map(&:section)
+        cut = songs(list)
+        cut[0...-1].each do |song|
+          # up to the length, then the shortest way to the end (from c: a b end)
+          expect(song.length).to be <= 4 + 3, song.inspect
+          expect([[], [:end], %i[b end], %i[a b end]]).to include(song.drop(4)), song.inspect
+        end
+        # Before the bound, the same draws as the free chain
+        expect(cut.first.first(4)).to eq(long.first.first(4))
+        expect(cut.length).to be > long.length * 2
+
+        # Played as planned
+        s = note_session(%i[a b c end])
+        pb = within(s) { MB::Sound.play_form(bound, seed: 1, on: :now) }
+        run(s, 30 * bar)
+        expect(pb.history.first(25)).to eq(list.first(25))
+
+        # Durations count in bars of the first meter; the bound prints back and builds again
+        dur = MB::Sound::Form.build { label :top; generate m, a: 1.bar, b: 1, c: 1, end: 1, length: 4.bars; goto :top }
+        expect(dur.plan(seed: 1).first(60).map(&:section)).to eq(list.first(60))
+        expect(bound.to_ruby).to include('length: 4')
+        again = MB::Sound.module_eval(bound.to_ruby.sub('flow do', 'MB::Sound::Form.build do'))
+        expect(again).to eq(bound)
+        expect(again.plan(seed: 1).first(60).map(&:section)).to eq(list.first(60))
+        expect(m.flow({ a: 1, b: 1, c: 1, end: 1 }, loop: true, length: 4).plan(seed: 1).first(60).map(&:section)).to eq(list.first(60))
+      end
+
+      it 'heads a chain with no end back to its start state, and plays a word\'s last section' do
+        f = moods.flow({ still: 1, drift: 1, bloom: 1, hush: 1 }, length: 3)
+        names = f.plan(seed: 1).first(300).map(&:section)
+        arcs = names.slice_before(:still).to_a
+        # still -> drift -> bloom -> hush -> still is the longest way back: at most 3 + 3
+        expect(arcs.map(&:length).max).to be <= 6
+        expect(moods.take(300).slice_before(:still).map(&:length).max).to be > 6
+
+        song = MB::Sound.lsystem(%i[intro body outro], body: { %i[build drop body] => 2, %i[build drop] => 1 }, generations: 6, seed: 8)
+        lens = { intro: 1, build: 1, drop: 1, outro: 1 }
+        full = MB::Sound::Form.build { generate song, bars: lens }.plan(seed: 1).first(100).map(&:section)
+        short = MB::Sound::Form.build { generate song, bars: lens, length: 3 }.plan(seed: 1).first(100).map(&:section)
+        expect(full.length).to be > 5
+        expect(short).to eq(full.first(3) + [:outro])
+      end
+
+      it 'checks its length' do
+        expect { MB::Sound::Form.build { generate MB::Sound.markov(a: { a: 1 }, seed: 1), a: 1, length: 0 } }.to raise_error(ArgumentError, /length: is bars or a Duration/)
+        expect { moods.flow({ still: 1 }, sections: 4, length: 8) }.to raise_error(ArgumentError, /length: bounds a generated flow/)
+      end
+    end
+
     it 'plays a generated section next on goto, the chain carrying on from it' do
       m = moods
       f = m.flow(still: 1, drift: 1, bloom: 1, hush: 1)

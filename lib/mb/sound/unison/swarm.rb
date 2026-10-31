@@ -55,7 +55,8 @@ module MB
           if glide
             # A start band is absolute: the copy's own transpose (its chord
             # tone and detune) comes after the glide, so take it off
-            start = band ? p.unison_copy.rand(band) - p.settings[:transpose] : scatter
+            own = p.is_a?(CopyPitch) ? p.notes_pitch.settings[:transpose] + p.offset_value - p.shift : p.settings[:transpose]
+            start = band ? p.unison_copy.rand(band) - own : scatter
             p = p.glide(glide, legato: legato, from: start, overshoot: overshoot, shape: shape, cycles: cycles)
           end
           if drift

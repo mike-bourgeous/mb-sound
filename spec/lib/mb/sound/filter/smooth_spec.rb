@@ -123,6 +123,75 @@ RSpec.describe(MB::Sound::Filter::Smooth) do
     end
   end
 
+  describe 'with keep_up: false (the damped kernel, gen-midi-2)' do
+    let(:step) { Numo::SFloat.zeros(2000).tap { |d| d[100..] = 1 } }
+
+    it 'is half-way at half the length like the default, then approaches exponentially and settles exactly' do
+      out = arr(step).smooth(100.samples, keep_up: false).sample(2000)
+      expect(arr(step).smooth(100.samples, keep_up: false).base_filter.smoother).to be_damped
+      expect(out[0...100].to_a.uniq).to eq([0.0])
+      half = (100...2000).find { |i| out[i] >= 0.5 } - 100
+      expect(half).to be_between(49, 51)
+      p99 = (100...2000).find { |i| out[i] >= 0.99 } - 100
+      expect(p99).to be_between(190, 205)
+      # Never past the step, and exactly the input once settled
+      expect(out.max).to eq(1.0)
+      expect(out[1500..].to_a.uniq).to eq([1.0])
+      expect(out.diff.min).to be >= 0
+    end
+
+    it "lags on fast notes where the default lands on each (a legato run of 60 ms notes through 100 ms)" do
+      notes = [60, 64, 67, 72, 67, 64] * 4
+      x = Numo::SFloat.cast(notes.flat_map { |n| [n] * 2880 })
+      fir = arr(x).smooth(0.1).sample(x.length)
+      damped = arr(x).smooth(0.1, keep_up: false).sample(x.length)
+      miss = ->(y) { (1...notes.length).map { |k| (y[k * 2880 - 1] - notes[k - 1]).abs }.sum / (notes.length - 1) }
+      expect(miss.(damped)).to be > miss.(fir)
+      # Both stay within the notes played
+      expect(damped.min).to be >= 60
+      expect(damped.max).to be <= 72
+    end
+
+    it 'matches the C kernel with its Ruby mirror, and plays the same at any buffer size' do
+      x = Numo::SFloat.new(3000).rand(-1, 1).tap { |v| v[1000..] = 0.25 }
+      x[0...1000] = (x[0...1000] * 4).round / 4
+      [10, 64, 700].each do |n|
+        s1 = MB::Sound::Notes::Smoother.new(n.samples, sample_rate: 48000, damped: true)
+        s2 = MB::Sound::Notes::Smoother.new(n.samples, sample_rate: 48000, damped: true)
+        s1.plan_start(0.0)
+        s2.plan_start(0.0)
+        a = Numo::SFloat.zeros(3000)
+        b = Numo::SFloat.zeros(3000)
+        st1, = s1.plan_arrays
+        st2, = s2.plan_arrays
+        [0, 1, 900, 1999, 3000].each_cons(2) do |from, to|
+          MB::Sound::FastControl.damped(x, a, from, to, st1)
+          MB::Sound::Notes::Smoother.damped_ruby(x, b, from, to, st2)
+        end
+        expect(a).to eq(b)
+        expect(st1.to_a).to eq(st2.to_a)
+        expect(st1[5]).to eq(1.0) if n < 100 # (settled on the held 0.25)
+      end
+      whole = arr(x).smooth(64.samples, keep_up: false).sample(3000)
+      expect(blocks(arr(x).smooth(64.samples, keep_up: false), [1, 367, 368, 800, 1464])).to eq(whole)
+      expect(blocks(arr(x).smooth(64.samples, keep_up: false, reset: arr(trig(3000, 5, 1200))), [700, 2300]))
+        .to eq(MB::Sound::Kernels.with(:ruby) { blocks(arr(x).smooth(64.samples, keep_up: false, reset: arr(trig(3000, 5, 1200))), [3000]) })
+    end
+
+    it 'checks its arguments, and prints back' do
+      expect { 1.constant.smooth(5.ms..50.ms, keep_up: false) }.to raise_error(ArgumentError, /needs a time/)
+      expect { 1.constant.smooth(0.1, keep_up: false, curve: :elastic) }.to raise_error(ArgumentError, /not both/)
+      expect { 1.constant.smooth(0.1, keep_up: :no) }.to raise_error(ArgumentError, /true or false/)
+      s = MB::Sound::Notes::Smoother.new(10.samples, sample_rate: 48000, damped: true)
+      s.plan_start(0.0)
+      st, = s.plan_arrays
+      expect { MB::Sound::FastControl.damped(Numo::SFloat.zeros(10), Numo::SFloat.zeros(10), 0, 9, st[0...5]) }.to raise_error(ArgumentError, /6 values/)
+      g = MB::Sound.seq(60, 64).n8.loop.number.smooth(0.08, keep_up: false)
+      expect(MB::Sound::GraphIO.dump(g, name: :x)).to include('smooth(0.08, keep_up: false)')
+      expect(g.base_filter.to_s).to eq('Smooth(0.08, keep_up: false)')
+    end
+  end
+
   describe 'with reset:' do
     let(:data) { Numo::SFloat.zeros(400).tap { |d| d[0...100] = 1; d[100...200] = 2; d[200..] = 3 } }
 
@@ -160,9 +229,11 @@ RSpec.describe(MB::Sound::Filter::Smooth) do
       x = Numo::SFloat.new(2000).rand(-1, 1)
       x[0...1000] = (x[0...1000] * 3).round
       reset = Numo::SFloat.zeros(2000).tap { |r| r[[0, 5, 6, 400, 1999]] = 1 }
-      [[300.samples, nil], [2.ms..20.ms, nil], [300.samples, :elastic], [20.samples, :back]].each do |len, curve|
-        a = MB::Sound::Notes::Smoother.new(len, sample_rate: 48000, curve: curve)
-        b = MB::Sound::Notes::Smoother.new(len, sample_rate: 48000, curve: curve)
+      [[300.samples, nil], [2.ms..20.ms, nil], [300.samples, :elastic], [20.samples, :back], [300.samples, :damped]].each do |len, curve|
+        damped = curve == :damped
+        curve = nil if damped
+        a = MB::Sound::Notes::Smoother.new(len, sample_rate: 48000, curve: curve, damped: damped)
+        b = MB::Sound::Notes::Smoother.new(len, sample_rate: 48000, curve: curve, damped: damped)
         got = SpecBuffers.join([0...700, 700...2000].map { |r| a.process_reset(x[r].dup, reset[r].dup).dup })
         b.plan_start(x[0])
         want = Numo::SFloat.zeros(2000)
@@ -189,6 +260,8 @@ RSpec.describe(MB::Sound::Filter::Smooth) do
         ->(c) { c.sig.smooth(0.003, reset: 5.hz.lfo.asquare) * 2 },
         ->(c) { c.sig.smooth(0.003, curve: :bounce, reset: 7.hz.lfo.asquare) * 2 },
         ->(c) { c.sig.smooth(1.ms..20.ms) * 2 },
+        ->(c) { (c.sig * 3).smooth(0.004, keep_up: false) + 1 },
+        ->(c) { c.sig.smooth(0.003, keep_up: false, reset: 5.hz.lfo.asquare) * 2 },
       ].each do |build|
         r = plan_compare(check: :raise) { build.call(Struct.new(:sig).new(PlanSpecHelpers::Source.new(kind: :steps, seed: 3, every: 37))) }
         expect(r.program.ops.map { |op| op.class.name.split('::').last.to_sym }).to include(:Smooth)

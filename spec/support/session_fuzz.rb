@@ -75,6 +75,7 @@ module SessionFuzz
     "grid(16, kick: 'x...x...', snare: '....x...').loop", "grid(16, cymbal: 'X')", "grid(8, kick: 'x.x.', hat: 'xxxx').loop",
     "grid(16, clap: '..x.')", "grid(16, kick: 'X..x..x.', hat: '.x.x.x.x', open_hat: '...x').loop",
     'beats(16, energy: knob(:busy), hold: 2, seed: 2) { kick [1, 0, 0, 0] * 4; hat euclid(10, 16), mutate: 0.5; fill every: 2, snare: 0.6 }',
+    'beats(16, energy: knob(:busy), seed: 3) { kick [1, 0, 0, 0] * 4, keep: [0, 8]; fill every: 2, energy: true, snare: 0.5, low_tom: 0.3 }',
   ].freeze
   # Looping tweens (timeline-aligned): their output is a function of the
   # timeline position alone (with gains that bring them near 0.5)

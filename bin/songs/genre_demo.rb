@@ -23,6 +23,7 @@
 #     bin/songs/genre_demo.rb -G dnb -K pump.flac     # ducks keyed by the two-step :pump trigger track, not the kick
 #     bin/songs/genre_demo.rb -G dnb -E song -S 3 d.flac        # a form the template's generator writes (seed 3; G4)
 #     bin/songs/genre_demo.rb -G ambient -E endless -b 54 a.flac  # forever live; 54 bars (3.6 min) rendered
+#     bin/songs/genre_demo.rb -G techno -E endless -A 10          # a new set about every 10 minutes (the chain length knob)
 #
 # Or in bin/sound.rb:
 #     genres                                  # the list
@@ -32,6 +33,7 @@
 #     genre(:dnb) { tempo 170; role :bass, :jungle_reese, duck: -8.db }.short.play
 #     genre(:dnb).generative(seed: 3).play    # a generated form (-E song -S 3)
 #     genre(:ambient).endless.play            # forever (-E endless)
+#     genre(:techno).endless(length: 600.seconds).play   # its shape repeats about every 10 minutes (-A 10)
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -48,6 +50,7 @@ module MB::Sound
       pump: [false, '-K', "Key the ducks from the template's :pump line, a trigger track nobody hears (dnb's ghost-kick pump), instead of its sidechain"],
       generate: [:none, Symbol, '-E', "Play a form the template's generator writes as it plays (G4): song (one generated song, full length) or endless (forever; render with -b)", %i[none song endless]],
       form_seed: [0, Integer, '-S', "With -E: the generator's seed (0 keeps the template's own: another number grows another form)", 0..1_000_000],
+      arc: [0.0, Float, '-A', "With -E: minutes one run of the generator plays before it heads for its end and its shape repeats (the chain length knob; 0 keeps the generator's own)", 0.0..600.0],
     ) { |p|
       t = genre(p.genre)
       if p.pump
@@ -61,9 +64,11 @@ module MB::Sound
       end
       raise ArgumentError, '--clip goes with -M club or -M vinyl' if p.clip && !%i[club vinyl].include?(p.mastering)
       seed = p.form_seed.zero? ? nil : p.form_seed
+      raise ArgumentError, '--arc goes with -E song or -E endless' if p.arc > 0 && p.generate == :none
+      arc = p.arc > 0 ? (p.arc * 60).seconds : :default
       case p.generate
-      when :song then t = t.generative(seed: seed)
-      when :endless then t = t.endless(seed: seed)
+      when :song then t = t.generative(seed: seed, length: arc)
+      when :endless then t = t.endless(seed: seed, length: arc)
       end
       t = t.short(p.seconds) unless p.full || p.generate != :none
       puts t.to_ruby if p.show

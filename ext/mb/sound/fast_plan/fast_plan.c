@@ -726,7 +726,7 @@ static double *smooth_array(VALUE v, size_t min, size_t *len, const char *what)
  * (an Array of Integers: the output jumps to the input there), or, with a
  * reset register R (GraphNode#smooth's reset:), a jump at every nonzero
  * sample of R.  The state's length picks the kernel (7 the B-spline FIR, 8
- * adaptive, 9 curve; see mb_smooth.h).  A smoother that hasn't started
+ * adaptive, 9 curve, 6 damped; see mb_smooth.h).  A smoother that hasn't started
  * (GraphNode#smooth's, before its first block) starts held at A[0], as
  * Notes::Smoother#process does.
  */
@@ -744,13 +744,13 @@ static void run_smooth(float *D, const float *A, const float *R, VALUE obj, size
 	VALUE ring1 = rb_ivar_get(smoother, id_ring1);
 	VALUE ring2 = rb_ivar_get(smoother, id_ring2);
 	size_t sl, n1 = 0, n2 = 0;
-	double *st = smooth_array(state, 7, &sl, "state");
+	double *st = smooth_array(state, 6, &sl, "state");
 	double *r1 = NULL, *r2 = NULL;
 	if (sl == 7 || sl == 9) {
 		r1 = smooth_array(ring1, 1, &n1, "ring 1");
 		r2 = smooth_array(ring2, 1, &n2, "ring 2");
-	} else if (sl != 8) {
-		rb_raise(rb_eArgError, "A planned smoother's state must have 7, 8, or 9 values (got %zu)", sl);
+	} else if (sl != 8 && sl != 6) {
+		rb_raise(rb_eArgError, "A planned smoother's state must have 6, 7, 8, or 9 values (got %zu)", sl);
 	}
 
 	if (R) {

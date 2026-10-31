@@ -594,7 +594,8 @@ module MB
         mutate: 0.5 }` is an evolving rhythm for any drum kit: rows drift,
         Euclidean rows mutate, `energy:` thins or fills (raising it only
         adds hits), `hold: 2` repeats each random bar, `fill every: 8`
-        fills phrase ends; `rhythm(field, [1, 0, 0.5, 0] * 4)` is one
+        fills phrase ends (`energy: true` grows the fill with the
+        energy); `rhythm(field, [1, 0, 0.5, 0] * 4)` is one
         melodic row.  Steer them live: options like `density:`, `mutate:`,
         `energy:`, `chance:` take knobs (`knob(:busy)`, `cc(1)`,
         `knob(:reg).choose(A2..A4, A3..A5)` for `range:`), read once per
@@ -777,8 +778,10 @@ module MB
         `lsys.flow(...)` writes the word out.  Inside a flow, `generate
         chain, still: 6, drift: 4..8` plays one drawn section per pass,
         decided at each commit point (Ranges and Arrays draw lengths per
-        occurrence; `sections: 4` per visit; `goto :hush` forces a state).
-        A section may play for different lengths (`chorus 16` ... `chorus
+        occurrence; `sections: 4` per visit; `goto :hush` forces a state;
+        `length: 128` bounds a run: past 128 bars the chain heads for its
+        end the shortest way, as `genre(:techno).endless(length:
+        600.seconds)` does).  A section may play for different lengths (`chorus 16` ... `chorus
         8`).  `seek 1000` in a generated flow plays what an uninterrupted
         run plays there (`form.plan(seed: 1).at(999)` shows it).
       TEXT
@@ -1220,7 +1223,9 @@ module MB
         The take logs every line and where each change landed (`take.save`
         replays it exactly).  `rec`/`capture` record MIDI into armed tracks
         (loops follow the timeline's phase; `align: :launch` starts from
-        what you played first); an armed track's live monitor is its own
+        what you played first; `cc: true` keeps the mod wheel, other CCs,
+        bend, and pressure in the clip, `cc: :split` in a clip of their own,
+        `captures[:lead_1_cc]`); an armed track's live monitor is its own
         player, :"name/live", which `stop :name` leaves playing and
         `disarm` stops.  `rec_audio` records the master bus to a file;
         `render` bounces graphs offline (`render 'drop.flac', from: :drop,

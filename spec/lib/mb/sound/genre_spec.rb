@@ -122,14 +122,47 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       plan = e.form.plan(seed: 0)
       expect(plan.first(500).length).to eq(500) # (no end)
       expect(plan.first(500).map(&:section).tally.keys).to contain_exactly(:emerge, :drift, :bloom, :hush, :tide, :dissolve)
-      # The walking material plays where the scenes played :drone, :motif, :harp
-      expect(e.scenes[:bloom]).to include(drone: :drone_walk, motif: :motif_walk, harp: :harp_walk)
+      # The written arch and the endless form play the same walking material
+      # (gen-midi-2: "Follow the walk"), on the timeline
+      expect(e.scenes).to eq(t.scenes)
       expect(t.scenes[:bloom]).to include(drone: :drone, motif: :motif, harp: :harp)
+      expect(t.generator.use).to eq({})
+      %i[drone motif harp].each { |c| expect(t.clips[c].align).to eq(:timeline), c.inspect }
       # The drone follows the key: one root per 16 bars, D, G, A, or E
-      roots = (0...24).map { |k| t.clips[:drone_walk].events_for(2 * k).map(&:value).uniq }
+      roots = (0...24).map { |k| t.clips[:drone].events_for(2 * k).map(&:value).uniq }
       expect(roots.flatten.uniq - [38, 31, 33, 40]).to eq([]) # (D2, G1, A1, E2)
       expect(roots.flatten.uniq.length).to be > 1
+      # ... within the written arch's 72 bars too (its keys change at bar 17)
+      written = (0...9).map { |k| t.clips[:drone].events_for(k).map(&:value).uniq }
+      expect(t.form.bars).to eq(72)
+      expect(written.flatten.uniq.length).to be > 1
+      expect(written.first(2).flatten.uniq).to eq([38])
       expect(t.generative.form.plan(seed: 0).first(100).length).to eq(12)
+    end
+
+    it 'bounds how long a chain runs before its shape repeats (endless(length:), the chain length knob)' do
+      t = genre[:techno]
+      bar_s = t.bar_length * 4 * 60 / t.tempo.to_r
+      songs = ->(v) { (0...20).map { |sd| v.call(sd).form.plan(seed: 0, bar_length: t.bar_length).first(300).sum { |p| (p.stop - p.start) / t.bar_length } } }
+      free = songs.(->(sd) { t.generative(seed: sd) })
+      cut = songs.(->(sd) { t.generative(seed: sd, length: 96) })
+      expect(free.max).to be > 300
+      expect(cut.max).to be < 96 + 140 # (the bound, then the shortest way out: a breakdown, build, peak, and the outro)
+      expect(cut.max).to be < free.max / 2
+      # Seconds convert at the template's tempo; the knob prints in the endless flow
+      e = t.endless(length: 600.seconds)
+      expect(e.form.to_ruby).to match(/\}, length: #{(600 / bar_s).ceil}$/)
+      expect(t.endless.form.to_ruby).not_to match(/\}, length: \d+$/)
+      # A template option: the generator's length is the default, printed back
+      t2 = genre.template(:techno_set) { like :techno; generator t.generator.source, bars: t.generator.bars, length: 300.seconds }
+      expect(t2.generator.length).to eq(300.seconds)
+      expect(t2.to_ruby).to include('length: 300.seconds')
+      expect(t2.endless.form.to_ruby).to include("length: #{(300 / bar_s).ceil}")
+      expect(t2.endless(length: nil).form.to_ruby).not_to match(/\}, length: \d+$/)
+      expect { t.endless(length: -3) }.to raise_error(ArgumentError, /length: is how long one arc/)
+      # Ambient's moods have no end: the arc heads back to emerge
+      arcs = genre[:ambient].endless(length: 32).form.plan(seed: 0).first(300).map(&:section).slice_before(:emerge).to_a
+      expect(arcs.length).to be > 10
     end
 
     it 'checks generators: sources, scenes, lengths, and swaps' do
