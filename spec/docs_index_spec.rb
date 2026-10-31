@@ -8,6 +8,22 @@ RSpec.describe('design notes index') do
     expect(DocsIndex.note_problems).to eq([])
   end
 
+  it 'starts every note with a short Quick reference whose paths exist' do
+    expect(DocsIndex.quick_reference_problems).to eq([])
+  end
+
+  it 'reports Quick references that are missing, misplaced, long, or name missing paths' do
+    note = ->(quick, rest = "Text.\n") { "# T\n\n<!-- summary -->\nS.\n<!-- /summary -->\n\n#{quick}#{rest}" }
+    expect(DocsIndex.quick_problems_of('n', note.("## Quick reference\n\n- `bin/sound.rb`\n\n"))).to eq([])
+    expect(DocsIndex.quick_problems_of('n', note.(''))).to eq(["n has no '## Quick reference' of '- ' bullets right after its summary block"])
+    expect(DocsIndex.quick_problems_of('n', note.("Intro.\n\n## Quick reference\n\n- a\n\n"))).to include(/no '## Quick reference'/)
+    expect(DocsIndex.quick_problems_of('n', note.("## Quick reference\n\n#{"- a\n" * 7}\n"))).to eq(["n's Quick reference has 7 bullets (1-6)"])
+    expect(DocsIndex.quick_problems_of('n', note.("## Quick reference\n\n- #{'x' * 1800}\n\n"))).to eq(["n's Quick reference is 1803 bytes (at most 1800)"])
+    expect(DocsIndex.quick_problems_of('n', note.("## Quick reference\n\n- `bin/nope.rb`\n\n", "## Quick reference\n"))).to eq(
+      ['n has 2 Quick reference headings', "n's Quick reference names bin/nope.rb, which doesn't exist"]
+    )
+  end
+
   it 'is current in design/notes/README.md and CLAUDE.md' do
     expect(DocsIndex.stale_problems).to eq([])
   end

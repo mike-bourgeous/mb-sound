@@ -6,6 +6,12 @@ On top, the Set layer (`MB::Sound::Arrangement`, `Session#arrangement`): `track`
 Rules: changes go through `Session#change`; scene graphs build on the scheduler thread ahead of their landing and new graphs are warmed in a sandbox first; never enable a TracePoint in library code (YJIT drops its compiled code); Sessions keep one instance variable layout.
 <!-- /summary -->
 
+## Quick reference
+
+- Set commands: `track`, `scene`, `go`, `launch`, `tweak`, `flow`, `knob`, `turn`, `arm`, `rec`, `capture`; launch points `on:` / `in:` / `at:`; `undo`.
+- Every change goes through `Session#change` (an exact sample, under the render lock); specs use `Session.new(realtime: false)` + `#process_buffer` and close sessions in `after` blocks.
+- Code `lib/mb/sound/session.rb` + `session/`, `lib/mb/sound/arrangement.rb`; specs `spec/lib/mb/sound/session_spec.rb`, `spec/lib/mb/sound/arrangement_spec.rb`, `spec/lib/mb/sound/take_spec.rb`; help `help :sets`, `help :flow`.
+
 Phase 1 of the arrangement plan (branch `arrange-1`, 2026-10-10): the shared Session groundwork ("G0") and the Set layer.  Phase 2 (branch `arrange-form`, 2026-10-10/11): ring-outs, song forms (`flow`) with labels, gotos, and picks, performer controls, fills, the marker table, and the meter map (sections below the Set layer).  Phase 3 (branch `arrange-3`, 2026-10-11): knobs (K6), snapshots, MIDI learn, and tracks that lead the beat or nudge their notes (Knobs, below).  Phase 4 (branch `arrange-4`, 2026-10-11): recording (the Session MIDI input, `arm`/`rec`/`capture`, audio `rec_audio` (since omnibus6), takes that replay MIDI; Recording, below; `take.song` is later).  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 Sources: the study on branch `research-arrangement` (`research/arrangement/README.md`, prototype in `prototype/`), the interconnect contracts K1-K10 on `research-plan-interconnect` (`research/plan-interconnect/README.md`), and the maintainer's decisions of 2026-10-10 (quoted below).

@@ -649,10 +649,10 @@ namespace :docs do
     puts "WARNING: #{warning}" if warning
   end
 
-  desc "Check the generated index and map, the notes' summaries, kept terms, and CLAUDE.md's size (warns over budget)"
+  desc "Check the generated index and map, the notes' summaries and Quick references, kept terms, and CLAUDE.md's size (warns over budget)"
   task :check do
     require_relative 'spec/docs_index'
-    problems = DocsIndex.note_problems + DocsIndex.stale_problems +
+    problems = DocsIndex.note_problems + DocsIndex.quick_reference_problems + DocsIndex.stale_problems +
       DocsIndex.missing_terms.map { |s, t| "term in no doc (#{s}): #{t}" } +
       DocsIndex.dangling_references.map { |n| "CLAUDE.md names design/notes/#{n}.md, which doesn't exist" }
     warning = DocsIndex.size_warning

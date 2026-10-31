@@ -4,6 +4,11 @@
 `sig.feedback { |fb, input| input + fb.delay(5.ms) * 0.8 }` (alias `fb`; `GraphNode::FeedbackLoop`) runs a loop's nodes one sample at a time as plan ops in C (`fast_loop`, exact Ruby mirror), the same output at any block size; `sig.delay(t, feedback: g) { |d| d.fb { ... }; d.wet { ... } }` is the tape-echo insert form.  Loop ops: arithmetic, shapers, delays, SVFs, biquads, lp4/diode ladders; other nodes on the loop go through `MB::Sound.live_error`.  Latency compensation (`compensate:` `:pitch` default, `:echo`, `:dc`, `false`) keeps periods and echo times exact; a hidden high shelf sustains loops with gentle lowpasses.
 <!-- /summary -->
 
+## Quick reference
+
+- `sig.feedback { |fb, input| input + fb.delay(5.ms) * 0.8 }` (alias `fb`); the insert form `sig.delay(t, feedback: g) { |d| d.fb { ... }; d.wet { ... } }`; `compensate:` `:pitch` (default), `:echo`, `:dc`, `false`.
+- Code `lib/mb/sound/graph_node/feedback_loop.rb` (ops in `fast_loop`); spec `spec/lib/mb/sound/graph_node/feedback_loop_spec.rb`; demo `bin/songs/feedback_song.rb`; help `help :effects`.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 

@@ -4,6 +4,12 @@
 `Sequence::Duration` lengths (`3.n16`, `2.bars`) work wherever lengths do; `1.beat.hz` is a Pitch from a `Sequence::TempoNode` whose tones lock their phase to the timeline, and `sig.delay(1.n8.dotted)` follows the tempo.  `Session` finds `TimelineNode`s in every graph.  The Transport's tempo is a `Sequence::TempoMap` of steps, ramps, and followed sources (`bpm 140, over: 4.bars`, `accel`/`rit`, `bpm :tempo`), journaled and undoable, rendered in 800-run-frame cells so it is the same at any buffer size; meters are a map too (`meter 7, 8`).  Build-time conversions read `Sequence.current_transport`.
 <!-- /summary -->
 
+## Quick reference
+
+- Lengths `3.n16`, `2.bars`, `1.n8.dotted`; `1.beat.hz` locks a tone to the timeline; tempo `bpm 140, over: 4.bars`, `accel`, `rit`; meters `meter 7, 8`.
+- Build-time conversions read `Sequence.current_transport`, never the default transport.
+- Code `lib/mb/sound/sequence/duration.rb`; specs `spec/lib/mb/sound/sequence/duration_spec.rb`, `spec/lib/mb/sound/session/tempo_changes_spec.rb`; demo `bin/songs/tempo_song.rb`; help `help :tempo`.
+
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
 
