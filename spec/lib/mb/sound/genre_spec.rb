@@ -122,13 +122,21 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       plan = e.form.plan(seed: 0)
       expect(plan.first(500).length).to eq(500) # (no end)
       expect(plan.first(500).map(&:section).tally.keys).to contain_exactly(:emerge, :drift, :bloom, :hush, :tide, :dissolve)
-      # The walking material plays where the scenes played :drone, :motif, :harp
-      expect(e.scenes[:bloom]).to include(drone: :drone_walk, motif: :motif_walk, harp: :harp_walk)
+      # The written arch and the endless form play the same walking material
+      # (gen-midi-2: "Follow the walk"), on the timeline
+      expect(e.scenes).to eq(t.scenes)
       expect(t.scenes[:bloom]).to include(drone: :drone, motif: :motif, harp: :harp)
+      expect(t.generator.use).to eq({})
+      %i[drone motif harp].each { |c| expect(t.clips[c].align).to eq(:timeline), c.inspect }
       # The drone follows the key: one root per 16 bars, D, G, A, or E
-      roots = (0...24).map { |k| t.clips[:drone_walk].events_for(2 * k).map(&:value).uniq }
+      roots = (0...24).map { |k| t.clips[:drone].events_for(2 * k).map(&:value).uniq }
       expect(roots.flatten.uniq - [38, 31, 33, 40]).to eq([]) # (D2, G1, A1, E2)
       expect(roots.flatten.uniq.length).to be > 1
+      # ... within the written arch's 72 bars too (its keys change at bar 17)
+      written = (0...9).map { |k| t.clips[:drone].events_for(k).map(&:value).uniq }
+      expect(t.form.bars).to eq(72)
+      expect(written.flatten.uniq.length).to be > 1
+      expect(written.first(2).flatten.uniq).to eq([38])
       expect(t.generative.form.plan(seed: 0).first(100).length).to eq(12)
     end
 

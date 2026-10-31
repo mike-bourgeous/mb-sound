@@ -145,7 +145,7 @@ module MB
       # per occurrence), +sections+ (how many Template#generative plays
       # when the source doesn't end by itself), +use+ (material swaps in
       # every scene for the generated form: `{ drone: :drone_walk }` plays
-      # clip :drone_walk wherever a scene plays :drone), +scenes+
+      # a clip :drone_walk wherever a scene plays :drone), +scenes+
       # (values added to scenes: `{ bloom: { space: 0.7 } }`), and +length+
       # (bars, a Duration, or seconds like 480.seconds; nil for none: how
       # long one arc of the source runs before it heads for its end, see
