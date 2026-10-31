@@ -759,7 +759,8 @@ module MB
           @wet = gain_input(wet, 'wet')
           @dry = gain_input(dry, 'dry')
           @mix = nil
-          @live_held = {} # (the last value of each gain node, held if it ends)
+          @live_held = {} # (each gain node's last value, held if it ends, and its steady-buffer cache)
+          @live_range = [0.0, 0.0] # (reused by #gain_values)
           @live_wet = nil
           @live_dry = nil
           unless mix.nil?
@@ -1035,23 +1036,44 @@ module MB
         end
 
         # +n+ values of gain +src+: the number, or the node's next samples as
-        # a DFloat (a short or ended node holds its last value).
+        # a DFloat (a short or ended node holds its last value).  A node
+        # buffer whose samples are all one value (a knob at rest) gives that
+        # number, so steady knobs mix through the numeric path: the same
+        # samples, at a number's cost (a frozen buffer seen before is
+        # recognized by its GraphNode::FrozenView::Key without a scan).
         def gain_values(src, n)
           return src unless src.respond_to?(:sample)
 
+          held = @live_held[src.object_id]
           buf = src.sample(n)
-          held = @live_held[src.object_id] || 0.0
-          if buf.nil? || buf.empty?
-            return held
-          end
+          return held&.[](0) || 0.0 if buf.nil? || buf.empty?
+
           buf = buf.real if buf.is_a?(Numo::SComplex) || buf.is_a?(Numo::DComplex)
+          held ||= (@live_held[src.object_id] = [0.0, FrozenView::Key.new, nil])
+          if buf.length >= n && held[1].match?(buf)
+            v = held[2]
+          else
+            held[1].set(buf)
+            r = @live_range
+            unless MB::Sound::Kernels.min_max(buf, r)
+              r[0] = buf.min.to_f
+              r[1] = buf.max.to_f
+            end
+            v = r[0] == r[1] ? r[0] : nil
+            held[2] = v
+          end
+          if v
+            held[0] = v
+            return v
+          end
+
           v = Numo::DFloat.cast(buf.length > n ? buf[0...n] : buf)
           if v.length < n
             full = Numo::DFloat.new(n).fill(v[-1])
             full[0...v.length] = v
             v = full
           end
-          @live_held[src.object_id] = v[-1]
+          held[0] = v[-1]
           v
         end
 

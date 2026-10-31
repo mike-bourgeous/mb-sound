@@ -194,7 +194,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     'formant(:a, :o, ...)' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.formant(:a, :o, **o) } }, :formant,
       { morph: 0.5, shift: 2, width: 1 }, {}],
     'lp4' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw.lp4(1000, **o) * v.amp_env(0.01, 0.1, 0.5, 0.1) } } }, :lp4,
-      { resonance: 0.3 }, { drive: 1.5 }],
+      { resonance: 0.3, drive: 1.5 }, {}],
     'compress' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.compress(**o) } }, :compress,
       { attack: 0.01, release: 0.1, threshold: -20.db, ratio: 4, mix: 0.8 }, {}],
   }.freeze

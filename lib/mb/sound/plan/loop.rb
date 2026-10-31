@@ -580,7 +580,8 @@ module MB
               when Plan::Op::FourPole
                 objects << op.filter
                 params = [op.cutoff, op.resonance].map { |v| v.is_a?(Plan::Const) ? -1 - sc.(v.parts[0].to_f) : reg.(v) }
-                body << [OPCODES[:four_pole], reg.(op.dst), reg.(op.a), objects.length - 1, *params, sc.(*op.settings)]
+                drive = op.drive.is_a?(Plan::Value) ? reg.(op.drive) : -1 # (a live drive; a Const is in the settings)
+                body << [OPCODES[:four_pole], reg.(op.dst), reg.(op.a), objects.length - 1, *params, sc.(*op.settings), drive]
               when Op::Svf
                 objects << op.filter.instance_variable_get(:@state)
                 params = [op.cutoff, op.quality, op.gain].map { |v| v.is_a?(Plan::Const) ? -1 - sc.(v.value.to_f) : reg.(v) }
@@ -1348,7 +1349,8 @@ module MB
               op.cookbook.dynamic_process(Numo::SFloat[regs[@reg[op.a]]], cutoff: Numo::SFloat[val.(op.cutoff)], quality: Numo::SFloat[val.(op.quality)])[0]
             when Plan::Op::FourPole
               val = ->(v) { v.is_a?(Plan::Const) ? v.parts[0] : Numo::SFloat[regs[@reg[v]]] }
-              op.filter.dynamic_process(Numo::SFloat[regs[@reg[op.a]]], cutoff: val.(op.cutoff), resonance: val.(op.resonance))[0]
+              drive = op.drive.nil? ? op.filter.drive : val.(op.drive)
+              op.filter.dynamic_process(Numo::SFloat[regs[@reg[op.a]]], cutoff: val.(op.cutoff), resonance: val.(op.resonance), drive: drive)[0]
             when Op::Svf
               val = ->(v) { v.is_a?(Plan::Const) ? v.value.to_f : regs[@reg[v]] }
               f = op.filter

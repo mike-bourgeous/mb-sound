@@ -110,6 +110,9 @@ module GraphSweep
       }]
     }
     ladders << ['feedback diode', ->(c) { c.sig.delay(0.002, feedback: 0.6) { |fb| fb.diode(c.mod(400, 3000), resonance: 0.4) } }]
+    ladders << ['feedback lp4 and diode live drive (delays-2)', ->(c) {
+      c.sig.feedback { |fb, input| input + (fb.delay(40.samples).lp4(1500, resonance: 0.5, drive: c.mod(0, 3)) + fb.delay(31.samples).diode(1200, resonance: 0.4, drive: c.mod(0.5, 2), drive_mode: :feedback)) * 0.4 }
+    }]
     biquads + ladders
   end
 
@@ -136,6 +139,10 @@ module GraphSweep
       ['lp4 quality: node', ->(c) { c.sig.lp4(1000, quality: c.mod(0.7, 8)) }],
       ['lp4 linear curve', ->(c) { c.sig.lp4(1000, resonance: 0.5, resonance_curve: :linear) }],
       ['diode unnormalized', ->(c) { c.sig.diode(c.mod(200, 3000), resonance: 0.5, normalize: false) }],
+      ['lp4 and diode live drive nodes (delays-2)', ->(c) {
+        c.sig.lp4(c.mod(200, 3000), resonance: 0.7, drive: c.mod(0, 4)) + c.sig.lp4(900, resonance: 0.8, drive: c.mod(0, 3), drive_mode: :stages) +
+          c.sig.diode(1200, resonance: 0.6, drive: c.mod(0.5, 3)) + c.sig.diode(1200, resonance: 0.6, drive: c.mod(0, 3), normalize: false, drive_mode: :feedback, clip: :hard)
+      }],
     ]
     modes + drives + others
   end

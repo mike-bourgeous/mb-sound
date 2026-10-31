@@ -543,6 +543,15 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       }
     end
 
+    it 'runs four-poles and diode ladders with live drive nodes (each lane on its own; delays-2)' do
+      settings = [{}, { mode: :diode }, { mode: :bp2 }, { mode: :hp2 }] # (one program: :feedback adds an aclip)
+      compare_lanes(settings.length) { |i, src|
+        cutoff = PlanSpecHelpers::Source.new(seed: i + 2, scale: 1500, offset: 2000)
+        drive = PlanSpecHelpers::Source.new(kind: :steps, seed: i + 9, scale: 1.5, offset: 2, every: 70)
+        (src * 0.5).lp4(cutoff, resonance: 0.6, drive: drive, **settings[i]) * 2
+      }
+    end
+
     it 'runs cookbook biquads with moving parameters' do
       compare_lanes(5) { |i, src|
         cutoff = PlanSpecHelpers::Source.new(seed: i + 2, scale: 1500, offset: 2000)

@@ -165,14 +165,15 @@ module MB
         # (FastFilter.four_pole or .diode_ladder, through mb_four_pole.h) on
         # the filter's own state, every mode, drive mode, clip, curve,
         # self-oscillation, and the diode ladder (fast_plan's OP_FOUR_POLE).
-        # Cutoff and resonance are numbers or Values read per sample.
+        # Cutoff and resonance are numbers or Values read per sample; a live
+        # drive (delays-2) a Value or a Const (nil: the filter's own drive).
         class FourPole < Base
-          attr_reader :a, :filter, :cutoff, :resonance
+          attr_reader :a, :filter, :cutoff, :resonance, :drive
 
-          def initialize(dst, node, filter, a, cutoff:, resonance:)
+          def initialize(dst, node, filter, a, cutoff:, resonance:, drive: nil)
             super(dst, node)
             raise Unsupported.new(node, 'a complex filter input') if a.complex?
-            [cutoff, resonance].each do |v|
+            [cutoff, resonance, drive].compact.each do |v|
               raise Unsupported.new(node, 'a complex filter parameter') if v.complex?
             end
 
@@ -180,14 +181,15 @@ module MB
             @a = a
             @cutoff = cutoff
             @resonance = resonance
+            @drive = drive
           end
 
           def operands
-            [@a, @cutoff, @resonance].grep(Value)
+            [@a, @cutoff, @resonance, @drive].grep(Value)
           end
 
           def expression
-            "#{@filter.mode}(#{@a}, cutoff: #{@cutoff}, resonance: #{@resonance})"
+            "#{@filter.mode}(#{@a}, cutoff: #{@cutoff}, resonance: #{@resonance}#{", drive: #{@drive}" if @drive})"
           end
 
           def opcode = :four_pole
@@ -197,14 +199,15 @@ module MB
             f = @filter
             curve, drive_mode, clip = f.send(:kernel_options)
             [
-              f.instance_variable_get(:@k_max), f.instance_variable_get(:@compensation), f.instance_variable_get(:@drive),
+              f.instance_variable_get(:@k_max), f.instance_variable_get(:@compensation), @drive.is_a?(Const) ? @drive.parts[0].to_f : f.instance_variable_get(:@drive),
               *f.instance_variable_get(:@mix), curve, drive_mode, clip, f.normalize? ? 1 : 0, f.diode? ? 1 : 0, f.instance_variable_get(:@tuning_number),
             ]
           end
 
           def run_ruby(env, count)
             par = ->(v) { v.is_a?(Const) ? v.parts[0] : env.fetch(v) }
-            env[@dst] = @filter.dynamic_process(Numo::SFloat.cast(env.fetch(@a)).dup, cutoff: par.(@cutoff), resonance: par.(@resonance))
+            drive = @drive.nil? ? @filter.drive : par.(@drive)
+            env[@dst] = @filter.dynamic_process(Numo::SFloat.cast(env.fetch(@a)).dup, cutoff: par.(@cutoff), resonance: par.(@resonance), drive: drive)
           end
         end
       end
@@ -236,8 +239,8 @@ module MB
         end
 
         # +filter+ (a Filter::FourPole) on +a+ (see Op::FourPole).
-        def four_pole(filter, a, cutoff:, resonance:)
-          emit(Op::FourPole.new(value(:real), node, filter, self[a], cutoff: self[cutoff], resonance: self[resonance]))
+        def four_pole(filter, a, cutoff:, resonance:, drive: nil)
+          emit(Op::FourPole.new(value(:real), node, filter, self[a], cutoff: self[cutoff], resonance: self[resonance], drive: drive.nil? ? nil : self[drive]))
         end
       end
     end

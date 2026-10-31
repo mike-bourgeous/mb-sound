@@ -67,7 +67,8 @@
  * +cutoff+ (Hz) and +resonance+ (0..1, through the curve and times +k_max+
  * for the loop gain k) are Numerics or NArrays of the buffer's length (read
  * as float32).  +state+ is a 4-element Array of the integrator states,
- * updated.  +drive+ 0 is linear.  +mix+ is 5 output gains for the cascade
+ * updated.  +drive+ 0 is linear; an NArray of the buffer's length is a live
+ * drive read per sample (negative values read as 0).  +mix+ is 5 output gains for the cascade
  * input and the four stage outputs (lowpass 4: [0, 0, 0, 0, 1]).  +curve+ is
  * 0 (linear), 1 (dB), 2 (self-oscillation over linear), or 3
  * (self-oscillation over dB; +k_max+ is then the loop gain at r = 1);
@@ -89,7 +90,9 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 	}
 	double k_max = NUM2DBL(argv[5]);
 	double comp = NUM2DBL(argv[6]);
-	double drive = NUM2DBL(argv[7]);
+	VALUE drive_v = argv[7];
+	_Bool live_drive = RTEST(rb_obj_is_kind_of(drive_v, numo_cNArray));
+	double drive = live_drive ? 0.0 : NUM2DBL(drive_v);
 	VALUE mix_v = argv[8];
 	if (!isfinite(k_max) || !isfinite(comp) || !(drive >= 0) || !isfinite(drive)) {
 		rb_raise(rb_eArgError, "Filter parameters must be finite (and drive not negative)");
@@ -135,9 +138,12 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 	size_t length = RNARRAY_SHAPE(buffer)[0];
 	float *data = mb_sfloat_ptr(buffer);
 
-	struct mb_signal fc_in, res_in;
+	struct mb_signal fc_in, res_in, drive_in;
 	mb_signal_input(&cutoff, length, "Cutoff", &fc_in);
 	mb_signal_input(&resonance, length, "Resonance", &res_in);
+	if (live_drive) {
+		mb_signal_input(&drive_v, length, "Drive", &drive_in);
+	}
 
 	struct mb_fp_args args = {
 		.rate = rate, .k_max = k_max, .comp = comp, .drive = drive,
@@ -146,7 +152,7 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 	};
 	double st[4] = { s0, s1, s2, s3 };
 	long fk = mb_flush_count_read(state, 4);
-	mb_four_pole_run(&args, data, data, length, &fc_in, &res_in, st, &fk);
+	mb_four_pole_run(&args, data, data, length, &fc_in, &res_in, live_drive ? &drive_in : NULL, st, &fk);
 	for (int j = 0; j < 4; j++) {
 		rb_ary_store(state, j, rb_float_new(st[j]));
 	}
@@ -159,6 +165,7 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 	RB_GC_GUARD(buffer);
 	RB_GC_GUARD(cutoff);
 	RB_GC_GUARD(resonance);
+	RB_GC_GUARD(drive_v);
 
 	return buffer;
 }
@@ -512,7 +519,9 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 	}
 	double k_max = NUM2DBL(argv[5]);
 	double comp = NUM2DBL(argv[6]);
-	double drive = NUM2DBL(argv[7]);
+	VALUE drive_v = argv[7];
+	_Bool live_drive = RTEST(rb_obj_is_kind_of(drive_v, numo_cNArray));
+	double drive = live_drive ? 0.0 : NUM2DBL(drive_v);
 	if (!isfinite(k_max) || !isfinite(comp) || !(drive >= 0) || !isfinite(drive)) {
 		rb_raise(rb_eArgError, "Filter parameters must be finite (and drive not negative)");
 	}
@@ -552,9 +561,12 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 	size_t length = RNARRAY_SHAPE(buffer)[0];
 	float *data = mb_sfloat_ptr(buffer);
 
-	struct mb_signal fc_in, res_in;
+	struct mb_signal fc_in, res_in, drive_in;
 	mb_signal_input(&cutoff, length, "Cutoff", &fc_in);
 	mb_signal_input(&resonance, length, "Resonance", &res_in);
+	if (live_drive) {
+		mb_signal_input(&drive_v, length, "Drive", &drive_in);
+	}
 
 	struct mb_fp_args args = {
 		.rate = rate, .k_max = k_max, .comp = comp, .drive = drive,
@@ -563,7 +575,7 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 	};
 	double st[4] = { s0, s1, s2, s3 };
 	long fk = mb_flush_count_read(state, 4);
-	mb_diode_ladder_run(&args, data, data, length, &fc_in, &res_in, st, &fk);
+	mb_diode_ladder_run(&args, data, data, length, &fc_in, &res_in, live_drive ? &drive_in : NULL, st, &fk);
 	for (int j = 0; j < 4; j++) {
 		rb_ary_store(state, j, rb_float_new(st[j]));
 	}
@@ -576,6 +588,7 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 	RB_GC_GUARD(buffer);
 	RB_GC_GUARD(cutoff);
 	RB_GC_GUARD(resonance);
+	RB_GC_GUARD(drive_v);
 
 	return buffer;
 }

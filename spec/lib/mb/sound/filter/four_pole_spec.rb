@@ -55,6 +55,35 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       end
     end
 
+    # (delays-2: a live drive, an NArray read per sample; negative values
+    # read as 0, and a constant drive buffer gives the number's samples)
+    [0, 1, 2].each do |drive_mode|
+      it "give identical samples with a live drive, drive mode #{drive_mode}, four-pole and diode ladder" do
+        drive = Numo::SFloat.linspace(-0.5, 4, 4801)
+        loud = noise * 4
+        s1 = [0.0] * 4
+        s2 = [0.0] * 4
+        s3 = [0.0] * 4
+        s4 = [0.0] * 4
+        [0...800, 800...801, 801...2400, 2400...4801].each do |r|
+          c = MB::Sound::FastFilter.four_pole(loud[r].dup, cutoffs[r], resonances[r], s1, 48000, 4.3, 0.375, drive[r], FP::MODES[:lp4], 1, drive_mode, 0, 1)
+          ruby = FP.process_ruby(loud[r].dup, cutoffs[r], resonances[r], s2, 48000, 4.3, 0.375, drive[r], FP::MODES[:lp4], 1, drive_mode, 0, 1)
+          expect(c).to eq(ruby)
+          expect(s1).to eq(s2)
+          next if drive_mode == 1
+
+          c = MB::Sound::FastFilter.diode_ladder(loud[r].dup, cutoffs[r], resonances[r], s3, 48000, 3.9, 0.375, drive[r], 1, drive_mode, 0, 1, 7)
+          ruby = FP.diode_process_ruby(loud[r].dup, cutoffs[r], resonances[r], s4, 48000, 3.9, 0.375, drive[r], 1, drive_mode, 0, 1, 7)
+          expect(c).to eq(ruby)
+          expect(s3).to eq(s4)
+        end
+
+        a = MB::Sound::FastFilter.four_pole(loud.dup, cutoffs, resonances, [0.0] * 4, 48000, 4.3, 0.375, Numo::SFloat.new(4801).fill(2.5), FP::MODES[:lp4], 1, drive_mode, 0, 1)
+        b = MB::Sound::FastFilter.four_pole(loud.dup, cutoffs, resonances, [0.0] * 4, 48000, 4.3, 0.375, 2.5, FP::MODES[:lp4], 1, drive_mode, 0, 1)
+        expect(a).to eq(b)
+      end
+    end
+
     [[1, 0, 0], [1, 1, 0], [1, 2, 1], [3, 0, 0], [3, 2, 0]].each do |curve, drive_mode, clip|
       it "give identical samples with a constant cutoff and a moving resonance, musical tuning, curve #{curve}, drive mode #{drive_mode}" do
         # (a resonance change alone recomputes the stages' frequency)

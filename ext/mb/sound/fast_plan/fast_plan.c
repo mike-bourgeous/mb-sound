@@ -89,7 +89,7 @@ enum {
 	OP_MAX,       // dst, a, b                   dst = Numo::SFloat.maximum(a, b) (real)
 	OP_POWF,      // dst, a, b                   dst = a ** b by mb_vec_pow (MB::Sound.precision :fast, a Constant or Knob base)
 	OP_SVF,       // dst, a, fc, q, g, object, sc  dst = Filter::SVF on a (plan_filters.c); fc/q/g registers or -1 (scalars sc[0..2]); sc[3]: remember the gain; object: the Filter::SVF
-	OP_FOUR_POLE, // dst, a, fc, res, object, sc   dst = GraphNode::FourPole on a (plan_filters.c); fc/res registers or -1 (scalars sc[14], sc[15]); sc[0..13] settings; object: the Filter::FourPole
+	OP_FOUR_POLE, // dst, a, fc, res, object, sc, drv   dst = GraphNode::FourPole on a (plan_filters.c); fc/res registers or -1 (scalars sc[14], sc[15]); sc[0..13] settings; object: the Filter::FourPole; drv a live drive register or -1 (sc[2])
 	OP_BIQUAD,    // dst, a, cut, q, object, type  dst = Filter::Cookbook (structure: :biquad) on a (plan_biquad.c); cut/q registers; object: the Filter::Cookbook
 	OP_CLIP,      // dst, a, sc                  dst = Numo clip of a to (float)sc[0]..(float)sc[1] (NaN stays NaN)
 	OP_EXP,       // dst, a, 0                   dst = (float)exp((double)a) (Numo::NMath.exp on an SFloat)
@@ -995,8 +995,11 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 		case OP_SVF:
 			len = 8;
 			break;
-		case OP_FOUR_POLE: case OP_BIQUAD:
+		case OP_BIQUAD:
 			len = 7;
+			break;
+		case OP_FOUR_POLE:
+			len = 8;
 			break;
 		case OP_CLIP: case OP_EXP: case OP_TIME_SCALE: case OP_UNARY:
 			len = 4;
@@ -1071,9 +1074,10 @@ static void svf_operands(const int32_t *op, size_t pc, const struct regs *R, lon
 	*remember = sc[op[7] + 3] != 0;
 }
 
-// The four-pole op's operands for one lane, checked (see OP_FOUR_POLE).
+// The four-pole op's operands for one lane, checked (see OP_FOUR_POLE):
+// the cutoff, resonance, and drive (its p NULL unless a live drive).
 static void four_pole_operands(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, VALUE objects,
-		struct mb_plan_param prm[2], VALUE *obj)
+		struct mb_plan_param prm[3], VALUE *obj)
 {
 	float *const *ptrs = R->p;
 	const char *cplx = R->c;
@@ -1086,6 +1090,10 @@ static void four_pole_operands(const int32_t *op, size_t pc, const struct regs *
 		prm[k].p = r >= 0 ? ptrs[r] : NULL;
 		prm[k].scalar = sc[op[6] + 14 + k];
 	}
+	int r = op[7];
+	if (r >= nregs || (r >= 0 && (cplx[r] || !ptrs[r]))) rb_raise(rb_eArgError, "Bad plan four-pole drive register at word %zu", pc);
+	prm[2].p = r >= 0 ? ptrs[r] : NULL;
+	prm[2].scalar = sc[op[6] + 2];
 	*obj = rb_ary_entry(objects, op[5]);
 }
 
@@ -1438,10 +1446,10 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 		}
 
 		case OP_FOUR_POLE: {
-			struct mb_plan_param prm[2];
+			struct mb_plan_param prm[3];
 			VALUE obj;
 			four_pole_operands(op, pc, R, nregs, sc, nscalars, objects, prm, &obj);
-			mb_plan_four_pole(ptrs[d], ptrs[op[2]], &prm[0], &prm[1], sc + op[6], obj, n);
+			mb_plan_four_pole(ptrs[d], ptrs[op[2]], &prm[0], &prm[1], &prm[2], sc + op[6], obj, n);
 			break;
 		}
 
@@ -1750,17 +1758,31 @@ static VALUE ruby_run_lanes(VALUE self, VALUE words, VALUE scalars_list, VALUE o
 		} else if (L > 1 && op[0] == OP_FOUR_POLE) {
 			float *dl[L];
 			const float *al[L];
-			struct mb_plan_param prm[2 * L];
+			struct mb_plan_param prm[2 * L], drv[L];
 			const double *cfg[L];
 			VALUE objs[L];
+			_Bool live = 0;
 			for (long l = 0; l < L; l++) {
 				check_op(op, pc, &R[l], nregs, nscalars[l]);
-				four_pole_operands(op, pc, &R[l], nregs, sc[l], nscalars[l], objects[l], prm + 2 * l, &objs[l]);
+				struct mb_plan_param p3[3];
+				four_pole_operands(op, pc, &R[l], nregs, sc[l], nscalars[l], objects[l], p3, &objs[l]);
+				prm[2 * l] = p3[0];
+				prm[2 * l + 1] = p3[1];
+				drv[l] = p3[2];
+				live = live || p3[2].p;
 				cfg[l] = sc[l] + op[6];
 				dl[l] = R[l].p[op[1]];
 				al[l] = R[l].p[op[2]];
 			}
-			mb_plan_four_pole_lanes((int)L, dl, al, prm, cfg, objs, n);
+			if (live) {
+				// A live drive (delays-2): each lane on its own (the
+				// lane-major kernel holds one drive per lane)
+				for (long l = 0; l < L; l++) {
+					mb_plan_four_pole(dl[l], al[l], &prm[2 * l], &prm[2 * l + 1], &drv[l], cfg[l], objs[l], n);
+				}
+			} else {
+				mb_plan_four_pole_lanes((int)L, dl, al, prm, cfg, objs, n);
+			}
 		} else if (L > 1 && op[0] == OP_BIQUAD) {
 			float *dl[L];
 			const float *al[L], *cl[L], *ql[L];

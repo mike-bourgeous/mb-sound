@@ -175,7 +175,8 @@ module MB
         # acts: :input (default; the cascade input), :stages (every stage,
         # OTA style), or :feedback (only the resonance feedback, MS-20
         # style; +clip: :soft+ or :hard), the last two with drive 1 unless
-        # given.  +mode:+ picks another tap mix: :lp2, :bp2, :bp4, :hp2,
+        # given (a node drive, e.g. a knob, is read per sample).  +mode:+
+        # picks another tap mix: :lp2, :bp2, :bp4, :hp2,
         # :hp4, or :diode (a TB-303-style diode ladder; see #diode).
         #
         # +resonance_curve: :db+ (default) makes the resonant peak rise
@@ -209,6 +210,15 @@ module MB
         )
           raise ArgumentError, 'Give lp4 resonance: or quality:, not both' if resonance && quality
 
+          # A drive node (a knob; delays-2) is read per sample; the modes that
+          # need saturation (self-oscillation, :stages, :feedback) keep it at
+          # least Filter::FourPole::MIN_LIVE_DRIVE, where a number 0 means 1
+          live_drive = drive.respond_to?(:sample) ? drive : nil
+          if live_drive && (self_oscillate || drive_mode != :input)
+            live_drive = live_drive.aclip(MB::Sound::Filter::FourPole::MIN_LIVE_DRIVE, Float::INFINITY)
+          end
+          drive = nil if live_drive
+
           f = MB::Sound::Filter::FourPole.new(
             mode: mode, drive: drive, self_oscillate: self_oscillate, compensation: compensation,
             resonance_curve: resonance_curve, drive_mode: drive_mode, clip: clip, normalize: normalize,
@@ -220,7 +230,7 @@ module MB
           diode = mode == :diode && (tuning != :hardware || !normalize)
           resonance = MB::Sound::GraphNode::FourPole.quality_resonance(quality, resonance_curve, diode: diode, tuning: tuning) if quality
           resonance ||= 0.0
-          MB::Sound::GraphNode::FourPole.new(self, f, cutoff: cutoff, resonance: resonance)
+          MB::Sound::GraphNode::FourPole.new(self, f, cutoff: cutoff, resonance: resonance, drive: live_drive)
         end
         alias four_pole lp4
         alias lowpass4 lp4

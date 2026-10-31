@@ -103,7 +103,7 @@ enum {
 	OP_MULADD,    // dst, a, b, c          dst = a + b * c (two roundings, as OP_MUL then OP_ADD)
 	OP_MULSADD,   // dst, a, b, sc         dst = a + (float)c * b (as OP_MULS then OP_ADD)
 	OP_BIQUAD,    // dst, a, obj, fc, q, type, sc   dst = Filter::Cookbook (direct form biquad) on a, coefficients per sample as its dynamic kernel (mb_biquad.h; obj: the Cookbook; fc, q: a register or -1 - scalar index; sc: sample rate, dB gain or NaN)
-	OP_FOUR_POLE, // dst, a, obj, fc, res, sc       dst = Filter::FourPole (four-pole or diode ladder) on a (mb_four_pole.h; obj: the Filter::FourPole; fc, res: a register or -1 - scalar index; sc: 14 settings as fast_plan's OP_FOUR_POLE)
+	OP_FOUR_POLE, // dst, a, obj, fc, res, sc, drv  dst = Filter::FourPole (four-pole or diode ladder) on a (mb_four_pole.h; obj: the Filter::FourPole; fc, res: a register or -1 - scalar index; sc: 14 settings as fast_plan's OP_FOUR_POLE; drv: a live drive register or -1)
 	OP_COUNT,
 
 	// Internal ops made by the decode-time rewriter (never in words)
@@ -116,7 +116,7 @@ static const int op_words[OP_COUNT] = {
 	[OP_END] = 0, [OP_FILL] = 2, [OP_MUL] = 3, [OP_MULS] = 3, [OP_ADD] = 3, [OP_ADDS] = 3,
 	[OP_DIV] = 3, [OP_DIVS] = 3, [OP_POW] = 3, [OP_MAX] = 3, [OP_COPY] = 2, [OP_SHAPE] = 4,
 	[OP_SVF] = 8, [OP_DREAD] = 2, [OP_DWRITE] = 2, [OP_HREAD] = 2, [OP_HWRITE] = 2,
-	[OP_MULADD] = 4, [OP_MULSADD] = 4, [OP_BIQUAD] = 7, [OP_FOUR_POLE] = 6,
+	[OP_MULADD] = 4, [OP_MULSADD] = 4, [OP_BIQUAD] = 7, [OP_FOUR_POLE] = 7,
 };
 
 // Sinc reads at delays shorter than the kernel's reach (taps newer than the
@@ -144,7 +144,7 @@ struct ins {
 	int st;            // index into the op's state table (shapers, SVFs, rings, histories)
 	float k;           // a float scalar operand
 	double kd[3];      // double operands (SVF parameters given as scalars)
-	int kreg[3];       // SVF parameter registers (-1: use kd)
+	int kreg[3];       // SVF parameter registers (-1: use kd; a four-pole's live drive in kreg[2])
 };
 
 struct shaper_state {
@@ -347,6 +347,15 @@ static void four_pole_read(struct four_pole_state *f, VALUE filter, const double
 	mb_dl_cache_init(&f->dcc, &f->args);
 	f->last_fc = NAN;
 	f->last_res = NAN;
+}
+
+// A live drive sample +d+ for the four-pole or diode ladder (as the run
+// kernels read their drive signals; delays-2).
+static inline void four_pole_drive(struct four_pole_state *f, double d)
+{
+	if (mb_fp_drive_update(&f->args, d, &f->inv_drive, &f->driven) && f->diode) {
+		mb_dl_drive_update(&f->dcc, &f->args);
+	}
 }
 
 // One sample through the four-pole or diode ladder (the run kernels' loop
@@ -846,8 +855,16 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 					biquad_read(&biquads[ibiquad++], obj, type, rate, sc[o[7] + 1]);
 				} else {
 					if (o[6] < 0 || o[6] + 14 > nscalars) rb_raise(rb_eArgError, "Bad loop four-pole scalars at word %zu", q);
+					if (o[7] >= 0) {
+						REG(o[7]);
+						p->kreg[2] = o[7];
+					}
 					p->st = (int)ifourpole;
 					four_pole_read(&fourpoles[ifourpole++], obj, sc + o[6]);
+					if (o[7] >= 0) {
+						// (a live drive starts linear, set by the first sample)
+						four_pole_drive(&fourpoles[p->st], 0.0);
+					}
 				}
 				break;
 			}
@@ -1039,6 +1056,9 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 		OPCASE(OP_FOUR_POLE) {
 			double fc = p->kreg[0] >= 0 ? R[p->kreg[0]] : p->kd[0];
 			double res = p->kreg[1] >= 0 ? R[p->kreg[1]] : p->kd[1];
+			if (p->kreg[2] >= 0) {
+				four_pole_drive(&fourpoles[p->st], R[p->kreg[2]]);
+			}
 			R[p->dst] = (float)four_pole_step(&fourpoles[p->st], fc, res, R[p->a]);
 			NEXT;
 		}

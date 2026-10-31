@@ -8,8 +8,10 @@ module MB
       #
       # The cutoff (Hz) and resonance (0..1) are numbers or graph nodes read
       # per sample, so envelopes, LFOs, and audio-rate filter FM all work.
-      # A Pitch (`800.hz`, `C5`) as the cutoff gives its frequency.  Nodes
-      # that end keep their last value.
+      # A Pitch (`800.hz`, `C5`) as the cutoff gives its frequency.  A drive
+      # node (delays-2: a knob turns lp4's drive without a rebuild) is read
+      # per sample too; a number drive is the filter's own.  Nodes that end
+      # keep their last value.
       class FourPole
         include GraphNode
         include SampleRateHelper
@@ -22,9 +24,15 @@ module MB
         # The cutoff and resonance: numbers or graph nodes.
         attr_reader :cutoff, :resonance
 
+        # A live drive (a graph node's sampler branch), or nil for the
+        # filter's own drive (a number).
+        attr_reader :drive
+
         # Filters +source+ with +filter+ (a MB::Sound::Filter::FourPole),
-        # whose cutoff and resonance are set by +cutoff+ and +resonance+.
-        def initialize(source, filter, cutoff:, resonance: 0.0)
+        # whose cutoff and resonance are set by +cutoff+ and +resonance+,
+        # and its drive by +drive+ if that is a node (a number sets the
+        # filter's drive).
+        def initialize(source, filter, cutoff:, resonance: 0.0, drive: nil)
           raise ArgumentError, "Filter must be a MB::Sound::Filter::FourPole (got #{filter.class})" unless filter.is_a?(MB::Sound::Filter::FourPole)
 
           @source = source.get_sampler
@@ -34,7 +42,12 @@ module MB
 
           @cutoff = self.class.param(cutoff, 'Cutoff', pitch: true)
           @resonance = self.class.param(resonance, 'Resonance')
-          [@cutoff, @resonance].each { |p| check_rate(p) }
+          @drive = drive.nil? ? nil : self.class.param(drive, 'Drive')
+          if @drive.is_a?(Numeric)
+            @filter.drive = @drive
+            @drive = nil
+          end
+          [@cutoff, @resonance, @drive].compact.each { |p| check_rate(p) }
 
           @filter.cutoff = @cutoff if @cutoff.is_a?(Numeric)
           @filter.resonance = @resonance if @resonance.is_a?(Numeric)
@@ -70,7 +83,7 @@ module MB
         end
 
         def sources
-          { input: @source, cutoff: @cutoff, resonance: @resonance }.select { |_, v| v.respond_to?(:sample) }
+          { input: @source, cutoff: @cutoff, resonance: @resonance, drive: @drive }.select { |_, v| v.respond_to?(:sample) }
         end
 
         def sample(count)
@@ -82,10 +95,11 @@ module MB
 
           cutoff = read(:cutoff, @cutoff, count)
           resonance = read(:resonance, @resonance, count)
+          drive = @drive ? read(:drive, @drive, count) : @filter.drive
 
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
           @buf[0..] = data # a copy, so shared (frozen) inputs are never written
-          @filter.dynamic_process(@buf.inplace!, cutoff: cutoff, resonance: resonance).not_inplace!
+          @filter.dynamic_process(@buf.inplace!, cutoff: cutoff, resonance: resonance, drive: drive).not_inplace!
         end
 
         # Sets the filter state as if +value+ had been the input for a long
@@ -100,11 +114,12 @@ module MB
         def plan_describe(p)
           a = p[@source]
           a = a.real if a.complex?
-          p.four_pole(@filter, a, cutoff: plan_param(p, :cutoff, @cutoff), resonance: plan_param(p, :resonance, @resonance))
+          p.four_pole(@filter, a, cutoff: plan_param(p, :cutoff, @cutoff), resonance: plan_param(p, :resonance, @resonance),
+                      drive: @drive && plan_param(p, :drive, @drive))
         end
 
         def plan_inputs
-          [@source, @cutoff, @resonance].select { |v| v.respond_to?(:sample) }
+          [@source, @cutoff, @resonance, @drive].select { |v| v.respond_to?(:sample) }
         end
 
         # Called by a region when the optional boundary input +source+ (a
@@ -166,15 +181,16 @@ module MB
             known = GraphNode::Traversable.describe_param(v).value
             next known.to_f if known.is_a?(Numeric)
             moving << key
-            (@last[key] || (key == :cutoff ? f.cutoff : f.resonance)).to_f
+            last_of(key).to_f
           }
           cutoff = value.(:cutoff, @cutoff)
           resonance = value.(:resonance, @resonance)
+          drive = @drive ? value.(:drive, @drive) : f.drive
           word = f.mode == :lp4 ? 'lp4' : f.diode? ? 'diode' : "lp4 #{f.mode}"
           {
             kind: :four_pole, mode: f.mode, cutoff: cutoff, resonance: resonance, tuning: f.tuning,
             resonance_curve: f.resonance_curve, normalize: f.normalize?, self_oscillate: f.self_oscillate?,
-            compensation: f.compensation, drive: f.drive, drive_mode: f.drive_mode, clip: f.clip,
+            compensation: f.compensation, drive: drive, drive_mode: f.drive_mode, clip: f.clip,
             sample_rate: @sample_rate.to_f, moving: moving.freeze,
             label: "#{word} #{moving.include?(:cutoff) ? '~' : ''}#{Plot::Panels.hz_text(cutoff)} reso #{moving.include?(:resonance) ? '~' : ''}#{format('%.3g', resonance)}#{f.tuning == :musical ? '' : " #{f.tuning}"}",
           }
@@ -188,12 +204,17 @@ module MB
           return value if value.is_a?(Numeric)
 
           node = Plan.origin(value)
-          return @last.fetch(key) { key == :cutoff ? @filter.cutoff : @filter.resonance } if @plan_ended&.key?(node)
+          return last_of(key) if @plan_ended&.key?(node)
 
           v = p.optional(value)
           v = v.real if v.complex?
           p.keep_last(v, @last, key)
           v
+        end
+
+        # A node parameter's last value, or before it gave one, the filter's.
+        def last_of(key)
+          @last.fetch(key) { key == :cutoff ? @filter.cutoff : (key == :drive ? @filter.drive : @filter.resonance) }
         end
 
         # A parameter's value for this buffer: a number, or the node's
@@ -203,7 +224,7 @@ module MB
           return value if value.is_a?(Numeric)
 
           data = value.sample(count)
-          return @last.fetch(key) { key == :cutoff ? @filter.cutoff : @filter.resonance } if data.nil? || data.empty?
+          return last_of(key) if data.nil? || data.empty?
 
           data = data.real if data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex)
           @last[key] = data[-1].to_f
