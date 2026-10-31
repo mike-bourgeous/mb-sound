@@ -62,8 +62,32 @@ RSpec.describe MB::Sound::Library::Bench do
       expect(bars.first(3).max - bars.first(3).min).to be < 1
       expect(bars.first(3)).to all(be_between(-18, -13))
       expect(bars[3]).to be < -45 # (the pad's release, then silence)
+      expect(data.map { |c| c[146_400...156_000].abs.max }.max).to be < 0.001 # (bar 2's slow arp rests on its fourth eighth)
       expect(data.map { |c| c[312_000..].abs.max }.max).to eq(0) # (dry: nothing rings past half a second into bar 4)
       expect(bench.effect_material(:mix).bpm).to eq(120)
+    end
+
+    # The maintainer, 2026-10-31: "a slower pluck arp instead of the fast
+    # arp currently on the bench for reverb tests" (mixed lengths), as the
+    # :arp material and bar 2 of the mix, at the mix's level
+    it 'plays the slow pluck arp four times as the arp material, about as loud as the mix' do
+      m = bench.effect_material(:arp)
+      expect(m.title).to eq('Pluck arp (slow, mixed lengths)')
+      expect([m.title, m.about].join).not_to match(/A7|arp_a7/)
+      steps = bench.arp_clip.steps
+      expect(steps.map(&:length)).to eq([1/8r, 1/8r, 1/4r, 1/8r, 1/8r, 1/4r]) # (one bar)
+      expect(steps.map(&:value)).to eq([MB::Sound::A3, MB::Sound::E4, MB::Sound::C5, nil, MB::Sound::G4, MB::Sound::E4].map { |n| n&.number })
+      data = bench.audio(:arp).to_a.map { |c| Numo::SFloat.cast(c) }
+      expect(data.length).to eq(2)
+      expect((data[0] - data[1]).abs.max).to eq(0)
+      expect(data[0].length).to be_between(384_000, 9 * 48_000) # (4 bars and the last note's release)
+      expect(MB::Sound.loudness(data).integrated).to be_within(1).of(-15.7)
+      # (the eighth rest, 1.0..1.25 s into each bar, is silent once the C5 rings out: a tail there is the effect's)
+      4.times do |b|
+        bar = b * 96_000
+        expect(data[0][(bar + 50_400)...(bar + 60_000)].abs.max).to be < 0.001
+        expect(data[0][bar...(bar + 12_000)].abs.max).to be > 0.3
+      end
     end
 
     it 'renders the shipped mix again from its graph (Bench.write_mix)', :slow do

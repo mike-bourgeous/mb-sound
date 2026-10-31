@@ -9,7 +9,7 @@
 # family and name (reverb.hall), or an entry name (dnb_reese); --find adds
 # what a find query matches.  Each preset renders on standard material
 # (Library::Bench, design/notes/library.md): effects on the audition mix
-# (4 bars: beat and bass, pluck, pad, silence), the A7 arp, the
+# (4 bars: beat and bass, pluck, pad, silence), a slow pluck arp, the
 # jungle break, and a saw pad (after a dry reference of each), instruments
 # on two phrases for their role and their genre template's phrase, kits on
 # two beats and a template beat.  Every render is matched to one loudness,

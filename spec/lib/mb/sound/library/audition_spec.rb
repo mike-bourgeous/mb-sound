@@ -1,7 +1,7 @@
 # `audition entry` (ui-scaffold-1, the library picker's `a` key): plays an
 # entry for a listen as player :audition, on CUE when the output has it,
 # else on MAIN under the set; every kind with a sound plays something
-# (effects and mastering chains on the Bench arp, envelopes shaping a
+# (effects and mastering chains on the audition mix, envelopes shaping a
 # triangle and noise).
 RSpec.describe(MB::Sound::Library::Audition, :aggregate_failures) do
   before { @sessions = [] }

@@ -29,9 +29,9 @@ module MB
         MIX_FILE = 'audition/effect_mix.flac'
 
         # The mix's part levels (gains on each part's graph: bars 1-3 at
-        # -15.6, -15.7, -15.6 LUFS; the whole -15.7 LUFS, -2.7 dBTP, about
-        # the A7 arp material's -16.6).
-        MIX_GAINS = { beat: 0.5, bass: 1.0, pluck: 0.91, pad: 1.1 }.freeze
+        # -15.6, -15.7, -15.6 LUFS; the whole -15.7 LUFS, -2.7 dBTP).  The
+        # pluck's gain also sets the :arp material's level.
+        MIX_GAINS = { beat: 0.5, bass: 1.0, pluck: 1.42, pad: 1.1 }.freeze
 
         # Phrases for instruments by role, two each (generic, written here,
         # in A minor at 120 BPM unless a material says otherwise), plus the
@@ -75,9 +75,9 @@ module MB
 
         module_function
 
-        # The dry audio materials (memoized per process: the pad renders
-        # once): +:arp+ (spec/test_data/arp_a7.flac four times, 120 BPM),
-        # +:break+ (breakbeat(:jungle) on both channels, at its own tempo),
+        # The dry audio materials (memoized per process: the pad and arp
+        # render once): +:arp+ (#arp_clip four times on the mix's pluck,
+        # 120 BPM), +:break+ (breakbeat(:jungle) on both channels, at its own tempo),
         # +:pad+ (two minor chords on a plain saw pad written here).  With
         # +files+ ({ key => path } of float WAVs, see Bench.write_materials)
         # they are read from those files instead, so another checkout
@@ -89,8 +89,7 @@ module MB
                           when :mix
                             Sample[mix_path].with(loop: nil)
                           when :arp
-                            arp = Sample[arp_path]
-                            Sample[arp.to_a.map { |c| Numo::SFloat.hstack([c] * 4) }]
+                            Sample[render_arp]
                           when :break
                             brk = MB::Sound.breakbeat(:jungle)
                             Sample[[brk.data(0), brk.data(0)]]
@@ -107,9 +106,9 @@ module MB
         # The effect audition mix's graph at 120 BPM, A minor, all dry (no
         # reverb or echo of its own, so an effect's tail is the effect's):
         # bar 1 a tr909 beat (kick on the beats, snare on 2 and 4, busy
-        # closed hats) and a funk_bass sixteenth riff, bar 2 a pluck
-        # arpeggio (dnb_pluck's voice without its echo and plate: a square
-        # through lp4 opened by a fast envelope), bar 3 the Bench's saw pad
+        # closed hats) and a funk_bass sixteenth riff, bar 2 the slow pluck
+        # arpeggio (#arp_clip on dnb_pluck's voice without its echo and
+        # plate: a square through lp4 opened by a fast envelope), bar 3 the Bench's saw pad
         # (#pad_graph) on an Am chord for a dotted half, bar 4 silence for
         # the effects' tails.  Built inside a render at 120 BPM
         # (Bench.render_mix).
@@ -119,10 +118,19 @@ module MB
           kit = s.grid(16, kick: 'x...x...x...x...', snare: '....x.......x...', closed_hat: 'x.xxx.xxx.xxx.xx')
           beat = Sequence::Kit.new(kit.rows.transform_values { |c| once(c, 1) })
           bass = s.seq(A1, R, A1, A2, R, A1, C2, R, A1, R, G1, R, E1, R, G1, A1).n16 | bar | bar | bar
-          pluck = bar | s.seq(A3, C4, E4, G4, A4, E4, C4, E4, A3, C4, E4, G4, C5, G4, E4, C4).n16 | bar | bar
+          pluck = bar | arp_clip | bar | bar
           pad = bar | bar | s.seq([A2, E3, A3, C4, E4], R.n8).n2.dotted.legato(1.0) | bar
           g = MIX_GAINS
           s.tr909(beat) * g[:beat] + s.preset(:funk_bass, midi: bass) * g[:bass] + pluck_graph(pluck) * g[:pluck] + pad_graph(pad) * g[:pad]
+        end
+
+        # The slow pluck arpeggio (the maintainer, 2026-10-31: "a slower
+        # pluck arp instead of the fast arp currently on the bench for
+        # reverb tests", mixed lengths): one bar at 120 BPM, eighths and
+        # quarters with an eighth rest, so a reverb's tail shows between
+        # notes.  Bar 2 of the mix, and the :arp material four times.
+        def arp_clip
+          MB::Sound.seq(A3.n8, E4.n8, C5.n4, R.n8, G4.n8, E4.n4)
         end
 
         # The mix's pluck voice (dnb_pluck's, dry): a square through a
@@ -159,11 +167,6 @@ module MB
           path
         end
 
-        # spec/test_data/arp_a7.flac in this checkout of mb-sound.
-        def arp_path
-          File.expand_path('../../../../../spec/test_data/arp_a7.flac', __dir__)
-        end
-
         # The pad material: Am to F, a bar each at 120 BPM, two detuned
         # saws through a gentle lowpass, slow attack and release.
         def pad_clip
@@ -177,6 +180,16 @@ module MB
             env = v.amp_env(0.35, 0.5, 0.85, 0.9, sensitivity: -6.db..0.db)
             ((v.hz.saw + v.hz.transpose(0.08).saw) * env * 0.12).filter(:lowpass, cutoff: 1800, quality: 0.7)
           }
+        end
+
+        # The arp material: #arp_clip four times (4 bars at 120 BPM) on the
+        # mix's pluck at its mix gain, dry, the same on both channels.
+        def render_arp
+          MB::Sound.with_seed(0) {
+            Bench.render_graph(bpm: 120, max_seconds: 9) {
+              MB::Sound.stereo(*Array.new(2) { pluck_graph(arp_clip.repeat(4)) * MIX_GAINS[:pluck] })
+            }
+          }[0]
         end
 
         def render_pad
@@ -215,8 +228,9 @@ module MB
               about: "mb-sound's 4-bar effect audition mix at 120 BPM: a tr909 beat with a funk_bass riff, a dnb_pluck arpeggio, a dnb_pad chord, then a silent bar for tails",
               bpm: 120, max_seconds: 12, source: -> { audio(:mix, files: files).node })
           when :arp
-            Material.new(key: :arp, title: 'A7 arp (arp_a7.flac x4)', about: 'spec/test_data/arp_a7.flac four times: a stereo Am7/Amaj7 triangle arp',
-              bpm: 120, max_seconds: 6, source: -> { audio(:arp, files: files).node })
+            Material.new(key: :arp, title: 'Pluck arp (slow, mixed lengths)',
+              about: "the audition mix's pluck arpeggio (A3 E4 C5, rest, G4 E4; eighths and quarters) four times at 120 BPM, dry",
+              bpm: 120, max_seconds: 12, source: -> { audio(:arp, files: files).node })
           when :break
             Material.new(key: :break, title: 'Jungle break', about: 'breakbeat(:jungle) once, on both channels, at its own tempo',
               bpm: MB::Sound.breakbeat(:jungle).bpm.round(2), max_seconds: 7, source: -> { audio(:break, files: files).node })
