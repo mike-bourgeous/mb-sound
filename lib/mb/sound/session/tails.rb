@@ -45,8 +45,10 @@ module MB
         # graph a rebuild or a new instrument replaced, ringing out under
         # the new one; it is never revived by a launch of its name (only by
         # an undo bringing that graph back) and not counted as the name's
-        # ringing player.
-        Ring = Struct.new(:stop_frame, :quiet, :sources, :capped, :active, :choke, :spill, keyword_init: true)
+        # ringing player.  +max_tail+ is the seconds after the stop when the
+        # cap fade begins (nil for Master::MAX_TAIL_SECONDS, Float::INFINITY
+        # for none; see #end_after).
+        Ring = Struct.new(:stop_frame, :quiet, :sources, :capped, :active, :choke, :spill, :max_tail, keyword_init: true)
 
         # Ends the players named +name+ once every node of +nodes+ (nodes
         # with #ended?: a file's GraphNode::Ringdown, a Synth playing a MIDI
@@ -58,18 +60,22 @@ module MB
         # the sleep grid (QuietRun::GRID session frames, the player read in
         # pieces ending there), so the ring-out starts on the same frame
         # whatever the buffer size; from there the player rings out like a
-        # stopped one (#follow_ring, capped after Master::MAX_TAIL_SECONDS)
-        # and is kept stopped when it sleeps.  Returns the number of players
-        # marked.
-        def end_after(name, nodes)
+        # stopped one (#follow_ring, capped after +max_tail+ seconds,
+        # Master::MAX_TAIL_SECONDS by default; Float::INFINITY for no cap,
+        # leaving the end to the render's own limit, as Library::Bench's
+        # effect renders do) and is kept stopped when it sleeps.  Returns
+        # the number of players marked.
+        def end_after(name, nodes, max_tail: Master::MAX_TAIL_SECONDS)
           nodes = nodes.to_a
           return 0 if nodes.empty?
           raise ArgumentError, "end_after needs nodes with #ended? (got #{nodes.reject { |n| n.respond_to?(:ended?) }.map(&:class).uniq.join(', ')})" unless nodes.all? { |n| n.respond_to?(:ended?) }
+          raise ArgumentError, "end_after's max_tail must be a positive number of seconds (got #{max_tail.inspect})" unless max_tail.is_a?(Numeric) && max_tail > 0
 
+          tail = max_tail == Master::MAX_TAIL_SECONDS ? nil : max_tail
           @render_lock.synchronize {
             @mutex.synchronize {
               list = @players.each_value.select { |p| p.name == name && p.ring.nil? }
-              list.each { |p| p.ends_after = nodes.dup.freeze }
+              list.each { |p| p.ends_after = nodes.dup.freeze; p.ends_tail = tail }
               list.length
             }
           }
@@ -119,7 +125,7 @@ module MB
           g = @master_gain.to_f
           loud = g > 0 && g != 1 ? QuietRun.float_at_least(QuietRun::QUIET / g) : QuietRun::QUIET_LOUD
           quiet = QuietRun.new((RING_QUIET_SECONDS * output.sample_rate).round, loud: loud, from: frame)
-          p.ring = Ring.new(stop_frame: frame, quiet: quiet, sources: [], capped: false, active: true, choke: false, spill: false)
+          p.ring = Ring.new(stop_frame: frame, quiet: quiet, sources: [], capped: false, active: true, choke: false, spill: false, max_tail: p.ends_tail)
           p.ends_after = nil
           quiet
         end
@@ -168,12 +174,16 @@ module MB
         end
 
         # Starts the cap fade of a ringing player if its tail reaches
-        # Master::MAX_TAIL_SECONDS before session frame +until_frame+.
+        # Master::MAX_TAIL_SECONDS (or its Ring's +max_tail+) before session
+        # frame +until_frame+.
         def cap_ring(p, until_frame, rate)
           ring = p.ring
           return if ring.capped || ring.stop_frame.nil?
 
-          cap_frame = ring.stop_frame + (Master::MAX_TAIL_SECONDS * rate).round
+          max_tail = ring.max_tail || Master::MAX_TAIL_SECONDS
+          return if max_tail == Float::INFINITY
+
+          cap_frame = ring.stop_frame + (max_tail * rate).round
           return if cap_frame >= until_frame
 
           ring.capped = true

@@ -5,7 +5,8 @@ module MB
         # What a preset plays on its Bench set (audition-1, 2026-10-30): a
         # +key+ (the group of the set and the argument of Entry#audition),
         # a +title+, the +bpm+ it plays at, +max_seconds+ (the render stops
-        # there, faded out, if the preset still rings), and +source+: a
+        # there, faded out, if the preset still rings; RING_SECONDS for the
+        # effect materials, whose renders ring out until quiet), and +source+: a
         # Proc giving a fresh dry stereo graph (effect materials) or a Clip
         # or Kit (instrument and kit phrases), +about+ for the item notes.
         Material = Data.define(:key, :title, :about, :bpm, :max_seconds, :source) do
@@ -226,17 +227,17 @@ module MB
           when :mix
             Material.new(key: :mix, title: 'Audition mix (beat and bass, pluck, pad, silence)',
               about: "mb-sound's 4-bar effect audition mix at 120 BPM: a tr909 beat with a funk_bass riff, a dnb_pluck arpeggio, a dnb_pad chord, then a silent bar for tails",
-              bpm: 120, max_seconds: 12, source: -> { audio(:mix, files: files).node })
+              bpm: 120, max_seconds: RING_SECONDS, source: -> { audio(:mix, files: files).node })
           when :arp
             Material.new(key: :arp, title: 'Pluck arp (slow, mixed lengths)',
               about: "the audition mix's pluck arpeggio (A3 E4 C5, rest, G4 E4; eighths and quarters) four times at 120 BPM, dry",
-              bpm: 120, max_seconds: 12, source: -> { audio(:arp, files: files).node })
+              bpm: 120, max_seconds: RING_SECONDS, source: -> { audio(:arp, files: files).node })
           when :break
             Material.new(key: :break, title: 'Jungle break', about: 'breakbeat(:jungle) once, on both channels, at its own tempo',
-              bpm: MB::Sound.breakbeat(:jungle).bpm.round(2), max_seconds: 7, source: -> { audio(:break, files: files).node })
+              bpm: MB::Sound.breakbeat(:jungle).bpm.round(2), max_seconds: RING_SECONDS, source: -> { audio(:break, files: files).node })
           when :pad
             Material.new(key: :pad, title: 'Saw pad (Am, F)', about: 'two detuned saws through a lowpass, Am then F, a bar each at 120 BPM',
-              bpm: 120, max_seconds: 8, source: -> { audio(:pad, files: files).node })
+              bpm: 120, max_seconds: RING_SECONDS, source: -> { audio(:pad, files: files).node })
           else
             raise Error, "no effect material #{key.inspect} (#{EFFECT_MATERIALS.join(', ')})"
           end

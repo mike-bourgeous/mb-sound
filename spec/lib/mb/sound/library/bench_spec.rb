@@ -171,6 +171,50 @@ RSpec.describe MB::Sound::Library::Bench do
     end
   end
 
+  describe 'effect renders ring out (bench-tails-1; the maintainer, 2026-10-31: "Until silent")' do
+    it 'run until the output stays below -90 dB for a second after the dry audio, unfaded, measured over the dry audio' do
+      hall = entry(:reverb, :hall)
+      m = bench.effect_material(:arp)
+      expect(bench::EFFECT_MATERIALS.map { |k| bench.effect_material(k).max_seconds }.uniq).to eq([bench::RING_SECONDS])
+      frames = bench.audio(:arp).length
+      raw = bench.render_raw(bench::Job.new(item: 'x', entry: hall, material: m, file: 'x'), raise_errors: true)
+      data = raw.data
+      last = data.map { |c| c.abs.ge(MB::Sound::QuietRun::QUIET).where.to_a.last }.max
+      expect(last).to be > frames + 7 * 48000 # (the old 12 s stop cut hall's tail at 3.8 s)
+      expect(data[0].length).to eq(last + 1 + 48000)
+      expect(raw.cut).to be(false)
+      expect(raw.frames).to eq(frames)
+
+      # Unfaded, and the same samples as a render to the cap without the
+      # early stop (what a --vs checkout without end_after's max_tail: does)
+      full, = MB::Sound.with_seed(0) { bench.render_graph(bpm: 120, max_seconds: data[0].length / 48000.0 + 0.5) { hall.(m.build.ringdown) } }
+      data.each_with_index { |c, i| expect((c - full[i][0...c.length]).abs.max).to eq(0) }
+      expect(bench.ring_end(full, frames)).to eq(data[0].length)
+
+      # The level comes from the arp's length (a long tail doesn't move
+      # it); the true peak from the whole file
+      lufs, peak = bench.measure(data, frames)
+      expect(raw.integrated).to eq(lufs)
+      expect(bench.measure(data.map { |c| c[0...frames].dup })[0]).to eq(lufs)
+      expect(bench.measure(data)[0]).to be < lufs - 0.1
+      expect(peak).to eq(bench.measure(data)[1])
+    end
+
+    it 'stop at the material\'s max_seconds, declicked, when the effect is still sounding' do
+      room = entry(:reverb, :room)
+      arp = bench.effect_material(:arp) # (its G4 plays at 1.4 s)
+      m = arp.with(max_seconds: 1.4)
+      data, cut = MB::Sound.with_seed(0) { bench.ring_render(room, m, bench.audio(:arp).length) }
+      expect(cut).to be(true)
+      expect(data[0].length).to eq(67200)
+      full, = MB::Sound.with_seed(0) { bench.render_graph(bpm: 120, max_seconds: 1.4) { room.(arp.build.ringdown) } }
+      fade = (bench::RING_CAP_FADE * 48000).round
+      expect((data[0][0...-fade] - full[0][0...-fade]).abs.max).to eq(0)
+      expect(data[0][-1].abs).to be < 1e-6
+      expect(full[0][-fade..].abs.max).to be > 0.01
+    end
+  end
+
   describe '.run, the set directory, and the notes read-back' do
     before(:context) do
       @root = Dir.mktmpdir('bench-', SpecTmp::ROOT)

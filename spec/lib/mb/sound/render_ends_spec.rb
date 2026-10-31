@@ -67,6 +67,28 @@ RSpec.describe('exact render ends', :aggregate_failures) do
     expect(data.length).to eq(data.abs.ge(MB::Sound::QuietRun::QUIET).where[-1] + 1 + 48000)
   end
 
+  it "caps a ring-down's tail at end_after's max_tail:, or leaves it to the render's limit" do
+    input_frames = MB::Sound.read('spec/test_data/arp_a7.flac')[0].length
+    stop = (input_frames / 800 + 1) * 800 # (the sleep grid frame after the input ended)
+    drone = ->(**opts) {
+      input = MB::Sound.file_input('spec/test_data/arp_a7.flac', channels: 1).ringdown
+      MB::Sound.bg(:script, input + 0.1.constant, fade: 0)
+      expect(MB::Sound::Session.current.end_after(:script, [input], **opts)).to eq(1)
+    }
+
+    capped = expect_exact { drone.(max_tail: 0.5) }
+    fade_end = stop + 24000 + (MB::Sound::Session::Master::TAIL_FADE_SECONDS * 48000).round
+    expect(capped[stop + 23000]).to be_within(1e-6).of(0.1)
+    expect(capped.length).to eq(fade_end) # (the cap fade ends the player)
+    expect(capped[-1].abs).to be < 1e-4
+
+    open = render_at(800, max_seconds: 12) { drone.(max_tail: Float::INFINITY) }[0]
+    expect(open.length).to eq(12 * 48000) # (past the default 10 s cap, unfaded)
+    expect(open[-1]).to be_within(1e-6).of(0.1)
+
+    expect { MB::Sound.render(MB::Sound::NullOutput.new(channels: 1, sleep: false), max_seconds: 0.1) { drone.(max_tail: 0) } }.to raise_error(ArgumentError, /max_tail/)
+  end
+
   it "drops a replaced master chain's tail on its exact frame" do
     expect_exact(bars: 3, bpm: 120) {
       MB::Sound.bg(:a, 0.1.constant.until(1.5))
