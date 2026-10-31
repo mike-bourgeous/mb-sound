@@ -26,7 +26,8 @@ module MB
       preset_family :sq80, kind: :instrument, label: 'SQ-80 patch',
         about: 'SQ-80-flavored voice patches: sq80(:flutter_pad), sq80(clip, :chop, cutoff: 900)',
         apply: ->(name, source = nil, **settings) { MB::Sound.sq80(source, name, **settings) },
-        code: ->(e) { "sq80(midi, #{e.name.inspect})" }
+        code: ->(e) { "sq80(midi, #{e.name.inspect})" },
+        document: ->(name) { :"sq80_#{name}" } # (listed as presets/sq80_glass etc.: L.inst.sq80_glass)
 
       preset :classic, tags: %i[keys formant],
         about: 'The voice as first built (bin/synths/sq80_voice.rb), an octave down: a formant wave, a SYNTH 3-style wave a few cents up, and a blipped PRIME an octave below them into a driven four-pole; 32nd-note filter chop and poly pressure flutter.',

@@ -56,7 +56,7 @@ RSpec.describe(MB::Sound::Arrangement::InstrumentPatch, :aggregate_failures) do
 
   it 'plays an SQ-80 patch, a genre patch, and a drum machine from the track clip' do
     {
-      MB::Sound::L.inst.sq80.classic => RIFF,
+      MB::Sound::Library.index.lookup(:sq80, :classic) => RIFF, # (the family entry; L.inst.sq80_classic is its document)
       :house_bass => RIFF,
       :tr909 => MB::Sound.grid(16, kick: 'x...x...').loop,
     }.each do |inst, clip|

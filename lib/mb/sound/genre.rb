@@ -249,7 +249,12 @@ module MB
           if GraphIO.find_preset(patch)
             MB::Sound.preset(patch, midi: source, **params) # (knob names bind there; see GraphIO's Loader)
           elsif Patches.respond_to?(patch)
-            Patches.public_send(patch, source, **knob_params(params, knob_names))
+            # (on a track, the settings the role leaves out become its
+            # knobs, :"bass/cutoff", as a preset's params do: TrackKnobs)
+            given = knob_params(params, knob_names)
+            entry = Library.index.lookup(:genre_patch, patch, note: false)
+            free = entry ? (Arrangement::TrackKnobs.entry_params(entry) || []) - given.keys : []
+            Patches.public_send(patch, source, **Arrangement::TrackKnobs.entry_knobs(entry, free), **given)
           elsif MB::Sound.respond_to?(patch)
             MB::Sound.public_send(patch, source, **knob_params(params, knob_names))
           else

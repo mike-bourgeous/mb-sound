@@ -191,6 +191,68 @@ module MB
         stab: [:instrument, %i[chord techno mono], 'A detuned saw stab (the Reese voice) with a drive knob'],
       }.freeze
 
+      # The settings of the patches that become a track's knobs
+      # (Arrangement::TrackKnobs; the maintainer, 2026-10-31: "Genre
+      # patches now"): { patch => { setting => [range, unit, description] } },
+      # the defaults the methods' own.  Only settings each patch reads as a
+      # signal and whose knob plays the same samples as the number until
+      # turned (measured: library-2's genre knob renders); left out: levels
+      # and gains (the track's level is the fader), lengths and tween ends
+      # (riser's bars, from, to: build-time), stab's drive (a softclip
+      # threshold read as a number), and resonance, reso, and
+      # filter_sustain, which read through a knob in float32 (-124 to -128
+      # dB off until turned).
+      PATCH_KNOBS = {
+        breaks: { cutoff: [200.0..16000.0, 'Hz', 'Lowpass after the grit'], grit: [0.0..1.0, nil, 'Sample-rate reduction to 30 kHz, mixed in'] },
+        rain: { density: [5.0..300.0, nil, 'Drops a second'] },
+        house_bass: {
+          cutoff: [40.0..2000.0, 'Hz', 'Four-pole cutoff before the envelope'], env: [0.0..6.0, 'oct', 'Filter envelope depth in octaves'],
+          body: [0.0..2.0, nil, 'Sine body under the saw'], sustain: [0.0..1.0, nil, 'Level after the decay'],
+          filter_decay: [0.01..2.0, 's', 'Filter envelope decay'],
+        },
+        acid: {
+          cutoff: [40.0..4000.0, 'Hz', 'Diode ladder cutoff before the envelope'], env_mod: [0.0..6.0, 'oct', 'Envelope depth in octaves'],
+          glide: [0.0..0.5, 's', 'Slide time'], drive: [0.0..4.0, nil, 'Ladder drive'],
+        },
+        roller: {
+          cutoff: [40.0..400.0, 'Hz', 'Sub lowpass'], noise: [0.0..2.0, nil, 'Noise tick level'],
+          tone: [4.0..64.0, nil, 'Tick bandpass, times the note'], room: [0.0..1.0, nil, 'Room on the part above 250 Hz'],
+        },
+        stab: { cutoff: [200.0..12000.0, 'Hz', 'Four-pole cutoff, wobbled by the LFO'] },
+      }.freeze
+
+      # The Params of patch +name+'s knob settings (PATCH_KNOBS), at the
+      # method's defaults ({} for patches without).
+      def self.patch_params(name)
+        knobs = PATCH_KNOBS[name] or return {}
+        defaults = patch_defaults(name)
+        knobs.to_h { |k, (range, unit, about)|
+          [k, MB::Sound::Param.declare(k, defaults.fetch(k).to_f, range: range, unit: unit, description: about)]
+        }
+      end
+
+      # The number defaults of patch +name+'s keywords ({ keyword =>
+      # number }), read from the method's definition with Prism (Ruby keeps
+      # no default values to read back), once.
+      def self.patch_defaults(name)
+        @patch_defaults ||= {}
+        @patch_defaults[name] ||= begin
+          file, line = Patches.method(name).source_location
+          tree = Prism.parse_file(file).value
+          node = nil
+          walk = ->(n) {
+            next if node || n.nil?
+            node = n if n.is_a?(Prism::DefNode) && n.name == name && n.location.start_line == line
+            n.compact_child_nodes.each(&walk)
+          }
+          walk.(tree)
+          (node&.parameters&.keywords || []).each_with_object({}) { |k, h|
+            v = k.respond_to?(:value) ? k.value : nil
+            h[k.name] = v.value if v.is_a?(Prism::IntegerNode) || v.is_a?(Prism::FloatNode)
+          }.freeze
+        end
+      end
+
       Library.index.define_family(
         :genre_patch, kind: :instrument, owner: Patches, about: 'Patches genre templates use where no preset fits',
         apply: ->(name, source = nil, **kw) { Patches.public_send(name, source, **kw) },
@@ -199,7 +261,7 @@ module MB
       PATCH_ENTRIES.each do |name, (kind, tags, about)|
         file, line = Patches.method(name).source_location
         Library.index.register(Library::Entry.new(
-          name: name, kind: kind, family: :genre_patch, tags: tags, about: about,
+          name: name, kind: kind, family: :genre_patch, tags: tags, about: about, params: -> { Genre.patch_params(name) },
           location: "#{file.delete_prefix(File.expand_path('../../..', __dir__) + '/')}:#{line}",
           builder: ->(source = nil, **kw) { Patches.public_send(name, source, **kw) }
         ))

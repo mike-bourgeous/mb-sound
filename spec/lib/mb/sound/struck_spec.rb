@@ -60,7 +60,7 @@ RSpec.describe(MB::Sound::Struck, :aggregate_failures) do
     expect(pl.graph(MB::Sound::L.kit.tr909).description).to eq('L.kit.tr909 playing a beat')
     # Other effects play on their Listening Bench material (audition-1);
     # sample edits still say what they are (ui-scaffold-1)
-    expect(pl.graph(MB::Sound::L.fx.hall).description).to eq('L.fx.hall on the A7 arp (its Bench material)')
+    expect(pl.graph(MB::Sound::L.fx.hall).description).to eq('L.fx.hall on the audition mix (beat and bass, pluck, pad, then its tail)')
     expect { pl.graph(MB::Sound::L.edit.s950) }.to raise_error(pl::Unplayable, /sample_edit .*nothing to play by itself/)
   end
 

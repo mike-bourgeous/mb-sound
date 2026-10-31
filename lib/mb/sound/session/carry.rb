@@ -51,12 +51,15 @@ module MB
         # (nodes of the new graph with state), +matched+ (of those, the
         # ones paired), +old_input+ (the replaced player's GraphNodeInput).
         # +uncarried+ counts the new graph's nodes with memory no carry
-        # moves (see .uncarried?) and the unfit pairs.
-        Plan = Data.define(:pairs, :adopts, :unfit, :synths, :stateful, :matched, :uncarried, :old_input, :sleepers) do
-          # True if every stateful node of the new graph has a partner and
-          # none holds uncarried memory (the swap can cut instead of
-          # crossfading).
-          def full? = matched == stateful && uncarried == 0
+        # moves (see .uncarried?) and the unfit pairs; +left+ the old
+        # graph's nodes with running state no new node took (an effect the
+        # rebuild took out or replaced: a track's `fx` swap, library-2), so
+        # the swap spills them (they ring out) rather than cut them off.
+        Plan = Data.define(:pairs, :adopts, :unfit, :synths, :stateful, :matched, :uncarried, :left, :old_input, :sleepers) do
+          # True if every stateful node of the new graph has a partner,
+          # none holds uncarried memory, and every old node with state was
+          # taken (the swap can cut instead of crossfading or spilling).
+          def full? = matched == stateful && uncarried == 0 && left == 0
 
           def to_s
             "#{matched}/#{stateful} stateful nodes, #{synths.length} synth#{'s' unless synths.length == 1}" \
@@ -162,9 +165,13 @@ module MB
           unfit = adopts.reject { |o, n| fits?(o, n) }
           adopts -= unfit
 
+          # Old nodes with state that nothing in the new graph took (their
+          # sound would end on the swap: spilled instead)
+          left = old_all.count { |x| !taken[x.__id__] && (stateful?(x) || uncarried?(x)) && !notes_side?(x) }
+
           Plan.new(pairs: pairs.freeze, adopts: adopts.freeze, unfit: unfit.freeze, synths: synths.freeze, stateful: stateful.length,
                    matched: (pairs + adopts + unfit).count { |_, x| in_all[x.__id__] },
-                   uncarried: all.count { |x| uncarried?(x) } + unfit.length, old_input: old_input, sleepers: sleepers.freeze)
+                   uncarried: all.count { |x| uncarried?(x) } + unfit.length, left: left, old_input: old_input, sleepers: sleepers.freeze)
         end
 
         # Every node of graph +roots+, once, with the owners of multi-output

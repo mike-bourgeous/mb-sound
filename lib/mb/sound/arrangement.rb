@@ -41,9 +41,15 @@ module MB
       # see #track's +lead_max:+).  Maintainer-approved 2026-10-11.
       ATTACK_LEAD_MAX = 1
 
-      Track = Struct.new(:name, :patch, :graph, :q, :fade, :clip, :lead, :nudge, :ahead, :lead_max, :capped, :clock, :clocked, :trigger, keyword_init: true) do
+      Track = Struct.new(:name, :patch, :graph, :q, :fade, :clip, :lead, :nudge, :ahead, :lead_max, :capped, :clock, :clocked, :trigger, :fx, keyword_init: true) do
         def patch?
           !patch.nil?
+        end
+
+        # The track's graph for +clip+: its patch, through its effect
+        # insert (+fx+, see Arrangement::Fx).
+        def build(clip)
+          Fx.apply(fx, patch.call(clip))
         end
 
         # +clip+ on the track's clock (the same clocked copy each time, so
@@ -62,6 +68,9 @@ module MB
       # stops ring out unless +others+ is :cut (tracks given :cut always
       # cut).
       Scene = Struct.new(:name, :values, :q, :fade, :others, :block, keyword_init: true)
+
+      # #track's +fx:+ when not given: the track keeps its effect insert.
+      KEEP_FX = Object.new.freeze
 
       # Values a scene can give a track besides clips.
       TRACK_STATES = [:on, :off, :cut, :keep, true, false, nil].freeze
@@ -263,9 +272,18 @@ module MB
       # +trigger: true+ makes it a trigger track (SidechainMethods#sidechain): heard
       # only by readers such as `duck(:name)`, never mixed (see
       # Session::Buses#route); +to:+ and +send:+ don't apply.
-      def track(name, *values, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, trigger: false, &patch)
+      def track(name, *values, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, trigger: false, fx: KEEP_FX, &patch)
         raise ArgumentError, "Track names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
         values = track_values(name, values, patch) or return nil
+        unless fx.equal?(KEEP_FX)
+          begin
+            fx = Fx.chain(fx, track: name)
+          rescue Fx::Error => e
+            return MB::Sound.live_error(e)
+          end
+          fx = nil if fx.empty?
+          raise ArgumentError, "track #{name.inspect}: fx: goes on a track with a patch or an instrument; a graph track's effects go in its graph" if fx && values[0]
+        end
         graph, clip, entry = values
         patch = InstrumentPatch.patch(entry) if entry
         check_quant(q) if q
@@ -311,7 +329,10 @@ module MB
         before = (entry || patch) && undo_state
         @mutex.synchronize {
           old = @tracks[name]
-          tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: clip || old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false, clock: clock, clocked: nil, trigger: !!trigger)
+          # (the effect insert stays through a new instrument or patch unless fx: is given)
+          kept = fx.equal?(KEEP_FX) ? (patch ? old&.fx : nil) : fx
+          tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: clip || old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false, clock: clock, clocked: nil, trigger: !!trigger,
+                                         fx: kept)
         }
         set_ahead(tr, graph) if graph || !lead.is_a?(Length::Attack)
         refresh_monitor(tr)
@@ -633,7 +654,9 @@ module MB
 
       # The Set state for undo (see Session#note_undo_extra).
       def undo_state
-        @mutex.synchronize { { clips: @tracks.transform_values(&:clip), patches: @tracks.transform_values(&:patch), scene: @current_scene, arms: (@arms || {}).dup } }
+        @mutex.synchronize {
+          { clips: @tracks.transform_values(&:clip), patches: @tracks.transform_values(&:patch), fx: @tracks.transform_values(&:fx), scene: @current_scene, arms: (@arms || {}).dup }
+        }
       end
 
       # Puts the Set state back (called by Session undo and redo).
@@ -642,6 +665,7 @@ module MB
           state[:clips].each { |n, c| @tracks[n].clip = c if @tracks[n] }
           # (a bound literal's undo: the patch before it; see LiteralBinding)
           state[:patches]&.each { |n, pt| @tracks[n].patch = pt if @tracks[n] && pt }
+          state[:fx]&.each { |n, f| @tracks[n].fx = f if @tracks[n] }
           @current_scene = state[:scene]
           @arms = state[:arms].dup if state[:arms]
         }
@@ -926,7 +950,7 @@ module MB
         graphs = (check ? 2 : 1).times.map {
           box = warm_sandbox
           boxes << box
-          Session.with_context(session: box) { tr.patch.call(clip) }
+          Session.with_context(session: box) { tr.build(clip) }
         }
 
         contained = check && (second = warm_nodes(graphs[1])) && warm_nodes(graphs[0]).each_key.none? { |n| second.include?(n) }
@@ -977,7 +1001,7 @@ module MB
         exercise = Sequence::Clip.new(events)
 
         box = warm_sandbox
-        graph = Session.with_context(session: box) { tr.patch.call(exercise) }
+        graph = Session.with_context(session: box) { tr.build(exercise) }
         box.add(graph, on: :now)
         bar = box.transport.frames_of(box.transport.bar_length, box.sample_rate).to_f
         (bar * WARM_UP_BARS / box.buffer_size).ceil.times { box.process_buffer }
@@ -1291,7 +1315,7 @@ module MB
           set_ahead(tr, graph)
           time = early(tr, musical) # (an attack lead is measured on the new graph)
           @session.add(graph, name: tr.name, start_time: time, fade: fade || 0, description: "#{tr.name}: #{name_of(clip)}",
-                       warm: -> { GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(clip) } }, carry: carry, clip: clip,
+                       warm: -> { GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.build(clip) } }, carry: carry, clip: clip,
                        spill: spill, full_now: full_now)
           @mutex.synchronize { tr.clip = clip } unless carry
         elsif @session.resumable?(tr.name)
@@ -1340,7 +1364,7 @@ module MB
       # phases, noise) are the replaced graph's and its voices continue
       # where those left off (sound-design-2).
       def build_patch(tr, clip, carry = false)
-        build = -> { GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(clip) } }
+        build = -> { GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.build(clip) } }
         saved = carry && @mutex.synchronize { @build_rngs[tr.name] }
         if saved
           rng, seed = saved

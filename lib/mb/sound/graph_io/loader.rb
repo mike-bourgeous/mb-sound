@@ -661,6 +661,7 @@ module MB
           @knob_nodes = {}
           @bound = {}
           @document.params.each do |name, spec|
+            spec[:given] = true if @overrides.key?(name) # (not a player's knob: TrackKnobs.follow_params)
             value = @overrides.fetch(name, spec[:value])
             decl = spec[:param]
             if decl && @overrides.key?(name) && header_number?(value) && !value.is_a?(Numeric) && MB::Sound::Param.type_of(value) == decl.type
@@ -964,6 +965,7 @@ module MB
           return @knob_nodes[name][0] if @document.params[name][:knob]
 
           c = @knobs[name].constant.named(name.to_s)
+          c.param_of = @document # (a named bg player's knob may take it over: TrackKnobs.follow_params)
           (@knob_nodes[name] ||= []) << c
           c
         end

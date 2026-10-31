@@ -29,7 +29,7 @@ RSpec.describe MB::Sound::Library::Bench do
       entries, skipped = bench.select(:instrument)
       expect(entries.map(&:family)).not_to include(:sq80)
       expect(entries.map(&:name).grep(/\Asq80_/)).to be_empty
-      expect(skipped.map { |e, _| e.name }).to include(:classic, :sq80_glass)
+      expect(skipped.map { |e, _| e.name }).to include(:sq80_classic, :sq80_glass) # (SQ-80 patches are listed as their documents)
       expect(bench.select('sq80.glass')[0].map(&:name)).to eq([:glass])
 
       entries, skipped = bench.select(:mastering)
@@ -44,8 +44,34 @@ RSpec.describe MB::Sound::Library::Bench do
   end
 
   describe 'materials' do
-    it 'gives effects the arp, the break, and the pad' do
-      expect(bench.materials_for(entry(:reverb, :hall)).map(&:key)).to eq(%i[arp break pad])
+    it 'gives effects the audition mix, the arp, the break, and the pad' do
+      expect(bench.materials_for(entry(:reverb, :hall)).map(&:key)).to eq(%i[mix arp break pad])
+    end
+
+    # The effect audition mix (maintainer, 2026-10-30): 4 bars at 120 BPM,
+    # beat and bass, a pluck arp, a pad, then a silent bar for tails,
+    # shipped in presets/ (rendered from mb-sound's own sounds)
+    it 'ships a 4-bar audition mix: three bars of sound, then one for tails' do
+      path = bench.mix_path
+      expect(path).to start_with(MB::Sound::GraphIO.library_presets_dir)
+      expect(File.size(path)).to be < 500_000
+      data = MB::Sound.read(path).map { |c| Numo::SFloat.cast(c) }
+      expect(data.length).to eq(2)
+      expect(data[0].length).to eq(384_000) # (4 bars at 120 BPM)
+      bars = (0...4).map { |b| MB::Sound.loudness(data.map { |c| c[(b * 96_000)...((b + 1) * 96_000)] }).integrated }
+      expect(bars.first(3).max - bars.first(3).min).to be < 1
+      expect(bars.first(3)).to all(be_between(-18, -13))
+      expect(bars[3]).to be < -45 # (the pad's release, then silence)
+      expect(data.map { |c| c[312_000..].abs.max }.max).to eq(0) # (dry: nothing rings past half a second into bar 4)
+      expect(bench.effect_material(:mix).bpm).to eq(120)
+    end
+
+    it 'renders the shipped mix again from its graph (Bench.write_mix)', :slow do
+      fresh = bench.render_mix
+      shipped = MB::Sound.read(bench.mix_path).map { |c| Numo::SFloat.cast(c) }
+      expect(fresh.zip(shipped).map { |a, b| (a - b).abs.max }.max).to be < 2.0 / 32768, # (16-bit FLAC)
+        'the shipped audition mix no longer matches its graph: if the sound change is meant, write it again ' \
+        '(bundle exec ruby -Ilib -e \'require "mb/sound"; MB::Sound::Library::Bench.write_mix\') and Bench the effects on it'
     end
 
     it 'gives instruments the phrases of their role, then their genre template phrase' do
@@ -75,8 +101,8 @@ RSpec.describe MB::Sound::Library::Bench do
     it 'plays the phrases and audio as finite graphs (Entry#audition)' do
       g = MB::Sound::L.fx.reverb.hall.audition(:break)
       expect(g.channel_count).to eq(2)
-      expect(MB::Sound::L.fx.reverb.hall.auditions).to eq(%i[arp break pad])
-      expect { MB::Sound::L.fx.reverb.hall.audition(:bass_riff) }.to raise_error(ArgumentError, /no :bass_riff material.*arp, break, pad/)
+      expect(MB::Sound::L.fx.reverb.hall.auditions).to eq(%i[mix arp break pad])
+      expect { MB::Sound::L.fx.reverb.hall.audition(:bass_riff) }.to raise_error(ArgumentError, /no :bass_riff material.*mix, arp, break, pad/)
     end
 
     it 'plays clip entries on their instrument' do
@@ -87,9 +113,9 @@ RSpec.describe MB::Sound::Library::Bench do
       expect((1..400).find { g.sample(800).nil? }).not_to be_nil # (finite: the loop plays twice)
     end
 
-    it 'makes `play L.fx.x` play the effect on the arp' do
+    it 'makes `play L.fx.x` play the effect on the audition mix' do
       g = MB::Sound::Library::Audition.playable(MB::Sound::L.fx.chorus.juno1)
-      expect(g.to_s).to include('on the A7 arp')
+      expect(g.to_s).to include('on the audition mix')
     end
   end
 
@@ -97,7 +123,7 @@ RSpec.describe MB::Sound::Library::Bench do
     it 'reaches the target, holds the ceiling, trims quiet tails, and fades cut ones' do
       loud = 110.hz.saw.sample(48000)
       quiet = Numo::SFloat.zeros(48000)
-      data, info = bench.match([Numo::SFloat.hstack([loud, quiet]), Numo::SFloat.hstack([loud, quiet])], cut: true)
+      data, info = bench.match([Numo::SFloat.hstack([loud, quiet]), Numo::SFloat.hstack([loud, quiet])], lufs: -20, cut: true)
       expect(info[:lufs]).to be_within(0.05).of(-20)
       expect(info[:cut]).to be(false) # the trim found the end
       expect(data[0].length).to eq(48000 + 12000)
@@ -105,10 +131,16 @@ RSpec.describe MB::Sound::Library::Bench do
       spiky = Numo::SFloat.zeros(96000)
       spiky[1000] = 1.0
       spiky[40000..] = 220.hz.sine.sample(56000) * 0.001
-      _, info = bench.match([spiky, spiky.dup])
+      _, info = bench.match([spiky, spiky.dup], lufs: -20)
       expect(info[:peak_bound]).to be(true)
       expect(info[:true_peak]).to be_within(0.05).of(-1)
       expect(info[:lufs]).to be < -20
+
+      # No target: as loud as the ceiling lets it go
+      _, info = bench.match([loud.dup, loud.dup])
+      expect(info[:true_peak]).to be_within(0.05).of(-1)
+      expect(info[:sets_level]).to be(true)
+      expect(info[:peak_bound]).to be(false)
 
       _, info = bench.match([Numo::SFloat.zeros(4800)] * 2)
       expect(info[:silent]).to be(true)
@@ -123,15 +155,35 @@ RSpec.describe MB::Sound::Library::Bench do
       @set = JSON.parse(File.read(File.join(@dir, 'set.json')))
     end
 
-    it 'renders a tiny family, each file matched to -20 LUFS within 0.5 LU' do
+    it 'renders a tiny family, every file matched to the loudest each reaches under the ceiling (maintainer, 2026-10-30: "Ceiling only")' do
       expect(@result.measures.length).to eq(3) # dry + default + eleven
       files = Dir[File.join(@dir, 'arp', '*.flac')].sort
       expect(files.map { |f| File.basename(f) }).to eq(%w[dry.flac squeeze_default.flac squeeze_eleven.flac])
-      files.each do |f|
+      target = @result.lufs
+      expect(@set['bench']['target_lufs']).to eq(target)
+      peaks = files.map { |f|
         l = MB::Sound.loudness(f)
-        expect(l.integrated).to be_within(0.5).of(-20), f
+        expect(l.integrated).to be_within(0.5).of(target), f
         expect(l.true_peak).to be <= -0.9
-      end
+        l.true_peak
+      }
+      expect(peaks.max).to be > -1.3 # (one sets the level: at the ceiling)
+      expect(@result.sets_level).not_to be_empty
+      expect(@result.measures.values.map(&:peak_bound)).to all(be(false))
+      expect(@set['summary']).to include(format('matched to %.1f LUFS integrated, the loudest every one reaches', target))
+    end
+
+    it 'defaults to the main checkout\'s tmp/listening, so worktree sets outlive the worktree' do
+      env = ENV.delete('MB_SOUND_BENCH_DIR')
+      main = described_class.main_checkout(bench.checkout_dir)
+      expect(main).not_to be_nil
+      expect(File.directory?(File.join(main, '.git'))).to be(true)
+      expect(bench.default_root).to eq(File.join(main, 'tmp', 'listening'))
+      ENV['MB_SOUND_BENCH_DIR'] = '/somewhere/else'
+      expect(bench.default_root).to eq('/somewhere/else')
+      expect(described_class.main_checkout('/')).to be_nil
+    ensure
+      ENV['MB_SOUND_BENCH_DIR'] = env
     end
 
     it 'writes the fields build_manifest.py and the Bench page read' do
@@ -154,7 +206,7 @@ RSpec.describe MB::Sound::Library::Bench do
       expect(eleven['variants'][0]['code']).to start_with('bpm 120; play L.fx.eleven.audition(:arp).at(')
       meta = @set['bench']['items'][eleven['id']]
       expect(meta['entry']).to include('family' => 'squeeze', 'name' => 'eleven', 'head_path' => 'L.fx.eleven')
-      expect(meta['measure']['lufs']).to be_within(0.5).of(-20)
+      expect(meta['measure']['lufs']).to be_within(0.5).of(@result.lufs)
     end
 
     it 'writes the console lines as Ruby that runs' do
@@ -213,17 +265,21 @@ RSpec.describe MB::Sound::Library::Bench do
       job = File.join(@root, 'jobs.json')
       eleven = @result.jobs.last
       File.write(job, JSON.generate(
-        lib: File.join(bench.checkout_dir, 'lib'), out: File.join(@root, 'before'), lufs: -20.0, ceiling: -1.0, format: 'flac',
+        lib: File.join(bench.checkout_dir, 'lib'), out: File.join(@root, 'before', 'raw'), ceiling: -1.0,
         files: { 'arp' => File.join(@dir, 'materials', 'arp.wav') },
         jobs: [{ item: eleven.item, family: 'squeeze', name: 'eleven', material: 'arp', file: eleven.file }, { item: 'x', family: 'squeeze', name: 'nope', material: 'arp', file: 'x' }]
       ))
-      expect { bench.run_job_file(job) }.to output(/L\.fx\.eleven .*LUFS.*\n.*nope arp: not here/).to_stdout
+      expect { bench.run_job_file(job) }.to output(/L\.fx\.eleven .*LUFS .*as rendered.*\n.*nope arp: not here/).to_stdout
       out = JSON.parse(File.read("#{job}.out.json"))
       expect(out['x']).to eq('missing' => true)
-      # Same inputs, same code: the same file as this checkout's render
+      # Same inputs, same code: the same file as this checkout's render,
+      # once matched to the set's loudness
+      raw = bench.raw_from(out[eleven.item], File.join(@root, 'before', 'raw'))
+      expect(raw.usable?).to be(true)
+      bench.finish_job(eleven, raw, File.join(@root, 'before'), lufs: @result.lufs, ceiling: -1.0, format: 'flac')
       a = MB::Sound.read(File.join(@root, 'before', "#{eleven.file}.flac"))
       b = MB::Sound.read(File.join(@dir, "#{eleven.file}.flac"))
-      expect((a[0] - b[0]).abs.max).to be < 1e-6
+      expect((a[0] - b[0]).abs.max).to be < 1e-4
     end
   end
 

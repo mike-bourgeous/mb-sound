@@ -8,19 +8,24 @@
 # instrument, kit), a head path (L.fx.reverb, L.inst.dnb, inst.dnb), a
 # family and name (reverb.hall), or an entry name (dnb_reese); --find adds
 # what a find query matches.  Each preset renders on standard material
-# (Library::Bench, design/notes/library.md): effects on the A7 arp, the
+# (Library::Bench, design/notes/library.md): effects on the audition mix
+# (4 bars: beat and bass, pluck, pad, silence), the A7 arp, the
 # jungle break, and a saw pad (after a dry reference of each), instruments
 # on two phrases for their role and their genre template's phrase, kits on
-# two beats and a template beat.  Every render is matched to one loudness
-# (-20 LUFS integrated, true peak at most -1 dBTP; renders the ceiling
-# holds back are marked peak-bound) and written into DIR/SET_ID/ with
+# two beats and a template beat.  Every render is matched to one loudness,
+# the loudest every one of them reaches with its true peak at most -1 dBTP
+# (--ceiling; --lufs matches to a loudness instead, turning down the
+# renders that would pass the ceiling), and written into DIR/SET_ID/ with
 # set.json and bench_set.py, the Listening Bench set (build_manifest.py
-# execs bench_set.py; nothing is published).  SQ-80 entries are skipped
-# unless named (no SQ-80 in demos).
+# execs bench_set.py; nothing is published).  DIR defaults to tmp/listening
+# in the repository's main checkout ($MB_SOUND_BENCH_DIR overrides), so sets
+# rendered in a worktree outlive it.  SQ-80 entries are skipped unless named
+# (no SQ-80 in demos).
 #
 # --vs REF renders the same presets in another checkout (a worktree path,
 # or a branch some worktree has checked out) as "before" variants, from
-# the same dry inputs, with this checkout's Bench code.
+# the same dry inputs, with this checkout's Bench code, matched with this
+# checkout's renders to one loudness.
 #
 # --notes reads an export of the Bench page's `notes` collection (a JSON
 # object of note documents, or an array of them) and prints, per preset,
@@ -48,7 +53,7 @@ MB::Sound.script(
   id: [nil, String, 'Set id (default presets-WHAT-DATE, -r2 ... when taken)'],
   title: [nil, String, 'Set title'],
   materials: [nil, String, '-m', 'Only these materials, comma-separated (arp, break, pad, bass_riff, template, ...)'],
-  lufs: [MB::Sound::Library::Bench::TARGET_LUFS, Float, 'Integrated loudness every render is matched to (LUFS)', -40.0..-6.0],
+  lufs: [nil, Float, 'Match every render to this loudness (LUFS; default: the loudest every render reaches under the ceiling)', -40.0..-3.0],
   ceiling: [MB::Sound::Library::Bench::CEILING, Float, 'Highest true peak after matching (dBTP)', -12.0..0.0],
   mp3: [false, 'Write 320 kbps MP3 instead of FLAC (smaller sets)'],
   vs: [nil, String, 'Also render in this checkout (a worktree path or a checked-out branch) as "before"'],

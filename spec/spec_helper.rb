@@ -72,6 +72,9 @@ require_relative 'support/spec_tmp'
 ENV['MB_SOUND_USER_PRESETS'] = File.join(SpecTmp::ROOT, 'user-presets')
 # (and UI notes, ui.note, go to one too)
 ENV['MB_SOUND_UI_NOTES'] = File.join(SpecTmp::ROOT, 'ui-notes')
+# (and Bench sets given no directory, which otherwise go to the main
+# checkout's tmp/listening: Library::Bench.default_root)
+ENV['MB_SOUND_BENCH_DIR'] = File.join(SpecTmp::ROOT, 'listening')
 require_relative 'support/spec_buffers'
 require_relative 'support/library_files'
 require_relative 'support/slow_tier'

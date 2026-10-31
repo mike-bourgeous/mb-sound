@@ -62,7 +62,8 @@ module MB
             on ['T'], :track, -1, help: 'the previous track', label: 't T'
             on ['v'], :voice, 1, help: "a kit's next voice", label: 'v V'
             on ['V'], :voice, -1, help: "a kit's previous voice", label: 'v V'
-            on ['P'], :view, help: 'the front panel (the knobs by section) or the sections', label: 'P'
+            on ['P'], :view, help: "the front panel or sections; F: a preset's fixed numbers", label: 'P F'
+            on ['F'], :fixed, help: "the front panel or sections; F: a preset's fixed numbers", label: 'P F'
             on ['p'], :plumbing, help: 'every node as chips, the hidden plumbing too (again: back)', label: 'p'
           end
 
@@ -94,6 +95,7 @@ module MB
           # What Enter does now, for the status line (the design's rule:
           # name Enter's action before it is pressed).
           def enter_hint(state)
+            return fixed_note(state) if fixed_cell?(state)
             if (pp = picked_param(state)) && !knob_of(state, pp)
               b = pp[2]
               return nil unless b
@@ -114,6 +116,7 @@ module MB
           # init voice's sync) is one `turn` line a step (each rebuilds the
           # track), never a held sweep; other knobs turn as in KnobTurns.
           def key_turn(state, step)
+            return fixed_note(state) if fixed_cell?(state)
             cell = picked(state)
             info = state[:snap]&.inspector
             return literal_turn(state, step) || super if cell.nil?
@@ -444,7 +447,7 @@ module MB
           # follows), Left/Right turn, Enter types or binds.
           def draw_panel(c, info, knobs, list, pick, state)
             keys = Inspect::SECTIONS.map { |sec| Inspect::SECTION_KEYS[sec] }.join(' ')
-            y = draw_header(c, info, state, "#{keys}  P sections")
+            y = draw_header(c, info, state, "#{keys}  P sections#{info.document ? "  F #{state[:fixed] ? 'hide' : 'show'} fixed" : ''}")
             if list.empty?
               text = info.voices.length > 1 ? "no knobs: the voice's settings are above (a kit's knob Hash: #{info.voice}: { decay: 0.4 }); P the sections" : 'no knobs or literals to show (P: the sections, p: every node)'
               c.text(0, y, c.fit(text, c.w), :dim)
@@ -626,6 +629,7 @@ module MB
           end
 
           def key_ask(state)
+            return fixed_note(state) if fixed_cell?(state)
             if (pp = picked_param(state)) && !knob_of(state, pp)
               name, _v, b = pp
               return "#{name}: driven by #{pp[1].detail || 'a node'}" unless b
@@ -709,6 +713,30 @@ module MB
             "#{state[:view]} view (P flips)"
           end
 
+          # F: a preset's fixed numbers as read-only panel cells, or not.
+          def key_fixed(state)
+            info = state[:snap]&.inspector
+            state[:fixed] = !state[:fixed]
+            state[:pick] = nil
+            return "#{info&.track || 'the track'} plays no preset: its literals are cells already (F shows a preset's numbers)" unless info&.document
+            state[:fixed] ? "#{info.document}'s fixed numbers shown, read-only (F hides them)" : "#{info.document}'s fixed numbers hidden (F shows them)"
+          end
+
+          # True if the picked panel cell is one of a preset's fixed numbers
+          # (shown read-only by F).
+          def fixed_cell?(state)
+            info = state[:snap]&.inspector or return false
+            return false unless info.document && state[:fixed] && view(state, info) == :panel
+            (pp = picked_param(state)) && !knob_of(state, pp) ? true : false
+          end
+
+          # The status line for a fixed number: what it is and what turns.
+          def fixed_note(state)
+            info = state[:snap]&.inspector
+            pp = picked_param(state)
+            "#{pp && pp[0]}: fixed in #{info&.document} (read-only; its params are #{info&.track}'s knobs; F hides these)"
+          end
+
           # p: the plumbing view (every node as chips) or back.
           def key_plumbing(state)
             state[:plumbing] = !state[:plumbing]
@@ -752,8 +780,11 @@ module MB
                 m = info.nodes[j]
                 shown_params(m).filter_map { |name, v|
                   # (counts stay out: read once while the patch builds, never knobs)
-                  # (and a preset's numbers: fixed in its document, its params are the knobs)
-                  [:param, name, v, j] if m.knob_of(name) || (!info.document && v.detail == Inspect::LITERAL && !Arrangement::LiteralBinding.count?(name, v.value))
+                  # (and a preset's numbers: fixed in its document, its params are the knobs;
+                  # F shows them as read-only cells: the maintainer, 2026-10-30: "Toggle")
+                  next [:param, name, v, j] if m.knob_of(name)
+                  next unless v.detail == Inspect::LITERAL && !Arrangement::LiteralBinding.count?(name, v.value)
+                  [:param, name, v, j] if !info.document || state[:fixed]
                 }
               }
             else

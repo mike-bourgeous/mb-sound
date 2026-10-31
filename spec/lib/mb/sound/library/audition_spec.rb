@@ -51,12 +51,24 @@ RSpec.describe(MB::Sound::Library::Audition, :aggregate_failures) do
       expect(s.cue_heard?).to eq(true)
       r = MB::Sound.audition(MB::Sound::L.fx.reverb.hall)
       expect(r.where).to eq(:cue)
-      expect(r.to_s).to include('on the A7 arp (its Bench material), on CUE')
+      expect(r.to_s).to include('on the audition mix (beat and bass, pluck, pad, then its tail), on CUE')
       s.process_buffer
       expect(s.players.keys).to eq([:"audition/cue"])
       MB::Sound.audition(:off)
       4.times { s.process_buffer }
       expect(s.players.keys).to be_empty
+    end
+  end
+
+  it 'starts on the next beat (maintainer, 2026-10-30)' do
+    s = session
+    MB::Sound::Session.with_context(session: s) do
+      MB::Sound.bg(:pulse, MB::Sound.seq(MB::Sound::C3).n4.loop.tone.sine.at(-30.db) * 1, on: :now)
+      5.times { s.process_buffer } # (0.083 s into the first beat at 120 BPM)
+      r = MB::Sound.audition(MB::Sound::L.inst.dnb.dnb_sub)
+      expect(r.change.to_s).to eq('bg :audition lands 1:2 (queued)')
+      expect(r.to_s).to include('on MAIN at -6 dB')
+      MB::Sound.audition(:off)
     end
   end
 

@@ -233,6 +233,11 @@ module MB
             opts[:lead_max] = tr.lead_max if tr.lead_max
             opts[:nudge] = tr.nudge if tr.nudge
             opts[:clock] = tr.clock if tr.clock
+            if tr.fx
+              # (the effect insert: library effects by name; Arrangement::Fx)
+              fxv = Arrangement::Fx.set_value(tr.fx)
+              fxv.nil? ? @problems << "track #{name.inspect}: its fx: has a block (set documents save library effects: fx: :hall)" : opts[:fx] = fxv
+            end
             opts.merge!(route_options(name, routes))
             if tr.trigger && tr.patch && (opts.keys - %i[q fade nudge]).empty?
               # A trigger track (SidechainMethods#sidechain): its patch as a block

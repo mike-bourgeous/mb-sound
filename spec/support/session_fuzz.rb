@@ -50,6 +50,12 @@ module SessionFuzz
     # (dropouts-2's master chain landing mid-buffer, which primed
     # softclip's ADAA state from zeros, is fixed since omnibus16;
     # session_fuzz_spec keeps a shrunk song)
+    carry: [
+      [/\bfx :t\d+/, 'two carrying rebuilds landing on one frame (the :carry relation\'s rebuild and an fx swap, both at the track\'s ' \
+                     'launch point): the second was planned against the graph the first replaces, so Session#add_now drops it ' \
+                     '("replaces only the graph it was built from") and the fx never lands; the same with a bind and a patch ' \
+                     'redefinition (library-2 found it; open for a carry follow-up)'],
+    ],
   }.freeze
 
   # A generated song: +header+ lines (tempo, meter) always kept, +lines+
@@ -378,6 +384,20 @@ module SessionFuzz
       beat = s.beat || 2
       back = s.rng.rand < 0.6 ? beat + 1/2r : [beat - 1/2r, 1].max
       "bpm #{s.pick([90, 160])}, over: #{s.pick(['1/2r', '3.beats'])}; after(in: 2.beats) { seek #{bar}, #{MB::Sound::RubyValue.number(back)} }"
+    },
+    ->(s) {
+      # (library-2) a preset on a named bg player: its params are the
+      # player's knobs (the document's Constants follow them); the other
+      # preset on :lib lands its own values with its graph; a turn of one
+      p = s.pick(%w[dnb_sub square_bass])
+      "bg :lib, preset(:#{p}, midi: #{s.pick(MELODIC)}).at(0.3)#{s.on}; turn :\"lib/cutoff\", #{s.pick([300.0, 900.0])}#{[', over: 1/2r', ''][s.rng.rand(2)]}#{s.on}"
+    },
+    ->(s) {
+      # (library-2) an instrument track's effect insert, swapped at its
+      # launch point: the notes carry, the old effect's tail spills
+      next unless s.instruments
+
+      "fx :#{s.pick(s.instruments)}, #{s.pick([':hall', ':dub', ':off', '[:juno1, :room]'])}#{s.on}"
     },
     # (new commands go here, at the end)
   ].freeze

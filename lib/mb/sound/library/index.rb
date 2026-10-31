@@ -77,6 +77,7 @@ module MB
           @code = {} # [family, name] => Entry (class presets and code registrations)
           @files_key = nil
           @files = [] # library-file entries of the file shelves, in search order
+          @pins = [] # pin lines of the file shelves (Library::Pins)
           @problems = []
           @warned = Set.new
           @documents = {} # path => [mtime, size, Entry]
@@ -87,9 +88,9 @@ module MB
         ### Families and registration (code)
 
         # Declares a family (see Family); returns it.
-        def define_family(name, kind:, about: nil, owner: nil, apply: nil, code: nil)
+        def define_family(name, kind:, about: nil, owner: nil, apply: nil, code: nil, document: nil)
           @lock.synchronize do
-            f = Family.new(name: name, kind: kind, about: about, owner: owner, apply: apply, code: code)
+            f = Family.new(name: name, kind: kind, about: about, owner: owner, apply: apply, code: code, document: document)
             old = @families[name]
             raise Collision, "family #{name.inspect} is declared twice (#{old.owner.inspect} and #{owner.inspect})" if old && old.owner && owner && !old.owner.equal?(owner)
             @families[name] = f
@@ -170,11 +171,15 @@ module MB
         # The winning entries (one per family and name), optionally only of
         # +kind+ or +family+; with +documents:+ (the default) the shelves'
         # graph documents too.  +shadowed: true+ includes the shadowed
-        # entries.
+        # entries.  Listings across families (no +family:+, documents
+        # included) leave out the shipped presets a shipped document
+        # stands for (Family#document: the SQ-80 patches, listed as their
+        # sq80_ documents).
         def entries(kind: nil, family: nil, documents: true, shadowed: false)
           all = all_entries(documents: documents)
           all = all.select { |e| e.kind == kind } if kind
           all = all.select { |e| e.family == family } if family
+          all = without_listed_documents(all) if documents && !family
           return all if shadowed
           seen = {}
           all.each { |e| seen[[e.family, e.name]] ||= e }
@@ -196,6 +201,13 @@ module MB
         # Names that shadow others: { [family, name] => [shadowed entries] }.
         def conflicts
           entries(shadowed: true).group_by { |e| [e.family, e.name] }.select { |_, l| l.length > 1 }.transform_values { |l| l.drop(1) }
+        end
+
+        # The `pin` lines of the file shelves (Library::Pins::Pin; collect
+        # writes them into a song's presets/pins.rb).
+        def pins
+          file_entries
+          @pins
         end
 
         # Problems found in shipped files and unreadable files: [message].
@@ -281,6 +293,7 @@ module MB
           @lock.synchronize do
             @files_key = nil
             @files = []
+            @pins = []
             @documents.clear
             @problems.clear
           end
@@ -300,17 +313,20 @@ module MB
             begin
               @problems.reject! { |p| p.start_with?('file ') }
               list = []
+              pins = []
               shelves.each do |shelf|
                 next unless shelf.dir && File.directory?(shelf.dir)
                 Library.library_files(shelf.dir).each do |path|
-                  list.concat(FileLoader.load(path, shelf: shelf))
+                  list.concat(FileLoader.load(path, shelf: shelf, pins: shelf.shipped? ? nil : pins))
                 rescue StandardError, ScriptError => e
                   problem(shelf, "file #{path}: #{e.message}")
                 end
               end
               @files = list.freeze
+              @pins = pins.freeze
               @files_key = key
               check_files(list)
+              check_pins(pins)
             ensure
               @loading = false
             end
@@ -334,6 +350,21 @@ module MB
         end
 
         private
+
+        # +list+ without the shipped class presets whose family names a
+        # shipped graph document in +list+ standing for them.
+        def without_listed_documents(list)
+          stand_ins = @families.values.select(&:document)
+          return list if stand_ins.empty?
+          shipped = nil
+          list.reject { |e|
+            next false unless e.shelf.shipped? && e.family != :preset
+            f = @families[e.family]
+            next false unless f&.document
+            shipped ||= list.select { |d| d.family == :preset && d.shelf.shipped? }.to_h { |d| [d.name, true] }
+            shipped.key?(f.document.call(e.name).to_sym)
+          }
+        end
 
         def document_entry(path, shelf)
           st = File.stat(path)
@@ -390,6 +421,23 @@ module MB
             next unless clash
             e.shelf.shipped? ? problem(e.shelf, "file #{clash}") : once(clash)
           end
+        end
+
+        # Warns (once each) for pins whose built-in has changed since it
+        # was pinned, or is gone (Library::Pins#change_warning).
+        def check_pins(pins)
+          pins.each do |pin|
+            msg = Pins.change_warning(pin, shipped_entry(pin.family, pin.name))
+            once(msg) if msg
+          end
+        end
+
+        # The shipped entry of +family+ and +name+ (a built-in graph
+        # document for :preset), or nil.
+        def shipped_entry(family, name)
+          return @code[[family, name]] unless family == :preset
+          path = Library.document_path(Library.builtin_shelf.dir, name)
+          path && document_entry(path, Library.builtin_shelf)
         end
 
         # A message if +entry+'s name is a tag or family word of another

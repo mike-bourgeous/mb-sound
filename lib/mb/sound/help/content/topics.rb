@@ -711,9 +711,20 @@ module MB
         `track :bass, L.inst.jungle_reese` again changes the instrument at
         its launch point (one undo step).  Track knobs take their params'
         full names (`:"bass/resonance"`); a short one (`:"bass/reso"`,
-        `/freq`, `/q`) finds it too, with a note.
+        `/freq`, `/q`) finds it too, with a note.  Genre patches' settings
+        become knobs the same way (`track :bass, L.inst.acid`:
+        `:"bass/cutoff"`), and so do a preset's params on a named player
+        (`bg :pad, preset(:dnb_pad, midi: riff)`: `:"pad/cutoff"`).
+
+        A track's effect insert follows its instrument: `track :keys,
+        :tine_piano, fx: L.fx.reverb.hall` (or a chain, `fx: [:juno1,
+        :hall]`).  `fx :keys, L.fx.dub` swaps it at the launch point, the
+        notes playing on and the old effect's tail ringing out (one undo
+        step); `fx :keys, :off` takes it out, `fx :keys` says what it is.
+        In `ui :sound` the library picker's Enter on an effect does this
+        for the inspected track.
       TEXT
-      commands :track, :tracks, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
+      commands :track, :tracks, :fx, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement
       see :flow, :knobs, :now, :library
       example 'two scenes' do
@@ -727,6 +738,11 @@ module MB
         track :try_bass, :dnb_sub, q: 1
         bg :try_bass, seq(A1, rest, A1, A2).n8.loop
         turn :"try_bass/cutoff", 80.0, over: 2
+      end
+      example 'an effect insert on a library instrument, swapped at the next bar', sound: false do
+        track :try_keys, :funk_keys, q: 1, fx: L.fx.hall
+        bg :try_keys, seq(A3, C4, E4, G4).n8.loop
+        fx :try_keys, L.fx.dub
       end
       example 'launch and tweak a clip' do
         track(:try_bass, q: 1) { |c| c.tone.saw.at(-10.db).lp4(500, resonance: 0.3) * c.amp_env }
@@ -1281,7 +1297,8 @@ module MB
         (`L.inst.reese` lists both Reeses, Tab shows what is left), and
         `.(sig)` uses it: `sig.then(&L.fx.hall)`.  Heads: `L.inst`,
         `L.fx`, `L.kit`, `L.seq`, `L.master`, `L.set`, `L.env`, `L.edit`,
-        `L.all`.
+        `L.mfx` (note effects), `L.analyze` (audio to notes or control),
+        `L.mod`, `L.all`.
 
         Entries come from shelves, searched in order: the session's racks,
         the project's presets/ (your song), the user shelf (a git
@@ -1290,16 +1307,19 @@ module MB
         lines: `reverb :big_plate, decay: 3.5, tags: %i[bright big]`,
         `instrument :keys do |midi| ... end`, `chain :dub do |sig| ...
         end`, `clip :walk, seq(A2, C3).n8.loop`.  `collect` copies the
-        presets a song used into its presets/, `promote :x, to: :user` a
-        song's preset onto your shelf.
+        presets a song used into its presets/ and pins the built-ins it
+        used (presets/pins.rb: the mb-sound version and a fingerprint of
+        each, so loading the song warns when one changed; `builtin: true`
+        copies them instead), `promote :x, to: :user` a song's preset onto
+        your shelf.
 
         Instruments play on tracks (`track :bass, L.inst.dnb.dnb_reese`;
         `help :sets`) and from `play L.inst.x` (a demo phrase).  Effects
         go after a sound: `sig.then(&L.fx.hall)`, or on a bus; `play
         L.fx.hall` plays a demo phrase through one.  `audition L.inst.x`
-        plays an entry as the player :audition: on CUE when the output has
-        it, else on MAIN 6 dB down; another replaces it, `audition off`
-        stops it.  In `ui :sound` the library picker (NAV l) does the same
+        plays an entry as the player :audition from the next beat: on CUE
+        when the output has it, else on MAIN 6 dB down; another replaces
+        it, `audition off` stops it.  In `ui :sound` the library picker (NAV l) does the same
         from the keys: / finds as you type, a auditions, Enter loads the
         entry into the inspected track at its launch point (knobs you
         turned carry), e puts the line on the console to edit.  The
@@ -1310,14 +1330,16 @@ module MB
         `struck :my_bell, resonator: :bell, decay: 8` makes another.
 
         Judging presets by ear: `L.fx.reverb.bench` renders every reverb on
-        the Listening Bench's material (the A7 arp, the jungle break, a saw
-        pad; instruments on phrases for their role and their genre
-        template's phrase), each matched to -20 LUFS, into a Bench set
+        the Listening Bench's material (the audition mix, the A7 arp, the
+        jungle break, a saw pad; instruments on phrases for their role and their genre
+        template's phrase), all matched to the loudest every render reaches
+        with its true peak at most -1 dBTP, into a Bench set
         folder (`bin/preset_bench.rb reverb` from a shell; `--vs master-ai`
         for before/after, `--notes` reads the verdicts back).
         `play L.fx.reverb.hall.audition(:break)` plays one of them;
         `.auditions` lists an entry's materials, and `play L.fx.hall`
-        plays an effect on the arp.
+        plays an effect on the audition mix (four bars: beat and bass, a
+        pluck arpeggio, a pad, then a silent bar for its tail).
       TEXT
       commands :find, :audition, :shelves, :save, :save!, :collect, :promote, :promote!, :struck
       note :library
@@ -1331,8 +1353,8 @@ module MB
       example 'a struck resonator from notes' do
         bg :try, struck(seq(C5, E5, G5, C6).n8.loop, :marimba).at(-12.db)
       end
-      example 'a plate reverb on the Bench arp' do
-        bg :try, L.fx.reverb.plate.audition(:arp).at(-14.db)
+      example 'a plate reverb on the audition mix' do
+        bg :try, L.fx.reverb.plate.audition(:mix).at(-17.db)
       end
     end
 

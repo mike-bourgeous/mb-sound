@@ -15,7 +15,7 @@ module MB
       module Picker
         # The heads in the order the picker shows them (Library::HEADS
         # with entries, then :all).
-        ORDER = %i[inst fx kit seq master env set edit notes listen mod].freeze
+        ORDER = %i[inst fx kit seq master env set edit mfx analyze mod].freeze
 
         # How long results are kept before the index is read again (a save
         # or a shelf change shows within this).
@@ -119,10 +119,12 @@ module MB
             return audition(entry) unless track
             Action.new(:run, "bg #{t}, #{path}.()", "#{track} plays #{entry.name} from its launch point")
           when :effect
+            # (a patch track's effect insert, at its launch point: Arrangement::Fx)
+            return Action.new(:run, "fx #{t}, #{path}", "#{track}'s effect becomes #{entry.name} at its launch point (its notes play on; undo takes it back)") if track && patch
             bus = entry.name.inspect
             feed = track ? "; feed #{t}, #{bus}, -12.db" : ''
             Action.new(:paste, "bus(#{bus}) { |sig| sig.then(&#{path}) }#{feed}",
-                       "effects go on a bus#{track ? " #{track} feeds" : ''} (or after the instrument in a patch block): the line onto the console to edit")
+                       "effects go on a bus#{track ? " #{track} feeds" : ''} (or a patch track's fx): the line onto the console to edit")
           when :master
             code = entry.family == :mastering ? "master #{entry.name.inspect}" : "master { |mix| mix.then(&#{path}) }"
             Action.new(:paste, code, 'a mastering chain ends the master: the line onto the console to edit')

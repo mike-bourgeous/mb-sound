@@ -150,7 +150,8 @@ module MB
         end
 
         # The graph the entry plays on its Listening Bench +material+ (see
-        # Library::Bench): an effect on :arp (default), :break, or :pad; an
+        # Library::Bench): an effect on :mix (default: the 4-bar audition
+        # mix), :arp, :break, or :pad; an
         # instrument on its role's phrases (`L.inst.dnb_reese.audition`,
         # `.audition(:template)`, its genre template's phrase); a kit on
         # :drums_beat or :drums_busy.  Finite, so `play` ends by itself:
@@ -204,8 +205,16 @@ module MB
       # presets they are, or nil), +apply+ (how a family preset is used:
       # called with the entry name and the arguments of Entry#call), and
       # +code+ (prints an entry's code form from the entry).
-      Family = Data.define(:name, :kind, :about, :owner, :apply, :code) do
-        def initialize(name:, kind:, about: nil, owner: nil, apply: nil, code: nil)
+      #
+      # +document+ (a Proc of a preset name, or nil) names the shipped graph
+      # document that stands for each of the family's shipped presets in
+      # listings (heads, find, a track's Symbol): SQ-80 patches are listed
+      # as their documents (L.inst.sq80_glass, with params that become
+      # track knobs), so `glass` under L.inst is the struck wine glass
+      # (maintainer, 2026-10-31: "Struck glass wins"); `sq80(:glass)` and
+      # the family's own lookups still read the class presets.
+      Family = Data.define(:name, :kind, :about, :owner, :apply, :code, :document) do
+        def initialize(name:, kind:, about: nil, owner: nil, apply: nil, code: nil, document: nil)
           raise ArgumentError, "Unknown entry kind #{kind.inspect} (#{KINDS.join(', ')})" unless KINDS.include?(kind)
           super
         end

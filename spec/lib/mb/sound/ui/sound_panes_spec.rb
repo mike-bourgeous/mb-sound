@@ -291,6 +291,33 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(again.nodes.reject.with_index { |_, i| i == again.node }).to eq(info.nodes.reject.with_index { |_, i| i == info.node })
     end
 
+    # The maintainer, 2026-10-30: "Toggle" (a preset's fixed numbers as
+    # read-only panel cells; library-2)
+    it 'shows a preset\'s fixed numbers as read-only panel cells while F is on' do
+      ui::Inspect.target = { track: :bass, node: nil }
+      snap = live_snap
+      pane = ui.panes.fetch(:inspector)
+      st = { title_in_rule: true, mode: true, view: :panel, snap: snap }
+      expect(snap.inspector.document).to eq('dnb_reese')
+      plain = pane.send(:pick_list, st, snap.inspector)
+      expect(plain.select { |e| e[0] == :param }).to all(satisfy { |e| snap.inspector.nodes[e[3]].knob_of(e[1]) }) # (knob cells only)
+      expect(draw(:inspector, snap, st, w: 100, h: 30)[0]).to include('F show fixed')
+      expect(key(:inspector, st, :fixed)).to eq("dnb_reese's fixed numbers shown, read-only (F hides them)")
+      shown = pane.send(:pick_list, st, snap.inspector)
+      fixed = shown - plain
+      expect(fixed).not_to be_empty
+      expect(fixed).to all(satisfy { |e| e[0] == :param && snap.inspector.nodes[e[3]].knob_of(e[1]).nil? })
+      expect(draw(:inspector, snap, st, w: 100, h: 30)[0]).to include('F hide fixed')
+      # A fixed cell is read-only: turns, Enter, and the status line say so
+      st[:pick] = shown.index(fixed.first)
+      note = /fixed in dnb_reese \(read-only; its params are bass's knobs; F hides these\)/
+      expect(key(:inspector, st, :turn, 0.05)).to match(note)
+      expect(key(:inspector, st, :ask)).to match(note)
+      expect(pane.enter_hint(st)).to match(note)
+      expect(key(:inspector, st, :fixed)).to eq("dnb_reese's fixed numbers hidden (F shows them)")
+      expect(pane.send(:pick_list, st, snap.inspector)).to eq(plain)
+    end
+
     it 'shows no node class names in any sound pane for the dnb_reese preset (omnibus15)' do
       ui::Inspect.target = { track: :bass, node: nil }
       first = live_snap

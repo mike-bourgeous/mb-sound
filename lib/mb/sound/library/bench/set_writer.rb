@@ -6,7 +6,8 @@ module MB
         # +dir+, the +jobs+, the +measures+ ({ item => Measure }), the
         # +before+ measures of a --vs run, the +skipped+ entries, +vs+, and
         # the +wall+ seconds.
-        Result = Data.define(:id, :dir, :jobs, :measures, :before, :skipped, :vs, :wall) do
+        # +lufs+ is the loudness the set was matched to.
+        Result = Data.define(:id, :dir, :jobs, :measures, :before, :skipped, :vs, :wall, :lufs) do
           # The entries benched.
           def entries = jobs.filter_map(&:entry).uniq
 
@@ -16,8 +17,12 @@ module MB
           # Items whose render raised (no file, not on the set).
           def failed = jobs.select { |j| measures[j.item]&.error }
 
-          # Items turned down to the ceiling (under the loudness target).
+          # Items turned down to the ceiling (under an explicit loudness).
           def peak_bound = jobs.select { |j| (m = measures[j.item]) && !m.missing? && m.peak_bound }
+
+          # Items at the ceiling at the set's loudness: those whose loudest
+          # sets the level of the set.
+          def sets_level = jobs.select { |j| (m = measures[j.item]) && !m.missing? && m.sets_level }
 
           # Megabytes of audio written (materials excluded).
           def megabytes
@@ -33,11 +38,12 @@ module MB
           # Lines for the end of a run.
           def summary
             lines = ["Bench set #{id}: #{entries.length} presets, #{measures.length} renders#{vs ? " (+ #{before.length} from #{vs})" : ''} in #{format('%.1f', wall)} s " \
-                     "(#{format('%.2f', per_render)} s each), #{format('%.1f', megabytes)} MB"]
+                     "(#{format('%.2f', per_render)} s each), #{format('%.1f', megabytes)} MB#{lufs ? format(', matched to %.1f LUFS', lufs) : ''}"]
             lines << "  #{dir}/bench_set.py (build_manifest.py: exec it; not published)"
             lines << "  failed, left out: #{failed.map { |j| "#{j.entry&.head_path} #{j.material.key} (#{measures[j.item].error})" }.join('; ')}" unless failed.empty?
             lines << "  silent, left out: #{silent.map { |j| "#{j.entry&.head_path} #{j.material.key}" }.join(', ')}" unless silent.empty?
             lines << "  peak-bound (under the target): #{peak_bound.map { |j| "#{j.entry&.head_path || 'dry'} #{j.material.key}" }.join(', ')}" unless peak_bound.empty?
+            lines << "  at the ceiling (they set the level): #{sets_level.map { |j| "#{j.entry&.head_path || 'dry'} #{j.material.key}" }.join(', ')}" unless sets_level.empty?
             lines << "  skipped: #{skipped.map { |e, r| "#{e.respond_to?(:head_path) ? e.head_path : e} (#{r})" }.join(', ')}" unless skipped.empty?
             lines.join("\n")
           end
@@ -53,7 +59,7 @@ module MB
         module_function
 
         # Writes +result+'s set.json and bench_set.py.  Returns the set Hash.
-        def write_set(result, title: nil, lufs: TARGET_LUFS, ceiling: CEILING, format: 'flac', what: nil, find: nil)
+        def write_set(result, title: nil, lufs: result.lufs, ceiling: CEILING, format: 'flac', what: nil, find: nil)
           set = set_hash(result, title: title, lufs: lufs, ceiling: ceiling, format: format, what: what, find: find)
           File.write(File.join(result.dir, 'set.json'), JSON.pretty_generate(set))
           File.write(File.join(result.dir, 'bench_set.py'), bench_set_py(result, set))
@@ -62,7 +68,7 @@ module MB
 
         # The set as build_manifest.py reads it (id, title, date, summary,
         # groups of items with variants) plus the `bench` metadata key.
-        def set_hash(result, title: nil, lufs: TARGET_LUFS, ceiling: CEILING, format: 'flac', what: nil, find: nil)
+        def set_hash(result, title: nil, lufs: result.lufs, ceiling: CEILING, format: 'flac', what: nil, find: nil)
           here = describe_checkout
           root = File.dirname(result.dir)
           groups = {}
@@ -95,12 +101,12 @@ module MB
         end
 
         def summary_text(result, lufs, ceiling, here)
-          s = "#{result.entries.length} presets on standard material, every render matched to #{format('%g', lufs)} LUFS integrated " \
-              "(true peak at most #{format('%g', ceiling)} dBTP; a render that would pass it is turned down and its note says so). "
-          s << 'Effects: the A7 arp, the jungle break, and a saw pad, after a dry reference of each. ' if result.entries.any? { |e| e.kind == :effect }
+          s = "#{result.entries.length} presets on standard material, every render matched to #{lufs ? format('%.1f', lufs) : '?'} LUFS integrated, " \
+              "the loudest every one reaches with its true peak at most #{format('%g', ceiling)} dBTP (the notes say which set it). "
+          s << 'Effects: the 4-bar audition mix (beat and bass, pluck, pad, a silent bar for tails), the A7 arp, the jungle break, and a saw pad, after a dry reference of each. ' if result.entries.any? { |e| e.kind == :effect }
           s << 'Instruments: two phrases for their role, then their genre template phrase. ' if result.entries.any? { |e| e.kind == :instrument }
           s << 'Kits: two beats, then a template beat. ' if result.entries.any? { |e| e.kind == :kit }
-          s << "Before = #{result.vs}, after = #{here[:branch]} (each matched on its own). " if result.vs
+          s << "Before = #{result.vs}, after = #{here[:branch]} (matched together). " if result.vs
           s << "Rendered by bin/preset_bench.rb (mb-sound #{here[:branch]} #{here[:commit]}). Listen for: which presets sound good as they are, " \
                "which need work (note what), and tags that fit (bright, dark, wide, ...)."
         end
@@ -129,7 +135,8 @@ module MB
         def level(m)
           return "failed (#{m.error})" if m&.error
           return 'silent' if m.nil? || m.silent
-          format('%.1f LUFS, %.1f dBTP, %+.1f dB%s%s', m.lufs, m.true_peak, m.gain, m.peak_bound ? ' (peak-bound: under the target to keep the ceiling)' : '',
+          format('%.1f LUFS, %.1f dBTP, %+.1f dB%s%s%s', m.lufs, m.true_peak, m.gain, m.peak_bound ? ' (peak-bound: under the target to keep the ceiling)' : '',
+            m.sets_level ? ' (at the ceiling: the loudest it reaches sets the level of the set)' : '',
             m.cut ? format(', cut at %.0f s and faded', m.seconds) : '')
         end
 

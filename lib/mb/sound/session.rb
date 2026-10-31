@@ -1373,7 +1373,7 @@ module MB
           if carried_from
             # (spill-over only where something can't carry: an unfit pair or
             # a kind that starts fresh; voices that changed alone crossfade)
-            if !carry.full? && carry.uncarried > 0 && spill && spillable?(carried_from)
+            if !carry.full? && (carry.uncarried > 0 || carry.left > 0) && spill && spillable?(carried_from)
               spiller = carried_from
               voices = carry.matched == carry.stateful
               Carry.apply(carry, give_back: voices)

@@ -18,9 +18,11 @@ module MB
     #   shelves; heads under MB::Sound::L (L.fx.reverb.hall)
     module Library
       # The head words under MB::Sound::L and the kinds they list (the
-      # word heads are provisional: maintainer, 2026-10-26).
+      # word heads are provisional: maintainer, 2026-10-26; `mfx` for note
+      # effects and `analyze` for audio-to-notes/control racks were `notes`
+      # and `listen` until library-2: maintainer, 2026-10-30).
       HEADS = {
-        inst: :instrument, fx: :effect, notes: :note_fx, listen: :listener, mod: :modulator,
+        inst: :instrument, fx: :effect, mfx: :note_fx, analyze: :listener, mod: :modulator,
         kit: :kit, seq: :clip, master: :master, set: :set, env: :envelope, edit: :sample_edit,
       }.freeze
 
@@ -285,6 +287,7 @@ require_relative 'library/entry'
 require_relative 'library/index'
 require_relative 'library/presettable'
 require_relative 'library/saving'
+require_relative 'library/pins'
 require_relative 'library/methods'
 require_relative 'library/heads'
 require_relative 'library/finder'

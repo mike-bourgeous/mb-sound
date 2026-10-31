@@ -12,7 +12,9 @@ RSpec.describe('bin/preset_bench.rb') do
     expect(text).to include('L.fx.room', 'arp', 'LUFS', 'Bench set pb-spec: 1 presets, 1 renders', 'bench_set.py')
     set = JSON.parse(File.read(File.join(root, 'pb-spec', 'set.json')))
     expect(set['groups'].flat_map { |g| g['items'] }.map { |i| i['id'] }).to eq(['pb-spec.reverb.room.arp'])
-    expect(MB::Sound.loudness(File.join(root, 'pb-spec', 'arp', 'reverb_room.flac')).integrated).to be_within(0.5).of(-20)
+    l = MB::Sound.loudness(File.join(root, 'pb-spec', 'arp', 'reverb_room.flac'))
+    expect(l.integrated).to be_within(0.5).of(set['bench']['target_lufs']) # (the loudest it reaches under -1 dBTP: alone, at the ceiling)
+    expect(l.true_peak).to be_within(0.15).of(-1)
   end
 
   it 'lists what would render' do
