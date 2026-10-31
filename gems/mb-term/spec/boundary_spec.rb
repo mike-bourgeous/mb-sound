@@ -78,13 +78,25 @@ RSpec.describe('mb-term boundary') do
     expect(problems).to eq([]), "mb-term reaches outside itself:\n#{problems.join("\n")}"
   end
 
-  # (Without Bundler: the parent repository's bundle loads mb-sound's gemspec,
-  # which defines MB::Sound::VERSION.)
+  # (Without Bundler too: a Ruby with nothing but the gem's lib/ on its
+  # load path.)
   it 'loads in a Ruby without mb-sound or Bundler, without warnings' do
     code = 'require "mb/term"; abort "MB::Sound defined" if defined?(MB::Sound); MB::Term::VT.new(2, 4).feed("x"); print MB::Term::Grid.new(2, 1, native: false).class'
     run = -> { IO.popen([RbConfig.ruby, '-W2', '-I', lib, '-e', code, err: %i[child out]], &:read) }
     out = defined?(Bundler) ? Bundler.with_unbundled_env(&run) : run.call
     expect(out).to eq('MB::Term::Cells')
+  end
+
+  # Its own Gemfile and lockfile (maintainer, 2026-10-30): a parent
+  # `bundle exec` leaves BUNDLE_GEMFILE at mb-sound's Gemfile unless the
+  # runner resets it (mb-sound's spec/gem_specs.rb does).
+  it 'runs under its own bundle when run by Bundler' do
+    skip 'not run by Bundler' unless defined?(Bundler)
+
+    gemfile = File.expand_path('../Gemfile', __dir__)
+    expect(Bundler.default_gemfile.to_s).to eq(gemfile)
+    expect(File).to exist("#{gemfile}.lock")
+    expect(Gem.loaded_specs.keys).not_to include('mb-sound')
   end
 
   it 'would catch a reference to mb-sound' do

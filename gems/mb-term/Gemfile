@@ -1,0 +1,7 @@
+# frozen_string_literal: true
+
+# mb-term's own bundle: its specs, bench, and standalone builds run from
+# this directory without mb-sound (mb-sound's Gemfile uses the gem by path).
+source 'https://rubygems.org'
+
+gemspec

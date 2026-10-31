@@ -183,9 +183,11 @@ full-screen programs (above).
 
 ## Running the specs
 
-The gem's specs run on their own (no mb-sound): from this directory,
-`bundle exec rspec` (it uses the parent repository's bundle), or `bundle
-exec rake spec:gems` from mb-sound's root.  `spec/boundary_spec.rb`
+The gem has its own Gemfile and lockfile, and its specs run on their own
+(no mb-sound): from this directory, `bundle install` once, then `bundle
+exec rake compile` (the C extension) and `bundle exec rspec`; or `bundle
+exec rake spec:gems` from mb-sound's root (which builds fast_term with
+mb-sound's extensions and runs the specs under this directory's bundle).  `spec/boundary_spec.rb`
 checks that the code reads only its own constants and Ruby's, requires
 only itself and the standard library, and loads in a Ruby without
 mb-sound or Bundler.

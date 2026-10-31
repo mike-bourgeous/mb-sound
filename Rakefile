@@ -435,15 +435,11 @@ end
 # MemcheckSelection.rakefile_section)
 
 # The specs of the gems in gems/ (mb-term: the terminal UI's generic
-# layers), each in its own rspec process from its own directory, so they run
-# without mb-sound loaded.  Returns true if they all pass.
-GEM_SPEC_DIRS = %w[gems/mb-term].freeze
-def run_gem_specs
-  GEM_SPEC_DIRS.all? do |dir|
-    puts "spec: #{dir}"
-    system('bundle', 'exec', 'rspec', chdir: File.join(__dir__, dir))
-  end
-end
+# layers), each in its own rspec process from its own directory with its own
+# bundle, so they run without mb-sound loaded (spec/gem_specs.rb).  Returns
+# true if they all pass.
+require_relative 'spec/gem_specs'
+def run_gem_specs = GemSpecs.run
 
 desc 'The suite in one rspec process (bundle exec rspec; the default task), after compiling'
 task spec: :compile do

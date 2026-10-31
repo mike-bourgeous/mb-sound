@@ -61,9 +61,6 @@ module MergeGate
     spec/merge_gate_spec.rb
   ].freeze
 
-  # The gems in gems/ whose specs run in their own processes.
-  GEM_DIRS = %w[gems/mb-term].freeze
-
   Selection = Struct.new(:merge, :ours, :theirs, :base, :worktree, :changed, :specs, :reasons, keyword_init: true)
 
   module_function
@@ -166,10 +163,8 @@ module MergeGate
   # Runs the gems' specs, each in its own directory and process.  Returns
   # true when they pass.
   def run_gem_specs
-    GEM_DIRS.select { |d| Dir.exist?(File.join(ROOT, d)) }.all? do |dir|
-      puts "merge:gate: #{dir} specs"
-      system('bundle', 'exec', 'rspec', chdir: File.join(ROOT, dir))
-    end
+    require_relative 'gem_specs'
+    GemSpecs.run(label: 'merge:gate')
   end
 
   # Selects and runs the gate (compiling is the rake task's prerequisite;
