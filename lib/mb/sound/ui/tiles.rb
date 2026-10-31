@@ -237,6 +237,7 @@ module MB
           relayout
           unless @repl_mode == :none
             r = repl_rect || MB::Term::Viewports::Rect.new(0, 0, [@cols, 20].min, [@rows - 1, 5].max)
+            UI::Completion.install_pry if @repl_mode == :thread # (a Pry of our own completes as the console's does)
             @host = MB::Term::Input::ReplHost.new(rows: r.h, cols: r.w, mode: @repl_mode, scrollback: @scrollback, ambiguous_width: @ambiguous,
                                         target: @context || TOPLEVEL_BINDING, pry: @pry_opts)
             @host.start

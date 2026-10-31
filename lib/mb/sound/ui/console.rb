@@ -133,6 +133,14 @@ module MB
 
         def self.install
           LibraryPopup.install # (find-as-you-type for L. chains: a Reline dialog)
+          install_pry
+        end
+
+        # The Pry part of .install: prepends this module to
+        # Pry::InputCompleter (also for the screen's own REPL thread,
+        # UI::Tiles; idempotent).
+        def self.install_pry
+          require 'pry'
           return unless defined?(::Pry::InputCompleter)
           ::Pry::InputCompleter.prepend(self) unless ::Pry::InputCompleter.ancestors.include?(self)
         end
@@ -183,8 +191,26 @@ module MB
           names = Completion.names_for(str.to_s, line || str.to_s)
           return names if names && Completion.contextual?(str.to_s, line || str.to_s)
 
+          # (Pry's completer evaluates the receiver before a dot, `Tie)` of
+          # `seq(Tie).n8<Tab>` too, and Ruby's parser warns about the half
+          # expression before the syntax error: pane_keys_spec seed 55214;
+          # a receiver that doesn't parse completes nothing there)
+          return names || [] unless Completion.receiver_parses?(str.to_s)
+
           rest = super
           names ? (names + rest).uniq : rest
+        end
+
+        # True unless +str+ (a word Reline completes) has a receiver before
+        # its last dot that isn't Ruby on its own (Pry's completer would
+        # evaluate it, e.g. `Tie)` from `seq(Tie).n8`).
+        def self.receiver_parses?(str)
+          receiver = str[/\A(.+)\.[^.]*\z/m, 1] or return true
+          receiver = receiver.delete_suffix('.') # (`a..b` ranges and `::` paths stay Pry's to judge)
+          return true if receiver.empty?
+          Prism.parse(receiver).errors.empty?
+        rescue StandardError
+          true
         end
 
         # True when +line+ names a command whose names complete +str+.
