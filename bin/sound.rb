@@ -2,16 +2,34 @@
 # Interactive sound environment.  Uses Pry within the MB::Sound module context.
 # See README.md for more info, including copyright and license.
 
-require 'rubygems'
-require 'bundler/setup'
+# Startup progress on a terminal: each step's name, then how long it took,
+# so a slow start shows where the time goes (nothing into pipes and logs)
+startup_began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+startup_shown = $stdout.tty? && ENV['TERM'] != 'dumb'
+startup_step = ->(label, &block) {
+  t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  if startup_shown
+    $stdout.print("#{label}...")
+    $stdout.flush
+  end
+  result = block.call
+  $stdout.puts(format(' %.2f s', Process.clock_gettime(Process::CLOCK_MONOTONIC) - t)) if startup_shown
+  result
+}
 
-require 'benchmark'
+startup_step.('Loading Pry') do
+  require 'rubygems'
+  require 'bundler/setup'
 
-require 'io/console'
-require 'pry'
-require 'pry-byebug'
+  require 'benchmark'
 
-Bundler.require
+  require 'io/console'
+  require 'pry'
+  require 'pry-byebug'
+end
+
+# Bundler.require loads mb-sound itself too (the Gemfile names its gemspec)
+startup_step.('Loading mb-sound') { Bundler.require }
 
 MB::U.sigquit_backtrace
 
@@ -36,8 +54,8 @@ MB::Sound::GraphNode::Tee.shared_check = :warn if MB::Sound::GraphNode::Tee.shar
 
 # Compile common node types before anything plays (YJIT is on via the shebang and MB::Sound::JIT),
 # and the dashboard band's painter (`ui`)
-MB::Sound.warm_up
-MB::Sound::UI.warm_up
+startup_step.('Warming up the sound engine') { MB::Sound.warm_up }
+startup_step.('Warming up the terminal UI') { MB::Sound::UI.warm_up }
 
 def clear
   STDOUT.write("\e[H\e[2J")
@@ -53,7 +71,8 @@ MB::Sound::TerminalInfo.query!
 
 # Console help (lib/mb/sound/help.rb): help, now, lesson; Pry's own help
 # moves to pry-help.  The welcome screen is a few lines and one random tip.
-require 'mb/sound/help'
+startup_step.('Loading console help') { require 'mb/sound/help' }
+puts format('Started in %.1f s', Process.clock_gettime(Process::CLOCK_MONOTONIC) - startup_began) if startup_shown
 MB::Sound::Help::Level.apply # the saved listening level becomes the monitor trim
 MB::Sound::Session::Cue::Prefs.apply # the saved phones blend (cue_mix 0.3, save: true)
 MB::Sound::Help.first_level_check # first launch only, in a terminal, with a sound card
@@ -111,25 +130,25 @@ end
 # An exception that ends the console writes a debug_dump (the take, the
 # session's state, the exception) before it prints
 begin
-Pry.start(
-  MB::Sound,
-  prompt: Pry::Prompt.new(:mb_sound, "The interactive sound environment's default prompt", [
-    # Pry's line counter, then the state only commands change: recording and
-    # armed tracks, the form's section or scene (MB::Sound::UI::Prompt and
-    # UI.prompt_status; MB::Sound::UI.prompt_status_enabled = false turns the
-    # state off); continuation lines get a dim prompt naming what is open
-    -> (obj, nest, pry) { MB::Sound::UI::Prompt.main(obj, nest, pry) },
-    -> (obj, nest, pry) { MB::Sound::UI::Prompt.continuation(pry.eval_string) },
-  ]),
-  # Typos and errors raised on purpose print as one line with suggestions;
-  # likely bugs keep a backtrace without Pry's frames (see
-  # MB::Sound::ErrorFormat; `wtf?` shows the last full backtrace)
-  exception_handler: ->(output, exception, _pry) {
-    output.puts(MB::Sound::ErrorFormat.console(exception, color: MB::Sound::ColorPolicy.color?(output)))
-  },
-  load_pry_byebug: false,
-  driver: PryByebugWorkaround
-)
+  Pry.start(
+    MB::Sound,
+    prompt: Pry::Prompt.new(:mb_sound, "The interactive sound environment's default prompt", [
+      # Pry's line counter, then the state only commands change: recording and
+      # armed tracks, the form's section or scene (MB::Sound::UI::Prompt and
+      # UI.prompt_status; MB::Sound::UI.prompt_status_enabled = false turns the
+      # state off); continuation lines get a dim prompt naming what is open
+      -> (obj, nest, pry) { MB::Sound::UI::Prompt.main(obj, nest, pry) },
+      -> (obj, nest, pry) { MB::Sound::UI::Prompt.continuation(pry.eval_string) },
+    ]),
+    # Typos and errors raised on purpose print as one line with suggestions;
+    # likely bugs keep a backtrace without Pry's frames (see
+    # MB::Sound::ErrorFormat; `wtf?` shows the last full backtrace)
+    exception_handler: ->(output, exception, _pry) {
+      output.puts(MB::Sound::ErrorFormat.console(exception, color: MB::Sound::ColorPolicy.color?(output)))
+    },
+    load_pry_byebug: false,
+    driver: PryByebugWorkaround
+  )
 rescue Exception => e # rubocop:disable Lint/RescueException (SystemExit and Interrupt pass)
   raise if e.is_a?(SystemExit) || e.is_a?(Interrupt)
   begin
