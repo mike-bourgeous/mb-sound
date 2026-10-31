@@ -188,7 +188,7 @@ module CarryCheck
     end
 
     module Hook
-      def apply(plan)
+      def apply(plan, **options)
         Recorder.note(plan)
         super
       end

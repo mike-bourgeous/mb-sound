@@ -10,7 +10,7 @@ RSpec.describe('Session::Carry over the shipped presets', :aggregate_failures) d
   after { MB::Sound.rewind }
 
   SWEEP_PRESETS = MB::Sound::Library.index.entries(kind: :instrument).select { |e| e.location.to_s.include?('/presets/') }.map(&:name).sort
-  SWEEP_FRAMES = 96_000 + 120_000 # (past the next note after the swap, where a sleeping voice wakes)
+  SWEEP_FRAMES = 160_000 # (past the next note after the swap at 144000, where a sleeping voice wakes)
 
   # Presets whose rebuilds may crossfade, with the reason (state no carry
   # moves yet).  Since carry-1's adoption every shipped preset is a cut, bit
