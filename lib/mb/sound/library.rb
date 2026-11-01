@@ -61,15 +61,18 @@ module MB
         end
 
         # The shelves in search order (SHELF_ORDER): the Session's racks,
+        # the running lesson's folder (while a lesson runs),
         # $MB_SOUND_PRESETS or else the project's presets/, the user shelf,
         # gems naming a shelf (metadata 'mb_sound_shelf', a directory in
         # the gem), mb-sound's built-ins.  The first match wins.
         #
         # Remembered until the working directory, the environment
         # ($MB_SOUND_PRESETS, $MB_SOUND_USER_PRESETS, $XDG_DATA_HOME,
-        # $HOME), or the bundle's gems change, or .reload!.
+        # $HOME), the running lesson, or the bundle's gems change, or
+        # .reload!.
         def shelves
-          key = [Dir.pwd, ENV['MB_SOUND_PRESETS'], ENV['MB_SOUND_USER_PRESETS'], ENV['XDG_DATA_HOME'], ENV['HOME'], Gem.loaded_specs.size]
+          lesson = GraphIO.lesson_presets_dir
+          key = [Dir.pwd, ENV['MB_SOUND_PRESETS'], ENV['MB_SOUND_USER_PRESETS'], ENV['XDG_DATA_HOME'], ENV['HOME'], Gem.loaded_specs.size, lesson]
           cached = @shelves
           return cached[1] if cached && cached[0] == key
 
@@ -78,6 +81,7 @@ module MB
           gems = gem_shelves
 
           list = [session_shelf]
+          list << Shelf.new(name: :lesson, dir: lesson, label: "lesson #{lesson}") if lesson
           env = ENV['MB_SOUND_PRESETS']
           if first != user
             name = !env.to_s.empty? && File.expand_path(env) == first ? :env : :project
@@ -91,16 +95,17 @@ module MB
           list
         end
 
-        # The shelf named +name+ (:env, :project, :user, :gem, :builtin;
-        # the first of that name), or nil.
+        # The shelf named +name+ (:lesson, :env, :project, :user, :gem,
+        # :builtin; the first of that name), or nil.
         def shelf(name)
           shelves.find { |s| s.name == name }
         end
 
-        # The shelf saves go to: $MB_SOUND_PRESETS, else the project's,
-        # else the user's (GraphIO.presets_dir).
+        # The shelf saves go to: the running lesson's (see
+        # GraphIO.lesson_presets_dir), else $MB_SOUND_PRESETS, else the
+        # project's, else the user's (GraphIO.save_dir).
         def save_shelf
-          shelves.find { |s| %i[env project user].include?(s.name) }
+          shelves.find { |s| %i[lesson env project user].include?(s.name) }
         end
 
         # The user shelf's directory: $MB_SOUND_USER_PRESETS, else the user

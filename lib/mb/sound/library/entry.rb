@@ -1,8 +1,8 @@
 module MB
   module Sound
     module Library
-      # A shelf the library reads entries from: +name+ (:session, :env,
-      # :project, :user, :gem, :builtin), +dir+ (its directory, or nil for
+      # A shelf the library reads entries from: +name+ (:session, :lesson,
+      # :env, :project, :user, :gem, :builtin), +dir+ (its directory, or nil for
       # the class presets and the Session's racks), and +label+ (for
       # listings: "project /x/presets", "gem my-sounds").  Shelves are
       # searched in SHELF_ORDER; the first match wins.
@@ -25,12 +25,14 @@ module MB
       end
 
       # Search order of the shelves: the Session's named racks (live
-      # definitions), $MB_SOUND_PRESETS, the project's presets/ (the song
-      # or album around the working directory), the user shelf (a git
-      # repository that every save commits to), gems that name a shelf
-      # in their metadata, then mb-sound's built-ins (class presets and
-      # its presets/ folder).
-      SHELF_ORDER = %i[session env project user gem builtin].freeze
+      # definitions), the folder of the lesson running in this console
+      # (only while it runs: a lesson's saves go there, never to your
+      # shelves; GraphIO.lesson_presets_dir), $MB_SOUND_PRESETS, the
+      # project's presets/ (the song or album around the working
+      # directory), the user shelf (a git repository that every save
+      # commits to), gems that name a shelf in their metadata, then
+      # mb-sound's built-ins (class presets and its presets/ folder).
+      SHELF_ORDER = %i[session lesson env project user gem builtin].freeze
 
       # What an entry is, musically: its scale.  Each kind has a head
       # under MB::Sound::L (see HEADS).  +generator+ is a clip generator

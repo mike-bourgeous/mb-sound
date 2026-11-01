@@ -95,6 +95,15 @@ module MB
 
       LESSONS = {}
 
+      # For lesson checks: what built the clip track +name+ plays (a
+      # Library::Generators::Built: the L.gen entry and the keywords it
+      # was given; the clip a `bg :track, clip` or scene gave it last), or
+      # nil.
+      def self.track_built(name)
+        tr = Session.current.arrangement.tracks[name] or return nil
+        Library::Generators.origin(tr.clip)
+      end
+
       # The lessons whose steps type a call to one of +names+, as [lesson
       # name, step number (from 1), steps] (the first such step of each),
       # for method pages' "Learn it in" (ux-1 item 26).
@@ -248,6 +257,10 @@ module MB
         # build, printing each step's title.  Returns self.
         def replay_to(n)
           n = n.clamp(0, @lesson.steps.length)
+          # (active while replaying, so the steps' saves and files go
+          # where they go when typed: #files_dir, #presets_dir)
+          was = LessonRunner.active
+          LessonRunner.active = self
           while @index < n
             s = step
             puts c(:dim, "replaying step #{@index + 1}: #{s.title}")
@@ -255,6 +268,8 @@ module MB
             advance
           end
           self
+        ensure
+          LessonRunner.active = was
         end
 
         # Where files the lesson's code makes without a path go while the
@@ -263,6 +278,13 @@ module MB
         # directory (Help.data_dir), so lessons never write next to the
         # performer's own takes.  Nil once the lesson is done.
         def files_dir = done? ? nil : File.join(Help.data_dir, 'lessons', @lesson.name.to_s)
+
+        # The lesson shelf while the lesson runs (files_dir/presets, nil
+        # once done): `save` writes there instead of your own shelf, and
+        # the library searches it first (GraphIO.lesson_presets_dir,
+        # Library.shelves), so a lesson's saved generators load back as
+        # `L.gen.l_beat` without littering your library.
+        def presets_dir = files_dir&.then { File.join(it, 'presets') }
 
         # Called after each console line: moves on when the step's check
         # passes; returns the text to print (or nil).
