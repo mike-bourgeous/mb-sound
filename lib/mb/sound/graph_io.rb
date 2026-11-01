@@ -67,7 +67,11 @@ module MB
       # (forms, tempo maps, and genre values printed whole Rationals as
       # Integers), rack `using` knob values exactly; older documents load
       # as before (`3r/4` and `3/4r` are the same Rational, and their
-      # Integers stay Integers).
+      # Integers stay Integers).  Format 8 (lib-gen-1, 2026-10-31) calls
+      # the library's generators: a clip or chain an L.gen or L.flow entry
+      # built prints as that call (`L.gen.techno_beat(seed: 3)`,
+      # `L.flow.techno_chain.()`), which older mb-sound can't read (it
+      # stops at the format line instead of an unknown name `L`).
       #
       # FORMATS names the change each version made, so loaders gate on a
       # name (GraphIO.since?) and branches adding versions touch only this
@@ -79,6 +83,7 @@ module MB
         5 => :typed_params,
         6 => :clip_shift,
         7 => :ruby_values,
+        8 => :library_calls,
       }.freeze
       FORMAT = FORMATS.keys.max
 

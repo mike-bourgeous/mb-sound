@@ -302,8 +302,17 @@ RSpec.describe MB::Sound::Library::Generators do
       expect(a.abs.max).to be > 0.01
       expect(b).to eq(a)
 
-      pad = MB::Sound::GraphIO.load("graph 7, name: \"p\"\nL.gen.chord_pad.().synth { |v| v.hz.sine * v.amp_env }\n")
+      pad = MB::Sound::GraphIO.load("graph #{MB::Sound::GraphIO::FORMAT}, name: \"p\"\nL.gen.chord_pad.().synth { |v| v.hz.sine * v.amp_env }\n")
       expect(pad).to be_a(MB::Sound::Synth)
+    end
+
+    it 'remember what built a clip or chain through garbage collection (an ObjectSpace::WeakMap would forget its values)' do
+      c = MB::Sound::L.gen.techno_beat(seed: 3)
+      m = MB::Sound::L.flow.techno_chain(seed: 3)
+      2.times { GC.start(full_mark: true, immediate_sweep: true) }
+      expect(gens.instrument(c)).to eq(:tr909)
+      expect(c.to_ruby).to eq('L.gen.techno_beat(seed: 3)')
+      expect(gens.origin(m).entry.name).to eq(:techno_chain)
     end
 
     it 'take keywords only, with did-you-mean for typos, and words with arguments call their entry' do

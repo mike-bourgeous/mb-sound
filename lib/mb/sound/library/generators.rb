@@ -62,9 +62,11 @@ module MB
           leap: 'The largest move, in scale steps',
         }.freeze
 
-        # Clips and sources built by entries => Built (identity-keyed and
-        # weak: an entry call never keeps what it built alive).
-        ORIGINS = ObjectSpace::WeakMap.new
+        # Clips built by entries => Built (keys weak: an entry call never
+        # keeps what it built alive; values strong: an ObjectSpace::WeakMap
+        # would let the Built go at the next GC; clips compare by identity).
+        # Sources keep theirs in @origin (they compare by their chains).
+        ORIGINS = ObjectSpace::WeakKeyMap.new
 
         # The repository root, for entry locations.
         ROOT = File.expand_path('../../../..', __dir__)
@@ -149,8 +151,11 @@ module MB
           result = GraphNode::Recipe.call(receiver, word, [], kwargs, nil) { MB::Sound.instance_exec(**values, &block) }
           check_result(entry, result)
           built = Built.new(entry, kwargs.dup.freeze)
-          ORIGINS[result] = built
-          result.instance_variable_set(:@origin, built) if entry.kind == :flow
+          if entry.kind == :flow
+            result.instance_variable_set(:@origin, built)
+          else
+            ORIGINS[result] = built
+          end
           result
         end
 
@@ -183,7 +188,8 @@ module MB
 
         # What built +obj+ (a Built), or nil.
         def origin(obj)
-          ORIGINS[obj]
+          return obj.instance_variable_get(:@origin) if obj.respond_to?(:form_next)
+          obj.is_a?(Sequence::Clip) ? ORIGINS[obj] : nil
         end
 
         # The instrument name a generator clip's entry plays on (see
@@ -223,9 +229,7 @@ module MB
           return copy unless built && built.entry.params.key?(:seed)
           kw = built.kwargs.merge(seed: seed)
           kw = kw.except(:seed) if built.entry.params[:seed].default == seed
-          b = Built.new(built.entry, kw.freeze)
-          ORIGINS[copy] = b
-          copy.instance_variable_set(:@origin, b)
+          copy.instance_variable_set(:@origin, Built.new(built.entry, kw.freeze))
           copy
         end
 
