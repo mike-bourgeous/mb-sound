@@ -6,6 +6,8 @@ module BufferSizeHelpers
 
   # Renders the node from +make+ for +seconds+ in buffers cycling through
   # +sizes+ (seeded and rewound, so every render builds the same graph).
+  # The output ends where the node ended (a short last buffer, or nil), if
+  # it ended sooner.
   def render_sizes(make, sizes, seconds)
     MB::Sound.rewind
     MB::Sound.seed(1)
@@ -21,10 +23,11 @@ module BufferSizeHelpers
 
       out ||= b.class.zeros(total)
       out[n...(n + b.length)] = b
-      n += c
+      n += b.length
       i += 1
+      break if b.length < c # (ended inside the buffer)
     end
-    [out, node]
+    [out && n < total ? out[0...n] : out, node]
   ensure
     MB::Sound.rewind
   end
@@ -40,7 +43,12 @@ module BufferSizeHelpers
     ref, node = render_sizes(make, [800], seconds)
     expect(ref.abs.max).to be > 0.01
     slow_tier(sizes).each do |s|
-      out, _ = render_sizes(make, s, s == [1] && one_sample_seconds ? [one_sample_seconds, seconds].min : seconds)
+      secs = s == [1] && one_sample_seconds ? [one_sample_seconds, seconds].min : seconds
+      out, _ = render_sizes(make, s, secs)
+      # Nodes that end do so on the same frame (fix-808-fuzz: drum kits
+      # ended on whole buffers, and this compared only the frames both
+      # renders had)
+      expect(out.length).to eq(ref.length), "at buffer sizes #{s}: #{out.length} frames, #{ref.length} at 800" if secs == seconds
       r = ref[0...out.length]
       if tolerance == 0
         diff = (out - r).ne(0).where.to_a

@@ -59,6 +59,28 @@ module MB
           c.split
         end
 
+        # Changes whose landing reads which players are playing, fading
+        # out, or stopped (a swap's target, a resume's stopped player, the
+        # stopped players a forget discards; see #state_change?).
+        STATE_KINDS = %i[swap resume forget].freeze
+
+        # True for a change whose action depends on the players' state
+        # where it lands (STATE_KINDS): the buffer splits on its frame, so
+        # what played before it (a fade-out ending, a cut stop) has retired
+        # there at any buffer size.  Changes land at the start of their
+        # span, so without the split a swap landing inside a buffer saw
+        # the players as they were at the buffer's start: a fade ending at
+        # the swap's frame had retired its player to the stopped list at
+        # 800-frame buffers (the fade ended with a buffer) but not at 367
+        # (fix-808-fuzz, SessionFuzz seed 28 of tempo-2: a tr808 track
+        # stopped with a fade, relaunched by its scene and swapped to
+        # `.ratchet(2)` in the same bar played the ratchet at 367 frames,
+        # since the swap fell through to the queued launch, and the plain
+        # kit at 800, where it swapped the stopped player).
+        def state_change?(c)
+          STATE_KINDS.include?(c.kind)
+        end
+
         def timeline_change?(c)
           c.kind == :seek || c.kind == :tempo || (c.kind == :restore && (c.subject == :timeline || c.subject == :tempo))
         end
@@ -237,7 +259,10 @@ module MB
         # of its time as launches land (carry-1: with the ceiling, a swap
         # between samples landed inside the first piece, so the state was
         # copied up to a buffer before the old graph stopped; SessionFuzz's
-        # :carry relation found it at 137.5 BPM).
+        # :carry relation found it at 137.5 BPM).  Changes reading the
+        # players' state (#state_change?: swaps, resumes, forgets) split on
+        # the floor sample too, so they land after the players that ended
+        # before them retired (fix-808-fuzz).
         #
         # Every such change in the span counts, not only the first: a
         # carrying swap split off on the floor sample before its time is
@@ -253,7 +278,7 @@ module MB
           i = 0
           while (c = @changes[i])
             i += 1
-            next unless (timeline_change?(c) || carry_change?(c)) && c.time > from
+            next unless (timeline_change?(c) || carry_change?(c) || state_change?(c)) && c.time > from
 
             to ||= Sequence::Transport.position_at(from, count, per_sample)
             break unless c.time < to # (the queue is in time order)

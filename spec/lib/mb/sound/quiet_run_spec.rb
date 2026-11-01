@@ -60,16 +60,4 @@ RSpec.describe(MB::Sound::QuietRun) do
       expect(r.sleep_due?(800)).to eq(true)
     end
   end
-
-  describe ':buffer mode' do
-    it 'counts quiet buffers on its own clock' do
-      r = q.new(1000, mode: :buffer)
-      expect(r.advance_buffer(600, true)).to eq(false)
-      expect(r.advance_buffer(600, false)).to eq(false)
-      expect(r.advance_buffer(400, false)).to eq(true)
-      expect(r).to be_done
-      r.reset(r.at)
-      expect(r).not_to be_done
-    end
-  end
 end

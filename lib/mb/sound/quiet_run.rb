@@ -17,20 +17,22 @@ module MB
     # - +:sample+ (buses, tails, ring-outs, a Synth's end, render ends,
     #   +wait+, script ring-downs, master spillover tails): right after the
     #   loud sample, so the run is frame-exact and the same at any buffer
-    #   size.  With a +grid+, the run completes only at grid frames
-    #   (buses sleep on Session frames that are multiples of GRID).
+    #   size (a drum voice's end, too).  With a +grid+, the run completes
+    #   only at grid frames (buses sleep on Session frames that are
+    #   multiples of GRID).
     # - +:cells+ (the grid sleepers: Synth lanes, sub-lanes, drum voices):
     #   at the start of the next grid cell, so the run counts whole silent
     #   cells of +grid+ frames; a sleeper falls asleep only at a grid point
     #   ending +window+ / +grid+ silent cells (and only if its nodes' idle
     #   checks agree, see NodeTraits), splitting its buffers there
     #   (#split_point), and resets the run where it wakes (#reset).
-    # - +:buffer+ (a drum voice's end): a buffer with any loud sample moves
-    #   the start to its end, counting on an internal clock (#advance_buffer),
-    #   deciding per buffer.  (Render ends, +wait+, the script ring-down,
-    #   and the master chain's spillover tail used it until session-2, the
-    #   maintainer's "Exact frame", 2026-10-31: they end on the exact frame
-    #   now, so files are the same length at any buffer size.)
+    #
+    # (A +:buffer+ mode decided per buffer: a buffer with any loud sample
+    # moved the start to its end.  Render ends, +wait+, the script
+    # ring-down, and the master chain's spillover tail used it until
+    # session-2, the maintainer's "Exact frame", 2026-10-31, and a drum
+    # voice's end until fix-808-fuzz; everything ends on exact frames now,
+    # so the mode is gone.)
     #
     # #advance is the ring-out form (delays, multitaps, networks, feedback
     # loops after their input ends): it finds the exact sample where the run
@@ -55,7 +57,7 @@ module MB
       # same frames are skipped at any buffer size.
       GRID = 800
 
-      MODES = %i[sample cells buffer].freeze
+      MODES = %i[sample cells].freeze
 
       # The smallest float magnitude counted as loud for "above +level+"
       # (a Float compared in double precision): float samples are above
@@ -85,8 +87,7 @@ module MB
 
       attr_reader :window, :mode, :grid, :quiet_from
 
-      # The run's internal clock (frames advanced by #advance and
-      # #advance_buffer).
+      # The run's internal clock (frames advanced by #advance).
       attr_reader :at
 
       # A run of +window+ frames (see the class description) whose quiet
@@ -246,24 +247,9 @@ module MB
         nil
       end
 
-      # The buffer form (see the class description): advances the internal
-      # clock over a buffer of +count+ frames that was +loud+ (true if any
-      # sample was).  Returns true once the run is complete.
-      def advance_buffer(count, loud)
-        @at += count
-        @quiet_from = @at if loud
-        @done = @at - @quiet_from >= @window
-      end
-
-      # True once #advance found the run's end, or #advance_buffer's run is
-      # complete.
+      # True once #advance found the run's end.
       def done?
         @done
-      end
-
-      # True if any of +length+ samples of +buf+ from +from+ is loud.
-      def loud?(buf, from = 0, length = buf.length - from)
-        !last_loud(buf, from, length).nil?
       end
 
       private

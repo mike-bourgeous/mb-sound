@@ -10,6 +10,17 @@ module MB
       # ends once every source has ended and the voice has been quiet (below
       # -90 dB) for QUIET_TIME (drum envelopes are retriggerable, so they
       # never end by themselves); looping clips and live MIDI play forever.
+      # The end is on an exact frame of the voice's own time, the same at
+      # any buffer size (#check_end): QUIET_TIME after the later of the
+      # frame where its last trigger input ended (Notes triggers end on
+      # their own grid after the stream's end, giving a short last buffer)
+      # and the sample after its last loud one, returning a short last
+      # buffer (fix-808-fuzz: it ended at the first whole buffer after
+      # QUIET_TIME of quiet buffers, so a one-shot grid's render was 25600
+      # frames at 800-frame buffers and 26424 at 367; SessionFuzz seed 42 of
+      # ux-notes-2).  Sources whose triggers never end while their Notes
+      # have (a stream without a known end) still count from the buffer
+      # where the Notes were seen ended.
       #
       # Idle skipping (+skip_idle: true+, the default): after SLEEP_TIME of
       # output within -120 dB (and with every node in its graph that has an
@@ -140,7 +151,10 @@ module MB
           @sample_rate = sample_rate.to_f
           @position = 0
           # (see #check_end and #sample_skipping)
-          @end_run = QuietRun.new(QUIET_TIME * @sample_rate, mode: :buffer)
+          @end_run = QuietRun.new(QUIET_TIME * @sample_rate)
+          @frame = 0 # (the voice's own time, for #check_end)
+          @input_ends = Array.new(@inputs.length) # (frames where inputs ended)
+          @notes_end = nil # (the frame after the buffer where the Notes were seen ended)
           @sleep_run = QuietRun.new(Synth::SKIP_GRID, loud: QuietRun::SILENCE_LOUD, mode: :cells, grid: Synth::SKIP_GRID)
           @sleeping = false
           @out = nil
@@ -165,8 +179,20 @@ module MB
           # (one reused Array of the inputs' buffers)
           bufs = @bufs
           bufs.clear
-          @inputs.each { |src, tap|
+          start = @frame
+          ends = @input_ends
+          i = 0
+          while i < @inputs.length
+            src, tap = @inputs[i]
             b = src.sample(count)
+            # Where the input ended (see #check_end); a seek may bring it
+            # back
+            len = b.nil? ? 0 : b.length
+            if len < count
+              ends[i] ||= start + len
+            else
+              ends[i] = nil
+            end
             b = zeros(count) if b.nil? || b.empty?
             # A source that ends inside this buffer (a one-shot clip whose
             # end is off the buffer grid) gives fewer samples; it sends no
@@ -175,7 +201,9 @@ module MB
             b = padded(b, count) if b.length < count
             tap.buffer = b
             bufs << b
-          }
+            i += 1
+          end
+          @frame = start + count
 
           if @skippable
             buf = sample_skipping(count, bufs)
@@ -188,7 +216,7 @@ module MB
             end
           end
 
-          check_end(buf)
+          check_end(buf, start)
         end
 
         # True while the voice skips its graph (see the class description).
@@ -232,7 +260,7 @@ module MB
           NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
         end
 
-        ADOPT_IVARS = %i[@position @end_run @sleep_run @sleeping @ended @slept].freeze
+        ADOPT_IVARS = %i[@position @end_run @sleep_run @sleeping @ended @slept @frame @input_ends @notes_end].freeze
 
         def sources
           s = { input: @graph }
@@ -263,17 +291,35 @@ module MB
 
         private
 
-        # Returns +buf+, or nil once the sources have ended and the voice has
-        # been quiet for QUIET_TIME (whole buffers: QuietRun's :buffer mode).
-        def check_end(buf)
-          return buf if @notes.empty? || !@notes.all?(&:ended?)
+        # Returns +buf+ (read from voice frame +start+), cut short where the
+        # voice ends, or nil if it ends at +start+ (see the class
+        # description): QUIET_TIME after the later of the frame where every
+        # input had ended (or, for inputs that don't end, the end of the
+        # buffer where the Notes were seen ended) and the sample after the
+        # last one at -90 dB or louder.
+        def check_end(buf, start)
+          return buf if @notes.empty?
 
-          if @end_run.advance_buffer(buf.length, @end_run.loud?(buf))
-            @ended = true
-            return nil
+          ended = @input_ends.all? ? @input_ends.max : nil
+          if ended.nil?
+            unless @notes.all?(&:ended?)
+              @notes_end = nil
+              return buf
+            end
+            ended = (@notes_end ||= start + buf.length)
           end
 
-          buf
+          run = @end_run
+          run.track(buf, start)
+          stop = MB::M.max(ended, run.quiet_from) + run.window.ceil
+          stop_at = start + buf.length
+          return buf if stop > stop_at
+
+          @ended = true
+          return nil if stop <= start
+          return buf if stop == stop_at
+
+          buf[0...(stop - start)]
         end
 
         # Samples the graph for +count+ samples while it may be skipped (see

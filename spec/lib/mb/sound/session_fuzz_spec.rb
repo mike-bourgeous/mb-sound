@@ -222,6 +222,32 @@ RSpec.describe('session fuzzing') do
           'raise "t1 played other clips after its relaunch" unless kept_t1.empty? || now.empty? || kept_t1.all? { |r| now.any? { |c| c.equal?(r) } } } }',
       ], 2,
     ],
+    # (fix-808-fuzz, tempo-2's seed 28: the swap landed inside a 367-frame
+    # buffer on the frame the fade ended, saw the faded player neither
+    # playing nor stopped, and swapped the scene's queued launch instead
+    # (the ratchet played at 367, the plain kit at 800); since parity-1's
+    # Kit#ratchet, the first transform such a swap could carry)
+    'a kit stopped with a fade, relaunched by its scene, and swapped on the fade end (seed 28)' => [
+      :buffer_size, ['bpm 120', 'knob :busy, 0.5'], [
+        'track(:t1, q: 1) { |kit| tr808(kit) * 0.5 }',
+        "scene :s1, t1: grid(8, kick: 'x.x.', hat: 'xxxx').loop, others: :keep",
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 3) { go :s1 }',
+        'at_bar(1, beat: 2) { stop :t1, fade: 1/4r }',
+        "at_bar(1, beat: 3) { swap :t1, grid(8, kick: 'x.x.', hat: 'xxxx').loop.ratchet(2) }",
+      ], 2,
+    ],
+    # (fix-808-fuzz, ux-notes-2's seed 42: drum voices ended on whole
+    # buffers, so the one-shot kit's render was 25600 frames at 800 and
+    # 26424 at 367; since session-2's exact render ends made the lengths
+    # count)
+    'a one-shot kit ending after its scene launches it (seed 42)' => [
+      :buffer_size, ['bpm 137.5', 'knob :busy, 0.5'], [
+        'track(:t1, q: 1) { |kit| tr808(kit) * 0.5 }',
+        "scene :s1, t1: grid(16, clap: '..x.'), others: :keep",
+        'at_bar(1) { go :s1, on: :now }',
+      ], 1,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil

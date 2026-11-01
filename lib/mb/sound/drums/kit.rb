@@ -63,9 +63,11 @@ module MB
           BufferHelper.zero(@buf)
 
           any = false
+          longest = 0
           @samplers.each do |name, s|
             data = s.sample(count)
             next if data.nil? || data.empty?
+            longest = data.length if data.length > longest
             next any = true if @silent.include?(name) # (played for its readers, never mixed)
 
             any = true
@@ -78,7 +80,11 @@ module MB
             end
           end
 
-          any ? @buf : nil
+          return nil unless any
+
+          # Voices end on exact frames (Voice#check_end): the kit ends with
+          # the last of them, inside the buffer if they all did
+          longest < count ? @buf[0...longest] : @buf
         end
 
         # True if swapping +clip+ (a Sequence::Clip) into this kit's clip
