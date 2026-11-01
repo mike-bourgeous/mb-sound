@@ -367,10 +367,25 @@ module MB
           File.expand_path('../../../presets', __dir__)
         end
 
-        # Directories searched for presets, in order (the save directory
-        # first, then the user directory, then mb-sound's own presets).
+        # The presets folder of the lesson running in this console
+        # (Help::LessonRunner#presets_dir), or nil.  While a lesson runs,
+        # saves go there and it is searched first (the lesson shelf), so a
+        # lesson's `save` never writes to your own shelf.
+        def lesson_presets_dir
+          defined?(MB::Sound::Help::LessonRunner) ? MB::Sound::Help::LessonRunner.active&.presets_dir : nil
+        end
+
+        # The directory saves go to: the lesson shelf while a lesson runs
+        # (.lesson_presets_dir), else .presets_dir.
+        def save_dir
+          lesson_presets_dir || presets_dir
+        end
+
+        # Directories searched for presets, in order (a running lesson's
+        # folder, the save directory, then the user directory, then
+        # mb-sound's own presets).
         def preset_dirs
-          [presets_dir, user_presets_dir, library_presets_dir].uniq
+          [lesson_presets_dir, presets_dir, user_presets_dir, library_presets_dir].compact.uniq
         end
 
         # The file of preset +name+ (the first found in .preset_dirs), or
@@ -573,8 +588,8 @@ module MB
 
         public
 
-        # The file GraphIO.save writes for +target+ (a preset name or a
-        # path).
+        # The file GraphIO.save writes for +target+ (a preset name, in
+        # .save_dir, or a path).
         def target_path(target)
           t = target.to_s
           if t.include?('/') || t.end_with?('.rb')
@@ -582,7 +597,7 @@ module MB
             File.expand_path(t)
           else
             raise ArgumentError, "preset names are words (got #{target.inspect})" unless t.match?(/\A[\w.-]+\z/) && !t.start_with?('.')
-            File.join(presets_dir, "#{t}#{EXTENSION}")
+            File.join(save_dir, "#{t}#{EXTENSION}")
           end
         end
       end

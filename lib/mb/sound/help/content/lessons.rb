@@ -297,6 +297,150 @@ module MB
       end
     end
 
+    # The material is bin/songs/generative_steer.rb's (D phrygian: the
+    # techno beat, the acid row, the phrygian motif).  Levels: library
+    # instruments play at full level, so each track gets one first (the
+    # beat's fill toms peak 6 dB over its bars).
+    Help.lesson :generative, 'Generative music from the library', minutes: 7 do
+      about 'L.gen generators on tracks: seeds, a knob steering them, a key that moves, a form that decides itself, and your own saved.'
+      needs :idle_set
+
+      step 'A bass line from the library' do
+        say <<~TEXT
+          `L.gen` lists the library's generators (beats, bass lines,
+          motifs, bells, pads; `L.gen.techno` the techno ones).  Each is a
+          preset with params; a track given one plays the looping clip it
+          builds, on the entry's own instrument: here an acid row walking
+          D phrygian.  Library instruments play loud, so set a level first.
+        TEXT
+        type do
+          track :l_bass, L.gen.acid_rhythm
+          level :l_bass, -18.db
+          bg :l_bass
+        end
+        check('L.gen.acid_rhythm playing on :l_bass') { Session.current.playing_after_queue?(:l_bass) && Help.track_built(:l_bass)&.entry&.name == :acid_rhythm }
+      end
+
+      step 'A beat' do
+        say <<~TEXT
+          `L.gen.techno_beat` evolves: an anchored kick and clap, drifting
+          ghost snares, mutating Euclidean hats, a fill every 8 bars.  It
+          plays on the TR-909 and joins at the next bar.
+        TEXT
+        type do
+          track :l_drums, L.gen.techno_beat
+          level :l_drums, -21.db
+          bg :l_drums
+        end
+        check('L.gen.techno_beat playing on :l_drums') { Session.current.playing_after_queue?(:l_drums) && Help.track_built(:l_drums)&.entry&.name == :techno_beat }
+      end
+
+      step 'Seeds' do
+        say <<~TEXT
+          A generator draws each bar from its seed and the bar's number, so
+          the same seed plays the same music every time (seeks and takes
+          too), and another seed is a variation of the same recipe.  `bg`
+          gives a track a new clip at its next bar; `L.gen.techno_beat.()`
+          is the default again.
+        TEXT
+        type { bg :l_drums, L.gen.techno_beat(seed: 3) }
+        check('the beat at seed 3') { Help.track_built(:l_drums)&.kwargs&.[](:seed) == 3 }
+      end
+
+      step 'A knob steers them' do
+        say <<~TEXT
+          Params like `energy:` take knobs, read once a bar just before it
+          starts, so a turn steers the next bar.  One knob drives both
+          parts: below 0.5 they thin out, above it they fill in (raising it
+          only adds hits).
+        TEXT
+        type do
+          knob :l_energy, 0.3
+          bg :l_drums, L.gen.techno_beat(seed: 3, energy: knob(:l_energy))
+          bg :l_bass, L.gen.acid_rhythm(energy: knob(:l_energy))
+          turn :l_energy, 0.9, over: 4.bars
+        end
+        check('both parts reading :l_energy') {
+          %i[l_drums l_bass].all? { |t| (k = Help.track_built(t)&.kwargs&.[](:energy)).is_a?(GraphNode::Knob) && k.name == :l_energy }
+        }
+      end
+
+      step 'A lead on another instrument' do
+        say <<~TEXT
+          An instrument after the generator plays it on that one instead.
+          `phrygian_motif` makes one-bar phrases that come back (a a b a,
+          b answering a, mutating a step now and then), here on the tine
+          piano.
+        TEXT
+        type do
+          track :l_lead, L.gen.phrygian_motif, :tine_piano
+          level :l_lead, -16.db
+          bg :l_lead
+        end
+        check('L.gen.phrygian_motif playing on :l_lead') { Session.current.playing_after_queue?(:l_lead) && Help.track_built(:l_lead)&.entry&.name == :phrygian_motif }
+      end
+
+      step 'A key that moves' do
+        say <<~TEXT
+          Melodic generators draw their notes from a probability scale
+          (`harmony:`); give them one that changes over time and they
+          follow: D phrygian for four bars, then G phrygian.  The bass and
+          the lead share it, so they move together.
+        TEXT
+        type do
+          @l_key = harmony(0 => scale(:phrygian, :d), 4.bars => scale(:phrygian, :g), curve: :step, loop: 8.bars)
+          bg :l_bass, L.gen.acid_rhythm(harmony: @l_key, energy: knob(:l_energy))
+          bg :l_lead, L.gen.phrygian_motif(harmony: @l_key)
+        end
+        check('the bass and the lead on @l_key') { %i[l_bass l_lead].all? { |t| Help.track_built(t)&.kwargs&.[](:harmony).is_a?(Generative::Harmony) } }
+      end
+
+      step 'A form that decides itself' do
+        say <<~TEXT
+          Scenes say what plays (knob values too); a chain picks each next
+          scene by weight and `flow` plays it, drawing each section's length.
+          `L.flow` holds the genre templates' chains (`L.flow.techno_chain`),
+          which play over scenes named like their sections; this one plays
+          over yours.  `goto :l_hush` forces the next section, `loop!` stays.
+        TEXT
+        type do
+          scene :l_dark, l_drums: :on, l_bass: :on, l_energy: 0.4
+          scene :l_lift, l_drums: :on, l_bass: :on, l_lead: :on, l_energy: 0.9
+          scene :l_hush, l_bass: :on, l_lead: :on, l_energy: 0.2
+          @l_moods = markov(l_dark: { l_lift: 2, l_hush: 1 }, l_lift: { l_dark: 1, l_hush: 1 }, l_hush: { l_lift: 1 }, seed: 2)
+          flow @l_moods, bars: { l_dark: 4, l_lift: [4, 8], l_hush: 2 }
+        end
+        check('a generated form playing') { (pb = Session.current.arrangement.playback) && !pb.ended? && pb.form.sections.key?(:l_lift) }
+      end
+
+      step 'Keep your own' do
+        say <<~TEXT
+          `save` keeps a generator call as an entry of your own, its knob a
+          param (`L.gen.l_beat`), and a chain with its lengths
+          (`L.flow.l_moods`: `flow L.flow.l_moods` plays it over these
+          scenes).  During a lesson saves go to the lesson's own shelf, not
+          yours; save again afterwards to keep them.
+        TEXT
+        type do
+          save :l_beat, L.gen.techno_beat(seed: 3, energy: knob(:l_energy))
+          save :l_moods, @l_moods, bars: { l_dark: 4, l_lift: [4, 8], l_hush: 2 }
+          bg :l_drums, L.gen.l_beat(l_energy: knob(:l_energy))
+        end
+        check('your L.gen.l_beat on :l_drums') { Help.track_built(:l_drums)&.entry&.name == :l_beat && Library.index.lookup(:flow, :l_moods, note: false) }
+      end
+
+      step 'Let it end' do
+        say <<~TEXT
+          `finish` ends the form after this section, and the parts ring out.
+          `help :generative` has the methods the generators are made of
+          (`beats`, `motifs`, `strikes`); bin/songs/generative_steer.rb is
+          this material as a song.
+        TEXT
+        type { finish }
+        check('the form ending after this section') { (pb = Session.current.arrangement.playback) && (pb.ended? || pb.upcoming.section.nil?) }
+      end
+    end
+
     Help.lesson :record, 'Recording', minutes: 5 do
       about 'MIDI into tracks (a looper and Capture MIDI) and the mix to a file.'
       needs :midi

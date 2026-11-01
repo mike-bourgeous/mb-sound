@@ -64,7 +64,9 @@ module MB
             }.join('  ').rstrip
           }
           head = "#{c(:title, 'mb-sound')} #{c(:dim, '- the one-screen sheet; help :start etc. open a section')}"
-          learn = "#{c(:head, 'Learn:')} #{c(:key, 'lesson')} #{LESSONS.keys.map { |l| c(:key, l.inspect) }.join(c(:dim, ', '))}  #{c(:dim, '(guided)')}"
+          learn = "#{c(:head, 'Learn:')} #{c(:key, 'lesson')} #{LESSONS.keys.map { |l| c(:key, l.inspect) }.join(c(:dim, ', '))}"
+          # (the hint only where it fits: the lessons come first)
+          learn += "  #{c(:dim, '(guided)')}" if visible_length(learn) + 10 <= w
           foot = Doc.new(width: w).commands([['More help', FOOTER]]).to_s
           ([head, learn, ''] + lines + [foot]).join("\n")
         end

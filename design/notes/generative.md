@@ -10,6 +10,7 @@ A generator is a looping Clip whose events per cycle are a pure function of (see
 - Every draw is counter-based (`Generative::Dice`, `fast_generative`); seeds come from `MB::Sound.seed` / `next_seed`.
 - Specs `spec/lib/mb/sound/generative/`; demo `bin/songs/generative_demo.rb`; help `help :generative`, `help :long_form`.
 - In the library (lib-gen-1): the demo songs' and genre templates' generators are `L.gen` entries (`L.gen.techno_beat(seed: 3, energy: knob(:energy))`, `track :drums, L.gen.techno_beat`) and their chains `L.flow` entries (`L.flow.techno_chain(seed: 4)`, `flow L.flow.techno_chain`); recipes print the call; library files hold your own (`generator :x do |seed: 1| ... end`, `flow :x, bars: { ... } do ... end`); library.md, "Generators".
+- Lesson: `lesson :generative` (9 steps: generators on tracks, seeds, a knob steering them, a moving key, a chain over scenes, saving your own; help.md, Lessons).
 
 The generative layer, phase G1 (branch `gen-1`, 2026-10-15; follow-ups `gen-2`), G2, phrase memory (branch `gen-3`, 2026-10-16), G3, knob steering and evolving rhythms (branch `generative-g3`, 2026-10-28), and G4, long form (branch `generative-g4`, 2026-10-29), built to the proposal of the research spike `research-generative` (commit be0a9e79, `research/generative/README.md` and `proposal.md`; never merged).  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 

@@ -188,6 +188,10 @@ module MB
               d.code_block(ex.source)
             end
           end
+          # (the lessons whose steps type one of the topic's commands, as
+          # method pages list them)
+          learn = Help.lessons_using(@topic.names)
+          d.lines(["#{c(:head, 'Learn it in:')} #{learn.map { |l, step, n| "#{c(:key, "lesson :#{l}")} #{c(:dim, "(step #{step} of #{n})")}" }.join(', ')}"]) unless learn.empty?
           more = []
           more << "See also: #{@topic.see.map { |s| "help :#{s}" }.join(', ')}." unless @topic.see.empty?
           more << "Design notes: #{@topic.notes.map { |n| "design/notes/#{n}.md" }.join(', ')}." unless @topic.notes.empty?
