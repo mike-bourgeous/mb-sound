@@ -273,6 +273,19 @@ RSpec.describe('session fuzzing') do
         'at_bar(1, beat: 2) { mute :t3 }',
       ].freeze, 3, false,
     ],
+    # (the 2026-11-01 batch soak, fix-batch-1101: the rebuilt synth's
+    # one-shot ended 1/2 a whole note late, so the flow's scene at bar 3
+    # found t2 still playing and built its patch again instead of swapping
+    # the clip in; since carry-1)
+    'a one-shot swapped into a rebuilt synth before a flow relaunches it (seed 768044)' => [
+      ['bpm 126', 'knob :busy, 0.5'], [
+        'track(:t2, q: 1/4r) { |clip| clip.synth(voices: 3) { |v| v.hz.saw * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t2: seq(C3.n4, G3.n8.dotted, Eb3.n16).loop',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(2, beat: 2) { bg :t2, seq(C5, D5).n16, on: :now; bg :t2, seq(E5, G5).n8.loop, in: 1/4r }',
+        'at_bar(3) { flow(seed: 74, on: :beat) { generate markov(s1: { s1: knob(:busy) }, seed: 33), s1: 1..2 } }',
+      ], 3, false,
+    ],
   }.each do |name, (header, lines, bars, slow)|
     it "holds carry for #{name}", *(slow ? [:slow] : []), render_budget: { seconds: 90, reason: 'a song rendered twice with and without its rebuilds' } do
       song = SessionFuzz::Song.new(header: header, lines: lines, bars: bars)

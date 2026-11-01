@@ -176,6 +176,40 @@ RSpec.describe(MB::Sound::Session::Carry, :aggregate_failures) do
     end
   end
 
+  # (fix-batch-1101, SessionFuzz seed 768044: the rebuilt Synth took the
+  # old one's lane frame count but not its output's, so its end, found in
+  # the first, cut the second 96000 frames late: the track's player stayed
+  # current, and a later scene launch built the patch again instead of
+  # swapping its clip)
+  it "ends a rebuilt synth's one-shot clip on the frame it ends without the rebuild" do
+    clip = MB::Sound.seq(MB::Sound::C3.n2, MB::Sound::E3.n2, MB::Sound::G3.n1)
+    ends = [nil, CARRY_REBUILD].map do |act|
+      MB::Sound.rewind
+      MB::Sound.seed(1)
+      s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false, buffer_size: 800)
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.track(:lead, &CARRY_LEAD)
+        MB::Sound.bg(:lead, clip)
+      end
+      s.process_buffer while s.frame < 3200
+      MB::Sound::Session.with_context(session: s) { act.call(s) } if act
+      s.process_buffer while s.frame < 300_000 && !s.idle?
+      expect(s.last_carry).to be_full if act
+      s.sound_end_frame
+    ensure
+      s&.close
+    end
+    expect(ends[0]).to be_between(192_000, 230_000)
+    expect(ends[1]).to eq(ends[0])
+
+    # (a Synth's frame counts of its own time go over together, or its
+    # times disagree: every *_position it has is in SYNTH_STATE)
+    synth = MB::Sound.seq(MB::Sound::C3).n4.synth { |v| v.hz.sine * v.amp_env(0.01, 0.1, 0.5, 0.1) }
+    positions = synth.instance_variables.grep(/position\z/)
+    expect(positions).to include(:@skip_position, :@out_position)
+    expect(positions - MB::Sound::Session::Carry::SYNTH_STATE).to eq([])
+  end
+
   # (ux-notes-1, the maintainer's note of 2026-10-31: "now the clip is
   # playing at double speed": his patch redefinition read the clip in two
   # places, `it.tone ... cutoff: it.hz + 150`, after one; the new clip
