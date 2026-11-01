@@ -190,8 +190,12 @@ module MB
       RESAMPLE_QUALITIES = { best: 0, medium: 1, fastest: 2, zoh: 3, linear: 4, off: -1 }.freeze
 
       # Seconds without dropouts before an adaptive output's grown queue
-      # shrinks back by a third (see +:adaptive+).
+      # shrinks back by a third (see +:adaptive+); doubled after each
+      # dropout that follows a shrink, up to SHRINK_AFTER_MAX.
       SHRINK_AFTER = 10.0
+
+      # The longest wait before shrinking (see SHRINK_AFTER).
+      SHRINK_AFTER_MAX = 160.0
 
       # How many of the last channels are CUE channels (see #initialize).
       attr_reader :cue_channels
@@ -227,7 +231,10 @@ module MB
       # queue, with a note on stderr; the write size and period stay.  After
       # SHRINK_AFTER seconds without dropouts (e.g. after stalls while YJIT
       # compiles at startup), it shrinks back by a third at a time, down to
-      # where it started (see also #reset_queue).
+      # where it started (see also #reset_queue).  A dropout right after a
+      # shrink (the smaller queue wasn't enough) doubles that wait, up to
+      # SHRINK_AFTER_MAX, so the queue settles instead of going back and
+      # forth (#shrink_wait).
       #
       # +:conceal+ chooses what plays when the queue runs dry anyway (see
       # Concealment.settings; AUDIO_CONCEAL wins): by default
@@ -307,6 +314,8 @@ module MB
         @last_write = nil
         @base_queue = @playback.queue_limit
         @last_change = MB::U.clock_now
+        @shrink_wait = SHRINK_AFTER
+        @last_adapt = nil # (:grow or :shrink: the queue's last change)
 
         @sample_rate = @playback.sample_rate.to_f
         @device_rate = @playback.device_rate.to_f
@@ -382,11 +391,21 @@ module MB
       end
 
       # Puts an adaptive output's queue back where it started (it also
-      # shrinks back on its own after SHRINK_AFTER seconds without dropouts).
+      # shrinks back on its own after #shrink_wait seconds without
+      # dropouts), and the wait back to SHRINK_AFTER.
       def reset_queue
         @playback.queue_limit = @base_queue
         @last_change = MB::U.clock_now
+        @shrink_wait = SHRINK_AFTER
+        @last_adapt = nil
         nil
+      end
+
+      # Seconds without dropouts before an adaptive output's grown queue
+      # shrinks by a third: SHRINK_AFTER, doubled after each dropout that
+      # followed a shrink (up to SHRINK_AFTER_MAX).
+      def shrink_wait
+        @shrink_wait
       end
 
       # The sound card's period (frames per callback).
@@ -476,18 +495,26 @@ module MB
 
         limit = @playback.queue_limit
         if underruns > @underruns_seen && active
+          # A dropout after a shrink: the smaller queue wasn't enough, so
+          # wait twice as long before trying it again (ux-notes-1: the
+          # maintainer's queue went 50 <-> 75 ms nine times in a session)
+          backoff = @last_adapt == :shrink && @shrink_wait < SHRINK_AFTER_MAX
+          @shrink_wait = [@shrink_wait * 2, SHRINK_AFTER_MAX].min if backoff
           @playback.queue_limit = (limit * 1.5).ceil # clamped to max_queue
           grown = @playback.queue_limit
           if grown > limit
-            warn "Audio dropout: raising the output queue to #{ms(grown)} ms"
+            wait = backoff ? " (#{secs(@shrink_wait)} s without dropouts before lowering it again)" : ''
+            warn "Audio dropout: raising the output queue to #{ms(grown)} ms#{wait}"
+            @last_adapt = :grow
           end
           @last_change = now
-        elsif limit > @base_queue && now - @last_change >= SHRINK_AFTER
+        elsif limit > @base_queue && now - @last_change >= @shrink_wait
           # No dropouts for a while (e.g. after startup stalls): shrink back
           # by a third at a time, down to where the queue started
           @playback.queue_limit = [(limit / 1.5).floor, @base_queue].max
-          warn "No audio dropouts for #{SHRINK_AFTER.round} s: lowering the output queue to #{ms(@playback.queue_limit)} ms"
+          warn "No audio dropouts for #{secs(@shrink_wait)} s: lowering the output queue to #{ms(@playback.queue_limit)} ms"
           @last_change = now
+          @last_adapt = :shrink
         end
 
         @underruns_seen = underruns
@@ -497,6 +524,8 @@ module MB
       def ms(frames)
         (frames * 1000.0 / @device_rate).round
       end
+
+      def secs(s) = s >= 1 ? s.round.to_s : format('%g', s.round(2))
 
       def warn_repeats
         n = @playback.repeated
