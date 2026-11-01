@@ -503,7 +503,13 @@ module SessionFuzz
   # (commands for players other commands ended first)
   # (a swap of a one-shot that has ended, ClipSwaps::ClipsOver: seed 104011
   # on master-ai dec63343, found in carry-1's spec run)
-  INVALID = [/No background player :\w+ is playing or stopped/, /doesn't play any of the clips being replaced/, /so a swap would never be heard/].freeze
+  # (the console's swap of a track that is fading out from a stop, or whose
+  # one-shot ended: FUZZ=40 seed 23 on master-ai 24e67f73, found by
+  # lesson-fixes-1; PlaybackMethods#swap's guard)
+  INVALID = [
+    /No background player :\w+ is playing or stopped/, /doesn't play any of the clips being replaced/, /so a swap would never be heard/,
+    /swap :\w+: track :\w+ isn't playing/,
+  ].freeze
 
   # The unexpected lines the last #render printed to stderr.
   def warnings = @warnings || []
