@@ -41,19 +41,19 @@ files:
     example: 18
     reason: the random-songs example checks every relation (buffer sizes, plans, timeline parts, warm-ups, carries and spills since carry-1, fx swaps since library-2, equal lengths since session-2) for 3 seeds, one drawn from RSpec's seed, so its time varies by seed; about 16 s alone in the Mac container and 31.8-41 s at PARALLEL=8 under load (x2.4-2.8 = 11.4-14.7 reference seconds, 2026-10-31), over the default 8; 37.7 s at PARALLEL=8 after wire-1 added a wire command (2026-11-01; a new command changes which song each seed draws), so example 18
   spec/lib/mb/sound/session/carry_sweep_spec.rb:
-    file: 45
-    reason: the slow tier rebuilds each of the 41 shipped instrument presets mid-note with its state carried and compares 154 buffers against no rebuild (two renders each); 74.8 s at x2.29 = 32.7 reference seconds in the Mac container's spec:full at PARALLEL=8, 2026-10-29 (sound-design-2); the everyday run keeps 3 presets
+    file: 52
+    reason: the slow tier rebuilds each of the 41 shipped instrument presets mid-note with its state carried and compares 154 buffers against no rebuild (two renders each); 74.8 s at x2.29 = 32.7 reference seconds in the Mac container's spec:full at PARALLEL=8, 2026-10-29 (sound-design-2); 89.4 and 91.7 s in the 2026-10-31 and 2026-11-01 batch runs, 45.4 reference seconds at the idle calibration x2.02 (fix-batch-1101; a preset's build is about 0.2 s, its two 160000-frame renders the rest); the everyday run keeps 4 presets
   spec/lib/mb/sound/buffer_size_invariance_spec.rb:
     file: 50
     example: 15
     reason: one-sample-buffer renders of Synths to their end (about 70 us per buffer); runner 31 s, 7 s for the longest example (the Mac i9 at PARALLEL=2 19.6 s, 9.8 reference seconds); 2026-10-25 post-merge spec:full on the Mac at PARALLEL=8 under load 4.4 took 105.35 s = 45.2 reference seconds, over the old 45; 2026-10-26 the slow-tier example :196 (a Synth ending) took 31.66 s at x2.26 = 14 reference seconds in a post-merge spec:full, over the old example budget 12, and the same before and after render-rebuild-1 in alternating runs
   spec/lib/mb/sound/buffer_size_invariance_synth_spec.rb:
-    file: 35
-    example: 8
-    reason: lane allocation and sampler chops at one-sample buffers (1.1 s each); runner 25 s
+    file: 48
+    example: 10
+    reason: lane allocation and sampler chops at one-sample buffers (1.1 s each, 52800 buffers per pass); runner 25 s; the slow tier's spec:full at PARALLEL=8 in the Mac container took 66.0-91.7 s over the 2026-10-30 to 2026-11-01 batches (up to 45.4 reference seconds at the idle calibration x2.02), its two lane-allocation examples 14.9 and 15.9 s (7.9 reference seconds, fix-batch-1101)
   spec/lib/mb/sound/help_spec.rb:
-    file: 25
-    reason: every help example played and measured (13 s locally at PARALLEL=4 after test-speed-3's short drum file)
+    file: 30
+    reason: every help example played and measured (13 s locally at PARALLEL=4 after test-speed-3's short drum file), every page checked for walls of text (4.4 s), and each lesson's steps checked before and after their code (3.2 s for :design); 47.0-52.0 s in the Mac container's spec:full at PARALLEL=8 over the 2026-10-30 to 2026-11-01 batches, 25.7 reference seconds at the idle calibration x2.02 (fix-batch-1101)
   spec/lib/mb/sound/ui/tiles_spec.rb:
     file: 25
     reason: many real Tiles screens with a Pry REPL on a pty, each started and waited for; runner 18 s
@@ -63,3 +63,15 @@ files:
   spec/bin/songs/night_bus_capture_spec.rb:
     example: 12
     reason: renders 15 bars of the night bus jam with captures and learn (8.5 s on the runner)
+  spec/lib/mb/sound/kernels_check_spec.rb:
+    file: 35
+    reason: every graph sweep factory (about 130) and scene planned and unplanned with each C kernel run beside its Ruby mirror, whose per-sample Ruby is the time; the slow tier adds 7-sample and 800-sample buffers through the mirrors; 68-83 s in the Mac container's spec:full at PARALLEL=8 over the 2026-10-30 to 2026-11-01 batches (no entry until then, so over the default every time); fix-batch-1101 cut it from 24.6 to 14.8 s alone everyday and 59.8 to 47.4 s with the slow tier (the coverage example reuses what the sweep examples reached; NoiseColor caches its impulse energy)
+  spec/lib/mb/sound/arrangement/track_knobs_spec.rb:
+    file: 32
+    reason: the slow tier plays every shipped instrument preset (41) and genre patch twice, with its params as numbers and as track knobs, building each patch twice per run (about 0.2 s a build for an SQ-80 or FM preset); 47.7-57.8 s in the Mac container's spec:full at PARALLEL=8 in the 2026-10-31 and 2026-11-01 batches since library-2's preset and genre knobs, up to 28.6 reference seconds at the idle calibration x2.02 (fix-batch-1101); the everyday run keeps 5
+  spec/bin/songs/generative_steer_spec.rb:
+    example: 10
+    reason: the density gesture needs the piece's 9-bar intro rendered (4.6 s alone, 6.2 s to FLAC) plus 5 bars without steering; 15.2-17.3 s at PARALLEL=8 in the Mac container over the 2026-10-30 to 2026-11-01 batches, up to 8.6 reference seconds at the idle calibration x2.02 (fix-batch-1101)
+  spec/bin/preset_bench_spec.rb:
+    example: 12
+    reason: the slow tier's --vs example runs bin/preset_bench.rb as a real process, which renders the preset in this checkout and again through a child process in the other (two Ruby starts and two renders); 18.9-22.0 s at PARALLEL=8 in the Mac container's spec:full in the 2026-10-31 and 2026-11-01 batches, up to 10.9 reference seconds at the idle calibration x2.02 (fix-batch-1101)
