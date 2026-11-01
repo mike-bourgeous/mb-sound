@@ -56,8 +56,25 @@ RSpec.describe MB::Sound::Help do
 
   # Plays +bars+ bars (120 BPM); returns the output channels.
   def play_bars(session, bars)
-    bufs = Array.new((96000 * bars) / 800) { session.process_buffer(800).map(&:dup) }
+    bufs = Array.new((96000 * bars).to_i / 800) { session.process_buffer(800).map(&:dup) }
     bufs.transpose.map { |c| Numo::SFloat.zeros(0).concatenate(*c) }
+  end
+
+  # Plays up to the middle of a bar (lines are typed mid-bar, not on a bar
+  # line: a change typed then lands at the next bar, after any `level`
+  # typed with it has glided; an idle transport doesn't move).
+  def play_to_mid_bar(session)
+    t = session.transport
+    frac = (0.5r - (t.position.to_r / t.bar_length) % 1) % 1
+    play_bars(session, frac) if frac > 0
+  end
+
+  # Clears the instance variables lesson steps set on MB::Sound (@l_rec,
+  # @l_key), so a lesson run in one example doesn't pass the next's checks
+  # (set to nil, not removed: removing them in varying orders gives MB::Sound
+  # new shapes, a :performance warning).
+  def forget_lesson_ivars
+    MB::Sound.instance_variables.grep(/\A@l_/).each { |v| MB::Sound.instance_variable_set(v, nil) }
   end
 
   def peak_db(channels) = 20 * Math.log10([channels.map { |c| c.abs.max }.max, 1e-9].max)
@@ -179,27 +196,86 @@ RSpec.describe MB::Sound::Help do
       allow_any_instance_of(MB::Sound::Take).to receive(:home).and_return(nil)
     end
 
+    # Lessons whose steps play over the example bounds, with the reason
+    # (their example expects the loud steps instead, so it fails once the
+    # lesson is fixed and the entry can go).
+    LOUD_LESSONS = {
+      design: 'the init voice plays at the library level, ~22 dB over the level tone (found by lesson-gen-1, 2026-11-01): its steps need a level line',
+    }.freeze
+
     MB::Sound::Help::LESSONS.each_value do |lesson|
-      it "#{lesson.name}: every step's check fails before its code and passes after" do
+      it "#{lesson.name}: every step's check fails before its code and passes after, and its sound stays in the example bounds" do
         session = new_session
         session.midi_in.input = keyboard(30) if lesson.needs.include?(:midi)
+        ref = self.class.reference
+        loud = []
         MB::Sound::Session.with_context(session: session) do
-          runner = MB::Sound::Help::LessonRunner.new(lesson, 0)
+          # (active, as `lesson :x` makes it: saves and files go to the
+          # lesson's folder)
+          MB::Sound::Help::LessonRunner.active = runner = MB::Sound::Help::LessonRunner.new(lesson, 0)
           play_bars(session, 1)
           lesson.steps.each do |step|
+            play_to_mid_bar(session)
             expect(runner.step).to equal(step)
             expect(step.passed?).to eq(false), "step #{step.title.inspect} passes before its code runs" if step.check
             MB::Sound.instance_exec(&step.code) if step.code
             expect(step.passed?).to eq(true), "step #{step.title.inspect}: #{step.check_text} failed"
             expect(runner.after_line).to include('✓')
-            play_bars(session, 1)
+            # Each step's bar within the examples' bounds (an upper bound on
+            # loudness only: steps may be quiet or silent)
+            out = play_bars(session, 1)
+            peak = peak_db(out) - ref[:peak]
+            lu = loudness(out) - ref[:loudness]
+            if peak > MB::Sound::Help::Level::EXAMPLE_PEAK_OVER_TONE_DB || lu > MB::Sound::Help::Level::EXAMPLE_LOUDNESS_WINDOW
+              loud << format('%s: peak %+.1f dB, %+.1f LU over the tone', step.title, peak, lu)
+            end
           end
           expect(runner.done?).to eq(true)
-          expect(peak_db(play_bars(session, 2)) - self.class.reference[:peak]).to be <= MB::Sound::Help::Level::EXAMPLE_PEAK_OVER_TONE_DB
+          expect(peak_db(play_bars(session, 2)) - ref[:peak]).to be <= MB::Sound::Help::Level::EXAMPLE_PEAK_OVER_TONE_DB
+        end
+        if LOUD_LESSONS.key?(lesson.name)
+          expect(loud).not_to be_empty, "lesson #{lesson.name.inspect} plays within the bounds now: remove it from LOUD_LESSONS (#{LOUD_LESSONS[lesson.name]})"
+        else
+          expect(loud).to eq([])
         end
       ensure
+        MB::Sound::Help::LessonRunner.active = nil
+        forget_lesson_ivars
         session&.close
       end
+    end
+
+    it 'generative: saves go to the lesson shelf (replays with from: too), load back while it runs, and never reach your shelf' do
+      session = new_session
+      lesson = MB::Sound::Help::LESSONS[:generative]
+      user = MB::Sound::GraphIO.user_presets_dir
+      mine = -> { Dir.exist?(user) ? Dir.glob('**/*', base: user).sort : [] }
+      before = mine.()
+      save = lesson.steps.index { |st| st.title == 'Keep your own' }
+      dir = File.join(ENV['MB_SOUND_HELP_DIR'], 'lessons', 'generative', 'presets')
+      MB::Sound::Session.with_context(session: session) do
+        runner = nil
+        expect { runner = MB::Sound.lesson(:generative, from: save + 2) }.to output(
+          /replaying step #{save + 1}: Keep your own.*Saved l_beat to #{Regexp.escape(dir)}.*Saved l_moods to #{Regexp.escape(dir)}/m
+        ).to_stdout
+        expect(MB::Sound::Help::LessonRunner.active).to equal(runner)
+        expect(MB::Sound::Library.save_shelf.name).to eq(:lesson)
+        expect(MB::Sound::Library.shelves.map(&:name).first(2)).to eq(%i[session lesson])
+        expect(Dir.glob('**/*.rb', base: dir).sort).to eq(%w[flow/l_moods.rb gen/l_beat.rb])
+        expect(MB::Sound::L.gen.l_beat.shelf.name).to eq(:lesson)
+        expect(MB::Sound::L.flow.l_moods.().take(6)).to eq(MB::Sound.instance_variable_get(:@l_moods).take(6))
+
+        # Done (or left): the lesson shelf is gone, and nothing reached yours
+        runner.next
+        expect(runner.done?).to eq(true)
+        expect(MB::Sound::Library.shelves.map(&:name)).not_to include(:lesson)
+        expect(MB::Sound::Library.index.lookup(:generator, :l_beat, note: false)).to be_nil
+        expect(mine.()).to eq(before)
+      end
+    ensure
+      MB::Sound::Help::LessonRunner.active = nil
+      forget_lesson_ivars
+      session&.close
     end
 
     it 'lesson.back stays on a step that already passes until lesson.next (it used to move on at once)' do

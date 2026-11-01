@@ -52,8 +52,8 @@ files:
     example: 10
     reason: lane allocation and sampler chops at one-sample buffers (1.1 s each, 52800 buffers per pass); runner 25 s; the slow tier's spec:full at PARALLEL=8 in the Mac container took 66.0-91.7 s over the 2026-10-30 to 2026-11-01 batches (up to 45.4 reference seconds at the idle calibration x2.02), its two lane-allocation examples 14.9 and 15.9 s (7.9 reference seconds, fix-batch-1101)
   spec/lib/mb/sound/help_spec.rb:
-    file: 30
-    reason: every help example played and measured (13 s locally at PARALLEL=4 after test-speed-3's short drum file), every page checked for walls of text (4.4 s), and each lesson's steps checked before and after their code (3.2 s for :design); 47.0-52.0 s in the Mac container's spec:full at PARALLEL=8 over the 2026-10-30 to 2026-11-01 batches, 25.7 reference seconds at the idle calibration x2.02 (fix-batch-1101)
+    file: 33
+    reason: every help example played and measured (13 s locally at PARALLEL=4 after test-speed-3's short drum file), every page checked for walls of text (4.4 s), and each lesson's steps checked before and after their code (3.2 s for :design); 47.0-52.0 s in the Mac container's spec:full at PARALLEL=8 over the 2026-10-30 to 2026-11-01 batches, 25.7 reference seconds at the idle calibration x2.02 (fix-batch-1101); lesson-gen-1 added lesson :generative (9 steps, 3.3 s, each step's bar measured like the others) and its lesson-shelf example (1.6 s), 59 s in one loaded process
   spec/lib/mb/sound/ui/tiles_spec.rb:
     file: 25
     reason: many real Tiles screens with a Pry REPL on a pty, each started and waited for; runner 18 s
