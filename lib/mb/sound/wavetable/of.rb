@@ -35,6 +35,52 @@ module MB
             raise ArgumentError, "Wavetable.of normalize: is :peak, :loudness, or nil (got #{normalize.inspect})"
           end
 
+          key = of_key(sources, size, normalize, align, mips, interpolation, name)
+          if key && (made = @of_lock.synchronize { @of_made[key] })
+            return made.clone
+          end
+
+          table = build_of(sources, size, normalize, align, mips, interpolation, name)
+          if key
+            @of_lock.synchronize {
+              @of_made.delete(key)
+              @of_made[key] = table
+              @of_made.shift while @of_made.length > OF_KEPT
+            }
+            return table.clone
+          end
+          table
+        end
+
+        # Tables .of keeps (the most recently made), so the same call
+        # again (each Synth lane of a preset calls wavetable_of: digibrass's
+        # two tables were ~1.6 ms a lane, ten lanes a build) copies one
+        # instead of building it again (load-lag-1).
+        OF_KEPT = 64
+
+        private
+
+        # The key .of keeps a table made from these arguments under, or nil
+        # if a source can't be compared (functions of phase, samples, files):
+        # library table names (with the table they name now, so a table
+        # registered again under the name makes a new one), harmonic
+        # amplitudes (frozen copies), and tables (by identity).
+        def of_key(sources, size, normalize, align, mips, interpolation, name)
+          key = sources.map { |src|
+            case src
+            when Symbol then [:named, src, named(src)]
+            when Array then src.all? { |a| a.is_a?(Numeric) && a.real? } ? src.dup.freeze : (return nil)
+            when Wavetable then [:table, src]
+            else return nil
+            end
+          }
+          [key, size, normalize, align, mips, interpolation, name].freeze
+        rescue StandardError
+          nil
+        end
+
+        # The table of .of's arguments (see .of).
+        def build_of(sources, size, normalize, align, mips, interpolation, name)
           rows = sources.each_with_index.flat_map { |s, i| source_spectra(s, size, i) }
           harmonics = [rows.map { |r| r.length - 1 }.max, (size - 1) / 2].min
           spectra = Numo::DComplex.zeros(rows.length, harmonics + 1)
@@ -54,8 +100,6 @@ module MB
 
           new(spectra: spectra, size: size, mips: mips, interpolation: interpolation, normalize: normalize == :loudness ? :loudness : nil, name: name)
         end
-
-        private
 
         # The spectra rows (DComplex, column 0 the DC) of source +s+ (see
         # .of), the +index+-th.

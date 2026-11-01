@@ -158,6 +158,10 @@ module MB
       # The registry of named tables (see .register).
       @registry = {}
 
+      # Tables made by .of, kept to copy (see .of and OF_KEPT).
+      @of_made = {}
+      @of_lock = Mutex.new
+
       class << self
         # A table of sine harmonics: +amplitudes+ (first for harmonic 1) with
         # +phases+ (cycles or Phases, e.g. 0.25 for a cosine; nil for all 0,
