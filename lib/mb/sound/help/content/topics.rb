@@ -607,7 +607,8 @@ module MB
         { |cycle, dice, busy:| }` hands them to your block.  The demo
         songs' and genre templates' generators are in the library:
         `L.gen` (`L.gen.koto_motif(seed: 3)`, `play L.gen.techno_beat`)
-        and `L.flow` for their section chains (`help :library`).
+        and `L.flow` for their section chains (`help :library`);
+        `lesson :generative` puts them on tracks step by step.
       TEXT
       commands :tones, :chord, :weights, :harmony, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
       note :generative
