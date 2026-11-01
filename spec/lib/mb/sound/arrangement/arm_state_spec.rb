@@ -116,6 +116,23 @@ RSpec.describe(MB::Sound::Arrangement::Arm) do
       end
     end
 
+    # (ux-notes-2: the monitor played on and the next command's sync found
+    # the arm monitoring again, so KEYS couldn't put a silent arm back)
+    it 'stops the monitor when a monitoring track is armed again with monitor: false' do
+      s = new_session
+      in_session(s) do
+        MB::Sound.track(:y, q: 1) { |c| c.number * c.gate }
+        MB::Sound.arm(:y)
+        s.process_buffer(800)
+        expect(s.players.keys).to eq([:'y/live'])
+        MB::Sound.arm(:y, monitor: false)
+        s.process_buffer(800)
+        expect(s.arrangement.arms.transform_values(&:state)).to eq(y: :silent)
+        expect(s.playing_after_queue?(:'y/live')).to eq(false)
+        expect(s.arrangement.arm_problems).to be_empty
+      end
+    end
+
     # Random walks over the commands that touch armed tracks and their
     # monitors, checking the invariant (armed and monitoring <=> the
     # monitor plays or is queued) after every command and buffer.

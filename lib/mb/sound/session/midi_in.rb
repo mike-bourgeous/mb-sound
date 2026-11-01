@@ -92,11 +92,6 @@ module MB
           midi_inputs.each_value(&:end_replay)
         end
 
-        # True if the Session renders in a background thread (see #add).
-        def realtime?
-          @realtime
-        end
-
         # The names of knobs listening to +input+ that follow controller
         # +cc+ (for :cc journal entries).
         def knobs_on_cc(input, cc)
@@ -136,8 +131,11 @@ module MB
           return nil if @changes.first.time >= to
           cuts = nil
           i = 0
+          track = Session::Name.wired(name)
           while (c = @changes[i]) && c.time < to && !timeline_change?(c)
-            unless c.subject.equal?(name) && !held?(c)
+            # (a hold of the wired track lands between the pieces too: its
+            # stream stops on the hold's frame; Session::Holds)
+            unless (c.subject.equal?(name) || hold_of?(c, track)) && !held?(c)
               i += 1
               next
             end
@@ -147,6 +145,12 @@ module MB
             (cuts ||= []) << [idx, wire_lander(c, land, frame + idx, from, frame)]
           end
           cuts
+        end
+
+        # True if change +c+ holds or releases track +track+ (or every
+        # held track).
+        def hold_of?(c, track)
+          (Holds::KINDS.include?(c.kind) || (c.kind == :restore && c.entry.data[:hold])) && (c.subject.equal?(track) || c.subject.equal?(:hold))
         end
 
         # Lands wire change +c+ at +land_frame+ when called (see #wire_cuts;

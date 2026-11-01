@@ -260,7 +260,9 @@ RSpec.describe(MB::Sound::Session::Carry, :aggregate_failures) do
     s.process_buffer while s.frame < 48_000
     MB::Sound::Session.with_context(session: s) { MB::Sound.swap(:growl, later) }
     s.process_buffer while s.frame < 48_000 * 3
-    MB::Sound::Session.with_context(session: s) { MB::Sound.track(:growl) { |c| c.tone.ramp.at(-10.db).filter(:bp4, cutoff: c.hz + 150, resonance: 0.4) } }
+    # (c.freq: since ux-notes-2, `c.hz + 150` warns that it adds 150 to a
+    # sine; both read the clip in a second place)
+    MB::Sound::Session.with_context(session: s) { MB::Sound.track(:growl) { |c| c.tone.ramp.at(-10.db).filter(:bp4, cutoff: c.freq + 150, resonance: 0.4) } }
     s.process_buffer while s.frame < 48_000 * 7
     input = s.ui_graphs.fetch(:growl)
     sources = MB::Sound::Session::Carry.graph_nodes(input.instance_variable_get(:@nodes)).grep(MB::Sound::MIDI::ClipSource)

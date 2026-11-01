@@ -311,6 +311,33 @@ module MB
         strip_command(:unsolo, names, point, fade: fade)
       end
 
+      # Holds tracks: their clips (and cue players and wired streams) go
+      # silent while their live monitors (:"bass/live", an armed track's
+      # keyboard) keep playing, right away with a 5 ms declick or at a
+      # launch point (+on:+, +in:+, +at:+).  #unhold brings them back in
+      # time with the timeline, as #unmute does.  The sound-design screen's
+      # KEYS mode holds the track it inspects, so the keyboard is all that
+      # plays it (Session::Holds).  Journaled, undoable.  With no names,
+      # lists the held tracks.  Also available as #hold_track.
+      #
+      #     arm :bass; hold :bass      # play the bass patch from the keyboard
+      #     unhold :bass               # its clip again, in time
+      def hold(*names, at: nil, on: nil, in: nil)
+        return Session.current.held_tracks if names.empty?
+        point = LaunchPoint.of(binding) or return nil
+        hold_command(:hold, names, point)
+      end
+      alias hold_track hold
+
+      # Releases held tracks (every held track if none are named): their
+      # clips come back in time.  See #hold.  Also available as
+      # #unhold_track.
+      def unhold(*names, at: nil, on: nil, in: nil)
+        point = LaunchPoint.of(binding) or return nil
+        hold_command(:unhold, names, point)
+      end
+      alias unhold_track unhold
+
       # With a group name and player names, defines a mute group that
       # #mute, #unmute, #solo, and #unsolo accept (`mutes :breakdown,
       # :drums, :bass`, then `mute :breakdown`).  With no arguments, shows
@@ -367,6 +394,20 @@ module MB
         label = "#{kind} #{names.map(&:inspect).join(', ')}".strip
         value = session_command(names, label: label) { |session, time|
           session.public_send(kind, *names, at: point, fade: fade, start_time: point.given? ? nil : time)
+        }
+        return value unless value.is_a?(Array) && value.all?(Session::Changes::Change)
+
+        session = Session.current
+        entries = value.map { |c| session.journal[c.seq] }
+        entries.length == 1 ? entries.first : entries
+      end
+
+      # Runs a hold or unhold command (see #hold) like #strip_command.
+      def hold_command(kind, names, point)
+        names = names.flatten.map { |n| player_name(n) }
+        label = "#{kind} #{names.map(&:inspect).join(', ')}".strip
+        value = session_command(names, label: label) { |session, time|
+          session.public_send(kind, *names, at: point, start_time: point.given? ? nil : time)
         }
         return value unless value.is_a?(Array) && value.all?(Session::Changes::Change)
 

@@ -347,6 +347,10 @@ module MB
           if want && !keep && !start_monitor(tr, input, wire: wire, time: wire ? time : nil)
             arm_event(tr.name, :arm_silent, input: input, monitor: monitor, wire: wire)
           end
+          # (armed again without a monitor: the monitor stops, as the arm
+          # state now says; before, it played on and the next sync_arms
+          # found it monitoring again; ux-notes-2)
+          @session.remove(mon, fade: @session.declick_bars, time: arm_time) if !want && @session.playing_after_queue?(mon)
           [c, wc]
         end
 

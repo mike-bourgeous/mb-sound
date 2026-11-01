@@ -117,6 +117,25 @@ module MB
           EnvelopeView.draw(d, chart, live)
         end
 
+        # Oscillators: one cycle rendered by a copy of the voice
+        # (UI::ToneCycle; ux-notes-2), given as +live+ ({ cycle: SFloat,
+        # rate:, frequency:, frames:, synced:, partial:, label: }); nil
+        # without one (nothing rendered yet).  The x axis is milliseconds,
+        # the y axis symmetric around zero at the cycle's peak.
+        register('MB::Sound::Tone') do |params, chart, live|
+          c = live.is_a?(Hash) ? live[:cycle] : nil
+          next nil unless c && c.length > 1
+          rate = live[:rate].to_f
+          ms = (live[:frames].to_i - 1) * 1000.0 / rate
+          x = Numo::DFloat.linspace(0, ms, c.length)
+          peak = c.abs.max.to_f
+          peak = 1.0 if peak <= 0
+          chart.x :linear, label: 'ms'
+          chart.y Scale::Symmetric.new(-peak..peak, label: nil)
+          chart.line c, x: x, label: live[:label]
+          chart.title live[:label] if live[:label]
+        end
+
         # Shapers: the transfer curve over inputs -2..2, with the input as a
         # reference line.
         register('MB::Sound::GraphNode::Shaper') do |params, chart|

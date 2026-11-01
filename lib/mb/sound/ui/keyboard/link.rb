@@ -24,6 +24,22 @@ module MB
 
           attr_reader :input, :session, :virtual
 
+          # Plays into MIDI input +name+ (nil: the default) from now on:
+          # the sound-design screen's KEYS mode follows the input the
+          # inspected track's monitor reads (Keyboard::Takeover; a wired
+          # track's wire input).  The next note attaches a new virtual input
+          # there (send note-offs first: the old one's notes end with it).
+          def input=(name)
+            @lock.synchronize do
+              return if name == @input
+              if @session && @stream
+                @session.midi_in(@input).remove_source(@stream) rescue nil
+              end
+              @input = name
+              @virtual = @source = @stream = nil
+            end
+          end
+
           # The block for the default patch (nil: none).
           attr_accessor :patch
 
@@ -34,6 +50,7 @@ module MB
             @session = nil
             @virtual = nil
             @source = nil
+            @stream = nil
             @monitor = false
             @lock = Mutex.new
           end
@@ -54,11 +71,11 @@ module MB
                 return @virtual
               end
 
+              @monitor = false unless s.equal?(@session) # (a new input on the same Session keeps its default patch)
               @session = s
-              @monitor = false
               @virtual = MIDI::VirtualInput.new('keyboard')
               @source = MIDI::LiveSource.new(@virtual, output: s.output_open? ? s.output : nil)
-              s.midi_in(@input).add_source(MIDI::Stream.new(@source), label: :keyboard)
+              @stream = s.midi_in(@input).add_source(MIDI::Stream.new(@source), label: :keyboard)
               @virtual
             end
           end

@@ -9,6 +9,7 @@ module MB
         # numeric constant or another GraphNode).
         def +(other)
           return MIDI::Param::Expr.new(:+, self, other) if other.is_a?(MIDI::Param::Base) # (a knob combined with cc(1): a param)
+          ArithmeticMethods.check_pitch(:+, self, other)
           # FIXME: this fails to set up the tee correctly when adding a node on the left; see bin/songs/stereo_drone.rb
           Mixer.new([self, other], sample_rate: self.sample_rate)
         end
@@ -17,6 +18,7 @@ module MB
         # GraphNode) from this node's #sample output.
         def -(other)
           return MIDI::Param::Expr.new(:-, self, other) if other.is_a?(MIDI::Param::Base) # (a knob combined with cc(1): a param)
+          ArithmeticMethods.check_pitch(:-, self, other)
           Mixer.new([self, [other, -1]], sample_rate: self.sample_rate)
         end
 
@@ -105,6 +107,89 @@ module MB
           Internal.warn_once_per_site(:at_negative,
             "at(#{text}) multiplies by #{text} (#{format('%+.0f', 20 * Math.log10(n.abs))} dB, inverted); " \
             "for a level write at(#{text}.db), for a range at(#{text}..#{text.delete_prefix('-')})")
+        end
+
+        # Checks a sum or difference (+op+ :+ or :-) of +left+ and +right+
+        # for a Pitch taken as a frequency (ux-notes-2; the maintainer's
+        # note 14: `it.hz + 150` meant 150 Hz above the note, but a Pitch
+        # used as a signal is a full-scale sine, so it added 150 to the
+        # sine, and a cutoff of it sat near 150 Hz).  By the operators rule
+        # (signal arithmetic unless type-tagged), the sum stays a sum:
+        # - a Pitch and a number (`it.hz + 150`, `150 + it.hz`, also a
+        #   Constant): a warning once per calling line, naming the
+        #   frequency form (`it.freq + 150`, `590.hz`) and semitones
+        #   (`transpose`);
+        # - two Pitches (`it.hz + 150.hz`), or a frequency node and a Pitch
+        #   (`it.freq + 150.hz`, which adds a 150 Hz sine to the
+        #   frequency): MB::Sound.live_error naming `it.freq + 150` (nodes
+        #   have no `.hz`; `(it.freq + 150).tone` is an oscillator there)
+        #   and, for two sines, `.sine` on each; live mode warns and sums.
+        # Tones (`it.hz.saw + 150.hz.sine`) and other nodes pass silently.
+        def self.check_pitch(op, left, right)
+          lp = left.is_a?(MB::Sound::Pitch)
+          rp = right.is_a?(MB::Sound::Pitch)
+          return unless lp || rp
+
+          if lp && rp || (rp && !left.is_a?(MB::Sound::Pitch) && ArgTypes.frequency?(left))
+            hz = right.constant? ? num(right.frequency) : 'n'
+            what = lp ? "#{pitch_text(left)} #{op} #{pitch_text(right)} mixes two full-scale sines (a Pitch used as a signal is a sine)" :
+                        "#{freq_text(nil)} #{op} #{pitch_text(right)} #{op == :+ ? 'adds' : 'subtracts'} a full-scale #{hz == 'n' ? '' : "#{hz} Hz "}sine #{op == :+ ? 'to' : 'from'} the frequency"
+            hint =
+              if lp && left.constant? && right.constant?
+                f = op == :+ ? left.frequency + right.frequency : left.frequency - right.frequency
+                "for #{num(f)} Hz write #{num(f)}.hz"
+              else
+                freq = lp ? freq_text(left) : freq_text(nil)
+                "for #{hz} Hz #{op == :+ ? 'above' : 'below'} it write #{freq} #{op} #{hz} (a node of Hz, as cutoff: takes; (#{freq} #{op} #{hz}).tone is an oscillator)"
+              end
+            mix = lp ? "; to mix two sines, #{pitch_text(left)}.sine #{op} #{pitch_text(right)}.sine" : ''
+            MB::Sound.live_error(ArgumentError.new("#{what}; #{hint}#{mix}"))
+            return
+          end
+
+          pitch, other = lp ? [left, right] : [right, left]
+          n = other.is_a?(GraphNode::Constant) ? other.constant : other
+          return unless n.is_a?(Numeric)
+
+          text = num(n)
+          if !lp && op == :-
+            Internal.warn_once_per_site(:pitch_arithmetic,
+              "#{text} - #{pitch_text(pitch)} subtracts the full-scale sine a Pitch plays as a signal from #{text}, not a frequency; for a frequency use #{freq_text(pitch)}")
+            return
+          end
+
+          expr = lp ? "#{pitch_text(pitch)} #{op} #{text}" : "#{text} #{op} #{pitch_text(pitch)}"
+          hint =
+            if pitch.constant?
+              f = op == :+ ? pitch.frequency + n : pitch.frequency - n
+              "for #{num(f)} Hz write #{num(f)}.hz"
+            else
+              "for #{text} Hz #{op == :+ ? 'above' : 'below'} it write #{freq_text(pitch)} #{op} #{text} (a node of Hz, as cutoff: takes; (#{freq_text(pitch)} #{op} #{text}).tone is an oscillator)"
+            end
+          semis = n.abs <= 24 ? ", or #{pitch_text(pitch)}.transpose(#{op == :- ? '-' : ''}#{text}) for semitones" : ''
+          Internal.warn_once_per_site(:pitch_arithmetic,
+            "#{expr} #{op == :+ ? 'adds' : 'subtracts'} #{text} #{op == :+ ? 'to' : 'from'} the full-scale sine a Pitch plays as a signal (a DC offset), not a frequency; #{hint}#{semis}")
+        end
+
+        # How the check names Pitch +p+ in its messages: a Note by its name
+        # (C4), a fixed pitch by its Ruby (440.hz), a voice's pitch as
+        # `it.hz` (the block's notes, whatever its name).
+        def self.pitch_text(p)
+          return p.name.to_s if p.respond_to?(:name) && p.is_a?(MB::Sound::Note)
+          return "#{num(p.frequency)}.hz" if p.constant?
+          defined?(MB::Sound::Notes::NotePitch) && p.is_a?(MB::Sound::Notes::NotePitch) ? 'it.hz' : 'pitch'
+        end
+
+        # The frequency node a message suggests for Pitch +p+ (nil: a
+        # voice's, `it.freq`).
+        def self.freq_text(p)
+          p.nil? || (defined?(MB::Sound::Notes::NotePitch) && p.is_a?(MB::Sound::Notes::NotePitch)) ? 'it.freq' : "#{pitch_text(p)}.freq"
+        end
+
+        # +x+ as the messages print it: whole numbers without a fraction
+        # (Pitches keep Floats: 150, not 150.0), else as Ruby.
+        def self.num(x)
+          x.is_a?(Numeric) && x.real? && x.finite? && x == x.round ? x.round.to_s : RubyValue.number(x)
         end
 
         # Divides incoming data by +other+, which may be a Numeric or another

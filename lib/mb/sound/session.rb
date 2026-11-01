@@ -10,6 +10,7 @@ require_relative 'session/changes'
 require_relative 'session/fades'
 require_relative 'session/undo' # (before the modules registering undo subjects)
 require_relative 'session/strip'
+require_relative 'session/holds'
 require_relative 'session/faders'
 require_relative 'session/master'
 require_relative 'session/tails'
@@ -75,6 +76,7 @@ module MB
       include Changes
       include Fades
       include Strip
+      include Holds
       include Faders
       include Undo
       include Master
@@ -326,6 +328,7 @@ module MB
 
         init_changes
         init_strip
+        init_holds
         init_faders
         init_undo
         init_knobs

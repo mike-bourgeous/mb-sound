@@ -4,7 +4,10 @@ module MB
       # Colors by role (what a thing is, not which color it is), resolved
       # when cells are written.  Roles: :text, :dim, :title, :name, :key
       # (values worth noticing), :ok, :warn, :bad, :rec, :armed, :queued,
-      # :low/:mid/:high (meter zones).
+      # :low/:mid/:high (meter zones), and the sound-design inspector's
+      # section bands (ux-notes-2, the maintainer's "Contrasting bands"):
+      # :band_text on :band_source, :band_filter, :band_amp, :band_mod,
+      # :band_fx, :band_knobs backgrounds.
       module Theme
         ROLES = {
           text: [208, 208, 208],
@@ -21,6 +24,13 @@ module MB
           low: [95, 175, 95],
           mid: [215, 215, 95],
           high: [255, 95, 95],
+          band_text: [0, 0, 0],
+          band_source: [215, 135, 0],
+          band_filter: [95, 175, 215],
+          band_amp: [135, 195, 95],
+          band_mod: [175, 135, 215],
+          band_fx: [195, 175, 135],
+          band_knobs: [160, 160, 160],
         }.freeze
 
         module_function
@@ -296,6 +306,13 @@ module MB
         role :low, [0, 135, 60]
         role :mid, [175, 135, 0]
         role :high, [200, 30, 30]
+        role :band_text, [30, 30, 30]
+        role :band_source, [255, 205, 140]
+        role :band_filter, [170, 210, 250]
+        role :band_amp, [195, 230, 170]
+        role :band_mod, [220, 200, 245]
+        role :band_fx, [225, 220, 190]
+        role :band_knobs, [215, 215, 215]
       end
 
       MB::Term::Themes.define(:phosphor) do
@@ -304,6 +321,13 @@ module MB
         role :title, [200, 255, 210], bold: true
         %i[warn armed mid].each { |r| role r, [230, 255, 120] }
         %i[bad rec high].each { |r| role r, [255, 120, 90] }
+        role :band_text, [0, 24, 6]
+        role :band_source, [157, 255, 180]
+        role :band_filter, [110, 215, 140]
+        role :band_amp, [190, 255, 205]
+        role :band_mod, [79, 191, 108]
+        role :band_fx, [135, 235, 160]
+        role :band_knobs, [120, 200, 140]
       end
 
       MB::Term::Themes.define(:mono) do
@@ -321,6 +345,13 @@ module MB
         role :low, 2
         role :mid, 3
         role :high, 1
+        role :band_text, 0
+        role :band_source, 3
+        role :band_filter, 6
+        role :band_amp, 2
+        role :band_mod, 5
+        role :band_fx, 7
+        role :band_knobs, 7
       end
     end
   end

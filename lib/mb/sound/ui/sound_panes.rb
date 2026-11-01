@@ -286,15 +286,12 @@ module MB
               key = Inspect::SECTION_KEYS[sec]
               next if collapsed[sec] == :omit
               if collapsed[sec]
-                x = c.text(0, y, c.pad(title, 7), :title)
-                x = c.text(x, y, "#{key} ", :key)
-                c.text(x, y, c.fit(list.map { |i| row_title(info.nodes[i]) }.join(' · '), [c.w - x, 0].max), :text)
+                x = band(c, y, sec, title, key, false, state, width: chip_width(state))
+                c.text(x + 1, y, c.fit(list.map { |i| row_title(info.nodes[i]) }.join(' · '), [c.w - x - 1, 0].max), :text)
                 y += 1
                 next
               end
-              x = c.text(0, y, "#{title} ", sec == cur ? :key : :title)
-              x = c.text(x, y, key, :key)
-              c.text(x, y, " #{'─' * [c.w - x - 2, 0].max}", :dim)
+              band(c, y, sec, title, key, sec == cur, state)
               y += 1
               # (the picked section's rows scroll to keep the picked row and
               # its params on screen)
@@ -320,6 +317,28 @@ module MB
             end
             c.text(0, c.h - 1, c.fit("#{hidden} plumbing nodes hidden (p shows)", c.w), :dim) if foot == 1
           end
+
+          # Section background roles (the theme's band colors).
+          BANDS = { source: :band_source, filter: :band_filter, amp: :band_amp, mod: :band_mod, fx: :band_fx }.freeze
+
+          # A section heading as a colored band (ux-notes-2; the
+          # maintainer's note 3, "maybe subsections need more contrasting
+          # colors and should only show shortcuts when focused?", and his
+          # "Keys only when focused" + "Contrasting bands"): the title on
+          # the section's color across +width+ columns (the row, or a
+          # collapsed line's chip), the picked section bold and marked ▸,
+          # and its jump key only while the inspector's keys are live (its
+          # mode: outside it, s is NAV's split).  Returns the column after
+          # it.
+          def band(c, y, sec, title, key, cur, state, width: c.w)
+            k = state[:mode] && key && !key.empty? ? "  #{key}" : ''
+            text = "#{cur ? '▸' : ' '}#{title}#{k} "
+            c.run(0, y, c.pad(text, [width, text.length].max.clamp(0, c.w)), :band_text, bg: BANDS[sec] || :band_knobs, bold: cur)
+          end
+
+          # A collapsed line's band chip width (a section title, its key
+          # while the keys are live).
+          def chip_width(state) = state[:mode] ? 12 : 9
 
           # The one-line signal chain over the sections (the spike's strip:
           # `notes → saw ×6 → lp4 → softclip → amp → highpass ×2 → out`):
@@ -473,16 +492,13 @@ module MB
               key = sec ? Inspect::SECTION_KEYS[sec] : ''
               names = cell_names(info, cells.map(&:first))
               if tight && sec != cur
-                x = c.text(0, y, c.pad(title, 7), :title)
-                x = c.text(x, y, "#{key} ", :key) unless key.empty?
+                x = band(c, y, sec, title, key, false, state, width: chip_width(state))
                 summary = cells.each_with_index.map { |(e, _), j| "#{names[j]} #{cell_value_text(info, e, knobs, state)}" }.join('  ')
-                c.text(x, y, c.fit(summary, [c.w - x, 0].max), :dim)
+                c.text(x + 1, y, c.fit(summary, [c.w - x - 1, 0].max), :dim)
                 y += 1
                 next
               end
-              x = c.text(0, y, "#{title} ", sec == cur ? :key : :title)
-              x = c.text(x, y, key, :key) unless key.empty?
-              c.text(x, y, " #{'─' * [c.w - x - 2, 0].max}", :dim)
+              band(c, y, sec, title, key, sec == cur, state)
               y += 1
               cells.each_slice(per).with_index do |slice, si|
                 break if y >= c.h
@@ -855,8 +871,8 @@ module MB
           PLAYHEAD_STEP = 1 / 240.0
 
           def initialize
-            super(:preview, rate: 8, height: 10, width: 48, needs: [:inspect], title: 'preview', min_height: 3,
-                            description: 'the inspected node\'s preview: a filter\'s response, a shaper\'s transfer curve, an envelope\'s note with a playhead')
+            super(:preview, rate: 8, height: 10, width: 48, needs: [:inspect, :render], title: 'preview', min_height: 3,
+                            description: 'the inspected node\'s preview: a filter\'s response, a shaper\'s transfer curve, an envelope\'s note with a playhead, one cycle of an oscillator')
             @playhead = false
           end
 
@@ -880,10 +896,17 @@ module MB
             return if w <= 0 || h <= 0
             n = s&.inspector&.selected
             @playhead = !n&.live.nil?
-            chart = n&.preview ? chart_for(n, state) : nil
+            why = nil
+            chart =
+              if n && Preview.tone?(n)
+                chart, why = tone_chart(n, s, state)
+                chart
+              elsif n&.preview
+                chart_for(n, state)
+              end
             unless chart
               c.clear
-              c.text(0, 0, c.fit(n ? "#{n.label}: no preview (filters, shapers, and envelopes have one)" : 'no node selected (the inspector: n)', w), :dim)
+              c.text(0, 0, c.fit(why || (n ? "#{n.label}: no preview (filters, shapers, envelopes, and oscillators have one)" : 'no node selected (the inspector: n)'), w), :dim)
               return
             end
             cells = c.grid.class
@@ -897,7 +920,41 @@ module MB
             live.draw(chart, c.grid, x: c.x, y: c.y)
           end
 
+          # True if NodeInfo +n+ is an oscillator (its preview is one cycle,
+          # UI::ToneCycle).
+          def self.tone?(n) = !n.params.node_class.nil? && n.params.node_class <= Tone
+
           private
+
+          # An oscillator's chart (one cycle of it rendered by a copy of the
+          # voice, UI::ToneCycle; ux-notes-2) and, without one, why: [chart
+          # or nil, text or nil].  Rebuilt only when the render changes.
+          def tone_chart(n, s, state)
+            src = s&.render_source
+            return [nil, "#{n.label}: #{src&.note || 'its cycle needs a voice to copy (a synth track)'}"] unless src&.synth
+            driver = (state[:tone_driver] ||= ToneCycle::Driver.new)
+            driver.tick(src, n.recipe_key, s.knobs, s.inspector&.knobs || [].freeze)
+            r = driver.shown
+            return [nil, "#{n.label}: rendering one cycle..."] unless r
+            return [nil, "#{n.label}: #{r.error}"] if r.error
+            pending = driver.pending?
+            key = [:tone, r.seq, r.key, pending]
+            return [state[:chart], nil] if state[:chart_of] == key && state[:chart]
+            ms = (r.frames - 1) * 1000.0 / r.rate
+            what = r.noise ? "noise  #{Panes.fmt(ms)} ms" : "#{Plot::Panels.hz_text(r.frequency)}  one cycle #{Panes.fmt(ms)} ms#{r.synced ? ' (its sync master\'s)' : ''}"
+            label = "#{n.label} #{what}" \
+                    "#{r.partial ? " (the first #{Panes.fmt(ToneCycle::MAX_SECONDS)} s)" : ''}  #{r.input}#{pending ? ' …' : ''}"
+            live = { cycle: r.cycle, rate: r.rate, frequency: r.frequency, frames: r.frames, synced: r.synced, partial: r.partial, label: label }
+            b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
+            chart = Plot::Panels.preview(n.params.node_class, n.params, b, live: live) ? b.build : nil
+            state[:chart_of] = key
+            state[:chart] = chart
+            [chart, chart ? nil : "#{n.label}: no cycle to draw"]
+          rescue StandardError => e
+            state[:chart_of] = nil
+            warn "preview of #{n.label}: #{e.class}: #{e.message}"
+            [nil, "#{n.label}: #{e.class}"]
+          end
 
           # The node's chart, rebuilt only when its params (or a playhead)
           # change.
