@@ -173,6 +173,32 @@ RSpec.describe('Inspector editability (Note 15)', :aggregate_failures) do
     end
   end
 
+  # gen-knobs-1: a library generator's steering params are its track's
+  # knobs (:"t/energy"), shown on the notes row as knob params (never loose
+  # knobs), for every shipped generator that has them.
+  it 'shows every shipped generator\'s track knobs as knob params of its notes row' do
+    gens = MB::Sound::Library::Generators
+    entries = MB::Sound::L.gen.entries.reject { |e| gens.knob_params(e).empty? }
+    expect(entries.length).to be >= 6
+    entries.each do |e|
+      session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+      MB::Sound::Session.with_context(session: session) do
+        MB::Sound.track(:t, e)
+        MB::Sound.bg(:t, on: :now)
+      end
+      2.times { session.process_buffer }
+      info = inspect::Gatherer.new.call(session, { track: :t, node: nil })
+      row = info.nodes.find { |n| n.what == 'notes' }
+      expect(row&.label).to eq(e.name.to_s)
+      knobs = gens.knob_params(e).map { |p| :"t/#{p}" }
+      expect(gens.knob_params(e).map { |p| row&.knob_of(p) }).to eq(knobs), e.name.to_s
+      expect(info.loose & knobs).to eq([]), e.name.to_s
+    ensure
+      session&.close
+      MB::Sound.rewind
+    end
+  end
+
   EDIT_ENTRIES.each do |name|
     it "edits every param of #{name} or lists the gap" do
       source = begin
