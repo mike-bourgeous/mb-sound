@@ -1277,8 +1277,9 @@ module MB
           # Every sound ended: the render ends on the frame the last one did
           # (or where the tails after it went quiet), not at the end of the
           # buffer holding it (session-2)
-          # (or the time of a scheduled block it kept time for)
-          ended = [session.sound_end_frame, session.schedule_ran_frame || 0].max
+          # (or the time of a scheduled block or the frame of a queued
+          # change it kept time for)
+          ended = [session.sound_end_frame, session.schedule_ran_frame || 0, session.change_landed_frame].max
           frames += render_end(session, hold, mix, ended, frames_left.call, buffer_size)
         elsif tail && (bars || seconds || to) && !interrupted
           # The song reached its end; stop anything still playing and let the

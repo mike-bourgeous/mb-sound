@@ -471,10 +471,9 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
 
       # Factories whose graphs print, but with state that isn't graph
       # structure, and why
-      state_only = {
-        'knob moves (Knob, Knob::Reader: a ramp, a jump, a followed node)' => 'knob moves are performance (turns, in a take), not the graph',
-        'drums with knob settings (live kit knobs)' => 'knob moves are performance (turns, in a take), not the graph',
-      }.freeze
+      # (GraphSweep::PERFORMANCE_STATE, shared with graph_io_spec and the
+      # relation fuzz)
+      state_only = GraphSweep::PERFORMANCE_STATE
 
       GraphSweep.factories.each do |name, factory|
         it "rebuilds #{name}" do

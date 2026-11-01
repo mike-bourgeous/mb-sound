@@ -233,12 +233,24 @@ module MB
 
           clip = run(entry, BLOCKS[entry], [], given, knobs: knobs)
           KNOBS[clip] = knobs.freeze
+          GIVEN[clip] = value if value.is_a?(Sequence::Clip)
           cache[key] = [given, knobs, clip]
           clip
         end
 
         # Clips .track_clip built => { param => knob } (keys weak).
         KNOBS = ObjectSpace::WeakKeyMap.new
+
+        # Clips .track_clip built from a clip => that clip (keys weak; set
+        # documents print a track's clip in the place of the clip it was
+        # given, so a loaded set saves the same text: fix-batch-1102b).
+        GIVEN = ObjectSpace::WeakKeyMap.new
+
+        # The clip .track_clip built +clip+ from (`track :drums, drums`
+        # with `drums = L.gen.techno_beat(seed: 5)`), or nil.
+        def given_clip(clip)
+          GIVEN[clip]
+        end
 
         # The track knobs steering +clip+ ({ param => GraphNode::Knob },
         # from .track_clip; the inspector's row for the clip), or nil.

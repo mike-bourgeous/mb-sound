@@ -54,6 +54,22 @@ RSpec.describe('relation fuzzing', :check_shared) do
     expect(results.to_h.select { |_, v| v == :error }.keys).to contain_exactly(:clip, :feedback, :ease, :sample_hold)
   end
 
+  # fix-batch-1102b: seed 768893 drew kit-live-1's moving-knob kit factory
+  # as a leaf, and the round trips (which keep knob values, not moves)
+  # failed.  Sweep leaves in GraphSweep::PERFORMANCE_STATE skip :recipe and
+  # :document; every other relation still runs on them.
+  it 'skips the round trips, and only those, for sweep leaves whose moves are performance (seed 768893)' do
+    counts = Hash.new(0)
+    expect(RelationFuzz.run_seed(768_893, counts: counts)).to eq([])
+    expect(counts).to include(recipe_skipped: 1, document_skipped: 1, buffer_size: 1, plan_exact: 1)
+
+    GraphSweep::PERFORMANCE_STATE.each_key do |name|
+      code = "RelationFuzz.sweep(#{name.inspect})"
+      expect(RelationFuzz::ROUND_TRIPS.map { |r| RelationFuzz.check(r, code) }).to eq([:skip, :skip])
+    end
+    expect(RelationFuzz.check(:recipe, 'RelationFuzz.sweep("drums with held knob settings (a bound kit)")')).to be_nil
+  end
+
   it 'shrinks a failing graph to the parts that fail' do
     big = RelationFuzz::Expr.new(:add, [], [
       RelationFuzz::Expr.new(:softclip, [], [RelationFuzz::Expr.new(:tone, [220, :square, nil], [])]),

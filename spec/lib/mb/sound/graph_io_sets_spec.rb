@@ -302,6 +302,86 @@ RSpec.describe('set documents', :aggregate_failures) do
     expect(RecipeHelpers.max_diff(ref, got)).to eq(0)
   end
 
+  # fix-batch-1102b (found by gen-knobs-1): `track :drums, L.gen.techno_beat`
+  # saved as `track :drums, :tr909`, so the loaded track had no clip; only
+  # scenes carried clips.  Each track's own clip (the one track, bg, swap,
+  # or a scene gave it last) is saved with it.
+  it "saves each track's own clip (generator, seq, kit grid, swapped), so the loaded tracks play what the original's held" do
+    riff = MB::Sound.events([0r, 1/8r, 45, 0.8], [3/8r, 1/8r, 48, 0.6], length: 1r, loop: true)
+    define = ->(drums, bass, kit, lead) {
+      MB::Sound.instance_exec do
+        bpm 128
+        track :drums, drums, :tr909
+        track(:bass, bass) { |clip| clip.synth(voices: 1) { |n| n.hz.saw * n.amp_env(0.003, 0.2, 0.4, 0.1) } * 0.3 }
+        track(:kit, kit) { |k| tr808(k, seed: 3) * 0.5 }
+        track(:lead, lead) { |clip| clip.synth(voices: 1) { |n| n.hz.triangle * n.amp_env(0.003, 0.1, 0.4, 0.1) } * 0.3 }
+      end
+    }
+    grid = MB::Sound.grid(16, kick: 'x...x...', hat: '..x...x.').loop
+
+    a = session
+    within(a) {
+      define.(MB::Sound::L.gen.techno_beat, riff, grid, nil)
+      MB::Sound.bg(:lead, riff.transpose(12))
+      4.times { a.process_buffer }
+      MB::Sound.swap(:lead, riff.transpose(7))
+      MB::Sound.turn(:"drums/energy", 0.8)
+      8.times { a.process_buffer }
+    }
+    text = io.dump(a.arrangement, name: 'held')
+    expect(text).to include(
+      "drums = L.gen.techno_beat(seed: 5)\n", "bass = events([0r, 1/8r, 45, 0.8], [3/8r, 1/8r, 48, 0.6], length: 1r, loop: true)\n",
+      "kit = grid(16, kick: \"x...x...\", hat: \"..x...x.\").loop\n", "lead = bass.transpose(7)\n",
+      "track :drums, drums, :tr909\n", 'track(:bass, bass) { |clip|', 'track(:kit, kit) { |k|', 'track(:lead, lead) { |clip|',
+      'knob :"drums/energy", (0.0..1.0).at(0.8)'
+    )
+
+    b = session
+    io.load(text, session: b)
+    held = ->(s) { s.arrangement.tracks.transform_values { |t| t.clip&.to_ruby } }
+    expect(held.(b)).to eq(held.(a))
+    expect(held.(b).values).to all(be_a(String))
+    expect(MB::Sound::Library::Generators.knobs_of(b.arrangement.tracks[:drums].clip).transform_values(&:value)).to eq({ energy: 0.8 })
+    expect(MB::Sound::Library::Generators.knobs_of(b.arrangement.tracks[:drums].clip)[:energy]).to equal(b.knobs[:"drums/energy"])
+    expect(stable(io.dump(b.arrangement, name: 'held'))).to eq(stable(text))
+
+    # The loaded tracks play the clips: like tracks given them directly
+    r = session
+    within(r) {
+      define.(MB::Sound::L.gen.techno_beat, riff, grid, riff.transpose(7))
+      MB::Sound.turn(:"drums/energy", 0.8)
+      r.process_buffer
+    }
+    b.process_buffer
+    out = [b, r].map { |s|
+      within(s) {
+        MB::Sound.seed(7)
+        %i[drums bass kit lead].each { |n| MB::Sound.bg(n) }
+      }
+      Array.new(120) { s.process_buffer.map(&:dup) }.transpose.map { |c| SpecBuffers.join(c) }
+    }
+    expect(out[1][0].abs.max).to be > 0.05
+    expect(RecipeHelpers.max_diff(*out)).to eq(0)
+  end
+
+  it "saves a trigger track's clip as a track(..., trigger: true), which doesn't start it (sidechain(:pump, clip) would)" do
+    a = session
+    within(a) {
+      MB::Sound.sidechain(:pump) { |c| c.trigger }
+      MB::Sound.bg(:pump, MB::Sound.seq(MB::Sound::C4, MB::Sound::R).n8.loop)
+      2.times { a.process_buffer }
+    }
+    text = io.dump(a.arrangement, name: 'pump')
+    expect(text).to include("pump = seq(C4, Rest).n8.loop\ntrack(:pump, pump, trigger: true) { |c|\n  c.trigger\n}\n")
+
+    b = session
+    io.load(text, session: b)
+    expect(b.arrangement.tracks[:pump]).to have_attributes(trigger: true)
+    expect(b.arrangement.tracks[:pump].clip.to_ruby).to eq(a.arrangement.tracks[:pump].clip.to_ruby)
+    expect(b.players).to be_empty
+    expect(stable(io.dump(b.arrangement, name: 'pump'))).to eq(stable(text))
+  end
+
   it 'saves wires whose streams print as Ruby, comments live ones, and loads them to play like the original (wire-1)' do
     lines = [
       'track(:lead, q: 1) { |c| c.number * c.gate * 0.001 }',

@@ -61,6 +61,14 @@ module MB
         # Session was created (see Stamp).
         attr_reader :frame
 
+        # The session frame the latest queued change landed on (0 before
+        # any): an idle render keeps time for queued changes (#schedule_waiting?),
+        # so it ends on the frame the last one landed, at any buffer size
+        # (PlaybackMethods#render; fix-batch-1102b: session fuzz seed 13's
+        # `at_bar(1, beat: 4) { level :t2, 0, on: :bar }` ended at the start
+        # of the buffer holding bar 2, 91200 frames at 800, 91383 at 367).
+        attr_reader :change_landed_frame
+
         # The Stamp of the next frame to render: the frame counter and
         # timeline position where a change made right now lands (see also
         # #transport_record).
@@ -199,6 +207,7 @@ module MB
           @journal = Journal.new
           @frame = 0
           @transport_record = transport_record_for(false)
+          @change_landed_frame = 0
         end
 
         # The transport position or a scheduled block's time, without the
@@ -291,6 +300,7 @@ module MB
         # raised with +raise_errors+).
         def commit_change(c, land_pos:, land_frame:, commits:, immediate:)
           c.lands = stamp(land_pos, frame: land_frame)
+          @change_landed_frame = land_frame if !immediate && land_frame > @change_landed_frame
           snapshot = !NO_SNAPSHOT_KINDS.include?(c.kind)
           c.before = undo_snapshot(snapshot_subject(c)) if snapshot
           @landing_frame = land_frame # for ramps that start on the landing sample (see Strip)

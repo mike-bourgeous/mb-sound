@@ -142,6 +142,10 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       'drums with knob settings (live kit knobs)' => '# :kd was about to move (changes queued) when saved',
     }.freeze
 
+    it 'lists the comment of every factory in GraphSweep::PERFORMANCE_STATE' do
+      expect(values_only.keys).to match_array(GraphSweep::PERFORMANCE_STATE.keys)
+    end
+
     GraphSweep.factories.each do |name, factory|
       it "saves and loads #{name}" do
         MB::Sound.seed(1)
