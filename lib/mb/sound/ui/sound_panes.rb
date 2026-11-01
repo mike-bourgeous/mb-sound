@@ -286,15 +286,12 @@ module MB
               key = Inspect::SECTION_KEYS[sec]
               next if collapsed[sec] == :omit
               if collapsed[sec]
-                x = c.text(0, y, c.pad(title, 7), :title)
-                x = c.text(x, y, "#{key} ", :key)
-                c.text(x, y, c.fit(list.map { |i| row_title(info.nodes[i]) }.join(' · '), [c.w - x, 0].max), :text)
+                x = band(c, y, sec, title, key, false, state, width: chip_width(state))
+                c.text(x + 1, y, c.fit(list.map { |i| row_title(info.nodes[i]) }.join(' · '), [c.w - x - 1, 0].max), :text)
                 y += 1
                 next
               end
-              x = c.text(0, y, "#{title} ", sec == cur ? :key : :title)
-              x = c.text(x, y, key, :key)
-              c.text(x, y, " #{'─' * [c.w - x - 2, 0].max}", :dim)
+              band(c, y, sec, title, key, sec == cur, state)
               y += 1
               # (the picked section's rows scroll to keep the picked row and
               # its params on screen)
@@ -320,6 +317,28 @@ module MB
             end
             c.text(0, c.h - 1, c.fit("#{hidden} plumbing nodes hidden (p shows)", c.w), :dim) if foot == 1
           end
+
+          # Section background roles (the theme's band colors).
+          BANDS = { source: :band_source, filter: :band_filter, amp: :band_amp, mod: :band_mod, fx: :band_fx }.freeze
+
+          # A section heading as a colored band (ux-notes-2; the
+          # maintainer's note 3, "maybe subsections need more contrasting
+          # colors and should only show shortcuts when focused?", and his
+          # "Keys only when focused" + "Contrasting bands"): the title on
+          # the section's color across +width+ columns (the row, or a
+          # collapsed line's chip), the picked section bold and marked ▸,
+          # and its jump key only while the inspector's keys are live (its
+          # mode: outside it, s is NAV's split).  Returns the column after
+          # it.
+          def band(c, y, sec, title, key, cur, state, width: c.w)
+            k = state[:mode] && key && !key.empty? ? "  #{key}" : ''
+            text = "#{cur ? '▸' : ' '}#{title}#{k} "
+            c.run(0, y, c.pad(text, [width, text.length].max.clamp(0, c.w)), :band_text, bg: BANDS[sec] || :band_knobs, bold: cur)
+          end
+
+          # A collapsed line's band chip width (a section title, its key
+          # while the keys are live).
+          def chip_width(state) = state[:mode] ? 12 : 9
 
           # The one-line signal chain over the sections (the spike's strip:
           # `notes → saw ×6 → lp4 → softclip → amp → highpass ×2 → out`):
@@ -473,16 +492,13 @@ module MB
               key = sec ? Inspect::SECTION_KEYS[sec] : ''
               names = cell_names(info, cells.map(&:first))
               if tight && sec != cur
-                x = c.text(0, y, c.pad(title, 7), :title)
-                x = c.text(x, y, "#{key} ", :key) unless key.empty?
+                x = band(c, y, sec, title, key, false, state, width: chip_width(state))
                 summary = cells.each_with_index.map { |(e, _), j| "#{names[j]} #{cell_value_text(info, e, knobs, state)}" }.join('  ')
-                c.text(x, y, c.fit(summary, [c.w - x, 0].max), :dim)
+                c.text(x + 1, y, c.fit(summary, [c.w - x - 1, 0].max), :dim)
                 y += 1
                 next
               end
-              x = c.text(0, y, "#{title} ", sec == cur ? :key : :title)
-              x = c.text(x, y, key, :key) unless key.empty?
-              c.text(x, y, " #{'─' * [c.w - x - 2, 0].max}", :dim)
+              band(c, y, sec, title, key, sec == cur, state)
               y += 1
               cells.each_slice(per).with_index do |slice, si|
                 break if y >= c.h

@@ -61,17 +61,19 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       lines = draw(:inspector, lp4, { title_in_rule: true, mode: true }, w: 60, h: 14)
       text = lines.join("\n")
       expect(lines[0]).to start_with('bass  2/3').and include('s f a o x')
-      expect(text).to include('SOURCE s', 'FILTER f', 'AMP a', 'FX x', '▸lp4', 'stereo  cut 2400 Hz  reso 0.25')
+      expect(text).to include(' SOURCE  s', '▸FILTER  f', ' AMP  a', ' FX  x', '▸lp4', 'stereo  cut 2400 Hz  reso 0.25')
       expect(text).to match(/cutoff +█+.* 2400 Hz  cut/) # (the knob's meter on the param it drives)
       expect(text).to include('resonance  0.25  ·') # (a literal: dim, Enter offers its bind)
       expect(text).to include('saw ×6', 'highpass ×2', '61 plumbing nodes hidden (p shows)')
-      expect(lines.index { |l| l.start_with?('SOURCE') }).to be < lines.index { |l| l.start_with?('FILTER') }
+      expect(lines.index { |l| l.match?(/\A[ ▸]SOURCE/) }).to be < lines.index { |l| l.match?(/\A[ ▸]FILTER/) }
       # Every row open when they all fit; the picked one alone, others on one line, when short
       tall = draw(:inspector, lp4, { title_in_rule: true }, w: 60, h: 30).join("\n")
       expect(tall).to include('  cutoff     150 Hz') # (highpass's params too)
       short = draw(:inspector, lp4, { title_in_rule: true }, w: 60, h: 8)
       expect(short.join("\n")).to include('▸lp4', 'cutoff')
-      expect(short.grep(/\A(SOURCE|AMP|FX) +[safox] /).length).to be >= 2
+      expect(short.grep(/\A (SOURCE|AMP|FX) +\S/).length).to be >= 2
+      keyed = draw(:inspector, lp4, { title_in_rule: true, mode: true }, w: 60, h: 8)
+      expect(keyed.grep(/\A (SOURCE|AMP|FX)  [safox] +\S/).length).to be >= 2
       empty = snap.with(slow: snap.slow.with(inspector: nil))
       expect(draw(:inspector, empty)[0]).to include('nothing to inspect')
     end
@@ -107,13 +109,45 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(st[:pick]).to eq(info.loose.length)
     end
 
+    # (ux-notes-2, the maintainer's note 3: "Showing SOURCE s made me want
+    # to do ^w, s, but that split the pry panel; maybe subsections need
+    # more contrasting colors and should only show shortcuts when
+    # focused?"; his "Keys only when focused" + "Contrasting bands")
+    it 'draws section headings as colored bands, with their jump keys only while the inspector\'s keys are live' do
+      lp4 = snap.with(slow: snap.slow.with(inspector: snap.inspector.with(node: 0)))
+      bg_of = ->(grid, x, y) { grid.instance_variable_get(:@bg)[y * grid.width + x] }
+      pack = ->(role) { MB::Term::Cells.pack(ui::Theme.rgb(role)) }
+      [[{ title_in_rule: true }, false], [{ title_in_rule: true, mode: true }, true]].each do |state, live|
+        [:sections, :panel].each do |view|
+          grid = MB::Term::Cells.new(60, 14)
+          ui.panes.fetch(:inspector).draw(ui::Canvas.new(grid, 0, 0, 60, 14), lp4, state.merge(view: view))
+          lines = grid.to_text(:none).lines.map(&:rstrip)
+          y = lines.index { |l| l.match?(/\A▸FILTER/) }
+          expect(y).not_to be_nil, "#{view}: #{lines.join("\n")}"
+          expect(lines[y]).to eq(live ? '▸FILTER  f' : '▸FILTER'), view.to_s
+          # (the band runs across the row, in FILTER's color)
+          expect([0, 30, 59].map { |x| bg_of.(grid, x, y) }.uniq).to eq([pack.(:band_filter)]), view.to_s
+          next unless view == :sections
+          src = lines.index { |l| l.match?(/\A SOURCE/) }
+          expect(lines[src]).to eq(live ? ' SOURCE  s' : ' SOURCE')
+          expect(bg_of.(grid, 10, src)).to eq(pack.(:band_source))
+          expect(lines.join("\n")).not_to match(/SOURCE s|FILTER f|AMP a|FX x/) unless live
+        end
+      end
+      # Every built-in theme has the band colors, the bands' text reading on each
+      %i[default paper phosphor mono].each do |theme|
+        t = MB::Term::Themes.named(theme)
+        expect(%i[band_text band_source band_filter band_amp band_mod band_fx band_knobs] - t.roles.keys).to eq([]), theme.to_s
+      end
+    end
+
     it 'draws the front panel with P: knobs and literals as cells by section, the picked row\'s first cell picked' do
       st = { title_in_rule: true, mode: true, view: :panel }
       lp4 = snap.with(slow: snap.slow.with(inspector: snap.inspector.with(node: 0)))
       lines = draw(:inspector, lp4, st, w: 80, h: 10)
       text = lines.join("\n")
       expect(lines[0]).to include('P sections')
-      expect(text).to include('FILTER f')
+      expect(text).to include('▸FILTER  f')
       expect(text).to match(/cut +█+.*2400 Hz/) # (the knob's cell: meter and value)
       expect(text).to match(/reso +·+ 0.25/) # (a literal's cell: dots, dim)
       expect(text).not_to include('saw', 'phase') # (only knobs and literals)
@@ -232,7 +266,7 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
     it 'shows no node class names in any sound pane, only DSL names and roles (omnibus15)' do
       env = snap.with(slow: snap.slow.with(inspector: ui_fake_envelope_inspector))
       text = sound_text(env) { |i| env.with(slow: env.slow.with(inspector: env.inspector.with(node: i))) }
-      expect(text).to include('lp4', 'saw ×6', 'FILTER f', 'amp_env')
+      expect(text).to include('lp4', 'saw ×6', 'FILTER', 'amp_env')
       expect_no_class_names(text)
     end
 
