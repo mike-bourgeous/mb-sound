@@ -71,6 +71,8 @@ module MB
       end
     end
 
+    # Levels: the init voice plays at full level (~22 dB over the level
+    # tone), so each track gets a level first (lesson-fixes-1).
     Help.lesson :design, 'Designing a sound', minutes: 5 do
       about 'The init voice, its knobs, a build switch, and your own patch\'s numbers as knobs.'
 
@@ -81,8 +83,12 @@ module MB
           track playing on MAIN.  A new track starts from the init voice: two
           oscillators that morph sine, triangle, square, saw, a mix, FM, AM,
           and sync (all off), a filter with its envelope, an ADSR, glide.
+          It plays at full level, so set the track's level first.
         TEXT
-        type { design :l_lead, seq(A3, C4, E4, G4).n8.loop }
+        type do
+          level :l_lead, -16.db
+          design :l_lead, seq(A3, C4, E4, G4).n8.loop
+        end
         check('a track :l_lead on the init voice') { tracks.key?(:l_lead) && knobs.key?(:"l_lead/wave1") }
       end
 
@@ -123,6 +129,7 @@ module MB
         TEXT
         type do
           track(:l_pad) { |c| c.synth(voices: 4) { |v| v.hz.saw.at(-12.db).lp4(900.hz) * v.env([[1, 0.02], [0.6, 0.3], [0, 0.6]], release_at: 2) } }
+          level :l_pad, -12.db
           design :l_pad, seq([A3, C4, E4], [G3, B3, D4]).n2.loop
         end
         check('a track :l_pad playing') { tracks.key?(:l_pad) && players.key?(:l_pad) }
