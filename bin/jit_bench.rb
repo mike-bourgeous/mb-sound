@@ -26,10 +26,11 @@
 #    bin/scene_profile.rb does (whose hooks this script loads).
 # 3. Scene changes, from the same renders: the slowest buffer where a
 #    change landed, and the slowest scheduled block (a scene build, which
-#    live runs on the scheduler thread); with YJIT on after the warm-ups a
-#    live start does (MB::Sound.warm_up and the form's
-#    Arrangement#warm_up), with YJIT off without them (play_form skips the
-#    form warm-up without YJIT).
+#    live runs on the scheduler thread); after the warm-ups a live start
+#    does: with YJIT on MB::Sound.warm_up and the form's
+#    Arrangement#warm_up with its rehearsal, with YJIT off the form's
+#    track builds alone (play_form warms up without YJIT since kit-live-1,
+#    without rehearsing; MB::Sound.warm_up only compiles).
 # 4. Profile (YJIT off): the Ruby methods with the most self time on the
 #    render path, from a sampling thread reading the render thread's
 #    backtrace (Thread#backtrace_locations whenever Ruby switches threads,
@@ -381,9 +382,9 @@ module JitBench
     profile = spec['profile']
 
     SceneProfile.install
-    # (with YJIT the warm-up a live start does; without, what play_form
-    # does live: no form warm-up)
-    SceneProfile.form_warm_up = yjit ? true : nil
+    # (the form warm-up a live start does: with YJIT the builds and the
+    # rehearsal, without the builds alone; see Arrangement#play_form)
+    SceneProfile.form_warm_up = true
     MB::Sound::Arrangement.prepend(SceneProfile::FormWarmUp)
     MB::Sound::ScriptRunner.prepend(SceneProfile::SongCapture)
     if profile

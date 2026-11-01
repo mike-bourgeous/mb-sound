@@ -211,7 +211,7 @@ module MB
           case @warm_changes
           when true then true
           when false then false
-          else AUTO && @realtime && defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
+          else AUTO && @realtime && JIT.compiling?
           end
         end
 
