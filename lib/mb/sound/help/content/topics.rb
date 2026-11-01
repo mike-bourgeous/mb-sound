@@ -1607,8 +1607,10 @@ module MB
         the track's knobs already; its other numbers bind the same way (F shows
         them as panel cells), and a setting the code didn't write or reads once
         while building (a filter's default quality, an lfo's rate from
-        `4.8.hz.lfo`, a kit voice's decay) binds as a build knob: each turn
-        rebuilds the track.  Every change is one
+        `4.8.hz.lfo`) binds as a build knob: each turn rebuilds the track.
+        A drum kit voice's settings (`bind :drums, tr909: :kick_decay`) are
+        live knobs: `turn :"drums/kick_decay", 1.5, over: 2.bars` sweeps
+        the playing kit.  Every change is one
         console line: journaled, undoable, in your take.  The preview draws
         the picked row: a filter's response (lp4 and diode too, with their
         resonance and tuning), a shaper's curve, an envelope's note with a
