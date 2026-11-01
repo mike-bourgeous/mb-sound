@@ -400,6 +400,16 @@ module SessionFuzz
 
       "fx :#{s.pick(s.instruments)}, #{s.pick([':hall', ':dub', ':off', '[:juno1, :room]'])}#{s.on}"
     },
+    ->(s) {
+      # (wire-1) a clip's stream, sometimes through a transform, wired into
+      # a synth track at its launch point (the track's clip plays on), and
+      # sometimes unwired two beats later
+      next if s.swappable.empty?
+
+      t = s.pick(s.swappable)
+      w = "wire :#{t}, #{s.pick(FREQ_CLIPS)}.stream#{s.pick(['', '.echo(1.n16, 2)', '.arp(:up, 16)', '.transpose(7)'])}#{s.on}"
+      s.rng.rand < 0.4 ? "#{w}; after(in: 2.beats) { unwire :#{t} }" : w
+    },
     # (new commands go here, at the end)
   ].freeze
 
@@ -452,6 +462,8 @@ module SessionFuzz
     /\ANo background player :\w+ is playing/,
     # (a scene giving a kick-ducked drums track a kit without a kick)
     /has no node named :kick for a sidechain/,
+    # (a stop of a wired track: the hint that its wire plays on; wire-1)
+    /\Astop :\w+: its wire \(.*\) still plays through/,
   ].freeze
 
   # Errors that make a generated song invalid rather than show a bug
