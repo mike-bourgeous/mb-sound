@@ -331,10 +331,29 @@ module MB
           end
         end
 
-        # The console line binding Target +t+ on track +track+.
-        def line(track, t)
+        # The console line binding Target +t+ on track +track+ (+as+: the
+        # knob's name, when it isn't the param's own; see #knob_name).
+        def line(track, t, as: nil)
           return "bind #{track.inspect}, #{t.param.inspect}" if t.kind == :document
-          "bind #{track.inspect}, #{t.call_name}: #{t.arg.inspect}#{", nth: #{t.nth}" if t.nth > 0}"
+          "bind #{track.inspect}, #{t.call_name}: #{t.arg.inspect}#{", nth: #{t.nth}" if t.nth > 0}#{", as: #{as.inspect}" if as}"
+        end
+
+        # The knob a binding of Target +t+ on track +track+ makes: the
+        # param's name (`:"lead/attack"`), unless the graph +roots+ already
+        # read a knob of that name for something else, then the call's and
+        # the param's (`:"lead/filter_env_attack"`; ux-notes-1: the init
+        # voice's amp env attack is the knob :"growl/attack", so binding its
+        # filter env's attack was refused with "give as: another name", and
+        # the inspector's turns that followed moved the amp env's attack:
+        # the maintainer's "Pressing enter on filter env attack did not
+        # give me a way to adjust it ... the displayed time did not
+        # change").  Returns [name, qualified?].
+        def knob_name(track, t, roots)
+          plain = Session::Name.param(track, t.param).to_sym
+          return [plain, false] if t.kind == :document
+          read = nodes(roots).any? { |n| n.is_a?(GraphNode::Knob::Reader) && n.knob.name == plain }
+          return [plain, false] unless read
+          [Session::Name.param(track, :"#{t.call_name}_#{t.param}").to_sym, true]
         end
 
         # The one-line refusal for Target +t+ of track +track+ whose
@@ -492,7 +511,7 @@ module MB
             return MB::Sound.live_error(e)
           end
 
-        kname = (follow || as || Session::Name.param(name, t.param)).to_sym
+        kname = (follow || as || LiteralBinding.knob_name(name, t, roots).first).to_sym
         default = LiteralBinding.knob_default(t.param, t.value, range)
         k = @session.knobs[kname]
         if k && !follow && (k.value - Param.magnitude(default.default).to_f).abs > 1e-9 * [1.0, k.value.abs].max
@@ -521,7 +540,10 @@ module MB
         unless LiteralBinding.nodes(broots).any? { |n| GraphNode.climb_tee_tree(n).equal?(probe) || (n.is_a?(GraphNode::Knob::Reader) && n.knob.equal?(probe)) }
           return MB::Sound.live_error(LiteralBinding::Error.new(LiteralBinding.fixed_message(name, t)))
         end
-        (@session.knob(kname, default) or return nil) unless k
+        # (a call inside a graph document: `preset` adopted the stand-in
+        # knob into the session while the test built, so it is the knob;
+        # ux-notes-1, the init voice's filter env)
+        (@session.knob(kname, default) or return nil) unless k || @session.knobs[kname]
 
         entry = nil
         @session.command("bind #{name.inspect} #{t.param} -> #{follow ? 'follows ' : ''}knob #{kname.inspect}") {
