@@ -31,7 +31,7 @@
  *   last grain_min frames before the gap (so kicks in the history don't fill
  *   a quiet gap with kicks), and concealed samples over the history's peak
  *   (uncorrelated grains summing in a seam) are limited softly (tanh) to
- *   at most 1 dB over it.
+ *   at most 1 dB over it, and never past full scale.
  * - Decay: the concealed output holds its level for +hold+ seconds, then
  *   falls 60 dB over +fade+ seconds (then silence), or falls over
  *   +quiet_fade+ (no hold) once the writer marked the end of its audio (the
@@ -389,16 +389,21 @@ static inline void mb_conceal_next(struct mb_conceal *c)
 }
 
 // +y+ unchanged up to +peak+, then limited softly (tanh) to
-// MB_CONCEAL_CEILING times it.
+// MB_CONCEAL_CEILING times it, but never past full scale that the history
+// didn't reach (hard at +peak+ if it did).
 static inline double mb_conceal_limit(double y, double peak)
 {
 	double a = fabs(y);
 	if (a <= peak) {
 		return y;
 	}
-	double room = peak * (MB_CONCEAL_CEILING - 1);
+	double top = peak * MB_CONCEAL_CEILING;
+	if (top > 1.0) {
+		top = peak > 1.0 ? peak : 1.0;
+	}
+	double room = top - peak;
 	if (!(room > 0)) {
-		return 0;
+		return y < 0 ? -peak : peak;
 	}
 	double l = peak + room * tanh((a - peak) / room);
 	return y < 0 ? -l : l;

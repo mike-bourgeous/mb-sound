@@ -508,8 +508,10 @@ module MB
         def limit(y, peak)
           a = y.abs
           return y if a <= peak
-          room = peak * (CEILING - 1)
-          return 0.0 unless room > 0
+          top = peak * CEILING
+          top = peak > 1.0 ? peak : 1.0 if top > 1.0
+          room = top - peak
+          return y < 0 ? -peak : peak unless room > 0
           l = peak + room * Math.tanh((a - peak) / room)
           y < 0 ? -l : l
         end

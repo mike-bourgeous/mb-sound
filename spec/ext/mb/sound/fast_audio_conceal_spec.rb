@@ -420,6 +420,7 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
                     db(src.map { |c| rms_max(c, gap - 960, src_back + 960) }.max)
             click = db(out.map { |c| d2(c[(gap - 2)...(back + 2)]).max }.max) - db(src.map { |c| d2(c[a...b]).max }.max)
             expect(peak).to be <= peak_db + 0.01, "#{pname} at #{at}: fill peak #{peak.round(1)} dB over the source's"
+            expect(out.map { |c| c[fill].abs.max }.max).to be <= 1.0, "#{pname} at #{at}: fill over full scale"
             expect(level).to be <= level_db, "#{pname} at #{at}: fill #{level.round(1)} dB over the audio around the gap"
             expect(click).to be <= click_db, "#{pname} at #{at}: a corner #{click.round(1)} dB sharper than the source's"
             next unless hz
