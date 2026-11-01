@@ -13,9 +13,9 @@ RSpec.describe('Inspector editability (Note 15)', :aggregate_failures) do
   let(:inspect) { MB::Sound::UI::Inspect }
   let(:lb) { MB::Sound::Arrangement::LiteralBinding }
 
-  ENTRIES = MB::Sound::Library.index.entries(kind: :instrument).select { |e| e.location.to_s.include?('/presets/') }.map(&:name)
-  CLIP = MB::Sound.seq(MB::Sound::C3, MB::Sound::E3).n4.loop
-  BEAT = MB::Sound.seq(*(35..81).to_a).n16.loop # (every GM drum note: any kit's voices)
+  EDIT_ENTRIES = MB::Sound::Library.index.entries(kind: :instrument).select { |e| e.location.to_s.include?('/presets/') }.map(&:name)
+  EDIT_CLIP = MB::Sound.seq(MB::Sound::C3, MB::Sound::E3).n4.loop
+  EDIT_BEAT = MB::Sound.seq(*(35..81).to_a).n16.loop # (every GM drum note: any kit's voices)
 
   # Kinds of gaps left for later pieces of the maintainer's option 2
   # ("library code takes params"), by the reason the inspector gives.
@@ -116,26 +116,26 @@ RSpec.describe('Inspector editability (Note 15)', :aggregate_failures) do
   end
 
   it 'covers the shipped presets and kits' do
-    expect(ENTRIES).to include(:tine_piano, :tine_crunch, :dnb_reese, :dnb_drums, :init)
+    expect(EDIT_ENTRIES).to include(:tine_piano, :tine_crunch, :dnb_reese, :dnb_drums, :init)
   end
 
   %i[tr909 tr808].each do |kit|
     it "edits every param of the #{kit} kit or lists the gap" do
       check(kit) do
         MB::Sound.instance_exec(kit) { |k| track(:t) { |c| send(k, c) } }
-        MB::Sound.bg(:t, BEAT)
+        MB::Sound.bg(:t, EDIT_BEAT)
       end
     end
   end
 
-  ENTRIES.each do |name|
+  EDIT_ENTRIES.each do |name|
     it "edits every param of #{name} or lists the gap" do
       source = begin
-        MB::Sound.keeping_random_state { MB::Sound.preset(name, midi: CLIP) }
-        CLIP
+        MB::Sound.keeping_random_state { MB::Sound.preset(name, midi: EDIT_CLIP) }
+        EDIT_CLIP
       rescue MB::Sound::GraphIO::LoadError => err
         raise unless err.message.include?('SourceMismatch')
-        BEAT
+        EDIT_BEAT
       end
       check(name) do
         MB::Sound.track(:t, name)
