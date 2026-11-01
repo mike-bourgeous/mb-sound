@@ -95,9 +95,12 @@ module MB
         (`tuning b4: 480`).  Change pitches by name, not arithmetic:
         `pitch.transpose(7)` (semitones, or `7.semitones`, `1.octaves`,
         `50.cents`), `up`/`dn`/`oct` for octaves, `(f * 2).hz` from a
-        number; `440.hz * 2` doubles the sine's amplitude.  `pitch.period`
-        is a length (one cycle), `pitch.frequency` the number in Hz,
-        `40.constant` a fixed value for arithmetic.
+        number; `440.hz * 2` doubles the sine's amplitude, and `v.hz +
+        150` adds 150 to the sine (it warns: in a voice, `v.freq + 150` is
+        150 Hz above the note, a node of Hz for `cutoff:`; two Pitches
+        added raise).  `pitch.period` is a length (one cycle),
+        `pitch.frequency` the number in Hz, `40.constant` a fixed value for
+        arithmetic.
       TEXT
       commands :tuning
       dsl :transpose, :up, :dn, :oct, :period, :frequency
