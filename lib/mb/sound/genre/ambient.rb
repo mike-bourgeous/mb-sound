@@ -1,5 +1,89 @@
 module MB
   module Sound
+    # The key walk (G4, generative-g4, 2026-10-29; the written form too
+    # since gen-midi-2, maintainer 2026-10-30: "Follow the walk"): the
+    # yo scale on D, G, A, and E (a Markov chain, a key every 16 bars,
+    # blending over the last 4: a 384-bar loop, 25.6 minutes at 60 BPM,
+    # on the timeline, so the written arch and the endless form walk the
+    # same keys), which all hold D, E, and A, so the bowls, rin, gong,
+    # and rain stick ring true in every key while the drone (the root, one
+    # 8-bar note per 8 bars), the koto (quarter notes, about four per 8
+    # bars, as the maintainer's "slow the koto" and "maybe half as many
+    # notes" had the written line), and the harp follow it.  Until
+    # gen-midi-2 the written form played a fixed D drone and hand-written
+    # D lines, and the generator swapped these in with use:.
+    module Genre
+      # The ambient template's key walk (see the comment above), shared by
+      # its generators.
+      module Ambient
+        extend Library::Generators::NoteNames # (D2, G1)
+
+        module_function
+
+        # The keys, one every 16 bars (a Markov chain on the yo scale's
+        # roots D, G, A, E; seed 61).
+        def keys
+          MB::Sound.markov(d: { g: 2, a: 2, e: 0.5 }, g: { d: 2, a: 0.5 }, a: { d: 2, e: 1 }, e: { a: 2, d: 1 }, seed: 61).take(24)
+        end
+
+        # The drone's root of each key.
+        def roots = { d: D2, g: G1, a: A1, e: E2 }
+
+        # The walk: the yo scale on each key with its root weighted, held 12
+        # bars and blended over 4 into the next, looping every 384 bars.
+        def walk
+          r = roots
+          MB::Sound.harmony(keys.each_with_index.flat_map { |k, i|
+            w = MB::Sound.scale(:yo, k).weights + MB::Sound.tones(r[k]) * 0.5
+            [[(16 * i).bars, w], [(16 * i + 12).bars, w]]
+          }.to_h, loop: 384.bars)
+        end
+
+        # The roots, stepping with the walk's keys (the drone's harmony).
+        def bass
+          r = roots
+          MB::Sound.harmony(keys.each_with_index.to_h { |k, i| [(16 * i).bars, [r[k]]] }, curve: :step, loop: 384.bars)
+        end
+      end
+    end
+
+    Library::Generators.generator :ambient_roots, instrument: :ambient_drone, tags: %i[ambient drone bass],
+      about: "The ambient walk's root, one 8-bar note per 8 bars (G1..F#2): D2, G1, A1, E2 as the keys walk",
+      params: -> { { seed: 1, harmony: Genre::Ambient.bass } } do |seed:, harmony:|
+      strikes(harmony.over(G1..Fs2), every: 8.bars, length: 8.bars, chance: 1.0, gap: 1, sharpen: 4, velocity: 0.7, note: 8.bars, seed: seed)
+    end
+
+    Library::Generators.generator :ambient_motif, instrument: :ambient_koto, tags: %i[ambient lead motif],
+      about: 'A sparse koto motif on the key walk: quarter notes, about four per 8 bars, a b a c (G4..G5 around D5)',
+      params: -> { { seed: 2, harmony: Genre::Ambient.walk, density: (0.0..1.0).at(0.1), mutate: (0.0..1.0).at(0.2) } } do |seed:, harmony:, density:, mutate:|
+      motifs(harmony, 32, step: 1.n4, form: %i[a b a c], answer: { b: :a }, density: density, vary: 0.3, mutate: mutate, evolve: 2,
+                          range: G4..G5, around: D5, velocity: 0.45..0.8, legato: 1.0, seed: seed)
+    end
+
+    Library::Generators.generator :ambient_figure, instrument: :ambient_harp, tags: %i[ambient arp harp motif],
+      about: 'A swung harp figure on the key walk: sixteenths, a a b a (G4..E5 around B4), swing 0.6',
+      params: -> { { seed: 3, harmony: Genre::Ambient.walk, density: (0.0..1.0).at(0.45), mutate: (0.0..1.0).at(0.15) } } do |seed:, harmony:, density:, mutate:|
+      motifs(harmony, 16, step: 1.n16, form: %i[a a b a], answer: { b: :a }, density: density, vary: 0.2, mutate: mutate,
+                          range: G4..E5, around: B4, velocity: 0.5..0.8, seed: seed).swing(0.6)
+    end
+
+    # The endless form (G4): moods by a Markov chain, each for 4 to 16
+    # bars (16 to 64 s), the arch's dissolve leading into a new emerge:
+    # `genre(:ambient).endless.play` plays forever, the key walking under
+    # it as under the written arch (bin/songs/endless.rb); `.generative`
+    # plays 12 moods.
+    Library::Generators.flow :ambient_chain, genre: :ambient, sections: 12, tags: %i[ambient markov moods],
+      about: 'Moods with no end: emerge, drift, bloom, hush, tide, dissolve (into a new emerge), 4 to 16 bars each',
+      bars: { emerge: 8, drift: [8, 16], bloom: [8, 16], hush: [4, 8], tide: [8, 16], dissolve: 8 },
+      params: -> { { seed: 60 } } do |seed:|
+      markov(emerge: { drift: 1 },
+             drift: { bloom: 3, hush: 1, tide: 1, drift: 0.5 },
+             bloom: { tide: 2, hush: 1.5, drift: 1 },
+             hush: { drift: 2, tide: 1, emerge: 0.5 },
+             tide: { hush: 2, drift: 1.5, dissolve: 0.5 },
+             dissolve: { emerge: 1 }, seed: seed)
+    end
+
     # Zen ambient soundscapes, from the persona panel (2026-10-13): Kaede
     # Rowntree's research (research-persona-zen,
     # research/persona-panel/zen/research.md: Eno's tape loops, kankyō
@@ -37,30 +121,12 @@ module MB
       clip :stick, seq(D5, T, T).n1
       clip :weather, seq(R).n1.loop # (rain and wind ignore their notes)
 
-      # The key walk (G4, generative-g4, 2026-10-29; the written form too
-      # since gen-midi-2, maintainer 2026-10-30: "Follow the walk"): the
-      # yo scale on D, G, A, and E (a Markov chain, a key every 16 bars,
-      # blending over the last 4: a 384-bar loop, 25.6 minutes at 60 BPM,
-      # on the timeline, so the written arch and the endless form walk the
-      # same keys), which all hold D, E, and A, so the bowls, rin, gong,
-      # and rain stick ring true in every key while the drone (the root, one
-      # 8-bar note per 8 bars), the koto (quarter notes, about four per 8
-      # bars, as the maintainer's "slow the koto" and "maybe half as many
-      # notes" had the written line), and the harp follow it.  Until
-      # gen-midi-2 the written form played a fixed D drone and hand-written
-      # D lines, and the generator swapped these in with use:.
-      keys = markov(d: { g: 2, a: 2, e: 0.5 }, g: { d: 2, a: 0.5 }, a: { d: 2, e: 1 }, e: { a: 2, d: 1 }, seed: 61).take(24)
-      roots = { d: D2, g: G1, a: A1, e: E2 }
-      walk = harmony(keys.each_with_index.flat_map { |k, i|
-        w = scale(:yo, k).weights + tones(roots[k]) * 0.5
-        [[(16 * i).bars, w], [(16 * i + 12).bars, w]]
-      }.to_h, loop: 384.bars)
-      bass = harmony(keys.each_with_index.to_h { |k, i| [(16 * i).bars, [roots[k]]] }, curve: :step, loop: 384.bars)
-      clip :drone, strikes(bass.over(G1..Fs2), every: 8.bars, length: 8.bars, chance: 1.0, gap: 1, sharpen: 4, velocity: 0.7, note: 8.bars, seed: 1)
-      clip :motif, motifs(walk, 32, step: 1.n4, form: %i[a b a c], answer: { b: :a }, density: 0.1, vary: 0.3, mutate: 0.2, evolve: 2,
-                               range: G4..G5, around: D5, velocity: 0.45..0.8, legato: 1.0, seed: 2)
-      clip :harp, motifs(walk, 16, step: 1.n16, form: %i[a a b a], answer: { b: :a }, density: 0.45, vary: 0.2, mutate: 0.15,
-                              range: G4..E5, around: B4, velocity: 0.5..0.8, seed: 3).swing(0.6)
+      # The key walk and what follows it (the drone, the koto motif, the
+      # harp figure): L.gen.ambient_roots, L.gen.ambient_motif, and
+      # L.gen.ambient_figure, defined above the template (Genre::Ambient).
+      clip :drone, L.gen.ambient_roots.()
+      clip :motif, L.gen.ambient_motif.()
+      clip :harp, L.gen.ambient_figure.()
 
       knob :space, 0.5, range: 0.0..1.0   # the rooms' level (bowls, rin, gong, koto, harp)
       knob :wear, 0.6, range: 0.0..1.0    # how old the tape is (koto, harp; 0.6 like the presets, textures-5)
@@ -95,19 +161,9 @@ module MB
       scene :dissolve, bowls: :bowl_a, bowls2: :bowl_b, rin: :rin, motif: :motif, harp: :harp, rain: :weather,
                        wear: [0.7, { over: 4 }], space: [0.8, { over: 4 }], drizzle: [0.1, { over: 8 }]
 
-      # The endless form (G4): moods by a Markov chain, each for 4 to 16
-      # bars (16 to 64 s), the arch's dissolve leading into a new emerge:
-      # `genre(:ambient).endless.play` plays forever, the key walking under
-      # it as under the written arch (bin/songs/endless.rb); `.generative`
-      # plays 12 moods.
-      generator markov(emerge: { drift: 1 },
-                       drift: { bloom: 3, hush: 1, tide: 1, drift: 0.5 },
-                       bloom: { tide: 2, hush: 1.5, drift: 1 },
-                       hush: { drift: 2, tide: 1, emerge: 0.5 },
-                       tide: { hush: 2, drift: 1.5, dissolve: 0.5 },
-                       dissolve: { emerge: 1 }, seed: 60),
-                bars: { emerge: 8, drift: [8, 16], bloom: [8, 16], hush: [4, 8], tide: [8, 16], dissolve: 8 },
-                sections: 12
+      # The endless form (G4): L.flow.ambient_chain, defined above the
+      # template.
+      generator L.flow.ambient_chain
 
       loudness(-19..-16)
       true_peak(-1.db)

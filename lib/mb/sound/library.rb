@@ -20,10 +20,14 @@ module MB
       # The head words under MB::Sound::L and the kinds they list (the
       # word heads are provisional: maintainer, 2026-10-26; `mfx` for note
       # effects and `analyze` for audio-to-notes/control racks were `notes`
-      # and `listen` until library-2: maintainer, 2026-10-30).
+      # and `listen` until library-2: maintainer, 2026-10-30; `gen` for
+      # clip generators and `flow` for section chains since lib-gen-1:
+      # maintainer, 2026-10-31, "L.gen + L.flow (rename form to flow) for
+      # now"; L.gen may later merge into L.seq, so the head is only a word
+      # over its kind).
       HEADS = {
         inst: :instrument, fx: :effect, mfx: :note_fx, analyze: :listener, mod: :modulator,
-        kit: :kit, seq: :clip, master: :master, set: :set, env: :envelope, edit: :sample_edit,
+        kit: :kit, seq: :clip, gen: :generator, flow: :flow, master: :master, set: :set, env: :envelope, edit: :sample_edit,
       }.freeze
 
       # The library file format's version (`library 1` at the top of a file;
@@ -293,6 +297,7 @@ require_relative 'library/heads'
 require_relative 'library/finder'
 require_relative 'library/audition'
 require_relative 'library/bench'
+require_relative 'library/generators'
 
 module MB
   module Sound

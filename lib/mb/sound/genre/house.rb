@@ -1,5 +1,19 @@
 module MB
   module Sound
+    # A generated form (G4): a stochastic L-system over the sections, one
+    # to three breakdown-drop cycles between the groove and the outros
+    # (16-bar phrases kept).  `genre(:house).generative(seed: 2).play`
+    # Registered as L.flow.house_chain (lib-gen-1: the template reads it from
+    # the library, `generator L.flow.house_chain`).
+    Library::Generators.flow :house_chain, genre: :house, tags: %i[house lsystem],
+      about: 'One to three breakdown-drop cycles between the groove and the outros (16-bar phrases)',
+      bars: { intro: 16, groove: [16, 32], breakdown: [8, 16], drop: 16, pickup: [8, 16], breakdown2: 8, drop2: [16, 32], outro: 8, outro2: 8 },
+      params: -> { { seed: 124 } } do |seed:|
+      lsystem(%i[intro groove body outro outro2],
+              body: { %i[breakdown drop pickup body] => 2, %i[breakdown drop pickup] => 1, %i[breakdown2 drop2] => 1, %i[breakdown drop2] => 1 },
+              generations: 3, seed: seed)
+    end
+
     # Deep house for DJs (Detroit/Chicago-leaning), from Charlie "Munro"
     # Munro's template data (persona panel round 2 sheet, section 7b,
     # /app/workbench/briefs/persona2/munro.md; genre-fixes, 2026-10-18),
@@ -31,13 +45,8 @@ module MB
         outro      8
         outro2     8
       end
-      # A generated form (G4): a stochastic L-system over the sections, one
-      # to three breakdown-drop cycles between the groove and the outros
-      # (16-bar phrases kept).  `genre(:house).generative(seed: 2).play`
-      generator lsystem(%i[intro groove body outro outro2],
-                        body: { %i[breakdown drop pickup body] => 2, %i[breakdown drop pickup] => 1, %i[breakdown2 drop2] => 1, %i[breakdown drop2] => 1 },
-                        generations: 3, seed: 124),
-                bars: { intro: 16, groove: [16, 32], breakdown: [8, 16], drop: 16, pickup: [8, 16], breakdown2: 8, drop2: [16, 32], outro: 8, outro2: 8 }
+      # A generated form (G4): L.flow.house_chain, defined above the template.
+      generator L.flow.house_chain
 
       four = 'X...X...X...X...'
       offbeat = '..6...6...6...6.'

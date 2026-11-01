@@ -162,10 +162,13 @@ module MB
                 length: length)
         end
 
-        # The builder line (see Builder#generator).
+        # The builder line (see Builder#generator): a library chain's bars
+        # and sections only where they differ from its entry's.
         def ruby
-          parts = [source.to_ruby, "bars: #{Genre.ruby(bars)}"]
-          parts << "sections: #{sections}" if sections
+          from = Library::Generators.origin(source)&.entry
+          parts = [source.to_ruby]
+          parts << "bars: #{Genre.ruby(bars)}" unless from && bars == Library::Generators.bars(from)
+          parts << "sections: #{sections}" if sections && sections != from&.settings&.[](:sections)
           parts << "length: #{Genre.ruby(length)}" if length
           parts << "use: #{Genre.ruby(use)}" unless use.empty?
           parts << "scenes: #{Genre.ruby(scenes)}" unless scenes.empty?
@@ -803,8 +806,18 @@ module MB
         #
         #     generator lsystem(%i[intro body outro], body: { %i[build drop body] => 1, %i[build drop] => 2 }, generations: 3, seed: 1),
         #               bars: { intro: 16, build: 8, drop: [16, 32], outro: 16 }
+        #
+        # +source+ may be a section chain from the library (an L.flow entry
+        # or what it built: `generator L.flow.techno_chain`,
+        # `generator L.flow.techno_chain(seed: 4)`): its bars and sections
+        # are the defaults, +bars+ and +sections+ change them.
         def generator(source, bars: {}, sections: nil, use: {}, scenes: {}, length: nil, **more)
-          @generator = source && Generator.new(source: source, bars: bars.merge(more), sections: sections, use: use, scenes: scenes, length: length)
+          return @generator = nil unless source
+          from = source.is_a?(Library::Entry) ? source : Library::Generators.origin(source)&.entry
+          source = Library::Generators.source(source)
+          bars = (Library::Generators.bars(from) || {}).merge(bars).merge(more)
+          sections ||= from&.settings&.[](:sections)
+          @generator = Generator.new(source: source, bars: bars, sections: sections, use: use, scenes: scenes, length: length)
         end
 
         # A drum Kit (e.g. `kit :drop, grid(16, kick: 'X.........X.....')`).

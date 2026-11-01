@@ -65,6 +65,7 @@ module MB
         when MB::Sound::Curve then v.to_ruby
         when MB::Sound::Param::Ranged then "(#{nested.call(v.range)}).at(#{nested.call(v.default)})"
         when MB::Sound::Generative::Value then v.to_ruby { |x| nested.call(x) }
+        when MB::Sound::Library::Generators::Path then v.text
         when Module then class_name(v)
         when Data
           name = class_name(v.class)

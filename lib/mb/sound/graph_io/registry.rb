@@ -166,6 +166,11 @@ module MB
 
         NOTE_NAME = /\A[A-G][sb]?\d+\z/
 
+        # Library heads documents may walk (`L.gen.techno_beat(seed: 3)`,
+        # `generate L.flow.techno_chain.(), bars: ...`): the generators'
+        # (lib-gen-1; recipes print their builds as these calls).
+        LIBRARY_HEADS = Set[:gen, :flow].freeze
+
         class << self
           # Recorded names by target (GraphNode::Recipe.wrapped).
           def wrapped
@@ -191,6 +196,11 @@ module MB
           # The callable names for +obj+ (for errors and did_you_mean).
           def names_for(obj)
             case obj
+            when MB::Sound::Library::Heads::Root then LIBRARY_HEADS
+            when MB::Sound::Library::Heads::Query
+              LIBRARY_HEADS.include?(MB::Sound::Library::HEADS.key(obj.kind)) ? obj.words.to_set : Set.new
+            when MB::Sound::Library::Entry
+              LIBRARY_HEADS.include?(MB::Sound::Library::HEADS.key(obj.kind)) ? Set[:call] : Set.new
             when Numeric then numeric
             when Array then wrapped.fetch(:array, Set.new).to_set | ARRAY_VALUES
             when Module then class_methods(obj)
@@ -241,6 +251,7 @@ module MB
           def constant(text)
             text = text.delete_prefix('::').delete_prefix('MB::Sound::')
             return VALUE_CONSTANTS[text] if VALUE_CONSTANTS.key?(text)
+            return MB::Sound::L if text == 'L' # (the library's heads; LIBRARY_HEADS)
             return unrecorded { MB::Sound::Note.new(text) } if text.match?(NOTE_NAME)
 
             constants[text]

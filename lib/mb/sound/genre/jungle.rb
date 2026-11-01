@@ -1,5 +1,20 @@
 module MB
   module Sound
+    # A generated form (G4): a stochastic L-system over the sections (rolls
+    # into drops, breakdowns into the second drop), another arrangement
+    # for each seed.  `genre(:jungle).generative(seed: 2).play`
+    # Registered as L.flow.jungle_chain (lib-gen-1: the template reads it from
+    # the library, `generator L.flow.jungle_chain`).
+    Library::Generators.flow :jungle_chain, genre: :jungle, tags: %i[jungle lsystem],
+      about: 'Rolls into drops, breakdowns into the second drop: another arrangement for each seed',
+      bars: { intro: [8, 16], lift: 16, roll: [8, 16], drop: [16, 32], breakdown: [8, 16], drop2: [16, 32], outro: 16 },
+      params: -> { { seed: 165 } } do |seed:|
+      lsystem(%i[intro lift body outro],
+              body: { %i[roll drop turn body] => 2, %i[roll drop turn] => 2, %i[drop turn] => 1 },
+              turn: { %i[breakdown drop2] => 3, %i[breakdown drop] => 1 },
+              generations: 3, seed: seed)
+    end
+
     # 1990s-2000s optimistic (atmospheric) jungle, from the persona panel
     # (2026-10-13): Nev Ashdown's research (research-persona-jungle,
     # research/persona-panel/jungle/research.md) and "Memory Card"
@@ -24,14 +39,8 @@ module MB
         drop2     32
         outro     16
       end
-      # A generated form (G4): a stochastic L-system over the sections (rolls
-      # into drops, breakdowns into the second drop), another arrangement
-      # for each seed.  `genre(:jungle).generative(seed: 2).play`
-      generator lsystem(%i[intro lift body outro],
-                        body: { %i[roll drop turn body] => 2, %i[roll drop turn] => 2, %i[drop turn] => 1 },
-                        turn: { %i[breakdown drop2] => 3, %i[breakdown drop] => 1 },
-                        generations: 3, seed: 165),
-                bars: { intro: [8, 16], lift: 16, roll: [8, 16], drop: [16, 32], breakdown: [8, 16], drop2: [16, 32], outro: 16 }
+      # A generated form (G4): L.flow.jungle_chain, defined above the template.
+      generator L.flow.jungle_chain
 
       # The chop is the instrument (genre-fixes, 2026-10-18; Nev: "You
       # built the sampler and the template didn't move in"): the shipped

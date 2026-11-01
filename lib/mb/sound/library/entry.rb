@@ -33,8 +33,12 @@ module MB
       SHELF_ORDER = %i[session env project user gem builtin].freeze
 
       # What an entry is, musically: its scale.  Each kind has a head
-      # under MB::Sound::L (see HEADS).
-      KINDS = %i[instrument effect note_fx listener modulator kit clip master set envelope sample_edit].freeze
+      # under MB::Sound::L (see HEADS).  +generator+ is a clip generator
+      # (note material for a track: motifs, beats, strikes, melodies,
+      # generate blocks; L.gen), +flow+ a section chain that drives a flow
+      # (markov and lsystem sources; L.flow) (lib-gen-1, maintainer
+      # 2026-10-31: "L.gen + L.flow (rename form to flow) for now").
+      KINDS = %i[instrument effect note_fx listener modulator kit clip generator flow master set envelope sample_edit].freeze
 
       # One library entry: a frozen value describing something you can
       # find and use by name (maintainer's library design, 2026-10-24:
@@ -110,9 +114,10 @@ module MB
         alias_method :[], :call
 
         # The words that narrow a search to this entry under its kind's
-        # head: its family (when it isn't :preset) and its tags.
+        # head: its family (when it isn't :preset or the kind's own word,
+        # as :generator under L.gen) and its tags.
         def words
-          (family == :preset ? tags : [family, *tags]).uniq
+          (family == :preset || family == kind ? tags : [family, *tags]).uniq
         end
 
         # Name words ("dnb_reese" => [:dnb, :reese]).

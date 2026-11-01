@@ -118,12 +118,27 @@ module MB
 
         module_function
 
-        # Defines the words of +query+ as its singleton methods.
+        # Defines the words of +query+ as its singleton methods.  Given
+        # arguments, a word naming an entry calls it: `L.gen.techno_beat(seed:
+        # 3)` is `L.gen.techno_beat.(seed: 3)`, `L.fx.hall(sig)` is
+        # `L.fx.hall.(sig)` (lib-gen-1).
         def define_words(query, words)
           words.each do |w|
             next if Query::OWN.include?(w) || Query.method_defined?(w) || Object.method_defined?(w)
-            query.define_singleton_method(w) { word(w) }
+            query.define_singleton_method(w) { |*args, **kwargs, &block|
+              found = word(w)
+              next found if args.empty? && kwargs.empty? && block.nil?
+              Heads.call_word(found, "#{path}.#{w}", args, kwargs, block)
+            }
           end
+        end
+
+        # Calls +found+ (what a word gave) with arguments: an Entry builds;
+        # a Query (several entries) raises with their paths.
+        def call_word(found, path, args, kwargs, block)
+          return found.call(*args, **kwargs, &block) if found.is_a?(Entry)
+          raise ArgumentError, "#{path} is #{found.size} entries (#{found.first(6).map(&:name).join(', ')}#{found.size > 6 ? ', ...' : ''}); " \
+            "name one to call it (#{path}.#{found.first.name}(...))"
         end
 
         # Tab completions for +text+ (a console word like "L.fx.re" or

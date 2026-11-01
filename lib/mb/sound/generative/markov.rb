@@ -52,12 +52,13 @@ module MB
           @walk = []
           @walk_tail = nil
           @finish_distances = nil
+          @origin = nil # (a library entry's build: Library::Generators)
           @lock = Mutex.new
         end
 
         # The same chain with another seed.
         def reseed(seed)
-          Markov.new(@rules, start: @start, seed: seed)
+          Library::Generators.reseeded(self, Markov.new(@rules, start: @start, seed: seed), seed)
         end
 
         # True if a weight is a moving param (see the class comment).
@@ -212,8 +213,15 @@ module MB
           [tail[1], name].freeze
         end
 
-        # Ruby that builds this chain again.
+        # Ruby that builds this chain again: the library entry's call that
+        # built it (`L.flow.techno_chain(seed: 4)`), else the chain
+        # (#chain_ruby).
         def to_ruby(&value_text)
+          @origin ? Library::Generators.call_text(@origin, &value_text) : chain_ruby(&value_text)
+        end
+
+        # The chain as `markov(...)`.
+        def chain_ruby(&value_text)
           # (moving weights print as the expression that made them: knob(:x))
           value_text ||= ->(v) { MIDI::Param.label(v) }
           reserved = @rules.keys.any? { |k| !k.is_a?(Symbol) || %i[start seed].include?(k) }
@@ -229,16 +237,17 @@ module MB
         alias to_s to_ruby
 
         def inspect
-          "#<Markov #{to_ruby}>"
+          "#<Markov #{chain_ruby}>"
         end
 
+        # (the same chain, however it was made)
         def ==(other)
-          other.is_a?(Markov) && other.to_ruby == to_ruby
+          other.is_a?(Markov) && other.chain_ruby == chain_ruby
         end
         alias eql? ==
 
         def hash
-          to_ruby.hash
+          chain_ruby.hash
         end
 
         private

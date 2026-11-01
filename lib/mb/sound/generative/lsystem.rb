@@ -41,13 +41,15 @@ module MB
           @seed = Integer(seed)
           @vary = vary ? true : false
           @words = {}
+          @origin = nil # (a library entry's build: Library::Generators)
           @lock = Mutex.new
         end
 
         # The same system with another seed.
         def reseed(seed)
-          LSystem.new(@axiom, @rules.transform_values { |alts| alts.length == 1 && alts[0][1] == 1 ? alts[0][0] : alts.to_h },
-                      generations: @generations, seed: seed, vary: @vary)
+          copy = LSystem.new(@axiom, @rules.transform_values { |alts| alts.length == 1 && alts[0][1] == 1 ? alts[0][0] : alts.to_h },
+                             generations: @generations, seed: seed, vary: @vary)
+          Library::Generators.reseeded(self, copy, seed)
         end
 
         # True if every visit of a flow grows a new word.
@@ -130,7 +132,15 @@ module MB
           false
         end
 
+        # Ruby that builds this system again: the library entry's call that
+        # built it (`L.flow.dnb_chain(seed: 4)`), else the system
+        # (#chain_ruby).
         def to_ruby(&value_text)
+          @origin ? Library::Generators.call_text(@origin, &value_text) : chain_ruby
+        end
+
+        # The system as `lsystem(...)`.
+        def chain_ruby(&_value_text)
           reserved = @rules.keys.any? { |k| %i[generations seed vary].include?(k) }
           alt = ->(word) { word.length == 1 ? word[0].inspect : "%i[#{word.join(' ')}]" }
           rule = ->(alts) {
@@ -145,16 +155,17 @@ module MB
         alias to_s to_ruby
 
         def inspect
-          "#<LSystem #{to_ruby}>"
+          "#<LSystem #{chain_ruby}>"
         end
 
+        # (the same system, however it was made)
         def ==(other)
-          other.is_a?(LSystem) && other.to_ruby == to_ruby
+          other.is_a?(LSystem) && other.chain_ruby == chain_ruby
         end
         alias eql? ==
 
         def hash
-          to_ruby.hash
+          chain_ruby.hash
         end
 
         private
