@@ -213,6 +213,7 @@ module MB
         @stopping = false
         @thread = Thread.new { monitor }
         @thread.name = 'dropout-probe'
+        ExitClose.register(self) # (a console session that quits still writes its log)
         unless @options[:quiet]
           $stdout.puts "Dropout probe: #{@traced ? describe_output : "#{@output.class} has no dropout trace (no underruns to see; render timings only)"}#{@latency_probe ? "; system probe #{@latency_probe.stats[:priority]}" : ''}"
         end
@@ -224,6 +225,7 @@ module MB
       def stop
         return self unless @thread
 
+        ExitClose.unregister(self)
         @stopping = true
         @thread.join
         @thread = nil
@@ -243,6 +245,12 @@ module MB
         reanalyze
         save if @options[:json]
         self
+      end
+
+      # #finish if still running (ExitClose calls it at exit).
+      def close
+        finish if @thread
+        nil
       end
 
       # Stops, prints the report, and says where the files are.
