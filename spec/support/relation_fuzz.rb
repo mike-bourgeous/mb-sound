@@ -86,6 +86,16 @@ module RelationFuzz
     /\Acapture tap/, # (live capture plumbing)
   ].freeze
 
+  # Relations that save and rebuild a graph: they skip graphs with a sweep
+  # leaf whose moves are performance (GraphSweep::PERFORMANCE_STATE, the
+  # list recipe_spec and graph_io_spec use: knob moves don't save), and the
+  # other relations still run on them
+  ROUND_TRIPS = %i[recipe document].freeze
+
+  def performance_state?(code)
+    GraphSweep::PERFORMANCE_STATE.each_key.any? { |name| code.include?("RelationFuzz.sweep(#{name.inspect})") }
+  end
+
   # Sweep factories with complex outputs
   COMPLEX_SWEEPS = ['HilbertIIR', 'complex matrix (Analytic)'].freeze
 
@@ -295,9 +305,11 @@ module RelationFuzz
   def peak(render) = render.map { |r| r.length == 0 ? 0.0 : r.abs.max }.max || 0.0
 
   # Checks +relation+ for +code+: nil if it holds, :skip if it doesn't apply
-  # (a graph that can't print, a KNOWN case), else a failure message.
+  # (a graph that can't print, a KNOWN case, a round trip of a sweep leaf
+  # whose moves are performance), else a failure message.
   def check(relation, code)
     return :skip if KNOWN.fetch(relation, []).any? { |re, _| code.match?(re) }
+    return :skip if ROUND_TRIPS.include?(relation) && performance_state?(code)
 
     case relation
     when :plan_exact, :plan_fast

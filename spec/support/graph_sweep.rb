@@ -514,6 +514,19 @@ module GraphSweep
     node_factories + svf_factories + biquad_factories + four_pole_factories + loop_filter_factories + filter_object_factories
   end
 
+  # Factories whose graphs move by themselves in ways that are performance,
+  # not graph structure (knob ramps and jumps: turns, in a take), so to_ruby
+  # and documents keep their values but not their moves, with reasons.  One
+  # list for every round-trip check of the factories: recipe_spec's
+  # state_only, graph_io_spec's values_only, and RelationFuzz's :recipe and
+  # :document relations (fix-batch-1102b: the relation fuzz ran the round
+  # trips on kit-live-1's moving-knob kit factory, left out of only the
+  # first two, whenever a seed drew it as a leaf).
+  PERFORMANCE_STATE = {
+    'knob moves (Knob, Knob::Reader: a ramp, a jump, a followed node)' => 'knob moves are performance (turns, in a take), not the graph',
+    'drums with knob settings (live kit knobs)' => 'knob moves are performance (turns, in a take), not the graph',
+  }.freeze
+
   # Node classes the sweep doesn't build, with reasons.
   EXEMPT = {
     'MB::Sound::Envelope::PreviewGate' => "the envelope preview copy's one-note gate (a display render); envelope_view_spec runs it",
