@@ -188,7 +188,7 @@ module MB
             kt = kit_target(roots, node, param, all: all) and return kt
           end
 
-          call = call_of(node) or raise Error, unrecorded(roots, param)
+          call = call_of(node) or raise Error, (kit_internal(roots, node, param, all) || unrecorded(roots, param))
           # (a call reached through a bundle inside a graph document binds
           # like the document's own calls since editability-1; before, it
           # stayed fixed while the document's own calls bound: dnb_reese's
@@ -269,6 +269,22 @@ module MB
           kw = call.kwargs.keys.find { |k| kit_voice_name(kit, call, k) == voice.name } || voice.name
           nth = keys_of(roots, method, all: all).index(key) or raise Error, "#{method} isn't in the track's graph"
           Target.new(kind: :call, call_name: method, nth: nth, key: key, slot: [:kw, kw, [setting]], param: name, value: value, document: nil, arg: name, mode: :build)
+        end
+
+        # Why +param+ of +node+, made inside a drum kit voice's code (an
+        # 808 hat's bandpass), can't be bound, naming the voice's settings
+        # that can, or nil if +node+ isn't in a kit voice.
+        def kit_internal(roots, node, param, all = nil)
+          (all || nodes(roots)).each do |k|
+            next unless k.is_a?(Drums::Kit)
+            k.voices.each do |vname, v|
+              g = v.graph
+              next unless g.equal?(node) || (g.respond_to?(:graph) && g.graph.any? { |x| x.equal?(node) })
+              settings = v.param_info.keys
+              return "#{param}: set inside the #{k.machine} #{vname.to_s.tr('_', ' ')}'s code; its settings are the #{vname} row's (#{settings.join(', ')})"
+            end
+          end
+          nil
         end
 
         # The voice name keyword +k+ of kit call +call+ (which made +kit+)
@@ -564,10 +580,10 @@ module MB
         # the maintainer's "Pressing enter on filter env attack did not
         # give me a way to adjust it ... the displayed time did not
         # change").  Returns [name, qualified?].
-        def knob_name(track, t, roots)
+        def knob_name(track, t, roots, all: nil)
           plain = Session::Name.param(track, t.param).to_sym
           return [plain, false] if t.kind == :document
-          read = nodes(roots).any? { |n| n.is_a?(GraphNode::Knob::Reader) && n.knob.name == plain }
+          read = (all || nodes(roots)).any? { |n| n.is_a?(GraphNode::Knob::Reader) && n.knob.name == plain }
           return [plain, false] unless read
           [Session::Name.param(track, :"#{t.call_name}_#{t.param}").to_sym, true]
         end

@@ -218,7 +218,7 @@ module MB
                   else
                     begin
                       t = lb.target(entry[:roots], n, name, all: all)
-                      kname, qualified = lb.knob_name(track, t, entry[:roots])
+                      kname, qualified = lb.knob_name(track, t, entry[:roots], all: all)
                       Bind.new(line: lb.line(track, t, as: qualified ? kname : nil).freeze, knob: kname, reason: nil)
                     rescue StandardError => e
                       Bind.new(line: nil, knob: nil, reason: (e.is_a?(lb::Error) ? e.message : "#{e.class}: #{e.message}").dup.freeze)

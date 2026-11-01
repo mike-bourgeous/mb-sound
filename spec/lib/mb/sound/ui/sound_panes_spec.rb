@@ -315,9 +315,10 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(again.nodes.reject.with_index { |_, i| i == again.node }).to eq(info.nodes.reject.with_index { |_, i| i == info.node })
     end
 
-    # The maintainer, 2026-10-30: "Toggle" (a preset's fixed numbers as
-    # read-only panel cells; library-2)
-    it 'shows a preset\'s fixed numbers as read-only panel cells while F is on' do
+    # The maintainer, 2026-10-30: "Toggle" (a preset's numbers as panel
+    # cells; library-2).  Since editability-1 they bind like any track's
+    # literals, as the sections view's do (they were read-only cells).
+    it 'shows a preset\'s numbers as bindable panel cells while F is on' do
       ui::Inspect.target = { track: :bass, node: nil }
       snap = live_snap
       pane = ui.panes.fetch(:inspector)
@@ -325,20 +326,22 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(snap.inspector.document).to eq('dnb_reese')
       plain = pane.send(:pick_list, st, snap.inspector)
       expect(plain.select { |e| e[0] == :param }).to all(satisfy { |e| snap.inspector.nodes[e[3]].knob_of(e[1]) }) # (knob cells only)
-      expect(draw(:inspector, snap, st, w: 100, h: 30)[0]).to include('F show fixed')
-      expect(key(:inspector, st, :fixed)).to eq("dnb_reese's fixed numbers shown, read-only (F hides them)")
+      expect(draw(:inspector, snap, st, w: 100, h: 30)[0]).to include('F show numbers')
+      expect(key(:inspector, st, :fixed)).to eq("dnb_reese's numbers shown (Enter or Left/Right binds one; F hides them)")
       shown = pane.send(:pick_list, st, snap.inspector)
-      fixed = shown - plain
-      expect(fixed).not_to be_empty
-      expect(fixed).to all(satisfy { |e| e[0] == :param && snap.inspector.nodes[e[3]].knob_of(e[1]).nil? })
-      expect(draw(:inspector, snap, st, w: 100, h: 30)[0]).to include('F hide fixed')
-      # A fixed cell is read-only: turns, Enter, and the status line say so
-      st[:pick] = shown.index(fixed.first)
-      note = /fixed in dnb_reese \(read-only; its params are bass's knobs; F hides these\)/
-      expect(key(:inspector, st, :turn, 0.05)).to match(note)
-      expect(key(:inspector, st, :ask)).to match(note)
-      expect(pane.enter_hint(st)).to match(note)
-      expect(key(:inspector, st, :fixed)).to eq("dnb_reese's fixed numbers hidden (F shows them)")
+      numbers = shown - plain
+      expect(numbers).not_to be_empty
+      expect(numbers).to all(satisfy { |e| e[0] == :param && snap.inspector.nodes[e[3]].knob_of(e[1]).nil? })
+      expect(draw(:inspector, snap, st, w: 100, h: 30)[0]).to include('F hide numbers')
+      # A number's cell offers its bind, as in the sections view
+      # (picking a cell picks its row, whose binds the next snapshot has)
+      ui::Inspect.target = { track: :bass, node: numbers.first[3] }
+      st[:snap] = snap = live_snap
+      list = pane.send(:pick_list, st, snap.inspector)
+      st[:pick] = list.index { |e| e[0] == :param && e[1] == numbers.first[1] && e[3] == numbers.first[3] }
+      expect(pane.enter_hint(st)).to match(/\Amake \w+ knob :"bass\/\w+": rebuilds bass/)
+      st[:pick] = nil
+      expect(key(:inspector, st, :fixed)).to eq("dnb_reese's numbers hidden (F shows them)")
       expect(pane.send(:pick_list, st, snap.inspector)).to eq(plain)
     end
 
