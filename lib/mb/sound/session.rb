@@ -553,12 +553,32 @@ module MB
         # The running state to carry from the graph this one replaces (see
         # Carry): matched here, copied on the swap frame
         carried = nil
+        follows = nil
         if carry && name
-          old = @mutex.synchronize { @players.each_value.find { |p| p.name == name && p.current? } }
-          carried = Carry.plan(old.input, nodes) if old
+          # A graph queued for the name before this rebuild replaces the
+          # current one first (before, this one was planned against the
+          # current graph and dropped where the first had replaced it: two
+          # binds before the bar landed only the first; editability-1,
+          # SessionFuzz's :carry relation).  A carrying rebuild queued for
+          # this time or later is superseded (this build has its changes
+          # too: it is cancelled, and this one carries from the current
+          # graph); anything else lands first, and this one follows it,
+          # carrying from the graph it starts.
+          follows = @render_lock.synchronize {
+            pending = @changes.reverse_each.find { |c| c.subject == name && START_KINDS.include?(c.kind) }
+            if pending&.kind == :bg && pending.split && pending.time >= time
+              cancel_changes(pending)
+              nil
+            else
+              pending&.kind == :bg && pending.graph ? pending : nil
+            end
+          }
+          old = follows ? nil : @mutex.synchronize { @players.each_value.find { |p| p.name == name && p.current? } }
+          carried = Carry.plan(follows ? follows.graph : old.input, nodes) if follows || old
           # (+full_now+: a time for a swap that cuts, sooner than +time+;
           # Arrangement#rebuild_track in sound design)
           time = full_now if full_now && carried&.full?
+          time = MB::M.max(time, follows.time) if follows
         end
 
         @render_lock.synchronize {
@@ -579,7 +599,8 @@ module MB
           bind_bus_taps(nodes, name, found: found) or return nil
           attach_bus_spies(name, nodes, found: found) if @bus_only.key?(name)
 
-          c = change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes, graph: input, split: !carried.nil?, spill: spill, hold: hold) { |t|
+          c = change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes, graph: input, split: !carried.nil?, spill: spill, hold: hold,
+                     follows: follows) { |t|
             add_now(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: t, fade: fade, explicit_fade: explicit_fade,
                     carry: carried, clip: clip, spill: spill)
           }
@@ -1405,7 +1426,10 @@ module MB
           # declick time.
           # (a muted player asleep since its mute holds that moment's state:
           # its replacement starts fresh, as before)
-          carried_from = carry && @players.each_value.find { |p| p.name == name && p.current? && p.started && !p.asleep && p.input.equal?(carry.old_input) }
+          # (or the carried player of a rebuild that landed on this frame,
+          # before it played: it holds the state carried into it; see #add's
+          # +follows+)
+          carried_from = carry && @players.each_value.find { |p| p.name == name && p.current? && (p.started || p.carried) && !p.asleep && p.input.equal?(carry.old_input) }
           spiller = nil
           if carried_from
             # (spill-over only where something can't carry: an unfit pair or

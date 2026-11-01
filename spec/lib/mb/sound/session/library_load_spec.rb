@@ -129,8 +129,11 @@ RSpec.describe('Loading a library instrument onto a playing track', :aggregate_f
       end
       s.close
     RUBY
-    landing = %w[0 1].map { |w|
-      out, status = Open3.capture2e({ 'MB_SOUND_YJIT' => '1', 'WARM' => w }, RbConfig.ruby, '-I', File.expand_path('../../../../../lib', __dir__), '-e', script)
+    # (both at once: each is a few seconds of building and warming)
+    runs = %w[0 1].map { |w|
+      Thread.new { Open3.capture2e({ 'MB_SOUND_YJIT' => '1', 'WARM' => w }, RbConfig.ruby, '-I', File.expand_path('../../../../../lib', __dir__), '-e', script) }
+    }.map(&:value)
+    landing = runs.map { |out, status|
       expect(status).to be_success, out
       Integer(out[/landing (\d+)/, 1])
     }

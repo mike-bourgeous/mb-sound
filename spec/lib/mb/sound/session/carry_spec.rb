@@ -24,7 +24,7 @@ RSpec.describe(MB::Sound::Session::Carry, :aggregate_failures) do
   # name) from CARRY_CLIP, with +act+ run (in the Session's context) after the
   # first 3200 frames; 160000 frames in +size+-frame buffers.  Returns
   # [samples, Session#last_carry].
-  def play(act = nil, patch: CARRY_LEAD, size: 800, frames: 160_000)
+  def play(act = nil, patch: CARRY_LEAD, size: 800, frames: 160_000, after: nil)
     MB::Sound.rewind
     MB::Sound.seed(1)
     out = MB::Sound::Sampler::CaptureOutput.new(channels: 2, buffer_size: size)
@@ -36,6 +36,7 @@ RSpec.describe(MB::Sound::Session::Carry, :aggregate_failures) do
     s.process_buffer while s.frame < 3200
     MB::Sound::Session.with_context(session: s) { act.call(s) } if act
     s.process_buffer while s.frame < frames
+    after&.call(s)
     [Numo::DFloat.cast(out.captured[0])[0...frames], s.last_carry]
   ensure
     s&.close
@@ -55,6 +56,38 @@ RSpec.describe(MB::Sound::Session::Carry, :aggregate_failures) do
     fresh, = play(->(s) { CARRY_REBUILD.(s, false) })
     expect(fresh[0...CARRY_SWAP]).to eq(plain[0...CARRY_SWAP])
     expect(rms_db(fresh[CARRY_SWAP...(CARRY_SWAP + 4800)]) - rms_db(plain[CARRY_SWAP...(CARRY_SWAP + 4800)])).to be < -20
+  end
+
+  # Two rebuilds queued for one launch point (editability-1: two binds
+  # before the bar landed only the first; the second was planned against
+  # the graph the first replaces, and Session#add_now drops a rebuild whose
+  # graph is gone): the second follows the first, carrying from it.
+  it 'lands both of two rebuilds queued for one launch point, carrying through both bit for bit' do
+    plain, = play
+    knobs = nil
+    both, plan = play(->(s) {
+      MB::Sound.bind(:lead, lp4: :resonance)
+      s.process_buffer
+      MB::Sound.bind(:lead, amp_env: :release)
+    }, after: ->(s) {
+      knobs = s.ui_graphs[:lead].graph.grep(MB::Sound::GraphNode::Knob::Reader).map { |r| r.knob.name }.uniq.sort
+    })
+    expect(knobs).to eq(%i[lead/release lead/resonance])
+    expect(plan).to be_full
+    expect(both).to eq(plain)
+
+    # The second queued for a later launch point: it follows the first,
+    # carrying from the graph the first started (bar 2:1, then 2:3)
+    landed = nil
+    later, plan = play(->(s) {
+      MB::Sound.bind(:lead, lp4: :resonance)
+      arr = s.arrangement
+      tr = arr.tracks[:lead]
+      s.command('rebuild') { arr.send(:start_track, tr, tr.clip, 3/2r, nil, carry: true, spill: true) }
+    }, after: ->(s) { landed = s.journal.changes.select { |e| e.subject == :lead && e.kind == :bg }.map { |e| [e.status, e.lands.to_s] } })
+    expect(landed.last(2)).to eq([[:landed, '2:1'], [:landed, '2:3']])
+    expect(plan).to be_full
+    expect(later).to eq(plain)
   end
 
   it 'lands on its exact frame at any buffer size' do
