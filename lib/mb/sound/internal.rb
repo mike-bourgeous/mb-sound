@@ -326,6 +326,33 @@ module MB
         @checkout_tmp_dir = main && File.join(main, 'tmp')
       end
 
+      # An ArgumentError saying how to play the MIDI::Stream +stream+ on
+      # player +name+'s instrument, for console +command+ (bg, cue, swap),
+      # or nil when +stream+ isn't a Stream or +name+ isn't a track with a
+      # patch (+any+: for any player, as swap needs clips everywhere).
+      # ux-notes-1: the maintainer's `cue :bowl, riff.loop.echo(...)`
+      # played the stream on the default patch (Playable's soft synth), and
+      # `launch` then replaced the track's instrument with it ("I wanted to
+      # put the sequence on cue on the existing instrument"); `bg :bowl,
+      # stream` did the same at the track's launch point.  Clip#echo, #arp,
+      # #strum, #chord, ... return live Streams (decision 8, 2026-10-09:
+      # their echoes ring past loop points), and a track's patch plays
+      # clips, so the answer is Clip#bake.
+      def stream_for_track_error(command, name, stream, any: false)
+        return nil unless stream.is_a?(MIDI::Stream)
+        unless any
+          tr = Session.current.arrangement.tracks[name] if name.is_a?(Symbol)
+          return nil unless tr&.patch?
+        end
+        what = stream.source.is_a?(MIDI::Transform) ? stream.source.to_s : nil
+        op = what&.[](/\A([a-z_]+)\(/, 1) || 'echo'
+        where = any && !Session.current.arrangement.tracks[name] ? "#{name.inspect}'s clips" : "#{name.inspect}'s instrument"
+        ArgumentError.new(
+          "#{command} #{name.inspect}: #{what ? "#{what} is" : 'that is'} a live MIDI stream (clip.#{op}(...) returns one), not a clip, so it can't play on #{where}; " \
+          "bake the #{op} into a clip: `riff.bake(#{op}(...))` instead of `riff.#{op}(...)` (a loop's #{op == 'echo' ? 'echoes wrap' : 'notes wrap'} to its start)"
+        )
+      end
+
       # Returns a Symbol describing the type of output that should be used:
       # OUTPUT_TYPE, else :device (see IOMethods#output).
       def detect_output

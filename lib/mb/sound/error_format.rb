@@ -46,8 +46,42 @@ module MB
             nil
           end
         end
+        console = e.is_a?(NameError) && (e.receiver.equal?(MB::Sound) rescue false)
+        if console && !e.is_a?(NoMethodError) && (hint = session_name_hint(e.name))
+          suggestions.unshift(hint)
+        elsif console && e.is_a?(NoMethodError) && (hint = GUESSES[e.name])
+          # (Ruby's spelling suggestions for these, write and collect, lead
+          # nowhere)
+          suggestions.replace([hint.call(*e.args.first(1))])
+        end
         message = message.sub(/ for module MB::Sound\z/, '').sub(/ for module MB::Sound(?=\n)/, '')
         [message.rstrip, suggestions.uniq]
+      end
+
+      # Console guesses with no method of that name, and what they meant
+      # (ux-notes-1: the maintainer's `wire :bowl, clip` and `connect
+      # :bowl, clip`, after swap refused a stream): name => Proc of the
+      # first argument giving the suggestion.
+      CLIP_ON_TRACK = ->(name = :bass, *) {
+        n = name.is_a?(Symbol) ? name.inspect : ':bass'
+        "swap #{n}, clip (a clip on #{n}'s instrument, at its next launch point; bg #{n}, clip starts a stopped track)"
+      }
+      GUESSES = { wire: CLIP_ON_TRACK, connect: CLIP_ON_TRACK, attach: CLIP_ON_TRACK }.freeze
+
+      # For a bare word the console doesn't know that names something in
+      # the current Session (a track, scene, or knob), the Symbol to write
+      # (`design bowl` for `design :bowl`; ux-notes-1), else nil.
+      def session_name_hint(name)
+        return nil unless name.is_a?(Symbol)
+        s = Session.existing or return nil
+        arr = s.arrangement
+        kind = if arr.tracks.key?(name) then 'track'
+               elsif arr.scenes.key?(name) then 'scene'
+               elsif s.knobs.key?(name) then 'knob'
+               end
+        kind && "#{name.inspect}, the #{kind}'s name"
+      rescue StandardError
+        nil
       end
 
       # "Class: message (did you mean x?)", the message's later lines kept.

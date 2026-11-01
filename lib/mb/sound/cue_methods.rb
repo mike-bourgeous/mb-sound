@@ -29,6 +29,9 @@ module MB
       # Journaled and undoable.  Returns the journal entry.
       def cue(name, sound = nil, at: nil, on: nil, in: nil, fade: nil)
         point = LaunchPoint.of(binding) or return nil
+        if (e = Internal.stream_for_track_error('cue', name, sound))
+          return MB::Sound.live_error(e)
+        end
         session = Session.current
         track = session.arrangement.tracks[name]
         scene = !track && sound.nil? && !session.playing_after_queue?(name) && session.arrangement.scenes.key?(name)
