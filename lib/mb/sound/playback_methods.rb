@@ -144,6 +144,11 @@ module MB
       # +send:+ (bus name => level, e.g. `send: { verb: -12.db }`) and +to:+
       # (a bus for its main out) route a named player (see BusMethods).
       #
+      # On a track (see ArrangementMethods#track), a clip or generator
+      # entry is its clip at the defaults: `bg :drums, L.gen.techno_beat`
+      # plays `L.gen.techno_beat.()` on the track (a new player auditions
+      # the entry, as #play does).
+      #
       # +clock:+ plays the clip (or Sample loop, or the clips and loops in a
       # graph) on a clock (see MB::Sound::Clock): `bg :bass, bassline,
       # clock: :reese`, `bg :bowl, strike, clock: 19.7.seconds`.
@@ -162,6 +167,15 @@ module MB
           return s.arrangement.play(name, :on, at: point.given? ? point : nil, fade: fade)
         end
         name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
+        # A library entry given to a track: a clip or generator entry is its
+        # clip at the defaults (as `track :x, entry` takes it), played on
+        # the track; instruments and effects say how to change the track's
+        # (lesson-fixes-1: `bg :drums, L.gen.techno_beat` played the 8-bar
+        # audition in place of the track; `play` and new players keep it)
+        if sound.is_a?(Library::Entry) && name && Session.current.arrangement.tracks[name]
+          sound = Internal.entry_for_track('bg', name, sound)
+          return MB::Sound.live_error(sound) if sound.is_a?(Exception)
+        end
         sound = Sequence::Clocked.apply(sound, clock) if clock
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
         # (a clip's echo or arp stream on a track: it would replace the
