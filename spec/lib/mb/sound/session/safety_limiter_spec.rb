@@ -34,7 +34,7 @@ RSpec.describe(MB::Sound::Session::SafetyLimiter, :aggregate_failures) do
     expect(session.safety_limiter).to eq(false)
     rt = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: :virtual), realtime: true).tap { |s| sessions << s }
     expect(rt.safety_limiter).to eq(true)
-    expect(rt.master_info).to eq('bypass (live output: a safety limiter at -1 dBFS until a master chain is set)')
+    expect(rt.master_info).to eq('bypass (live output: a safety limiter at -1 dBFS until a master chain is set; master { it } plays the mix unprocessed)')
   end
 
   it 'holds the live output under -1 dBFS without a master chain, leaving the mix it returns (renders, recordings, taps) alone' do

@@ -52,7 +52,7 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
   end
 
   it 'scales only what is written to the output: not the returned mix, taps, or audio recordings' do
-    MB::Sound::Session.monitor_gain = 6.db
+    MB::Sound::Session.monitor_gain = -6.db
     out = out_class.new(channels: 2, sleep: false)
     keep = keep_class.new
     s = new_session(output: out, monitor: true)
@@ -66,14 +66,14 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
     s.recordings.first.wait
 
     expect(peak(mix)).to be_within(0.05).of(-20)
-    expect(peak(out.channel(0)[0...mix.length])).to be_within(0.05).of(-14)
-    expect(out.channel(0)[0...mix.length]).to eq(mix * 6.db)
+    expect(peak(out.channel(0)[0...mix.length])).to be_within(0.05).of(-26)
+    expect(out.channel(0)[0...mix.length]).to eq(mix * -6.db)
     expect(peak(SpecBuffers.join(tapped))).to be_within(0.05).of(-20)
     expect(peak(keep.channel(0))).to be_within(0.05).of(-20)
   end
 
   it 'applies after the master chain and its limiter' do
-    MB::Sound::Session.monitor_gain = 3.db
+    MB::Sound::Session.monitor_gain = -3.db
     out = out_class.new(channels: 2, sleep: false)
     s = new_session(output: out, monitor: true)
     s.master { |l, r| [l.limit(ceiling: -6.db, true_peak: false), r.limit(ceiling: -6.db, true_peak: false)] }
@@ -81,27 +81,35 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
     mix = SpecBuffers.join(Array.new(60) { s.process_buffer(800)[0].dup })
     tail = 24000...mix.length
     expect(peak(mix[tail])).to be_within(0.2).of(-6)
-    expect(peak(out.channel(0)[tail])).to be_within(0.2).of(-3)
+    expect(peak(out.channel(0)[tail])).to be_within(0.2).of(-9)
   end
 
-  it 'clips peaks it pushes over full scale on the way out, with one warning, and counts them' do
-    MB::Sound::Session.monitor_gain = MB::Sound::Session::MonitorTrim::MAX_MONITOR_GAIN
-    MB::Sound::Session.instance_variable_set(:@monitor_warned_at, nil)
+  # audio-safety-2 (2026-11-01): a +15 dB trim from the level check
+  # hard-clipped the maintainer's -10 dBFS sine on the way out
+  it 'only turns down: a louder request sets 0 dB with a note to raise the system volume, and full scale passes unclipped' do
+    expect(MB::Sound::Session::MonitorTrim::MAX_MONITOR_GAIN).to eq(1)
+    expect {
+      MB::Sound::Session.monitor_gain = 6.db
+    }.to output(/Monitor trim \+6\.0 dB asked: .*0 dB.*raise the system or audio interface volume/).to_stderr
+    expect(MB::Sound::Session.monitor_gain).to eq(1)
+
     out = out_class.new(channels: 2, sleep: false)
     s = new_session(output: out, monitor: true)
-    s.add(100.hz.sine.at(-20.db), name: :tone, on: :now) # +27 dB: peaks at +7 dBFS
+    s.add(100.hz.sine.at(-0.1.db), name: :tone, on: :now)
+    mix = nil
     expect {
-      5.times { s.process_buffer(800) }
-    }.to output(/Monitor trim \+27\.0 dB clipped a peak 7\.0 dB over full scale/).to_stderr
-    expect(out.channel(0).abs.max).to eq(1)
-    expect(s.monitor_clips).to eq(5)
+      mix = SpecBuffers.join(Array.new(5) { s.process_buffer(800)[0].dup })
+    }.not_to output.to_stderr
+    expect(out.channel(0)[0...mix.length]).to eq(mix)
+    expect(peak(mix)).to be_within(0.01).of(-0.1)
+    expect(s.monitor_clips).to eq(0)
   end
 
   it 'leaves renders alone' do
     a = tmp_path('a.flac')
     b = tmp_path('b.flac')
     MB::Sound.render(a, 100.hz.sine.at(-20.db), seconds: 0.5)
-    MB::Sound::Session.monitor_gain = 12.db
+    MB::Sound::Session.monitor_gain = -12.db
     MB::Sound.render(b, 100.hz.sine.at(-20.db), seconds: 0.5)
     expect(MB::Sound.read(b)).to eq(MB::Sound.read(a))
   end
@@ -109,17 +117,18 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
   it 'is a console command that takes replays skip' do
     expect(MB::Sound.monitor_gain(-6.db).to_db).to be_within(1e-9).of(-6)
     expect(MB::Sound.monitor.to_db).to be_within(1e-9).of(-6)
-    expect { MB::Sound.monitor_gain(40.db) }.to raise_error(ArgumentError, /0 to 27 dB/)
-    expect { MB::Sound.monitor_gain(-1) }.to raise_error(ArgumentError)
+    expect { MB::Sound.monitor_gain(40.db) }.to output(/0 dB at most/).to_stderr
+    expect(MB::Sound.monitor_gain.to_db).to eq(0)
+    expect { MB::Sound.monitor_gain(-1) }.to raise_error(ArgumentError, /0 dB or less/)
     expect(MB::Sound::Take::FOREGROUND).to include('monitor_gain', 'monitor')
   end
 
   it 'reaches foreground play (which plays through the live Session)' do
-    MB::Sound::Session.monitor_gain = 6.db
+    MB::Sound::Session.monitor_gain = -6.db
     live = out_class.new(channels: 2, buffer_size: 800, sleep: :virtual) # a virtual clock: unpaced, the render thread wrote (and this kept) GBs while play waited
     MB::Sound.use_output(live)
     MB::Sound.play(100.hz.sine.at(-20.db).until(0.1), plot: false, quiet: true)
-    expect(peak(live.channel(0))).to be_within(0.05).of(-14 + MB::Sound.master_gain.to_db)
+    expect(peak(live.channel(0))).to be_within(0.05).of(-26 + MB::Sound.master_gain.to_db)
   ensure
     MB::Sound::Session.default.close
     MB::Sound.use_output(nil)

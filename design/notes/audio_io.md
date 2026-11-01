@@ -80,7 +80,7 @@ Most material stays about as close at 1 s as at 50 ms (the history is the same i
 
 ## Monitor trim (help-1, 2026-10-13)
 
-`Session.monitor_gain` (console `monitor_gain`/`monitor`, set by `help.level`) is a live-only listening gain on what monitored Sessions (realtime by default) and foreground `play` write to the output, after the master chain, limiter, and master gain; renders, stems, `rec_audio`, taps, and takes never see it, and over-full-scale peaks it causes are clipped with a warning.  Details in `help.md` (`Session::MonitorTrim`, `lib/mb/sound/session/monitor_trim.rb`).
+`Session.monitor_gain` (console `monitor_gain`/`monitor`, set by `help.level`) is a live-only listening gain on what monitored Sessions (realtime by default) and foreground `play` write to the output, after the master chain, limiter, and master gain; renders, stems, `rec_audio`, taps, and takes never see it.  It only attenuates (0 dB at most, audio-safety-2: a +15 dB trim clipped the maintainer's live output), so live output reaches full scale only from the mix itself.  Details in `help.md` (`Session::MonitorTrim`, `lib/mb/sound/session/monitor_trim.rb`).
 
 ## Closing at exit without keeping things alive (gc-leak-1, 2026-10-17)
 

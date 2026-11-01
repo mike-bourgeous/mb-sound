@@ -53,11 +53,12 @@ module MB
           Tip.new(topic, random.rand(topic.examples.length))
         end
 
-        # The listening level (see Help::Level), which sets the monitor
-        # trim for live playback: with a level, sets it (the level check
-        # tone's peak, `help.level -20.db`; a bare negative number is read
-        # as dB with a warning in the console, see Decibels.db_of); without, runs the level check when the console
-        # is interactive (keys move the level), else shows it.
+        # The listening level (see Help::Level): the monitor trim for live
+        # playback, -60 to 0 dB.  With a level, sets it (`help.level
+        # -12.db`; over 0 dB sets 0 dB and says to raise the system volume;
+        # a bare negative number is read as dB with a warning in the
+        # console, see Decibels.db_of); without, runs the level check when
+        # the console is interactive (keys move the trim), else shows it.
         def level(db = nil, input: $stdin, out: $stdout)
           if db
             Level.save(Decibels.db_of(db, 'level'))
@@ -102,11 +103,11 @@ module MB
         def to_s
           trim = format('%+.1f dB', 20 * Math.log10([Session.monitor_gain, 1e-9].max))
           if Level.saved?
-            "#{c(:title, 'level')} #{c(:key, "#{Level.db.round(1)} dBFS")} (the level check tone's peak): monitor trim #{trim} for live playback\n" \
-              "#{c(:dim, '  renders and recordings are unchanged; help.level checks it again, help.level -20.db sets it')}"
+            "#{c(:title, 'level')} monitor trim #{c(:key, trim)} for live playback (the level check tone at #{(Level::REFERENCE_DB + Level.db).round(1)} dBFS)\n" \
+              "#{c(:dim, '  renders and recordings are unchanged; the trim only turns down (raise the system volume for more); help.level checks it again, help.level -12.db sets it')}"
           else
-            "#{c(:title, 'level')} no level check yet (monitor trim #{trim}; the tone's reference is #{Level::REFERENCE_DB.round} dBFS)\n" \
-              "#{c(:dim, '  help.level runs the check (keys move the level); help.level -20.db sets it')}"
+            "#{c(:title, 'level')} no level check yet (monitor trim #{trim}; the tone peaks at #{Level::REFERENCE_DB.round} dBFS at 0 dB)\n" \
+              "#{c(:dim, '  help.level runs the check (keys move the trim, -60 to 0 dB); help.level -12.db sets it')}"
           end
         end
       end
