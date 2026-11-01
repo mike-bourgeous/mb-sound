@@ -298,4 +298,28 @@ RSpec.describe('script runner scripts', :smoke) do
       expect(data[0].length).to be >= (48000 * 60 * 4 * 16 / 112.0).floor # 16 bars at 112 BPM
     end
   end
+
+  # The YJIT on/off bench's quick run on a song and the synth piece: render
+  # children with YJIT on and off and the YJIT-off profile (about 35 s;
+  # its spec covers the startup children and the tables)
+  describe 'bin/jit_bench.rb (a quick run)' do
+    outfile = File.join(out_dir, 'smoke_jit_bench.json')
+    runs.add('jit_bench quick run', "bin/jit_bench.rb --quick --pieces night_bus_flow,dense --buffers 512 --bars 2 --seconds 1 -S render,profile -o #{outfile.shellescape}", env: shared_env)
+
+    it 'measures render cost, scene changes, and the YJIT-off profile', smoke_run: 'jit_bench quick run' do
+      text, status = runs.take('jit_bench quick run')
+      expect(status).to be_success, text
+      expect(text).not_to include('FAILED')
+
+      expect(text).to match(/^\| night_bus_flow \| 512 \| [\d.]+% \| [\d.]+% \| [\d.]+x \|/)
+      expect(text).to match(/^\| dense \| 512 \| [\d.]+% \| [\d.]+% \| [\d.]+x \|/)
+      expect(text).to match(/^\| night_bus_flow \| 512 \| 10\.67 \| \d+ \|/)
+      expect(text).to match(/^#### night_bus_flow at 128 frames: [\d.]+% of realtime, \d+ samples on the render path/)
+      expect(text).to match(/^#### dense at 128 frames: /)
+
+      r = JSON.parse(File.read(outfile))
+      expect(r['render'].map { |x| "#{x['piece']} #{x['yjit'] ? 'on' : 'off'}" }.sort).to eq(['dense off', 'dense on', 'night_bus_flow off', 'night_bus_flow on'])
+      expect(r['profile'].map { |x| x['profile']['render']['samples'] }).to all(be > 0)
+    end
+  end
 end
