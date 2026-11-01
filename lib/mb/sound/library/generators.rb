@@ -11,8 +11,8 @@ module MB
       #
       #     L.gen.techno_beat                                  # the Entry
       #     L.gen.techno_beat(seed: 3, energy: knob(:energy))  # its Clip
-      #     L.gen.techno_beat.()                               # the Clip at the entry's defaults
-      #     track :drums, L.gen.techno_beat                    # on its kit (the TR-909)
+      #     L.gen.techno_beat.()                               # the Clip at the entry's defaults (prints L.gen.techno_beat(seed: 5))
+      #     track :drums, L.gen.techno_beat                    # on its kit (the TR-909), energy the knob :"drums/energy"
       #     track :lead, L.gen.phrygian_motif, :tine_piano     # on another instrument
       #     flow L.flow.techno_chain                           # the chain over this session's scenes
       #     L.flow.techno_chain(seed: 4)                       # the chain, reseeded
@@ -21,9 +21,11 @@ module MB
       # with defaults; given keywords replace them, unknown ones raise with
       # did-you-mean), and records the call on what it built, so recipes,
       # graph documents, set documents, and template code print it back
-      # as `L.gen.techno_beat(seed: 3, energy: energy)` (or
-      # `L.gen.techno_beat.()` at the defaults) and load it again (the
-      # loader walks `L.gen`/`L.flow` chains, GraphIO::Registry).
+      # as `L.gen.techno_beat(seed: 3, energy: energy)` (the defaults with
+      # their seed: `L.gen.techno_beat(seed: 5)`) and load it again (the
+      # loader walks `L.gen`/`L.flow` chains, GraphIO::Registry).  On a
+      # track, the steering params a call leaves out are the track's knobs
+      # (.track_clip).
       #
       # Shipped generators are defined in code beside what plays them (the
       # genre templates' chains and clips in lib/mb/sound/genre/*.rb, the

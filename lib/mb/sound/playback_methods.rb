@@ -146,8 +146,9 @@ module MB
       #
       # On a track (see ArrangementMethods#track), a clip or generator
       # entry is its clip at the defaults: `bg :drums, L.gen.techno_beat`
-      # plays `L.gen.techno_beat.()` on the track (a new player auditions
-      # the entry, as #play does).
+      # plays `L.gen.techno_beat.()` on the track, steered by the track's
+      # knobs (:"drums/energy"; a new player auditions the entry, as #play
+      # does).
       #
       # +clock:+ plays the clip (or Sample loop, or the clips and loops in a
       # graph) on a clock (see MB::Sound::Clock): `bg :bass, bassline,
