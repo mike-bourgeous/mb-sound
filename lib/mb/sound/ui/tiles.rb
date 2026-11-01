@@ -1378,7 +1378,10 @@ module MB
 
         # The screen's Keyboard::Takeover (made on first use).
         def keys_takeover
-          @keys_takeover ||= Keyboard::Takeover.new(run: ->(code, note) { run_pane_line(PaneKeys::Run[code, note]) })
+          # (The arm and hold run quietly: journaled, undoable, in the take,
+          # but not printed; the maintainer, 2026-11-02: "No printout when
+          # activating the keyboard in sound design."  Errors still show.)
+          @keys_takeover ||= Keyboard::Takeover.new(run: ->(code, note) { run_quiet_line(PaneKeys::Run[code, note]) })
         end
 
         # Every way out of KEYS mode: all notes off, the terminal's keys as
@@ -1610,6 +1613,19 @@ module MB
         # in the screen's session: journaled, undoable, a take line; the
         # Ruby it ran and what it printed go into the REPL pane (the
         # messages without one), its note or result on the status line.
+        # Runs +run+'s console line like #run_pane_line (journaled, in the
+        # take) without printing it or its result; an error prints and
+        # flashes as there.
+        def run_quiet_line(run)
+          out = StringIO.new
+          with_output_to(out) { UI.run_line(run.code, @session || Session.existing) }
+        rescue StandardError, ScriptError => e
+          result = "#{e.class}: #{e.message}"
+          print_to_repl("# #{run.note || 'ui'}\n#{Tiles.shown_code(run.code)}\n#{out.string}#{result}\n")
+          flash(Tiles.one_line(result), :bad)
+          nil
+        end
+
         def run_pane_line(run)
           out = StringIO.new
           r = err = nil

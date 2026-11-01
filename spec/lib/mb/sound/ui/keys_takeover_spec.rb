@@ -116,7 +116,7 @@ RSpec.describe(MB::Sound::UI::Keyboard::Takeover, :aggregate_failures) do
     expect(t.enter(s, :nothing)).to eq([])
   end
 
-  it 'arms and holds the inspected track when the sound screen enters KEYS, as REPL lines, and puts it back on the way out' do
+  it 'arms and holds the inspected track when the sound screen enters KEYS, quietly, and puts it back on the way out' do
     s = new_session
     console(s, 'track(:bass) { |c| c.synth(voices: 2) { |v| v.hz.saw * v.amp_env } }', 'bg :bass, seq(A2).n4.loop, on: :now')
     ui::Inspect.target = { track: :bass, node: nil }.freeze
@@ -127,13 +127,12 @@ RSpec.describe(MB::Sound::UI::Keyboard::Takeover, :aggregate_failures) do
     @tiles.keys
     expect(@term.wait_for(' KEYS ')).to eq(true)
     expect(wait_until { s.held_tracks == [:bass] && s.arrangement.armed?(:bass) }).to eq(true), @term.text
-    expect(@term.wait_for(/hold :bass/)).to eq(true), @term.text
-    expect(@term.text).to include('arm :bass')
+    expect(@term.text).not_to match(/hold :bass|arm :bass/) # (no printout: the maintainer, 2026-11-02)
+    expect(s.journal.entries.map(&:kind)).to include(:hold)
 
     @term.write("\x1d") # (Ctrl-]: NAV, out of KEYS)
     expect(@term.wait_for(' NAV ')).to eq(true)
     expect(wait_until { s.held_tracks.empty? && !s.arrangement.armed?(:bass) }).to eq(true), @term.text
-    expect(@term.wait_for(/unhold :bass/)).to eq(true), @term.text
-    expect(@term.text).to include('disarm :bass')
+    expect(@term.text).not_to match(/unhold :bass|disarm :bass/)
   end
 end
