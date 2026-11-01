@@ -57,9 +57,10 @@
 # Prints one Markdown table per measurement (machine, Ruby, and YJIT at
 # the top) to paste back, and writes the raw results to -o (JSON, written
 # after every child, so an interrupted run keeps what finished) and the
-# tables next to it (.md).  A full run (3 repeats) takes about an hour on
-# the Mac container; --quick (one repeat, 8 bars per song, 4 s of the
-# synth) about 10 minutes.  Run it while nothing else runs on the machine.
+# tables next to it (.md).  A full run (3 repeats) took 44 minutes in the
+# Mac container, plus 8 for the profiles; --quick (one repeat, 8 bars per
+# song, 4 s of the synth: the songs' intros, with few or no scene changes)
+# 3.5 minutes.  Run it while nothing else runs on the machine.
 #
 # Usage: $0 [options]
 #
@@ -741,7 +742,7 @@ if MB::Sound.main_script?(__FILE__)
   MB::Sound.script(
     args: 0,
     repeats: [3, Integer, '-n', 'Repeats of each measurement (alternating YJIT on and off)', 1..100],
-    quick: [false, '-Q', 'One repeat, 8 bars per song and 4 s of the synth (about 10 minutes)'],
+    quick: [false, '-Q', 'One repeat, 8 bars per song and 4 s of the synth (3.5 minutes in the Mac container)'],
     pieces: [JitBench::PIECES.keys.join(','), String, '-p', "Comma-separated pieces: #{JitBench::PIECES.keys.join(', ')}, or song script paths"],
     buffers: ['128,512', String, '-b', 'Comma-separated buffer sizes in frames'],
     sections: [JitBench::SECTIONS.join(','), String, '-S', 'Comma-separated measurements: startup, render (render cost and scene changes), profile (YJIT off)'],
