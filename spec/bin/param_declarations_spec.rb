@@ -5,7 +5,9 @@ require_relative '../support/param_guard'
 # give a help line, a knob, and a document line, with defaults in range
 # (spec/support/param_guard.rb).  Each script is read in a fork with
 # ScriptRunner.declarations_of (loaded with its helper stopping before it
-# runs anything), so the scripts' constants stay out of this process.
+# runs anything), so the scripts' constants stay out of this process: forks
+# of one small reader process (spec/support/param_declarations_reader.rb),
+# since forks of a spec process a parallel run had grown were 5x slower.
 RSpec.describe('bin/ script param declarations', :aggregate_failures) do
   def root = File.expand_path('../..', __dir__)
 
@@ -17,27 +19,13 @@ RSpec.describe('bin/ script param declarations', :aggregate_failures) do
     }
   end
 
-  # [file, kind, [[problems, built, text], ...]] for one script, from a
-  # fork.
-  def read_script(file)
-    rd, wr = IO.pipe
-    pid = fork do
-      rd.close
-      $stdout.reopen(File::NULL)
-      result = begin
-        found = MB::Sound::ScriptRunner.declarations_of(file)
-        found && [found[0], found[1].map { |sp| [*ParamGuard.check(sp.param), sp.param.to_ruby] }]
-      rescue Exception => e # rubocop:disable Lint/RescueException
-        [:error, "#{e.class}: #{e.message}"]
-      end
-      wr.write(Marshal.dump(result))
-      wr.close
-      exit!(0)
-    end
-    wr.close
-    data = rd.read
-    rd.close
-    Process.wait(pid)
+  # { file => [kind, [[problems, built, text], ...]] (nil: no helper,
+  # [:error, message]: it raised) } for +files+, read by one Ruby process
+  # forking per script (spec/support/param_declarations_reader.rb).
+  def read_scripts(files)
+    reader = File.join(root, 'spec', 'support', 'param_declarations_reader.rb')
+    data = IO.popen([RbConfig.ruby, reader, *files], 'rb', chdir: root, &:read)
+    expect($?).to be_success
     Marshal.load(data)
   end
 
@@ -45,9 +33,10 @@ RSpec.describe('bin/ script param declarations', :aggregate_failures) do
     files = Dir.glob('bin/**/*.rb', base: root).sort
     expect(files.length).to be >= 100
     counts = { scripts: 0, params: 0, knobs: 0, documents: 0 }
+    results = read_scripts(files.reject { |f| without_helper.key?(f) }.map { |f| File.join(root, f) })
     files.each do |f|
       next if without_helper.key?(f)
-      result = read_script(File.join(root, f))
+      result = results.fetch(File.join(root, f))
       expect(result).not_to be_nil, "#{f} calls no script helper (add it to without_helper with a reason?)"
       next if result.nil?
       expect(result[0]).not_to eq(:error), "#{f}: #{result[1]}"

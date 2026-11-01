@@ -238,13 +238,31 @@ module MB
         # between samples landed inside the first piece, so the state was
         # copied up to a buffer before the old graph stopped; SessionFuzz's
         # :carry relation found it at 137.5 BPM).
+        #
+        # Every such change in the span counts, not only the first: a
+        # carrying swap split off on the floor sample before its time is
+        # due at the start of the next span (0 frames before it), and a
+        # seek at the same time still needs its own split on the ceiling
+        # sample (fix-batch-1101, SessionFuzz seed 768014: an fx swap and a
+        # seek on bar 3 left the seek to the next buffer's start, a buffer
+        # size's worth of frames late).
         def frames_before_seek(count, per_sample)
-          c = @changes.find { |x| timeline_change?(x) || carry_change?(x) } or return nil
           from = @transport.position
-          return nil unless c.time > from && c.time < Sequence::Transport.position_at(from, count, per_sample)
-          k = (c.time - from) / per_sample
-          k = timeline_change?(c) ? k.ceil : k.floor
-          k > 0 && k < count ? k : nil
+          to = nil
+          best = nil
+          i = 0
+          while (c = @changes[i])
+            i += 1
+            next unless (timeline_change?(c) || carry_change?(c)) && c.time > from
+
+            to ||= Sequence::Transport.position_at(from, count, per_sample)
+            break unless c.time < to # (the queue is in time order)
+
+            k = (c.time - from) / per_sample
+            k = timeline_change?(c) ? k.ceil : k.floor
+            best = k if k > 0 && k < count && (best.nil? || k < best)
+          end
+          best
         end
       end
     end

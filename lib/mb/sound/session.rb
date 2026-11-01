@@ -367,6 +367,8 @@ module MB
         @span = Span.new(self, 0, 0r, 0r, false, 48000, 0)
         @player_frame = nil
         @sound_end_frame = 0 # (see #sound_end_frame)
+        @schedule_ran_kept = nil # (see #schedule_ran_frame)
+        @span_end_pos = nil # (see #keep_schedule_ran_frame)
         @asleep_ids = nil # (unused since dropouts-2; see Strip#span_graphs)
         @span_graph_scratch = nil
         @kept_scratch = nil # (see Strip#read_kept_graphs)
@@ -782,12 +784,18 @@ module MB
 
       # The session frame of the latest time a scheduled block ran for, if
       # that time has come (renders keep time up to it while idle; see
-      # PlaybackMethods#render), else nil.
+      # PlaybackMethods#render), else nil.  A seek forgets the times blocks
+      # ran for (their timeline is gone), so the frame of one whose time
+      # had come is kept from before the seek (#keep_schedule_ran_frame):
+      # a block seeking back from its own time ends a render there at any
+      # buffer size (seed 768014, fix-batch-1101).
       def schedule_ran_frame
-        pos = @scheduler.ran_ahead_time or return nil
+        kept = @schedule_ran_kept
+        pos = @scheduler.ran_ahead_time or return kept
         now = @transport.position
-        return nil if pos > now
-        @frame - @transport.frames_of(now - pos, Rational(output.sample_rate)).floor
+        return kept if pos > now
+        f = @frame - @transport.frames_of(now - pos, Rational(output.sample_rate)).floor
+        kept && kept > f ? kept : f
       end
 
       # True if this offline session's timeline keeps moving while nothing
@@ -1123,6 +1131,22 @@ module MB
       end
       private :span_step
 
+      # Before the scheduler forgets the times blocks ran for at a seek,
+      # keeps the session frame of the latest one whose time had come on
+      # the timeline before the jump (where the last span ended; a seek
+      # landing on a block's own time lands on the frame holding it), for
+      # #schedule_ran_frame.  Called with the render lock held.
+      def keep_schedule_ran_frame
+        pos = @scheduler.ran_ahead_time or return
+        last = @span_end_pos or return
+        rate = Rational(output.sample_rate)
+        return if @transport.frames_of(pos - last, rate) >= 1
+
+        f = @frame - @transport.frames_of(last - pos, rate).floor
+        @schedule_ran_kept = f if @schedule_ran_kept.nil? || f > @schedule_ran_kept
+      end
+      private :keep_schedule_ran_frame
+
       # Renders +count+ frames (one span of #process_buffer): scheduled
       # blocks, changes landing in the span, players, and the master chain.
       # Advances the timeline and the frame counter.  Returns the mix.
@@ -1148,6 +1172,7 @@ module MB
           @mutex.synchronize { @players.values }.each do |p|
             p.timeline_nodes.each { |n| n.start_at(from, origin: p.start, launch: p.launch, transport: @transport) } if p.started
           end
+          keep_schedule_ran_frame
           @scheduler.seeked(from)
         end
 
@@ -1207,6 +1232,7 @@ module MB
           @transport.advance_span(from, to, whole_notes)
           end_clock_span(count, whole_notes, moving)
         end
+        @span_end_pos = @transport.position # (the timeline before a seek; see #keep_schedule_ran_frame)
         # Pre-chain master gain (the default; see #master_gain_post?)
         # (in place on this span's own mix buffers when the kernel takes
         # them: the same float products as Numo's c * gain)

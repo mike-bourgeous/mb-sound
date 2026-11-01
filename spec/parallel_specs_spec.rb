@@ -234,6 +234,23 @@ RSpec.describe(ParallelSpecs) do
       expect(ParallelSpecs.host_key(3)).to match(/ x\d+, PARALLEL=3\z/)
     end
 
+    it 'keeps a reading of the machine speed only when nothing else ran meanwhile' do
+      speeds = tmp_path('speed.json')
+      File.write(budgets, yaml + "reference:\n  machine: the runner\n  seconds: 0.25\n")
+      busy = ParallelSpecs::LoadWatch::Load.new(2.5, 3.0)
+      allow(ParallelSpecs).to receive(:measure_host_speed).and_return([0.75, busy])
+      scale, why = ParallelSpecs.budget_scale(3, budgets_path: budgets, speed_path: speeds)
+      expect(scale).to eq(3.0)
+      expect(why).to include('budgets x3.00 (measured while other work used 2.50 cores').and include('not kept')
+      expect(File.exist?(speeds)).to eq(false)
+
+      idle = ParallelSpecs::LoadWatch::Load.new(0.1, 3.0)
+      allow(ParallelSpecs).to receive(:measure_host_speed).and_return([0.5, idle])
+      scale, why = ParallelSpecs.budget_scale(3, budgets_path: budgets, speed_path: speeds)
+      expect([scale, why]).to match([2.0, satisfy { |w| !w.include?('not kept') }])
+      expect(JSON.parse(File.read(speeds))).to eq(ParallelSpecs.host_key(3) => 0.5)
+    end
+
     it 'has a reference speed in the real budgets' do
       data = YAML.safe_load_file(ParallelSpecs::BUDGETS_PATH)
       expect(data.dig('reference', 'seconds')).to be_a(Numeric).and be > 0

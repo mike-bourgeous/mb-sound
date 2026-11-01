@@ -382,9 +382,14 @@ module MB
 
         # A Synth's idle-skipping and lane measuring state, carried as it
         # is (frame counts of the synth's own time, per-lane flags, and the
-        # lanes' QuietRuns).
+        # lanes' QuietRuns).  Both of its frame counts go together: the
+        # lanes' (@skip_position, where #check_end finds the end) and the
+        # output's (@out_position, which #end_frame is compared with); with
+        # only the first carried, a rebuilt synth's one-shot ended as many
+        # frames late as the old synth had played before the rebuild
+        # (SessionFuzz seed 768044, fix-batch-1101).
         SYNTH_STATE = %i[
-          @skipping @skip_generation @lane_runs @skip_position @grid_offset @grid_started @quiet @quiet_pos @peaks
+          @skipping @skip_generation @lane_runs @skip_position @out_position @grid_offset @grid_started @quiet @quiet_pos @peaks
           @cell_lo @cell_hi @cell_fresh @done @end_quiet
         ].freeze
 
