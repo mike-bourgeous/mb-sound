@@ -66,9 +66,30 @@ module MB
 
         module_function
 
-        # The nodes of graph +roots+, each once.
+        # The nodes of graph +roots+, each once (UI::Inspect.nodes_of's
+        # walk: a root that isn't a GraphNode but has sources, a ChannelMixer
+        # like a preset's final Pan, is walked through GraphNode.graph;
+        # editability-1: before, tine_piano's graph was its Pan alone, so
+        # bind found none of its calls, "env isn't in the track's graph").
         def nodes(roots)
-          roots.flat_map { |r| [r, *(r.respond_to?(:graph) ? r.graph : [])] }.uniq(&:__id__)
+          roots.flat_map { |r| [r, *UI::Inspect.nodes_of(r)] }.uniq(&:__id__)
+        end
+
+        # The graph Document graph +roots+ were loaded from, or nil: a
+        # root's own, else the recorded bundle's a root is an output of (a
+        # preset ending in a stereo bundle, `.pan(...)`, keeps its Document
+        # on the Channels bundle, while the roots are the Pan behind it;
+        # editability-1: tine_piano and tine_crunch weren't known as
+        # presets).
+        def document(roots)
+          roots.each do |r|
+            d = GraphIO.document_of(r)
+            return d if d
+            b = GraphNode::Recipe.bundle_of(r)
+            d = b && GraphIO.document_of(b)
+            return d if d
+          end
+          nil
         end
 
         # The recorded Call that made +node+, or nil.
@@ -144,9 +165,10 @@ module MB
           end
 
           call = call_of(node) or raise Error, unrecorded(roots, param)
-          # (a call reached through a bundle inside a graph document: the
-          # document's numbers are fixed, its params bind)
-          raise Error, unrecorded(roots, param) if !own_call?(node) && roots.any? { |r| GraphIO.document_of(r) }
+          # (a call reached through a bundle inside a graph document binds
+          # like the document's own calls since editability-1; before, it
+          # stayed fixed while the document's own calls bound: dnb_reese's
+          # filter quality)
           # (a chained setter's argument: :release_curve is .curve(release: ...))
           arg = param
           unless slot_of(call, param)
@@ -236,12 +258,12 @@ module MB
             call = bundle_calls(n).find { |c| GraphNode::Recipe.key_of(c) == key } and (node = n) and (bundled = true) and break
           end
           if bundled
-            raise Error, unrecorded(roots, param) if roots.any? { |r| GraphIO.document_of(r) }
             return target_of_call(roots, call, param)
           end
           return target(roots, node, param) if call.equal?(call_of(node))
-          # (a chained setter's argument, named after it: .curve(release:) is :release_curve)
-          raise Error, unrecorded(roots, param) if roots.any? { |r| GraphIO.document_of(r) }
+          # (a chained setter's argument, named after it: .curve(release:) is
+          # :release_curve; inside a graph document too, as #target finds it:
+          # editability-1, tine_piano's `lfo.at(0.3)`)
           target_of_call(roots, call, :"#{param}_#{call.written || call.name}", param)
         end
 
@@ -252,14 +274,14 @@ module MB
           src = GraphNode.climb_tee_tree(src) if src
           return nil unless src.is_a?(GraphNode::Constant) && src.named?
           name = src.graph_node_name.to_sym
-          doc = roots.lazy.filter_map { |r| GraphIO.document_of(r) }.first
+          doc = LiteralBinding.document(roots)
           return nil unless doc && doc.params.key?(name)
           Target.new(kind: :document, call_name: nil, nth: nil, key: nil, slot: nil, param: name, value: src.constant, document: doc.name.to_s)
         end
 
         # A document param by name in graph +roots+ (`bind :bass, :cutoff`).
         def find_document(roots, param)
-          doc = roots.lazy.filter_map { |r| GraphIO.document_of(r) }.first
+          doc = LiteralBinding.document(roots)
           raise Error, "the track's graph has no document param #{param.inspect} (bind :x, method: :param for a literal)" unless doc && doc.params.key?(param)
           c = nodes(roots).find { |n| n.is_a?(GraphNode::Constant) && n.named? && n.graph_node_name.to_sym == param }
           value = c ? c.constant : doc.params[param][:value]
@@ -435,7 +457,7 @@ module MB
         # Why the +nth+ call of +method+ isn't found: a preset's text
         # (whose calls aren't recorded) or a name not in the graph.
         def missing(roots, method, param, nth)
-          return unrecorded(roots, param) if keys_of(roots, method).empty? && roots.any? { |r| GraphIO.document_of(r) }
+          return unrecorded(roots, param) if keys_of(roots, method).empty? && LiteralBinding.document(roots)
           "no #{method}#{" ##{nth}" if nth > 0} in the track's graph#{suggestion(roots, method)}"
         end
 
@@ -443,7 +465,7 @@ module MB
         # the user's terms (never a node class name): a preset's literals
         # are fixed in its text, and only its params bind.
         def unrecorded(roots, param)
-          doc = roots.lazy.filter_map { |r| GraphIO.document_of(r) }.first
+          doc = LiteralBinding.document(roots)
           return "#{param}: not set by the track's code (nothing to bind)" unless doc
           params = doc.params.keys
           bind = params.empty? ? 'it has no params to bind' : "bind its param#{params.length == 1 ? '' : 's'} instead: #{params.join(', ')}"
@@ -474,7 +496,7 @@ module MB
           return MB::Sound.live_error(LiteralBinding::Error.new("#{name} isn't playing: bind finds its literals in the graph it plays (bg #{name.inspect}, clip)"))
         end
         roots = UI::Inspect.roots(input)
-        doc = roots.lazy.filter_map { |r| GraphIO.document_of(r) }.first
+        doc = LiteralBinding.document(roots)
         follow = nil
         # (library-instruments-1: a preset's param following an existing
         # knob, `bind :bass, cutoff: :cut`; params already the track's knobs
@@ -519,26 +541,9 @@ module MB
         end
 
         # A test build with a stand-in knob first: the patch must build and
-        # read the knob (a count or a setting read once while building
-        # can't follow one), else nothing changes
-        # (a document param's stand-in is a Constant: preset would adopt a
-        # Knob into the session)
-        probe = t.kind == :document ? GraphNode::Constant.new(Param.magnitude(default.default).to_f, sample_rate: 48000) : GraphNode::Knob.new(kname, default)
-        begin
-          built = MB::Sound.keeping_random_state {
-            Session.with_context(session: @session) {
-              GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { LiteralBinding.wrap(tr.patch, t, kname, knob: probe).call(tr.clip) }
-            }
-          }
-        rescue ScriptError, StandardError
-          # (the patch built with the number, so the knob is what it can't
-          # take: a setting read once while building; the error stays the
-          # refusal's #cause)
-          return MB::Sound.live_error(LiteralBinding::Error.new(LiteralBinding.fixed_message(name, t)))
-        end
-        broots = built.is_a?(GraphNode::Channels) ? built.to_a : [built]
-        unless LiteralBinding.nodes(broots).any? { |n| GraphNode.climb_tee_tree(n).equal?(probe) || (n.is_a?(GraphNode::Knob::Reader) && n.knob.equal?(probe)) }
-          return MB::Sound.live_error(LiteralBinding::Error.new(LiteralBinding.fixed_message(name, t)))
+        # read the knob, else nothing changes
+        if (err = bind_probe(name, tr, t, kname, default))
+          return MB::Sound.live_error(err)
         end
         # (a call inside a graph document: `preset` adopted the stand-in
         # knob into the session while the test built, so it is the knob;
@@ -553,6 +558,40 @@ module MB
           @session.note_undo_extra(self, before, undo_state)
         }
         entry && @session.journal[entry.seq]
+      end
+
+      # The test build before a bind (see #bind_literal): track +name+
+      # (Track +tr+)'s patch built with Target +t+ given a stand-in knob
+      # named +kname+ (+default+ its ranged default).  Nil if the patch
+      # builds and reads the knob, else the LiteralBinding::Error a bind
+      # raises (a count or a setting read once while building can't follow
+      # a knob).  Nothing changes but the session's knob of a graph
+      # document's call (`preset` adopts the stand-in while the test
+      # builds).  Public for the editability guard (editability-1: an
+      # offered bind line isn't proof that the setting is live).
+      def bind_probe(name, tr, t, kname, default)
+        # (a document param's stand-in is a Constant: preset would adopt a
+        # Knob into the session)
+        probe = t.kind == :document ? GraphNode::Constant.new(Param.magnitude(default.default).to_f, sample_rate: 48000) : GraphNode::Knob.new(kname, default)
+        begin
+          built = MB::Sound.keeping_random_state {
+            Session.with_context(session: @session) {
+              GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { LiteralBinding.wrap(tr.patch, t, kname, knob: probe).call(tr.clip) }
+            }
+          }
+        rescue ScriptError, StandardError
+          # (the patch built with the number, so the knob is what it can't
+          # take: a setting read once while building; the error stays the
+          # refusal's #cause: raised here to keep it)
+          begin
+            raise LiteralBinding::Error, LiteralBinding.fixed_message(name, t)
+          rescue LiteralBinding::Error => e
+            return e
+          end
+        end
+        broots = built.is_a?(GraphNode::Channels) ? built.to_a : [built]
+        return nil if LiteralBinding.nodes(broots).any? { |n| GraphNode.climb_tee_tree(n).equal?(probe) || (n.is_a?(GraphNode::Knob::Reader) && n.knob.equal?(probe)) }
+        LiteralBinding::Error.new(LiteralBinding.fixed_message(name, t))
       end
 
       private

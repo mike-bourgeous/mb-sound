@@ -40,7 +40,8 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
   }
 
   def code_of(s, track = :lead)
-    MB::Sound::UI::Inspect.roots(s.ui_graphs[track]).first.to_ruby
+    r = MB::Sound::UI::Inspect.roots(s.ui_graphs[track]).first
+    (r.respond_to?(:to_ruby) ? r : MB::Sound::GraphNode::Recipe.bundle_of(r)).to_ruby # (a preset ending in .pan: its bundle)
   end
 
   before { @sessions = [] }
@@ -111,14 +112,48 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     expect(code_of(s, :bass)).to include('lp4(knob(:"bass/cutoff") * lfo')
     expect((bound - ref).abs.max).to eq(0.0)
 
-    # A preset's literals are fixed in its text: the reason names the
-    # preset and its params, never a node class (the inspector shows it)
-    MB::Sound::Session.with_context(session: s) do
-      expect { MB::Sound.bind(:bass, filter: :quality) }.to raise_error(described_class::Error, 'quality is fixed in the dnb_reese preset; bind its params instead: cutoff, resonance, drive, glide')
-    end
+    # A preset's own numbers bind too, calls reached through its stereo
+    # bundle included (editability-1; before, "quality is fixed in the
+    # dnb_reese preset" while the inspector offered the document's other
+    # calls' binds): the same samples at the knob's starting value
     roots = Array(s.arrangement.instance_variable_get(:@built)[:bass])
     wrapper = roots.flat_map { |r| MB::Sound::GraphNode.graph(r) }.grep(MB::Sound::Filter::SampleWrapper).first
-    expect { described_class.target(roots, wrapper, :quality) }.to raise_error(described_class::Error, 'quality is fixed in the dnb_reese preset; bind its params instead: cutoff, resonance, drive, glide')
+    t = described_class.target(roots, wrapper, :quality)
+    expect([t.kind, t.call_name, t.value]).to eq([:call, :filter, 0.7])
+    s2, bound2, = play(->(_) { MB::Sound.bind(:bass, filter: :quality) }, track: :bass, patch: reese, clip: clip)
+    _, ref2, = play(REBUILD, track: :bass, patch: reese, clip: clip)
+    expect(s2.knobs[:"bass/quality"].value).to eq(0.7)
+    expect((bound2 - ref2).abs.max).to eq(0.0)
+
+    # Numbers made inside library code (no recorded call) say so in the
+    # user's terms, naming the preset's params, never a node class
+    expect(described_class.unrecorded(roots, :quality)).to eq('quality is fixed in the dnb_reese preset; bind its params instead: cutoff, resonance, drive, glide')
+  end
+
+  # (editability-1: tine_piano ends in a stereo `.pan(...)`, so its root
+  # is the Pan, a ChannelMixer with no #graph, and its Document is on the
+  # Channels bundle: bind found none of its calls, "env isn't in the
+  # track's graph", and didn't know it was a preset)
+  it 'binds the literals of a preset whose root is a ChannelMixer (tine_piano): the same samples at their values' do
+    tine = ->(c) { MB::Sound.preset(:tine_piano, midi: c) }
+    clip = MB::Sound.seq(MB::Sound::C3, MB::Sound::E3).n4.loop
+    _, ref, = play(REBUILD, track: :keys, patch: tine, clip: clip, buffers: 150)
+    [
+      [{ env: :attack }, 2, :"keys/attack", 0.001, 'v.env(knob(:"keys/attack"), 1.4, 0, 0.3, gm: false)'],
+      [{ amp_env: :sustain }, 0, :"keys/sustain", 0.0, 'knob(:"keys/sustain")'],
+      [{ filter: :cutoff }, 0, :"keys/cutoff", 30.0, 'cutoff: knob(:"keys/cutoff")'],
+      [{ filter: :quality }, 0, :"keys/quality", 0.7, 'quality: knob(:"keys/quality")'],
+      [{ at: :amplitude }, 0, :"keys/amplitude_at", 0.3, 'lfo.at(knob(:"keys/amplitude_at"))'],
+    ].each do |what, nth, kname, value, code|
+      s, bound, = play(->(_) { MB::Sound.bind(:keys, what, nth: nth) }, track: :keys, patch: tine, clip: clip, buffers: 150)
+      expect(s.knobs[kname]&.value).to be_within(1e-12).of(value), what.inspect
+      expect(code_of(s, :keys)).to include(code)
+      expect(bound.length).to eq(ref.length)
+      expect((bound - ref).abs.max).to eq(0.0), "#{what}: #{(bound - ref).abs.max}"
+      expect(bound.abs.max).to be > 0.01
+      s.close
+      @sessions.delete(s)
+    end
   end
 
   it 'is one undo step: the old patch and graph come back' do

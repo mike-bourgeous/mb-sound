@@ -373,12 +373,14 @@ module MB
           end
           voices = cls.rows.filter_map(&:voice).uniq.freeze
 
-          code = roots.filter_map { |r| r.respond_to?(:to_ruby) ? (r.to_ruby rescue nil) : nil }.uniq.join("\n").freeze
+          # (a root that prints nothing itself, a preset's final Pan, prints as the
+          # recorded bundle it is an output of; editability-1)
+          code = roots.filter_map { |r| (r = r.respond_to?(:to_ruby) ? r : GraphNode::Recipe.bundle_of(r)) && r.respond_to?(:to_ruby) ? (r.to_ruby rescue nil) : nil }.uniq.join("\n").freeze
           {
             nodes: nodes, objects: rows.map(&:first).freeze, groups: rows.map { |r| r[2] }.freeze, extras: rows.map(&:last).freeze,
             knobs: knobs.freeze, loose: knobs.reject { |k| shown[k] }.freeze, hidden: cls.hidden, voices: voices, unfit: cls.unfit.length,
             code: code.empty? ? nil : code, capped: capped, voice_knobs: cls.voice_knobs, build_knobs: build_knobs.freeze,
-            document: roots.lazy.filter_map { |r| GraphIO.document_of(r) rescue nil }.first&.name&.then { |n| "#{n}".freeze }, # (a new String: a name from document text carries GraphIO::FileGuard's mark)
+            document: (Arrangement::LiteralBinding.document(roots) rescue nil)&.name&.then { |n| "#{n}".freeze }, # (a new String: a name from document text carries GraphIO::FileGuard's mark)
           }
         end
 
