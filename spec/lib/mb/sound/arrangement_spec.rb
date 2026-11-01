@@ -129,6 +129,59 @@ RSpec.describe(MB::Sound::Arrangement) do
     expect(run(800)[0]).to eq(6000)
   end
 
+  # (lesson-fixes-1: a console swap changed the player's clip but not the
+  # track's, so a relaunch after a stop played the track's first clip
+  # again; Arrangement#note_swap)
+  describe 'a console swap on a track' do
+    before do
+      set.go(:one, at: :now)
+      run(800)
+      within { MB::Sound.swap(:a, a2, on: :now) }
+      expect(run(800)[0]).to eq(50)
+    end
+
+    it 'is the track\'s clip: a relaunch by name or a scene\'s :on after a stop plays the swapped clip' do
+      expect(set.tracks[:a].clip).to equal(a2)
+      expect(set.slots(:a)).to include(a2)
+
+      within { MB::Sound.stop(:a, fade: 0) }
+      run(800)
+      within { MB::Sound.bg(:a, on: :now) }
+      expect(run(800)[0]).to eq(50)
+
+      set.scene(:on_a, a: :on)
+      within { MB::Sound.stop(:a, fade: 0) }
+      run(800)
+      set.go(:on_a, at: :now)
+      expect(run(800)[0]).to eq(50)
+
+      # A scene naming the track's clip still wins
+      set.go(:one, at: :now)
+      expect(run(800)[0]).to eq(48)
+      expect(set.tracks[:a].clip).to equal(a1)
+    end
+
+    it 'is undone with the swap' do
+      within { MB::Sound.undo(on: :now) }
+      expect(set.tracks[:a].clip).to equal(a1)
+      expect(run(800)[0]).to eq(48)
+    end
+
+    it 'follows old => new pairs and kit rows' do
+      within { MB::Sound.swap(:a, a2 => a1, on: :now) }
+      expect(set.tracks[:a].clip).to equal(a1)
+      expect(run(800)[0]).to eq(48)
+
+      kit = MB::Sound.grid(4, kick: 'x...', hat: '.x.x').loop
+      kick = MB::Sound.grid(4, kick: 'xx..').loop
+      swapped = set.send(:swapped_track_clip, kit, { kit[:kick] => kick[:kick] })
+      expect(swapped.rows[:kick]).to equal(kick[:kick])
+      expect(swapped.rows[:hat]).to equal(kit[:hat])
+      expect(set.send(:swapped_track_clip, kit, { kit => kick })).to equal(kick)
+      expect(set.send(:swapped_track_clip, kit, { a1 => a2 })).to be_nil
+    end
+  end
+
   it 'keeps tracks and mute groups in one namespace, raising for collisions in scripts' do
     expect { session.mute_group(:a, :b) }.to raise_error(ArgumentError, /:a is already a track/)
     session.mute_group(:both, :a, :b)

@@ -572,7 +572,10 @@ module MB
       # was made from, or old => new pairs to choose.  Clips made from the
       # old clip (e.g. bass.transpose(12), or the voices of Clip#synth) are
       # rebuilt from the new one the same way.  Stopped players can be
-      # swapped too, and play the new clip when resumed.  See Session#swap.
+      # swapped too, and play the new clip when resumed.  On a track (see
+      # ArrangementMethods#track), the new clip becomes the track's clip,
+      # as with `bg :name, clip`, so `bg :name` or a scene's :on after a
+      # stop plays it.  See Session#swap.
       #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
@@ -619,6 +622,12 @@ module MB
         end
         session_command(name, label: "swap #{name.inspect}", kind: :swap) { |session, time|
           session.swap(name, clips, at: point, start_time: point.given? ? nil : time)
+          # A track remembers the swapped clip, as `bg :track, clip` does
+          # (lesson-fixes-1; see Arrangement#note_swap)
+          if name.is_a?(Symbol) && session.arrangement.tracks[name]
+            change = Session.context&.command&.changes&.reverse&.find { |c| c.kind == :swap && c.subject == name }
+            session.arrangement.note_swap(name, clips, change)
+          end
           name
         }
       end

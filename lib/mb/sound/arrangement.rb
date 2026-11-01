@@ -624,6 +624,60 @@ module MB
         result && @session.journal[result.seq]
       end
 
+      # Records a console swap (PlaybackMethods#swap) of +clips+ into
+      # track +name+'s player as the track's clip, the record `bg :name,
+      # clip` (#play) keeps, so a later `bg :name`, a scene's :on, or a
+      # rebuild plays the swapped clip instead of the one the track had
+      # before (lesson-fixes-1: a scene's :on after a stop played the
+      # track's first clip again, losing the swap's seed and knobs).  The
+      # swapped clip becomes one of the track's slots (see ClipMatrix) and
+      # the launch clip of +change+ (the swap's Change), and the record is
+      # part of the command's undo step.  Called inside the command (see
+      # Session#command).  Does nothing for a name that isn't a track.
+      def note_swap(name, clips, change = nil)
+        tr = tracks[name] or return nil
+        before = undo_state
+        clip = @mutex.synchronize {
+          new_clip = swapped_track_clip(tr.clip, clips)
+          tr.clip = new_clip if new_clip
+          new_clip
+        }
+        return nil unless clip
+
+        note_launch(name, change, clip)
+        @session.note_undo_extra(self, before, undo_state)
+        clip
+      end
+
+      # What track clip +old+ becomes when +clips+ (a Clip, a Kit, or a
+      # Hash of old => new clips, kits, or rows) is swapped in (see
+      # #note_swap): a Clip or Kit replaces it, a Hash maps it (by
+      # identity) or, for a Kit, maps its rows; nil if +clips+ doesn't
+      # change it.
+      def swapped_track_clip(old, clips)
+        case clips
+        when Sequence::Clip, Sequence::Kit
+          clips
+        when Hash
+          pair = clips.find { |k, _| k.equal?(old) }
+          next_clip = pair&.last
+          return next_clip if next_clip.is_a?(Sequence::Clip) || next_clip.is_a?(Sequence::Kit)
+          return nil unless old.is_a?(Sequence::Kit)
+
+          # Row pairs (kick_a => kick_b, or kits whose rows match by name)
+          rows = clips.each_with_object({}.compare_by_identity) { |(k, v), map|
+            if k.is_a?(Sequence::Kit) && v.is_a?(Sequence::Kit)
+              (k.rows.keys & v.rows.keys).each { |r| map[k.rows[r]] = v.rows[r] }
+            elsif k.is_a?(Sequence::Clip) && v.is_a?(Sequence::Clip)
+              map[k] = v
+            end
+          }
+          mapped = old.rows.transform_values { |c| rows[c] || c }
+          return nil if mapped.all? { |r, c| c.equal?(old.rows[r]) }
+          Sequence::Kit.new(mapped)
+        end
+      end
+
       # What scene +sc+ does to track +tr+ when it doesn't name it: :keep
       # with `others: :keep`, and for trigger tracks always (omnibus17,
       # Munro's M5: a full scene stopped the pump of a hand-built set, so it
