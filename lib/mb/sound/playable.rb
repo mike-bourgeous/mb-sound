@@ -116,6 +116,9 @@ module MB
           if (inst = sound.instrument)
             node = inst.respond_to?(:sampler) ? sound.sampler(inst) : inst.kit(sound)
             wrap(node, "#{label(inst)}: #{sound}", !sound.looping?, nil)
+          elsif (name = Library::Generators.instrument(sound))
+            # (a library generator's clip: on its entry's instrument)
+            wrap(Arrangement::InstrumentPatch.entry_for(name, track: :play).call(sound), "#{name}: #{sound}", !sound.looping?, nil)
           else
             wrap(sound.synth(voices: VOICES, &PATCH), sound.to_s, !sound.looping?,
               'notes play on a soft saw; choose a sound with `clip.synth { |v| v.hz.square * v.amp_env }` or `clip.played_by(instrument)`')

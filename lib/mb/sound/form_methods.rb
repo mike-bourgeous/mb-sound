@@ -36,8 +36,25 @@ module MB
       # end it), else the loaded flow (`demo`'s, or the last one built; the
       # Form, printed as its block, after a line saying `start` plays it),
       # else nil.  Also available as #form.
-      def flow(play: true, seed: nil, warm_up: :auto, at: nil, on: nil, in: nil, &block)
+      #
+      # Given a section chain (+source+: an L.flow entry or what it built,
+      # or any markov or lsystem with +bars:+), plays the flow `generate
+      # source, bars:, length:` over this session's scenes (one scene per
+      # section name; `genre(:techno).setup` makes the techno chain's), the
+      # entry's bars by default; +loop: true+ starts it over when it ends,
+      # forever:
+      #
+      #     flow L.flow.techno_chain
+      #     flow L.flow.techno_chain(seed: 4), loop: true
+      def flow(source = nil, bars: {}, length: nil, loop: false, play: true, seed: nil, warm_up: :auto, at: nil, on: nil, in: nil, &block)
         arrangement = Session.current.arrangement
+        if source
+          raise ArgumentError, 'flow takes a section chain or a block, not both' if block
+          src = source
+          lengths = bars
+          arc = length
+          block = loop ? proc { label :top; generate src, bars: lengths, length: arc; goto :top } : proc { generate src, bars: lengths, length: arc }
+        end
         unless block
           pb = arrangement.playback
           return pb if pb && !pb.ended?

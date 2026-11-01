@@ -114,7 +114,7 @@ module MB
           def split(values)
             clip = instrument = nil
             values.each do |v|
-              if v.is_a?(Sequence::Clip) || v.is_a?(Sequence::Kit) || (v.is_a?(Library::Entry) && v.kind == :clip)
+              if v.is_a?(Sequence::Clip) || v.is_a?(Sequence::Kit) || (v.is_a?(Library::Entry) && (v.kind == :clip || v.kind == :generator))
                 raise ArgumentError, 'design: give it one clip (got two)' if clip
                 clip = v.is_a?(Library::Entry) ? v.call : v
               else

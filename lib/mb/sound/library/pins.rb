@@ -72,6 +72,9 @@ module MB
             "#{settings_text(s)}\n#{settings_text(res.settings)}"
           elsif entry.family == :genre_patch
             method_source(Genre::Patches, entry.name)
+          elsif %i[generator flow].include?(entry.family)
+            # (a shipped generator: its definition and its params' defaults)
+            "#{definition_source(entry.location)}\n#{entry.params.values.map(&:to_ruby).join("\n")}\n#{settings_text(s)}"
           elsif s.is_a?(Hash)
             settings_text(s)
           end
@@ -92,6 +95,21 @@ module MB
             text = text.lines.reject { |l| l.match?(/\A\s*(saved|mb_sound):/) }.join if f.end_with?('.rb')
             "#{File.basename(f)}\n#{text}"
           }.join("\n")
+        end
+
+        # The statement starting at +location+ ("file:line", relative to
+        # the repository or absolute), read with Prism.
+        def definition_source(location)
+          file, line = location.split(/:(?=\d+\z)/)
+          file = File.expand_path(file, Generators::ROOT)
+          found = nil
+          walk = ->(n) {
+            next if found || n.nil?
+            found = n if n.is_a?(Prism::CallNode) && n.block && n.location.start_line <= line.to_i && n.block.location.start_line == line.to_i
+            n.compact_child_nodes.each(&walk)
+          }
+          walk.(Prism.parse_file(file).value)
+          found&.slice
         end
 
         # The source of +mod+'s method +name+ (its def, read with Prism).

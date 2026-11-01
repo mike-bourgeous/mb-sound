@@ -15,7 +15,7 @@ module MB
       module Picker
         # The heads in the order the picker shows them (Library::HEADS
         # with entries, then :all).
-        ORDER = %i[inst fx kit seq master env set edit mfx analyze mod].freeze
+        ORDER = %i[inst fx kit seq gen flow master env set edit mfx analyze mod].freeze
 
         # How long results are kept before the index is read again (a save
         # or a shelf change shows within this).
@@ -115,9 +115,11 @@ module MB
             return Action.new(:run, "track #{t}, #{path}", "#{track} plays #{entry.name} from its launch point (knobs you turned carry; undo takes it back)") if patch
             Action.new(:paste, "track #{t}, #{path}; bg #{t}, clip",
                        "#{track} isn't a track with a patch (bg played it): edit the clip, Enter runs it")
-          when :clip
+          when :clip, :generator
             return audition(entry) unless track
             Action.new(:run, "bg #{t}, #{path}.()", "#{track} plays #{entry.name} from its launch point")
+          when :flow
+            Action.new(:paste, "flow #{path}", "#{entry.name} is a section chain: the flow that plays it over this set's scenes onto the console")
           when :effect
             # (a patch track's effect insert, at its launch point: Arrangement::Fx)
             return Action.new(:run, "fx #{t}, #{path}", "#{track}'s effect becomes #{entry.name} at its launch point (its notes play on; undo takes it back)") if track && patch

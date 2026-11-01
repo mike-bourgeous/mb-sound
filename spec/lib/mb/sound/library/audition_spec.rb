@@ -31,7 +31,7 @@ RSpec.describe(MB::Sound::Library::Audition, :aggregate_failures) do
       expect(peak).to be > 0.001, "#{e.head_path} (#{kind} #{family}) is silent"
       [kind, family]
     end
-    expect(played.map(&:first).uniq).to include(:instrument, :kit, :effect, :master, :envelope)
+    expect(played.map(&:first).uniq).to include(:instrument, :kit, :effect, :master, :envelope, :generator, :flow)
   end
 
   it 'plays on MAIN at -6 dB without CUE, on CUE with it, and stops' do

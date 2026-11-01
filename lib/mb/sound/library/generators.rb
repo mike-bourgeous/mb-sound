@@ -108,14 +108,19 @@ module MB
         def define(kind, name, tags:, about:, params:, describe:, settings:, block:)
           raise ArgumentError, "#{kind} #{name.inspect} needs a block" unless block
           file, line = block.source_location
-          entry = nil
-          builder = ->(*args, **kw, &b) { run(entry, block, args, kw, b) }
-          entry = Entry.new(
-            name: name, kind: kind, family: kind, tags: tags, about: about, location: "#{file.delete_prefix("#{ROOT}/")}:#{line}",
-            params: -> { declare(MB::Sound.instance_exec(&params), describe) },
-            settings: settings.compact, builder: builder
-          )
-          Library.index.register(entry)
+          Library.index.register(entry(
+            kind, name, tags: tags, about: about, location: "#{file.delete_prefix("#{ROOT}/")}:#{line}",
+            params: -> { declare(MB::Sound.instance_exec(&params), describe) }, settings: settings, block: block
+          ))
+        end
+
+        # An Entry of +kind+ (:generator or :flow) building with +block+
+        # (see .run); +params+ is { name => Param } or a Proc making it;
+        # the rest as Entry.new takes it.
+        def entry(kind, name, params:, settings:, block:, **rest)
+          built = nil
+          builder = ->(*args, **kw, &b) { run(built, block, args, kw, b) }
+          built = Entry.new(name: name, kind: kind, family: kind, params: params, settings: settings.compact, builder: builder, **rest)
         end
 
         # { name => Param } for +defaults+ ({ name => default }).
@@ -282,8 +287,9 @@ module MB
         # The first SKETCH_SECTIONS sections +src+ draws (a chain stops at
         # its end).
         def sketch_sections(src)
-          f = Form.build { generate src, bars: src.form_states.to_h { |s| [s, 1] } }
-          f.plan(seed: 0).first(SKETCH_SECTIONS).map(&:name)
+          lengths = src.form_states.reject { |s| src.nonterminal?(s) }.to_h { |s| [s, 1] }
+          f = Form.build { generate src, bars: lengths }
+          f.plan(seed: 0).first(SKETCH_SECTIONS).map(&:section)
         rescue StandardError
           src.respond_to?(:take) ? src.take(SKETCH_SECTIONS) : src.word.first(SKETCH_SECTIONS)
         end

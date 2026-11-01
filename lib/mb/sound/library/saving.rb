@@ -16,6 +16,7 @@ module MB
         # next free version name, +tags+/+about+ go into the header (tags:,
         # description:).  Prints what happened; returns the path or nil.
         def save(name, graph, replace:, bump:, tags: nil, about: nil, **opts)
+          return save_generator(name, graph, replace: replace, bump: bump, tags: tags, about: about, **opts) if generator?(graph)
           meta = (opts.delete(:meta) || {}).dup
           meta[:tags] = check_tags(tags) if tags
           meta[:description] = about.to_s if about
@@ -48,6 +49,85 @@ module MB
         rescue GraphIO::DumpError => e
           warn "Not saved: #{e.message}"
           nil
+        end
+
+        # True if +value+ saves as a library generator statement (see
+        # #save_generator): a clip a generator made, or a section chain.
+        def generator?(value)
+          (value.is_a?(Sequence::Clip) && (Generators.origin(value) || value.variations.any? { |v| v.block.is_a?(Generative::Producer) })) ||
+            (value.respond_to?(:form_next) && value.respond_to?(:reseed))
+        end
+
+        # Saves a generator clip or a section chain as a library file
+        # statement, `gen/<name>.rb` or `flow/<name>.rb` on the save shelf
+        # (library-file syntax: `generator :x, instrument: ... do ... end`,
+        # `flow :x, bars: { ... } do ... end`), the clip's recipe as the
+        # block; knobs it reads become `param` lines at their current values
+        # (named as the recipe names them), so `L.gen.x(energy:
+        # knob(:energy))` steers it again.  +bars+ (a chain's lengths; the
+        # entry's that built it by default) and +instrument+ (the
+        # generator entry's by default) go on the line.  Never replaces
+        # unless +replace+; +bump+ picks the next free version.
+        def save_generator(name, value, replace:, bump:, tags: nil, about: nil, bars: nil, instrument: nil, sections: nil, genre: nil)
+          kind = value.is_a?(Sequence::Clip) ? :generator : :flow
+          dir = Library.save_shelf&.dir or raise ArgumentError, 'no shelf to save to'
+          path = ->(n) { File.join(dir, kind == :flow ? 'flow' : 'gen', "#{n}.rb") }
+          name = name.to_sym
+          if bump && File.file?(path.(name))
+            v = 2
+            v += 1 while File.file?(path.("#{name.to_s.sub(/_v\d+\z/, '')}_v#{v}"))
+            name = :"#{name.to_s.sub(/_v\d+\z/, '')}_v#{v}"
+          end
+          target = path.(name)
+          existed = File.file?(target)
+          if existed && !replace
+            warn "Not saved: #{name} exists (#{shown(target)}); save! #{label(name)}, ... replaces it, bump: true saves #{label(:"#{name}_v2")}"
+            return nil
+          end
+          from = Generators.origin(value)&.entry
+          settings = {}
+          if kind == :generator
+            inst = instrument || (from&.kind == :generator ? from.settings[:instrument] : nil)
+            settings[:instrument] = inst if inst
+            body, params = generator_body(value)
+          else
+            bars ||= Generators.bars(from)
+            unless bars
+              warn "Not saved: #{name}: a section chain saves with its sections' lengths (save :#{name}, chain, bars: { intro: 8, ... })"
+              return nil
+            end
+            settings[:bars] = bars
+            sections ||= from&.settings&.[](:sections)
+            genre ||= from&.settings&.[](:genre)
+            settings[:sections] = sections if sections
+            settings[:genre] = genre if genre
+            body = value.to_ruby
+            params = []
+          end
+          settings[:tags] = check_tags(tags) if tags
+          settings[:about] = about.to_s if about
+          head = "#{kind} #{name.inspect}#{settings.map { |k, v| ", #{k}: #{k == :tags ? "%i[#{v.join(' ')}]" : RubyValue.to_ruby(v)}" }.join}"
+          text = "library #{Library::FORMAT}\n#{head} do\n#{(params + body.lines.map(&:chomp)).map { |l| "  #{l}" }.join("\n")}\nend\n"
+          FileUtils.mkdir_p(File.dirname(target))
+          File.write(target, text)
+          Library.reload!
+          committed = Git.commit_save(target, "save #{label(name)}#{' (replaced)' if existed}")
+          puts "Saved #{name} to #{shown(target)}#{' (replaced)' if existed}#{' (committed)' if committed}"
+          target
+        end
+
+        # [the recipe of generator +clip+ as Ruby (GraphIO.dump's graph
+        # lines), its knobs (Clip#param_nodes) as `param` lines at their
+        # values, read in the recipe by name].
+        def generator_body(clip)
+          doc = GraphIO.dump(clip, name: 'generator')
+          tree = Prism.parse(doc).value.statements.body
+          body = tree.reject { |st| st.is_a?(Prism::CallNode) && st.receiver.nil? && GraphIO::Document::HEADER.include?(st.name) }.map(&:slice).join("\n")
+          params = clip.param_nodes.select { |k| k.is_a?(GraphNode::Knob) && k.name.to_s.match?(/\A[a-z_][a-z0-9_]*\z/) }.map { |k|
+            body = body.gsub("knob(#{k.name.inspect})", k.name.to_s)
+            "param #{k.name.inspect}, #{Param.literal(k.value)}"
+          }
+          [body, params]
         end
 
         # True if a document or bundle exists at +target+ (a document path).

@@ -166,8 +166,14 @@ module MB
         # }` (+length:+, then +times:+, +fill:+, +scene:+, +fade:+, knob
         # values).  +length:+ (bars or a Duration) bounds an arc of the
         # source: past it the source heads for its end (see Form::Generate).
+        #
+        # +source+ may be a section chain from the library (an L.flow entry,
+        # or what it built: `generate L.flow.techno_chain`): its bars are the
+        # defaults.
         def generate(source, bars: {}, sections: nil, length: nil, **lengths)
-          given = bars.merge(lengths)
+          from = source.is_a?(::MB::Sound::Library::Entry) ? source : ::MB::Sound::Library::Generators.origin(source)&.entry
+          source = ::MB::Sound::Library::Generators.source(source)
+          given = (::MB::Sound::Library::Generators.bars(from) || {}).merge(bars).merge(lengths)
           specs = {}
           options = {}
           given.each do |name, spec|

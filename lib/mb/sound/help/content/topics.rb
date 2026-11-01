@@ -604,7 +604,10 @@ module MB
         `knob(:reg).choose(A2..A4, A3..A5)` for `range:`), read once per
         cycle a `lead:` (one beat) before it starts, so a `turn` steers the
         next cycle and takes replay it; `generate(1.bar, busy: knob(:busy))
-        { |cycle, dice, busy:| }` hands them to your block.
+        { |cycle, dice, busy:| }` hands them to your block.  The demo
+        songs' and genre templates' generators are in the library:
+        `L.gen` (`L.gen.koto_motif(seed: 3)`, `play L.gen.techno_beat`)
+        and `L.flow` for their section chains (`help :library`).
       TEXT
       commands :tones, :chord, :weights, :harmony, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
       note :generative
@@ -802,7 +805,10 @@ module MB
         end the shortest way, as `genre(:techno).endless(length:
         600.seconds)` does).  A section may play for different lengths (`chorus 16` ... `chorus
         8`).  `seek 1000` in a generated flow plays what an uninterrupted
-        run plays there (`form.plan(seed: 1).at(999)` shows it).
+        run plays there (`form.plan(seed: 1).at(999)` shows it).  The
+        genre templates' chains are in the library: `L.flow.techno_chain`
+        (`flow L.flow.techno_chain` plays it with its section lengths;
+        `generate L.flow.dnb_chain(seed: 3)` inside a flow).
       TEXT
       commands :markov, :lsystem
       note :generative
@@ -1296,9 +1302,24 @@ module MB
         `L.fx.reverb.hall` reaches one by words, each narrowing the last
         (`L.inst.reese` lists both Reeses, Tab shows what is left), and
         `.(sig)` uses it: `sig.then(&L.fx.hall)`.  Heads: `L.inst`,
-        `L.fx`, `L.kit`, `L.seq`, `L.master`, `L.set`, `L.env`, `L.edit`,
-        `L.mfx` (note effects), `L.analyze` (audio to notes or control),
-        `L.mod`, `L.all`.
+        `L.fx`, `L.kit`, `L.seq`, `L.gen` (clip generators), `L.flow`
+        (section chains), `L.master`, `L.set`, `L.env`, `L.edit`, `L.mfx`
+        (note effects), `L.analyze` (audio to notes or control), `L.mod`,
+        `L.all`.
+
+        Generators are entries too: `L.gen.techno_beat(seed: 3, energy:
+        knob(:energy))` is the demo songs' evolving beat as a clip (a word
+        given keywords builds; `L.gen.techno_beat.()` at the defaults),
+        `track :drums, L.gen.techno_beat` plays it on its kit, `track :lead,
+        L.gen.phrygian_motif, :tine_piano` on another instrument.
+        `L.flow.techno_chain(seed: 4)` is a genre template's section chain;
+        `flow L.flow.techno_chain` plays it over the session's scenes, and
+        the templates read theirs from here.  Saved graphs print them back
+        as the call.  A library file holds your own: `generator :mine,
+        instrument: :tr909 do |seed: 1| param :energy, (0.0..1.0).at(0.5);
+        beats(16, energy: energy, seed: seed) { kick [1, 0, 0, 0] * 4 } end`,
+        `flow :arc, bars: { intro: 8, drop: [16, 32] } do |seed: 1|
+        markov(...) end`; `save :mine, clip` writes one.
 
         Entries come from shelves, searched in order: the session's racks,
         the project's presets/ (your song), the user shelf (a git
