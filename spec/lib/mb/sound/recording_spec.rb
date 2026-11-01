@@ -482,7 +482,7 @@ RSpec.describe(MB::Sound::RecordMethods) do
   end
 
   describe 'console names' do
-    names = %i[rec record rec_audio record_audio stop_rec_audio stop_recording_audio arm arm_track disarm disarm_track armed armed_tracks capture capture_midi captures recorded_clips recordings]
+    names = %i[rec record rec_audio record_audio stop_rec_audio stop_recording_audio arm arm_track disarm disarm_track armed armed_tracks capture capture_midi captures recorded_clips recordings wire connect unwire wires]
 
     it 'are RecordMethods, not Kernel or Object methods, GraphNode methods, or Pry commands' do
       require 'pry'

@@ -619,15 +619,18 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(MB::Sound::ErrorFormat.summary(e)).to end_with('(did you mean :bowl, seq(...) (a comma after :bowl, not a period)?)')
     end
 
-    it 'suggests the Symbol for a bare track name, and swap for wire and connect' do
+    it 'suggests the Symbol for a bare track name, swap for attach, and swap for a clip given to wire and connect' do
       in_session do
         e = (MB::Sound.module_eval('bowl.clip') rescue $!)
         expect(MB::Sound::ErrorFormat.summary(e)).to eq("NameError: undefined local variable or method 'bowl' (did you mean :bowl, the track's name?)")
+        e = (MB::Sound.module_eval('attach :bowl, 1') rescue $!)
+        expect(MB::Sound::ErrorFormat.summary(e)).to eq(
+          "NoMethodError: undefined method 'attach' (did you mean swap :bowl, clip (a clip on :bowl's instrument, at its next launch point; bg :bowl, clip starts a stopped track) " \
+          "or wire :bowl, stream (a MIDI stream into :bowl's instrument)?)"
+        )
+        # (wire and connect are commands since wire-1: a clip gets the swap hint)
         %w[wire connect].each do |w|
-          e = (MB::Sound.module_eval("#{w} :bowl, 1") rescue $!)
-          expect(MB::Sound::ErrorFormat.summary(e)).to eq(
-            "NoMethodError: undefined method '#{w}' (did you mean swap :bowl, clip (a clip on :bowl's instrument, at its next launch point; bg :bowl, clip starts a stopped track)?)"
-          )
+          expect { MB::Sound.module_eval("#{w} :bowl, seq(C3).n4.loop") }.to raise_error(ArgumentError, /a clip plays on :bowl's instrument with swap :bowl, clip/)
         end
         e = (MB::Sound.module_eval('nosuchname_here') rescue $!)
         expect(MB::Sound::ErrorFormat.summary(e)).not_to include('the track')

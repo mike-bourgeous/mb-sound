@@ -22,6 +22,7 @@ module MB
     # which tracks still align to their quantization).
     class Arrangement
       include Recording
+      include Wires
       include PatchCheck
       include ClipMatrix
 
@@ -639,7 +640,11 @@ module MB
           state += ', muted' if @session.muted?(tr.name)
           state += ', soloed' if @session.soloed?(tr.name)
           arm = arms[tr.name]
-          state += arm.monitoring? ? ', armed' : ', armed (no monitor)' if arm
+          if arm&.wired?
+            state += arm.monitoring? ? ", wired: #{arm.wire.text}" : ", wired (no monitor): #{arm.wire.text}"
+          elsif arm
+            state += arm.monitoring? ? ', armed' : ', armed (no monitor)'
+          end
           state = "trigger, #{state}" if tr.trigger
           k = @session.fader(tr.name)
           state += ", level #{@session.level(tr.name).inspect}" if k && k.value.to_f != 1

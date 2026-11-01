@@ -352,14 +352,22 @@ module MB
           op = what&.[](/\A([a-z_]+)\(/, 1) || 'arp'
           ArgumentError.new(
             "#{command} #{name.inspect}: #{what ? "#{what} is" : 'that is'} a live MIDI stream of a clip (clip.#{op}(...) returns one), not a clip, so it can't play on #{where}; " \
-            "bake the #{op} into a clip: `riff.bake(#{op}(...))` instead of `riff.#{op}(...)` (a loop's notes wrap to its start)"
+            "bake the #{op} into a clip: `riff.bake(#{op}(...))` instead of `riff.#{op}(...)` (a loop's notes wrap to its start)" \
+            "#{wire_hint(name)}"
           )
         else
           ArgumentError.new(
             "#{command} #{name.inspect}: that is live MIDI (no clip), so it can't play on #{where}; record it into a clip first (`arm #{name.inspect}` then `rec` or `capture`), " \
-            "or give #{name.inspect} a patch that reads it"
+            "or give #{name.inspect} a patch that reads it#{wire_hint(name)}"
           )
         end
+      end
+
+      # The wire alternative for patch track +name+ (see
+      # #stream_for_track_error), or ''.
+      def wire_hint(name)
+        tr = name.is_a?(Symbol) && Session.current.arrangement.tracks[name]
+        tr&.patch? ? "; or play the stream into #{name.inspect}'s instrument as live MIDI: `wire #{name.inspect}, stream`" : ''
       end
 
       # Returns a Symbol describing the type of output that should be used:
