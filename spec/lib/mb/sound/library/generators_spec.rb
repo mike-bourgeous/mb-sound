@@ -399,6 +399,7 @@ RSpec.describe MB::Sound::Library::Generators do
       s, _ = run(:drums, -> { track.(); MB::Sound.bg(:x, MB::Sound::L.gen.techno_beat, on: :now) }, buffers: 1)
       expect(s.players[:x]).to include('8 bars')
     end
+
   end
 
   describe 'play and audition' do
@@ -488,12 +489,18 @@ RSpec.describe MB::Sound::Library::Generators do
       path = nil
       expect { path = MB::Sound.save(:beat3, clip, tags: %i[mine], about: 'Seed 3') }.to output(/Saved beat3/).to_stdout
       expect(path).to eq(File.join(save_dir, 'gen', 'beat3.rb'))
+      # (the steering params the call left out stay params: on a track,
+      # knobs again; gen-knobs-1)
+      energy = MB::Sound::L.gen.techno_beat.params[:energy].to_ruby
+      expect(energy).to start_with('param :energy, (0.0..1.0).at(0.5), description: ')
       expect(File.read(path)).to eq(<<~RUBY)
         library 1
         generator :beat3, instrument: :tr909, tags: %i[mine], about: "Seed 3" do
-          L.gen.techno_beat(seed: 3)
+          #{energy}
+          L.gen.techno_beat(seed: 3, energy: energy)
         end
       RUBY
+      expect(MB::Sound::L.gen.beat3.params[:energy].range).to eq(0.0..1.0)
       expect(cycles(MB::Sound::L.gen.beat3.())).to eq(cycles(clip))
       expect { MB::Sound.save(:beat3, clip) }.to output(/Not saved: beat3 exists.*save!/).to_stderr
       expect { MB::Sound.save(:beat3, clip, bump: true) }.to output(/Saved beat3_v2/).to_stdout

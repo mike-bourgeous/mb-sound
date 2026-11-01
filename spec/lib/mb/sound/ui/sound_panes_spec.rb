@@ -315,6 +315,28 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(again.nodes.reject.with_index { |_, i| i == again.node }).to eq(info.nodes.reject.with_index { |_, i| i == info.node })
     end
 
+    # gen-knobs-1: a generator's track knobs (:"lead/density") are a notes
+    # row's params at the top of SOURCE, not loose knobs.
+    it 'shows a library generator\'s track knobs on a notes row' do
+      MB::Sound::Session.with_context(session: @session) do
+        MB::Sound.track(:lead, MB::Sound::L.gen.phrygian_motif)
+        MB::Sound.level(:lead, -30.db)
+        MB::Sound.bg(:lead, on: :now)
+      end
+      3.times { @session.process_buffer }
+      info = ui::Inspect::Gatherer.new.call(@session, { track: :lead })
+      notes = info.nodes.find { |n| n.what == 'notes' }
+      expect(notes).to have_attributes(label: 'phrygian_motif', section: :source)
+      expect(%i[density mutate].map { |p| notes.knob_of(p) }).to eq(%i[lead/density lead/mutate])
+      expect(notes.params.values[:density].value).to eq(0.5)
+      expect(info.loose).not_to include(:"lead/density", :"lead/mutate")
+      expect(info.nodes.reject { |n| n.section == :plumbing }.first).to equal(notes) # (the notes first)
+      ui::Inspect.target = { track: :lead, node: info.nodes.index(notes) }
+      text = draw(:inspector, live_snap, { title_in_rule: true }, w: 100, h: 30).join("\n")
+      expect(text).to include('phrygian_motif', 'density', 'mutate')
+      expect_no_class_names(text)
+    end
+
     # The maintainer, 2026-10-30: "Toggle" (a preset's numbers as panel
     # cells; library-2).  Since editability-1 they bind like any track's
     # literals, as the sections view's do (they were read-only cells).
