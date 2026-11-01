@@ -193,6 +193,8 @@ module MB
           @spy_frame = nil
           @spy_from = nil
           @spy_session = nil
+          # How it was made (see #lineage, stream_lineage.rb)
+          @lineage = nil
         end
 
         # Calls the block with each event this stream reads from its

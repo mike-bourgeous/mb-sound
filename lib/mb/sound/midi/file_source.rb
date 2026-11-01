@@ -61,6 +61,11 @@ module MB
         # files loop at this length.
         attr_reader :duration
 
+        # True if the file repeats (see #initialize).
+        def loop?
+          @loop
+        end
+
         # +file+ is a filename or a MIDIFile.  If +:loop+ is true, the file
         # repeats every #duration seconds (it must have a nonzero duration).
         def initialize(file, loop: false, tempo_map: nil)
