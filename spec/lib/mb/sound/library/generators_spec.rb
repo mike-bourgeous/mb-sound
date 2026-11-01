@@ -273,14 +273,14 @@ RSpec.describe MB::Sound::Library::Generators do
         entry = lib.index.lookup(:flow, name)
         expect(t.generator.source).to eq(entry.call)
         expect(t.generator.bars).to eq(entry.settings[:bars])
-        expect(t.generator.ruby).to eq("generator L.flow.#{name}.()")
+        expect(t.generator.ruby).to eq("generator L.flow.#{name}(seed: #{entry.params[:seed].default})") # (the seed written out: gen-knobs-1)
         expect(t.generative(seed: 4).form.to_ruby).to include("generate L.flow.#{name}(seed: 4), bars:")
       end
       amb = MB::Sound.genre(:ambient)
       expect(amb.generator.sections).to eq(12)
       { drone: :ambient_roots, motif: :ambient_motif, harp: :ambient_figure }.each do |clip, name|
         expect(cycles(amb.clips[clip], 4)).to eq(cycles(MB::Sound.instance_exec(lib.index.lookup(:generator, name).params[:seed].default, &refs::AMBIENT_INLINE[name]), 4))
-        expect(amb.to_ruby).to include("clip #{clip.inspect}, L.gen.#{name}.()")
+        expect(amb.to_ruby).to include("clip #{clip.inspect}, L.gen.#{name}(seed: #{lib.index.lookup(:generator, name).params[:seed].default})")
       end
     end
   end
@@ -288,10 +288,14 @@ RSpec.describe MB::Sound::Library::Generators do
   describe 'calls' do
     it 'print back as the library call and load again (graph documents walk L.gen chains)' do
       expect(MB::Sound::L.gen.techno_beat(seed: 3).to_ruby).to eq('L.gen.techno_beat(seed: 3)')
-      expect(MB::Sound::L.gen.techno_beat.().to_ruby).to eq('L.gen.techno_beat.()')
+      # (a call at its defaults prints its seed: the maintainer, 2026-11-02, "Write the seed")
+      expect(MB::Sound::L.gen.techno_beat.().to_ruby).to eq('L.gen.techno_beat(seed: 5)')
+      expect(MB::Sound::L.gen.techno_beat(energy: 0.8).to_ruby).to eq('L.gen.techno_beat(seed: 5, energy: 0.8)')
+      expect(MB::Sound::L.gen.techno_beat.to_ruby).to eq('L.gen.techno_beat(seed: 5)')
       expect(MB::Sound::L.flow.techno_chain(seed: 4).to_ruby).to eq('L.flow.techno_chain(seed: 4)')
       expect(MB::Sound::L.flow.techno_chain.().reseed(5).to_ruby).to eq('L.flow.techno_chain(seed: 5)')
-      expect(MB::Sound::L.flow.techno_chain(seed: 4).reseed(132).to_ruby).to eq('L.flow.techno_chain.()')
+      expect(MB::Sound::L.flow.techno_chain(seed: 4).reseed(132).to_ruby).to eq('L.flow.techno_chain(seed: 132)')
+      expect(MB::Sound::L.flow.techno_chain.().to_ruby).to eq('L.flow.techno_chain(seed: 132)')
 
       g = MB::Sound.tr909(MB::Sound::L.gen.techno_beat(seed: 3, energy: 0.8))
       text = MB::Sound::GraphIO.dump(g, name: 'beat')
@@ -356,7 +360,7 @@ RSpec.describe MB::Sound::Library::Generators do
 
     it 'play a generator entry on its instrument, or on the one given (either order), as the clip with that instrument' do
       s, got = run(:drums, -> { MB::Sound.track(:drums, MB::Sound::L.gen.techno_beat) })
-      expect(s.arrangement.tracks[:drums].clip.to_ruby).to eq('L.gen.techno_beat.()')
+      expect(s.arrangement.tracks[:drums].clip.to_ruby).to eq('L.gen.techno_beat(seed: 5)')
       _, ref = run(:drums, -> { MB::Sound.track(:drums, MB::Sound::L.gen.techno_beat.(), :tr909) })
       expect(got.abs.max).to be > 0.01
       expect(got).to eq(ref)
@@ -379,7 +383,7 @@ RSpec.describe MB::Sound::Library::Generators do
     it 'bg of a bare entry on a track plays its clip at the defaults on the track; instruments and effects point to track and fx' do
       track = -> { MB::Sound.track(:drums, MB::Sound::L.gen.techno_beat(seed: 3)) }
       s, got = run(:drums, -> { track.(); MB::Sound.bg(:drums, MB::Sound::L.gen.techno_beat, on: :now) })
-      expect(s.arrangement.tracks[:drums].clip.to_ruby).to eq('L.gen.techno_beat.()')
+      expect(s.arrangement.tracks[:drums].clip.to_ruby).to eq('L.gen.techno_beat(seed: 5)')
       expect(s.players[:drums]).not_to include('8 bars')
       _, ref = run(:drums, -> { track.(); MB::Sound.bg(:drums, MB::Sound::L.gen.techno_beat.(), on: :now) })
       expect(got.abs.max).to be > 0.01
@@ -531,7 +535,7 @@ RSpec.describe MB::Sound::Library::Generators do
           pass = ->(form) { form.plan(seed: 0).first(12).map { |x| [x.section, x.length] } }
           expect(pass.(f)).to eq(pass.(ref))
           g = MB::Sound.flow(MB::Sound::L.flow.dnb_chain, loop: true, play: false)
-          expect(g.to_ruby).to start_with("flow do\n  label :top\n  generate L.flow.dnb_chain.(), bars:")
+          expect(g.to_ruby).to start_with("flow do\n  label :top\n  generate L.flow.dnb_chain(seed: 174), bars:")
           h = MB::Sound::Form.build { generate MB::Sound::L.flow.dnb_chain }
           dnb_bars = lib.index.lookup(:flow, :dnb_chain).settings[:bars]
           expect(pass.(h)).to eq(pass.(MB::Sound::Form.build { generate MB::Sound::L.flow.dnb_chain.(), bars: dnb_bars }))

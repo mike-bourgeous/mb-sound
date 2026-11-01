@@ -123,6 +123,126 @@ module MB
           built = nil
           builder = ->(*args, **kw, &b) { run(built, block, args, kw, b) }
           built = Entry.new(name: name, kind: kind, family: kind, params: params, settings: settings.compact, builder: builder, **rest)
+          BLOCKS[built] = block
+          built
+        end
+
+        # Each entry's block (Entry => block, keys weak), for builds with
+        # track knobs (.track_clip).
+        BLOCKS = ObjectSpace::WeakKeyMap.new
+
+        # +kwargs+ with +entry+'s seed written out (its default, first)
+        # when it has a seed param and +kwargs+ gives none.
+        def with_seed(entry, kwargs)
+          seed = entry.params[:seed]
+          return kwargs if seed.nil? || kwargs.key?(:seed)
+          { seed: seed.default }.merge(kwargs)
+        end
+
+        # The params of generator Entry +entry+ that a track playing it
+        # gets as knobs (the maintainer, 2026-11-02: "Yes", generator
+        # params become track knobs like preset params): numeric params
+        # with a bounded range and a number default (`energy: (0.0..1.0).at(0.5)`),
+        # the options the generators read once a cycle (energy, density,
+        # mutate, chance, ...).  Values (harmonies, scales, chords),
+        # structure (grids, divisions), seeds, and plain-number params
+        # stay as they are.  Library file generators' ranged params too
+        # (`param :energy, (0.0..1.0).at(0.5)`).
+        def knob_params(entry)
+          return [] unless entry.kind == :generator
+          entry.params.filter_map { |k, p|
+            k if k != :seed && p.numeric? && p.bounded? && p.default.is_a?(Numeric) && p.range.begin.is_a?(Numeric)
+          }
+        end
+
+        # +value+ (a generator Entry, a clip one built, or anything else)
+        # as track +track+ of +session+ plays it: the entry's clip (at its
+        # defaults, or with the keywords the call gave) with the session
+        # knobs :"track/param" steering the .knob_params the call didn't
+        # give (Arrangement::TrackKnobs.knob_for: made at the param's value
+        # with its range, or reused), so `track :drums, L.gen.techno_beat`
+        # turns with :"drums/energy" and renders like the plain values
+        # until it is turned.  +reuse+ (scenes, bg, swap) keeps an existing
+        # knob as it is instead of TrackKnobs' rules for a track's new
+        # build (a scene defined while another generator plays on the
+        # track doesn't move its knobs).  Other values, entries without
+        # such params, and calls that gave all of them come back as they
+        # are (entries built at their defaults).  The same call on the
+        # same track gives the same clip (remembered per Session), so a
+        # scene and the track's own clip are one slot.
+        def track_clip(value, track, session, reuse: false)
+          entry, given =
+            case value
+            when Entry
+              return value unless value.kind == :generator && value.builder
+              [value, {}]
+            when Sequence::Clip
+              b = ORIGINS[value] or return value
+              [b.entry, b.kwargs]
+            else
+              return value
+            end
+          free = knob_params(entry) - given.keys
+          ok = session && track.is_a?(Symbol) && !track.to_s.include?('/') && BLOCKS[entry]
+          return value.is_a?(Entry) ? value.call : value if free.empty? || !ok
+
+          knobs = free.to_h { |k|
+            param = entry.params[k]
+            kname = Session::Name.param(track, k)
+            [k, (reuse && session.knobs[kname]) || Arrangement::TrackKnobs.knob_for(session, track, param)]
+          }
+          return value.is_a?(Entry) ? value.call : value if knobs.value?(nil) # (a knob name taken by something else)
+
+          cache = (track_clips[session] ||= {})
+          key = [track, entry.name, entry.location]
+          hit = cache[key]
+          return hit[2] if hit && hit[0] == given && hit[1].all? { |k, kn| knobs[k].equal?(kn) } && hit[1].length == knobs.length
+
+          clip = run(entry, BLOCKS[entry], [], given, knobs: knobs)
+          KNOBS[clip] = knobs.freeze
+          cache[key] = [given, knobs, clip]
+          clip
+        end
+
+        # Clips .track_clip built => { param => knob } (keys weak).
+        KNOBS = ObjectSpace::WeakKeyMap.new
+
+        # The track knobs steering +clip+ ({ param => GraphNode::Knob },
+        # from .track_clip; the inspector's row for the clip), or nil.
+        def knobs_of(clip)
+          KNOBS[clip]
+        end
+
+        # The clips .track_clip built per Session ({ Session => { [track,
+        # entry name, location] => [given, knobs, clip] } }, weak).
+        def track_clips
+          @track_clips ||= ObjectSpace::WeakKeyMap.new
+        end
+
+        # Runs the block with +values+' moving params (knobs, ccs) for
+        # +params+ remembered as having the params' defaults for their
+        # home (see .home).
+        def with_homes(params, values, &block)
+          homes = nil
+          values.each do |k, v|
+            next unless MIDI::Param.param?(v)
+            d = params[k]&.default
+            next unless d.is_a?(Numeric)
+            (homes ||= {}.compare_by_identity)[v] = d
+          end
+          return yield unless homes
+          Internal.with_local(:mb_sound_generator_homes, homes) { yield }
+        end
+
+        # The default of the generator param that moving param +param+
+        # steers in the entry building now (a knob given for density: in
+        # `L.gen.ambient_motif(density: knob(:busy))`, or a track's
+        # :"lead/density"), or nil.  Generators whose steered path works
+        # around a home value read it (motifs' density thins and fills
+        # around it), so a knob at the entry's default plays what the
+        # plain default plays.
+        def home(param)
+          Thread.current[:mb_sound_generator_homes]&.[](param)
         end
 
         # { name => Param } for +defaults+ ({ name => default }).
@@ -135,8 +255,14 @@ module MB
         # Builds +entry+ with +kwargs+ (keywords only): runs +block+ (a
         # Ruby block taking every param as a keyword, or a library file's
         # walked block) with the params' defaults and the given values,
-        # recording the call on the result (see the module comment).
-        def run(entry, block, args, kwargs, given_block = nil)
+        # recording the call on the result (see the module comment).  The
+        # call records its seed written out (the maintainer, 2026-11-02:
+        # "Write the seed"): `L.gen.techno_beat.()` prints back as
+        # `L.gen.techno_beat(seed: 5)`.  +knobs+ ({ param => knob }, from
+        # .track_clip) steer the params a track gives knobs to: the block
+        # gets them, the call records only +kwargs+ (a track gives the
+        # knobs again when it plays the call).
+        def run(entry, block, args, kwargs, given_block = nil, knobs: nil)
           path = head_path(entry)
           raise ArgumentError, "#{path} takes its params as keywords (#{keys_text(entry)}); got #{args.length} positional" unless args.empty?
           raise ArgumentError, "#{path} takes no block" if given_block
@@ -146,9 +272,13 @@ module MB
             raise ArgumentError, "#{path}: unknown keyword#{'s' if unknown.length > 1} #{unknown.map { |k| "#{k}:" }.join(', ')} " \
               "(it takes #{keys_text(entry)})#{Library.suggest(unknown[0], params.keys).gsub(/:(\w+)/, '\1:')}"
           end
+          kwargs = with_seed(entry, kwargs)
           values = params.transform_values(&:default).merge(kwargs)
+          values.merge!(knobs) if knobs
           receiver, word = split_path(path)
-          result = GraphNode::Recipe.call(receiver, word, [], kwargs, nil) { MB::Sound.instance_exec(**values, &block) }
+          result = GraphNode::Recipe.call(receiver, word, [], kwargs, nil) {
+            with_homes(params, values) { MB::Sound.instance_exec(**values, &block) }
+          }
           check_result(entry, result)
           built = Built.new(entry, kwargs.dup.freeze)
           if entry.kind == :flow
@@ -210,14 +340,22 @@ module MB
           x.is_a?(Entry) && x.kind == :flow ? x.call : x
         end
 
-        # Ruby for what +built+ built: `L.flow.techno_chain(seed: 4)`, or
-        # `L.flow.techno_chain.()` at the defaults; +value_text+ prints the
-        # keyword values (knobs by their label).
+        # Ruby for what +built+ built: `L.flow.techno_chain(seed: 4)` (the
+        # seed written out at its default too: .with_seed), or
+        # `L.flow.x.()` for an entry without params given or a seed;
+        # +value_text+ prints the keyword values (knobs by their label).
         def call_text(built, &value_text)
           value_text ||= ->(v) { MIDI::Param.param?(v) ? MIDI::Param.label(v) : RubyValue.to_ruby(v, gains: true) }
           path = head_path(built.entry)
-          return "#{path}.()" if built.kwargs.empty?
-          "#{path}(#{built.kwargs.map { |k, v| "#{k}: #{value_text.call(v)}" }.join(', ')})"
+          kwargs = with_seed(built.entry, built.kwargs)
+          return "#{path}.()" if kwargs.empty?
+          "#{path}(#{kwargs.map { |k, v| "#{k}: #{value_text.call(v)}" }.join(', ')})"
+        end
+
+        # Ruby for +entry+ built at its defaults: `L.gen.techno_beat(seed:
+        # 5)` (the family's code form; `L.gen.x.()` without a seed param).
+        def default_call_text(entry)
+          call_text(Built.new(entry, {}.freeze))
         end
 
         # A copy of +source+ (a flow entry's build) reseeded with +seed+,
@@ -228,7 +366,6 @@ module MB
           built = source.instance_variable_get(:@origin)
           return copy unless built && built.entry.params.key?(:seed)
           kw = built.kwargs.merge(seed: seed)
-          kw = kw.except(:seed) if built.entry.params[:seed].default == seed
           copy.instance_variable_set(:@origin, Built.new(built.entry, kw.freeze))
           copy
         end
@@ -301,10 +438,10 @@ module MB
 
       index.define_family(:generator, kind: :generator, owner: Generators,
                                       about: 'Clip generators: note material for a track (L.gen.techno_beat(seed: 3))',
-                                      code: ->(e) { "#{Generators.head_path(e)}.()" })
+                                      code: ->(e) { Generators.default_call_text(e) })
       index.define_family(:flow, kind: :flow, owner: Generators,
                                  about: 'Section chains a flow plays (flow L.flow.techno_chain; generate L.flow.techno_chain.(), bars: ...)',
-                                 code: ->(e) { "#{Generators.head_path(e)}.()" })
+                                 code: ->(e) { Generators.default_call_text(e) })
     end
   end
 end

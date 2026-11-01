@@ -26,12 +26,16 @@ module MB
         # knobs, with the params that can be (read as nodes), by entry:
         # struck instruments' decay (Struck::KNOB_PARAMS), genre patches'
         # settings (Genre::PATCH_KNOBS; library-2, the maintainer
-        # 2026-10-31: "Genre patches now").  Other families' params stay
+        # 2026-10-31: "Genre patches now"), generators' steering params
+        # (gen-knobs-1, 2026-11-02: "Yes").  Other families' params stay
         # numbers (SQ-80's later, once its ban lifts; graph documents' are
         # all knobs, above).
         ENTRY_PARAMS = {
           struck: ->(_entry) { MB::Sound::Struck::KNOB_PARAMS },
           genre_patch: ->(entry) { MB::Sound::Genre::PATCH_KNOBS.fetch(entry.name, {}).keys },
+          # (generators' ranged params, read once a cycle; the clip, not the
+          # patch, reads them: Library::Generators.track_clip; gen-knobs-1)
+          generator: ->(entry) { MB::Sound::Library::Generators.knob_params(entry) },
         }.freeze
 
         module_function

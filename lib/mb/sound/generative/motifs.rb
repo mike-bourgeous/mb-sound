@@ -65,8 +65,11 @@ module MB
         # +field+ is a Field or FieldTimeline; +around+ the note number the
         # motifs center on; +step+ a Rational; the rest as MB::Sound#motifs.
         # +fields+ (for a steered +range:+) gives [field, around] for a
-        # range.  A steered +density+ (G3) builds motifs at CORE_DENSITY.
-        def initialize(field, steps:, step:, form:, answer:, density:, vary:, mutate:, evolve:, leap:, around:, velocity:, legato:, seed:, fields: nil)
+        # range.  A steered +density+ (G3) builds motifs at +home+ (a
+        # library generator's default density; gen-knobs-1), else
+        # CORE_DENSITY.
+        def initialize(field, steps:, step:, form:, answer:, density:, vary:, mutate:, evolve:, leap:, around:, velocity:, legato:, seed:, fields: nil,
+                       home: nil)
           @field = field
           @fields = fields
           @by_range = {}
@@ -76,7 +79,8 @@ module MB
           @form = form
           @answer = answer
           @calls = answer.values.uniq.freeze
-          @density = density.is_a?(Numeric) ? density.to_f : CORE_DENSITY
+          @core = home.nil? ? CORE_DENSITY : home.to_f.clamp(0.0, 1.0)
+          @density = density.is_a?(Numeric) ? density.to_f : @core
           @vary = vary.is_a?(Numeric) ? vary.to_f : 0.0
           @mutate = mutate.is_a?(Numeric) ? mutate.to_f : 0.0
           @evolve = evolve
@@ -126,22 +130,24 @@ module MB
         end
 
         # Motif +m+ of +letter+ thinned or filled to +density+ (G3): below
-        # CORE_DENSITY each note after the first stays with probability
-        # density / CORE_DENSITY, above it each rest fills with a passing
-        # note with probability (density - CORE_DENSITY) / (1 -
-        # CORE_DENSITY), its contour on a run between its neighbors'.  The draws are
-        # per letter and step, so the same density gives the same rhythm.
+        # the core density (the home given to #initialize, else
+        # CORE_DENSITY) each note after the first stays with probability
+        # density / core, above it each rest fills with a passing note with
+        # probability (density - core) / (1 - core), its contour on a run
+        # between its neighbors'.  The draws are per letter and step, so
+        # the same density gives the same rhythm.
         def steer_density(letter, m, density)
-          return m if density == CORE_DENSITY
+          core = @core
+          return m if density == core
           d = Dice.new(@seed, :density, letter)
           u = d.rands(@steps)
           on = m.on.dup
           contour = m.contour.dup
-          if density < CORE_DENSITY
-            keep = density / CORE_DENSITY
+          if density < core
+            keep = density / core
             (1...@steps).each { |s| (on[s] = false; contour[s] = nil) if on[s] && u[s] >= keep }
           else
-            fill = (density - CORE_DENSITY) / (1 - CORE_DENSITY)
+            fill = (density - core) / (1 - core)
             filled = (1...@steps).select { |s| !on[s] && u[s] < fill }
             return m if filled.empty?
             filled.each { |s| on[s] = true }

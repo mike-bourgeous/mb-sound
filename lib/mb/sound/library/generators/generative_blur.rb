@@ -111,7 +111,7 @@ module MB
           about: "The note-ons of a granular cloud, 120 a second, from a blurred field in three octaves (A3..A6): each starts a grain at its pitch",
           params: -> {
             c = GenerativeBlur.cloud_settings(120)
-            { seed: 4, harmony: GenerativeBlur.part_field(:grains), every: Rational(1, c[:division]).whole, chance: c[:chance] }
+            { seed: 4, harmony: GenerativeBlur.part_field(:grains), every: Rational(1, c[:division]).whole, chance: (0.0..1.0).at(c[:chance]) }
           },
           describe: { every: 'The strike grid' } do |seed:, harmony:, every:, chance:|
           strikes(harmony, every: every, chance: chance, gap: 1, sharpen: 1, seed: seed)
