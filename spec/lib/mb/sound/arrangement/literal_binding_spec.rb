@@ -181,7 +181,9 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     # A set document saves the patch reading the knobs (the user's block,
     # built with the bindings)
     text = MB::Sound::GraphIO.dump(s.arrangement, name: 'bound')
-    expect(text).to include('knob :"lead/resonance"', 'track(:lead) { |c|', 'lp4(1200.hz, resonance: knob(:"lead/resonance"))', 'knob(:"lead/release")')
+    # (with the clip the track holds, fix-batch-1102b)
+    expect(text).to include('knob :"lead/resonance"', 'lp4(1200.hz, resonance: knob(:"lead/resonance"))', 'knob(:"lead/release")')
+    expect(text).to match(/^lead = .*\ntrack\(:lead, lead\) \{ \|c\|$/)
     s2 = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
     @sessions << s2
     doc = MB::Sound::GraphIO.load(text, session: s2)

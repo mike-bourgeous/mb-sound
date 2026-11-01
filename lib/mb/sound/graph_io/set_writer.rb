@@ -248,19 +248,24 @@ module MB
               fxv.nil? ? @problems << "track #{name.inspect}: its fx: has a block (set documents save library effects: fx: :hall)" : opts[:fx] = fxv
             end
             opts.merge!(route_options(name, routes))
-            if tr.trigger && tr.patch && (opts.keys - %i[q fade nudge]).empty?
+            # (the track's own clip, by its name in the clips above:
+            # `track :drums, drums, :tr909`; sidechain(:pump, clip) would
+            # play it, so a trigger track with a clip is a track(..., trigger: true))
+            own = track_clip(tr)
+            clip_text = own ? [@clip_names[own]] : []
+            if tr.trigger && tr.patch && own.nil? && (opts.keys - %i[q fade nudge]).empty?
               # A trigger track (SidechainMethods#sidechain): its patch as a block
               block_statement(:sidechain, [name], opts, tr.patch, [probe_clip(name, tr)], "trigger track #{name.inspect}")
             elsif tr.patch && (sym = instrument_symbol(tr.patch))
               # A library instrument (`track :bass, :dnb_reese`; Arrangement::InstrumentPatch)
               opts[:trigger] = true if tr.trigger
-              ["track #{[name.inspect, sym.inspect, *opts.map { |k, v| "#{k}: #{lit(v)}" }].join(', ')}"]
+              ["track #{[name.inspect, *clip_text, sym.inspect, *opts.map { |k, v| "#{k}: #{lit(v)}" }].join(', ')}"]
             elsif tr.patch
               opts[:trigger] = true if tr.trigger
-              block_statement(:track, [name], opts, tr.patch, [probe_clip(name, tr)], "track #{name.inspect}")
+              block_statement(:track, [name, *(own ? [own] : [])], opts, tr.patch, [probe_clip(name, tr)], "track #{name.inspect}")
             else
               opts[:trigger] = true if tr.trigger
-              graph_statement("track #{name.inspect}", tr.graph, opts.map { |k, v| "#{k}: #{lit(v)}" })
+              graph_statement(["track #{name.inspect}", *clip_text].join(', '), tr.graph, opts.map { |k, v| "#{k}: #{lit(v)}" })
             end
           }
         end
@@ -290,6 +295,15 @@ module MB
           return nil if patch.respond_to?(:literal_bindings)
           entry = Arrangement::InstrumentPatch.entry_of(patch) or return nil
           Arrangement::InstrumentPatch.symbol_for(entry)
+        end
+
+        # Track +tr+'s own clip (a Clip or Kit, the one before a track
+        # clock's view of it), or nil.
+        def track_clip(tr)
+          c = tr.clip
+          return nil unless c.is_a?(Sequence::Clip) || c.is_a?(Sequence::Kit)
+          tr.clocked&.each { |src, view| return src if view.equal?(c) }
+          c
         end
 
         # The clip a patch is built from: the track's clip, else the first
@@ -375,16 +389,27 @@ module MB
               list << v if (v.is_a?(Sequence::Clip) || v.is_a?(Sequence::Kit)) && !list.any? { |x| x.equal?(v) }
             end
           end
+          # (each track's own clip: the one track, bg, swap, or a scene gave
+          # it last, so starting the loaded track plays it; fix-batch-1102b)
+          @track_clip_owner = {}.compare_by_identity
+          @arrangement.tracks.each do |name, tr|
+            v = track_clip(tr) or next
+            @track_clip_owner[v] ||= name
+            list << v unless list.any? { |x| x.equal?(v) }
+          end
           # (the clips wired streams read: `wire :lead, riff.stream.echo(...)`)
           @arrangement.wire_definitions.each_value do |w|
             root = w.lineage&.root
             v = root.is_a?(MIDI::ClipSource) ? root.clip : nil
             list << v if v && !list.any? { |x| x.equal?(v) }
           end
-          list = list.each_with_index.sort_by { |c, i| [GraphNode::Recipe.call_of(c)&.seq || 0, i] }.map(&:first)
+          # (a track's generator clip in the place of the clip it was built
+          # from, so a loaded set's clips keep their order; Generators.track_clip)
+          list = list.each_with_index.sort_by { |c, i| [GraphNode::Recipe.call_of(Library::Generators.given_clip(c) || c)&.seq || 0, i] }.map(&:first)
 
           @clip_names = {}.compare_by_identity
-          list.each { |c| @clip_names[c] = unique(c.respond_to?(:name) && c.name ? c.name.to_s : 'clip') }
+          # (unnamed ones a track holds after the track: `drums = L.gen.techno_beat(seed: 5)`)
+          list.each { |c| @clip_names[c] = unique(c.respond_to?(:name) && c.name ? c.name.to_s : (@track_clip_owner[c] || 'clip').to_s) }
 
           list.flat_map { |c|
             name = @clip_names[c]
