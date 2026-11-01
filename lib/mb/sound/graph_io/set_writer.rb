@@ -100,6 +100,7 @@ module MB
           body.concat(master)
           body.concat(buses)
           body.concat(tracks)
+          body.concat(wire_lines)
           body.concat(scenes)
           body.concat(mute_groups)
           body.concat(sections)
@@ -256,6 +257,24 @@ module MB
           }
         end
 
+        # `wire :lead, riff.stream.echo(1.n8, 3)` for each wired track whose
+        # stream prints as Ruby (MIDI::Stream#lineage: a clip's or a MIDI
+        # file's, through transforms without blocks); live streams can't be
+        # saved, so their line is a comment (takes keep what they played).
+        # Loading a set wires its tracks again (at each track's launch
+        # point: now, while nothing plays).
+        def wire_lines
+          @arrangement.wire_definitions.map { |name, w|
+            text = Arrangement::Wire.ruby(w.lineage, clip_text: ->(c) { @clip_names[c] || 'clip' }, lit: @lit)
+            if text
+              "wire #{name.inspect}, #{text}"
+            else
+              @warnings << "track #{name.inspect}'s wire (#{w.text}) is a live stream; set documents don't save it"
+              "# wire #{name.inspect}, ... (#{w.text}: a live stream, not saved; takes replay it)"
+            end
+          }
+        end
+
         # The Symbol naming the library instrument +patch+ plays (see
         # Arrangement::InstrumentPatch), if it names it back; nil for patch
         # blocks and bound literals (printed as their blocks).
@@ -347,6 +366,12 @@ module MB
             sc.values.each_value do |v|
               list << v if (v.is_a?(Sequence::Clip) || v.is_a?(Sequence::Kit)) && !list.any? { |x| x.equal?(v) }
             end
+          end
+          # (the clips wired streams read: `wire :lead, riff.stream.echo(...)`)
+          @arrangement.wire_definitions.each_value do |w|
+            root = w.lineage&.root
+            v = root.is_a?(MIDI::ClipSource) ? root.clip : nil
+            list << v if v && !list.any? { |x| x.equal?(v) }
           end
           list = list.each_with_index.sort_by { |c, i| [GraphNode::Recipe.call_of(c)&.seq || 0, i] }.map(&:first)
 

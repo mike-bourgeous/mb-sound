@@ -326,7 +326,7 @@ module MB
 
         # Set commands of `kind: :set` documents (see #load_set), called
         # with their evaluated arguments on the set's Session.
-        SET_COMMANDS = %i[bpm meter master_gain quant master bus track sidechain scene mutes section flow].freeze
+        SET_COMMANDS = %i[bpm meter master_gain quant master bus track sidechain wire scene mutes section flow].freeze
 
         # Commands a scene block may hold (they land at the scene's launch
         # point, as in an #at_bar block): meter and tempo, knob turns and
