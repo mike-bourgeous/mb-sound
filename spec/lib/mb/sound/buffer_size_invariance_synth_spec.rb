@@ -45,6 +45,14 @@ RSpec.describe 'Buffer size invariance (samplers, drums, Synth lanes)' do
       expect_invariant(-> { MB::Sound.tr808(MB::Sound.grid(16, **kit).loop) }, seconds: 2.1)
     end
 
+    # (fix-808-fuzz: voices of one-shot sources ended on whole buffers)
+    [:tr808, :tr909].each do |machine|
+      it "ends a one-shot #{machine} kit on the same frame at any buffer size" do
+        rows = machine == :tr808 ? kit : kit.slice(:kick, :snare, :closed_hat, :open_hat, :clap, :rimshot)
+        expect_invariant(-> { MB::Sound.public_send(machine, MB::Sound.grid(16, **rows)) }, seconds: 6, sizes: [[367, 368], [64]])
+      end
+    end
+
     it 'gives the same kit samples with knobs and more cowbell' do
       expect_invariant(
         -> { MB::Sound.tr808(MB::Sound.grid(16, **kit).loop, closed_hat: { tune: 300, decay: 0.1 }, cowbell: { tune: 800 }, cymbal: { tone: 0.8 }, more_cowbell: true) },

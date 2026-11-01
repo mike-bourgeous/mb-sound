@@ -217,6 +217,34 @@ RSpec.describe(MB::Sound::Drums::Kit, :aggregate_failures) do
     # ("trigger has 685 samples, not 800"): a one-step crash clip launched
     # off the 800-sample grid ended inside a buffer while its cymbal rang on
     [:tr808, :tr909].each do |machine|
+      # (fix-808-fuzz, SessionFuzz seed 42 of ux-notes-2: voices ended at
+      # the first whole buffer after QUIET_TIME of quiet buffers, so a
+      # one-shot grid's render was 25600 frames at 800-frame buffers and
+      # 26424 at 367)
+      it "ends #{machine} on the same frame at any buffer size" do
+        renders = [800, 367, 64].map { |size|
+          MB::Sound.rewind
+          kit = MB::Sound.public_send(machine, MB::Sound.grid(16, clap: '..x.', kick: 'x...'), seed: 3)
+          out = []
+          while (buf = kit.sample(size))
+            out << buf.dup
+          end
+          expect(kit.ended?).to eq(true)
+          SpecBuffers.join(out)
+        }
+        expect(renders.map(&:length).uniq.length).to eq(1), renders.map(&:length).inspect
+        expect((renders[1] - renders[0]).abs.max).to be < 1e-6
+        expect((renders[2] - renders[0]).abs.max).to be < 1e-6
+
+        # QUIET_TIME after the triggers end (on their grid after the clip's
+        # end, a 16th of a bar at 120 BPM) and the last sample at -90 dB
+        loud = renders[0].abs.ge(MB::Sound::QuietRun::QUIET_LOUD).where.to_a.last
+        ends = [((4 * 6000 + 799) / 800) * 800, loud + 1].max + MB::Sound::Drums::Voice::QUIET_TIME * 48000
+        expect(renders[0].length).to eq(ends)
+      ensure
+        MB::Sound.rewind
+      end
+
       it "rings on in #{machine} when a one-shot clip ends off the buffer grid" do
         voice = machine == :tr808 ? :cymbal : :crash
         out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
