@@ -217,9 +217,10 @@ module MB
         # joining its own earlier knob (the same player playing the rack
         # again) takes the knob's new range and curve.  Knobs with
         # +follow:+ start following their Session knob when they join.
-        def adopt_knobs(sound, player: nil)
-          nodes = to_nodes(sound)
-          found = nodes.flat_map { |n| [n, *n.graph] }
+        # +found+ is the graph's nodes when listed already
+        # (Session#graph_nodes).
+        def adopt_knobs(sound, player: nil, found: nil)
+          found ||= to_nodes(sound).flat_map { |n| [n, *n.graph] }
           readers = found.grep(GraphNode::Knob::Reader)
           own = {}.compare_by_identity
           (readers.map(&:knob) + found.grep(GraphNode::Knob)).each { |k| own[k] = true }

@@ -38,6 +38,31 @@ module MB
       # turned into sound (nil for things that are already graphs).
       Graph = Data.define(:nodes, :description, :ends, :note)
 
+      # Graph's description reader: a LazyDescription is worked out here,
+      # the first time it is read.
+      module LazyRead
+        def description
+          d = super
+          d.is_a?(LazyDescription) ? d.to_s : d
+        end
+      end
+      Graph.prepend(LazyRead)
+
+      # A Graph's description worked out when first read: describing a
+      # graph walks it (see .describe), and Session#add reads it only for
+      # players without a description given (load-lag-1: a digibrass
+      # track's load described its graph five times, ~60 ms, for nothing).
+      class LazyDescription
+        def initialize(&block)
+          @block = block
+          @text = nil
+        end
+
+        def to_s
+          @text ||= @block.call.to_s
+        end
+      end
+
       # The default patch for notes without one (Clips, Notes, MIDI files
       # and Streams) and the keyboard pane's (UI::Keyboard::Link::PATCH is this
       # one): a soft filtered saw.
@@ -69,7 +94,7 @@ module MB
             'an envelope plays as the level of a triangle and some noise; multiply it into your own sound: `220.hz.saw * env`')
 
         when GraphNode, GraphNode::MultiOutput
-          Graph.new(nodes: sound.outputs, description: describe(sound), ends: nil, note: nil)
+          Graph.new(nodes: sound.outputs, description: LazyDescription.new { describe(sound) }, ends: nil, note: nil)
 
         when Numo::NArray
           raise Unplayable, 'Cannot play an empty array' if sound.empty?
@@ -204,7 +229,7 @@ module MB
         ends = parts.map(&:ends)
         Graph.new(
           nodes: parts.flat_map(&:nodes),
-          description: parts.map(&:description).join(', '),
+          description: LazyDescription.new { parts.map(&:description).join(', ') },
           ends: ends.all?(true) ? true : (ends.any?(false) ? false : nil),
           note: parts.map(&:note).compact.uniq.join('; ').then { |n| n.empty? ? nil : n }
         )

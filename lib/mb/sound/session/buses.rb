@@ -463,9 +463,11 @@ module MB
         # Binds the BusTaps in +nodes+ (a graph's outputs) to this Session
         # and records what +owner+ (a player name, bus name, or :master)
         # reads, attaching spies for `only:` readers.  Returns false (after
-        # MB::Sound.live_error) if the readers would make a loop.
-        def bind_bus_taps(nodes, owner)
-          taps = nodes.flat_map { |n| [n, *n.graph] }.grep(GraphNode::BusTap::Channel).map(&:original_source).uniq
+        # MB::Sound.live_error) if the readers would make a loop.  +found+
+        # is the graph's nodes when listed already (Session#graph_nodes:
+        # #add lists them before taking the render lock).
+        def bind_bus_taps(nodes, owner, found: nil)
+          taps = (found || nodes.flat_map { |n| [n, *n.graph] }).grep(GraphNode::BusTap::Channel).map(&:original_source).uniq
           return true if taps.empty?
 
           taps.each { |t| t.bind(self) }
@@ -497,12 +499,12 @@ module MB
 
         # Attaches spies for `only:` readers of +name+ to the nodes they name
         # in +nodes+ (a graph about to play under +name+).  +locked+ when
-        # called with @mutex held.
-        def attach_bus_spies(name, nodes, locked: false)
+        # called with @mutex held; +found+ as for #bind_bus_taps.
+        def attach_bus_spies(name, nodes, locked: false, found: nil)
           onlys = locked ? (@bus_only.key?(name) ? @bus_only[name].to_a : []) : @mutex.synchronize { @bus_only.key?(name) ? @bus_only[name].to_a : [] }
           return if onlys.empty?
 
-          all = nodes.flat_map { |n| [n, *n.graph] }.uniq
+          all = (found || nodes.flat_map { |n| [n, *n.graph] }).uniq
           onlys.each do |only|
             node = all.find { |n| bus_named?(n, only) }
             if node.nil?

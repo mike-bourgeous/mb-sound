@@ -408,11 +408,19 @@ module MB
 
         # Finds what skipping needs (#setup_skipping) on the thread that
         # builds the graph (Session#add), not in the render thread's first
-        # buffer (alloc-2).
+        # buffer (alloc-2), and what the voice reads while asleep
+        # (#boundary, kept while its Tees keep their branches), not where
+        # it first falls asleep (load-lag-1: four walks of the voice's graph
+        # on the render thread, for each voice of a kit just loaded).
+        # Public: GraphNodeInput#prime calls nodes that respond to it (it
+        # was private here since alloc-2, so no voice was primed and every
+        # kit voice set up skipping in its first buffer; load-lag-1).
         def prime_render
           setup_skipping(@skip_idle) if @skippable.nil?
+          boundary if @skippable
           nil
         end
+        public :prime_render
 
         # What the voice reads while skipped (see #setup_skipping): its
         # branches of Tees read elsewhere (another voice, e.g. a kit's metal
