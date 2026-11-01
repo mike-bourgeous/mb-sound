@@ -114,6 +114,7 @@ module MB
         @exercise_skipped = [] # (#warm_up: tracks whose exercise raised)
         @build_knobs = {} # (BuildKnobs: knob name => tracks whose patches read it while building)
         @build_rngs = {} # (#build_patch: track name => [root generator, seed] its last build started from)
+        @checked_build = nil # (PatchCheck#check_build: the build #build_patch takes next)
         @build_knob_lock = Mutex.new
       end
 
@@ -309,9 +310,12 @@ module MB
         reset = entry && had && !(prior && prior.name == entry.name && prior.location == entry.location)
         defer0 = playing ? ->(&b) { TrackKnobs.deferring(landings) { b.call } } : ->(&b) { b.call }
         defer = reset ? ->(&b) { TrackKnobs.resetting { defer0.call(&b) } } : defer0
-        # Built once now, so a broken patch fails here (see PatchCheck)
+        # Built once now, so a broken patch fails here (see PatchCheck); a
+        # playing track's new instrument is built for its rebuild, which
+        # takes that build (PatchCheck#check_build: built once, not twice)
+        source = clip || @mutex.synchronize { @tracks[name]&.clip }
         begin
-          ok = defer.call { check_patch(name, patch, clip || @mutex.synchronize { @tracks[name]&.clip }) }
+          ok = defer.call { playing && source ? check_build(name, patch, source) : check_patch(name, patch, source) }
         rescue PatchCheck::PatchError => e
           note_failed_track(name, e)
           raise
@@ -350,6 +354,8 @@ module MB
           landings.each { |k, v| k.set(v, frame: k.next_frame) unless v == k.value }
         end
         name
+      ensure
+        drop_checked_build
       end
 
       # The track's positional +values+ (see #track) sorted into [graph,
@@ -1387,6 +1393,13 @@ module MB
             Internal.restore_rng(rng.dup, seed)
             build.call
           }
+        end
+        if (checked = take_checked_build(tr, clip))
+          # (#track's check built the patch for this rebuild, drawing what
+          # this build would have: its effect insert goes on, then)
+          graph = GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { Fx.apply(tr.fx, checked.graph) }
+          @mutex.synchronize { @build_rngs[tr.name] = checked.start }
+          return graph
         end
         start = [Internal.root_rng.dup, Internal.root_seed]
         graph = build.call

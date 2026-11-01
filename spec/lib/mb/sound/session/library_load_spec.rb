@@ -55,6 +55,37 @@ RSpec.describe('Loading a library instrument onto a playing track', :aggregate_f
     s&.close
   end
 
+  # Arrangement#track checks a patch by building it; for a playing track's
+  # new instrument that build is the rebuild's (PatchCheck#check_build),
+  # so a preset builds once (a digibrass build is ~100-200 ms), drawing
+  # the seeds one build draws.
+  it "builds a playing track's new instrument once, drawing one build's seeds" do
+    s = playing_session(:init)
+    builds = 0
+    allow(MB::Sound).to receive(:preset).and_wrap_original { |m, *a, **k, &b| builds += 1; m.call(*a, **k, &b) }
+    MB::Sound::Session.with_context(session: s) do
+      before = MB::Sound::Internal.root_rng.dup
+      MB::Sound.track(:lead, MB::Sound::L.inst.digibrass)
+      expect(builds).to eq(1)
+      # (a library preset's seeds are saved in its document: no draws)
+      expect(MB::Sound::Internal.root_rng).to eq(before)
+
+      # An instrument whose build draws seeds (rain's random phases): the
+      # generator moves on as one build of it moves it
+      entry = MB::Sound::L.inst.rain
+      clip = s.arrangement.tracks[:lead].clip
+      MB::Sound::Internal.restore_rng(Random.new(5), 5)
+      MB::Sound.track(:lead, entry)
+      after = MB::Sound::Internal.root_rng.dup
+      MB::Sound::Internal.restore_rng(Random.new(5), 5)
+      MB::Sound::Arrangement::InstrumentPatch.patch(entry).call(clip)
+      expect(after).to eq(MB::Sound::Internal.root_rng)
+      expect(after).not_to eq(Random.new(5))
+    end
+  ensure
+    s&.close
+  end
+
   # GraphNodeInput#prime (Session#add, on the building thread) calls
   # #prime_render on nodes that respond to it: a private one is skipped
   # without a word (Drums::Voice's was, from alloc-2 to load-lag-1, so
