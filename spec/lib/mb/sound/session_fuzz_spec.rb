@@ -185,6 +185,15 @@ RSpec.describe('session fuzzing') do
         'at_bar(1, beat: 3) { turn :tint, 1 }',
       ], 1,
     ],
+    # (the 2026-11-01 batch soak, fix-batch-1101: the seek forgot the time
+    # its block ran for, so a render with nothing playing ended at the
+    # start of the buffer holding the seek, 125600 frames at 800 and 125514
+    # at 367; since session-2's exact render ends)
+    'a block seeking back from its own time with nothing playing (seed 768014)' => [
+      :buffer_size, ['bpm 137.5', 'meter 3, 4', 'knob :busy, 0.5'], [
+        'at_bar(2, beat: 4) { seek 2, 2.999 }',
+      ], 3,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil

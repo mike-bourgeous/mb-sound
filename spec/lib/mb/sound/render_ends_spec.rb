@@ -58,6 +58,17 @@ RSpec.describe('exact render ends', :aggregate_failures) do
     expect(data.length).to eq(4 * 48000) # (bar 3's block; bar 4 is the end)
   end
 
+  # (fix-batch-1101, SessionFuzz seed 768014: the seek forgot the time its
+  # block ran for, so the render ended where the buffer holding it began)
+  it 'keeps time for a block that seeks back, up to the frame of its seek' do
+    data = expect_exact(bars: 3, bpm: 137.5) {
+      MB::Sound.meter(3, 4)
+      MB::Sound.at_bar(2, beat: 4) { MB::Sound.seek(2, 2.999) }
+    }
+    # (bar 3 at 137.5 BPM in 3/4: the frame holding 6 beats' 125672.73)
+    expect(data.length).to eq((6 * 60 * 48000r / 137.5r).ceil)
+  end
+
   it "ends a script's ring-down on the frame its quiet second completes (Session#end_after)" do
     data = expect_exact {
       input = MB::Sound.file_input('spec/test_data/arp_a7.flac', channels: 1).ringdown
