@@ -94,90 +94,36 @@ module MB::Sound
   # The piece's length in bars (the field loops every 16).
   GENERATIVE_BLUR_BARS = 16
 
-  # The field's chords, two bars each (D dorian, into F major, back).
-  GENERATIVE_BLUR_CHORDS = [
-    [D3, F3, A3, C4], [G2, B2, D3, F3], [C3, E3, G3, B3], [F3, A3, C4, E4],
-    [As2, D3, F3, A3], [C3, E3, G3, As3], [G2, B2, D3, F3], [A2, C3, E3, G3],
-  ].freeze
+  # The generators are library entries (lib-gen-1; defined in
+  # lib/mb/sound/library/generators/generative_blur.rb, the field and the
+  # cloud settings there as Library::Generators::GenerativeBlur): the line
+  # L.gen.blur_line and the cloud's strikes L.gen.blur_cloud.
 
-  # The probability field at +blur+ (a FieldTimeline over A3..A5).  With
-  # +transition+ nil, the key blends from D dorian into F major over bars
-  # 7-10 and back over bars 11-16; with a number of bars, F major lands on
-  # bar 9 (the B flat chord) and D dorian comes back on bar 13 (the G7),
-  # each change blended over the +transition+ bars before it (0: a step).
-  # +chord_blend+ nil or 0 steps from chord to chord; a number of bars
-  # (up to 2) blends each chord into the next over that span before it.
-  # +octaves+ 2 (A3..A5, a bell around E4) or 3 (A3..A6, around B4, a
-  # wider bell).  +transition+ :slow is the same as nil.
+  # The probability field at +blur+ (see
+  # Library::Generators::GenerativeBlur.field).
   def self.generative_blur_field(blur, transition: nil, chord_blend: nil, octaves: 2)
-    dorian = scale(:dorian, :d)
-    major = scale(:major, :f)
-    key =
-      if transition.nil? || transition == :slow
-        harmony(0 => dorian, 6.bars => dorian, 10.bars => major, loop: 16.bars)
-      elsif transition == 0
-        harmony(0 => dorian, 8.bars => major, 12.bars => dorian, curve: :step, loop: 16.bars)
-      else
-        t = transition.rationalize
-        harmony(0 => dorian, (8 - t).bars => dorian, 8.bars => major, (12 - t).bars => major, 12.bars => dorian, loop: 16.bars)
-      end
-    chords =
-      if chord_blend.nil? || chord_blend == 0
-        harmony(GENERATIVE_BLUR_CHORDS.each_with_index.to_h { |c, i| [(2 * i).bars, c] }, curve: :step, loop: 16.bars)
-      else
-        b = chord_blend.rationalize
-        raise ArgumentError, "chord_blend must be 0..2 bars (got #{chord_blend})" unless b > 0 && b <= 2
-        keys = GENERATIVE_BLUR_CHORDS.each_with_index.flat_map { |c, i| b < 2 ? [[(2 * i).bars, c], [(2 * i + 2 - b).bars, c]] : [[(2 * i).bars, c]] }
-        harmony(keys.to_h, loop: 16.bars)
-      end
-    range, around, width = octaves == 3 ? [A3..A6, B4, 10.5] : [A3..A5, E4, 7]
-    ((blur > 0 ? key.blur(blur) : key) + chords * 1.5).over(range, around: around, width: width)
+    Library::Generators::GenerativeBlur.field(blur, transition: transition, chord_blend: chord_blend, octaves: octaves)
   end
 
   # The anchor bassline: one note a bar, the root of the chord of the
   # moment two octaves below the line's middle (G1..F2), with a quieter
   # fifth above it, never blurred, so every chord and key change is heard.
   def self.generative_blur_bass_clip
-    roots = GENERATIVE_BLUR_CHORDS.flat_map { |c| [c.first.dn] * 2 }
+    roots = Library::Generators::GenerativeBlur.chord_list.flat_map { |c| [c.first.dn] * 2 }
     (seq(*roots).n1.vel(0.8) & seq(*roots.map { |r| r.transpose(7) }).n1.vel(0.45)).loop
   end
 
-  # Default settings per part (the maintainer's Listening Bench picks,
-  # 2026-10-16): the line blends chord to chord over 1/4 bar in two octaves
-  # with the slow key blends; the cloud blends over 1/2 bar in three
-  # octaves with 1-bar key changes.  With both parts the key changes are
-  # shared (1 bar, so the parts never disagree on the key); chord blends
-  # and ranges stay per part.
-  GENERATIVE_BLUR_DEFAULTS = {
-    dense: { chord_blend: 0.25, octaves: 2, transition: :slow }.freeze,
-    grains: { chord_blend: 0.5, octaves: 3, transition: 1 }.freeze,
-  }.freeze
-
-  # The piece's tempo.
-  GENERATIVE_BLUR_BPM = 84
-
-  # Grains a second a numeric +cloud+ may ask for.
-  GENERATIVE_BLUR_CLOUD_RATES = 0.5..160
+  # Default settings per part, the tempo, and the cloud rates (see
+  # Library::Generators::GenerativeBlur).
+  GENERATIVE_BLUR_DEFAULTS = Library::Generators::GenerativeBlur::DEFAULTS
+  GENERATIVE_BLUR_BPM = Library::Generators::GenerativeBlur::BPM
+  GENERATIVE_BLUR_CLOUD_RATES = Library::Generators::GenerativeBlur::CLOUD_RATES
 
   # The strike grid, chance, grain size (seconds), and gain of a cloud of
-  # +rate+ grains a second (a number; :dense and :sparse keep their own
-  # settings): the coarsest of 128ths, 256ths, and 512ths at 84 BPM (44.8,
-  # 89.6, 179.2 slots a second) where the chance stays at most 0.9; grains
-  # 350 ms long (the dense cloud's) up to 40 a second and 14 / rate seconds
-  # above, so about 14 overlap at most (Grains holds 32); and the dense
-  # cloud's 0.2 gain times sqrt(14 / overlap) (overlap at least 1), the
-  # level of random-phase grains summed.
+  # +rate+ grains a second (see
+  # Library::Generators::GenerativeBlur.cloud_settings).
   def self.generative_blur_cloud_settings(rate)
-    unless rate.is_a?(Numeric) && GENERATIVE_BLUR_CLOUD_RATES.cover?(rate)
-      raise ArgumentError,
-        "cloud is :dense, :sparse, or grains a second from #{GENERATIVE_BLUR_CLOUD_RATES.begin} to #{GENERATIVE_BLUR_CLOUD_RATES.end} (got #{rate.inspect})"
-    end
-
-    whole = MB::Sound::Sequence::TempoMap.seconds_at(1.0, GENERATIVE_BLUR_BPM)
-    division = [128, 256, 512].find { |n| rate / (n / whole) <= 0.9 } || 512
-    size = [0.35, 14.0 / rate].min
-    overlap = [rate * size, 1.0].max
-    { division: division, chance: rate / (division / whole), size: size, gain: 0.2 * Math.sqrt(14.0 / overlap) }
+    Library::Generators::GenerativeBlur.cloud_settings(rate)
   end
 
   # Starts the piece on the current session (live, or in a render block).
@@ -216,7 +162,7 @@ module MB::Sound
     }
 
     if mode == :dense || mode == :both
-      line = strikes(field_for.(:dense), every: Rational(1, division).whole, chance: 1, gap: 1, sharpen: 1, velocity: 0.45..0.8, seed: seed)
+      line = L.gen.blur_line(seed: seed, harmony: field_for.(:dense), division: division)
       pluck = line.synth(voices: division > 16 ? division / 2 : 6) { |v| v.hz.triangle * v.env(0.002, 0.25, 0, 0.1) * (v.velocity * 0.6 + 0.4) }
       bg :dense, ambient_room(pluck.lp4(3500), space: 0.35, decay: 3, room_size: 0.5).pan(-0.1), fade: 0
     end
@@ -227,7 +173,7 @@ module MB::Sound
         # #generative_blur_cloud_settings)
         c = numeric_cloud
         tone = bounce(3.seconds, root: D4, name: 'tone') { D4.triangle * 0.6 + D4.transpose(12).sine * 0.2 }
-        n = strikes(field_for.(:grains), every: Rational(1, c[:division]).whole, chance: c[:chance], gap: 1, sharpen: 1, seed: seed + 1).notes
+        n = L.gen.blur_cloud(seed: seed + 1, harmony: field_for.(:grains), every: Rational(1, c[:division]).whole, chance: c[:chance]).notes
         cloud_node = tone.grains(freq: n.freq, trigger: n.trigger, density: 0, position: 0.5, spread: 0.2, size: c[:size],
           pan_spread: 1, normalize: false, seed: seed + 2)
         bg :grains, ambient_room(cloud_node.lp4(4500) * c[:gain], space: 0.4, decay: 3, room_size: 0.8), fade: 0
@@ -236,13 +182,13 @@ module MB::Sound
         # about 14 overlap; spread over a 3 s tone so even grains pitched
         # up to A5 read inside it.
         tone = bounce(3.seconds, root: D4, name: 'tone') { D4.triangle * 0.6 + D4.transpose(12).sine * 0.2 }
-        n = strikes(field_for.(:grains), every: Rational(1, 128).whole, chance: 0.9, gap: 1, sharpen: 1, seed: seed + 1).notes
+        n = L.gen.blur_cloud(seed: seed + 1, harmony: field_for.(:grains), every: Rational(1, 128).whole, chance: 0.9).notes
         cloud_node = tone.grains(freq: n.freq, trigger: n.trigger, density: 0, position: 0.5, spread: 0.2, size: 350.ms,
           pan_spread: 1, normalize: false, seed: seed + 2)
         bg :grains, ambient_room(cloud_node.lp4(4500) * 0.2, space: 0.4, decay: 3, room_size: 0.8), fade: 0
       else
         tone = bounce(1.seconds, root: D4, name: 'tone') { D4.triangle * 0.6 + D4.transpose(12).sine * 0.2 }
-        n = strikes(field_for.(:grains), every: 1.n32, chance: 0.7, gap: 1, sharpen: 1, seed: seed + 1).notes
+        n = L.gen.blur_cloud(seed: seed + 1, harmony: field_for.(:grains), every: 1.n32, chance: 0.7).notes
         cloud_node = tone.grains(freq: n.freq, trigger: n.trigger, density: 0, position: 0.3, spread: 0.1, size: 150.ms,
           pan_spread: 0.8, normalize: false, seed: seed + 2)
         bg :grains, ambient_room(cloud_node.lp4(4000) * 0.3, space: 0.5, decay: 5, room_size: 0.8), fade: 0

@@ -132,14 +132,12 @@ module MB::Sound
   end
 
   # The clips.  At 60 BPM a bar is 4 seconds: an eighth is half a second.
+  # The motif and the harp figure are library generators (chance notes,
+  # humanized; lib-gen-1, lib/mb/sound/library/generators/tin_roof.rb):
+  # L.gen.tin_roof_motif and L.gen.tin_roof_harp.
   def self.tin_roof_clips
-    motif = seq(
-      A4, R, R, D5, R, B4, R, R,   R, R, E5.maybe(0.6), R, R, R, R, R,
-      G4, R, R, A4, R, R, R, R,    R, D5, R, R, B4.maybe(0.5), R, R, R,
-    ).n8.humanize(1.n64, velocity: 0.15).loop(align: :launch)
-    harp = seq(
-      D5, R, A4, B4.maybe(0.7), R, D5, R, E5,  R, G4, R, R, A4.maybe(0.5), R, R, R,
-    ).n16.swing(0.6).humanize(1.n128, velocity: 0.2).loop(align: :launch)
+    motif = L.gen.tin_roof_motif.()
+    harp = L.gen.tin_roof_harp.()
     {
       motif: motif,
       motif_back: motif.reverse,                # the illusion: the same line, backwards
