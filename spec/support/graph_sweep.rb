@@ -455,6 +455,20 @@ module GraphSweep
           choke :open_hat, :closed_hat
         }
       }],
+      # Live kit knobs (kit-live-1): voice settings given as knobs that move
+      # (a ramp, a jump), read as nodes by the 909's analog and sampled
+      # voices (tune through the sampler's per-hit shift), the 808's own
+      # metal bank, and a kit builder voice
+      ['drums with knob settings (live kit knobs)', ->(c) {
+        knob = ->(name, v, lo, hi, to) {
+          MB::Sound::GraphNode::Knob.new(name, v, range: lo..hi).tap { |k| k.ramp_to(to, frames: 900, frame: 20); k.set(v, frame: 1500, smooth: 0) }
+        }
+        g = c.s.grid(32, bd: 'x.x.', snare: '.x.x', hat: 'xx..', oh: '..xx', cp: '.x..')
+        c.s.tr909(g, kick: { decay: knob.(:kd, 0.55, 0.05, 2.0, 1.5), punch: knob.(:kp, 0.9, 0.0, 1.0, 0.2) }, snare: { tone: knob.(:st, 0.5, 0.0, 1.0, 1.0) },
+                     closed_hat: { tune: knob.(:ht, -3, -24, 24, 5) }, clap: { level: knob.(:cl, 0.75, 0.0, 2.0, 0.2) }) +
+          c.s.tr808(g, closed_hat: { tune: knob.(:mt, 205.3, 100.0, 800.0, 400.0), tone: knob.(:mo, 0.5, 0.0, 1.0, 0.9) }, kick: { sigh: knob.(:ks, 0.45, 0.0, 1.0, 0.9) }) +
+          c.s.kit(c.s.grid(32, kick: 'x.x.')) { voice(:kick, tune: knob.(:kt, 50.0, 30.0, 200.0, 120.0)) { |h| h.body(h.tune, decay: 0.2) } }
+      }],
       # (omnibus17, Kez's K5 and Odile's F12: stereo Samples as voices play
       # mixed down; they raised in Drums::Voice#initialize)
       ['drums kit builder, stereo sample voices', ->(c) {

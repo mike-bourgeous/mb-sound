@@ -217,9 +217,10 @@ module MB
           mode = :live
           if (slot = slot_of(call, arg))
             value = slot_value(call, slot)
-            # (a member of a Hash argument binds as a build knob: kits read
-            # their voices' settings in Ruby arithmetic, so a knob node
-            # there would move the samples)
+            # (a member of a Hash argument binds as a build knob: the method
+            # may read it in Ruby arithmetic, so a knob node there could move
+            # the samples; kits, whose voices read settings as nodes, bind
+            # live through .kit_target)
             mode = :build if slot[0] == :kw && slot[2] && call.kwargs[slot[1]].is_a?(Hash)
           elsif node && (slot, value = unwritten_slot(call, node, arg))
             mode = :build
@@ -243,10 +244,17 @@ module MB
         # `bind :drums, tr909: :kick_decay` names).  The setting is a member
         # of the kit call's Hash for the voice (`tr909(c, kick: { decay:
         # 0.4 })`, written or not, under the name the code used, `bd:`),
-        # bound :build: the kit reads its settings in Ruby arithmetic, so a
-        # knob node would move the samples, and the knob's value while the
-        # kit builds gives exactly the number.  Nil if +node+ isn't in a
-        # recorded kit; raises Error for a setting that isn't a number.
+        # bound :live (kit-live-1, the maintainer's "Yes, live kit knobs",
+        # 2026-11-02; :build in editability-1): the kit is given the knob
+        # and reads it as a node, so a turn sweeps the playing kit, and at
+        # the setting's number the samples are the same within float
+        # rounding (bit for bit for the tr909, tr808, and kit builder
+        # settings measured; the 808's hats and cymbal take their own metal
+        # bank for a knob tune, so their phases differ; drums.md).  A voice
+        # that reads a setting once while building falls back to a build
+        # binding (Arrangement#bind_probe; the editability guard fails for
+        # shipped kits).  Nil if +node+ isn't in a recorded kit; raises
+        # Error for a setting that isn't a number.
         def kit_target(roots, node, param, all: nil)
           all ||= nodes(roots)
           kit = node.is_a?(Drums::Kit) ? node : all.find { |n| n.is_a?(Drums::Kit) && n.voices.each_value.any? { |v| v.equal?(node) } }
@@ -268,7 +276,7 @@ module MB
           raise Error, "#{name} of #{method} is not a number (#{value.inspect[0, 40]}): only numbers become knobs" unless literal?(value)
           kw = call.kwargs.keys.find { |k| kit_voice_name(kit, call, k) == voice.name } || voice.name
           nth = keys_of(roots, method, all: all).index(key) or raise Error, "#{method} isn't in the track's graph"
-          Target.new(kind: :call, call_name: method, nth: nth, key: key, slot: [:kw, kw, [setting]], param: name, value: value, document: nil, arg: name, mode: :build)
+          Target.new(kind: :call, call_name: method, nth: nth, key: key, slot: [:kw, kw, [setting]], param: name, value: value, document: nil, arg: name, mode: :live)
         end
 
         # Why +param+ of +node+, made inside a drum kit voice's code (an

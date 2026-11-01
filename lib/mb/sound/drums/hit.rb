@@ -136,7 +136,7 @@ module MB
 
         # Plays +sample+ (a MB::Sound::Sample; a Sampler::Instrument plays
         # its first region's key) from its start on every hit, +tune+
-        # semitones up (a number or a node), at the hit's velocity: under a
+        # semitones up (a number, or a node read at each hit), at the hit's velocity: under a
         # decay envelope (#env) of +decay+ if given, else held at the
         # velocity until the next hit.  +interpolation+ and +mips+ as for
         # Sampler::Instrument#play (`interpolation: :none, mips: false` is
@@ -149,9 +149,13 @@ module MB
           if tune.is_a?(Numeric) || tune.is_a?(MB::Sound::Interval)
             options[:transpose] = tune
           else
-            # The sampler reads +freq+ relative to the key's own frequency
-            a4 = MB::Sound.tuning.frequency_of(69).to_f
-            options[:freq] = Drums.exp2(tune / 12.0) * (a4 * 2.0**((root - 69) / 12.0))
+            # A node (a knob, a clip's notes, an LFO) is read at each hit
+            # as the sampler's +shift+ (semitones added like +transpose+),
+            # so a knob at a number plays the same samples as the number
+            # (kit-live-1: the frequency path, Hz relative to the key's own
+            # frequency in float32, moved a 909 hat by 1e-6 and a crash by
+            # -74 dBFS); a ringing hit keeps its pitch
+            options[:shift] = tune
           end
           s = inst.play(**options)
           s * (decay.nil? ? velocity : env(decay, curve: curve))
