@@ -93,6 +93,7 @@ require_relative 'support/plan_helpers'
 require_relative 'support/kernel_helpers'
 require_relative 'support/transport_guard'
 require_relative 'support/session_guard'
+require_relative 'support/spawn_guard' # (process starts while a Session plays)
 require_relative 'support/no_gnuplot'
 require_relative 'support/recipe_helpers'
 require_relative 'support/patch_helpers'
