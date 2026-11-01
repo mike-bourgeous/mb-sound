@@ -22,6 +22,8 @@
 #     bin/ui_demo.rb --tiles                # the tiled screen (:tiles) with a REPL pane
 #     bin/ui_demo.rb --tiles --flood 10000  # ... printing 10 000 lines into the REPL while the song plays
 #     bin/ui_demo.rb --tiles -l studio --size 60x200
+#     bin/ui_demo.rb --tiles --notes 4 -s 40  # a ui.note every 4 s: what each costs the audio (the first one finds
+#                                           # tmp/ui-notes as a session's first note does; notes go to a temp dir)
 #     bin/ui_demo.rb --tiles -l keys        # with the virtual keyboard, in KEYS mode: play along on z..m and q..]
 #                                           # (Ctrl-] back; `arm :lead`-style tracks aren't in this song, so a default patch plays)
 #
@@ -67,6 +69,7 @@ module MB::Sound
       quiet: [false, 'Print only the summary', '-q'],
       tiles: [false, 'The tiled screen (a layout with a repl pane; default :tiles) instead of the band'],
       flood: [0, 'With --tiles: lines to print into the REPL pane, starting after 2 s (throughput under audio)', Integer],
+      notes: [0.0, 'Take a ui.note every this many seconds (0: none) and report what each cost the audio', Float],
     ) { |_args, p|
       ENV['AUDIO_PROFILE'] = p.latency.to_s if p.latency
       tty = $stdout.tty?
@@ -110,6 +113,12 @@ module MB::Sound
       xruns = { on: 0, off: 0 }
       loads = { on: [], off: [] }
       session.add_tap { |_| (band.active? ? loads[:on] : loads[:off]) << session.render_load if session.render_load }
+      # --notes: each note's time, the render thread's buffer gaps around it,
+      # and underruns just after it
+      tap_times = []
+      session.add_tap { |_| tap_times << MB::U.clock_now } if p.notes > 0
+      note_log = []
+      next_note = MB::U.clock_now + [p.notes, 2.0].max
 
       # Windows of band on/off (one window unless --compare)
       window = p.compare ? 5.0 : p.seconds
@@ -140,6 +149,19 @@ module MB::Sound
           if flood && !flood[:done] && band.host.synchronize { band.host.vt.text.include?('=> :flood_done') }
             flood[:done] = MB::U.clock_now
             flood[:bytes] = band.host.bytes_read - flood[:bytes]
+          end
+          if p.notes > 0 && MB::U.clock_now >= next_note
+            next_note += p.notes
+            x_before = underruns.call
+            t0 = MB::U.clock_now
+            if note_log.empty?
+              Internal.checkout_tmp_dir # (where a session's first note looks first; timed with it)
+              ENV['MB_SOUND_UI_NOTES'] ||= Dir.mktmpdir('ui_demo_notes')
+            end
+            UI::NoteLog.save("ui_demo --notes probe #{note_log.length + 1}", capture: UI::NoteLog.capture(p.tiles ? band : (band.active? ? band : nil)), session: session)
+            t1 = MB::U.clock_now
+            sleep 0.3
+            note_log << { at: t0 - start, ms: (t1 - t0) * 1000, span: [t0, t1], xruns: x_before && underruns.call - x_before }
           end
           next if flood && !flood[:done] && MB::U.clock_now - (flood[:printed] ||= 0) < 1.0 # (progress once a second)
           flood[:printed] = MB::U.clock_now if flood
@@ -206,6 +228,16 @@ module MB::Sound
         puts "Underruns: n/a (#{out.class.name.split('::').last} output)"
       end
       puts "Captures: #{captured} in #{p.capture}" if p.capture
+      unless note_log.empty?
+        gaps = tap_times.each_cons(2).map { |a, b| [b - a, a] }
+        p99 = gaps.map(&:first).sort[((gaps.length - 1) * 0.99).round].to_f * 1000
+        puts "ui.note (#{note_log.length}, to #{ENV['MB_SOUND_UI_NOTES']}): the render thread's buffer gaps are #{p99.round(1)} ms p99 overall"
+        note_log.each_with_index do |n, i|
+          near = gaps.select { |_g, at| at >= n[:span][0] - 0.1 && at <= n[:span][1] + 0.1 }.map(&:first).max.to_f * 1000
+          puts format('  note %d at %5.1f s: %6.2f ms on the REPL thread%s, largest buffer gap around it %5.1f ms, underruns %s',
+                      i + 1, n[:at], n[:ms], i == 0 ? ' (with the first lookup)' : '', near, n[:xruns].nil? ? 'n/a' : n[:xruns])
+        end
+      end
       if flood
         if flood[:done]
           secs = flood[:done] - flood[:at]

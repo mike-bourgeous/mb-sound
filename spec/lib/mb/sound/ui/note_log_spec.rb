@@ -70,6 +70,63 @@ RSpec.describe(MB::Sound::UI::NoteLog, :aggregate_failures) do
     expect(described_class.dir).to eq(File.join(File.dirname(MB::Sound::Internal.help_data_dir), 'ui-notes'))
   end
 
+  # audio-safety-2: the maintainer's first ui.note of a session glitched
+  # the audio; finding tmp/ui-notes ran `git rev-parse`, and starting a
+  # process from a big Ruby process holds the GVL through fork (19 ms of
+  # render-thread wait measured on Linux; longer on macOS, which forks)
+  it 'never starts a process, also for the first note of a session' do
+    internal = MB::Sound::Internal
+    had = internal.instance_variable_defined?(:@checkout_tmp_dir)
+    old = internal.instance_variable_get(:@checkout_tmp_dir)
+    old_version = MB::Sound::GraphIO.instance_variable_get(:@library_version)
+    internal.remove_instance_variable(:@checkout_tmp_dir) if had
+    MB::Sound::GraphIO.instance_variable_set(:@library_version, nil)
+    ENV['MB_SOUND_UI_NOTES'] = nil
+    %i[spawn fork].each { |m| allow(Process).to receive(m).and_raise("no #{m} on a live path") }
+    allow(Kernel).to receive(:fork).and_raise('no fork on a live path')
+    allow(IO).to receive(:popen).and_raise('no popen on a live path')
+    allow(Open3).to receive(:spawn).and_raise('no spawn on a live path') # (Open3 calls Kernel#spawn on itself)
+    expect { Open3.capture2('true') }.to raise_error(/no spawn/) # (the old lookup's path is covered)
+
+    expect(described_class.dir).to eq(File.join(internal.main_checkout(internal::GEM_ROOT), 'tmp', 'ui-notes'))
+    expect(MB::Sound::GraphIO.library_version).to match(/\A#{Regexp.escape(MB::Sound::VERSION)} \(\h{7}\)\z/)
+  ensure
+    internal.instance_variable_set(:@checkout_tmp_dir, old) if had
+    MB::Sound::GraphIO.instance_variable_set(:@library_version, old_version)
+  end
+
+  it 'finds the main checkout and the commit as git does, from git\'s files' do
+    internal = MB::Sound::Internal
+    root = internal::GEM_ROOT
+    common = IO.popen(['git', '-C', root, 'rev-parse', '--path-format=absolute', '--git-common-dir'], err: File::NULL, &:read).strip
+    head = IO.popen(['git', '-C', root, 'rev-parse', 'HEAD'], err: File::NULL, &:read).strip
+    expect(internal.git_dirs(root)[1]).to eq(common)
+    expect(internal.git_dirs(File.join(root, 'lib', 'mb'))[1]).to eq(common)
+    expect(internal.main_checkout(root)).to eq(File.dirname(common))
+    expect(internal.git_head(root, length: 40)).to eq(head)
+    expect(internal.main_checkout('/')).to be_nil
+    expect(internal.git_head('/')).to be_nil
+  end
+
+  it 'reads what plays from the UI snapshot while a screen is up (no render lock)' do
+    slow = ui::Slow.new(
+      tracks: [ui::TrackInfo.new(name: :bass, q: '1/4r', clip: 'bass_a', armed: false), ui::TrackInfo.new(name: :pad, q: '1r', clip: 'graph', armed: false)].freeze,
+      scenes: [].freeze, scene: :drop, queued: [].freeze, recording: [].freeze, armed: [].freeze, form: nil, knob_specs: {}.freeze
+    )
+    snap = ui::Snapshot.fake(bar: 17, beat: 3r, bpm: 128, slow: slow, parts: [
+      ui::PartLoad.new(name: :bass, kind: :player, state: :playing, load: 0.01),
+      ui::PartLoad.new(name: :hat, kind: :player, state: :starting, load: 0.0),
+      ui::PartLoad.new(name: :master, kind: :master, state: :playing, load: 0.0),
+    ].freeze)
+    session = double('session', ui_feed: double('feed', latest: snap))
+    expect(session).not_to receive(:players)
+    expect(described_class.playing_lines(session)).to eq([
+      '- **at**: bar 17:3, 128 bpm, scene :drop',
+      '- **players**: :bass (track: bass_a, q 1/4r); :hat (starting)',
+      '- **tracks not playing**: :pad',
+    ])
+  end
+
   it 'is ui.note and ui.notes with no screen too, and a help entry' do
     n = ui.facade.note('works without a screen')
     expect(n.where).to eq('no screen')
