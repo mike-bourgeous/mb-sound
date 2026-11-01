@@ -39,7 +39,7 @@ files:
   spec/lib/mb/sound/session_fuzz_spec.rb:
     file: 40
     example: 18
-    reason: the random-songs example checks every relation (buffer sizes, plans, timeline parts, warm-ups, carries and spills since carry-1, fx swaps since library-2, equal lengths since session-2) for 3 seeds, one drawn from RSpec's seed, so its time varies by seed; about 16 s alone in the Mac container and 31.8-41 s at PARALLEL=8 under load (x2.4-2.8 = 11.4-14.7 reference seconds, 2026-10-31), over the default 8; 37.7 s at PARALLEL=8 after wire-1 added a wire command (2026-11-01: a new command changes which song each seed draws), so example 18
+    reason: the random-songs example checks every relation (buffer sizes, plans, timeline parts, warm-ups, carries and spills since carry-1, fx swaps since library-2, equal lengths since session-2) for 3 seeds, one drawn from RSpec's seed, so its time varies by seed; about 16 s alone in the Mac container and 31.8-41 s at PARALLEL=8 under load (x2.4-2.8 = 11.4-14.7 reference seconds, 2026-10-31), over the default 8; 37.7 s at PARALLEL=8 after wire-1 added a wire command (2026-11-01; a new command changes which song each seed draws), so example 18
   spec/lib/mb/sound/session/carry_sweep_spec.rb:
     file: 45
     reason: the slow tier rebuilds each of the 41 shipped instrument presets mid-note with its state carried and compares 154 buffers against no rebuild (two renders each); 74.8 s at x2.29 = 32.7 reference seconds in the Mac container's spec:full at PARALLEL=8, 2026-10-29 (sound-design-2); the everyday run keeps 3 presets
