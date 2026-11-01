@@ -203,6 +203,17 @@ module MB
       #     bind :bass, curve: :release           # a chained .curve(release: 30): :"bass/release_curve"
       #     bind :bass, cutoff: :cut              # preset :dnb_reese's param follows knob :cut
       #
+      # Settings the code didn't write (a keyword left at its default, like
+      # `filter(:highpass, cutoff: 150)`'s quality; an lfo's frequency from
+      # the Pitch it was called on, `4.8.hz.lfo`; a tone's starting phase)
+      # and settings read once while the patch builds (a softclip's
+      # threshold) bind as build knobs (editability-1): the patch is given
+      # the knob's value as it builds, so each turn rebuilds the track (its
+      # state carried), a step a key in the inspector.
+      #
+      #     bind :pad, filter: :quality           # quality: 0.7071 (the default) as knob :"pad/quality"
+      #     bind :pad, lfo: :frequency            # 4.8.hz.lfo: :"pad/frequency", turn rebuilds
+      #
       # A track playing a graph document already has its params as knobs
       # (:"bass/cutoff"; Arrangement::TrackKnobs), so `bind :bass, :cutoff`
       # names that knob; `bind :bass, cutoff: :cut` makes the param follow

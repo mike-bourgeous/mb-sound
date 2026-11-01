@@ -170,7 +170,10 @@ module MB
             # and preview follow turns; the others keep their first one)
             if sel && (n = entry[:objects][sel])
               nodes = nodes.dup
-              nodes[sel] = nodes[sel].with(params: Inspect.snapshot(n, entry[:extras][sel]), live: live_of(entry[:groups][sel]), binds: binds_of(session, track, entry, sel, n))
+              binds = binds_of(session, track, entry, sel, n)
+              pk = build_bound(session, track, binds)
+              nodes[sel] = nodes[sel].with(params: Inspect.snapshot(n, entry[:extras][sel]), live: live_of(entry[:groups][sel]), binds: binds,
+                                           param_knobs: pk.empty? ? nodes[sel].param_knobs : nodes[sel].param_knobs.merge(pk).freeze)
               nodes.freeze
             end
             InspectInfo.new(track: track, tracks: tracks, knobs: entry[:knobs], nodes: nodes, node: sel, code: entry[:code], error: nil,
@@ -223,6 +226,22 @@ module MB
                   end
               }.freeze
             end
+          end
+
+          # { param => knob name } for the params of +binds+ (see #binds_of)
+          # that track +track+'s patch already binds as build knobs
+          # (editability-1: the patch is given the knob's value while it
+          # builds, so the graph shows the number; the param turns its knob,
+          # each turn a rebuild, instead of offering the bind again).
+          def build_bound(session, track, binds)
+            return {} if binds.empty?
+            arr = session.respond_to?(:arrangement) ? session.arrangement : nil
+            patch = arr&.tracks&.[](track)&.patch
+            return {} unless patch.respond_to?(:literal_bindings)
+            bound = patch.literal_bindings.filter_map { |t, kn| kn if t.build? }
+            return {} if bound.empty?
+            knobs = session.knobs
+            binds.each_with_object({}) { |(name, b), h| h[name] = b.knob if b.knob && bound.include?(b.knob) && knobs.key?(b.knob) }
           end
 
           # The playhead of an envelope group's newest sounding note (see

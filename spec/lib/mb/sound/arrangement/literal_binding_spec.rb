@@ -1,3 +1,4 @@
+require 'digest'
 require_relative '../../../../support/ui_helpers'
 
 # Live literals (envelope-view-1): a number in a track's patch (or a graph
@@ -313,6 +314,59 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     turned = Numo::DFloat.cast(s.output.captured[0])
     expect((turned[0...bound.length] - ref[0...bound.length]).abs.max).to eq(0.0)
     expect((turned[bound.length..] - (ref[bound.length..] rescue 0)).abs.max).to be > 0.001 if ref.length > bound.length
+  end
+
+  # Note 15 (editability-1): kits take their voices' settings as params.
+  # Each voice's settings (tune, decay, tone, ...) bind as the track's
+  # knobs (:"drums/kick_decay"), given to the kit as numbers while it
+  # builds (build knobs): the same samples at their values, written or
+  # not, under the name the code used for the voice.
+  it 'binds drum kit voice settings as build knobs: the same samples, a turn rebuilds' do
+    beat = MB::Sound.grid(16, kick: 'x...x...x...x...', snare: '....x.......x...', hat: 'x.x.x.x.x.x.x.x.').loop
+    [
+      [->(c) { MB::Sound.tr909(c) }, { tr909: :kick_decay }, :"drums/kick_decay", 0.55],
+      [->(c) { MB::Sound.tr909(c, bd: { tune: 52 }) }, { tr909: :kick_tune }, :"drums/kick_tune", 52],
+      [->(c) { MB::Sound.tr909(c) }, { tr909: :closed_hat_tune }, :"drums/closed_hat_tune", -3],
+      [->(c) { MB::Sound.tr808(c, snare: { snappy: 0.5 }) }, { tr808: :snare_snappy }, :"drums/snare_snappy", 0.5],
+      [->(c) { MB::Sound.tr808(c) }, { tr808: :kick_tone }, :"drums/kick_tone", nil],
+    ].each do |patch, what, kname, value|
+      _, ref, = play(REBUILD, track: :drums, patch: patch, clip: beat, buffers: 150)
+      s, bound, entry = play(->(_) { MB::Sound.bind(:drums, what) }, track: :drums, patch: patch, clip: beat, buffers: 150)
+      expect(entry.to_s).to eq('bg :drums lands 2:1 (queued)'), what.inspect
+      expect(s.knobs[kname]&.value).to be_within(1e-9).of(value), what.inspect if value
+      expect(s.arrangement.build_knob?(kname)).to eq(true), what.inspect
+      expect(Digest::MD5.hexdigest(bound.to_binary)).to eq(Digest::MD5.hexdigest(ref.to_binary)), "#{what}: #{(bound - ref).abs.max}"
+      expect(bound.abs.max).to be > 0.01
+      s.close
+      @sessions.delete(s)
+    end
+
+    # The inspector shows each voice's settings as its row, and the bind
+    # (Left/Right, Enter) for each
+    s, = play(nil, track: :drums, patch: ->(c) { MB::Sound.tr909(c) }, clip: beat, buffers: 2)
+    g = MB::Sound::UI::Inspect::Gatherer.new
+    info = g.call(s, { track: :drums, voice: :kick })
+    i = info.nodes.index { |n| n.what == 'voice' && n.voice == :kick }
+    expect(i).not_to be_nil
+    row = g.call(s, { track: :drums, voice: :kick, node: i }).nodes[i]
+    expect(row.params.values.keys).to include(:tune, :decay, :attack, :punch, :drive, :level)
+    expect(row.binds[:decay].line).to eq('bind :drums, tr909: :kick_decay')
+    expect(row.binds[:decay].knob).to eq(:"drums/kick_decay")
+
+    # A turn rebuilds the kit with the new decay
+    MB::Sound::Session.with_context(session: s) { MB::Sound.bind(:drums, { tr909: :kick_decay }, on: :now) }
+    4.times { s.process_buffer }
+    MB::Sound::Session.with_context(session: s) { MB::Sound.turn(:"drums/kick_decay", 1.2, on: :now) }
+    4.times { s.process_buffer }
+    kick = MB::Sound::UI::Inspect.roots(s.ui_graphs[:drums]).first.voices[:kick]
+    # (the inspector then shows the setting as its knob, a build knob)
+    info = g.call(s, { track: :drums, voice: :kick })
+    i = info.nodes.index { |n| n.what == 'voice' && n.voice == :kick }
+    row = g.call(s, { track: :drums, voice: :kick, node: i }).nodes[i]
+    expect(row.knob_of(:decay)).to eq(:"drums/kick_decay")
+    expect(info.build_knobs).to include(:"drums/kick_decay")
+    expect(kick.knobs[:decay]).to eq(1.2)
+    expect(code_of(s, :drums)).to include('kick: { decay: 1.2 }')
   end
 
   it 'replays from a take bit for bit' do

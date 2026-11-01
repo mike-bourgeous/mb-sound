@@ -19,6 +19,11 @@ RSpec.describe(MB::Sound::UI::Design, :aggregate_failures) do
 
   after do
     ui::Inspect.target = nil
+    # (an example that leaves `design` open makes later specs' rebuilds of
+    # a track of that name land on the next buffer: editability-1 found
+    # literal_binding_spec's :pad binds landing now after `design :pad`)
+    described_class.instance_variable_set(:@open, false)
+    described_class.instance_variable_set(:@last, nil)
     @session&.close
     MB::Sound.rewind
   end

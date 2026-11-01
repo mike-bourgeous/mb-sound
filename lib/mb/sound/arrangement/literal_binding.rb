@@ -184,6 +184,10 @@ module MB
             return doc
           end
 
+          if node.is_a?(Drums::Voice) || node.is_a?(Drums::Kit)
+            kt = kit_target(roots, node, param, all: all) and return kt
+          end
+
           call = call_of(node) or raise Error, unrecorded(roots, param)
           # (a call reached through a bundle inside a graph document binds
           # like the document's own calls since editability-1; before, it
@@ -230,6 +234,70 @@ module MB
           end
           nth = keys_of(roots, method, all: all).index(key) or raise Error, "#{method} isn't in the track's graph"
           Target.new(kind: :call, call_name: method, nth: nth, key: key, slot: slot, param: param, value: value, document: nil, arg: arg, mode: mode)
+        end
+
+        # The Target for a drum kit voice's setting (editability-1, Note 15:
+        # kits take their voices' settings as params): +node+ is a
+        # Drums::Voice and +param+ its setting (:decay), or the Kit and
+        # +param+ the voice's and the setting's names (:kick_decay, what
+        # `bind :drums, tr909: :kick_decay` names).  The setting is a member
+        # of the kit call's Hash for the voice (`tr909(c, kick: { decay:
+        # 0.4 })`, written or not, under the name the code used, `bd:`),
+        # bound :build: the kit reads its settings in Ruby arithmetic, so a
+        # knob node would move the samples, and the knob's value while the
+        # kit builds gives exactly the number.  Nil if +node+ isn't in a
+        # recorded kit; raises Error for a setting that isn't a number.
+        def kit_target(roots, node, param, all: nil)
+          all ||= nodes(roots)
+          kit = node.is_a?(Drums::Kit) ? node : all.find { |n| n.is_a?(Drums::Kit) && n.voices.each_value.any? { |v| v.equal?(node) } }
+          return nil unless kit
+          call = own_call_of(kit) or return nil
+          if node.is_a?(Drums::Voice)
+            voice = node
+            setting = param
+          else
+            vname = kit.voices.keys.sort_by { |k| -k.length }.find { |k| param.to_s.start_with?("#{k}_") } or return nil
+            voice = kit.voices[vname]
+            setting = param.to_s.delete_prefix("#{vname}_").to_sym
+          end
+          return nil unless voice.knobs.key?(setting) && !Drums::Voice::KIT_KNOBS.include?(setting)
+          key = GraphNode::Recipe.key_of(call) or raise Error, "#{param}: this graph wasn't built by a track's patch (track :x { |clip| ... } makes one)"
+          method = call.written || call.name
+          name = :"#{voice.name}_#{setting}"
+          value = voice.knobs[setting]
+          raise Error, "#{name} of #{method} is not a number (#{value.inspect[0, 40]}): only numbers become knobs" unless literal?(value)
+          kw = call.kwargs.keys.find { |k| kit_voice_name(kit, call, k) == voice.name } || voice.name
+          nth = keys_of(roots, method, all: all).index(key) or raise Error, "#{method} isn't in the track's graph"
+          Target.new(kind: :call, call_name: method, nth: nth, key: key, slot: [:kw, kw, [setting]], param: name, value: value, document: nil, arg: name, mode: :build)
+        end
+
+        # The voice name keyword +k+ of kit call +call+ (which made +kit+)
+        # names: a voice, or an alias (`bd:`), or nil.
+        def kit_voice_name(kit, call, k)
+          return k if kit.voices.key?(k)
+          case kit.machine
+          when :tr808 then Drums::TR808.voice_name(k)
+          when :tr909 then Drums::TR909.machine.voice_name(k)
+          else call.receiver.is_a?(Drums::Machine) ? call.receiver.voice_name(k) : nil
+          end
+        rescue StandardError
+          nil
+        end
+
+        # A knob range for a drum kit voice setting (Target +t+ from
+        # .kit_target), or nil: amounts 0..1, levels 0..2, a tune in Hz
+        # (20..2000) or in semitones (-24..24, the 909's sampled voices);
+        # decays take the Param names table's seconds.
+        def kit_range(t)
+          return nil unless t.kind == :call && t.slot[0] == :kw && t.slot[2]&.length == 1 && t.param.to_s.end_with?("_#{t.slot[2][0]}")
+          setting = t.slot[2][0]
+          v = Param.magnitude(t.value).to_f rescue (return nil)
+          case setting
+          when :tone, :snappy, :punch, :drive, :attack, :sigh then 0.0..1.0
+          when :level then 0.0..2.0
+          when :tune then v.abs < 30 ? -24.0..24.0 : 20.0..2000.0
+          when :decay then Param.name_entry(:decay)&.dig(:range)
+          end
         end
 
         # [slot, value] for a setting +param+ of +node+ that +call+ (the
@@ -661,7 +729,7 @@ module MB
           end
 
         kname = (follow || as || LiteralBinding.knob_name(name, t, roots).first).to_sym
-        default = LiteralBinding.knob_default(t.param, t.value, range)
+        default = LiteralBinding.knob_default(t.param, t.value, range || LiteralBinding.kit_range(t))
         k = @session.knobs[kname]
         if k && !follow && (k.value - Param.magnitude(default.default).to_f).abs > 1e-9 * [1.0, k.value.abs].max
           return MB::Sound.live_error(LiteralBinding::Error.new("knob #{kname.inspect} is at #{k.value}, not #{name}'s #{t.param} (#{Param.literal(default.default)}): give as: another name"))
