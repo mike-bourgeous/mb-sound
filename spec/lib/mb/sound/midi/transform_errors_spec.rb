@@ -71,7 +71,8 @@ RSpec.describe('MIDI transform argument errors', :aggregate_failures) do
 
   it "answers the maintainer's echo lines on clips, Notes, and unattached chains" do
     # A bare echo() echoes eighths, 3 times (as arp() and strum() have defaults)
-    expect(clip.echo.source).to have_attributes(delay: 1.n8, count: 3)
+    expect(clip.stream.echo.source).to have_attributes(delay: 1.n8, count: 3)
+    expect(clip.echo.events.length).to eq(clip.events.length * 4) # (Clip#echo bakes: ux-notes-1)
 
     msg = summary_of { clip.echo(3, transpose: 5) }
     expect(msg).to eq('ArgumentError: echo: unknown keyword: :transpose; e.g. riff.echo(3.n16, 3, pitch: 7.st, velocity: 0.7) (did you mean pitch:?)')

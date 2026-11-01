@@ -34,12 +34,22 @@ module MB
         ].freeze
 
         # Transforms that Sequence::Clip mirrors, returning Streams of the
-        # clip (user decision 8, 2026-10-09: `clip.echo(...)` is a Stream
+        # clip (user decision 8, 2026-10-09: `clip.echo(...)` was a Stream
         # whose echoes ring past loop points; `clip.bake(echo(...))` is a
-        # Clip).  Clip has its own #transpose and editing methods.
+        # Clip).  Clip has its own #transpose and editing methods.  The
+        # ones in CLIP_BAKED return Clips instead.
         CLIP_TRANSFORMS = [
           :echo, :arp, :strum, :chord, :snap, :through, :degrees, :lock,
         ].freeze
+
+        # Clip transforms that return the clip baked through them (a Clip:
+        # Clip#bake, so a loop's echoes wrap to its start), so they play on
+        # a track's instrument like any clip (ux-notes-1; the maintainer,
+        # 2026-10-31: "I want to be able to put echo on clips", after
+        # `swap :bowl, riff.loop.echo(...)` refused the Stream and `cue`
+        # played it on the default patch).  `clip.stream.echo(...)` is the
+        # live Stream, as before.
+        CLIP_BAKED = [:echo].freeze
 
         # Returns a stream that repeats each note +count+ times, +delay+
         # apart (seconds, a Length, or a Duration such as 3.n16; an eighth
@@ -525,11 +535,21 @@ module MB
       class Clip
         # Stream transforms that clips play through (each returns a
         # MIDI::Stream of a new #stream of this clip; Clip#bake runs one
-        # offline into a Clip).  Clip's own #transpose, #ratchet, etc.
-        # return Clips.
+        # offline into a Clip), except those in Stream::CLIP_BAKED, which
+        # return this clip baked through the transform (a Clip:
+        # `riff.loop.echo(3.n16, 5, pitch: 5.st)` is
+        # `riff.loop.bake(echo(3.n16, 5, pitch: 5.st))`, echoes from the end
+        # of the loop wrapping to its start).  Clip's own #transpose,
+        # #ratchet, etc. return Clips.
         MIDI::Stream::CLIP_TRANSFORMS.each do |name|
-          define_method(name) do |*args, **kwargs, &block|
-            stream.public_send(name, *args, **kwargs, &block)
+          if MIDI::Stream::CLIP_BAKED.include?(name)
+            define_method(name) do |*args, **kwargs, &block|
+              bake(MIDI::Transform::Spec.new.public_send(name, *args, **kwargs, &block))
+            end
+          else
+            define_method(name) do |*args, **kwargs, &block|
+              stream.public_send(name, *args, **kwargs, &block)
+            end
           end
         end
       end

@@ -575,20 +575,34 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       MB::Sound.rewind
     end
 
-    let(:stream) { MB::Sound.seq(MB::Sound::C2, MB::Sound::A2).n8.loop.echo(3.n16, 2) }
+    let(:riff) { MB::Sound.seq(MB::Sound::C2, MB::Sound::A2).n8.loop }
+    let(:stream) { riff.arp(:up) }
 
     def in_session(&block) = MB::Sound::Session.with_context(session: @session, &block)
 
-    it 'refuses it on bg, cue, and swap, saying to bake it, and leaves the instrument playing' do
+    it 'plays a clip\'s echo on the track\'s instrument with swap, cue, and bg (Clip#echo is a Clip)' do
+      echoed = riff.echo(3.n16, 2, pitch: 5.st, velocity: 0.5)
+      expect(echoed).to be_a(MB::Sound::Sequence::Clip)
+      expect(echoed.events).to eq(riff.bake(MB::Sound.echo(3.n16, 2, pitch: 5.st, velocity: 0.5)).events)
+      in_session { MB::Sound.swap(:bowl, echoed, at: :now) }
+      20.times { @session.process_buffer }
+      expect(@session.arrangement.tracks[:bowl].patch?).to eq(true)
+      expect(@session.players[:bowl]).not_to include('MIDI')
+      in_session { MB::Sound.cue(:bowl, riff.echo(1.n8, 1)) }
+      in_session { MB::Sound.bg(:bowl, riff.echo(1.n16, 1)) }
+      40.times { @session.process_buffer }
+      expect(@session.players.values).to all(satisfy { |d| !d.include?('MIDI') })
+    end
+
+    it 'refuses a clip\'s live stream (arp) on bg, cue, and swap, saying to bake it, and leaves the instrument playing' do
       %i[bg cue swap].each do |cmd|
-        expect { in_session { MB::Sound.public_send(cmd, :bowl, stream) } }.to raise_error(ArgumentError, /#{cmd} :bowl: echo\(.*live MIDI stream.*riff\.bake\(echo\(\.\.\.\)\)/)
+        expect { in_session { MB::Sound.public_send(cmd, :bowl, stream) } }.to raise_error(ArgumentError, /#{cmd} :bowl: arp\(.*live MIDI stream of a clip.*riff\.bake\(arp\(\.\.\.\)\)/)
       end
+      expect { in_session { MB::Sound.bg(:bowl, MB::Sound::Notes.new(MB::Sound::MIDI::Stream.new(MB::Sound::MIDI::LiveSource.new(MB::Sound::MIDI::VirtualInput.new)))) } }.to raise_error(ArgumentError, /live MIDI \(no clip\).*rec/) if defined?(MB::Sound::MIDI::VirtualInput)
       40.times { @session.process_buffer }
       expect(@session.players.keys).to eq([:bowl])
       expect(@session.players[:bowl]).not_to include('MIDI')
       expect(@session.arrangement.tracks[:bowl].patch?).to eq(true)
-      # (a baked one plays on the instrument)
-      expect { in_session { MB::Sound.swap(:bowl, MB::Sound.seq(MB::Sound::C2).n8.loop.bake(MB::Sound.echo(3.n16, 2)), at: :now) } }.not_to raise_error
     end
 
     it 'says swap takes the name first for swap({bowl: clip}) and play takes one sound' do

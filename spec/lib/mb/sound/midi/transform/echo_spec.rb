@@ -287,11 +287,26 @@ RSpec.describe(MB::Sound::MIDI::Transform::Echo, :midi_transforms) do
       expect(peaks[10..12].max).to be > 0.1 # the first echo at 0.25 s (buffer 10)
     end
 
-    it 'Clip#echo returns a stream of the clip with echoes' do
+    # (ux-notes-1: Clip#echo bakes, so a clip's echo plays on a track's
+    # instrument; the live stream is clip.stream.echo)
+    it 'Clip#echo returns the clip with its echoes baked in, and clip.stream.echo a stream of the clip with echoes' do
       clip = MB::Sound.seq(MB::Sound::C4).n4
-      s = clip.echo(1.n8, 2, pitch: 2, transport: transport)
+      c = clip.echo(1.n8, 2, pitch: 2)
+      expect(c).to be_a(MB::Sound::Sequence::Clip)
+      expect(c.events.map { |e| [e.value.to_i, e.start] }).to eq([[60, 0r], [62, 1/8r], [64, 1/4r]])
+      expect(c.to_ruby).to eq('seq(C4).n4.echo(1.n8, 2, pitch: 2)')
+
+      s = clip.stream.echo(1.n8, 2, pitch: 2, transport: transport)
       expect(s).to be_a(MB::Sound::MIDI::Stream)
       expect(ons(read_all(s, seconds: 2)).map { |e| [e[1], e[2]] }).to eq([[60, 0r], [62, 1/4r], [64, 1/2r]])
+    end
+
+    it 'Clip#echo of a loop wraps the echoes from its end to its start (Clip#bake)' do
+      loop = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n4.loop
+      c = loop.echo(1.n4, 1)
+      expect(c).to be_looping
+      expect(c.length).to eq(loop.length)
+      expect(c.events.map { |e| [e.value.to_i, e.start] }.sort).to eq([[60, 0r], [60, 1/4r], [64, 0r], [64, 1/4r]])
     end
 
     it 'Stream#synth plays a stream on voices' do
