@@ -72,7 +72,10 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
 
     it 'stops at the :safe queue' do
       o = device_output(profile: :low)
-      expect { 8.times { drop_out(o) } }.to output.to_stderr
+      # (more drop-outs than the six growths to the cap: while the
+      # concealment lands on a write, the next one queues behind it, so
+      # back-to-back drop-outs can run out once between them)
+      expect { 12.times { drop_out(o) } }.to output.to_stderr
       expect(o.queue_limit).to eq(4080)
       expect { drop_out(o) }.not_to output.to_stderr
     end
