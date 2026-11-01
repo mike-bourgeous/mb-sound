@@ -25,7 +25,7 @@ RSpec.describe('bin/jit_bench.rb') do
       'startup' => [startup.(true, 2.0), startup.(false, 1.5)],
       'render' => [render.(true, 1.0, 4.0), render.(false, 2.0, 12.0)],
       'profile' => [render.(false, 2.0, 12.0).merge('kind' => 'profile', 'profile' => {
-        'render' => { 'samples' => 100, 'self' => [['MB::Sound::Plan::Program#run_c (lib/mb/sound/plan/program.rb)', 15.0, 15.0, [['MB::Sound::FastPlan.run', 15.0]], [['MB::Sound::Plan::Planned#sample', 15.0]]]],
+        'render' => { 'samples' => 100, 'in_c' => 40.0, 'in_kernels' => 20.0, 'files' => [['lib/mb/sound/plan/program.rb', 15.0]], 'self' => [['MB::Sound::Plan::Program#run_c (lib/mb/sound/plan/program.rb)', 15.0, 15.0, [['MB::Sound::FastPlan.run', 15.0]], [['MB::Sound::Plan::Planned#sample', 15.0]]]],
                       'top_frames' => [], 'inclusive' => [['MB::Sound::Session#render_span (lib/mb/sound/session.rb)', 98.0], ['MB::Sound::Synth#sample (lib/mb/sound/synth.rb)', 60.0]] },
         'build' => { 'samples' => 10, 'self' => [['MB::Sound::Synth#initialize (lib/mb/sound/synth.rb)', 40.0, 0.0, [], []]], 'top_frames' => [], 'inclusive' => [] },
       })],
@@ -41,6 +41,7 @@ RSpec.describe('bin/jit_bench.rb') do
     expect(md).to include('| night_bus_flow | 128 | 37.5% | 75.0% | 2.00x | 75.0% | 150.0% | 375% | 750% | 30/30 | 15 |')
     expect(md).to include('| night_bus_flow | 128 | 2.67 | 3 | 4.0 | 12.0 | 30.0 | 30.0 | intro ends | 2.00 |')
     expect(md).to include('| 15.0 | 15.0 | `MB::Sound::Plan::Program#run_c (lib/mb/sound/plan/program.rb)` | `MB::Sound::FastPlan.run` 15.0 | `MB::Sound::Plan::Planned#sample` 15.0 |')
+    expect(md).to include("In C functions: 40% of the samples (mb-sound's own extensions 20%", 'Self time by file: `lib/mb/sound/plan/program.rb` 15%')
     # (every sample's frames left out of the subtrees)
     expect(md).to include('Inclusive (the subtrees): `MB::Sound::Synth#sample` 60%')
     expect(md).to include('Scene builds (scheduled blocks, 10 samples), self: `MB::Sound::Synth#initialize` 40%')
@@ -56,6 +57,12 @@ RSpec.describe('bin/jit_bench.rb') do
     expect { JitBench.piece('nope') }.to raise_error(ArgumentError, /Unknown piece "nope" \(tunnel_vision, night_bus_flow, techno, dense/)
     expect { JitBench.piece('bin/effects/flanger.rb') }.to raise_error(ArgumentError, /isn't a song script/)
     expect(JitBench.piece('bin/songs/memory_card.rb')[:song]).to end_with('bin/songs/memory_card.rb')
+  end
+
+  it 'tells C functions from Ruby methods by their labels' do
+    s = JitBench::Sampler
+    expect(%w[Thread.current Kernel#is_a? MB::Sound::FastPlan.run Numo::SFloat#sort].map { |l| s.c_label?(l) }).to all(be true)
+    expect(['MB::Sound::Tuning.current', 'MB::Sound::Session#process_buffer', 'block in MB::Sound::Synth#sample', '<main>', 'Nope::Missing#x'].map { |l| s.c_label?(l) }).to all(be false)
   end
 
   it 'samples a thread, folding C functions into the Ruby method calling them' do

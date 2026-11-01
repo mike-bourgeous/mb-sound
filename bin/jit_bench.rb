@@ -35,13 +35,18 @@
 #    backtrace (Thread#backtrace_locations whenever Ruby switches threads,
 #    about every 10 ms whatever RUBY_THREAD_TIMESLICE says (Ruby 4.0); no
 #    TracePoint).  A method's "self" share is its own Ruby plus the C
-#    functions it calls directly ("in C", the C functions named: Ruby
-#    gives a C function's frame its caller's file and line).  Ruby
-#    switches threads only at safe points, so a sample lands where a C
-#    function is called or returns, never inside it; either way it counts
-#    for the calling Ruby method.  GC time doesn't show (the sampler can't
-#    run during GC; the GC column says how much there was).  Scene builds
-#    (scheduled blocks) are sampled apart.
+#    functions it calls directly ("in C", the C functions named: methods
+#    without a source location), with its callers; the share of samples
+#    in C functions (mb-sound's own and the rest) and self time by file
+#    head each piece.  Ruby switches threads only at safe points (mostly
+#    C function calls), so the shares are a coarse guide: tiny methods
+#    can show several times their cost (Tuning.current's Thread.current,
+#    59 calls of 0.19 us per 2.3 ms buffer of the dense piece, sampled at
+#    6%, and making it free changed nothing measurable); confirm a
+#    candidate with call counts or a microbenchmark before porting it.  GC
+#    time doesn't show (the sampler can't run during GC; the GC column
+#    says how much there was).  Scene builds (scheduled blocks) are
+#    sampled apart.
 #
 # Pieces: tunnel_vision (bin/songs/tunnel_vision.rb), night_bus_flow,
 # techno (genre(:techno).short: bin/songs/genre_demo.rb -G techno, about a
@@ -245,6 +250,9 @@ module JitBench
     @cfuncs = { render: Hash.new { |h, k| h[k] = Hash.new(0) }, build: Hash.new { |h, k| h[k] = Hash.new(0) } }
     @callers = { render: Hash.new { |h, k| h[k] = Hash.new(0) }, build: Hash.new { |h, k| h[k] = Hash.new(0) } }
     @inclusive = { render: Hash.new(0), build: Hash.new(0) }
+    @files = { render: Hash.new(0), build: Hash.new(0) }
+    @in_c = Hash.new(0)
+    @in_kernels = Hash.new(0)
     @totals = Hash.new(0)
     @thread = nil
 
@@ -253,11 +261,26 @@ module JitBench
 
       def frame_key(loc) = "#{loc.label} (#{JitBench.short_path(loc.absolute_path || loc.path)})"
 
-      # True if +locs[i]+ is a C function's frame: Ruby gives a C frame
-      # its caller's file and line.
+      # True if +locs[i]+ is a C function's frame (Ruby gives those their
+      # caller's file and line, so the label decides: a method without a
+      # source location is C).
       def cfunc?(locs, i)
-        n = locs[i + 1]
-        n && locs[i].lineno == n.lineno && locs[i].path == n.path
+        locs[i + 1] && c_label?(locs[i].label)
+      end
+
+      def c_label?(label)
+        @c_labels ||= {}
+        return @c_labels[label] if @c_labels.key?(label)
+        @c_labels[label] =
+          if label.start_with?('block ', '<', 'rescue in ', 'ensure in ') || !(m = label.match(/\A([A-Z][\w:]*)([#.])([^#.]+)\z/))
+            false
+          else
+            mod = Object.const_get(m[1])
+            meth = m[2] == '#' ? mod.instance_method(m[3]) : mod.method(m[3])
+            meth.source_location.nil?
+          end
+      rescue NameError
+        @c_labels[label] = false
       end
 
       # Samples the +main+ thread's backtrace on a thread of its own,
@@ -278,10 +301,15 @@ module JitBench
             i += 1 while cfunc?(locs, i)
             owner = frame_key(locs[i])
             @owner[where][owner] += 1
+            @files[where][JitBench.short_path(locs[i].absolute_path || locs[i].path)] += 1
             @callers[where][owner][locs[i + 1].label] += 1 if locs[i + 1]
             if i > 0
               @owner_c[where][owner] += 1
               @cfuncs[where][owner][locs[i - 1].label] += 1
+              @in_c[where] += 1
+              # (mb-sound's own C: FastPlan, FastSynth, ...; the rest is
+              # Ruby's core and Numo)
+              @in_kernels[where] += 1 if locs[0, i].any? { |l| l.label.start_with?('MB::') }
             end
             locs.map { |l| frame_key(l) }.uniq.each { |k| @inclusive[where][k] += 1 }
           end
@@ -304,6 +332,8 @@ module JitBench
           n = @totals[w]
           [w, {
             samples: n,
+            in_c: pct.(@in_c[w], n), in_kernels: pct.(@in_kernels[w], n),
+            files: @files[w].sort_by { |_, c| -c }.first(top).map { |k, c| [k, pct.(c, n)] },
             self: @owner[w].sort_by { |_, c| -c }.first(top).map { |k, c|
               [k, pct.(c, n), pct.(@owner_c[w][k], n), @cfuncs[w][k].sort_by { |_, cc| -cc }.first(3).map { |f, cc| [f, pct.(cc, n)] },
                @callers[w][k].sort_by { |_, cc| -cc }.first(2).map { |f, cc| [f, pct.(cc, n)] }]
@@ -669,6 +699,12 @@ module JitBench
         lines << ''
         lines << format('#### %s at %d frames: %.1f%% of realtime, %d samples on the render path, GC %.0f ms/s', x['piece'], x['buffer'], 100.0 * x['mean_ms'] / x['buffer_ms'], render['samples'], x['gc_ms_per_s'])
         lines << ''
+        if render['in_c']
+          lines << format('In C functions: %.0f%% of the samples (mb-sound\'s own extensions %.0f%%, Ruby core and Numo the rest); the rest is Ruby.', render['in_c'], render['in_kernels'])
+          lines << ''
+          lines << "Self time by file: #{render['files'].first(10).map { |f, v| "`#{f}` #{fmt(v, 0)}%" }.join(', ')}"
+          lines << ''
+        end
         lines << '| self % | in C | Ruby method (file) | C functions it calls (%) | called from (%) |'
         lines << '|---:|---:|---|---|---|'
         list = ->(fs) { fs.to_a.map { |f, fv| "`#{f}` #{fmt(fv)}" }.join(', ') }
