@@ -203,11 +203,12 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
   end
 
   # A sweep (fixes-1030; settings from research-snapshot-mutability's
-  # probe_live.rb): every effect setting either binds (the rebuilt patch
+  # probe_live.rb): every effect setting binds, live (the rebuilt patch
   # reads the knob; effects returning bundles, ping_pong, multitap, chorus,
-  # are found through their outputs) or is refused with one line saying it
-  # is fixed when the patch builds (never a raw NoMethodError).  A new
-  # effect, or a setting that becomes live, goes in this table.
+  # are found through their outputs) or, for one read once while the patch
+  # builds, as a build knob (editability-1: each turn rebuilds; before,
+  # refused with one line saying it is fixed when the patch builds).  A
+  # new effect, or a setting that becomes live, goes in this table.
   BIND_SWEEP = {
     'reverb(:hall, ...)' => [->(o) { ->(c) { c.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) }.reverb(:hall, **o) } }, :reverb,
       { lowpass: 8000, highpass: 100, drive: 0.5, crush: 0.2, shimmer: 0.3, stretch: 1.2, mix: 0.3, wet: 0.5, dry: 1, level: 1, predelay: 0.02 },
@@ -234,7 +235,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
       { attack: 0.01, release: 0.1, threshold: -20.db, ratio: 4, mix: 0.8 }, {}],
   }.freeze
 
-  it 'binds every live effect setting and refuses fixed ones with one line (sweep)' do
+  it 'binds every effect setting: live ones to a knob, fixed ones as build knobs (sweep)' do
     BIND_SWEEP.each do |label, (patch, method, live, fixed)|
       live.merge(fixed).each do |setting, value|
         s, _, result = play(->(_) {
@@ -245,14 +246,10 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
           end
         }, track: :fx, patch: patch.({ setting => value }), buffers: 2)
         what = "#{label} #{setting}"
-        if live.key?(setting)
-          expect(result).not_to be_a(Exception), "#{what}: #{result.inspect}"
-          expect(s.knobs.keys.grep(/\Afx\//)).not_to be_empty, what
-        else
-          expect(result).to be_a(described_class::Error), "#{what}: #{result.inspect}"
-          expect(result.message).to match(/\Abind :fx, #{method}: :#{setting}: #{setting} of #{method} is fixed when the patch builds, so a knob can't move it; .* \(nothing was changed\)\z/), what
-          expect(result.message.lines.count).to eq(1), what
-        end
+        expect(result).not_to be_a(Exception), "#{what}: #{result.inspect}"
+        knobs = s.knobs.keys.grep(/\Afx\//)
+        expect(knobs).not_to be_empty, what
+        expect(knobs.any? { |k| s.arrangement.build_knob?(k) }).to eq(!live.key?(setting)), what
         s.close
         @sessions.delete(s)
       end
@@ -276,6 +273,46 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     turned = Numo::DFloat.cast(s.output.captured[0])
     expect((turned[0...bound.length] - ref[0...bound.length]).abs.max).to eq(0.0)
     expect((turned[bound.length..] - ref[bound.length..]).abs.max).to be > 0.01
+  end
+
+  # Note 15 (editability-1): settings the code didn't write (a keyword
+  # left at its default, an lfo's frequency given by the Pitch it was
+  # called on, a tone's starting phase) and settings read once while
+  # building bind as build knobs: the patch is given the knob's value as
+  # it builds, so the samples are the same by construction, and a turn
+  # rebuilds the track.
+  UNWRITTEN = ->(c) {
+    c.synth(voices: 2) { |v| (v.hz.saw.filter(:lowpass, cutoff: 900) + v.hz.sine * 0.3) * v.amp_env(0.01, 0.1, 0.5, 0.1) }.softclip(0.4, 0.9) * (4.8.hz.lfo.at(0.2) + 0.8)
+  }
+
+  it 'binds settings the code didn\'t write, and ones read while building, as build knobs: the same samples, a turn rebuilds' do
+    _, ref, = play(REBUILD, track: :pad, patch: UNWRITTEN)
+    [
+      [{ filter: :quality }, :"pad/quality", Math.sqrt(0.5), 'filter(:lowpass, cutoff: 900, quality: 0.7071067811865476)'],
+      [{ softclip: :threshold }, :"pad/threshold", 0.4, 'softclip(0.4, 0.9)'],
+      [{ lfo: :frequency }, :"pad/frequency", 4.8, '4.8.hz.lfo'],
+      [{ sine: :phase }, :"pad/phase", 0.0, 'sig.sine'],
+    ].each do |what, kname, value, code|
+      s, bound, entry = play(->(_) { MB::Sound.bind(:pad, what) }, track: :pad, patch: UNWRITTEN)
+      expect(entry.to_s).to eq('bg :pad lands 2:1 (queued)'), what.inspect
+      expect(s.knobs[kname]&.value).to be_within(1e-9).of(value), what.inspect # (a dB-ranged knob holds 0.4 as 0.4000000000202974; the build gets 0.4)
+      expect(s.arrangement.build_knob?(kname)).to eq(true), what.inspect
+      expect(code_of(s, :pad)).to include(code), what.inspect
+      expect((bound - ref).abs.max).to eq(0.0), "#{what}: #{(bound - ref).abs.max}"
+      s.close
+      @sessions.delete(s)
+    end
+
+    # A turn rebuilds the track with the new value (one undo step)
+    s, bound, = play(->(_) { MB::Sound.bind(:pad, lfo: :frequency) }, track: :pad, patch: UNWRITTEN)
+    graph = s.ui_graphs[:pad]
+    MB::Sound::Session.with_context(session: s) { MB::Sound.turn(:"pad/frequency", 2, on: :now) }
+    40.times { s.process_buffer }
+    expect(s.ui_graphs[:pad]).not_to equal(graph)
+    expect(code_of(s, :pad)).to include('2.hz.lfo')
+    turned = Numo::DFloat.cast(s.output.captured[0])
+    expect((turned[0...bound.length] - ref[0...bound.length]).abs.max).to eq(0.0)
+    expect((turned[bound.length..] - (ref[bound.length..] rescue 0)).abs.max).to be > 0.001 if ref.length > bound.length
   end
 
   it 'replays from a take bit for bit' do

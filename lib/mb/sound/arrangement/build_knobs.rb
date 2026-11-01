@@ -23,6 +23,16 @@ module MB
           }
         end
 
+        # Forgets that track +track+'s patch read knob +name+ while building
+        # (a bind's test build that was refused; LiteralBinding).
+        def forget_build_knob(track, name)
+          @build_knob_lock.synchronize {
+            list = @build_knobs[name] or next
+            list.delete(track)
+            @build_knobs.delete(name) if list.empty?
+          }
+        end
+
         # The tracks whose patches read knob +name+ while building, playing
         # now (or queued to).
         def build_knob_tracks(name)

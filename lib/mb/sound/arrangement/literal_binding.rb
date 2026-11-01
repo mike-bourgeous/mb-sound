@@ -32,10 +32,30 @@ module MB
         # setter's (`.curve(release: 30)`, a config call of the node);
         # +arg+ is the argument's name in the call (:release), +param+ the
         # name the inspector and the knob use (:release_curve).
-        Target = Data.define(:kind, :call_name, :nth, :key, :slot, :param, :value, :document, :arg) do
-          def initialize(kind:, call_name:, nth:, key:, slot:, param:, value:, document:, arg: nil)
-            super(kind: kind, call_name: call_name, nth: nth, key: key, slot: slot, param: param, value: value, document: document, arg: arg || param)
+        #
+        # Since editability-1 a slot may also name a setting the call's code
+        # didn't write (Note 15's "given by a chained call with no name"):
+        # [:kw, name] for a keyword of the DSL method left at its default
+        # (`filter(:highpass, cutoff: 150)`'s quality, a unison's spread),
+        # [:kw, name, [key]] for a member of a Hash argument
+        # (`tr909(c, kick: { tune: 50 })`, written or not), [:recv] for
+        # the receiver Pitch (`4.8.hz.lfo`'s frequency), and [:after,
+        # setter] for a setter applied to the call's result (a tone's
+        # starting phase, `with_phase`).  +mode+ is :live (the patch is
+        # given knob(...) there and follows it) or :build (the patch is
+        # given the knob's value while it builds, GraphNode.build_value,
+        # so the knob is a build knob of the track: each turn rebuilds it,
+        # its state carried; the same samples by construction).  Settings
+        # the code didn't write bind :build, as do written ones a knob
+        # can't move (read once while building: a softclip's threshold).
+        Target = Data.define(:kind, :call_name, :nth, :key, :slot, :param, :value, :document, :arg, :mode) do
+          def initialize(kind:, call_name:, nth:, key:, slot:, param:, value:, document:, arg: nil, mode: :live)
+            super(kind: kind, call_name: call_name, nth: nth, key: key, slot: slot, param: param, value: value, document: document, arg: arg || param, mode: mode)
           end
+
+          # True if the patch is given the knob's value while it builds
+          # (see the class description).
+          def build? = mode == :build
         end
 
         # A literal that can't be bound, with the reason.
@@ -182,16 +202,26 @@ module MB
               break
             end
           end
-          target_of_call(roots, call, param, arg, all: all)
+          target_of_call(roots, call, param, arg, all: all, node: call.equal?(call_of(node)) ? node : nil)
         end
 
         # The Target for argument +arg+ of recorded +call+ (named +param+;
         # see Target), or raises Error.
-        def target_of_call(roots, call, param, arg = param, all: nil)
+        def target_of_call(roots, call, param, arg = param, all: nil, node: nil)
           key = GraphNode::Recipe.key_of(call) or raise Error, "#{param}: this graph wasn't built by a track's patch (track :x { |clip| ... } makes one)"
           method = call.written || call.name
-          slot = slot_of(call, arg) or raise Error, "#{param} isn't an argument of #{method}(...) (a setting a chained call gave without a name)"
-          value = slot_value(call, slot)
+          mode = :live
+          if (slot = slot_of(call, arg))
+            value = slot_value(call, slot)
+            # (a member of a Hash argument binds as a build knob: kits read
+            # their voices' settings in Ruby arithmetic, so a knob node
+            # there would move the samples)
+            mode = :build if slot[0] == :kw && slot[2] && call.kwargs[slot[1]].is_a?(Hash)
+          elsif node && (slot, value = unwritten_slot(call, node, arg))
+            mode = :build
+          else
+            raise Error, "#{param} isn't an argument of #{method}(...) (a setting a chained call gave without a name)"
+          end
           unless LiteralBinding.literal?(value)
             raise Error, "#{param} of #{method} is #{value.is_a?(Sequence::Duration) ? 'a tempo length' : 'not a number'} (#{value.inspect[0, 40]}): only numbers become knobs"
           end
@@ -199,7 +229,31 @@ module MB
             raise Error, "#{param} of #{method} is a count (#{value}; read once while the patch builds): shown read-only, no knob"
           end
           nth = keys_of(roots, method, all: all).index(key) or raise Error, "#{method} isn't in the track's graph"
-          Target.new(kind: :call, call_name: method, nth: nth, key: key, slot: slot, param: param, value: value, document: nil, arg: arg)
+          Target.new(kind: :call, call_name: method, nth: nth, key: key, slot: slot, param: param, value: value, document: nil, arg: arg, mode: mode)
+        end
+
+        # [slot, value] for a setting +param+ of +node+ that +call+ (the
+        # call that made it) didn't write (see Target), or nil: a keyword
+        # of the DSL method left at its default, the receiver Pitch's
+        # frequency, or a tone's starting phase or frequency set after the
+        # call.  The value is the one the node shows (#param_info).
+        def unwritten_slot(call, node, param)
+          info = (node.respond_to?(:param_info) ? node.param_info : {}) rescue {}
+          shown = info[param]&.value
+          params = dsl_parameters(call) || []
+          if params.any? { |type, n| %i[key keyreq].include?(type) && n == param } ||
+              (params.any? { |type, _| type == :keyrest } && !shown.nil? && !positional_names(call).to_a.include?(param))
+            return [[:kw, param], shown] if literal?(shown)
+          end
+          r = call.receiver
+          if param == :frequency && r.is_a?(Pitch) && !r.is_a?(Notes::NotePitch) && r.frequency.is_a?(Numeric) && own_call_of(node).equal?(call)
+            return [[:recv], r]
+          end
+          if node.is_a?(Tone) && own_call_of(node).equal?(call) && literal?(shown)
+            return [[:after, :with_phase], shown] if param == :phase
+            return [[:after, :set_frequency], shown] if param == :frequency && node.sources[:frequency].is_a?(Numeric)
+          end
+          nil
         end
 
         # The value at +slot+ of +call+ (see Target).
@@ -213,7 +267,61 @@ module MB
         # (copies along the path).
         def replace_path(list, path, value)
           i, *rest = path
-          list.dup.tap { |l| l[i] = rest.empty? ? value : replace_path(l[i], rest, value) }
+          # (a Hash member the code didn't write: a kit voice's default)
+          list = list.nil? ? (i.is_a?(Integer) ? [] : {}) : list.dup
+          list.tap { |l| l[i] = rest.empty? ? value : replace_path(l[i], rest, value) }
+        end
+
+        # Build knob value +number+ for literal +sample+ (see #retype): the
+        # literal itself while the knob holds it (a knob on a curve or a
+        # dB range keeps 0.4 as 0.4000000000202974), so a build binding
+        # gives the patch exactly what its code gave at the starting value.
+        def build_literal(sample, number)
+          m = Param.magnitude(sample).to_f rescue nil
+          return sample if m && (number.to_f - m).abs <= 1e-9 * [1.0, m.abs].max
+          retype(sample, number)
+        end
+
+        # +number+ (a build knob's value) as the type of literal +sample+:
+        # Hz for a Pitch, seconds for a Length, an Integer for an Integer
+        # when it is whole (so the patch builds with what it was given).
+        def retype(sample, number)
+          return number.round if sample.is_a?(Integer) && number.to_f == number.to_f.round
+          Param.retype(sample, number)
+        end
+
+        # A substitution rule for Recipe.substituting: gives the call's
+        # arguments (#call), receiver (#receiver), and result (#after) the
+        # value of one binding, after +prev+'s (two bindings of one call).
+        class Rule
+          def initialize(prev, slot, value)
+            @prev = prev
+            @kind, @at, @path = slot
+            @value = value
+          end
+
+          def call(args, kwargs)
+            args, kwargs = @prev.call(args, kwargs) if @prev
+            case @kind
+            when :kw
+              [args, kwargs.merge(@at => @path ? LiteralBinding.replace_path(kwargs[@at], @path, @value.call) : @value.call)]
+            when :arg
+              [args.dup.tap { |a| a[@at] = @path ? LiteralBinding.replace_path(a[@at], @path, @value.call) : @value.call }, kwargs]
+            else
+              [args, kwargs]
+            end
+          end
+
+          def receiver(r)
+            r = @prev.receiver(r) if @prev.respond_to?(:receiver)
+            @kind == :recv ? @value.call : r
+          end
+
+          def after(result)
+            result = @prev.after(result) if @prev.respond_to?(:after)
+            result.__send__(@at, @value.call) if @kind == :after # (with_phase, or Tone's own set_frequency)
+            result
+          end
         end
 
         # The literals a node's code wrote that #param_info doesn't name, as
@@ -253,9 +361,19 @@ module MB
           key = keys_of(roots, method)[nth] or raise Error, missing(roots, method, param, nth)
           node = call = nil
           bundled = false
+          # (the node made by the call that shows the param, if several are:
+          # a unison's outputs and its mixer share its call, and only the
+          # mixer has its spread; editability-1)
+          shows = ->(n) { (n.respond_to?(:param_info) && n.param_info.key?(param)) rescue false }
           nodes(roots).each do |n|
-            call = calls_of(n).find { |c| GraphNode::Recipe.key_of(c) == key } and (node = n) and break
-            call = bundle_calls(n).find { |c| GraphNode::Recipe.key_of(c) == key } and (node = n) and (bundled = true) and break
+            if (c = calls_of(n).find { |cc| GraphNode::Recipe.key_of(cc) == key })
+              if node.nil? || bundled || (!shows.(node) && shows.(n))
+                node, call, bundled = n, c, false
+              end
+              break if shows.(n)
+            elsif node.nil? && (c = bundle_calls(n).find { |cc| GraphNode::Recipe.key_of(cc) == key })
+              node, call, bundled = n, c, true
+            end
           end
           if bundled
             return target_of_call(roots, call, param)
@@ -308,6 +426,12 @@ module MB
         # The positional parameter names of +call+'s DSL method (past the
         # recorders, whose parameters are *args, **kwargs).
         def positional_names(call)
+          dsl_parameters(call)&.select { |type, _| type == :req || type == :opt }&.map(&:last)
+        end
+
+        # The parameters of +call+'s DSL method (Method#parameters, past the
+        # recorders), or nil.
+        def dsl_parameters(call)
           name = call.written || call.name
           m = call.receiver.method(name) rescue (return nil)
           m = m.super_method while m.super_method && m.parameters.map(&:first) == %i[rest keyrest block]
@@ -316,7 +440,7 @@ module MB
             m = GraphNode.instance_method(name) rescue (return nil)
             m = m.super_method while m.super_method && m.parameters.map(&:first) == %i[rest keyrest block]
           end
-          m.parameters.select { |type, _| type == :req || type == :opt }.map(&:last)
+          m.parameters
         end
 
         # The knob default for literal +value+ of param +param+: a ranged
@@ -327,6 +451,8 @@ module MB
           v = value.is_a?(Pitch) ? value.frequency.to_f.hz : value
           v = v.to_f if v.is_a?(Length::Samples) || (v.is_a?(Numeric) && !v.is_a?(Length) && !v.is_a?(Decibels))
           entry = Param.name_entry(param) || envelope_entry(param)
+          # (a frequency below the audio band, an lfo's: the rate range)
+          entry = Param.name_entry(:rate) if param == :frequency && Param.magnitude(v).to_f < 20
           r = range || entry&.dig(:range)
           if r && !r.begin.is_a?(Float) && !r.begin.is_a?(Integer) && v.is_a?(Float)
             # (a typed range: the literal in its unit)
@@ -397,7 +523,10 @@ module MB
         #
         # +knob+ (a GraphNode::Knob) stands in for the new binding's knob
         # instead (bind_literal's test build, before the knob exists).
-        def wrap(patch, t, kname, knob: nil)
+        #
+        # +hits+ (an Array) collects the Targets whose stand-in the build
+        # was given (bind_probe: a build binding's knob is read only then).
+        def wrap(patch, t, kname, knob: nil, hits: nil)
           bindings = (patch.respond_to?(:literal_bindings) ? patch.literal_bindings : []) + [[t, kname]]
           stand_in = ->(kn) { knob && kn == kname ? knob : nil }
           base = patch.respond_to?(:unbound_patch) ? patch.unbound_patch : patch
@@ -407,17 +536,15 @@ module MB
             if tt.kind == :document
               (docs[tt.document] ||= {})[tt.param] = stand_in.(kn) || kn
             else
-              kind, at, path = tt.slot
-              rule = subs[tt.key] # (two literals of one call: both)
-              subs[tt.key] = ->(args, kwargs) {
-                args, kwargs = rule.call(args, kwargs) if rule
+              # (a build binding gives the knob's value while the patch
+              # builds, as the literal's type; GraphNode.build_value notes
+              # the knob as a build knob of the track)
+              value = ->() {
                 k = stand_in.(kn) || Session.current.knob(kn)
-                if kind == :kw
-                  [args, kwargs.merge(at => path ? replace_path(kwargs[at], path, k) : k)]
-                else
-                  [args.dup.tap { |a| a[at] = path ? replace_path(a[at], path, k) : k }, kwargs]
-                end
+                hits << tt if hits && k.equal?(knob)
+                tt.build? ? build_literal(tt.value, GraphNode.build_value(k)) : k
               }
+              subs[tt.key] = Rule.new(subs[tt.key], tt.slot, value) # (two literals of one call: both)
             end
           end
           subs.freeze
@@ -542,9 +669,8 @@ module MB
 
         # A test build with a stand-in knob first: the patch must build and
         # read the knob, else nothing changes
-        if (err = bind_probe(name, tr, t, kname, default))
-          return MB::Sound.live_error(err)
-        end
+        t = bind_probe(name, tr, t, kname, default)
+        return MB::Sound.live_error(t) if t.is_a?(Exception)
         # (a call inside a graph document: `preset` adopted the stand-in
         # knob into the session while the test built, so it is the knob;
         # ux-notes-1, the init voice's filter env)
@@ -562,21 +688,36 @@ module MB
 
       # The test build before a bind (see #bind_literal): track +name+
       # (Track +tr+)'s patch built with Target +t+ given a stand-in knob
-      # named +kname+ (+default+ its ranged default).  Nil if the patch
-      # builds and reads the knob, else the LiteralBinding::Error a bind
-      # raises (a count or a setting read once while building can't follow
-      # a knob).  Nothing changes but the session's knob of a graph
+      # named +kname+ (+default+ its ranged default).  Returns the Target
+      # to bind if the patch builds and reads the knob, else the
+      # LiteralBinding::Error a bind raises.  A written literal a knob
+      # can't move (a setting read once while building) is tried again as
+      # a build binding (Target#build?, editability-1; before, refused with
+      # "fixed when the patch builds"), which a patch that builds with it
+      # takes.  Nothing changes but the session's knob of a graph
       # document's call (`preset` adopts the stand-in while the test
-      # builds).  Public for the editability guard (editability-1: an
-      # offered bind line isn't proof that the setting is live).
+      # builds).  Public for the editability guard (an offered bind line
+      # isn't proof that the setting follows a knob).
       def bind_probe(name, tr, t, kname, default)
+        had = build_knobs_of(name).include?(kname)
+        found = probe_build(name, tr, t, kname, default)
+        found = probe_build(name, tr, t.with(mode: :build), kname, default) if found.is_a?(Exception) && t.kind == :call && !t.build?
+        forget_build_knob(name, kname) if found.is_a?(Exception) && !had
+        found
+      end
+
+      private
+
+      # One test build for #bind_probe: Target +t+, or the Error.
+      def probe_build(name, tr, t, kname, default)
         # (a document param's stand-in is a Constant: preset would adopt a
         # Knob into the session)
         probe = t.kind == :document ? GraphNode::Constant.new(Param.magnitude(default.default).to_f, sample_rate: 48000) : GraphNode::Knob.new(kname, default)
+        hits = []
         begin
           built = MB::Sound.keeping_random_state {
             Session.with_context(session: @session) {
-              GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { LiteralBinding.wrap(tr.patch, t, kname, knob: probe).call(tr.clip) }
+              GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { LiteralBinding.wrap(tr.patch, t, kname, knob: probe, hits: hits).call(tr.clip) }
             }
           }
         rescue ScriptError, StandardError
@@ -589,12 +730,13 @@ module MB
             return e
           end
         end
+        # (a build binding's knob is read while building: given, it is
+        # read)
+        return t if t.build? && !hits.empty?
         broots = built.is_a?(GraphNode::Channels) ? built.to_a : [built]
-        return nil if LiteralBinding.nodes(broots).any? { |n| GraphNode.climb_tee_tree(n).equal?(probe) || (n.is_a?(GraphNode::Knob::Reader) && n.knob.equal?(probe)) }
+        return t if !t.build? && LiteralBinding.nodes(broots).any? { |n| GraphNode.climb_tee_tree(n).equal?(probe) || (n.is_a?(GraphNode::Knob::Reader) && n.knob.equal?(probe)) }
         LiteralBinding::Error.new(LiteralBinding.fixed_message(name, t))
       end
-
-      private
 
       # True if graph +roots+ read Session knob +kname+.
       def reads_knob?(roots, kname)
