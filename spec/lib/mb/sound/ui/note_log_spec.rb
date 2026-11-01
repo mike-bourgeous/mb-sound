@@ -91,7 +91,11 @@ RSpec.describe(MB::Sound::UI::NoteLog, :aggregate_failures) do
     expect(described_class.dir).to eq(File.join(internal.main_checkout(internal::GEM_ROOT), 'tmp', 'ui-notes'))
     expect(MB::Sound::GraphIO.library_version).to match(/\A#{Regexp.escape(MB::Sound::VERSION)} \(\h{7}\)\z/)
   ensure
-    internal.instance_variable_set(:@checkout_tmp_dir, old) if had
+    if had
+      internal.instance_variable_set(:@checkout_tmp_dir, old)
+    elsif internal.instance_variable_defined?(:@checkout_tmp_dir)
+      internal.remove_instance_variable(:@checkout_tmp_dir)
+    end
     MB::Sound::GraphIO.instance_variable_set(:@library_version, old_version)
   end
 

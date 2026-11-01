@@ -16,6 +16,7 @@ RSpec.describe('live paths start no processes', :aggregate_failures) do
     ENV['MB_SOUND_UI_NOTES'] = nil
     @help = ENV['MB_SOUND_HELP_DIR']
     ENV['MB_SOUND_HELP_DIR'] = File.join(tmp_path('help'), 'help')
+    @had_tmp_dir = MB::Sound::Internal.instance_variable_defined?(:@checkout_tmp_dir)
     @tmp_dir = MB::Sound::Internal.instance_variable_get(:@checkout_tmp_dir)
     @version = MB::Sound::GraphIO.instance_variable_get(:@library_version)
     @trim = MB::Sound::Session.monitor_gain
@@ -24,7 +25,12 @@ RSpec.describe('live paths start no processes', :aggregate_failures) do
   after do
     ENV['MB_SOUND_UI_NOTES'] = @notes
     ENV['MB_SOUND_HELP_DIR'] = @help
-    MB::Sound::Internal.instance_variable_set(:@checkout_tmp_dir, @tmp_dir)
+    # (an undefined cache stays undefined: a nil one would mean "not a checkout")
+    if @had_tmp_dir
+      MB::Sound::Internal.instance_variable_set(:@checkout_tmp_dir, @tmp_dir)
+    elsif MB::Sound::Internal.instance_variable_defined?(:@checkout_tmp_dir)
+      MB::Sound::Internal.remove_instance_variable(:@checkout_tmp_dir)
+    end
     MB::Sound::GraphIO.instance_variable_set(:@library_version, @version)
     MB::Sound::Session.monitor_gain = @trim
     @tiles&.stop
