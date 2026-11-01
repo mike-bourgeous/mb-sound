@@ -27,6 +27,14 @@ module MB
       # More sources can play into the same input beside it (#add_source:
       # the terminal UI's virtual keyboard next to a hardware keyboard);
       # their events merge into each span in time order.
+      #
+      # A track's wire input (named Session::Name.wire(track), e.g.
+      # :"lead/wire") plays a MIDI stream wired into the track instead of
+      # live input (`wire :lead, riff.stream.echo(1.n8, 3)`, `arm :lead,
+      # input: stream`; see #wire_to and design/notes/arrangement.md,
+      # Wires): it is read after the other inputs (it may read their taps),
+      # and its wire changes land inside the span on their exact frames
+      # (Session::MidiIn#pump_midi cuts the span there).
       class MidiInput
         # An event as it landed: the session +frame+, the timeline +pos+
         # (whole notes; the position of the frame), the Session's +epoch+
@@ -79,6 +87,64 @@ module MB
           # Notes held now (see #held_notes): { [channel, note] => HeldNote }
           @held = {}
           @held_list = [].freeze
+          # The wired stream (see #wire_to), where it was wired, its
+          # timeline nodes, the epoch they follow, events owed when a wire
+          # ends (note-offs, pedal up), and the frame a segmented read
+          # starts at (see #pump)
+          @wire_input = !Session::Name.wired(name).nil?
+          @wired = nil
+          @wire_origin = nil
+          @wire_nodes = nil
+          @wire_epoch = nil
+          @wire_pedal = false
+          @pending_offs = nil
+        end
+
+        # True for a track's wire input (see the class comment).
+        def wire_input?
+          @wire_input
+        end
+
+        # The stream wired into this input (see #wire_to), or nil.
+        def wired
+          @wired
+        end
+
+        # Plays +stream+ (a MIDI::Stream, or anything MIDI::Stream.for
+        # takes; nil for none) into this wire input from now on, in place of
+        # the stream wired before: called under the render lock by a :wire,
+        # :unwire, or undo :restore change as it lands (between buffers, or
+        # inside a span on its frame; see #pump).  The new stream's timeline
+        # nodes (clip sources, arps, scheduled transforms) start following
+        # the Session's timeline at +pos+, as a launched graph's do (looping
+        # clips in phase), and again after every seek.  Notes the old stream
+        # left held end on the landing frame (note-offs, and the sustain
+        # pedal up), so the track's monitor never hangs; a take replay plays
+        # those from its log instead.  Returns the Stream (or nil).
+        def wire_to(stream, pos:)
+          @lock.synchronize {
+            old = @wired
+            if old
+              @extras.delete(old)&.close
+              @labels.delete(old)
+              owe_offs unless @replay
+            end
+
+            st = stream && MIDI::Stream.for(stream)
+            @wired = st
+            @wire_pedal = false
+            if st
+              @extras[st] = st.reader
+              @labels[st] = :wire
+              @wire_origin = pos.to_r
+              @wire_epoch = @session.epoch
+              @wire_nodes = [st, *st.graph].grep(Sequence::TimelineNode).uniq
+              start_wire(@wire_origin)
+            else
+              @wire_origin = @wire_nodes = @wire_epoch = nil
+            end
+            st
+          }
         end
 
         # The raw value (0..127) of controller +number+ (on 0-based
@@ -116,6 +182,10 @@ module MB
         # Stops reading +stream+ (see #add_source).  Returns nil.
         def remove_source(stream)
           @lock.synchronize {
+            if stream.equal?(@wired)
+              wire_to(nil, pos: @session.transport.position)
+              return nil
+            end
             @extras.delete(stream)&.close
             label = @labels.delete(stream)
             # Its held notes end with it (the source can't send their offs)
@@ -135,7 +205,8 @@ module MB
           @held_list
         end
 
-        # The streams added with #add_source.
+        # The streams added with #add_source (and the wired stream, see
+        # #wire_to).
         def sources
           @lock.synchronize { @extras.keys }
         end
@@ -213,13 +284,24 @@ module MB
         # Reads the input for the span of +count+ frames starting at session
         # frame +frame+ and timeline position +from+ (+per_sample+ whole
         # notes per frame), in the Session's +epoch+.  Called by the Session
-        # once per span, before its changes land and graphs render.  Returns
-        # the Span.
-        def pump(frame, count, from, per_sample, epoch, rate)
+        # once per span, before its changes land and graphs render.
+        #
+        # +cuts+ (a wire input's; see Session::MidiIn#pump_midi): [offset,
+        # callable] pairs in frame order, each a wire change landing inside
+        # the span: the span is read in pieces, the change landing between
+        # them on its frame, so the old stream plays up to that frame and
+        # the new one from it at any buffer size.  Returns the Span.
+        def pump(frame, count, from, per_sample, epoch, rate, cuts = nil)
           @lock.synchronize {
             @sample_rate = rate
-            drain_extras(count, rate) if @replay && !@extras.empty?
-            events = @replay ? replay_events(frame, count, from, per_sample, epoch) : input_events(frame, count, from, per_sample, epoch, rate)
+            rewire_after_seek(from) if @wired && @wire_epoch != epoch
+            @span_sources = nil
+            events =
+              if cuts.nil?
+                read_span(frame, count, from, per_sample, epoch, rate)
+              else
+                read_cut(frame, count, from, per_sample, epoch, rate, cuts)
+              end
             @span = Span.new(id: @span_id += 1, frame: frame, count: count, events: events.freeze)
 
             unless events.empty?
@@ -264,10 +346,83 @@ module MB
         end
 
         def to_s
-          "MIDI input#{@name ? " #{@name.inspect}" : ''}#{replaying? ? ' (replay)' : @input ? '' : ' (none)'}"
+          "MIDI input#{@name ? " #{@name.inspect}" : ''}#{replaying? ? ' (replay)' : @input || @wired ? '' : ' (none)'}"
         end
 
         private
+
+        # One span's (or piece's) events: the input's or the take's, any
+        # events owed by a wire that ended, and (wire inputs) read with the
+        # Session's player frame at the piece's start, so taps of other
+        # inputs read in pieces give each piece its own events (see Tap).
+        def read_span(frame, count, from, per_sample, epoch, rate)
+          offs = @pending_offs ? stamp_offs(frame, from, epoch, rate) : nil
+          if @wire_input
+            events = @session.send(:reading_from, frame) { read_events_for(frame, count, from, per_sample, epoch, rate) }
+          else
+            events = read_events_for(frame, count, from, per_sample, epoch, rate)
+          end
+          offs ? offs.concat(events) : events
+        end
+
+        def read_events_for(frame, count, from, per_sample, epoch, rate)
+          drain_extras(count, rate) if @replay && !@extras.empty?
+          @replay ? replay_events(frame, count, from, per_sample, epoch) : input_events(frame, count, from, per_sample, epoch, rate)
+        end
+
+        # A span read in pieces around the wire changes landing in it (see
+        # #pump).
+        def read_cut(frame, count, from, per_sample, epoch, rate, cuts)
+          out = []
+          at = 0
+          cuts.each do |off, action|
+            if off > at
+              out.concat(read_span(frame + at, off - at, Sequence::Transport.position_at(from, at, per_sample), per_sample, epoch, rate))
+              at = off
+            end
+            action.call
+          end
+          out.concat(read_span(frame + at, count - at, Sequence::Transport.position_at(from, at, per_sample), per_sample, epoch, rate)) if count > at
+          out
+        end
+
+        # Starts the wired stream's timeline nodes at +pos+ (see #wire_to).
+        def start_wire(pos)
+          t = @session.transport
+          @wire_nodes.each { |n| n.start_at(pos, origin: @wire_origin, launch: @wire_origin, transport: t) }
+        end
+
+        # After a seek (a new epoch), the wired stream's timeline nodes move
+        # to the new position, as a playing graph's clips do; notes it held
+        # end there.
+        def rewire_after_seek(from)
+          @wire_epoch = @session.epoch
+          start_wire(from)
+        end
+
+        # Owes note-offs for the notes the wired stream holds now (and the
+        # sustain pedal up), to be sent at the start of the next read (see
+        # #read_span).
+        def owe_offs
+          offs = @held.each_value.filter_map { |h|
+            next unless h.source == :wire
+            MIDI::Event.parse([0x80 | (h.channel & 15), h.note, 0], time: 0r)
+          }
+          if @wire_pedal
+            offs << MIDI::Event.parse([0xB0, 64, 0], time: 0r)
+          end
+          return if offs.empty?
+          (@pending_offs ||= []).concat(offs)
+          @held.delete_if { |_, h| h.source == :wire }
+          @held_list = @held.values.freeze
+        end
+
+        # The owed events (see #owe_offs) stamped on +frame+.
+        def stamp_offs(frame, from, epoch, rate)
+          offs = @pending_offs
+          @pending_offs = nil
+          offs.map { |e| Stamped.new(frame: frame, pos: from, epoch: epoch, event: e.at(Rational(frame, rate))) }
+        end
 
         # The readers of the input and of the added sources.
         def readers
@@ -281,7 +436,6 @@ module MB
           return [] if list.empty?
 
           out = []
-          @span_sources = nil
           list.each do |reader|
             start = reader.cursor
             label = reader.equal?(@reader) ? :input : (@labels[@extras.key(reader)] || :extra)
@@ -332,6 +486,8 @@ module MB
               end
               changed = true
             when :cc
+              # (the wired stream's sustain pedal, released when it ends)
+              @wire_pedal = e.raw.to_i >= 64 if e.note == 64 && @wire_input && @span_sources&.[](st) == :wire
               # All notes off (123) and all sound off (120) end held notes
               if e.note == 123 || e.note == 120
                 changed ||= @held.any? { |(ch, _), _| ch == e.channel }

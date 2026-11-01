@@ -10,15 +10,45 @@ module MB
       # the Session's MIDI log, which takes save so replays play the same
       # MIDI on the same frames.
       module MidiIn
+        # Undo subject of a wire input's changes (:wire, :unwire, and their
+        # restores; subject the input's name, :"lead/wire"): the stream
+        # wired into it.
+        WireSubject = Data.define(:name)
+        Undo.subject WireSubject, snapshot: :wire_undo_snapshot, restore: :restore_wire_change
+        Undo.claim :wire_undo_subject, order: 50
+
         # The MidiInput named +name+ (nil for the default), created when
         # first needed (without an input: see MidiInput#input=, or the
         # console's MidiMethods#midi, which attaches live input).
         def midi_in(name = nil)
           @midi_lock.synchronize {
-            @midi_inputs[name] ||= MidiInput.new(self, name).tap { |m|
+            @midi_inputs[name] || begin
+              m = @midi_inputs[name] = MidiInput.new(self, name)
               m.replay([], base_epoch: @replay_epoch || 0) if @replay_mode
-            }
+              # Wire inputs read after the others: their streams may read
+              # the others' taps (`wire :lead, midi.arp(:up)`)
+              plain, wires = @midi_inputs.values.partition { |i| !i.wire_input? }
+              @midi_pump = (plain + wires).freeze
+              m
+            end
           }
+        end
+
+        # Wires +stream+ (a MIDI::Stream or anything MIDI::Stream.for takes:
+        # a transform chain, a Notes, a clip's stream, a MIDI file; nil to
+        # unwire) into the wire input named +name+ (see
+        # Session::Name.wire) at timeline position +time+ (nil or a past
+        # time for now), as a :wire change (an :unwire one for nil): the
+        # stream's events play into the input from the exact frame where
+        # the change lands, at any buffer size, and what reads the input
+        # (a track's monitor, `rec`, `capture`, the MIDI log takes keep)
+        # hears it as live input.  Undoable (WireSubject).  Returns the
+        # Change.
+        def wire_midi(name, stream, time, data: {})
+          raise ArgumentError, "#{name.inspect} isn't a wire input name (Session::Name.wire(:lead))" unless Name.wired(name)
+          hub = midi_in(name)
+          stream = MIDI::Stream.for(stream) if stream
+          change(stream ? :wire : :unwire, name, time, data: data) { |t| hub.wire_to(stream, pos: t) }
         end
 
         # The MidiInputs (a Hash from name to MidiInput).
@@ -78,6 +108,7 @@ module MB
         def init_midi_in
           @midi_lock = Mutex.new
           @midi_inputs = {}
+          @midi_pump = [].freeze # (#midi_inputs in the order #pump_midi reads them)
           @midi_log = []
           @replay_mode = false
         end
@@ -85,10 +116,73 @@ module MB
         # Reads every MidiInput for the span (called by #render_span).
         def pump_midi(frame, count, from, per_sample)
           return if @midi_inputs.empty? # (no Array a span without inputs)
-          inputs = @midi_lock.synchronize { @midi_inputs.values }
+          inputs = @midi_pump
           return if inputs.empty?
           rate = output.sample_rate.round
-          inputs.each { |m| m.pump(frame, count, from, per_sample, epoch, rate) }
+          inputs.each { |m|
+            cuts = m.wire_input? && !@changes.empty? ? wire_cuts(m.name, frame, count, from, per_sample) : nil
+            m.pump(frame, count, from, per_sample, epoch, rate, cuts)
+          }
+        end
+
+        # The wire changes for wire input +name+ landing in this span, taken
+        # from the change queue as [offset, lander] pairs for
+        # MidiInput#pump, which lands each between the pieces of the span it
+        # reads (so the stream changes on the change's frame, where
+        # #commit_due would land it; nil if none).  Called with the render
+        # lock held.
+        def wire_cuts(name, frame, count, from, per_sample)
+          to = Sequence::Transport.position_at(from, count, per_sample)
+          return nil if @changes.first.time >= to
+          cuts = nil
+          i = 0
+          while (c = @changes[i]) && c.time < to && !timeline_change?(c)
+            unless c.subject.equal?(name) && !held?(c)
+              i += 1
+              next
+            end
+            @changes.delete_at(i)
+            idx = MB::M.max(Sequence::Transport.frame_at(c.time, from, per_sample), 0)
+            land = MB::M.max(c.time, from)
+            (cuts ||= []) << [idx, wire_lander(c, land, frame + idx, from, frame)]
+          end
+          cuts
+        end
+
+        # Lands wire change +c+ at +land_frame+ when called (see #wire_cuts;
+        # a method, so each Proc keeps its own change).
+        def wire_lander(c, land_pos, land_frame, from, frame)
+          -> { commit_change(c, land_pos: land_pos, land_frame: land_frame, commits: stamp(from, frame: frame), immediate: false) }
+        end
+
+        # Runs the block with #player_frame at +frame+: a wire input reading
+        # another input's taps in pieces (see MidiInput#pump).
+        def reading_from(frame)
+          old = @player_frame
+          @player_frame = frame
+          yield
+        ensure
+          @player_frame = old
+        end
+
+        # The undo subject of a wire input's change (see WireSubject), or
+        # nil.
+        def wire_undo_subject(c)
+          Name.wired(c.subject) ? WireSubject.new(c.subject) : nil
+        end
+
+        # The stream wired into a wire input, for undo.  Called with the
+        # render lock held.
+        def wire_undo_snapshot(subject)
+          @midi_lock.synchronize { @midi_inputs[subject.name] }&.wired
+        end
+
+        # Wires a wire input back to the stream it had before +original+,
+        # at +time+.
+        def restore_wire_change(subject, original, time)
+          stream = original.before
+          hub = midi_in(subject.name)
+          change(:restore, subject.name, time, data: { wire: true }, undoes: original.seq) { |t| hub.wire_to(stream, pos: t) }
         end
 
         # Appends a MidiInput's stamped events to the MIDI log.

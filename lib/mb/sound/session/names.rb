@@ -71,6 +71,8 @@ module MB
       # |---------------------|---------------------------------------------|
       # | :"lead/live"        | track :lead's monitor player (#monitor?)    |
       # | :"lead/cue"         | track :lead's cue player (#cue?)            |
+      # | :"lead/wire"        | track :lead's wire input (#wire?; a MIDI    |
+      # |                     | input name, not a player)                   |
       # | :"bass/level"       | player :bass's level knob (#level?)         |
       # | :"kick/key"         | player :kick's key level knob (#key?)       |
       # | :"bass/cutoff"      | a track knob (a patch param, a live literal)|
@@ -88,6 +90,11 @@ module MB
 
         # The leaf of a track's cue player (Session::Cue).
         CUE = 'cue'
+
+        # The leaf of a track's wire input: the private Session MIDI input
+        # a stream wired into the track plays into (`wire :lead, stream`;
+        # Arrangement::Recording, Session::MidiIn).
+        WIRE = 'wire'
 
         # The leaf of a player's level knob (Session::Faders).
         LEVEL = 'level'
@@ -137,6 +144,18 @@ module MB
           # Player +name+'s cue player name (:"lead/cue").
           def cue(name)
             join(name, CUE)
+          end
+
+          # Track +track+'s wire input name (:"lead/wire"; a Session MIDI
+          # input, see Session::MidiIn).
+          def wire(track)
+            join(track, WIRE)
+          end
+
+          # The track whose wire input +name+ is (:lead for :"lead/wire"),
+          # or nil (also for anything not a Symbol).
+          def wired(name)
+            name.is_a?(Symbol) ? self[name].wired : nil
           end
 
           # Player +name+'s level knob name (:"bass/level").
@@ -229,6 +248,11 @@ module MB
           !plain? && @parts.last == CUE
         end
 
+        # True for a track's wire input name (:"lead/wire").
+        def wire?
+          @parts.length == 2 && @parts.last == WIRE
+        end
+
         # True for a player's level knob name (:"bass/level").
         def level?
           @parts.length == 2 && @parts.last == LEVEL
@@ -248,6 +272,12 @@ module MB
         # The name whose cue player this is (:lead for :"lead/cue"), or nil.
         def cued
           cue? ? @base : nil
+        end
+
+        # The track whose wire input this is (:lead for :"lead/wire"), or
+        # nil.
+        def wired
+          wire? ? @base : nil
         end
 
         # The player name whose strip (mute, solo, level, routes) this
