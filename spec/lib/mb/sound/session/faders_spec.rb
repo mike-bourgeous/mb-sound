@@ -59,6 +59,37 @@ RSpec.describe(MB::Sound::Session::Faders) do
     expect(d[192000 + 480..].to_a.uniq).to eq([2.0])
   end
 
+  # (lesson-fixes-1: help_spec's lessons found `level :x, -18.db` landing
+  # with x's launch on a bar line gliding 5 ms from unity over the first
+  # hit, up to +18 dB)
+  it 'lands without the glide on or before a player\'s first frame, at 800 and 367 frames, in either order' do
+    [[800], [367]].each do |sizes|
+      [true, false].each do |level_first|
+        s = new_session.tap { |x| @sessions << x }
+        d = run(2 * 96000, sizes, s: s) { |ss|
+          ss.level(:a, -18.db, start_time: 1r) if level_first
+          ss.add(1.constant, name: :a, start_time: 1r)
+          ss.level(:a, -18.db, start_time: 1r) unless level_first
+          ss.add(1.constant, name: :b, start_time: 1r)
+          ss.level(:b, -18.db, start_time: 1/2r) # (before it starts)
+        }
+        expect(d[0...96000].abs.max).to eq(0)
+        expect(d[96000..].to_a.uniq.length).to eq(1), "#{sizes} level first: #{level_first}"
+        expect(d[96000]).to be_within(1e-6).of(2 * -18.db)
+      end
+    end
+
+    # A level its player has played at still glides, also on a relaunch's
+    # frame (the old graph is heard)
+    d = run(2 * 96000) { |ss|
+      ss.add(1.constant, name: :a, on: :now)
+      ss.add(1.constant, name: :a, start_time: 1r, fade: 0)
+      ss.level(:a, -18.db, start_time: 1r)
+    }
+    expect(d[96000]).to be > 0.5
+    expect(d[96000 + 480]).to be_within(1e-6).of(-18.db)
+  end
+
   it 'moves along a dB taper: 0 dB mid-travel, silence at the bottom, +12 dB at the top' do
     MB::Sound::Session.with_context(session: session) do
       session.add(1.constant, name: :a, on: :now)

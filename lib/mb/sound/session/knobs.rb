@@ -772,6 +772,9 @@ module MB
             if over
               k.ramp_to(value, frames: knob_frames(over), frame: frame, curve: curve, from: from)
             else
+              # (a level nobody has heard yet lands without its glide; see
+              # Faders#unheard_level?)
+              smooth = 0 if smooth.nil? && unheard_level?(k)
               k.set(value, frame: frame, smooth: smooth)
             end
           else

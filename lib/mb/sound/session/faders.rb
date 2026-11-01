@@ -57,8 +57,10 @@ module MB
         # Sets player name +name+'s level (see the module comment) to
         # +value+: a linear gain (`-6.db`, 0.5, 0 for silence, up to
         # MAX_LEVEL), a knob name, or a node to follow; right away with a
-        # short glide, at a launch point (+on:+, +in:+, +at:+), or over
-        # +over:+ (a ramp, shaped by +curve:+, from where it is or +from:+).
+        # short glide (none while no player of the name has played yet:
+        # see #unheard_level?), at a launch point (+on:+, +in:+, +at:+), or
+        # over +over:+ (a ramp, shaped by +curve:+, from where it is or
+        # +from:+).
         # Without a value, returns the level as a Decibels (0.db when none
         # was set).  Returns the :turn Change otherwise.
         def level(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, smooth: nil, start_time: nil)
@@ -138,6 +140,23 @@ module MB
         end
 
         private
+
+        # True if +k+ is a level knob (not a key level) whose players have
+        # played no frame yet: none is playing, or each one starts on the
+        # landing frame or later (a launch on the same sample, before or
+        # after the level in the queue).  A plain turn of such a level
+        # lands without the knob's declick glide (lesson-fixes-1: `level
+        # :kick, -18.db` landing with the kick's launch on a bar line glided
+        # over 5 ms from unity, so the first hit played up to 18 dB loud);
+        # there is no click to soften on a level nobody heard.  Called on
+        # the landing (under the render lock).
+        def unheard_level?(k)
+          nm = Name[k.name]
+          return false unless nm.level?
+
+          owner = nm.owner
+          @mutex.synchronize { @players.each_value.none? { |p| p.started && Name[p.name].strip_owner == owner } }
+        end
 
         # Linear gain +g+ as Decibels (to 0.01 dB; -Infinity.db for 0).
         def level_db(g)
