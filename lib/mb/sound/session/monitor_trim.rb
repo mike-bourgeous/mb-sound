@@ -13,14 +13,23 @@ module MB
       #
       # Sessions apply it when +monitor+ is true, by default when they are
       # realtime (the console's background Session); renders use
-      # non-realtime Sessions, so they never hear it.  Above 0 dB the trim
-      # can push peaks past full scale: the written buffer is then clipped
-      # to -1..1 and a warning (at most one every MONITOR_WARN_SECONDS)
-      # says by how much, so it never clips unnoticed.
+      # non-realtime Sessions, so they never hear it.
+      #
+      # The trim only turns down (0 dB at most; audio-safety-2, 2026-11-01:
+      # a +15 dB trim from the level check hard-clipped everything over
+      # -15 dBFS after the master gain, the maintainer's "limiting and
+      # clipping" on a -10 dBFS sine).  A louder request is set to 0 dB
+      # with a note to raise the system or interface volume instead, so
+      # live output is the mix's own up to full scale.  Peaks over full
+      # scale (a mix already over, e.g. with `master_gain 6.db`) are still
+      # clipped with a warning (at most one every MONITOR_WARN_SECONDS).
       module MonitorTrim
-        # The most the trim may be (a soft tone at -30 dBFS peak brought
-        # up to -3 dBFS).
-        MAX_MONITOR_GAIN = 10 ** (27 / 20.0)
+        # The most the trim may be: 0 dB (it only attenuates).
+        MAX_MONITOR_GAIN = 1.0
+
+        # What a louder request says (the trim is set to 0 dB).
+        LOUDER_NOTE = 'The monitor trim only turns down (0 dB at most, so live output never clips from it); ' \
+                      'set it to 0 dB.  For more level, raise the system or audio interface volume'
 
         # Seconds between clip warnings.
         MONITOR_WARN_SECONDS = 10
@@ -36,18 +45,25 @@ module MB
           end
 
           # Sets the monitor trim (linear, 0 to MAX_MONITOR_GAIN, e.g.
-          # `6.db`).
+          # `-6.db`).  More than 0 dB sets 0 dB with a warning
+          # (LOUDER_NOTE).
           def monitor_gain=(gain)
-            unless gain.is_a?(Numeric) && gain.real? && gain >= 0 && gain <= MAX_MONITOR_GAIN * (1 + 1e-9)
-              raise ArgumentError, "The monitor gain must be a number from 0 to #{(20 * Math.log10(MAX_MONITOR_GAIN)).round} dB (got #{gain.inspect})"
+            unless gain.is_a?(Numeric) && gain.real? && gain >= 0
+              raise ArgumentError, "The monitor gain must be a gain of 0 dB or less, e.g. -6.db (got #{gain.inspect})"
             end
-            @monitor_gain = gain.to_f
+            if gain > MAX_MONITOR_GAIN * (1 + 1e-9)
+              warn format("\e[33mMonitor trim %+.1f dB asked: %s\e[0m", 20 * Math.log10(gain), LOUDER_NOTE)
+              gain = MAX_MONITOR_GAIN
+            end
+            @monitor_gain = [gain.to_f, MAX_MONITOR_GAIN].min
           end
 
           # Clips +bufs+ (channels already multiplied by a trim of +gain+)
           # to full scale if they went over, warning at most once every
           # MONITOR_WARN_SECONDS.  Returns the (possibly new) Array and
-          # whether it clipped.  Also used by foreground #play.
+          # whether it clipped.  Also used by foreground #play.  (A safety
+          # net: since the trim only attenuates, it can't fire from the
+          # trim itself.)
           def monitor_clip(bufs, gain)
             return [bufs, false] unless gain > 1.0
             peak = bufs.map { |c| c.abs.max }.max.to_f

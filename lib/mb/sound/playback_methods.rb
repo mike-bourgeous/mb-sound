@@ -546,15 +546,15 @@ module MB
       # live playback only, after the master chain, any limiter, and the
       # master gain, that never reaches #render, stems, #rec_audio files,
       # vis, or takes (see Session::MonitorTrim).  With a +gain+ (linear,
-      # up to +27 dB), sets it first.  The listening level check
-      # (`help.level`) sets it too.  Peaks the trim pushes over full scale
-      # are clipped on the way out, with a warning.  Also available as
-      # #monitor.
+      # 0 dB at most: the trim only turns down, so it never clips the
+      # output; louder asks for 0 dB with a note to raise the system or
+      # interface volume), sets it first.  The listening level check
+      # (`help.level`) sets it too.  Also available as #monitor.
       #
       # Example (bin/sound.rb):
-      #     monitor_gain 6.db       # louder in the speakers, renders unchanged
-      #     monitor_gain.to_db      # => 6.0
-      #     monitor 0.db
+      #     monitor_gain -6.db      # quieter in the speakers, renders unchanged
+      #     monitor_gain.to_db      # => -6.0
+      #     monitor 0.db            # the mix as it is, up to full scale
       def monitor_gain(gain = nil)
         Session.monitor_gain = gain if gain
         Session.monitor_gain

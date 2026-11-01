@@ -527,16 +527,13 @@ module MB
         end
 
         # mb-sound's version, with the git commit when the library is a
-        # checkout.
+        # checkout (read from git's files: saving a document while a set
+        # plays must not start a process; see Internal.main_checkout).
         def library_version
           @library_version ||= begin
             root = File.expand_path('../..', __dir__)
             head = File.join(root, '..', '.git')
-            commit = nil
-            if File.exist?(head)
-              commit = IO.popen(['git', '-C', root, 'rev-parse', '--short', 'HEAD'], err: File::NULL, &:read).strip rescue nil
-              commit = nil if commit&.empty?
-            end
+            commit = File.exist?(head) ? Internal.git_head(root) : nil
             commit ? "#{MB::Sound::VERSION} (#{commit})" : MB::Sound::VERSION
           end
         end

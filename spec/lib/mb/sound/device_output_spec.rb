@@ -72,7 +72,10 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
 
     it 'stops at the :safe queue' do
       o = device_output(profile: :low)
-      expect { 8.times { drop_out(o) } }.to output.to_stderr
+      # (more drop-outs than the six growths to the cap: while the
+      # concealment lands on a write, the next one queues behind it, so
+      # back-to-back drop-outs can run out once between them)
+      expect { 12.times { drop_out(o) } }.to output.to_stderr
       expect(o.queue_limit).to eq(4080)
       expect { drop_out(o) }.not_to output.to_stderr
     end
@@ -94,9 +97,42 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
 
       expect(o.queue_limit).to eq(2400)
       expect(notes).to eq([
-        'No audio dropouts for 0 s: lowering the output queue to 57 ms',
-        'No audio dropouts for 0 s: lowering the output queue to 50 ms',
+        'No audio dropouts for 0.1 s: lowering the output queue to 57 ms',
+        'No audio dropouts for 0.1 s: lowering the output queue to 50 ms',
       ])
+    end
+
+    # ux-notes-1: the maintainer's queue went 50 <-> 75 ms nine times in a
+    # session (each shrink met the next dropout); audio-safety-2 backs off
+    it 'doubles the wait before shrinking after a dropout that follows a shrink, up to SHRINK_AFTER_MAX' do
+      stub_const('MB::Sound::DeviceOutput::SHRINK_AFTER', 0.1)
+      stub_const('MB::Sound::DeviceOutput::SHRINK_AFTER_MAX', 0.4)
+      o = device_output(profile: :low, latency: 0.05)
+      notes = []
+      allow(o).to receive(:warn) { |msg| notes << msg }
+      write_until = ->(&cond) {
+        deadline = MB::U.clock_now + 3
+        o.write(block) until cond.call || MB::U.clock_now > deadline
+      }
+
+      drop_out(o, pause: 0.08) # grows; a dropout not after a shrink keeps the wait
+      expect(o.queue_limit).to eq(3600)
+      expect(o.shrink_wait).to eq(0.1)
+
+      [0.2, 0.4, 0.4].each do |wait|
+        grown = o.queue_limit
+        t = MB::U.clock_now
+        write_until.() { o.queue_limit < grown }
+        expect(o.queue_limit).to be < grown
+        expect(MB::U.clock_now - t).to be >= o.shrink_wait * 0.9
+        drop_out(o, pause: 0.08) # right after the shrink
+        expect(o.shrink_wait).to eq(wait)
+        expect(notes.last).to match(/\AAudio dropout: raising the output queue to \d+ ms(?: \(#{wait} s without dropouts before lowering it again\))?\z/)
+      end
+      expect(notes.grep(/before lowering it again/).length).to be >= 2
+
+      o.reset_queue
+      expect(o.shrink_wait).to eq(0.1)
     end
 
     it 'puts the queue back with #reset_queue' do

@@ -712,12 +712,14 @@ static void playback_pull(struct playback *p, float *out, size_t frames)
 	size_t rp = atomic_load_explicit(&p->read_pos, memory_order_relaxed);
 	size_t wp = atomic_load_explicit(&p->write_pos, memory_order_acquire);
 	size_t available = wp - rp;
-	size_t count = available < frames ? available : frames;
+	int quiet = atomic_load_explicit(&p->quiet_pos, memory_order_relaxed) == wp;
+	// (while concealing, frames wait in the ring until the grains have
+	// landed on them; see mb_conceal_take)
+	size_t count = mb_conceal_take(&p->conceal, available, frames);
 
 	playback_copy(p, out, rp, count, frames);
 
 	if (p->conceal.mode == MB_CONCEAL_REPEAT) {
-		int quiet = atomic_load_explicit(&p->quiet_pos, memory_order_relaxed) == wp;
 		int was_active = p->conceal.active;
 		size_t concealed = mb_conceal_process(&p->conceal, out, frames, count, quiet);
 		if (was_active || concealed) {
@@ -727,10 +729,10 @@ static void playback_pull(struct playback *p, float *out, size_t frames)
 		}
 	}
 
-	if (count < frames) {
+	if (available < frames) {
 		// Count each time the audio runs out, not every silent callback
 		// (audio shorter than one callback ran out too)
-		if (count > 0 || !p->starving) {
+		if (available > 0 || !p->starving) {
 			atomic_fetch_add_explicit(&p->underruns, 1, memory_order_relaxed);
 			p->starving = 1;
 		}
@@ -918,10 +920,18 @@ static void conceal_settings_from(VALUE hash, struct mb_conceal_settings *s)
 	s->return_fade = conceal_number(hash, "return_fade");
 	s->match = conceal_number(hash, "match");
 	s->search = conceal_number(hash, "search");
+	s->align = conceal_number(hash, "align");
+	VALUE level = rb_hash_lookup2(hash, ID2SYM(rb_intern("level")), Qundef);
+	if (level == Qundef) {
+		rb_raise(rb_eArgError, "Concealment settings need :level");
+	}
+	s->level_cap = !NIL_P(level);
+	s->level = s->level_cap ? NUM2DBL(level) : 0;
 	s->seed = NUM2ULL(rb_hash_lookup2(hash, ID2SYM(rb_intern("seed")), INT2FIX(0)));
 
 	if (s->mode == MB_CONCEAL_REPEAT) {
 		if (!(s->grain_min > 0 && s->grain_max >= s->grain_min && s->match > 0 && s->search >= 0 && s->return_fade > 0 && s->hold >= 0 &&
+				s->align >= 0 && s->align <= 0.05 && isfinite(s->level) &&
 				s->history >= s->grain_max + s->match && s->history <= 2.0 && s->return_fade <= s->history)) {
 			rb_raise(rb_eArgError, "Bad concealment settings (see MB::Sound::Concealment.settings)");
 		}
@@ -1798,34 +1808,34 @@ static VALUE concealer_initialize(VALUE self, VALUE channels, VALUE rate, VALUE 
 
 /*
  * call-seq:
- *   concealer.process(real, frames, quiet) -> String
+ *   concealer.pull(queued, frames, quiet) -> [String, Integer]
  *
- * One device pull: +real+ is a String of interleaved 32-bit floats (the
- * frames the ring had, at most +frames+), and the result +frames+ frames
- * as the device would play them.  +quiet+ as if the writer had called
- * Playback#end_stream.
+ * One device pull as Playback makes it: +queued+ is a String of
+ * interleaved 32-bit floats (everything the ring holds, any length); the
+ * pull takes what mb_conceal_take allows (while concealing, none until the
+ * grains have landed on it).  +quiet+ as if the writer had called
+ * Playback#end_stream.  Returns the +frames+ frames played and how many
+ * queued frames were taken.
  */
-static VALUE concealer_process(VALUE self, VALUE real, VALUE frames_value, VALUE quiet)
+static VALUE concealer_pull(VALUE self, VALUE queued, VALUE frames_value, VALUE quiet)
 {
 	struct concealer *k = get_concealer(self);
-	StringValue(real);
+	StringValue(queued);
 	size_t ch = k->c.ch;
-	size_t bytes = RSTRING_LEN(real);
+	size_t bytes = RSTRING_LEN(queued);
 	if (bytes % (ch * sizeof(float)) != 0) {
-		rb_raise(rb_eArgError, "Real audio must be whole frames of %zu floats", ch);
+		rb_raise(rb_eArgError, "Queued audio must be whole frames of %zu floats", ch);
 	}
-	size_t count = bytes / (ch * sizeof(float));
+	size_t available = bytes / (ch * sizeof(float));
 	size_t frames = NUM2SIZET(frames_value);
-	if (count > frames) {
-		rb_raise(rb_eArgError, "More real frames (%zu) than the pull (%zu)", count, frames);
-	}
+	size_t count = mb_conceal_take(&k->c, available, frames);
 
 	VALUE out = rb_str_new(NULL, frames * ch * sizeof(float));
 	float *o = (float *)RSTRING_PTR(out);
-	memcpy(o, RSTRING_PTR(real), bytes);
+	memcpy(o, RSTRING_PTR(queued), count * ch * sizeof(float));
 	memset(o + count * ch, 0, (frames - count) * ch * sizeof(float));
 	mb_conceal_process(&k->c, o, frames, count, RTEST(quiet));
-	return out;
+	return rb_ary_new_from_args(2, out, SIZET2NUM(count));
 }
 
 /* The concealment state, for specs. */
@@ -1836,7 +1846,8 @@ static VALUE concealer_state(VALUE self)
 	VALUE h = rb_hash_new();
 	rb_hash_aset(h, ID2SYM(rb_intern("active")), c->active ? Qtrue : Qfalse);
 	rb_hash_aset(h, ID2SYM(rb_intern("faded")), c->faded ? Qtrue : Qfalse);
-	rb_hash_aset(h, ID2SYM(rb_intern("returning")), c->in_exit ? Qtrue : Qfalse);
+	rb_hash_aset(h, ID2SYM(rb_intern("landing")), INT2NUM(c->landing));
+	rb_hash_aset(h, ID2SYM(rb_intern("land_left")), SIZET2NUM(c->land_left));
 	rb_hash_aset(h, ID2SYM(rb_intern("gain")), DBL2NUM(c->gain));
 	rb_hash_aset(h, ID2SYM(rb_intern("total")), ULL2NUM(c->total));
 	rb_hash_aset(h, ID2SYM(rb_intern("draws")), ULL2NUM(c->draws));
@@ -1861,8 +1872,9 @@ static uint64_t concealer_now_ns(void)
  * stutter (pulls of real audio, then a gap of four pulls, then real audio
  * again), each a Hash of :mean_ns and :max_ns per pull: :steady pulls (all
  * real, only the history copy), :entry (the first gap pull: the match
- * search), :concealing (the rest of the gap), :returning (the first real
- * pull after it: the crossfade back).  For measuring the device thread's
+ * search), :concealing (the rest of the gap), :returning (the first pull
+ * with audio queued after it: planning the landing, with its alignment
+ * search, and its first frames).  For measuring the device thread's
  * added cost (design/notes/audio_io.md, "Underrun concealment").
  */
 static VALUE concealer_benchmark(VALUE self, VALUE frames_value, VALUE cycles_value)
@@ -1882,7 +1894,7 @@ static VALUE concealer_benchmark(VALUE self, VALUE frames_value, VALUE cycles_va
 
 	// Pulls per cycle: enough real audio to finish the crossfade back and
 	// refill the history, then the gap
-	size_t real_pulls = (k->c.history + k->c.exit_frames) / frames + 2;
+	size_t real_pulls = (k->c.history + k->c.land_frames + 2 * k->c.align_search) / frames + 2;
 	uint64_t sum[4] = { 0 }, max[4] = { 0 }, n[4] = { 0 };
 	uint64_t phase = 0;
 	for (long cy = 0; cy < cycles; cy++) {
@@ -1898,7 +1910,9 @@ static VALUE concealer_benchmark(VALUE self, VALUE frames_value, VALUE cycles_va
 			memset(buf + count * ch, 0, (frames - count) * ch * sizeof(float));
 
 			uint64_t t0 = concealer_now_ns();
-			mb_conceal_process(&k->c, buf, frames, count, 0);
+			size_t taken = mb_conceal_take(&k->c, count, frames);
+			memset(buf + taken * ch, 0, (frames - taken) * ch * sizeof(float));
+			mb_conceal_process(&k->c, buf, frames, taken, 0);
 			uint64_t dt = concealer_now_ns() - t0;
 			sum[kind] += dt;
 			n[kind]++;
@@ -1926,7 +1940,7 @@ static void init_concealer(VALUE fast_audio)
 	VALUE k = rb_define_class_under(fast_audio, "Concealer", rb_cObject);
 	rb_define_alloc_func(k, concealer_alloc);
 	rb_define_method(k, "initialize", concealer_initialize, 3);
-	rb_define_method(k, "process", concealer_process, 3);
+	rb_define_method(k, "pull", concealer_pull, 3);
 	rb_define_method(k, "state", concealer_state, 0);
 	rb_define_method(k, "benchmark", concealer_benchmark, 2);
 }

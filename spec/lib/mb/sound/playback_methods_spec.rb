@@ -460,7 +460,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
     it 'sets, shows, and removes master effects' do
       # (the default Session is realtime: its live output has the safety limiter)
-      expect(MB::Sound.master).to eq('bypass (live output: a safety limiter at -1 dBFS until a master chain is set)')
+      expect(MB::Sound.master).to eq('bypass (live output: a safety limiter at -1 dBFS until a master chain is set; master { it } plays the mix unprocessed)')
       expect(MB::Sound.master { |mix| mix.softclip }.data[:description]).to start_with('master:')
       expect(MB::Sound.master).to start_with('master:')
       expect(MB::Sound::Session.default.master_active?).to eq(true)

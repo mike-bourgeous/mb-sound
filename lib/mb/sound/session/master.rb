@@ -156,8 +156,11 @@ module MB
         end
 
         # What #master_info adds to "bypass" while the live output's safety
-        # limiter stands in for a chain (see SafetyLimiter).
-        SAFETY_NOTE = ' (live output: a safety limiter at -1 dBFS until a master chain is set)'
+        # limiter stands in for a chain (see SafetyLimiter), with the way to
+        # the mix unprocessed (an empty chain; with `master_gain 0.db` and
+        # the monitor trim at 0 dB, a -10 dBFS sine reaches the sound card
+        # as it is, up to full scale).
+        SAFETY_NOTE = ' (live output: a safety limiter at -1 dBFS until a master chain is set; master { it } plays the mix unprocessed)'
 
         # True if no master chain runs or waits to start (#master_info is
         # "bypass", with or without SAFETY_NOTE).

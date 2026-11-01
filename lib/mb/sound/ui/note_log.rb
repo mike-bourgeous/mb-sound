@@ -142,9 +142,43 @@ module MB
           out.join("\n") + "\n"
         end
 
-        # What +session+ plays, as Markdown list items.
+        # What +session+ plays, as Markdown list items: from the UI's latest
+        # snapshot while a screen is up (published by the render thread;
+        # nothing waits), else from the Session's own readers, which take the
+        # render lock (audio-safety-2: a note while a set plays shouldn't
+        # queue behind the render thread or hold it up).
         def playing_lines(session)
           return ['- **playing**: no session'] unless session
+          snap = session.respond_to?(:ui_feed) && session.ui_feed&.latest
+          snap ? snapshot_lines(snap) : session_lines(session)
+        rescue StandardError => e
+          ["- **playing**: (not read: #{e.class}: #{e.message})"]
+        end
+
+        # #playing_lines from a UI::Snapshot.
+        def snapshot_lines(snap)
+          slow = snap.slow
+          at = ["bar #{snap.stamp}", "#{format('%g', snap.bpm.to_f.round(2))} bpm"]
+          if (f = slow.form)
+            at << "form #{f.ended ? 'ended' : "#{f.section} (pass #{f.pass}, next #{f.next} at #{f.next_at})"}"
+          end
+          slow.scene && at << "scene #{slow.scene.inspect}"
+          tracks = slow.tracks.to_h { |t| [t.name, t] }
+          players = snap.players
+          names = players.map(&:name)
+          list = players.map { |pl|
+            tr = tracks[pl.name]
+            state = pl.state == :playing ? '' : " #{pl.state}"
+            tr ? "#{pl.name.inspect} (track: #{tr.clip}, q #{tr.q}#{state})" : "#{pl.name.inspect}#{state.empty? ? '' : " (#{state.strip})"}"
+          }
+          out = ["- **at**: #{at.join(', ')}", "- **players**: #{list.empty? ? 'none' : list.join('; ')}"]
+          idle = tracks.keys - names
+          out << "- **tracks not playing**: #{idle.map(&:inspect).join(', ')}" unless idle.empty?
+          out
+        end
+
+        # #playing_lines from the Session (no screen up).
+        def session_lines(session)
           out = []
           arr = session.arrangement
           clock = session.clock.to_s
@@ -159,8 +193,6 @@ module MB
           idle = tracks.keys - players.keys
           out << "- **tracks not playing**: #{idle.map(&:inspect).join(', ')}" unless idle.empty?
           out
-        rescue StandardError => e
-          out << "- **playing**: (not read: #{e.class}: #{e.message})"
         end
       end
     end

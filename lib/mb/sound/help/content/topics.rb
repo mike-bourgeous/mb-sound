@@ -934,7 +934,10 @@ module MB
         with a 5 ms declick or synced fades (muted players sleep); master
         effects run on the whole mix and swap at launch points.  The
         master gain comes before the master chain (a limiter keeps its
-        ceiling); `master_gain 2.db, post: true` moves it after.
+        ceiling); `master_gain 2.db, post: true` moves it after.  `master
+        { it }` and `master_gain 0.db` play the mix as it is (no safety
+        limiter, no -10 dB master gain); the monitor trim (`help.level`,
+        `monitor_gain`) only turns down.
       TEXT
       commands :level, :key_level, :mute, :unmute, :solo, :unsolo, :mutes, :master, :master_gain, :monitor_gain
       note :arrangement, :master_effects
@@ -978,7 +981,10 @@ module MB
         `:histogram` (the center of the bars' loudness distribution).
         Without a master chain the live output (not renders or recordings)
         ends in a transparent safety limiter at -1 dBFS; `master` says so,
-        and any chain or preset replaces it.
+        and any chain or preset replaces it.  For the mix unprocessed up
+        to full scale (a test tone straight to the sound card): `master {
+        it }` and `master_gain 0.db`, with the monitor trim at 0 dB (it
+        only turns down; raise the system volume for more).
       TEXT
       commands :masters, :master, :render
       dsl :master, :ride

@@ -307,11 +307,67 @@ module MB
       # its common .git directory, so a worktree gives the main checkout),
       # or nil outside a repository or for a bare one.  Used by
       # Library::Bench.default_root and UI::NoteLog.dir.
+      #
+      # Read from the files git keeps (see #git_dirs), never by running git:
+      # the first ui.note of a session ran `git rev-parse` here, and
+      # starting a process from a large Ruby process (fork, with the GVL
+      # held; macOS has no vfork path) kept the render thread from running
+      # for long enough to drop out (audio-safety-2, the maintainer's
+      # glitch at his first ui.note; 19 ms of render-thread GVL wait even
+      # on Linux, 133 MB).  Live paths (the console, the UI, saving
+      # documents) never start processes.
       def main_checkout(dir)
-        common, status = Open3.capture2('git', '-C', dir.to_s, 'rev-parse', '--path-format=absolute', '--git-common-dir', err: File::NULL)
-        return nil unless status.success?
-        common = common.strip
+        _, common = git_dirs(dir)
+        return nil unless common
         File.basename(common) == '.git' ? File.dirname(common) : nil
+      end
+
+      # [the git directory, the common git directory] of the repository
+      # +dir+ is in, found as git does (walking up to a .git directory, or a
+      # worktree's .git file naming its git directory, whose commondir file
+      # names the common one), or nil.  No process is started.
+      def git_dirs(dir)
+        d = File.expand_path(dir.to_s)
+        loop do
+          dot = File.join(d, '.git')
+          if File.directory?(dot)
+            return [dot, dot]
+          elsif File.file?(dot)
+            g = File.read(dot)[/\Agitdir:\s*(.+?)\s*\z/m, 1]
+            return nil unless g
+            g = File.expand_path(g, d)
+            common_file = File.join(g, 'commondir')
+            common = File.file?(common_file) ? File.expand_path(File.read(common_file).strip, g) : g
+            return [g, common]
+          end
+          up = File.dirname(d)
+          return nil if up == d
+          d = up
+        end
+      rescue SystemCallError
+        nil
+      end
+
+      # The first +length+ hex digits of the commit checked out in the
+      # repository +dir+ is in (HEAD, through its ref file or packed-refs),
+      # or nil; read from git's files without starting git (see
+      # #main_checkout).  Unlike `git rev-parse --short`, always +length+
+      # digits.
+      def git_head(dir, length: 7)
+        g, common = git_dirs(dir)
+        return nil unless g
+        head = File.read(File.join(g, 'HEAD')).strip
+        sha = head
+        if (ref = head[/\Aref:\s*(\S+)/, 1])
+          file = [g, common].map { |base| File.join(base, ref) }.find { |f| File.file?(f) }
+          sha = if file
+                  File.read(file).strip
+                else
+                  packed = File.join(common, 'packed-refs')
+                  File.file?(packed) ? File.foreach(packed).map(&:split).find { |_sha, name| name == ref }&.first : nil
+                end
+        end
+        sha.to_s.match?(/\A\h{40,64}\z/) ? sha[0, length] : nil
       rescue SystemCallError
         nil
       end

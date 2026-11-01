@@ -5,14 +5,20 @@ module MB
     #
     # When the writer misses a deadline and the output queue runs dry, the
     # device thread plays grains of the last audio it played instead of
-    # silence: Hann-like (equal-power) crossfaded grains of jittered lengths
-    # (20-60 ms) from jittered positions in the last 120 ms, so there is no
-    # fixed repetition period to buzz at, holding their level for 100 ms
-    # (:hold) and then falling 60 dB over a second, then
-    # crossfades back (5 ms) when audio arrives.  Late audio is played, not
-    # dropped, so the queue and the device clock move as before, and
-    # underruns are counted as before (stats[:underruns]); stats[:concealed]
-    # and [:concealed_gaps] count what was filled.
+    # silence: crossfaded grains of jittered lengths (20-60 ms) from jittered
+    # positions in the last 120 ms, so there is no fixed repetition period to
+    # buzz at, each moved a little to cross the one before it in phase, no
+    # louder than 6 dB over the 20 ms before the gap, holding their level for
+    # 100 ms (:hold) and then falling 60 dB over a second.  When audio
+    # arrives, the grains land on it: they cross (5 ms) into a last grain
+    # ending where the late audio starts, which then continues it sample
+    # for sample (audio-safety-2: crossfading straight into the late audio
+    # met it at an unrelated phase, and pops and chirps came from that and
+    # from returns cut short).  Late audio is played, not dropped, so the
+    # device clock moves as before, the queued audio plays in order (5-17 ms
+    # later for the landing), and underruns are counted as before
+    # (stats[:underruns]); stats[:concealed] and [:concealed_gaps] count what
+    # was filled.
     #
     # Settings (DeviceOutput's +:conceal+, or AUDIO_CONCEAL):
     #   :repeat  - grains (DEFAULTS; the default, see DEFAULT)
@@ -26,9 +32,12 @@ module MB
       # Seconds, except :seed.  :hold is the time at full level before the
       # decay, :fade the time to fall 60 dB after it (nil: no decay),
       # :quiet_fade the same (without the hold) once the writer marked the
-      # end of its audio (DeviceOutput#end_stream), :return_fade the crossfade back to
-      # real audio, :match and :search the window and lag range compared when
-      # choosing the first grain.
+      # end of its audio (DeviceOutput#end_stream), :return_fade the seam
+      # into the last grain of the landing (at most the shortest grain), :match and :search the window and lag range compared when
+      # choosing the first grain, :align how far each later grain may move
+      # to cross the one before it in phase (0: not at all), :level the dB a
+      # grain may be over the level of the 20 ms before the gap (nil: no
+      # cap; audio-safety-2).
       DEFAULTS = {
         mode: :repeat,
         fixed: false,
@@ -41,6 +50,8 @@ module MB
         return_fade: 0.005,
         match: 0.001,
         search: 0.01,
+        align: 0.006,
+        level: 6.0,
         seed: 0x6d62_736f_756e_64,
       }.freeze
 
@@ -83,7 +94,7 @@ module MB
         end
         spec.each do |k, v|
           raise Error, "Unknown concealment setting #{k.inspect} (#{(DEFAULTS.keys + [:grain]).join(', ')})" unless DEFAULTS.key?(k)
-          s[k] = %i[fixed seed].include?(k) || v.nil? ? v : seconds(v)
+          s[k] = %i[fixed seed].include?(k) || v.nil? ? v : k == :level ? Float(v) : seconds(v)
         end
         s[:grain_max] = s[:grain_min] if s[:fixed]
         check(s)
@@ -118,6 +129,8 @@ module MB
         problems << ':search must not be negative' unless s[:search] >= 0
         problems << ':fade must be positive or nil' unless s[:fade].nil? || s[:fade] > 0
         problems << ':hold must not be negative' unless s[:hold] >= 0
+        problems << ':align must be 0 to 50 ms' unless s[:align] && s[:align] >= 0 && s[:align] <= 0.05
+        problems << ':level must be a number of dB or nil' unless s[:level].nil? || s[:level].finite?
         raise Error, "Bad concealment settings: #{problems.join('; ')}" unless problems.empty?
       end
       private_class_method :parse_string, :check
@@ -127,8 +140,9 @@ module MB
       # with forced gaps, as a sound card would play it: +gaps+ are
       # [start, length] pairs in seconds (of the input) where the writer is
       # late by +length+, so the output is longer by the gaps (late audio is
-      # played, not dropped).  +period+ is the device's pull size.  Returns
-      # an Array of SFloat channels; for listening to settings, e.g.
+      # played, not dropped), and then catches up.  +period+ is the
+      # device's pull size.  Returns an Array of SFloat channels; for
+      # listening to settings, e.g.
       #     play Concealment.simulate(read('x.flac'), gaps: [[1, 0.08]], conceal: :fixed)
       def self.simulate(audio, gaps:, conceal: :repeat, rate: 48000, period: 128)
         audio = Array(audio).map { |c| Numo::SFloat.cast(c) }
@@ -144,18 +158,22 @@ module MB
             gaps.shift
             while left > 0
               n = [period, left].min
-              out << Numo::SFloat.from_binary(k.process('', n, false))
+              out << Numo::SFloat.from_binary(k.pull('', n, false)[0])
               left -= n
             end
             next
           end
 
+          # What the queue holds: up to the next gap (the writer caught up)
           n = [period, length - pos].min
           n = [n, gaps[0][0] - pos].min if gaps.any?
-          m = Numo::SFloat.zeros(n, ch)
-          ch.times { |c| m[true, c] = audio[c][pos...(pos + n)] }
-          out << Numo::SFloat.from_binary(k.process(m.to_binary, n, false))
-          pos += n
+          q = [length - pos, period + 4800].min
+          q = [q, gaps[0][0] - pos].min if gaps.any?
+          m = Numo::SFloat.zeros(q, ch)
+          ch.times { |c| m[true, c] = audio[c][pos...(pos + q)] }
+          played, taken = k.pull(m.to_binary, n, false)
+          out << Numo::SFloat.from_binary(played)
+          pos += taken
         end
 
         joined = out.empty? ? Numo::SFloat[] : Numo::SFloat.zeros(out.sum(&:length)).tap { |j|
@@ -168,14 +186,15 @@ module MB
 
       # The Ruby reference of mb_conceal.h, step for step (same splitmix64
       # draws, same recurrences, float32 history and output), for specs.
-      # #process takes one device pull: the real frames the ring had (an
-      # Array of per-channel SFloats, possibly empty) and the pull's length,
-      # returning an Array of per-channel SFloats.
+      # #pull takes one device pull as Playback makes it: everything the
+      # ring holds (an Array of per-channel SFloats, possibly empty) and the
+      # pull's length, returning the pull's channels and how many queued
+      # frames it took.
       class Reference
         MASK = 0xffff_ffff_ffff_ffff
         GOLDEN = 0x9E37_79B9_7F4A_7C15
 
-        Grain = Struct.new(:src, :len, :i)
+        Grain = Struct.new(:src, :len, :i, :g)
 
         attr_reader :frames, :events, :total, :draws
 
@@ -189,7 +208,11 @@ module MB
           @grain_max = [to_frames(s[:grain_max], rate), @grain_min].max
           @match_window = to_frames(s[:match], rate)
           @match_search = to_frames(s[:search], rate)
-          @exit_frames = to_frames(s[:return_fade], rate)
+          @land_frames = [to_frames(s[:return_fade], rate), @grain_min].min
+          @align_search = s[:align].to_f > 0 ? (s[:align] * rate).round : 0
+          @align_window = to_frames(0.001, rate)
+          @level_ratio = s[:level].nil? ? 0 : 10.0**(s[:level] / 20.0)
+          @ref_rms = 0.0
           @hold_frames = s[:hold].to_f > 0 ? (s[:hold] * rate).round : 0
           @held = 0
           @quiet = false
@@ -199,6 +222,7 @@ module MB
           @quiet_decay = 10.0**(-3.0 / ((qf > 0 ? qf : 1e-3) * rate))
           @floor_gain = 1e-3
           @offset_decay = Math.exp(-1.0 / (0.002 * rate))
+          @bend_decay = Math.exp(-1.0 / (0.00025 * rate))
           @cur_decay = @decay
           @seed = s[:seed] & MASK
           @draws = 0
@@ -208,107 +232,112 @@ module MB
 
           @active = false
           @faded = false
-          @in_exit = false
+          @landing = 0
+          @land_left = 0
           @t0 = 0
           @avail = 0
           @gain = 0.0
           @peak = 0.0
           @offset = Array.new(channels, 0.0)
-          @cur = Grain.new(0, 0, 0)
-          @nxt = Grain.new(0, 0, 0)
+          @bend = Array.new(channels, 0.0)
+          @bend_u = Array.new(channels, 0.0)
+          @cur = Grain.new(0, 0, 0, 1.0)
+          @nxt = Grain.new(0, 0, 0, 1.0)
+          @fin = Grain.new(0, 0, 0, 1.0)
+          @fin_rho = 0.0
           @h = 0
           @h_in = 0
           @in_seam = false
           @j = 0
           @sc = @ss = @scd = @ssd = 0.0
-          @xj = 0
-          @xc = @xs = @xcd = @xsd = 0.0
+          @rho = 0.0
           @x = Numo::SFloat.zeros(channels)
 
           return unless @mode == :repeat
 
-          need = [2 * @history, @history + @exit_frames + 1].max
           @cap = 16
-          @cap <<= 1 while @cap < need
+          @cap <<= 1 while @cap < 2 * @history
           @hist = Numo::SFloat.zeros(@cap, channels)
         end
 
         def state
           {
-            active: @active, faded: @faded, returning: @in_exit, gain: @gain, total: @total, draws: @draws,
+            active: @active, faded: @faded, landing: @landing, land_left: @land_left, gain: @gain, total: @total, draws: @draws,
             frames: @frames, events: @events, grain: @active ? [@t0 - @cur.src, @cur.len, @cur.i] : nil,
           }
         end
 
-        # See mb_conceal_process.
+        # See mb_conceal_take.
+        def take(available, frames)
+          return [available, frames].min if @mode != :repeat || !@active
+          if @landing == LAND_NONE
+            return 0 if available == 0
+            land
+          end
+          return 0 if @land_left >= frames
+          [available, frames - @land_left].min
+        end
+
+        # One pull (see FastAudio::Concealer#pull): +queued+ is everything
+        # the ring holds.  Returns the pull's channels and the frames taken.
+        def pull(queued, frames, quiet: false)
+          available = queued.empty? ? 0 : queued[0].length
+          count = take(available, frames)
+          [process(count > 0 ? queued.map { |c| c[0...count] } : [], frames, quiet: quiet), count]
+        end
+
+        # See mb_conceal_process (+real+: what #take took).
         def process(real, frames, quiet: false)
           count = real.empty? ? 0 : real[0].length
           raise ArgumentError, 'More real frames than the pull' if count > frames
 
           out = Numo::SFloat.zeros(frames, @ch)
-          @ch.times { |k| out[0...count, k] = real[k] } if count > 0
-          return split(out) unless @mode == :repeat
+          return split_real(out, real, 0, count) unless @mode == :repeat
 
           @cur_decay = quiet ? @quiet_decay : @decay
           @quiet = quiet ? true : false
 
-          if count > 0
-            push(out[0...count, true])
+          @active = false if @active && @landing == LAND_NONE && count > 0
 
-            if @active && @total - @t0 > @cap - @history
-              @active = false
-              @in_exit = false
-            end
-
-            i = 0
-            while i < count && @active
-              unless @in_exit
-                d = Math::PI / (2.0 * @exit_frames)
-                @in_exit = true
-                @xj = 0
-                @xc = Math.cos(0.5 * d)
-                @xs = Math.sin(0.5 * d)
-                @xcd = Math.cos(d)
-                @xsd = Math.sin(d)
-              end
-
+          done = 0
+          if @active && @landing != LAND_NONE
+            r = [@land_left, frames].min
+            while done < r
               frame(@x)
-              @ch.times do |k|
-                r = out[i, k]
-                y = r * @xs + @x[k] * @xc
-                lim = r.abs > @peak ? r.abs : @peak
-                y = lim if y > lim
-                y = -lim if y < -lim
-                out[i, k] = y
-              end
-
-              @xc, @xs = rotate(@xc, @xs, @xcd, @xsd)
-              @xj += 1
-              if @xj >= @exit_frames
-                @active = false
-                @in_exit = false
-              end
-              i += 1
+              out[done, true] = @x
+              done += 1
             end
           end
+          concealed = done
 
-          return split(out) if count >= frames
-
-          if @active
-            @in_exit = false
-          elsif quiet || !enter
-            return split(out)
+          if count > 0
+            @ch.times { |k| out[done...(done + count), k] = real[k] }
+            push(out[done...(done + count), true])
+            done += count
           end
 
-          (count...frames).each do |i|
-            frame(@x)
-            out[i, true] = @x
+          if done < frames && (@active || (!quiet && enter))
+            (done...frames).each do |i|
+              frame(@x)
+              out[i, true] = @x
+            end
+            concealed += frames - done
           end
-          @frames += frames - count
+          @frames += concealed
           split(out)
         end
 
+        LAND_NONE = 0
+        LAND_NEXT = 1
+        LAND_LAST = 2
+        LAND_AFTER = 3
+
         private
+
+        def split_real(out, real, at, count)
+          @ch.times { |k| out[at...(at + count), k] = real[k] } if count > 0
+          split(out)
+        end
 
         def split(out)
           @ch.times.map { |k| out[true, k].dup }
@@ -346,6 +375,110 @@ module MB
           lo + z % (hi - lo + 1)
         end
 
+        # See mb_conceal_gain.
+        def grain_gain(g)
+          return 1.0 if @level_ratio <= 0
+          step = (g.len + 255) / 256
+          sum = 0.0
+          n = 0
+          j = 0
+          while j < g.len
+            @ch.times do |k|
+              a = at(g.src + j, k)
+              sum += a * a
+            end
+            n += 1
+            j += step
+          end
+          rms = Math.sqrt(sum / (n * @ch))
+          cap = @ref_rms * @level_ratio
+          rms > cap ? cap / rms : 1.0
+        end
+
+        # See mb_conceal_err.
+        def err(a, b, w, limit)
+          e = 0.0
+          jj = 0
+          while jj < w && e < limit
+            @ch.times do |k|
+              d = at(a + jj, k) - at(b + jj, k)
+              e += d * d
+            end
+            jj += 1
+          end
+          e
+        end
+
+        # See mb_conceal_best.
+        def best(at_cur, from, to, off, w)
+          best = from
+          best_err = Float::INFINITY
+          (from..to).step(2) do |src|
+            e = err(at_cur, src + off, w, best_err)
+            if e < best_err
+              best_err = e
+              best = src
+            end
+          end
+          coarse = best
+          [-1, 1].each do |side|
+            next if (side < 0 && coarse == from) || (side > 0 && coarse == to)
+            src = coarse + side
+            e = err(at_cur, src + off, w, best_err)
+            if e < best_err
+              best_err = e
+              best = src
+            end
+          end
+          best
+        end
+
+        # See mb_conceal_align.
+        def align
+          g = @nxt
+          w = [@align_window, @h].min
+          off = (@h - w) / 2
+          at_cur = @cur.src + (@cur.len - @h) + off
+          lo = @t0 - @avail
+          hi = @t0 - g.len
+          s = @align_search
+          from = g.src > lo + s ? g.src - s : lo
+          to = g.src + s < hi ? g.src + s : hi
+          g.src = best(at_cur, from, to, off, w)
+        end
+
+        # See mb_conceal_seam_rho.
+        def seam_rho
+          rho_at(@cur.src + (@cur.len - @h), @nxt.src, @h)
+        end
+
+        # See mb_conceal_rho.
+        def rho_at(a0, b0, h)
+          step = (h + 255) / 256
+          sxy = sxx = syy = 0.0
+          j = 0
+          while j < h
+            @ch.times do |k|
+              a = at(a0 + j, k)
+              b = at(b0 + j, k)
+              sxy += a * b
+              sxx += a * a
+              syy += b * b
+            end
+            j += step
+          end
+          return 0.0 unless sxx > 0 && syy > 0
+          (sxy / Math.sqrt(sxx * syy)).clamp(0.0, 1.0)
+        end
+
+        # See mb_conceal_seam.
+        def seam(half)
+          room = @cur.len - @h_in
+          h = [room, half].min
+          @h = h < 1 ? 1 : h
+          @in_seam = false
+        end
+
         def choose_next
           g = @nxt
           if @fixed
@@ -357,12 +490,30 @@ module MB
             g.src = @t0 - pick(g.len, @avail)
           end
           g.i = 0
+          seam(g.len / 2)
 
-          room = @cur.len - @h_in
-          half = g.len / 2
-          h = [room, half].min
-          @h = h < 1 ? 1 : h
-          @in_seam = false
+          if @fixed
+            g.g = 1.0
+            @rho = 0.0
+            return
+          end
+          align if @align_search > 0
+          @rho = seam_rho
+          g.g = grain_gain(g)
+        end
+
+        CEILING = 1.1220184543019633
+
+        # See mb_conceal_limit.
+        def limit(y, peak)
+          a = y.abs
+          return y if a <= peak
+          top = peak * CEILING
+          top = peak > 1.0 ? peak : 1.0 if top > 1.0
+          room = top - peak
+          return y < 0 ? -peak : peak unless room > 0
+          l = peak + room * Math.tanh((a - peak) / room)
+          y < 0 ? -l : l
         end
 
         def rotate(c, s, cd, sd)
@@ -375,7 +526,25 @@ module MB
             return
           end
 
-          if !@in_seam && @cur.i + @h >= @cur.len
+          if @landing != LAND_NONE
+            f = @landing == LAND_LAST ? @cur : @landing == LAND_NEXT ? @nxt : @fin
+            if @land_left <= 1
+              @gain = 1.0
+              f.g = 1.0
+              @ch.times { |k| @offset[k] = @bend[k] = @bend_u[k] = 0.0 }
+            else
+              n = @land_left.to_f
+              @gain += (1 - @gain) / n
+              f.g += (1 - f.g) / n
+              @ch.times do |k|
+                @offset[k] -= @offset[k] / n
+                @bend[k] -= @bend[k] / n
+                @bend_u[k] -= @bend_u[k] / n
+              end
+            end
+          end
+
+          if !@in_seam && @landing != LAND_LAST && @cur.i + @h >= @cur.len
             d = Math::PI / (2.0 * @h)
             @in_seam = true
             @j = 0
@@ -385,14 +554,14 @@ module MB
             @ssd = Math.sin(d)
           end
 
+          sg = @in_seam ? 1.0 / Math.sqrt(1.0 + 2.0 * @rho * @sc * @ss) : 1.0
           @ch.times do |k|
-            v = at(@cur.src + @cur.i, k)
-            v = v * @sc + at(@nxt.src + @nxt.i, k) * @ss if @in_seam
-            y = @gain * v + @offset[k]
-            y = @peak if y > @peak
-            y = -@peak if y < -@peak
-            out[k] = y
+            v = at(@cur.src + @cur.i, k) * @cur.g
+            v = (v * @sc + at(@nxt.src + @nxt.i, k) * @nxt.g * @ss) * sg if @in_seam
+            out[k] = limit(@gain * v + @offset[k] + @bend[k], @peak)
             @offset[k] *= @offset_decay
+            @bend[k] = (@bend[k] + @bend_u[k]) * @bend_decay
+            @bend_u[k] *= @bend_decay
           end
 
           @cur.i += 1
@@ -403,8 +572,28 @@ module MB
             if @j >= @h
               @cur, @nxt = @nxt, @cur
               @h_in = @h
-              choose_next
+              @in_seam = false
+              if @landing == LAND_NEXT
+                @landing = LAND_LAST
+              elsif @landing == LAND_AFTER
+                @cur.len = @cur.i + @land_frames
+                @nxt.src, @nxt.len, @nxt.i, @nxt.g = @fin.src, @fin.len, @fin.i, @fin.g
+                @h = @land_frames
+                @rho = @fin_rho
+                @landing = LAND_NEXT
+              else
+                choose_next
+              end
             end
+          end
+
+          if @landing != LAND_NONE
+            @land_left -= 1
+            if @land_left == 0
+              @active = false
+              @landing = LAND_NONE
+            end
+            return
           end
 
           if @held < @hold_frames && !@quiet
@@ -457,8 +646,33 @@ module MB
           @cur.len = len
           @cur.i = 0
           @h_in = 0
+
+          sum = 0.0
+          (@t0 - @grain_min...@t0).each do |pos|
+            @ch.times do |k|
+              a = at(pos, k)
+              sum += a * a
+            end
+          end
+          @ref_rms = Math.sqrt(sum / (@grain_min * @ch))
+          @cur.g = @fixed ? 1.0 : grain_gain(@cur)
+
           @ch.times do |k|
-            @offset[k] = at(@t0 - 1, k) - at(@cur.src - 1, k)
+            x1 = at(@t0 - 1, k)
+            x2 = at(@t0 - 2, k)
+            h0 = at(@cur.src, k)
+            h1 = at(@cur.src - 1, k)
+            @offset[k] = x1 - h1 * @cur.g
+            ds = (x1 - x2) - (h0 - h1) * @cur.g
+            sq = 0.0
+            (1..w).each do |jj|
+              d = at(@t0 - jj, k) - 2.0 * at(@t0 - jj - 1, k) + at(@t0 - jj - 2, k)
+              sq += d * d
+            end
+            excess = ds.abs - 2.0 * Math.sqrt(sq / w)
+            b = excess > 0 ? (ds < 0 ? -excess : excess) : 0.0
+            @bend[k] = b
+            @bend_u[k] = b
           end
           @peak = 0.0
           (@t0 - avail...@t0).each do |pos|
@@ -471,10 +685,63 @@ module MB
           @held = 0
           @faded = false
           @active = true
-          @in_exit = false
+          @landing = LAND_NONE
           @events += 1
           choose_next
           true
+        end
+
+        # See mb_conceal_last_grain: [grain, rho].
+        def last_grain(pos)
+          hs = @land_frames
+          to = @t0 - hs - 1
+          lo = @t0 - @avail
+          span = 2 * @align_search
+          from = to > lo + span ? to - span : lo
+          w = [@align_window, hs].min
+          off = (hs - w) / 2
+          src = @align_search > 0 && !@fixed ? best(pos + off, from, to, off, w) : to
+          g = Grain.new(src, @t0 - src, 0, 1.0)
+          [g, @fixed ? 0.0 : rho_at(pos, g.src, hs)]
+        end
+
+        # See mb_conceal_land.
+        def land
+          hs = @land_frames
+          if @faded
+            @faded = false
+            @gain = 0.0
+            @in_seam = false
+          end
+
+          if @in_seam
+            pos = @nxt.src + @h
+            if pos + hs >= @t0
+              @nxt.len = @t0 - @nxt.src
+              @landing = LAND_NEXT
+              @land_left = @nxt.len - @nxt.i
+              return
+            end
+            @fin, @fin_rho = last_grain(pos)
+            @landing = LAND_AFTER
+            @land_left = (@h - @j) + @fin.len
+            return
+          end
+
+          pos = @cur.src + @cur.i
+          if pos + hs >= @t0
+            @cur.len = @t0 - @cur.src
+            @landing = LAND_LAST
+            @land_left = @cur.len - @cur.i
+            return
+          end
+
+          @cur.len = @cur.i + hs
+          g, @rho = last_grain(pos)
+          @nxt.src, @nxt.len, @nxt.i, @nxt.g = g.src, g.len, g.i, g.g
+          @h = hs
+          @landing = LAND_NEXT
+          @land_left = @nxt.len
         end
       end
     end
