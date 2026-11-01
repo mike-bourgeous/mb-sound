@@ -81,6 +81,25 @@ RSpec.describe(MB::Sound::Session::Changes) do
       expect { run(1600) }.not_to raise_error
     end
 
+    # (fix-batch-1101, SessionFuzz seed 768014: an fx swap and a seek on
+    # one time between samples; the swap's split on the floor sample left
+    # the seek due mid-span, so it landed at the next buffer's start)
+    it 'lands a seek on its frame after a carrying swap split off just before it, at any buffer size' do
+      time = 1r + 1/(3 * 96000r) # (a third of a sample after frame 96000)
+      frames = [800, 367].map do |size|
+        s = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120),
+                                   channels: 1, buffer_size: size, realtime: false, raise_errors: true)
+        s.add(1.constant, name: :x)
+        s.instance_variable_get(:@render_lock).synchronize { s.send(:change, :skip, :x, time, split: true) { |_| } }
+        s.seek(1, start_time: time)
+        s.process_buffer(size) while s.frame < 98_000
+        s.journal.changes.select { |e| %i[skip seek].include?(e.kind) }.map { |e| [e.kind, e.lands.frame] }
+      ensure
+        s&.close
+      end
+      expect(frames).to eq([[[:skip, 96000], [:seek, 96001]]] * 2)
+    end
+
     it 'lets a queued graph start after a queued stop' do
       session.add(1.constant, name: :x)
       session.remove(:x, fade: 0, time: 1r)

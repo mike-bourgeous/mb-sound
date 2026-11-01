@@ -194,6 +194,19 @@ RSpec.describe('session fuzzing') do
         'at_bar(2, beat: 4) { seek 2, 2.999 }',
       ], 3,
     ],
+    # (the same seed after that fix, FUZZ=24 FUZZ_BASE=768000: an fx swap
+    # split off on the floor sample of bar 3 hid the seek on its ceiling
+    # sample from Seeks#frames_before_seek, so the seek landed at the next
+    # buffer's start; since carry-1's floor splits)
+    'an fx swap and a seek landing on one time between samples (seed 768014)' => [
+      :buffer_size, ['bpm 137.5', 'meter 3, 4', 'knob :busy, 0.5'], [
+        'track :t3, L.inst.jungle.jungle_sub, q: 1',
+        'scene :s1, t3: seq(C3.n4, G3.n8.dotted, Eb3.n16).loop, others: :keep',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(3) { fx :t3, :dub }',
+        'at_bar(2, beat: 4) { seek 2, 2.999 }',
+      ], 3,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil
