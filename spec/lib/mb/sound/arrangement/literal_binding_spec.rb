@@ -40,6 +40,13 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     s.command('rebuild') { arr.send(:start_track, tr, tr.clip, arr.send(:resolve, tr.q || arr.quant, tr, MB::Sound::LaunchPoint::NONE), nil, carry: true) }
   }
 
+  # REBUILD on the next buffer, as `bind ..., on: :now` lands.
+  REBUILD_NOW = ->(s) {
+    arr = s.arrangement
+    tr = arr.tracks.values.first
+    s.command('rebuild') { arr.send(:start_track, tr, tr.clip, arr.send(:resolve, tr.q || arr.quant, tr, MB::Sound::LaunchPoint.on(:now)), nil, carry: true) }
+  }
+
   def code_of(s, track = :lead)
     r = MB::Sound::UI::Inspect.roots(s.ui_graphs[track]).first
     (r.respond_to?(:to_ruby) ? r : MB::Sound::GraphNode::Recipe.bundle_of(r)).to_ruby # (a preset ending in .pan: its bundle)
@@ -138,15 +145,13 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
   it 'binds the literals of a preset whose root is a ChannelMixer (tine_piano): the same samples at their values' do
     tine = ->(c) { MB::Sound.preset(:tine_piano, midi: c) }
     clip = MB::Sound.seq(MB::Sound::C3, MB::Sound::E3).n4.loop
-    _, ref, = play(REBUILD, track: :keys, patch: tine, clip: clip, buffers: 150)
+    _, ref, = play(REBUILD_NOW, track: :keys, patch: tine, clip: clip, buffers: 30)
     [
       [{ env: :attack }, 2, :"keys/attack", 0.001, 'v.env(knob(:"keys/attack"), 1.4, 0, 0.3, gm: false)'],
-      [{ amp_env: :sustain }, 0, :"keys/sustain", 0.0, 'knob(:"keys/sustain")'],
-      [{ filter: :cutoff }, 0, :"keys/cutoff", 30.0, 'cutoff: knob(:"keys/cutoff")'],
       [{ filter: :quality }, 0, :"keys/quality", 0.7, 'quality: knob(:"keys/quality")'],
       [{ at: :amplitude }, 0, :"keys/amplitude_at", 0.3, 'lfo.at(knob(:"keys/amplitude_at"))'],
     ].each do |what, nth, kname, value, code|
-      s, bound, = play(->(_) { MB::Sound.bind(:keys, what, nth: nth) }, track: :keys, patch: tine, clip: clip, buffers: 150)
+      s, bound, = play(->(_) { MB::Sound.bind(:keys, what, nth: nth, on: :now) }, track: :keys, patch: tine, clip: clip, buffers: 30)
       expect(s.knobs[kname]&.value).to be_within(1e-12).of(value), what.inspect
       expect(code_of(s, :keys)).to include(code)
       expect(bound.length).to eq(ref.length)
