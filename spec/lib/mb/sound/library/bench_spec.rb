@@ -243,13 +243,13 @@ RSpec.describe MB::Sound::Library::Bench do
 
     it 'defaults to the main checkout\'s tmp/listening, so worktree sets outlive the worktree' do
       env = ENV.delete('MB_SOUND_BENCH_DIR')
-      main = described_class.main_checkout(bench.checkout_dir)
+      main = MB::Sound::Internal.main_checkout(bench.checkout_dir)
       expect(main).not_to be_nil
       expect(File.directory?(File.join(main, '.git'))).to be(true)
       expect(bench.default_root).to eq(File.join(main, 'tmp', 'listening'))
       ENV['MB_SOUND_BENCH_DIR'] = '/somewhere/else'
       expect(bench.default_root).to eq('/somewhere/else')
-      expect(described_class.main_checkout('/')).to be_nil
+      expect(MB::Sound::Internal.main_checkout('/')).to be_nil
     ensure
       ENV['MB_SOUND_BENCH_DIR'] = env
     end

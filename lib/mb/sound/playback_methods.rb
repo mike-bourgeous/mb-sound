@@ -44,7 +44,13 @@ module MB
       #     play sf2('GeneralUser.sf2')                   # a demo phrase
       #     play riff, clock: 138.75.bpm                 # on a clock (see #bg)
       #     play                                          # no sound: starts the transport (see TransportMethods#start)
-      def play(sound = (no_sound = true), gain: nil, plot: nil, graphical: false, spectrum: false, quiet: false, fade: nil, at: nil, on: nil, in: nil, clock: nil)
+      def play(sound = (no_sound = true), *more, gain: nil, plot: nil, graphical: false, spectrum: false, quiet: false, fade: nil, at: nil, on: nil, in: nil, clock: nil)
+        unless more.empty?
+          # (ux-notes-1: the maintainer's `play :bowl, riff` for a clip on a
+          # track's instrument)
+          hint = sound.is_a?(Symbol) ? "; for a clip on #{sound.inspect}'s instrument: bg #{sound.inspect}, clip (or swap #{sound.inspect}, clip while it plays)" : ''
+          raise ArgumentError, "play takes one sound (got #{more.length + 1})#{hint}"
+        end
         point = LaunchPoint.of(binding) or return nil
         return start(at: point) if no_sound
         sound = Sequence::Clocked.apply(sound, clock) if clock
@@ -158,6 +164,11 @@ module MB
         name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
         sound = Sequence::Clocked.apply(sound, clock) if clock
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
+        # (a clip's echo or arp stream on a track: it would replace the
+        # track's instrument with the default patch; ux-notes-1)
+        if (e = Internal.stream_for_track_error('bg', name, sound))
+          return MB::Sound.live_error(e)
+        end
 
         # A clip given to a track with a patch plays through the patch (see
         # ArrangementMethods#track)
@@ -573,6 +584,15 @@ module MB
       #     swap :drums, beat2                       # the same: rows by name (rows it lacks go silent)
       def swap(name, clips = nil, at: nil, on: nil, in: nil, **pairs)
         point = LaunchPoint.of(binding) or return nil
+        if name.is_a?(Hash) && clips.nil? && pairs.empty?
+          # (ux-notes-1: the maintainer's `swap({bowl: riff})`, a Hash in
+          # parentheses, which Ruby passes as the name)
+          example = name.length == 1 ? "swap #{name.keys.first.inspect}, clip" : 'swap :bass, clip'
+          return MB::Sound.live_error(ArgumentError.new("swap takes the player's name first, then its new clip: #{example} (a Hash in parentheses is the name; old => new pairs follow the name: swap :drums, beat => beat2)"))
+        end
+        if (e = Internal.stream_for_track_error('swap', name, clips, any: true))
+          return MB::Sound.live_error(e)
+        end
         raise ArgumentError, 'Pass a new clip or old => new pairs, not both' if clips && !pairs.empty?
         clips ||= pairs
         raise ArgumentError, 'Pass a new clip or old => new pairs to swap' if clips.is_a?(Hash) && clips.empty?
@@ -586,6 +606,15 @@ module MB
         clips = clips.call if clips.is_a?(Library::Entry)
 
         name = player_name(name)
+        # (ux-notes-1: the maintainer's `swap :growl, riff` after a one-shot
+        # clip had ended the track; Session#swap said only "No background
+        # player :growl is playing or stopped")
+        session = Session.current
+        if name.is_a?(Symbol) && session.arrangement.tracks[name]&.patch? && !session.playing_after_queue?(name) && !session.resumable?(name)
+          return MB::Sound.live_error(ArgumentError.new(
+            "swap #{name.inspect}: track #{name.inspect} isn't playing (a one-shot clip ended, or it was stopped); bg #{name.inspect}, clip plays a clip on its instrument"
+          ))
+        end
         session_command(name, label: "swap #{name.inspect}", kind: :swap) { |session, time|
           session.swap(name, clips, at: point, start_time: point.given? ? nil : time)
           name

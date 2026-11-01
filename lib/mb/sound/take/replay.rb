@@ -63,6 +63,7 @@ module MB
           @ends_epoch = ends_epoch
           @seconds = seconds
           @lines = []
+          @lines_left = 0 # (take lines not run yet: see #schedule, #render)
           @midi = {}
           @decisions = []
           @gestures = []
@@ -140,9 +141,11 @@ module MB
           @midi.each { |name, rows| session.midi_in(name).replay(rows, base_epoch: @base_epoch) }
           session.replay_decisions!(@decisions, base_epoch: @base_epoch) unless @decisions.empty?
           session.replay_gestures!(@gestures, base_epoch: @base_epoch) unless @gestures.empty?
+          @lines_left = @lines.length
           @lines.each_with_index do |l, i|
             eval_at = [l.issued, *l.lands.map { |t| Array(t).first }].min
             session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i, owner: :take, exact: true) do
+              @lines_left -= 1
               run_line(session, binding, l, i)
             end
           end
@@ -189,7 +192,13 @@ module MB
             # (something not in the take, like the keyboard's default patch,
             # kept it going), so it keeps moving here until the last row
             # plays, then pauses when idle as it would live
-            session.advance_idle = midi_pending?(session)
+            # So do take lines still to run: the live timeline moved to
+            # where they were typed, maybe through foreground plays the
+            # replay skips (ux-notes-1: a take whose first line failed and
+            # whose next ran 7.7 whole notes later, after `play
+            # L.inst.ambient_gong`, went quiet at 1:1 with 448 lines left;
+            # #play keeps its :take_clock player moving for the same reason)
+            session.advance_idle = midi_pending?(session) || @lines_left > 0
 
             before = transport.position
             n = [sizes.next, max_frames - frames].min

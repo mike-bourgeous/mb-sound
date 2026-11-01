@@ -83,6 +83,30 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(draw(:inspector, env, { title_in_rule: true }, w: 80, h: 12)[1]).not_to start_with('notes') # (short: the sections only)
     end
 
+    # (ux-notes-1, the maintainer, 2026-10-31: "Pressing up when at the top
+    # of an inspector list should move to the bottom of the list above,
+    # e.g. glide time up to osc2")
+    it 'steps Up past a row\'s first param into the row above\'s last, and Down past its last into the next row' do
+      pane = ui.panes.fetch(:inspector)
+      info = snap.inspector
+      rows = info.shown.sort_by { |j| [MB::Sound::UI::Inspect::SECTIONS.index(info.nodes[j].section) || 99, j] }
+      skip 'the fake data needs two rows' if rows.length < 2
+      at = rows[1]
+      st = { title_in_rule: true, mode: true }
+      picked = ->(j) { snap.with(slow: snap.slow.with(inspector: info.with(node: j))) }
+      draw(:inspector, picked.(at), st, w: 80, h: 30)
+      st[:pick] = info.loose.length # (the row's first param)
+      key(:inspector, st, :pick, -1)
+      expect(MB::Sound::UI::Inspect.target[:node]).to eq(rows[0])
+      draw(:inspector, picked.(rows[0]), st, w: 80, h: 30)
+      expect(st[:pick]).to eq(pane.send(:pick_list, st, picked.(rows[0]).inspector).length - 1)
+      # (and Down from there, the row it came from)
+      key(:inspector, st, :pick, 1)
+      expect(MB::Sound::UI::Inspect.target[:node]).to eq(at)
+      draw(:inspector, picked.(at), st, w: 80, h: 30)
+      expect(st[:pick]).to eq(info.loose.length)
+    end
+
     it 'draws the front panel with P: knobs and literals as cells by section, the picked row\'s first cell picked' do
       st = { title_in_rule: true, mode: true, view: :panel }
       lp4 = snap.with(slow: snap.slow.with(inspector: snap.inspector.with(node: 0)))

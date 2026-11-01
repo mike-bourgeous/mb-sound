@@ -407,5 +407,42 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       @tiles.send(:run_pane_line, ui::PaneKeys::Run['turn :nope_not_a_knob, 1', 'nope'])
       expect(@term.wait_for('ArgumentError')).to eq(true), @term.text
     end
+
+    # (ux-notes-1, the maintainer's note: "Something printed a bunch of knob
+    # history to the pry console": a long held key's gesture line)
+    it 'prints a long gesture line shortened, while the whole line runs and is journaled' do
+      @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+      @session.knob(:space, 0.2)
+      frames = (0...80).map { |i| "(#{i}/10r).seconds => #{(i % 50) / 50.0}" }
+      line = "turn :space, #{frames.join(', ')}, curve: :linear"
+      @tiles, @term = ui_tiles(:tiles, rows: 30, cols: 100, session: @session)
+      expect(@term.wait_for('t> ')).to eq(true)
+      @tiles.send(:run_pane_line, ui::PaneKeys::Run[line, 'space 0.58 (7.90 s held)'])
+      expect(@term.wait_for('77 more keyframes')).to eq(true), @term.text
+      expect(@term.text).to include('the whole line ran')
+      expect(@term.text).not_to include('(40/10r)')
+      turns = @session.journal.changes.select { |c| c.kind == :turn }
+      expect(turns.length).to eq(1)
+    end
+  end
+
+  describe 'UI::Tiles.shown_code' do
+    let(:frames) { (0...30).map { |i| "(#{i}/10r).seconds => #{i / 30.0}" } }
+
+    it 'keeps short lines whole' do
+      expect(ui::Tiles.shown_code('turn :cut, 0 => 300.hz, 1.n8 => 900.hz')).to eq('turn :cut, 0 => 300.hz, 1.n8 => 900.hz')
+    end
+
+    it 'keeps the first two and the last keyframe of a long keyframe line, its options, and counts the rest' do
+      short = ui::Tiles.shown_code("turn :\"bowl/wave1\", #{frames.join(', ')}, curve: :linear")
+      expect(short).to eq("turn :\"bowl/wave1\", #{frames[0]}, #{frames[1]}, … 27 more keyframes …, #{frames[29]}, curve: :linear")
+      expect(short.length).to be <= ui::Tiles::SHOWN_CODE_MAX
+    end
+
+    it 'cuts any other long line' do
+      short = ui::Tiles.shown_code("bg :x, #{'1 + ' * 100}1")
+      expect(short.length).to eq(ui::Tiles::SHOWN_CODE_MAX + 2)
+      expect(short).to end_with(' …')
+    end
   end
 end

@@ -71,6 +71,47 @@ module MB
           rest.to_s.strip.empty? ? first : "#{first} ..."
         end
 
+        # The longest pane line printed whole into the REPL pane (see
+        # .shown_code).
+        SHOWN_CODE_MAX = 200
+
+        # How many of a long line's keyframes .shown_code keeps at its start
+        # and end.
+        SHOWN_KEYFRAMES = [2, 1].freeze
+
+        # A pane key's console line as the REPL pane prints it (ux-notes-1,
+        # the maintainer's note 2026-10-31: "Something printed a bunch of
+        # knob history to the pry console": an 11 s held key's gesture
+        # line, 74 keyframes, filled the console).  Lines up to
+        # SHOWN_CODE_MAX characters print whole.  A longer call with
+        # keyframes (`turn :x, 0 => 0.5, 1.n8 => 0.7, ..., curve: :linear`)
+        # keeps its first two and last keyframe and its options, the rest
+        # counted (`… 71 more keyframes …`); any other long line is cut at
+        # SHOWN_CODE_MAX with " …".  Only the printing is shortened: the
+        # line run, journaled, and kept by the take is the whole one.
+        def self.shown_code(code, max: SHOWN_CODE_MAX)
+          code = code.to_s
+          return code if code.length <= max
+
+          body = Prism.parse(code).value.statements.body
+          call = body.length == 1 ? body.first : nil
+          args = call.is_a?(Prism::CallNode) ? call.arguments&.arguments : nil
+          hash = args&.last
+          if hash.is_a?(Prism::KeywordHashNode)
+            frames, options = hash.elements.partition { |e| e.is_a?(Prism::AssocNode) && !e.key.is_a?(Prism::SymbolNode) }
+            head, tail = SHOWN_KEYFRAMES
+            if frames.length > head + tail + 1
+              more = frames.length - head - tail
+              parts = args[0...-1].map(&:slice) + frames.first(head).map(&:slice) +
+                ["… #{more} more keyframes …"] + frames.last(tail).map(&:slice) + options.map(&:slice)
+              short = "#{call.name} #{parts.join(', ')}"
+              return short if short.length <= max * 2
+            end
+          end
+
+          "#{code[0, max]} …"
+        end
+
         # The key table for +modes+ as text lines (for help :ui).
         def self.key_table(*modes)
           table = Keys.table
@@ -1539,8 +1580,10 @@ module MB
             err = e
           end
           result = err ? "#{err.class}: #{err.message}" : "=> #{Tiles.one_line(r.inspect)[0, 120]}"
-          print_to_repl("# #{run.note || 'ui'}\n#{run.code}\n#{out.string}#{result}\n")
-          err ? flash(Tiles.one_line(result), :bad) : flash(Tiles.one_line("#{run.note || run.code}  (#{run.code})"), :ok)
+          shown = Tiles.shown_code(run.code)
+          whole = shown == run.code ? '' : "# (shortened here: the whole line ran, and the take keeps it)\n"
+          print_to_repl("# #{run.note || 'ui'}\n#{whole}#{shown}\n#{out.string}#{result}\n")
+          err ? flash(Tiles.one_line(result), :bad) : flash(Tiles.one_line("#{run.note || shown}  (#{shown})"), :ok)
           r
         end
 

@@ -562,16 +562,24 @@ RSpec.describe(MB::Sound::Take) do
     s.close
   end
 
-  it 'warns when a replay goes quiet with take lines left to run' do
+  # (ux-notes-1: the maintainer's second take of 2026-10-31 began with a
+  # failed `bg`, then foreground plays the replay skips, then `design` 7.7
+  # whole notes in; the replay went quiet at 1:1 with 448 lines left.  A
+  # line typed further along means the live timeline moved there.)
+  it 'keeps the timeline moving to take lines still to run, as it moved live' do
     r = MB::Sound::Take::Replay.new(bpm: 120, bar_length: 1r, master_gain: 0.5, fade_in: nil, fade_out: nil, rng: nil, ends: 6r) { |rp|
       rp.line(0r, [0r], 'bg :x, 0.1.constant.until(1.bar)')
       rp.line(5r, [5r], 'bg :y, 0.1.constant')
     }
+    out = []
     frames = 0
     expect {
-      frames = r.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), tail: 0)
-    }.to output(/went quiet at 2:1.*1 take line left to run.*ends at 7:1/).to_stderr
-    expect(frames).to be_between(96000, 97600)
+      frames = r.render(MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1, tail: 0) { |mix| out << mix[0].dup }
+    }.not_to output.to_stderr
+    mix = SpecBuffers.join(out)
+    expect(frames).to be >= 6 * 96000
+    expect(mix[96000 * 3].abs).to eq(0) # (silent between them)
+    expect(mix[96000 * 5 + 48000].abs).to be > 0.01 # (:y plays from 5r, where it was typed)
   end
 
   it 'keeps the timeline moving while recorded MIDI is still to play, then pauses when idle' do
@@ -670,6 +678,24 @@ RSpec.describe(MB::Sound::Take) do
     expect { path = take.save(:tmp) }.to output(/Saved the take to .*tmp_takes\/take_\d+_\d+\.rb/).to_stdout
     expect(File.read(path)).to eq(take.to_ruby)
     expect { take.save(:temp) }.to raise_error(ArgumentError, /:tmp/)
+  end
+
+  # (ux-notes-1: the maintainer typed `take.save :tmp, 'UX friction'`)
+  it 'keeps a note in the header and the file name: take.save :tmp, "UX friction" (or note:)' do
+    allow(described_class).to receive(:tmp_dir).and_return(tmp_path('tmp_takes'))
+    path = nil
+    expect { path = take.save(:tmp, 'UX friction') }.to output(/Saved the take \(UX friction\) to .*take_\d+_\d+_ux_friction\.rb/).to_stdout
+    text = File.read(path)
+    expect(text.lines[1]).to start_with('# Replay of a live mb-sound take')
+    expect(text.lines[2]).to eq("# Note: UX friction\n")
+    expect(text).to eq(take.to_ruby(note: 'UX friction'))
+
+    other = tmp_path('x.rb')
+    expect { take.save(other, note: "two\nlines") }.to output(/Saved the take \(two\) to .*x\.rb/).to_stdout
+    expect(File.read(other).lines[2, 2]).to eq(["# Note: two\n", "#       lines\n"])
+    expect(described_class.file_words('  A/B: the  Bass!  ')).to eq('_a_b_the_bass')
+    expect(described_class.file_words(nil)).to eq('')
+    expect { take.save(:temp, 'x') }.to raise_error(ArgumentError, /then a note/)
   end
 
   it 'autosaves to one file, keeping the newest AUTOSAVE_KEEP, and saves once more when stopped' do

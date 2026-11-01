@@ -301,12 +301,13 @@ module MB
       end
 
       # The replay script (see #save).
-      def to_ruby(title: nil)
+      def to_ruby(title: nil, note: nil)
         lines = @mutex.synchronize { @lines.dup }
         title ||= "take started #{@start[:time]}"
 
         out = +"#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby\n"
         out << "# Replay of a live mb-sound #{title}: #{lines.length} console lines.\n"
+        note.to_s.strip.each_line.with_index { |l, i| out << "##{i == 0 ? ' Note: ' : '       '}#{l.rstrip}\n".sub(/ +\n\z/, "\n") }
         out << "# Each line runs again at the time it was typed, with every change it\n"
         out << "# made landing exactly where it landed live.\n"
         out << "#\n"
@@ -370,17 +371,34 @@ module MB
       # #home if set, else to the project's sets/ directory with +repo:
       # true+, else to the user data directory (see .data_dir).  +path+
       # :tmp saves to mb-sound's tmp/takes/ (for debugging hand-offs;
-      # maintainer, 2026-10-18).  Returns the path.
-      def save(path = nil, repo: false)
-        path = File.join(self.class.tmp_dir, "take_#{Time.now.strftime('%Y%m%d_%H%M%S')}.rb") if path == :tmp
-        raise ArgumentError, "take.save takes a path or :tmp (got #{path.inspect})" if path.is_a?(Symbol)
+      # maintainer, 2026-10-18).  A +note+ (the second argument, or
+      # +note:+) goes into the script's header comment, and into a file
+      # name #save makes, as words (`take_20261031_173152_ux_friction.rb`;
+      # ux-notes-1, the maintainer typed `take.save :tmp, 'UX friction'`).
+      # Returns the path.
+      #
+      #     take.save :tmp, 'UX friction'
+      #     take.save note: 'second verse idea'
+      def save(path = nil, note_text = nil, repo: false, note: note_text)
+        note = note&.to_s&.strip
+        note = nil if note&.empty?
+        name = "take_#{Time.now.strftime('%Y%m%d_%H%M%S')}#{Take.file_words(note)}.rb"
+        path = File.join(self.class.tmp_dir, name) if path == :tmp
+        raise ArgumentError, "take.save takes a path or :tmp (got #{path.inspect}), then a note: take.save :tmp, 'UX friction'" if path.is_a?(Symbol)
         path = File.expand_path(path.to_s) if path # `~/x.rb` is a home path, as in a shell
-        path ||= File.join(home || (repo ? File.expand_path('../../../sets', __dir__) : self.class.data_dir), "take_#{Time.now.strftime('%Y%m%d_%H%M%S')}.rb")
+        path ||= File.join(home || (repo ? File.expand_path('../../../sets', __dir__) : self.class.data_dir), name)
         FileUtils.mkdir_p(File.dirname(path))
-        File.write(path, to_ruby)
+        File.write(path, to_ruby(note: note))
         File.chmod(0o755, path)
-        puts "Saved the take to \e[1m#{path}\e[0m"
+        puts "Saved the take#{note ? " (#{note.lines.first.strip})" : ''} to \e[1m#{path}\e[0m"
         path
+      end
+
+      # A note's first words for a file name (`_ux_friction`, at most 40
+      # characters), or '' for none.
+      def self.file_words(note)
+        words = note.to_s.lines.first.to_s.downcase.gsub(/[^a-z0-9]+/, '_').gsub(/\A_+|_+\z/, '')[0, 40].sub(/_+\z/, '')
+        words.empty? ? '' : "_#{words}"
       end
 
       # How often the console's take saves itself (#autosave!), in seconds.

@@ -556,6 +556,85 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
   end
 
+  # ux-notes-1: the maintainer's take of 2026-10-31 tried to put
+  # `riff.loop.echo(...)` on a track's instrument with swap, cue, bg, play,
+  # swap({bowl: ...}), wire, and connect; cue and bg played the stream on
+  # the default patch, replacing the instrument at launch
+  describe 'a clip transform\'s stream on a track, and the guesses around it' do
+    before do
+      @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+      MB::Sound::Session.with_context(session: @session) do
+        MB::Sound.track(:bowl, :init)
+        MB::Sound.bg(:bowl, MB::Sound.seq(MB::Sound::C3).n4.loop)
+      end
+      20.times { @session.process_buffer }
+    end
+
+    after do
+      @session.close
+      MB::Sound.rewind
+    end
+
+    let(:riff) { MB::Sound.seq(MB::Sound::C2, MB::Sound::A2).n8.loop }
+    let(:stream) { riff.arp(:up) }
+
+    def in_session(&block) = MB::Sound::Session.with_context(session: @session, &block)
+
+    it 'plays a clip\'s echo on the track\'s instrument with swap, cue, and bg (Clip#echo is a Clip)' do
+      echoed = riff.echo(3.n16, 2, pitch: 5.st, velocity: 0.5)
+      expect(echoed).to be_a(MB::Sound::Sequence::Clip)
+      expect(echoed.events).to eq(riff.bake(MB::Sound.echo(3.n16, 2, pitch: 5.st, velocity: 0.5)).events)
+      in_session { MB::Sound.swap(:bowl, echoed, at: :now) }
+      20.times { @session.process_buffer }
+      expect(@session.arrangement.tracks[:bowl].patch?).to eq(true)
+      expect(@session.players[:bowl]).not_to include('MIDI')
+      in_session { MB::Sound.cue(:bowl, riff.echo(1.n8, 1)) }
+      in_session { MB::Sound.bg(:bowl, riff.echo(1.n16, 1)) }
+      40.times { @session.process_buffer }
+      expect(@session.players.values).to all(satisfy { |d| !d.include?('MIDI') })
+    end
+
+    it 'refuses a clip\'s live stream (arp) on bg, cue, and swap, saying to bake it, and leaves the instrument playing' do
+      %i[bg cue swap].each do |cmd|
+        expect { in_session { MB::Sound.public_send(cmd, :bowl, stream) } }.to raise_error(ArgumentError, /#{cmd} :bowl: arp\(.*live MIDI stream of a clip.*riff\.bake\(arp\(\.\.\.\)\)/)
+      end
+      expect { in_session { MB::Sound.bg(:bowl, MB::Sound::Notes.new(MB::Sound::MIDI::Stream.new(MB::Sound::MIDI::LiveSource.new(MB::Sound::MIDI::VirtualInput.new)))) } }.to raise_error(ArgumentError, /live MIDI \(no clip\).*rec/) if defined?(MB::Sound::MIDI::VirtualInput)
+      40.times { @session.process_buffer }
+      expect(@session.players.keys).to eq([:bowl])
+      expect(@session.players[:bowl]).not_to include('MIDI')
+      expect(@session.arrangement.tracks[:bowl].patch?).to eq(true)
+    end
+
+    it 'says swap takes the name first for swap({bowl: clip}) and play takes one sound' do
+      expect { in_session { MB::Sound.swap({ bowl: stream }) } }.to raise_error(ArgumentError, /swap :bowl, clip/)
+      expect { in_session { MB::Sound.play(:bowl, stream) } }.to raise_error(ArgumentError, /play takes one sound \(got 2\); for a clip on :bowl's instrument: bg :bowl, clip/)
+    end
+
+    it 'says to bg a track whose one-shot clip ended, and a comma for `swap :bowl. seq(...)`' do
+      in_session { MB::Sound.swap(:bowl, MB::Sound.seq(MB::Sound::C3).n16, at: :now) }
+      @session.process_buffer while @session.playing_after_queue?(:bowl) && @session.frame < 48_000 * 30
+      expect(@session.playing_after_queue?(:bowl)).to eq(false)
+      expect { in_session { MB::Sound.swap(:bowl, riff) } }.to raise_error(ArgumentError, /track :bowl isn't playing .*bg :bowl, clip/)
+      e = (MB::Sound.module_eval('swap :bowl. seq(C2)') rescue $!)
+      expect(MB::Sound::ErrorFormat.summary(e)).to end_with('(did you mean :bowl, seq(...) (a comma after :bowl, not a period)?)')
+    end
+
+    it 'suggests the Symbol for a bare track name, and swap for wire and connect' do
+      in_session do
+        e = (MB::Sound.module_eval('bowl.clip') rescue $!)
+        expect(MB::Sound::ErrorFormat.summary(e)).to eq("NameError: undefined local variable or method 'bowl' (did you mean :bowl, the track's name?)")
+        %w[wire connect].each do |w|
+          e = (MB::Sound.module_eval("#{w} :bowl, 1") rescue $!)
+          expect(MB::Sound::ErrorFormat.summary(e)).to eq(
+            "NoMethodError: undefined method '#{w}' (did you mean swap :bowl, clip (a clip on :bowl's instrument, at its next launch point; bg :bowl, clip starts a stopped track)?)"
+          )
+        end
+        e = (MB::Sound.module_eval('nosuchname_here') rescue $!)
+        expect(MB::Sound::ErrorFormat.summary(e)).not_to include('the track')
+      end
+    end
+  end
+
   describe '#resume, #stopped, and #forget' do
     after(:each) do
       MB::Sound::Session.default.close

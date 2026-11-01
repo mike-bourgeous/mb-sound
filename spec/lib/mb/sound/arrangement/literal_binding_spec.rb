@@ -399,4 +399,34 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
   ensure
     ui::Inspect.target = nil
   end
+
+  # (ux-notes-1, the maintainer's note of 2026-10-31: "Pressing enter on
+  # filter env attack did not give me a way to adjust it, or if it did the
+  # knob fader did not appear and the displayed time did not change": the
+  # init voice's amp env attack is the knob :"growl/attack", so
+  # `bind :growl, filter_env: :attack` was refused, and the inspector's
+  # turns after it moved the amp env's attack)
+  it 'names a literal\'s knob after its call when the param\'s name is another knob the graph reads (the init voice\'s filter env attack)' do
+    s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+    @sessions << s
+    MB::Sound::Session.with_context(session: s) do
+      MB::Sound.track(:growl, :init)
+      MB::Sound.bg(:growl, MB::Sound.seq(MB::Sound::E3, MB::Sound::G3).n4.loop)
+    end
+    4.times { s.process_buffer }
+    MB::Sound::Session.with_context(session: s) { MB::Sound.bind(:growl, filter_env: :attack, on: :now) }
+    20.times { s.process_buffer }
+    expect(s.knobs.keys).to include(:"growl/filter_env_attack")
+    expect(s.knobs[:"growl/attack"].value).not_to eq(s.knobs[:"growl/filter_env_attack"].value) # (the amp env's own knob, untouched)
+    tr = s.arrangement.tracks[:growl]
+    expect(tr.patch.literal_bindings.map { |b| b.respond_to?(:knob) ? b.knob : b }.inspect).to include('filter_env_attack')
+
+    # The inspector offers the same knob and says so on the line
+    roots = MB::Sound::UI::Inspect.roots(s.ui_graphs[:growl])
+    env = described_class.nodes(roots).find { |n| n.is_a?(MB::Sound::Envelope) && (described_class.target(roots, n, :sustain) rescue nil)&.call_name == :filter_env }
+    t = described_class.target(roots, env, :sustain)
+    name, qualified = described_class.knob_name(:growl, t, roots)
+    expect([name, qualified]).to eq([:"growl/filter_env_sustain", true])
+    expect(described_class.line(:growl, t, as: name)).to eq('bind :growl, filter_env: :sustain, as: :"growl/filter_env_sustain"')
+  end
 end

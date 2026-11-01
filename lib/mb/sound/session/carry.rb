@@ -130,6 +130,29 @@ module MB
             end
           end
 
+          # Clip sources the matching above left alone (the new patch reads
+          # its clip in more or fewer places: `it.tone ... cutoff: it.hz +
+          # 150` after `it.tone`): when every old clip source plays the same
+          # clip, each takes that one's state (its clip, swaps included), so
+          # the rebuilt graph plays what the old one played rather than the
+          # clip it was first built for (ux-notes-1, the maintainer's note
+          # 2026-10-31: "now the clip is playing at double speed": `design
+          # :growl`'s half-note clip came back over the whole-note clip
+          # swapped in since)
+          old_all ||= graph_nodes(old_nodes)
+          old_sources = old_all.grep(MIDI::ClipSource)
+          unless old_sources.empty?
+            first = old_sources.first
+            pending = ->(o) { o.instance_variable_get(:@pending_swap) }
+            if old_sources.all? { |o| o.clip.equal?(first.clip) && pending.(o).equal?(pending.(first)) }
+              all.grep(MIDI::ClipSource).each do |x|
+                next if seen[x.__id__]
+                seen[x.__id__] = true
+                pairs << [first, x]
+              end
+            end
+          end
+
           # Notes nodes the new graph has where the old had none (a unison
           # whose detune became a knob reads note numbers of its own): each
           # takes the state of an old node of its kind in the same voice,

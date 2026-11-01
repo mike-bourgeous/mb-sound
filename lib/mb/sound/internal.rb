@@ -1,3 +1,4 @@
+require 'open3'
 require 'tempfile'
 
 module MB
@@ -296,6 +297,68 @@ module MB
         else
           base = ENV['XDG_DATA_HOME'].to_s.empty? ? File.join(Dir.home, '.local', 'share') : ENV['XDG_DATA_HOME']
           File.join(base, 'mb-sound', 'help')
+        end
+      end
+
+      # mb-sound's own directory (the gem's root: lib/'s parent).
+      GEM_ROOT = File.expand_path('../../..', __dir__)
+
+      # The main checkout of the git repository +dir+ is in (the parent of
+      # its common .git directory, so a worktree gives the main checkout),
+      # or nil outside a repository or for a bare one.  Used by
+      # Library::Bench.default_root and UI::NoteLog.dir.
+      def main_checkout(dir)
+        common, status = Open3.capture2('git', '-C', dir.to_s, 'rev-parse', '--path-format=absolute', '--git-common-dir', err: File::NULL)
+        return nil unless status.success?
+        common = common.strip
+        File.basename(common) == '.git' ? File.dirname(common) : nil
+      rescue SystemCallError
+        nil
+      end
+
+      # The tmp/ directory of the main checkout mb-sound runs from, when it
+      # runs from a git checkout (a worktree's main checkout, so the files
+      # outlive the worktree and the containers sharing /app see them), or
+      # nil for an installed gem.  Looked up once.
+      def checkout_tmp_dir
+        return @checkout_tmp_dir if defined?(@checkout_tmp_dir)
+        main = File.exist?(File.join(GEM_ROOT, '.git')) ? main_checkout(GEM_ROOT) : nil
+        @checkout_tmp_dir = main && File.join(main, 'tmp')
+      end
+
+      # An ArgumentError saying how to play the MIDI::Stream (or Notes)
+      # +stream+ on player +name+'s instrument, for console +command+ (bg,
+      # cue, swap), or nil when +stream+ isn't one or +name+ isn't a track
+      # with a patch (+any+: for any player, as swap needs clips
+      # everywhere).  ux-notes-1: the maintainer's `cue :bowl,
+      # riff.loop.echo(...)` played the stream on the default patch
+      # (Playable's soft synth), and `launch` then replaced the track's
+      # instrument with it ("I wanted to put the sequence on cue on the
+      # existing instrument"); `bg :bowl, stream` did the same at the
+      # track's launch point.  Clip#echo returns a Clip since then
+      # (Stream::CLIP_BAKED); the other clip transforms (arp, strum, chord,
+      # ...) still return Streams, which Clip#bake makes clips, and live
+      # input can't become a clip without recording it.
+      def stream_for_track_error(command, name, stream, any: false)
+        return nil unless stream.is_a?(MIDI::Stream) || stream.is_a?(Notes)
+        unless any
+          tr = Session.current.arrangement.tracks[name] if name.is_a?(Symbol)
+          return nil unless tr&.patch?
+        end
+        where = any && !Session.current.arrangement.tracks[name] ? "#{name.inspect}'s clips" : "#{name.inspect}'s instrument"
+        nodes = stream.is_a?(MIDI::Stream) ? [stream.source, *(stream.graph rescue [])] : []
+        if nodes.any?(MIDI::ClipSource)
+          what = stream.source.is_a?(MIDI::Transform) ? stream.source.to_s : nil
+          op = what&.[](/\A([a-z_]+)\(/, 1) || 'arp'
+          ArgumentError.new(
+            "#{command} #{name.inspect}: #{what ? "#{what} is" : 'that is'} a live MIDI stream of a clip (clip.#{op}(...) returns one), not a clip, so it can't play on #{where}; " \
+            "bake the #{op} into a clip: `riff.bake(#{op}(...))` instead of `riff.#{op}(...)` (a loop's notes wrap to its start)"
+          )
+        else
+          ArgumentError.new(
+            "#{command} #{name.inspect}: that is live MIDI (no clip), so it can't play on #{where}; record it into a clip first (`arm #{name.inspect}` then `rec` or `capture`), " \
+            "or give #{name.inspect} a patch that reads it"
+          )
         end
       end
 

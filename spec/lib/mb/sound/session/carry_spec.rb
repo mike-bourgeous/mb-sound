@@ -175,4 +175,31 @@ RSpec.describe(MB::Sound::Session::Carry, :aggregate_failures) do
       expect(carried).to eq(plain)
     end
   end
+
+  # (ux-notes-1, the maintainer's note of 2026-10-31: "now the clip is
+  # playing at double speed": his patch redefinition read the clip in two
+  # places, `it.tone ... cutoff: it.hz + 150`, after one; the new clip
+  # sources didn't pair with the old one, so they played the clip the graph
+  # was first built for, `design`'s half notes, instead of the whole notes
+  # swapped in since)
+  it 'plays the swapped-in clip after a redefinition that reads the clip in more places' do
+    first = MB::Sound.seq(MB::Sound::C3).n2.loop
+    later = MB::Sound.seq(MB::Sound::C2, MB::Sound::C4, MB::Sound::G2, MB::Sound::G3).n1.loop
+    s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false, buffer_size: 800)
+    MB::Sound::Session.with_context(session: s) do
+      MB::Sound.track(:growl) { |c| c.tone.ramp.at(-10.db) }
+      MB::Sound.bg(:growl, first)
+    end
+    s.process_buffer while s.frame < 48_000
+    MB::Sound::Session.with_context(session: s) { MB::Sound.swap(:growl, later) }
+    s.process_buffer while s.frame < 48_000 * 3
+    MB::Sound::Session.with_context(session: s) { MB::Sound.track(:growl) { |c| c.tone.ramp.at(-10.db).filter(:bp4, cutoff: c.hz + 150, resonance: 0.4) } }
+    s.process_buffer while s.frame < 48_000 * 7
+    input = s.ui_graphs.fetch(:growl)
+    sources = MB::Sound::Session::Carry.graph_nodes(input.instance_variable_get(:@nodes)).grep(MB::Sound::MIDI::ClipSource)
+    expect(sources.length).to eq(2)
+    expect(sources.map(&:clip)).to all(equal(later))
+  ensure
+    s&.close
+  end
 end

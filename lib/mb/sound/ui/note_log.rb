@@ -13,8 +13,9 @@ module MB
       # text capture of the screen, the players and tracks, the form's
       # section, the scene, the position, and the last console lines.
       # Notes go to one Markdown file per day in $MB_SOUND_UI_NOTES, else
-      # the user data directory (ui-notes/ beside help/ and takes/),
-      # appended, never rewritten.  `ui.notes` lists today's.
+      # the main checkout's tmp/ui-notes/ when mb-sound runs from a git
+      # checkout, else the user data directory (ui-notes/ beside help/ and
+      # takes/), appended, never rewritten (see .dir).  `ui.notes` lists today's.
       module NoteLog
         # The console lines kept with a note.
         COMMANDS = 8
@@ -44,10 +45,17 @@ module MB
 
         module_function
 
-        # Where notes go: $MB_SOUND_UI_NOTES, else the user data directory.
+        # Where notes go: $MB_SOUND_UI_NOTES, else tmp/ui-notes/ in the main
+        # checkout when mb-sound runs from a git checkout (a worktree's main
+        # checkout too: Internal.checkout_tmp_dir; the maintainer,
+        # 2026-10-31: "The ui.note feature should save somewhere the
+        # container can see", since the Mac's user data directory is outside
+        # the /app volume), else the user data directory (an installed gem).
         def dir
           env = ENV['MB_SOUND_UI_NOTES']
           return File.expand_path(env) unless env.to_s.empty?
+          tmp = Internal.checkout_tmp_dir
+          return File.join(tmp, 'ui-notes') if tmp
           File.join(File.dirname(Internal.help_data_dir), 'ui-notes')
         end
 
