@@ -1326,7 +1326,8 @@ module MB
         resonator effects are instruments too: `L.inst.bar` strikes the
         :bar resonator from notes (`struck(clip, :bar)`; every resonator
         preset has one, built from it), `L.fx.bar.ping(C5)` strikes it
-        once, `play L.fx.bar` plays a strike, and a library file line
+        once (a clip, `L.fx.bar.ping(seq(C2, A2).n16.loop)`, plays as
+        written), `play L.fx.bar` plays a strike, and a library file line
         `struck :my_bell, resonator: :bell, decay: 8` makes another.
 
         Judging presets by ear: `L.fx.reverb.bench` renders every reverb on

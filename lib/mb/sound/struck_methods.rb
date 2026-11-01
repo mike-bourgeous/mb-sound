@@ -19,6 +19,7 @@ module MB
       #     play struck(seq(C5, E5, G5, C6).n8, :marimba)
       #     track :bells, L.inst.bell
       #     L.fx.bar.ping(C5)                 # one strike of the bar
+      #     L.fx.bar.ping(seq(C2, A2).n16.loop)  # a clip, played as written
       #     L.inst.bowl.(riff, decay: 8)      # a shorter bowl
       def struck(source = nil, name = :bar, decay: nil, beat: nil, spread: nil, voices: nil, level: nil)
         source, name = name, source if source.is_a?(Symbol)
