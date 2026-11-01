@@ -512,12 +512,16 @@ module MB
 
         # Rewrites the transforms' own argument errors (see .argument_help),
         # for Streams and everything mirroring them (Notes, Clip, unattached
-        # chains).  Anonymous, like the DSL's recorders, so introspection
+        # chains), and records each Stream transform's call on the stream it
+        # returns (Stream#lineage, stream_lineage.rb: how it prints back as
+        # Ruby).  Anonymous, like the DSL's recorders, so introspection
         # that skips wrappers finds the transform.
         ARGUMENT_HELP = Module.new do
           TRANSFORMS.each do |name|
             define_method(name) do |*args, **kwargs, &block|
-              super(*args, **kwargs, &block)
+              out = super(*args, **kwargs, &block)
+              out.__send__(:adopt_lineage, self, name, args, kwargs, block) if out.is_a?(Stream) && is_a?(Stream) && !out.equal?(self)
+              out
             rescue ArgumentError => e
               raise Stream.argument_help(e, name) || e
             end

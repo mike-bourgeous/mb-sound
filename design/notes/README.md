@@ -143,8 +143,8 @@ Live MIDI uses JACK ports when a server answers, else bundled RtMidi; specs use 
 ### [Arrangement and the Session groundwork](arrangement.md)
 
 The Session groundwork: `Session::Stamp` (frame + Rational position), `Session::Journal`, and one change queue (`Session#change`) through which every command lands on an exact sample, with mute/solo, undo, launch points (`on:`/`in:`/`at:`), and takes that replay exactly at any buffer size.
-On top, the Set layer (`MB::Sound::Arrangement`, `Session#arrangement`): `track`, `scene`, `go`, the clip matrix (`launch`, `tweak`), ring-outs, song forms (`flow` with labels, gotos, picks, fills), seeks, markers, knobs (`knob`, `turn`, scenes and sections turning them), clocks, and recording (`arm`, `rec`, `capture`, `rec_audio`).
-Rules: changes go through `Session#change`; scene graphs build on the scheduler thread ahead of their landing and new graphs are warmed in a sandbox first; never enable a TracePoint in library code (YJIT drops its compiled code); Sessions keep one instance variable layout.
+On top, the Set layer (`MB::Sound::Arrangement`, `Session#arrangement`): `track`, `scene`, `go`, the clip matrix (`launch`, `tweak`), ring-outs, song forms (`flow` with labels, gotos, picks, fills), seeks, markers, knobs (`knob`, `turn`, scenes and sections turning them), clocks, recording (`arm`, `rec`, `capture`, `rec_audio`), wires (`wire`).
+Rules: changes go through `Session#change`; scene graphs build ahead of their landing on the scheduler thread, new graphs warm in a sandbox first; never enable a TracePoint in library code (YJIT drops its code); Sessions keep one instance variable layout.
 
 ### [Master effects](master_effects.md)
 

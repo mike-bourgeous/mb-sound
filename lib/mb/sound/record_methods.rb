@@ -19,19 +19,56 @@ module MB
     #     captures               # the clips recorded so far, by name
     #     rec_audio 'sets/take3.flac'   # the master bus, from now; alone: a timestamped file
     #     stop_rec_audio on: :bar
+    #     wire :lead, midi.arp(:up, 16)       # a stream into :lead's patch, as if played live
+    #     wire :lead, riff.stream.echo(1.n8, 3), on: :bar
+    #     wires                  # => {lead: "riff.stream.echo(1.n8, 3)"}
+    #     unwire :lead
     module RecordMethods
       # Arms tracks: `rec` and `capture` without names record into them,
       # and each track's patch plays the live MIDI input (a monitor player
       # named "track/live") unless +monitor: false+.  +input:+ picks a
       # named MIDI input (see MidiMethods#midi; the default input
-      # otherwise).  Returns the :arm journal entries.  Also available as
+      # otherwise), or a MIDI stream played instead of live input
+      # (`arm :lead, input: midi.arp(:up)`: the track is wired to it now;
+      # see #wire).  Returns the :arm journal entries.  Also available as
       # #arm_track.
       def arm(*names, monitor: true, input: nil)
         session = Session.current
-        attach_session_midi(session, input)
+        attach_session_midi(session, input) unless Arrangement::Wire.stream?(input)
         session.arrangement.arm(*names, monitor: monitor, input: input)
       end
       alias arm_track arm
+
+      # Wires a MIDI stream into track +name+'s instrument at the track's
+      # launch point (+on:+, +in:+, +at:+, else its +q:+): the stream
+      # plays through the track's patch exactly as live input does (the
+      # track is armed on it, its monitor :"name/live" playing), so `rec`
+      # and `capture` record it and takes replay it.  Anything
+      # MIDI::Stream.for takes: `midi.arp(:up)` (live input through an
+      # arp), `riff.stream.echo(1.n8, 3)` (a clip as a live stream, its
+      # echoes ringing past the loop), `midi_file('x.mid')`.  The track's
+      # clip plays on beside it.  Clips go on tracks with #swap.  One undo
+      # step.  Also available as #connect.
+      #
+      #     wire :lead, midi.arp(:up, 16, octaves: 2)
+      #     wire :keys, riff.stream.echo(1.n8, 3, pitch: 7.st), on: :bar
+      def wire(name = nil, stream = nil, monitor: true, at: nil, on: nil, in: nil)
+        Session.current.arrangement.wire(name, stream, monitor: monitor, at: at, on: on, in: binding.local_variable_get(:in))
+      end
+      alias connect wire
+
+      # Stops the streams wired into tracks +names+ (every wired track if
+      # none are named) at each track's launch point (+on:+, +in:+,
+      # +at:+); the tracks are disarmed.  One undo step.
+      def unwire(*names, at: nil, on: nil, in: nil)
+        Session.current.arrangement.unwire(*names, at: at, on: on, in: binding.local_variable_get(:in))
+      end
+
+      # The wired tracks: a Hash from track name to the stream wired into
+      # it, as Ruby (`live ...` for live streams).
+      def wires
+        Session.current.arrangement.wires
+      end
 
       # Disarms tracks (every armed track if none are named) and stops
       # their monitors.  Also available as #disarm_track.
@@ -163,8 +200,9 @@ module MB
 
         armed = session.arrangement.armed
         names = armed.keys if names.empty?
+        # (a wired track's input plays its stream, not live input)
         inputs = names.map { |n| armed[n] }.uniq
-        (inputs.empty? ? [nil] : inputs).each { |i| attach_session_midi(session, i) }
+        (inputs.empty? ? [nil] : inputs).each { |i| attach_session_midi(session, i) unless Session::Name.wired(i) }
       end
 
       # The scheduled block's time inside one (see Session::Changes#now).

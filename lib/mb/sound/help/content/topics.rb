@@ -1107,7 +1107,7 @@ module MB
       commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale
       dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord
       note :midi
-      see :record, :midi_files
+      see :record, :midi_files, :wire
     end
 
     Help.topic :midi_files, 'MIDI files as clips and kits', group: :perform do
@@ -1132,6 +1132,41 @@ module MB
       commands :midi_tracks, :midi_clip, :midi_kit, :midi_file
       note :midi
       see :midi, :sequences
+    end
+
+    Help.topic :wire, 'Wiring streams into tracks', group: :perform do
+      about <<~TEXT
+        `wire :lead, stream` plays a MIDI stream through a track's
+        instrument exactly as a keyboard would: the track is armed on it,
+        its live monitor :"lead/live" plays from the track's launch point
+        (`on: :bar`, `in:`, `at:` too), and `rec`/`capture` record it.  Any
+        stream works: live input through transforms (`midi.arp(:up, 16)`,
+        `midi.chord(:min7).strum(20.ms)`), a clip as a live stream
+        (`riff.stream.echo(1.n8, 3)`, its echoes ringing past the loop
+        point), a MIDI file (`midi_file('x.mid')`).  Wiring again swaps the
+        stream on its exact frame (held notes end there); the track's own
+        clip plays on beside it (`stop :lead` stops the clip, `unwire :lead`
+        the stream).  `wires` lists them; set documents save the ones that
+        print as Ruby; takes replay them all.  A clip on a track's
+        instrument is `swap :lead, clip`; `arm :lead, input: stream` wires
+        it now.
+      TEXT
+      commands :wire, :unwire, :wires
+      note :arrangement
+      see :midi, :record, :sets
+      example 'a clip echoing into a track as a live stream' do
+        track(:try_lead, q: 1) { |c| c.synth(voices: 6) { |v| v.hz.triangle.at(-17.db) * v.env(0.003, 0.2, 0.3, 0.15) } }
+        riff = seq(A3, C4, E4, nil).n8.loop
+        wire :try_lead, riff.stream.echo(1.n16, 2, pitch: 7.st, velocity: 0.6)
+        after(3) { unwire :try_lead }
+      end
+      example 'an arp wired in, then swapped for another on the next bar' do
+        track(:try_lead, q: 1) { |c| c.synth(voices: 4) { |v| v.hz.saw.at(-16.db).lp4(1400) * v.env(0.002, 0.1, 0.4, 0.08) } }
+        chords = (seq(A3, F3).n1 & seq(C4, A3).n1 & seq(E4, C4).n1).loop
+        wire :try_lead, chords.arp(:up, 16, octaves: 2)
+        after(1) { wire :try_lead, chords.arp(:down, 8) }
+        after(3) { unwire :try_lead }
+      end
     end
 
     Help.topic :templates, 'Rhythm and feel templates', group: :perform do

@@ -40,11 +40,11 @@ module MB
         # Applies +event+ (see Arm::TABLE) to track +name+'s arm state,
         # creating it from +input+ and +monitor+ when disarmed.  Returns the
         # new Arm, or nil once disarmed.
-        def arm_event(name, event, input: nil, monitor: true)
+        def arm_event(name, event, input: nil, monitor: true, wire: nil)
           @mutex.synchronize {
             @arms ||= {}
-            arm = @arms[name] || Arm.new(input: input, monitor: monitor, state: :disarmed)
-            arm = arm.with(input: input, monitor: monitor) if %i[arm arm_silent].include?(event)
+            arm = @arms[name] || Arm.new(input: input, monitor: monitor, state: :disarmed, wire: wire)
+            arm = arm.with(input: input, monitor: monitor, wire: wire) if %i[arm arm_silent].include?(event)
             nxt = arm.on(event)
             nxt ? @arms[name] = nxt : @arms.delete(name)
             nxt
@@ -108,7 +108,9 @@ module MB
           return [] if names.empty?
           time = @session.now
           before = undo_state
+          a = arms
           names.each do |n|
+            @session.wire_midi(a[n].input, nil, time, data: { track: n, by: :panic }) if a[n]&.wired?
             arm_event(n, :panic)
             @session.change(:disarm, n, time, data: { by: :panic }) { |_t| }
           end
@@ -126,26 +128,26 @@ module MB
         # them, and (+monitor: true+, the default) each track's patch also
         # plays the live input (MidiInput#stream through a LiveClip) as the
         # player "name/live", so the performer hears the track's sound.
-        # +input+ names the Session's MIDI input (nil: the default).
-        # Returns the :arm journal entries (one, or an Array).
+        # +input+ names the Session's MIDI input (nil: the default), or is
+        # a MIDI stream to play instead of live input (anything
+        # MIDI::Stream.for takes: `midi.arp(:up)`, `riff.stream.echo(1.n8,
+        # 3)`, a MIDI file's Notes): the track is then wired to it from now
+        # (see Wires#wire, which lands at a launch point).  Returns the :arm
+        # journal entries (one, or an Array).
         def arm(*names, monitor: true, input: nil)
           names = names.flatten
           raise ArgumentError, 'Name the tracks to arm' if names.empty?
           trs = names.map { |n| recording_track(n) or return nil }
+          wire = nil
+          if Wire.stream?(input)
+            wire = Wire.of(input, 'arm ..., input:') or return nil
+          end
 
           entries = nil
           @session.command("arm #{names.map(&:inspect).join(', ')}") {
             before = undo_state
-            entries = trs.map { |tr|
-              # Armed right away (Set state, like a track's clip), so `arm
-              # :lead; rec 4` works while the :arm change waits (in a
-              # replay, lines run ahead of their landing times)
-              want = monitor && tr.patch?
-              arm_event(tr.name, want ? :arm : :arm_silent, input: input, monitor: monitor)
-              c = @session.change(:arm, tr.name, @session.now, data: { input: input }.compact) { |_t| }
-              arm_event(tr.name, :arm_silent, input: input, monitor: monitor) if want && !start_monitor(tr, input)
-              c
-            }
+            time = @session.now
+            entries = trs.map { |tr| arm_now(tr, monitor: monitor, input: wire ? nil : input, wire: wire, time: time).first }
             @session.note_undo_extra(self, before, undo_state)
           }
           entries = entries.map { |c| @session.journal[c.seq] }
@@ -166,12 +168,7 @@ module MB
             # time, not when the scheduler runs it (up to Session#lookahead
             # earlier, which cut the end of the monitored phrase; the looper persona, 2026-10-13)
             time = @session.now
-            entries = names.map { |n|
-              mon = Session::Name.monitor(n)
-              @session.remove(mon, fade: @session.declick_bars, time: time) if @session.playing_after_queue?(mon)
-              arm_event(n, :disarm)
-              @session.change(:disarm, n, time) { |_t| }
-            }
+            entries = names.map { |n| disarm_now(n, time).first }
             @session.note_undo_extra(self, before, undo_state)
           }
           entries = entries.map { |c| @session.journal[c.seq] }
@@ -310,15 +307,60 @@ module MB
 
         private
 
-        # The track to record into, or nil (after live_error).
-        def recording_track(name)
+        # The track to record into (or wire: +wire+ true), or nil (after
+        # live_error).
+        def recording_track(name, wire: false)
           tr = tracks[name]
           if tr.nil?
             known = tracks.keys
-            return MB::Sound.live_error(ArgumentError.new("No track #{name.inspect} to record into#{known.empty? ? '' : " (tracks: #{known.map(&:inspect).join(', ')})#{Form.suggest(name, known)}"}"))
+            return MB::Sound.live_error(ArgumentError.new("No track #{name.inspect} to #{wire ? 'wire' : 'record into'}#{known.empty? ? '' : " (tracks: #{known.map(&:inspect).join(', ')})#{Form.suggest(name, known)}"}"))
           end
-          return MB::Sound.live_error(ArgumentError.new("Track #{name.inspect} plays a graph; recording needs a track with a patch (track #{name.inspect} do |clip| ... end)")) unless tr.patch?
+          return MB::Sound.live_error(ArgumentError.new("Track #{name.inspect} plays a graph; #{wire ? 'a wire' : 'recording'} needs a track with a patch (track #{name.inspect} do |clip| ... end)")) unless tr.patch?
           tr
+        end
+
+        # Arms track +tr+ (inside a command; see #arm): on MIDI input
+        # +input+, or on the stream of Wire +wire+ through the track's wire
+        # input from timeline position +time+ (+arm_time+ is the :arm
+        # change's: now).  Arming a wired track on live input unwires it at
+        # +time+; wiring a track whose monitor plays its wire input already
+        # keeps that monitor (only the stream changes).  Returns the :arm
+        # Change and the :wire or :unwire Change (or nil).
+        def arm_now(tr, monitor:, input:, wire:, time:, arm_time: @session.now)
+          prior = arms[tr.name]
+          input = Session::Name.wire(tr.name) if wire
+          want = monitor && tr.patch?
+          mon = Session::Name.monitor(tr.name)
+          keep = wire && want && prior&.wired? && prior.monitoring? && @session.playing_after_queue?(mon)
+
+          # Armed right away (Set state, like a track's clip), so `arm
+          # :lead; rec 4` works while the :arm change waits (in a replay,
+          # lines run ahead of their landing times)
+          arm_event(tr.name, want ? :arm : :arm_silent, input: input, monitor: monitor, wire: wire)
+          c = @session.change(:arm, tr.name, arm_time, data: { input: input, wire: wire&.text }.compact) { |_t| }
+          wc =
+            if wire
+              @session.wire_midi(input, wire.stream, time, data: { track: tr.name, stream: wire.text })
+            elsif prior&.wired?
+              @session.wire_midi(prior.input, nil, time, data: { track: tr.name })
+            end
+          if want && !keep && !start_monitor(tr, input, wire: wire, time: wire ? time : nil)
+            arm_event(tr.name, :arm_silent, input: input, monitor: monitor, wire: wire)
+          end
+          [c, wc]
+        end
+
+        # Disarms track +name+ at timeline position +time+ (inside a
+        # command; see #disarm): its monitor stops, and a wired stream stops
+        # playing into its wire input.  Returns the :disarm Change and the
+        # :unwire Change (or nil).
+        def disarm_now(name, time)
+          arm = arms[name]
+          mon = Session::Name.monitor(name)
+          @session.remove(mon, fade: @session.declick_bars, time: time) if @session.playing_after_queue?(mon)
+          wc = arm&.wired? ? @session.wire_midi(arm.input, nil, time, data: { track: name }) : nil
+          arm_event(name, :disarm)
+          [@session.change(:disarm, name, time) { |_t| }, wc]
         end
 
         # +length+ (bars or a Duration) in whole notes, or nil (after
@@ -413,11 +455,12 @@ module MB
           arm = arms[tr.name]
           return unless arm&.monitoring? && @session.playing_after_queue?(Session::Name.monitor(tr.name))
           # (a patch that fails to build leaves the old monitor playing)
-          arm_event(tr.name, :redefine) if start_monitor(tr, arm.input)
+          arm_event(tr.name, :redefine) if start_monitor(tr, arm.input, wire: arm.wire)
         end
 
-        # Starts the player that monitors armed track +tr+ (see #arm).
-        def start_monitor(tr, input)
+        # Starts the player that monitors armed track +tr+ (see #arm), now
+        # or at +time+ (a wire's launch point).
+        def start_monitor(tr, input, wire: nil, time: nil)
           live = Session::MidiInput::LiveClip.new(@session.midi_in(input))
           graph = begin
                     GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.build(live) }
@@ -425,10 +468,17 @@ module MB
                     # (not a PatchError: a patch may play clips but not live
                     # MIDI, e.g. ghost_chords; the track still arms, silent)
                     where = patch_line(tr.patch, e)
-                    notice_patch_problem("Track #{tr.name.inspect} can't monitor live MIDI (#{e.class}: #{e.message}#{where ? " at #{where}" : ''}); recording still works")
+                    notice_patch_problem("Track #{tr.name.inspect} can't monitor #{wire ? 'its wire' : 'live MIDI'} (#{e.class}: #{e.message}#{where ? " at #{where}" : ''}); recording still works")
                     return nil
                   end
-          @session.add(graph, name: Session::Name.monitor(tr.name), on: :now, fade: 0, description: "#{tr.name}: live monitor (armed; #{input ? "MIDI input #{input.inspect}" : 'live MIDI'})")
+          what = wire ? "wired: #{wire.text}" : "armed; #{input ? "MIDI input #{input.inspect}" : 'live MIDI'}"
+          name = Session::Name.monitor(tr.name)
+          description = "#{tr.name}: live monitor (#{what})"
+          if time
+            @session.add(graph, name: name, start_time: time, fade: 0, description: description)
+          else
+            @session.add(graph, name: name, on: :now, fade: 0, description: description)
+          end
         end
       end
     end

@@ -64,13 +64,15 @@ module MB
 
       # Console guesses with no method of that name, and what they meant
       # (ux-notes-1: the maintainer's `wire :bowl, clip` and `connect
-      # :bowl, clip`, after swap refused a stream): name => Proc of the
-      # first argument giving the suggestion.
+      # :bowl, clip`, after swap refused a stream; `wire`/`connect` are
+      # commands since wire-1, refusing a clip with the same hint):
+      # name => Proc of the first argument giving the suggestion.
       CLIP_ON_TRACK = ->(name = :bass, *) {
         n = name.is_a?(Symbol) ? name.inspect : ':bass'
-        "swap #{n}, clip (a clip on #{n}'s instrument, at its next launch point; bg #{n}, clip starts a stopped track)"
+        "swap #{n}, clip (a clip on #{n}'s instrument, at its next launch point; bg #{n}, clip starts a stopped track) " \
+          "or wire #{n}, stream (a MIDI stream into #{n}'s instrument)"
       }
-      GUESSES = { wire: CLIP_ON_TRACK, connect: CLIP_ON_TRACK, attach: CLIP_ON_TRACK }.freeze
+      GUESSES = { attach: CLIP_ON_TRACK }.freeze
 
       # For a bare word the console doesn't know that names something in
       # the current Session (a track, scene, or knob), the Symbol to write

@@ -1,6 +1,7 @@
 # Graph-io phase 3: set documents (kind: :set), the Set layer saved and
 # loaded so a set can be reopened.
 require_relative '../../../support/graph_sweep'
+require_relative '../../../support/midi_writer'
 
 # Sets for the spec below, written in MB::Sound so note names resolve as in
 # the console.
@@ -253,6 +254,39 @@ RSpec.describe('set documents', :aggregate_failures) do
 
     ref = play(a, a.arrangement.last_form, 120)
     got = play(b, doc.form, 120)
+    expect(ref[0].abs.max).to be > 0.05
+    expect(RecipeHelpers.max_diff(ref, got)).to eq(0)
+  end
+
+  it 'saves wires whose streams print as Ruby, comments live ones, and loads them to play like the original (wire-1)' do
+    lines = [
+      'track(:lead, q: 1) { |c| c.number * c.gate * 0.001 }',
+      'track(:keys, q: 1) { |c| c.number * c.gate * 0.001 }',
+      'track(:pad, q: 1) { |c| c.number * c.gate * 0.001 }',
+      'riff = seq(C4, E4, G4, nil).n4.loop.named(:riff)',
+      'wire :lead, riff.stream.echo(1.n8, 2, pitch: 7.st).transpose(2)',
+      'wire :keys, MB::Sound::Session.current.midi_in.stream.arp(:up, 16)',
+      "wire :pad, midi_file(#{MidiWriter.reese_song(tmp_path('reese.mid')).inspect}, loop: true).transpose(-12)",
+    ]
+    a = session
+    b = MB::Sound::Take.console_binding
+    within(a) { lines.each { |l| b.eval(l) } }
+    text = nil
+    expect { text = io.dump(a.arrangement, name: 'wired') }.to output(/track :keys's wire \(live MIDI arp\(:up, n16\)\) is a live stream/).to_stderr
+    expect(text).to include("riff = seq(C4, E4, G4, nil).n4.loop.named(:riff)\n")
+    expect(text).to include("\nwire :lead, riff.stream.echo(1.n8, 2, pitch: 7.st).transpose(2)\n")
+    expect(text).to match(/^# wire :keys, \.\.\. \(live MIDI arp\(:up, n16\): a live stream, not saved; takes replay it\)$/)
+    expect(text).to include("# WARNING(graph-io): track :keys's wire (live MIDI arp(:up, n16)) is a live stream; set documents don't save it")
+    expect(text).to match(/^wire :pad, midi_file\(".*reese\.mid", loop: true\)\.transpose\(-12\)$/)
+
+    # (the file's absolute path isn't one a document may read: load without it)
+    c = session
+    doc = io.load(text.lines.grep_v(/\Awire :pad/).join, session: c)
+    expect(doc.kind).to eq(:set)
+    expect(c.arrangement.wires).to eq({ lead: 'riff.stream.echo(1.n8, 2, pitch: 7.st).transpose(2)' })
+    within(a) { b.eval('unwire :pad') }
+    ref = Array.new(240) { a.process_buffer.map(&:dup) }.transpose.map { |x| SpecBuffers.join(x) }
+    got = Array.new(240) { c.process_buffer.map(&:dup) }.transpose.map { |x| SpecBuffers.join(x) }
     expect(ref[0].abs.max).to be > 0.05
     expect(RecipeHelpers.max_diff(ref, got)).to eq(0)
   end

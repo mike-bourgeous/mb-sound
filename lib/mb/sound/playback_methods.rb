@@ -248,7 +248,9 @@ module MB
                 # An armed track's live monitor keeps playing (maintainer,
                 # 2026-10-13: stop stops the clips; "Keep, but add hints")
                 mon = name.is_a?(Symbol) && !names.include?(Session::Name.monitor(name)) && Session::Name.monitor(name)
-                if mon && session.playing_after_queue?(mon)
+                if mon && session.playing_after_queue?(mon) && (w = session.arrangement.arms[name]&.wire)
+                  warn "stop #{name.inspect}: its wire (#{w.text}) still plays through #{mon.inspect} (unwire #{name.inspect})"
+                elsif mon && session.playing_after_queue?(mon)
                   warn "stop #{name.inspect}: its live monitor #{mon.inspect} is still playing (disarm #{name.inspect} or stop #{mon.inspect})"
                 elsif !stopped.include?(name)
                   playing = session.players.keys

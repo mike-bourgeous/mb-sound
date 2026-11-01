@@ -25,7 +25,15 @@ module MB
       # Invariant (checked by Recording#arm_problems): a track is
       # :monitoring exactly when its monitor player is playing or queued
       # (Session#playing_after_queue?).
-      class Arm < Data.define(:input, :monitor, :state)
+      #
+      # +wire+ is the Wire of a track armed on a stream (`wire :lead,
+      # stream`, `arm :lead, input: stream`; its +input+ is then the
+      # track's wire input, Session::Name.wire), else nil.
+      class Arm < Data.define(:input, :monitor, :state, :wire)
+        def initialize(input:, monitor:, state:, wire: nil)
+          super
+        end
+
         # The states in order.
         STATES = %i[disarmed monitoring silent].freeze
 
@@ -72,6 +80,9 @@ module MB
 
         # True while the track's monitor plays (see the invariant).
         def monitoring? = state == :monitoring
+
+        # True if the track is armed on a wired stream (see #wire).
+        def wired? = !wire.nil?
       end
     end
   end

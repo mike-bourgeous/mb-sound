@@ -88,8 +88,11 @@ module MB
           'MB::Sound::GraphNode' => %i[samples seconds cycles cyc radians rad outputs then],
           'MB::Sound::GraphNode::Channels' => %i[then],
           'MB::Sound::Notes' => %i[then],
-          'MB::Sound::Sequence::Clip' => %i[then],
-          'MB::Sound::MIDI::Stream' => %i[then],
+          # (a clip's stream through transforms: set documents' wires,
+          # `wire :lead, riff.stream.echo(1.n8, 3)`; transforms taking
+          # blocks are code)
+          'MB::Sound::Sequence::Clip' => %i[then stream],
+          'MB::Sound::MIDI::Stream' => %i[then] + (MB::Sound::MIDI::Stream::TRANSFORMS - %i[select reject map_notes]),
           'MB::Sound::Rack' => %i[with >> << using],
           # A rack's knobs with modulation around them (racks R2)
           'MB::Sound::GraphNode::Knob' => %i[mod choose],
@@ -221,7 +224,9 @@ module MB
           # class's ancestors plus VALUES, without the iterating bundle
           # methods; delay insert pipelines add d.wet (d.fb is recorded).
           def instance_names(obj)
-            klass = obj.class
+            # (an armed track's monitor builds its patch on a LiveClip, the
+            # clip methods it has: a loaded set's patch may call them)
+            klass = obj.is_a?(MB::Sound::Session::MidiInput::LiveClip) ? MB::Sound::Sequence::Clip : obj.class
             @instance_names ||= {}
             names = (@instance_names[klass] ||= begin
               n = Set.new
