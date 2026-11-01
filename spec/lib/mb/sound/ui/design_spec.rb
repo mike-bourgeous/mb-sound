@@ -54,6 +54,12 @@ RSpec.describe(MB::Sound::UI::Design, :aggregate_failures) do
     expect(r.to_s).to start_with('design :lead: init on track :lead (new), plays G4 (its role\'s note) on MAIN')
     expect(@session.arrangement.tracks[:lead].patch?).to eq(true)
     expect(@session.knobs.keys).to include(:"lead/wave1", :"lead/sync", :"lead/cutoff", :"lead/glide")
+    # (ux-notes-1: with sync off the graph has no synced tone, so the walk
+    # alone didn't know sync is a build knob, and a held key made a gesture
+    # its turn refused; the inspector turns it a step a key)
+    4.times { @session.process_buffer }
+    info = MB::Sound::UI::Inspect::Gatherer.new.call(@session, { track: :lead, node: nil })
+    expect(info.build_knobs).to include(:"lead/sync")
     run { stop :lead, on: :now }
     @session.process_buffer
   end

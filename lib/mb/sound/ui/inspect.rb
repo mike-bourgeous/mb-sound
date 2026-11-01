@@ -175,7 +175,7 @@ module MB
             end
             InspectInfo.new(track: track, tracks: tracks, knobs: entry[:knobs], nodes: nodes, node: sel, code: entry[:code], error: nil,
                             loose: entry[:loose], hidden: entry[:hidden], voices: voices, voice: voice, unfit: entry[:unfit], document: entry[:document],
-                            voice_knobs: entry[:voice_knobs], build_knobs: entry[:build_knobs] || [].freeze)
+                            voice_knobs: entry[:voice_knobs], build_knobs: build_knobs_of(session, track, entry))
           rescue StandardError => e
             info = InspectInfo.new(track: track, tracks: tracks || [].freeze, knobs: entry&.[](:knobs) || [].freeze, nodes: entry&.[](:nodes) || [].freeze,
                                    node: nil, code: entry&.[](:code), error: "#{e.class}: #{e.message}".freeze)
@@ -183,6 +183,21 @@ module MB
           end
 
           private
+
+          # The build knobs of track +track+'s graph +entry+: the switches
+          # its walk found (Tone#sync's enabled:), and the knobs the
+          # Arrangement noted its patch read while building (BuildKnobs; the
+          # init voice's sync, off, builds no synced tone and no reader, so
+          # the walk alone missed it: the inspector took it for a plain knob,
+          # and a held key's gesture was refused, "read when growl builds,
+          # so it takes plain values"; ux-notes-1).
+          def build_knobs_of(session, track, entry)
+            found = entry[:build_knobs] || [].freeze
+            arr = session.respond_to?(:arrangement) ? session.arrangement : nil
+            return found unless arr.respond_to?(:build_knobs_of)
+            noted = arr.build_knobs_of(track)
+            noted.all? { |k| found.include?(k) } ? found : (found | noted).freeze
+          end
 
           # The Binds of node +n+ (index +sel+ of +entry+'s graph) of track
           # +track+ (kept per graph: literals change only when it is built

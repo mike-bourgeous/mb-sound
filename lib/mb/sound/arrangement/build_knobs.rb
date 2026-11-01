@@ -35,6 +35,12 @@ module MB
           @build_knob_lock.synchronize { @build_knobs.key?(name) }
         end
 
+        # The build knobs track +track+'s patch read (names; the inspector
+        # turns them a step a key: UI::Inspect).  Takes no render lock.
+        def build_knobs_of(track)
+          @build_knob_lock.synchronize { @build_knobs.select { |_, list| list.include?(track) }.keys }
+        end
+
         # Turns build knob +k+ to +value+ and rebuilds +tracks+ at +point+
         # (a LaunchPoint; each track's quantization by default), in one
         # Session#command.  The knob lands with the rebuilt graphs.  Returns
