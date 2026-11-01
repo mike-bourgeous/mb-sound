@@ -9,7 +9,7 @@ Rules: never `jack_port_unregister` on an active JACK client; things closed at e
 ## Quick reference
 
 - Pick the backend with `OUTPUT_TYPE` / `INPUT_TYPE` (`device`, `ffmpeg`, `null`; the container uses `null`); latency with `AUDIO_PROFILE`, a script's `-L`, or console `latency :low`.
-- Check a machine with `bin/audio_check.rb` and `bin/midi_check.rb`; stalls with `bin/latency_probe.rb` (latency_probe.md).
+- Check a machine with `bin/audio_check.rb` and `bin/midi_check.rb`; stalls with `bin/latency_probe.rb`, and where live underruns come from with `bin/dropout_probe.rb` (`DeviceOutput#trace_start`; latency_probe.md, Dropout probe).
 - JACK: `spec/lib/mb/sound/jack_spec.rb` needs `jackd2` (skips without it); never `jack_port_unregister` on an active client.
 - Close things at exit through `ExitClose`, never an `at_exit` block of their own.
 

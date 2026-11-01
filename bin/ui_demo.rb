@@ -130,7 +130,7 @@ module MB::Sound
         band.start if on && !band.active?
         band.stop if !on && band.active?
         scheduler = Thread.list.find { |th| th.name == 'MB::Sound::Session scheduler' }
-        # (GVLProbe watches up to 4 threads: with --tiles, the REPL's pty reader replaces main)
+        # (GVLProbe watches up to 6 threads: with --tiles, the REPL's pty reader replaces main)
         names = [:render, :painter, :scheduler, p.tiles ? :pty : :main]
         threads = [session.render_thread, band.thread || Thread.current, scheduler || Thread.current, (p.tiles && band.pty_thread) || Thread.current]
         FastUI::GVLProbe.start(threads)

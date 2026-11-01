@@ -217,3 +217,4 @@ Rules: never `jack_port_unregister` on an active JACK client; things closed at e
 
 `bin/latency_probe.rb -t 1h` / `MB::Sound::LatencyProbe.start(dir:)` tells system stalls from mb-sound's own: `FastLatency::Probe` is a pthread outside the GVL on an absolute-deadline 1 ms loop timing a memory walk and a CPU loop, with per-second aggregates, histograms, and stall episodes in C, drained through a lock-free ring by a Ruby consumer; a Ruby ticker sees GVL/GC/YJIT stalls too, and `#watch(session)` logs slow buffers and underruns.
 Reports give percentiles, top stalls with wall times, periodicity (":59.9 of each minute"), Ruby stalls by cause, and plots; `MB_SOUND_LATENCY_PROBE=1` probes any live script.
+`bin/dropout_probe.rb` (`DropoutProbe`) gives each live underrun a likely cause (GC, render, GVL, lock, system, YJIT, device, queue shrink) from a C write/gap trace, `GVLProbe`'s log, and a LatencyProbe.

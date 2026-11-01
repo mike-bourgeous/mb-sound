@@ -254,6 +254,34 @@ RSpec.describe('script runner scripts', :smoke) do
     end
   end
 
+  # The dropout probe plays live (it refuses renders): a few seconds on
+  # miniaudio's null device with stalls injected, about 10 s
+  describe 'bin/dropout_probe.rb' do
+    json = File.join(out_dir, 'smoke_dropouts.json')
+    runs.add('dropout_probe live', "bin/dropout_probe.rb -q --song tempo_song --seconds 4.5 --inject render,lock,gvl --every 1 --stall 150 --no-system -J #{json.shellescape}",
+      env: shared_env.merge('OUTPUT_TYPE' => 'device', 'AUDIO_BACKEND' => 'null'))
+
+    it 'prints its header and options with --help' do
+      text, status = fork_script('bin/dropout_probe.rb', '--help')
+      expect(status).to be_success, text
+      expect(text).to include(File.readlines('bin/dropout_probe.rb')[1].delete_prefix('#').strip, '--inject', '--seconds', '--ui')
+    end
+
+    it 'plays live, finds the injected dropouts, and writes its log', smoke_run: 'dropout_probe live' do
+      text, status = runs.take('dropout_probe live')
+      expect(status).to be_success, text
+      # (the adaptive queue's notes about the dropouts it was made to have)
+      expect_script_warnings(/Audio dropout: raising the output queue/, /No audio dropouts for [\d.]+ s: lowering/)
+      expect(text).to include('Likely causes:', 'Marks (things done on purpose)', "Dropout log: #{json}")
+      data = JSON.parse(File.read(json))
+      marks = data['marks']
+      expect(marks.length).to be >= 3
+      # (the 150 ms stalls outlast the largest queue, 85 ms)
+      expect(marks.count { |m| m['cause'] == m['label'] }).to be >= 2
+      expect(File.exist?(json.sub(/\.json\z/, '.csv'))).to eq(true)
+    end
+  end
+
   # One song rendered to its end: half-bar renders never reach end-of-song
   # cases like one-shot clips ending inside a buffer (fixes-14: drums_808's
   # crash clip at bar 13 crashed every full render, "trigger has 685

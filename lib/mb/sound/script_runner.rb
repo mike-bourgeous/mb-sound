@@ -1150,11 +1150,16 @@ module MB
       #
       # With MB_SOUND_LATENCY_PROBE set (a directory, or 1 for one under
       # tmp/latency_probe/), a LatencyProbe watches the session while the
-      # script plays and saves its report there at the end.
+      # script plays and saves its report there at the end.  Likewise
+      # MB_SOUND_DROPOUT_PROBE (a .json path, or 1) or DropoutProbe.arm
+      # (bin/dropout_probe.rb) runs a DropoutProbe.
       def live
-        probe = LatencyProbe.from_env(Session.current, name: File.basename(@script.to_s, '.rb'))
+        name = File.basename(@script.to_s, '.rb')
+        probe = LatencyProbe.from_env(Session.current, name: name)
+        dropouts = DropoutProbe.from_env(Session.current, name: name)
         live_playback
       ensure
+        dropouts&.finish
         probe&.finish
       end
 

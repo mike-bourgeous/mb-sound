@@ -241,12 +241,76 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
     end
 
     it 'checks its arguments' do
-      expect { probe.start([]) }.to raise_error(ArgumentError, /1 to 4 threads/)
-      expect { probe.start([Thread.current] * 5) }.to raise_error(ArgumentError)
+      expect { probe.start([]) }.to raise_error(ArgumentError, /1 to 6 threads/)
+      expect { probe.start([Thread.current] * 7) }.to raise_error(ArgumentError)
       expect { probe.start([1]) }.to raise_error(TypeError)
       probe.start([Thread.current])
       expect { probe.waits(1) }.to raise_error(IndexError, /No GVLProbe slot 1/)
       expect(probe.waits(0)).to eq([])
+    end
+
+    describe 'log' do
+      after {
+        probe.log_stop
+        probe.log_drain
+      }
+
+      it 'timestamps long waits for the GVL, times blocked off it, and GC steps with the thread that ran them' do
+        probe.log_drain
+        sleeper = Thread.new { sleep 0.01; MB::Sound::FastLatency.spin(0.0001) }
+        probe.start([sleeper, Thread.current])
+        probe.log_start(0.001, 0.0)
+        t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)
+        # (the sleeper wakes while this thread holds the GVL for 20 ms)
+        sleep 0.005
+        MB::Sound::FastLatency.spin(0.02)
+        sleeper.join
+        GC.start
+        probe.log_stop
+        log = probe.log_drain
+        t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)
+
+        mine = log.select { |kind, slot, *| kind == :thread && slot == 0 }
+        expect(mine).not_to be_empty
+        blocked = mine.find { |_, _, _, a, b, _| a > 0 && b - a >= 8_000_000 }
+        expect(blocked).not_to be_nil # (the sleep)
+        waited = mine.find { |_, _, _, _, b, c| c - b >= 5_000_000 }
+        expect(waited).not_to be_nil
+        expect(waited[2]).to eq(1) # (held by this thread)
+        mine.each { |_, _, _, a, b, c| expect([a, b, c].reject(&:zero?)).to all(be_between(t0 - 20_000_000, t1)) }
+
+        gc = log.select { |kind, *| kind == :gc }
+        expect(gc).not_to be_empty
+        expect(gc.map { |r| r[1] }).to include(1)
+        gc.each { |_, _, _, a, b, c, count| expect([b >= a, c, count >= 1]).to eq([true, 0, true]) }
+        expect(probe.log_stats).to include(on: false, lost: 0)
+        expect(probe.log_stats[:gc_steps]).to be >= gc.length
+      end
+
+      # (a subprocess: YJIT is off in specs, and the ring is sized once)
+      it 'checks its size, and keeps YJIT code while its GC hook runs (an internal TracePoint)' do
+        code = <<~RUBY
+          require 'bundler/setup'
+          require 'mb-sound'
+          def hot(n) = (0...n).sum { |i| i * 2 }
+          300.times { hot(100) }
+          begin
+            MB::Sound::FastUI::GVLProbe.log_start(0.001, 0.0, 4)
+          rescue ArgumentError => e
+            puts e.message
+          end
+          MB::Sound::FastUI::GVLProbe.log_start(0.001, 0.0)
+          GC.start
+          300.times { hot(100) }
+          MB::Sound::FastUI::GVLProbe.log_stop
+          gc = MB::Sound::FastUI::GVLProbe.log_drain.count { |r| r[0] == :gc }
+          p [gc > 0, RubyVM::YJIT.runtime_stats[:invalidate_everything]]
+        RUBY
+        out = IO.popen(['ruby', '--yjit', '--yjit-stats=quiet', '-e', code], err: [:child, :out], &:read)
+        expect($?).to be_success, out
+        expect(out).to include('holds 16 to 16777216 records (got 4)')
+        expect(out.lines.last.strip).to eq('[true, 0]'), out
+      end
     end
   end
 end

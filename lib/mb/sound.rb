@@ -261,6 +261,7 @@ require_relative 'sound/shaper'
 require_relative 'sound/haas_pan'
 require_relative 'sound/meter'
 require_relative 'sound/latency_probe'
+require_relative 'sound/dropout_probe'
 
 require_relative 'sound/window'
 require_relative 'sound/window_reader'

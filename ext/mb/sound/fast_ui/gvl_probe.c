@@ -19,6 +19,16 @@
  * written only by events of that thread, and Ruby reads the recorded
  * values from a fixed ring (a read racing a write may see one stale
  * value, which statistics tolerate).
+ *
+ * The log (GVLProbe.log_start, dropout-probe-1; MB::Sound::DropoutProbe)
+ * adds timestamps: each time a watched thread gets the GVL back after
+ * being off it (blocked: SUSPENDED to READY) or waiting for it (READY to
+ * RESUMED) at least the log's threshold, one record with all three times;
+ * and each GC step (an internal GC_ENTER/GC_EXIT TracePoint: no ISEQ
+ * events, so YJIT keeps its code) at least the GC threshold long, with
+ * the watched thread that ran it.  Records are pushed at RESUMED and in the
+ * GC hook, both with the GVL held, and drained with it, so the log needs no
+ * atomics.
  */
 #include <stdint.h>
 #include <string.h>
@@ -26,8 +36,10 @@
 
 #include <ruby.h>
 #include <ruby/thread.h>
+#include <ruby/debug.h>
+#include <stdlib.h>
 
-#define PROBE_SLOTS 4
+#define PROBE_SLOTS 6
 #define PROBE_RING 65536
 #define PROBE_BLOCKERS 4096
 
@@ -39,6 +51,7 @@ struct probe_slot {
 	VALUE thread;
 	int64_t ready_ns;
 	int64_t resumed_ns;
+	int64_t suspended_ns; // (for the log)
 	uint64_t wait_count;
 	uint64_t hold_count;
 	int32_t waits[PROBE_RING]; // nanoseconds, capped at 2.1 s
@@ -57,6 +70,44 @@ static struct probe_slot probe_slots[PROBE_SLOTS];
 static int probe_slot_count;
 static rb_internal_thread_event_hook_t *probe_hook;
 static VALUE probe_threads; // keeps the watched Thread objects alive
+
+// The log (see the top): a ring of records, overwritten oldest first when
+// the reader falls behind (counted in log_lost).
+struct log_record {
+	int64_t a_ns; // :thread suspended (0: unknown); :gc entered
+	int64_t b_ns; // :thread ready; :gc exited
+	int64_t c_ns; // :thread resumed; :gc 0
+	int64_t gc_count; // rb_gc_count() after the record
+	int8_t kind; // 0 thread, 1 gc
+	int8_t slot; // watched slot (-1: another thread, for GC)
+	int8_t holder; // :thread: the slot holding the GVL when it became ready
+};
+#define LOG_THREAD 0
+#define LOG_GC 1
+
+static struct log_record *log_ring;
+static uint64_t log_cap; // a power of two
+static uint64_t log_head;
+static uint64_t log_tail;
+static uint64_t log_lost;
+static int log_on;
+static int64_t log_threshold_ns;
+static int64_t log_gc_threshold_ns;
+static VALUE log_gc_tracepoint = Qnil;
+static int64_t log_gc_enter_ns;
+static uint64_t log_gc_steps; // every GC step while logging
+static int64_t log_gc_total_ns;
+static int64_t log_gc_max_ns;
+
+static void log_push(const struct log_record *r)
+{
+	if (log_head - log_tail >= log_cap) {
+		log_tail++;
+		log_lost++;
+	}
+	log_ring[log_head & (log_cap - 1)] = *r;
+	log_head++;
+}
 
 static int64_t probe_now(void)
 {
@@ -88,6 +139,20 @@ static void probe_event(rb_event_flag_t event, const rb_internal_thread_event_da
 			s->ready_ns = now;
 			s->holder_at_ready = probe_holder;
 		} else if (event & RUBY_INTERNAL_THREAD_EVENT_RESUMED) {
+			if (log_on && s->ready_ns &&
+				((s->suspended_ns && s->ready_ns - s->suspended_ns >= log_threshold_ns) || now - s->ready_ns >= log_threshold_ns)) {
+				struct log_record r = {
+					.a_ns = s->suspended_ns,
+					.b_ns = s->ready_ns,
+					.c_ns = now,
+					.gc_count = (int64_t)rb_gc_count(),
+					.kind = LOG_THREAD,
+					.slot = (int8_t)i,
+					.holder = (int8_t)s->holder_at_ready,
+				};
+				log_push(&r);
+			}
+			s->suspended_ns = 0;
 			if (s->ready_ns) {
 				int32_t wait = probe_clamp(now - s->ready_ns);
 				s->waits[s->wait_count % PROBE_RING] = wait;
@@ -102,6 +167,7 @@ static void probe_event(rb_event_flag_t event, const rb_internal_thread_event_da
 			s->resumed_ns = now;
 			probe_holder = i;
 		} else if (event & RUBY_INTERNAL_THREAD_EVENT_SUSPENDED) {
+			s->suspended_ns = now;
 			if (s->resumed_ns) {
 				s->holds[s->hold_count % PROBE_RING] = probe_clamp(now - s->resumed_ns);
 				s->hold_count++;
@@ -116,7 +182,7 @@ static void probe_event(rb_event_flag_t event, const rb_internal_thread_event_da
 }
 
 /*
- * GVLProbe.start(threads) -> threads: watches up to 4 Threads (replacing
+ * GVLProbe.start(threads) -> threads: watches up to 6 Threads (replacing
  * any watched before) and clears their records.
  */
 static VALUE probe_start(VALUE self, VALUE threads)
@@ -224,6 +290,169 @@ static VALUE probe_blockers(VALUE self, VALUE index)
 	return out;
 }
 
+// The GC hook: GC_ENTER and GC_EXIT, with the GVL held.  No allocation and
+// no Ruby calls (only clock reads, rb_gc_count, and the current thread).
+static void log_gc_hook(VALUE tpval, void *data)
+{
+	(void)data;
+	rb_event_flag_t event = rb_tracearg_event_flag(rb_tracearg_from_tracepoint(tpval));
+	int64_t now = probe_now();
+	if (event & RUBY_INTERNAL_EVENT_GC_ENTER) {
+		log_gc_enter_ns = now;
+		return;
+	}
+	if (!(event & RUBY_INTERNAL_EVENT_GC_EXIT) || log_gc_enter_ns == 0) {
+		return;
+	}
+
+	int64_t ns = now - log_gc_enter_ns;
+	log_gc_steps++;
+	log_gc_total_ns += ns;
+	if (ns > log_gc_max_ns) {
+		log_gc_max_ns = ns;
+	}
+	if (log_on && ns >= log_gc_threshold_ns) {
+		VALUE thread = rb_thread_current();
+		int slot = -1;
+		for (int i = 0; i < probe_slot_count; i++) {
+			if (probe_slots[i].thread == thread) {
+				slot = i;
+				break;
+			}
+		}
+		struct log_record r = {
+			.a_ns = log_gc_enter_ns,
+			.b_ns = now,
+			.gc_count = (int64_t)rb_gc_count(),
+			.kind = LOG_GC,
+			.slot = (int8_t)slot,
+			.holder = -1,
+		};
+		log_push(&r);
+	}
+	log_gc_enter_ns = 0;
+}
+
+/*
+ * GVLProbe.log_start(threshold = 0.001, gc_threshold = 0.0001, size = 65536)
+ * -> true: starts the log (see the top): thread records for watched
+ * threads off the GVL or waiting for it at least +threshold+ seconds, GC
+ * records for steps at least +gc_threshold+ long (nil: no GC hook), in a
+ * ring of +size+ records (rounded up to a power of two; allocated once).
+ * Keeps logging across GVLProbe.start (records name slots, so drain before
+ * watching other threads).
+ */
+static VALUE probe_log_start(int argc, VALUE *argv, VALUE self)
+{
+	VALUE threshold, gc_threshold, size;
+	rb_scan_args(argc, argv, "03", &threshold, &gc_threshold, &size);
+
+	if (log_ring == NULL) {
+		long n = NIL_P(size) ? 65536 : NUM2LONG(size);
+		if (n < 16 || n > (1L << 24)) {
+			rb_raise(rb_eArgError, "The GVLProbe log holds 16 to 16777216 records (got %ld)", n);
+		}
+		uint64_t cap = 16;
+		while (cap < (uint64_t)n) {
+			cap <<= 1;
+		}
+		log_ring = calloc(cap, sizeof(*log_ring));
+		if (log_ring == NULL) {
+			rb_raise(rb_eNoMemError, "Could not allocate the GVLProbe log");
+		}
+		log_cap = cap;
+	}
+
+	log_threshold_ns = (int64_t)((NIL_P(threshold) ? 0.001 : NUM2DBL(threshold)) * 1e9);
+	if (argc >= 2 && NIL_P(gc_threshold)) {
+		if (!NIL_P(log_gc_tracepoint)) {
+			rb_tracepoint_disable(log_gc_tracepoint);
+		}
+	} else {
+		log_gc_threshold_ns = (int64_t)((NIL_P(gc_threshold) ? 0.0001 : NUM2DBL(gc_threshold)) * 1e9);
+		if (NIL_P(log_gc_tracepoint)) {
+			log_gc_tracepoint = rb_tracepoint_new(Qnil, RUBY_INTERNAL_EVENT_GC_ENTER | RUBY_INTERNAL_EVENT_GC_EXIT, log_gc_hook, NULL);
+			rb_gc_register_address(&log_gc_tracepoint);
+		}
+		log_gc_enter_ns = 0;
+		rb_tracepoint_enable(log_gc_tracepoint);
+	}
+	log_on = 1;
+	return Qtrue;
+}
+
+// GVLProbe.log_stop -> nil: stops logging (and the GC hook); records stay
+// for log_drain.
+static VALUE probe_log_stop(VALUE self)
+{
+	log_on = 0;
+	if (!NIL_P(log_gc_tracepoint)) {
+		rb_tracepoint_disable(log_gc_tracepoint);
+	}
+	return Qnil;
+}
+
+/*
+ * GVLProbe.log_drain -> Array of records, oldest first, each
+ * [kind, slot, holder, a_ns, b_ns, c_ns, gc_count]: kind :thread (a
+ * watched slot off the GVL from a_ns (0: unknown) to b_ns, then waiting
+ * until c_ns; holder the slot holding the GVL at b_ns, -1 for none or
+ * another thread) or :gc (a GC step from a_ns to b_ns run by watched slot
+ * +slot+, -1 another thread; c_ns 0); times CLOCK_MONOTONIC ns; gc_count
+ * GC.count after it.
+ */
+static VALUE probe_log_drain(VALUE self)
+{
+	VALUE out = rb_ary_new_capa(log_ring ? (long)(log_head - log_tail) : 0);
+	if (log_ring == NULL) {
+		return out;
+	}
+	VALUE thread_sym = ID2SYM(rb_intern("thread"));
+	VALUE gc_sym = ID2SYM(rb_intern("gc"));
+	// (allocating here can run the GC hook, which pushes; take the
+	// records first)
+	uint64_t head = log_head;
+	uint64_t tail = log_tail;
+	uint64_t n = head - tail;
+	struct log_record *copy = n ? malloc(n * sizeof(*copy)) : NULL;
+	if (n && copy == NULL) {
+		rb_raise(rb_eNoMemError, "Could not copy the GVLProbe log");
+	}
+	for (uint64_t k = 0; k < n; k++) {
+		copy[k] = log_ring[(tail + k) & (log_cap - 1)];
+	}
+	log_tail = head;
+
+	for (uint64_t k = 0; k < n; k++) {
+		struct log_record *r = &copy[k];
+		VALUE row = rb_ary_new_capa(7);
+		rb_ary_push(row, r->kind == LOG_GC ? gc_sym : thread_sym);
+		rb_ary_push(row, INT2NUM(r->slot));
+		rb_ary_push(row, INT2NUM(r->holder));
+		rb_ary_push(row, LL2NUM(r->a_ns));
+		rb_ary_push(row, LL2NUM(r->b_ns));
+		rb_ary_push(row, LL2NUM(r->c_ns));
+		rb_ary_push(row, LL2NUM(r->gc_count));
+		rb_ary_push(out, row);
+	}
+	free(copy);
+	return out;
+}
+
+// GVLProbe.log_stats -> { on:, lost:, gc_steps:, gc_ns:, gc_max_ns: }:
+// records overwritten before a drain, and every GC step while the GC hook
+// ran (count, total and longest ns).
+static VALUE probe_log_stats(VALUE self)
+{
+	VALUE h = rb_hash_new();
+	rb_hash_aset(h, ID2SYM(rb_intern("on")), log_on ? Qtrue : Qfalse);
+	rb_hash_aset(h, ID2SYM(rb_intern("lost")), ULL2NUM(log_lost));
+	rb_hash_aset(h, ID2SYM(rb_intern("gc_steps")), ULL2NUM(log_gc_steps));
+	rb_hash_aset(h, ID2SYM(rb_intern("gc_ns")), LL2NUM(log_gc_total_ns));
+	rb_hash_aset(h, ID2SYM(rb_intern("gc_max_ns")), LL2NUM(log_gc_max_ns));
+	return h;
+}
+
 void mb_fast_ui_init_gvl_probe(VALUE mFastUI)
 {
 	probe_threads = rb_ary_new();
@@ -236,4 +465,8 @@ void mb_fast_ui_init_gvl_probe(VALUE mFastUI)
 	rb_define_module_function(mProbe, "waits", probe_waits, 1);
 	rb_define_module_function(mProbe, "holds", probe_holds, 1);
 	rb_define_module_function(mProbe, "blockers", probe_blockers, 1);
+	rb_define_module_function(mProbe, "log_start", probe_log_start, -1);
+	rb_define_module_function(mProbe, "log_stop", probe_log_stop, 0);
+	rb_define_module_function(mProbe, "log_drain", probe_log_drain, 0);
+	rb_define_module_function(mProbe, "log_stats", probe_log_stats, 0);
 }

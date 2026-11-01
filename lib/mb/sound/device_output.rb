@@ -413,6 +413,36 @@ module MB
         @period
       end
 
+      # The adaptive queue's state, for readers on other threads (e.g.
+      # DropoutProbe): :queue_limit and :base_queue (device frames),
+      # :shrink_wait (seconds), :last_adapt (:grow, :shrink, or nil), and
+      # :last_change (MB::U.clock_now of the queue's last change or dropout).
+      def adapt_state
+        { queue_limit: @playback.queue_limit, base_queue: @base_queue, shrink_wait: @shrink_wait, last_adapt: @last_adapt, last_change: @last_change, adaptive: @adaptive }
+      end
+
+      # The dropout trace (FastAudio::Playback#trace_start; read by
+      # DropoutProbe): every write and counted underrun leaves a record of
+      # its times and the queue, drained by #trace_drain.  Clock reads and
+      # stores only on the writing and device threads.
+      def trace_start(writes = 8192, gaps = 1024)
+        @playback.trace_start(writes, gaps)
+      end
+
+      def trace_stop
+        @playback.trace_stop
+      end
+
+      # [writes, gaps] since the last drain (see FastAudio::Playback#trace_drain).
+      def trace_drain
+        @playback.trace_drain
+      end
+
+      # The trace's counters, or nil before #trace_start.
+      def trace_stats
+        @playback.trace_stats
+      end
+
       # Statistics from the C extension: :queued, :frames_written,
       # :frames_played (the sound card's clock, including silence), and
       # :underruns (times the audio ran out while the sound card needed it,
