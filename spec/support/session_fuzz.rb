@@ -51,12 +51,10 @@ module SessionFuzz
     # (dropouts-2's master chain landing mid-buffer, which primed
     # softclip's ADAA state from zeros, is fixed since omnibus16;
     # session_fuzz_spec keeps a shrunk song)
-    carry: [
-      [/\bfx :t\d+/, 'two carrying rebuilds landing on one frame (the :carry relation\'s rebuild and an fx swap, both at the track\'s ' \
-                     'launch point): the second was planned against the graph the first replaces, so Session#add_now drops it ' \
-                     '("replaces only the graph it was built from") and the fx never lands; the same with a bind and a patch ' \
-                     'redefinition (library-2 found it; open for a carry follow-up)'],
-    ],
+    # (two carrying rebuilds landing on one frame, the :carry relation's
+    # rebuild and an fx swap at the track's launch point, dropped the
+    # second, since library-2 found it; since load-lag-1 a later rebuild
+    # supersedes a queued one for its time or earlier, or follows it)
   }.freeze
 
   # A generated song: +header+ lines (tempo, meter) always kept, +lines+

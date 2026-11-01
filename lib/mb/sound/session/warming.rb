@@ -149,15 +149,17 @@ module MB
         end
 
         @signatures = {}
+        @spill_exercised = false
         @signature_lock = Mutex.new
         @always = false
 
         class << self
           # A signature of what a warm-up of +kind+ compiles: the kind, the
-          # buffer size, and the classes of +nodes+' graphs.
-          def signature(kind, buffer_size, nodes)
+          # buffer size, and the classes of +nodes+' graphs (+found+, when
+          # listed already: Session#graph_nodes).
+          def signature(kind, buffer_size, nodes, found = nil)
             classes = {}
-            Array(nodes).each { |n| [n, *n.graph].each { |x| classes[x.class] = true unless x.is_a?(Numeric) } }
+            (found || Array(nodes).flat_map { |n| [n, *n.graph] }).each { |x| classes[x.class] = true unless x.is_a?(Numeric) }
             [kind, buffer_size, classes.keys.map(&:name).sort].hash
           end
 
@@ -172,7 +174,17 @@ module MB
 
           # Forgets every warmed signature (for specs).
           def forget!
-            @signature_lock.synchronize { @signatures.clear }
+            @signature_lock.synchronize { @signatures.clear; @spill_exercised = false }
+          end
+
+          # True if the spill exercise ran in this process (and notes that
+          # it has; see Session#warm_spill_exercise).
+          def spill_exercised!
+            @signature_lock.synchronize {
+              next true if @spill_exercised
+              @spill_exercised = true
+              false
+            }
           end
 
           # True makes every session warm every change, even ones warmed
@@ -288,19 +300,109 @@ module MB
         #
         # With +background+ (a WarmHold), a warm-up that runs (not one
         # known or skipped) runs on its own thread, counted in the hold;
-        # returns the hold then, else nil.
-        def warm_graph(name, nodes, copy, at, background: nil)
+        # returns the hold then, else nil.  +found+: the graph's nodes,
+        # when listed already (Session#graph_nodes).
+        def warm_graph(name, nodes, copy, at, background: nil, found: nil)
           return unless warming?
-          w = warm(:graph, name, nodes, at, background: background) { |box, land, _, live|
+          pname = name.is_a?(Symbol) ? name : :warm
+          w = warm(:graph, name, nodes, at, background: background, spill: ->(box) { warm_spill(box, pname) }, found: found) { |box, land, _, live|
             built = copy ? copy.call : recipe_copy(nodes)
             next [:failed, 'no recipe'] if built.nil?
             graph = Playable.graph(built, sample_rate: box.sample_rate)
             next :built if warm_shares?(graph.nodes.flat_map { |n| [n, *n.graph] }, live)
             box.add(warm_noise, name: :warm_other, start_time: 0r)
-            box.add(graph, name: name.is_a?(Symbol) ? name : :warm, start_time: land)
+            box.add(graph, name: pname, start_time: land)
             :played
           }
           w.equal?(background) ? background : nil
+        end
+
+        # Buffers a graph's warm-up plays after its copy spills (see
+        # #warm_spill).
+        SPILL_BUFFERS = 16
+
+        # Spills the copy playing as +name+ in sandbox +box+ (see
+        # #warm_graph): a stand-in replaces it with spill: true in the
+        # middle of a buffer, so the copy's clips go silent with its voices
+        # choked and it rings out under the stand-in (Session#add_now,
+        # Tails), as the live graph will when a new instrument or a
+        # rebuild replaces it (load-lag-1: the first spill in a session
+        # compiled the choke path in the landing buffer, 13-29 iseqs, 30-42
+        # ms).  It waits (up to a bar) for a Synth voice to sound, so the
+        # choke has voices to stop.  Then plays SPILL_BUFFERS buffers.
+        # Does nothing if the copy has no clip sources (it would crossfade
+        # instead).
+        def warm_spill(box, name)
+          warm_spill_exercise
+          return unless box.send(:spillable_name?, name)
+          per_buffer = box.transport.whole_notes_of(Rational(box.buffer_size, box.sample_rate))
+          wait = (box.transport.frames_of(box.transport.bar_length, box.sample_rate) / box.buffer_size.to_f).ceil
+          wait.times do
+            break if box.send(:voices_sounding?, name)
+            box.process_buffer
+          end
+          at = box.transport.position + per_buffer / 2
+          # (with the knobs turning there, as a new instrument's reused
+          # param knobs do where it lands: TrackKnobs)
+          warm_turns(box, at)
+          box.add(warm_noise, name: name, start_time: at, spill: true)
+          SPILL_BUFFERS.times { box.process_buffer }
+        end
+
+        # Turns every knob of sandbox +box+ (its copies of the session's
+        # knobs and the spill exercise's) to another value at timeline
+        # position +at+, landing with their declick glides (see
+        # #warm_spill).
+        def warm_turns(box, at)
+          box.knobs.each do |kname, k|
+            sp = k.spec
+            lo = sp.range.begin.to_f
+            hi = sp.range.end.to_f
+            v = k.value.to_f
+            box.turn(kname, (v - lo).abs > (hi - v).abs ? lo + (hi - lo) * 0.25 : lo + (hi - lo) * 0.75, start_time: at)
+          rescue StandardError
+            next
+          end
+        end
+
+        # Spills in a process's spill exercise (see #warm_spill_exercise):
+        # more than MB::Sound::JIT's call threshold (5), so the code a spill
+        # runs once per spilled graph or voice compiles.
+        SPILL_EXERCISES = 6
+
+        # Once per process, on a graph warm-up's thread: a small clip-driven
+        # Synth (three-note chords) spilled by the next one SPILL_EXERCISES
+        # times in a sandbox, so the spill's code that runs once per graph
+        # or voice (the landing's spill branch, the ring's start, the clip
+        # sources' choke, the allocator's chokes, the all-sound-off events)
+        # has been called often enough to compile before a live spill
+        # (load-lag-1: one spill per warm-up round left the allocator's
+        # #choke and the CC events to compile in the live landing buffer).
+        def warm_spill_exercise
+          return if Warming.spill_exercised!
+          box = Session.new(output: NullOutput.new(channels: @channels, sample_rate: sample_rate, buffer_size: buffer_size, sleep: false),
+                            transport: Sequence::Transport.new(bpm: @transport.bpm, bar_length: @transport.bar_length), channels: @channels,
+                            buffer_size: buffer_size, realtime: false, raise_errors: true, master_gain: 1)
+          box.send(:sandbox!)
+          clip = MB::Sound.seq([MB::Sound::C3, MB::Sound::E3, MB::Sound::G3], [MB::Sound::D3, MB::Sound::F3, MB::Sound::A3]).n8.loop
+          # (param knobs of both scales, read by the voices and turned
+          # where each spill lands, as a new instrument's are)
+          cut = box.knob(:"warm/cutoff", 2000, range: 20..20_000, curve: :exp)
+          mix = box.knob(:"warm/mix", 0.5, range: 0.0..1.0)
+          voice = proc { |v| v.hz.saw.lp4(cut, resonance: 0.2).at(0.1) * v.amp_env(0.002, 0.05, 0.6, 0.05) * mix }
+          per_buffer = box.transport.whole_notes_of(Rational(box.buffer_size, box.sample_rate))
+          GraphNode::Recipe.quietly {
+            box.add(clip.synth(voices: 3, &voice), name: :warm_spill, start_time: 0r)
+            4.times { box.process_buffer }
+            SPILL_EXERCISES.times do
+              at = box.transport.position + per_buffer / 2
+              warm_turns(box, at)
+              box.add(clip.synth(voices: 3, &voice), name: :warm_spill, start_time: at, spill: true)
+              4.times { box.process_buffer }
+            end
+          }
+        ensure
+          box&.close
         end
 
         # The WarmHold for a new graph #add starts now, or nil to warm it
@@ -377,7 +479,7 @@ module MB
         # With +background+ (a WarmHold), the warm-up thread isn't joined:
         # it releases the hold when it and the hold's other warm-ups are
         # done, and the hold is returned (see Warming).
-        def warm(kind, name, nodes, at, background: nil)
+        def warm(kind, name, nodes, at, background: nil, spill: nil, found: nil)
           # (never stall a render thread; offline renders run scheduled
           # blocks holding the render lock, which is fine)
           return note_warm(Warm.new(kind: kind, name: name, ms: 0.0, result: :skipped, reason: 'the render lock is held')) if @realtime && @render_lock.mon_owned?
@@ -387,11 +489,11 @@ module MB
             need = WARM_MARGIN * (last ? last.ms / 1000.0 : WARM_GUESS)
             return note_warm(Warm.new(kind: kind, name: name, ms: 0.0, result: :skipped, reason: format('%.2f s before the block\'s time', left))) if left < need
           end
-          sig = Warming.signature(kind, buffer_size, nodes)
+          sig = Warming.signature(kind, buffer_size, nodes, found)
           return note_warm(Warm.new(kind: kind, name: name, ms: (MB::U.clock_now - t0) * 1000, result: :known, reason: nil)) if Warming.known!(sig) && !Warming.always
 
           result = reason = nil
-          live = warm_node_set(nodes)
+          live = warm_node_set(nodes, found)
           worker = Thread.new {
             Thread.current.report_on_exception = false
             Thread.current.name = 'mb-sound-warm'
@@ -399,7 +501,7 @@ module MB
               Internal.strictly {
                 Internal.with_private_rng(0) {
                   WARM_ROUNDS.times do |round|
-                    result, reason = warm_round(kind, at, round, live) { |*a| yield(*a) }
+                    result, reason = warm_round(kind, at, round, live, spill) { |*a| yield(*a) }
                     break unless result == :played
                   end
                 }
@@ -433,7 +535,7 @@ module MB
         # copy made on live nodes (a node its block captured; the copy is
         # then only built) are removed again, so the live Tees stay in
         # lockstep.  Returns the result and reason.
-        def warm_round(kind, at, round, live)
+        def warm_round(kind, at, round, live, spill = nil)
           box = warm_sandbox
           copy_clocks(box)
           # (inside a buffer, as changes landing on a bar line do, and
@@ -466,6 +568,9 @@ module MB
               after = MB::M.max(after, (bar * GRAPH_BARS / box.buffer_size).ceil)
             end
             (WARM_LEAD + after).times { box.process_buffer }
+            # (then the copy spills, as it will when something replaces
+            # it live: see #warm_spill)
+            spill&.call(box)
           end
           [result, reason]
         rescue StandardError, ScriptError => e
@@ -515,9 +620,9 @@ module MB
 
         # The nodes of the graphs of +nodes+, as a Hash compared by
         # identity (numbers left out).
-        def warm_node_set(nodes)
+        def warm_node_set(nodes, found = nil)
           set = {}.compare_by_identity
-          Array(nodes).each { |o| [o, *o.graph].each { |n| set[n] = true unless n.is_a?(Numeric) } }
+          (found || Array(nodes).flat_map { |o| [o, *o.graph] }).each { |n| set[n] = true unless n.is_a?(Numeric) }
           set
         end
 

@@ -2,7 +2,7 @@ module MB
   module Sound
     # An input object that reads from a node graph.
     class GraphNodeInput
-      attr_reader :channels, :sample_rate, :buffer_size
+      attr_reader :channels, :sample_rate
 
       # The graph nodes (one per channel) this input reads from.
       attr_reader :nodes
@@ -26,7 +26,9 @@ module MB
           n.sample_rate = @sample_rate unless n.sample_rate == @sample_rate
         end
 
-        @buffer_size = buffer_size || nodes[0].graph_buffer_size || 800
+        # (searched for when first asked: the search walks the graph, and a
+        # Session never asks; load-lag-1)
+        @buffer_size = buffer_size
 
         @channels = MB::M.max(nodes.length, channels)
 
@@ -39,6 +41,12 @@ module MB
         @handled_spies = {}
         @synths = nil
         @node_set = nil
+      end
+
+      # The buffer size given, else the smallest one a node of the graph
+      # names (see GraphNode#graph_buffer_size), else 800.
+      def buffer_size
+        @buffer_size ||= @nodes[0].graph_buffer_size || 800
       end
 
       # Lists the graph's nodes (with Tees) for Session::Strip#graph_node_set

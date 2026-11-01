@@ -521,11 +521,21 @@ module MB
         playable = Playable.graph(sound, sample_rate: sample_rate)
         nodes = match_rate(playable.nodes)
         @mastering_capture&.saw(nodes) # (a targeted render's passes; see Mastering::Targeting)
-        adopt_knobs(nodes, player: name) # graph documents' knobs and rack knobs join the Session (see Knobs#adopt_knobs)
+        # The graph's nodes, from one walk (each output's graph, as the
+        # walks it replaces listed them; load-lag-1: a digibrass load
+        # walked its graph about ten times here, ~150 ms, one of them under
+        # the render lock): its knobs, timeline nodes, bus taps, and warm-up
+        # signature come from it.  Upstream walks don't change with the
+        # input's branches or the plans (downstream of the outputs; plans
+        # leave sources alone), only when a knob joins one the session has
+        # (#adopt_knobs: then walked again).
+        found = graph_nodes(nodes)
+        joined = adopt_knobs(nodes, player: name, found: found) # graph documents' knobs and rack knobs join the Session (see Knobs#adopt_knobs)
+        found = graph_nodes(nodes) if knobs_redirected?(joined, found)
         adopt_clocks(playable.nodes) # graph documents' clocks too (see Clocks#adopt_clocks)
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
-        timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
+        timeline_nodes = found.grep(Sequence::TimelineNode).uniq
         # The graph's Synths (see #align_grids), first-buffer setups (e.g.
         # drum voices' skipping), and node set (see Strip#graph_node_set),
         # from one walk here, on the thread that builds it, rather than by
@@ -535,7 +545,7 @@ module MB
 
         # Its code compiled here rather than where it lands, or in the
         # background, the change held until it is done (see Warming)
-        hold = warm_graph(name, nodes, warm, warm_time(point, start_time), background: warm_hold_for_add)
+        hold = warm_graph(name, nodes, warm, warm_time(point, start_time), background: warm_hold_for_add, found: found)
 
         default = @players.empty? && !queued_start? ? :now : :bar # (launch_time's :auto, kept for a held change's re-time)
         time = start_time ? start_time.to_r : launch_time(point, timeline_nodes, default: default)
@@ -543,12 +553,32 @@ module MB
         # The running state to carry from the graph this one replaces (see
         # Carry): matched here, copied on the swap frame
         carried = nil
+        follows = nil
         if carry && name
-          old = @mutex.synchronize { @players.each_value.find { |p| p.name == name && p.current? } }
-          carried = Carry.plan(old.input, nodes) if old
+          # A graph queued for the name before this rebuild replaces the
+          # current one first (before, this one was planned against the
+          # current graph and dropped where the first had replaced it: two
+          # binds before the bar landed only the first; editability-1,
+          # SessionFuzz's :carry relation).  A carrying rebuild queued for
+          # this time or later is superseded (this build has its changes
+          # too: it is cancelled, and this one carries from the current
+          # graph); anything else lands first, and this one follows it,
+          # carrying from the graph it starts.
+          follows = @render_lock.synchronize {
+            pending = @changes.reverse_each.find { |c| c.subject == name && START_KINDS.include?(c.kind) }
+            if pending&.kind == :bg && pending.split && pending.time >= time
+              cancel_changes(pending)
+              nil
+            else
+              pending&.kind == :bg && pending.graph ? pending : nil
+            end
+          }
+          old = follows ? nil : @mutex.synchronize { @players.each_value.find { |p| p.name == name && p.current? } }
+          carried = Carry.plan(follows ? follows.graph : old.input, nodes) if follows || old
           # (+full_now+: a time for a swap that cuts, sooner than +time+;
           # Arrangement#rebuild_track in sound design)
           time = full_now if full_now && carried&.full?
+          time = MB::M.max(time, follows.time) if follows
         end
 
         @render_lock.synchronize {
@@ -566,10 +596,11 @@ module MB
           # Routing, readers of buses and players, and spies for readers of
           # named nodes in this graph (see Buses)
           route(name, to: to, send: send) unless to == :keep && send.nil?
-          bind_bus_taps(nodes, name) or return nil
-          attach_bus_spies(name, nodes) if @bus_only.key?(name)
+          bind_bus_taps(nodes, name, found: found) or return nil
+          attach_bus_spies(name, nodes, found: found) if @bus_only.key?(name)
 
-          c = change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes, graph: input, split: !carried.nil?, spill: spill, hold: hold) { |t|
+          c = change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes, graph: input, split: !carried.nil?, spill: spill, hold: hold,
+                     follows: follows) { |t|
             add_now(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: t, fade: fade, explicit_fade: explicit_fade,
                     carry: carried, clip: clip, spill: spill)
           }
@@ -1395,7 +1426,10 @@ module MB
           # declick time.
           # (a muted player asleep since its mute holds that moment's state:
           # its replacement starts fresh, as before)
-          carried_from = carry && @players.each_value.find { |p| p.name == name && p.current? && p.started && !p.asleep && p.input.equal?(carry.old_input) }
+          # (or the carried player of a rebuild that landed on this frame,
+          # before it played: it holds the state carried into it; see #add's
+          # +follows+)
+          carried_from = carry && @players.each_value.find { |p| p.name == name && p.current? && (p.started || p.carried) && !p.asleep && p.input.equal?(carry.old_input) }
           spiller = nil
           if carried_from
             # (spill-over only where something can't carry: an unfit pair or
@@ -1474,10 +1508,40 @@ module MB
         Rational(@transport.whole_notes_of(Envelope::CHOKE_TIME.to_r), @transport.bar_length)
       end
 
+      # Every node of the graphs of +nodes+ (a graph's outputs): each
+      # output, then its graph, outputs in order (repeats left in), as
+      # #add lists them once for its preparations.
+      def graph_nodes(nodes)
+        nodes.flat_map { |n| [n, *n.graph] }
+      end
+
+      # True if #adopt_knobs redirected one of the graph's knobs to the
+      # session's (+joined+, its result, has a knob that isn't among
+      # +found+, the graph's nodes), so its readers now read another Knob.
+      def knobs_redirected?(joined, found)
+        return false if joined.empty?
+        ids = {}.compare_by_identity
+        found.each { |n| ids[n] = true if n.is_a?(GraphNode::Knob) }
+        joined.each_value.any? { |k| !ids[k] }
+      end
+
       # True if player +p+ can spill over (see #add_now): its graph has clip
       # sources to stop.
       def spillable?(p)
         p.timeline_nodes.any? { |n| n.is_a?(MIDI::ClipSource) }
+      end
+
+      # True if the current player named +name+ has started and can spill
+      # over (see #spillable?; Warming#warm_spill).
+      def spillable_name?(name)
+        @mutex.synchronize { @players.each_value.any? { |p| p.name == name && p.current? && p.started && spillable?(p) } }
+      end
+
+      # True if a Synth of the current player named +name+ has a voice
+      # sounding (see Warming#warm_spill).
+      def voices_sounding?(name)
+        p = @mutex.synchronize { @players.each_value.find { |x| x.name == name && x.current? } }
+        !p.nil? && p.input.synths.any? { |s| s.allocator.active_count > 0 }
       end
 
       # Stops (or starts fading out) the players named +name+ at +time+, or

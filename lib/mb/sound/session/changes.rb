@@ -41,7 +41,7 @@ module MB
         # the background (it waits in the queue, past its time if need be,
         # until the warm-up is done; see Warming).
         Change = Struct.new(
-          :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts, :graph, :split, :spill, :hold,
+          :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts, :graph, :split, :spill, :hold, :follows,
           keyword_init: true
         )
 
@@ -101,7 +101,7 @@ module MB
         #
         # With +hold+ (a Warming::WarmHold), the change waits in the queue
         # until the hold is released, even if its time comes first.
-        def change(kind, subject, time, data: {}, undoes: nil, starts: nil, graph: nil, split: false, spill: false, hold: nil, &action)
+        def change(kind, subject, time, data: {}, undoes: nil, starts: nil, graph: nil, split: false, spill: false, hold: nil, follows: nil, &action)
           raise IOError, 'Session is closed' if @closed
           raise ArgumentError, 'Pass a block to apply the change' unless action
 
@@ -138,7 +138,8 @@ module MB
             pos = @transport.position
             check_late(kind, subject, time, pos) unless queue
             seq = @journal.next_seq
-            c = Change.new(seq: seq, kind: kind, subject: subject, time: time, action: action, starts: starts, graph: graph, split: split, spill: spill, hold: hold)
+            c = Change.new(seq: seq, kind: kind, subject: subject, time: time, action: action, starts: starts, graph: graph, split: split, spill: spill, hold: hold,
+                           follows: follows)
 
             c.entry = @journal.add(Journal::Entry.new(
               seq: seq, kind: kind, subject: subject,
@@ -148,7 +149,7 @@ module MB
               status: :queued, source: source, line: line, data: data.freeze, undoes: undoes
             ))
 
-            if (time.nil? || time <= pos) && !hold
+            if (time.nil? || time <= pos) && !hold && !held?(c)
               commit_change(c, land_pos: pos, land_frame: @frame, commits: stamp(pos, frame: @frame), immediate: true)
             else
               c.time = pos if time.nil? || time < pos # (held: waits for its warm-up)
@@ -254,10 +255,14 @@ module MB
         end
 
         # True if queued change +c+ waits for a background warm-up (see
-        # Warming::WarmHold).
+        # Warming::WarmHold), or for the queued change it +follows+ to land
+        # (a rebuild planned against the graph a queued rebuild starts:
+        # Session#add).
         def held?(c)
           h = c.hold
-          !h.nil? && !h.released?
+          return true if !h.nil? && !h.released?
+          f = c.follows
+          !f.nil? && @changes.include?(f)
         end
 
         # Applies queued changes whose time is before +to+, each on its

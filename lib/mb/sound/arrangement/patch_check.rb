@@ -57,6 +57,51 @@ module MB
           build_checked(name, patch, source, probe, what)
         end
 
+        # A check of +patch+ for a playing track +name+ given a new
+        # instrument (#track; its rebuild follows in the same command) that
+        # is the rebuild's build: +patch+ built from +source+ (the clip the
+        # rebuild plays) in the caller's context, drawing its seeds from the
+        # root generator as the rebuild would, kept for #build_patch to
+        # take (#take_checked_build), so the instrument builds once instead
+        # of twice (load-lag-1: a digibrass or SQ-80 build is ~100-200 ms).
+        # A build #build_patch doesn't take puts the generator back
+        # (#drop_checked_build: as #check_patch keeps it).  Returns as
+        # #check_patch does.
+        def check_build(name, patch, source, what: "track #{name.inspect}")
+          start = [Internal.root_rng.dup, Internal.root_seed]
+          graph = GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { patch.call(source) }
+          @checked_build = CheckedBuild.new(patch: patch, source: source, start: start, graph: graph, after: Internal.root_rng.dup, after_seed: Internal.root_seed)
+          true
+        rescue ScriptError, StandardError => e
+          Internal.restore_rng(start[0], start[1]) if start
+          report_patch_error(patch_error(name, patch, source, e, what))
+        end
+
+        # A build made by #check_build: the +patch+ and +source+ it was
+        # built from, the root generator's state it +start+ed from ([rng,
+        # seed]), the +graph+, and the generator's state +after+ it.
+        CheckedBuild = Data.define(:patch, :source, :start, :graph, :after, :after_seed)
+
+        # The build #check_build kept, if it was of track +tr+'s patch for
+        # +clip+ and the root generator is where it left it (nothing drew
+        # since), else nil; either way it is taken.
+        def take_checked_build(tr, clip)
+          cb = @checked_build
+          @checked_build = nil
+          return nil unless cb && cb.patch.equal?(tr.patch) && cb.source.equal?(clip)
+          return nil unless Internal.root_rng == cb.after && Internal.root_seed == cb.after_seed
+          cb
+        end
+
+        # Drops a build #check_build kept that nothing took, putting the
+        # root generator back to where the check started if nothing drew
+        # since (as #check_patch keeps the random state).
+        def drop_checked_build
+          cb = @checked_build or return
+          @checked_build = nil
+          Internal.restore_rng(cb.start[0], cb.start[1]) if Internal.root_rng == cb.after && Internal.root_seed == cb.after_seed
+        end
+
         # The build of #check_patch (separate, so only the patch's own
         # errors are rescued).
         def build_checked(name, patch, source, probe, what)
