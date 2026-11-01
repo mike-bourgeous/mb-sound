@@ -1,5 +1,22 @@
 module MB
   module Sound
+    # A generated form (G4): a Markov chain over the sections, as a DJ
+    # set rides a track: peaks trade with their b-sides, breakdowns lead
+    # back to the second peak or another build, and the outro comes when
+    # the chain reaches it (each seed another long take).
+    # `genre(:techno).generative(seed: 4).play`
+    # Registered as L.flow.techno_chain (lib-gen-1: the template reads it from
+    # the library, `generator L.flow.techno_chain`).
+    Library::Generators.flow :techno_chain, genre: :techno, tags: %i[techno markov],
+      about: 'Peaks trade with their b-sides, breakdowns lead back to the second peak or another build, the outro when the chain reaches it',
+      bars: { intro: 16, hats: [8, 16], build: [8, 16], peak: [16, 32], peak_b: 16, breakdown: [8, 16], peak2: [16, 32], outro: 16, outro_b: 8, outro_c: 8 },
+      params: -> { { seed: 132 } } do |seed:|
+      markov(intro: { hats: 1 }, hats: { build: 1 }, build: { peak: 1 },
+             peak: { peak_b: 2, breakdown: 1 }, peak_b: { peak: 1, breakdown: 2, peak2: 0.5 },
+             breakdown: { peak2: 2, build: 1 }, peak2: { peak_b: 0.5, outro: 1.5, breakdown: 0.5 },
+             outro: { outro_b: 1 }, outro_b: { outro_c: 1 }, outro_c: {}, seed: seed)
+    end
+
     # Detroit / peak-time techno for DJs, from Charlie "Munro" Munro's
     # template data (persona panel round 2 sheet, section 7b,
     # /app/workbench/briefs/persona2/munro.md; genre-fixes, 2026-10-18),
@@ -32,16 +49,8 @@ module MB
         outro_b   8
         outro_c   8
       end
-      # A generated form (G4): a Markov chain over the sections, as a DJ
-      # set rides a track: peaks trade with their b-sides, breakdowns lead
-      # back to the second peak or another build, and the outro comes when
-      # the chain reaches it (each seed another long take).
-      # `genre(:techno).generative(seed: 4).play`
-      generator markov(intro: { hats: 1 }, hats: { build: 1 }, build: { peak: 1 },
-                       peak: { peak_b: 2, breakdown: 1 }, peak_b: { peak: 1, breakdown: 2, peak2: 0.5 },
-                       breakdown: { peak2: 2, build: 1 }, peak2: { peak_b: 0.5, outro: 1.5, breakdown: 0.5 },
-                       outro: { outro_b: 1 }, outro_b: { outro_c: 1 }, outro_c: {}, seed: 132),
-                bars: { intro: 16, hats: [8, 16], build: [8, 16], peak: [16, 32], peak_b: 16, breakdown: [8, 16], peak2: [16, 32], outro: 16, outro_b: 8, outro_c: 8 }
+      # A generated form (G4): L.flow.techno_chain, defined above the template.
+      generator L.flow.techno_chain
 
       four = 'X...X...X...X...'
       hats = '3535353535353535'

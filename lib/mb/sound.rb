@@ -284,6 +284,8 @@ MB::Sound::GraphNode::Recipe.install!
 require_relative 'sound/graph_io'
 require_relative 'sound/demo_methods'
 require_relative 'sound/genre'
+# The demo songs' generators (L.gen, L.flow; the genre templates' are in genre/)
+require_relative 'sound/library/generators/shipped'
 
 # The terminal UI (`ui`, `pane`, `layout`): a dashboard band above the console
 require_relative 'sound/ui'

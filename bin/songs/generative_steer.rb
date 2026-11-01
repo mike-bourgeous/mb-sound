@@ -40,6 +40,7 @@
 #     knob :energy, 0.4
 #     bg :d, tr909(beats(16, hold: 2, energy: knob(:energy)) { kick [1, 0, 0, 0] * 4, keep: [0, 4, 8, 12]; hat euclid(10, 16), mutate: 0.5 })
 #     turn :energy, 0 => 0.1, 4.bars => 0.95     # a gesture: the beat grows from nothing
+#     bg :d, tr909(L.gen.techno_beat(energy: knob(:energy)))    # the song's beat from the library (L.gen.generative_steer lists its parts)
 #     knob :busy, 0.3
 #     bg :h, tr909(generate(1.bar, busy: knob(:busy), values: [F2s]) { |cycle, dice, busy:|
 #       16.times.filter_map { |i| [i * 1/16r, 1/32r, F2s, 0.6] if dice.rand(:hat, i) < busy }
@@ -55,42 +56,14 @@ module MB::Sound
   # The piece's length in bars (the form's).
   GENERATIVE_STEER_BARS = 32
 
-  # The chords, two bars each, looping every 8 bars: i, bII, VII, i in D phrygian.
-  GENERATIVE_STEER_CHORDS = [[D3, F3, A3], [Ds3, G3, As3], [C3, Ds3, G3], [D3, F3, A3]].freeze
-
-  # The probability scale: D phrygian with the chord layer on top.
-  def self.generative_steer_harmony
-    chords = harmony(GENERATIVE_STEER_CHORDS.each_with_index.to_h { |c, i| [(2 * i).bars, c] }, curve: :step, loop: 8.bars)
-    scale(:phrygian, :d).weights + chords * 1.5
-  end
-
-  # The drums: an evolving techno beat (anchored kick and clap, drifting
-  # snare ghosts, mutating Euclidean hats and ride, a fill every 8 bars),
-  # thinned and filled by +energy+.
-  def self.generative_steer_beats(energy, seed:)
-    beats(16, hold: 2, swing: 0.53, energy: energy, over: 4, seed: seed) do
-      kick [1, 0, 0, 0] * 4, keep: [0, 4, 8, 12], drift: 0.1
-      clap [0, 0, 0, 0, 1, 0, 0, 0] * 2, keep: [4, 12], level: 0.85
-      snare [0, 0, 0, 0.1, 0, 0, 0.15, 0, 0, 0.1, 0, 0, 0, 0.2, 0, 0.25], drift: 0.2, level: 0.5
-      hat euclid(10, 16), mutate: 0.5, drift: 0.15, level: 0.7
-      open_hat [0, 0, 0.8, 0] * 4, drift: 0.25, level: 0.6
-      ride euclid(5, 16), mutate: 0.3, level: 0.45
-      fill every: 8, snare: 0.7, low_tom: 0.35, mid_tom: 0.35
-    end
-  end
-
-  # The bass: one melodic row walking the chord tones low (D2..D3),
-  # steered by the same +energy+.
-  def self.generative_steer_bass(h, energy, seed:)
-    rhythm(h.over(D2..D3, around: A2), [1, 0, 0.35, 0.5, 0, 0.3, 0.6, 0.2] * 2, energy: energy, hold: 2, length: 1, seed: seed)
-  end
-
-  # The lead: one-bar phrases of sixteenths with phrase memory (a a b a, b
-  # answering a), +density+ and +wander+ (mutation) steered.
-  def self.generative_steer_lead(h, density, wander, seed:)
-    motifs(h, 16, step: 1.n16, form: %i[a a b a], answer: { b: :a }, density: density, mutate: wander, vary: 0.2, evolve: 1,
-      range: A3..A5, around: E4, seed: seed)
-  end
+  # The generators are library entries (lib-gen-1; defined in
+  # lib/mb/sound/library/generators/generative_steer.rb): the drums
+  # L.gen.techno_beat (an evolving techno beat, thinned and filled by
+  # energy), the bass L.gen.acid_rhythm (one melodic row walking the
+  # chord tones low, D2..D3), the lead L.gen.phrygian_motif (one-bar
+  # phrases of sixteenths with phrase memory, density and mutate
+  # steered), all on the D phrygian harmony
+  # (Library::Generators::GenerativeSteer.harmony).
 
   # Sets up knobs, tracks, scenes, and (with +form+) the form on the
   # current session; without a form, the build scene plays.  +steer+ false
@@ -102,17 +75,16 @@ module MB::Sound
     knob :energy, start[:energy], range: 0.0..1.0
     knob :density, start[:density], range: 0.0..1.0
     knob :wander, start[:wander], range: 0.0..1.0
-    h = generative_steer_harmony
 
     track(:drums) { |clip| tr909(clip, shuffle: 0) * 0.8 }
     track(:bass) { |clip| acid_voice(clip, cutoff: 260, reso: 0.55, env_mod: 2.5) * 0.55 }
     track(:lead) { |clip| clip.synth(voices: 3) { |v| pluck_voice(v, sustain: 1.2, brightness: 9) }.delay(3.n16, feedback: 0.3, wet: 0.25) * 3.2 }
     track(:pad) { |clip| stereo(*fifth_pad(clip, voices: 2, cutoff: 700, release: 2)) * 0.4 }
 
-    drums = generative_steer_beats(knob(:energy), seed: seed)
-    bass = generative_steer_bass(h, knob(:energy), seed: seed + 1)
-    lead = generative_steer_lead(h, knob(:density), knob(:wander), seed: seed + 2)
-    pad = seq(*GENERATIVE_STEER_CHORDS).len(2.bars).loop
+    drums = L.gen.techno_beat(seed: seed, energy: knob(:energy))
+    bass = L.gen.acid_rhythm(seed: seed + 1, energy: knob(:energy))
+    lead = L.gen.phrygian_motif(seed: seed + 2, density: knob(:density), mutate: knob(:wander))
+    pad = seq(*Library::Generators::GenerativeSteer.chords).len(2.bars).loop
 
     scene :intro, drums: drums, lead: lead, pad: pad
     scene :build, drums: drums, bass: bass, lead: lead, pad: pad

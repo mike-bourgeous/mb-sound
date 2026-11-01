@@ -56,6 +56,11 @@
 #       (50..62).select { |n| w[n] > 0.12 }.first(3).map { |n| [0r, 2r, n, 0.3 + 0.2 * dice.rand(n)] }
 #     })
 #     melody(h, 8, range: A3..A5, vary: true).to_ruby   # prints the generator back as Ruby
+#
+# The parts are in the library (L.gen; `L.gen.generative_demo` lists them):
+#     play L.gen.koto_motif                                   # the lead, 8 bars on the koto
+#     bg :lead, ambient_koto_voice(L.gen.koto_motif(seed: 3))  # another seed: another tune
+#     track :bells, L.gen.rin_strikes                         # on its instrument (the rin)
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -65,49 +70,21 @@ module MB::Sound
   # The demo's length in bars (the harmony loops every 32).
   GENERATIVE_DEMO_BARS = 32
 
-  # The demo's chords, two bars each (D dorian, then F major, then back).
-  GENERATIVE_DEMO_CHORDS = [
-    [D3, F3, A3, C4], [G2, B2, D3, F3], [C3, E3, G3, B3], [A2, C3, E3, G3],
-    [D3, F3, A3, C4], [G2, B2, D3, F3], [E3, G3, B3, D4], [A2, C3, E3, G3],
-    [D3, F3, A3, C4], [F3, A3, C4, E4], [As2, D3, F3, A3], [G2, As2, D3, F3],
-    [C3, E3, G3, As3], [F3, A3, C4, E4], [As2, D3, F3, A3], [A2, C3, E3, G3],
-  ].freeze
-
-  # The key: D dorian, blending into F major over bars 13-18 and back over
-  # bars 27-30, looping every 32 bars.
-  def self.generative_demo_key
-    harmony(
-      0 => scale(:dorian, :d), 12.bars => scale(:dorian, :d), 18.bars => scale(:major, :f),
-      26.bars => scale(:major, :f), 30.bars => scale(:dorian, :d), loop: 32.bars
-    )
-  end
-
-  # The chord layer: GENERATIVE_DEMO_CHORDS, two bars each, looping.
-  def self.generative_demo_chords
-    harmony(GENERATIVE_DEMO_CHORDS.each_with_index.to_h { |c, i| [(2 * i).bars, c] }, curve: :step, loop: 32.bars)
-  end
-
-  # The leads' register: every lead plays in this range with its average
-  # note near E4 (motifs around E4, melody from D4, old from the root D4;
-  # 62-63 over 32 bars at seed 7), so A/B comparisons hear the line, not
-  # the octave.
-  GENERATIVE_DEMO_RANGE = (A3..A5).freeze
-  GENERATIVE_DEMO_CENTER = E4
+  # The parts are library generators (lib-gen-1; defined in
+  # lib/mb/sound/library/generators/generative_demo.rb, the harmony there
+  # as Library::Generators::GenerativeDemo): the lead L.gen.koto_motif
+  # (or L.gen.probability_melody, L.gen.dorian_melody), the bells
+  # L.gen.rin_strikes, the bowls L.gen.bowl_strikes, the pad
+  # L.gen.chord_pad.
 
   # The lead's line (a Clip): :motifs (phrase memory), :melody (G1's
   # melody on the probability scale +h+), or :old (melody(vary: true) on
   # plain D dorian).
   def self.generative_demo_lead(h, lead: :motifs, seed: 7)
-    rhythm = euclid(5, 8, A3, step: 8)
     case lead
-    when :motifs
-      motifs(h, 8, step: 1.n8, form: %i[a a b a], answer: { b: :a }, vary: 0.2, mutate: 0.25, evolve: 2,
-        range: GENERATIVE_DEMO_RANGE, around: GENERATIVE_DEMO_CENTER, seed: seed)
-    when :melody, :new
-      # (its walk drifts up from the start: D4 puts its average with the others')
-      melody(h, rhythm: rhythm, range: GENERATIVE_DEMO_RANGE, start: D4, vary: true, seed: seed).loop
-    when :old
-      melody(scale(:dorian, :d), rhythm: rhythm, range: GENERATIVE_DEMO_RANGE, vary: true, seed: seed).loop
+    when :motifs then L.gen.koto_motif(seed: seed, harmony: h)
+    when :melody, :new then L.gen.probability_melody(seed: seed, harmony: h)
+    when :old then L.gen.dorian_melody(seed: seed)
     else
       raise ArgumentError, "The lead is :motifs, :melody, or :old (got #{lead.inspect})"
     end
@@ -120,19 +97,12 @@ module MB::Sound
   # on plain D dorian), for A/B listening, +part+ :all or one part.
   def self.generative_demo(seed: 7, blur: 0, lead: :motifs, part: :all)
     bpm 84
-    key = generative_demo_key
-    chords = generative_demo_chords
-    h = (blur > 0 ? key.blur(blur) : key) + chords * 1.5
+    h = Library::Generators::GenerativeDemo.harmony(blur)
 
     line = generative_demo_lead(h, lead: lead, seed: seed)
-    bells = strikes(h.over(A4..A6, around: E5, width: 7), every: 1.n8, chance: 0.2, gap: 4, length: 2.bars, seed: seed + 1)
-    bowls = strikes((key + chords * 4).over(D2..D4, around: A2, width: 6), every: 1.n2, chance: 0.45, gap: 2, sharpen: 3, note: 1.bar, seed: seed + 2)
-    pad = generate(2.bars, values: (50..62).to_a, seed: seed + 3) { |cycle, dice|
-      w = chords.at(cycle * 2)
-      notes = (50..62).select { |n| w[n] > 0 }
-      notes = notes.reject.with_index { |_, i| i == 1 && dice.chance(0.4, :drop) }
-      notes.map { |n| [0r, 2r, n, 0.35 + 0.15 * dice.rand(:vel, n)] }
-    }
+    bells = L.gen.rin_strikes(seed: seed + 1, harmony: h)
+    bowls = L.gen.bowl_strikes(seed: seed + 2)
+    pad = L.gen.chord_pad(seed: seed + 3)
 
     parts = {
       lead: -> { ambient_koto_voice(line, wear: 0.25) * 1.4 },

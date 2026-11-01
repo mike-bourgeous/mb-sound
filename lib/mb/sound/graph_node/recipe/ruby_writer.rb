@@ -676,6 +676,10 @@ module MB
             text = recv ? "#{recv}.#{name}" : name
             if args.any?
               text += "(#{args.join(', ')})"
+            elsif c.receiver.is_a?(MB::Sound::Library::Generators::Path)
+              # A library entry's call at its defaults: `L.gen.techno_beat.()`
+              # (the bare head path is the Entry)
+              text += '.()'
             elsif recv.nil? && @used.include?(name)
               # A local of that name would shadow the bare call
               text += '()'

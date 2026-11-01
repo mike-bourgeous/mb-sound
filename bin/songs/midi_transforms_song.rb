@@ -93,9 +93,10 @@ module MB::Sound
     chords = (seq(A3, F3, C4, G3).n1 & seq(C4, A3, E4, B3).n1 & seq(E4, C4, G4, D4).n1).legato(0.95).loop
     chords2 = (seq(D3, A3, F3, E3).n1 & seq(F3, C4, A3, Gs3).n1 & seq(A3, E4, C4, B3).n1).legato(0.95).loop
 
-    # A new bass line every loop, the same every run (seed 7)
-    rhythm = euclid(5, 8, A1, velocity: 0.8) | euclid(3, 8, A1, rotate: 1, velocity: 0.7)
-    line = melody(scale(:minor_pentatonic, A1), rhythm: rhythm, leap: 2, range: E1..A2, seed: 7, vary: true).loop
+    # A new bass line every loop, the same every run (seed 7): the library
+    # generator L.gen.pentatonic_bass (lib-gen-1;
+    # lib/mb/sound/library/generators/midi_transforms_song.rb)
+    line = L.gen.pentatonic_bass(seed: 7)
     bass = line.bake(echo(3.n16, 2, pitch: 12, velocity: 0.45, gate: 0.4), cycles: 4)
 
     kick = euclid(3, 8, C2).loop

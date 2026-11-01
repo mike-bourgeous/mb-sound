@@ -1,5 +1,23 @@
 module MB
   module Sound
+    # A generated form (G4, generative-g4): the same sections as a
+    # stochastic L-system, so each seed grows another DJ-friendly roller:
+    # one to three build-drop cycles, each drop turning through a
+    # breakdown and pull-up into the next (phrases stay on 8 and 16 bars:
+    # breakdowns of 7 or 15 plus the pull-up bar).
+    # `genre(:dnb).generative(seed: 3).play`
+    # Registered as L.flow.dnb_chain (lib-gen-1: the template reads it from
+    # the library, `generator L.flow.dnb_chain`).
+    Library::Generators.flow :dnb_chain, genre: :dnb, tags: %i[dnb lsystem],
+      about: 'One to three build-drop cycles, each drop turning through a breakdown and pull-up into the next (8- and 16-bar phrases)',
+      bars: { intro: [16, 32], build: 8, drop: [16, 32], breakdown: [7, 15], pullup: 1, drop2: [16, 32], outro: [16, 32] },
+      params: -> { { seed: 174 } } do |seed:|
+      lsystem(%i[intro body outro],
+              body: { %i[build drop turn body] => 2, %i[build drop turn] => 1 },
+              turn: { %i[breakdown pullup drop2] => 2, %i[breakdown pullup drop] => 1 },
+              generations: 3, seed: seed)
+    end
+
     # Modern UK drum & bass, from the persona panel (2026-10-13): Kez Volta's
     # research (research-persona-edm, research/persona-panel/edm/research.md)
     # and "Tunnel Vision" (bin/songs/tunnel_vision.rb, patches in
@@ -23,17 +41,8 @@ module MB
         drop2     32
         outro     32
       end
-      # A generated form (G4, generative-g4): the same sections as a
-      # stochastic L-system, so each seed grows another DJ-friendly roller:
-      # one to three build-drop cycles, each drop turning through a
-      # breakdown and pull-up into the next (phrases stay on 8 and 16 bars:
-      # breakdowns of 7 or 15 plus the pull-up bar).
-      # `genre(:dnb).generative(seed: 3).play`
-      generator lsystem(%i[intro body outro],
-                        body: { %i[build drop turn body] => 2, %i[build drop turn] => 1 },
-                        turn: { %i[breakdown pullup drop2] => 2, %i[breakdown pullup drop] => 1 },
-                        generations: 3, seed: 174),
-                bars: { intro: [16, 32], build: 8, drop: [16, 32], breakdown: [7, 15], pullup: 1, drop2: [16, 32], outro: [16, 32] }
+      # A generated form (G4): L.flow.dnb_chain, defined above the template.
+      generator L.flow.dnb_chain
 
       two_step = 'X.........X.....'
       hats = '7.4.7.4.7.4.7.45'

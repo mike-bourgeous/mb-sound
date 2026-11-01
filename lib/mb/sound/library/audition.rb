@@ -9,8 +9,10 @@ module MB
       # instrument (Struck), clips on their instrument, other effects their
       # first Listening Bench material, the audition mix (Library::Bench,
       # audition-1, library-2), mastering chains the same mix through
-      # them, envelope presets a triangle and some noise shaped by them;
-      # the rest say what to do with them.
+      # them, envelope presets a triangle and some noise shaped by them,
+      # generators their clip on their instrument for 8 bars, section
+      # chains a sketch (a bar and a chord a section; lib-gen-1); the rest
+      # say what to do with them.
       module Audition
         # A beat for kit entries.
         KIT_DEMO = { kick: 'x...x...x...x...', snare: '....x.......x...', closed_hat: 'x.x.x.x.x.x.x.xx' }.freeze
@@ -59,6 +61,10 @@ module MB
               "a kit plays a grid: #{path}.(grid(16, kick: 'x...'))")
           when :clip
             entry.call
+          when :generator
+            Generators.demo(entry)
+          when :flow
+            Generators.sketch(entry)
           when :effect
             Playable.wrap(entry.audition(:mix), "#{path} on the audition mix (beat and bass, pluck, pad, then its tail)", true,
               "an effect processes a sound: #{path}.audition(:arp), (:break), or (:pad) for the other Bench materials, sig.then(&#{path}) on any sound")

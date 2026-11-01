@@ -360,7 +360,10 @@ module MB
       def track_values(name, values, patch)
         graph = clip = entry = nil
         values.each do |v|
-          if v.is_a?(Library::Entry) && v.kind == :clip && v.builder
+          # (clip entries and clip generators give their clip; a
+          # generator's clip plays on its entry's instrument unless the
+          # track gets another: Library::Generators.instrument)
+          if v.is_a?(Library::Entry) && (v.kind == :clip || v.kind == :generator) && v.builder
             v = v.call
           end
           if v.is_a?(Sequence::Clip) || v.is_a?(Sequence::Kit)
@@ -376,6 +379,13 @@ module MB
           else
             raise ArgumentError, "track #{name.inspect}: give it one graph (got two)" if graph
             graph = v
+          end
+        end
+        if clip && !graph && !entry && !patch && (inst = Library::Generators.instrument(clip))
+          begin
+            entry = InstrumentPatch.entry_for(inst, track: name)
+          rescue InstrumentPatch::Error => e
+            return MB::Sound.live_error(e)
           end
         end
         # (a clip alone plays as a graph, on what plays it: Playable.graph)

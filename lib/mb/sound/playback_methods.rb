@@ -576,7 +576,7 @@ module MB
         raise ArgumentError, 'Pass a new clip or old => new pairs, not both' if clips && !pairs.empty?
         clips ||= pairs
         raise ArgumentError, 'Pass a new clip or old => new pairs to swap' if clips.is_a?(Hash) && clips.empty?
-        if clips.is_a?(Library::Entry) && clips.kind != :clip
+        if clips.is_a?(Library::Entry) && clips.kind != :clip && clips.kind != :generator
           # (library-instruments-1: the maintainer's guess `swap :bass, L.inst.x`)
           return MB::Sound.live_error(ArgumentError.new(
             "swap changes a player's clips; #{clips.head_path} is #{clips.kind == :effect ? 'an effect' : 'an instrument'}: " \
