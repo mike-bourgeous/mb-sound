@@ -148,6 +148,26 @@ RSpec.describe(MB::Sound::Session::ClipSwaps) do
     expect(run(800)[0]).to eq(MB::Sound::D2.number)
   end
 
+  # (fix-808-fuzz, SessionFuzz seed 28 of tempo-2: changes land at the
+  # start of their span, so at 367 frames a swap landing on the frame a fade
+  # ended saw the faded player neither playing nor stopped yet, and was
+  # lost; at 800 the fade ended with a buffer and the swap found it stopped)
+  [800, 367].each do |size|
+    it "swaps a player whose fade-out ends on the swap's frame as the stopped player at #{size}-frame buffers" do
+      s = MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: size, realtime: false, raise_errors: true)
+      s.add(bass.number, name: :bass)
+      s.remove(:bass, fade: 1/4r, time: 1/4r) # beat 2, ending on beat 3 (frame 48000)
+      s.swap(:bass, bass2, start_time: 1/2r)
+      s.process_buffer while s.frame < 48000 + size
+      expect(s.stopped.keys).to eq([:bass])
+
+      s.resume(:bass, at: :now, fade: 0)
+      expect(s.process_buffer[0][-1]).to eq(MB::Sound::D2.number)
+    ensure
+      s&.close
+    end
+  end
+
   it 'raises errors for unknown players and clips that are not played' do
     expect { session.swap(:nope, bass2) }.to raise_error(ArgumentError, /No background player :nope/)
     session.add(bass.number, name: :bass)
