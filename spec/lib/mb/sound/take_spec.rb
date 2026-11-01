@@ -562,16 +562,24 @@ RSpec.describe(MB::Sound::Take) do
     s.close
   end
 
-  it 'warns when a replay goes quiet with take lines left to run' do
+  # (ux-notes-1: the maintainer's second take of 2026-10-31 began with a
+  # failed `bg`, then foreground plays the replay skips, then `design` 7.7
+  # whole notes in; the replay went quiet at 1:1 with 448 lines left.  A
+  # line typed further along means the live timeline moved there.)
+  it 'keeps the timeline moving to take lines still to run, as it moved live' do
     r = MB::Sound::Take::Replay.new(bpm: 120, bar_length: 1r, master_gain: 0.5, fade_in: nil, fade_out: nil, rng: nil, ends: 6r) { |rp|
       rp.line(0r, [0r], 'bg :x, 0.1.constant.until(1.bar)')
       rp.line(5r, [5r], 'bg :y, 0.1.constant')
     }
+    out = []
     frames = 0
     expect {
-      frames = r.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), tail: 0)
-    }.to output(/went quiet at 2:1.*1 take line left to run.*ends at 7:1/).to_stderr
-    expect(frames).to be_between(96000, 97600)
+      frames = r.render(MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1, tail: 0) { |mix| out << mix[0].dup }
+    }.not_to output.to_stderr
+    mix = SpecBuffers.join(out)
+    expect(frames).to be >= 6 * 96000
+    expect(mix[96000 * 3].abs).to eq(0) # (silent between them)
+    expect(mix[96000 * 5 + 48000].abs).to be > 0.01 # (:y plays from 5r, where it was typed)
   end
 
   it 'keeps the timeline moving while recorded MIDI is still to play, then pauses when idle' do
