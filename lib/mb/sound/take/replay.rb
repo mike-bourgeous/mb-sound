@@ -123,7 +123,7 @@ module MB
           # midi-consol-2 start in C major, the only key there was)
           root, mode = @start[:key] || ['C', :major]
           t.reset_key(MusicalKey.default.with_root(root).with_mode(mode))
-          t.bpm = @start[:bpm]
+          t.reset_tempo(@start[:bpm])
           t.tempo_map = Sequence::TempoMap.from_rows(@start[:tempo_map]) if @start[:tempo_map] # (tempo-2: ramps and history the take started with)
           session.master_gain = @start[:master_gain]
           session.master_gain_post = !!@start[:master_gain_post]

@@ -218,6 +218,50 @@ RSpec.describe('set documents', :aggregate_failures) do
     expect(doc.form.to_ruby).to include('b 2r')
   end
 
+  it 'saves the base tempo and scene and section tempo changes, which load again (tempo-3: "bpm = base, tempo = live")' do
+    a = session
+    within(a) {
+      MB::Sound.instance_exec do
+        bpm 132
+        track :lead, 220.hz.triangle.at(-24.db)
+        scene :a, lead: :on, tempo: [150, over: 2]
+        scene(:b, lead: :on) { tempo 100 }
+        section :c, 4, tempo: 140
+        flow(play: false) { a 2; b 2 }
+      end
+    }
+    a.transport.tempo_change { |m, _| m.step(160, at: 3) } # (a change later in the song: performance, not setup)
+    text = nil
+    expect { text = io.dump(a.arrangement, name: 'tempos') }.to output(/tempo changes after the start aren't saved/).to_stderr
+    expect(text).to include("bpm 132\n").and include('tempo: [150, { over: 2 }]').and include('{ tempo 100 }').and include('tempo: 140')
+    expect(text).to include("# WARNING(graph-io): tempo changes after the start aren't saved (1; the base tempo is)")
+    expect(text).to match(/\Agraph #{MB::Sound::GraphIO::FORMAT},|^graph #{MB::Sound::GraphIO::FORMAT},/)
+
+    b = session
+    io.load(text, session: b)
+    expect(b.transport.bpm).to eq(132)
+    expect(b.arrangement.scenes[:a].values[:tempo]).to eq([150, { over: 2 }])
+    expect(stable(io.dump(b.arrangement, name: 'tempos'))).to eq(stable(text.sub(/^# WARNING\(graph-io\): tempo.*\n/, '')))
+  end
+
+  it 'loads the scene and section bpm: values and scene-block bpm lines of documents before format 9 as tempo changes' do
+    old = %(graph 8, kind: :set\nbpm 120\ntrack :lead, 220.hz.triangle.at(-24.db)\nscene :a, lead: :on, bpm: [150, over: 2]\nscene(:b, lead: :on) { bpm 100 }\nsection :c, 4, bpm: 140\n)
+    b = session
+    io.load(old, session: b)
+    expect(b.arrangement.scenes[:a].values).to eq({ lead: :on, tempo: [150, { over: 2 }] })
+    expect(b.arrangement.sections[:c].knobs).to eq({ tempo: 140 })
+    within(b) { MB::Sound.bg(:hum, 0.01.constant) } # (the timeline moves while something plays)
+    b.process_buffer(800)
+    expect(b.transport.position).to be > 0
+    within(b) { b.arrangement.go(:b, at: :now) }
+    b.process_buffer(800)
+    expect(b.transport.bpm).to eq(100)
+    expect(b.transport.tempo_map.base).to eq(120) # (a change where the scene landed, not the base)
+
+    expect { io.load(old.sub('graph 8', 'graph 9'), session: session) }.to raise_error(io::LoadError, /:4: .*bpm: would set the song's base tempo/)
+    expect { io.load(%(graph 9, kind: :set\nscene(:b) { bpm 100 }), session: session) }.to raise_error(io::LoadError, /:2: a scene block changes the tempo where the scene lands with tempo/)
+  end
+
   it 'saves buses, sends (gains and knob names), and to: routes, loading them to play bit for bit like the original' do
     build = -> {
       MB::Sound.instance_exec do
@@ -477,7 +521,7 @@ RSpec.describe('set documents', :aggregate_failures) do
 
   it 'loads only set commands and assignments' do
     expect { io.load(%(graph 1, kind: :set\n220.hz.saw), session: session) }.to raise_error(io::LoadError, /:2: a set document holds set commands/)
-    expect { io.load(%(graph 1, kind: :set\nscene(:a) { |t| 1 }), session: session) }.to raise_error(io::LoadError, /:2: a scene block holds assignments and the commands meter, bpm, turn/)
+    expect { io.load(%(graph 1, kind: :set\nscene(:a) { |t| 1 }), session: session) }.to raise_error(io::LoadError, /:2: a scene block holds assignments and the commands meter, tempo, turn/)
     expect { io.load(%(graph 1, kind: :set\nscene(:a) { play 220.hz }), session: session) }.to raise_error(io::LoadError, /a scene block holds/)
     expect { io.load(%(graph 1, kind: :set\nscene(:a) { bg(:x, 1.constant) { 2 } }), session: session) }.to raise_error(io::LoadError, /without blocks/)
     expect { io.load(%(graph 1, kind: :set\nmutes(:a, :b) { 2 }), session: session) }.to raise_error(io::LoadError, /mutes takes no block/)

@@ -33,7 +33,7 @@ module MB
         # once per tempo cell.  Returns the Change.
         def change_tempo_map(bpm = nil, over: nil, curve: nil, follow: nil, at: nil, start_time: nil)
           raise ArgumentError, 'Give a tempo or a source to follow, not both' if bpm && follow
-          raise ArgumentError, 'over: ramps to a tempo; it needs one (bpm 140, over: 4.bars)' if over && bpm.nil?
+          raise ArgumentError, 'over: ramps to a tempo; it needs one (tempo 140, over: 4.bars)' if over && bpm.nil?
           follow = check_tempo_source(follow) if follow
           target = Sequence::TempoMap.check_bpm(bpm) if bpm
           curve = curve.nil? ? nil : Curve[curve]
@@ -64,15 +64,33 @@ module MB
           }
         end
 
+        # Sets the song's base tempo to +bpm+ (a number or a Tempo; tempo-3,
+        # maintainer 2026-11-02: "bpm = base, tempo = live"): the tempo map's
+        # first segment, so every position that followed the base plays at
+        # +bpm+ and later changes stay (Sequence::TempoMap#with_base: a ramp
+        # from the base starts from the new one).  A journaled :tempo_base
+        # change (subject :tempo, so undo restores the map as it was),
+        # landing at +start_time+ (whole notes; now by default) on its exact
+        # frame like other timeline changes; heard at once where the base
+        # is in effect.  Returns the Change.
+        def change_tempo_base(bpm, start_time: nil)
+          target = Sequence::TempoMap.check_bpm(bpm)
+          time = start_time ? start_time.to_r : launch_time(LaunchPoint::NONE, [], default: :now)
+          change(:tempo_base, :tempo, time, data: { bpm: bpm }) { |_t|
+            @transport.tempo_change { |map, _pos| map.with_base(target) }
+            tempo_cell(1) # (the tempo where it landed, for what lands with it)
+          }
+        end
+
         # The source of a followed tempo checked and ready to read: knob
         # names (checked now), Knobs and readers as they are, and anything
         # MIDI::Param reads (tempo LFOs like `4.bars.lfo.at(150..180)`, cc
         # params, clips, sums of those).  Audio-rate nodes raise, pointing
         # at a knob that follows them.
         def check_tempo_source(source)
-          ValueSource.coerce(source, 'bpm', read: :decision, numbers: false, names: :check, knobs: self)
+          ValueSource.coerce(source, 'tempo', read: :decision, numbers: false, names: :check, knobs: self)
         rescue MIDI::Param::NotAParam => e
-          raise ArgumentError, "#{e.message}; for a tempo, make a knob follow it and follow the knob: knob :tempo, 120, range: 60..200; turn :tempo, follow: node; bpm :tempo"
+          raise ArgumentError, "#{e.message}; for a tempo, make a knob follow it and follow the knob: knob :pace, 120, range: 60..200; turn :pace, follow: node; tempo :pace"
         end
 
         private
@@ -161,7 +179,7 @@ module MB
         def restore_tempo(state)
           raise 'Nothing to restore for the tempo' unless state.is_a?(TempoState)
           if state.map.static?
-            @transport.bpm = state.bpm
+            @transport.reset_tempo(state.bpm)
           else
             @transport.tempo_change { |_map, _pos| state.map }
           end

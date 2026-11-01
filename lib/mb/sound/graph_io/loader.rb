@@ -158,6 +158,10 @@ module MB
           # Whether clips' #shift means #rotate (documents before format 6;
           # see GraphIO::FORMAT)
           @old_shift = false
+          # Whether scene and section `bpm:` values and scene blocks' `bpm`
+          # lines change the tempo where they land (documents before
+          # format 9, read as tempo: and tempo; see GraphIO::FORMAT)
+          @old_tempo = false
           @path = path
           @label = path || '(graph document)'
           @given_inputs = inputs.transform_keys(&:to_sym)
@@ -331,7 +335,7 @@ module MB
         # Commands a scene block may hold (they land at the scene's launch
         # point, as in an #at_bar block): meter and tempo, knob turns and
         # snapshots, background players, mutes and solos.
-        SCENE_COMMANDS = %i[meter bpm turn recall xfade bg stop swap mute unmute solo unsolo].freeze
+        SCENE_COMMANDS = %i[meter tempo turn recall xfade bg stop swap mute unmute solo unsolo].freeze
 
         # Loads a set document (kind: :set, see SetWriter) into the
         # Session (the current one unless given): knob lines become the
@@ -511,6 +515,7 @@ module MB
               @old_db = !GraphIO.since?(version, :linear_gains)
               @old_ring = !GraphIO.since?(version, :ring_all_typed_inputs)
               @old_shift = !GraphIO.since?(version, :clip_shift)
+              @old_tempo = !GraphIO.since?(version, :tempo_live)
               @document.meta = kwargs
             when :inputs
               bad = args.reject { |a| a.is_a?(Symbol) }
@@ -793,7 +798,9 @@ module MB
               end
               MB::Sound.bus(*args, **kwargs, &(b && build_proc(b, scope)))
             when :scene
-              MB::Sound.scene(*args, **kwargs, &(b && scene_proc(b, scope)))
+              MB::Sound.scene(*args, **old_tempo_values(kwargs), &(b && scene_proc(b, scope)))
+            when :section
+              MB::Sound.section(*args, **old_tempo_values(kwargs))
             when :flow
               raise error(node, 'flow takes a block (flow do ... end)') unless b && args.empty? && kwargs.empty?
               raise error(b, 'flow blocks take no parameters') if b.parameters
@@ -808,6 +815,13 @@ module MB
           rescue StandardError => e
             raise error(node, "#{name} raised #{e.class}: #{e.message}")
           end
+        end
+
+        # Scene and section values of a document before format 9, whose
+        # `bpm:` changed the tempo where they landed: as `tempo:`.
+        def old_tempo_values(kwargs)
+          return kwargs unless @old_tempo && kwargs.key?(:bpm) && !kwargs.key?(:tempo)
+          kwargs.transform_keys { |k| k == :bpm ? :tempo : k }
         end
 
         public
@@ -825,7 +839,10 @@ module MB
           names, rest = block_params(b)
           (b.body&.body || []).each do |st|
             next if st.is_a?(Prism::LocalVariableWriteNode)
-            unless st.is_a?(Prism::CallNode) && st.receiver.nil? && SCENE_COMMANDS.include?(st.name) && st.block.nil?
+            if st.is_a?(Prism::CallNode) && st.receiver.nil? && st.name == :bpm && !@old_tempo
+              raise error(st, "a scene block changes the tempo where the scene lands with tempo (bpm sets the song's base tempo)")
+            end
+            unless st.is_a?(Prism::CallNode) && st.receiver.nil? && (SCENE_COMMANDS.include?(st.name) || (@old_tempo && st.name == :bpm)) && st.block.nil?
               raise error(st, "a scene block holds assignments and the commands #{SCENE_COMMANDS.join(', ')} (without blocks)")
             end
           end
@@ -860,9 +877,10 @@ module MB
               next
             end
             args, kwargs = call_args(st, scope)
-            check_limits(st, MB::Sound, st.name, args, kwargs)
+            name = @old_tempo && st.name == :bpm ? :tempo : st.name # (format 9: a scene's tempo is a change)
+            check_limits(st, MB::Sound, name, args, kwargs)
             begin
-              MB::Sound.public_send(st.name, *args, **kwargs)
+              MB::Sound.public_send(name, *args, **kwargs)
             rescue GraphIO::LoadError
               raise
             rescue StandardError => e
@@ -925,7 +943,7 @@ module MB
                 end
               else
                 raise error(b, "#{name} takes no block") if b
-                FLOW_CALL.bind_call(builder, name, *args, **kwargs)
+                FLOW_CALL.bind_call(builder, name, *args, **old_tempo_values(kwargs))
               end
             rescue GraphIO::LoadError
               raise

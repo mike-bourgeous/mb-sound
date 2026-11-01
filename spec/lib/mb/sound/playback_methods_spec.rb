@@ -920,7 +920,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     it 'counts bars on the timeline, following tempo changes during the render' do
       seconds = MB::Sound.render(filename, bars: 4, bpm: 120) do
         MB::Sound.bg(1.constant)
-        MB::Sound.at_bar(3) { MB::Sound.bpm(60) }
+        MB::Sound.at_bar(3) { MB::Sound.tempo(60) }
       end
       expect(seconds).to eq(2 * 2 + 2 * 4) # two bars at 120 BPM, two at 60
     end

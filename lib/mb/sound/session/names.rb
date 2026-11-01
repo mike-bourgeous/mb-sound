@@ -4,12 +4,13 @@ module MB
       # The Session's top-level names (contract K2 in
       # design/notes/arrangement.md): tracks, mute groups, and (later) knobs
       # share one namespace, so a scene can say `bass: bass_a, cut: 800`
-      # without saying which is which.  +master+ and +cue+ are reserved.
+      # without saying which is which.  +master+, +cue+, and +tempo+ are
+      # reserved (scenes' and sections' `tempo:` changes the tempo; tempo-3).
       # Names are Symbols in Ruby; #path joins names into the
       # `player/node/lane` paths used for display and files.
       class Names
         # Names no track, group, or knob may take.
-        RESERVED = [:master, :cue].freeze
+        RESERVED = [:master, :cue, :tempo].freeze
 
         def initialize
           @kinds = {}
@@ -25,7 +26,9 @@ module MB
           raise ArgumentError, "Names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
 
           error = @mutex.synchronize {
-            if RESERVED.include?(name)
+            if name == :tempo
+              ":tempo is reserved (a scene's tempo: changes the tempo); name the #{kind} something else, like :pace (tempo :pace follows a knob)"
+            elsif RESERVED.include?(name)
               "#{name.inspect} is reserved"
             elsif @kinds[name] && @kinds[name] != kind
               "#{name.inspect} is already a #{@kinds[name]}; pick another name for the #{kind}"

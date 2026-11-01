@@ -60,7 +60,7 @@ module MB
         end
 
         def timeline_change?(c)
-          c.kind == :seek || c.kind == :tempo || (c.kind == :restore && (c.subject == :timeline || c.subject == :tempo))
+          c.kind == :seek || c.kind == :tempo || c.kind == :tempo_base || (c.kind == :restore && (c.subject == :timeline || c.subject == :tempo))
         end
 
         # The undo subject of a seek (see Undo#snapshot_subject).

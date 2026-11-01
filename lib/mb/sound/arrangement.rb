@@ -515,6 +515,9 @@ module MB
             next
           end
           kind = @session.names.kind(k)
+          if k == :bpm && kind.nil?
+            return MB::Sound.live_error(ArgumentError.new(Arrangement.bpm_value_message(name, v)))
+          end
           if kind == :knob || control_value?(k, v) || @session.track_strip_knob?(k)
             check_knob_value(name, k, v) or return nil
             next
@@ -1150,17 +1153,30 @@ module MB
       KEY_VALUES = [:key, :mode].freeze
 
       # Scene and section values that change the session tempo
-      # (tempo-maps-1): `bpm: 140`, `bpm: [160, over: 4.bars, curve:
-      # :smooth]` (a ramp from the tempo in effect), `bpm: :tempo` (follow
-      # a knob), `bpm: 4.bars.lfo.at(150..180)`.  `tempo:` is the same
-      # unless the Session has a knob or track named :tempo (then it turns
-      # that).
-      TEMPO_VALUES = [:bpm, :tempo].freeze
+      # (tempo-maps-1; tempo-3: `tempo:`, like the #tempo command, since a
+      # scene's tempo is a change where it lands, not the song's base):
+      # `tempo: 140`, `tempo: [160, over: 4.bars, curve: :smooth]` (a ramp
+      # from the tempo in effect), `tempo: :pace` (follow a knob), `tempo:
+      # 4.bars.lfo.at(150..180)`.  :tempo is a reserved name (no knob or
+      # track takes it; Session::Names::RESERVED), so `tempo:` always means
+      # the tempo.  `bpm:` (the base) raises unless something is named :bpm
+      # (see .bpm_value_message).
+      TEMPO_VALUES = [:tempo].freeze
 
       # True if scene or section value name +name+ changes the session
       # tempo (see TEMPO_VALUES).
       def tempo_value?(name)
-        name == :bpm || (name == :tempo && @session.names.kind(:tempo).nil?)
+        name == :tempo
+      end
+
+      # The error for a scene's or section's `bpm:` value (tempo-3: the
+      # base tempo is the song's, set with the bpm command; a scene or
+      # section changes the tempo with tempo:).
+      def self.bpm_value_message(owner, value)
+        v, options = value.is_a?(Array) ? value : [value, nil]
+        text = [v, *(options || {}).map { |k, o| "#{k}: #{RubyValue.to_ruby(o) rescue o.inspect}" }].map { |x| x.is_a?(String) ? x : (RubyValue.to_ruby(x) rescue x.inspect) }
+        spelled = text.length > 1 ? "[#{text.join(', ')}]" : text.first
+        "#{owner.inspect}: bpm: would set the song's base tempo (the bpm command); a scene or section changes the tempo where it lands with tempo: #{spelled}"
       end
 
       # The tempo (or source) and ramp options of a tempo value.

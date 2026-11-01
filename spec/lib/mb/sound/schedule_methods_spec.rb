@@ -335,7 +335,7 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
   it 'changes the tempo at the scheduled time' do
     within do
       MB::Sound.bg(0.constant)
-      MB::Sound.at_bar(2) { MB::Sound.bpm(240) }
+      MB::Sound.at_bar(2) { MB::Sound.tempo(240) }
     end
     run(96000 - 800)
     expect(transport.bpm).to eq(120)

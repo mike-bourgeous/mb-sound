@@ -66,12 +66,14 @@ RSpec.describe('API guesses from the 2026-10-27 take', :aggregate_failures) do
     expect(run('bg :pad').to_s).to start_with('bg :pad lands')
   end
 
-  it 'takes tempo as bpm, and points drifting tempos at clocks with speed:' do
+  it 'changes the tempo with tempo (bpm: the base), and points drifting tempos at clocks with speed:' do
     expect(run('tempo 180').kind).to eq(:tempo) # (the journal entry: tempo-2)
     expect(session.transport.bpm).to eq(180)
     # (tempo-maps-1 supports moving tempos: a Hz LFO points at the tempo-LFO spelling, a range at ramps)
-    expect(error_of('bpm 0.1.hz.lfo.at(90..180)').message).to match(/write \d+\.bars\.lfo\.at\(\.\.\.\) for 0\.1\.hz\.lfo.*bpm :tempo/)
-    expect(error_of('bpm 90..180').message).to include('a tempo is one value', 'bpm 90; bpm 180, over: 4.bars')
+    expect(error_of('tempo 0.1.hz.lfo.at(90..180)').message).to match(/write \d+\.bars\.lfo\.at\(\.\.\.\) for 0\.1\.hz\.lfo.*tempo :pace/)
+    expect(error_of('tempo 90..180').message).to include('a tempo is one value', 'tempo 90; tempo 180, over: 4.bars')
+    expect(error_of('bpm 140, over: 4.bars').message).to include("bpm sets the song's base tempo", '(tempo 140, over: 4.bars)')
+    expect(run('bpm 150').kind).to eq(:tempo_base) # (the base: tempo-3)
     run('bpm 120.bpm') # (a Tempo value reads as its number)
     expect(session.transport.bpm).to eq(120)
 
