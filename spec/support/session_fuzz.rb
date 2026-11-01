@@ -293,6 +293,39 @@ module SessionFuzz
         lines << "at_bar(#{rng.rand(1..bars)}, beat: 2) { bg :#{t}, grid(16, kick: 'x..x..x.x..x..x.').loop, fade: 1/4r, on: :beat }"
       end
     end
+    # (lesson-fixes-1) a synth track swapped, stopped, and launched again
+    # by name: it plays the clip it played before the stop (a console swap
+    # is the track's clip, Arrangement#note_swap; it played the track's
+    # earlier clip again).  The script checks that itself (a raise, which
+    # :runs reports) in songs without seeks (a seek back into the window
+    # replays a part of it), between eighth beats (2 1/8 to 2 7/8), where
+    # no other step lands (steps and launch points land on whole beats,
+    # `in: 1/8r` ones on half beats).  Drawn last, so every seed keeps the
+    # song it made before.
+    # (Not for a track given a one-shot clip: its swap may land after the
+    # one-shot ended, ClipSwaps::ClipsOver, an INVALID song.)
+    if !swappable.empty? && rng.rand < 0.3
+      t = pick(rng, swappable)
+      bar = rng.rand(1..bars)
+      stop = pick(rng, ['fade: 0', 'ring: true'])
+      clip = pick(rng, MELODIC.select { |c| c.end_with?('.loop') })
+      unless lines.any? { |l| l.match?(/\b#{t}\b/) && (l.include?('seq(C5, D5)') || l.include?('motifs(')) }
+        lines << "at_bar(#{bar}, beat: 17/8r) { swap :#{t}, #{clip}, on: :now }"
+        if lines.any? { |l| l.include?('seek ') }
+          lines << "at_bar(#{bar}, beat: 19/8r) { stop :#{t}, #{stop} }"
+          lines << "at_bar(#{bar}, beat: 21/8r) { bg :#{t}, on: :now }"
+        else
+          roots = "s.timeline_nodes_of(:#{t}).grep(MIDI::ClipSource).map { |n| (n.ring_clip || n.pending_clip || n.clip).lineage.last }"
+          lines << "kept_#{t} = []"
+          # (blocks run half a bar ahead in renders: the probes are
+          # changes, landing on their sample under the render lock)
+          lines << "at_bar(#{bar}, beat: 19/8r) { s = Session.current; s.change(:probe, :#{t}, s.now) { kept_#{t}.replace(#{roots}) }; stop :#{t}, #{stop} }"
+          lines << "at_bar(#{bar}, beat: 21/8r) { bg :#{t}, on: :now }"
+          lines << "at_bar(#{bar}, beat: 23/8r) { s = Session.current; s.change(:probe, :#{t}, s.now) { now = #{roots}; " \
+                   "raise \"#{t} played other clips after its relaunch\" unless kept_#{t}.empty? || now.empty? || kept_#{t}.all? { |r| now.any? { |c| c.equal?(r) } } } }"
+        end
+      end
+    end
     Song.new(header: header, lines: lines, bars: bars)
   end
 
@@ -470,7 +503,13 @@ module SessionFuzz
   # (commands for players other commands ended first)
   # (a swap of a one-shot that has ended, ClipSwaps::ClipsOver: seed 104011
   # on master-ai dec63343, found in carry-1's spec run)
-  INVALID = [/No background player :\w+ is playing or stopped/, /doesn't play any of the clips being replaced/, /so a swap would never be heard/].freeze
+  # (the console's swap of a track that is fading out from a stop, or whose
+  # one-shot ended: FUZZ=40 seed 23 on master-ai 24e67f73, found by
+  # lesson-fixes-1; PlaybackMethods#swap's guard)
+  INVALID = [
+    /No background player :\w+ is playing or stopped/, /doesn't play any of the clips being replaced/, /so a swap would never be heard/,
+    /swap :\w+: track :\w+ isn't playing/,
+  ].freeze
 
   # The unexpected lines the last #render printed to stderr.
   def warnings = @warnings || []

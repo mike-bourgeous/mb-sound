@@ -35,7 +35,7 @@ RSpec.describe('session fuzzing') do
   it 'generates valid songs that use every kind of command' do
     songs = (1..40).map { |s| SessionFuzz.generate(Random.new(s)).code }
     all = songs.join("\n")
-    %w[track( scene go swap stop mute unmute solo turn tween .freq tr808( tr909( launch tweak meter L.inst. :dnb_sub bus( feed master flow( markov( seek glide(:length) key_level].each do |word|
+    %w[track( scene go swap stop mute unmute solo turn tween .freq tr808( tr909( launch tweak meter L.inst. :dnb_sub bus( feed master flow( markov( seek glide(:length) key_level kept_t].each do |word|
       expect(all).to include(word)
     end
     expect(all).to match(/\{ swap :t\d, grid\(.*\)\.loop\.\w+/) # (parity-1: a kit swapped to a Kit transform)
@@ -206,6 +206,21 @@ RSpec.describe('session fuzzing') do
         'at_bar(3) { fx :t3, :dub }',
         'at_bar(2, beat: 4) { seek 2, 2.999 }',
       ], 3,
+    ],
+    # (lesson-fixes-1: a console swap didn't change the track's clip, so
+    # `bg :t1` after a stop played the scene's clip again; seed 5's case)
+    'a swapped instrument track stopped and launched again by name' => [
+      :runs, ['bpm 137.5', 'meter 3, 4'], [
+        'track :t1, :dnb_sub, q: 1',
+        'scene :s1, t1: seq(C3.n4, G3.n8.dotted, Eb3.n16).loop',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(2, beat: 17/8r) { swap :t1, seq(F3, A3, C4, E4).n4.loop, on: :now }',
+        'kept_t1 = []',
+        'at_bar(2, beat: 19/8r) { s = Session.current; s.change(:probe, :t1, s.now) { kept_t1.replace(s.timeline_nodes_of(:t1).grep(MIDI::ClipSource).map { |n| (n.ring_clip || n.pending_clip || n.clip).lineage.last }) }; stop :t1, fade: 0 }',
+        'at_bar(2, beat: 21/8r) { bg :t1, on: :now }',
+        'at_bar(2, beat: 23/8r) { s = Session.current; s.change(:probe, :t1, s.now) { now = s.timeline_nodes_of(:t1).grep(MIDI::ClipSource).map { |n| (n.ring_clip || n.pending_clip || n.clip).lineage.last }; ' \
+          'raise "t1 played other clips after its relaunch" unless kept_t1.empty? || now.empty? || kept_t1.all? { |r| now.any? { |c| c.equal?(r) } } } }',
+      ], 2,
     ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do

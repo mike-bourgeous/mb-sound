@@ -199,9 +199,10 @@ RSpec.describe MB::Sound::Help do
     # Lessons whose steps play over the example bounds, with the reason
     # (their example expects the loud steps instead, so it fails once the
     # lesson is fixed and the entry can go).
-    LOUD_LESSONS = {
-      design: 'the init voice plays at the library level, ~22 dB over the level tone (found by lesson-gen-1, 2026-11-01): its steps need a level line',
-    }.freeze
+    # (none since lesson-fixes-1 gave lesson :design's tracks levels; e.g.
+    # `design: 'the init voice plays ~22 dB over the level tone: its steps
+    # need a level line'`)
+    LOUD_LESSONS = {}.freeze
 
     MB::Sound::Help::LESSONS.each_value do |lesson|
       it "#{lesson.name}: every step's check fails before its code and passes after, and its sound stays in the example bounds" do

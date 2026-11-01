@@ -144,6 +144,11 @@ module MB
       # +send:+ (bus name => level, e.g. `send: { verb: -12.db }`) and +to:+
       # (a bus for its main out) route a named player (see BusMethods).
       #
+      # On a track (see ArrangementMethods#track), a clip or generator
+      # entry is its clip at the defaults: `bg :drums, L.gen.techno_beat`
+      # plays `L.gen.techno_beat.()` on the track (a new player auditions
+      # the entry, as #play does).
+      #
       # +clock:+ plays the clip (or Sample loop, or the clips and loops in a
       # graph) on a clock (see MB::Sound::Clock): `bg :bass, bassline,
       # clock: :reese`, `bg :bowl, strike, clock: 19.7.seconds`.
@@ -162,6 +167,15 @@ module MB
           return s.arrangement.play(name, :on, at: point.given? ? point : nil, fade: fade)
         end
         name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
+        # A library entry given to a track: a clip or generator entry is its
+        # clip at the defaults (as `track :x, entry` takes it), played on
+        # the track; instruments and effects say how to change the track's
+        # (lesson-fixes-1: `bg :drums, L.gen.techno_beat` played the 8-bar
+        # audition in place of the track; `play` and new players keep it)
+        if sound.is_a?(Library::Entry) && name && Session.current.arrangement.tracks[name]
+          sound = Internal.entry_for_track('bg', name, sound)
+          return MB::Sound.live_error(sound) if sound.is_a?(Exception)
+        end
         sound = Sequence::Clocked.apply(sound, clock) if clock
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
         # (a clip's echo or arp stream on a track: it would replace the
@@ -572,7 +586,10 @@ module MB
       # was made from, or old => new pairs to choose.  Clips made from the
       # old clip (e.g. bass.transpose(12), or the voices of Clip#synth) are
       # rebuilt from the new one the same way.  Stopped players can be
-      # swapped too, and play the new clip when resumed.  See Session#swap.
+      # swapped too, and play the new clip when resumed.  On a track (see
+      # ArrangementMethods#track), the new clip becomes the track's clip,
+      # as with `bg :name, clip`, so `bg :name` or a scene's :on after a
+      # stop plays it.  See Session#swap.
       #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
@@ -619,6 +636,12 @@ module MB
         end
         session_command(name, label: "swap #{name.inspect}", kind: :swap) { |session, time|
           session.swap(name, clips, at: point, start_time: point.given? ? nil : time)
+          # A track remembers the swapped clip, as `bg :track, clip` does
+          # (lesson-fixes-1; see Arrangement#note_swap)
+          if name.is_a?(Symbol) && session.arrangement.tracks[name]
+            change = Session.context&.command&.changes&.reverse&.find { |c| c.kind == :swap && c.subject == name }
+            session.arrangement.note_swap(name, clips, change)
+          end
           name
         }
       end

@@ -372,6 +372,29 @@ RSpec.describe MB::Sound::Library::Generators do
       _, ref = run(:bass, -> { MB::Sound.track(:bass, MB::Sound::L.gen.acid_rhythm(seed: 2), :acid) })
       expect(got).to eq(ref)
     end
+
+    # (lesson-fixes-1: `bg :drums, L.gen.techno_beat` played the 8-bar
+    # audition in place of the track, while `bg :drums, L.gen.techno_beat()`
+    # played on it)
+    it 'bg of a bare entry on a track plays its clip at the defaults on the track; instruments and effects point to track and fx' do
+      track = -> { MB::Sound.track(:drums, MB::Sound::L.gen.techno_beat(seed: 3)) }
+      s, got = run(:drums, -> { track.(); MB::Sound.bg(:drums, MB::Sound::L.gen.techno_beat, on: :now) })
+      expect(s.arrangement.tracks[:drums].clip.to_ruby).to eq('L.gen.techno_beat.()')
+      expect(s.players[:drums]).not_to include('8 bars')
+      _, ref = run(:drums, -> { track.(); MB::Sound.bg(:drums, MB::Sound::L.gen.techno_beat.(), on: :now) })
+      expect(got.abs.max).to be > 0.01
+      expect(got).to eq(ref)
+
+      run(:drums, -> {
+        track.()
+        expect { MB::Sound.bg(:drums, MB::Sound::L.inst.dnb.dnb_reese) }.to raise_error(ArgumentError, /L\.inst\.dnb_reese is an instrument, and :drums is a track: track :drums, L\.inst\.dnb_reese gives it/)
+        expect { MB::Sound.bg(:drums, MB::Sound::L.fx.reverb.hall) }.to raise_error(ArgumentError, /is an effect, and :drums is a track: fx :drums, L\.fx\./)
+      }, buffers: 1)
+
+      # A new player still auditions it
+      s, _ = run(:drums, -> { track.(); MB::Sound.bg(:x, MB::Sound::L.gen.techno_beat, on: :now) }, buffers: 1)
+      expect(s.players[:x]).to include('8 bars')
+    end
   end
 
   describe 'play and audition' do

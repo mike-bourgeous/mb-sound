@@ -419,6 +419,33 @@ module MB
         end
       end
 
+      # Library Entry +entry+ given to +command+ (`bg`) for the existing
+      # track +name+: a clip or generator entry's clip at its defaults (as
+      # `track :x, entry` takes it, so it plays on the track), an
+      # ArgumentError for an instrument, kit, or effect entry naming the
+      # command that changes the track's (`track`, `fx`), else +entry+
+      # (played as itself; lesson-fixes-1).
+      def entry_for_track(command, name, entry)
+        path = entry.head_path
+        case entry.kind
+        when :clip, :generator
+          entry.builder ? entry.call : entry
+        when :instrument, :kit
+          ArgumentError.new(
+            "#{command} #{name.inspect}, #{path}: #{path} is #{entry.kind == :kit ? 'a kit' : 'an instrument'}, and #{name.inspect} is a track: " \
+            "track #{name.inspect}, #{path} gives it that instrument (built again at its launch point); #{command} #{name.inspect}, clip plays a clip on it; " \
+            "play #{path} auditions it"
+          )
+        when :effect
+          ArgumentError.new(
+            "#{command} #{name.inspect}, #{path}: #{path} is an effect, and #{name.inspect} is a track: fx #{name.inspect}, #{path} puts it on the track; " \
+            "play #{path} auditions it"
+          )
+        else
+          entry
+        end
+      end
+
       # The wire alternative for patch track +name+ (see
       # #stream_for_track_error), or ''.
       def wire_hint(name)
