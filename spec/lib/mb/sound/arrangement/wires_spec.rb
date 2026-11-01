@@ -38,24 +38,30 @@ RSpec.describe(MB::Sound::Arrangement::Wires) do
     SpecBuffers.join(out)
   end
 
-  SETUP = [
-    'track(:lead, q: 1) { |c| c.number * c.gate }',
-    'bg :clock, 0.constant, on: :now',
-    'riff = seq(C4, E4, G4, nil).n4.loop.named(:riff)',
-    'hop = seq(A4, B4).n8.loop.named(:hop)',
-  ].freeze
+  # (methods, not constants: a describe block's constants are Object's)
+  def self.setup_lines
+    [
+      'track(:lead, q: 1) { |c| c.number * c.gate }',
+      'bg :clock, 0.constant, on: :now',
+      'riff = seq(C4, E4, G4, nil).n4.loop.named(:riff)',
+      'hop = seq(A4, B4).n8.loop.named(:hop)',
+    ].freeze
+  end
 
-  SIZES = [[800], *[[367, 368], [64], [1001, 13]]].freeze
+  def setup_lines = self.class.setup_lines
+
+  # Buffer sizes past 800 (the slow tier keeps the first).
+  def other_sizes = [[367, 368], [64], [1001, 13]]
 
   describe '#wire' do
     it 'plays a stream through the track patch from its launch point, rewires on the exact frame (ending held notes), and unwires, at any buffer size' do
       lines = {
-        0 => SETUP,
+        0 => setup_lines,
         10 => ['wire :lead, riff.stream'],               # lands on bar 2
         255 => ['wire :lead, hop.stream, on: :beat'],    # bar 3 beat 2 (216000), C4 still held
         300 => ['unwire :lead'],                         # bar 4
       }
-      results = [[800], *slow_tier(SIZES.drop(1))].map { |sizes|
+      results = [[800], *slow_tier(other_sizes)].map { |sizes|
         s = new_session
         [perform(s, lines, 96000 * 4, sizes), s]
       }
@@ -86,7 +92,7 @@ RSpec.describe(MB::Sound::Arrangement::Wires) do
     it 'keeps the track clip playing beside the stream, and says so in tracks and stop' do
       s = new_session
       b = MB::Sound::Take.console_binding
-      perform(s, { 0 => SETUP + ['bg :lead, riff', 'wire :lead, hop.stream'] }, 9600, binding: b)
+      perform(s, { 0 => setup_lines + ['bg :lead, riff', 'wire :lead, hop.stream'] }, 9600, binding: b)
       MB::Sound::Session.with_context(session: s) do
         expect(b.eval('wires')).to eq({ lead: 'hop.stream' })
         expect(s.arrangement.track_info[:lead]).to eq('q:1 riff (playing, wired: hop.stream)')
@@ -99,8 +105,8 @@ RSpec.describe(MB::Sound::Arrangement::Wires) do
 
     it 'plays live input through transforms (a tap of the default input), on exact frames at any buffer size' do
       played = [[60, 2.1r, 2.35r], [64, 2.6r, 2.9r]]
-      lines = { 0 => SETUP, 10 => ['wire :lead, MB::Sound::Session.current.midi_in.stream.transpose(12), on: :bar'] }
-      results = [[800], *slow_tier(SIZES.drop(1))].map { |sizes|
+      lines = { 0 => setup_lines, 10 => ['wire :lead, MB::Sound::Session.current.midi_in.stream.transpose(12), on: :bar'] }
+      results = [[800], *slow_tier(other_sizes)].map { |sizes|
         s = new_session
         s.midi_in.input = keyboard(*played)
         perform(s, lines, 96000 * 2, sizes)
@@ -116,7 +122,7 @@ RSpec.describe(MB::Sound::Arrangement::Wires) do
 
     it 'records the stream with rec, as live input' do
       s = new_session
-      perform(s, { 0 => SETUP, 10 => ['wire :lead, riff.stream', 'rec 1'] }, 96000 * 3 + 800)
+      perform(s, { 0 => setup_lines, 10 => ['wire :lead, riff.stream', 'rec 1'] }, 96000 * 3 + 800)
       clip = s.arrangement.captures[:lead_1]
       expect(clip.events.map { |e| [e.start, e.length, e.value] }).to eq([[0r, 1/4r, 60], [1/4r, 1/4r, 64], [1/2r, 1/4r, 67]])
       expect(s.arrangement.tracks[:lead].clip).to equal(clip)
@@ -125,13 +131,13 @@ RSpec.describe(MB::Sound::Arrangement::Wires) do
     it 'is one undo step: cancelled before it lands, restored at the next bar after' do
       s = new_session
       b = MB::Sound::Take.console_binding
-      d = perform(s, { 0 => SETUP, 10 => ['wire :lead, riff.stream', 'undo'] }, 96000 * 2, binding: b)
+      d = perform(s, { 0 => setup_lines, 10 => ['wire :lead, riff.stream', 'undo'] }, 96000 * 2, binding: b)
       expect(d.abs.max).to eq(0)
       expect(s.arrangement.wires).to eq({})
       expect(s.arrangement.arm_problems).to eq([])
 
       s = new_session
-      d = perform(s, { 0 => SETUP, 10 => ['wire :lead, riff.stream, on: :now'], 130 => ['undo'] }, 96000 * 3)
+      d = perform(s, { 0 => setup_lines, 10 => ['wire :lead, riff.stream, on: :now'], 130 => ['undo'] }, 96000 * 3)
       expect(d[8000]).to eq(0)          # (C4, begun before the wire, isn't chased)
       expect(d[30000]).to eq(64)
       expect(d[192000 + 240..].abs.max).to eq(0) # undone at bar 3
@@ -143,7 +149,7 @@ RSpec.describe(MB::Sound::Arrangement::Wires) do
     it 'says what to write for clips, kits, names, and missing streams' do
       s = new_session
       b = MB::Sound::Take.console_binding
-      perform(s, { 0 => SETUP }, 800, binding: b)
+      perform(s, { 0 => setup_lines }, 800, binding: b)
       MB::Sound::Session.with_context(session: s) do
         expect { b.eval('wire :lead, riff') }.to raise_error(ArgumentError, /a clip plays on :lead's instrument with swap :lead, clip.*wire :lead, clip\.stream/)
         expect { b.eval('connect :lead, riff') }.to raise_error(ArgumentError, /swap :lead, clip/)
@@ -160,7 +166,7 @@ RSpec.describe(MB::Sound::Arrangement::Wires) do
   describe 'arm ..., input: stream' do
     it 'wires the track now' do
       s = new_session
-      d = perform(s, { 0 => SETUP + ['arm :lead, input: riff.stream'] }, 48000)
+      d = perform(s, { 0 => setup_lines + ['arm :lead, input: riff.stream'] }, 48000)
       expect(d[0]).to eq(60)
       expect(d[24000]).to eq(64)
       expect(s.arrangement.armed).to eq({ lead: :"lead/wire" })
@@ -170,7 +176,7 @@ RSpec.describe(MB::Sound::Arrangement::Wires) do
     it 'unwires when the track is armed on live input, and disarm unwires' do
       s = new_session
       s.midi_in.input = keyboard([60, 100, 101]) # (a stand-in keyboard: no live MIDI)
-      d = perform(s, { 0 => SETUP + ['arm :lead, input: riff.stream'], 40 => ['arm :lead, monitor: false'], 60 => ['disarm'] }, 96000)
+      d = perform(s, { 0 => setup_lines + ['arm :lead, input: riff.stream'], 40 => ['arm :lead, monitor: false'], 60 => ['disarm'] }, 96000)
       expect(d[30000]).to eq(64)
       expect(d[32000 + 240..].abs.max).to eq(0)
       expect(s.midi_in(:"lead/wire").wired).to be_nil
@@ -185,7 +191,7 @@ RSpec.describe(MB::Sound::Arrangement::Wires) do
       sessions << s
       b = MB::Sound::Take.console_binding
       t = MB::Sound::Take.new(session: s)
-      lines = { 0 => SETUP, 10 => ['wire :lead, riff.stream.echo(1.n8, 2, pitch: 12)'], 250 => ['wire :lead, hop.stream, on: :beat'], 300 => ['unwire :lead'] }
+      lines = { 0 => setup_lines, 10 => ['wire :lead, riff.stream.echo(1.n8, 2, pitch: 12)'], 250 => ['wire :lead, hop.stream, on: :beat'], 300 => ['unwire :lead'] }
       out = []
       (96000 * 4 / 800).times do |i|
         lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: s) { t.line(code, b) } }
