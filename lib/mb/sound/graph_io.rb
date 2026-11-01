@@ -71,7 +71,12 @@ module MB
       # the library's generators: a clip or chain an L.gen or L.flow entry
       # built prints as that call (`L.gen.techno_beat(seed: 3)`,
       # `L.flow.techno_chain.()`), which older mb-sound can't read (it
-      # stops at the format line instead of an unknown name `L`).
+      # stops at the format line instead of an unknown name `L`).  Format
+      # 9 (tempo-3, 2026-11-01; "bpm = base, tempo = live") writes a
+      # scene's or section's tempo as `tempo:` (a change where it lands)
+      # and a scene block's tempo change as `tempo`; `bpm` sets the song's
+      # base tempo.  Older documents' scene and section `bpm:` values and
+      # scene blocks' `bpm` lines load as `tempo:` and `tempo`.
       #
       # FORMATS names the change each version made, so loaders gate on a
       # name (GraphIO.since?) and branches adding versions touch only this
@@ -84,6 +89,7 @@ module MB
         6 => :clip_shift,
         7 => :ruby_values,
         8 => :library_calls,
+        9 => :tempo_live,
       }.freeze
       FORMAT = FORMATS.keys.max
 

@@ -386,9 +386,9 @@ module SessionFuzz
     ->(s) {
       # (tempo-maps-1: a ramp from where the tempo is, or a followed tempo LFO)
       if s.rng.rand < 0.75
-        "bpm #{s.pick([90, 140, 180])}, over: #{s.pick(['1', '1/2r', '3.beats'])}#{[', curve: :smooth', ''][s.rng.rand(2)]}#{s.on}"
+        "tempo #{s.pick([90, 140, 180])}, over: #{s.pick(['1', '1/2r', '3.beats'])}#{[', curve: :smooth', ''][s.rng.rand(2)]}#{s.on}"
       else
-        "bpm #{s.pick(['1.bars.lfo.at(100..140)', '2.beats.lfo.at(150..170)'])}"
+        "tempo #{s.pick(['1.bars.lfo.at(100..140)', '2.beats.lfo.at(150..170)'])}"
       end
     },
     ->(s) { "bg :#{s.bg_name}, #{s.pick(MELODIC)}#{s.on}" },
@@ -403,7 +403,7 @@ module SessionFuzz
       # (session-core-1: the time math moved into Transport/TempoMap)
       # stream transforms converting between stream seconds and the
       # timeline, a glide over each note's length hint, and a musical time
-      # limit, under the song's tempo (ramps and LFOs from the bpm command)
+      # limit, under the song's tempo (ramps and LFOs from the tempo command)
       fx = s.pick(['echo(1.n16, 2)', 'arp(:up, 16)', 'quantize(16)', 'swing(0.6)', 'humanize(4.ms, seed: 3)'])
       "bg :#{s.bg_name}, #{s.pick(MELODIC)}.notes.#{fx}.synth(voices: 2) { |v| v.hz.glide(:length).triangle * v.amp_env(0.002, 0.05, 0.6, 0.02) * 0.2 }" \
         ".until(#{s.pick(['1.bars', '3.beats'])})#{s.on}"
@@ -415,7 +415,7 @@ module SessionFuzz
       bar = s.bar || 1
       beat = s.beat || 2
       back = s.rng.rand < 0.6 ? beat + 1/2r : [beat - 1/2r, 1].max
-      "bpm #{s.pick([90, 160])}, over: #{s.pick(['1/2r', '3.beats'])}; after(in: 2.beats) { seek #{bar}, #{MB::Sound::RubyValue.number(back)} }"
+      "tempo #{s.pick([90, 160])}, over: #{s.pick(['1/2r', '3.beats'])}; after(in: 2.beats) { seek #{bar}, #{MB::Sound::RubyValue.number(back)} }"
     },
     ->(s) {
       # (library-2) a preset on a named bg player: its params are the
@@ -445,6 +445,19 @@ module SessionFuzz
       # (ux-notes-2) a hold: the track's clip, cue player, and wired stream
       # silent (its monitor plays on), released a beat or two later in time
       "hold :#{s.t}#{s.on}; after(in: #{s.pick(['1.beat', '2.beats'])}) { unhold :#{s.t} }"
+    },
+    ->(s) {
+      # (tempo-3: "bpm = base, tempo = live") the song's base tempo set
+      # now: heard at once while the base plays, under a ramp from the base
+      # (which then starts from the new base), or under a later change
+      # (heard after a seek back before it)
+      bar = s.bar || 1
+      base = "bpm #{s.pick([100, 132, 150])}"
+      case s.rng.rand(3)
+      when 0 then base
+      when 1 then "tempo #{s.pick([90, 160])}, over: #{s.pick(['1', '3.beats'])}; after(in: 2.beats) { #{base} }"
+      else "tempo #{s.pick([110, 140])}; #{base}; after(in: 2.beats) { seek #{[bar - 1, 1].max} }"
+      end
     },
     # (new commands go here, at the end)
   ].freeze

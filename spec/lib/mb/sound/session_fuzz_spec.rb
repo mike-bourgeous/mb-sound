@@ -64,7 +64,7 @@ RSpec.describe('session fuzzing') do
   it 'renders seeds 52, 82, and 127 to the same end bar at 367 and 800 frames', render_budget: { seconds: 120, reason: 'three random songs at two buffer sizes' } do
     [52, 82, 127].each do |seed|
       song = SessionFuzz.generate(Random.new(seed), commands: 15)
-      expect(song.code).to match(/bpm \d+\.beats?\.lfo|bpm \d\.bars\.lfo/), "seed #{seed} no longer draws a tempo LFO"
+      expect(song.code).to match(/tempo \d+\.beats?\.lfo|tempo \d\.bars\.lfo/), "seed #{seed} no longer draws a tempo LFO"
       expect(SessionFuzz.check(:buffer_size, song)).to be_nil, "seed #{seed}"
     end
   end
@@ -123,7 +123,7 @@ RSpec.describe('session fuzzing') do
     'a followed tempo LFO up to the end bar' => [
       :buffer_size, ['bpm 174'], [
         'bg :a, 220.hz.sine.at(0.1)',
-        'at_bar(2, beat: 4) { bpm 2.beats.lfo.at(150..170) }',
+        'at_bar(2, beat: 4) { tempo 2.beats.lfo.at(150..170) }',
       ], 2,
     ],
     # (omnibus16: dropouts-2's seeds 11 and 28; a master chain landing

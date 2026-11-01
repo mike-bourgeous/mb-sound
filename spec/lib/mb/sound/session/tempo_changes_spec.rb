@@ -105,6 +105,40 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
       expect(len.to_f).to be_within(1e-6).of(10 * 120 / (240 * Math.log(2)))
     end
 
+    describe '#with_base (tempo-3: "bpm = base")' do
+      it 'changes a constant tempo everywhere' do
+        expect(map.with_base(90)).to eq(described_class.constant(90))
+        expect(map.with_base(120)).to equal(map)
+        expect(map.base).to eq(120)
+      end
+
+      it 'keeps later changes, and ramps and follows that started from the tempo in effect start from the new one' do
+        m = map.ramp(180, at: 1, length: 2).ramp(100, at: 2, length: 1) # (the second cuts the first at 150)
+        m = m.step(140, at: 4).ramp(160, at: 5, length: 1).follow(:pace, at: 7)
+        b = m.with_base(60)
+        expect(b.base).to eq(60)
+        expect(b.segments.map(&:pos)).to eq(m.segments.map(&:pos))
+        expect(b.segments[1]).to eq(m.segments[1].with(from: 60)) # (from the new base)
+        expect(b.segments[2].from).to eq(120) # (where the first ramp now is at 2: 60 -> 180 halfway)
+        expect(b.segments[3]).to eq(m.segments[3]) # (a step keeps its tempo)
+        expect(b.segments[4]).to eq(m.segments[4]) # (from the step)
+        expect(b.segments[5].last).to eq(160)
+        expect(b.bpm_at(0)).to eq(60)
+        expect(b.bpm_at(4)).to eq(140)
+      end
+
+      it 'keeps a ramp that jumped from the tempo before it' do
+        m = described_class.from_rows([[nil, 120], [2, 90, 150, 2]])
+        expect(m.with_base(100).segments[1]).to eq(m.segments[1])
+      end
+
+      it 'replaces a followed base with a step' do
+        m = described_class.new([described_class::Follow.new(pos: -Float::INFINITY, source: :pace, last: 130)])
+        expect(m.base).to be_nil
+        expect(m.with_base(90)).to eq(described_class.constant(90))
+      end
+    end
+
     it 'prints its segments' do
       expect(map.ramp(140, at: 4, length: 2).to_s).to include('ramp(4r, 120r => 140r, length: 2r)') # (exact Rationals, printers-1)
     end
@@ -113,7 +147,7 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
   describe 'ramps' do
     it 'lands on the exact frame and moves the tempo in 800-frame cells to the target' do
       session.add(voice, name: :x)
-      in_session { MB::Sound.bpm(180, over: 1, at: MB::Sound.bar(2)) }
+      in_session { MB::Sound.tempo(180, over: 1, at: MB::Sound.bar(2)) }
       _, marks = run(session, 96000 * 3)
 
       # bar 1 at 120
@@ -131,7 +165,7 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
         t = MB::Sound::Sequence::Transport.new(bpm: 120)
         s = new_session(t, size)
         s.add(voice, name: :x)
-        in_session(s) { MB::Sound.bpm(150, over: 1.bars, curve: :smooth, at: MB::Sound.bar(1, beat: 3)) }
+        in_session(s) { MB::Sound.tempo(150, over: 1.bars, curve: :smooth, at: MB::Sound.bar(1, beat: 3)) }
         data, marks = run(s, 96000 * 2 + 4800, size)
         s.close
         [data, marks.to_h { |f, pos, bpm| [f, [pos, bpm]] }, t.position]
@@ -147,11 +181,11 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
 
     it 'ramps from where a ramp in progress is when a new tempo lands' do
       session.add(voice, name: :x)
-      in_session { MB::Sound.bpm(200, over: 2) }
+      in_session { MB::Sound.tempo(200, over: 2) }
       run(session, 96000)
       mid = transport.bpm
       expect(mid).to be > 130
-      in_session { MB::Sound.bpm(100, over: 1) }
+      in_session { MB::Sound.tempo(100, over: 1) }
       seg = transport.tempo_map.segments.last
       expect(seg).to be_a(MB::Sound::Sequence::TempoMap::Ramp)
       expect(seg.from).to be_within(1).of(mid.to_r) # (the ramp's own tempo where the new one lands)
@@ -159,10 +193,10 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
       expect(transport.bpm).to eq(100)
     end
 
-    it 'ends with a plain bpm (one constant tempo, as before)' do
-      in_session { MB::Sound.bpm(200, over: 2) }
+    it 'ends with a plain tempo (one constant tempo, as before)' do
+      in_session { MB::Sound.tempo(200, over: 2) }
       expect(transport.tempo_moves?).to eq(true)
-      MB::Sound::Session.with_context(session: session) { MB::Sound.bpm(90) }
+      MB::Sound::Session.with_context(session: session) { MB::Sound.tempo(90) }
       expect(transport.tempo_moves?).to eq(false)
       expect(transport.bpm).to eq(90)
     end
@@ -170,7 +204,7 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
     it 'undoes a ramp' do
       session.add(voice, name: :x)
       run(session, 800)
-      in_session { MB::Sound.bpm(180, over: 1) }
+      in_session { MB::Sound.tempo(180, over: 1) }
       run(session, 9600)
       expect(transport.bpm).to be > 120
       session.undo(on: :now)
@@ -181,7 +215,7 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
 
     it 'reads the map at a seek target: inside a ramp, the ramp plays on from there (tempo-2)' do
       session.add(voice, name: :x)
-      in_session { MB::Sound.bpm(180, over: 2) }
+      in_session { MB::Sound.tempo(180, over: 2) }
       run(session, 96000 * 3) # (past the ramp's end: 180 holds)
       expect(transport.bpm).to eq(180)
       expect(transport.tempo_moves?).to eq(false)
@@ -207,7 +241,7 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
     it 'plays the tempo before a later change after a seek back, and the change again where it was' do
       session.add(voice, name: :x)
       run(session, 96000)
-      in_session { MB::Sound.bpm(150) } # (at bar 2)
+      in_session { MB::Sound.tempo(150) } # (at bar 2)
       run(session, 96000)
       in_session { MB::Sound.seek(1) }
       expect(transport.bpm).to eq(120)
@@ -232,15 +266,15 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
     end
 
     it 'takes seconds as the ramp length' do
-      in_session { MB::Sound.bpm(240, over: 4.seconds) }
+      in_session { MB::Sound.tempo(240, over: 4.seconds) }
       seg = transport.tempo_map.segments.last
       expect(seg.length.to_f).to be_within(1e-5).of(4 * 120 / (240 * Math.log(2)))
     end
 
     it 'explains ranges and shapes without a ramp' do
-      expect { in_session { MB::Sound.bpm(90..180) } }.to raise_error(ArgumentError, /ramp.*knob.*LFO/)
-      expect { in_session { MB::Sound.bpm(140, curve: :smooth) } }.to raise_error(ArgumentError, /over:/)
-      expect { in_session { MB::Sound.bpm(140, over: -1) } }.to raise_error(ArgumentError, /over:/)
+      expect { in_session { MB::Sound.tempo(90..180) } }.to raise_error(ArgumentError, /ramp.*knob.*LFO/)
+      expect { in_session { MB::Sound.tempo(140, curve: :smooth) } }.to raise_error(ArgumentError, /over:/)
+      expect { in_session { MB::Sound.tempo(140, over: -1) } }.to raise_error(ArgumentError, /over:/)
     end
 
     it 'has accel and rit spellings' do
@@ -251,14 +285,15 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
     end
   end
 
-  describe 'plain bpm (tempo-2: journaled)' do
+  describe 'plain tempo (tempo-2: journaled)' do
     it 'is a journaled, undoable :tempo change' do
-      e = in_session { MB::Sound.bpm(140) }
+      e = in_session { MB::Sound.tempo(140) }
       expect(e).to be_a(MB::Sound::Session::Journal::Entry)
       expect([e.kind, e.status]).to eq([:tempo, :landed])
       expect(transport.bpm).to eq(140)
       expect(transport.tempo_moves?).to eq(false)
       expect(in_session { MB::Sound.bpm }).to eq(140)
+      expect(in_session { MB::Sound.tempo }).to eq(140)
       session.undo(on: :now)
       expect(transport.bpm).to eq(120)
     end
@@ -271,7 +306,7 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
         read = nil
         in_session(s) {
           MB::Sound.at_bar(2, beat: 2) {
-            MB::Sound.bpm(150)
+            MB::Sound.tempo(150)
             read = [MB::Sound.bpm, 1.bars.to_seconds.to_f] # (the rest of the block reads the queued tempo)
           }
         }
@@ -291,14 +326,116 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
     end
 
     it 'refuses a range with what it might have meant (maintainer, 2026-10-30: "Error")' do
-      expect { in_session { MB::Sound.bpm(90..180) } }.to raise_error(ArgumentError) { |e|
+      expect { in_session { MB::Sound.tempo(90..180) } }.to raise_error(ArgumentError) { |e|
         expect(e.message.lines.length).to eq(1)
-        expect(e.message).to include('did you mean', 'bpm 90; bpm 180, over: 4.bars', 'knob :tempo, 90, range: 90..180; bpm :tempo', 'bpm 4.bars.lfo.at(90..180)')
+        expect(e.message).to include('did you mean', 'tempo 90; tempo 180, over: 4.bars', 'knob :pace, 90, range: 90..180; tempo :pace', 'tempo 4.bars.lfo.at(90..180)')
       }
-      expect { in_session { MB::Sound.tempo(90..180, over: 8.bars) } }.to raise_error(ArgumentError, /bpm 180, over: 8.bars/)
-      expect { in_session { MB::Sound.bpm(90.bpm..180.bpm) } }.to raise_error(ArgumentError, /bpm 90; bpm 180/)
+      expect { in_session { MB::Sound.tempo(90..180, over: 8.bars) } }.to raise_error(ArgumentError, /tempo 180, over: 8.bars/)
+      expect { in_session { MB::Sound.tempo(90.bpm..180.bpm) } }.to raise_error(ArgumentError, /tempo 90; tempo 180/)
+      expect { in_session { MB::Sound.bpm(90..180) } }.to raise_error(ArgumentError, /tempo 90; tempo 180/)
+      expect { in_session { MB::Sound.tempo(-3) } }.to raise_error(ArgumentError, /positive/)
+      expect(session.journal.entries).to be_empty
+    end
+  end
+
+  describe 'base tempo (bpm; tempo-3, maintainer 2026-11-02: "bpm = base, tempo = live")' do
+    it 'sets the tempo everywhere the base plays, keeping later changes' do
+      session.add(voice, name: :x)
+      run(session, 96000)
+      in_session { MB::Sound.tempo(150) } # (at bar 2)
+      run(session, 96000)
+      e = in_session { MB::Sound.bpm(100) }
+      expect([e.kind, e.subject, e.status]).to eq([:tempo_base, :tempo, :landed])
+      expect(transport.bpm).to eq(150) # (the change from bar 2 is still in effect here)
+      expect(transport.tempo_map.rows).to eq([[nil, 100], [1, 150]])
+      in_session { MB::Sound.seek(1) }
+      expect(transport.bpm).to eq(100)
+      _, marks = run(session, 96000 * 2)
+      change = marks.find { |_, _, bpm| bpm == 150 }
+      expect(change[1]).to be >= 1
+      expect(marks.select { |_, pos, _| pos < 1 }.map(&:last).uniq).to eq([100])
+    end
+
+    it 'is heard at once where the base is in effect, and a constant map stays constant' do
+      session.add(voice, name: :x)
+      run(session, 48000)
+      in_session { MB::Sound.bpm(140) }
+      expect(transport.bpm).to eq(140)
+      expect(transport.tempo_map.static?).to eq(true)
+      expect(transport.tempo_moves?).to eq(false)
+    end
+
+    it 'starts a ramp from the base from the new base' do
+      session.add(voice, name: :x)
+      in_session { MB::Sound.tempo(180, over: 2) }
+      run(session, 96000 * 3 / 2) # (in the ramp)
+      in_session { MB::Sound.bpm(60) }
+      ramp = transport.tempo_map.segments[1]
+      expect([ramp.from, ramp.to, ramp.length]).to eq([60, 180, 2])
+      run(session, 800)
+      pos = transport.position
+      expect(transport.bpm).to be_within(1).of(60 + 120 * pos.to_f / 2)
+    end
+
+    it 'undoes to the map as it was' do
+      session.add(voice, name: :x)
+      in_session { MB::Sound.tempo(180, over: 2, at: MB::Sound.bar(2)) }
+      run(session, 9600)
+      before = transport.tempo_map
+      in_session { MB::Sound.bpm(90) }
+      expect(transport.bpm).to eq(90)
+      session.undo(on: :now)
+      run(session, 800)
+      expect(transport.tempo_map).to eq(before)
+      expect(transport.bpm).to eq(120)
+    end
+
+    it 'has no launch point, ramp, or source, pointing at tempo' do
+      expect { in_session { MB::Sound.bpm(140, over: 4.bars) } }.to raise_error(ArgumentError, /base tempo.*\(tempo 140, over: 4\.bars\)/)
+      expect { in_session { MB::Sound.bpm(140, on: :bar) } }.to raise_error(ArgumentError, /tempo 140, on: :bar/)
+      expect { in_session { MB::Sound.bpm(140, curve: :smooth) } }.to raise_error(ArgumentError, /tempo 140, curve: :smooth/)
+      expect { in_session { MB::Sound.bpm(:pace) } }.to raise_error(ArgumentError, /to follow :pace from here on: tempo :pace/)
+      expect { in_session { MB::Sound.bpm(4.bars.lfo.at(150..180)) } }.to raise_error(ArgumentError, /from here on: tempo 4\.bars/)
       expect { in_session { MB::Sound.bpm(-3) } }.to raise_error(ArgumentError, /positive/)
       expect(session.journal.entries).to be_empty
+    end
+
+    it 'plays a constant song the same as tempo from a scheduled block, at any buffer size, and the block reads it' do
+      results = %i[bpm tempo].flat_map { |command|
+        [800, *slow_tier([367], keep: 0)].map do |size|
+          t = MB::Sound::Sequence::Transport.new(bpm: 120)
+          s = new_session(t, size)
+          s.add(voice, name: :x)
+          read = nil
+          in_session(s) {
+            MB::Sound.at_bar(2, beat: 2) {
+              MB::Sound.public_send(command, 150)
+              read = MB::Sound.bpm
+            }
+          }
+          data, = run(s, 96000 * 3, size)
+          e = s.journal.entries.find { |x| x.status == :landed && x.subject == :tempo }
+          s.close
+          [command, data, e.lands.frame, read]
+        end
+      }
+      _, data, frame, = results.first
+      expect(frame).to eq(96000 + 24000)
+      results.each do |command, d, f, read|
+        expect(read).to eq(150), command.to_s
+        expect(f).to eq(frame)
+        expect((d - data).abs.max).to eq(0), command.to_s
+      end
+    end
+
+    it 'sets the base through Transport#bpm= too; reset_tempo forgets the changes' do
+      transport.tempo_change { |m, _| m.step(150, at: 2) }
+      transport.bpm = 100
+      expect(transport.tempo_map.rows).to eq([[nil, 100], [2, 150]])
+      expect(transport.bpm).to eq(100)
+      transport.reset_tempo(90)
+      expect(transport.tempo_map.static?).to eq(true)
+      expect(transport.bpm).to eq(90)
     end
   end
 
@@ -309,9 +446,9 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
         s = new_session(t, size)
         s.add(voice, name: :x)
         in_session(s) do
-          MB::Sound.knob(:tempo, 120, range: 60..200)
-          MB::Sound.bpm(:tempo)
-          MB::Sound.turn(:tempo, 180, over: 1)
+          MB::Sound.knob(:pace, 120, range: 60..200)
+          MB::Sound.tempo(:pace)
+          MB::Sound.turn(:pace, 180, over: 1)
         end
         data, = run(s, 96000 * 2, size)
         r = [data, t.position, t.bpm]
@@ -327,7 +464,7 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
 
     it 'follows tempo LFOs and Tempo-ranged knobs' do
       session.add(voice, name: :x)
-      in_session { MB::Sound.bpm(1.bars.lfo.at(100..140)) }
+      in_session { MB::Sound.tempo(1.bars.lfo.at(100..140)) }
       _, marks = run(session, 96000 * 2)
       bpms = marks.map { |m| m[2].to_f }
       expect(bpms.min).to be < 105
@@ -335,14 +472,14 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
 
       in_session do
         MB::Sound.knob(:t, (90.bpm..180.bpm).at(140.bpm))
-        MB::Sound.bpm(MB::Sound.knob(:t))
+        MB::Sound.tempo(MB::Sound.knob(:t))
       end
       run(session, 1600)
       expect(transport.bpm).to eq(140)
     end
 
     it 'points audio-rate sources at a knob that follows them' do
-      expect { in_session { MB::Sound.bpm(0.1.hz.lfo.at(90..180)) } }.to raise_error(ArgumentError, /turn :tempo, follow: node; bpm :tempo/)
+      expect { in_session { MB::Sound.tempo(0.1.hz.lfo.at(90..180)) } }.to raise_error(ArgumentError, /turn :pace, follow: node; tempo :pace/)
     end
   end
 
@@ -359,7 +496,7 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
       in_session do
         MB::Sound.track(:x, voice)
         MB::Sound.scene(:a, x: :on)
-        MB::Sound.scene(:b, x: :on, bpm: [160, over: 1])
+        MB::Sound.scene(:b, x: :on, tempo: [160, over: 1])
         MB::Sound.go(:a, at: :now)
       end
       run(session, 800)
@@ -376,8 +513,8 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
         in_session(s) do
           MB::Sound.track(:x, voice)
           MB::Sound.scene(:a, x: :on)
-          where == :scene ? MB::Sound.scene(:b, x: :on, bpm: [160, over: 2]) : MB::Sound.scene(:b, x: :on)
-          ramp = where == :section ? { bpm: [160, over: 2] } : {}
+          where == :scene ? MB::Sound.scene(:b, x: :on, tempo: [160, over: 2]) : MB::Sound.scene(:b, x: :on)
+          ramp = where == :section ? { tempo: [160, over: 2] } : {}
           MB::Sound.flow(seed: 1, on: :now) do
             a 2
             b 4, **ramp
@@ -407,9 +544,18 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
       end
     end
 
+    it 'points a scene or section bpm: at tempo:, and reserves the name :tempo' do
+      in_session { MB::Sound.track(:x, voice) }
+      expect { in_session { MB::Sound.scene(:c, x: :on, bpm: [160, over: 2]) } }.to raise_error(ArgumentError, /:c: bpm: would set the song's base tempo.*tempo: \[160, over: 2\]/)
+      expect { in_session { MB::Sound.flow { a 4, bpm: 140 } } }.to raise_error(ArgumentError, /bpm: would set.*tempo: 140/)
+      expect { in_session { MB::Sound.knob(:tempo, 120, range: 60..200) } }.to raise_error(ArgumentError, /:tempo is reserved.*:pace/)
+      in_session { MB::Sound.knob(:bpm, 0.5) } # (a knob may take the name :bpm; scenes then turn it)
+      expect(in_session { MB::Sound.scene(:d, x: :on, bpm: 0.25) }).to eq(:d)
+    end
+
     it 'refuses bad scene tempo values' do
       in_session { MB::Sound.track(:x, voice) }
-      expect { in_session { MB::Sound.scene(:c, x: :on, bpm: [160, oops: 1]) } }.to raise_error(ArgumentError, /bpm: takes a tempo/)
+      expect { in_session { MB::Sound.scene(:c, x: :on, tempo: [160, oops: 1]) } }.to raise_error(ArgumentError, /tempo: takes a tempo/)
     end
   end
 
@@ -455,29 +601,46 @@ RSpec.describe(MB::Sound::Session::TempoChanges) do
           'track :pad, 0.05.constant', # (clipless, started by :two after the seek's target: omnibus16)
           'a = seq(C4, E4, G4).n16.loop',
           'scene :one, x: a',
-          'scene :two, x: a.transpose(5), pad: :on, bpm: [150, over: 2]',
+          'scene :two, x: a.transpose(5), pad: :on, tempo: [150, over: 2]',
           'go :one, at: :now',
         ],
-        37 => ['bpm 90, over: 3'],
+        37 => ['tempo 90, over: 3'],
         150 => ['go :two'],
         260 => ['seek 2'],
-        330 => ['knob :tempo, 120, range: 60..200', 'bpm :tempo', 'turn :tempo, 170, over: 1'],
+        330 => ['knob :pace, 120, range: 60..200', 'tempo :pace', 'turn :pace, 170, over: 1'],
       }
       t = expect_take_replays(lines, 560)
       expect(t.entries.map(&:kind)).to include(:tempo, :seek, :scene)
     end
 
+    it 'replays base changes, under a ramp from the base and after a later change, and their undo (tempo-3)', render_budget: { seconds: 60, reason: 'a 4-bar performance and replays at two buffer sizes' } do
+      lines = {
+        0 => [
+          "track(:x, q: 1) { |c| c.number * c.gate * 0.002 }",
+          'scene :one, x: seq(C4, E4, G4).n16.loop',
+          'go :one, at: :now',
+          'tempo 170, over: 2',
+        ],
+        70 => ['bpm 100'], # (in the ramp from the base: it starts from 100 now)
+        150 => ['tempo 140', 'bpm 90'], # (a step, then a base under it)
+        220 => ['seek 1, 3'], # (back into the ramp from the new base)
+        300 => ['undo'],
+      }
+      t = expect_take_replays(lines, 400)
+      expect(t.entries.map(&:kind)).to include(:tempo_base, :tempo, :seek)
+    end
+
     it 'replays a ramp the take started in, plain tempos, and seeks back into the ramp (tempo-2)', render_budget: { seconds: 60, reason: 'a 4-bar performance and replays at two buffer sizes' } do
-      in_session { MB::Sound.bpm(160, over: 3) } # (before the take: its start state)
+      in_session { MB::Sound.tempo(160, over: 3) } # (before the take: its start state)
       lines = {
         0 => [
           "track(:x, q: 1) { |c| c.number * c.gate * 0.002 }",
           'scene :one, x: seq(C4, E4, G4).n16.loop',
           'go :one, at: :now',
         ],
-        90 => ['bpm 100'], # (cuts the ramp short)
+        90 => ['tempo 100'], # (cuts the ramp short)
         140 => ['seek 2, 3'], # (back into the ramp)
-        200 => ['bpm 130', 'seek 1'], # (a step, then back before it)
+        200 => ['tempo 130', 'seek 1'], # (a step, then back before it)
         300 => ['undo'],
       }
       t = expect_take_replays(lines, 400)

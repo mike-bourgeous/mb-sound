@@ -53,7 +53,7 @@ module MB
       # tempo, Clip#bake): the current Session context's transport (inside a
       # PlaybackMethods#render block, a scheduled block, a scene build, ...),
       # else the default .transport.  Inside a scheduled block that queued a
-      # tempo change with MB::Sound#bpm (it lands at the block's time), a
+      # tempo change with MB::Sound#tempo or #bpm (it lands at the block's time), a
       # Transport at that pending tempo, so what the block builds is measured
       # at the tempo it will play at.  Before 2026-10-15 these read the
       # default transport, so a song's `bpm 72` in a render (or a scheduled

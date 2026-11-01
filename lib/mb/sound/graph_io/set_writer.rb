@@ -130,7 +130,15 @@ module MB
         # Tempo, meter, master gain, and quantization.
         def settings
           t = @session.transport
-          lines = ["bpm #{lit(t.bpm)}"]
+          # The song's base tempo (tempo-3, "bpm = base"); changes made from
+          # positions on are performance (takes keep them)
+          map = t.tempo_map
+          base = map.static? ? t.bpm : (map.base || t.bpm)
+          base = base.to_i if base.is_a?(Rational) && base.denominator == 1
+          lines = ["bpm #{lit(base)}"]
+          if map.segments.length > 1
+            @warnings << "tempo changes after the start aren't saved (#{map.segments.length - 1}; the base tempo is)"
+          end
           bar = t.bar_length(0r)
           unless bar == 1
             r = bar.to_r

@@ -508,21 +508,78 @@ module MB
         transport.rewind
       end
 
-      # Sets the tempo in quarter notes per minute, or returns it if
-      # +beats_per_minute+ is nil.  Every tempo change is a journaled,
-      # undoable :tempo change on the transport's tempo map (see
-      # Sequence::TempoMap) landing on its exact frame, replayed exactly
-      # from takes, and returns its journal entry (tempo-2, maintainer
-      # 2026-10-30: "Yes, journal it"): right away by default (clips that
-      # are already playing change speed there), at a launch point (+on:+,
-      # +in:+, +at:+), or, inside a scheduled block (see ScheduleMethods),
-      # at the block's time; the rest of the block then reads the queued
-      # tempo (`bpm` returns it, and Durations, #bounce, etc. count at it;
-      # see Sequence.current_transport), and `bpm 140` there returns 140.
-      # A script's --bpm option scales the tempos a song sets (see
+      # Sets the song's base tempo in quarter notes per minute (a number or
+      # a Tempo), or returns the tempo now if +beats_per_minute+ is nil
+      # (inside a scheduled block, a tempo the block queued; see #tempo).
+      #
+      # "bpm = base, tempo = live" (tempo-3, maintainer 2026-11-02): the
+      # base is the tempo before the first change in the tempo map
+      # (Sequence::TempoMap#with_base), so every position that followed the
+      # base plays at +beats_per_minute+, from the start of the song on, and
+      # later changes made with #tempo stay (a ramp from the base starts
+      # from the new base).  A journaled, undoable :tempo_base change,
+      # landing right away (inside a scheduled block, at the block's time)
+      # on its exact frame; heard at once wherever the base is in effect.
+      # Returns its journal entry (in a scheduled block, the tempo).  A
+      # script's --bpm option scales the tempos a song sets (see
       # Sequence::Transport#override_bpm).
       #
-      # Also #tempo (`tempo 174`, like `genre(:dnb, tempo: 174)`).
+      # A base has no launch point, ramp, or source: `bpm 140, on: :bar`,
+      # `bpm 140, over: 4.bars`, and `bpm :pace` raise, pointing at #tempo.
+      #
+      #     bpm 128                  # the song's tempo, everywhere
+      #     tempo 140, over: 4.bars  # a change from here on (#tempo)
+      #     bpm 120                  # the start plays at 120; the ramp stays
+      def bpm(beats_per_minute = nil, over: nil, curve: nil, at: nil, on: nil, in: nil)
+        if beats_per_minute.is_a?(Range)
+          return MB::Sound.live_error(ArgumentError.new(SequenceMethods.tempo_range_message(beats_per_minute, over)))
+        end
+
+        context = MB::Sound::Session.context
+        given = [(:over if over), (:curve if curve), (:at if at), (:on if on), (:in if binding.local_variable_get(:in))].compact
+        if beats_per_minute.nil?
+          raise ArgumentError, 'over: ramps to a tempo; give one (tempo 140, over: 4.bars)' unless given.empty?
+          return context&.batch&.pending_bpm || transport.bpm
+        end
+        unless given.empty?
+          options = given.map { |k| "#{k}: #{SequenceMethods.value_text(binding.local_variable_get(k))}" }.join(', ')
+          return MB::Sound.live_error(ArgumentError.new(
+            "bpm sets the song's base tempo, everywhere; a change from a position on is tempo (tempo #{SequenceMethods.value_text(beats_per_minute)}, #{options})"
+          ))
+        end
+        if tempo_source?(beats_per_minute)
+          source = Sequence::TempoMap.source_ruby(beats_per_minute)
+          return MB::Sound.live_error(ArgumentError.new("bpm sets the song's base tempo to a number; to follow #{source} from here on: tempo #{source}"))
+        end
+
+        target = transport.scaled_bpm(beats_per_minute.is_a?(MB::Sound::Tempo) ? beats_per_minute.to_r : beats_per_minute)
+        Sequence::TempoMap.check_bpm(target) # (raises here, not when it lands)
+        label = "bpm #{RubyValue.number(target)}"
+        # A base tempo in effect at a scheduled block's time is read by the
+        # rest of the block (see Sequence.current_transport)
+        if context&.batch && context.time
+          map = transport.tempo_map
+          context.batch.pending_bpm = target if map.segment_at(context.time.to_r).equal?(map.segments[0])
+        end
+        session_command(target, label: label, kind: :tempo_base) { |s, time|
+          s.change_tempo_base(target, start_time: time)
+        }
+      end
+
+      # Changes the tempo from a position on, in quarter notes per minute
+      # ("bpm = base, tempo = live": see #bpm for the song's base tempo), or
+      # returns the tempo now if +beats_per_minute+ is nil.  Every change is
+      # a journaled, undoable :tempo change on the transport's tempo map
+      # (see Sequence::TempoMap) landing on its exact frame, which seeks
+      # read at their target and takes replay exactly (tempo-2), and
+      # returns its journal entry: right away by default (clips that are
+      # already playing change speed there), at a launch point (+on:+,
+      # +in:+, +at:+), or, inside a scheduled block (see ScheduleMethods),
+      # at the block's time; the rest of the block then reads the queued
+      # tempo (`tempo` returns it, and Durations, #bounce, etc. count at
+      # it; see Sequence.current_transport), and `tempo 140` there returns
+      # 140.  A script's --bpm option scales the tempos a song sets (see
+      # Sequence::Transport#override_bpm).
       #
       # Ramps and followed tempo (tempo-maps-1): +over:+ ramps from the
       # tempo in effect to +beats_per_minute+ over bars (through the meter
@@ -530,15 +587,15 @@ module MB
       # linear in BPM by default); a knob name, knob(:x), or a param like
       # `4.bars.lfo.at(150..180)` makes the tempo follow it (read every 800
       # frames).  A new tempo replaces a ramp from where it is.  A range
-      # (`bpm 90..180`) raises, pointing at a ramp, a knob, or a tempo LFO
-      # between its ends.
+      # (`tempo 90..180`) raises, pointing at a ramp, a knob, or a tempo
+      # LFO between its ends.
       #
-      #     bpm 128                               # now
-      #     bpm 140, over: 4.bars                 # accelerando
-      #     bpm 90, over: 2, curve: :smooth, on: :bar
-      #     knob :tempo, 120, range: 60..200; bpm :tempo
-      #     bpm 4.bars.lfo.at(150..180)
-      def bpm(beats_per_minute = nil, over: nil, curve: nil, at: nil, on: nil, in: nil)
+      #     tempo 128                               # now
+      #     tempo 140, over: 4.bars                 # accelerando
+      #     tempo 90, over: 2, curve: :smooth, on: :bar
+      #     knob :pace, 120, range: 60..200; tempo :pace
+      #     tempo 4.bars.lfo.at(150..180)
+      def tempo(beats_per_minute = nil, over: nil, curve: nil, at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
         if beats_per_minute.is_a?(Range)
           return MB::Sound.live_error(ArgumentError.new(SequenceMethods.tempo_range_message(beats_per_minute, over)))
@@ -546,15 +603,15 @@ module MB
 
         context = MB::Sound::Session.context
         if beats_per_minute.nil?
-          raise ArgumentError, 'over: ramps to a tempo; give one (bpm 140, over: 4.bars)' if over || curve
+          raise ArgumentError, 'over: ramps to a tempo; give one (tempo 140, over: 4.bars)' if over || curve
           return context&.batch&.pending_bpm || transport.bpm
         end
 
         follow = tempo_source?(beats_per_minute)
-        raise ArgumentError, 'curve: shapes a ramp; give over: too (bpm 140, over: 4.bars, curve: :smooth)' if curve && !over
+        raise ArgumentError, 'curve: shapes a ramp; give over: too (tempo 140, over: 4.bars, curve: :smooth)' if curve && !over
         target = follow ? nil : transport.scaled_bpm(beats_per_minute.is_a?(MB::Sound::Tempo) ? beats_per_minute.to_r : beats_per_minute)
         Sequence::TempoMap.check_bpm(target) if target # (raises here, not when it lands)
-        label = "bpm #{follow ? Sequence::TempoMap.source_ruby(beats_per_minute) : RubyValue.number(target)}#{", over: #{over.inspect}" if over}"
+        label = "tempo #{follow ? Sequence::TempoMap.source_ruby(beats_per_minute) : RubyValue.number(target)}#{", over: #{over.inspect}" if over}"
         # A plain tempo queued by a scheduled block is read by the rest of
         # the block (see Sequence.current_transport)
         context.batch.pending_bpm = target if target && !over && context&.batch
@@ -563,7 +620,17 @@ module MB
         }
       end
 
-      # The one-line error for a tempo range (`bpm 90..180`), with the
+      # Ruby text of a tempo or option value for messages.
+      def self.value_text(v)
+        v = v.to_r if v.is_a?(MB::Sound::Tempo)
+        return RubyValue.number(v) if v.is_a?(Numeric) && v.real?
+        return Sequence::TempoMap.source_ruby(v) if v.is_a?(Symbol) || v.respond_to?(:to_ruby)
+        RubyValue.to_ruby(v)
+      rescue StandardError
+        v.inspect
+      end
+
+      # The one-line error for a tempo range (`tempo 90..180`), with the
       # spellings that move between its ends (maintainer, 2026-10-30:
       # "Error").
       def self.tempo_range_message(range, over = nil)
@@ -575,21 +642,19 @@ module MB
         lo = text.(range.begin, '90')
         hi = text.(range.end, '180')
         length = over ? RubyValue.to_ruby(over) : '4.bars' rescue '4.bars'
-        "bpm #{range.inspect}: a tempo is one value; did you mean a ramp (bpm #{lo}; bpm #{hi}, over: #{length}), " \
-          "a knob (knob :tempo, #{lo}, range: #{lo}..#{hi}; bpm :tempo), or a tempo LFO (bpm 4.bars.lfo.at(#{lo}..#{hi}))?"
+        "#{range.inspect}: a tempo is one value; did you mean a ramp (tempo #{lo}; tempo #{hi}, over: #{length}), " \
+          "a knob (knob :pace, #{lo}, range: #{lo}..#{hi}; tempo :pace), or a tempo LFO (tempo 4.bars.lfo.at(#{lo}..#{hi}))?"
       end
 
-      alias_method :tempo, :bpm
-
-      # Accelerando: #bpm with +over:+ (`accel 160, over: 8.bars`).
+      # Accelerando: #tempo with +over:+ (`accel 160, over: 8.bars`).
       def accel(beats_per_minute, over:, curve: nil, at: nil, on: nil, in: nil)
-        bpm(beats_per_minute, over: over, curve: curve, at: at, on: on, in: binding.local_variable_get(:in))
+        tempo(beats_per_minute, over: over, curve: curve, at: at, on: on, in: binding.local_variable_get(:in))
       end
       alias accelerando accel
 
-      # Ritardando: #bpm with +over:+ (`rit 90, over: 2.bars`).
+      # Ritardando: #tempo with +over:+ (`rit 90, over: 2.bars`).
       def rit(beats_per_minute, over:, curve: nil, at: nil, on: nil, in: nil)
-        bpm(beats_per_minute, over: over, curve: curve, at: at, on: on, in: binding.local_variable_get(:in))
+        tempo(beats_per_minute, over: over, curve: curve, at: at, on: on, in: binding.local_variable_get(:in))
       end
       alias ritardando rit
 

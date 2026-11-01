@@ -1423,12 +1423,12 @@ bounce
 bake
 Sequence.current_transport
 Sequence::TempoMap
-bpm 140, over: 4.bars, curve:
+tempo 140, over: 4.bars, curve:
 accel
 rit
-bpm :tempo
-bpm 4.bars.lfo.at(150..180)
-bpm: [160, over: 4]
+tempo :pace
+tempo 4.bars.lfo.at(150..180)
+tempo: [160, over: 4]
 :tempo
 bpm 120
 Transport#tempo_map=

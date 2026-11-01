@@ -145,7 +145,7 @@ module MB
               harmony: 'a Harmony value (prints through its own recipe)', dice: 'a Dice value (generator blocks get their own)',
             },
             'SequenceMethods' => {
-              bpm: 'transport tempo (session state)', transport: 'the session transport',
+              bpm: 'the base tempo (session state)', tempo: 'a tempo change (session state)', transport: 'the session transport',
               rewind: 'transport control', seek: 'transport control', scale: 'a Scale value',
             },
           }.freeze

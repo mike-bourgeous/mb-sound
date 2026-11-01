@@ -130,17 +130,34 @@ module MB
         end
 
 
-        # Sets the tempo in quarter notes per minute (a number or a Tempo)
-        # everywhere: the tempo map becomes this one constant tempo (for a
-        # fresh timeline: a new transport, a take replay's start, a
-        # script's --bpm; songs and the console change the tempo through
-        # SequenceMethods#bpm, a journaled change that lands where the
-        # timeline is).
+        # Sets the base tempo in quarter notes per minute (a number or a
+        # Tempo; tempo-3, "bpm = base"): with one constant tempo, the tempo
+        # everywhere; with changes in the map, the tempo before the first
+        # one (TempoMap#with_base: later changes stay).  Not journaled: for
+        # a new transport, a script's --bpm, and code driving a transport
+        # directly; songs and the console set the base through
+        # SequenceMethods#bpm (journaled, undoable) and change the tempo
+        # from a position on through SequenceMethods#tempo.  See
+        # #reset_tempo for one constant tempo everywhere.
         def bpm=(bpm)
           bpm = bpm.bpm if bpm.is_a?(MB::Sound::Tempo)
           raise ArgumentError, "BPM must be a positive number (got #{bpm.inspect})" unless bpm.is_a?(Numeric) && bpm.finite? && bpm > 0
-          @bpm = bpm
-          @tempo_map = nil # (built on first use: most transports never ramp)
+          map = @tempo_map
+          if map.nil? || map.static?
+            @bpm = bpm
+            @tempo_map = nil # (built on first use: most transports never ramp)
+          else
+            tempo_change { |m, _pos| m.with_base(bpm) }
+          end
+        end
+
+        # One constant tempo everywhere, forgetting the map's changes (for a
+        # fresh timeline: a take replay's start, undo back to a constant
+        # tempo, the per-example spec reset).  Returns the tempo.
+        def reset_tempo(bpm = 120)
+          @tempo_map = nil
+          @tempo_quiet = nil
+          self.bpm = bpm
         end
 
         # The tempo map (Sequence::TempoMap): the tempo as a function of

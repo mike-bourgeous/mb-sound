@@ -20,7 +20,7 @@
 #     3.n16                                  # => 3 × n16 (also 3.sixteenths, 1.n8.dotted, 2.bars, 3.beats)
 #     bg :sweep, 55.hz.ramp.at(1).filter(:lowpass, cutoff: 4.bars.lfo.triangle.at(200..3000), quality: 6) * 0.3
 #     bg :wob, 55.hz.square.at(1).filter(:lowpass, cutoff: 1.n8.lfo.at(150..900), quality: 4) * 0.2
-#     bpm 90                                 # both LFOs follow, still on the bar grid
+#     tempo 90                               # both LFOs follow, still on the bar grid (bpm 90: the base, from bar 1)
 #     s = seq(C4, Eb4, G4, Bb4).n16.loop
 #     bg :pluck, (s.tone.triangle.at(1) * s.env(0.001, 0.15, 0, 0.1)).delay(1.n8.dotted, feedback: -6.db, dry: 1, wet: -6.db) * 0.3
 #     bg :alt, (s.tone.at(1) * s.env(0.001, 0.1, 0, 0.1)).delay(2.bars.lfo.square.at(3.n16..5.n16), dry: 1, wet: -4.db) * 0.3
@@ -78,8 +78,8 @@ module MB::Sound
     at_bar(7) { bg :echo, echo, fade: 1 }
 
     # Slow down: the LFO stretches to the new bar length and the delays glide
-    at_bar(9) { bpm 80 }
-    at_bar(13) { bpm 100 }
+    at_bar(9) { tempo 80 }
+    at_bar(13) { tempo 100 }
 
     at_bar(15) { outro fade: 2 }
   end

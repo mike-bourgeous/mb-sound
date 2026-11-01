@@ -645,22 +645,24 @@ module MB
 
     Help.topic :tempo, 'Tempo, tuning, and the timeline', group: :time do
       about <<~TEXT
-        One transport for everything: tempo (`bpm 174`, also `tempo 174`),
-        a meter map, and bar numbers that stay stable.  Durations (`1.n8.dotted`, `2.bars`) follow the
-        tempo; `1.beat.hz` locks a tone to the beat; `tuning` moves every
-        Note.
+        One transport for everything: tempo, a meter map, and bar numbers
+        that stay stable.  `bpm 174` sets the song's base tempo, from bar 1
+        on (later changes stay); `tempo 174` changes the tempo from here
+        on.  Durations (`1.n8.dotted`, `2.bars`) follow the tempo;
+        `1.beat.hz` locks a tone to the beat; `tuning` moves every Note.
 
-        Tempo moves too: `bpm 140, over: 4.bars` ramps from where the
+        Tempo moves too: `tempo 140, over: 4.bars` ramps from where the
         tempo is (`accel`/`rit` say the same; `curve: :smooth`; `over:
-        10.seconds`), with launch points (`bpm 90, over: 2, on: :bar`).
-        `bpm :tempo` follows a knob (`knob :tempo, (90.bpm..180.bpm)
-        .at(140.bpm)`), `bpm 4.bars.lfo.at(150..180)` a tempo LFO, read
-        every 800 frames.  Scenes and sections take `bpm: [160, over:
-        4]`.  Every tempo change, a plain `bpm 120` too, is journaled and
-        undoable, lands on its exact frame, and replays exactly from takes;
-        a new tempo ends a ramp from where it is.  A seek reads the tempo
-        there: into a ramp, the ramp plays on from that point.  Bars,
-        launches, clips, delays, and LFOs all follow.
+        10.seconds`), with launch points (`tempo 90, over: 2, on: :bar`).
+        `tempo :pace` follows a knob (`knob :pace, (90.bpm..180.bpm)
+        .at(140.bpm)`), `tempo 4.bars.lfo.at(150..180)` a tempo LFO, read
+        every 800 frames.  Scenes and sections take `tempo: [160, over:
+        4]`.  Every tempo change, and `bpm`, is journaled and undoable,
+        lands on its exact frame, and replays exactly from takes; a new
+        tempo ends a ramp from where it is, and a new base moves a ramp
+        that started from it.  A seek reads the tempo there: into a ramp,
+        the ramp plays on from that point.  Bars, launches, clips, delays,
+        and LFOs all follow.
       TEXT
       commands :bpm, :tempo, :accel, :rit, :meter, :rewind, :seek, :bar, :transport, :tuning
       note :tempo_sync, :numbers_lengths_phases
@@ -670,7 +672,12 @@ module MB
       end
       example 'an arpeggio speeding up' do
         bg :try, seq(C4, E4, G4, C5).n16.loop.tone.triangle.at(-24.db).until(4.bars)
-        bpm 180, over: 3.bars
+        tempo 180, over: 3.bars
+      end
+      example 'a new base under the ramp' do
+        bg :try, seq(C4, E4, G4, C5).n16.loop.tone.triangle.at(-24.db).until(4.bars)
+        tempo 180, over: 3.bars
+        bpm 90 # (the song's base: the ramp now starts from 90)
       end
     end
 

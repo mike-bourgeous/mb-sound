@@ -74,6 +74,7 @@ module MB
         knob_names = (session.control_names + Arrangement::KEY_VALUES + Arrangement::TEMPO_VALUES).uniq
         knobs = options.slice(*(unknown & knob_names))
         unknown -= knob_names
+        raise ArgumentError, Arrangement.bpm_value_message(name, options[:bpm]) if unknown.include?(:bpm)
         unless unknown.empty?
           hint = suggest(unknown.first, SECTION_OPTIONS + knob_names)
           raise ArgumentError, "#{name}: unknown options #{unknown.map(&:inspect).join(', ')} (use #{SECTION_OPTIONS.map { |o| "#{o}:" }.join(', ')}, or knob names)#{hint}"

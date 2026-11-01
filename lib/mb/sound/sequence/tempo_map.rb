@@ -222,6 +222,43 @@ module MB
           TempoMap.new([*kept, segment])
         end
 
+        # The base tempo: the first segment's (in effect before any change),
+        # a Rational BPM, or nil when the base follows a source (a map
+        # rewound while following a knob; see Transport#rewind).
+        def base
+          first = @segments[0]
+          first.is_a?(Step) ? first.bpm : nil
+        end
+
+        # A new map whose base tempo (the segment before the first change)
+        # is +bpm+ (tempo-3, maintainer 2026-11-02: "bpm = base, tempo =
+        # live"): every position that followed the base plays at +bpm+,
+        # and later changes stay.  A ramp or a followed source that started
+        # from the tempo in effect where it began (every one made live does)
+        # starts from the new tempo there, so a ramp from the base starts
+        # from the new base, and one that interrupted it from where that
+        # ramp now is; a ramp's length in whole notes stays.  Steps keep
+        # their tempos.
+        def with_base(bpm)
+          bpm = TempoMap.check_bpm(bpm)
+          old = @segments
+          first = old[0]
+          return self if first.is_a?(Step) && first.bpm == bpm
+          out = [Step.new(pos: first.pos, bpm: bpm)]
+          (1...old.length).each do |i|
+            seg = old[i]
+            was = old[i - 1].bpm_at(seg.pos)
+            now = out[i - 1].bpm_at(seg.pos)
+            seg = case seg
+                  when Ramp then seg.from == was ? seg.with(from: now) : seg
+                  when Follow then seg.last == was ? seg.with(last: now) : seg
+                  else seg
+                  end
+            out << seg
+          end
+          TempoMap.new(out)
+        end
+
         # A new map with a ramp from the tempo in effect at +at+ to +to+
         # BPM over +length+ whole notes.
         def ramp(to, at:, length:, curve: nil)

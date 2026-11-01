@@ -180,7 +180,7 @@ RSpec.configure do |config|
     # machine a sample late, a spy's stamps 14 buffers late).
     t = MB::Sound::Sequence.transport
     t.seek(0) unless t.position.zero?
-    t.bpm = 120 unless t.bpm == 120
+    t.reset_tempo(120) unless t.bpm == 120 && t.tempo_map.static? # (a ramp left from bar 9 would have stayed)
     t.meter(1, at: 0) unless t.meters.length == 1 && t.bar_length(0) == 1
     t.reset_key unless t.keys.length == 1 && t.key == MB::Sound::MusicalKey.default
     MB::Sound::Session.default.master_gain = MB::Sound::Session::DEFAULT_MASTER_GAIN

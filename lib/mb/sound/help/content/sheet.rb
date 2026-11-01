@@ -24,7 +24,7 @@ module MB
 
     Help::Sheet.group :time do
       line('clip in eighths') { seq(C4, E4, G4).n8.loop }
-      line { bpm 128; meter 7, 8 }
+      line { bpm 128; tempo 140, over: 4; meter 7, 8 }
       line('run at bar 9') { at_bar(9) { go :drop } }
       line { every(4) { turn :cut, 300 } }
       line('locks to the beat') { 1.beat.hz.lfo.triangle }
