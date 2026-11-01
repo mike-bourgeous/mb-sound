@@ -144,17 +144,48 @@ module MB
         # The params of generator Entry +entry+ that a track playing it
         # gets as knobs (the maintainer, 2026-11-02: "Yes", generator
         # params become track knobs like preset params): numeric params
-        # with a bounded range and a number default (`energy: (0.0..1.0).at(0.5)`),
-        # the options the generators read once a cycle (energy, density,
-        # mutate, chance, ...).  Values (harmonies, scales, chords),
-        # structure (grids, divisions), seeds, and plain-number params
-        # stay as they are.  Library file generators' ranged params too
-        # (`param :energy, (0.0..1.0).at(0.5)`).
+        # with a bounded range and a number default (`energy:
+        # (0.0..1.0).at(0.5)`) that the generator steers by, the options
+        # read once a cycle (energy, density, mutate, chance, ...).
+        # Values (harmonies, scales, chords), structure (grids,
+        # divisions), seeds, and plain-number params stay as they are.
+        # Library file generators' ranged params too (`param :energy,
+        # (0.0..1.0).at(0.5)`), when the block steers by them: each
+        # candidate is probed once per entry (a build with stand-in knobs,
+        # keeping the params whose knob the clip reads, Clip#param_nodes),
+        # so a param the block reads as a number while building (`legato(x)`)
+        # never becomes a knob that turns nothing.
         def knob_params(entry)
           return [] unless entry.kind == :generator
+          steering[entry] ||= probe_steering(entry).freeze
+        end
+
+        # The candidates of .knob_params: ranged numeric params.
+        def ranged_params(entry)
           entry.params.filter_map { |k, p|
             k if k != :seed && p.numeric? && p.bounded? && p.default.is_a?(Numeric) && p.range.begin.is_a?(Numeric)
           }
+        end
+
+        # .knob_params by entry (keys weak).
+        def steering
+          @steering ||= ObjectSpace::WeakKeyMap.new
+        end
+
+        # The .ranged_params of +entry+ that a build with stand-in knobs
+        # (GraphNode::Knob outside any Session, at the defaults) reads as
+        # moving params; none if that build raises (a block reading them as
+        # numbers).
+        def probe_steering(entry)
+          ranged = ranged_params(entry)
+          block = BLOCKS[entry]
+          return [] if ranged.empty? || block.nil?
+          probes = ranged.to_h { |k| p = entry.params[k]; [k, GraphNode::Knob.new(:"probe_#{k}", p.default.to_f, range: p.range)] }
+          clip = MB::Sound.keeping_random_state { run(entry, block, [], {}, knobs: probes) }
+          read = clip.param_nodes
+          ranged.select { |k| read.any? { |n| n.equal?(probes[k]) } }
+        rescue StandardError
+          []
         end
 
         # +value+ (a generator Entry, a clip one built, or anything else)

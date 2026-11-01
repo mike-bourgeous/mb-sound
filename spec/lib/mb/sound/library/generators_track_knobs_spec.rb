@@ -169,4 +169,30 @@ RSpec.describe MB::Sound::Library::Generators, 'track knobs', :aggregate_failure
     ENV.delete('MB_SOUND_PRESETS')
     lib.reload!
   end
+
+  it 'make knobs of a library file generator\'s ranged params only where it steers by them' do
+    dir = File.dirname(tmp_path('presets/x'))
+    FileUtils.mkdir_p(File.join(dir, 'gen'))
+    File.write(File.join(dir, 'gen', 'mine.rb'), <<~RUBY)
+      library 1
+      generator :mine, instrument: :tr909 do |seed: 1|
+        param :energy, (0.0..1.0).at(0.4)
+        param :hold, (0.05..1.0).at(0.5)
+        beats(16, energy: energy, seed: seed) { kick [1, 0, 0, 0] * 4; hat euclid(7, 16), mutate: 0.5 }.legato(hold)
+      end
+    RUBY
+    ENV['MB_SOUND_PRESETS'] = dir
+    lib.reload!
+    e = MB::Sound::L.gen.mine
+    expect(e.params.keys).to eq(%i[seed energy hold])
+    expect(gens.knob_params(e)).to eq(%i[energy]) # (hold is read as a number while building: no knob that turns nothing)
+    s, got = run(:t, -> { MB::Sound.track(:t, e) }, buffers: 120)
+    expect(s.knobs.keys.grep(%r{\At/})).to eq(%i[t/energy])
+    _, ref = run(:t, -> { MB::Sound.track(:t, e.call(energy: 0.4)) }, buffers: 120)
+    expect(got.abs.max).to be > 0.01
+    expect(got).to eq(ref)
+  ensure
+    ENV.delete('MB_SOUND_PRESETS')
+    lib.reload!
+  end
 end
