@@ -73,6 +73,22 @@ module KernelCheckExtras
       MB::Sound::Kernels.smootherstep_buf(Numo::SFloat.zeros(16).inplace!)
     },
   }.freeze
+
+  # The kernel names each factory and scene reached in check mode in this
+  # process, by [:factory or :scene, name] (see .reaching), for the
+  # coverage example, which reuses them instead of running the sweep a
+  # second time (it was 10 of the file's 25 s; fix-batch-1101).
+  REACHED = {}
+
+  # Runs the block (check mode work for +key+), noting the kernels it
+  # checked, declined, or nested (whose counts went up) in REACHED.
+  def reaching(key)
+    k = MB::Sound::Kernels
+    before = [k.checked, k.declined, k.nested].map(&:dup)
+    r = yield
+    REACHED[key] = [k.checked, k.declined, k.nested].zip(before).flat_map { |now, was| now.select { |name, n| n > was[name] }.keys }.uniq
+    r
+  end
 end
 
 RSpec.describe('kernel check mode over the graph sweep', :check_shared) do
@@ -89,16 +105,18 @@ RSpec.describe('kernel check mode over the graph sweep', :check_shared) do
 
   GraphSweep.factories.each do |name, factory|
     it "matches the C kernels' Ruby mirrors for #{name}, planned and unplanned" do
-      [true, false].each do |planned|
-        sizes.each do |size, buffers|
-          MB::Sound::Plan.enabled = planned
-          MB::Sound.seed(1)
-          graph = MB::Sound::Kernels.with(:check) { factory.call(GraphSweep::Context.new) }
-          MB::Sound::Plan.install(graph) if planned
-          begin
-            MB::Sound::Kernels.with(:check) { GraphSweep.run(graph, size, buffers) }
-          rescue => e
-            raise e.class, "#{name} (#{planned ? 'planned' : 'unplanned'}, #{size}-sample buffers): #{e.message}", e.backtrace
+      KernelCheckExtras.reaching([:factory, name]) do
+        [true, false].each do |planned|
+          sizes.each do |size, buffers|
+            MB::Sound::Plan.enabled = planned
+            MB::Sound.seed(1)
+            graph = MB::Sound::Kernels.with(:check) { factory.call(GraphSweep::Context.new) }
+            MB::Sound::Plan.install(graph) if planned
+            begin
+              MB::Sound::Kernels.with(:check) { GraphSweep.run(graph, size, buffers) }
+            rescue => e
+              raise e.class, "#{name} (#{planned ? 'planned' : 'unplanned'}, #{size}-sample buffers): #{e.message}", e.backtrace
+            end
           end
         end
       end
@@ -108,29 +126,42 @@ RSpec.describe('kernel check mode over the graph sweep', :check_shared) do
   KernelCheckExtras::SCENES.each do |name, scene|
     it "matches the C kernels' Ruby mirrors for #{name}" do
       MB::Sound.seed(1)
-      MB::Sound::Kernels.with(:check) { scene.call }
+      KernelCheckExtras.reaching([:scene, name]) { MB::Sound::Kernels.with(:check) { scene.call } }
     end
   end
 
-  it 'compares the kernels the sweep reaches, and every other kernel has a compare spec' do
-    MB::Sound::Kernels.reset_checked
-    KernelCheckExtras::SCENES.each_value { |scene| MB::Sound::Kernels.with(:check) { scene.call } }
-    GraphSweep.factories.each do |_, factory|
-      [true, false].each do |planned|
-        MB::Sound::Plan.enabled = planned
+  # (a child group: RSpec runs a group's own examples before its children,
+  # so in a whole-file run the sweep examples above have noted what they
+  # reached; run alone, it runs whatever they haven't, one 128-sample
+  # buffer each)
+  describe 'coverage' do
+    it 'compares the kernels the sweep reaches, and every other kernel has a compare spec' do
+      KernelCheckExtras::SCENES.each do |name, scene|
+        next if KernelCheckExtras::REACHED.key?([:scene, name])
         MB::Sound.seed(1)
-        graph = MB::Sound::Kernels.with(:check) { factory.call(GraphSweep::Context.new) }
-        MB::Sound::Plan.install(graph) if planned
-        MB::Sound::Kernels.with(:check) { GraphSweep.run(graph, 128, 1) }
+        KernelCheckExtras.reaching([:scene, name]) { MB::Sound::Kernels.with(:check) { scene.call } }
       end
+      GraphSweep.factories.each do |name, factory|
+        next if KernelCheckExtras::REACHED.key?([:factory, name])
+        KernelCheckExtras.reaching([:factory, name]) do
+          [true, false].each do |planned|
+            MB::Sound::Plan.enabled = planned
+            MB::Sound.seed(1)
+            graph = MB::Sound::Kernels.with(:check) { factory.call(GraphSweep::Context.new) }
+            MB::Sound::Plan.install(graph) if planned
+            MB::Sound::Kernels.with(:check) { GraphSweep.run(graph, 128, 1) }
+          end
+        end
+      end
+      keys = KernelCheckExtras::SCENES.keys.map { |n| [:scene, n] } + GraphSweep.factories.map { |n, _| [:factory, n] }
+      checked = keys.flat_map { |k| KernelCheckExtras::REACHED.fetch(k) }.uniq
+      expect(checked.length).to be > 40
+
+      missing = KernelsGuard.checkable_entries.map(&:name) - checked - KernelsGuard::COMPARED_ELSEWHERE.keys
+      expect(missing).to eq([]), "kernels neither the check-mode sweep reaches nor COMPARED_ELSEWHERE lists: #{missing.join(', ')}"
+
+      # (an entry listed as compared elsewhere that the sweep now reaches is
+      # fine: the list says where else it is compared)
     end
-    checked = MB::Sound::Kernels.checked.keys | MB::Sound::Kernels.declined.keys | MB::Sound::Kernels.nested.keys
-    expect(checked.length).to be > 40
-
-    missing = KernelsGuard.checkable_entries.map(&:name) - checked - KernelsGuard::COMPARED_ELSEWHERE.keys
-    expect(missing).to eq([]), "kernels neither the check-mode sweep reaches nor COMPARED_ELSEWHERE lists: #{missing.join(', ')}"
-
-    # (an entry listed as compared elsewhere that the sweep now reaches is
-    # fine: the list says where else it is compared)
   end
 end

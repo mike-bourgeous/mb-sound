@@ -35,6 +35,14 @@ module MB
         TARGET_RMS = 0.2
         WHITE_RMS = 1.0 / Math.sqrt(3)
 
+        # Impulse response energies (see #energy) by [color, sample rate]:
+        # the same for every NoiseColor of a color and rate.  Its 2 s
+        # impulse takes about 4 ms through the C biquads but 0.8 s through
+        # their Ruby mirrors (kernel :check mode, where the graph sweep's
+        # kernel check built it once per example; fix-batch-1101).
+        ENERGIES = {}
+        ENERGIES_LOCK = Mutex.new
+
         attr_reader :color, :sample_rate
 
         def initialize(color = :pink, sample_rate: 48000)
@@ -49,7 +57,9 @@ module MB
         def sample_rate=(rate)
           @sample_rate = rate.to_f
           @chain = Filter::FilterChain.new(*design)
-          @gain = TARGET_RMS / (WHITE_RMS * Math.sqrt(energy))
+          key = [@color, @sample_rate].freeze
+          e = ENERGIES_LOCK.synchronize { ENERGIES[key] } || energy.tap { |v| ENERGIES_LOCK.synchronize { ENERGIES[key] = v } }
+          @gain = TARGET_RMS / (WHITE_RMS * Math.sqrt(e))
         end
         alias at_rate sample_rate=
 
