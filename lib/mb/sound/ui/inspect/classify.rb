@@ -162,6 +162,9 @@ module MB
           # The DSL word for +n+ (never a class name).
           def label(n)
             return n.name.to_s if short_class(n) == 'Drums::Voice'
+            if short_class(n) == 'MIDI::ClipSource' && (b = Library::Generators.origin(n.clip))
+              return b.entry.name.to_s
+            end
             return n.graph_node_name.to_s if n.respond_to?(:named?) && n.named?
             d = preview(n)
             return d[:filter_type].to_s if d.is_a?(Hash) && d[:filter_type]
@@ -171,6 +174,16 @@ module MB
             return cn.to_s if cn && cn.to_s.match?(/\A[a-z]/) && cn.to_s != 'constant'
             return n.wave_type.to_s if n.respond_to?(:wave_type) && n.wave_type
             WORDS[short_class(n)] || Inspect.snake(short_class(n).split('::').last)
+          end
+
+          # [[param, Knob::Reader], ...] for the track knobs steering the
+          # generator clip ClipSource +n+ plays (Library::Generators.knobs_of),
+          # as a row's knobs (frozen; empty for other clips).
+          def generator_knobs(n)
+            clip = n.respond_to?(:clip) ? n.clip : nil
+            knobs = clip.is_a?(Sequence::Clip) ? Library::Generators.knobs_of(clip) : nil
+            return [].freeze if knobs.nil? || knobs.empty?
+            knobs.map { |param, k| [param, GraphNode::Knob::Reader.new(k)].freeze }.freeze
           end
 
           # A wrapped filter's kind when it has no cookbook type ("comb").
@@ -293,6 +306,9 @@ module MB
                 # ...; editability-1; before, hidden as plumbing, its
                 # settings only a dim line under the voice strip)
                 if sc == 'Drums::Voice' then [:source, 'voice']
+                # (a library generator's clip steered by the track's knobs:
+                # a row of its params, density, energy, ...; gen-knobs-1)
+                elsif sc == 'MIDI::ClipSource' && !generator_knobs(n).empty? then [:source, 'notes']
                 elsif sc == 'Drums::Repeats' then [:amp, 'bursts']
                 elsif sc == 'Drums::ChokeGate' then [:amp, 'choke']
                 elsif lfo?(n) && sc == 'GraphNode::Multiplier' then [:mod, 'lfo']
@@ -355,11 +371,13 @@ module MB
               copies /= lanes if lanes > 1 && copies % lanes == 0
               copies /= channels if channels > 1 && copies % channels == 0
               Row.new(section: sec, label: lab.freeze, what: what&.freeze, dest: dest.map(&:freeze).freeze, count: nodes.length, copies: copies,
-                      channels: channels, nodes: nodes.freeze, voice: voice, stage: nodes.map { |n| stage[n.__id__] || 999 }.min, knobs: [].freeze)
+                      channels: channels, nodes: nodes.freeze, voice: voice, knobs: [].freeze,
+                      stage: short_class(nodes.first) == 'MIDI::ClipSource' ? -1 : nodes.map { |n| stage[n.__id__] || 999 }.min) # (the notes first)
             }
             order = SECTIONS + [:other]
             rows.sort_by!.with_index { |r, i| [r.voice.to_s, order.index(r.section) || 99, r.stage, i] }
             rows = attach_knobs(all, users, rows)
+            rows = rows.map { |r| short_class(r.nodes.first) == 'MIDI::ClipSource' ? r.with(knobs: generator_knobs(r.nodes.first)) : r }
             voice_knobs = all.each_with_object({}) { |n, h|
               next unless short_class(n) == 'Drums::Voice' && n.respond_to?(:knobs) && n.knobs.is_a?(Hash)
               h[n.name] ||= Ractor.make_shareable(n.knobs.select { |_, v| v.is_a?(Numeric) || v.is_a?(Symbol) }.transform_values { |v| v.is_a?(Numeric) ? v.to_f : v })
