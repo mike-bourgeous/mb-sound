@@ -309,6 +309,12 @@ module MB
         @cell_hi = Array.new(@allocator.lanes.length) { [] }
         @cell_fresh = Array.new(@allocator.lanes.length, true)
         # Branches made while building the lanes (see #setup_idle_skipping)
+        # (each lane's walk from #prepare_skipping, with the count of lanes
+        # whose preparations changed a graph when it was taken: reused for
+        # @lane_graphs below while no later lane changed one, instead of
+        # walking every lane again; load-lag-1)
+        walks = []
+        changes = 0
         @built_branches = GraphNode::Tee.collect_branches {
           @lanes = @allocator.lanes.each_with_index.map { |lane, idx|
             v = Notes.new(lane, sustain: false, sample_rate: @sample_rate)
@@ -324,14 +330,21 @@ module MB
             v.envelopes.each { |env| env.retrigger(:add) if env.respond_to?(:retrigger) } if add
             @notes << v
             outs = lane_outputs(graph, idx).map(&:get_sampler)
-            prepare_skipping(outs, v) if skip_idle
+            if skip_idle
+              g, changed = prepare_skipping(outs, v)
+              changes += 1 if changed
+              walks[idx] = [g, changes] if g
+            end
             outs
           }
         }
         @notes.freeze
 
         # Every node of every lane's graph (see #unread_branch?)
-        @lane_graphs = @lanes.map { |outs| outs.flat_map { |o| o.graph(include_tees: true) }.uniq }
+        @lane_graphs = @lanes.each_with_index.map { |outs, idx|
+          w = walks[idx]
+          w && w[1] == changes ? w[0] : outs.flat_map { |o| o.graph(include_tees: true) }.uniq
+        }
         @in_lanes = {}
         @lane_graphs.each { |g| g.each { |n| @in_lanes[n.__id__] = true } }
 
@@ -778,16 +791,25 @@ module MB
       # zone value indices (GraphNode::SubLane.prepare), and zone values
       # read through the Notes nodes a skipped lane keeps advancing get an
       # Index of their own (GraphNode::ZoneValue.separate).
+      #
+      # Returns [the lane's nodes after the preparations (nil if they may
+      # have changed them), true if the preparations may have changed any
+      # graph].
       def prepare_skipping(outs, v)
-        GraphNode::SubLane.prepare(outs, v) if Synth.sub_lanes
         g = outs.flat_map { |o| o.graph(include_tees: true) }.uniq
-        return unless g.any? { |n| n.is_a?(GraphNode::ZoneValue) }
+        changed = false
+        if Synth.sub_lanes && GraphNode::SubLane.prepare(outs, v, graph: g)
+          changed = true
+          g = outs.flat_map { |o| o.graph(include_tees: true) }.uniq
+        end
+        return [g, changed] unless g.any? { |n| n.is_a?(GraphNode::ZoneValue) }
 
         own = GraphNode::SubLane.advanced_nodes(g.select { |n| n.is_a?(Notes::Node) && n.notes.equal?(v) })
         zones = g.select { |n| n.is_a?(GraphNode::ZoneValue) }
         before = zones.map(&:zone_index).uniq
         GraphNode::ZoneValue.separate(g, own)
         GraphNode::ZoneValue.release(before, zones)
+        [nil, true]
       end
 
       # The nodes skipped lane +idx+ still reads (see #setup_idle_skipping):

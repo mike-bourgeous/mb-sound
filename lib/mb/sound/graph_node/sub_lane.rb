@@ -112,10 +112,14 @@ module MB
         # through the Notes nodes a sleeping sub-lane keeps advancing (see
         # ZoneValue.separate), so the sub-lane can pause the rest (an Index
         # serves its readers in lockstep).
-        def self.prepare(outs, notes)
-          graph = outs.flat_map { |o| o.graph(include_tees: true) }.uniq
+        #
+        # +graph+ is the lane's nodes when walked already.  Returns nil if
+        # there was nothing to prepare (the lane has no sub-lanes), else
+        # true.
+        def self.prepare(outs, notes, graph: nil)
+          graph ||= outs.flat_map { |o| o.graph(include_tees: true) }.uniq
           parts = graph.select { |n| n.is_a?(SubLane) && n.notes.equal?(notes) }
-          return if parts.empty?
+          return nil if parts.empty?
 
           zones = graph.select { |n| n.is_a?(ZoneValue) }
           in_graph = {}.compare_by_identity
@@ -148,6 +152,7 @@ module MB
             ZoneValue.separate(nodes, advanced_nodes(nodes))
           end
           ZoneValue.release(before, zones)
+          true
         end
 
         # The nodes among +nodes+ that a sleeping sub-lane (or skipped lane)
