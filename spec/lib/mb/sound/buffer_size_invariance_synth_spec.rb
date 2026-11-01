@@ -52,6 +52,37 @@ RSpec.describe 'Buffer size invariance (samplers, drums, Synth lanes)' do
       )
     end
 
+    # kit-live-1: voice settings bound as live knobs move while voices
+    # sleep and wake; a Session's knobs give each read the frame's value,
+    # so a sweep lands the same at any buffer size
+    it 'gives the same kit samples at any buffer size while live knob settings move' do
+      render = ->(size) {
+        out = MB::Sound::Sampler::CaptureOutput.new(channels: 1, buffer_size: size)
+        s = MB::Sound::Session.new(output: out, realtime: false, channels: 1, master_gain: 1, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+        k = {
+          decay: s.knob(:kd, 0.55, range: 0.05..2.0), punch: s.knob(:kp, 0.9, range: 0.0..1.0), tune: s.knob(:ht, -3, range: -24..24),
+          tone: s.knob(:mo, 0.5, range: 0.0..1.0), mt: s.knob(:mt, 205.3, range: 100.0..800.0),
+        }
+        k[:decay].ramp_to(1.8, frames: 60000, frame: 5000)
+        k[:punch].ramp_to(0.1, frames: 30000, frame: 20000)
+        k[:tune].set(4, frame: 41000, smooth: 0)
+        k[:tone].ramp_to(1.0, frames: 50000, frame: 3000)
+        k[:mt].ramp_to(400.0, frames: 40000, frame: 30000)
+        g = MB::Sound.grid(16, kick: 'x...x...x...x...', closed_hat: 'x.x.x.x.x.x.x.x.', oh: '......x.......x.').loop
+        s.add(
+          MB::Sound.tr909(g, seed: 3, kick: { decay: k[:decay], punch: k[:punch] }, closed_hat: { tune: k[:tune] }) +
+            MB::Sound.tr808(g, seed: 4, closed_hat: { tone: k[:tone], tune: k[:mt] }),
+          name: :kit, on: :now
+        )
+        (96000 / size + 1).times { s.process_buffer }
+        s.close
+        Numo::SFloat.cast(out.captured[0])[0...96000]
+      }
+      ref = render.(800)
+      expect(ref.abs.max).to be > 0.1
+      slow_tier([367, 64]).each { |size| expect(render.(size)).to eq(ref), "#{size}-frame buffers" }
+    end
+
     it 'gives the same separate outputs at any buffer size' do
       expect_invariant(-> { MB::Sound.tr808(MB::Sound.grid(16, **kit).loop, outputs: :separate)[:open_hat] }, seconds: 4.5, sizes: [[367, 368], [64]])
     end

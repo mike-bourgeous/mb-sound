@@ -294,7 +294,9 @@ module MB
               hit = first_hit(bufs[0], o)
               stop = hit || count
               if stop > o
-                boundary.each { |n| n.sample(stop - o) }
+                # (knob readers keep their place in the Session's buffer:
+                # they advance without a buffer, as in skipped Synth lanes)
+                boundary.each { |n| n.is_a?(GraphNode::Knob::Reader) ? n.advance(stop - o) : n.sample(stop - o) }
                 unless @catch_ups.empty?
                   @slept += stop - o
                   catch_up if @slept >= MB::Sound::NodeTraits::CATCH_UP_CHUNK
@@ -419,6 +421,7 @@ module MB
           @set = set
           @tee_branches = nodes.select { |n| n.is_a?(GraphNode::Tee::Branch) }
           @notes_nodes = nodes.select { |n| n.is_a?(MB::Sound::Notes::Node) }
+          @knob_readers = nodes.select { |n| n.is_a?(GraphNode::Knob::Reader) }
           @boundary_cache = nil
           @skippable = true # (last: #sample sets up again until this is set)
         end
@@ -470,7 +473,13 @@ module MB
           notes_nodes.each { |n| n.graph(include_tees: true).each { |u| upstream[u.__id__] = true unless u.equal?(n) } }
           notes_nodes.reject! { |n| upstream[n.__id__] }
 
-          list = shared + notes_nodes
+          # Knob readers (a voice setting bound as a live knob) advance past
+          # the frames slept, so a voice waking inside a buffer reads the
+          # knob's value on that frame (kit-live-1: they gave the buffer's
+          # first frames, so a ramp landed differently by buffer size)
+          knobs = @knob_readers.reject { |n| upstream[n.__id__] }
+
+          list = shared + notes_nodes + knobs
 
           # The random streams that pause with the voice (not read through
           # the list above; see #catch_up)
