@@ -108,11 +108,40 @@ module ParallelSpecs
   # over the reference machine's (#budget_scale; maintainer, 2026-10-21:
   # "Set them relative to each machine's performance on first run maybe?").
   # Returns nil if the workload fails.
+  #
+  # A reading taken while other work ran (LoadWatch: over IDLE_CPUS cores
+  # besides the bench) is used for that run but not kept, so the next run
+  # measures again (fix-batch-1101: the Mac container's PARALLEL=8 readings
+  # ranged 0.49-1.0 s, the idle ones 0.49 s, so a reading under load
+  # loosened every budget until the worktree went; #host_speed_unkept says
+  # why a reading wasn't kept).
   def host_speed(count, path: HOST_SPEED_PATH)
+    @host_speed_unkept = nil
     key = host_key(count)
     table = File.exist?(path) ? (JSON.parse(File.read(path)) rescue {}) : {}
     return table[key] if table[key] && ENV['MB_SOUND_SPEC_CALIBRATE'] != '1'
 
+    seconds, load = measure_host_speed(count)
+    return nil if seconds.nil?
+
+    if load.others && !load.idle?
+      @host_speed_unkept = load
+      return seconds
+    end
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, JSON.pretty_generate(table.merge(key => seconds)) + "\n")
+    seconds
+  end
+
+  # The LoadWatch::Load of the last #host_speed reading if it wasn't kept
+  # (taken under load), else nil.
+  def host_speed_unkept = @host_speed_unkept
+
+  # Runs +count+ copies of the bench at once; returns [the median copy's
+  # seconds (nil if one failed), the LoadWatch::Load of other work
+  # meanwhile].
+  def measure_host_speed(count)
+    before = LoadWatch.snapshot
     readers = Array.new(count) do
       r, w = IO.pipe
       pid = Process.spawn(RbConfig.ruby, HOST_SPEED_SCRIPT, out: w, err: File::NULL, chdir: ROOT)
@@ -125,12 +154,10 @@ module ParallelSpecs
       Process.wait(pid)
       $?.success? ? Float(out, exception: false) : nil
     }
-    return nil if times.include?(nil)
+    load = LoadWatch.between(before, LoadWatch.snapshot)
+    return [nil, load] if times.include?(nil)
 
-    seconds = times.sort[times.length / 2].round(4)
-    FileUtils.mkdir_p(File.dirname(path))
-    File.write(path, JSON.pretty_generate(table.merge(key => seconds)) + "\n")
-    seconds
+    [times.sort[times.length / 2].round(4), load]
   end
 
   # How much slower than the reference machine this one is (never below 1):
@@ -145,8 +172,9 @@ module ParallelSpecs
     return [1.0, 'host speed: the workload failed; budgets unscaled'] unless speed
 
     scale = [speed / ref, 1.0].max
-    [scale, format('host speed %.3f s (%s) vs the reference %.3f s (%s): budgets x%.2f',
-                   speed, host_key(count), ref, reference['machine'], scale)]
+    unkept = host_speed_unkept && " (measured while #{host_speed_unkept}: not kept, measured again next run)"
+    [scale, format('host speed %.3f s (%s) vs the reference %.3f s (%s): budgets x%.2f%s',
+                   speed, host_key(count), ref, reference['machine'], scale, unkept)]
   end
 
   # Runs the groups, returns true if every process passed.
