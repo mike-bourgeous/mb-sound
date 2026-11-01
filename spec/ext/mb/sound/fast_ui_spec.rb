@@ -255,7 +255,8 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
         probe.log_drain
       }
 
-      it 'timestamps long waits for the GVL, times blocked off it, and GC steps with the thread that ran them' do
+      it 'timestamps long waits for the GVL, times blocked off it, and GC steps with the thread that ran them',
+         memcheck_skip: 'Valgrind serializes threads, so the GVL wait it times never happens (batch6-1102); the log paths still run in the other GVLProbe log examples' do
         probe.log_drain
         sleeper = Thread.new { sleep 0.01; MB::Sound::FastLatency.spin(0.0001) }
         probe.start([sleeper, Thread.current])
