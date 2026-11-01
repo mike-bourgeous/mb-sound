@@ -41,6 +41,43 @@ RSpec.describe(MB::Sound::UI::Inspect, :aggregate_failures) do
     expect(inspect.default_node(nodes, walked[:voices].first)).not_to be_nil
   end
 
+  # Reasons an oscillator row may give instead of its cycle (the render
+  # pane's too: a voice there is no copy of).
+  TONE_CYCLE_REASONS = /no recorded call to copy|outside the voice|no synth voice to copy|shared with the live graph/
+
+  # The oscillator preview's sweep (ux-notes-2, UI::ToneCycle): every
+  # SOURCE oscillator row renders one cycle (finite, one period at its
+  # frequency, or a noise window) or says why it can't.  The render
+  # pane's Source is built as UI::Poll#render_source builds it.
+  def expect_tone_cycles(name, input, walked, clip)
+    tc = MB::Sound::UI::ToneCycle
+    roots = inspect.roots(input)
+    nodes = roots.flat_map { |r| [r, *(r.respond_to?(:graph) ? r.graph(include_tees: true) : [])] }.uniq(&:__id__)
+    synth = nodes.find { |n| n.is_a?(MB::Sound::Synth) }
+    live = nodes.to_h { |n| [n.__id__, true] }
+    synth&.instance_variable_get(:@lane_graphs)&.each { |g| g.each { |n| live[n.__id__] = true } }
+    src = MB::Sound::UI::PatchRender::Source.new(track: :t, synth: synth, clip: clip, bpm: 120, bar_length: 1r, key: nil, tuning: nil, channels: 2,
+                                                 note: synth ? nil : 't has no synth voice to copy', words: name.to_s, live: live)
+    input_note = MB::Sound::UI::PatchRender.input(src, 0.5)
+    cache = {}
+    walked[:nodes].each_index do |i|
+      next unless walked[:nodes][i].section == :source && walked[:objects][i].is_a?(MB::Sound::Tone)
+      label = "#{name} #{walked[:nodes][i].label}"
+      r = tc.render(tc::Job.new(seq: i, key: [i], source: src, input: input_note, knobs: [], tone: tc.key_of(walked[:objects][i])), cache: cache)
+      if r.error
+        expect(r.error).to match(TONE_CYCLE_REASONS), label
+        next
+      end
+      expect(r.cycle.length).to be > 1, label
+      expect(r.cycle.isfinite.all?).to eq(true), label
+      want = r.noise ? tc::NOISE_FRAMES : r.partial ? (tc::MAX_SECONDS * r.rate).round : (r.rate / r.frequency).ceil + 1
+      expect(r.frames).to eq(want), label
+    end
+  ensure
+    cache&.[](:copies)&.each_value(&:close)
+    cache&.[](:scopes)&.each_value(&:close)
+  end
+
   %i[tr909 tr808].each do |kit|
     it "classifies every node of the #{kit} kit, by voice" do
       session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
@@ -93,6 +130,8 @@ RSpec.describe(MB::Sound::UI::Inspect, :aggregate_failures) do
         expect(walked[:nodes].length).to be > 1
         expect_sections(walked)
         next if walked[:capped] # (rows capped: coverage can't be told)
+
+        expect_tone_cycles(name, input, walked, source)
 
         shown = walked[:groups].flatten.to_h { |n| [n.object_id, true] }
         whole = (input.respond_to?(:nodes) ? input.nodes : [input]).flat_map { |n| MB::Sound::GraphNode.graph(n) }.uniq(&:object_id)

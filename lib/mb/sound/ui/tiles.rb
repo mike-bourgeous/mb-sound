@@ -164,6 +164,8 @@ module MB
           @line_cursor = @old_winch = @signals = @wake_r = @wake_w = nil
           @attached = @poll = @polled_at = @poll_warned = @last = nil
           @asking = nil # ([pane name, PaneKeys::Ask] while a pane's value prompt is open)
+          @keys_takeover = nil # (Keyboard::Takeover: KEYS on the sound-design screen arms and holds the inspected track)
+          @takeover_lock = Mutex.new
           @temporary_jumps = {} # (pane name => the Proc that takes it away: panes put in by their jump letter)
           @input = input
           @output = output
@@ -1345,10 +1347,38 @@ module MB
           end
           Thread.new do
             Thread.current.name = 'MB::Sound::UI keys'
+            take_over_inspected
             @keyboard.out.ensure_monitor if @keyboard.out.respond_to?(:ensure_monitor)
           rescue StandardError => e
             flash("keyboard: #{e.class}: #{e.message}", :bad)
           end
+        end
+
+        # KEYS on the sound-design screen (an inspector on screen and a
+        # track inspected): arm the track with its monitor and hold its
+        # clip until KEYS ends (Keyboard::Takeover; ux-notes-2, the
+        # maintainer's "Arm + hold the clip"), each step a console line in
+        # the REPL pane.  Returns the lines run.
+        def take_over_inspected
+          @takeover_lock.synchronize do
+            return [] unless @keyboard.active?
+            track = takeover_track or return []
+            session = @session || Session.existing or return []
+            keys_takeover.enter(session, track, @keyboard.out)
+          end
+        end
+
+        # The track KEYS takes over: the inspected one, while an inspector
+        # is on screen (nil otherwise).
+        def takeover_track
+          return nil unless @tiler.layout.panes.include?(:inspector)
+          t = Inspect.target&.[](:track) || @last&.inspector&.track
+          t.is_a?(Symbol) && Session::Name.monitored(t).nil? && Session::Name.cued(t).nil? ? t : nil
+        end
+
+        # The screen's Keyboard::Takeover (made on first use).
+        def keys_takeover
+          @keys_takeover ||= Keyboard::Takeover.new(run: ->(code, note) { run_pane_line(PaneKeys::Run[code, note]) })
         end
 
         # Every way out of KEYS mode: all notes off, the terminal's keys as
@@ -1358,9 +1388,18 @@ module MB
 
           @keyboard.all_off(mono_now)
           @keyboard.active = false
+          give_back_takeover
           @term&.write(@kitty_pushed ? "\e[<u\e[?1004l" : "\e[?1004l") if @term&.entered?
           @kitty_pushed = false
           self
+        end
+
+        # Puts back what KEYS took over (see #take_over_inspected).
+        def give_back_takeover
+          return unless @keys_takeover&.on?
+          @takeover_lock.synchronize { @keys_takeover.leave(@keyboard.out) }
+        rescue StandardError => e
+          flash("keyboard: #{e.class}: #{e.message}", :bad)
         end
 
         # Leaves KEYS mode from outside the router (hiding, stopping).

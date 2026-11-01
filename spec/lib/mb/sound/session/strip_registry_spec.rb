@@ -31,7 +31,7 @@ RSpec.describe(MB::Sound::Session::Strip, 'registry', :aggregate_failures) do
     expect(strip.rules.map(&:order)).to eq(strip.rules.map(&:order).sort)
     expect(strip.steps.map(&:order)).to eq(strip.steps.map(&:order).sort)
     expect(strip.rules.map(&:order).uniq.length).to eq(strip.rules.length), 'two strip rules share an order'
-    expect(strip.rules.map(&:name)).to eq(%i[cue_strip_rule mute_strip_rule solo_strip_rule bus_solo_strip_rule])
+    expect(strip.rules.map(&:name)).to eq(%i[hold_strip_rule cue_strip_rule mute_strip_rule solo_strip_rule bus_solo_strip_rule])
     expect(strip.steps.map(&:name)).to eq(%i[player_strip_step bus_strip_step])
   end
 
