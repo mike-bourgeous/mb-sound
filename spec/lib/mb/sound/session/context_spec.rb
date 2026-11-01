@@ -41,6 +41,7 @@ RSpec.describe(MB::Sound::Session::Context, :aggregate_failures) do
     mb_sound_mastering: 'Mastering.building: trims and captured presets',
     mb_sound_knob_landings: 'Arrangement::TrackKnobs.deferring: knob values an instrument change turns at its launch point',
     mb_sound_knob_reset: 'Arrangement::TrackKnobs.resetting: a new instrument starts every reused knob at its own value',
+    mb_sound_generator_homes: 'Library::Generators.with_homes: the defaults of the generator params moving params steer, while an entry builds (motifs density home)',
     mb_param_peek: 'MIDI::Param.peek: reads that decide nothing',
     scene_profile: 'bin/scene_profile.rb measurements',
   }.freeze
