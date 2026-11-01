@@ -117,7 +117,9 @@ module MB
                        "#{track} isn't a track with a patch (bg played it): edit the clip, Enter runs it")
           when :clip, :generator
             return audition(entry) unless track
-            Action.new(:run, "bg #{t}, #{path}.()", "#{track} plays #{entry.name} from its launch point")
+            # (a generator bare: the track's knobs steer it; gen-knobs-1)
+            gen = entry.kind == :generator
+            Action.new(:run, "bg #{t}, #{path}#{'.()' unless gen}", "#{track} plays #{entry.name} from its launch point#{gen ? " (its params #{track}'s knobs)" : ''}")
           when :flow
             Action.new(:paste, "flow #{path}", "#{entry.name} is a section chain: the flow that plays it over this set's scenes onto the console")
           when :effect

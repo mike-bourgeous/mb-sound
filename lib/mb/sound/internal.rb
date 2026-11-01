@@ -421,15 +421,19 @@ module MB
 
       # Library Entry +entry+ given to +command+ (`bg`) for the existing
       # track +name+: a clip or generator entry's clip at its defaults (as
-      # `track :x, entry` takes it, so it plays on the track), an
+      # `track :x, entry` takes it, so it plays on the track; a
+      # generator's with the track's knobs), an
       # ArgumentError for an instrument, kit, or effect entry naming the
       # command that changes the track's (`track`, `fx`), else +entry+
       # (played as itself; lesson-fixes-1).
       def entry_for_track(command, name, entry)
         path = entry.head_path
         case entry.kind
-        when :clip, :generator
+        when :clip
           entry.builder ? entry.call : entry
+        when :generator
+          # (with the track's knobs: Library::Generators.track_clip)
+          entry.builder ? Library::Generators.track_clip(entry, name, Session.current, reuse: true) : entry
         when :instrument, :kit
           ArgumentError.new(
             "#{command} #{name.inspect}, #{path}: #{path} is #{entry.kind == :kit ? 'a kit' : 'an instrument'}, and #{name.inspect} is a track: " \

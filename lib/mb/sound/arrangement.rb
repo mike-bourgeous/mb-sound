@@ -377,9 +377,12 @@ module MB
           # (clip entries and clip generators give their clip; a
           # generator's clip plays on its entry's instrument unless the
           # track gets another: Library::Generators.instrument)
-          if v.is_a?(Library::Entry) && (v.kind == :clip || v.kind == :generator) && v.builder
+          if v.is_a?(Library::Entry) && v.kind == :clip && v.builder
             v = v.call
           end
+          # (a generator's params the call left out become the track's
+          # knobs, :"drums/energy": Library::Generators.track_clip)
+          v = Library::Generators.track_clip(v, name, @session) if v.is_a?(Library::Entry) || v.is_a?(Sequence::Clip)
           if v.is_a?(Sequence::Clip) || v.is_a?(Sequence::Kit)
             raise ArgumentError, "track #{name.inspect}: give it one clip (got two)" if clip
             clip = v
@@ -504,6 +507,13 @@ module MB
         # (a knob's short name, :"bass/reso", is the knob's full name in the
         # scene: Session::Knobs#full_knob_name)
         values = values.transform_keys { |k| (k.is_a?(Symbol) && @session.full_knob_name(k)) || k }
+        # (a track's generator, L.gen.techno_beat or a clip it built, plays
+        # with the track's knobs for its params, :"drums/energy", made if
+        # missing and left as they are if not: Library::Generators.track_clip)
+        values = values.to_h { |k, v|
+          gen = (v.is_a?(Library::Entry) && v.kind == :generator) || (v.is_a?(Sequence::Clip) && Library::Generators.origin(v))
+          [k, gen && k.is_a?(Symbol) && @session.names.kind(k) != :knob ? Library::Generators.track_clip(v, k, @session, reuse: true) : v]
+        }
 
         values.each do |k, v|
           if KEY_VALUES.include?(k)

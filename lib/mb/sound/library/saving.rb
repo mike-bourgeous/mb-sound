@@ -120,6 +120,8 @@ module MB
         # lines), its knobs (Clip#param_nodes) as `param` lines at their
         # values, read in the recipe by name].
         def generator_body(clip)
+          built = Generators.origin(clip)
+          return entry_call_body(clip, built) if built && !Generators.knob_params(built.entry).empty?
           doc = GraphIO.dump(clip, name: 'generator')
           tree = Prism.parse(doc).value.statements.body
           body = tree.reject { |st| st.is_a?(Prism::CallNode) && st.receiver.nil? && GraphIO::Document::HEADER.include?(st.name) }.map(&:slice).join("\n")
@@ -127,6 +129,28 @@ module MB
             body = body.gsub("knob(#{k.name.inspect})", k.name.to_s)
             "param #{k.name.inspect}, #{Param.literal(k.value)}"
           }
+          [body, params]
+        end
+
+        # [body, params] (see #generator_body) for +clip+, which +built+'s
+        # generator call built: the call, its steering params the call
+        # left out (Generators.knob_params) kept as params of the new
+        # entry at their current values (the track's knobs' when a track
+        # steers the clip, else the defaults; gen-knobs-1), so the saved
+        # generator is steered on a track as the call was; knobs given in
+        # the call (`energy: knob(:energy)`) become params as above.
+        def entry_call_body(clip, built)
+          entry = built.entry
+          turned = Generators.knobs_of(clip) || {}
+          free = Generators.knob_params(entry) - built.kwargs.keys
+          params = free.map { |p| entry.params[p].to_ruby('param', value: turned[p]&.value || entry.params[p].default) }
+          kwargs = built.kwargs.merge(free.to_h { |p| [p, Generators::Path.new(p.to_s)] })
+          body = Generators.call_text(Generators::Built.new(entry, kwargs))
+          built.kwargs.each_value do |v|
+            next unless v.is_a?(GraphNode::Knob) && v.name.to_s.match?(/\A[a-z_][a-z0-9_]*\z/)
+            body = body.gsub("knob(#{v.name.inspect})", v.name.to_s)
+            params << "param #{v.name.inspect}, #{Param.literal(v.value)}"
+          end
           [body, params]
         end
 

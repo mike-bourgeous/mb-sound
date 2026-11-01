@@ -106,7 +106,10 @@ module MB
       # (`knob(:reg).choose(A2..A4, A3..A5)`), read once per phrase at its
       # decision point, +lead:+ (one beat) before it (Generative::Steer).
       # A steered density thins or fills the motifs around 0.5 (the same
-      # notes come back at the same density; raising it only adds notes);
+      # notes come back at the same density; raising it only adds notes;
+      # in a library generator, around the generator's default density, so
+      # `L.gen.ambient_motif(density: knob(:busy))` at 0.1 plays the plain
+      # 0.1 motifs);
       # a steered mutate is how far the motifs have wandered from their
       # first form.
       #
@@ -148,9 +151,12 @@ module MB
         field, center, notes = fields.(ranges ? ranges.first : range)
         notes = ranges.flat_map { |r| fields.(r)[2] }.uniq.sort if ranges
         seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
+        # (a steered density thins and fills around its home: a library
+        # generator's default for it, else 0.5; Library::Generators.home)
+        home = MIDI::Param.param?(density) ? Library::Generators.home(density) : nil
         m = Generative::Motifs.new(field, steps: steps, step: step, form: form.dup.freeze, answer: answer.freeze, density: density, vary: vary,
           mutate: mutate, evolve: evolve, leap: leap, around: center, velocity: velocity, legato: legato.rationalize(1r / 1024), seed: seed,
-          fields: ranges && ->(r) { fields.(r).first(2) })
+          fields: ranges && ->(r) { fields.(r).first(2) }, home: home)
         params = { density: density, vary: vary, mutate: mutate, range: (range if ranges) }.select { |_, v| MIDI::Param.param?(v) }
         unless params.empty?
           return Sequence::Clip.generate(m.length, values: notes, seed: seed, name: "motifs(seed: #{seed})", align: align, lead: lead, params: params) { |cycle, dice, **v|

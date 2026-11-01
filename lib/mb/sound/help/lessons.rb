@@ -104,6 +104,14 @@ module MB
         Library::Generators.origin(tr.clip)
       end
 
+      # For lesson checks: the track knobs steering the generator clip
+      # track +name+ plays ({ param => knob }; Library::Generators.knobs_of),
+      # or {}.
+      def self.track_knobs(name)
+        tr = Session.current.arrangement.tracks[name] or return {}
+        (tr.clip.is_a?(Sequence::Clip) && Library::Generators.knobs_of(tr.clip)) || {}
+      end
+
       # The lessons whose steps type a call to one of +names+, as [lesson
       # name, step number (from 1), steps] (the first such step of each),
       # for method pages' "Learn it in" (ux-1 item 26).

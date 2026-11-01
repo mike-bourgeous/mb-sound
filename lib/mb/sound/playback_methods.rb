@@ -146,8 +146,9 @@ module MB
       #
       # On a track (see ArrangementMethods#track), a clip or generator
       # entry is its clip at the defaults: `bg :drums, L.gen.techno_beat`
-      # plays `L.gen.techno_beat.()` on the track (a new player auditions
-      # the entry, as #play does).
+      # plays `L.gen.techno_beat.()` on the track, steered by the track's
+      # knobs (:"drums/energy"; a new player auditions the entry, as #play
+      # does).
       #
       # +clock:+ plays the clip (or Sample loop, or the clips and loops in a
       # graph) on a clock (see MB::Sound::Clock): `bg :bass, bassline,
@@ -189,6 +190,9 @@ module MB
         if name && (sound.is_a?(Sequence::Clip) || sound.is_a?(Sequence::Kit))
           session = Session.current
           if session.arrangement.tracks[name]
+            # (a clip a generator built plays with the track's knobs for
+            # the params its call left out: Library::Generators.track_clip)
+            sound = Library::Generators.track_clip(sound, name, session, reuse: true)
             return session.arrangement.play(name, sound, at: point, fade: fade) if point.given?
 
             time = Session.context&.time
@@ -622,9 +626,15 @@ module MB
             "track #{name.inspect}, #{clips.head_path} gives track #{name.inspect} that instrument (built again at its launch point)"
           ))
         end
-        clips = clips.call if clips.is_a?(Library::Entry)
+        clips = clips.call if clips.is_a?(Library::Entry) && clips.kind != :generator
 
         name = player_name(name)
+        if clips.is_a?(Library::Entry) || clips.is_a?(Sequence::Clip)
+          # (a generator on a track: the track's knobs steer it,
+          # Library::Generators.track_clip; another player: the defaults)
+          track = name.is_a?(Symbol) && Session.current.arrangement.tracks[name]
+          clips = track ? Library::Generators.track_clip(clips, name, Session.current, reuse: true) : (clips.is_a?(Library::Entry) ? clips.call : clips)
+        end
         # (ux-notes-1: the maintainer's `swap :growl, riff` after a one-shot
         # clip had ended the track; Session#swap said only "No background
         # player :growl is playing or stopped")

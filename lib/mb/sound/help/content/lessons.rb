@@ -309,7 +309,7 @@ module MB
     # instruments play at full level, so each track gets one first (the
     # beat's fill toms peak 6 dB over its bars).
     Help.lesson :generative, 'Generative music from the library', minutes: 7 do
-      about 'L.gen generators on tracks: seeds, a knob steering them, a key that moves, a form that decides itself, and your own saved.'
+      about 'L.gen generators on tracks: seeds, track knobs steering them, a key that moves, a form that decides itself, and your own saved.'
       needs :idle_set
 
       step 'A bass line from the library' do
@@ -318,14 +318,18 @@ module MB
           motifs, bells, pads; `L.gen.techno` the techno ones).  Each is a
           preset with params; a track given one plays the looping clip it
           builds, on the entry's own instrument: here an acid row walking
-          D phrygian.  Library instruments play loud, so set a level first.
+          D phrygian.  Its params that steer it become the track's knobs
+          (`:"l_bass/energy"`), as an instrument's do.  Library instruments
+          play loud, so set a level first.
         TEXT
         type do
           track :l_bass, L.gen.acid_rhythm
           level :l_bass, -18.db
           bg :l_bass
         end
-        check('L.gen.acid_rhythm playing on :l_bass') { Session.current.playing_after_queue?(:l_bass) && Help.track_built(:l_bass)&.entry&.name == :acid_rhythm }
+        check('L.gen.acid_rhythm playing on :l_bass') {
+          Session.current.playing_after_queue?(:l_bass) && Help.track_built(:l_bass)&.entry&.name == :acid_rhythm && Help.track_knobs(:l_bass).key?(:energy)
+        }
       end
 
       step 'A beat' do
@@ -347,28 +351,32 @@ module MB
           A generator draws each bar from its seed and the bar's number, so
           the same seed plays the same music every time (seeks and takes
           too), and another seed is a variation of the same recipe.  `bg`
-          gives a track a new clip at its next bar; `L.gen.techno_beat.()`
-          is the default again.
+          gives a track a new clip at its next bar.  Calls print back with
+          their seed written out (a saved set shows the default as
+          `L.gen.techno_beat(seed: 5)`), so a set knows which line it
+          played.
         TEXT
         type { bg :l_drums, L.gen.techno_beat(seed: 3) }
         check('the beat at seed 3') { Help.track_built(:l_drums)&.kwargs&.[](:seed) == 3 }
       end
 
-      step 'A knob steers them' do
+      step 'Knobs steer them' do
         say <<~TEXT
-          Params like `energy:` take knobs, read once a bar just before it
-          starts, so a turn steers the next bar.  One knob drives both
-          parts: below 0.5 they thin out, above it they fill in (raising it
-          only adds hits).
+          Each track's generator params are its knobs, named after the
+          track: `:"l_drums/energy"`, `:"l_bass/energy"` (`knobs` lists
+          them, the inspector shows them on its notes row, MIDI learn and
+          scenes take them).  A generator reads them once a bar just before
+          it starts, so a turn steers the next bar: below 0.5 the parts
+          thin out, above it they fill in (raising it only adds hits).  A
+          call that gives one keeps it: `L.gen.techno_beat(energy: 0.8)`, or
+          `energy: knob(:x)` for one knob over several parts.
         TEXT
         type do
-          knob :l_energy, 0.3
-          bg :l_drums, L.gen.techno_beat(seed: 3, energy: knob(:l_energy))
-          bg :l_bass, L.gen.acid_rhythm(energy: knob(:l_energy))
-          turn :l_energy, 0.9, over: 4.bars
+          turn :"l_drums/energy", 0.9, over: 4.bars
+          turn :"l_bass/energy", 0.3
         end
-        check('both parts reading :l_energy') {
-          %i[l_drums l_bass].all? { |t| (k = Help.track_built(t)&.kwargs&.[](:energy)).is_a?(GraphNode::Knob) && k.name == :l_energy }
+        check('turns of :"l_drums/energy" and :"l_bass/energy"') {
+          %i[l_drums/energy l_bass/energy].all? { |k| Session.current.journal.changes.any? { |e| e.kind == :turn && e.subject == k } }
         }
       end
 
@@ -392,11 +400,12 @@ module MB
           Melodic generators draw their notes from a probability scale
           (`harmony:`); give them one that changes over time and they
           follow: D phrygian for four bars, then G phrygian.  The bass and
-          the lead share it, so they move together.
+          the lead share it, so they move together; the energy they leave
+          out stays the tracks' knob.
         TEXT
         type do
           @l_key = harmony(0 => scale(:phrygian, :d), 4.bars => scale(:phrygian, :g), curve: :step, loop: 8.bars)
-          bg :l_bass, L.gen.acid_rhythm(harmony: @l_key, energy: knob(:l_energy))
+          bg :l_bass, L.gen.acid_rhythm(harmony: @l_key)
           bg :l_lead, L.gen.phrygian_motif(harmony: @l_key)
         end
         check('the bass and the lead on @l_key') { %i[l_bass l_lead].all? { |t| Help.track_built(t)&.kwargs&.[](:harmony).is_a?(Generative::Harmony) } }
@@ -404,16 +413,17 @@ module MB
 
       step 'A form that decides itself' do
         say <<~TEXT
-          Scenes say what plays (knob values too); a chain picks each next
-          scene by weight and `flow` plays it, drawing each section's length.
+          Scenes say what plays (knob values too, the tracks' generator
+          knobs among them); a chain picks each next scene by weight and
+          `flow` plays it, drawing each section's length.
           `L.flow` holds the genre templates' chains (`L.flow.techno_chain`),
           which play over scenes named like their sections; this one plays
           over yours.  `goto :l_hush` forces the next section, `loop!` stays.
         TEXT
         type do
-          scene :l_dark, l_drums: :on, l_bass: :on, l_energy: 0.4
-          scene :l_lift, l_drums: :on, l_bass: :on, l_lead: :on, l_energy: 0.9
-          scene :l_hush, l_bass: :on, l_lead: :on, l_energy: 0.2
+          scene :l_dark, l_drums: :on, l_bass: :on, "l_drums/energy": 0.4
+          scene :l_lift, l_drums: :on, l_bass: :on, l_lead: :on, "l_drums/energy": 0.9, "l_lead/density": 0.7
+          scene :l_hush, l_bass: :on, l_lead: :on, "l_bass/energy": 0.2, "l_lead/density": 0.3
           @l_moods = markov(l_dark: { l_lift: 2, l_hush: 1 }, l_lift: { l_dark: 1, l_hush: 1 }, l_hush: { l_lift: 1 }, seed: 2)
           flow @l_moods, bars: { l_dark: 4, l_lift: [4, 8], l_hush: 2 }
         end
@@ -422,18 +432,22 @@ module MB
 
       step 'Keep your own' do
         say <<~TEXT
-          `save` keeps a generator call as an entry of your own, its knob a
-          param (`L.gen.l_beat`), and a chain with its lengths
-          (`L.flow.l_moods`: `flow L.flow.l_moods` plays it over these
-          scenes).  During a lesson saves go to the lesson's own shelf, not
-          yours; save again afterwards to keep them.
+          `save` keeps a generator call as an entry of your own
+          (`L.gen.l_beat`), the params it leaves out kept as its params, so
+          on a track they are knobs again (`:"l_drums/energy"`), and a
+          chain with its lengths (`L.flow.l_moods`: `flow L.flow.l_moods`
+          plays it over these scenes).  During a lesson saves go to the
+          lesson's own shelf, not yours; save again afterwards to keep them.
         TEXT
         type do
-          save :l_beat, L.gen.techno_beat(seed: 3, energy: knob(:l_energy))
+          save :l_beat, L.gen.techno_beat(seed: 3)
           save :l_moods, @l_moods, bars: { l_dark: 4, l_lift: [4, 8], l_hush: 2 }
-          bg :l_drums, L.gen.l_beat(l_energy: knob(:l_energy))
+          bg :l_drums, L.gen.l_beat
         end
-        check('your L.gen.l_beat on :l_drums') { Help.track_built(:l_drums)&.entry&.name == :l_beat && Library.index.lookup(:flow, :l_moods, note: false) }
+        check('your L.gen.l_beat on :l_drums, steered by :"l_drums/energy"') {
+          Help.track_built(:l_drums)&.entry&.name == :l_beat && Help.track_knobs(:l_drums)[:energy]&.name == :"l_drums/energy" &&
+            Library.index.lookup(:flow, :l_moods, note: false)
+        }
       end
 
       step 'Let it end' do
