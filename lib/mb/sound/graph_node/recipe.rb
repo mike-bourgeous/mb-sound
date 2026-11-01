@@ -291,15 +291,20 @@ module MB
             inv = st.scopes.last
             counts = inv ? (inv.counts ||= {}) : st.counts
             ordinal = counts && (counts[name] = counts.fetch(name, -1) + 1)
+            rule = nil
+            called = receiver
             if st.subs && ordinal
               # (an argument given again as something else: Recipe.substituting)
               call0 = Call.new(receiver, name, args, kwargs, nil, nil, nil, inv, 0, nil, nil, nil, nil, ordinal)
               if (rule = st.subs[key_of(call0)])
                 args, kwargs = rule.call(args, kwargs)
                 pass_args, pass_kwargs = rule.call(pass_args, pass_kwargs)
+                # (a rule may give the receiver again too, a literal Pitch:
+                # the method runs on it instead; editability-1)
+                called = rule.receiver(receiver) if rule.respond_to?(:receiver)
               end
             end
-            call = Call.new(receiver, name, args, kwargs, block, kind, nil, inv, 0, seeds, lane(st))
+            call = Call.new(called, name, args, kwargs, block, kind, nil, inv, 0, seeds, lane(st))
             call.written = written if written && written != name
             call.ordinal = ordinal
             pass = kind == :build ? wrap_block(block, call) : block
@@ -308,14 +313,17 @@ module MB
             old_current = st.current
             st.current = call
             result = begin
-              yield(pass, pass_args, pass_kwargs)
+              r = called.equal?(receiver) ? yield(pass, pass_args, pass_kwargs) : called.public_send(written || name, *pass_args, **pass_kwargs, &pass)
+              # (and may set something on the result, at depth: a tone's
+              # starting phase)
+              rule.respond_to?(:after) ? rule.after(r) : r
             ensure
               st.depth -= 1
               st.current = old_current
             end
 
             call.seq = next_seq
-            note(receiver, call, result)
+            note(called, call, result)
             note_implied_ring(result, call) if result.is_a?(Mixer)
             result
           end

@@ -170,7 +170,10 @@ module MB
             # and preview follow turns; the others keep their first one)
             if sel && (n = entry[:objects][sel])
               nodes = nodes.dup
-              nodes[sel] = nodes[sel].with(params: Inspect.snapshot(n, entry[:extras][sel]), live: live_of(entry[:groups][sel]), binds: binds_of(session, track, entry, sel, n))
+              binds = binds_of(session, track, entry, sel, n)
+              pk = build_bound(session, track, binds)
+              nodes[sel] = nodes[sel].with(params: Inspect.snapshot(n, entry[:extras][sel]), live: live_of(entry[:groups][sel]), binds: binds,
+                                           param_knobs: pk.empty? ? nodes[sel].param_knobs : nodes[sel].param_knobs.merge(pk).freeze)
               nodes.freeze
             end
             InspectInfo.new(track: track, tracks: tracks, knobs: entry[:knobs], nodes: nodes, node: sel, code: entry[:code], error: nil,
@@ -215,7 +218,7 @@ module MB
                   else
                     begin
                       t = lb.target(entry[:roots], n, name, all: all)
-                      kname, qualified = lb.knob_name(track, t, entry[:roots])
+                      kname, qualified = lb.knob_name(track, t, entry[:roots], all: all)
                       Bind.new(line: lb.line(track, t, as: qualified ? kname : nil).freeze, knob: kname, reason: nil)
                     rescue StandardError => e
                       Bind.new(line: nil, knob: nil, reason: (e.is_a?(lb::Error) ? e.message : "#{e.class}: #{e.message}").dup.freeze)
@@ -223,6 +226,22 @@ module MB
                   end
               }.freeze
             end
+          end
+
+          # { param => knob name } for the params of +binds+ (see #binds_of)
+          # that track +track+'s patch already binds as build knobs
+          # (editability-1: the patch is given the knob's value while it
+          # builds, so the graph shows the number; the param turns its knob,
+          # each turn a rebuild, instead of offering the bind again).
+          def build_bound(session, track, binds)
+            return {} if binds.empty?
+            arr = session.respond_to?(:arrangement) ? session.arrangement : nil
+            patch = arr&.tracks&.[](track)&.patch
+            return {} unless patch.respond_to?(:literal_bindings)
+            bound = patch.literal_bindings.filter_map { |t, kn| kn if t.build? }
+            return {} if bound.empty?
+            knobs = session.knobs
+            binds.each_with_object({}) { |(name, b), h| h[name] = b.knob if b.knob && bound.include?(b.knob) && knobs.key?(b.knob) }
           end
 
           # The playhead of an envelope group's newest sounding note (see
@@ -373,12 +392,14 @@ module MB
           end
           voices = cls.rows.filter_map(&:voice).uniq.freeze
 
-          code = roots.filter_map { |r| r.respond_to?(:to_ruby) ? (r.to_ruby rescue nil) : nil }.uniq.join("\n").freeze
+          # (a root that prints nothing itself, a preset's final Pan, prints as the
+          # recorded bundle it is an output of; editability-1)
+          code = roots.filter_map { |r| (r = r.respond_to?(:to_ruby) ? r : GraphNode::Recipe.bundle_of(r)) && r.respond_to?(:to_ruby) ? (r.to_ruby rescue nil) : nil }.uniq.join("\n").freeze
           {
             nodes: nodes, objects: rows.map(&:first).freeze, groups: rows.map { |r| r[2] }.freeze, extras: rows.map(&:last).freeze,
             knobs: knobs.freeze, loose: knobs.reject { |k| shown[k] }.freeze, hidden: cls.hidden, voices: voices, unfit: cls.unfit.length,
             code: code.empty? ? nil : code, capped: capped, voice_knobs: cls.voice_knobs, build_knobs: build_knobs.freeze,
-            document: roots.lazy.filter_map { |r| GraphIO.document_of(r) rescue nil }.first&.name&.then { |n| "#{n}".freeze }, # (a new String: a name from document text carries GraphIO::FileGuard's mark)
+            document: (Arrangement::LiteralBinding.document(roots) rescue nil)&.name&.then { |n| "#{n}".freeze }, # (a new String: a name from document text carries GraphIO::FileGuard's mark)
           }
         end
 

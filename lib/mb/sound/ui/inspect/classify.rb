@@ -161,6 +161,7 @@ module MB
 
           # The DSL word for +n+ (never a class name).
           def label(n)
+            return n.name.to_s if short_class(n) == 'Drums::Voice'
             return n.graph_node_name.to_s if n.respond_to?(:named?) && n.named?
             d = preview(n)
             return d[:filter_type].to_s if d.is_a?(Hash) && d[:filter_type]
@@ -286,10 +287,13 @@ module MB
             hide = ->(n, why) { hidden[why] += 1; plumbing << [why, n] }
             all.each do |n|
               sc = short_class(n)
-              (hide.(n, 'drum voices (v V picks one)'); next) if sc == 'Drums::Voice'
               sig = signal.key?(n.__id__)
               sec, what =
-                if sc == 'Drums::Repeats' then [:amp, 'bursts']
+                # (a drum voice's own row: its settings, tune decay tone
+                # ...; editability-1; before, hidden as plumbing, its
+                # settings only a dim line under the voice strip)
+                if sc == 'Drums::Voice' then [:source, 'voice']
+                elsif sc == 'Drums::Repeats' then [:amp, 'bursts']
                 elsif sc == 'Drums::ChokeGate' then [:amp, 'choke']
                 elsif lfo?(n) && sc == 'GraphNode::Multiplier' then [:mod, 'lfo']
                 elsif sc == 'Tone' && !sig && lfo_internal?(n, users) then hide.(n, 'lfo internals'); next
@@ -461,6 +465,7 @@ module MB
             all.each do |v|
               next unless short_class(v) == 'Drums::Voice'
               name = v.respond_to?(:name) ? v.name : :voice
+              out[v.__id__] = name # (the voice's own row)
               g = v.respond_to?(:graph) ? v.graph : nil
               next unless g
               [g].flatten.each { |x|

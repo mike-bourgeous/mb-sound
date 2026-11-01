@@ -240,6 +240,23 @@ module MB
           s
         end
 
+        # The knobs that are the kit's for every voice (Machine::COMMON_KNOBS),
+        # left out of #param_info.
+        KIT_KNOBS = %i[accent velocity_curve flam].freeze
+
+        # The voice's settings as params (its knobs but the kit-wide
+        # accent, velocity curve, and flam spacing; numbers or nodes): tune,
+        # decay, tone, ... (editability-1, Note 15: the inspector shows them
+        # as the voice's row, and `bind :drums, tr909: :kick_decay` makes
+        # one a knob).
+        def param_info
+          @knobs.each_with_object({}) { |(k, v), h|
+            next if KIT_KNOBS.include?(k)
+            next unless v.is_a?(Numeric) || v.is_a?(GraphNode)
+            h[k] = GraphNode::Traversable.describe_param(v)
+          }.freeze
+        end
+
         def to_s
           "#{@machine} #{@name} (#{@knobs.map { |k, v| "#{k}: #{v.is_a?(Numeric) ? MB::M.sigfigs(v, 3) : v}" }.join(', ')})"
         end
