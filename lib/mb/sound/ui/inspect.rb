@@ -33,10 +33,14 @@ module MB
         # +channels+ (2 after a stereo mixer: +count+ is then the copies
         # one voice has in one channel), +param_knobs+ ({ param => knob
         # name } for params a knob drives through arithmetic, `knob(:cut)
-        # * lfo`, so turning the param turns that knob).
-        NodeInfo = Data.define(:key, :label, :role, :count, :params, :preview, :knobs, :live, :binds, :section, :what, :dest, :voice, :channels, :param_knobs) do
+        # * lfo`, so turning the param turns that knob), +recipe_key+ (the
+        # selected oscillator's recorded call, GraphNode::Recipe.key_of: the
+        # preview finds the same oscillator in a copy of the voice,
+        # UI::ToneCycle; nil for other nodes).
+        NodeInfo = Data.define(:key, :label, :role, :count, :params, :preview, :knobs, :live, :binds, :section, :what, :dest, :voice, :channels, :param_knobs,
+                               :recipe_key) do
           def initialize(key:, label:, role:, count:, params:, preview:, knobs:, live: nil, binds: {}.freeze, section: nil, what: nil, dest: [].freeze,
-                         voice: nil, channels: 1, param_knobs: {}.freeze)
+                         voice: nil, channels: 1, param_knobs: {}.freeze, recipe_key: nil)
             super
           end
 
@@ -173,7 +177,8 @@ module MB
               binds = binds_of(session, track, entry, sel, n)
               pk = build_bound(session, track, binds)
               nodes[sel] = nodes[sel].with(params: Inspect.snapshot(n, entry[:extras][sel]), live: live_of(entry[:groups][sel]), binds: binds,
-                                           param_knobs: pk.empty? ? nodes[sel].param_knobs : nodes[sel].param_knobs.merge(pk).freeze)
+                                           param_knobs: pk.empty? ? nodes[sel].param_knobs : nodes[sel].param_knobs.merge(pk).freeze,
+                                           recipe_key: n.is_a?(Tone) ? (entry[:tone_keys] ||= {}).fetch(sel) { entry[:tone_keys][sel] = ToneCycle.key_of(n) } : nil)
               nodes.freeze
             end
             InspectInfo.new(track: track, tracks: tracks, knobs: entry[:knobs], nodes: nodes, node: sel, code: entry[:code], error: nil,

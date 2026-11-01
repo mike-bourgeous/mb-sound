@@ -855,8 +855,8 @@ module MB
           PLAYHEAD_STEP = 1 / 240.0
 
           def initialize
-            super(:preview, rate: 8, height: 10, width: 48, needs: [:inspect], title: 'preview', min_height: 3,
-                            description: 'the inspected node\'s preview: a filter\'s response, a shaper\'s transfer curve, an envelope\'s note with a playhead')
+            super(:preview, rate: 8, height: 10, width: 48, needs: [:inspect, :render], title: 'preview', min_height: 3,
+                            description: 'the inspected node\'s preview: a filter\'s response, a shaper\'s transfer curve, an envelope\'s note with a playhead, one cycle of an oscillator')
             @playhead = false
           end
 
@@ -880,10 +880,17 @@ module MB
             return if w <= 0 || h <= 0
             n = s&.inspector&.selected
             @playhead = !n&.live.nil?
-            chart = n&.preview ? chart_for(n, state) : nil
+            why = nil
+            chart =
+              if n && Preview.tone?(n)
+                chart, why = tone_chart(n, s, state)
+                chart
+              elsif n&.preview
+                chart_for(n, state)
+              end
             unless chart
               c.clear
-              c.text(0, 0, c.fit(n ? "#{n.label}: no preview (filters, shapers, and envelopes have one)" : 'no node selected (the inspector: n)', w), :dim)
+              c.text(0, 0, c.fit(why || (n ? "#{n.label}: no preview (filters, shapers, envelopes, and oscillators have one)" : 'no node selected (the inspector: n)'), w), :dim)
               return
             end
             cells = c.grid.class
@@ -897,7 +904,41 @@ module MB
             live.draw(chart, c.grid, x: c.x, y: c.y)
           end
 
+          # True if NodeInfo +n+ is an oscillator (its preview is one cycle,
+          # UI::ToneCycle).
+          def self.tone?(n) = !n.params.node_class.nil? && n.params.node_class <= Tone
+
           private
+
+          # An oscillator's chart (one cycle of it rendered by a copy of the
+          # voice, UI::ToneCycle; ux-notes-2) and, without one, why: [chart
+          # or nil, text or nil].  Rebuilt only when the render changes.
+          def tone_chart(n, s, state)
+            src = s&.render_source
+            return [nil, "#{n.label}: #{src&.note || 'its cycle needs a voice to copy (a synth track)'}"] unless src&.synth
+            driver = (state[:tone_driver] ||= ToneCycle::Driver.new)
+            driver.tick(src, n.recipe_key, s.knobs, s.inspector&.knobs || [].freeze)
+            r = driver.shown
+            return [nil, "#{n.label}: rendering one cycle..."] unless r
+            return [nil, "#{n.label}: #{r.error}"] if r.error
+            pending = driver.pending?
+            key = [:tone, r.seq, r.key, pending]
+            return [state[:chart], nil] if state[:chart_of] == key && state[:chart]
+            ms = (r.frames - 1) * 1000.0 / r.rate
+            what = r.noise ? "noise  #{Panes.fmt(ms)} ms" : "#{Plot::Panels.hz_text(r.frequency)}  one cycle #{Panes.fmt(ms)} ms#{r.synced ? ' (its sync master\'s)' : ''}"
+            label = "#{n.label} #{what}" \
+                    "#{r.partial ? " (the first #{Panes.fmt(ToneCycle::MAX_SECONDS)} s)" : ''}  #{r.input}#{pending ? ' …' : ''}"
+            live = { cycle: r.cycle, rate: r.rate, frequency: r.frequency, frames: r.frames, synced: r.synced, partial: r.partial, label: label }
+            b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
+            chart = Plot::Panels.preview(n.params.node_class, n.params, b, live: live) ? b.build : nil
+            state[:chart_of] = key
+            state[:chart] = chart
+            [chart, chart ? nil : "#{n.label}: no cycle to draw"]
+          rescue StandardError => e
+            state[:chart_of] = nil
+            warn "preview of #{n.label}: #{e.class}: #{e.message}"
+            [nil, "#{n.label}: #{e.class}"]
+          end
 
           # The node's chart, rebuilt only when its params (or a playhead)
           # change.

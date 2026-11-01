@@ -474,12 +474,15 @@ module MB
           # rate stays at 48 kHz), in steps with a pause (.rest) between them,
           # so the render thread gets the GVL between steps; only the voice
           # block's own call is one stretch.
-          def build(job, rate, pace, scopes = nil)
+          # +plan+ false leaves the copy unplanned (UI::ToneCycle samples one
+          # oscillator inside it, which a fused region's member doesn't
+          # promise; unplanned gives the same samples by the as-if rule).
+          def build(job, rate, pace, scopes = nil, plan: true)
             t0 = now
-            copy = build_at(job, rate, pace, scopes)
+            copy = build_at(job, rate, pace, scopes, plan: plan)
             if copy.error && rate != RATES.last && copy.error.start_with?('MB::Sound::GraphNode::SampleRateHelper', 'RuntimeError')
               copy.close unless scopes
-              copy = build_at(job, RATES.last, pace, scopes)
+              copy = build_at(job, RATES.last, pace, scopes, plan: plan)
             end
             copy.want = rate
             copy.ms = ((now - t0) * 1000).round(1)
@@ -487,7 +490,7 @@ module MB
           end
 
           # One copy of the voice at +rate+ (see .build).
-          def build_at(job, rate, pace, scopes = nil)
+          def build_at(job, rate, pace, scopes = nil, plan: true)
             src = job.source
             synth = src.synth
             scope = nil
@@ -530,7 +533,7 @@ module MB
                 end
                 rest(pace)
                 slack(src.frames, pace)
-                Plan.install(outs)
+                Plan.install(outs) if plan
                 rest(pace)
                 # One block before any note, so every node has made its state
                 # (oscillators make theirs on their first block) before the
@@ -1017,7 +1020,10 @@ module MB
         # and keeps the newest Result.  The thread starts on the first
         # #submit and ends after IDLE seconds without work (or #close).
         class Worker
-          def initialize(&on_done)
+          # +renderer+ renders each job (a module with
+          # .render(job, cache:, pace:): PatchRender, UI::ToneCycle).
+          def initialize(renderer = PatchRender, &on_done)
+            @renderer = renderer
             @mutex = Mutex.new
             @cond = ConditionVariable.new
             @job = nil
@@ -1074,7 +1080,7 @@ module MB
 
           def start
             @thread = Thread.new { run }
-            @thread.name = 'mb-sound patch render'
+            @thread.name = @renderer == PatchRender ? 'mb-sound patch render' : "mb-sound #{@renderer.name.split('::').last} render"
             @thread.priority = -3
             @thread.report_on_exception = false
           end
@@ -1102,7 +1108,7 @@ module MB
                 @job = nil
                 j
               }
-              r = PatchRender.render(job, cache: @cache, pace: true)
+              r = @renderer.render(job, cache: @cache, pace: true)
               @mutex.synchronize {
                 @result = r if @result.nil? || r.seq > @result.seq
                 @running = false
@@ -1115,13 +1121,14 @@ module MB
         # A Worker that renders on the calling thread as #submit is called
         # (PatchRender.inline).
         class InlineWorker
-          def initialize
+          def initialize(renderer = PatchRender)
+            @renderer = renderer
             @result = nil
             @cache = {}
           end
 
           def submit(job)
-            @result = PatchRender.render(job, cache: @cache)
+            @result = @renderer.render(job, cache: @cache)
             self
           end
 
