@@ -151,6 +151,10 @@ require 'shellwords'
 require 'mb-sound'
 
 module JitBench
+  # (Its spec loads this file and the smoke test's fork_script loads it
+  # again in the same process: drop the old constants first.)
+  %i[ROOT SCRIPT PIECES SECTIONS MAX_SONG_SECONDS STARTUP_ROWS].each { |c| remove_const(c) if const_defined?(c, false) }
+
   ROOT = File.expand_path('..', __dir__)
   SCRIPT = File.expand_path(__FILE__)
 
