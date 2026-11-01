@@ -606,6 +606,15 @@ module MB
         clips = clips.call if clips.is_a?(Library::Entry)
 
         name = player_name(name)
+        # (ux-notes-1: the maintainer's `swap :growl, riff` after a one-shot
+        # clip had ended the track; Session#swap said only "No background
+        # player :growl is playing or stopped")
+        session = Session.current
+        if name.is_a?(Symbol) && session.arrangement.tracks[name]&.patch? && !session.playing_after_queue?(name) && !session.resumable?(name)
+          return MB::Sound.live_error(ArgumentError.new(
+            "swap #{name.inspect}: track #{name.inspect} isn't playing (a one-shot clip ended, or it was stopped); bg #{name.inspect}, clip plays a clip on its instrument"
+          ))
+        end
         session_command(name, label: "swap #{name.inspect}", kind: :swap) { |session, time|
           session.swap(name, clips, at: point, start_time: point.given? ? nil : time)
           name

@@ -49,6 +49,10 @@ module MB
         console = e.is_a?(NameError) && (e.receiver.equal?(MB::Sound) rescue false)
         if console && !e.is_a?(NoMethodError) && (hint = session_name_hint(e.name))
           suggestions.unshift(hint)
+        elsif e.is_a?(NoMethodError) && (e.receiver.is_a?(Symbol) rescue false) && MB::Sound.respond_to?(e.name) && !Symbol.method_defined?(e.name)
+          # (ux-notes-1: the maintainer's `swap :growl. seq(...)`, a period
+          # for a comma after a name)
+          suggestions.replace(["#{e.receiver.inspect}, #{e.name}(...) (a comma after #{e.receiver.inspect}, not a period)"])
         elsif console && e.is_a?(NoMethodError) && (hint = GUESSES[e.name])
           # (Ruby's spelling suggestions for these, write and collect, lead
           # nowhere)
