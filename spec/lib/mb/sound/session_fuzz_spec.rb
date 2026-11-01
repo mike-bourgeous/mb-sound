@@ -248,6 +248,14 @@ RSpec.describe('session fuzzing') do
         'at_bar(1) { go :s1, on: :now }',
       ], 1,
     ],
+    # (fix-batch-1102b, FUZZ=24's seed 13: an idle render kept time for a
+    # queued level change, then ended at the start of the buffer holding
+    # it: 91200 frames at 800, 91383 at 367; it ends on the change's frame)
+    'a queued change landing after every sound ended (FUZZ=24 seed 13)' => [
+      :buffer_size, ['bpm 126', 'knob :busy, 0.5'], [
+        'at_bar(1, beat: 4) { level :t2, 0, on: :bar }',
+      ], 2,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil
