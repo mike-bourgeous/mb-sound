@@ -441,6 +441,11 @@ module SessionFuzz
       w = "wire :#{t}, #{s.pick(FREQ_CLIPS)}.stream#{s.pick(['', '.echo(1.n16, 2)', '.arp(:up, 16)', '.transpose(7)'])}#{s.on}"
       s.rng.rand < 0.4 ? "#{w}; after(in: 2.beats) { unwire :#{t} }" : w
     },
+    ->(s) {
+      # (ux-notes-2) a hold: the track's clip, cue player, and wired stream
+      # silent (its monitor plays on), released a beat or two later in time
+      "hold :#{s.t}#{s.on}; after(in: #{s.pick(['1.beat', '2.beats'])}) { unhold :#{s.t} }"
+    },
     # (new commands go here, at the end)
   ].freeze
 

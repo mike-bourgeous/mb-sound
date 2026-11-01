@@ -1,6 +1,7 @@
 require_relative 'keyboard/hold_tracker'
 require_relative 'keyboard/step_entry'
 require_relative 'keyboard/link'
+require_relative 'keyboard/takeover'
 require_relative 'keyboard/pane'
 require_relative 'keyboard/scale_lock'
 

@@ -98,6 +98,9 @@ module MB
           @wire_epoch = nil
           @wire_pedal = false
           @pending_offs = nil
+          # (a held track's wire input drops its stream's events: Session::Holds)
+          @wire_track = Session::Name.wired(name)
+          @wire_held = false
         end
 
         # True for a track's wire input (see the class comment).
@@ -356,6 +359,7 @@ module MB
         # Session's player frame at the piece's start, so taps of other
         # inputs read in pieces give each piece its own events (see Tap).
         def read_span(frame, count, from, per_sample, epoch, rate)
+          check_wire_hold if @wire_input
           offs = @pending_offs ? stamp_offs(frame, from, epoch, rate) : nil
           if @wire_input
             events = @session.send(:reading_from, frame) { read_events_for(frame, count, from, per_sample, epoch, rate) }
@@ -384,6 +388,17 @@ module MB
           end
           out.concat(read_span(frame + at, count - at, Sequence::Transport.position_at(from, at, per_sample), per_sample, epoch, rate)) if count > at
           out
+        end
+
+        # Follows the track's hold (Session::Holds): while held, the wired
+        # stream's events are read and dropped (#input_events); the notes it
+        # holds when the hold is first read end there (note-offs, the pedal
+        # up; a take replay has them in its log).
+        def check_wire_hold
+          held = @session.send(:wire_held?, @wire_track)
+          return if held == @wire_held
+          @wire_held = held
+          owe_offs if held && @wired && !@replay
         end
 
         # Starts the wired stream's timeline nodes at +pos+ (see #wire_to).
@@ -439,8 +454,9 @@ module MB
           list.each do |reader|
             start = reader.cursor
             label = reader.equal?(@reader) ? :input : (@labels[@extras.key(reader)] || :extra)
+            drop = @wire_held && label == :wire
             reader.next(Rational(count, rate)).each { |e|
-              next unless e.is_a?(MIDI::Event)
+              next if drop || !e.is_a?(MIDI::Event)
               off = ((e.time - start) * rate).floor.clamp(0, count - 1)
               st = Stamped.new(frame: frame + off, pos: Sequence::Transport.position_at(from, off, per_sample), epoch: epoch, event: e.at(Rational(frame + off, rate)))
               (@span_sources ||= {}.compare_by_identity)[st] = label unless label == :input

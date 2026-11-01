@@ -706,6 +706,7 @@ module MB
           state = @session.playing_after_queue?(tr.name) ? 'playing' : 'stopped'
           state += ', muted' if @session.muted?(tr.name)
           state += ', soloed' if @session.soloed?(tr.name)
+          state += ', held (unhold brings it back)' if @session.track_held?(tr.name)
           arm = arms[tr.name]
           if arm&.wired?
             state += arm.monitoring? ? ", wired: #{arm.wire.text}" : ", wired (no monitor): #{arm.wire.text}"

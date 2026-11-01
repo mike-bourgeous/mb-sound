@@ -1304,9 +1304,12 @@ module MB
         song; scripts take `--from drop --to breakdown`, and `--take
         take.rb` saves a run as a replay script).  No MIDI keyboard?  The tiles'
         virtual keyboard (`ui.keys`, see `help :ui`) plays into the same
-        input, and Enter there captures.
+        input, and Enter there captures; on the sound-design screen, KEYS
+        arms the inspected track and `hold`s it (its clip, cue, and wired
+        stream go quiet while the keyboard plays it; `unhold` brings the
+        clip back in time) until KEYS ends.
       TEXT
-      commands :take, :arm, :disarm, :armed, :rec, :capture, :captures, :rec_audio, :stop_rec_audio, :recordings, :render, :write
+      commands :take, :arm, :disarm, :armed, :hold, :unhold, :rec, :capture, :captures, :rec_audio, :stop_rec_audio, :recordings, :render, :write
       note :arrangement
       see :midi, :presets
     end
