@@ -181,7 +181,7 @@ Rack documents (`save :dub, rack(:dub)`, format 4) and graph documents carrying 
 
 ### [Console help](help.md)
 
-Console help (`lib/mb/sound/help.rb` + `help/`, loaded by bin/sound.rb or on first use): `help` (the one-screen sheet), `help :knobs` (topics), `help :turn` (method pages from doc comments), `help /reson/` (search), `help node`, `now`, `demo`, and `lesson :set` (runnable lessons); every page is built with `Help::Doc` and shown through `Help.show`.  `help.level` sets the listening level as the live-only monitor trim.  The guard spec `spec/lib/mb/sound/help_spec.rb` requires every public console command to be in a topic (`help/content/topics.rb`), on the sheet, or exempt with a reason, and every example to play near the level tone.
+Console help (`lib/mb/sound/help.rb` + `help/`, loaded by bin/sound.rb or on first use): `help` (the one-screen sheet), `help :knobs` (topics), `help :turn` (method pages from doc comments), `help /reson/` (search), `help node`, `now`, `demo`, and `lesson :set` (runnable lessons: `:generative` puts the library's generators on tracks; a lesson's saves go to its own shelf); every page is built with `Help::Doc` and shown through `Help.show`.  `help.level` sets the listening level as the live-only monitor trim.  The guard spec `spec/lib/mb/sound/help_spec.rb` requires every public console command to be in a topic (`help/content/topics.rb`), on the sheet, or exempt with a reason, and every example to play near the level tone.
 
 ### [The mb-sound tutorial (design for a later phase)](help_tutorial.md)
 
