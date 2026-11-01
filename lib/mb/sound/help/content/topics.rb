@@ -674,6 +674,11 @@ module MB
         bg :try, seq(C4, E4, G4, C5).n16.loop.tone.triangle.at(-24.db).until(4.bars)
         tempo 180, over: 3.bars
       end
+      example 'a new base under the ramp' do
+        bg :try, seq(C4, E4, G4, C5).n16.loop.tone.triangle.at(-24.db).until(4.bars)
+        tempo 180, over: 3.bars
+        bpm 90 # (the song's base: the ramp now starts from 90)
+      end
     end
 
     Help.topic :schedule, 'Scheduling', group: :time do
