@@ -128,6 +128,51 @@ RSpec.describe('Inspector editability (Note 15)', :aggregate_failures) do
     end
   end
 
+  # kit-live-1 (the maintainer's "Yes, live kit knobs", 2026-11-02):
+  # every voice setting of the kits binds as a live knob, one the playing
+  # kit follows (sweeps, follows, MIDI), never a build knob a turn
+  # rebuilds the kit for: the kit is given the knob and reads it as a node.
+  # Every setting's bind is test-built (Arrangement#bind_probe), so a voice
+  # that reads a setting once while building (a number in Ruby
+  # arithmetic, an Integer count) fails here, naming the voice and setting.
+  EDIT_KITS = {
+    tr909: ->(c) { MB::Sound.tr909(c) },
+    tr808: ->(c) { MB::Sound.tr808(c) },
+    dnb_drums: :dnb_drums, funk_beat: :funk_beat, funk_perc: :funk_perc, jungle_perc: :jungle_perc,
+    machine: ->(c) { MB::Sound.kit(c) { voice(:kick, tune: 48, decay: 0.4) { |h| h.body(h.tune, decay: h.decay) + h.click(0.3) }; tr909 :snare, :clap; tr808 :cowbell, :closed_hat } },
+  }.freeze
+
+  EDIT_KITS.each do |kname, patch|
+    it "binds every voice setting of the #{kname} kit as a live knob" do
+      session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+      MB::Sound::Session.with_context(session: session) do
+        patch.is_a?(Symbol) ? MB::Sound.track(:t, patch) : MB::Sound.track(:t, &patch)
+        MB::Sound.bg(:t, EDIT_BEAT)
+      end
+      2.times { session.process_buffer }
+      roots = inspect.roots(session.ui_graphs[:t])
+      kit = lb.nodes(roots).find { |n| n.is_a?(MB::Sound::Drums::Kit) }
+      expect(kit).not_to be_nil
+      checked = 0
+      refused = []
+      kit.voices.each do |vname, voice|
+        voice.param_info.each_key do |setting|
+          next unless lb.literal?(voice.knobs[setting])
+          t = lb.target(roots, kit, :"#{vname}_#{setting}")
+          knob = lb.knob_name(:t, t, roots).first
+          got = session.arrangement.bind_probe(:t, session.arrangement.tracks[:t], t, knob, lb.knob_default(t.param, t.value, lb.kit_range(t)))
+          checked += 1
+          refused << [vname, setting, got.is_a?(Exception) ? got.message : 'a build knob'] if got.is_a?(Exception) || got.build?
+        end
+      end
+      expect(checked).to be > 10
+      expect(refused).to eq([]), "#{kname}: voice settings that aren't live knobs:\n#{refused.map(&:inspect).join("\n")}"
+    ensure
+      session&.close
+      MB::Sound.rewind
+    end
+  end
+
   EDIT_ENTRIES.each do |name|
     it "edits every param of #{name} or lists the gap" do
       source = begin

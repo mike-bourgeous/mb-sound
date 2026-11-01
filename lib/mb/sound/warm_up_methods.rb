@@ -97,7 +97,7 @@ module MB
       #     warm_up(tracks: true)
       def warm_up(calls: 200, buffer: 128, midi: false, tracks: false)
         return Session.current.arrangement.warm_up if tracks
-        return nil unless defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
+        return nil unless JIT.compiling?
 
         t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 

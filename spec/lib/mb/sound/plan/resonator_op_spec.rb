@@ -72,6 +72,21 @@ RSpec.describe(MB::Sound::Plan::Op::Resonator) do
     plan_compare(check: :raise) { (hits * 1).resonate(:glass, 660) * 1 + (hits * 1).ping(110, decay: 0.2) * 1 }
   end
 
+  # kit-live-1: kit voice settings bound as live knobs are read as nodes
+  # (the knob a plan param), so the voices' arithmetic on them fuses, the
+  # same as unfused while the knobs move
+  it 'fuses kit voices whose settings are moving knobs, matching the unfused graph' do
+    knob = ->(name, v, to, lo, hi) {
+      MB::Sound::GraphNode::Knob.new(name, v, range: lo..hi).tap { |k| k.ramp_to(to, frames: 700, frame: 30) }
+    }
+    plan_compare(check: :raise) {
+      g = MB::Sound.grid(64, bd: 'x.x.x.x.', snare: '.x...x..', ch: 'xxxxxxxx')
+      MB::Sound.tr808(g, kick: { decay: knob.(:kd, 2.4, 0.3, 0.1, 4.0), tone: knob.(:kt, 0.5, 0.9, 0.0, 1.0), sigh: knob.(:ks, 0.45, 0.1, 0.0, 1.0) },
+                         snare: { tune: knob.(:sn, 180.0, 240.0, 50.0, 500.0) }, closed_hat: { tone: knob.(:ht, 0.5, 0.1, 0.0, 1.0) }) * 1 +
+        MB::Sound.tr909(g, kick: { punch: knob.(:kp, 0.9, 0.2, 0.0, 1.0), drive: knob.(:kv, 0.8, 0.1, 0.0, 1.0) }, snare: { snappy: knob.(:ss, 0.6, 0.1, 0.0, 1.0) }) * 1
+    }
+  end
+
   it 'fuses a TR-808 kick voice graph into one region' do
     kit = MB::Sound.tr808(MB::Sound.grid(16, 'x...x...').loop)
     voice = kit.voices[:kick]

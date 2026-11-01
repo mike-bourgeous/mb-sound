@@ -404,6 +404,9 @@ RSpec.describe(MB::Sound::Arrangement) do
   end
 
   describe '#warm_up' do
+    # (specs run without YJIT; the rehearsal and exercises run only with it)
+    before { allow(MB::Sound::JIT).to receive(:compiling?).and_return(true) }
+
     it "builds and plays each patch per scene clip in a sandbox, and keeps the root generator's draws" do
       built = []
       set.track(:c) { |c| built << c; MB::Sound.synth(c, voices: 1) { |v| v.hz.saw.rnd * v.amp_env } }
@@ -476,9 +479,30 @@ RSpec.describe(MB::Sound::Arrangement) do
       expect(render.(true)).to eq(plain)
     end
 
-    it 'runs when a form starts only in an idle realtime session with YJIT' do
+    it 'runs when a form starts only in an idle realtime session' do
       expect(set).not_to receive(:warm_up)
       within { set.play_form(MB::Sound::Form.build { one 1 }) }
+    end
+
+    # kit-live-1 (the maintainer's "Yes, always warm", 2026-11-02): the
+    # builds fill caches (wavetables, the TR-909 ROM) a scene would make
+    # as it lands, so they run without YJIT too; the rehearsal and the
+    # exercises only compile code, so they don't
+    it 'runs without YJIT too, building the tracks without rehearsing' do
+      allow(MB::Sound::JIT).to receive(:compiling?).and_return(false)
+      allow(session).to receive(:realtime?).and_return(true)
+      built = []
+      set.track(:c) { |c| built << c; MB::Sound.synth(c, voices: 2) { |v| v.hz.saw.rnd * v.amp_env(0.01, 0.1, 0.5, 0.1) } }
+      set.scene(:three, c: a1)
+      built.clear
+      expect(set).to receive(:warm_up).and_call_original
+      expect(set).not_to receive(:rehearse)
+      expect(set).not_to receive(:warm_exercise)
+      expect { within { set.play_form(MB::Sound::Form.build { one 1; three 1 }) } }.to output(
+        /Warmed up 3 tracks in \d+\.\d s \(skip with warm_up: false\)/
+      ).to_stdout
+      expect(built).to eq([a1, a1]) # (twice, to look for shared nodes)
+      expect(set.rehearsal).to be_nil
     end
 
     it 'runs when a form starts with warm_up: true, rehearsing the form, printing one line' do
@@ -543,6 +567,8 @@ RSpec.describe(MB::Sound::Arrangement) do
   end
 
   describe '#rehearse' do
+    before { allow(MB::Sound::JIT).to receive(:compiling?).and_return(true) }
+
     it "plays the form's transitions in a sandbox, leaving the session, seeds, and knobs as they were" do
       cut = within { session.knob(:cut, 500, range: 100..5000, curve: :exp) }
       lfo = 2.hz.lfo

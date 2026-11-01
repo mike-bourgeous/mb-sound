@@ -174,9 +174,16 @@ module MB
       # its chance (weighted gotos and picks; MB::Sound.next_seed by default, so takes
       # replay the same choices).  +warm_up+ builds every track's patch once
       # first (see #warm_up): :auto (the default) for a realtime session
-      # with YJIT that isn't playing yet, true, or false (`flow(warm_up:
-      # false) { }` in the console); when it runs it prints one line
-      # ("Warmed up 12 tracks in 2.0 s").  Returns the Form::Playback.
+      # that isn't playing yet, true, or false (`flow(warm_up: false) { }`
+      # in the console); when it runs it prints one line ("Warmed up 12
+      # tracks in 2.0 s").  With YJIT it also rehearses the form (see
+      # #rehearse); without, it only builds: the builds fill caches
+      # (wavetables, the TR-909 ROM) that a scene would otherwise make when
+      # it lands (techno's breakdown scene, YJIT off: 584-614 ms -> 93-102
+      # ms; the rehearsal compiles code and nothing more, 2.2 s for no gain
+      # without YJIT; kit-live-1, the maintainer's "Yes, always warm",
+      # 2026-11-02; before, :auto ran with YJIT only).  Returns the
+      # Form::Playback.
       def play_form(form, at: nil, on: nil, in: nil, seed: nil, warm_up: :auto)
         point = LaunchPoint.of(binding) or return nil
         raise ArgumentError, "Expected a Form (got #{form.class})" unless form.is_a?(Form)
@@ -184,7 +191,7 @@ module MB
 
         # Compile the tracks' builds before the first scene change needs them
         raise ArgumentError, "warm_up: must be :auto, true, or false (got #{warm_up.inspect})" unless [:auto, true, false].include?(warm_up)
-        if warm_up == true || (warm_up == :auto && @session.realtime? && @session.idle? && defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?)
+        if warm_up == true || (warm_up == :auto && @session.realtime? && @session.idle?)
           t0 = MB::U.clock_now
           result = self.warm_up(form: form)
           sections = @rehearsal if result
@@ -789,11 +796,13 @@ module MB
       # builds.  With a +form:+ (a Form), the tracks are built (twice, to
       # find the self-contained ones) but not played on their own: #rehearse
       # then plays the form's transitions with them (#rehearsal is the
-      # number of sections it played).  Returns a Hash of track name =>
-      # [milliseconds, :played or :built].  Called by #play_form for a
-      # realtime session with YJIT (see #play_form's +warm_up:+); console:
-      # `warm_up(tracks: true)`.
-      def warm_up(*tracks, again: false, play: true, form: nil)
+      # number of sections it played), and each self-contained track plays
+      # its exercise (#warm_exercise), when +rehearse+ (by default while
+      # YJIT runs, MB::Sound::JIT.compiling?: both only compile code).
+      # Returns a Hash of track name => [milliseconds, :played or :built].
+      # Called by #play_form for an idle realtime session (see #play_form's
+      # +warm_up:+); console: `warm_up(tracks: true)`.
+      def warm_up(*tracks, again: false, play: true, form: nil, rehearse: JIT.compiling?)
         unless @session.idle?
           return MB::Sound.live_error(RuntimeError.new('warm_up builds the tracks before anything plays (a scene built meanwhile could draw other random seeds)'))
         end
@@ -824,13 +833,13 @@ module MB
             @mutex.synchronize { @rehearsable[tr.name] = how.all?(:played) ? tr.patch : false } if play
             # The rehearsal's short sections never reach a voice's second
             # note: an exercise does (see #warm_exercise)
-            if play && form && how.all?(:played) && warm_exercise(tr, clips[0]) == false
+            if play && form && rehearse && how.all?(:played) && warm_exercise(tr, clips[0]) == false
               @exercise_skipped << tr.name
             end
             result[tr.name] = [((MB::U.clock_now - t0) * 1000).round(1), how.include?(:built) ? :built : :played]
           end
         end
-        @rehearsal = play && form ? rehearse(form) : nil
+        @rehearsal = play && form && rehearse ? self.rehearse(form) : nil
         # The warm-up's garbage collected now, before anything plays, which
         # also puts off the next major collection (they stop every thread,
         # the render thread too)

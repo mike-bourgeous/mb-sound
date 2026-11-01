@@ -73,6 +73,9 @@ RSpec.describe(MB::Sound::RenderProgress) do
     MB::Sound.render(path, 220.hz.saw.at(-20.db), seconds: 0.05)
     expect { MB::Sound.render(path, 220.hz.saw.at(-20.db), seconds: 0.05) }
       .to raise_error(MB::Util::FileMethods::FileExistsError, "#{path} exists; overwrite: true replaces it (scripts: -f)")
+    # (the refused render keeps the file it refused to replace; kit-live-1:
+    # it was deleted as an empty file of a failed render)
+    expect(File.size?(path)).to be > 1000
     old = MB::Sound.live?
     MB::Sound.live = true
     expect { MB::Sound.render(path, 220.hz.saw.at(-20.db), seconds: 0.05, overwrite: true) }.to output("rendered 0.05 s to #{path}\n").to_stdout

@@ -512,7 +512,7 @@ if MB::Sound.main_script?(__FILE__)
     bars: [nil, Integer, 'Bars to play (default: the whole song offline, 32 realtime)', 1..],
     realtime: [false, '-R', 'Play in a realtime Session on an emulated sound card (takes real time) instead of rendering'],
     latency: [50.0, Float, '-l', 'The emulated card\'s queue in ms (realtime)', 1.0..1000.0],
-    warm_up: ['on', String, '-w', 'The form\'s track warm-up (Arrangement#warm_up): on, off, or auto (what play_form does: realtime with YJIT only)', ['on', 'off', 'auto']],
+    warm_up: ['on', String, '-w', 'The form\'s track warm-up (Arrangement#warm_up): on, off, or auto (what play_form does: idle realtime sessions; it rehearses with YJIT only)', ['on', 'off', 'auto']],
     top: [8, Integer, '-t', 'How many blocks and buffers to list', 1..100],
     band: [false, 'With -R, also paint the terminal UI\'s deck (to /dev/null, as with a song\'s --ui) while it plays'],
   ) { |args, p|

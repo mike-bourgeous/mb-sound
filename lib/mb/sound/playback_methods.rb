@@ -1309,8 +1309,11 @@ module MB
         hold&.flush
         session&.close
         # An error before the first frame (a --from the song lacks, a patch
-        # that raises) leaves no empty file behind (ux-fix-2)
-        if failed && filename.is_a?(String) && (frames.nil? || frames == 0)
+        # that raises) leaves no empty file behind (ux-fix-2), but a file
+        # the render didn't open (FileExists without overwrite: +output+
+        # is nil) stays (kit-live-1: a refused render deleted the existing
+        # file it refused to replace)
+        if failed && output && filename.is_a?(String) && (frames.nil? || frames == 0)
           output.close if session.nil? && output.respond_to?(:close)
           File.delete(filename) if File.file?(filename)
         end

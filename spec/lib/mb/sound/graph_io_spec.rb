@@ -139,6 +139,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
     # comment and load, but render differently
     values_only = {
       'knob moves (Knob, Knob::Reader: a ramp, a jump, a followed node)' => '# :sweep was about to move (changes queued) when saved',
+      'drums with knob settings (live kit knobs)' => '# :kd was about to move (changes queued) when saved',
     }.freeze
 
     GraphSweep.factories.each do |name, factory|

@@ -323,10 +323,12 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
 
   # Note 15 (editability-1): kits take their voices' settings as params.
   # Each voice's settings (tune, decay, tone, ...) bind as the track's
-  # knobs (:"drums/kick_decay"), given to the kit as numbers while it
-  # builds (build knobs): the same samples at their values, written or
-  # not, under the name the code used for the voice.
-  it 'binds drum kit voice settings as build knobs: the same samples, a turn rebuilds' do
+  # knobs (:"drums/kick_decay"), written or not, under the name the code
+  # used for the voice.  Since kit-live-1 (the maintainer's "Yes, live kit
+  # knobs", 2026-11-02) they are live knobs: the kit is given the knob and
+  # reads it as a node, so a turn sweeps it without a rebuild, and at the
+  # setting's value the kit plays the same samples (bit for bit here).
+  it 'binds drum kit voice settings as live knobs: the same samples, a turn sweeps them' do
     beat = MB::Sound.grid(16, kick: 'x...x...x...x...', snare: '....x.......x...', hat: 'x.x.x.x.x.x.x.x.').loop
     [
       [->(c) { MB::Sound.tr909(c) }, { tr909: :kick_decay }, :"drums/kick_decay", 0.55],
@@ -334,12 +336,14 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
       [->(c) { MB::Sound.tr909(c) }, { tr909: :closed_hat_tune }, :"drums/closed_hat_tune", -3],
       [->(c) { MB::Sound.tr808(c, snare: { snappy: 0.5 }) }, { tr808: :snare_snappy }, :"drums/snare_snappy", 0.5],
       [->(c) { MB::Sound.tr808(c) }, { tr808: :kick_tone }, :"drums/kick_tone", nil],
+      [->(c) { MB::Sound.kit(c) { voice(:kick, tune: 48) { |h| h.body(h.tune, decay: 0.4) }; tr909 :snare, :closed_hat } }, { kit: :kick_tune }, :"drums/kick_tune", 48],
     ].each do |patch, what, kname, value|
       _, ref, = play(REBUILD, track: :drums, patch: patch, clip: beat, buffers: 150)
       s, bound, entry = play(->(_) { MB::Sound.bind(:drums, what) }, track: :drums, patch: patch, clip: beat, buffers: 150)
       expect(entry.to_s).to eq('bg :drums lands 2:1 (queued)'), what.inspect
       expect(s.knobs[kname]&.value).to be_within(1e-9).of(value), what.inspect if value
-      expect(s.arrangement.build_knob?(kname)).to eq(true), what.inspect
+      expect(s.arrangement.build_knob?(kname)).to eq(false), what.inspect
+      expect(code_of(s, :drums)).to include("{ #{what.values.first.to_s.split('_').last}: knob(:\"#{kname}\") }"), what.inspect
       expect(Digest::MD5.hexdigest(bound.to_binary)).to eq(Digest::MD5.hexdigest(ref.to_binary)), "#{what}: #{(bound - ref).abs.max}"
       expect(bound.abs.max).to be > 0.01
       s.close
@@ -358,20 +362,33 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     expect(row.binds[:decay].line).to eq('bind :drums, tr909: :kick_decay')
     expect(row.binds[:decay].knob).to eq(:"drums/kick_decay")
 
-    # A turn rebuilds the kit with the new decay
+    # A turn over two bars sweeps the decay in the playing graph (no
+    # rebuild): each kick rings longer than the last
     MB::Sound::Session.with_context(session: s) { MB::Sound.bind(:drums, { tr909: :kick_decay }, on: :now) }
     4.times { s.process_buffer }
-    MB::Sound::Session.with_context(session: s) { MB::Sound.turn(:"drums/kick_decay", 1.2, on: :now) }
-    4.times { s.process_buffer }
-    kick = MB::Sound::UI::Inspect.roots(s.ui_graphs[:drums]).first.voices[:kick]
-    # (the inspector then shows the setting as its knob, a build knob)
+    graph = s.ui_graphs[:drums]
+    kick = MB::Sound::UI::Inspect.roots(graph).first.voices[:kick]
+    expect(kick.knobs[:decay]).to equal(s.knobs[:"drums/kick_decay"])
+    start = s.output.captured[0].length
+    MB::Sound::Session.with_context(session: s) { MB::Sound.turn(:"drums/kick_decay", 1.5, over: 2.bars, on: :now) }
+    240.times { s.process_buffer } # (2 bars at 120 BPM: 192000 frames)
+    expect(s.ui_graphs[:drums]).to equal(graph)
+    expect(s.journal.changes.count { |c| c.kind == :start }).to be <= 2 # (the bind's rebuild only)
+    out = Numo::DFloat.cast(s.output.captured[0])[start..]
+    # The level just before each kick (the last one's ring) grows as the
+    # decay sweeps up
+    tails = (1..7).map { |k| out[(k * 24000 - 900)...(k * 24000 - 100)].abs.max }
+    expect(tails.each_cons(2).all? { |a, b| b > a }).to eq(true), tails.inspect
+    expect(tails.last).to be > tails.first * 2
+    expect(s.knobs[:"drums/kick_decay"].value).to be_within(1e-9).of(1.5)
+
+    # The inspector shows the setting as its knob, a live one
     info = g.call(s, { track: :drums, voice: :kick })
     i = info.nodes.index { |n| n.what == 'voice' && n.voice == :kick }
     row = g.call(s, { track: :drums, voice: :kick, node: i }).nodes[i]
     expect(row.knob_of(:decay)).to eq(:"drums/kick_decay")
-    expect(info.build_knobs).to include(:"drums/kick_decay")
-    expect(kick.knobs[:decay]).to eq(1.2)
-    expect(code_of(s, :drums)).to include('kick: { decay: 1.2 }')
+    expect(info.build_knobs).not_to include(:"drums/kick_decay")
+    expect(code_of(s, :drums)).to include('kick: { decay: knob(:"drums/kick_decay") }')
   end
 
   it 'replays from a take bit for bit' do

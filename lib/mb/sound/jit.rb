@@ -59,6 +59,15 @@ module MB
       def self.threshold
         @threshold
       end
+
+      # True while YJIT runs (however it was started): warm-ups whose only
+      # gain is compiled code (MB::Sound.warm_up, UI.warm_up, a form's
+      # rehearsal and exercises, Session::Warming) run only then, while
+      # those that also build caches (a form's track builds: wavetables, the
+      # TR-909 ROM) run either way (kit-live-1).
+      def self.compiling?
+        defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled? ? true : false
+      end
     end
   end
 end

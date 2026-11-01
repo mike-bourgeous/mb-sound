@@ -44,7 +44,7 @@ module MB
       # first frames otherwise hold the GVL for tens of milliseconds while
       # compiling).  Once per process; nil without YJIT.  Returns seconds.
       def self.warm_up(frames: 130)
-        return nil if @warmed || !(defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?)
+        return nil if @warmed || !JIT.compiling?
         @warmed = true
         t0 = MB::U.clock_now
 
