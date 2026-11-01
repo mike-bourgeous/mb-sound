@@ -38,7 +38,7 @@ module MB
 
           mode_keys do
             group 'Inspector'
-            on [:up, 'k'], :pick, -1, help: 'previous param or knob', label: 'Up Down'
+            on [:up, 'k'], :pick, -1, help: 'previous param or knob (past the first: the row above)', label: 'Up Down'
             on [:down, 'j'], :pick, 1, help: 'next param or knob', label: 'Up Down'
             on [:right, 'l'], :turn, KnobTurns::STEP, help: 'turn the knob up (held: a live sweep, one turn line)', label: 'Left Right'
             on [:left, 'h'], :turn, -KnobTurns::STEP, help: 'turn the knob down (held: a live sweep, one turn line)', label: 'Left Right'
@@ -162,6 +162,12 @@ module MB
             end
             knobs = s.knobs.to_h { |k| [k.name, k] }
             list = pick_list(state, info)
+            # (Up past a row's top: the row above, from its last param, once
+            # its params are here; see #key_pick)
+            if (want = state[:pick_end]) && info.node == want
+              state[:pick] = list.length - 1
+              state[:pick_end] = nil
+            end
             # (nothing picked yet: the panel starts on the picked row's first cell)
             state[:pick] ||= list.index { |e| e[0] == :param && e[3] == info.node } if view(state, info) == :panel
             pick = list.empty? ? nil : (state[:pick] = state[:pick].to_i.clamp(0, list.length - 1))
@@ -617,8 +623,22 @@ module MB
               e = list[state[:pick]]
               Inspect.target = { track: info.track, node: e[3], voice: info.voice, param: e[1] }.freeze if e && e[0] == :param
             elsif info
-              # (the picked param, which the preview marks: an envelope's point)
               list = pick_list(state, info)
+              # (sections: past the top of a row's params, the row above's
+              # last one; past the bottom, the next row's first: the
+              # maintainer, 2026-10-31: "Pressing up when at the top of an
+              # inspector list should move to the bottom of the list above,
+              # e.g. glide time up to osc2"; ux-notes-1)
+              if view(state, info) == :sections && info.shown.length > 1 && !list.empty?
+                if state[:pick] < 0
+                  msg = key_node(state, -1)
+                  state[:pick_end] = Inspect.target&.[](:node)
+                  return [*out, msg]
+                elsif state[:pick] > list.length - 1
+                  return [*out, key_node(state, 1)]
+                end
+              end
+              # (the picked param, which the preview marks: an envelope's point)
               e = list[state[:pick].to_i.clamp(0, [list.length - 1, 0].max)]
               param = e && e[0] == :param ? e[1] : nil
               if (Inspect.target || {})[:param] != param
@@ -750,6 +770,7 @@ module MB
 
           # Picks row +i+ (the inspector, preview, and code follow).
           def pick_row(state, info, i)
+            state[:pick_end] = nil
             n = info.nodes[i]
             state[:pick] =
               case view(state, info)
