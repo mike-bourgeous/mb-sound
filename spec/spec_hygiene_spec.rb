@@ -22,6 +22,23 @@ RSpec.describe('spec hygiene') do
     end
   end
 
+  # A constant assigned in a spec file's describe block is a top-level
+  # constant: two files using one name warn "already initialized
+  # constant" whenever both load (wire-1's SIZES, editability-1's ENTRIES,
+  # 2026-11-02).  Give spec constants names unique to their file.
+  it 'has no constant name assigned in two spec files' do
+    defs = Hash.new { |h, k| h[k] = [] }
+    Dir.chdir(root) { Dir['spec/**/*_spec.rb'] }.each do |f|
+      top = nil # the top-level construct the line is in (a module's constants are its own)
+      File.foreach(File.join(root, f)) do |line|
+        top = Regexp.last_match(1) if line.match(/\A(module|class|RSpec\.describe|describe)\b/)
+        (m = line.match(/\A {2}([A-Z][A-Z0-9_]*)\s*=[^=~]/)) && top != 'module' && top != 'class' && defs[m[1]] << f
+      end
+    end
+    dupes = defs.select { |_, fs| fs.uniq.length > 1 }.map { |c, fs| "#{c}: #{fs.uniq.join(', ')}" }
+    expect(dupes).to eq([]), dupes.join("\n")
+  end
+
   # omnibus12: set state left in the default Session reached later
   # examples (support/session_guard.rb; spec_helper closes such a Session
   # before every example)
