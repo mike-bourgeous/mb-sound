@@ -467,7 +467,14 @@ module GraphSweep
         c.s.tr909(g, kick: { decay: knob.(:kd, 0.55, 0.05, 2.0, 1.5), punch: knob.(:kp, 0.9, 0.0, 1.0, 0.2) }, snare: { tone: knob.(:st, 0.5, 0.0, 1.0, 1.0) },
                      closed_hat: { tune: knob.(:ht, -3, -24, 24, 5) }, clap: { level: knob.(:cl, 0.75, 0.0, 2.0, 0.2) }) +
           c.s.tr808(g, closed_hat: { tune: knob.(:mt, 205.3, 100.0, 800.0, 400.0), tone: knob.(:mo, 0.5, 0.0, 1.0, 0.9) }, kick: { sigh: knob.(:ks, 0.45, 0.0, 1.0, 0.9) }) +
-          c.s.kit(c.s.grid(32, kick: 'x.x.')) { voice(:kick, tune: knob.(:kt, 50.0, 30.0, 200.0, 120.0)) { |h| h.body(h.tune, decay: 0.2) } }
+          c.s.kit(c.s.grid(32, kick: 'x.x.'), kick: { tune: knob.(:kt, 50.0, 30.0, 200.0, 120.0) }) { voice(:kick, tune: 50) { |h| h.body(h.tune, decay: 0.2) } }
+      }],
+      # (held, they save in documents and load as knob lines: a bound kit's
+      # set document)
+      ['drums with held knob settings (a bound kit)', ->(c) {
+        kn = ->(name, v, lo, hi) { MB::Sound::GraphNode::Knob.new(name, v, range: lo..hi) }
+        g = c.s.grid(32, bd: 'x.x.', hat: 'xx..', cp: '.x..')
+        c.s.tr909(g, kick: { decay: kn.(:hkd, 0.4, 0.05, 2.0) }, closed_hat: { tune: kn.(:hht, 2, -24, 24) }) + c.s.tr808(g, closed_hat: { tone: kn.(:hmo, 0.7, 0.0, 1.0) })
       }],
       # (omnibus17, Kez's K5 and Odile's F12: stereo Samples as voices play
       # mixed down; they raised in Drums::Voice#initialize)

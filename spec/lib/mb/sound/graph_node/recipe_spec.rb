@@ -473,6 +473,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       # structure, and why
       state_only = {
         'knob moves (Knob, Knob::Reader: a ramp, a jump, a followed node)' => 'knob moves are performance (turns, in a take), not the graph',
+        'drums with knob settings (live kit knobs)' => 'knob moves are performance (turns, in a take), not the graph',
       }.freeze
 
       GraphSweep.factories.each do |name, factory|
