@@ -88,6 +88,9 @@ module MB
           end
           last = players.keys.last
           s << "#{code("stop #{last.inspect}")} / #{code("mute #{last.inspect}, on: :bar")}" if last
+          if (w = @s.arrangement.wires.keys.first)
+            s << "#{code("unwire #{w.inspect}")}  #{c(:dim, "stops the stream wired into #{w.inspect} (its clip plays on)")}"
+          end
           if (k = knobs.keys.first)
             s << "#{code("turn #{k.inspect}, #{fmt(knobs[k].spec.range.end)}, over: 2.bars")}  #{code('snap :here')}"
           end

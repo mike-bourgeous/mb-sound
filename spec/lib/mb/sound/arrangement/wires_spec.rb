@@ -92,6 +92,7 @@ RSpec.describe(MB::Sound::Arrangement::Wires) do
         expect(s.arrangement.track_info[:lead]).to eq('q:1 riff (playing, wired: hop.stream)')
         expect(s.players.keys).to include(:lead, :"lead/live")
         expect(s.players[:"lead/live"]).to include('wired: hop.stream')
+        expect(MB::U.remove_ansi(b.eval('now').to_s)).to include('unwire :lead  stops the stream wired into :lead (its clip plays on)')
         expect { b.eval('stop :lead') }.to output(/stop :lead: its wire \(hop\.stream\) still plays through :"lead\/live" \(unwire :lead\)/).to_stderr
       end
     end
