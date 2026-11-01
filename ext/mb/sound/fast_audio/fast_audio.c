@@ -594,7 +594,228 @@ struct playback {
 	size_t in_cap; // frames
 	float *out_buf;
 	size_t out_cap; // frames
+
+	// Dropout trace (#trace_start; NULL until then; freed with the
+	// playback): records of writes and underrun gaps for
+	// MB::Sound::DropoutProbe, read by Ruby on another thread
+	struct pb_trace *_Atomic trace;
 };
+
+/* Dropout trace ----------------------------------------------------------- */
+
+// Instrumentation for MB::Sound::DropoutProbe (dropout-probe-1): while on,
+// the writer (#write) and the device thread (playback_pull) each push fixed
+// records into their own single-producer single-consumer ring, which
+// #trace_drain empties from a Ruby thread.  Clock reads and stores only (no
+// Ruby, no allocation, no locks on either thread); a full ring drops the
+// record and counts it.  Times are CLOCK_MONOTONIC nanoseconds (Ruby's
+// Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)); CPU times
+// are the writing thread's CLOCK_THREAD_CPUTIME_ID.
+
+// One #write: when it started and returned, its waits for room, the
+// writing thread's CPU time at both ends, and the queue.
+struct pb_trace_write {
+	int64_t enter_ns; // #write called
+	int64_t exit_ns; // #write returning
+	int64_t wait_ns; // time spent waiting for room (without the GVL, plus getting it back)
+	int64_t room_ns; // the last wait found room (0: no wait)
+	int64_t back_ns; // the GVL back after that wait (0: no wait)
+	int64_t pull_ns; // the device pull before room_ns (the one that made room)
+	int64_t cpu_enter_ns; // the writing thread's CPU time at enter_ns
+	int64_t cpu_exit_ns;
+	int64_t queued; // device frames queued at enter_ns
+	int64_t queue_limit;
+	int64_t frames; // device frames written
+};
+#define PB_TRACE_WRITE_FIELDS 11
+
+// One counted underrun (stats[:underruns] + 1): the pull that ran short and
+// the dry pulls after it, until a pull with enough audio or the next
+// counted underrun.
+struct pb_trace_gap {
+	int64_t start_ns; // the pull that ran short
+	int64_t end_ns; // the gap's last short pull
+	int64_t since_ns; // from the pull before it to start_ns (device thread lateness)
+	int64_t frames; // frames that pull asked for
+	int64_t available; // frames queued then
+	int64_t short_frames; // frames the ring didn't have, over the gap's pulls
+	int64_t pulls; // short pulls in the gap
+	int64_t queue_limit; // the writer's queue limit then
+	int64_t write_pos; // frames written by then
+	int64_t underrun; // stats[:underruns] after this one
+	int64_t late_ns; // the longest time between two pulls in the PB_TRACE_RECENT_NS before
+	int64_t late_at_ns; // when that pull came
+};
+#define PB_TRACE_GAP_FIELDS 12
+
+// How far back a gap looks for a late pull (the device thread stalled, then
+// caught up at once, draining the queue in a burst).
+#define PB_TRACE_RECENT_NS 250000000LL
+
+struct pb_trace {
+	_Atomic int on;
+
+	struct pb_trace_write *writes;
+	size_t write_cap; // a power of two
+	_Atomic size_t write_head; // writer
+	_Atomic size_t write_tail; // reader
+	_Atomic size_t write_lost;
+	struct pb_trace_write wcur; // writer only: the write in progress
+
+	struct pb_trace_gap *gaps;
+	size_t gap_cap;
+	_Atomic size_t gap_head; // device thread
+	_Atomic size_t gap_tail; // reader
+	_Atomic size_t gap_lost;
+	struct pb_trace_gap gcur; // device thread only: the gap in progress
+	int gap_open;
+
+	// Device thread pulls: the latest one's time (also read by the writer),
+	// how many, the longest time between two, and how many came more than
+	// twice the period after the one before
+	_Atomic int64_t last_pull_ns;
+	_Atomic size_t pulls;
+	_Atomic int64_t max_since_ns;
+	_Atomic size_t late_pulls;
+	int64_t period_ns;
+	int64_t recent_since_ns; // device thread only: the longest time between pulls lately
+	int64_t recent_at_ns; // and when
+};
+
+static inline int64_t pb_trace_now(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static inline int64_t pb_trace_cpu(void)
+{
+	struct timespec ts;
+	if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != 0) {
+		return -1;
+	}
+	return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+// The trace while it's on, else NULL (one acquire load when off).
+static inline struct pb_trace *pb_trace_on(struct playback *p)
+{
+	struct pb_trace *t = atomic_load_explicit(&p->trace, memory_order_acquire);
+	return t != NULL && atomic_load_explicit(&t->on, memory_order_relaxed) ? t : NULL;
+}
+
+// Device thread: a gap ended (or the next counted underrun began).
+static void pb_trace_push_gap(struct pb_trace *t)
+{
+	size_t head = atomic_load_explicit(&t->gap_head, memory_order_relaxed);
+	size_t tail = atomic_load_explicit(&t->gap_tail, memory_order_acquire);
+	if (head - tail >= t->gap_cap) {
+		atomic_fetch_add_explicit(&t->gap_lost, 1, memory_order_relaxed);
+	} else {
+		t->gaps[head & (t->gap_cap - 1)] = t->gcur;
+		atomic_store_explicit(&t->gap_head, head + 1, memory_order_release);
+	}
+	t->gap_open = 0;
+}
+
+// Device thread, every pull while tracing: +available+ of +frames+ were
+// queued; +counted+ if this pull counted an underrun; +wp+ the write
+// position it read.
+static void pb_trace_pull(struct pb_trace *t, struct playback *p, size_t frames, size_t available, int counted, size_t wp)
+{
+	int64_t now = pb_trace_now();
+	int64_t last = atomic_load_explicit(&t->last_pull_ns, memory_order_relaxed);
+	int64_t since = last ? now - last : 0;
+	atomic_store_explicit(&t->last_pull_ns, now, memory_order_release);
+	atomic_fetch_add_explicit(&t->pulls, 1, memory_order_relaxed);
+	if (since > atomic_load_explicit(&t->max_since_ns, memory_order_relaxed)) {
+		atomic_store_explicit(&t->max_since_ns, since, memory_order_relaxed);
+	}
+	if (t->period_ns > 0 && since > 2 * t->period_ns) {
+		atomic_fetch_add_explicit(&t->late_pulls, 1, memory_order_relaxed);
+	}
+	if (since >= t->recent_since_ns || now - t->recent_at_ns > PB_TRACE_RECENT_NS) {
+		t->recent_since_ns = since;
+		t->recent_at_ns = now;
+	}
+
+	if (available < frames) {
+		if (counted) {
+			if (t->gap_open) {
+				pb_trace_push_gap(t);
+			}
+			t->gcur = (struct pb_trace_gap){
+				.start_ns = now,
+				.end_ns = now,
+				.since_ns = since,
+				.frames = (int64_t)frames,
+				.available = (int64_t)available,
+				.short_frames = (int64_t)(frames - available),
+				.pulls = 1,
+				.queue_limit = (int64_t)p->queue_limit,
+				.write_pos = (int64_t)wp,
+				.underrun = (int64_t)atomic_load_explicit(&p->underruns, memory_order_relaxed),
+				.late_ns = t->recent_since_ns,
+				.late_at_ns = t->recent_at_ns,
+			};
+			t->gap_open = 1;
+		} else if (t->gap_open) {
+			t->gcur.end_ns = now;
+			t->gcur.short_frames += (int64_t)(frames - available);
+			t->gcur.pulls++;
+		}
+	} else if (t->gap_open) {
+		pb_trace_push_gap(t);
+	}
+}
+
+// Writer: #write started.
+static inline void pb_trace_write_start(struct playback *p, struct pb_trace *t)
+{
+	t->wcur = (struct pb_trace_write){
+		.enter_ns = pb_trace_now(),
+		.cpu_enter_ns = pb_trace_cpu(),
+		.queued = (int64_t)(atomic_load_explicit(&p->write_pos, memory_order_relaxed) -
+			atomic_load_explicit(&p->read_pos, memory_order_acquire)),
+		.queue_limit = (int64_t)p->queue_limit,
+	};
+}
+
+// Writer: #write returning after writing +frames+ device frames.
+static void pb_trace_write_end(struct pb_trace *t, size_t frames)
+{
+	t->wcur.frames = (int64_t)frames;
+	t->wcur.exit_ns = pb_trace_now();
+	t->wcur.cpu_exit_ns = pb_trace_cpu();
+
+	size_t head = atomic_load_explicit(&t->write_head, memory_order_relaxed);
+	size_t tail = atomic_load_explicit(&t->write_tail, memory_order_acquire);
+	if (head - tail >= t->write_cap) {
+		atomic_fetch_add_explicit(&t->write_lost, 1, memory_order_relaxed);
+		return;
+	}
+	t->writes[head & (t->write_cap - 1)] = t->wcur;
+	atomic_store_explicit(&t->write_head, head + 1, memory_order_release);
+}
+
+static size_t pb_trace_pow2(size_t n)
+{
+	size_t c = 16;
+	while (c < n) {
+		c <<= 1;
+	}
+	return c;
+}
+
+static void pb_trace_free(struct pb_trace *t)
+{
+	if (t != NULL) {
+		free(t->writes);
+		free(t->gaps);
+		free(t);
+	}
+}
 
 // Releases the device and context (not the ring, which a writer in another
 // thread may still be looking at until it sees that the output is closed).
@@ -643,6 +864,7 @@ static void playback_free(void *ptr)
 	free(p->capture);
 	free(p->in_buf);
 	free(p->out_buf);
+	pb_trace_free(atomic_load(&p->trace));
 	mb_conceal_free(&p->conceal);
 	if (p->src != NULL) {
 		src_delete(p->src);
@@ -729,15 +951,22 @@ static void playback_pull(struct playback *p, float *out, size_t frames)
 		}
 	}
 
+	int counted = 0;
 	if (available < frames) {
 		// Count each time the audio runs out, not every silent callback
 		// (audio shorter than one callback ran out too)
 		if (available > 0 || !p->starving) {
 			atomic_fetch_add_explicit(&p->underruns, 1, memory_order_relaxed);
 			p->starving = 1;
+			counted = 1;
 		}
 	} else {
 		p->starving = 0;
+	}
+
+	struct pb_trace *trace = pb_trace_on(p);
+	if (trace != NULL) {
+		pb_trace_pull(trace, p, frames, available, counted, wp);
 	}
 
 	atomic_store_explicit(&p->read_pos, rp + count, memory_order_release);
@@ -1265,6 +1494,9 @@ static size_t queued_frames(struct playback *p)
 struct wait_args {
 	struct playback *p;
 	size_t want;
+	struct pb_trace *trace; // the dropout trace, if on
+	int64_t room_ns; // (trace only) when the wait found room
+	int64_t pull_ns; // (trace only) the device pull before that
 };
 
 // Waits (without the GVL) until +want+ frames fit in the queue, the output
@@ -1278,6 +1510,10 @@ static void *wait_for_space(void *arg)
 	while (!p->interrupted && atomic_load(&p->open) && !atomic_load(&p->stopped)) {
 		size_t queued = queued_frames(p);
 		if (queued <= p->queue_limit && p->queue_limit - queued >= a->want) {
+			if (a->trace != NULL) {
+				a->room_ns = pb_trace_now();
+				a->pull_ns = atomic_load_explicit(&a->trace->last_pull_ns, memory_order_acquire);
+			}
 			break;
 		}
 
@@ -1317,7 +1553,7 @@ static void grow_buffer(float **buf, size_t *cap, size_t frames, size_t channels
 
 // Copies +count+ interleaved device-rate frames into the ring, waiting
 // without the GVL while the queue is full (see #write).
-static void push_frames(struct playback *p, const float *frames, size_t count)
+static void push_frames(struct playback *p, const float *frames, size_t count, struct pb_trace *trace)
 {
 	size_t mask = p->capacity - 1;
 	size_t out_ch = p->out_channels;
@@ -1337,9 +1573,19 @@ static void push_frames(struct playback *p, const float *frames, size_t count)
 				want = p->queue_limit / 2;
 			}
 
-			struct wait_args args = { p, want };
+			struct wait_args args = { p, want, trace, 0, 0 };
 			p->interrupted = 0;
+			int64_t waited = trace != NULL ? pb_trace_now() : 0;
 			rb_thread_call_without_gvl(wait_for_space, &args, unblock_wait, p);
+			if (trace != NULL) {
+				int64_t back = pb_trace_now();
+				trace->wcur.wait_ns += back - waited;
+				if (args.room_ns) {
+					trace->wcur.room_ns = args.room_ns;
+					trace->wcur.pull_ns = args.pull_ns;
+					trace->wcur.back_ns = back;
+				}
+			}
 			rb_thread_check_ints();
 			check_open(p);
 			continue;
@@ -1381,17 +1627,9 @@ static VALUE to_contiguous_sfloat(VALUE value)
 	return value;
 }
 
-/*
- * call-seq:
- *   playback.write([channel_narray, ...]) -> frames
- *
- * Queues one NArray per input channel (all the same length) for playback,
- * waiting without the GVL while the queue is full.  Raises IOError if the
- * output is closed, or FastAudio::Error if the device stopped.
- */
-static VALUE playback_write(VALUE self, VALUE channels)
+// #write's work (see playback_write), with the dropout trace if on.
+static VALUE playback_write_frames(struct playback *p, VALUE channels, struct pb_trace *trace)
 {
-	struct playback *p = get_playback(self);
 	check_open(p);
 
 	Check_Type(channels, T_ARRAY);
@@ -1432,7 +1670,7 @@ static VALUE playback_write(VALUE self, VALUE channels)
 	RB_GC_GUARD(keep);
 
 	if (p->src == NULL) {
-		push_frames(p, p->in_buf, frames);
+		push_frames(p, p->in_buf, frames, trace);
 		return SIZET2NUM(frames);
 	}
 
@@ -1457,7 +1695,7 @@ static VALUE playback_write(VALUE self, VALUE channels)
 		}
 
 		used += data.input_frames_used;
-		push_frames(p, p->out_buf, data.output_frames_gen);
+		push_frames(p, p->out_buf, data.output_frames_gen, trace);
 
 		if (data.input_frames_used == 0 && data.output_frames_gen == 0) {
 			break; // libsamplerate wants more input than it has
@@ -1465,6 +1703,29 @@ static VALUE playback_write(VALUE self, VALUE channels)
 	}
 
 	return SIZET2NUM(frames);
+}
+
+/*
+ * call-seq:
+ *   playback.write([channel_narray, ...]) -> frames
+ *
+ * Queues one NArray per input channel (all the same length) for playback,
+ * waiting without the GVL while the queue is full.  Raises IOError if the
+ * output is closed, or FastAudio::Error if the device stopped.
+ */
+static VALUE playback_write(VALUE self, VALUE channels)
+{
+	struct playback *p = get_playback(self);
+	struct pb_trace *trace = pb_trace_on(p);
+	if (trace == NULL) {
+		return playback_write_frames(p, channels, NULL);
+	}
+
+	pb_trace_write_start(p, trace);
+	size_t wp = atomic_load_explicit(&p->write_pos, memory_order_relaxed);
+	VALUE result = playback_write_frames(p, channels, trace);
+	pb_trace_write_end(trace, atomic_load_explicit(&p->write_pos, memory_order_relaxed) - wp);
+	return result;
 }
 
 /*
@@ -1674,6 +1935,158 @@ static VALUE playback_stats(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("concealed")), SIZET2NUM(atomic_load(&p->concealed_frames)));
 	rb_hash_aset(h, ID2SYM(rb_intern("concealed_gaps")), SIZET2NUM(atomic_load(&p->concealed_gaps)));
 
+	return h;
+}
+
+/*
+ * call-seq:
+ *   playback.trace_start(writes = 8192, gaps = 1024) -> true
+ *
+ * Starts the dropout trace (MB::Sound::DropoutProbe): from now on every
+ * #write and every counted underrun pushes a record into a ring of
+ * +writes+ (or +gaps+) records (rounded up to powers of two), which
+ * #trace_drain empties.  Allocates the rings on the first call; later calls
+ * turn the trace on again with them (records left are kept).  The writer
+ * and the device thread only read clocks and store numbers.
+ */
+static VALUE playback_trace_start(int argc, VALUE *argv, VALUE self)
+{
+	struct playback *p = get_playback(self);
+	VALUE writes, gaps;
+	rb_scan_args(argc, argv, "02", &writes, &gaps);
+
+	struct pb_trace *t = atomic_load(&p->trace);
+	if (t == NULL) {
+		long nw = NIL_P(writes) ? 8192 : NUM2LONG(writes);
+		long ng = NIL_P(gaps) ? 1024 : NUM2LONG(gaps);
+		if (nw < 1 || nw > (1L << 24) || ng < 1 || ng > (1L << 24)) {
+			rb_raise(rb_eArgError, "Trace rings hold 1 to 16777216 records (got %ld writes, %ld gaps)", nw, ng);
+		}
+
+		t = calloc(1, sizeof(*t));
+		if (t == NULL) {
+			rb_raise(rb_eNoMemError, "Could not allocate the dropout trace");
+		}
+		t->write_cap = pb_trace_pow2((size_t)nw);
+		t->gap_cap = pb_trace_pow2((size_t)ng);
+		t->writes = calloc(t->write_cap, sizeof(*t->writes));
+		t->gaps = calloc(t->gap_cap, sizeof(*t->gaps));
+		if (t->writes == NULL || t->gaps == NULL) {
+			pb_trace_free(t);
+			rb_raise(rb_eNoMemError, "Could not allocate the dropout trace");
+		}
+		if (p->info.ready && p->info.rate > 0) {
+			t->period_ns = (int64_t)p->info.period * 1000000000LL / (int64_t)p->info.rate;
+		}
+		atomic_store(&t->on, 1);
+		atomic_store_explicit(&p->trace, t, memory_order_release);
+	} else {
+		atomic_store(&t->on, 1);
+	}
+
+	return Qtrue;
+}
+
+// playback.trace_stop -> nil: turns the dropout trace off (its records stay
+// for #trace_drain).
+static VALUE playback_trace_stop(VALUE self)
+{
+	struct pb_trace *t = atomic_load(&get_playback(self)->trace);
+	if (t != NULL) {
+		atomic_store(&t->on, 0);
+	}
+	return Qnil;
+}
+
+// playback.trace? -> true while the dropout trace is on.
+static VALUE playback_trace_p(VALUE self)
+{
+	return pb_trace_on(get_playback(self)) ? Qtrue : Qfalse;
+}
+
+static VALUE pb_trace_row(const int64_t *v, int n)
+{
+	VALUE row = rb_ary_new_capa(n);
+	for (int i = 0; i < n; i++) {
+		rb_ary_push(row, LL2NUM(v[i]));
+	}
+	return row;
+}
+
+/*
+ * call-seq:
+ *   playback.trace_drain -> [writes, gaps]
+ *
+ * Empties the dropout trace's rings: +writes+ is an Array of
+ * [enter_ns, exit_ns, wait_ns, room_ns, back_ns, pull_ns, cpu_enter_ns,
+ * cpu_exit_ns, queued, queue_limit, frames] (times CLOCK_MONOTONIC ns,
+ * frames at the device rate; room_ns, back_ns, pull_ns 0 for a write that
+ * didn't wait), +gaps+ of [start_ns, end_ns, since_ns, frames, available,
+ * short_frames, pulls, queue_limit, write_pos, underrun, late_ns,
+ * late_at_ns] (late_ns the longest time between two device pulls in the
+ * 250 ms before the gap, at late_at_ns; see
+ * MB::Sound::DropoutProbe).  Empty Arrays before #trace_start.
+ */
+static VALUE playback_trace_drain(VALUE self)
+{
+	struct pb_trace *t = atomic_load(&get_playback(self)->trace);
+	VALUE writes = rb_ary_new();
+	VALUE gaps = rb_ary_new();
+	if (t != NULL) {
+		size_t head = atomic_load_explicit(&t->write_head, memory_order_acquire);
+		size_t tail = atomic_load_explicit(&t->write_tail, memory_order_relaxed);
+		for (; tail != head; tail++) {
+			struct pb_trace_write w = t->writes[tail & (t->write_cap - 1)];
+			int64_t v[PB_TRACE_WRITE_FIELDS] = {
+				w.enter_ns, w.exit_ns, w.wait_ns, w.room_ns, w.back_ns, w.pull_ns,
+				w.cpu_enter_ns, w.cpu_exit_ns, w.queued, w.queue_limit, w.frames,
+			};
+			rb_ary_push(writes, pb_trace_row(v, PB_TRACE_WRITE_FIELDS));
+		}
+		atomic_store_explicit(&t->write_tail, tail, memory_order_release);
+
+		head = atomic_load_explicit(&t->gap_head, memory_order_acquire);
+		tail = atomic_load_explicit(&t->gap_tail, memory_order_relaxed);
+		for (; tail != head; tail++) {
+			struct pb_trace_gap g = t->gaps[tail & (t->gap_cap - 1)];
+			int64_t v[PB_TRACE_GAP_FIELDS] = {
+				g.start_ns, g.end_ns, g.since_ns, g.frames, g.available,
+				g.short_frames, g.pulls, g.queue_limit, g.write_pos, g.underrun,
+				g.late_ns, g.late_at_ns,
+			};
+			rb_ary_push(gaps, pb_trace_row(v, PB_TRACE_GAP_FIELDS));
+		}
+		atomic_store_explicit(&t->gap_tail, tail, memory_order_release);
+	}
+	return rb_assoc_new(writes, gaps);
+}
+
+/*
+ * call-seq:
+ *   playback.trace_stats -> { on:, write_lost:, gap_lost:, pulls:, late_pulls:, max_pull_gap_ns:, last_pull_ns:, period_ns:, gap_open: }
+ *
+ * The dropout trace's counters (nil before #trace_start): records dropped
+ * because a ring was full, the device pulls traced, those that came more
+ * than twice the device period after the one before, the longest time
+ * between two pulls, the latest pull's time, and whether a gap is still
+ * open (its record is pushed when it ends).
+ */
+static VALUE playback_trace_stats(VALUE self)
+{
+	struct pb_trace *t = atomic_load(&get_playback(self)->trace);
+	if (t == NULL) {
+		return Qnil;
+	}
+	VALUE h = rb_hash_new();
+	rb_hash_aset(h, ID2SYM(rb_intern("on")), atomic_load(&t->on) ? Qtrue : Qfalse);
+	rb_hash_aset(h, ID2SYM(rb_intern("write_lost")), SIZET2NUM(atomic_load(&t->write_lost)));
+	rb_hash_aset(h, ID2SYM(rb_intern("gap_lost")), SIZET2NUM(atomic_load(&t->gap_lost)));
+	rb_hash_aset(h, ID2SYM(rb_intern("pulls")), SIZET2NUM(atomic_load(&t->pulls)));
+	rb_hash_aset(h, ID2SYM(rb_intern("late_pulls")), SIZET2NUM(atomic_load(&t->late_pulls)));
+	rb_hash_aset(h, ID2SYM(rb_intern("max_pull_gap_ns")), LL2NUM(atomic_load(&t->max_since_ns)));
+	rb_hash_aset(h, ID2SYM(rb_intern("last_pull_ns")), LL2NUM(atomic_load(&t->last_pull_ns)));
+	rb_hash_aset(h, ID2SYM(rb_intern("period_ns")), LL2NUM(t->period_ns));
+	rb_hash_aset(h, ID2SYM(rb_intern("gap_open")), t->gap_open ? Qtrue : Qfalse);
 	return h;
 }
 
@@ -3357,6 +3770,11 @@ void Init_fast_audio(void)
 	rb_define_method(playback, "queue_limit=", playback_set_queue_limit, 1);
 	rb_define_method(playback, "write", playback_write, 1);
 	rb_define_method(playback, "end_stream", playback_end_stream, 0);
+	rb_define_method(playback, "trace_start", playback_trace_start, -1);
+	rb_define_method(playback, "trace_stop", playback_trace_stop, 0);
+	rb_define_method(playback, "trace?", playback_trace_p, 0);
+	rb_define_method(playback, "trace_drain", playback_trace_drain, 0);
+	rb_define_method(playback, "trace_stats", playback_trace_stats, 0);
 	rb_define_method(playback, "close", playback_close, 0);
 	rb_define_method(playback, "closed?", playback_closed, 0);
 	rb_define_method(playback, "sample_rate", playback_sample_rate, 0);
