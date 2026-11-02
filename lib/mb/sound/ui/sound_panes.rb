@@ -430,18 +430,22 @@ module MB
             kn = n.knob_of(name)
             k = kn && knobs[kn]
             mods = modulators(info, n, name)
+            masked = n.masked[name]
             if k&.spec
               value, turning = shown_value(state, kn, k)
               vtext = value_text(v.unit ? v : v.with(unit: Panes.unit_of(k.spec, name)), value) || Panes.fmt(value)
               more = mods.empty? ? '' : "← #{mods.join(', ')}"
               mw = (c.w - x - vtext.length - more.length - kn.to_s.length - 6).clamp(3, 16)
               x = c.meter(k.spec.position(value.to_f).to_f, width: mw, x: x + 1, y: y, role: :key)
-              x = c.text(x + 1, y, vtext, turning ? :queued : :text)
+              x = c.text(x + 1, y, vtext, turning ? :queued : (masked ? :dim : :text))
               x = c.text(x + 1, y, more, :dim) unless more.empty?
-              c.text(x, y, c.fit("  #{kn}", [c.w - x, 0].max), :dim)
+              c.text(x, y, c.fit(masked ? "  #{sel ? masked : 'not heard here'}" : "  #{kn}", [c.w - x, 0].max), :dim)
             elsif !v.value.nil?
-              x = c.text(x + 1, y, value_text(v) || v.value.to_s, :text)
+              x = c.text(x + 1, y, value_text(v) || v.value.to_s, masked ? :dim : :text)
               hint = sel && (b = n.binds[name]) ? (b.line ? "  Enter: knob #{b.knob.inspect}" : "  #{b.reason}") : (v.detail == Inspect::LITERAL ? '  ·' : '')
+              # (a turn this voice and clip can't make heard, with why when
+              # picked: Inspect.masked_of; inspector-nav-1)
+              hint = sel ? "  #{masked}" : '  · not heard here' if masked
               c.text(x, y, c.fit(hint, [c.w - x, 0].max), :dim)
             else
               c.text(x + 1, y, c.fit(mods.empty? ? "#{c.glyph(:arrow)} #{v.label || v.detail}" : "← #{mods.join(', ')}", [c.w - x - 1, 0].max), :dim)
