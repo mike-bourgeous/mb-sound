@@ -66,11 +66,30 @@ module MB
           f = (rows.length / WINDOW).round
           pace = @pacer.breakdown(window: WINDOW)
           text = pace[:refreshes] > 0 ? "#{@pacer.readout(window: WINDOW)} · #{kbs.round} kB/s" : "#{f} fps · #{format('%.1f', cpu)} ms · #{kbs.round} kB/s"
+          # (the live panes' redraws, when the slowest is under the painter's
+          # rate: the painter ran 60/60 Hz while the envelope preview drew
+          # 9.5 times a second, rates level 3; inspector-nav-1, the
+          # maintainer: "the UI heading says it's at 60fps")
+          slow = slowest_live_pane(now)
+          if slow && slow[1] < @target_fps * 0.9
+            note = " (#{slow[0]} #{slow[1] >= 10 ? slow[1].round : slow[1]}/s)"
+            text = text.include?(' Hz') ? text.sub(' Hz', " Hz#{note}") : text.sub(' fps', " fps#{note}")
+          end
           text += " · #{@rates.readout}" if @rates.level > 0
-          { fps: f, cpu_ms: cpu, kb_per_s: kbs.round(1), pacing: pace, rates: @rates.to_h, text: text }
+          { fps: f, cpu_ms: cpu, kb_per_s: kbs.round(1), pacing: pace, rates: @rates.to_h, live_panes: slow && { name: slow[0], fps: slow[1] }, text: text }
         end
 
         private
+
+        # [name, measured redraws/s] of the slowest visible pane that wants
+        # the painter's rate (meters and live panes, UI::PaneRates), or nil
+        # (screens without per-pane draws: #live_panes is theirs).
+        def slowest_live_pane(now)
+          names = respond_to?(:live_panes, true) ? live_panes : nil
+          return nil if names.nil? || names.empty?
+          m = @rates.measured(now)
+          names.map { |n| [n, m[n] || 0.0] }.min_by(&:last)
+        end
 
         def init_frame_rate(target)
           @target_fps = target

@@ -190,6 +190,30 @@ module MB
             info
           end
 
+          # +info+ (this Gatherer's last InspectInfo for its target) with the
+          # selected envelope's playhead read again (Inspect.live_of: the
+          # state the render thread left, no render lock), or +info+ itself
+          # when the selected row has none or its graph is gone.  The
+          # painter calls it every frame between the 4/s polls
+          # (inspector-nav-1: the maintainer, 2026-11-02, "Envelope preview
+          # play head sometimes just stops updating"; read 4 times a second,
+          # eighth notes at 120 BPM are 4 a second too, so every poll saw
+          # the same moment of the note: all idle, or the same spot of its
+          # decay, the playhead frozen for seconds).
+          def live_info(info)
+            sel = info&.node or return info
+            entry = @cache[info.track] or return info
+            group = entry[:groups][sel]
+            return info unless group&.first.respond_to?(:playhead_state)
+            n = info.nodes[sel]
+            return info unless n && entry[:nodes][sel]&.label == n.label
+            live = live_of(group)
+            return info if live == n.live
+            nodes = info.nodes.dup
+            nodes[sel] = n.with(live: live)
+            info.with(nodes: nodes.freeze)
+          end
+
           private
 
           # The build knobs of track +track+'s graph +entry+: the switches

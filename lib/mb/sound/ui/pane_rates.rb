@@ -13,7 +13,8 @@ module MB
       # per frame, the most overdue first).  Load is the painter's share of
       # a frame period (paint + write, smoothed) and the render thread's
       # load (Snapshot#load: the share of real time the audio took);
-      # leaving a level asks for calm over EASE seconds, so it doesn't
+      # leaving a level asks for calm over EASE seconds (EASE_QUIET while the
+      # painter is quiet), so it doesn't
       # flap.
       #
       # An explicit state machine (TRANSITIONS: [state, event] => [state,
@@ -63,6 +64,18 @@ module MB
         # steps), and of :calm before stepping back up.
         STRAIN = 0.25
         EASE = 2.0
+
+        # Seconds of calm per step up while the painter is quiet (its share
+        # under QUIET_SHARE, the render thread's under RENDER_QUIET): after
+        # `design` the first frames (YJIT compiling, the first walks and
+        # voice copies) took the screen to level 4, and with the painter at
+        # 0.03-0.08 of a frame it took 11 s to climb back at EASE a level,
+        # the inspector and preview drawing 8-15 times a second
+        # (inspector-nav-1; the maintainer, 2026-11-02: "UI frame rate
+        # seems very slow").
+        EASE_QUIET = 0.5
+        QUIET_SHARE = 0.1
+        RENDER_QUIET = 0.3
 
         # Smoothing of the painter's share (each frame's weight).
         ALPHA = 0.2
@@ -206,7 +219,8 @@ module MB
               @since = now
             end
           when :step_up
-            if now - @since >= EASE && @level > 0
+            ease = @share < QUIET_SHARE && @render_load < RENDER_QUIET ? EASE_QUIET : EASE
+            if now - @since >= ease && @level > 0
               @level -= 1
               @changes += 1
               @since = now
