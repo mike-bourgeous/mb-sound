@@ -365,7 +365,18 @@ module MB
       #
       # +marks: true+ adds each note's pitch mark (see #pitch_mark) to its
       # number, as #freq and `v.hz` do.
-      def number(marks: false)
+      #
+      # +chase: false+ keeps the number of the latest note-on through
+      # content jumps (a clip swap or scene launch chases the note at the
+      # new position otherwise): a sampler voice following tracker lanes
+      # (Sampler::Instrument#play's +lanes:+) keeps its sample's pitch until
+      # its next note-on, as a tracker channel does (tracker-2).
+      def number(marks: false, chase: true)
+        unless chase
+          return memo(marks ? :marked_number_held : :number_held) {
+            Number.new(note_stream, notes: self, sample_rate: @sample_rate, marks: marks, chase: false)
+          }
+        end
         return memo(:marked_number) { Number.new(note_stream, notes: self, sample_rate: @sample_rate, marks: true) } if marks
         memo(:number) { Number.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
@@ -417,7 +428,19 @@ module MB
       # notes sound the same in voices and samplers and still export as
       # bends.  +marks: false+ leaves the marks out (samplers add them
       # themselves at each note-on; a voice can read #pitch_mark itself).
-      def freq(marks: true)
+      #
+      # +chase: false+ follows the number of the latest note-on through
+      # content jumps (see #number): samplers play with it, since a sample
+      # voice still sounding at a clip swap or scene launch was started by
+      # the old content and keeps its pitch (its ratio to the note-on's
+      # frequency), where a chased number would retune it by the key
+      # difference (tracker-2).
+      def freq(marks: true, chase: true)
+        unless chase
+          return memo(marks ? :freq_held : :freq_unmarked_held) {
+            Frequency.new(number(marks: marks, chase: false), offsets: [bend_semitones], sample_rate: @sample_rate)
+          }
+        end
         return memo(:freq_unmarked) { Frequency.new(number, offsets: [bend_semitones], sample_rate: @sample_rate) } unless marks
         memo(:freq) { Frequency.new(number(marks: true), offsets: [bend_semitones], sample_rate: @sample_rate) }
       end
