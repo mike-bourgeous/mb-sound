@@ -295,6 +295,7 @@ require_relative 'sound/library/generators/shipped'
 
 # The terminal UI (`ui`, `pane`, `layout`): a dashboard band above the console
 require_relative 'sound/ui'
+require_relative 'sound/player'
 require_relative 'sound/terminal_info'
 require_relative 'sound/debug_methods'
 require_relative 'sound/table'

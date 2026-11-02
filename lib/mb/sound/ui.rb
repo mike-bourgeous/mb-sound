@@ -19,6 +19,7 @@ require_relative 'ui/session_panes'
 require_relative 'ui/turn_gesture'
 require_relative 'ui/knob_turns'
 require_relative 'ui/set_panes'
+require_relative 'ui/player_panes'
 require_relative 'ui/sound_panes'
 require_relative 'ui/picker'
 require_relative 'ui/note_log'
@@ -154,6 +155,10 @@ module MB
         wall: ['the performance panes at once (tracks, queue, knobs, cpu, the keyboard, meters, scope, spectrum, messages; the set panes are on ui :session), for big terminals', '200x60 and up'],
         show: ['song_script --ui: a big scope and spectrum, no console', '120x40 and up'],
         play: ['synth_script --ui: the keyboard, scope, spectrum, no console', '120x40 and up'],
+        player_audio: ['bin/play.rb, a sound file: its overview with the play head, scope, spectrum, meters, file info, playlist', '80x24 and up'],
+        player_module: ['bin/play.rb, a tracker module: its pattern rows with a VU per channel, scope, meters, info, playlist', '80x24 and up'],
+        player_midi: ['bin/play.rb, a MIDI file: its notes as a piano roll, scope, meters, info, playlist', '80x24 and up'],
+        player: ['bin/play.rb, anything else: scope, spectrum, meters, info, playlist', '80x24 and up'],
       }.freeze
 
       # Every layout `ui` can show, as [name, kind (:band, :tiles, :script),
@@ -258,6 +263,7 @@ module MB
       # user left it).  `ui.list` names them.
       def self.tile_layout_levels
         @tile_layout_levels ||= {
+          **player_layout_levels,
           sound: {
             # 80x24: the voice (its panel by default), the picked row's
             # preview, the console (NAV l puts the library picker in for a
@@ -285,11 +291,26 @@ module MB
         }
       end
 
+      # Smaller versions of the player screens (bin/play.rb): at 80x24 the
+      # row for what plays, the file's view, the meters, and the playlist.
+      def self.player_layout_levels
+        views = { player_audio: [:overview, 8], player_module: [:pattern, nil], player_midi: [:roll, nil], player: [:scope, nil] }
+        views.to_h { |name, (view, h)|
+          compact = MB::Term::Viewports.layout(name) {
+            pane :now, height: 1
+            h ? pane(view, height: h) : pane(view)
+            pane(:scope) if h
+            cols(height: 6) { pane :meters, weight: 1; pane :playlist, weight: 1 }
+          }
+          [name, { compact: compact }]
+        }
+      end
+
       # Layout +name+ for Density +level+: its smaller version, else the
       # built-in one itself (big terminals), else nil (no versions).
       def self.tile_layout_at(name, level)
         versions = tile_layout_levels[name] or return nil
-        versions[level] || tile_layouts[name]
+        versions[level] || tile_layouts[name] || show_layouts[name]
       end
 
       # Tiled layouts without a console, for scripts' screens (song_script
@@ -303,6 +324,36 @@ module MB
               rows(width: 36) { pane :tracks; pane :queue, height: 6; pane :knobs, height: 8 }
               rows(weight: 3) { pane :scope; pane :spectrum, height: 12 }
               rows(width: 34) { pane :meters, height: 7; pane :cpu; pane :messages, height: 6 }
+            }
+          },
+          # bin/play.rb (MB::Sound::Player; play-ui-1): a row for what plays,
+          # the file's own view, the meters, its info, and the playlist
+          player_audio: MB::Term::Viewports.layout(:player_audio) {
+            pane :now, height: 1
+            cols {
+              rows(weight: 3) { pane :overview, height: 8; pane :scope; pane :spectrum, height: 10 }
+              rows(width: 36) { pane :meters, height: 7; pane :info, height: 10; pane :playlist; pane :messages, height: 5 }
+            }
+          },
+          player_module: MB::Term::Viewports.layout(:player_module) {
+            pane :now, height: 1
+            cols {
+              rows(weight: 3) { pane :pattern; pane :scope, height: 8 }
+              rows(width: 36) { pane :meters, height: 7; pane :info, height: 9; pane :form, height: 1; pane :playlist; pane :messages, height: 5 }
+            }
+          },
+          player_midi: MB::Term::Viewports.layout(:player_midi) {
+            pane :now, height: 1
+            cols {
+              rows(weight: 3) { pane :roll; pane :scope, height: 8 }
+              rows(width: 36) { pane :meters, height: 7; pane :info, height: 8; pane :playlist; pane :messages, height: 5 }
+            }
+          },
+          player: MB::Term::Viewports.layout(:player) {
+            pane :now, height: 1
+            cols {
+              rows(weight: 3) { pane :scope; pane :spectrum, height: 10 }
+              rows(width: 36) { pane :meters, height: 7; pane :info, height: 6; pane :playlist; pane :messages, height: 5 }
             }
           },
           # A synth or effect: the keyboard, scope, spectrum, meters
