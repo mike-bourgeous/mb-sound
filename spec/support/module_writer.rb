@@ -140,3 +140,87 @@ module ModuleWriter
     end
   end
 end
+
+module ModuleWriter
+  module_function
+
+  # Pads +out+ to a 16-byte boundary and returns its parapointer.
+  def para(out)
+    out << "\0" * ((16 - out.bytesize % 16) % 16)
+    out.bytesize / 16
+  end
+
+  # Scream Tracker 3 (.s3m): +channels+ PCM channels (left, right, ...),
+  # +samples+ with +c2spd+, +bits+ 16, +stereo+; cells' notes are neutral,
+  # :cut for ^^.  +pans+ (0..15 per channel) writes a pan table.
+  def s3m(path, samples:, patterns:, orders: [0], title: 'spec s3m', channels: 4, speed: 6, tempo: 125, global_volume: 64, flags: 0,
+          pans: nil, signed: false, stereo: true)
+    head = +''.b
+    head << text(title, 28) << [0x1A, 16, 0, 0].pack('C4')
+    head << [orders.length + 1, samples.length, patterns.length, flags, 0x1320, signed ? 1 : 2].pack('v6')
+    head << 'SCRM' << [global_volume, speed, tempo, stereo ? 0xB0 : 0x30, 0, pans ? 252 : 0].pack('C6') << "\0" * 8 << [0].pack('v')
+    head << Array.new(32) { |c| c < channels ? (c.even? ? c / 2 : 8 + c / 2) : 255 }.pack('C32')
+    head << (orders + [255]).pack('C*')
+    ins_at = head.bytesize
+    head << "\0\0" * samples.length
+    pat_at = head.bytesize
+    head << "\0\0" * patterns.length
+    head << Array.new(32) { |c| 0x20 | ((pans && pans[c]) || 0) }.pack('C32') if pans
+    out = head
+    ins_ptrs = []
+    data_fix = []
+    samples.each { |s|
+      ins_ptrs << para(out)
+      data = s[:data] || []
+      loop = s[:loop]
+      fl = (loop ? 1 : 0) | (s[:stereo] ? 2 : 0) | (s[:bits] == 16 ? 4 : 0)
+      rec = +''.b
+      rec << [1].pack('C') << text(s[:file] || '', 12)
+      data_fix << [out.bytesize + rec.bytesize, s]
+      rec << [0, 0].pack('Cv')
+      rec << [s[:stereo] ? data[0].length : data.length, loop ? loop[0] : 0, loop ? loop[1] : 0, s[:volume] || 64, 0, 0, fl, s[:c2spd] || 8363].pack('VVVCCCCV')
+      rec << "\0" * 12 << text(s[:name] || '', 28) << 'SCRS'
+      out << rec
+    }
+    pat_ptrs = patterns.map { |pat|
+      ptr = para(out)
+      body = +''.b
+      64.times { |r|
+        (pat[r] || []).each_with_index { |cell, c|
+          next if cell.nil?
+          what = c
+          what |= 32 if cell[:note] || cell[:sample]
+          what |= 64 if cell[:volume]
+          what |= 128 if cell[:effect]
+          body << [what].pack('C')
+          if what & 32 != 0
+            n = cell[:note]
+            nb = n.nil? ? 255 : (n == :cut ? 254 : (((n - 12) / 12) << 4) | ((n - 12) % 12))
+            body << [nb, cell[:sample] || 0].pack('CC')
+          end
+          body << [cell[:volume]].pack('C') if what & 64 != 0
+          body << [letter(cell[:effect]), cell[:param] || 0].pack('CC') if what & 128 != 0
+        }
+        body << "\0"
+      }
+      out << [body.bytesize + 2].pack('v') << body
+      ptr
+    }
+    data_fix.each { |at, s|
+      ptr = para(out)
+      out[at, 3] = [ptr >> 16, ptr & 0xFFFF].pack('Cv')
+      chans = s[:stereo] ? s[:data] : [s[:data] || []]
+      chans.each { |d|
+        if s[:bits] == 16
+          out << d.map { |x| v = (x.clamp(-1.0, 32767 / 32768.0) * 32768).round; signed ? v : v + 32768 }.pack(signed ? 's<*' : 'v*')
+        else
+          out << d.map { |x| v = (x.clamp(-1.0, 127 / 128.0) * 128).round; (signed ? v : v + 128) & 0xFF }.pack('C*')
+        end
+      }
+    }
+    out[ins_at, ins_ptrs.length * 2] = ins_ptrs.pack('v*')
+    out[pat_at, pat_ptrs.length * 2] = pat_ptrs.pack('v*')
+    File.binwrite(path, out)
+    path
+  end
+end

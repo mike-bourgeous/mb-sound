@@ -60,9 +60,11 @@ require_relative 'tracker/song'
 require_relative 'tracker/binary'
 require_relative 'tracker/mod_reader'
 require_relative 'tracker/six_six_nine_reader'
+require_relative 'tracker/s3m_reader'
 require_relative 'tracker/player'
 require_relative 'tracker/import'
 require_relative 'tracker/set'
 
+MB::Sound::Tracker::READERS[:s3m] = MB::Sound::Tracker::S3MReader
 MB::Sound::Tracker::READERS[:"669"] = MB::Sound::Tracker::SixSixNineReader
 MB::Sound::Tracker::READERS[:mod] = MB::Sound::Tracker::ModReader

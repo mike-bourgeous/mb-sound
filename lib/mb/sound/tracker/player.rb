@@ -384,3 +384,4 @@ end
 require_relative 'player/amiga'
 require_relative 'player/mod'
 require_relative 'player/six_six_nine'
+require_relative 'player/s3m'
