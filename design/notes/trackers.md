@@ -6,7 +6,7 @@
 
 ## Quick reference
 
-- `song = mod_import('tune.mod', mode: :musical | :hardware, separation:)`; `play song`, `render 'x.flac', song`, `save :tune, song` (a set bundle, samples as assets); `song.setup` then `go :p03`, `fx :ch2, ...`, `swap :ch1, song[:p03][:ch1].transpose(12)`, `tempo 150`; `song.play(loop: true)`; `mod_samples(path)`.
+- `song = mod_import('tune.mod', mode: :musical | :hardware, separation:)`; `play song` (or `play 'tune.mod'`, `bin/play.rb tune.mod`), `render 'x.flac', song` (or the path), `save :tune, song` (a set bundle, samples as assets); `song.setup` then `go :p03`, `fx :ch2, ...`, `swap :ch1, song[:p03][:ch1].transpose(12)`, `tempo 150`; `song.play(loop: true)`; `mod_samples(path)`.
 - Code `lib/mb/sound/tracker.rb` + `tracker/` (readers `*_reader.rb`, `player.rb` + `player/`, `import.rb`, `set.rb`), `lib/mb/sound/tracker_methods.rb`; the sampler-voice lanes in `lib/mb/sound/sampler/instrument.rb` (`Instrument#play` `lanes:`).
 - Specs `spec/lib/mb/sound/tracker/*_spec.rb` (one per format, plus `set_spec.rb`), `spec/lib/mb/sound/sampler_lanes_spec.rb`; synthetic modules from `spec/support/module_writer.rb` (MOD, 669, S3M, XM, IT with an IT 2.14/2.15 compressor).
 

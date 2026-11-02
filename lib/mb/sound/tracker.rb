@@ -45,6 +45,18 @@ module MB
         READERS.fetch(format).read(bytes, name: name)
       end
 
+      # File name extensions of modules (also Amiga "mod.name" files).
+      EXTENSIONS = %w[.mod .669 .s3m .xm .it].freeze
+
+      # True if +path+ (a String) names a module file by its extension
+      # (or an Amiga-style "mod." prefix) and exists: `play 'tune.mod'`
+      # and `render 'x.flac', 'tune.xm'` import it (see TrackerMethods).
+      def module_file?(path)
+        return false unless path.is_a?(String)
+        base = File.basename(path).downcase
+        (EXTENSIONS.include?(File.extname(base)) || base.start_with?('mod.')) && File.file?(path)
+      end
+
       # The format of +bytes+ (:it, :xm, :s3m, :"669", :mod), or raises
       # FormatError.
       def detect(bytes, name: 'module')

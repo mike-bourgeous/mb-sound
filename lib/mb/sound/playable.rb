@@ -262,6 +262,10 @@ module MB
         when '.sf2'
           graph(MB::Sound.sf2(path))
         else
+          if Tracker.module_file?(path)
+            raise Unplayable, "#{File.basename(path)} is a tracker module, a whole set of tracks: `play #{path.inspect}` (foreground), " \
+              "`mod_import(#{path.inspect}).play` (background), or `render(file, #{path.inspect})`"
+          end
           node = MB::Sound.file_input(path, resample: sample_rate.round)
           Graph.new(nodes: node.outputs, description: file_description(path), ends: true, note: nil)
         end

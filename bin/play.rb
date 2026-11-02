@@ -1,5 +1,6 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
-# Plays audio files, one after another, while showing meters.
+# Plays audio files (and tracker modules: .mod, .669, .s3m, .xm, .it), one
+# after another, while showing meters.
 #
 # Usage: $0 sound_filename [...]
 

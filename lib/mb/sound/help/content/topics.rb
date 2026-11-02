@@ -409,7 +409,8 @@ module MB
         (:ch1, :ch2, ...) playing the module's samples, a clip per pattern
         per channel, a scene per pattern as it played (:p03, and :p03_b
         when the song plays a pattern another way), and a flow through the
-        order list.  `play song` plays it once through (`song.play(loop:
+        order list.  `play song` (or `play 'tune.mod'`, and `bin/play.rb
+        tune.mod`) plays it once through (`song.play(loop:
         true)` repeats like a tracker), `render 'tune.flac', song` renders
         it (with `stems:`, a file per channel), and `save :tune, song`
         writes a set document with the samples as assets.

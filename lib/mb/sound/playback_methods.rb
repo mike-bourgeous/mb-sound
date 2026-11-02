@@ -27,6 +27,8 @@ module MB
       # - a Wavetable as one note; a preset's Symbol (synth presets play a
       #   demo phrase); a genre template (`genre(:dnb)`, or `play :dnb`):
       #   about a minute of its form (set up in the background Session)
+      # - a tracker module (`play 'tune.mod'`, .669, .s3m, .xm, .it) or its
+      #   set (`play mod_import(path)`): the whole song (see #mod_import)
       # Anything else prints what it is and how to play it (an error in
       # scripts; see LiveMethods#live_error).
       #
@@ -59,6 +61,7 @@ module MB
         if sound.is_a?(Genre::Template) || (sound.is_a?(Symbol) && Genre.names.include?(sound) && !GraphIO.find_preset(sound))
           return play_genre(sound.is_a?(Symbol) ? Genre[sound] : sound, foreground: foreground, quiet: quiet, plot: plot, graphical: graphical, spectrum: spectrum)
         end
+        sound = mod_import(sound) if Tracker.module_file?(sound)
         if sound.is_a?(Tracker::Set)
           return play_tracker(sound, foreground: foreground, quiet: quiet, plot: plot, graphical: graphical, spectrum: spectrum)
         end
@@ -1182,6 +1185,7 @@ module MB
 
         sounds.each { |s|
           # (a tracker module's set plays its flow: Tracker::Set#play)
+          s = mod_import(s) if Tracker.module_file?(s)
           next Session.with_context(session: session) { s.play } if s.is_a?(Tracker::Set)
           session.add(s, on: :now)
         }

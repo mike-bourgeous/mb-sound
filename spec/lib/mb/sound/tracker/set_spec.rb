@@ -71,5 +71,10 @@ RSpec.describe(MB::Sound::Tracker::Set, :aggregate_failures) do
     expect(secs).to be_within(0.05).of(set.seconds) # (the song stops at its end: looping samples don't ring on)
     expect(MB::Sound.render(file, gain: -12.db, overwrite: true) { set.play }).to eq(secs)
     expect { MB::Sound::Playable.graph(set) }.to raise_error(MB::Sound::Playable::Unplayable, /play song/)
+    # (a module file renders as its set)
+    expect(MB::Sound.render(file, path, gain: -12.db, overwrite: true)).to be_within(0.05).of(set.seconds)
+    expect { MB::Sound::Playable.graph(path) }.to raise_error(MB::Sound::Playable::Unplayable, /tracker module/)
+    expect(MB::Sound::Tracker.module_file?(path)).to be(true)
+    expect(MB::Sound::Tracker.module_file?(tmp_path('x.mod'))).to be(false)
   end
 end
