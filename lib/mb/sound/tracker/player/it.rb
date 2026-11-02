@@ -202,6 +202,7 @@ module MB
               s, played = sample_for(ch, note)
               smp = s && @song.samples[s]
               if porta && ch.period && ch.voice
+                porta_sample(ch, s, smp, played) if s && s != ch.sample && smp && !smp.empty?
                 ch.target = period_of(played, s || ch.sample)
               elsif smp && !smp.empty?
                 new_note_action(ch, s, played)
@@ -230,6 +231,22 @@ module MB
               start_note(ch, smp) unless note.is_a?(Integer)
             end
             ch.volume = cell.volume if cell.volume && cell.volume <= 64
+          end
+
+          # Tone portamento onto a note of another sample: the new sample
+          # plays at once, at the pitch the channel had (its period moved to
+          # the new sample's rate), and slides to the note at its own rate
+          # (measured from openmpt123: a 22050 Hz sample, then G with a
+          # 44100 Hz one, slid from 22050 Hz to the new note's 27781).
+          def porta_sample(ch, s, smp, played)
+            ratio = smp.rate.to_f / sample_rate_of(ch.sample)
+            ch.period = @linear ? ch.period + 768 * Math.log2(ratio) : ch.period * ratio
+            ch.period = ch.period.round if hardware?
+            ch.out_period = ch.period
+            ch.sample = s
+            ch.offset = 0.0
+            trigger(ch, s, 0, played)
+            start_note(ch, smp)
           end
 
           # [the sample index, the note it plays] for +note+ on the

@@ -215,6 +215,21 @@ RSpec.describe('tracker pitch guard', :aggregate_failures) do
     check('IT', track(path, 66), exp)
   end
 
+  it 'IT: tone portamento onto another sample plays it at once and slides to the note at its rate' do
+    s8 = Array.new(64) { |j| Math.sin(2 * Math::PI * j / 8) * 0.9 }
+    cells = { [0, 0] => { note: 60, sample: 1 }, [2, 0] => { note: 52, sample: 2, effect: 'G', param: 0x20 }, [3, 0] => { effect: 'G', param: 0 } }
+    path = tmp_path('porta.it')
+    w.it(path, samples: [{ data: sine, loop: [0, 64], c5speed: 22_050 }, { data: s8, loop: [0, 64], c5speed: 44_100 }], patterns: [w.pattern(1, cells, rows: 8)],
+               channels: 1, linear: true)
+    # (rates as 16-frame sines: the 8-frame sample sounds an octave up; openmpt123: 2756, 3094, then 3473 Hz)
+    lin = ->(p, rate) { rate * 2**((3840 - p) / 768.0) * 2 }
+    p0 = 3840 + 768 * Math.log2(2) # (C-5 at 22050 Hz as a period of the 44100 Hz sample)
+    target = 3840 + 8 * 64
+    exp = row(0, [3840] * 6) { |p| lin.(p, 22_050) / 2 }
+    exp.merge!(row(2, [p0, p0 - 128, target, target, target, target]) { |p| lin.(p, 44_100) })
+    check('IT porta onto a new sample', track(path, 24), exp)
+  end
+
   it '669: Hz slides' do
     cells = { [0, 0] => { note: 60, sample: 1, effect: 0, param: 2 }, [2, 0] => { note: 60, sample: 1, effect: 1, param: 2 } }
     path = tmp_path('pitch.669')
