@@ -57,6 +57,8 @@ What was off, and the fix:
 | IT vibrato | S3M's: twice as deep, downward first, idle on the first tick, bipolar square (50-150 cents) | IT's tables (upward first, square up/0), every tick moving on first, (value × depth) >> 4 through IT's linear slide steps (1/64 semitone below 16, 1/16 above) |
 | IT arpeggio, linear slides | the period multiplied by a ratio: +12.4 and +20 semitones for 4 and 7 | 64 linear periods a semitone |
 | IT fine vibrato | 4 times too deep | >> 6 |
+| IT tone portamento onto another sample | kept the old sample's rate: an octave off for good with 22050/44100 Hz samples | the new sample starts at the channel's pitch and slides to the note at its own rate, as openmpt123 does |
+| XM linear finetune | ft / 2 periods: 1.5-5.5 cents sharp on finetuned samples | FT2's 1/16 semitone steps, (ft >> 3) × 4 |
 
 Measured but kept: MOD slides, tone portamento, fine slides, and ProTracker's limits (113..856, notes all in range) agreed within a cent or two; 8-channel MODs slide past both limits in openmpt123 too; 669 slides as tracker-1 measured.  Not matched: ST3/FT2 Amiga-mode arpeggios use table notes (2-5 cents from exact ratios), XM Amiga notes off the C table by up to 4 cents, IT's K after a U/S3x mix, random waveforms (counted as unsupported), openmpt123's quarter period on a finetune-0 B-3 (113.25), and slides past a format's top pitch (openmpt123 cuts the note).  Tremolo and XM auto-vibrato keep tracker-1's waveforms (not re-measured).
 

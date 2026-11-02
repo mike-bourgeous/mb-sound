@@ -44,7 +44,7 @@ module MB
         # measurements; the reference player's mixing level).
         GAINS = { mod: 3.0, "669": 1.5, s3m: 1.5, xm: 1.0, it: 1.5 }.freeze
 
-        attr_reader :song, :mode, :separation, :name, :limits, :interpolation, :mix_rate, :bass_mono
+        attr_reader :song, :mode, :separation, :name, :limits, :interpolation, :mix_rate, :bass_mono, :rolloff
 
         # Sample reads (+interpolation:+), as Sampler::Instrument#play
         # options.  :band_limited is the sampler's own read (half-octave
@@ -83,8 +83,12 @@ module MB
         # joins, so content above half the rate folds back and the top
         # rolls off); +bass_mono+ (Hz, or nil) centers each channel below
         # that frequency (GraphNode#mono_below), so wide Amiga pans keep
-        # their bass in the middle.
-        def initialize(song, mode: :musical, separation: nil, name: nil, limits: :format, interpolation: nil, mix_rate: nil, bass_mono: nil)
+        # their bass in the middle; +rolloff+ (Hz, or nil) a gentle
+        # two-pole Butterworth lowpass on each channel (-3 dB there), for
+        # the top a mixer's images or a DAC's filter left (the maintainer:
+        # "a very gentle rolloff starting around 12-15k").
+        def initialize(song, mode: :musical, separation: nil, name: nil, limits: :format, interpolation: nil, mix_rate: nil, bass_mono: nil,
+                       rolloff: nil)
           raise ArgumentError, "mode: is :musical or :hardware (got #{mode.inspect})" unless %i[musical hardware].include?(mode)
           @song = song
           @mode = mode
@@ -95,6 +99,8 @@ module MB
           raise ArgumentError, "mix_rate: is a rate in Hz above 1000 (got #{mix_rate.inspect})" if @mix_rate && !(@mix_rate > 1000)
           @bass_mono = bass_mono && Float(bass_mono)
           raise ArgumentError, "bass_mono: is a frequency in Hz above 0 (got #{bass_mono.inspect})" if @bass_mono && !(@bass_mono > 0)
+          @rolloff = rolloff && Float(rolloff)
+          raise ArgumentError, "rolloff: is a frequency in Hz from 1000 to 23000 (got #{rolloff.inspect})" if @rolloff && !@rolloff.between?(1000, 23_000)
           @separation = (separation || (mode == :musical ? SEPARATION.fetch(song.format, 1.0) : 1.0)).to_f
           @name = name || song.title
           @result = nil
@@ -164,9 +170,9 @@ module MB
         end
 
         # What each track's sampler goes through (see #initialize):
-        # { mix_rate:, bass_mono: } (nil for none).
+        # { mix_rate:, bass_mono:, rolloff: } (nil for none).
         def post_options
-          { mix_rate: @mix_rate, bass_mono: @bass_mono }
+          { mix_rate: @mix_rate, bass_mono: @bass_mono, rolloff: @rolloff }
         end
 
         # The Tracker::Set.

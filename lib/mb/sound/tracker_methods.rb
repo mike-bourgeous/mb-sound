@@ -23,7 +23,8 @@ module MB
       # default for MOD, 669, S3M; :linear for XM and IT), or :sinc;
       # +mix_rate+ (e.g. 22_050) mixes each channel at an old PC mixer's
       # rate; +bass_mono+ (e.g. 150) centers each channel's bass, for wide
-      # pans.  Effects the player skips are listed in one warning.
+      # pans; +rolloff+ (e.g. 14_000) a gentle lowpass on each channel.
+      # Effects the player skips are listed in one warning.
       #
       #     song = mod_import('tune.mod', separation: 0.8, bass_mono: 150)
       #     song = mod_import('tune.s3m', interpolation: :linear, mix_rate: 22_050)
@@ -32,11 +33,11 @@ module MB
       #     play song
       #     render 'tune.flac', song
       #     song.setup; go :p03; fx :ch2, L.fx.reverb.hall
-      def mod_import(path, mode: :musical, separation: nil, limits: :format, interpolation: nil, mix_rate: nil, bass_mono: nil)
+      def mod_import(path, mode: :musical, separation: nil, limits: :format, interpolation: nil, mix_rate: nil, bass_mono: nil, rolloff: nil)
         song = Tracker.read(path)
         song.problems.each { |p| warn "#{File.basename(path.to_s)}: #{p}" }
         set = Tracker::Import.new(song, mode: mode, separation: separation, limits: limits, interpolation: interpolation, mix_rate: mix_rate,
-                                        bass_mono: bass_mono, name: File.basename(path.to_s, '.*')).set
+                                        bass_mono: bass_mono, rolloff: rolloff, name: File.basename(path.to_s, '.*')).set
         unless set.unsupported.empty?
           warn "#{File.basename(path.to_s)}: effects not played: #{set.unsupported.map { |n, c| "#{n} (#{c}x)" }.join(', ')}"
         end

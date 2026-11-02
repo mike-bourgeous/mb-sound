@@ -262,6 +262,9 @@ RSpec.describe(MB::Sound::Tracker::ModReader, :aggregate_failures) do
       top = ->(x) { s = MB::Sound.real_fft(Numo::DFloat.cast(x[4800...24_000])).abs; s[(9000 * 19_200 / 48_000)..].sum / s.sum }
       # (channel 1 is hard left: its energy above 9 kHz drops once mixed at 11 kHz, the folded content landing lower)
       expect(top.(low[0])).to be < top.(plain[0]) * 0.5
+      rolled = play(MB::Sound.mod_import(path, separation: 1, rolloff: 4000), 24_000)
+      expect(top.(rolled[0])).to be < top.(plain[0]) * 0.2
+      expect { t::Import.new(t.read(path), rolloff: 30_000) }.to raise_error(ArgumentError, /rolloff/)
       _, r = play(MB::Sound.mod_import(path, separation: 1, bass_mono: 2000), 24_000)
       expect(r[4800..].abs.max).to be > 0.05
       expect(plain[1][4800..].abs.max).to be < 1e-6

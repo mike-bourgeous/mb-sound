@@ -38,8 +38,8 @@ module MB
         # the song ends).
         attr_reader :restart
 
-        # What each track's sampler goes through: { mix_rate:, bass_mono: }
-        # (see Import#initialize).
+        # What each track's sampler goes through: { mix_rate:, bass_mono:,
+        # rolloff: } (see Import#initialize).
         attr_reader :post
 
         def initialize(import:, tracks:, scenes:, plays:, restart:, bpm:, voice:, instrument:, unsupported:, post: {})
@@ -107,10 +107,12 @@ module MB
           options = @voice
           rate = @post[:mix_rate]
           mono = @post[:bass_mono]
-          return proc { |clip| clip.sampler(inst, **options) } unless rate || mono
+          top = @post[:rolloff]
+          return proc { |clip| clip.sampler(inst, **options) } unless rate || mono || top
           proc { |clip|
             out = clip.sampler(inst, **options)
             out = out.decimate(rate, interpolation: :linear) if rate
+            out = out.filter(:lowpass, cutoff: top, quality: Math.sqrt(0.5)) if top
             out = out.mono_below(mono) if mono
             out
           }
