@@ -64,6 +64,21 @@ Measured but kept: MOD slides, tone portamento, fine slides, and ProTracker's li
 
 The units (`lib/mb/sound/tracker/effects.rb`, for a general effect framework to wrap later): `Effects::Waveform` (tables per kind), `Effects::Oscillator` (position and waveform, retrigger, `#tick(t, speed)` under a timing: :protracker, :fasttracker, :impulse), `Effects::Arpeggio.semitones(param, t, speed:, order:)`, `Effects::Slide.toward`/`.by` (tone portamento, limits), `Effects.it_linear_units`.  Each format's player keeps one Oscillator per channel (`Player#vibrato_style`) and turns the values into its own period units.
 
+Per module (the maintainer's eight; each channel's sine-sample copy, the first 60 s, `:musical` against openmpt123, ticks both voiced and steady; cents):
+
+| module | before: within 5 / 20 cents, p95 | after | render off its own log (> 20 cents), before / after |
+|---|---|---|---|
+| cry4bass.mod | 88.2% / 94.2%, 95 | 99.9% / 100%, 1.3 | 5.55% / 0 |
+| mach.mod | 99.3% / 99.7%, 4.5 | 100% / 100%, 0.8 | 0.30% / 0 |
+| yo_space.mod (8 ch) | 81.6% / 83.0% | 81.8% / 83.0% (the rest: bottomed-out notes an octave off openmpt123's 3424; `:hardware` 100% within 20) | 0.04% / 0.01% |
+| 2nd_pm.s3m | 99.7% / 99.8%, 3.2 | 99.9% / 100%, 3.2 | 0.21% / 0 |
+| boom!.669 | 95.9% / 96.1%, 2.4 | the same (the 4% are note-change ticks a tick apart) | 0 / 0 |
+| floating.xm | 100% / 100%, 0.2 | 100% / 100%, 0.2 | 0.15% / 0.02% |
+| 2bseen.xm | 90.9% / 99.2%, 5.5 | 99.2% / 99.3%, 1.7 | 0.38% / 0.70% (background voices) |
+| drwho.it | 84.9% / 87.0%, 1200 | 97.9% / 100%, 1.9 | 2.08% / 1.93% (background voices) |
+
+The copies loop every sample, so notes ring longer than in the songs (drwho's 1200-cent stretch was a G onto another sample on a note that had ended in the original).  `:hardware` renders measure worse than their own logs (drop-sample images fold into the tracker's band); their logs agree with openmpt123 as `:musical`'s do.
+
 **Limits** (the maintainer, about yo_space.mod, an 8-channel MOD whose notes step down past the period table: "mb-sound is playing this the way most players I've heard do, where the descending notes bottom out at a fixed pitch.  But I've heard one or two players that keep the pitch descending toward zero"): the bottoming out is the reader's period-to-note mapping (a stored period past the five-octave table maps to its lowest note, 1712), not a slide clamp.  `limits: :none` (`mod_import`, `Import`, `Player`; default `:format`) plays stored periods past the table as their own notes (`ModReader.note_of(period, extended: true)`) and lifts every format's slide limits, keeping the period at or above `Player::PERIOD_FLOOR` (1), so a slide falls toward 0 Hz; the bend lane's range (96 semitones) stops it eight octaves below the note.  Measured: openmpt123 plays yo_space's stored periods down to 3424 and holds there (four times C-1), between the two.  `:hardware` already played stored periods (as Paula would) and still does; `:musical` bottoms out unless `limits: :none`.  A 23 s slide to 44 Hz renders without NaNs or slowdown.  669's slides already stop at 1 Hz.
 
 ## Reads, mixer rates, and bass (tracker-2, the maintainer's tracker-1 Bench notes)
