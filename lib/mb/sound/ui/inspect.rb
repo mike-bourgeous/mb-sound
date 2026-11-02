@@ -361,7 +361,10 @@ module MB
             snap = Inspect.snapshot(n, extras)
             read = (Inspect.knobs_read(n) + extras.map { |_, rd| rd.knob.name }).uniq.freeze
             info = NodeInfo.new(key: 0, label: label, role: role_of(n, label), count: r.copies, params: snap, preview: preview?(n), knobs: read,
-                                section: r.section == :other ? nil : r.section, what: r.what, dest: r.dest, voice: r.voice, channels: r.channels, param_knobs: pk)
+                                # (a node no section fits shows in MOD, marked: a row the
+                                # sections view leaves out can't be reached by Up and Down,
+                                # inspector-nav-1; the guard keeps Classify#unfit empty)
+                                section: r.section == :other ? :mod : r.section, what: r.section == :other ? 'unsorted' : r.what, dest: r.dest, voice: r.voice, channels: r.channels, param_knobs: pk)
             [n, info, r.nodes, extras]
           }
 

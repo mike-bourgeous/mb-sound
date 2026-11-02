@@ -160,15 +160,13 @@ module MB
             end
             knobs = s.knobs.to_h { |k| [k.name, k] }
             list = pick_list(state, info)
-            # (Up past a row's top: the row above, from its last param, once
-            # its params are here; see #key_pick)
-            if (want = state[:pick_end]) && info.node == want
-              state[:pick] = list.length - 1
-              state[:pick_end] = nil
-            end
             # (nothing picked yet: the panel starts on the picked row's first cell)
             state[:pick] ||= list.index { |e| e[0] == :param && e[3] == info.node } if view(state, info) == :panel
-            pick = list.empty? ? nil : (state[:pick] = state[:pick].to_i.clamp(0, list.length - 1))
+            pick =
+              if list.empty? then nil
+              elsif view(state, info) == :sections then stop_index(state, info, list)
+              else state[:pick] = state[:pick].to_i.clamp(0, list.length - 1)
+              end
             case view(state, info)
             when :plumbing then draw_plumbing(c, info, knobs, list, pick, state)
             when :panel then draw_panel(c, info, knobs, list, pick, state)
@@ -247,7 +245,10 @@ module MB
 
             rows = info.shown
             secs = Inspect::SECTIONS.select { |sec| rows.any? { |i| info.nodes[i].section == sec } }
-            sel = info.node
+            # (the open row is the picked stop's: before the next poll
+            # brings its info, the shown node is still the last one)
+            stop = pick && list[pick]
+            sel = stop&.[](3) || info.node
             cur = sel && info.nodes[sel]&.section
             hidden = info.hidden.values.sum
             foot = hidden > 0 && c.h - y > secs.length + 3 ? 1 : 0
@@ -277,7 +278,10 @@ module MB
                 total -= 1
               end
             end
-            psel = pick && pick >= loose.length ? pick - loose.length : nil
+            # (the picked param's place in its row, or nil: a knob, or the
+            # row itself when it has no params)
+            psel = stop && stop[0] == :param ? shown_params(info.nodes[sel]).index { |name, _| name == stop[1] } : nil
+            row_picked = stop && stop[0] == :row
 
             secs.each do |sec|
               break if y >= c.h - foot
@@ -305,11 +309,15 @@ module MB
                 n = info.nodes[i]
                 on = i == sel
                 x = c.run(0, y, on ? '▸' : ' ', :key)
-                x = c.run(x, y, c.pad(row_title(n), 14), on && psel.nil? ? :key : :name, reverse: on && state[:mode] && psel.nil?)
+                x = c.run(x, y, c.pad(row_title(n), 14), on && psel.nil? ? :key : :name, reverse: on && state[:mode] && row_picked)
                 c.text(x + 1, y, c.fit(row_tail(n, knobs), [c.w - x - 1, 0].max), :dim)
                 y += 1
                 next unless on || open == :all
+                # (a picked param below the pane's bottom: the row's params
+                # scroll so it shows)
+                skip = on && psel ? [psel - (c.h - foot - y) + 1, 0].max : 0
                 shown_params(n).each_with_index do |(name, v), pi|
+                  next if pi < skip
                   break if y >= c.h - foot
                   y = draw_param(c, y, info, n, name, v, knobs, state, sel: on && state[:mode] && pi == psel, indent: 2)
                 end
@@ -625,44 +633,48 @@ module MB
             c.text(1, y, '(no params of its own)', :dim) if n.params.values.empty? && y < c.h
           end
 
+          # Up/Down (inspector-nav-1, the maintainer, 2026-11-02: "Arrow key
+          # up/down navigation in the inspector is pretty flaky ... Doesn't
+          # loop around from very top to very bottom"): one rule in every
+          # view, the next (previous) stop of #pick_list in display order,
+          # wrapping from the last to the first and back.  In the sections
+          # view the stops are every drawn row's params (a row with none is
+          # one stop of its own) after the loose knobs, so Down crosses
+          # rows and sections (ux-notes-1's "glide time up to osc2"); the
+          # stop is kept by name (#stop_key), not by an index into the
+          # picked row's params, so presses before the next poll (4/s)
+          # brings the new row's info keep counting from where they are.
           def key_pick(state, d)
             out = flush(state)
-            state[:pick] = state[:pick].to_i + d
-            # (the panel: the picked cell's row becomes the picked row, so
-            # the preview follows and its literals' bind lines are ready)
             info = state[:snap]&.inspector
-            if info && view(state, info) == :panel
-              list = pick_list(state, info)
-              state[:pick] = state[:pick].clamp(0, [list.length - 1, 0].max)
-              e = list[state[:pick]]
-              Inspect.target = { track: info.track, node: e[3], voice: info.voice, param: e[1] }.freeze if e && e[0] == :param
-            elsif info
-              list = pick_list(state, info)
-              # (sections: past the top of a row's params, the row above's
-              # last one; past the bottom, the next row's first: the
-              # maintainer, 2026-10-31: "Pressing up when at the top of an
-              # inspector list should move to the bottom of the list above,
-              # e.g. glide time up to osc2"; ux-notes-1)
-              if view(state, info) == :sections && info.shown.length > 1 && !list.empty?
-                if state[:pick] < 0
-                  msg = key_node(state, -1)
-                  state[:pick_end] = Inspect.target&.[](:node)
-                  return [*out, msg]
-                elsif state[:pick] > list.length - 1
-                  return [*out, key_node(state, 1)]
-                end
-              end
-              # (the picked param, which the preview marks: an envelope's point)
-              e = list[state[:pick].to_i.clamp(0, [list.length - 1, 0].max)]
-              param = e && e[0] == :param ? e[1] : nil
-              if (Inspect.target || {})[:param] != param
-                Inspect.target = { track: info.track, node: info.node, voice: info.voice, param: param }.compact.freeze
-              end
+            return out unless info
+            list = pick_list(state, info)
+            return out if list.empty?
+            from = view(state, info) == :sections ? stop_index(state, info, list) : state[:pick].to_i.clamp(0, list.length - 1)
+            i = (from + d) % list.length
+            e = list[i]
+            state[:pick] = i
+            if view(state, info) == :sections
+              state[:at] = stop_key(e)
+              state[:at_track] = info.track
             end
+            return out if view(state, info) == :plumbing
+            # (the stop's row becomes the picked row, so the preview follows
+            # and its literals' bind lines are ready; the picked param is
+            # what the preview marks: an envelope's point)
+            node = e[3] || Inspect.target&.[](:node) || info.node
+            param = e[0] == :param ? e[1] : nil
+            want = { track: info.track, node: node, voice: info.voice, param: param }.compact.freeze
+            Inspect.target = want unless Inspect.target == want
             out
           end
 
           def key_ask(state)
+            if (info = state[:snap]&.inspector) && view(state, info) == :sections
+              list = pick_list(state, info)
+              e = list.empty? ? nil : list[state[:pick].to_i.clamp(0, list.length - 1)]
+              return "#{row_title(info.nodes[e[3]])}: no settings to turn" if e && e[0] == :row
+            end
             if (pp = picked_param(state)) && !knob_of(state, pp)
               name, _v, b = pp
               return "#{name}: driven by #{pp[1].detail || 'a node'}" unless b
@@ -701,14 +713,14 @@ module MB
             return 'no tracks playing' if info.tracks.empty?
             i = info.tracks.index(info.track) || 0
             t = info.tracks[(i + d) % info.tracks.length]
-            state[:pick] = nil
+            state[:pick] = state[:at] = nil
             Inspect.target = { track: t, node: nil }.freeze
             [*flush(state), "inspecting #{t}"]
           end
 
           def key_node(state, d)
             info = state[:snap]&.inspector or return 'nothing to inspect'
-            rows = view(state, info) == :plumbing ? info.nodes.each_index.to_a : info.shown.sort_by { |j| [Inspect::SECTIONS.index(info.nodes[j].section) || 99, j] }
+            rows = view(state, info) == :plumbing ? info.nodes.each_index.to_a : section_rows(info)
             return 'no nodes' if rows.empty?
             at = rows.index(info.node)
             i = rows[at ? (at + d) % rows.length : (d > 0 ? 0 : -1)]
@@ -732,6 +744,7 @@ module MB
             return "#{info.track} has no drum voices (a kit's voices appear once played)" if info.voices.length < 2
             v = info.voices[((info.voices.index(info.voice) || 0) + d) % info.voices.length]
             state[:pick] = info.loose.length
+            state[:at] = nil
             Inspect.target = { track: info.track, node: nil, voice: v }.freeze
             [*flush(state), "voice #{v}"]
           end
@@ -742,7 +755,7 @@ module MB
             now = view(state, info)
             state[:plumbing] = nil
             state[:view] = now == :panel ? :sections : :panel
-            state[:pick] = nil
+            state[:pick] = state[:at] = nil
             "#{state[:view]} view (P flips)"
           end
 
@@ -755,7 +768,7 @@ module MB
           def key_fixed(state)
             info = state[:snap]&.inspector
             state[:fixed] = !state[:fixed]
-            state[:pick] = nil
+            state[:pick] = state[:at] = nil
             return "#{info&.track || 'the track'} plays no preset: its literals are cells already (F shows a preset's numbers)" unless info&.document
             state[:fixed] ? "#{info.document}'s numbers shown (Enter or Left/Right binds one; F hides them)" : "#{info.document}'s numbers hidden (F shows them)"
           end
@@ -763,7 +776,7 @@ module MB
           # p: the plumbing view (every node as chips) or back.
           def key_plumbing(state)
             state[:plumbing] = !state[:plumbing]
-            state[:pick] = nil
+            state[:pick] = state[:at] = nil
             state[:plumbing] ? 'every node, plumbing too (p: back to the sections)' : 'sections'
           end
 
@@ -773,33 +786,41 @@ module MB
 
           # Picks row +i+ (the inspector, preview, and code follow).
           def pick_row(state, info, i)
-            state[:pick_end] = nil
             n = info.nodes[i]
             state[:pick] =
               case view(state, info)
               when :plumbing then info.knobs.length
               when :panel then pick_list(state, info).index { |e| e[0] == :param && e[3] == i } || state[:pick]
-              else info.loose.length
+              else
+                list = pick_list(state, info)
+                at = list.index { |e| e[3] == i } || info.loose.length
+                state[:at] = list[at] && stop_key(list[at])
+                state[:at_track] = info.track
+                at
               end
             Inspect.target = { track: info.track, node: i, voice: info.voice }.freeze
             sec = n.section && n.section != :plumbing ? "#{Inspect::SECTION_TITLES[n.section]} " : ''
             "#{sec}#{row_title(n)}#{n.what ? " (#{n.what})" : ''}"
           end
 
-          # What Up/Down step through: [[:knob, name], ...] then [[:param,
-          # name, ParamValue], ...] of the selected row (the plumbing view:
-          # every knob; the others: the knobs no row shows).
+          # What Up/Down step through, in display order: the knobs (the
+          # plumbing view: every knob; the others: the knobs no row shows),
+          # then the plumbing view's selected node's params; the sections
+          # view's every drawn row's params, a row without shown params a
+          # [:row] stop of its own (its title is what's picked); the panel's
+          # every shown row's knob-driven and literal params.  The sections
+          # and panel lists don't depend on the picked row, so a press
+          # before the next poll steps the same list.
           #
-          # Entries are [:knob, name] or [:param, name, ParamValue, row].  The
-          # panel's are every shown row's knob-driven and literal params, in
-          # section order (they don't depend on the picked row).
+          # Entries are [:knob, name], [:param, name, ParamValue, row], or
+          # [:row, nil, nil, row].
           def pick_list(state, info)
             n = info.selected
             case view(state, info)
             when :plumbing
               info.knobs.map { |k| [:knob, k] } + (n ? n.params.values.map { |name, v| [:param, name, v, info.node] } : [])
             when :panel
-              rows = info.shown.sort_by { |j| [Inspect::SECTIONS.index(info.nodes[j].section) || 99, j] }
+              rows = section_rows(info)
               info.loose.map { |k| [:knob, k] } + rows.flat_map { |j|
                 m = info.nodes[j]
                 shown_params(m).filter_map { |name, v|
@@ -812,8 +833,41 @@ module MB
                 }
               }
             else
-              info.loose.map { |k| [:knob, k] } + (n ? shown_params(n).map { |name, v| [:param, name, v, info.node] } : [])
+              info.loose.map { |k| [:knob, k] } + section_rows(info).flat_map { |j|
+                ps = shown_params(info.nodes[j])
+                ps.empty? ? [[:row, nil, nil, j]] : ps.map { |name, v| [:param, name, v, j] }
+              }
             end
+          end
+
+          # The sections view's rows in display order (SECTIONS, then each
+          # section's rows as #shown lists them): what #draw_sections draws
+          # and #pick_list steps, from one place.
+          def section_rows(info)
+            rows = info.shown
+            Inspect::SECTIONS.flat_map { |sec| rows.select { |i| info.nodes[i].section == sec } }
+          end
+
+          # A #pick_list entry's identity: [kind, name, row].
+          def stop_key(e) = [e[0], e[1], e[3]]
+
+          # The index in +list+ (the sections view's #pick_list) of the
+          # picked stop (state[:at]), kept by name across polls; a row
+          # picked from outside the keys (design, a voice or track switch,
+          # Inspect.target set elsewhere: neither the shown row nor the
+          # target's is the stop's) or a stop gone starts on the shown
+          # row's first stop.  Sets state[:pick] and state[:at].
+          def stop_index(state, info, list)
+            at = state[:at]
+            if at && (state[:at_track] != info.track || (at[2] && at[2] != info.node && at[2] != Inspect.target&.[](:node)))
+              at = nil
+            end
+            i = at && list.index { |e| stop_key(e) == at }
+            i ||= at && at[2] && list.index { |e| e[3] == at[2] }
+            i ||= list.index { |e| e[3] == info.node } || 0
+            state[:at] = stop_key(list[i])
+            state[:at_track] = info.track
+            state[:pick] = i
           end
 
           # The knob param row +pp+ ([name, ParamValue, Bind, row]) turns, or
@@ -831,6 +885,7 @@ module MB
             list = pick_list(state, info)
             return nil if list.empty?
             e = list[state[:pick].to_i.clamp(0, list.length - 1)]
+            return nil if e[0] == :row
             kn = e[0] == :knob ? e[1] : knob_of(state, [e[1], e[2], nil, e[3]])
             return nil unless kn
             k = s.knobs.find { |kv| kv.name == kn } or return nil
