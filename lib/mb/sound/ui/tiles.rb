@@ -1502,11 +1502,11 @@ module MB
         end
 
         # What a pane key or tick returned (one or an Array, in order):
-        # Runs run as console lines, a Preview moves a knob live
-        # (Session#preview_turn, unjournaled: a held key's gesture), a
-        # Commit runs the gesture's line from the Session
-        # (Session#gesture_line); then the pane's #lines_ran.  A String
-        # flashes.
+        # Runs run as console lines, Turns as quiet ones (#run_turn_line),
+        # a Preview moves a knob live (Session#preview_turn, unjournaled: a
+        # held key's gesture), a Commit runs the gesture's line from the
+        # Session (Session#gesture_line) as a Turn; then the pane's
+        # #lines_ran.  A String flashes.
         def pane_result(name, r)
           ran = false
           Array(r).each do |x|
@@ -1523,10 +1523,13 @@ module MB
               rescue ArgumentError => e
                 flash("#{e.class}: #{e.message}", :bad)
               end
+            when PaneKeys::Turn
+              run_turn_line(name, x)
+              ran = true
             when PaneKeys::Commit
               s = @session || Session.existing
               code = s&.gesture_line(x.knob)
-              run_pane_line(PaneKeys::Run[code, x.note]) if code
+              run_turn_line(name, PaneKeys::Turn[code, x.note]) if code
               ran = true
             when PaneKeys::Ask
               # (a value to type: a prompt line; #line_done hands the text to the pane)
@@ -1624,6 +1627,28 @@ module MB
           print_to_repl("# #{run.note || 'ui'}\n#{Tiles.shown_code(run.code)}\n#{out.string}#{result}\n")
           flash(Tiles.one_line(result), :bad)
           nil
+        end
+
+        # Runs a knob turn's line (PaneKeys::Turn) like #run_quiet_line
+        # (journaled, in the take, nothing in the REPL pane unless it
+        # fails), keeps it as pane +name+'s turn line (one line, replaced
+        # on every turn: KnobTurns#turn_line_canvas), and flashes its note
+        # (inspector-headers-1, the maintainer's 2026-11-02 "Too much noise
+        # in the repl; knob turn code should have one line in a dedicated
+        # panel if shown").
+        def run_turn_line(name, turn)
+          out = StringIO.new
+          r = with_output_to(out) { UI.run_line(turn.code, @session || Session.existing) }
+        rescue StandardError, ScriptError => e
+          result = "#{e.class}: #{e.message}"
+          print_to_repl("# #{turn.note || 'ui'}\n#{Tiles.shown_code(turn.code)}\n#{out.string}#{result}\n")
+          flash(Tiles.one_line(result), :bad)
+          nil
+        else
+          shown = Tiles.one_line(Tiles.shown_code(turn.code))
+          @states[name][:turn_line] = shown
+          flash(Tiles.one_line(turn.note || shown), :ok)
+          r
         end
 
         def run_pane_line(run)

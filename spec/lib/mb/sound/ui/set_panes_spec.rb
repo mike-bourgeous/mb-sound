@@ -169,7 +169,7 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       out = key(:racks, st, :reset)
       expect(out[0]).to be_a(pk::Commit)
       expect(out[0].knob).to eq(:"bass/dub/tone")
-      expect(out[1]).to eq(pk::Run['turn :"bass/dub/tone", 2400', 'bass/dub/tone 2400'])
+      expect(out[1]).to eq(pk::Turn['turn :"bass/dub/tone", 2400', 'bass/dub/tone 2400'])
       pane.lines_ran(st)
       key(:racks, st, :pick, 5) # (clamped)
       expect(key(:racks, st, :turn, 1.0)).to eq([pk::Preview[:"bass/dub/tone", 8000.0]])
@@ -368,6 +368,7 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       expect(wait_until { @tiles.router.mode == :pane && @tiles.tiler.focus == :racks }).to eq(true)
       turns = -> { @session.journal.changes.count { |e| e.kind == :turn } }
       before = turns.call
+      repl = @tiles.send(:repl_lines)
       # A held Right: a press, then repeats 40 ms apart
       @term.write("\e[C")
       sleep 0.3
@@ -375,12 +376,16 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       expect(turns.call).to eq(before) # (nothing journaled until the keys stop)
       sp = @session.knobs.values.find { |k| k.name.to_s.end_with?('dub/space') }
       expect(wait_until { sp.value > 0.4 }).to eq(true) # (but the knob moved, heard while held)
-      # (the fitted keyframes: gesture-curves)
-      expect(@term.wait_for(/turn :"(drone\/)?dub\/space", 0 => 0\.32, \S+ => 0\.3\d/, timeout: 3)).to eq(true), @term.text
+      # (the fitted keyframes, gesture-curves, as the pane's one turn line,
+      # not in the REPL pane: inspector-headers-1, the maintainer's "Too
+      # much noise in the repl")
+      expect(@term.wait_for(/│turn :"(drone\/)?dub\/space", 0 => 0\.32, /, timeout: 3)).to eq(true), @term.text
+      expect(@tiles.instance_variable_get(:@states)[:racks][:turn_line]).to match(/\Aturn :"(drone\/)?dub\/space", 0 => 0\.32, \S+ => 0\.3\d/)
       expect(@term.text).to include("dub/space 0.48 (")
       expect(wait_until { turns.call == before + 1 }).to eq(true)
       sleep ui::TurnGesture::GAP + 0.1
       expect(turns.call).to eq(before + 1)
+      expect(@tiles.send(:repl_lines)).to eq(repl), @term.text
       expect(@tiles.mode_problems).to eq([])
     ensure
       stop = true

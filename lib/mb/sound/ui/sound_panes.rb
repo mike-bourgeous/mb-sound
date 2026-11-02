@@ -153,6 +153,7 @@ module MB
 
           def draw_body(c, s, state)
             state[:snap] = s
+            c = turn_line_canvas(c, state)
             info = s&.inspector
             if info.nil? || info.track.nil?
               c.puts ['nothing to inspect ', :dim], ['(play a track: bg :bass, clip)', :dim]
@@ -286,12 +287,12 @@ module MB
               key = Inspect::SECTION_KEYS[sec]
               next if collapsed[sec] == :omit
               if collapsed[sec]
-                x = band(c, y, sec, title, key, false, state, width: chip_width(state))
+                x = heading(c, y, sec, title, key, false, state, chip: chip_width(state))
                 c.text(x + 1, y, c.fit(list.map { |i| row_title(info.nodes[i]) }.join(' · '), [c.w - x - 1, 0].max), :text)
                 y += 1
                 next
               end
-              band(c, y, sec, title, key, sec == cur, state)
+              heading(c, y, sec, title, key, sec == cur, state)
               y += 1
               # (the picked section's rows scroll to keep the picked row and
               # its params on screen)
@@ -318,25 +319,29 @@ module MB
             c.text(0, c.h - 1, c.fit("#{hidden} plumbing nodes hidden (p shows)", c.w), :dim) if foot == 1
           end
 
-          # Section background roles (the theme's band colors).
-          BANDS = { source: :band_source, filter: :band_filter, amp: :band_amp, mod: :band_mod, fx: :band_fx }.freeze
+          # Section heading roles (the theme's section colors).
+          SECTION_ROLES = { source: :band_source, filter: :band_filter, amp: :band_amp, mod: :band_mod, fx: :band_fx }.freeze
 
-          # A section heading as a colored band (ux-notes-2; the
-          # maintainer's note 3, "maybe subsections need more contrasting
-          # colors and should only show shortcuts when focused?", and his
-          # "Keys only when focused" + "Contrasting bands"): the title on
-          # the section's color across +width+ columns (the row, or a
-          # collapsed line's chip), the picked section bold and marked ▸,
-          # and its jump key only while the inspector's keys are live (its
-          # mode: outside it, s is NAV's split).  Returns the column after
-          # it.
-          def band(c, y, sec, title, key, cur, state, width: c.w)
+          # A section heading (inspector-headers-1, the maintainer's
+          # 2026-11-02 note: "I'd like the inspector to use foreground
+          # colors and lines rather than background colors for headers";
+          # ux-notes-2 made them background bands): the title in the
+          # section's color, the picked section bold and marked ▸, its jump
+          # key only while the inspector's keys are live (its mode: outside
+          # it, s is NAV's split; ux-notes-2's "Keys only when focused"),
+          # then a rule in the section's color to the row's end.  Given a
+          # +chip+ width (a collapsed line's title), no rule: the title
+          # padded to it.  Returns the column after it.
+          def heading(c, y, sec, title, key, cur, state, chip: nil)
+            role = SECTION_ROLES[sec] || :band_knobs
             k = state[:mode] && key && !key.empty? ? "  #{key}" : ''
-            text = "#{cur ? '▸' : ' '}#{title}#{k} "
-            c.run(0, y, c.pad(text, [width, text.length].max.clamp(0, c.w)), :band_text, bg: BANDS[sec] || :band_knobs, bold: cur)
+            text = "#{cur ? '▸' : ' '}#{title}#{k}"
+            return c.text(0, y, c.pad("#{text} ", [chip, text.length + 1].max.clamp(0, c.w)), role, bold: cur) if chip
+            x = c.text(0, y, text, role, bold: cur)
+            c.text(x, y, " #{c.glyph(:hrule) * [c.w - x - 2, 0].max}", role)
           end
 
-          # A collapsed line's band chip width (a section title, its key
+          # A collapsed line's title chip width (a section title, its key
           # while the keys are live).
           def chip_width(state) = state[:mode] ? 12 : 9
 
@@ -492,13 +497,13 @@ module MB
               key = sec ? Inspect::SECTION_KEYS[sec] : ''
               names = cell_names(info, cells.map(&:first))
               if tight && sec != cur
-                x = band(c, y, sec, title, key, false, state, width: chip_width(state))
+                x = heading(c, y, sec, title, key, false, state, chip: chip_width(state))
                 summary = cells.each_with_index.map { |(e, _), j| "#{names[j]} #{cell_value_text(info, e, knobs, state)}" }.join('  ')
                 c.text(x + 1, y, c.fit(summary, [c.w - x - 1, 0].max), :dim)
                 y += 1
                 next
               end
-              band(c, y, sec, title, key, sec == cur, state)
+              heading(c, y, sec, title, key, sec == cur, state)
               y += 1
               cells.each_slice(per).with_index do |slice, si|
                 break if y >= c.h
@@ -681,7 +686,7 @@ module MB
             cell = picked(state) or return no_knob_note
             text = text.to_s.strip
             return 'nothing typed' if text.empty?
-            PaneKeys::Run["turn #{cell[0].inspect}, #{text}", "#{cell[0]} #{text}"]
+            PaneKeys::Turn["turn #{cell[0].inspect}, #{text}", "#{cell[0]} #{text}"]
           end
 
           # The `bind` line #key_ask offered, as typed (Enter runs it).

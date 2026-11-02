@@ -431,6 +431,7 @@ module MB
 
           def draw_body(c, s, state)
             state[:snap] = s
+            c = turn_line_canvas(c, state)
             racks = s&.racks || []
             if racks.empty?
               c.puts ['no racks ', :dim], ['(arack :dub do |sig| ... end; sig.then(&rack(:dub)))', :dim]

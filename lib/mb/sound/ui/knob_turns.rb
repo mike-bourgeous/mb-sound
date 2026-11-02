@@ -7,8 +7,10 @@ module MB
       # screen's Session#preview_turn) and ONE journaled console line when
       # the keys stop (PaneKeys::Commit, Session#gesture_line), through a
       # UI::TurnGesture; a set value is one `turn :name, value` line
-      # (PaneKeys::Run).  The value a key set stands in for the knob for
-      # PENDING seconds, until the snapshot catches up.
+      # (PaneKeys::Turn).  The value a key set stands in for the knob for
+      # PENDING seconds, until the snapshot catches up.  Turn lines never
+      # print in the REPL pane: the latest shows on the pane's last row
+      # (#turn_line_canvas; inspector-headers-1).
       #
       # A pane including it defines `picked(state)`: the knob its keys
       # turn as [knob name, KnobValue] (from the snapshot it drew), or nil.
@@ -83,6 +85,19 @@ module MB
           state[:gesture]&.ran
         end
 
+        # Rows a pane needs before its last one shows the turn line.
+        TURN_LINE_ROWS = 4
+
+        # The latest turn's line (the screen's `state[:turn_line]`, one
+        # line, replaced on every turn) on +c+'s last row, dim, when there
+        # is one and room; returns the canvas for the rest of the pane.
+        def turn_line_canvas(c, state)
+          line = state[:turn_line]
+          return c if line.nil? || c.h < TURN_LINE_ROWS
+          c.text(0, c.h - 1, c.fit(line, c.w), :dim)
+          c.sub(0, 0, c.w, c.h - 1)
+        end
+
         # The value to show for knob +kn+ (KnobValue +k+): a turning
         # gesture's target, else a value a key just set, else the
         # snapshot's.  Returns [value, turning?].
@@ -115,7 +130,7 @@ module MB
         def set(state, kn, value)
           (state[:pending] ||= {})[kn] = [value, self.class.clock.call]
           v = TurnGesture.number(value)
-          PaneKeys::Run["turn #{kn.inspect}, #{v}", "#{kn} #{v}"]
+          PaneKeys::Turn["turn #{kn.inspect}, #{v}", "#{kn} #{v}"]
         end
 
         def pending(state, kn)
