@@ -66,9 +66,11 @@ module MB
         end
 
         # The master gain it plays at: the Session's usual -10 dB of
-        # headroom for things synthesized at full scale (MIDI on the default
-        # patch, instruments); unity for recordings and modules, which carry
-        # their own levels (as effect scripts play recordings).
+        # headroom for things that sum full-scale parts (MIDI on the default
+        # patch, instruments, a module's channels: Tracker::Import::GAINS
+        # were matched to openmpt123 through it, as `play` plays modules);
+        # unity for recordings, which carry their own levels (as effect
+        # scripts play them).
         def master_gain = Session::DEFAULT_MASTER_GAIN
 
         # Seconds the file plays (nil if unknown).
@@ -313,7 +315,6 @@ module MB
 
         def kind = :module
         def layout = :player_module
-        def master_gain = 1.0 # (Tracker::Import::GAINS match openmpt123's loudness at unity)
 
         def length = @set&.seconds
 
