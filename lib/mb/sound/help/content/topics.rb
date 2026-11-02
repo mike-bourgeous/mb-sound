@@ -1644,12 +1644,16 @@ module MB
         (oscillators, samples, glide), FILTER, AMP (drive, the amp
         envelope), MOD (LFOs), FX, each envelope in the section it shapes.
         s f a o x jump to a section (again: its next row), n/N step rows,
-        Up/Down pick the open row's params, Left/Right turn the knob a
+        Up/Down step every param in screen order (into the next row and
+        section, wrapping at the ends), Left/Right turn the knob a
         param reads (Shift or H/L fine; a held key is a live sweep, one
         `turn` line when you let go), Enter types a value, 0 its default, m
         learns a MIDI controller.  P flips to the front panel (only the
         knobs and literals, side by side; the default at 80x24), p shows
-        every node, plumbing too; a kit picks its voice with v/V.
+        every node, plumbing too; a kit picks its voice with v/V.  A param
+        this voice and clip can't make heard shows dim, `· not heard here`,
+        the reason when picked (a filter envelope's release under a short
+        amp release; a legato glide when no notes overlap).
 
         A number no knob drives (`resonance: 0.25`, an envelope's attack, a
         point of `env([[1, 0.01], [0.6, 0.3]])`, a chained `.curve(release:
