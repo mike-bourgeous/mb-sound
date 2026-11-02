@@ -28,6 +28,9 @@ default:
   file: 20
   example: 8
 files:
+  spec/lib/mb/sound/ui/inspect_audible_spec.rb:
+    example: 12
+    reason: the slow tier renders a bar of the instrument once per turnable param to prove each turn is heard or marked (the init voice has the most params); 22.4 s for the init case in the 2026-11-02 batch suite at PARALLEL=8 under load, x2.34 = 9.6 reference seconds (inspector-nav-1)
   spec/bin/play_spec.rb:
     file: 35
     example: 12
