@@ -402,6 +402,41 @@ module MB
       end
     end
 
+    Help.topic :trackers, 'Tracker modules: MOD, 669, S3M, XM, IT', group: :sound do
+      about <<~TEXT
+        `song = mod_import('tune.mod')` reads a tracker module (.mod, .669,
+        .s3m, .xm, .it) and turns it into a set: a track per channel
+        (:ch1, :ch2, ...) playing the module's samples, a clip per pattern
+        per channel, a scene per pattern as it played (:p03, and :p03_b
+        when the song plays a pattern another way), and a flow through the
+        order list.  `play song` plays it once through (`song.play(loop:
+        true)` repeats like a tracker), `render 'tune.flac', song` renders
+        it (with `stems:`, a file per channel), and `save :tune, song`
+        writes a set document with the samples as assets.
+
+        Play with it: `song.setup` puts the tracks, scenes, and flow on the
+        session without playing, so `go :p03` loops one pattern, `fx :ch2,
+        L.fx.reverb.hall` puts a reverb on a channel, `swap :ch1,
+        song[:p03][:ch1].transpose(12)` moves a channel up an octave (notes
+        carry their pitch as marks, the key picks the sample), and `tempo
+        140` speeds the song up.  `mod_samples(path)` gives the samples
+        alone (`play mod_samples('tune.mod')[2]`).
+
+        Each tick of the module is 1/96 of a whole note, so the session
+        tempo is the module's tempo and rows at speed 6 are sixteenths.
+        Effects (slides, vibrato, arpeggio, volume slides, envelopes, ...)
+        become bend, volume (CC 7), pan (CC 10), and start (CC 20) lanes
+        that the sampler voice follows tick by tick (`clip.sampler(inst,
+        lanes: true)`).  `mode: :musical` (the default) reads samples
+        band-limited, tunes notes exactly, declicks lane steps over 1.5 ms,
+        and narrows Amiga pans; `mode: :hardware` reads drop-sample with
+        the format's integer periods, steps on the tick, and keeps hard
+        pans.  Effects it doesn't play are listed when the module loads.
+      TEXT
+      commands :mod_import, :tracker_import, :mod_samples
+      see :sampler, :sets, :flow
+    end
+
     Help.topic :soundfonts, 'SoundFonts (.sf2)', group: :sound do
       about <<~TEXT
         `font = sf2('GM.sf2')` opens a SoundFont 2 file; `font.presets`
