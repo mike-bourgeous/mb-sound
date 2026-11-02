@@ -62,8 +62,8 @@ module MB
             on ['T'], :track, -1, help: 'the previous track', label: 't T'
             on ['v'], :voice, 1, help: "a kit's next voice", label: 'v V'
             on ['V'], :voice, -1, help: "a kit's previous voice", label: 'v V'
-            on ['P'], :view, help: "the front panel or sections; F: a preset's numbers as cells", label: 'P F'
-            on ['F'], :fixed, help: "the front panel or sections; F: a preset's numbers as cells", label: 'P F'
+            on ['P'], :view, help: 'the front panel or the sections', label: 'P F'
+            on ['F'], :fixed, help: "a preset's numbers as panel cells, or not", label: 'P F'
             on ['p'], :plumbing, help: 'every node as chips, the hidden plumbing too (again: back)', label: 'p'
           end
 
@@ -1389,15 +1389,20 @@ module MB
 
           # [built, planned]: [[keys, help], ...] each; the inspector's
           # bindings grouped by their label ("Up Down": "previous knob /
-          # next knob"), fine turns left out (Shift is on the status line).
+          # next knob"; the ? page names each binding's own keys), fine
+          # turns left out (Shift is on the status line).
           def self.rows
             groups = {}
-            Inspector.mode_keymap.help_groups.flat_map { |_, rows| rows }.each do |keys, help|
-              next if help.include?('fine')
-              label = keys.split.length > 2 ? keys.split.first(2).join(' ') : keys
-              (groups[label] ||= []) << help.sub(/ \(.*\z/, '')
+            Inspector.mode_keymap.entries.each do |b|
+              next if b.help.nil? || b.help.include?('fine')
+              label = b.label || MB::Term::Input::Keymap.keys_name(b.keys)
+              (groups[label] ||= []) << b.help.sub(/ \(.*\z/, '')
             end
-            [[PICKER] + groups.map { |label, helps| [label, helps.uniq.join(' / ')] }, PLANNED]
+            # (labels saying the same things: the first one's line, n N for
+            # Tab S-Tab too; the ? page names each)
+            merged = {}
+            groups.each { |label, helps| merged[helps.uniq] ||= label }
+            [[PICKER] + merged.map { |helps, label| [label, helps.join(' / ')] }, PLANNED]
           end
 
           def draw_body(c, _s, _state)
