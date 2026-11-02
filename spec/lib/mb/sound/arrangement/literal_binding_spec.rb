@@ -458,8 +458,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     snap = snap.with(slow: snap.slow.with(inspector: info), knobs: [].freeze)
     pane = ui.panes.fetch(:inspector)
     st = { title_in_rule: true, mode: true, snap: snap }
-    names = lp4.params.values.keys
-    st[:pick] = names.index(:resonance) # (no knobs: the params come first)
+    st[:pick] = pane.send(:pick_list, st, info).index { |e| e[0] == :param && e[1] == :resonance && e[3] == i }
     grid = MB::Term::Cells.new(80, 16)
     pane.draw(ui::Canvas.new(grid, 0, 0, 80, 16), snap, st)
     expect(grid.to_text(:none)).to include('Enter: knob :"lead/resonance"')

@@ -752,8 +752,7 @@ module MB
             info = state[:snap]&.inspector or return 'nothing to inspect'
             return "#{info.track} has no drum voices (a kit's voices appear once played)" if info.voices.length < 2
             v = info.voices[((info.voices.index(info.voice) || 0) + d) % info.voices.length]
-            state[:pick] = info.loose.length
-            state[:at] = nil
+            state[:pick] = state[:at] = nil
             Inspect.target = { track: info.track, node: nil, voice: v }.freeze
             [*flush(state), "voice #{v}"]
           end
@@ -870,9 +869,12 @@ module MB
             at = state[:at]
             if at && (state[:at_track] != info.track || (at[2] && at[2] != info.node && at[2] != Inspect.target&.[](:node)))
               at = nil
+              state[:pick] = nil
             end
             i = at && list.index { |e| stop_key(e) == at }
             i ||= at && at[2] && list.index { |e| e[3] == at[2] }
+            # (an index a caller set, without a stop: that stop)
+            i ||= state[:pick] if at.nil? && state[:pick].is_a?(Integer) && state[:pick].between?(0, list.length - 1)
             i ||= list.index { |e| e[3] == info.node } || 0
             state[:at] = stop_key(list[i])
             state[:at_track] = info.track
