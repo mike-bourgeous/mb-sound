@@ -386,6 +386,7 @@ module MB
         path = File.join(self.class.tmp_dir, name) if path == :tmp
         raise ArgumentError, "take.save takes a path or :tmp (got #{path.inspect}), then a note: take.save :tmp, 'UX friction'" if path.is_a?(Symbol)
         path = File.expand_path(path.to_s) if path # `~/x.rb` is a home path, as in a shell
+        path = "#{path}.rb" if path && File.extname(path).empty? # a take is a script (`take.save 'tmp/verse'` writes tmp/verse.rb)
         path ||= File.join(home || (repo ? File.expand_path('../../../sets', __dir__) : self.class.data_dir), name)
         FileUtils.mkdir_p(File.dirname(path))
         File.write(path, to_ruby(note: note))

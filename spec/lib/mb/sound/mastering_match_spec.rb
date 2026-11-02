@@ -13,6 +13,9 @@ RSpec.describe('MB::Sound::Mastering :match', :aggregate_failures) do
 
   describe MB::Sound::Analysis::Spectrum do
     it 'measures white noise at +3 dB/oct and pink noise near 0, gating silence' do
+      # (seeded: unseeded noise measured 3.01-3.124 over 40 seeds, 6 outside
+      # 0.1 of 3; seed 2 measures 3.017)
+      Numo::NArray.srand(2)
       white = Numo::DFloat.new(rate * 4).rand_norm * 0.1
       expect(MB::Sound::Analysis::Spectrum.new(white).tilt).to be_within(0.1).of(3)
       pink = rendered(MB::Sound.noise(:pink), 4)

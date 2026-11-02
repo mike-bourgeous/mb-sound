@@ -670,6 +670,17 @@ RSpec.describe(MB::Sound::Take) do
     ENV['HOME'] = old
   end
 
+  # (the maintainer saved `tmp/sound design sunday`, 2026-11-02: "should that
+  # have auto-added a file extension?")
+  it 'adds .rb to a path without an extension and keeps one that has one' do
+    path = nil
+    expect { path = take.save(tmp_path('sound design sunday')) }.to output(/Saved the take to .*sound design sunday\.rb/).to_stdout
+    expect(path).to end_with('/sound design sunday.rb')
+    expect(File.read(path)).to eq(take.to_ruby)
+    expect { path = take.save(tmp_path('verse.take')) }.to output(/verse\.take/).to_stdout
+    expect(path).to end_with('/verse.take')
+  end
+
   it 'saves to tmp/takes with take.save :tmp, even with a set home' do
     expect(described_class.tmp_dir).to end_with('/tmp/takes')
     allow(described_class).to receive(:tmp_dir).and_return(tmp_path('tmp_takes'))
