@@ -706,27 +706,30 @@ module MB
         }
       end
 
-      # Plots the background mix (see #bg) live until you press Ctrl-C, then
-      # returns to the prompt while playback continues.  Each frame plots
-      # the newest buffer of the mix with level meters, as fast as the
-      # plotter can draw; buffers that arrive while a frame is drawing are
-      # skipped.  Also available as #vis.
+      # Shows the background mix (see #bg) live until you press Ctrl-C,
+      # then returns to the prompt while playback continues: a band of the
+      # terminal UI under the console (UI.layouts :vis, master meters with
+      # true peak and short-term loudness beside a big scope; :vis_spectrum
+      # with +spectrum+, a spectrum over log frequency with note names),
+      # each buffer drawn when it reaches the speakers (the output's
+      # latency).  With a tiled screen or band already up, its scope (or
+      # spectrum) pane shows the mix instead.  Also available as #vis.
       #
-      # +:graphical+ plots inline images (iTerm2, kitty, sixel) instead of
-      # text, and +:spectrum+ plots the frequency spectrum (log frequency
-      # with note names) instead of the waveform.
+      # +:graphical+ plots inline images (iTerm2, kitty, sixel) of each
+      # buffer instead (a PlotOutput, without meters).
       #
-      # The mix is rendered a little ahead of what you hear (by the output's
-      # buffering), so the plot may lead the sound slightly.
-      #
-      # +:stop+ is an optional callable checked about every 50 ms; plotting
+      # +:stop+ is an optional callable checked about every 50 ms; the view
       # ends when it returns true (e.g. when a script's #wait has returned,
       # so `--plot` doesn't keep a finished script running).
       #
-      # +:header+ replaces the title line above the plot (#play shows what
-      # it plays there).
+      # +:header+ is the title line above an inline-image plot (#play shows
+      # what it plays there).
       #
       # Returns a Hash with the number of frames drawn and the frame rate.
+      #
+      # (play-ui-1: the band replaced the old text meters,
+      # MB::Sound::Meter.linear_meters, which drew cursor-up rows of bars
+      # above the plot and raised in terminals under 22 columns.)
       def visualize(graphical: false, spectrum: false, stop: nil, header: nil)
         session = Session.default
         unless session.running?
@@ -738,67 +741,9 @@ module MB
         if (screen = UI.screen)
           return visualize_in_ui(screen, spectrum: spectrum, stop: stop)
         end
+        return visualize_images(session, spectrum: spectrum, stop: stop, header: header) if graphical
 
-        # Each buffer is shown when it reaches the speakers: the tap runs
-        # right after a buffer is written, so it plays after the output's
-        # current latency (DeviceOutput#latency; outputs without one are
-        # shown right away)
-        output = session.output
-        due = []
-        due_lock = Mutex.new
-        tap = session.add_tap { |mix|
-          delay = output.respond_to?(:latency) ? output.latency : 0
-          due_lock.synchronize {
-            due << [MB::U.clock_now + delay, mix.map(&:dup)] # (the render thread reuses its mix)
-            due.shift while due.length > 1000
-          }
-        }
-        latest = nil
-
-        header = "\e[H\e[J#{header || "\e[36mVisualizing the background mix\e[0m\n"}\n"
-        $stdout.write header
-        plot_output = PlotOutput.new(
-          session.output,
-          plot: plotter(graphical: graphical),
-          graphical: graphical,
-          spectrum: spectrum,
-          header_lines: header.lines.count,
-          window_size: 1 << 20 # plot the whole buffer, whatever its size
-        )
-
-        frames = 0
-        start = MB::U.clock_now
-        shown = nil
-        next_check = start
-        loop do
-          now = MB::U.clock_now
-          if stop && now >= next_check
-            break if stop.call
-            next_check = now + 0.05
-          end
-
-          due_lock.synchronize {
-            latest = due.shift[1] while due.first && due.first[0] <= now
-          }
-
-          data = latest
-          if data.nil? || data.equal?(shown)
-            sleep 0.001
-            next
-          end
-
-          shown = data
-          plot_output.plot(data)
-          frames += 1
-        end
-
-        visualize_result(start, frames)
-
-      rescue Interrupt
-        visualize_result(start, frames)
-
-      ensure
-        session.remove_tap(tap) if tap
+        visualize_band(session, spectrum: spectrum, stop: stop)
       end
       alias vis visualize
 
@@ -1102,6 +1047,77 @@ module MB
         { pane: kind }
       ensure
         restore&.call
+      end
+
+      # #visualize on a band of the terminal UI (UI.layouts :vis or
+      # :vis_spectrum) under the console, until +stop+ (or Ctrl-C).
+      def visualize_band(session, spectrum:, stop:)
+        io = $stdout
+        size = io.respond_to?(:winsize) && io.tty? ? nil : [MB::U.height, MB::U.width]
+        band = UI::Band.new(layout: UI.layouts.fetch(spectrum ? :vis_spectrum : :vis), session: session, io: io, size: size)
+        puts "\e[2mvis: the mix (Ctrl-C returns)\e[0m" if stop.nil?
+        UI.warm_up
+        start = MB::U.clock_now
+        band.start
+        if stop
+          sleep 0.05 until stop.call
+        else
+          sleep 0.05 while session.running?
+        end
+        visualize_result(start, band.stats[:frames])
+      rescue Interrupt
+        visualize_result(start, band&.stats&.[](:frames))
+      ensure
+        band&.stop
+      end
+
+      # #visualize with inline images: each buffer when it reaches the
+      # speakers (the tap runs right after a buffer is written, so it plays
+      # after the output's latency, DeviceOutput#latency) through a
+      # PlotOutput's image plotter.
+      def visualize_images(session, spectrum:, stop:, header:)
+        output = session.output
+        due = []
+        due_lock = Mutex.new
+        tap = session.add_tap { |mix|
+          delay = output.respond_to?(:latency) ? output.latency : 0
+          due_lock.synchronize {
+            due << [MB::U.clock_now + delay, mix.map(&:dup)] # (the render thread reuses its mix)
+            due.shift while due.length > 1000
+          }
+        }
+
+        header = "\e[H\e[J#{header || "\e[36mVisualizing the background mix\e[0m\n"}\n"
+        $stdout.write header
+        plot_output = PlotOutput.new(session.output, plot: plotter(graphical: true), graphical: true, spectrum: spectrum,
+                                     header_lines: header.lines.count, window_size: 1 << 20) # (the whole buffer, whatever its size)
+
+        frames = 0
+        start = MB::U.clock_now
+        shown = nil
+        latest = nil
+        next_check = start
+        loop do
+          now = MB::U.clock_now
+          if stop && now >= next_check
+            break if stop.call
+            next_check = now + 0.05
+          end
+          due_lock.synchronize { latest = due.shift[1] while due.first && due.first[0] <= now }
+          data = latest
+          if data.nil? || data.equal?(shown)
+            sleep 0.001
+            next
+          end
+          shown = data
+          plot_output.plot(data)
+          frames += 1
+        end
+        visualize_result(start, frames)
+      rescue Interrupt
+        visualize_result(start, frames)
+      ensure
+        session.remove_tap(tap) if tap
       end
 
       def visualize_result(start, frames)

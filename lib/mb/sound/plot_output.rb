@@ -2,101 +2,79 @@ require 'forwardable'
 
 module MB
   module Sound
-    # A wrapper for any audio output stream that responds to the #write method
-    # that plots whatever's being written as fast as the display can keep up.
+    # A wrapper for any audio output stream that responds to the #write
+    # method that shows whatever's being written: on a terminal, a band of
+    # the terminal UI under the console (UI.layouts :vis, master meters
+    # beside a scope; :vis_spectrum with +spectrum+), fed by a
+    # UI::BufferFeed; with +graphical+ (or a +plot+ plotter given), an
+    # inline-image chart of each buffer, as fast as the display keeps up.
+    # `output(plot: true)` and `loopback` make one.
+    #
+    # (play-ui-1: the band replaced the old text meters drawn above each
+    # plot, MB::Sound::Meter.)
     class PlotOutput
       extend Forwardable
 
       def_delegators :@output, :sample_rate, :channels, :buffer_size
 
-      # If true, PlotOutput will try to manage audio/video sync by sleeping.
-      # Set this to false if something else applies backpressure to maintain
-      # sync (e.g. a synchronous plotting backend).
+      # If true, a graphical PlotOutput tries to keep audio and pictures in
+      # sync by sleeping (false: something else applies backpressure, e.g.
+      # a synchronous plotting backend).
       attr_accessor :sleep
 
       # The output stream to which this PlotOutput will forward audio data.
       attr_reader :output
 
+      # The UI::BufferFeed of what's written (its band's source).
+      attr_reader :feed
+
+      # The band showing it (nil until the first write to a terminal, and
+      # for graphical plots).
+      attr_reader :band
+
       # Initializes an output plotter for the given +output+.  Up to
-      # +:window_size+ samples will be drawn from each call to #write.
-      #
-      # +:plot+ can be used to customize the Plot instance, or to pass a
-      # different compatible plotter.
-      def initialize(output, window_size: 960, graphical: false, header_lines: 1, plot: nil, spectrum: false)
+      # +:window_size+ samples of each write are drawn in graphical plots;
+      # +:plot+ is a plotter for them (Plot::Plotter or one with its #plot
+      # Hash interface; given, graphical plots are drawn).  +:io+ is where
+      # the band draws (a terminal; nothing is drawn elsewhere).
+      def initialize(output, window_size: 960, graphical: false, header_lines: 1, plot: nil, spectrum: false, io: $stdout)
         raise "Output streams must respond to #write" unless output.respond_to?(:write)
         raise "Output streams must respond to #buffer_size" unless output.respond_to?(:buffer_size)
 
         @closed = false
-
-        @header_lines = header_lines + output.channels + 1
-        max_header = MB::U.height / 5
-        @header_lines = max_header if @header_lines > max_header
-        @window_size = window_size || output.buffer_size
-
-        @spectrum = spectrum
-
         @output = output
+        @spectrum = spectrum
+        @io = io
+        @feed = UI::BufferFeed.new(channels: output.channels, sample_rate: output.sample_rate)
+        @band = nil
+        @graphical = graphical || !plot.nil?
 
-        @plot_set = false
-        if plot
-          @p = plot
-          @plot_set = true
-        elsif graphical
-          @p = Plot::Plotter.graphical
-        else
-          @p = Plot::Plotter.terminal(height_fraction: (MB::U.height - header_lines - 2).to_f / MB::U.height)
-        end
+        @header_lines = header_lines
+        @window_size = window_size || output.buffer_size
+        @plot_set = !plot.nil?
+        @p = plot || (graphical ? Plot::Plotter.graphical : nil)
 
         @min = -0.1
         @max = 0.1
-
         @next_time = nil
         @frame = 0
-
         @sleep = true
       end
 
-      # Writes the data to the output, saves it for the plotting thread, then
-      # wakes up the plotting thread.
+      # Writes the data to the output and shows it (see the class comment).
       def write(data)
-        dw = data.map { |c|
-          c.respond_to?(:real) ? c.real : c
-        }
+        dw = data.map { |c| c.respond_to?(:real) ? c.real : c }
         @output.write(dw)
-
-        period = data[0].length.to_f / @output.sample_rate
-        now = ::MB::U.clock_now
-
-        # Subtract some time to build up a buffer before plotting
-        @next_time ||= ::MB::U.clock_now - 0.2
-
-        remaining = @next_time - now
-        this_time = @next_time
-        @next_time += period
-
-        @frame += 1
-        if !@sleep || remaining > 0.5 * period || @frame % 5 == 0
-          dp = data.flat_map { |c|
-            # TODO: show real/imag labels, plot within same chart if possible
-            c.respond_to?(:imag) ? [c.real, c.imag] : [c]
-          }
-          plot(dp)
-
-          # The sleep is necessary to maintain sync
-          remaining = this_time - ::MB::U.clock_now
-          Kernel.sleep(0.75 * remaining) if @sleep && remaining > 0
-        elsif remaining < 0
-          # Force a plot eventually for really large lags (e.g. happens when
-          # looping input to output)
-          @next_time += 0.1 * period
-        end
+        @feed.push(dw)
+        @graphical ? plot_in_time(data) : start_band
       end
 
-      # Closes the output stream and stops plotting.
+      # Closes the output stream and stops showing it.
       def close
         @closed = true
-        STDOUT.write "\e[#{@p.height + @header_lines + 2}H\n" if @p.respond_to?(:height) && @p.respond_to?(:print) && @p.print
-        @p.close unless @plot_set
+        @band&.stop
+        @band = nil
+        @p&.close unless @plot_set
         @output.close
       end
 
@@ -104,19 +82,19 @@ module MB
       def closed?
         out_closed = (@output.respond_to?(:closed?) && @output.closed?)
         close if out_closed && !@closed
-        @closed || @p.closed?
+        @closed || (@p.respond_to?(:closed?) && @p.closed?)
       end
 
       # Plots one buffer of +data+ (an Array of Numo::NArrays, one per
-      # channel) right away, with level meters, without writing it to the
-      # output.  Used by #write and by PlaybackMethods#visualize.
+      # channel) right away as a chart, without writing it to the output
+      # (graphical plots; PlaybackMethods#visualize with +graphical+).
       #
       # Plotters with #draw (MB::Sound::Plot::Plotter) get a waveform over
       # time or a spectrum over log frequency with note names; others get
       # the MB::M::Plot Hash interface (#plot with channel indexes).
       def plot(data)
+        @p ||= Plot::Plotter.graphical
         puts "\e[#{@header_lines + 1}H\e[36mPress Ctrl-C to stop\e[0m\e[K" if !@p.respond_to?(:print) || @p.print
-        Meter.linear_meters(data.map { |v| v.abs.max }, 3)
 
         samples = [@window_size, data[0].length].min
         data = data.map { |c| c[-samples..-1] }
@@ -128,7 +106,6 @@ module MB
 
         if @spectrum
           @p.logscale if @p.respond_to?(:logscale)
-          # TODO: Use a window function
           data = data.map { |c| MB::Sound.real_fft(c).abs.map(&:to_db).clip(-80, 80) }
           @p.xrange(1, data[0].length) if @p.respond_to?(:xrange)
           @p.yrange(-80, 0) if @p.respond_to?(:yrange)
@@ -142,6 +119,42 @@ module MB
       end
 
       private
+
+      # The band, on the first write to a terminal.
+      def start_band
+        return if @band || @closed || !(@io.respond_to?(:tty?) && @io.tty?) || UI.screen
+        @band = UI::Band.new(layout: UI.layouts.fetch(@spectrum ? :vis_spectrum : :vis), source: @feed.method(:snapshot), io: @io).start
+      end
+
+      # A graphical plot of +data+ when the display has time for it, sleeping
+      # to keep pictures with the sound unless +sleep+ is false.
+      def plot_in_time(data)
+        period = data[0].length.to_f / @output.sample_rate
+        now = ::MB::U.clock_now
+
+        # Subtract some time to build up a buffer before plotting
+        @next_time ||= ::MB::U.clock_now - 0.2
+
+        remaining = @next_time - now
+        this_time = @next_time
+        @next_time += period
+
+        @frame += 1
+        if !@sleep || remaining > 0.5 * period || @frame % 5 == 0
+          dp = data.flat_map { |c|
+            c.respond_to?(:imag) ? [c.real, c.imag] : [c]
+          }
+          plot(dp)
+
+          # The sleep is necessary to maintain sync
+          remaining = this_time - ::MB::U.clock_now
+          Kernel.sleep(0.75 * remaining) if @sleep && remaining > 0
+        elsif remaining < 0
+          # Force a plot eventually for really large lags (e.g. happens when
+          # looping input to output)
+          @next_time += 0.1 * period
+        end
+      end
 
       # Draws a Plot chart of +data+ (one buffer per channel).
       def draw(data)

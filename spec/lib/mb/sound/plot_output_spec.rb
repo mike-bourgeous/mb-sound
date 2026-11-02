@@ -38,14 +38,36 @@ RSpec.describe(MB::Sound::PlotOutput) do
     end
 
     it 'can create a graphical plotter' do
-      expect(STDOUT).to receive(:write).at_least(1).times
       po = MB::Sound::PlotOutput.new(output, graphical: true)
+      expect(po.instance_variable_get(:@p)).to be_a(MB::Sound::Plot::Plotter)
+      expect(po.band).to be_nil
       po.close
     end
 
-    it 'can create a terminal plotter' do
-      expect(STDOUT).to receive(:write).at_least(1).times
-      po = MB::Sound::PlotOutput.new(output)
+    # (play-ui-1: a band of the terminal UI replaced the old text meters)
+    it 'shows writes on a band of master meters and a scope when its io is a terminal, and takes it down on close' do
+      io = Class.new(StringIO) {
+        def tty? = true
+        def winsize = [30, 100]
+      }.new
+      po = MB::Sound::PlotOutput.new(MB::Sound::NullOutput.new(channels: 2, sleep: false), io: io)
+      po.write([220.hz.sample(800), 330.hz.sample(800)])
+      expect(po.band).to be_a(MB::Sound::UI::Band)
+      po.band.refresh
+      screen = MB::Term::Screen.new(30, 100)
+      screen.feed(io.string)
+      expect(screen.to_text).to include('MASTER').and include('SCOPE')
+      expect(po.feed.frames).to eq(800)
+      po.close
+      expect(po.band).to be_nil
+    end
+
+    it "doesn't draw anything when its io isn't a terminal" do
+      io = StringIO.new
+      po = MB::Sound::PlotOutput.new(MB::Sound::NullOutput.new(channels: 2, sleep: false), io: io)
+      po.write([220.hz.sample(800)] * 2)
+      expect(po.band).to be_nil
+      expect(io.string).to eq('')
       po.close
     end
   end
@@ -74,7 +96,6 @@ RSpec.describe(MB::Sound::PlotOutput) do
 
   describe '#write with a Plot plotter' do
     it 'draws a waveform with one legend entry per channel' do
-      expect(MB::Sound::Meter).to receive(:linear_meters).at_least(1).times
       po = MB::Sound::PlotOutput.new(output, window_size: 800, plot: plotter).tap { |p| p.sleep = false }
       po.write([100.hz.sample(800), 200.hz.sample(800), 300.hz.sample(800), Numo::SFloat.zeros(800)])
       lines = plotter.lines
@@ -85,7 +106,6 @@ RSpec.describe(MB::Sound::PlotOutput) do
     end
 
     it 'draws a spectrum over log frequency with note names' do
-      expect(MB::Sound::Meter).to receive(:linear_meters).at_least(1).times
       po = MB::Sound::PlotOutput.new(output, window_size: 800, plot: plotter, spectrum: true).tap { |p| p.sleep = false }
       po.write([1000.hz.sample(800)] * 4)
       lines = plotter.lines
@@ -96,7 +116,6 @@ RSpec.describe(MB::Sound::PlotOutput) do
 
   describe '#write with a Hash plotter' do
     it 'can plot in the time domain' do
-      expect(MB::Sound::Meter).to receive(:linear_meters).at_least(1).times
       expect(plot).to receive(:plot).with(short_data)
       po_time.write(short_data.values)
 
@@ -105,7 +124,6 @@ RSpec.describe(MB::Sound::PlotOutput) do
     end
 
     it 'can plot in the frequency domain' do
-      expect(MB::Sound::Meter).to receive(:linear_meters).at_least(1).times
       expect(plot).to receive(:plot).with(short_dc)
       po_freq.write(short_data.values)
 

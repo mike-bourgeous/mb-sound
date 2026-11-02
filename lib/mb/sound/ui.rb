@@ -20,6 +20,7 @@ require_relative 'ui/turn_gesture'
 require_relative 'ui/knob_turns'
 require_relative 'ui/set_panes'
 require_relative 'ui/player_panes'
+require_relative 'ui/buffer_feed'
 require_relative 'ui/sound_panes'
 require_relative 'ui/picker'
 require_relative 'ui/note_log'
@@ -137,6 +138,14 @@ module MB
           mini: Layout.new(:mini) {
             cols { pane :transport; pane :form }
           },
+          # `vis`, play's live view, --plot, bin/record.rb, and plotting
+          # outputs (play-ui-1: the old text meters gave way to these)
+          vis: Layout.new(:vis) {
+            cols { pane :meters, width: 34; pane :scope, height: 12 }
+          },
+          vis_spectrum: Layout.new(:vis_spectrum) {
+            cols { pane :meters, width: 34; pane :spectrum, height: 12 }
+          },
         }
       end
 
@@ -146,6 +155,8 @@ module MB
         band: ['the default band: transport, form, tracks, queue, meters, scope', '7 rows'],
         deck: ['a taller band with knobs and CPU per part (bigger, boxed, with spectrum and messages from 160x50)', '13 rows'],
         mini: ['one line: transport and form', '1 row'],
+        vis: ['master meters beside a big scope: `vis`, play, --plot, bin/record.rb', '12 rows'],
+        vis_spectrum: ['master meters beside a big spectrum: `vis spectrum: true`', '12 rows'],
         tiles: ['the whole screen: the console beside tracks, queue, meters, scope', '80x24 and up'],
         studio: ['tracks | the console over a scope | tabs of meters, knobs, cpu, buses', '120x40 and up'],
         session: ['the set: launch lane, the clip matrix and clip detail, racks, landed changes, buses, MIDI, around the console', '160x45 and up'],

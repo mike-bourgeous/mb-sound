@@ -188,7 +188,8 @@ module MB
       # DeviceOutput::PROFILES); other output types ignore it.
       #
       # Pass either true or a Hash of options for MB::Sound::PlotOutput in
-      # +:plot+ to enable live plotting.
+      # +:plot+ to show what's written (a band of meters and a scope on a
+      # terminal; +graphical: true+ for inline-image plots).
       #
       # Outputs are cached and reused by later calls with the same parameters,
       # unless +:shared+ is false.  An unshared output is always new and is
@@ -204,7 +205,7 @@ module MB
 
         if plot
           graphical = plot.is_a?(Hash) && plot[:graphical] || false
-          p = { plot: plotter(graphical: graphical) }
+          p = graphical ? { plot: plotter(graphical: true) } : {} # (else a band of the terminal UI; see PlotOutput)
           p.merge!(plot) if plot.is_a?(Hash)
 
           return MB::Sound::PlotOutput.new(output(**info.merge(plot: nil), shared: false), **p) unless shared

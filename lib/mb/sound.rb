@@ -263,7 +263,6 @@ require_relative 'sound/processing_matrix'
 require_relative 'sound/softest_clip'
 require_relative 'sound/shaper'
 require_relative 'sound/haas_pan'
-require_relative 'sound/meter'
 require_relative 'sound/latency_probe'
 require_relative 'sound/dropout_probe'
 
