@@ -572,7 +572,8 @@ RSpec.describe MB::Sound::Help do
       p.level = -12
       out.written.clear
       expect(peak_db(play_bars(session, 1))).to be_within(0.3).of(-30) # the mix before the trim
-      expect(peak_db(written(out))).to be_within(0.3).of(-42)
+      # (past the trim's glide to its new gain, 20 ms at most: play-ui-1)
+      expect(peak_db(written(out).map { |c| c[(0.025 * 48000).round..] })).to be_within(0.3).of(-42)
       p.stop
       play_bars(session, 0.1)
       expect(session.players).not_to have_key(MB::Sound::Help::Level::PLAYER)

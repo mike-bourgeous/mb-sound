@@ -30,6 +30,7 @@ require_relative 'session/audio_recording'
 require_relative 'session/stems'
 require_relative 'session/cue'
 require_relative 'session/monitor_trim'
+require_relative 'session/pause_fade'
 require_relative 'session/safety_limiter'
 require_relative 'session/buses'
 require_relative 'session/racks'
@@ -94,6 +95,7 @@ module MB
       include AudioRecording
       include Stems
       include MonitorTrim
+      include PauseFade
       include SafetyLimiter
       include UIFeed
       include Warming
@@ -310,6 +312,8 @@ module MB
         @advance_idle = false
         @raise_errors = raise_errors
         @paused = false
+        @render_error = nil # (see #render_error)
+        init_pause_fade
 
         @players = {}
         @stopped = {}
@@ -796,6 +800,14 @@ module MB
         @scheduler.reset(wait: wait).merge(form: form)
       end
 
+      # True while a form plays (see Form::Playback#keeps_time?) at
+      # timeline position +pos+ (the current one by default): the timeline
+      # keeps moving through its silent stretches, live and offline.
+      def form_keeps_time?(pos = @transport.position)
+        pb = @arrangement&.playback
+        !pb.nil? && pb.keeps_time?(pos)
+      end
+
       # Returns true if a scheduled block's time has come (so it will run on
       # the next buffer even if nothing is playing).
       def schedule_due?
@@ -1008,14 +1020,22 @@ module MB
         @realtime
       end
 
-      # True while a realtime Session is paused (see #paused=).
+      # True while a realtime Session is paused, or asked to pause (see
+      # #paused=; #pause_state is where the render thread is).
       def paused? = @paused
+
+      # The exception that stopped the background render thread, or nil
+      # (the thread warns and ends; PlaybackEnd reports it).
+      attr_reader :render_error
 
       # Pauses (true) or resumes (false) a realtime Session's render
       # thread: while paused it writes silence to the output and renders
       # nothing, so the timeline, the players, and scheduled blocks wait
       # where they are (a script's screen pauses a song with Space; see
-      # ScriptRunner's --ui).  Renders (#process_buffer) don't pause.
+      # ScriptRunner's --ui).  The output fades out over the last buffer
+      # before the pause and in over the first after it, and playing on
+      # renders the next sample (see PauseFade).  Renders (#process_buffer)
+      # don't pause.
       def paused=(on)
         raise ArgumentError, 'Only a realtime Session pauses (renders call process_buffer)' if on && !@realtime
         @paused = !!on
@@ -1146,7 +1166,7 @@ module MB
 
         # The safety limiter (without a master chain) and the monitor trim
         # reach only the output (see SafetyLimiter, MonitorTrim)
-        output.write(monitored(cue_frame(safety_limited(mix), count))) # with CUE (see Cue)
+        output.write(pause_faded(monitored(cue_frame(safety_limited(mix), count)))) # with CUE (see Cue); pauses fade (PauseFade)
         record_mix(mix, @frame - count)
         call_taps(mix)
         @ui_feed&.publish(self, mix, count, @load)
@@ -1193,7 +1213,11 @@ module MB
         @span.frame = @frame
         @span.pos = from
         @span.per_sample = per_sample
-        @span.moving = @advance_idle || !idle?
+        # Offline renders waiting for scheduled blocks keep time while idle
+        # (see #advance_idle=), live and offline sessions while a form plays
+        # (see Form::Playback#keeps_time?); otherwise the timeline pauses
+        keep_time = @advance_idle || form_keeps_time?(from)
+        @span.moving = keep_time || !idle?
         @span.sample_rate = sample_rate
         @span.run = @run_frame
         Thread.current[:mb_sound_span] = @span
@@ -1210,9 +1234,6 @@ module MB
           @scheduler.seeked(from)
         end
 
-        # Offline renders waiting for scheduled blocks keep time while idle
-        # (see #advance_idle=); otherwise the timeline pauses
-        keep_time = @advance_idle
         @scheduler.dispatch(from, to, playing: keep_time || !idle?)
 
         # MIDI input lands on exact frames before changes (a recording
@@ -2190,15 +2211,9 @@ module MB
           # machine (e.g. waking the screen) doesn't starve the renderer
           FastAudio.boost_thread_priority
 
-          until @closed
-            if @paused
-              n = buffer_size
-              output.write(Array.new(output.channels) { Numo::SFloat.zeros(n) })
-            else
-              process_buffer
-            end
-          end
+          render_or_pause until @closed # (pauses fade out and in; see PauseFade)
         rescue => e
+          @render_error = e
           warn "Background session stopped with an error: #{e.class}: #{e.message}"
         end
         @thread.name = 'MB::Sound::Session'

@@ -34,6 +34,9 @@ module MB
         # Seconds between clip warnings.
         MONITOR_WARN_SECONDS = 10
 
+        # How long a changed trim glides to its new gain (seconds).
+        RAMP_SECONDS = 0.02
+
         def self.included(base)
           base.extend(ClassMethods)
         end
@@ -93,16 +96,40 @@ module MB
         def init_monitor(monitor)
           @monitor = monitor
           @monitor_clips = 0
+          @monitor_applied = nil # (the trim the last buffer ended at; see #monitored)
         end
 
         # The buffer to write: +mix+ times the trim, clipped to full scale
         # (with a warning) if the trim pushed it over.  Returns +mix+ itself
-        # when there is no trim.
+        # when there is no trim.  A changed trim glides from the gain the
+        # last buffer ended at, at most a full-scale change per
+        # RAMP_SECONDS (linear in gain), so turning the volume doesn't
+        # click (play-ui-1: bin/play.rb's volume keys).
         def monitored(mix)
           gain = Session.monitor_gain
-          return mix if !@monitor || gain == 1.0
+          from = @monitor_applied || gain
+          return mix unless @monitor
+          if gain == 1.0 && from == 1.0
+            @monitor_applied = 1.0
+            return mix
+          end
 
-          out, clipped = Session.monitor_clip(mix.map { |c| c * gain }, gain)
+          n = mix[0]&.length.to_i
+          if from != gain && n > 0
+            # (at most a full-scale change per RAMP_SECONDS, so a big step
+            # takes several buffers and a small one a few milliseconds)
+            step = 1.0 / (RAMP_SECONDS * output.sample_rate)
+            k = ((gain - from).abs / step).ceil.clamp(1, n)
+            to = from + (gain - from).clamp(-k * step, k * step)
+            ramp = Numo::SFloat.new(n).fill(to)
+            ramp[0...k] = Numo::SFloat.linspace(from, to, k + 1)[1..]
+            @monitor_applied = to
+            out = mix.map { |c| c * ramp }
+          else
+            @monitor_applied = gain
+            out = mix.map { |c| c * gain }
+          end
+          out, clipped = Session.monitor_clip(out, [from, gain].max)
           @monitor_clips += 1 if clipped
           out
         end

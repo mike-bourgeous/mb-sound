@@ -87,8 +87,8 @@ module MB
 
         session = Session.current
         bg(:play, playable, at: point, fade: fade || 0) or return nil
-        playing = -> { !session.closed? && session.playing_after_queue?(:play) }
-        wait_for_player(playing, plot: plot_option(plot, quiet), graphical: graphical, spectrum: spectrum, header: header) or stop(:play, fade: STOP_FADE)
+        ending = PlaybackEnd.new(session, busy: -> { session.playing_after_queue?(:play) })
+        wait_for_player(ending, plot: plot_option(plot, quiet), graphical: graphical, spectrum: spectrum, header: header) or stop(:play, fade: STOP_FADE)
         nil
       end
 
@@ -832,7 +832,9 @@ module MB
         tap = session.add_tap { |mix|
           n = mix[0]&.length || 0
           f0 = session.frame - n
-          if session.idle? && !session.schedule_due?
+          # (a form playing on through a silent stretch keeps the song going:
+          # its timeline moves on to the next section; Form::Playback#keeps_time?)
+          if session.idle? && !session.schedule_due? && !session.form_keeps_time?
             unless quiet
               tail_from = MB::M.clamp(session.sound_end_frame, f0, session.frame)
               quiet = QuietRun.new(window, from: tail_from)
@@ -1293,8 +1295,10 @@ module MB
           ended = [session.sound_end_frame, session.schedule_ran_frame || 0, session.change_landed_frame].max
           frames += render_end(session, hold, mix, ended, frames_left.call, buffer_size)
         elsif tail && (bars || seconds || to) && !interrupted
-          # The song reached its end; stop anything still playing and let the
-          # master effects ring out
+          # The song reached its end; stop anything still playing (and the
+          # flow: no section begins in the tail, whose timeline doesn't move)
+          # and let the master effects ring out
+          session.arrangement.playback&.stop
           session.remove(fade: 0)
           # (up to Session::MAX_TAIL_SECONDS, or what max_seconds: leaves)
           frames += render_end(session, hold, nil, session.frame, max_seconds ? (max_seconds * rate).round - frames : Float::INFINITY, buffer_size)
@@ -1437,19 +1441,38 @@ module MB
         ColorPolicy.animate?($stdout)
       end
 
-      # Waits while +playing+ returns true, plotting the mix if +plot+ (see
-      # #visualize).  Returns true if the sound ended, false if Ctrl-C
-      # interrupted it.
-      def wait_for_player(playing, plot:, graphical:, spectrum:, header:)
+      # Waits until +ending+ (a PlaybackEnd) says the playback is over,
+      # plotting the mix if +plot+ (see #visualize).  Returns true if the
+      # sound ended, false if Ctrl-C interrupted it.  A render thread that
+      # stopped or an output that stopped taking audio is warned about
+      # (and counts as ended); players still playing after a form's tail
+      # ran out are stopped.
+      def wait_for_player(ending, plot:, graphical:, spectrum:, header:)
+        session = Session.current
         if plot
-          visualize(graphical: graphical, spectrum: spectrum, stop: -> { !playing.call }, header: header)
+          visualize(graphical: graphical, spectrum: spectrum, stop: -> { ending.over? }, header: header)
         else
-          session = Session.current
-          Internal.wait_audio(session, 0.01) while playing.call
+          Internal.wait_audio(session, 0.01) until ending.over?
         end
-        !playing.call
+        return false unless ending.over?
+        finish_playback(ending)
+        true
       rescue Interrupt
         false
+      end
+
+      # What a PlaybackEnd that ended says: a warning for failures and
+      # stalls, and leftovers stopped (see PlaybackEnd#leftovers).
+      def finish_playback(ending)
+        case ending.state
+        when :failed, :stalled then warn "\e[33mPlayback ended: #{ending.reason}\e[0m"
+        when :ended
+          if ending.leftovers
+            warn "\e[2m#{ending.reason}\e[0m"
+            stop(:all, fade: STOP_FADE)
+          end
+        end
+        nil
       end
 
       # #play for a genre template: about a minute of its form
@@ -1468,15 +1491,7 @@ module MB
         playback = t.play
         return playback unless foreground
 
-        session = Session.current
-        started = false
-        playing = -> {
-          next false if session.closed?
-          busy = !session.idle? || session.schedule_waiting?(repeating: false) || session.schedule_due?
-          started ||= busy
-          !started || busy
-        }
-        wait_for_player(playing, plot: plot_option(plot, quiet), graphical: graphical, spectrum: spectrum, header: header) or panic
+        wait_for_player(PlaybackEnd.for_form(Session.current, playback), plot: plot_option(plot, quiet), graphical: graphical, spectrum: spectrum, header: header) or panic
         nil
       end
 
@@ -1495,15 +1510,7 @@ module MB
         playback = set.play
         return playback unless foreground
 
-        session = Session.current
-        started = false
-        playing = -> {
-          next false if session.closed?
-          busy = !session.idle? || session.schedule_waiting?(repeating: false) || session.schedule_due?
-          started ||= busy
-          !started || busy
-        }
-        wait_for_player(playing, plot: plot_option(plot, quiet), graphical: graphical, spectrum: spectrum, header: header) or panic
+        wait_for_player(PlaybackEnd.for_form(Session.current, playback), plot: plot_option(plot, quiet), graphical: graphical, spectrum: spectrum, header: header) or panic
         nil
       end
 
