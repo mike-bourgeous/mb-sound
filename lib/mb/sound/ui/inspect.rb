@@ -364,7 +364,7 @@ module MB
                                 # (a node no section fits shows in MOD, marked: a row the
                                 # sections view leaves out can't be reached by Up and Down,
                                 # inspector-nav-1; the guard keeps Classify#unfit empty)
-                                section: r.section == :other ? :mod : r.section, what: r.section == :other ? 'unsorted' : r.what, dest: r.dest, voice: r.voice, channels: r.channels, param_knobs: pk)
+                                section: r.section == :other ? :mod : r.section, what: r.section == :other ? 'unsorted'.freeze : r.what, dest: r.dest, voice: r.voice, channels: r.channels, param_knobs: pk)
             [n, info, r.nodes, extras]
           }
 
