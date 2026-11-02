@@ -6,7 +6,7 @@
 
 ## Quick reference
 
-- `song = mod_import('tune.mod', mode: :musical | :hardware, separation:, limits: :format | :none)`; `play song` (or `play 'tune.mod'`, `bin/play.rb tune.mod`), `render 'x.flac', song` (or the path), `save :tune, song` (a set bundle, samples as assets); `song.setup` then `go :p03`, `fx :ch2, ...`, `swap :ch1, song[:p03][:ch1].transpose(12)`, `tempo 150`; `song.play(loop: true)`; `mod_samples(path)`.
+- `song = mod_import('tune.mod', mode: :musical | :hardware, separation:, limits: :format | :none, interpolation: :cubic | :band_limited | :linear | :none | :sinc, mix_rate: nil | Hz, bass_mono: nil | Hz)`; `play song` (or `play 'tune.mod'`, `bin/play.rb tune.mod`), `render 'x.flac', song` (or the path), `save :tune, song` (a set bundle, samples as assets); `song.setup` then `go :p03`, `fx :ch2, ...`, `swap :ch1, song[:p03][:ch1].transpose(12)`, `tempo 150`; `song.play(loop: true)`; `mod_samples(path)`.
 - Code `lib/mb/sound/tracker.rb` + `tracker/` (readers `*_reader.rb`, `player.rb` + `player/`, `effects.rb`, `import.rb`, `set.rb`), `lib/mb/sound/tracker_methods.rb`; the sampler-voice lanes in `lib/mb/sound/sampler/instrument.rb` (`Instrument#play` `lanes:`).
 - Specs `spec/lib/mb/sound/tracker/*_spec.rb` (one per format, plus `set_spec.rb`, `effects_spec.rb`, and `pitch_guard_spec.rb`: every pitch effect per format rendered and pitch-tracked against the format's periods, `spec/support/pitch_track.rb`), `spec/lib/mb/sound/sampler_lanes_spec.rb`; synthetic modules from `spec/support/module_writer.rb` (MOD, 669, S3M, XM, IT with an IT 2.14/2.15 compressor).
 
@@ -25,9 +25,9 @@ The maintainer (2026-11-02): "If I gave you a .669 file could you build a parser
 
 | | `:musical` (default) | `:hardware` |
 |---|---|---|
-| sample reads | band-limited levels, `:optimal` interpolation | drop-sample, no levels |
+| sample reads (`interpolation:`) | `:cubic` on the raw sample (tracker-2; tracker-1 read band-limited levels, now `:band_limited`) | drop-sample (`:none`) for MOD, 669, S3M; `:linear` for XM and IT |
+| lanes | stepped over 1.5 ms (a declick) | steps on the tick; ramped over 1.5 ms for XM and IT |
 | note pitches | the format's tables (what the composer heard; ProTracker's finetune rows halved per octave, fractional as openmpt123 plays them), slides and vibrato unrounded | integer periods and the replay's rounding |
-| lanes | stepped over 1.5 ms (a declick) | steps on the tick |
 | pans | Amiga hard pans (MOD, 669) narrowed to 0.6 | as written |
 
 Pan laws follow the formats (linear, FastTracker 2's equal power for XM), since a module's balance between hard-panned and centered channels was set under its tracker's law.  `Import::GAINS` matches openmpt123's loudness per format.
@@ -63,6 +63,14 @@ Measured but kept: MOD slides, tone portamento, fine slides, and ProTracker's li
 The units (`lib/mb/sound/tracker/effects.rb`, for a general effect framework to wrap later): `Effects::Waveform` (tables per kind), `Effects::Oscillator` (position and waveform, retrigger, `#tick(t, speed)` under a timing: :protracker, :fasttracker, :impulse), `Effects::Arpeggio.semitones(param, t, speed:, order:)`, `Effects::Slide.toward`/`.by` (tone portamento, limits), `Effects.it_linear_units`.  Each format's player keeps one Oscillator per channel (`Player#vibrato_style`) and turns the values into its own period units.
 
 **Limits** (the maintainer, about yo_space.mod, an 8-channel MOD whose notes step down past the period table: "mb-sound is playing this the way most players I've heard do, where the descending notes bottom out at a fixed pitch.  But I've heard one or two players that keep the pitch descending toward zero"): the bottoming out is the reader's period-to-note mapping (a stored period past the five-octave table maps to its lowest note, 1712), not a slide clamp.  `limits: :none` (`mod_import`, `Import`, `Player`; default `:format`) plays stored periods past the table as their own notes (`ModReader.note_of(period, extended: true)`) and lifts every format's slide limits, keeping the period at or above `Player::PERIOD_FLOOR` (1), so a slide falls toward 0 Hz; the bend lane's range (96 semitones) stops it eight octaves below the note.  Measured: openmpt123 plays yo_space's stored periods down to 3424 and holds there (four times C-1), between the two.  `:hardware` already played stored periods (as Paula would) and still does; `:musical` bottoms out unless `limits: :none`.  A 23 s slide to 44 Hz renders without NaNs or slowdown.  669's slides already stop at 1 Hz.
+
+## Reads, mixer rates, and bass (tracker-2, the maintainer's tracker-1 Bench notes)
+
+His picks: mach openmpt123, 2nd_pm `:hardware`, boom, drwho, floating `:musical`; "The band-limited reads on musical have a harsh resonance that isn't present in the openmpt reference" (cymbals too), "Hardware is clicking on the bass [drwho]; Impulse Tracker would not have clicked like that", "Some players offered linear or cubic interpolation as a compromise on aliasing vs high end presence", "the players I grew up with might have been rendering at 16kHz or 22.05 or 32", "I might like the Amiga pan a little wider than openmpt, maybe with mono bass for the subs".
+
+Measured on a synthetic white-noise sample (C-2, an 8287 Hz rate) and a click sample: the band-limited read (the sampler's half-octave levels built at 4x with a long sinc, `:optimal` interpolation) is flat to the sample's Nyquist frequency and then a brick wall (-8.5 dB in the 4-5 kHz band, -109 dB above), and its impulse response rings for milliseconds on both sides (-23 dB 0.5 ms before a click, -28.5 dB 1 ms before, -40 dB 4 ms after): the resonance he heard, at each sample's top, on every transient.  openmpt123 rolls off gently (-3.3 dB in 3-4 kHz, -9.5 in 4-5, -22 in 5-6.3, -85 above 8 kHz) and its click is over within 0.5 ms.  A 4-point cubic on the raw sample (no levels) follows openmpt123's passband within about a dB (-3.6, -8.0, -16 dB) with no ringing, its images 40-60 dB down instead of 85: now the `:musical` read.  `:linear` rolls off more (-5.2 dB in 3-4 kHz, images -28 to -46 dB).  Without levels a sample played above 48 kHz (a high XM/IT note) aliases.  The sampler's own band-limited read is unchanged elsewhere.
+
+`mix_rate:` decimates each track (linear joins) to an old mixer's rate, folding content above half of it and rolling off the top; `bass_mono:` centers each track below a frequency (`mono_below`), for wider pans (`separation:`).  Both go on the tracks' patch (`Set#post`).
 
 ## Comparison (tracker-1, 2026-11-02)
 

@@ -18,17 +18,25 @@ module MB
       # pitches in the format's period range, as most players do (a MOD's
       # notes stored past ProTracker's table bottom out at its lowest
       # note), :none lifts it (stored periods play as written, slides keep
-      # falling toward 0 Hz; tracker-2).  Effects the player skips are
-      # listed in one warning.
+      # falling toward 0 Hz; tracker-2); +interpolation+ :cubic (the
+      # :musical default), :band_limited, :linear, :none (the :hardware
+      # default for MOD, 669, S3M; :linear for XM and IT), or :sinc;
+      # +mix_rate+ (e.g. 22_050) mixes each channel at an old PC mixer's
+      # rate; +bass_mono+ (e.g. 150) centers each channel's bass, for wide
+      # pans.  Effects the player skips are listed in one warning.
+      #
+      #     song = mod_import('tune.mod', separation: 0.8, bass_mono: 150)
+      #     song = mod_import('tune.s3m', interpolation: :linear, mix_rate: 22_050)
       #
       #     song = mod_import('tune.mod')
       #     play song
       #     render 'tune.flac', song
       #     song.setup; go :p03; fx :ch2, L.fx.reverb.hall
-      def mod_import(path, mode: :musical, separation: nil, limits: :format)
+      def mod_import(path, mode: :musical, separation: nil, limits: :format, interpolation: nil, mix_rate: nil, bass_mono: nil)
         song = Tracker.read(path)
         song.problems.each { |p| warn "#{File.basename(path.to_s)}: #{p}" }
-        set = Tracker::Import.new(song, mode: mode, separation: separation, limits: limits, name: File.basename(path.to_s, '.*')).set
+        set = Tracker::Import.new(song, mode: mode, separation: separation, limits: limits, interpolation: interpolation, mix_rate: mix_rate,
+                                        bass_mono: bass_mono, name: File.basename(path.to_s, '.*')).set
         unless set.unsupported.empty?
           warn "#{File.basename(path.to_s)}: effects not played: #{set.unsupported.map { |n, c| "#{n} (#{c}x)" }.join(', ')}"
         end

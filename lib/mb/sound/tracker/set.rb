@@ -38,7 +38,11 @@ module MB
         # the song ends).
         attr_reader :restart
 
-        def initialize(import:, tracks:, scenes:, plays:, restart:, bpm:, voice:, instrument:, unsupported:)
+        # What each track's sampler goes through: { mix_rate:, bass_mono: }
+        # (see Import#initialize).
+        attr_reader :post
+
+        def initialize(import:, tracks:, scenes:, plays:, restart:, bpm:, voice:, instrument:, unsupported:, post: {})
           @import = import
           @tracks = tracks.freeze
           @scenes = scenes.freeze
@@ -48,6 +52,7 @@ module MB
           @voice = voice.freeze
           @instrument = instrument
           @unsupported = unsupported
+          @post = post.freeze
           freeze
         end
 
@@ -100,7 +105,15 @@ module MB
         def patch
           inst = @instrument
           options = @voice
-          proc { |clip| clip.sampler(inst, **options) }
+          rate = @post[:mix_rate]
+          mono = @post[:bass_mono]
+          return proc { |clip| clip.sampler(inst, **options) } unless rate || mono
+          proc { |clip|
+            out = clip.sampler(inst, **options)
+            out = out.decimate(rate, interpolation: :linear) if rate
+            out = out.mono_below(mono) if mono
+            out
+          }
         end
 
         # Sets the set up on the current Session (or +session+): the base
