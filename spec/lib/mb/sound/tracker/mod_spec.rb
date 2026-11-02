@@ -170,20 +170,111 @@ RSpec.describe(MB::Sound::Tracker::ModReader, :aggregate_failures) do
       expect(d.freq[1..5].map { |f| (pal / f).round }).to eq([0, 8, 16, 24, 32].map { |pos| 428 + ((sine[pos & 31] * 8) >> 7) * (pos < 32 ? 1 : -1) })
     end
 
-    it 'plays the table notes with unrounded slides and exact arpeggios in :musical mode' do
-      cells = { [0, 0] => { note: 60, sample: 1, effect: 0, param: 0x47 }, [0, 1] => { note: 61, sample: 1 } }
-      r = run(write(cells), mode: :musical)
-      a, b = r.logs
-      base = a.freq[0]
-      expect(base).to be_within(1e-9).of(MB::Sound::Tracker::Player::Amiga::PAL / 428)
-      expect(a.freq[1] / base).to be_within(1e-12).of(2**(4 / 12.0))
-      expect(a.freq[2] / base).to be_within(1e-12).of(2**(7 / 12.0))
-      expect(b.freq[0]).to be_within(1e-9).of(MB::Sound::Tracker::Player::Amiga::PAL / 404)
+    it 'plays the table notes and table arpeggios in :musical mode, finetuned rows halved per octave' do
+      samples = [{ name: 'saw', data: w.saw(2000), volume: 64, loop: [1000, 2000] }, { name: 'ft2', data: w.saw(2000), volume: 64, loop: [1000, 2000], finetune: 2 }]
+      cells = { [0, 0] => { note: 60, sample: 1, effect: 0, param: 0x47 }, [0, 1] => { note: 61, sample: 1 },
+                [0, 2] => { note: 57, sample: 2 }, [0, 3] => { note: 81, sample: 2 } }
+      r = run(write(cells, samples: samples), mode: :musical)
+      a, b, c, d = r.logs
+      pal = MB::Sound::Tracker::Player::Amiga::PAL
+      expect(a.freq[0]).to be_within(1e-9).of(pal / 428)
+      # (the arpeggio's notes are the table's: 339 and 285, as the composer heard them)
+      expect(a.freq[1]).to be_within(1e-9).of(pal / 339)
+      expect(a.freq[2]).to be_within(1e-9).of(pal / 285)
+      expect(b.freq[0]).to be_within(1e-9).of(pal / 404)
+      # (finetune 2: A-1 is 502, A-3 its quarter, 125.5)
+      ft2 = MB::Sound::Tracker::ModReader::FINETUNE_PERIODS[2]
+      expect(ft2[9]).to eq(502)
+      expect(c.freq[0]).to be_within(1e-9).of(pal / 502)
+      expect(d.freq[0]).to be_within(1e-9).of(pal / 125.5)
+    end
+
+    it 'bottoms out at the table for periods stored past it, and plays them with limits: :none' do
+      # (an 8-channel MOD stepping down past C-0 the way the maintainer's
+      # yo_space.mod does: 1712, then 1812, 1920, ... 3424)
+      periods = [1712, 1812, 1920, 2032, 3424]
+      cells = periods.each_with_index.to_h { |p, r| [[r, 0], { period: p, sample: 1 }] }
+      path = write(cells, patterns: [w.pattern(8, cells)], channels: 8)
+      pal = MB::Sound::Tracker::Player::Amiga::PAL
+      %i[musical hardware].each do |mode|
+        clamped = run(path, mode: mode).logs[0]
+        open = t::Player.for(t.read(path), mode: mode, limits: :none).run.logs[0]
+        got = periods.each_index.map { |r| (pal / open.freq[r * 6]).round }
+        expect(got).to eq(periods), mode.to_s
+        # (:musical maps them to the lowest table note, as most players do; :hardware plays them as Paula would)
+        expected = mode == :musical ? [1712] * 5 : periods
+        expect(periods.each_index.map { |r| (pal / clamped.freq[r * 6]).round }).to eq(expected), mode.to_s
+      end
+      expect(MB::Sound::Tracker::ModReader.note_of(3424, extended: true)).to eq(24)
+      expect(MB::Sound::Tracker::ModReader.note_of(3424)).to eq(36)
+      expect { t::Player.for(t.read(path), limits: :off) }.to raise_error(ArgumentError, /limits/)
     end
 
     it 'lists effects it skips' do
       r = run(write({ [0, 0] => { note: 60, sample: 1, effect: 14, param: 0x31 }, [1, 0] => { effect: 14, param: 0xF1 } }))
       expect(r.unsupported).to eq('E3x glissando' => 1, 'EFx invert loop' => 1)
+    end
+  end
+
+  describe 'reads' do
+    # (a click sample: a full-scale frame in silence, at C-2)
+    let(:click_path) { write({ [0, 0] => { note: 60, sample: 1 } }, samples: [{ name: 'click', data: Array.new(4000) { |i| i == 2000 ? 0.99 : 0.0 }, volume: 64 }]) }
+
+    def ringing(set)
+      l, r = play(set, 24_000)
+      x = (l + r).abs
+      pk = x.max_index
+      # (the loudest frame 1 ms before and 2 ms after the click, relative to it)
+      [x[(pk - 72)..(pk - 48)].max / x[pk], x[(pk + 96)..(pk + 120)].max / x[pk]]
+    end
+
+    it 'reads :musical samples with a cubic that does not ring (the band-limited read does, by choice)' do
+      before, after = ringing(MB::Sound.mod_import(click_path))
+      expect(before).to be < 1e-6
+      expect(after).to be < 1e-6
+      before, after = ringing(MB::Sound.mod_import(click_path, interpolation: :band_limited))
+      # (measured: -28 dB 1 ms before, -34 dB 2 ms after)
+      expect(before).to be > 0.01
+      expect(after).to be > 0.01
+    end
+
+    it 'picks reads and lane ramps per mode and format, and checks its options' do
+      t = MB::Sound::Tracker
+      song = t.read(click_path)
+      expect(t::Import.new(song).voice_options).to include(interpolation: :cubic, mips: false, lanes: include(smooth: t::Import::LANE_SMOOTH))
+      hw = t::Import.new(song, mode: :hardware).voice_options
+      expect(hw).to include(interpolation: :none, mips: false)
+      expect(hw[:lanes]).not_to include(:smooth)
+      # (FT2 and IT interpolated and ramped)
+      xm = t::Import.new(song.with(format: :xm), mode: :hardware).voice_options
+      expect(xm).to include(interpolation: :linear, lanes: include(smooth: t::Import::LANE_SMOOTH))
+      expect(t::Import.new(song, interpolation: :band_limited).voice_options).not_to include(:mips)
+      expect { t::Import.new(song, interpolation: :spline) }.to raise_error(ArgumentError, /interpolation/)
+      expect { t::Import.new(song, mix_rate: 10) }.to raise_error(ArgumentError, /mix_rate/)
+      expect { t::Import.new(song, bass_mono: -1) }.to raise_error(ArgumentError, /bass_mono/)
+    end
+
+    it 'lowers multichannel MODs as openmpt123 does (6 dB at 8 channels and more)' do
+      g = ->(n) { MB::Sound::Tracker::Import.gain_db(t.read(write({}, patterns: [w.pattern(n)], channels: n))) }
+      expect(g.(4)).to eq(MB::Sound::Tracker::Import::GAINS[:mod])
+      expect(g.(4) - g.(8)).to be_within(1e-9).of(20 * Math.log10(2))
+      expect(g.(16)).to eq(g.(8))
+    end
+
+    it 'mixes at an old mixer\'s rate and centers the bass when asked' do
+      saw = { name: 'saw', data: w.saw(2000, period: 20), volume: 64, loop: [0, 2000] }
+      path = write({ [0, 0] => { note: 84, sample: 1 } }, samples: [saw])
+      plain = play(MB::Sound.mod_import(path, separation: 1), 24_000)
+      low = play(MB::Sound.mod_import(path, separation: 1, mix_rate: 11_025), 24_000)
+      top = ->(x) { s = MB::Sound.real_fft(Numo::DFloat.cast(x[4800...24_000])).abs; s[(9000 * 19_200 / 48_000)..].sum / s.sum }
+      # (channel 1 is hard left: its energy above 9 kHz drops once mixed at 11 kHz, the folded content landing lower)
+      expect(top.(low[0])).to be < top.(plain[0]) * 0.5
+      rolled = play(MB::Sound.mod_import(path, separation: 1, rolloff: 4000), 24_000)
+      expect(top.(rolled[0])).to be < top.(plain[0]) * 0.2
+      expect { t::Import.new(t.read(path), rolloff: 30_000) }.to raise_error(ArgumentError, /rolloff/)
+      _, r = play(MB::Sound.mod_import(path, separation: 1, bass_mono: 2000), 24_000)
+      expect(r[4800..].abs.max).to be > 0.05
+      expect(plain[1][4800..].abs.max).to be < 1e-6
     end
   end
 

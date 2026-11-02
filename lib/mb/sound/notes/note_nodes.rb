@@ -86,15 +86,19 @@ module MB
       # The note number of the newest held note, held after it is released
       # (see Notes#number).
       #
+      # With +chase: false+ content jumps leave the number alone (see
+      # Notes#number).
+      #
       # With +marks: true+ (Notes#freq and NotePitch, so `v.hz` and
       # `v.freq`; maintainer decision 2026-10-18) each note's pitch mark
       # (MIDI::Event#pitch, e.g. a cents scale's `micro: :mark` notes) is
       # added to its number; notes without a mark give the same numbers
       # either way.
       class Number < NoteNode
-        def initialize(stream, notes: nil, sample_rate: 48000, marks: false)
+        def initialize(stream, notes: nil, sample_rate: 48000, marks: false, chase: true)
           super(stream, notes: notes, sample_rate: sample_rate)
           @marks = marks
+          @chase = chase
           first = stream.first_note
           @number = first ? marked_number(first) : DEFAULT_NUMBER
           @node_type_name = 'Notes Number'
@@ -125,8 +129,10 @@ module MB
           @number = marked_number(entry)
         end
 
+        # (+chase: false+ keeps the latest note-on's number: see
+        # Notes#number)
         def chase(event)
-          @number = marked_number(event)
+          @number = marked_number(event) if @chase
         end
 
         # The note number of +e+ (an Event or NoteStack::Entry), plus its

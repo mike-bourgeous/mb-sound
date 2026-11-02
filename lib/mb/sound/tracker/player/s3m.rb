@@ -34,7 +34,7 @@ module MB
 
           def initialize(song, **options)
             super
-            @limits = song.flags[:amiga_limits] ? [113 * 4, 856 * 4] : [28, 65_535]
+            @range = song.flags[:amiga_limits] ? [113 * 4, 856 * 4] : [28, 65_535]
             @fast = song.flags[:fast_slides]
           end
 
@@ -62,7 +62,13 @@ module MB
           end
 
           def clamp_period(p)
-            p.clamp(*@limits)
+            Effects::Slide.by(p, 0, unlimited? ? nil : @range, floor: PERIOD_FLOOR)
+          end
+
+          # ST3's vibrato reads its waveform on a row's first tick without
+          # moving on, and its ramp raises the pitch first (measured).
+          def vibrato_style
+            { kind: :st3, timing: :fasttracker }
           end
 
           def start_row(order, row, cells)
@@ -124,6 +130,7 @@ module MB
             when 26 then unsupported('Z MIDI macro')
             end
             ch.out_period = ch.period
+            vibrato(ch, e == 21 ? 7 : 5, 0) if e == 8 || e == 11 || e == 21
             tremor(ch) if e == 9
           end
 
@@ -149,7 +156,7 @@ module MB
                 ch.note = cell.note
                 ch.period = period_of(cell.note, @song.samples[sample].rate)
                 ch.target = nil
-                ch.vib_pos = 0 if ch.vib_wave < 4
+                ch.vibrato.retrigger
                 ch.trem_pos = 0 if ch.trem_wave < 4
                 offset = 0
                 if e == 15
@@ -201,7 +208,9 @@ module MB
             case v >> 4
             when 1 then unsupported('S1x glissando') if x > 0
             when 2 then unsupported('S2x finetune')
-            when 3 then ch.vib_wave = x
+            when 3
+              ch.vibrato.wave = x
+              unsupported('S3x random vibrato') if x & 3 == 3
             when 4 then ch.trem_wave = x
             when 8 then ch.pan = x / 7.5 - 1.0
             when 10 then unsupported('SAx stereo control')
@@ -244,12 +253,12 @@ module MB
                 ch.out_period = ch.period
               end
             when 7 then tone_porta(ch, ch.memory[:porta] * 4)
-            when 8 then vibrato(ch, 5)
-            when 21 then vibrato(ch, 7)
+            when 8 then vibrato(ch, 5, t)
+            when 21 then vibrato(ch, 7, t)
             when 9 then tremor(ch)
             when 10 then arpeggio(ch, t)
             when 11
-              vibrato(ch, 5)
+              vibrato(ch, 5, t)
               volume_slide_s3m(ch, v, t)
             when 12
               tone_porta(ch, ch.memory[:porta] * 4)
@@ -263,17 +272,22 @@ module MB
 
           def tone_porta(ch, speed)
             return unless ch.target && ch.period
-            ch.period = ch.period < ch.target ? [ch.period + speed, ch.target].min : [ch.period - speed, ch.target].max
+            ch.period = Effects::Slide.toward(ch.period, ch.target, speed)
             ch.out_period = ch.period
           end
 
-          def vibrato(ch, shift)
+          # Vibrato (H, or U with +shift+ 7) on tick +t+ of its row: the
+          # waveform's value (Effects::Oscillator) times the depth, shifted
+          # down by +shift+ bits, added to the period.
+          def vibrato(ch, shift, t)
             return unless ch.period
-            w = wave_value(ch.vib_wave, ch.vib_pos)
-            depth = ch.memory[:vib_depth]
+            w = ch.vibrato.tick(t, ch.memory[:vib_speed]) or return
+            ch.out_period = ch.period + vibrato_offset(w, ch.memory[:vib_depth], shift)
+          end
+
+          def vibrato_offset(w, depth, shift)
             d = hardware? ? (w.abs * depth) >> shift : w.abs * depth / (1 << shift).to_f
-            ch.out_period = ch.period + (w < 0 ? -d : d)
-            ch.vib_pos = (ch.vib_pos + ch.memory[:vib_speed]) & 63
+            w < 0 ? -d : d
           end
 
           def tremolo(ch)

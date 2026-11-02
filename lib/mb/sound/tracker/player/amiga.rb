@@ -13,15 +13,19 @@ module MB
           PAL = 3_546_894.6
 
           # The period at +note+ (neutral; 60 is period 428) with +finetune+
-          # (eighths of a semitone, -8..7) times +scale+ (4 for S3M/XM's
-          # finer periods): the table's period (the notes the composer
-          # heard; equal-tempered outside the table's five octaves) moved by
-          # the finetune, rounded to an integer on hardware.
-          def amiga_period(note, finetune = 0, scale: 1)
-            base = 428.0 * 2**(-(note - 60) / 12.0)
+          # (eighths of a semitone, -8..7): ProTracker's finetune row
+          # (ModReader::FINETUNE_PERIODS) over 2 per octave above C-1 (note
+          # 48) and times 2 per octave below it, fractional as the
+          # reference plays them (finetune 0 is the period table itself);
+          # rounded to an integer on hardware.
+          def amiga_period(note, finetune = 0)
             i = note - ModReader::FIRST_NOTE
-            base = ModReader::PERIODS[i].to_f if i >= 0 && i < ModReader::PERIODS.length
-            p = base * 2**(-finetune / 96.0) * scale
+            if finetune == 0 && i >= 0 && i < ModReader::PERIODS.length
+              return ModReader::PERIODS[i]
+            end
+            octave, semi = (note - 48).divmod(12)
+            base = ModReader::FINETUNE_PERIODS.fetch(finetune.clamp(-8, 7))[semi]
+            p = base * 2.0**-octave
             hardware? ? p.round : p
           end
         end

@@ -89,10 +89,10 @@ module MB
 
         # Channel state (see Player#channel_state).
         class Channel
-          attr_accessor :index, :sample, :instrument, :note, :period, :target, :volume, :pan, :finetune, :memory, :vib_pos, :vib_wave,
+          attr_accessor :index, :sample, :instrument, :note, :period, :target, :volume, :pan, :finetune, :memory,
                         :trem_pos, :trem_wave, :loop_row, :loop_count, :delay_note, :cut_tick, :retrig, :out_period, :out_volume, :offset,
                         :voice, :glissando, :tremor, :channel_volume, :key_on, :arp, :last_note, :pan_slide, :env_tick, :fade, :pending,
-                        :note_volume, :vol_column
+                        :note_volume, :vol_column, :vibrato
 
           def initialize(index, pan)
             @index = index
@@ -105,8 +105,6 @@ module MB
             @pan = pan
             @finetune = 0
             @memory = Hash.new(0)
-            @vib_pos = 0
-            @vib_wave = 0
             @trem_pos = 0
             @trem_wave = 0
             @loop_row = 0
@@ -130,21 +128,42 @@ module MB
             @pending = nil
             @note_volume = nil
             @vol_column = nil
+            @vibrato = nil # (an Effects::Oscillator, set by the Player's #setup)
           end
         end
 
-        attr_reader :song, :mode
+        attr_reader :song, :mode, :limits
 
-        def initialize(song, mode: :musical, max_ticks: MAX_TICKS)
+        # Period limit choices (see #initialize).
+        LIMITS = %i[format none].freeze
+
+        # The lowest period a slide reaches with +limits: :none+ (the
+        # period never reaches 0; the pitch has no floor).
+        PERIOD_FLOOR = 1
+
+        # +limits+ :format (default) keeps notes and slides in the format's
+        # period range (ProTracker's three octaves for 4-channel MODs, notes
+        # bottoming out at the lowest table note); :none lifts it: notes
+        # play their stored periods (a MOD's periods past the table) and
+        # slides keep going, the pitch falling toward 0 Hz (the period
+        # stays above PERIOD_FLOOR).
+        def initialize(song, mode: :musical, max_ticks: MAX_TICKS, limits: :format)
           raise ArgumentError, "mode: is :musical or :hardware (got #{mode.inspect})" unless %i[musical hardware].include?(mode)
+          raise ArgumentError, "limits: is #{LIMITS.map(&:inspect).join(' or ')} (got #{limits.inspect})" unless LIMITS.include?(limits)
           @song = song
           @mode = mode
+          @limits = limits
           @max_ticks = max_ticks
           @unsupported = Hash.new(0)
         end
 
         def hardware?
           @mode == :hardware
+        end
+
+        # True with +limits: :none+.
+        def unlimited?
+          @limits == :none
         end
 
         # Plays the song through once and returns a Result.
@@ -231,7 +250,10 @@ module MB
           @global_volume = @song.global_volume.to_f
           @stopped = false
           @channels = Array.new(@song.channels) { |c| Channel.new(c, @song.pans[c] || 0.0) }
-          @channels.each_with_index { |ch, c| ch.channel_volume = @song.channel_volumes[c] || 64 }
+          @channels.each_with_index { |ch, c|
+            ch.channel_volume = @song.channel_volumes[c] || 64
+            ch.vibrato = Effects::Oscillator.new(**vibrato_style)
+          }
           @logs = Array.new(@song.channels) { |c| Log.new(:"ch#{c + 1}") }
         end
 
@@ -286,6 +308,12 @@ module MB
           record_tick
           @channels.each { |ch| end_tick(ch, t) }
           @tick += 1
+        end
+
+        # The format's vibrato: Effects::Oscillator's +kind:+ (waveform
+        # tables) and +timing:+ (what a row's first tick does).
+        def vibrato_style
+          { kind: :protracker, timing: :protracker }
         end
 
         # Per-channel work after the tick's effects, before it is recorded
@@ -388,6 +416,7 @@ module MB
   end
 end
 
+require_relative 'effects'
 require_relative 'player/amiga'
 require_relative 'player/mod'
 require_relative 'player/six_six_nine'

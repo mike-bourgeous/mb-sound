@@ -44,17 +44,74 @@ module MB
         # measurements; the reference player's mixing level).
         GAINS = { mod: 3.0, "669": 1.5, s3m: 1.5, xm: 1.0, it: 1.5 }.freeze
 
-        attr_reader :song, :mode, :separation, :name
+        # The gain (dB) for +song+'s samples: GAINS for its format; MODs
+        # with more than 4 channels lower it as openmpt123 does (measured
+        # on one note: 6 channels -3.7 dB, 8 and more -6.0 dB; tracker-2,
+        # the maintainer's 8-channel MOD was 5 LU loud), by the ratio of
+        # channels to 4, up to 8.  Other formats don't depend on the count.
+        def self.gain_db(song)
+          db = GAINS.fetch(song.format, 0.0)
+          db -= 20 * Math.log10(song.channels.clamp(4, 8) / 4.0) if song.format == :mod
+          db
+        end
+
+        attr_reader :song, :mode, :separation, :name, :limits, :interpolation, :mix_rate, :bass_mono, :rolloff
+
+        # Sample reads (+interpolation:+), as Sampler::Instrument#play
+        # options.  :band_limited is the sampler's own read (half-octave
+        # band-limited levels at 4x, :optimal interpolation): flat to the
+        # sample's Nyquist frequency, then a brick wall that rings for
+        # milliseconds before and after every transient (measured: -28 dB
+        # 1 ms before a click, -40 dB 4 ms after), heard on cymbals as a
+        # harsh resonance at the sample's top (the maintainer, tracker-1
+        # Bench).  :cubic (the :musical default since tracker-2) reads the
+        # raw sample with a 4-point cubic: no ringing, a rolloff within a
+        # dB of openmpt123's up to the Nyquist frequency, images 40-60 dB
+        # down; :linear the PC trackers' interpolation (FT2, IT); :none
+        # drop-sample (Paula); :sinc the sampler's sinc kernel.
+        READS = {
+          band_limited: {}.freeze,
+          cubic: { interpolation: :cubic, mips: false }.freeze,
+          linear: { interpolation: :linear, mips: false }.freeze,
+          none: { interpolation: :none, mips: false }.freeze,
+          sinc: { interpolation: :sinc, mips: false }.freeze,
+        }.freeze
+
+        # :hardware reads per format: drop-sample for the Amiga formats and
+        # ST3 (Sound Blaster mixing), linear for FT2 and IT, whose mixers
+        # interpolated and ramped volume changes.
+        HARDWARE_READS = { xm: :linear, it: :linear }.freeze
 
         # +song+ a Song (see Tracker.read); +mode+ :musical (band-limited
         # sample reads, exact equal-tempered periods, lanes smoothed over
         # LANE_SMOOTH) or :hardware (drop-sample reads without band
         # limiting, the format's integer periods, steps on the tick);
-        # +separation+ scales the pans (0 mono, 1 as written).
-        def initialize(song, mode: :musical, separation: nil, name: nil)
+        # +separation+ scales the pans (0 mono, 1 as written); +limits+
+        # :format or :none (see Player#initialize); +interpolation+ one of
+        # READS (default :cubic in :musical, HARDWARE_READS or :none in
+        # :hardware); +mix_rate+ (Hz, or nil) mixes each channel as an old
+        # PC mixer at that rate would (Hz: GraphNode#decimate with linear
+        # joins, so content above half the rate folds back and the top
+        # rolls off); +bass_mono+ (Hz, or nil) centers each channel below
+        # that frequency (GraphNode#mono_below), so wide Amiga pans keep
+        # their bass in the middle; +rolloff+ (Hz, or nil) a gentle
+        # two-pole Butterworth lowpass on each channel (-3 dB there), for
+        # the top a mixer's images or a DAC's filter left (the maintainer:
+        # "a very gentle rolloff starting around 12-15k").
+        def initialize(song, mode: :musical, separation: nil, name: nil, limits: :format, interpolation: nil, mix_rate: nil, bass_mono: nil,
+                       rolloff: nil)
           raise ArgumentError, "mode: is :musical or :hardware (got #{mode.inspect})" unless %i[musical hardware].include?(mode)
           @song = song
           @mode = mode
+          @limits = limits
+          @interpolation = interpolation || (mode == :hardware ? HARDWARE_READS.fetch(song.format, :none) : :cubic)
+          raise ArgumentError, "interpolation: is one of #{READS.keys.map(&:inspect).join(', ')} (got #{interpolation.inspect})" unless READS.key?(@interpolation)
+          @mix_rate = mix_rate && Float(mix_rate)
+          raise ArgumentError, "mix_rate: is a rate in Hz above 1000 (got #{mix_rate.inspect})" if @mix_rate && !(@mix_rate > 1000)
+          @bass_mono = bass_mono && Float(bass_mono)
+          raise ArgumentError, "bass_mono: is a frequency in Hz above 0 (got #{bass_mono.inspect})" if @bass_mono && !(@bass_mono > 0)
+          @rolloff = rolloff && Float(rolloff)
+          raise ArgumentError, "rolloff: is a frequency in Hz from 1000 to 23000 (got #{rolloff.inspect})" if @rolloff && !@rolloff.between?(1000, 23_000)
           @separation = (separation || (mode == :musical ? SEPARATION.fetch(song.format, 1.0) : 1.0)).to_f
           @name = name || song.title
           @result = nil
@@ -69,7 +126,7 @@ module MB
 
         # The Player's recording (see Player::Result).
         def result
-          @result ||= Player.for(@song, mode: @mode).run
+          @result ||= Player.for(@song, mode: @mode, limits: @limits).run
         end
 
         # MB::Sound::Samples for Song#samples (nil for empty slots).
@@ -104,7 +161,7 @@ module MB
             raise FormatError, "#{@name}: plays #{used.length} samples (an instrument holds 127)" if used.length > 127
             list = samples
             Sampler::Instrument.new(name: @name) { |inst|
-              gain = 10**(GAINS.fetch(@song.format, 0.0) / 20)
+              gain = 10**(Import.gain_db(@song) / 20)
               used.each { |i| inst.region(list[i], keys: Import.key_of(i), keytrack: 0, gain: gain) }
             }
           end
@@ -112,13 +169,21 @@ module MB
 
         # The sampler options the tracks play with (see
         # Sampler::Instrument#play).
+        #
+        # Lanes step on the tick in :hardware for the Amiga formats and ST3;
+        # FT2 and IT ramped volume and pitch changes, so their :hardware
+        # lanes ramp over LANE_SMOOTH as :musical's do (a stepped bass
+        # clicked where Impulse Tracker didn't).
         def voice_options
           law = PAN_LAWS.fetch(@song.format, :linear)
-          if @mode == :hardware
-            { lanes: { law: law }, interpolation: :none, mips: false }
-          else
-            { lanes: { smooth: LANE_SMOOTH, law: law } }
-          end
+          ramp = @mode == :musical || HARDWARE_READS.key?(@song.format)
+          { lanes: ramp ? { smooth: LANE_SMOOTH, law: law } : { law: law } }.merge(READS.fetch(@interpolation))
+        end
+
+        # What each track's sampler goes through (see #initialize):
+        # { mix_rate:, bass_mono:, rolloff: } (nil for none).
+        def post_options
+          { mix_rate: @mix_rate, bass_mono: @bass_mono, rolloff: @rolloff }
         end
 
         # The Tracker::Set.
@@ -150,7 +215,7 @@ module MB
           end
           restart = r.restart && r.restart[0]
           Set.new(import: self, tracks: tracks, scenes: scenes, plays: plays, restart: restart, bpm: r.tempos[0][1], voice: voice_options,
-                  instrument: inst, unsupported: r.unsupported)
+                  instrument: inst, unsupported: r.unsupported, post: post_options)
         end
 
         private

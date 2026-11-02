@@ -267,7 +267,9 @@ module MB
             lane = Instrument.lane_options(lanes)
             smooth = lane[:smooth]
             if lane[:bend] && freq == :auto
-              freq = Notes::Frequency.new(source.number, offsets: [source.bend_semitones(nil, smooth: smooth)], sample_rate: source.sample_rate)
+              # (the number of the latest note-on, not a chased one: a clip swap
+              # mid-note leaves the sample's pitch alone, tracker-2)
+              freq = Notes::Frequency.new(source.number(chase: false), offsets: [source.bend_semitones(nil, smooth: smooth)], sample_rate: source.sample_rate)
             end
             start ||= source.cc(lane[:start], smooth: false) if lane[:start]
             out = play(source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose, declick: declick,
@@ -280,7 +282,7 @@ module MB
           if source
             trigger ||= source.trigger
             number ||= source.number
-            freq = source.freq(marks: false) if freq == :auto
+            freq = source.freq(marks: false, chase: false) if freq == :auto
             gate = release_loop? ? source.gate : nil if gate == :auto
             shift = source.pitch_mark if shift == :auto
           else
@@ -345,7 +347,7 @@ module MB
           mask = layer && source ? per_note(coverage, source, local) : nil
           mods = @modulation && source ? modulators(source, shared, mask, local) : nil
           if mods && mods[:pitch]
-            freq = shared[[:pitch, freq, mods[:keys][:pitch]]] ||= shift_by((freq || source.freq(marks: false)).then { |f| f.respond_to?(:sample) ? f : f.constant }, mods, :pitch)
+            freq = shared[[:pitch, freq, mods[:keys][:pitch]]] ||= shift_by((freq || source.freq(marks: false, chase: false)).then { |f| f.respond_to?(:sample) ? f : f.constant }, mods, :pitch)
           end
 
           nodes = Array.new(channel_count) { |c|
@@ -626,7 +628,7 @@ module MB
             # one index (number and velocity read once per buffer) for every
             # zone value of the voice, across layers
             index = shared[:zone_index] ||= source.is_a?(Hash) ? GraphNode::ZoneValue::Index.new(source[:number], source[:velocity]) :
-                                                                   GraphNode::ZoneValue::Index.new(source.number, source.velocity)
+                                                                   GraphNode::ZoneValue::Index.new(source.number(chase: false), source.velocity)
             value.node(index: index)
           when Hash then value.transform_values { |v| per_note(v, source, shared) }
           when Array then value.map { |v| per_note(v, source, shared) }
