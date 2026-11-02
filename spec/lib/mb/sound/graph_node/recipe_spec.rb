@@ -466,6 +466,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
         'sampler zone values (ZoneValue), pans, layers' => 'Samples made from NArrays (bundles save them as assets; see sf2_spec.rb)',
         'sampler choke groups (SamplerVoice choke)' => 'Samples made from NArrays (bundles save them as assets; see sampler_graph_io_spec.rb)',
         'loop players (LoopPlayer)' => 'Samples made from NArrays (bundles save them as assets; see sampler_graph_io_spec.rb)',
+        'sampler lanes (a tracker channel)' => 'Samples made from NArrays (bundles save them as assets; see tracker/set_spec.rb)',
         'capture tap (CaptureTap)' => 'live capture plumbing (capture_audio), not graph structure',
       }.freeze
 

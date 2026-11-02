@@ -57,15 +57,15 @@ RSpec.describe('relation fuzzing', :check_shared) do
   # fix-batch-1102b: seed 768893 drew kit-live-1's moving-knob kit factory
   # as a leaf, and the round trips (which keep knob values, not moves)
   # failed.  Sweep leaves in GraphSweep::PERFORMANCE_STATE skip :recipe and
-  # :document; every other relation still runs on them.
-  it 'skips the round trips, and only those, for sweep leaves whose moves are performance (seed 768893)' do
-    counts = Hash.new(0)
-    expect(RelationFuzz.run_seed(768_893, counts: counts)).to eq([])
-    expect(counts).to include(recipe_skipped: 1, document_skipped: 1, buffer_size: 1, plan_exact: 1)
-
+  # :document; every other relation still runs on them.  (Checked on the
+  # leaves by name: a seed's draw moves whenever a factory is added;
+  # tracker-1's sweep case moved 768893 off the kit.)
+  it 'skips the round trips, and only those, for sweep leaves whose moves are performance' do
     GraphSweep::PERFORMANCE_STATE.each_key do |name|
       code = "RelationFuzz.sweep(#{name.inspect})"
-      expect(RelationFuzz::ROUND_TRIPS.map { |r| RelationFuzz.check(r, code) }).to eq([:skip, :skip])
+      results = RelationFuzz::RELATIONS.to_h { |r| [r, RelationFuzz.check(r, code)] }
+      expect(results.slice(*RelationFuzz::ROUND_TRIPS).values).to eq([:skip, :skip]), name
+      expect(results.except(*RelationFuzz::ROUND_TRIPS).values.uniq).to eq([nil]), "#{name}: #{results.inspect}"
     end
     expect(RelationFuzz.check(:recipe, 'RelationFuzz.sweep("drums with held knob settings (a bound kit)")')).to be_nil
   end
