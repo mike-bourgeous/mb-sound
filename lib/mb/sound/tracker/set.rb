@@ -123,22 +123,31 @@ module MB
               MB::Sound.scene(n, **values) { changes.each { |pos, bpm| MB::Sound.tempo(bpm, in: Sequence::Duration.new(pos)) } }
             end
           }
+          # (a song that ends stops there, as a tracker does: its looping
+          # samples would ring out forever)
+          MB::Sound.scene(END_SCENE, others: :cut)
           form(loop: loop)
         end
 
+        # The scene that ends the song: every track stops (a 5 ms declick).
+        END_SCENE = :fin
+
         # The flow (a Form): a section per visit, named after its scene,
-        # for its length; with +loop+, a label :loop where the song loops
-        # back to and a goto there at the end.  Built on the current
-        # Session's arrangement (its last form).
+        # for its length, then a tick of END_SCENE (every track stops);
+        # with +loop+, a label :loop where the song loops back to and a goto
+        # there before the end.  Built on the current Session's arrangement
+        # (its last form).
         def form(loop: false)
           plays = @plays
           restart = loop ? @restart : nil
+          fin = END_SCENE
           Session.current.arrangement.build_form {
             plays.each_with_index { |(n, len), i|
               label :loop if i == restart
               __send__(n, Sequence::Duration.new(len))
             }
             goto :loop if restart
+            __send__(fin, Sequence::Duration.new(1/96r))
           }
         end
 
@@ -147,6 +156,17 @@ module MB
         def play(loop: false, **options)
           f = setup(loop: loop)
           MB::Sound.play_form(f, **options)
+        end
+
+        # The set set up on a Session of its own (not the current one;
+        # nothing plays), as an Arrangement: what `save :song, set` saves
+        # (GraphIO.dump takes anything with #to_arrangement).  With +loop+,
+        # the flow loops as #setup's does.
+        def to_arrangement(loop: false)
+          s = Session.new(output: NullOutput.new(channels: 2, sleep: false), transport: Sequence::Transport.new(bpm: @bpm), channels: 2,
+                          realtime: false, raise_errors: true)
+          setup(session: s, loop: loop)
+          s.arrangement
         end
 
         def to_s

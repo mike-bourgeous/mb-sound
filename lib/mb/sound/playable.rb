@@ -171,6 +171,10 @@ module MB
         when Form
           raise Unplayable, 'A form plays the scenes and tracks of the Session: `play_form form` (or `flow do ... end`)'
 
+        when Tracker::Set
+          raise Unplayable, "A tracker module's set plays its tracks, scenes, and flow: `play song` (foreground), `song.play` " \
+            '(background), `render(file, song)`, or `song.setup` to play it by hand'
+
         when nil
           raise Unplayable, 'Nothing to play (got nil)'
 
