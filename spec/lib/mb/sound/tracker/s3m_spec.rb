@@ -76,7 +76,7 @@ RSpec.describe(MB::Sound::Tracker::S3MReader, :aggregate_failures) do
 
   it 'imports as a set' do
     set = MB::Sound.mod_import(write({ [0, 0] => { note: 60, sample: 2 }, [4, 1] => { note: 72, sample: 1, effect: 'O', param: 4 } }))
-    expect(set.tracks.length).to eq(4)
+    expect(set.tracks).to eq(%i[ch1 ch2]) # (channels that never play get no track)
     ev = set[:p00][:ch2].events[0]
     expect([ev.start, ev.value, ev.pitch]).to eq([24/96r, 1, 12])
     expect(set[:p00][:ch2].control(20).points).to include([24/96r, 1024 / 4000.0])

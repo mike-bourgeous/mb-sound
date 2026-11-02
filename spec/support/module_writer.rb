@@ -300,3 +300,175 @@ module ModuleWriter
     path
   end
 end
+
+module ModuleWriter
+  module_function
+
+  # IT 2.14/2.15 compression of signed integer samples +ints+ (8 or 16
+  # +bits+), as ItCompression reads it: blocks of 0x8000/0x4000 samples,
+  # each value in the narrowest width that holds the next few deltas,
+  # changing width with all three of the format's escape kinds.
+  def it_compress(ints, bits: 8, it215: false)
+    out = +''.b
+    block = bits == 16 ? 0x4000 : 0x8000
+    top = bits + 1
+    limit = 1 << bits
+    ints.each_slice(block) { |chunk|
+      d1 = d2 = 0
+      deltas = chunk.map { |v|
+        if it215
+          nd1 = v - d2 # (the stream holds the change of the first delta)
+          dd = nd1 - d1
+          d1 = nd1
+          d2 = v
+          dd
+        else
+          dd = v - d1
+          d1 = v
+          dd
+        end
+      }.map { |x| ((x + limit / 2) & (limit - 1)) - limit / 2 }
+      bitsout = []
+      width = top
+      put = ->(v, w) { w.times { |i| bitsout << ((v >> i) & 1) } }
+      reserved = ->(v, w) {
+        u = v & ((1 << w) - 1)
+        if w < 7 then u == 1 << (w - 1)
+        elsif w < top
+          border = ((limit - 1) >> (top - w)) - (bits == 16 ? 8 : 4)
+          u > border && u <= border + (bits == 16 ? 16 : 8)
+        else false
+        end
+      }
+      fits = ->(v, w) { w >= top || (v >= -(1 << (w - 1)) && v < (1 << (w - 1)) && !reserved.(v, w)) }
+      change = ->(t) {
+        return if t == width
+        if width < 7
+          put.(1 << (width - 1), width)
+          put.(t < width ? t - 1 : t - 2, bits == 16 ? 4 : 3)
+        elsif width < top
+          border = ((limit - 1) >> (top - width)) - (bits == 16 ? 8 : 4)
+          put.(border + (t < width ? t : t - 1), width)
+        else
+          put.(limit | (t - 1), width)
+        end
+        width = t
+      }
+      deltas.each_with_index { |v, i|
+        unless fits.(v, width)
+          need = (1..top).find { |w| deltas[i, 8].all? { |x| fits.(x, w) } }
+          change.(need)
+        end
+        put.(width >= top ? v & (limit - 1) : v, width)
+        # shrink when the next deltas are small
+        if i % 16 == 15 && width > 3
+          need = (1..top).find { |w| deltas[i + 1, 16].to_a.all? { |x| fits.(x, w) } }
+          change.(need) if need && need < width
+        end
+      }
+      bytes = bitsout.each_slice(8).map { |b8| b8.each_with_index.sum { |bit, k| bit << k } }
+      out << [bytes.length].pack('v') << bytes.pack('C*')
+    }
+    out
+  end
+
+  # Impulse Tracker (.it, written as IT 2.14): +samples+ (+data+, +loop+,
+  # +sustain+, +ping_pong+, +volume+, +global_volume+, +pan+ (0..64),
+  # +c5speed+, +bits+, +compressed+ (true or :it215), +unsigned+);
+  # +instruments+ (nil for sample mode) with +keymap+ (120 [note, sample]
+  # pairs or a sample number for all notes), +nna+, +dct+, +dca+,
+  # +fadeout+, +global_volume+, +pan+, and +volume_envelope+ /
+  # +pan_envelope+ / +pitch_envelope+ ({ points:, loop: [a, b], sustain: [a,
+  # b] }).  Cells: neutral notes (C-5 = 60), :off, :cut, :fade;
+  # +instrument+ (or +sample+), +volume+ (the raw volume column), +effect+
+  # (a letter or 1-26) and +param+.
+  def it(path, samples:, patterns:, instruments: nil, orders: [0], title: 'spec it', channels: 4, speed: 6, tempo: 125, linear: true,
+         global_volume: 128, pans: nil, volumes: nil)
+    head = +''.b
+    head << 'IMPM' << text(title, 26) << [0x1004].pack('v')
+    head << [orders.length + 1, (instruments || []).length, samples.length, patterns.length, 0x0214, 0x0214].pack('v6')
+    head << [1 | (instruments ? 4 : 0) | (linear ? 8 : 0), 0].pack('vv')
+    head << [global_volume, 48, speed, tempo, 128, 0].pack('C6') << [0, 0, 0].pack('vVV')
+    head << Array.new(64) { |c| pans ? (pans[c] || 32) : 32 }.pack('C64')
+    head << Array.new(64) { |c| volumes ? (volumes[c] || 64) : 64 }.pack('C64')
+    head << (orders + [255]).pack('C*')
+    table_at = head.bytesize
+    count = (instruments || []).length + samples.length + patterns.length
+    head << "\0" * (4 * count)
+    out = head
+    offsets = []
+    (instruments || []).each { |ins|
+      offsets << out.bytesize
+      km = ins[:keymap].is_a?(Array) ? ins[:keymap] : Array.new(120) { |n| [n, ins[:keymap] || 1] }
+      rec = +''.b
+      rec << 'IMPI' << text('', 12) << [0, ins[:nna] || 0, ins[:dct] || 0, ins[:dca] || 0, ins[:fadeout] || 0].pack('CCCCv')
+      rec << [0, 0, ins[:global_volume] || 128, ins[:pan] ? ins[:pan] : 128 | 32, 0, 0].pack('cCCCCC') << [0x0214, 1, 0].pack('vCC')
+      rec << text(ins[:name] || '', 26) << [0, 0, 0, 0, 0].pack('CCCCv')
+      rec << km.flat_map { |n, s| [n, s] }.pack('C240')
+      [ins[:volume_envelope], ins[:pan_envelope], ins[:pitch_envelope]].each { |env|
+        pts = env ? env[:points] : []
+        fl = env ? 1 | (env[:loop] ? 2 : 0) | (env[:sustain] ? 4 : 0) : 0
+        rec << [fl, pts.length, env&.dig(:loop, 0) || 0, env&.dig(:loop, 1) || 0, env&.dig(:sustain, 0) || 0, env&.dig(:sustain, 1) || 0].pack('C6')
+        25.times { |k| x, y = pts[k] || [0, 0]; rec << [y, x].pack('cv') }
+        rec << "\0"
+      }
+      rec << "\0" * 4
+      out << rec
+    }
+    data_fix = []
+    samples.each { |s|
+      offsets << out.bytesize
+      data = s[:data] || []
+      bits = s[:bits] || 8
+      fl = (data.empty? ? 0 : 1) | (bits == 16 ? 2 : 0) | (s[:compressed] ? 8 : 0) | (s[:loop] ? 16 : 0) | (s[:sustain] ? 32 : 0) | (s[:ping_pong] ? 64 : 0)
+      cvt = (s[:unsigned] ? 0 : 1) | (s[:compressed] == :it215 ? 4 : 0)
+      rec = +''.b
+      rec << 'IMPS' << text('', 12) << [0, s[:global_volume] || 64, fl, s[:volume] || 64].pack('C4') << text(s[:name] || '', 26)
+      rec << [cvt, s[:pan] ? 128 | s[:pan] : 32].pack('CC')
+      lp = s[:loop] || [0, 0]
+      sp = s[:sustain] || [0, 0]
+      rec << [data.length, lp[0], lp[1], s[:c5speed] || 8363, sp[0], sp[1]].pack('V6')
+      data_fix << [out.bytesize + rec.bytesize, s]
+      rec << [0].pack('V') << [0, 0, 0, 0].pack('C4')
+      out << rec
+    }
+    patterns.each { |pat|
+      offsets << out.bytesize
+      body = +''.b
+      pat.each { |row|
+        row.each_with_index { |cell, c|
+          next if cell.nil?
+          mask = 0
+          mask |= 1 if cell[:note]
+          mask |= 2 if cell[:instrument] || cell[:sample]
+          mask |= 4 if cell[:volume]
+          mask |= 8 if cell[:effect]
+          body << [(c + 1) | 128, mask].pack('CC')
+          if cell[:note]
+            body << [{ off: 255, cut: 254, fade: 246 }.fetch(cell[:note]) { cell[:note] }].pack('C')
+          end
+          body << [cell[:instrument] || cell[:sample]].pack('C') if mask & 2 != 0
+          body << [cell[:volume]].pack('C') if mask & 4 != 0
+          body << [letter(cell[:effect]), cell[:param] || 0].pack('CC') if mask & 8 != 0
+        }
+        body << "\0"
+      }
+      out << [body.bytesize, pat.length, 0].pack('vvV') << body
+    }
+    data_fix.each { |at, s|
+      out[at, 4] = [out.bytesize].pack('V')
+      bits = s[:bits] || 8
+      ints = (s[:data] || []).map { |x| bits == 16 ? (x.clamp(-1.0, 32767 / 32768.0) * 32768).round : (x.clamp(-1.0, 127 / 128.0) * 128).round }
+      if s[:compressed]
+        out << it_compress(ints, bits: bits, it215: s[:compressed] == :it215)
+      elsif bits == 16
+        out << (s[:unsigned] ? ints.map { |v| v + 32768 }.pack('v*') : ints.pack('s<*'))
+      else
+        out << (s[:unsigned] ? ints.map { |v| v + 128 } : ints.map { |v| v & 0xFF }).pack('C*')
+      end
+    }
+    out[table_at, 4 * count] = offsets.pack('V*')
+    File.binwrite(path, out)
+    path
+  end
+end

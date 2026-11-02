@@ -35,6 +35,15 @@ module MB
         # pans (MOD, 669) are narrowed in :musical mode.
         SEPARATION = { mod: 0.6, "669": 0.6 }.freeze
 
+        # Pan laws per format: the trackers' linear law (-6 dB in the
+        # middle), FastTracker 2's square-root (equal power) one for XM.
+        PAN_LAWS = { xm: :equal_power }.freeze
+
+        # Gain per format (dB), matching the loudness of openmpt123's
+        # renders of the maintainer's modules within about a dB (tracker-1
+        # measurements; the reference player's mixing level).
+        GAINS = { mod: 3.0, "669": 1.5, s3m: 1.5, xm: 1.0, it: 1.5 }.freeze
+
         attr_reader :song, :mode, :separation, :name
 
         # +song+ a Song (see Tracker.read); +mode+ :musical (band-limited
@@ -92,7 +101,8 @@ module MB
             raise FormatError, "#{@name}: plays #{used.length} samples (an instrument holds 127)" if used.length > 127
             list = samples
             Sampler::Instrument.new(name: @name) { |inst|
-              used.each { |i| inst.region(list[i], keys: Import.key_of(i), keytrack: 0) }
+              gain = 10**(GAINS.fetch(@song.format, 0.0) / 20)
+              used.each { |i| inst.region(list[i], keys: Import.key_of(i), keytrack: 0, gain: gain) }
             }
           end
         end
@@ -100,10 +110,11 @@ module MB
         # The sampler options the tracks play with (see
         # Sampler::Instrument#play).
         def voice_options
+          law = PAN_LAWS.fetch(@song.format, :linear)
           if @mode == :hardware
-            { lanes: true, interpolation: :none, mips: false }
+            { lanes: { law: law }, interpolation: :none, mips: false }
           else
-            { lanes: LANE_SMOOTH }
+            { lanes: { smooth: LANE_SMOOTH, law: law } }
           end
         end
 
@@ -111,15 +122,15 @@ module MB
         def set
           r = result
           inst = instrument
-          tracks = r.logs.map(&:name)
-          clips = Hash.new { |h, k| h[k] = {} }
+          logs = r.logs.select(&:used?) # (channels that never play get no track)
+          tracks = logs.map(&:name)
           cache = {}
           scenes = {}
           names = {}
           plays = []
-          marks = Array.new(r.logs.length) # (each log's [mark, sample] before the visit)
+          marks = Array.new(logs.length) # (each log's [mark, sample] before the visit)
           r.visits.each_with_index do |v, vi|
-            row = r.logs.each_with_index.map { |log, c|
+            row = logs.each_with_index.map { |log, c|
               clip, marks[c] = clip_for(v, log, marks[c])
               cache[[c, clip_key(clip)]] ||= clip
             }

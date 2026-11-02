@@ -230,7 +230,11 @@ module MB
               ch.out_period = ch.period
             end
             return if cell.nil? || cell.effect.nil?
+            effect_tick(ch, cell, t)
+          end
 
+          # The effect of +cell+ on tick +t+ (above 0) of its row.
+          def effect_tick(ch, cell, t)
             v = ch.vol_column
             case cell.effect
             when 4 then volume_slide_s3m(ch, v, t)
