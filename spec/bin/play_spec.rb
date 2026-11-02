@@ -6,11 +6,20 @@ require_relative '../support/module_writer'
 # 80x24, its keys, the plain lines without a terminal or with --no-ui, and a
 # narrow terminal (the old text meters raised under 22 columns).
 RSpec.describe('bin/play.rb', :aggregate_failures) do
+  # (a module stops at its first pattern break: rows of 32 make 3.8 s
+  # sections, the whole song 11.5 s)
   let(:mod) {
     w = ModuleWriter
-    p0 = w.pattern(4, { [0, 0] => { note: 60, sample: 1 }, [16, 1] => { note: 64, sample: 1, effect: 12, param: 40 } })
-    p1 = w.pattern(4, { [0, 2] => { note: 67, sample: 1 } })
+    p0 = w.pattern(4, { [0, 0] => { note: 60, sample: 1 }, [16, 1] => { note: 64, sample: 1, effect: 12, param: 40 }, [31, 0] => { effect: 13, param: 0 } })
+    p1 = w.pattern(4, { [0, 2] => { note: 67, sample: 1 }, [31, 0] => { effect: 13, param: 0 } })
     w.mod(tmp_path('play.mod'), samples: [{ name: 'saw', data: w.saw(2000), loop: [1000, 2000] }], patterns: [p0, p1, p0], orders: [0, 1, 2])
+  }
+
+  # A one-section module of 1.9 s (16 rows, then a pattern break).
+  let(:short_mod) {
+    w = ModuleWriter
+    p0 = w.pattern(4, { [0, 0] => { note: 60, sample: 1 }, [15, 0] => { effect: 13, param: 0 } })
+    w.mod(tmp_path('short.mod'), samples: [{ name: 'saw', data: w.saw(2000), loop: [1000, 2000] }], patterns: [p0], orders: [0])
   }
 
   # Runs bin/play.rb with +args+ in a +rows+ x +cols+ pty read by a
@@ -105,9 +114,9 @@ RSpec.describe('bin/play.rb', :aggregate_failures) do
   end
 
   it 'prints plain lines without a terminal, and with --no-ui' do
-    out, err, status = Open3.capture3({ 'OUTPUT_TYPE' => 'null' }, 'bin/play.rb', 'spec/test_data/arp_a7.flac', mod)
+    out, err, status = Open3.capture3({ 'OUTPUT_TYPE' => 'null' }, 'bin/play.rb', 'spec/test_data/arp_a7.flac', short_mod)
     expect(status).to be_success, err
-    expect(MB::U.remove_ansi(err)).to include('Playing arp_a7.flac', 'Playing play.mod (0:', 'MOD, musical')
+    expect(MB::U.remove_ansi(err)).to include('Playing arp_a7.flac', 'Playing short.mod (0:01', 'MOD, musical')
     expect(out).not_to include("\e[?1049h") # (no screen)
 
     status = in_pty('--no-ui', 'spec/test_data/arp_a7.flac') do |text, _w, wait|

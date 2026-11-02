@@ -175,9 +175,9 @@ module MB
         class Pattern < Base
           NOTE_NAMES = %w[C- C# D- D# E- F- F# G- G# A- A# B-].freeze
 
-          def initialize(player) = super(player, :pattern, rate: 30, height: 20, width: 80, title: 'pattern', min_height: 4, description: "a module's pattern rows, the row playing highlighted, a VU per channel")
+          def initialize(player) = super(player, :pattern, rate: 20, height: 20, width: 80, title: 'pattern', min_height: 4, description: "a module's pattern rows, the row playing highlighted, a VU per channel")
 
-          def draw_body(c, s, _state)
+          def draw_body(c, s, state)
             it = @player.item
             unless it.respond_to?(:set) && it.set && s
               c.puts [it.loaded? ? 'no patterns' : 'loading', :dim]
@@ -211,23 +211,35 @@ module MB
             body = c.h - 1
             mid = body / 2
             rows = visit.rows
+            # (each row's text built once per pattern and width: the cells
+            # never change while it plays)
+            key = [set.object_id, c.w, cw, shown]
+            unless state[:lines_key] == key
+              state[:lines_key] = key
+              state[:lines] = {}
+            end
+            lines = state[:lines]
             body.times do |y|
               i = ri + y - mid
               next if i < 0 || i >= rows.length
               row = rows[i][0]
               current = i == ri
               role = current ? :key : (row % 4 == 0 ? :text : :dim)
-              cells = pattern&.rows&.[](row) || []
-              line = +format('%02d', row)
-              line << '  '
-              chans.first(shown).each do |ch, _|
-                line << cell_text(cells[ch], cw, song.format) << ' '
-              end
-              c.run(0, y + 1, line.ljust(c.w), role, reverse: current)
+              line = (lines[[visit.pattern, row]] ||= row_text(pattern, row, chans.first(shown), cw, song.format, c.w).freeze)
+              c.run(0, y + 1, line, role, reverse: current)
             end
           end
 
           private
+
+          # Row +row+ of +pattern+ as a tracker shows it, +w+ wide.
+          def row_text(pattern, row, chans, cw, format, w)
+            cells = pattern&.rows&.[](row) || []
+            line = +format('%02d', row)
+            line << '  '
+            chans.each { |ch, _| line << cell_text(cells[ch], cw, format) << ' ' }
+            line.ljust(w)
+          end
 
           # [[pattern channel index, Log], ...] for the channels the set
           # plays (tracks :ch1.. in order).

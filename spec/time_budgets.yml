@@ -28,6 +28,10 @@ default:
   file: 20
   example: 8
 files:
+  spec/bin/play_spec.rb:
+    file: 35
+    example: 12
+    reason: six real bin/play.rb processes in ptys (the player screens need real terminals and the real startup; each spends 3-5 s on startup and YJIT/UI warm-up, a module 2 s more on its form warm-up), the module screen example stepping through every key; 44.5 s alone in the Mac container (12.7 s for that example), 84.6 s at PARALLEL=8 under load at x2.68 = 31.6 reference seconds before its modules were shortened (play-ui-1, 2026-11-02)
   spec/bin/gc_soak_spec.rb:
     file: 80
     example: 70
