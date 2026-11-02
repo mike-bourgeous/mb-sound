@@ -93,12 +93,13 @@ module MB
         # Delta-coded signed PCM (XM): each value is the previous plus the
         # stored difference, wrapping at +bits+.
         def self.delta(raw, bits)
+          return Numo::SFloat[] if raw.bytesize < bits / 8
           ints = bits == 16 ? Numo::Int16.from_binary(raw.byteslice(0, raw.bytesize & ~1)) : Numo::Int8.from_binary(raw)
           return Numo::SFloat[] if ints.empty?
           sum = Numo::Int64.cast(ints).cumsum
           range = 1 << bits
           half = range / 2
-          wrapped = ((sum + half) % range) - half
+          wrapped = ((sum + half) & (range - 1)) - half # (Numo's % keeps the sign: C-style)
           Numo::SFloat.cast(wrapped) / half.to_f
         end
       end

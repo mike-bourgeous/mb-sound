@@ -282,12 +282,19 @@ module MB
 
         def play_tick(t, cells)
           @channels.each_with_index { |ch, c| tick_effect(ch, cells[c], t) if t > 0 }
-          @channels.each { |ch| end_tick(ch, t) }
+          @channels.each { |ch| before_record(ch, t) }
           record_tick
+          @channels.each { |ch| end_tick(ch, t) }
           @tick += 1
         end
 
-        # Per-channel work after the tick's effects (envelopes, fades).
+        # Per-channel work after the tick's effects, before it is recorded
+        # (auto-vibrato).
+        def before_record(ch, t)
+        end
+
+        # Per-channel work after the tick is recorded (envelopes and fades
+        # move on to the next tick).
         def end_tick(ch, t)
         end
 
@@ -385,3 +392,5 @@ require_relative 'player/amiga'
 require_relative 'player/mod'
 require_relative 'player/six_six_nine'
 require_relative 'player/s3m'
+require_relative 'player/envelopes'
+require_relative 'player/xm'

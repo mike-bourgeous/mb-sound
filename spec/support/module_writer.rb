@@ -224,3 +224,79 @@ module ModuleWriter
     path
   end
 end
+
+module ModuleWriter
+  module_function
+
+  # FastTracker 2 (.xm 1.04): +instruments+ are Hashes with +samples+ (each
+  # with +data+, +loop+ and +loop_type+ (:forward/:ping_pong), +volume+,
+  # +finetune+, +relative+, +pan+, +bits+), +keymap+ (96 sample numbers,
+  # default all 0), +volume_envelope+/+pan_envelope+ ({ points: [[x, y],
+  # ...], sustain: i, loop: [a, b] }), +fadeout+, +vibrato+ ([type, sweep,
+  # depth, rate]).  Cells: neutral notes (C-4 = 60) or :off, +instrument+,
+  # +volume+ (the raw volume column byte), +effect+ (0-35), +param+.
+  def xm(path, instruments:, patterns:, orders: [0], title: 'spec xm', channels: 4, speed: 6, tempo: 125, linear: true, restart: 0)
+    out = +''.b
+    out << 'Extended Module: ' << text(title, 20) << [0x1A].pack('C') << text('ModuleWriter', 20) << [0x0104, 276].pack('vV')
+    out << [orders.length, restart, channels, patterns.length, instruments.length, linear ? 1 : 0, speed, tempo].pack('v8')
+    out << orders.dup.fill(0, orders.length...256).pack('C256')
+    patterns.each { |pat|
+      body = +''.b
+      pat.each { |row|
+        channels.times { |c|
+          cell = row[c]
+          if cell.nil?
+            body << [0x80].pack('C')
+          else
+            n = case cell[:note]
+                when nil then 0
+                when :off then 97
+                else cell[:note] - MB::Sound::Tracker::XMReader::NOTE_OFFSET
+                end
+            body << [0x9F, n, cell[:instrument] || cell[:sample] || 0, cell[:volume] || 0, cell[:effect] || 0, cell[:param] || 0].pack('C6')
+          end
+        }
+      }
+      out << [9, 0, pat.length, body.bytesize].pack('VCvv') << body
+    }
+    instruments.each { |ins|
+      smps = ins[:samples] || []
+      head = +''.b
+      head << text(ins[:name] || '', 22) << [0, smps.length].pack('Cv')
+      if smps.empty?
+        out << [head.bytesize + 4].pack('V') << head
+        next
+      end
+      head << [40].pack('V') << (ins[:keymap] || [0] * 96).pack('C96')
+      [ins[:volume_envelope], ins[:pan_envelope]].each { |env|
+        pts = env ? env[:points] : []
+        head << pts.flatten.dup.fill(0, pts.flatten.length...24).pack('v24')
+      }
+      ve = ins[:volume_envelope]
+      pe = ins[:pan_envelope]
+      head << [ve ? ve[:points].length : 0, pe ? pe[:points].length : 0].pack('CC')
+      [ve, pe].each { |env| head << [env&.dig(:sustain) || 0, env&.dig(:loop, 0) || 0, env&.dig(:loop, 1) || 0].pack('C3') }
+      type = ->(env) { env ? 1 | (env[:sustain] ? 2 : 0) | (env[:loop] ? 4 : 0) : 0 }
+      head << [type.(ve), type.(pe)].pack('CC') << (ins[:vibrato] || [0, 0, 0, 0]).pack('C4') << [ins[:fadeout] || 0, 0].pack('vv')
+      head << "\0" * 22
+      out << [head.bytesize + 4].pack('V') << head
+      datas = smps.map { |s|
+        bits = s[:bits] || 8
+        ints = (s[:data] || []).map { |x| bits == 16 ? (x.clamp(-1.0, 32767 / 32768.0) * 32768).round : (x.clamp(-1.0, 127 / 128.0) * 128).round }
+        deltas = ints.each_with_index.map { |v, i| v - (i > 0 ? ints[i - 1] : 0) }
+        bits == 16 ? deltas.pack('s<*') : deltas.map { |d| d & 0xFF }.pack('C*')
+      }
+      smps.each_with_index { |s, i|
+        div = (s[:bits] || 8) / 8
+        loop = s[:loop]
+        lt = loop ? (s[:loop_type] == :ping_pong ? 2 : 1) : 0
+        out << [datas[i].bytesize, loop ? loop[0] * div : 0, loop ? (loop[1] - loop[0]) * div : 0].pack('V3')
+        out << [s[:volume] || 64, s[:finetune] || 0, lt | (div == 2 ? 16 : 0), s[:pan] || 128, s[:relative] || 0, 0].pack('CcCCcC')
+        out << text(s[:name] || '', 22)
+      }
+      datas.each { |d| out << d }
+    }
+    File.binwrite(path, out)
+    path
+  end
+end
