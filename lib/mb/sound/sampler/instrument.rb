@@ -241,11 +241,39 @@ module MB
         # either way (the fade also stops the voice afterwards, so a later
         # note on the lane has no declick tail of the old one).  A length
         # also sets how fast choke groups fade the voice.
+        #
+        # +lanes+ (tracker-1): the voice follows its MIDI channel's lanes
+        # the way a tracker channel follows its effects, tick by tick: pitch
+        # bend in semitones at the stream's bend range (a clip's bend lane
+        # sends its range as RPN 0), CC 7 as a linear volume (0..1 of full;
+        # velocity still picks velocity layers), CC 10 as the pan (stereo
+        # out; balance for stereo samples), and CC 20 as the start of each
+        # note (a 0..1 fraction of the region, read at the note-on: a
+        # tracker's sample offset).  true steps on the exact event samples;
+        # a length smooths each step over it (`lanes: 2.ms`); a Hash picks
+        # some (`lanes: { pan: false, smooth: 2.ms }`; keys :bend, :volume,
+        # :pan, :start, each true, false, or a CC number, and :smooth).
+        # Tracker::Import's tracks play this way.
         def play(source = nil, trigger: nil, number: nil, freq: :auto, gate: :auto, shift: :auto, start: nil, transpose: 0, declick: DECLICK,
-                 interpolation: nil, mips: nil, seed: nil, steal_fade: true)
+                 interpolation: nil, mips: nil, seed: nil, steal_fade: true, lanes: false)
           if source && !source.is_a?(MB::Sound::Notes)
             raise ArgumentError, "Play a sampler from a synth voice (v), trigger:/number:, or a MIDI source (got #{source.inspect})" unless midi_source?(source)
-            return sampler(source, transpose: transpose, start: start, declick: declick, interpolation: interpolation, mips: mips, steal_fade: steal_fade)
+            return sampler(source, transpose: transpose, start: start, declick: declick, interpolation: interpolation, mips: mips, steal_fade: steal_fade, lanes: lanes)
+          end
+
+          if lanes
+            raise ArgumentError, 'lanes: follows a synth voice\'s MIDI channel; play the instrument from a voice (v)' unless source
+            lane = Instrument.lane_options(lanes)
+            smooth = lane[:smooth]
+            if lane[:bend] && freq == :auto
+              freq = Notes::Frequency.new(source.number, offsets: [source.bend_semitones(nil, smooth: smooth)], sample_rate: source.sample_rate)
+            end
+            start ||= source.cc(lane[:start], smooth: false) if lane[:start]
+            out = play(source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose, declick: declick,
+                               interpolation: interpolation, mips: mips, seed: seed, steal_fade: steal_fade)
+            out = out * source.cc(lane[:volume], default: 127, smooth: smooth) if lane[:volume]
+            out = out.pan(source.cc(lane[:pan], range: -1.0..1.0, default: 64, smooth: smooth)) if lane[:pan]
+            return out
           end
 
           if source
@@ -443,6 +471,33 @@ module MB
         # playing a sample of +sample_channels+: equal power with 0 dB in the
         # middle for mono samples (+3 dB at the side it's panned to), a
         # balance (the far channel turned down) for stereo samples.
+        # The lanes #play follows by default with +lanes: true+ (CC
+        # numbers; see #play).
+        LANES = { bend: true, volume: 7, pan: 10, start: 20 }.freeze
+
+        # #play's +lanes+ option as a Hash of LANES (CC numbers, true for
+        # the bend, nil for lanes left out) and :smooth (seconds, or false).
+        def self.lane_options(lanes)
+          opts = case lanes
+                 when true then {}
+                 when Hash then lanes
+                 when Numeric, Length then { smooth: lanes }
+                 else raise ArgumentError, "lanes: is true, a smoothing length, or a Hash of #{LANES.keys.join(', ')}, smooth: (got #{lanes.inspect})"
+                 end
+          unknown = opts.keys - LANES.keys - [:smooth]
+          raise ArgumentError, "lanes: unknown keys #{unknown.map(&:inspect).join(', ')} (#{LANES.keys.join(', ')}, smooth)" unless unknown.empty?
+          result = LANES.to_h { |k, default|
+            v = opts.fetch(k, true)
+            v = default if v == true
+            raise ArgumentError, "lanes: #{k}: is true, false, or a CC number 0..127 (got #{v.inspect})" unless v == false || v.nil? || v == true || (v.is_a?(Integer) && v.between?(0, 127))
+            [k, v || nil]
+          }
+          smooth = opts[:smooth]
+          smooth = smooth.nil? || smooth == false || smooth == 0 ? false : Length.seconds(smooth).to_f
+          raise ArgumentError, "lanes: smooth: is a length above 0 or false (got #{opts[:smooth].inspect})" if smooth && !(smooth > 0)
+          result.merge(smooth: smooth)
+        end
+
         def self.pan_gain(pan, c, sample_channels)
           return 1.0 if pan == 0
           if sample_channels == 1
