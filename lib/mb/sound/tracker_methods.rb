@@ -10,20 +10,20 @@ module MB
       # `render`, and `save` take it; `song.setup` puts it on the Session
       # without playing, so `go :p03` launches a pattern as a scene.
       #
-      # +mode+ :musical (default: band-limited sample reads, exact
-      # equal-tempered pitches, lanes declicked over 1.5 ms, Amiga pans
-      # narrowed) or :hardware (drop-sample reads, the format's integer
-      # period tables, steps on the tick, pans as written); +separation+
-      # sets the stereo width (0..1); +limits+ :format (default) keeps
-      # pitches in the format's period range, as most players do (a MOD's
-      # notes stored past ProTracker's table bottom out at its lowest
-      # note), :none lifts it (stored periods play as written, slides keep
-      # falling toward 0 Hz; tracker-2); +interpolation+ :cubic (the
-      # :musical default), :band_limited, :linear, :none (the :hardware
-      # default for MOD, 669, S3M; :linear for XM and IT), or :sinc;
-      # +mix_rate+ (e.g. 22_050) mixes each channel at an old PC mixer's
-      # rate; +bass_mono+ (e.g. 150) centers each channel's bass, for wide
-      # pans; +rolloff+ (e.g. 14_000) a gentle lowpass on each channel.
+      # +mode+ :musical (default: cubic sample reads, the format's
+      # periods with unrounded slides, lanes declicked over 1.5 ms, Amiga
+      # pans narrowed) or :hardware (drop-sample reads, linear for XM and
+      # IT; integer periods; steps on the tick; pans as written).
+      #
+      # +separation+ sets the stereo width (0..1).  +limits+ :format
+      # (default) keeps pitches in the format's period range, as most
+      # players do; :none lifts it (a MOD's periods past its table play as
+      # written, slides keep falling toward 0 Hz).
+      #
+      # +interpolation+ picks the read (:cubic, :band_limited, :linear,
+      # :none, :sinc); +mix_rate+ (e.g. 22_050) mixes each channel at an
+      # old PC mixer's rate; +bass_mono+ (e.g. 150) centers each channel's
+      # bass; +rolloff+ (e.g. 14_000) is a gentle lowpass per channel.
       # Effects the player skips are listed in one warning.
       #
       #     song = mod_import('tune.mod', separation: 0.8, bass_mono: 150)
