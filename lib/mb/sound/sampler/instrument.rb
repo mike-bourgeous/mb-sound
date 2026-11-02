@@ -252,7 +252,8 @@ module MB
         # tracker's sample offset).  true steps on the exact event samples;
         # a length smooths each step over it (`lanes: 2.ms`); a Hash picks
         # some (`lanes: { pan: false, smooth: 2.ms }`; keys :bend, :volume,
-        # :pan, :start, each true, false, or a CC number, and :smooth).
+        # :pan, :start, each true, false, or a CC number, :smooth, and :law,
+        # the pan law: `law: :linear` is the trackers' -6 dB middle).
         # Tracker::Import's tracks play this way.
         def play(source = nil, trigger: nil, number: nil, freq: :auto, gate: :auto, shift: :auto, start: nil, transpose: 0, declick: DECLICK,
                  interpolation: nil, mips: nil, seed: nil, steal_fade: true, lanes: false)
@@ -272,7 +273,7 @@ module MB
             out = play(source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose, declick: declick,
                                interpolation: interpolation, mips: mips, seed: seed, steal_fade: steal_fade)
             out = out * source.cc(lane[:volume], default: 127, smooth: smooth) if lane[:volume]
-            out = out.pan(source.cc(lane[:pan], range: -1.0..1.0, default: 64, smooth: smooth)) if lane[:pan]
+            out = out.pan(source.cc(lane[:pan], range: -1.0..1.0, default: 64, smooth: smooth), law: lane[:law]) if lane[:pan]
             return out
           end
 
@@ -467,25 +468,27 @@ module MB
           new(layers: instruments, mips: mips, name: name, lineage: lineage)
         end
 
-        # The gain of channel +c+ (of 2) for a region panned to +pan+ (-1..1)
-        # playing a sample of +sample_channels+: equal power with 0 dB in the
-        # middle for mono samples (+3 dB at the side it's panned to), a
-        # balance (the far channel turned down) for stereo samples.
         # The lanes #play follows by default with +lanes: true+ (CC
         # numbers; see #play).
         LANES = { bend: true, volume: 7, pan: 10, start: 20 }.freeze
 
+        # Pan laws a pan lane may follow (GraphNode#pan's).
+        LANE_LAWS = %i[equal_power minus_4_5db linear].freeze
+
         # #play's +lanes+ option as a Hash of LANES (CC numbers, true for
-        # the bend, nil for lanes left out) and :smooth (seconds, or false).
+        # the bend, nil for lanes left out), :smooth (seconds, or false), and
+        # :law (the pan lane's pan law; :equal_power by default).
         def self.lane_options(lanes)
           opts = case lanes
                  when true then {}
                  when Hash then lanes
                  when Numeric, Length then { smooth: lanes }
-                 else raise ArgumentError, "lanes: is true, a smoothing length, or a Hash of #{LANES.keys.join(', ')}, smooth: (got #{lanes.inspect})"
+                 else raise ArgumentError, "lanes: is true, a smoothing length, or a Hash of #{LANES.keys.join(', ')}, smooth:, law: (got #{lanes.inspect})"
                  end
-          unknown = opts.keys - LANES.keys - [:smooth]
-          raise ArgumentError, "lanes: unknown keys #{unknown.map(&:inspect).join(', ')} (#{LANES.keys.join(', ')}, smooth)" unless unknown.empty?
+          unknown = opts.keys - LANES.keys - %i[smooth law]
+          raise ArgumentError, "lanes: unknown keys #{unknown.map(&:inspect).join(', ')} (#{LANES.keys.join(', ')}, smooth, law)" unless unknown.empty?
+          law = opts.fetch(:law, :equal_power)
+          raise ArgumentError, "lanes: law: is one of #{LANE_LAWS.map(&:inspect).join(', ')} (got #{law.inspect})" unless LANE_LAWS.include?(law)
           result = LANES.to_h { |k, default|
             v = opts.fetch(k, true)
             v = default if v == true
@@ -495,9 +498,13 @@ module MB
           smooth = opts[:smooth]
           smooth = smooth.nil? || smooth == false || smooth == 0 ? false : Length.seconds(smooth).to_f
           raise ArgumentError, "lanes: smooth: is a length above 0 or false (got #{opts[:smooth].inspect})" if smooth && !(smooth > 0)
-          result.merge(smooth: smooth)
+          result.merge(smooth: smooth, law: law)
         end
 
+        # The gain of channel +c+ (of 2) for a region panned to +pan+ (-1..1)
+        # playing a sample of +sample_channels+: equal power with 0 dB in the
+        # middle for mono samples (+3 dB at the side it's panned to), a
+        # balance (the far channel turned down) for stereo samples.
         def self.pan_gain(pan, c, sample_channels)
           return 1.0 if pan == 0
           if sample_channels == 1

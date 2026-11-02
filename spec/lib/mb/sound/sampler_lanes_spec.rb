@@ -58,6 +58,15 @@ RSpec.describe('sampler lanes', :aggregate_failures) do
     expect(out[24_000 + 100]).to be_within(1e-3).of(100 / 48_000.0)
   end
 
+  it 'pans by the law it is given (the trackers: linear, -6 dB in the middle)' do
+    lanes = [seq::ControlLane.new(:cc, 10, [[0r, 0.5]])]
+    l, r = bufs(clip(lanes).sampler(inst, lanes: { law: :linear }), 4)
+    plain = bufs(clip([]).sampler(inst), 4)[0]
+    expect((l - plain * 0.5).abs.max).to be < 1e-3
+    expect((r - plain * 0.5).abs.max).to be < 1e-3
+    expect { inst.play(clip([]).notes, lanes: { law: :cubic }) }.to raise_error(ArgumentError, /law:/)
+  end
+
   it 'checks its options' do
     v = clip([]).notes
     expect { inst.play(v, lanes: { wobble: 1 }) }.to raise_error(ArgumentError, /unknown keys :wobble/)
