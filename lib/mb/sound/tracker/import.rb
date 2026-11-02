@@ -81,9 +81,12 @@ module MB
         def self.sample_of(s, i)
           return nil if s.nil? || s.empty?
           data = s.data.length == 1 ? s.data[0] : s.data
-          loop = s.loop && s.loop[1] > s.loop[0] ? s.loop[0]...s.loop[1] : nil
+          # (an IT sustain loop with no loop of its own plays as the loop:
+          # a Sample has one, and the release is the volume envelope's)
+          points, mode = s.loop ? [s.loop, s.loop_mode] : [s.sustain_loop, s.sustain_mode]
+          loop = points && points[1] > points[0] ? points[0]...points[1] : nil
           label = format('%02d %s', i + 1, s.name.to_s.strip).strip
-          Sample.new(data, sample_rate: s.rate.to_f, root: 60, loop: loop, loop_mode: loop ? (s.loop_mode || :forward) : nil, name: label)
+          Sample.new(data, sample_rate: s.rate.to_f, root: 60, loop: loop, loop_mode: loop ? (mode || :forward) : nil, name: label)
         end
 
         # The key that plays sample index +i+ (0-based).

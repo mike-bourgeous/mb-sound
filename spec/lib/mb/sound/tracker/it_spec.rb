@@ -115,6 +115,12 @@ RSpec.describe(MB::Sound::Tracker::ITReader, :aggregate_failures) do
     expect(c.pan[0]).to eq(1.0)
   end
 
+  it 'imports a sustain loop alone as the sample loop' do
+    sd = MB::Sound::Tracker::SampleData.new(name: 'pad', data: [Numo::SFloat.new(1000).seq / 1000], rate: 22_050.0, sustain_loop: [200, 800], sustain_mode: :ping_pong)
+    s = MB::Sound::Tracker::Import.sample_of(sd, 3)
+    expect([s.loop_points, s.loop_mode, s.sample_rate, s.name]).to eq([[200, 800], :ping_pong, 22_050.0, '04 pad'])
+  end
+
   it 'imports background voices as tracks' do
     set = MB::Sound.mod_import(write({ [0, 0] => { note: 48, instrument: 1 }, [1, 0] => { note: 50, instrument: 1 } }, speed: 3))
     expect(set.tracks).to eq(%i[ch1 bg1])

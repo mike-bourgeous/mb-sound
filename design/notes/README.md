@@ -138,6 +138,10 @@ Live MIDI uses JACK ports when a server answers, else bundled RtMidi; specs use 
 
 `analyze_form(source)` (alias `analyze_structure`; `StructureMethods`, `lib/mb/sound/structure.rb` + `structure/`, pure Ruby + Numo) finds tempo, beats, bars, and meters in a file, audio data, or a graph and returns a `Structure::Result`: our renders use the render's exact grid, imported audio is tracked (comb-autocorrelation tempo, a constant-tempo grid, a downbeat Viterbi allowing 2- and 3-beat bars).  Phase S2: `sections` with letter labels (bar-feature SSM, Foote novelty, DP over bar lines), `form`/`flow_ruby`, `markers!` (`:analysis` markers), `compare(take.form)`.  Shares `MB::Sound::Analysis` (STFT, chroma, keys, spectra) with the other listening tools.
 
+### [Tracker modules](trackers.md)
+
+`mod_import(path)` (`TrackerMethods`, `lib/mb/sound/tracker/`) turns MOD, 669, S3M, XM, and IT modules into a `Tracker::Set`: pure-Ruby readers make a format-neutral `Tracker::Song`, `Tracker::Player` steps it tick by tick like the format's replay routine (effects, envelopes, IT background voices), and `Tracker::Import` maps the recording onto a track per channel (one `Sampler::Instrument` whose keys pick samples, played with `clip.sampler(inst, lanes: ...)`), a looping clip per pattern visit per channel (notes with pitch marks plus bend, CC 7 volume, CC 10 pan, CC 20 start lanes at tick resolution), a scene per visit, and a flow.  A tick is 1/96 of a whole note, so BPM is the module's tempo.  `play`, `render`, and `save` take the set; `:musical` and `:hardware` modes.  Help `help :trackers`.
+
 ## Session and set
 
 ### [Arrangement and the Session groundwork](arrangement.md)

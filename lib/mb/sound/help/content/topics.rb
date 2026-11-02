@@ -434,6 +434,7 @@ module MB
         pans.  Effects it doesn't play are listed when the module loads.
       TEXT
       commands :mod_import, :tracker_import, :mod_samples
+      note :trackers
       see :sampler, :sets, :flow
     end
 
