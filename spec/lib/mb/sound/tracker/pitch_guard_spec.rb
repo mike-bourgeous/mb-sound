@@ -168,9 +168,11 @@ RSpec.describe('tracker pitch guard', :aggregate_failures) do
       [6, 0] => { note: 60, instrument: 1, effect: 4, param: 0x48 }, [7, 0] => { effect: 4, param: 0 },
       [8, 0] => { note: 60, instrument: 1, effect: 0, param: 0x47 },
       [9, 0] => { note: 60, instrument: 1, effect: 14, param: 0x12 },
+      [10, 0] => { note: 60, instrument: 2 },
     }
     path = tmp_path('pitch.xm')
-    w.xm(path, instruments: [{ samples: [{ data: sine, loop: [0, 64] }] }], patterns: [w.pattern(1, cells)], channels: 1, linear: true)
+    w.xm(path, instruments: [{ samples: [{ data: sine, loop: [0, 64] }] }, { samples: [{ data: sine, loop: [0, 64], finetune: 46 }] }],
+               patterns: [w.pattern(1, cells)], channels: 1, linear: true)
     lin = ->(p) { 8363.0 * 2**((4608 - p) / 768.0) }
     exp = {}
     # (C-4 is linear period 4608, 64 a semitone; slides move 4 a unit)
@@ -183,7 +185,9 @@ RSpec.describe('tracker pitch guard', :aggregate_failures) do
     # (FT2's tick counter runs down: 0, y, x at speed 6)
     exp.merge!(row(8, [0, 7, 4, 0, 7, 4].map { |s| 4608 - s * 64 }, &lin))
     exp.merge!(row(9, [4600] * 6, &lin))
-    check('XM', track(path, 60), exp)
+    # (finetune 46 steps as 40, 1/16 semitones: 20 linear periods, not 23)
+    exp.merge!(row(10, [4588] * 6, &lin).except(60))
+    check('XM', track(path, 66), exp)
   end
 
   it 'IT (linear slides): slides, tone portamento, vibrato on every tick, arpeggio' do

@@ -49,7 +49,10 @@ module MB
             n0 = note - 12 + (smp&.relative_note || 0)
             ft = smp&.finetune || 0
             if @linear
-              hardware? ? 7680 - n0 * 64 - ft / 2 : 7680 - n0 * 64 - ft / 2.0
+              # (FT2 steps finetune by 1/16 semitone, its top 5 bits: 4
+              # linear periods; measured from openmpt123, finetune 12 and 13
+              # play as 8, 46 as 40, 111 as 104)
+              7680 - n0 * 64 - (ft >> 3) * 4
             else
               p = 1712.0 * 2**(-(n0 - 48 + ft / 128.0) / 12)
               hardware? ? p.round : p
