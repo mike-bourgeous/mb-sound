@@ -255,8 +255,7 @@ module MB
 
         case File.extname(path).downcase
         when '.mid', '.midi'
-          wrap(MB::Sound.synth(MB::Sound.midi_file(path), voices: VOICES, &PATCH), "#{File.basename(path)} on the default patch", true,
-            'MIDI plays on a soft saw; choose a sound with `synth(midi_file(path)) { |v| v.hz.square * v.amp_env }`')
+          midi_file(path).first
         when '.sfz'
           instrument(MB::Sound.sfz(path), File.basename(path))
         when '.sf2'
@@ -269,6 +268,17 @@ module MB
           node = MB::Sound.file_input(path, resample: sample_rate.round)
           Graph.new(nodes: node.outputs, description: file_description(path), ends: true, note: nil)
         end
+      end
+
+      # A MIDI file on the default patch (PATCH), read from +from+ seconds
+      # (bin/play.rb's seeks; notes held across +from+ aren't struck
+      # again): [the Graph, its MIDI::FileSource].
+      def midi_file(path, from: 0)
+        source = MIDI::FileSource.new(path)
+        source.seek(from) if from.to_f > 0
+        graph = wrap(MB::Sound.synth(Notes.new(source), voices: VOICES, &PATCH), "#{File.basename(path)} on the default patch", true,
+          'MIDI plays on a soft saw; choose a sound with `synth(midi_file(path)) { |v| v.hz.square * v.amp_env }`')
+        [graph, source]
       end
 
       # A preset (see GraphIO.find_preset) or genre template named +name+.

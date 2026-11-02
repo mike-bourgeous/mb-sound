@@ -634,6 +634,62 @@ RSpec.describe(MB::Sound::Form) do
     end
   end
 
+  # play-ui-1: a timeline paused whenever every player ended inside a
+  # section (a one-shot clip's last note, a scene that cut everything), so
+  # the next section's block never came due, live or offline, and the flow
+  # stopped there for good (bin/play.rb waited for a module's end forever).
+  describe 'silent sections' do
+    # Plays a flow of a one-shot note, a bar that cuts everything, and a
+    # looping note from bar 3, on +s+; returns the first sounding frame
+    # from bar 2 on (the frames written to +out+ for a realtime session).
+    def silent_flow(s, out: nil, buffer_size:)
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.track(:a) { |c| c.gate * 0.5 }
+        MB::Sound.scene(:one, a: MB::Sound.seq(MB::Sound::C4).n4)
+        MB::Sound.scene(:gap, others: :cut)
+        MB::Sound.scene(:two, a: MB::Sound.seq(MB::Sound::E4).n4.loop)
+        f = s.arrangement.build_form { one 1.bars; gap 1.bars; two 1.bars }
+        MB::Sound.play_form(f, warm_up: false)
+        if out
+          MB::Sound::Internal.wait_audio(s, 0.05) until out.written_frames > 3.5 * bar
+          out.mono
+        else
+          SpecBuffers.join(Array.new((3.5 * bar / buffer_size).ceil) { s.process_buffer(buffer_size)[0].dup })
+        end
+      end
+    end
+
+    # A virtual-clock NullOutput that keeps what it writes (channel 0).
+    def capture_output(buffer_size)
+      Class.new(MB::Sound::NullOutput) {
+        def written = @written ||= []
+        def written_frames = written.sum(&:length)
+        def write(data)
+          written << data[0].dup
+          super
+        end
+        def mono = SpecBuffers.join(written)
+      }.new(channels: 1, sleep: :virtual, buffer_size: buffer_size)
+    end
+
+    [512, 800, 367].each do |n|
+      it "keeps time through a silent section and launches the next on its bar at #{n}-frame buffers (live and offline)" do
+        offline = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false),
+                                         transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: n, realtime: false)
+        out = capture_output(n)
+        live = MB::Sound::Session.new(master_gain: 1, output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, realtime: true)
+        [silent_flow(offline, buffer_size: n), silent_flow(live, out: out, buffer_size: n)].each do |data|
+          after_gap = data[(bar + bar / 4)..]
+          first = after_gap.to_a.index { |v| v.abs > 0 }
+          expect(first && first + bar + bar / 4).to eq(2 * bar) # bar 3's first frame
+        end
+      ensure
+        offline&.close
+        live&.close
+      end
+    end
+  end
+
   describe 'fills' do
     it 'plays a section\'s fill in its last bar: the fill scene and fill-marked notes' do
       set.track(:x) { |c| c.notes.number }

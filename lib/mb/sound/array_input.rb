@@ -16,10 +16,23 @@ module MB
       #
       # +:repeat+ is true, false, or the number of times to play the sound.  -1
       # also repeats forever.
-      def initialize(data:, sample_rate: 48000, buffer_size: 800, repeat: false)
+      #
+      # +:shared+ true reads +data+ as given, without the copy every input
+      # otherwise makes (bin/play.rb's player seeks a file it holds in
+      # memory by starting a new input on the same arrays): one-dimensional
+      # Numo::SFloat or DFloat channels of one type and length, which the
+      # caller must not change while it plays.
+      def initialize(data:, sample_rate: 48000, buffer_size: 800, repeat: false, shared: false)
         data = [data] if data.is_a?(Numo::NArray)
 
         raise "No data given to ArrayInput (nest two arrays like [[]] if you want to use an empty Array)" if data.nil? || data.empty?
+
+        if shared
+          kinds = data.map(&:class).uniq
+          unless kinds.length == 1 && [Numo::SFloat, Numo::DFloat].include?(kinds[0]) && data.all? { |c| c.ndim == 1 } && data.map(&:length).uniq.length == 1
+            raise ArgumentError, 'shared: true takes one-dimensional SFloat or DFloat channels of one type and length'
+          end
+        end
 
         data = data.map { |v| Numo::NArray.cast(v) }
 
@@ -48,7 +61,7 @@ module MB
         end
 
         # Convert all arrays to have the same type and length
-        @data = data.map { |v|
+        @data = shared ? data : data.map { |v|
           @dtype.zeros(@frames).tap { |c|
             c[0...v.length] = v if @frames > 0 && v.length > 0
           }

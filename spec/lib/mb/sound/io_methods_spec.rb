@@ -59,7 +59,6 @@ RSpec.describe(MB::Sound::IOMethods) do
 
     it 'returns a working PlotOutput when plot is set' do
       begin
-        expect(MB::Sound::Meter).to receive(:linear_meters)
         ENV['OUTPUT_TYPE'] = ':null'
         o = MB::Sound.output(plot: { plot: MB::Sound::Plot::Plotter.terminal.tap { |p| p.print = false } })
         expect(o).to be_a(MB::Sound::PlotOutput)

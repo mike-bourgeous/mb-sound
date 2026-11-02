@@ -667,35 +667,43 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       MB::Sound.rewind
     end
 
-    it 'plots the newest mix buffers until interrupted, then removes its tap' do
-      MB::Sound.bg(220.hz.sine)
-      plotted = []
-      allow_any_instance_of(MB::Sound::PlotOutput).to receive(:plot) { |_, data|
-        plotted << data
-        raise Interrupt if plotted.length == 3
-      }
-      allow($stdout).to receive(:write)
-
-      result = MB::Sound.visualize
-      expect(result[:frames]).to eq(2)
-      expect(result[:fps]).to be > 0
-      expect(plotted.map(&:length).uniq).to eq([2])
-      expect(plotted.uniq(&:object_id).length).to eq(3) # never the same buffer twice
-      expect(MB::Sound::Session.default.instance_variable_get(:@taps)).to be_empty
+    # A $stdout standing in for a 30x100 terminal, keeping what's written.
+    def fake_terminal
+      Class.new(StringIO) {
+        def tty? = true
+        def winsize = [30, 100]
+      }.new
     end
 
-    it 'returns when its stop callable returns true, then removes its tap' do
+    # (play-ui-1: a band of the terminal UI replaced the old text meters)
+    it 'shows the mix on a band of meters and a scope until its stop callable says so, then takes the band down' do
       MB::Sound.bg(220.hz.sine)
-      plotted = 0
-      allow_any_instance_of(MB::Sound::PlotOutput).to receive(:plot) { plotted += 1 }
-      allow($stdout).to receive(:write)
-
-      result = MB::Sound.visualize(stop: -> { plotted >= 3 })
-      expect(result[:frames]).to be >= 3
-      expect(MB::Sound::Session.default.instance_variable_get(:@taps)).to be_empty
+      io = fake_terminal
+      $stdout = io
+      t = MB::U.clock_now
+      result = MB::Sound.visualize(stop: -> { MB::U.clock_now - t > 0.5 })
+      $stdout = STDOUT
+      expect(result[:frames]).to be > 0
+      expect(io.string).to include('MASTER', 'SCOPE')
+      expect(MB::Sound::Session.default.ui_feed).to be_nil
+    ensure
+      $stdout = STDOUT
     end
 
-    it "shows each buffer after the output's latency, when it is heard" do
+    it 'shows a spectrum with spectrum: true, and returns on Ctrl-C' do
+      MB::Sound.bg(220.hz.sine)
+      io = fake_terminal
+      $stdout = io
+      t = MB::U.clock_now
+      result = MB::Sound.visualize(spectrum: true, stop: -> { raise Interrupt if MB::U.clock_now - t > 0.3 })
+      $stdout = STDOUT
+      expect(result).to include(:frames, :fps)
+      expect(io.string).to include('SPECTRUM')
+    ensure
+      $stdout = STDOUT
+    end
+
+    it "plots inline images with graphical: true, each buffer after the output's latency, when it is heard" do
       out = MB::Sound::NullOutput.new(channels: 2)
       out.define_singleton_method(:latency) { 0.2 }
       MB::Sound.use_output(out)
@@ -703,14 +711,19 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
       start = MB::U.clock_now
       first = nil
-      allow_any_instance_of(MB::Sound::PlotOutput).to receive(:plot) { |_, _data|
+      plotted = []
+      allow_any_instance_of(MB::Sound::PlotOutput).to receive(:plot) { |_, data|
         first ||= MB::U.clock_now
-        raise Interrupt
+        plotted << data
+        raise Interrupt if plotted.length == 3
       }
       allow($stdout).to receive(:write)
 
-      MB::Sound.visualize
+      result = MB::Sound.visualize(graphical: true)
       expect(first - start).to be >= 0.18
+      expect(result[:frames]).to eq(2)
+      expect(plotted.uniq(&:object_id).length).to eq(3) # never the same buffer twice
+      expect(MB::Sound::Session.default.instance_variable_get(:@taps)).to be_empty
     end
 
     it 'is also called vis' do

@@ -1,5 +1,6 @@
 require 'fileutils'
 require 'shellwords'
+require_relative '../support/module_writer'
 
 # Runs every script converted to the script runner (see
 # MB::Sound::ScriptRunner) with --help and with a short render, checking that
@@ -12,6 +13,7 @@ RSpec.describe('script runner scripts', :smoke) do
   runs = SmokeRuns.new(File.join(SpecTmp::ROOT, 'smoke_runs'))
   out_dir = File.join(SpecTmp::ROOT, 'smoke_out')
   infile = File.join(out_dir, 'smoke_effect_input.flac')
+  play_mod = File.join(out_dir, 'smoke_play.mod') # (bin/play.rb's module, written below)
   shared_env = { 'MB_SOUND_CHECK_SHARED' => '1' } # (as the around hook below sets for the forks)
 
   before(:context) do
@@ -19,6 +21,9 @@ RSpec.describe('script runner scripts', :smoke) do
     # (-12 dB: effect scripts play at 0 dB, and dry + wet (flanger, ping
     # pong) went over full scale with 0.5, which renders warn about)
     MB::Sound.write(infile, [220.hz.saw.at(0.25).sample(4800), 330.hz.saw.at(0.25).sample(4800)], sample_rate: 48000, overwrite: true)
+    w = ModuleWriter
+    w.mod(play_mod, samples: [{ name: 'saw', data: w.saw(2000), loop: [1000, 2000] }],
+                    patterns: [w.pattern(4, { [0, 0] => { note: 60, sample: 1 }, [8, 1] => { note: 67, sample: 1 } })], orders: [0])
     # Longest first (the full drums_808 render, the granular song)
     keys = SmokeRuns.selected_keys
     first = keys.select { |k| k.include?('full') || k.include?('granular') }
@@ -251,6 +256,19 @@ RSpec.describe('script runner scripts', :smoke) do
         expect(data.length).to eq(2)
         expect(data[0].length).to be >= 48000 * 0.5 # at least half a bar at up to 240 BPM
       end
+    end
+  end
+
+  # bin/play.rb plays every kind of file to its end (play-ui-1): a sound
+  # file, a MIDI file, and a synthetic module, as plain lines (the screens:
+  # spec/bin/play_spec.rb), about 12 s on the wall-clock NullOutput
+  describe 'bin/play.rb (plain lines)' do
+    runs.add('play.rb plain', "bin/play.rb --no-ui spec/test_data/arp_a7.flac spec/test_data/c_major.mid #{play_mod.shellescape}", env: shared_env)
+
+    it 'plays a sound file, a MIDI file, and a module to their ends', smoke_run: 'play.rb plain' do
+      text, status = runs.take('play.rb plain')
+      expect(status).to be_success, text
+      expect(MB::U.remove_ansi(text)).to include('Playing arp_a7.flac', 'Playing c_major.mid', 'Playing smoke_play.mod')
     end
   end
 

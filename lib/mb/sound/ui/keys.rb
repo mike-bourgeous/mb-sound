@@ -140,6 +140,25 @@ module MB
           doc 'Ctrl-] F2', 'NAV (zoom a pane, ...), the keyboard'
         end
 
+        # bin/play.rb's player screen (play-ui-1; MB::Sound::Player acts on
+        # them: Player::ACTIONS).
+        PLAYER_SCREEN = Keymap.new(:player_screen) do
+          group 'Player'
+          on ['q', 'Q', :escape], :quit, help: 'quit (also Ctrl-C)', label: 'q Esc'
+          on ' ', :pause, help: 'pause, play on (a 5 ms fade; on from the next sample)'
+          on :left, :seek_back, help: 'back, forward 5 s (a module: a bar)', label: 'Left Right'
+          on :right, :seek_forward, help: 'back, forward 5 s (a module: a bar)', label: 'Left Right'
+          on [:up, '[', [:left, :shift]], :jump_back, help: 'back, forward 30 s (a module: a section)', label: 'Up Down [ ]'
+          on [:down, ']', [:right, :shift]], :jump_forward, help: 'back, forward 30 s (a module: a section)', label: 'Up Down [ ]'
+          on ['-', '_', '9'], :volume_down, help: 'volume down, up 2 dB (0 dB at most)', label: '- + (9 0)'
+          on ['+', '=', '0'], :volume_up, help: 'volume down, up 2 dB (0 dB at most)', label: '- + (9 0)'
+          on ['n', '>', :page_down], :next_item, help: 'next, previous file (p: the start first)', label: 'n p'
+          on ['p', '<', :page_up], :prev_item, help: 'next, previous file (p: the start first)', label: 'n p'
+          on :home, :restart, help: 'back to the start'
+          on '?', :help, help: 'these keys'
+          doc 'Ctrl-]', 'NAV (zoom a pane, ...)'
+        end
+
         # A screen's status-line hints from its keymap ("q Esc quit  Space
         # pause ..."): the first words of each help line.
         def self.hints(map)

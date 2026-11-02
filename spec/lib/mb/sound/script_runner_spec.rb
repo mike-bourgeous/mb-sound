@@ -512,8 +512,8 @@ RSpec.describe(MB::Sound::ScriptRunner) do
 
       it 'exits at the end of the song with --plot (the plot stops when the song has ended)' do
         plotted = 0
-        allow_any_instance_of(MB::Sound::PlotOutput).to receive(:plot) { plotted += 1 }
-        allow($stdout).to receive(:write)
+        allow_any_instance_of(MB::Sound::UI::Band).to receive(:start) { |band| plotted += 1; band }
+        allow_any_instance_of(MB::Sound::UI::Band).to receive(:stop) { |band| band }
 
         r = runner(:song, ['-q', '--plot', '--bars', '0.25'])
         t = MB::U.clock_now

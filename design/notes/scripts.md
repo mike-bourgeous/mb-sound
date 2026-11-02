@@ -2,8 +2,9 @@
 
 <!-- summary -->
 Every bin/ script except the console `bin/sound.rb` uses a `ScriptingMethods` helper backed by `ScriptRunner`: `effect_script { |input, p| }`, `synth_script { |midi, p| }`, `song_script(bars:) { |p| }`, or `script(args:) { |args, p| }`, sharing `-o`, `-f`, `-g`, `-P`, `-q`, `-L`, `--ui [LAYOUT]`.
-Parameters are options only (`name: [default, 'description', '-x', Type, range]`); graph-building code goes inside the block, loadable scripts are guarded with `if main_script?(__FILE__)`, and every script starts with the `RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1` shebang (`spec/bin/shebang_spec.rb`), never `RUBY_YJIT_ENABLE=1`/`--yjit`.
-Plain song files start with `require 'mb/sound/dsl'` (`MB::Sound::DSL`): the console's commands and note names at the program's top level, waiting for background playback at its end.
+Parameters are options only (`name: [default, 'description', '-x', Type, range]`); graph code goes inside the block, loadable scripts are guarded with `if main_script?(__FILE__)`, and every script starts with the `RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1` shebang (`spec/bin/shebang_spec.rb`).
+Plain song files start with `require 'mb/sound/dsl'`: the console's commands at the top level, waiting for playback at the end.
+`bin/play.rb` plays files on player screens by type (`MB::Sound::Player`).
 <!-- /summary -->
 
 ## Quick reference
@@ -11,6 +12,7 @@ Plain song files start with `require 'mb/sound/dsl'` (`MB::Sound::DSL`): the con
 - Helpers: `effect_script { |input, p| }`, `synth_script { |midi, p| }`, `song_script(bars:) { |p| }`, `script(args:) { |args, p| }`; options only (`name: [default, 'description', '-x', Type, range]`), graph code inside the block.
 - Shebang `#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby` (`spec/bin/shebang_spec.rb`); plain song files `require 'mb/sound/dsl'`.
 - New scripts go in the smoke tables (`spec/bin/script_smoke_spec.rb`, `bundle exec rspec --tag smoke`); code `lib/mb/sound/script_runner.rb`.
+- `bin/play.rb a.flac tune.mod b.mid` (`MB::Sound::Player`, terminal_ui.md "The player screen"): screens by type, Space/Left/Right/Up/Down/-/+/n/p/q, plain lines with `--no-ui` or without a terminal; `bin/record.rb out.flac` shows the input on a `:vis` band.
 
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 
@@ -59,6 +61,7 @@ bg :hat, grid(16, 'x.x.x.x.x.x.x.xx').repeat(4)
 
 ## Screens and keys for live scripts (ux-1, 2026-10-17)
 
+- `bin/play.rb` (play-ui-1, 2026-11-02) is a general script around `MB::Sound::Player` (terminal_ui.md "The player screen and the vis band"): `--[no-]ui` (the screen when stdin and stdout are terminals that animate, else plain lines), `-l/--layout` one of the player layouts for every file.  Its smoke row plays a sound file, a MIDI file, and a synthetic module with `--no-ui`; `spec/bin/play_spec.rb` drives the screens in a pty.  `-P/--plot` (effects, synths, songs) shows the mix on the `:vis` band (master meters beside a big scope) until the script's `wait` returns.
 - `--ui [LAYOUT]` (effects, synths, songs; live only): the script plays in a terminal screen without a console (`ScriptRunner#live_ui`: `UI::Tiles` with `repl: :none`).  Songs default to `:show` (transport and form, tracks, queue, knobs, a big scope over the spectrum, meters, cpu, messages), synths and effects to `:play` (scope, spectrum, the keyboard, meters, knobs, cpu, messages; synths start in KEYS mode, the keyboard playing the script's MIDI input, and with no MIDI device the keyboard alone plays).  q quits (Ctrl-C too; in KEYS Ctrl-C first leaves the keyboard), Space pauses the whole Session (`Session#paused=`: the render thread writes silence and renders nothing), Right skips to the next section, Left back to the start of this one, Esc all notes off, Ctrl-] NAV, F2 the keyboard.  An ended song keeps its final meters up ("ended: q quits").  What the script prints goes to the messages pane (`UI::Messages::Writer` as `$stdout`).  Spec: `spec/bin/script_ui_spec.rb`.
 - Live synth and effect scripts on a terminal (not `--plot`, not `--ui`) read keys (`ScriptRunner::LiveKeys`): Esc sends sustain off and all notes off on every channel into the session's MIDI input (a `MIDI::VirtualInput`), Esc twice within a second all sound off (CC 120); q or Ctrl-C quits; l prints the last 20 MIDI events.  `MIDI_LOG=1` prints every MIDI event as it arrives, `MIDI_STUCK=seconds` warns once per note held longer.  Spec: `spec/lib/mb/sound/script_runner/live_keys_spec.rb`.
 

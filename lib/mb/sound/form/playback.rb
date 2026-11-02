@@ -88,6 +88,7 @@ module MB
           @started = false
           @gen = 0
           @end_at = nil # (#end_at: no section begins at or after it)
+          @end_pos = nil # (where the form ended, which the scheduler may run ahead of; see #keeps_time?)
           @decision_offset = 0 # (see #decision_count)
           @plan = nil # (see #plan)
           @plan_meters = nil
@@ -128,6 +129,21 @@ module MB
         # True once #start was called.
         def started?
           @started
+        end
+
+        # True while the form keeps its Session's timeline moving at
+        # timeline position +pos+ even with nothing playing: from its start
+        # until it ends, or until the position it ends at when the scheduler
+        # ran its end ahead (play-ui-1: a live timeline paused whenever every
+        # player ended inside a section, a one-shot clip's last note or a
+        # scene that cut everything, so the next section's block never came
+        # due and the flow stopped there for good; a module's one-tick :fin
+        # left the end's block waiting).  #stop ends it at once, #end_at at
+        # its time (a script's --bars: what rings after it rings out on a
+        # paused timeline, as before).
+        def keeps_time?(pos)
+          return false if !@started || (@end_at && pos >= @end_at)
+          !@ended || (!@end_pos.nil? && pos < @end_pos)
         end
 
         # True while the current section repeats until #onward.
@@ -421,6 +437,7 @@ module MB
           @lock.synchronize {
             @gen += 1
             @ended = true
+            @end_pos = nil
             undo_commit
             @transport.fills.remove_owner(self, after: @session.now)
           }
@@ -625,13 +642,23 @@ module MB
             # the seek lands, but places tempo ramps from the pass's start,
             # so the seek hears what the ramp reaches there: tempo-2)
             turn_at = [time, @session.now].max
-            Session.with_context_fields(tempo_anchor: time < @transport.position ? [@session, time] : nil) {
-              launch(scene, fade: sec.fade) if scene && @arrangement.scenes.key?(scene)
-              # The section's knob values, after its scene's (they win)
-              sec.knobs.each do |k, v|
-                @session.send(:without_command) { @arrangement.send(:turn_knob, k, v, turn_at) }
-              end
-            }
+            # (a launch that fails, e.g. a LateChange in a script when the
+            # block ran late, is raised after the pass is set up below, so
+            # the form keeps going: play-ui-1, a module's :fin launch that
+            # raised left the form half in its last pass, never ending, and
+            # bin/play.rb waited for it forever)
+            launch_error = nil
+            begin
+              Session.with_context_fields(tempo_anchor: time < @transport.position ? [@session, time] : nil) {
+                launch(scene, fade: sec.fade) if scene && @arrangement.scenes.key?(scene)
+                # The section's knob values, after its scene's (they win)
+                sec.knobs.each do |k, v|
+                  @session.send(:without_command) { @arrangement.send(:turn_knob, k, v, turn_at) }
+                end
+              }
+            rescue StandardError => e
+              launch_error = e
+            end
             @pass_seqs = first_seq...@session.journal.next_seq
 
             # (this pass's length: a section may play for different lengths)
@@ -649,6 +676,7 @@ module MB
             schedule(@commit_time, "#{name} commit") { commit if gen == @gen && !(@end_at && @commit_time >= @end_at) }
             boundary = @boundary
             schedule(boundary, "#{name} ends") { cross(boundary) if gen == @gen }
+            raise launch_error if launch_error
           }
         end
 
@@ -835,6 +863,7 @@ module MB
           if @end_at && time.to_r >= @end_at
             @lock.synchronize {
               @ended = true
+              @end_pos = time.to_r
               @gen += 1
             }
             return
@@ -859,6 +888,7 @@ module MB
         def finish_form(time)
           @lock.synchronize {
             @ended = true
+            @end_pos = time.to_r
             @gen += 1
           }
           @session.remove(time: time, ring: true)

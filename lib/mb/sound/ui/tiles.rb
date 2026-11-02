@@ -164,6 +164,7 @@ module MB
           @line_cursor = @old_winch = @signals = @wake_r = @wake_w = nil
           @attached = @poll = @polled_at = @poll_warned = @last = nil
           @asking = nil # ([pane name, PaneKeys::Ask] while a pane's value prompt is open)
+          @overlay_from_play = false # (see #key_help)
           @keys_takeover = nil # (Keyboard::Takeover: KEYS on the sound-design screen arms and holds the inspected track)
           @takeover_lock = Mutex.new
           @temporary_jumps = {} # (pane name => the Proc that takes it away: panes put in by their jump letter)
@@ -896,7 +897,10 @@ module MB
 
         private def key_help_unlocked(on)
           if on
-            @router.mode = :nav unless %i[nav overlay once].include?(@router.mode)
+            # (a screen without a console opened from its own keys, the
+            # player's ?: back to them on close, its own keys listed)
+            @overlay_from_play = @repl_mode == :none && @router.state == :play
+            @router.mode = :nav unless %i[nav overlay once].include?(@router.mode) || @overlay_from_play
             @router.mode = :overlay
           elsif @router.state == :overlay
             @router.mode = :nav
@@ -1481,7 +1485,11 @@ module MB
         # The key overlay's groups: NAV's, the focused pane's keys, and the
         # keyboard's (KEYS or step entry) when it is focused.
         def overlay_groups
-          groups = Keys.groups(:nav).dup
+          # (a screen without a console's own keys, from its ? key: those
+          # alone; NAV's ? lists them before NAV's)
+          own = @repl_mode == :none && @router.repl_keys ? @router.repl_keys.help_groups : []
+          return own.freeze if @overlay_from_play && !own.empty?
+          groups = own + Keys.groups(:nav)
           groups += @jump_map.help_groups unless @jump_map.entries.empty?
           pane = pane_keymap
           groups = pane.help_groups.map { |g, k| ["#{g} (#{@tiler.focus})", k] } + groups if pane
@@ -2000,7 +2008,7 @@ module MB
           want = UI.tile_layout_at(@layout_name, @density.level) or return
           now = @tiler.layout
           return if now == want
-          versions = [UI.tile_layouts[@layout_name], *UI.tile_layout_levels[@layout_name].values]
+          versions = [UI.tile_layouts[@layout_name] || UI.show_layouts[@layout_name], *UI.tile_layout_levels[@layout_name].values]
           @tiler.layout = want if versions.include?(now)
         end
 
