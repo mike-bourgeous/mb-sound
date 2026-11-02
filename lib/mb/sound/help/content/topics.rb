@@ -428,11 +428,17 @@ module MB
         Effects (slides, vibrato, arpeggio, volume slides, envelopes, ...)
         become bend, volume (CC 7), pan (CC 10), and start (CC 20) lanes
         that the sampler voice follows tick by tick (`clip.sampler(inst,
-        lanes: true)`).  `mode: :musical` (the default) reads samples
-        band-limited, tunes notes exactly, declicks lane steps over 1.5 ms,
-        and narrows Amiga pans; `mode: :hardware` reads drop-sample with
-        the format's integer periods, steps on the tick, and keeps hard
-        pans.  Effects it doesn't play are listed when the module loads.
+        lanes: true)`).  Both modes follow each format's period math tick
+        by tick (Amiga periods with ProTracker's finetune rows, ST3
+        periods, FT2 and IT linear slides).  `mode: :musical` (the default)
+        reads samples band-limited, keeps slides and vibrato unrounded,
+        declicks lane steps over 1.5 ms, and narrows Amiga pans; `mode:
+        :hardware` reads drop-sample with integer periods, steps on the
+        tick, and keeps hard pans.  `limits: :none` lifts the period
+        limits: a MOD's notes stored below its lowest table note keep
+        falling instead of bottoming out, and slides go on toward 0 Hz
+        (`mod_import('tune.mod', limits: :none)`).  Effects it doesn't play
+        are listed when the module loads.
       TEXT
       commands :mod_import, :tracker_import, :mod_samples
       note :trackers

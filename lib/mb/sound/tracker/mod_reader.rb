@@ -34,6 +34,34 @@ module MB
         # The neutral note number of PERIODS[0].
         FIRST_NOTE = 36
 
+        # The lowest octave's periods (C-1 to B-1, notes 48..59) of each
+        # finetune (-8..7, eighths of a semitone), as ProTracker plays
+        # them: measured from openmpt123 renders of synthetic one-note
+        # modules (tracker-2; an 8-frame looped sine, the mean frequency
+        # over 4 ticks per note, every one within 0.1 period of an
+        # integer).  Finetune 0 is PERIODS' row.  Higher octaves are these
+        # over 2 per octave, fractional (125.5 for finetune 2's B-3), as
+        # measured; a 2 ** (-finetune / 96) shortcut is off by up to 2
+        # periods (6 cents) in the lowest octave.
+        FINETUNE_PERIODS = {
+          -8 => [907, 856, 808, 762, 720, 678, 640, 604, 570, 538, 508, 480],
+          -7 => [900, 850, 802, 757, 715, 675, 636, 601, 567, 535, 505, 477],
+          -6 => [894, 844, 796, 752, 709, 670, 632, 597, 563, 532, 502, 474],
+          -5 => [887, 838, 791, 746, 704, 665, 628, 592, 559, 528, 498, 470],
+          -4 => [881, 832, 785, 741, 699, 660, 623, 588, 555, 524, 494, 467],
+          -3 => [875, 826, 779, 736, 694, 655, 619, 584, 551, 520, 491, 463],
+          -2 => [868, 820, 774, 730, 689, 651, 614, 580, 547, 516, 487, 460],
+          -1 => [862, 814, 768, 725, 684, 646, 610, 575, 543, 513, 484, 457],
+           0 => [856, 808, 762, 720, 678, 640, 604, 570, 538, 508, 480, 453],
+           1 => [850, 802, 757, 715, 674, 637, 601, 567, 535, 505, 477, 450],
+           2 => [844, 796, 752, 709, 670, 632, 597, 563, 532, 502, 474, 447],
+           3 => [838, 791, 746, 704, 665, 628, 592, 559, 528, 498, 470, 444],
+           4 => [832, 785, 741, 699, 660, 623, 588, 555, 524, 495, 467, 441],
+           5 => [826, 779, 736, 694, 655, 619, 584, 551, 520, 491, 463, 437],
+           6 => [820, 774, 730, 689, 651, 614, 580, 547, 516, 487, 460, 434],
+           7 => [814, 768, 725, 684, 646, 610, 575, 543, 513, 484, 457, 431],
+        }.freeze
+
         module_function
 
         # True if +bytes+ look like a MOD with a known signature.
@@ -52,9 +80,15 @@ module MB
         end
 
         # The neutral note of Amiga +period+ (the nearest table period), or
-        # nil for 0.
-        def note_of(period)
+        # nil for 0.  With +extended: true+ periods past the table get the
+        # equal-tempered note they stand for (period 1812 is note 35, 3424
+        # note 24), where the table stops at its ends (tracker-2: the
+        # import option limits: :none).
+        def note_of(period, extended: false)
           return nil if period.nil? || period <= 0
+          if extended && (period > PERIODS[0] * 1.03 || period < PERIODS[-1] / 1.03)
+            return (60 - 12 * Math.log2(period / 428.0)).round
+          end
           i = PERIODS.each_index.min_by { |k| (Math.log(PERIODS[k].to_f / period)).abs }
           FIRST_NOTE + i
         end

@@ -19,9 +19,23 @@ module MB
           # (FastTracker's) slide further.
           PT_LIMITS = [113, 856].freeze
 
+          # The limits of other MODs.
+          WIDE_LIMITS = [28, 6848].freeze
+
           def initialize(song, **options)
             super
-            @limits = song.channels == 4 ? PT_LIMITS : [28, 6848]
+            @protracker = MOD.protracker?(song)
+            @range = @protracker ? PT_LIMITS : WIDE_LIMITS
+          end
+
+          # True if +song+ plays as ProTracker does (as openmpt123 tells
+          # them apart, measured on synthetic files, tracker-2): 4 channels
+          # and every note in ProTracker's three octaves (periods 113..856).
+          # Other MODs play as FastTracker 2 plays them: wider period
+          # limits, and vibrato that stays on a row's first tick.
+          def self.protracker?(song)
+            return false unless song.channels == 4
+            song.patterns.all? { |pat| pat.rows.all? { |r| r.all? { |c| c.nil? || c.period.nil? || c.period.between?(*PT_LIMITS) } } }
           end
 
           private
@@ -30,12 +44,20 @@ module MB
             Amiga::PAL / period.to_f
           end
 
+          # A note's period; ProTracker-style MODs keep notes at or above
+          # the B-3 limit (a finetuned B-3 plays 113, measured), not below
+          # the C-1 one (a finetune -8 C-1 plays 907).
           def period_of(note, finetune)
-            amiga_period(note, finetune)
+            p = amiga_period(note, finetune)
+            @protracker && !unlimited? ? [p, @range[0]].max : p
+          end
+
+          def vibrato_style
+            { kind: :protracker, timing: @protracker ? :protracker : :fasttracker }
           end
 
           def clamp_period(p)
-            p.clamp(*@limits)
+            Effects::Slide.by(p, 0, unlimited? ? nil : @range, floor: PERIOD_FLOOR)
           end
 
           def row_cell(ch, cell)
@@ -79,6 +101,7 @@ module MB
             when 3 then ch.memory[:porta] = param if param > 0
             when 4, 6
               vib_memory(ch, param) if effect == 4
+              vibrato(ch, 0)
             when 5
             when 7
               ch.memory[:trem_speed] = param >> 4 if param >> 4 > 0
@@ -107,10 +130,12 @@ module MB
             ch.memory[:vib_depth] = param & 15 if param & 15 > 0
           end
 
-          # A note on the row's first tick (or a delayed one).
+          # A note on the row's first tick (or a delayed one).  With
+          # +limits: :none+ a period past the table plays its own note.
           def note_on(ch, cell)
             effect = cell.effect
-            target = period_of(cell.note, ch.finetune)
+            note = unlimited? && cell.period ? ModReader.note_of(cell.period, extended: true) : cell.note
+            target = period_of(note, ch.finetune)
             target = cell.period if hardware? && cell.period && ch.finetune == 0
             sample = ch.pending || ch.sample
             if (effect == 3 || effect == 5) && ch.period && ch.voice
@@ -120,10 +145,10 @@ module MB
             end
             return if sample.nil?
 
-            ch.note = cell.note
+            ch.note = note
             ch.period = target
             ch.target = nil
-            ch.vib_pos = 0 if ch.vib_wave < 4
+            ch.vibrato.retrigger
             ch.trem_pos = 0 if ch.trem_wave < 4
             offset = 0
             if effect == 9
@@ -139,7 +164,9 @@ module MB
             when 1 then slide(ch, -x) if ch.period
             when 2 then slide(ch, x) if ch.period
             when 3 then unsupported('E3x glissando') if x > 0
-            when 4 then ch.vib_wave = x
+            when 4
+              ch.vibrato.wave = x
+              unsupported('E4x random vibrato') if x & 3 == 3
             when 6
               if x == 0
                 ch.loop_row = current_row
@@ -182,12 +209,12 @@ module MB
             when 1 then slide(ch, -param) if ch.period && param > 0
             when 2 then slide(ch, param) if ch.period && param > 0
             when 3 then tone_porta(ch, ch.memory[:porta])
-            when 4 then vibrato(ch, ch.memory[:vib_speed], ch.memory[:vib_depth])
+            when 4 then vibrato(ch, t)
             when 5
               tone_porta(ch, ch.memory[:porta])
               volume_slide(ch, param)
             when 6
-              vibrato(ch, ch.memory[:vib_speed], ch.memory[:vib_depth])
+              vibrato(ch, t)
               volume_slide(ch, param)
             when 7 then tremolo(ch, ch.memory[:trem_speed], ch.memory[:trem_depth])
             when 10 then volume_slide(ch, param)
@@ -207,41 +234,41 @@ module MB
             ch.out_period = arp_period(ch, semis)
           end
 
-          # The period +semis+ above the channel's: the table's note above
-          # the nearest note (hardware), or the exact ratio.
+          # The period +semis+ above the channel's: the finetune table's
+          # note +semis+ above the channel's note (the nearest one to its
+          # period, found in the table as ProTracker does), in both modes
+          # (the composer heard the table's notes; measured: openmpt123's
+          # arpeggios are the table's within a cent).
           def arp_period(ch, semis)
-            return ch.period * 2**(-semis / 12.0) unless hardware?
             base = ModReader.note_of((ch.period * 2**(ch.finetune / 96.0)).round)
             base ? period_of(base + semis, ch.finetune) : ch.period
           end
 
           def tone_porta(ch, speed)
             return unless ch.target && ch.period
-            if ch.period < ch.target
-              ch.period = [ch.period + speed, ch.target].min
-            else
-              ch.period = [ch.period - speed, ch.target].max
-            end
+            ch.period = Effects::Slide.toward(ch.period, ch.target, speed)
             ch.out_period = ch.period
           end
 
-          def vibrato(ch, speed, depth)
+          # Vibrato on tick +t+ (Effects::Oscillator: ProTracker leaves the
+          # first tick at the note's period, FastTracker-style MODs read the
+          # waveform there too).
+          def vibrato(ch, t)
             return unless ch.period
-            ch.out_period = ch.period + vib_delta(ch.vib_wave, ch.vib_pos, depth, 7)
-            ch.vib_pos = (ch.vib_pos + speed) & 63
+            w = ch.vibrato.tick(t, ch.memory[:vib_speed]) or return
+            ch.out_period = ch.period + vib_delta(w, ch.memory[:vib_depth], 7)
           end
 
-          # A vibrato or tremolo offset: the waveform times +depth+, shifted
-          # down by +shift+ bits (integer on hardware).
-          def vib_delta(wave, pos, depth, shift)
-            w = wave_value(wave, pos)
+          # A vibrato or tremolo offset: waveform value +w+ times +depth+,
+          # shifted down by +shift+ bits (integer on hardware).
+          def vib_delta(w, depth, shift)
             return w * depth / (1 << shift).to_f unless hardware?
             d = (w.abs * depth) >> shift
             w < 0 ? -d : d
           end
 
           def tremolo(ch, speed, depth)
-            ch.out_volume = (ch.volume + vib_delta(ch.trem_wave, ch.trem_pos, depth, 6)).clamp(0, 64)
+            ch.out_volume = (ch.volume + vib_delta(wave_value(ch.trem_wave, ch.trem_pos), depth, 6)).clamp(0, 64)
             ch.trem_pos = (ch.trem_pos + speed) & 63
           end
 

@@ -170,15 +170,23 @@ RSpec.describe(MB::Sound::Tracker::ModReader, :aggregate_failures) do
       expect(d.freq[1..5].map { |f| (pal / f).round }).to eq([0, 8, 16, 24, 32].map { |pos| 428 + ((sine[pos & 31] * 8) >> 7) * (pos < 32 ? 1 : -1) })
     end
 
-    it 'plays the table notes with unrounded slides and exact arpeggios in :musical mode' do
-      cells = { [0, 0] => { note: 60, sample: 1, effect: 0, param: 0x47 }, [0, 1] => { note: 61, sample: 1 } }
-      r = run(write(cells), mode: :musical)
-      a, b = r.logs
-      base = a.freq[0]
-      expect(base).to be_within(1e-9).of(MB::Sound::Tracker::Player::Amiga::PAL / 428)
-      expect(a.freq[1] / base).to be_within(1e-12).of(2**(4 / 12.0))
-      expect(a.freq[2] / base).to be_within(1e-12).of(2**(7 / 12.0))
-      expect(b.freq[0]).to be_within(1e-9).of(MB::Sound::Tracker::Player::Amiga::PAL / 404)
+    it 'plays the table notes and table arpeggios in :musical mode, finetuned rows halved per octave' do
+      samples = [{ name: 'saw', data: w.saw(2000), volume: 64, loop: [1000, 2000] }, { name: 'ft2', data: w.saw(2000), volume: 64, loop: [1000, 2000], finetune: 2 }]
+      cells = { [0, 0] => { note: 60, sample: 1, effect: 0, param: 0x47 }, [0, 1] => { note: 61, sample: 1 },
+                [0, 2] => { note: 57, sample: 2 }, [0, 3] => { note: 81, sample: 2 } }
+      r = run(write(cells, samples: samples), mode: :musical)
+      a, b, c, d = r.logs
+      pal = MB::Sound::Tracker::Player::Amiga::PAL
+      expect(a.freq[0]).to be_within(1e-9).of(pal / 428)
+      # (the arpeggio's notes are the table's: 339 and 285, as the composer heard them)
+      expect(a.freq[1]).to be_within(1e-9).of(pal / 339)
+      expect(a.freq[2]).to be_within(1e-9).of(pal / 285)
+      expect(b.freq[0]).to be_within(1e-9).of(pal / 404)
+      # (finetune 2: A-1 is 502, A-3 its quarter, 125.5)
+      ft2 = MB::Sound::Tracker::ModReader::FINETUNE_PERIODS[2]
+      expect(ft2[9]).to eq(502)
+      expect(c.freq[0]).to be_within(1e-9).of(pal / 502)
+      expect(d.freq[0]).to be_within(1e-9).of(pal / 125.5)
     end
 
     it 'lists effects it skips' do

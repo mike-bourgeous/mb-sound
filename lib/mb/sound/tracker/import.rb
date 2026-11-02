@@ -44,17 +44,19 @@ module MB
         # measurements; the reference player's mixing level).
         GAINS = { mod: 3.0, "669": 1.5, s3m: 1.5, xm: 1.0, it: 1.5 }.freeze
 
-        attr_reader :song, :mode, :separation, :name
+        attr_reader :song, :mode, :separation, :name, :limits
 
         # +song+ a Song (see Tracker.read); +mode+ :musical (band-limited
         # sample reads, exact equal-tempered periods, lanes smoothed over
         # LANE_SMOOTH) or :hardware (drop-sample reads without band
         # limiting, the format's integer periods, steps on the tick);
-        # +separation+ scales the pans (0 mono, 1 as written).
-        def initialize(song, mode: :musical, separation: nil, name: nil)
+        # +separation+ scales the pans (0 mono, 1 as written); +limits+
+        # :format or :none (see Player#initialize).
+        def initialize(song, mode: :musical, separation: nil, name: nil, limits: :format)
           raise ArgumentError, "mode: is :musical or :hardware (got #{mode.inspect})" unless %i[musical hardware].include?(mode)
           @song = song
           @mode = mode
+          @limits = limits
           @separation = (separation || (mode == :musical ? SEPARATION.fetch(song.format, 1.0) : 1.0)).to_f
           @name = name || song.title
           @result = nil
@@ -69,7 +71,7 @@ module MB
 
         # The Player's recording (see Player::Result).
         def result
-          @result ||= Player.for(@song, mode: @mode).run
+          @result ||= Player.for(@song, mode: @mode, limits: @limits).run
         end
 
         # MB::Sound::Samples for Song#samples (nil for empty slots).

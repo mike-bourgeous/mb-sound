@@ -1,14 +1,14 @@
 # Tracker modules
 
 <!-- summary -->
-`mod_import(path)` (`TrackerMethods`, `lib/mb/sound/tracker/`) turns MOD, 669, S3M, XM, and IT modules into a `Tracker::Set`: pure-Ruby readers make a format-neutral `Tracker::Song`, `Tracker::Player` steps it tick by tick like the format's replay routine (effects, envelopes, IT background voices), and `Tracker::Import` maps the recording onto a track per channel (one `Sampler::Instrument` whose keys pick samples, played with `clip.sampler(inst, lanes: ...)`), a looping clip per pattern visit per channel (notes with pitch marks plus bend, CC 7 volume, CC 10 pan, CC 20 start lanes at tick resolution), a scene per visit, and a flow.  A tick is 1/96 of a whole note, so BPM is the module's tempo.  `play`, `render`, and `save` take the set; `:musical` and `:hardware` modes.  Help `help :trackers`.
+`mod_import(path)` (`TrackerMethods`, `lib/mb/sound/tracker/`) turns MOD, 669, S3M, XM, and IT modules into a `Tracker::Set`: pure-Ruby readers make a format-neutral `Tracker::Song`, `Tracker::Player` steps it tick by tick like the format's replay routine (effects, envelopes, IT background voices), and `Tracker::Import` maps the recording onto a track per channel (one `Sampler::Instrument` whose keys pick samples, played with `clip.sampler(inst, lanes: ...)`), a looping clip per pattern visit per channel (notes with pitch marks plus bend, CC 7 volume, CC 10 pan, CC 20 start lanes at tick resolution), a scene per visit, and a flow.  A tick is 1/96 of a whole note, so BPM is the module's tempo.  `play`/`render`/`save` take the set; `:musical`/`:hardware` modes, `limits: :none`.  Pitch effects are per-tick units (`Tracker::Effects`) checked by a pitch-tracking guard.  Help `help :trackers`.
 <!-- /summary -->
 
 ## Quick reference
 
-- `song = mod_import('tune.mod', mode: :musical | :hardware, separation:)`; `play song` (or `play 'tune.mod'`, `bin/play.rb tune.mod`), `render 'x.flac', song` (or the path), `save :tune, song` (a set bundle, samples as assets); `song.setup` then `go :p03`, `fx :ch2, ...`, `swap :ch1, song[:p03][:ch1].transpose(12)`, `tempo 150`; `song.play(loop: true)`; `mod_samples(path)`.
-- Code `lib/mb/sound/tracker.rb` + `tracker/` (readers `*_reader.rb`, `player.rb` + `player/`, `import.rb`, `set.rb`), `lib/mb/sound/tracker_methods.rb`; the sampler-voice lanes in `lib/mb/sound/sampler/instrument.rb` (`Instrument#play` `lanes:`).
-- Specs `spec/lib/mb/sound/tracker/*_spec.rb` (one per format, plus `set_spec.rb`), `spec/lib/mb/sound/sampler_lanes_spec.rb`; synthetic modules from `spec/support/module_writer.rb` (MOD, 669, S3M, XM, IT with an IT 2.14/2.15 compressor).
+- `song = mod_import('tune.mod', mode: :musical | :hardware, separation:, limits: :format | :none)`; `play song` (or `play 'tune.mod'`, `bin/play.rb tune.mod`), `render 'x.flac', song` (or the path), `save :tune, song` (a set bundle, samples as assets); `song.setup` then `go :p03`, `fx :ch2, ...`, `swap :ch1, song[:p03][:ch1].transpose(12)`, `tempo 150`; `song.play(loop: true)`; `mod_samples(path)`.
+- Code `lib/mb/sound/tracker.rb` + `tracker/` (readers `*_reader.rb`, `player.rb` + `player/`, `effects.rb`, `import.rb`, `set.rb`), `lib/mb/sound/tracker_methods.rb`; the sampler-voice lanes in `lib/mb/sound/sampler/instrument.rb` (`Instrument#play` `lanes:`).
+- Specs `spec/lib/mb/sound/tracker/*_spec.rb` (one per format, plus `set_spec.rb`, `effects_spec.rb`, and `pitch_guard_spec.rb`: every pitch effect per format rendered and pitch-tracked against the format's periods, `spec/support/pitch_track.rb`), `spec/lib/mb/sound/sampler_lanes_spec.rb`; synthetic modules from `spec/support/module_writer.rb` (MOD, 669, S3M, XM, IT with an IT 2.14/2.15 compressor).
 
 The maintainer (2026-11-02): "If I gave you a .669 file could you build a parser/player that would load it into the flow/track/clip/sampler structure?", then the framing: "The module support is because the mechanics are already there and for nostalgia's sake rather than being actually practical, so imperfection is OK, but fun is mandatory."  Branch `tracker-1`.  His modules (a MOD, a 669, an S3M, two XMs, an IT, and a reference mp3 of one XM) are private: never committed, quoted, or published; specs build their own with `ModuleWriter`.
 
@@ -26,7 +26,7 @@ The maintainer (2026-11-02): "If I gave you a .669 file could you build a parser
 | | `:musical` (default) | `:hardware` |
 |---|---|---|
 | sample reads | band-limited levels, `:optimal` interpolation | drop-sample, no levels |
-| note pitches | the format's tables (what the composer heard) with unrounded slides and exact arpeggio ratios | integer periods and the replay's rounding |
+| note pitches | the format's tables (what the composer heard; ProTracker's finetune rows halved per octave, fractional as openmpt123 plays them), slides and vibrato unrounded | integer periods and the replay's rounding |
 | lanes | stepped over 1.5 ms (a declick) | steps on the tick |
 | pans | Amiga hard pans (MOD, 669) narrowed to 0.6 | as written |
 
@@ -39,6 +39,30 @@ Pan laws follow the formats (linear, FastTracker 2's equal power for XM), since 
 - **S3M**: ST3 periods by C2Spd (14317056 Hz / period), shared effect memory, fast slides by flag or ST3.00.  Skipped: S1x, S2x, SAx, SFx, Y, Z; AdLib channels.
 - **XM**: linear or Amiga periods, FT2 memories, the volume column, instruments with keymaps, volume/pan envelopes, fadeout, auto-vibrato.  Skipped: E0x, E3x, EFx.
 - **IT**: S3M's letters with IT's memories and extras (M/N, P, T slides, V/W, X, SAx, S7x), the volume column, instruments with note remapping, volume/pan/pitch envelopes, fadeout, NNA background voices with duplicate checks, IT 2.14/2.15 compressed samples (pure Ruby; checked against openmpt123 renders of files made by the spec writer's compressor).  Skipped: filter envelopes, S6x, S9x, S77-S7C, Y, Z.  Approximations: a Sample has one loop, so an IT sample's regular loop wins and a sustain loop alone plays as a plain loop (its release is the volume envelope's); a background voice restarts its sample at its current position on its own track.
+
+## Pitch (tracker-2, 2026-11-02)
+
+The maintainer: "I dropped in another mod, cry4bass.mod where the pitch effects are pretty far off so those need to be made more accurate."  Measured, not guessed: each module (and synthetic calibration modules) is rewritten with every sample a looped sine of 16 (or 8) frames, one channel at a time kept (flow effects B, D, F, E6, EE kept on the others), rendered by openmpt123 and by mb-sound in both modes, and pitch-tracked per tick (the analytic signal's instantaneous frequency, the median or mean over the tick's middle 70%; under a cent on steady ticks).  The scripts live in the branch's job scratch, not the repo; `spec/support/pitch_track.rb` is the tracker the guard uses.
+
+What was off, and the fix:
+
+| what | error before | fix |
+|---|---|---|
+| a note ringing across a scene change (any sampler voice) | the voice's key chased the new clip's last note: retuned by the key difference, 100-1100+ cents (2% of cry4bass's ticks; tracker keys are sample numbers) | sampler voices read the number of their latest note-on (`Notes#freq(chase: false)`; sampler.md) |
+| MOD finetune | 2 ** (-finetune / 96) shortcut: up to 2 periods (6 cents) off in the lowest octave, growing through slides (tone portamento 4-9 cents) | ProTracker's finetune rows (`ModReader::FINETUNE_PERIODS`, measured), halved per octave, fractional as openmpt123 plays them; B-3 kept at 113 in 4-channel MODs |
+| MOD arpeggio (:musical) | exact ratios: 3-4 cents off the table's notes | the table's notes in both modes |
+| vibrato on a row's first tick (S3M, XM, multichannel MOD) | reset to the note: 20-90 cents for one tick each row | FT2/ST3 read the waveform without moving on (`Oscillator` timing :fasttracker); ProTracker MODs do reset (:protracker) |
+| ramp waveform | half a cycle off (MOD, XM) or mirrored (S3M): up to 120 cents | measured shapes (`Waveform` :protracker, :st3) |
+| XM arpeggio | 0, x, y: 300 cents off on two ticks of three | FT2's 0, y, x (its tick counter counts down; `Arpeggio` :fasttracker) |
+| IT vibrato | S3M's: twice as deep, downward first, idle on the first tick, bipolar square (50-150 cents) | IT's tables (upward first, square up/0), every tick moving on first, (value × depth) >> 4 through IT's linear slide steps (1/64 semitone below 16, 1/16 above) |
+| IT arpeggio, linear slides | the period multiplied by a ratio: +12.4 and +20 semitones for 4 and 7 | 64 linear periods a semitone |
+| IT fine vibrato | 4 times too deep | >> 6 |
+
+Measured but kept: MOD slides, tone portamento, fine slides, and ProTracker's limits (113..856, notes all in range) agreed within a cent or two; 8-channel MODs slide past both limits in openmpt123 too; 669 slides as tracker-1 measured.  Not matched: ST3/FT2 Amiga-mode arpeggios use table notes (2-5 cents from exact ratios), XM Amiga notes off the C table by up to 4 cents, IT's K after a U/S3x mix, random waveforms (counted as unsupported), openmpt123's quarter period on a finetune-0 B-3 (113.25), and slides past a format's top pitch (openmpt123 cuts the note).  Tremolo and XM auto-vibrato keep tracker-1's waveforms (not re-measured).
+
+The units (`lib/mb/sound/tracker/effects.rb`, for a general effect framework to wrap later): `Effects::Waveform` (tables per kind), `Effects::Oscillator` (position and waveform, retrigger, `#tick(t, speed)` under a timing: :protracker, :fasttracker, :impulse), `Effects::Arpeggio.semitones(param, t, speed:, order:)`, `Effects::Slide.toward`/`.by` (tone portamento, limits), `Effects.it_linear_units`.  Each format's player keeps one Oscillator per channel (`Player#vibrato_style`) and turns the values into its own period units.
+
+**Limits** (the maintainer, about yo_space.mod, an 8-channel MOD whose notes step down past the period table: "mb-sound is playing this the way most players I've heard do, where the descending notes bottom out at a fixed pitch.  But I've heard one or two players that keep the pitch descending toward zero"): the bottoming out is the reader's period-to-note mapping (a stored period past the five-octave table maps to its lowest note, 1712), not a slide clamp.  `limits: :none` (`mod_import`, `Import`, `Player`; default `:format`) plays stored periods past the table as their own notes (`ModReader.note_of(period, extended: true)`) and lifts every format's slide limits, keeping the period at or above `Player::PERIOD_FLOOR` (1), so a slide falls toward 0 Hz; the bend lane's range (96 semitones) stops it eight octaves below the note.  Measured: openmpt123 plays yo_space's stored periods down to 3424 and holds there (four times C-1), between the two.  `:hardware` already played stored periods (as Paula would) and still does; `:musical` bottoms out unless `limits: :none`.  A 23 s slide to 44 Hz renders without NaNs or slowdown.  669's slides already stop at 1 Hz.
 
 ## Comparison (tracker-1, 2026-11-02)
 

@@ -57,6 +57,7 @@ module MB
           end
 
           def clamp_period(p)
+            return [p, PERIOD_FLOOR].max if unlimited?
             @linear ? p.clamp(1, 7680) : p.clamp(28, 65_535)
           end
 
@@ -131,6 +132,13 @@ module MB
             end
             volume_column_tick0(ch, cell.volume) if cell.volume && ch.delay_note.nil?
             ch.out_period = ch.period
+            # (FT2's vibrato holds its waveform's value on a row's first
+            # tick, measured: Effects::Oscillator :fasttracker)
+            vibrato(ch, 0) if e == 4 || e == 6
+          end
+
+          def vibrato_style
+            { kind: :protracker, timing: :fasttracker }
           end
 
           # A cell's note, instrument, and volume column value (on the row's
@@ -154,7 +162,7 @@ module MB
                 ch.note = note
                 ch.period = period_of(note, s)
                 ch.target = nil
-                ch.vib_pos = 0 if ch.vib_wave < 4
+                ch.vibrato.retrigger
                 ch.trem_pos = 0 if ch.trem_wave < 4
                 offset = 0
                 if e == 9
@@ -210,7 +218,7 @@ module MB
             case v >> 4
             when 6 then ch.volume = [ch.volume - x, 0].max
             when 7 then ch.volume = [ch.volume + x, 64].min
-            when 11 then vibrato(ch)
+            when 11 then vibrato(ch, 1)
             when 13 then ch.pan = [ch.pan - x / 127.5, -1.0].max
             when 14 then ch.pan = [ch.pan + x / 127.5, 1.0].min
             when 15 then tone_porta(ch)
@@ -224,7 +232,9 @@ module MB
             when 1 then slide(ch, -mem(ch, :fup, x) * 4)
             when 2 then slide(ch, mem(ch, :fdown, x) * 4)
             when 3 then unsupported('E3x glissando') if x > 0
-            when 4 then ch.vib_wave = x
+            when 4
+              ch.vibrato.wave = x
+              unsupported('E4x random vibrato') if x & 3 == 3
             when 5 then nil
             when 6
               if x == 0
@@ -272,12 +282,12 @@ module MB
             when 1 then slide(ch, -ch.memory[:up] * 4)
             when 2 then slide(ch, ch.memory[:down] * 4)
             when 3 then tone_porta(ch)
-            when 4 then vibrato(ch)
+            when 4 then vibrato(ch, t)
             when 5
               tone_porta(ch)
               volume_slide(ch, ch.memory[:vol])
             when 6
-              vibrato(ch)
+              vibrato(ch, t)
               volume_slide(ch, ch.memory[:vol])
             when 7 then tremolo(ch)
             when 10 then volume_slide(ch, ch.memory[:vol])
@@ -300,28 +310,30 @@ module MB
             end
           end
 
+          # Arpeggio in FT2's order (Effects::Arpeggio :fasttracker: its tick
+          # counter counts down, so at speed 6 the row plays 0, y, x).
           def arpeggio(ch, t)
-            k = t % 3
-            return if k == 0 || ch.period.nil?
-            semis = k == 1 ? ch.arp >> 4 : ch.arp & 15
+            return if ch.period.nil?
+            semis = Effects::Arpeggio.semitones(ch.arp, t, speed: @speed, order: :fasttracker)
+            return if semis == 0
             ch.out_period = @linear ? ch.period - semis * 64 : ch.period * 2**(-semis / 12.0)
             ch.out_period = ch.out_period.round if hardware?
           end
 
           def tone_porta(ch)
             return unless ch.target && ch.period
-            speed = ch.memory[:porta] * 4
-            ch.period = ch.period < ch.target ? [ch.period + speed, ch.target].min : [ch.period - speed, ch.target].max
+            ch.period = Effects::Slide.toward(ch.period, ch.target, ch.memory[:porta] * 4)
             ch.out_period = ch.period
           end
 
-          def vibrato(ch)
+          # Vibrato on tick +t+: the waveform (Effects::Oscillator) times the
+          # depth over 32, in periods.
+          def vibrato(ch, t)
             return unless ch.period
-            w = wave_value(ch.vib_wave, ch.vib_pos)
+            w = ch.vibrato.tick(t, ch.memory[:vib_speed]) or return
             depth = ch.memory[:vib_depth]
             d = hardware? ? (w.abs * depth) >> 5 : w.abs * depth / 32.0
             ch.out_period = ch.period + (w < 0 ? -d : d)
-            ch.vib_pos = (ch.vib_pos + ch.memory[:vib_speed]) & 63
           end
 
           def tremolo(ch)

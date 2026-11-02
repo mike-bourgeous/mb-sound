@@ -14,17 +14,21 @@ module MB
       # equal-tempered pitches, lanes declicked over 1.5 ms, Amiga pans
       # narrowed) or :hardware (drop-sample reads, the format's integer
       # period tables, steps on the tick, pans as written); +separation+
-      # sets the stereo width (0..1).  Effects the player skips are listed
-      # in one warning.
+      # sets the stereo width (0..1); +limits+ :format (default) keeps
+      # pitches in the format's period range, as most players do (a MOD's
+      # notes stored past ProTracker's table bottom out at its lowest
+      # note), :none lifts it (stored periods play as written, slides keep
+      # falling toward 0 Hz; tracker-2).  Effects the player skips are
+      # listed in one warning.
       #
       #     song = mod_import('tune.mod')
       #     play song
       #     render 'tune.flac', song
       #     song.setup; go :p03; fx :ch2, L.fx.reverb.hall
-      def mod_import(path, mode: :musical, separation: nil)
+      def mod_import(path, mode: :musical, separation: nil, limits: :format)
         song = Tracker.read(path)
         song.problems.each { |p| warn "#{File.basename(path.to_s)}: #{p}" }
-        set = Tracker::Import.new(song, mode: mode, separation: separation, name: File.basename(path.to_s, '.*')).set
+        set = Tracker::Import.new(song, mode: mode, separation: separation, limits: limits, name: File.basename(path.to_s, '.*')).set
         unless set.unsupported.empty?
           warn "#{File.basename(path.to_s)}: effects not played: #{set.unsupported.map { |n, c| "#{n} (#{c}x)" }.join(', ')}"
         end

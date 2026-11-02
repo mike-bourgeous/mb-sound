@@ -44,7 +44,7 @@ module MB
           def initialize(song, **options)
             super
             @linear = song.linear
-            @limits = @linear ? [1, 15_360] : [28, 65_535]
+            @range = @linear ? [1, 15_360] : [28, 65_535]
             @fast = false
           end
 
@@ -150,7 +150,40 @@ module MB
             when 26 then unsupported('Z MIDI macro')
             end
             ch.out_period = ch.period
+            vibrato(ch, e == 21 ? 7 : 5, 0) if e == 8 || e == 11 || e == 21
+            vibrato(ch, 5, 0) if cell.volume&.between?(203, 212) && !(e == 8 || e == 11 || e == 21)
             tremor(ch) if e == 9
+          end
+
+          # IT's vibrato (without old effects) moves on and reads its
+          # waveform on every tick, the first included, starts upward, and
+          # has its own tables (Effects::Waveform :it); with old effects it
+          # plays as ST3's.
+          def vibrato_style
+            @song.flags[:old_effects] ? super : { kind: :it, timing: :impulse }
+          end
+
+          # The vibrato's period offset: ST3's with old effects; else
+          # (value * depth) >> 4 for H (>> 6 for U), as 1/64 semitones
+          # through IT's linear slide steps (Effects.it_linear_units) or as
+          # periods (Amiga slides).  Measured: depth 8 swings 50 cents at
+          # either rate, 1/16 semitone steps above 1/4 semitone.
+          def vibrato_offset(w, depth, shift)
+            return super if @song.flags[:old_effects]
+            d = (w.abs * depth) >> (shift - 1)
+            d = Effects.it_linear_units(d) if @linear
+            d = w.abs * depth / (1 << (shift - 1)).to_f if !hardware? && !@linear
+            w < 0 ? -d : d
+          end
+
+          # Arpeggio: semitones up as 64 linear periods each, or the
+          # period's ratio (Amiga slides).
+          def arpeggio(ch, t)
+            return super unless @linear
+            k = t % 3
+            return if k == 0 || ch.period.nil? || ch.arp.nil?
+            semis = k == 1 ? ch.arp >> 4 : ch.arp & 15
+            ch.out_period = ch.period - semis * 64
           end
 
           def cell_note(ch, cell, e, v)
@@ -176,7 +209,7 @@ module MB
                 ch.note = played
                 ch.period = period_of(played, s)
                 ch.target = nil
-                ch.vib_pos = 0 if ch.vib_wave < 4
+                ch.vibrato.retrigger
                 ch.trem_pos = 0 if ch.trem_wave < 4
                 offset = 0
                 if e == 15
@@ -291,7 +324,7 @@ module MB
               tone_porta(ch, ch.memory[:porta] * 4) if tick > 0
             when 203..212
               ch.memory[:vib_depth] = vc - 203 if tick == 0 && vc > 203
-              vibrato(ch, 5) if tick > 0
+              vibrato(ch, 5, tick) if tick > 0
             end
           end
 
