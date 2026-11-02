@@ -218,10 +218,10 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       spec = snap.knobs.first.spec
       expect(ui::KnobTurns.turned(spec, 1000.0, 0.02) / 1000.0).to be_within(1e-3).of(ui::KnobTurns.turned(spec, 4000.0, 0.02) / 4000.0)
       st.delete(:gesture)
-      expect(key(:inspector, st, :reset).last).to eq(ui::PaneKeys::Run['turn :cut, 800', 'cut 800'])
+      expect(key(:inspector, st, :reset).last).to eq(ui::PaneKeys::Turn['turn :cut, 800', 'cut 800'])
       ask = key(:inspector, st, :ask).last
       expect(ask).to eq(ui::PaneKeys::Ask['turn :cut, ', 800, :typed]) # (the value just set stands in until the snapshot has it)
-      expect(key(:inspector, st, :typed, '3000.hz')).to eq(ui::PaneKeys::Run['turn :cut, 3000.hz', 'cut 3000.hz'])
+      expect(key(:inspector, st, :typed, '3000.hz')).to eq(ui::PaneKeys::Turn['turn :cut, 3000.hz', 'cut 3000.hz'])
       expect(key(:inspector, st, :typed, '  ')).to eq('nothing typed')
       expect(key(:inspector, st, :learn).last.code).to eq('learn :cut')
       expect(key(:inspector, st, :track, 1)).to include('inspecting pad')
@@ -543,6 +543,59 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(@term.wait_for('turn :cut, 3100')).to eq(true)
       @term.write("\e")
       expect(@term.wait_for('cancelled')).to eq(true), @term.lines.last
+      expect(@tiles.mode_problems).to eq([])
+    ensure
+      stop = true
+      pump&.join
+    end
+
+    # (inspector-headers-1, the maintainer, 2026-11-02: "Too much noise in
+    # the repl; knob turn code should have one line in a dedicated panel if
+    # shown")
+    it 'turns knobs from its keys without adding lines to the REPL pane, the latest turn\'s line on its last row, every turn journaled' do
+      @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+      MB::Sound::Session.with_context(session: @session) do
+        MB::Sound.instance_eval do
+          knob :cut, 2400.hz, range: 150.hz..8000.hz
+          bg :pad, 220.hz.saw.at(-30.db).filter(:lowpass, cutoff: knob(:cut))
+        end
+      end
+      4.times { @session.process_buffer }
+      @tiles, @term = ui_tiles(:sound, rows: 40, cols: 120, session: @session)
+      stop = false
+      pump = Thread.new { until stop; @session.process_buffer; sleep 0.005; end }
+      expect(@term.wait_for('t> ')).to eq(true)
+      expect(@term.wait_for('2400 Hz')).to eq(true), @term.text
+      @term.write("\x1d")
+      expect(@term.wait_for(' NAV ')).to eq(true)
+      @term.type('d')
+      expect(wait_until { @tiles.router.mode == :pane && @tiles.tiler.focus == :inspector }).to eq(true)
+      expect(@term.wait_for("Enter: type cut's value")).to eq(true), @term.lines.last
+      repl = @tiles.send(:repl_lines)
+      turns = -> { @session.journal.changes.count { |e| e.kind == :turn } }
+      before = turns.call
+      line = -> { @tiles.instance_variable_get(:@states)[:inspector][:turn_line] }
+      # A held Right (one gesture line when the keys stop)
+      @term.write("\e[C")
+      sleep 0.3
+      6.times { @term.write("\e[C"); sleep 0.04 }
+      expect(wait_until(timeout: 3) { turns.call == before + 1 }).to eq(true)
+      expect(wait_until { line.()&.start_with?('turn :cut, 0 => ') }).to eq(true), line.().inspect
+      expect(@term.wait_for(/│turn :cut, 0 => /)).to eq(true), @term.text
+      # 0: the default (a `turn` line, replacing the gesture's)
+      @term.type('0')
+      expect(wait_until { line.() == 'turn :cut, 2400' }).to eq(true), line.().inspect
+      expect(@term.wait_for(/│turn :cut, 2400 *│/)).to eq(true), @term.text
+      expect(@term.text).not_to match(/│turn :cut, 0 => /)
+      # A typed value
+      @term.write("\r")
+      expect(@term.wait_for('turn :cut, 2400')).to eq(true)
+      @term.write("\x15")
+      @term.type("3100.hz\r")
+      expect(wait_until { line.() == 'turn :cut, 3100.hz' }).to eq(true), line.().inspect
+      expect(wait_until { (@session.knobs[:cut].value - 3100).abs < 1e-6 }).to eq(true)
+      expect(turns.call).to eq(before + 3)
+      expect(@tiles.send(:repl_lines)).to eq(repl), @term.text
       expect(@tiles.mode_problems).to eq([])
     ensure
       stop = true

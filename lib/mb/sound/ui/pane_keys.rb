@@ -112,6 +112,19 @@ module MB
           def self.[](code, note = nil) = new(code: code.freeze, note: note&.freeze)
         end
 
+        # A knob turn's console line (a `turn` a key set, a typed value,
+        # a held key's gesture): run like a Run (UI.run_line: journaled,
+        # undoable, a take line), but not printed in the REPL pane
+        # (inspector-headers-1, the maintainer's 2026-11-02 "Too much noise
+        # in the repl; knob turn code should have one line in a dedicated
+        # panel if shown"): the screen keeps the latest as the pane's one
+        # turn line (`state[:turn_line]`, KnobTurns#turn_line_canvas), an
+        # error printing as a Run's does.  +note+ is what the status line
+        # says.
+        Turn = Data.define(:code, :note) do
+          def self.[](code, note = nil) = new(code: code.freeze, note: note&.freeze)
+        end
+
         # A live, unjournaled knob move a pane key asks for (a step of a
         # held-key gesture; UI::TurnGesture): the screen calls
         # Session#preview_turn.  A Commit follows.

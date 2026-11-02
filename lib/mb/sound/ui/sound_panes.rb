@@ -153,6 +153,7 @@ module MB
 
           def draw_body(c, s, state)
             state[:snap] = s
+            c = turn_line_canvas(c, state)
             info = s&.inspector
             if info.nil? || info.track.nil?
               c.puts ['nothing to inspect ', :dim], ['(play a track: bg :bass, clip)', :dim]
@@ -685,7 +686,7 @@ module MB
             cell = picked(state) or return no_knob_note
             text = text.to_s.strip
             return 'nothing typed' if text.empty?
-            PaneKeys::Run["turn #{cell[0].inspect}, #{text}", "#{cell[0]} #{text}"]
+            PaneKeys::Turn["turn #{cell[0].inspect}, #{text}", "#{cell[0]} #{text}"]
           end
 
           # The `bind` line #key_ask offered, as typed (Enter runs it).
