@@ -65,10 +65,52 @@ module MB
           next nil unless filter
 
           f, db = Presets.response_db(filter, d[:sample_rate])
-          top = [(db.max / 6.0).ceil * 6, 6].max
           chart.x :frequency, f[0]..f[-1]
-          chart.y Scale::DB.new([top - 66, -60].max..top)
+          chart.y Scale::DB.new(Panels.db_range(Panels.cookbook_top(d), db))
           chart.line db, x: f, label: d[:label]
+        end
+
+        # A filter preview's dB axis: -60 dB to +top+, fixed for the
+        # filter's type and settings that don't move, so a cutoff, Q, or
+        # resonance sweep (an envelope, an LFO, a knob) moves the curve, not
+        # the axis (inspector-nav-1; the maintainer, 2026-11-02: "diode filter
+        # preview plot keeps changing vertical range": the top followed the
+        # response's peak every frame).  A response above +top+ (shouldn't
+        # happen) raises it to fit.
+        def self.db_range(top, db)
+          peak = db.max
+          top = [(peak / 6.0).ceil * 6, top].max if peak.finite? && peak > top
+          -60..top
+        end
+
+        # The top of a cookbook or SVF filter's axis: +24 dB (a Q up to
+        # about 16, the resonant types' peak), or a shelf or peak's gain
+        # and 6 dB over it when that is more.
+        def self.cookbook_top(d)
+          g = [d[:db_gain], d[:gain]].compact.map { |x| x.is_a?(Numeric) ? x.abs : 0 }.max.to_f
+          [((g + 6) / 6.0).ceil * 6, 24].max
+        end
+
+        # The top of a four-pole's (or diode ladder's) axis: its response's
+        # peak at full resonance (the most over cutoffs from 20 Hz to 0.45 of
+        # the rate) for the settings that don't
+        # move (mode, resonance curve, self-oscillation, compensation,
+        # normalization, tuning), kept per settings.
+        def self.four_pole_top(d)
+          key = d.values_at(:mode, :resonance_curve, :self_oscillate, :compensation, :normalize, :tuning, :sample_rate, :drive_mode, :clip)
+          (@four_pole_tops ||= {})[key] ||= begin
+            @four_pole_tops.shift while @four_pole_tops.length > 64
+            rate = d[:sample_rate]
+            peak = [20.0, 100.0, 1000.0, 5000.0, 15000.0, rate * 0.45].map { |cut|
+              f = Filter::FourPole.new(
+                cutoff: [cut, rate * 0.45].min, resonance: 1.0, mode: d[:mode], self_oscillate: d[:self_oscillate], compensation: d[:compensation],
+                resonance_curve: d[:resonance_curve], normalize: d[:normalize], tuning: d[:tuning], sample_rate: rate,
+                drive_mode: d[:drive_mode] == :stages && d[:mode] == :diode ? :input : d[:drive_mode], clip: d[:drive_mode] == :feedback ? d[:clip] : :soft
+              )
+              Presets.response_db(f, rate)[1].max
+            }.max
+            [(peak / 6.0).ceil * 6, 6].max
+          end
         end
 
         # Four-pole filters and diode ladders (lp4, diode; sound-design-nav-1):
@@ -90,9 +132,8 @@ module MB
             )
           }
           f, db = Presets.response_db(filter.(d[:cutoff]), rate)
-          top = [(db.max / 6.0).ceil * 6, 6].max
           chart.x :frequency, f[0]..f[-1]
-          chart.y Scale::DB.new([top - 66, -60].max..top)
+          chart.y Scale::DB.new(Panels.db_range(Panels.four_pole_top(d), db))
           if d[:moving]&.include?(:cutoff)
             [0.5, 2.0].each do |r|
               c = (d[:cutoff] * r).clamp(20.0, rate * 0.45)
@@ -128,8 +169,11 @@ module MB
           rate = live[:rate].to_f
           ms = (live[:frames].to_i - 1) * 1000.0 / rate
           x = Numo::DFloat.linspace(0, ms, c.length)
+          # (-1..1, or the peak up to the next quarter above it: a knob
+          # turn moving the cycle's peak a little keeps the axis;
+          # inspector-nav-1)
           peak = c.abs.max.to_f
-          peak = 1.0 if peak <= 0
+          peak = peak.finite? && peak > 1.0 ? (peak * 4).ceil / 4.0 : 1.0
           chart.x :linear, label: 'ms'
           chart.y Scale::Symmetric.new(-peak..peak, label: nil)
           chart.line c, x: x, label: live[:label]

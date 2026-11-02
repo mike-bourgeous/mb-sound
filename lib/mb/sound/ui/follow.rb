@@ -4,7 +4,7 @@ module MB
       # Following a Session for a screen (Band, Tiles): attaches the screen's
       # Feed to Session.existing (or a given Session), runs the Poll for slow
       # data, and takes the newest Snapshot.  Uses @feed, @session, @source,
-      # @attached, @poll, @polled_at, @last.
+      # @attached, @poll, @polled_at, @polled_target, @last.
       module Follow
         # Seconds between Poll runs (slow data).
         POLL = 0.25
@@ -32,9 +32,27 @@ module MB
           @attached = nil
         end
 
+        # Slow data every POLL seconds; between polls, the inspector's info
+        # again when Inspect.target changed (a key picked another row: its
+        # params and preview now), else its envelope playhead each frame
+        # (inspector-nav-1).
         def poll(now)
-          return if @poll.nil? || (@polled_at && now - @polled_at < Follow::POLL)
+          return if @poll.nil?
+          target = Inspect.target
+          if @polled_at && now - @polled_at < Follow::POLL
+            slow = @feed.slow
+            return unless slow&.inspector
+            if target.equal?(@polled_target)
+              live = @poll.live_again(slow)
+              @feed.slow = live unless live.equal?(slow)
+              return
+            end
+            @polled_target = target
+            again = @poll.inspect_again(slow)
+            return @feed.slow = again if again
+          end
           @polled_at = now
+          @polled_target = target
           slow, refs = @poll.call(@feed.needs)
           @feed.slow = slow
           @feed.knob_refs = refs

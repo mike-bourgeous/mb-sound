@@ -37,10 +37,15 @@ module MB
         # selected oscillator's recorded call, GraphNode::Recipe.key_of: the
         # preview finds the same oscillator in a copy of the voice,
         # UI::ToneCycle; nil for other nodes).
+        #
+        # +masked+ ({ param => reason }, the selected row's): params whose
+        # turns this voice and clip can't make heard, with why (see
+        # Inspect.masked_of), so the inspector says so instead of turning
+        # numbers that change nothing (inspector-nav-1).
         NodeInfo = Data.define(:key, :label, :role, :count, :params, :preview, :knobs, :live, :binds, :section, :what, :dest, :voice, :channels, :param_knobs,
-                               :recipe_key) do
+                               :recipe_key, :masked) do
           def initialize(key:, label:, role:, count:, params:, preview:, knobs:, live: nil, binds: {}.freeze, section: nil, what: nil, dest: [].freeze,
-                         voice: nil, channels: 1, param_knobs: {}.freeze, recipe_key: nil)
+                         voice: nil, channels: 1, param_knobs: {}.freeze, recipe_key: nil, masked: {}.freeze)
             super
           end
 
@@ -179,6 +184,7 @@ module MB
               nodes[sel] = nodes[sel].with(params: Inspect.snapshot(n, entry[:extras][sel]), live: live_of(entry[:groups][sel]), binds: binds,
                                            param_knobs: pk.empty? ? nodes[sel].param_knobs : nodes[sel].param_knobs.merge(pk).freeze,
                                            recipe_key: n.is_a?(Tone) ? (entry[:tone_keys] ||= {}).fetch(sel) { entry[:tone_keys][sel] = ToneCycle.key_of(n) } : nil)
+              nodes[sel] = nodes[sel].with(masked: Inspect.masked_of(nodes, sel, n, clip: clip_of(session, track), knobs: session.knobs))
               nodes.freeze
             end
             InspectInfo.new(track: track, tracks: tracks, knobs: entry[:knobs], nodes: nodes, node: sel, code: entry[:code], error: nil,
@@ -188,6 +194,38 @@ module MB
             info = InspectInfo.new(track: track, tracks: tracks || [].freeze, knobs: entry&.[](:knobs) || [].freeze, nodes: entry&.[](:nodes) || [].freeze,
                                    node: nil, code: entry&.[](:code), error: "#{e.class}: #{e.message}".freeze)
             info
+          end
+
+          # Track +track+'s clip (Arrangement), or nil.
+          def clip_of(session, track)
+            arr = session.respond_to?(:arrangement) ? session.arrangement : nil
+            arr&.tracks&.[](track)&.clip
+          rescue StandardError
+            nil
+          end
+
+          # +info+ (this Gatherer's last InspectInfo for its target) with the
+          # selected envelope's playhead read again (Inspect.live_of: the
+          # state the render thread left, no render lock), or +info+ itself
+          # when the selected row has none or its graph is gone.  The
+          # painter calls it every frame between the 4/s polls
+          # (inspector-nav-1: the maintainer, 2026-11-02, "Envelope preview
+          # play head sometimes just stops updating"; read 4 times a second,
+          # eighth notes at 120 BPM are 4 a second too, so every poll saw
+          # the same moment of the note: all idle, or the same spot of its
+          # decay, the playhead frozen for seconds).
+          def live_info(info)
+            sel = info&.node or return info
+            entry = @cache[info.track] or return info
+            group = entry[:groups][sel]
+            return info unless group&.first.respond_to?(:playhead_state)
+            n = info.nodes[sel]
+            return info unless n && entry[:nodes][sel]&.label == n.label
+            live = live_of(group)
+            return info if live == n.live
+            nodes = info.nodes.dup
+            nodes[sel] = n.with(live: live)
+            info.with(nodes: nodes.freeze)
           end
 
           private
@@ -361,7 +399,10 @@ module MB
             snap = Inspect.snapshot(n, extras)
             read = (Inspect.knobs_read(n) + extras.map { |_, rd| rd.knob.name }).uniq.freeze
             info = NodeInfo.new(key: 0, label: label, role: role_of(n, label), count: r.copies, params: snap, preview: preview?(n), knobs: read,
-                                section: r.section == :other ? nil : r.section, what: r.what, dest: r.dest, voice: r.voice, channels: r.channels, param_knobs: pk)
+                                # (a node no section fits shows in MOD, marked: a row the
+                                # sections view leaves out can't be reached by Up and Down,
+                                # inspector-nav-1; the guard keeps Classify#unfit empty)
+                                section: r.section == :other ? :mod : r.section, what: r.section == :other ? 'unsorted'.freeze : r.what, dest: r.dest, voice: r.voice, channels: r.channels, param_knobs: pk)
             [n, info, r.nodes, extras]
           }
 
@@ -508,6 +549,63 @@ module MB
           end
           return nil unless best
           { stage: best[1], segment: best[2], position: best[3], peak: best[4], at: Process.clock_gettime(Process::CLOCK_MONOTONIC) }.freeze
+        end
+
+        # The amp envelope's release (seconds) under which another
+        # envelope's longer release can't be heard: the amp ends the note
+        # first (acid's 8 ms; its filter envelope's release, 20 ms, turned
+        # to 0.88 s, moved the mix by -27.5 dB).
+        MASKING_RELEASE = 0.05
+
+        # { param => reason } for row +sel+ of +nodes+ (NodeInfos; +obj+ the
+        # row's node) whose turns this voice and +clip+ can't make heard
+        # (inspector-nav-1; the maintainer, 2026-11-02: "Pressing left/right
+        # on env release seems to have no effect though the numbers
+        # change"; the audibility guard in inspect_audible_spec.rb renders
+        # each turn):
+        #
+        # - an envelope's release, other than the amp envelope's, while the
+        #   voice's amp envelope releases in MASKING_RELEASE or less;
+        # - a legato glide's time when +clip+ has no slides or overlapping
+        #   notes (acid's glide on his `legato(0.5)` eighths: -220 dB).
+        def masked_of(nodes, sel, obj, clip: nil, knobs: {})
+          n = nodes[sel]
+          out = {}
+          value = lambda do |row, name|
+            kn = row.knob_of(name)
+            v = kn && knobs[kn] ? knobs[kn].value : row.params.values[name]&.value
+            v.is_a?(Numeric) ? v.to_f : nil
+          end
+          if n.params.values.key?(:release) && n.what.to_s.end_with?(' env') && n.what != 'amp env'
+            amp = nodes.find { |m| m.what == 'amp env' && (m.voice.nil? || n.voice.nil? || m.voice == n.voice) }
+            a = amp && value.(amp, :release)
+            r = value.(n, :release)
+            if a && r && a <= MASKING_RELEASE
+              out[:release] = "heard only within the amp env's #{Panes.fmt(a * 1000)} ms release (it ends the note first)".freeze
+            end
+          end
+          if obj.is_a?(Notes::Glide) && obj.legato && n.params.values.key?(:time) && clip && !legato_notes?(clip)
+            out[:time] = 'glides only between overlapping or slid notes; the clip has none (legato: true)'.freeze
+          end
+          out.freeze
+        end
+
+        # True if +clip+ (a Sequence::Clip or anything with #events and
+        # #length) has slid notes or notes overlapping the next (a looping
+        # clip's last into its first); true when that can't be told.
+        def legato_notes?(clip)
+          events = clip.respond_to?(:events) ? clip.events : nil
+          return true unless events.is_a?(Array)
+          notes = events.select { |e| e.respond_to?(:start) && e.respond_to?(:length) && e.length }.sort_by(&:start)
+          return false if notes.empty?
+          return true if notes.any? { |e| e.respond_to?(:slid) && e.slid }
+          len = clip.respond_to?(:length) ? clip.length : nil
+          notes.each_with_index.any? { |e, i|
+            nxt = notes[i + 1]
+            nxt ? e.start + e.length > nxt.start : (len && e.start + e.length > len + notes.first.start)
+          }
+        rescue StandardError
+          true
         end
 
         # True if Plot::Panels draws a preview for +node+'s class.

@@ -26,6 +26,10 @@
 #                                           # tmp/ui-notes as a session's first note does; notes go to a temp dir)
 #     bin/ui_demo.rb --tiles -l keys        # with the virtual keyboard, in KEYS mode: play along on z..m and q..]
 #                                           # (Ctrl-] back; `arm :lead`-style tracks aren't in this song, so a default patch plays)
+#     bin/ui_demo.rb --design 'design :bass, L.inst.acid, seq(E1, E1, G1, A1).n8.loop.legato(0.5)' -s 20
+#                                           # the sound-design screen (ui :sound) on that line instead of the song;
+#                                           # adds each pane's redraws per second and CPU, and how often the
+#                                           # envelope preview's playhead moved (pick the amp env: a, or NAV d then a)
 #
 # Expected: the band at the top shows bar:beat moving, the form's section
 # and what comes next, tracks lighting up as scenes change, queued changes
@@ -70,23 +74,27 @@ module MB::Sound
       tiles: [false, 'The tiled screen (a layout with a repl pane; default :tiles) instead of the band'],
       flood: [0, 'With --tiles: lines to print into the REPL pane, starting after 2 s (throughput under audio)', Integer],
       notes: [0.0, 'Take a ui.note every this many seconds (0: none) and report what each cost the audio', Float],
+      design: [nil, 'A design line (design :bass, L.inst.acid, riff) for the sound screen instead of the song (implies --tiles)', String],
+      env: [true, 'With --design: pick the amp envelope row (its preview has the playhead)'],
+      press: [0.0, 'With --design and no terminal: press Down then Right (a turn) every this many seconds (0: none)', Float],
     ) { |_args, p|
+      tiles = p.tiles || !p.design.nil?
       ENV['AUDIO_PROFILE'] = p.latency.to_s if p.latency
       tty = $stdout.tty?
-      quiet = p.quiet || (p.tiles && tty) # (with --tiles in a terminal, the screen is the tiles')
+      quiet = p.quiet || (tiles && tty) # (with --tiles in a terminal, the screen is the tiles')
       rows, cols = p.size.split('x').map(&:to_i)
       io = tty ? $stdout : File.open(File::NULL, 'w')
 
       MB::Sound.warm_up
       UI.warm_up
-      MB::Sound.last_stop(perform: true, seed: 1)
+      MB::Sound.last_stop(perform: true, seed: 1) unless p.design
       session = Session.current
       MB::Sound.seek(p.seek) if p.seek
-      Thread.pass until session.running?
+      Thread.pass until session.running? unless p.design
       out = session.output
       underruns = -> { out.respond_to?(:underruns) ? out.underruns : nil }
 
-      if p.tiles
+      if tiles
         layout = p.layout == :band ? :tiles : p.layout
         if tty
           term_in = $stdin
@@ -99,12 +107,47 @@ module MB::Sound
           term_in = term_out
           Thread.new { loop { pty_master.readpartial(65_536) } rescue nil }
         end
+        layout = :sound if p.design
         band = UI::Tiles.new(layout: UI.tiles_layout_named(layout), input: term_in, output: term_out, repl: :thread, look: p.look, color: p.color, probe: tty)
       else
         band = UI::Band.new(layout: UI.layout_named(p.layout), io: io, at: p.at, look: p.look, color: p.color, size: tty ? nil : [rows, cols])
         UI.instance_variable_set(:@band, band) # (so Reline's guard and `now` see it)
       end
       flood = nil
+      playhead = nil
+      if p.design
+        # The screen design shows (UI.show reuses an active screen), then
+        # the line; the preview's playhead counted by the chart it draws
+        band.start
+        UI.instance_variable_set(:@tiles, band)
+        puts MB::Sound.module_eval(p.design) unless quiet
+        Thread.pass until session.running?
+        if p.env
+          # (the amp envelope's row, once the track lands)
+          track = UI::Inspect.target&.[](:track)
+          info = nil
+          20.times { info = UI::Inspect::Gatherer.new.call(session, { track: track }); break if info&.track == track; sleep 0.1 }
+          amp = info&.nodes&.index { |n| n.what == 'amp env' }
+          UI::Inspect.target = { track: track, node: amp }.freeze if amp
+        end
+        playhead = { draws: 0, moves: 0, last: nil, gaps: [], at: nil }
+        UI::Panes::Preview.prepend(Module.new do
+          define_method(:chart_for) do |n, state|
+            chart = super(n, state)
+            live = n.live
+            pos = live && live[:stage] == :segment ? [live[:segment], live[:position], state[:chart_of]&.last&.[](:elapsed)] : nil
+            now = MB::U.clock_now
+            playhead[:draws] += 1
+            if pos && pos != playhead[:last]
+              playhead[:moves] += 1
+              playhead[:gaps] << now - playhead[:at] if playhead[:at]
+              playhead[:at] = now
+            end
+            playhead[:last] = pos
+            chart
+          end
+        end)
+      end
 
       waits = { on: [], off: [] }
       holds = []
@@ -131,8 +174,8 @@ module MB::Sound
         band.stop if !on && band.active?
         scheduler = Thread.list.find { |th| th.name == 'MB::Sound::Session scheduler' }
         # (GVLProbe watches up to 6 threads: with --tiles, the REPL's pty reader replaces main)
-        names = [:render, :painter, :scheduler, p.tiles ? :pty : :main]
-        threads = [session.render_thread, band.thread || Thread.current, scheduler || Thread.current, (p.tiles && band.pty_thread) || Thread.current]
+        names = [:render, :painter, :scheduler, tiles ? :pty : :main]
+        threads = [session.render_thread, band.thread || Thread.current, scheduler || Thread.current, (tiles && band.pty_thread) || Thread.current]
         FastUI::GVLProbe.start(threads)
         x0 = underruns.call
         gc0 = [GC.count, GC.stat(:time)]
@@ -140,8 +183,12 @@ module MB::Sound
         t = MB::U.clock_now
         while (now = MB::U.clock_now) < stop_at
           # (50 ms steps while a flood runs, so its time is measured closely)
-          sleep([flood && !flood[:done] ? 0.05 : 1.0, stop_at - now].min)
-          if p.tiles && p.flood > 0 && flood.nil? && band.active? && MB::U.clock_now - start >= 2
+          sleep([flood && !flood[:done] ? 0.05 : p.press > 0 ? [p.press, 1.0].min : 1.0, stop_at - now].min)
+          if p.press > 0 && pty_master && MB::U.clock_now >= (next_press ||= start + 2.0)
+            next_press += p.press
+            pty_master.write((presses = presses.to_i + 1).odd? ? "\e[B" : "\e[C")
+          end
+          if tiles && p.flood > 0 && flood.nil? && band.active? && MB::U.clock_now - start >= 2
             # Print into the REPL as if typed; done when its result shows
             flood = { lines: p.flood, at: MB::U.clock_now, bytes: band.host.bytes_read }
             band.host.write("#{p.flood}.times { |i| pry_instance.output.puts \"flood line \#{i} \#{'=' * 60}\" }; :flood_done\r")
@@ -158,15 +205,15 @@ module MB::Sound
               Internal.checkout_tmp_dir # (where a session's first note looks first; timed with it)
               ENV['MB_SOUND_UI_NOTES'] ||= Dir.mktmpdir('ui_demo_notes')
             end
-            UI::NoteLog.save("ui_demo --notes probe #{note_log.length + 1}", capture: UI::NoteLog.capture(p.tiles ? band : (band.active? ? band : nil)), session: session)
+            UI::NoteLog.save("ui_demo --notes probe #{note_log.length + 1}", capture: UI::NoteLog.capture(tiles ? band : (band.active? ? band : nil)), session: session)
             t1 = MB::U.clock_now
             sleep 0.3
             note_log << { at: t0 - start, ms: (t1 - t0) * 1000, span: [t0, t1], xruns: x_before && underruns.call - x_before }
           end
           next if flood && !flood[:done] && MB::U.clock_now - (flood[:printed] ||= 0) < 1.0 # (progress once a second)
           flood[:printed] = MB::U.clock_now if flood
-          puts "#{format('%5.1f', now - start)} s  #{session.transport_record&.then { |r| Session::Stamp.at(r[:pos], session.transport).to_s }}  load #{((session.render_load || 0) * 100).round}%  band #{band.active? ? 'on' : 'off'}" unless quiet
-          if p.capture && !p.tiles && band.active? && now - t >= 1.0
+          puts "#{format('%5.1f', now - start)} s  #{session.transport_record&.then { |r| Session::Stamp.at(r[:pos], session.transport).to_s }}  load #{((session.render_load || 0) * 100).round}%  band #{band.active? ? 'on' : 'off'}#{tiles ? "  rates #{band.rates.to_h.slice(:level, :state, :share, :render_load)}" : ''}" unless quiet
+          if p.capture && !tiles && band.active? && now - t >= 1.0
             t = now
             band.invalidate
             frame = band.refresh
@@ -197,19 +244,34 @@ module MB::Sound
         on = !on if p.compare
       end
       band_stats = band.stats
+      pane_rates = band.rates.measured
+      readout = band.frame_rate[:text]
       band.stop
       pty_master&.close
       MB::Sound.stop(:all, fade: 0)
 
       puts
-      what = p.tiles ? "#{band.layout_name} tiles" : "#{p.layout} band"
-      puts "Render thread wake delay (GVL wait after each wake), #{session.buffer_size}-frame buffers, #{what} at #{band.rows}x#{band.cols} #{p.color} #{p.look}#{tty ? '' : p.tiles ? ' (to a pty)' : ' (to /dev/null)'}:"
+      what = tiles ? "#{band.layout_name} tiles" : "#{p.layout} band"
+      puts "Render thread wake delay (GVL wait after each wake), #{session.buffer_size}-frame buffers, #{what} at #{band.rows}x#{band.cols} #{p.color} #{p.look}#{tty ? '' : tiles ? ' (to a pty)' : ' (to /dev/null)'}:"
       puts ui_demo_line('  band on', waits[:on]) if waits[:on].any? || p.ui
       puts ui_demo_line('  band off', waits[:off]) if waits[:off].any? || !p.ui
       puts ui_demo_line('Painter GVL holds', holds) if holds.any?
       s = band_stats
       puts "Painter per refresh: #{s[:frames]} refreshes, CPU p50 #{s[:cpu_ms][:p50]} p99 #{s[:cpu_ms][:p99]} max #{s[:cpu_ms][:max]} ms (refreshes that drew: p50 #{s[:busy_cpu_ms][:p50]} p99 #{s[:busy_cpu_ms][:p99]}), #{MB::M.sigfigs(s[:panes], 3)} panes per refresh, #{s[:bytes][:mean]} bytes per written frame (max #{s[:bytes][:max]})" if s[:frames] > 0
       s[:slowest].each { |e| puts "  slow refresh at #{e[:at]}: #{e[:cpu_ms]} ms CPU #{e[:parts].map { |k, v| "#{k} #{v}" }.join(', ')}" } if s[:frames] > 0
+      if tiles && s[:frames] > 0
+        rates = pane_rates
+        puts "Painter: #{readout}; per pane: redraws/s, CPU p50/p99 ms:"
+        s[:pane_cpu_ms].sort_by { |name, c| -(c[:p50] || 0) * (rates[name] || 0) }.each do |name, c|
+          puts format('  %-12s %5.1f/s  %6.2f / %6.2f', name, rates[name] || 0, c[:p50] || 0, c[:p99] || 0)
+        end
+      end
+      if playhead
+        g = playhead[:gaps].sort
+        q = ->(f) { g.empty? ? 0 : (g[((g.length - 1) * f).round] * 1000).round(1) }
+        puts "Envelope preview: #{playhead[:draws]} charts, the playhead moved #{playhead[:moves]} times (#{(playhead[:moves] / p.seconds).round(1)}/s); " \
+             "gaps between moves p50 #{q.(0.5)} p99 #{q.(0.99)} max #{q.(1.0)} ms"
+      end
       %i[on off].each do |k|
         next if loads[k].empty?
         l = loads[k].sort

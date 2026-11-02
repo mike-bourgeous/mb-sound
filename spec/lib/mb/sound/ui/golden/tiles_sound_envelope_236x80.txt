@@ -50,7 +50,7 @@ inst fx kit seq master  → bass│  resonance  0.25  ·                        
                               │0.2┤⡿⠒⠂⠂⠂⠂⠂⠂⠂⠂⡇⠂⠂⠂⠂⠂⠪⠂⠂⠂⠂⠂⠂⠂⠂⠂⠒⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠪⠂⠂⠒⠂⠂⠂⠂⠂⠊⠳⢦⡊⠳⢦⡂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠒⠂⠂⠂⠂│Enter      type a value, or bind a literal param
                               │   │⡇⢈        ⡇     ⠨         ⢈      ⠅               ⠨  ⢈        ⠉⠳⢤⣉⠓⢥⣀              ⠅          ⢈    │0          the knob's default
 ──────────────────────────────│0.1┤⡇⠡⠁⠁⠁⠁⠁⠁⠁⠁⡇⠁⠁⠁⠁⠁⠩⠁⠁⠁⠁⠁⠁⠁⠁⠁⠡⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠩⠁⠁⠡⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠉⠉⠗⠳⠭⣗⣳⡥⣅⣁⡁⠁⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠡⠁⠁⠁⠁│m          learn a MIDI controller for the knob
-A detuned saw Reese through a…│0.0┤⡇⠐        ⡇     ⠨         ⠐      ⠅               ⠨  ⠐             ⠅    ⠉⠉⠉⠛⠛⠛⠒⠶⠶⠶⠤⠥⠤⠤⣤⣤⣄⣀⣀⣀⣀⣀⣐⣀⣀⣀⣀│s f        SOURCE: oscillators, samples, glide / FILTER: filters and the filter envelope / AMP: drive…
+A detuned saw Reese through a…│0.0┤⡇⠐        ⡇     ⠨         ⠐      ⠅               ⠨  ⠐             ⠅    ⠉⠉⠉⠛⠛⠛⠒⠶⠶⠶⠤⠥⠤⠤⣤⣤⣄⣀⣀⣀⣀⣀⣐⣀⣀⣀⣀│s f a o x  SOURCE: oscillators, samples, glide / FILTER: filters and the filter envelope / AMP: drive…
 tags dnb bass  params cutoff  │   └┬───────────────┬────────────────┬───────────────┬────────────────┬───────────────┬───────────────│n N        the next row / the previous row
 L.inst.dnb_reese  builtin     │    0              200              400             600              800              1190ms 200ms/div│t T        the next track / the previous track
 ─ AUDITION ───────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────── 10 ─

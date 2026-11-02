@@ -151,7 +151,7 @@ module MB
                        mouse: false, nav_esc: nil, kitty: false, context: nil, probe: true, scrollback: MB::Term::VT::SCROLLBACK, pry: {},
                        keyboard: nil, keys_kitty: nil, on_key: nil, hints: nil, play_keys: nil, on_action: nil, nav_once: true)
           # (Every instance variable set up front, in one order: one object shape)
-          @term = @ambiguous = @host = @stopping = @full = @painter = @reader = @hidden = @relayout = @repl_full = @match = @search = @flash = @reloaded_at = @size_checked_at = @resized = @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = @line_cursor = @old_winch = @signals = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = @heard = nil
+          @term = @ambiguous = @host = @stopping = @full = @painter = @reader = @hidden = @relayout = @repl_full = @match = @search = @flash = @reloaded_at = @size_checked_at = @resized = @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = @line_cursor = @old_winch = @signals = @attached = @poll = @polled_at = @polled_target = @poll_warned = @last = @painter_warned = @heard = nil
           raise ArgumentError, "Layout #{layout.name.inspect} has no repl pane (`repl` in the layout block)" unless layout.repl? || repl == :none
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless MB::Term::Cells::MODES.key?(color)
 
@@ -2018,6 +2018,15 @@ module MB
 
         def rate_note(p)
           p.name == :repl || p.tabs ? nil : rate_text(p.name)
+        end
+
+        # The placed panes that want the painter's rate (meters and live
+        # panes: FrameRate#frame_rate names the slowest).
+        def live_panes
+          (@placed || []).filter_map { |p|
+            next if p.tabs || p.name == :repl || !(pane = @panes[p.name])
+            p.name if PaneRates.priority_of(p.name, pane) != :list
+          }
         end
 
         def rebuild_jumps(names)

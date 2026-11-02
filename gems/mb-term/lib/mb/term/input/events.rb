@@ -102,8 +102,9 @@ module MB
       # same help text in a group print as one line.
       class Keymap
         # One binding: its keys as written, the chord, the Action's name
-        # and arguments, the help text, and the group.
-        Binding = Data.define(:keys, :chord, :action, :args, :help, :group)
+        # and arguments, the help text, the group, and its label (nil:
+        # none).
+        Binding = Data.define(:keys, :chord, :action, :args, :help, :group, :label)
 
         attr_reader :name
 
@@ -124,11 +125,14 @@ module MB
         # Binds +keys+ to Action +action+ with +args+ (+help+: what it
         # does, for the key table).  Returns self.
         # +label+ names the keys in the key table instead (several
-        # bindings with one label show once: 'arrows').
+        # bindings with one label and the same help show once: 'arrows');
+        # where bindings sharing a label say different things (Up: the
+        # previous param, Down: the next), each line names its own keys
+        # (#help_groups).
         def on(keys, action, *args, help: nil, label: nil)
           seq = (@seq = @seq.to_i + 1)
           each_chord(keys) do |key|
-            @map[key.chord] = [action, args, keys.is_a?(Range), help, @group, label || keys, seq]
+            @map[key.chord] = [action, args, keys.is_a?(Range), help, @group, label, seq, keys]
           end
           self
         end
@@ -158,7 +162,7 @@ module MB
 
         # Every binding (Binding), in the order bound.
         def entries
-          @map.map { |chord, (a, args, _, help, group, keys)| Binding.new(keys: keys, chord: chord, action: a, args: args, help: help, group: group) }
+          @map.map { |chord, (a, args, _, help, group, label, _, keys)| Binding.new(keys: keys, chord: chord, action: a, args: args, help: help, group: group, label: label) }
         end
 
         # Bindings as {"key" => :action} (for the keys line and help).
@@ -168,10 +172,20 @@ module MB
 
         # The key table: [[group, [[keys text, help], ...]], ...], keys
         # with the same help in a group joined ("h j k l"), ranges as
-        # "1-9"; bindings without help are left out.
+        # "1-9"; bindings without help are left out.  A label stands for
+        # its bindings only where they all have one help; otherwise each
+        # line names its own keys (inspector-nav-1: the maintainer,
+        # 2026-11-02, "Inspector help shows "s f a o x" repeated as the
+        # key for all sections").
         def help_groups
           groups = {}
-          items = @map.each_value.filter_map { |_a, _args, _pass, help, group, keys, seq| [seq, group, keys.is_a?(String) && keys.length > 1 ? keys : Keymap.keys_name(keys), help] if help }
+          helps = Hash.new { |h, k| h[k] = [] }
+          @map.each_value { |_a, _args, _pass, help, group, label, _seq, _keys| helps[[group, label]] << help if label && help }
+          items = @map.each_value.filter_map { |_a, _args, _pass, help, group, label, seq, keys|
+            next unless help
+            own = label.nil? || helps[[group, label]].uniq.length > 1
+            [seq, group, own ? Keymap.keys_name(keys) : label, help]
+          }
           items += @docs.map { |group, keys, help, seq| [seq, group, keys, help] }
           items.sort_by(&:first).each do |_, group, name, help|
             lines = (groups[group] ||= {})

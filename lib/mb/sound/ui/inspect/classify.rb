@@ -69,7 +69,7 @@ module MB
           # Modulation sources with nothing to turn (shown as where a row's
           # param comes from, never as rows).
           CONTROLLERS = %w[
-            Notes::Velocity Notes::Control Notes::Bend Notes::Aftertouch Notes::PolyPressure Notes::Pressure Notes::Resonance
+            Notes::Velocity Notes::Accent Notes::Lift Notes::Control Notes::Bend Notes::Aftertouch Notes::PolyPressure Notes::Pressure Notes::Resonance
           ].freeze
 
           ENVELOPES = %w[Envelope Notes::NoteEnvelope].freeze
@@ -165,7 +165,9 @@ module MB
             if short_class(n) == 'MIDI::ClipSource' && (b = Library::Generators.origin(n.clip))
               return b.entry.name.to_s
             end
-            return n.graph_node_name.to_s if n.respond_to?(:named?) && n.named?
+            # (a node named without a name, a chorus's multitap, falls through:
+            # an empty title was a row Up and Down landed on with nothing drawn)
+            return n.graph_node_name.to_s if n.respond_to?(:named?) && n.named? && !n.graph_node_name.to_s.empty?
             d = preview(n)
             return d[:filter_type].to_s if d.is_a?(Hash) && d[:filter_type]
             return d[:mode].to_s if d.is_a?(Hash) && d[:mode]
@@ -225,13 +227,18 @@ module MB
 
             # Control-derived arithmetic: arithmetic whose inputs are all
             # control (velocity-scaled envelopes, `2 ** lfo`, `cut * lfo`).
+            # Wrapped filters whose main inputs are all control are control
+            # too (acid's accent sweep: a FirstOrder lowpass on the
+            # envelope; inspector-nav-1: it was a FILTER row with nothing to
+            # turn, where Up and Down stuck).
             ctrl = {}
-            arith = all.select { |n| arithmetic?(n) }
+            arith = all.select { |n| arithmetic?(n) || short_class(n) == 'Filter::SampleWrapper' }
             loop do
               grew = false
               arith.each do |n|
                 next if ctrl[n.__id__]
                 e = edge.(n)
+                e = e.select { |_, role, _| role == :main } if short_class(n) == 'Filter::SampleWrapper'
                 next if e.empty? || !e.all? { |_, _, x| control?(x) || ctrl[x.__id__] }
                 ctrl[n.__id__] = true
                 grew = true
@@ -332,6 +339,8 @@ module MB
                   if d.is_a?(Hash) && d[:filter_type] then post[n.__id__] ? [:fx, 'post-amp EQ'] : [:filter, nil]
                   elsif cn == :delay then [:fx, 'delay']
                   elsif cn == :smooth then hide.(n, 'smoothing'); next
+                  # (a filter of control signals: see ctrl above)
+                  elsif ctrl[n.__id__] then hide.(n, 'smoothing'); next
                   elsif base_word(n) == 'delay' then [:fx, 'delay']
                   else post[n.__id__] ? [:fx, 'post-amp'] : [:filter, nil]
                   end

@@ -85,6 +85,44 @@ RSpec.describe(MB::Sound::UI::PaneRates, :aggregate_failures) do
     expect(rates.changes).to eq(2 * peak)
   end
 
+  # (inspector-nav-1: after `design` the warm-up took the screen to level 4
+  # and a quiet painter, 0.03-0.08 of a frame, climbed back in 11 s)
+  it 'climbs back EASE_QUIET a level while the painter is quiet, EASE while it is merely calm' do
+    heavy = ->(t) { t < 2.0 ? 0.003 : 0.00001 }
+    _, _, levels = simulate(6.0, pane_cost: heavy)
+    peak_at = levels.index(levels.max)
+    back = levels.index.with_index { |l, i| i > peak_at && l == 0 }
+    expect(levels.max).to be >= 3
+    expect(back / 60.0 - 2.0).to be < levels.max * described_class::EASE_QUIET + 1.0 # (from the load's end)
+    # (the render thread busier than RENDER_QUIET: the slow climb, EASE a level)
+    @t = 0.0
+    _, _, levels2 = simulate(12.0, pane_cost: heavy, render: ->(_t) { 0.4 })
+    peak2 = levels2.index(levels2.max)
+    back2 = levels2.index.with_index { |l, i| i > peak2 && l == 0 }
+    expect(back2 / 60.0 - 2.0).to be >= levels2.max * described_class::EASE - 0.1
+  end
+
+  # (inspector-nav-1; the maintainer: "the UI heading says it's at 60fps"
+  # while the envelope preview drew 9.5 times a second)
+  it 'names the slowest live pane in the frame-rate readout when it draws under the painter\'s rate' do
+    t = 10.0
+    screen = Object.new
+    screen.extend(MB::Sound::UI::FrameRate)
+    screen.instance_variable_set(:@clock, -> { t })
+    screen.instance_variable_set(:@frames, [])
+    screen.send(:init_frame_rate, 60)
+    names = %i[inspector preview]
+    screen.define_singleton_method(:live_panes) { names }
+    rates = screen.rates
+    (0...120).each { |i| rates.drew(:inspector, 8.0 + i / 60.0) }
+    (0...20).each { |i| rates.drew(:preview, 8.0 + i / 10.0) }
+    text = screen.frame_rate[:text]
+    expect(text).to match(%r{fps \(preview 9\.5/s\)})
+    expect(screen.frame_rate[:live_panes]).to eq(name: :preview, fps: 9.5)
+    (0...120).each { |i| rates.drew(:preview, 8.0 + i / 60.0) }
+    expect(screen.frame_rate[:text]).not_to include('/s)')
+  end
+
   it 'steps down for render-thread load even when painting is cheap, and holds while load is merely fine' do
     render = ->(t) { t < 2.0 ? 0.9 : t < 6.0 ? 0.7 : 0.1 }
     rates, _, levels = simulate(15.0, render: render)

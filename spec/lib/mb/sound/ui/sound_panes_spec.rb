@@ -88,26 +88,43 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
 
     # (ux-notes-1, the maintainer, 2026-10-31: "Pressing up when at the top
     # of an inspector list should move to the bottom of the list above,
-    # e.g. glide time up to osc2")
-    it 'steps Up past a row\'s first param into the row above\'s last, and Down past its last into the next row' do
+    # e.g. glide time up to osc2"; inspector-nav-1, 2026-11-02: "sometimes
+    # it takes me to the next section, sometimes loops in one section,
+    # sometimes gets stuck at the end of one section.  Doesn't loop around
+    # from very top to very bottom")
+    it 'steps Up past a row\'s first param into the row above\'s last, Down back, wrapping at the ends, before the next poll too' do
       pane = ui.panes.fetch(:inspector)
       info = snap.inspector
-      rows = info.shown.sort_by { |j| [MB::Sound::UI::Inspect::SECTIONS.index(info.nodes[j].section) || 99, j] }
+      rows = pane.send(:section_rows, info)
       skip 'the fake data needs two rows' if rows.length < 2
-      at = rows[1]
       st = { title_in_rule: true, mode: true }
       picked = ->(j) { snap.with(slow: snap.slow.with(inspector: info.with(node: j))) }
-      draw(:inspector, picked.(at), st, w: 80, h: 30)
-      st[:pick] = info.loose.length # (the row's first param)
+      draw(:inspector, picked.(rows[1]), st, w: 80, h: 30)
+      list = pane.send(:pick_list, st, info)
+      first1 = list.index { |e| e[3] == rows[1] }
+      expect(st[:pick]).to eq(first1) # (the shown row's first stop)
       key(:inspector, st, :pick, -1)
       expect(MB::Sound::UI::Inspect.target[:node]).to eq(rows[0])
-      draw(:inspector, picked.(rows[0]), st, w: 80, h: 30)
-      expect(st[:pick]).to eq(pane.send(:pick_list, st, picked.(rows[0]).inspector).length - 1)
-      # (and Down from there, the row it came from)
+      expect(st[:at][2]).to eq(rows[0])
+      expect(list[first1 - 1][3]).to eq(rows[0]) # (its last stop)
+      expect(st[:pick]).to eq(first1 - 1)
+      # (drawn before the poll brings rows[0]'s info: the stop is kept, and drawn open)
+      lines = draw(:inspector, picked.(rows[1]), st, w: 80, h: 30)
+      expect(st[:pick]).to eq(first1 - 1)
       key(:inspector, st, :pick, 1)
-      expect(MB::Sound::UI::Inspect.target[:node]).to eq(at)
-      draw(:inspector, picked.(at), st, w: 80, h: 30)
-      expect(st[:pick]).to eq(info.loose.length)
+      expect(MB::Sound::UI::Inspect.target[:node]).to eq(rows[1])
+      expect(st[:pick]).to eq(first1)
+      # Two presses before a poll count from where they are (they looped in the row before)
+      key(:inspector, st, :pick, 1)
+      key(:inspector, st, :pick, 1)
+      expect(st[:pick]).to eq((first1 + 2) % list.length)
+      # Wrapping: Up from the very first stop is the very last, Down back
+      key(:inspector, st, :pick, -1) until st[:pick] == 0
+      key(:inspector, st, :pick, -1)
+      expect(st[:pick]).to eq(list.length - 1)
+      key(:inspector, st, :pick, 1)
+      expect(st[:pick]).to eq(0)
+      expect(lines.join("\n")).to include('▸')
     end
 
     # (ux-notes-2, the maintainer's note 3: "Showing SOURCE s made me want
@@ -509,6 +526,46 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       @term&.close
       @session&.close
       MB::Sound.rewind
+    end
+
+    # (inspector-nav-1: his line, keys through the screen's pty as typed,
+    # faster than the 4/s poll)
+    it 'steps Up and Down through every stop of acid on his line and wraps, on the screen, keys typed faster than the poll' do
+      @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+      MB::Sound::Session.with_context(session: @session) do
+        MB::Sound.module_eval('track :bass, L.inst.acid; bg :bass, seq(E1, E1, G1, A1).n8.loop.legato(0.5)')
+      end
+      20.times { @session.process_buffer }
+      MB::Sound::UI::Inspect.target = { track: :bass }.freeze
+      @tiles, @term = ui_tiles(:sound, rows: 40, cols: 120, session: @session)
+      stop = false
+      pump = Thread.new { until stop; @session.process_buffer; sleep 0.005; end }
+      expect(@term.wait_for('diode')).to eq(true), @term.text
+      @term.write("\x1d")
+      expect(@term.wait_for(' NAV ')).to eq(true)
+      @term.type('d')
+      expect(wait_until { @tiles.router.mode == :pane && @tiles.tiler.focus == :inspector }).to eq(true)
+      pane = ui.panes.fetch(:inspector)
+      st = @tiles.instance_variable_get(:@states)[:inspector]
+      expect(wait_until { st[:at] }).to be_truthy
+      list = pane.send(:pick_list, st, st[:snap].inspector)
+      start = st[:at]
+      # A whole lap down, typed at once after the first: back where it started
+      @term.write("\e[B")
+      expect(wait_until { st[:at] != start }).to eq(true)
+      @term.write("\e[B" * (list.length - 1))
+      expect(wait_until { st[:at] == start }).to eq(true), "#{st[:at].inspect} after a lap from #{start.inspect}"
+      expect(st[:pick]).to eq(list.index { |e| pane.send(:stop_key, e) == start })
+      # SOURCE's first row (saw phase), then Up: the very last stop, on screen
+      @term.type('s')
+      expect(wait_until { (st[:at] || [])[2] == list.first[3] }).to eq(true), st[:at].inspect
+      @term.write("\e[A")
+      expect(wait_until { st[:at] == pane.send(:stop_key, list.last) }).to eq(true), st[:at].inspect
+      expect(@term.wait_for(list.last[1].to_s)).to eq(true), @term.text
+      expect(@tiles.mode_problems).to eq([])
+    ensure
+      stop = true
+      pump&.join
     end
 
     it 'goes into the inspector with NAV d, names Enter\'s action, and turns a typed value through the prompt line' do

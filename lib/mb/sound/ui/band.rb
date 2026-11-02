@@ -65,7 +65,7 @@ module MB
         # to draw instead of following a Session (specs, captures).
         def initialize(layout:, io: $stdout, session: nil, at: :bottom, color: :ansi256, look: :auto, glyphs: UI.glyphs, size: nil, clock: nil, cells: Kernels.cell_grid, fps: 60, panes: UI.panes, source: nil)
           # (Every instance variable set up front, in one order: one object shape)
-          @stopping = @thread = @first_refresh = @reasserted_at = @full = @resized = @rows = @cols = @density = @shown_layout = @boxed = @height = @placed = @rule_row = @grid = @shown = @chrome = @size_checked_at = @old_winch = @winch_installed = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = @heard = @starter = nil
+          @stopping = @thread = @first_refresh = @reasserted_at = @full = @resized = @rows = @cols = @density = @shown_layout = @boxed = @height = @placed = @rule_row = @grid = @shown = @chrome = @size_checked_at = @old_winch = @winch_installed = @attached = @poll = @polled_at = @polled_target = @poll_warned = @last = @painter_warned = @heard = @starter = nil
           raise ArgumentError, "at: is :top or :bottom (got #{at.inspect})" unless %i[top bottom].include?(at)
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless MB::Term::Cells::MODES.key?(color)
 

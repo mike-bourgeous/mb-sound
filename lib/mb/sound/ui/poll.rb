@@ -119,6 +119,27 @@ module MB
           [slow, knobs.to_a.freeze]
         end
 
+        # +slow+ with the inspector's info for the current Inspect.target
+        # (a key picked another row or track: its info now, not at the
+        # next 4/s poll; inspector-nav-1), or nil when the target's track
+        # changed (the render source too: a whole #call then).
+        def inspect_again(slow, needs = nil)
+          info = slow&.inspector
+          return slow unless info && @inspector
+          fresh = @inspector.call(@session)
+          return nil unless fresh.track == info.track
+          slow.with(inspector: fresh)
+        end
+
+        # +slow+ with the selected envelope's playhead read again
+        # (Inspect::Gatherer#live_info), or +slow+ itself.
+        def live_again(slow)
+          info = slow&.inspector
+          return slow unless info && @inspector
+          fresh = @inspector.live_info(info)
+          fresh.equal?(info) ? slow : slow.with(inspector: fresh)
+        end
+
         private
 
         # The inspected track's PatchRender::Source (the RENDER pane): the

@@ -68,6 +68,32 @@ RSpec.describe('GraphNode inspection protocol') do
       expect(MB::Sound::Plot::Panels.registered).to include('MB::Sound::Filter::SampleWrapper', 'MB::Sound::GraphNode::Shaper')
     end
 
+    # (inspector-nav-1; the maintainer, 2026-11-02: "diode filter preview
+    # plot keeps changing vertical range")
+    it 'keeps a filter preview\'s dB axis across cutoff and resonance sweeps, per filter type' do
+      axis = lambda do |node|
+        b = MB::Sound::Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
+        MB::Sound::Plot::Panels.preview(node.class, node.param_snapshot, b)
+        y = b.build.y
+        [y.instance_variable_get(:@lo), y.instance_variable_get(:@hi)]
+      end
+      saw = -> { 110.hz.saw }
+      sweeps = {
+        diode: [20, 100, 300, 1000, 5000, 15000].product([0, 0.3, 0.6, 0.9, 1]).map { |c, r| saw.().diode(c, resonance: r) },
+        lp4: [20, 100, 1000, 5000, 15000].product([0, 0.5, 1]).map { |c, r| saw.().lp4(c, resonance: r) },
+        hp4: [100, 1000, 10000].product([0, 0.7]).map { |c, r| saw.().lp4(c, resonance: r, mode: :hp4) },
+        lowpass: [50, 800, 12000].product([0.5, 0.7, 4, 12]).map { |c, q| saw.().filter(:lowpass, cutoff: c, quality: q) },
+        peak: [100, 2000].product([0.7, 3]).map { |c, q| saw.().filter(:peak, cutoff: c, quality: q, gain: 6.db) },
+      }
+      sweeps.each do |kind, nodes|
+        ranges = nodes.map { |n| axis.(n) }
+        expect(ranges.uniq.length).to eq(1), "#{kind}: #{ranges.uniq.inspect}"
+        expect(ranges.first[0]).to eq(-60)
+      end
+      # (a response over the top, which shouldn't happen, raises it to fit)
+      expect(MB::Sound::Plot::Panels.db_range(24, Numo::SFloat[0, 30.5])).to eq(-60..36)
+    end
+
     it 'is nil by default' do
       expect(MB::Sound::Plot.preview(110.hz.saw)).to be_nil
       expect(110.hz.saw.plot_preview(nil)).to be_nil
