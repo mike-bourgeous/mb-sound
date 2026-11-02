@@ -496,6 +496,46 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       MB::Sound.rewind
     end
 
+    # (inspector-nav-1: his line, keys through the screen's pty as typed,
+    # faster than the 4/s poll)
+    it 'steps Up and Down through every stop of acid on his line and wraps, on the screen, keys typed faster than the poll' do
+      @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+      MB::Sound::Session.with_context(session: @session) do
+        MB::Sound.module_eval('track :bass, L.inst.acid; bg :bass, seq(E1, E1, G1, A1).n8.loop.legato(0.5)')
+      end
+      20.times { @session.process_buffer }
+      MB::Sound::UI::Inspect.target = { track: :bass }.freeze
+      @tiles, @term = ui_tiles(:sound, rows: 40, cols: 120, session: @session)
+      stop = false
+      pump = Thread.new { until stop; @session.process_buffer; sleep 0.005; end }
+      expect(@term.wait_for('diode')).to eq(true), @term.text
+      @term.write("\x1d")
+      expect(@term.wait_for(' NAV ')).to eq(true)
+      @term.type('d')
+      expect(wait_until { @tiles.router.mode == :pane && @tiles.tiler.focus == :inspector }).to eq(true)
+      pane = ui.panes.fetch(:inspector)
+      st = @tiles.instance_variable_get(:@states)[:inspector]
+      expect(wait_until { st[:at] }).to be_truthy
+      list = pane.send(:pick_list, st, st[:snap].inspector)
+      start = st[:at]
+      # A whole lap down, typed at once after the first: back where it started
+      @term.write("\e[B")
+      expect(wait_until { st[:at] != start }).to eq(true)
+      @term.write("\e[B" * (list.length - 1))
+      expect(wait_until { st[:at] == start }).to eq(true), "#{st[:at].inspect} after a lap from #{start.inspect}"
+      expect(st[:pick]).to eq(list.index { |e| pane.send(:stop_key, e) == start })
+      # SOURCE's first row (saw phase), then Up: the very last stop, on screen
+      @term.type('s')
+      expect(wait_until { (st[:at] || [])[2] == list.first[3] }).to eq(true), st[:at].inspect
+      @term.write("\e[A")
+      expect(wait_until { st[:at] == pane.send(:stop_key, list.last) }).to eq(true), st[:at].inspect
+      expect(@term.wait_for(list.last[1].to_s)).to eq(true), @term.text
+      expect(@tiles.mode_problems).to eq([])
+    ensure
+      stop = true
+      pump&.join
+    end
+
     it 'goes into the inspector with NAV d, names Enter\'s action, and turns a typed value through the prompt line' do
       @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
       MB::Sound::Session.with_context(session: @session) do
