@@ -1,4 +1,5 @@
 require_relative '../../../../support/ui_helpers'
+require_relative '../../../../support/color_distance'
 
 # The sound-design screen (sound-design-ui-1): the patch inspector's data
 # (UI::Inspect, from a real Session's graphs without the render lock), its
@@ -112,9 +113,12 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
     # (ux-notes-2, the maintainer's note 3: "Showing SOURCE s made me want
     # to do ^w, s, but that split the pry panel; maybe subsections need
     # more contrasting colors and should only show shortcuts when
-    # focused?"; his "Keys only when focused" + "Contrasting bands")
-    it 'draws section headings as colored bands, with their jump keys only while the inspector\'s keys are live' do
+    # focused?"; his "Keys only when focused"; inspector-headers-1, his
+    # 2026-11-02 "foreground colors and lines rather than background
+    # colors for headers")
+    it 'draws section headings in their section\'s color with a rule, with their jump keys only while the inspector\'s keys are live' do
       lp4 = snap.with(slow: snap.slow.with(inspector: snap.inspector.with(node: 0)))
+      fg_of = ->(grid, x, y) { grid.instance_variable_get(:@fg)[y * grid.width + x] }
       bg_of = ->(grid, x, y) { grid.instance_variable_get(:@bg)[y * grid.width + x] }
       pack = ->(role) { MB::Term::Cells.pack(ui::Theme.rgb(role)) }
       [[{ title_in_rule: true }, false], [{ title_in_rule: true, mode: true }, true]].each do |state, live|
@@ -124,21 +128,49 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
           lines = grid.to_text(:none).lines.map(&:rstrip)
           y = lines.index { |l| l.match?(/\A▸FILTER/) }
           expect(y).not_to be_nil, "#{view}: #{lines.join("\n")}"
-          expect(lines[y]).to eq(live ? '▸FILTER  f' : '▸FILTER'), view.to_s
-          # (the band runs across the row, in FILTER's color)
-          expect([0, 30, 59].map { |x| bg_of.(grid, x, y) }.uniq).to eq([pack.(:band_filter)]), view.to_s
+          title = live ? '▸FILTER  f' : '▸FILTER'
+          expect(lines[y]).to eq("#{title} #{'─' * (60 - title.length - 2)}"), view.to_s
+          # (title and rule in FILTER's color, on the pane's own background)
+          expect([1, 30, 57].map { |x| fg_of.(grid, x, y) }.uniq).to eq([pack.(:band_filter)]), view.to_s
+          expect([1, 30, 57].map { |x| bg_of.(grid, x, y) }.uniq).to eq([bg_of.(grid, 59, lines.length - 1)]), view.to_s
           next unless view == :sections
           src = lines.index { |l| l.match?(/\A SOURCE/) }
-          expect(lines[src]).to eq(live ? ' SOURCE  s' : ' SOURCE')
-          expect(bg_of.(grid, 10, src)).to eq(pack.(:band_source))
+          expect(lines[src]).to match(live ? /\A SOURCE  s ─+\z/ : /\A SOURCE ─+\z/)
+          expect(fg_of.(grid, 3, src)).to eq(pack.(:band_source))
           expect(lines.join("\n")).not_to match(/SOURCE s|FILTER f|AMP a|FX x/) unless live
         end
       end
-      # Every built-in theme has the band colors, the bands' text reading on each
+      # Every built-in theme has the section colors, each kept apart from
+      # the theme's ordinary roles (the maintainer: "except colors that
+      # match the normal UI colors like on filter") and from the others
+      ordinary = %i[text dim title name key ok warn bad rec armed queued low mid high]
+      sections = %i[band_source band_filter band_amp band_mod band_fx band_knobs]
+      # (CIEDE2000 10 or more, WCAG contrast 4.5 or more on the theme's
+      # background; :mono's palette indices are the terminal's, so there
+      # only different indices)
+      backgrounds = { default: [0, 0, 0], paper: [255, 255, 255], phosphor: [0, 0, 0] }
       %i[default paper phosphor mono].each do |theme|
         t = MB::Term::Themes.named(theme)
-        expect(%i[band_text band_source band_filter band_amp band_mod band_fx band_knobs] - t.roles.keys).to eq([]), theme.to_s
+        expect(sections - t.roles.keys).to eq([]), theme.to_s
+        expect(t.roles.keys).not_to include(:band_text)
+        color = ->(r) { t.roles.fetch(r)[0] }
+        if theme == :mono
+          # (16 indices, 10 taken by ordinary roles: SOURCE's bright yellow
+          # is :armed's too, a track state the inspector never shows)
+          expect(sections.product(ordinary - [:armed]).select { |sr, r| color.(sr) == color.(r) }).to eq([])
+          next
+        end
+        near = sections.product(ordinary + sections).reject { |a, b| a == b }.filter_map { |a, b|
+          d = ColorDistance.delta_e(color.(a), color.(b))
+          "#{a}/#{b} #{d.round(1)}" if d < 10 && !(sections.include?(b) && [a, b] == [:band_fx, :band_knobs])
+        }
+        expect(near).to eq([]), theme.to_s
+        low = sections.filter_map { |sr| c = ColorDistance.contrast(color.(sr), backgrounds[theme]); "#{sr} #{c.round(2)}" if c < 4.5 }
+        expect(low).to eq([]), theme.to_s
       end
+      # (the measure: the default theme's old FILTER band was 7.4 from :title, AMP 7.2 from :ok)
+      expect(ColorDistance.delta_e([95, 175, 215], [135, 175, 215])).to be < 10
+      expect(ColorDistance.delta_e([135, 195, 95], [95, 215, 95])).to be < 10
     end
 
     it 'draws the front panel with P: knobs and literals as cells by section, the picked row\'s first cell picked' do

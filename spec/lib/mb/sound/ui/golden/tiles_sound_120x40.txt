@@ -2,13 +2,13 @@
 ─ TRACKS ───────────── 3 ─┬─ SOUND ─────────────────────────┴──────── 4 ─┬─ CODE ─────────────────────────────────── 5 ─
 ● drums  beat_a           │bass  2/3                                     │knob :cut, (100.0..8000.0).at(2400.0), curve:
 ● bass   bass_a           │notes → saw ×6 → lp4 → softclip → highpass ×2…│    :exp, unit: "Hz"
-● lead   rec →21:1        │ SOURCE                                       │
+● lead   rec →21:1        │ SOURCE ───────────────────────────────────── │
 ● pad    stopping chords  │ saw ×6         phase 0                       │# bass: the graph it plays (to_ruby)
-                          │ FILTER                                       │synth(riff, voices: 1) { |v|
+                          │ FILTER ───────────────────────────────────── │synth(riff, voices: 1) { |v|
                           │ lp4            stereo  cut 2400 Hz  reso 0.25│  saws = v.hz.unison(6, detune: 0.32) { |p,
-                          │ AMP                                          │      _i| p.saw }
+                          │ AMP ──────────────────────────────────────── │      _i| p.saw }
 ─ LIBRARY ──────────── 6 ─┤ softclip       stereo                        │  saws.lp4(knob(:cut), resonance:        more
-inst fx kit seq     → bass│▸FX                                           ├─ RENDER ───────────────────────────────── 7 ─
+inst fx kit seq     → bass│▸FX ───────────────────────────────────────── ├─ RENDER ───────────────────────────────── 7 ─
 / find (in: NAV l)        │▸highpass ×2    post-amp EQ  stereo  cut 150 …│bass  -22.2 LUFS  peak -11.2  rms -20.8  fi…
 ▸●dnb_reese    dnb bass   │  cutoff     150 Hz                           │ 0.2┤⠄⠄⠄⠄⠄⢄⣄⠴⠞⠍⠝⠖⠤⣄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄
   dnb_sub      dnb bass s…│  quality    0.7                              │    │  ⣀⠤⠚⠉    ⠅  ⠈⠉⠲⢤⣀  ⠨         ⠨
