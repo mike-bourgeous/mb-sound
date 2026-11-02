@@ -223,6 +223,8 @@ module MB
         # files the graph reads (bundles; see .save); without it they raise
         # DumpError (tables) or keep their paths (file names).
         def dump(graph, name: nil, kind: nil, inputs: {}, params: {}, options: {}, from: nil, meta: {}, assets: nil)
+          # (values that set a set up save as that set: Tracker::Set)
+          graph = graph.to_arrangement if graph.respond_to?(:to_arrangement)
           if graph.is_a?(Rack)
             unless inputs.empty? && params.empty? && options.empty? && kind.nil?
               raise ArgumentError, 'rack documents take their inputs from the rack\'s ports (no inputs, params, options, or kind)'

@@ -750,7 +750,16 @@ module MB
 
           # Nodes read by other boundary nodes (e.g. a Glide's time input)
           # are read through them
-          own = g.select { |n| n.is_a?(Notes::Node) && n.notes.equal?(@notes[idx]) }
+          # Channel-wide nodes (`v.cc(7)`, `v.bend`) belong to no lane's
+          # Notes; one read only by this lane, with no Tee, is this lane's
+          # to keep in step (tracker-1: a one-voice synth's CC 7 lane fell
+          # behind the timeline while its lane slept, so a clip's volume
+          # lane never reached the next note)
+          own = g.select { |n|
+            n.is_a?(Notes::Node) &&
+              (n.notes.equal?(@notes[idx]) || (n.notes.nil? && sets.each_with_index.none? { |set, j| j != idx && set[n.__id__] }))
+          }
+          own.sort_by!.with_index { |n, i| [n.notes.nil? ? 1 : 0, i] } # (a lane's own node first: the clock below)
           upstream = {}
           own.each { |n| n.graph(include_tees: true).each { |u| upstream[u.__id__] = true unless u.equal?(n) } }
           own.reject! { |n| upstream[n.__id__] }

@@ -27,6 +27,8 @@ module MB
       # - a Wavetable as one note; a preset's Symbol (synth presets play a
       #   demo phrase); a genre template (`genre(:dnb)`, or `play :dnb`):
       #   about a minute of its form (set up in the background Session)
+      # - a tracker module (`play 'tune.mod'`, .669, .s3m, .xm, .it) or its
+      #   set (`play mod_import(path)`): the whole song (see #mod_import)
       # Anything else prints what it is and how to play it (an error in
       # scripts; see LiveMethods#live_error).
       #
@@ -58,6 +60,10 @@ module MB
 
         if sound.is_a?(Genre::Template) || (sound.is_a?(Symbol) && Genre.names.include?(sound) && !GraphIO.find_preset(sound))
           return play_genre(sound.is_a?(Symbol) ? Genre[sound] : sound, foreground: foreground, quiet: quiet, plot: plot, graphical: graphical, spectrum: spectrum)
+        end
+        sound = mod_import(sound) if Tracker.module_file?(sound)
+        if sound.is_a?(Tracker::Set)
+          return play_tracker(sound, foreground: foreground, quiet: quiet, plot: plot, graphical: graphical, spectrum: spectrum)
         end
 
         begin
@@ -1177,7 +1183,12 @@ module MB
           end
         max_frames = MB::M.min(max_frames, (max_seconds * rate).round) if max_seconds
 
-        sounds.each { |s| session.add(s, on: :now) }
+        sounds.each { |s|
+          # (a tracker module's set plays its flow: Tracker::Set#play)
+          s = mod_import(s) if Tracker.module_file?(s)
+          next Session.with_context(session: session) { s.play } if s.is_a?(Tracker::Set)
+          session.add(s, on: :now)
+        }
         Session.with_context(session: session) { block.call } if block
 
         label = filename.is_a?(String) ? File.basename(filename) : 'output'
@@ -1455,6 +1466,33 @@ module MB
           $stderr.puts header
         end
         playback = t.play
+        return playback unless foreground
+
+        session = Session.current
+        started = false
+        playing = -> {
+          next false if session.closed?
+          busy = !session.idle? || session.schedule_waiting?(repeating: false) || session.schedule_due?
+          started ||= busy
+          !started || busy
+        }
+        wait_for_player(playing, plot: plot_option(plot, quiet), graphical: graphical, spectrum: spectrum, header: header) or panic
+        nil
+      end
+
+      # #play for a tracker module's set (Tracker::Set, from #mod_import):
+      # the whole song once through, set up and played in the current
+      # Session (see Tracker::Set#play).  In the foreground, waits until it
+      # ends; Ctrl-C stops everything (see #panic).
+      def play_tracker(set, foreground:, quiet:, plot:, graphical:, spectrum:)
+        unless quiet || !foreground
+          secs = set.seconds.round
+          header = "\e[36mPlaying\e[0m #{set.song.format} #{set.name.inspect} (#{secs / 60}:#{format('%02d', secs % 60)}, #{set.tracks.length} tracks)\n" \
+            "\e[2mtracks and scenes stay set up afterwards (`tracks`, `go :#{set.scenes.first}`)\e[0m\n" \
+            "\e[33mPress Ctrl-C to stop\e[0m\n"
+          $stderr.puts header
+        end
+        playback = set.play
         return playback unless foreground
 
         session = Session.current

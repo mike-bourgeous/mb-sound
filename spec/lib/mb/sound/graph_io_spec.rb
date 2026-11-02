@@ -132,6 +132,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       'sampler zone values (ZoneValue), pans, layers' => 'a Sample made from audio in memory',
       'sampler choke groups (SamplerVoice choke)' => 'a Sample made from audio in memory',
       'loop players (LoopPlayer)' => 'a Sample made from audio in memory',
+      'sampler lanes (a tracker channel)' => 'a Sample made from audio in memory',
       'capture tap (CaptureTap)' => "can't print a MB::Sound::Sampler::AudioCapture",
     }.freeze
 

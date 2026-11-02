@@ -108,6 +108,8 @@ require_relative 'sound/struck_methods'
 require_relative 'sound/structure_methods'
 require_relative 'sound/genre_methods'
 require_relative 'sound/sampler_methods'
+require_relative 'sound/tracker'
+require_relative 'sound/tracker_methods'
 require_relative 'sound/help_autoload'
 
 module MB
@@ -154,6 +156,7 @@ module MB
     extend StructureMethods
     extend GenreMethods
     extend SamplerMethods
+    extend TrackerMethods
     extend HelpAutoload
 
     # Speed of sound for wavelength calculations, in meters per second.

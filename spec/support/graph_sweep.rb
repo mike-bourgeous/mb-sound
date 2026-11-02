@@ -300,6 +300,22 @@ module GraphSweep
         inst = MB::Sound::Sampler::Instrument.layered(a, b)
         c.clip.synth(voices: 2) { |v, _i| inst.play(v) }.mixdown * 0.5
       }],
+      # A tracker channel (tracker-1): one sampler voice following bend,
+      # CC 7, CC 10, and CC 20 lanes tick by tick, its volume lane at 0
+      # while the lane sleeps (the Synth idle-skip fix: channel nodes read
+      # by one lane stay in step)
+      ['sampler lanes (a tracker channel)', ->(_c) {
+        d = Numo::SFloat.cast(Array.new(3000) { |i| ((i % 40) / 20.0 - 1) * 0.8 })
+        smp = MB::Sound::Sample[d].looped(1000...3000)
+        inst = MB::Sound::Sampler::Instrument.new { |i| i.region(smp, keys: 1, keytrack: 0); i.region(smp.rev, keys: 2, keytrack: 0) }
+        clip = MB::Sound.events([1/32r, 3/32r, 1, 0.8, { pitch: 0 }], [1/8r, 1/16r, 2, 0.5, { pitch: 7 }], [7/32r, 1/32r, 1, 1.0, { pitch: -5 }],
+                                length: 1/4r, loop: true, align: :launch, controls: {
+                                  bend: { range: 96, points: [[0r, 0.0], [1/32r, 0.01], [3/64r, 0.02], [1/8r, -0.03], [5/32r, 0.0]] },
+                                  cc7: [[0r, 0.0], [1/32r, 1.0], [5/64r, 0.5], [1/8r, 0.8], [3/16r, 0.0], [7/32r, 0.9]],
+                                  cc10: [[0r, 0.2], [1/8r, 0.9]], cc20: [[0r, 0.0], [1/8r, 0.25], [7/32r, 0.0]]
+                                })
+        clip.sampler(inst, lanes: true).mixdown * 0.4 + clip.sampler(inst, lanes: { smooth: 0.0015, law: :linear }).mixdown * 0.4
+      }],
       ['grains (Grains)', ->(c) {
         d = Numo::SFloat.cast(Array.new(3000) { |i| Math.sin(i * 0.07) * Math.exp(-i / 2000.0) })
         smp = MB::Sound::Sample[d]
