@@ -409,8 +409,10 @@ module MB
         (:ch1, :ch2, ...) playing the module's samples, a clip per pattern
         per channel, a scene per pattern as it played (:p03, and :p03_b
         when the song plays a pattern another way), and a flow through the
-        order list.  `play song` (or `play 'tune.mod'`, and `bin/play.rb
-        tune.mod`) plays it once through (`song.play(loop:
+        order list.  `play song` (or `play 'tune.mod'`) plays it once
+        through, and `bin/play.rb tune.mod` on a player screen of its
+        pattern rows, as a tracker shows them, with a VU per channel
+        (Up/Down a pattern, Left/Right a bar; `song.play(loop:
         true)` repeats like a tracker), `render 'tune.flac', song` renders
         it (with `stems:`, a file per channel), and `save :tune, song`
         writes a set document with the samples as assets.
@@ -1482,7 +1484,9 @@ module MB
       about <<~TEXT
         Pure-Ruby plots in the terminal (Braille, blocks, sparklines) or as
         images: waveforms, spectra, spectrograms, histograms, and chart
-        builders; `vis` plots the live mix.
+        builders; `vis` shows the live mix on a band of master meters and
+        a big scope (`vis spectrum: true`: a spectrum; `graphical: true`:
+        inline images).
       TEXT
       commands :plot, :spectrum, :spectrogram, :time_freq, :hist, :density, :mag_phase, :overlay, :overlay_chart, :table, :chart, :figure, :vis
       note :plotting
@@ -1550,6 +1554,14 @@ module MB
         two panes, Ctrl-W Ctrl-] stays in NAV.  F2 or
         `keys` is the keyboard, Ctrl-Z hides the tiles while the set plays
         on (`fg` brings them back, `jobs` lists what runs).
+
+        `bin/play.rb` plays files on a screen of their own, chosen by type
+        (`:player_audio`: the file's overview with the play head, scope,
+        spectrum; `:player_module`: a module's pattern rows with a VU per
+        channel; `:player_midi`: the notes as a piano roll; meters, the
+        file's info, and the playlist beside): Space pauses, Left/Right
+        seek, Up/Down jump (a module's sections), - and + the volume, n/p
+        the next and previous file, ? the keys.
 
         Warnings go to a messages pane while a screen is up (NAV m shows
         it; `ui off` sums them up).  NAV f shows the frame rate and each

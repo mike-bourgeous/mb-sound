@@ -197,7 +197,7 @@ A design, not yet built, for a full vimtutor-style tutorial in the live console:
 
 ### [Terminal UI](terminal_ui.md)
 
-`ui` (`lib/mb/sound/ui.rb` + `ui/`) is the live terminal UI: a read-only dashboard band under the console (`ui :deck`, `ui :mini`), or `ui :tiles`/`:studio`, which own the alternate screen and tile panes around the real Pry on an in-process pty (the generic layers are the mb-term gem, `gems/mb-term/`, `MB::Term`).  The render thread publishes one frozen `UI::Snapshot` per buffer the painter takes; `UI::Poll` reads slow data 4/s; a painter thread draws panes (Ruby: `pane`, `layout`) into a C cell grid and writes changed cells in one synchronized frame.  Never poll `Session#players`/`#clock`/`#strip_info` from the painter (render lock), and panes never write their own bytes.  `ui.note 'text'` (or NAV #) keeps a UI note with a capture of the screen for the refinement rounds (`UI::NoteLog`).
+`ui` (`lib/mb/sound/ui.rb` + `ui/`) is the live terminal UI: a read-only dashboard band under the console (`ui :deck`, `ui :mini`), or `ui :tiles`/`:studio`, which own the alternate screen and tile panes around the real Pry on an in-process pty (the generic layers are the mb-term gem, `gems/mb-term/`, `MB::Term`).  The render thread publishes one frozen `UI::Snapshot` per buffer the painter takes; `UI::Poll` reads slow data 4/s; a painter thread draws panes (Ruby: `pane`, `layout`) into a C cell grid and writes changed cells in one synchronized frame.  Never poll `Session#players`/`#clock`/`#strip_info` from the painter (render lock), and panes never write their own bytes.  `ui.note 'text'` (or NAV #) keeps a UI note with a screen capture (`UI::NoteLog`).  `bin/play.rb` has player screens by file type (`MB::Sound::Player`); `vis`, `--plot`, and `bin/record.rb` use a `:vis` band.
 
 ### [Sound-design screen (`ui :sound`)](sound_design_ui.md)
 
@@ -206,8 +206,9 @@ A design, not yet built, for a full vimtutor-style tutorial in the live console:
 ### [Scripts](scripts.md)
 
 Every bin/ script except the console `bin/sound.rb` uses a `ScriptingMethods` helper backed by `ScriptRunner`: `effect_script { |input, p| }`, `synth_script { |midi, p| }`, `song_script(bars:) { |p| }`, or `script(args:) { |args, p| }`, sharing `-o`, `-f`, `-g`, `-P`, `-q`, `-L`, `--ui [LAYOUT]`.
-Parameters are options only (`name: [default, 'description', '-x', Type, range]`); graph-building code goes inside the block, loadable scripts are guarded with `if main_script?(__FILE__)`, and every script starts with the `RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1` shebang (`spec/bin/shebang_spec.rb`), never `RUBY_YJIT_ENABLE=1`/`--yjit`.
-Plain song files start with `require 'mb/sound/dsl'` (`MB::Sound::DSL`): the console's commands and note names at the program's top level, waiting for background playback at its end.
+Parameters are options only (`name: [default, 'description', '-x', Type, range]`); graph code goes inside the block, loadable scripts are guarded with `if main_script?(__FILE__)`, and every script starts with the `RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1` shebang (`spec/bin/shebang_spec.rb`).
+Plain song files start with `require 'mb/sound/dsl'`: the console's commands at the top level, waiting for playback at the end.
+`bin/play.rb` plays files on player screens by type (`MB::Sound::Player`).
 
 ## Audio I/O
 

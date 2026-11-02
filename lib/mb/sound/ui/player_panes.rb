@@ -33,7 +33,9 @@ module MB
         # One row: state, which file of how many, its name, the time, a
         # progress meter, and the volume.
         class Now < Base
-          STATES = { loading: ['…', :queued], playing: [:play, :ok], paused: ['‖', :warn], ended: [:stop, :dim], failed: ['!', :bad], quit: [:stop, :dim] }.freeze
+          # [glyph name (or text), role] by Player#state; paused is two of
+          # the separator glyph, a pause sign in either glyph set
+          STATES = { loading: [:queued, :queued], playing: [:play, :ok], paused: [[:sep, 2], :warn], ended: [:stop, :dim], failed: ['!', :bad], quit: [:stop, :dim] }.freeze
 
           def initialize(player) = super(player, :now, rate: 10, height: 1, width: 80, description: 'the player: state, file n of m, its name, time, progress, volume')
 
@@ -41,7 +43,7 @@ module MB
             pl = @player
             it = pl.item
             g, role = STATES.fetch(pl.state, ['?', :dim])
-            g = c.glyph(g) if g.is_a?(Symbol)
+            g = g.is_a?(Symbol) ? c.glyph(g) : g.is_a?(Array) ? c.glyph(g[0]) * g[1] : g
             pos = PlayerPanes.heard(pl, s)
             len = it.length
             time = "#{Player::Item.clock(pos)} / #{Player::Item.clock(len)}"
@@ -288,23 +290,11 @@ module MB
               c.puts [it.loaded? ? 'no notes' : 'loading', :dim]
               return
             end
-            unless state[:of].equal?(notes)
-              nums = notes.map { |n| n[:number] }
-              state[:lo] = nums.min
-              state[:hi] = nums.max
-              state[:of] = notes
-            end
             now = PlayerPanes.heard(@player, s)
             rows = c.h
-            lo, hi = state[:lo], state[:hi]
-            span = hi - lo + 1
-            if span > rows
-              mid = (lo + hi) / 2
-              lo = mid - rows / 2
-              hi = lo + rows - 1
-            end
-            w = c.w - 4
             t0 = now - BEFORE
+            lo, hi = note_range(notes, t0, now + AFTER, rows, state)
+            w = c.w - 4
             per = (BEFORE + AFTER) / w
             head = (BEFORE / per).round
             grid = Array.new(rows) { ' ' * w }
@@ -335,6 +325,28 @@ module MB
                 x = z
               end
             end
+          end
+
+          private
+
+          # The note numbers shown ([lowest, highest], +rows+ of them): the
+          # notes between +from+ and +to+ seconds, kept where they were
+          # until one falls outside (so the view doesn't jump each frame),
+          # centered on their median when they need more rows than there are.
+          def note_range(notes, from, to, rows, state)
+            win = notes.select { |n| (n[:sustain_time] || n[:off_time]) >= from && n[:on_time] <= to }
+            nums = (win.empty? ? notes : win).map { |n| n[:number] }.sort
+            lo, hi = state[:range]
+            if lo.nil? || hi - lo + 1 != rows || nums.first < lo || nums.last > hi
+              if nums.last - nums.first + 1 > rows
+                lo = nums[nums.length / 2] - rows / 2
+              else
+                lo = nums.first - (rows - (nums.last - nums.first + 1)) / 2
+              end
+              hi = lo + rows - 1
+              state[:range] = [lo, hi]
+            end
+            [lo, hi]
           end
         end
       end
