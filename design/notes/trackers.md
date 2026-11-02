@@ -72,7 +72,9 @@ His picks: mach openmpt123, 2nd_pm `:hardware`, boom, drwho, floating `:musical`
 
 Measured on a synthetic white-noise sample (C-2, an 8287 Hz rate) and a click sample: the band-limited read (the sampler's half-octave levels built at 4x with a long sinc, `:optimal` interpolation) is flat to the sample's Nyquist frequency and then a brick wall (-8.5 dB in the 4-5 kHz band, -109 dB above), and its impulse response rings for milliseconds on both sides (-23 dB 0.5 ms before a click, -28.5 dB 1 ms before, -40 dB 4 ms after): the resonance he heard, at each sample's top, on every transient.  openmpt123 rolls off gently (-3.3 dB in 3-4 kHz, -9.5 in 4-5, -22 in 5-6.3, -85 above 8 kHz) and its click is over within 0.5 ms.  A 4-point cubic on the raw sample (no levels) follows openmpt123's passband within about a dB (-3.6, -8.0, -16 dB) with no ringing, its images 40-60 dB down instead of 85: now the `:musical` read.  `:linear` rolls off more (-5.2 dB in 3-4 kHz, images -28 to -46 dB).  Without levels a sample played above 48 kHz (a high XM/IT note) aliases.  The sampler's own band-limited read is unchanged elsewhere.
 
-`mix_rate:` decimates each track (linear joins) to an old mixer's rate, folding content above half of it and rolling off the top; `bass_mono:` centers each track below a frequency (`mono_below`), for wider pans (`separation:`).  Both go on the tracks' patch (`Set#post`).
+Levels: openmpt123 plays a MOD's note 3.7 dB lower at 6 channels and 6.0 dB lower at 8 and more than at 4 (other formats don't depend on the count), so `Import.gain_db` lowers MODs by 20 log10(channels / 4) up to 8; the maintainer's 8-channel MOD was 5 LU louder than openmpt123 before.
+
+`mix_rate:` decimates each track (linear joins) to an old mixer's rate, folding content above half of it and rolling off the top; `bass_mono:` centers each track below a frequency (`mono_below`), for wider pans (`separation:`); `rolloff:` is a two-pole Butterworth lowpass per track (the cubic's images leave the excerpts 2-7 dB above openmpt123 from 10 kHz).  All go on the tracks' patch (`Set#post`).
 
 ## Comparison (tracker-1, 2026-11-02)
 

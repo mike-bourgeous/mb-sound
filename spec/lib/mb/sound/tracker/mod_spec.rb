@@ -254,6 +254,13 @@ RSpec.describe(MB::Sound::Tracker::ModReader, :aggregate_failures) do
       expect { t::Import.new(song, bass_mono: -1) }.to raise_error(ArgumentError, /bass_mono/)
     end
 
+    it 'lowers multichannel MODs as openmpt123 does (6 dB at 8 channels and more)' do
+      g = ->(n) { MB::Sound::Tracker::Import.gain_db(t.read(write({}, patterns: [w.pattern(n)], channels: n))) }
+      expect(g.(4)).to eq(MB::Sound::Tracker::Import::GAINS[:mod])
+      expect(g.(4) - g.(8)).to be_within(1e-9).of(20 * Math.log10(2))
+      expect(g.(16)).to eq(g.(8))
+    end
+
     it 'mixes at an old mixer\'s rate and centers the bass when asked' do
       saw = { name: 'saw', data: w.saw(2000, period: 20), volume: 64, loop: [0, 2000] }
       path = write({ [0, 0] => { note: 84, sample: 1 } }, samples: [saw])

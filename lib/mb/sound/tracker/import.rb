@@ -44,6 +44,17 @@ module MB
         # measurements; the reference player's mixing level).
         GAINS = { mod: 3.0, "669": 1.5, s3m: 1.5, xm: 1.0, it: 1.5 }.freeze
 
+        # The gain (dB) for +song+'s samples: GAINS for its format; MODs
+        # with more than 4 channels lower it as openmpt123 does (measured
+        # on one note: 6 channels -3.7 dB, 8 and more -6.0 dB; tracker-2,
+        # the maintainer's 8-channel MOD was 5 LU loud), by the ratio of
+        # channels to 4, up to 8.  Other formats don't depend on the count.
+        def self.gain_db(song)
+          db = GAINS.fetch(song.format, 0.0)
+          db -= 20 * Math.log10(song.channels.clamp(4, 8) / 4.0) if song.format == :mod
+          db
+        end
+
         attr_reader :song, :mode, :separation, :name, :limits, :interpolation, :mix_rate, :bass_mono, :rolloff
 
         # Sample reads (+interpolation:+), as Sampler::Instrument#play
@@ -150,7 +161,7 @@ module MB
             raise FormatError, "#{@name}: plays #{used.length} samples (an instrument holds 127)" if used.length > 127
             list = samples
             Sampler::Instrument.new(name: @name) { |inst|
-              gain = 10**(GAINS.fetch(@song.format, 0.0) / 20)
+              gain = 10**(Import.gain_db(@song) / 20)
               used.each { |i| inst.region(list[i], keys: Import.key_of(i), keytrack: 0, gain: gain) }
             }
           end
