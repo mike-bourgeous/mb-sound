@@ -19,6 +19,7 @@ module MB
         @buffer_size = buffer_size || DEFAULT_BUFFER
         @sample_rate = sample_rate.to_f
 
+        @child = nil
         if io_or_popen_args.is_a?(Array)
           @popen = true
           @io = run(*io_or_popen_args)
@@ -33,8 +34,8 @@ module MB
         @io.nil? || @io.closed?
       end
 
-      # Closes the input or output.  Returns the process exit status object if
-      # the IO object was opened by popen.
+      # Closes the input or output.  Returns the process's exit status (a
+      # Starter::Status) if the IO object was opened by running a command.
       def close
         return unless @io
 
@@ -42,7 +43,7 @@ module MB
         @io = nil
 
         if @popen
-          $?
+          @child&.wait
         else
           nil
         end
@@ -50,9 +51,10 @@ module MB
 
       private
 
-      # Wraps popen to set kernel internal pipe buffer size based on audio
-      # buffer size, and to start the process in a different process group so
-      # Ctrl-C doesn't interrupt it.
+      # Starts +command+ with a pipe (through MB::Sound::Starter, so the
+      # console doesn't fork while audio plays), sets the kernel's pipe
+      # buffer size based on the audio buffer size, and starts the process
+      # in a different process group so Ctrl-C doesn't interrupt it.
       #
       # +command+ is a String or an Array, +direction+ is 'r' or 'w'.
       #
@@ -68,10 +70,9 @@ module MB
 
         direction = "#{direction}b" unless direction.end_with?('b')
 
-        IO.popen(command, direction, pgroup: 0).tap { |pipe|
-          size = @buffer_size * @channels * 4
-          MB::U.pipe_size(pipe, size)
-        }
+        pipe, @child = Starter.popen(command, direction, pgroup: 0)
+        MB::U.pipe_size(pipe, @buffer_size * @channels * 4)
+        pipe
       end
     end
   end

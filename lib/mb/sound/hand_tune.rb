@@ -285,6 +285,7 @@ module MB
       #     # turn by ear; ab to compare; ui.note 'the click is late'; take.save :tmp, 'tuned kick'
       def tune(track, code, ref: nil, play: nil, as: nil, **params)
         o = HandTune.tune(track, code, ref: ref, play: play, as: as, **params)
+        HandTune::Worker.prepare if MB::Sound.live? # (refine's worker loads while he turns knobs)
         puts o.to_s # (a pasted one-liner may end with another line: say what it did either way)
         o
       end

@@ -4,8 +4,14 @@
 # can't write while it lasts: a session's first ui.note ran `git rev-parse`
 # (19 ms of render-thread GVL wait in the container, more on the Mac's
 # heap).  Live paths (console commands, the UI and its panes, saving
-# documents) never start processes (CLAUDE.md rules; Internal.git_dirs reads
-# git's files instead).
+# documents) never fork the console: library code starts processes through
+# MB::Sound::Starter (spawner-1), whose starter process (launched by
+# bin/sound.rb before anything plays, and by spec_helper for the suite)
+# forks instead, so those starts never reach the hooks below and pass; a
+# direct start (Starter's fallback where no starter runs, or a call that
+# bypasses it) while a Session plays fails its example.  Reading git's
+# files (Internal.git_dirs) beats starting git at all.
+# spec/lib/mb/sound/spawn_sites_spec.rb lists lib/'s direct starts.
 #
 # The guard wraps Process.spawn/fork, Kernel#spawn/system/`/fork (Open3
 # calls Kernel#spawn), and IO.popen; while a Session's render thread runs,
@@ -18,12 +24,10 @@
 module SpawnGuard
   MODES = %w[fail report off].freeze
 
-  # Library files allowed to start a process while a Session plays, with
-  # the reason.  Each is a known risk of the same kind, kept until its own
-  # fix (terminal_ui.md lists them).
-  ALLOWED = {
-    'lib/mb/sound/io_base.rb' => 'ffmpeg pipes for file and ffmpeg I/O (recordings, ffmpeg outputs, file inputs) open with IO.popen',
-  }.freeze
+  # Library files allowed to start a process directly while a Session
+  # plays, with the reason (none since spawner-1: ffmpeg pipes, ffprobe,
+  # git, and refine's worker go through MB::Sound::Starter).
+  ALLOWED = {}.freeze
 
   @records = []
   @live_names = ['MB::Sound::Session'].freeze

@@ -1,4 +1,3 @@
-require 'open3'
 
 module MB
   module Sound
@@ -28,8 +27,8 @@ module MB
 
         # "branch commit" of a checkout, for labels and set metadata.
         def describe_checkout(dir = checkout_dir)
-          branch, = Open3.capture2('git', '-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD', err: File::NULL)
-          commit, = Open3.capture2('git', '-C', dir, 'rev-parse', '--short=10', 'HEAD', err: File::NULL)
+          branch, = Starter.capture('git', '-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD', err: :null)
+          commit, = Starter.capture('git', '-C', dir, 'rev-parse', '--short=10', 'HEAD', err: :null)
           { branch: branch.strip, commit: commit.strip }
         end
 
@@ -38,7 +37,7 @@ module MB
         # commands that make one otherwise.
         def worktree_for(ref)
           return File.expand_path(ref) if File.directory?(ref.to_s)
-          list, = Open3.capture2('git', '-C', checkout_dir, 'worktree', 'list', '--porcelain', err: File::NULL)
+          list, = Starter.capture('git', '-C', checkout_dir, 'worktree', 'list', '--porcelain', err: :null)
           path = nil
           list.each_line do |l|
             path = l.split(' ', 2)[1].strip if l.start_with?('worktree ')
@@ -66,9 +65,15 @@ module MB
           cmd = ['bundle', 'exec', 'ruby', '-Ilib', '-e', CHILD, job_path]
           status = nil
           runner = -> {
-            Open3.popen2e(env, *cmd, chdir: path) do |_in, out, wait|
+            out, w = IO.pipe
+            begin
+              child = Starter.spawn(env, *cmd, chdir: path, in: :null, out: w, err: :out)
+              w.close
               out.each_line { |l| io&.puts "  #{vs}: #{l.chomp}" }
-              status = wait.value
+              status = child.wait
+            ensure
+              out.close
+              w.close unless w.closed?
             end
           }
           defined?(Bundler) ? Bundler.with_unbundled_env(&runner) : runner.call

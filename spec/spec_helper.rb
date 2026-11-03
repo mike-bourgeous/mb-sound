@@ -73,8 +73,8 @@ ENV['MB_SOUND_USER_PRESETS'] = File.join(SpecTmp::ROOT, 'user-presets')
 # (and UI notes, ui.note, go to one too)
 ENV['MB_SOUND_UI_NOTES'] = File.join(SpecTmp::ROOT, 'ui-notes')
 ENV['MB_SOUND_FITS'] = File.join(SpecTmp::ROOT, 'fits')
-# (bin/sound.rb's refine worker stays off in the console specs; refine's
-# specs start their own: hand_tune/worker_spec.rb)
+# (the console's tune doesn't start refine's worker ahead in the specs;
+# refine's specs start their own: hand_tune/worker_spec.rb)
 ENV['MB_SOUND_REFINE_WORKER'] ||= '0'
 # (and Bench sets given no directory, which otherwise go to the main
 # checkout's tmp/listening: Library::Bench.default_root)
@@ -98,6 +98,11 @@ require_relative 'support/kernel_helpers'
 require_relative 'support/transport_guard'
 require_relative 'support/session_guard'
 require_relative 'support/spawn_guard' # (process starts while a Session plays)
+# The process starter, as bin/sound.rb launches it: library code starts its
+# processes (ffmpeg, ffprobe, git, refine's worker) through it, so specs that
+# load files while a Session plays pass the spawn guard the way the console
+# does (MB_SOUND_STARTER=0 runs the suite with direct starts instead)
+MB::Sound::Starter.start
 require_relative 'support/no_gnuplot'
 require_relative 'support/recipe_helpers'
 require_relative 'support/patch_helpers'
