@@ -480,7 +480,11 @@ module MB
           def build(job, rate, pace, scopes = nil, plan: true)
             t0 = now
             copy = build_at(job, rate, pace, scopes, plan: plan)
-            if copy.error && rate != RATES.last && copy.error.start_with?('MB::Sound::GraphNode::SampleRateHelper', 'RuntimeError')
+            # (a node that can't run at a lower rate; also inside a graph
+            # document's voice, whose loader wraps the error: hand-tune-1's
+            # fit patches, a param read by lp4 straight from the track's
+            # 48 kHz knob)
+            if copy.error && rate != RATES.last && (copy.error.start_with?('MB::Sound::GraphNode::SampleRateHelper', 'RuntimeError') || copy.error.include?('sample rate is'))
               copy.close unless scopes
               copy = build_at(job, RATES.last, pace, scopes, plan: plan)
             end

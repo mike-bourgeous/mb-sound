@@ -65,6 +65,7 @@ module MB
             on ['P'], :view, help: 'the front panel or the sections', label: 'P F'
             on ['F'], :fixed, help: "a preset's numbers as panel cells, or not", label: 'P F'
             on ['p'], :plumbing, help: 'every node as chips, the hidden plumbing too (again: back)', label: 'p'
+            on ['b'], :ab, help: "A/B: hear the track's reference instead of the patch, and back (ab; set one up with ab :kick, 'ref.wav')"
           end
 
           keys do
@@ -710,6 +711,16 @@ module MB
             text = text.to_s.strip
             return 'nothing typed' if text.empty?
             PaneKeys::Run[text, "#{text}: the patch rebuilds at the track's launch point"]
+          end
+
+          # b: flips the inspected track's A/B (Reference: `ab :kick`, one
+          # console line, in the take; its result, which one is heard now,
+          # on the status line; without a reference, the error says how to
+          # set one up).
+          def key_ab(state)
+            info = state[:snap]&.inspector
+            track = info&.track or return 'nothing to inspect'
+            [*flush(state), PaneKeys::Run["ab #{track.inspect}", "ab #{track}: the patch or its reference"]]
           end
 
           def key_learn(state)
@@ -1391,7 +1402,7 @@ module MB
 
           # Keys the design plans but this build doesn't have yet.
           PLANNED = [
-            ['S', 'save (name, tags, params)'], ['b', 'A/B against the loaded preset'], ['*', 'favourite'],
+            ['S', 'save (name, tags, params)'], ['*', 'favourite'],
           ].freeze
 
           # The library picker's keys in one line (NAV l goes in; its own

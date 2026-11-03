@@ -1718,8 +1718,16 @@ module MB
         opens it with every fitted value turnable.  A number the code reads
         once while building (a softclip's threshold) is a build knob: each
         turn rebuilds the track.
+
+        `ab :kick, 'kick_ref.wav'` puts the reference on its own track
+        (:kick_ref) playing the kick's clip at the sample's own pitch,
+        muted, its level matched to the patch's loudness (LUFS of one note
+        at the knobs now); `ab` (or b in the inspector) flips what you hear
+        between the patch and the reference, matching again when the knobs
+        moved; `ab :kick, :off` stops it.  Each flip is one console line in
+        your take, so a reader of the take sees when you compared.
       TEXT
-      commands :fit_patch
+      commands :fit_patch, :ab
       note :sound_design_ui
       see :inspector, :knobs
     end

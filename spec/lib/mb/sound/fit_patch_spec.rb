@@ -128,6 +128,23 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
       expect(s.arrangement.build_knob?(:"lead/cutoff")).to eq(false)
     end
 
+    it "renders in the sound-design screen's RENDER pane (a param read by lp4 straight from the track's knob)" do
+      fit = MB::Sound::FitPatch.save(:lead_fit, LEAD_CODE, LEAD_PARAMS)
+      s, = run(->(_s) { M.track(:lead, fit); M.bg(:lead, clip) }, buffers: 4)
+      ui = MB::Sound::UI
+      poll = ui::Poll.new(s)
+      ui::Inspect.target = { track: :lead, node: nil }
+      src = poll.call(%i[inspect render]).first.render_source
+      job = ui::PatchRender::Job.new(seq: 1, key: [:lead, 1], source: src, input: ui::PatchRender.input(src, 0.5),
+                                     knobs: s.knobs.map { |n, k| [n, k.value, k.spec] }, seconds: 0.5)
+      r = ui::PatchRender.render(job)
+      expect(r.error).to be_nil
+      expect(r.lufs).to be_finite
+    ensure
+      ui::Inspect.target = nil
+      poll&.close
+    end
+
     it 'plays a fitted kit voice from a clip' do
       params = { tune: (30.0..110.0).at(51.328155), decay: (0.1..2.0).at(0.468972), clip: (0.2..1.0).at(0.205115) }
       fit = MB::Sound::FitPatch.save(:kick_fit, KICK_CODE, params)
