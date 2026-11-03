@@ -44,6 +44,9 @@ module MB
       class Bleed
         HOP = 96
         N_FFT = 1024
+
+        # The under-2-kHz body envelope's block (5 ms).
+        BODY_HOP = 240
         BANDS = DSP.octave_bands(31.25, 16000.0, 1)
 
         # One flag: +kind+ (:second_onset, :sustained_top, :low_energy,
@@ -75,14 +78,14 @@ module MB
           @flags = []
           rate = Signal::RATE
           low = DSP.brickwall(x.data, rate, 2000.0)
-          env = Signal.new(low).envelope_db(240)
+          env = Signal.new(low).envelope_db(BODY_HOP)
           pk = env.max_index
           @percussive = env[pk..].lt(env[pk] - 25).count_true > 0
 
           hi = @bands.select { |s| s.band[0] >= 2000 && s.level > -45 }
           # Later onsets in the high bands, and high bands that peak well
           # after the body (a hat on a kick with no click of its own)
-          body = pk * 240 / Signal::RATE.to_f
+          body = pk * BODY_HOP / Signal::RATE.to_f
           later = hi.flat_map(&:onsets) + hi.map(&:peak).select { |t| t > body + 0.015 }
           later = later.select { |t| t > 0.015 && t < 0.4 }
           if @percussive && later.length >= 2
