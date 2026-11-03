@@ -183,6 +183,8 @@ module MB
               c.line(y, ['find ', :key], [q, :text], ['▏', :key], ["  (#{n})", :dim])
             elsif !q.empty?
               c.line(y, ['find ', :dim], [q, :text], [" (#{n}; Backspace: less)", :dim])
+            elsif w.state == :reference && w.scanning?
+              c.text(0, y, c.fit("#{n} references so far: reading #{w.folder}…", c.w), :dim)
             elsif w.state == :reference
               c.text(0, y, c.fit(state[:mode] ? "#{n} references: Enter pick  a listen  / find  d folder  r again  Esc NAV" : "#{n} references (in: NAV h, or Enter on this pane)", c.w), :dim)
             else

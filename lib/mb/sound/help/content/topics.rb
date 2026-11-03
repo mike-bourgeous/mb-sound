@@ -1719,8 +1719,25 @@ module MB
 
     Help.topic :hand_tune, 'Hand-tuning a fitted sound', group: :look do
       about <<~TEXT
+        `tuner` (or NAV h on the tiles) walks you through it: pick a
+        reference from a list (the hand-tune queue, a folder's sound files:
+        `tuner 'refs/'`, d on the screen, remembered; Samples already read),
+        each with its length and a summary (pitch, envelope); a listens
+        (at -20 LUFS), Enter picks.  Then a synth for it (the queue's fit,
+        your fit documents, the init voice, a blank sine, the library's
+        instruments and kits), with an L3 score against the reference for
+        the one under the cursor; a listens on the reference's note, b A/Bs
+        it with the reference, e puts its tune line on the console, Enter
+        runs it.  That opens the tuning screen (ui :tuning): the sound
+        screen with a strip naming the keys (in the inspector: b A/B, R
+        refine, A apply, E retune, # note, w W back to the tuner's synths,
+        references).  Esc goes a step back; `tuner off` closes it.  Your
+        take keeps the tune line, not the tuner's steps.
+
         `tune :kick, code, ref: 'kick_ref.wav', tune: (30.0..110.0).at(51.3),
-        ...` does it all in one line: the fit patch, `design` on track
+        ...` does it all in one line (the code may also be a library
+        instrument to start from, `tune :kick, L.inst.init, ref: ...`, or a
+        fit's document path): the fit patch, `design` on track
         :kick (`play:` a clip, else its role's note), and the reference
         for A/B (`as:` names the patch).  Then turn by ear, flip with b,
         note what you hear, and `take.save`.
@@ -1784,7 +1801,7 @@ module MB
         `MB::Sound::Take.read('take.rb')` reads a saved take the same way
         (walked, never run).
       TEXT
-      commands :tune, :fit_patch, :ab, :retune, :refine
+      commands :tuner, :tune, :fit_patch, :ab, :retune, :refine, :audition
       note :hand_tune, :sound_design_ui
       see :inspector, :knobs, :ui
     end

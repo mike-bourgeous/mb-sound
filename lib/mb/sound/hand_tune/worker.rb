@@ -105,10 +105,13 @@ module MB
 
         attr_reader :pid
 
-        def initialize
+        # +serve+ names the loop the process runs (default refine's,
+        # .serve; the tuner's worker runs Wizard::Remote.serve).
+        def initialize(serve: 'MB::Sound::HandTune::Worker.serve')
+          raise ArgumentError, "Worker serve: is a method's name (got #{serve.inspect})" unless serve.match?(/\A[A-Z][\w:]*\.\w+\z/)
           lib = File.expand_path('../../..', __dir__)
           gemfile = File.expand_path('../../../../Gemfile', __dir__)
-          code = "require 'bundler/setup'; require 'mb-sound'; MB::Sound::HandTune::Worker.serve"
+          code = "require 'bundler/setup'; require 'mb-sound'; #{serve}"
           env = { 'BUNDLE_GEMFILE' => gemfile, 'MB_SOUND_YJIT' => '1', 'RUBYOPT' => ENV['RUBYOPT'].to_s }
           r_in, w_in = IO.pipe
           r_out, w_out = IO.pipe
@@ -164,6 +167,9 @@ module MB
           @lines.pop(timeout: timeout)
         end
 
+        # Sends message +h+ (a Hash, one JSON line).
+        def send_message(h) = send_line(h)
+
         # Ends the process.
         def close
           send_line(quit: true) rescue nil
@@ -187,7 +193,7 @@ module MB
             @lines << (JSON.parse(line) rescue { 'error' => "worker said: #{line.strip[0, 200]}" })
           end
         ensure
-          @lines << { 'error' => 'the refine worker exited' }
+          @lines << { 'error' => 'the worker process exited', 'exited' => true }
         end
       end
     end

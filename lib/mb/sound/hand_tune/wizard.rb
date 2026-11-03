@@ -295,19 +295,60 @@ module MB
             Summary.new(seconds: nil, hz: nil, note: nil, label: nil, shape: nil, attack: nil, decay: nil, error: "#{e.class}: #{e.message.lines.first&.strip}")
           end
 
+          # The sound files of +folder+ (recursively, by path, at most
+          # MAX_FILES) and the lengths of +paths+, from their headers
+          # (Sample::LoopInfo, no audio decoded): { 'files' => [[path,
+          # seconds], ...], 'seconds' => { path => seconds } } (plain data:
+          # the worker process sends it as JSON).
+          def scan(folder, paths = [])
+            files = File.directory?(folder.to_s) ? Sample::LoopInfo.scan(folder).first(MAX_FILES).map { |e| [e.path, e.seconds] } : []
+            secs = paths.to_h { |p| [p, (Sample::LoopInfo.read(p).seconds rescue nil)] }
+            { 'files' => files, 'seconds' => secs }
+          rescue StandardError
+            { 'files' => [], 'seconds' => {} }
+          end
+
+          # Renders one note (+note+, a MIDI number) of a graph document
+          # (+document+, a path) or a library instrument (+entry+, its head
+          # path: "L.kit.tr909") offline (a private Session at +bpm+) and
+          # compares it with the reference at +ref+ (HandTune.compare).
+          # Returns a Score.
+          def score_of(ref:, note:, document: nil, entry: nil, bpm: 120.0)
+            t0 = MB::U.clock_now
+            target = Analysis::Signal.from(ref, seconds: SCORE_SECONDS)
+            seconds = target.seconds.clamp(0.1, SCORE_SECONDS)
+            audio = Internal.with_private_rng(1) {
+              if document
+                HandTune.render(document, {}, note: note, seconds: seconds)
+              else
+                e = HandTune.entry_at(entry) or raise ArgumentError, "no library entry #{entry}"
+                clip = MB::Sound.seq(note).len(Rational(1, 4)).vel(0.8)
+                MB::Sound.bounce(seconds.seconds, bpm: bpm, channels: 1, gain: 1.0) { e.(clip) }.to_a.map { |c| c[0...(seconds * RATE).round] }
+              end
+            }
+            c = HandTune.compare(target, audio[0], seconds: seconds)
+            Score.new(total: c.total, lufs: Reference.lufs(audio, RATE), ms: ((MB::U.clock_now - t0) * 1000).round, error: nil)
+          rescue StandardError => e
+            Score.new(total: nil, lufs: nil, ms: ((MB::U.clock_now - t0) * 1000).round, error: "#{e.class}: #{e.message.lines.first&.strip}")
+          end
+
           # The transition table as text (help, specs).
           def table
             TRANSITIONS.map { |(s, e), (to, what)| format('%-10s %-8s -> %-10s %s', s, e, to, what) }.join("\n")
           end
         end
 
-        attr_reader :session, :state, :refs, :ref, :synths, :folder, :background, :line, :track
+        attr_reader :session, :state, :ref, :synths, :folder, :background, :line, :track
 
         def initialize(session:, folder: nil)
           @session = session
           @state = :reference
           @folder = folder || Wizard.remembered_folder || Wizard.default_folder
           @refs = [].freeze
+          @queue = [].freeze
+          @samples = [].freeze
+          @scanning = nil
+          @scan_gen = 0
           @ref = nil
           @synths = [].freeze
           @synth = nil
@@ -335,7 +376,7 @@ module MB
         # The list of the step (+state+: :reference or :synth) narrowed by
         # its find words (every word in the entry's name or about).
         def shown(state = @state)
-          list = state == :synth ? @synths : @refs
+          list = state == :synth ? @synths : refs
           words = @query[state].to_s.downcase.split(/\s+/).reject(&:empty?)
           return list if words.empty?
           list.select { |x| t = "#{x.name} #{x.about} #{x.respond_to?(:kind) ? x.kind : ''}".downcase; words.all? { |w| t.include?(w) } }
@@ -365,26 +406,36 @@ module MB
         # Reads the references again (queue, folder, loaded samples).
         def refresh
           @queue = Wizard.queue_items.freeze
-          list = []
-          seen = {}
-          @queue.each do |q|
-            next unless q.ref_path
-            seen[q.ref_path] = true
-            list << Ref.new(kind: :queue, name: "#{q.number} #{q.title}", path: q.ref_path, seconds: file_seconds(q.ref_path), item: q,
-                            about: q.status == :fails ? "queue #{q.number} (its fit fails: #{q.problem.to_s[0, 60]})" : "queue #{q.number}: #{q.title}")
+          @samples = loaded_samples.freeze
+          paths = @queue.filter_map(&:ref_path) + @samples.map(&:first)
+          @scan_gen = @scan_gen.to_i + 1
+          key = [:scan, @folder, @scan_gen]
+          if @background.offload?
+            # (the headers read in the worker: about 3 ms a file on the
+            # console's GVL otherwise; the folder's files show when read)
+            @scanning = key
+            @background.want(key, { 'do' => 'scan', 'path' => @folder, 'paths' => paths }) { Wizard.scan(@folder, paths) }
+            build_refs(nil)
+          else
+            @scanning = nil
+            build_refs(Wizard.scan(@folder, paths))
           end
-          folder_files.each do |e|
-            next if seen[e.path]
-            seen[e.path] = true
-            list << Ref.new(kind: :file, name: e.path.delete_prefix("#{@folder}/"), path: e.path, seconds: e.seconds, item: nil, about: "in #{@folder}")
-          end
-          loaded_samples.each do |path, about|
-            next if seen[path]
-            seen[path] = true
-            list << Ref.new(kind: :sample, name: File.basename(path), path: path, seconds: file_seconds(path), item: nil, about: about)
-          end
-          @refs = list.freeze
           self
+        end
+
+        # The references (see #refresh; the folder's files once read).
+        def refs
+          if @scanning && (r = @background.get(@scanning))
+            @scanning = nil
+            build_refs(r.is_a?(Exception) ? nil : r)
+          end
+          @refs
+        end
+
+        # True while the folder is being read (in the worker).
+        def scanning?
+          refs
+          !@scanning.nil?
         end
 
         # Sends +event+ (EVENTS) with its argument: :pick takes a Ref
@@ -428,7 +479,9 @@ module MB
         def summary(ref, want: true)
           return nil unless ref
           key = [:summary, *ref.key]
-          @background.get(key) || (want ? @background.want(key) { Wizard.summarize(ref.path) } && nil : nil)
+          r = @background.get(key)
+          return failed(Summary, r) if r.is_a?(Exception)
+          r || (want ? @background.want(key, { 'do' => 'summary', 'path' => ref.path }) { Wizard.summarize(ref.path) } && nil : nil)
         end
 
         # The score of +synth+ against the picked reference if worked out,
@@ -436,7 +489,10 @@ module MB
         def score(synth, want: true)
           return nil unless synth && @ref && !synth.problem
           key = [:score, synth.kind, synth.name, *@ref.key]
-          @background.get(key) || (want ? @background.want(key) { score_now(synth) } && nil : nil)
+          r = @background.get(key)
+          return failed(Score, r) if r.is_a?(Exception)
+          return r if r || !want
+          @background.want(key, -> { score_job(synth) }) { Wizard.score_of(**score_job(synth).transform_keys(&:to_sym).except(:do)) } && nil
         end
 
         # The MIDI note the reference is played on: a queue item's, a drum
@@ -584,9 +640,9 @@ module MB
         def to_s
           case @state
           when :reference
-            lines = @refs.first(20).each_with_index.map { |r, i| format('%3d  %-40s %s', i, r.name[0, 40], r.seconds ? "#{r.seconds.round(2)} s" : '') }
-            more = @refs.length > 20 ? "\n  ... #{@refs.length - 20} more (tuner.refs)" : ''
-            "tuner step 1, a reference (#{@refs.length}: the queue, #{@folder}, loaded samples): tuner.pick(i)\n#{lines.join("\n")}#{more}"
+            lines = refs.first(20).each_with_index.map { |r, i| format('%3d  %-40s %s', i, r.name[0, 40], r.seconds ? "#{r.seconds.round(2)} s" : '') }
+            more = refs.length > 20 ? "\n  ... #{refs.length - 20} more (tuner.refs)" : ''
+            "tuner step 1, a reference (#{refs.length}#{scanning? ? ', reading the folder' : ''}: the queue, #{@folder}, loaded samples): tuner.pick(i)\n#{lines.join("\n")}#{more}"
           when :synth
             lines = @synths.first(20).each_with_index.map { |x, i| format('%3d  %-8s %-28s %s', i, x.kind, x.name.to_s[0, 28], x.problem ? "can't: #{x.problem[0, 50]}" : x.about.to_s[0, 60]) }
             "tuner step 2, a synth for #{@ref.name} (track #{@track.inspect}): tuner.pick(i), tuner.back\n#{lines.join("\n")}"
@@ -599,18 +655,30 @@ module MB
 
         private
 
-        # The sound files of the folder (headers only), at most MAX_FILES.
-        def folder_files
-          return [] unless File.directory?(@folder)
-          Sample::LoopInfo.scan(@folder).first(MAX_FILES)
-        rescue StandardError
-          []
-        end
-
-        def file_seconds(path)
-          Sample::LoopInfo.read(path).seconds
-        rescue StandardError
-          nil
+        # #refs from the queue, the samples, and +scan+ (Wizard.scan's
+        # result, or nil before it).
+        def build_refs(scan)
+          secs = scan ? scan['seconds'] || scan[:seconds] || {} : {}
+          files = scan ? scan['files'] || scan[:files] || [] : []
+          list = []
+          seen = {}
+          @queue.each do |q|
+            next unless q.ref_path
+            seen[q.ref_path] = true
+            list << Ref.new(kind: :queue, name: "#{q.number} #{q.title}", path: q.ref_path, seconds: secs[q.ref_path], item: q,
+                            about: q.status == :fails ? "queue #{q.number} (its fit fails: #{q.problem.to_s[0, 60]})" : "queue #{q.number}: #{q.title}")
+          end
+          files.each do |path, sec|
+            next if seen[path]
+            seen[path] = true
+            list << Ref.new(kind: :file, name: path.delete_prefix("#{@folder}/"), path: path, seconds: sec, item: nil, about: "in #{@folder}")
+          end
+          @samples.each do |path, about|
+            next if seen[path]
+            seen[path] = true
+            list << Ref.new(kind: :sample, name: File.basename(path), path: path, seconds: secs[path], item: nil, about: about)
+          end
+          @refs = list.freeze
         end
 
         # [[path, about], ...] of Samples read from files in this process
@@ -717,36 +785,37 @@ module MB
           }
         end
 
-        # Renders one note of +synth+ (offline, a private Session) and
-        # compares it with the reference (HandTune.compare).
-        def score_now(synth)
-          t0 = MB::U.clock_now
-          target = (@target_sig ||= {})[@ref.key] ||= Analysis::Signal.from(@ref.path, seconds: SCORE_SECONDS)
-          seconds = target.seconds.clamp(0.1, SCORE_SECONDS)
-          n = note_for(synth).to_i
-          audio = Internal.with_private_rng(1) {
-            if (v = version_of(synth))
-              HandTune.render(v, {}, note: n, seconds: seconds)
-            else
-              clip = MB::Sound.seq(n).len(Rational(1, 4)).vel(0.8)
-              e = synth.entry
-              MB::Sound.bounce(seconds.seconds, bpm: @session.transport.bpm.to_f, channels: 1, gain: 1.0) { e.(clip) }.to_a.map { |c| c[0...(seconds * RATE).round] }
-            end
-          }
-          c = HandTune.compare(target, audio[0], seconds: seconds)
-          Score.new(total: c.total, lufs: Reference.lufs(audio, RATE), ms: ((MB::U.clock_now - t0) * 1000).round, error: nil)
-        rescue StandardError => e
-          Score.new(total: nil, lufs: nil, ms: ((MB::U.clock_now - t0) * 1000).round, error: "#{e.class}: #{e.message.lines.first&.strip}")
+        # A +klass+ (Summary, Score) saying background job +e+ failed.
+        def failed(klass, e)
+          msg = "#{e.class}: #{e.message.lines.first&.strip}"
+          klass == Summary ? Summary.new(seconds: nil, hz: nil, note: nil, label: nil, shape: nil, attack: nil, decay: nil, error: msg) : Score.new(total: nil, lufs: nil, ms: nil, error: msg)
+        end
+
+        # What a score of +synth+ needs, as plain data (Wizard.score_of's
+        # keywords; the worker process gets it as JSON): the reference's
+        # path, the synth's document (its version) or library head path,
+        # the note, the tempo.
+        def score_job(synth)
+          { 'do' => 'score', 'ref' => @ref.path, 'document' => version_of(synth), 'entry' => (synth.entry&.head_path rescue nil),
+            'note' => note_for(synth).to_i, 'bpm' => @session.transport.bpm.to_f }
         end
       end
 
-      # The tuner's background work (summaries and scores): one thread at
-      # a low priority, the most recently wanted job first, each started
-      # right after the live render thread finishes a buffer when a
-      # realtime Session plays (UI::PatchRender.slack), so it never starts
-      # on the render thread's turn.  A job holds the GVL for its
-      # length (a summary 20-150 ms, a score 30 ms to 1 s; Ruby preempts it
-      # every timeslice); the thread ends after IDLE seconds without work.
+      # The tuner's background work (the folder's headers, summaries, and
+      # scores), a folder's scan first, then the most recently wanted job,
+      # one at a time, from one thread at a low priority.  Each job runs in
+      # the tuner's worker process (Remote, started through the process
+      # starter: Starter) when it can start, so the console's GVL stays the
+      # render thread's: measured on the Mac container (800-frame buffers,
+      # a reese riff and a beat playing), 50 summaries run in this process
+      # made the render thread wait p99 15 ms, max 62 ms (32 GCs, 0.6 s),
+      # 10 scores p99 10.8 ms, max 41 ms, the folder's headers 164 ms on
+      # the console's thread (max 10.5 ms); in the worker, the waits stay
+      # at the idle numbers (design/notes/hand_tune.md).  Without a worker
+      # (no starter while a render thread runs, $MB_SOUND_TUNER_WORKER=0)
+      # jobs wait until nothing renders, then run here; .inline runs none
+      # until #drain (specs).  The thread ends after IDLE seconds without
+      # work.
       class Wizard::Background
         IDLE = 10.0
 
@@ -764,18 +833,23 @@ module MB
           @thread = nil
           @closed = false
           @busy = nil
+          @remote = nil
+          @remote_tried = false
+          @remote_failed = false
         end
 
         # The result kept under +key+, or nil.
         def get(key) = @mutex.synchronize { @results[key] }
 
-        # Queues +block+ for +key+ unless its result is kept or it is
-        # queued (then it moves to the front).  Returns true.
-        def want(key, &block)
+        # Queues a job for +key+ unless its result is kept or it is queued
+        # (then it moves to the front): +remote+ (a Hash of plain data, or a
+        # Proc making one, for the worker process: Remote) and +block+ (the
+        # same work here).  Returns true.
+        def want(key, remote = nil, &block)
           @mutex.synchronize {
             return true if @results.key?(key) || @busy == key || @closed
             @jobs.delete(key)
-            @jobs[key] = block
+            @jobs[key] = [remote, block]
             start unless @thread&.alive? || Wizard::Background.inline
             @cond.signal
           }
@@ -788,13 +862,24 @@ module MB
         # True while a job runs or waits.
         def busy? = @mutex.synchronize { !@busy.nil? || !@jobs.empty? }
 
+        # Where jobs run: :worker (a process), :here, or nil (not decided
+        # until the first job).
+        def where
+          return nil unless @remote_tried
+          @remote&.alive? ? :worker : @remote_failed ? :here : nil
+        end
+
+        # True when jobs go to the worker process (one can start; not
+        # .inline).
+        def offload? = !Wizard::Background.inline && !@remote_failed && (!@remote.nil? || Wizard::Remote.usable?)
+
         # Drops queued jobs (results stay).
         def clear = @mutex.synchronize { @jobs.clear }
 
-        # Runs every queued job on the calling thread (specs, captures).
+        # Runs every queued job on the calling thread, here (specs).
         def drain
           loop do
-            key, job = @mutex.synchronize { @jobs.shift }
+            key, (_, job) = @mutex.synchronize { @jobs.shift }
             break unless key
             r = job.call
             @mutex.synchronize { @results[key] = r }
@@ -809,6 +894,8 @@ module MB
             @thread
           }
           t&.join(2)
+          @remote&.close
+          @remote = nil
         end
 
         private
@@ -822,7 +909,7 @@ module MB
 
         def run
           loop do
-            key, job = @mutex.synchronize {
+            key, (remote, job) = @mutex.synchronize {
               deadline = MB::U.clock_now + IDLE
               while @jobs.empty? && !@closed
                 left = deadline - MB::U.clock_now
@@ -833,13 +920,13 @@ module MB
                 @cond.wait(@mutex, left)
               end
               return(@thread = nil) if @closed
-              k = @jobs.keys.last
+              # (a folder's scan first: the list waits on it)
+              k = @jobs.keys.find { |x| x[0] == :scan } || @jobs.keys.last
               @busy = k
               [k, @jobs.delete(k)]
             }
-            wait_for_slack
             r = begin
-              job.call
+              (w = remote && worker) ? w.call(remote.respond_to?(:call) ? remote.call : remote) : (wait_for_quiet; job.call)
             rescue StandardError => e
               e
             end
@@ -851,12 +938,99 @@ module MB
           end
         end
 
-        # Waits for the live render thread to finish a buffer (when one
-        # runs), so the job starts in the time between buffers.
-        def wait_for_slack
-          s = @session
-          return unless s.respond_to?(:realtime?) && s.realtime? && s.respond_to?(:frames_rendered)
-          UI::PatchRender.slack(-> { s.frames_rendered }, true)
+        # The worker process (started on the first job when it can be:
+        # Remote.usable?), or nil.
+        def worker
+          unless @remote_tried
+            @remote_tried = true
+            @remote = Wizard::Remote.new if Wizard::Remote.usable?
+            @remote_failed = @remote.nil?
+          end
+          return @remote if @remote&.alive?
+          @remote_failed = true
+          nil
+        rescue StandardError => e
+          warn "the tuner's worker didn't start (#{e.message}); its summaries and scores run in this process"
+          @remote_failed = true
+          @remote = nil
+        end
+
+        # Without the worker, waits until no render thread runs (measured:
+        # jobs here while a Session plays made the render thread wait up to
+        # 62 ms; see the class description), then for nothing more.
+        def wait_for_quiet
+          sleep 0.25 while Worker.live_render? && !@closed
+        end
+      end
+
+      # The tuner's worker process (a Worker running .serve): summaries
+      # and scores off the console's GVL.  Requests and answers are JSON
+      # lines: {"id": n, "do": "summary", "path": ...} or {"id": n, "do":
+      # "score", "ref":, "document":, "entry":, "note":, "bpm":} ->
+      # {"id": n, "summary": {...}} / {"id": n, "score": {...}}.
+      class Wizard::Remote
+        # True when a worker can start now: through the process starter,
+        # or while nothing renders (else a start would fork with the GVL
+        # held); never with $MB_SOUND_TUNER_WORKER=0.
+        def self.usable?
+          return false if ENV['MB_SOUND_TUNER_WORKER'] == '0'
+          !Starter.current.nil? || !Worker.live_render?
+        end
+
+        # The worker process's loop.
+        def self.serve(input = $stdin, output = $stdout)
+          Process.setpriority(Process::PRIO_PROCESS, 0, 10) rescue nil
+          output.sync = true
+          output.puts(JSON.generate(ready: true))
+          while (line = input.gets)
+            msg = JSON.parse(line)
+            break if msg['quit']
+            out =
+              case msg['do']
+              when 'summary' then { summary: Wizard.summarize(msg['path']).to_h }
+              when 'scan' then { scan: Wizard.scan(msg['path'], msg['paths'] || []) }
+              when 'score'
+                { score: Wizard.score_of(ref: msg['ref'], note: msg['note'].to_i, document: msg['document'], entry: msg['entry'], bpm: msg['bpm'].to_f).to_h }
+              else { error: "unknown request #{msg['do'].inspect}" }
+              end
+            output.puts(JSON.generate(out.merge(id: msg['id'])))
+          end
+        rescue StandardError => e
+          output.puts(JSON.generate(error: "#{e.class}: #{e.message}"))
+        end
+
+        def initialize
+          @worker = Worker.new(serve: 'MB::Sound::HandTune::Wizard::Remote.serve')
+          @id = 0
+          @ready = false
+        end
+
+        def alive? = @worker.alive?
+
+        # Runs request +h+ in the worker and returns its Summary or Score
+        # (waiting off the GVL; a Score or Summary with the error when the
+        # worker fails).
+        def call(h)
+          @ready ||= @worker.wait_ready
+          id = (@id += 1)
+          @worker.send_message(h.merge('id' => id))
+          loop do
+            msg = @worker.next_message(60) or raise "the tuner's worker took over 60 s"
+            raise msg['error'].to_s if msg['error'] && (msg['exited'] || msg['id'].nil? || msg['id'] == id)
+            next unless msg['id'] == id
+            return Wizard::Summary.new(**self.class.symbols(msg['summary'])) if msg['summary']
+            return Wizard::Score.new(**self.class.symbols(msg['score'])) if msg['score']
+            return msg['scan'] if msg['scan']
+          end
+        end
+
+        def close = @worker.close
+
+        # +h+ (from JSON) with Symbol keys, and its shape a Symbol.
+        def self.symbols(h)
+          h = h.transform_keys(&:to_sym)
+          h[:shape] = h[:shape].to_sym if h[:shape].is_a?(String)
+          h
         end
       end
 

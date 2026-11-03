@@ -76,6 +76,8 @@ ENV['MB_SOUND_FITS'] = File.join(SpecTmp::ROOT, 'fits')
 # (the console's tune doesn't start refine's worker ahead in the specs;
 # refine's specs start their own: hand_tune/worker_spec.rb)
 ENV['MB_SOUND_REFINE_WORKER'] ||= '0'
+# (and the tuner's: its jobs run in the process; wizard_spec starts one)
+ENV['MB_SOUND_TUNER_WORKER'] ||= '0'
 # (and Bench sets given no directory, which otherwise go to the main
 # checkout's tmp/listening: Library::Bench.default_root)
 ENV['MB_SOUND_BENCH_DIR'] = File.join(SpecTmp::ROOT, 'listening')

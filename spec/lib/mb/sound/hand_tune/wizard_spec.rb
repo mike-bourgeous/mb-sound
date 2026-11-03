@@ -6,6 +6,8 @@
 # order, one tune line per kind that the take reader reads, auditions, and
 # a take whose tuner line replays to the same setup.  Synthetic references
 # and queue items only (never the maintainer's tmp/hand-tune-queue).
+require_relative '../../../../support/ui_helpers'
+
 RSpec.describe(MB::Sound::HandTune::Wizard, :aggregate_failures) do
   S = MB::Sound unless defined?(S)
 
@@ -272,6 +274,32 @@ RSpec.describe(MB::Sound::HandTune::Wizard, :aggregate_failures) do
     r = SpecBuffers.join(out)
     expect(a.abs.max).to be > 0.01
     expect((r[0...a.length] - a).abs.max).to eq(0)
+  end
+
+  # The live path: the folder's headers, summaries, and scores in the
+  # tuner's worker process (started through the process starter, as
+  # bin/sound.rb runs one; spec_helper's), so the console's GVL stays the
+  # render thread's (hand_tune.md: measured).
+  it 'reads the folder, summaries, and scores in its worker process' do
+    described_class::Background.inline = nil
+    ENV['MB_SOUND_TUNER_WORKER'] = '1'
+    w = wizard
+    expect(w.background.offload?).to eq(true)
+    expect(wait_until(timeout: 60) { !w.scanning? }).to eq(true)
+    expect(w.background.where).to eq(:worker)
+    bass = w.refs.find { |r| r.name == 'bass_saw.flac' }
+    expect(bass.seconds.round(2)).to eq(0.42)
+    w.summary(bass)
+    expect(wait_until(timeout: 30) { w.summary(bass, want: false) }).to have_attributes(note: 33, shape: :percussive, error: nil)
+    w.pick(0)
+    init = w.synths.find { |x| x.kind == :init }
+    w.score(init)
+    sc = wait_until(timeout: 30) { w.score(init, want: false) }
+    expect(sc).to be_a(described_class::Score)
+    expect(sc.total).to be_a(Float)
+    expect(sc.error).to be_nil
+  ensure
+    ENV['MB_SOUND_TUNER_WORKER'] = '0'
   end
 
   it 'goes back a step and restarts, keeping the reference under the cursor' do
