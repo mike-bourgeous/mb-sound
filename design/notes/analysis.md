@@ -1,0 +1,68 @@
+# Sound-matching analysis
+
+<!-- summary -->
+`analyze(sound)`, `compare(target, fit)`, `look(a, b, path:)` (`AnalysisMethods`; `MB::Sound::Analysis`, `lib/mb/sound/analysis/`, pure Ruby + Numo) read a sound the way round 3 of the voice-match study learned to: pitch contour and per-cycle pitch envelope, level and brightness envelopes, the attack window, amplitude modulation by band (the measure that best predicted the maintainer's picks), top-octave movement, moving resonances and combs, a bleed screen, PNG images to read, the L3 distance term by term with `Analysis.rank`, and `Preferences` (does a distance agree with a listener's picks?).
+<!-- /summary -->
+
+## Quick reference
+
+- Console: `analyze 'orig.wav'` (a Report), `compare 'orig.wav', fit` (L3 terms) or `compare 'orig.wav', 'a' => a, 'b' => b` (a Ranking), `look 'orig.wav', fit, path: 'x.png'`.
+- Library: `Analysis.analyze(sound, seconds:)`, `.compare`, `.rank(target, candidates, by:)`, `.look(sounds, path:)`, `Analysis::Preferences.new(items).evaluate`; readers `Signal`, `PitchContour`, `PitchEnvelope`, `Envelope`, `Attack`, `PerceivedPitch`, `ModulationSpectrum`, `BandEnvelopes`, `SpectralMotion`, `Bleed`, `Comparison`, `Look`.
+- Code `lib/mb/sound/analysis/`; specs `spec/lib/mb/sound/analysis/` on synthetic sounds (`spec/support/synthetic_sounds.rb`); help `help :analysis`.
+
+The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
+
+## Why (2026-11-03)
+
+Round 3 of the synth-settings study (branch `research-voice-match-3`, 6ea917e0; `research/voice-match/README.md` Round 3 and `ANALYSIS_TECHNIQUES.md`) asked why the fitting loss disagreed with what the maintainer heard on the Listening Bench.  His words: "if we can identify the right building blocks and analysis techniques then future persona agents will have a much better shot at making music."  Its ranked list of building blocks put "an analysis toolkit for agents" first; branch `analysis-lib-1` moved it into the library ("Add the analysis library to the project and start work on the hand-tuning tools.  I'd probably write notes along the way explaining what I am seeing on a waveform or spectrogram and hearing with my ears, and try to connect them together for the sake of improving the analyzers").  A hand-tuning agent (branch `hand-tune-1`) builds on this API.
+
+What round 3 found, and what the toolkit keeps:
+
+- **The modulation spectrum agrees with his ears.**  On 24 Bench items where his verdict picked a candidate, round 2's loss ranked his pick first 9 times (chance 7.5); envelope fluctuation by octave band and modulation band 14 (p 0.005); the first 50 ms 12 (p 0.04); L3 = round 2's loss + 2 x modulation + 0.3 x attack 15 (73% of pairs, p 0.001).  HF band envelopes, HF movement, perceived pitch, loudness-weighted spectra, and clip matching did not beat chance alone.
+- **Looking changed decisions** on 8 samples (a falling resonant peak, a filter attack read as a pitch envelope, hard clipping, a clean sine kick fitted as squares, comb teeth sliding up high, a loop seam): `look`.
+- **Measuring the moving parts** corrected his rate estimates (right direction, 2-2.5x low by ear): `PitchContour`, `ModulationSpectrum#peaks`.
+- **Bleed** (hats on kicks, kicks under chopped notes) was confirmed on three references, with false alarms on 11 of 58 clean renders: `Bleed`, "a reason to look, not a verdict".
+- His picks on round 3's own Bench (after the study, 2026-11-03) matched L3's predictions written down before he listened on 7 of 17 items (round 2's loss 4, chance about 4; where the two disagreed, L3 3, round 2's loss 0); he called the fits "directionally right on most of them".  On IT 2's vibrato: "My guessed rate too slow, measured rate maybe a tiny bit too fast": rates are printed with an uncertainty.
+
+## Sounds in: `Signal`
+
+Every reader takes anything `Signal.from` takes: a filename (`MB::Sound.read`, resampled to 48 kHz), a `Sample` (its region in play order, at its level), audio data (a Numo array or Array of channels at `sample_rate:`, resampled in the FFT domain), or anything `play` takes, rendered the way `MB::Sound.write` renders (no master gain) for `seconds:`, or until it ends, at most `GRAPH_SECONDS` (4; the Report says when it cut a graph).  Rendering advances the graph.  Channels are averaged; everything runs at 48 kHz so numbers don't depend on the source rate.  A Signal keeps its STFTs, block envelopes, band, and pitch contour, so the readers of one Report share them.
+
+**Framing.**  `Signal#stft` frames start at sample `i * hop` with the sound zero-padded by `n_fft` at its end (round 3's `stft_mag`), not `Analysis::STFT`'s centered frames.  Measured (analysis-lib-1): with the centered framing L3 ranked his pick first 13 times instead of 15 (the pick's rank moved on 4 of 24 items); with round 3's framing every term equals `ears.rb` digit for digit on synthetic pairs, and a private re-check over the MP3s he heard gives 15/24 again.  Readers that look for movement (AM peaks, top-band statistics, spectral motion) leave out frames whose window runs past the end (they read the padding as a fade; a 1 s 3 Hz AM read 2.7 Hz).
+
+## Readers
+
+- **`PitchContour`** (`Signal#pitch_contour`): YIN every 10 ms over 40 ms windows (FFT difference function, threshold 0.15, voiced under 0.3 aperiodicity, 40-1500 Hz); median Pitch, octave-folded cents, `Vibrato` (rate a Pitch, depth an Interval in cents, `rate_error`) and `Sweep` (first and last voiced tenths a semitone or more apart).  Rates come from the contour's slow spectrum, refined by least-squares sinusoid fits (`DSP.sine_fit`; a window's peak read rates of 2-3-cycle sounds several percent low); the rate uncertainty is twice the Cramér-Rao bound with the fit's residual as noise (at least 1%); the depth is corrected for the 40 ms window's averaging (6 Hz: 9%).  Synthetic: 5.5 Hz ±18 cents reads 5.5 Hz (rate ±0.06) ±18 cents.
+- **`PitchEnvelope`** (`PitchEnvelope.of`): the first 300 ms cycle by cycle, from upward zero crossings of the sound low-passed at 1.5x its dominant partial (attack or body); nil when the periods change unevenly (noise) or disagree with the contour's body pitch.  For kicks, toms, and basses whose fundamental dominates.  A 250 -> 60 Hz synthetic kick reads 204/138/70 Hz at 10/30/100 ms (formula 201/137/70); the contour's 40 ms windows see only 88 -> 60 Hz there.
+- **`Envelope`**: the whole sound's level (5 ms RMS: peak time, attack, times to -6/-20/-40 dB after the peak, ending `:cut`/`:fade`, shape `:percussive`/`:sustained`/`:swell`/`:hump`) and brightness (RMS frequency every 20 ms, `:falling`/`:rising`/`:steady`), so "the envelope moves backward" shows as a direction (a reversed kick reads "swells ... cut off while loud; brightness rises").
+- **`Attack`** (first 50 ms after the onset): onset, 10-90% rise on waveform peaks (a low note's rise to within about a cycle), attack and sound peaks (Decibels), brightness as RMS frequency over 0-10, 15-25, 40-50 ms (a 10 ms FFT centroid of a 110 Hz tone read half its steady value; the time-domain second moment doesn't), clicks (1 ms frames whose energy above 4 kHz stands 12 dB over every frame within 10 ms but its neighbors: a saw's edges don't count), flat tops at the peak (runs of 8+ samples within 1e-4; resampled or lossy copies of clipped sounds may not show them, `crest` is there), perceived pitch over the attack and the body, and round 3's attack distance.
+- **`PerceivedPitch`**: subharmonic summation (Hermes 1988) on an eighth-semitone grid, harmonics minus 0.7x the inter-harmonics, with octave scouting (the best's octave neighbors and their scores).  Changed from round 3: the best is the middle of the top-scoring plateau, refined from its harmonics' peaks (the study took the lowest grid point of a tie and read a 110 Hz sine as 103 Hz).  Not a Comparison term (it did not rank his picks).
+- **`ModulationSpectrum`**: octave-band envelopes (125 Hz up; a partial top band when a third of an octave or more is left, weighing nothing in the distance) in dB at 200 frames/s, detrended; `depths` (RMS fluctuation per modulation band 0.25-32 Hz) and `distance` are round 3's measure; `peaks` are the clear modulations over the body (spectral peak, then a sinusoid fit; kept when it holds 30% of the band's fluctuation, swings 0.5 dB, explains half the envelope's variance, and isn't on the slowest rate the length allows; neighboring bands at the same rate merged): "AM 0.60 Hz (rate ±0.01), ±1.5 dB in 125 Hz-2 kHz".  Rates are Pitches (`peak.rate.lfo` plays one), depths Decibels.
+- **`BandEnvelopes`**: octave-band levels every 5 ms, and the top three octaves under the band in thirds relative to the whole (spread, 1-8 Hz fluctuation, drift; `moving`).
+- **`SpectralMotion`**: a resonant peak's track (spectrum smoothed over ±1/12 octave and ±1.5 f0, prominence over the higher of its two 1/6-2/3-octave sides, the frame's own f0 and 2 f0 skipped) as `:falling`/`:rising`/`:static`, and comb teeth (cepstral peak of the detrended log spectrum over 500 Hz, delays 0.4-10 ms, a pitched sound's period multiples skipped) as `:sliding_down`/`:sliding_up`/`:static`/`:wandering`.  Phasers (unequal notches) don't show as combs.  Synthetic: a 4 -> 1 kHz bandpass sweep and a 1 -> 5 ms flanger read right; noise, a harmonic tone, and a kick read neither.
+- **`Bleed`**: round 3's screen (second onsets above 2 kHz in a one-shot, a top that outlasts the body, energy under a steady note's fundamental, noise between harmonics), with masks.  Added: high bands that peak 15 ms or more after the body count as later onsets (a hat on a kick without a click of its own was missed).
+
+`Report` (`analyze`) runs them all on one Signal: about 0.27 s for a 2 s tone, 0.06 s for a 0.5 s kick (Mac container, i9-9880H, YJIT, after the first call; the first call about 0.5 s).
+
+## Comparing: `Comparison`, `rank`, `Preferences`
+
+`Comparison.new(target, candidate)` aligns both onsets to sample 10, cuts both to the shorter length, matches the candidate's RMS to the target's, and reports `spectral` (round 2's loss: per STFT size the floored log-magnitude distance `lsd` and spectral convergence `sc`, plus the 5 ms envelope `env`: lsd/6 + sc + env/6; sizes 256/1024/4096 at hop n/4 up to 0.6 s, else 1024/4096 at hop n/2), `modulation`, `attack`, `total` (L3 = spectral + 2 modulation + 0.3 attack, `WEIGHTS`; `weights:` replaces them), and `timbre` (the 4096-point magnitude residual in dB the Bench used to show).  About 0.1 s for two 2 s sounds.  `Analysis.rank(target, { label => sound }, by:)` sorts candidates; `Ranking#to_s` is a table of every term.
+
+Why these weights: four weightings of the same three terms all ranked 13-15 of 24, and the first (5, 1) made fits trade 5-8 dB of timbre for modulation and attack, so the spectral part leads.  Learned weights over all ten families did not generalize (9/24 leave-one-out); the labeled set is small, 11 families were tried (the modulation term's p 0.005 is about 0.05 corrected), and his picks were not blind.  Treat the agreement as a direction.
+
+`Preferences.new(items).evaluate(scorers)` is round 3's `eval_prefs.rb` method: per distance, top-1 hits, pairs ordered right (ties half), mean reciprocal rank, and exact one-sided p values under random rankings (the distributions of sums of per-item outcomes, instead of the study's Monte Carlo).  Items carry `target:`/`candidates:` (compared here) or precomputed `scores:`.  On round 3's stored distances it reproduces the study's table (L3 15/24, p 0.001).  Write the distance's predicted pick down before the listener hears a new set: that is the clean test.
+
+## Looking: `Look`
+
+`Look.save(path, sounds)` (`look`): a column per sound, rows for the whole waveform, the first 50 ms, a log-frequency spectrogram, and a linear spectrogram of the top three octaves under the first sound's band, onset-aligned on one amplitude scale, axes in seconds and Hz, drawn by `MB::Sound::Plot` (`plotting.md`; the figure is built on mb-sound's side of the plot boundary).  700 x 230 pixels per column and row (1400 x 920 for two sounds, about 1.7k tokens read as an image); about 0.9 s for one sound and 2 s for two.  Read it and write down what you see, row by row, before changing a sound (`ANALYSIS_TECHNIQUES.md` section 2 on the research branch has round 3's table of what to look for).
+
+## Known weak spots
+
+- **Pitch envelopes and envelope shapes** are what his notes still flag (all of round 3's 909 kick fits, IT 9, MOD1 9, MOD2 11 "the envelope moves backward").  No Comparison term reads them as shapes: L3's attack term sees 50 ms of level and spectrum, its spectral term a 5 ms envelope.  `PitchEnvelope` and `Envelope` read them for looking and hand-tuning; a pitch-envelope distance is untested against his picks.
+- `PitchContour` folds octaves around the median (YIN octave jumps), so a sweep over an octave reads as a Sweep from its ends, not a contour.
+- AM readings on percussive sounds: a falling pitch moves energy between bands, which the fit-quality and edge-rate checks reject (a synthetic kick read "AM 5.2 Hz" before them).
+- The heuristics' thresholds (clicks, flat tops, resonances, combs, bleed, envelope shapes) were set on synthetic signals, not tuned on recordings.
+
+## Left out (2026-11-03)
+
+The optimizer (CMA-ES), the voices and fitting harness, the round 3 refits, the other distance families (pitch modulation, HF band envelopes, loudness-weighted spectra, clip matching: none beat chance alone), learned weights, and anything about his private samples stay on the research branches.  Masks (`Bleed#masks`) are reported but no Comparison applies them yet.
