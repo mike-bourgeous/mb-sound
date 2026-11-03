@@ -84,6 +84,10 @@ module MB
           r.is_a?(Range) && r.begin.is_a?(Integer)
         end
 
+        # (see #keys_of; WeakMap keys compare by identity)
+        KEYS_BY_NODES = ObjectSpace::WeakMap.new
+        EMPTY_KEYS = [].freeze
+
         module_function
 
         # The nodes of graph +roots+, each once (UI::Inspect.nodes_of's
@@ -139,16 +143,32 @@ module MB
         # The call keys of +method+'s calls in graph +roots+, in the order
         # the patch made them (by Call#seq: the same from any root, and when
         # the patch builds again).
+        #
+        # A caller's +all+ (.nodes(roots), which callers keep while they look
+        # up a graph's params: the inspector's binds per graph) gets every
+        # method's keys from one walk, kept for that Array (fuzz-fixes-2:
+        # a walk of the whole graph per param made the inspector's binds
+        # quadratic, about 1.8 million #call_of calls in
+        # inspect_editability_spec, where a kit has 30-60 settings over
+        # hundreds of nodes).
         def keys_of(roots, method, all: nil)
-          seqs = {}
-          (all || nodes(roots)).each do |n|
+          return (KEYS_BY_NODES[all] ||= keys_by_method(all)).fetch(method, EMPTY_KEYS) if all
+
+          keys_by_method(nodes(roots)).fetch(method, EMPTY_KEYS)
+        end
+
+        # { method => call keys in the order the patch made them } over
+        # +nodes+ (see #keys_of).
+        def keys_by_method(nodes)
+          seqs = Hash.new { |h, m| h[m] = {} }
+          nodes.each do |n|
             (calls_of(n) + bundle_calls(n)).each do |c|
-              next unless (c.written || c.name) == method
               k = GraphNode::Recipe.key_of(c) or next
-              seqs[k] = c.seq if seqs[k].nil? || c.seq < seqs[k]
+              s = seqs[c.written || c.name]
+              s[k] = c.seq if s[k].nil? || c.seq < s[k]
             end
           end
-          seqs.sort_by { |_, seq| seq }.map(&:first)
+          seqs.transform_values { |s| s.sort_by { |_, seq| seq }.map(&:first).freeze }.freeze
         end
 
         # The recorded calls of bundles +node+ was made from, nearest first:

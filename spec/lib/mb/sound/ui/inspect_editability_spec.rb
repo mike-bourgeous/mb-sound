@@ -151,15 +151,16 @@ RSpec.describe('Inspector editability (Note 15)', :aggregate_failures) do
       end
       2.times { session.process_buffer }
       roots = inspect.roots(session.ui_graphs[:t])
-      kit = lb.nodes(roots).find { |n| n.is_a?(MB::Sound::Drums::Kit) }
+      all = lb.nodes(roots) # (walked once, as the inspector does: LiteralBinding.keys_of keeps its keys per list)
+      kit = all.find { |n| n.is_a?(MB::Sound::Drums::Kit) }
       expect(kit).not_to be_nil
       checked = 0
       refused = []
       kit.voices.each do |vname, voice|
         voice.param_info.each_key do |setting|
           next unless lb.literal?(voice.knobs[setting])
-          t = lb.target(roots, kit, :"#{vname}_#{setting}")
-          knob = lb.knob_name(:t, t, roots).first
+          t = lb.target(roots, kit, :"#{vname}_#{setting}", all: all)
+          knob = lb.knob_name(:t, t, roots, all: all).first
           got = session.arrangement.bind_probe(:t, session.arrangement.tracks[:t], t, knob, lb.knob_default(t.param, t.value, lb.kit_range(t)))
           checked += 1
           refused << [vname, setting, got.is_a?(Exception) ? got.message : 'a build knob'] if got.is_a?(Exception) || got.build?
@@ -201,16 +202,21 @@ RSpec.describe('Inspector editability (Note 15)', :aggregate_failures) do
 
   EDIT_ENTRIES.each do |name|
     it "edits every param of #{name} or lists the gap" do
-      source = begin
-        MB::Sound.keeping_random_state { MB::Sound.preset(name, midi: EDIT_CLIP) }
-        EDIT_CLIP
+      # (drum kits take drum notes: a kit raises SourceMismatch on the
+      # melodic clip, and the track is made again on every GM drum note;
+      # before fuzz-fixes-2 every preset was built once more first to find
+      # out)
+      source = EDIT_CLIP
+      begin
+        check(name) do
+          MB::Sound.track(:t, name)
+          MB::Sound.bg(:t, source)
+        end
       rescue MB::Sound::GraphIO::LoadError => err
-        raise unless err.message.include?('SourceMismatch')
-        EDIT_BEAT
-      end
-      check(name) do
-        MB::Sound.track(:t, name)
-        MB::Sound.bg(:t, source)
+        raise unless err.message.include?('SourceMismatch') && source.equal?(EDIT_CLIP)
+
+        source = EDIT_BEAT
+        retry
       end
     end
   end
