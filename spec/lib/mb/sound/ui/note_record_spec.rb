@@ -47,7 +47,7 @@ RSpec.describe('UI notes with the sound they are about', :aggregate_failures) do
     rec = ui::NoteLog.read(n.data)
     expect(rec).to include(version: 1, text: 'the attack is too soft', pointed: { seconds: 0.012, hz: 3000.0 })
     expect(rec[:sound]).to include(track: 'lead', params: { cutoff: 2000.0, resonance: 0.25 })
-    expect(rec[:sound][:instrument]).to include(name: 'note_fit', path: fit.path)
+    expect(rec[:sound][:instrument]).to include(name: 'note_fit', path: fit.version) # (the version it played: hand-tune-2)
     expect(rec[:sound][:knobs]).to include("lead/cutoff": 2000.0)
     expect(rec[:sound][:reference]).to include(source: 'darker', track: 'lead_ref', hearing: 'patch')
     expect(rec[:sound][:note]).to include(number: 45)

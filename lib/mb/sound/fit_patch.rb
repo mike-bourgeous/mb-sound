@@ -1,3 +1,4 @@
+require 'digest'
 require 'fileutils'
 require 'prism'
 
@@ -57,12 +58,14 @@ module MB
       # +column+ in the code (1-based), the literal's +text+.
       Site = Data.define(:name, :line, :column, :text)
 
-      # A written fit patch: +name+, +path+ (the document), +entry+ (a
-      # Library::Entry for `track`/`design`; see #library_entry), +params+
-      # ({ name => MB::Sound::Param }), +sites+ (Sites), +missing+ (param
-      # names found nowhere in the code), +skipped+ ({ param => why } for
-      # those found only where a param can't go), +text+ (the document).
-      Patch = Data.define(:name, :path, :entry, :params, :sites, :missing, :skipped, :text) do
+      # A written fit patch: +name+, +path+ (the document, where it is
+      # edited), +version+ (the immutable copy of this text the track plays;
+      # see .version_path), +entry+ (a Library::Entry for `track`/`design`;
+      # see #library_entry), +params+ ({ name => MB::Sound::Param }),
+      # +sites+ (Sites), +missing+ (param names found nowhere in the code),
+      # +skipped+ ({ param => why } for those found only where a param
+      # can't go), +text+ (the document).
+      Patch = Data.define(:name, :path, :version, :entry, :params, :sites, :missing, :skipped, :text) do
         # The Library::Entry `track :kick, fit` and `design :kick, fit` play
         # (Arrangement::InstrumentPatch takes anything answering it).
         def library_entry = entry
@@ -119,12 +122,24 @@ module MB
       # skipped ({ param => why its literal stays a number })].  Literals
       # inside a Range, typed values (`4.07.db`, `12.cents`), and runtime
       # blocks (`then`) stay numbers: those places take no nodes.
-      def document(code, params, name:, description: nil, input: :midi)
+      #
+      # A param the code names (`h.body(tune, ...)`, as a document's body
+      # does) is found there too (a Site whose text is the name).  With
+      # +match:+ (param names), only those params' values name literals,
+      # every other number staying one (HandTune.retune: a new block's
+      # numbers become its new params).  +saved:+ is the header's time
+      # (nil leaves it out: Take::Reader's rebuilt versions).
+      def document(code, params, name:, description: nil, input: :midi, match: nil, saved: Time.now)
         code = unwrap(code.to_s)
         result = Prism.parse(code)
         raise Error, "fit_patch #{name}: the code doesn't parse: #{result.errors.first&.message}" unless result.success?
         bad = params.keys.select { |k| !k.to_s.match?(/\A[a-z_][a-z0-9_]*\z/) || VOICE_CALLS.include?(k) || k == input }
         raise Error, "fit_patch #{name}: #{bad.map(&:inspect).join(', ')} can't name a param (lowercase words; not #{input} or a voice call)" unless bad.empty?
+        calls = params.keys.select { |k| GraphIO::Registry.top_level.include?(k) }
+        unless calls.empty?
+          raise Error, "fit_patch #{name}: #{calls.map(&:inspect).join(', ')} can't name a param: #{calls.length == 1 ? 'it is a function' : 'they are functions'} " \
+                       "documents call (#{calls.first}_level:)"
+        end
         locals = local_names(result.value) & params.keys
         unless locals.empty?
           raise Error, "fit_patch #{name}: the code assigns #{locals.join(', ')} itself; give #{locals.length == 1 ? 'that param' : 'those params'} another name (#{locals.first}_value:)"
@@ -137,8 +152,9 @@ module MB
 
         sites = []
         skipped = {}
+        matching = match ? params.slice(*match.map(&:to_sym)) : params
         literals(result.value) do |node, key, why|
-          hits = params.select { |_, p| matches?(node, p.default) }.keys
+          hits = matching.select { |_, p| matches?(node, p.default) }.keys
           next if hits.empty?
           if why
             hits.each { |h| skipped[h] ||= "#{node.slice} is #{why}" }
@@ -154,14 +170,19 @@ module MB
           edits << [loc.start_offset, loc.end_offset, pick.to_s]
           sites << Site.new(name: pick, line: loc.start_line, column: loc.start_column + 1, text: node.slice)
         end
+        references(result.value, params.keys).each do |node|
+          loc = node.location
+          sites << Site.new(name: node.name, line: loc.start_line, column: loc.start_column + 1, text: node.slice)
+        end
+        sites.sort_by! { |x| [x.line, x.column] }
         missing = params.keys - sites.map(&:name).uniq
 
         body = code.b
         edits.sort_by { |s, _, _| -s }.each { |s, e, text| body[s...e] = text.b }
         body = body.force_encoding(code.encoding)
 
-        meta = { name: name.to_s, kind: :synth, saved: Time.now.utc.strftime('%Y-%m-%dT%H:%M:%SZ'), mb_sound: GraphIO.library_version, from: 'fit_patch',
-                 description: description || "A fitted voice with every fitted number a knob (fit_patch, hand-tune-1): #{params.keys.join(', ')}" }
+        meta = { name: name.to_s, kind: :synth, saved: saved&.utc&.strftime('%Y-%m-%dT%H:%M:%SZ'), mb_sound: GraphIO.library_version, from: 'fit_patch',
+                 description: description || "A fitted voice with every fitted number a knob (fit_patch, hand-tune-1): #{params.keys.join(', ')}" }.compact
         lines = ['# mb-sound graph document: a Ruby subset that MB::Sound.preset and', '# MB::Sound::GraphIO.load read without running it (no eval).']
         lines << GraphIO.graph_line(meta.map { |k, v| "#{k}: #{RubyValue.to_ruby(v)}" })
         lines << GraphIO.inputs_line(input => :notes)
@@ -172,22 +193,55 @@ module MB
 
       # Writes the document for +code+ and +params+ (see .document; params
       # as .declare takes them) to +path+ (default: .dir/NAME.mbg.rb,
-      # replacing an older fit of that name), checks that it loads and
-      # plays a block, and returns a Patch.
-      def save(name, code, params, path: nil, description: nil)
+      # replacing an older fit of that name) and its version (.write),
+      # checks that it loads and plays a block, and returns a Patch.
+      def save(name, code, params, path: nil, description: nil, match: nil)
         name = name.to_sym
         raise Error, "fit_patch takes a name for the patch (a Symbol like :kick_fit), got #{name.inspect}" unless name.to_s.match?(/\A[a-z_][a-z0-9_]*\z/)
         params = declare(params)
         raise Error, "fit_patch #{name}: give the fitted numbers as knobs (tune: (30.0..110.0).at(51.3), ...)" if params.empty?
-        text, sites, missing, skipped = document(code, params, name: name, description: description)
+        text, sites, missing, skipped = document(code, params, name: name, description: description, match: match)
         check(name, text)
+        path, version, entry = write(name, text, path: path)
+        Patch.new(name: name, path: path, version: version, entry: entry, params: params.reject { |k, _| missing.include?(k) }.freeze, sites: sites,
+                  missing: missing, skipped: skipped, text: text.freeze)
+      end
+
+      # The canonical path of fit +name+'s document (.dir/NAME.mbg.rb), or
+      # +path+ expanded.
+      def path_of(name, path = nil)
         path = File.expand_path(path || File.join(dir, "#{name}#{GraphIO::EXTENSION}"))
-        path += GraphIO::EXTENSION unless path.end_with?('.rb')
+        path.end_with?('.rb') ? path : path + GraphIO::EXTENSION
+      end
+
+      # Writes document +text+ of fit +name+ to its path (.path_of: where
+      # it is read and edited) and its version (.version_path), and returns
+      # [path, version path, entry]: the Library::Entry a track plays,
+      # whose document is the version (so an undo, or a rebuild after the
+      # file was edited, plays the text that was loaded), with the path as
+      # its lineage (InstrumentPatch.same_instrument?: a new version of the
+      # same fit is the same instrument, so turned knobs carry).
+      def write(name, text, path: nil)
+        path = path_of(name, path)
         FileUtils.mkdir_p(File.dirname(path))
         File.write(path, text)
-        entry = Library.document_entry(path, Library.session_shelf)
-        Patch.new(name: name, path: path, entry: entry, params: params.reject { |k, _| missing.include?(k) }.freeze, sites: sites, missing: missing,
-                  skipped: skipped, text: text.freeze)
+        version = version_path(text, name)
+        entry = Library.document_entry(version, Library.session_shelf)
+        entry = entry.with(settings: entry.settings.merge(lineage: path))
+        [path, version, entry]
+      end
+
+      # The immutable copy of document +text+ of fit +name+:
+      # .dir/versions/NAME-<12 hex digits of its SHA-256>.mbg.rb, written
+      # if it isn't there yet.  The same text, the same path (Take::Reader
+      # renders a take's start and end from the versions its lines made).
+      def version_path(text, name)
+        digest = Digest::SHA256.hexdigest(text)[0, 12]
+        path = File.join(dir, 'versions', "#{name}-#{digest}#{GraphIO::EXTENSION}")
+        return path if File.file?(path) && File.read(path) == text
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, text)
+        path
       end
 
       # Notes the check plays at once (a kit voice answers only its own
@@ -206,6 +260,19 @@ module MB
         raise
       rescue StandardError, ScriptError => e
         raise Error.new("fit_patch #{name}: the document doesn't load or play: #{e.class}: #{e.message.lines.first&.strip}", document: text)
+      end
+
+      # Header calls of a graph document (not its body).
+      HEADER_CALLS = %i[graph inputs param knob].freeze
+
+      # The body of graph document +text+ (its code after the header's
+      # graph, inputs, param, and knob lines), as `retune :kick, code` takes
+      # it.
+      def body_of(text)
+        tree = Prism.parse(text)
+        return '' unless tree.success?
+        first = tree.value.statements.body.find { |st| !(st.is_a?(Prism::CallNode) && st.receiver.nil? && HEADER_CALLS.include?(st.name)) }
+        first ? text.byteslice(first.location.start_offset..).strip : ''
       end
 
       # +code+ without a `play (...)` or `bg (...)` around it (fits print
@@ -240,6 +307,16 @@ module MB
           stack.concat(n.compact_child_nodes)
         end
         nil
+      end
+
+      # The CallNodes of +root+'s tree that name one of +names+ as a bare
+      # word (`tune`, read as a param by GraphIO's loader).
+      def references(root, names, out = [])
+        if root.is_a?(Prism::CallNode) && root.receiver.nil? && root.arguments.nil? && root.block.nil? && root.variable_call? && names.include?(root.name)
+          out << root
+        end
+        root.compact_child_nodes.each { |c| references(c, names, out) }
+        out
       end
 
       # The local variable names +node+'s tree assigns or takes as block

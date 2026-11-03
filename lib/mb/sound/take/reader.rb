@@ -13,8 +13,12 @@ module MB
       # through the same text: Take#to_ruby) is walked with Prism, never
       # evaluated, as the library's loaders are: the Replay's start state
       # (tempo), then each `r.line`'s code, whose `turn`/`move`, `level`,
-      # `ab`, `undo`, `knob`, `fit_patch`, `track`, and `design` calls it
-      # reads.  Values are read from literals: numbers, Rationals, `.hz`,
+      # `ab`, `undo`, `knob`, `fit_patch`, `tune`, `retune`, `track`, and
+      # `design` calls it reads.  A `retune` (hand-tune-2) is a Structure
+      # row between the turns, and each version of a fit patch's document
+      # the take played is kept (+versions+: rebuilt from the lines with
+      # FitPatch.document, Prism only), so start and end render from their
+      # own structures.  Values are read from literals: numbers, Rationals, `.hz`,
       # `.khz`, `.ms`, `.seconds`, `.db` (a level's gain), keyframe Hashes
       # (`turn :cut, 0 => 400, 1.n8 => 3000`: a gesture, its keys kept, its
       # last value the row's +to+), and ranged defaults (`(lo..hi).at(v)`).
@@ -38,12 +42,43 @@ module MB
         # 0), +kind+ (:turn, :gesture (a held key's keyframes), :ramp (over:),
         # :level, :undo), +steps+ (a gesture's keys [[seconds, value], ...]
         # or its raw steps [[frames, value], ...] when the take kept them),
-        # +code+ (the line).
+        # +code+ (the line).  A :reset row is a kept knob a redefinition put
+        # back (Structure#reset).
         Turn = Data.define(:knob, :from, :to, :pos, :seconds, :line, :kind, :steps, :code) do
           def to_s
             f = from.nil? ? '?' : Reader.number(from)
             t = to.nil? ? '?' : Reader.number(to)
             "#{format('%8.3f', seconds.to_f)} s  #{knob.inspect}  #{f} -> #{t}  (#{kind})"
+          end
+        end
+
+        # A version of a track's fit patch document the take played:
+        # +track+, +name+ (the fit's), +text+ (the document), +line+ (the take
+        # line that made it; -1 for one given with +patch:+).  #path is its
+        # immutable copy (FitPatch.version_path, written when first asked).
+        Version = Data.define(:track, :name, :text, :line) do
+          def path = FitPatch.version_path(text, name)
+
+          def declarations = GraphIO.parse(text).declarations
+
+          def inspect = "#<Take::Reader::Version #{track.inspect} #{name} line #{line}>"
+        end
+
+        # A redefinition of a track's fit patch (`retune`: a structure row
+        # between the turns): +track+, +added+, +removed+, +kept+ (param
+        # names), +changed+ (kept params declared anew: range, curve, or
+        # value), +reset+ (kept knobs whose turned value the new range
+        # leaves out, back at the param's value: a :reset row each follows),
+        # +pos+, +seconds+ (where the rebuild landed), +line+, +code+,
+        # +version+ (the Version it made, or nil when the line's document
+        # couldn't be read).
+        Structure = Data.define(:track, :added, :removed, :kept, :changed, :reset, :pos, :seconds, :line, :code, :version) do
+          def to_s
+            parts = [*added.map { |p| "+#{p}" }, *removed.map { |p| "-#{p}" }]
+            parts << "kept #{kept.length}"
+            parts << "changed #{changed.join(', ')}" unless changed.empty?
+            parts << 'document unknown' unless version
+            "#{format('%8.3f', seconds.to_f)} s  #{track.inspect}  structure: #{parts.join(', ')}  (retune)"
           end
         end
 
@@ -55,9 +90,12 @@ module MB
         # What the reader found: +rows+ (Turns in take order), +flips+,
         # +start+ and +finish+ ({ knob => value } before the first and after
         # the last row, for the knobs the rows turned), +tracks+ ({ track =>
-        # document path } of fit patches and +patch:+ entries), +bpm+,
-        # +lines+ (the take's line codes).
-        Result = Data.define(:rows, :flips, :start, :finish, :tracks, :bpm, :lines) do
+        # document path } of fit patches and +patch:+ entries: the last
+        # version's), +bpm+, +lines+ (the take's line codes), +versions+ ({
+        # track => [Version, ...] }: each fit patch document the take played,
+        # in order), +structures+ (Structures: the redefinitions), +events+
+        # (the rows and structures in take order).
+        Result = Data.define(:rows, :flips, :start, :finish, :tracks, :bpm, :lines, :versions, :structures, :events) do
           # The knobs whose value at the end differs from the start.
           def changed = finish.select { |k, v| !v.nil? && start[k] != v }.keys
 
@@ -79,12 +117,21 @@ module MB
             }
           end
 
+          # The path of +track+'s document at the start (+which+ :start) or
+          # the end (:finish): the first or last Version's (a take that
+          # redefined the patch played several), else +tracks+'.
+          def document(track, which = :finish)
+            list = versions[track]
+            v = list && (which == :start ? list.first : list.last)
+            path = v&.path || tracks[track]
+            path or raise ArgumentError, "no graph document known for track #{track.inspect} (Take.read(..., patch: { #{track}: path }))"
+          end
+
           # The params of +track+'s document at the start (+which+ :start)
           # or the end (:finish): { param => value }, the document's values
           # for params no row turned.
           def values(track, which = :finish)
-            path = tracks[track] or raise ArgumentError, "no graph document known for track #{track.inspect} (Take.read(..., patch: { #{track}: path }))"
-            doc = GraphIO.parse(path)
+            doc = GraphIO.parse(document(track, which))
             state = which == :start ? start : finish
             doc.declarations.to_h { |p, decl|
               k = Session::Name.param(track, p)
@@ -98,8 +145,7 @@ module MB
           # seconds in +seconds+.  With +dir+, also writes start.wav and
           # finish.wav there (Returns the Hash with :paths).
           def renders(track, note: 60, velocity: 0.8, hold: nil, seconds: 1.0, dir: nil)
-            path = tracks[track] or raise ArgumentError, "no graph document known for track #{track.inspect} (Take.read(..., patch: { #{track}: path }))"
-            out = %i[start finish].to_h { |w| [w, HandTune.render(path, values(track, w), note: note, velocity: velocity, hold: hold, seconds: seconds)] }
+            out = %i[start finish].to_h { |w| [w, HandTune.render(document(track, w), values(track, w), note: note, velocity: velocity, hold: hold, seconds: seconds)] }
             if dir
               FileUtils.mkdir_p(dir)
               out[:paths] = %i[start finish].to_h { |w|
@@ -111,11 +157,12 @@ module MB
             out
           end
 
-          # The rows as a table, one per line.
+          # The rows (and structure rows) as a table, one per line.
           def to_s
             head = "take: #{rows.length} turn#{'s' unless rows.length == 1} of #{rows.map(&:knob).uniq.length} knobs, #{flips.length} A/B flip#{'s' unless flips.length == 1}"
+            head += ", #{structures.length} redefinition#{'s' unless structures.length == 1}" unless structures.empty?
             ch = changed.map { |k| "#{k} #{Reader.number(start[k])} -> #{Reader.number(finish[k])}" }
-            [head, *rows.map { |r| "  #{r}" }, ("changed: #{ch.join('; ')}" unless ch.empty?)].compact.join("\n")
+            [head, *events.map { |r| "  #{r}" }, ("changed: #{ch.join('; ')}" unless ch.empty?)].compact.join("\n")
           end
 
           def inspect = "#<#{to_s.lines.first.strip}>"
@@ -158,8 +205,11 @@ module MB
           @start = start.transform_keys(&:to_sym)
           @defaults = defaults.transform_keys(&:to_sym)
           @patch = patch.to_h { |t, p| [t.to_sym, p.respond_to?(:path) ? p.path : p.to_s] }
-          @fits = {}    # (local name or fit name => [path, { param => value }])
+          @fits = {}    # (local name or fit name => [path, { param => value }, name, version text or nil])
           @tracks = {}  # (track => document path)
+          @versions = {} # (track => [Version, ...])
+          @structures = []
+          @events = []
           @known = {}   # (knob => value at the take's start, as found)
           @state = {}   # (knob => value now)
           @rows = []
@@ -183,8 +233,9 @@ module MB
           start = {}
           @rows.each { |r| start[r.knob] = r.from unless start.key?(r.knob) }
           finish = @rows.to_h { |r| [r.knob, @state[r.knob]] }
-          Result.new(rows: @rows.freeze, flips: @flips.freeze, start: start.freeze, finish: finish.freeze, tracks: @tracks.dup.freeze, bpm: @bpm,
-                     lines: @lines.freeze)
+          tracks = @tracks.merge(@versions.to_h { |t, list| [t, list.last.path] })
+          Result.new(rows: @rows.freeze, flips: @flips.freeze, start: start.freeze, finish: finish.freeze, tracks: tracks.freeze, bpm: @bpm,
+                     lines: @lines.freeze, versions: @versions.transform_values(&:freeze).freeze, structures: @structures.freeze, events: @events.freeze)
         end
 
         private
@@ -272,6 +323,7 @@ module MB
           when :fit_patch then (f = read_fit(node)) && (@fits[f[2]] = f)
           when :track, :design then read_track(args)
           when :tune then read_tune(node, args)
+          when :retune then read_retune(node, args)
           when :ab then read_ab(node, args)
           when :undo then read_undo(node)
           end
@@ -292,7 +344,26 @@ module MB
           }.transform_values { |v| v.respond_to?(:default) ? v.default : v }
           path = File.expand_path(path.to_s) if path
           path ||= File.join(FitPatch.dir, "#{name}#{GraphIO::EXTENSION}")
-          [path, params, name]
+          [path, params, name, fit_text(name, string_of(args[1]), kw)]
+        end
+
+        # The document a `fit_patch`/`tune` line wrote for fit +name+ from
+        # +code+ and its param keywords +kw+ ({ key => node }), rebuilt
+        # (FitPatch.document, without its saved time), or nil.
+        def fit_text(name, code, kw)
+          return nil unless code
+          given = kw.except(:path, :description, :ref, :play, :as).transform_values { |v| value(v) }
+          desc = kw[:description] && value(kw[:description])
+          FitPatch.document(code, FitPatch.declare(given), name: name, description: desc.is_a?(String) ? desc : nil, saved: nil)[0]
+        rescue StandardError
+          nil
+        end
+
+        # Starts +track+'s versions at document +text+ of fit +name+ (a fit
+        # loaded on it).
+        def start_version(track, name, text)
+          return unless text
+          @versions[track] = [Version.new(track: track, name: name, text: text, line: @line_ctx ? @line_ctx[:index] : -1)]
         end
 
         # `tune :kick, code, ref:, play:, as:, param: (lo..hi).at(v), ...`
@@ -311,7 +382,63 @@ module MB
           }
           name = as.is_a?(Symbol) ? as : :"#{track}_fit"
           @tracks[track] = File.join(FitPatch.dir, "#{name}#{GraphIO::EXTENSION}")
+          start_version(track, name, fit_text(name, string_of(args[1]), keywords(node)))
           params.each { |p, v| seed(Session::Name.param(track, p), v) }
+        end
+
+        # `retune :kick, code, param: (lo..hi).at(v), ...` or `retune :kick,
+        # document: "..."` (HandTune.retune): a Structure row, the track's
+        # next Version, and :reset rows for turned knobs the new ranges
+        # leave out.  Knobs no row turned take the new params' values (as
+        # TrackKnobs gives untouched knobs); added ones start at theirs.
+        def read_retune(node, args)
+          track = value(args[0])
+          return unless track.is_a?(Symbol)
+          kw = keywords(node)
+          prev = @versions[track]&.last
+          if prev.nil? && (path = @tracks[track]) && File.file?(path)
+            name = (GraphIO.parse(path).name rescue nil) || File.basename(path, GraphIO::EXTENSION)
+            prev = Version.new(track: track, name: name.to_sym, text: File.read(path), line: -1)
+          end
+          text =
+            if kw[:document]
+              string_of(kw[:document])
+            elsif args[1] && prev && (code = string_of(args[1]))
+              begin
+                doc = GraphIO.parse(prev.text)
+                given = FitPatch.declare(kw.transform_values { |v| value(v) })
+                decls = doc.declarations.select { |_, p| p.is_a?(Param) }.merge(given)
+                FitPatch.document(code, decls, name: prev.name, description: doc.description, match: given.keys, saved: nil)[0]
+              rescue StandardError
+                nil
+              end
+            end
+          version = text && Version.new(track: track, name: prev&.name || ((GraphIO.parse(text).name rescue nil) || :"#{track}_fit").to_sym, text: text,
+                                        line: @line_ctx[:index])
+          before = prev ? (prev.declarations rescue {}) : {}
+          after = version ? (version.declarations rescue {}) : before
+          kept = before.keys & after.keys
+          changed = kept.reject { |p| before[p].range == after[p].range && before[p].default == after[p].default && before[p].curve == after[p].curve }
+          reset = {}
+          kept.each do |p|
+            k = Session::Name.param(track, p)
+            turned = @state.key?(k) || @start.key?(k)
+            if turned
+              v = current(k)
+              r = after[p].range
+              reset[p] = [v, after[p].default] if v.is_a?(Numeric) && r && !r.cover?(v)
+            elsif changed.include?(p)
+              @state[k] = after[p].default
+            end
+          end
+          (after.keys - before.keys).each { |p| seed(Session::Name.param(track, p), after[p].default) }
+          pos = landing
+          st = Structure.new(track: track, added: after.keys - before.keys, removed: before.keys - after.keys, kept: kept, changed: changed, reset: reset,
+                             pos: pos, seconds: seconds_at(pos), line: @line_ctx[:index], code: @line_ctx[:code], version: version)
+          @structures << st
+          @events << st
+          (@versions[track] ||= (prev ? [prev] : [])) << version if version
+          reset.each { |p, (_from, to)| add_row(Session::Name.param(track, p), to, :reset, nil) }
         end
 
         # `track :kick, fit` / `design :kick, fit, clip`: links the track
@@ -330,6 +457,7 @@ module MB
                   end
             next unless fit
             @tracks[track] = fit[0]
+            start_version(track, fit[2], fit[3])
             fit[1].each { |p, v| seed(Session::Name.param(track, p), v) }
           end
         end
@@ -337,8 +465,12 @@ module MB
         # Adds +track+'s document +path+ (the +patch:+ option): its params'
         # values as where its knobs start.
         def add_track(track, path)
-          @tracks[track] = path
-          GraphIO.parse(path).declarations.each { |p, decl| seed(Session::Name.param(track, p), decl.default) }
+          text = path.include?("\n") ? path : File.read(path)
+          doc = GraphIO.parse(text)
+          name = (doc.name || File.basename(path, GraphIO::EXTENSION)).to_sym
+          start_version(track, name, text) if doc.meta[:from] == 'fit_patch' || path.include?("\n")
+          @tracks[track] = path.include?("\n") ? @versions[track].last.path : path
+          doc.declarations.each { |p, decl| seed(Session::Name.param(track, p), decl.default) }
         rescue StandardError
           nil
         end
@@ -414,6 +546,7 @@ module MB
           row = Turn.new(knob: knob, from: from, to: to, pos: pos, seconds: seconds_at(pos), line: @line_ctx[:index], kind: kind, steps: steps,
                          code: @line_ctx[:code])
           @rows << row
+          @events << row
           @line_ctx[:rows] << row
         end
 
@@ -534,9 +667,13 @@ module MB
       #     take.turns.renders(:kick, note: 36, seconds: 0.5)
       def turns(start: {}, patch: {})
         defaults = session.knobs.to_h { |n, k| [n, k.spec.default] }
+        ids = @mutex.synchronize { @lines.map(&:id) }
         live = session.arrangement.tracks.keys.filter_map { |t|
           path = Reference.document_path(session, t)
-          path && [t, path]
+          # (a track retuned during the take starts at the version it played
+          # before its first retune here)
+          first = HandTune.history(session)[t]&.find { |id, _old, _new| ids.include?(id) }
+          path && [t, first ? first[1] : path]
         }.to_h
         Reader.read(self, start: start, patch: live.merge(patch), defaults: defaults)
       end

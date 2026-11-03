@@ -121,6 +121,19 @@ module MB
           patch
         end
 
+        # True if Library::Entry +b+ is the same instrument as +a+ (a track
+        # given it again keeps its turned knobs and carries its state; see
+        # Arrangement#track): the same name, and the same location or the
+        # same lineage (settings[:lineage]: the versions of one fit patch,
+        # FitPatch.write).
+        def same_instrument?(a, b)
+          return false unless a && b && a.name == b.name
+          return true if a.location == b.location
+          la = a.settings.is_a?(Hash) && a.settings[:lineage]
+          lb = b.settings.is_a?(Hash) && b.settings[:lineage]
+          !!(la && la == lb)
+        end
+
         # The Library::Entry a track's +patch+ plays (through the counting
         # and binding wrappers), or nil for a patch block.
         def entry_of(patch)

@@ -108,7 +108,12 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
       fit = MB::Sound::FitPatch.save(:lead_fit, LEAD_CODE, LEAD_PARAMS)
       expect(fit.path).to eq(File.join(MB::Sound::FitPatch.dir, 'lead_fit.mbg.rb'))
       expect(File.read(fit.path)).to eq(fit.text)
-      expect(fit.entry).to have_attributes(name: :lead_fit, family: :preset, location: fit.path)
+      # (the track plays the version, an immutable copy; its lineage is the
+      # path, where the document is edited: hand-tune-2)
+      expect(fit.entry).to have_attributes(name: :lead_fit, family: :preset, location: fit.version)
+      expect(fit.version).to match(%r{/versions/lead_fit-\h{12}\.mbg\.rb\z})
+      expect(File.read(fit.version)).to eq(fit.text)
+      expect(fit.entry.settings[:lineage]).to eq(fit.path)
       expect(fit.values).to eq(cutoff: 1234.5, resonance: 0.25, attack: 0.01, clip: 0.3)
       expect(fit.to_s).to match(/fit patch lead_fit: 4 knobs \(cutoff, resonance, attack, clip\)/)
     end

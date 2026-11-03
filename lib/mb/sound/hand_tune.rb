@@ -100,19 +100,36 @@ module MB
       # before and after the step), +terms+ ({ term => change }: negative
       # is closer), +agrees+ (true when the loss fell or held within
       # +tolerance+, false when it calls his step worse).
+      # A step whose +row+ is a Take::Reader::Structure is a redefinition
+      # (retune): its loss change is the structure's own effect, at the
+      # knobs he had.
       Step = Data.define(:row, :before, :after, :terms, :agrees) do
+        # True for a redefinition's step.
+        def structure? = row.is_a?(Take::Reader::Structure)
+
         def to_s
           t = terms.map { |k, d| "#{k} #{format('%+.3f', d)}" }.join(', ')
-          "#{format('%8.3f', row.seconds.to_f)} s  #{row.knob}  #{Take::Reader.number(row.from)} -> #{Take::Reader.number(row.to)}  " \
+          what = structure? ? "#{row.track}  structure #{[*row.added.map { |p| "+#{p}" }, *row.removed.map { |p| "-#{p}" }].join(' ')}".rstrip :
+                              "#{row.knob}  #{Take::Reader.number(row.from)} -> #{Take::Reader.number(row.to)}"
+          "#{format('%8.3f', row.seconds.to_f)} s  #{what}  " \
             "loss #{format('%.3f', before)} -> #{format('%.3f', after)} (#{t})  #{agrees ? 'agrees' : 'DISAGREES'}"
         end
       end
+
+      # One stretch of his path played by one version of the patch
+      # (between redefinitions): +document+ (its path), +start+ and +finish+
+      # (the comparisons where it began and ended), +line+ (the straight
+      # line between, as Inference#line).
+      Segment = Data.define(:document, :start, :finish, :line)
 
       # What .infer found: +steps+ (Steps), +start+ and +finish+ (the
       # comparison at his start and end), +line+ ([[fraction, total], ...]:
       # the straight line from his start to his end, which a loss that
       # agrees with him falls along), +track+.
-      Inference = Data.define(:track, :steps, :start, :finish, :line) do
+      #
+      # +segments+ (Segments) split the path at redefinitions (retune); +line+
+      # is the last one's.  A redefinition is a Step of its own.
+      Inference = Data.define(:track, :steps, :start, :finish, :line, :segments) do
         # His steps the loss calls worse.
         def disagreements = steps.reject(&:agrees)
 
@@ -121,16 +138,25 @@ module MB
         # gave up.
         def weighted = start.terms.to_h { |k, v| [k, finish.terms[k] - v] }
 
-        # True if the loss falls along the straight line from start to end.
+        # True if the loss falls along the straight line from start to end
+        # (of the last segment).
         def monotone? = line.each_cons(2).all? { |(_, a), (_, b)| b <= a + 1e-9 }
+
+        # The redefinitions' steps.
+        def structures = steps.select(&:structure?)
 
         def to_s
           w = weighted.map { |k, d| "#{k} #{format('%+.3f', d)}" }.join(', ')
+          lines = segments.each_with_index.map { |sg, i|
+            mono = sg.line.each_cons(2).all? { |(_, a), (_, b)| b <= a + 1e-9 }
+            label = segments.length > 1 ? "segment #{i + 1} (#{File.basename(sg.document)})" : 'the straight line start -> end'
+            "along #{label}: #{sg.line.map { |f, v| "#{(f * 100).round}% #{format('%.3f', v)}" }.join(', ')}#{mono ? '' : ' (not falling all the way)'}"
+          }
           [
             "#{track}: loss #{format('%.3f', start.total)} at his start, #{format('%.3f', finish.total)} at his end (#{w})",
             "the loss agrees with #{steps.count(&:agrees)} of his #{steps.length} steps#{disagreements.empty? ? '' : '; calls worse:'}",
             *disagreements.map { |st| "  #{st}" },
-            "along the straight line start -> end: #{line.map { |f, v| "#{(f * 100).round}% #{format('%.3f', v)}" }.join(', ')}#{monotone? ? '' : ' (not falling all the way)'}",
+            *lines,
             'every step:', *steps.map { |st| "  #{st}" },
           ].join("\n")
         end
@@ -154,36 +180,67 @@ module MB
       #
       #     t = take.turns
       #     puts HandTune.infer(t, track: :kick, reference: 'kick_ref.wav', note: 36, seconds: 0.5)
+      #
+      # A take that redefined the patch (retune; Take::Reader::Structure)
+      # is scored in segments, one per version of the document: the
+      # redefinition is a step of its own (the loss at his knobs before it,
+      # then in the new structure at the knobs it carried: the structure's
+      # own effect), and each segment has its straight line.
       def infer(turns, track:, reference:, note: 60, velocity: 0.8, hold: nil, seconds: 1.0, tolerance: 1e-6, line: [0.25, 0.5, 0.75])
-        path = turns.tracks[track] or raise ArgumentError, "no graph document known for track #{track.inspect} (Take.read(..., patch: { #{track}: path }))"
+        path = turns.document(track, :start)
         doc = GraphIO.parse(path)
-        names = doc.params.keys.to_h { |p| [Session::Name.param(track, p), p] }
+        knob_of = ->(d) { d.params.keys.to_h { |p| [Session::Name.param(track, p), p] } }
+        names = knob_of.(doc)
         state = turns.values(track, :start)
-        score = ->(values) { compare(reference, render(path, values, note: note, velocity: velocity, hold: hold, seconds: seconds)[0], seconds: seconds) }
-        start = score.(state)
+        score = ->(at, values) { compare(reference, render(at, values, note: note, velocity: velocity, hold: hold, seconds: seconds)[0], seconds: seconds) }
+        # (the straight line from +a+ to +b+ in document +d+ at +at+)
+        segment = ->(at, d, a, b, from, to) {
+          pts = [[0.0, from.total]] + Array(line).map { |f|
+            v = d.declarations.to_h { |p, decl|
+              pa = decl.position(a[p]).to_f
+              pb = decl.position(b[p]).to_f
+              [p, decl.value(pa + (pb - pa) * f)]
+            }
+            [f.to_f, score.(at, v).total]
+          } + [[1.0, to.total]]
+          Segment.new(document: at, start: from, finish: to, line: pts.freeze)
+        }
+        start = score.(path, state)
         prev = start
-        steps = turns.rows.filter_map { |row|
-          p = names[row.knob] or next
-          next if row.to.nil?
-          state = state.merge(p => row.to)
-          now = score.(state)
+        seg = [state, start]
+        segments = []
+        steps = turns.events.filter_map { |row|
+          if row.is_a?(Take::Reader::Structure)
+            next unless row.track == track && row.version
+            segments << segment.(path, doc, seg[0], state, seg[1], prev)
+            old = doc.declarations
+            path = row.version.path
+            doc = GraphIO.parse(path)
+            names = knob_of.(doc)
+            # (as TrackKnobs gives them: kept knobs moved from their param's
+            # value keep it unless the new range leaves it out, others and
+            # added ones take the new params' values)
+            state = doc.declarations.to_h { |p, decl|
+              v = state[p]
+              moved = old[p] && v.is_a?(Numeric) && v != old[p].default
+              [p, moved && !row.reset.key?(p) ? v : decl.default]
+            }
+          else
+            next if row.kind == :reset # (in the structure's step)
+            p = names[row.knob] or next
+            next if row.to.nil?
+            state = state.merge(p => row.to)
+          end
+          now = score.(path, state)
           terms = now.terms.to_h { |k, v| [k, v - prev.terms[k]] }
           st = Step.new(row: row, before: prev.total, after: now.total, terms: terms, agrees: now.total <= prev.total + tolerance)
+          seg = [state, now] if row.is_a?(Take::Reader::Structure)
           prev = now
           st
         }
         finish = prev
-        a = turns.values(track, :start)
-        b = turns.values(track, :finish)
-        pts = [[0.0, start.total]] + Array(line).map { |f|
-          v = doc.declarations.to_h { |p, decl|
-            pa = decl.position(a[p]).to_f
-            pb = decl.position(b[p]).to_f
-            [p, decl.value(pa + (pb - pa) * f)]
-          }
-          [f.to_f, score.(v).total]
-        } + [[1.0, finish.total]]
-        Inference.new(track: track, steps: steps.freeze, start: start, finish: finish, line: pts.freeze)
+        segments << segment.(path, doc, seg[0], state, seg[1], finish)
+        Inference.new(track: track, steps: steps.freeze, start: start, finish: finish, line: segments.last.line, segments: segments.freeze)
       end
 
       # What `tune` opened: +track+, +fit+ (FitPatch::Patch), +opened+
@@ -236,3 +293,6 @@ module MB
     extend HandTuneMethods
   end
 end
+
+require_relative 'hand_tune/retune'
+
