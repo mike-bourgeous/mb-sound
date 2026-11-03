@@ -132,7 +132,8 @@ module MB
         # spectrum peak reads rates of sounds only two or three cycles long
         # several percent low (detrending and the window's edges); the fit
         # doesn't.  Returns [rate Hz, amplitude (in e's units), rate
-        # uncertainty Hz]: twice the Cramér-Rao bound of a sinusoid's
+        # uncertainty Hz, the share of e's variance around its line that
+        # the sinusoid explains]; the uncertainty is twice the Cramér-Rao bound of a sinusoid's
         # frequency in noise (Rife and Boorstyn 1974) with the fit's
         # residual as the noise, so a modulation that isn't a clean
         # sinusoid reads less certain; at least 1% of the rate.
@@ -155,7 +156,8 @@ module MB
           f, amp, rss = best
           noise = rss / [n - 4, 1].max
           sigma = amp > 0 && n > 2 ? Math.sqrt(12 * noise / (amp**2 * n * (n**2 - 1.0))) * rate / (2 * Math::PI) : f
-          [f, amp, [2 * sigma, 0.01 * f].max]
+          line = (detrend(e)**2).sum
+          [f, amp, [2 * sigma, 0.01 * f].max, line > 0 ? 1 - rss / line : 0.0]
         end
 
         # [amplitude, residual sum of squares] of e ~ a + b t + c cos + d sin

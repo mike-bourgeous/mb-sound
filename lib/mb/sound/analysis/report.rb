@@ -3,7 +3,8 @@ module MB
     module Analysis
       # Everything the sound-matching analyzers read from one sound, as one
       # report an agent or a person can read (Analysis.analyze, console
-      # `analyze`): level, pitch contour, attack window and perceived
+      # `analyze`): level, pitch contour and pitch envelope, level and
+      # brightness envelopes (shape and direction), attack window and perceived
       # pitch, amplitude modulation by band, top-octave movement, moving
       # resonances and combs, and the bleed screen.  Each part is its
       # analyzer's object, so the numbers behind a line are one call away.
@@ -14,12 +15,14 @@ module MB
       #     r.attack.clicks              # => []
       #     r.to_h                       # plain numbers
       class Report
-        attr_reader :signal, :pitch, :attack, :modulation, :bands, :motion, :bleed
+        attr_reader :signal, :pitch, :pitch_envelope, :envelope, :attack, :modulation, :bands, :motion, :bleed
 
         # Analyzes +sound+ (anything Signal.from takes).
         def initialize(sound)
           @signal = Signal.from(sound)
           @pitch = @signal.pitch_contour
+          @pitch_envelope = PitchEnvelope.of(@signal)
+          @envelope = Envelope.new(@signal)
           @attack = Attack.new(@signal)
           @modulation = ModulationSpectrum.new(@signal)
           @bands = BandEnvelopes.new(@signal)
@@ -36,6 +39,9 @@ module MB
           out = [head]
           out << 'pitch:'
           out.concat(@pitch.lines.map { |l| "  #{l}" })
+          out << "  #{@pitch_envelope}" if @pitch_envelope
+          out << 'envelope:'
+          out.concat(@envelope.lines.map { |l| "  #{l}" })
           out << 'attack (first 50 ms):'
           out.concat(@attack.lines.map { |l| "  #{l}" })
           out << 'modulation:'
@@ -64,8 +70,9 @@ module MB
             band_hz: @signal.band, truncated: @signal.truncated,
             pitch: {
               median_hz: @pitch.median&.frequency, note: @pitch.note_label, voiced: @pitch.voiced,
-              vibrato: @pitch.vibrato&.to_h, sweep: @pitch.sweep&.to_h,
+              vibrato: @pitch.vibrato&.to_h, sweep: @pitch.sweep&.to_h, envelope: @pitch_envelope&.to_h&.except(:times, :hz),
             },
+            envelope: @envelope.to_h,
             attack: {
               onset: @attack.onset.to_f, rise: @attack.rise.to_f, peak_time: @attack.peak_time.to_f,
               attack_peak_db: @attack.attack_peak.decibels, brightness_hz: @attack.brightness, clicks: @attack.clicks.map(&:to_f),

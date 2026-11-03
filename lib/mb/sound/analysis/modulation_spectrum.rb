@@ -22,7 +22,8 @@ module MB
       # within BODY_DB of the loudest, each band's envelope floored FLOOR_DB under its own
       # peak; its spectrum's peak, refined by least-squares sinusoid fits)
       # as a rate and depth (±dB), keeps those holding at least MIN_SHARE of
-      # the band's fluctuation and MIN_DEPTH, and merges
+      # the band's fluctuation, MIN_DEPTH, and a fit explaining MIN_FIT of
+      # the envelope's variance, and merges
       # neighboring bands that move at the same rate (within 15%).
       class ModulationSpectrum
         # Modulation bands (Hz) of #depths and #distance.
@@ -45,6 +46,11 @@ module MB
         FLOOR_DB = 40.0
         MIN_DEPTH = 0.5
         MIN_SHARE = 0.3
+
+        # The sinusoid fit must explain this much of the band envelope's
+        # variance (a kick's falling pitch moves energy between bands
+        # without a rate).
+        MIN_FIT = 0.5
 
         # Bands this far under the loudest band (mean power) are left out of
         # #peaks.
@@ -174,9 +180,11 @@ module MB
             e = e.clip(e.max - FLOOR_DB, nil)
             spec = DSP.slow_spectrum(e, FRAME_RATE)
             rate, _, part = DSP.sine_peak(spec, lo, RATES.end)
-            next unless rate && part >= MIN_SHARE
-            rate, depth, err = DSP.sine_fit(e, FRAME_RATE, rate)
-            next unless depth >= MIN_DEPTH
+            # (a peak on the lowest rate allowed is slower movement than
+            # the sound is long enough to read)
+            next unless rate && part >= MIN_SHARE && rate > lo * 1.05
+            rate, depth, err, fit = DSP.sine_fit(e, FRAME_RATE, rate)
+            next unless depth >= MIN_DEPTH && fit >= MIN_FIT
             [c, rate, depth, part, err]
           end
 

@@ -11,7 +11,8 @@ module MB
       # Resonance: each frame's power spectrum is smoothed over ±1/12
       # octave (and over at least ±1.5 f0 for pitched sounds, so harmonics
       # blend into an envelope), read on a 48-per-octave grid from
-      # RESONANCE_LOW to the band, and compared with its own average over
+      # RESONANCE_LOW to the band (peaks judged 2/3 octave inside both
+      # ends: from about 250 Hz to 0.63 x the band), and compared with its own average over
       # ±2/3 octave; the most prominent point at least PROMINENCE dB over
       # its surroundings is the frame's peak.  A track of peaks on at least
       # TRACKED of the body's frames that moves at least half an octave in
@@ -22,7 +23,8 @@ module MB
       # its own ±1.5 kHz average, is searched for equally spaced ripple (a
       # cepstrum: the peak quefrency between COMB_DELAYS, a delay whose
       # teeth are 1/delay apart) standing COMB_STRENGTH times over the
-      # cepstrum's mean power.  Pitched sounds skip quefrencies near
+      # cepstrum's mean power, in frames holding at least COMB_SHARE_DB of
+      # their energy above COMB_LOW.  Pitched sounds skip quefrencies near
       # multiples of their period (harmonics are combs too).  The delay
       # track then slides (a sweep), holds (a static comb), or wanders (an
       # LFO: its rate).  Phasers (unequally spaced notches) don't show
@@ -41,13 +43,14 @@ module MB
         BODY_DB = 30.0
         TRACKED = 0.4
 
-        RESONANCE_LOW = 250.0
+        RESONANCE_LOW = 160.0
         GRID_PER_OCTAVE = 48
         PROMINENCE = 6.0
 
         COMB_LOW = 500.0
         COMB_DELAYS = 0.0004..0.010
         COMB_STRENGTH = 12.0
+        COMB_SHARE_DB = -30.0
 
         # A resonant peak: +from+ and +to+ (Pitches: the medians of the
         # first and last five peak frames), +start+ and +stop+
@@ -157,12 +160,21 @@ module MB
           l = DSP.db(s[true, gi], 1e-20)
           prom = prominence(l)
 
-          edge = GRID_PER_OCTAVE / 12
+          # (points whose sides run off the grid aren't judged: a spectrum's
+          # slope at the grid's ends would read as a peak)
+          edge = (GRID_PER_OCTAVE * 2 / 3.0).round
+          return nil if count <= 2 * edge + 4
           track = []
           prom.shape[0].times do |f|
             row = prom[f, edge...(count - edge)]
             j = row.max_index
-            track << [@times[@body[f]], freqs[j + edge], row[j]] if row[j] >= PROMINENCE
+            next unless row[j] >= PROMINENCE
+            hz = freqs[j + edge]
+            # (a pitched frame's fundamental or second harmonic is a peak
+            # of its own, not a resonance)
+            f0 = frame_f0(@body[f])
+            next if f0 && [f0, 2 * f0].any? { |h| Math.log2(hz / h).abs < 1 / 3.0 }
+            track << [@times[@body[f]], hz, row[j]]
           end
           return nil if track.length < 10 || track.length < TRACKED * @body.size
 
@@ -187,7 +199,12 @@ module MB
           b = ([@band, Signal::RATE * 0.45].min / df).floor
           m = b - a + 1
           return nil if m < 64
-          l = DSP.db(@power[@body, a..b], 1e-20)
+          # Frames with little energy over COMB_LOW (under COMB_SHARE_DB of
+          # their total) would read their noise floor's ripple
+          upper = DSP.db(@power[@body, a..b].sum(axis: 1), 1e-30) - DSP.db(@power[@body, true].sum(axis: 1), 1e-30)
+          rows = upper.ge(COMB_SHARE_DB).where
+          return nil if rows.size < 10
+          l = DSP.db(@power[@body[rows], a..b], 1e-20)
           l = l - DSP.smooth_rows(l.transpose.dup, (1500.0 / df).round).transpose
           w = DSP.hann(m)
           npad = 1
@@ -217,7 +234,7 @@ module MB
               den = y0 - 2 * y1 + y2
               frac = (0.5 * (y0 - y2) / den).clamp(-0.5, 0.5) if den.abs > 1e-20
             end
-            track << [@times[@body[f]], (j + jlo + frac) / (npad * df)]
+            track << [@times[@body[rows[f]]], (j + jlo + frac) / (npad * df)]
           end
           return nil if track.length < 10 || track.length < TRACKED * @body.size
 
@@ -271,6 +288,17 @@ module MB
           left = side.(i - far, i - near + 1)
           right = side.(i + near, i + far + 1)
           l - Numo::DFloat.maximum(left, right)
+        end
+
+        # PitchContour's f0 at motion frame +i+ (nearest contour frame by
+        # time), nil if unvoiced.
+        def frame_f0(i)
+          pc = @signal.pitch_contour
+          return nil if pc.times.empty?
+          t = @times[i]
+          k = ((t * Signal::RATE - PitchContour::WINDOW / 2.0) / PitchContour::HOP).round.clamp(0, pc.times.length - 1)
+          hz = pc.hz[k]
+          hz.nan? ? nil : hz
         end
 
         def correlation(a, b)

@@ -209,7 +209,7 @@ module MB
           return nil if lo >= VIBRATO_RATES.end
           spec = DSP.slow_spectrum(Numo::DFloat.cast(c), frame_rate)
           rate, _, share = DSP.sine_peak(spec, lo, VIBRATO_RATES.end)
-          return nil unless rate && share >= MIN_SHARE
+          return nil unless rate && share >= MIN_SHARE && rate > lo * 1.05
           rate, depth, err = DSP.sine_fit(Numo::DFloat.cast(c), frame_rate, rate)
           # Each frame's period averages the pitch over the window, which
           # shrinks a swing at +rate+ like a boxcar does (6 Hz: by 9%)
