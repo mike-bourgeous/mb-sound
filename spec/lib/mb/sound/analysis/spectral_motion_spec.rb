@@ -22,6 +22,13 @@ RSpec.describe(MB::Sound::Analysis::SpectralMotion) do
     expect(r.from.frequency).to be_within(150).of(2000)
   end
 
+  it 'finds a resonant lowpass on a saw through its harmonics' do
+    r = sm.new(MB::Sound::Analysis::Signal.from(MB::Sound::Pitch.new(110).saw.filter(:lowpass, cutoff: 800, quality: 8), seconds: 1)).resonance
+    expect(r.motion).to eq(:static)
+    expect(r.from.frequency).to be_within(80).of(800)
+    expect(sm.new(MB::Sound::Analysis::Signal.from(MB::Sound::Pitch.new(110).saw.filter(:lowpass, cutoff: 800, quality: 0.7), seconds: 1)).resonance).to be_nil
+  end
+
   it 'finds comb teeth sliding as a flanger sweeps from 1 to 5 ms' do
     delays = 0.001 + 0.004 * Numo::DFloat.new(noise.length).seq / noise.length
     c = sm.new(SyntheticSounds.flanger(noise, delays)).comb

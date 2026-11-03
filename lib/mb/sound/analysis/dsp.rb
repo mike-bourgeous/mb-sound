@@ -76,8 +76,8 @@ module MB
         # contour in cents) sampled at +rate+ frames per second: detrended,
         # Hann-windowed, zero-padded to at least 4x its length.  Returns a
         # Hash with :hz (bin frequencies), :mag (|X|), :window_sum,
-        # :window_power, :nfft, and :frames, so callers can read band variances (#band_rms) and
-        # sinusoid amplitudes (#sine_peak).
+        # :window_power, :nfft, and :frames, so callers can read band
+        # variances (#band_rms) and sinusoid peaks (#sine_peak).
         def slow_spectrum(e, rate)
           frames = e.length
           nfft = 1
@@ -133,10 +133,10 @@ module MB
         # several percent low (detrending and the window's edges); the fit
         # doesn't.  Returns [rate Hz, amplitude (in e's units), rate
         # uncertainty Hz, the share of e's variance around its line that
-        # the sinusoid explains]; the uncertainty is twice the Cramér-Rao bound of a sinusoid's
-        # frequency in noise (Rife and Boorstyn 1974) with the fit's
-        # residual as the noise, so a modulation that isn't a clean
-        # sinusoid reads less certain; at least 1% of the rate.
+        # the sinusoid explains].  The uncertainty is twice the Cramér-Rao
+        # bound of a sinusoid's frequency in noise (Rife and Boorstyn 1974)
+        # with the fit's residual as the noise, so a modulation that isn't
+        # a clean sinusoid reads less certain; at least 1% of the rate.
         def sine_fit(e, rate, hz, span: 0.2, steps: 21)
           n = e.length
           t = Numo::DFloat.new(n).seq / rate.to_f

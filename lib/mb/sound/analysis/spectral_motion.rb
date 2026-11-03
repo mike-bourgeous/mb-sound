@@ -9,8 +9,9 @@ module MB
       # inside the sound within BODY_DB of the loudest).
       #
       # Resonance: each frame's power spectrum is smoothed over ±1/12
-      # octave (and over at least ±1.5 f0 for pitched sounds, so harmonics
-      # blend into an envelope), read on a 48-per-octave grid from
+      # octave (pitched frames instead take the envelope through their
+      # harmonics' peaks, and a lower bar, PITCHED_PROMINENCE), read on a
+      # 48-per-octave grid from
       # RESONANCE_LOW to the band (peaks judged 2/3 octave inside both
       # ends: from about 250 Hz to 0.63 x the band), and compared with its own average over
       # ±2/3 octave; the most prominent point at least PROMINENCE dB over
@@ -46,6 +47,10 @@ module MB
         RESONANCE_LOW = 160.0
         GRID_PER_OCTAVE = 48
         PROMINENCE = 6.0
+
+        # Pitched frames read the envelope through their harmonics, which
+        # has no noise to rise over: a lower bar.
+        PITCHED_PROMINENCE = 4.0
 
         COMB_LOW = 500.0
         COMB_DELAYS = 0.0004..0.010
@@ -143,7 +148,6 @@ module MB
           bins = p.shape[1]
           k = Numo::DFloat.new(bins).seq
           half = k * (2**(1 / 12.0) - 1)
-          half = Numo::DFloat.maximum(half, 1.5 * @f0 / df) if @f0
           half = half.clip(2, nil).ceil.cast_to(Numo::Int64)
           ki = Numo::Int64.new(bins).seq
           lo = (ki - half).clip(0, bins - 1)
@@ -158,6 +162,14 @@ module MB
           freqs = RESONANCE_LOW * 2**(Numo::DFloat.new(count).seq / GRID_PER_OCTAVE)
           gi = (freqs / df).round.cast_to(Numo::Int64)
           l = DSP.db(s[true, gi], 1e-20)
+          # Pitched frames: the envelope through the harmonics' peaks
+          # instead (smoothing over ±1.5 f0 dilutes a resonance between
+          # two or three harmonics)
+          pitched = Array.new(p.shape[0]) { |f| frame_f0(@body[f]) }
+          pitched.each_with_index do |f0, f|
+            env = f0 && harmonic_envelope(p[f, true], f0, freqs)
+            l[f, true] = env if env
+          end
           prom = prominence(l)
 
           # (points whose sides run off the grid aren't judged: a spectrum's
@@ -168,7 +180,7 @@ module MB
           prom.shape[0].times do |f|
             row = prom[f, edge...(count - edge)]
             j = row.max_index
-            next unless row[j] >= PROMINENCE
+            next unless row[j] >= (pitched[f] ? PITCHED_PROMINENCE : PROMINENCE)
             hz = freqs[j + edge]
             # (a pitched frame's fundamental or second harmonic is a peak
             # of its own, not a resonance)
@@ -288,6 +300,32 @@ module MB
           left = side.(i - far, i - near + 1)
           right = side.(i + near, i + far + 1)
           l - Numo::DFloat.maximum(left, right)
+        end
+
+        # dB levels at +freqs+ of the envelope through the harmonic peaks of
+        # +power+ (one frame) at +f0+ (each harmonic's highest bin within
+        # a quarter f0 of it; straight lines in dB against log frequency
+        # between them), or nil with fewer than four harmonics in range.
+        def harmonic_envelope(power, f0, freqs)
+          bins = power.length
+          q = [(f0 / 4 / df).floor, 1].max
+          hs = []
+          h = 1
+          while (c = (h * f0 / df).round) + q < bins && h * f0 <= freqs[-1] * 1.5
+            hs << [Math.log2(h * f0), 10 * Math.log10(power[(c - q)..(c + q)].max + 1e-20)]
+            h += 1
+          end
+          return nil if hs.length < 4
+          x = hs.map(&:first)
+          y = hs.map(&:last)
+          lf = Numo::NMath.log2(freqs).to_a
+          j = 0
+          Numo::DFloat.cast(lf.map { |v|
+            next y[0] if v <= x[0]
+            next y[-1] if v >= x[-1]
+            j += 1 while x[j + 1] < v
+            y[j] + (y[j + 1] - y[j]) * (v - x[j]) / (x[j + 1] - x[j])
+          })
         end
 
         # PitchContour's f0 at motion frame +i+ (nearest contour frame by
