@@ -64,11 +64,18 @@ module MB
         # and the last console lines, appended to today's Markdown file
         # (UI::NoteLog.dir: $MB_SOUND_UI_NOTES, else the main checkout's
         # tmp/ui-notes/ from a git checkout, else the user data directory).
+        # Each note also writes a JSON record an agent can read (the sound
+        # it is about: the inspected track's patch, knobs, and reference;
+        # the RENDER pane's view, markers, and what it drew; where in the
+        # take; UI::NoteLog.record).  +at:+ (seconds into the rendered
+        # note) and +freq:+ (Hz or a Pitch) name the spot you mean; without
+        # them the RENDER pane's markers (, . < > there) do.
         # Returns the Note, which prints the file's path.
         # NAV # opens a prompt line for one while the set plays.
         #
         #     ui.note 'the cutoff turns too slowly at the bottom'
-        def note(text) = NoteLog.save(text)
+        #     ui.note 'the bump here sounds like a second click', at: 0.012, freq: 3000
+        def note(text, at: nil, freq: nil) = NoteLog.save(text, at: at, freq: freq)
 
         # The UI notes of +day+ (:today, a Date, or "2026-10-30"), one line
         # each (UI::NoteLog::Listing).

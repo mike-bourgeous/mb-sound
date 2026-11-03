@@ -6,7 +6,7 @@ require_relative '../../../support/ui_helpers'
 RSpec.describe(MB::Sound::Reference, :aggregate_failures) do
   M = MB::Sound unless defined?(M)
 
-  CODE = 'synth(CLIP, voices: 1) { |v| v.hz.saw.lp4(1234.5, resonance: 0.25) * v.amp_env(0.01, 0.2, 0.5, 0.1) }'.freeze
+  REF_SPEC_CODE = 'synth(CLIP, voices: 1) { |v| v.hz.saw.lp4(1234.5, resonance: 0.25) * v.amp_env(0.01, 0.2, 0.5, 0.1) }'.freeze
 
   before { @sessions = [] }
   after {
@@ -14,7 +14,7 @@ RSpec.describe(MB::Sound::Reference, :aggregate_failures) do
     MB::Sound.rewind
   }
 
-  let(:fit) { MB::Sound::FitPatch.save(:lead_fit, CODE, { cutoff: (100.0..8000.0).at(1234.5), resonance: (0.0..1.0).at(0.25) }) }
+  let(:fit) { MB::Sound::FitPatch.save(:lead_fit, REF_SPEC_CODE, { cutoff: (100.0..8000.0).at(1234.5), resonance: (0.0..1.0).at(0.25) }) }
   let(:clip) { M.seq(M::A2).n4.loop }
   # The reference: the same voice darker and 6 dB down (a sound to match).
   let(:reference) {

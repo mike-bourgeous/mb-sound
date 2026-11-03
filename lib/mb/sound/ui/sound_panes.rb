@@ -65,7 +65,7 @@ module MB
             on ['P'], :view, help: 'the front panel or the sections', label: 'P F'
             on ['F'], :fixed, help: "a preset's numbers as panel cells, or not", label: 'P F'
             on ['p'], :plumbing, help: 'every node as chips, the hidden plumbing too (again: back)', label: 'p'
-            on ['b'], :ab, help: "A/B: hear the track's reference instead of the patch, and back (ab; set one up with ab :kick, 'ref.wav')"
+            on ['b'], :ab, help: 'A/B: the reference or the patch (ab)'
           end
 
           keys do
@@ -1089,10 +1089,23 @@ module MB
             on ['+', '='], :length, 1, help: 'a longer envelope view', label: '+ -'
             on '-', :length, -1, help: 'a shorter envelope view', label: '+ -'
             on 'r', :again, help: 'render again'
+            on ',', :cursor_time, -1, help: 'the time marker earlier (a ui.note names the spot)', label: ', .'
+            on '.', :cursor_time, 1, help: 'the time marker later', label: ', .'
+            on '<', :cursor_freq, -1, help: 'the frequency marker lower (the spectrum)', label: '< >'
+            on '>', :cursor_freq, 1, help: 'the frequency marker higher', label: '< >'
+            on 'x', :cursor_clear, help: 'no markers'
           end
+
+          # Steps of the markers: the envelope view's length over
+          # CURSOR_STEPS, a sixth of an octave.
+          CURSOR_STEPS = 50
+          CURSOR_OCTAVES = 1 / 6r
 
           # The color of the previous render behind the current one.
           PREVIOUS = '#5c6370'
+
+          # The markers' color (, . < >).
+          MARKER = '#e5c07b'
 
           # Render lengths + and - step through (seconds).
           LENGTHS = [0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0, 20.0].freeze
@@ -1137,7 +1150,7 @@ module MB
             driver.tick(src, s.knobs, s.inspector&.knobs || [].freeze)
             r = driver.shown
             r = nil if r && r.track != src.track
-            draw_header(c, r, driver)
+            draw_header(c, r, driver, Render.cursor_text(state))
             return if c.h < 2
             if r.nil? || r.error
               c.text(0, 1, c.fit(r ? r.error : 'rendering...', c.w), r ? :warn : :dim)
@@ -1184,8 +1197,9 @@ module MB
           # The first row: the track and its figures, what it played (and
           # whether its period settled), the copy's rate, the render's time,
           # and a mark while a newer render waits or runs.
-          def draw_header(c, r, driver)
+          def draw_header(c, r, driver, marks = nil)
             x = c.text(0, 0, r&.track.to_s, :name)
+            x = c.text(x, 0, "  #{marks}", :key) if marks && x + marks.length + 2 <= c.w
             if r && !r.error
               x = c.line(0, ['  ', :dim], [Panes.db(r.lufs), :text], [' LUFS', :dim], ['  peak ', :dim], [Panes.db(r.peak), :text],
                          ['  rms ', :dim], [Panes.db(r.rms), :text], x: x)
@@ -1229,6 +1243,41 @@ module MB
             'render: again'
           end
 
+          # , and . move the time marker (seconds into the rendered note,
+          # drawn on the envelope view; ui.note keeps it), starting at a
+          # tenth of the view.
+          def key_cursor_time(state, d)
+            len = PatchRender.seconds.to_f
+            t = state[:cursor_time] || len * 0.1 - d * len / CURSOR_STEPS
+            state[:cursor_time] = (t + d * len / CURSOR_STEPS).clamp(0.0, len)
+            "render: marker at #{Render.time_text(state[:cursor_time])}"
+          end
+
+          # < and > move the frequency marker (drawn on the spectrum),
+          # starting at 1 kHz.
+          def key_cursor_freq(state, d)
+            f = state[:cursor_freq] || 1000.0 / 2**(d * CURSOR_OCTAVES.to_f)
+            state[:cursor_freq] = (f * 2**(d * CURSOR_OCTAVES.to_f)).clamp(20.0, 24000.0)
+            "render: marker at #{Render.freq_text(state[:cursor_freq])}"
+          end
+
+          def key_cursor_clear(state)
+            state[:cursor_time] = state[:cursor_freq] = nil
+            'render: no markers'
+          end
+
+          # `0.120 s` / `12 ms` for a marker time in seconds.
+          def self.time_text(t) = t < 0.1 ? "#{(t * 1000).round(1)} ms".sub('.0 ms', ' ms') : "#{format('%.3f', t)} s"
+
+          # `3.00 kHz` / `440 Hz` for a marker frequency.
+          def self.freq_text(f) = f >= 1000 ? "#{format('%.2f', f / 1000.0)} kHz" : "#{f.round} Hz"
+
+          # The markers as text for the header (`@ 120 ms 3.00 kHz`), or nil.
+          def self.cursor_text(state)
+            parts = [state[:cursor_time] && time_text(state[:cursor_time]), state[:cursor_freq] && freq_text(state[:cursor_freq])].compact
+            parts.empty? ? nil : "@ #{parts.join(' ')}"
+          end
+
           # What Enter does in the pane (the status line).
           def enter_hint(_state) = nil
 
@@ -1239,7 +1288,7 @@ module MB
           # change.
           def chart_for(r, prev, view, state)
             charts = (state[:charts] ||= {})
-            key = [r.seq, prev&.seq]
+            key = [r.seq, prev&.seq, view == :spectrum ? state[:cursor_freq] : (view == :envelope ? state[:cursor_time] : nil)]
             hit = charts[view]
             return hit[1] if hit && hit[0] == key
             b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
@@ -1253,6 +1302,7 @@ module MB
               b.y Plot::Scale::DB.new(-90.0..[(top / 10.0).ceil * 10, -40].max.to_f)
               b.line(ps[1], x: ps[0], color: PREVIOUS) if ps
               b.line(db, x: f)
+              b.rule(x: state[:cursor_freq], color: MARKER) if state[:cursor_freq]
             when :cycle
               return nil unless r.cycle && r.cycle[0].length > 1
               ms = ->(res) { (0..(res.cycle[0].length - 1) * 1000.0 / res.rate) }
@@ -1275,6 +1325,7 @@ module MB
               end
               b.area(r.hi, x: 0..r.frames, base: 0.0, color: 0)
               b.area(r.lo, x: 0..r.frames, base: 0.0, color: 0)
+              b.rule(x: state[:cursor_time] * r.rate, color: MARKER) if state[:cursor_time]
             end
             chart = b.build
             charts[view] = [key, chart]

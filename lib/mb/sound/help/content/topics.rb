@@ -1743,6 +1743,15 @@ module MB
         moved; `ab :kick, :off` stops it.  Each flip is one console line in
         your take, so a reader of the take sees when you compared.
 
+        Notes while you listen: `ui.note 'the click comes late', at: 0.012,
+        freq: 3000` (or NAV # on the screen) keeps your words with the
+        sound they are about (the patch's knobs, its reference, the RENDER
+        pane's view and what it drew, where in the take) as a JSON record
+        an agent reads later (`UI::NoteLog.records`).  In the RENDER pane
+        (NAV w), , and . move a time marker over the envelope, < and > a
+        frequency marker over the spectrum (x clears them); a note
+        without at:/freq: points at the markers.
+
         `take.turns` reads your take as knob rows (knob, from, to, when,
         turn or held-key gesture, A/B flips, undos), `take.turns.changed`
         the knobs that ended elsewhere, and `take.turns.renders(:kick,
@@ -1752,7 +1761,7 @@ module MB
       TEXT
       commands :tune, :fit_patch, :ab
       note :sound_design_ui
-      see :inspector, :knobs
+      see :inspector, :knobs, :ui
     end
   end
 end
