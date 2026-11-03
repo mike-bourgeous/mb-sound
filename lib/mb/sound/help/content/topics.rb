@@ -1726,6 +1726,13 @@ module MB
         between the patch and the reference, matching again when the knobs
         moved; `ab :kick, :off` stops it.  Each flip is one console line in
         your take, so a reader of the take sees when you compared.
+
+        `take.turns` reads your take as knob rows (knob, from, to, when,
+        turn or held-key gesture, A/B flips, undos), `take.turns.changed`
+        the knobs that ended elsewhere, and `take.turns.renders(:kick,
+        note: 36)` one note of the patch at the take's start and end;
+        `MB::Sound::Take.read('take.rb')` reads a saved take the same way
+        (walked, never run).
       TEXT
       commands :fit_patch, :ab
       note :sound_design_ui
