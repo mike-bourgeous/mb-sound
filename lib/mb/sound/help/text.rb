@@ -38,8 +38,16 @@ module MB
 
         # The source text of a block's body, found with Prism from the file
         # and line where the block was written (real Ruby, not a string).
+        # Kept per file and line, as the parsed files are (each method page
+        # asks for every lesson step's source: a walk of the lesson file's
+        # tree per step made method pages take ~20 ms each; fuzz-fixes-2).
         def block_body(block)
           file, line = block.source_location
+          @bodies ||= {}
+          @bodies[[file, line]] ||= find_block_body(file, line).freeze
+        end
+
+        def find_block_body(file, line)
           @trees ||= {}
           tree = (@trees[file] ||= Prism.parse_file(file).value)
           found = nil
