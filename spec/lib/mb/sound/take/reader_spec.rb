@@ -3,14 +3,12 @@
 # read back as knob rows, from the take object and from its saved file
 # (Prism, no eval), with renders of the patch at the start and the end.
 RSpec.describe(MB::Sound::Take::Reader, :aggregate_failures) do
-  M = MB::Sound unless defined?(M)
-
-  let(:session) { M::Session.new(output: M::NullOutput.new(channels: 2, sleep: false), transport: M::Sequence::Transport.new(bpm: 120), realtime: false) }
-  let(:take) { M::Take.new(session: session) }
+  let(:session) { MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), realtime: false) }
+  let(:take) { MB::Sound::Take.new(session: session) }
 
   after {
     session.close
-    M.rewind
+    MB::Sound.rewind
   }
 
   FIT_LINE = 'lead = fit_patch :reader_fit, "synth(CLIP, voices: 1) { |v| v.hz.saw.lp4(1234.5, resonance: 0.25) * v.amp_env(0.01, 0.2, 0.5, 0.1) }", ' \
@@ -19,11 +17,11 @@ RSpec.describe(MB::Sound::Take::Reader, :aggregate_failures) do
   # Plays the session: lines typed before the given buffers, a held-key
   # gesture on the cutoff over buffers 25-31 (committed at 33).
   def perform(lines)
-    b = M::Take.console_binding
+    b = MB::Sound::Take.console_binding
     40.times do |i|
-      lines.fetch(i, []).each { |code| M::Session.with_context(session: session) { take.line(code, b) } }
+      lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { take.line(code, b) } }
       session.preview_turn(:"lead/cutoff", 2000 + (i - 24) * 100) if i.between?(25, 31)
-      M::Session.with_context(session: session) { take.line(session.gesture_line(:"lead/cutoff"), b) } if i == 33
+      MB::Sound::Session.with_context(session: session) { take.line(session.gesture_line(:"lead/cutoff"), b) } if i == 33
       session.process_buffer
     end
   end
@@ -66,7 +64,7 @@ RSpec.describe(MB::Sound::Take::Reader, :aggregate_failures) do
     path = File.join(Dir.mktmpdir('reader', SpecTmp::ROOT), 'take.rb')
     File.write(path, take.to_ruby)
     expect(MB::Sound::Take::Reader).not_to receive(:eval)
-    t = M::Take.read(path)
+    t = MB::Sound::Take.read(path)
     expect(t.rows.map { |r| [r.knob, r.from, r.to, r.kind] }.first(4)).to eq(take.turns.rows.map { |r| [r.knob, r.from, r.to, r.kind] }.first(4))
     expect(t.rows.last).to have_attributes(knob: :"lead/cutoff", from: 2700.0, to: 2000.0, kind: :undo)
     expect(t.tracks).to eq(lead: File.join(MB::Sound::FitPatch.dir, 'reader_fit.mbg.rb'))
@@ -101,7 +99,7 @@ RSpec.describe(MB::Sound::Take::Reader, :aggregate_failures) do
         X
       end.main(ARGV, __FILE__)
     RUBY
-    t = M::Take.read(text, start: { mix: 0.25 })
+    t = MB::Sound::Take.read(text, start: { mix: 0.25 })
     expect(t.bpm).to eq(100.0)
     expect(t.rows.map { |r| [r.knob, r.from, r.to, r.kind] }).to eq([
       [:cut, 400, 3000.0, :turn], [:mix, 0.25, 0.5, :turn], [:cut, 3000.0, nil, :turn],
@@ -126,13 +124,13 @@ RSpec.describe(MB::Sound::Take::Reader, :aggregate_failures) do
         X
       end.main(ARGV, __FILE__)
     RUBY
-    t = M::Take.read(text)
+    t = MB::Sound::Take.read(text)
     expect(t.tracks).to eq(kick: File.join(MB::Sound::FitPatch.dir, 'kick_fit.mbg.rb'))
     expect(t.rows.map { |r| [r.knob, r.from, r.to] }).to eq([[:"kick/level", 1.0, 10**(-2 / 20.0)], [:"kick/decay", 0.47, 0.3]])
   end
 
   it 'refuses what is not a take' do
-    expect { M::Take.read("puts 1\n") }.to raise_error(MB::Sound::Take::Reader::Error, /not a take script/)
-    expect { M::Take.read(42) }.to raise_error(MB::Sound::Take::Reader::Error)
+    expect { MB::Sound::Take.read("puts 1\n") }.to raise_error(MB::Sound::Take::Reader::Error, /not a take script/)
+    expect { MB::Sound::Take.read(42) }.to raise_error(MB::Sound::Take::Reader::Error)
   end
 end

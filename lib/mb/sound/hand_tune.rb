@@ -24,7 +24,7 @@ module MB
       def render(path, values = {}, note: 60, velocity: 0.8, hold: nil, seconds: 1.0, channels: 1)
         bpm = Sequence.current_transport.bpm.to_f
         hold ||= seconds * 0.8
-        len = Rational((hold * bpm / 240.0 * 4096).round.clamp(1, nil), 4096)
+        len = Rational((Sequence::TempoMap.whole_notes_at(hold, bpm) * 4096).round.clamp(1, nil), 4096)
         clip = MB::Sound.seq(note).len(len).vel(velocity)
         frames = (seconds * RATE).round
         s = MB::Sound.keeping_random_state {

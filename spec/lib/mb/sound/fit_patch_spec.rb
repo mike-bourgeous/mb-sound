@@ -2,15 +2,13 @@
 # params become a graph document whose params are the track's knobs.
 # Synthetic fits only (the maintainer's samples stay private).
 RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
-  M = MB::Sound unless defined?(M)
-
   LEAD_CODE = 'synth(CLIP, voices: 1) { |v| (v.hz.saw.lp4(1234.5, resonance: 0.25) * v.amp_env(0.01, 0.2, 0.5, 0.1) * 4).softclip(0.3, 1.0) }'.freeze
   LEAD_PARAMS = {
     cutoff: (100.0..8000.0).at(1234.5), resonance: (0.0..1.0).at(0.25), attack: [(0.001..1.0).at(0.01), 'Amp attack in seconds'],
     clip: (0.1..1.0).at(0.3),
   }.freeze
   # The same voice as Ruby, for comparing samples.
-  LEAD_BLOCK = ->(c) { M.synth(c, voices: 1) { |v| (v.hz.saw.lp4(1234.5, resonance: 0.25) * v.amp_env(0.01, 0.2, 0.5, 0.1) * 4).softclip(0.3, 1.0) } }
+  LEAD_BLOCK = ->(c) { MB::Sound.synth(c, voices: 1) { |v| (v.hz.saw.lp4(1234.5, resonance: 0.25) * v.amp_env(0.01, 0.2, 0.5, 0.1) * 4).softclip(0.3, 1.0) } }
 
   # A kit voice as the 909 study prints its structure fits (values to 6
   # places, 3 over 100).
@@ -24,14 +22,14 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
   }
 
   def run(setup, buffers: 40, acts: {})
-    M.rewind
-    M.seed(1)
-    out = M::Sampler::CaptureOutput.new(channels: 2, buffer_size: 800)
-    s = M::Session.new(output: out, realtime: false)
+    MB::Sound.rewind
+    MB::Sound.seed(1)
+    out = MB::Sound::Sampler::CaptureOutput.new(channels: 2, buffer_size: 800)
+    s = MB::Sound::Session.new(output: out, realtime: false)
     @sessions << s
-    M::Session.with_context(session: s) { setup.call(s) }
+    MB::Sound::Session.with_context(session: s) { setup.call(s) }
     buffers.times do |i|
-      (a = acts[i]) && M::Session.with_context(session: s) { a.call(s) }
+      (a = acts[i]) && MB::Sound::Session.with_context(session: s) { a.call(s) }
       s.process_buffer
     end
     [s, Numo::DFloat.cast(out.captured[0])]
@@ -125,12 +123,12 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
   end
 
   describe 'on a track' do
-    let(:clip) { M.seq(M::A2, M::C3).n4.loop }
+    let(:clip) { MB::Sound.seq(MB::Sound::A2, MB::Sound::C3).n4.loop }
 
     it 'plays the fitted code bit for bit, every param a bounded knob of the track' do
       fit = MB::Sound::FitPatch.save(:lead_fit, LEAD_CODE, LEAD_PARAMS)
-      _, want = run(->(_s) { M.track(:lead) { |c| LEAD_BLOCK.(c) }; M.bg(:lead, clip) })
-      s, got = run(->(_s) { M.track(:lead, fit); M.bg(:lead, clip) })
+      _, want = run(->(_s) { MB::Sound.track(:lead) { |c| LEAD_BLOCK.(c) }; MB::Sound.bg(:lead, clip) })
+      s, got = run(->(_s) { MB::Sound.track(:lead, fit); MB::Sound.bg(:lead, clip) })
       expect(want.abs.max).to be > 0.2 # (0.82 before the master's -10 dB: the softclip shapes it)
       expect(got).to eq(want)
       expect(s.knobs.keys).to include(:"lead/cutoff", :"lead/resonance", :"lead/attack", :"lead/clip")
@@ -140,8 +138,8 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
 
     it 'turns live knobs live and makes a clip threshold a build knob' do
       fit = MB::Sound::FitPatch.save(:lead_fit, LEAD_CODE, LEAD_PARAMS)
-      _, want = run(->(_s) { M.track(:lead, fit); M.bg(:lead, clip) })
-      s, got = run(->(_s) { M.track(:lead, fit); M.bg(:lead, clip) }, acts: { 10 => ->(_s) { M.turn(:"lead/cutoff", 300.0, smooth: 0) } })
+      _, want = run(->(_s) { MB::Sound.track(:lead, fit); MB::Sound.bg(:lead, clip) })
+      s, got = run(->(_s) { MB::Sound.track(:lead, fit); MB::Sound.bg(:lead, clip) }, acts: { 10 => ->(_s) { MB::Sound.turn(:"lead/cutoff", 300.0, smooth: 0) } })
       expect(got[0...8000]).to eq(want[0...8000])
       expect((got[9000..] - want[9000..]).abs.max).to be > 0.05
       expect(s.arrangement.build_knob?(:"lead/clip")).to eq(true)
@@ -150,7 +148,7 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
 
     it "renders in the sound-design screen's RENDER pane (a param read by lp4 straight from the track's knob)" do
       fit = MB::Sound::FitPatch.save(:lead_fit, LEAD_CODE, LEAD_PARAMS)
-      s, = run(->(_s) { M.track(:lead, fit); M.bg(:lead, clip) }, buffers: 4)
+      s, = run(->(_s) { MB::Sound.track(:lead, fit); MB::Sound.bg(:lead, clip) }, buffers: 4)
       ui = MB::Sound::UI
       poll = ui::Poll.new(s)
       ui::Inspect.target = { track: :lead, node: nil }
@@ -168,7 +166,7 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
     it 'renders a fitted kit voice in the RENDER pane through a copy of the kit' do
       params = { tune: (30.0..110.0).at(51.328155), decay: (0.1..2.0).at(0.468972), clip: (0.2..1.0).at(0.205115) }
       fit = MB::Sound::FitPatch.save(:kick_fit, KICK_CODE, params)
-      s, = run(->(_s) { M.track(:kick, fit); M.bg(:kick, M.seq(M::C2).n4.loop) }, buffers: 4)
+      s, = run(->(_s) { MB::Sound.track(:kick, fit); MB::Sound.bg(:kick, MB::Sound.seq(MB::Sound::C2).n4.loop) }, buffers: 4)
       ui = MB::Sound::UI
       poll = ui::Poll.new(s)
       ui::Inspect.target = { track: :kick, node: nil }
@@ -195,7 +193,7 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
     it 'plays a fitted kit voice from a clip' do
       params = { tune: (30.0..110.0).at(51.328155), decay: (0.1..2.0).at(0.468972), clip: (0.2..1.0).at(0.205115) }
       fit = MB::Sound::FitPatch.save(:kick_fit, KICK_CODE, params)
-      s, got = run(->(_s) { M.track(:kick, fit); M.bg(:kick, M.seq(M::C2).n4.loop) })
+      s, got = run(->(_s) { MB::Sound.track(:kick, fit); MB::Sound.bg(:kick, MB::Sound.seq(MB::Sound::C2).n4.loop) })
       expect(got.abs.max).to be > 0.05
       expect(s.knobs[:"kick/tune"].value).to eq(51.328155)
     end
@@ -214,10 +212,10 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
     end
 
     it 'makes the fit patch, opens it in design on its track, and sets up the reference' do
-      s = M::Session.new(output: M::NullOutput.new(channels: 2, sleep: false), realtime: false)
+      s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
       @sessions << s
       ref = MB::Sound::Sample.new([Numo::SFloat.new(9600).rand(-0.2, 0.2)], name: 'noise')
-      o = M::Session.with_context(session: s) { M.tune(:lead, LEAD_CODE, ref: ref, play: M.seq(M::A2).n4.loop, **LEAD_PARAMS) }
+      o = MB::Sound::Session.with_context(session: s) { MB::Sound.tune(:lead, LEAD_CODE, ref: ref, play: MB::Sound.seq(MB::Sound::A2).n4.loop, **LEAD_PARAMS) }
       expect(o.fit.name).to eq(:lead_fit)
       expect(o.opened.to_s).to start_with('design :lead: lead_fit on track :lead (new)')
       expect(o.pair).to have_attributes(track: :lead, ref: :lead_ref, hearing: :patch)

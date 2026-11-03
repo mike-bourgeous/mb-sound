@@ -385,7 +385,7 @@ module MB
           return unless name.is_a?(Symbol) && args[1]
           v = value(args[1])
           v = v.to_f if v.is_a?(Numeric)
-          add_row(:"#{name}/level", v.is_a?(Numeric) ? v : nil, :level, nil)
+          add_row(Session::Name.level(name), v.is_a?(Numeric) ? v : nil, :level, nil)
         end
 
         def read_ab(_node, args)
@@ -423,7 +423,7 @@ module MB
           return @start[knob] if @start.key?(knob)
           return @known[knob] if @known.key?(knob)
           return @defaults[knob] if @defaults.key?(knob)
-          knob.to_s.end_with?('/level') ? 1.0 : nil # (a track's level is unity until set: Session::Faders)
+          Session::Name[knob].level? ? 1.0 : nil # (a track's level is unity until set: Session::Faders)
         end
 
         # The landing position of the change being read: the line's next
@@ -434,7 +434,7 @@ module MB
           l[i] || l.last || @line_ctx[:issued]
         end
 
-        def seconds_at(pos) = pos.to_r * 240 / @bpm
+        def seconds_at(pos) = Sequence::TempoMap.seconds_at(pos.to_r, @bpm)
 
         # A `turn` call's keyframes: [[seconds, value], ...] from its
         # non-Symbol Hash keys, or nil.
@@ -455,13 +455,13 @@ module MB
           if node.is_a?(Prism::CallNode) && node.receiver && node.arguments.nil?
             n = value(node.receiver)
             if n.is_a?(Numeric)
-              return n * NOTE_LENGTHS[node.name] * 240 / @bpm if NOTE_LENGTHS[node.name]
-              return n * 240 / @bpm if %i[bar bars whole].include?(node.name)
+              return seconds_at(n * NOTE_LENGTHS[node.name]) if NOTE_LENGTHS[node.name]
+              return seconds_at(n) if %i[bar bars whole].include?(node.name)
               return n * 60 / @bpm if %i[beat beats].include?(node.name)
             end
           end
           v = value(node)
-          v.is_a?(Numeric) ? v * 240 / @bpm : nil # (plain numbers are bars of 4/4)
+          v.is_a?(Numeric) ? seconds_at(v) : nil # (plain numbers are bars of 4/4)
         end
 
         def positional(node) = (node.arguments&.arguments || []).reject { |a| a.is_a?(Prism::KeywordHashNode) || a.is_a?(Prism::BlockArgumentNode) }

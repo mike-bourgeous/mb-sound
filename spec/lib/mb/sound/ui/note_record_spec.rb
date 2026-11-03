@@ -7,7 +7,6 @@ require_relative '../../../../support/ui_helpers'
 # RENDER pane's , . < > place the markers a note points at; records read
 # back as plain data and draw as images offline.  Synthetic sounds only.
 RSpec.describe('UI notes with the sound they are about', :aggregate_failures) do
-  M = MB::Sound unless defined?(M)
   let(:ui) { MB::Sound::UI }
 
   NOTE_SPEC_CODE = 'synth(CLIP, voices: 1) { |v| v.hz.saw.lp4(1234.5, resonance: 0.25) * v.amp_env(0.01, 0.2, 0.5, 0.1) }'.freeze
@@ -28,14 +27,14 @@ RSpec.describe('UI notes with the sound they are about', :aggregate_failures) do
   end
 
   def fit_session
-    @session = M::Session.new(output: M::NullOutput.new(channels: 2, sleep: false), realtime: false)
+    @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
     fit = MB::Sound::FitPatch.save(:note_fit, NOTE_SPEC_CODE, { cutoff: (100.0..8000.0).at(1234.5), resonance: (0.0..1.0).at(0.25) })
     ref = MB::Sound::Sample.new([MB::Sound::HandTune.render(fit.path, { cutoff: 600.0 }, note: 45, hold: 0.4, seconds: 0.5)[0] * 0.5], name: 'darker')
-    M::Session.with_context(session: @session) do
-      M.track(:lead, fit)
-      M.bg(:lead, M.seq(M::A2).n4.loop)
-      M.ab(:lead, ref)
-      M.turn(:"lead/cutoff", 2000.0)
+    MB::Sound::Session.with_context(session: @session) do
+      MB::Sound.track(:lead, fit)
+      MB::Sound.bg(:lead, MB::Sound.seq(MB::Sound::A2).n4.loop)
+      MB::Sound.ab(:lead, ref)
+      MB::Sound.turn(:"lead/cutoff", 2000.0)
     end
     10.times { @session.process_buffer }
     fit

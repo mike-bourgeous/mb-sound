@@ -4,8 +4,6 @@ require_relative '../../../support/ui_helpers'
 # playing the patch track's clip, muted, its level matched to the patch's
 # loudness; `ab` flips which one is heard.  Synthetic references only.
 RSpec.describe(MB::Sound::Reference, :aggregate_failures) do
-  M = MB::Sound unless defined?(M)
-
   REF_SPEC_CODE = 'synth(CLIP, voices: 1) { |v| v.hz.saw.lp4(1234.5, resonance: 0.25) * v.amp_env(0.01, 0.2, 0.5, 0.1) }'.freeze
 
   before { @sessions = [] }
@@ -15,7 +13,7 @@ RSpec.describe(MB::Sound::Reference, :aggregate_failures) do
   }
 
   let(:fit) { MB::Sound::FitPatch.save(:lead_fit, REF_SPEC_CODE, { cutoff: (100.0..8000.0).at(1234.5), resonance: (0.0..1.0).at(0.25) }) }
-  let(:clip) { M.seq(M::A2).n4.loop }
+  let(:clip) { MB::Sound.seq(MB::Sound::A2).n4.loop }
   # The reference: the same voice darker and 6 dB down (a sound to match).
   let(:reference) {
     a = MB::Sound::HandTune.render(fit.path, { cutoff: 500.0 }, note: 45, hold: 0.5, seconds: 0.5)
@@ -23,10 +21,10 @@ RSpec.describe(MB::Sound::Reference, :aggregate_failures) do
   }
 
   def session
-    M.rewind
-    M.seed(1)
-    out = M::Sampler::CaptureOutput.new(channels: 1, buffer_size: 800)
-    s = M::Session.new(output: out, realtime: false)
+    MB::Sound.rewind
+    MB::Sound.seed(1)
+    out = MB::Sound::Sampler::CaptureOutput.new(channels: 1, buffer_size: 800)
+    s = MB::Sound::Session.new(output: out, realtime: false)
     @sessions << s
     [s, out]
   end
@@ -39,10 +37,10 @@ RSpec.describe(MB::Sound::Reference, :aggregate_failures) do
   it 'puts the reference on its own track, muted, playing the clip, loudness-matched' do
     s, out = session
     pair = nil
-    M::Session.with_context(session: s) do
-      M.track(:lead, fit)
-      M.bg(:lead, clip)
-      pair = M.ab(:lead, reference)
+    MB::Sound::Session.with_context(session: s) do
+      MB::Sound.track(:lead, fit)
+      MB::Sound.bg(:lead, clip)
+      pair = MB::Sound.ab(:lead, reference)
     end
     expect(pair).to have_attributes(track: :lead, ref: :lead_ref, hearing: :patch, note: nil)
     expect(pair.level_db).to be_within(1e-9).of(pair.patch_lufs - pair.ref_lufs)
@@ -53,32 +51,32 @@ RSpec.describe(MB::Sound::Reference, :aggregate_failures) do
     patch = lufs(out, 48000, 96000)
     expect(pair.to_s).to match(/hearing the patch \(:lead\); patch -?\d+\.\d LUFS, reference -?\d+\.\d LUFS, reference level \+\d+\.\d dB/)
 
-    M::Session.with_context(session: s) { expect(M.ab).to equal(pair) }
+    MB::Sound::Session.with_context(session: s) { expect(MB::Sound.ab).to equal(pair) }
     expect(pair.hearing).to eq(:ref)
     120.times { s.process_buffer }
     ref = lufs(out, 48000 + 96000, 96000 + 96000)
     expect(ref).to be_within(1.0).of(patch)
     expect(s.journal.changes.select { |e| %i[mute unmute].include?(e.kind) }.map { |e| [e.kind, e.subject] }.last(2)).to eq([%i[mute lead], %i[unmute lead_ref]])
 
-    M::Session.with_context(session: s) { M.ab(:lead) }
+    MB::Sound::Session.with_context(session: s) { MB::Sound.ab(:lead) }
     expect(pair.hearing).to eq(:patch)
-    M::Session.with_context(session: s) { M.ab(:lead, :off) }
+    MB::Sound::Session.with_context(session: s) { MB::Sound.ab(:lead, :off) }
     expect(MB::Sound::Reference.pair(s, :lead)).to be_nil
   end
 
   it 'matches again on a flip to the reference after the knobs moved' do
     s, = session
     pair = nil
-    M::Session.with_context(session: s) do
-      M.track(:lead, fit)
-      M.bg(:lead, clip)
-      pair = M.ab(:lead, reference)
+    MB::Sound::Session.with_context(session: s) do
+      MB::Sound.track(:lead, fit)
+      MB::Sound.bg(:lead, clip)
+      pair = MB::Sound.ab(:lead, reference)
     end
     10.times { s.process_buffer }
     first = pair.patch_lufs
-    M::Session.with_context(session: s) { M.turn(:"lead/cutoff", 300.0, smooth: 0) }
+    MB::Sound::Session.with_context(session: s) { MB::Sound.turn(:"lead/cutoff", 300.0, smooth: 0) }
     10.times { s.process_buffer }
-    M::Session.with_context(session: s) { M.ab }
+    MB::Sound::Session.with_context(session: s) { MB::Sound.ab }
     expect(pair.values).to eq(cutoff: 300.0, resonance: 0.25)
     expect(pair.patch_lufs).not_to be_within(0.1).of(first)
     want = MB::Sound::Reference.lufs(MB::Sound::Reference.patch_audio(s, :lead, 0.5), 48000)
@@ -88,22 +86,22 @@ RSpec.describe(MB::Sound::Reference, :aggregate_failures) do
   it 'flips a patch block it cannot render offline, saying it is not matched' do
     s, = session
     pair = nil
-    M::Session.with_context(session: s) do
-      M.track(:lead) { |c| c.synth { |v| v.hz.saw * v.amp_env } }
-      M.bg(:lead, clip)
-      pair = M.ab(:lead, reference)
+    MB::Sound::Session.with_context(session: s) do
+      MB::Sound.track(:lead) { |c| c.synth { |v| v.hz.saw * v.amp_env } }
+      MB::Sound.bg(:lead, clip)
+      pair = MB::Sound.ab(:lead, reference)
     end
     expect(pair.note).to match(/not loudness-matched: :lead's patch isn't a graph document/)
     expect(pair.level_db).to eq(0.0)
-    M::Session.with_context(session: s) { M.ab }
+    MB::Sound::Session.with_context(session: s) { MB::Sound.ab }
     expect(pair.hearing).to eq(:ref)
   end
 
   it 'says how to set one up' do
     s, = session
-    M::Session.with_context(session: s) do
-      expect { M.ab }.to raise_error(ArgumentError, /no reference set up/)
-      expect { M.ab(:nope, reference) }.to raise_error(ArgumentError, /no track :nope/)
+    MB::Sound::Session.with_context(session: s) do
+      expect { MB::Sound.ab }.to raise_error(ArgumentError, /no reference set up/)
+      expect { MB::Sound.ab(:nope, reference) }.to raise_error(ArgumentError, /no track :nope/)
     end
   end
 
@@ -130,9 +128,9 @@ RSpec.describe(MB::Sound::Reference, :aggregate_failures) do
       @sessions << s
       pair = nil
       MB::Sound::Session.with_context(session: s) do
-        M.track(:lead, fit)
-        M.bg(:lead, clip)
-        pair = M.ab(:lead, reference)
+        MB::Sound.track(:lead, fit)
+        MB::Sound.bg(:lead, clip)
+        pair = MB::Sound.ab(:lead, reference)
       end
       20.times { s.process_buffer }
       MB::Sound::UI::Inspect.target = { track: :lead }.freeze
