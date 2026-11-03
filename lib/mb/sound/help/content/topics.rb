@@ -1513,9 +1513,19 @@ module MB
         s.flow_ruby`, `s.markers!` for `seek :"analysis/b_1"`, and
         `s.compare(take.form)` to check a render against the flow that
         played).  Keys: `Sample['pad.wav'].key_analysis`.
+
+        Matching a sound by ear and by eye: `analyze 'orig.wav'` reports
+        pitch and vibrato, the attack (onset, rise, clicks, flat tops,
+        perceived pitch), amplitude modulation by band, top-octave
+        movement, moving resonances and combs, and a bleed screen (a
+        reason to look, not a verdict); `compare 'orig.wav', fit` gives
+        the L3 distance term by term (`compare 'orig.wav', 'a' => a, 'b'
+        => b` ranks them); `look 'orig.wav', fit, path: 'x.png'` writes
+        waveform, first-50-ms, spectrogram, and top-octave images with
+        labeled axes to read before changing a sound.
       TEXT
-      commands :freq_estimate, :peaks, :autocorrelate, :crosscorrelate, :peak_correlation, :analyze_form, :loudness
-      note :structure
+      commands :freq_estimate, :peaks, :autocorrelate, :crosscorrelate, :peak_correlation, :analyze_form, :loudness, :analyze, :compare, :look
+      note :structure, :analysis
       see :loudness, :plots
     end
 
