@@ -6,7 +6,7 @@ module MB
       # resonant filter, a noise layer through a falling bandpass) and
       # comb teeth (a flanger, a comb filter, a short echo).  Both read
       # 2048-point frames every 10 ms over the body of the sound (frames
-      # within BODY_DB of the loudest).
+      # inside the sound within BODY_DB of the loudest).
       #
       # Resonance: each frame's power spectrum is smoothed over ±1/12
       # octave (and over at least ±1.5 f0 for pitched sounds, so harmonics
@@ -109,8 +109,10 @@ module MB
           mag = @signal.stft(N_FFT, HOP)
           @power = mag**2
           total = DSP.db(@power.sum(axis: 1), 1e-20)
-          @body = total.ge(total.max - BODY_DB).where
-          @times = Numo::DFloat.new(mag.shape[0]).seq * (HOP / Signal::RATE.to_f)
+          full = [[(@signal.length - N_FFT) / HOP + 1, 0].max, total.length].min
+          total = total[0...full]
+          @body = full > 0 ? total.ge(total.max - BODY_DB).where : Numo::Int32[]
+          @times = (Numo::DFloat.new(mag.shape[0]).seq * HOP + N_FFT / 2) / Signal::RATE.to_f
           pc = @signal.pitch_contour
           @f0 = pc.median && pc.voiced >= 0.5 ? pc.median.frequency : nil
           @resonance = @body.size >= 10 ? find_resonance : nil

@@ -18,10 +18,11 @@ module MB
       # #depths and #distance are round 3's measure (whole envelopes, the
       # modulation bands of MOD_BANDS, octave bands weighted by their
       # loudness share to the 0.3 power).  #peaks reads the strongest rate
-      # in each band over the body of the sound (frames within BODY_DB of
-      # the loudest, each band's envelope floored FLOOR_DB under its own
-      # peak) as a sinusoid's rate and depth (±dB), keeps those holding at
-      # least MIN_SHARE of the band's fluctuation and MIN_DEPTH, and merges
+      # in each band over the body of the sound (frames inside the sound
+      # within BODY_DB of the loudest, each band's envelope floored FLOOR_DB under its own
+      # peak; its spectrum's peak, refined by least-squares sinusoid fits)
+      # as a rate and depth (±dB), keeps those holding at least MIN_SHARE of
+      # the band's fluctuation and MIN_DEPTH, and merges
       # neighboring bands that move at the same rate (within 15%).
       class ModulationSpectrum
         # Modulation bands (Hz) of #depths and #distance.
@@ -52,14 +53,18 @@ module MB
         # A clear modulation: +bands+ ([lo, hi] Hz pairs it was found in),
         # +rate+ (a Pitch: `rate.lfo` plays it), +depth+ (Decibels: the
         # envelope swings ±depth), +share+ (the part of those bands'
-        # fluctuation at that rate, 0..1).
-        Peak = Data.define(:bands, :rate, :depth, :share) do
+        # fluctuation at that rate, 0..1), +rate_error+ (Hz: about two
+        # standard errors of the rate, DSP.sine_fit).
+        Peak = Data.define(:bands, :rate, :depth, :share, :rate_error) do
           # The frequency range of the bands ("2-4 kHz").
           def range = Analysis.band_label(bands.first[0], bands.last[1])
 
-          def to_h = { bands: bands, rate_hz: rate.frequency, depth_db: depth.decibels, share: share }
+          def to_h = { bands: bands, rate_hz: rate.frequency, rate_error_hz: rate_error, depth_db: depth.decibels, share: share }
 
-          def to_s = "AM #{Analysis.rate_label(rate.frequency)} ±#{format('%.1f', depth.decibels)} dB in #{range}"
+          def to_s
+            "AM #{Analysis.rate_label(rate.frequency)} (rate ±#{Analysis.rate_label(rate_error).sub(' Hz', '')}), " \
+              "±#{format('%.1f', depth.decibels)} dB in #{range}"
+          end
 
           def inspect = "#<ModulationSpectrum::Peak #{self}, #{(share * 100).round}% of its fluctuation>"
         end
@@ -77,7 +82,8 @@ module MB
         # modulation bands have a full period inside the sound.
         attr_reader :depths, :valid
 
-        # Each band's weight in #distance (loudness share^0.3, summing to 1).
+        # Each band's weight in #distance (loudness share^0.3, summing to 1;
+        # 0 for a partial top band).
         attr_reader :weights
 
         # The clear modulations (Peak), deepest first.
@@ -95,7 +101,11 @@ module MB
           @envelopes = DSP.db(power, 1e-10).freeze
           @depths, @valid = depths_of(@envelopes)
           share = power.mean(axis: 0)
+          # (#distance reads whole octaves, as round 3 did: a partial top
+          # band weighs nothing there)
+          @octaves = DSP.octave_bands(LOWEST, @band).length
           w = share**0.3
+          w[@octaves..] = 0 if @octaves < @bands.length
           @weights = (w.sum > 0 ? w / w.sum : Numo::DFloat.new(@bands.length).fill(1.0 / @bands.length)).freeze
           @peaks = find_peaks(power, share).freeze
         end
@@ -145,6 +155,11 @@ module MB
         # Peaks per band over the body, merged across neighboring bands.
         def find_peaks(power, share)
           total = DSP.db(power.sum(axis: 1), 1e-10)
+          # (frames whose window runs past the end read the padding as a
+          # fade: leave them out)
+          full = [(@signal.length - N_FFT) / HOP + 1, 0].max
+          total = total[0...full] if full < total.length
+          return [] if total.empty?
           body = total.ge(total.max - BODY_DB).where
           return [] if body.size < 8
           span = body[0]..body[-1]
@@ -158,9 +173,11 @@ module MB
             e = @envelopes[span, c]
             e = e.clip(e.max - FLOOR_DB, nil)
             spec = DSP.slow_spectrum(e, FRAME_RATE)
-            rate, depth, part = DSP.sine_peak(spec, lo, RATES.end)
-            next unless rate && depth >= MIN_DEPTH && part >= MIN_SHARE
-            [c, rate, depth, part]
+            rate, _, part = DSP.sine_peak(spec, lo, RATES.end)
+            next unless rate && part >= MIN_SHARE
+            rate, depth, err = DSP.sine_fit(e, FRAME_RATE, rate)
+            next unless depth >= MIN_DEPTH
+            [c, rate, depth, part, err]
           end
 
           groups = []
@@ -178,7 +195,8 @@ module MB
               bands: g.map { |c, *| @bands[c] }.freeze,
               rate: (g.sum { |f| f[1] } / g.length).hz,
               depth: (g.sum { |f| f[2] } / g.length).db,
-              share: g.sum { |f| f[3] } / g.length
+              share: g.sum { |f| f[3] } / g.length,
+              rate_error: g.map { |f| f[4] }.max
             )
           }.sort_by { |p| -p.depth.decibels }
         end

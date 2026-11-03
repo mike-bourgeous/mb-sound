@@ -8,11 +8,12 @@ RSpec.describe(MB::Sound::Analysis::ModulationSpectrum) do
     expect(m.peaks.length).to eq(1)
     pk = m.peaks.first
     expect(pk.rate).to be_a(MB::Sound::Pitch)
-    expect(pk.rate.frequency).to be_within(0.05).of(0.6)
+    expect(pk.rate.frequency).to be_within(0.02).of(0.6)
     expect(pk.depth).to be_a(MB::Sound::Decibels)
-    expect(pk.depth.decibels).to be_within(0.2).of(1.5)
+    expect(pk.depth.decibels).to be_within(0.1).of(1.5)
     expect(pk.bands.first[0]).to eq(125.0)
-    expect(m.to_s).to match(/AM 0\.6\d Hz ±1\.[456] dB in 125 Hz-/)
+    expect(m.to_s).to match(/AM 0\.60 Hz \(rate ±0\.0\d\), ±1\.5 dB in 125 Hz-/)
+    expect(pk.rate_error).to be_between(0.005, 0.05)
   end
 
   it 'finds faster AM in one band only' do
@@ -21,8 +22,8 @@ RSpec.describe(MB::Sound::Analysis::ModulationSpectrum) do
     m = ms.new(base + hi)
     pk = m.peaks.find { |p| p.bands.any? { |lo, hi_| lo <= 3000 && hi_ > 3000 } }
     expect(pk).not_to be_nil
-    expect(pk.rate.frequency).to be_within(0.1).of(5.5)
-    expect(pk.depth.decibels).to be_within(0.4).of(3.0)
+    expect(pk.rate.frequency).to be_within(0.05).of(5.5)
+    expect(pk.depth.decibels).to be_within(0.2).of(3.0)
     expect(m.peaks.map(&:bands).flatten(1)).not_to include([125.0, 250.0])
   end
 

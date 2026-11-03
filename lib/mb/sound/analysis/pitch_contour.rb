@@ -32,9 +32,10 @@ module MB
         SILENCE = 1e-8
 
         # Vibrato: the contour's strongest rate between VIBRATO_RATES (at
-        # least 1.5 cycles inside the voiced span), kept if it swings at
-        # least MIN_VIBRATO cents and holds MIN_SHARE of the contour's
-        # fluctuation in that range.
+        # least 1.5 cycles inside the voiced span; refined by least-squares
+        # sinusoid fits, its depth corrected for the window's averaging),
+        # kept if it swings at least MIN_VIBRATO cents and holds MIN_SHARE
+        # of the contour's fluctuation in that range.
         VIBRATO_RATES = 0.5..20.0
         MIN_VIBRATO = 3.0
         MIN_SHARE = 0.3
@@ -45,10 +46,11 @@ module MB
 
         # A periodic pitch swing: +rate+ a Pitch (`rate.lfo` plays it),
         # +depth+ an Interval (±cents, peak), +share+ of the contour's
-        # fluctuation at that rate (0..1).
-        Vibrato = Data.define(:rate, :depth, :share) do
-          def to_h = { rate_hz: rate.frequency, depth_cents: depth.to_cents.to_f, share: share }
-          def to_s = "vibrato #{Analysis.rate_label(rate.frequency)} ±#{depth.to_cents.round} cents"
+        # fluctuation at that rate (0..1), +rate_error+ (Hz, about two
+        # standard errors).
+        Vibrato = Data.define(:rate, :depth, :share, :rate_error) do
+          def to_h = { rate_hz: rate.frequency, rate_error_hz: rate_error, depth_cents: depth.to_cents.to_f, share: share }
+          def to_s = "vibrato #{Analysis.rate_label(rate.frequency)} (rate ±#{Analysis.rate_label(rate_error).sub(' Hz', '')}), ±#{depth.to_cents.round} cents"
           def inspect = "#<PitchContour::Vibrato #{self}, #{(share * 100).round}% of the fluctuation>"
         end
 
@@ -206,9 +208,15 @@ module MB
           lo = [VIBRATO_RATES.begin, 1.5 / dur].max
           return nil if lo >= VIBRATO_RATES.end
           spec = DSP.slow_spectrum(Numo::DFloat.cast(c), frame_rate)
-          rate, depth, share = DSP.sine_peak(spec, lo, VIBRATO_RATES.end)
-          return nil unless rate && depth >= MIN_VIBRATO && share >= MIN_SHARE
-          Vibrato.new(rate: rate.hz, depth: depth.round.cents, share: share)
+          rate, _, share = DSP.sine_peak(spec, lo, VIBRATO_RATES.end)
+          return nil unless rate && share >= MIN_SHARE
+          rate, depth, err = DSP.sine_fit(Numo::DFloat.cast(c), frame_rate, rate)
+          # Each frame's period averages the pitch over the window, which
+          # shrinks a swing at +rate+ like a boxcar does (6 Hz: by 9%)
+          x = Math::PI * rate * WINDOW / Signal::RATE
+          depth /= Math.sin(x) / x if x > 1e-6 && x < 2.5
+          return nil unless depth >= MIN_VIBRATO
+          Vibrato.new(rate: rate.hz, depth: depth.round.cents, share: share, rate_error: err)
         end
       end
     end

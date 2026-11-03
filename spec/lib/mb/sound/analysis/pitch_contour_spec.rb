@@ -7,10 +7,11 @@ RSpec.describe(MB::Sound::Analysis::PitchContour) do
     c = pc.new(SyntheticSounds.tone(220, 2, vibrato: [5.5, 18]))
     expect(c.median.frequency).to be_within(1).of(220)
     expect(c.voiced).to be > 0.9
-    expect(c.vibrato.rate.frequency).to be_within(0.15).of(5.5)
+    expect(c.vibrato.rate.frequency).to be_within(0.05).of(5.5)
     expect(c.vibrato.depth).to be_a(MB::Sound::Interval)
-    expect(c.vibrato.depth.to_cents).to be_within(2).of(18)
-    expect(c.to_s).to include('A3', 'vibrato 5.5 Hz ±1')
+    expect(c.vibrato.depth.to_cents).to be_within(1).of(18)
+    expect(c.to_s).to include('A3', 'vibrato 5.5 Hz (rate ±0.', '), ±18 cents')
+    expect(c.vibrato.rate_error).to be_between(0.05, 0.2)
     expect(c.vibrato.to_h[:rate_hz]).to be_within(0.15).of(5.5)
   end
 

@@ -168,13 +168,25 @@ module MB
           end
         end
 
-        # Magnitude STFT [frames, n_fft / 2 + 1] (Analysis::STFT framing:
-        # frame i centered on sample i * hop), kept for later calls.
+        # Magnitude STFT [frames, n_fft / 2 + 1], kept for later calls:
+        # periodic Hann frames starting at sample i * hop (frame i covers
+        # i * hop ... i * hop + n_fft, centered n_fft / 2 later), the sound
+        # zero-padded by n_fft at its end, ceil(length / hop) frames.
+        #
+        # This is round 3's framing, not Analysis::STFT's centered one: the
+        # distances measured against the maintainer's picks used it, and
+        # the centered framing moved L3's pick rank on 4 of the 24 labeled
+        # items (13 first instead of 15; analysis-lib-1, 2026-11-03).
         def stft(n_fft, hop)
           @cache[[:stft, n_fft, hop]] ||= begin
-            rows = STFT.count(length, hop)
+            padded = Numo::DFloat.zeros(length + n_fft)
+            padded[0...length] = @data
+            rows = (length / hop.to_f).ceil
+            w = STFT.hann(n_fft)
             out = Numo::DFloat.zeros(rows, n_fft / 2 + 1)
-            STFT.each_chunk(@data, n_fft: n_fft, hop: hop) { |r, mag| out[r, true] = mag }
+            rows.times do |f|
+              out[f, true] = Numo::Pocketfft.rfft(padded[(f * hop)...(f * hop + n_fft)] * w).abs
+            end
             out.freeze
           end
         end

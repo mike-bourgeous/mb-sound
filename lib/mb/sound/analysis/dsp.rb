@@ -126,6 +126,70 @@ module MB
           [(k + frac) * df, 2 * mag[k] / spec[:window_sum], share]
         end
 
+        # Refines a sinusoid in +e+ (frames at +rate+ per second) near +hz+:
+        # least-squares fits of a line plus a sinusoid at STEPS rates across
+        # ±+span+ of +hz+, then a finer pass around the best.  A window's
+        # spectrum peak reads rates of sounds only two or three cycles long
+        # several percent low (detrending and the window's edges); the fit
+        # doesn't.  Returns [rate Hz, amplitude (in e's units), rate
+        # uncertainty Hz]: twice the Cramér-Rao bound of a sinusoid's
+        # frequency in noise (Rife and Boorstyn 1974) with the fit's
+        # residual as the noise, so a modulation that isn't a clean
+        # sinusoid reads less certain; at least 1% of the rate.
+        def sine_fit(e, rate, hz, span: 0.2, steps: 21)
+          n = e.length
+          t = Numo::DFloat.new(n).seq / rate.to_f
+          t -= t.mean
+          best = nil
+          2.times do
+            lo = hz * (1 - span)
+            hi = hz * (1 + span)
+            steps.times do |i|
+              f = lo + (hi - lo) * i / (steps - 1).to_f
+              fit = fit_at(e, t, f)
+              best = [f, *fit] if best.nil? || fit[1] < best[2]
+            end
+            hz = best[0]
+            span *= 2.0 / steps
+          end
+          f, amp, rss = best
+          noise = rss / [n - 4, 1].max
+          sigma = amp > 0 && n > 2 ? Math.sqrt(12 * noise / (amp**2 * n * (n**2 - 1.0))) * rate / (2 * Math::PI) : f
+          [f, amp, [2 * sigma, 0.01 * f].max]
+        end
+
+        # [amplitude, residual sum of squares] of e ~ a + b t + c cos + d sin
+        # at +f+ Hz.
+        def fit_at(e, t, f)
+          w = t * (2 * Math::PI * f)
+          cols = [Numo::DFloat.ones(t.length), t, Numo::NMath.cos(w), Numo::NMath.sin(w)]
+          ata = cols.map { |a| cols.map { |b| (a * b).sum } }
+          atb = cols.map { |a| (a * e).sum }
+          coef = solve(ata, atb)
+          return [0.0, (e**2).sum] unless coef
+          fitted = cols.each_with_index.sum(Numo::DFloat.zeros(t.length)) { |c, i| c * coef[i] }
+          [Math.sqrt(coef[2]**2 + coef[3]**2), ((e - fitted)**2).sum]
+        end
+
+        # Solves the small system +a+ x = +b+ (Arrays) by Gaussian
+        # elimination with partial pivoting; nil if singular.
+        def solve(a, b)
+          n = b.length
+          m = a.each_with_index.map { |row, i| row.dup << b[i] }
+          n.times do |c|
+            p = (c...n).max_by { |r| m[r][c].abs }
+            return nil if m[p][c].abs < 1e-12
+            m[c], m[p] = m[p], m[c]
+            (c + 1...n).each do |r|
+              k = m[r][c] / m[c][c]
+              (c..n).each { |j| m[r][j] -= k * m[c][j] }
+            end
+          end
+          x = Array.new(n, 0.0)
+          (n - 1).downto(0) { |r| x[r] = (m[r][n] - ((r + 1)...n).sum { |j| m[r][j] * x[j] }) / m[r][r] }
+          x
+        end
+
         # +x+ with everything above +high+ Hz (and, with +low:+, at and below
         # +low+ Hz) zeroed in the FFT domain, +pad+ zeros added first so a
         # signal cut off at full level doesn't wrap its edge into its start.

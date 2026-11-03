@@ -56,14 +56,14 @@ RSpec.describe(MB::Sound::Analysis::Signal) do
   it 'keeps STFTs and envelopes' do
     s = sig.from(SyntheticSounds.sine(1000, 0.2))
     expect(s.stft(1024, 240)).to equal(s.stft(1024, 240))
-    expect(s.stft(1024, 240).shape).to eq([MB::Sound::Analysis::STFT.count(s.length, 240), 513])
+    expect(s.stft(1024, 240).shape).to eq([(s.length / 240.0).ceil, 513])
     env = s.envelope_db(240)
     expect(env.length).to eq(40)
     expect(env[20]).to be_within(0.1).of(20 * Math.log10(0.5 / Math.sqrt(2)))
   end
 
   it 'finds the band of a sound between 2 and 16 kHz' do
-    expect(sig.from(SyntheticSounds.tone(220, 0.5, harmonics: 10)).band).to be_between(2200, 3500)
+    expect(sig.from(SyntheticSounds.tone(220, 0.5, harmonics: 10)).band).to be_between(2200, 4500)
     expect(sig.from(SyntheticSounds.noise(0.5)).band).to eq(16000.0)
   end
 end

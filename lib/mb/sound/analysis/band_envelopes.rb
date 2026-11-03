@@ -49,7 +49,7 @@ module MB
         # Octave bands ([lo, hi] Hz) and their levels in dB [frames, bands].
         attr_reader :bands, :levels
 
-        # Frame times (seconds).
+        # Frame times (seconds, frame centers).
         attr_reader :times
 
         # The top bands ([lo, hi] Hz) and their levels relative to the whole
@@ -69,7 +69,7 @@ module MB
           rate = Signal::RATE
           @bands = DSP.octave_bands(LOWEST, @band, partial: true)
           @levels = DSP.db(DSP.band_power(mag, N_FFT, @bands, rate), 1e-10).freeze
-          @times = (Numo::DFloat.new(mag.shape[0]).seq * (HOP / rate.to_f)).freeze
+          @times = ((Numo::DFloat.new(mag.shape[0]).seq * HOP + N_FFT / 2) / rate.to_f).freeze
 
           @top_bands = DSP.octave_bands(@band / 2**TOP_OCTAVES, @band, TOP_PER_OCTAVE)
           p = DSP.smooth_rows(DSP.band_power(mag, N_FFT, @top_bands, rate), SMOOTH)
@@ -103,12 +103,18 @@ module MB
 
         private
 
+        def empty_movement
+          @std = @fluctuation = @slope = Numo::DFloat[].freeze
+          nil
+        end
+
         def movement(total_db)
+          # (frames whose window runs past the end are left out)
+          full = [[(@signal.length - N_FFT) / HOP + 1, 0].max, total_db.length].min
+          return empty_movement if full < 20
+          total_db = total_db[0...full]
           keep = total_db.ge(total_db.max - RANGE_DB).where
-          if keep.size < 20
-            @std = @fluctuation = @slope = Numo::DFloat[].freeze
-            return
-          end
+          return empty_movement if keep.size < 20
           r = @relative[keep, true]
           @std = r.stddev(axis: 0).freeze
           cols = r.shape[1]
