@@ -158,7 +158,7 @@ module MB
           doc = document_of(session, track) or return {}
           doc.params.keys.to_h { |p|
             k = session.knobs[Session::Name.param(track, p)]
-            [p, k ? k.value : doc.params[p].default]
+            [p, k ? k.value : doc.declarations[p].default]
           }
         end
 

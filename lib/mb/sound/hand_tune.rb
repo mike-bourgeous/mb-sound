@@ -95,6 +95,97 @@ module MB
         Analysis.look(sounds.transform_values { |v| v.is_a?(Array) ? v.first : v }, path: path, seconds: seconds)
       end
 
+      # One step of his path scored (see .infer): +row+ (the take's
+      # Take::Reader::Turn), +before+ and +after+ (the comparison's total
+      # before and after the step), +terms+ ({ term => change }: negative
+      # is closer), +agrees+ (true when the loss fell or held within
+      # +tolerance+, false when it calls his step worse).
+      Step = Data.define(:row, :before, :after, :terms, :agrees) do
+        def to_s
+          t = terms.map { |k, d| "#{k} #{format('%+.3f', d)}" }.join(', ')
+          "#{format('%8.3f', row.seconds.to_f)} s  #{row.knob}  #{Take::Reader.number(row.from)} -> #{Take::Reader.number(row.to)}  " \
+            "loss #{format('%.3f', before)} -> #{format('%.3f', after)} (#{t})  #{agrees ? 'agrees' : 'DISAGREES'}"
+        end
+      end
+
+      # What .infer found: +steps+ (Steps), +start+ and +finish+ (the
+      # comparison at his start and end), +line+ ([[fraction, total], ...]:
+      # the straight line from his start to his end, which a loss that
+      # agrees with him falls along), +track+.
+      Inference = Data.define(:track, :steps, :start, :finish, :line) do
+        # His steps the loss calls worse.
+        def disagreements = steps.reject(&:agrees)
+
+        # The terms' change from his start to his end ({ term => change }):
+        # negative ones got closer (what he listened for), positive ones he
+        # gave up.
+        def weighted = start.terms.to_h { |k, v| [k, finish.terms[k] - v] }
+
+        # True if the loss falls along the straight line from start to end.
+        def monotone? = line.each_cons(2).all? { |(_, a), (_, b)| b <= a + 1e-9 }
+
+        def to_s
+          w = weighted.map { |k, d| "#{k} #{format('%+.3f', d)}" }.join(', ')
+          [
+            "#{track}: loss #{format('%.3f', start.total)} at his start, #{format('%.3f', finish.total)} at his end (#{w})",
+            "the loss agrees with #{steps.count(&:agrees)} of his #{steps.length} steps#{disagreements.empty? ? '' : '; calls worse:'}",
+            *disagreements.map { |st| "  #{st}" },
+            "along the straight line start -> end: #{line.map { |f, v| "#{(f * 100).round}% #{format('%.3f', v)}" }.join(', ')}#{monotone? ? '' : ' (not falling all the way)'}",
+            'every step:', *steps.map { |st| "  #{st}" },
+          ].join("\n")
+        end
+
+        def inspect = "#<HandTune::Inference #{track}: #{disagreements.length} of #{steps.length} steps disagree>"
+      end
+
+      # The infer step (prototype; research-voice-match-3's hand-tune loop,
+      # step 4): scores every state along the maintainer's path through a
+      # take (+turns+, a Take::Reader::Result) for +track+'s graph document
+      # with the comparison (.compare: L3) against +reference+ (a path, a
+      # Sample, channels at 48 kHz), and reports where the loss disagrees
+      # with him: his steps it calls worse.  Each state is one note
+      # (+note+, +velocity+, +hold+, +seconds+) rendered offline from the
+      # document at that state's params (.render): the same values, the
+      # same samples.  +line+ fractions of the straight line from his start
+      # to his end (in each param's range and curve: Param#position) are
+      # scored too.  Turns of knobs that aren't the document's params
+      # (levels) are left out: the comparison is level-free.  A loss tuned
+      # to agree with him changes .compare.  Returns an Inference.
+      #
+      #     t = take.turns
+      #     puts HandTune.infer(t, track: :kick, reference: 'kick_ref.wav', note: 36, seconds: 0.5)
+      def infer(turns, track:, reference:, note: 60, velocity: 0.8, hold: nil, seconds: 1.0, tolerance: 1e-6, line: [0.25, 0.5, 0.75])
+        path = turns.tracks[track] or raise ArgumentError, "no graph document known for track #{track.inspect} (Take.read(..., patch: { #{track}: path }))"
+        doc = GraphIO.parse(path)
+        names = doc.params.keys.to_h { |p| [Session::Name.param(track, p), p] }
+        state = turns.values(track, :start)
+        score = ->(values) { compare(reference, render(path, values, note: note, velocity: velocity, hold: hold, seconds: seconds)[0], seconds: seconds) }
+        start = score.(state)
+        prev = start
+        steps = turns.rows.filter_map { |row|
+          p = names[row.knob] or next
+          next if row.to.nil?
+          state = state.merge(p => row.to)
+          now = score.(state)
+          terms = now.terms.to_h { |k, v| [k, v - prev.terms[k]] }
+          st = Step.new(row: row, before: prev.total, after: now.total, terms: terms, agrees: now.total <= prev.total + tolerance)
+          prev = now
+          st
+        }
+        finish = prev
+        a = turns.values(track, :start)
+        b = turns.values(track, :finish)
+        pts = [[0.0, start.total]] + Array(line).map { |f|
+          v = doc.declarations.to_h { |p, decl|
+            pa = decl.position(a[p]).to_f
+            pb = decl.position(b[p]).to_f
+            [p, decl.value(pa + (pb - pa) * f)]
+          }
+          [f.to_f, score.(v).total]
+        } + [[1.0, finish.total]]
+        Inference.new(track: track, steps: steps.freeze, start: start, finish: finish, line: pts.freeze)
+      end
+
       # What `tune` opened: +track+, +fit+ (FitPatch::Patch), +opened+
       # (UI::Design::Opened, or nil without a screen), +pair+
       # (Reference::Pair, or nil without a reference).

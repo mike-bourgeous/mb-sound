@@ -86,7 +86,7 @@ module MB
             path = tracks[track] or raise ArgumentError, "no graph document known for track #{track.inspect} (Take.read(..., patch: { #{track}: path }))"
             doc = GraphIO.parse(path)
             state = which == :start ? start : finish
-            doc.params.to_h { |p, decl|
+            doc.declarations.to_h { |p, decl|
               k = Session::Name.param(track, p)
               [p, state.key?(k) && !state[k].nil? ? state[k] : decl.default]
             }
@@ -177,9 +177,9 @@ module MB
           replay = find_replay(tree.value) or raise Error, "not a take script (no MB::Sound::Take::Replay.new(...) do |r| ... end)"
           read_start(replay)
           @gestures = read_gestures(replay)
+          @patch.each { |t, path| add_track(t, path) }
           body = replay.block&.body&.body || []
           body.each { |st| read_statement(st) }
-          @patch.each { |t, path| add_track(t, path) unless @tracks.key?(t) }
           start = {}
           @rows.each { |r| start[r.knob] = r.from unless start.key?(r.knob) }
           finish = @rows.to_h { |r| [r.knob, @state[r.knob]] }
@@ -310,7 +310,7 @@ module MB
         # values as where its knobs start.
         def add_track(track, path)
           @tracks[track] = path
-          GraphIO.parse(path).params.each { |p, decl| seed(Session::Name.param(track, p), decl.default) }
+          GraphIO.parse(path).declarations.each { |p, decl| seed(Session::Name.param(track, p), decl.default) }
         rescue StandardError
           nil
         end
