@@ -632,7 +632,7 @@ module MB
       # +:time+ stops (or starts fading) at that timeline position in whole
       # notes instead of now (used for scheduled actions).  A stop for now
       # also cancels graphs waiting in the change queue to start under those
-      # names.
+      # names (a +:time+ the timeline has reached: only those due by then).
       #
       # +ring: true+ rings players out instead (see Tails): their clips stop
       # sending notes at the stop time and the graph keeps playing until it
@@ -641,6 +641,10 @@ module MB
       def remove(*names, fade: nil, time: nil, ring: false)
         fade = ring ? nil : (fade.nil? ? @fade_out : bars_or_nil(fade))
         time = time&.to_r
+        # (a stop for a time the timeline has reached, e.g. a scheduled
+        # block's or a scene launch's landing now, cancels only the starts
+        # due by then: see below)
+        due = time
         time = nil if time && time <= @transport.position
 
         @render_lock.synchronize {
@@ -649,8 +653,17 @@ module MB
             playing = @mutex.synchronize { @players.each_value.any? { |p| p.name == n } }
             waiting = @changes.select { |c| c.subject == n && START_KINDS.include?(c.kind) }
 
-            # A stop for now cancels starts that haven't happened yet
-            cancel_changes(*waiting) if time.nil?
+            # A stop for now cancels starts that haven't happened yet.  A
+            # stop for a given time keeps starts queued for after it, as a
+            # stop queued ahead of that time does (fuzz-fixes-2: after a
+            # seek back, a flow's scene launch landing now ended the
+            # track's cue queued for a later bar, so `launch` found nothing
+            # cued; whether a scheduled stop dropped a later start
+            # depended on whether its block ran early or late)
+            if time.nil?
+              waiting = waiting.select { |c| c.time.nil? || c.time <= due } if due
+              cancel_changes(*waiting)
+            end
 
             if playing || (time && !waiting.empty?)
               data = ring ? { ring: true } : { fade: fade }
