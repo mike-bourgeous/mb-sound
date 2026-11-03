@@ -227,7 +227,9 @@ module MB
       #       tune: (30.0..110.0).at(51.33), decay: (0.1..2.0).at(0.469)
       #     # turn by ear; ab to compare; ui.note 'the click is late'; take.save :tmp, 'tuned kick'
       def tune(track, code, ref: nil, play: nil, as: nil, **params)
-        HandTune.tune(track, code, ref: ref, play: play, as: as, **params)
+        o = HandTune.tune(track, code, ref: ref, play: play, as: as, **params)
+        puts o.to_s # (a pasted one-liner may end with another line: say what it did either way)
+        o
       end
     end
 
