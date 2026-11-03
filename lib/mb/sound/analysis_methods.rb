@@ -83,6 +83,78 @@ module MB
         peaks
       end
 
+      # Analyzes +sound+ for matching it by ear and by eye (see
+      # Analysis::Report, design/notes/analysis.md): pitch contour and
+      # vibrato, the attack window (onset, rise, brightness, clicks, flat
+      # tops, perceived pitch over the attack and the body), amplitude
+      # modulation by band, top-octave movement, moving resonant peaks and
+      # comb teeth, and the bleed screen.  Prints the report in the console
+      # and returns the Analysis::Report.
+      #
+      # +sound+ is a filename, a Sample, audio data (a Numo array or an
+      # Array of channels at +:sample_rate+), or anything `play` takes (a
+      # graph renders for +:seconds+, or until it ends, at most
+      # Analysis::Signal::GRAPH_SECONDS; rendering advances it).
+      #
+      # Examples:
+      #     analyze 'sounds/pluck.flac'
+      #     r = analyze(123.hz.saw.filter(:lowpass, cutoff: 800), seconds: 1)
+      #     r.pitch.vibrato         # => nil or Vibrato(rate, depth)
+      #     r.to_h                  # plain numbers
+      def analyze(sound, seconds: nil, sample_rate: 48000)
+        report = Analysis.analyze(sound, seconds: seconds, sample_rate: sample_rate)
+        puts report if MB::Sound.live?
+        report
+      end
+      alias analyze_sound analyze
+
+      # Compares +candidate+ with +target+ (any sounds #analyze takes) by
+      # round 3's L3 distance (Analysis::Comparison: round 2's spectral
+      # loss + 2 x the modulation-spectrum distance + 0.3 x the attack
+      # window; lower is closer), term by term.  With a Hash or Array of
+      # candidates, ranks them (Analysis.rank) closest first.  Prints the
+      # result in the console and returns it.
+      #
+      # Examples:
+      #     compare 'original.wav', 'fit.wav'
+      #     compare 'original.wav', 'a' => fit_a, 'b' => fit_b
+      def compare(target, candidate = nil, seconds: nil, **candidates)
+        list = candidate.is_a?(Hash) || candidate.is_a?(Array) ? candidate : candidates
+        result =
+          if candidate.nil? || list.equal?(candidate)
+            raise ArgumentError, 'Pass a candidate sound, or several as a Hash or Array' if list.empty?
+            Analysis.rank(target, list, seconds: seconds)
+          else
+            raise ArgumentError, 'Pass one candidate or a Hash of them, not both' unless candidates.empty?
+            Analysis.compare(target, candidate, seconds: seconds)
+          end
+        puts result if MB::Sound.live?
+        result
+      end
+      alias compare_sounds compare
+
+      # Writes a PNG for looking at +sounds+ (Analysis::Look: per sound the
+      # waveform, the first 50 ms, a spectrogram, and the top three
+      # octaves, axes in seconds and Hz) to +path:+ (default a new file in
+      # the temp directory), prints the path in the console, and returns
+      # it.  Read the image and write down what you see before changing a
+      # sound.  A Hash labels the sounds; the first is the target.
+      #
+      # Examples:
+      #     look 'original.wav'
+      #     look 'original.wav', fit, path: 'compare.png'
+      #     look 'original' => 'orig.wav', 'fit' => fit
+      def look(*sounds, path: nil, seconds: nil, **labeled)
+        sounds = sounds.first if sounds.length == 1 && sounds.first.is_a?(Hash)
+        sounds = labeled if sounds.empty?
+        raise ArgumentError, 'Pass one or more sounds' if sounds.empty?
+        path ||= Analysis::Look.temp_path
+        Analysis.look(sounds, path: path, seconds: seconds)
+        puts path if MB::Sound.live?
+        path
+      end
+      alias look_at look
+
       # Measures loudness per ITU-R BS.1770-4 / EBU R 128 (see
       # MB::Sound::Loudness), returning a Loudness::Result: gated integrated
       # loudness in LUFS (#integrated, alias #lufs), momentary (400 ms) and
