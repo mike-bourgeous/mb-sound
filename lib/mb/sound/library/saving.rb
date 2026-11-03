@@ -1,5 +1,4 @@
 require 'fileutils'
-require 'open3'
 
 module MB
   module Sound
@@ -243,7 +242,7 @@ module MB
         end
 
         def run(*args, dir:)
-          out, status = Open3.capture2e('git', '-C', dir, *args)
+          out, _, status = Starter.capture('git', '-C', dir, *args, err: :out)
           [out, status.success?]
         rescue SystemCallError
           [nil, false]

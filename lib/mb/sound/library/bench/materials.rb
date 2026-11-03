@@ -161,7 +161,7 @@ module MB
           Dir.mktmpdir('mix-') do |dir|
             wav = File.join(dir, 'mix.wav')
             MB::Sound.write(wav, data, sample_rate: 48000, overwrite: true)
-            out, status = Open3.capture2e('ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', wav, '-c:a', 'flac', '-sample_fmt', 's16', path)
+            out, _, status = Starter.capture('ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', wav, '-c:a', 'flac', '-sample_fmt', 's16', path, err: :out)
             raise Error, "ffmpeg failed writing #{path}: #{out}" unless status.success?
           end
           @audio&.delete(:mix)

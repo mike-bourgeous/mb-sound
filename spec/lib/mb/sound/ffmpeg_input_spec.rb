@@ -211,7 +211,8 @@ RSpec.describe MB::Sound::FFMPEGInput do
       end
 
       expect(delay).to be < 3
-      expect(result).to be_a(Process::Status)
+      expect(result).to be_a(MB::Sound::Starter::Status) # (a child of the process starter, or a direct child)
+      expect(result.exitstatus).to eq(0).or eq(MB::Sound::FFMPEGInput::EMPIRICAL_EPIPE_STATUS)
 
       expect { input.read(1) }.to raise_exception(IOError)
     end

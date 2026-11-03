@@ -1,7 +1,6 @@
 require 'json'
 require 'fileutils'
 require 'time'
-require 'open3'
 require 'tmpdir'
 
 module MB

@@ -401,7 +401,8 @@ module MB
       # +track+ as they are, against its reference (ab, or tune's ref:),
       # it searches (CMA-ES) for knob values the comparison (L3) calls
       # closer, within your limits, without disturbing what plays (it runs
-      # in a worker process, started before playback by bin/sound.rb).
+      # in a worker process, started at your first tune or refine through
+      # the process starter).
       # Nothing changes until you say: it prints the proposal as one
       # `turn` line, `refine.ab` flips between yours, the refined copy, and
       # the reference (b in the inspector too, once set up), and

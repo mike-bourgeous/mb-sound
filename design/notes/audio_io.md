@@ -12,6 +12,7 @@ Rules: never `jack_port_unregister` on an active JACK client; things closed at e
 - Check a machine with `bin/audio_check.rb` and `bin/midi_check.rb`; stalls with `bin/latency_probe.rb`, and where live underruns come from with `bin/dropout_probe.rb` (`DeviceOutput#trace_start`; latency_probe.md, Dropout probe).
 - JACK: `spec/lib/mb/sound/jack_spec.rb` needs `jackd2` (skips without it); never `jack_port_unregister` on an active client.
 - Close things at exit through `ExitClose`, never an `at_exit` block of their own.
+- Processes (ffmpeg pipes in `IOBase#run`, ffprobe, git, refine's worker) start through the process starter bin/sound.rb launches (`MB::Sound::Starter.spawn`/`.popen`/`.capture`; terminal_ui.md, Starting processes), never `Process.spawn`/`IO.popen`/`Open3` in lib/ (`spawn_sites_spec.rb`), so a file load while a set plays never forks the console; `IOBase#close` returns a `Starter::Status`.
 
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
 

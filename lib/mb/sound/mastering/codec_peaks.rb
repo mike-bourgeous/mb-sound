@@ -1,5 +1,4 @@
 require 'tmpdir'
-require 'open3'
 
 module MB
   module Sound
@@ -53,7 +52,7 @@ module MB
         # once per process).
         def self.encoders
           @encoders ||= begin
-            out, _err, status = Open3.capture3('ffmpeg', '-nostdin', '-hide_banner', '-encoders')
+            out, _err, status = Starter.capture('ffmpeg', '-nostdin', '-hide_banner', '-encoders')
             status.success? ? out.scan(/^\s*A\S*\s+(\S+)/).flatten.freeze : [].freeze
           rescue SystemCallError
             [].freeze
@@ -100,7 +99,7 @@ module MB
               next [c, nil] unless args
 
               encoded = File.join(dir, "encoded.#{CODECS[c][1]}")
-              _out, err, status = Open3.capture3('ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', path, *args, encoded)
+              _out, err, status = Starter.capture('ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', path, *args, encoded)
               raise IOError, "ffmpeg couldn't encode #{c}: #{err.strip}" unless status.success?
 
               # (decoded at 48 kHz; Opus decodes there anyway)
