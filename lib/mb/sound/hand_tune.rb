@@ -296,3 +296,5 @@ end
 
 require_relative 'hand_tune/retune'
 
+require_relative 'hand_tune/cmaes'
+require_relative 'hand_tune/search'
