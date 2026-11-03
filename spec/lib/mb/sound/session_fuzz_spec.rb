@@ -23,7 +23,7 @@ RSpec.describe('session fuzzing') do
   after { MB::Sound.rewind }
 
   it "holds every relation for #{seeds.length} random songs#{ENV['FUZZ'] ? '' : ' (FUZZ=N for more)'}",
-     render_budget: { seconds: 40 + seeds.length * 60, reason: 'each random song renders 2-3 bars about 4 times, plus its timeline parts twice' } do
+     render_budget: { seconds: 60 + seeds.length * 100, reason: 'each random song renders 2-3 bars 9-13 times (plus warm-up sandboxes): 58.6 s a seed on average, up to 116 s (seeds 1-60 and 770000-770047, fuzz-fixes-2; 60 a seed left batch9 soak groups of 12 seeds at 680-822 s against 760)' } do
     counts = Hash.new(0)
     failures = seeds.flat_map { |s| SessionFuzz.run_seed(s, counts: counts) }
     summary = counts.sort.map { |k, v| "#{k} #{v}" }.join(', ')
@@ -256,6 +256,23 @@ RSpec.describe('session fuzzing') do
         'at_bar(1, beat: 4) { level :t2, 0, on: :bar }',
       ], 2,
     ],
+    # (fuzz-fixes-2: after the seek back to bar 2, the flow's pass there
+    # launched :s1 now, and the stop of :t1's cue that the scene's start
+    # of :t1 makes (Session::Cue#end_cue_at_start) cancelled the cue
+    # queued for bar 3, so `launch` found nothing cued; merge:gate's seed
+    # 427306, shrunk with the cue and its launch kept together)
+    'a cue queued for after a flow relaunch that a seek back moved earlier (seed 427306)' => [
+      :runs, ['bpm 137.5'], [
+        'knob :cut, 1200.0, range: 200.0..4000.0',
+        'track(:t1, q: 1) { |clip| clip.synth(voices: 2) { |v| v.hz.sine * v.amp_env(0.002, 0.05, 0.6, 0.02) }.filter(:lowpass, cutoff: knob(:cut), quality: 2) * 0.3 }',
+        "track(:t2, q: 1/2r) { |kit| tr808(kit) * 0.5 }",
+        "scene :s1, t1: seq(C5, D5).n8, t2: grid(16, kick: 'X..x..x.', hat: '.x.x.x.x', open_hat: '...x').loop, others: :keep",
+        'at_bar(2) { tempo 160, over: 3.beats; after(in: 2.beats) { seek 2, 1 } }',
+        'at_bar(3) { cue :t1, seq(A4, C5).n8.loop }',
+        'at_bar(3, beat: 3) { launch }',
+        'at_bar(2) { flow(seed: 54, on: :beat) { generate markov(s1: { s1: 2 }, seed: 25), s1: 1 } }',
+      ], 2,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil
@@ -373,5 +390,32 @@ RSpec.describe('session fuzzing') do
     small = SessionFuzz.shrink(song, :buffer_size, 'mismatch')
     expect(small.lines).to eq(['at_bar(2) { bg :b, 330.hz.sine * 0.1 }'])
     expect(small.bars).to eq(1)
+  end
+
+  # (fuzz-fixes-2: seed 427306 shrank to a `launch` with its cue dropped,
+  # a plain user error with the bug's own message)
+  it 'drops a cue and the launch that needs it together while shrinking' do
+    lines = ['at_bar(3) { cue :t1, seq(A4, C5).n8.loop }', 'at_bar(1) { go :s1 }', 'at_bar(3, beat: 3) { launch }',
+             'at_bar(2) { bg :t2, seq(A4, C5).n8.loop, on: :now; cue :t2 }', 'at_bar(2, beat: 3) { launch :t2 }']
+    expect(SessionFuzz.drop_line(lines, 0)).to eq(lines.values_at(1, 3, 4))
+    expect(SessionFuzz.drop_line(lines, 3)).to eq(lines.values_at(0, 1, 2))
+    expect(SessionFuzz.drop_line(lines, 2)).to eq(lines.values_at(0, 1, 3, 4))
+  end
+
+  # (fuzz-fixes-2: batch9's soak ran out of render budget inside seed
+  # 770035's :plan renders, and the error was shrunk and reported as a
+  # plan mismatch)
+  it 'raises the render budget running out instead of reporting it as the relation failing' do
+    # (a song of its own: songs :runs found an error in are skipped by the
+    # other relations, and the next example's song raises)
+    song = SessionFuzz::Song.new(header: ['bpm 120'], lines: ['bg :a, 221.hz.sine * 0.1'], bars: 1)
+    allow(SessionFuzz).to receive(:render).and_raise(RenderBudget::Exceeded, 'over budget')
+    %i[runs plan].each { |rel| expect { SessionFuzz.check(rel, song) }.to raise_error(RenderBudget::Exceeded) }
+  end
+
+  it 'fails a song whose render runs past RENDER_CAP' do
+    stub_const('SessionFuzz::RENDER_CAP', 0.5)
+    song = SessionFuzz::Song.new(header: ['bpm 120'], lines: ['bg :a, 220.hz.sine * 0.1'], bars: 2)
+    expect(SessionFuzz.check(:runs, song)).to match(/\ASessionFuzz::RenderCapped: .*RENDER_CAP \(0\.5 s\)/)
   end
 end

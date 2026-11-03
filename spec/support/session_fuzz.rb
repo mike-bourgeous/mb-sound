@@ -476,8 +476,18 @@ module SessionFuzz
 
   # --- rendering ------------------------------------------------------
 
+  # The longest a song's render may run (seconds of audio): a `bars:`
+  # render has no cap of its own, so a song that never reached its end
+  # bar (a seek loop) would render until the example's render budget ran
+  # out, buried under RenderBudget::Exceeded.  Generated songs' renders
+  # took at most 8.6 s (seeds 1-60 and 770000-770047, fuzz-fixes-2).
+  RENDER_CAP = 30
+
+  # A render that reached RENDER_CAP.
+  class RenderCapped < RuntimeError; end
+
   # Renders +code+ for +bars+ bars in +buffer_size+-frame buffers; returns
-  # the mix (one DFloat per channel).
+  # the mix (one DFloat per channel).  Raises RenderCapped past RENDER_CAP.
   def render(code, bars, buffer_size: 800, plans: true, rebuilds: :inline, warm: false)
     plan = MB::Sound::Plan
     old = [plan.enabled, plan.precision, plan.rebuilds]
@@ -492,12 +502,17 @@ module SessionFuzz
     old_err = $stderr
     $stderr = err # (see #warnings)
     begin
-      MB::Sound.render(out, bars: bars, buffer_size: buffer_size, channels: 2, gain: 1, exact_lanes: true) { RecipeHelpers.eval_recipe(code) }
+      MB::Sound.render(out, bars: bars, buffer_size: buffer_size, channels: 2, gain: 1, exact_lanes: true, max_seconds: RENDER_CAP) { RecipeHelpers.eval_recipe(code) }
     ensure
       $stderr = old_err
     end
     @warnings = err.string.lines.reject { |l| EXPECTED_WARNINGS.any? { |re| l.match?(re) } }
-    out.captured.map { |c| Numo::DFloat.cast(c) }
+    mix = out.captured.map { |c| Numo::DFloat.cast(c) }
+    if mix.first && mix.first.length >= RENDER_CAP * 48000
+      raise RenderCapped, "the song's #{bars}-bar render ran to SessionFuzz::RENDER_CAP (#{RENDER_CAP} s) without ending (a seek loop?)"
+    end
+
+    mix
   ensure
     MB::Sound::Session::Warming.always = false
     plan.enabled, plan.precision, plan.rebuilds = old
@@ -622,6 +637,8 @@ module SessionFuzz
         render(code, song.bars)
         warnings.empty? ? nil : "Warning: #{warnings.first(3).join}"
       rescue StandardError, SystemStackError => e
+        raise if budget_exceeded?(e)
+
         (@errors ||= {})[code] = true
         # (a generated user error: swapping a player a stop or scene
         # already ended; the song is skipped, not failed)
@@ -682,7 +699,26 @@ module SessionFuzz
       nil
     end
   rescue StandardError, SystemStackError => e
+    raise if budget_exceeded?(e)
+
     "#{e.class}: #{e.message.lines.first(3).join} (#{e.backtrace&.find { |l| l.include?('/lib/mb/') }&.sub(/.*\/lib\//, 'lib/')})"
+  end
+
+  # True for the example's render budget running out (RenderBudget, in
+  # specs): never a relation's failure, so #check raises it (fuzz-fixes-2:
+  # batch9's soak of FUZZ_BASE=770024 FUZZ=12 rendered 825 s of audio
+  # against its 760, the budget ran out inside seed 770035's :plan
+  # renders, and the error, caught as the relation's failure, was shrunk
+  # without counting (so nothing failed again: "shrunk from 16 to 16
+  # lines") and reported as a load-dependent plan mismatch).
+  def budget_exceeded?(e)
+    defined?(RenderBudget::Exceeded) && e.is_a?(RenderBudget::Exceeded)
+  end
+
+  # Runs the block outside the example's render budget (RenderBudget, in
+  # specs): for work done only once a seed has failed.
+  def uncounted(&block)
+    defined?(RenderBudget) ? RenderBudget.uncounted(&block) : yield
   end
 
   # --- shrinking ------------------------------------------------------
@@ -699,9 +735,26 @@ module SessionFuzz
   # (Its renders don't count toward the example's render budget: the
   # example fails with the shrunk song anyway; see RenderBudget.uncounted.)
   def shrink(song, relation, message, limit: 60)
-    return RenderBudget.uncounted { shrink_counted(song, relation, message, limit: limit) } if defined?(RenderBudget)
+    uncounted { shrink_counted(song, relation, message, limit: limit) }
+  end
 
-    shrink_counted(song, relation, message, limit: limit)
+  # Lines generated as a pair that shrinking drops together: [pattern of
+  # the first, ->(match) { pattern of the lines that need it }].  Without
+  # the first, the second is a user error that may say what the failure
+  # said (fuzz-fixes-2: seed 427306's failure was `launch` finding nothing
+  # cued, a cue queued for a later bar dropped by a stop landing now;
+  # dropping the cue line made the song's `launch` raise the same error,
+  # so the shrunk song lost the bug and showed a plain user error).
+  SHRINK_TOGETHER = [
+    # (a cue at a bar and the launch two beats later: `launch` alone, or
+    # `launch :t`)
+    [/\Aat_bar\((\d+)\) \{ .*\bcue :(t\d+)/, ->(m) { /\Aat_bar\(#{m[1]}, beat: 3\) \{ launch(?: :#{m[2]})? \}/ }],
+  ].freeze
+
+  # +lines+ without line +i+ and the lines SHRINK_TOGETHER ties to it.
+  def drop_line(lines, i)
+    tied = SHRINK_TOGETHER.filter_map { |first, needs| (m = lines[i].match(first)) && needs.(m) }
+    lines.reject.with_index { |l, j| j == i || tied.any? { |re| l.match?(re) } }
   end
 
   def shrink_counted(song, relation, message, limit:)
@@ -723,7 +776,7 @@ module SessionFuzz
         (song.lines.length - 1).downto(0) do |i|
           break if tries > limit
 
-          s = Song.new(header: song.header, lines: song.lines.reject.with_index { |_, j| j == i }, bars: song.bars)
+          s = Song.new(header: song.header, lines: drop_line(song.lines, i), bars: song.bars)
           next unless fails.(s)
 
           smaller = s
@@ -754,7 +807,11 @@ module SessionFuzz
         nil
       else
         small = shrink(song, rel, r)
-        Failure.new(seed: seed, relation: rel, song: small, message: check(rel, small), original: song.code)
+        # (the shrunk song's own message, checked outside the budget too;
+        # a song that doesn't fail again keeps the first message, said so)
+        again = uncounted { check(rel, small) }
+        message = again.is_a?(String) ? again : "#{r}\n(the #{small.equal?(song) ? 'song' : 'shrunk song'} passed when checked again: #{again.inspect})"
+        Failure.new(seed: seed, relation: rel, song: small, message: message, original: song.code)
       end
     end
   end

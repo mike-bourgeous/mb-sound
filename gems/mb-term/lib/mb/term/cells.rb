@@ -75,9 +75,10 @@ module MB
       def text(x, y, str, fg: nil, bold: false, max: nil)
         str = str.to_s
         str = str[0, max] if max
-        str.each_char.with_index do |c, k|
-          set(x + k, y, c, fg: fg, bold: bold)
-        end
+        # (one run, as #set per character would write it: canvases clear
+        # and draw through here, and #set's keywords and packing per cell
+        # were most of an inspector pane's draw; fuzz-fixes-2)
+        put_run(x, y, str, Cells.pack(fg), nil, bold ? BOLD : 0)
       end
 
       # Writes +str+ from (+x+, +y+) in one style: packed colors (see
@@ -86,17 +87,20 @@ module MB
       def put_run(x, y, str, fg, bg, attr)
         return if y < 0 || y >= @height
 
-        str.each_char.with_index do |c, k|
-          cx = x + k
-          next if cx < 0
-          break if cx >= @width
+        # (the characters from column 0 to the right edge, written as one
+        # slice per array: the per-cell loop was most of a pane's draw)
+        skip = x < 0 ? -x : 0
+        n = str.length - skip
+        n = @width - x - skip if @width - x - skip < n
+        return if n <= 0
 
-          i = y * @width + cx
-          @ch[i] = c == "\0" ? '' : c
-          @fg[i] = fg
-          @bg[i] = bg
-          @attr[i] = attr
-        end
+        i = y * @width + x + skip
+        chars = str[skip, n].chars
+        chars.map! { |c| c == "\0" ? '' : c } if str.include?("\0")
+        @ch[i, n] = chars
+        @fg.fill(fg, i, n)
+        @bg.fill(bg, i, n)
+        @attr.fill(attr, i, n)
         nil
       end
 
