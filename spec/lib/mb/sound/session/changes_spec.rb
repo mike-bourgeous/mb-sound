@@ -118,6 +118,27 @@ RSpec.describe(MB::Sound::Session::Changes) do
       expect(changes(run(96000 * 2))).to eq([[0, 1]])
     end
 
+    # (fuzz-fixes-2, session fuzz seed 427306: after a seek back, a flow's
+    # scene launch landing now ended a track's cue queued for a later bar)
+    it 'keeps starts queued for after a stop given a time the timeline has reached, as when the stop was queued ahead' do
+      results = [:ahead, :reached].map do |issued|
+        s = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120),
+                                   channels: 1, buffer_size: 800, realtime: false, raise_errors: true)
+        out = []
+        s.add(1.constant, name: :x)
+        s.add(2.constant, name: :x, start_time: 2r, fade: 0)
+        s.remove(:x, fade: 0, time: 1r) if issued == :ahead
+        out << s.process_buffer(800)[0].dup while s.frame < 96000
+        s.remove(:x, fade: 0, time: 1r) if issued == :reached
+        out << s.process_buffer(800)[0].dup while s.frame < 96000 * 3
+        expect(s.journal.changes.map(&:status)).not_to include(:cancelled)
+        changes(SpecBuffers.join(out))
+      ensure
+        s&.close
+      end
+      expect(results).to eq([[[0, 1], [96000, 0], [192000, 2]]] * 2)
+    end
+
     it 'keeps the timeline moving while a graph waits in the queue' do
       session.add(1.constant, name: :x, start_time: 1/2r)
       expect(session.idle?).to eq(false)
