@@ -137,7 +137,7 @@ module MB
             case v
             when nil then nil
             when Library::Entry then v.name
-            else v.to_s
+            else v.respond_to?(:library_entry) && v.library_entry ? v.library_entry.name : v.to_s
             end
           end
 

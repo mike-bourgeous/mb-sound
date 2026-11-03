@@ -1716,5 +1716,52 @@ module MB
       note :sound_design_ui
       see :ui, :knobs, :cue, :presets
     end
+
+    Help.topic :hand_tune, 'Hand-tuning a fitted sound', group: :look do
+      about <<~TEXT
+        `tune :kick, code, ref: 'kick_ref.wav', tune: (30.0..110.0).at(51.3),
+        ...` does it all in one line: the fit patch, `design` on track
+        :kick (`play:` a clip, else its role's note), and the reference
+        for A/B (`as:` names the patch).  Then turn by ear, flip with b,
+        note what you hear, and `take.save`.
+
+        A fit (an agent matching a sound) prints its voice as console Ruby
+        with the fitted numbers as literals.  `fit_patch :kick_fit, code,
+        tune: (30.0..110.0).at(51.3), decay: (0.1..2.0).at(0.47)` turns it
+        into a patch whose fitted numbers are knobs with the fit's ranges
+        (a graph document in tmp/fits/, its params the track's knobs:
+        `:"kick/tune"`), so `design :kick, kick_fit, seq(C2).n4.loop`
+        opens it with every fitted value turnable.  A number the code reads
+        once while building (a softclip's threshold) is a build knob: each
+        turn rebuilds the track.
+
+        `ab :kick, 'kick_ref.wav'` puts the reference on its own track
+        (:kick_ref) playing the kick's clip at the sample's own pitch,
+        muted, its level matched to the patch's loudness (LUFS of one note
+        at the knobs now); `ab` (or b in the inspector) flips what you hear
+        between the patch and the reference, matching again when the knobs
+        moved; `ab :kick, :off` stops it.  Each flip is one console line in
+        your take, so a reader of the take sees when you compared.
+
+        Notes while you listen: `ui.note 'the click comes late', at: 0.012,
+        freq: 3000` (or NAV # on the screen) keeps your words with the
+        sound they are about (the patch's knobs, its reference, the RENDER
+        pane's view and what it drew, where in the take) as a JSON record
+        an agent reads later (`UI::NoteLog.records`).  In the RENDER pane
+        (NAV w), , and . move a time marker over the envelope, < and > a
+        frequency marker over the spectrum (x clears them); a note
+        without at:/freq: points at the markers.
+
+        `take.turns` reads your take as knob rows (knob, from, to, when,
+        turn or held-key gesture, A/B flips, undos), `take.turns.changed`
+        the knobs that ended elsewhere, and `take.turns.renders(:kick,
+        note: 36)` one note of the patch at the take's start and end;
+        `MB::Sound::Take.read('take.rb')` reads a saved take the same way
+        (walked, never run).
+      TEXT
+      commands :tune, :fit_patch, :ab
+      note :hand_tune, :sound_design_ui
+      see :inspector, :knobs, :ui
+    end
   end
 end

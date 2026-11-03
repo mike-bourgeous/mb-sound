@@ -240,7 +240,13 @@ module MB
           silent = voices.keys & silent_names
           if outputs == :mix
             clip_notes = source.is_a?(Sequence::Clip) && !source.performed? ? voices.keys.flat_map { |v| gm_notes(v, map) } : nil
-            Kit.new(voices, machine: @name, clip_notes: clip_notes, velocity_curve: velocity_curve.nil? && !source.is_a?(Sequence::Kit) ? Drums.velocity_curve(source) : nil, flams: flams, silent: silent)
+            k = Kit.new(voices, machine: @name, clip_notes: clip_notes, velocity_curve: velocity_curve.nil? && !source.is_a?(Sequence::Kit) ? Drums.velocity_curve(source) : nil, flams: flams, silent: silent)
+            # (a copy for the RENDER pane: the same design, knobs, and seeds
+            # from another source; hand-tune-1)
+            k.copier = ->(src, names) {
+              kit(src, accent: accent, velocity_curve: velocity_curve, only: names, map: map, skip_idle: false, outputs: :mix, seed: seed, flam: flam, **settings)
+            }
+            k
           else
             heard = voices.except(*silent)
             raise SourceMismatch, "Nothing in #{source} plays a voice that is heard (silent: #{silent.join(', ')})" if heard.empty?

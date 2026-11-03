@@ -31,13 +31,16 @@ module MB
           case value
           when Library::Entry then check(value, track)
           when Symbol then check(lookup(value, track), track)
+          else
+            # (anything standing for an entry: a FitPatch::Patch)
+            check(value.library_entry, track) if !value.is_a?(Proc) && value.respond_to?(:library_entry) && value.library_entry.is_a?(Library::Entry)
           end
         end
 
         # True if +value+ is something #entry_for takes (an Entry or a
         # Symbol).
         def instrument?(value)
-          value.is_a?(Library::Entry) || value.is_a?(Symbol)
+          value.is_a?(Library::Entry) || value.is_a?(Symbol) || (!value.is_a?(Proc) && value.respond_to?(:library_entry) && value.library_entry.is_a?(Library::Entry))
         end
 
         # The Entry a Symbol names for a track: what `preset :x` loads (a

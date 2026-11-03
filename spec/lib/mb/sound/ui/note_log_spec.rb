@@ -36,7 +36,8 @@ RSpec.describe(MB::Sound::UI::NoteLog, :aggregate_failures) do
     n = described_class.save("the cutoff turns too slowly\nat the bottom of its range", session: @session, time: time,
                              capture: { layout: :sound, focus: :inspector, mode: :pane, size: [120, 40], text: "SOUND\n▸lp4  cutoff ████" })
     expect(n.path).to eq(File.join(@dir, '2026-10-30.md'))
-    expect(n.to_s).to eq("ui.note saved 14:03:12 (ui :sound, 120x40, focus inspector, pane mode) to #{n.path}")
+    expect(n.to_s).to eq("ui.note saved 14:03:12 (ui :sound, 120x40, focus inspector, pane mode) to #{n.path}, data #{n.data}")
+    expect(n.data).to start_with(File.join(@dir, 'data', '')).and end_with('/140312.json')
     text = File.read(n.path)
     expect(text).to start_with("# UI notes 2026-10-30\n")
     expect(text).to include('## 14:03:12  the cutoff turns too slowly', '> at the bottom of its range',

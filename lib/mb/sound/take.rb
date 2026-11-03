@@ -532,3 +532,4 @@ module MB
 end
 
 require_relative 'take/replay'
+require_relative 'take/reader'

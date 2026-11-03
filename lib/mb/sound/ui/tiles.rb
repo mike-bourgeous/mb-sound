@@ -255,6 +255,14 @@ module MB
         # The virtual keyboard (UI::Keyboard) KEYS mode plays.
         attr_reader :keyboard
 
+        # Pane +name+'s state (the Hash its keys and drawing keep: the
+        # render pane's view and cursor), or nil if it has none yet.  Read
+        # by ui.note (UI::NoteLog.capture) to say what was looked at.
+        def pane_state(name) = @states.key?(name) ? @states[name] : nil
+
+        # The Session this screen shows (nil: the default one).
+        def session = @session
+
         def active? = @active
 
         # The painter thread (nil while off).

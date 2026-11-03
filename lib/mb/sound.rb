@@ -110,6 +110,9 @@ require_relative 'sound/genre_methods'
 require_relative 'sound/sampler_methods'
 require_relative 'sound/tracker'
 require_relative 'sound/tracker_methods'
+require_relative 'sound/fit_patch'
+require_relative 'sound/hand_tune'
+require_relative 'sound/reference'
 require_relative 'sound/help_autoload'
 
 module MB

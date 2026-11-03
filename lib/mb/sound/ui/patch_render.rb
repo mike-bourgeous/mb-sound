@@ -139,6 +139,26 @@ module MB
           def initialize(words: nil, live: nil, synth: nil, frames: nil, **rest) = super(words: words, live: live, synth: synth, frames: frames, **rest)
         end
 
+        # A drum kit standing in for a Synth in a Source (hand-tune-1: a
+        # fitted kick or clap is a kit voice): #voice_block and #seed key the
+        # copy as a Synth's do, #copy_voice builds a copy of the kit
+        # (Drums::Kit#copy_for) playing the render's NoteFeed, every voice
+        # (the note decides which sounds), and #copy_notes gives the Notes
+        # its voices read.  A kit's copy is built again for every render
+        # (.render): its voices' note triggers don't all go back with the
+        # reset.
+        KitCopy = Struct.new(:kit) do
+          def voice_block = kit
+          def seed = nil
+          def lanes = [nil].freeze
+
+          # A copy of the kit playing +feed+ (a MIDI::Source).
+          def copy_voice(feed) = kit.copy_for(feed)
+
+          # The Notes the copy's voices read.
+          def copy_notes(graph) = graph.voices.values.flat_map(&:notes)
+        end
+
         # What a render plays: +note+ (a MIDI note number), +velocity+
         # (0..1), +hold+ (seconds held in the envelope view, or nil for the
         # role's share), +kind+ (:clip_note or :guess), +role+, +text+ (for
@@ -331,6 +351,13 @@ module MB
             copies = (cache[:copies] ||= {})
             key = [job.copy_key, want]
             copy = copies.delete(key) # (then put back last: the most recent)
+            # (a kit's copy is built again for every render: its voices'
+            # note triggers don't all go back with the reset; a kit voice
+            # builds in a few ms)
+            if copy && src.synth.respond_to?(:copy_voice)
+              copy.close
+              copy = nil
+            end
             copy ||= build(job, want, pace, cache[:scopes])
             copies[key] = copy
             copies.shift[1].close while copies.length > COPIES
@@ -480,7 +507,11 @@ module MB
           def build(job, rate, pace, scopes = nil, plan: true)
             t0 = now
             copy = build_at(job, rate, pace, scopes, plan: plan)
-            if copy.error && rate != RATES.last && copy.error.start_with?('MB::Sound::GraphNode::SampleRateHelper', 'RuntimeError')
+            # (a node that can't run at a lower rate; also inside a graph
+            # document's voice, whose loader wraps the error: hand-tune-1's
+            # fit patches, a param read by lp4 straight from the track's
+            # 48 kHz knob)
+            if copy.error && rate != RATES.last && (copy.error.start_with?('MB::Sound::GraphNode::SampleRateHelper', 'RuntimeError') || copy.error.include?('sample rate is'))
               copy.close unless scopes
               copy = build_at(job, RATES.last, pace, scopes, plan: plan)
             end
@@ -495,7 +526,7 @@ module MB
             synth = src.synth
             scope = nil
             Internal.strictly do
-              Internal.with_private_rng(synth.seed) do
+              Internal.with_private_rng(synth.seed || 0) do
                 slack(src.frames, pace)
                 scope = scopes ? scope_kept(job, rate, scopes) : scope_for(job, rate)
                 rest(pace)
@@ -503,7 +534,11 @@ module MB
                 v = Notes.new(feed, sustain: false, sample_rate: rate)
                 slack(src.frames, pace)
                 graph = Session.with_context(session: scope) {
-                  Synth.with_lane(0, synth.lanes.length) { MB::Sound.with_seed(synth.seed) { synth.voice_block.call(v, 0) } }
+                  if synth.respond_to?(:copy_voice)
+                    synth.copy_voice(feed)
+                  else
+                    Synth.with_lane(0, synth.lanes.length) { MB::Sound.with_seed(synth.seed) { synth.voice_block.call(v, 0) } }
+                  end
                 }
                 rest(pace)
                 outs = (graph.respond_to?(:outputs) ? graph.outputs.to_a : [graph]).map(&:get_sampler)
@@ -549,7 +584,8 @@ module MB
                 # The note streams go back to stream time 0 with the nodes
                 # reading them (their readers' cursors are in the nodes'
                 # snapshots)
-                streams = streams_of(v).map { |st| [st, stream_state(st)] }
+                notes = synth.respond_to?(:copy_notes) ? synth.copy_notes(graph) : [v]
+                streams = notes.flat_map { |n| streams_of(n) }.uniq(&:__id__).map { |st| [st, stream_state(st)] }
                 rest(pace)
                 return Copy.new(key: job.copy_key, scope: scope, shared: !scopes.nil?, feed: feed, outputs: outs, states: states, streams: streams,
                                 start: start, rate: rate, work: {}, error: nil)

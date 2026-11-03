@@ -60,7 +60,7 @@ module DocsIndex
     },
     'Notes and structure' => {
       'sequences' => 'Sequences', 'generative' => 'Generative music', 'midi' => 'MIDI', 'structure' => 'Structure analysis',
-      'analysis' => 'Sound-matching analysis', 'trackers' => 'Tracker modules',
+      'analysis' => 'Sound-matching analysis', 'hand_tune' => 'Hand-tuning a fitted sound', 'trackers' => 'Tracker modules',
     },
     'Session and set' => {
       'arrangement' => 'Arrangement and Session groundwork', 'master_effects' => 'Master effects', 'buses' => 'Buses and sends',

@@ -323,7 +323,8 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       built, planned = ui::Panes::SoundKeys.rows
       expect(built.map(&:first)).to include('Up Down', 'Left Right', 'Enter', '0', 'm', 't T', 'n N')
       expect(built.first).to eq(ui::Panes::SoundKeys::PICKER) # (ui-scaffold-1: the library picker's keys in one line)
-      expect(planned.map(&:first)).to eq(%w[S b *])
+      expect(built.map(&:first)).to include('b') # (hand-tune-1: the A/B planned here is built: the reference)
+      expect(planned.map(&:first)).to eq(%w[S *])
       expect(draw(:sound_keys, snap, w: 50).join("\n")).to include('l          library: / find', 'Enter      type a value')
       expect(draw(:sound_keys, snap, w: 50, h: 30).join("\n")).to include('(later)')
       cue = snap.with(parts: [ui::PartLoad.new(name: :"acid/cue", kind: :player, state: :playing, load: 0.0)].freeze)
