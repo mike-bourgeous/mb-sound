@@ -205,19 +205,27 @@ RSpec.describe(MB::Sound::UI::Inspect, :aggregate_failures) do
 
   ENTRIES.each do |name|
     it "lists every inspectable node of #{name}" do
-      # (drum kits take drum notes)
-      source = begin
-        MB::Sound.keeping_random_state { MB::Sound.preset(name, midi: CLIP) }
-        CLIP
-      rescue MB::Sound::GraphIO::LoadError => err
-        raise unless err.message.include?('SourceMismatch')
-        BEAT
-      end
-      session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+      # (drum kits take drum notes: a kit raises SourceMismatch on the
+      # melodic clip, and the track is made again on every GM drum note;
+      # before fuzz-fixes-2 every preset was built once more first to find
+      # out, about a tenth of this file's time)
+      source = CLIP
+      session = nil
       begin
-        MB::Sound::Session.with_context(session: session) do
-          MB::Sound.instance_exec(name) { |n| track(:t) { |c| preset n, midi: c } }
-          MB::Sound.bg(:t, source)
+        session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+        begin
+          MB::Sound::Session.with_context(session: session) do
+            MB::Sound.instance_exec(name) { |n| track(:t) { |c| preset n, midi: c } }
+            MB::Sound.bg(:t, source)
+          end
+        rescue MB::Sound::GraphIO::LoadError => err
+          raise unless err.message.include?('SourceMismatch') && source.equal?(CLIP)
+
+          session.close
+          MB::Sound.rewind
+          source = BEAT
+          session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+          retry
         end
         2.times { session.process_buffer }
         input = session.instance_variable_get(:@players).values.find { |p| p.name == :t }.input
