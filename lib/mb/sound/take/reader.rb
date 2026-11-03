@@ -40,7 +40,7 @@ module MB
         # position it landed, in whole notes), +seconds+ (that position in
         # seconds at the take's tempo), +line+ (the take line's index, from
         # 0), +kind+ (:turn, :gesture (a held key's keyframes), :ramp (over:),
-        # :level, :undo), +steps+ (a gesture's keys [[seconds, value], ...]
+        # :level, :undo, :refine (an applied refine proposal), :reset), +steps+ (a gesture's keys [[seconds, value], ...]
         # or its raw steps [[frames, value], ...] when the take kept them),
         # +code+ (the line).  A :reset row is a kept knob a redefinition put
         # back (Structure#reset).
@@ -217,6 +217,8 @@ module MB
           @lines = []
           @undone = []
           @hearing = Hash.new(:patch)
+          @alt = {} # (track => true while refine's A/B copy is up)
+          @last_refine = nil
           @bpm = 120.0
         end
 
@@ -309,6 +311,17 @@ module MB
             end
           when Prism::CallNode
             return read_call(node) if node.receiver.nil?
+            # (refine's A/B: `refine.ab`, `refine(:kick, proposal: {...}).ab`)
+            r = node.receiver
+            if r.is_a?(Prism::CallNode) && r.name == :refine && r.receiver.nil?
+              read_call(r) if r.arguments
+              track = value(positional(r)[0]) || @last_refine
+              if node.name == :ab && track.is_a?(Symbol)
+                @alt[track] = true
+                to = positional(node)[0] && value(positional(node)[0])
+                flip(track, to.is_a?(Symbol) ? to : nil)
+              end
+            end
           when Prism::StatementsNode, Prism::ParenthesesNode, Prism::BeginNode
             node.compact_child_nodes.each { |c| read_code(c) }
           end
@@ -325,6 +338,7 @@ module MB
           when :tune then read_tune(node, args)
           when :retune then read_retune(node, args)
           when :ab then read_ab(node, args)
+          when :refine then read_refine(node, args)
           when :undo then read_undo(node)
           end
         end
@@ -395,6 +409,9 @@ module MB
           track = value(args[0])
           return unless track.is_a?(Symbol)
           kw = keywords(node)
+          # (`retune :kick` alone, kept as typed, changed nothing: one that
+          # read an edited file is kept as what it read)
+          return if args[1].nil? && kw[:document].nil?
           prev = @versions[track]&.last
           if prev.nil? && (path = @tracks[track]) && File.file?(path)
             name = (GraphIO.parse(path).name rescue nil) || File.basename(path, GraphIO::EXTENSION)
@@ -490,10 +507,20 @@ module MB
           seed(name, v) if v.is_a?(Numeric)
         end
 
+        # Keywords of `turn` itself (others name a track's knobs: `turn
+        # :kick, tune: 48.2`).
+        TURN_OPTIONS = %i[at on in over curve from follow smooth].freeze
+
         def read_turn(node, args)
           name = value(args[0])
           return unless name.is_a?(Symbol)
           kw = keywords(node)
+          group = kw.except(*TURN_OPTIONS)
+          if args[1].nil? && !group.empty?
+            # (a track's knobs at once: one change, a row each)
+            group.each { |p, v| x = value(v); add_row(Session::Name.param(name, p), x.is_a?(Numeric) ? x : nil, :turn, nil) }
+            return
+          end
           keys = keyframes(node)
           kind = :turn
           steps = nil
@@ -522,12 +549,43 @@ module MB
 
         def read_ab(_node, args)
           track = value(args[0])
-          return if args[1] # (a setup or :off)
+          if args[1] # (a setup or :off)
+            @alt.delete(track) if value(args[1]) == :off
+            return
+          end
           return if track == :off
+          flip(track, nil)
+        end
+
+        # A flip of +track+'s A/B (nil: the last pair) to +to+ or the next:
+        # patch -> reference, or patch -> refined -> reference once refine's
+        # A/B copy is up (Reference::Pair#alt).
+        def flip(track, to)
           key = track || @last_ab
-          @hearing[key] = @hearing[key] == :patch ? :ref : :patch
+          order = @alt[key] ? %i[patch alt ref] : %i[patch ref]
+          @hearing[key] = to || order[(order.index(@hearing[key]).to_i + 1) % order.length]
           @last_ab = key
           @flips << Flip.new(track: track, pos: landing, seconds: seconds_at(landing), line: @line_ctx[:index], code: @line_ctx[:code], hearing: @hearing[key])
+        end
+
+        # `refine(:kick, apply: { tune: 47.9 })` (HandTune::Refinement#apply
+        # as the take keeps it): a :refine row per knob it turned; the A/B
+        # copy stops.  `proposal:` lines (what a search found) change no
+        # knob.
+        def read_refine(node, args)
+          track = value(args[0])
+          return unless track.is_a?(Symbol)
+          @last_refine = track
+          kw = keywords(node)
+          h = kw[:apply]
+          return unless h.is_a?(Prism::HashNode) || h.is_a?(Prism::KeywordHashNode)
+          h.elements.each do |e|
+            next unless e.is_a?(Prism::AssocNode) && e.key.is_a?(Prism::SymbolNode)
+            v = value(e.value)
+            add_row(Session::Name.param(track, e.key.unescaped.to_sym), v.is_a?(Numeric) ? v : nil, :refine, nil)
+          end
+          @alt.delete(track)
+          @hearing[track] = :patch
         end
 
         def read_undo(_node)

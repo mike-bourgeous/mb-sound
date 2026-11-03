@@ -52,6 +52,10 @@ MB::Sound.live = true
 # they only warn, so a live set keeps playing (see GraphNode::Tee)
 MB::Sound::GraphNode::Tee.shared_check = :warn if MB::Sound::GraphNode::Tee.shared_check
 
+# refine's worker process (MB::Sound::HandTune::Worker), started while
+# nothing plays: starting a process later holds the GVL through the fork
+MB::Sound::HandTune::Worker.prestart
+
 # Compile common node types before anything plays (YJIT is on via the shebang and MB::Sound::JIT),
 # and the dashboard band's painter (`ui`)
 startup_step.('Warming up the sound engine') { MB::Sound.warm_up }

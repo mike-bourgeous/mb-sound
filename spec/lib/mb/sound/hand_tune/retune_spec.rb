@@ -156,6 +156,8 @@ RSpec.describe(MB::Sound::HandTune, :aggregate_failures) do
       r = nil
       expect { r = MB::Sound.retune(:lead) }.to output(/is the document playing .*retune :lead, "synth\(midi, voices: 1\) \{ \|v\| v\.hz\.saw\.lp4\(cutoff, resonance: resonance\)/).to_stdout
       expect(r.unchanged).to eq(true)
+      # (a take keeps that line as typed: the reader sees no redefinition)
+      expect(MB::Sound::Take.read("MB::Sound::Take::Replay.new(bpm: 120) do |r|\n  r.line 0r, [], 'retune :lead'\nend\n").structures).to eq([])
       expect { MB::Sound.retune(:lead, RT_NOISE, noise_level: (0.0..1.0).at(0.6)) }.to raise_error(MB::Sound::FitPatch::Error, /noise_level \(0\.6 is none of the code's numbers\)/)
       expect { MB::Sound.retune(:lead, RT_NOISE, noise: (0.0..1.0).at(0.125)) }.to raise_error(MB::Sound::FitPatch::Error, /noise can't name a param: it is a function documents call/)
       expect { MB::Sound.retune(:nope, RT_NOISE) }.to raise_error(ArgumentError, /no track :nope/)

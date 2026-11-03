@@ -39,9 +39,9 @@ module MB
       # Analysis::Signal.from takes: a path, a Sample, channels at
       # +sample_rate:+).  The one call site the loop's loss goes through,
       # so a tuned loss is a change here.  Returns an Analysis::Comparison
-      # (#total, #terms).
-      def compare(target, sound, seconds: nil)
-        Analysis.compare(target, sound, seconds: seconds)
+      # (#total, #terms).  +weights:+ replaces L3's (refine's option).
+      def compare(target, sound, seconds: nil, weights: Analysis::Comparison::WEIGHTS)
+        Analysis.compare(target, sound, seconds: seconds, weights: weights)
       end
 
       # A PNG of what a ui.note pointed at (+record+: a NoteLog record or
@@ -295,6 +295,9 @@ module MB
 end
 
 require_relative 'hand_tune/retune'
-
 require_relative 'hand_tune/cmaes'
 require_relative 'hand_tune/search'
+require_relative 'hand_tune/refine_job'
+require_relative 'hand_tune/worker'
+require_relative 'hand_tune/refine'
+

@@ -69,8 +69,22 @@ module MB
       #
       #     turn :space, 0 => 0.30, 1.n8 => 0.50, 1.n4 => 0.62
       #     turn :cut, 0 => 400, 1.bar => 3000, 2.bars => 800, curve: :smooth
+      #
+      # A track's knobs together, to plain numbers, as one change (one undo
+      # step; build knobs rebuild the track once): the track's name and
+      # its params as keywords (hand-tune-2; refine.apply writes this):
+      #
+      #     turn :kick, tune: 48.2, decay: 0.41
       def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, **keys)
         point = LaunchPoint.of(binding) or return nil
+        if (pairs = track_turn(name, value, keys))
+          unless over.nil? && curve.nil? && from.nil? && follow.nil? && smooth.nil?
+            raise ArgumentError, "turn #{name.inspect}, #{keys.keys.first}: ...: a track's knobs together take plain values (ramps, follows, and curves turn one knob)"
+          end
+          return session_command(name, label: "turn #{name.inspect}, #{keys.keys.join(', ')}", kind: :turn, all: true) { |session, time|
+            session.turn_knobs(pairs, at: point, start_time: point.given? ? nil : time)
+          }
+        end
         name = knob_name(name)
         group = Session.current.racks.knob_group?(name) # (every instance's knob; see Session::Knobs#turn)
         session_command(name, label: "turn #{name.inspect}", kind: :turn, all: group) { |session, time|
@@ -142,6 +156,27 @@ module MB
 
       # A knob name given to a command: a Symbol (a short alias of a knob's
       # full name resolves to it; Session::Knobs#full_knob_name), or a knob.
+      # { knob name => value } for `turn :track, param: value, ...` (a track
+      # +name+, no +value+, Symbol +keys+ naming its knobs), or nil for
+      # other turns.  Raises ArgumentError naming the track's knobs for a
+      # key that is none of them.
+      def track_turn(name, value, keys)
+        return nil unless name.is_a?(Symbol) && value.nil? && !keys.empty? && keys.keys.all?(Symbol)
+        session = Session.current
+        prefix = "#{name}/"
+        own = session.knobs.keys.select { |k| k.to_s.start_with?(prefix) }
+        return nil if own.empty? # (Session#turn says which keywords it takes)
+        keys.to_h { |p, v|
+          kname = Session::Name.param(name, p)
+          unless session.knobs[kname]
+            params = own.map { |k| k.to_s.delete_prefix(prefix) }
+            hint = DidYouMean::SpellChecker.new(dictionary: params).correct(p.to_s).first
+            raise ArgumentError, "turn #{name.inspect}, #{p}: #{name.inspect} has no knob #{p}#{hint ? " (did you mean #{hint}:?)" : ''} (its knobs: #{params.join(', ')})"
+          end
+          [kname, v]
+        }
+      end
+
       def knob_name(name)
         k = ValueSource.knob_of(name)
         return k.name if k
