@@ -101,7 +101,7 @@ require_relative 'support/spawn_guard' # (process starts while a Session plays)
 # The process starter, as bin/sound.rb launches it: library code starts its
 # processes (ffmpeg, ffprobe, git, refine's worker) through it, so specs that
 # load files while a Session plays pass the spawn guard the way the console
-# does (MB_SOUND_STARTER=0 runs the suite with direct starts instead)
+# does
 MB::Sound::Starter.start
 require_relative 'support/no_gnuplot'
 require_relative 'support/recipe_helpers'

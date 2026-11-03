@@ -35,6 +35,14 @@
 # all (each in turn).  The report then lists each injection and the cause
 # its dropout got.
 #
+# --inject spawn starts processes while playing instead, every --every
+# seconds: an ffmpeg decode (ffprobe and ffmpeg) of a short test file
+# through the process starter, as the console starts them (spawner-1:
+# MB::Sound::Starter, launched before playback); spawn_direct does the
+# same with direct starts from this process (each holds the GVL through
+# its fork).  Compare the reports' GVL waits ("GVL waits of 1 ms or more")
+# and dropouts.
+#
 # Usage: bin/dropout_probe.rb [options]
 #
 # On the Mac (natively, with the sound card):
@@ -43,6 +51,8 @@
 #     bin/dropout_probe.rb --seconds 300 --gc quiet --json tmp/dropouts_mac_quiet.json
 #     bin/dropout_probe.rb --song tunnel_vision --ui --json tmp/dropouts_tv.json
 #     bin/dropout_probe.rb --seconds 60 --inject all --json tmp/dropouts_inject.json  # check the causes
+#     bin/dropout_probe.rb --seconds 60 --inject spawn --every 1 --json tmp/dropouts_spawn.json         # decodes through the starter
+#     bin/dropout_probe.rb --seconds 60 --inject spawn_direct --every 1 --json tmp/dropouts_direct.json # the same, direct
 # In the container (no sound card: miniaudio's null device):
 #     OUTPUT_TYPE=device AUDIO_BACKEND=null bin/dropout_probe.rb --seconds 40 --inject all
 #
@@ -61,6 +71,13 @@ module MB::Sound
   class DropoutInjector
     KINDS = %i[render gvl gc lock system].freeze
 
+    # Process starts while playing (not part of all): an ffmpeg decode
+    # through the process starter, or directly.
+    SPAWN_KINDS = %i[spawn spawn_direct].freeze
+
+    # The file the spawn kinds decode (0.4 s).
+    SPAWN_FILE = File.expand_path('../spec/test_data/arp_a7.flac', __dir__)
+
     attr_reader :marks
 
     def initialize(session, kinds, every:, stall:, first: 4.0)
@@ -77,6 +94,8 @@ module MB::Sound
       @helper = nil
       @helper_in = nil
       @stopping = false
+      # (now, before playback: the starter's own launch is a fork too)
+      @starter = kinds.intersect?(SPAWN_KINDS) ? Starter.start : nil
     end
 
     # Prepares what the kinds need (before playback: ballast for :gc, the
@@ -128,6 +147,14 @@ module MB::Sound
       when :gc then GC.start(full_mark: true, immediate_sweep: true)
       when :lock then @session.with_render_lock { sleep @stall }
       when :system then @helper_in.puts('stop') && @helper_in.flush
+      when :spawn then MB::Sound.read(SPAWN_FILE)
+      when :spawn_direct
+        old = Starter.use(nil)
+        begin
+          MB::Sound.read(SPAWN_FILE)
+        ensure
+          Starter.use(old)
+        end
       end
     end
 
@@ -165,7 +192,8 @@ module MB::Sound
       gc: [:normal, Symbol, 'GC mode while playing: normal, or quiet (majors held off, as the console\'s `gc :quiet`)', %i[normal quiet]],
       system: [true, 'Run the LatencyProbe beside it (system stalls, load, CPU, memory)'],
       ticker: [false, "The LatencyProbe's Ruby ticker too (adds GVL traffic of its own)"],
-      inject: ['none', String, 'Make dropouts on purpose: render, gvl, gc, lock, system, all (each in turn), or a list (gvl,lock)'],
+      inject: ['none', String, 'Make dropouts on purpose: render, gvl, gc, lock, system, all (each in turn), or a list (gvl,lock); ' \
+                               'or start processes: spawn (through the process starter), spawn_direct'],
       every: [5.0, Float, 'Seconds between injected dropouts', 0.5..3600.0],
       stall: [150.0, Float, 'Milliseconds each injected stall lasts', 1.0..10_000.0],
       quiet_probe: [false, 'No line per dropout while playing'],
@@ -181,8 +209,8 @@ module MB::Sound
       kinds = p.inject.split(',').map { |k| k.strip.delete_prefix(':').to_sym }
       kinds = DropoutInjector::KINDS if kinds == [:all]
       kinds = [] if kinds == [:none]
-      bad = kinds - DropoutInjector::KINDS
-      raise ScriptRunner::InputError, "Unknown --inject #{bad.join(', ')} (#{DropoutInjector::KINDS.join(', ')}, all, none)" unless bad.empty?
+      bad = kinds - DropoutInjector::KINDS - DropoutInjector::SPAWN_KINDS
+      raise ScriptRunner::InputError, "Unknown --inject #{bad.join(', ')} (#{(DropoutInjector::KINDS + DropoutInjector::SPAWN_KINDS).join(', ')}, all, none)" unless bad.empty?
       injector = DropoutInjector.new(session, kinds, every: p.every, stall: p.stall / 1000.0, first: [p.every, 4.0].min) unless kinds.empty?
 
       DropoutProbe.arm(
