@@ -28,6 +28,7 @@ module MB
           on 'K', :keys, help: 'KEYS: the keyboard (put in below the REPL if missing; F2 too)'
           on 't', :jump, :tracks, help: 'into: REPL i, KEYS k, tracks t, meters e', label: ''
           on 'e', :jump, :meters, help: 'into: REPL i, KEYS k, tracks t, meters e', label: ''
+          on 'h', :jump, :tuner, help: 'the tuner (hand-tuning: pick a reference, then a synth; opens it when not on screen)'
           doc 'a b ...', "a pane's letter (by its number in NAV)"
           group 'Modes'
           on ' ', :pause, help: 'play / pause (starts the flow if nothing played yet)', label: 'Space'

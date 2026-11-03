@@ -66,6 +66,13 @@ module MB
             on ['F'], :fixed, help: "a preset's numbers as panel cells, or not", label: 'P F'
             on ['p'], :plumbing, help: 'every node as chips, the hidden plumbing too (again: back)', label: 'p'
             on ['b'], :ab, help: 'A/B: the reference or the patch (ab)'
+            # (hand-tune-3: the tuner's step 3 keys, named by the tune strip)
+            on ['R'], :refine, help: 'refine against the reference (again: stop; then A/B it)'
+            on ['A'], :apply, help: "apply refine's proposal (one undo step)"
+            on ['E'], :retune, help: "retune from the fit's edited file"
+            on ['#'], :note, help: 'a note about what you hear (ui.note)'
+            on ['w'], :tuner_back, help: 'the tuner: back to the synths, the references', label: 'w W'
+            on ['W'], :tuner_restart, help: 'the tuner: back to the synths, the references', label: 'w W'
           end
 
           keys do
@@ -723,9 +730,60 @@ module MB
             [*flush(state), PaneKeys::Run["ab #{track.inspect}", "ab #{track}: the patch or its reference"]]
           end
 
+          # R: refine's next step for the inspected track (start a search
+          # without waiting, stop one running, A/B a proposal).
+          def key_refine(state)
+            info = state[:snap]&.inspector
+            track = info&.track or return 'nothing to inspect'
+            s = Session.existing
+            r = s && HandTune.refinements[s]
+            r = nil unless r&.track == track
+            code, note =
+              if r && !r.done?
+                ['refine.stop', "refine #{track}: stopping (the best so far stays)"]
+              elsif r && r.state == :done && r.proposal && !r.proposal.empty?
+                ['refine.ab', "refine #{track}: yours, the refined copy, the reference (R or b again)"]
+              else
+                ["refine #{track.inspect}, wait: false", "refine #{track}: searching from your knobs (R again: stop)"]
+              end
+            [*flush(state), PaneKeys::Run[code, note]]
+          end
+
+          def key_apply(state)
+            return 'nothing to inspect' unless state[:snap]&.inspector&.track
+            [*flush(state), PaneKeys::Run['refine.apply', 'refine: the proposal applied (undo takes it back)']]
+          end
+
+          def key_retune(state)
+            track = state[:snap]&.inspector&.track or return 'nothing to inspect'
+            [*flush(state), PaneKeys::Run["retune #{track.inspect}", "retune #{track}: from its fit's file"]]
+          end
+
+          # #: a note, typed on a prompt line (key_noted runs ui.note).
+          def key_note(_state) = PaneKeys::Ask['ui note: ', '', :noted]
+
+          def key_noted(state, text)
+            return 'no note saved' if text.to_s.strip.empty?
+            [*flush(state), PaneKeys::Run["ui.note #{text.to_s.strip.inspect}", 'note saved (ui.notes lists them)']]
+          end
+
+          def key_tuner_back(state) = tuner_step(state, :back)
+          def key_tuner_restart(state) = tuner_step(state, :restart)
+
           def key_learn(state)
             cell = picked(state) or return no_knob_note
             [*flush(state), PaneKeys::Run["learn #{cell[0].inspect}", "learn #{cell[0]}: turn a controller"]]
+          end
+
+          # The tuner a step back (+event+ :back or :restart), its screen
+          # shown.
+          def tuner_step(state, event)
+            w = HandTune::Wizard.current or return 'no tuner open (tuner, or NAV h)'
+            return 'the tuner is at its lists already (NAV h)' unless w.state == :tuning || event == :restart
+            out = flush(state)
+            w.public_send(event)
+            TunerScreen.show(w)
+            [*out, "tuner step #{w.step}"]
           end
 
           def key_track(state, d)

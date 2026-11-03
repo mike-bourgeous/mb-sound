@@ -444,28 +444,38 @@ module MB
         def note
           return nil unless @ref
           return @ref.item.note if @ref.item&.note
-          w = words(@ref.name)
-          d = w.lazy.map { |x| DRUM_NOTES[x] }.find(&:itself)
-          return d if d
           s = summary(@ref, want: false)
           return s.note.clamp(12, 108) if s&.note
-          UI::PatchRender.role_of(@ref.name)[:note]
+          drum_note || UI::PatchRender.role_of(@ref.name)[:note]
+        end
+
+        # The GM drum note the reference's words name (DRUM_NOTES), or nil.
+        def drum_note = words(@ref&.name).lazy.map { |x| DRUM_NOTES[x] }.find(&:itself)
+
+        # True when +synth+ is a kit (a kit entry, or a document whose voice
+        # is a kit: it plays a voice only on that voice's note).
+        def kit?(synth)
+          return synth.entry.kind == :kit if synth&.entry
+          text = synth&.path ? File.read(synth.path) : (synth&.kind == :queue ? @ref&.item&.lines.to_s : '')
+          text.match?(/\b(kit|drum_kit|tr909|tr808)\s*[({]/)
+        rescue SystemCallError
+          false
         end
 
         # The note +synth+ plays the reference's part on: a kit's voice note
         # for kits (DRUM_NOTES by the reference's words, else the kick's or
         # the snare's by its role), else #note.
         def note_for(synth)
-          return note unless synth&.entry&.kind == :kit
-          w = words(@ref&.name)
-          w.lazy.map { |x| DRUM_NOTES[x] }.find(&:itself) || (role == :drum ? DRUM_NOTES[:snare] : DRUM_NOTES[:kick])
+          return @ref.item.note if synth&.kind == :queue && @ref&.item&.note
+          return note unless kit?(synth)
+          drum_note || (role == :drum ? DRUM_NOTES[:snare] : DRUM_NOTES[:kick])
         end
 
         # The play: clip's code for the picked reference (a queue item's;
         # else its note (+synth+'s: Wizard#note_for), as long as the
         # reference at the session's tempo).
         def play_code(synth = nil)
-          return @ref.item.play if @ref&.item&.play && !(synth&.entry&.kind == :kit)
+          return @ref.item.play if @ref&.item&.play && (synth.nil? || synth.kind == :queue || !kit?(synth))
           n = Note.new(note_for(synth).to_i).name
           secs = (@ref&.seconds || summary(@ref, want: false)&.seconds || 0.5).to_f
           beat = 60.0 / @session.transport.bpm.to_f

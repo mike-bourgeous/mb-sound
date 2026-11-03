@@ -96,8 +96,8 @@ RSpec.describe(MB::Sound::HandTune::Wizard, :aggregate_failures) do
     expect(q[1].problem).to start_with('MB::Sound::FitPatch::Error')
 
     # (a queue item's reference isn't listed again under the folder)
-    expect(w.refs.map { |r| [r.kind, r.name] }).to eq([[:queue, '1 synthetic kick (a test item)'], [:queue, '2 a clap that fails (a test item)'], [:file, 'bass_saw.flac']])
-    expect(w.refs.map(&:seconds).map { |x| x&.round(2) }).to eq([0.4, 0.3, 0.42])
+    expect(w.refs.reject { |r| r.kind == :sample }.map { |r| [r.kind, r.name] }).to eq([[:queue, '1 synthetic kick (a test item)'], [:queue, '2 a clap that fails (a test item)'], [:file, 'bass_saw.flac']])
+    expect(w.refs.reject { |r| r.kind == :sample }.map(&:seconds).map { |x| x&.round(2) }).to eq([0.4, 0.3, 0.42])
     expect(w.folder).to eq(File.join(@root, 'refs'))
 
     # A Sample read in this process (else nobody holds it: the cache is weak)

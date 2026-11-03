@@ -30,6 +30,10 @@ module MB
         # the init voice (presets/init.mbg.rb, bin/synths/init_voice.rb).
         BLANK = :init
 
+        # The layouts that are the sound screen (ui :sound, and the tuner's
+        # step 3, ui :tuning: the sound screen with the tune strip).
+        SOUND_LAYOUTS = %i[sound tuning].freeze
+
         class << self
           # The last track designed (`design` alone opens it again).
           attr_reader :last
@@ -90,7 +94,7 @@ module MB
 
             t = UI.tiles
             target = Inspect.target
-            !!(t&.active? && t.layout_name == :sound && target.is_a?(Hash) && target[:track] == name)
+            !!(t&.active? && SOUND_LAYOUTS.include?(t.layout_name) && target.is_a?(Hash) && target[:track] == name)
           rescue StandardError
             false
           end
@@ -166,8 +170,8 @@ module MB
               elsif (b = UI.screen) then [:band, b.layout.name]
               else [:none]
               end
-            @before = now unless now == [:tiles, :sound] || @before
-            screen = UI.show(:sound)
+            @before = now unless (now[0] == :tiles && SOUND_LAYOUTS.include?(now[1])) || @before
+            screen = UI.show(TunerScreen.design_layout)
             screen.enter(:inspector) if screen.respond_to?(:enter) && screen.respond_to?(:tiler) && screen.tiler.layout.panes.include?(:inspector)
             screen
           end
