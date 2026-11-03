@@ -89,6 +89,15 @@ RSpec.describe(MB::Sound::Shaper) do
       expect(c.dup.quantize(0.5).sample(2)).to eq(Numo::SComplex[3 + 4i, 0])
     end
 
+    it 'reads a param or knob given as a setting once, while building (hand-tune-1)' do
+      t = 0.3.constant
+      x = MB::Sound::ArrayInput.new(data: [sine * 2])
+      y = MB::Sound::ArrayInput.new(data: [sine * 2])
+      expect(x.softclip(t, 1.0.constant).sample(2400)).to eq(y.softclip(0.3, 1.0).sample(2400))
+      expect(t.build_read?).to eq(true)
+      expect { 1.constant.softclip(1.hz.lfo) }.to raise_error(ArgumentError, /read while the graph builds/)
+    end
+
     it 'checks its parameters' do
       expect { 1.constant.softclip(0.5, 0.25) }.to raise_error(ArgumentError, /Limit/)
       expect { 1.constant.clip(1, -1) }.to raise_error(ArgumentError, /max/)

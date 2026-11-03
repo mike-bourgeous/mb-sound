@@ -1706,5 +1706,22 @@ module MB
       note :sound_design_ui
       see :ui, :knobs, :cue, :presets
     end
+
+    Help.topic :hand_tune, 'Hand-tuning a fitted sound', group: :look do
+      about <<~TEXT
+        A fit (an agent matching a sound) prints its voice as console Ruby
+        with the fitted numbers as literals.  `fit_patch :kick_fit, code,
+        tune: (30.0..110.0).at(51.3), decay: (0.1..2.0).at(0.47)` turns it
+        into a patch whose fitted numbers are knobs with the fit's ranges
+        (a graph document in tmp/fits/, its params the track's knobs:
+        `:"kick/tune"`), so `design :kick, kick_fit, seq(C2).n4.loop`
+        opens it with every fitted value turnable.  A number the code reads
+        once while building (a softclip's threshold) is a build knob: each
+        turn rebuilds the track.
+      TEXT
+      commands :fit_patch
+      note :sound_design_ui
+      see :inspector, :knobs
+    end
   end
 end

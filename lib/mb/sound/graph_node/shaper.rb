@@ -26,9 +26,15 @@ module MB
         # Creates a shaper for +source+.  For :softclip, +p1+ is the
         # threshold and +p2+ the limit (see MB::Sound::SoftestClip); for
         # :clip, the min and max (nil for none); for :quantize, the step.
+        # A param or knob (a graph document's `param`, a track's knob) is
+        # read once while the graph builds (GraphNode.build_value; on a
+        # track, turning it rebuilds the track): hand-tune-1, so a fitted
+        # voice's clip threshold can be a knob of its patch.
         def initialize(source, mode:, p1: 0.0, p2: 0.0, antialias: true)
           raise ArgumentError, "Unknown shaper #{mode.inspect}" unless MB::Sound::Shaper::MODES.include?(mode)
 
+          p1 = GraphNode.build_value(p1) if p1.is_a?(GraphNode)
+          p2 = GraphNode.build_value(p2) if p2.is_a?(GraphNode)
           @source = source.get_sampler
           @sample_rate = @source.sample_rate
           @mode = mode
