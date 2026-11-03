@@ -466,9 +466,13 @@ module MB
 
           png = "#{dot.path}.png"
           File.write(dot, self.graphviz(include_tees: include_tees, expand_channels: expand_channels))
-          # (through the process starter: no fork of the console while audio plays)
+          # (through the process starter: no fork of the console while audio
+          # plays; a missing dot or viewer is skipped as `system` skipped it,
+          # with no Ruby warning: containers have no `open`)
           [['dot', '-Tpng:cairo', dot.path, '-o', png], ['open', png]].each do |cmd|
             Starter.spawn(*cmd).wait
+          rescue Errno::ENOENT
+            nil
           rescue SystemCallError => e
             warn "#{cmd.first}: #{e.message}"
           end

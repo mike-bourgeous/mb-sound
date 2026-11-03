@@ -65,6 +65,10 @@ RSpec.describe(MB::Sound::Starter, :aggregate_failures) do
       got = Array.new(40) { |i| Thread.new { described_class.capture('sh', '-c', "echo #{i}; exit #{i % 5}") } }.map(&:value)
       expect(got.map { |o, _, _| o.to_i }).to eq((0...40).to_a)
       expect(got.map { |_, _, st| st.exitstatus }).to eq((0...40).map { |i| i % 5 })
+      # (the starter's waiter threads drop each child just after its status
+      # arrives: the batch-10 suite once saw 1 left at the check)
+      deadline = MB::U.clock_now + 5
+      sleep 0.01 until starter.children == 0 || MB::U.clock_now > deadline
       expect(starter.children).to eq(0)
     end
   end
