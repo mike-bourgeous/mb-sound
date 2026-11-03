@@ -35,6 +35,7 @@ require_relative 'ui/band'
 require_relative 'ui/reline_guard'
 require_relative 'ui/console'
 require_relative 'ui/design'
+require_relative 'ui/tuner'
 require_relative 'ui/library_popup'
 require_relative 'ui/prompt'
 require_relative 'ui/messages'
@@ -110,6 +111,7 @@ module MB
           Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::MessageDetail.new, Panes::Page.new, Panes::Keyboard.new,
           Panes::Buses.new, Panes::Log.new, Panes::Lane.new, Panes::Clips.new, Panes::ClipDetail.new, Panes::Racks.new, Panes::Midi.new,
           Panes::Inspector.new, Panes::Preview.new, Panes::Code.new, Panes::Picker.new, Panes::Audition.new, Panes::SoundKeys.new, Panes::Render.new,
+          Panes::Tuner.new, Panes::TuneStrip.new,
         ].to_h { |p| [p.name, p] }
       end
 
@@ -163,6 +165,8 @@ module MB
         mixer: ['the mix: buses with input, output, and send meters, the master meters, CPU, the console over a scope', '120x40 and up'],
         keys: ['the console over the keyboard, starting in KEYS mode', '100x30 and up'],
         sound: ['sound design: the voice in sections or as a front panel (a track\'s knobs and params to turn), the picked row\'s preview, the graph\'s code, a render of one note, the CUE line, the console below, the library picker beside the tracks; fewer panes on smaller screens (80x24: the panel, its preview, the console, NAV l the picker for a while; the keys pane from 160x50)', '80x24 and up'],
+        tuner: ['hand-tuning, steps 1 and 2 (tuner, NAV h): the tuner\'s list of references, then of synths to pair, with lengths, summaries, and scores; the tracks, the CUE line, the console', '80x24 and up'],
+        tuning: ['hand-tuning, step 3: ui :sound with the tune strip (the reference, what is heard, refine, the keys: b A/B, R refine, A apply, E retune, # note, w W back to the tuner\'s steps)', '80x24 and up'],
         wall: ['the performance panes at once (tracks, queue, knobs, cpu, the keyboard, meters, scope, spectrum, messages; the set panes are on ui :session), for big terminals', '200x60 and up'],
         show: ['song_script --ui: a big scope and spectrum, no console', '120x40 and up'],
         play: ['synth_script --ui: the keyboard, scope, spectrum, no console', '120x40 and up'],
@@ -254,6 +258,29 @@ module MB
             pane :audition, height: 1
             repl weight: 2, min: 8
           },
+          # Hand-tuning (hand-tune-3, UI::TunerScreen): the tuner's lists
+          # (steps 1 and 2) beside the tracks, the CUE line, the console
+          tuner: MB::Term::Viewports.layout(:tuner, focus: :repl) {
+            cols(height: 1) { pane :transport; pane :form }
+            cols(weight: 5) {
+              rows(width: 30) { pane :tracks, height: 7; pane :meters, height: 6; pane :scope }
+              pane :tuner, weight: 4
+            }
+            pane :audition, height: 1
+            repl weight: 2, min: 8
+          },
+          # Step 3: the sound screen with the tune strip
+          tuning: MB::Term::Viewports.layout(:tuning, focus: :repl) {
+            cols(height: 1) { pane :transport; pane :form }
+            pane :tune_strip, height: 2
+            cols(weight: 5) {
+              rows(width: 30) { pane :tracks, height: 7; pane :picker }
+              rows(weight: 3) { pane :inspector, weight: 3; pane :preview, weight: 2, min: 8 }
+              rows(weight: 3) { pane :code; pane :render, weight: 2, min: 8; pane :sound_keys, height: 9 }
+            }
+            pane :audition, height: 1
+            repl weight: 2, min: 8
+          },
           # The mix (ux-r4): buses with their input, output, and send
           # meters beside the master's, the console over a scope
           mixer: MB::Term::Viewports.layout(:mixer, focus: :repl) {
@@ -275,6 +302,7 @@ module MB
       def self.tile_layout_levels
         @tile_layout_levels ||= {
           **player_layout_levels,
+          **tuner_layout_levels,
           sound: {
             # 80x24: the voice (its panel by default), the picked row's
             # preview, the console (NAV l puts the library picker in for a
@@ -290,6 +318,50 @@ module MB
             # CUE line, the console (the keys pane only on big screens)
             normal: MB::Term::Viewports.layout(:sound, focus: :repl) {
               cols(height: 1) { pane :transport; pane :form }
+              cols(weight: 5) {
+                rows(width: 26) { pane :tracks, height: 7; pane :picker }
+                rows(weight: 3) { pane :inspector, weight: 3; pane :preview, weight: 2, min: 8 }
+                rows(weight: 3) { pane :code; pane :render, weight: 2, min: 8 }
+              }
+              pane :audition, height: 1
+              repl weight: 2, min: 8
+            },
+          },
+        }
+      end
+
+      # The tuner's layouts at :compact and :normal (UI::TunerScreen):
+      # step 3 is ui :sound's version with the tune strip (one row at
+      # 80x24).
+      def self.tuner_layout_levels
+        {
+          tuner: {
+            compact: MB::Term::Viewports.layout(:tuner, focus: :repl) {
+              cols(height: 1) { pane :transport; pane :form }
+              pane :tuner, weight: 3, min: 8
+              repl weight: 2, min: 4
+            },
+            normal: MB::Term::Viewports.layout(:tuner, focus: :repl) {
+              cols(height: 1) { pane :transport; pane :form }
+              cols(weight: 5) {
+                rows(width: 26) { pane :tracks, height: 7; pane :meters }
+                pane :tuner, weight: 4
+              }
+              pane :audition, height: 1
+              repl weight: 2, min: 8
+            },
+          },
+          tuning: {
+            compact: MB::Term::Viewports.layout(:tuning, focus: :repl) {
+              cols(height: 1) { pane :transport; pane :form }
+              pane :tune_strip, height: 1
+              pane :inspector, weight: 3, min: 6
+              pane :preview, height: 5
+              repl weight: 2, min: 4
+            },
+            normal: MB::Term::Viewports.layout(:tuning, focus: :repl) {
+              cols(height: 1) { pane :transport; pane :form }
+              pane :tune_strip, height: 2
               cols(weight: 5) {
                 rows(width: 26) { pane :tracks, height: 7; pane :picker }
                 rows(weight: 3) { pane :inspector, weight: 3; pane :preview, weight: 2, min: 8 }

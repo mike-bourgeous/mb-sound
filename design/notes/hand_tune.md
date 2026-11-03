@@ -1,14 +1,15 @@
 # Hand-tuning a fitted sound
 
 <!-- summary -->
-The hand-tune loop (`hand_tune.rb`, `hand_tune/`, `fit_patch.rb`, `reference.rb`, `take/reader.rb`): `tune :kick, code, ref: 'kick.wav', tune: (30.0..110.0).at(51.3)` makes a fit's numbers the track's knobs (`FitPatch`), opens `design`, and A/Bs the reference (`ab`, b); `retune :kick, code, noise_level: (0.0..1.0).at(0.2)` (or the edited file) redefines the graph, turned knobs carrying; `refine :kick, seconds: 20, within: 0.15` searches (CMA-ES, in a worker process started on demand through the process starter) from his knobs, proposing a `turn` line to A/B three ways and apply as one undo step; `ui.note` keeps his words with the sound; `take.turns` reads his take as knob and structure rows with start/end renders; `HandTune.infer` scores his path with L3, across redefinitions.
+The hand-tune loop (`hand_tune.rb`, `hand_tune/`, `fit_patch.rb`, `reference.rb`, `take/reader.rb`): `tuner` (NAV h) lists references (queue, folder, samples) then synths for one (its fit, fits, init, blank, the library), and runs one `tune` line; `tune :kick, code, ref: 'kick.wav', tune: (30.0..110.0).at(51.3)` (or `L.inst.init`) makes the numbers knobs (`FitPatch`), opens `design`, A/Bs the reference (`ab`, b); `retune :kick, code, ...` redefines the graph, knobs carrying; `refine :kick, seconds: 20` searches (CMA-ES, a worker process) from his knobs, a `turn` line to A/B and apply; `ui.note` keeps his words; `take.turns` reads his take; `HandTune.infer` scores his path with L3.
 <!-- /summary -->
 
 ## Quick reference
 
-- Console: `tune :kick, code, ref: path, play: clip, as: :name, param: (lo..hi).at(v), ...`; `fit_patch :name, code, param: (lo..hi).at(v)` (no design); `ab :kick, path` / `ab` / `ab :kick, :off`; `retune :kick, code, new_param: (lo..hi).at(v)` / `retune :kick` (the edited file; alone, prints the body); `refine :kick, seconds: 20, within: 0.15, only:, except:, evals:, staged:, weights:, seed:, tune: 40..60`, `refine.ab`, `refine.apply`, `refine.off`, `refine.stop`; `turn :kick, tune: 47.9, decay: 0.41` (a track's knobs as one change); `ui.note 'text', at: 0.012, freq: 3000`; `take.turns`; help `help :hand_tune`.
+- Tuner: `tuner` / `tuner 'dir'` / `tuner off`, NAV h; `ui :tuner` (Enter, a, b, /, d, e, Esc), `ui :tuning` (inspector R A E # w W); `HandTune::Wizard` (`pick`, `back`, `line`); `audition 'ref.wav'`, `audition L.inst.x, note: C2`.
+- Console: `tune :kick, code, ref: path, play: clip, as: :name, param: (lo..hi).at(v), ...` (or `L.inst.init`, a document: `FitPatch.adopt`); `fit_patch :name, code, param: (lo..hi).at(v)` (no design); `ab :kick, path` / `ab` / `ab :kick, :off`; `retune :kick, code, new_param: (lo..hi).at(v)` / `retune :kick` (the edited file; alone, prints the body); `refine :kick, seconds: 20, within: 0.15, only:, except:, evals:, staged:, weights:, seed:, tune: 40..60`, `refine.ab`, `refine.apply`, `refine.off`, `refine.stop`; `turn :kick, tune: 47.9, decay: 0.41` (a track's knobs as one change); `ui.note 'text', at: 0.012, freq: 3000`; `take.turns`; help `help :hand_tune`.
 - Agents: `MB::Sound::Take.read('take.rb')` (rows, `structures`, `events`, `versions`, `changed`, `reversals`, `values(:kick, :start)`, `document(:kick, :start)`, `renders(:kick, note: 36, dir:)`), `HandTune.infer(turns, track:, reference:, note:, seconds:)` (`segments`, structure steps), `HandTune.refine_job(session, track, ...)` + `HandTune.refine_run(job)` (in-process), `HandTune::Search` / `CMAES` (the research optimizer, exact), `HandTune.blocks(text, params)`, `UI::NoteLog.records` / `.read(path)`, `HandTune.note_image(path)`, `HandTune.note_look(path)`; `HandTune.compare` is the loop's one loss call site.
-- Specs `spec/lib/mb/sound/fit_patch_spec.rb`, `reference_spec.rb`, `hand_tune_spec.rb`, `hand_tune/{retune,refine,refine_job,worker,search,cmaes}_spec.rb`, `take/reader_spec.rb`, `ui/note_record_spec.rb` (synthetic fits and references only).
+- Specs `spec/lib/mb/sound/fit_patch_spec.rb`, `reference_spec.rb`, `hand_tune_spec.rb`, `hand_tune/{retune,refine,refine_job,worker,search,cmaes,wizard}_spec.rb`, `ui/tuner_spec.rb`, `take/reader_spec.rb`, `ui/note_record_spec.rb` (synthetic fits and references only).
 
 Branch hand-tune-1 (2026-11-03), from research-voice-match-3's Round 3 section 6 ("Hand-tune and infer", 6ea917e0) and the maintainer's "Add the analysis library to the project and start work on the hand-tuning tools.  I'd probably write notes along the way explaining what I am seeing on a waveform or spectrogram and hearing with my ears, and try to connect them together for the sake of improving the analyzers"; on the 909 kick: "I think I would need to hand tune this and have you figure out what I did and then make the loss metrics work for that."  The analysis toolkit is `analysis.md` (analysis-lib-1).
 
@@ -128,6 +129,49 @@ puts MB::Sound::HandTune.infer(take.turns, track: :kick, reference: 'tmp/kick_re
 
 Expected: the retune line says "added noise_decay, noise_hp, noise_level; kept 2"; refine shows one progress line for 20 s, then the loss before and after, the knobs it moved, and its `turn :kick, ...` line; the three A/B steps say which is heard; after apply the knobs are the proposal's; `take.turns` lists his turns, `structure: +noise_decay, +noise_hp, +noise_level, kept 2  (retune)`, and the `(refine)` rows.
 
+## The tuner: a reference, then a synth, then tune (`tuner`, hand-tune-3)
+
+The maintainer (2026-11-03): "I'd like a wizard-ish UI for hand tuning where I can select a reference and paired synth from a list".  `HandTune::Wizard` (`hand_tune/wizard.rb`) is a front end over `tune`, three states with a transition table (`TRANSITIONS`: reference, synth, tuning x pick, back, restart; `Wizard.table`); `UI::Panes::Tuner` and `TuneStrip` draw it (`ui/tuner.rb`), `UI::TunerScreen` shows its step.
+
+- **Step 1, a reference**: the queue's items (`Wizard.queue_items`: each file of `$MB_SOUND_TUNE_QUEUE`, else `tmp/hand-tune-queue/` beside `FitPatch.dir`, walked with Prism, never run: track, `ref:` found on disk near the item, `play:` and its note, the OK/FAILS line, the item's lines), the sound files of a folder (`tuner 'dir'` or d; `$MB_SOUND_REFS`, else `tmp/refs/`; the last one remembered in `tmp/tuner.json`), and Samples read in this process or played by a track's sampler (`Sample.loaded`; the A/B references' tracks left out).  Lengths from the files' headers (`Sample::LoopInfo`, no decoding); a summary (`Wizard.summarize`: YIN pitch over the first second, `Analysis::Envelope` shape and -20 dB time) for the rows on screen, worked out in the background.  a plays it (`audition 'kick.wav'`: once, at -20 LUFS, the instruments' level; another audition or a again stops it).
+- **Step 2, a synth**: the queue item's fit, the track's fit documents (`FitPatch.dir/<track>_*.mbg.rb`, then the last versions of them that differ), the init voice, a blank voice (a sine through an ADSR whose times come from the reference's envelope: start from nothing and `retune` layers in), the other fits, then the library's instruments and kits, those whose words fit the reference's role first (kits first for a kick; roles from the file's words, else the summary: percussive and low is a kick).  / finds as the library picker finds (`UI::Picker.results` under L.inst and L.kit).  The synth under the cursor gets an L3 score against the reference after 0.4 s (`Wizard.score_of`: one note rendered offline, `HandTune.compare`), and its note's loudness, so b's A/B plays the reference matched to it (`audition 'ref.wav', lufs: -17.3`, then `audition L.inst.x, note: A2`).
+- **Ranking by score: measured, skipped.**  Rendering and comparing all 63 library instruments and kits against a 0.2 s kick took 10.1 s of rendering and 1.8 s of comparisons (first renders 12-981 ms each: jungle_breaks 981, ambient_harp 642; struck ones 12-50 ms).  Twelve seconds per reference, even in a worker, is too slow for a list he scrolls; the list is ordered by words, and scores come for the entries looked at.
+- **The note**: a kit (an entry or a document whose voice is a kit) plays on its voice's GM note (`DRUM_NOTES` by the reference's words: kick 36, snare 38, clap 39, hats 42/46; else the kick's, the snare's for drum roles), other synths on the reference's pitch (else its role's note, `PatchRender.role_of`); a queue item's own `play:` for its fit.  The clip is that note looping, as long as the reference at the tempo (`.n4`, `.n2`, `.n1`, ...).
+- **Step 3, tune**: Enter runs the tune line through `UI.run_line` (journaled, the take's one line for the whole tuner: `tune :kick, L.inst.init, ref: "...", play: seq(A2).n4.loop, as: :kick_init`; a queue item's own lines; a fit document by its immutable version; a kit as itself: `tune :kick, L.kit.tr909, ...`).  `tune` tells the tuner (`Wizard#note_tuned`), `design` shows `ui :tuning` (the sound screen with the strip) instead of `ui :sound` while the tuner tunes; a failed line goes back to step 2.  In the inspector: b A/B (as before), R refine (`refine :kick, wait: false`; while it runs `refine.stop`; with a proposal `refine.ab`), A `refine.apply`, E `retune :kick` (the edited file), # a `ui.note`, w back to the synths, W to the references.  The strip names these keys from the inspector's keymap and says what is heard and what refine is doing.
+- **Library documents become fits** (`FitPatch.adopt`): a library instrument's document (or a fit's) copied as fit `:<track>_<name>` (its header's name, `from: "fit_patch"`, "Tuned from L.inst.init" in its description), so ab's loudness match, retune, and refine work as for any fit, and the queue's own `kick_fit` file is never replaced by another start.  Kits, struck and genre patches are built by Ruby code, not documents: they play as themselves (A/B unmatched, no retune or refine; the list says "by ear").  The take reader reads the adopted forms (`Take::Reader#adopted_text`).
+- **The take**: the tune line, the auditions (`audition ...` lines, as the library picker's; a queue fit or the blank voice is auditioned and scored from a scratch copy of its document in `tmp/tuner/`, content-addressed, so the fits' `versions/` list only what tracks played), and his turns; never the tuner's steps.  `wizard_spec` replays such a take to the same samples, bit for bit.
+
+### Where the background work runs (measured)
+
+The Mac container, a reese riff and a 909 beat playing on the null output (800-frame buffers), `FastUI::GVLProbe` on the render thread, 15 s a phase (scratch script `measure_wake.rb` in the hand-tune-3 job directory: 50 synthetic references of 0.3-1.8 s):
+
+| phase | jobs in the console process (a thread at priority -3) | jobs in the tuner's worker process |
+|---|---|---|
+| nothing (baseline) | p99 0.001 ms, max 0.5 ms | the same |
+| open: the folder's 50 headers | 164 ms on the console thread; 3 waits over 2 ms, max 10.5 ms | 12 ms; max 0.29 ms |
+| 50 summaries (12.6 / 11.6 s) | p99 15 ms, max 62 ms, 138 waits over 2 ms, 32 GCs (585 ms) | p99 0.001 ms, max 2.9 ms (1 over 2 ms), 0 GCs |
+| 10 scores (3.8 / 5.2 s) | p99 10.8 ms, max 41 ms, 102 over 2 ms | max 0.98 ms |
+
+A first in-process version started each job right after the render thread's buffer (`PatchRender.slack`): an analysis holds the GVL for its length in 10 ms timeslices and its garbage runs GCs on the render thread's time, as refine's in-process search did.  So the jobs go to a worker process (`Wizard::Remote`: refine's `Worker` class running `Remote.serve`, JSON lines `{id, do: scan | summary | score}`), started through the process starter on the first job (about 2 s to load; 100 MB), closed with the tuner; the folder's headers are read there too (the list fills in: "reading <folder>…").  Without a worker (no starter while a render thread runs, `$MB_SOUND_TUNER_WORKER=0`) jobs wait until nothing renders and run in the console process.  Every file read goes through `Sample`/`MB::Sound.read` (the starter's ffmpeg); no new spawn sites.
+
+### Walk-through
+
+In bin/sound.rb from /app:
+
+```ruby
+tuner                     # step 1: the queue's references, tmp/refs/, loaded samples (NAV h does the same)
+# Down to one, a to listen, Enter: step 2 (its fit first; the cursor's L3 score shows after a moment)
+# a listens on its note, b A/B with the reference, e puts its tune line on the console, Enter tunes
+# step 3: the sound screen with the strip; turn knobs; b flips; R refines (R again: A/B the proposal), A applies
+# w: back to the synths (try another), W: the references; Esc in the lists goes a step back
+tuner 'tmp/samples-cc0'   # another folder (remembered)
+take.save :tmp, 'tuned with the tuner'
+puts take.turns           # the tune line's knobs, his turns
+tuner off                 # the screen before
+```
+
+Expected: step 1 lists each reference with its length and, within a few seconds, "A2 +7 cents, percussive, -20 dB at 70 ms"-style summaries; step 2 starts with the queue item's fit (q), the init voice (i), blank (b), then the library (L); a score reads "L3 2.40"; Enter shows the sound screen with ` TUNE  kick vs 03_kick.wav  hearing the patch` and the keys line; the take has one `tune` line.
+
 ## Open questions
 
 1. A/B: mute/unmute (built), solo, CUE, or a crossfade knob?  And should `b` also A/B against the loaded preset, as first planned?
@@ -138,3 +182,7 @@ Expected: the retune line says "added noise_decay, noise_hp, noise_level; kept 2
 6. (Answered 2026-11-03: "Merge, starter process": a starter launched at startup starts the worker, ffmpeg, and git; spawner-1 starts the worker on demand at the first `tune` or refine.)
 7. refine's defaults: 20 s, `within: 0.2`, joint search (not staged), seed 1; the refined copy as a third muted track (his knobs untouched until apply, so the take's turns stay his) vs turning his knobs to the proposal and back.
 8. Apply lands each live knob with a turn's short glide at once, and build knobs with one rebuild; fine for a kick, or should apply land on the next note?
+9. (hand-tune-3) The tuner's name and key: `tuner` and NAV h (alternatives: `tune` with no arguments, `wizard`, `pick_ref`; a jump letter shared with the inspector's keys?).
+10. The blank voice: a sine through an ADSR from the reference's envelope; or a sine with a pitch envelope for percussive references, or the init voice with one oscillator?
+11. Step 3's keys live in the inspector (R A E # w W, where he already is) rather than in the strip; ok, or should the strip be a pane of its own keys?
+12. Ranking by score: skipped (12 s a reference for the whole library); score the role's first dozen in the worker as the list opens, or keep scoring only what the cursor rests on?

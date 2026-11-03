@@ -62,7 +62,7 @@ RSpec.describe(MB::Sound::UI::Keys, :aggregate_failures) do
   it "keeps every pane's jump letter clear of NAV's keys and the others' (ux-r4, ux-r4b)" do
     declared = ObjectSpace.each_object(Class).select { |c| c < ui::Pane && c.name && c.jump }.to_h { |c| [ui::PaneKeys.kind_of(c.allocate), c.jump] }
     expect(ui::Keys.check_jumps(declared)).to eq([])
-    expect(ui::Keys::JUMPS).to eq(repl: 'i', keyboard: 'k', tracks: 't', meters: 'e')
+    expect(ui::Keys::JUMPS).to eq(repl: 'i', keyboard: 'k', tracks: 't', meters: 'e', tuner: 'h')
     expect(ui::Keys.reserved_letters).to include('p', 's', 'v', 'z', 'x', 'm', 'f', 'g', 'G', 'u', 'n', 'y')
     # (h j l are free since ux-r4b: arrows move the focus; K is NAV's KEYS
     # again since ui-api-1, as the docs say: panel round 2 K16/N7)

@@ -207,6 +207,97 @@ module MB
                   missing: missing, skipped: skipped, text: text.freeze)
       end
 
+      # A fit patch made from an existing graph document (hand-tune-3: the
+      # tuner starts a hand-tune from a library instrument, the init
+      # voice, or a fit's document, not only from a fit's printed code):
+      # +source+ is a Library::Entry of a graph document (L.inst.init), a
+      # document's path, or its text.  The document is the same but for its
+      # header's name (+name+), `from: "fit_patch"`, and a description
+      # saying what it was made from, so tune, retune, and refine take it
+      # like any fit; it is written and checked as .save writes fits
+      # (.dir/NAME.mbg.rb and its version).  Raises Error for a source that
+      # isn't a graph document played from a `midi` notes input with
+      # params.  Returns a Patch (no sites: its params were params
+      # already).
+      def adopt(name, source, path: nil)
+        name = name.to_sym
+        raise Error, "fit_patch takes a name for the patch (a Symbol like :kick_fit), got #{name.inspect}" unless name.to_s.match?(/\A[a-z_][a-z0-9_]*\z/)
+        text, params = adopted(name, source)
+        check(name, text)
+        path, version, entry = write(name, text, path: path)
+        Patch.new(name: name, path: path, version: version, entry: entry, params: params, sites: [].freeze, missing: [].freeze,
+                  skipped: {}.freeze, text: text.freeze)
+      end
+
+      # [document text, params] .adopt writes for fit +name+ from
+      # +source+, without writing anything (Take::Reader rebuilds a take's
+      # versions with it).
+      def adopted(name, source)
+        text, from = adopt_source(source)
+        doc = begin
+          GraphIO.parse(text)
+        rescue GraphIO::LoadError => e
+          raise Error, "tune: #{from} isn't a graph document (#{e.message.lines.first&.strip})"
+        end
+        raise Error, "tune: #{from} plays from no midi input (inputs #{doc.inputs.inspect}): an instrument's document does" unless Array(doc.inputs.is_a?(Hash) ? doc.inputs.keys : doc.inputs).include?(:midi)
+        params = doc.declarations.select { |_, p| p.is_a?(Param) }
+        raise Error, "tune: #{from} has no params to turn" if params.empty?
+        mark = "Tuned from #{from} (tune, hand-tune-3)"
+        about = doc.description.to_s.sub(/\ATuned from .*? \(tune, hand-tune-3\)(: )?/, '')
+        text = rewrite_meta(text, name: name.to_s, from: 'fit_patch', description: about.empty? ? mark : "#{mark}: #{about}")
+        [text, params.freeze]
+      end
+
+      # [text, what it is called] of an adopt source.
+      def adopt_source(source)
+        case source
+        when Library::Entry
+          loc = source.location
+          unless source.settings.is_a?(Hash) && source.settings[:document] && loc && File.file?(loc)
+            raise Error, "tune: #{source.name} isn't a graph document (Ruby code builds it): pass it as an instrument to tune its knobs by ear (no retune)"
+          end
+          [File.read(loc), (source.head_path rescue source.name.to_s)]
+        when String, Pathname
+          s = source.to_s
+          s.include?("\n") ? [s, 'the document given'] : [File.read(File.expand_path(s)), File.basename(s)]
+        else
+          raise Error, "tune: give the voice's code, a graph document (a path), or a library instrument (L.inst.init), not #{source.class}"
+        end
+      rescue SystemCallError => e
+        raise Error, "tune: #{e.message}"
+      end
+
+      # +text+ (a graph document) with its `graph` header's keywords in
+      # +values+ ({ key => value }) replaced, or added after the others.
+      def rewrite_meta(text, values)
+        tree = Prism.parse(text)
+        call = tree.value.statements.body.find { |st| st.is_a?(Prism::CallNode) && st.receiver.nil? && st.name == :graph }
+        raise Error, 'tune: the document has no graph header' unless call && call.arguments
+        hash = call.arguments.arguments.find { |a| a.is_a?(Prism::KeywordHashNode) }
+        edits = []
+        left = values.dup
+        hash&.elements&.each do |el|
+          next unless el.is_a?(Prism::AssocNode) && el.key.is_a?(Prism::SymbolNode)
+          k = el.key.unescaped.to_sym
+          next unless left.key?(k)
+          edits << [el.value.location.start_offset, el.value.location.end_offset, RubyValue.to_ruby(left.delete(k))]
+        end
+        unless left.empty?
+          at = (hash || call.arguments.arguments.last).location.end_offset
+          edits << [at, at, left.map { |k, v| ", #{k}: #{RubyValue.to_ruby(v)}" }.join]
+        end
+        out = text.b
+        edits.sort_by { |s, _, _| -s }.each { |s, e, t| out[s...e] = t.b }
+        out.force_encoding(text.encoding)
+      end
+
+      # True when +x+ is something .adopt takes (an Entry, or a path of a
+      # graph document) rather than a fit's printed code.
+      def document_source?(x)
+        return true if x.is_a?(Library::Entry) || x.is_a?(Pathname)
+        x.is_a?(String) && !x.include?("\n") && x.end_with?(GraphIO::EXTENSION)
+      end
+
       # The canonical path of fit +name+'s document (.dir/NAME.mbg.rb), or
       # +path+ expanded.
       def path_of(name, path = nil)

@@ -625,8 +625,18 @@ module MB
         # Esc in a pane's own mode (MB::Term::Input::Router#pane_key): the page pane
         # goes back to what opened it (true: handled); other panes to NAV.
         def pane_escape
-          return false unless @tiler.focus == :page && @page_opener
-          back_from_page
+          if @tiler.focus == :page && @page_opener
+            back_from_page
+            return true
+          end
+          # (a pane that takes Esc in its own mode: the tuner's step back,
+          # hand-tune-3; its key_escape returns nil to let NAV have it)
+          name = @tiler.focus
+          pane = @panes[name]
+          return false unless pane.respond_to?(:key_escape)
+          r = pane.key_escape(@states[name])
+          return false if r.nil?
+          pane_result(name, r)
           true
         end
 
@@ -1030,6 +1040,11 @@ module MB
             if (rows = UI.panes[name]&.temporary_rows(@tiler.layout.panes))
               @temporary_jumps[name] = plot_pane(name, height: [rows, @rows / 2].min, prefer: TEMPORARY_PREFER[name])
               return enter_unlocked(name) if @tiler.layout.panes.include?(name)
+            end
+            # (a pane kind with a screen of its own: the tuner's NAV h)
+            if (p = UI.panes[name]).respond_to?(:jump_to_screen)
+              r = p.jump_to_screen(self)
+              return r.is_a?(String) ? flash(Tiles.one_line(r), :key) : r
             end
             return flash("no #{name} pane here (: show :#{name})", :dim)
           end
@@ -2011,13 +2026,18 @@ module MB
 
         # A built-in layout with smaller versions (UI.tile_layout_levels)
         # shown at the version for the screen's Density level, while the
-        # layout on screen is one of its versions as built.
+        # layout on screen is one of its versions as built.  The focus
+        # doesn't count (hand-tune-3: `design` shows ui :sound and goes into
+        # the inspector before the screen lays it out, so at 80x24 the big
+        # version stayed: the focus made it differ from every version); it
+        # stays on its pane when the version has it.
         def level_layout
           want = UI.tile_layout_at(@layout_name, @density.level) or return
           now = @tiler.layout
+          want = want.with(focus: now.focus) if want.panes.include?(now.focus)
           return if now == want
           versions = [UI.tile_layouts[@layout_name] || UI.show_layouts[@layout_name], *UI.tile_layout_levels[@layout_name].values]
-          @tiler.layout = want if versions.include?(now)
+          @tiler.layout = want if versions.any? { |v| v.panes.include?(now.focus) && v.with(focus: now.focus) == now }
         end
 
         # Jump letters for the panes on screen ({name => letter}: Keys::JUMPS
