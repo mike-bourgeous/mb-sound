@@ -357,6 +357,7 @@ module MB
           @queue = [].freeze
           @background = Background.new(session)
           @mutex = Mutex.new
+          @found = nil
           @cursor = { reference: 0, synth: 0 }
           @query = { reference: '', synth: '' }
           @tuned = nil
@@ -375,11 +376,24 @@ module MB
 
         # The list of the step (+state+: :reference or :synth) narrowed by
         # its find words (every word in the entry's name or about).
+        # The library's synths are found as the library picker finds them
+        # (UI::Picker.results under L.inst and L.kit: name, words, tags, in
+        # its ranking), the others by their words.
         def shown(state = @state)
           list = state == :synth ? @synths : refs
-          words = @query[state].to_s.downcase.split(/\s+/).reject(&:empty?)
+          q = @query[state].to_s
+          words = q.downcase.split(/\s+/).reject(&:empty?)
           return list if words.empty?
-          list.select { |x| t = "#{x.name} #{x.about} #{x.respond_to?(:kind) ? x.kind : ''}".downcase; words.all? { |w| t.include?(w) } }
+          by_words = ->(x) { t = "#{x.name} #{x.about} #{x.respond_to?(:kind) ? x.kind : ''}".downcase; words.all? { |w| t.include?(w) } }
+          return list.select(&by_words) unless state == :synth
+          key = [q, @synths.__id__]
+          return @found[1] if @found&.first == key
+          lib = list.select { |x| x.kind == :library }.to_h { |x| [x.entry, x] }
+          found = %i[inst kit].flat_map { |h| UI::Picker.results(h, q) rescue [] }.filter_map { |e| lib[e] }.uniq
+          found = lib.values.select(&by_words) if found.empty?
+          out = (list.reject { |x| x.kind == :library }.select(&by_words) + found).freeze
+          @found = [key, out]
+          out
         end
 
         # The entry under the cursor of +state+'s list, or nil.
