@@ -145,12 +145,64 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
       poll&.close
     end
 
+    it 'renders a fitted kit voice in the RENDER pane through a copy of the kit' do
+      params = { tune: (30.0..110.0).at(51.328155), decay: (0.1..2.0).at(0.468972), clip: (0.2..1.0).at(0.205115) }
+      fit = MB::Sound::FitPatch.save(:kick_fit, KICK_CODE, params)
+      s, = run(->(_s) { M.track(:kick, fit); M.bg(:kick, M.seq(M::C2).n4.loop) }, buffers: 4)
+      ui = MB::Sound::UI
+      poll = ui::Poll.new(s)
+      ui::Inspect.target = { track: :kick, node: nil }
+      src = poll.call(%i[inspect render]).first.render_source
+      expect(src.synth).to be_a(ui::PatchRender::KitCopy)
+      job = ->(tune) {
+        knobs = s.knobs.map { |n, k| [n, n == :"kick/tune" ? tune : k.value, k.spec] }
+        ui::PatchRender::Job.new(seq: 1, key: [:kick, tune], source: src, input: ui::PatchRender.input(src, 0.5), knobs: knobs, seconds: 0.5)
+      }
+      cache = {}
+      a = ui::PatchRender.render(job.(51.328155), cache: cache)
+      b = ui::PatchRender.render(job.(90.0), cache: cache)
+      again = ui::PatchRender.render(job.(51.328155), cache: cache)
+      expect(a.error).to be_nil
+      expect(a.peak).to be > -30
+      expect(again.hi).to eq(a.hi) # (reset to the same state every render)
+      expect(b.hi).not_to eq(a.hi) # (the copy reads the job's knob values)
+    ensure
+      cache&.[](:copies)&.each_value(&:close)
+      ui::Inspect.target = nil
+      poll&.close
+    end
+
     it 'plays a fitted kit voice from a clip' do
       params = { tune: (30.0..110.0).at(51.328155), decay: (0.1..2.0).at(0.468972), clip: (0.2..1.0).at(0.205115) }
       fit = MB::Sound::FitPatch.save(:kick_fit, KICK_CODE, params)
       s, got = run(->(_s) { M.track(:kick, fit); M.bg(:kick, M.seq(M::C2).n4.loop) })
       expect(got.abs.max).to be > 0.05
       expect(s.knobs[:"kick/tune"].value).to eq(51.328155)
+    end
+  end
+
+  describe 'tune (the one-liner)' do
+    before do
+      allow(MB::Sound::UI).to receive(:show).and_return(nil)
+      allow(MB::Sound::UI::Design).to receive(:terminal?).and_return(true)
+    end
+
+    after do
+      MB::Sound::UI::Inspect.target = nil
+      MB::Sound::UI::Design.instance_variable_set(:@open, false)
+      MB::Sound::UI::Design.instance_variable_set(:@last, nil)
+    end
+
+    it 'makes the fit patch, opens it in design on its track, and sets up the reference' do
+      s = M::Session.new(output: M::NullOutput.new(channels: 2, sleep: false), realtime: false)
+      @sessions << s
+      ref = MB::Sound::Sample.new([Numo::SFloat.new(9600).rand(-0.2, 0.2)], name: 'noise')
+      o = M::Session.with_context(session: s) { M.tune(:lead, LEAD_CODE, ref: ref, play: M.seq(M::A2).n4.loop, **LEAD_PARAMS) }
+      expect(o.fit.name).to eq(:lead_fit)
+      expect(o.opened.to_s).to start_with('design :lead: lead_fit on track :lead (new)')
+      expect(o.pair).to have_attributes(track: :lead, ref: :lead_ref, hearing: :patch)
+      expect(o.to_s).to include('fit patch lead_fit', 'ab :lead: hearing the patch', 'take.save')
+      expect(s.arrangement.tracks.keys).to include(:lead, :lead_ref)
     end
   end
 end

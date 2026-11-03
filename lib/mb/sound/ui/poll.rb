@@ -155,8 +155,11 @@ module MB
           unless walk && walk[:name] == name && walk[:roots].length == roots.length && walk[:roots].zip(roots).all? { |a, b| a.equal?(b) }
             nodes = roots.flat_map { |r| [r, *(r.respond_to?(:graph) ? r.graph(include_tees: true) : [])] }.uniq(&:__id__)
             synth = nodes.find { |n| n.is_a?(Synth) }
+            # (a kit that can be copied plays in the pane too: a fitted
+            # kick; hand-tune-1)
+            synth ||= nodes.find { |n| n.is_a?(Drums::Kit) && n.copier }&.then { |k| PatchRender::KitCopy.new(k) }
             live = nodes.each_with_object({}) { |n, h| h[n.__id__] = true }
-            if synth
+            if synth.is_a?(Synth)
               synth.instance_variable_get(:@lane_graphs)&.each { |g| g.each { |n| live[n.__id__] = true } }
             end
             walk = @render_walk = { name: name, roots: roots, synth: synth, live: live.freeze }

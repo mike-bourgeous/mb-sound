@@ -1709,6 +1709,12 @@ module MB
 
     Help.topic :hand_tune, 'Hand-tuning a fitted sound', group: :look do
       about <<~TEXT
+        `tune :kick, code, ref: 'kick_ref.wav', tune: (30.0..110.0).at(51.3),
+        ...` does it all in one line: the fit patch, `design` on track
+        :kick (`play:` a clip, else its role's note), and the reference
+        for A/B (`as:` names the patch).  Then turn by ear, flip with b,
+        note what you hear, and `take.save`.
+
         A fit (an agent matching a sound) prints its voice as console Ruby
         with the fitted numbers as literals.  `fit_patch :kick_fit, code,
         tune: (30.0..110.0).at(51.3), decay: (0.1..2.0).at(0.47)` turns it
@@ -1734,7 +1740,7 @@ module MB
         `MB::Sound::Take.read('take.rb')` reads a saved take the same way
         (walked, never run).
       TEXT
-      commands :fit_patch, :ab
+      commands :tune, :fit_patch, :ab
       note :sound_design_ui
       see :inspector, :knobs
     end

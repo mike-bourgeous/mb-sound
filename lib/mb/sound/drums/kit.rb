@@ -42,7 +42,21 @@ module MB
           @machine = machine
           @sample_rate = sample_rate.to_f
           @buf = nil
+          @copier = nil
           @node_type_name = "#{machine} kit"
+        end
+
+        # A Proc building this kit again from another source (+source+,
+        # voice names), with the same voices, knobs, and seeds, set by
+        # Machine#kit; nil for kits that can't (tr808).  The sound-design
+        # screen's RENDER pane plays a copy made this way (hand-tune-1:
+        # UI::PatchRender::KitCopy).
+        attr_accessor :copier
+
+        # A copy of this kit playing +source+ (see #copier), its idle voices
+        # never skipped; nil if it can't be copied.
+        def copy_for(source, names = self.names)
+          @copier&.call(source, names)
         end
 
         # The voice named +name+.

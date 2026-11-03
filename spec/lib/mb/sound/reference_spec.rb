@@ -107,10 +107,10 @@ RSpec.describe(MB::Sound::Reference, :aggregate_failures) do
     end
   end
 
-  it 'has console names (ab, fit_patch) that are no Kernel, Object, GraphNode, or Pry names' do
+  it 'has console names (ab, fit_patch, tune) that are no Kernel, Object, GraphNode, or Pry names' do
     require 'pry'
     pry_commands = Pry::Commands.keys.map(&:to_s)
-    { ab: MB::Sound::ReferenceMethods, fit_patch: MB::Sound::FitPatchMethods }.each do |n, owner|
+    { ab: MB::Sound::ReferenceMethods, fit_patch: MB::Sound::FitPatchMethods, tune: MB::Sound::HandTuneMethods }.each do |n, owner|
       expect(MB::Sound.method(n).owner).to eq(owner), "#{n} is defined by #{MB::Sound.method(n).owner}"
       expect(Object.new.respond_to?(n, true)).to eq(false), "#{n} is an Object method"
       expect(pry_commands).not_to include(n.to_s)
