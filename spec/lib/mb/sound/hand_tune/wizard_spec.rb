@@ -209,7 +209,7 @@ RSpec.describe(MB::Sound::HandTune::Wizard, :aggregate_failures) do
     ref = w.ref
     expect(w.audition_line(ref)).to eq("audition #{ref.path.inspect}")
     expect(w.audition_line(by[:init])).to eq('audition L.inst.init, note: A1')
-    expect(w.audition_line(by[:kick_fit])).to match(%r{\Aaudition ".*/versions/kick_fit-\h{12}\.mbg\.rb", note: A1\z})
+    expect(w.audition_line(by[:kick_fit])).to match(%r{\Aaudition ".*/tuner/kick_fit-\h{12}\.mbg\.rb", note: A1\z}) # (a scratch copy, not in versions/)
     w.score(by[:init])
     w.background.drain
     expect(w.audition_line(ref, match: by[:init])).to match(/\Aaudition ".*", lufs: -\d+\.\d\z/)

@@ -502,7 +502,7 @@ module MB
         # else nil (+want+: work it out in the background).
         def score(synth, want: true)
           return nil unless synth && @ref && !synth.problem
-          key = [:score, synth.kind, synth.name, *@ref.key]
+          key = [:score, synth.kind, synth.name, synth.path, *@ref.key]
           r = @background.get(key)
           return failed(Score, r) if r.is_a?(Exception)
           return r if r || !want
@@ -623,8 +623,15 @@ module MB
           return synth.entry.location if synth.entry && !synth.ears && synth.kind != :blank && synth.kind != :queue
           return nil if synth.ears
           take = "MB::Sound::Take::Replay.new(bpm: 120) do |r|\n  r.line 0r, [], #{tune_line(synth).inspect}\nend\n"
-          v = Take.read(take).versions[@track]&.first
-          v&.path
+          v = Take.read(take).versions[@track]&.first or return nil
+          # (a scratch copy for auditions and scores, kept out of the fits'
+          # versions/, which the synth list reads)
+          path = File.join(Wizard.home, 'tuner', "#{v.name}-#{Digest::SHA256.hexdigest(v.text)[0, 12]}#{GraphIO::EXTENSION}")
+          unless File.file?(path) && File.read(path) == v.text
+            FileUtils.mkdir_p(File.dirname(path))
+            File.write(path, v.text)
+          end
+          path
         rescue StandardError
           nil
         end
