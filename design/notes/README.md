@@ -144,7 +144,7 @@ Live MIDI uses JACK ports when a server answers, else bundled RtMidi; specs use 
 
 ### [Hand-tuning a fitted sound](hand_tune.md)
 
-The hand-tune loop (`lib/mb/sound/hand_tune.rb`, `fit_patch.rb`, `reference.rb`, `take/reader.rb`, `ui/note_log.rb`): `tune :kick, code, ref: 'kick.wav', tune: (30.0..110.0).at(51.3), ...` turns a fit's printed voice into a graph document whose fitted numbers are the track's knobs (`FitPatch`), opens it in `design`, and puts the reference on its own track for A/B (`ab`, b in the inspector; loudness-matched); `ui.note 'text', at:, freq:` (or the RENDER pane's , . < > markers) keeps his words with the sound, view, and spot as a JSON record; `take.turns` / `Take.read` read his take as knob rows (Prism, no eval) with start/end renders; `HandTune.infer` scores his path with `Analysis.compare` (L3) and names the steps the loss calls worse.
+The hand-tune loop (`hand_tune.rb`, `hand_tune/`, `fit_patch.rb`, `reference.rb`, `take/reader.rb`): `tune :kick, code, ref: 'kick.wav', tune: (30.0..110.0).at(51.3)` makes a fit's numbers the track's knobs (`FitPatch`), opens `design`, and A/Bs the reference (`ab`, b); `retune :kick, code, noise_level: (0.0..1.0).at(0.2)` (or the edited file) redefines the graph, turned knobs carrying; `refine :kick, seconds: 20, within: 0.15` searches (CMA-ES, in a worker process) from his knobs, proposing a `turn` line to A/B three ways and apply as one undo step; `ui.note` keeps his words with the sound; `take.turns` reads his take as knob and structure rows with start/end renders; `HandTune.infer` scores his path with L3, across redefinitions.
 
 ### [Tracker modules](trackers.md)
 
