@@ -89,7 +89,7 @@ module MB
               size: [screen.cols, screen.rows], text: screen.hidden? ? nil : screen.to_text(:none), sound: sound_capture(screen, session),
             }
           else
-            { layout: (screen.layout.name rescue nil), focus: nil, mode: :band, size: nil, text: screen.to_text(:none) }
+            { layout: (screen.layout.name rescue nil), focus: nil, mode: :band, size: nil, text: screen.to_text(:none), sound: sound_capture(screen, session) }
           end
         rescue StandardError => e
           { layout: nil, focus: nil, mode: :unknown, size: nil, text: "(no capture: #{e.class}: #{e.message})" }

@@ -111,6 +111,26 @@ RSpec.describe(MB::Sound::Take::Reader, :aggregate_failures) do
     expect(t.rows[1].seconds).to eq(0.6)
   end
 
+  it "reads a tune line of several lines: its fit patch and where its knobs start" do
+    text = <<~RUBY
+      MB::Sound::Take::Replay.new(bpm: 120, ends: 2r) do |r|
+        r.line 0r, [0r, 0r], <<~'X'
+          tune :kick, "kit(grid(16, kick: 'X...')) { voice(:kick) { |h| h.body(51.3, decay: 0.47) } }",
+            ref: "kick.wav", play: seq(C2).n4.loop,
+            tune: [(30.0..110.0).at(51.3), "the body pitch"],
+            decay: (0.1..2.0).at(0.47)
+          level :kick, -2.0.db
+        X
+        r.line 1/4r, [1/4r], <<~'X'
+          turn :"kick/decay", 0.3
+        X
+      end.main(ARGV, __FILE__)
+    RUBY
+    t = M::Take.read(text)
+    expect(t.tracks).to eq(kick: File.join(MB::Sound::FitPatch.dir, 'kick_fit.mbg.rb'))
+    expect(t.rows.map { |r| [r.knob, r.from, r.to] }).to eq([[:"kick/level", 1.0, 10**(-2 / 20.0)], [:"kick/decay", 0.47, 0.3]])
+  end
+
   it 'refuses what is not a take' do
     expect { M::Take.read("puts 1\n") }.to raise_error(MB::Sound::Take::Reader::Error, /not a take script/)
     expect { M::Take.read(42) }.to raise_error(MB::Sound::Take::Reader::Error)

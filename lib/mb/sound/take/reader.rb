@@ -228,7 +228,7 @@ module MB
           args = st.arguments&.arguments || []
           issued = value(args[0])
           lands = value(args[1])
-          code = args[2].respond_to?(:unescaped) ? args[2].unescaped : nil
+          code = string_of(args[2])
           return unless code
           index = @lines.length
           @lines << code
@@ -238,6 +238,14 @@ module MB
           @line_ctx = { index: index, issued: issued.is_a?(Numeric) ? issued : 0r, landings: landings, code: code.strip, rows: [] }
           tree.value.statements.body.each { |s| read_code(s) }
           @undone << @line_ctx[:rows] unless @line_ctx[:rows].empty?
+        end
+
+        # The text of a string literal +node+ (a squiggly heredoc of several
+        # lines is an InterpolatedStringNode of plain parts), or nil.
+        def string_of(node)
+          return node.unescaped if node.respond_to?(:unescaped)
+          return nil unless node.is_a?(Prism::InterpolatedStringNode) && node.parts.all? { |x| x.is_a?(Prism::StringNode) }
+          node.parts.map(&:unescaped).join
         end
 
         # A console statement of a line (assignments, calls; `;` statements).
@@ -263,6 +271,7 @@ module MB
           when :knob then read_knob(args, keywords(node))
           when :fit_patch then (f = read_fit(node)) && (@fits[f[2]] = f)
           when :track, :design then read_track(args)
+          when :tune then read_tune(node, args)
           when :ab then read_ab(node, args)
           when :undo then read_undo(node)
           end
@@ -284,6 +293,25 @@ module MB
           path = File.expand_path(path.to_s) if path
           path ||= File.join(FitPatch.dir, "#{name}#{GraphIO::EXTENSION}")
           [path, params, name]
+        end
+
+        # `tune :kick, code, ref:, play:, as:, param: (lo..hi).at(v), ...`
+        # (HandTuneMethods#tune): the fit patch :kick_fit (or as:) on track
+        # :kick, its knobs starting at the params' values.
+        def read_tune(node, args)
+          track = value(args[0])
+          return unless track.is_a?(Symbol)
+          kw = keywords(node)
+          as = kw[:as] ? value(kw[:as]) : nil
+          %i[ref play as].each { |k| kw.delete(k) }
+          params = kw.to_h { |k, v|
+            v = v.elements.first if v.is_a?(Prism::ArrayNode)
+            v = value(v)
+            [k, v.respond_to?(:default) ? v.default : v]
+          }
+          name = as.is_a?(Symbol) ? as : :"#{track}_fit"
+          @tracks[track] = File.join(FitPatch.dir, "#{name}#{GraphIO::EXTENSION}")
+          params.each { |p, v| seed(Session::Name.param(track, p), v) }
         end
 
         # `track :kick, fit` / `design :kick, fit, clip`: links the track

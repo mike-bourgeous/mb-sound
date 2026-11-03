@@ -53,6 +53,10 @@ RSpec.describe('UI notes with the sound they are about', :aggregate_failures) do
     expect(rec[:sound][:reference]).to include(source: 'darker', track: 'lead_ref', hearing: 'patch')
     expect(rec[:sound][:note]).to include(number: 45)
     expect(rec[:take]).to include(:lines, :position, :frame)
+    # (the dashboard band's capture keeps the sound too: a script's ui.note)
+    band = instance_double(MB::Sound::UI::Band, to_text: 'band', layout: double(name: :mini))
+    allow(band).to receive(:is_a?) { |k| k == MB::Sound::UI::Band }
+    expect(ui::NoteLog.capture(band, session: @session)[:sound]).to include(track: :lead)
     expect(ui::NoteLog.records).to eq([n.data])
     md = File.read(n.path)
     expect(md).to include('- **about**: track :lead, note_fit, reference darker (hearing the patch), at 12 ms 3.00 kHz', "- **data**: #{n.data}")
