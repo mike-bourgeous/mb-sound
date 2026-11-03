@@ -9,7 +9,7 @@ require 'prism'
 # lists every direct start: Process.spawn/fork/exec, Kernel#spawn/system/
 # exec/fork without a receiver, backticks and %x, IO.popen, Open3, and
 # PTY.spawn.  Any not in ALLOWED fails, naming its file and line.
-RSpec.describe('direct process starts in lib/') do
+module SpawnSites
   ROOT = File.expand_path('../../../..', __dir__)
 
   # Files that may start processes directly, with the reason.
@@ -36,10 +36,12 @@ RSpec.describe('direct process starts in lib/') do
     'Open3' => %i[capture2 capture2e capture3 popen2 popen2e popen3 pipeline pipeline_r pipeline_w pipeline_rw pipeline_start],
     'PTY' => %i[spawn getpty],
   }.freeze
+end
 
+RSpec.describe('direct process starts in lib/') do
   # [relative path, line, what] for each direct start in +path+.
   def starts(path)
-    rel = path.delete_prefix("#{ROOT}/")
+    rel = path.delete_prefix("#{SpawnSites::ROOT}/")
     found = []
     stack = [Prism.parse_file(path).value]
     while (n = stack.pop)
@@ -48,7 +50,7 @@ RSpec.describe('direct process starts in lib/') do
         found << [rel, n.location.start_line, 'backticks']
       when Prism::CallNode
         r = n.receiver
-        if r.nil? ? KERNEL.include?(n.name) && (n.arguments || n.name == :fork) : RECEIVERS[r.slice.delete_prefix('::')]&.include?(n.name)
+        if r.nil? ? SpawnSites::KERNEL.include?(n.name) && (n.arguments || n.name == :fork) : SpawnSites::RECEIVERS[r.slice.delete_prefix('::')]&.include?(n.name)
           found << [rel, n.location.start_line, [r&.slice, n.name].compact.join('.')]
         end
       end
@@ -57,11 +59,11 @@ RSpec.describe('direct process starts in lib/') do
     found
   end
 
-  let(:files) { Dir[File.join(ROOT, '{lib,gems/mb-term/lib}/**/*.rb')].sort }
+  let(:files) { Dir[File.join(SpawnSites::ROOT, '{lib,gems/mb-term/lib}/**/*.rb')].sort }
 
   it 'finds direct starts only in the allowed files' do
     all = files.flat_map { |f| starts(f) }
-    bad = all.reject { |rel, _, _| ALLOWED.key?(rel) }
+    bad = all.reject { |rel, _, _| SpawnSites::ALLOWED.key?(rel) }
     list = bad.map { |rel, line, what| "#{rel}:#{line} #{what}" }
     expect(list).to eq([]), "direct process starts: #{list.join(', ')}; start processes through MB::Sound::Starter " \
       '(.spawn, .popen, .capture: no fork of the console while audio plays), or add the file to ALLOWED with a reason'
@@ -88,8 +90,8 @@ RSpec.describe('direct process starts in lib/') do
   end
 
   it 'allows only files that exist and still start processes' do
-    ALLOWED.each_key do |rel|
-      path = File.join(ROOT, rel)
+    SpawnSites::ALLOWED.each_key do |rel|
+      path = File.join(SpawnSites::ROOT, rel)
       expect(File.file?(path)).to eq(true), "#{rel} (ALLOWED) is gone"
       expect(starts(path)).not_to be_empty, "#{rel} (ALLOWED) no longer starts processes: remove it from ALLOWED" if File.file?(path)
     end

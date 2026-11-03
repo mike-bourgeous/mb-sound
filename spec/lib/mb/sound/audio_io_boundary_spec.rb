@@ -36,6 +36,9 @@ module AudioIOBoundary
       'mb/sound/input_buffer_wrapper.rb: CircularBuffer', 'mb/sound/output_buffer_wrapper.rb: CircularBuffer',
       'mb/sound/concealment.rb: Length::Samples', 'mb/sound/midi/live_source.rb: Length',
     ],
+    'process starts through the process starter (spawner-1): the gem would take Starter along (plain Ruby, no mb-sound in its process)' => [
+      'mb/sound/ffmpeg_input.rb: Starter', 'mb/sound/io_base.rb: Starter',
+    ],
     "mb-sound's Internal helpers (quiet_stderr and friends)" => [
       'mb/sound/device_output.rb: Internal', 'mb/sound/midi/input.rb: Internal',
     ],
