@@ -74,6 +74,10 @@ RSpec.describe(MB::Sound::RefineMethods, :aggregate_failures) do
     expect(again.result.history).to eq(r.result.history)
     expect(refine(evals: 4, except: [:cutoff], within: nil).job.params).to eq([:resonance])
 
+    staged = refine(evals: 8, staged: [[:cutoff], [:resonance]])
+    expect(staged.job.stages).to eq([[:cutoff], [:resonance]])
+    expect(staged.result.best).to be <= staged.result.start # (each stage from the best so far)
+
     timed = refine(seconds: 0.5)
     expect(timed.result.ended).to eq(:time)
     expect(timed.result.seconds).to be < 0.5 + 1.0 # (it ends after the evaluation that crosses the budget, plus one at its best)
