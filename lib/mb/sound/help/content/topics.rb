@@ -1760,7 +1760,7 @@ module MB
         (walked, never run).
       TEXT
       commands :tune, :fit_patch, :ab
-      note :sound_design_ui
+      note :hand_tune, :sound_design_ui
       see :inspector, :knobs, :ui
     end
   end
