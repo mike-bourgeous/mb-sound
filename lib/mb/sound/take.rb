@@ -1,4 +1,5 @@
 require 'fileutils'
+require 'prism'
 require 'rbconfig'
 
 module MB
@@ -86,6 +87,34 @@ module MB
         def note_choice(kind, key, choice)
           _take, line = Session.context&.take_line
           line.choices << [kind, key, choice] if line
+        end
+
+        # Records the console line being evaluated on this thread with the
+        # first call to +name+ the block picks (yielded each Prism CallNode
+        # of that name without a receiver, in order) written as +code+
+        # instead, so a command that read something a replay can't read
+        # again (a file edited since) records what it read: `retune :kick`
+        # is kept as `retune :kick, document: "..."` (HandTune.retune).
+        # Returns true if the line was changed (false outside a take's
+        # line, or when no call matched).  With +receiver: true+, calls
+        # with a receiver are yielded too (`refine.apply`).
+        def record_call_as(name, code, receiver: false)
+          _take, line = Session.context&.take_line
+          return false unless line
+          tree = Prism.parse(line.code)
+          return false unless tree.success?
+          stack = [tree.value]
+          until stack.empty?
+            n = stack.shift
+            if n.is_a?(Prism::CallNode) && n.name == name && (receiver || n.receiver.nil?) && (!block_given? || yield(n))
+              src = line.code.b
+              src[n.location.start_offset...n.location.end_offset] = code.b
+              line.code = src.force_encoding(line.code.encoding)
+              return true
+            end
+            stack.concat(n.compact_child_nodes)
+          end
+          false
         end
 
         # The choice a replaying take line recorded for +kind+ and +key+, or

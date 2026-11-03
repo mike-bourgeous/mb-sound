@@ -111,12 +111,14 @@ module MB
         # See #distance.
         def self.distance(x, y)
           n = [(WINDOW * Signal::RATE).round + Signal::ONSET, x.length, y.length].min
-          ex = Signal.new(x.data[0...n]).envelope_db(48)
+          # (x's side is kept with it: one target, many candidates)
+          xn = x.memo([:attack_cut, n]) { Signal.new(x.data[0...n]) }
+          ex = xn.envelope_db(48)
           ey = Signal.new(y.data[0...n]).envelope_db(48)
           px = x.envelope_db(48).max
           py = y.envelope_db(48).max
           de = ((ex - px).clip(-60, 0) - (ey - py).clip(-60, 0)).abs.mean
-          mx = Signal.new(x.data[0...n]).stft(256, 64)
+          mx = xn.stft(256, 64)
           my = Signal.new(y.data[0...n]).stft(256, 64)
           fl = mx.max * 10**(-50 / 20.0)
           fl = 1e-12 if fl <= 0

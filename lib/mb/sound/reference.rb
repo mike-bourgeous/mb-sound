@@ -35,12 +35,25 @@ module MB
       # the Sample's name), +hearing+ (:patch or :ref), +level_db+ (the
       # reference's level now, dB), +patch_lufs+ and +ref_lufs+ (the last
       # match; nil when not measured), +values+ (the knob values of the
-      # last match), +note+ (why it isn't matched, or nil).
-      Pair = Struct.new(:track, :ref, :sample, :source, :hearing, :level_db, :patch_lufs, :ref_lufs, :values, :note, keyword_init: true) do
+      # last match), +note+ (why it isn't matched, or nil), +alt+ (a third
+      # track in the A/B: refine's proposal, :"<track>_refined", or nil;
+      # flips then cycle patch -> alt -> reference: hearing :alt).
+      Pair = Struct.new(:track, :ref, :sample, :source, :hearing, :level_db, :patch_lufs, :ref_lufs, :values, :note, :alt, keyword_init: true) do
         def to_s
           match = patch_lufs && ref_lufs ? "patch #{fmt(patch_lufs)} LUFS, reference #{fmt(ref_lufs)} LUFS, reference level #{fmt(level_db)} dB" : (note || 'not matched')
-          "ab #{track.inspect}: hearing the #{hearing == :ref ? "reference (#{ref.inspect})" : "patch (#{track.inspect})"}; #{match}"
+          heard = case hearing
+                  when :ref then "reference (#{ref.inspect})"
+                  when :alt then "refined (#{alt.inspect})"
+                  else "patch (#{track.inspect})"
+                  end
+          "ab #{track.inspect}: hearing the #{heard}; #{match}"
         end
+
+        # The tracks the flips cycle through, in order.
+        def cycle = alt ? [track, alt, ref] : [track, ref]
+
+        # What #hearing names each track of #cycle.
+        def hearings = alt ? %i[patch alt ref] : %i[patch ref]
 
         def inspect = "#<#{self}>"
 
@@ -87,21 +100,21 @@ module MB
         end
 
         # Flips +track+'s pair (the last one set up when nil) between the
-        # patch and the reference, matching the reference's level again
-        # first when the patch's knobs moved.  Returns the Pair.
-        def flip(session, track = nil)
+        # patch and the reference (through refine's proposal first when the
+        # pair has one: Pair#alt), matching the reference's level again
+        # first when the patch's knobs moved.  +to+ picks what to hear
+        # (:patch, :alt, :ref) instead of the next.  Returns the Pair.
+        def flip(session, track = nil, to: nil)
           pair = pair(session, track) or raise ArgumentError, "ab: no reference set up (ab #{(track || :kick).inspect}, 'reference.wav')"
-          to = pair.hearing == :patch ? :ref : :patch
+          hearings = pair.hearings
+          to ||= hearings[(hearings.index(pair.hearing).to_i + 1) % hearings.length]
+          raise ArgumentError, "ab: hear one of #{hearings.map(&:inspect).join(', ')} (got #{to.inspect})" unless hearings.include?(to)
           match(session, pair) if to == :ref && pair.values != knob_values(session, pair.track)
+          heard = pair.cycle[hearings.index(to)]
           Session.with_context(session: session) do
             session.command("ab #{pair.track.inspect}") do
-              if to == :ref
-                MB::Sound.mute(pair.track)
-                MB::Sound.unmute(pair.ref)
-              else
-                MB::Sound.mute(pair.ref)
-                MB::Sound.unmute(pair.track)
-              end
+              pair.cycle.each { |t| MB::Sound.mute(t) unless t == heard }
+              MB::Sound.unmute(heard)
             end
           end
           pair.hearing = to
@@ -115,9 +128,11 @@ module MB
           Session.with_context(session: session) do
             session.command("ab #{pair.track.inspect}, :off") do
               MB::Sound.stop(pair.ref)
+              MB::Sound.stop(pair.alt) if pair.alt
               MB::Sound.unmute(pair.track)
             end
           end
+          pair.alt = nil
           pairs(session).delete(pair.track)
           @last = nil if @last == pair.track
           pair.hearing = :patch

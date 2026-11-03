@@ -1752,14 +1752,39 @@ module MB
         frequency marker over the spectrum (x clears them); a note
         without at:/freq: points at the markers.
 
+        Missing a layer?  `retune :kick, code, noise_level: (0.0..1.0).at(0.2)`
+        redefines the patch's graph while you tune: the code is the
+        document's body (`retune :kick` alone prints it), its knobs by name,
+        each new number given like tune's.  Or edit the fit's file
+        (tmp/fits/kick_fit.mbg.rb: new param lines and the code) and
+        `retune :kick`.  Turned knobs keep their values, the new numbers
+        become knobs, removed ones are listed, the reference is matched
+        again, and it is one undo step and one take line (the file's
+        retune keeps what it read).
+
+        Let an optimizer refine your settings: `refine :kick, seconds: 20,
+        within: 0.15` searches (CMA-ES, in a worker process, so the audio
+        plays on) from your knobs, each kept within 15% of its range of
+        where you put it (or `tune: 40..60` per knob, `only: [:tune,
+        :decay]`, `except:`, `evals: 300`), for values the comparison (L3)
+        calls closer to the reference.  It shows the best loss so far
+        (Ctrl-C stops it, keeping the best) and prints the proposal as one
+        `turn :kick, tune: 47.9, decay: 0.41` line.  Nothing changes until
+        you say: `refine.ab` (or b, once set up) cycles yours, the refined
+        copy (loudness-matched), and the reference; `refine.apply` turns
+        your knobs to it as one undo step; `refine.off` drops the copy.
+        `staged: true` refines one block of knobs at a time (the body, the
+        click, the noise).  Takes keep what it found, not the search.
+
         `take.turns` reads your take as knob rows (knob, from, to, when,
-        turn or held-key gesture, A/B flips, undos), `take.turns.changed`
-        the knobs that ended elsewhere, and `take.turns.renders(:kick,
-        note: 36)` one note of the patch at the take's start and end;
+        turn or held-key gesture, A/B flips, undos, applied refines, and a
+        structure row per retune), `take.turns.changed` the knobs that ended elsewhere, and
+        `take.turns.renders(:kick, note: 36)` one note of the patch at the
+        take's start and end (each from its own structure);
         `MB::Sound::Take.read('take.rb')` reads a saved take the same way
         (walked, never run).
       TEXT
-      commands :tune, :fit_patch, :ab
+      commands :tune, :fit_patch, :ab, :retune, :refine
       note :hand_tune, :sound_design_ui
       see :inspector, :knobs, :ui
     end

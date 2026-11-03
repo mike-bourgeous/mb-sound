@@ -414,6 +414,37 @@ module MB
           }
         end
 
+        # Turns several knobs to plain values as one change (+pairs+: {
+        # knob name => value }; KnobMethods#turn's `turn :kick, tune: 48.2,
+        # decay: 0.41`, hand-tune-2): live knobs as #turn does, build knobs
+        # all at once with one rebuild of the tracks that read them
+        # (Arrangement#turn_build_knobs).  Run inside a Session#command, it
+        # is one undo step.
+        def turn_knobs(pairs, at: nil, start_time: nil)
+          point = at.is_a?(LaunchPoint) ? at : LaunchPoint::NONE
+          build = {}
+          tracks = []
+          pairs.each do |name, value|
+            k = knob!(control_name(name))
+            unless value.is_a?(Numeric)
+              raise ArgumentError, "turn several knobs to plain numbers (#{k.name.inspect} got #{value.inspect}); ramps and keyframes take one knob: turn #{k.name.inspect}, ..."
+            end
+            rebuilds = @arrangement&.build_knob?(k.name) ? @arrangement.build_knob_tracks(k.name) : []
+            if rebuilds.empty?
+              turn(k.name, value, at: point, start_time: start_time)
+            else
+              v = knob_value(k, value)
+              check_turn_value(k, v)
+              warn_clamp(k, v)
+              v = k.spec.clamp(v)
+              next if v == k.value
+              build[k] = v
+              tracks |= rebuilds
+            end
+          end
+          @arrangement.turn_build_knobs(build, tracks, point: point) unless build.empty?
+        end
+
         # Ruby's own error for Symbol keys that aren't keywords of #turn (the
         # other keys are keyframe times).
         def check_turn_keywords(keys)

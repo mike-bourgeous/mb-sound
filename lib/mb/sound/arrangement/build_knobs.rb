@@ -56,11 +56,20 @@ module MB
         # Session#command.  The knob lands with the rebuilt graphs.  Returns
         # the journal entries of the rebuilds.
         def turn_build_knob(k, value, tracks, point: LaunchPoint::NONE, fade: nil)
+          turn_build_knobs({ k => value }, tracks, point: point, fade: fade)
+        end
+
+        # Turns several build knobs at once (+pairs+: { knob => value }) and
+        # rebuilds +tracks+ once with all of them (hand-tune-2: a grouped
+        # `turn :kick, clip: 0.3, drive: 2`; two rebuilds for one launch
+        # point would keep only the first), in one Session#command.
+        def turn_build_knobs(pairs, tracks, point: LaunchPoint::NONE, fade: nil)
           entries = []
-          @session.command("turn #{k.name.inspect} #{Param.literal(value) rescue value} (rebuilds #{tracks.join(', ')})") {
+          label = pairs.map { |k, v| "#{k.name.inspect} #{Param.literal(v) rescue v}" }.join(', ')
+          @session.command("turn #{label} (rebuilds #{tracks.join(', ')})") {
             before = undo_state
             first = nil
-            k.build_value = value
+            pairs.each { |k, v| k.build_value = v }
             begin
               tracks.each do |name|
                 tr = @tracks[name] or next
@@ -69,9 +78,9 @@ module MB
                 entries << c
               end
             ensure
-              k.build_value = nil
+              pairs.each_key { |k| k.build_value = nil }
             end
-            @session.turn(k.name, value, start_time: first, build: true)
+            pairs.each { |k, v| @session.turn(k.name, v, start_time: first, build: true) }
             @session.note_undo_extra(self, before, undo_state)
           }
           entries.compact.map { |e| @session.journal[e.seq] }

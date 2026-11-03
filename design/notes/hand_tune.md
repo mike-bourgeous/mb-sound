@@ -1,14 +1,14 @@
 # Hand-tuning a fitted sound
 
 <!-- summary -->
-The hand-tune loop (`lib/mb/sound/hand_tune.rb`, `fit_patch.rb`, `reference.rb`, `take/reader.rb`, `ui/note_log.rb`): `tune :kick, code, ref: 'kick.wav', tune: (30.0..110.0).at(51.3), ...` turns a fit's printed voice into a graph document whose fitted numbers are the track's knobs (`FitPatch`), opens it in `design`, and puts the reference on its own track for A/B (`ab`, b in the inspector; loudness-matched); `ui.note 'text', at:, freq:` (or the RENDER pane's , . < > markers) keeps his words with the sound, view, and spot as a JSON record; `take.turns` / `Take.read` read his take as knob rows (Prism, no eval) with start/end renders; `HandTune.infer` scores his path with `Analysis.compare` (L3) and names the steps the loss calls worse.
+The hand-tune loop (`hand_tune.rb`, `hand_tune/`, `fit_patch.rb`, `reference.rb`, `take/reader.rb`): `tune :kick, code, ref: 'kick.wav', tune: (30.0..110.0).at(51.3)` makes a fit's numbers the track's knobs (`FitPatch`), opens `design`, and A/Bs the reference (`ab`, b); `retune :kick, code, noise_level: (0.0..1.0).at(0.2)` (or the edited file) redefines the graph, turned knobs carrying; `refine :kick, seconds: 20, within: 0.15` searches (CMA-ES, in a worker process) from his knobs, proposing a `turn` line to A/B three ways and apply as one undo step; `ui.note` keeps his words with the sound; `take.turns` reads his take as knob and structure rows with start/end renders; `HandTune.infer` scores his path with L3, across redefinitions.
 <!-- /summary -->
 
 ## Quick reference
 
-- Console: `tune :kick, code, ref: path, play: clip, as: :name, param: (lo..hi).at(v), ...`; `fit_patch :name, code, param: (lo..hi).at(v)` (no design); `ab :kick, path` / `ab` / `ab :kick, :off`; `ui.note 'text', at: 0.012, freq: 3000`; `take.turns`; help `help :hand_tune`.
-- Agents: `MB::Sound::Take.read('take.rb')` (rows, `changed`, `reversals`, `values(:kick, :start)`, `renders(:kick, note: 36, dir:)`), `HandTune.infer(turns, track:, reference:, note:, seconds:)`, `UI::NoteLog.records` / `.read(path)`, `HandTune.note_image(path)`, `HandTune.note_look(path)`; `HandTune.compare` is the loop's one loss call site.
-- Specs `spec/lib/mb/sound/fit_patch_spec.rb`, `reference_spec.rb`, `hand_tune_spec.rb`, `take/reader_spec.rb`, `ui/note_record_spec.rb` (synthetic fits and references only).
+- Console: `tune :kick, code, ref: path, play: clip, as: :name, param: (lo..hi).at(v), ...`; `fit_patch :name, code, param: (lo..hi).at(v)` (no design); `ab :kick, path` / `ab` / `ab :kick, :off`; `retune :kick, code, new_param: (lo..hi).at(v)` / `retune :kick` (the edited file; alone, prints the body); `refine :kick, seconds: 20, within: 0.15, only:, except:, evals:, staged:, weights:, seed:, tune: 40..60`, `refine.ab`, `refine.apply`, `refine.off`, `refine.stop`; `turn :kick, tune: 47.9, decay: 0.41` (a track's knobs as one change); `ui.note 'text', at: 0.012, freq: 3000`; `take.turns`; help `help :hand_tune`.
+- Agents: `MB::Sound::Take.read('take.rb')` (rows, `structures`, `events`, `versions`, `changed`, `reversals`, `values(:kick, :start)`, `document(:kick, :start)`, `renders(:kick, note: 36, dir:)`), `HandTune.infer(turns, track:, reference:, note:, seconds:)` (`segments`, structure steps), `HandTune.refine_job(session, track, ...)` + `HandTune.refine_run(job)` (in-process), `HandTune::Search` / `CMAES` (the research optimizer, exact), `HandTune.blocks(text, params)`, `UI::NoteLog.records` / `.read(path)`, `HandTune.note_image(path)`, `HandTune.note_look(path)`; `HandTune.compare` is the loop's one loss call site.
+- Specs `spec/lib/mb/sound/fit_patch_spec.rb`, `reference_spec.rb`, `hand_tune_spec.rb`, `hand_tune/{retune,refine,refine_job,worker,search,cmaes}_spec.rb`, `take/reader_spec.rb`, `ui/note_record_spec.rb` (synthetic fits and references only).
 
 Branch hand-tune-1 (2026-11-03), from research-voice-match-3's Round 3 section 6 ("Hand-tune and infer", 6ea917e0) and the maintainer's "Add the analysis library to the project and start work on the hand-tuning tools.  I'd probably write notes along the way explaining what I am seeing on a waveform or spectrogram and hearing with my ears, and try to connect them together for the sake of improving the analyzers"; on the 909 kick: "I think I would need to hand tune this and have you figure out what I did and then make the loss metrics work for that."  The analysis toolkit is `analysis.md` (analysis-lib-1).
 
@@ -65,9 +65,76 @@ Renders the track's document at every state along his path (his start, then each
 
 First run (the queue's 909 kick thejames, four made-up turns standing in for his: shorter sweep time, less drive, more sweep, less tick): the loss called the sweep-time step worse (spectral +0.64, attack +0.23) and did not fall along the straight line (25% 1.93, 50% 2.05, 75% 2.48).  His real take is the test.
 
+## Redefining the graph while tuning (`retune`, hand-tune-2)
+
+The maintainer (2026-11-03): "The tuning process should be able to handle me redefining the graph to add missing oscillators or noise elements etc."  One command, two ways in:
+
+- `retune :kick, code, noise_level: (0.0..1.0).at(0.2), ...`: the code is the document's body (its params by name: `retune :kick` alone prints the body playing, ready to copy), each new param's number written in the code and matched by fit_patch's literal rules (`FitPatch.document match:` limits matching to the new params, so the code's other numbers stay numbers; names the code references count as sites).  A kept param given again takes its new range.
+- Edit the fit's file (`tmp/fits/kick_fit.mbg.rb`: new `param` lines, the code) and `retune :kick`.  The take keeps what was read: `Take.record_call_as` rewrites the line's call as `retune :kick, document: "..."`, so the take replays without the file.
+- **Versions**: each document text the track plays is an immutable copy (`FitPatch.version_path`: `tmp/fits/versions/<name>-<sha12>.mbg.rb`); the track's Library entry is the copy, its lineage (`settings[:lineage]`) the editable path.  So an undo puts the old version back, and a rebuild after the file was edited plays the text that was loaded.  `InstrumentPatch.same_instrument?` treats versions of one lineage as the same instrument: turned knobs carry (TrackKnobs' rules: a knob still where its param put it takes the new value; a turned one keeps its value unless the new range leaves it out, then it goes back to the param's value: `Retuned#reset`), new params become knobs, removed ones are listed (their knobs stay, unread).  The same instrument given again now rebuilds carrying its state (`change_instrument carry:`; it used to spill like another instrument): the voices play on where the structures match, the rest spills.
+- The rebuild and the reference's new loudness match (`Reference.match`, at the knobs now) are one undo step.  In sound design the rebuild lands on the next buffer or beat (Arrangement#rebuild_track's timing), elsewhere at the track's launch point.
+- **The take reader**: a retune is a `Structure` row between the turns (added, removed, kept, changed, reset; `Result#events` has both in order).  Every version the take played is rebuilt from its lines (`FitPatch.document` for tune, fit_patch, and code retunes; the text for document retunes; Prism only), so `values`/`renders`/`document` at the start and the end use their own structures.  The live take (`take.turns`) starts a track retuned during the take at the version it played before its first retune there (`HandTune.history`); a saved take read cold needs its `tune` line or `patch:` with the starting version (a take restarted after `tune` doesn't say which document played).
+- **Infer across**: the path is scored in segments (`Inference#segments`, one per version); the redefinition is a step of its own: the loss at his knobs before it, then in the new structure at the knobs it carried (the structure's own effect).  `line` is the last segment's straight line.
+- Params named like a document function (`noise`) are refused: the loader read `noise.filter(...)` as the param.
+- Guards (`hand_tune/retune_spec.rb`): a take with a code retune and a file retune mid-song replays to the same samples; knobs carry; structure rows and exact start/end renders; infer's structure step; undo; removed params and the rematch.
+
+## Refine: an optimizer pass on his settings (`refine`, hand-tune-2)
+
+The maintainer (2026-11-03): "optionally I'd like to be able to trigger an optimizer pass with time or range limitations on top of my own settings to refine them".  `refine :kick, seconds: 20, within: 0.15` starts from the knobs as they are, against the track's reference (`ab`, or tune's `ref:`):
+
+- **Limits**: `seconds:` (wall clock; 20 when neither is given) and/or `evals:`; `within:` (a trust region: each knob moves at most this share of its range, in its own scale, from where he put it; 0.2 by default, nil for the whole range) or a range per knob (`tune: 40..60`); `only:`/`except:` (default every bounded numeric param of the document).  `staged: true` searches one block at a time (`HandTune.blocks`: the call a param is an argument of, an operator's operand with what it operates on, a local's value with the local: the 909 kick's body, clip, noise), the budget split by block size, each stage from the best so far: the voice-match lesson for layered voices; or `staged: [[:tune, :decay], [:tick]]`.
+- **The loss**: `HandTune.compare` (L3), `weights:` overriding.  One note rendered offline from the document at each point (`HandTune.render`), at the track's note, as long as the reference (at most 2 s; `length:`).  The comparison keeps the target's side with its Signal (analysis.md), so one evaluation of a 0.5 s kick costs about 56 ms (render 10, compare 27) in the Mac container: about 350 evaluations in 20 s.
+- **The search**: `Search` (research `fit.rb`'s loop: CMA-ES in the unit cube from his point, restarts on stagnation, penalty outside the cube, each run scoring its start, so it never ends worse than his settings) over `CMAES`, both ported operation for operation.  Port check: the research code (6ea917e0 `cmaes.rb`, `fit.rb`) and the lib on sphere, Rastrigin, and Rosenbrock losses in 2, 4, and 7 dimensions with seeds 1, 3, 11 gave the same best, the same evaluation it was found at, and the same history; 50 generations of ask/tell gave the same means and steps; `search_spec`/`cmaes_spec` keep the research run's numbers.  `seed:` defaults to 1, not a draw from MB::Sound's root seed: a replay doesn't search, so a draw would move every later random choice of the replayed set.
+- **Where it runs (measured, the Mac container, a techno set live on the null device under the dropout probe, 30 s each)**:
+
+| mode | evaluations | dropouts | render thread GVL waits >= 1 ms (held by others) | longest wait | GC |
+|---|---|---|---|---|---|
+| none (baseline) | 0 | 0 | 7 | 8.0 ms | 13 ms |
+| in-process thread | 498 | 0 (1 in a 20 s run: an 82 ms major GC) | 1396 (11.7 s) | 20.3 ms | 2024 ms |
+| in-process, one evaluation after each buffer (slack) | 493 | 0 | 1383 (11.2 s) | 22.0 ms | 2196 ms |
+| worker process | 514 | 0 | 7 | 2.6 ms | 13 ms |
+| a process started every 2 s while playing | 15 | 0 | 20 (143 ms) | 16.9 ms | 0 |
+
+  An evaluation holds the GVL tens of milliseconds (Ruby rendering and analysis, preempted only at the 10 ms timeslice), so slack windows don't help, and its garbage makes major GCs on the render thread's time.  The worker (`HandTune::Worker`: `ruby -e` loading mb-sound, nice 10, JSON lines over pipes, about 2 s to load and 100 MB) keeps the render thread at its idle numbers at the same speed.  It starts while nothing plays: bin/sound.rb starts it at startup (`Worker.prestart`; `MB_SOUND_REFINE_WORKER=0` turns that off), refine starts it if nothing plays, and refuses while a render thread runs (spawn rule: a process start holds the GVL through the fork, worse on macOS without vfork), offering `mode: :here` (in-process: scripts and specs).  The console waits on the worker's lines off the GVL (`worker_spec`: the console process used under a quarter of a core while a refine ran beside a playing Session).  Option (c), a `bin/refine.rb` in another terminal on a saved take, and (d), pausing playback, weren't needed.
+- **Results**: a proposal (changed params, 5 significant figures), printed as one `turn :kick, tune: 47.9, decay: 0.41` line with the loss and its terms before and after.  Progress redraws one line (best loss, evaluations, time left; `ColorPolicy.animate?`); Ctrl-C (or `refine.stop`, or `wait: false` and `refine.stop`) keeps the best so far.  Nothing changes until asked: `refine.ab` sets up a muted copy of the track at the proposal (`:kick_refined`, his other knobs, loudness-matched to his patch) and cycles his patch, the copy, the reference (`Reference::Pair#alt`; `ab` and b cycle the three while it's up); `refine.apply` turns his knobs to the proposal as one change (`Session#turn_knobs` in one command: one undo step, build knobs rebuilding the track once, `Arrangement#turn_build_knobs`) and stops the copy; `refine.off` stops it.
+- **`turn :kick, tune: 47.9, decay: 0.41`**: a track's knobs together, to plain numbers, one change (`KnobMethods#turn` with a track name and its params as keywords; a typo names the track's knobs).  The proposal prints this form so he can paste part of it.
+- **Takes keep what was found, not the search**: the search's line becomes `refine(:kick, proposal: { ... }, searched: "seconds: 20, seed: 1, 284 evaluations, loss ...")` once its result is known, `refine.apply` becomes `refine(:kick, apply: { ... })`, `refine.ab` stays (the replayed proposal answers it).  A replay never searches.  The reader reads apply lines as `:refine` rows and three-way flips (`hearing: :alt`).
+
+## Walk-through: a queue item with a noise layer, refined
+
+In bin/sound.rb from /app (the worker starts with it):
+
+```ruby
+# 1. A queue item: paste its tune line (tmp/hand-tune-queue/, private) or any fit's
+tune :kick, "kit(grid(16, kick: 'X...'), seed: 1) { voice(:kick) { |h| h.body(51.33, decay: 0.469) } }", ref: 'tmp/kick_ref.wav',
+  tune: (30.0..110.0).at(51.33), decay: (0.1..2.0).at(0.469)
+# 2. Turn by ear (inspector arrows); b flips the reference
+# 3. A noise layer: print the body, then give it with the layer and its numbers as new knobs
+retune :kick
+retune :kick, "kit(midi, seed: 1) { voice(:kick) { |h| h.mix(h.body(tune, decay: decay), h.noise(decay: 0.06, highpass: 2000.0) * 0.2) } }",
+  noise_decay: (0.005..0.3).at(0.06), noise_hp: (200.0..12000.0).at(2000.0), noise_level: (0.0..1.0).at(0.2)
+# 4. Turn the new knobs by ear, then let the optimizer refine for 20 s within 15% of each knob's range
+refine :kick, seconds: 20, within: 0.15
+refine.ab        # the refined copy
+refine.ab        # the reference
+refine.ab        # yours again
+refine.apply     # one undo step (undo puts yours back)
+ui.note 'refined: the click got shorter, the noise brighter'
+# 5. Save the take and read it back
+take.save :tmp, 'kick with a noise layer, refined'
+puts take.turns   # turns, a structure row for the retune, the refine's rows
+puts MB::Sound::HandTune.infer(take.turns, track: :kick, reference: 'tmp/kick_ref.wav', note: 36, seconds: 0.5)
+```
+
+Expected: the retune line says "added noise_decay, noise_hp, noise_level; kept 2"; refine shows one progress line for 20 s, then the loss before and after, the knobs it moved, and its `turn :kick, ...` line; the three A/B steps say which is heard; after apply the knobs are the proposal's; `take.turns` lists his turns, `structure: +noise_decay, +noise_hp, +noise_level, kept 2  (retune)`, and the `(refine)` rows.
+
 ## Open questions
 
 1. A/B: mute/unmute (built), solo, CUE, or a crossfade knob?  And should `b` also A/B against the loaded preset, as first planned?
 2. Fit patches go to `tmp/fits/`; should a tuned fit be saveable to the library (`save :kick_tuned, ...` works from the document; a `tune`-time `save:` option?).
 3. The markers' keys (, . < > x) and steps; a pointer later?
 4. Note records keep the RENDER pane's drawn data (about 40 KB a note); keep, or only the spot and the patch state (renders are reproducible)?
+5. (hand-tune-2) Names: `retune` (alternatives: `tune :kick, edit: code`, `fit_patch.edit`, `redefine`) and `refine` (it shadows Ruby's `Module#refine` on MB::Sound itself; alternatives `hone`, `polish`, `nudge`)?
+6. When the worker starts: bin/sound.rb at startup (built; 100 MB and 2 s of a core in the background, even if never used), at the first `tune` while nothing plays, or only on demand (refused while playing)?  A small helper process started at startup that starts the others (a "zygote") would let any live path start processes without holding the GVL: ffmpeg reads, git, and this worker.
+7. refine's defaults: 20 s, `within: 0.2`, joint search (not staged), seed 1; the refined copy as a third muted track (his knobs untouched until apply, so the take's turns stay his) vs turning his knobs to the proposal and back.
+8. Apply lands each live knob with a turn's short glide at once, and build knobs with one rebuild; fine for a kick, or should apply land on the next note?

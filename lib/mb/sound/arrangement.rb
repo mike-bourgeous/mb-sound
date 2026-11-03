@@ -314,7 +314,7 @@ module MB
         # maintainer, 2026-10-30: "Always reset")
         had = @mutex.synchronize { @tracks[name] }
         prior = InstrumentPatch.entry_of(had&.patch)
-        reset = entry && had && !(prior && prior.name == entry.name && prior.location == entry.location)
+        reset = entry && had && !InstrumentPatch.same_instrument?(prior, entry)
         defer0 = playing ? ->(&b) { TrackKnobs.deferring(landings) { b.call } } : ->(&b) { b.call }
         defer = reset ? ->(&b) { TrackKnobs.resetting { defer0.call(&b) } } : defer0
         # Built once now, so a broken patch fails here (see PatchCheck); a
@@ -349,7 +349,7 @@ module MB
         set_ahead(tr, graph) if graph || !lead.is_a?(Length::Attack)
         refresh_monitor(tr)
         if entry && old&.patch? && tr.clip && @session.playing_after_queue?(name)
-          defer.call { change_instrument(tr, entry, before, landings) }
+          defer.call { change_instrument(tr, entry, before, landings, carry: !reset) }
         elsif patch && !entry && old&.patch? && tr.clip && @session.playing_after_queue?(name)
           # A redefined patch block rebuilds the playing graph, carrying its
           # state where it can and spilling over the rest (carry-1; the
@@ -417,11 +417,6 @@ module MB
         [graph, clip, entry]
       end
 
-      # Track +tr+, playing, was given a new instrument (+entry+): built
-      # again with its clip at its launch point, keeping its routing, its
-      # reused param knobs (+landings+, { knob => value } from
-      # TrackKnobs.deferring) turned there (one Session#command: journaled,
-      # one undo step; +before+ is the Set state before the redefinition).
       # Rebuilds track +tr+'s playing graph for its redefined patch block
       # (see #track): one Session#command, one undo step.
       def redefine_patch(tr, before)
@@ -431,9 +426,18 @@ module MB
         }
       end
 
-      def change_instrument(tr, entry, before, landings = {})
+      # Track +tr+, playing, was given a new instrument (+entry+): built
+      # again with its clip at its launch point, keeping its routing, its
+      # reused param knobs (+landings+, { knob => value } from
+      # TrackKnobs.deferring) turned there (one Session#command: journaled,
+      # one undo step; +before+ is the Set state before the redefinition).
+      # The same instrument again (a new version of a fit patch, retune;
+      # InstrumentPatch.same_instrument?) carries the running state where
+      # it maps (+carry:+), as a redefined patch block does; another one
+      # spills.
+      def change_instrument(tr, entry, before, landings = {}, carry: false)
         @session.command("track #{tr.name.inspect} -> #{entry.head_path}") {
-          c = rebuild_track(tr, LaunchPoint::NONE, nil, carry: false, spill: true)
+          c = rebuild_track(tr, LaunchPoint::NONE, nil, carry: carry, spill: true)
           time = c&.time || resolve(tr.q || @quant, tr, LaunchPoint::NONE)
           landings.each { |k, v| @session.turn(k.name, v, start_time: time, build: true) unless v == k.value }
           @session.note_undo_extra(self, before, undo_state)

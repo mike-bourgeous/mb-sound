@@ -74,18 +74,19 @@ module MB
           y = Signal.from(candidate).aligned
           n = [x.length, y.length].min
           raise ArgumentError, 'Both sounds need at least 1024 samples after their onsets' if n < 1024
-          xd = x.data[0...n]
+          # (the target's side is kept with its Signal, so comparing many
+          # candidates with one target, as refine does, measures it once)
+          @target = x.memo([:comparison_cut, n]) { Signal.new(x.data[0...n], name: x.name) }
           yd = y.data[0...n]
           ry = Math.sqrt((yd**2).mean)
-          yd = yd * (Math.sqrt((xd**2).mean) / ry) if ry > 0
-          @target = Signal.new(xd, name: x.name)
+          yd = yd * (@target.rms / ry) if ry > 0
           @candidate = Signal.new(yd, name: y.name)
           @band = @target.band
           @weights = WEIGHTS.keys.to_h { |k| [k, (weights[k] || 0).to_f] }.freeze
           @spectral_parts, @timbre = spectral_loss(@target, @candidate)
           @spectral = @spectral_parts[:total]
           @spectral_parts = @spectral_parts.except(:total).freeze
-          @modulation = ModulationSpectrum.new(@target, band: @band).distance(ModulationSpectrum.new(@candidate, band: @band))
+          @modulation = @target.memo([:modulation_spectrum, @band]) { ModulationSpectrum.new(@target, band: @band) }.distance(ModulationSpectrum.new(@candidate, band: @band))
           @attack = Attack.distance(@target, @candidate)
         end
 
@@ -137,7 +138,7 @@ module MB
           long = x.seconds > LONG_SECONDS
           sizes = long ? LONG_SIZES : SIZES
           div = long ? 2 : 4
-          xs = shape(x.data)
+          xs = x.memo(:comparison_shaped) { shape(x.data) }
           ys = shape(y.data)
           mags = SIZES.to_h { |n|
             bins = [(@band * n / Signal::RATE).floor + 1, n / 2 + 1].min

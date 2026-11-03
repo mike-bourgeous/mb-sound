@@ -67,7 +67,10 @@ RSpec.describe(MB::Sound::Take::Reader, :aggregate_failures) do
     t = MB::Sound::Take.read(path)
     expect(t.rows.map { |r| [r.knob, r.from, r.to, r.kind] }.first(4)).to eq(take.turns.rows.map { |r| [r.knob, r.from, r.to, r.kind] }.first(4))
     expect(t.rows.last).to have_attributes(knob: :"lead/cutoff", from: 2700.0, to: 2000.0, kind: :undo)
-    expect(t.tracks).to eq(lead: File.join(MB::Sound::FitPatch.dir, 'reader_fit.mbg.rb'))
+    # (the version of the document the take's line wrote; hand-tune-2)
+    expect(t.tracks.keys).to eq([:lead])
+    expect(t.tracks[:lead]).to match(%r{\A#{Regexp.escape(MB::Sound::FitPatch.dir)}/versions/reader_fit-\h{12}\.mbg\.rb\z})
+    expect(MB::Sound::FitPatch.body_of(File.read(t.tracks[:lead]))).to eq(MB::Sound::FitPatch.body_of(File.read(File.join(MB::Sound::FitPatch.dir, 'reader_fit.mbg.rb'))))
     expect(t.values(:lead, :start)).to eq(cutoff: 1234.5, reso: 0.25)
     expect(t.values(:lead)).to eq(cutoff: 2000.0, reso: 0.4)
     expect(t.reversals.map { |b, a| [a.kind, b.kind] }).to eq([%i[gesture undo]])
@@ -125,7 +128,8 @@ RSpec.describe(MB::Sound::Take::Reader, :aggregate_failures) do
       end.main(ARGV, __FILE__)
     RUBY
     t = MB::Sound::Take.read(text)
-    expect(t.tracks).to eq(kick: File.join(MB::Sound::FitPatch.dir, 'kick_fit.mbg.rb'))
+    expect(t.tracks[:kick]).to match(%r{/versions/kick_fit-\h{12}\.mbg\.rb\z})
+    expect(t.versions[:kick].map(&:line)).to eq([0])
     expect(t.rows.map { |r| [r.knob, r.from, r.to] }).to eq([[:"kick/level", 1.0, 10**(-2 / 20.0)], [:"kick/decay", 0.47, 0.3]])
   end
 
