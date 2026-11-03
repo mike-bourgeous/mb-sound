@@ -396,8 +396,34 @@ module MB
           }
           name = as.is_a?(Symbol) ? as : :"#{track}_fit"
           @tracks[track] = File.join(FitPatch.dir, "#{name}#{GraphIO::EXTENSION}")
+          if (adopted = adopted_text(name, args[1]))
+            # (hand-tune-3: a document to start from, its params the knobs)
+            start_version(track, name, adopted[0])
+            adopted[1].each { |p, decl| seed(Session::Name.param(track, p), decl.default) }
+            return
+          end
           start_version(track, name, fit_text(name, string_of(args[1]), keywords(node)))
           params.each { |p, v| seed(Session::Name.param(track, p), v) }
+        end
+
+        # [text, params] of the fit a `tune` line adopted from a document
+        # (`tune :kick, L.inst.init, ...`, `tune :kick,
+        # 'tmp/fits/versions/x.mbg.rb'`, `tune :kick, :init`;
+        # FitPatch.adopted), or nil.
+        def adopted_text(name, node)
+          source =
+            case node
+            when Prism::StringNode
+              s = node.unescaped
+              FitPatch.document_source?(s) ? s : nil
+            when Prism::SymbolNode then Library::Audition.entry_for(node.unescaped.to_sym)
+            when Prism::CallNode then HandTune.entry_at(node.slice)
+            end
+          return nil unless source
+          return nil if source.is_a?(Library::Entry) && !(source.settings.is_a?(Hash) && source.settings[:document])
+          FitPatch.adopted(name, source)
+        rescue StandardError
+          nil
         end
 
         # `retune :kick, code, param: (lo..hi).at(v), ...` or `retune :kick,

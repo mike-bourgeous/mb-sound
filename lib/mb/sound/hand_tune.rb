@@ -246,22 +246,57 @@ module MB
       # What `tune` opened: +track+, +fit+ (FitPatch::Patch), +opened+
       # (UI::Design::Opened, or nil without a screen), +pair+
       # (Reference::Pair, or nil without a reference).
-      Opened = Data.define(:track, :fit, :opened, :pair) do
+      Opened = Data.define(:track, :fit, :opened, :pair, :instrument) do
+        def initialize(track:, fit:, opened:, pair:, instrument: nil) = super
+
         def to_s
-          [fit.to_s, opened&.to_s, pair&.to_s, "turn by ear, ab (or b) to compare, ui.note 'what you hear', take.save :tmp, 'tuned #{track}'"].compact.join("\n")
+          what = fit ? fit.to_s : "#{track} plays #{instrument&.name} (built by Ruby code, not a graph document: turn its knobs by ear; retune and refine need a fit patch)"
+          [what, opened&.to_s, pair&.to_s, "turn by ear, ab (or b) to compare, ui.note 'what you hear', take.save :tmp, 'tuned #{track}'"].compact.join("\n")
         end
 
-        def inspect = "#<HandTune::Opened #{track.inspect}: #{fit.name}#{pair ? ", reference #{pair.source}" : ''}>"
+        def inspect = "#<HandTune::Opened #{track.inspect}: #{fit ? fit.name : instrument&.name}#{pair ? ", reference #{pair.source}" : ''}>"
       end
 
-      # Loads a fitted sound for hand-tuning in one line (see
-      # HandTuneMethods#tune).  Returns an Opened.
+      # Loads a sound for hand-tuning in one line (see
+      # HandTuneMethods#tune).  +code+ is a fit's printed voice (with its
+      # numbers in +params+), or (hand-tune-3, the tuner) a graph document
+      # to start from: a library instrument (`L.inst.init`, or its name),
+      # a document's path (a fit's version), adopted as fit +as+ (its
+      # params the knobs already: FitPatch.adopt).  A library instrument
+      # that isn't a document (kits, struck and genre patches: Ruby builds
+      # them) plays as itself, its knobs to turn by ear (no retune or
+      # refine).  Returns an Opened.
       def tune(track, code, ref: nil, play: nil, as: nil, **params)
         raise ArgumentError, "tune names a track: tune :kick, code, ref: 'kick.wav', tune: (30.0..110.0).at(51.3), ..." unless track.is_a?(Symbol)
-        fit = FitPatch.save(as || :"#{track}_fit", code, params)
-        opened = UI::Design.open(track, fit, *[play].compact)
+        code = Library::Audition.entry_for(code) if code.is_a?(Symbol)
+        instrument = nil
+        fit =
+          if FitPatch.document_source?(code)
+            raise ArgumentError, "tune #{track.inspect}: a document's params are its knobs already (got #{params.keys.join(', ')})" unless params.empty?
+            if code.is_a?(Library::Entry) && !(code.settings.is_a?(Hash) && code.settings[:document])
+              instrument = code
+              nil
+            else
+              FitPatch.adopt(as || :"#{track}_fit", code)
+            end
+          else
+            FitPatch.save(as || :"#{track}_fit", code, params)
+          end
+        opened = UI::Design.open(track, fit || instrument, *[play].compact)
         pair = ref ? Reference.setup(Session.current, track, ref) : nil
-        Opened.new(track: track, fit: fit, opened: opened, pair: pair)
+        Opened.new(track: track, fit: fit, opened: opened, pair: pair, instrument: instrument)
+      end
+
+      # The library Entry head path +text+ names ("L.inst.init",
+      # "L.kit.tr909"), or nil (names resolved through the heads, never
+      # evaluated).
+      def entry_at(text)
+        words = text.to_s.split('.')
+        return nil unless words.shift == 'L' && words.length >= 2
+        head = words.shift.to_sym
+        return nil unless head == :all || Library::HEADS.key?(head)
+        e = UI::Picker.walk(head, words)
+        e.is_a?(Library::Entry) ? e : nil
       end
     end
 
