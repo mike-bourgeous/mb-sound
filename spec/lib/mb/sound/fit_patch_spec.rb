@@ -73,6 +73,26 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
       expect(text).to include('resonance: 0.25')
     end
 
+    it 'leaves literals a param cannot take as numbers, saying why, and unwraps a play line' do
+      code = 'play (synth(seq(C4).len(1/8r), voices: 1) { |v| (v.hz.saw * v.env(0.0013, 0.0555, 0.4433, 0.05, sensitivity: 1.0..1.0)).then { |u| u + u * u * -0.5743 }' \
+             '.filter(:peak, cutoff: 1605.4, quality: 3.7526, gain: 0.7968.db) })'
+      params = MB::Sound::FitPatch.declare(att: (0.0001..1.0).at(0.00132698), dec: (0.001..5.0).at(0.0555094), sus: (0.0..1.0).at(1.0),
+                                           sq: (-1.0..1.0).at(-0.57429), f: (100.0..8000.0).at(1605.43), g: (-12.0..12.0).at(0.79684))
+      text, sites, missing, skipped = MB::Sound::FitPatch.document(code, params, name: :x)
+      expect(sites.map(&:name)).to eq(%i[att dec f])
+      expect(missing).to eq(%i[sus sq g])
+      expect(skipped).to eq(sus: '1.0 is inside a Range (a setting, not a knob)', sq: '-0.5743 is inside a then block (runs while playing; params can\'t go there)',
+                            g: '0.7968 is a typed value (0.7968.db): bind it in the inspector')
+      expect(text).to include('synth(midi, voices: 1) { |v| (v.hz.saw * v.env(att, dec, 0.4433, 0.05, sensitivity: 1.0..1.0))')
+      expect(text).not_to include('play')
+    end
+
+    it 'gives a literal two params round to the closer one' do
+      params = MB::Sound::FitPatch.declare(spacing: (0.004..0.02).at(0.0085), burst: (0.002..0.03).at(0.009))
+      _, sites, = MB::Sound::FitPatch.document('synth(CLIP) { |v| v.hz.saw.lp4(0.0085 * 1e5) * v.env(0.009, 0.1, 0, 0.1) }', params, name: :x)
+      expect(sites.map { |x| [x.name, x.text] }).to eq([['spacing', '0.0085'], ['burst', '0.009']].map { |n, t| [n.to_sym, t] })
+    end
+
     it 'refuses ambiguous literals, names the code assigns, and code without a voice' do
       both = MB::Sound::FitPatch.declare(a: (0.0..1.0).at(0.25), b: (0.0..1.0).at(0.25))
       expect { MB::Sound::FitPatch.document(LEAD_CODE, both, name: :x) }.to raise_error(MB::Sound::FitPatch::Error, /0\.25 at 1:\d+ matches :a and :b/)

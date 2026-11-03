@@ -60,8 +60,9 @@ module MB
       # A written fit patch: +name+, +path+ (the document), +entry+ (a
       # Library::Entry for `track`/`design`; see #library_entry), +params+
       # ({ name => MB::Sound::Param }), +sites+ (Sites), +missing+ (param
-      # names found nowhere in the code), +text+ (the document).
-      Patch = Data.define(:name, :path, :entry, :params, :sites, :missing, :text) do
+      # names found nowhere in the code), +skipped+ ({ param => why } for
+      # those found only where a param can't go), +text+ (the document).
+      Patch = Data.define(:name, :path, :entry, :params, :sites, :missing, :skipped, :text) do
         # The Library::Entry `track :kick, fit` and `design :kick, fit` play
         # (Arrangement::InstrumentPatch takes anything answering it).
         def library_entry = entry
@@ -71,7 +72,9 @@ module MB
 
         def to_s
           knobs = params.keys.map { |k| k.to_s }.join(', ')
-          miss = missing.empty? ? '' : "; not in the code: #{missing.join(', ')} (name the number it printed instead, or bind it in the inspector)"
+          left = missing - skipped.keys
+          miss = left.empty? ? '' : "; not in the code: #{left.join(', ')} (name the number it printed instead, or bind it in the inspector)"
+          miss += "; left as numbers: #{skipped.map { |k, why| "#{k} (#{why})" }.join('; ')}" unless skipped.empty?
           "fit patch #{name}: #{params.length} knob#{'s' unless params.length == 1} (#{knobs}) in #{path}#{miss}"
         end
 
@@ -112,9 +115,12 @@ module MB
 
       # The document text for voice +code+ (console Ruby with the fit's
       # numbers as literals) with +params+ ({ name => MB::Sound::Param }:
-      # see .declare) as `param` lines.  Returns [text, sites, missing].
+      # see .declare) as `param` lines.  Returns [text, sites, missing,
+      # skipped ({ param => why its literal stays a number })].  Literals
+      # inside a Range, typed values (`4.07.db`, `12.cents`), and runtime
+      # blocks (`then`) stay numbers: those places take no nodes.
       def document(code, params, name:, description: nil, input: :midi)
-        code = code.to_s
+        code = unwrap(code.to_s)
         result = Prism.parse(code)
         raise Error, "fit_patch #{name}: the code doesn't parse: #{result.errors.first&.message}" unless result.success?
         bad = params.keys.select { |k| !k.to_s.match?(/\A[a-z_][a-z0-9_]*\z/) || VOICE_CALLS.include?(k) || k == input }
@@ -130,10 +136,15 @@ module MB
         edits << [source.location.start_offset, source.location.end_offset, input.to_s] unless source.slice == input.to_s
 
         sites = []
-        literals(result.value) do |node, key|
+        skipped = {}
+        literals(result.value) do |node, key, why|
           hits = params.select { |_, p| matches?(node, p.default) }.keys
           next if hits.empty?
-          pick = hits.include?(key) ? key : (hits.length == 1 ? hits.first : nil)
+          if why
+            hits.each { |h| skipped[h] ||= "#{node.slice} is #{why}" }
+            next
+          end
+          pick = hits.include?(key) ? key : closest(node, hits.to_h { |h| [h, params[h].default] })
           unless pick
             loc = node.location
             raise Error, "fit_patch #{name}: the literal #{node.slice} at #{loc.start_line}:#{loc.start_column + 1} matches #{hits.map(&:inspect).join(' and ')}: " \
@@ -156,7 +167,7 @@ module MB
         lines << GraphIO.inputs_line(input => :notes)
         params.each { |pname, p| lines << p.document_line(p.default) unless missing.include?(pname) }
         lines << '' << body.strip
-        [lines.join("\n") + "\n", sites.freeze, missing.freeze]
+        [lines.join("\n") + "\n", sites.freeze, missing.freeze, skipped.slice(*missing).freeze]
       end
 
       # Writes the document for +code+ and +params+ (see .document; params
@@ -168,20 +179,25 @@ module MB
         raise Error, "fit_patch takes a name for the patch (a Symbol like :kick_fit), got #{name.inspect}" unless name.to_s.match?(/\A[a-z_][a-z0-9_]*\z/)
         params = declare(params)
         raise Error, "fit_patch #{name}: give the fitted numbers as knobs (tune: (30.0..110.0).at(51.3), ...)" if params.empty?
-        text, sites, missing = document(code, params, name: name, description: description)
+        text, sites, missing, skipped = document(code, params, name: name, description: description)
         check(name, text)
         path = File.expand_path(path || File.join(dir, "#{name}#{GraphIO::EXTENSION}"))
         path += GraphIO::EXTENSION unless path.end_with?('.rb')
         FileUtils.mkdir_p(File.dirname(path))
         File.write(path, text)
         entry = Library.document_entry(path, Library.session_shelf)
-        Patch.new(name: name, path: path, entry: entry, params: params.reject { |k, _| missing.include?(k) }.freeze, sites: sites, missing: missing, text: text.freeze)
+        Patch.new(name: name, path: path, entry: entry, params: params.reject { |k, _| missing.include?(k) }.freeze, sites: sites, missing: missing,
+                  skipped: skipped, text: text.freeze)
       end
 
-      # Loads document +text+ with a one-note clip and reads a block of it;
-      # raises Error (with the text) if it doesn't load or play.
+      # Notes the check plays at once (a kit voice answers only its own
+      # notes: kick 36, snare 38, clap 39, hats 42/46; synths take any).
+      CHECK_NOTES = [36, 38, 39, 42, 46, 60].freeze
+
+      # Loads document +text+ with a clip of CHECK_NOTES and reads a block
+      # of it; raises Error (with the text) if it doesn't load or play.
       def check(name, text)
-        clip = MB::Sound.seq(36).n4
+        clip = MB::Sound.seq(CHECK_NOTES).n4
         g = MB::Sound.keeping_random_state { GraphIO.load(text, inputs: { midi: clip }) }
         g = g.first if g.is_a?(Array)
         g = g.to_a.first if g.respond_to?(:to_a) && !g.respond_to?(:sample)
@@ -190,6 +206,22 @@ module MB
         raise
       rescue StandardError, ScriptError => e
         raise Error.new("fit_patch #{name}: the document doesn't load or play: #{e.class}: #{e.message.lines.first&.strip}", document: text)
+      end
+
+      # +code+ without a `play (...)` or `bg (...)` around it (fits print
+      # console lines that play the voice).
+      def unwrap(code)
+        tree = Prism.parse(code)
+        return code unless tree.success?
+        body = tree.value.statements.body
+        return code unless body.length == 1
+        call = body[0]
+        return code unless call.is_a?(Prism::CallNode) && %i[play bg].include?(call.name) && call.receiver.nil? && call.block.nil?
+        args = call.arguments&.arguments || []
+        return code unless args.length == 1
+        a = args[0]
+        a = a.body.body.first while a.is_a?(Prism::ParenthesesNode) && a.body&.body&.length == 1
+        a.slice
       end
 
       # The node giving the voice's source in +root+ (a Prism tree): the
@@ -221,24 +253,57 @@ module MB
         out.uniq
       end
 
+      # Unit calls whose receiver is a typed value (`4.07.db`, `12.cents`):
+      # a param there would be a node, which these don't take.
+      UNIT_CALLS = %i[db dB cents hz khz ms s sec seconds second n1 n2 n4 n8 n16 n32 bars bar beats beat].freeze
+
+      # Calls whose blocks run while the graph plays (the documents' safe
+      # subset: arithmetic on the block's own arguments, no params).
+      RUNTIME_BLOCKS = %i[then map_samples].freeze
+
       # Yields each numeric literal of +node+'s tree with the keyword it is
-      # the value of (a Symbol, or nil).
-      def literals(node, key = nil, &block)
+      # the value of (a Symbol, or nil) and why it can't be a param (nil, or
+      # words: inside a Range, a typed value, inside a runtime block).
+      def literals(node, key = nil, why = nil, &block)
         case node
         when Prism::FloatNode, Prism::IntegerNode
-          yield node, key
+          yield node, key, why
         when Prism::AssocNode
           k = node.key.is_a?(Prism::SymbolNode) ? node.key.unescaped.to_sym : nil
-          literals(node.key, nil, &block)
-          literals(node.value, k, &block)
+          literals(node.key, nil, why, &block)
+          literals(node.value, k, why, &block)
+        when Prism::RangeNode
+          node.compact_child_nodes.each { |c| literals(c, nil, why || 'inside a Range (a setting, not a knob)', &block) }
+        when Prism::CallNode
+          if node.receiver && UNIT_CALLS.include?(node.name) && node.arguments.nil? &&
+             (node.receiver.is_a?(Prism::FloatNode) || node.receiver.is_a?(Prism::IntegerNode))
+            literals(node.receiver, key, why || "a typed value (#{node.slice}): bind it in the inspector", &block)
+          else
+            literals(node.receiver, nil, why, &block) if node.receiver
+            node.arguments&.compact_child_nodes&.each { |c| literals(c, nil, why, &block) }
+            if node.block
+              w = RUNTIME_BLOCKS.include?(node.name) ? "inside a #{node.name} block (runs while playing; params can't go there)" : nil
+              literals(node.block, nil, why || w, &block)
+            end
+          end
         else
-          node.compact_child_nodes.each { |c| literals(c, nil, &block) }
+          node.compact_child_nodes.each { |c| literals(c, nil, why, &block) }
         end
       end
 
+      # The one of +hits+ ({ name => value }) whose value is closest to
+      # literal +node+'s, or nil when two are as close.
+      def closest(node, hits)
+        lit = node.value.to_f
+        best = hits.min_by(2) { |_, v| (v - lit).abs }
+        return best[0][0] if best.length == 1
+        (best[0][1] - lit).abs + 1e-12 < (best[1][1] - lit).abs ? best[0][0] : nil
+      end
+
       # True if literal +node+ prints +value+ at its own precision: a
-      # literal with 3 or more decimals is any value rounding to it, a
-      # shorter one the value to 6 places.
+      # literal with 3 or more decimals or 4 or more significant digits
+      # (2477.1) is any value rounding to it, a shorter one the value to 6
+      # places.
       def matches?(node, value)
         case node
         when Prism::IntegerNode
@@ -252,7 +317,8 @@ module MB
             # trailing zeros: a short literal is the value to 6 places, a
             # longer one any value rounding to it; 0.25 doesn't print 0.3)
             d = m[1].length
-            d >= 3 ? (value - lit).abs <= 0.5 * 10.0**-d * (1 + 1e-9) : (value.round(6) - lit).abs <= 1e-12
+            sig = text.delete('-').sub(/\A0*\.?0*/, '').delete('.').length
+            d >= 3 || sig >= 4 ? (value - lit).abs <= 0.5 * 10.0**-d * (1 + 1e-9) : (value.round(6) - lit).abs <= 1e-12
           else
             (value - lit).abs <= 1e-9 * [value.abs, lit.abs].max
           end
