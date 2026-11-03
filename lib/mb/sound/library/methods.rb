@@ -92,7 +92,17 @@ module MB
       #     audition L.fx.reverb.hall
       #     audition :tr909
       #     audition off
-      def audition(entry = :off)
+      #
+      # A sound file or a Sample plays once at Audition::SOUND_LUFS (-20
+      # LUFS, the instruments' level; +lufs:+ another), a graph document's
+      # path as its instrument, and +note:+ plays an instrument or kit on
+      # that note, four quarter notes (hand-tune-3: the tuner's
+      # references and synths):
+      #
+      #     audition 'refs/kick.wav'
+      #     audition L.inst.acid, note: C2
+      #     audition 'tmp/fits/kick_fit.mbg.rb', note: 36
+      def audition(entry = :off, note: nil, lufs: nil)
         s = Session.current
         playing = s.players.keys & %i[audition audition/cue]
         if entry.nil? || entry == :off || entry == false
@@ -103,8 +113,17 @@ module MB
           return out
         end
 
-        e = Library::Audition.entry_for(entry)
-        g = Playable.graph(Library::Audition.playable(e))
+        if entry.is_a?(Sample) || ((entry.is_a?(String) || entry.is_a?(Pathname)) && !FitPatch.document_source?(entry.to_s))
+          raise ArgumentError, 'audition: note: is for instruments (a sound plays as it is)' if note
+          g, = Library::Audition.sound(entry, lufs: lufs)
+          path = entry.is_a?(Sample) ? (entry.name || 'a Sample').to_s : entry.to_s
+          e = nil
+        else
+          raise ArgumentError, 'audition: lufs: is for sounds (instruments play at their own level)' if lufs
+          e = entry.is_a?(String) || entry.is_a?(Pathname) ? Library.document_entry(File.expand_path(entry.to_s), Library.session_shelf) : Library::Audition.entry_for(entry)
+          path = e.location && e.shelf == Library.session_shelf ? e.location.to_s : e.head_path
+          g = Playable.graph(note ? Library::Audition.on_note(e, note, label: path) : Library::Audition.playable(e))
+        end
         if s.cue_heard?
           stop(:audition) if playing.include?(:audition)
           change = cue(:audition, g, on: :beat)
@@ -116,7 +135,7 @@ module MB
           change = bg(:audition, quiet, on: :beat)
           where = :main
         end
-        Library::Audition::Started.new(path: e.head_path, what: g.description.delete_prefix("#{e.head_path} "), where: where, change: change)
+        Library::Audition::Started.new(path: path, what: g.description.delete_prefix("#{path} "), where: where, change: change)
       end
 
       # Copies preset +name+ (an Entry, or a name found first on the

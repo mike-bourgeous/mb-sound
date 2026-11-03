@@ -95,6 +95,41 @@ module MB
         rescue KeyError => e
           raise ArgumentError, "audition #{what.inspect}: #{e.message}"
         end
+
+        # The loudness a sound's audition plays at (`audition 'kick.wav'`;
+        # hand-tune-3, the tuner's references): the library instruments'
+        # level on their demo phrases (Struck::LEVELS, the init voice).
+        SOUND_LUFS = -20.0
+
+        # Quarter notes `audition entry, note: C2` plays (one bar at 4/4).
+        NOTE_REPEATS = 4
+
+        # [a Playable::Graph playing sound +source+ (a file path or a
+        # Sample) once, its gain in dB]: the gain brings its integrated
+        # loudness over its first seconds (Reference::MATCH_SECONDS at
+        # most) to +lufs+ (SOUND_LUFS by default; a silent sound plays at
+        # unity).
+        def sound(source, lufs: nil)
+          sample = source.is_a?(Sample) ? source : Sample[source.to_s]
+          secs = sample.seconds.to_f.clamp(Reference::MIN_SECONDS, Reference::MATCH_SECONDS)
+          l = Reference.lufs(sample.to_a.map { |c| c[0...(secs * sample.sample_rate).round] }, sample.sample_rate)
+          db = l.finite? ? ((lufs || SOUND_LUFS) - l).clamp(-60.0, 24.0) : 0.0
+          name = source.is_a?(Sample) ? (sample.name || 'a Sample').to_s : File.basename(source.to_s)
+          g = Playable.graph(sample.node)
+          gain = Decibels.new(db).to_f
+          what = l.finite? ? "#{name} once at #{format('%.1f', lufs || SOUND_LUFS)} LUFS (#{format('%+.1f', db)} dB)" : "#{name} once (silent over its first #{secs.round(2)} s)"
+          [Playable::Graph.new(nodes: g.nodes.map { |n| n * gain }, description: what, ends: true, note: "a sound: audition 'file.wav', lufs: -18"), db]
+        end
+
+        # A Playable::Graph of instrument or kit +entry+ playing +note+ (a
+        # Note or MIDI number) NOTE_REPEATS times as quarter notes, ending
+        # after them (the tuner auditions a synth on its reference's note).
+        def on_note(entry, note, label: nil)
+          n = note.is_a?(Note) ? note : Note.new(note.to_i)
+          clip = MB::Sound.seq(*Array.new(NOTE_REPEATS, n.number)).n4
+          path = label || (entry.head_path rescue entry.name.to_s)
+          Playable.wrap(entry.(clip), "#{path} playing #{n.name} #{NOTE_REPEATS} times", true, "an instrument on one note: audition #{path}, note: #{n.name}")
+        end
       end
     end
   end

@@ -133,6 +133,17 @@ module MB
           nil
         end
 
+        # The Samples read from files in this process and still in use
+        # (the file cache's live entries; the tuner lists them as
+        # references, hand-tune-3).
+        def loaded
+          (@cache || {}).values.filter_map do |w|
+            w.weakref_alive? ? w.__getobj__ : nil
+          rescue WeakRef::RefError
+            nil
+          end.uniq
+        end
+
         def from_file_uncached(path, **options)
           # (graph documents: the file inside the document's directory)
           real = defined?(GraphIO::FileGuard) ? GraphIO::FileGuard.resolve(path, 'reading a sample') : path

@@ -284,6 +284,7 @@ module MB
           end
         opened = UI::Design.open(track, fit || instrument, *[play].compact)
         pair = ref ? Reference.setup(Session.current, track, ref) : nil
+        Wizard.current&.note_tuned(track) # (the tuner's step 3: its line ran)
         Opened.new(track: track, fit: fit, opened: opened, pair: pair, instrument: instrument)
       end
 
@@ -335,3 +336,4 @@ require_relative 'hand_tune/search'
 require_relative 'hand_tune/refine_job'
 require_relative 'hand_tune/worker'
 require_relative 'hand_tune/refine'
+require_relative 'hand_tune/wizard'
