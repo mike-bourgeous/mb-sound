@@ -7,10 +7,12 @@ module MB
       # A Ruby process that runs refine jobs (hand-tune-2), so an optimizer
       # pass doesn't compete with the live render thread for the GVL: the
       # console only reads its progress lines (blocking reads, off the
-      # GVL).  Started when no Session renders (bin/sound.rb at startup,
-      # Worker.start; starting a process from the console's big heap forks
-      # with the GVL held: audio-safety-2), it loads mb-sound once and
-      # waits.  It runs at a lower CPU priority (nice 10) than the console.
+      # GVL).  Started on demand (the console's first tune, Worker.prepare,
+      # or refine, Worker.start) through the process starter (Starter:
+      # starting a process from the console's big heap forks with the GVL
+      # held, audio-safety-2), or directly while nothing plays where no
+      # starter runs, it loads mb-sound once (about 2 s, 100 MB) and waits.
+      # It runs at a lower CPU priority (nice 10) than the console.
       #
       # Protocol: JSON lines.  To the worker: {"job": RefineJob data},
       # {"stop": true} (ends the job, keeping its best), {"quit": true}.
@@ -29,27 +31,32 @@ module MB
             @current
           end
 
-          # Starts the console's worker unless it runs.  Refuses (an
-          # ArgumentError) while a Session renders, unless +force+.  Returns
-          # the Worker.
+          # Starts the console's worker unless it runs.  Through the
+          # process starter when one runs (bin/sound.rb), at any time;
+          # without one, it refuses (an ArgumentError) while a Session
+          # renders, unless +force+.  Returns the Worker.
           def start(force: false)
             return current if current
-            if !force && Worker.live_render?
-              raise ArgumentError, 'refine: its worker process starts only while nothing plays (starting a process holds the GVL; ' \
-                                   'bin/sound.rb starts it before playing: stop, then refine again, or run it in-process with mode: :here)'
+            if !force && Starter.current.nil? && Worker.live_render?
+              raise ArgumentError, 'refine: its worker process starts only while nothing plays when no process starter runs ' \
+                                   '(starting a process here holds the GVL; bin/sound.rb runs one): stop, then refine again, ' \
+                                   'or run it in-process with mode: :here'
             end
             @current = new
           end
 
-          # Starts the console's worker at startup (bin/sound.rb, before
-          # anything plays), unless $MB_SOUND_REFINE_WORKER is 0.  It loads
-          # mb-sound in its own process (about 2 s, 100 MB) and waits.
+          # Starts the console's worker ahead of a refine (the console's
+          # tune), so the first refine doesn't wait for it to load, when
+          # that's safe: through the process starter, or while nothing
+          # plays.  Not when $MB_SOUND_REFINE_WORKER is 0 (the specs).
           # Returns the Worker, or nil.
-          def prestart
+          def prepare
             return nil if ENV['MB_SOUND_REFINE_WORKER'] == '0'
+            return current if current
+            return nil if Starter.current.nil? && Worker.live_render?
             start
           rescue StandardError => e
-            warn "The refine worker didn't start (#{e.message}); refine will start it while nothing plays"
+            warn "The refine worker didn't start (#{e.message}); refine will start it"
             nil
           end
 
@@ -105,9 +112,13 @@ module MB
           env = { 'BUNDLE_GEMFILE' => gemfile, 'MB_SOUND_YJIT' => '1', 'RUBYOPT' => ENV['RUBYOPT'].to_s }
           r_in, w_in = IO.pipe
           r_out, w_out = IO.pipe
-          @pid = Process.spawn(env, RbConfig.ruby, '-I', lib, '-e', code, in: r_in, out: w_out)
-          r_in.close
-          w_out.close
+          begin
+            @child = Starter.spawn(env, RbConfig.ruby, '-I', lib, '-e', code, in: r_in, out: w_out)
+          ensure
+            r_in.close
+            w_out.close
+          end
+          @pid = @child.pid
           @in = w_in
           @out = r_out
           @in.sync = true
@@ -120,10 +131,7 @@ module MB
 
         # True while the process runs.
         def alive?
-          return false unless @pid
-          Process.waitpid(@pid, Process::WNOHANG).nil?
-        rescue Errno::ECHILD
-          false
+          @pid && @child.alive? ? true : false
         end
 
         # Waits up to +timeout+ seconds for the worker to have loaded
@@ -160,11 +168,9 @@ module MB
         def close
           send_line(quit: true) rescue nil
           @in&.close rescue nil
-          if @pid
-            unless (Process.waitpid(@pid, Process::WNOHANG) rescue true)
-              Process.kill(:TERM, @pid) rescue nil
-              Process.waitpid(@pid) rescue nil
-            end
+          if @pid && !@child.wait(0.2)
+            @child.kill(:TERM)
+            @child.wait(5)
           end
           @pid = nil
           ExitClose.unregister(self)

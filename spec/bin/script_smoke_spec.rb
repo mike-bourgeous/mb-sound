@@ -298,6 +298,21 @@ RSpec.describe('script runner scripts', :smoke) do
       expect(marks.count { |m| m['cause'] == m['label'] }).to be >= 2
       expect(File.exist?(json.sub(/\.json\z/, '.csv'))).to eq(true)
     end
+
+    # (spawner-1: ffmpeg decodes while playing through the process starter,
+    # the native-Mac measurement's command)
+    spawn_json = File.join(out_dir, 'smoke_dropouts_spawn.json')
+    runs.add('dropout_probe spawns', "bin/dropout_probe.rb -q --song tempo_song --seconds 4.5 --inject spawn --every 1 --no-system -J #{spawn_json.shellescape}",
+      env: shared_env.merge('OUTPUT_TYPE' => 'device', 'AUDIO_BACKEND' => 'null'))
+
+    it 'starts processes through the process starter while playing (--inject spawn)', smoke_run: 'dropout_probe spawns' do
+      text, status = runs.take('dropout_probe spawns')
+      expect(status).to be_success, text
+      expect_script_warnings(/No audio dropouts for [\d.]+ s: lowering/, /Audio dropout: raising the output queue/)
+      data = JSON.parse(File.read(spawn_json))
+      expect(data['marks'].map { |m| m['label'] }.uniq).to eq(['spawn'])
+      expect(data['marks'].length).to be >= 3
+    end
   end
 
   # One song rendered to its end: half-bar renders never reach end-of-song

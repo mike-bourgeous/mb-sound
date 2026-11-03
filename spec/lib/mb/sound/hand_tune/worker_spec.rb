@@ -1,12 +1,13 @@
-# refine's worker process (hand-tune-2): started while nothing plays (a
-# process start holds the GVL), it runs the search in its own process, so
-# the console only waits on its progress lines.  Measured live with the
+# refine's worker process (hand-tune-2): started on demand through the
+# process starter (spawner-1; without one, only while nothing plays: a
+# process start from the console holds the GVL), it runs the search in its
+# own process, so the console only waits on its progress lines.  Measured live with the
 # dropout probe (design/notes/hand_tune.md, Refine): the render thread's
 # GVL waits stayed at the idle baseline with the worker, against about
 # 1400 waits of up to 20 ms in 30 s with the search in-process.  Here: the
-# same proposal as in-process, the refusal to start while a render thread
-# runs, and the console process's CPU while a prestarted worker refines
-# beside a playing Session.
+# same proposal as in-process, starting while a render thread runs through
+# the starter (and the refusal without one), and the console process's CPU
+# while a worker refines beside a playing Session.
 RSpec.describe(MB::Sound::HandTune::Worker, :aggregate_failures) do
   WK_CODE = 'synth(CLIP, voices: 1) { |v| v.hz.saw.lp4(1234.5, resonance: 0.25) * v.amp_env(0.01, 0.2, 0.5, 0.1) }'.freeze
 
@@ -30,7 +31,7 @@ RSpec.describe(MB::Sound::HandTune::Worker, :aggregate_failures) do
     end
   end
 
-  it 'finds what an in-process search finds, and refuses to start while a render thread runs' do
+  it 'finds what an in-process search finds; starts while a render thread runs only through the process starter' do
     s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1, realtime: false)
     j = job(s, evals: 12)
     here = MB::Sound::HandTune.refine_run(j)
@@ -49,7 +50,22 @@ RSpec.describe(MB::Sound::HandTune::Worker, :aggregate_failures) do
     MB::Sound.use_output(MB::Sound::NullOutput.new(channels: 2, buffer_size: 800, sleep: :virtual))
     MB::Sound.bg(:try, 220.hz.sine.at(-30.db))
     Thread.pass until MB::Sound::Session.default.running?
-    expect { described_class.start }.to raise_error(ArgumentError, /starts only while nothing plays/)
+    expect(MB::Sound::Starter.current).not_to be_nil # (spec_helper, as bin/sound.rb)
+    spawned = MB::Sound::Starter.current.spawned
+    @worker = described_class.start
+    expect(MB::Sound::Starter.current.spawned).to eq(spawned + 1)
+    expect(@worker.wait_ready).to eq(true)
+    expect(SpawnGuard.take).to eq([])
+    @worker.close
+    expect(@worker.alive?).to eq(false)
+
+    old = MB::Sound::Starter.use(nil)
+    begin
+      expect { described_class.start }.to raise_error(ArgumentError, /starts only while nothing plays when no process starter runs/)
+      expect(described_class.prepare).to be_nil
+    ensure
+      MB::Sound::Starter.use(old)
+    end
     expect(SpawnGuard.take).to eq([])
   end
 
@@ -71,8 +87,18 @@ RSpec.describe(MB::Sound::HandTune::Worker, :aggregate_failures) do
     expect(SpawnGuard.take).to eq([])
   end
 
-  it 'is not started at startup with MB_SOUND_REFINE_WORKER=0' do
+  it 'is started ahead by the console\'s tune unless MB_SOUND_REFINE_WORKER=0' do
     expect(ENV['MB_SOUND_REFINE_WORKER']).to eq('0') # (spec_helper)
-    expect(described_class.prestart).to be_nil
+    expect(described_class.prepare).to be_nil
+    expect(described_class.current).to be_nil
+    saved = ENV.delete('MB_SOUND_REFINE_WORKER')
+    begin
+      @worker = described_class.prepare
+      expect(@worker).to be_a(described_class)
+      expect(described_class.prepare).to equal(@worker) # (one worker)
+    ensure
+      ENV['MB_SOUND_REFINE_WORKER'] = saved
+    end
+    expect(@worker.wait_ready).to eq(true)
   end
 end

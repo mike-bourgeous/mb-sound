@@ -466,8 +466,12 @@ module MB
 
           png = "#{dot.path}.png"
           File.write(dot, self.graphviz(include_tees: include_tees, expand_channels: expand_channels))
-          system("dot -Tpng:cairo #{dot.path.shellescape} -o #{png.shellescape}")
-          system("open #{png.shellescape}")
+          # (through the process starter: no fork of the console while audio plays)
+          [['dot', '-Tpng:cairo', dot.path, '-o', png], ['open', png]].each do |cmd|
+            Starter.spawn(*cmd).wait
+          rescue SystemCallError => e
+            warn "#{cmd.first}: #{e.message}"
+          end
 
           png
         end

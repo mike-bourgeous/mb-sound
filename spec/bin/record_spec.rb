@@ -17,7 +17,9 @@ RSpec.describe('bin/record.rb') do
     end
     text = -> { lock.synchronize { vt.text } }
     d = MB::U.clock_now + 30
-    sleep 0.05 until text.call.include?('SCOPE') || MB::U.clock_now > d
+    # (all three: a frame arrives in several reads, and a partial one can
+    # show SCOPE before LUFS; spec:quick under load, spawner-1)
+    sleep 0.05 until %w[MASTER SCOPE LUFS].all? { |word| text.call.include?(word) } || MB::U.clock_now > d
     expect(text.call).to include('MASTER', 'SCOPE', 'LUFS')
     w.write("\x03")
     _, status = Process.wait2(pid)

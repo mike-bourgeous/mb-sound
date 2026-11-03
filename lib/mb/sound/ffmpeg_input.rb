@@ -26,12 +26,13 @@ module MB
       # +audio_only+ is true); and :format, containing a Hash describing the
       # file as a whole.
       def self.parse_info(filename, format: nil, audio_only: true)
-        fnesc = filename.shellescape
-
-        format_opt = format ? "-f #{format.shellescape}" : ''
-        audio_opt = audio_only ? '-select_streams a' : ''
-        raw_info = `ffprobe -loglevel 8 -print_format json -show_format -show_streams #{audio_opt} #{format_opt} #{fnesc}`
-        raise "ffprobe failed for #{filename.inspect}: #{$?}\n\t#{raw_info}" unless $?.success?
+        cmd = ['ffprobe', '-loglevel', '8', '-print_format', 'json', '-show_format', '-show_streams']
+        cmd.push('-select_streams', 'a') if audio_only
+        cmd.push('-f', format.to_s) if format
+        cmd << filename.to_s
+        # (through the process starter: no fork of the console while audio plays)
+        raw_info, _, status = Starter.capture(*cmd, err: nil)
+        raise "ffprobe failed for #{filename.inspect}: #{status}\n\t#{raw_info}" unless status.success? || (status.unknown? && !raw_info.empty?)
 
         convert_values(JSON.parse(raw_info, symbolize_names: true)).tap { |h|
           h[:streams]&.sort_by! { |s| s[:index] || 0 }
@@ -185,6 +186,8 @@ module MB
       def close
         super.tap { |result|
           # TODO: capture ffmpeg output for the error message
+          # (an unknown status: the process starter died while ffmpeg ran)
+          next if result.nil? || result.unknown?
           unless result.success? || result.exitstatus == EMPIRICAL_EPIPE_STATUS
             raise "Reading from #{@filename} failed with status #{result.exitstatus}: #{result}"
           end
