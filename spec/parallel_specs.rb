@@ -194,7 +194,9 @@ module ParallelSpecs
       json = File.join(OUT_DIR, "#{i}.json")
       env = { 'MB_SOUND_WARNINGS_REPORT' => File.join(OUT_DIR, "#{i}.warnings.json"), 'MB_SOUND_RSS_REPORT' => File.join(OUT_DIR, "#{i}.rss.json"),
               'MB_SOUND_TRANSPORT_REPORT' => File.join(OUT_DIR, "#{i}.transport.json") }
-      Process.spawn(env, 'bundle', 'exec', 'rspec', '--format', 'progress', '--format', 'json', '--out', json, *extra_args, *group,
+      # (SafeJsonFormatter: a non-UTF-8 string can't lose the report)
+      Process.spawn(env, 'bundle', 'exec', 'rspec', '--require', './spec/support/safe_json_formatter.rb',
+                    '--format', 'progress', '--format', 'SafeJsonFormatter', '--out', json, *extra_args, *group,
                     out: log, err: [:child, :out], chdir: ROOT)
     end
     statuses = pids.map { |pid| Process.wait2(pid).last }
