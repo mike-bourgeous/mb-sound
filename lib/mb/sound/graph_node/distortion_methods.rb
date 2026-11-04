@@ -76,6 +76,42 @@ module MB
         end
         alias ashape_curve aease
 
+        # Shapes every sample through a transfer curve drawn in dB (DbShaper).
+        # Input level to output level, the sign kept (after Sonic Foundry's
+        # DirectX Distortion): points as for #compand
+        # (`-60.db => -30.db`, a Hash or [input, output(, shape)] rows; bare
+        # numbers are linear gains), joined by straight lines in dB
+        # (+interpolation+ :linear, the default) or monotone cubics
+        # (:cubic).  Unlike #compand the curve works on each sample, not a
+        # smoothed level: it distorts.  Outputs may fall as inputs rise
+        # (fold-back).  A Symbol is a preset (`shape_db(:fuzz)`; DbShaper
+        # presets :soft_knee (the default), :fuzz, :fold_back, :gate,
+        # :asymmetric; `L.fx.shape_db`), with the other options over it.
+        #
+        # +negative+ is :mirror (default: negative samples mirror the
+        # positive curve) or points of their own.  +below+ says what happens
+        # under the first point: :line (continue its line, as #compand does),
+        # :unity (slope 1 from the first point), or :silence.  Above the
+        # last point the last line continues (inputs over full scale keep
+        # following it).  +mix+ (0..1) is the shaped share, phase-aligned.
+        #
+        # Antialiased like #softclip (half a sample of delay; closed-form
+        # ADAA of the power laws that dB lines are); #ashape_db is the exact
+        # version for control signals.
+        #
+        #     play 110.hz.saw.at(-6.db).shape_db(-84.db => -60.db, -48.db => -18.db, 0.db => -6.db)   # a dense fuzz
+        #     play 110.hz.saw.shape_db(:fold_back, mix: 0.5)
+        #     play 220.hz.triangle.shape_db(-40.db => -40.db, 0.db => -10.db, negative: { -40.db => -40.db, -10.db => -10.db, 0.db => -10.db })
+        def shape_db(points = nil, negative: nil, interpolation: nil, below: nil, mix: nil, antialias: true, **more_points)
+          DbShaper.build(self, points, more_points, negative: negative, interpolation: interpolation, below: below, mix: mix, antialias: antialias)
+        end
+
+        # The plain (exact, aliasing) version of #shape_db, for control
+        # signals.
+        def ashape_db(points = nil, **options)
+          shape_db(points, **options, antialias: false)
+        end
+
         # Adds a quantizer to the node graph.  Values will be rounded to the
         # nearest multiple of +increment+.  To quantize to a given number of
         # bits, use e.g. `5.bits`.  An +increment+ of zero means no quantization.
