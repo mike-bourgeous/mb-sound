@@ -254,6 +254,10 @@ module GraphSweep
       # Shapers
       ['shapers', ->(c) { c.sig.softclip + c.sig.clip(-0.3, 0.3) + c.sig.quantize(0.1) + c.sig.asoftclip + c.sig.aclip(-0.5, 0.2) + c.sig.aquantize(0.2) }],
       ['ease (CurveShaper)', ->(c) { c.sig.ease(:elastic) + c.sig.aease(:smoothstep) + c.sig.ease(:bounce, edges: :mirror) }],
+      ['shape_db (DbShaper)', ->(c) {
+        c.sig.shape_db(:fuzz) + c.sig.ashape_db(:fold_back, mix: 0.5) + c.sig.shape_db(:asymmetric, interpolation: :linear) +
+          c.sig.shape_db(-60.db => -40.db, -20.db => -12.db, 0.db => -6.db, below: :silence, interpolation: :cubic)
+      }],
       ['Quantize node', ->(c) { c.sig.quantize(c.mod(0.01, 0.2)) }],
       ['formant (Formant) constant and morphing', ->(c) {
         c.sig.formant(:a) + c.sig.formant(:a, :e, [[300, 0.db, 50], [900, -6.db, 60], [2500, -12.db, 100], [3300, -20.db, 120], [4000, -30.db, 150]], morph: c.mod(0, 1), shift: c.mod(-5, 5, 3), width: c.mod(0.5, 1.5, 2), voice: :soprano)

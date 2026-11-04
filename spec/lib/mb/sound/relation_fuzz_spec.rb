@@ -51,7 +51,7 @@ RSpec.describe('relation fuzzing', :check_shared) do
       expect(err.message).to match(/complex|real/), "#{code}: #{err.message}"
       [e.kind, :error]
     end
-    expect(results.to_h.select { |_, v| v == :error }.keys).to contain_exactly(:clip, :feedback, :ease, :sample_hold)
+    expect(results.to_h.select { |_, v| v == :error }.keys).to contain_exactly(:clip, :feedback, :ease, :sample_hold, :shape_db)
   end
 
   # fix-batch-1102b: seed 768893 drew kit-live-1's moving-knob kit factory
