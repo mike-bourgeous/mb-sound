@@ -79,7 +79,9 @@ hl()
 
 if [[ $build = 1 ]]; then
 	hl "Building"
-	docker build . -f Dockerfile -t $APPNAME \
+	# (from the repo, not the current directory: run from elsewhere, `.` built
+	# the wrong context; mb-landscape's note, 2026-11-04)
+	docker build "$REPO_DIR" -f "$REPO_DIR/Dockerfile" -t $APPNAME \
 		--build-arg GIT_USER_NAME="$(git -C "$REPO_DIR" config user.name || true)" \
 		--build-arg GIT_USER_EMAIL="$(git -C "$REPO_DIR" config user.email || true)"
 	recreate=1
