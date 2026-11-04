@@ -168,12 +168,18 @@ module MB
         `tween([100.hz, 5000.hz, 100.hz], 2.bars)` takes 4 bars to come
         back down, then (looping) takes 2 more back to its first value;
         `tween([100.hz, 5000.hz], 2.bars)` is up and down in 4 bars.
+        `curve:` may be a list, one per step, cycling like the steps
+        (breakpoint automation like ACID's envelopes: `:hold :linear
+        :fast :slow :smooth :sharp`).
       TEXT
       commands :adsr, :env, :amp_env, :filter_env, :fm_env, :sq80_env, :tween, :bounce_hits
       dsl :smooth, :ease
       note :envelopes, :curves
       example 'a plucked note' do
         bg :try, 220.hz.saw.at(-12.db).lp4(300 + env([[3000, 0.002], [0, 0.4, 40]])) * env([[1, 0.002], [0, 0.8, 60]])
+      end
+      example 'a curve per step: up fast, hold and drop, then back along :sharp' do
+        bg :try, 55.hz.saw.at(-16.db).lp4(tween([200.hz, 3000.hz, 600.hz], 2.beats, curve: [:fast, :hold, :sharp])).until(2.bars)
       end
     end
 
