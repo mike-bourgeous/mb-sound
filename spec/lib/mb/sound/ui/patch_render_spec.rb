@@ -232,6 +232,25 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       expect(out.captured).to eq(other_out.captured)
     end
 
+    # (fix-flaky-1104: note_record_spec under load showed "the voice reads
+    # nodes made outside it" for good: a first job without the session's
+    # knobs built a copy that failed, and the cache kept that copy for the
+    # jobs with the knobs)
+    it 'builds the copy again when the knobs it can read change, never keeping a copy that failed without them' do
+      @session, = bass_session
+      @cache = {}
+      src = source_of(@session)
+      bare = pr.render(job_for(@session, 1, source: src, knobs: []), cache: @cache)
+      expect(bare.error).to include('reads nodes made outside it') # (the live :cut knob, with no copy of it)
+      full = pr.render(job_for(@session, 2, source: src), cache: @cache)
+      expect(full.error).to be_nil
+      expect(full.peak).to be_between(-30, 6)
+      copy = @cache[:copy]
+      turned = pr.render(job_for(@session, 3, source: src, knobs: @session.knobs.map { |n, k| [n, n == :cut ? 300.0 : k.value, k.spec] }), cache: @cache)
+      expect(turned.error).to be_nil
+      expect(@cache[:copy]).to equal(copy) # (a knob value: no rebuild)
+    end
+
     it 'shows one settled cycle from a rising zero crossing, or a few cycles when detuned copies never repeat' do
       @session, = bass_session
       @cache = {}

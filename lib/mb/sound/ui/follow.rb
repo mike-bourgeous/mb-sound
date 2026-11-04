@@ -54,8 +54,7 @@ module MB
           @polled_at = now
           @polled_target = target
           slow, refs = @poll.call(@feed.needs)
-          @feed.slow = slow
-          @feed.knob_refs = refs
+          @feed.polled(slow, refs)
         rescue => e
           warn "UI poll: #{e.class}: #{e.message}" unless @poll_warned
           @poll_warned = true

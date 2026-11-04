@@ -21,7 +21,13 @@ unregisters the port of an active client, which races libjack's notification
 thread (a spec process segfaulted in `HandleLatencyCallback`, 2026-10-12;
 JACK2 issue #216).  It reads RtMidi's private `JackMidiData`, so after an
 update check that the struct still has `client` and `port` (the build fails
-if not).
+if not).  It also wraps RtMidi's `jack_activate` and `jack_client_close`
+(macros around the `#include`, so `RtMidi.cpp` stays unmodified): the
+activation registers a `jack_on_info_shutdown` callback, and a client whose
+server dropped it is never deactivated or closed (libjack deletes a
+process's clients at its next `jack_client_open` once one lost the server;
+fix-flaky-1104).  After an update, check that RtMidi's JACK code still calls
+`jack_activate` and `jack_client_close` directly.
 
 ## Updating RtMidi manually
 

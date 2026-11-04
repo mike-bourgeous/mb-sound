@@ -170,10 +170,16 @@ module MB
         # +input+, +knobs+ (frozen [name, value, Knob::Spec] rows), +seconds+.
         Job = Data.define(:seq, :key, :source, :input, :knobs, :seconds) do
           # What decides whether a Copy can render this job: the voice block,
-          # the note, and the session's settings (not knob values).
+          # the note, the session's settings, and the names of its knobs (the
+          # copy's scope has a copy of each, which the copy's knob readers
+          # read; not their values).  (fix-flaky-1104: a first job built
+          # from a UI snapshot without the knobs failed to copy a reader of
+          # a live knob, and that failed copy stayed cached for the jobs
+          # that had them)
           def copy_key
             s = source
-            [s.synth&.voice_block.object_id, s.synth&.seed, input.note, s.bpm, s.bar_length, s.key, s.tuning.object_id, s.channels].freeze
+            [s.synth&.voice_block.object_id, s.synth&.seed, input.note, s.bpm, s.bar_length, s.key, s.tuning.object_id, s.channels,
+             knobs.map(&:first)].freeze
           end
         end
 

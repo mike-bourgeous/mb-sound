@@ -143,14 +143,17 @@ module MB
       # A child of the starter (killed through it, so a pid reused after it
       # ended is never signaled).
       class StarterChild < Child
-        attr_reader :id
+        attr_reader :id, :argv
 
-        def initialize(starter, id)
+        def initialize(starter, id, argv = nil)
           super()
           @starter = starter
           @id = id
+          @argv = argv
           @reply = Queue.new
         end
+
+        def inspect = "#<#{self.class.name} id #{@id} pid #{@pid.inspect} #{@argv.inspect}#{exited? ? ' ended' : ''}>"
 
         def kill(signal = :TERM)
           return if exited?
@@ -378,6 +381,13 @@ module MB
       # Number of children still running.
       def children = @lock.synchronize { @children.length }
 
+      # The children still running, as [{ id:, pid:, argv: }] (pid nil
+      # while a spawn waits for its reply; argv nil for a ping), for
+      # diagnostics.
+      def child_list
+        @lock.synchronize { @children.values }.map { |c| { id: c.id, pid: c.pid, argv: c.argv } }
+      end
+
       # Asks the starter to start [env, args] (see Starter.spawn for
       # +opts+).  Returns a StarterChild; raises Dead if the starter is
       # gone, and the same SystemCallError as Process.spawn if the command
@@ -391,7 +401,7 @@ module MB
         @lock.synchronize do
           raise Dead, 'process starter is closed' if @dead
           @serial += 1
-          child = StarterChild.new(self, @serial)
+          child = StarterChild.new(self, @serial, args)
           @children[@serial] = child
         end
         dir = chdir || (Dir.pwd rescue nil)
@@ -416,8 +426,7 @@ module MB
           @lock.synchronize { @children.delete(child.id) }
           raise starter_error(reply)
         end
-        child.started(reply['pid'])
-        @spawned += 1
+        @lock.synchronize { @spawned += 1 }
         child
       ensure
         opened&.each { |io| io.close rescue nil }
@@ -510,6 +519,10 @@ module MB
             child&.finish(Status.new(child.pid, msg['status'], msg['signal']))
           elsif (id = msg['id'])
             child = @lock.synchronize { @children[id] }
+            # (the pid set here, before the exit line that may follow at
+            # once: set by the spawning thread after it woke, a quick
+            # child's Status had no pid, 51 of 1200 in 30 bursts of 40)
+            child&.started(msg['pid']) if msg['pid']
             child&.reply(msg)
           end
         end
