@@ -73,11 +73,15 @@ module Catalog
     require 'mb/sound/help'
   end
 
-  # The GraphNode *Methods modules, in inclusion order
+  # The GraphNode *Methods modules, in inclusion order: only those defined
+  # under their names, so a spec's anonymous module named like one (e.g.
+  # channel_dispatch_spec's SpecExampleMethods, included for the rest of
+  # the process) stays out
   def dsl_modules
     load_library
     MB::Sound::GraphNode.included_modules
       .select { |m| m.name&.start_with?('MB::Sound::GraphNode::') && m.name.end_with?('Methods') }
+      .select { |m| (Object.const_get(m.name) rescue nil).equal?(m) }
       .reverse
   end
 

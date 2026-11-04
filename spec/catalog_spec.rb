@@ -24,6 +24,17 @@ RSpec.describe('library catalog') do
     expect(names - listed).to eq([])
   end
 
+  it 'leaves out modules only named like DSL modules (specs include such modules for the rest of the process)' do
+    fake = Module.new do
+      def self.name = 'MB::Sound::GraphNode::SpecCatalogMethods'
+      def spec_catalog_double = self * 2
+    end
+    real = MB::Sound::GraphNode.included_modules
+    allow(MB::Sound::GraphNode).to receive(:included_modules).and_return([fake, *real])
+    expect(Catalog.dsl_modules).not_to include(fake)
+    expect(Catalog.dsl_modules).to include(MB::Sound::GraphNode::FilterMethods)
+  end
+
   it 'lists every help topic with its title' do
     Catalog.topics.each do |t|
       expect(text).to include("- `:#{t.name}` #{t.title}")
