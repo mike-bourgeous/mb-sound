@@ -366,6 +366,34 @@ module MB
         value.to_f
       end
 
+      # ACID's fade and envelope curves (regions-1; the .acd study's
+      # research/acd-format/acd/audio_render.rb): :fast 1 - (1 - x)² (the
+      # same as :quad_out), :slow x² (:quad), :sharp 0.5 + 4(x - 0.5)³
+      # (:cubic_out_in: steep at both ends, flat in the middle), and :hold,
+      # which stays at the start until the end (an envelope segment
+      # holding its first point; a fade-in that waits, then cuts in).
+      # :linear and :smooth (:smoothstep) are ACID's other two.
+      def self.fast
+        @fast ||= new(:fast, kind: :out, monotonic: true, natural: true, generic: ->(x, _m) { x * (2.0 - x) }, form: [:poly, [0.0, 2.0, -1.0]])
+      end
+
+      # x² (see .fast).
+      def self.slow
+        @slow ||= new(:slow, kind: :in, monotonic: true, natural: true, generic: ->(x, _m) { x * x }, form: [:poly, [0.0, 0.0, 1.0]])
+      end
+
+      # 0.5 + 4(x - 0.5)³ (see .fast).
+      def self.sharp
+        @sharp ||= new(:sharp, kind: :out, monotonic: true, natural: true, generic: ->(x, _m) { (x - 0.5) * (x - 0.5) * (x - 0.5) * 4.0 + 0.5 },
+                               form: [:poly, [0.0, 3.0, -6.0, 4.0]])
+      end
+
+      # 0 until x reaches 1 (see .fast).
+      def self.hold
+        @hold ||= new(:hold, kind: :in, monotonic: true, slopes: [0.0, 0.0],
+                             scalar: ->(x) { x >= 1.0 ? 1.0 : 0.0 }, vector: ->(x) { Numo::DFloat.cast(x.ge(1.0)) })
+      end
+
       # Builders for .named: each takes the options it understands
       # (+overshoot:+, +cycles:+) and rejects others.
       def self.plain(name, &block)
@@ -401,6 +429,10 @@ module MB
         ease_in: plain(:ease_in) { bezier(0.42, 0.0, 1.0, 1.0) },
         ease_out: plain(:ease_out) { bezier(0.0, 0.0, 0.58, 1.0) },
         ease_in_out: plain(:ease_in_out) { bezier(0.42, 0.0, 0.58, 1.0) },
+        fast: plain(:fast) { fast },
+        slow: plain(:slow) { slow },
+        sharp: plain(:sharp) { sharp },
+        hold: plain(:hold) { hold },
       }.freeze
 
       # Raises if +options+ has keys other than +allowed+.
