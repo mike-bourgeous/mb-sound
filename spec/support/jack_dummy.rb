@@ -129,6 +129,19 @@ module JackDummy
       unlock
     end
 
+    # Ends the server as a crash or a stalled server would for its clients
+    # (SIGTERM: it exits cleanly, freeing its registry slot), keeping the
+    # lock and the name until #stop (fix-flaky-1104: closing clients after
+    # their server is gone).  Returns its exit status.
+    def kill_server
+      raise 'JackDummy has no server running' unless @pid
+
+      Process.kill('TERM', @pid)
+      _, status = Process.wait2(@pid)
+      @pid = nil
+      status
+    end
+
     # The servers in JACK's registry, as [[slot, pid, name], ...] (empty if
     # the registry is missing or its layout is not the one this code knows).
     def registry_servers

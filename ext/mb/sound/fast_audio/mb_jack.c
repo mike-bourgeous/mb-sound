@@ -70,6 +70,14 @@ struct unit_list {
 static jack_client_t *client;
 static pid_t client_pid;
 static _Atomic int client_lost; // the server shut down or dropped us
+// The server dropped the client (its shutdown callback ran): libjack's next
+// jack_client_open in this process, ours or another library's (RtMidi in
+// fast_midi), closes and deletes every client the process still has ("Jack
+// server was closed but clients are still allocated, cleanup..."), so
+// mb_jack_close leaves it to libjack instead of closing a client that may be
+// gone (fix-flaky-1104: jack_client_close crashed after a server exit and
+// one FastMIDI port listing)
+static _Atomic int server_dropped;
 static _Atomic(struct unit_list *) active;
 static _Atomic size_t cycles_started;
 static _Atomic size_t cycles_done;
@@ -365,6 +373,7 @@ static void on_shutdown(void *arg)
 {
 	(void)arg;
 
+	atomic_store(&server_dropped, 1);
 	atomic_store(&client_lost, 1);
 	notify_shutdown(atomic_load(&active));
 }
@@ -405,6 +414,7 @@ static jack_client_t *open_attempt(const char *name, const char **error)
 	}
 
 	atomic_store(&client_lost, 0);
+	atomic_store(&server_dropped, 0);
 	atomic_store(&active, NULL);
 	atomic_store(&cycles_skipped, 0);
 	atomic_store(&cycles_repeated, 0);
@@ -518,7 +528,9 @@ void mb_jack_close(void)
 	pthread_mutex_lock(&change_lock);
 	jack_client_t *c = client;
 	client = NULL;
-	jack.client_close(c); // deactivates first, then stops the process thread and frees every port
+	if (!atomic_load(&server_dropped)) {
+		jack.client_close(c); // deactivates first, then stops the process thread and frees every port
+	}
 	forget_spares();
 	struct unit_list *list = atomic_exchange(&active, NULL);
 	notify_shutdown(list);
