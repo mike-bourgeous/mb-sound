@@ -26,9 +26,10 @@ ENV IS_DEMO=1
 ENV CLAUDE_CONFIG_DIR=/claude
 RUN mkdir -p /claude && curl -fsSL https://claude.ai/install.sh | bash
 
-# GitHub
-ENV GH_CONFIG_DIR=/app/.gh-user
-RUN mkdir -p /app/.gh-user && \
+# GitHub: per-machine config at /gh, mounted by dock.sh from LOCAL_GH (see
+# the comment at the top of dock.sh)
+ENV GH_CONFIG_DIR=/gh
+RUN mkdir -p /gh && \
 	wget https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_linux_amd64.deb && \
 	dpkg -i gh_2.102.0_linux_amd64.deb && \
 	rm gh_2.102.0_linux_amd64.deb

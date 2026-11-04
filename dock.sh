@@ -21,6 +21,11 @@ REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOCAL_CLAUDE="${LOCAL_CLAUDE:-$HOME/.mb-sound-claude}"
 SHARED_CLAUDE="${SHARED_CLAUDE:-$REPO_DIR/.claude-shared}"
 SHARED_DIRS="memory:projects/-app/memory skills:skills plans:plans rules:rules commands:commands agents:agents output-styles:output-styles workflows:workflows"
+# GitHub CLI config (gh's login token and settings), per machine and never
+# shared, like LOCAL_CLAUDE: mounted at /gh, which is GH_CONFIG_DIR in the
+# container.  It used to live in the repo's gitignored .gh-user (visible to
+# every machine sharing /app); a new LOCAL_GH starts as a copy of it.
+LOCAL_GH="${LOCAL_GH:-$HOME/.mb-sound-gh}"
 # Optional read-only folders for reference material that must never be
 # written to (e.g. the maintainer's music projects on a dual-boot disk):
 # space-separated host:container pairs, mounted with :ro, e.g.
@@ -72,7 +77,18 @@ else
 	# Create the mount points ourselves so they belong to this user, not
 	# root.  Nested bind mounts: the shared folders cover their mount points
 	# inside the local config.
-	mounts=(-v "$REPO_DIR":/app -v "$LOCAL_CLAUDE":/claude)
+	if [[ ! -e "$LOCAL_GH" ]]; then
+		if [[ -d "$REPO_DIR/.gh-user" ]]; then
+			echo "Copying $REPO_DIR/.gh-user to $LOCAL_GH (gh's config is per machine now;"
+			echo "delete the old folder once every machine has its own copy)."
+			cp -a "$REPO_DIR/.gh-user" "$LOCAL_GH"
+		else
+			mkdir -p "$LOCAL_GH"
+		fi
+		chmod 700 "$LOCAL_GH"
+	fi
+
+	mounts=(-v "$REPO_DIR":/app -v "$LOCAL_CLAUDE":/claude -v "$LOCAL_GH":/gh)
 	for pair in $SHARED_DIRS; do
 		src="$SHARED_CLAUDE/${pair%%:*}"
 		dst="${pair#*:}"
@@ -101,5 +117,6 @@ else
 		--cap-add SYS_NICE \
 		"${mounts[@]}" \
 		-e CLAUDE_CONFIG_DIR=/claude \
+		-e GH_CONFIG_DIR=/gh \
 		$APPNAME /bin/bash
 fi
