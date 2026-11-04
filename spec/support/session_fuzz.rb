@@ -434,12 +434,17 @@ module SessionFuzz
     ->(s) {
       # (wire-1) a clip's stream, sometimes through a transform, wired into
       # a synth track at its launch point (the track's clip plays on), and
-      # sometimes unwired two beats later
+      # sometimes unwired two beats later, if it's still wired then: a
+      # track has one wire, so a later wire of the track replaces this one,
+      # and another line's unwire may have unwired it already, where
+      # `unwire` raises in a script by design ("No stream is wired into
+      # :t3"; fix-batch-1104, seed 771036: two wires of :t3 on one beat,
+      # each with its unwire)
       next if s.swappable.empty?
 
       t = s.pick(s.swappable)
       w = "wire :#{t}, #{s.pick(FREQ_CLIPS)}.stream#{s.pick(['', '.echo(1.n16, 2)', '.arp(:up, 16)', '.transpose(7)'])}#{s.on}"
-      s.rng.rand < 0.4 ? "#{w}; after(in: 2.beats) { unwire :#{t} }" : w
+      s.rng.rand < 0.4 ? "#{w}; after(in: 2.beats) { unwire :#{t} if wires.key?(:#{t}) }" : w
     },
     ->(s) {
       # (ux-notes-2) a hold: the track's clip, cue player, and wired stream

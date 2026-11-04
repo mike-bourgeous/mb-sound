@@ -111,7 +111,7 @@ module MB
         # Tee.shared_check on, a modified buffer raises or warns).
         def sample(count)
           count = count.round
-          return nil if finished?
+          return keep_time(count) if finished?
 
           from = @reader.cursor
           step(count)
@@ -238,6 +238,23 @@ module MB
         # handled instead of gliding (see Held#render).
         def smooth_jump
           (@jumps ||= []) << @render_offset if @smoother
+        end
+
+        # Moves the reader +count+ samples on for a finished node read again
+        # (a Synth lane's envelope reads an ended gate as 0 while another
+        # lane rings out), as if it had read them, and returns nil.  So a
+        # seek or restart that brings it back (a new generation) finds it
+        # where the stream's other readers are, as at every buffer size:
+        # before fix-batch-1104 it stayed where it finished, so a one-shot
+        # clip's idle lanes ended the buffer its last event was read in,
+        # and after a seek back to the clip's start their gates (not their
+        # note numbers) played that buffer late (SessionFuzz seed 771024:
+        # 572 frames at 800-frame buffers, 310 at 367).
+        def keep_time(count)
+          from = @reader.cursor
+          @reader.events(from, @stream.advance(from, count, @sample_rate))
+          @frames_read += count
+          nil
         end
 
         # True if #sample should return nil (see the class description).

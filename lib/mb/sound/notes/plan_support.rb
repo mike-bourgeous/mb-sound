@@ -127,7 +127,7 @@ module MB
         # plan that fuses the node.
         def advance(count)
           count = count.round
-          return nil if finished?(true) # (envelopes of a skipped lane don't render)
+          return keep_time(count) if finished?(true) # (envelopes of a skipped lane don't render)
           if @plan_member || @plan_region
             plan_feed(count)
             # The smoother runs as #sample would run it (Op::Smooth isn't

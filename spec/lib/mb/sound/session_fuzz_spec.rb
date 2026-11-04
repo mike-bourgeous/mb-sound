@@ -42,6 +42,21 @@ RSpec.describe('session fuzzing') do
     songs.each { |code| expect { Prism.parse(code).errors.then { |e| raise e.map(&:message).join(', ') unless e.empty? } }.not_to raise_error }
   end
 
+  it 'unwires a track only while it is still wired (seed 771036)' do
+    # (a track has one wire, and unwire of a track nothing is wired into
+    # raises in scripts by design: two wire lines for one track, each
+    # with its unwire, made the second unwire a user error)
+    rng = Random.new(5)
+    codes = SessionFuzz::COMMANDS.flat_map { |cmd|
+      Array.new(40) {
+        cmd.call(SessionFuzz::Step.new(rng: rng, t: :t1, on: ', on: :now', scenes: %i[s1 s2], swappable: %i[t1],
+                                       instruments: %i[t2], knob: true, clip_for: ->(_) { 'seq(C4).n8.loop' }, bgs: 0))
+      }
+    }.compact.grep(/unwire/)
+    expect(codes).not_to be_empty
+    expect(codes).to all(match(/\{ unwire :t1 if wires\.key\?\(:t1\) \}/))
+  end
+
   it 'builds a command (or skips the step) from every entry of the append-only COMMANDS list' do
     expect(SessionFuzz::COMMANDS.length).to be >= 15
     rng = Random.new(3)
@@ -206,6 +221,39 @@ RSpec.describe('session fuzzing') do
         'at_bar(3) { fx :t3, :dub }',
         'at_bar(2, beat: 4) { seek 2, 2.999 }',
       ], 3,
+    ],
+    # (the 2026-11-04 batch 11 soak, fix-batch-1104: a one-shot clip's idle
+    # Synth lanes ended their gates in the buffer that read its last
+    # event, and those gates, read again while another lane rang out,
+    # stayed there; the seek back to before the clip's start brought them
+    # back that buffer behind their note numbers, so the replayed first
+    # note sounded 572 frames late at 800-frame buffers and 310 at 367;
+    # since Notes::Node#keep_time)
+    'a seek back past a one-shot synth clip that ended on the seek (seed 771024)' => [
+      :buffer_size, ['bpm 126', 'meter 3, 4'], [
+        'knob :busy, 0.5',
+        'at_bar(1, beat: 2) { tempo 90, over: 3.beats; after(in: 2.beats) { seek 1, 5/2r } }',
+        'at_bar(1, beat: 3) { bg :lib, preset(:square_bass, midi: seq(C5, D5).n8).at(0.3); turn :"lib/cutoff", 300.0, over: 1/2r }',
+      ], 2,
+    ],
+    # (the same soak, seed 771036: two wires of :t3 on one beat, each with
+    # its unwire; the second wire replaced the first, the first line's
+    # unwire unwired :t3, and the second's raised "No stream is wired into
+    # :t3", as a user's script would; the generator's unwire is guarded
+    # since fix-batch-1104)
+    'two wires of one track on one beat, each unwired while still wired (seed 771036)' => [
+      :runs, ['bpm 126'], [
+        'knob :busy, 0.5',
+        'track(:t3, q: 1) { |clip| clip.synth(voices: 2) { |v| v.hz.sine * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'at_bar(1, beat: 4) { wire :t3, seq(G3.n4, D4.n8.dotted, B3.n16).loop.stream.echo(1.n16, 2), on: :now; after(in: 2.beats) { unwire :t3 if wires.key?(:t3) } }',
+        'at_bar(1, beat: 4) { wire :t3, seq(A3, C4.n4, E4).n8.loop.stream, on: :now; after(in: 2.beats) { unwire :t3 if wires.key?(:t3) } }',
+      ], 1,
+    ],
+    'the same without a tempo ramp or preset (seed 771024)' => [
+      :buffer_size, ['bpm 126', 'meter 3, 4'], [
+        'at_bar(1, beat: 3) { bg :lib, seq(C5, D5).n8.synth { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) }.at(0.3) }',
+        'at_bar(1, beat: 4) { seek 1, 5/2r }',
+      ], 2,
     ],
     # (lesson-fixes-1: a console swap didn't change the track's clip, so
     # `bg :t1` after a stop played the scene's clip again; seed 5's case)
