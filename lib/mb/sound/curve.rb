@@ -579,11 +579,41 @@ module MB
         when Proc then new(&value)
         when Numeric then db(value)
         when Array
+          raise ArgumentError, "A list of curves (#{value.inspect}) goes where one curve per step is taken (tween's curve:), not here" if list?(value)
           raise ArgumentError, "A bezier curve needs four numbers (got #{value.inspect})" unless value.length == 4
           bezier(*value)
         else
           raise ArgumentError, "Expected a curve name, Curve, Proc, dB number, or bezier values (got #{value.inspect})"
         end
+      end
+
+      # True if +value+ is a list of curves, one per step (tween-curves-1,
+      # 2026-11-04; see .list): an Array that isn't a bezier's numbers.
+      # An Array of numbers only stays a bezier (.from), so per-step dB
+      # curves go in as Curve.db(d) entries.
+      def self.list?(value)
+        value.is_a?(Array) && !value.all?(Numeric)
+      end
+
+      # Curves for a list of curve values (see .list?), one per step, e.g. a
+      # tween's `curve: [:fast, :hold, Curve[:elastic, overshoot: 0.4]]`:
+      # each entry anything .from takes (a bezier as its own Array of four
+      # numbers).  +options+ (+overshoot:+, +cycles:+) go to every name in
+      # the list, as with a single name (a name that takes none raises);
+      # Curves and Procs are used as they are.  Returns a frozen Array of
+      # Curves.
+      def self.list(values, **options)
+        raise ArgumentError, 'A list of curves needs at least one curve' if values.empty?
+
+        options = options.compact
+        if !options.empty? && values.none? { |v| v.is_a?(Symbol) || v.is_a?(String) }
+          raise ArgumentError, "Options #{options} need curve names in the list (give each curve its options: Curve[:elastic, overshoot: 0.4])"
+        end
+
+        values.map { |v|
+          raise ArgumentError, "A list of curves can't hold another list (got #{v.inspect})" if list?(v)
+          v.is_a?(Symbol) || v.is_a?(String) ? named(v, **options) : from(v)
+        }.freeze
       end
 
       # Returns the named curve (see the class description and NAMES),

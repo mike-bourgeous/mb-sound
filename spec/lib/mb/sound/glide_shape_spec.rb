@@ -45,6 +45,22 @@ RSpec.describe('Glide shapes (Notes::Glide with a Curve)') do
     expect(out[575...960].to_a.uniq).to eq([72.0])
   end
 
+  it 'takes a list of shapes, one per note-on in turn, cycling (tween-curves-1)' do
+    # (the first note-on takes the first shape though it jumps, so shape i
+    # goes with a clip's note i)
+    n = notes_for(*[60, 72, 60, 72, 60].each_with_index.map { |note, i| ev.note_on(note, 100, time: i * 0.01r) })
+    g = MB::Sound::Notes::Glide.new(n.note_stream, notes: n, time: 0.005, shape: [:fast, :hold])
+    out = SpecBuffers.join(6.times.map { g.sample(480).dup }).cast_to(Numo::DFloat)
+    t = (Numo::DFloat.new(240).seq + 1) / 240.0
+    fast = MB::Sound::Curve[:fast].lookup(t.dup)
+    expect(out[480...719].to_a.uniq).to eq([60.0]) # 60 -> 72 holds (:hold), then jumps
+    expect(out[720]).to eq(72.0)
+    expect((out[960...1200] - (72 - 12 * fast)).abs.max).to be < 1e-4 # 72 -> 60 along :fast
+    expect(out[1440...1679].to_a.uniq).to eq([60.0]) # :hold again
+    expect((out[1920...2160] - (72 - 12 * fast)).abs.max).to be < 1e-4
+    expect(g.curves).to eq([MB::Sound::Curve[:fast], MB::Sound::Curve[:hold]])
+  end
+
   it 'rejects cycles without a shape and options with a Curve object' do
     expect { glide_out(time: 0.02, cycles: 3) }.to raise_error(ArgumentError, /shape/)
     expect { glide_out(time: 0.02, shape: MB::Sound::Curve[:elastic], overshoot: 0.2) }.to raise_error(ArgumentError, /shape name/)

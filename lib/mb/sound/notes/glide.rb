@@ -42,6 +42,16 @@ module MB
       # (e.g. the squiggle's size and wiggles; see Curve); otherwise the
       # curve's defaults apply.
       #
+      # A list of shapes (an Array that isn't a bezier's four numbers; see
+      # MB::Sound::Curve.list) gives one curve per glide in turn, cycling:
+      # the first note-on glides along the first, the next along the
+      # second, and so on (tween-curves-1, 2026-11-04: tweens with a curve
+      # per step, as ACID's envelope segments).  +overshoot+ and +cycles+
+      # go to every name in the list.  A content jump from a clip
+      # (MIDI::Source::Chase#index) picks the chased event's curve, so the
+      # list follows a clip of one note per step wherever it is launched
+      # or seeked; the note-ons after it take the curves after that one.
+      #
       # +resume+ (false by default; true for tweens, see
       # Sequence::Clip#tween) makes the glide pick up where it would be
       # after a content jump (a Session launch or seek partway through a
@@ -70,8 +80,13 @@ module MB
         attr_reader :overshoot
 
         # The glide's MB::Sound::Curve, or nil for the default smoothstep
-        # (see the class description).
+        # (see the class description); with a list of shapes, the current
+        # glide's.
         attr_reader :curve
+
+        # The list of curves glides take in turn (see the class
+        # description), or nil.
+        attr_reader :curves
 
         # Returns the bump scale k for which the glide curve
         # t²(3 - 2t) + k t³(1 - t)² peaks at 1 + +overshoot+ (found by
@@ -88,7 +103,14 @@ module MB
           @glide_bufs = nil # (reused by #fill; dropouts-2)
 
           @curve = nil
-          if shape.nil?
+          @curves = nil
+          @next_curve = 0
+          if MB::Sound::Curve.list?(shape)
+            @curves = MB::Sound::Curve.list(shape, overshoot: overshoot, cycles: cycles)
+            @curve = @curves[0]
+            @overshoot = 0.0
+            @overshoot_k = 0.0
+          elsif shape.nil?
             raise ArgumentError, 'Glide cycles need a shape (e.g. shape: :squiggle)' unless cycles.nil?
             overshoot ||= 0
             raise ArgumentError, "Glide overshoot must be a number from 0 to 1 (got #{overshoot.inspect})" unless overshoot.is_a?(Numeric) && (0..1).cover?(overshoot)
@@ -147,7 +169,7 @@ module MB
           @position = nil
           @start = nil
           @length = nil
-          @node_type_name = "Notes Glide#{' (legato)' if @legato}#{" #{@curve}" if @curve}"
+          @node_type_name = "Notes Glide#{' (legato)' if @legato}#{" #{@curves ? @curves.join(', ') : @curve}" if @curve}"
         end
 
         # The current output note number.
@@ -268,6 +290,7 @@ module MB
 
           glide = from || (@had_note && enabled? && (legato || !@legato))
           @had_note = true
+          next_curve if @curves
           @hint_seconds = hint_seconds(event) if @lengths
           glide_to(target, from || current, glide)
         end
@@ -293,10 +316,27 @@ module MB
           @had_note = false
         end
 
-        # Resumes the glide in progress at a content jump (see +resume:+ in
-        # the class description), or chases as usual.
+        # Applies a Source::Chase (see Node#chase_item): with a list of
+        # curves, the chased event's index (Chase#index, from clips) picks
+        # the curve first: the chased note's, or for a note starting right
+        # at the jump, its note-on's (it follows).
         def chase_item(c)
-          return super unless @resume && c.previous && enabled?
+          if @curves && c.index
+            i = c.index % @curves.length
+            if c.starts
+              @next_curve = i
+            else
+              @curve = @curves[i]
+              @next_curve = (i + 1) % @curves.length
+            end
+          end
+          resume_item(c)
+        end
+
+        # Resumes the glide in progress at a content jump (see +resume:+ in
+        # the class description), or chases as usual (Node#chase_item).
+        def resume_item(c)
+          return c.starts ? chase_start(c.event) : chase(c.event) unless @resume && c.previous && enabled?
 
           start = marked_number(c.previous)
           @from_offset = nil
@@ -329,6 +369,13 @@ module MB
             when 121 then @gm_on = false if @gm # RP-15 resets portamento
             end
           end
+        end
+
+        # With a list of curves: the curve of the glide starting now (a
+        # note-on, or a chased note), counting on to the next.
+        def next_curve
+          @curve = @curves[@next_curve]
+          @next_curve = (@next_curve + 1) % @curves.length
         end
 
         # True if notes glide at all (always, except :gm with CC 65 off).
