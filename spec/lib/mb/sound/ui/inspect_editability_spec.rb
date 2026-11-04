@@ -138,7 +138,7 @@ RSpec.describe('Inspector editability (Note 15)', :aggregate_failures) do
   EDIT_KITS = {
     tr909: ->(c) { MB::Sound.tr909(c) },
     tr808: ->(c) { MB::Sound.tr808(c) },
-    dnb_drums: :dnb_drums, funk_beat: :funk_beat, funk_perc: :funk_perc, jungle_perc: :jungle_perc,
+    dnb_drums: :dnb_drums, funk_beat: :funk_beat, funk_perc: :funk_perc, jungle_perc: :jungle_perc, fit909_kick: :fit909_kick,
     machine: ->(c) { MB::Sound.kit(c) { voice(:kick, tune: 48, decay: 0.4) { |h| h.body(h.tune, decay: h.decay) + h.click(0.3) }; tr909 :snare, :clap; tr808 :cowbell, :closed_hat } },
   }.freeze
 
@@ -166,7 +166,7 @@ RSpec.describe('Inspector editability (Note 15)', :aggregate_failures) do
           refused << [vname, setting, got.is_a?(Exception) ? got.message : 'a build knob'] if got.is_a?(Exception) || got.build?
         end
       end
-      expect(checked).to be > 10
+      expect(checked).to be > (kit.voices.length == 1 ? 7 : 10) # (the fitted kick: one voice, eight settings)
       expect(refused).to eq([]), "#{kname}: voice settings that aren't live knobs:\n#{refused.map(&:inspect).join("\n")}"
     ensure
       session&.close

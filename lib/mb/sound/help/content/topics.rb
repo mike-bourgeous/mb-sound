@@ -293,6 +293,10 @@ module MB
         h.click end; choke :open_hat, by: :closed_hat }` with layers
         (body, noise, click, metal, sample, fm, bursts, repeats, env, sweep) and
         voices borrowed from the machines (`tr909 :clap`, `tr808 :cowbell`).
+
+        Shipped designs lend voices too: `borrow :fit909_kick` (the 909
+        kick fitted to a recorded house beat, `L.kit.fit909_kick` on its
+        own), with `tr909 except: :kick` leaving the 909's kick out.
       TEXT
       commands :tr808, :tr909, :kit, :drum_kit, :grid, :euclid
       note :drums
@@ -308,6 +312,9 @@ module MB
           voice(:snare) { |h| h.fm(240, ratio: 2.3, index: 1, decay: 0.12, index_decay: 0.03) * 0.5 + h.noise(decay: 0.15, highpass: 2000) * 0.4 }
           tr909 :closed_hat
         }.at(-14.db)
+      end
+      example 'the 909 with the fitted kick' do
+        bg :try, kit(grid(16, kick: 'X...X...X...X...', clap: '....X.......X...', hat: '..x...x...x...x.').loop) { borrow :fit909_kick; tr909 except: :kick }.at(-16.db)
       end
     end
 

@@ -30,7 +30,7 @@ module MB
       # +velocity_curve:+, and +flam:+ in its knob Hash (see #kit).
       class Machine
         # One voice of a design.
-        VoiceSpec = Struct.new(:name, :defaults, :block, :gm, :aliases, :silent, keyword_init: true)
+        VoiceSpec = Struct.new(:name, :defaults, :block, :gm, :aliases, :silent, :params, keyword_init: true)
 
         # The decay (seconds) of a silent voice without a block: a key
         # pulse at the hit's velocity, falling linearly to 0, long enough
@@ -76,7 +76,7 @@ module MB
         end
 
         # Adds a voice (see Builder#voice).
-        def add_voice(name, defaults, block, gm: nil, aliases: [], silent: false)
+        def add_voice(name, defaults, block, gm: nil, aliases: [], silent: false, params: nil)
           name = name.to_sym
           raise ArgumentError, "The #{@name} already has a #{name.inspect} voice" if @voices.key?(name)
           bad = defaults.keys & Hit::METHODS
@@ -86,8 +86,19 @@ module MB
           raise ArgumentError, "The #{name} needs a block that builds its sound" unless block
 
           gm = gm.nil? ? default_gm(name) : Array(gm).map { |n| Sequence::Grid.row_value(n) }
+          # Ranged defaults (`decay: (0.1..2.0).at(0.47)`) declare the knob's
+          # range (a Param: bind ranges, library entry params); the voice
+          # reads the default
+          params = (params || {}).dup
+          defaults = defaults.to_h { |k, v|
+            next [k, v] unless v.is_a?(MB::Sound::Param::Ranged) || v.is_a?(MB::Sound::Param)
+            param = v.is_a?(MB::Sound::Param) ? v : MB::Sound::Param.new(name: k, default: v)
+            params[k] = param
+            [k, param.default]
+          }
           defaults = { level: 1.0 }.merge(defaults)
-          @voices[name] = VoiceSpec.new(name: name, defaults: defaults.freeze, block: block, gm: gm.freeze, aliases: Array(aliases).map(&:to_sym).freeze, silent: !!silent)
+          @voices[name] = VoiceSpec.new(name: name, defaults: defaults.freeze, block: block, gm: gm.freeze, aliases: Array(aliases).map(&:to_sym).freeze, silent: !!silent,
+                                        params: params.freeze)
           Array(aliases).each { |a| @aliases[a.to_sym] = name }
           self
         end
@@ -108,10 +119,16 @@ module MB
         # Copies voices +names+ (all if empty) of +other+ (a Machine) with
         # their chokes among the copied voices; +knobs+ changes defaults by
         # voice name (see Builder#tr909).
-        def add_from(other, names, knobs = {})
-          keys = names.empty? ? other.names : names.map { |n|
-            other.voice_name(n) || raise(ArgumentError, "Unknown #{other.name} voice #{n.inspect} (voices: #{other.names.map(&:inspect).join(', ')})")
-          }.uniq
+        def add_from(other, names, knobs = {}, except: nil)
+          known = ->(n) { other.voice_name(n) || raise(ArgumentError, "Unknown #{other.name} voice #{n.inspect} (voices: #{other.names.map(&:inspect).join(', ')})") }
+          keys = names.empty? ? other.names : names.map(&known).uniq
+          keys -= Array(except).map(&known)
+          raise ArgumentError, "except: leaves no #{other.name} voices to add" if keys.empty?
+          taken = keys.select { |k| @voices.key?(k) }
+          unless taken.empty?
+            raise ArgumentError, "The #{@name} already has a #{taken.first.inspect} voice; leave one out " \
+              "(`#{other.name} except: #{taken.first.inspect}`, or except: on the other)"
+          end
           knobs = knobs.to_h { |n, k|
             key = other.voice_name(n)
             raise ArgumentError, "No #{n.inspect} among the #{other.name} voices added (#{keys.join(', ')})" unless keys.include?(key)
@@ -122,7 +139,8 @@ module MB
             spec = other.voices.fetch(k)
             changed = knobs.fetch(k, {})
             Drums.knobs(k, spec.defaults, changed)
-            add_voice(k, spec.defaults.merge(changed), spec.block, gm: spec.gm, aliases: spec.aliases.reject { |a| @aliases.key?(a) || @voices.key?(a) }, silent: spec.silent)
+            add_voice(k, spec.defaults.merge(changed), spec.block, gm: spec.gm, aliases: spec.aliases.reject { |a| @aliases.key?(a) || @voices.key?(a) }, silent: spec.silent,
+                      params: spec.params)
           end
           keys.each do |k|
             (other.chokes[k] || []).each { |by| add_choke([k], by: by) if keys.include?(by) }
@@ -304,7 +322,7 @@ module MB
 
           Voice.new(
             graph, name: spec.name, machine: @name, inputs: inputs, notes: notes,
-            knobs: k.merge(accent: accent, velocity_curve: velocity_curve), skip_idle: skip_idle, built: built
+            knobs: k.merge(accent: accent, velocity_curve: velocity_curve), params: spec.params || {}, skip_idle: skip_idle, built: built
           )
         end
 
@@ -444,20 +462,34 @@ module MB
           names
         end
 
-        # Adds TR-909 voices (by name or alias; all of them without names),
-        # with their knobs, GM notes, aliases, and the hat choke when both
-        # hats are added: `tr909 :kick, :clap`.  Keyword arguments change
-        # their knob defaults by voice: `tr909 :kick, kick: { decay: 1.2 }`.
-        def tr909(*names, **knobs)
-          @machine.add_from(TR909.machine, names, knobs)
+        # Adds TR-909 voices (by name or alias; all of them without names,
+        # or all but +except+), with their knobs, GM notes, aliases, and the
+        # hat choke when both hats are added: `tr909 :kick, :clap`,
+        # `tr909 except: :kick`.  Keyword arguments change their knob
+        # defaults by voice: `tr909 :kick, kick: { decay: 1.2 }`.
+        def tr909(*names, except: nil, **knobs)
+          @machine.add_from(TR909.machine, names, knobs, except: except)
         end
 
-        # Adds TR-808 voices (by name or alias; all of them without names)
-        # with their knobs, GM notes, and aliases (see Drums::TR808), each
-        # with its own metal bank; the open hat is choked by the closed hat
-        # when both are added.  `tr808 :cowbell, cowbell: { decay: 0.6 }`.
-        def tr808(*names, **knobs)
-          @machine.add_from(TR808.machine, names, knobs)
+        # Adds TR-808 voices (by name or alias; all of them without names,
+        # or all but +except+) with their knobs, GM notes, and aliases (see
+        # Drums::TR808), each with its own metal bank; the open hat is
+        # choked by the closed hat when both are added.  `tr808 :cowbell,
+        # cowbell: { decay: 0.6 }`.
+        def tr808(*names, except: nil, **knobs)
+          @machine.add_from(TR808.machine, names, knobs, except: except)
+        end
+
+        # Adds the voices of another kit design (Drums.design: a shipped
+        # kit's name such as :fit909_kick, :tr909, :tr808, a library kit
+        # entry, or a Drums::Machine), like #tr909: by name (all without
+        # names, or all but +except+), knob defaults changed by voice.  The
+        # 909 with the fitted kick, the kick first so every voice keeps the
+        # seed it has in tr909:
+        #
+        #     kit(grid(16, kick: 'X...X...X...X...', clap: '....X.......X...')) { borrow :fit909_kick; tr909 except: :kick }
+        def borrow(design, *names, except: nil, **knobs)
+          @machine.add_from(Drums.design(design), names, knobs, except: except)
         end
 
         def to_s
@@ -469,6 +501,28 @@ module MB
       # A Drums::Machine named +name+ from the block (see Machine).
       def self.machine(name = :kit, &block)
         Machine.new(name, &block)
+      end
+
+      # The shipped kit designs (Drums::Machine) by name, for
+      # Builder#borrow: the drum machines and the fitted voices
+      # (Drums::Fits::DESIGNS).
+      def self.designs
+        { tr909: -> { TR909.machine }, tr808: -> { TR808.machine } }.merge(Fits::DESIGNS)
+      end
+
+      # The kit design +design+ (a Drums::Machine, or the name of a shipped
+      # one; see .designs), raising with the names otherwise.
+      def self.design(design)
+        return design if design.is_a?(Machine)
+        design = design.name if design.is_a?(MB::Sound::Library::Entry)
+        d = designs
+        make = design.respond_to?(:to_sym) && d[design.to_sym]
+        unless make
+          names = d.keys
+          hint = DidYouMean::SpellChecker.new(dictionary: names.map(&:to_s)).correct(design.to_s).first
+          raise ArgumentError, "No kit design #{design.inspect} (#{names.map(&:inspect).join(', ')})#{"\nDid you mean?  :#{hint}" if hint}"
+        end
+        make.call
       end
     end
   end

@@ -39,6 +39,18 @@ module MB
 
         module_function
 
+        # The rows of +rows+ (a grid's { row => pattern }) that kit entry
+        # +entry+ plays: all of them, or for an entry listing its voices
+        # (settings[:voices]: a one-voice design such as
+        # L.kit.fit909_kick) only those, else the first row on its first
+        # voice.
+        def kit_rows(entry, rows)
+          voices = entry.settings.is_a?(Hash) && entry.settings[:voices]
+          return rows unless voices
+          kept = rows.slice(*voices)
+          kept.empty? ? { voices.first => rows.values.first } : kept
+        end
+
         # A Playable::Graph (or something Playable.graph takes) for +entry+;
         # raises Playable::Unplayable with a working spelling otherwise.
         def playable(entry)
@@ -57,7 +69,7 @@ module MB
             Playable.wrap(entry.(Playable.demo_phrase), "#{path} playing a demo phrase", true,
               "an instrument plays notes: #{path}.(clip), or track :x, #{path}")
           when :kit
-            Playable.wrap(entry.(MB::Sound.grid(16, **KIT_DEMO)), "#{path} playing a beat", true,
+            Playable.wrap(entry.(MB::Sound.grid(16, **kit_rows(entry, KIT_DEMO))), "#{path} playing a beat", true,
               "a kit plays a grid: #{path}.(grid(16, kick: 'x...'))")
           when :clip
             entry.call

@@ -68,7 +68,7 @@ module MB
           'MB::Sound::Sample::Slices' => %i[[] name keymap],
           # Instruments built region by region (in Instrument.new's block)
           'MB::Sound::Sampler::Instrument' => %i[region],
-          'MB::Sound::Drums::Builder' => %i[voice choke tr808 tr909],
+          'MB::Sound::Drums::Builder' => %i[voice choke tr808 tr909 borrow],
           # Evolving rhythm rows (in MB::Sound#beats' block)
           'MB::Sound::Generative::Beats::Builder' => MB::Sound::Generative::Beats::Builder::NAMES.keys + %i[row euclid fill],
           'MB::Sound::Drums::Hit' => MB::Sound::Drums::Hit::METHODS - %i[knobs name machine],

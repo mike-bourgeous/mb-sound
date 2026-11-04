@@ -125,6 +125,11 @@ module MB
         # The knob values used (a frozen Hash).
         attr_reader :knobs
 
+        # The knobs' declared ranges ({ knob => MB::Sound::Param }, frozen;
+        # only knobs the design gave as `(lo..hi).at(default)`): bind ranges
+        # (Arrangement::LiteralBinding.kit_range).
+        attr_reader :knob_params
+
         # Creates a voice playing +graph+.  +inputs+ is a list of [source,
         # tap] pairs: each buffer, the voice reads each source (a trigger
         # node; nil reads as zeros) and gives it to its Tap, which the graph
@@ -139,7 +144,7 @@ module MB
         # average), as a sampler's mono outs would (omnibus17: it raised
         # "undefined method 'get_sampler' for Channels", Kez's K5 and
         # Odile's F12).  Pan or widen the kit after it.
-        def initialize(graph, name:, machine:, inputs:, notes: [], knobs: {}, skip_idle: true, sample_rate: 48000, built: nil)
+        def initialize(graph, name:, machine:, inputs:, notes: [], knobs: {}, params: {}, skip_idle: true, sample_rate: 48000, built: nil)
           graph = graph.mono if graph.is_a?(GraphNode::Channels) || (graph.respond_to?(:channel_count) && graph.channel_count > 1)
           @graph = graph.get_sampler
           @name = name
@@ -148,6 +153,7 @@ module MB
           @inputs = inputs.map { |src, tap| [src.get_sampler, tap] }
           @notes = Array(notes).freeze
           @knobs = knobs.dup.freeze
+          @knob_params = params.dup.freeze
           @sample_rate = sample_rate.to_f
           @position = 0
           # (see #check_end and #sample_skipping)

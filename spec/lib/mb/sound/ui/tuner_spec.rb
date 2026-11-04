@@ -37,6 +37,9 @@ RSpec.describe(MB::Sound::UI::Panes::Tuner, :aggregate_failures) do
     ui::Inspect.target = nil
     ui::Design.instance_variable_set(:@open, false)
     ui::Design.instance_variable_set(:@last, nil)
+    # (the screen design restores on close: left at the tuner's, a later
+    # spec's Design.close brought a tuner screen back up; carry_spec)
+    ui::Design.instance_variable_set(:@before, nil)
     ui::TunerScreen.instance_variable_set(:@before, nil)
     @session&.close
     MB::Sound.rewind

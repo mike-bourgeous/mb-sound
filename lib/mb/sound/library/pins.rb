@@ -52,9 +52,9 @@ module MB
         # sound as it does: a graph document's text (a bundle's files;
         # without the `saved:` and `mb_sound:` header lines, which change on
         # every save), a class preset's settings (a struck instrument's with
-        # its resonator preset's), a genre patch's method source; nil for
-        # entries with none of those (drum machines: pinned by version
-        # only).
+        # its resonator preset's), a genre patch's or fitted kit design's
+        # method source; nil for entries with none of those (tr808, tr909:
+        # pinned by version only).
         def fingerprint(entry)
           text = fingerprint_text(entry)
           text && Digest::SHA256.hexdigest(text)[0, 16]
@@ -72,6 +72,9 @@ module MB
             "#{settings_text(s)}\n#{settings_text(res.settings)}"
           elsif entry.family == :genre_patch
             method_source(Genre::Patches, entry.name)
+          elsif entry.family == :machine && Drums::Fits::DESIGNS.key?(entry.name)
+            # (a fitted design: its method's source, the fitted numbers)
+            method_source(Drums::Fits, entry.name)
           elsif %i[generator flow].include?(entry.family)
             # (a shipped generator: its definition and its params' defaults)
             "#{definition_source(entry.location)}\n#{entry.params.values.map(&:to_ruby).join("\n")}\n#{settings_text(s)}"
