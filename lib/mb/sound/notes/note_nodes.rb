@@ -88,7 +88,7 @@ module MB
       #
       # With +chase: false+ content jumps leave the number alone (see
       # Notes#number); with +chase: :resume+ only jumps that resume a note
-      # on this lane move it (Notes#resume: the resumed note is the latest
+      # on this lane move it (Notes#resumes?: the resumed note is the latest
       # note-on of a sampler voice that plays it).
       #
       # With +marks: true+ (Notes#freq and NotePitch, so `v.hz` and
@@ -338,34 +338,6 @@ module MB
 
           @adding = @notes.add_envelopes?
           event.velocity
-        end
-      end
-
-      # A single-sample impulse at a content jump inside a note that sounded
-      # in the content playing now, valued at the seconds since it started
-      # (MIDI::Source::Chase#resume; see Notes#resume).  In a Synth lane
-      # only the lane its allocator chose resumes (Allocator#resume_lane?).
-      class Resume < Node::Impulse
-        def initialize(stream, notes: nil, sample_rate: 48000)
-          super
-          @node_type_name = 'Notes Resume'
-        end
-
-        private
-
-        def render(buf, items)
-          BufferHelper.zero(buf)
-          quiet = 0.0
-          items.each do |off, item|
-            next unless item.is_a?(MIDI::Source::Chase) && resumes_here?(item)
-            buf[off] = item.resume.to_f
-            quiet = nil
-          end
-          quiet
-        end
-
-        def impulse(_event)
-          nil
         end
       end
 

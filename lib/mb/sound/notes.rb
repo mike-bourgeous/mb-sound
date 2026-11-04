@@ -372,7 +372,7 @@ module MB
       # (Sampler::Instrument#play's +lanes:+) keeps its sample's pitch until
       # its next note-on, as a tracker channel does (tracker-2).
       # +chase: :resume+ is the same except at jumps that resume a note on
-      # this voice (#resume), which take that note's number: sampler voices
+      # this voice (#resumes?), which take that note's number: sampler voices
       # resuming one-shots (regions-1).
       def number(marks: false, chase: true)
         if chase == :resume
@@ -426,21 +426,19 @@ module MB
         memo(:choke) { Choke.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
 
-      # A single-sample impulse at a content jump (a seek, a late launch of
-      # a looping clip, a swap; see MIDI::Source#chase) that lands inside a
-      # note that sounded in the content playing now, valued at the seconds
-      # since that note started (a Notes::Resume; 0 elsewhere).  One-shot
-      # sampler voices start the note's sample that far in, so a jump plays
-      # what an uninterrupted run plays there (Sampler::Instrument#play's
-      # +resume+; regions-1).  In a Synth only the lane its allocator gives
-      # the note resumes it (MIDI::Allocator#resume_lane); notes that start
-      # right at the jump play their own note-ons instead.  #velocity holds
-      # the note's velocity from that sample on.
-      def resume
-        memo(:resume) {
-          @stream.allocator.resume_notes! if @stream.is_a?(MIDI::Allocator::Lane)
-          Resume.new(note_stream, notes: self, sample_rate: @sample_rate)
-        }
+      # True if content jump +chase+ (a MIDI::Source::Chase) resumes its
+      # note on this voice: the jump landed inside a note that sounded in
+      # the content playing now (Chase#resume, the seconds since it
+      # started), and this Notes' stream isn't a Synth lane that its
+      # allocator didn't give the note to (MIDI::Allocator#resume_lane).
+      # One-shot sampler voices start the note's sample that far in, so a
+      # jump plays what an uninterrupted run plays there
+      # (Sampler::Instrument#play's +resume+, GraphNode::SamplerVoice;
+      # regions-1); #number(chase: :resume) takes its number.
+      def resumes?(chase)
+        t = chase.resume
+        return false unless t && t > 0
+        !@stream.respond_to?(:resume_lane?) || @stream.resume_lane?(chase)
       end
 
       # The frequency in Hz of #number plus pitch bend (MIDI::Event#bend_semitones,
@@ -460,7 +458,7 @@ module MB
       # the old content and keeps its pitch (its ratio to the note-on's
       # frequency), where a chased number would retune it by the key
       # difference (tracker-2).  +chase: :resume+ also takes a resumed
-      # note's number (see #number and #resume).
+      # note's number (see #number and #resumes?).
       def freq(marks: true, chase: true)
         if chase == :resume
           return memo(marks ? :freq_resume : :freq_unmarked_resume) {

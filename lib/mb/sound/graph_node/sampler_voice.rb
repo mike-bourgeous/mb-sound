@@ -24,12 +24,13 @@ module MB
       # idle on the exact sample.  +choke_time+ (seconds) changes that time
       # (Instrument#play's +steal_fade+ length).
       #
-      # +resume+ (Notes#resume, with +velocity+, Notes#velocity): at a
-      # content jump inside a note that sounded before it (a seek, a late
-      # launch of a looping clip), the voice starts that note where an
-      # uninterrupted run would be: the impulse's seconds into its sample at
-      # the note's speed then (a note-on on the same sample wins), forward
-      # loops wrapped into the loop.  Instrument#play turns it on for
+      # +resume+ (the voice's Notes, whose #trigger is +trigger+): at a
+      # content jump inside a note that sounded before it (a seek;
+      # Notes#resumes?), the voice starts that note where an uninterrupted
+      # run would be: its seconds since it started into its sample at the
+      # note's speed then (a note-on on the same sample wins), forward loops
+      # wrapped into the loop.  The voice checks the stream's generation
+      # once per buffer (no node to read).  Instrument#play turns it on for
       # one-shot instruments without an envelope (regions-1).
       #
       # Playback reads the samples' band-limited levels (sample-mode
@@ -61,8 +62,7 @@ module MB
         attr_reader :seed
 
         def initialize(instrument, channel: 0, trigger: nil, number: nil, freq: nil, gate: nil, shift: nil, start: nil, transpose: 0, declick: Sampler::DECLICK,
-                       interpolation: nil, mips: nil, seed: nil, once: false, choke: nil, choke_fade: true, choke_time: nil, resume: nil, velocity: nil,
-                       sample_rate: 48000)
+                       interpolation: nil, mips: nil, seed: nil, once: false, choke: nil, choke_fade: true, choke_time: nil, resume: nil, sample_rate: 48000)
           raise ArgumentError, "A sampler voice plays a Sampler::Instrument (got #{instrument.inspect})" unless instrument.is_a?(Sampler::Instrument)
           @instrument = instrument
           @channel = Integer(channel)
@@ -81,10 +81,14 @@ module MB
           @start = start.nil? ? 0.0 : input(start)
           @shift = shift.nil? ? 0.0 : input(shift)
           @choke = choke.nil? ? nil : input(choke)
-          raise ArgumentError, 'A sampler voice that resumes notes needs their velocity (Notes#velocity)' if resume && velocity.nil?
-          @resume = resume.nil? || @once ? nil : input(resume)
-          @velocity = @resume ? input(velocity) : nil
-          @range = [0.0, 0.0]
+          raise ArgumentError, "A sampler voice resumes the notes of a voice's Notes (got #{resume.inspect})" unless resume.nil? || resume.is_a?(MB::Sound::Notes)
+          @resume = resume.nil? || @once ? nil : resume
+          @resume_generation = @resume&.stream&.generation
+          @resume_chase = nil
+          @resume_elapsed = nil
+          @resume_velocity = nil
+          lane = @resume&.stream
+          lane.allocator.resume_notes! if lane.is_a?(MIDI::Allocator::Lane)
           @choke_fade = !!choke_fade
           @choke_time = choke_time.nil? ? MB::Sound::Envelope::CHOKE_TIME : Float(choke_time)
           raise ArgumentError, "The choke time is seconds above 0 (got #{choke_time.inspect})" unless @choke_time > 0
@@ -173,10 +177,8 @@ module MB
           start = read(@start, count) or return nil
           shift = read(@shift, count) or return nil
           choke = @choke && (read(@choke, count) or return nil)
-          if @resume
-            res = read(@resume, count) or return nil
-            vel = read(@velocity, count) or return nil
-            trig, start = resume_notes(res, vel, trig, num, freq, start, shift, count) if resumes?(res)
+          if @resume && (at = resume_offset(count))
+            trig, start = resume_note(at, trig, num, freq, start, shift, count)
           end
 
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
@@ -190,10 +192,6 @@ module MB
           s[:start] = @start unless @start.is_a?(Numeric)
           s[:shift] = @shift unless @shift.is_a?(Numeric)
           s[:choke] = @choke if @choke
-          if @resume
-            s[:resume] = @resume
-            s[:velocity] = @velocity
-          end
           s.reject { |_, v| v.is_a?(Numeric) }
         end
 
@@ -246,51 +244,67 @@ module MB
           b
         end
 
-        # True if resume buffer +res+ has an impulse.
-        def resumes?(res)
-          return res > 0 if res.is_a?(Numeric)
-          Kernels.min_max(res, @range) ? @range[1] > 0 : res.max > 0
+        # The offset in this block of the content jump whose note this
+        # voice resumes (Notes#resumes?), or nil: the stream's generation is
+        # checked each block, and a jump's chase waits for the block holding
+        # its time (the voice's trigger node has read this block, so its
+        # cursor is the block's end).
+        def resume_offset(count)
+          stream = @resume.stream
+          g = stream.generation
+          unless g == @resume_generation
+            @resume_generation = g
+            c = stream.chase
+            @resume_chase = c && c.generation == g && @resume.resumes?(c) ? c : nil
+          end
+          c = @resume_chase or return nil
+
+          to = @resume.trigger.cursor
+          return nil unless c.time < to
+
+          @resume_chase = nil
+          @resume_elapsed = c.resume.to_f
+          v = c.event.velocity.to_f
+          @resume_velocity = v > 1 ? 1.0 : v
+          rate = @sample_rate.to_r
+          off = ((c.time - (to - Rational(count) / rate)) * rate).floor
+          off < 0 ? 0 : (off >= count ? count - 1 : off)
         end
 
-        # The trigger and start inputs with a note-on at each resume impulse
-        # of +res+ (velocity +vel+) whose start is where the resumed note's
-        # sample would be: the impulse's seconds at the speed of the region
-        # the kernel will pick (its round robin and random draws as of this
-        # block's start), forward and release loops wrapped (ping-pong loops
-        # are entered going forward).  A note-on on the same sample wins.
-        def resume_notes(res, vel, trig, num, freq, start, shift, count)
+        # The trigger and start inputs with a note-on at sample +i+ for the
+        # resumed note (Chase#resume seconds since it started, its
+        # velocity), its start where the note's sample would be: those
+        # seconds at the speed of the region the kernel will pick (round
+        # robin and random draws as of this block's start), forward and
+        # release loops wrapped (ping-pong loops are entered going
+        # forward).  A note-on on the same sample wins.
+        def resume_note(i, trig, num, freq, start, shift, count)
           k = Sampler::KernelRuby
-          trig = trig.is_a?(Numeric) ? Numo::SFloat.new(count).fill(trig) : trig.dup
-          start = start.is_a?(Numeric) ? Numo::SFloat.new(count).fill(start) : start.dup
+          t = @resume_elapsed
+          v = @resume_velocity
+          return [trig, start] unless (trig.is_a?(Numeric) ? trig : trig[i]) <= 0 && v > 0
+
           cfg = config
           regs = Array.new(@regions.shape[0]) { |r| @regions[r, true].to_a }
           ctx = { specs: @specs, regions: regs, split: Integer(cfg[2]), interp: cfg[3], last: @state[k::LAST_REGION].to_i }
+          fr = (start.is_a?(Numeric) ? start : start[i]).to_f
+          n = num.is_a?(Numeric) ? num : num[i]
+          note = k::Voice.new(false, nil)
+          k.note_on(ctx, note, 0, n.to_f, v, fr, (shift.is_a?(Numeric) ? shift : shift[i]).to_f, @counters.dup, [@rng[0].to_i], cfg[0], cfg[5])
+          return [trig, start] if note.region.nil?
 
-          res.each_with_index do |t, i|
-            next unless t > 0 && trig[i] <= 0
+          sp = note.base
+          sp *= (freq.is_a?(Numeric) ? freq : freq[i]) / note.nhz if freq && note.nhz > 0
+          r = regs[note.region]
+          len = r[k::STOP] - r[k::START]
+          return [trig, start] unless len > 0
 
-            v = vel.is_a?(Numeric) ? vel : vel[i]
-            v = v > 1 ? 1.0 : v.to_f
-            next unless v > 0
-
-            n = num.is_a?(Numeric) ? num : num[i]
-            note = k::Voice.new(false, nil)
-            k.note_on(ctx.merge(last: ctx[:last]), note, 0, n.to_f, v, start[i].to_f, (shift.is_a?(Numeric) ? shift : shift[i]).to_f,
-                      @counters.dup, [@rng[0].to_i], cfg[0], cfg[5])
-            next if note.region.nil?
-
-            sp = note.base
-            sp *= (freq.is_a?(Numeric) ? freq : freq[i]) / note.nhz if freq && note.nhz > 0
-            r = regs[note.region]
-            len = r[k::STOP] - r[k::START]
-            next unless len > 0
-
-            off = r[k::OFFSET] + start[i].to_f * len + t * @sample_rate * sp.abs
-            off = loop_offset(r, off) if r[k::LOOP_END] > r[k::LOOP_START] && r[k::REVERSE] == 0
-            trig[i] = v
-            start[i] = (off - r[k::OFFSET]) / len
-          end
-
+          off = r[k::OFFSET] + fr * len + t * @sample_rate * sp.abs
+          off = loop_offset(r, off) if r[k::LOOP_END] > r[k::LOOP_START] && r[k::REVERSE] == 0
+          trig = trig.is_a?(Numeric) ? Numo::SFloat.new(count).fill(trig) : trig.dup
+          start = start.is_a?(Numeric) ? Numo::SFloat.new(count).fill(start) : start.dup
+          trig[i] = v
+          start[i] = (off - r[k::OFFSET]) / len
           [trig, start]
         end
 

@@ -431,13 +431,9 @@ module MB
         end
 
         # True if Source::Chase +c+ resumes its note on this node's voice
-        # (see Notes#resume): it has a Chase#resume, and the Notes' stream
-        # isn't a Synth lane its allocator didn't give the note to.
+        # (see Notes#resumes?).
         def resumes_here?(c)
-          t = c.resume
-          return false unless t && t > 0
-          lane = @notes&.stream
-          !lane.respond_to?(:resume_lane?) || lane.resume_lane?(c)
+          @notes ? @notes.resumes?(c) : c.resume.to_f > 0
         end
 
         # A chased note that starts right at the jump (see #chase_item).

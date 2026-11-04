@@ -260,7 +260,7 @@ module MB
         # preroll: false)`, a looping clip launched or a form seeking
         # mid-section) inside a note that sounded before it in the content
         # playing now, the voice starts that note's sample where an
-        # uninterrupted run would be (Notes#resume), instead of leaving it
+        # uninterrupted run would be (Notes#resumes?), instead of leaving it
         # silent and the old content's sample ringing on.  :auto (the
         # default) resumes for one-shot instruments without an envelope
         # (plain samples, slices, chop hits: an envelope wouldn't follow);
@@ -377,7 +377,7 @@ module MB
             GraphNode::SamplerVoice.new(
               self, channel: c, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
               declick: declick, interpolation: interpolation, mips: mips, seed: seed, choke: choke, choke_fade: @envelope.nil?, choke_time: choke_time,
-              resume: resume ? source.resume : nil, velocity: resume ? source.velocity : nil
+              resume: resume ? source : nil
             )
           }
           nodes.each { |n| source.register(n) } if source && one_shot?
