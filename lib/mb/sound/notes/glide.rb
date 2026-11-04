@@ -67,6 +67,10 @@ module MB
       # 2 ms..5 s) with CC 65 (portamento on/off, off by default as in GM2)
       # deciding whether notes glide; CC 84 glides regardless of CC 65.
       class Glide < Number
+        # How close (in samples) a resumed glide's note start may be to a
+        # sample to count as on it (see #resume_position).
+        RESUME_SNAP = 1e-6
+
         # The glide time as given (seconds, a node, or :gm).
         attr_reader :time
 
@@ -290,9 +294,16 @@ module MB
 
           glide = from || (@had_note && enabled? && (legato || !@legato))
           @had_note = true
-          next_curve if @curves
           @hint_seconds = hint_seconds(event) if @lengths
-          glide_to(target, from || current, glide)
+          return glide_to(target, from || current, glide) unless @curves
+
+          # (where the glide in progress is, along its own curve, before
+          # the next curve takes over: SessionFuzz seed 293, a note-on
+          # between samples at 174 BPM came a sample before a :fast glide
+          # ended, and read it along the next step's :hold, its start)
+          start = from || current
+          next_curve
+          glide_to(target, start, glide)
         end
 
         def uncovered(entry)
@@ -351,7 +362,7 @@ module MB
             @hint_seconds = hint_seconds(c.event, c.elapsed)
             glide_to(marked_number(c.event), start, true)
             if @gliding
-              @position = (c.elapsed * @sample_rate).round
+              @position = resume_position(c)
               @gliding = false if @position >= @length
             end
           end
@@ -369,6 +380,23 @@ module MB
             when 121 then @gm_on = false if @gm # RP-15 resets portamento
             end
           end
+        end
+
+        # The samples a resumed glide (Chase +c+) has played on the chase's
+        # sample: from the sample its note-on would have landed on (the
+        # floor of its stream time, as #items places events) to the
+        # chase's, so it ends on the same sample as a glide that played
+        # from its note-on (tween-curves-1: SessionFuzz seed 293, 174 BPM,
+        # a :hold step launched mid-step jumped a sample apart from the
+        # uninterrupted run; the rounded elapsed time was off by one where
+        # steps start between samples).
+        # (Chase#elapsed comes from the tempo in Float seconds: the note's
+        # start snaps to a sample within RESUME_SNAP of one, so 26400 plus
+        # 4e-12 samples counts as 26400)
+        def resume_position(c)
+          chase = c.time.to_r * @sample_rate
+          start = chase - c.elapsed.to_r * @sample_rate
+          chase.floor - (start + RESUME_SNAP).floor
         end
 
         # With a list of curves: the curve of the glide starting now (a
