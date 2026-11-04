@@ -498,6 +498,8 @@ module MB
         #     master { |mix| mix.squeeze(depth: 0.3, time: 0.5) }
         def squeeze(preset = :default, depth: nil, time: 1.0, upward: 1.0, downward: 1.0, split: nil, gain: 0.db, max_gain: 24.db, lookahead: 0.002)
           settings = Squeeze.preset_settings(preset)
+          # (params and knobs are read once while building)
+          depth, time, upward, downward = [depth, time, upward, downward].map { |v| GraphNode.build_setting(v) }
           depth ||= settings[:depth]
           split ||= settings[:split]
           raise ArgumentError, "Squeeze depth must be 0..1 (got #{depth.inspect})" unless depth.is_a?(Numeric) && (0..1).cover?(depth)

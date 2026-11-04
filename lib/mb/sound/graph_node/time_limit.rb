@@ -37,6 +37,8 @@ module MB
         attr_reader :length
 
         def initialize(source, length)
+          # (a param or knob is its number of seconds while building)
+          length = GraphNode.build_setting(length)
           fixed = length.is_a?(Numeric) || (length.is_a?(MB::Sound::Length) && length.fixed?)
           unless fixed && length.to_r >= 0
             raise ArgumentError, "Give #until a length >= 0: seconds, a Length (e.g. 480.samples), or a Duration (e.g. 2.bars) (got #{length.inspect})"

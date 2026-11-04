@@ -188,6 +188,27 @@ module MB
         end
       end
 
+      # True if +v+ is a param or knob (a Constant, Knob, or Knob::Reader,
+      # through Tee branches): what .build_value reads as a number.
+      def self.build_param?(v)
+        return false unless v.is_a?(GraphNode)
+        v = climb_tee_tree(v)
+        v.is_a?(Constant) || v.is_a?(Knob) || v.is_a?(Knob::Reader)
+      end
+
+      # +v+ as a setting read once while the graph builds (fit-patch-2,
+      # 2026-11-04): a param or knob (.build_param?) becomes its number
+      # (.build_value: on a track, a build knob whose turns rebuild the
+      # track), anything else stays as it is, so a setting that takes only
+      # numbers (a burst spacing, a reverb's room size) takes a graph
+      # document's param too and plays the same samples as the number.
+      # Settings that take nodes as live values check for those first.
+      # GraphIO::NumberOnly lists the settings that still take only
+      # numbers (spec/lib/mb/sound/graph_io/number_only_spec.rb).
+      def self.build_setting(v)
+        build_param?(v) ? build_value(v) : v
+      end
+
       # True if +v+ (see .build_value) is on (nonzero); +default+ for nil.
       def self.build_flag?(v, default: true)
         b = build_value(v)

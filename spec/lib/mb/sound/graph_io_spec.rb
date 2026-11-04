@@ -353,6 +353,42 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
     end
   end
 
+  # Console forms fits print (fit-patch-2): blocks run once while building
+  # are walked as document code, MB::Sound.x is the top-level x.
+  describe 'build-time blocks and full names' do
+    let(:clip) { MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8.loop }
+
+    it 'walks then blocks as document code: params and DSL calls inside, the same samples as the Ruby' do
+      code = "graph #{io::FORMAT}, name: \"t\"\nparam :sq, 0.25\nparam :f, 900.0\n\n" \
+             '220.hz.saw.then { |u| u + u * u * sq }.then { |x| ap = x.filter(:allpass, cutoff: f, quality: 0.5); x + ap * 0.5 }'
+      g = io.load(code)
+      want = 220.hz.saw.then { |u| u + u * u * 0.25 }.then { |x| ap = x.filter(:allpass, cutoff: 900.0.constant, quality: 0.5); x + ap * 0.5 }
+      expect(render(g)).to eq(render(want))
+      expect(io.document_of(g)[:sq]).to eq(0.25)
+      expect_load_error('220.hz.saw.then { |x| 3.times { x } }', 1, /times isn't a graph method/)
+    end
+
+    it 'loads with_seed blocks, the draws inside following the seed whatever the root seed' do
+      code = "# inputs: midi\nwith_seed(4) { synth(midi, voices: 1) { |v| v.hz.saw.at(0.2) + noise * 0.3 } }"
+      MB::Sound.seed(1)
+      want = render(MB::Sound.with_seed(4) { MB::Sound.synth(clip, voices: 1) { |v| v.hz.saw.at(0.2) + MB::Sound.noise * 0.3 } }, buffers: 10)
+      MB::Sound.seed(99)
+      expect(render(io.load(code, inputs: { midi: clip }), buffers: 10)).to eq(want)
+      MB::Sound.seed(99)
+      expect(render(io.load(code.sub('with_seed(4)', 'with_seed(5)'), inputs: { midi: clip }), buffers: 10)).not_to eq(want)
+      expect_load_error("with_seed(1) { system('ls') }", 1, /`system` is never allowed/)
+    end
+
+    it 'reads MB::Sound.x as x and the Drums helpers, nothing else of MB::Sound' do
+      g = io.load('MB::Sound.noise(seed: 3) * MB::Sound::Drums.decay_env(MB::Sound.seq(MB::Sound::C4).n4.loop.notes.trigger, 0.1)')
+      want = MB::Sound.noise(seed: 3) * MB::Sound::Drums.decay_env(MB::Sound.seq(MB::Sound::C4).n4.loop.notes.trigger, 0.1)
+      expect(render(g, buffers: 6)).to eq(render(want, buffers: 6))
+      expect_load_error('MB::Sound.live = true', 1, /live= isn't a graph method of MB::Sound|never allowed/)
+      expect_load_error('MB::Sound.close_outputs', 1, /close_outputs isn't a graph method of MB::Sound/)
+      expect_load_error("MB::Sound::Drums.const_get(:X)", 1, /never allowed/)
+    end
+  end
+
   describe 'runtime blocks' do
     it 'loads blocks within the safe subset and prints them back' do
       code = "220.hz.saw.proc { |buf| (buf * 3).clip(-0.5, 0.5) * 2 }"

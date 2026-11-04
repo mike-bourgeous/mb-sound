@@ -319,6 +319,46 @@ RSpec.describe(MB::Sound::Drums::Machine, :aggregate_failures) do
     end
   end
 
+  describe 'repeats, env triggers, and params (fit-patch-2)' do
+    let(:grid) { MB::Sound.grid(16, clap: 'x...X...').loop }
+    let(:old_form) {
+      MB::Sound.kit {
+        voice(:clap) { |h|
+          b = h.bursts(4, 0.0093, falloff: 0.8821)
+          env = MB::Sound::Drums.decay_env(b, 0.0164, curve: 30) + MB::Sound::Drums.decay_env(MB::Sound::Drums::Repeats.new(h.t, [[0.0271, 1.0]]), 0.4412) * 0.2135
+          MB::Sound.noise.filter(:bandpass, cutoff: 1184, quality: 2) * env
+        }
+      }
+    }
+
+    it 'plays env(trigger:) and repeats as Drums.decay_env and Repeats.new do' do
+      new_form = MB::Sound.kit {
+        voice(:clap) { |h|
+          env = h.env(0.0164, curve: 30, trigger: h.bursts(4, 0.0093, falloff: 0.8821)) + h.env(0.4412, trigger: h.repeats([[0.0271, 1.0]])) * 0.2135
+          MB::Sound.noise.filter(:bandpass, cutoff: 1184, quality: 2) * env
+        }
+      }
+      ref = collect(old_form.kit(grid, seed: 3), 0.6)
+      expect(ref.abs.max).to be > 0.05
+      expect(collect(new_form.kit(grid, seed: 3), 0.6)).to eq(ref)
+    end
+
+    it 'reads params and knobs for burst spacing, falloff, and repeat delays and gains while building' do
+      c = ->(v) { v.constant }
+      k = MB::Sound::GraphNode::Knob.new(:falloff, 0.8821, range: 0.4..1.2)
+      with_params = MB::Sound.kit {
+        voice(:clap) { |h|
+          b = h.bursts(4, c.(0.0093), falloff: k)
+          env = MB::Sound::Drums.decay_env(b, 0.0164, curve: 30) + MB::Sound::Drums.decay_env(MB::Sound::Drums::Repeats.new(h.t, [[c.(0.0271), c.(1.0)]]), 0.4412) * 0.2135
+          MB::Sound.noise.filter(:bandpass, cutoff: 1184, quality: 2) * env
+        }
+      }
+      expect(collect(with_params.kit(grid, seed: 3), 0.6)).to eq(collect(old_form.kit(grid, seed: 3), 0.6))
+      expect { MB::Sound::Drums::Repeats.new(MB::Sound.seq(MB::Sound::C4).notes.trigger, [[0.01, 220.hz.saw]]) }
+        .to raise_error(ArgumentError, /Repeat gains are numbers, params, or knobs/)
+    end
+  end
+
   describe 'graph documents' do
     it 'saves kits as their blocks and loads them without running code' do
       g = MB::Sound.grid(16, kick: 'X...x...', snare: '....x...', hat: 'x.x.x.x.', oh: '..x...x.', cb: 'x..x..x.').loop

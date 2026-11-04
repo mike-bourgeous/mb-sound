@@ -20,6 +20,8 @@ module MB
         attr_reader :length
 
         def initialize(length, sample_rate: 48000)
+          # (a param or knob is its number of seconds while building)
+          length = GraphNode.build_setting(length)
           fixed = length.is_a?(Numeric) || (length.is_a?(MB::Sound::Length) && length.fixed?)
           raise ArgumentError, "Silence needs a length >= 0: seconds or a Length (got #{length.inspect})" unless fixed && length.to_r >= 0
 

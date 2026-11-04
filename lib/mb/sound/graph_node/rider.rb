@@ -90,6 +90,8 @@ module MB
         # rising, +gate+ the LU under the recent loudest program below which
         # it holds.
         def initialize(inputs, target:, start: 0.db, range: 9.db, down: 3.0, up: 10.0, gate: 10.0)
+          # (times are read once while building: params and knobs too)
+          down, up, gate = [down, up, gate].map { |v| GraphNode.build_setting(v) }
           inputs = Array(inputs).flat_map { |n|
             raise ArgumentError, "Rider inputs must be graph nodes (got #{n.class})" unless n.is_a?(GraphNode) || n.is_a?(MultiOutput)
             n.outputs

@@ -50,6 +50,9 @@ module MB
         attr_reader :hold_length, :fade_length
 
         def initialize(source, hold: 1, fade: 0.5)
+          # (params and knobs are their numbers of seconds while building)
+          hold = GraphNode.build_setting(hold)
+          fade = GraphNode.build_setting(fade)
           [[:hold, hold], [:fade, fade]].each do |name, v|
             fixed = v.is_a?(Numeric) || (v.is_a?(MB::Sound::Length) && !v.is_a?(MB::Sound::Sequence::Duration) && v.fixed?)
             unless fixed && v.to_r >= 0

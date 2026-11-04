@@ -63,6 +63,16 @@ RSpec.describe(MB::Sound::Length, :aggregate_failures) do
       expect { MB::Sound::Length.seconds(2.hz.lfo) }.to raise_error(ArgumentError, /length of time/)
     end
 
+    it "reads a param or knob as its number of seconds while building (fit-patch-2)" do
+      k = MB::Sound::GraphNode::Knob.new(:t, 0.02, range: 0.0..1.0)
+      expect(MB::Sound::Length.seconds(0.25.constant)).to eq(0.25)
+      expect(MB::Sound::Length.seconds(k)).to eq(0.02)
+      expect(MB::Sound::Length.seconds(k.get_sampler)).to eq(0.02)
+      expect(MB::Sound::Length.samples(0.5.constant, sample_rate: 48000)).to eq(24000)
+      expect(MB::Sound::GraphNode.build_setting(220.hz.saw)).to be_a(MB::Sound::Tone)
+      expect(MB::Sound::GraphNode.build_setting(3)).to eq(3)
+    end
+
     it 'snaps lengths within a billionth of a whole sample' do
       expect(MB::Sound::Length.snap(0.1 * 48000)).to eq(4800)
       expect(MB::Sound::Length.snap(4800.4)).to eq(4800.4)

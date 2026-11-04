@@ -121,6 +121,9 @@ module MB
           'MB::Sound::Sequence::Duration' => %i[new],
           # Tweening curves (Curve#to_ruby: `Curve[:back, overshoot: 0.3]`)
           'MB::Sound::Curve' => %i[[]],
+          # Kit voice helpers (a module: kit blocks print as their source,
+          # and fitted claps call Drums.decay_env on bursts; fit-patch-2)
+          'MB::Sound::Drums' => %i[decay_env mix hz],
         }.freeze
 
         # Methods that read files (allowed only with a path relative to the
@@ -137,8 +140,12 @@ module MB
         # Scale values for transforms such as Clip#ghost_chords; knob: a
         # rack's own knobs, inside rack blocks only, see Loader; breakbeat:
         # a break that ships with mb-sound, read from the library, never a
-        # document path).
-        TOP_EXTRA = (Set[:per_voice, :per_channel, :scale, :tones, :weights, :harmony, :markov, :lsystem, :knob, :cc, :modes, :breakbeat] | MB::Sound::Rack::CONSTRUCTORS).freeze
+        # document path;
+        # with_seed: a block whose random draws start from a given seed
+        # (MB::Sound.with_seed; fit-patch-2: fits print it around a voice),
+        # walked as document code.)
+        TOP_EXTRA = (Set[:per_voice, :per_channel, :scale, :tones, :weights, :harmony, :markov, :lsystem, :knob, :cc, :modes, :breakbeat, :with_seed] |
+                     MB::Sound::Rack::CONSTRUCTORS).freeze
 
         # Methods whose blocks build graphs (run once per call as document
         # code) rather than run while sampling.
@@ -146,7 +153,11 @@ module MB
         # rhythm rows (GenerativeMethods#beats) print as
         # their source (runtime blocks to the recorder) and load as build
         # blocks, whose parameterless forms run on the builder or hit.
-        BUILD_BLOCKS = (MB::Sound::GraphNode::Recipe::BUILD_BLOCKS | Set[:wet, :kit, :drum_kit, :voice, :beats]).freeze
+        # `then` (Kernel#then: the block runs once, at once, on its
+        # receiver) and `with_seed` (MB::Sound.with_seed) build too
+        # (fit-patch-2: a fit's `x.then { |u| ... }` reads params and
+        # calls DSL methods; it used to be held to the runtime subset).
+        BUILD_BLOCKS = (MB::Sound::GraphNode::Recipe::BUILD_BLOCKS | Set[:wet, :kit, :drum_kit, :voice, :beats, :then, :with_seed]).freeze
 
         # Methods allowed in the safe subset of runtime blocks (proc bodies
         # and lambda values, run while sampling): arithmetic and math on
@@ -264,14 +275,15 @@ module MB
 
           # Classes and markers a document may name, by their name relative
           # to MB::Sound: classes whose .new is recorded, Data values, the
-          # CLASS_METHODS classes, and seq markers.
+          # CLASS_METHODS classes and modules, and seq markers.
           def constants
             @constants ||= begin
               table = {}
               ObjectSpace.each_object(Module) do |m|
                 name = m.name
                 next unless name&.start_with?('MB::Sound::')
-                next unless m.is_a?(Class)
+                # (modules only where CLASS_METHODS names their functions)
+                next unless m.is_a?(Class) || CLASS_METHODS.key?(name)
                 next unless m.singleton_class.include?(GraphNode::Recipe::NewRecording) || data_class?(m) || CLASS_METHODS.key?(name)
                 table[name.delete_prefix('MB::Sound::')] = m
               end

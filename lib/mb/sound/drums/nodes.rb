@@ -19,16 +19,21 @@ module MB
         attr_reader :taps
 
         # +taps+ is a list of [delay, gain] pairs (delays in seconds or any
-        # Length, 0 for the hit itself).
+        # Length, 0 for the hit itself; delays and gains may be params or
+        # knobs, read while the graph builds).
         def initialize(trigger, taps, sample_rate: 48000)
           raise ArgumentError, "Repeats need a trigger node (got #{trigger.inspect})" unless trigger.respond_to?(:sample)
           raise ArgumentError, 'Repeats need at least one [delay, gain] pair' if taps.empty?
 
           @input = trigger.get_sampler
+          # (delays and gains are read once while building: a param or
+          # knob is its number, GraphNode.build_setting; fit-patch-2)
           @taps = taps.map { |d, g|
             s = d.is_a?(Numeric) ? d : MB::Sound::Length.seconds(d)
             raise ArgumentError, "Repeat delays are 0 seconds or more (got #{d.inspect})" unless s.is_a?(Numeric) && s >= 0
-            [s.to_f, g.to_f]
+            gain = GraphNode.build_setting(g)
+            raise ArgumentError, "Repeat gains are numbers, params, or knobs (got #{g.inspect})" unless gain.is_a?(Numeric)
+            [s.to_f, gain.to_f]
           }.freeze
           @sample_rate = sample_rate.to_f
           @node_type_name = 'Repeats'

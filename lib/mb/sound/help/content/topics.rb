@@ -291,7 +291,7 @@ module MB
         `D1.flam`), and kits of your own:
         `kit { voice :kick, tune: 50 do |h| h.body(h.tune, sweep: 3) +
         h.click end; choke :open_hat, by: :closed_hat }` with layers
-        (body, noise, click, metal, sample, fm, bursts, env, sweep) and
+        (body, noise, click, metal, sample, fm, bursts, repeats, env, sweep) and
         voices borrowed from the machines (`tr909 :clap`, `tr808 :cowbell`).
       TEXT
       commands :tr808, :tr909, :kit, :drum_kit, :grid, :euclid

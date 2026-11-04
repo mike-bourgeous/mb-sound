@@ -806,6 +806,7 @@ module MB
 end
 
 require_relative 'graph_io/registry'
+require_relative 'graph_io/number_only'
 require_relative 'graph_io/document'
 require_relative 'graph_io/loader'
 require_relative 'graph_io/old_decibels'

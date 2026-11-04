@@ -130,7 +130,7 @@ module MB
       # numbers become its new params).  +saved:+ is the header's time
       # (nil leaves it out: Take::Reader's rebuilt versions).
       def document(code, params, name:, description: nil, input: :midi, match: nil, saved: Time.now)
-        code = unwrap(code.to_s)
+        code = unroll(unwrap(code.to_s), name)
         result = Prism.parse(code)
         raise Error, "fit_patch #{name}: the code doesn't parse: #{result.errors.first&.message}" unless result.success?
         bad = params.keys.select { |k| !k.to_s.match?(/\A[a-z_][a-z0-9_]*\z/) || VOICE_CALLS.include?(k) || k == input }
@@ -382,6 +382,86 @@ module MB
         a.slice
       end
 
+      # The most copies .unroll writes for one `n.times { }`.
+      UNROLL_LIMIT = 32
+
+      # +code+ with each `n.times { ... }` statement (n an Integer literal,
+      # the block's value unused) written out n times, its block parameter
+      # read as each index (fit-patch-2: a fit's phaser chains four
+      # allpasses with `4.times { ap = ap.filter(...) }`; graph documents
+      # have no loops, by design, so the document gets the chain the loop
+      # built, which is also what the graph prints as).  Other `times`
+      # calls stay, and the loader names them.
+      def unroll(code, name = nil)
+        UNROLL_LIMIT.times do
+          tree = Prism.parse(code)
+          return code unless tree.success?
+          call = unrollable(tree.value)
+          return code unless call
+          count = call.receiver.value
+          if count > UNROLL_LIMIT
+            raise Error, "fit_patch #{name}: #{call.receiver.slice}.times writes out #{count} copies (at most #{UNROLL_LIMIT}): write the chain out"
+          end
+          body = call.block.body
+          text = body ? code.byteslice(body.location.start_offset...body.location.end_offset) : 'nil'
+          param = call.block.parameters&.parameters&.requireds&.first&.name
+          sep = text.include?("\n") ? "\n" : '; '
+          copies = Array.new(count) { |i| param ? replace_reads(text, body, param, i.to_s) : text }
+          out = code.b
+          out[call.location.start_offset...call.location.end_offset] = (count == 0 ? 'nil' : copies.join(sep)).b
+          code = out.force_encoding(code.encoding)
+        end
+        code
+      end
+
+      # The first `n.times { }` statement of +root+ that .unroll writes
+      # out (its innermost first), or nil.
+      def unrollable(root)
+        found = nil
+        stack = [root]
+        until stack.empty?
+          n = stack.pop
+          if n.is_a?(Prism::StatementsNode)
+            n.body[0...-1].each do |st|
+              next unless st.is_a?(Prism::CallNode) && st.name == :times && st.receiver.is_a?(Prism::IntegerNode) && st.arguments.nil? &&
+                          st.block.is_a?(Prism::BlockNode) && unrollable_params?(st.block.parameters)
+              inner = st.block.body && unrollable(st.block.body)
+              return inner || st
+            end
+          end
+          stack.concat(n.compact_child_nodes.reverse)
+        end
+        found
+      end
+
+      # True for no block parameters or one plain name.
+      def unrollable_params?(params)
+        return true if params.nil?
+        return false unless params.is_a?(Prism::BlockParametersNode) && params.parameters && params.locals.empty?
+        list = params.parameters
+        list.requireds.length == 1 && list.requireds[0].is_a?(Prism::RequiredParameterNode) && list.optionals.empty? &&
+          list.rest.nil? && list.posts.empty? && list.keywords.empty? && list.keyword_rest.nil? && list.block.nil?
+      end
+
+      # +text+ (the source of +body+) with each read of local +name+ at the
+      # block's own depth replaced by +value+.
+      def replace_reads(text, body, name, value)
+        reads = []
+        stack = [[body, 0]]
+        until stack.empty?
+          n, depth = stack.pop
+          reads << n if n.is_a?(Prism::LocalVariableReadNode) && n.name == name && n.depth == depth
+          d = n.is_a?(Prism::BlockNode) || n.is_a?(Prism::LambdaNode) ? depth + 1 : depth
+          n.compact_child_nodes.each { |c| stack << [c, d] }
+        end
+        base = body.location.start_offset
+        out = text.b
+        reads.sort_by { |r| -r.location.start_offset }.each do |r|
+          out[(r.location.start_offset - base)...(r.location.end_offset - base)] = value.b
+        end
+        out.force_encoding(text.encoding)
+      end
+
       # The node giving the voice's source in +root+ (a Prism tree): the
       # first argument of the first VOICE_CALLS call met walking the tree
       # (calls made before inside blocks count too: a document's locals),
@@ -425,38 +505,82 @@ module MB
       # a param there would be a node, which these don't take.
       UNIT_CALLS = %i[db dB cents hz khz ms s sec seconds second n1 n2 n4 n8 n16 n32 bars bar beats beat].freeze
 
-      # Calls whose blocks run while the graph plays (the documents' safe
-      # subset: arithmetic on the block's own arguments, no params).
-      RUNTIME_BLOCKS = %i[then map_samples].freeze
+      # True if a block given to a call named +name+ runs while the graph
+      # plays (the documents' safe subset for runtime blocks: arithmetic on
+      # the block's own arguments, no params): every literal block but the
+      # build blocks the loader walks as document code (GraphIO::Registry::
+      # BUILD_BLOCKS: synth, kit, voice, then, with_seed, ...).
+      def runtime_block?(name)
+        !GraphIO::Registry::BUILD_BLOCKS.include?(name)
+      end
 
       # Yields each numeric literal of +node+'s tree with the keyword it is
-      # the value of (a Symbol, or nil) and why it can't be a param (nil, or
-      # words: inside a Range, a typed value, inside a runtime block).
-      def literals(node, key = nil, why = nil, &block)
+      # the value of (a Symbol, or nil), why it can't be a param (nil, or
+      # words: inside a Range, a typed value, inside a runtime block, at a
+      # setting that takes only numbers), and its setting ([call,
+      # argument]: the innermost call it is an argument or receiver of, as
+      # GraphIO::NumberOnly names settings; nil outside calls).  With
+      # +number_only: false+ the NumberOnly settings don't count as reasons
+      # (the param sweep guard checks the list with that).
+      def literals(node, key = nil, why = nil, setting = nil, number_only: true, &block)
+        walk = ->(n, k, w, st) { literals(n, k, w, st, number_only: number_only, &block) }
         case node
         when Prism::FloatNode, Prism::IntegerNode
-          yield node, key, why
+          only = number_only && why.nil? ? GraphIO::NumberOnly.reason(setting) : nil
+          yield node, key, why || (only && "at a setting that takes only numbers (#{setting_name(setting)}: #{only})"), setting
         when Prism::AssocNode
           k = node.key.is_a?(Prism::SymbolNode) ? node.key.unescaped.to_sym : nil
-          literals(node.key, nil, why, &block)
-          literals(node.value, k, why, &block)
+          walk.(node.key, nil, why, setting)
+          walk.(node.value, k, why, setting)
         when Prism::RangeNode
-          node.compact_child_nodes.each { |c| literals(c, nil, why || 'inside a Range (a setting, not a knob)', &block) }
+          node.compact_child_nodes.each { |c| walk.(c, nil, why || 'inside a Range (a setting, not a knob)', setting) }
         when Prism::CallNode
           if node.receiver && UNIT_CALLS.include?(node.name) && node.arguments.nil? &&
              (node.receiver.is_a?(Prism::FloatNode) || node.receiver.is_a?(Prism::IntegerNode))
-            literals(node.receiver, key, why || "a typed value (#{node.slice}): bind it in the inspector", &block)
+            walk.(node.receiver, key, why || "a typed value (#{node.slice}): bind it in the inspector", setting)
           else
-            literals(node.receiver, nil, why, &block) if node.receiver
-            node.arguments&.compact_child_nodes&.each { |c| literals(c, nil, why, &block) }
+            label = call_label(node)
+            walk.(node.receiver, nil, why, [label, :self]) if node.receiver
+            (node.arguments&.arguments || []).each_with_index do |a, i|
+              if a.is_a?(Prism::KeywordHashNode)
+                a.elements.each do |el|
+                  kw = el.is_a?(Prism::AssocNode) && el.key.is_a?(Prism::SymbolNode) ? el.key.unescaped.to_sym : :**
+                  walk.(el, nil, why, [label, kw])
+                end
+              else
+                walk.(a, nil, why, [label, i])
+              end
+            end
             if node.block
-              w = RUNTIME_BLOCKS.include?(node.name) ? "inside a #{node.name} block (runs while playing; params can't go there)" : nil
-              literals(node.block, nil, why || w, &block)
+              w = node.block.is_a?(Prism::BlockNode) && runtime_block?(node.name) ? "inside a #{node.name} block (runs while playing; params can't go there)" : nil
+              walk.(node.block, nil, why || w, nil)
             end
           end
         else
-          node.compact_child_nodes.each { |c| literals(c, nil, why, &block) }
+          node.compact_child_nodes.each { |c| walk.(c, nil, why, setting) }
         end
+      end
+
+      # A call's name as GraphIO::NumberOnly names settings: the method
+      # name, or `Const.name` for a call on a constant other than MB::Sound
+      # (`Filter::Biquad.new`).
+      def call_label(node)
+        r = node.receiver
+        if r.is_a?(Prism::ConstantReadNode) || r.is_a?(Prism::ConstantPathNode)
+          c = r.slice.delete_prefix('::').delete_prefix('MB::Sound').delete_prefix('::')
+          return "#{c}.#{node.name}" unless c.empty?
+        end
+        node.name.to_s
+      end
+
+      # +setting+ ([call, argument]) as words: `tween(0)`, `lowpass(quality:)`.
+      def setting_name(setting)
+        call, arg = setting
+        a = case arg
+            when Symbol then arg == :self ? 'receiver' : "#{arg}:"
+            else arg.to_s
+            end
+        "#{call}(#{a})"
       end
 
       # The one of +hits+ ({ name => value }) whose value is closest to
