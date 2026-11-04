@@ -64,6 +64,21 @@ module MB
           Decibels.db_of(value, name, zero: zero)
         end
 
+        # Transfer curve points as given to #compand (and GraphNode#shape_db):
+        # +points+ (a Hash of input => output, an Array of [input, output] or
+        # [input, output, shape] rows, or nil) followed by +more+ (points
+        # given as keywords), as rows of dB numbers (gain_db: `-60.db`
+        # exactly, bare numbers as linear gains) for Dynamics::Transfer.points.
+        # +what+ names the method in errors.
+        def self.point_rows(points, more, what)
+          rows = points.is_a?(Hash) ? points.to_a : points.to_a
+          rows += more.to_a
+          rows.map { |p|
+            next p unless p.is_a?(Array) && (2..3).cover?(p.length)
+            [gain_db(p[0], "#{what} point input"), gain_db(p[1], "#{what} point output"), *p[2..]]
+          }
+        end
+
         # A dB number for the classes under the DSL (Dynamics, Transfer),
         # which take dB: a Decibels value as its dB value, numbers as they
         # are.
@@ -335,13 +350,7 @@ module MB
             raise ArgumentError, 'Give compand points or a block, not both' if points || !more_points.empty?
             Dynamics::Transfer.from_block(over, step: step, &block)
           else
-            pts = points.is_a?(Hash) ? points.to_a : points.to_a
-            pts += more_points.to_a
-            pts = pts.map { |p|
-              next p unless p.is_a?(Array) && (2..3).cover?(p.length)
-              [DynamicsMethods.gain_db(p[0], 'compand point input'), DynamicsMethods.gain_db(p[1], 'compand point output'), *p[2..]]
-            }
-            Dynamics::Transfer.points(pts, interpolation: interpolation)
+            Dynamics::Transfer.points(DynamicsMethods.point_rows(points, more_points, 'compand'), interpolation: interpolation)
           end
 
           finish_dynamics(Dynamics.new(

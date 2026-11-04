@@ -145,8 +145,11 @@ module MB
           # Outside the points the curve continues its end slopes.
           #
           # Output levels must not decrease (louder input never comes out
-          # quieter), and Curve shapes must be monotonic.
-          def self.points(points, interpolation: :linear, description: nil)
+          # quieter) unless +monotonic+ is false (waveshapers like
+          # GraphNode::DbShaper fold back), and Curve shapes must be
+          # monotonic (each segment then moves one way; cubic slopes are
+          # zero at turning points, so cubics never overshoot either way).
+          def self.points(points, interpolation: :linear, description: nil, monotonic: true)
             raise ArgumentError, "Interpolation must be :linear or :cubic (got #{interpolation.inspect})" unless [:linear, :cubic].include?(interpolation)
 
             rows = points.is_a?(Hash) ? points.to_a : points.to_a
@@ -161,7 +164,7 @@ module MB
             rows.sort_by!(&:first)
             rows.each_cons(2) do |a, b|
               raise ArgumentError, "Transfer point input levels must differ (#{a[0]} given twice)" if a[0] == b[0]
-              raise ArgumentError, "Transfer curve output levels must not decrease (#{a[0]} => #{a[1]}, #{b[0]} => #{b[1]})" if b[1] < a[1]
+              raise ArgumentError, "Transfer curve output levels must not decrease (#{a[0]} => #{a[1]}, #{b[0]} => #{b[1]})" if monotonic && b[1] < a[1]
             end
 
             xs = rows.map(&:first)
