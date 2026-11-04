@@ -375,6 +375,9 @@ module MB
         steals one, fading it over 3 ms from the steal (`steal_fade: 10.ms`
         for longer; `sample.play(v, steal_fade: false)` or `.sampler(brk,
         voices: 3, steal_fade: false)` lets it ring on under the new notes).
+        A seek (or `render(from:, preroll: false)`) landing inside a
+        one-shot's note starts its sample where the song would be
+        (`resume: false` for the old silence there).
 
         Converters: `.lofi(:mpc60)` is the cleanest (40 kHz, filtered: grit
         that sits in a mix), `:s950` darker (31.25 kHz, the jungle

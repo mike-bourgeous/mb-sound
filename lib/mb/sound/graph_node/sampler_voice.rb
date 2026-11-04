@@ -24,6 +24,14 @@ module MB
       # idle on the exact sample.  +choke_time+ (seconds) changes that time
       # (Instrument#play's +steal_fade+ length).
       #
+      # +resume+ (Notes#resume, with +velocity+, Notes#velocity): at a
+      # content jump inside a note that sounded before it (a seek, a late
+      # launch of a looping clip), the voice starts that note where an
+      # uninterrupted run would be: the impulse's seconds into its sample at
+      # the note's speed then (a note-on on the same sample wins), forward
+      # loops wrapped into the loop.  Instrument#play turns it on for
+      # one-shot instruments without an envelope (regions-1).
+      #
       # Playback reads the samples' band-limited levels (sample-mode
       # Wavetable levels, +mips+ apart, +interpolation+ :optimal), so
       # pitching up doesn't alias; `interpolation: :none, mips: false` is
@@ -53,7 +61,8 @@ module MB
         attr_reader :seed
 
         def initialize(instrument, channel: 0, trigger: nil, number: nil, freq: nil, gate: nil, shift: nil, start: nil, transpose: 0, declick: Sampler::DECLICK,
-                       interpolation: nil, mips: nil, seed: nil, once: false, choke: nil, choke_fade: true, choke_time: nil, sample_rate: 48000)
+                       interpolation: nil, mips: nil, seed: nil, once: false, choke: nil, choke_fade: true, choke_time: nil, resume: nil, velocity: nil,
+                       sample_rate: 48000)
           raise ArgumentError, "A sampler voice plays a Sampler::Instrument (got #{instrument.inspect})" unless instrument.is_a?(Sampler::Instrument)
           @instrument = instrument
           @channel = Integer(channel)
@@ -72,6 +81,10 @@ module MB
           @start = start.nil? ? 0.0 : input(start)
           @shift = shift.nil? ? 0.0 : input(shift)
           @choke = choke.nil? ? nil : input(choke)
+          raise ArgumentError, 'A sampler voice that resumes notes needs their velocity (Notes#velocity)' if resume && velocity.nil?
+          @resume = resume.nil? || @once ? nil : input(resume)
+          @velocity = @resume ? input(velocity) : nil
+          @range = [0.0, 0.0]
           @choke_fade = !!choke_fade
           @choke_time = choke_time.nil? ? MB::Sound::Envelope::CHOKE_TIME : Float(choke_time)
           raise ArgumentError, "The choke time is seconds above 0 (got #{choke_time.inspect})" unless @choke_time > 0
@@ -160,6 +173,11 @@ module MB
           start = read(@start, count) or return nil
           shift = read(@shift, count) or return nil
           choke = @choke && (read(@choke, count) or return nil)
+          if @resume
+            res = read(@resume, count) or return nil
+            vel = read(@velocity, count) or return nil
+            trig, start = resume_notes(res, vel, trig, num, freq, start, shift, count) if resumes?(res)
+          end
 
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
           Kernels.sampler_play(@buf, @specs, @regions, @state, @counters, @rng, [trig, num, freq, gate, start, shift, choke], config)
@@ -172,6 +190,10 @@ module MB
           s[:start] = @start unless @start.is_a?(Numeric)
           s[:shift] = @shift unless @shift.is_a?(Numeric)
           s[:choke] = @choke if @choke
+          if @resume
+            s[:resume] = @resume
+            s[:velocity] = @velocity
+          end
           s.reject { |_, v| v.is_a?(Numeric) }
         end
 
@@ -222,6 +244,65 @@ module MB
           return nil if b.nil? || b.empty?
           raise ArgumentError, 'Sampler inputs must give the buffer size asked for' if b.length != count
           b
+        end
+
+        # True if resume buffer +res+ has an impulse.
+        def resumes?(res)
+          return res > 0 if res.is_a?(Numeric)
+          Kernels.min_max(res, @range) ? @range[1] > 0 : res.max > 0
+        end
+
+        # The trigger and start inputs with a note-on at each resume impulse
+        # of +res+ (velocity +vel+) whose start is where the resumed note's
+        # sample would be: the impulse's seconds at the speed of the region
+        # the kernel will pick (its round robin and random draws as of this
+        # block's start), forward and release loops wrapped (ping-pong loops
+        # are entered going forward).  A note-on on the same sample wins.
+        def resume_notes(res, vel, trig, num, freq, start, shift, count)
+          k = Sampler::KernelRuby
+          trig = trig.is_a?(Numeric) ? Numo::SFloat.new(count).fill(trig) : trig.dup
+          start = start.is_a?(Numeric) ? Numo::SFloat.new(count).fill(start) : start.dup
+          cfg = config
+          regs = Array.new(@regions.shape[0]) { |r| @regions[r, true].to_a }
+          ctx = { specs: @specs, regions: regs, split: Integer(cfg[2]), interp: cfg[3], last: @state[k::LAST_REGION].to_i }
+
+          res.each_with_index do |t, i|
+            next unless t > 0 && trig[i] <= 0
+
+            v = vel.is_a?(Numeric) ? vel : vel[i]
+            v = v > 1 ? 1.0 : v.to_f
+            next unless v > 0
+
+            n = num.is_a?(Numeric) ? num : num[i]
+            note = k::Voice.new(false, nil)
+            k.note_on(ctx.merge(last: ctx[:last]), note, 0, n.to_f, v, start[i].to_f, (shift.is_a?(Numeric) ? shift : shift[i]).to_f,
+                      @counters.dup, [@rng[0].to_i], cfg[0], cfg[5])
+            next if note.region.nil?
+
+            sp = note.base
+            sp *= (freq.is_a?(Numeric) ? freq : freq[i]) / note.nhz if freq && note.nhz > 0
+            r = regs[note.region]
+            len = r[k::STOP] - r[k::START]
+            next unless len > 0
+
+            off = r[k::OFFSET] + start[i].to_f * len + t * @sample_rate * sp.abs
+            off = loop_offset(r, off) if r[k::LOOP_END] > r[k::LOOP_START] && r[k::REVERSE] == 0
+            trig[i] = v
+            start[i] = (off - r[k::OFFSET]) / len
+          end
+
+          [trig, start]
+        end
+
+        # Offset +off+ (source samples from the region's start) of a note
+        # that has played on through region +r+'s loop, wrapped into it.
+        def loop_offset(r, off)
+          k = Sampler::KernelRuby
+          ls = r[k::LOOP_START] - r[k::START]
+          le = r[k::LOOP_END] - r[k::START]
+          return off if off < le
+
+          ls + MB::Sound::Wavetable::KernelRuby.fwrap(off - ls, le - ls)
         end
 
         def first_trigger(count)

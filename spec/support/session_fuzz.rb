@@ -464,6 +464,14 @@ module SessionFuzz
       else "tempo #{s.pick([110, 140])}; #{base}; after(in: 2.beats) { seek #{[bar - 1, 1].max} }"
       end
     },
+    ->(s) {
+      # (regions-1) a chop of the shipped break on a bg player, then a seek
+      # landing inside a hit: one-shot slices resume where the song would
+      # be (Notes#resume), the same at any buffer size
+      bar = s.bar || 1
+      "bg :#{s.bg_name}, breakbeat(:jungle).slices(8).then { |b| b.chop(0, 3, 5, 2, per: 1/8r).loop.sampler(b) } * 0.4#{s.on}; " \
+        "after(in: 3.beats) { seek #{bar}, #{s.pick(['2.25', '3.6', '1.1'])} }"
+    },
     # (new commands go here, at the end)
   ].freeze
 

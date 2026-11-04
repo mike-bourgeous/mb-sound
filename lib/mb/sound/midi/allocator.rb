@@ -250,6 +250,12 @@ module MB
             @idle_check ? !!@idle_check.call : nil
           end
 
+          # True if the allocator gave this lane the note that content jump
+          # +chase+ resumes (see Notes#resume and Allocator#resume_lane).
+          def resume_lane?(chase)
+            @allocator.resume_lane(chase) == @index
+          end
+
           # The lane's allocation state as of the last event the allocator
           # read: :free, :sounding, :released, or :choking.
           def state
@@ -499,7 +505,34 @@ module MB
           @seq = 0
           @chokes = nil
           @injected = nil # (#inject: events processed with the input's, by time)
+          @resume_generation = @stream.generation # (#resume_lane)
+          @resume = nil
+          @resumes = false
           @node_type_name = "allocator(#{voices} voices)"
+        end
+
+        # The index of the lane given the note that content jump +chase+
+        # resumes (MIDI::Source::Chase#resume: a one-shot sample's note
+        # that sounded before the jump; see Notes#resume), or nil if none.
+        # At the jump, after its note-offs, the note takes a lane as a note
+        # that starts and is released at once, without events: the released
+        # lane that last played its key (whose old sample it replaces, as
+        # a mono voice's does), else the lane that has been free the
+        # longest, else the oldest released one (never a steal), so later
+        # notes leave it ringing as they would a released one-shot.  Mono
+        # allocators resume on their one lane.
+        def resume_lane(chase)
+          r = @resume
+          r && r[0] == chase.generation ? r[1] : nil
+        end
+
+        # Gives resumed notes lanes from now on (see #resume_lane): called
+        # by Notes#resume for a lane's Notes, so synths whose voices don't
+        # resume notes allocate exactly as before.  Returns self.
+        def resume_notes!
+          @resume_generation = @stream.generation unless @resumes
+          @resumes = true
+          self
         end
 
         # Changes the number of spare lanes in use (from 0 to #max_spares),
@@ -579,6 +612,29 @@ module MB
           events = @input.events(@read_to, to)
           @read_to = to
           events = merge_injected(events, to) if @injected
+
+          gen = @stream.generation
+          if @resumes && gen != @resume_generation
+            @resume_generation = gen
+            c = @stream.chase
+            if c && c.generation == gen && c.resume
+              # (after the jump's note-offs, before its note-ons, as
+              # Notes::Node orders a chase)
+              idx = events.index { |e| e.time > c.time || (e.time >= c.time && e.note_on?) } || events.length
+              i = 0
+              while i < idx
+                process(events[i])
+                i += 1
+              end
+              resume_note(c)
+              while i < events.length
+                process(events[i])
+                i += 1
+              end
+              return
+            end
+          end
+
           events.each do |e| process(e) end
         end
 
@@ -618,6 +674,31 @@ module MB
 
         def next_seq
           @seq += 1
+        end
+
+        # Gives the note content jump +chase+ resumes a lane (see
+        # #resume_lane).
+        def resume_note(chase)
+          if @mono
+            @resume = [chase.generation, 0]
+            return
+          end
+
+          refresh(chase.time)
+          e = chase.event
+          released = @voice_states.select { |x| x.state == :released }
+          v = released.select { |x| x.key == [e.channel, e.note] }.max_by(&:on_seq) || free_lane || released.min_by(&:off_seq)
+          @resume = [chase.generation, v&.index]
+          return unless v
+
+          v.state = :released
+          v.channel = e.channel
+          v.note = e.note
+          v.velocity = e.velocity
+          v.on_seq = next_seq
+          v.off_seq = next_seq
+          v.choke_end = nil
+          v.last_time = chase.time
         end
 
         def process(e)

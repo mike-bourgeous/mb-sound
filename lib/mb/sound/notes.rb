@@ -371,7 +371,15 @@ module MB
       # new position otherwise): a sampler voice following tracker lanes
       # (Sampler::Instrument#play's +lanes:+) keeps its sample's pitch until
       # its next note-on, as a tracker channel does (tracker-2).
+      # +chase: :resume+ is the same except at jumps that resume a note on
+      # this voice (#resume), which take that note's number: sampler voices
+      # resuming one-shots (regions-1).
       def number(marks: false, chase: true)
+        if chase == :resume
+          return memo(marks ? :marked_number_resume : :number_resume) {
+            Number.new(note_stream, notes: self, sample_rate: @sample_rate, marks: marks, chase: :resume)
+          }
+        end
         unless chase
           return memo(marks ? :marked_number_held : :number_held) {
             Number.new(note_stream, notes: self, sample_rate: @sample_rate, marks: marks, chase: false)
@@ -418,6 +426,23 @@ module MB
         memo(:choke) { Choke.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
 
+      # A single-sample impulse at a content jump (a seek, a late launch of
+      # a looping clip, a swap; see MIDI::Source#chase) that lands inside a
+      # note that sounded in the content playing now, valued at the seconds
+      # since that note started (a Notes::Resume; 0 elsewhere).  One-shot
+      # sampler voices start the note's sample that far in, so a jump plays
+      # what an uninterrupted run plays there (Sampler::Instrument#play's
+      # +resume+; regions-1).  In a Synth only the lane its allocator gives
+      # the note resumes it (MIDI::Allocator#resume_lane); notes that start
+      # right at the jump play their own note-ons instead.  #velocity holds
+      # the note's velocity from that sample on.
+      def resume
+        memo(:resume) {
+          @stream.allocator.resume_notes! if @stream.is_a?(MIDI::Allocator::Lane)
+          Resume.new(note_stream, notes: self, sample_rate: @sample_rate)
+        }
+      end
+
       # The frequency in Hz of #number plus pitch bend (MIDI::Event#bend_semitones,
       # with the stream's bend range) through the session Tuning (a
       # Notes::Frequency).
@@ -434,8 +459,14 @@ module MB
       # voice still sounding at a clip swap or scene launch was started by
       # the old content and keeps its pitch (its ratio to the note-on's
       # frequency), where a chased number would retune it by the key
-      # difference (tracker-2).
+      # difference (tracker-2).  +chase: :resume+ also takes a resumed
+      # note's number (see #number and #resume).
       def freq(marks: true, chase: true)
+        if chase == :resume
+          return memo(marks ? :freq_resume : :freq_unmarked_resume) {
+            Frequency.new(number(marks: marks, chase: :resume), offsets: [bend_semitones], sample_rate: @sample_rate)
+          }
+        end
         unless chase
           return memo(marks ? :freq_held : :freq_unmarked_held) {
             Frequency.new(number(marks: marks, chase: false), offsets: [bend_semitones], sample_rate: @sample_rate)

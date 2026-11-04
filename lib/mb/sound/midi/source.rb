@@ -42,9 +42,14 @@ module MB
         # (ClipSource) also give the +previous+ note (a note-on Event, or
         # nil for the first note of a non-looping clip) and the stream
         # seconds +elapsed+ since the chased note started, so a glide can
-        # resume where it would be (tweens; see Notes::Glide).
-        Chase = Data.define(:generation, :time, :event, :starts, :previous, :elapsed) do
-          def initialize(generation:, time:, event:, starts: false, previous: nil, elapsed: nil)
+        # resume where it would be (tweens; see Notes::Glide).  +resume+
+        # is +elapsed+ when the chased note sounded in the content playing
+        # now (it started after the clip's launch or swap, so an
+        # uninterrupted run would have played it), else nil: one-shot
+        # sampler voices start the note's sample that far in (see
+        # Notes#resume).
+        Chase = Data.define(:generation, :time, :event, :starts, :previous, :elapsed, :resume) do
+          def initialize(generation:, time:, event:, starts: false, previous: nil, elapsed: nil, resume: nil)
             super
           end
         end

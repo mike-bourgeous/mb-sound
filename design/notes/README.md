@@ -100,7 +100,7 @@ One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a dB
 
 ### [Sampler](sampler.md)
 
-`MB::Sound::Sample` (`lib/mb/sound/sample.rb`, `sample/`) is an immutable sound in memory (files, arrays, `bounce` of a graph, `capture_audio` live) with a root note, loop points, and cheap views (slices, reverse, loops, fades); edits (`bits`, `lofi`, `stretch`, `mono`) make new audio.  `Sample::Slices` name and chop breaks into clips with pitch marks; `Sampler::Instrument` maps regions to keys, velocities, and round robins, also from SFZ (`sfz`) and SoundFont 2 (`sf2`, pure Ruby).  `GraphNode::SamplerVoice` + `fast_sampler` (exact mirror `Sampler::KernelRuby`) plays them from the exact note-on sample, band-limited, with a 64-sample declick; a plan boundary.  Help `help :sampler`, `lesson :chop`.
+`MB::Sound::Sample` (`lib/mb/sound/sample.rb`, `sample/`) is an immutable sound in memory (files, arrays, `bounce` of a graph, `capture_audio` live) with a root note, loop points, and cheap views (slices, reverse, loops, fades); edits (`bits`, `lofi`, `stretch`, `mono`) make new audio.  `Sample::Slices` name and chop breaks into clips with pitch marks; `Sampler::Instrument` maps regions to keys, velocities, and round robins, also from SFZ (`sfz`) and SoundFont 2 (`sf2`, pure Ruby).  `GraphNode::SamplerVoice` + `fast_sampler` (exact mirror `Sampler::KernelRuby`) plays them from the exact note-on sample, band-limited, with a 64-sample declick; a plan boundary.  A seek landing inside a one-shot's note starts its sample where the song would be (`resume:`, `Notes#resume`).  Help `help :sampler`, `lesson :chop`.
 
 ### [Textures: dust, drift, modal resonators](textures.md)
 
