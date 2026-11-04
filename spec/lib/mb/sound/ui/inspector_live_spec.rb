@@ -73,7 +73,8 @@ RSpec.describe('UI inspector live data', :aggregate_failures) do
     fake.define_singleton_method(:call) { |_needs| calls << :call; [slow, []] }
     fake.define_singleton_method(:live_again) { |slow| calls << :live; slow }
     fake.define_singleton_method(:inspect_again) { |slow| calls << :again; slow }
-    feed = Struct.new(:slow, :needs, :knob_refs).new(nil, [:inspect], nil)
+    feed = ui::Feed.new
+    feed.needs = [:inspect]
     screen = Object.new
     screen.extend(ui::Follow)
     screen.instance_variable_set(:@poll, fake)

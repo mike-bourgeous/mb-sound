@@ -57,6 +57,23 @@ RSpec.describe(MB::Sound::UI::NoteLog, :aggregate_failures) do
     expect { described_class.save('  ') }.to raise_error(ArgumentError, /takes the note's text/)
   end
 
+  # (fix-flaky-1104: note_record_spec read .records.last as soon as the file
+  # appeared and once got "unexpected end of input" from a plain File.write)
+  it 'writes a record whole before .records lists it' do
+    seen = []
+    allow(File).to receive(:write).and_wrap_original do |m, path, *args, **kw|
+      r = m.call(path, *args, **kw)
+      seen << [path.to_s, described_class.records.dup] if path.to_s.start_with?(described_class.session_dir)
+      r
+    end
+    n = described_class.save('whole', session: nil, capture: { layout: nil, focus: nil, mode: :off, size: nil, text: nil })
+    expect(seen.length).to eq(1)
+    expect(seen.dig(0, 1)).to eq([]) # (written, not yet listed)
+    expect(described_class.records).to eq([n.data])
+    expect(described_class.read(n.data)).to include(text: 'whole')
+    expect(Dir.children(File.dirname(n.data))).to eq([File.basename(n.data)])
+  end
+
   # (the maintainer, 2026-10-31: "The ui.note feature should save somewhere
   # the container can see")
   it 'defaults to the main checkout\'s tmp/ui-notes from a git checkout, else the user data directory; the env wins' do

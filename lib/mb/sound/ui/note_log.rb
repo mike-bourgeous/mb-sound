@@ -109,8 +109,12 @@ module MB
           rec = record(text, capture, session, time, at: at, freq: freq)
           data = data_path(time)
           FileUtils.mkdir_p(File.dirname(data))
-          File.write(data, JSON.pretty_generate(rec) + "\n")
-          md = markdown(text, capture, session, time, rec: rec, data: data)
+          # (written whole, then renamed into place: a reader that lists
+          # .records as soon as the file appears never sees half of it)
+          part = "#{data}.part"
+          File.write(part, JSON.pretty_generate(rec) + "\n")
+          File.rename(part, data)
+          md =markdown(text, capture, session, time, rec: rec, data: data)
           path = path_for(time.to_date)
           FileUtils.mkdir_p(File.dirname(path))
           File.open(path, 'a') do |f|

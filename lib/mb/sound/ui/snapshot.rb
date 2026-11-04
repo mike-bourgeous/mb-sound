@@ -456,9 +456,21 @@ module MB
         # What visible panes need besides the basics (:meters, :scope).
         attr_reader :needs
 
-        # The Slow data and knobs (set by the painter's Poll) included in
-        # every snapshot.
-        attr_accessor :slow
+        # The Slow data (set by the painter's Poll) included in every
+        # snapshot.
+        def slow = @polled[0]
+
+        def slow=(slow)
+          @polled = [slow, @polled[1]].freeze
+        end
+
+        # Sets the Slow data and the knobs to read (#knob_refs=) together,
+        # so no snapshot pairs a new Slow with the knobs of the poll before
+        # (fix-flaky-1104: the RENDER pane once rendered the first poll's
+        # render source with no knobs).
+        def polled(slow, refs)
+          @polled = [slow, refs.freeze].freeze
+        end
 
         # Snapshots published so far.
         attr_reader :published
@@ -466,8 +478,7 @@ module MB
         def initialize(scope_length: SCOPE_LENGTH)
           @scope_length = scope_length
           @needs = [].freeze
-          @slow = Slow.empty
-          @knob_refs = [].freeze
+          @polled = [Slow.empty, [].freeze].freeze # ([Slow, knob refs]: one value, read once per snapshot)
           @taken = true
           @latest = nil
           @published = 0
@@ -482,7 +493,7 @@ module MB
         # Knobs to read into each snapshot: an Array of [name, knob]
         # (GraphNode::Knob), replaced by the painter's Poll.
         def knob_refs=(refs)
-          @knob_refs = refs.freeze
+          @polled = [@polled[0], refs.freeze].freeze
         end
 
         # The render thread's BusMeter for +session+ while a pane needs
@@ -561,6 +572,7 @@ module MB
           out = session.output
           underruns = out.respond_to?(:underruns) ? out.underruns : nil
           bus_levels, send_levels = @needs.include?(:buses) && @bus_meter ? @bus_meter.take : [nil, nil]
+          slow, refs = @polled
 
           Snapshot.new(
             seq: @published + 1, time: MB::U.clock_now, frame: rec[:frame], pos: rec[:pos],
@@ -571,8 +583,8 @@ module MB
             master: @needs.include?(:meters) && @meter ? @meter.take : nil,
             scope: @needs.include?(:scope) && @scope ? @scope.to_a : nil,
             underruns: underruns,
-            knobs: @knob_refs.map { |name, k| KnobValue.new(name: name, value: k.value, spec: k.spec) }.freeze,
-            slow: @slow,
+            knobs: refs.map { |name, k| KnobValue.new(name: name, value: k.value, spec: k.spec) }.freeze,
+            slow: slow,
             latency: out.respond_to?(:latency) ? out.latency.to_f : 0.0,
             bus_levels: bus_levels, send_levels: send_levels,
             notes: session.respond_to?(:held_notes) ? session.held_notes : [].freeze,
