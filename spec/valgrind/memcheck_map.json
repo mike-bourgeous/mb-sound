@@ -752,6 +752,23 @@
         "FastClip.shape_curve"
       ]
     },
+    "spec/lib/mb/sound/graph_node/db_shaper_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
+        "FastArithmetic.mix"
+      ],
+      "fast_clip": [
+        "FastClip.shape_curve",
+        "FastClip.shape_db"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
     "spec/lib/mb/sound/graph_node/decimator_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.fill_range",
@@ -1656,8 +1673,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]

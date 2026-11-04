@@ -65,6 +65,7 @@ module MemcheckSelection
     'spec/lib/mb/sound/tone_gain_spec.rb',           # FastArithmetic.scale through Tone#gain
     'spec/lib/mb/sound/shaper_spec.rb',              # FastClip.shape
     'spec/lib/mb/sound/graph_node/curve_shaper_spec.rb', # FastClip.shape_curve
+    'spec/lib/mb/sound/graph_node/db_shaper_spec.rb', # FastClip.shape_curve's dB form, FastClip.shape_db
     'spec/lib/mb/sound/curve_spec.rb',               # FastClip.curve_lookup
     'spec/lib/mb/sound/envelope_spec.rb',            # FastEnvelope.process
     'spec/lib/mb/sound/envelope_segments_spec.rb',   # FastEnvelope.process (segment lists, loops)
