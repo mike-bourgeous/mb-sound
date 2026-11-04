@@ -900,6 +900,7 @@ module MB
           end
           [events, idx, cycle]
         end
+        private :event_place
 
         # Returns true if the event at +index+ plays in the given loop
         # +cycle+.  Events with a probability are decided by a random number
@@ -1047,7 +1048,7 @@ module MB
         #     cutoff = seq(300.hz, 3000.hz, 900.hz, 1800.hz).n2.loop.tween(curve: :elastic)
         #     bg :pad, 110.hz.saw.filter(:lowpass, cutoff: cutoff, quality: 3) * 0.3
         #     seq(0, 12, 12, 0).n2.tween(1.n8, curve: :bounce)    # bounce to each value in an eighth
-        #     seq(0, 1, 0.5, 0.5).n4.tween(curve: [:fast, :slow, :hold, :sharp])  # a curve per step
+        #     seq(0, 1, 0.5, 0.8).n4.loop.tween(curve: [:fast, :slow, :hold, :sharp])  # a curve per step
         def tween(time = nil, curve: :smoothstep, overshoot: nil, cycles: nil, log: nil, transport: nil)
           keys = @events.group_by(&:start).sort_by(&:first).map { |start, es| [start, es.last.value] }
           raise ArgumentError, 'A tween needs at least one value' if keys.empty?
