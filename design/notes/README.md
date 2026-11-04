@@ -62,7 +62,7 @@ Every named thing (presets at every scale: effects, instruments, kits, clips, ge
 
 ### [Multichannel](multichannel.md)
 
-Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`stereo(l, r)`, `channels(a, b, c)`; Array-like but deliberately not Enumerable: `.to_a` for `shuffle` etc.).  DSL calls on bundles run per channel with NumPy-style broadcasting (per-channel arguments via bundles or `per_channel(list | a..b)`; `per_voice` in synth voices); `reverb` is the exception (one reverb for all channels).  Conversions are `GraphNode::ChannelMixer` nodes (`pan`/`balance`, `width`, `mono`, `swap`, `mid_side`, `matrix`, `place`, `left`/`right`); sample all outputs of a mixer in turn.
+Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`stereo(l, r)`, `channels(a, b, c)`; Array-like but deliberately not Enumerable: `.to_a` for `shuffle` etc.).  DSL calls on bundles run per channel with NumPy-style broadcasting (per-channel arguments via bundles or `per_channel(list | a..b)`; `per_voice` in synth voices); `reverb` is the exception (one reverb for all channels).  Conversions are `GraphNode::ChannelMixer` nodes (`pan`/`balance`, `width`, `mono`, `swap`, `mid_side`, `matrix`, `place`, `left`/`right`); sample all outputs of a mixer in turn.  Pan laws (`ChannelMixer::PanLaws`): mono `:equal_power` (default), `:minus_4_5db`, `:linear`; stereo `balance(x, law:)`/`pan(x, law:)` take `:balance` (default) or ACID's `:constant_power`, `:balance_0db`/`_3db`/`_6db`, `:add_channels` (provisional), all planned bit for bit.
 
 ## Sound
 

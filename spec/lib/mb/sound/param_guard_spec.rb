@@ -31,10 +31,11 @@ RSpec.describe('param declarations', :aggregate_failures) do
     expect(counts[:knobs]).to be >= 10
   end
 
-  it 'covers every ChannelMixer param' do
+  it 'covers every ChannelMixer param and option (pan laws)' do
     classes = ObjectSpace.each_object(Class).select { |c| c < MB::Sound::GraphNode::ChannelMixer }
-    params = classes.flat_map { |c| c.params.values }.uniq
-    expect(params.length).to be >= 5
+    params = classes.flat_map { |c| c.params.values + c.options.values }.uniq
+    expect(params.length).to be >= 7
+    expect(params.map(&:name)).to include(:law)
     guard('ChannelMixer', params)
   end
 

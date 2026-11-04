@@ -26,7 +26,8 @@ module MB
         # -3 dB on each side, so loudness stays even as the signal moves;
         # :minus_4_5db and :linear (-6 dB) are the alternatives.  On a stereo
         # node, balances instead (see Channels#balance), like most DAWs'
-        # stereo pan controls.
+        # stereo pan controls, with a stereo +law+ if given (e.g.
+        # :add_channels; see ChannelMixer::PanLaws::STEREO_LAWS).
         #
         # Examples (bin/sound.rb):
         #     bg 330.hz.triangle.at(0.3).pan(-0.5)
@@ -34,6 +35,10 @@ module MB
         #     bg 330.hz.triangle.at(0.3).pan(0.5, law: :linear)
         def pan(position = 0, law: :equal_power)
           return channels_bundle.pan(position, law: law) if channel_count > 1
+          if ChannelMixer::PanLaws::STEREO_LAWS.include?(law) && !PAN_LAWS.include?(law)
+            raise ArgumentError, "#{law.inspect} is a pan law for stereo inputs (mono pans use #{PAN_LAWS.map(&:inspect).join(', ')})"
+          end
+
           ChannelMixer::Pan.new(self, position: position, law: law).then { |m| Channels.new(m.outputs) }
         end
 
@@ -77,9 +82,9 @@ module MB
 
         # Stereo conversions for nodes with several outputs (see Channels).
         [:left, :right, :swap, :mid_side, :from_mid_side, :width, :balance].each do |name|
-          define_method(name) do |*args|
+          define_method(name) do |*args, **kwargs|
             raise ArgumentError, "#{name} needs a multichannel node (this one has 1 channel)" if channel_count == 1
-            channels_bundle.public_send(name, *args)
+            channels_bundle.public_send(name, *args, **kwargs)
           end
         end
 

@@ -160,9 +160,10 @@ module MB
           end
 
           # Declares an option: a fixed setting chosen when the mixer is
-          # created, one of +values+ if given.
+          # created, one of +values+ if given.  Builds an MB::Sound::Param
+          # (its range the list of choices), as .param does.
           def option(name, default:, values: nil)
-            own_options[name] = { default: default, values: values }.freeze
+            own_options[name] = MB::Sound::Param.declare(name, default, range: values)
           end
 
           # The parameters declared by this class and its superclasses.
@@ -241,11 +242,9 @@ module MB
             set_param(name, settings.key?(name) ? settings.delete(name) : spec.default, spec)
           end
           self.class.options.each do |name, spec|
-            value = settings.key?(name) ? settings.delete(name) : spec[:default]
-            if spec[:values] && !spec[:values].include?(value)
-              raise ArgumentError, "#{name} must be one of #{spec[:values].map(&:inspect).join(', ')} (got #{value.inspect})"
-            end
-            @options[name] = value
+            # (Param checks: raise in scripts and specs, warn and use the
+            # default live; unknown choices suggest the nearest)
+            @options[name] = settings.key?(name) ? spec.check(settings.delete(name)) : spec.default
           end
           raise ArgumentError, "Unknown settings for #{self.class.name}: #{settings.keys.join(', ')}" unless settings.empty?
 
