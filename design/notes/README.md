@@ -54,7 +54,7 @@ Every named thing (presets at every scale: effects, instruments, kits, clips, ge
 
 ### [Tweening curves](curves.md)
 
-`MB::Sound::Curve` (`Curve[:elastic, overshoot:]`, many named easings with `_in`/`_out` variants, ACID's six fade shapes (`:linear :fast :slow :smooth :sharp :hold`), `Curve.db`/`Curve.s`, `bezier`, Procs; `#lookup` tables in C) maps progress 0..1 and is shared by glides (`v.hz.glide(t, shape:)`), tweens (`tween([300.hz, 3000.hz], 1.bar, curve:)`: the length is per step between keyframes, not the total), `smooth(t, curve:)`, and the antialiased shaper `sig.ease(curve, ...)` (`aease` exact).  `bounce_hits(2.bars, count:, elasticity:, decay:)` makes bouncing-ball rhythms.  Demos `bin/songs/tween_song.rb`, `bin/songs/bouncing_ball.rb`.
+`MB::Sound::Curve` (`Curve[:elastic, overshoot:]`, many named easings with `_in`/`_out` variants, ACID's six fade shapes (`:linear :fast :slow :smooth :sharp :hold`), `Curve.db`/`Curve.s`, `bezier`, Procs; `#lookup` tables in C) maps progress 0..1 and is shared by glides (`v.hz.glide(t, shape:)`), tweens (`tween([300.hz, 3000.hz], 1.bar, curve:)`: the length is per step between keyframes, not the total; `curve: [:fast, :hold, :sharp]` gives one curve per step, cycling like the steps), `smooth(t, curve:)`, and the antialiased shaper `sig.ease(curve, ...)` (`aease` exact).  `bounce_hits(2.bars, count:, elasticity:, decay:)` makes bouncing-ball rhythms.  Demos `bin/songs/tween_song.rb`, `bin/songs/bouncing_ball.rb`.
 
 ### [Tempo sync](tempo_sync.md)
 

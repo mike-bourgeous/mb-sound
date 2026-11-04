@@ -42,6 +42,16 @@ module MB
       # (e.g. the squiggle's size and wiggles; see Curve); otherwise the
       # curve's defaults apply.
       #
+      # A list of shapes (an Array that isn't a bezier's four numbers; see
+      # MB::Sound::Curve.list) gives one curve per glide in turn, cycling:
+      # the first note-on glides along the first, the next along the
+      # second, and so on (tween-curves-1, 2026-11-04: tweens with a curve
+      # per step, as ACID's envelope segments).  +overshoot+ and +cycles+
+      # go to every name in the list.  A content jump from a clip
+      # (MIDI::Source::Chase#index) picks the chased event's curve, so the
+      # list follows a clip of one note per step wherever it is launched
+      # or seeked; the note-ons after it take the curves after that one.
+      #
       # +resume+ (false by default; true for tweens, see
       # Sequence::Clip#tween) makes the glide pick up where it would be
       # after a content jump (a Session launch or seek partway through a
@@ -57,6 +67,10 @@ module MB
       # 2 ms..5 s) with CC 65 (portamento on/off, off by default as in GM2)
       # deciding whether notes glide; CC 84 glides regardless of CC 65.
       class Glide < Number
+        # How close (in samples) a resumed glide's note start may be to a
+        # sample to count as on it (see #resume_position).
+        RESUME_SNAP = 1e-6
+
         # The glide time as given (seconds, a node, or :gm).
         attr_reader :time
 
@@ -70,8 +84,13 @@ module MB
         attr_reader :overshoot
 
         # The glide's MB::Sound::Curve, or nil for the default smoothstep
-        # (see the class description).
+        # (see the class description); with a list of shapes, the current
+        # glide's.
         attr_reader :curve
+
+        # The list of curves glides take in turn (see the class
+        # description), or nil.
+        attr_reader :curves
 
         # Returns the bump scale k for which the glide curve
         # t²(3 - 2t) + k t³(1 - t)² peaks at 1 + +overshoot+ (found by
@@ -88,7 +107,14 @@ module MB
           @glide_bufs = nil # (reused by #fill; dropouts-2)
 
           @curve = nil
-          if shape.nil?
+          @curves = nil
+          @next_curve = 0
+          if MB::Sound::Curve.list?(shape)
+            @curves = MB::Sound::Curve.list(shape, overshoot: overshoot, cycles: cycles)
+            @curve = @curves[0]
+            @overshoot = 0.0
+            @overshoot_k = 0.0
+          elsif shape.nil?
             raise ArgumentError, 'Glide cycles need a shape (e.g. shape: :squiggle)' unless cycles.nil?
             overshoot ||= 0
             raise ArgumentError, "Glide overshoot must be a number from 0 to 1 (got #{overshoot.inspect})" unless overshoot.is_a?(Numeric) && (0..1).cover?(overshoot)
@@ -147,7 +173,7 @@ module MB
           @position = nil
           @start = nil
           @length = nil
-          @node_type_name = "Notes Glide#{' (legato)' if @legato}#{" #{@curve}" if @curve}"
+          @node_type_name = "Notes Glide#{' (legato)' if @legato}#{" #{@curves ? @curves.join(', ') : @curve}" if @curve}"
         end
 
         # The current output note number.
@@ -269,7 +295,15 @@ module MB
           glide = from || (@had_note && enabled? && (legato || !@legato))
           @had_note = true
           @hint_seconds = hint_seconds(event) if @lengths
-          glide_to(target, from || current, glide)
+          return glide_to(target, from || current, glide) unless @curves
+
+          # (where the glide in progress is, along its own curve, before
+          # the next curve takes over: SessionFuzz seed 293, a note-on
+          # between samples at 174 BPM came a sample before a :fast glide
+          # ended, and read it along the next step's :hold, its start)
+          start = from || current
+          next_curve
+          glide_to(target, start, glide)
         end
 
         def uncovered(entry)
@@ -293,10 +327,27 @@ module MB
           @had_note = false
         end
 
-        # Resumes the glide in progress at a content jump (see +resume:+ in
-        # the class description), or chases as usual.
+        # Applies a Source::Chase (see Node#chase_item): with a list of
+        # curves, the chased event's index (Chase#index, from clips) picks
+        # the curve first: the chased note's, or for a note starting right
+        # at the jump, its note-on's (it follows).
         def chase_item(c)
-          return super unless @resume && c.previous && enabled?
+          if @curves && c.index
+            i = c.index % @curves.length
+            if c.starts
+              @next_curve = i
+            else
+              @curve = @curves[i]
+              @next_curve = (i + 1) % @curves.length
+            end
+          end
+          resume_item(c)
+        end
+
+        # Resumes the glide in progress at a content jump (see +resume:+ in
+        # the class description), or chases as usual (Node#chase_item).
+        def resume_item(c)
+          return c.starts ? chase_start(c.event) : chase(c.event) unless @resume && c.previous && enabled?
 
           start = marked_number(c.previous)
           @from_offset = nil
@@ -311,7 +362,7 @@ module MB
             @hint_seconds = hint_seconds(c.event, c.elapsed)
             glide_to(marked_number(c.event), start, true)
             if @gliding
-              @position = (c.elapsed * @sample_rate).round
+              @position = resume_position(c)
               @gliding = false if @position >= @length
             end
           end
@@ -329,6 +380,30 @@ module MB
             when 121 then @gm_on = false if @gm # RP-15 resets portamento
             end
           end
+        end
+
+        # The samples a resumed glide (Chase +c+) has played on the chase's
+        # sample: from the sample its note-on would have landed on (the
+        # floor of its stream time, as #items places events) to the
+        # chase's, so it ends on the same sample as a glide that played
+        # from its note-on (tween-curves-1: SessionFuzz seed 293, 174 BPM,
+        # a :hold step launched mid-step jumped a sample apart from the
+        # uninterrupted run; the rounded elapsed time was off by one where
+        # steps start between samples).
+        # (Chase#elapsed comes from the tempo in Float seconds: the note's
+        # start snaps to a sample within RESUME_SNAP of one, so 26400 plus
+        # 4e-12 samples counts as 26400)
+        def resume_position(c)
+          chase = c.time.to_r * @sample_rate
+          start = chase - c.elapsed.to_r * @sample_rate
+          chase.floor - (start + RESUME_SNAP).floor
+        end
+
+        # With a list of curves: the curve of the glide starting now (a
+        # note-on, or a chased note), counting on to the next.
+        def next_curve
+          @curve = @curves[@next_curve]
+          @next_curve = (@next_curve + 1) % @curves.length
         end
 
         # True if notes glide at all (always, except :gm with CC 65 off).

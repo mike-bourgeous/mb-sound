@@ -358,7 +358,8 @@ module MB
           elapsed = transport.seconds_of(since)
           Chase.new(
             generation: @generation, time: time, event: event, starts: since == 0,
-            previous: note_event(prev, time), elapsed: elapsed, resume: resumed?(pos, since) ? elapsed : nil
+            previous: note_event(prev, time), elapsed: elapsed, resume: resumed?(pos, since) ? elapsed : nil,
+            index: @clip.event_index(pos)
           )
         end
 

@@ -329,8 +329,10 @@ module MB
       # table's nodes and for staircases, within 1e-4 at the bounce's
       # contacts (kinks inside cells), and only roughly in the first or
       # last cell of curves with a vertical slope there (sqrt-like
-      # beziers and Procs; 1/2048 of the way).  Modifies +t+ in place if it is
-      # a contiguous Numo::DFloat; returns the values.  Used by glides.
+      # beziers and Procs; 1/2048 of the way).  At 1 it is the curve's value
+      # at 1 even for a curve that jumps there (:hold; since tween-curves-1,
+      # 2026-11-04, the jump's left value before).  Modifies +t+ in place if
+      # it is a contiguous Numo::DFloat; returns the values.  Used by glides.
       def lookup(t)
         t = Numo::DFloat.cast(t) unless t.is_a?(Numo::DFloat) && t.contiguous?
         Kernels.curve_lookup(t, *value_table)
@@ -360,7 +362,7 @@ module MB
         pos = cells.to_f if pos > cells.to_f
         j = pos.to_i
         u = pos - j.to_f
-        return fl[j] if u < NODE_SNAP
+        return j == cells ? fr[j] : fl[j] if u < NODE_SNAP
 
         h = 1.0 / cells.to_f
         u2 = u * u
@@ -577,11 +579,41 @@ module MB
         when Proc then new(&value)
         when Numeric then db(value)
         when Array
+          raise ArgumentError, "A list of curves (#{value.inspect}) goes where one curve per step is taken (tween's curve:), not here" if list?(value)
           raise ArgumentError, "A bezier curve needs four numbers (got #{value.inspect})" unless value.length == 4
           bezier(*value)
         else
           raise ArgumentError, "Expected a curve name, Curve, Proc, dB number, or bezier values (got #{value.inspect})"
         end
+      end
+
+      # True if +value+ is a list of curves, one per step (tween-curves-1,
+      # 2026-11-04; see .list): an Array that isn't a bezier's numbers.
+      # An Array of numbers only stays a bezier (.from), so per-step dB
+      # curves go in as Curve.db(d) entries.
+      def self.list?(value)
+        value.is_a?(Array) && !value.all?(Numeric)
+      end
+
+      # Curves for a list of curve values (see .list?), one per step, e.g. a
+      # tween's `curve: [:fast, :hold, Curve[:elastic, overshoot: 0.4]]`:
+      # each entry anything .from takes (a bezier as its own Array of four
+      # numbers).  +options+ (+overshoot:+, +cycles:+) go to every name in
+      # the list, as with a single name (a name that takes none raises);
+      # Curves and Procs are used as they are.  Returns a frozen Array of
+      # Curves.
+      def self.list(values, **options)
+        raise ArgumentError, 'A list of curves needs at least one curve' if values.empty?
+
+        options = options.compact
+        if !options.empty? && values.none? { |v| v.is_a?(Symbol) || v.is_a?(String) }
+          raise ArgumentError, "Options #{options} need curve names in the list (give each curve its options: Curve[:elastic, overshoot: 0.4])"
+        end
+
+        values.map { |v|
+          raise ArgumentError, "A list of curves can't hold another list (got #{v.inspect})" if list?(v)
+          v.is_a?(Symbol) || v.is_a?(String) ? named(v, **options) : from(v)
+        }.freeze
       end
 
       # Returns the named curve (see the class description and NAMES),

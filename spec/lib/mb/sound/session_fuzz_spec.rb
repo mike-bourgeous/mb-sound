@@ -100,6 +100,12 @@ RSpec.describe('session fuzzing') do
     'an uneven-step tween launched where a step starts between samples (seed 116)' => [
       :timeline, ['bpm 174'], ['at_bar(1, beat: 2) { bg :x1, tween([300.0, 3000.0, 800.0], [1.beat, 3.beats]) * 0.0002, on: :now }'], 2,
     ],
+    # (tween-curves-1: the glide read the step it was leaving along the
+    # next step's :hold, and resumed glides started from a rounded Float
+    # elapsed time, so a :hold launched mid-step jumped a sample apart)
+    'a tween with a curve per step launched mid-step between samples (seed 293)' => [
+      :timeline, ['bpm 174', 'knob :busy, 0.5'], ['at_bar(1, beat: 3) { bg :x1, tween([0.0, 1.0, 0.25, 0.75], [1.beat, 2.beats], curve: [:fast, :hold, :sharp]) * 0.5, on: :now }'], 1,
+    ],
     'a tr808 track revived by a scene after ringing out (seed 1194)' => [
       :buffer_size, ['bpm 112'], [
         'track(:t1, q: 1/2r) { |kit| tr808(kit) * 0.5 }',

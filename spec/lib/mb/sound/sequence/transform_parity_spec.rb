@@ -124,7 +124,7 @@ RSpec.describe('Clip and Kit transform parity', :aggregate_failures) do
   def kit_exempt
     {
       'readers, playback plumbing, and lineage' => %i[
-        align control control_chase control_edges control_horizon controls controls? edge_horizon edges event_at event_before events
+        align control control_chase control_edges control_horizon controls controls? edge_horizon edges event_at event_before event_index events
         events_for launch_aligned? length lineage looping? param_nodes performed? plays? rederive seed source steer_lead steered? stream
         value value_at values variations with_controls without_controls fit_controls split_controls controls_clip rhythm
       ],

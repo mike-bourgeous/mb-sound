@@ -209,6 +209,10 @@ module GraphSweep
       ['tween and glide', ->(c) {
         c.sig.filter(:lowpass, cutoff: c.s.tween([300.0, 3000.0, 600.0], 1.n64, curve: :smooth), quality: 2) + c.notes.hz.glide(0.002, from: 110.hz).square.at(0.3)
       }],
+      # A curve per step (Glide curve lists, Chase#index; tween-curves-1)
+      ['tween with a curve per step', ->(c) {
+        c.sig * c.s.tween([0.0, 1.0, 0.25, 0.75], [1.n64, 1.n32], curve: [:fast, :hold, MB::Sound::Curve[:elastic, overshoot: 0.3]])
+      }],
       ['tempo tone (TempoNode)', ->(c) { 1.beat.hz.saw + 2.bars.lfo.square }],
       ['tempo delay', ->(c) { c.sig.delay(1.n32) }],
 

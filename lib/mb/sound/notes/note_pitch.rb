@@ -180,7 +180,11 @@ module MB
         # another glide curve from the tweening library (MB::Sound::Curve:
         # :squiggle, :elastic, :back, :bounce, :steps, :s, a Curve, ...);
         # +overshoot:+ and +cycles:+ then set its size and wiggles (each
-        # curve's default when not given).  See Notes::Glide.
+        # curve's default when not given).  A list of shapes gives one per
+        # note in turn, cycling (`shape: [:fast, :hold]`: the first note's
+        # glide along :fast, the next one's :hold, and so on; the first
+        # note takes the first shape though it jumps; +overshoot:+ and
+        # +cycles:+ go to every name in the list).  See Notes::Glide.
         #
         # In a unison, +time+, +overshoot:+, +shape:+, and +cycles:+ may be
         # per-copy values (a Range, `spread(a..b)`, `channels(...)`; see
@@ -196,6 +200,7 @@ module MB
         #     play v.hz.glide(300.ms, overshoot: 0.1).saw * v.amp_env
         #     play v.hz.glide(400.ms, shape: :squiggle).saw * v.amp_env
         #     play v.hz.glide(500.ms, shape: :elastic, overshoot: 0.4, cycles: 4).saw * v.amp_env
+        #     play v.hz.glide(150.ms, shape: [:fast, :hold, :sharp]).saw * v.amp_env  # a shape per note, in turn
         def glide(time, legato: false, from: nil, overshoot: nil, shape: nil, cycles: nil)
           time = per_copy(time)
           # Per-copy starts of Intervals stay relative (see Unison::Copy)

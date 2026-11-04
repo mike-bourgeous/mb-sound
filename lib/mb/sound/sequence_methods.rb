@@ -302,6 +302,16 @@ module MB
       # tweens back to the first over the last step; repeat a value to hold
       # it.  +overshoot:+ and +cycles:+ go to a named curve.
       #
+      # +curve+ may be a list, one curve per step (step i, from value i to
+      # the next, takes entry i), cycling like +step+ lengths when shorter:
+      # breakpoint automation like ACID's envelopes, whose segments each
+      # have their own shape (`[:linear, :fast, :slow, :smooth, :sharp,
+      # :hold]`; :hold keeps the step's first value until the next).
+      # Entries are anything +curve+ takes (a bezier as its own Array of
+      # four numbers); +overshoot:+ and +cycles:+ go to every name in the
+      # list (or give `Curve[:elastic, overshoot: 0.4]` entries), +log:+ to
+      # the whole tween.
+      #
       # A looping tween follows the timeline like any looping clip: launched
       # partway through it (e.g. at bar 2 of a 2-bar tween), it plays the
       # step the timeline is in, from wherever that step would be (since
@@ -321,6 +331,9 @@ module MB
       #     tween([0, 1, 0.3], 1.bar, curve: :bounce, loop: false)    # a bouncing mix knob, then 0.3
       #     tween([0, 12, 12, 7], 2.beats, curve: :steps, cycles: 4)  # stepped automation, holding 12 for a step
       #     tween([200, 1000], 1.bar, align: :launch)  # from 200 wherever it launches
+      #     # a curve per step: up fast, slowly down to 0.4, hold it for a
+      #     # bar, jump to 0.8, then back to 0 along :sharp
+      #     tween([0, 1, 0.4, 0.8], [1.beat, 3.beats, 1.bar, 2.beats], curve: [:fast, :slow, :hold, :sharp])
       #     # 2 bars per step: up for 2 bars, down for 2 (5000 Hz after 2
       #     # bars, back at 100 Hz after 4), then 2 bars from 100 to 100
       #     # (the loop back to the first keyframe): 6 bars per loop

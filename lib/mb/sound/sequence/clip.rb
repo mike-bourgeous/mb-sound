@@ -869,8 +869,27 @@ module MB
         # of the cycle before for a loop's first event, or nil (no event, or
         # the first event of a non-looping clip).
         def event_before(position)
-          e = event_at(position) or return nil
+          events, idx, cycle = event_place(position)
+          return nil if idx.nil?
+          return events[idx - 1] if idx > 0
+          return nil unless @loop
+
+          events_for(cycle - 1).last
+        end
+
+        # The index of the event #event_at returns for +position+ (whole
+        # notes) among its cycle's events (sorted by start), or nil: e.g. a
+        # tween's step, one event per step (tween-curves-1; see
+        # MIDI::Source::Chase#index).
+        def event_index(position)
+          event_place(position)[1]
+        end
+
+        # [events holding it, index, the position's cycle] for
+        # #event_at(+position+)'s event (index nil if there is none).
+        def event_place(position)
           cycle = @loop ? (position / @length).floor : 0
+          e = event_at(position) or return [nil, nil, cycle]
           events = @loop ? events_for(cycle) : @events
           idx = events.index { |x| x.equal?(e) }
           if idx.nil?
@@ -878,13 +897,10 @@ module MB
             # belongs to the cycle before
             events = events_for(cycle - 1)
             idx = events.index { |x| x.equal?(e) }
-            return nil if idx.nil?
           end
-          return events[idx - 1] if idx > 0
-          return nil unless @loop
-
-          events_for(cycle - 1).last
+          [events, idx, cycle]
         end
+        private :event_place
 
         # Returns true if the event at +index+ plays in the given loop
         # +cycle+.  Events with a probability are decided by a random number
@@ -1009,6 +1025,17 @@ module MB
         # go to a named curve.  A Notes::Glide underneath; see also
         # MB::Sound.tween.
         #
+        # +curve+ may also be a list, one curve per step (tween-curves-1,
+        # 2026-11-04; ACID's envelope segments): step i, from keyframe i
+        # to the next, takes entry i, cycling like a tween's step lengths
+        # when the list is shorter (each loop starts again at the first);
+        # entries are anything a single curve may be (a bezier as its own
+        # Array of four numbers; an Array of numbers alone is one bezier),
+        # +overshoot:+ and +cycles:+ go to every name in it (a name taking
+        # none raises: give such curves as `Curve[:elastic, overshoot:
+        # 0.4]` entries), and +log:+ is the whole tween's.  Launches and
+        # seeks pick the step's own curve.
+        #
         # Values (see .tween_values): plain numbers tween linearly.
         # Pitches (`300.hz`, Notes like A4) tween in octaves and the output
         # is in Hz, so frequencies and cutoffs move evenly in pitch and
@@ -1021,6 +1048,7 @@ module MB
         #     cutoff = seq(300.hz, 3000.hz, 900.hz, 1800.hz).n2.loop.tween(curve: :elastic)
         #     bg :pad, 110.hz.saw.filter(:lowpass, cutoff: cutoff, quality: 3) * 0.3
         #     seq(0, 12, 12, 0).n2.tween(1.n8, curve: :bounce)    # bounce to each value in an eighth
+        #     seq(0, 1, 0.5, 0.8).n4.loop.tween(curve: [:fast, :slow, :hold, :sharp])  # a curve per step
         def tween(time = nil, curve: :smoothstep, overshoot: nil, cycles: nil, log: nil, transport: nil)
           keys = @events.group_by(&:start).sort_by(&:first).map { |start, es| [start, es.last.value] }
           raise ArgumentError, 'A tween needs at least one value' if keys.empty?
@@ -1041,10 +1069,20 @@ module MB
           glide_clip = Clip.new(events, length: @length, loop: @loop, seed: @seed, align: @align)
 
           notes = glide_clip.notes(transport: transport)
-          name = "tween #{Curve.from(curve, **{ overshoot: overshoot, cycles: cycles }.compact)}"
+          if Curve.list?(curve)
+            # One curve per glide event (step i takes entry i, cycling), so
+            # the glide's list turns over with the clip
+            list = Curve.list(curve, overshoot: overshoot, cycles: cycles)
+            shape = events.each_index.map { |i| list[i % list.length] }
+            name = "tween #{list.join(', ')}"
+            overshoot = cycles = nil
+          else
+            shape = curve
+            name = "tween #{Curve.from(curve, **{ overshoot: overshoot, cycles: cycles }.compact)}"
+          end
           g = Notes::Glide.new(
             notes.note_stream, time: glide_clip.send(:tween_time, time, transport), from: values[0],
-            shape: curve, overshoot: overshoot, cycles: cycles, resume: true, notes: notes
+            shape: shape, overshoot: overshoot, cycles: cycles, resume: true, notes: notes
           ).named(name)
           log ? (2 ** g).named("#{name} (octaves)") : g
         end

@@ -37,6 +37,30 @@ RSpec.describe('Glide shapes (Notes::Glide with a Curve)') do
     expect(glide_out(time: 0.02, shape: ->(x) { x })[480 + 479]).to be_within(1e-4).of(66)
   end
 
+  it 'reaches the target after a :hold glide ends partway through a buffer (tween-curves-1)' do
+    # (Curve#lookup gave :hold's left value at 1, so the rest of the
+    # buffer after the glide stayed at the start note)
+    out = glide_out(time: 0.002, shape: :hold) # 96 samples from 480
+    expect(out[480...575].to_a.uniq).to eq([60.0])
+    expect(out[575...960].to_a.uniq).to eq([72.0])
+  end
+
+  it 'takes a list of shapes, one per note-on in turn, cycling (tween-curves-1)' do
+    # (the first note-on takes the first shape though it jumps, so shape i
+    # goes with a clip's note i)
+    n = notes_for(*[60, 72, 60, 72, 60].each_with_index.map { |note, i| ev.note_on(note, 100, time: i * 0.01r) })
+    g = MB::Sound::Notes::Glide.new(n.note_stream, notes: n, time: 0.005, shape: [:fast, :hold])
+    out = SpecBuffers.join(6.times.map { g.sample(480).dup }).cast_to(Numo::DFloat)
+    t = (Numo::DFloat.new(240).seq + 1) / 240.0
+    fast = MB::Sound::Curve[:fast].lookup(t.dup)
+    expect(out[480...719].to_a.uniq).to eq([60.0]) # 60 -> 72 holds (:hold), then jumps
+    expect(out[720]).to eq(72.0)
+    expect((out[960...1200] - (72 - 12 * fast)).abs.max).to be < 1e-4 # 72 -> 60 along :fast
+    expect(out[1440...1679].to_a.uniq).to eq([60.0]) # :hold again
+    expect((out[1920...2160] - (72 - 12 * fast)).abs.max).to be < 1e-4
+    expect(g.curves).to eq([MB::Sound::Curve[:fast], MB::Sound::Curve[:hold]])
+  end
+
   it 'rejects cycles without a shape and options with a Curve object' do
     expect { glide_out(time: 0.02, cycles: 3) }.to raise_error(ArgumentError, /shape/)
     expect { glide_out(time: 0.02, shape: MB::Sound::Curve[:elastic], overshoot: 0.2) }.to raise_error(ArgumentError, /shape name/)
@@ -48,6 +72,18 @@ RSpec.describe('Glide shapes (Notes::Glide with a Curve)') do
     out = SpecBuffers.join(6.times.map { f.sample(480).dup })
     expect(out.max).to be > MB::Sound::Note.new(72).frequency * 1.05
     expect(out[-1]).to be_within(0.01).of(MB::Sound::Note.new(72).frequency)
+  end
+
+  it 'glides a Notes pitch with a list of shapes, one per note in turn' do
+    n = notes_for(ev.note_on(60, 100, time: 0r), ev.note_on(72, 100, time: 0.01r), ev.note_on(60, 100, time: 0.02r))
+    num = n.hz.glide(5.ms, shape: [:fast, :hold]).freq.log2 # (octaves, to read the curve)
+    out = SpecBuffers.join(4.times.map { num.sample(480).dup }).cast_to(Numo::DFloat)
+    c4 = Math.log2(MB::Sound::Note.new(60).frequency)
+    # the first note takes :fast (it jumps), the second :hold: 60 until it lands on 72
+    expect(out[480...719].to_a.map { _1.round(4) }.uniq).to eq([c4.round(4)])
+    expect(out[720]).to be_within(1e-4).of(c4 + 1)
+    # the third :fast again, from 72 down to 60
+    expect(out[960 + 59]).to be_within(1e-3).of(c4 + 1 - 0.4375) # 1 - (1 - 1/4)^2 of the way at a quarter
   end
 
   it 'gives swarm copies their own shapes and cycles' do

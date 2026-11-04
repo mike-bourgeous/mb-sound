@@ -93,6 +93,8 @@ module SessionFuzz
   TWEENS = [
     'tween([200.0, 1000.0], 1.bar, curve: :linear) * 0.0005', 'tween([300.0, 3000.0, 800.0], [1.beat, 3.beats]) * 0.0002',
     'tween([0.0, 1.0, 0.3], 2.beats, curve: :bounce) * 0.5', 'tween([100.0, 900.0], 3.beats, curve: :elastic) * 0.0005',
+    # (a curve per step, fewer curves than steps, uneven steps; tween-curves-1)
+    'tween([0.0, 1.0, 0.25, 0.75], [1.beat, 2.beats], curve: [:fast, :hold, :sharp]) * 0.5',
   ].freeze
   # Library instruments for `track :t1, ...` (light ones: one voice each)
   INSTRUMENTS = [':dnb_sub', 'L.inst.jungle.jungle_sub', ':dnb_sub'].freeze
