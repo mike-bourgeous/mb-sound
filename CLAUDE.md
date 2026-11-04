@@ -14,6 +14,14 @@ mb-sound is a Ruby library for sound processing with a fluent DSL for building s
 - `spec/` - Test suite
 - `design/notes/` - one design note per subsystem, indexed by `design/notes/README.md` (see Architecture)
 
+### How we build (read this first, also after a resume or compaction)
+
+- mb-sound is a library first.  Anything that makes, shapes, places, or mixes sound is a GraphNode (or a Session piece: track, clip, scene, flow, bus) reachable from the DSL, so features compose.  A new capability is a node, a DSL method, or an option on an existing one, never a parallel engine inside a script, importer, or research folder.
+- Before writing a sound path, find the building block: `design/notes/README.md` (each note's Quick reference), `help` topics, `MB::Sound::Library`.  Extend what is there (an option, a law, a curve, a clip kind) rather than writing a second version beside it ("no split realities": one mechanism, changed across the board).
+- Importers and research spikes (trackers, MIDI, ACID .acd, sound matching) translate foreign data into mb-sound objects (tracks, clips, scenes, flows, regions, Samples, instruments, patches) and render through the library.  A missing piece becomes a library change on its own branch; a hand-rolled engine is at most a test oracle, named as one.
+- Shared conventions everywhere: Params for settings, Lengths and Decibels for values, `Curve` for shapes, `MB::Sound.seed` for randomness, Ruby the maintainer can read for anything saved or printed (documents, takes, recipes).
+- Sound is judged by rendering and by ear (the Listening Bench), not by numbers alone ("Ears win", `.claude/collaboration.md`).
+
 ## Build & Development Commands
 
 ```bash
