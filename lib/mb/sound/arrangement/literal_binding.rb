@@ -48,9 +48,11 @@ module MB
         # its state carried; the same samples by construction).  Settings
         # the code didn't write bind :build, as do written ones a knob
         # can't move (read once while building: a softclip's threshold).
-        Target = Data.define(:kind, :call_name, :nth, :key, :slot, :param, :value, :document, :arg, :mode) do
-          def initialize(kind:, call_name:, nth:, key:, slot:, param:, value:, document:, arg: nil, mode: :live)
-            super(kind: kind, call_name: call_name, nth: nth, key: key, slot: slot, param: param, value: value, document: document, arg: arg || param, mode: mode)
+        # +range+ is a range the code declared for the setting (a kit
+        # voice's `(lo..hi).at(default)` knob; .kit_range), or nil.
+        Target = Data.define(:kind, :call_name, :nth, :key, :slot, :param, :value, :document, :arg, :mode, :range) do
+          def initialize(kind:, call_name:, nth:, key:, slot:, param:, value:, document:, arg: nil, mode: :live, range: nil)
+            super(kind: kind, call_name: call_name, nth: nth, key: key, slot: slot, param: param, value: value, document: document, arg: arg || param, mode: mode, range: range)
           end
 
           # True if the patch is given the knob's value while it builds
@@ -296,7 +298,9 @@ module MB
           raise Error, "#{name} of #{method} is not a number (#{value.inspect[0, 40]}): only numbers become knobs" unless literal?(value)
           kw = call.kwargs.keys.find { |k| kit_voice_name(kit, call, k) == voice.name } || voice.name
           nth = keys_of(roots, method, all: all).index(key) or raise Error, "#{method} isn't in the track's graph"
-          Target.new(kind: :call, call_name: method, nth: nth, key: key, slot: [:kw, kw, [setting]], param: name, value: value, document: nil, arg: name, mode: :live)
+          declared = voice.knob_params[setting]&.range
+          Target.new(kind: :call, call_name: method, nth: nth, key: key, slot: [:kw, kw, [setting]], param: name, value: value, document: nil, arg: name, mode: :live,
+                     range: declared && (Param.magnitude(declared.begin).to_f..Param.magnitude(declared.end).to_f))
         end
 
         # Why +param+ of +node+, made inside a drum kit voice's code (an
@@ -329,11 +333,14 @@ module MB
         end
 
         # A knob range for a drum kit voice setting (Target +t+ from
-        # .kit_target), or nil: amounts 0..1, levels 0..2, a tune in Hz
-        # (20..2000) or in semitones (-24..24, the 909's sampled voices);
-        # decays take the Param names table's seconds.
+        # .kit_target), or nil: the range the voice declared (Machine
+        # voices' `(lo..hi).at(default)` knobs: the fitted kicks), else
+        # amounts 0..1, levels 0..2, a tune in Hz (20..2000) or in
+        # semitones (-24..24, the 909's sampled voices); decays take the
+        # Param names table's seconds.
         def kit_range(t)
           return nil unless t.kind == :call && t.slot[0] == :kw && t.slot[2]&.length == 1 && t.param.to_s.end_with?("_#{t.slot[2][0]}")
+          return t.range if t.range
           setting = t.slot[2][0]
           v = Param.magnitude(t.value).to_f rescue (return nil)
           case setting
