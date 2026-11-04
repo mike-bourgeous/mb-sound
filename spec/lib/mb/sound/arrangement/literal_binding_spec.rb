@@ -339,11 +339,15 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
       [->(c) { MB::Sound.tr808(c, snare: { snappy: 0.5 }) }, { tr808: :snare_snappy }, :"drums/snare_snappy", 0.5],
       [->(c) { MB::Sound.tr808(c) }, { tr808: :kick_tone }, :"drums/kick_tone", nil],
       [->(c) { MB::Sound.kit(c) { voice(:kick, tune: 48) { |h| h.body(h.tune, decay: 0.4) }; tr909 :snare, :closed_hat } }, { kit: :kick_tune }, :"drums/kick_tune", 48],
-    ].each do |patch, what, kname, value|
+      # (a borrowed design's ranged knob: the fitted 909 kick's drop binds
+      # with the range it declared; kick-lib-1)
+      [->(c) { MB::Sound.kit(c) { borrow :fit909_kick; tr909 except: :kick } }, { kit: :kick_drop }, :"drums/kick_drop", 0.283811, 0.0..0.8],
+    ].each do |patch, what, kname, value, range|
       _, ref, = play(REBUILD, track: :drums, patch: patch, clip: beat, buffers: 150)
       s, bound, entry = play(->(_) { MB::Sound.bind(:drums, what) }, track: :drums, patch: patch, clip: beat, buffers: 150)
       expect(entry.to_s).to eq('bg :drums lands 2:1 (queued)'), what.inspect
       expect(s.knobs[kname]&.value).to be_within(1e-9).of(value), what.inspect if value
+      expect(s.knobs[kname].range).to eq(range), what.inspect if range
       expect(s.arrangement.build_knob?(kname)).to eq(false), what.inspect
       expect(code_of(s, :drums)).to include("{ #{what.values.first.to_s.split('_').last}: knob(:\"#{kname}\") }"), what.inspect
       expect(Digest::MD5.hexdigest(bound.to_binary)).to eq(Digest::MD5.hexdigest(ref.to_binary)), "#{what}: #{(bound - ref).abs.max}"

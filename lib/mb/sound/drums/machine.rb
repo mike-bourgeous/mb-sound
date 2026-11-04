@@ -481,12 +481,13 @@ module MB
         end
 
         # Adds the voices of another kit design (Drums.design: a shipped
-        # kit's name such as :tr909, :tr808, or a Drums::Machine), like
-        # #tr909: by name (all without names, or all but +except+), knob
-        # defaults changed by voice.
+        # kit's name such as :fit909_kick, :tr909, :tr808, a library kit
+        # entry, or a Drums::Machine), like #tr909: by name (all without
+        # names, or all but +except+), knob defaults changed by voice.  The
+        # 909 with the fitted kick, the kick first so every voice keeps the
+        # seed it has in tr909:
         #
-        #     zap = kit { voice(:zap) { |h| h.fm(800, index: 3, decay: 0.1) } }
-        #     kit(grid(16, zap: 'x..x', clap: '....X...')) { borrow zap; tr909 :clap }
+        #     kit(grid(16, kick: 'X...X...X...X...', clap: '....X.......X...')) { borrow :fit909_kick; tr909 except: :kick }
         def borrow(design, *names, except: nil, **knobs)
           @machine.add_from(Drums.design(design), names, knobs, except: except)
         end
@@ -503,9 +504,10 @@ module MB
       end
 
       # The shipped kit designs (Drums::Machine) by name, for
-      # Builder#borrow: the drum machines.
+      # Builder#borrow: the drum machines and the fitted voices
+      # (Drums::Fits::DESIGNS).
       def self.designs
-        { tr909: -> { TR909.machine }, tr808: -> { TR808.machine } }
+        { tr909: -> { TR909.machine }, tr808: -> { TR808.machine } }.merge(Fits::DESIGNS)
       end
 
       # The kit design +design+ (a Drums::Machine, or the name of a shipped

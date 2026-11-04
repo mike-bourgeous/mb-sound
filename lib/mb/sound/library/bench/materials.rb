@@ -203,7 +203,7 @@ module MB
           when :effect
             EFFECT_MATERIALS.map { |k| effect_material(k) }
           when :kit
-            [phrase(:drums_beat), phrase(:drums_busy), template_material(entry)].compact
+            [phrase(:drums_beat, entry), phrase(:drums_busy, entry), template_material(entry)].compact
           when :instrument
             role = role_of(entry)
             [*ROLE_MATERIALS.fetch(role).map { |k| phrase(k, entry) }, template_material(entry)].compact
@@ -275,10 +275,10 @@ module MB
                -> { Playable.demo_phrase }]
             when :drums_beat
               ['Drum beat', "Audition's demo beat (kick, snare, closed hat), four bars", 120, 10,
-               -> { kit = MB::Sound.grid(16, **Audition::KIT_DEMO); repeat_kit(kit, 4) }]
+               -> { kit = MB::Sound.grid(16, **kit_rows(entry, Audition::KIT_DEMO)); repeat_kit(kit, 4) }]
             when :drums_busy
               ['Busy beat (open hats)', 'kick, snare, closed and open hats, four bars', 120, 10,
-               -> { repeat_kit(MB::Sound.grid(16, **BUSY_KIT), 4) }]
+               -> { repeat_kit(MB::Sound.grid(16, **kit_rows(entry, BUSY_KIT)), 4) }]
             when :texture
               ['Held notes', 'A3 for a bar, four times (textures may ignore the notes)', 120, 10,
                -> { MB::Sound.seq(A3).n1.legato(0.98).repeat(4) }]
@@ -289,6 +289,11 @@ module MB
               raise Error, "no phrase #{key.inspect} (#{ROLE_MATERIALS.values.flatten.uniq.join(', ')}, template)"
             end
           Material.new(key: key, title: title, about: about, bpm: bpm, max_seconds: seconds, source: clip)
+        end
+
+        # Rows of a beat for kit +entry+ (nil: all; see Audition.kit_rows).
+        def kit_rows(entry, rows)
+          entry ? Audition.kit_rows(entry, rows) : rows
         end
 
         # A Kit whose rows each play +count+ bars (non-looping, so the

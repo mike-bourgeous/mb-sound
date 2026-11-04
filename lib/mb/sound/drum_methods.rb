@@ -76,10 +76,19 @@ module MB
       alias drum_kit kit
     end
 
-    # The drum machines as library entries (family :machine, `L.kit.tr909`).
-    Library.index.define_family(:machine, kind: :kit, owner: DrumMethods, about: 'Drum machines: tr808(grid), tr909(midi)',
-                                apply: ->(name, source = nil, **kw) { MB::Sound.public_send(name, source, **kw) },
-                                code: ->(e) { "#{e.name}(grid(16, kick: 'x...x...').loop)" })
+    # The drum machines and fitted kit designs as library entries (family
+    # :machine, `L.kit.tr909`, `L.kit.fit909_kick`).  Fitted designs
+    # (Drums::Fits) play through `kit(source) { borrow :name }`, which
+    # records and saves as written.
+    Library.index.define_family(:machine, kind: :kit, owner: DrumMethods, about: 'Drum machines and kit designs: tr808(grid), tr909(midi), kit(grid) { borrow :fit909_kick }',
+                                apply: ->(name, source = nil, **kw) { Library.index.lookup(:machine, name).call(source, **kw) },
+                                code: ->(e) {
+                                  if DrumMethods.method_defined?(e.name)
+                                    "#{e.name}(grid(16, kick: 'x...x...').loop)"
+                                  else
+                                    "kit(grid(16, kick: 'x...x...').loop) { borrow #{e.name.inspect} }"
+                                  end
+                                })
     {
       tr808: [%i[analog classic], 'A TR-808-flavored kit: resonator, metal-bank, and noise voices'],
       tr909: [%i[analog classic rom], 'A TR-909-flavored kit: analog kick/snare/toms/clap, 6-bit ROM hats and cymbals'],
