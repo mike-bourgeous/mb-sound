@@ -155,7 +155,10 @@ else
 	# --cap-add SYS_NICE: lets the render and latency probe threads get
 	# SCHED_FIFO/nice priority (maintainer's OK, 2026-10-25); also only for
 	# new containers.
-	docker run --name $APPNAME -it -p 3000:3000 \
+	# -p 127.0.0.1:3000:3000: a port for a future web interface, reachable
+	# from this machine only (the maintainer, 2026-11-04); never mount the
+	# Docker or Podman socket into the container.
+	docker run --name $APPNAME -it -p 127.0.0.1:3000:3000 \
 		--shm-size=512m \
 		--cap-add SYS_NICE \
 		"${mounts[@]}" \
