@@ -97,6 +97,7 @@ module MB
 
           init_smooth(smooth)
 
+          walk = GraphNode.build_setting(walk) # (read once while building)
           unless walk.nil? || (walk.is_a?(Numeric) && walk.real? && walk > 0 && walk <= 1)
             raise ArgumentError, "Drift walk must be nil or a share of the range above 0, at most 1 (got #{walk.inspect})"
           end

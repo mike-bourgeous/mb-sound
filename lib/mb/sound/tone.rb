@@ -1130,6 +1130,7 @@ module MB
       # Also see the MB::Sound::Noise class for another way to synthesize
       # noise.
       def noise(blend = true, seed: nil)
+        blend = GraphNode.build_setting(blend) # (a param: its number, read once)
         configure do
           @noise_seed = Integer(seed) if seed
           @noise_seed ||= MB::Sound.next_seed if blend != false && blend != 0

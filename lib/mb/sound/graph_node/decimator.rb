@@ -92,6 +92,7 @@ module MB
             raise ArgumentError, "Decimator rate must be a number of Hz, a node, or a Pitch (got #{rate.inspect})"
           end
           raise ArgumentError, "Decimator rate must be a real number (got #{rate})" if rate.is_a?(Complex)
+          jitter = GraphNode.build_setting(jitter) # (read once while building)
           unless jitter.is_a?(Numeric) && jitter >= 0 && jitter <= MAX_JITTER
             raise ArgumentError, "Decimator jitter must be a number from 0 to #{MAX_JITTER} (got #{jitter.inspect})"
           end

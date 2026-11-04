@@ -539,7 +539,9 @@ module MB
         def self.room_params(params, sample_rate:)
           p = ROOM_DEFAULTS.merge(params)
           p.delete(:damping) if params.key?(:lowpass) && !params.key?(:damping)
-          room_size = p.delete(:room_size).to_f
+          # (room size, decay, and damping lay out the network: params and
+          # knobs are read once while building, GraphNode.build_setting)
+          room_size = GraphNode.build_setting(p.delete(:room_size)).to_f
           raise ArgumentError, 'Room size must be between 0.0 and 1.0' unless room_size.between?(0, 1)
 
           decay = MB::Sound::Length.seconds(p[:decay], sample_rate: sample_rate)
@@ -1521,7 +1523,7 @@ module MB
         # i.e. r = g ** (1 / alpha - 1), p = (1 - r) / (1 + r) (the
         # filter's DC gain is 1, so DC keeps the line's decay).
         def damping_coefficients(damping, design: :exact)
-          damping = damping.to_f
+          damping = GraphNode.build_setting(damping).to_f
           raise ArgumentError, 'Damping must be between 0.0 and 1.0' unless damping.between?(0, 1)
 
           alpha = [1.0 - damping, 0.05].max

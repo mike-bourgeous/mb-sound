@@ -97,6 +97,9 @@ module MB
             quality = quality || 0.5 ** 0.5
 
             if structure == :biquad
+              # (a param or knob is its number while building; other nodes
+              # need the SVF)
+              gain = GraphNode.build_setting(gain)
               raise ArgumentError, 'The biquad structure takes a numeric gain: (use the default SVF for gain nodes)' if gain && !gain.is_a?(Numeric)
               f = MB::Sound::Filter::Cookbook.new(filter_or_type, sample_rate, 1, quality: 1, db_gain: gain && Decibels.db_of(gain, 'gain'))
               MB::Sound::Filter::SampleWrapper.new(f, self, inputs: { cutoff: cutoff, quality: quality })

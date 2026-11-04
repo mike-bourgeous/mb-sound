@@ -222,23 +222,27 @@ module MB
       end
 
       # Returns +value+ in seconds: plain numbers are already seconds; lengths
-      # convert at +sample_rate+ and +transport+'s tempo.  Raises an error for
-      # graph nodes.
+      # convert at +sample_rate+ and +transport+'s tempo.  A param or knob
+      # (a graph document's param, a track's knob) is its number of seconds
+      # while the graph builds (GraphNode.build_setting; fit-patch-2).
+      # Raises an error for other graph nodes.
       def self.seconds(value, sample_rate: 48000, transport: Sequence.current_transport)
+        value = GraphNode.build_setting(value)
         case value
         when Length then value.to_seconds(sample_rate: sample_rate, transport: transport)
         when Numeric then value
-        else raise ArgumentError, "Expected a length of time (seconds, a Length, or a Duration; got #{value.inspect})"
+        else raise ArgumentError, "Expected a length of time (seconds, a Length, a Duration, or a param; got #{value.inspect})"
         end
       end
 
       # Returns +value+ as a number of samples at +sample_rate+: plain numbers
-      # are seconds.
+      # (and params, as for .seconds) are seconds.
       def self.samples(value, sample_rate: 48000, transport: Sequence.current_transport)
+        value = GraphNode.build_setting(value)
         case value
         when Length then value.to_samples(sample_rate: sample_rate, transport: transport)
         when Numeric then value * sample_rate
-        else raise ArgumentError, "Expected a length of time (seconds, a Length, or a Duration; got #{value.inspect})"
+        else raise ArgumentError, "Expected a length of time (seconds, a Length, a Duration, or a param; got #{value.inspect})"
         end
       end
 
