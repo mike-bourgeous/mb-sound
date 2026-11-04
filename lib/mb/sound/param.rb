@@ -189,6 +189,7 @@ module MB
           when true, false then :boolean
           when Integer, Float then :number # (also before Notes and Clips load: ControlSpecs made at load)
           when String then :string
+          when Symbol then :name # (also at load: ChannelMixer law options)
           else
             t = ArgTypes.classify(v)
             t == :node ? :node : t

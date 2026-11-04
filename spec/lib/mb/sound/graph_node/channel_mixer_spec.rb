@@ -90,7 +90,7 @@ RSpec.describe(MB::Sound::GraphNode::ChannelMixer, :aggregate_failures) do
 
     it 'declare their parameters and options for discovery' do
       expect(MB::Sound::GraphNode::ChannelMixer::Pan.params).to eq(position: MB::Sound::Param.declare(:position, 0, range: -1.0..1.0))
-      expect(MB::Sound::GraphNode::ChannelMixer::Pan.options[:law][:values]).to eq([:equal_power, :minus_4_5db, :linear])
+      expect(MB::Sound::GraphNode::ChannelMixer::Pan.options[:law].range).to eq([:equal_power, :minus_4_5db, :linear])
       expect(MB::Sound::GraphNode::ChannelMixer::Pan.channels).to eq([1, 2])
       expect(MB::Sound::GraphNode::ChannelMixer::Mono.channels).to eq([:any, 1])
     end
