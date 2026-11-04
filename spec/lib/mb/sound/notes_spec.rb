@@ -753,6 +753,25 @@ RSpec.describe(MB::Sound::Notes) do
       expect(n.sample(800)).not_to eq(nil)
     end
 
+    it 'keeps time while ended, so a restart plays its gate in step with its note numbers' do
+      # (fix-batch-1104: an ended gate read again stayed at its end, so
+      # after a seek back it played the frames it was read while ended
+      # late; SessionFuzz seed 771024's idle Synth lanes)
+      v = clip_notes(clip)
+      g = v.gate
+      n = v.number
+      40.times { g.sample(800); n.sample(800) }
+      expect(g.sample(800)).to eq(nil)
+      n.sample(800)
+      expect(g.cursor).to eq(n.cursor)
+
+      v.stream.restart
+      gate = g.sample(800)
+      num = n.sample(800)
+      expect(gate[0]).to eq(1)
+      expect(num[0]).to eq(MB::Sound::C4.number)
+    end
+
     it 'keeps going while envelopes are sounding, up to the tail limit' do
       v = clip_notes(clip)
       g = v.gate

@@ -207,6 +207,26 @@ RSpec.describe('session fuzzing') do
         'at_bar(2, beat: 4) { seek 2, 2.999 }',
       ], 3,
     ],
+    # (the 2026-11-04 batch 11 soak, fix-batch-1104: a one-shot clip's idle
+    # Synth lanes ended their gates in the buffer that read its last
+    # event, and those gates, read again while another lane rang out,
+    # stayed there; the seek back to before the clip's start brought them
+    # back that buffer behind their note numbers, so the replayed first
+    # note sounded 572 frames late at 800-frame buffers and 310 at 367;
+    # since Notes::Node#keep_time)
+    'a seek back past a one-shot synth clip that ended on the seek (seed 771024)' => [
+      :buffer_size, ['bpm 126', 'meter 3, 4'], [
+        'knob :busy, 0.5',
+        'at_bar(1, beat: 2) { tempo 90, over: 3.beats; after(in: 2.beats) { seek 1, 5/2r } }',
+        'at_bar(1, beat: 3) { bg :lib, preset(:square_bass, midi: seq(C5, D5).n8).at(0.3); turn :"lib/cutoff", 300.0, over: 1/2r }',
+      ], 2,
+    ],
+    'the same without a tempo ramp or preset (seed 771024)' => [
+      :buffer_size, ['bpm 126', 'meter 3, 4'], [
+        'at_bar(1, beat: 3) { bg :lib, seq(C5, D5).n8.synth { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) }.at(0.3) }',
+        'at_bar(1, beat: 4) { seek 1, 5/2r }',
+      ], 2,
+    ],
     # (lesson-fixes-1: a console swap didn't change the track's clip, so
     # `bg :t1` after a stop played the scene's clip again; seed 5's case)
     'a swapped instrument track stopped and launched again by name' => [
