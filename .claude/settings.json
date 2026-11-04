@@ -17,5 +17,18 @@
       "Bash(ls:*)",
       "Bash(grep:*)"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session_restart.sh"
+          }
+        ]
+      }
+    ]
   }
 }
