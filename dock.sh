@@ -1,6 +1,17 @@
 #!/bin/bash
 # MB - Claude code container environment
 # Used with Podman on Ubuntu Linux
+#
+# Usage: ./dock.sh [options] [-- docker run arguments...]
+#   --build              rebuild the image (and remove the old container)
+#   --recreate           remove the container and create it again (options
+#                        below only apply when the container is created)
+#   --ro HOST:CONTAINER  mount a host folder read-only (repeatable), e.g.
+#                        --ro /mnt/windows/Music/Projects:/music
+#   --mount HOST:CONTAINER
+#                        mount a host folder read-write (repeatable)
+#   -h, --help           this help
+# Arguments after `--` go to `docker run` as they are (only when creating).
 
 APPNAME=mb-sound
 
@@ -26,12 +37,35 @@ SHARED_DIRS="memory:projects/-app/memory skills:skills plans:plans rules:rules c
 # container.  It used to live in the repo's gitignored .gh-user (visible to
 # every machine sharing /app); a new LOCAL_GH starts as a copy of it.
 LOCAL_GH="${LOCAL_GH:-$HOME/.mb-sound-gh}"
-# Optional read-only folders for reference material that must never be
-# written to (e.g. the maintainer's music projects on a dual-boot disk):
-# space-separated host:container pairs, mounted with :ro, e.g.
-#   READONLY_MOUNTS="/mnt/windows/Music/Projects:/music" ./dock.sh
-# Like the other options, applies only when the container is created.
-READONLY_MOUNTS="${READONLY_MOUNTS:-}"
+
+usage()
+{
+	sed -n '4,14p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+build=0
+recreate=0
+extra_mounts=()
+run_args=()
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--build) build=1 ;;
+		--recreate) recreate=1 ;;
+		--ro|--mount)
+			if [[ $# -lt 2 || "$2" != *:* ]]; then
+				echo "$1 needs HOST:CONTAINER"
+				exit 1
+			fi
+			[[ "$1" = --ro ]] && extra_mounts+=("$2:ro") || extra_mounts+=("$2")
+			shift ;;
+		--ro=*) extra_mounts+=("${1#--ro=}:ro") ;;
+		--mount=*) extra_mounts+=("${1#--mount=}") ;;
+		--) shift; run_args=("$@"); break ;;
+		-h|--help) usage; exit 0 ;;
+		*) echo "Unknown option: $1"; echo; usage; exit 1 ;;
+	esac
+	shift
+done
 
 trap echo EXIT
 
@@ -43,16 +77,22 @@ hl()
 	printf "\033[0m\n\n"
 }
 
-if [[ "${1-}" = "--build" ]]; then
+if [[ $build = 1 ]]; then
 	hl "Building"
 	docker build . -f Dockerfile -t $APPNAME \
 		--build-arg GIT_USER_NAME="$(git -C "$REPO_DIR" config user.name || true)" \
 		--build-arg GIT_USER_EMAIL="$(git -C "$REPO_DIR" config user.email || true)"
+	recreate=1
+fi
 
-	if docker ps -a 2>&1 | grep -q $APPNAME; then
-		hl "Removing old container"
-		docker rm -f $APPNAME
-	fi
+if [[ $recreate = 1 ]] && docker ps -a 2>&1 | grep -q $APPNAME; then
+	hl "Removing old container"
+	docker rm -f $APPNAME
+fi
+
+if docker ps -a 2>&1 | grep -q $APPNAME && [[ ${#extra_mounts[@]} -gt 0 || ${#run_args[@]} -gt 0 ]]; then
+	echo "The container exists, so --ro/--mount/-- arguments don't apply; add --recreate."
+	exit 1
 fi
 
 if docker ps 2>&1 | grep -q $APPNAME; then
@@ -74,9 +114,6 @@ else
 		exit 1
 	fi
 
-	# Create the mount points ourselves so they belong to this user, not
-	# root.  Nested bind mounts: the shared folders cover their mount points
-	# inside the local config.
 	if [[ ! -e "$LOCAL_GH" ]]; then
 		if [[ -d "$REPO_DIR/.gh-user" ]]; then
 			echo "Copying $REPO_DIR/.gh-user to $LOCAL_GH (gh's config is per machine now;"
@@ -88,6 +125,9 @@ else
 		chmod 700 "$LOCAL_GH"
 	fi
 
+	# Create the mount points ourselves so they belong to this user, not
+	# root.  Nested bind mounts: the shared folders cover their mount points
+	# inside the local config.
 	mounts=(-v "$REPO_DIR":/app -v "$LOCAL_CLAUDE":/claude -v "$LOCAL_GH":/gh)
 	for pair in $SHARED_DIRS; do
 		src="$SHARED_CLAUDE/${pair%%:*}"
@@ -95,14 +135,15 @@ else
 		mkdir -p "$src" "$LOCAL_CLAUDE/$dst"
 		mounts+=(-v "$src":"/claude/$dst")
 	done
-	for pair in $READONLY_MOUNTS; do
-		src="${pair%%:*}"
-		dst="${pair#*:}"
+	# --ro/--mount folders: a missing host folder stops here (an unmounted
+	# disk would otherwise mount as an empty directory)
+	for spec in ${extra_mounts[@]+"${extra_mounts[@]}"}; do
+		src="${spec%%:*}"
 		if [[ ! -d "$src" ]]; then
-			echo "READONLY_MOUNTS: $src is not a directory (is the disk mounted?)"
+			echo "$src is not a directory (is the disk mounted?)"
 			exit 1
 		fi
-		mounts+=(-v "$src":"$dst":ro)
+		mounts+=(-v "$spec")
 	done
 
 	# --shm-size: every JACK2 server maps ~40 MB of /dev/shm, and Docker's
@@ -118,5 +159,6 @@ else
 		"${mounts[@]}" \
 		-e CLAUDE_CONFIG_DIR=/claude \
 		-e GH_CONFIG_DIR=/gh \
+		${run_args[@]+"${run_args[@]}"} \
 		$APPNAME /bin/bash
 fi
