@@ -21,6 +21,12 @@ REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOCAL_CLAUDE="${LOCAL_CLAUDE:-$HOME/.mb-sound-claude}"
 SHARED_CLAUDE="${SHARED_CLAUDE:-$REPO_DIR/.claude-shared}"
 SHARED_DIRS="memory:projects/-app/memory skills:skills plans:plans rules:rules commands:commands agents:agents output-styles:output-styles workflows:workflows"
+# Optional read-only folders for reference material that must never be
+# written to (e.g. the maintainer's music projects on a dual-boot disk):
+# space-separated host:container pairs, mounted with :ro, e.g.
+#   READONLY_MOUNTS="/mnt/windows/Music/Projects:/music" ./dock.sh
+# Like the other options, applies only when the container is created.
+READONLY_MOUNTS="${READONLY_MOUNTS:-}"
 
 trap echo EXIT
 
@@ -72,6 +78,15 @@ else
 		dst="${pair#*:}"
 		mkdir -p "$src" "$LOCAL_CLAUDE/$dst"
 		mounts+=(-v "$src":"/claude/$dst")
+	done
+	for pair in $READONLY_MOUNTS; do
+		src="${pair%%:*}"
+		dst="${pair#*:}"
+		if [[ ! -d "$src" ]]; then
+			echo "READONLY_MOUNTS: $src is not a directory (is the disk mounted?)"
+			exit 1
+		fi
+		mounts+=(-v "$src":"$dst":ro)
 	done
 
 	# --shm-size: every JACK2 server maps ~40 MB of /dev/shm, and Docker's
