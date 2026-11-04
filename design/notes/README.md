@@ -144,7 +144,7 @@ Live MIDI uses JACK ports when a server answers, else bundled RtMidi; specs use 
 
 ### [Hand-tuning a fitted sound](hand_tune.md)
 
-The hand-tune loop (`hand_tune.rb`, `hand_tune/`, `fit_patch.rb`, `reference.rb`, `take/reader.rb`): `tuner` (NAV h) lists references (queue, folder, samples) then synths for one (its fit, fits, init, blank, the library), and runs one `tune` line; `tune :kick, code, ref: 'kick.wav', tune: (30.0..110.0).at(51.3)` (or `L.inst.init`) makes the numbers knobs (`FitPatch`; settings that take only numbers stay numbers, `GraphIO::NumberOnly`), opens `design`, A/Bs the reference (`ab`, b); `retune :kick, code, ...` redefines the graph, knobs carrying; `refine :kick, seconds: 20` searches (CMA-ES, a worker process) from his knobs, a `turn` line to A/B and apply; `ui.note` keeps his words; `take.turns` reads his take; `HandTune.infer` scores his path with L3.
+The hand-tune loop (`hand_tune.rb`, `hand_tune/`, `fit_patch.rb`, `reference.rb`, `take/reader.rb`): `tuner` (NAV h) lists references (queue, folder, samples) then synths for one (its fit, fits, init, blank, the library), and runs one `tune` line; `tune :kick, code, ref: 'kick.wav', tune: (30.0..110.0).at(51.3)` (or `L.inst.init`) makes the numbers knobs (`FitPatch`), opens `design`, A/Bs the reference (`ab`, b); `retune :kick, code, ...` redefines the graph, knobs carrying; `refine :kick, seconds: 20` searches (CMA-ES, a worker process) from his knobs, a `turn` line to A/B and apply; `ui.note` keeps his words; `take.turns` reads his take; `HandTune.infer` scores his path with L3.
 
 ### [Tracker modules](trackers.md)
 

@@ -498,7 +498,10 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
         f = 110.hz.saw.filter(:peak, cutoff: 900, quality: 3, gain: gain)
         expect(f.sources[:gain]).to be_a(MB::Sound::GraphNode)
         expect(f.sample(4800).isfinite.all?).to eq(true)
-        expect { 110.hz.saw.filter(:peak, cutoff: 900, gain: 0.5.constant, structure: :biquad) }.to raise_error(ArgumentError, /gain/)
+        expect { 110.hz.saw.filter(:peak, cutoff: 900, gain: gain, structure: :biquad) }.to raise_error(ArgumentError, /gain/)
+        # (a param or knob is its number while building: fit-patch-2)
+        a = 110.hz.saw.filter(:peak, cutoff: 900, gain: 0.5.constant, structure: :biquad).sample(4800).dup
+        expect(110.hz.saw.filter(:peak, cutoff: 900, gain: 0.5, structure: :biquad).sample(4800)).to eq(a)
       end
 
       it 'raises for unknown structures and filters without a structure' do
