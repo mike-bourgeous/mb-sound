@@ -169,6 +169,11 @@ RSpec.describe(MB::Sound::GraphNode::ChannelMixer, 'plan ops') do
       pan_linear: ->(s) { (s[0] * 0.5).pan(-0.7, law: :linear) },
       pan_minus_4_5db: ->(s) { (s[0] * 0.5).pan(0.2, law: :minus_4_5db) },
       balance: ->(s) { s.balance(-0.4) },
+      balance_constant_power: ->(s) { s.balance(0.6, law: :constant_power) },
+      balance_0db: ->(s) { s.balance(-0.3, law: :balance_0db) },
+      balance_3db: ->(s) { s.balance(0.45, law: :balance_3db) },
+      balance_6db: ->(s) { s.pan(-0.8, law: :balance_6db) },
+      add_channels: ->(s) { s.balance(0.7, law: :add_channels) },
       width: ->(s) { s.width(1.6) },
       mid_side: ->(s) { s.mid_side },
       swap: ->(s) { s.swap },
@@ -202,6 +207,30 @@ RSpec.describe(MB::Sound::GraphNode::ChannelMixer, 'plan ops') do
         }
         expect(mixer_region(r).program.ops.count { |op| op.is_a?(MB::Sound::Plan::Op::PanGain) }).to eq(2)
       end
+    end
+
+    # The straight-line stereo laws: PanLaws.linear_stereo builds the
+    # same steps from plan Values (clips, products, sums), no PanGain
+    {
+      constant_power: 2, balance_0db: 0, balance_3db: 0, balance_6db: 0, add_channels: 0,
+    }.each do |law, pan_gains|
+      it "matches a moving #{law} balance, positions beyond -1..1 included, also in check mode" do
+        r = plan_compare(check: :raise) { |_c|
+          pos = src.new(kind: :steps, seed: 6, every: 45, scale: 1.4) * 1
+          outs = stereo_input.balance(pos, law: law).to_a
+          outs[0] + outs[1] * 0.5
+        }
+        ops = mixer_region(r).program.ops
+        expect(ops.count { |op| op.is_a?(MB::Sound::Plan::Op::PanGain) }).to eq(pan_gains)
+        expect(ops.count { |op| op.is_a?(MB::Sound::Plan::Op::Clip) }).to eq(3) if pan_gains == 0
+      end
+    end
+
+    it 'runs moving straight-line stereo laws with the Ruby engine' do
+      plan_compare(engines: [:ruby]) { |_c|
+        pos = src.new(kind: :steps, seed: 7, every: 30, scale: 1.2) * 1
+        %i[balance_3db add_channels].map { |law| stereo_input.balance(pos, law: law).to_a.reduce(:+) }.reduce(:+)
+      }
     end
 
     it 'fuses an autopan LFO with the pan (the keys presets)' do

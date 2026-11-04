@@ -215,30 +215,45 @@ module MB
 
         # Pans a one-channel bundle like a single node (see
         # ChannelMethods#pan), or balances a stereo bundle (see #balance), as
-        # most DAWs' stereo track pan controls do.  Bundles with more
-        # channels raise an error.
+        # most DAWs' stereo track pan controls do.  On a stereo bundle,
+        # +law+ may be a stereo law (ChannelMixer::PanLaws::STEREO_LAWS,
+        # e.g. :add_channels); the mono laws (the default :equal_power
+        # included) give the default :balance.  Bundles with more channels
+        # raise an error.
         #
-        # Example (bin/sound.rb):
+        # Examples (bin/sound.rb):
         #     bg stereo(220.hz.saw.at(0.2), 330.hz.saw.at(0.2)).pan(2.bars.lfo)
+        #     bg stereo(220.hz.saw.at(0.2), 330.hz.saw.at(0.2)).pan(0.7, law: :add_channels)
         def pan(position = 0, law: :equal_power)
           return @outputs[0].pan(position, law: law) if channel_count == 1
           raise ArgumentError, "Can only pan bundles with 1 or 2 channels (got #{channel_count})" unless channel_count == 2
-          raise ArgumentError, "Unknown pan law #{law.inspect} (supported: #{ChannelMethods::PAN_LAWS.map(&:inspect).join(', ')})" unless ChannelMethods::PAN_LAWS.include?(law)
+          return balance(position, law: law) if ChannelMixer::PanLaws::STEREO_LAWS.include?(law)
+
+          unless ChannelMethods::PAN_LAWS.include?(law)
+            laws = ChannelMethods::PAN_LAWS + ChannelMixer::PanLaws::STEREO_LAWS
+            raise ArgumentError, "Unknown pan law #{law.inspect} (supported: #{laws.map(&:inspect).join(', ')})"
+          end
 
           balance(position)
         end
 
-        # Balances a stereo bundle (a ChannelMixer::Balance): +position+ from
-        # -1 (left only) through 0 (unchanged) to 1 (right only), and may be
-        # a graph node.  The side being turned down follows an equal-power
-        # curve scaled to unity at the center (about -5.3 dB at +/-0.5); the
-        # other side stays at full level.
+        # Balances (pans) a stereo bundle (a ChannelMixer::Balance):
+        # +position+ from -1 (left) through 0 (center) to 1 (right), and may
+        # be a graph node.  +law+ is one of
+        # ChannelMixer::PanLaws::STEREO_LAWS: the default :balance keeps the
+        # favored side at full level and fades the other on an equal-power
+        # curve scaled to unity at the center (about -5.3 dB at +/-0.5);
+        # ACID's laws are :constant_power (-3 dB on both channels at the
+        # center), :balance_0db/:balance_3db/:balance_6db (straight lines
+        # from that center level), and :add_channels (the far channel moves
+        # into the near one, so a hard pan is the mono sum on one side).
         #
-        # Example (bin/sound.rb):
+        # Examples (bin/sound.rb):
         #     bg stereo(220.hz.saw.at(0.2), 330.hz.saw.at(0.2)).balance(-0.3)
-        def balance(position = 0)
+        #     bg stereo(220.hz.saw.at(0.2), 330.hz.saw.at(0.2)).balance(4.bars.lfo, law: :add_channels)
+        def balance(position = 0, law: :balance)
           require_stereo('balance')
-          mixed(ChannelMixer::Balance.new(@outputs, position: position))
+          mixed(ChannelMixer::Balance.new(@outputs, position: position, law: law))
         end
 
         # Mixes the channels into new channels with +matrix+ (see

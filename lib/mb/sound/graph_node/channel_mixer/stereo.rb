@@ -56,28 +56,46 @@ module MB
           end
         end
 
-        # Balances a stereo signal, as most DAWs' stereo track pan controls
-        # do: +position+ from -1 (left only) through 0 (unchanged) to 1
-        # (right only); the favored side stays at full level and the other
-        # fades out (see PanLaws.balance).
+        # Balances (pans) a stereo signal, as most DAWs' stereo track pan
+        # controls do: +position+ from -1 (left) through 0 (center) to 1
+        # (right); +law+ picks how (see PanLaws::STEREO_LAWS).  The default
+        # :balance keeps the favored side at full level and fades the other
+        # out (see PanLaws.balance); ACID's laws (:constant_power,
+        # :balance_0db, :balance_3db, :balance_6db, :add_channels) are the
+        # alternatives.
         #
         # Created with Channels#balance (and Channels#pan on stereo bundles).
         class Balance < ChannelMixer
           channels 2 => 2
           param :position, default: 0, range: -1.0..1.0
+          option :law, default: :balance, values: PanLaws::STEREO_LAWS
 
           def gains_for(position:)
-            left, right = PanLaws.balance(position)
-            [[left, 0], [0, right]]
+            PanLaws.stereo(option(:law), position)
           end
 
-          # A moving position: PanLaws.balance's gains (Plan::Op::PanGain)
-          # times each channel, as #mix computes them.
+          # A moving position: the trigonometric laws' gains
+          # (Plan::Op::PanGain) times each channel, or the straight-line
+          # laws' matrix built from the plan's Values by
+          # PanLaws.linear_stereo (the code the unplanned mixer runs), each
+          # output summed as #mix sums it.
           def plan_moving_reason = nil
 
           def plan_describe_moving(p, terms)
             pos = p[@param_values[:position]]
-            [p.pan_gain(pos, :balance, 0) * terms[0], p.pan_gain(pos, :balance, 1) * terms[1]]
+            law = option(:law)
+
+            case law
+            when :balance, :constant_power
+              pan_law = law == :balance ? :balance : :equal_power
+              [p.pan_gain(pos, pan_law, 0) * terms[0], p.pan_gain(pos, pan_law, 1) * terms[1]]
+
+            else
+              rows = PanLaws.linear_stereo(law, p.clip(pos, -1, 1)) { |x, lo, hi| p.clip(x, lo, hi) }
+              rows.map { |row|
+                row.each_with_index.reject { |g, _| g.is_a?(Numeric) && g == 0 }.map { |g, i| g * terms[i] }.reduce(:+)
+              }
+            end
           end
         end
 
