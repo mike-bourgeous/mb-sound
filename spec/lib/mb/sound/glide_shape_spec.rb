@@ -74,6 +74,18 @@ RSpec.describe('Glide shapes (Notes::Glide with a Curve)') do
     expect(out[-1]).to be_within(0.01).of(MB::Sound::Note.new(72).frequency)
   end
 
+  it 'glides a Notes pitch with a list of shapes, one per note in turn' do
+    n = notes_for(ev.note_on(60, 100, time: 0r), ev.note_on(72, 100, time: 0.01r), ev.note_on(60, 100, time: 0.02r))
+    num = n.hz.glide(5.ms, shape: [:fast, :hold]).freq.log2 # (octaves, to read the curve)
+    out = SpecBuffers.join(4.times.map { num.sample(480).dup }).cast_to(Numo::DFloat)
+    c4 = Math.log2(MB::Sound::Note.new(60).frequency)
+    # the first note takes :fast (it jumps), the second :hold: 60 until it lands on 72
+    expect(out[480...719].to_a.map { _1.round(4) }.uniq).to eq([c4.round(4)])
+    expect(out[720]).to be_within(1e-4).of(c4 + 1)
+    # the third :fast again, from 72 down to 60
+    expect(out[960 + 59]).to be_within(1e-3).of(c4 + 1 - 0.4375) # 1 - (1 - 1/4)^2 of the way at a quarter
+  end
+
   it 'gives swarm copies their own shapes and cycles' do
     n = notes_for(ev.note_on(50, 100, time: 0r))
     seen = []

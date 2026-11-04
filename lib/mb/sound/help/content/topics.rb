@@ -170,7 +170,8 @@ module MB
         `tween([100.hz, 5000.hz], 2.bars)` is up and down in 4 bars.
         `curve:` may be a list, one per step, cycling like the steps
         (breakpoint automation like ACID's envelopes: `:hold :linear
-        :fast :slow :smooth :sharp`).
+        :fast :slow :smooth :sharp`), and so may a glide's `shape:`, one
+        per note in turn: `v.hz.glide(150.ms, shape: [:fast, :hold])`.
       TEXT
       commands :adsr, :env, :amp_env, :filter_env, :fm_env, :sq80_env, :tween, :bounce_hits
       dsl :smooth, :ease
@@ -180,6 +181,9 @@ module MB
       end
       example 'a curve per step: up fast, hold and drop, then back along :sharp' do
         bg :try, 55.hz.saw.at(-16.db).lp4(tween([200.hz, 3000.hz, 600.hz], 2.beats, curve: [:fast, :hold, :sharp])).until(2.bars)
+      end
+      example 'a glide shape per note: :fast, then :hold, in turn' do
+        bg :try, seq(A2, E3, C3, G3).n4.loop.synth(voices: 1) { |v| v.hz.glide(150.ms, shape: [:fast, :hold]).saw.at(-18.db) * v.amp_env }.until(2.bars)
       end
     end
 
