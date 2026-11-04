@@ -37,6 +37,14 @@ RSpec.describe('Glide shapes (Notes::Glide with a Curve)') do
     expect(glide_out(time: 0.02, shape: ->(x) { x })[480 + 479]).to be_within(1e-4).of(66)
   end
 
+  it 'reaches the target after a :hold glide ends partway through a buffer (tween-curves-1)' do
+    # (Curve#lookup gave :hold's left value at 1, so the rest of the
+    # buffer after the glide stayed at the start note)
+    out = glide_out(time: 0.002, shape: :hold) # 96 samples from 480
+    expect(out[480...575].to_a.uniq).to eq([60.0])
+    expect(out[575...960].to_a.uniq).to eq([72.0])
+  end
+
   it 'rejects cycles without a shape and options with a Curve object' do
     expect { glide_out(time: 0.02, cycles: 3) }.to raise_error(ArgumentError, /shape/)
     expect { glide_out(time: 0.02, shape: MB::Sound::Curve[:elastic], overshoot: 0.2) }.to raise_error(ArgumentError, /shape name/)

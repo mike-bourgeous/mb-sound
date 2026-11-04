@@ -5,7 +5,11 @@
  * right values of one node to the left values of the next; exactly on a
  * node it is the left value (so staircases jump just after each node, like
  * Curve.steps; within MB_CURVE_NODE_SNAP of a cell after it, as Curve.steps
- * snaps rounding).  Positions are clamped to 0..1 (NaN reads as 0).
+ * snaps rounding), except at 1, the last node, where it is the right
+ * value: the curve's value at 1, so a curve that jumps there (:hold)
+ * reaches its end there, as Curve#map does (tween-curves-1, 2026-11-04: a
+ * :hold glide stayed at its start after its end).  Positions are clamped
+ * to 0..1 (NaN reads as 0).
  *
  * Shared by FastClip.curve_lookup (glides) and FastTexture.drift (curve
  * segments); the exact Ruby mirror is MB::Sound::Curve.lookup_ruby, so keep
@@ -36,7 +40,7 @@ static inline double mb_curve_lookup(const struct mb_curve_table *c, double x)
 	size_t j = (size_t)pos;
 	double u = pos - (double)j;
 	if (u < MB_CURVE_NODE_SNAP) {
-		return c->fl[j];
+		return j == c->cells ? c->fr[j] : c->fl[j];
 	}
 	double h = 1.0 / (double)c->cells;
 	double u2 = u * u, u3 = u2 * u;

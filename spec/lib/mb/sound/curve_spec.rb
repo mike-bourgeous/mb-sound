@@ -201,6 +201,18 @@ RSpec.describe(MB::Sound::Curve) do
       expect(h.to_s).to include('hold')
     end
 
+    it 'reaches the end of :hold at 1 in #lookup too, in C and the Ruby mirror (tween-curves-1)' do
+      # (#lookup gave the jump's left value at 1, so a :hold glide stayed
+      # at its start after its end)
+      h = MB::Sound::Curve[:hold]
+      x = Numo::DFloat[0, 0.5, 2047 / 2048.0, 0.9999999, 1, 1.5]
+      want = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0]
+      expect(h.lookup(x.dup).to_a).to eq(want)
+      expect(MB::Sound::Curve.curve_lookup_ruby(x.dup, *h.value_table).to_a).to eq(want)
+      # Curves without a jump at 1 end where they did
+      %i[linear smooth elastic bounce].each { |n| expect(MB::Sound::Curve[n].lookup(Numo::DFloat[1.0])[0]).to eq(1.0) }
+    end
+
     it 'prints their own names' do
       %i[fast slow sharp hold].each { |n| expect(MB::Sound::Curve[n].name).to eq(n.to_s) }
     end

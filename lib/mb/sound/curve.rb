@@ -329,8 +329,10 @@ module MB
       # table's nodes and for staircases, within 1e-4 at the bounce's
       # contacts (kinks inside cells), and only roughly in the first or
       # last cell of curves with a vertical slope there (sqrt-like
-      # beziers and Procs; 1/2048 of the way).  Modifies +t+ in place if it is
-      # a contiguous Numo::DFloat; returns the values.  Used by glides.
+      # beziers and Procs; 1/2048 of the way).  At 1 it is the curve's value
+      # at 1 even for a curve that jumps there (:hold; since tween-curves-1,
+      # 2026-11-04, the jump's left value before).  Modifies +t+ in place if
+      # it is a contiguous Numo::DFloat; returns the values.  Used by glides.
       def lookup(t)
         t = Numo::DFloat.cast(t) unless t.is_a?(Numo::DFloat) && t.contiguous?
         Kernels.curve_lookup(t, *value_table)
@@ -360,7 +362,7 @@ module MB
         pos = cells.to_f if pos > cells.to_f
         j = pos.to_i
         u = pos - j.to_f
-        return fl[j] if u < NODE_SNAP
+        return j == cells ? fr[j] : fl[j] if u < NODE_SNAP
 
         h = 1.0 / cells.to_f
         u2 = u * u
