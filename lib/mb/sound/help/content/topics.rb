@@ -379,6 +379,14 @@ module MB
         one-shot's note starts its sample where the song would be
         (`resume: false` for the old silence there).
 
+        Audio on the timeline: `regions([vox, 0r, 2r, { offset: 1.5,
+        fade_out: 1/4r, curve_out: :slow }], [vox, 7/4r, 2r, { fade_in:
+        1/4r }])` is a lane of regions (sample, start and length in whole
+        notes or Durations, `offset:` into the source in seconds, `gain:`,
+        `transpose:`, fades with ACID's curves `:linear :fast :slow :smooth
+        :sharp :hold`); overlaps add (a crossfade), and a seek inside a
+        region plays it from the right source sample (`bg :vox, lane`).
+
         Converters: `.lofi(:mpc60)` is the cleanest (40 kHz, filtered: grit
         that sits in a mix), `:s950` darker (31.25 kHz, the jungle
         classic), `:sp1200` the dirtiest (26 kHz, no filters: crunchy hats);
@@ -395,7 +403,7 @@ module MB
         `mode: :paul` stretch in the frequency domain, and `.grains` plays
         a sample as a grain cloud: see `help :granular`.
       TEXT
-      commands :bounce, :capture_audio, :chop, :sampler, :sfz, :breakbeat
+      commands :bounce, :capture_audio, :chop, :sampler, :sfz, :breakbeat, :regions
       dsl :bounce
       note :sampler
       see :drums, :sequences, :granular

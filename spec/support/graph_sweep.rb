@@ -330,6 +330,20 @@ module GraphSweep
         st = MB::Sound::Sample[[d, d * -0.5], bpm: 960]
         smp.follow * 0.3 + smp.follow(:resample, align: :launch) * 0.3 + st.follow(stretch: { mode: :slice, slices: 4, fill: :stretch, cycle: 0.001 })[1] * 0.3
       }],
+      # Region lanes (regions-1): overlapping regions with crossfades in
+      # ACID's shapes, an offset, a transposed (Catmull-Rom) region off the
+      # frame grid, a stereo sample, one played to its source's end
+      ['region lanes (RegionPlayer)', ->(_c) {
+        d = Numo::SFloat.cast(Array.new(3000) { |i| Math.sin(i * 0.07) * 0.8 })
+        smp = MB::Sound::Sample[d]
+        st = MB::Sound::Sample[[d, d * -0.5]]
+        MB::Sound.regions(
+          [smp, 0r, 1/96r, { fade_out: 1/384r, curve_out: :fast }],
+          [smp, 1/128r, 1/96r, { offset: 0.01, fade_in: 1/384r, curve_in: :sharp, gain: -3.db }],
+          [smp, 1/64r + 1/100000r, 1/128r, { transpose: 5, fade_in: 1/512r, curve_in: :slow, fade_out: 1/512r, curve_out: :hold }],
+          [smp, 1/48r, nil, { offset: 0.03 }],
+        ) * 0.5 + MB::Sound.regions([st, 1/256r, 1/64r, { fade_in: 1/256r, curve_in: :smooth }])[1] * 0.3
+      }],
       ['capture tap (CaptureTap)', ->(c) { MB::Sound::GraphNode::CaptureTap.new(c.sig, MB::Sound::Sampler::AudioCapture.new(100_000)) + c.sig }],
 
       # Delays and reverbs

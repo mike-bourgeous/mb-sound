@@ -177,6 +177,36 @@ module MB
                end
         inst.sampler(source, voices: voices, **options, &block)
       end
+
+      # A lane of audio regions on the timeline (regions-1;
+      # GraphNode::RegionPlayer, one per channel in a Channels bundle for
+      # stereo samples or +channels+): each row is [sample, at, length,
+      # { offset:, gain:, transpose:, fade_in:, fade_out:, curve_in:,
+      # curve_out: }] (see MB::Sound::Region; positions and lengths in
+      # whole notes like `events(...)` rows, or Durations and Lengths;
+      # length nil plays to the source's end; offset is source seconds),
+      # or a Region.  Overlapping regions add (with fades, a crossfade).
+      # Seeks and launches landing inside a region play it from the source
+      # sample an uninterrupted run is on.  +align+ :timeline places
+      # regions from bar 1, :launch from the graph's launch.  Plays as a
+      # graph (`bg :vox, lane`, `track :vox, lane`); never ends (`until`).
+      #
+      #     vox = Sample['take3.flac']
+      #     lane = regions(
+      #       [vox, 0r, 2r, { offset: 1.5, fade_out: 1/4r, curve_out: :slow }],
+      #       [vox, 7/4r, 2r, { offset: 8, gain: -3.db, fade_in: 1/4r, curve_in: :fast }],   # a crossfade
+      #       [breakbeat(:jungle), 4r, nil],
+      #     )
+      #     bg :vox, lane
+      def regions(*rows, channels: nil, align: :timeline)
+        raise ArgumentError, 'regions takes one or more rows ([sample, at, length, { options }])' if rows.empty?
+        list = rows.map { |r| Region.row(r) }
+        n = channels.nil? ? list.map { |r| r.sample.channel_count }.max : Integer(channels)
+        raise ArgumentError, "channels: is 1 or more (got #{channels.inspect})" unless n >= 1
+        data = {}
+        players = Array.new(n) { |c| GraphNode::RegionPlayer.new(list, channel: c, align: align, data: data) }
+        n == 1 ? players[0] : MB::Sound.channels(*players)
+      end
     end
   end
 end
