@@ -10,9 +10,9 @@ module MB
         # Crossfade laws #blend takes.
         CURVES = %i[linear power].freeze
 
-        # Mixes the effect the block builds from this node with the node
-        # itself: +mix+ 0 is all dry, 1 all wet.  +mix+ is a number, a knob's
-        # name (a Symbol: `knob(:wet)` read per sample), or any node.
+        # Mixes the effect the block builds from this node with the node itself.
+        # +mix+ 0 is all dry, 1 all wet.  +mix+ is a number, a knob's name (a
+        # Symbol: `knob(:wet)` read per sample), or any node.
         #
         # +curve:+ :linear (default, the same law as the effects' own `mix:`
         # options: dry * (1 - mix) + wet * mix, which keeps the level of

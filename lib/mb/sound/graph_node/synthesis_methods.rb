@@ -4,8 +4,8 @@ module MB
       # Methods that use a node to control an oscillator, wavetable, or
       # envelope.  Included in GraphNode.
       module SynthesisMethods
-        # Converts a fractional MIDI note number to a frequency in Hz with the
-        # current tuning, following tuning changes (see MB::Sound.tuning).
+        # Converts MIDI note numbers (fractional too) to Hz in the current
+        # tuning.  Follows tuning changes (see MB::Sound.tuning).
         def freq
           # (tagged as a frequency for type-dispatched parameters; see ArgTypes)
           ArgTypes.tag(MB::Sound.tuning.freq(self), :frequency)
@@ -16,13 +16,14 @@ module MB
           MB::Sound::Tone[self]
         end
 
-        # Multiplies this node by a one-shot MB::Sound::Envelope (see
-        # EnvelopeMethods#adsr) with the given +attack+, +decay+, +sustain+,
-        # and +release+ (times in seconds or any length, +sustain+ relative to
-        # the peak), at this node's sample rate.  The envelope releases
-        # +:hold+ seconds after it starts (default: twice the attack plus
-        # decay, at least 0.1 s; false for forever), then ends.  Other
-        # options (e.g. +:curve+, default :analog) go to Envelope#initialize.
+        # Multiplies this node by a one-shot ADSR envelope
+        # (MB::Sound::Envelope).  The +attack+, +decay+, +sustain+, and
+        # +release+ are as for EnvelopeMethods#adsr (times in seconds or any
+        # length, +sustain+ relative to the peak), at this node's sample rate.
+        # The envelope releases +:hold+ seconds after it starts (default: twice
+        # the attack plus decay, at least 0.1 s; false for forever), then ends.
+        # Other options (e.g. +:curve+, default :analog) go to
+        # Envelope#initialize.
         #
         # Example:
         #     play 220.hz.saw.adsr(0.005, 0.3, 0.4, 1, curve: :snappy)
@@ -30,14 +31,13 @@ module MB
           self * MB::Sound::Envelope.from_preset(:adsr, attack, decay, sustain, release, sample_rate: sample_rate, **options)
         end
 
-        # Pings a struck resonator with this node (a GraphNode::Resonator):
-        # every impulse rings as a decaying sine at +freq+ (Hz: a number,
-        # node, or Pitch) with the impulse's height as its amplitude,
+        # Pings a struck resonator (a GraphNode::Resonator): impulses ring as
+        # sines.  Every impulse rings as a decaying sine at +freq+ (Hz: a
+        # number, node, or Pitch) with the impulse's height as its amplitude,
         # falling 60 dB in +decay+ (seconds, a Length, or a node).  The
-        # frequency may move freely without changing the ringing level (e.g.
-        # a kick's pitch sweep).  +phase+ is the starting phase in cycles
-        # (0.25 starts at the peak; or an MB::Sound::Phase, e.g.
-        # 1.2.radians).
+        # frequency may move freely without changing the ringing level (e.g. a
+        # kick's pitch sweep).  +phase+ is the starting phase in cycles (0.25
+        # starts at the peak; or an MB::Sound::Phase, e.g. 1.2.radians).
         #
         # Examples:
         #     play grid(16, 'x...x...').loop.trigger.ping(52, decay: 0.8)
@@ -47,16 +47,16 @@ module MB
         end
         alias resonator ping
 
-        # Strikes a modal resonator with this node (GraphNode::ModalResonator):
-        # every impulse rings all the modes of a struck object at once,
-        # +preset+ (ModalResonator.presets: :bowl, :rin, :gong, :bell,
-        # :chime, :tubular, :bar, :marimba, :vibes, :glass, :plate,
-        # :membrane) or a list of modes [[ratio, amplitude, decay share,
-        # beat multiple, bloom share], ...], at +freq+ (Hz: a number, node,
-        # or Pitch; e.g. `v.freq` in a synth voice, so the object follows
-        # the keys; a preset's typical pitch when left out, e.g. 660 Hz for
-        # :glass).  The impulse's height is the strike's force (a trigger's
-        # velocity).  The preset and the frequency may come in either order.
+        # Strikes a modal resonator (GraphNode::ModalResonator): bowls, bells,
+        # bars.  Every impulse rings all the modes of a struck object at once,
+        # +preset+ (ModalResonator.presets: :bowl, :rin, :gong, :bell, :chime,
+        # :tubular, :bar, :marimba, :vibes, :glass, :plate, :membrane) or a list
+        # of modes [[ratio, amplitude, decay share, beat multiple, bloom share],
+        # ...], at +freq+ (Hz: a number, node, or Pitch; e.g. `v.freq` in a
+        # synth voice, so the object follows the keys; a preset's typical pitch
+        # when left out, e.g. 660 Hz for :glass).  The impulse's height is the
+        # strike's force (a trigger's velocity).  The preset and the frequency
+        # may come in either order.
         #
         # +decay+ (seconds to -60 dB for the longest-ringing modes; a number,
         # Length, Duration, or node) and +beat+ (Hz between the two halves of
@@ -136,17 +136,17 @@ module MB
           MB::Sound.stereo(left + right * blend, right + left * blend)
         end
 
-        # Reads a cycle-mode MB::Sound::Wavetable (+table+: anything
-        # Wavetable.[] accepts) with this node as the phase in cycles (0...1
-        # is one cycle), +scan+ (0..1, a number or node; a Tone without an
-        # amplitude scans 0..1) across its frames (clamped, or wrapping
-        # around with +scan_wrap: true+ as in Tone#wavetable; +wrap+ is
-        # about the phase).  Levels follow the phase's
-        # speed: +increment+ (a node of cycles per sample, or false for the
-        # brightest level), a phasor Tone's increment port, or else the
-        # phase's own change per sample (see GraphNode::Wavetable).  On a
-        # Tone, #wavetable makes the table its waveform instead (see
-        # Tone#wavetable); #phase_table always reads at this node's value.
+        # Reads a cycle-mode MB::Sound::Wavetable with this node as the phase.
+        # +table+ is anything Wavetable.[] accepts, the phase is in cycles
+        # (0...1 is one cycle), and +scan+ (0..1, a number or node; a Tone
+        # without an amplitude scans 0..1) across its frames (clamped, or
+        # wrapping around with +scan_wrap: true+ as in Tone#wavetable; +wrap+ is
+        # about the phase).  Levels follow the phase's speed: +increment+ (a
+        # node of cycles per sample, or false for the brightest level), a phasor
+        # Tone's increment port, or else the phase's own change per sample (see
+        # GraphNode::Wavetable).  On a Tone, #wavetable makes the table its
+        # waveform instead (see Tone#wavetable); #phase_table always reads at
+        # this node's value.
         #
         # Example:
         #     # Phase distortion from a wobbling phase
@@ -165,13 +165,13 @@ module MB
           phase_table(table, scan: scan, interpolation: interpolation, wrap: wrap, increment: increment, scan_wrap: scan_wrap)
         end
 
-        # Waveshapes this node through a cycle-mode MB::Sound::Wavetable: the
+        # Waveshapes this node through a cycle-mode MB::Sound::Wavetable.  The
         # input from -1 to 1 reads across the whole cycle (0 reads the middle;
-        # beyond -1..1 the ends), +scan+ as for #phase_table.  Levels follow
-        # how fast the input moves (half its change per sample, its peak held
-        # for about a buffer), so a loud or high input reads duller levels
-        # instead of aliasing; +increment: false+ always reads the brightest
-        # level.  +scan_wrap+ as for #phase_table.
+        # beyond -1..1 the ends), +scan+ as for #phase_table.  Levels follow how
+        # fast the input moves (half its change per sample, its peak held for
+        # about a buffer), so a loud or high input reads duller levels instead
+        # of aliasing; +increment: false+ always reads the brightest level.
+        # +scan_wrap+ as for #phase_table.
         #
         # Example:
         #     play 110.hz.sine.waveshape(:basic, scan: 0.2.hz.lfo.triangle.at(0..1)).at(-12.db)

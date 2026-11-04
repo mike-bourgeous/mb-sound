@@ -161,12 +161,12 @@ module MB
           ratio.to_f.infinite? ? 0.0 : 1.0 / ratio
         end
 
-        # A feed-forward compressor: above +threshold+ the level rises 1 dB
-        # per +ratio+ dB (Float::INFINITY for a limiter-like flat top),
-        # rounded by a +knee+ dB wide soft knee.  +attack+ and +release+ are
-        # the gain's fall and rise times (one-pole time constants), +hold+
-        # keeps the reduction that long before releasing.  +makeup+ is a gain
-        # (`6.db`) or :auto (half the gain change at 0 dBFS back).
+        # A feed-forward compressor: above +threshold+ the level rises 1 dB per
+        # +ratio+.  Float::INFINITY gives a limiter-like flat top; a +knee+ dB
+        # wide soft knee rounds the corner.  +attack+ and +release+ are the
+        # gain's fall and rise times (one-pole time constants), +hold+ keeps the
+        # reduction that long before releasing.  +makeup+ is a gain (`6.db`) or
+        # :auto (half the gain change at 0 dBFS back).
         #
         # +sidechain+ (any node or bundle, or a bus or track name such as
         # :drums; see BusMethods#bus) drives the detector instead of the
@@ -218,9 +218,9 @@ module MB
         end
         alias compressor compress
 
-        # A downward expander: below +threshold+ the level falls +ratio+ dB
-        # per dB, by at most +range+ (default -40.db).  +attack+ is how fast
-        # it opens, +release+ how fast it closes, +hold+ how long it stays
+        # A downward expander: below +threshold+ the level falls +ratio+ dB per
+        # dB.  It falls by at most +range+ (default -40.db).  +attack+ is how
+        # fast it opens, +release+ how fast it closes, +hold+ how long it stays
         # open after the level falls.
         #
         # Example (bin/sound.rb):
@@ -240,9 +240,9 @@ module MB
         end
         alias expander expand
 
-        # A noise gate: an expander with a steep ratio (+ratio+, default 20)
-        # and +range+ (default -80.db), opening in +attack+, staying open
-        # +hold+ after the level falls, then closing over +release+.
+        # A noise gate: a steep expander (+ratio+ 20, +range+ -80.db by
+        # default).  It opens in +attack+, stays open +hold+ after the level
+        # falls, then closes over +release+.
         #
         # Example (bin/sound.rb):
         #     play snare.noise_gate(threshold: -30.db, hold: 30.ms, release: 50.ms)
@@ -250,10 +250,10 @@ module MB
           expand(threshold: threshold, range: range, ratio: ratio, knee: knee, attack: attack, hold: hold, release: release, **options)
         end
 
-        # Sidechain ducking: turns this signal down by up to +amount+ (e.g.
-        # -18.db; 18.db is the same, since ducking never boosts; a bare
-        # number is a linear gain at most 1, see Decibels.reduction_db)
-        # while +sidechain+ (e.g. a kick) is above
+        # Sidechain ducking: turns this signal down while +sidechain+ is loud.
+        # It turns down by up to +amount+ (e.g. -18.db; 18.db is the same, since
+        # ducking never boosts; a bare number is a linear gain at most 1, see
+        # Decibels.reduction_db) while +sidechain+ (e.g. a kick) is above
         # +threshold+, the reduction growing 1 dB per dB above it (an
         # infinite-ratio compressor with a range) so loud hits duck fully;
         # recovering over +release+ (a one-pole time constant: seconds, a
@@ -297,8 +297,8 @@ module MB
         end
         alias sidechain_duck duck
 
-        # An arbitrary compander: a transfer curve from input level (dB) to
-        # output level (dB), as points, a block, or a Dynamics::Transfer.
+        # A compander with any transfer curve (input dB to output dB).  The
+        # curve is points, a block, or a Dynamics::Transfer.
         #
         # Points are levels (`-60.db`) in a Hash (`compand(-60.db => -80.db,
         # -40.db => -40.db, 0.db => -12.db)`) or an Array of [input, output]
@@ -355,11 +355,12 @@ module MB
         end
         alias compander compand
 
-        # A lookahead brickwall limiter (Dynamics::Limiter): the output stays
-        # at or under +ceiling+ (-1 dB by default; with +true_peak+, its
-        # inter-sample peaks too, within about 0.1 dB), the gain ramping down
-        # over +lookahead+ before each peak and recovering over +release+.
-        # Adds +lookahead+ of latency (plus 6 samples with +true_peak+).
+        # A lookahead brickwall limiter (Dynamics::Limiter): output stays under
+        # +ceiling+.  The output stays at or under +ceiling+ (-1 dB by default;
+        # with +true_peak+, its inter-sample peaks too, within about 0.1 dB),
+        # the gain ramping down over +lookahead+ before each peak and recovering
+        # over +release+.  Adds +lookahead+ of latency (plus 6 samples with
+        # +true_peak+).
         #
         # Example (bin/sound.rb):
         #     master { |mix| mix.limit(ceiling: -1.db, release: 80.ms) }
@@ -372,14 +373,14 @@ module MB
         alias limiter limit
         alias brickwall limit
 
-        # Splits this signal into bands at +frequencies+ (Hz numbers or
-        # Pitches, increasing) with Linkwitz-Riley crossovers (+order+ 2, 4
-        # (default), or 8), yields one node per band (a bundle per band for
-        # multichannel input), low to high, and returns the sum of what the
-        # block returns (an Array of nodes or bundles, one-channel results
-        # used for every channel).  Untouched bands sum back to the input
-        # through an allpass (flat).  Without a block, returns the bands as
-        # an Array.
+        # Splits this signal into Linkwitz-Riley bands for the block to process.
+        # The bands split at +frequencies+ (Hz numbers or Pitches, increasing)
+        # with crossovers of +order+ 2, 4 (default), or 8; the block gets one
+        # node per band (a bundle per band for multichannel input), low to high,
+        # and the result is the sum of what it returns (an Array of nodes or
+        # bundles, one-channel results used for every channel).  Untouched bands
+        # sum back to the input through an allpass (flat).  Without a block,
+        # returns the bands as an Array.
         #
         # Examples (bin/sound.rb):
         #     play drums.bands(150.hz, 3000.hz) { |lo, mid, hi| [lo.compress(ratio: 4), mid, hi.at(-3.db)] }
@@ -478,19 +479,18 @@ module MB
             ].freeze
         end
 
-        # Multiband upward + downward compression ("squeeze it to eleven"):
-        # three LR4 bands, each compressed downward above a threshold and
-        # upward below a lower one (upward below a lower one (at most +max_gain+ of lift, default 24.db)), with
-        # :auto makeup per band.  +preset+ is :default (gentle glue) or
-        # :eleven (the extreme, OTT-style setting; see Squeeze.presets).
-        # +downward+ and +upward+ (0..1) scale the ratios toward 1:1; +time+
-        # scales attack and release; +depth+ (0..1, default from the
-        # preset) mixes each compressed band with the plain band
-        # (phase-aligned); +split+ overrides the crossovers; +gain+ is an
-        # output gain (`3.db`).  Every band looks +lookahead+ ahead (default 2
-        # ms, the node's latency) so the fast attacks catch transients.
-        # Master-chain friendly (about 0.7% of realtime per stereo
-        # 800-sample buffer).
+        # Multiband upward + downward compression ("squeeze it to eleven",
+        # OTT-style).  Three LR4 bands, each compressed downward above a
+        # threshold and upward below a lower one (at most +max_gain+ of lift,
+        # default 24.db), with :auto makeup per band.  +preset+ is :default
+        # (gentle glue) or :eleven (the extreme, OTT-style setting; see
+        # Squeeze.presets).  +downward+ and +upward+ (0..1) scale the ratios
+        # toward 1:1; +time+ scales attack and release; +depth+ (0..1, default
+        # from the preset) mixes each compressed band with the plain band
+        # (phase-aligned); +split+ overrides the crossovers; +gain+ is an output
+        # gain (`3.db`).  Every band looks +lookahead+ ahead (default 2 ms, the
+        # node's latency) so the fast attacks catch transients.  Master-chain
+        # friendly (about 0.7% of realtime per stereo 800-sample buffer).
         #
         # Examples (bin/sound.rb):
         #     play drums.squeeze                     # gentle

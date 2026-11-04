@@ -42,11 +42,10 @@ module MB
           ChannelMixer::Pan.new(self, position: position, law: law).then { |m| Channels.new(m.outputs) }
         end
 
-        # Mixes any number of channels into new channels with +matrix+ (a
-        # ChannelMixer::Matrix): one row per output and one column per
-        # channel.  Entries are numbers, complex numbers (phase shifts: real
-        # inputs become analytic signals), or graph nodes.  Returns a bundle,
-        # or one node for a one-row matrix.
+        # Mixes channels into new ones with +matrix+ (a ChannelMixer::Matrix).
+        # One row per output and one column per channel.  Entries are numbers,
+        # complex numbers (phase shifts: real inputs become analytic signals),
+        # or graph nodes.  Returns a bundle, or one node for a one-row matrix.
         #
         # Examples (bin/sound.rb):
         #     bg stereo(a, b).matrix([[1, 0.3], [0.3, 1]])   # crossfeed
@@ -56,13 +55,12 @@ module MB
           mixer.outputs.length == 1 ? mixer.outputs[0] : Channels.new(mixer.outputs)
         end
 
-        # Places this single-channel node in a two-channel phase-amplitude
-        # field, as matrix surround encoders do (a ChannelMixer::Position):
-        # +x+ from -1 (left) to 1 (right) sets the levels, and +y+ from 1
-        # (front) to -1 (rear) the phase difference (in phase at the front,
-        # opposite at the rear).  Both may be graph nodes.  Real inputs come
-        # out as real Lt/Rt channels; complex inputs stay complex.  Also
-        # available as #position.
+        # Places this mono node in a phase-amplitude field
+        # (ChannelMixer::Position).  As matrix surround encoders do, +x+ from -1
+        # (left) to 1 (right) sets the levels, and +y+ from 1 (front) to -1
+        # (rear) the phase difference (in phase at the front, opposite at the
+        # rear).  Both may be graph nodes.  Real inputs come out as real Lt/Rt
+        # channels; complex inputs stay complex.  Also available as #position.
         #
         # Examples (bin/sound.rb):
         #     bg 220.hz.saw.at(0.3).place(x: -1, y: -1)               # rear left

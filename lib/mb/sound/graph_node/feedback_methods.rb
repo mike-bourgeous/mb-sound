@@ -3,13 +3,12 @@ module MB
     module GraphNode
       # Graph feedback (see FeedbackLoop): DSL methods included in GraphNode.
       module FeedbackMethods
-        # Builds a feedback loop on this node: the block gets the loop
-        # variable (+fb+ in the examples: the loop's own output; see
-        # FeedbackLoop for when it is the current output and when the one
-        # before) and this node (+input+; +in+ is a Ruby keyword), and
-        # returns the loop's body, which the loop runs one sample at a
-        # time.  Returns the loop (a FeedbackLoop node).  Also available as
-        # #fb.
+        # Builds a feedback loop on this node from the block (a FeedbackLoop).
+        # The block gets the loop variable (+fb+ in the examples: the loop's own
+        # output; see FeedbackLoop for when it is the current output and when
+        # the one before) and this node (+input+; +in+ is a Ruby keyword), and
+        # returns the loop's body, which the loop runs one sample at a time.
+        # Returns the loop (a FeedbackLoop node).  Also available as #fb.
         #
         # The body may contain arithmetic, shapers (softclip, clip, ...),
         # delays (`fb.delay(t)`), and SVF filters (`filter(:lowpass, ...)`)

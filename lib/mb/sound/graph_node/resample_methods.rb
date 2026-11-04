@@ -13,10 +13,11 @@ module MB
           MB::Sound::GraphNode::Resample.new(upstream: self, sample_rate: sample_rate, mode: mode)
         end
 
-        # Tells this node and all upstream nodes to run at +multiplier+ times the
-        # current sample rate, then appends a Resample node to restore the
-        # current sample rate.  The +multiplier+ may also be less than one to
-        # undersample, and may be fractional (for most node types).
+        # Runs this node and its inputs at +multiplier+ times the rate, then
+        # resamples.  Upstream nodes run at +multiplier+ times the current
+        # sample rate, and an appended Resample node restores the current sample
+        # rate.  The +multiplier+ may also be less than one to undersample, and
+        # may be fractional (for most node types).
         #
         # The upstream rates change when the graph first plays (or is
         # planned; see Resample#apply_oversample), once every consumer of

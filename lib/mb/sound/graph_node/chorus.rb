@@ -279,9 +279,9 @@ module MB
       # per channel (see ChannelDispatch::EXCLUDED): a stereo input is
       # chorused as one.
       module ChorusMethods
-        # Appends a Juno-60-style stereo chorus (see Chorus), returning a
-        # stereo Channels bundle: left = dry + a delay swept by a triangle
-        # LFO, right = dry + the same delay swept the opposite way.
+        # Appends a Juno-60-style stereo chorus (see Chorus), returning a stereo
+        # bundle.  Left = dry + a delay swept by a triangle LFO, right = dry +
+        # the same delay swept the opposite way.
         #
         # +mode+ is :juno1 (alias :juno, :juno_i; 0.513 Hz over 1.66-5.35
         # ms), :juno2 (:juno_ii; 0.863 Hz, same range), or :juno12
