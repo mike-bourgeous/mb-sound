@@ -7,6 +7,11 @@
 # hit) was retuned by the key difference: +7 semitones here, the sample
 # numbers' difference in tracker sets.  A property sweep (in
 # QuickSelection::ALWAYS): every voice kind and every jump kind.
+#
+# A seek inside a note that sounded before it resumes that note (one-shot
+# voices start its sample where an uninterrupted run would be, regions-1;
+# Notes#resume), so after the seek the voice plays the resumed note at its
+# own pitch; with +resume: false+ the old sample rings on at its pitch.
 RSpec.describe('held voice pitch across content jumps', :aggregate_failures) do
   let(:m) { MB::Sound }
   let(:seq) { MB::Sound::Sequence }
@@ -32,17 +37,22 @@ RSpec.describe('held voice pitch across content jumps', :aggregate_failures) do
   end
 
   # Voice kinds: [instrument, the track's patch, key of the held note, key
-  # of the other clip's note]; every sample is a 220 Hz sine at note 60.
+  # of the other clip's note, the other note's pitch (Hz) where a seek
+  # resumes it]; every sample is a 220 Hz sine at note 60.
   def voices
     melodic = m::Sampler::Instrument.new(name: 'melodic') { |i| i.region(sine(220), keys: 0..127) }
     kit = m::Sampler::Instrument.new(name: 'kit') { |i|
       i.region(sine(220), keys: 36, keytrack: 0)
       i.region(sine(220), keys: 38, keytrack: 0)
     }
+    fifth = 220 * 2**(7 / 12.0)
     {
-      melodic: [proc { |c| c.sampler(melodic) }, 60, 67],
-      kit: [proc { |c| c.sampler(kit) }, 36, 38],
-      tracker_lanes: [proc { |c| c.sampler(kit, lanes: true) }, 36, 38],
+      melodic: [proc { |c| c.sampler(melodic) }, 60, 67, fifth],
+      melodic_no_resume: [proc { |c| c.sampler(melodic, resume: false) }, 60, 67, 220],
+      kit: [proc { |c| c.sampler(kit) }, 36, 38, 220],
+      tracker_lanes: [proc { |c| c.sampler(kit, lanes: true) }, 36, 38, 220],
+      tracker_lanes_melodic: [proc { |c| c.sampler(melodic, lanes: true) }, 60, 67, fifth],
+      tracker_lanes_no_resume: [proc { |c| c.sampler(melodic, lanes: true, resume: false) }, 60, 67, 220],
     }
   end
 
@@ -62,7 +72,7 @@ RSpec.describe('held voice pitch across content jumps', :aggregate_failures) do
   end
 
   it 'keeps a sampler voice at its note-on pitch through every jump' do
-    voices.each do |kind, (patch, held, other)|
+    voices.each do |kind, (patch, held, other, resumed)|
       JUMPS.each do |jump, run|
         s = session
         a = clip(0r, held)
@@ -84,7 +94,11 @@ RSpec.describe('held voice pitch across content jumps', :aggregate_failures) do
         x = SpecBuffers.join(bufs)
         before = peak_hz(x, 0)
         expect(before).to be_within(2).of(220), "#{kind}: plays 220 Hz before the jump (got #{before})"
-        expect(peak_hz(x, 24_000)).to eq(before), "#{kind} voice through a #{jump}: keeps its pitch"
+        if jump == :seek
+          expect(peak_hz(x, 24_000)).to be_within(2).of(resumed), "#{kind} voice through a #{jump}: resumes the other note (or keeps its pitch)"
+        else
+          expect(peak_hz(x, 24_000)).to eq(before), "#{kind} voice through a #{jump}: keeps its pitch"
+        end
         s.close
       end
     end

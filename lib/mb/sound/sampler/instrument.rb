@@ -255,12 +255,28 @@ module MB
         # :pan, :start, each true, false, or a CC number, :smooth, and :law,
         # the pan law: `law: :linear` is the trackers' -6 dB middle).
         # Tracker::Import's tracks play this way.
+        #
+        # +resume+ (regions-1): at a content jump (a seek, `render(from:,
+        # preroll: false)`, a looping clip launched or a form seeking
+        # mid-section) inside a note that sounded before it in the content
+        # playing now, the voice starts that note's sample where an
+        # uninterrupted run would be (Notes#resumes?), instead of leaving it
+        # silent and the old content's sample ringing on.  :auto (the
+        # default) resumes for one-shot instruments without an envelope
+        # (plain samples, slices, chop hits: an envelope wouldn't follow);
+        # true for any instrument played from a voice, false for the old
+        # behavior.  Only the newest note at the jump resumes (in a Synth,
+        # on the lane its allocator gives it); a clip swap resumes nothing
+        # from before the swap, and clips on their own clocks nothing.
         def play(source = nil, trigger: nil, number: nil, freq: :auto, gate: :auto, shift: :auto, start: nil, transpose: 0, declick: DECLICK,
-                 interpolation: nil, mips: nil, seed: nil, steal_fade: true, lanes: false)
+                 interpolation: nil, mips: nil, seed: nil, steal_fade: true, lanes: false, resume: :auto)
           if source && !source.is_a?(MB::Sound::Notes)
             raise ArgumentError, "Play a sampler from a synth voice (v), trigger:/number:, or a MIDI source (got #{source.inspect})" unless midi_source?(source)
-            return sampler(source, transpose: transpose, start: start, declick: declick, interpolation: interpolation, mips: mips, steal_fade: steal_fade, lanes: lanes)
+            return sampler(source, transpose: transpose, start: start, declick: declick, interpolation: interpolation, mips: mips, steal_fade: steal_fade, lanes: lanes,
+                                   **(resume == :auto ? {} : { resume: resume }))
           end
+          raise ArgumentError, "resume: is :auto, true, or false (got #{resume.inspect})" unless [:auto, true, false].include?(resume)
+          resume = source && (resume == :auto ? resumes? : resume)
 
           if lanes
             raise ArgumentError, 'lanes: follows a synth voice\'s MIDI channel; play the instrument from a voice (v)' unless source
@@ -269,11 +285,12 @@ module MB
             if lane[:bend] && freq == :auto
               # (the number of the latest note-on, not a chased one: a clip swap
               # mid-note leaves the sample's pitch alone, tracker-2)
-              freq = Notes::Frequency.new(source.number(chase: false), offsets: [source.bend_semitones(nil, smooth: smooth)], sample_rate: source.sample_rate)
+              freq = Notes::Frequency.new(source.number(chase: resume ? :resume : false), offsets: [source.bend_semitones(nil, smooth: smooth)],
+                                          sample_rate: source.sample_rate)
             end
             start ||= source.cc(lane[:start], smooth: false) if lane[:start]
             out = play(source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose, declick: declick,
-                               interpolation: interpolation, mips: mips, seed: seed, steal_fade: steal_fade)
+                               interpolation: interpolation, mips: mips, seed: seed, steal_fade: steal_fade, resume: resume)
             out = out * source.cc(lane[:volume], default: 127, smooth: smooth) if lane[:volume]
             out = out.pan(source.cc(lane[:pan], range: -1.0..1.0, default: 64, smooth: smooth), law: lane[:law]) if lane[:pan]
             return out
@@ -282,7 +299,7 @@ module MB
           if source
             trigger ||= source.trigger
             number ||= source.number
-            freq = source.freq(marks: false, chase: false) if freq == :auto
+            freq = source.freq(marks: false, chase: resume ? :resume : false) if freq == :auto
             gate = release_loop? ? source.gate : nil if gate == :auto
             shift = source.pitch_mark if shift == :auto
           else
@@ -302,7 +319,13 @@ module MB
           choke_time = steal_fade && steal_fade != true ? Length.seconds(steal_fade).to_f : nil
           raise ArgumentError, "steal_fade: is true, false, or a length above 0 (got #{steal_fade.inspect})" if choke_time && !(choke_time > 0)
           voice(source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose, declick: declick,
-                        interpolation: interpolation, mips: mips, seed: seed, shared: {}, choke: choke, choke_time: choke_time)
+                        interpolation: interpolation, mips: mips, seed: seed, shared: {}, choke: choke, choke_time: choke_time, resume: resume)
+        end
+
+        # True if #play resumes notes by default (+resume: :auto+): every
+        # sample is a one-shot and no envelope would hold the voice back.
+        def resumes?
+          @layers ? @layers.all?(&:resumes?) : one_shot? && @envelope.nil?
         end
 
         # The voice for #play's resolved inputs; +shared+ keeps modulation
@@ -325,14 +348,14 @@ module MB
         # (+scope+: a Hash holding the layer's ZoneValue::Index), so a
         # piano's second layer costs nothing on notes outside its keys.
         def voice(source, trigger:, number:, freq:, gate:, shift:, start:, transpose:, declick:, interpolation:, mips:, seed:, shared:, layer: false, choke: nil,
-                  scope: nil, choke_time: nil)
+                  scope: nil, choke_time: nil, resume: false)
           if @layers
             n = channel_count
             alloc = source && source.stream.respond_to?(:allocator) ? source.stream.allocator : nil
             outs = @layers.each_with_index.map { |l, li|
               o = l.send(:voice, source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
                                          declick: declick, interpolation: interpolation, mips: mips, seed: seed, shared: shared, layer: true, choke: choke,
-                                         scope: part?(l, alloc) ? {} : nil, choke_time: choke_time)
+                                         scope: part?(l, alloc) ? {} : nil, choke_time: choke_time, resume: resume)
               if part?(l, alloc)
                 part = GraphNode::SubLane.new(o, notes: source, wake: l.wake_check(mono: alloc.mono?), name: l.name || "layer #{li + 1}")
                 o = part.outputs.length == 1 ? part.outputs[0] : MB::Sound.channels(*part.outputs)
@@ -353,7 +376,8 @@ module MB
           nodes = Array.new(channel_count) { |c|
             GraphNode::SamplerVoice.new(
               self, channel: c, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
-              declick: declick, interpolation: interpolation, mips: mips, seed: seed, choke: choke, choke_fade: @envelope.nil?, choke_time: choke_time
+              declick: declick, interpolation: interpolation, mips: mips, seed: seed, choke: choke, choke_fade: @envelope.nil?, choke_time: choke_time,
+              resume: resume ? source : nil
             )
           }
           nodes.each { |n| source.register(n) } if source && one_shot?

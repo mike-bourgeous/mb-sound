@@ -430,6 +430,12 @@ module MB
           c.starts ? chase_start(c.event) : chase(c.event)
         end
 
+        # True if Source::Chase +c+ resumes its note on this node's voice
+        # (see Notes#resumes?).
+        def resumes_here?(c)
+          @notes ? @notes.resumes?(c) : c.resume.to_f > 0
+        end
+
         # A chased note that starts right at the jump (see #chase_item).
         # The same as #chase unless a node treats the note-on that follows
         # as a first note (Glide).

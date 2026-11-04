@@ -172,6 +172,40 @@ RSpec.describe(MB::Sound::Curve) do
     end
   end
 
+  describe 'ACID fade and envelope shapes (regions-1)' do
+    # The formulas of the .acd study's audio_render.rb (CURVES)
+    acid = {
+      linear: ->(x) { x }, fast: ->(x) { 1 - (1 - x)**2 }, slow: ->(x) { x * x },
+      smooth: ->(x) { x * x * (3 - 2 * x) }, sharp: ->(x) { 0.5 + 4 * (x - 0.5)**3 },
+    }
+
+    it 'gives the five moving shapes by name, scalar and vectorized' do
+      acid.each do |name, f|
+        c = MB::Sound::Curve[name]
+        want = Numo::DFloat.cast(grid.to_a.map { |x| f.(x) })
+        expect((c.map(grid) - want).abs.max).to be < 1e-15, name.to_s
+        expect(c.(0.3)).to be_within(1e-15).of(f.(0.3)), name.to_s
+      end
+    end
+
+    it 'matches the Penner names they equal' do
+      { fast: :quad_out, slow: :quad, sharp: :cubic_out_in }.each do |name, other|
+        expect((MB::Sound::Curve[name].map(grid) - MB::Sound::Curve[other].map(grid)).abs.max).to be < 1e-15, name.to_s
+      end
+    end
+
+    it 'holds the start until the end with :hold' do
+      h = MB::Sound::Curve[:hold]
+      expect([0, 0.5, 0.999999, 1].map { |x| h.(x) }).to eq([0.0, 0.0, 0.0, 1.0])
+      expect(h.map(Numo::DFloat[0, 0.5, 1]).to_a).to eq([0.0, 0.0, 1.0])
+      expect(h.to_s).to include('hold')
+    end
+
+    it 'prints their own names' do
+      %i[fast slow sharp hold].each { |n| expect(MB::Sound::Curve[n].name).to eq(n.to_s) }
+    end
+  end
+
   describe '.from' do
     it 'converts names, numbers (dB), Procs, arrays (bezier), and curves' do
       expect(MB::Sound::Curve.from(:smooth)).to eq(MB::Sound::Curve.smoothstep)
@@ -246,6 +280,7 @@ RSpec.describe('MB::Sound::Curve#lookup') do
               when /bezier\(0.42, 0.0, 1.0|bezier\(0.0, 0.0/ then 2e-3 # vertical end slopes
               when /custom/ then 0.025 # sqrt: an infinite slope, wrong in the first cell (1/2048)
               when /steps/ then 1e-15
+              when /hold/ then 1.0 # its jump at 1 ramps over the table's last cell (1/2048)
               else 1e-7
               end
       expect(err).to be <= limit, "#{c}: #{err}"

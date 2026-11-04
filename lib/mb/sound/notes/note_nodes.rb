@@ -87,7 +87,9 @@ module MB
       # (see Notes#number).
       #
       # With +chase: false+ content jumps leave the number alone (see
-      # Notes#number).
+      # Notes#number); with +chase: :resume+ only jumps that resume a note
+      # on this lane move it (Notes#resumes?: the resumed note is the latest
+      # note-on of a sampler voice that plays it).
       #
       # With +marks: true+ (Notes#freq and NotePitch, so `v.hz` and
       # `v.freq`; maintainer decision 2026-10-18) each note's pitch mark
@@ -132,7 +134,13 @@ module MB
         # (+chase: false+ keeps the latest note-on's number: see
         # Notes#number)
         def chase(event)
-          @number = marked_number(event) if @chase
+          @number = marked_number(event) if @chase == true
+        end
+
+        # (+chase: :resume+ takes a resumed note's number as a note-on's)
+        def chase_item(c)
+          return super unless @chase == :resume
+          @number = marked_number(c.event) if resumes_here?(c)
         end
 
         # The note number of +e+ (an Event or NoteStack::Entry), plus its

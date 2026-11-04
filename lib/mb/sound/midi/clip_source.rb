@@ -110,6 +110,7 @@ module MB
           @carried_origin = nil
           @choke_swap = nil # (see #ring_out)
           @carried_sounding = nil
+          @content_from = nil # (see #chase_at_position)
         end
 
         # The current clip position in whole notes (a Rational).
@@ -354,10 +355,22 @@ module MB
           # (the event's length from here as its length hint, like a
           # note-on read partway through its note)
           event = note_event(e, time)&.with_length_hint(Sequence::Duration.new(MB::M.max(e.length - since, 0r)))
+          elapsed = transport.seconds_of(since)
           Chase.new(
             generation: @generation, time: time, event: event, starts: since == 0,
-            previous: note_event(prev, time), elapsed: transport.seconds_of(since)
+            previous: note_event(prev, time), elapsed: elapsed, resume: resumed?(pos, since) ? elapsed : nil
           )
+        end
+
+        # True if the note that started +since+ whole notes before clip
+        # position +pos+ sounded in the content playing now (Chase#resume):
+        # it started at or after the clip position where this content
+        # began (the launch, or the latest swap; nil after a carried start:
+        # the old source's notes carry on), so an uninterrupted run would
+        # have played it.  Not for clips on their own clocks (yet).
+        def resumed?(pos, since)
+          return false unless since > 0 && @clock.nil?
+          @content_from.nil? || pos - since >= @content_from
         end
 
         # A note-on Event for the clip +event+ at stream +time+, or nil.
@@ -431,6 +444,7 @@ module MB
               @clock = nil
               @clock_anchor = nil
               @origin = c
+              @content_from = nil
               set_clip_position(time - @origin)
               return jumped
             end
@@ -443,13 +457,15 @@ module MB
           @graph_origin = origin
 
           if @clip.clocking
+            @content_from = nil
             clock_start(time, position, launch: @swap_anchor || timeline_launch || origin, origin: origin, fresh: fresh || @clock_graph.nil?)
             return jumped
           end
           @clock = nil
           @clock_anchor = nil
 
-          @origin = clip_origin(@clip, @swap_anchor || timeline_launch || origin, origin)
+          anchor = @swap_anchor || timeline_launch || origin
+          @origin = clip_origin(@clip, anchor, origin)
           position = time - @origin
           set_clip_position(wrap_position(position))
           # Keep clip position + origin on the timeline when the position
@@ -458,6 +474,9 @@ module MB
           # whole loop late, so fills played a loop early: night_bus_flow's
           # turn fill a bar early in both drops after the 2/4 gap)
           @origin -= @clip_position - position if @clip_position != position
+          # (notes from before the launch never played: a seek or a late
+          # start resumes only notes from the launch on; Chase#resume)
+          @content_from = anchor - @origin
           jumped
         end
 
@@ -572,6 +591,7 @@ module MB
           note_param_nodes(clip)
           @swap_anchor = clip.launch_aligned? ? swap_time : nil
           if clip.clocking
+            @content_from = nil
             clock_rf = @clock ? clock_rf_of(split) : nil
             clock_start(swap_time, split, launch_rf: clock_rf, fresh: true, rf: clock_rf)
           else
@@ -579,6 +599,8 @@ module MB
             @clock_anchor = nil
             @origin = clip_origin(clip, swap_time, swap_time)
             set_clip_position(swap_time - @origin)
+            # (the new clip's notes from before the swap never played)
+            @content_from = @clip_position
           end
         end
 

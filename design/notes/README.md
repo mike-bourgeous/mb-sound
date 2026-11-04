@@ -54,7 +54,7 @@ Every named thing (presets at every scale: effects, instruments, kits, clips, ge
 
 ### [Tweening curves](curves.md)
 
-`MB::Sound::Curve` (`Curve[:elastic, overshoot:]`, many named easings with `_in`/`_out` variants, `Curve.db`/`Curve.s`, `bezier`, Procs; `#lookup` tables in C) maps progress 0..1 and is shared by glides (`v.hz.glide(t, shape:)`), tweens (`tween([300.hz, 3000.hz], 1.bar, curve:)`: the length is per step between keyframes, not the total), `smooth(t, curve:)`, and the antialiased shaper `sig.ease(curve, ...)` (`aease` exact).  `bounce_hits(2.bars, count:, elasticity:, decay:)` makes bouncing-ball rhythms.  Demos `bin/songs/tween_song.rb`, `bin/songs/bouncing_ball.rb`.
+`MB::Sound::Curve` (`Curve[:elastic, overshoot:]`, many named easings with `_in`/`_out` variants, ACID's six fade shapes (`:linear :fast :slow :smooth :sharp :hold`), `Curve.db`/`Curve.s`, `bezier`, Procs; `#lookup` tables in C) maps progress 0..1 and is shared by glides (`v.hz.glide(t, shape:)`), tweens (`tween([300.hz, 3000.hz], 1.bar, curve:)`: the length is per step between keyframes, not the total), `smooth(t, curve:)`, and the antialiased shaper `sig.ease(curve, ...)` (`aease` exact).  `bounce_hits(2.bars, count:, elasticity:, decay:)` makes bouncing-ball rhythms.  Demos `bin/songs/tween_song.rb`, `bin/songs/bouncing_ball.rb`.
 
 ### [Tempo sync](tempo_sync.md)
 
@@ -100,7 +100,7 @@ One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a dB
 
 ### [Sampler](sampler.md)
 
-`MB::Sound::Sample` (`lib/mb/sound/sample.rb`, `sample/`) is an immutable sound in memory (files, arrays, `bounce` of a graph, `capture_audio` live) with a root note, loop points, and cheap views (slices, reverse, loops, fades); edits (`bits`, `lofi`, `stretch`, `mono`) make new audio.  `Sample::Slices` name and chop breaks into clips with pitch marks; `Sampler::Instrument` maps regions to keys, velocities, and round robins, also from SFZ (`sfz`) and SoundFont 2 (`sf2`, pure Ruby).  `GraphNode::SamplerVoice` + `fast_sampler` (exact mirror `Sampler::KernelRuby`) plays them from the exact note-on sample, band-limited, with a 64-sample declick; a plan boundary.  Help `help :sampler`, `lesson :chop`.
+`MB::Sound::Sample` (`lib/mb/sound/sample.rb`, `sample/`) is an immutable sound in memory (files, arrays, `bounce` of a graph, `capture_audio` live) with a root note, loop points, and cheap views (slices, reverse, loops, fades); edits (`bits`, `lofi`, `stretch`, `mono`) make new audio.  `Sample::Slices` name and chop breaks into clips with pitch marks; `Sampler::Instrument` maps regions to keys, velocities, and round robins, also from SFZ (`sfz`) and SoundFont 2 (`sf2`, pure Ruby).  `GraphNode::SamplerVoice` + `fast_sampler` (exact mirror `Sampler::KernelRuby`) plays them from the exact note-on sample, band-limited, with a 64-sample declick; a plan boundary.  A seek landing inside a one-shot's note starts its sample where the song would be (`resume:`, `Notes#resumes?`).  Help `help :sampler`, `lesson :chop`.
 
 ### [Textures: dust, drift, modal resonators](textures.md)
 
@@ -113,6 +113,10 @@ Texture nodes in `fast_texture` and `fast_resonator` (exact Ruby mirrors, the sa
 ### [Loop files, slice stretch, tempo-following loops](loops.md)
 
 `Sample['loop.wav']` reads loop metadata without ffmpeg's help (`Sample::Riff`: ACID tempo/beats/meter/root, `smpl` loops, cue labels as `sample.markers`), then FLAC tags, then tempo and key words in file and folder names (`Sample::LoopInfo`, reasons in `meta[:why]`), or detects the tempo and key (`detect: true`; `#detect_key`, Krumhansl-Schmuckler on a chromagram fold, `Analysis::Key`).  `stretch(r, mode: :slice)` (`Sample::SliceStretch`) moves slices to scaled times with exact attacks; `sample.follow` (`GraphNode::LoopPlayer`, a TimelineNode and plan boundary) plays a loop in time with the session tempo (slice stretch for percussive loops, spectral for tonal ones).  Console `loops(dir, bpm:, key:, beats:, detect:)` lists a folder from headers and names only (`detect:` decodes files missing a tempo or key; keys match enharmonically).  Help `help :loops`.
+
+### [Timeline regions](regions.md)
+
+`regions([sample, at, length, { offset:, gain:, transpose:, fade_in:, fade_out:, curve_in:, curve_out: }], ...)` (`SamplerMethods#regions`) is a lane of audio regions on the timeline: `MB::Sound::Region` values played by `GraphNode::RegionPlayer` (a TimelineNode and plan boundary; a Channels bundle for stereo), the placement fields of a DAW's audio events (ACID's, from the .acd study).  Overlaps add (crossfades), fades follow ACID's renderer in its six curves (`:linear :fast :slow :smooth :sharp :hold`), and a seek or launch inside a region plays it from the source sample an uninterrupted run is on, the same at any buffer size.  Prints and saves as `regions(...)` rows.  Library building block for the timeline options (A-E) the maintainer hasn't chosen between yet.
 
 ### [SQ-80 voice, patches, and (designed) SysEx import](sq80.md)
 

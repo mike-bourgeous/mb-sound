@@ -62,6 +62,9 @@ module MB
     #   (Curve.steps(n, curve) steps along another curve)
     # - :ease, :ease_in, :ease_out, :ease_in_out - CSS's cubic-bezier
     #   presets (Curve.bezier for any)
+    # - :fast (1 - (1 - x)²), :slow (x²), :sharp (0.5 + 4(x - 0.5)³), :hold
+    #   (the start until the end) - with :linear and :smooth, ACID's six
+    #   fade and envelope curves (region fades, Region)
     #
     # Composition: #reverse (the same motion played backwards: an :in curve
     # becomes :out), #in / #out / #in_out / #out_in (Penner-style variants

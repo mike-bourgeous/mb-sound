@@ -1,7 +1,7 @@
 # Tweening curves
 
 <!-- summary -->
-`MB::Sound::Curve` (`Curve[:elastic, overshoot:]`, many named easings with `_in`/`_out` variants, `Curve.db`/`Curve.s`, `bezier`, Procs; `#lookup` tables in C) maps progress 0..1 and is shared by glides (`v.hz.glide(t, shape:)`), tweens (`tween([300.hz, 3000.hz], 1.bar, curve:)`: the length is per step between keyframes, not the total), `smooth(t, curve:)`, and the antialiased shaper `sig.ease(curve, ...)` (`aease` exact).  `bounce_hits(2.bars, count:, elasticity:, decay:)` makes bouncing-ball rhythms.  Demos `bin/songs/tween_song.rb`, `bin/songs/bouncing_ball.rb`.
+`MB::Sound::Curve` (`Curve[:elastic, overshoot:]`, many named easings with `_in`/`_out` variants, ACID's six fade shapes (`:linear :fast :slow :smooth :sharp :hold`), `Curve.db`/`Curve.s`, `bezier`, Procs; `#lookup` tables in C) maps progress 0..1 and is shared by glides (`v.hz.glide(t, shape:)`), tweens (`tween([300.hz, 3000.hz], 1.bar, curve:)`: the length is per step between keyframes, not the total), `smooth(t, curve:)`, and the antialiased shaper `sig.ease(curve, ...)` (`aease` exact).  `bounce_hits(2.bars, count:, elasticity:, decay:)` makes bouncing-ball rhythms.  Demos `bin/songs/tween_song.rb`, `bin/songs/bouncing_ball.rb`.
 <!-- /summary -->
 
 ## Quick reference
@@ -23,6 +23,10 @@ Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds 
 
 - Bounce rhythms: `bounce_hits(2.bars, count: 16, elasticity: 0.75, note: C2, reverse:)` (`SequenceMethods`) is a Clip of hits at length × (1 - e^i), converging on the bar line; velocities fall by `decay:` separately from the timing (`:gentle` e^(i/2), default since 2026-10-08 (user's listening pick); `:speed` e^i, the impact speed, the old default; `:none`; a factor per hit; a Curve or Curve name over the hits; a Proc of (i, position fraction)), and `pitch: -1` (semitones or Interval per hit, or a Proc) moves later hits; demo `bin/songs/bouncing_ball.rb` (per-section decays: 0.9 per hit for the drop and settle, the user's picks; `--decay` overrides all; balls loop with `align: :launch` so they drop where launched).
 - Dynamic cookbook cutoffs (`filter(:lowpass, cutoff: node)`) clamp to `Cookbook::DYNAMIC_MIN_CUTOFF` (1 Hz, like FourPole; negative and NaN included).  Fast moves into very low cutoffs still make a direct-form biquad's output jump (a DC bump that decays once the cutoff rises; measured in the commit 8323e7d1 message), so tween cutoffs as Pitches.  Since 2026-10-08 graph cookbook filters build `Filter::SVF` (`filters.md`), whose parameters may move every sample without DC bumps; the bump remains only with `structure: :biquad`.
+
+## ACID's six shapes (regions-1, 2026-11-04)
+
+ACID Pro's fades and envelope segments use six curves (the .acd study, `research/acd-format/acd/audio_render.rb` on `research-acd-format-linux`, `CURVES`): linear, fast `1 - (1 - x)²`, slow `x²`, smooth (smoothstep), sharp `0.5 + 4(x - 0.5)³`, and hold.  `:linear` and `:smooth` existed; `:fast` (= `:quad_out`), `:slow` (= `:quad`), and `:sharp` (= `:cubic_out_in`) are now named curves with their own names and polynomial forms (so the shaper integrates them exactly), and `:hold` stays at 0 until x reaches 1 (an envelope segment holding its first point; ACID's fade code 0, "no fade", is a different thing: an importer leaves such a fade out rather than mapping it to `:hold`).  `:hold`'s jump at 1 ramps over the last cell of `#lookup`'s table.  Region fades (`regions.md`) take them as `curve_in:`/`curve_out:`, fade-outs as `1 - curve(x)` like ACID; Gesture segments and tweens take them like any name.  Specs: `curve_spec.rb` "ACID fade and envelope shapes".
 
 ## Smoothing (`GraphNode#smooth`, smoothing-1, 2026-10-30)
 

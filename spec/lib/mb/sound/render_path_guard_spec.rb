@@ -122,6 +122,7 @@ RSpec.describe('render path code guards') do
     ['lib/mb/sound/graph_node/chorus_nodes.rb', '(@tail * @sample_rate).ceil', 'a Float tail in seconds'],
     ['lib/mb/sound/graph_node/constant.rb', '(timestamp * @sample_rate).floor', 'Float seconds from timed_change callers'],
     ['lib/mb/sound/notes/node.rb', '((time - from) * rate).floor', 'rate is @rate_r (Rational)'],
+    ['lib/mb/sound/graph_node/sampler_voice.rb', 'off = ((c.time - (to - Rational(count) / rate)) * rate).floor', 'rate is @sample_rate.to_r (Rational; a resumed note, regions-1)'],
     ['lib/mb/sound/wavetable/builder.rb', '(valid * rate).ceil', 'a Float length in seconds'],
     ['lib/mb/sound/session/midi_input.rb', '((e.time - start) * rate).floor', 'rate is output.sample_rate.round (Integer)'],
     ['lib/mb/sound/ui/patch_render.rb', 'held = (hold * rate).floor', 'how much of a RENDER pane preview the note is held for (Float seconds, a display bound)'],

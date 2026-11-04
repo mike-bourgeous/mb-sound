@@ -24,6 +24,15 @@ module MB
       # idle on the exact sample.  +choke_time+ (seconds) changes that time
       # (Instrument#play's +steal_fade+ length).
       #
+      # +resume+ (the voice's Notes, whose #trigger is +trigger+): at a
+      # content jump inside a note that sounded before it (a seek;
+      # Notes#resumes?), the voice starts that note where an uninterrupted
+      # run would be: its seconds since it started into its sample at the
+      # note's speed then (a note-on on the same sample wins), forward loops
+      # wrapped into the loop.  The voice checks the stream's generation
+      # once per buffer (no node to read).  Instrument#play turns it on for
+      # one-shot instruments without an envelope (regions-1).
+      #
       # Playback reads the samples' band-limited levels (sample-mode
       # Wavetable levels, +mips+ apart, +interpolation+ :optimal), so
       # pitching up doesn't alias; `interpolation: :none, mips: false` is
@@ -53,7 +62,7 @@ module MB
         attr_reader :seed
 
         def initialize(instrument, channel: 0, trigger: nil, number: nil, freq: nil, gate: nil, shift: nil, start: nil, transpose: 0, declick: Sampler::DECLICK,
-                       interpolation: nil, mips: nil, seed: nil, once: false, choke: nil, choke_fade: true, choke_time: nil, sample_rate: 48000)
+                       interpolation: nil, mips: nil, seed: nil, once: false, choke: nil, choke_fade: true, choke_time: nil, resume: nil, sample_rate: 48000)
           raise ArgumentError, "A sampler voice plays a Sampler::Instrument (got #{instrument.inspect})" unless instrument.is_a?(Sampler::Instrument)
           @instrument = instrument
           @channel = Integer(channel)
@@ -72,6 +81,14 @@ module MB
           @start = start.nil? ? 0.0 : input(start)
           @shift = shift.nil? ? 0.0 : input(shift)
           @choke = choke.nil? ? nil : input(choke)
+          raise ArgumentError, "A sampler voice resumes the notes of a voice's Notes (got #{resume.inspect})" unless resume.nil? || resume.is_a?(MB::Sound::Notes)
+          @resume = resume.nil? || @once ? nil : resume
+          @resume_generation = @resume&.stream&.generation
+          @resume_chase = nil
+          @resume_elapsed = nil
+          @resume_velocity = nil
+          lane = @resume&.stream
+          lane.allocator.resume_notes! if lane.is_a?(MIDI::Allocator::Lane)
           @choke_fade = !!choke_fade
           @choke_time = choke_time.nil? ? MB::Sound::Envelope::CHOKE_TIME : Float(choke_time)
           raise ArgumentError, "The choke time is seconds above 0 (got #{choke_time.inspect})" unless @choke_time > 0
@@ -160,6 +177,9 @@ module MB
           start = read(@start, count) or return nil
           shift = read(@shift, count) or return nil
           choke = @choke && (read(@choke, count) or return nil)
+          if @resume && (at = resume_offset(count))
+            trig, start = resume_note(at, trig, num, freq, start, shift, count)
+          end
 
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
           Kernels.sampler_play(@buf, @specs, @regions, @state, @counters, @rng, [trig, num, freq, gate, start, shift, choke], config)
@@ -222,6 +242,81 @@ module MB
           return nil if b.nil? || b.empty?
           raise ArgumentError, 'Sampler inputs must give the buffer size asked for' if b.length != count
           b
+        end
+
+        # The offset in this block of the content jump whose note this
+        # voice resumes (Notes#resumes?), or nil: the stream's generation is
+        # checked each block, and a jump's chase waits for the block holding
+        # its time (the voice's trigger node has read this block, so its
+        # cursor is the block's end).
+        def resume_offset(count)
+          stream = @resume.stream
+          g = stream.generation
+          unless g == @resume_generation
+            @resume_generation = g
+            c = stream.chase
+            @resume_chase = c && c.generation == g && @resume.resumes?(c) ? c : nil
+          end
+          c = @resume_chase or return nil
+
+          to = @resume.trigger.cursor
+          return nil unless c.time < to
+
+          @resume_chase = nil
+          @resume_elapsed = c.resume.to_f
+          v = c.event.velocity.to_f
+          @resume_velocity = v > 1 ? 1.0 : v
+          rate = @sample_rate.to_r
+          off = ((c.time - (to - Rational(count) / rate)) * rate).floor
+          off < 0 ? 0 : (off >= count ? count - 1 : off)
+        end
+
+        # The trigger and start inputs with a note-on at sample +i+ for the
+        # resumed note (Chase#resume seconds since it started, its
+        # velocity), its start where the note's sample would be: those
+        # seconds at the speed of the region the kernel will pick (round
+        # robin and random draws as of this block's start), forward and
+        # release loops wrapped (ping-pong loops are entered going
+        # forward).  A note-on on the same sample wins.
+        def resume_note(i, trig, num, freq, start, shift, count)
+          k = Sampler::KernelRuby
+          t = @resume_elapsed
+          v = @resume_velocity
+          return [trig, start] unless (trig.is_a?(Numeric) ? trig : trig[i]) <= 0 && v > 0
+
+          cfg = config
+          regs = Array.new(@regions.shape[0]) { |r| @regions[r, true].to_a }
+          ctx = { specs: @specs, regions: regs, split: Integer(cfg[2]), interp: cfg[3], last: @state[k::LAST_REGION].to_i }
+          fr = (start.is_a?(Numeric) ? start : start[i]).to_f
+          n = num.is_a?(Numeric) ? num : num[i]
+          note = k::Voice.new(false, nil)
+          k.note_on(ctx, note, 0, n.to_f, v, fr, (shift.is_a?(Numeric) ? shift : shift[i]).to_f, @counters.dup, [@rng[0].to_i], cfg[0], cfg[5])
+          return [trig, start] if note.region.nil?
+
+          sp = note.base
+          sp *= (freq.is_a?(Numeric) ? freq : freq[i]) / note.nhz if freq && note.nhz > 0
+          r = regs[note.region]
+          len = r[k::STOP] - r[k::START]
+          return [trig, start] unless len > 0
+
+          off = r[k::OFFSET] + fr * len + t * @sample_rate * sp.abs
+          off = loop_offset(r, off) if r[k::LOOP_END] > r[k::LOOP_START] && r[k::REVERSE] == 0
+          trig = trig.is_a?(Numeric) ? Numo::SFloat.new(count).fill(trig) : trig.dup
+          start = start.is_a?(Numeric) ? Numo::SFloat.new(count).fill(start) : start.dup
+          trig[i] = v
+          start[i] = (off - r[k::OFFSET]) / len
+          [trig, start]
+        end
+
+        # Offset +off+ (source samples from the region's start) of a note
+        # that has played on through region +r+'s loop, wrapped into it.
+        def loop_offset(r, off)
+          k = Sampler::KernelRuby
+          ls = r[k::LOOP_START] - r[k::START]
+          le = r[k::LOOP_END] - r[k::START]
+          return off if off < le
+
+          ls + MB::Sound::Wavetable::KernelRuby.fwrap(off - ls, le - ls)
         end
 
         def first_trigger(count)
