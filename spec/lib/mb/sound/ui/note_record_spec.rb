@@ -78,10 +78,13 @@ RSpec.describe('UI notes with the sound they are about', :aggregate_failures) do
     expect(wait_until { @tiles.router.mode == :pane && @tiles.tiler.focus == :render }).to eq(true)
     st = @tiles.pane_state(:render)
     # (the first press shows a marker where it starts: a tenth of the view, 1 kHz)
+    # (waiting for both presses: under load the pane handled the first
+    # alone, 0.05, when the check ran; fix-flaky-1104)
     @term.type('..')
-    expect(wait_until { st[:cursor_time] }).to be_within(1e-9).of(0.06)
+    near = ->(v, want, tol) { v && (v - want).abs <= tol }
+    expect(wait_until { near.(st[:cursor_time], 0.06, 1e-9) }).to eq(true), st[:cursor_time].inspect
     @term.type('>>')
-    expect(wait_until { st[:cursor_freq] }).to be_within(1e-6).of(1000 * 2**(1 / 6.0))
+    expect(wait_until { near.(st[:cursor_freq], 1000 * 2**(1 / 6.0), 1e-6) }).to eq(true), st[:cursor_freq].inspect
     expect(@term.wait_for('@ 60 ms 1.12 kHz')).to eq(true), @term.text
     @term.write("\x1d")
     expect(@term.wait_for(' NAV ')).to eq(true)
