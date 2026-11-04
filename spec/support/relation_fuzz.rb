@@ -45,7 +45,7 @@ module RelationFuzz
 
     def size = 1 + kids.sum(&:size)
 
-    def stereo? = kind == :pan || kids.any?(&:stereo?)
+    def stereo? = kind == :pan || kind == :balance || kids.any?(&:stereo?)
   end
 
   Failure = Struct.new(:seed, :relation, :code, :message, :original, keyword_init: true) do
@@ -150,7 +150,11 @@ module RelationFuzz
       when 11 then [:feedback, rng.rand(20..120), (0.2 + rng.rand * 0.5).round(2)]
       when 12 then [:ease, %i[smoothstep elastic bounce][rng.rand(3)]]
       when 13 then [:formant, %i[a e i o u][rng.rand(5)]]
-      when 14 then [:pan, control(rng, -1, 1)]
+      when 14
+        # (pan-laws-1: half the pans balance a stereo input by one of the
+        # stereo laws instead)
+        laws = MB::Sound::GraphNode::ChannelMixer::PanLaws::STEREO_LAWS
+        rng.rand < 0.5 ? [:pan, control(rng, -1, 1)] : [:balance, laws[rng.rand(laws.length)], control(rng, -1, 1)]
       when 15 then rng.rand < 0.5 ? [:abs] : [:until, [0.011, 0.0313, 0.05][rng.rand(3)]]
       when 16 then [:period_delay, [110, 220, 331][rng.rand(3)]]
       # (per-channel triggers on a stereo input: same-shape channel
@@ -226,6 +230,10 @@ module RelationFuzz
     when :ease then "#{k[0]}.ease(#{a[0].inspect})"
     when :formant then "#{k[0]}.formant(#{a[0].inspect})"
     when :pan then "#{k[0]}.pan(#{ctl(a[0])})"
+    when :balance
+      # (a mono input becomes stereo first: itself and a scaled copy)
+      input = e.kids[0].stereo? ? k[0] : "#{k[0]}.then { |x| stereo(x, x * -0.5) }"
+      "#{input}.balance(#{ctl(a[1])}, law: #{a[0].inspect})"
     when :sample_hold
       trig = 'seq(C4.n64, E4.n64).loop.notes.trigger'
       "#{k[0]}.sample_hold(#{a[0] ? "stereo(#{trig}, #{trig})" : trig})"

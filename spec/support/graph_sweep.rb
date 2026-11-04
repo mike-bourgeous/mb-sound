@@ -427,6 +427,12 @@ module GraphSweep
 
       # Multichannel
       ['pan, balance, width', ->(c) { c.sig.pan(c.mod(-1, 1)).width(c.mod(0, 2)) + c.stereo_sig.balance(0.3) }],
+      # (pan-laws-1: every stereo law, moving and fixed)
+      ['balance laws', ->(c) {
+        MB::Sound::GraphNode::ChannelMixer::PanLaws::STEREO_LAWS.each_with_index.map { |law, i|
+          c.stereo_sig.balance(i.even? ? c.mod(-1.2, 1.2, 5 + i) : 0.4 - 0.2 * i, law: law)
+        }.reduce(:+)
+      }],
       ['mid_side, swap, mono', ->(c) { c.stereo_sig.mid_side.from_mid_side.swap.mono }],
       ['matrix and place', ->(c) { c.stereo_sig.matrix([[1, 0.5], [0.2, c.mod(0, 1)], [0.3, 0.3]]) + c.sig.place(x: c.mod(-1, 1), y: 0.5).channels(0, 1).mixdown rescue c.stereo_sig.matrix([[1, 0.5], [0.2, 1]]) }],
       ['complex matrix (Analytic)', ->(c) { c.stereo_sig.matrix([[1, 1i], [0.5, -1i]]) }],
