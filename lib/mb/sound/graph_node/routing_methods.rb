@@ -4,8 +4,8 @@ module MB
       # Methods for connecting graph nodes to inputs, branches, other nodes,
       # and custom processing blocks.  Included in GraphNode.
       module RoutingMethods
-        # Creates and returns an input object that reads from this node's #sample
-        # method whenever the I/O's #read method is called.
+        # Returns an input object (GraphNodeInput) whose #read samples this
+        # node.
         #
         # See MB::Sound::GraphNode::GraphNodeArrayMixin#as_input for a method of
         # combining multiple nodes into a readable input.
@@ -55,26 +55,25 @@ module MB
           ProcNode.new(self, extra_sources: sources, sample_rate: self.sample_rate, type_name: type_name, &block)
         end
 
-        # Marks this node's output as a length in samples (Length::Samples),
-        # e.g. for a delay time that changes every sample:
+        # Marks this node's output as a length in samples (Length::Samples).
+        # E.g. for a delay time that changes every sample:
         # `sig.delay(lfo.at(10..20).samples)`.
         def samples
           Length::Samples.new(self)
         end
 
-        # Marks this node's output as a phase in cycles (an MB::Sound::Phase).
-        # Plain nodes are already cycles where a method takes a phase, so
-        # this only documents the unit: `110.hz.pm(330.hz.at(0..0.4).cycles)`.
-        # Also available as #cyc.
+        # Marks this node's output as a phase in cycles (a Phase).  Plain nodes
+        # are already cycles where a method takes a phase, so this only
+        # documents the unit: `110.hz.pm(330.hz.at(0..0.4).cycles)`.  Also
+        # available as #cyc.
         def cycles
           Phase.new(self)
         end
         alias cyc cycles
 
-        # Marks this node's output as a phase in radians (an MB::Sound::Phase
-        # whose cycles are this node divided by 2 pi), e.g. a modulator whose
-        # level is a PM index in radians: `110.hz.pm(330.hz.at(2.4).radians)`.
-        # Also available as #rad.
+        # Marks this node's output as a phase in radians (a Phase of this / 2
+        # pi).  E.g. a modulator whose level is a PM index in radians:
+        # `110.hz.pm(330.hz.at(2.4).radians)`.  Also available as #rad.
         def radians
           Phase.radians(self)
         end
@@ -86,10 +85,9 @@ module MB
           Length::Seconds.new(self)
         end
 
-        # If this node (or its inputs) have a finite length of audio data
-        # available (e.g. a sound file), then when they run out of data the given
-        # +sources+ (other graph nodes that respond to :sample) will be played
-        # after this node finishes.
+        # Plays +sources+ (other graph nodes) after this node runs out of data.
+        # This node (or its inputs) must have a finite length of audio data
+        # available (e.g. a sound file).
         def and_then(*sources)
           raise 'No sources were given' if sources.empty?
           MB::Sound::GraphNode::NodeSequence.new([self, *sources])
@@ -112,11 +110,11 @@ module MB
         end
         alias for until
 
-        # Returns a gate (GraphNode::Sounding) that is 1 while this node makes
-        # sound (above -90 dB), stays open for +hold+ after it falls silent,
-        # then fades to 0 over +fade+ (seconds or Lengths); it starts closed
-        # and ends after this node ends, once its fade is done, so whatever
-        # it gates ends with the sound.  The same at any buffer size.
+        # A gate that is 1 while this node makes sound (GraphNode::Sounding).
+        # It is 1 above -90 dB, stays open for +hold+ after the node falls
+        # silent, then fades to 0 over +fade+ (seconds or Lengths); it starts
+        # closed and ends after this node ends, once its fade is done, so
+        # whatever it gates ends with the sound.  The same at any buffer size.
         #
         # Example (bin/sound.rb): a hiss that runs only while the music does
         #     tune = 220.hz.triangle.at(-12.db) * adsr(0.01, 0.4, 0, 0.1, hold: 1)
@@ -125,15 +123,13 @@ module MB
           MB::Sound::GraphNode::Sounding.new(self, hold: hold, fade: fade)
         end
 
-        # Returns a node that plays this node, then silence forever once it
-        # ends, so effects after it can ring out (see Ringdown).  On a
-        # multichannel node, each channel gets its own Ringdown.
+        # Plays this node, then silence forever so effects ring out (Ringdown).
+        # On a multichannel node, each channel gets its own Ringdown.
         def ringdown
           MB::Sound::GraphNode::Ringdown.new(self)
         end
 
-        # Calls #sample with +count+ requested samples +times+ times,
-        # concatenating the results into a single array.
+        # Concatenates +times+ calls of #sample(+count+) into one array.
         def multi_sample(count, times)
           raise "Count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
           raise "Times must be a positive Integer (got #{count.inspect})" unless times.is_a?(Integer) && times > 0
@@ -156,9 +152,8 @@ module MB
           ret[0...endidx] if ret
         end
 
-        # Appends a BufferAdapter to the graph with this node as its upstream
-        # source, using the given +length+ as the upstream frame size.  When
-        # downstream nodes sample the adapter, the adapter will sample the
+        # Appends a BufferAdapter that samples this node in +length+ chunks.
+        # When downstream nodes sample the adapter, the adapter will sample the
         # upstream node in +length+-sized chunks.  This allows running a node
         # graph with a shorter internal buffer size than the sound card input or
         # output buffer size, for example.  Plain numbers are samples; other

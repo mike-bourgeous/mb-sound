@@ -145,9 +145,9 @@ module MB
         # Filter types for #filter that make a four-pole filter (#lp4).
         FOUR_POLE_TYPES = [:four_pole, :lp4, :lp2, :bp2, :bp4, :hp2, :hp4, :diode].freeze # Filter::FourPole::MODES
 
-        # A CEM3379-style 4-pole resonant lowpass (24 dB/octave), the filter
-        # of the Ensoniq SQ-80 and many analog polysynths (see
-        # MB::Sound::Filter::FourPole and GraphNode::FourPole).
+        # A CEM3379-style 4-pole resonant lowpass (24 dB/octave;
+        # GraphNode::FourPole).  The filter of the Ensoniq SQ-80 and many analog
+        # polysynths (see MB::Sound::Filter::FourPole).
         #
         # +cutoff+ is in Hz (a number, a Pitch such as `800.hz`, or a node,
         # e.g. Notes#cutoff); +resonance+ is 0..1 (a number or node).  Both
@@ -238,25 +238,24 @@ module MB
         alias four_pole lp4
         alias lowpass4 lp4
 
-        # A TB-303-style diode ladder lowpass: #lp4 with +mode: :diode+ (see
-        # #lp4 for the options and Filter::FourPole for the model), with
-        # lp4's resonance scale and curves (the same knob positions sit the
-        # same distance from oscillation), self-oscillation, compensation,
-        # and drive (+drive_mode:+ :input or :feedback).  The coupled stages
-        # spread their poles: a gentler, longer slope (without resonance
-        # about 6, 8, 11, and 16 dB/octave over the first four octaves above
-        # the cutoff, against lp4's 11, 18, 22, 24) and a peak that narrows
-        # and squelches as the resonance rises.  Its cutoff means what lp4's
-        # does (+tuning: :musical+: -6 dB there without resonance, the peak on
-        # it from resonance 0.41 up).  +normalize: true+ (default) matches
-        # its bass and saturation to lp4's (the same DC gain at every
-        # resonance, self-oscillation at lp4's level); with
-        # +tuning: :hardware+ it also matches its cutoff to hardware lp4's
-        # (-12 dB there without resonance, +quality:+ giving lp4's knob),
-        # and +normalize: false, tuning: :hardware+ is the unmatched ladder
-        # (resonant peak at the cutoff at every resonance, so -25 dB there
-        # without resonance; quieter self-oscillation).
-        # Alias #diode_ladder.
+        # A TB-303-style diode ladder lowpass: #lp4 with `mode: :diode`.  See
+        # #lp4 for the options and Filter::FourPole for the model.  It has lp4's
+        # resonance scale and curves (the same knob positions sit the same
+        # distance from oscillation), self-oscillation, compensation, and drive
+        # (+drive_mode:+ :input or :feedback).  The coupled stages spread their
+        # poles: a gentler, longer slope (without resonance about 6, 8, 11, and
+        # 16 dB/octave over the first four octaves above the cutoff, against
+        # lp4's 11, 18, 22, 24) and a peak that narrows and squelches as the
+        # resonance rises.  Its cutoff means what lp4's does (+tuning:
+        # :musical+: -6 dB there without resonance, the peak on it from
+        # resonance 0.41 up).  +normalize: true+ (default) matches its bass and
+        # saturation to lp4's (the same DC gain at every resonance,
+        # self-oscillation at lp4's level); with +tuning: :hardware+ it also
+        # matches its cutoff to hardware lp4's (-12 dB there without resonance,
+        # +quality:+ giving lp4's knob), and +normalize: false, tuning:
+        # :hardware+ is the unmatched ladder (resonant peak at the cutoff at
+        # every resonance, so -25 dB there without resonance; quieter
+        # self-oscillation).  Alias #diode_ladder.
         #
         #     play 55.hz.saw.diode(0.25.hz.lfo.at(150..2500), resonance: 0.8, drive: 2) * 0.5
         #     v.hz.saw.diode(v.cutoff(300), resonance: v.reso(0.7))
@@ -265,16 +264,15 @@ module MB
         end
         alias diode_ladder diode
 
-        # A formant filter (GraphNode::Formant): five parallel resonant
-        # bandpasses at a sung vowel's formants, so a bright source "says"
-        # the vowel.  +vowels+ are :a, :e, :i, :o, :u (Csound's formant
-        # tables for +voice+ :soprano, :alto, :countertenor, :tenor
-        # (default), or :bass) or custom Arrays of five [Hz, dB, bandwidth]
-        # triples; with several, +morph+ (0..1, a number or node) glides
-        # across the list.  +shift+ moves every formant by semitones (a
-        # number, Interval, or node: key tracking with `v.number - 60`),
-        # +width+ scales the bandwidths (below 1 is more resonant).
-        # Level-normalized by default (see Formant).  Alias #vowel.
+        # A formant filter (GraphNode::Formant): a bright source "says" a vowel.
+        # Five parallel resonant bandpasses sit at a sung vowel's formants.
+        # +vowels+ are :a, :e, :i, :o, :u (Csound's formant tables for +voice+
+        # :soprano, :alto, :countertenor, :tenor (default), or :bass) or custom
+        # Arrays of five [Hz, dB, bandwidth] triples; with several, +morph+
+        # (0..1, a number or node) glides across the list.  +shift+ moves every
+        # formant by semitones (a number, Interval, or node: key tracking with
+        # `v.number - 60`), +width+ scales the bandwidths (below 1 is more
+        # resonant).  Level-normalized by default (see Formant).  Alias #vowel.
         #
         #     play 110.hz.saw.formant(:a)
         #     play 110.hz.pulse(0.1).formant(:a, :e, :i, :o, :u, morph: 0.25.hz.lfo.at(0..1))
@@ -335,8 +333,7 @@ module MB
           self.filter(chain)
         end
 
-        # Creates a harmonic series of peaking filters starting at the given
-        # +fundamental_hz+, arranged in series.
+        # Peaking filters in series at the harmonics of +fundamental_hz+.
         #
         # +:count+ - The number of filters to create.
         # +:ratio+ - The increment between harmonics (1.0 for integer harmonics).
@@ -353,8 +350,7 @@ module MB
           peq(pairs.to_h, structure: structure)
         end
 
-        # Creates a harmonic series of bandpass filters starting at the given
-        # +fundamental_hz+, arranged in parallel.
+        # Bandpass filters in parallel at the harmonics of +fundamental_hz+.
         #
         # +fundamental_hz+ - The first filter frequency (Proc, GraphNode, or Numeric).
         # +:count+ - The number of filters to create (Integer).
@@ -420,22 +416,22 @@ module MB
           structure
         end
 
-        # Applies an IIR phase difference network to remove negative frequencies
-        # and produce a Complex-valued analytic signal.
+        # A complex analytic signal from an IIR phase difference network
+        # (Hilbert).  It removes negative frequencies.
         #
         # See MB::Sound::Filter::HilbertIIR.
         def hilbert_iir(sample_rate: self.sample_rate)
           filter(MB::Sound::Filter::HilbertIIR.new(sample_rate: sample_rate))
         end
 
-        # Smooths this node over +length+: seconds or any length (e.g.
-        # `60.samples`, `100.ms`, `1.n16` at the current tempo), with
-        # MB::Sound::Filter::Smooth, the MIDI controllers' smoother: a linear
-        # filter whose step response is an S-curve (a quadratic B-spline)
-        # over +length+, so a step glides over +length+, a stream of steps
-        # (note numbers, a turned 7-bit knob) becomes a smooth line, and a
-        # moving signal passes delayed by half the length.  The output
-        # starts on this node's first value, or on +from+.
+        # Smooths this node over +length+ with an S-curve step (Filter::Smooth).
+        # +length+ is seconds or any length (e.g. `60.samples`, `100.ms`,
+        # `1.n16` at the current tempo); MB::Sound::Filter::Smooth is the MIDI
+        # controllers' smoother: a linear filter whose step response is an
+        # S-curve (a quadratic B-spline) over +length+, so a step glides over
+        # +length+, a stream of steps (note numbers, a turned 7-bit knob)
+        # becomes a smooth line, and a moving signal passes delayed by half the
+        # length.  The output starts on this node's first value, or on +from+.
         #
         # With +reset:+ (a graph node of triggers, e.g. a note-on trigger), the
         # output jumps to the input at every nonzero sample of +reset+ instead
@@ -473,9 +469,9 @@ module MB
           MB::Sound::Filter::SampleWrapper.new(f, self, inputs: { reset: reset })
         end
 
-        # Hard-clips the slope of the output of this node to the given +max_rise+
-        # and +max_fall+, in units per second.  If only one value is specified,
-        # then the other value will be set to its negative.
+        # Limits this node's slope to +max_rise+ and +max_fall+ units per
+        # second.  If only one value is specified, then the other value will be
+        # set to its negative.
         #
         # A value of zero for +max_fall+ outputs a cumulative maximum value, and
         # similarly for +max_rise+.

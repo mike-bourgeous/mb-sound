@@ -4,18 +4,17 @@ module MB
       # Methods that append delays and reverbs to a graph.  Included in
       # GraphNode.
       module DelayMethods
-        # Adds a MB::Sound::Filter::Delay to the signal chain with a delay of
-        # +time+: a number of seconds, any
-        # length (`5.samples`, `250.ms`, `0.01.seconds`), a musical length
-        # that follows the tempo (`3.n16`, `1.n8.dotted`), or a graph node
-        # giving the time every sample (seconds, or samples with
-        # `node.samples`; musical-time nodes like
+        # A delay line (Filter::Delay) of +time+ with feedback, smoothing, and
+        # inserts.  +time+ is a number of seconds, any length (`5.samples`,
+        # `250.ms`, `0.01.seconds`), a musical length that follows the tempo
+        # (`3.n16`, `1.n8.dotted`), or a graph node giving the time every sample
+        # (seconds, or samples with `node.samples`; musical-time nodes like
         # `2.bars.lfo.square.at(3.n16..5.n16)` follow the tempo).  The time
         # keeps its unit when the sample rate changes: inside #oversample,
-        # `5.samples` stays 5 samples at the oversampled rate and `0.01`
-        # stays 10 ms.  Buffers for musical lengths are sized for tempos down
-        # to Sequence::TempoNode::SLOWEST_BPM; +:max_delay+ (any length)
-        # sizes the initial buffer otherwise (buffers grow as needed).
+        # `5.samples` stays 5 samples at the oversampled rate and `0.01` stays
+        # 10 ms.  Buffers for musical lengths are sized for tempos down to
+        # Sequence::TempoNode::SLOWEST_BPM; +:max_delay+ (any length) sizes the
+        # initial buffer otherwise (buffers grow as needed).
         #
         # +:smooth+ glides delay time changes (including tempo changes) like
         # a tape delay: true (the default), a rate in seconds per second, or
@@ -417,9 +416,8 @@ module MB
           )
         end
 
-        # Adds a multi-tap delay with the given delay sources, returning an Array
-        # of nodes representing the taps, as a channel bundle (e.g.
-        # `l, r = sig.multitap(...)`).  Also available as #multitap_delay.
+        # A multi-tap delay: one output per delay time, as a channel bundle.
+        # E.g. `l, r = sig.multitap(...)`.  Also available as #multitap_delay.
         # The +delays+ may be any delay time accepted by #delay: seconds,
         # lengths (`96.samples`, `250.ms`), musical lengths that follow the
         # tempo (`1.n8.dotted`), or graph nodes.

@@ -5,8 +5,7 @@ module MB
       # (e.g. mixing, multiplication, logarithms, and decibel conversion).
       # Included in GraphNode.
       module ArithmeticMethods
-        # Creates a mixer that adds this node's #sample output to +other+ (a
-        # numeric constant or another GraphNode).
+        # Adds +other+ (a number or a node) to this node (a Mixer).
         def +(other)
           return MIDI::Param::Expr.new(:+, self, other) if other.is_a?(MIDI::Param::Base) # (a knob combined with cc(1): a param)
           ArithmeticMethods.check_pitch(:+, self, other)
@@ -14,8 +13,7 @@ module MB
           Mixer.new([self, other], sample_rate: self.sample_rate)
         end
 
-        # Creates a mixer that subtracts +other+ (a numeric constant or another
-        # GraphNode) from this node's #sample output.
+        # Subtracts +other+ (a number or a node) from this node (a Mixer).
         def -(other)
           return MIDI::Param::Expr.new(:-, self, other) if other.is_a?(MIDI::Param::Base) # (a knob combined with cc(1): a param)
           ArithmeticMethods.check_pitch(:-, self, other)
@@ -49,20 +47,19 @@ module MB
           self
         end
 
-        # Creates a multiplier that multiplies +other+ (a numeric constant or
-        # another GraphNode) by this node's #sample output.
+        # Multiplies this node by +other+ (a number or a node; a Multiplier).
         def *(other)
           return MIDI::Param::Expr.new(:*, self, other) if other.is_a?(MIDI::Param::Base) # (a knob combined with cc(1): a param)
           Multiplier.new([self, other], sample_rate: self.sample_rate)
         end
 
-        # Scales this node's output, with the meaning Tone#at gives full-scale
-        # signals: a number or a graph node multiplies (`self * amplitude`),
-        # and a Range `a..b` maps -1..1 onto it (`self * (b - a) / 2 +
-        # (a + b) / 2`).  Tones keep their own #at, applied inside the
-        # oscillator.  Bad values (a Range of Durations, which only Tones
-        # take, or anything else) go through MB::Sound.live_error, returning
-        # this node unchanged in live mode.
+        # Scales this node by a number or node, or maps -1..1 onto a Range.  The
+        # meaning Tone#at gives full-scale signals: a number or a graph node
+        # multiplies (`self * amplitude`), and a Range `a..b` maps -1..1 onto it
+        # (`self * (b - a) / 2 + (a + b) / 2`).  Tones keep their own #at,
+        # applied inside the oscillator.  Bad values (a Range of Durations,
+        # which only Tones take, or anything else) go through
+        # MB::Sound.live_error, returning this node unchanged in live mode.
         #
         #     play 220.hz.saw.lp4(800).at(-20.db)
         #     220.hz.saw.filter(:lowpass, cutoff: 3.hz.lfo.lp4(10).at(400..2000))
@@ -192,15 +189,15 @@ module MB
           x.is_a?(Numeric) && x.real? && x.finite? && x == x.round ? x.round.to_s : RubyValue.number(x)
         end
 
-        # Divides incoming data by +other+, which may be a Numeric or another
-        # signal graph.  For signal graphs, each numerator value is divided
-        # by the corresponding denominator value at the same index.
+        # Divides this node by +other+, a number or a node (a BinaryOperation).
+        # For signal graphs, each numerator value is divided by the
+        # corresponding denominator value at the same index.
         def /(other)
           BinaryOperation.new(self, other, operator: '/')
         end
 
-        # Appends a node that raises the incoming values to +other+, which should
-        # be either a numeric or another signal graph (a BinaryOperation).
+        # Raises this node to the power +other+, a number or a node (a
+        # BinaryOperation).
         #
         # With a Constant or Knob base (e.g. 10 ** (lfo / 20)) and
         # MB::Sound.precision :fast, raises with the plan layer's fast 2^x
@@ -209,22 +206,20 @@ module MB
           BinaryOperation.new(self, other, operator: '**', fast_power_base: is_a?(Constant) || is_a?(Knob) || is_a?(Knob::Reader))
         end
 
-        # Appends a node that returns the real value of a complex signal, or the
-        # unmodified value of a real signal.
+        # The real part of a complex signal (a real signal passes unchanged).
         def real
           MB::Sound::GraphNode::ComplexNode.new(self, mode: :real)
         end
 
-        # Appends a node that returns the real value of a complex signal, or
-        # zeros for a real signal.
+        # The imaginary part of a complex signal (zeros for a real signal).
         def imag
           MB::Sound::GraphNode::ComplexNode.new(self, mode: :imag)
         end
 
-        # Appends a node that returns the magnitude of a complex signal, or the
-        # absolute value of a real signal, antialiased (a full-wave rectifier's
-        # corner aliases; see MB::Sound::Shaper).  See #aabs for the exact
-        # version for control signals.
+        # The absolute value of a real signal or magnitude of a complex one,
+        # antialiased (a full-wave rectifier's corner aliases; see
+        # MB::Sound::Shaper).  See #aabs for the exact version for control
+        # signals.
         def abs
           MB::Sound::GraphNode::Shaper.new(self, mode: :abs)
         end
@@ -234,52 +229,45 @@ module MB
           MB::Sound::GraphNode::Shaper.new(self, mode: :abs, antialias: false)
         end
 
-        # Appends a node that returns the instantaneous phase of a complex
-        # signal, or zeros or Math::PI for a real signal, in radians (the
-        # complex argument, as Numo's and Complex#arg; phase inputs count
-        # cycles, so feed it to one as `sig.arg.radians`).
+        # The instantaneous phase of a complex signal in radians (0 or pi if
+        # real).  It is the complex argument, as Numo's and Complex#arg; phase
+        # inputs count cycles, so feed it to one as `sig.arg.radians`.
         def arg
           MB::Sound::GraphNode::ComplexNode.new(self, mode: :arg)
         end
 
-        # Rounds values from the node down to the next lower integer (a
-        # MathFunction node).
+        # Rounds values down to integers (a MathFunction node).
         def floor
           MathFunction.new(self, function: :floor)
         end
 
-        # Raises values from the node to the next higher integer (a
-        # MathFunction node).
+        # Rounds values up to integers (a MathFunction node).
         def ceil
           MathFunction.new(self, function: :ceil)
         end
 
-        # Rounds values from the node to the nearest integer (a MathFunction
-        # node).
+        # Rounds values to the nearest integers (a MathFunction node).
         def round
           MathFunction.new(self, function: :round)
         end
 
-        # Appends a node that calculates the natural logarithm of values
-        # passing through (a MathFunction node).
+        # The natural logarithm of the values (a MathFunction node).
         def log
           MathFunction.new(self, function: :ln)
         end
 
-        # Appends a node that calculates the base two logarithm of values
-        # passing through (a MathFunction node).
+        # The base two logarithm of the values (a MathFunction node).
         def log2
           MathFunction.new(self, function: :log2)
         end
 
-        # Appends a node that calculates the base ten logarithm of values
-        # passing through (a MathFunction node).
+        # The base ten logarithm of the values (a MathFunction node).
         def log10
           MathFunction.new(self, function: :log10)
         end
 
-        # Wraps the numeric in a MB::Sound::GraphNode::Constant so that numeric values can
-        # be listed first in signal graph arithmetic operations.
+        # Lets numbers come first in signal arithmetic (`0.5 * node`; a
+        # Constant).
         def coerce(numeric)
           [numeric.constant(sample_rate: self.sample_rate), self]
         end
