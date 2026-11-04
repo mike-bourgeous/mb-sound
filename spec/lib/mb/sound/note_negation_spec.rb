@@ -11,11 +11,19 @@ RSpec.describe('Negating Notes, Steps, and nodes (audit for Note#!)') do
 
   risky = /(?:(?<![!=\w])!!?\s*|\bnot\s+)@?(?:#{risky_names.join('|')})\b(?!\s*(?:\.|&\.|\(|\[|\?|=[^=]))/
 
+  # A line's code, roughly: string literals on the line emptied and its
+  # comment dropped, scanning left to right so a quote inside a comment or
+  # a # inside a string doesn't fool it (a reason string saying "numbers,
+  # not nodes" is prose, not a negation; fix-batch-1104).  Interpolations
+  # go with their strings; multi-line strings and heredocs stay code.
+  code_of = ->(line) {
+    line.gsub(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|#(?!\{).*$/) { |m| m.start_with?('#') ? '' : m[0] * 2 }
+  }
+
   it 'finds no bare negations of note-like or node-like variables in lib/' do
     hits = Dir[File.expand_path('../../../../lib/**/*.rb', __dir__)].flat_map { |path|
       File.readlines(path).each_with_index.filter_map { |line, idx|
-        code = line.sub(/(?<!['"])#(?![{]).*$/, '') # drop comments (roughly)
-        "#{path.sub(%r{.*/lib/}, 'lib/')}:#{idx + 1}: #{line.strip}" if code.match?(risky)
+        "#{path.sub(%r{.*/lib/}, 'lib/')}:#{idx + 1}: #{line.strip}" if code_of.(line).match?(risky)
       }
     }
 
@@ -29,6 +37,14 @@ RSpec.describe('Negating Notes, Steps, and nodes (audit for Note#!)') do
     expect('x if !note.nil?').not_to match(risky)
     expect('x if !value&.empty?').not_to match(risky)
     expect('x if a != note').not_to match(risky)
+
+    expect(code_of.('x if !note')).to match(risky)
+    expect(code_of.('x if !note # the "note" here')).to match(risky)
+    expect(code_of.(%q{puts "#{a}" if not nodes})).to match(risky)
+    expect(code_of.(%q{'events' => { :* => "data: numbers, not nodes" },})).not_to match(risky)
+    expect(code_of.(%q{x = 'not pitch' + "!note \\" !step"})).not_to match(risky)
+    expect(code_of.('# skip it if !note')).not_to match(risky)
+    expect(code_of.(%q{x = 1 # it's 'not nodes'})).not_to match(risky)
   end
 
   it 'overrides ! only on Notes and Steps' do
