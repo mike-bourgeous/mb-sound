@@ -654,33 +654,53 @@ namespace :depend do
 end
 
 # design/notes/README.md and CLAUDE.md's topic map, generated from the notes'
-# summary blocks (spec/docs_index.rb; docs-split-1)
+# summary blocks (spec/docs_index.rb; docs-split-1), and the library catalog
+# design/catalog.md, generated from the DSL's doc comments and the help
+# topics (spec/catalog.rb, which loads mb-sound; catalog-1)
 namespace :docs do
-  desc "Write design/notes/README.md and CLAUDE.md's topic map from the notes' summary blocks"
+  desc "Write design/notes/README.md, CLAUDE.md's topic map, and design/catalog.md (the library catalog)"
   task :index do
     require_relative 'spec/docs_index'
     DocsIndex.write!
     puts "docs:index: #{DocsIndex.notes.length} notes in #{DocsIndex::GROUPS.length} groups"
     warning = DocsIndex.size_warning
     puts "WARNING: #{warning}" if warning
+
+    require_relative 'spec/catalog'
+    Catalog.write!
+    puts "docs:index: design/catalog.md, #{Catalog.dsl_lines.length} DSL methods and #{Catalog.topics.length} help topics, " \
+      "#{(Catalog.text.bytesize / 1000.0).round(1)} KB of #{Catalog::BUDGET / 1000} KB"
+    problems = Catalog.problems
+    puts "WARNING: catalog:\n  #{problems.join("\n  ")}" unless problems.empty?
   end
 
-  desc "Check the generated index and map, the notes' summaries and Quick references, kept terms, and CLAUDE.md's size (warns over budget)"
+  desc "Check the generated index, map, and catalog, the notes' summaries and Quick references, kept terms, and CLAUDE.md's size (warns over budget)"
   task :check do
     require_relative 'spec/docs_index'
+    require_relative 'spec/catalog'
     problems = DocsIndex.note_problems + DocsIndex.quick_reference_problems + DocsIndex.stale_problems +
       DocsIndex.missing_terms.map { |s, t| "term in no doc (#{s}): #{t}" } +
-      DocsIndex.dangling_references.map { |n| "CLAUDE.md names design/notes/#{n}.md, which doesn't exist" }
+      DocsIndex.dangling_references.map { |n| "CLAUDE.md names design/notes/#{n}.md, which doesn't exist" } +
+      Catalog.problems + (Catalog.stale? ? ['design/catalog.md is stale: run `rake docs:index`'] : [])
     warning = DocsIndex.size_warning
     puts "WARNING: #{warning}" if warning
     abort("docs:check:\n  #{problems.join("\n  ")}") unless problems.empty?
-    puts "docs:check: OK (CLAUDE.md #{(DocsIndex.claude_text.bytesize / 1000.0).round(1)} KB of #{DocsIndex::BUDGET / 1000} KB)"
+    puts "docs:check: OK (CLAUDE.md #{(DocsIndex.claude_text.bytesize / 1000.0).round(1)} KB of #{DocsIndex::BUDGET / 1000} KB, " \
+      "design/catalog.md #{(Catalog.text.bytesize / 1000.0).round(1)} KB of #{Catalog::BUDGET / 1000} KB)"
   end
 
-  desc "CLAUDE.md's sections by size"
+  desc "CLAUDE.md's sections by size, then the files it imports"
   task :size do
     require_relative 'spec/docs_index'
+    require_relative 'spec/catalog'
     DocsIndex.sections.each { |h, b| puts format('%7d  %s', b, h) }
     puts format('%7d  total (budget %d)', DocsIndex.claude_text.bytesize, DocsIndex::BUDGET)
+    # @-imports load with CLAUDE.md but don't count toward its budget; the
+    # catalog has its own (Catalog::BUDGET), collaboration.md none
+    DocsIndex.imports.each do |path, bytes|
+      budget = path == 'design/catalog.md' ? " (budget #{Catalog::BUDGET})" : ''
+      puts format('%7d  imported: %s%s', bytes, path, budget)
+    end
+    puts format('%7d  loaded with CLAUDE.md', DocsIndex.claude_text.bytesize + DocsIndex.imports.sum(&:last))
   end
 end

@@ -158,8 +158,8 @@ module MB
           mixed(ChannelMixer::Swap.new(@outputs))
         end
 
-        # Converts left/right stereo to mid/side: mid is (L + R) / 2 and side
-        # is (L - R) / 2.  See #from_mid_side.
+        # Converts left/right stereo to mid/side: M = (L + R) / 2, S = (L - R) /
+        # 2.  See #from_mid_side.
         def mid_side
           require_stereo('mid_side')
           mixed(ChannelMixer::MidSide.new(@outputs))
@@ -172,9 +172,8 @@ module MB
           mixed(ChannelMixer::FromMidSide.new(@outputs))
         end
 
-        # Changes the stereo width by scaling the side (L - R) signal: 0 is
-        # mono, 1 is unchanged, and larger values are wider.  +amount+ may be
-        # a graph node.
+        # Changes the stereo width by scaling the side (L - R): 0 mono, 1 as is.
+        # Larger values are wider.  +amount+ may be a graph node.
         #
         # Example (bin/sound.rb):
         #     bg stereo(220.hz.saw.at(0.2), 221.hz.saw.at(0.2)).width(1.5)
@@ -237,16 +236,16 @@ module MB
           balance(position)
         end
 
-        # Balances (pans) a stereo bundle (a ChannelMixer::Balance):
-        # +position+ from -1 (left) through 0 (center) to 1 (right), and may
-        # be a graph node.  +law+ is one of
+        # Balances (pans) a stereo bundle by +position+ (a
+        # ChannelMixer::Balance).  +position+ goes from -1 (left) through 0
+        # (center) to 1 (right), and may be a graph node.  +law+ is one of
         # ChannelMixer::PanLaws::STEREO_LAWS: the default :balance keeps the
-        # favored side at full level and fades the other on an equal-power
-        # curve scaled to unity at the center (about -5.3 dB at +/-0.5);
-        # ACID's laws are :constant_power (-3 dB on both channels at the
-        # center), :balance_0db/:balance_3db/:balance_6db (straight lines
-        # from that center level), and :add_channels (the far channel moves
-        # into the near one, so a hard pan is the mono sum on one side).
+        # favored side at full level and fades the other on an equal-power curve
+        # scaled to unity at the center (about -5.3 dB at +/-0.5); ACID's laws
+        # are :constant_power (-3 dB on both channels at the center),
+        # :balance_0db/:balance_3db/:balance_6db (straight lines from that
+        # center level), and :add_channels (the far channel moves into the near
+        # one, so a hard pan is the mono sum on one side).
         #
         # Examples (bin/sound.rb):
         #     bg stereo(220.hz.saw.at(0.2), 330.hz.saw.at(0.2)).balance(-0.3)

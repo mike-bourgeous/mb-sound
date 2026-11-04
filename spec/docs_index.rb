@@ -231,6 +231,17 @@ module DocsIndex
     }.sort_by { |_, b| -b }
   end
 
+  # [[path, bytes], ...] of the files CLAUDE.md imports with @path (outside
+  # code spans and blocks); they load into every session with it but don't
+  # count toward BUDGET (`rake docs:size` lists them)
+  def imports
+    t = claude_text.gsub(/^```.*?^```/m, '').gsub(/`[^`\n]*`/, '')
+    t.scan(%r{(?<![\w@./])@([\w./-]+\.md)\b}).flatten.uniq.filter_map { |p|
+      f = File.join(ROOT, p)
+      [p, File.size(f)] if File.exist?(f)
+    }
+  end
+
   # nil within BUDGET, else a message naming the biggest sections
   def size_warning(budget: BUDGET)
     size = claude_text.bytesize

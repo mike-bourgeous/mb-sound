@@ -11,10 +11,11 @@ module MB
         # Sides #haas can delay.
         HAAS_SIDES = %i[left right].freeze
 
-        # A ping-pong delay (a GraphNode::DelayNetwork of two lines feeding
-        # each other): echoes alternate left, right, left, ..., +time+
-        # apart, each +feedback+ times the one before.  Returns a stereo
-        # bundle of the dry signal plus the echoes.
+        # A ping-pong delay: echoes alternate left and right
+        # (GraphNode::DelayNetwork).  Two lines feed each other: echoes
+        # alternate left, right, left, ..., +time+ apart, each +feedback+ times
+        # the one before.  Returns a stereo bundle of the dry signal plus the
+        # echoes.
         #
         # +time+ is any delay time (seconds, `250.ms`, `1.n8.dotted` following
         # the tempo, a node); +:feedback+ a number or node (-1..1 decays;
@@ -73,10 +74,10 @@ module MB
         end
         alias pingpong ping_pong
 
-        # A Haas (precedence effect) widener: one side delayed by a few
-        # milliseconds, so a mono sound spreads out while it still seems to
-        # come from the undelayed side.  Returns a stereo bundle (a stereo
-        # input keeps its other side as it is).
+        # A Haas (precedence effect) widener: one side delayed a few
+        # milliseconds.  A mono sound spreads out while it still seems to come
+        # from the undelayed side.  Returns a stereo bundle (a stereo input
+        # keeps its other side as it is).
         #
         # +time+ is the delay (default 15 ms; about 1-35 ms fuses into one
         # sound, longer ones are heard as an echo), +:side+ :right (default)
@@ -105,13 +106,13 @@ module MB
           Channels.new([l, r])
         end
 
-        # A tape echo (GraphNode::TapeEcho): the repeats run through a tape
-        # sim on every pass (wow and flutter, a highpass and a lowpass,
-        # saturation), one sample at a time in a feedback loop.  +preset+ is
+        # A tape echo (GraphNode::TapeEcho): repeats run through a tape sim each
+        # pass.  Wow and flutter, a highpass and a lowpass, and saturation on
+        # every pass, one sample at a time in a feedback loop.  +preset+ is
         # :reel (default; warm 3/16 echoes), :slapback (one 110 ms slap),
         # :ping_pong (repeats bouncing left and right; stereo out), or :dub
-        # (dark, saturated dotted quarters ringing on), or a :delay preset
-        # from a library shelf (`L.fx.delay`); options override it:
+        # (dark, saturated dotted quarters ringing on), or a :delay preset from
+        # a library shelf (`L.fx.delay`); options override it:
         #
         # +:time+ - echo time (seconds, `250.ms`, `1.n8.dotted`, a node)
         # +:feedback+ - repeat gain (above 1 the saturation holds it up)

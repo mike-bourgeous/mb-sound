@@ -9,6 +9,7 @@ Console help (`lib/mb/sound/help.rb` + `help/`, loaded by bin/sound.rb or on fir
 - Console: `help`, `help :knobs`, `help :turn`, `help /reson/`, `help node`, `now`, `demo`, `lesson :set`; `help.level` sets the listening level.
 - A new command needs a topic entry in `lib/mb/sound/help/content/topics.rb` or a `Help::Coverage` exemption; pages are built with `Help::Doc`, shown through `Help.show`.
 - Guard spec `spec/lib/mb/sound/help_spec.rb` (coverage, examples playing near the level tone).
+- Each topic is one line of the library catalog `design/catalog.md` (title, then its commands and non-GraphNode DSL names; `rake docs:index`, `spec/catalog_spec.rb`; graph_nodes.md); a topic change means rerunning `rake docs:index`.
 
 ## Current state (the overview CLAUDE.md carried until 2026-10-30)
 

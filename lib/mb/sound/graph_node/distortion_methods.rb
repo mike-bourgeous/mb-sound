@@ -10,15 +10,14 @@ module MB
       # but are exact, for control signals (delay times, envelopes) and
       # deliberate grit.
       module DistortionMethods
-        # Hard-clips the output of this node to the given min and max, one of
-        # which may be nil to disable clipping in that direction.
-        # Antialiased; see #aclip for exact clipping of control signals.
+        # Hard-clips this node between +min+ and +max+ (nil for no limit),
+        # antialiased.  See #aclip for exact clipping of control signals.
         def clip(min, max)
           Shaper.new(self, mode: :clip, p1: min, p2: max).named("clip #{min}..#{max}")
         end
 
-        # Hard-clips like #clip without antialiasing: exact (no added delay),
-        # for control signals like delay times and envelopes.
+        # Hard-clips like #clip without antialiasing: exact, for control
+        # signals.  No added delay, for delay times and envelopes.
         def aclip(min, max)
           Shaper.new(self, mode: :clip, p1: min, p2: max, antialias: false).named("aclip #{min}..#{max}")
         end
@@ -97,29 +96,28 @@ module MB
           MB::Sound::GraphNode::Quantize.new(upstream: self, increment: increment)
         end
 
-        # Samples this node at each rising edge of +trigger+ and holds the
-        # value until the next one (see GraphNode::SampleHold): quantizing
-        # in time, as #quantize does in level.  Without a trigger, this node
-        # is the trigger and the held values are random (+range+, default
-        # -1..1; +seed+), e.g. `8.hz.lfo.square.sample_hold` is a stepped
-        # random LFO at 8 steps per second.  Alias #sah.
+        # Samples and holds this node at each rising edge of +trigger+
+        # (SampleHold).  Quantizing in time, as #quantize does in level.
+        # Without a trigger, this node is the trigger and the held values are
+        # random (+range+, default -1..1; +seed+), e.g.
+        # `8.hz.lfo.square.sample_hold` is a stepped random LFO at 8 steps per
+        # second.  Alias #sah.
         def sample_hold(trigger = nil, range: -1.0..1.0, seed: nil)
           return SampleHold.new(nil, self, range: range, seed: seed, sample_rate: sample_rate) if trigger.nil?
           SampleHold.new(self, trigger, sample_rate: sample_rate)
         end
         alias sah sample_hold
 
-        # Reduces this node's sample rate to +rate+ Hz with a zero-order hold
-        # and no filtering, aliasing on purpose (GraphNode::Decimator): the
+        # Sample-rate reduction to +rate+ Hz, aliasing on purpose
+        # (GraphNode::Decimator).  A zero-order hold with no filtering: the
         # lo-fi sampler crunch, and with a resonant filter before it, moving
-        # vocal-like peaks.  +rate+ is a number, a Pitch, or a node of Hz
-        # that may move every sample (e.g. `v.freq * 6` tracks the note, so
-        # every note folds the same way); +jitter+ (0..0.95) loosens the hold
-        # clock at random (+seed+).  +mix+ is the crushed share (1, the
-        # default, all crushed; a number or a node; to be consolidated with
-        # a universal wet/dry mix for nodes and subgraphs when one exists).
-        # Bit crushing is #aquantize.  Aliases
-        # #crush_rate, #srr (sample-rate reduction).
+        # vocal-like peaks.  +rate+ is a number, a Pitch, or a node of Hz that
+        # may move every sample (e.g. `v.freq * 6` tracks the note, so every
+        # note folds the same way); +jitter+ (0..0.95) loosens the hold clock at
+        # random (+seed+).  +mix+ is the crushed share (1, the default, all
+        # crushed; a number or a node; to be consolidated with a universal
+        # wet/dry mix for nodes and subgraphs when one exists).  Bit crushing is
+        # #aquantize.  Aliases #crush_rate, #srr (sample-rate reduction).
         #
         #     play 110.hz.saw.lp4(1500, resonance: 0.8).decimate(2900)
         #     play 220.hz.square.decimate(0.2.hz.lfo.at(500..6000), jitter: 0.2)

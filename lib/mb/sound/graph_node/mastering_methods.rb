@@ -5,11 +5,11 @@ module MB
       # (mastering-1; see Mastering).  Included in GraphNode and Channels;
       # bundles go through whole (one chain for every channel).
       module MasteringMethods
-        # Runs this signal (usually the whole mix, a stereo bundle) through
-        # mastering preset +preset+ (:club, :streaming, :quiet, :vinyl, or a
-        # Mastering::Preset) with +options+ (see Mastering.from_preset: +lufs:+,
-        # +platform:+, +ceiling:+, +drive:+, +ride:+, +mono:+, +glue:+,
-        # +clip:+, +de_ess:+).  Also available as #mastering.
+        # Masters this signal with +preset+ (:club, :streaming, :quiet, :vinyl).
+        # It is usually the whole mix (a stereo bundle); +preset+ may also be a
+        # Mastering::Preset, and +options+ go to Mastering.from_preset (+lufs:+,
+        # +platform:+, +ceiling:+, +drive:+, +ride:+, +mono:+, +glue:+, +clip:+,
+        # +de_ess:+).  Also available as #mastering.
         #
         # The chain's trim (its gain stage) is the preset's +drive+, or the
         # gain a render measured to reach the target (see
@@ -22,10 +22,10 @@ module MB
         end
         alias mastering master
 
-        # Rides this signal's level toward +target+ (LUFS, or a
-        # Loudness::TARGETS name) with a slow gain from its short-term
-        # loudness (see Rider: +start+, +range+, +down+, +up+, +gate+).
-        # Put a limiter after it.
+        # Rides this signal's level toward +target+ LUFS with a slow gain
+        # (Rider).  +target+ is LUFS or a Loudness::TARGETS name; the gain
+        # follows the short-term loudness (see Rider: +start+, +range+, +down+,
+        # +up+, +gate+).  Put a limiter after it.
         #
         #     master { |mix| mix.ride(-14).limit(ceiling: -1.db) }
         def ride(target, start: 0.db, range: 9.db, down: 3.0, up: 10.0, gate: 10.0)
