@@ -1057,6 +1057,11 @@ module MB
           raise error(node, "unknown constant #{text}#{hint} (documents may name the library's node, filter, and value classes, notes like A3, and Float::INFINITY)")
         end
 
+        # True if +node+ names MB::Sound itself (`MB::Sound`, `::MB::Sound`).
+        def sound_module?(node)
+          (node.is_a?(Prism::ConstantPathNode) || node.is_a?(Prism::ConstantReadNode)) && node.slice.delete_prefix('::') == 'MB::Sound'
+        end
+
         def bound?(name)
           @inputs&.key?(name) || @knobs&.key?(name)
         end
@@ -1105,6 +1110,14 @@ module MB
             else
               receiver = MB::Sound
             end
+          elsif sound_module?(node.receiver)
+            # MB::Sound.noise is the top-level noise (console code written
+            # out in full, as fits print kit voices; fit-patch-2)
+            raise error(node, "the header holds values only (#{name} isn't one)") if @header
+            unless Registry.top_level.include?(name) && MB::Sound.respond_to?(name)
+              raise error(node, "#{name} isn't a graph method of MB::Sound#{GraphIO.suggest(name, Registry.top_level.to_a)}")
+            end
+            receiver = MB::Sound
           else
             receiver = eval_node(node.receiver, scope)
             if @header && !receiver.is_a?(Numeric) && !(receiver.is_a?(Range) && name == :at)

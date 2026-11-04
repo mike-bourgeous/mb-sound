@@ -17,7 +17,8 @@ module MB
       #   (sampler-style, pitched by +tune+ semitones);
       # - #fm: a two-operator FM tone (bells, zaps, FM toms);
       # - #env (decay envelopes), #sweep (pitch envelopes), #velocity
-      #   (the hit's velocity, held), #bursts (repeated hits: claps), #mix.
+      #   (the hit's velocity, held), #bursts (repeated hits: claps),
+      #   #repeats (the hit again at given delays), #mix.
       #
       # Layers are graph nodes, so they mix with + and scale with *, and
       # every other DSL method works on them too:
@@ -35,7 +36,7 @@ module MB
       class Hit
         # Layer and helper names, which knobs may not use.
         METHODS = [
-          :trigger, :t, :velocity, :env, :sweep, :body, :ping, :noise, :click, :metal, :sample, :fm, :bursts, :mix,
+          :trigger, :t, :velocity, :env, :sweep, :body, :ping, :noise, :click, :metal, :sample, :fm, :bursts, :repeats, :mix,
           :knobs, :name, :machine, :hz,
         ].freeze
 
@@ -80,9 +81,12 @@ module MB
 
         # A decay envelope on every hit, peaking at the velocity (unless
         # +velocity: false+): rises over +attack+ (0.5 ms) and falls 60 dB
-        # (+curve+) over +decay+ (seconds, a Length, or a node).
-        def env(decay, attack: 0.0005, curve: 60, velocity: true)
-          Drums.decay_env(@trigger, decay, attack: attack, curve: curve, velocity: velocity)
+        # (+curve+) over +decay+ (seconds, a Length, or a node).  +trigger+
+        # (default the voice's own, #t) plays it from another trigger
+        # signal instead, such as #bursts or #repeats (fit-patch-2: a
+        # clap's burst and tail envelopes, written with params).
+        def env(decay, attack: 0.0005, curve: 60, velocity: true, trigger: @trigger)
+          Drums.decay_env(trigger, decay, attack: attack, curve: curve, velocity: velocity)
         end
 
         # A pitch envelope (a multiplier for a frequency): 1 + +amount+ at
@@ -181,9 +185,23 @@ module MB
         # The trigger repeated +count+ times +spacing+ apart (seconds or a
         # Length), each repeat +falloff+ times the last (Drums::Repeats): a
         # clap's bursts.  `bursts(4, 9.ms)` hits at 0, 9, 18, and 27 ms.
+        # +spacing+ and +falloff+ may be params or knobs, read while the
+        # graph builds (a track's knob rebuilds the voice when turned);
+        # +count+ is a number (the copies, counted against a document's
+        # limits).
         def bursts(count, spacing, falloff: 1.0)
           s = MB::Sound::Length.seconds(spacing)
-          Repeats.new(@trigger, Array.new(Integer(count)) { |i| [i * s, falloff**i] })
+          f = GraphNode.build_setting(falloff)
+          Repeats.new(@trigger, Array.new(Integer(count)) { |i| [i * s, f**i] })
+        end
+
+        # The trigger (or +trigger+) played again at each of +taps+'
+        # delays, scaled by its gain: [[delay, gain], ...] (seconds or
+        # Lengths; numbers, params, or knobs; 0 for the hit itself), as
+        # Drums::Repeats: `h.env(0.5, trigger: h.repeats([[22.ms, 1.0]]))`
+        # is a tail starting 22 ms after the hit.
+        def repeats(taps, trigger: @trigger)
+          Repeats.new(trigger, taps)
         end
 
         # Sums nodes (numbers of 0 are skipped) into one node that lasts as
