@@ -47,9 +47,11 @@ module MB
         # now (it started after the clip's launch or swap, so an
         # uninterrupted run would have played it), else nil: one-shot
         # sampler voices start the note's sample that far in (see
-        # Notes#resume).
-        Chase = Data.define(:generation, :time, :event, :starts, :previous, :elapsed, :resume) do
-          def initialize(generation:, time:, event:, starts: false, previous: nil, elapsed: nil, resume: nil)
+        # Notes#resume).  ClipSource also gives the chased event's +index+
+        # among its cycle's events (Sequence::Clip#event_index), so a glide
+        # with a curve per step picks the chased step's (tween-curves-1).
+        Chase = Data.define(:generation, :time, :event, :starts, :previous, :elapsed, :resume, :index) do
+          def initialize(generation:, time:, event:, starts: false, previous: nil, elapsed: nil, resume: nil, index: nil)
             super
           end
         end
