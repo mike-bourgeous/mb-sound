@@ -69,13 +69,16 @@ module MB
         # [input, output, shape] rows, or nil) followed by +more+ (points
         # given as keywords), as rows of dB numbers (gain_db: `-60.db`
         # exactly, bare numbers as linear gains) for Dynamics::Transfer.points.
-        # +what+ names the method in errors.
+        # A pair of outputs (`-34.db => [-38.db, -12.db]`) is a vertical step
+        # (two points at one input, for curves that take steps; Hash keys
+        # can't repeat).  +what+ names the method in errors.
         def self.point_rows(points, more, what)
           rows = points.is_a?(Hash) ? points.to_a : points.to_a
           rows += more.to_a
-          rows.map { |p|
-            next p unless p.is_a?(Array) && (2..3).cover?(p.length)
-            [gain_db(p[0], "#{what} point input"), gain_db(p[1], "#{what} point output"), *p[2..]]
+          rows.flat_map { |p|
+            next [p] unless p.is_a?(Array) && (2..3).cover?(p.length)
+            outs = p[1].is_a?(Array) && p[1].length == 2 ? p[1] : [p[1]]
+            outs.map { |o| [gain_db(p[0], "#{what} point input"), gain_db(o, "#{what} point output"), *p[2..]] }
           }
         end
 

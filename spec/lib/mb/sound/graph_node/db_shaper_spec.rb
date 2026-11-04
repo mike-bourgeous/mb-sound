@@ -6,23 +6,24 @@ RSpec.describe(MB::Sound::GraphNode::DbShaper) do
   # The formula, written out from the points (plain dB numbers, [in, out]
   # pairs): y = sign(x) 10^(T(20 log10 |x|) / 20), T straight lines between
   # the points, continued past both ends (below: :unity uses slope 1 under
-  # the first point, :silence gives 0 there), then mixed with x.
+  # the first point, :silence gives 0 there), then mixed with x.  Two
+  # points at one input are a step to the second one's output.
   def reference(x, points, negative = nil, below: :line, mix: 1.0)
     return 0.0 if x == 0
 
-    pts = (x < 0 && negative ? negative : points).map { |p| p.map(&:to_f) }.sort_by(&:first)
+    pts = (x < 0 && negative ? negative : points).map { |p| p.map(&:to_f) }.each_with_index.sort_by { |p, i| [p[0], i] }.map(&:first)
+    lines = pts.each_cons(2).reject { |a, b| a[0] == b[0] }
     l = 20 * Math.log10(x.abs)
     db =
       if l < pts[0][0]
+        a, b = lines.first
         case below
         when :silence then nil
-        when :unity then pts[0][1] + (l - pts[0][0])
-        else pts[0][1] + (pts[1][1] - pts[0][1]) / (pts[1][0] - pts[0][0]) * (l - pts[0][0])
+        when :unity then a[1] + (l - a[0])
+        else a[1] + (b[1] - a[1]) / (b[0] - a[0]) * (l - a[0])
         end
       else
-        k = pts.rindex { |p| p[0] <= l }
-        k = pts.length - 2 if k >= pts.length - 1
-        a, b = pts[k], pts[k + 1]
+        a, b = lines.reverse.find { |p, _| p[0] <= l }
         a[1] + (b[1] - a[1]) / (b[0] - a[0]) * (l - a[0])
       end
     y = db.nil? ? 0.0 : (x < 0 ? -1 : 1) * 10**(db / 20.0)
@@ -37,13 +38,28 @@ RSpec.describe(MB::Sound::GraphNode::DbShaper) do
 
   def input(data) = MB::Sound::ArrayInput.new(data: [data])
 
-  def db_points(pts) = pts.to_h { |i, o| [i.db, o.db] }
+  # Non-harmonic power below 20 kHz relative to harmonic power (dB), with
+  # coherent sampling at bin +k+ (as in shaper_spec).
+  def alias_db(node, k, n: 16384)
+    node.sample(4800)
+    data = Numo::DFloat.cast(node.sample(n))
+    pow = MB::Sound.real_fft(data).abs**2
+    harm = Numo::Bit.zeros(pow.length)
+    (k...pow.length).step(k) { |b| harm[b] = 1 }
+    other = ~harm
+    other[0] = 0
+    other[(20000.0 / 48000 * n).ceil..] = 0
+    10 * Math.log10(pow[other.where].sum / pow[harm.where].sum)
+  end
+
+  def db_points(pts) = pts.map { |i, o| [i.db, o.db] }
 
   DB_SHAPER_CURVES = {
     'a soft knee' => [[[-84, -84], [-24, -24], [-12, -14], [0, -9]], nil],
     'a fold-back' => [[[-84, -84], [-12, -6], [0, -24]], nil],
     'a gate-like low end' => [[[-84, -120], [-40, -100], [-30, -30], [0, 0]], nil],
     'separate halves' => [[[-84, -84], [-20, -20], [0, -6]], [[-84, -84], [-30, -30], [-12, -14], [0, -14]]],
+    'steps up and down' => [[[-84, -84], [-34, -40], [-34, -12], [-10, -8], [-10, -20], [0, -14]], [[-84, -84], [-20, -30], [-20, -10], [0, -6]]],
   }.freeze
 
   describe 'the exact version (#ashape_db)' do
@@ -160,19 +176,6 @@ RSpec.describe(MB::Sound::GraphNode::DbShaper) do
       end
     end
 
-    # Non-harmonic power below 20 kHz relative to harmonic power (dB), with
-    # coherent sampling at bin +k+ (as in shaper_spec).
-    def alias_db(node, k, n: 16384)
-      node.sample(4800)
-      data = Numo::DFloat.cast(node.sample(n))
-      pow = MB::Sound.real_fft(data).abs**2
-      harm = Numo::Bit.zeros(pow.length)
-      (k...pow.length).step(k) { |b| harm[b] = 1 }
-      other = ~harm
-      other[0] = 0
-      other[(20000.0 / 48000 * n).ceil..] = 0
-      10 * Math.log10(pow[other.where].sum / pow[harm.where].sum)
-    end
 
     # Measured 2026-11-04 (amplitude 0.9): 3 kHz 9.4-24 dB less aliasing
     # (softclip 10.9), 8 kHz 18-32 dB (softclip 20.4)
@@ -188,6 +191,68 @@ RSpec.describe(MB::Sound::GraphNode::DbShaper) do
   it 'gives the same output at any buffer size' do
     expect_invariant(-> { (110.hz.saw.at(0.5) + 0.3.hz.lfo.at(0.4)).shape_db(:asymmetric, mix: 0.8) }, seconds: 0.5)
     expect_invariant(-> { 110.hz.saw.ashape_db(:fold_back) }, seconds: 0.5)
+  end
+
+  describe 'vertical steps' do
+    let(:step) { [[-84.db, -84.db], [-34.db, -40.db], [-34.db, -12.db], [0.db, -6.db]] }
+
+    it 'jumps at the step, taking the second point\'s output on it and above' do
+      t = DBS.transfer(step, {}, :linear)
+      expect(t.call(-34.0)).to eq(-12.0)
+      expect(t.call(-34.0 - 1e-9)).to be_within(1e-6).of(-40.0)
+      expect(t.call(-37.0)).to be_within(1e-9).of(-84 + 44 * 47 / 50.0)
+    end
+
+    it 'takes a step as an output pair in a Hash' do
+      a = input(levels).ashape_db(-84.db => -84.db, -34.db => [-40.db, -12.db], 0.db => -6.db).sample(levels.length)
+      b = input(levels).ashape_db(step).sample(levels.length)
+      expect(a).to eq(b)
+      expect(110.hz.saw.shape_db(-84.db => -84.db, -34.db => [-40.db, -12.db], 0.db => -6.db).to_ruby).to eq('110.hz.saw.shape_db(-84.db => -84.db, -34.db => [-40.db, -12.db], 0.db => -6.db)')
+    end
+
+    it 'integrates across steps in closed form (the antiderivative bends, never jumps)' do
+      node = input(levels).shape_db(db_points(DB_SHAPER_CURVES['steps up and down'][0]), negative: db_points(DB_SHAPER_CURVES['steps up and down'][1]))
+      c = node.instance_variable_get(:@rows)
+      [[0.005, 0.05], [0.05, 0.4], [-0.3, -0.05], [-0.5, 0.5]].each do |lo, hi|
+        n = 200_000
+        h = (hi - lo) / n
+        numeric = (0...n).sum { |k| DBS.form_f(c, lo + (k + 0.5) * h) } * h
+        expect(DBS.form_integral(c, hi) - DBS.form_integral(c, lo)).to be_within(2e-6 * (hi - lo).abs).of(numeric), "#{lo}..#{hi}"
+      end
+    end
+
+    it 'antialiases across a step: the exact curve at the midpoints away from it, between both sides on it' do
+      t = Numo::DFloat.new(4800).seq
+      x = Numo::SFloat.cast(Numo::NMath.sin(t * 2 * Math::PI * 50 / 48000) * 0.9)
+      out = input(x).shape_db(step).sample(4800)
+      exact = input(x).ashape_db(step)
+      mid = exact.plain((x[1..] + x[0...-1]) * 0.5)
+      ends_a = exact.plain(x[0...-1])
+      ends_b = exact.plain(x[1..])
+      edge = 10**(-34 / 20.0)
+      (2...4799).each do |i|
+        a, b = x[i - 1].abs, x[i].abs
+        if (a - edge) * (b - edge) <= 0 && x[i - 1] * x[i] > 0
+          lo, hi = [ends_a[i - 1], ends_b[i - 1]].minmax
+          expect(out[i]).to be_between(lo - 1e-4, hi + 1e-4), "sample #{i} straddles the step"
+        elsif [a, b].min > edge * 1.05 || [a, b].max < edge / 1.05
+          expect(out[i]).to be_within(5e-4).of(mid[i - 1]), "sample #{i}"
+        end
+      end
+    end
+
+    it 'reduces aliasing of a step by at least 8 dB at 3 kHz' do
+      k = 1025
+      f = k * 48000.0 / 16384
+      expect(alias_db(f.hz.sine.at(0.9).shape_db(step), k)).to be < alias_db(f.hz.sine.at(0.9).ashape_db(step), k) - 8
+    end
+
+    it 'refuses steps at the ends, three points at one input, and steps in compand' do
+      expect { 1.constant.shape_db([[-34.db, -40.db], [-34.db, -12.db], [0.db, 0.db]]) }.to raise_error(ArgumentError, /both sides/)
+      expect { 1.constant.shape_db([[-60.db, -60.db], [0.db, -40.db], [0.db, -12.db]]) }.to raise_error(ArgumentError, /both sides/)
+      expect { 1.constant.shape_db([[-60.db, -60.db], [-34.db, -40.db], [-34.db, -30.db], [-34.db, -12.db], [0.db, 0.db]]) }.to raise_error(ArgumentError, /three/)
+      expect { 1.constant.compand(-60.db => -60.db, -34.db => [-40.db, -12.db], 0.db => 0.db) }.to raise_error(ArgumentError, /must differ/)
+    end
   end
 
   describe 'settings' do

@@ -84,7 +84,10 @@ module MB
         # (+interpolation+ :linear, the default) or monotone cubics
         # (:cubic).  Unlike #compand the curve works on each sample, not a
         # smoothed level: it distorts.  Outputs may fall as inputs rise
-        # (fold-back).  A Symbol is a preset (`shape_db(:fuzz)`; DbShaper
+        # (fold-back).  Two outputs at one input are a vertical step
+        # (`-34.db => [-40.db, -12.db]`, or two rows with that input): the
+        # curve jumps there, taking the second output at the step and
+        # above.  A Symbol is a preset (`shape_db(:fuzz)`; DbShaper
         # presets :soft_knee (the default), :fuzz, :fold_back, :gate,
         # :asymmetric; `L.fx.shape_db`), with the other options over it.
         #

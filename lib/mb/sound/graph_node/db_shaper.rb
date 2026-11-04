@@ -9,7 +9,10 @@ module MB
       # where T is a Dynamics::Transfer built from compander-style points
       # (GraphNode#shape_db; Dynamics::Transfer.points with outputs free to
       # fall, so curves may fold back), straight lines between the points by
-      # default (:linear) or monotone cubics (:cubic).  Negative samples go
+      # default (:linear) or monotone cubics (:cubic), with vertical steps
+      # where two points share an input (the second point's output at the
+      # step and above; the antiderivative only bends there, so the ADAA
+      # integral stays exact across it).  Negative samples go
       # through +negative+ (another Transfer), or through the positive curve
       # mirrored (nil, odd symmetry).  Zero stays zero.
       #
@@ -237,7 +240,7 @@ module MB
         # points +more+ (DynamicsMethods.point_rows), outputs free to fall.
         def self.transfer(points, more, interpolation)
           rows = DynamicsMethods.point_rows(points, more, 'shape_db')
-          t = Dynamics::Transfer.points(rows, interpolation: interpolation, monotonic: false)
+          t = Dynamics::Transfer.points(rows, interpolation: interpolation, monotonic: false, steps: true)
           Dynamics::Transfer.new(t.segments, description: t.description.sub(/\Acompand /, ''))
         end
 

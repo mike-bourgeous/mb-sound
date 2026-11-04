@@ -149,7 +149,15 @@ module MB
           # GraphNode::DbShaper fold back), and Curve shapes must be
           # monotonic (each segment then moves one way; cubic slopes are
           # zero at turning points, so cubics never overshoot either way).
-          def self.points(points, interpolation: :linear, description: nil, monotonic: true)
+          #
+          # With +steps+ (GraphNode::DbShaper; compressors keep distinct
+          # inputs) two points may share an input level: a vertical step,
+          # from the first one's output (the curve's value up to it) to the
+          # second one's (its value at the step and above), in the order
+          # given.  Steps sit between other points (not at the first or
+          # last input), at most two points per input level; cubics are
+          # fitted on each side of a step separately.
+          def self.points(points, interpolation: :linear, description: nil, monotonic: true, steps: false)
             raise ArgumentError, "Interpolation must be :linear or :cubic (got #{interpolation.inspect})" unless [:linear, :cubic].include?(interpolation)
 
             rows = points.is_a?(Hash) ? points.to_a : points.to_a
@@ -161,21 +169,36 @@ module MB
               [DynamicsMethods.db_param(r[0]).to_f, DynamicsMethods.db_param(r[1]).to_f, r[2] || interpolation]
             }
             raise ArgumentError, 'A transfer curve needs at least two points' if rows.length < 2
-            rows.sort_by!(&:first)
+            # (stable: the points of a step keep their order)
+            rows = rows.each_with_index.sort_by { |r, i| [r[0], i] }.map(&:first)
             rows.each_cons(2) do |a, b|
-              raise ArgumentError, "Transfer point input levels must differ (#{a[0]} given twice)" if a[0] == b[0]
+              if a[0] == b[0]
+                raise ArgumentError, "Transfer point input levels must differ (#{a[0]} given twice)" unless steps
+                if a.equal?(rows.first) || b.equal?(rows.last)
+                  raise ArgumentError, "A step (#{a[0]} given twice) needs points on both sides of it"
+                end
+              end
               raise ArgumentError, "Transfer curve output levels must not decrease (#{a[0]} => #{a[1]}, #{b[0]} => #{b[1]})" if monotonic && b[1] < a[1]
+            end
+            rows.each_cons(3) do |a, _, c|
+              raise ArgumentError, "A step has two points (#{a[0]} given three times or more)" if a[0] == c[0]
             end
 
             xs = rows.map(&:first)
             ys = rows.map { |r| r[1] }
-            slopes = pchip_slopes(xs, ys)
+            # (monotone slopes on each side of every step)
+            slopes = []
+            xs.each_index.slice_when { |i, j| xs[i] == xs[j] }.each do |run|
+              slopes.concat(run.length < 2 ? [0.0] * run.length : pchip_slopes(xs.values_at(*run), ys.values_at(*run)))
+            end
 
             segments = []
             rows.each_cons(2).with_index do |(a, b), idx|
               x0, y0, shape = a
               x1, y1 = b
               h = x1 - x0
+              next if h == 0 # (a step: the next segment starts at its second point)
+
               case shape
               when :linear
                 segments << [x0, y0, (y1 - y0) / h, 0, 0]
