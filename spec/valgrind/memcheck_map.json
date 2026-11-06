@@ -200,6 +200,7 @@
     },
     "spec/ext/mb/sound/fast_convolve_spec.rb": {
       "fast_convolve": [
+        "FastConvolve::Engine#boundary_levels",
         "FastConvolve::Engine#fft_input",
         "FastConvolve::Engine#finish",
         "FastConvolve::Engine#initialize",
@@ -209,7 +210,10 @@
         "FastConvolve::Engine#reset",
         "FastConvolve::Engine#room",
         "FastConvolve::Engine#spectrum",
-        "FastConvolve::Engine#swap_state"
+        "FastConvolve::Engine#sub_size",
+        "FastConvolve::Engine#swap_state",
+        "FastConvolve::Engine#task",
+        "FastConvolve::Engine#task_result"
       ]
     },
     "spec/ext/mb/sound/fast_delay_spec.rb": {
@@ -735,8 +739,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -779,6 +781,7 @@
         "FastClip.shape"
       ],
       "fast_convolve": [
+        "FastConvolve::Engine#boundary_levels",
         "FastConvolve::Engine#fft_input",
         "FastConvolve::Engine#finish",
         "FastConvolve::Engine#initialize",
@@ -787,7 +790,10 @@
         "FastConvolve::Engine#room",
         "FastConvolve::Engine#shape",
         "FastConvolve::Engine#spectrum",
-        "FastConvolve::Engine#swap_state"
+        "FastConvolve::Engine#sub_size",
+        "FastConvolve::Engine#swap_state",
+        "FastConvolve::Engine#task",
+        "FastConvolve::Engine#task_result"
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
@@ -1112,12 +1118,14 @@
         "FastControl.smooth"
       ],
       "fast_convolve": [
+        "FastConvolve::Engine#boundary_levels",
         "FastConvolve::Engine#fft_input",
         "FastConvolve::Engine#finish",
         "FastConvolve::Engine#initialize",
         "FastConvolve::Engine#process",
         "FastConvolve::Engine#room",
-        "FastConvolve::Engine#spectrum"
+        "FastConvolve::Engine#spectrum",
+        "FastConvolve::Engine#sub_size"
       ],
       "fast_delay": [
         "FastDelay.network",
@@ -1874,8 +1882,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1999,8 +2005,6 @@
         "FastSynth.sync_pulse_edges"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
