@@ -23,14 +23,22 @@ module MB
       # in 4/4, 2 for a 2/4 bar; a Rational for bars like 7/8 on a
       # Transport grid), and +end_seconds+ (the next bar's downbeat, or one
       # bar length on for the last bar).
-      Bar = Data.define(:number, :seconds, :beats, :end_seconds) do
+      #
+      # +compound+ is true for the bars of a song read as 6/8 (see
+      # Structure::Compound): their meter is counted in eighths ("6/8",
+      # not "3/4").
+      Bar = Data.define(:number, :seconds, :beats, :end_seconds, :compound) do
+        def initialize(number:, seconds:, beats:, end_seconds:, compound: false) = super
+
         # The bar's length in whole notes (1 for 4/4, 1/2r for 2/4).
         def length
           Rational(beats) / 4
         end
 
-        # The bar's time signature, e.g. "4/4" or "7/8".
+        # The bar's time signature, e.g. "4/4" or "7/8" ("6/8" for a
+        # compound bar of 3 quarter notes).
         def meter
+          return "#{(length * 8).to_i}/8" if compound && (length * 8).denominator == 1
           Sequence::Transport.meter_label(length)
         end
 
@@ -81,7 +89,13 @@ module MB
         # The Frames the analysis worked on (for plots and later phases).
         attr_reader :frames
 
-        def initialize(tempo:, tempo_estimate:, beats:, bars:, meters:, tracker:, duration:, sample_rate:, timings:, frames:)
+        # A Structure::Compound when the onsets read as compound meter
+        # (6/8): regridded as 6/8 (Compound#regridded?, the tempo then in
+        # quarter notes, 3 to a bar), or a note naming the 6/8 reading of
+        # a grid left as it was; nil for simple meter.
+        attr_reader :compound
+
+        def initialize(tempo:, tempo_estimate:, beats:, bars:, meters:, tracker:, duration:, sample_rate:, timings:, frames:, compound: nil)
           @tempo = tempo
           @tempo_estimate = tempo_estimate
           @beats = beats.freeze
@@ -92,6 +106,7 @@ module MB
           @sample_rate = sample_rate
           @timings = timings.freeze
           @frames = frames
+          @compound = compound
           @section_analysis = nil
         end
 
@@ -142,13 +157,25 @@ module MB
         end
 
         # Console commands that set the analyzed meter changes on a Session
-        # (see FormMethods#meter), e.g. "meter 2, 4, at: bar(33)".
+        # (see FormMethods#meter), e.g. "meter 2, 4, at: bar(33)", after
+        # the starting meter when it isn't 4/4 ("meter 6, 8" for a song
+        # read as compound meter).
         def meters_ruby
-          @meters.drop(1).map { |m|
-            beats = m.bar_length * 4
-            beats.denominator == 1 ? "meter #{beats.to_i}, 4, at: bar(#{m.bar})" : "meter #{m.bar_length.numerator}, #{m.bar_length.denominator}, at: bar(#{m.bar})"
-          }.join("\n")
+          first = @meters.first
+          lines = []
+          lines << meter_line(first.bar_length) if first && first.bar_length != 1
+          lines.concat(@meters.drop(1).map { |m| "#{meter_line(m.bar_length)}, at: bar(#{m.bar})" })
+          lines.join("\n")
         end
+
+        # "meter 2, 4" for a bar of +bar_length+ whole notes (in eighths
+        # for compound meter: "meter 6, 8").
+        def meter_line(bar_length)
+          return "meter #{(bar_length * 8).to_i}, 8" if @compound&.regridded? && (bar_length * 8).denominator == 1
+          beats = bar_length * 4
+          beats.denominator == 1 ? "meter #{beats.to_i}, 4" : "meter #{bar_length.numerator}, #{bar_length.denominator}"
+        end
+        private :meter_line
 
         # The song's sections (phase S2; Structure::Sections): an Array of
         # Structure::Section with letter labels ("A", "B", "A'") and flow
@@ -257,8 +284,10 @@ module MB
           odd = irregular_bars.map { |b| "bar #{b.number}: #{b.meter}" }
           extra = odd.empty? ? '' : " (#{odd.join(', ')})"
           secs = @section_analysis ? ", #{labels.join(' ')}" : ''
-          format('%.2f BPM, %d bars of %s%s from %.2f s, %s%s', @tempo, @bars.length,
-            Sequence::Transport.meter_label(Rational(beats_per_bar, 4)), extra, @bars.first&.seconds || 0, @tracker, secs)
+          usual = @bars.find { |b| b.beats == beats_per_bar }&.meter || Sequence::Transport.meter_label(Rational(beats_per_bar, 4))
+          note = @compound ? " (#{@compound.note})" : ''
+          format('%.2f BPM, %d bars of %s%s from %.2f s, %s%s%s', @tempo, @bars.length,
+            usual, extra, @bars.first&.seconds || 0, @tracker, secs, note)
         end
 
         private

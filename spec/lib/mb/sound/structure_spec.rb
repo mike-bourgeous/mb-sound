@@ -198,6 +198,75 @@ RSpec.describe(MB::Sound::Structure, :aggregate_failures) do
     end
   end
 
+  # fix-batch-1106: both 6/8 songs of research-acd-format-2's form
+  # comparison came out as 4/4 at 4/3 of their tempo (90 -> 120, 103 ->
+  # 137.3); a synthetic 6/8 groove (kick on 1, clap on 4, eighth hats, the
+  # bass changing every bar) comes out at 60 (dotted quarters) without a
+  # hint, and at 120 with that hint (the songs' grid)
+  describe 'compound meter (6/8)' do
+    def six_eight(bpm, bars: 8)
+      MB::Sound.seed(3)
+      MB::Sound.render(capture = MB::Sound::Structure::Capture.new, bars: bars, bpm: bpm) do
+        MB::Sound.meter 6, 8
+        roots = MB::Sound.seq(MB::Sound::E2, MB::Sound::G2, MB::Sound::A2, MB::Sound::D2).len(3/4r).loop.notes
+        drums = MB::Sound.tr808(MB::Sound.grid(8, kick: 'X.....', clap: '...X..', hat: 'xxxxxx').loop)
+        MB::Sound.bg :six, drums + roots.hz.saw * roots.amp_env(0.005, 0.4, 0.5, 0.1) * 0.25
+      end
+      capture.data
+    end
+
+    it 'regrids a grid whose beat is a dotted eighth (4/4 at 4/3 of the tempo) as 6/8' do
+      data = six_eight(90)
+      r = MB::Sound.analyze_form(data, bpm: 120)
+      expect(r.compound).to have_attributes(kind: :dotted_eighth, regridded?: true)
+      expect(r.tempo).to be_within(0.05).of(90)
+      expect(r.bars.map(&:meter).uniq).to eq(['6/8'])
+      expect(r.bars.length).to be >= 7
+      r.downbeats.each { |t| expect((t / 2.0 - (t / 2.0).round).abs * 2).to be < 0.02 }
+      expect(r.beats.select { |b| b.bar == 2 }.map(&:beat)).to eq([1, 2, 3])
+      expect(r.beats.each_cons(2).map { |a, b| b.seconds - a.seconds }).to all(be_within(0.02).of(2 / 3.0))
+      expect(r.meters_ruby).to eq('meter 6, 8')
+      expect(r.transport.bar_length).to eq(3/4r)
+      expect(r.to_s).to include('of 6/8', '6/8 at 90.0')
+
+      # at 103 too, the other song's tempo (as 137.3)
+      r = MB::Sound.analyze_form(six_eight(103), bpm: 137.33)
+      expect(r.compound&.kind).to eq(:dotted_eighth)
+      expect(r.tempo).to be_within(0.05).of(103)
+    end
+
+    it 'names the 6/8 reading of a dotted-quarter or eighth beat grid, leaving the grid' do
+      r = MB::Sound.analyze_form(six_eight(90))
+      expect(r.tempo).to be_within(0.05).of(60)
+      expect(r.compound).to have_attributes(kind: :ternary, regridded?: false)
+      expect(r.compound.tempo).to be_within(0.05).of(90)
+      expect(r.compound.note).to include('6/8 at 90.0')
+      expect(r.bars.map(&:meter).uniq).to eq(['4/4'])
+
+      r = MB::Sound.analyze_form(six_eight(70, bars: 6))
+      expect(r.tempo).to be_within(0.1).of(140)
+      expect(r.compound).to have_attributes(kind: :threes)
+      expect(r.compound.tempo).to be_within(0.05).of(70)
+
+      expect(MB::Sound.analyze_form(six_eight(90), compound: false).compound).to be_nil
+    end
+
+    it 'leaves simple meter alone, and calls a shuffle ternary without regridding it' do
+      MB::Sound.seed(5)
+      MB::Sound.render(capture = MB::Sound::Structure::Capture.new, self.class.groove, bars: 6, bpm: 120)
+      r = MB::Sound.analyze_form(capture.data)
+      expect(r.compound).to be_nil
+      expect(r.bars.map(&:meter).uniq).to eq(['4/4'])
+
+      MB::Sound.seed(3)
+      swung = MB::Sound.tr808(MB::Sound.grid(12, kick: 'X.....X.....', clap: '...X.....X..', hat: 'x.xx.xx.xx.x').loop) + self.class.bass_line
+      r = MB::Sound.analyze_form(swung, bars: 6, bpm: 96, grid: false)
+      expect(r.tempo).to be_within(0.02).of(96)
+      expect(r.compound&.kind).to eq(:ternary)
+      expect(r.bars.map(&:meter).uniq).to eq(['4/4'])
+    end
+  end
+
   describe 'errors' do
     it 'refuses bad options and inputs' do
       expect { MB::Sound::Structure.analyze(Numo::SFloat.zeros(4800), beats: :fancy) }.to raise_error(ArgumentError, /beats:/)
