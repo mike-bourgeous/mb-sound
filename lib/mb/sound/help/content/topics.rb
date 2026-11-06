@@ -210,8 +210,8 @@ module MB
         multitaps, ping-pong, Haas), tape echoes with presets (`L.fx.delay`:
         :reel, :slapback, :ping_pong, :dub), feedback loops that run one
         sample at a time in C, the FDN reverb with presets, convolution
-        with impulse responses (`sig.convolve('hall.wav', mix: 0.3)`, zero
-        latency; `reverb_match('hall.wav')` fits the FDN to one), the Juno
+        with impulse responses (`sig.ir('hall.wav')`, alias of `convolve`, zero
+        latency, wet -10 dB; `reverb_match('hall.wav')` fits the FDN to one), the Juno
         chorus, and antialiased shapers.
       TEXT
       dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :softclip, :clip, :decimate, :quantize, :ease, :oversample, :ring

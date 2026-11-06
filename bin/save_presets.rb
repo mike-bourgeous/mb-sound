@@ -147,8 +147,34 @@ module MB::Sound
   LIBRARY_PRESET_MIDI = 'spec/test_data/c_major.mid'
 
   # Every library preset name.
+  # The FDN reverb fitted by reverb_match (MB::Sound::ReverbMatch,
+  # conv-reverb-1, 2026-11-06) to synthesized impulses: exponential noise
+  # tails with these octave T60s (spec/support/synthetic_sounds.rb's
+  # impulse_response, plus a few early reflections for the room and hall;
+  # the generator is /app/tmp/listening/conv-reverb-1/make_impulses.rb).
+  # The values are the fit's, stored (a fit renders the reverb about 70
+  # times); saved as effect documents with a mix param through
+  # ReverbMatch.graph, as ReverbMatch#save writes them.
+  LIBRARY_PRESET_FITS = {
+    fit_room: {
+      settings: { room_size: 0.9, decay: 0.8317, damping: 0.7656, predelay: 0.0, wet: 1, dry: 0, seed: 1, level: 0.9996, extra_time: 1.4 },
+      eq: { 125 => 7.52, 250 => 4.1, 500 => 1.63, 1000 => 1.13, 4000 => -2.69, 8000 => -11.87 }, width: 0.773,
+      tags: %i[fitted small dark], about: 'A small dark room (T60 0.92 s at 125 Hz to 0.30 s at 8 kHz), the FDN fitted by reverb_match to a synthesized impulse',
+    },
+    fit_hall: {
+      settings: { room_size: 0.9, decay: 2.583, lowpass: 8786.6, predelay: 0.00225, wet: 1, dry: 0, seed: 1, level: 0.6581, extra_time: 4.5 },
+      eq: { 125 => 3.58, 250 => 1.9, 500 => 0.9, 1000 => -1.25, 2000 => -1.34, 4000 => -1.71, 8000 => -2.07 }, width: 0.882,
+      tags: %i[fitted big warm], about: 'A warm hall (T60 3.0 s at 125 Hz to 1.0 s at 8 kHz), the FDN fitted by reverb_match to a synthesized impulse',
+    },
+    fit_space: {
+      settings: { room_size: 0.9, decay: 5.3732, damping: 0.8067, predelay: 0.02025, wet: 1, dry: 0, seed: 1, level: 0.3751, extra_time: 8.4 },
+      eq: { 500 => 0.5, 1000 => -0.7, 2000 => -0.54, 4000 => -0.95, 8000 => 2.02 }, width: 0.959,
+      tags: %i[fitted huge long], about: 'A big space (T60 5.6 s at 125 Hz to 2.6 s at 8 kHz), the FDN fitted by reverb_match to a synthesized impulse',
+    },
+  }.freeze
+
   def self.library_preset_names
-    LIBRARY_PRESET_PATCHES.keys + LIBRARY_PRESET_EFFECTS.keys + LIBRARY_PRESET_RACKS.keys + LIBRARY_PRESET_SETS.keys
+    LIBRARY_PRESET_PATCHES.keys + LIBRARY_PRESET_EFFECTS.keys + LIBRARY_PRESET_RACKS.keys + LIBRARY_PRESET_SETS.keys + LIBRARY_PRESET_FITS.keys
   end
 
   # Saves library preset +name+ into +dir+ (presets/ by default), returning
@@ -205,6 +231,17 @@ module MB::Sound
           box.close
         end
       end
+    elsif (fit = LIBRARY_PRESET_FITS[name])
+      MB::Sound.with_seed(0) do
+        input = ArrayInput.new(data: [Numo::SFloat.zeros(1)])
+        mix = ReverbMatch::PRESET_MIX
+        graph = ReverbMatch.graph(input, settings: fit[:settings], eq: fit[:eq], width: fit[:width], mix: mix.constant.named('mix'))
+        GraphIO.save(
+          File.join(dir, "#{name}#{GraphIO::EXTENSION}"), graph,
+          inputs: { input: input }, params: { mix: ReverbMatch::PRESET_PARAM.merge(value: mix) }, from: 'bin/save_presets.rb',
+          kind: :effect, meta: { description: fit[:about], tags: fit[:tags] }
+        )
+      end
     else
       raise ArgumentError, "No library preset #{name}#{GraphIO.suggest(name, library_preset_names)}"
     end
@@ -239,6 +276,7 @@ module MB::Sound
           src = LIBRARY_PRESET_PATCHES[n]&.then { |s, w, *| "#{s} -p #{w}" } ||
                 LIBRARY_PRESET_RACKS[n]&.then { |s, m, *| "#{s} #{m} (rack)" } ||
                 LIBRARY_PRESET_SETS[n]&.then { |s, m, *| "#{s} #{m} (set)" } ||
+                LIBRARY_PRESET_FITS[n]&.then { 'reverb_match fit (effect)' } ||
                 "#{LIBRARY_PRESET_EFFECTS.fetch(n)[0]} (effect)"
           puts "#{n.to_s.ljust(16)} #{src}"
         end

@@ -88,7 +88,7 @@ Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`
 
 ### [Reverbs](reverbs.md)
 
-`#reverb` (`GraphNode::Reverb`, kernel `fast_reverb`) is the FDN reverb: `[l, r].reverb(:hall)` runs inputs through diffusion, a per-sample FDN, and energy-normalized output taps; presets `:room`, `:hall`, `:plate`, `:shimmer`, `:gated`, ...; the friendly form takes `room_size:`, `decay:`, `damping:`; options for modulation, in-loop filters, drive, shimmer, freeze, `duck:`, `gate:`; `mix:`/`wet:`/`dry:`/`level:`/`predelay:` take nodes read every sample.  One reverb serves all channels.  `sig.convolve('hall.wav', mix: 0.3)` (`GraphNode::Convolver`, kernel `fast_convolve`) plays an impulse response with zero latency, mono to true stereo; `reverb_match('hall.wav')` fits the FDN to an impulse's per-octave T60, predelay, tone, and width.
+`#reverb` (`GraphNode::Reverb`, kernel `fast_reverb`) is the FDN reverb: `[l, r].reverb(:hall)` runs inputs through diffusion, a per-sample FDN, and energy-normalized output taps; presets `:room`, `:hall`, `:plate`, `:shimmer`, `:gated`, ...; the friendly form takes `room_size:`, `decay:`, `damping:`; options for modulation, in-loop filters, drive, shimmer, freeze, `duck:`, `gate:`; `mix:`/`wet:`/`dry:`/`level:`/`predelay:` take nodes read every sample.  One reverb serves all channels.  `sig.convolve('hall.wav')` (alias `ir`; `GraphNode::Convolver`, kernel `fast_convolve`) plays an impulse response with zero latency (wet -10 dB by default); `reverb_match('hall.wav')` fits the FDN to an impulse (`m.save :name`; presets `fit_room`, `fit_hall`, `fit_space`).
 
 ### [Dynamics (compressor, compander, ducking, limiter, multiband)](dynamics.md)
 

@@ -26,8 +26,10 @@ module MB
         #          clamped), equal power like #delay's: dry * sqrt(1 - mix),
         #          wet * sqrt(mix).  Default nil: +:wet+ and +:dry+ as given.
         # +:wet+, +:dry+ - Levels (dB values, linear numbers, or nodes);
-        #                  default wet 1 and dry 0 (only the convolution),
-        #                  or dry 1 with a +:mix+.
+        #                  default wet -10 dB (DEFAULT_WET) and dry 0, the
+        #                  convolution alone, about 10 dB under its input
+        #                  (maintainer, 2026-11-06); with a +:mix+, wet 1
+        #                  and dry 1 crossfaded.
         # +:gain+ - The impulse's gain (dB or linear) after +:normalize+.
         # +:normalize+ - true (default) scales the impulse to unit energy
         #                per output, so broadband sound comes out at about
@@ -41,14 +43,21 @@ module MB
         #
         # Examples (bin/sound.rb):
         #     play file_input('drums.flac').convolve('hall.wav', mix: 0.3)
+        #     play file_input('drums.flac').ir('hall.wav')        # wet only, -10 dB
         #     play saw(110).convolve(ir, wet: -6.db, dry: 1, length: 2.5)
         #     [l, r].channels.convolve('true_stereo.wav')     # four channels
-        def convolve(impulse, mix: nil, wet: 1, dry: nil, gain: 1, normalize: true, predelay: 0, length: nil, trim: nil, fade: nil, partition: nil)
+        def convolve(impulse, mix: nil, wet: nil, dry: nil, gain: 1, normalize: true, predelay: 0, length: nil, trim: nil, fade: nil, partition: nil)
           raise ArgumentError, 'convolve takes length: or trim: (the same option), not both' if length && trim
 
           ConvolveMethods.build(self, impulse, mix: mix, wet: wet, dry: dry, gain: gain, normalize: normalize, predelay: predelay,
             length: length || trim, fade: fade, partition: partition)
         end
+
+        alias ir convolve
+
+        # The default wet level without a +:mix+ (maintainer, 2026-11-06:
+        # "wet -10dB normalized, dry 0").
+        DEFAULT_WET = -10.db
 
         # The #convolve graph for +node+ (a mono node or a stereo bundle).
         def self.build(node, impulse, mix:, wet:, dry:, gain:, normalize:, predelay:, length:, fade:, partition:)
@@ -75,7 +84,7 @@ module MB
             partition: partition
           )
 
-          wet = level(wet, 'wet')
+          wet = level(wet.nil? ? (mix.nil? ? DEFAULT_WET : 1) : wet, 'wet')
           dry = level(dry.nil? ? (mix.nil? ? 0 : 1) : dry, 'dry')
           dg, wg = DelayMethods.mix_levels(dry, wet, mix)
 

@@ -25,6 +25,7 @@ module MB
     #
     #     m = reverb_match('hall.wav')     # prints the report
     #     play drums.then { |d| m.apply(d, mix: 0.3) }
+    #     m.save(:my_hall)                 # a library preset: L.fx.my_hall
     #     m.to_ruby                        # "sig.reverb(room_size: ..., ...).peq(...)"
     #     m.settings                       # the reverb's keywords
     #     m.plot('match.png')              # EDC curves and T60 by band
@@ -96,28 +97,65 @@ module MB
         fit
       end
 
-      # The fitted graph on +input+ (a node or bundle): the reverb (wet
-      # only), its EQ and width, and dry/wet as #convolve mixes them
-      # (+mix+ equal power; default wet only).
-      def apply(input, mix: nil, wet: 1, dry: nil)
+      # The fitted graph on +input+ (a node or bundle; see .graph): wet only
+      # at DEFAULT_WET (-10 dB) by default, as #convolve, or crossfaded
+      # with the dry signal by +mix+ (equal power).
+      def apply(input, mix: nil, wet: nil, dry: nil)
+        self.class.graph(input, settings: @settings, eq: @eq, width: @width, output_channels: @output_channels, mix: mix, wet: wet, dry: dry)
+      end
+
+      # The default wet level without a +mix+ (#convolve's).
+      DEFAULT_WET = GraphNode::ConvolveMethods::DEFAULT_WET
+
+      # A fitted graph from its values (#apply; the library's fitted
+      # presets, bin/save_presets.rb): +input+ (a node or bundle) through
+      # #reverb with +settings+, peaking EQ +eq+ ({ Hz => dB }, one octave
+      # wide), and +width+, built from recorded DSL calls so it prints and
+      # saves as Ruby.  Without +mix+: the wet graph at +wet+ (default
+      # DEFAULT_WET) plus the input at +dry+ (default 0).  With +mix+ (0..1,
+      # a number or node): input.blend(mix, curve: :power) around the wet
+      # graph at +wet+ (default 1).
+      def self.graph(input, settings:, eq: {}, width: nil, output_channels: 2, mix: nil, wet: nil, dry: nil)
         sides = GraphNode::ConvolveMethods.input_nodes(input)
         src = sides.length == 1 ? sides[0] : GraphNode::Channels.new(sides)
-        w = wet_graph(src)
-        wet = GraphNode::ConvolveMethods.level(wet, 'wet')
-        dry = GraphNode::ConvolveMethods.level(dry.nil? ? (mix.nil? ? 0 : 1) : dry, 'dry')
-        dg, wg = GraphNode::DelayMethods.mix_levels(dry, wet, mix)
-        wet_sides = w.is_a?(GraphNode::Channels) ? w.outputs : [w]
-        if wet_sides.length == 1
-          dd = GraphNode::Chorus.scale(sides[0], dg)
-          ww = GraphNode::Chorus.scale(w, wg)
-          return ww || w * 0 if dd.nil?
-          return dd if ww.nil?
-          GraphNode::DelayMethods.ring_sum(ww, dd)
+        level = ->(v, name) { GraphNode::ConvolveMethods.level(v, name) }
+        wet_graph = lambda { |s, w|
+          node = s.reverb(**settings, wet: w, output_channels: output_channels)
+          node = node.peq(eq.to_h { |f, g| [f, [g.db, 1]] }) unless eq.nil? || eq.empty?
+          node = node.width(width) if width && width != 1 && output_channels == 2
+          node
+        }
+        if mix
+          w = level.(wet.nil? ? 1 : wet, 'wet')
+          raise ArgumentError, 'With mix:, the dry level is the crossfade\'s (leave out dry:)' unless dry.nil?
+          src.blend(mix, curve: :power) { |s| wet_graph.(s, w) }
         else
-          dry_sides = sides.length == 1 ? [sides[0], sides[0]] : sides
-          GraphNode::StereoDelayMethods.wet_dry(dry_sides, wet_sides, dry: dg, wet: wg, mix: nil)
+          w = level.(wet.nil? ? DEFAULT_WET : wet, 'wet')
+          d = level.(dry.nil? ? 0 : dry, 'dry')
+          g = wet_graph.(src, w)
+          return g if d.is_a?(Numeric) && d == 0
+          g + (d.is_a?(Numeric) && d == 1 ? src : src.at(d))
         end
       end
+
+      # Saves the fit as library preset +name+ (an effect graph document
+      # with an +input+ and a +mix+ param, default +mix+; see
+      # GraphIOMethods#save): `preset :name, input: sig` or `L.fx.name`
+      # plays it.  Never replaces unless +replace: true+; +bump: true+
+      # saves the next free version.  Returns the path or nil.
+      def save(name, mix: PRESET_MIX, tags: %i[fitted], about: nil, replace: false, bump: false)
+        input = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(1)])
+        g = apply(input, mix: mix.to_f.constant.named('mix'))
+        about ||= "The FDN reverb fitted to an impulse by reverb_match (T60 #{@impulse.t60.values.compact.minmax.map { |v| format('%.2f', v) }.join('..')} s)"
+        Library::Saving.save(name, g, replace: replace, bump: bump, tags: tags, about: about,
+          inputs: { input: input }, params: { mix: PRESET_PARAM.merge(value: mix.to_f) }, kind: :effect)
+      end
+
+      # A saved fit's default dry/wet mix.
+      PRESET_MIX = 0.3
+
+      # A saved fit's mix param.
+      PRESET_PARAM = { range: 0.0..1.0, description: 'Dry/wet mix (equal power)' }.freeze
 
       # The fitted wet graph as Ruby, reading +input+ (a variable name).
       def to_ruby(input = 'sig')

@@ -56,7 +56,7 @@ RSpec.describe(MB::Sound::GraphNode::Convolver, :aggregate_failures) do
       [[20, nil], [64, 64], [65, 64], [128, 64], [129, 64], [2000, 128], [9000, nil]].each do |len, part|
         h = impulse(len, len)
         ref = direct(x, h)
-        outs = sizes.map { |bs| render(input(x).convolve(h, normalize: false, partition: part), bs)[0] }
+        outs = sizes.map { |bs| render(input(x).convolve(h, wet: 1, normalize: false, partition: part), bs)[0] }
         outs.each_with_index do |y, i|
           expect(y.length).to eq(ref.length), "length #{len}, buffer #{sizes[i]}"
           expect(error_db(y, ref)).to be < -140, "length #{len}, partition #{part.inspect}, buffer #{sizes[i]}"
@@ -81,7 +81,7 @@ RSpec.describe(MB::Sound::GraphNode::Convolver, :aggregate_failures) do
         outs = [1, 128, 800].map { |bs|
           ins = xs.map { |x| input(x) }
           src = ins.length == 1 ? ins[0] : MB::Sound::GraphNode::Channels.new(ins)
-          render(src.convolve(irs, normalize: false, partition: 128), bs)
+          render(src.convolve(irs, wet: 1, normalize: false, partition: 128), bs)
         }
         outs.each do |ys|
           expect(ys.length).to eq(2), name
@@ -96,14 +96,14 @@ RSpec.describe(MB::Sound::GraphNode::Convolver, :aggregate_failures) do
     x = noise(500, 4)
     [nil, 32].each do |part|
       [1, 128].each do |bs|
-        y = render(input(x).convolve(Numo::DFloat[1.0], partition: part), bs)[0]
+        y = render(input(x).convolve(Numo::DFloat[1.0], wet: 1, partition: part), bs)[0]
         expect(y).to eq(Numo::DFloat.cast(x))
       end
     end
     # a long impulse starting with a 1: the first sample is the input's first
     h = impulse(5000, 5)
     h[0] = 1
-    y = render(input(x).convolve(h, normalize: false), 1)[0]
+    y = render(input(x).convolve(h, wet: 1, normalize: false), 1)[0]
     expect(y[0]).to eq(x[0])
   end
 
@@ -111,7 +111,7 @@ RSpec.describe(MB::Sound::GraphNode::Convolver, :aggregate_failures) do
     h = impulse(700, 6)
     xl = noise(1000, 7)
     xr = noise(300, 8)
-    ys = render(MB::Sound::GraphNode::Channels.new([input(xl), input(xr)]).convolve([h, h], normalize: false), 128)
+    ys = render(MB::Sound::GraphNode::Channels.new([input(xl), input(xr)]).convolve([h, h], wet: 1, normalize: false), 128)
     expect(ys.map(&:length)).to eq([1699, 1699])
     expect(error_db(ys[1], direct(xr, h))).to be < -140
   end
@@ -121,15 +121,23 @@ RSpec.describe(MB::Sound::GraphNode::Convolver, :aggregate_failures) do
     let(:h) { impulse(1000, 10) }
 
     it 'normalizes to unit energy per output by default and applies gain' do
-      y = render(input(x).convolve(h), 128)[0]
+      y = render(input(x).convolve(h, wet: 1), 128)[0]
       ref = direct(x, h / Math.sqrt((h**2).sum))
       expect(error_db(y, ref)).to be < -130
-      y6 = render(input(x).convolve(h, gain: -6.db), 128)[0]
+      y6 = render(input(x).convolve(h, wet: 1, gain: -6.db), 128)[0]
       expect((y6 - y * 10**(-0.3)).abs.max).to be < 1e-6
     end
 
+    it 'defaults to the convolution alone at -10 dB (no dry), also as #ir' do
+      wet = render(input(x).convolve(h, wet: 1), 128)[0]
+      y = render(input(x).convolve(h), 128)[0]
+      expect((y - wet * 10**-0.5).abs.max).to be < 1e-6
+      expect(render(input(x).ir(h), 128)[0]).to eq(y)
+      expect(input(x).ir(h).to_ruby).to include('.convolve(nil)') # (an alias prints as the method)
+    end
+
     it 'mixes dry and wet with equal power (mix:), or by wet: and dry: levels' do
-      wet = render(input(x).convolve(h), 128)[0]
+      wet = render(input(x).convolve(h, wet: 1), 128)[0]
       mixed = render(input(x).convolve(h, mix: 0.25), 128)[0]
       ref = pad(wet, wet.length) * Math.sqrt(0.25) + pad(Numo::DFloat.cast(x), wet.length) * Math.sqrt(0.75)
       expect((mixed - ref).abs.max).to be < 1e-6
@@ -145,17 +153,17 @@ RSpec.describe(MB::Sound::GraphNode::Convolver, :aggregate_failures) do
     end
 
     it 'delays the impulse by predelay and truncates it with a fade' do
-      y = render(input(x).convolve(h, normalize: false, predelay: 100.samples), 128)[0]
+      y = render(input(x).convolve(h, wet: 1, normalize: false, predelay: 100.samples), 128)[0]
       expect(error_db(y, direct(x, pad(Numo::DFloat.zeros(100).concatenate(h), 1100)))).to be < -140
       expect(y[0...100].abs.max).to be < 1e-12 # (FFT rounding)
 
-      t = render(input(x).convolve(h, normalize: false, length: 400.samples, fade: 100.samples), 128)[0]
+      t = render(input(x).convolve(h, wet: 1, normalize: false, length: 400.samples, fade: 100.samples), 128)[0]
       hh = h[0...400].dup
       win = (Numo::NMath.cos((Numo::DFloat.new(100).seq(0.5) / 100) * Math::PI) + 1) * 0.5
       hh[300..] = hh[300..] * win
       expect(t.length).to eq(2000 + 399)
       expect(error_db(t, direct(x, hh))).to be < -140
-      expect(render(input(x).convolve(h, trim: 400.samples, fade: 100.samples, normalize: false), 128)[0]).to eq(t)
+      expect(render(input(x).convolve(h, wet: 1, trim: 400.samples, fade: 100.samples, normalize: false), 128)[0]).to eq(t)
       expect { input(x).convolve(h, length: 1, trim: 1) }.to raise_error(ArgumentError, /not both/)
     end
 
@@ -174,17 +182,17 @@ RSpec.describe(MB::Sound::GraphNode::Convolver, :aggregate_failures) do
     it 'reads a file path as a Sample (stereo files, other rates resampled)' do
       path = tmp_path('ir.wav')
       MB::Sound.write(path, [h * 0.5, h * -0.25], sample_rate: 48000)
-      ys = render(input(x).convolve(path, normalize: false), 128)
+      ys = render(input(x).convolve(path, wet: 1, normalize: false), 128)
       expect(ys.length).to eq(2)
       expect(error_db(ys[0], direct(x, h * 0.5))).to be < -80 # (a 16/24-bit file)
       expect(error_db(ys[1], direct(x, h * -0.25))).to be < -80
 
       s = MB::Sound::Sample[path]
-      expect(render(input(x).convolve(s, normalize: false), 128)).to eq(ys)
+      expect(render(input(x).convolve(s, wet: 1, normalize: false), 128)).to eq(ys)
 
       p44 = tmp_path('ir44.wav')
       MB::Sound.write(p44, [MB::Sound::Analysis::DSP.resample(h, 48000, 44100)], sample_rate: 44100)
-      y44 = render(input(x).convolve(p44, normalize: false), 128)[0]
+      y44 = render(input(x).convolve(p44, wet: 1, normalize: false), 128)[0]
       expect(y44.length).to be_within(2).of(x.length + h.length - 1)
     end
 
@@ -215,7 +223,7 @@ RSpec.describe(MB::Sound::GraphNode::Convolver, :aggregate_failures) do
   describe 'node behavior' do
     it 'may sleep once its input has been silent for the impulse length' do
       h = impulse(300, 13)
-      conv = input(noise(200, 14).concatenate(Numo::SFloat.zeros(3000))).convolve(h)
+      conv = input(noise(200, 14).concatenate(Numo::SFloat.zeros(3000))).convolve(h, wet: 1)
       expect(conv.sleep_ready?).to eq(false)
       conv.sample(400)
       expect(conv.sleep_ready?).to eq(false)
@@ -226,12 +234,12 @@ RSpec.describe(MB::Sound::GraphNode::Convolver, :aggregate_failures) do
     it 'carries its state into a rebuilt convolver of the same shape' do
       h = impulse(500, 15)
       x = noise(2000, 16)
-      ref = render(input(x).convolve(h), 100)[0]
+      ref = render(input(x).convolve(h, wet: 1), 100)[0]
 
-      old = input(x).convolve(h)
+      old = input(x).convolve(h, wet: 1)
       first = Array.new(5) { old.sample(100).dup }
       rest_src = MB::Sound::ArrayInput.new(data: [x[500..].dup])
-      fresh = rest_src.convolve(h)
+      fresh = rest_src.convolve(h, wet: 1)
       expect(fresh.carry_fits?(old)).to eq(true)
       fresh.carry_adopt(old)
       rest = render(fresh, 100)[0]
