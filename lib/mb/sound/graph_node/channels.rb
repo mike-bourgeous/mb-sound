@@ -32,6 +32,7 @@ module MB
         include Nameable
         include ChorusMethods
         include StereoDelayMethods
+        include ConvolveMethods
         include DynamicsMethods
         include BlendMethods
         include MasteringMethods

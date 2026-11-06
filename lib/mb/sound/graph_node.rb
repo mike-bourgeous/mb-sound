@@ -26,6 +26,7 @@ require_relative 'graph_node/debug_methods'
 require_relative 'graph_node/channel_methods'
 require_relative 'graph_node/chorus'
 require_relative 'graph_node/stereo_delay_methods'
+require_relative 'graph_node/convolve_methods'
 require_relative 'graph_node/dynamics_methods'
 require_relative 'graph_node/sampling_methods'
 require_relative 'graph_node/blend_methods'
@@ -86,6 +87,7 @@ module MB
       include ChannelMethods
       include ChorusMethods
       include StereoDelayMethods
+      include ConvolveMethods
       include DynamicsMethods
       include SamplingMethods
       include BlendMethods
@@ -583,6 +585,8 @@ require_relative 'graph_node/channel_mixer/stereo'
 require_relative 'graph_node/channel_mixer/position'
 require_relative 'graph_node/channel_mixer/unison'
 require_relative 'graph_node/reverb'
+require_relative 'convolution'
+require_relative 'graph_node/convolver'
 require_relative 'graph_node/semitone_shift'
 require_relative 'graph_node/resonator'
 require_relative 'graph_node/modal_resonator'
