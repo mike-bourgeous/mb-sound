@@ -225,13 +225,28 @@ module MB
               }.then { |r| root.looping? && !r.looping? ? r.loop(align: root.align).tap { |q| Sequence::Kit::ROW_NAMES[q] = row } : r }
             end
           end
-          raise ArgumentError, "Player #{name.inspect} doesn't play a grid kit's rows; pass old_kit => new_kit" if mapping.empty?
+          raise ArgumentError, no_kit_rows_message(name, nodes) if mapping.empty?
 
           extra = kit.rows.keys - played.uniq
           if warn && !extra.empty?
             Kernel.warn "swap #{name.inspect}: #{extra.map(&:inspect).join(', ')} #{extra.length == 1 ? 'isn\'t a row' : 'aren\'t rows'} the player plays (no voices for #{extra.length == 1 ? 'it' : 'them'}; bg or launch the kit to build them)"
           end
           mapping
+        end
+
+        # Why #kit_swap_mapping found no rows to swap a Kit into for player
+        # +name+ playing clip sources +nodes+: what it plays, and how to
+        # play the kit there instead (a swap keeps the graph, which was
+        # built for the clip it plays: fix-fuzz-1106, SessionFuzz seed
+        # 773034, a kit track a flow had switched to a `beats` clip; the
+        # message suggested old_kit => new_kit pairs, which find no rows
+        # either).
+        def no_kit_rows_message(name, nodes)
+          playing = nodes.map { |n| n.ring_clip || n.pending_clip || n.clip }.first.to_s
+          playing = "#{playing[0, 37]}..." if playing.length > 40
+          how = arrangement.tracks[name] ? "`bg #{name.inspect}, kit` builds the track's patch for the kit's rows" : 'bg it again with a kit built for the new rows'
+          "Player #{name.inspect} plays a clip (#{playing}), not a grid kit's rows, so a Kit has no rows to swap into: " \
+            "#{how} (a swap keeps the graph), or swap in a Clip"
         end
 
         # Returns a mapping from the clip that every clip source's clip was

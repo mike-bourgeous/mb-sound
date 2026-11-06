@@ -333,6 +333,22 @@ RSpec.describe('session fuzzing') do
     end
   end
 
+  # (batch 16's soak, fix-fuzz-1106: the parity-1 kit swap of t3's first
+  # grid landed while the flow played :s2, whose beats clip has no kit
+  # rows: a user error by design, ClipSwaps#kit_swap_mapping; kit swaps
+  # are generated only where every scene gives the track a grid with the
+  # first one's rows)
+  it 'swaps a kit only where every scene plays it a grid with those rows (seed 773034)', render_budget: { seconds: 60, reason: 'one random song' } do
+    song = SessionFuzz.generate(Random.new(773034))
+    expect(song.code).to include('t3: beats(16')
+    expect(song.code).not_to match(/swap :t3, grid/)
+    expect(SessionFuzz.check(:runs, song)).to be_nil
+
+    expect(SessionFuzz.kit_rows?("grid(16, kick: 'x...', hat: 'x.x.').loop", %w[kick hat])).to eq(true)
+    expect(SessionFuzz.kit_rows?("grid(16, kick: 'x...').loop", %w[kick hat])).to eq(false)
+    expect(SessionFuzz.kit_rows?('beats(16, seed: 3) { kick [1, 0, 0, 0] * 4 }', %w[kick])).to eq(false)
+  end
+
   # The :carry relation's finds (carry-1), shrunk: each song's carrying
   # rebuilds come from its track lines and length (SessionFuzz.carry_lines)
   {
