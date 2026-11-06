@@ -76,6 +76,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `ping_pong/pingpong(time, feedback:, spread:, ...)` A ping-pong delay: echoes alternate left and right (GraphNode::DelayNetwork)
 - `tape_echo(preset, seed:, ...)` A tape echo (GraphNode::TapeEcho): repeats run through a tape sim each pass
 - `reverb(preset, output_channels:, ...)` Appends a reverb to this node (see GraphNode::Reverb)
+- `convolve(impulse, mix:, wet:, ...)` Convolves this signal with an impulse response (convolution reverb)
 - `chorus/juno_chorus(mode, ...)` Appends a Juno-60-style stereo chorus (see Chorus), returning a stereo bundle
 - `feedback/fb(*args, compensate:, sustain:, &block)` Builds a feedback loop on this node from the block (a FeedbackLoop)
 
