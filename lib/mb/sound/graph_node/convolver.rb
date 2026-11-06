@@ -108,6 +108,7 @@ module MB
           inputs.each_with_index do |i, idx|
             raise ArgumentError, "Convolver input #{idx} must be a graph node (got #{i.inspect})" unless i.respond_to?(:sample)
           end
+          impulse = [impulse] if impulse.is_a?(Numo::NArray) # (Array(narray) would make one channel per sample)
           channels = Array(impulse).map { |c| Numo::DFloat.cast(c).flatten }
           unless [1, 2, 4].include?(channels.length)
             raise ArgumentError, "An impulse has 1, 2, or 4 channels (got #{channels.length})"

@@ -97,4 +97,41 @@ module SyntheticSounds
     out[a...(a + n)] += x[0...n]
     out
   end
+
+  # A stereo impulse response of exponentially decaying noise: +t60s+ maps
+  # octave band centers (Hz) to their T60 in seconds (each band's noise
+  # spans center / 1.38 to center * 1.38, so bands never share FFT bins),
+  # after +predelay+ seconds of silence, with +tilt_db+ dB per octave around
+  # 1 kHz, a +correlation+ between the channels, and white noise at
+  # +floor+ (peak-relative amplitude) under everything.
+  def impulse_response(t60s, seconds: 1.5, predelay: 0.0, seed: 1, tilt_db: 0.0, correlation: 0.0, floor: 0.0)
+    rng = Random.new(seed)
+    n = (seconds * RATE).round
+    t = Numo::DFloat.new(n).seq / RATE
+    noise = -> { Numo::DFloat[*Array.new(n) { rng.rand - 0.5 }] }
+    m = 2**Math.log2(n).ceil * 2
+    f = Numo::DFloat.new(m / 2 + 1).seq * (RATE.to_f / m)
+    band = lambda { |x, center|
+      xx = Numo::DFloat.zeros(m)
+      xx[0...n] = x
+      spec = Numo::Pocketfft.rfft(xx)
+      spec[(f < center / 1.38) | (f > center * 1.38)] = 0
+      Numo::Pocketfft.irfft(spec)[0...n].dup
+    }
+    chans = [Numo::DFloat.zeros(n), Numo::DFloat.zeros(n)]
+    t60s.each do |center, t60|
+      env = Numo::NMath.exp(-Math.log(1000) * t / t60) * 10**(tilt_db * Math.log2(center / 1000.0) / 20)
+      common = band.(noise.(), center)
+      chans.each do |c|
+        c.inplace + (band.(noise.(), center) * Math.sqrt(1 - correlation) + common * Math.sqrt(correlation)) * env
+      end
+    end
+    peak = chans.map { |c| c.abs.max }.max
+    pre = (predelay * RATE).round
+    chans.map { |c|
+      c = c / peak
+      c += noise.() * (2 * floor) if floor > 0
+      Numo::DFloat.zeros(pre).concatenate(c)
+    }
+  end
 end

@@ -220,7 +220,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 ### Look and listen
 
 - `:plots` Plots: plot spectrum spectrogram time_freq hist density mag_phase overlay overlay_chart table chart figure vis
-- `:analysis` Analysis: freq_estimate peaks autocorrelate crosscorrelate peak_correlation analyze_form loudness analyze compare look
+- `:analysis` Analysis: freq_estimate peaks autocorrelate crosscorrelate peak_correlation analyze_form loudness analyze compare look reverb_match
 - `:loudness` Loudness: loudness render
 - `:now` Help and what is going on: help now lesson players knobs scenes tracks mutes changes markers ruby debug_dump
 - `:ui` Dashboard band and tiled screen: ui off pane layout keys fg jobs

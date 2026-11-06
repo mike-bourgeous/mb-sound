@@ -209,10 +209,12 @@ module MB
         Delays (sinc-interpolated, tempo-synced lengths; regenerating
         multitaps, ping-pong, Haas), tape echoes with presets (`L.fx.delay`:
         :reel, :slapback, :ping_pong, :dub), feedback loops that run one
-        sample at a time in C, the FDN reverb with presets, the Juno chorus,
-        and antialiased shapers.
+        sample at a time in C, the FDN reverb with presets, convolution
+        with impulse responses (`sig.convolve('hall.wav', mix: 0.3)`, zero
+        latency; `reverb_match('hall.wav')` fits the FDN to one), the Juno
+        chorus, and antialiased shapers.
       TEXT
-      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :chorus, :softclip, :clip, :decimate, :quantize, :ease, :oversample, :ring
+      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :softclip, :clip, :decimate, :quantize, :ease, :oversample, :ring
       note :delays, :feedback_loops, :reverbs, :chorus
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do
@@ -1551,8 +1553,14 @@ module MB
         => b` ranks them); `look 'orig.wav', fit, path: 'x.png'` writes
         waveform, first-50-ms, spectrogram, and top-octave images with
         labeled axes to read before changing a sound.
+
+        Impulse responses: `m = reverb_match('hall.wav')` measures decay
+        times per octave, predelay, build-up, tail tone, and width, and
+        fits the algorithmic reverb to them (`m.apply(sig, mix: 0.3)`,
+        `m.to_ruby`, `m.plot('match.png')`); `sig.convolve('hall.wav')`
+        plays the impulse itself.
       TEXT
-      commands :freq_estimate, :peaks, :autocorrelate, :crosscorrelate, :peak_correlation, :analyze_form, :loudness, :analyze, :compare, :look
+      commands :freq_estimate, :peaks, :autocorrelate, :crosscorrelate, :peak_correlation, :analyze_form, :loudness, :analyze, :compare, :look, :reverb_match
       note :structure, :analysis
       see :loudness, :plots
     end
