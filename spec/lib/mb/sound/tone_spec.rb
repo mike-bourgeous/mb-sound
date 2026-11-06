@@ -94,6 +94,31 @@ RSpec.describe MB::Sound::Tone do
     end
   end
 
+  # fix-batch-1106: a number for the warp reads as a node's sample would (a
+  # float): complex_square.pwm(0.3) played -23.7 dB off pwm(0.3.constant),
+  # at 220 Hz a warp edge landing exactly on sample 720; planned and
+  # unplanned, every warp kernel
+  describe '#pwm with a number or a constant node' do
+    def run(g, plan)
+      MB::Sound::Plan.install([g]) if plan
+      SpecBuffers.join(Array.new(8) { g.sample(128).dup })
+    end
+
+    {
+      'complex square' => ->(w, _p) { 220.hz.complex_square.pwm(w).real }, # (warps around 0: no pivot)
+      'band-limited square' => ->(w, p) { 220.hz.square.pwm(w, pivot: p) },
+      'triangle' => ->(w, p) { 220.hz.triangle.pwm(w, pivot: p) },
+      'wavetable' => ->(w, _p) { 220.hz.wavetable(:basic).pwm(w) },
+    }.each do |name, mk|
+      it "plays the same samples for a #{name}" do
+        ref = run(mk.(0.3, 0.1), false)
+        expect(run(mk.(0.3.constant, 0.1.constant), false)).to eq(ref)
+        expect(run(mk.(0.3.constant, 0.1), true)).to eq(ref)
+        expect(run(mk.(0.3, 0.1), true)).to eq(ref)
+      end
+    end
+  end
+
   describe '#fm' do
     it_behaves_like 'modulation sources', :fm
 

@@ -1908,6 +1908,11 @@ module MB
       # a constant in plans).
       def compute(count, freq, phase, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain, pivot = nil)
         pivot = warp_pivot if pivot.nil? && warped?
+        # A number for the warp reads as a node's samples would: a float
+        # (fix-batch-1106: pwm(0.3) and pwm(0.3.constant) differed by -23.7
+        # dB on complex shapes, where a warp edge lands exactly on a sample)
+        width = Kernels::Arithmetic.f32(width) if width.is_a?(Numeric)
+        pivot = Kernels::Arithmetic.f32(pivot) if pivot.is_a?(Numeric)
         pick_zone(freq) if @table.is_a?(MB::Sound::Wavetable::KeyMap) && (@zone_table.nil? || @reset.nil?)
         build_buffer(count)
 
@@ -2023,7 +2028,7 @@ module MB
       # For plans (Plan::Op::Tone in C): the warp's pivot (cycles; a
       # constant, since a pivot node keeps the tone out of plans).
       def plan_pivot
-        warped? ? warp_pivot.to_f : 0.0
+        warped? ? Kernels::Arithmetic.f32(warp_pivot) : 0.0 # (as #compute reads it)
       end
 
       # For plans (Plan::Op::Tone in C): the phase jump of a reset on the

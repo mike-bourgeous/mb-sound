@@ -466,8 +466,14 @@ module MB
             next if op.is_a?(Plan::Loop::Op::SustainParam) # (set below)
 
             v = op.constant.plan_param(count)
+            # (a steady value as the float a node's sample holds, as the
+            # constant reads when it's a boundary input (shared through a
+            # Tee) or a param's node: fix-batch-1106, a biquad allpass's
+            # quality 1.2 and 1.2.constant differed by -50 dB, the loop's
+            # pitch latency unwrapping to another period at the double)
+            v = Kernels::Arithmetic.f32(v) unless v.is_a?(Numo::NArray)
             @params[i] = v
-            @values[op.dst] = v.is_a?(Numo::NArray) ? v : v.to_f
+            @values[op.dst] = v
           end
 
           if n < count
