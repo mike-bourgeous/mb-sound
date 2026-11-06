@@ -105,6 +105,7 @@ require_relative 'support/spawn_guard' # (process starts while a Session plays)
 # load files while a Session plays pass the spawn guard the way the console
 # does
 MB::Sound::Starter.start
+require_relative 'support/child_guard' # (examples leaving the starter's children running)
 require_relative 'support/no_gnuplot'
 require_relative 'support/recipe_helpers'
 require_relative 'support/patch_helpers'

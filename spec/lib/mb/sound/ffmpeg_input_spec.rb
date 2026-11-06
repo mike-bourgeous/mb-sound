@@ -1,6 +1,8 @@
 require 'benchmark'
 
 RSpec.describe MB::Sound::FFMPEGInput do
+  close_file_inputs_after_each # (examples read their inputs in part; spec/support/child_guard.rb)
+
   describe '.parse_info' do
     let(:info) {
       MB::Sound::FFMPEGInput.parse_info('sounds/sine/sine_100_1s_mono.flac')

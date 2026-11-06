@@ -70,6 +70,8 @@ RSpec.describe(MB::Sound::InputBufferWrapper, :aggregate_failures) do
       expect(file).to receive(:read).with(2048).twice.and_call_original
       expect(b.read(1500).sum.abs.sum).not_to eq(0)
       expect(b.read(1500)[0].length).to eq(1500)
+    ensure
+      file.close
     end
 
     it 'can return Complex data' do

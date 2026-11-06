@@ -29,6 +29,12 @@ module MB
         end
       end
 
+      # True if this reads from or writes to a command it started (see
+      # #run), not an IO object it was given.
+      def runs_command?
+        @popen
+      end
+
       # Returns true if the input or output has been closed.
       def closed?
         @io.nil? || @io.closed?

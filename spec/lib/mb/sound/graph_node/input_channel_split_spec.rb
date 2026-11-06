@@ -1,4 +1,6 @@
 RSpec.describe(MB::Sound::GraphNode::InputChannelSplit) do
+  close_file_inputs_after_each # (examples read their inputs in part; spec/support/child_guard.rb)
+
   it 'can be created' do
     l, r = MB::Sound.file_input('sounds/synth0.flac').split
     expect(l).to be_a(MB::Sound::GraphNode::InputChannelSplit::InputChannelNode)
