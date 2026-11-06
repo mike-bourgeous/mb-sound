@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-31",
+  "generated": "2026-11-06",
   "specs": {
     "gems/mb-term/spec/native_spec.rb": {
       "fast_term": [
@@ -96,7 +96,7 @@
     "spec/ext/mb/sound/fast_audio_conceal_spec.rb": {
       "fast_audio": [
         "FastAudio::Concealer#initialize",
-        "FastAudio::Concealer#process",
+        "FastAudio::Concealer#pull",
         "FastAudio::Concealer#state",
         "FastAudio::Playback#captured",
         "FastAudio::Playback#close",
@@ -180,9 +180,36 @@
         "FastAudio::Playback#write"
       ]
     },
+    "spec/ext/mb/sound/fast_audio_trace_spec.rb": {
+      "fast_audio": [
+        "FastAudio::Playback#close",
+        "FastAudio::Playback#initialize",
+        "FastAudio::Playback#stats",
+        "FastAudio::Playback#trace?",
+        "FastAudio::Playback#trace_drain",
+        "FastAudio::Playback#trace_start",
+        "FastAudio::Playback#trace_stats",
+        "FastAudio::Playback#trace_stop",
+        "FastAudio::Playback#write"
+      ]
+    },
     "spec/ext/mb/sound/fast_control_spec.rb": {
       "fast_control": [
         "FastControl.smooth"
+      ]
+    },
+    "spec/ext/mb/sound/fast_convolve_spec.rb": {
+      "fast_convolve": [
+        "FastConvolve::Engine#fft_input",
+        "FastConvolve::Engine#finish",
+        "FastConvolve::Engine#initialize",
+        "FastConvolve::Engine#position",
+        "FastConvolve::Engine#process",
+        "FastConvolve::Engine#quiet?",
+        "FastConvolve::Engine#reset",
+        "FastConvolve::Engine#room",
+        "FastConvolve::Engine#spectrum",
+        "FastConvolve::Engine#swap_state"
       ]
     },
     "spec/ext/mb/sound/fast_delay_spec.rb": {
@@ -350,6 +377,8 @@
         "FastUI::GVLProbe.active?",
         "FastUI::GVLProbe.blockers",
         "FastUI::GVLProbe.holds",
+        "FastUI::GVLProbe.log_drain",
+        "FastUI::GVLProbe.log_stop",
         "FastUI::GVLProbe.start",
         "FastUI::GVLProbe.stop",
         "FastUI::GVLProbe.waits",
@@ -451,6 +480,12 @@
         "FastAudio::JackMIDIOutput#port_name",
         "FastAudio::JackMIDIOutput#write"
       ],
+      "fast_midi": [
+        "FastMIDI::Output#close",
+        "FastMIDI::Output.new"
+      ]
+    },
+    "spec/ext/mb/sound/jack_server_loss_spec.rb": {
       "fast_midi": [
         "FastMIDI::Output#close",
         "FastMIDI::Output.new"
@@ -700,6 +735,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -726,6 +763,34 @@
       ],
       "fast_sound": [
         "FastSound.smoothstep_buf"
+      ]
+    },
+    "spec/lib/mb/sound/graph_node/convolver_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
+        "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
+        "FastArithmetic.mix",
+        "FastArithmetic.power",
+        "FastArithmetic.product"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
+      ],
+      "fast_convolve": [
+        "FastConvolve::Engine#fft_input",
+        "FastConvolve::Engine#finish",
+        "FastConvolve::Engine#initialize",
+        "FastConvolve::Engine#process",
+        "FastConvolve::Engine#quiet?",
+        "FastConvolve::Engine#room",
+        "FastConvolve::Engine#shape",
+        "FastConvolve::Engine#spectrum",
+        "FastConvolve::Engine#swap_state"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
       ]
     },
     "spec/lib/mb/sound/graph_node/curve_shaper_spec.rb": {
@@ -759,9 +824,14 @@
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
+        "FastArithmetic.divide",
         "FastArithmetic.fill_range",
+        "FastArithmetic.last_at_least",
         "FastArithmetic.mix",
         "FastArithmetic.product"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
       ],
       "fast_dynamics": [
         "FastDynamics.compand",
@@ -779,6 +849,7 @@
       ],
       "fast_sound": [
         "FastSound.matrix_mix",
+        "FastSound.narray_log10",
         "FastSound.oscillate"
       ],
       "fast_synth": [
@@ -943,11 +1014,16 @@
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
         "FastArithmetic.fill_range",
+        "FastArithmetic.min_max",
         "FastArithmetic.mix",
+        "FastArithmetic.product",
         "FastArithmetic.wet_dry"
       ],
       "fast_delay": [
         "FastDelay.read"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
       ],
       "fast_reverb": [
         "FastReverb::Network#initialize",
@@ -1001,6 +1077,7 @@
     },
     "spec/lib/mb/sound/graph_sweep_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.accumulate",
         "FastArithmetic.add_at",
         "FastArithmetic.cast_copy",
         "FastArithmetic.circular_read",
@@ -1029,9 +1106,18 @@
       "fast_control": [
         "FastControl.adaptive",
         "FastControl.curve",
+        "FastControl.damped",
         "FastControl.reset_run",
         "FastControl.slew",
         "FastControl.smooth"
+      ],
+      "fast_convolve": [
+        "FastConvolve::Engine#fft_input",
+        "FastConvolve::Engine#finish",
+        "FastConvolve::Engine#initialize",
+        "FastConvolve::Engine#process",
+        "FastConvolve::Engine#room",
+        "FastConvolve::Engine#spectrum"
       ],
       "fast_delay": [
         "FastDelay.network",
@@ -1354,13 +1440,21 @@
         "FastSynth.jump_add",
         "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
+      ],
+      "fast_unison": [
+        "FastUnison.scale"
       ]
     },
     "spec/lib/mb/sound/plan/dynamics_ops_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.copy",
+        "FastArithmetic.divide",
         "FastArithmetic.fill_range",
         "FastArithmetic.mix",
         "FastArithmetic.product"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
       ],
       "fast_dynamics": [
         "FastDynamics.compand"
@@ -1369,6 +1463,7 @@
         "FastPlan.run"
       ],
       "fast_sound": [
+        "FastSound.narray_log10",
         "FastSound.oscillate"
       ]
     },
@@ -1377,6 +1472,9 @@
         "FastArithmetic.copy",
         "FastArithmetic.mix",
         "FastArithmetic.product"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
       ],
       "fast_filter": [
         "FastFilter.diode_ladder",
@@ -1488,6 +1586,9 @@
         "FastSynth.jump_add",
         "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
+      ],
+      "fast_unison": [
+        "FastUnison.scale"
       ]
     },
     "spec/lib/mb/sound/plan/lofi_ops_spec.rb": {
@@ -1654,7 +1755,9 @@
       "fast_arithmetic": [
         "FastArithmetic.add_at",
         "FastArithmetic.copy",
+        "FastArithmetic.divide",
         "FastArithmetic.fill_range",
+        "FastArithmetic.knob_ramp",
         "FastArithmetic.last_at_least",
         "FastArithmetic.mix",
         "FastArithmetic.power",
@@ -1676,8 +1779,12 @@
         "FastResonator.modes",
         "FastResonator.ping"
       ],
+      "fast_sampler": [
+        "FastSampler.play"
+      ],
       "fast_sound": [
-        "FastSound.fast_math="
+        "FastSound.fast_math=",
+        "FastSound.oscillate"
       ]
     },
     "spec/lib/mb/sound/plan/shared_inputs_spec.rb": {
@@ -1767,21 +1874,59 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
+      ]
+    },
+    "spec/lib/mb/sound/plan/unison_ops_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.fill_range",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_control": [
+        "FastControl.smooth"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_plan": [
+        "FastPlan.run",
+        "FastPlan.run_lanes"
+      ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
+      ],
+      "fast_sound": [
+        "FastSound.matrix_mix",
+        "FastSound.number_to_freq",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.jump_add",
+        "FastSynth.jump_queue",
+        "FastSynth.oscillate_bl"
+      ],
+      "fast_unison": [
+        "FastUnison.exact",
+        "FastUnison.scale"
       ]
     },
     "spec/lib/mb/sound/sampler_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.add_at",
-        "FastArithmetic.circular_read",
-        "FastArithmetic.circular_write",
         "FastArithmetic.copy",
         "FastArithmetic.fill_range",
         "FastArithmetic.last_at_least",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.scale"
+      ],
+      "fast_control": [
+        "FastControl.smooth"
       ],
       "fast_plan": [
         "FastPlan.run"
@@ -1854,6 +1999,8 @@
         "FastSynth.sync_pulse_edges"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -2020,6 +2167,23 @@
         "fast_control.o": [
           "ext/mb/sound/include/mb_ext_helpers.h",
           "ext/mb/sound/include/mb_smooth.h"
+        ]
+      }
+    },
+    "fast_convolve": {
+      "dir": "ext/mb/sound/fast_convolve",
+      "sources": [
+        "fast_convolve.c"
+      ],
+      "modules": [
+        "FastConvolve"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_ext_helpers.h"
+      ],
+      "depend": {
+        "fast_convolve.o": [
+          "ext/mb/sound/include/mb_ext_helpers.h"
         ]
       }
     },
