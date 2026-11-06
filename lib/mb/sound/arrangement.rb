@@ -115,6 +115,7 @@ module MB
         @build_knobs = {} # (BuildKnobs: knob name => tracks whose patches read it while building)
         @build_rngs = {} # (#build_patch: track name => [root generator, seed] its last build started from)
         @checked_build = nil # (PatchCheck#check_build: the build #build_patch takes next)
+        @build_for = nil # (#building_for: [track name, clip] #track's check builds for)
         @build_knob_lock = Mutex.new
       end
 
@@ -321,8 +322,11 @@ module MB
         # playing track's new instrument is built for its rebuild, which
         # takes that build (PatchCheck#check_build: built once, not twice)
         source = clip || @mutex.synchronize { @tracks[name]&.clip }
+        # (or the clip a play inside #building_for gives it next: `design`)
+        ahead = @build_for if patch && !playing && @build_for&.first == name
+        source = ahead[1] if ahead
         begin
-          ok = defer.call { playing && source ? check_build(name, patch, source) : check_patch(name, patch, source) }
+          ok = defer.call { (playing || ahead) && source ? check_build(name, patch, source) : check_patch(name, patch, source) }
         rescue PatchCheck::PatchError => e
           note_failed_track(name, e)
           raise
@@ -362,6 +366,22 @@ module MB
         end
         name
       ensure
+        drop_checked_build unless ahead
+      end
+
+      # Runs the block with #track's check of a new instrument for track
+      # +name+ (one that isn't playing) built for +clip+, the clip a play
+      # in the block gives the track next, and kept for that play's build
+      # to take (PatchCheck#check_build: `design` built the instrument
+      # twice, once to check it on a test clip and once to play it, ~130
+      # ms each for the init voice; fix-batch-1106).  A kept build nothing
+      # took is dropped at the end (the random state put back).
+      def building_for(name, clip)
+        old = @build_for
+        @build_for = [name, clip]
+        yield
+      ensure
+        @build_for = old
         drop_checked_build
       end
 
