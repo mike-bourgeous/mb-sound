@@ -64,6 +64,8 @@ RSpec.describe('render path code guards') do
     ['lib/mb/sound/null_input.rb', 'Numo::SFloat.new(frames).fill(@fill)', 'grows the buffer (rarely)'],
     *%w[dynamics.rb dynamics/crossover.rb loudness_meter.rb rider.rb].map { |f| ["lib/mb/sound/graph_node/#{f}", '@sampled.fill(false)', 'an Array (no allocation)'] },
     ['lib/mb/sound/mastering/targeting.rb', '@sampled.fill(false)', 'an Array (no allocation)'],
+    ['lib/mb/sound/graph_node/convolver.rb', '@sampled.fill(false)', 'an Array (no allocation)'],
+    ['lib/mb/sound/convolution.rb', 'y.fill(0.0)', "RubyEngine's per-output sums, an Array (the mirror)"],
     ['lib/mb/sound/graph_node/sub_lane.rb', '@out.fill(', 'an Array of outputs (no allocation)'],
   ].freeze
 
