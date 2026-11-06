@@ -333,6 +333,22 @@ RSpec.describe('session fuzzing') do
     end
   end
 
+  # (batch 16's soak, fix-fuzz-1106: the parity-1 kit swap of t3's first
+  # grid landed while the flow played :s2, whose beats clip has no kit
+  # rows: a user error by design, ClipSwaps#kit_swap_mapping; kit swaps
+  # are generated only where every scene gives the track a grid with the
+  # first one's rows)
+  it 'swaps a kit only where every scene plays it a grid with those rows (seed 773034)', render_budget: { seconds: 60, reason: 'one random song' } do
+    song = SessionFuzz.generate(Random.new(773034))
+    expect(song.code).to include('t3: beats(16')
+    expect(song.code).not_to match(/swap :t3, grid/)
+    expect(SessionFuzz.check(:runs, song)).to be_nil
+
+    expect(SessionFuzz.kit_rows?("grid(16, kick: 'x...', hat: 'x.x.').loop", %w[kick hat])).to eq(true)
+    expect(SessionFuzz.kit_rows?("grid(16, kick: 'x...').loop", %w[kick hat])).to eq(false)
+    expect(SessionFuzz.kit_rows?('beats(16, seed: 3) { kick [1, 0, 0, 0] * 4 }', %w[kick])).to eq(false)
+  end
+
   # The :carry relation's finds (carry-1), shrunk: each song's carrying
   # rebuilds come from its track lines and length (SessionFuzz.carry_lines)
   {
@@ -417,6 +433,19 @@ RSpec.describe('session fuzzing') do
         'at_bar(1) { go :s1, on: :now }',
         'at_bar(2, beat: 2) { bg :t2, seq(C5, D5).n16, on: :now; bg :t2, seq(E5, G5).n8.loop, in: 1/4r }',
         'at_bar(3) { flow(seed: 74, on: :beat) { generate markov(s1: { s1: knob(:busy) }, seed: 33), s1: 1..2 } }',
+      ], 3, false,
+    ],
+    # (batch 16's soak, fix-fuzz-1106: t1's rebuild and a seek back landed
+    # on bar 2 beat 3; the rebuilt graph's first start, after the seek,
+    # took over the replaced clip source's notes as if no jump had
+    # happened, so they rang on instead of ending, and the seek's position
+    # wasn't chased; shrunk from a song whose seek came with a regions lane)
+    'a rebuild landing on the frame of a seek back (seed 773017)' => [
+      ['bpm 150', 'knob :busy, 0.5'], [
+        'track(:t1, q: 1/4r) { |clip| clip.synth(voices: 3) { |v| v.hz.triangle * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t1: seq(C4, E4, G4).n8.loop',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 4) { after(in: 3.beats) { seek 1, 1.1 } }',
       ], 3, false,
     ],
   }.each do |name, (header, lines, bars, slow)|

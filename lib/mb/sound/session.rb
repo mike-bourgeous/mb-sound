@@ -130,7 +130,7 @@ module MB
         :started, :slow_warned, :loads, :gain, :ramp, :fade_in, :fade_out, :fading_out, :keep,
         :strip_level, :strip_ramp, :asleep, :ring, :asleep_reads, :read_to, :cpu, :cue, :waited,
         :level_buf, # ([value, frozen SFloat] of a steady level; Faders#fader_levels)
-        :carried, # ([start, launch] of the player a carrying rebuild replaced; see #render_player)
+        :carried, # ([start, launch] of the player a carrying rebuild replaced, and the transport's seek generation where it landed; see #render_player)
         :handed, # (true for a player whose state a carrying rebuild took: it stops on the swap frame; see #remove_now)
         :clip, # (the clip a track's patch was built for, or nil; see #built_clip)
         :ends_after, # (nodes whose ending starts its quiet ring-out; Tails#end_after)
@@ -1539,7 +1539,7 @@ module MB
           end
 
           np = start_player(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: start, fade: fade, after: after,
-                            carried: carried_from && [carried_from.start, carried_from.launch].freeze, clip: clip)
+                            carried: carried_from && [carried_from.start, carried_from.launch, @transport.generation].freeze, clip: clip)
           if carried_from && (q = @players[@next_serial]) && q.name == name
             # (a carried player goes on as the old one: from its start and
             # launch, so a seek back before the swap doesn't leave it
@@ -1874,6 +1874,13 @@ module MB
             # graph's start, and a seek back before the rebuild plays it as
             # that one would have played (carry-1; SessionFuzz's :carry
             # relation)
+            if p.carried[2] != @transport.generation
+              # (a seek landed after the rebuild, before its graph played:
+              # the replaced graph would have jumped there, ending its notes
+              # in progress and chasing the new position's; fix-fuzz-1106,
+              # SessionFuzz seed 773017: a rebuild and a seek on one frame)
+              p.timeline_nodes.each { |n| n.carry_seeked if n.respond_to?(:carry_seeked) }
+            end
             p.timeline_nodes.each { |n| n.start_at(start, origin: p.start, launch: p.launch, transport: @transport) }
           else
             p.timeline_nodes.each { |n| n.start_at(start, origin: start, launch: p.launch, transport: @transport) }

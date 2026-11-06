@@ -143,6 +143,7 @@ module SessionFuzz
 
     scenes = []
     first_clips = nil # (the first scene's clips, for kit swaps)
+    scene_clips = [] # (every scene's clips, for kit swaps)
     swappable = nil # (synth tracks the first scene starts with looping clips: swaps need a player, and take Clips, not Kits)
     rng.rand(1..2).times do |i|
       sname = :"s#{i + 1}"
@@ -152,6 +153,7 @@ module SessionFuzz
       clips = parts.to_h { |t| [t, clip_for.(t)] }
       swappable ||= clips.select { |t, c| tracks[t] == :synth && c.end_with?('.loop') }.keys
       first_clips ||= clips
+      scene_clips << clips
       lines << "scene :#{sname}, #{clips.map { |t, c| "#{t}: #{c}" }.join(', ')}#{extra}"
       scenes << sname
     end
@@ -229,11 +231,17 @@ module SessionFuzz
     # (parity-1) a drum track playing a looping grid swapped to that grid
     # transformed (Kit transforms run per row; drawn last, so every seed
     # keeps the song it made before)
+    # Only where every scene giving the track a clip gives it a grid with
+    # the first one's rows: a scene (or a flow's) giving it a beats clip
+    # or other rows leaves no rows to swap by name, a user error by design
+    # (fix-fuzz-1106, seed 773034: ClipSwaps#kit_swap_mapping raised for
+    # a flow's beats clip; the draws stay, so other seeds keep their songs).
     kits = first_clips.select { |t, c| tracks[t] == :drums && c.start_with?('grid(') && c.end_with?('.loop') }.keys
     if !kits.empty? && rng.rand < 0.35
       t = pick(rng, kits)
       fx = pick(rng, KIT_TRANSFORMS)
-      lines << "at_bar(#{rng.rand(1..bars)}, beat: 3) { swap :#{t}, #{first_clips[t]}.#{fx} }"
+      line = "at_bar(#{rng.rand(1..bars)}, beat: 3) { swap :#{t}, #{first_clips[t]}.#{fx} }"
+      lines << line if scene_clips.all? { |c| c[t].nil? || kit_rows?(c[t], grid_rows(first_clips[t])) }
     end
     # (omnibus17) track levels (the strip's fader): set now, at a launch
     # point, or over a ramp, and from a scene value (drawn last, so every
@@ -488,6 +496,13 @@ module SessionFuzz
     },
     # (new commands go here, at the end)
   ].freeze
+
+  # The row names of grid clip code +code+ (`grid(16, kick: 'x...', ...)`).
+  def grid_rows(code) = code.scan(/(\w+): '/).flatten
+
+  # True if clip code +code+ is a grid with every row of +rows+ (a kit
+  # swap of a grid with those rows finds them all; see #generate).
+  def kit_rows?(code, rows) = code.start_with?('grid(') && (rows - grid_rows(code)).empty?
 
   # Kit transforms for #generate's kit swaps.
   KIT_TRANSFORMS = [
