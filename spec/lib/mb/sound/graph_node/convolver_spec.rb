@@ -53,7 +53,9 @@ RSpec.describe(MB::Sound::GraphNode::Convolver, :aggregate_failures) do
   describe 'against a direct convolution' do
     it 'matches within -140 dB at every buffer size, bit for bit across sizes (mono, short and long impulses)' do
       x = noise(3000, 1)
-      [[20, nil], [64, 64], [65, 64], [128, 64], [129, 64], [2000, 128], [9000, nil]].each do |len, part|
+      # (default plan edges: the 128-tap head, the 128 and 1024 levels, the
+      # spread 8192 level from 16384 and its second partition)
+      [[20, 64], [64, 64], [65, 64], [128, 64], [129, 64], [2000, 128], [128, nil], [129, nil], [1024, nil], [1025, nil], [16_384, nil], [16_385, nil], [24_577, nil]].each do |len, part|
         h = impulse(len, len)
         ref = direct(x, h)
         outs = sizes.map { |bs| render(input(x).convolve(h, wet: 1, normalize: false, partition: part), bs)[0] }

@@ -6,8 +6,8 @@ module MB
       # Convolves its input with an impulse response (a recorded room, hall,
       # plate, spring, or cabinet; any FIR filter): the wet half of a
       # convolution reverb.  GraphNode#convolve builds it and adds the dry
-      # mix.  Zero latency: the impulse's first partition runs in the time
-      # domain, the rest as uniformly partitioned FFT convolution (see
+      # mix.  Zero latency: the impulse's first 128 samples run in the time
+      # domain, the rest as non-uniformly partitioned FFT convolution (see
       # MB::Sound::Convolution and the :convolve_engine kernel), so the
       # first output sample already holds the impulse's first tap, and the
       # output is the same at any buffer size.
@@ -78,8 +78,12 @@ module MB
         # +gain+, normalization, +predelay+, and +length+).
         attr_reader :impulse
 
-        # The partition size in samples (see Convolution.partition_for).
+        # The block size of a uniform plan (the +partition:+ option), or nil
+        # for the default non-uniform plan (see Convolution.plan).
         attr_reader :partition
+
+        # The partition plan (Convolution::Plan).
+        attr_reader :plan
 
         # The input nodes (sampler branches).
         attr_reader :inputs
@@ -100,8 +104,8 @@ module MB
         # broadband sound comes out at about its input power), +predelay+
         # (samples) delays it, and +length+ (samples, or nil for all of it)
         # truncates it with a raised-cosine fade over its last +fade+
-        # samples.  +partition+ is the block size (nil: chosen for the
-        # length).
+        # samples.  +partition+ makes the plan uniform with blocks of that
+        # many samples (nil: the default non-uniform plan, Convolution.plan).
         def initialize(inputs:, impulse:, sample_rate:, gain: 1.0, normalize: true, predelay: 0, length: nil, fade: nil, partition: nil)
           inputs = Array(inputs)
           raise ArgumentError, "A convolver takes one or two inputs (got #{inputs.length})" unless [1, 2].include?(inputs.length)
@@ -123,12 +127,11 @@ module MB
           @gain = gain.to_f
           @impulse = shape_impulse(channels, normalize: normalize, predelay: Integer(predelay), length: length && Integer(length), fade: fade && Integer(fade))
           len = @impulse.map(&:length).max
-          @partition = partition ? Integer(partition) : Convolution.partition_for(len)
-          raise ArgumentError, "The partition must be a positive whole number of samples (got #{partition.inspect})" unless @partition > 0
-          heads, spectra = Convolution.prepare(@impulse, @partition)
+          @partition = partition && Integer(partition)
           @length = len
-          @engine = Kernels.convolve_engine.new(@partition, @inputs.length, @output_count, @paths, heads, spectra, len)
-          @work = Numo::DComplex.zeros(2 * @partition)
+          @runner = Convolution::Runner.new(@impulse, inputs: @inputs.length, outputs: @output_count, paths: @paths, partition: @partition)
+          @plan = @runner.plan
+          @engine = @runner.engine
 
           @position = 0
           @ended = Array.new(@inputs.length, false)
@@ -180,8 +183,8 @@ module MB
 
         ADOPT_IVARS = %i[@position @end_position @done].freeze
 
-        # For #carry_fits?: [partition, partitions, inputs, outputs,
-        # impulse channels, paths].
+        # For #carry_fits?: [head taps, inputs, outputs, impulse channels,
+        # paths, levels].
         def engine_shape
           @engine.shape
         end
@@ -216,7 +219,7 @@ module MB
         end
 
         def to_s
-          "Convolver (#{@impulse.length} ch, #{format('%.3f', @length / @sample_rate)} s, partition #{@partition})"
+          "Convolver (#{@impulse.length} ch, #{format('%.3f', @length / @sample_rate)} s, #{@plan})"
         end
 
         private
@@ -310,7 +313,7 @@ module MB
           end
 
           outs = output_set(count)
-          Convolution.run(@engine, outs, @ins, n, @work)
+          @runner.run(outs, @ins, n)
           @position += n
           return outs if n == count
 
