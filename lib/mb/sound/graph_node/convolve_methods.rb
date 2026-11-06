@@ -16,8 +16,8 @@ module MB
         # to left, right to right).  An impulse at another sample rate is
         # resampled.
         #
-        # Zero latency (the impulse's first block runs in the time domain,
-        # the rest as partitioned FFT convolution) and the same output at
+        # Zero latency (the impulse's first 128 samples run in the time
+        # domain, the rest as non-uniformly partitioned FFT convolution) and the same output at
         # any buffer size; see GraphNode::Convolver.  The output rings on
         # for the impulse's length after the input ends.
         #
@@ -38,8 +38,9 @@ module MB
         # +:length+ (alias +:trim+) - Keeps this much of the impulse
         #                (seconds or a Length), fading its end out over
         #                +:fade+ (default a quarter of the kept length).
-        # +:partition+ - The block size in samples (default from the
-        #                impulse's length; Convolution.partition_for).
+        # +:partition+ - A uniform block size in samples (default nil: the
+        #                non-uniform plan, a 128-tap head, then 128, 1024,
+        #                and 8192-sample partitions; Convolution.plan).
         #
         # Examples (bin/sound.rb):
         #     play file_input('drums.flac').convolve('hall.wav', mix: 0.3)
