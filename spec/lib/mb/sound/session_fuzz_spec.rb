@@ -419,6 +419,19 @@ RSpec.describe('session fuzzing') do
         'at_bar(3) { flow(seed: 74, on: :beat) { generate markov(s1: { s1: knob(:busy) }, seed: 33), s1: 1..2 } }',
       ], 3, false,
     ],
+    # (batch 16's soak, fix-fuzz-1106: t1's rebuild and a seek back landed
+    # on bar 2 beat 3; the rebuilt graph's first start, after the seek,
+    # took over the replaced clip source's notes as if no jump had
+    # happened, so they rang on instead of ending, and the seek's position
+    # wasn't chased; shrunk from a song whose seek came with a regions lane)
+    'a rebuild landing on the frame of a seek back (seed 773017)' => [
+      ['bpm 150', 'knob :busy, 0.5'], [
+        'track(:t1, q: 1/4r) { |clip| clip.synth(voices: 3) { |v| v.hz.triangle * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t1: seq(C4, E4, G4).n8.loop',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 4) { after(in: 3.beats) { seek 1, 1.1 } }',
+      ], 3, false,
+    ],
   }.each do |name, (header, lines, bars, slow)|
     it "holds carry for #{name}", *(slow ? [:slow] : []), render_budget: { seconds: 90, reason: 'a song rendered twice with and without its rebuilds' } do
       song = SessionFuzz::Song.new(header: header, lines: lines, bars: bars)
