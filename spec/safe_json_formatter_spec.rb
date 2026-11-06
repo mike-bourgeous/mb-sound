@@ -22,4 +22,20 @@ RSpec.describe(SafeJsonFormatter) do
     f.close(nil)
     expect(JSON.parse(io.string)['messages']).to eq(["x �"])
   end
+
+  # fix-batch-1106: a recurrence names its source (the report's
+  # "scrubbed" list, printed by rake spec:parallel)
+  it 'lists where each string it scrubbed was, its encoding, and its first bytes, and converts text encodings' do
+    found = []
+    out = described_class.scrub({ examples: [{ description: 'ok', pending_message: "skip: \x90 left".b }],
+                                  messages: ['plain'.b, "caf\xE9".dup.force_encoding(Encoding::ISO_8859_1)] }, found)
+    expect(found).to eq([{ path: 'examples/0/pending_message', encoding: 'ASCII-8BIT', start: '"skip: \\x90 left"' }])
+    expect(out[:messages]).to eq(['plain', 'café'])
+
+    io = StringIO.new
+    f = described_class.new(io)
+    f.output_hash[:messages] = ['fine', "x \x90".b]
+    f.close(nil)
+    expect(JSON.parse(io.string)['scrubbed']).to eq([{ 'path' => 'messages/1', 'encoding' => 'ASCII-8BIT', 'start' => '"x \\x90"' }])
+  end
 end

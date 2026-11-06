@@ -218,11 +218,13 @@ module ParallelSpecs
     examples = []
     crashed = []
     outside = {} # (process index => errors outside examples, e.g. a spec file that doesn't load)
+    scrubbed = [] # ([process index, entry, its examples] for strings SafeJsonFormatter had to make UTF-8)
     groups.each_index do |i|
       json = File.join(out_dir, "#{i}.json")
       begin
         report = JSON.parse(File.read(json))
         examples.concat(report.fetch('examples'))
+        Array(report['scrubbed']).each { |s| scrubbed << [i, s, report['examples']] }
         n = report.dig('summary', 'errors_outside_of_examples_count').to_i
         outside[i] = n if n > 0
       rescue Errno::ENOENT, JSON::ParserError, KeyError, TypeError
@@ -239,6 +241,17 @@ module ParallelSpecs
     puts format('spec:parallel: %d examples, %d failures, %d pending%s in %.1f s wall (%.1f s of examples)',
                 examples.length, failed.length, pending,
                 outside.empty? ? '' : format(', %d errors outside examples', outside.values.sum), wall, file_times.values.sum)
+
+    unless scrubbed.empty?
+      # (the source of the batch-10 report crash's "\x90"; see
+      # support/safe_json_formatter.rb)
+      puts "Strings in the reports that weren't UTF-8 (#{scrubbed.length}; scrubbed; spec/support/safe_json_formatter.rb):"
+      scrubbed.first(20).each do |i, s, list|
+        where = s['path'].to_s[%r{\Aexamples/(\d+)}, 1]
+        ex = where && list[where.to_i]
+        puts "  process #{i} #{s['path']} (#{s['encoding']})#{ex ? " #{ex['file_path']}:#{ex['line_number']}" : ''}: #{s['start']}"
+      end
+    end
 
     puts 'Slowest files:'
     file_times.sort_by { |_, t| -t }.first(10).each { |f, t| puts format('  %6.2f s %s%s', t, f, t > SLOW_FILE ? '  SLOW' : '') }
