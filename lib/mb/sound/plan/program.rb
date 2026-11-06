@@ -388,7 +388,7 @@ module MB
                    when :wavetable then 0
                    else Op::Tone::WAVES.fetch(tone.wave_type)
                    end
-            width_value = op.width.is_a?(Const) ? op.width.value : nil
+            width_value = op.width.is_a?(Const) ? Kernels::Arithmetic.f32(op.width.value) : nil # (as Tone#compute reads it)
 
             sc = scalar(
               op.frequency.is_a?(Const) ? op.frequency.value : 0,

@@ -53,32 +53,33 @@ module MB
             clip, instrument = split(values)
             existing = arr.tracks[name]
             created = existing.nil?
+            clip_text = nil
             if instrument || existing.nil?
               # (a new track without an instrument starts from the init
               # voice: sound-design-2, the maintainer's "Init, based on 2osc
               # morph with optional am/fm/sync")
               instrument ||= BLANK
+              unless session.playing_after_queue?(name)
+                # (the clip it plays next, known now: the track's check
+                # builds the instrument for it, and the play below takes
+                # that build instead of building it again)
+                clip ||= existing&.clip
+                clip, clip_text = default_clip_text(name, instrument) unless clip
+                entry = nil
+                arr.building_for(name, clip) {
+                  MB::Sound.track(name, instrument) or return nil
+                  entry = MB::Sound.bg(name, clip)
+                }
+                return opened(session, name, instrument, created, clip_text || clip_name(clip), true, entry)
+              end
               MB::Sound.track(name, instrument) or return nil
             end
             tr = arr.tracks[name]
             clip ||= tr&.clip
             played = !session.playing_after_queue?(name) || values.any? { |v| v.is_a?(Sequence::Clip) || v.is_a?(Sequence::Kit) }
-            clip_text = clip_name(clip)
-            unless clip
-              clip, note = default_clip(name, instrument)
-              clip_text = "#{note} (its role's note)"
-            end
+            clip, clip_text = default_clip_text(name, instrument) unless clip
             entry = played ? MB::Sound.bg(name, clip) : nil
-            @last = name
-            @open = true
-
-            Inspect.target = { track: name, node: nil }.freeze
-            show_screen
-            info = Inspect::Gatherer.new.call(session, Inspect.target) rescue nil
-            info = nil unless info&.track == name # (not playing yet: it lands at its launch point)
-            row = info&.selected && "#{Inspect::SECTION_TITLES[info.selected.section] || 'row'} #{info.selected.label}"
-            Opened.new(track: name, instrument: instrument_name(instrument), created: created, clip: clip_text, played: played,
-                       knobs: info ? info.knobs : nil, row: row, entry: entry)
+            opened(session, name, instrument, created, clip_text || clip_name(clip), played, entry)
           end
 
           # Puts back the screen that was up before `design` (ui off when
@@ -114,6 +115,20 @@ module MB
 
           private
 
+          # The Opened for track +name+ just opened, with the inspector on it.
+          def opened(session, name, instrument, created, clip_text, played, entry)
+            @last = name
+            @open = true
+
+            Inspect.target = { track: name, node: nil }.freeze
+            show_screen
+            info = Inspect::Gatherer.new.call(session, Inspect.target) rescue nil
+            info = nil unless info&.track == name # (not playing yet: it lands at its launch point)
+            row = info&.selected && "#{Inspect::SECTION_TITLES[info.selected.section] || 'row'} #{info.selected.label}"
+            Opened.new(track: name, instrument: instrument_name(instrument), created: created, clip: clip_text, played: played,
+                       knobs: info ? info.knobs : nil, row: row, entry: entry)
+          end
+
           # [clip, instrument] from design's values.
           def split(values)
             clip = instrument = nil
@@ -135,6 +150,12 @@ module MB
             row = PatchRender.role_of("#{name} #{instrument_name(instrument)}")
             note = Note.new(row[:note])
             [MB::Sound.seq(note).n2.loop, note.name]
+          end
+
+          # [default_clip's clip, the text saying so].
+          def default_clip_text(name, instrument)
+            clip, note = default_clip(name, instrument)
+            [clip, "#{note} (its role's note)"]
           end
 
           def instrument_name(v)

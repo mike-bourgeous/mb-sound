@@ -29,6 +29,12 @@ module MB
         end
       end
 
+      # True if this reads from or writes to a command it started (see
+      # #run), not an IO object it was given.
+      def runs_command?
+        @popen
+      end
+
       # Returns true if the input or output has been closed.
       def closed?
         @io.nil? || @io.closed?
@@ -70,8 +76,8 @@ module MB
 
         direction = "#{direction}b" unless direction.end_with?('b')
 
-        pipe, @child = Starter.popen(command, direction, pgroup: 0)
-        MB::U.pipe_size(pipe, @buffer_size * @channels * 4)
+        # (the size set before the command starts: a full pipe can't shrink)
+        pipe, @child = Starter.popen(command, direction, pgroup: 0, pipe_size: @buffer_size * @channels * 4)
         pipe
       end
     end

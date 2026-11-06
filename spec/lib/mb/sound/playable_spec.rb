@@ -25,7 +25,9 @@ RSpec.describe(MB::Sound::Playable) do
       expect(described_class.graph(arp)).to have_attributes(ends: true, description: /arp_a7/)
       expect(described_class.graph(arp.node).ends).to eq(nil)
       expect(described_class.graph(MB::Sound.seq(MB::Sound::C4).loop)).to have_attributes(ends: false, note: /soft saw/)
-      expect(described_class.graph([arp, 'spec/test_data/arp_a7.flac']).nodes.length).to eq(4)
+      both = described_class.graph([arp, 'spec/test_data/arp_a7.flac'])
+      expect(both.nodes.length).to eq(4)
+      close_inputs(both.nodes) # (the file's reader, never read)
       expect(described_class.graph(Numo::SFloat.zeros(2, 10)).nodes.length).to eq(2)
     end
 

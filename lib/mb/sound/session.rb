@@ -326,6 +326,7 @@ module MB
         @mutex = Mutex.new
         @thread = nil
         @closed = false
+        @file_readers = ObjectSpace::WeakMap.new # (process-backed inputs its graphs read; see #close_file_readers)
         @plan_deferral = nil # (see #plan_deferral)
         @generation = @transport.generation
         @scheduler = Scheduler.new(self, realtime: realtime, raise_errors: raise_errors)
@@ -539,6 +540,7 @@ module MB
         found = graph_nodes(nodes)
         joined = adopt_knobs(nodes, player: name, found: found) # graph documents' knobs and rack knobs join the Session (see Knobs#adopt_knobs)
         found = graph_nodes(nodes) if knobs_redirected?(joined, found)
+        note_file_readers(found)
         adopt_clocks(playable.nodes) # graph documents' clocks too (see Clocks#adopt_clocks)
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
@@ -1413,6 +1415,7 @@ module MB
         @scheduler.close
         @plan_deferral&.close
         @output&.close
+        close_file_readers
         # (the graphs stay; see Strip.structure_check)
         check_structure! if Strip.structure_check
       end
@@ -1423,6 +1426,35 @@ module MB
       end
 
       private
+
+      # Remembers the inputs among +nodes+ (a graph's nodes, from #add)
+      # that read from a process (FFMPEGInput's ffmpeg: file_input, a
+      # played file), so #close can close them (fix-batch-1106).
+      def note_file_readers(nodes)
+        nodes.each { |n| @file_readers[n] = true if n.is_a?(IOInput) && n.runs_command? && !n.closed? }
+      end
+
+      # Closes every input noted by #note_file_readers that is still open
+      # (#close, after the render thread ended): a graph cut short (a stop,
+      # until(), a replacement) left its ffmpeg blocked on a full pipe until
+      # the GC closed the pipe, a process (and its memory) per cut-short
+      # file for as long as the GC took (fix-flaky-1104 found 19 in a
+      # suite run).  Graphs the closed Session played can't play on in it;
+      # one played in another Session too ends there with the file.  While
+      # the Session runs, a cut-short graph stays open for #resume and
+      # #undo (design/notes/audio_io.md).
+      def close_file_readers
+        list = []
+        @file_readers.each_key { |r| list << r }
+        list.each do |r|
+          next if r.closed?
+          begin
+            r.close
+          rescue StandardError
+            nil # (a reader cut short may end on SIGPIPE; nothing left to tell anyone)
+          end
+        end
+      end
 
       # Starts a graph built by #add at timeline position +start+, handing
       # over from the graph it replaces (applied by the change queue).

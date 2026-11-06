@@ -50,14 +50,15 @@ module NumberOnlySweep
   end
 
   # Documents whose params (constant nodes at the numbers' values) play
-  # other samples than the numbers, with why: found by this sweep
-  # (fit-patch-2), the same on master-ai, left for a DSP round.  An entry
-  # that plays the numbers' samples again fails (remove it).
-  KNOWN = {
-    'complex shapes' => 'complex_square.pwm(0.3.constant) plays another duty path than pwm(0.3): -23.7 dB peak difference',
-    'feedback biquad(:allpass)' => 'a quality node in a one-sample feedback loop with a moving cutoff differs from the number by -50 dB ' \
-                                   '(the SVF too; a fixed cutoff matches)',
-  }.freeze
+  # other samples than the numbers, with why.  An entry that plays the
+  # numbers' samples again fails (remove it).  fix-batch-1106 emptied it:
+  # both entries were a number read as a double where a node's samples
+  # are floats (Tone's warp width and pivot; a feedback loop's steady
+  # params), which numbers now read as the float too (complex_square's
+  # pwm(0.3) and pwm(0.3.constant) were -23.7 dB apart, a warp edge landing
+  # exactly on a sample at 220 Hz; a loop allpass's quality -50 dB, its
+  # pitch latency unwrapping to another period).
+  KNOWN = {}.freeze
 
   # Code beyond the factories: settings the factories don't reach, and the
   # shapes the hand-tune queue's fits print (synthetic; no private code).

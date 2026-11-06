@@ -50,6 +50,21 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
     }
   end
 
+  # fix-batch-1106: a steady constant in a loop reads as the float a
+  # node's sample holds, as a shared one (a Tee branch, a boundary input)
+  # or a param's node does: an allpass's quality 1.2 and 1.2.constant
+  # were -50 dB apart (the pitch latency, at the double, unwrapped to
+  # another period: its unwrap is that sensitive near half a period)
+  it 'plays a filter setting given as a number and as a constant node alike' do
+    [:biquad, :svf].each do |structure|
+      mk = ->(q) {
+        110.hz.saw.at(0.5).feedback { |fb, input| input + fb.delay(40.samples).filter(:allpass, cutoff: 7.hz.lfo.at(400..3000), quality: q, structure: structure) * 0.4 }
+      }
+      render = ->(g) { SpecBuffers.join(Array.new(8) { g.sample(128).dup }) }
+      expect(render.(mk.(1.2.constant))).to eq(render.(mk.(1.2))), structure.to_s
+    end
+  end
+
   describe 'latency compensation' do
     [110, 440, 1760].each do |f|
       it "tunes a Karplus-Strong string at #{f} Hz within 0.05 cents" do
@@ -107,10 +122,14 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
       expect(cents(pitch(d, 440), 440)).to be_within(0.05).of(expected)
     end
 
+    # The loop lowpass's quality as the loop reads it: the float a node's
+    # sample holds (fix-batch-1106)
+    def ks_q = MB::Sound::Kernels::Arithmetic.f32(0.5**0.5)
+
     # The phase delay at f of the KS loop with a lowpass at damp * f (the
     # two-sample average's half sample plus the SVF's phase delay)
     def ks_phase_delay(f, damp)
-      svf = MB::Sound::Filter::SVF.new(:lowpass, 48000, f * damp, quality: 0.5**0.5)
+      svf = MB::Sound::Filter::SVF.new(:lowpass, 48000, f * damp, quality: ks_q)
       w = 2 * Math::PI * f / 48000.0
       0.5 - svf.response(w).arg / w
     end
@@ -134,7 +153,7 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
         d = l.sample(96000)[4800...(4800 + 65536)]
         expect(cents(pitch(d, f), f).abs).to be < tol
         g = Math.tan(Math::PI * f * damp / 48000.0)
-        expect(l.latency).to be_within(1e-9).of(0.5 + 1 / (2 * g * 0.5**0.5))
+        expect(l.latency).to be_within(1e-9).of(0.5 + 1 / (2 * g * ks_q))
         expect(cents(pitch(ks(f, damping: damp, compensate: false).sample(96000)[4800...(4800 + 65536)], f), f)).to be < -40
       end
     end
