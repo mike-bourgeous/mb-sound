@@ -263,9 +263,16 @@ module MB
         # shell) with a pipe to (+mode+ "w") or from ("r") it, like IO.popen;
         # other options as .spawn.  Returns [IO, Child]: close the IO, then
         # Child#wait for its status.
-        def popen(command, mode = 'r', **opts)
+        #
+        # +pipe_size+ (bytes) sets the pipe's capacity (MB::U.pipe_size;
+        # Linux) before the child starts: set after, F_SETPIPE_SZ fails
+        # with EBUSY once the child has written more than the new size (an
+        # ffmpeg reader of a short file, fix-batch-1106: the golden
+        # check's EBUSY of 2026-11-04).
+        def popen(command, mode = 'r', pipe_size: nil, **opts)
           argv = command.is_a?(Array) ? command : [command]
           r, w = IO.pipe
+          MB::U.pipe_size(r, pipe_size) if pipe_size
           if mode.include?('w')
             child = spawn(*argv, in: r, **opts)
             r.close
