@@ -84,16 +84,16 @@ module GraphSweep
           }
         }],
       ]
-    } + svf::DECRAMP_TYPES.flat_map { |t|
-      # decramped designs (filters-acd-1): cutoffs up to near Nyquist
+    } + svf::MATCHED_TYPES.flat_map { |t|
+      # matched responses (filters-acd-1): cutoffs up to near Nyquist
       gain = svf::GAIN_TYPES.include?(t)
       fo = svf::FIRST_ORDER_TYPES.include?(t)
       [
-        ["filter(#{t.inspect}, decramp: true) modulated", ->(c) {
-          c.sig.filter(t, cutoff: c.mod(200, 20000), quality: fo ? nil : c.mod(0.5, 6, 3), gain: gain ? c.mod(0.5, 2, 5) : nil, decramp: true)
+        ["filter(#{t.inspect}, response: :matched) modulated", ->(c) {
+          c.sig.filter(t, cutoff: c.mod(200, 20000), quality: fo ? nil : c.mod(0.5, 6, 3), gain: gain ? c.mod(0.5, 2, 5) : nil, response: :matched)
         }],
-        ["feedback filter(#{t.inspect}, decramp: true) constant", ->(c) {
-          c.sig.feedback { |fb, input| input + fb.delay(40.samples).filter(t, cutoff: 12000, quality: fo ? nil : 1.5, gain: gain ? 1.5 : nil, decramp: true) * 0.4 }
+        ["feedback filter(#{t.inspect}, response: :matched) constant", ->(c) {
+          c.sig.feedback { |fb, input| input + fb.delay(40.samples).filter(t, cutoff: 12000, quality: fo ? nil : 1.5, gain: gain ? 1.5 : nil, response: :matched) * 0.4 }
         }],
       ]
     }

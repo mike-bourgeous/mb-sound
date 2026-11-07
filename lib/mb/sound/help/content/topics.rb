@@ -190,20 +190,21 @@ module MB
     Help.topic :filters, 'Filters', group: :sound do
       about <<~TEXT
         Cookbook filters (`filter(:lowpass, cutoff:, quality:)`) build SVFs
-        whose parameters can move every sample; `:lowpass1p`, `:highpass1p`,
-        `:lowshelf1p`, and `:highshelf1p` are 6 dB/octave one-poles, and
-        `decramp: true` keeps the analog shape up to 20 kHz.  `lp4` is a
+        whose parameters can move every sample; `lp1`/`hp1` (`:lowpass1p`,
+        `:highpass1p`), `:lowshelf1p`, and `:highshelf1p` are 6 dB/octave
+        one-poles, and `response: :matched` keeps the analog shape up to
+        20 kHz (`:bilinear` is the default).  `lp4` is a
         CEM3379-style four-pole, `diode` a 303-style ladder with the same
         knobs.
       TEXT
-      dsl :filter, :lp4, :diode, :peq, :formant, :smooth
+      dsl :filter, :lp1, :hp1, :lp4, :diode, :peq, :formant, :smooth
       note :filters
       see :knobs
       example 'a swept four-pole (one bar up, one bar down: the length is per step)' do
         bg :try, 55.hz.saw.at(-16.db).lp4(tween([200.hz, 4000.hz], 1.bar), resonance: 0.6).until(2.bars)
       end
       example 'a gentle 6 dB/octave treble shelf on a one-pole lowpass' do
-        bg :try, 110.hz.saw.at(-16.db).filter(:lowpass1p, cutoff: 2000).filter(:highshelf1p, cutoff: 4000, gain: 6.db).until(2.bars)
+        bg :try, 110.hz.saw.at(-16.db).lp1(2000).filter(:highshelf1p, cutoff: 4000, gain: 6.db).until(2.bars)
       end
     end
 

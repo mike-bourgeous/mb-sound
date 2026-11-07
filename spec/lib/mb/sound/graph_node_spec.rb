@@ -567,35 +567,67 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     end
 
     # filters-acd-1 (2026-11-07)
-    context 'with decramp: true' do
-      it 'builds the decramped SVF design' do
-        f = 110.hz.saw.filter(:lowpass, cutoff: 15000, quality: 4, decramp: true)
-        expect(f.base_filter.decramp).to eq(true)
+    describe '#lp1 and #hp1' do
+      let(:noise) { MB::Sound.with_seed(4) { Numo::SFloat.cast(MB::Sound.noise.sample(4800)) } }
+
+      def input
+        MB::Sound::ArrayInput.new(data: [noise])
+      end
+
+      it 'are filter(:lowpass1p / :highpass1p, ...), with a Pitch cutoff as its frequency and response:' do
+        expect(input.lp1(800).sample(4800)).to eq(input.filter(:lowpass1p, cutoff: 800).sample(4800))
+        expect(input.lp1(800.hz).sample(4800)).to eq(input.filter(:lowpass1p, cutoff: 800).sample(4800))
+        expect(input.lowpass1(800).sample(4800)).to eq(input.filter(:lowpass1p, cutoff: 800).sample(4800))
+        expect(input.hp1(300, response: :matched).sample(4800)).to eq(input.filter(:highpass1p, cutoff: 300, response: :matched).sample(4800))
+        expect(input.highpass1(300).sample(4800)).to eq(input.filter(:highpass1p, cutoff: 300).sample(4800))
+        expect(input.lp1(0.5.hz.lfo.at(200..800)).sources[:cutoff]).to be_a(MB::Sound::GraphNode)
+      end
+
+      it 'print and load back as written' do
+        g = 110.hz.saw.lp1(800).hp1(0.5.hz.lfo.at(50..200), response: :matched)
+        expect(g.to_ruby).to include('110.hz.saw.lp1(800).hp1(0.5.hz.lfo.at(50..200), response: :matched)')
+        expect(MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g)).sample(800)).to eq(g.sample(800))
+      end
+    end
+
+    # filters-acd-1 (2026-11-07)
+    context 'with response: :matched' do
+      it 'builds the matched SVF design' do
+        f = 110.hz.saw.filter(:lowpass, cutoff: 15000, quality: 4, response: :matched)
+        expect(f.base_filter.response_design).to eq(:matched)
         expect(f.base_filter.type_id).to eq(16)
-        expect(110.hz.saw.filter(:lowpass, cutoff: 15000, quality: 4).base_filter.decramp).to eq(false)
+        expect(110.hz.saw.filter(:lowpass, cutoff: 15000, quality: 4).base_filter.response_design).to eq(:bilinear)
         a = f.sample(4800).dup
-        expect(110.hz.saw.filter(:lowpass, cutoff: 15000.constant, quality: 4, decramp: true).sample(4800)).to eq(a)
+        expect(110.hz.saw.filter(:lowpass, cutoff: 15000.constant, quality: 4, response: :matched).sample(4800)).to eq(a)
         expect(110.hz.saw.filter(:lowpass, cutoff: 15000, quality: 4).sample(4800)).not_to eq(a)
       end
 
       it 'takes lp4\'s resonance: on :lowpass and passes through channel bundles' do
-        expect(110.hz.saw.filter(:lowpass, cutoff: 9000, resonance: 0.3, decramp: true).base_filter.decramp).to eq(true)
-        b = MB::Sound.stereo(110.hz.saw, 220.hz.saw).filter(:highpass, cutoff: 500, decramp: true)
-        expect(b.outputs.map { |o| o.base_filter.decramp }).to eq([true, true])
+        expect(110.hz.saw.filter(:lowpass, cutoff: 9000, resonance: 0.3, response: :matched).base_filter.response_design).to eq(:matched)
+        b = MB::Sound.stereo(110.hz.saw, 220.hz.saw).filter(:highpass, cutoff: 500, response: :matched)
+        expect(b.outputs.map { |o| o.base_filter.response_design }).to eq([:matched, :matched])
       end
 
-      it 'raises for types without a decramped design, the biquad, lp4, and filter objects' do
-        expect { 110.hz.saw.filter(:peak, cutoff: 900, gain: 2, decramp: true) }.to raise_error(ArgumentError, /decramp/)
-        expect { 110.hz.saw.filter(:lowshelf1p, cutoff: 900, gain: 2, decramp: true) }.to raise_error(ArgumentError, /decramp/)
-        expect { 110.hz.saw.filter(:lowpass, cutoff: 900, structure: :biquad, decramp: true) }.to raise_error(ArgumentError, /biquad/)
-        expect { 110.hz.saw.filter(:lowpass, cutoff: 900, slope: 24, decramp: true) }.to raise_error(ArgumentError, /slope/)
-        expect { 110.hz.saw.filter(:lp4, cutoff: 900, decramp: true) }.to raise_error(ArgumentError, /decramp/)
-        expect { 110.hz.saw.filter(400.hz.lowpass, decramp: true) }.to raise_error(ArgumentError, /decramp/)
+      it 'raises for types without a matched design, the biquad, lp4, and filter objects' do
+        expect { 110.hz.saw.filter(:peak, cutoff: 900, gain: 2, response: :matched) }.to raise_error(ArgumentError, /response/)
+        expect { 110.hz.saw.filter(:lowshelf1p, cutoff: 900, gain: 2, response: :matched) }.to raise_error(ArgumentError, /response/)
+        expect { 110.hz.saw.filter(:lowpass, cutoff: 900, structure: :biquad, response: :matched) }.to raise_error(ArgumentError, /biquad/)
+        expect { 110.hz.saw.filter(:lowpass, cutoff: 900, slope: 24, response: :matched) }.to raise_error(ArgumentError, /slope/)
+        expect { 110.hz.saw.filter(:lp4, cutoff: 900, response: :matched) }.to raise_error(ArgumentError, /response/)
+        expect { 110.hz.saw.filter(400.hz.lowpass, response: :matched) }.to raise_error(ArgumentError, /response/)
+      end
+
+      it 'takes response: :bilinear (the default, the same samples) and raises for other values' do
+        a = 110.hz.saw.filter(:lowpass, cutoff: 9000, quality: 2).sample(4800).dup
+        expect(110.hz.saw.filter(:lowpass, cutoff: 9000, quality: 2, response: :bilinear).sample(4800)).to eq(a)
+        expect(110.hz.saw.filter(:lowpass, cutoff: 9000, structure: :biquad, response: :bilinear).base_filter).to be_a(MB::Sound::Filter::Cookbook)
+        expect { 110.hz.saw.filter(:lowpass, cutoff: 9000, response: :analog) }.to raise_error(ArgumentError, /:bilinear or :matched/)
+        expect(MB::Sound::Filter::SVF::RESPONSES).to eq([:bilinear, :matched])
       end
 
       it 'prints and loads back' do
-        g = 110.hz.saw.filter(:bandpass, cutoff: 0.5.hz.lfo.at(5000..15000), quality: 3, decramp: true)
-        expect(g.to_ruby).to include('filter(:bandpass, cutoff: 0.5.hz.lfo.at(5000..15000), quality: 3, decramp: true)')
+        g = 110.hz.saw.filter(:bandpass, cutoff: 0.5.hz.lfo.at(5000..15000), quality: 3, response: :matched)
+        expect(g.to_ruby).to include('filter(:bandpass, cutoff: 0.5.hz.lfo.at(5000..15000), quality: 3, response: :matched)')
         expect(MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g)).sample(800)).to eq(g.sample(800))
       end
     end

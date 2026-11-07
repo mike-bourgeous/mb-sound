@@ -125,7 +125,7 @@ module MB
             end
 
             def expression
-              "svf_#{@filter.filter_type}#{"_decramped" if @filter.decramp}(#{@a}, cutoff: #{@cutoff}, quality: #{@quality}, gain: #{@gain})"
+              "svf_#{@filter.filter_type}#{"_matched" if @filter.response_design == :matched}(#{@a}, cutoff: #{@cutoff}, quality: #{@quality}, gain: #{@gain})"
             end
 
             def opcode = :svf
@@ -1473,7 +1473,7 @@ module MB
           # tan(pi fc / rate)); an allpass's twice that; a one-pole
           # lowpass's 1 / (2 g).  Other types count as no latency (their
           # phase at the loop's low frequencies is small or their DC gain
-          # is zero).  (Decramped designs count as their bilinear ones.)
+          # is zero).  (Matched designs count as their bilinear ones.)
           def svf_latency(op, m, values)
             return m if m.equal?(ZERO)
 

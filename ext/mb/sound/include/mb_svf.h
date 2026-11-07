@@ -32,9 +32,9 @@
 #define SVF_LOWSHELF1P 11
 #define SVF_HIGHSHELF1P 12
 #define SVF_TYPE_MAX 12
-// Added to a type: the decramped design (mb_svf_decramp; only for the
-// types mb_svf_type_valid accepts with it)
-#define SVF_DECRAMP 16
+// Added to a type: the matched-response design (`response: :matched`;
+// mb_svf_matched; only for the types mb_svf_type_valid accepts with it)
+#define SVF_MATCHED 16
 
 // Lowest cutoff in Hz (NaN and negative values too), like FP_MIN_CUTOFF
 #define SVF_MIN_CUTOFF 1.0
@@ -42,7 +42,7 @@
 #define SVF_MIN_QUALITY 1e-10
 #define SVF_MIN_GAIN 1e-10
 
-// True if +type+ is a filter type, with or without SVF_DECRAMP (decramped
+// True if +type+ is a filter type, with or without SVF_MATCHED (matched
 // designs exist for the lowpass, highpass, bandpasses, notch, allpass, and
 // the first-order lowpass and highpass).
 static inline int mb_svf_type_valid(int type)
@@ -50,8 +50,8 @@ static inline int mb_svf_type_valid(int type)
 	if (type < 0) {
 		return 0;
 	}
-	if (type & SVF_DECRAMP) {
-		switch (type & ~SVF_DECRAMP) {
+	if (type & SVF_MATCHED) {
+		switch (type & ~SVF_MATCHED) {
 			case SVF_LOWPASS:
 			case SVF_HIGHPASS:
 			case SVF_BANDPASS:
@@ -83,7 +83,7 @@ static inline void mb_svf_init(struct mb_svf *s)
 	s->a2 = s->a3 = s->m0 = s->m1 = s->m2 = 0;
 }
 
-// The decramped design of filter +type+ (without SVF_DECRAMP; see
+// The matched-response design of filter +type+ (without SVF_MATCHED; see
 // mb_svf_type_valid) at +w0+ radians per sample, quality +q+, and linear gain
 // +G+ (filters-acd-1, 2026-11-07): the SVF's g, k, and output mix for a
 // digital response matched to the analog prototype's magnitude instead of
@@ -101,8 +101,8 @@ static inline void mb_svf_init(struct mb_svf *s)
 // is then written as the SVF it equals: with P = 1 + a1 + a2, M = 1 - a1 +
 // a2, W = b0 + b1 + b2, V = b0 - b1 + b2, D = b0 - b2: g = sqrt(P / M),
 // g k = 2 (1 - a2) / M, m0 = V / M, m1 = (2 D - g k V) / (g M), m2 = W / P -
-// m0.  Exact Ruby mirror: Filter::SVF.decramp_design.
-static inline void mb_svf_decramp(int type, double w0, double q, double G, double *gp, double *kp, double *m)
+// m0.  Exact Ruby mirror: Filter::SVF.matched_design.
+static inline void mb_svf_matched(int type, double w0, double q, double G, double *gp, double *kp, double *m)
 {
 	double s1 = sin(0.5 * w0);
 	double ph1 = s1 * s1;
@@ -227,8 +227,8 @@ static inline void mb_svf_design(int type, double fc, double q, double G, double
 		G = SVF_MIN_GAIN;
 	}
 
-	if (type & SVF_DECRAMP) {
-		mb_svf_decramp(type & ~SVF_DECRAMP, 2.0 * fc * pi_over_rate, q, G, gp, kp, m);
+	if (type & SVF_MATCHED) {
+		mb_svf_matched(type & ~SVF_MATCHED, 2.0 * fc * pi_over_rate, q, G, gp, kp, m);
 		return;
 	}
 

@@ -70,7 +70,7 @@ static void pf_svf_read(struct pf_svf_lane *f, VALUE filter)
 
 	f->type = NUM2INT(rb_ivar_get(filter, id_type_id));
 	if (!mb_svf_type_valid(f->type)) {
-		rb_raise(rb_eArgError, "SVF filter type must be 0..12, or a decramped type (+16)");
+		rb_raise(rb_eArgError, "SVF filter type must be 0..12, or a matched-response type (+16)");
 	}
 	double rate = NUM2DBL(rb_ivar_get(filter, id_sample_rate));
 	if (!(rate > 0) || !isfinite(rate)) {

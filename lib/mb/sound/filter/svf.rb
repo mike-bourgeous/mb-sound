@@ -23,12 +23,13 @@ module MB
       # pole) with an output mix that cancels one pole, so they share its
       # kernels, plan ops, and loop ops.
       #
-      # +decramp: true+ (DECRAMP_TYPES) replaces the bilinear transform with
-      # a design matched to the analog response's magnitude (see
-      # .decramp_design): the bilinear transform squeezes the analog
+      # +response: :matched+ (MATCHED_TYPES; the default is :bilinear, see
+      # RESPONSES) replaces the bilinear transform with a design matched to
+      # the analog response's magnitude (see .matched_design): the bilinear
+      # transform squeezes the analog
       # response above the cutoff into the space below Nyquist, so at 48 kHz
       # a lowpass's top octave falls 5-13 dB too fast and highpasses and
-      # bandpasses lose their top octave's shape; the decramped design stays
+      # bandpasses lose their top octave's shape; the matched design stays
       # within about 1 dB of the analog response up to 20 kHz (lowpass within
       # 12 dB of its peak: 0.8 dB; see design/notes/filters.md).
       #
@@ -79,16 +80,35 @@ module MB
         # ignore the quality.
         FIRST_ORDER_TYPES = [:lowpass1p, :highpass1p, :lowshelf1p, :highshelf1p].freeze
 
-        # Types with a decramped design (+decramp: true+; see .decramp_design).
-        DECRAMP_TYPES = [:lowpass, :highpass, :bandpass, :bandpass_skirt, :notch, :allpass, :lowpass1p, :highpass1p].freeze
+        # Designs for +response:+: :bilinear (the default; the bilinear
+        # transform with the cutoff prewarped, the cookbook's) or :matched
+        # (the analog magnitude up to Nyquist; MATCHED_TYPES only, see
+        # .matched_design).
+        RESPONSES = [:bilinear, :matched].freeze
 
-        # Added to a type's id for its decramped design (SVF_DECRAMP in
+        # Types with a matched design (+response: :matched+).
+        MATCHED_TYPES = [:lowpass, :highpass, :bandpass, :bandpass_skirt, :notch, :allpass, :lowpass1p, :highpass1p].freeze
+
+        # Added to a type's id for its matched design (SVF_MATCHED in
         # mb_svf.h).
-        DECRAMP = 16
+        MATCHED = 16
 
-        # Every valid kernel type id (FILTER_TYPE_IDS, and DECRAMP_TYPES' ids
-        # plus DECRAMP; mb_svf_type_valid).
-        TYPE_IDS = (FILTER_TYPE_IDS.values + DECRAMP_TYPES.map { |t| FILTER_TYPE_IDS.fetch(t) + DECRAMP }).freeze
+        # Every valid kernel type id (FILTER_TYPE_IDS, and MATCHED_TYPES' ids
+        # plus MATCHED; mb_svf_type_valid).
+        TYPE_IDS = (FILTER_TYPE_IDS.values + MATCHED_TYPES.map { |t| FILTER_TYPE_IDS.fetch(t) + MATCHED }).freeze
+
+        # Checks a +response:+ option for +filter_type+ (nil for :bilinear),
+        # returning it.
+        def self.check_response(response, filter_type)
+          response ||= :bilinear
+          unless RESPONSES.include?(response)
+            raise ArgumentError, "response: is #{RESPONSES.map(&:inspect).join(' or ')} (got #{response.inspect})"
+          end
+          if response == :matched && !MATCHED_TYPES.include?(filter_type)
+            raise ArgumentError, "response: :matched is for #{MATCHED_TYPES.map(&:inspect).join(', ')} (got #{filter_type.inspect})"
+          end
+          response
+        end
 
         # The quality first-order types keep (they ignore it).
         FIRST_ORDER_QUALITY = 0.5
@@ -143,11 +163,11 @@ module MB
         attr_reader :filter_type, :sample_rate, :cutoff, :quality, :gain
 
         # The filter type's number in the kernels (FILTER_TYPE_IDS, plus
-        # DECRAMP when decramped).
+        # MATCHED for the matched response).
         attr_reader :type_id
 
-        # True for the decramped design (see DECRAMP_TYPES).
-        attr_reader :decramp
+        # The design: :bilinear or :matched (see RESPONSES).
+        attr_reader :response_design
 
         # Makes an SVF with the parameters of a Filter::Cookbook (its
         # quality, computed from a bandwidth or shelf slope if it was made
@@ -166,13 +186,12 @@ module MB
         # Cookbook does), and +:db_gain+ for bandpass (output gain), peak,
         # and shelves (dB, as its name says, or a Decibels value read as its
         # exact dB), or +:gain+, the same as a linear gain.  First-order types
-        # (FIRST_ORDER_TYPES) take no quality.  +:decramp+ picks the
-        # decramped design (DECRAMP_TYPES; see .decramp_design).
-        def initialize(filter_type, sample_rate, f_center, quality: nil, db_gain: nil, gain: nil, bandwidth_oct: nil, shelf_slope: nil, decramp: false)
+        # (FIRST_ORDER_TYPES) take no quality.  +:response+ picks the design
+        # (RESPONSES: :bilinear, the default, or :matched for MATCHED_TYPES;
+        # see .matched_design).
+        def initialize(filter_type, sample_rate, f_center, quality: nil, db_gain: nil, gain: nil, bandwidth_oct: nil, shelf_slope: nil, response: :bilinear)
           raise ArgumentError, "Invalid filter type #{filter_type.inspect}" unless FILTER_TYPE_IDS.include?(filter_type)
-          if decramp && !DECRAMP_TYPES.include?(filter_type)
-            raise ArgumentError, "decramp: is for #{DECRAMP_TYPES.map(&:inspect).join(', ')} (got #{filter_type.inspect})"
-          end
+          response = self.class.check_response(response, filter_type)
           if FIRST_ORDER_TYPES.include?(filter_type)
             raise ArgumentError, "First-order filters (#{filter_type.inspect}) take no quality, bandwidth, or shelf slope" if bandwidth_oct || shelf_slope
             quality ||= FIRST_ORDER_QUALITY
@@ -193,8 +212,8 @@ module MB
           raise ArgumentError, 'Missing quality/bandwidth_oct/shelf_slope' if quality.nil?
 
           @filter_type = filter_type
-          @decramp = !!decramp
-          @type_id = FILTER_TYPE_IDS.fetch(filter_type) + (@decramp ? DECRAMP : 0)
+          @response_design = response
+          @type_id = FILTER_TYPE_IDS.fetch(filter_type) + (response == :matched ? MATCHED : 0)
           @sample_rate = sample_rate.to_f
           @cutoff = f_center.to_f
           @quality = quality.to_f
@@ -292,7 +311,7 @@ module MB
         # See GraphNode#to_s
         def to_s
           s = "svf #{@filter_type}"
-          s << ' decramped' if @decramp
+          s << ' matched' if @response_design == :matched
           s << " quality: #{@quality.round(4)}" if @quality && !FIRST_ORDER_TYPES.include?(@filter_type)
           s << " gain: #{db_gain.round(2)}dB" if @gain && GAIN_TYPES.include?(@filter_type)
           s
@@ -300,7 +319,7 @@ module MB
 
         # See GraphNode#to_s_graphviz
         def to_s_graphviz
-          s = "type: svf #{@filter_type}#{' decramped' if @decramp}\n"
+          s = "type: svf #{@filter_type}#{' matched' if @response_design == :matched}\n"
           s << "gain: #{db_gain.round(2)}dB\n" if @gain && GAIN_TYPES.include?(@filter_type)
           s
         end
@@ -322,8 +341,8 @@ module MB
           q = MIN_QUALITY unless q >= MIN_QUALITY
           gain = MIN_GAIN unless gain >= MIN_GAIN
 
-          if type_id >= DECRAMP
-            g, k, m0, m1, m2 = decramp_design(type_id - DECRAMP, 2.0 * fc * (Math::PI / rate), q, gain)
+          if type_id >= MATCHED
+            g, k, m0, m1, m2 = matched_design(type_id - MATCHED, 2.0 * fc * (Math::PI / rate), q, gain)
             return [g, k, 1.0 / (1.0 + g * (g + k)), m0, m1, m2]
           end
 
@@ -375,8 +394,9 @@ module MB
           [g, k, a1, m0, m1, m2]
         end
 
-        # The decramped design (mb_svf_decramp in mb_svf.h; filters-acd-1,
-        # 2026-11-07) of the type with id +base_id+ (without DECRAMP) at +w0+
+        # The matched-response design (mb_svf_matched in mb_svf.h;
+        # filters-acd-1, 2026-11-07) of the type with id +base_id+ (without
+        # MATCHED) at +w0+
         # radians per sample, quality +q+, and linear gain +gain+ (clamped
         # by .coefficients): [g, k, m0, m1, m2] for a digital response
         # matched to the analog prototype's magnitude instead of the bilinear
@@ -393,7 +413,7 @@ module MB
         # b2, D = b0 - b2: g = sqrt(P / M), g k = 2 (1 - a2) / M, m0 = V / M,
         # m1 = (2 D - g k V) / (g M), m2 = W / P - m0.  The same operations
         # as the C.
-        def self.decramp_design(base_id, w0, q, gain)
+        def self.matched_design(base_id, w0, q, gain)
           s1 = Math.sin(0.5 * w0)
           ph1 = s1 * s1
           ph0 = 1.0 - ph1
@@ -481,7 +501,7 @@ module MB
         # operations, and samples (specs check every sample).  Returns a new
         # SFloat; updates +state+.
         def self.process_ruby(buffer, cutoff, quality, gain, type_id, state, sample_rate)
-          raise ArgumentError, 'SVF filter type must be 0..12, or a decramped type (+16)' unless TYPE_IDS.include?(type_id)
+          raise ArgumentError, 'SVF filter type must be 0..12, or a matched-response type (+16)' unless TYPE_IDS.include?(type_id)
           rate = sample_rate.to_f
           raise ArgumentError, 'Sample rate must be positive and finite' unless rate > 0 && rate.finite?
           raise ArgumentError, 'SVF state must have two elements' unless state.is_a?(Array) && (state.length == 2 || state.length == 3)

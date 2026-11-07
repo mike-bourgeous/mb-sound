@@ -201,7 +201,7 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
  *   first-order types at k = 2 (a double pole, one cancelled): lowpass1p
  *   (0, 1, 1); highpass1p (1, -1, -1); lowshelf1p (1, G - 1, G - 1) with
  *   g / G for a cut; highshelf1p (G, 1 - G, 1 - G) with g G for a cut.
- * Types + 16 (SVF_DECRAMP) use the decramped design (mb_svf_decramp in
+ * Types + 16 (SVF_MATCHED) use the matched-response design (mb_svf_matched in
  * mb_svf.h) instead of the bilinear transform.
  *
  * Exact Ruby mirror: MB::Sound::Filter::SVF.process_ruby (same operations;
@@ -221,7 +221,7 @@ static VALUE ruby_svf(VALUE self, VALUE buffer, VALUE cutoff, VALUE quality, VAL
 {
 	int type = NUM2INT(type_v);
 	if (!mb_svf_type_valid(type)) {
-		rb_raise(rb_eArgError, "SVF filter type must be 0..12, or a decramped type (+16)");
+		rb_raise(rb_eArgError, "SVF filter type must be 0..12, or a matched-response type (+16)");
 	}
 	double rate = NUM2DBL(rate_v);
 	if (!(rate > 0) || !isfinite(rate)) {

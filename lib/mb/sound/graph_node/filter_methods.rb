@@ -33,12 +33,13 @@ module MB
         # :highshelf1p with +gain:+; Filter::SVF::FIRST_ORDER_TYPES), and
         # the four-pole types (FOUR_POLE_TYPES, see #lp4).
         #
-        # +decramp: true+ (:lowpass, :highpass, the bandpasses, :notch,
-        # :allpass, :lowpass1p, :highpass1p; Filter::SVF::DECRAMP_TYPES)
-        # matches the analog response up to Nyquist instead of the bilinear
-        # transform's, whose top octave falls too fast (at 48 kHz a lowpass
-        # near 10-15 kHz is 5-15 dB low near 20 kHz; decramped within about 1 dB
-        # up to 20 kHz).  Off by default (the same sound as before).
+        # +response:+ picks the SVF's design (Filter::SVF::RESPONSES):
+        # :bilinear (the default, the cookbook's bilinear transform) or
+        # :matched (:lowpass, :highpass, the bandpasses, :notch, :allpass,
+        # :lowpass1p, :highpass1p; Filter::SVF::MATCHED_TYPES), which keeps
+        # the analog response up to Nyquist where the bilinear transform's
+        # top octave falls too fast (at 48 kHz a lowpass near 10-15 kHz is
+        # 5-15 dB low near 20 kHz; matched within about 1 dB up to 20 kHz).
         #
         # Cookbook responses (types, and Cookbook objects such as
         # `150.hz.highpass(quality: 4)`) run as a state-variable filter
@@ -79,7 +80,7 @@ module MB
         #
         #     # A resonant lowpass near the top of the spectrum without
         #     # the bilinear transform's cramping
-        #     MB::Sound.play noise.filter(:lowpass, cutoff: 15000, quality: 4, decramp: true)
+        #     MB::Sound.play noise.filter(:lowpass, cutoff: 15000, quality: 4, response: :matched)
         #
         # :lowpass also takes lp4's +resonance:+ (0..1; reese-slope-1,
         # 2026-11-07): the 2-pole's quality is the one whose gain at the
@@ -93,15 +94,17 @@ module MB
         # `lp4(cutoff, resonance:)`).
         #
         # TODO: support SampleWrapper inputs argument
-        def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, resonance: nil, slope: nil, structure: nil, decramp: nil, in_place: false)
+        def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, resonance: nil, slope: nil, structure: nil, response: nil, in_place: false)
           f = filter_or_type
 
-          if decramp
-            unless f.is_a?(Symbol) && MB::Sound::Filter::SVF::DECRAMP_TYPES.include?(f)
-              raise ArgumentError, "decramp: is for the filter types #{MB::Sound::Filter::SVF::DECRAMP_TYPES.map(&:inspect).join(', ')} (got #{filter_or_type.inspect})"
+          unless response.nil?
+            unless f.is_a?(Symbol) && MB::Sound::Filter::SVF::FILTER_TYPE_IDS.include?(f)
+              raise ArgumentError, "response: is for the SVF filter types (#{MB::Sound::Filter::SVF::FILTER_TYPES.map(&:inspect).join(', ')}; got #{filter_or_type.inspect})"
             end
-            raise ArgumentError, 'decramp: is for the SVF (not structure: :biquad)' if structure == :biquad
-            raise ArgumentError, 'decramp: is for the 2-pole lowpass (not slope: 24)' if slope && GraphNode.build_value(slope) == 24
+            if MB::Sound::Filter::SVF.check_response(response, f) == :matched
+              raise ArgumentError, 'response: :matched is for the SVF (not structure: :biquad)' if structure == :biquad
+              raise ArgumentError, 'response: :matched is for the 2-pole lowpass (not slope: 24)' if slope && GraphNode.build_value(slope) == 24
+            end
           end
 
           if MB::Sound::Filter::SVF::FIRST_ORDER_TYPES.include?(f)
@@ -170,7 +173,7 @@ module MB
               f = MB::Sound::Filter::SVF.new(
                 filter_or_type, sample_rate, 1, quality: 1,
                 gain: gain_node ? 1.0 : gain && Decibels.gain_of(gain, 'gain'),
-                decramp: !!decramp
+                response: response || :bilinear
               )
               inputs = { cutoff: cutoff, quality: quality }
               inputs[:gain] = gain_node if gain_node
@@ -202,6 +205,38 @@ module MB
           else
             raise "Unsupported filter type: #{filter_or_type.inspect}"
           end
+        end
+
+        # A 6 dB/octave one-pole lowpass, -3 dB at the cutoff.  The shorthand
+        # for `filter(:lowpass1p, cutoff:, response:)`, a Filter::SVF
+        # (filters-acd-1, 2026-11-07).  +cutoff+ is Hz (a number, Pitch, or node, read per
+        # sample); +response:+ is :bilinear (default) or :matched (the analog
+        # response up to Nyquist; see #filter).  Alias #lowpass1.
+        #
+        #     play 110.hz.saw.lp1(800)
+        #     play noise.lp1(0.25.hz.lfo.at(200..8000))
+        def lp1(cutoff, response: nil)
+          filter(:lowpass1p, cutoff: one_pole_cutoff(cutoff), response: response)
+        end
+        alias lowpass1 lp1
+
+        # A 6 dB/octave one-pole highpass, -3 dB at the cutoff.  #lp1's
+        # counterpart, the shorthand for `filter(:highpass1p, cutoff:,
+        # response:)`.  Alias #highpass1.
+        #
+        #     play 110.hz.saw.hp1(300)
+        def hp1(cutoff, response: nil)
+          filter(:highpass1p, cutoff: one_pole_cutoff(cutoff), response: response)
+        end
+        alias highpass1 hp1
+
+        # A Pitch cutoff for #lp1 and #hp1 as its frequency, as #lp4 reads
+        # one (a constant, or a node following the tuning for Notes; #filter
+        # would play a Pitch node as a sine).
+        private def one_pole_cutoff(cutoff)
+          return cutoff unless cutoff.is_a?(MB::Sound::Pitch) && !cutoff.is_a?(MB::Sound::Tone)
+
+          cutoff.constant? ? cutoff.frequency : cutoff.freq
         end
 
         # Filter types for #filter that make a four-pole filter (#lp4).

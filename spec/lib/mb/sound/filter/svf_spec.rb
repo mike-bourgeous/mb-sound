@@ -18,7 +18,7 @@ RSpec.describe(MB::Sound::Filter::SVF, :aggregate_failures) do
     let(:gains) { Numo::SFloat.new(n).seq.map { |i| 4 * Math.sin(i * 0.0011)**2 } }
 
     SVFF::TYPE_IDS.each do |id|
-      type = "#{SVFF::FILTER_TYPES[id % SVFF::DECRAMP]}#{' (decramped)' if id >= SVFF::DECRAMP}"
+      type = "#{SVFF::FILTER_TYPES[id % SVFF::MATCHED]}#{' (matched)' if id >= SVFF::MATCHED}"
       it "give identical samples for #{type} with modulated parameters" do
         s1 = [0.0, 0.0]
         s2 = [0.0, 0.0]
@@ -135,8 +135,8 @@ RSpec.describe(MB::Sound::Filter::SVF, :aggregate_failures) do
       expect { SVFF.new(:lowpass, 48000, 1000) }.to raise_error(ArgumentError, /quality/)
       expect { SVFF.new(:highshelf1p, 48000, 1000) }.to raise_error(ArgumentError, /gain/)
       expect { SVFF.new(:lowpass1p, 48000, 1000, bandwidth_oct: 1) }.to raise_error(ArgumentError, /First-order/)
-      expect { SVFF.new(:peak, 48000, 1000, quality: 1, db_gain: 3, decramp: true) }.to raise_error(ArgumentError, /decramp/)
-      expect { SVFF.new(:lowshelf1p, 48000, 1000, db_gain: 3, decramp: true) }.to raise_error(ArgumentError, /decramp/)
+      expect { SVFF.new(:peak, 48000, 1000, quality: 1, db_gain: 3, response: :matched) }.to raise_error(ArgumentError, /response/)
+      expect { SVFF.new(:lowshelf1p, 48000, 1000, db_gain: 3, response: :matched) }.to raise_error(ArgumentError, /response/)
     end
   end
 
@@ -234,7 +234,7 @@ RSpec.describe(MB::Sound::Filter::SVF, :aggregate_failures) do
   end
 
   # filters-acd-1 (2026-11-07): designs matched to the analog magnitude
-  describe 'decramp: true' do
+  describe 'response: :matched' do
     def analog(type, hz, q, gain, f)
       k = 1.0 / q
       s = Complex(0, f / hz.to_f)
@@ -276,7 +276,7 @@ RSpec.describe(MB::Sound::Filter::SVF, :aggregate_failures) do
       lowpass1p: 1.0, highpass1p: 1.0,
     }.freeze
 
-    SVFF::DECRAMP_TYPES.each do |type|
+    SVFF::MATCHED_TYPES.each do |type|
       it "#{type} stays within #{LIMITS.fetch(type)} dB of the analog response up to 20 kHz at 48 kHz" do
         qs = SVFF::FIRST_ORDER_TYPES.include?(type) ? [0.5] : [0.5, 0.707, 2, 12.77, 24.9]
         worst = 0
@@ -284,7 +284,7 @@ RSpec.describe(MB::Sound::Filter::SVF, :aggregate_failures) do
         qs.each do |q|
           [100, 1000, 5000, 10000, 15000, 20000].each do |hz|
             gain = type == :bandpass || type == :bandpass_skirt ? 2.0 : 1.0
-            worst = [worst, max_db_error(SVFF.new(type, 48000, hz, quality: q, gain: gain, decramp: true), type, hz, q, gain)].max
+            worst = [worst, max_db_error(SVFF.new(type, 48000, hz, quality: q, gain: gain, response: :matched), type, hz, q, gain)].max
             worst_bilinear = [worst_bilinear, max_db_error(SVFF.new(type, 48000, hz, quality: q, gain: gain), type, hz, q, gain)].max
           end
         end
@@ -292,8 +292,8 @@ RSpec.describe(MB::Sound::Filter::SVF, :aggregate_failures) do
         expect(worst_bilinear).to be > 5 unless type == :allpass
       end
 
-      it "#{type} decramped filters with its response (measured from the impulse response)" do
-        svf = SVFF.new(type, 48000, 12000, quality: 3, gain: 1.5, decramp: true)
+      it "#{type} matched filters with its response (measured from the impulse response)" do
+        svf = SVFF.new(type, 48000, 12000, quality: 3, gain: 1.5, response: :matched)
         expect(svf.type_id).to eq(SVFF::FILTER_TYPE_IDS[type] + 16)
         imp = Numo::SFloat.zeros(16384)
         imp[0] = 1
@@ -305,20 +305,20 @@ RSpec.describe(MB::Sound::Filter::SVF, :aggregate_failures) do
 
     it 'keeps the analog gain at the cutoff and the lowpass at DC, and its phase near the analog in the passband' do
       [[:lowpass, 0.63], [:lowpass, 24.9], [:highpass, 5]].each do |type, q|
-        svf = SVFF.new(type, 48000, 20000, quality: q, decramp: true)
+        svf = SVFF.new(type, 48000, 20000, quality: q, response: :matched)
         expect(svf.response(2 * Math::PI * 20000 / 48000).abs).to be_within(1e-9).of(q)
       end
-      lp = SVFF.new(:lowpass, 48000, 15000, quality: 0.707, decramp: true)
+      lp = SVFF.new(:lowpass, 48000, 15000, quality: 0.707, response: :matched)
       expect(lp.response(0).real).to be_within(1e-12).of(1)
       # (magnitudes are matched, not phases: 4 degrees here)
       expect((lp.response(2 * Math::PI * 1000 / 48000) / analog(:lowpass, 15000, 0.707, 1, 1000)).arg.abs).to be < 0.1
-      bp = SVFF.new(:bandpass, 48000, 15000, quality: 4, gain: 1, decramp: true)
+      bp = SVFF.new(:bandpass, 48000, 15000, quality: 4, gain: 1, response: :matched)
       expect(bp.response(2 * Math::PI * 15000 / 48000).abs).to be_within(1e-9).of(1)
-      expect(SVFF.new(:notch, 48000, 15000, quality: 4, decramp: true).response(2 * Math::PI * 15000 / 48000).abs).to be < 1e-9
+      expect(SVFF.new(:notch, 48000, 15000, quality: 4, response: :matched).response(2 * Math::PI * 15000 / 48000).abs).to be < 1e-9
     end
 
     it 'matches the bilinear design at low cutoffs (within 0.03 dB below 1 kHz for a 100 Hz lowpass)' do
-      a = SVFF.new(:lowpass, 48000, 100, quality: 2, decramp: true)
+      a = SVFF.new(:lowpass, 48000, 100, quality: 2, response: :matched)
       b = SVFF.new(:lowpass, 48000, 100, quality: 2)
       omegas = Numo::DFloat.linspace(0.0005, 2 * Math::PI * 1000 / 48000, 200)
       expect((Numo::NMath.log10(a.response(omegas).abs) - Numo::NMath.log10(b.response(omegas).abs)).abs.max * 20).to be < 0.03
@@ -328,9 +328,9 @@ RSpec.describe(MB::Sound::Filter::SVF, :aggregate_failures) do
       # (the zeros come from small differences there: the poles' magnitude
       # at the cutoff once lost 5 digits at 1 Hz, Q 29, giving a bandpass 121
       # times too loud)
-      SVFF::DECRAMP_TYPES.each do |type|
+      SVFF::MATCHED_TYPES.each do |type|
         [1, 2, 5].product([0.05, 0.707, 30, 1000]).each do |hz, q|
-          a = SVFF.new(type, 48000, hz, quality: q, gain: 1, decramp: true)
+          a = SVFF.new(type, 48000, hz, quality: q, gain: 1, response: :matched)
           b = SVFF.new(type, 48000, hz, quality: q, gain: 1)
           omegas = Numo::DFloat.linspace(0.05, 10, 200) * (2 * Math::PI * hz / 48000)
           expect((a.response(omegas) - b.response(omegas)).abs.max / b.response(omegas).abs.max).to be < 5e-3
@@ -343,8 +343,8 @@ RSpec.describe(MB::Sound::Filter::SVF, :aggregate_failures) do
       noise = MB::Sound.with_seed(7) { Numo::SFloat.cast(MB::Sound.noise.sample(n)) }
       cut = Numo::SFloat.new(n).seq.map { |i| 23500 * Math.sin(i * 0.002)**2 + 1 }
       q = Numo::SFloat.new(n).seq.map { |i| 30 * Math.sin(i * 0.0007)**2 + 0.05 }
-      SVFF::DECRAMP_TYPES.each do |type|
-        svf = SVFF.new(type, 48000, 1000, quality: 1, gain: 1, decramp: true)
+      SVFF::MATCHED_TYPES.each do |type|
+        svf = SVFF.new(type, 48000, 1000, quality: 1, gain: 1, response: :matched)
         out = svf.dynamic_process(noise.dup, cutoff: cut, quality: q)
         bilinear = SVFF.new(type, 48000, 1000, quality: 1, gain: 1).dynamic_process(noise.dup, cutoff: cut, quality: q)
         expect(out.isfinite.all?).to eq(true)
@@ -354,8 +354,8 @@ RSpec.describe(MB::Sound::Filter::SVF, :aggregate_failures) do
       end
     end
 
-    it 'prints as decramped' do
-      expect(SVFF.new(:lowpass, 48000, 1000, quality: 2, decramp: true).to_s).to include('decramped')
+    it 'prints as matched' do
+      expect(SVFF.new(:lowpass, 48000, 1000, quality: 2, response: :matched).to_s).to include('matched')
     end
   end
 
