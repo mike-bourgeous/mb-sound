@@ -83,6 +83,87 @@ RSpec.describe('bin/synths/dnb.rb') do
     end
   end
 
+  describe 'the Reese\'s slope and low_cut params (reese-slope-1)' do
+    def reese(length = 1, **params) = render_patch(MB::Sound.with_seed(5) { MB::Sound.preset(:dnb_reese, midi: patch_notes([f1, 0, length]), **params) }, length)
+
+    # The Reese before reese-slope-1 (lp4, two 150 Hz highpasses), for the
+    # bit-for-bit check of the defaults.
+    def old_reese(midi)
+      MB::Sound.synth(midi, voices: 1) { |v|
+        pitch = v.hz.glide(0.035, legato: true)
+        saws = pitch.unison(6, detune: 0.32, spread: 0.5) { |p, _i| p.saw }
+        lfo = 2 ** v.lfo(2.bars, shape: :sine, depth: 0.8)
+        amp = v.env(0.004, 0.25, 0.85, 0.06, gm: false).legato
+        ((saws.lp4(2400 * lfo, resonance: 0.25) * 2.2).softclip(0.35, 0.95) * amp)
+          .filter(:highpass, cutoff: 150, quality: 0.7).filter(:highpass, cutoff: 150, quality: 0.7)
+      }
+    end
+
+    it 'plays the defaults (slope 24, low_cut 150) bit for bit like before, from the voice and the script patch' do
+      old = render_patch(MB::Sound.with_seed(5) { old_reese(patch_notes([f1, 0, 1.5])) }, 1.5)
+      expect(render_patch(MB::Sound.with_seed(5) { MB::Sound.dnb_reese_voice(patch_notes([f1, 0, 1.5])) }, 1.5)).to eq(old)
+      expect(render_patch(MB::Sound.with_seed(5) { MB::Sound.dnb_patch(patch_notes([f1, 0, 1.5]), :reese) }, 1.5)).to eq(old)
+      expect(reese(1.5, slope: 24, low_cut: 150)).to eq(reese(1.5))
+    end
+
+    it 'lets more of the top through with slope: 12, a 2-pole on the same resonance knob' do
+      steep = reese(lfo_depth: 0)[0]
+      gentle = reese(lfo_depth: 0, slope: 12)[0]
+      expect(peak_db(gentle)).to be_between(-12, 6)
+      expect(band_share(seconds(gentle, 0.2, 0.9), 6000, 20000)).to be > band_share(seconds(steep, 0.2, 0.9), 6000, 20000) * 3
+      expect(reese(lfo_depth: 0, slope: 12, resonance: 0.5)[0]).not_to eq(gentle) # (the knob reaches the 2-pole)
+      expect { reese(slope: 18) }.to raise_error(/24, 12|slope/)
+    end
+
+    it 'lets the fundamental through with low_cut: 0 (both highpasses out of the voice; 1 Hz in a document) and keeps more of it at 30' do
+      f = MB::Sound::F1.frequency
+      low = ->(x) { band_share(seconds(x, 0.2, 0.9), f * 0.7, f * 1.4) }
+      cut = low.(reese[0])
+      open = low.(reese(low_cut: 0)[0])
+      mid = low.(reese(low_cut: 30)[0])
+      expect(cut).to be < 0.01
+      expect(mid).to be > cut * 3
+      expect(open).to be > mid
+      expect(rms_db(seconds(reese(low_cut: 0)[0] - reese(low_cut: 30)[0], 0.2, 0.9))).to be > -60
+
+      # the voice leaves both highpasses out for a number 0 or nil
+      plain = MB::Sound.dnb_reese_voice(patch_notes([f1, 0, 1]), low_cut: 0)
+      expect(plain.graph.count { |n| n.is_a?(MB::Sound::Filter::SampleWrapper) }).to eq(0)
+      expect(render_patch(MB::Sound.with_seed(5) { MB::Sound.dnb_reese_voice(patch_notes([f1, 0, 1]), low_cut: nil) }, 1))
+        .to eq(render_patch(MB::Sound.with_seed(5) { MB::Sound.dnb_reese_voice(patch_notes([f1, 0, 1]), low_cut: 0) }, 1))
+    end
+
+    it 'saves slope and low_cut as params and loads them back bit for bit' do
+      g = MB::Sound.with_seed(5) { MB::Sound.preset(:dnb_reese, midi: patch_notes([f1, 0, 1]), slope: 12, low_cut: 30) }
+      text = MB::Sound::GraphIO.dump(g)
+      expect(text).to include('param :slope, 12, range: [24, 12]', 'param :low_cut, (0.0..500.0).at(30)', 'slope: slope', 'cutoff: low_cut')
+      loaded = MB::Sound::GraphIO.load(text, inputs: { midi: patch_notes([f1, 0, 1]) })
+      expect(render_patch(loaded, 1)).to eq(render_patch(g, 1))
+    end
+
+    it 'turns low_cut live on a track (no rebuild); slope, a choice, is given to the preset instead of a knob' do
+      session = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120),
+                                       channels: 2, buffer_size: 800, realtime: false, raise_errors: true)
+      MB::Sound::Session.with_context(session: session) {
+        MB::Sound.instance_eval {
+          track :reese, :dnb_reese
+          bg :reese, seq(MB::Sound::F1).n1.loop
+        }
+      }
+      session.process_buffer
+      graph = session.ui_graphs[:reese]
+      expect(session.knobs.keys).to include(:"reese/low_cut")
+      expect(session.knobs.keys).not_to include(:"reese/slope")
+      expect(session.arrangement.build_knob?(:"reese/low_cut")).to eq(false)
+      MB::Sound::Session.with_context(session: session) { MB::Sound.turn(:"reese/low_cut", 0) }
+      40.times { session.process_buffer }
+      expect(session.ui_graphs[:reese]).to equal(graph)
+    ensure
+      session&.close
+      MB::Sound.rewind
+    end
+  end
+
   it 'plays a clean sub with harmonics: false: the note\'s sine, nothing above the lowpass' do
     sub = render_patch(MB::Sound.dnb_sub_voice(patch_notes([f1, 0, 1]), harmonics: false), 1)[0]
     expect(peak_hz(seconds(sub, 0.2, 0.9), 20, 400)).to be_within(1.5).of(MB::Sound::F1.frequency)
