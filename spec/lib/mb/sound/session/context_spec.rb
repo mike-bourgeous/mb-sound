@@ -20,6 +20,7 @@ RSpec.describe(MB::Sound::Session::Context, :aggregate_failures) do
     mb_sound_span: 'the span a Session renders on this thread (Session.span; render path)',
     mb_sound_plan_deferral: 'the plan rebuild deferral of the render (render path)',
     mb_sound_tee_new_branches: 'Tee.collect_branches: branches made while building',
+    mb_sound_warming_for: 'Warming#warm: the session a warm-up thread warms for (its render lock raises there: Changes::RenderLock)',
     mb_sound_tee_rate_pins: 'Tee.pin_rates: branches resampled out of an oversample region',
     mb_sound_inspecting: 'GraphNode::Inspect: no nested one-line inspects',
     mb_sound_pry_command: 'the running Pry command, for the pager',

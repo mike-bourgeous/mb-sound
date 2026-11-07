@@ -24,6 +24,28 @@ module MB
         # time has already passed (see #change and Scheduler#lookahead).
         class LateChange < RuntimeError; end
 
+        # The Session's render lock: a Monitor that raises
+        # Warming::LockOrderError when a warm-up thread of its own session
+        # takes it (fix-warm-deadlock-1107: the thread waiting for a
+        # warm-up may hold the lock, as a scheduled block in an offline
+        # render does, so a warm-up thread taking it would deadlock; the
+        # waiting thread destroys the warm-up's stale branches instead, see
+        # Warming#warm).  A sandbox's lock is its own, so a warm-up still
+        # renders its sandbox.
+        class RenderLock < Monitor
+          def initialize(session)
+            super()
+            @session = session
+          end
+
+          def synchronize(&)
+            if Thread.current[:mb_sound_warming_for].equal?(@session)
+              raise Warming::LockOrderError, "a warm-up thread took its session's render lock (the thread waiting for the warm-up may hold it: a deadlock)"
+            end
+            super
+          end
+        end
+
         # A change waiting in the queue (or applied).  +time+ is the landing
         # position in whole notes (nil for "now").  +action+ is called with
         # the landing time to apply it.  +before+ and +after+ are snapshots
@@ -202,7 +224,7 @@ module MB
 
         # Sets up the change queue and journal.  Called by Session#initialize.
         def init_changes
-          @render_lock = Monitor.new
+          @render_lock = RenderLock.new(self)
           @changes = []
           @journal = Journal.new
           @frame = 0
