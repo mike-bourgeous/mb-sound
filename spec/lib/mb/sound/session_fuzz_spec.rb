@@ -329,6 +329,17 @@ RSpec.describe('session fuzzing') do
         'at_bar(2) { flow(seed: 54, on: :beat) { generate markov(s1: { s1: 2 }, seed: 25), s1: 1 } }',
       ], 2,
     ],
+    # (fix-bufsize-1107: after the tempo change the third region's start
+    # fell between the last frame of one 800-frame block and the first of
+    # the next, and RegionPlayer started it in neither)
+    'a region starting between two blocks after a tempo change (seed 532169)' => [
+      :buffer_size, ['bpm 126', 'knob :busy, 0.5'], [
+        'at_bar(2, beat: 3) { bpm 100 }',
+        'at_bar(1, beat: 3) { bg :x1, regions([breakbeat(:jungle), 0r, 3/4r, { fade_out: 1/8r, curve_out: :sharp }], ' \
+        '[breakbeat(:jungle), 5/8r, 1r, { offset: 0.4, fade_in: 1/8r, curve_in: :smooth, gain: -3.db }], ' \
+        '[breakbeat(:jungle), 3/2r + 1/7r, 1/2r, { transpose: 7 }]) * 0.4, on: :now }',
+      ], 2,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil

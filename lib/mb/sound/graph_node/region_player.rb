@@ -115,11 +115,17 @@ module MB
             r = @resolved[i]
             p = @playing[i]
             if p.nil?
+              # (a region starts on the first frame at or after its
+              # position: frame j0 of this block when j0 is in 0...count;
+              # a position between this block's last frame and the next
+              # block's first (e in -1...0 there) starts the next block at
+              # j0 0, where a check of `at >= @pos` lost it: seed 532169)
               a = r.at
-              if a >= @pos && a < pos_end
-                j0 = ((a - @pos) / step).ceil
-                if j0 < count
-                  p = @playing[i] = playing(r, 0, j0 - (a - @pos) / step, step)
+              if a < pos_end
+                e = (a - @pos) / step
+                j0 = e.ceil
+                if j0 >= 0 && j0 < count
+                  p = @playing[i] = playing(r, 0, j0 - e, step)
                   render(i, r, p, j0, count)
                 end
               end
