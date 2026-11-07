@@ -1756,6 +1756,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1827,6 +1829,8 @@
         "FastSampler.play"
       ],
       "fast_sound": [
+        "FastSound.biquad_narray",
+        "FastSound.cookbook",
         "FastSound.fast_math=",
         "FastSound.oscillate"
       ]
