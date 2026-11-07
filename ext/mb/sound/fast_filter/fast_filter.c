@@ -197,7 +197,12 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
  *   bandpass_skirt, peak Q (0, G, 0); notch (1, -k, 0); allpass (1, -2k, 0);
  *   peak: k = 1 / (Q A), (1, k (G - 1), 0);
  *   lowshelf: g / sqrt(A), (1, k (A - 1), G - 1);
- *   highshelf: g sqrt(A), (G, k (1 - A) A, 1 - G).
+ *   highshelf: g sqrt(A), (G, k (1 - A) A, 1 - G);
+ *   first-order types at k = 2 (a double pole, one cancelled): lowpass1p
+ *   (0, 1, 1); highpass1p (1, -1, -1); lowshelf1p (1, G - 1, G - 1) with
+ *   g / G for a cut; highshelf1p (G, 1 - G, 1 - G) with g G for a cut.
+ * Types + 16 (SVF_DECRAMP) use the decramped design (mb_svf_decramp in
+ * mb_svf.h) instead of the bilinear transform.
  *
  * Exact Ruby mirror: MB::Sound::Filter::SVF.process_ruby (same operations;
  * the extension is built with -ffp-contract=off).
@@ -215,8 +220,8 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 static VALUE ruby_svf(VALUE self, VALUE buffer, VALUE cutoff, VALUE quality, VALUE gain, VALUE type_v, VALUE state, VALUE rate_v)
 {
 	int type = NUM2INT(type_v);
-	if (type < SVF_LOWPASS || type > SVF_BANDPASS_SKIRT) {
-		rb_raise(rb_eArgError, "SVF filter type must be 0..8");
+	if (!mb_svf_type_valid(type)) {
+		rb_raise(rb_eArgError, "SVF filter type must be 0..12, or a decramped type (+16)");
 	}
 	double rate = NUM2DBL(rate_v);
 	if (!(rate > 0) || !isfinite(rate)) {

@@ -10,6 +10,28 @@ module MB
       # (both are the bilinear transform with the cutoff prewarped; they
       # differ only by rounding).
       #
+      # First-order types (filters-acd-1, 2026-11-07; FIRST_ORDER_TYPES):
+      # :lowpass1p and :highpass1p (6 dB/octave, -3 dB at the cutoff; the
+      # bilinear one-poles, as Filter::FirstOrder's :lowpass and :highpass),
+      # and the shelves :lowshelf1p and :highshelf1p (6 dB/octave; +gain:
+      # is the shelf's gain, e.g. 15.db; the cutoff is the corner on the
+      # shelf's side: a boost's pole, where its gain is sqrt((G^2 + 1) / 2),
+      # about 3 dB short of a large boost; a cut is the boost's mirror image,
+      # as in Zolzer's DAFX first-order shelving filters and the 6 dB/octave
+      # shelves of many DAW EQs).
+      # They ignore the quality.  They run as this SVF at k = 2 (a double
+      # pole) with an output mix that cancels one pole, so they share its
+      # kernels, plan ops, and loop ops.
+      #
+      # +decramp: true+ (DECRAMP_TYPES) replaces the bilinear transform with
+      # a design matched to the analog response's magnitude (see
+      # .decramp_design): the bilinear transform squeezes the analog
+      # response above the cutoff into the space below Nyquist, so at 48 kHz
+      # a lowpass's top octave falls 5-13 dB too fast and highpasses and
+      # bandpasses lose their top octave's shape; the decramped design stays
+      # within about 1 dB of the analog response up to 20 kHz (lowpass within
+      # 12 dB of its peak: 0.8 dB; see design/notes/filters.md).
+      #
       # The difference is in motion: its states are integrator states, not
       # past samples, so the cutoff, quality, and gain may change on any
       # sample without thumps (a direct form biquad whose cutoff dives
@@ -45,15 +67,37 @@ module MB
           :lowshelf,
           :highshelf,
           :bandpass_skirt,
+          :lowpass1p,
+          :highpass1p,
+          :lowshelf1p,
+          :highshelf1p,
         ].freeze
 
         FILTER_TYPE_IDS = FILTER_TYPES.each_with_index.to_h.freeze
 
+        # The first-order types (one pole; see the class comment).  They
+        # ignore the quality.
+        FIRST_ORDER_TYPES = [:lowpass1p, :highpass1p, :lowshelf1p, :highshelf1p].freeze
+
+        # Types with a decramped design (+decramp: true+; see .decramp_design).
+        DECRAMP_TYPES = [:lowpass, :highpass, :bandpass, :bandpass_skirt, :notch, :allpass, :lowpass1p, :highpass1p].freeze
+
+        # Added to a type's id for its decramped design (SVF_DECRAMP in
+        # mb_svf.h).
+        DECRAMP = 16
+
+        # Every valid kernel type id (FILTER_TYPE_IDS, and DECRAMP_TYPES' ids
+        # plus DECRAMP; mb_svf_type_valid).
+        TYPE_IDS = (FILTER_TYPE_IDS.values + DECRAMP_TYPES.map { |t| FILTER_TYPE_IDS.fetch(t) + DECRAMP }).freeze
+
+        # The quality first-order types keep (they ignore it).
+        FIRST_ORDER_QUALITY = 0.5
+
         # Types whose response uses the gain.
-        GAIN_TYPES = [:bandpass, :bandpass_skirt, :peak, :lowshelf, :highshelf].freeze
+        GAIN_TYPES = [:bandpass, :bandpass_skirt, :peak, :lowshelf, :highshelf, :lowshelf1p, :highshelf1p].freeze
 
         # Types that need a gain (Cookbook raises without one).
-        GAIN_REQUIRED = [:peak, :lowshelf, :highshelf].freeze
+        GAIN_REQUIRED = [:peak, :lowshelf, :highshelf, :lowshelf1p, :highshelf1p].freeze
 
         # The lowest cutoff in Hz (NaN and negative values too), as for
         # Cookbook#dynamic_process and FourPole.
@@ -98,8 +142,12 @@ module MB
 
         attr_reader :filter_type, :sample_rate, :cutoff, :quality, :gain
 
-        # The filter type's number in the kernels (FILTER_TYPE_IDS).
+        # The filter type's number in the kernels (FILTER_TYPE_IDS, plus
+        # DECRAMP when decramped).
         attr_reader :type_id
+
+        # True for the decramped design (see DECRAMP_TYPES).
+        attr_reader :decramp
 
         # Makes an SVF with the parameters of a Filter::Cookbook (its
         # quality, computed from a bandwidth or shelf slope if it was made
@@ -117,9 +165,18 @@ module MB
         # +:shelf_slope+ (shelves; converted to a quality at +f_center+ as
         # Cookbook does), and +:db_gain+ for bandpass (output gain), peak,
         # and shelves (dB, as its name says, or a Decibels value read as its
-        # exact dB), or +:gain+, the same as a linear gain.
-        def initialize(filter_type, sample_rate, f_center, quality: nil, db_gain: nil, gain: nil, bandwidth_oct: nil, shelf_slope: nil)
+        # exact dB), or +:gain+, the same as a linear gain.  First-order types
+        # (FIRST_ORDER_TYPES) take no quality.  +:decramp+ picks the
+        # decramped design (DECRAMP_TYPES; see .decramp_design).
+        def initialize(filter_type, sample_rate, f_center, quality: nil, db_gain: nil, gain: nil, bandwidth_oct: nil, shelf_slope: nil, decramp: false)
           raise ArgumentError, "Invalid filter type #{filter_type.inspect}" unless FILTER_TYPE_IDS.include?(filter_type)
+          if decramp && !DECRAMP_TYPES.include?(filter_type)
+            raise ArgumentError, "decramp: is for #{DECRAMP_TYPES.map(&:inspect).join(', ')} (got #{filter_type.inspect})"
+          end
+          if FIRST_ORDER_TYPES.include?(filter_type)
+            raise ArgumentError, "First-order filters (#{filter_type.inspect}) take no quality, bandwidth, or shelf slope" if bandwidth_oct || shelf_slope
+            quality ||= FIRST_ORDER_QUALITY
+          end
           raise ArgumentError, 'Give db_gain: or gain:, not both' if db_gain && gain
           raise "Sample rate must be a positive numeric (got #{sample_rate.inspect})" unless sample_rate.is_a?(Numeric) && sample_rate > 0
 
@@ -136,7 +193,8 @@ module MB
           raise ArgumentError, 'Missing quality/bandwidth_oct/shelf_slope' if quality.nil?
 
           @filter_type = filter_type
-          @type_id = FILTER_TYPE_IDS.fetch(filter_type)
+          @decramp = !!decramp
+          @type_id = FILTER_TYPE_IDS.fetch(filter_type) + (@decramp ? DECRAMP : 0)
           @sample_rate = sample_rate.to_f
           @cutoff = f_center.to_f
           @quality = quality.to_f
@@ -234,14 +292,15 @@ module MB
         # See GraphNode#to_s
         def to_s
           s = "svf #{@filter_type}"
-          s << " quality: #{@quality.round(4)}" if @quality
+          s << ' decramped' if @decramp
+          s << " quality: #{@quality.round(4)}" if @quality && !FIRST_ORDER_TYPES.include?(@filter_type)
           s << " gain: #{db_gain.round(2)}dB" if @gain && GAIN_TYPES.include?(@filter_type)
           s
         end
 
         # See GraphNode#to_s_graphviz
         def to_s_graphviz
-          s = "type: svf #{@filter_type}\n"
+          s = "type: svf #{@filter_type}#{' decramped' if @decramp}\n"
           s << "gain: #{db_gain.round(2)}dB\n" if @gain && GAIN_TYPES.include?(@filter_type)
           s
         end
@@ -262,6 +321,11 @@ module MB
           end
           q = MIN_QUALITY unless q >= MIN_QUALITY
           gain = MIN_GAIN unless gain >= MIN_GAIN
+
+          if type_id >= DECRAMP
+            g, k, m0, m1, m2 = decramp_design(type_id - DECRAMP, 2.0 * fc * (Math::PI / rate), q, gain)
+            return [g, k, 1.0 / (1.0 + g * (g + k)), m0, m1, m2]
+          end
 
           g = FourPole.tan(fc * (Math::PI / rate))
           k = 1.0 / q
@@ -289,6 +353,20 @@ module MB
             a = Math.sqrt(gain)
             g = g * Math.sqrt(a)
             m0 = gain; m1 = k * (1.0 - a) * a; m2 = 1.0 - gain
+          when 9 # lowpass1p
+            k = 2.0
+            m0 = 0.0; m1 = 1.0; m2 = 1.0
+          when 10 # highpass1p
+            k = 2.0
+            m0 = 1.0; m1 = -1.0; m2 = -1.0
+          when 11 # lowshelf1p
+            k = 2.0
+            g = g / gain if gain < 1.0
+            m0 = 1.0; m1 = gain - 1.0; m2 = gain - 1.0
+          when 12 # highshelf1p
+            k = 2.0
+            g = g * gain if gain < 1.0
+            m0 = gain; m1 = 1.0 - gain; m2 = 1.0 - gain
           else # lowpass
             m0 = 0.0; m1 = 0.0; m2 = 1.0
           end
@@ -297,11 +375,113 @@ module MB
           [g, k, a1, m0, m1, m2]
         end
 
+        # The decramped design (mb_svf_decramp in mb_svf.h; filters-acd-1,
+        # 2026-11-07) of the type with id +base_id+ (without DECRAMP) at +w0+
+        # radians per sample, quality +q+, and linear gain +gain+ (clamped
+        # by .coefficients): [g, k, m0, m1, m2] for a digital response
+        # matched to the analog prototype's magnitude instead of the bilinear
+        # transform's.  After Martin Vicanek, "Matched Second Order Digital
+        # Filters" (2016): the analog poles mapped by z = e^(s T) (impulse
+        # invariance; a first-order type's one pole doubled, cancelled by a
+        # zero), zeros for the analog magnitude at DC and the cutoff (lowpass,
+        # one zero; lowpass1p), a double zero at DC and the cutoff
+        # (highpass), a zero at DC and the cutoff (highpass1p), a zero at DC,
+        # the slope near DC, and the peak (bandpasses), zeros on the unit
+        # circle at the cutoff and DC (notch), or the mirrored poles
+        # (allpass).  The biquad is then written as the SVF it equals: with
+        # P = 1 + a1 + a2, M = 1 - a1 + a2, W = b0 + b1 + b2, V = b0 - b1 +
+        # b2, D = b0 - b2: g = sqrt(P / M), g k = 2 (1 - a2) / M, m0 = V / M,
+        # m1 = (2 D - g k V) / (g M), m2 = W / P - m0.  The same operations
+        # as the C.
+        def self.decramp_design(base_id, w0, q, gain)
+          s1 = Math.sin(0.5 * w0)
+          ph1 = s1 * s1
+          ph0 = 1.0 - ph1
+          p = 0.0
+          e1 = 0.0 # a first-order type's |1 - p e^(-j w0)|^2
+
+          # P, M, and aw (|A(e^(j w0))|^2, the poles' squared magnitude at
+          # the cutoff) as products of sums of positive terms: no
+          # cancellation at low cutoffs, where the matched zeros come from
+          # small differences
+          if base_id == 9 || base_id == 10 # lowpass1p, highpass1p
+            p = Math.exp(-w0)
+            pp = (1.0 - p) * (1.0 - p)
+            mm = (1.0 + p) * (1.0 + p)
+            a2 = p * p
+            e1 = pp + 4.0 * p * ph1
+            aw = e1 * e1
+          else
+            zeta = 0.5 / q
+            if zeta < 1.0
+              r = Math.exp(-zeta * w0)
+              rt = Math.sqrt(1.0 - zeta * zeta)
+              sh = Math.sin(0.5 * w0 * rt)
+              c = 4.0 * r * sh * sh
+              pp = (1.0 - r) * (1.0 - r) + c
+              mm = (1.0 + r) * (1.0 + r) - c
+              a2 = r * r
+              # (w0 -+ the poles' angle) / 2
+              sm = Math.sin(0.5 * w0 * zeta * zeta / (1.0 + rt))
+              sp = Math.sin(0.5 * w0 * (1.0 + rt))
+              r1 = (1.0 - r) * (1.0 - r)
+              aw = (r1 + 4.0 * r * sm * sm) * (r1 + 4.0 * r * sp * sp)
+            else
+              s = Math.sqrt(zeta * zeta - 1.0)
+              p1 = Math.exp(-w0 / (zeta + s))
+              p2 = Math.exp(-w0 * (zeta + s))
+              pp = (1.0 - p1) * (1.0 - p2)
+              mm = (1.0 + p1) * (1.0 + p2)
+              a2 = p1 * p2
+              aw = ((1.0 - p1) * (1.0 - p1) + 4.0 * p1 * ph1) * ((1.0 - p2) * (1.0 - p2) + 4.0 * p2 * ph1)
+            end
+          end
+
+          case base_id
+          when 1 # highpass
+            h = q * Math.sqrt(aw) / (4.0 * ph1)
+            w = 0.0; v = 4.0 * h; d = 0.0
+          when 2, 8 # bandpass, bandpass_skirt
+            pk = base_id == 2 ? gain : gain * q
+            sl = 2.0 * pk * pp / (q * w0)
+            s0 = sl * sl
+            rr = pk * pk * aw / ph1
+            b2 = (s0 - rr) / (4.0 * ph1)
+            b1 = s0 - 4.0 * b2
+            b1 = 0.0 unless b1 > 0.0
+            disc = 0.25 * b1 + b2
+            w = 0.0; v = Math.sqrt(b1); d = disc > 0.0 ? Math.sqrt(disc) : 0.0
+          when 3 # notch
+            w = pp; v = pp * ph0 / ph1; d = 0.0
+          when 4 # allpass
+            w = pp; v = mm; d = a2 - 1.0
+          when 9 # lowpass1p
+            c0 = pp
+            c1 = (0.5 * e1 - c0 * ph0) / ph1
+            sc1 = c1 > 0.0 ? Math.sqrt(c1) : 0.0
+            z0 = 0.5 * ((1.0 - p) + sc1)
+            z1 = 0.5 * ((1.0 - p) - sc1)
+            w = c0; v = sc1 * (1.0 + p); d = z0 + p * z1
+          when 10 # highpass1p
+            c = Math.sqrt(0.5 * e1 / (4.0 * ph1))
+            w = 0.0; v = 2.0 * c * (1.0 + p); d = c * (1.0 - p)
+          else # lowpass
+            b1 = (q * q * aw - pp * pp * ph0) / ph1
+            sb1 = b1 > 0.0 ? Math.sqrt(b1) : 0.0
+            w = pp; v = sb1; d = 0.5 * (pp + sb1)
+          end
+
+          g = Math.sqrt(pp / mm)
+          gk = 2.0 * (1.0 - a2) / mm
+          m0 = v / mm
+          [g, gk / g, m0, (2.0 * d - gk * v) / (g * mm), w / pp - m0]
+        end
+
         # The Ruby mirror of MB::Sound::FastFilter.svf: the same arguments,
         # operations, and samples (specs check every sample).  Returns a new
         # SFloat; updates +state+.
         def self.process_ruby(buffer, cutoff, quality, gain, type_id, state, sample_rate)
-          raise ArgumentError, 'SVF filter type must be 0..8' unless (0..8).cover?(type_id)
+          raise ArgumentError, 'SVF filter type must be 0..12, or a decramped type (+16)' unless TYPE_IDS.include?(type_id)
           rate = sample_rate.to_f
           raise ArgumentError, 'Sample rate must be positive and finite' unless rate > 0 && rate.finite?
           raise ArgumentError, 'SVF state must have two elements' unless state.is_a?(Array) && (state.length == 2 || state.length == 3)
