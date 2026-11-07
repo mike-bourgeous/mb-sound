@@ -185,6 +185,31 @@ RSpec.describe(MB::Sound::Session::ClipSwaps) do
     end
   end
 
+  # (fix-bufsize-1107, SessionFuzz seed 394532: a scheduled block run ahead
+  # of bar 2 swapped the launch queued there at 800 frames, and at 367 found
+  # the stopped player still kept, whose clip it doesn't play: the swap
+  # raised and the track built its patch again)
+  it 'swaps the clips of a launch queued to land by the swap, not the stopped or current player it replaces' do
+    queued = MB::Sound.seq(MB::Sound::G2).n4.loop
+    session.add(bass.number, name: :bass)
+    session.add(bass.number * 0, name: :x)
+    run(800)
+    session.remove(:bass, fade: 0)
+    run(800)
+    expect(session.stopped.keys).to eq([:bass])
+
+    session.add(queued.number, name: :bass, start_time: 1r)
+    expect(session.swap(:bass, { queued => bass2 }, start_time: 1r)).to eq(1)
+    session.add(queued.number * 1000, name: :x, start_time: 1r) # (:x plays bass until then)
+    expect(session.swap(:x, { queued => bass2 }, start_time: 1r)).to eq(1)
+    expect { session.swap(:x, { queued => bass2 }, start_time: 1/2r) }.to raise_error(ArgumentError, /doesn't play any of the clips/)
+
+    data = run(96_000)
+    expect(data[96_000 - 1600 - 1]).to eq(0)
+    expect(data[96_000 - 1600]).to eq(MB::Sound::D2.number) # (:x fades in over the declick)
+    expect(data[96_000 - 1600 + 1000]).to eq(MB::Sound::D2.number * 1001)
+  end
+
   it 'raises errors for unknown players and clips that are not played' do
     expect { session.swap(:nope, bass2) }.to raise_error(ArgumentError, /No background player :nope/)
     session.add(bass.number, name: :bass)

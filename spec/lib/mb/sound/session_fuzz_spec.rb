@@ -354,6 +354,24 @@ RSpec.describe('session fuzzing') do
         'at_bar(2, beat: 2) { bg :ducked, 0.2.constant.duck(:t2, only: :kick, amount: -12.db), on: :beat }',
       ], 1,
     ],
+    # (fix-bufsize-1107: the bar-2 relaunch, run ahead, swapped the clip of
+    # the launch queued for bar 2 at 800 frames; at 367 the player stopped
+    # with a ring-out had already rung out into the stopped list when the
+    # block ran, so the swap went to it and raised, and the track built a
+    # new Synth whose unused lanes ran at another pitch, their key-sync
+    # reset step differing on a later note)
+    'a relaunch swapping a queued launch while a stopped player is kept (seed 394532)' => [
+      :buffer_size, ['bpm 150', 'knob :busy, 0.5'], [
+        'track(:t2, q: 1) { |clip| clip.synth(voices: 2) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t2: seq(G4.n16, B4.n16, D5.n8).loop, others: :keep',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 2) { after(in: 3.beats) { seek 1, 1.1 } }',
+        'at_bar(1, beat: 2) { stop :t2 }',
+        'at_bar(1, beat: 2) { bg :t2, seq(C5, D5).n16, on: :now }',
+        'at_bar(1, beat: 2) { bg :t2, seq(E5, G5).n8.loop, in: 1/4r }',
+        'at_bar(2) { bg :t2, seq(A4, C5).n8.loop, on: :now }',
+      ], 2,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil
