@@ -504,6 +504,24 @@ RSpec.describe(MB::Sound::Session) do
       expect(session.resume(1)).to be_nil
     end
 
+    # (fix-bufsize-1107, SessionFuzz seed 394532: at 367 frames the stop
+    # landed inside the span whose start had started the relaunch, so the
+    # stopped graph was kept after it, beside the one playing)
+    [800, 367].each do |size|
+      it "doesn't keep a graph stopped on the frame a relaunch of its name starts (#{size}-frame buffers)" do
+        s = MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: size, realtime: false, raise_errors: true)
+        s.add(1.constant, name: :pad)
+        s.process_buffer
+        s.remove(:pad, time: 1/4r)
+        s.add(2.constant, name: :pad, start_time: 1/4r, fade: 0)
+        s.process_buffer while s.frame < 30_000
+        expect(s.stopped).to be_empty
+        expect(s.players.keys).to eq([:pad])
+      ensure
+        s&.close
+      end
+    end
+
     it 'keeps a fading graph only once the fade finishes' do
       session.add(1.constant, name: :pad)
       run(800)

@@ -356,10 +356,11 @@ RSpec.describe('session fuzzing') do
     ],
     # (fix-bufsize-1107: the bar-2 relaunch, run ahead, swapped the clip of
     # the launch queued for bar 2 at 800 frames; at 367 the player stopped
-    # with a ring-out had already rung out into the stopped list when the
-    # block ran, so the swap went to it and raised, and the track built a
-    # new Synth whose unused lanes ran at another pitch, their key-sync
-    # reset step differing on a later note)
+    # on the one-shot relaunch's frame was kept as stopped after the
+    # relaunch started (the stop landed inside the span), so the swap went
+    # to it and raised, and the track built a new Synth whose unused lanes
+    # ran at another pitch, their key-sync reset step differing on a later
+    # note)
     'a relaunch swapping a queued launch while a stopped player is kept (seed 394532)' => [
       :buffer_size, ['bpm 150', 'knob :busy, 0.5'], [
         'track(:t2, q: 1) { |clip| clip.synth(voices: 2) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',

@@ -49,11 +49,12 @@ module MB
           # player is still current, or stopped, when the command runs
           # depends on when a scheduled block runs it, which depends on the
           # buffer size (fix-bufsize-1107, SessionFuzz seed 394532: a track
-          # stopped with a ring-out and relaunched as a one-shot was in the
-          # stopped list when the bar-2 block ran at 367 frames but not at
-          # 800, so its swap into the launch queued for bar 2 went to the
-          # stopped player and raised at 367, and the track built its patch
-          # again: a new Synth, whose unused lanes ran at another pitch)
+          # stopped and relaunched as a one-shot on one frame still had its
+          # stopped player kept when the bar-2 block ran at 367 frames, not
+          # at 800 (Session#keep_stopped, fixed too), so its swap into the
+          # launch queued for bar 2 went to the stopped player and raised at
+          # 367, and the track built its patch again: a new Synth, whose
+          # unused lanes ran at another pitch)
           _player, stopped, nodes, queued = @render_lock.synchronize {
             @mutex.synchronize {
               t = swap_target(name)

@@ -1767,6 +1767,13 @@ module MB
       def keep_stopped(p)
         end_ring(p)
         return unless p.keep
+        # A player started under the name since supersedes it, as #add_now
+        # drops a kept one when it starts one (fix-bufsize-1107: a stop
+        # landing inside a span retired its player after the span's start
+        # had already started the relaunch, so at 367 frames the stopped
+        # player was kept beside the one playing, and later commands
+        # found it; SessionFuzz seed 394532)
+        return if @players.each_value.any? { |o| o.name == p.name && o.serial > p.serial }
         @stopped.delete(p.name)
         @stopped[p.name] = p
       end
