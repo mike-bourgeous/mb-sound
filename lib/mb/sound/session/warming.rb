@@ -37,8 +37,14 @@ module MB
       #
       # The warm-up runs on its own thread at WARM_PRIORITY (like the
       # scheduler's, below the render thread's) joined by the caller, with
-      # major GCs held off (GCQuiet), and never while the caller holds the
-      # render lock.  What a warm-up compiles depends only on code paths,
+      # major GCs held off (GCQuiet), and never while a realtime session's
+      # caller holds the render lock (an offline render's scheduled blocks
+      # warm holding it).  The warm-up thread never takes its session's
+      # render lock (Changes::RenderLock raises LockOrderError): the
+      # thread that waited for it destroys the branches its copies made
+      # on live Tees (fix-warm-deadlock-1107: a warm-up thread destroying
+      # them under the lock deadlocked an offline render whose scheduled
+      # block was joining it).  What a warm-up compiles depends only on code paths,
       # so a change whose kind and node classes were warmed before in this
       # process (Warming.signature) isn't warmed again.
       #
@@ -88,6 +94,10 @@ module MB
 
         # How many warm-ups #warmed keeps.
         WARM_LOG = 32
+
+        # Raised when a warm-up thread takes its session's render lock
+        # (see Changes::RenderLock and #warm).
+        class LockOrderError < RuntimeError; end
 
         # False when MB_SOUND_WARM turns :auto warming off.
         AUTO = !%w[0 false off no].include?(ENV['MB_SOUND_WARM'].to_s.downcase)
@@ -480,8 +490,9 @@ module MB
         # it releases the hold when it and the hold's other warm-ups are
         # done, and the hold is returned (see Warming).
         def warm(kind, name, nodes, at, background: nil, spill: nil, found: nil)
-          # (never stall a render thread; offline renders run scheduled
-          # blocks holding the render lock, which is fine)
+          # (never stall a render thread; an offline render runs scheduled
+          # blocks holding the render lock, so the warm-up thread never
+          # takes it: see Changes::RenderLock)
           return note_warm(Warm.new(kind: kind, name: name, ms: 0.0, result: :skipped, reason: 'the render lock is held')) if @realtime && @render_lock.mon_owned?
           t0 = MB::U.clock_now
           if !Warming.always && (left = scheduled_time_left)
@@ -494,14 +505,16 @@ module MB
 
           result = reason = nil
           live = warm_node_set(nodes, found)
+          stale = [] # (branches the copies made on live Tees: see #warm_round)
           worker = Thread.new {
             Thread.current.report_on_exception = false
             Thread.current.name = 'mb-sound-warm'
+            Thread.current[:mb_sound_warming_for] = self
             GCQuiet.during {
               Internal.strictly {
                 Internal.with_private_rng(0) {
                   WARM_ROUNDS.times do |round|
-                    result, reason = warm_round(kind, at, round, live, spill) { |*a| yield(*a) }
+                    result, reason = warm_round(kind, at, round, live, stale, spill) { |*a| yield(*a) }
                     break unless result == :played
                   end
                 }
@@ -516,26 +529,51 @@ module MB
               Thread.current.name = 'mb-sound-warm-wait'
               begin
                 worker.join
+              rescue LockOrderError => e
+                result = :failed
+                reason = "#{e.class}: #{e.message}"
+                warn "#{reason} (warming #{kind} #{name.inspect})"
               rescue StandardError
                 nil
               ensure
+                drop_stale(stale)
                 note_warm(Warm.new(kind: kind, name: name, ms: (MB::U.clock_now - t0) * 1000, result: result || :failed, reason: reason))
                 release_warm_hold(background) if background.finished!
               end
             }
             return background
           end
-          worker.join
-          note_warm(Warm.new(kind: kind, name: name, ms: (MB::U.clock_now - t0) * 1000, result: result, reason: reason))
+          error = nil
+          begin
+            worker.join
+          rescue LockOrderError => e
+            error = e
+          ensure
+            # (on this thread, which may hold the render lock already)
+            drop_stale(stale)
+          end
+          w = note_warm(Warm.new(kind: kind, name: name, ms: (MB::U.clock_now - t0) * 1000, result: error ? :failed : result, reason: error ? "#{error.class}: #{error.message}" : reason))
+          MB::Sound.live_error(error) if error
+          w
+        end
+
+        # Destroys the branches warm-up copies made on live Tees (see
+        # #warm_round), under the render lock, on the thread that waited
+        # for the warm-up thread.
+        def drop_stale(stale)
+          @render_lock.synchronize { stale.each(&:destroy) } unless stale.empty?
         end
 
         # One round of #warm in a new sandbox, its timeline placed so the
         # change lands at +at+ (when there is room for the lead), with
         # +live+ the live graph's nodes (see #warm_node_set).  Branches the
         # copy made on live nodes (a node its block captured; the copy is
-        # then only built) are removed again, so the live Tees stay in
-        # lockstep.  Returns the result and reason.
-        def warm_round(kind, at, round, live, spill = nil)
+        # then only built, or fails to load) are added to +stale+, for the
+        # thread that waits for the warm-up to destroy (#drop_stale), so
+        # the live Tees stay in lockstep.  Returns the result and reason.
+        # Raises LockOrderError if the warm-up took the session's render
+        # lock (Changes::RenderLock).
+        def warm_round(kind, at, round, live, stale, spill = nil)
           box = warm_sandbox
           copy_clocks(box)
           # (inside a buffer, as changes landing on a bar line do, and
@@ -546,17 +584,18 @@ module MB
           land = at && at > lead ? at : lead
           box.transport.seek(land - lead)
           later = land + WARM_BUFFERS / 2 * per_buffer
-          result = nil
+          result = error = nil
           made = GraphNode::Tee.collect_branches {
             result = begin
               Session.with_context(session: box) { yield box, land, later, live }
+            rescue LockOrderError => e
+              error = e
             rescue StandardError, ScriptError => e
               [:failed, "#{e.class}: #{e.message.lines.first&.chomp}"]
             end
           }
-          stale = []
           made.each_key { |b| stale << b if b.reader && live.include?(b.owner_tee) }
-          @render_lock.synchronize { stale.each(&:destroy) } unless stale.empty?
+          raise error if error
           result, reason = result if result.is_a?(Array)
           if result == :played
             after = WARM_BUFFERS
@@ -573,6 +612,8 @@ module MB
             spill&.call(box)
           end
           [result, reason]
+        rescue LockOrderError
+          raise
         rescue StandardError, ScriptError => e
           [:failed, "#{e.class}: #{e.message.lines.first&.chomp}"]
         ensure

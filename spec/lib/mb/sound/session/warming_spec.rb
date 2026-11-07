@@ -92,6 +92,39 @@ RSpec.describe(MB::Sound::Session::Warming) do
     s&.close
   end
 
+  # (fix-warm-deadlock-1107: an offline render's scheduled block holds the
+  # render lock while it waits for its warm-up; the warm-up thread took
+  # the lock to destroy a branch its copy made on a live Tee, and the two
+  # waited for each other: batch 18's soak hung for 80 minutes on a `cue`
+  # whose recipe copy branched a node of the live graph)
+  it "warms a copy that branches a live node in an offline render's scheduled block without a deadlock" do
+    s = new_session(true)
+    described_class.always = true # (as SessionFuzz's :warm relation: no time margin)
+    src = 220.hz.sine
+    graph = src * 0.5 + src * 0.25 # (src teed, in the live graph)
+    MB::Sound::Session.with_context(session: s) do
+      s.add(110.hz.saw.at(0.1), name: :a)
+      MB::Sound.at_bar(2) { s.add(graph, name: :b, warm: -> { src * 0.1 }) }
+    end
+    renderer = Thread.new { run(s, 380) } # (bar 2 at 120 BPM: 375 buffers)
+    expect(renderer.join(30)).not_to be_nil, 'the offline render deadlocked in a warm-up'
+    expect(s.warmed.find { |w| w.name == :b }).to have_attributes(result: :built)
+    # (the copy's branch destroyed again, by the thread that waited)
+    expect(src.instance_variable_get(:@internal_tee).branches.length).to eq(2)
+  ensure
+    described_class.always = false
+    s&.close unless renderer&.alive? # (a deadlocked render can't close)
+  end
+
+  it "raises LockOrderError when a warm-up thread takes its session's render lock" do
+    s = new_session(true)
+    expect {
+      s.add(330.hz.sine * 0.1, name: :c, warm: -> { s.with_render_lock { 330.hz.sine * 0.1 } })
+    }.to raise_error(described_class::LockOrderError, /warm-up thread took its session's render lock/)
+  ensure
+    s&.close
+  end
+
   # (session-2, the maintainer's "In background": the console returns at
   # once; the change lands once warm)
   describe 'in the background' do
