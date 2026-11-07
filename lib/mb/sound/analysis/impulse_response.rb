@@ -254,13 +254,139 @@ module MB
           d > 0 ? (a * b).sum / d : nil
         end
 
+        # Abel and Huang's normalized echo density (2006) over time: in
+        # windows of +window+ seconds every +hop+ seconds, the fraction of
+        # samples further than one standard deviation from zero, divided by
+        # a Gaussian's fraction (erfc(1 / sqrt(2)), 0.3173), averaged over
+        # the channels.  About 1 for a diffuse tail, near 0 for sparse or
+        # discrete echoes; the build-up from early reflections to a diffuse
+        # tail rises toward 1.  Returns [times (window centers, seconds),
+        # densities], both DFloats.
+        def echo_density(window: 0.02, hop: 0.005)
+          @fit_cache[[:ned, window, hop]] ||= begin
+            w = [(window * @sample_rate).round, 8].max
+            step = [(hop * @sample_rate).round, 1].max
+            n = @channels.map(&:length).min
+            frames = n > w ? (n - w) / step + 1 : 0
+            ned = Numo::DFloat.zeros(frames)
+            @channels.each do |c|
+              frames.times do |f|
+                x = c[(f * step)...(f * step + w)]
+                sd = Math.sqrt((x**2).mean)
+                ned[f] += sd > 0 ? (x.abs > sd).count_true.to_f / w / GAUSSIAN_OUTSIDE : 0.0
+              end
+            end
+            ned /= @channels.length
+            [(Numo::DFloat.new(frames).seq * step + w / 2.0) / @sample_rate, ned]
+          end
+        end
+
+        # A Gaussian's fraction of samples beyond one standard deviation.
+        GAUSSIAN_OUTSIDE = Math.erfc(1 / Math.sqrt(2))
+
+        # The median echo density of the late part (from LATE after the
+        # onset to where the broadband decay falls 40 dB, at most 2 s): near
+        # 1 for a diffuse tail, low for discrete echoes (a stadium, a
+        # flutter, a slapback).
+        def late_echo_density
+          @fit_cache[:late_ned] ||= begin
+            t, ned = echo_density
+            a, b = late_window(2.0)
+            sel = ((t >= a) & (t <= b)).where
+            sel.empty? ? nil : DSP.median(ned[sel].to_a)
+          end
+        end
+
+        # Repeating echoes in the late part: the largest normalized
+        # autocorrelation of its 1 ms energy envelope (in dB, the decay's
+        # line removed) at lags of 10 to 250 ms, as [correlation, lag in
+        # seconds; local peaks only).  About 0.1 for a diffuse tail, higher
+        # for a flutter or a stadium's slap; nil when the late part is under
+        # 0.15 s.
+        def echo_periodicity
+          @fit_cache[:periodicity] ||= begin
+            a, b = late_window(2.0)
+            if b - a < 0.15
+              nil
+            else
+              e = energy(nil)[(a * @sample_rate).round...(b * @sample_rate).round]
+              w = (0.001 * @sample_rate).round
+              n = e.length / w
+              env = DSP.db(e[0...(n * w)].reshape(n, w).mean(axis: 1), 1e-30)
+              # (minus its 21 ms moving average: the decay and slow swells
+              # aren't echoes)
+              env -= DSP.smooth_rows(env.reshape(n, 1), 10).reshape(n)
+              lags = (5..[250, n / 2].min).map { |lag|
+                x = env[0...(n - lag)]
+                y = env[lag..]
+                d = Math.sqrt((x**2).sum * (y**2).sum)
+                d > 0 ? (x * y).sum / d : 0.0
+              }
+              # the largest local peak past 10 ms
+              best = [0.0, 0.0]
+              lags.each_with_index do |r, i|
+                lag = i + 5
+                next if lag < 10 || i == 0 || i == lags.length - 1
+                best = [r, lag * w / @sample_rate] if r > lags[i - 1] && r >= lags[i + 1] && r > best[0]
+              end
+              best
+            end
+          end
+        end
+
+        # Spectral flatness of the late tail (geometric over arithmetic mean
+        # of the power spectrum, after dividing out its slow shape) in the
+        # 100-400 Hz and 400-1600 Hz bands, as [low, mid]: 0.56 for a
+        # diffuse (Gaussian) tail, lower when separate modes ring (an FDN
+        # with too few or too short lines for a long decay: the metallic,
+        # "bunched" tail).  nil when the late part is under 0.3 s.
+        def tail_flatness
+          @fit_cache[:flatness] ||= begin
+            a, b = late_window(2.0, start: 0.3)
+            if b - a < 0.3
+              nil
+            else
+              [[100, 400], [400, 1600]].map { |lo, hi|
+                @channels.sum { |c| DSP.spectral_flatness(c[(a * @sample_rate).round...(b * @sample_rate).round], @sample_rate, lo, hi) } / @channels.length
+              }
+            end
+          end
+        end
+
+        # The late part as [start, stop] seconds: from +start+ after the
+        # onset to where the broadband decay falls 40 dB, at most +longest+
+        # seconds.
+        def late_window(longest, start: LATE)
+          d = edc(nil)
+          stop = (d <= -40).where.to_a.first || d.length
+          a = onset + start
+          [a, [stop / @sample_rate, a + longest].min]
+        end
+
+        # True when the impulse has strong discrete or repeating echoes (a
+        # stadium, a flutter echo, a slapback): a late echo density under
+        # ECHO_DENSITY_MIN or a periodicity over PERIODICITY_MAX.
+        def discrete_echoes?
+          ned = late_echo_density
+          per = echo_periodicity&.first
+          (!ned.nil? && ned < ECHO_DENSITY_MIN) || (!per.nil? && per > PERIODICITY_MAX)
+        end
+
+        # The late echo density under which an impulse counts as echoey (the
+        # FDN :stadium preset reads 0.15; diffuse tails 0.85-1.05).
+        ECHO_DENSITY_MIN = 0.5
+
+        # The late periodicity over which an impulse counts as echoey.
+        PERIODICITY_MAX = 0.35
+
         # The measurements as a Hash of plain values.
         def to_h
           {
             seconds: seconds.round(4), onset: onset.round(5), t60: t60.transform_values { |v| v&.round(4) },
             t60_broadband: t60_broadband&.round(4), edt: edt.transform_values { |v| v&.round(4) },
             c50: c50.round(2), c80: c80.round(2), tail_levels: tail_levels.transform_values { |v| v.round(2) },
-            correlation: correlation&.round(3), channels: @channels.length,
+            correlation: correlation&.round(3), late_echo_density: late_echo_density&.round(3), echo_periodicity: echo_periodicity&.first&.round(3),
+            tail_flatness: tail_flatness&.map { |v| v.round(3) }, channels: @channels.length,
           }
         end
 

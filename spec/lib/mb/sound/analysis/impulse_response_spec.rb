@@ -31,6 +31,47 @@ RSpec.describe(MB::Sound::Analysis::ImpulseResponse, :aggregate_failures) do
     expect((flat[8000] - flat[125]) - (dark[8000] - dark[125])).to be_within(1.5).of(18)
   end
 
+  describe 'echo density, periodicity, and tail flatness' do
+    let(:rate) { 48_000 }
+
+    it 'reads a diffuse tail as diffuse' do
+      # (white Gaussian noise decaying with T60 2 s: the synthetic octave
+      # bands leave gaps between them, which read as less flat)
+      rng = Random.new(21)
+      noise = Array.new(2) { Numo::DFloat[*Array.new(rate * 3) { Math.sqrt(-2 * Math.log(1 - rng.rand)) * Math.cos(2 * Math::PI * rng.rand) }] }
+      decay = Numo::NMath.exp(-Numo::DFloat.new(rate * 3).seq / rate * Math.log(1000) / 2)
+      ir = described_class.new(noise.map { |c| c * decay })
+      t, ned = ir.echo_density
+      expect(t.length).to eq(ned.length)
+      expect(ir.late_echo_density).to be_within(0.15).of(1.0)
+      expect(ir.echo_periodicity[0]).to be < 0.3
+      expect(ir.tail_flatness).to all(be_within(0.12).of(0.56))
+      expect(ir.discrete_echoes?).to eq(false)
+    end
+
+    it 'finds discrete echoes (a decaying impulse train) and repeating ones (a flutter)' do
+      sparse = Numo::DFloat.zeros(rate * 2)
+      (0...40).each { |k| sparse[(k * 0.047 * rate).round] = 0.9**k }
+      ir = described_class.new([sparse])
+      expect(ir.late_echo_density).to be < 0.3
+      expect(ir.discrete_echoes?).to eq(true)
+
+      tail = SyntheticSounds.impulse_response(t60s.transform_values { 0.6 }, seconds: 1.2, seed: 22)[0]
+      gate = Numo::DFloat.new(tail.length).seq.map { |i| (i / (0.031 * rate)).floor.even? ? 1.0 : 0.15 }
+      flutter = described_class.new([tail * gate])
+      per, lag = flutter.echo_periodicity
+      expect(per).to be > 0.35
+      expect(lag / 0.062).to be_within(0.05).of((lag / 0.062).round) # (the gate's period or a multiple)
+      expect(flutter.discrete_echoes?).to eq(true)
+    end
+
+    it 'reads ringing modes as a low tail flatness' do
+      t = Numo::DFloat.new(rate * 2).seq / rate
+      modes = [130.0, 207.0, 331.0, 452.0, 611.0, 870.0, 1130.0, 1420.0].sum { |f| Numo::NMath.sin(t * 2 * Math::PI * f) } * Numo::NMath.exp(-t * 2)
+      expect(described_class.new([modes]).tail_flatness).to all(be < 0.1)
+    end
+  end
+
   it 'reads Samples, files, and 2D arrays, and prints a summary' do
     chans = SyntheticSounds.impulse_response(t60s, seconds: 1, seed: 7)
     path = tmp_path('ir.wav')

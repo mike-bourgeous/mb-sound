@@ -37,6 +37,59 @@ module MB
       # Room sizes tried for the build-up.
       ROOM_SIZES = [0.1, 0.3, 0.5, 0.7, 0.9].freeze
 
+      # Reverb presets suited to normal rooms and halls: the candidates for
+      # #closest_preset.
+      COMPARABLE_PRESETS = %i[room default plate hall space].freeze
+
+      # Reverb presets kept out of #closest_preset, and why (the maintainer,
+      # 2026-11-06, after :stadium came up as a cathedral's and a big
+      # space's closest preset: "Stadium preset's parameters are not a good
+      # foundation for normal reverbs").
+      EXCLUDED_PRESETS = {
+        stadium: 'deliberate discrete echoes (a stadium PA): not a normal reverb',
+        shimmer: 'a tail that climbs in octaves (pitch shifting)',
+        grit: 'a tail that saturates and crumbles',
+        lofi: 'wobbly, dark, and bit crushed',
+        gated: 'cut off 0.25 s after the hit',
+        drone: 'an endless 30 s wash',
+      }.freeze
+
+      # The comparable preset (COMPARABLE_PRESETS) whose mid-band T60 (500
+      # Hz and 1 kHz) is closest to the impulse's, by ratio.
+      def closest_preset
+        mid = ->(t) { Math.sqrt((t[500] || t.values.compact.first) * (t[1000] || t.values.compact.first)) }
+        want = mid.(@impulse.t60)
+        COMPARABLE_PRESETS.min_by { |p| Math.log(mid.(self.class.preset_t60(p)) / want).abs }
+      end
+
+      # A reverb preset's T60 per octave band (its impulse with stereo in
+      # and out, measured once per process).
+      def self.preset_t60(name)
+        (@preset_t60 ||= {})[name] ||= begin
+          x = Numo::SFloat.zeros(48000 * 12)
+          x[0] = 1
+          ins = [MB::Sound::ArrayInput.new(data: [x]), MB::Sound::ArrayInput.new(data: [x])]
+          outs = GraphNode::Channels.new(ins).reverb(name, wet: 1, dry: 0, extra_time: 0).outputs
+          res = outs.map { [] }
+          loop do
+            bufs = outs.map { |o| o.sample(4800) }
+            break if bufs.any?(&:nil?)
+            bufs.each_with_index { |b, i| res[i] << b.dup }
+          end
+          Analysis::ImpulseResponse.new(res.map { |r| Numo::DFloat.cast(r[0].concatenate(*r[1..])) }).t60
+        end
+      end
+
+      # Feedback line counts tried for the tail's modal density (cost on
+      # the Mac for a stereo 8 s room at 128 / 800 frames: 2.9 / 1.6%,
+      # 4.3 / 2.9%, 7.4 / 5.6%).
+      LINES = [8, 16, 32].freeze
+
+      # The fit takes the fewest lines whose late-tail flatness reaches
+      # this share of the impulse's (capped at FLATNESS_CAP).
+      FLATNESS_SHARE = 0.85
+      FLATNESS_CAP = 0.45
+
       # Search limits.
       DAMPING = 0.0..0.97
       LOWPASS = 500.0..20_000.0
@@ -84,6 +137,7 @@ module MB
         @max_evals = max_evals
         @evaluations = 0
         @evaluations_at = 0
+        @lines = nil
         @mode = nil
         @room_size = nil
         @t60_fits = nil
@@ -93,6 +147,12 @@ module MB
         @fitted = nil
         @target = @impulse.t60.compact
         raise ArgumentError, 'The impulse decays less than 15 dB in every octave band; no T60 to match' if @target.empty?
+        if @impulse.discrete_echoes?
+          per = @impulse.echo_periodicity
+          Internal.warn_once_per_site(:reverb_match_echoes,
+            format("reverb_match: this impulse has discrete or repeating echoes (late echo density %.2f, periodicity %.2f at %.0f ms); the FDN can't make them, so the fit is a diffuse tail (convolve plays them)",
+              @impulse.late_echo_density || 0, per ? per[0] : 0, per ? per[1] * 1000 : 0))
+        end
 
         fit
       end
@@ -180,6 +240,8 @@ module MB
           t60_rms: Math.sqrt(t60.values.compact.sum { |e| Math.log(1 + e)**2 } / t60.values.compact.length),
           tail: tail,
           tail_rms: Math.sqrt(tail.values.sum { |d| d * d } / tail.length),
+          tail_flatness: [@impulse.tail_flatness, @fitted.tail_flatness],
+          echo_density: [@impulse.late_echo_density, @fitted.late_echo_density],
           c50: @fitted.c50 - @impulse.c50,
           c80: @fitted.c80 - @impulse.c80,
           onset: @fitted.onset - @impulse.onset,
@@ -203,8 +265,14 @@ module MB
           *rows,
           format('  T60 RMS error %.1f%%, tail spectrum RMS %.1f dB, C50 %+.1f dB, C80 %+.1f dB, onset %+.1f ms (%d renders)',
             100 * (Math.exp(e[:t60_rms]) - 1), e[:tail_rms], e[:c50], e[:c80], 1000 * e[:onset], @evaluations),
+          format('  %d feedback lines; late-tail flatness (0.56 diffuse) %s -> %s; late echo density %s -> %s',
+            @lines, fmt_pair(e[:tail_flatness][0]), fmt_pair(e[:tail_flatness][1]), fmt_num(e[:echo_density][0]), fmt_num(e[:echo_density][1])),
         ].join("\n")
       end
+
+      def fmt_pair(v) = v ? v.map { |x| format('%.2f', x) }.join('/') : '-'
+      def fmt_num(v) = v ? format('%.2f', v) : '-'
+      private :fmt_pair, :fmt_num
 
       def inspect
         "#<#{self.class.name} #{to_ruby}>"
@@ -289,6 +357,7 @@ module MB
       # The reverb's keywords; +absorb+ is { damping: x } or { lowpass: hz }.
       def base_settings(room_size, decay, absorb, highpass)
         s = { room_size: room_size, decay: decay, **absorb }
+        s[:channels] = @lines if @lines && @lines != LINES.first
         s[:highpass] = highpass if highpass
         s.merge(predelay: 0, wet: 1, dry: 0, seed: SEED)
       end
@@ -306,6 +375,22 @@ module MB
           m = measure(base_settings(r, decay, { damping: damping }, nil), channels: 1)
           (m.c50 - @impulse.c50).abs + (m.c80 - @impulse.c80).abs
         }
+
+        # 1b. feedback lines for the tail's modal density: the fewest whose
+        # late tail is about as flat (diffuse) as the impulse's.  8 lines
+        # under a 9 s cathedral rang as separate modes (flatness 0.03-0.07
+        # against the impulse's 0.34; the maintainer heard "echo bunching
+        # like the feedback loop is off"); 32 read 0.40-0.47.
+        @lines = LINES.first
+        flat = @impulse.tail_flatness
+        if flat
+          want = [flat.sum / flat.length, FLATNESS_CAP].min * FLATNESS_SHARE
+          LINES.each do |n|
+            @lines = n
+            f = measure(base_settings(@room_size, decay, { damping: damping }, nil), channels: 1).tail_flatness
+            break if f.nil? || f.sum / f.length >= want
+          end
+        end
 
         # 2. decay times per band, with the damping filters and with the
         # in-loop lowpass instead (a cutoff in the audio band bends T60 down

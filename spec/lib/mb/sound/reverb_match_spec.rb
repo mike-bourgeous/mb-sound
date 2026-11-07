@@ -73,6 +73,27 @@ RSpec.describe(MB::Sound::ReverbMatch, :aggregate_failures) do
     expect(m.to_s).to include('Fitted reverb:', 'T60 RMS error')
   end
 
+  it 'compares with normal reverb presets only (not :stadium)' do
+    expect(described_class::COMPARABLE_PRESETS + described_class::EXCLUDED_PRESETS.keys).to match_array(MB::Sound::GraphNode::Reverb.presets.keys)
+    expect(described_class::COMPARABLE_PRESETS).not_to include(:stadium)
+    expect(described_class::COMPARABLE_PRESETS).to include(m.closest_preset)
+  end
+
+  it 'warns when the impulse has discrete echoes, and still fits a tail' do
+    rate = 48_000
+    sparse = Numo::DFloat.zeros(rate)
+    (0...30).each { |k| sparse[(k * 0.023 * rate).round + 100] = 0.85**k }
+    noise = SyntheticSounds.impulse_response(T60S.transform_values { 0.5 }, seconds: 1, seed: 5)[0] * 0.05
+    echoey = nil
+    expect { echoey = described_class.new([sparse + noise], max_evals: 8) }.to output(/discrete or repeating echoes/).to_stderr
+    expect(echoey.settings[:decay]).to be > 0
+  end
+
+  it 'picks more feedback lines when the impulse tail is more diffuse than 8 lines ring' do
+    expect(m.to_s).to match(/\d+ feedback lines; late-tail flatness/)
+    expect(described_class::LINES).to include(m.settings.fetch(:channels, 8))
+  end
+
   it 'refuses a silent impulse' do
     expect { described_class.new(Numo::DFloat.zeros(48000)) }.to raise_error(ArgumentError, /no T60/)
   end

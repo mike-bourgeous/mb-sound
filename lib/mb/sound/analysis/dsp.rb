@@ -241,6 +241,27 @@ module MB
         end
 
         # The median of an Array of numbers (nil if empty).
+        # Spectral flatness of +x+ at +rate+ in lo..hi Hz: the geometric over
+        # the arithmetic mean of its power spectrum (Hann squared window)
+        # divided by a 101-bin moving average, so the slow spectral shape
+        # doesn't count.  0.56 for Gaussian noise (exp(-Euler's gamma));
+        # lower for sparse peaks (ringing modes).
+        def spectral_flatness(x, rate, lo, hi)
+          n = x.length
+          win = Numo::NMath.sin(Numo::DFloat.new(n).seq * (Math::PI / n))**2
+          p = Numo::Pocketfft.rfft(Numo::DFloat.cast(x) * win).abs**2
+          df = rate.to_f / n
+          seg = p[(lo / df).round..[(hi / df).round, p.length - 1].min]
+          k = 101
+          c = Numo::DFloat.zeros(seg.length + 1)
+          c[1..] = seg.cumsum
+          idx = Numo::Int64.new(seg.length).seq
+          a = (idx - k / 2).clip(0, seg.length)
+          b = (idx + k / 2 + 1).clip(0, seg.length)
+          r = seg / ((c[b] - c[a]) / (b - a) + 1e-300)
+          Math.exp(Numo::NMath.log(r + 1e-30).mean) / r.mean
+        end
+
         def median(values)
           return nil if values.empty?
           s = values.sort
