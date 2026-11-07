@@ -41,8 +41,9 @@ module MB
         # (its antialiasing state moves to a rebuilt shaper: #carry_adopt)
         node_traits memory: :short, carry: :adopt
 
-        # Curve sources of the C kernel.
-        FORMS = { table: 0, poly: 1, cos: 2, exp: 3 }.freeze
+        # Curve sources of the C kernel (:db is GraphNode::DbShaper's
+        # dB-domain curve, piecewise power laws on the signed input).
+        FORMS = { table: 0, poly: 1, cos: 2, exp: 3, db: 4 }.freeze
 
         # Edge modes of the C kernel (see the class description).
         EDGES = { clamp: 0, extend: 1, wrap: 2, mirror: 3, none: 4 }.freeze
@@ -272,6 +273,8 @@ module MB
           when FORMS[:exp]
             c, inv = params[:coeffs].to_a
             (x - (Math.exp(c * x) - 1.0) / c) * inv
+          when FORMS[:db]
+            DbShaper.form_integral(params[:db_rows] ||= params[:coeffs].to_a, x)
           else
             table_eval(params, x, false)
           end
@@ -291,6 +294,8 @@ module MB
           when FORMS[:exp]
             c, inv = params[:coeffs].to_a
             (1.0 - Math.exp(c * x)) * inv
+          when FORMS[:db]
+            DbShaper.form_f(params[:db_rows] ||= params[:coeffs].to_a, x)
           else
             table_eval(params, x, true)
           end
