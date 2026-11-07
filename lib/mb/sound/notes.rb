@@ -828,7 +828,9 @@ module MB
       # +rate+ - Hz (a number or a node, e.g. following poly pressure), or a
       #          musical length (a Duration such as `1.n8` or `2.bars`: one
       #          cycle per length, following the tempo and locked to the
-      #          timeline).
+      #          timeline), or a node counted in bars (`lfo_bars.bars`,
+      #          GraphNode#bars: a tempo LFO whose cycle follows a param or
+      #          knob while playing, with no phase jump).
       # +:shape+ - :triangle (default; alias :tri), :saw (rising; :ramp),
       #            :square (:sqr), :sine, or :noise (alias :random, :sh):
       #            a random value held for each cycle (sample and hold; see
@@ -879,7 +881,7 @@ module MB
         end
         phase = Phase.cycles(phase) if phase
         raise ArgumentError, "phase: must be a number of cycles or a Phase (got #{phase.inspect})" unless phase.nil? || phase.is_a?(Numeric)
-        tempo = rate.is_a?(MB::Sound::Sequence::Duration)
+        tempo = rate.is_a?(MB::Sound::Sequence::Duration) || rate.is_a?(MB::Sound::Sequence::NodeDuration)
         sync ||= tempo ? :free : :key
         raise ArgumentError, "LFO sync must be one of #{LFO_SYNC} (got #{sync.inspect})" unless LFO_SYNC.include?(sync)
         raise ArgumentError, 'human: needs a numeric or node rate' if human && tempo

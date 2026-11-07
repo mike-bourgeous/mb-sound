@@ -40,7 +40,7 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
   # same sound at their defaults: bin/save_presets.rb --check and the
   # renders against master-ai's documents).
   CURATED = {
-    dnb_reese: %i[cutoff resonance drive glide], dnb_sub: %i[cutoff release], dnb_neuro: %i[cutoff decay grit],
+    dnb_reese: %i[cutoff resonance drive glide lfo_depth lfo_bars], dnb_sub: %i[cutoff release], dnb_neuro: %i[cutoff decay grit],
     dnb_pad: %i[cutoff attack release], dnb_pluck: %i[cutoff decay echo], dnb_boom: %i[decay drop],
     jungle_breaks: %i[cutoff grit], jungle_sub: %i[release], jungle_reese: %i[glide release], jungle_keys: %i[decay],
     jungle_pad: %i[cutoff attack release], jungle_flute: %i[glide attack echo],
@@ -149,7 +149,7 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
       MB::Sound.preset(:funk_bass, midi: BASS_RIFF) # (a graph nothing plays)
       MB::Sound.bg(:a, BASS_RIFF)
     }, buffers: 4)
-    expect(s.knobs.keys).to contain_exactly(:cut, :"a/resonance", :"pad/resonance", :"pad/glide")
+    expect(s.knobs.keys).to contain_exactly(:cut, :"a/resonance", :"pad/resonance", :"pad/glide", :"pad/lfo_depth", :"pad/lfo_bars")
   end
 
   # bg presets get param knobs like tracks (library-2; the maintainer,

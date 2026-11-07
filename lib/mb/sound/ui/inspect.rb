@@ -519,16 +519,19 @@ module MB
         end
 
         # The knob each param of +node+ reads through arithmetic (`cut *
-        # lfo`, `2 ** env * cut`), when it reads exactly one: { param =>
-        # knob name } (params given a knob directly name it in their
-        # ParamValue#label instead).
+        # lfo`, `2 ** env * cut`), when it reads exactly one at the
+        # nearest depth that reads any: { param => knob name } (params
+        # given a knob directly name it in their ParamValue#label instead).
+        # So a modulation depth knob further in (`cut * 2 ** v.lfo(...,
+        # depth: lfo_depth)`, dnb_reese since reese-params-1) leaves the
+        # cutoff its knob.
         def param_knobs(node)
           return {}.freeze unless node.respond_to?(:params)
           (node.params rescue {}).each_with_object({}) { |(name, src), h|
             next if src.is_a?(Numeric)
             s = GraphNode.climb_tee_tree(src)
             next if s.is_a?(GraphNode::Knob::Reader) || s.is_a?(GraphNode::Knob)
-            found = knobs_in(s, 3, arithmetic: true)
+            found = knobs_in(s, 3, arithmetic: true, nearest: true)
             h[name] = found.first if found.length == 1
           }.freeze
         end
@@ -682,11 +685,13 @@ module MB
         # through Multipliers, Mixers, BinaryOperations, and ProcNodes with
         # +arithmetic+: a
         # glide reading a knob for its time doesn't make the frequency it
-        # moves that knob's).
-        def knobs_in(src, depth, arithmetic: false)
+        # moves that knob's).  With +nearest+, only the knobs of the
+        # nearest depth that has any.
+        def knobs_in(src, depth, arithmetic: false, nearest: false)
           out = []
           frontier = [src]
           (depth + 1).times do
+            break if nearest && !out.empty?
             nxt = []
             frontier.each do |s|
               s = GraphNode.climb_tee_tree(s)
