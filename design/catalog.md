@@ -118,7 +118,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `sounding(hold:, fade:)` A gate that is 1 while this node makes sound (GraphNode::Sounding)
 - `seconds` Marks this node's output as a length in seconds (Length::Seconds)
 - `samples` Marks this node's output as a length in samples (Length::Samples)
-- `bars` This param or knob, read while building, as a Duration in bars
+- `bars` Marks this node's output as a number of bars, read live (an LFO rate)
 - `cycles/cyc` Marks this node's output as a phase in cycles (a Phase)
 - `radians/rad` Marks this node's output as a phase in radians (a Phase of this / 2 pi)
 
