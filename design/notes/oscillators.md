@@ -8,7 +8,7 @@
 
 - Shapes: `ramp`/`saw`, `square`, `triangle` (PolyBLEP/PolyBLAMP); `pwm(w, pivot:)` (alias `skew`) warps any shape around a per-shape pivot; `sync(ratio:)` / `sync(master)` / `softsync` (minBLEP, ~2.78 samples delay, `enabled:` read at build); `fm_feedback(amount, gain:)` (aliases `fmfb`, `fm_fb`; sines only); `tone.gain(g)` multiplies inside the Tone.
 - Phase jumps are band-limited steps (`clean` makes them hard-sync events, ~2x CPU); `tone.reset(trig, to:)` jumps at nonzero trigger samples; `.free` never resets; `.rnd` random phases.
-- `softclip`, `clip`, `abs`, `quantize` use ADAA (antiderivative antialiasing) plus a half-sample allpass; `asoftclip` etc. are exact.
+- `softclip`, `clip`, `abs`, `quantize` use ADAA (antiderivative antialiasing) plus a half-sample allpass; `asoftclip` etc. are exact.  `ease` (CurveShaper) and `shape_db` (DbShaper, a dB-domain transfer curve per sample; dynamics.md) share FastClip.shape_curve's ADAA.
 - `sig.decimate(rate, jitter:, interpolation: :hold | :linear)` (`crush_rate`, `srr`): sample-rate reduction on purpose, the rate a number or a per-sample node (`v.freq * n`).
 - Wavetables: `440.hz.wavetable(t, scan:)`, `wavetable_of(:sine, [1, 0.5], ->(p) { ... }, t)` (`Wavetable.of`; prints and saves as the call; `help :wavetables`).
 - Unison: `pitch.unison(n, detune:, spread:, mix:) { |p, i| p.saw }`, also `pitch.unison(n).saw` (a pending unison whose oscillator methods chain) and `pitch.saw.unison(n)` (`Tone#unison`), bit for bit the same; `pitch.swarm(...)` per-copy glides.  Still aliasing: FM/PM sidebands (use `oversample`), `gauss`, naive shapes.

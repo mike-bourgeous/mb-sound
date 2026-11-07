@@ -519,6 +519,28 @@ module MB
           f.reset(reset) if reset
           self.filter(f)
         end
+
+        # Follows this node with its acceleration limited (GraphNode::Inertia).
+        # The change of velocity per substep is clamped to +-+rate+ (full
+        # scale is 1; a number or a node), +substeps+ per sample: slow and
+        # quiet signals pass exactly, fast loud ones overshoot into
+        # fixed-size limit cycles ("squelchy chirps"; the DirectX
+        # Distortion's slew, whose percentage s is `inertia(s * 0.0005,
+        # mode: :hardware)` at 48 kHz).  Not a slope limit (#clip_rate).
+        #
+        # +mode+ :musical (default) gives each channel its own previous
+        # sample as the first substep's input; :hardware (2 substeps)
+        # reproduces the plug-in's interleaved stereo stream: each channel's
+        # first substep reads the sample before it in L, R, L, R order (left:
+        # the right channel's previous sample; right: the left's current
+        # one), so mono material comes out slightly different left and
+        # right.  Bundles are handled whole (one Inertia per channel).
+        #
+        #     play 1000.hz.sine.at(-6.db).inertia(0.005)            # chirps
+        #     play drums.inertia(0.045, mode: :hardware)             # slew 90: rounded clicks
+        def inertia(rate, substeps: 2, mode: :musical)
+          Inertia.build(self, rate, substeps: substeps, mode: mode)
+        end
       end
     end
   end
