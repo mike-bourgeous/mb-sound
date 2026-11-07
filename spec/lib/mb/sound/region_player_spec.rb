@@ -96,8 +96,23 @@ RSpec.describe(MB::Sound::GraphNode::RegionPlayer, :aggregate_failures) do
 
   it 'gives the same samples at any buffer size, transposed and off the frame grid too' do
     smp = material
-    list = rows + [[smp, 1/3r + 1/1000000r, 1/2r, { transpose: 3.5, fade_in: 1/16r, curve_in: :smooth }]]
+    # (the last row starts at frame 96799.5, between two 800-frame blocks)
+    list = rows + [[smp, 1/3r + 1/1000000r, 1/2r, { transpose: 3.5, fade_in: 1/16r, curve_in: :smooth }], [smp, 1r + 1599/192_000r, 1/4r]]
     expect_invariant(-> { m.regions(*list) }, seconds: 4.6)
+  end
+
+  # (fix-bufsize-1107, seed 532169: a region whose start fell between a
+  # block's last frame and the next block's first was skipped by both)
+  it 'starts a region positioned between the last frame of a block and the first of the next' do
+    smp = material
+    list = [[smp, 1599/192_000r, 1/8r], [smp, 1599/192_000r + 1/4r, 1/8r, { transpose: 2 }]] # (frames 799.5 and 24799.5)
+    got = played(list, 40_000)
+    expect(got[0...800].abs.max).to eq(0)
+    expect(got[801...12_800].abs.max).to be > 0.3
+    expect(got[24_801...36_800].abs.max).to be > 0.3
+    [367, 64].each do |size|
+      expect(played(list, 40_000, size: size)).to eq(got), "#{size}-frame buffers"
+    end
   end
 
   it 'starts a seek or a render(from:) inside a region on the sample an uninterrupted run plays' do

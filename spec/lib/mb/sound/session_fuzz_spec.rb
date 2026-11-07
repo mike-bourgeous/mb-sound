@@ -329,6 +329,50 @@ RSpec.describe('session fuzzing') do
         'at_bar(2) { flow(seed: 54, on: :beat) { generate markov(s1: { s1: 2 }, seed: 25), s1: 1 } }',
       ], 2,
     ],
+    # (fix-bufsize-1107: after the tempo change the third region's start
+    # fell between the last frame of one 800-frame block and the first of
+    # the next, and RegionPlayer started it in neither)
+    'a region starting between two blocks after a tempo change (seed 532169)' => [
+      :buffer_size, ['bpm 126', 'knob :busy, 0.5'], [
+        'at_bar(2, beat: 3) { bpm 100 }',
+        'at_bar(1, beat: 3) { bg :x1, regions([breakbeat(:jungle), 0r, 3/4r, { fade_out: 1/8r, curve_out: :sharp }], ' \
+        '[breakbeat(:jungle), 5/8r, 1r, { offset: 0.4, fade_in: 1/8r, curve_in: :smooth, gain: -3.db }], ' \
+        '[breakbeat(:jungle), 3/2r + 1/7r, 1/2r, { transpose: 7 }]) * 0.4, on: :now }',
+      ], 2,
+    ],
+    # (fix-bufsize-1107: the bar-2 block, run ahead of its time, bound the
+    # duck's reader of :t2 on a buffer that depends on the buffer size,
+    # which woke the held kit there; a reader counts from its graph's
+    # start since, so the kit wakes on the unhold as without the duck)
+    'a held kit a reader added ahead of its time reads (seed 611891)' => [
+      :buffer_size, ['bpm 126', 'knob :busy, 0.5'], [
+        'track(:t2, q: 1/2r) { |kit| tr808(kit) * 0.5 }',
+        'scene :s1, t2: beats(16, energy: knob(:busy), seed: 3) { kick [1, 0, 0, 0] * 4, keep: [0, 8]; fill every: 2, energy: true, snare: 0.5, low_tom: 0.3 }, others: :keep',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 2) { hold :t2, on: :now }',
+        'at_bar(1, beat: 2) { after(in: 2.beats) { unhold :t2 } }',
+        'at_bar(2, beat: 2) { bg :ducked, 0.2.constant.duck(:t2, only: :kick, amount: -12.db), on: :beat }',
+      ], 1,
+    ],
+    # (fix-bufsize-1107: the bar-2 relaunch, run ahead, swapped the clip of
+    # the launch queued for bar 2 at 800 frames; at 367 the player stopped
+    # on the one-shot relaunch's frame was kept as stopped after the
+    # relaunch started (the stop landed inside the span), so the swap went
+    # to it and raised, and the track built a new Synth whose unused lanes
+    # ran at another pitch, their key-sync reset step differing on a later
+    # note)
+    'a relaunch swapping a queued launch while a stopped player is kept (seed 394532)' => [
+      :buffer_size, ['bpm 150', 'knob :busy, 0.5'], [
+        'track(:t2, q: 1) { |clip| clip.synth(voices: 2) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t2: seq(G4.n16, B4.n16, D5.n8).loop, others: :keep',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 2) { after(in: 3.beats) { seek 1, 1.1 } }',
+        'at_bar(1, beat: 2) { stop :t2 }',
+        'at_bar(1, beat: 2) { bg :t2, seq(C5, D5).n16, on: :now }',
+        'at_bar(1, beat: 2) { bg :t2, seq(E5, G5).n8.loop, in: 1/4r }',
+        'at_bar(2) { bg :t2, seq(A4, C5).n8.loop, on: :now }',
+      ], 2,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil
@@ -349,6 +393,15 @@ RSpec.describe('session fuzzing') do
     expect(SessionFuzz.kit_rows?("grid(16, kick: 'x...', hat: 'x.x.').loop", %w[kick hat])).to eq(true)
     expect(SessionFuzz.kit_rows?("grid(16, kick: 'x...').loop", %w[kick hat])).to eq(false)
     expect(SessionFuzz.kit_rows?('beats(16, seed: 3) { kick [1, 0, 0, 0] * 4 }', %w[kick])).to eq(false)
+  end
+
+  # (fix-bufsize-1107's soak: the ducked-kick step's grid without a snare
+  # took over t1 before a kit swap with one: a user error by design)
+  it 'drops a kit swap whose rows the ducked-kick step\'s grid lacks (seed 611894)', render_budget: { seconds: 60, reason: 'one random song' } do
+    song = SessionFuzz.generate(Random.new(611894))
+    expect(song.code).to include("{ bg :t1, grid(16, kick: 'x...x...', open_hat: '..x...x.').loop")
+    expect(song.code).not_to match(/swap :t1, grid/)
+    expect(SessionFuzz.check(:runs, song)).to be_nil
   end
 
   # The :carry relation's finds (carry-1), shrunk: each song's carrying

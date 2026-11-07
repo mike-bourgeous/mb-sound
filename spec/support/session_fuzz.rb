@@ -264,8 +264,14 @@ module SessionFuzz
     if !drums.empty? && rng.rand < 0.3
       t = pick(rng, drums)
       on = pick(rng, ['on: :bar', 'on: :beat', 'in: 1/4r'])
-      lines << "at_bar(#{rng.rand(1..bars)}, beat: 2) { bg :#{t}, grid(16, kick: 'x...x...', open_hat: '..x...x.').loop, #{on}; " \
+      grid = "grid(16, kick: 'x...x...', open_hat: '..x...x.')"
+      lines << "at_bar(#{rng.rand(1..bars)}, beat: 2) { bg :#{t}, #{grid}.loop, #{on}; " \
                "bg :ducked, 0.2.constant.duck(:#{t}, only: :kick, amount: -12.db), #{on} }"
+      # (fix-bufsize-1107's soak, seed 611894: the parity-1 kit swap drawn
+      # above for this track swapped in a kit with a snare after this grid
+      # without one took over, a user error by design (the swap warns that
+      # :snare has no voices): the swap stays only if this grid has its rows)
+      lines.reject! { |l| l.start_with?('at_bar') && l.include?("{ swap :#{t}, grid(") && !kit_rows?(grid, grid_rows(l)) }
     end
     # (omnibus17, Munro's M5) a trigger track ducking a part, through full
     # scenes that don't name it (it keeps pumping) and sometimes `pump:
