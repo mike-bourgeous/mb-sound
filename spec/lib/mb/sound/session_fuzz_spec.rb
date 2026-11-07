@@ -395,6 +395,15 @@ RSpec.describe('session fuzzing') do
     expect(SessionFuzz.kit_rows?('beats(16, seed: 3) { kick [1, 0, 0, 0] * 4 }', %w[kick])).to eq(false)
   end
 
+  # (fix-bufsize-1107's soak: the ducked-kick step's grid without a snare
+  # took over t1 before a kit swap with one: a user error by design)
+  it 'drops a kit swap whose rows the ducked-kick step\'s grid lacks (seed 611894)', render_budget: { seconds: 60, reason: 'one random song' } do
+    song = SessionFuzz.generate(Random.new(611894))
+    expect(song.code).to include("{ bg :t1, grid(16, kick: 'x...x...', open_hat: '..x...x.').loop")
+    expect(song.code).not_to match(/swap :t1, grid/)
+    expect(SessionFuzz.check(:runs, song)).to be_nil
+  end
+
   # The :carry relation's finds (carry-1), shrunk: each song's carrying
   # rebuilds come from its track lines and length (SessionFuzz.carry_lines)
   {
