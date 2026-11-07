@@ -28,8 +28,17 @@ module MB
         # :notch, :allpass, :peak, :lowshelf, :highshelf; +gain:+ is a gain
         # for the last three and an output gain for the bandpasses: `6.db`
         # exactly, a bare number linear, or a node of linear gains; see
-        # Decibels.gain_of) and
+        # Decibels.gain_of), the first-order types (6 dB/octave, no
+        # quality: :lowpass1p, :highpass1p, and the shelves :lowshelf1p and
+        # :highshelf1p with +gain:+; Filter::SVF::FIRST_ORDER_TYPES), and
         # the four-pole types (FOUR_POLE_TYPES, see #lp4).
+        #
+        # +decramp: true+ (:lowpass, :highpass, the bandpasses, :notch,
+        # :allpass, :lowpass1p, :highpass1p; Filter::SVF::DECRAMP_TYPES)
+        # matches the analog response up to Nyquist instead of the bilinear
+        # transform's, whose top octave falls too fast (at 48 kHz a lowpass
+        # near 10-15 kHz is 5-15 dB low near 20 kHz; decramped within about 1 dB
+        # up to 20 kHz).  Off by default (the same sound as before).
         #
         # Cookbook responses (types, and Cookbook objects such as
         # `150.hz.highpass(quality: 4)`) run as a state-variable filter
@@ -62,6 +71,16 @@ module MB
         #     # or 24 (lp4), chosen when the graph builds
         #     MB::Sound.play 55.hz.saw.filter(:lowpass, cutoff: 900, resonance: 0.25, slope: 12)
         #
+        #     # A one-pole lowpass (6 dB/octave), its cutoff swept by an LFO
+        #     MB::Sound.play 110.hz.saw.filter(:lowpass1p, cutoff: 0.25.hz.lfo.at(200..4000))
+        #
+        #     # A gentle 6 dB/octave treble boost of 6 dB from 3 kHz up
+        #     MB::Sound.play 110.hz.saw.filter(:highshelf1p, cutoff: 3000, gain: 6.db)
+        #
+        #     # A resonant lowpass near the top of the spectrum without
+        #     # the bilinear transform's cramping
+        #     MB::Sound.play noise.filter(:lowpass, cutoff: 15000, quality: 4, decramp: true)
+        #
         # :lowpass also takes lp4's +resonance:+ (0..1; reese-slope-1,
         # 2026-11-07): the 2-pole's quality is the one whose gain at the
         # cutoff is lp4's at that resonance (Filter::FourPole.resonance_to_quality:
@@ -74,8 +93,21 @@ module MB
         # `lp4(cutoff, resonance:)`).
         #
         # TODO: support SampleWrapper inputs argument
-        def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, resonance: nil, slope: nil, structure: nil, in_place: false)
+        def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, resonance: nil, slope: nil, structure: nil, decramp: nil, in_place: false)
           f = filter_or_type
+
+          if decramp
+            unless f.is_a?(Symbol) && MB::Sound::Filter::SVF::DECRAMP_TYPES.include?(f)
+              raise ArgumentError, "decramp: is for the filter types #{MB::Sound::Filter::SVF::DECRAMP_TYPES.map(&:inspect).join(', ')} (got #{filter_or_type.inspect})"
+            end
+            raise ArgumentError, 'decramp: is for the SVF (not structure: :biquad)' if structure == :biquad
+            raise ArgumentError, 'decramp: is for the 2-pole lowpass (not slope: 24)' if slope && GraphNode.build_value(slope) == 24
+          end
+
+          if MB::Sound::Filter::SVF::FIRST_ORDER_TYPES.include?(f)
+            raise ArgumentError, "First-order filters (#{f.inspect}) take no quality: or resonance:" if quality || resonance
+            raise ArgumentError, "First-order filters (#{f.inspect}) run as an SVF (no structure: :biquad)" if structure == :biquad
+          end
 
           unless slope.nil?
             raise ArgumentError, "slope: is for :lowpass (got #{filter_or_type.inspect})" unless f == :lowpass
@@ -123,7 +155,7 @@ module MB
           when f.is_a?(Symbol)
             raise 'Cutoff frequency must be given when creating a filter by type' if cutoff.nil?
 
-            quality = quality || 0.5 ** 0.5
+            quality = quality || (MB::Sound::Filter::SVF::FIRST_ORDER_TYPES.include?(f) ? MB::Sound::Filter::SVF::FIRST_ORDER_QUALITY : 0.5 ** 0.5)
 
             if structure == :biquad
               # (a param or knob is its number while building; other nodes
@@ -137,7 +169,8 @@ module MB
               gain_node = gain.respond_to?(:sample) ? gain : nil
               f = MB::Sound::Filter::SVF.new(
                 filter_or_type, sample_rate, 1, quality: 1,
-                gain: gain_node ? 1.0 : gain && Decibels.gain_of(gain, 'gain')
+                gain: gain_node ? 1.0 : gain && Decibels.gain_of(gain, 'gain'),
+                decramp: !!decramp
               )
               inputs = { cutoff: cutoff, quality: quality }
               inputs[:gain] = gain_node if gain_node

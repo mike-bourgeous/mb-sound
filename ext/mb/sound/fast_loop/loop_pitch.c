@@ -324,8 +324,13 @@ static void pc_params_moments(struct pc_ctx *c, long i)
 				c->pg[k] = c->vval[e[5]];
 
 				// #svf_latency: a lowpass's group delay at DC 1 / (2 g Q), an
-				// allpass's twice that, other types none
-				double factor = e[6] == SVF_LOWPASS ? 1.0 : (e[6] == SVF_ALLPASS ? 2.0 : 0.0);
+				// allpass's twice that, a one-pole lowpass's 1 / (2 g), other
+				// types none (decramped designs count as their bilinear ones)
+				int base = e[6] & ~SVF_DECRAMP;
+				double factor = base == SVF_LOWPASS || base == SVF_LOWPASS1P ? 1.0 : (base == SVF_ALLPASS ? 2.0 : 0.0);
+				if (base == SVF_LOWPASS1P) {
+					q = 1.0;
+				}
 				if (factor != 0.0) {
 					double rate = c->sc[e[7]];
 					double hi = rate * 0.49;
@@ -444,7 +449,10 @@ static _Bool pc_harmonic_risk(struct pc_ctx *c)
 	}
 	for (long k = 0; k < c->nr; k++) {
 		const int32_t *e = c->rx + k * PC_RWORDS;
-		if (e[0] == RK_FOUR_POLE || (e[0] == RK_SVF && (e[6] != SVF_LOWPASS || c->pq[k] > 0.7072))) {
+		if (e[0] == RK_SVF && (e[6] & ~SVF_DECRAMP) == SVF_LOWPASS1P) {
+			continue; // (falls monotonically)
+		}
+		if (e[0] == RK_FOUR_POLE || (e[0] == RK_SVF && ((e[6] & ~SVF_DECRAMP) != SVF_LOWPASS || c->pq[k] > 0.7072))) {
 			return 1;
 		}
 	}
@@ -695,7 +703,7 @@ static VALUE pc_track(VALUE self, VALUE code, VALUE scalars, VALUE srcs, VALUE c
 			for (int j = 3; j <= 5; j++) {
 				if (e[j] < 0 || e[j] >= c.nv) rb_raise(rb_eArgError, "pitch_track SVF value out of range");
 			}
-			if (e[6] < 0 || e[6] > SVF_BANDPASS_SKIRT || e[7] < 0 || e[7] >= nscalars) rb_raise(rb_eArgError, "pitch_track SVF type or rate out of range");
+			if (e[6] < 0 || e[6] > SVF_TYPE_MAX + SVF_DECRAMP || !mb_svf_type_valid((int)e[6]) || e[7] < 0 || e[7] >= nscalars) rb_raise(rb_eArgError, "pitch_track SVF type or rate out of range");
 		}
 		if (e[0] == RK_FOUR_POLE) {
 			if (e[3] < 0 || e[3] >= c.nv || e[4] < 0 || e[4] >= c.nv) rb_raise(rb_eArgError, "pitch_track four-pole value out of range");

@@ -519,14 +519,20 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       MB::Sound::Plan.enabled = true
     end
 
-    it 'runs SVFs of every type with moving parameters' do
-      types = MB::Sound::Filter::SVF::FILTER_TYPES
-      compare_lanes(types.length) { |i, src|
-        cutoff = PlanSpecHelpers::Source.new(seed: i + 7, scale: 900, offset: 1200)
-        quality = PlanSpecHelpers::Source.new(kind: :steps, seed: i + 3, scale: 2, offset: 2.5, every: 77)
-        gain = PlanSpecHelpers::Source.new(kind: :steps, seed: i + 5, scale: 4, offset: 5, every: 131)
-        (src * 0.5).filter(types[i], cutoff: cutoff, quality: quality, gain: gain) * 2
-      }
+    it 'runs SVFs of every type (decramped too) with moving parameters' do
+      svf = MB::Sound::Filter::SVF
+      types = svf::FILTER_TYPES.map { |t| [t, false] } + svf::DECRAMP_TYPES.map { |t| [t, true] }
+      # (first-order types take no quality, a param in their programs: a
+      # group of their own)
+      types.partition { |t, _| svf::FIRST_ORDER_TYPES.include?(t) }.each do |list|
+        compare_lanes(list.length) { |i, src|
+          type, decramp = list[i]
+          cutoff = PlanSpecHelpers::Source.new(seed: i + 7, scale: 900, offset: 1200)
+          quality = svf::FIRST_ORDER_TYPES.include?(type) ? nil : PlanSpecHelpers::Source.new(kind: :steps, seed: i + 3, scale: 2, offset: 2.5, every: 77)
+          gain = PlanSpecHelpers::Source.new(kind: :steps, seed: i + 5, scale: 4, offset: 5, every: 131)
+          (src * 0.5).filter(type, cutoff: cutoff, quality: quality, gain: gain, decramp: decramp) * 2
+        }
+      end
     end
 
     it 'runs four-poles and diode ladders in every drive mode, mixed in one group' do
