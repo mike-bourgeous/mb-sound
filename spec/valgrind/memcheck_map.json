@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-11-04",
+  "generated": "2026-11-07",
   "specs": {
     "gems/mb-term/spec/native_spec.rb": {
       "fast_term": [
@@ -896,6 +896,23 @@
         "FastWavetable.oscillate"
       ]
     },
+    "spec/lib/mb/sound/graph_node/inertia_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
+        "FastArithmetic.fill_range",
+        "FastArithmetic.mix"
+      ],
+      "fast_control": [
+        "FastControl.inertia"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
     "spec/lib/mb/sound/graph_node/modal_resonator_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.copy",
@@ -1075,6 +1092,7 @@
         "FastControl.adaptive",
         "FastControl.curve",
         "FastControl.damped",
+        "FastControl.inertia",
         "FastControl.reset_run",
         "FastControl.slew",
         "FastControl.smooth"
@@ -1586,7 +1604,6 @@
       ],
       "fast_wavetable": [
         "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1837,6 +1854,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
