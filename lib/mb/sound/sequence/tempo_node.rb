@@ -22,6 +22,18 @@ module MB
       # 0, so the tones stop moving.  A freewheeling node (see #freewheel)
       # ignores the timeline: it gives no jumps and keeps running while the
       # timeline is paused, but its frequency still follows the tempo.
+      #
+      # With a +count+ node (reese-params-2: GraphNode#bars, a param or
+      # knob read live), the length is +count+ times +duration+ on every
+      # sample (`lfo_bars.bars` is 1.bar times the knob), so a tone made
+      # from it integrates the moving frequency with no phase jump: its
+      # phase stays locked to the timeline while the count is steady, and
+      # after the count moves it keeps its place in the cycle (it is not
+      # pulled back onto the grid) until the timeline jumps again, where
+      # the jump phase is the timeline position in cycles of the count's
+      # value on that sample.  A steady count gives the exact samples of
+      # the Duration it stands for (2.0 times 1.bar plays like 2.bars).
+      # Counts below MIN_COUNT (and NaN) read as MIN_COUNT.
       class TempoNode
         include GraphNode
         include GraphNode::SampleRateHelper
@@ -33,6 +45,10 @@ module MB
         port :jump_phase, 'On jump samples, the timeline position in cycles of the duration (0...1, double precision); 0 elsewhere'
 
         MODES = [:hz, :seconds].freeze
+
+        # The smallest +count+ read (see the class description): a cycle
+        # this many times the duration.
+        MIN_COUNT = 1.0 / 256
 
         # The slowest tempo that delay buffers are sized for when given
         # Durations (see .max_seconds).  Delays grow their buffers if needed
@@ -75,13 +91,26 @@ module MB
         # :hz or :seconds (see the class description).
         attr_reader :mode
 
-        def initialize(duration, mode:, transport: nil, sample_rate: 48000)
+        # The node giving how many times +duration+ the length is (see the
+        # class description), or nil for +duration+ itself.
+        attr_reader :count
+
+        # The NodeDuration this node was made from (NodeDuration#hz), for
+        # graph export, or nil.
+        attr_reader :origin
+
+        def initialize(duration, mode:, transport: nil, sample_rate: 48000, count: nil, origin: nil)
           raise ArgumentError, "Mode must be one of #{MODES.inspect} (got #{mode.inspect})" unless MODES.include?(mode)
           raise ArgumentError, "Expected a Duration (got #{duration.inspect})" unless duration.is_a?(Duration)
           Length.check_time(duration, 'A tempo-synced length')
           raise ArgumentError, "A tempo-synced length must be longer than zero (got #{duration})" unless duration.whole_notes > 0
 
+          raise ArgumentError, "A tempo length's count must be a graph node (got #{count.inspect})" unless count.nil? || count.respond_to?(:sample)
+
           @duration = duration
+          @count = count
+          @count_input = count&.get_sampler
+          @origin = origin
           @mode = mode
           @transport = transport
           @sample_rate = sample_rate.to_f
@@ -103,6 +132,13 @@ module MB
           @start_callbacks = nil
           @steady_value = nil
           @quiet = nil
+          @count_last = nil
+          @count_values = nil
+          @count_wnps = nil
+          @count_whole_notes = nil
+          @moving = nil
+          @pending_time = nil
+          @first_count = nil
         end
 
         # Makes this node ignore the timeline (see the class description), or
@@ -132,14 +168,17 @@ module MB
         def scaled(ratio)
           raise ArgumentError, "The ratio must be a positive number (got #{ratio.inspect})" unless ratio.is_a?(Numeric) && ratio > 0
 
-          node = TempoNode.new(Duration.new(@duration.whole_notes / ratio.to_r, label: "#{@duration} / #{MB::M.sigfigs(ratio, 6)}"), mode: @mode, transport: @transport, sample_rate: @sample_rate)
+          node = TempoNode.new(Duration.new(@duration.whole_notes / ratio.to_r, label: "#{@duration} / #{MB::M.sigfigs(ratio, 6)}"), mode: @mode, transport: @transport, sample_rate: @sample_rate, count: @count)
           node.instance_variable_set(:@parent, self)
           node
         end
 
         # The current output value: Hz (:hz) or seconds (:seconds) at the
-        # transport's current tempo, ignoring pauses.
+        # transport's current tempo, ignoring pauses (with a +count+, at its
+        # last value read).
         def value
+          return count_value(@count_last || 1.0) if @count
+
           wnps = transport.whole_notes_per_second
 
           # Cached while the tempo (Transport caches its Rational), length,
@@ -172,7 +211,7 @@ module MB
         end
 
         def sources
-          {}
+          @count_input ? { count: @count_input } : {}
         end
 
         # Plan layer: the value read every block as a param (Plan::Op::Param,
@@ -185,6 +224,7 @@ module MB
 
         def plan_unsupported_reason
           return 'ports (timeline jumps) in use' if @ports
+          return 'a moving length (count:)' if @count
 
           nil
         end
@@ -201,7 +241,7 @@ module MB
 
         # For plan listings.
         def value_string
-          "#{MB::M.sigfigs(value, 5)} #{@mode == :hz ? 'Hz' : 's'} (#{@duration})"
+          "#{MB::M.sigfigs(value, 5)} #{@mode == :hz ? 'Hz' : 's'} (#{@count ? "#{MB::M.sigfigs(@count_last || 1.0, 5)} × " : ''}#{@duration})"
         end
 
         private
@@ -210,6 +250,8 @@ module MB
         # (like GraphNode::Constant), so a steady tempo allocates nothing;
         # consumers must copy a frozen input before changing it.
         def sample_main(count)
+          return sample_counted(count) if @count
+
           v = @mode == :hz && timeline_paused? && !freewheel? ? 0.0 : value
           buf = @steady
           return buf if buf && buf.length == count && @steady_value.eql?(v)
@@ -218,11 +260,87 @@ module MB
           @steady = Numo::SFloat.new(count).fill(v).freeze
         end
 
+        # #sample_main with a +count+ node (see the class description): the
+        # steady frozen buffer while the count holds one value in this frame
+        # (#count_value, the same number a Duration of that length gives),
+        # else the value of each sample's count (#count_values).  The count
+        # is read while paused too, so it stays in step.
+        def sample_counted(count)
+          c = @count_input.sample(count)
+          c = nil if c && c.length != count
+          paused = @mode == :hz && timeline_paused? && !freewheel?
+          if c.nil? || paused || c.min == c.max
+            b = c ? c[0] : (@count_last || 1.0)
+            @count_last = b
+            @first_count = b
+            v = paused ? 0.0 : count_value(b)
+            buf = @steady
+            return buf if buf && buf.length == count && @steady_value.eql?(v)
+
+            @steady_value = v
+            return @steady = Numo::SFloat.new(count).fill(v).freeze
+          end
+
+          @count_last = c[-1]
+          @first_count = c[0]
+          @moving = Numo::SFloat.zeros(count) if @moving.nil? || @moving.length != count
+          count_values(c, @moving)
+        end
+
+        # The output for one +b+ (a count): Hz or seconds of +b+ times the
+        # duration at the transport's tempo, computed as #value computes a
+        # Duration's (exact Rationals unless the tempo is a Float), so a
+        # steady count of 2.0 times 1.bar gives 2.bars' samples.  Cached for
+        # the last few counts at one tempo.
+        def count_value(b)
+          b = b.to_f
+          b = MIN_COUNT unless b >= MIN_COUNT
+          wnps = transport.whole_notes_per_second
+          unless @count_values && @count_wnps.equal?(wnps) && @count_whole_notes.equal?(@duration.whole_notes)
+            @count_wnps = wnps
+            @count_whole_notes = @duration.whole_notes
+            @count_values = {}
+          end
+          @count_values[b] ||= begin
+            @count_values.shift if @count_values.length >= 16
+            seconds = TempoMap.seconds_for(b.to_r * @duration.whole_notes, wnps)
+            @mode == :hz ? (1 / seconds).to_f : seconds.to_f
+          end
+        end
+
+        # Writes each sample's #count_value for the counts +c+ into +out+
+        # (an SFloat) without a Ruby call per sample: the same formula in
+        # doubles, checked to round to the same float32 within twice its
+        # worst error; the rare samples that might not are computed exactly
+        # (#count_value), so every sample matches #count_value at any buffer
+        # size.
+        def count_values(c, out)
+          b = Numo::DFloat.cast(c)
+          b[~(b >= MIN_COUNT)] = MIN_COUNT
+          wnps = transport.whole_notes_per_second.to_f
+          seconds = (b * @duration.whole_notes.to_f) / wnps
+          d = @mode == :hz ? 1.0 / seconds : seconds
+          lo = Numo::SFloat.cast(d * (1 - 4e-15))
+          hi = Numo::SFloat.cast(d * (1 + 4e-15))
+          out[true] = Numo::SFloat.cast(d)
+          (lo.ne(hi)).where.each { |i| out[i] = count_value(c[i]) }
+          out
+        end
+
         # The ports for the frame just computed: a jump on its first sample
         # if the timeline jumped since the last frame (see the class
         # description), else shared frozen zeros (so readers can skip
         # buffers they have seen).
         def compute_ports(count)
+          if @pending_time
+            # (with a count: the position in cycles of the count's value on
+            # the jump's sample)
+            first = (@first_count || 1.0).to_f
+            first = MIN_COUNT unless first >= MIN_COUNT
+            cycles = @pending_time / (first.to_r * @duration.whole_notes)
+            @pending_jump = (cycles - cycles.floor).to_f
+            @pending_time = nil
+          end
           if @pending_jump
             store_port(:jumps, Numo::SFloat.zeros(count).tap { |j| j[0] = 1 })
             store_port(:jump_phase, Numo::DFloat.zeros(count).tap { |p| p[0] = @pending_jump })
@@ -240,6 +358,8 @@ module MB
           @start_callbacks&.each { |c| c.call(self) }
 
           return if freewheel? || @mode != :hz || @ports.nil?
+          return @pending_time = time if @count
+
           cycles = time / @duration.whole_notes
           @pending_jump = (cycles - cycles.floor).to_f
         end

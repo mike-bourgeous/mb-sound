@@ -85,19 +85,14 @@ module MB
           Length::Seconds.new(self)
         end
 
-        # This param or knob, read while building, as a Duration in bars.
-        # A graph document's param, a script's named Constant, or a track's
-        # knob, read as that many bars of the current transport (like
-        # Numeric#bars), for settings that take a Duration, such as a tempo
-        # LFO's rate: `v.lfo(lfo_rate.bars)`.  The Duration
-        # remembers where it came from, so graph export prints
-        # `lfo_rate.bars` and a saved graph keeps the param.  Read once
-        # (GraphNode.build_value): on a track, turning the knob rebuilds
-        # the track.  Raises ArgumentError for other nodes (a moving value
-        # isn't a fixed length).
+        # Marks this node's output as a number of bars, read live (an LFO rate).
+        # A Sequence::NodeDuration of 1.bar (of the current transport) times
+        # this node: a tempo LFO rate (`v.lfo(lfo_bars.bars)`) or tempo pitch
+        # (`lfo_bars.bars.hz`) that follows a param, knob, or other node
+        # while playing, with no phase jump, and plays like the Duration
+        # while the node holds still.  Graph export prints `lfo_bars.bars`.
         def bars
-          b = GraphNode.build_value(self).bars
-          Sequence::Duration.new(b.whole_notes, label: b.to_s, origin: [self, :bars])
+          Sequence::NodeDuration.new(self, 1.bar, :bars)
         end
 
         # Plays +sources+ (other graph nodes) after this node runs out of data.

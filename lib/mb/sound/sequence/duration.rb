@@ -114,24 +114,15 @@ module MB
         # The length in whole notes (a Rational).
         attr_reader :whole_notes
 
-        # Where this duration was read from, as [object, method name] (e.g.
-        # [a graph document's param, :bars] for `lfo_rate.bars`; see
-        # GraphNode#bars), so graph export prints the call instead of the
-        # length; nil otherwise.  Arithmetic and modifier results have no
-        # origin.  Doesn't affect equality.
-        attr_reader :origin
-
         # Creates a Duration of +whole_notes+ (converted to a Rational; Floats
         # are rationalized as in .rational).  +:label+ is used by #to_s
-        # instead of the default description (e.g. "2 bars").  +:origin+ is
-        # #origin.
-        def initialize(whole_notes, label: nil, origin: nil)
+        # instead of the default description (e.g. "2 bars").
+        def initialize(whole_notes, label: nil)
           unless whole_notes.is_a?(Numeric) && whole_notes.real? && !(whole_notes.is_a?(Float) && !whole_notes.finite?)
             raise ArgumentError, "Duration must be a finite real number of whole notes (got #{whole_notes.inspect})"
           end
           @whole_notes = Duration.rational(whole_notes)
           @label = label
-          @origin = origin
         end
 
         # Returns this Duration, raising ArgumentError with one line if it is

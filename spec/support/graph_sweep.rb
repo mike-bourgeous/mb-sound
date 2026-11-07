@@ -214,6 +214,8 @@ module GraphSweep
         c.sig * c.s.tween([0.0, 1.0, 0.25, 0.75], [1.n64, 1.n32], curve: [:fast, :hold, MB::Sound::Curve[:elastic, overshoot: 0.3]])
       }],
       ['tempo tone (TempoNode)', ->(c) { 1.beat.hz.saw + 2.bars.lfo.square }],
+      # A tempo LFO whose cycle follows a node (TempoNode count:, GraphNode#bars; reese-params-2)
+      ['tempo tone counted by a node (NodeDuration)', ->(c) { c.mod(0.01, 0.05).bars.lfo.square + 0.02.constant.bars.hz.saw }],
       ['tempo delay', ->(c) { c.sig.delay(1.n32) }],
 
       # Arithmetic and routing
