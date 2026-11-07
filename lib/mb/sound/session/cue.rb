@@ -366,7 +366,7 @@ module MB
         def switch_cue_player(p, name, time, fade)
           @players.each_value do |o|
             next unless o.name == name && o.current? && !o.equal?(p)
-            if o.started
+            if o.heard?
               o.stop_at = time
               o.fade_out = fade
               o.keep = true
