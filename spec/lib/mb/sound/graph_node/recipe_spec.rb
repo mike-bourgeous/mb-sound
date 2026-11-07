@@ -364,6 +364,21 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       expect(code).to include('(fx + fx.delay(100.ms)) * 13.db')
     end
 
+    it 'leaves a graph\'s samples alone when printing it: note pitches under oversample (reese-slope-1)' do
+      # (printing once built a voice's untransposed v.hz frequency node
+      # while looking for tempo pitches, after oversample had set the
+      # graph's rate: 8e-4 off, batch 18's stereo_graph_synth_example
+      # smoke failure)
+      build = -> { MB::Sound.synth(MB::Sound::Notes.new(midi_path), voices: 2) { |v| v.hz.transpose(12).at(0.3) }.oversample(2) }
+      MB::Sound.seed(0)
+      plain = RecipeHelpers.render(build.call, buffers: 40)
+      MB::Sound.seed(0)
+      g = build.call
+      expect(g.to_ruby).to include('v.hz.transpose(12)')
+      expect(RecipeHelpers.max_diff(plain, RecipeHelpers.render(g, buffers: 40))).to eq(0)
+      expect(plain[0].abs.max).to be > 0.1
+    end
+
     it 'rebuilds a Karplus-Strong feedback loop' do
       code = round_trip {
         exc = (MB::Sound.noise.at(0.5) * MB::Sound.adsr(0, 0, 1, 0, hold: 220.hz.period)).and_then(0.constant)
