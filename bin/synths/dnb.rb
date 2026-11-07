@@ -12,7 +12,8 @@
 #
 # Patches (-p):
 #   reese  six detuned saws (unison), a 4-pole lowpass breathing on a 2-bar
-#          LFO around --cutoff, softclipped, highpassed at 150 Hz off the sub
+#          LFO around --cutoff (--lfo-depth octaves, 0 for none, every
+#          --lfo-rate bars), softclipped, highpassed at 150 Hz off the sub
 #   sub    one sine through a 110 Hz lowpass, gliding between legato notes
 #          with a quiet 2nd and 3rd for small speakers (harmonics: false
 #          for the bare sine; [0.4, 0.2] is Small Talk's louder pair)
@@ -66,16 +67,22 @@ module MB::Sound
   end
 
   # The Reese: six detuned saws (the beating does the moving), a 4-pole
-  # lowpass breathing on a 2-bar LFO (+breath+ octaves either side) around
-  # +cutoff+ (a number or a node, e.g. a knob), a softclipper, and a
-  # highpass at +highpass+ Hz (twice) so it never fights the sub.  Spread a
-  # little in stereo by the unison (only above the highpass, so the low end
-  # stays mono).  Mono legato with a +glide+ in seconds.
-  def self.dnb_reese_voice(midi, cutoff: 2400, detune: 0.32, spread: 0.5, breath: 0.8, drive: 2.2, resonance: 0.25, glide: 0.035, highpass: 150)
+  # lowpass breathing on a tempo LFO (a sine, +lfo_depth+ octaves either
+  # side, one cycle every +lfo_rate+ bars, locked to the timeline) around
+  # +cutoff+ (a number or a node: a knob, a tween, a song's control
+  # envelope), a softclipper, and a highpass at +highpass+ Hz (twice) so it
+  # never fights the sub.  +lfo_depth: 0+ turns the LFO off, so the cutoff
+  # follows +cutoff+ alone (reese-params-1, 2026-11-07: the maintainer's
+  # "The reese should lose its cutoff lfo and follow the control envelope
+  # from the song").  +lfo_depth+ may be a node too; +lfo_rate+ is a number
+  # or a param or knob, read while the graph builds (GraphNode#bars).
+  # Spread a little in stereo by the unison (only above the highpass, so
+  # the low end stays mono).  Mono legato with a +glide+ in seconds.
+  def self.dnb_reese_voice(midi, cutoff: 2400, detune: 0.32, spread: 0.5, lfo_depth: 0.8, lfo_rate: 2, drive: 2.2, resonance: 0.25, glide: 0.035, highpass: 150)
     synth(midi, voices: 1) { |v|
       pitch = v.hz.glide(glide, legato: true)
       saws = pitch.unison(6, detune: detune, spread: spread) { |p, _i| p.saw }
-      lfo = 2 ** v.lfo(2.bars, shape: :sine, depth: breath)
+      lfo = 2 ** v.lfo(lfo_rate.bars, shape: :sine, depth: lfo_depth)
       amp = v.env(0.004, 0.25, 0.85, 0.06, gm: false).legato
       ((saws.lp4(cutoff * lfo, resonance: resonance) * drive).softclip(0.35, 0.95) * amp)
         .filter(:highpass, cutoff: highpass, quality: 0.7).filter(:highpass, cutoff: highpass, quality: 0.7)
@@ -319,7 +326,7 @@ module MB::Sound
   # the document's params (bin/save_presets.rb passes them).  Values are
   # the voice methods' defaults, so the presets sound as before.
   DNB_KNOBS = {
-    reese: { cutoff: 2400.0, resonance: 0.25, drive: 2.2, glide: 0.035 },
+    reese: { cutoff: 2400.0, resonance: 0.25, drive: 2.2, glide: 0.035, lfo_depth: 0.8, lfo_rate: 2.0 },
     sub: { cutoff: 110.0, release: 0.05 },
     neuro: { grit: 0.25, cutoff: 600.0, decay: 0.12 },
     pad: { cutoff: 2600.0, attack: 0.6, release: 1.2 },
@@ -344,14 +351,23 @@ module MB::Sound
     end
   end
 
+  # What a patch's preset description adds after where it came from (see
+  # .dnb_description).
+  DNB_ABOUT = {
+    reese: 'Its cutoff breathes on a tempo LFO (lfo_depth octaves either side, one cycle every lfo_rate bars); ' \
+      'lfo_depth: 0 leaves the cutoff to cutoff alone, which takes a number, a knob, or a tween ' \
+      '(preset :dnb_reese, midi: clip, lfo_depth: 0, cutoff: tween([300.hz, 3000.hz], 4.bars)).',
+  }.freeze
+
   # Where the patches came from, for preset descriptions (--save writes
   # it into the document): +what+ is the patch (a Symbol) or a phrase.
   def self.dnb_description(what)
+    about = DNB_ABOUT[what]
     what = "Drum & bass patch :#{what}" if what.is_a?(Symbol)
     "#{what} from bin/synths/dnb.rb, " \
       'first made by Kez Volta, a fictional modern EDM / UK drum & bass producer-DJ, ' \
       'for the song "Tunnel Vision" (bin/songs/tunnel_vision.rb) ' \
-      'in the persona panel experiment of 2026-10-13 (research branch research-persona-edm).'
+      "in the persona panel experiment of 2026-10-13 (research branch research-persona-edm).#{about && " #{about}"}"
   end
 
   if main_script?(__FILE__)
@@ -359,6 +375,8 @@ module MB::Sound
       description: ->(p) { dnb_description(p.patch) },
       patch: [:reese, Symbol, '-p', 'Patch to play', [:reese, :sub, :neuro, :pad, :pluck, :boom, :drums]],
       cutoff: [nil, Float, '-c', 'Lowpass cutoff in Hz (reese 2400 around its LFO, sub 110, neuro 600 and pluck 500 under their envelopes, pad 2600)', 20.0..10000.0],
+      lfo_depth: [nil, Float, 'Reese cutoff LFO depth in octaves either side of the cutoff (0.8; 0 for no LFO)', 0.0..1.0],
+      lfo_rate: [nil, Float, 'Reese cutoff LFO cycle length in bars, locked to the timeline (2)', 0.25..16.0],
       resonance: [nil, Float, 'Reese lowpass resonance 0..1 (0.25)', 0.0..1.0],
       drive: [nil, Float, 'Reese drive into the softclipper (2.2)', 0.5..8.0],
       glide: [nil, Float, 'Reese legato glide in seconds (0.035)', 0.0..0.5],
