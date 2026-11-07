@@ -406,7 +406,10 @@ module MB
           @routed_span = false
           @bus_tapped = ::Set.new
           @bus_sources = ::Set.new
-          @bus_tapped_for = nil # (the bus_ranks the two sets were made for)
+          @bus_always_read = ::Set.new # (sources a bus or the master chain reads; see #bus_read_from)
+          @bus_owners_of = {} # (source name => player names reading it; see #bus_read_from)
+          @bus_read_started = ::Set.new # (sources a player's reader has started reading; see #bus_read_from)
+          @bus_tapped_for = nil # (the bus_ranks these sets were made for)
           @routed_order = nil # (see #routed_order)
           @stem_shadows = {}
           @ui_bus_meter = nil # (see #render_routed)
@@ -593,6 +596,41 @@ module MB
           @bus_sources.include?(name)
         end
 
+        # The first frame of this span (an offset from +offset+ on) from
+        # which player +name+ keeps rendering while muted because a reader
+        # reads it (Session#render_player), or nil if it doesn't yet (+from+,
+        # +to+, +per_sample+ as for #render_player).  A bus or the master
+        # chain reads from its binding; a player's reader from its graph's
+        # first start, and from then on, as readers stay bound (a stopped
+        # reader's source keeps rendering while muted, as before).  Readers
+        # are bound when their graph is added (Session#add), which a
+        # scheduled block does ahead of its time on a buffer that depends on
+        # the buffer size: before fix-bufsize-1107 the binding woke a held
+        # track there, so it chased its clip from a different frame at 800
+        # and 367 frames (SessionFuzz seed 611891: an 808 track held until a
+        # beat, ducked from a later bar).
+        def bus_read_from(name, from, to, per_sample, offset)
+          return offset if @bus_always_read.include?(name) || @bus_read_started.include?(name)
+
+          owners = @bus_owners_of[name]
+          return nil if owners.nil?
+
+          players = @span_players
+          best = nil
+          i = 0
+          while i < players.length
+            pl = players[i]
+            i += 1
+            next unless owners.include?(pl.name) && pl.start < to
+
+            f = pl.started ? offset : Sequence::Transport.frame_at(pl.start, from, per_sample)
+            f = offset if f < offset
+            best = f if best.nil? || f < best
+          end
+          @bus_read_started << name if best
+          best
+        end
+
         # True if some reader reads +key+ (a name, or [name, only]).
         def bus_tapped?(key)
           @bus_tapped.include?(key)
@@ -767,6 +805,18 @@ module MB
           unless @bus_tapped_for.equal?(ranks)
             @bus_tapped = @mutex.synchronize { @bus_readers.each_value.flat_map(&:to_a).to_set }
             @bus_sources = @bus_tapped.to_set { |k| k.is_a?(Array) ? k[0] : k }
+            # (who reads each source, for #bus_read_from)
+            @bus_always_read = ::Set.new
+            @bus_owners_of = {}
+            @mutex.synchronize {
+              @bus_readers.each do |owner, keys|
+                always = owner == :master || @buses.key?(owner)
+                keys.each do |k|
+                  src = k.is_a?(Array) ? k[0] : k
+                  always ? @bus_always_read << src : (@bus_owners_of[src] ||= []) << owner
+                end
+              end
+            }
             @bus_tapped_for = ranks
           end
           @send_knobs.each { |k| k.read(frame, count) } unless @send_knobs.empty?

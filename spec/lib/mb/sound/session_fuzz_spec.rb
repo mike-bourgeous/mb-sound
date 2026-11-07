@@ -340,6 +340,20 @@ RSpec.describe('session fuzzing') do
         '[breakbeat(:jungle), 3/2r + 1/7r, 1/2r, { transpose: 7 }]) * 0.4, on: :now }',
       ], 2,
     ],
+    # (fix-bufsize-1107: the bar-2 block, run ahead of its time, bound the
+    # duck's reader of :t2 on a buffer that depends on the buffer size,
+    # which woke the held kit there; a reader counts from its graph's
+    # start since, so the kit wakes on the unhold as without the duck)
+    'a held kit a reader added ahead of its time reads (seed 611891)' => [
+      :buffer_size, ['bpm 126', 'knob :busy, 0.5'], [
+        'track(:t2, q: 1/2r) { |kit| tr808(kit) * 0.5 }',
+        'scene :s1, t2: beats(16, energy: knob(:busy), seed: 3) { kick [1, 0, 0, 0] * 4, keep: [0, 8]; fill every: 2, energy: true, snare: 0.5, low_tom: 0.3 }, others: :keep',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 2) { hold :t2, on: :now }',
+        'at_bar(1, beat: 2) { after(in: 2.beats) { unhold :t2 } }',
+        'at_bar(2, beat: 2) { bg :ducked, 0.2.constant.duck(:t2, only: :kick, amount: -12.db), on: :beat }',
+      ], 1,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil
