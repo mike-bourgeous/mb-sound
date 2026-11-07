@@ -167,8 +167,8 @@ module MB::Sound
       tags: %i[fitted big warm], about: 'A warm hall (T60 3.0 s at 125 Hz to 1.0 s at 8 kHz), the FDN fitted by reverb_match to a synthesized impulse',
     },
     fit_space: {
-      settings: { room_size: 0.9, decay: 5.3732, damping: 0.8067, predelay: 0.02025, wet: 1, dry: 0, seed: 1, level: 0.3751, extra_time: 8.4 },
-      eq: { 500 => 0.5, 1000 => -0.7, 2000 => -0.54, 4000 => -0.95, 8000 => 2.02 }, width: 0.959,
+      settings: { room_size: 0.9, decay: 5.3665, damping: 0.8032, channels: 16, predelay: 0.02104, wet: 1, dry: 0, seed: 1, level: 0.3821, extra_time: 8.4 },
+      eq: { 125 => -0.78, 1000 => -0.8, 2000 => -0.26, 4000 => -0.83, 8000 => 2.56 }, width: 0.959,
       tags: %i[fitted huge long], about: 'A big space (T60 5.6 s at 125 Hz to 2.6 s at 8 kHz), the FDN fitted by reverb_match to a synthesized impulse',
     },
   }.freeze
