@@ -516,6 +516,35 @@ module SessionFuzz
   # Bus chains for #generate.
   BUS_FX = ['reverb(:room, mix: 1)', 'delay(1.n8, feedback: 0.3) * 0.5', 'lp4(900) * 0.7'].freeze
 
+  # The seeds session_fuzz_spec's everyday example draws its third song
+  # from (by RSpec's seed), so its cost stays bounded (fix-fuzz-1107: a
+  # seed drawn from all of 100000-999999 took 0.1-19 s of CPU alone, median
+  # 4.5 s, p90 9.4 s, and the example went over its time budget under
+  # load, 51 and 77 s against 47.5).  These are the 102 of 256 random
+  # seeds (Random.new(1107), 100000-999999) that ran every relation
+  # (9-10 renders: no generated user error) and passed in 1.0-4.0 s of CPU
+  # each (SessionFuzz.run_seed alone, Mac container, master-ai f500aae0
+  # plus fix-fuzz-1107; mean 2.75 s), covering every feature the full
+  # draw did (buses, presets, regions, flows, seeks, tempo changes,
+  # master chains, wires, instruments, kits).  Seeds 394532, 532169, and
+  # 611891 failed :buffer_size then (omnibus13-queue).  The wider draw is
+  # the soaks' (FUZZ=N FUZZ_BASE=n).  Generation steps are drawn last, so
+  # these seeds keep their songs and only gain lines as COMMANDS grows;
+  # measure again if the example creeps over its budget.
+  EVERYDAY_SEEDS = [
+    103495, 105519, 121052, 156356, 161133, 169386, 194854, 195840, 215611, 224210,
+    242173, 281250, 282850, 295180, 295204, 318521, 331786, 340015, 345139, 345535,
+    350753, 354448, 362524, 370295, 371922, 387032, 393013, 393581, 395173, 396886,
+    413948, 414667, 419332, 423291, 430570, 432939, 436883, 441999, 443310, 468211,
+    469182, 474769, 488310, 499881, 507764, 510169, 518908, 523688, 524498, 527384,
+    532608, 534638, 538638, 557012, 559004, 560308, 564179, 598498, 642094, 644507,
+    655780, 659380, 665945, 680343, 696342, 697083, 698722, 702441, 719842, 727767,
+    730500, 745345, 750702, 751387, 778817, 794890, 798544, 807664, 808442, 808905,
+    816662, 816923, 827255, 842611, 866456, 866902, 870180, 875845, 883005, 888440,
+    900366, 929176, 939644, 946684, 948406, 949185, 971206, 977174, 980429, 985309,
+    990681, 996681,
+  ].freeze
+
   # --- rendering ------------------------------------------------------
 
   # The longest a song's render may run (seconds of audio): a `bars:`

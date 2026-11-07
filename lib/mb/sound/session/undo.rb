@@ -378,10 +378,10 @@ module MB
                 @stopped.delete(name) if @stopped[name]&.input.equal?(state.player.input)
                 @players.each_value do |p|
                   next unless p.name == name && p.current?
-                  if spill && p.started && spillable?(p) && !p.input.equal?(state.player.input)
+                  if spill && p.heard? && spillable?(p) && !p.input.equal?(state.player.input)
                     start_ringing(p, time, choke: true, spill: true)
                     @spills += 1
-                  elsif p.started || p.carried # (see Session#add_now)
+                  elsif p.heard? # (see Session#add_now)
                     p.stop_at = time
                     p.fade_out = declick
                   else

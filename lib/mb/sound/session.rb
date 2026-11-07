@@ -141,6 +141,22 @@ module MB
         def current?
           stop_at.nil?
         end
+
+        # True if this player has played a frame, or is a carrying
+        # rebuild's player (#add_now), which goes on as the one it replaced
+        # from the swap frame: decisions about what the listener heard of a
+        # name (whether a stop fades it, a replacement spills it, a level
+        # glides) read this, never +started+ alone, so an event landing on
+        # the swap frame, before the carried player's first sample, does
+        # what it would have done to the replaced player (fix-fuzz-1107,
+        # SessionFuzz seed 327738: a level landing with a rebuild cut
+        # instead of gliding).  +started+ stays for the render mechanics
+        # (starting timeline nodes, catching a graph's reads up), where the
+        # carried graph really hasn't played; carry_spec.rb's STARTED_READS lists
+        # those reads.
+        def heard?
+          !!(started || carried)
+        end
       end
 
       # Launch point alignments for +:on+ (see LaunchPoint).
@@ -918,7 +934,7 @@ module MB
                          ' (ringing out)'
                        elsif !p.current?
                          ' (fading out)'
-                       elsif !p.started
+                       elsif !p.heard?
                          " (starts at bar #{bar_of(p.start)})"
                        end
               status = "#{status} (muted)" if p.asleep || p.strip_level == 0 && p.strip_ramp.nil?
@@ -1463,7 +1479,7 @@ module MB
           # (a carrying rebuild's player that hasn't played yet stands in for
           # the one it replaced, which stopped on its frame: it is replaced
           # as that one would have been)
-          replacing = @players.each_value.any? { |p| p.name == name && p.current? && (p.started || p.carried) }
+          replacing = @players.each_value.any? { |p| p.name == name && p.current? && p.heard? }
 
           # A carrying rebuild (a bind's, a build knob's) replaces only the
           # graph it was built from: if that one ended, stopped, or was
@@ -1498,7 +1514,7 @@ module MB
           # (or the carried player of a rebuild that landed on this frame,
           # before it played: it holds the state carried into it; see #add's
           # +follows+)
-          carried_from = carry && @players.each_value.find { |p| p.name == name && p.current? && (p.started || p.carried) && !p.asleep && p.input.equal?(carry.old_input) }
+          carried_from = carry && @players.each_value.find { |p| p.name == name && p.current? && p.heard? && !p.asleep && p.input.equal?(carry.old_input) }
           spiller = nil
           if carried_from
             # (spill-over only where something can't carry: an unfit pair or
@@ -1518,7 +1534,7 @@ module MB
             end
             @last_carry = carry
           elsif spill && !carry
-            spiller = @players.each_value.find { |p| p.name == name && p.current? && p.started && spillable?(p) }
+            spiller = @players.each_value.find { |p| p.name == name && p.current? && p.heard? && spillable?(p) }
           end
 
           # Hand over from the graph being replaced at the new start time
@@ -1529,7 +1545,7 @@ module MB
               start_ringing(p, start, choke: true, spill: true)
               @spills += 1
               after = p.serial if carry
-            elsif p.started || p.carried
+            elsif p.heard?
               p.stop_at = start
               p.fade_out = fade
               after = p.serial if carry
@@ -1603,7 +1619,7 @@ module MB
       # True if the current player named +name+ has started and can spill
       # over (see #spillable?; Warming#warm_spill).
       def spillable_name?(name)
-        @mutex.synchronize { @players.each_value.any? { |p| p.name == name && p.current? && p.started && spillable?(p) } }
+        @mutex.synchronize { @players.each_value.any? { |p| p.name == name && p.current? && p.heard? && spillable?(p) } }
       end
 
       # True if a Synth of the current player named +name+ has a voice
@@ -1633,7 +1649,7 @@ module MB
 
             if ring && p.ring
               # Already ringing out
-            elsif ring && p.current? && (p.started || p.carried || (time && p.start < time))
+            elsif ring && p.current? && (p.heard? || (time && p.start < time))
               unless start_ringing(p, time || @transport.position)
                 stop = time || @transport.position
                 p.stop_at = MB::M.min(p.stop_at || stop, stop)
@@ -1643,7 +1659,7 @@ module MB
             elsif ring && !p.current?
               # Being replaced: it stops at its replacement's start as before
             elsif time
-              if !p.started && !p.carried && p.start >= time
+              if !p.heard? && p.start >= time
                 # It would never have played
                 @players.delete(p.serial)
                 note_retired(p)
@@ -1652,7 +1668,7 @@ module MB
                 p.stop_at = MB::M.min(p.stop_at || time, time)
                 p.fade_out = fade
               end
-            elsif fade && (p.started || p.carried)
+            elsif fade && p.heard?
               # Fade from wherever the player is now, even if it was already
               # being replaced or faded (a rebuilt player that hasn't played
               # yet stands in for the one it replaced)

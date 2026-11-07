@@ -155,7 +155,7 @@ module MB
           return false unless nm.level?
 
           owner = nm.owner
-          @mutex.synchronize { @players.each_value.none? { |p| p.started && Name[p.name].strip_owner == owner } }
+          @mutex.synchronize { @players.each_value.none? { |p| p.heard? && Name[p.name].strip_owner == owner } }
         end
 
         # Linear gain +g+ as Decibels (to 0.01 dB; -Infinity.db for 0).

@@ -271,4 +271,40 @@ RSpec.describe(MB::Sound::Session::Carry, :aggregate_failures) do
   ensure
     s&.close
   end
+
+  # (fix-fuzz-1107: a carrying rebuild's player goes on as the one it
+  # replaced from the swap frame, but hasn't played a frame until the next
+  # render; events landing on that frame that asked whether a name's player
+  # had started saw none, so a level cut instead of gliding (SessionFuzz
+  # seed 327738), a cue launch dropped the rebuilt player instead of fading
+  # it, and an instrument change cut it instead of spilling it.  Every
+  # decision about what was heard reads Player#heard?; +started+ is read
+  # only by the render mechanics listed here, each with why the carried
+  # player's own state is the right one there.)
+  STARTED_READS = {
+    ['session.rb', 'render_span'] => 'a seek restarts the graphs that played; a carried one jumps at its own start (ClipSource#carry_seeked)',
+    ['session.rb', 'render_player'] => "starting a graph's timeline nodes, and the clock wait of one that played",
+    ['strip.rb', 'catch_up_waiting'] => 'graphs whose input nothing has read yet',
+    ['strip.rb', 'read_kept_graphs'] => 'graphs read by their own player',
+  }.freeze
+
+  it 'reads what was heard of a player through Player#heard?, and +started+ only in the render mechanics' do
+    root = File.expand_path('../../../../../lib/mb/sound', __dir__)
+    reads = Hash.new(0)
+    [File.join(root, 'session.rb'), *Dir[File.join(root, 'session', '*.rb')]].each do |f|
+      method = nil
+      File.foreach(f) do |line|
+        next if line.match?(/\A\s*#/)
+
+        method = line[/\A\s*def (?:self\.)?([\w?!=]+)/, 1] || method
+        # (players are p, o, q, player, old, or np; chains, read through
+        # c, chain, or x, have a +started+ of their own)
+        line.scan(/(?<![\w.])(?:p|o|q|player|old|np)\.started(?![\w?!]|\s*=[^=])/) { reads[[File.basename(f), method]] += 1 }
+      end
+    end
+    expect(reads.keys.sort).to eq(STARTED_READS.keys.sort)
+    expect(MB::Sound::Session::Player.new(started: nil, carried: [0, 0, 0]).heard?).to eq(true)
+    expect(MB::Sound::Session::Player.new(started: true).heard?).to eq(true)
+    expect(MB::Sound::Session::Player.new.heard?).to eq(false)
+  end
 end

@@ -4,8 +4,9 @@
 # parts launched mid-song match the same parts from bar 1, and warming
 # changes before they land doesn't change it either, nor do carrying
 # rebuilds of the tracks (what a bind does; carry-1).
-# Everyday: SEEDS seeds from a fixed base plus one from RSpec's seed;
-# FUZZ=N runs N seeds (the long mode), FUZZ_SEED=n one seed (a repro),
+# Everyday: 2 seeds from a fixed base plus one picked by RSpec's seed
+# from SessionFuzz::EVERYDAY_SEEDS (songs measured cheap, so the example's
+# time is bounded; fix-fuzz-1107); FUZZ=N runs N seeds (the long mode), FUZZ_SEED=n one seed (a repro),
 # FUZZ_BASE=n moves the fixed base.
 require_relative '../../../support/session_fuzz'
 
@@ -16,7 +17,8 @@ RSpec.describe('session fuzzing') do
     else
       base = Integer(ENV['FUZZ_BASE'] || 1)
       count = Integer(ENV['FUZZ'] || 2)
-      extra = ENV['FUZZ'] ? [] : [100_000 + (RSpec.configuration.seed.to_i * 7) % 900_000]
+      list = SessionFuzz::EVERYDAY_SEEDS
+      extra = ENV['FUZZ'] ? [] : [list[RSpec.configuration.seed.to_i % list.length]]
       (base...(base + count)).to_a + extra
     end
 
@@ -446,6 +448,41 @@ RSpec.describe('session fuzzing') do
         'scene :s1, t1: seq(C4, E4, G4).n8.loop',
         'at_bar(1) { go :s1, on: :now }',
         'at_bar(1, beat: 4) { after(in: 3.beats) { seek 1, 1.1 } }',
+      ], 3, false,
+    ],
+    # (conv-reverb-1's spec:quick, fix-fuzz-1107: t2's rebuild and a level
+    # landed on bar 3; the rebuilt player hadn't played yet, so the level
+    # counted as unheard and cut to 0 where the uninterrupted song glided
+    # over the declick (Faders#unheard_level?, now Player#heard?); shrunk
+    # from a song with a dnb_sub and a second synth track)
+    'a level landing with a rebuild (seed 327738)' => [
+      ['bpm 174', 'meter 3, 4', 'knob :busy, 0.5'], [
+        'track(:t2, q: 1) { |clip| clip.synth(voices: 3) { |v| v.hz.sine * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t2: melody(scale(:minor, :a).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop, others: :keep',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(2, beat: 3) { level :t2, 0, on: :bar }',
+      ], 3, false,
+    ],
+    # (the same class, fix-fuzz-1107: a cue launched on a rebuild's frame
+    # dropped the rebuilt player instead of fading it out
+    # (Cue#switch_cue_player))
+    'a cue launched where a rebuild lands' => [
+      ['bpm 174', 'meter 3, 4', 'knob :busy, 0.5'], [
+        'track(:t2, q: 1) { |clip| clip.synth(voices: 3) { |v| v.hz.sine * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t2: melody(scale(:minor, :a).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop, others: :keep',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(2, beat: 3) { cue :t2, seq(A4, C5).n8.loop; after(in: 1.beat) { launch :t2 } }',
+      ], 3, false,
+    ],
+    # (the same class, fix-fuzz-1107: an instrument change on a rebuild's
+    # frame cut the rebuilt player instead of spilling it (Session#add_now's
+    # spiller); the change is asked for after the rebuild, at 1:3)
+    'an instrument change landing with a rebuild' => [
+      ['bpm 174', 'meter 3, 4', 'knob :busy, 0.5'], [
+        'track :t1, :dnb_sub, q: 1',
+        'scene :s1, t1: seq(C4, E4, G4).n8.loop',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 3) { after(in: 1/16r) { track :t1, :square_bass } }',
       ], 3, false,
     ],
   }.each do |name, (header, lines, bars, slow)|
