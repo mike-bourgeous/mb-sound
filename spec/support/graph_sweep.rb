@@ -137,6 +137,7 @@ module GraphSweep
     }
     others = [
       ['lp4 quality: node', ->(c) { c.sig.lp4(1000, quality: c.mod(0.7, 8)) }],
+      ['lowpass resonance: node, slope: 12 (reese-slope-1)', ->(c) { c.sig.filter(:lowpass, cutoff: c.mod(200, 3000), resonance: c.mod(0, 0.8, 3), slope: 12) }],
       ['lp4 linear curve', ->(c) { c.sig.lp4(1000, resonance: 0.5, resonance_curve: :linear) }],
       ['diode unnormalized', ->(c) { c.sig.diode(c.mod(200, 3000), resonance: 0.5, normalize: false) }],
       ['lp4 and diode live drive nodes (delays-2)', ->(c) {
