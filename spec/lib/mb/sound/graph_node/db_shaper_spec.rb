@@ -8,7 +8,7 @@ RSpec.describe(MB::Sound::GraphNode::DbShaper) do
   # the points, continued past both ends (below: :unity uses slope 1 under
   # the first point, :silence gives 0 there), then mixed with x.  Two
   # points at one input are a step to the second one's output.
-  def reference(x, points, negative = nil, below: :line, mix: 1.0)
+  def reference(x, points, negative = nil, below: :line, above: :line, mix: 1.0)
     return 0.0 if x == 0
 
     pts = (x < 0 && negative ? negative : points).map { |p| p.map(&:to_f) }.each_with_index.sort_by { |p, i| [p[0], i] }.map(&:first)
@@ -22,6 +22,8 @@ RSpec.describe(MB::Sound::GraphNode::DbShaper) do
         when :unity then a[1] + (l - a[0])
         else a[1] + (b[1] - a[1]) / (b[0] - a[0]) * (l - a[0])
         end
+      elsif above == :unity && l >= pts[-1][0]
+        pts[-1][1] + (l - pts[-1][0])
       else
         a, b = lines.reverse.find { |p, _| p[0] <= l }
         a[1] + (b[1] - a[1]) / (b[0] - a[0]) * (l - a[0])
@@ -78,6 +80,17 @@ RSpec.describe(MB::Sound::GraphNode::DbShaper) do
       end
     end
 
+    DB_SHAPER_CURVES.each do |name, (points, negative)|
+      it "follows the formula for #{name} with above: :unity (slope 1 over the last point)" do
+        node = input(levels).ashape_db(db_points(points), negative: negative && db_points(negative), below: :unity, above: :unity)
+        out = node.sample(levels.length)
+        levels.to_a.each_with_index do |x, i|
+          r = reference(x, points, negative, below: :unity, above: :unity)
+          expect(out[i]).to be_within(2e-7 * [r.abs, 1e-30].max + 1e-38).of(r), "x = #{x}"
+        end
+      end
+    end
+
     it 'follows a cubic curve (Dynamics::Transfer.points with :cubic)' do
       pts = [[-60, -40], [-20, -10], [0, -3]]
       t = MB::Sound::GraphNode::Dynamics::Transfer.points(pts, interpolation: :cubic)
@@ -123,8 +136,8 @@ RSpec.describe(MB::Sound::GraphNode::DbShaper) do
 
     it 'matches its Ruby mirror sample for sample' do
       DB_SHAPER_CURVES.each do |name, (points, negative)|
-        [[:line, 1.0, :linear], [:silence, 0.6, :linear], [:unity, 1.0, :cubic]].each do |below, mix, interpolation|
-          node = input(signal).shape_db(db_points(points), negative: negative && db_points(negative), below: below, mix: mix, interpolation: interpolation)
+        [[:line, 1.0, :linear, :line], [:silence, 0.6, :linear, :unity], [:unity, 1.0, :cubic, :unity]].each do |below, mix, interpolation, above|
+          node = input(signal).shape_db(db_points(points), negative: negative && db_points(negative), below: below, above: above, mix: mix, interpolation: interpolation)
           c = SpecBuffers.join(3.times.map { node.sample(400).dup })
           coeffs = node.instance_variable_get(:@coeffs)
           state = [0.0, 0.0, 0.0, 0]
@@ -283,6 +296,7 @@ RSpec.describe(MB::Sound::GraphNode::DbShaper) do
     it 'rejects unknown options and modes' do
       expect { 1.constant.shape_db(:fuzz, belwo: :line) }.to raise_error(ArgumentError)
       expect { 1.constant.shape_db(:fuzz, below: :floor) }.to raise_error(ArgumentError, /below/)
+      expect { 1.constant.shape_db(:fuzz, above: :silence) }.to raise_error(ArgumentError, /above/)
       expect { 1.constant.shape_db(:fuzz, negative: :flip) }.to raise_error(ArgumentError, /mirror/)
       expect { 1.constant.shape_db(:fuzz, mix: 2) }.to raise_error(ArgumentError, /mix/)
     end

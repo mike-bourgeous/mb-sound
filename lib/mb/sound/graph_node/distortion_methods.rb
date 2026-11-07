@@ -94,9 +94,11 @@ module MB
         # +negative+ is :mirror (default: negative samples mirror the
         # positive curve) or points of their own.  +below+ says what happens
         # under the first point: :line (continue its line, as #compand does),
-        # :unity (slope 1 from the first point), or :silence.  Above the
-        # last point the last line continues (inputs over full scale keep
-        # following it).  +mix+ (0..1) is the shaped share, phase-aligned.
+        # :unity (slope 1 from the first point), or :silence.  +above+ says
+        # what happens over the last point: :line (the last line continues,
+        # also for inputs over full scale) or :unity (slope 1 from the last
+        # point, as the DirectX Distortion does).  +mix+ (0..1) is the shaped
+        # share, phase-aligned.
         #
         # Antialiased like #softclip (half a sample of delay; closed-form
         # ADAA of the power laws that dB lines are); #ashape_db is the exact
@@ -105,8 +107,8 @@ module MB
         #     play 110.hz.saw.at(-6.db).shape_db(-84.db => -60.db, -48.db => -18.db, 0.db => -6.db)   # a dense fuzz
         #     play 110.hz.saw.shape_db(:fold_back, mix: 0.5)
         #     play 220.hz.triangle.shape_db(-40.db => -40.db, 0.db => -10.db, negative: { -40.db => -40.db, -10.db => -10.db, 0.db => -10.db })
-        def shape_db(points = nil, negative: nil, interpolation: nil, below: nil, mix: nil, antialias: true, **more_points)
-          DbShaper.build(self, points, more_points, negative: negative, interpolation: interpolation, below: below, mix: mix, antialias: antialias)
+        def shape_db(points = nil, negative: nil, interpolation: nil, below: nil, above: nil, mix: nil, antialias: true, **more_points)
+          DbShaper.build(self, points, more_points, negative: negative, interpolation: interpolation, below: below, above: above, mix: mix, antialias: antialias)
         end
 
         # The plain (exact, aliasing) version of #shape_db, for control

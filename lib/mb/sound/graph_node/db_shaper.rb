@@ -16,9 +16,11 @@ module MB
       # through +negative+ (another Transfer), or through the positive curve
       # mirrored (nil, odd symmetry).  Zero stays zero.
       #
-      # Above the last point the curve continues its last segment, so inputs
-      # over full scale keep following it (no clamp: add #clip after it for
-      # a ceiling).  Below the first point (+below+):
+      # Above the last point (+above+) the curve continues its last segment
+      # (:line, the default), so inputs over full scale keep following it
+      # (no clamp: add #clip after it for a ceiling), or continues from the
+      # last point with slope 1 (:unity, a fixed gain, as the DirectX
+      # Distortion does).  Below the first point (+below+):
       # - :line (default, as the compander does) continues the first
       #   segment's line; its slope must be above 0 (else quiet input would
       #   come out louder, and silence as noise)
@@ -51,8 +53,11 @@ module MB
         # The ways below the first point (see the class description).
         BELOW = %i[line unity silence].freeze
 
+        # The ways above the last point (see the class description).
+        ABOVE = %i[line unity].freeze
+
         # Settings a preset may give (GraphNode#shape_db's keywords).
-        KEYS = %i[points negative interpolation below mix].freeze
+        KEYS = %i[points negative interpolation below above mix].freeze
 
         # Largest dB distance of the antialiased version's chords from a
         # cubic segment.
@@ -78,6 +83,7 @@ module MB
         param :mix, 1.0, range: 0.0..1.0, description: 'Shaped share (0 dry, 1 all shaped; phase-aligned)'
         param :interpolation, :linear, range: %i[linear cubic], description: 'Lines between points in dB, or monotone cubics'
         param :below, :line, range: BELOW, description: 'Below the first point: continue its line, unity slope, or silence'
+        param :above, :line, range: ABOVE, description: 'Above the last point: continue its line, or unity slope'
 
         # Generic curves (never the maintainer's plugin settings).
         preset :soft_knee, points: { -84.db => -84.db, -24.db => -24.db, -12.db => -14.db, 0.db => -9.db }.freeze, interpolation: :cubic,
@@ -99,6 +105,9 @@ module MB
         # How the curves continue below their first points (see BELOW).
         attr_reader :below
 
+        # How the curves continue above their last points (see ABOVE).
+        attr_reader :above
+
         # The shaped share (0..1).
         attr_reader :mix
 
@@ -109,23 +118,25 @@ module MB
         # +negative+ for negative samples, or nil to mirror the positive
         # curve), continuing below the first points by +below+, mixed by
         # +mix+ (see the class description).
-        def initialize(source, positive:, negative: nil, below: :line, mix: 1.0, antialias: true)
+        def initialize(source, positive:, negative: nil, below: :line, above: :line, mix: 1.0, antialias: true)
           @source = source.get_sampler
           @sample_rate = @source.sample_rate
           [positive, negative].compact.each do |t|
             raise ArgumentError, "dB shaper curves are Dynamics::Transfers (got #{t.class})" unless t.is_a?(Dynamics::Transfer)
           end
           raise ArgumentError, "below must be one of #{BELOW.inspect} (got #{below.inspect})" unless BELOW.include?(below)
+          raise ArgumentError, "above must be one of #{ABOVE.inspect} (got #{above.inspect})" unless ABOVE.include?(above)
           raise ArgumentError, "mix must be a number from 0 to 1 (got #{mix.inspect})" unless mix.is_a?(Numeric) && (0..1).cover?(mix)
 
           @positive = positive
           @negative = negative
           @below = below
+          @above = above
           @mix = mix.to_f
           @antialias = !!antialias
 
-          pos = DbShaper.half(positive, below)
-          neg = negative && DbShaper.half(negative, below)
+          pos = DbShaper.half(positive, below, above)
+          neg = negative && DbShaper.half(negative, below, above)
           @pos_table = pos[:table]
           @neg_table = neg && neg[:table]
           @pos_floor = pos[:floor]
@@ -198,7 +209,7 @@ module MB
         end
 
         def to_s
-          "#{super} -- #{@node_type_name}(#{@positive}#{", negative #{@negative}" if @negative}, below #{@below}#{", mix #{@mix}" if @mix != 1})"
+          "#{super} -- #{@node_type_name}(#{@positive}#{", negative #{@negative}" if @negative}, below #{@below}#{", above #{@above}" if @above != :line}#{", mix #{@mix}" if @mix != 1})"
         end
 
         # Builds the shaper of GraphNode#shape_db on +input+: +points+ (a
@@ -206,7 +217,7 @@ module MB
         # keyword points +more+) with the other settings over the preset's.
         # A first segment that can't continue below (:line with a slope at
         # most 0) goes through MB::Sound.live_error (live mode: :unity).
-        def self.build(input, points, more, negative: nil, interpolation: nil, below: nil, mix: nil, antialias: true)
+        def self.build(input, points, more, negative: nil, interpolation: nil, below: nil, above: nil, mix: nil, antialias: true)
           bad = more.keys.reject { |k| k.is_a?(Numeric) }
           raise ArgumentError, "Unknown shape_db options: #{bad.map(&:inspect).join(', ')}#{Library.suggest(bad[0], KEYS + [:antialias])}" unless bad.empty?
 
@@ -218,6 +229,7 @@ module MB
           negative = settings.fetch(:negative, :mirror) if negative.nil?
           interpolation ||= settings.fetch(:interpolation, :linear)
           below ||= settings.fetch(:below, :line)
+          above ||= settings.fetch(:above, :line)
           mix = settings.fetch(:mix, 1.0) if mix.nil?
           mix = GraphNode.build_setting(mix) # (a param or knob is read once while building)
           raise ArgumentError, "negative must be :mirror or points (got #{negative.inspect})" if negative.is_a?(Symbol) && negative != :mirror
@@ -233,7 +245,7 @@ module MB
             end
           end
 
-          new(input, positive: pos, negative: neg, below: below, mix: mix, antialias: antialias)
+          new(input, positive: pos, negative: neg, below: below, above: above, mix: mix, antialias: antialias)
         end
 
         # A Dynamics::Transfer from compander-style +points+ and keyword
@@ -255,13 +267,15 @@ module MB
 
         # The plain shaper's segment table, floor, and the antialiased
         # version's power-law rows for one half's Dynamics::Transfer
-        # +transfer+ with +below+ ({ table:, floor:, rows: }, rows flat).
-        def self.half(transfer, below)
+        # +transfer+ with +below+ and +above+ ({ table:, floor:, rows: },
+        # rows flat).
+        def self.half(transfer, below, above = :line)
           segs = transfer.segments.dup
           x0, y0, = segs[0]
           problem = below == :line && below_problem(transfer)
           raise ArgumentError, problem if problem
           segs[0] = [x0, y0, 1.0, 0.0, 0.0].freeze if below == :unity
+          segs[-1] = [*segs[-1][0, 2], 1.0, 0.0, 0.0].freeze if above == :unity
           {
             table: Numo::DFloat.cast(segs.flatten).freeze,
             floor: below == :silence ? x0.to_f : -Float::INFINITY,
