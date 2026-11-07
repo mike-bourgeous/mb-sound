@@ -85,7 +85,7 @@ module MB
           # Racks applied to sources (`sig.then(&arack { |s| ... })`;
           # Loader#call_block takes a Rack as the block argument), bound,
           # and composed
-          'MB::Sound::GraphNode' => %i[samples seconds cycles cyc radians rad outputs then],
+          'MB::Sound::GraphNode' => %i[samples seconds bars cycles cyc radians rad outputs then],
           'MB::Sound::GraphNode::Channels' => %i[then],
           'MB::Sound::Notes' => %i[then],
           # (a clip's stream through transforms: set documents' wires,

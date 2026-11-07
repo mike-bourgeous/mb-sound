@@ -341,9 +341,12 @@ module MB
             when MB::Sound::Length::Seconds, MB::Sound::Length::Samples
               objects_in(v.origin[0], acc) if v.origin
               objects_in(v.value, acc)
+            when MB::Sound::Sequence::Duration then objects_in(v.origin[0], acc) if v.origin
             when MB::Sound::Phase then objects_in(v.cycles, acc) unless v.cycles.is_a?(Numeric)
             when ChannelValues then objects_in(v.values, acc)
-            else acc << v if Recipe.graph_object?(v)
+            else
+              acc << v if Recipe.graph_object?(v)
+              objects_in(tempo_origin(v), acc) if v.is_a?(MB::Sound::Pitch)
             end
             acc
           end
@@ -1007,8 +1010,10 @@ module MB
 
           def leaf?(v)
             case v
-            when Numeric, Symbol, String, true, false, nil, MB::Sound::Interval, MB::Sound::Sequence::Duration, MB::Sound::Tempo
+            when Numeric, Symbol, String, true, false, nil, MB::Sound::Interval, MB::Sound::Tempo
               true
+            when MB::Sound::Sequence::Duration
+              v.origin.nil?
             when MB::Sound::Length::Seconds, MB::Sound::Length::Samples
               v.value.is_a?(Numeric)
             when MB::Sound::Pitch
@@ -1027,6 +1032,8 @@ module MB
             when String
               # A file name, in a bundle: the asset's name
               return (@assets && @assets.file(v))&.inspect || v.inspect
+            when MB::Sound::Sequence::Duration
+              return origin_text(v, indent) if v.origin
             when MB::Sound::Length::Samples, MB::Sound::Length::Seconds
               return origin_text(v, indent) if v.origin
               unless v.value.is_a?(Numeric)
@@ -1285,7 +1292,18 @@ module MB
           end
 
           def pitch_text(p)
+            d = tempo_origin(p)
+            return "#{origin_text(d, '')}.hz" if d
             MB::Sound::RubyValue.pitch(p) || fixme("a #{p.class} with a node frequency")
+          end
+
+          # The Duration of tempo-synced Pitch +p+ (`lfo_rate.bars.hz`) when
+          # it was read from a param (Duration#origin, GraphNode#bars), else
+          # nil.
+          def tempo_origin(p)
+            return nil unless p.is_a?(MB::Sound::Pitch) && !p.constant?
+            src = p.freq
+            src.is_a?(MB::Sound::Sequence::TempoNode) && src.mode == :hz && !src.freewheel? && src.duration.origin ? src.duration : nil
           end
 
           def wavetable_text(t, indent = '')

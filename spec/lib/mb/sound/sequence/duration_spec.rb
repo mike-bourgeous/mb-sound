@@ -178,4 +178,37 @@ RSpec.describe(MB::Sound::Sequence::Duration) do
       expect { MB::Sound::LaunchPoint.build(at: nil, on: nil, offset: -5.ms) }.to raise_error(ArgumentError, /in: must be/)
     end
   end
+
+  describe 'params read as bars (GraphNode#bars, reese-params-1)' do
+    it 'reads a param while the graph builds as a Duration that remembers it' do
+      c = 2.0.constant.named('rate')
+      d = c.bars
+      expect(d).to eq(2.bars)
+      expect(d.origin[0]).to equal(c)
+      expect(c.build_read?).to eq(true)
+      expect((d * 2).origin).to be_nil
+      expect { 220.hz.saw.bars }.to raise_error(ArgumentError, /a param, or a knob/)
+    end
+
+    it 'keeps the param in saved graphs: an LFO rate, a tempo pitch, a delay time' do
+      text = <<~DOC
+        graph 9, name: "bars_test", kind: :synth
+        inputs midi: :notes
+        param :rate, (0.25..16.0).at(2.0), description: "Bars per cycle"
+
+        synth(midi, voices: 1) { |v|
+          (v.hz.saw * rate.bars.hz.lfo.at(0..1) * v.lfo(rate.bars, depth: 0.5)).delay(rate.bars, max_delay: 30)
+        }
+      DOC
+      clip = -> { MB::Sound.seq(MB::Sound::F2).n1.loop }
+      saved = MB::Sound::GraphIO.dump(MB::Sound::GraphIO.load(text, inputs: { midi: clip.() }))
+      expect(saved).to include('(v.hz.saw * rate.bars.hz.lfo.at(0..1) * v.lfo(rate.bars, depth: 0.5)).delay(rate.bars, max_delay: 30)')
+      expect(saved).to include('param :rate, (0.25..16.0).at(2.0)')
+
+      one = MB::Sound::GraphIO.load(saved, inputs: { midi: clip.() }, params: { rate: 1 })
+      written = MB::Sound::GraphIO.load(text.gsub('rate.bars', '1.bar'), inputs: { midi: clip.() })
+      render = ->(g) { 18.times.map { g.sample(800).dup } }
+      expect(render.(one)).to eq(render.(written))
+    end
+  end
 end
