@@ -3,11 +3,11 @@
 graph 9,
   name: "dnb_pluck",
   kind: :synth,
-  saved: "2026-11-07T01:41:10Z",
-  mb_sound: "0.12.0.usegit (cfbf40d)",
+  saved: "2026-11-07T02:47:57Z",
+  mb_sound: "0.12.0.usegit (d0feafb)",
   from: "bin/synths/dnb.rb",
   description: "Drum & bass patch :pluck from bin/synths/dnb.rb, first made by Kez Volta, a fictional modern EDM / UK drum & bass producer-DJ, for the song \"Tunnel Vision\" (bin/songs/tunnel_vision.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-edm).",
-  options: { patch: :pluck, lfo_depth: nil, lfo_rate: nil, resonance: nil, drive: nil, glide: nil, attack: nil, release: nil, grit: nil, drop: nil }
+  options: { patch: :pluck, lfo_depth: nil, lfo_bars: nil, resonance: nil, drive: nil, glide: nil, attack: nil, release: nil, grit: nil, drop: nil }
 inputs midi: :notes
 param :cutoff, (20.0..10000.0).at(500.0), description: "Lowpass cutoff in Hz (reese 2400 around its LFO, sub 110, neuro 600 and pluck 500 under their envelopes, pad 2600)"
 param :decay, (0.01..8.0).at(0.35), description: "Amplitude decay in seconds (neuro 0.12: its filter envelope too; pluck 0.35, boom 1.2)"

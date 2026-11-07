@@ -370,9 +370,8 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(@session).not_to receive(:debug_graphs)
       info = g.call(@session, { track: :bass })
       expect(info.tracks).to eq(%i[bass pad])
-      # (:cut, which the patch gives the preset, and the preset's other params as the track's knobs: Arrangement::TrackKnobs;
-      # lfo_rate is a build knob, read while building, not by the graph)
-      expect(info.knobs).to contain_exactly(:cut, :"bass/resonance", :"bass/drive", :"bass/glide", :"bass/lfo_depth")
+      # (:cut, which the patch gives the preset, and the preset's other params as the track's knobs: Arrangement::TrackKnobs)
+      expect(info.knobs).to contain_exactly(:cut, :"bass/resonance", :"bass/drive", :"bass/glide", :"bass/lfo_depth", :"bass/lfo_bars")
       labels = info.nodes.map(&:label)
       expect(labels).to include('lp4', 'highpass', 'softclip')
       lp4 = info.nodes.find { |n| n.label == 'lp4' }
@@ -383,6 +382,7 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(shown.map(&:section).chunk_while { |a, b| a == b }.map(&:first)).to eq(%i[source filter amp mod fx]) # (in section order)
       expect(shown.find { |n| n.what == 'amp env' }).to have_attributes(section: :amp, dest: ['amp'])
       expect(shown.find { |n| n.label == 'lfo' }).to have_attributes(section: :mod, dest: ['lp4 cutoff'])
+      expect(shown.find { |n| n.label == 'lfo' }.knobs).to contain_exactly(:"bass/lfo_bars", :"bass/lfo_depth") # (both turn live: reese-params-2)
       expect(shown.find { |n| n.label == 'highpass' }).to have_attributes(section: :fx, what: 'post-amp EQ', count: 2)
       expect(info.selected).to eq(lp4) # (by default the filter)
       expect(info.loose).to eq([]) # (every knob on a row's param)

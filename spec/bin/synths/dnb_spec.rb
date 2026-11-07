@@ -26,16 +26,16 @@ RSpec.describe('bin/synths/dnb.rb') do
 
     def reese(length = 2, **params) = render_patch(MB::Sound.preset(:dnb_reese, midi: patch_notes([f1, 0, length]), **params), length)[0]
 
-    it 'turns the cutoff LFO off with lfo_depth: 0 and sets its cycle in bars with lfo_rate:' do
+    it 'turns the cutoff LFO off with lfo_depth: 0 and sets its cycle in bars with lfo_bars:' do
       # (measured: 10x over a cycle a second at 120 BPM; 1.65x from the
       # unison's beating alone)
-      wobble = shares(reese(lfo_rate: 0.5))
+      wobble = shares(reese(lfo_bars: 0.5))
       expect(wobble.max / wobble.min).to be > 5
 
-      steady = reese(lfo_depth: 0, lfo_rate: 0.5)
+      steady = reese(lfo_depth: 0, lfo_bars: 0.5)
       expect(shares(steady).max / shares(steady).min).to be < 2
-      expect(reese(lfo_depth: 0, lfo_rate: 7)).to eq(steady) # (no LFO, no rate)
-      expect(reese(lfo_depth: 0.8, lfo_rate: 2)).to eq(reese) # the defaults
+      expect(reese(lfo_depth: 0, lfo_bars: 7)).to eq(steady) # (no LFO, no rate)
+      expect(reese(lfo_depth: 0.8, lfo_bars: 2)).to eq(reese) # the defaults
     end
 
     it 'drives a param over time with a node: a tween on the cutoff, saved and loaded' do
@@ -49,23 +49,37 @@ RSpec.describe('bin/synths/dnb.rb') do
       expect(band_share(seconds(out, 1.5, 1.9), 2000, 20000)).to be > band_share(seconds(out, 0.1, 0.4), 2000, 20000) * 10
     end
 
-    it 'saves lfo_rate as a param read as bars, a build knob on a track' do
+    it 'saves lfo_bars as a live param, so both LFO knobs turn on a track: no rebuild, the same samples at any buffer size' do
       text = File.read(File.join(MB::Sound::GraphIO.library_presets_dir, 'dnb_reese.mbg.rb'))
-      expect(text).to include('v.lfo(lfo_rate.bars, shape: :sine, depth: lfo_depth)')
+      expect(text).to include('v.lfo(lfo_bars.bars, shape: :sine, depth: lfo_depth)')
 
-      session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
-      MB::Sound::Session.with_context(session: session) {
-        MB::Sound.instance_eval {
-          track :reese, :dnb_reese
-          bg :reese, seq(MB::Sound::F1).n1.loop
+      play = lambda do |size, turns|
+        session = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120),
+                                         channels: 2, buffer_size: size, realtime: false, raise_errors: true)
+        MB::Sound::Session.with_context(session: session) {
+          MB::Sound.instance_eval {
+            track :reese, :dnb_reese
+            bg :reese, seq(MB::Sound::F1).n1.loop
+          }
         }
-      }
-      session.process_buffer
-      expect(session.arrangement.build_knob?(:"reese/lfo_rate")).to eq(true)
-      expect(session.arrangement.build_knob?(:"reese/lfo_depth")).to eq(false)
-      expect(session.knobs[:"reese/lfo_depth"].value).to eq(0.8)
-    ensure
-      session&.close
+        out = [session.process_buffer.map(&:dup)]
+        graph = session.ui_graphs[:reese]
+        expect(session.knobs.keys).to include(:"reese/lfo_bars", :"reese/lfo_depth")
+        expect(session.arrangement.build_knob?(:"reese/lfo_bars")).to eq(false)
+        MB::Sound::Session.with_context(session: session) { MB::Sound.turn(:"reese/lfo_bars", 0.5, at: MB::Sound.bar(2)); MB::Sound.turn(:"reese/lfo_depth", 1.0, at: MB::Sound.bar(2)) } if turns
+        out << session.process_buffer.map(&:dup) while out.sum { |b| b[0].length } < 3.5 * 48000
+        expect(session.ui_graphs[:reese]).to equal(graph) # (turned, not rebuilt)
+        Numo::SFloat.cast(SpecBuffers.join(out.map(&:first)))[0...(3.5 * 48000).round]
+      ensure
+        session&.close
+        MB::Sound.rewind
+      end
+
+      turned = play.(800, true)
+      plain = play.(800, false)
+      expect(turned[0...90_000]).to eq(plain[0...90_000]) # (the turns land on bar 2: 2 s at 120 BPM)
+      expect((turned[100_000..] - plain[100_000..]).abs.max).to be > 0.01
+      expect(play.(367, true)).to eq(turned)
     end
   end
 

@@ -135,7 +135,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
 
     # Numbers made inside library code (no recorded call) say so in the
     # user's terms, naming the preset's params, never a node class
-    expect(described_class.unrecorded(roots, :quality)).to eq('quality is fixed in the dnb_reese preset; bind its params instead: cutoff, lfo_depth, lfo_rate, resonance, drive, glide')
+    expect(described_class.unrecorded(roots, :quality)).to eq('quality is fixed in the dnb_reese preset; bind its params instead: cutoff, lfo_depth, lfo_bars, resonance, drive, glide')
   end
 
   # (editability-1: tine_piano ends in a stereo `.pan(...)`, so its root
