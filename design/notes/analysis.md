@@ -7,7 +7,7 @@
 ## Quick reference
 
 - Console: `analyze 'orig.wav'` (a Report), `compare 'orig.wav', fit` (L3 terms) or `compare 'orig.wav', 'a' => a, 'b' => b` (a Ranking), `look 'orig.wav', fit, path: 'x.png'`.
-- Library: `Analysis.analyze(sound, seconds:)`, `.compare`, `.rank(target, candidates, by:)`, `.look(sounds, path:)`, `Analysis::Preferences.new(items).evaluate`; readers `Signal`, `PitchContour`, `PitchEnvelope`, `Envelope`, `Attack`, `PerceivedPitch`, `ModulationSpectrum`, `BandEnvelopes`, `SpectralMotion`, `Bleed`, `Comparison`, `Look`.
+- Library: `Analysis.analyze(sound, seconds:)`, `.compare`, `.rank(target, candidates, by:)`, `.look(sounds, path:)`, `Analysis::Preferences.new(items).evaluate`; readers `Signal`, `PitchContour`, `PitchEnvelope`, `Envelope`, `Attack`, `PerceivedPitch`, `ModulationSpectrum`, `BandEnvelopes`, `SpectralMotion`, `Bleed`, `Comparison`, `Look`; `ImpulseResponse` (room acoustics of an impulse: per-octave T60, EDC, onset, C50/C80, tail levels, correlation; `reverb_match` builds on it, reverbs.md).
 - Code `lib/mb/sound/analysis/`; specs `spec/lib/mb/sound/analysis/` on synthetic sounds (`spec/support/synthetic_sounds.rb`); help `help :analysis`.
 
 The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.

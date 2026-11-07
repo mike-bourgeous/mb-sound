@@ -99,6 +99,7 @@ module MB
           :samples, :seconds,
           :loudness_meter, :lufs_meter,
           :chorus, :juno_chorus,
+          *ConvolveMethods.public_instance_methods(false), # (one convolver: true stereo crosses the sides)
           *StereoDelayMethods.public_instance_methods(false), # (stereo in, stereo out)
           :blend, # (the effect gets the whole bundle)
           :inertia, # (:hardware mode reads neighboring channels)

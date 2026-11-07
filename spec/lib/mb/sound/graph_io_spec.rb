@@ -135,6 +135,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       'region lanes (RegionPlayer)' => 'a Sample made from audio in memory', # (region_player_spec.rb round trips a lane of breakbeat(:jungle))
       'sampler lanes (a tracker channel)' => 'a Sample made from audio in memory',
       'capture tap (CaptureTap)' => "can't print a MB::Sound::Sampler::AudioCapture",
+      'convolve (Convolver)' => 'a Sample made from audio in memory',
     }.freeze
 
     # Factories whose documents keep values but not moves: they save with a
@@ -562,6 +563,8 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
         'Notes.new("%s").tone',
         'synth("%s") { |v| v.tone }',
         'tr808("%s")',
+        '220.hz.saw.convolve("%s")',
+        '220.hz.saw.convolve(Sample["%s"])',
       ].each do |pattern|
         it "keeps file names in #{pattern % 'x'} relative to the document" do
           opened = []

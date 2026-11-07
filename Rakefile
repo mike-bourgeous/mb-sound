@@ -216,6 +216,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_reverb' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_convolve' do |ext|
+  ext.name = 'fast_convolve'
+  ext.ext_dir = 'ext/mb/sound/fast_convolve'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 # mb-term's native grid and VT (gems/mb-term; fast_ui's Grid subclasses
 # the grid)
 Rake::ExtensionTask.new 'mb-term-fast_term' do |ext|

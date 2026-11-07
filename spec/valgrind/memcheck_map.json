@@ -198,6 +198,24 @@
         "FastControl.smooth"
       ]
     },
+    "spec/ext/mb/sound/fast_convolve_spec.rb": {
+      "fast_convolve": [
+        "FastConvolve::Engine#boundary_levels",
+        "FastConvolve::Engine#fft_input",
+        "FastConvolve::Engine#finish",
+        "FastConvolve::Engine#initialize",
+        "FastConvolve::Engine#position",
+        "FastConvolve::Engine#process",
+        "FastConvolve::Engine#quiet?",
+        "FastConvolve::Engine#reset",
+        "FastConvolve::Engine#room",
+        "FastConvolve::Engine#spectrum",
+        "FastConvolve::Engine#sub_size",
+        "FastConvolve::Engine#swap_state",
+        "FastConvolve::Engine#task",
+        "FastConvolve::Engine#task_result"
+      ]
+    },
     "spec/ext/mb/sound/fast_delay_spec.rb": {
       "fast_delay": [
         "FastDelay.read"
@@ -466,6 +484,12 @@
         "FastAudio::JackMIDIOutput#port_name",
         "FastAudio::JackMIDIOutput#write"
       ],
+      "fast_midi": [
+        "FastMIDI::Output#close",
+        "FastMIDI::Output.new"
+      ]
+    },
+    "spec/ext/mb/sound/jack_server_loss_spec.rb": {
       "fast_midi": [
         "FastMIDI::Output#close",
         "FastMIDI::Output.new"
@@ -741,6 +765,38 @@
       ],
       "fast_sound": [
         "FastSound.smoothstep_buf"
+      ]
+    },
+    "spec/lib/mb/sound/graph_node/convolver_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
+        "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
+        "FastArithmetic.mix",
+        "FastArithmetic.power",
+        "FastArithmetic.product"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
+      ],
+      "fast_convolve": [
+        "FastConvolve::Engine#boundary_levels",
+        "FastConvolve::Engine#fft_input",
+        "FastConvolve::Engine#finish",
+        "FastConvolve::Engine#initialize",
+        "FastConvolve::Engine#process",
+        "FastConvolve::Engine#quiet?",
+        "FastConvolve::Engine#room",
+        "FastConvolve::Engine#shape",
+        "FastConvolve::Engine#spectrum",
+        "FastConvolve::Engine#sub_size",
+        "FastConvolve::Engine#swap_state",
+        "FastConvolve::Engine#task",
+        "FastConvolve::Engine#task_result"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
       ]
     },
     "spec/lib/mb/sound/graph_node/curve_shaper_spec.rb": {
@@ -1096,6 +1152,16 @@
         "FastControl.reset_run",
         "FastControl.slew",
         "FastControl.smooth"
+      ],
+      "fast_convolve": [
+        "FastConvolve::Engine#boundary_levels",
+        "FastConvolve::Engine#fft_input",
+        "FastConvolve::Engine#finish",
+        "FastConvolve::Engine#initialize",
+        "FastConvolve::Engine#process",
+        "FastConvolve::Engine#room",
+        "FastConvolve::Engine#spectrum",
+        "FastConvolve::Engine#sub_size"
       ],
       "fast_delay": [
         "FastDelay.network",
@@ -1761,8 +1827,6 @@
         "FastSampler.play"
       ],
       "fast_sound": [
-        "FastSound.biquad_narray",
-        "FastSound.cookbook",
         "FastSound.fast_math=",
         "FastSound.oscillate"
       ]
@@ -1854,8 +1918,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -2147,6 +2209,23 @@
         "fast_control.o": [
           "ext/mb/sound/include/mb_ext_helpers.h",
           "ext/mb/sound/include/mb_smooth.h"
+        ]
+      }
+    },
+    "fast_convolve": {
+      "dir": "ext/mb/sound/fast_convolve",
+      "sources": [
+        "fast_convolve.c"
+      ],
+      "modules": [
+        "FastConvolve"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_ext_helpers.h"
+      ],
+      "depend": {
+        "fast_convolve.o": [
+          "ext/mb/sound/include/mb_ext_helpers.h"
         ]
       }
     },

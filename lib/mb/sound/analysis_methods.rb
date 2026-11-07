@@ -133,6 +133,27 @@ module MB
       end
       alias compare_sounds compare
 
+      # Fits the algorithmic reverb (#reverb's room-size form) to an impulse
+      # response (MB::Sound::ReverbMatch): per-octave decay times, predelay,
+      # early build-up, late-tail tone (peaking EQ after the reverb), and
+      # stereo width.  Prints the report (T60 per band, impulse vs fit, tail
+      # level errors) in the console and returns the ReverbMatch, whose
+      # #apply builds the graph on a signal and #to_ruby prints it.  The
+      # same impulse plays exactly through #convolve; the match is the
+      # cheaper, tweakable cousin (decay, damping, and modulation stay
+      # knobs).  +impulse+ is a file path, a Sample, or NArray channels.
+      #
+      # Examples:
+      #     m = reverb_match('hall.wav')
+      #     play m.apply(file_input('drums.flac'), mix: 0.3)
+      #     m.plot('match.png')            # EDC curves and T60 by band
+      #     ruby m.to_ruby
+      def reverb_match(impulse, sample_rate: 48000)
+        m = ReverbMatch.new(impulse, sample_rate: sample_rate)
+        puts m if MB::Sound.live?
+        m
+      end
+
       # Writes a PNG for looking at +sounds+ (Analysis::Look: per sound the
       # waveform, the first 50 ms, a spectrogram, and the top three
       # octaves, axes in seconds and Hz) to +path:+ (default a new file in

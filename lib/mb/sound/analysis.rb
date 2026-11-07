@@ -17,6 +17,7 @@ require_relative 'analysis/comparison'
 require_relative 'analysis/preferences'
 require_relative 'analysis/look'
 require_relative 'analysis/report'
+require_relative 'analysis/impulse_response'
 
 module MB
   module Sound

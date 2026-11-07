@@ -81,6 +81,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `ping_pong/pingpong(time, feedback:, spread:, ...)` A ping-pong delay: echoes alternate left and right (GraphNode::DelayNetwork)
 - `tape_echo(preset, seed:, ...)` A tape echo (GraphNode::TapeEcho): repeats run through a tape sim each pass
 - `reverb(preset, output_channels:, ...)` Appends a reverb to this node (see GraphNode::Reverb)
+- `convolve/ir(impulse, mix:, wet:, ...)` Convolves this signal with an impulse response (convolution reverb)
 - `chorus/juno_chorus(mode, ...)` Appends a Juno-60-style stereo chorus (see Chorus), returning a stereo bundle
 - `feedback/fb(*args, compensate:, sustain:, &block)` Builds a feedback loop on this node from the block (a FeedbackLoop)
 
@@ -225,7 +226,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 ### Look and listen
 
 - `:plots` Plots: plot spectrum spectrogram time_freq hist density mag_phase overlay overlay_chart table chart figure vis
-- `:analysis` Analysis: freq_estimate peaks autocorrelate crosscorrelate peak_correlation analyze_form loudness analyze compare look
+- `:analysis` Analysis: freq_estimate peaks autocorrelate crosscorrelate peak_correlation analyze_form loudness analyze compare look reverb_match
 - `:loudness` Loudness: loudness render
 - `:now` Help and what is going on: help now lesson players knobs scenes tracks mutes changes markers ruby debug_dump
 - `:ui` Dashboard band and tiled screen: ui off pane layout keys fg jobs
