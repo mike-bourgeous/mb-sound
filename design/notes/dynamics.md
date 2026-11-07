@@ -10,7 +10,7 @@ One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a dB
 - `limit(ceiling: -1.db, lookahead: 1.5.ms, release:, true_peak: true)`: lookahead brickwall with Annex 2 true peaks, latency lookahead + 6 samples, master-chain ready (`master { |mix| mix.limit }`).
 - Trigger tracks: `sidechain :pump, grid(16, 'x...x...').loop` (aliases `pump`, `trigger_track`, `trigger_line`) is heard only by readers: `duck(:pump)`, `bus(:pump)`, `compress(sidechain: :pump)`; set documents print `sidechain(:pump) { |clip| ... }`; `shape: :gate` is the default; templates write `sidechain :pump, clip` (dnb's `genre(:dnb) { sidechain :pump, :pump }`).
 - dB rule (db-1, 2026-10-14): graph documents before format 3 load bare dynamics levels and gains with the old dB meaning and a warning.
-- `sig.shape_db(-84.db => -60.db, -48.db => -18.db, 0.db => -6.db, negative: :mirror | points, interpolation: :linear | :cubic, below: :line | :unity | :silence, mix: 1)`: the compander's points applied to every sample with its sign kept (a distortion, not a level control); presets `:soft_knee` (default), `:fuzz`, `:fold_back`, `:gate`, `:asymmetric` (`L.fx.shape_db`); antialiased, half a sample late; `ashape_db` exact (dB-domain waveshaper below).
+- `sig.shape_db(-84.db => -60.db, 0.db => -6.db, negative:, interpolation:, below:, above:, mix:)` (presets `L.fx.shape_db`; `ashape_db` exact) and `sig.inertia(rate, mode: :musical | :hardware)` (an acceleration limit; the DirectX Distortion's slew): sections below, with the plug-in's chain as a recipe.
 - Cost per stereo 800-sample buffer (Measurements below): ~0.2% of realtime for a compressor, 0.4% for the limiter, 0.7% for squeeze.
 
 Branch dynamics-1 (2026-10-11).  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
@@ -65,7 +65,30 @@ The maintainer's ask (via the Linux session's .acd study): rebuild Sonic Foundry
 - **Presets** (`DbShaper` is Presettable, family `shape_db`, params mix/interpolation/below; generic curves): `:soft_knee` (unity to -24 dB, cubic knee toward -9 dB; the default for `shape_db` with no points), `:fuzz` (-84 => -60, -48 => -18, -24 => -9, 0 => -6), `:fold_back` (-12 => -6, 0 => -24), `:gate` (-40 => -100, -30 => -30), `:asymmetric` (soft top half, flat-topped bottom half at -14 dB: even harmonics).
 - **Graph**: a plan boundary like the curve shapers; same output at any buffer size; `node_traits carry: :adopt` (ADAA state); per channel through ChannelDispatch; records, prints, and loads like any DSL call (`shape_db(-60.db => -30.db, ..., negative: { ... }, below: :unity, mix: 0.8)`).  Sweeps: a graph sweep factory, relation fuzz (half the softclip draws).
 - **Listening**: Bench set `db-shaper-1-2026-11-04` (`/app/tmp/listening/db-shaper-1/`, not published): the presets on a saw bass, a saw pad, and a CC0 drum loop against softclip at -20 LUFS, and the fuzz with mix.
-- Open (design branch, waiting for the maintainer): the name; the below-first-point reading; the plugin's mirror modes, filter, and mix (differential saves would settle them); a node `mix:`.
+- **Above the last point** (round 2, 2026-11-07): `above: :line` (default, the last line continues) or `:unity` (slope 1 from the last point, a fixed gain).  The plug-in does the latter: ACID's stretched inputs reach a little over full scale, and a steep last segment came out several dB hot (the Linux session's fit of the maintainer's reference renders).  The same change in both versions: the last transfer segment's slope becomes 1.  Below the first point the plug-in passes the input unchanged, which is `below: :unity` for curves whose first point lies on the unity line (all of his do).
+- **Steps and the plug-in**: the plug-in builds a table with one entry per 0.1 dB of input (at an input with two points the later one wins) and interpolates linearly in amplitude between entries, so its vertical step is a 0.1 dB-wide ramp ending on the second output at the step's input.  The step rule here (the second output at the step and above) is the same at the step; the converter writes the ramp by moving each step's first point 0.1 dB down along the curve (a dB-linear ramp, close to the plug-in's amplitude-linear one).  No `step_width:` option (kept as a question).
+- Open (design branch, waiting for the maintainer): the names (`shape_db`, `inertia`); the below-first-point reading; a node `mix:`; `step_width:`; the lowpass on the dry path and other sample rates (untested in the reference renders).
+
+### Inertia (`inertia`, the DirectX Distortion's slew; round 2, 2026-11-07)
+
+Decoded by the Linux session from the maintainer's reference renders: the plug-in's "slew" is not a slope limit (that is `clip_rate`) but a deadbeat second-order follower with its acceleration clamped, run at 2 substeps per sample: per substep `d = clamp((u - y) - v, -rate, rate); v += d; y += v`, output the last substep, `rate = slew% * 0.0005` (full scale 1).  A signal whose samples each move at most `rate` from the last passes exactly once running (the first substep must stop the velocity); faster, louder ones bend, or overshoot into bang-bang limit cycles of fixed amplitude (proportional to the rate): the maintainer's "squelchy chirps" (a 1 kHz sine at 0.89 through rate 0.005 peaks near 1.8).  A click of 0.5 comes out `rate * [1, 4, 3]`, then silence.
+
+- `GraphNode::Inertia` (`lib/mb/sound/graph_node/inertia.rb`), kernel `FastControl.inertia` (beside `slew`, the LinearFollower's limiter), Ruby mirror `Inertia.process_ruby` (Kernels `:inertia`); double-precision state `[y, v, previous first-substep input]` carried across buffers (same output at any buffer size; `carry: :adopt`).  The chaotic limit cycles make double precision matter (the Linux fit: float32 nulls audibly worse).
+- Substep inputs run from a (the first substep's input) to x[n], linearly for more than 2 substeps (exactly a, then x[n] with 2).  `mode: :musical` (default): a is the channel's own previous sample.  `mode: :hardware` (2 substeps): a is the previous sample of the interleaved stream L, R, L, R (left reads the right channel's previous sample, right the left's current one; more channels continue the pattern), so mono material comes out slightly different left and right, as in the plug-in.  Bundles are handled whole (`Inertia.build`, outside ChannelDispatch); a node rate is read per sample as float32 like any signal input.
+- Checked: bit for bit against the Linux session's interleaved oracle (its Ruby loop, run locally on 1 s of loud stereo noise at slews 5-100 and a 1 kHz sine; the spec carries its own written-out reference), the click responses, the C and Ruby mirrors at 1-5 substeps with number and node rates.  A plan boundary.
+
+### The DirectX Distortion as a recipe (round 2, 2026-11-07)
+
+The plug-in's chain is curve -> slew -> one-pole lowpass -> wet gain, plus dry gain (decoded settings: lowpass on/frequency, dry and wet in 0.1 dB with -600 for no dry, slew on/percentage, mirror mode (a UI mode that writes the stored negative points; renders need only the points)).  In library pieces, for a stereo `sig`:
+
+```ruby
+wet = sig.ashape_db(positive, negative: negative, below: :unity, above: :unity)  # points in dB, steps as pairs
+         .inertia(slew * 0.0005, mode: :hardware)                               # when slew is on
+         .filter(MB::Sound::Filter::FirstOrder.new(:lowpass1p, 48000, hz))       # when the lowpass is on: p = exp(-2 pi f / fs)
+out = wet * wet_db.db + sig * dry_db.db                                          # dry -60 dB (-600) means no dry term
+```
+
+The plug-in is exact (it aliases), hence `ashape_db`; `shape_db` is the antialiased choice for new sounds.  The renders were 48 kHz only, so the slew mapping at other rates is a guess.  The converter (the .acd importer) writes this chain.
 
 ## Measurements
 

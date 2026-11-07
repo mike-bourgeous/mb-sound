@@ -16,6 +16,8 @@
  * slots, table), and damped(x, out, from, to, state): Notes::Smoother's
  * adaptive, curve, and damped kernels (see mb_smooth.h).  slew(data, s, max_rise, max_fall, absolute):
  * Filter::LinearFollower's slew limiter (delay-time smoothing, clip_rate).
+ * inertia(x, out, first, lag, rate, substeps, state): GraphNode::Inertia's
+ * acceleration-limited follower (the DirectX Distortion's "slew").
  *
  * The Ruby mirrors (Notes::Smoother.smooth_ruby and the others) give exactly the same
  * samples (specs check it), so keep the operations identical; built with
@@ -198,6 +200,90 @@ static VALUE ruby_slew(VALUE self, VALUE data, VALUE s_v, VALUE rise_v, VALUE fa
 	return DBL2NUM(s);
 }
 
+/*
+ * inertia(x, out, first, lag, rate, substeps, state): GraphNode::Inertia,
+ * a deadbeat second-order follower whose change of velocity per substep is
+ * clamped to +-rate (full-scale units), run +substeps+ times per sample:
+ *   d = clamp((u - y) - v, -rate, rate); v += d; y += v
+ * for substep inputs u from a (the first substep's input) to x[i] (the
+ * last), linearly between them (k / (substeps - 1)); out[i] = y after the
+ * last.  a is +first+[i] (an SFloat at least as long as x, or nil for x
+ * itself) with +lag+ 0, or the previous sample of it with +lag+ 1 (from
+ * +state+ at the buffer's start).  Unclamped, y lands on u in one substep,
+ * so slow and quiet signals pass exactly; fast loud ones overshoot into
+ * limit cycles.  +rate+ is a signal input (a Numeric or an NArray read as
+ * float32), taken as 0 below 0 (or NaN).  +state+ is a DFloat [y, v,
+ * previous first-substep source], updated in place.  Double precision
+ * (the limit cycles are chaotic: float32 parts from it audibly in nulls).
+ * Mirror: GraphNode::Inertia.process_ruby, the same operations.
+ */
+static VALUE ruby_inertia(VALUE self, VALUE x, VALUE out, VALUE first, VALUE lag_v, VALUE rate, VALUE substeps_v, VALUE state)
+{
+	size_t length = check_array(x, numo_cSFloat, 0, "The input");
+	if (check_array(out, numo_cSFloat, 0, "The output") != length) {
+		rb_raise(rb_eArgError, "The output must have as many values as the input");
+	}
+	const float *fp = NULL;
+	if (!NIL_P(first)) {
+		check_array(first, numo_cSFloat, length, "The first-substep input");
+		fp = (const float *)(nary_get_pointer_for_read(first) + nary_get_offset(first));
+	}
+	check_array(state, numo_cDFloat, 3, "The state");
+	rb_check_frozen(out);
+	rb_check_frozen(state);
+	long substeps = NUM2LONG(substeps_v);
+	if (substeps < 1 || substeps > 1024) {
+		rb_raise(rb_eArgError, "Substeps must be 1 to 1024 (got %ld)", substeps);
+	}
+	int lag = NUM2INT(lag_v);
+	if (lag != 0 && lag != 1) {
+		rb_raise(rb_eArgError, "The lag must be 0 or 1 (got %d)", lag);
+	}
+	struct mb_signal r;
+	mb_signal_input(&rate, length, "The rate", &r);
+
+	double *st = dfloat_ptr(state);
+	double y = st[0], v = st[1], prev = st[2];
+	const float *xp = (const float *)(nary_get_pointer_for_read(x) + nary_get_offset(x));
+	float *op = mb_sfloat_ptr(out);
+	double last = (double)(substeps - 1);
+
+	for (size_t i = 0; i < length; i++) {
+		double xn = xp[i];
+		double src = fp ? (double)fp[i] : xn;
+		double a = lag ? prev : src;
+		prev = src;
+		double aa = mb_signal_at(&r, i);
+		if (!(aa > 0)) {
+			aa = 0;
+		}
+		for (long k = 0; k < substeps; k++) {
+			double u = k == substeps - 1 ? xn : (k == 0 ? a : a + (xn - a) * (double)k / last);
+			double d = (u - y) - v;
+			if (d > aa) {
+				d = aa;
+			} else if (d < -aa) {
+				d = -aa;
+			}
+			v += d;
+			y += v;
+		}
+		op[i] = (float)y;
+	}
+
+	st[0] = y;
+	st[1] = v;
+	st[2] = prev;
+
+	RB_GC_GUARD(x);
+	RB_GC_GUARD(out);
+	RB_GC_GUARD(first);
+	RB_GC_GUARD(rate);
+	RB_GC_GUARD(state);
+
+	return out;
+}
+
 // reset_run(x, out, state, ring1, ring2, reset): Notes::Smoother over all
 // of x into out (SFloat) with the kernel the state's length picks, jumping
 // to the input at every nonzero sample of +reset+ (an SFloat at least as
@@ -249,4 +335,5 @@ void Init_fast_control(void)
 	rb_define_module_function(fast_control, "damped", ruby_damped, 5);
 	rb_define_module_function(fast_control, "slew", ruby_slew, 5);
 	rb_define_module_function(fast_control, "reset_run", ruby_reset_run, 6);
+	rb_define_module_function(fast_control, "inertia", ruby_inertia, 7);
 }

@@ -212,9 +212,10 @@ module MB
         sample at a time in C, the FDN reverb with presets, the Juno chorus,
         and antialiased shapers, among them `shape_db`: transfer curves
         drawn in dB, per sample, with presets (`L.fx.shape_db`: :soft_knee,
-        :fuzz, :fold_back, :gate, :asymmetric).
+        :fuzz, :fold_back, :gate, :asymmetric), and `inertia`, an
+        acceleration-limited follower whose limit cycles chirp.
       TEXT
-      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :chorus, :softclip, :clip, :shape_db, :decimate, :quantize, :ease, :oversample, :ring
+      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :chorus, :softclip, :clip, :shape_db, :inertia, :decimate, :quantize, :ease, :oversample, :ring
       note :delays, :feedback_loops, :reverbs, :chorus
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do

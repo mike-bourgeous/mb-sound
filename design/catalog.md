@@ -52,6 +52,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `bandpass_series(fundamental_hz, count:, ratio:, ...)` Bandpass filters in parallel at the harmonics of fundamental_hz
 - `hilbert_iir(sample_rate:)` A complex analytic signal from an IIR phase difference network (Hilbert)
 - `clip_rate(max_rise, max_fall, reset:, sample_rate:)` Limits this node's slope to max_rise and max_fall units per second
+- `inertia(rate, substeps:, mode:)` Follows this node with its acceleration limited (GraphNode::Inertia)
 - `smooth(length, reset:, curve:, ...)` Smooths this node over length with an S-curve step (Filter::Smooth)
 
 ### Distortion and shaping
