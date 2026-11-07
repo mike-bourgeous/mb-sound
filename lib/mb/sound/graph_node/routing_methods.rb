@@ -85,11 +85,11 @@ module MB
           Length::Seconds.new(self)
         end
 
-        # This param or knob (a graph document's param, a script's named
-        # Constant, a track's knob), read while the graph builds, as a
-        # musical length of that many bars of the current transport (a
-        # Duration, like Numeric#bars), for settings that take a Duration,
-        # such as a tempo LFO's rate: `v.lfo(lfo_rate.bars)`.  The Duration
+        # This param or knob, read while building, as a Duration in bars.
+        # A graph document's param, a script's named Constant, or a track's
+        # knob, read as that many bars of the current transport (like
+        # Numeric#bars), for settings that take a Duration, such as a tempo
+        # LFO's rate: `v.lfo(lfo_rate.bars)`.  The Duration
         # remembers where it came from, so graph export prints
         # `lfo_rate.bars` and a saved graph keeps the param.  Read once
         # (GraphNode.build_value): on a track, turning the knob rebuilds
