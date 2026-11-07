@@ -6,7 +6,7 @@
 
 ## Quick reference
 
-- Graph filters: `node.filter(:lowpass, cutoff:, quality:)` (an SVF; `structure: :biquad` for the direct form), `peq`, `sig.lp4(cutoff, resonance:)`, `sig.diode(...)`, `v.reso(...)` in voices, `sig.formant(:a, :o, morph:)`.
+- Graph filters: `node.filter(:lowpass, cutoff:, quality:)` (an SVF; `structure: :biquad` for the direct form), `peq`, `sig.lp4(cutoff, resonance:)`, `sig.diode(...)`, `v.reso(...)` in voices, `sig.formant(:a, :o, morph:, voice:, shift:, width:)`.
 - One-poles: `filter(:lowpass1p, cutoff:)`, `:highpass1p`, `filter(:highshelf1p, cutoff:, gain: 6.db)`, `:lowshelf1p` (no quality; `Filter::SVF::FIRST_ORDER_TYPES`).  No cramping near Nyquist: `filter(:lowpass, cutoff: 15000, quality: 4, decramp: true)` (`Filter::SVF::DECRAMP_TYPES`; off by default).
 - A lowpass on lp4's knob at either slope: `filter(:lowpass, cutoff:, resonance:, slope: 12 | 24)` (12, the default: an SVF at `Filter::FourPole.resonance_to_quality(r)`; 24: exactly `lp4(cutoff, resonance:)`; slope read when the graph builds).
 - Code `lib/mb/sound/filter/` (`#process`/`#reset`, `Filter::Cookbook` designs); spec `spec/lib/mb/sound/filter/svf_spec.rb` and its neighbors; help `help :filters`.
