@@ -140,6 +140,15 @@ RSpec.describe('session fuzzing') do
         'at_bar(2, beat: 3) { launch :t1 }',
       ], 3,
     ],
+    # (fix-warm-deadlock-1107: batch 18's soak hung on seed 766010; the
+    # cue's warm-up, joined by the scheduled block holding the render
+    # lock, took the lock to destroy its copy's branch on a live Tee)
+    'a cue of a patch track warmed in a scheduled block (seed 766010)' => [
+      :warm, ['bpm 150'], [
+        'track :t2, :dnb_sub, q: 1',
+        'at_bar(1) { cue :t2, seq(A4, C5).n8.loop }',
+      ], 1,
+    ],
     # (omnibus16: generative-g4's FUZZ_BASE=41 FUZZ=150 seeds 52, 82, 127;
     # a render's end bar under a followed tempo LFO came from the tempo at
     # its last buffer's start, 1-2 frames off at 367-frame buffers)
