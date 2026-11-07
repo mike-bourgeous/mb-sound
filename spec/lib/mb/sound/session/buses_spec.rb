@@ -349,6 +349,63 @@ RSpec.describe(MB::Sound::Session::Buses) do
       end
     end
 
+    # (fix-bufsize-1107, SessionFuzz seed 611891: a reader bound by a
+    # block run ahead of its time woke the held kit on the buffer after the
+    # bind, so the kit chased its grid from a frame that depended on the
+    # buffer size and on when the block ran)
+    it 'wakes a held source for a reader on the frame the reader starts, not when it was added', render_budget: { seconds: 70, reason: 'thirteen 2.5 s renders' } do
+      # held from 1/4 to 7/8 of bar 1 (off sample positions); the reader
+      # lands at 3/5 + 1/9600 (57600.01) while held, or at 9/8 + 1/9600 after
+      sides = { kit: 'x...x...x...x...', low_tom: '..x...x...x...x.', cowbell: '.x...x...x...x..' }
+      play = lambda do |sizes, reader_at, add_at, stop_at = nil|
+        MB::Sound.seed(1) # (the kit draws its seeds as it builds)
+        s = new_session
+        MB::Sound::Session.with_context(session: s) do
+          MB::Sound.track(:drums) { |kit| MB::Sound.tr808(kit) * 0.5 }
+          MB::Sound.bg(:drums, MB::Sound.grid(16, kick: sides[:kit], low_tom: sides[:low_tom], cowbell: sides[:cowbell]).loop, on: :now)
+          s.hold(:drums, start_time: 1/4r + 1/960_000r)
+          s.unhold(:drums, start_time: 7/8r + 1/960_000r)
+        end
+        out = []
+        done = 0
+        sizes.cycle do |n|
+          break if done >= 240_000
+          if reader_at && add_at && done >= add_at
+            MB::Sound::Session.with_context(session: s) { s.add(0.2.constant.duck(:drums, only: :kick, amount: -12.db), name: :ducked, start_time: reader_at) }
+            s.remove(:ducked, time: stop_at) if stop_at
+            add_at = nil
+          end
+          n = [n, 240_000 - done].min
+          out << s.process_buffer(n)[0].dup
+          done += n
+        end
+        s.close
+        SpecBuffers.join(out)
+      end
+
+      while_held = 3/5r + 1/9600r
+      after_unhold = 9/8r + 1/9600r
+      a = play.([800], while_held, 30_000)
+      expect(a[90_000...110_000].abs.max).to be > 0.1
+      expect(play.([800], while_held, 50_000)).to eq(a)
+      [[367, 368], [64], [799]].each do |sizes|
+        expect(play.(sizes, while_held, 30_000)).to eq(a), "#{sizes.join('/')}-frame buffers"
+      end
+
+      # Landing after the unhold: nothing before the landing differs from
+      # the song without the reader, wherever the add ran
+      plain = play.([800], nil, nil)
+      [[[800], 30_000], [[367, 368], 30_000], [[800], 50_000], [[64], 70_000]].each do |sizes, add_at|
+        b = play.(sizes, after_unhold, add_at)
+        expect((b[0...108_000] - plain[0...108_000]).abs.max).to be < 1e-6, "#{sizes.join('/')}-frame buffers, added at #{add_at}"
+      end
+
+      # A reader that played before the hold and stopped while held: the
+      # source renders on while muted (readers stay bound), at any size
+      c = play.([800], 1/8r, 0, 1/2r + 1/9600r)
+      expect(play.([367, 368], 1/8r, 0, 1/2r + 1/9600r)).to eq(c)
+    end
+
     it 'keeps ducking while the pad is soloed (a source a reader reads renders while muted)' do
       kick_graph = -> { MB::Sound.grid(4, 'x...').loop.trigger.ping(50, decay: 0.3) }
       ref = new_session

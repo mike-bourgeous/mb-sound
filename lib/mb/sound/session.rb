@@ -1767,6 +1767,13 @@ module MB
       def keep_stopped(p)
         end_ring(p)
         return unless p.keep
+        # A player started under the name since supersedes it, as #add_now
+        # drops a kept one when it starts one (fix-bufsize-1107: a stop
+        # landing inside a span retired its player after the span's start
+        # had already started the relaunch, so at 367 frames the stopped
+        # player was kept beside the one playing, and later commands
+        # found it; SessionFuzz seed 394532)
+        return if @players.each_value.any? { |o| o.name == p.name && o.serial > p.serial }
         @stopped.delete(p.name)
         @stopped[p.name] = p
       end
@@ -1972,9 +1979,17 @@ module MB
         # A muted player has nothing to ring out
         return retire(p, keep: p.keep) if ringing && p.ring.stop_frame && (p.asleep || (p.strip_level <= 0 && p.strip_ramp.nil?))
 
-        # A player that a sidechain reads keeps rendering while muted (see
-        # Buses#bus_source?), waking here if it slept before
-        sidechained = @routed_span && bus_source?(p.name)
+        # A player that a sidechain reads keeps rendering while muted, from
+        # the frame its first reader reads it (Buses#bus_read_from: a
+        # reader bound ahead of its graph's start doesn't count before
+        # then), waking here if it slept before
+        sidechained = false
+        read_from = nil
+        if @routed_span && bus_source?(p.name)
+          read_from = bus_read_from(p.name, from, to, per_sample, offset)
+          read_from = nil if read_from && read_from >= offset + frames
+          sidechained = !read_from.nil? && read_from <= offset
+        end
         if sidechained && p.asleep
           wake_pos = Sequence::Transport.position_at(from, offset, per_sample)
           p.timeline_nodes.each { |n| n.start_at(wake_pos, origin: p.start, launch: p.launch, transport: @transport) }
@@ -1982,9 +1997,11 @@ module MB
         end
 
         # Sleeping (muted) players aren't rendered until their unmute ramp
-        # starts; then their clips catch up with the timeline
+        # starts or a reader starts reading them (on that frame); then their
+        # clips catch up with the timeline
         if !sidechained && (p.asleep || (p.strip_level <= 0 && p.strip_ramp.nil?))
           wake = p.strip_ramp && p.strip_ramp.to > 0 ? MB::M.max(p.strip_ramp.start - base, offset) : nil
+          wake = read_from if read_from && (wake.nil? || read_from < wake)
           if wake.nil? || wake >= offset + frames
             p.asleep = true
             fade_ramp(p, base + offset, frames) # keeps fades moving while asleep
@@ -2002,6 +2019,7 @@ module MB
           frames -= wake - offset
           offset = wake
         end
+        sidechained ||= !read_from.nil?
 
         # A mute ramp ending in this buffer: the graph stops on the ramp's
         # last frame (not the end of the buffer), so free-running
