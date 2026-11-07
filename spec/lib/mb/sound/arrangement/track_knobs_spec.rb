@@ -40,7 +40,7 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
   # same sound at their defaults: bin/save_presets.rb --check and the
   # renders against master-ai's documents).
   CURATED = {
-    dnb_reese: %i[cutoff resonance drive glide lfo_depth lfo_bars], dnb_sub: %i[cutoff release], dnb_neuro: %i[cutoff decay grit],
+    dnb_reese: %i[cutoff resonance drive glide lfo_depth lfo_bars slope low_cut], dnb_sub: %i[cutoff release], dnb_neuro: %i[cutoff decay grit],
     dnb_pad: %i[cutoff attack release], dnb_pluck: %i[cutoff decay echo], dnb_boom: %i[decay drop],
     jungle_breaks: %i[cutoff grit], jungle_sub: %i[release], jungle_reese: %i[glide release], jungle_keys: %i[decay],
     jungle_pad: %i[cutoff attack release], jungle_flute: %i[glide attack echo],
@@ -69,10 +69,11 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
       clip = n.to_s.match?(/drum|beat|perc/) ? DRUM_GRID : BASS_RIFF
       _, *ref = run(->(_s) { MB::Sound.track(:t) { |c| MB::Sound.preset(n, midi: c, **defaults) }; MB::Sound.bg(:t, clip) }, buffers: 30)
       s, *got = run(->(_s) { MB::Sound.track(:t, n); MB::Sound.bg(:t, clip) }, buffers: 30)
-      expect(s.knobs.keys).to eq(defaults.keys.map { |k| MB::Sound::Session::Name.param(:t, k) })
+      knobbed = defaults.keys.select { |k| doc.declarations[k].numeric? } # (choice params, dnb_reese's slope, are given, not knobs)
+      expect(s.knobs.keys).to eq(knobbed.map { |k| MB::Sound::Session::Name.param(:t, k) })
       expect(got).to eq(ref)
       expect(ref[0].abs.max).to be > 0.001
-      expect(s.knobs.values.map(&:value)).to eq(doc.declarations.values_at(*defaults.keys).map { |p| MB::Sound::Param.magnitude(p.default).to_f })
+      expect(s.knobs.values.map(&:value)).to eq(doc.declarations.values_at(*knobbed).map { |p| MB::Sound::Param.magnitude(p.default).to_f })
     end
   end
 
@@ -149,7 +150,7 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
       MB::Sound.preset(:funk_bass, midi: BASS_RIFF) # (a graph nothing plays)
       MB::Sound.bg(:a, BASS_RIFF)
     }, buffers: 4)
-    expect(s.knobs.keys).to contain_exactly(:cut, :"a/resonance", :"pad/resonance", :"pad/glide", :"pad/lfo_depth", :"pad/lfo_bars")
+    expect(s.knobs.keys).to contain_exactly(:cut, :"a/resonance", :"pad/resonance", :"pad/glide", :"pad/lfo_depth", :"pad/lfo_bars", :"pad/low_cut")
   end
 
   # bg presets get param knobs like tracks (library-2; the maintainer,
@@ -164,6 +165,7 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
       expect(got).to eq(ref)
       expect(ref[0].abs.max).to be > 0.001
       build = n == :init ? %i[sync] : [] # (init's sync chooses the graph's structure: a build knob on tracks, a number here)
+      build += defaults.keys.reject { |k| doc.declarations[k].numeric? } # (choice params: dnb_reese's slope)
       expect(s.knobs.keys).to eq((defaults.keys - build).map { |k| MB::Sound::Session::Name.param(:pad, k) })
     end
   end

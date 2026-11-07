@@ -150,8 +150,63 @@ RSpec.describe(MB::Sound::GraphNode::FourPole, :check_shared) do
 
     it 'rejects gain for four-pole filters and resonance for others' do
       expect { saw.filter(:lp4, cutoff: 500, gain: 4) }.to raise_error(ArgumentError, /gain/)
-      expect { saw.filter(:lowpass, cutoff: 500, resonance: 0.5) }.to raise_error(ArgumentError, /resonance/)
+      expect { saw.filter(:highpass, cutoff: 500, resonance: 0.5) }.to raise_error(ArgumentError, /resonance/)
       expect { saw.filter(:lp4) }.to raise_error(ArgumentError, /Cutoff/)
+    end
+
+    describe ':lowpass with lp4\'s resonance and slope: (reese-slope-1)' do
+      let(:fp) { MB::Sound::Filter::FourPole }
+
+      it 'maps lp4\'s resonance to the 2-pole quality with lp4\'s gain at the cutoff (the inverse of quality_to_resonance)' do
+        expect(fp.resonance_to_quality(0)).to be_within(1e-9).of(0.5)
+        { 0.15 => 0.58, 0.2 => 0.89, 0.25 => 1.56, 0.5 => 5.28 }.each do |r, q|
+          expect(fp.resonance_to_quality(r)).to be_within(0.01).of(q), r.to_s
+        end
+        (12..100).each { |i| expect(fp.quality_to_resonance(fp.resonance_to_quality(i / 100.0))).to be_within(1e-4).of(i / 100.0) }
+        (1..20).each { |i| expect(fp.resonance_to_quality(fp.quality_to_resonance(i))).to be_within(i * 1e-3).of(i) }
+        expect(fp.resonance_to_quality(0.4, tuning: :hardware)).to be_within(1e-12).of(196**0.4 / 4)
+        expect(fp.resonance_to_quality(Numo::SFloat[0, 0.25, 0.5]).to_a).to eq([0, 0.25, 0.5].map { |r| fp.resonance_to_quality(r).to_f }.map { |q| Numo::SFloat[q][0] })
+
+        # lp4's response at its cutoff matches the 2-pole's (q) at every resonance
+        [0, 0.15, 0.25, 0.5, 0.8].each do |r|
+          f = fp.new(cutoff: 500, resonance: r)
+          at_cutoff = f.response(2 * Math::PI * 500 / 48000).abs / f.response(0).abs
+          expect(at_cutoff).to be_within(0.005 * at_cutoff).of(fp.resonance_to_quality(r)), r.to_s
+        end
+      end
+
+      it 'builds an SVF lowpass at the mapped quality, from a number or a node' do
+        node = saw.filter(:lowpass, cutoff: 900, resonance: 0.25)
+        expect(node).to be_a(MB::Sound::Filter::SampleWrapper)
+        plain = 110.hz.saw.filter(:lowpass, cutoff: 900, quality: fp.resonance_to_quality(0.25))
+        expect(node.sample(800)).to eq(plain.sample(800))
+
+        knob = 0.25.constant.named('res')
+        moving = 110.hz.saw.filter(:lowpass, cutoff: 900, resonance: knob)
+        q = MB::Sound::GraphNode::FourPole.resonance_quality(0.3.constant)
+        expect(q).to be_a(MB::Sound::GraphNode::QualityResonance)
+        expect(q.sample(4).to_a.map { |v| v.round(4) }).to eq([fp.resonance_to_quality(0.3).round(4)] * 4)
+        expect((moving.sample(800) - 110.hz.saw.filter(:lowpass, cutoff: 900, resonance: 0.25).sample(800)).abs.max).to be < 1e-5
+        expect { saw.filter(:lowpass, cutoff: 900, resonance: 0.2, quality: 1) }.to raise_error(ArgumentError, /not both/)
+      end
+
+      it 'picks lp4 (exactly) with slope: 24 and the 2-pole with 12, read from a number, param, or knob when it builds' do
+        expect(saw.filter(:lowpass, cutoff: 900, resonance: 0.3, slope: 24)).to be_a(MB::Sound::GraphNode::FourPole)
+        lp4 = 110.hz.saw.lp4(900, resonance: 0.3).sample(2000).dup
+        expect(110.hz.saw.filter(:lowpass, cutoff: 900, resonance: 0.3, slope: 24.constant.named('slope')).sample(2000)).to eq(lp4)
+        expect(saw.filter(:lowpass, cutoff: 900, resonance: 0.3, slope: 12)).to be_a(MB::Sound::Filter::SampleWrapper)
+        expect(saw.filter(:lowpass, cutoff: 900, resonance: 0.3, slope: 12.0.constant)).to be_a(MB::Sound::Filter::SampleWrapper)
+
+        expect { saw.filter(:lowpass, cutoff: 900, slope: 18) }.to raise_error(ArgumentError, /12 or 24/)
+        expect { saw.filter(:highpass, cutoff: 900, slope: 24) }.to raise_error(ArgumentError, /:lowpass/)
+        expect { saw.filter(:lowpass, cutoff: 900, slope: 110.hz.saw) }.to raise_error(ArgumentError, /builds/)
+      end
+
+      it 'prints and loads back as filter(:lowpass, ..., slope:)' do
+        g = 110.hz.saw.filter(:lowpass, cutoff: 900, resonance: 0.2, slope: 12)
+        expect(g.to_ruby).to include('filter(:lowpass, cutoff: 900, resonance: 0.2, slope: 12)')
+        expect(MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g)).sample(800)).to eq(g.sample(800))
+      end
     end
 
     it 'wraps a Filter::FourPole object at its cutoff and resonance' do

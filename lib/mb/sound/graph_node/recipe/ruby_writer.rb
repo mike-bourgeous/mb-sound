@@ -1298,9 +1298,15 @@ module MB
           end
 
           # The Sequence::NodeDuration of tempo-synced Pitch +p+
-          # (`lfo_bars.bars.hz`; GraphNode#bars), else nil.
+          # (`lfo_bars.bars.hz`; GraphNode#bars), else nil.  Never calls a
+          # Notes pitch's #freq: it builds the frequency node on first use
+          # (Notes#frequency_for), so printing a graph would change the
+          # samples it renders afterward (reese-slope-1: batch 18's smoke
+          # failure, stereo_graph_synth_example.rb, 1e-3 off after
+          # printing); tempo pitches are plain Pitches anyway.
           def tempo_origin(p)
             return nil unless p.is_a?(MB::Sound::Pitch) && !p.constant?
+            return nil if p.is_a?(MB::Sound::Notes::NotePitch)
             src = p.freq
             src.is_a?(MB::Sound::Sequence::TempoNode) && src.mode == :hz && !src.freewheel? ? src.origin : nil
           end

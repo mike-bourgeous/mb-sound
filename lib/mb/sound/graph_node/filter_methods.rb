@@ -58,9 +58,32 @@ module MB
         #     # CEM3379-style 4-pole lowpass (see #lp4); takes resonance: 0..1
         #     MB::Sound.play 110.hz.saw.filter(:lp4, cutoff: 0.2.hz.lfo.at(300..3000), resonance: 0.47)
         #
+        #     # A lowpass taking lp4's resonance knob at 12 dB/octave (a 2-pole)
+        #     # or 24 (lp4), chosen when the graph builds
+        #     MB::Sound.play 55.hz.saw.filter(:lowpass, cutoff: 900, resonance: 0.25, slope: 12)
+        #
+        # :lowpass also takes lp4's +resonance:+ (0..1; reese-slope-1,
+        # 2026-11-07): the 2-pole's quality is the one whose gain at the
+        # cutoff is lp4's at that resonance (Filter::FourPole.resonance_to_quality:
+        # 0 to about 0.1 gives Q 0.5, -6 dB at the cutoff like lp4 there; 0.25
+        # gives 1.57, 0.5 gives 5.3), a number or a node (a param or knob
+        # moves it live).  +slope:+ (12 or 24 dB/octave, :lowpass only; a
+        # number, param, or knob read once while the graph builds, like
+        # Tone#sync's +enabled:+: on a track, turning it rebuilds the track)
+        # picks the 2-pole (12, the default) or lp4 (24: exactly
+        # `lp4(cutoff, resonance:)`).
+        #
         # TODO: support SampleWrapper inputs argument
-        def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, resonance: nil, structure: nil, in_place: false)
+        def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, resonance: nil, slope: nil, structure: nil, in_place: false)
           f = filter_or_type
+
+          unless slope.nil?
+            raise ArgumentError, "slope: is for :lowpass (got #{filter_or_type.inspect})" unless f == :lowpass
+
+            s = GraphNode.build_value(slope)
+            raise ArgumentError, "slope: is 12 or 24 (dB/octave; got #{s.inspect})" unless s == 12 || s == 24
+            f = :lp4 if s == 24
+          end
 
           if FOUR_POLE_TYPES.include?(f)
             raise ArgumentError, 'Cutoff frequency must be given when creating a filter by type' if cutoff.nil?
@@ -68,7 +91,13 @@ module MB
             raise ArgumentError, 'Four-pole filters have no structure: option' if structure
             return lp4(cutoff, resonance: resonance, quality: quality, mode: f == :four_pole ? :lp4 : f)
           end
-          raise ArgumentError, "Only four-pole filters (#{FOUR_POLE_TYPES.join(', ')}) take resonance:" if resonance
+
+          if resonance
+            raise ArgumentError, "Only four-pole filters (#{FOUR_POLE_TYPES.join(', ')}) and :lowpass take resonance:" unless f == :lowpass
+            raise ArgumentError, 'Give :lowpass resonance: or quality:, not both' if quality
+
+            quality = MB::Sound::GraphNode::FourPole.resonance_quality(resonance)
+          end
 
           f = f.hz if f.is_a?(Numeric)
           f = f.lowpass if f.is_a?(Tone) || f.is_a?(Pitch)

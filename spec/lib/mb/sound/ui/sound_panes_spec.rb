@@ -371,7 +371,7 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       info = g.call(@session, { track: :bass })
       expect(info.tracks).to eq(%i[bass pad])
       # (:cut, which the patch gives the preset, and the preset's other params as the track's knobs: Arrangement::TrackKnobs)
-      expect(info.knobs).to contain_exactly(:cut, :"bass/resonance", :"bass/drive", :"bass/glide", :"bass/lfo_depth", :"bass/lfo_bars")
+      expect(info.knobs).to contain_exactly(:cut, :"bass/resonance", :"bass/drive", :"bass/glide", :"bass/lfo_depth", :"bass/lfo_bars", :"bass/low_cut")
       labels = info.nodes.map(&:label)
       expect(labels).to include('lp4', 'highpass', 'softclip')
       lp4 = info.nodes.find { |n| n.label == 'lp4' }
