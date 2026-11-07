@@ -815,7 +815,7 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 				p->st = (int)isvf;
 				struct svf_state *s = &svfs[isvf++];
 				s->type = o[7];
-				if (s->type < SVF_LOWPASS || s->type > SVF_BANDPASS_SKIRT) rb_raise(rb_eArgError, "Bad loop SVF type %d", s->type);
+				if (!mb_svf_type_valid(s->type)) rb_raise(rb_eArgError, "Bad loop SVF type %d", s->type);
 				double rate = sc[o[8]];
 				if (!(rate > 0) || !isfinite(rate)) rb_raise(rb_eArgError, "Bad loop SVF sample rate");
 				s->pi_over_rate = M_PI / rate;

@@ -44,6 +44,8 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 ### Filters and EQ
 
 - `filter(filter_or_type, cutoff:, quality:, ...)` Applies the given filter to this sample source or sample chain
+- `lp1/lowpass1(cutoff, response:)` A 6 dB/octave one-pole lowpass, -3 dB at the cutoff
+- `hp1/highpass1(cutoff, response:)` A 6 dB/octave one-pole highpass, -3 dB at the cutoff
 - `lp4/four_pole/lowpass4(cutoff, resonance:, quality:, ...)` A CEM3379-style 4-pole resonant lowpass (24 dB/octave; GraphNode::FourPole)
 - `diode/diode_ladder(cutoff, resonance:, ...)` A TB-303-style diode ladder lowpass: #lp4 with `mode: :diode`
 - `formant/vowel(*vowels, voice:, morph:, ...)` A formant filter (GraphNode::Formant): a bright source "says" a vowel

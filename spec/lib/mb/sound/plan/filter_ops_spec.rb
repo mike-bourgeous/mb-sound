@@ -10,15 +10,24 @@ RSpec.describe(MB::Sound::Plan, 'filter ops') do
   end
 
   describe 'SVF (Filter::SampleWrapper)' do
-    MB::Sound::Filter::SVF::FILTER_TYPE_IDS.each_key do |type|
-      it "matches #{type} with moving cutoff, quality, and gain inputs" do
+    svf = MB::Sound::Filter::SVF
+    (svf::FILTER_TYPES.map { |t| [t, false] } + svf::MATCHED_TYPES.map { |t| [t, true] }).each do |type, matched|
+      it "matches #{type}#{' (matched)' if matched} with moving cutoff, quality, and gain inputs" do
         r = plan_compare(check: :raise) {
           sig = src.new(seed: 1) * 0.8
-          sig.filter(type, cutoff: src.new(seed: 2, scale: 1500, offset: 2000), quality: src.new(seed: 3, scale: 2, offset: 2.5),
-                     gain: src.new(seed: 4, scale: 0.5, offset: 1.5))
+          quality = svf::FIRST_ORDER_TYPES.include?(type) ? nil : src.new(seed: 3, scale: 2, offset: 2.5)
+          sig.filter(type, cutoff: src.new(seed: 2, scale: 1500, offset: 2000), quality: quality,
+                     gain: src.new(seed: 4, scale: 0.5, offset: 1.5), response: matched ? :matched : nil)
         }
         expect(op_names(r)).to include(:FilterSvf)
       end
+    end
+
+    it 'matches matched-response lowpasses near Nyquist with constant parameters (filters-acd-1)' do
+      r = plan_compare(check: :raise) {
+        (src.new(seed: 5) * 1).filter(:lowpass, cutoff: 18000, quality: 5.44, response: :matched).filter(:highpass1p, cutoff: 30, response: :matched) * 1
+      }
+      expect(op_names(r).count(:FilterSvf)).to eq(2)
     end
 
     it 'matches with constant parameters and a numeric gain (params, a gain constant)' do

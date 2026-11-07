@@ -34,7 +34,7 @@ module MB
           end
 
           def expression
-            "svf_#{@filter.filter_type}(#{@a}, cutoff: #{@cutoff}, quality: #{@quality}#{@gain_input || @filter.gain ? ", gain: #{@gain}" : ''})"
+            "svf_#{@filter.filter_type}#{"_matched" if @filter.response_design == :matched}(#{@a}, cutoff: #{@cutoff}, quality: #{@quality}#{@gain_input || @filter.gain ? ", gain: #{@gain}" : ''})"
           end
 
           def opcode = :svf

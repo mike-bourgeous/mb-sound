@@ -516,6 +516,121 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
         expect(b.outputs.map { |o| o.base_filter.class }).to eq([MB::Sound::Filter::Cookbook] * 2)
       end
     end
+
+    # filters-acd-1 (2026-11-07)
+    context 'with first-order types' do
+      let(:noise) { MB::Sound.with_seed(2) { Numo::SFloat.cast(MB::Sound.noise.sample(48000)) } }
+      let(:input) { MB::Sound::ArrayInput.new(data: [noise]) }
+
+      it 'runs :lowpass1p and :highpass1p as SVFs, a cutoff number or node giving the same samples' do
+        f = input.filter(:lowpass1p, cutoff: 400)
+        expect(f.base_filter).to be_a(MB::Sound::Filter::SVF)
+        expect(f.base_filter.filter_type).to eq(:lowpass1p)
+        a = f.sample(48000).dup
+        expect(MB::Sound::ArrayInput.new(data: [noise]).filter(:lowpass1p, cutoff: 400.constant).sample(48000)).to eq(a)
+        expected = MB::Sound::Filter::SVF.new(:lowpass1p, 48000, 400).process(noise.dup)
+        expect(a).to eq(expected)
+        # the bilinear one-pole: Filter::FirstOrder's :lowpass within float32 rounding
+        fo = MB::Sound::Filter::FirstOrder.new(:lowpass, 48000, 400).process(noise.dup)
+        expect(20 * Math.log10((a - fo).abs.max / fo.abs.max)).to be < -100
+      end
+
+      it 'takes a moving cutoff' do
+        f = 110.hz.saw.filter(:highpass1p, cutoff: 0.5.hz.lfo.at(100..4000))
+        expect(f.sources[:cutoff]).to be_a(MB::Sound::GraphNode)
+        expect(f.sample(4800).isfinite.all?).to eq(true)
+      end
+
+      it 'makes 6 dB/octave shelves with gain: (x + highpass1p(x) * (G - 1) for a boost)' do
+        a = input.filter(:highshelf1p, cutoff: 1919, gain: 15.db).sample(48000).dup
+        hp = MB::Sound::ArrayInput.new(data: [noise]).filter(:highpass1p, cutoff: 1919).sample(48000)
+        b = noise + hp * (15.db.to_f - 1)
+        expect(20 * Math.log10((a - b).abs.max / b.abs.max)).to be < -100
+        low = MB::Sound::ArrayInput.new(data: [noise]).filter(:lowshelf1p, cutoff: 200, gain: 0.5.hz.lfo.at(0.25..4))
+        expect(low.sources[:gain]).to be_a(MB::Sound::GraphNode)
+        expect(low.sample(48000).isfinite.all?).to eq(true)
+      end
+
+      it 'raises for a quality, the biquad structure, or a missing shelf gain' do
+        expect { 110.hz.saw.filter(:lowpass1p, cutoff: 400, quality: 2) }.to raise_error(ArgumentError, /quality/)
+        expect { 110.hz.saw.filter(:lowpass1p, cutoff: 400, resonance: 0.2) }.to raise_error(ArgumentError, /quality/)
+        expect { 110.hz.saw.filter(:highpass1p, cutoff: 400, structure: :biquad) }.to raise_error(ArgumentError, /SVF/)
+        expect { 110.hz.saw.filter(:lowshelf1p, cutoff: 400) }.to raise_error(ArgumentError, /gain/)
+      end
+
+      it 'prints and loads back' do
+        g = 110.hz.saw.filter(:lowpass1p, cutoff: 0.5.hz.lfo.at(200..800)).filter(:highshelf1p, cutoff: 3000, gain: 6.db)
+        expect(g.to_ruby).to include('filter(:lowpass1p, cutoff: 0.5.hz.lfo.at(200..800))')
+        expect(g.to_ruby).to include('filter(:highshelf1p, cutoff: 3000, gain: 6.db)')
+        expect(MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g)).sample(800)).to eq(g.sample(800))
+      end
+    end
+
+    # filters-acd-1 (2026-11-07)
+    describe '#lp1 and #hp1' do
+      let(:noise) { MB::Sound.with_seed(4) { Numo::SFloat.cast(MB::Sound.noise.sample(4800)) } }
+
+      def input
+        MB::Sound::ArrayInput.new(data: [noise])
+      end
+
+      it 'are filter(:lowpass1p / :highpass1p, ...), with a Pitch cutoff as its frequency and response:' do
+        expect(input.lp1(800).sample(4800)).to eq(input.filter(:lowpass1p, cutoff: 800).sample(4800))
+        expect(input.lp1(800.hz).sample(4800)).to eq(input.filter(:lowpass1p, cutoff: 800).sample(4800))
+        expect(input.lowpass1(800).sample(4800)).to eq(input.filter(:lowpass1p, cutoff: 800).sample(4800))
+        expect(input.hp1(300, response: :matched).sample(4800)).to eq(input.filter(:highpass1p, cutoff: 300, response: :matched).sample(4800))
+        expect(input.highpass1(300).sample(4800)).to eq(input.filter(:highpass1p, cutoff: 300).sample(4800))
+        expect(input.lp1(0.5.hz.lfo.at(200..800)).sources[:cutoff]).to be_a(MB::Sound::GraphNode)
+      end
+
+      it 'print and load back as written' do
+        g = 110.hz.saw.lp1(800).hp1(0.5.hz.lfo.at(50..200), response: :matched)
+        expect(g.to_ruby).to include('110.hz.saw.lp1(800).hp1(0.5.hz.lfo.at(50..200), response: :matched)')
+        expect(MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g)).sample(800)).to eq(g.sample(800))
+      end
+    end
+
+    # filters-acd-1 (2026-11-07)
+    context 'with response: :matched' do
+      it 'builds the matched SVF design' do
+        f = 110.hz.saw.filter(:lowpass, cutoff: 15000, quality: 4, response: :matched)
+        expect(f.base_filter.response_design).to eq(:matched)
+        expect(f.base_filter.type_id).to eq(16)
+        expect(110.hz.saw.filter(:lowpass, cutoff: 15000, quality: 4).base_filter.response_design).to eq(:bilinear)
+        a = f.sample(4800).dup
+        expect(110.hz.saw.filter(:lowpass, cutoff: 15000.constant, quality: 4, response: :matched).sample(4800)).to eq(a)
+        expect(110.hz.saw.filter(:lowpass, cutoff: 15000, quality: 4).sample(4800)).not_to eq(a)
+      end
+
+      it 'takes lp4\'s resonance: on :lowpass and passes through channel bundles' do
+        expect(110.hz.saw.filter(:lowpass, cutoff: 9000, resonance: 0.3, response: :matched).base_filter.response_design).to eq(:matched)
+        b = MB::Sound.stereo(110.hz.saw, 220.hz.saw).filter(:highpass, cutoff: 500, response: :matched)
+        expect(b.outputs.map { |o| o.base_filter.response_design }).to eq([:matched, :matched])
+      end
+
+      it 'raises for types without a matched design, the biquad, lp4, and filter objects' do
+        expect { 110.hz.saw.filter(:peak, cutoff: 900, gain: 2, response: :matched) }.to raise_error(ArgumentError, /response/)
+        expect { 110.hz.saw.filter(:lowshelf1p, cutoff: 900, gain: 2, response: :matched) }.to raise_error(ArgumentError, /response/)
+        expect { 110.hz.saw.filter(:lowpass, cutoff: 900, structure: :biquad, response: :matched) }.to raise_error(ArgumentError, /biquad/)
+        expect { 110.hz.saw.filter(:lowpass, cutoff: 900, slope: 24, response: :matched) }.to raise_error(ArgumentError, /slope/)
+        expect { 110.hz.saw.filter(:lp4, cutoff: 900, response: :matched) }.to raise_error(ArgumentError, /response/)
+        expect { 110.hz.saw.filter(400.hz.lowpass, response: :matched) }.to raise_error(ArgumentError, /response/)
+      end
+
+      it 'takes response: :bilinear (the default, the same samples) and raises for other values' do
+        a = 110.hz.saw.filter(:lowpass, cutoff: 9000, quality: 2).sample(4800).dup
+        expect(110.hz.saw.filter(:lowpass, cutoff: 9000, quality: 2, response: :bilinear).sample(4800)).to eq(a)
+        expect(110.hz.saw.filter(:lowpass, cutoff: 9000, structure: :biquad, response: :bilinear).base_filter).to be_a(MB::Sound::Filter::Cookbook)
+        expect { 110.hz.saw.filter(:lowpass, cutoff: 9000, response: :analog) }.to raise_error(ArgumentError, /:bilinear or :matched/)
+        expect(MB::Sound::Filter::SVF::RESPONSES).to eq([:bilinear, :matched])
+      end
+
+      it 'prints and loads back' do
+        g = 110.hz.saw.filter(:bandpass, cutoff: 0.5.hz.lfo.at(5000..15000), quality: 3, response: :matched)
+        expect(g.to_ruby).to include('filter(:bandpass, cutoff: 0.5.hz.lfo.at(5000..15000), quality: 3, response: :matched)')
+        expect(MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g)).sample(800)).to eq(g.sample(800))
+      end
+    end
   end
 
   describe '#peq' do

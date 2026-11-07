@@ -36,7 +36,7 @@ module Catalog
   GROUPS = {
     'Synthesis and oscillators' => %i[tone freq phase_table wavetable waveshape ping resonate adsr],
     'Arithmetic and math' => %i[+ - * / ** coerce at abs aabs real imag arg floor ceil round log log2 log10 ring],
-    'Filters and EQ' => %i[filter lp4 diode formant peq peq_series bandpass_series hilbert_iir clip_rate inertia smooth],
+    'Filters and EQ' => %i[filter lp1 hp1 lp4 diode formant peq peq_series bandpass_series hilbert_iir clip_rate inertia smooth],
     'Distortion and shaping' => %i[softclip asoftclip clip aclip quantize aquantize decimate ease aease shape_db ashape_db sample_hold],
     'Delays, reverb, chorus, feedback' => %i[delay feedback_delay multitap haas ping_pong tape_echo reverb chorus feedback],
     'Dynamics, loudness, mastering' => %i[compress compand expand noise_gate limit duck squeeze bands mono_below ride master loudness_meter],

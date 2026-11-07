@@ -68,18 +68,32 @@ module GraphSweep
   end
 
   def self.svf_factories
-    MB::Sound::Filter::SVF::FILTER_TYPES.flat_map { |t|
-      gain = MB::Sound::Filter::SVF::GAIN_TYPES.include?(t)
+    svf = MB::Sound::Filter::SVF
+    svf::FILTER_TYPES.flat_map { |t|
+      gain = svf::GAIN_TYPES.include?(t)
+      fo = svf::FIRST_ORDER_TYPES.include?(t) # (no quality)
       [
-        ["filter(#{t.inspect}) constant", ->(c) { c.sig.filter(t, cutoff: 800, quality: 2, gain: gain ? 2.0 : nil) }],
-        ["filter(#{t.inspect}) modulated", ->(c) { c.sig.filter(t, cutoff: c.mod(200, 4000), quality: c.mod(0.5, 6, 3), gain: gain ? c.mod(0.5, 2, 5) : nil) }],
+        ["filter(#{t.inspect}) constant", ->(c) { c.sig.filter(t, cutoff: 800, quality: fo ? nil : 2, gain: gain ? 2.0 : nil) }],
+        ["filter(#{t.inspect}) modulated", ->(c) { c.sig.filter(t, cutoff: c.mod(200, 4000), quality: fo ? nil : c.mod(0.5, 6, 3), gain: gain ? c.mod(0.5, 2, 5) : nil) }],
         ["feedback filter(#{t.inspect}) constant", ->(c) {
-          c.sig.feedback { |fb, input| input + fb.delay(40.samples).filter(t, cutoff: 1200, quality: 1.5, gain: gain ? 1.5 : nil) * 0.4 }
+          c.sig.feedback { |fb, input| input + fb.delay(40.samples).filter(t, cutoff: 1200, quality: fo ? nil : 1.5, gain: gain ? 1.5 : nil) * 0.4 }
         }],
         ["feedback filter(#{t.inspect}) modulated", ->(c) {
           c.sig.feedback { |fb, input|
-            input + fb.delay(c.mod(20, 60, 2).samples).filter(t, cutoff: c.mod(300, 3000), quality: c.mod(0.6, 3, 4), gain: gain ? c.mod(0.5, 1.5) : nil).softclip * 0.5
+            input + fb.delay(c.mod(20, 60, 2).samples).filter(t, cutoff: c.mod(300, 3000), quality: fo ? nil : c.mod(0.6, 3, 4), gain: gain ? c.mod(0.5, 1.5) : nil).softclip * 0.5
           }
+        }],
+      ]
+    } + svf::MATCHED_TYPES.flat_map { |t|
+      # matched responses (filters-acd-1): cutoffs up to near Nyquist
+      gain = svf::GAIN_TYPES.include?(t)
+      fo = svf::FIRST_ORDER_TYPES.include?(t)
+      [
+        ["filter(#{t.inspect}, response: :matched) modulated", ->(c) {
+          c.sig.filter(t, cutoff: c.mod(200, 20000), quality: fo ? nil : c.mod(0.5, 6, 3), gain: gain ? c.mod(0.5, 2, 5) : nil, response: :matched)
+        }],
+        ["feedback filter(#{t.inspect}, response: :matched) constant", ->(c) {
+          c.sig.feedback { |fb, input| input + fb.delay(40.samples).filter(t, cutoff: 12000, quality: fo ? nil : 1.5, gain: gain ? 1.5 : nil, response: :matched) * 0.4 }
         }],
       ]
     }

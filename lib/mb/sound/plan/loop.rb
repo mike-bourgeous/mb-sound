@@ -125,7 +125,7 @@ module MB
             end
 
             def expression
-              "svf_#{@filter.filter_type}(#{@a}, cutoff: #{@cutoff}, quality: #{@quality}, gain: #{@gain})"
+              "svf_#{@filter.filter_type}#{"_matched" if @filter.response_design == :matched}(#{@a}, cutoff: #{@cutoff}, quality: #{@quality}, gain: #{@gain})"
             end
 
             def opcode = :svf
@@ -723,7 +723,7 @@ module MB
           # (#latency's moments count them as no latency, as here).  Other
           # filters keep their phase at 1 / T, so a short #delay comb through
           # a lowpass stays in tune as in the :pitch mode.
-          ECHO_WIRES = [:highpass, :bandpass, :bandpass_skirt].freeze
+          ECHO_WIRES = [:highpass, :bandpass, :bandpass_skirt, :highpass1p].freeze
 
           # Four-pole modes without gain at DC, wires in an echo loop's
           # response like ECHO_WIRES.
@@ -1103,13 +1103,16 @@ module MB
 
           # True when an SVF on the loop could have more gain above the
           # pitch than at it (anything but a lowpass with a quality up to
-          # 1 / sqrt(2), whose gain falls monotonically).
+          # 1 / sqrt(2) or a one-pole lowpass, whose gain falls
+          # monotonically).
           def harmonic_risk?(list, params, at, i)
             return true if uneven_filters?(list)
 
             list.each_with_index.any? { |e, k|
               next true if e[0] == :four_pole # (a resonant peak; no boosts with a four-pole on the loop)
               next false unless e[0] == :svf
+
+              next false if e[3].filter.filter_type == :lowpass1p
 
               e[3].filter.filter_type != :lowpass || at.call(params[k][1], i) > 0.7072
             }
@@ -1467,9 +1470,10 @@ module MB
           end
 
           # A lowpass SVF's group delay at DC is 1 / (2 g Q) samples (g =
-          # tan(pi fc / rate)); an allpass's twice that.  Other types count
-          # as no latency (their phase at the loop's low frequencies is
-          # small or their DC gain is zero).
+          # tan(pi fc / rate)); an allpass's twice that; a one-pole
+          # lowpass's 1 / (2 g).  Other types count as no latency (their
+          # phase at the loop's low frequencies is small or their DC gain
+          # is zero).  (Matched designs count as their bilinear ones.)
           def svf_latency(op, m, values)
             return m if m.equal?(ZERO)
 
@@ -1481,6 +1485,7 @@ module MB
             factor = case op.filter.filter_type
                      when :lowpass then 1.0
                      when :allpass then 2.0
+                     when :lowpass1p then q = 1.0; 1.0
                      else return m
                      end
             rate = op.filter.sample_rate.to_f
