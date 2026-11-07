@@ -4,8 +4,9 @@
 # parts launched mid-song match the same parts from bar 1, and warming
 # changes before they land doesn't change it either, nor do carrying
 # rebuilds of the tracks (what a bind does; carry-1).
-# Everyday: SEEDS seeds from a fixed base plus one from RSpec's seed;
-# FUZZ=N runs N seeds (the long mode), FUZZ_SEED=n one seed (a repro),
+# Everyday: 2 seeds from a fixed base plus one picked by RSpec's seed
+# from SessionFuzz::EVERYDAY_SEEDS (songs measured cheap, so the example's
+# time is bounded; fix-fuzz-1107); FUZZ=N runs N seeds (the long mode), FUZZ_SEED=n one seed (a repro),
 # FUZZ_BASE=n moves the fixed base.
 require_relative '../../../support/session_fuzz'
 
@@ -16,7 +17,8 @@ RSpec.describe('session fuzzing') do
     else
       base = Integer(ENV['FUZZ_BASE'] || 1)
       count = Integer(ENV['FUZZ'] || 2)
-      extra = ENV['FUZZ'] ? [] : [100_000 + (RSpec.configuration.seed.to_i * 7) % 900_000]
+      list = SessionFuzz::EVERYDAY_SEEDS
+      extra = ENV['FUZZ'] ? [] : [list[RSpec.configuration.seed.to_i % list.length]]
       (base...(base + count)).to_a + extra
     end
 
