@@ -318,7 +318,7 @@ module MB
           b = Numo::DFloat.cast(c)
           b[~(b >= MIN_COUNT)] = MIN_COUNT
           wnps = transport.whole_notes_per_second.to_f
-          seconds = (b * @duration.whole_notes.to_f) / wnps
+          seconds = TempoMap.seconds_for(b * @duration.whole_notes.to_f, wnps)
           d = @mode == :hz ? 1.0 / seconds : seconds
           lo = Numo::SFloat.cast(d * (1 - 4e-15))
           hi = Numo::SFloat.cast(d * (1 + 4e-15))
