@@ -373,7 +373,7 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
     it 'lets template knobs drive preset params and puts mono_below first in the master chain' do
       MB::Sound.knob(:cut, 600, range: 150..8000, curve: :exp)
       bass = genre[:dnb].patch(:bass, genre[:dnb].clips[:riff])
-      expect(bass.to_ruby).to include('lp4(knob(:cut)')
+      expect(bass.to_ruby).to include('filter(:lowpass, cutoff: knob(:cut)')
       master = MB::Sound::Genre.master_chain(MB::Sound.stereo(1.constant, 1.constant).mono_below(120), genre[:jungle].mix.master)
       expect(master.to_ruby).to include('mono_below(120).compress(')
     end
