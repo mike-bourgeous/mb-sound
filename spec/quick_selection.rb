@@ -82,7 +82,10 @@ module QuickSelection
     [%r{\Aspec/valgrind/}, %w[spec/valgrind/memcheck_selection_spec.rb]],
     [%r{\Aspec/support/plan_helpers\.rb\z}, %w[spec/lib/mb/sound/plan]],
     [%r{\Aspec/support/(fork_script|smoke_runs|subprocess_\w+)\.rb\z|\Aspec/subprocess_\w+\.rb\z}, %w[spec/bin]],
-    [%r{\Apresets/}, %w[spec/lib/mb/sound/library_spec.rb spec/bin/save_presets_spec.rb]],
+    # (param_guard_spec checks every presets/ param line; track_knobs_spec
+    # the curated knobs each preset ships: reese-slope-1's choice param
+    # passed spec:quick and failed the merge gate)
+    [%r{\Apresets/}, %w[spec/lib/mb/sound/library_spec.rb spec/bin/save_presets_spec.rb spec/lib/mb/sound/param_guard_spec.rb spec/lib/mb/sound/arrangement/track_knobs_spec.rb]],
     [%r{\Agolden/}, %w[spec/lib/mb/sound/sound_guard_spec.rb]],
     [%r{\Agems/mb-term/}, %w[spec/lib/mb/sound/ui/term_integration_spec.rb]],
   ].freeze
