@@ -183,6 +183,12 @@ module MB
           mixed(ChannelMixer::Width.new(@outputs, amount: amount))
         end
 
+        # Follows every channel with its acceleration limited (see
+        # GraphNode#inertia; :hardware mode reads the neighboring channels).
+        def inertia(rate, substeps: 2, mode: :musical)
+          Inertia.build(self, rate, substeps: substeps, mode: mode)
+        end
+
         # Runs every channel into one multichannel reverb (one reverb input
         # per channel), returning a bundle of its outputs: as many as there
         # are channels unless +:output_channels+ is given (a single output

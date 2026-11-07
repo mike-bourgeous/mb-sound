@@ -130,7 +130,7 @@ module MB
         :started, :slow_warned, :loads, :gain, :ramp, :fade_in, :fade_out, :fading_out, :keep,
         :strip_level, :strip_ramp, :asleep, :ring, :asleep_reads, :read_to, :cpu, :cue, :waited,
         :level_buf, # ([value, frozen SFloat] of a steady level; Faders#fader_levels)
-        :carried, # ([start, launch] of the player a carrying rebuild replaced; see #render_player)
+        :carried, # ([start, launch] of the player a carrying rebuild replaced, and the transport's seek generation where it landed; see #render_player)
         :handed, # (true for a player whose state a carrying rebuild took: it stops on the swap frame; see #remove_now)
         :clip, # (the clip a track's patch was built for, or nil; see #built_clip)
         :ends_after, # (nodes whose ending starts its quiet ring-out; Tails#end_after)
@@ -140,6 +140,22 @@ module MB
         # True unless this player is being replaced or stopped.
         def current?
           stop_at.nil?
+        end
+
+        # True if this player has played a frame, or is a carrying
+        # rebuild's player (#add_now), which goes on as the one it replaced
+        # from the swap frame: decisions about what the listener heard of a
+        # name (whether a stop fades it, a replacement spills it, a level
+        # glides) read this, never +started+ alone, so an event landing on
+        # the swap frame, before the carried player's first sample, does
+        # what it would have done to the replaced player (fix-fuzz-1107,
+        # SessionFuzz seed 327738: a level landing with a rebuild cut
+        # instead of gliding).  +started+ stays for the render mechanics
+        # (starting timeline nodes, catching a graph's reads up), where the
+        # carried graph really hasn't played; carry_spec.rb's STARTED_READS lists
+        # those reads.
+        def heard?
+          !!(started || carried)
         end
       end
 
@@ -326,6 +342,7 @@ module MB
         @mutex = Mutex.new
         @thread = nil
         @closed = false
+        @file_readers = ObjectSpace::WeakMap.new # (process-backed inputs its graphs read; see #close_file_readers)
         @plan_deferral = nil # (see #plan_deferral)
         @generation = @transport.generation
         @scheduler = Scheduler.new(self, realtime: realtime, raise_errors: raise_errors)
@@ -539,6 +556,7 @@ module MB
         found = graph_nodes(nodes)
         joined = adopt_knobs(nodes, player: name, found: found) # graph documents' knobs and rack knobs join the Session (see Knobs#adopt_knobs)
         found = graph_nodes(nodes) if knobs_redirected?(joined, found)
+        note_file_readers(found)
         adopt_clocks(playable.nodes) # graph documents' clocks too (see Clocks#adopt_clocks)
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
@@ -916,7 +934,7 @@ module MB
                          ' (ringing out)'
                        elsif !p.current?
                          ' (fading out)'
-                       elsif !p.started
+                       elsif !p.heard?
                          " (starts at bar #{bar_of(p.start)})"
                        end
               status = "#{status} (muted)" if p.asleep || p.strip_level == 0 && p.strip_ramp.nil?
@@ -1413,6 +1431,7 @@ module MB
         @scheduler.close
         @plan_deferral&.close
         @output&.close
+        close_file_readers
         # (the graphs stay; see Strip.structure_check)
         check_structure! if Strip.structure_check
       end
@@ -1424,6 +1443,35 @@ module MB
 
       private
 
+      # Remembers the inputs among +nodes+ (a graph's nodes, from #add)
+      # that read from a process (FFMPEGInput's ffmpeg: file_input, a
+      # played file), so #close can close them (fix-batch-1106).
+      def note_file_readers(nodes)
+        nodes.each { |n| @file_readers[n] = true if n.is_a?(IOInput) && n.runs_command? && !n.closed? }
+      end
+
+      # Closes every input noted by #note_file_readers that is still open
+      # (#close, after the render thread ended): a graph cut short (a stop,
+      # until(), a replacement) left its ffmpeg blocked on a full pipe until
+      # the GC closed the pipe, a process (and its memory) per cut-short
+      # file for as long as the GC took (fix-flaky-1104 found 19 in a
+      # suite run).  Graphs the closed Session played can't play on in it;
+      # one played in another Session too ends there with the file.  While
+      # the Session runs, a cut-short graph stays open for #resume and
+      # #undo (design/notes/audio_io.md).
+      def close_file_readers
+        list = []
+        @file_readers.each_key { |r| list << r }
+        list.each do |r|
+          next if r.closed?
+          begin
+            r.close
+          rescue StandardError
+            nil # (a reader cut short may end on SIGPIPE; nothing left to tell anyone)
+          end
+        end
+      end
+
       # Starts a graph built by #add at timeline position +start+, handing
       # over from the graph it replaces (applied by the change queue).
       def add_now(name:, input:, description:, timeline_nodes:, start:, fade:, explicit_fade:, carry: nil, clip: nil, spill: false)
@@ -1431,7 +1479,7 @@ module MB
           # (a carrying rebuild's player that hasn't played yet stands in for
           # the one it replaced, which stopped on its frame: it is replaced
           # as that one would have been)
-          replacing = @players.each_value.any? { |p| p.name == name && p.current? && (p.started || p.carried) }
+          replacing = @players.each_value.any? { |p| p.name == name && p.current? && p.heard? }
 
           # A carrying rebuild (a bind's, a build knob's) replaces only the
           # graph it was built from: if that one ended, stopped, or was
@@ -1466,7 +1514,7 @@ module MB
           # (or the carried player of a rebuild that landed on this frame,
           # before it played: it holds the state carried into it; see #add's
           # +follows+)
-          carried_from = carry && @players.each_value.find { |p| p.name == name && p.current? && (p.started || p.carried) && !p.asleep && p.input.equal?(carry.old_input) }
+          carried_from = carry && @players.each_value.find { |p| p.name == name && p.current? && p.heard? && !p.asleep && p.input.equal?(carry.old_input) }
           spiller = nil
           if carried_from
             # (spill-over only where something can't carry: an unfit pair or
@@ -1486,7 +1534,7 @@ module MB
             end
             @last_carry = carry
           elsif spill && !carry
-            spiller = @players.each_value.find { |p| p.name == name && p.current? && p.started && spillable?(p) }
+            spiller = @players.each_value.find { |p| p.name == name && p.current? && p.heard? && spillable?(p) }
           end
 
           # Hand over from the graph being replaced at the new start time
@@ -1497,7 +1545,7 @@ module MB
               start_ringing(p, start, choke: true, spill: true)
               @spills += 1
               after = p.serial if carry
-            elsif p.started || p.carried
+            elsif p.heard?
               p.stop_at = start
               p.fade_out = fade
               after = p.serial if carry
@@ -1507,7 +1555,7 @@ module MB
           end
 
           np = start_player(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: start, fade: fade, after: after,
-                            carried: carried_from && [carried_from.start, carried_from.launch].freeze, clip: clip)
+                            carried: carried_from && [carried_from.start, carried_from.launch, @transport.generation].freeze, clip: clip)
           if carried_from && (q = @players[@next_serial]) && q.name == name
             # (a carried player goes on as the old one: from its start and
             # launch, so a seek back before the swap doesn't leave it
@@ -1571,7 +1619,7 @@ module MB
       # True if the current player named +name+ has started and can spill
       # over (see #spillable?; Warming#warm_spill).
       def spillable_name?(name)
-        @mutex.synchronize { @players.each_value.any? { |p| p.name == name && p.current? && p.started && spillable?(p) } }
+        @mutex.synchronize { @players.each_value.any? { |p| p.name == name && p.current? && p.heard? && spillable?(p) } }
       end
 
       # True if a Synth of the current player named +name+ has a voice
@@ -1601,7 +1649,7 @@ module MB
 
             if ring && p.ring
               # Already ringing out
-            elsif ring && p.current? && (p.started || p.carried || (time && p.start < time))
+            elsif ring && p.current? && (p.heard? || (time && p.start < time))
               unless start_ringing(p, time || @transport.position)
                 stop = time || @transport.position
                 p.stop_at = MB::M.min(p.stop_at || stop, stop)
@@ -1611,7 +1659,7 @@ module MB
             elsif ring && !p.current?
               # Being replaced: it stops at its replacement's start as before
             elsif time
-              if !p.started && !p.carried && p.start >= time
+              if !p.heard? && p.start >= time
                 # It would never have played
                 @players.delete(p.serial)
                 note_retired(p)
@@ -1620,7 +1668,7 @@ module MB
                 p.stop_at = MB::M.min(p.stop_at || time, time)
                 p.fade_out = fade
               end
-            elsif fade && (p.started || p.carried)
+            elsif fade && p.heard?
               # Fade from wherever the player is now, even if it was already
               # being replaced or faded (a rebuilt player that hasn't played
               # yet stands in for the one it replaced)
@@ -1719,6 +1767,13 @@ module MB
       def keep_stopped(p)
         end_ring(p)
         return unless p.keep
+        # A player started under the name since supersedes it, as #add_now
+        # drops a kept one when it starts one (fix-bufsize-1107: a stop
+        # landing inside a span retired its player after the span's start
+        # had already started the relaunch, so at 367 frames the stopped
+        # player was kept beside the one playing, and later commands
+        # found it; SessionFuzz seed 394532)
+        return if @players.each_value.any? { |o| o.name == p.name && o.serial > p.serial }
         @stopped.delete(p.name)
         @stopped[p.name] = p
       end
@@ -1842,6 +1897,13 @@ module MB
             # graph's start, and a seek back before the rebuild plays it as
             # that one would have played (carry-1; SessionFuzz's :carry
             # relation)
+            if p.carried[2] != @transport.generation
+              # (a seek landed after the rebuild, before its graph played:
+              # the replaced graph would have jumped there, ending its notes
+              # in progress and chasing the new position's; fix-fuzz-1106,
+              # SessionFuzz seed 773017: a rebuild and a seek on one frame)
+              p.timeline_nodes.each { |n| n.carry_seeked if n.respond_to?(:carry_seeked) }
+            end
             p.timeline_nodes.each { |n| n.start_at(start, origin: p.start, launch: p.launch, transport: @transport) }
           else
             p.timeline_nodes.each { |n| n.start_at(start, origin: start, launch: p.launch, transport: @transport) }
@@ -1917,9 +1979,17 @@ module MB
         # A muted player has nothing to ring out
         return retire(p, keep: p.keep) if ringing && p.ring.stop_frame && (p.asleep || (p.strip_level <= 0 && p.strip_ramp.nil?))
 
-        # A player that a sidechain reads keeps rendering while muted (see
-        # Buses#bus_source?), waking here if it slept before
-        sidechained = @routed_span && bus_source?(p.name)
+        # A player that a sidechain reads keeps rendering while muted, from
+        # the frame its first reader reads it (Buses#bus_read_from: a
+        # reader bound ahead of its graph's start doesn't count before
+        # then), waking here if it slept before
+        sidechained = false
+        read_from = nil
+        if @routed_span && bus_source?(p.name)
+          read_from = bus_read_from(p.name, from, to, per_sample, offset)
+          read_from = nil if read_from && read_from >= offset + frames
+          sidechained = !read_from.nil? && read_from <= offset
+        end
         if sidechained && p.asleep
           wake_pos = Sequence::Transport.position_at(from, offset, per_sample)
           p.timeline_nodes.each { |n| n.start_at(wake_pos, origin: p.start, launch: p.launch, transport: @transport) }
@@ -1927,9 +1997,11 @@ module MB
         end
 
         # Sleeping (muted) players aren't rendered until their unmute ramp
-        # starts; then their clips catch up with the timeline
+        # starts or a reader starts reading them (on that frame); then their
+        # clips catch up with the timeline
         if !sidechained && (p.asleep || (p.strip_level <= 0 && p.strip_ramp.nil?))
           wake = p.strip_ramp && p.strip_ramp.to > 0 ? MB::M.max(p.strip_ramp.start - base, offset) : nil
+          wake = read_from if read_from && (wake.nil? || read_from < wake)
           if wake.nil? || wake >= offset + frames
             p.asleep = true
             fade_ramp(p, base + offset, frames) # keeps fades moving while asleep
@@ -1947,6 +2019,7 @@ module MB
           frames -= wake - offset
           offset = wake
         end
+        sidechained ||= !read_from.nil?
 
         # A mute ramp ending in this buffer: the graph stops on the ramp's
         # last frame (not the end of the buffer), so free-running

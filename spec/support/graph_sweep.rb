@@ -137,6 +137,7 @@ module GraphSweep
     }
     others = [
       ['lp4 quality: node', ->(c) { c.sig.lp4(1000, quality: c.mod(0.7, 8)) }],
+      ['lowpass resonance: node, slope: 12 (reese-slope-1)', ->(c) { c.sig.filter(:lowpass, cutoff: c.mod(200, 3000), resonance: c.mod(0, 0.8, 3), slope: 12) }],
       ['lp4 linear curve', ->(c) { c.sig.lp4(1000, resonance: 0.5, resonance_curve: :linear) }],
       ['diode unnormalized', ->(c) { c.sig.diode(c.mod(200, 3000), resonance: 0.5, normalize: false) }],
       ['lp4 and diode live drive nodes (delays-2)', ->(c) {
@@ -214,6 +215,8 @@ module GraphSweep
         c.sig * c.s.tween([0.0, 1.0, 0.25, 0.75], [1.n64, 1.n32], curve: [:fast, :hold, MB::Sound::Curve[:elastic, overshoot: 0.3]])
       }],
       ['tempo tone (TempoNode)', ->(c) { 1.beat.hz.saw + 2.bars.lfo.square }],
+      # A tempo LFO whose cycle follows a node (TempoNode count:, GraphNode#bars; reese-params-2)
+      ['tempo tone counted by a node (NodeDuration)', ->(c) { c.mod(0.01, 0.05).bars.lfo.square + 0.02.constant.bars.hz.saw }],
       ['tempo delay', ->(c) { c.sig.delay(1.n32) }],
 
       # Arithmetic and routing
@@ -254,6 +257,15 @@ module GraphSweep
       # Shapers
       ['shapers', ->(c) { c.sig.softclip + c.sig.clip(-0.3, 0.3) + c.sig.quantize(0.1) + c.sig.asoftclip + c.sig.aclip(-0.5, 0.2) + c.sig.aquantize(0.2) }],
       ['ease (CurveShaper)', ->(c) { c.sig.ease(:elastic) + c.sig.aease(:smoothstep) + c.sig.ease(:bounce, edges: :mirror) }],
+      ['inertia (Inertia), musical and hardware', ->(c) {
+        h = MB::Sound.stereo(c.sig, c.sig * 0.5).inertia(c.mod(0.002, 0.01), mode: :hardware)
+        c.sig.inertia(0.005) + c.sig.inertia(0.02, substeps: 3) + h.outputs[0] + h.outputs[1]
+      }],
+      ['shape_db (DbShaper)', ->(c) {
+        c.sig.shape_db(:fuzz) + c.sig.ashape_db(:fold_back, mix: 0.5) + c.sig.shape_db(:asymmetric, interpolation: :linear) +
+          c.sig.shape_db(-60.db => -40.db, -20.db => -12.db, 0.db => -6.db, below: :silence, interpolation: :cubic) +
+          c.sig.shape_db(-84.db => -84.db, -34.db => [-40.db, -12.db], 0.db => -6.db, negative: [[-84.db, -84.db], [-20.db, -30.db], [-20.db, -10.db], [0.db, -6.db]])
+      }],
       ['Quantize node', ->(c) { c.sig.quantize(c.mod(0.01, 0.2)) }],
       ['formant (Formant) constant and morphing', ->(c) {
         c.sig.formant(:a) + c.sig.formant(:a, :e, [[300, 0.db, 50], [900, -6.db, 60], [2500, -12.db, 100], [3300, -20.db, 120], [4000, -30.db, 150]], morph: c.mod(0, 1), shift: c.mod(-5, 5, 3), width: c.mod(0.5, 1.5, 2), voice: :soprano)

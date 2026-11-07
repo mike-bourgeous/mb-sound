@@ -143,6 +143,7 @@ module SessionFuzz
 
     scenes = []
     first_clips = nil # (the first scene's clips, for kit swaps)
+    scene_clips = [] # (every scene's clips, for kit swaps)
     swappable = nil # (synth tracks the first scene starts with looping clips: swaps need a player, and take Clips, not Kits)
     rng.rand(1..2).times do |i|
       sname = :"s#{i + 1}"
@@ -152,6 +153,7 @@ module SessionFuzz
       clips = parts.to_h { |t| [t, clip_for.(t)] }
       swappable ||= clips.select { |t, c| tracks[t] == :synth && c.end_with?('.loop') }.keys
       first_clips ||= clips
+      scene_clips << clips
       lines << "scene :#{sname}, #{clips.map { |t, c| "#{t}: #{c}" }.join(', ')}#{extra}"
       scenes << sname
     end
@@ -229,11 +231,17 @@ module SessionFuzz
     # (parity-1) a drum track playing a looping grid swapped to that grid
     # transformed (Kit transforms run per row; drawn last, so every seed
     # keeps the song it made before)
+    # Only where every scene giving the track a clip gives it a grid with
+    # the first one's rows: a scene (or a flow's) giving it a beats clip
+    # or other rows leaves no rows to swap by name, a user error by design
+    # (fix-fuzz-1106, seed 773034: ClipSwaps#kit_swap_mapping raised for
+    # a flow's beats clip; the draws stay, so other seeds keep their songs).
     kits = first_clips.select { |t, c| tracks[t] == :drums && c.start_with?('grid(') && c.end_with?('.loop') }.keys
     if !kits.empty? && rng.rand < 0.35
       t = pick(rng, kits)
       fx = pick(rng, KIT_TRANSFORMS)
-      lines << "at_bar(#{rng.rand(1..bars)}, beat: 3) { swap :#{t}, #{first_clips[t]}.#{fx} }"
+      line = "at_bar(#{rng.rand(1..bars)}, beat: 3) { swap :#{t}, #{first_clips[t]}.#{fx} }"
+      lines << line if scene_clips.all? { |c| c[t].nil? || kit_rows?(c[t], grid_rows(first_clips[t])) }
     end
     # (omnibus17) track levels (the strip's fader): set now, at a launch
     # point, or over a ramp, and from a scene value (drawn last, so every
@@ -256,8 +264,14 @@ module SessionFuzz
     if !drums.empty? && rng.rand < 0.3
       t = pick(rng, drums)
       on = pick(rng, ['on: :bar', 'on: :beat', 'in: 1/4r'])
-      lines << "at_bar(#{rng.rand(1..bars)}, beat: 2) { bg :#{t}, grid(16, kick: 'x...x...', open_hat: '..x...x.').loop, #{on}; " \
+      grid = "grid(16, kick: 'x...x...', open_hat: '..x...x.')"
+      lines << "at_bar(#{rng.rand(1..bars)}, beat: 2) { bg :#{t}, #{grid}.loop, #{on}; " \
                "bg :ducked, 0.2.constant.duck(:#{t}, only: :kick, amount: -12.db), #{on} }"
+      # (fix-bufsize-1107's soak, seed 611894: the parity-1 kit swap drawn
+      # above for this track swapped in a kit with a snare after this grid
+      # without one took over, a user error by design (the swap warns that
+      # :snare has no voices): the swap stays only if this grid has its rows)
+      lines.reject! { |l| l.start_with?('at_bar') && l.include?("{ swap :#{t}, grid(") && !kit_rows?(grid, grid_rows(l)) }
     end
     # (omnibus17, Munro's M5) a trigger track ducking a part, through full
     # scenes that don't name it (it keeps pumping) and sometimes `pump:
@@ -489,6 +503,13 @@ module SessionFuzz
     # (new commands go here, at the end)
   ].freeze
 
+  # The row names of grid clip code +code+ (`grid(16, kick: 'x...', ...)`).
+  def grid_rows(code) = code.scan(/(\w+): '/).flatten
+
+  # True if clip code +code+ is a grid with every row of +rows+ (a kit
+  # swap of a grid with those rows finds them all; see #generate).
+  def kit_rows?(code, rows) = code.start_with?('grid(') && (rows - grid_rows(code)).empty?
+
   # Kit transforms for #generate's kit swaps.
   KIT_TRANSFORMS = [
     'reverse', 'rotate(1.n16)', 'rotate(-1.n8)', 'shift(1.n8)', 'shift(-1.n16)', 'swing(0.6)', 'humanize(4.ms, velocity: 0.1)',
@@ -500,6 +521,35 @@ module SessionFuzz
 
   # Bus chains for #generate.
   BUS_FX = ['reverb(:room, mix: 1)', 'delay(1.n8, feedback: 0.3) * 0.5', 'lp4(900) * 0.7'].freeze
+
+  # The seeds session_fuzz_spec's everyday example draws its third song
+  # from (by RSpec's seed), so its cost stays bounded (fix-fuzz-1107: a
+  # seed drawn from all of 100000-999999 took 0.1-19 s of CPU alone, median
+  # 4.5 s, p90 9.4 s, and the example went over its time budget under
+  # load, 51 and 77 s against 47.5).  These are the 102 of 256 random
+  # seeds (Random.new(1107), 100000-999999) that ran every relation
+  # (9-10 renders: no generated user error) and passed in 1.0-4.0 s of CPU
+  # each (SessionFuzz.run_seed alone, Mac container, master-ai f500aae0
+  # plus fix-fuzz-1107; mean 2.75 s), covering every feature the full
+  # draw did (buses, presets, regions, flows, seeks, tempo changes,
+  # master chains, wires, instruments, kits).  Seeds 394532, 532169, and
+  # 611891 failed :buffer_size then (omnibus13-queue).  The wider draw is
+  # the soaks' (FUZZ=N FUZZ_BASE=n).  Generation steps are drawn last, so
+  # these seeds keep their songs and only gain lines as COMMANDS grows;
+  # measure again if the example creeps over its budget.
+  EVERYDAY_SEEDS = [
+    103495, 105519, 121052, 156356, 161133, 169386, 194854, 195840, 215611, 224210,
+    242173, 281250, 282850, 295180, 295204, 318521, 331786, 340015, 345139, 345535,
+    350753, 354448, 362524, 370295, 371922, 387032, 393013, 393581, 395173, 396886,
+    413948, 414667, 419332, 423291, 430570, 432939, 436883, 441999, 443310, 468211,
+    469182, 474769, 488310, 499881, 507764, 510169, 518908, 523688, 524498, 527384,
+    532608, 534638, 538638, 557012, 559004, 560308, 564179, 598498, 642094, 644507,
+    655780, 659380, 665945, 680343, 696342, 697083, 698722, 702441, 719842, 727767,
+    730500, 745345, 750702, 751387, 778817, 794890, 798544, 807664, 808442, 808905,
+    816662, 816923, 827255, 842611, 866456, 866902, 870180, 875845, 883005, 888440,
+    900366, 929176, 939644, 946684, 948406, 949185, 971206, 977174, 980429, 985309,
+    990681, 996681,
+  ].freeze
 
   # --- rendering ------------------------------------------------------
 

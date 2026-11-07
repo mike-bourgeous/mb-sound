@@ -94,6 +94,7 @@ RSpec.describe('render path code guards') do
     ['lib/mb/sound/graph_node/dynamics.rb', 'v[-1]', 'holds a live control node\'s last value past its end and pads a short buffer with it (delays-2), read per sample otherwise'],
     ['lib/mb/sound/graph_node/zone_value.rb', 'num[-1]', 'a whole-buffer check before ptp; per sample otherwise'],
     ['lib/mb/sound/graph_node/zone_value.rb', 'vel[-1]', 'a whole-buffer check before ptp; per sample otherwise'],
+    ['lib/mb/sound/sequence/tempo_node.rb', 'c[-1]', 'holds a moving count\'s last value past its end and for #value (listings); per sample otherwise (reese-params-2)'],
   ].freeze
 
   it 'reads no parameter from the last sample of a sampled buffer' do

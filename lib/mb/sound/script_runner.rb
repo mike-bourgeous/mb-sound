@@ -922,7 +922,7 @@ module MB
           v = @params[p.name]
           if v.is_a?(Numeric) && v.real?
             spec = { value: v }
-            spec[:range] = p.allowed if p.allowed.is_a?(Range)
+            spec[:range] = p.allowed if p.allowed.is_a?(Range) || p.allowed.is_a?(Array)
             spec[:description] = p.description if p.description
             if (cc = specs[p.name])
               spec[:cc] = cc.number

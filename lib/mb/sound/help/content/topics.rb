@@ -212,9 +212,12 @@ module MB
         sample at a time in C, the FDN reverb with presets, convolution
         with impulse responses (`sig.ir('hall.wav')`, alias of `convolve`, zero
         latency, wet -10 dB; `reverb_match('hall.wav')` fits the FDN to one), the Juno
-        chorus, and antialiased shapers.
+        chorus, and antialiased shapers, among them `shape_db`: transfer curves
+        drawn in dB, per sample, with presets (`L.fx.shape_db`: :soft_knee,
+        :fuzz, :fold_back, :gate, :asymmetric), and `inertia`, an
+        acceleration-limited follower whose limit cycles chirp.
       TEXT
-      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :softclip, :clip, :decimate, :quantize, :ease, :oversample, :ring
+      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :softclip, :clip, :shape_db, :inertia, :decimate, :quantize, :ease, :oversample, :ring
       note :delays, :feedback_loops, :reverbs, :chorus
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do
@@ -224,6 +227,10 @@ module MB
       example 'a dub tape echo' do
         blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop
         bg :try, (blip.tone.triangle.at(-14.db) * blip.amp_env).tape_echo(:dub)
+      end
+      example 'a fuzz drawn in dB' do
+        bass = seq(A1, A1, C2, G1).n8.loop
+        bg :try, (bass.tone.saw.lp4(900) * bass.env).at(-6.db).shape_db(-84.db => -60.db, -48.db => -18.db, 0.db => -6.db).at(-12.db)
       end
       example 'a plate' do
         clip = seq(E4, rest, B4, rest).n8.loop

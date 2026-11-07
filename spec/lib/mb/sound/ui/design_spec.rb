@@ -30,6 +30,27 @@ RSpec.describe(MB::Sound::UI::Design, :aggregate_failures) do
 
   def run(&block) = MB::Sound::Session.with_context(session: @session) { MB::Sound.instance_eval(&block) }
 
+  # fix-batch-1106: the track's patch check built the instrument for the
+  # test clip, then the play built it again for the clip (~130 ms each for
+  # the init voice); now the check builds for the clip and the play takes
+  # that build, with the same samples (Arrangement#building_for)
+  it 'builds a new track\'s instrument once, for the clip it plays, and an existing silent track\'s new one once too' do
+    riff = MB::Sound.seq(MB::Sound::E1, MB::Sound::G1).n8.loop.named(:riff)
+    builds = 0
+    allow(MB::Sound::GraphIO).to receive(:load).and_wrap_original { |m, *a, **k| builds += 1; m.call(*a, **k) }
+    run { design :bass, :init, riff }
+    expect(builds).to eq(1)
+    expect(@session.playing_after_queue?(:bass)).to eq(true)
+    expect(@session.arrangement.instance_variable_get(:@checked_build)).to be_nil
+
+    run { stop :bass, ring: false }
+    @session.process_buffer
+    builds = 0
+    run { design :bass, :dnb_reese }
+    expect(builds).to eq(1)
+    expect(@session.playing_after_queue?(:bass)).to eq(true)
+  end
+
   it 'makes the track with an instrument, plays its clip on MAIN, and opens ui :sound on its filter' do
     riff = MB::Sound.seq(MB::Sound::E1, MB::Sound::G1).n8.loop.named(:riff)
     r = run { design :bass, :dnb_reese, riff }

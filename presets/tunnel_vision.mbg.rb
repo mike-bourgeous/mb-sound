@@ -1,10 +1,10 @@
 # mb-sound set document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 7,
+graph 9,
   name: "tunnel_vision",
   kind: :set,
-  saved: "2026-10-30T06:35:20Z",
-  mb_sound: "0.12.0.usegit (28b121e2)",
+  saved: "2026-11-07T04:20:46Z",
+  mb_sound: "0.12.0.usegit (9065390)",
   from: "bin/songs/tunnel_vision.rb",
   description: "Set :tunnel_vision from bin/songs/tunnel_vision.rb (\"Tunnel Vision\", Kez Volta's drum & bass at 174 BPM in F minor, the buses demo): drums, Reese, sub, neuro, boom, riser, pad, pluck; a :hall bus (ducked by the kick) and an :echo bus with sends, the basses ducked by the drums' kick voice; scenes intro..tail; knobs :cut, :grit, :space, :air, :lift; its flow (play_form doc.form).  `demo :tunnel_vision` loads it."
 knob :cut, (150.hz..8000.hz).at(2400.hz)
@@ -72,7 +72,8 @@ track(:reese, send: { hall: 0.1 }) { |clip|
     }
     lfo = 2 ** v.lfo(2.bars, shape: :sine, depth: 0.8)
     amp = v.env(0.004, 0.25, 0.85, 0.06, gm: false).legato
-    ((saws.lp4(cut * lfo, resonance: 0.25) * 2.2).softclip(0.35, 0.95) * amp).filter(:highpass, cutoff: 150, quality: 0.7).filter(:highpass, cutoff: 150, quality: 0.7)
+    reese = (saws.filter(:lowpass, cutoff: cut * lfo, resonance: 0.25, slope: 24) * 2.2).softclip(0.35, 0.95) * amp
+    reese.filter(:highpass, cutoff: 150, quality: 0.7).filter(:highpass, cutoff: 150, quality: 0.7)
   } * 1.0).duck(:drums, only: :kick, amount: -8.db, release: 1.n16)
 }
 track(:sub) { |clip|

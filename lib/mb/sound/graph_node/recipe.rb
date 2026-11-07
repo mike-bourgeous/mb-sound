@@ -133,6 +133,7 @@ module MB
             spy: 'runtime block for debugging', debug: 'debug output', clear_spies: 'debugging',
             samples: 'a Length value (Numeric-like), printed as a value',
             seconds: 'a Length value, printed as a value',
+            bars: 'a counted musical length (Sequence::NodeDuration), printed as a value',
             cycles: 'a Phase value (cycles), printed as a value', cyc: 'alias of cycles',
             radians: 'a Phase value, printed as a value', rad: 'alias of radians',
           },

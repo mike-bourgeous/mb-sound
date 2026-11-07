@@ -117,7 +117,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     _, ref, = play(nil, track: :bass, patch: reese, clip: clip) # (nothing to rebuild)
     expect(kn).to eq(:"bass/cutoff")
     expect(s.knobs[:"bass/cutoff"].value).to eq(2400.0)
-    expect(code_of(s, :bass)).to include('lp4(knob(:"bass/cutoff") * lfo')
+    expect(code_of(s, :bass)).to include('filter(:lowpass, cutoff: knob(:"bass/cutoff") * lfo')
     expect((bound - ref).abs.max).to eq(0.0)
 
     # A preset's own numbers bind too, calls reached through its stereo
@@ -128,14 +128,14 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     wrapper = roots.flat_map { |r| MB::Sound::GraphNode.graph(r) }.grep(MB::Sound::Filter::SampleWrapper).first
     t = described_class.target(roots, wrapper, :quality)
     expect([t.kind, t.call_name, t.value]).to eq([:call, :filter, 0.7])
-    s2, bound2, = play(->(_) { MB::Sound.bind(:bass, filter: :quality) }, track: :bass, patch: reese, clip: clip)
+    s2, bound2, = play(->(_) { MB::Sound.bind(:bass, filter: :quality, nth: 1) }, track: :bass, patch: reese, clip: clip) # (the 2nd filter call: the 1st is the lowpass, reese-slope-1)
     _, ref2, = play(REBUILD, track: :bass, patch: reese, clip: clip)
     expect(s2.knobs[:"bass/quality"].value).to eq(0.7)
     expect((bound2 - ref2).abs.max).to eq(0.0)
 
     # Numbers made inside library code (no recorded call) say so in the
     # user's terms, naming the preset's params, never a node class
-    expect(described_class.unrecorded(roots, :quality)).to eq('quality is fixed in the dnb_reese preset; bind its params instead: cutoff, resonance, drive, glide')
+    expect(described_class.unrecorded(roots, :quality)).to eq('quality is fixed in the dnb_reese preset; bind its params instead: cutoff, lfo_depth, lfo_bars, resonance, slope, low_cut, drive, glide')
   end
 
   # (editability-1: tine_piano ends in a stereo `.pan(...)`, so its root

@@ -82,6 +82,19 @@ module MB
           QualityResonance.new(quality, curve: curve, diode: diode, tuning: tuning)
         end
 
+        # The 2-pole quality (a number, or a node from +resonance+'s node)
+        # whose gain at the cutoff is lp4's (or the diode ladder's) at
+        # +resonance+ (0..1 on the :db curve; a number or node such as a
+        # param or knob): the inverse of .quality_resonance (see
+        # Filter::FourPole.resonance_to_quality).  `filter(:lowpass,
+        # resonance:)` reads it.
+        def self.resonance_quality(resonance, diode: false, tuning: :musical)
+          return MB::Sound::Filter::FourPole.resonance_to_quality(resonance, diode: diode, tuning: tuning) if resonance.is_a?(Numeric)
+          raise ArgumentError, "Resonance must be a number or graph node (got #{resonance.inspect})" unless resonance.respond_to?(:sample)
+
+          QualityResonance.new(resonance, diode: diode, tuning: tuning, function: :resonance_quality)
+        end
+
         def sources
           { input: @source, cutoff: @cutoff, resonance: @resonance, drive: @drive }.select { |_, v| v.respond_to?(:sample) }
         end

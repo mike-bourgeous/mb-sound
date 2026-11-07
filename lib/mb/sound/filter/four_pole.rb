@@ -914,20 +914,66 @@ module MB
           curve == :linear ? to_linear.(r) : r
         end
 
-        # Points in .musical_quality_table (uniform in log q).
-        MUSICAL_QUALITY_POINTS = 1024
+        # The quality of a 2-pole filter (Filter::SVF and the cookbook
+        # filters, whose gain at the cutoff is their q) that has this
+        # filter's gain at the cutoff (relative to DC) at resonance +r+ (0..1
+        # on the :db curve): the inverse of .quality_to_resonance, so that
+        # `lp4(quality: resonance_to_quality(r))` is `lp4(resonance: r)` and
+        # `filter(:lowpass, resonance: r)` (a 2-pole taking lp4's knob;
+        # reese-slope-1, 2026-11-07) means a comparable peak.  +r+ may be a
+        # number or an NArray (an SFloat comes back).
+        #
+        # With +tuning: :musical+ (default), lp4: r up to about 0.1 gives
+        # 0.50 (-6 dB at the cutoff, no peak: lp4 is 6 dB down at its cutoff
+        # there too), 0.15 gives 0.58, 0.2 gives 0.89, 0.25 gives 1.57, 0.3
+        # gives 2.06, 0.5 gives 5.3, 0.7 gives 14.6, 1 gives 69.7 (linear
+        # interpolation of .musical_cutoff_gains in log gain).  With
+        # +tuning: :hardware+: 196^r / 4 (0.25 to 49).  +diode: true+ uses
+        # the diode ladder's responses, as in .quality_to_resonance.
+        def self.resonance_to_quality(r, diode: false, tuning: :musical)
+          if tuning == :hardware
+            log_ratio = Math.log(diode ? 40 + 39 * DIODE_EDGE_K : 196)
+            edge = diode ? DIODE_EDGE_K : 4.0
+            if r.is_a?(Numo::NArray)
+              r = r.real if r.is_a?(Numo::SComplex) || r.is_a?(Numo::DComplex)
+              return Numo::SFloat.cast(Numo::NMath.exp(Numo::DFloat.cast(r).clip(0.0, 1.0) * log_ratio) * (1.0 / edge))
+            end
+            return Math.exp(r.to_f.clamp(0.0, 1.0) * log_ratio) / edge
+          end
+          raise ArgumentError, "Unknown tuning #{tuning.inspect} (use :musical or :hardware)" unless tuning == :musical
 
-        # The musical tuning's quality table for lp4 (+diode+ false) or the
-        # diode ladder: [log q at the first point, log q step, resonances on
-        # the :db curve (an Array of MUSICAL_QUALITY_POINTS)] for q from 1/2
-        # (resonance 0) to the gain at the cutoff at full
-        # resonance, from the analog response with the musical tuning (the
-        # gain at the cutoff relative to DC; kept rising where it is flat,
-        # below resonance 0.1).  Memoized.
-        def self.musical_quality_table(diode)
-          @musical_quality_tables ||= {}
-          @musical_quality_tables[!!diode] ||= begin
-            steps = 4000
+          gains = musical_cutoff_gains(diode)
+          steps = gains.length - 1
+
+          if r.is_a?(Numo::NArray)
+            r = r.real if r.is_a?(Numo::SComplex) || r.is_a?(Numo::DComplex)
+            p = Numo::DFloat.cast(r).clip(0.0, 1.0) * steps
+            i = p.floor.clip(0, steps - 1)
+            f = p - i
+            i = Numo::Int64.cast(i)
+            table = Numo::DFloat.cast(gains)
+            return Numo::SFloat.cast(Numo::NMath.exp(table[i] * (1.0 - f) + table[i + 1] * f))
+          end
+
+          p = r.to_f.clamp(0.0, 1.0) * steps
+          i = [p.floor, steps - 1].min
+          f = p - i
+          Math.exp(gains[i] * (1.0 - f) + gains[i + 1] * f)
+        end
+
+        # Steps of resonance in .musical_cutoff_gains (uniform in r).
+        MUSICAL_GAIN_STEPS = 4000
+
+        # The natural log of the gain at the cutoff relative to DC with the
+        # musical tuning, for lp4 (+diode+ false) or the diode ladder, at
+        # resonances 0, 1 / MUSICAL_GAIN_STEPS, ..., 1 on the :db curve, from
+        # the analog response (kept rising where it is flat, below resonance
+        # 0.1, for the searches).  Shared by .musical_quality_table and
+        # .resonance_to_quality.  Memoized.
+        def self.musical_cutoff_gains(diode)
+          @musical_cutoff_gains ||= {}
+          @musical_cutoff_gains[!!diode] ||= begin
+            steps = MUSICAL_GAIN_STEPS
             gains = (0..steps).map do |i|
               r = i.to_f / steps
               if diode
@@ -944,6 +990,26 @@ module MB
             end
             # (strictly rising, for the search)
             gains.each_index { |i| gains[i] = [gains[i], gains[i - 1] + 1e-12].max if i > 0 }
+            gains.freeze
+          end
+        end
+        private_class_method :musical_cutoff_gains
+
+        # Points in .musical_quality_table (uniform in log q).
+        MUSICAL_QUALITY_POINTS = 1024
+
+        # The musical tuning's quality table for lp4 (+diode+ false) or the
+        # diode ladder: [log q at the first point, log q step, resonances on
+        # the :db curve (an Array of MUSICAL_QUALITY_POINTS)] for q from 1/2
+        # (resonance 0) to the gain at the cutoff at full
+        # resonance, from the analog response with the musical tuning (the
+        # gain at the cutoff relative to DC; kept rising where it is flat,
+        # below resonance 0.1).  Memoized.
+        def self.musical_quality_table(diode)
+          @musical_quality_tables ||= {}
+          @musical_quality_tables[!!diode] ||= begin
+            gains = musical_cutoff_gains(diode)
+            steps = gains.length - 1
 
             lo = gains[0] # (1 / 2: -6 dB at the cutoff without resonance)
             hi = gains.last

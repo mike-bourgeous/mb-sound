@@ -85,6 +85,16 @@ module MB
           Length::Seconds.new(self)
         end
 
+        # Marks this node's output as a number of bars, read live (an LFO rate).
+        # A Sequence::NodeDuration of 1.bar (of the current transport) times
+        # this node: a tempo LFO rate (`v.lfo(lfo_bars.bars)`) or tempo pitch
+        # (`lfo_bars.bars.hz`) that follows a param, knob, or other node
+        # while playing, with no phase jump, and plays like the Duration
+        # while the node holds still.  Graph export prints `lfo_bars.bars`.
+        def bars
+          Sequence::NodeDuration.new(self, 1.bar, :bars)
+        end
+
         # Plays +sources+ (other graph nodes) after this node runs out of data.
         # This node (or its inputs) must have a finite length of audio data
         # available (e.g. a sound file).

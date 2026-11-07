@@ -1,7 +1,7 @@
 # Structure analysis (music information retrieval)
 
 <!-- summary -->
-`analyze_form(source)` (alias `analyze_structure`; `StructureMethods`, `lib/mb/sound/structure.rb` + `structure/`, pure Ruby + Numo) finds tempo, beats, bars, and meters in a file, audio data, or a graph and returns a `Structure::Result`: our renders use the render's exact grid, imported audio is tracked (comb-autocorrelation tempo, a constant-tempo grid, a downbeat Viterbi allowing 2- and 3-beat bars).  Phase S2: `sections` with letter labels (bar-feature SSM, Foote novelty, DP over bar lines), `form`/`flow_ruby`, `markers!` (`:analysis` markers), `compare(take.form)`.  Shares `MB::Sound::Analysis` (STFT, chroma, keys, spectra) with the other listening tools.
+`analyze_form(source)` (alias `analyze_structure`; `StructureMethods`, `lib/mb/sound/structure.rb` + `structure/`, pure Ruby + Numo) finds tempo, beats, bars, and meters in a file, audio data, or a graph and returns a `Structure::Result`: our renders use the render's exact grid, imported audio is tracked (comb-autocorrelation tempo, a constant-tempo grid, a downbeat Viterbi allowing 2- and 3-beat bars; compound meter checked: a dotted-eighth grid regridded as 6/8, other 6/8 readings named in `Result#compound`).  Phase S2: `sections` with letter labels (bar-feature SSM, Foote novelty, DP over bar lines), `form`/`flow_ruby`, `markers!` (`:analysis` markers), `compare(take.form)`.  Shares `MB::Sound::Analysis` (STFT, chroma, keys, spectra) with the other listening tools.
 <!-- /summary -->
 
 ## Quick reference
@@ -63,6 +63,17 @@ Generated grooves (`spec/lib/mb/sound/structure_spec.rb`; an 808 kit with kick o
 - Half time (kick on 1 and the and of 3, clap on 3, at 140 BPM): tempo and beats exact, downbeats a beat early.  The kick's long tail makes beat 4's timbre like beat 1's, and the drums outweigh the bass in chroma.  Spec'd for tempo and beats only.
 - One constant tempo; 4/4 with occasional 2- and 3-beat bars unless `beats_per_bar:` says otherwise; downbeats need a harmonic or bass change at bar lines (drum-only loops with kicks on 1 and 3 are ambiguous).
 - `at_bar(n)` blocks are scheduled at the timeline position bar n had when scheduled, so in a render whose earlier `at_bar` block changes the meter, a later `at_bar` lands elsewhere; the specs set meters up front with `meter 2, 4, at: bar(5)` (a scheduling gotcha seen while writing the specs, not a structure issue).
+
+### Compound meter (fix-batch-1106)
+
+Both 6/8 songs of the ACID form comparison (research-acd-format-2, 17893d01) came out as 4/4 at 4/3 of their tempo (90 -> 120, 103 -> 137.3): the tempo prior near 120 picks a beat of a dotted eighth (1.5 eighths), so every other beat falls between eighths, and the 4-beat bars are the 6/8 bars.  A synthetic 6/8 groove (kick on 1, clap on 4, eighth hats, bass every bar; `structure_spec.rb`) comes out at 60 (dotted quarters) without a hint, 140 (eighths) at 70, and at 120 (the songs' case) with that hint.
+
+`Structure::Compound.check` (after the downbeats, tracked audio only; `compound: false` skips it) reads the onset envelope's peaks around the grid (within 1/24 of a beat, as multiples of the envelope's mean) for three patterns, each needing the expected places at least twice the places that must stay quiet:
+- `:dotted_eighth`: the beats of one parity on nothing while the others' 1/3 and 2/3 points of the two-beat span (the eighths) sound: measured 8.0x vs 0.5x (90 as 120) and 5.7x vs 0.5x (103 as 137.33).  The grid fits no meter, so `analyze` regrids: tempo x 3/4, bars kept (a downbeat on an off-parity beat moves to the neighbour with the stronger downbeat observation), 3 quarter-note beats a bar 4/3 of a grid beat apart, `Bar#compound` (meter "6/8"), `meters_ruby` "meter 6, 8".  90.02 and 103.0 BPM found, downbeats within 2 ms of the 2 s bars.
+- `:ternary`: the beat divides in three (1/3 and 2/3 vs 1/2 of it): 12/8 (a 4/4 shuffle) at this tempo or 6/8 at 3/2 of it; the 6/8 groove at 90 (60 found, 8.0x vs 0.6x) and the 4/4 shuffle groove (3.5x vs 0.6x) both read so, which only the bar level could tell apart (bars of 2 beats vs 4), so it is named, not regridded.
+- `:threes`: every third beat accented: 3/4 here or 6/8 at half (the 70 groove at 140: 42x vs 10x).  Named only.
+
+Plain and 16th-hat 4/4 grooves and a 3/4 groove with claps on 2 and 3 read as simple (nil).  Open: telling 6/8 from 12/8 on a ternary grid (re-running the downbeats with 2-beat bars), the real songs (the two private pairs: `form_compare.rb` on master-ai should now find 90 and 103 if their grids are the 4/3 case), and 3/4 (no detection of its own; reads as 4/4 with the Viterbi's 3-beat bars at a cost).
 
 ## S2: sections, labels, forms, markers (`structure/sections.rb`, `structure/comparison.rb`, listen-1)
 

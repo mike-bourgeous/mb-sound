@@ -76,7 +76,7 @@ Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`
 
 ### [Filter System](filters.md)
 
-`lib/mb/sound/filter/` has 16+ filter types (`#process`/`#reset`; `Filter::Cookbook` designs).  Graph cookbook filters (`node.filter(:lowpass, cutoff:, quality:)`, `peq`) build `Filter::SVF`, whose parameters may move every sample (`structure: :biquad` for the old biquad); `sig.lp4(cutoff, resonance:)` is a CEM3379-style 4-pole and `sig.diode(...)` a TB-303-style ladder with the same knobs (`v.reso(...)` in voices); `sig.formant(:a, :o, morph:, voice:, shift:, width:)` five vowel bandpasses.  Convention: where mb-sound departs from its hardware model the playable version is `:musical` (default) and the faithful one `:hardware`.  Filter states flush denormals on an 800-sample grid of their own time, so tails match at any buffer size.
+`lib/mb/sound/filter/` has 16+ filter types (`#process`/`#reset`; `Filter::Cookbook` designs).  Graph cookbook filters (`node.filter(:lowpass, cutoff:, quality:)`, `peq`) build `Filter::SVF`, whose parameters may move every sample (`structure: :biquad` for the old biquad); `sig.lp4(cutoff, resonance:)` is a CEM3379-style 4-pole (`filter(:lowpass, cutoff:, resonance:, slope: 12 | 24)`: lp4's knob on a 2-pole or lp4) and `sig.diode(...)` a TB-303-style ladder with the same knobs (`v.reso(...)` in voices); `sig.formant(:a, :o, morph:, voice:, shift:, width:)` five vowel bandpasses.  Convention: where mb-sound departs from its hardware model the playable version is `:musical` (default) and the faithful one `:hardware`.  Filter states flush denormals on an 800-sample grid of their own time, so tails match at any buffer size.
 
 ### [Delays](delays.md)
 
@@ -92,7 +92,7 @@ Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`
 
 ### [Dynamics (compressor, compander, ducking, limiter, multiband)](dynamics.md)
 
-One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a dB peak/RMS detector (linked, any `sidechain:`), a transfer curve, a log-domain smoother, `lookahead:`, `makeup:`, `mix:`; same output at any buffer size.  `threshold:`, `ratio:`, and `mix:` take nodes (knobs) read every sample (live controls moving the curve).  Faces `compress`, `expand`, `noise_gate`, `duck(kick)`, `compand(...)`, `limit(ceiling: -1.db, lookahead: 1.5.ms, release:, true_peak: true)`, `bands(200.hz, 2000) { |lo, mid, hi| [...] }` crossovers, `mono_below`, and `squeeze`; trigger tracks (`sidechain :pump, clip`) key ducks with a line nobody hears.  Levels and gains are written `-12.db` (exact dB); bare numbers are linear gains and bare negatives raise.
+One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a dB peak/RMS detector (linked, any `sidechain:`), a transfer curve, a log-domain smoother, `lookahead:`, `makeup:`, `mix:`; same output at any buffer size.  `threshold:`, `ratio:`, and `mix:` take nodes (knobs) read every sample (live controls moving the curve).  Faces `compress`, `expand`, `noise_gate`, `duck(kick)`, `compand(...)`, `limit(ceiling: -1.db, lookahead: 1.5.ms, release:, true_peak: true)`, `bands(200.hz, 2000) { |lo, mid, hi| [...] }` crossovers, `mono_below`, and `squeeze`; trigger tracks (`sidechain :pump, clip`) key ducks with a line nobody hears.  Levels and gains are written `-12.db` (exact dB); bare numbers are linear gains and bare negatives raise.  The same points drive `shape_db`, a per-sample dB-domain waveshaper (closed-form ADAA).
 
 ### [Drum machines](drums.md)
 
@@ -140,7 +140,7 @@ Live MIDI uses JACK ports when a server answers, else bundled RtMidi; specs use 
 
 ### [Structure analysis (music information retrieval)](structure.md)
 
-`analyze_form(source)` (alias `analyze_structure`; `StructureMethods`, `lib/mb/sound/structure.rb` + `structure/`, pure Ruby + Numo) finds tempo, beats, bars, and meters in a file, audio data, or a graph and returns a `Structure::Result`: our renders use the render's exact grid, imported audio is tracked (comb-autocorrelation tempo, a constant-tempo grid, a downbeat Viterbi allowing 2- and 3-beat bars).  Phase S2: `sections` with letter labels (bar-feature SSM, Foote novelty, DP over bar lines), `form`/`flow_ruby`, `markers!` (`:analysis` markers), `compare(take.form)`.  Shares `MB::Sound::Analysis` (STFT, chroma, keys, spectra) with the other listening tools.
+`analyze_form(source)` (alias `analyze_structure`; `StructureMethods`, `lib/mb/sound/structure.rb` + `structure/`, pure Ruby + Numo) finds tempo, beats, bars, and meters in a file, audio data, or a graph and returns a `Structure::Result`: our renders use the render's exact grid, imported audio is tracked (comb-autocorrelation tempo, a constant-tempo grid, a downbeat Viterbi allowing 2- and 3-beat bars; compound meter checked: a dotted-eighth grid regridded as 6/8, other 6/8 readings named in `Result#compound`).  Phase S2: `sections` with letter labels (bar-feature SSM, Foote novelty, DP over bar lines), `form`/`flow_ruby`, `markers!` (`:analysis` markers), `compare(take.form)`.  Shares `MB::Sound::Analysis` (STFT, chroma, keys, spectra) with the other listening tools.
 
 ### [Sound-matching analysis](analysis.md)
 

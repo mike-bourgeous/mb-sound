@@ -42,10 +42,35 @@ module MB
           raise IOError, 'Session is closed' if @closed
           point = LaunchPoint.of(binding) or return nil
 
-          _player, stopped, nodes = @render_lock.synchronize { @mutex.synchronize { swap_target(name) } }
+          # A start waiting in the change queue replaces a stopped player
+          # when it lands, and one landing by the swap's time replaces the
+          # current player before the swap lands, so the swap goes to that
+          # start's clips (as #swap_now finds them on landing).  Whether a
+          # player is still current, or stopped, when the command runs
+          # depends on when a scheduled block runs it, which depends on the
+          # buffer size (fix-bufsize-1107, SessionFuzz seed 394532: a track
+          # stopped and relaunched as a one-shot on one frame still had its
+          # stopped player kept when the bar-2 block ran at 367 frames, not
+          # at 800 (Session#keep_stopped, fixed too), so its swap into the
+          # launch queued for bar 2 went to the stopped player and raised at
+          # 367, and the track built its patch again: a new Synth, whose
+          # unused lanes ran at another pitch)
+          _player, stopped, nodes, queued = @render_lock.synchronize {
+            @mutex.synchronize {
+              t = swap_target(name)
+              q = t[1] ? queued_start_by(name, nil) : nil
+              t[1] = false if q
+              t << q
+            }
+          }
+          time = stopped ? nil : (start_time ? start_time.to_r : launch_time(point, queued ? queued.starts : nodes))
+          queued = @render_lock.synchronize { @mutex.synchronize { queued_start_by(name, time) } } || queued if time
+          if queued
+            nodes = queued.starts.grep(MIDI::ClipSource)
+            raise ArgumentError, "Player #{name.inspect} doesn't play any clips" if nodes.empty?
+          end
           count = planned_swaps(name, nodes, clips, warn: true).length
 
-          time = stopped ? nil : (start_time ? start_time.to_r : launch_time(point, nodes))
           if !stopped && clips_over_by?(name, time)
             # (the voices reading an ended one-shot clip have ended, so the
             # swap would land unheard and the player end with its tail;
@@ -73,8 +98,10 @@ module MB
             @mutex.synchronize {
               next false if @changes.any? { |c| c.subject == name && c.kind == :swap }
 
-              player = @players.values.select { |p| p.name == name && p.current? }.last
-              start = player ? nil : @changes.select { |c| c.subject == name && c.starts }.last
+              # (a start queued to land by +time+ is what plays then; see #swap)
+              start = time && queued_start_by(name, time)
+              player = start ? nil : @players.values.select { |p| p.name == name && p.current? }.last
+              start ||= player ? nil : @changes.select { |c| c.subject == name && c.starts }.last
               next false if start&.kind == :restore # (an undo's player: its clip positions are its own)
 
               nodes = (player ? player.timeline_nodes : start&.starts || []).grep(MIDI::ClipSource)
@@ -94,6 +121,15 @@ module MB
             @players.each_value.any? { |p| p.name == name && p.current? } || @stopped.key?(name) ||
               @changes.any? { |c| c.subject == name && c.starts }
           }
+        end
+
+        # The last start of a player named +name+ waiting in the change
+        # queue to land by timeline position +time+ (any time for nil; a
+        # carrying rebuild's split start aside: it takes over the playing
+        # graph's clip sources), or nil.  Called with @render_lock and
+        # @mutex held.
+        def queued_start_by(name, time)
+          @changes.select { |c| c.subject == name && c.starts && !c.split && (time.nil? || (c.time && c.time <= time)) }.last
         end
 
         # Finds the player whose clips #swap changes: the current player
@@ -225,13 +261,28 @@ module MB
               }.then { |r| root.looping? && !r.looping? ? r.loop(align: root.align).tap { |q| Sequence::Kit::ROW_NAMES[q] = row } : r }
             end
           end
-          raise ArgumentError, "Player #{name.inspect} doesn't play a grid kit's rows; pass old_kit => new_kit" if mapping.empty?
+          raise ArgumentError, no_kit_rows_message(name, nodes) if mapping.empty?
 
           extra = kit.rows.keys - played.uniq
           if warn && !extra.empty?
             Kernel.warn "swap #{name.inspect}: #{extra.map(&:inspect).join(', ')} #{extra.length == 1 ? 'isn\'t a row' : 'aren\'t rows'} the player plays (no voices for #{extra.length == 1 ? 'it' : 'them'}; bg or launch the kit to build them)"
           end
           mapping
+        end
+
+        # Why #kit_swap_mapping found no rows to swap a Kit into for player
+        # +name+ playing clip sources +nodes+: what it plays, and how to
+        # play the kit there instead (a swap keeps the graph, which was
+        # built for the clip it plays: fix-fuzz-1106, SessionFuzz seed
+        # 773034, a kit track a flow had switched to a `beats` clip; the
+        # message suggested old_kit => new_kit pairs, which find no rows
+        # either).
+        def no_kit_rows_message(name, nodes)
+          playing = nodes.map { |n| n.ring_clip || n.pending_clip || n.clip }.first.to_s
+          playing = "#{playing[0, 37]}..." if playing.length > 40
+          how = arrangement.tracks[name] ? "`bg #{name.inspect}, kit` builds the track's patch for the kit's rows" : 'bg it again with a kit built for the new rows'
+          "Player #{name.inspect} plays a clip (#{playing}), not a grid kit's rows, so a Kit has no rows to swap into: " \
+            "#{how} (a swap keeps the graph), or swap in a Clip"
         end
 
         # Returns a mapping from the clip that every clip source's clip was

@@ -55,23 +55,23 @@ RSpec.describe('Tone null-test reference') do
     # corrected as if the tone had always run, so a square or pulse starting
     # on its edge at phase 0 plays the edge's midpoint (0), not +1; only
     # sample 0 changes (warp corners at phase 0 get their small kink term)
-    'pulse_dc' => 'first sample as if the tone had always run',
+    'pulse_dc' => 'first sample as if the tone had always run; 2026-11-06 (fix-batch-1106): a number for the warp read as a float, as a node\'s sample (last bits, residual -148 dB)',
     'pulse' => 'first sample as if the tone had always run',
     'pm_index' => 'first sample as if the tone had always run; 2026-10-10: PM in cycles (last bits, residual below -130 dB)',
     'square_110' => 'first sample as if the tone had always run',
     'rate_96000_fm' => 'first sample as if the tone had always run; 2026-10-13: running phase (last bits)',
     'notes' => 'first sample as if the tone had always run',
-    'ramp_pwm' => 'first sample as if the tone had always run; 2026-10-13 (fixes-7): constant-frequency phase grid (last bits)',
+    'ramp_pwm' => 'first sample as if the tone had always run; 2026-10-13 (fixes-7): constant-frequency phase grid (last bits); 2026-11-06 (fix-batch-1106): a number for the warp read as a float, as a node\'s sample (last bits, residual -127 dB)',
     'reset_lfo' => 'first sample as if the tone had always run',
     'drumramp' => 'first sample as if the tone had always run',
-    'sine_pwm' => 'first sample as if the tone had always run',
-    'sync_tone_master' => 'first sample as if the tone had always run',
+    'sine_pwm' => 'first sample as if the tone had always run; 2026-11-06 (fix-batch-1106): a number for the warp read as a float, as a node\'s sample (last bits, residual -150 dB)',
+    'sync_tone_master' => 'first sample as if the tone had always run; 2026-11-06 (fix-batch-1106): a number for the warp read as a float, as a node\'s sample (last bits, residual -129 dB)',
     'pwm_node' => 'first sample as if the tone had always run',
     'lfo_square_20' => 'first sample as if the tone had always run',
     'square_3520' => 'first sample as if the tone had always run; 2026-10-13 (fixes-7): constant-frequency phase grid (last bits)',
-    'skew_triangle' => 'first sample as if the tone had always run',
+    'skew_triangle' => 'first sample as if the tone had always run; 2026-11-06 (fix-batch-1106): a number for the warp read as a float, as a node\'s sample (last bits, residual -150 dB)',
     'negative_amp' => 'first sample as if the tone had always run',
-    'parabola_pwm' => 'first sample as if the tone had always run',
+    'parabola_pwm' => 'first sample as if the tone had always run; 2026-11-06 (fix-batch-1106): a number for the warp read as a float, as a node\'s sample (last bits, residual -144 dB)',
     # 2026-10-10: noise tones keep a running phase wrapped every sample, so
     # the output no longer depends on block sizes (last-bit differences;
     # RMS and peak equal to 9 digits)
@@ -116,6 +116,10 @@ RSpec.describe('Tone null-test reference') do
     'rate_44100' => 'constant-frequency phase grid (last bits)',
     'sine_3520' => 'constant-frequency phase grid (last bits)',
     'triangle_3520' => 'constant-frequency phase grid (last bits)',
+    # 2026-11-06 (fix-batch-1106): warp widths and pivots given as numbers
+    # read as floats, as a node's samples (pwm(0.3) and pwm(0.3.constant)
+    # play the same samples)
+    'sync_pwm' => 'a number for the warp read as a float (last bits, residual -131 dB)',
   }.freeze
 
   it 'has a reference for every case' do

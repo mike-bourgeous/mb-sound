@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-11-06",
+  "generated": "2026-11-07",
   "specs": {
     "gems/mb-term/spec/native_spec.rb": {
       "fast_term": [
@@ -808,6 +808,23 @@
         "FastClip.shape_curve"
       ]
     },
+    "spec/lib/mb/sound/graph_node/db_shaper_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
+        "FastArithmetic.mix"
+      ],
+      "fast_clip": [
+        "FastClip.shape_curve",
+        "FastClip.shape_db"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
     "spec/lib/mb/sound/graph_node/decimator_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.fill_range",
@@ -933,6 +950,23 @@
         "FastWavetable.half_means",
         "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
+      ]
+    },
+    "spec/lib/mb/sound/graph_node/inertia_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
+        "FastArithmetic.fill_range",
+        "FastArithmetic.mix"
+      ],
+      "fast_control": [
+        "FastControl.inertia"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
       ]
     },
     "spec/lib/mb/sound/graph_node/modal_resonator_spec.rb": {
@@ -1107,12 +1141,14 @@
       "fast_clip": [
         "FastClip.curve_lookup",
         "FastClip.shape",
-        "FastClip.shape_curve"
+        "FastClip.shape_curve",
+        "FastClip.shape_db"
       ],
       "fast_control": [
         "FastControl.adaptive",
         "FastControl.curve",
         "FastControl.damped",
+        "FastControl.inertia",
         "FastControl.reset_run",
         "FastControl.slew",
         "FastControl.smooth"
@@ -2145,12 +2181,14 @@
       "includes": [
         "ext/mb/sound/include/mb_clip_shape.h",
         "ext/mb/sound/include/mb_curve_lookup.h",
+        "ext/mb/sound/include/mb_dynamics.h",
         "ext/mb/sound/include/mb_ext_helpers.h"
       ],
       "depend": {
         "fast_clip.o": [
           "ext/mb/sound/include/mb_clip_shape.h",
           "ext/mb/sound/include/mb_curve_lookup.h",
+          "ext/mb/sound/include/mb_dynamics.h",
           "ext/mb/sound/include/mb_ext_helpers.h"
         ]
       }

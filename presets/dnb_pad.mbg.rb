@@ -1,13 +1,13 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 7,
+graph 9,
   name: "dnb_pad",
   kind: :synth,
-  saved: "2026-10-30T06:33:02Z",
-  mb_sound: "0.12.0.usegit (28b121e2)",
+  saved: "2026-11-07T04:26:29Z",
+  mb_sound: "0.12.0.usegit (debcdfb)",
   from: "bin/synths/dnb.rb",
   description: "Drum & bass patch :pad from bin/synths/dnb.rb, first made by Kez Volta, a fictional modern EDM / UK drum & bass producer-DJ, for the song \"Tunnel Vision\" (bin/songs/tunnel_vision.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-edm).",
-  options: { patch: :pad, resonance: nil, drive: nil, glide: nil, decay: nil, grit: nil, echo: nil, drop: nil }
+  options: { patch: :pad, lfo_depth: nil, lfo_bars: nil, resonance: nil, slope: nil, low_cut: nil, drive: nil, glide: nil, decay: nil, grit: nil, echo: nil, drop: nil }
 inputs midi: :notes
 param :cutoff, (20.0..10000.0).at(2600.0), description: "Lowpass cutoff in Hz (reese 2400 around its LFO, sub 110, neuro 600 and pluck 500 under their envelopes, pad 2600)"
 param :attack, (0.001..8.0).at(0.6), description: "Pad attack in seconds (0.6)"

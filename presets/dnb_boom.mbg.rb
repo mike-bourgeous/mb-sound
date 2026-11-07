@@ -1,13 +1,13 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 7,
+graph 9,
   name: "dnb_boom",
   kind: :synth,
-  saved: "2026-10-30T06:33:08Z",
-  mb_sound: "0.12.0.usegit (28b121e2)",
+  saved: "2026-11-07T04:26:36Z",
+  mb_sound: "0.12.0.usegit (debcdfb)",
   from: "bin/synths/dnb.rb",
   description: "Drum & bass patch :boom from bin/synths/dnb.rb, first made by Kez Volta, a fictional modern EDM / UK drum & bass producer-DJ, for the song \"Tunnel Vision\" (bin/songs/tunnel_vision.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-edm).",
-  options: { patch: :boom, cutoff: nil, resonance: nil, drive: nil, glide: nil, attack: nil, release: nil, grit: nil, echo: nil }
+  options: { patch: :boom, cutoff: nil, lfo_depth: nil, lfo_bars: nil, resonance: nil, slope: nil, low_cut: nil, drive: nil, glide: nil, attack: nil, release: nil, grit: nil, echo: nil }
 inputs midi: :notes
 param :decay, (0.01..8.0).at(1.2), description: "Amplitude decay in seconds (neuro 0.12: its filter envelope too; pluck 0.35, boom 1.2)"
 param :drop, (0.0..4.0).at(2.0), description: "Boom pitch dive in octaves onto the note (2)"

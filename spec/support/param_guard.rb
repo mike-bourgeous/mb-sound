@@ -58,10 +58,18 @@ module ParamGuard
   end
 
   # True if +param+ fits a graph document's `param` line (format 5): a
-  # number or unit-value default (2400.hz) and a range of them, if any.
+  # number or unit-value default (2400.hz) and a range of them, if any, or
+  # a list of numeric choices (`param :slope, 24, range: [24, 12]`: script
+  # options with choices save so since reese-slope-1).
   def document?(param)
     value = ->(v) { (v.is_a?(Numeric) && v.real?) || MB::Sound::Param::UNIT_TYPES.include?(MB::Sound::Param.type_of(v)) }
-    value.(param.default) && (param.range.nil? || (param.range.is_a?(Range) && [param.range.begin, param.range.end].all?(&value)))
+    return false unless value.(param.default)
+    case param.range
+    when nil then true
+    when Range then [param.range.begin, param.range.end].all?(&value)
+    when Array then param.range.all? { |v| v.is_a?(Numeric) && v.real? }
+    else false
+    end
   end
 end
 

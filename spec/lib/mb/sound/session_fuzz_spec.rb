@@ -4,8 +4,9 @@
 # parts launched mid-song match the same parts from bar 1, and warming
 # changes before they land doesn't change it either, nor do carrying
 # rebuilds of the tracks (what a bind does; carry-1).
-# Everyday: SEEDS seeds from a fixed base plus one from RSpec's seed;
-# FUZZ=N runs N seeds (the long mode), FUZZ_SEED=n one seed (a repro),
+# Everyday: 2 seeds from a fixed base plus one picked by RSpec's seed
+# from SessionFuzz::EVERYDAY_SEEDS (songs measured cheap, so the example's
+# time is bounded; fix-fuzz-1107); FUZZ=N runs N seeds (the long mode), FUZZ_SEED=n one seed (a repro),
 # FUZZ_BASE=n moves the fixed base.
 require_relative '../../../support/session_fuzz'
 
@@ -16,7 +17,8 @@ RSpec.describe('session fuzzing') do
     else
       base = Integer(ENV['FUZZ_BASE'] || 1)
       count = Integer(ENV['FUZZ'] || 2)
-      extra = ENV['FUZZ'] ? [] : [100_000 + (RSpec.configuration.seed.to_i * 7) % 900_000]
+      list = SessionFuzz::EVERYDAY_SEEDS
+      extra = ENV['FUZZ'] ? [] : [list[RSpec.configuration.seed.to_i % list.length]]
       (base...(base + count)).to_a + extra
     end
 
@@ -137,6 +139,15 @@ RSpec.describe('session fuzzing') do
         'at_bar(2) { bg :t1, seq(A4, C5).n8.loop, on: :now; cue :t1 }',
         'at_bar(2, beat: 3) { launch :t1 }',
       ], 3,
+    ],
+    # (fix-warm-deadlock-1107: batch 18's soak hung on seed 766010; the
+    # cue's warm-up, joined by the scheduled block holding the render
+    # lock, took the lock to destroy its copy's branch on a live Tee)
+    'a cue of a patch track warmed in a scheduled block (seed 766010)' => [
+      :warm, ['bpm 150'], [
+        'track :t2, :dnb_sub, q: 1',
+        'at_bar(1) { cue :t2, seq(A4, C5).n8.loop }',
+      ], 1,
     ],
     # (omnibus16: generative-g4's FUZZ_BASE=41 FUZZ=150 seeds 52, 82, 127;
     # a render's end bar under a followed tempo LFO came from the tempo at
@@ -327,10 +338,79 @@ RSpec.describe('session fuzzing') do
         'at_bar(2) { flow(seed: 54, on: :beat) { generate markov(s1: { s1: 2 }, seed: 25), s1: 1 } }',
       ], 2,
     ],
+    # (fix-bufsize-1107: after the tempo change the third region's start
+    # fell between the last frame of one 800-frame block and the first of
+    # the next, and RegionPlayer started it in neither)
+    'a region starting between two blocks after a tempo change (seed 532169)' => [
+      :buffer_size, ['bpm 126', 'knob :busy, 0.5'], [
+        'at_bar(2, beat: 3) { bpm 100 }',
+        'at_bar(1, beat: 3) { bg :x1, regions([breakbeat(:jungle), 0r, 3/4r, { fade_out: 1/8r, curve_out: :sharp }], ' \
+        '[breakbeat(:jungle), 5/8r, 1r, { offset: 0.4, fade_in: 1/8r, curve_in: :smooth, gain: -3.db }], ' \
+        '[breakbeat(:jungle), 3/2r + 1/7r, 1/2r, { transpose: 7 }]) * 0.4, on: :now }',
+      ], 2,
+    ],
+    # (fix-bufsize-1107: the bar-2 block, run ahead of its time, bound the
+    # duck's reader of :t2 on a buffer that depends on the buffer size,
+    # which woke the held kit there; a reader counts from its graph's
+    # start since, so the kit wakes on the unhold as without the duck)
+    'a held kit a reader added ahead of its time reads (seed 611891)' => [
+      :buffer_size, ['bpm 126', 'knob :busy, 0.5'], [
+        'track(:t2, q: 1/2r) { |kit| tr808(kit) * 0.5 }',
+        'scene :s1, t2: beats(16, energy: knob(:busy), seed: 3) { kick [1, 0, 0, 0] * 4, keep: [0, 8]; fill every: 2, energy: true, snare: 0.5, low_tom: 0.3 }, others: :keep',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 2) { hold :t2, on: :now }',
+        'at_bar(1, beat: 2) { after(in: 2.beats) { unhold :t2 } }',
+        'at_bar(2, beat: 2) { bg :ducked, 0.2.constant.duck(:t2, only: :kick, amount: -12.db), on: :beat }',
+      ], 1,
+    ],
+    # (fix-bufsize-1107: the bar-2 relaunch, run ahead, swapped the clip of
+    # the launch queued for bar 2 at 800 frames; at 367 the player stopped
+    # on the one-shot relaunch's frame was kept as stopped after the
+    # relaunch started (the stop landed inside the span), so the swap went
+    # to it and raised, and the track built a new Synth whose unused lanes
+    # ran at another pitch, their key-sync reset step differing on a later
+    # note)
+    'a relaunch swapping a queued launch while a stopped player is kept (seed 394532)' => [
+      :buffer_size, ['bpm 150', 'knob :busy, 0.5'], [
+        'track(:t2, q: 1) { |clip| clip.synth(voices: 2) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t2: seq(G4.n16, B4.n16, D5.n8).loop, others: :keep',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 2) { after(in: 3.beats) { seek 1, 1.1 } }',
+        'at_bar(1, beat: 2) { stop :t2 }',
+        'at_bar(1, beat: 2) { bg :t2, seq(C5, D5).n16, on: :now }',
+        'at_bar(1, beat: 2) { bg :t2, seq(E5, G5).n8.loop, in: 1/4r }',
+        'at_bar(2) { bg :t2, seq(A4, C5).n8.loop, on: :now }',
+      ], 2,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil
     end
+  end
+
+  # (batch 16's soak, fix-fuzz-1106: the parity-1 kit swap of t3's first
+  # grid landed while the flow played :s2, whose beats clip has no kit
+  # rows: a user error by design, ClipSwaps#kit_swap_mapping; kit swaps
+  # are generated only where every scene gives the track a grid with the
+  # first one's rows)
+  it 'swaps a kit only where every scene plays it a grid with those rows (seed 773034)', render_budget: { seconds: 60, reason: 'one random song' } do
+    song = SessionFuzz.generate(Random.new(773034))
+    expect(song.code).to include('t3: beats(16')
+    expect(song.code).not_to match(/swap :t3, grid/)
+    expect(SessionFuzz.check(:runs, song)).to be_nil
+
+    expect(SessionFuzz.kit_rows?("grid(16, kick: 'x...', hat: 'x.x.').loop", %w[kick hat])).to eq(true)
+    expect(SessionFuzz.kit_rows?("grid(16, kick: 'x...').loop", %w[kick hat])).to eq(false)
+    expect(SessionFuzz.kit_rows?('beats(16, seed: 3) { kick [1, 0, 0, 0] * 4 }', %w[kick])).to eq(false)
+  end
+
+  # (fix-bufsize-1107's soak: the ducked-kick step's grid without a snare
+  # took over t1 before a kit swap with one: a user error by design)
+  it 'drops a kit swap whose rows the ducked-kick step\'s grid lacks (seed 611894)', render_budget: { seconds: 60, reason: 'one random song' } do
+    song = SessionFuzz.generate(Random.new(611894))
+    expect(song.code).to include("{ bg :t1, grid(16, kick: 'x...x...', open_hat: '..x...x.').loop")
+    expect(song.code).not_to match(/swap :t1, grid/)
+    expect(SessionFuzz.check(:runs, song)).to be_nil
   end
 
   # The :carry relation's finds (carry-1), shrunk: each song's carrying
@@ -417,6 +497,54 @@ RSpec.describe('session fuzzing') do
         'at_bar(1) { go :s1, on: :now }',
         'at_bar(2, beat: 2) { bg :t2, seq(C5, D5).n16, on: :now; bg :t2, seq(E5, G5).n8.loop, in: 1/4r }',
         'at_bar(3) { flow(seed: 74, on: :beat) { generate markov(s1: { s1: knob(:busy) }, seed: 33), s1: 1..2 } }',
+      ], 3, false,
+    ],
+    # (batch 16's soak, fix-fuzz-1106: t1's rebuild and a seek back landed
+    # on bar 2 beat 3; the rebuilt graph's first start, after the seek,
+    # took over the replaced clip source's notes as if no jump had
+    # happened, so they rang on instead of ending, and the seek's position
+    # wasn't chased; shrunk from a song whose seek came with a regions lane)
+    'a rebuild landing on the frame of a seek back (seed 773017)' => [
+      ['bpm 150', 'knob :busy, 0.5'], [
+        'track(:t1, q: 1/4r) { |clip| clip.synth(voices: 3) { |v| v.hz.triangle * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t1: seq(C4, E4, G4).n8.loop',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 4) { after(in: 3.beats) { seek 1, 1.1 } }',
+      ], 3, false,
+    ],
+    # (conv-reverb-1's spec:quick, fix-fuzz-1107: t2's rebuild and a level
+    # landed on bar 3; the rebuilt player hadn't played yet, so the level
+    # counted as unheard and cut to 0 where the uninterrupted song glided
+    # over the declick (Faders#unheard_level?, now Player#heard?); shrunk
+    # from a song with a dnb_sub and a second synth track)
+    'a level landing with a rebuild (seed 327738)' => [
+      ['bpm 174', 'meter 3, 4', 'knob :busy, 0.5'], [
+        'track(:t2, q: 1) { |clip| clip.synth(voices: 3) { |v| v.hz.sine * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t2: melody(scale(:minor, :a).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop, others: :keep',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(2, beat: 3) { level :t2, 0, on: :bar }',
+      ], 3, false,
+    ],
+    # (the same class, fix-fuzz-1107: a cue launched on a rebuild's frame
+    # dropped the rebuilt player instead of fading it out
+    # (Cue#switch_cue_player))
+    'a cue launched where a rebuild lands' => [
+      ['bpm 174', 'meter 3, 4', 'knob :busy, 0.5'], [
+        'track(:t2, q: 1) { |clip| clip.synth(voices: 3) { |v| v.hz.sine * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t2: melody(scale(:minor, :a).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop, others: :keep',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(2, beat: 3) { cue :t2, seq(A4, C5).n8.loop; after(in: 1.beat) { launch :t2 } }',
+      ], 3, false,
+    ],
+    # (the same class, fix-fuzz-1107: an instrument change on a rebuild's
+    # frame cut the rebuilt player instead of spilling it (Session#add_now's
+    # spiller); the change is asked for after the rebuild, at 1:3)
+    'an instrument change landing with a rebuild' => [
+      ['bpm 174', 'meter 3, 4', 'knob :busy, 0.5'], [
+        'track :t1, :dnb_sub, q: 1',
+        'scene :s1, t1: seq(C4, E4, G4).n8.loop',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 3) { after(in: 1/16r) { track :t1, :square_bass } }',
       ], 3, false,
     ],
   }.each do |name, (header, lines, bars, slow)|

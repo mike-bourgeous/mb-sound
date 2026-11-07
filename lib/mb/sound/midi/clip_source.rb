@@ -411,6 +411,28 @@ module MB
           @carried_sounding = s ? s.dup : {}
         end
 
+        # Called by Session before a carried source's first start when the
+        # timeline was seeked after the rebuild landed (fix-fuzz-1106,
+        # SessionFuzz seed 773017): the start is then a jump, as the
+        # replaced source's seek would have been, so the notes in progress
+        # it took over get their note-offs, the next read plays early notes
+        # like any jump, and the start's origin is worked out as a seek's.
+        # The extra jump counts as the carried start's, so Notes nodes
+        # holding the replaced graph's notes chase the seek's position
+        # (Notes::Node#take_chase).
+        def carry_seeked
+          return self if @carried_sounding.nil? && @carried_origin.nil?
+
+          @carried_origin = nil
+          @carried_early = nil
+          if (c = @carried_sounding)
+            @carried_sounding = nil
+            @sounding = c
+          end
+          jumped
+          self
+        end
+
         # Source#balance, except at a carried source's start (see
         # #carry_adopt): the start's jump ends none of the replaced source's
         # notes in progress, which this source takes over.
@@ -422,7 +444,7 @@ module MB
           end
           super(events)
         end
-        public :carry_fits?, :carry_adopt
+        public :carry_fits?, :carry_adopt, :carry_seeked
 
         def seek_to(time)
           set_clip_position(transport.whole_notes_of(time))

@@ -53,6 +53,8 @@ module MB
           # (hz, lfo: tempo-synced pitches and LFOs, `1.bar.hz`)
           'MB::Sound::Sequence::Duration' => %i[dotted dd double_dotted triplet d t hz lfo] + ARITHMETIC.to_a,
           'MB::Sound::Length::Quantity' => ARITHMETIC.to_a,
+          # (lfo_bars.bars.hz, .lfo: tempo pitches and LFOs following a node)
+          'MB::Sound::Sequence::NodeDuration' => %i[hz lfo],
           'MB::Sound::Interval' => ARITHMETIC.to_a,
           'MB::Sound::Phase' => ARITHMETIC.to_a,
           # lfo.samples, 0.25.cycles of a node, input.outputs[i] (and
@@ -85,7 +87,7 @@ module MB
           # Racks applied to sources (`sig.then(&arack { |s| ... })`;
           # Loader#call_block takes a Rack as the block argument), bound,
           # and composed
-          'MB::Sound::GraphNode' => %i[samples seconds cycles cyc radians rad outputs then],
+          'MB::Sound::GraphNode' => %i[samples seconds bars cycles cyc radians rad outputs then],
           'MB::Sound::GraphNode::Channels' => %i[then],
           'MB::Sound::Notes' => %i[then],
           # (a clip's stream through transforms: set documents' wires,

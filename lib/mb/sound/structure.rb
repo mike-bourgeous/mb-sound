@@ -2,6 +2,7 @@ require_relative 'structure/frames'
 require_relative 'structure/tempo'
 require_relative 'structure/beats'
 require_relative 'structure/meter'
+require_relative 'structure/compound'
 require_relative 'structure/result'
 require_relative 'structure/sections'
 require_relative 'structure/comparison'
@@ -63,7 +64,7 @@ module MB
       def self.analyze(data, sample_rate: 48000, bpm: nil, refine: 0.005, grid: nil, start: 0,
         beats: :grid, beats_per_bar: 4, short_bars: [2, 3], downbeat_penalty: 15.0,
         phase_weights: [4, 1, 1], tightness: 100, offset: ONSET_LATENCY,
-        min_bpm: 50, max_bpm: 220, center_bpm: 120)
+        min_bpm: 50, max_bpm: 220, center_bpm: 120, compound: true)
         raise ArgumentError, "beats: must be :grid or :dp (got #{beats.inspect})" unless [:grid, :dp].include?(beats)
         raise ArgumentError, "beats_per_bar: must be an Integer of at least 2 (got #{beats_per_bar.inspect})" unless beats_per_bar.is_a?(Integer) && beats_per_bar >= 2
         raise ArgumentError, "bpm: must be a positive number (got #{bpm.inspect})" unless bpm.nil? || (bpm.is_a?(Numeric) && bpm > 0)
@@ -106,15 +107,79 @@ module MB
           tempo = period ? 60 * fps / period : bpm
         end
 
+        obs = nil
         db = timed.(:downbeats) {
           obs = Meter.observations(frames, beat_frames)
           Meter.downbeats(obs, beats_per_bar: beats_per_bar, short_bars: short_bars, penalty: downbeat_penalty)
         }
 
+        # A 6/8 song read as simple meter (see Compound): reported, and
+        # regridded as 6/8 when the grid's beat is a dotted eighth
+        found = compound && beats_per_bar == 4 ? timed.(:downbeats) { Compound.check(onset, fps, beat_frames, tempo) } : nil
+        if found&.regridded?
+          beat_list, bars, meters = compound_bars(beat_frames, db, obs, fps, offset)
+          return Result.new(tempo: found.tempo, tempo_estimate: estimate, beats: beat_list, bars: bars, meters: meters,
+            tracker: beats, duration: duration, sample_rate: sample_rate, timings: timings, frames: frames, compound: found)
+        end
+
         times = beat_frames.map { |f| f / fps + offset }
         beat_list, bars, meters = tracked_bars(times, db, beats_per_bar)
         Result.new(tempo: tempo, tempo_estimate: estimate, beats: beat_list, bars: bars, meters: meters,
-          tracker: beats, duration: duration, sample_rate: sample_rate, timings: timings, frames: frames)
+          tracker: beats, duration: duration, sample_rate: sample_rate, timings: timings, frames: frames, compound: found)
+      end
+
+      # Beats, bars, and meters for a 6/8 song whose grid beat is a dotted
+      # eighth (Compound :dotted_eighth): the 4-beat bars of downbeats +db+
+      # (indices into +beat_frames+) become 6/8 bars of 3 quarter-note
+      # beats (two eighths, 4/3 of a grid beat, apart).  A downbeat on a
+      # beat between eighths (every other grid beat) moves to the
+      # neighbour, the earlier or later one as their downbeat
+      # observations (+obs+) say.
+      def self.compound_bars(beat_frames, db, obs, fps, offset)
+        n = beat_frames.length
+        if db.length >= 2 && n >= 2
+          period = beat_frames.each_cons(2).map { |a, b| b - a }.sort[(n - 1) / 2]
+          # the parity of the eighths' beats: the one holding the downbeats
+          # in most bars, unless its observations are weaker
+          even = (0...n).step(2).sum { |i| obs[i] }
+          odd = (1...n).step(2).sum { |i| obs[i] }
+          parity = even >= odd ? 0 : 1
+          db = db.map { |i|
+            next i if i % 2 == parity
+            back = i - 1 >= 0 ? obs[i - 1] : -Float::INFINITY
+            fwd = i + 1 < n ? obs[i + 1] : -Float::INFINITY
+            back >= fwd ? i - 1 : i + 1
+          }.uniq
+          step = period * 4 / 3.0
+          bars = db.each_with_index.map { |bi, k|
+            start = beat_frames[bi]
+            stop = k + 1 < db.length ? beat_frames[db[k + 1]] : start + 4 * period
+            len = Rational(((stop - start) / step * 2).round, 2) # (quarter-note beats, to the eighth)
+            len = 3r if len <= 0
+            Bar.new(number: k + 1, seconds: start / fps + offset, beats: len.denominator == 1 ? len.to_i : len,
+              end_seconds: stop / fps + offset, compound: true)
+          }
+          beats = []
+          first = beat_frames[db.first]
+          t = first
+          t -= step while t - step >= beat_frames.first - period / 4
+          pickup = ((first - t) / step).round
+          (0...pickup).each { |k| beats << Beat.new(seconds: (t + k * step) / fps + offset, bar: 0, beat: 4 - pickup + k) }
+          bars.each_with_index do |b, k|
+            start = beat_frames[db[k]]
+            count = k + 1 < bars.length ? ((beat_frames[db[k + 1]] - start) / step).round : [((beat_frames.last - start) / step).floor + 1, 3].min
+            count.times { |j| beats << Beat.new(seconds: (start + j * step) / fps + offset, bar: b.number, beat: j + 1) }
+          end
+          meters = []
+          pos = 0r
+          bars.each do |b|
+            meters << Sequence::Transport::Meter.new(pos: pos, bar_length: b.length, bar: b.number) if meters.empty? || meters.last.bar_length != b.length
+            pos += b.length
+          end
+          return [beats, bars, meters]
+        end
+        times = beat_frames.map { |f| f / fps + offset }
+        [times.map { |t| Beat.new(seconds: t, bar: 0, beat: 1) }, [], [Sequence::Transport::Meter.new(pos: 0r, bar_length: 3/4r, bar: 1)]]
       end
 
       # "m:ss.cc" for +seconds+ (negative times, a hair before the start,

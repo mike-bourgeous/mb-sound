@@ -75,7 +75,7 @@ module MB
             :ringing
           elsif !p.current?
             :fading
-          elsif !p.started
+          elsif !p.heard?
             :starting
           elsif p.asleep || p.strip_level == 0 && p.strip_ramp.nil?
             :muted

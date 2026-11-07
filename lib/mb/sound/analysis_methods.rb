@@ -205,14 +205,18 @@ module MB
       def loudness(data, sample_rate: 48000, weights: nil, true_peak: true)
         if data.is_a?(String)
           input = FFMPEGInput.new(data)
-          analyzer = Loudness::Analyzer.new(channels: input.channels, sample_rate: input.sample_rate, weights: weights, true_peak: true_peak)
-          chunk = (input.sample_rate * 10).round
-          loop do
-            buf = input.read(chunk)
-            break if buf.nil? || buf[0].nil? || buf[0].empty?
-            analyzer.process(buf)
+          begin
+            analyzer = Loudness::Analyzer.new(channels: input.channels, sample_rate: input.sample_rate, weights: weights, true_peak: true_peak)
+            chunk = (input.sample_rate * 10).round
+            loop do
+              buf = input.read(chunk)
+              break if buf.nil? || buf[0].nil? || buf[0].empty?
+              analyzer.process(buf)
+            end
+            return analyzer.result
+          ensure
+            input.close # (ffmpeg's status and pipe now, not at the GC)
           end
-          return analyzer.result
         end
 
         if data.is_a?(GraphNode) || data.is_a?(GraphNode::Channels)

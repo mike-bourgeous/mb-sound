@@ -139,7 +139,8 @@ module RelationFuzz
       when 0 then [:filter, FILTERS[rng.rand(FILTERS.length)], control(rng, 200, 5000), control(rng, 0.5, 4)]
       when 1 then [:lp4, control(rng, 200, 5000), rng.rand.round(2)]
       when 2 then [:diode, control(rng, 200, 4000), rng.rand.round(2)]
-      when 3 then [:softclip]
+      # (db-shaper-1: half the softclips are dB shapers instead)
+      when 3 then rng.rand < 0.5 ? [:softclip] : [:shape_db, %i[soft_knee fuzz fold_back gate asymmetric][rng.rand(5)]]
       when 4 then [:asoftclip]
       when 5 then [:clip, (0.2 + rng.rand * 0.6).round(2)]
       when 6 then [:quantize, [0.05, 0.1, 0.25][rng.rand(3)]]
@@ -175,7 +176,7 @@ module RelationFuzz
       [:filter, :lowpass, c, [:const, 1]], [:lp4, c, 0.3], [:diode, c, 0.3], [:softclip], [:asoftclip], [:clip, 0.5],
       [:quantize, 0.1], [:delay, [:const, 0.001], nil], [:delay, [:const, 0.001], 0.3], [:decimate, [:const, 4000]],
       [:at, [:const, 0.5]], [:compress, -12, 4], [:feedback, 30, 0.5], [:ease, :smoothstep], [:formant, :a],
-      [:pan, [:const, 0.2]], [:abs], [:until, 0.011], [:period_delay, 110], [:sample_hold, false],
+      [:pan, [:const, 0.2]], [:abs], [:until, 0.011], [:period_delay, 110], [:sample_hold, false], [:shape_db, :fuzz],
     ].map { |op| Expr.new(op.first, op.drop(1), [kid]) }
   end
 
@@ -228,6 +229,7 @@ module RelationFuzz
                end
       "#{k[0]}.feedback { |fb, input| input + fb.delay(#{a[0]}.samples)#{insert} * #{a[1]} }"
     when :ease then "#{k[0]}.ease(#{a[0].inspect})"
+    when :shape_db then "#{k[0]}.shape_db(#{a[0].inspect})"
     when :formant then "#{k[0]}.formant(#{a[0].inspect})"
     when :pan then "#{k[0]}.pan(#{ctl(a[0])})"
     when :balance

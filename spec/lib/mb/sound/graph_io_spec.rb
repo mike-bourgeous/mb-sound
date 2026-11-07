@@ -352,6 +352,8 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       g = MB::Sound.preset(path, input: MB::Sound.file_input(audio_path).ringdown, drive: 0.5)
       expect(io.document_of(g)[:drive]).to eq(0.5)
       expect(render(g, buffers: 10).map { |c| c.abs.max }.max).to be > 0.01
+    ensure
+      close_inputs(g) if g
     end
   end
 
@@ -542,7 +544,10 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
 
         FileUtils.cp(audio_path, tmp_path('arp.flac'))
         File.write(path, "file_input('arp.flac')")
-        expect(render(io.load(path), buffers: 4).first.abs.max).to be > 0.01
+        g = io.load(path)
+        expect(render(g, buffers: 4).first.abs.max).to be > 0.01
+      ensure
+        close_inputs(g) if g
       end
 
       # graph-io-3: before FileGuard, Wavetable['/abs/path'], tables named
