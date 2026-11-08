@@ -42,6 +42,40 @@ RSpec.describe('UI session panes', :aggregate_failures) do
     expect(text).to match(/pad\s+stopping chords/) # (no level shown at unity)
   end
 
+  # (tuner-fixes-1, the maintainer: "The tracks UI says it has nothing to
+  # scroll but at the bottom it says +5 more"; "let me use arrows to
+  # highlight tracks and then delete them, or change their volume")
+  it 'picks tracks with the arrows, scrolling to them, changes the picked level, stops it, and hides stopped tracks' do
+    tracks = (1..9).map { |i| ui::TrackInfo.new(name: :"t#{i}", q: '1', clip: 'c', armed: false, level: i == 3 ? -2.0 : nil) }.freeze
+    snap = snap_with(tracks: tracks).with(parts: [].freeze) # (no other players)
+    pane = ui.panes.fetch(:tracks)
+    state = { title_in_rule: true }
+    paint = -> {
+      grid = MB::Term::Cells.new(40, 5)
+      pane.draw(ui::Canvas.new(grid, 0, 0, 40, 5), snap, state)
+      grid.to_text(:none).lines.map(&:rstrip)
+    }
+    lines = paint.()
+    expect(lines.last).to eq('+5 more (Enter, then Up/Down)')
+    expect(pane.key_action(:scroll, state, 0)).to include('t1') # (the arrows pick here, not "nothing to scroll")
+    6.times { pane.key_action(:pick, state, 1) }
+    expect(state[:cursor]).to eq(:t7)
+    lines = paint.()
+    expect(lines.join("\n")).to include('▸t7')
+    expect(lines.last).to eq('3 above, +2 more')
+    expect(lines.first).to include('t4')
+
+    state[:cursor] = :t3
+    r = pane.key_action(:level, state, -1)
+    expect(r.code).to eq('level :t3, -3.0.db')
+    expect(pane.key_action(:level, state, 0).code).to eq('level :t3, 0.0.db')
+    expect(pane.key_action(:stop_track, state).code).to eq('stop :t3')
+
+    # (all nine are stopped in the fake snapshot: v hides them)
+    expect(pane.key_action(:stopped_view, state)).to include('hidden')
+    expect(paint.().first).to eq('9 stopped (v shows them)')
+  end
+
   it 'logs landed changes newest at the bottom' do
     landed = [ui::LandedInfo.new(seq: 1, kind: :add, subject: :bass, lands: '9:1', pos: 8r, at: nil),
               ui::LandedInfo.new(seq: 2, kind: :mute, subject: :pad, lands: '17:1', pos: 16r, at: nil)].freeze
