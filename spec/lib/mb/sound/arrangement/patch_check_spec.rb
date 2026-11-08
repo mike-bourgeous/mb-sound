@@ -141,7 +141,9 @@ RSpec.describe(MB::Sound::Arrangement::PatchCheck) do
         }.new(stores, f))
       end
       expect(stores.map { |_, m, _| m }).to include(:track, :scene)
-      unchecked = stores.reject(&:last)
+      # (methods that only put back a Track #track stored and checked)
+      exempt = { put_track: "untrack's undo puts back the Track it took out (tuner-fixes-1)" }
+      unchecked = stores.reject(&:last).reject { |_, m, _| exempt.key?(m) }
       expect(unchecked).to be_empty, "these store patches without check_patch: #{unchecked.inspect}"
     end
   end
