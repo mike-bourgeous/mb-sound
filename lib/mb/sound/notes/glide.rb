@@ -158,11 +158,12 @@ module MB
           @from = from
           @from_note = nil
           @from_offset = nil
+          @from_number = nil # (+from+ as a note number, for #resume_start)
           if from.is_a?(Interval)
             @from_offset = from.to_semitones.to_f
           elsif !from.nil?
             raise ArgumentError, "Glide start must be a Pitch, a note number, or an Interval (got #{from.inspect})" unless from.is_a?(Numeric) || from.is_a?(MB::Sound::Pitch)
-            @number = @from_note = number_of(from)
+            @number = @from_note = @from_number = number_of(from)
           end
 
           @value = @number
@@ -347,9 +348,9 @@ module MB
         # Resumes the glide in progress at a content jump (see +resume:+ in
         # the class description), or chases as usual (Node#chase_item).
         def resume_item(c)
-          return c.starts ? chase_start(c.event) : chase(c.event) unless @resume && c.previous && enabled?
+          start = resume_start(c)
+          return c.starts ? chase_start(c.event) : chase(c.event) unless @resume && start && enabled?
 
-          start = marked_number(c.previous)
           @from_offset = nil
           if c.starts
             # The note-on follows at the same time and glides from +start+
@@ -365,6 +366,22 @@ module MB
               @position = resume_position(c)
               @gliding = false if @position >= @length
             end
+          end
+        end
+
+        # Where a resumed glide (Chase +c+) glides from: the previous note,
+        # or +from:+ for the first note of a clip that doesn't loop (a
+        # non-looping tween's first step, which glides from its first
+        # keyframe; Chase#index 0 with no previous note).  Before
+        # fix-bus-tween-1 that chase had no start, so it jumped to the
+        # step's target: `tween([0, 1], 4.bars, loop: false)` seeked, or
+        # woken in a bus chain, at bar 2 held 1 instead of 0.25.  Nil if
+        # neither is known.
+        def resume_start(c)
+          if c.previous
+            marked_number(c.previous)
+          elsif c.index == 0
+            @from_number
           end
         end
 
