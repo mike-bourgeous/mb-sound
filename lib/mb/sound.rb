@@ -108,6 +108,7 @@ require_relative 'sound/drum_methods'
 require_relative 'sound/sq80_methods'
 require_relative 'sound/struck_methods'
 require_relative 'sound/structure_methods'
+require_relative 'sound/bar_stats_methods'
 require_relative 'sound/genre_methods'
 require_relative 'sound/sampler_methods'
 require_relative 'sound/tracker'
@@ -159,6 +160,7 @@ module MB
     extend SQ80Methods
     extend StruckMethods
     extend StructureMethods
+    extend BarStatsMethods
     extend GenreMethods
     extend SamplerMethods
     extend TrackerMethods

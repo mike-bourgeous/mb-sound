@@ -1574,14 +1574,25 @@ module MB
         waveform, first-50-ms, spectrogram, and top-octave images with
         labeled axes to read before changing a sound.
 
+        Bar by bar: `r = bar_stats('song.flac', bpm: 140)` measures every
+        beat, bar, and section (onset timing per band, LUFS, peaks, crest,
+        tails, octave bands, width, chroma, key) with a broadcast loudness
+        report (`puts r.broadcast`: integrated, LRA, true peak, PLR,
+        pass/fail for EBU R 128, ATSC A/85, streaming); `render 'song.flac',
+        bars: 64, bar_stats: true { song }` writes them beside the file on
+        the render's exact grid.  `c = compare_bars('a.flac', 'b.flac', bpm:
+        140)` ranks the bars that changed, names likely causes (a late bus,
+        missing reverb, over-compression, a missing band, a transpose), and
+        `c.check!(timing: 2)` fails naming the bars.
+
         Impulse responses: `m = reverb_match('hall.wav')` measures decay
         times per octave, predelay, build-up, tail tone, and width, and
         fits the algorithmic reverb to them (`m.apply(sig, mix: 0.3)`,
         `m.to_ruby`, `m.plot('match.png')`); `sig.convolve('hall.wav')`
         plays the impulse itself.
       TEXT
-      commands :freq_estimate, :peaks, :autocorrelate, :crosscorrelate, :peak_correlation, :analyze_form, :loudness, :analyze, :compare, :look, :reverb_match
-      note :structure, :analysis
+      commands :freq_estimate, :peaks, :autocorrelate, :crosscorrelate, :peak_correlation, :analyze_form, :loudness, :analyze, :compare, :look, :reverb_match, :bar_stats, :compare_bars
+      note :structure, :analysis, :bar_stats
       see :loudness, :plots
     end
 
@@ -1591,8 +1602,11 @@ module MB
         renders.  `render 'mix.flac', bars: 64, report: :tracks { song }`
         (scripts: `--report`) prints LUFS, short-term max, true peak, and
         PLR per track and the mix, and each section pass's loudness.
+        `bar_stats('song.flac').broadcast` is the broadcast report (as
+        ffmpeg's ebur128 prints it) with pass/fail per delivery target, and
+        loudness per beat, bar, and section.
       TEXT
-      commands :loudness, :render
+      commands :loudness, :render, :bar_stats
       dsl :loudness_meter
       note :method_modules, :dynamics
       see :mastering
