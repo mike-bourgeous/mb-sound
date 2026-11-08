@@ -481,6 +481,40 @@ RSpec.describe(MB::Sound::Session::Buses) do
       expect(session.bus_info[:pre]).to match(/to verb/)
       expect(session.bus_info[:verb]).to match(/to master/)
     end
+
+    # fix-bus-tween-1 (found by the .acd converter's bus envelopes): a
+    # one-shot tween in a chain whose bus first got signal after bar 1
+    # jumped to its end there (0.00 until bar 2, then 1.00), since the
+    # wake's chase into its first step had no previous keyframe; the same
+    # tween on a track was right.  Input in bar 2, then (after a gap the
+    # bus sleeps through) from bar 4.
+    [800, 367].each do |bs|
+      it "plays a tween that doesn't loop on the timeline in a chain fed late and woken after a gap (#{bs}-frame buffers)" do
+        tween = -> { MB::Sound.tween([0.0, 1.0], [4.n1], loop: false, curve: :linear) }
+        lane = -> {
+          smp = MB::Sound::Sample.new([Numo::SFloat.new(48000 * 8).fill(0.5)])
+          MB::Sound.regions([smp, 1r, 1r], [smp, 3r, 2r])
+        }
+        bused = new_session
+        bused.bus(:b) { |sig| sig * tween.call }
+        bused.add(lane.call, name: :t, to: :b)
+        a = run(96000 * 5, [bs], s: bused)
+        asleep = bus_struct(:b, s: bused).asleep
+        bused.close
+
+        tracked = new_session
+        tracked.add(lane.call * tween.call, name: :t)
+        b = run(96000 * 5, [bs], s: tracked)
+        tracked.close
+
+        expect(a[96000]).to be_within(1e-5).of(0.5 * 0.25) # bar 2: a quarter of the way
+        expect(a[192000...288000].abs.max).to eq(0) # the gap
+        expect(a[288000]).to be_within(1e-5).of(0.5 * 0.75) # bar 4, woken
+        expect(a[383999]).to be_within(1e-5).of(0.5)
+        expect(asleep).to eq(false)
+        expect((a - b).abs.max).to be < 1e-7
+      end
+    end
   end
 
   # fixes-13: bus chains run in segments of a span and sleep, so a chain

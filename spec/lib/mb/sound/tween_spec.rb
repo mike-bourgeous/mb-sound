@@ -64,6 +64,31 @@ RSpec.describe('Tweens (MB::Sound.tween, Clip#tween, smooth(curve:))') do
       end
     end
 
+    [800, 367].each do |bs|
+      it "resumes a tween that doesn't loop where a seek lands in its first step, or back on its start (#{bs}-frame buffers)" do
+        # fix-bus-tween-1: the chase into the first step of a one-shot
+        # tween had no previous keyframe, so it jumped to the step's
+        # target (1.0 here) and held it; a bus waking mid-tween did the same
+        tw = -> { MB::Sound.tween([0.0, 1.0, 0.5], [3.n1, 1.n1], loop: false, curve: [:linear, :fast]) }
+        ref = take(tw.call, 9)
+        [9/4r, 0r, 7/2r].each do |target|
+          session = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: bs, realtime: false, raise_errors: true)
+          out = []
+          MB::Sound::Session.with_context(session: session) {
+            MB::Sound.bg(:t, tw.call)
+            out << session.process_buffer[0].dup while out.sum(&:length) < 120000
+            session.seek(MB::Sound::Sequence::Duration.new(target))
+            out << session.process_buffer[0].dup while out.sum(&:length) < 120000 + 96000 * 2
+          }
+          session.close
+          data = SpecBuffers.join(out).cast_to(Numo::DFloat)
+          seeked = (120000 / bs.to_f).ceil * bs # (the seek lands on the next buffer's start)
+          at = (target * 96000).to_i
+          expect((data[seeked...(seeked + 96000)] - ref[at...(at + 96000)]).abs.max).to be < 1e-5, "seek to #{target}"
+        end
+      end
+    end
+
     it 'starts at its first keyframe wherever it launches with align: :launch' do
       out = launched_tween(MB::Sound.tween([200.0, 1000.0], 1.bar, curve: :linear, align: :launch), pre: 100000, buffer_size: 800, bars: 2)
       start = out.to_a.index { |v| v != 0 }
