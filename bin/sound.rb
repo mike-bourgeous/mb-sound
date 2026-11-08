@@ -133,6 +133,11 @@ class PryByebugWorkaround < Pry::REPL
   end
 end
 
+# The console's line editing, evaluation, and printing compiled by YJIT before
+# anything plays (the first lines typed otherwise hold the GVL while it
+# compiles them: dropouts; MB::Sound::UI.warm_up_console)
+startup_step.('Warming up the console') { MB::Sound::UI.warm_up_console }
+
 # An exception that ends the console writes a debug_dump (the take, the
 # session's state, the exception) before it prints
 begin

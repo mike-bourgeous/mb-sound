@@ -75,6 +75,17 @@ module MB
           MB::Sound.module_eval('binding')
         end
 
+        # Runs the block with a throwaway take as .current (console lines
+        # evaluated in it go to no take: UI.warm_up_console's).  Returns
+        # the block's value.
+        def discarding
+          old = @current
+          @current = new
+          yield
+        ensure
+          @current = old
+        end
+
         # The id of the console line being evaluated on this thread, or nil.
         def current_line_id
           Session.context&.take_line&.last&.id
