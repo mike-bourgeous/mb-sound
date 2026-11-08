@@ -509,6 +509,16 @@ module SessionFuzz
       line = "bg :#{s.bg_name}, #{lane} * 0.4#{s.on}"
       s.rng.rand < 0.6 ? "#{line}; after(in: 3.beats) { seek #{bar}, #{s.pick(['2.25', '3.6', '1.1'])} }" : line
     },
+    ->(s) {
+      # (fix-bus-resample-1) a bus whose chain reads ahead of its output
+      # (resamplers around a filter, the Nightfall drum bus), fed by a
+      # melodic part: its latency is the chain's read-ahead at any buffer
+      # size (before, two buffers late with its first buffer played three
+      # times, so :buffer_size failed), the same through a bus tap
+      chain = s.pick(['resample(96000).lp4(9000).resample(48000)', 'resample(96000).filter(:lowpass, cutoff: 12000.0, quality: 0.7).resample(48000)', 'resample(44100).resample(48000)'])
+      line = "bus(:ovs) { |sig| sig.#{chain} * 0.5 }; bg :#{s.bg_name}, #{s.pick(MELODIC)}, to: :ovs#{s.on}"
+      s.rng.rand < 0.3 ? "#{line}; bg :#{s.bg_name}, bus(:ovs).resample(96000).resample(48000) * 0.3#{s.on}" : line
+    },
     # (new commands go here, at the end)
   ].freeze
 
