@@ -69,6 +69,22 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     expect(term.slave.console_mode.to_s).not_to eq(before.to_s) if mode.nil?
   end
 
+  # (tuner-fixes-1: "Running plot when UI is up should ... rescale the plot
+  # to the panel size instead of the console size")
+  it 'sizes text plots to the REPL pane while it is up' do
+    start(:tiles, rows: 40, cols: 160)
+    MB::Sound::UI.instance_variable_set(:@tiles, @tiles)
+    r = @tiles.repl_size
+    expect(r).to eq([repl_rect.w, repl_rect.h])
+    expect(r[0]).to be < 160
+    expect(MB::Sound::UI.console_size).to eq(r)
+    p = MB::Sound::Plot::Plotter.terminal(height_fraction: 0.8)
+    expect(p.width).to eq(r[0] - 1)
+    expect(p.height).to eq(((r[1] - 1) * 0.8).round)
+  ensure
+    MB::Sound::UI.instance_variable_set(:@tiles, nil)
+  end
+
   it 'enters NAV with Ctrl-], picks, zooms, and leaves with i, keys going back to the REPL' do
     start
     nav('z')

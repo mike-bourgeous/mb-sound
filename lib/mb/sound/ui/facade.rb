@@ -12,6 +12,33 @@ module MB
       #     ui.bind ['k', :ctrl], :keys
       #     ui.mode          # => :band
       #     ui.screen        # the Band or Tiles itself
+      # What a bare `ui` returns while nothing is on screen (see
+      # UIMethods#ui): the facade's commands, the default screen shown
+      # first for all but QUIET ones, and when printed (`ui` alone at the
+      # prompt: Pry prints the result).
+      class Pending
+        # Facade commands that need no screen (a bare `ui` before them
+        # shows nothing).
+        QUIET = %i[note notes bind unbind key_table keyboard mode off keys].freeze
+
+        def method_missing(name, *args, **opts, &block)
+          return super unless UI.facade.respond_to?(name)
+          UI.show unless QUIET.include?(name)
+          UI.facade.public_send(name, *args, **opts, &block)
+        end
+
+        def respond_to_missing?(name, include_private = false) = UI.facade.respond_to?(name, include_private) || super
+
+        # Shows the default screen (the band), as `ui` always did, and
+        # describes it.
+        def inspect
+          UI.show
+          UI.facade.inspect
+        end
+
+        def pretty_print(q) = q.text(inspect)
+      end
+
       class Facade
         # The mode: :tiles, :band, :hidden (tiles hidden with Ctrl-Z), :off.
         def mode

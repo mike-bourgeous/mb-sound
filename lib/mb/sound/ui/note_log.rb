@@ -25,8 +25,12 @@ module MB
         # (the screen in words), +markdown+ (what was appended), +data+ (the
         # note's JSON record, see .record), +record+ (the record's Hash).
         Note = Data.define(:time, :text, :path, :where, :markdown, :data, :record) do
-          def to_s = "ui.note saved #{time.strftime('%H:%M:%S')} (#{where}#{about}) to #{path}, data #{data}"
-          def inspect = "#<#{self}>"
+          # (one short line: the maintainer, 2026-11-07, "The return value of
+          # ui.note makes too much noise in the pry console"; #data has the
+          # record's path)
+          def to_s = "note saved #{time.strftime('%H:%M:%S')} (#{where}#{about}) in #{path.delete_prefix("#{Dir.pwd}/")}"
+          def inspect = "#<ui.#{self}>"
+          def pretty_print(q) = q.text(inspect)
 
           private def about
             pt = record[:pointed]

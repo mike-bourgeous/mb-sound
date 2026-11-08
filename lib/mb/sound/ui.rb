@@ -680,6 +680,20 @@ module MB
         @band if @band&.active?
       end
 
+      # [columns, rows] the console has while a screen is up (the tiled
+      # screen's REPL pane; the terminal less the band's rows), or nil:
+      # text plots size to it (Plot::Plotter.console_size).
+      def self.console_size
+        t = @tiles
+        return t.repl_size if t&.active? && t.repl_size
+        b = @band
+        return [b.cols, [b.rows - b.height, 5].max] if b&.active? && b.cols && b.rows && b.height
+        nil
+      rescue StandardError
+        nil
+      end
+      Plot::Plotter.console_size = -> { UI.console_size }
+
       # Defines (or replaces) a pane kind: the block makes a Pane from a
       # name and options (`pane :x, kind: :mine, ...` in pane files).
       #

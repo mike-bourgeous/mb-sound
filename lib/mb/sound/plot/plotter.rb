@@ -34,6 +34,16 @@ module MB
         # The lines of the last text plot.
         attr_reader :lines
 
+        class << self
+          # A Proc giving [columns, rows] of the console that text plots
+          # print into when an application draws a screen of its own around
+          # it (mb-sound's terminal UI: the REPL pane, or the rows the band
+          # leaves), or returning nil for the whole terminal.  Plots size to
+          # it instead of the terminal (tuner-fixes-1: a plot from the tiled
+          # screen's REPL was drawn at the terminal's size).
+          attr_accessor :console_size
+        end
+
         # A text plotter sized to fractions of the terminal (resized with the
         # terminal unless +width+ or +height+ fixes it; PLOT_WIDTH and
         # PLOT_HEIGHT override).
@@ -78,7 +88,7 @@ module MB
           env = Terminal.env_int('PLOT_WIDTH')
           return env if env
 
-          ((@width || (MB::U.width - 1)) * (@width ? 1 : @width_fraction)).round.clamp(20, nil)
+          ((@width || console_cols || (MB::U.width - 1)) * (@width ? 1 : @width_fraction)).round.clamp(20, nil)
         end
 
         # Text height in lines (or image height in pixels).
@@ -88,7 +98,19 @@ module MB
           env = Terminal.env_int('PLOT_HEIGHT')
           return env if env
 
-          ((@height || (MB::U.height - 1)) * (@height ? 1 : @height_fraction)).round.clamp(5, nil)
+          ((@height || console_rows || (MB::U.height - 1)) * (@height ? 1 : @height_fraction)).round.clamp(5, nil)
+        end
+
+        # The console's columns less one when .console_size knows them.
+        private def console_cols
+          s = Plotter.console_size&.call
+          s && s[0] - 1
+        end
+
+        # The console's rows less one when .console_size knows them.
+        private def console_rows
+          s = Plotter.console_size&.call
+          s && s[1] - 1
         end
 
         # Sets the x range of following plots (nil, nil to fit the data).

@@ -263,6 +263,13 @@ module MB
         # The Session this screen shows (nil: the default one).
         def session = @session
 
+        # [columns, rows] of the REPL pane, or nil without one (text plots
+        # size to it: Plot::Plotter.console_size).
+        def repl_size
+          r = repl_rect
+          r && [r.w, r.h]
+        end
+
         def active? = @active
 
         # The painter thread (nil while off).
