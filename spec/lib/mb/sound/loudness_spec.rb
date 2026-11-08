@@ -473,6 +473,23 @@ RSpec.describe(MB::Sound::Loudness, :aggregate_failures) do
       expect(a.momentary).to be_within(0.1).of(-26)
     end
 
+    it 'measures ranges: ungated mean loudness to the sample, and window maxima ending inside' do
+      a = described_class.new(channels: 2).process(stereo([[-30, 1], [-20, 1], [-30, 1.005]]))
+      mean = a.mean_loudness_in([[0.0, 1.0], [1.0, 2.0], [0.5, 1.5], [1.0, 1.0], [0.995, 1.005]])
+      expect(mean[0]).to be_within(0.05).of(-30)
+      expect(mean[1]).to be_within(0.05).of(-20)
+      expect(mean[2]).to be_within(0.05).of(10 * Math.log10((10**-3.0 + 10**-2.0) / 2))
+      expect(mean[3]).to be_nil
+      expect(mean[4]).to be_within(0.05).of(10 * Math.log10((10**-3.0 + 10**-2.0) / 2))
+      m = a.momentary_max_in([[0.0, 1.0], [1.0, 2.0], [1.4, 1.41], [2.5, 3.005]])
+      expect(m[0]).to be_within(0.05).of(-30)
+      expect(m[1]).to be_within(0.05).of(-20)
+      expect(m[2]).to be_within(0.05).of(-20)
+      expect(m[3]).to be_within(0.05).of(-30)
+      expect(a.momentary_max_in([[0.0, a.samples / 48000.0]])[0]).to be_within(1e-9).of(a.result.momentary_max)
+      expect(a.short_term_max_in([[0.0, a.samples / 48000.0]])[0]).to be_within(1e-9).of(a.result.short_term_max)
+    end
+
     it 'uses 10 ms segments at 44.1 kHz and odd rates' do
       [44100, 22050].each do |rate|
         a = described_class.new(channels: 2, sample_rate: rate)

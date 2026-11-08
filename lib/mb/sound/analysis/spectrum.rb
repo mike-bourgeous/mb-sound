@@ -30,6 +30,9 @@ module MB
         CENTERS = [25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000,
                    2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000].map(&:to_f).freeze
 
+        # Octave band centers (Hz, IEC 61260 nominal, 31.5 Hz to 16 kHz).
+        OCTAVE_CENTERS = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000].map(&:to_f).freeze
+
         attr_reader :sample_rate
 
         # The gated mean power spectrum (n_fft / 2 + 1 bins, Numo::DFloat).
@@ -64,34 +67,64 @@ module MB
         # Third-octave band levels: { center Hz => dB re the total power }
         # (bands past Nyquist left out; -inf for empty bands).
         def bands
-          @bands ||= begin
-            f = STFT.bin_freqs(N_FFT, @sample_rate)
-            total = @power.sum
-            CENTERS.select { |c| c * 2**(1 / 6.0) < @sample_rate / 2 }.to_h { |c|
-              lo = c * 2**(-1 / 6.0)
-              hi = c * 2**(1 / 6.0)
-              sel = (f.ge(lo) & f.lt(hi)).where
-              p = sel.size > 0 ? @power[sel].sum : 0.0
-              [c, p > 0 && total > 0 ? 10 * Math.log10(p / total) : -Float::INFINITY]
-            }.freeze
-          end
+          @bands ||= Spectrum.band_levels(@power, @sample_rate)
         end
 
         # The tilt in dB per octave: the least-squares slope of the band
         # levels in TILT_RANGE against log2 of their centers (0.0 for
         # silence).
         def tilt
-          @tilt ||= begin
-            pts = bands.select { |c, v| TILT_RANGE.cover?(c) && v.finite? }.map { |c, v| [Math.log2(c / 1000.0), v] }
-            if pts.length < 2
-              0.0
-            else
-              mx = pts.sum(&:first) / pts.length
-              my = pts.sum(&:last) / pts.length
-              sxx = pts.sum { |x, _| (x - mx)**2 }
-              (pts.sum { |x, y| (x - mx) * (y - my) } / sxx).round(3)
-            end
+          @tilt ||= Spectrum.tilt_of(bands)
+        end
+
+        # Band levels of a power spectrum +power+ (n_fft / 2 + 1 bins at
+        # +sample_rate+): { center Hz => dB re +reference+ (the total power
+        # by default) }, +centers+ +per_octave+ to the octave (third
+        # octaves by default, OCTAVE_CENTERS with 1), each band summing
+        # the bins within half a band of its center; bands past Nyquist
+        # left out, -inf for empty ones.  Bar statistics read each beat's
+        # spectrum with it (BarStats).
+        def self.band_levels(power, sample_rate, centers: CENTERS, per_octave: 3, reference: nil)
+          n_fft = (power.length - 1) * 2
+          kept, map = band_map(n_fft, sample_rate, centers: centers, per_octave: per_octave)
+          total = reference || power.sum
+          sums = power.dot(map)
+          kept.each_with_index.to_h { |c, i|
+            p = sums[i]
+            [c, p > 0 && total > 0 ? 10 * Math.log10(p / total) : -Float::INFINITY]
+          }.freeze
+        end
+
+        # The bands of #band_levels for +n_fft+-point spectra: [centers
+        # kept (under Nyquist), a (n_fft / 2 + 1) x centers 0/1 DFloat
+        # whose columns pick each band's bins] (cached), so frames x bins
+        # powers dot the map give frames x bands.
+        def self.band_map(n_fft, sample_rate, centers: CENTERS, per_octave: 3)
+          @band_maps ||= {}
+          @band_maps[[n_fft, sample_rate.to_f, centers, per_octave]] ||= begin
+            f = STFT.bin_freqs(n_fft, sample_rate)
+            up = 2**(1 / (2.0 * per_octave))
+            down = 2**(-1 / (2.0 * per_octave))
+            kept = centers.select { |c| c * up < sample_rate / 2.0 }
+            map = Numo::DFloat.zeros(f.length, [kept.length, 1].max)
+            kept.each_with_index { |c, i| map[(f.ge(c * down) & f.lt(c * up)).where, i] = 1.0 }
+            [kept.freeze, map.freeze].freeze
           end
+        end
+
+        # The least-squares slope (dB per octave, rounded to 0.001) of band
+        # levels +levels+ ({ center Hz => dB }) in TILT_RANGE against log2
+        # of their centers; 0.0 with fewer than two finite bands.  Bands
+        # integrate power, so third octaves and octaves give the same
+        # slope.
+        def self.tilt_of(levels)
+          pts = levels.select { |c, v| TILT_RANGE.cover?(c) && v.finite? }.map { |c, v| [Math.log2(c / 1000.0), v] }
+          return 0.0 if pts.length < 2
+
+          mx = pts.sum(&:first) / pts.length
+          my = pts.sum(&:last) / pts.length
+          sxx = pts.sum { |x, _| (x - mx)**2 }
+          (pts.sum { |x, y| (x - mx) * (y - my) } / sxx).round(3)
         end
 
         def inspect

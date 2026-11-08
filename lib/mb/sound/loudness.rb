@@ -627,6 +627,36 @@ module MB
           }
         end
 
+        # The ungated loudness (LUFS) of each of +ranges+ ([start, end] in
+        # seconds from the start, e.g. single beats): the mean K-weighted
+        # square over the range (its 10 ms segment sums, the partial ones
+        # at its edges counted in proportion), -Infinity for silence, nil
+        # for an empty range.  Bar statistics read beats with it, where a
+        # 400 ms gating block may not fit (BarStats).
+        def mean_loudness_in(ranges)
+          cs = segment_cumsum
+          ranges.map { |a, b|
+            sa = (a * @sample_rate).clamp(0, @samples)
+            sb = (b * @sample_rate).clamp(0, @samples)
+            next if sb <= sa
+            Loudness.lufs((energy_at(cs, sb) - energy_at(cs, sa)) / (sb - sa))
+          }
+        end
+
+        # The largest momentary loudness (LUFS) of 400 ms windows ending
+        # inside each of +ranges+ ([start, end] seconds; windows end every
+        # 10 ms, with silence before the start, as #result's maxima); nil
+        # for a range holding no window end.
+        def momentary_max_in(ranges)
+          window_max_in(ranges, MOMENTARY_SEGMENTS)
+        end
+
+        # The largest short-term loudness (LUFS) of 3 s windows ending
+        # inside each of +ranges+ (see #momentary_max_in).
+        def short_term_max_in(ranges)
+          window_max_in(ranges, SHORT_TERM_SEGMENTS)
+        end
+
         # Loudness range (LU) so far, as if followed by 1.5 s of silence
         # (see #result).
         def range
@@ -767,6 +797,42 @@ module MB
           starts = Numo::Int64.new((sums.length - segments) / hop + 1).seq * hop
           ends = starts + segments
           (cs[ends] - cs[starts]) / (cl[ends] - cl[starts])
+        end
+
+        # Cumulative segment sums (with the partial last segment) and their
+        # boundaries in samples: [sums (DFloat, length + 1), boundaries].
+        def segment_cumsum
+          sums = @segment_sums + [@segment_sum]
+          cs = Numo::DFloat.zeros(sums.length + 1)
+          cs[1..] = Numo::DFloat.cast(sums).cumsum
+          [cs, Array.new(sums.length) { |k| boundary(k) } + [@samples]]
+        end
+
+        # The K-weighted energy from the start to sample position +s+ (a
+        # Float), with the segment holding it counted in proportion.
+        def energy_at(cs, s)
+          sums, bounds = cs
+          k = (s / (@sample_rate * SEGMENT)).floor.clamp(0, bounds.length - 2)
+          k -= 1 while k > 0 && bounds[k] > s
+          k += 1 while k < bounds.length - 2 && bounds[k + 1] <= s
+          len = bounds[k + 1] - bounds[k]
+          part = len > 0 ? (sums[k + 1] - sums[k]) * ((s - bounds[k]) / len).clamp(0.0, 1.0) : 0.0
+          sums[k] + part
+        end
+
+        # See #momentary_max_in (+segments+ long windows).
+        def window_max_in(ranges, segments)
+          w = windows(segments, 1, partial: true)
+          return ranges.map { nil } if w.empty?
+          ranges.map { |a, b|
+            # window i ends at (i + 1) segments (the last one at the end)
+            first = (a / SEGMENT + 1e-9).floor
+            last = [(b / SEGMENT + 1e-9).floor - 1, w.length - 1].min
+            last = w.length - 1 if b * @sample_rate >= @samples
+            first = 0 if first < 0
+            next if last < first
+            Loudness.lufs(w[first..last].max)
+          }
         end
 
         # Converts mean squares to LUFS (-Infinity for silence).

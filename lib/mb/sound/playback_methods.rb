@@ -919,6 +919,15 @@ module MB
       # integrated loudness of each track and the mix per section pass.
       # Measured before +:loudness+ normalization.
       #
+      # +bar_stats: true+ (or a Hash of BarStats.analyze options) records the
+      # render's own beat grid (every beat on the frame the timeline crossed
+      # it, through tempo changes and meters, sections from the song form)
+      # and writes bar statistics beside the file when it's done
+      # ("song.flac.bar_stats.rb"; BarStats.load reads it; with +:stems+,
+      # each stem's too).  See BarStats.
+      #
+      #     render 'song.flac', bars: 64, bar_stats: true { my_song }
+      #
       # +ring: :first+ makes every sum built for the render (in the block,
       # scheduled blocks, and track patches; `a + b`) end with its first
       # input to end, the old default; sums ring until every input ends
@@ -955,8 +964,19 @@ module MB
       # Returns the seconds rendered (a Float); at the console it also prints
       # `rendered 4.0 s to x.flac` (ux-fix-1 item 20: Pry showed a bare
       # number).
-      def render(filename, *sounds, loudness: nil, peak: :warn, master: nil, **kwargs, &block)
+      def render(filename, *sounds, loudness: nil, peak: :warn, master: nil, bar_stats: false, **kwargs, &block)
+        if bar_stats
+          raise ArgumentError, 'bar_stats: measures a sound file; render to a file name' unless filename.is_a?(String)
+          raise ArgumentError, "bar_stats: is true or a Hash of BarStats.analyze options (got #{bar_stats.inspect})" unless bar_stats == true || bar_stats.is_a?(Hash)
+          kwargs[:grid_out] = grid_out = {}
+        end
         seconds = render_targeted(filename, *sounds, loudness: loudness, peak: peak, master: master, **kwargs, &block)
+        if grid_out && grid_out[:grid] && File.file?(filename)
+          options = bar_stats == true ? {} : bar_stats
+          options = { stems: kwargs[:stems] }.merge(options) if kwargs[:stems]
+          BarStats.analyze(filename, grid: grid_out[:grid], save: true, **options)
+          puts "bar statistics in #{BarStats::Sidecar.path(filename)}" if MB::Sound.live?
+        end
         if MB::Sound.live? && filename.is_a?(String) && seconds.is_a?(Numeric)
           puts "rendered #{MB::M.sigfigs(seconds.to_f, 4)} s to #{filename}"
         end
@@ -1137,7 +1157,7 @@ module MB
       # Mastering::Targeting), gets back +:session+ and +:origin+ (the frame
       # where the file starts), and with +:defer_report+ leaves printing the
       # report to the caller.
-      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, bus_stems: false, max_seconds: nil, exact_lanes: false, from: nil, to: nil, preroll: true, ring: nil, report: nil, mastering: {}, &block)
+      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, bus_stems: false, max_seconds: nil, exact_lanes: false, from: nil, to: nil, preroll: true, ring: nil, report: nil, mastering: {}, grid_out: nil, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, "max_seconds: must be positive (got #{max_seconds.inspect})" if max_seconds && max_seconds <= 0
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
@@ -1168,6 +1188,8 @@ module MB
         end
         mastering[:session] = session
         mastering[:origin] = 0
+        # The render's beat grid, for bar statistics (see BarStats::Grid::Recorder)
+        recorder = grid_out && BarStats::Grid::Recorder.new(session)
         # (a song that never sets master effects gets the override too)
         session.master(mastering[:override], on: :now) if mastering[:override]
         if stems
@@ -1243,6 +1265,7 @@ module MB
           output.open!(skip)
           session.stems&.origin = session.frame + skip
           mastering[:origin] = session.frame + skip
+          recorder.origin = mastering[:origin] if recorder
           end_time = bars && -> { transport.bar_position(transport.bar_at(from_pos) + bars.to_r) }
         end
         if to
@@ -1340,6 +1363,8 @@ module MB
           MixReport.last = meter.report
           puts MixReport.last unless mastering[:defer_report]
         end
+
+        grid_out[:grid] = recorder.grid(frames) if recorder && !interrupted
 
         frames.to_f / rate
 
