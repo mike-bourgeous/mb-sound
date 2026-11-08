@@ -75,6 +75,29 @@ module BarStatsSounds
     Numo::DFloat.cast(Array.new(length) { rng.rand * 2 - 1 }) * 0.05
   end
 
+  # A kick-only stem (+song+ with the chord and hats left out) silent in
+  # +silent+ bars, from the first downbeat at 0 s, +extra+ samples past
+  # its last bar (a render ending a few samples into the next bar), with
+  # a noise floor at +floor+ dBFS RMS (nil: digital zero) under all of it.
+  def kick_stem(bpm: 140, bars: 8, silent: [], floor: nil, extra: 0, delay: 0)
+    l, r = song(bpm: bpm, bars: bars, drop: { mid: 1..bars, high: 1..bars, low: silent }, delay: { low: delay })
+    n = ((bars * 4 * 60.0 / bpm) * RATE).round + extra
+    l = Numo::DFloat.zeros(n).tap { |x| x[0...[n, l.length - (OFFSET * RATE).round].min] = l[(OFFSET * RATE).round...][0...n] }
+    r = l.dup
+    if floor
+      noise = noise_floor(n, floor)
+      l += noise
+      r += noise
+    end
+    [l, r]
+  end
+
+  # Gaussian noise at +db+ dBFS RMS (seeded).
+  def noise_floor(n, db)
+    rng = Random.new(7)
+    Numo::DFloat.cast(Array.new(n) { Math.sqrt(-2 * Math.log(1 - rng.rand)) * Math.cos(2 * Math::PI * rng.rand) }) * 10**(db / 20.0)
+  end
+
   # Adds +x+ times +g+ into +l+ (and +r+) from sample +s+.
   def add(l, r, x, s, g)
     e = [s + x.length, l.length].min

@@ -66,4 +66,14 @@ RSpec.describe(MB::Sound::BarStats::Timing, :aggregate_failures) do
     expect(lags[:low].map(&:samples)).to all(be_within(0.2).of(3168)) # (the chord's leakage into the low band stays put)
     expect(lags[:mid].map { |l| l.samples.abs }).to all(be < 0.05)
   end
+
+  it 'gives no lag for spans of a few samples or bands with nothing in them' do
+    a = mono(BarStatsSounds.kick_stem(bars: 2, extra: 8))
+    n = a.length
+    lags = described_class.lags(a, a, rate, [[0.0, 1.0], [(n - 8) / 48000.0, n / 48000.0]])
+    expect(lags[:low][0].samples).to eq(0)
+    expect(lags[:low][1]).to be_nil
+    expect(lags[:high][0]).to be_nil.or(have_attributes(samples: be_within(0.5).of(0)))
+  end
+
 end
