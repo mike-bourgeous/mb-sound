@@ -123,8 +123,8 @@ module MB
           chunks(times.length, 16).each do |i0, i1|
             w0 = (spans[i0][1] - spans[i0][0]) * window
             w1 = (spans[i1 - 1][1] - spans[i1 - 1][0]) * window
-            from = ((times[i0] - w0) * rate).floor
-            to = ((times[i1 - 1] + w1) * rate).ceil + 1
+            from = frame_floor(times[i0] - w0, rate)
+            to = frame_ceil(times[i1 - 1] + w1, rate) + 1
             margin = (0.05 * rate).round
             bands = Bands.split(x, rate, from: from, to: to, margin: margin)
             base = from - margin
@@ -132,8 +132,8 @@ module MB
               o = onset_function(bands[bi], band, rate)
               (i0...i1).each do |i|
                 half = (spans[i][1] - spans[i][0]) * window
-                a = ((times[i] - half) * rate).floor - base
-                b = ((times[i] + half) * rate).ceil - base
+                a = frame_floor(times[i] - half, rate) - base
+                b = frame_ceil(times[i] + half, rate) - base
                 a = a.clamp(0, o.length)
                 b = b.clamp(a, o.length)
                 next if b <= a
@@ -173,6 +173,12 @@ module MB
           (from...k).find { |i| seg[i] >= cut && (i == 0 || seg[i] > seg[i - 1]) && seg[i] >= seg[i + 1] } || k
         end
 
+        # The sample at or before (#frame_floor) or at or after
+        # (#frame_ceil) +seconds+ (Float seconds of an analysis window, not
+        # a render's frame count).
+        def frame_floor(seconds, rate) = (seconds * rate).floor
+        def frame_ceil(seconds, rate) = (seconds * rate).ceil
+
         # [first, last + 1) index ranges of +n+ items, +size+ at a time.
         def chunks(n, size)
           (0...n).step(size).map { |i| [i, [i + size, n].min] }
@@ -189,8 +195,8 @@ module MB
           song = song_lags(a, b, rate, m)
           out = Bands::NAMES.to_h { |band| [band, []] }
           spans.each do |s, e|
-            from = (s * rate).floor
-            to = [(e * rate).ceil, from + 1].max
+            from = frame_floor(s, rate)
+            to = [frame_ceil(e, rate), from + 1].max
             margin = m + r + (0.05 * rate).round
             ba = Bands.split(a, rate, from: from, to: to, margin: margin)
             bb = Bands.split(b, rate, from: from, to: to, margin: margin)
