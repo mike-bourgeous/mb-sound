@@ -167,8 +167,17 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
       context "when resampling mode is #{mode.inspect}" do
         let (:resample_mode) { mode }
         let (:max_delta) {
-          # Zero-order hold is noisy so relax its reference delta limit
-          resample_mode.to_s.downcase.include?('zoh') ? 0.25 : -30.db
+          # Zero-order hold is noisy so relax its reference delta limit;
+          # :min_phase delays low frequencies by about 3 output frames (a
+          # phase shift against the reference; resample_min_phase_spec
+          # measures it), so its limit is that shift's
+          if resample_mode.to_s.downcase.include?('zoh')
+            0.25
+          elsif resample_mode == :min_phase
+            0.1
+          else
+            -30.db
+          end
         }
 
         it_behaves_like 'a working resampler'

@@ -9,7 +9,11 @@ module MB
         #
         # The resampling +:mode+ must be one of the supported modes listed in
         # MB::Sound::GraphNode::Resample::MODES (e.g. :libsamplerate_best).
-        def resample(sample_rate = self.sample_rate, mode: MB::Sound::GraphNode::Resample::DEFAULT_MODE)
+        # Without one it is Resample::DEFAULT_MODE, except in a live
+        # Session's bus and master chains (and graphs reading a bus tap),
+        # where it is :min_phase, which reads nothing ahead, so the chain
+        # isn't late (see Resample::MinPhase; fix-bus-resample-1).
+        def resample(sample_rate = self.sample_rate, mode: nil)
           MB::Sound::GraphNode::Resample.new(upstream: self, sample_rate: sample_rate, mode: mode)
         end
 
@@ -35,7 +39,7 @@ module MB
         #     play 355.hz.pm(630.hz.at(16) * 0.5.hz.drumramp.at(0.9..1).filter(10.hz.lowpass))
         #     # With oversampling; does not have the same aliasing
         #     play 355.hz.pm(630.hz.at(16) * 0.5.hz.drumramp.at(0.9..1).filter(10.hz.lowpass)).oversample(16)
-        def oversample(multiplier, mode: MB::Sound::GraphNode::Resample::DEFAULT_MODE)
+        def oversample(multiplier, mode: nil)
           raise ArgumentError, "Oversampling multiplier must be a positive number (got #{multiplier.inspect})" unless multiplier.is_a?(Numeric) && multiplier.positive? && multiplier.finite?
 
           MB::Sound::GraphNode::Resample.new(upstream: self, sample_rate: self.sample_rate, mode: mode).oversampling(multiplier)

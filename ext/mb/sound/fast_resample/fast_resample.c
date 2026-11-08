@@ -7,6 +7,7 @@
  * https://rubyreferences.github.io/rubyref/advanced/extensions.html
  * https://silverhammermba.github.io/emberb/c/
  */
+#include <math.h>
 #include <samplerate.h>
 
 #include <ruby.h>
@@ -312,6 +313,136 @@ static VALUE ruby_fast_resample_initialize(int argc, VALUE *argv, VALUE self)
 	return self;
 }
 
+/*
+ * call-seq:
+ *   MB::Sound::FastResample.min_phase(out, input, table, phases, taps, scale, start, num, den, base) -> out
+ *
+ * A causal (minimum-phase) polyphase resampler step (GraphNode::Resample's
+ * :min_phase mode; exact Ruby mirror Resample::MinPhase.run_ruby).  Output
+ * frame k is output frame start + k of the stream, at input position
+ * t = (start + k) * num / den (num / den input frames per output frame,
+ * exactly, so positions don't depend on how the stream is split into
+ * reads); +input+ (a contiguous Numo::SFloat) holds input frames from
+ * frame +base+ on.  Each output is the sum over taps j of
+ * input[floor(t) - j] times the prototype +table+ (a contiguous Numo::DFloat
+ * of phases * taps + 1 values: the minimum-phase lowpass sampled +phases+
+ * times per input frame, then a 0) at ((t - floor(t)) + j) * scale *
+ * phases, interpolated linearly, times +scale+ (1 when upsampling, the
+ * output/input ratio when downsampling, which stretches the filter to the
+ * lower cutoff).  So it reads no input past floor(t): no lookahead.
+ * Raises if a tap would read before +base+ or past the input.
+ */
+static VALUE ruby_min_phase(VALUE self, VALUE out, VALUE input, VALUE table, VALUE phases, VALUE taps, VALUE scale, VALUE start, VALUE num, VALUE den, VALUE base)
+{
+	if (CLASS_OF(out) != numo_cSFloat || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
+		rb_raise(rb_eArgError, "Output must be a contiguous 1D Numo::SFloat");
+	}
+	if (CLASS_OF(input) != numo_cSFloat || RNARRAY_NDIM(input) != 1 || !RTEST(nary_check_contiguous(input))) {
+		rb_raise(rb_eArgError, "Input must be a contiguous 1D Numo::SFloat");
+	}
+	if (CLASS_OF(table) != numo_cDFloat || RNARRAY_NDIM(table) != 1 || !RTEST(nary_check_contiguous(table))) {
+		rb_raise(rb_eArgError, "Table must be a contiguous 1D Numo::DFloat");
+	}
+
+	long n_out = (long)RNARRAY_SHAPE(out)[0];
+	long n_in = (long)RNARRAY_SHAPE(input)[0];
+	long n_table = (long)RNARRAY_SHAPE(table)[0];
+	long ph = NUM2LONG(phases);
+	long tp = NUM2LONG(taps);
+	double sc = NUM2DBL(scale);
+	long long st0 = NUM2LL(start);
+	long long nu = NUM2LL(num);
+	long long de = NUM2LL(den);
+	long long b0 = NUM2LL(base);
+
+	if (ph < 1 || tp < 1 || n_table != ph * tp + 1) {
+		rb_raise(rb_eArgError, "Table must have phases * taps + 1 values (got %ld for %ld * %ld)", n_table, ph, tp);
+	}
+	if (!(sc > 0 && sc <= 1) || nu < 1 || de < 1 || st0 < 0) {
+		rb_raise(rb_eArgError, "Scale must be in (0, 1], num and den positive, and start non-negative");
+	}
+
+	// Taps reached at this scale (the stretched filter's length in input frames)
+	long reach = (long)ceil(tp / sc);
+	long limit = ph * tp; // table index past the last coefficient
+
+	if (n_out > 0) {
+		long long first = st0 * nu / de - b0;
+		long long last = (st0 + n_out - 1) * nu / de - b0;
+		if (first - (reach - 1) < 0) {
+			rb_raise(rb_eArgError, "Input needs %ld frames of history before frame %lld", reach - 1, first + b0);
+		}
+		if (last >= n_in) {
+			rb_raise(rb_eArgError, "Input frame %lld is past the %ld-frame input from frame %lld", last + b0, n_in, b0);
+		}
+	}
+
+	const float *x = (const float *)(nary_get_pointer_for_read(input) + nary_get_offset(input));
+	const double *h = (const double *)(nary_get_pointer_for_read(table) + nary_get_offset(table));
+	float *y = (float *)(nary_get_pointer_for_write(out) + nary_get_offset(out));
+	double sp = sc * (double)ph;
+
+	// Coefficient sets for the first MP_SLOTS fractional positions seen
+	// (integer and small rational ratios repeat a few: 2x up uses 0 and
+	// 0.5, 2x down only 0), each computed as below, so the sums are the
+	// same as computing every tap's coefficient in place
+	enum { MP_SLOTS = 8 };
+	double *coefs = ALLOC_N(double, (size_t)reach * (MP_SLOTS + 1));
+	long long keys[MP_SLOTS];
+	long lens[MP_SLOTS + 1];
+	int used = 0;
+
+	for (long k = 0; k < n_out; k++) {
+		long long a = (st0 + k) * nu;
+		long n = (long)(a / de - b0);
+		long long rem = a % de;
+
+		int slot = -1;
+		for (int s = 0; s < used; s++) {
+			if (keys[s] == rem) {
+				slot = s;
+				break;
+			}
+		}
+		if (slot < 0) {
+			slot = used < MP_SLOTS ? used++ : MP_SLOTS; // (the last set is scratch once the slots fill)
+			if (slot < MP_SLOTS) {
+				keys[slot] = rem;
+			}
+			double f = (double)rem / (double)de;
+			double *c = coefs + (size_t)slot * (size_t)reach;
+			long len = 0;
+			for (long j = 0; j < reach; j++) {
+				double tau = (f + (double)j) * sp;
+				long i = (long)tau;
+				if (i >= limit) {
+					break;
+				}
+				c[j] = h[i] + (tau - (double)i) * (h[i + 1] - h[i]);
+				len = j + 1;
+			}
+			lens[slot] = len;
+		}
+
+		const double *c = coefs + (size_t)slot * (size_t)reach;
+		long len = lens[slot];
+		const float *xn = x + n;
+		double acc = 0.0;
+		for (long j = 0; j < len; j++) {
+			acc += (double)xn[-j] * c[j];
+		}
+		y[k] = (float)(acc * sc);
+	}
+
+	xfree(coefs);
+
+	RB_GC_GUARD(out);
+	RB_GC_GUARD(input);
+	RB_GC_GUARD(table);
+
+	return out;
+}
+
 void Init_fast_resample(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -323,6 +454,7 @@ void Init_fast_resample(void)
 
 	rb_define_method(fast_resample_class, "initialize", ruby_fast_resample_initialize, -1);
 	rb_define_method(fast_resample_class, "read", ruby_read, 1);
+	rb_define_singleton_method(fast_resample_class, "min_phase", ruby_min_phase, 10);
 
 	rb_define_private_method(fast_resample_class, "lookup_converter", ruby_lookup_converter, 1);
 	rb_define_private_method(fast_resample_class, "setup_converter_type", ruby_setup_converter_type, 1);
