@@ -82,6 +82,13 @@ module MB
         # an unrelated lag gives by chance (#on_time).
         ON_TIME_PROBES = [0.003, 0.005, 0.007, 0.011].freeze
 
+        # A waveform correlation at or over this is an exact copy: its lag
+        # is the whole sample.
+        EXACT_CORRELATION = 0.99999
+
+        # Spans shorter than this (seconds) get no lag.
+        MIN_SPAN = 0.05
+
         # Onset-correlation peaks refined on the waveform per span.
         MAX_CANDIDATES = 4
 
@@ -314,6 +321,9 @@ module MB
         # length; +m+ the search range, +r+ the refinement range, +hint+
         # the band's whole-song lag (samples).
         def span_lag(xa, xb, band, rate, margin, len, m, r, hint)
+          # (spans shorter than a few onset blocks have no lag to find)
+          step = [(rate / 1000.0).round, 1].max
+          return nil if len < MIN_SPAN * rate || len < 4 * step
           body = xa[margin...(margin + len)]
           ea = (body * body).sum
           return nil if ea <= 0
@@ -321,22 +331,28 @@ module MB
           # Onset lag candidates: onset functions at about 1 kHz (block
           # mean squares), peaks within PEAK_TIE of the best (a chord's
           # beating or a 16th-note pattern gives several)
-          step = [(rate / 1000.0).round, 1].max
           md = (m / step.to_f).ceil
           oa = coarse_onsets(xa[margin...(margin + len)], band, rate, step)
           ob = coarse_onsets(xb[(margin - md * step)...(margin + len + md * step)], band, rate, step)
           candidates = [[hint.clamp(-m, m), 0.0]]
-          if oa.max > 0 && ob.max > 0
-            c = full_window_corr(oa, ob, md)
+          if oa.size > 0 && ob.size > 0 && oa.max > 0 && ob.max > 0
+            # (normalized by each window's energy, so louder hits next to
+            # the span can't outweigh the span itself: a recording compared
+            # with itself peaks at 0)
+            raw = full_window_corr(oa, ob, md)
+            cs = Numo::DFloat.zeros(ob.length + 1)
+            cs[1..] = (ob * ob).cumsum
+            idx = Numo::Int64.new(raw.length).seq
+            energy = (cs[(idx + oa.length).clip(0, ob.length)] - cs[idx.clip(0, ob.length)]).clip(0, nil)
+            ea_o = (oa * oa).sum
+            c = raw / Numo::NMath.sqrt(energy * ea_o + 1e-300)
             best = c.max
             peaks = (1...(c.length - 1)).select { |i| c[i] >= c[i - 1] && c[i] >= c[i + 1] && c[i] >= best * PEAK_TIE }
             peaks = [c.max_index] if peaks.empty?
             peaks = peaks.max_by(MAX_CANDIDATES) { |i| c[i] }.sort_by { |i| ((i - md) * step - hint).abs }
-            candidates = peaks.map { |i|
-              seg = ob[i...(i + oa.length)]
-              norm = Math.sqrt((oa * oa).sum * (seg * seg).sum)
-              [((i - md) * step).clamp(-m, m), norm > 0 ? c[i] / norm : 0.0]
-            }
+            candidates = peaks.map { |i| [((i - md) * step).clamp(-m, m), c[i]] }
+            # (the band's whole-song lag is always tried too)
+            candidates << [hint.clamp(-m, m), 0.0] unless candidates.any? { |l, _| (l - hint).abs <= step }
           end
 
           # Each candidate refined on the waveform within +-r (a dot product
@@ -356,7 +372,9 @@ module MB
               coarse.to_f
             else
               frac = 0.0
-              if k > 0 && k < wave.length - 1
+              # (an exact copy correlates 1 on a whole sample: no parabola,
+              # whose sides the samples next to the span tilt)
+              if k > 0 && k < wave.length - 1 && corr < EXACT_CORRELATION
                 den = wave[k - 1] - 2 * wave[k] + wave[k + 1]
                 frac = 0.5 * (wave[k - 1] - wave[k + 1]) / den if den < 0
               end

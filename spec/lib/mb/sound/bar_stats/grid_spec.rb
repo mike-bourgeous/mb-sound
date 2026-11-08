@@ -1,3 +1,5 @@
+require_relative '../../../../support/bar_stats_sounds'
+
 # The grids bar statistics count on (BarStats::Grid): a constant grid from
 # a tempo and the first downbeat, and a render's own grid
 # (render(..., bar_stats: true), Grid::Recorder): beats on the frames the
@@ -14,6 +16,27 @@ RSpec.describe(MB::Sound::BarStats::Grid, :aggregate_failures) do
       expect(g.bars[1].seconds).to eq(2.75)
       expect(g.beat_spans.last).to eq([4.75, 5.0])
       expect(g.source).to eq(:given)
+    end
+  end
+
+  describe 'BarStats.analyze\'s choice of grid (bar-stats-fix-1)' do
+    let(:stem) { BarStatsSounds.kick_stem(silent: [3, 4], extra: 8) }
+
+    it 'takes bpm: alone as a constant grid from 0 s, and says so' do
+      r = s::BarStats.analyze(stem, bpm: 140.0001, sections: false)
+      expect(r.grid.source).to eq(:given)
+      expect(r.bars.length).to eq(8) # (8 samples past bar 8 make no bar 9)
+      expect(r.grid.bars.first.seconds).to eq(0.0)
+      expect(r.grid.bars[4].seconds).to be_within(1e-9).of(4 * 4 * 60 / 140.0001)
+      expect(r.grid_text).to eq('constant 140.0001 BPM, bar 1 at 0.000 s (bpm: given)')
+      expect(r.to_s).to include('Grid: constant 140.0001 BPM')
+    end
+
+    it 'tracks beats with grid: :track (bpm: then a hint) or without bpm:, and refuses offset: without bpm:' do
+      r = s::BarStats.analyze(stem, bpm: 140, grid: :track, sections: false)
+      expect(r.grid.source).to eq(:tracked)
+      expect(r.grid_text).to start_with('tracked: ').and include('(bpm: 140.0 as a hint)')
+      expect { s::BarStats.analyze(stem, offset: 0.5) }.to raise_error(ArgumentError, /pass bpm: with it/)
     end
   end
 

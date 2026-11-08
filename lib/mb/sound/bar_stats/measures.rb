@@ -35,6 +35,10 @@ module MB
         # beats are zero-padded to it).
         MIN_FFT = 4096
 
+        # Third octaves this many dB under a span's loudest third are left
+        # out of its tilt (as Spectrum::GATE leaves out quiet frames).
+        TILT_GATE = 40.0
+
         # Third-octave centers of the spectral sums (Spectrum::CENTERS);
         # every three make one octave band.
         THIRDS = Analysis::Spectrum::CENTERS
@@ -258,7 +262,11 @@ module MB
             octaves = thirds.each_slice(3).map { |t| t.sum }
             row[:bands] = octaves.map { |p| p > 0 ? rms + db(p / total) : -Float::INFINITY }
             row[:centroid] = mid[@nthirds + 1] / total
-            row[:tilt] = Analysis::Spectrum.tilt_of(@thirds.each_with_index.to_h { |c, k| [c, thirds[k] > 0 ? db(thirds[k] / total) : -Float::INFINITY] })
+            # (thirds more than TILT_GATE under the loudest are left out: a
+            # noise floor under a kick stem isn't its tilt)
+            levels = @thirds.each_with_index.to_h { |c, k| [c, thirds[k] > 0 ? db(thirds[k] / total) : -Float::INFINITY] }
+            top = levels.values.max
+            row[:tilt] = Analysis::Spectrum.tilt_of(levels.transform_values { |v| v >= top - TILT_GATE ? v : -Float::INFINITY })
           else
             row.merge!(bands: nil, centroid: nil, tilt: nil)
           end

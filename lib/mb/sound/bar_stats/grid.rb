@@ -21,6 +21,9 @@ module MB
       #     g.bars.first          # => #<Bar bar 1 (4/4) at 0.250 s>
       #     g.beat_spans          # => [[start, end], ...] seconds
       class Grid
+        # Seconds of audio a constant grid's last beat needs after it.
+        MIN_TAIL = 0.05
+
         attr_reader :beats, :bars, :sections, :source, :tempo, :duration
 
         # +beats+, +bars+, +sections+ as Structure values; +source+ as above;
@@ -54,7 +57,10 @@ module MB
 
           spb = 60.0 / bpm
           first = -(offset / spb + 1e-9).floor
-          last = ((duration - offset) / spb - 1e-9).ceil - 1
+          # (a beat with under MIN_TAIL seconds of audio after it is left
+          # out: a song 133 bars long at 140.0001 BPM ends 8 samples into
+          # bar 134)
+          last = ((duration - MIN_TAIL - offset) / spb).ceil - 1
           beats = (first..last).map { |k|
             # (beats before the first downbeat are a pickup in bar 0)
             Structure::Beat.new(seconds: offset + k * spb, bar: k < 0 ? 0 : k / beats_per_bar + 1, beat: k % beats_per_bar + 1)

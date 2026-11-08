@@ -35,11 +35,14 @@ module MB
       # Measures +source+ (a filename or audio data: an Array of channels or
       # a Numo array at +:sample_rate+) and returns a Report.
       #
-      # The grid (see Grid): +grid:+ a Grid (a render's), a
-      # Structure::Result, or a Transport or Session whose timeline starts
-      # at the audio's start; else +bpm:+ with +offset:+ (bar 1's downbeat
-      # in seconds) for a constant grid; else beat tracking
-      # (Structure.analyze, +bpm:+ as a hint).  +beats_per_bar:+ for
+      # The grid (see Grid; Report#grid_text says which was used): +grid:+
+      # a Grid (a render's), a Structure::Result, or a Transport or Session
+      # whose timeline starts at the audio's start; else with +bpm:+ a
+      # constant grid at that tempo with bar 1's downbeat at +offset:+
+      # seconds (0 by default); +grid: :track+, or no +bpm:+ at all, tracks
+      # the beats (Structure.analyze, +bpm:+ then a hint).  Beat tracking
+      # on a sparse stem can put bars where the song's aren't, so a known
+      # tempo is taken as given (bar-stats-fix-1).  +beats_per_bar:+ for
       # constant and tracked grids.
       #
       # +sections:+ :auto (the grid's: a render's form passes, a tracked
@@ -99,7 +102,8 @@ module MB
       def self.request_settings(grid:, bpm:, offset:, beats_per_bar:, sections:, window:)
         g =
           case grid
-          when nil then bpm && offset ? :given : :tracked
+          when nil then bpm ? :given : :tracked
+          when :track then :tracked
           when Grid then grid.source
           when Structure::Result then grid.tracker == :transport ? :transport : :tracked
           else :transport
@@ -135,10 +139,11 @@ module MB
           case grid
           when Grid then grid
           when Structure::Result then Grid.from_structure(grid, sections: sections == :auto)
-          when nil
-            if bpm && offset
-              Grid.constant(bpm: bpm, offset: offset, beats_per_bar: beats_per_bar, duration: duration)
+          when nil, :track
+            if bpm && grid.nil?
+              Grid.constant(bpm: bpm, offset: offset || 0, beats_per_bar: beats_per_bar, duration: duration)
             else
+              raise ArgumentError, 'offset: places a constant grid; pass bpm: with it (grid: :track tracks the beats)' if offset
               Grid.from_structure(Structure.analyze(channels, sample_rate: rate, bpm: bpm, beats_per_bar: beats_per_bar), sections: sections == :auto)
             end
           else
