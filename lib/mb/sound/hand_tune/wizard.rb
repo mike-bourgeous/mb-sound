@@ -361,6 +361,7 @@ module MB
           @cursor = { reference: 0, synth: 0 }
           @query = { reference: '', synth: '' }
           @tuned = nil
+          @last_tuned = nil
         end
 
         # The cursor of each list ({ reference:, synth: }: indexes into
@@ -372,7 +373,7 @@ module MB
         attr_reader :tuned
 
         # Called by HandTune.tune when a tune line set up +track+.
-        def note_tuned(track) = @tuned = track
+        def note_tuned(track) = @tuned = @last_tuned = track
 
         # The list of the step (+state+: :reference or :synth) narrowed by
         # its find words (every word in the entry's name or about).
@@ -469,7 +470,7 @@ module MB
             raise ArgumentError, 'tuner: pick a synth (a Wizard::Synth)' unless arg.is_a?(Synth)
             raise ArgumentError, "tuner: #{arg.name} can't load: #{arg.problem}" if arg.problem
             @synth = arg
-            @line = tune_line(arg)
+            @line = stop_previous + tune_line(arg)
             @tuned = nil
           in [_, :restart]
             refresh
@@ -567,6 +568,18 @@ module MB
           else
             s.hz && s.hz < 150 ? :bass : s.shape == :sustained ? :lead : :pad
           end
+        end
+
+        # A `stop` line for the track the tuner tuned last and its A/B and
+        # refined copies when the next tune is for another track
+        # (tuner-fixes-1, the maintainer: "it's annoying that the previous
+        # patch is still running when I try to load a new one with W"), or
+        # ''.
+        def stop_previous
+          prev = @last_tuned
+          return '' if prev.nil? || prev == @track
+          names = [prev, :"#{prev}_ref", :"#{prev}_refined"].select { |n| @session.arrangement.tracks.key?(n) }
+          names.empty? ? '' : "stop #{names.map(&:inspect).join(', ')}\n"
         end
 
         # The `tune` line for +synth+ and the picked reference (what the

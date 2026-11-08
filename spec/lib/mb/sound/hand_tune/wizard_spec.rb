@@ -276,6 +276,33 @@ RSpec.describe(MB::Sound::HandTune::Wizard, :aggregate_failures) do
     expect((r[0...a.length] - a).abs.max).to eq(0)
   end
 
+  # (tuner-fixes-1, the maintainer: "it's annoying that the previous patch
+  # is still running when I try to load a new one with W")
+  it 'stops the track it tuned before (and its reference) when it tunes another' do
+    w = wizard
+    w.pick(0)
+    w.pick(w.synths.index { |x| x.kind == :init })
+    b = S::Take.console_binding
+    take = S::Take.new(session: session)
+    expect { S::Session.with_context(session: session) { take.line(w.line, b) } }.to output(/kick_init/).to_stdout
+    3.times { session.process_buffer }
+    expect(session.players.keys).to include(:kick)
+    w.restart
+    w.pick(w.refs.index { |r| r.name == 'bass_saw.flac' })
+    expect(w.track).to eq(:bass)
+    w.pick(w.synths.index { |x| x.kind == :init })
+    expect(w.line).to start_with("stop :kick, :kick_ref\ntune :bass, L.inst.init")
+    expect { S::Session.with_context(session: session) { take.line(w.line, b) } }.to output(/bass_init/).to_stdout
+    200.times { session.process_buffer }
+    expect(session.players.keys).to include(:bass)
+    expect(session.players.keys).not_to include(:kick, :kick_ref)
+
+    # (the same track again: nothing to stop)
+    w.back
+    w.pick(w.synths.index { |x| x.kind == :blank })
+    expect(w.line).to start_with('tune :bass')
+  end
+
   # The live path: the folder's headers, summaries, and scores in the
   # tuner's worker process (started through the process starter, as
   # bin/sound.rb runs one; spec_helper's), so the console's GVL stays the
