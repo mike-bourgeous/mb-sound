@@ -85,6 +85,45 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     MB::Sound::UI.instance_variable_set(:@tiles, nil)
   end
 
+  # (tuner-fixes-1, the maintainer's answer: plots in "either their own
+  # pane or a modal toggle with the pry pane")
+  it 'shows plots in a plot pane beside the REPL, the next one replacing it, q closing it' do
+    start(:tiles, rows: 40, cols: 160)
+    MB::Sound::UI.instance_variable_set(:@tiles, @tiles)
+    out = StringIO.new
+    $stdout = out
+    MB::Sound.plot(440.hz.sine, samples: 480)
+    $stdout = STDOUT
+    expect(out.string).not_to include('⠀' * 4) # (no text plot printed)
+    expect(@tiles.tiler.layout.panes).to include(:plot, :repl)
+    pane = MB::Sound::UI.panes[:plot]
+    first = pane.figure
+    expect(first).not_to be_nil
+    expect(@tiles.tiler.rects[:plot].h).to be >= 6
+    expect(@tiles.tiler.focus).not_to eq(:plot) # (the console keeps its keys)
+    @tiles.refresh
+    expect(region(@tiles.to_text, @tiles.tiler.rects[:plot]).join).to match(/[⠁-⣿]/) # (drawn)
+    chart = MB::Sound.chart { line Numo::SFloat[0, 1, 0, -1, 0] }
+    expect(chart.pretty_inspect).to eq("(in the plot pane)\n")
+    expect(pane.figure).not_to equal(first)
+    expect(@tiles.tiler.layout.panes.count(:plot)).to eq(1)
+    expect(pane.key_action(:close, {})).to eq(:close) # (q)
+    @tiles.send(:pane_result, :plot, :close)
+    expect(@tiles.tiler.layout.panes).not_to include(:plot)
+    expect(chart.pretty_inspect).to eq("(in the plot pane)\n") # (opens it again)
+    expect(@tiles.tiler.layout.panes).to include(:plot)
+    MB::Sound::UI.facade.plot(false)
+    expect(@tiles.tiler.layout.panes).not_to include(:plot)
+    $stdout = out = StringIO.new
+    MB::Sound::UI.instance_variable_set(:@tiles, nil)
+    MB::Sound.chart { line Numo::SFloat[0, 1, 0] }.show
+    $stdout = STDOUT
+    expect(out.string).not_to be_empty # (no screen: printed)
+  ensure
+    $stdout = STDOUT
+    MB::Sound::UI.instance_variable_set(:@tiles, nil)
+  end
+
   it 'enters NAV with Ctrl-], picks, zooms, and leaves with i, keys going back to the REPL' do
     start
     nav('z')

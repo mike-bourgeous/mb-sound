@@ -58,13 +58,16 @@ module MB
             io.write(Terminal.image_escape(img, image, columns: Terminal.width))
             io.write("\n")
           else
+            return nil if opts.empty? && Plotter.sink&.call(figure) # (a screen's plot pane)
             io.puts lines(**opts)
           end
           nil
         end
 
-        # Shows the plot when the console (Pry, IRB) or pp prints the chart.
+        # Shows the plot when the console (Pry, IRB) or pp prints the chart
+        # (in a screen's plot pane when Plotter.sink takes it).
         def pretty_print(q)
+          return q.text('(in the plot pane)') if Plotter.sink&.call(figure)
           q.text("\n" + to_s(height: [default_height, Terminal.height - 4].min))
         end
 

@@ -1542,7 +1542,9 @@ module MB
         images: waveforms, spectra, spectrograms, histograms, and chart
         builders; `vis` shows the live mix on a band of master meters and
         a big scope (`vis spectrum: true`: a spectrum; `graphical: true`:
-        inline images).
+        inline images).  With the tiled screen up, a plot shows in a plot
+        pane beside the console, at the pane's size (the next plot
+        replaces it; q in it, or `ui.plot false`, closes it).
       TEXT
       commands :plot, :spectrum, :spectrogram, :time_freq, :hist, :density, :mag_phase, :overlay, :overlay_chart, :table, :chart, :figure, :vis
       note :plotting

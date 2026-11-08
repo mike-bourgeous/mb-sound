@@ -515,6 +515,66 @@ module MB
           end
         end
 
+        # The console's last plot while the tiled screen is up (`plot`,
+        # `spectrum`, `chart { }`, ...: Plot::Plotter.sink, Tiles#plot),
+        # drawn at the pane's size (resizing redraws it), the REPL keeping
+        # its rows and keys: a pane of its own rather than a mode of the
+        # REPL pane, which hosts the console's terminal and is never
+        # replaced (tuner-fixes-1).  q closes it.
+        class PlotView < Pane
+          mode_keys do
+            group 'Plot'
+            on 'q', :close, help: 'close the plot (ui.plot false)'
+            on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
+          end
+
+          def initialize
+            super(:plot, rate: 4, height: 16, width: 80, title: 'plot', min_height: 4,
+                         description: "the console's last plot (plot, spectrum, chart { }) while the tiled screen is up; the next plot replaces it, q or ui.plot false closes it")
+            @figure = nil
+            @seq = 0
+          end
+
+          # The figure shown (a Plot::Chart or Figure), or nil.
+          attr_reader :figure
+
+          # Shows +figure+ next.
+          def show(figure)
+            @figure = figure
+            @seq += 1
+            self
+          end
+
+          def plot?
+            true
+          end
+
+          def draw(c, _s, state, look: nil)
+            c.clear
+            return if c.w <= 0 || c.h <= 0
+            if @title && !state[:title_in_rule]
+              c.text(0, 0, 'PLOT', :title)
+              c = c.sub(0, 1, c.w, c.h - 1)
+              return if c.h <= 0
+            end
+            unless @figure
+              c.text(0, 0, c.fit('no plot yet (plot 440.hz.sine, chart { ... })', c.w), :dim)
+              return
+            end
+            cells = c.grid.class
+            lk = look == :auto || look.nil? ? :scope : look
+            live = state[:live]
+            if live.nil? || live.width != c.w || live.height != c.h || state[:cells] != cells || state[:look] != lk
+              live = state[:live] = Plot::Live.new(width: c.w, height: c.h, look: lk, cells: cells)
+              state[:cells] = cells
+              state[:look] = lk
+            end
+            live.draw(@figure, c.grid, x: c.x, y: c.y)
+          end
+
+          def key_close(_state) = :close
+        end
+
         # CPU per part: render load, then each player, bus, and master
         # chain by its share of the audio time.
         class CPU < Pane

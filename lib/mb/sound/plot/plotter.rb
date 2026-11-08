@@ -34,6 +34,9 @@ module MB
         # The lines of the last text plot.
         attr_reader :lines
 
+        # The figure of the last plot (#draw), or nil.
+        attr_reader :figure
+
         class << self
           # A Proc giving [columns, rows] of the console that text plots
           # print into when an application draws a screen of its own around
@@ -42,6 +45,11 @@ module MB
           # it instead of the terminal (tuner-fixes-1: a plot from the tiled
           # screen's REPL was drawn at the terminal's size).
           attr_accessor :console_size
+
+          # A Proc given each text plot's figure before it prints, returning
+          # true when it showed it elsewhere (mb-sound's tiled screen: its
+          # plot pane), so nothing prints; nil prints as usual.
+          attr_accessor :sink
         end
 
         # A text plotter sized to fractions of the terminal (resized with the
@@ -68,6 +76,7 @@ module MB
           @io = io
           @type = nil
           @print = true
+          @figure = nil
           @xrange = nil
           @yrange = nil
           @logscale = false
@@ -168,6 +177,7 @@ module MB
         # its text (or returns the lines; see #plot).
         def draw(figure, print: true)
           figure = figure.figure
+          @figure = figure
           if @save
             path, w, h = @save
             @save = nil
@@ -181,6 +191,8 @@ module MB
             @io.write("\n")
             return nil
           end
+
+          return nil if @print && print && !@graphical && Plotter.sink&.call(figure)
 
           w = @graphical ? Terminal.width : width
           h = @graphical ? [Terminal.height - 2, 10].max : height

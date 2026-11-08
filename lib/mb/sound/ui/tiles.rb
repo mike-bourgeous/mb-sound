@@ -168,6 +168,7 @@ module MB
           @keys_takeover = nil # (Keyboard::Takeover: KEYS on the sound-design screen arms and holds the inspected track)
           @takeover_lock = Mutex.new
           @temporary_jumps = {} # (pane name => the Proc that takes it away: panes put in by their jump letter)
+          @plot_close = nil # (the plot pane's temporary slot: #plot)
           @input = input
           @output = output
           @session = session
@@ -628,6 +629,33 @@ module MB
 
         # What opened the page pane (see #page), or nil.
         attr_reader :page_opener
+
+        # Shows +figure+ (a Plot::Chart or Figure: what `plot`, `spectrum`,
+        # `chart { }` draw) in the plot pane: a slot taken from the REPL's
+        # rows, as a help page's is, while the focus stays where it is (the
+        # console keeps its keys); the next plot replaces it; q in the pane
+        # or `ui.plot false` closes it (tuner-fixes-1, the maintainer:
+        # plots "either their own pane or a modal toggle with the pry
+        # pane"; Plot::Plotter.sink sends them here).  A layout with a plot
+        # pane keeps it.  Returns self.
+        def plot(figure = nil)
+          if figure.nil? || figure == false
+            @plot_close&.call
+            @plot_close = nil
+            @full = true
+            return self
+          end
+          @panes[:plot].show(figure) if @panes[:plot].respond_to?(:show)
+          unless @plot_close || @tiler.layout.panes.include?(:plot)
+            repl = @tiler.rects[:repl] || @tiler.rects.values.max_by(&:area)
+            rows = [((repl ? repl.h : @rows) - REPL_MIN_ROWS - 1) * 2 / 3, 6].max
+            temp = nil
+            tile { |t| temp = t.open_temporary(:plot, rows, keep: t.layout.panes - [:repl], fallback: :repl) }
+            @plot_close = temp && -> { tile { |t| t.close_temporary(temp) } }
+          end
+          @full = true
+          self
+        end
 
         # Esc in a pane's own mode (MB::Term::Input::Router#pane_key): the page pane
         # goes back to what opened it (true: handled); other panes to NAV.
@@ -1594,6 +1622,9 @@ module MB
                 @page_opener = opener
                 back_from_page
                 @page_opener = nil
+              elsif name == :plot
+                plot(false)
+                act(MB::Term::Input::Action.of(:mode, :repl)) if @host
               elsif @temporary_jumps[name]
                 close_temporary_jump(name)
               elsif @host

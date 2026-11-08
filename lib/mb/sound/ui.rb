@@ -108,7 +108,7 @@ module MB
       def self.panes
         @panes ||= [
           Panes::Transport.new, Panes::Form.new, Panes::Tracks.new, Panes::Queue.new,
-          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::MessageDetail.new, Panes::Page.new, Panes::Keyboard.new,
+          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::MessageDetail.new, Panes::Page.new, Panes::PlotView.new, Panes::Keyboard.new,
           Panes::Buses.new, Panes::Log.new, Panes::Lane.new, Panes::Clips.new, Panes::ClipDetail.new, Panes::Racks.new, Panes::Midi.new,
           Panes::Inspector.new, Panes::Preview.new, Panes::Code.new, Panes::Picker.new, Panes::Audition.new, Panes::SoundKeys.new, Panes::Render.new,
           Panes::Tuner.new, Panes::TuneStrip.new,
@@ -693,6 +693,18 @@ module MB
         nil
       end
       Plot::Plotter.console_size = -> { UI.console_size }
+
+      # Shows +figure+ in the tiled screen's plot pane (Tiles#plot) when a
+      # tiled screen with a REPL is up; true if it did (Plot::Plotter.sink).
+      def self.show_plot(figure)
+        t = @tiles
+        return false unless t&.active? && t.repl_size
+        t.plot(figure)
+        true
+      rescue StandardError
+        false
+      end
+      Plot::Plotter.sink = ->(figure) { UI.show_plot(figure) }
 
       # Defines (or replaces) a pane kind: the block makes a Pane from a
       # name and options (`pane :x, kind: :mine, ...` in pane files).
