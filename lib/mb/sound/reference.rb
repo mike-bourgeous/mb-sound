@@ -122,6 +122,22 @@ module MB
           pair
         end
 
+        # Gives +track+'s reference (and refine's copy) the track's clip
+        # when a `bg` changed it (tuner-fixes-1, the maintainer: "Changing
+        # the generator/clip feeding the patch did not correspondingly
+        # update the reference"), at the same launch point (+opts+: bg's
+        # at:, on:, in:, fade:).  Called by FollowsClip.
+        def follow(session, track, opts = {})
+          pair = pairs(session)[track] or return nil
+          clip = session.arrangement.tracks[track]&.clip or return nil
+          [pair.ref, pair.alt].compact.each do |t|
+            tr = session.arrangement.tracks[t]
+            next if tr.nil? || tr.clip.equal?(clip)
+            MB::Sound.bg(t, clip, **opts.slice(:at, :on, :in, :fade))
+          end
+          pair
+        end
+
         # Stops +track+'s reference (its track stops; the patch is heard).
         def off(session, track = nil)
           pair = pair(session, track) or return nil
@@ -224,6 +240,20 @@ module MB
         end
       end
     end
+
+    # A track's A/B copies follow its clip: a `bg :lead, clip` that changes
+    # a tuned track's clip gives its reference and refined copy that clip
+    # too (Reference.follow).  Prepended to PlaybackMethods.
+    module Reference::FollowsClip
+      def bg(name_or_sound, sound = nil, **opts)
+        result = super
+        if sound && name_or_sound.is_a?(Symbol) && (s = Session.current)
+          Reference.follow(s, name_or_sound, opts)
+        end
+        result
+      end
+    end
+    PlaybackMethods.prepend(Reference::FollowsClip)
 
     # The console's ab (MB::Sound extends it; hand-tune-1).
     module ReferenceMethods

@@ -38,6 +38,7 @@ A fit prints its voice as console Ruby with literal numbers.  `FitPatch.document
 - **The patch's loudness**: one note rendered offline from the track's graph document at the knob values now (`HandTune.render`: `bounce` in a private Session, master at 0 dB, the note `UI::PatchRender.input` picks: the clip's first note, else the role's).  Patch blocks (not documents) play the reference unmatched, and the pair says so.
 - **Choice and alternatives** (open question): mute/unmute of two tracks is the simplest existing path (exact landings, 5 ms declick, both on MAIN at the same note).  Solo would fight other solos; CUE needs phones routing; a crossfade knob would make a third control and a partial mix.  The `b` key was planned as "A/B against the loaded preset" (sound_design_ui.md); it now flips the reference.
 - Setting up reads the reference file (ffmpeg, as any sound file read: a process start on a console command); flips start nothing.
+- **The clip follows** (tuner-fixes-1; "Changing the generator/clip feeding the patch did not correspondingly update the reference"): a `bg :lead, clip` (or a generator) that changes a tuned track's clip gives `:lead_ref` and refine's copy the same clip at the same launch point (`Reference.follow`, through `Reference::FollowsClip` prepended to PlaybackMethods#bg).
 
 ## Kits in the RENDER pane
 

@@ -34,6 +34,22 @@ RSpec.describe(MB::Sound::Reference, :aggregate_failures) do
     MB::Sound.loudness([Numo::SFloat.cast(out.captured[0][from...to])], sample_rate: 48000, true_peak: false).integrated
   end
 
+  # (tuner-fixes-1, the maintainer: "Changing the generator/clip feeding
+  # the patch did not correspondingly update the reference")
+  it 'gives the reference the clip a bg gives the patch track' do
+    s, = session
+    other = MB::Sound.seq(MB::Sound::C3).n8.loop
+    MB::Sound::Session.with_context(session: s) do
+      MB::Sound.track(:lead, fit)
+      MB::Sound.bg(:lead, clip)
+      MB::Sound.ab(:lead, reference)
+      expect(s.arrangement.tracks[:lead_ref].clip).to equal(clip)
+      MB::Sound.bg(:lead, other)
+    end
+    expect(s.arrangement.tracks[:lead_ref].clip).to equal(other)
+    expect(s.journal.changes.map(&:subject)).to include(:lead_ref)
+  end
+
   it 'puts the reference on its own track, muted, playing the clip, loudness-matched' do
     s, out = session
     pair = nil
