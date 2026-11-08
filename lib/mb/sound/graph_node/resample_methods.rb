@@ -9,10 +9,11 @@ module MB
         #
         # The resampling +:mode+ must be one of the supported modes listed in
         # MB::Sound::GraphNode::Resample::MODES (e.g. :libsamplerate_best).
-        # Without one it is Resample::DEFAULT_MODE, except in a live
-        # Session's bus and master chains (and graphs reading a bus tap),
-        # where it is :min_phase, which reads nothing ahead, so the chain
-        # isn't late (see Resample::MinPhase; fix-bus-resample-1).
+        # Without one it is Resample::DEFAULT_MODE, except in a Session's
+        # bus, master, and stem chains (and graphs reading a bus tap), live
+        # and in renders, where it is :min_phase, which reads nothing ahead,
+        # so the chain isn't late (see Resample::MinPhase,
+        # GraphNode::ReadAhead.prepare; fix-bus-resample-1).
         def resample(sample_rate = self.sample_rate, mode: nil)
           MB::Sound::GraphNode::Resample.new(upstream: self, sample_rate: sample_rate, mode: mode)
         end

@@ -6,9 +6,13 @@
 # tap, at several buffer sizes (spec/lib/mb/sound/graph_node/read_ahead_spec.rb).
 # On a track a chain reads its sources ahead and isn't late; span-fed
 # sources (a chain's MixSource, a bus tap) can't give frames past the
-# span, so there the chain hears its input GraphNode::ReadAhead frames late:
-# the relation is "the track's output, that many frames later", within
-# -80 dB of the peak, and the latency doesn't depend on the buffer size.
+# span, so there resamplers given no mode switch to :min_phase, live and in
+# renders (GraphNode::ReadAhead.prepare; resample-render-minphase), and
+# what still reads ahead hears its input GraphNode::ReadAhead frames late:
+# the relation is "the track's output (of the chain's TWINS entry, the same
+# chain with the switch spelled out), that many frames later", within
+# -80 dB of the peak, the latency is 0 for chains in ZERO_LATENCY, and it
+# doesn't depend on the buffer size.
 # Before the fix a MixSource handed every whole-buffer read the same buffer
 # and a tap read zeros past the span: the first buffer played up to three
 # times and the chain came out two buffers late (1600 frames at 800, 734
@@ -35,7 +39,22 @@ module ReadAheadSweep
     min_phase_44k: ->(s) { s.resample(44100, mode: :min_phase).resample(48000, mode: :min_phase) },
     min_phase_region: ->(s) { s.resample(96000, mode: :min_phase).lp4(9000).oversample(2, mode: :min_phase).resample(48000, mode: :min_phase) },
     min_phase_beside: ->(s) { s * 0.5 + s.resample(96000, mode: :min_phase).resample(48000, mode: :min_phase) * 0.5 },
+    min_phase_filter: ->(s) { s.resample(96000, mode: :min_phase).filter(:lowpass, cutoff: 20000.0, quality: 0.7).resample(48000, mode: :min_phase) },
   }.freeze
+
+  # Chains given no mode => the same chain with :min_phase given, which is
+  # what they become fed by a span-fed source (the reference track).
+  TWINS = {
+    best_pair: :min_phase_pair,
+    down_up_44k: :min_phase_44k,
+    filter_between: :min_phase_filter,
+    oversampled_region: :min_phase_region,
+    dry_beside: :min_phase_beside,
+  }.freeze
+
+  # Chains that are not late as bus, master, and tap chains (the rest read
+  # ahead through a resampler given a mode or a BufferAdapter).
+  ZERO_LATENCY = (TWINS.keys + CHAINS.keys.grep(/\Amin_phase/)).freeze
 
   # Where a chain plays.
   CONTEXTS = %i[track bus master tap].freeze

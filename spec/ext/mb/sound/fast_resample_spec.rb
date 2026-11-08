@@ -119,6 +119,56 @@ RSpec.describe(MB::Sound::FastResample, :aggregate_failures) do
       expect(r.read(100)).to equal(short)
     end
 
+    # (batch 22's memcheck, fix-batch22: libsamplerate's linear converter
+    # read the frame before a one-frame block, an invalid read from
+    # Resample.lookahead's one-frame feeding, and kept a pointer into the
+    # block's buffer for the next read; FastResample now hands it a copy
+    # after the previous block's last frame)
+    describe 'blocks given to libsamplerate' do
+      let(:data) { rng = Random.new(1108); Numo::SFloat.cast(Array.new(2000) { rng.rand * 2 - 1 }) }
+
+      # Output of +mode+ at +ratio+, fed +chunk+ frames per callback from
+      # +buf+ (a buffer the callback refills; +scribble+ overwrites it
+      # after every read), read 5 frames at a time.
+      def run(mode, ratio, chunk, scribble: false)
+        buf = Numo::SFloat.zeros(chunk)
+        pos = 0
+        fr = MB::Sound::FastResample.new(ratio, mode) { |_|
+          next nil if pos >= data.length
+          n = MB::M.min(chunk, data.length - pos)
+          buf = Numo::SFloat.zeros(n) if buf.length != n
+          buf[0...n] = data[pos...(pos + n)]
+          pos += n
+          buf
+        }
+        out = []
+        300.times do
+          x = fr.read(5) or break
+          out << x.dup
+          buf.fill(7) if scribble
+        end
+        SpecBuffers.join(out)
+      end
+
+      MB::Sound::GraphNode::Resample::MODES.grep(/libsamplerate/).each do |mode|
+        it "#{mode}: gives the same output fed one frame per callback as in big blocks" do
+          [2.0, 0.5, 0.919].each do |ratio|
+            one = run(mode, ratio, 1)
+            big = run(mode, ratio, 1000)
+            # (the zero-order hold gives a frame more at the end of the
+            # stream fed one frame at a time)
+            n = MB::M.min(one.length, big.length)
+            expect(n).to be >= big.length - 1
+            expect(one[0...n]).to eq(big[0...n]), "#{mode} at #{ratio}"
+          end
+        end
+
+        it "#{mode}: copies each block (a callback's buffer changed after a read changes nothing)" do
+          expect(run(mode, 0.919, 1000, scribble: true)).to eq(run(mode, 0.919, 1000))
+        end
+      end
+    end
+
     shared_examples_for 'a working libsamplerate wrapper' do
       it 'can read zeros' do
         result = r_half.read(100)
