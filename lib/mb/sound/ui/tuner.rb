@@ -432,7 +432,7 @@ module MB
         # drift).
         class TuneStrip < Pane
           # The inspector's actions the strip names, in order.
-          ACTIONS = %i[ab refine apply save_fit retune note tuner_back tuner_restart].freeze
+          ACTIONS = %i[ab refine apply save_fit fit_saves retune note tuner_back tuner_restart].freeze
 
           def initialize = super(:tune_strip, rate: 4, height: 2, width: 80, title: 'tune', description: 'the tuner\'s step 3: the reference, what is heard, refine, and the hand-tune keys')
 
@@ -447,7 +447,7 @@ module MB
             }
           end
 
-          SHORT = { ab: 'A/B', refine: 'refine', apply: 'apply', save_fit: 'save', retune: 'reload file', note: 'note', tuner_back: 'synths', tuner_restart: 'references' }.freeze
+          SHORT = { ab: 'A/B', refine: 'refine', apply: 'apply', save_fit: 'save', fit_saves: 'saves', retune: 'reload file', note: 'note', tuner_back: 'synths', tuner_restart: 'references' }.freeze
 
           def draw_body(c, _s, _state)
             w = HandTune::Wizard.current

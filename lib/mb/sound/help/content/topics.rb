@@ -1780,7 +1780,7 @@ module MB
         it with the reference, e puts its tune line on the console, Enter
         runs it.  That opens the tuning screen (ui :tuning): the sound
         screen with a strip naming the keys (in the inspector: b A/B, R
-        refine, A apply, S save, E reload the fit's file, # note, w W back
+        refine, A apply, S save, Y saves, E reload the fit's file, # note, w W back
         to the tuner's synths, references).  Esc goes a step back; `tuner off` closes it.  Your
         take keeps the tune line, not the tuner's steps.
 
@@ -1801,6 +1801,9 @@ module MB
         instead of writing the fit's numbers over them; `tune ..., fresh:
         true` starts from the fit's numbers again (your saved file stays in
         tmp/fits/versions/).  E only reloads the file after you edit it.
+        Every save is kept: `save_fit :kick, note: 'darker'` adds why,
+        `fit_saves :kick` (Y) lists them newest first, and `restore_fit
+        :kick, 2` plays save 2 again, knobs and all, as one undo step.
 
         A fit (an agent matching a sound) prints its voice as console Ruby
         with the fitted numbers as literals.  `fit_patch :kick_fit, code,
@@ -1861,7 +1864,7 @@ module MB
         `MB::Sound::Take.read('take.rb')` reads a saved take the same way
         (walked, never run).
       TEXT
-      commands :tuner, :tune, :save_fit, :fit_patch, :ab, :retune, :refine, :audition
+      commands :tuner, :tune, :save_fit, :fit_saves, :restore_fit, :fit_patch, :ab, :retune, :refine, :audition
       note :hand_tune, :sound_design_ui
       see :inspector, :knobs, :ui
     end

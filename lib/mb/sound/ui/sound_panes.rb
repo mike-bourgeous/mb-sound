@@ -70,6 +70,7 @@ module MB
             on ['R'], :refine, help: 'refine against the reference (again: stop; then A/B it)'
             on ['A'], :apply, help: "apply refine's proposal (one undo step)"
             on ['S'], :save_fit, help: "save the knobs into the fit's file (save_fit)"
+            on ['Y'], :fit_saves, help: "the fit's saves, newest first (fit_saves; restore_fit puts one back)"
             on ['E'], :retune, help: "reload the fit's edited file (retune; not a save)"
             on ['#'], :note, help: 'a note about what you hear (ui.note)'
             on ['w'], :tuner_back, help: 'the tuner: back to the synths, the references', label: 'w W'
@@ -761,6 +762,12 @@ module MB
           def key_save_fit(state)
             track = state[:snap]&.inspector&.track or return 'nothing to inspect'
             [*flush(state), PaneKeys::Run["save_fit #{track.inspect}", "save_fit #{track}: its knobs into its fit's file (the console says where)"]]
+          end
+
+          # Y: the fit's save history on the console (fit_saves).
+          def key_fit_saves(state)
+            track = state[:snap]&.inspector&.track or return 'nothing to inspect'
+            [*flush(state), PaneKeys::Run["fit_saves #{track.inspect}", "fit_saves #{track}: its saves on the console (restore_fit #{track.inspect}, n)"]]
           end
 
           def key_retune(state)

@@ -169,7 +169,7 @@ RSpec.describe(MB::Sound::UI::Panes::Tuner, :aggregate_failures) do
 
   it 'names the inspector\'s hand-tune keys from its keymap, and every tuner key has help' do
     keys = ui::Panes::TuneStrip.keys
-    expect(keys.map(&:first)).to eq(%w[b R A S E # w W])
+    expect(keys.map(&:first)).to eq(%w[b R A S Y E # w W])
     expect(keys.map(&:last)).to all(satisfy { |h| !h.empty? })
     map = ui::Panes::Tuner.mode_keymap
     expect(map.entries.map(&:action).uniq).to include(:pick, :act, :audition, :ab, :find, :folder, :edit, :quit)

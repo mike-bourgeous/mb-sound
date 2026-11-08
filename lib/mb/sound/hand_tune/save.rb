@@ -9,7 +9,9 @@ module MB
       # moved to, or nil), +nothing+ (true when the file held the knobs'
       # values already: nothing written), +replay+ (true in a take's
       # replay: only the version written).
-      Saved = Data.define(:track, :name, :path, :version, :changed, :promoted, :refused, :unloaded, :nothing, :replay) do
+      Saved = Data.define(:track, :name, :path, :version, :changed, :promoted, :refused, :unloaded, :nothing, :replay, :entry) do
+        def initialize(track:, name:, path:, version:, changed:, promoted:, refused:, unloaded:, nothing:, replay:, entry: nil) = super
+
         def to_s
           if nothing
             msg = "save_fit #{track.inspect}: nothing to save: #{File.basename(path)} holds #{track}'s knobs as they are"
@@ -21,6 +23,7 @@ module MB
           parts << "new params from bound numbers: #{promoted.join(', ')}" unless promoted.empty?
           parts << "not saved: #{refused_text}" unless refused.empty?
           parts << "your earlier edits of the file, never loaded, are in #{unloaded}" if unloaded
+          parts << "save #{entry.number} of #{name} (fit_saves #{track.inspect} lists them; restore_fit #{track.inspect}, n puts one back)" if entry
           parts << "tune #{track.inspect} or the tuner start from it now" unless replay
           parts.join("\n")
         end
@@ -121,7 +124,7 @@ module MB
       # SaveFitMethods#save_fit), or +document+ (the whole text, as a take
       # keeps the save) and plays that version (one undo step: the same
       # sound, the knobs now the file's values).  Returns a Saved.
-      def save_fit(track, document: nil)
+      def save_fit(track, document: nil, note: nil, reset: false)
         raise ArgumentError, 'save_fit names a track: save_fit :kick' unless track.is_a?(Symbol)
         session = Session.current
         old_path, old, lineage = fit_of(session, track)
@@ -172,15 +175,128 @@ module MB
           end
         end
         path, version, entry = FitPatch.write(name, text, path: lineage, file: !replay)
-        Take.record_call_as(:save_fit, "save_fit #{track.inspect}, document: #{text.inspect}") unless document
+        Take.record_call_as(:save_fit, "save_fit #{track.inspect}, document: #{text.inspect}#{", note: #{note.to_s.inspect}" if note}") unless document
         Session.with_context(session: session) {
-          session.command("save_fit #{track.inspect}") { MB::Sound.track(track, entry) }
+          session.command("save_fit #{track.inspect}") {
+            # (restore_fit: the knobs take the restored values)
+            reset ? Arrangement::TrackKnobs.resetting { MB::Sound.track(track, entry) } : MB::Sound.track(track, entry)
+          }
         }
         (history(session)[track] ||= []) << [Take.current_line_id, old_path, version]
+        logged = replay ? nil : record_save(name, version, note: note, changed: changed.length)
         Saved.new(track: track, name: name, path: path, version: version, changed: changed.freeze, promoted: promoted.freeze, refused: refused,
-                  unloaded: unloaded, nothing: false, replay: replay)
+                  unloaded: unloaded, nothing: false, replay: replay, entry: logged)
+      end
+      # One save of a fit (its history: .saves): +number+ (1 the first,
+      # kept as later saves come), +at+ (the time, UTC, as written), +version+
+      # (the immutable copy's path), +knobs+ (how many changed), +note+ (or
+      # nil), +take+ (where in which take, or nil).
+      SaveEntry = Data.define(:number, :at, :version, :knobs, :note, :take) do
+        def to_s
+          when_ = at.to_s.sub('T', ' ').sub(/Z\z/, ' UTC')
+          "#{number.to_s.rjust(3)}  #{when_}  #{knobs} knob#{'s' unless knobs == 1}#{note ? "  #{note}" : ''}#{take ? "  (#{take})" : ''}" \
+            "#{File.file?(version) ? '' : '  (its version is gone)'}"
+        end
+      end
+
+      # The history file of fit +name+'s saves: FitPatch.dir/history/NAME.rb,
+      # one `save` line a save, oldest first (readable Ruby, read with
+      # Prism, never run; appended a line at a time, so a crash leaves
+      # every line written before it).
+      def history_path(name) = File.join(FitPatch.dir, 'history', "#{name}.rb")
+
+      # Appends a save of fit +name+ (its +version+ path) to its history;
+      # returns the SaveEntry.
+      def record_save(name, version, note: nil, changed: 0, at: Time.now)
+        path = history_path(name)
+        FileUtils.mkdir_p(File.dirname(path))
+        number = saves(name).map(&:number).max.to_i + 1
+        t, line = Session.context&.take_line
+        take = t && "#{t.autosave_path ? File.basename(t.autosave_path) : "the take started #{t.start[:time]}"}, line #{t.lines.index(line).to_i + 1}"
+        stamp = at.utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+        rel = version.delete_prefix("#{FitPatch.dir}/")
+        fields = ["save #{number}", "at: #{stamp.inspect}", "version: #{rel.inspect}", "knobs: #{changed.to_i}"]
+        fields << "note: #{note.to_s.inspect}" if note
+        fields << "take: #{take.inspect}" if take
+        File.open(path, 'a') do |f|
+          f.write("# mb-sound: the saves of fit #{name} (save_fit), oldest first; fit_saves lists them, restore_fit puts one back.\n") if f.size == 0
+          f.write("#{fields.join(', ')}\n")
+          f.flush
+        end
+        SaveEntry.new(number: number, at: stamp, version: File.join(FitPatch.dir, rel), knobs: changed.to_i, note: note&.to_s, take: take)
+      end
+
+      # Fit +name+'s saves (SaveEntries, oldest first), from its history
+      # file (walked with Prism: lines it can't read are left out).
+      def saves(name)
+        path = history_path(name)
+        return [] unless File.file?(path)
+        Prism.parse(File.read(path)).value.statements.body.filter_map { |st|
+          next unless st.is_a?(Prism::CallNode) && st.name == :save && st.receiver.nil?
+          args = st.arguments&.arguments || []
+          n = args.first
+          kw = args.find { |a| a.is_a?(Prism::KeywordHashNode) }
+          next unless n.is_a?(Prism::IntegerNode) && kw
+          h = kw.elements.to_h { |e| [e.key.unescaped.to_sym, e.value.is_a?(Prism::IntegerNode) ? e.value.value : (e.value.unescaped rescue nil)] }
+          next unless h[:version] && h[:at]
+          SaveEntry.new(number: n.value, at: h[:at], version: File.expand_path(h[:version], FitPatch.dir), knobs: h[:knobs].to_i, note: h[:note], take: h[:take])
+        }
+      end
+
+      # The fit name +track+ plays (its document's), or nil.
+      def fit_name(session, track)
+        _p, doc, lineage = fit_of(session, track)
+        (doc.name || File.basename(lineage, GraphIO::EXTENSION)).to_sym
+      end
+
+      # Plays save +number+ of the fit +track+ plays (see .saves) again: its
+      # version becomes the fit's file and the track's patch, its knobs at
+      # the saved values (one undo step; recorded as a save of its own).
+      def restore_fit(track, number)
+        session = Session.current
+        name = fit_name(session, track)
+        e = saves(name).find { |x| x.number == number } or raise ArgumentError, "restore_fit #{track.inspect}, #{number.inspect}: #{name} has no save #{number.inspect} (fit_saves #{track.inspect} lists them)"
+        raise ArgumentError, "restore_fit #{track.inspect}, #{number}: its version #{e.version} is gone" unless File.file?(e.version)
+        text = File.read(e.version)
+        Take.record_call_as(:restore_fit, "save_fit #{track.inspect}, document: #{text.inspect}, note: #{"restored save #{number}".inspect}")
+        save_fit(track, document: text, note: "restored save #{number} (#{e.at})", reset: true)
       end
     end
+
+    # The console's fit_saves and restore_fit (MB::Sound extends them;
+    # tuner-fixes-1).
+    module FitSavesMethods
+      # Lists the saves of the fit track +track+ plays (save_fit), newest
+      # first: number, time, how many knobs changed, the note, and the take.
+      # Returns the SaveEntries.
+      #
+      #     fit_saves :kick
+      def fit_saves(track)
+        session = Session.current
+        name = HandTune.fit_name(session, track)
+        list = HandTune.saves(name).reverse
+        if list.empty?
+          puts "#{name}: no saves yet (S in the inspector, or save_fit #{track.inspect}, note: 'why')"
+        else
+          puts "#{name}: #{list.length} save#{'s' unless list.length == 1}, newest first (restore_fit #{track.inspect}, n plays one again):", *list.map(&:to_s)
+        end
+        list
+      end
+
+      # Plays save +number+ (from fit_saves) of the fit track +track+ plays
+      # again: the fit's file, the track's patch, and its knobs (one undo
+      # step: undo goes back).  Returns a HandTune::Saved.
+      #
+      #     restore_fit :kick, 2
+      def restore_fit(track, number)
+        s = HandTune.restore_fit(track, number)
+        puts s.to_s
+        s
+      end
+    end
+
+    extend FitSavesMethods
+
 
     # The console's save_fit (MB::Sound extends it; tuner-fixes-1).
     module SaveFitMethods
@@ -197,8 +313,11 @@ module MB
       #
       #     save_fit :kick
       #     # saved kick: 3 knobs into tmp/fits/kick_fit.mbg.rb (tune 51.02 -> 51.82, ...)
-      def save_fit(track, document: nil)
-        s = HandTune.save_fit(track, document: document)
+      #
+      # +note:+ says why, in the fit's save history (fit_saves lists it,
+      # restore_fit puts a save back).
+      def save_fit(track, document: nil, note: nil)
+        s = HandTune.save_fit(track, document: document, note: note)
         puts s.to_s
         s
       end

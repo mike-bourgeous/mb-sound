@@ -137,4 +137,35 @@ RSpec.describe('MB::Sound::HandTune.save_fit', :aggregate_failures) do
     expect((data[0...@live.length] - @live).abs.max).to eq(0)
     expect(File.read(fit_file)).to include('at(800.0)')
   end
+
+  # (the maintainer, 2026-11-08: "Does the save key preserve version
+  # history? That would be ideal.")
+  it 'keeps a readable history of saves, lists it newest first, and restores one as an undoable step' do
+    lines = {
+      0 => [SV_TUNE], 10 => ['turn :"lead/cutoff", 700'], 20 => ['save_fit :lead, note: "darker"'],
+      30 => ['turn :"lead/cutoff", 2000', 'turn :"lead/resonance", 0.6'], 40 => ['save_fit :lead'],
+    }
+    expect { @live, @take = perform(lines, buffers: 50) }.to output(/save 1 of lead_fit.*\n.*\n?.*save 2 of lead_fit/m).to_stdout
+    hist = File.read(MB::Sound::HandTune.history_path(:lead_fit))
+    expect(hist.lines.length).to eq(3) # (a comment, two saves)
+    expect(hist).to match(/^save 1, at: "\d{4}-\d\d-\d\dT[\d:]+Z", version: "versions\/lead_fit-\h{12}\.mbg\.rb", knobs: 1, note: "darker", take: "the take started .*, line 3"$/)
+    expect(hist).to match(/^save 2, at: .*, knobs: 2, take: .*$/)
+    MB::Sound::GraphIO.parse(hist) rescue nil # (plain Ruby lines)
+
+    list = nil
+    expect { MB::Sound::Session.with_context(session: session) { list = MB::Sound.fit_saves(:lead) } }.to output(/lead_fit: 2 saves, newest first.*\n\s+2  .*2 knobs .*\n\s+1  .*1 knob  darker/).to_stdout
+    expect(list.map(&:number)).to eq([2, 1])
+    expect(param_of(File.read(list.last.version), :cutoff)).to eq(700.0)
+
+    # (restore save 1: the file, the patch, and the knobs; one undo step)
+    # (it lands at the track's launch point, the next bar)
+    expect { perform({ 0 => ['restore_fit :lead, 1'] }, buffers: 130, take: @take) }.to output(/saved lead: 2 knobs into .*\n.*save 3 of lead_fit/m).to_stdout
+    expect(param_of(File.read(fit_file), :cutoff)).to eq(700.0)
+    expect(knob(:"lead/cutoff")).to eq(700.0)
+    expect(knob(:"lead/resonance")).to eq(0.25)
+    expect(MB::Sound::HandTune.saves(:lead_fit).last.note).to start_with('restored save 1')
+    expect(@take.lines.last.code).to start_with('save_fit :lead, document: "# mb-sound graph document').and end_with('note: "restored save 1"')
+    perform({ 0 => ['undo'] }, buffers: 130, take: @take)
+    expect(param_of(File.read(MB::Sound::Reference.document_path(session, :lead)), :cutoff)).to eq(2000.0)
+  end
 end
