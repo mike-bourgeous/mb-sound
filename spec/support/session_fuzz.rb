@@ -18,7 +18,9 @@
 #   Session's render thread defers them; render-rebuild-1)
 # - :timeline: a timeline-following part (a looping tween, a looping
 #   clip's frequency) launched partway through the song plays from the
-#   launch what it plays there when started at bar 1, within -80 dB
+#   launch what it plays there when started at bar 1, within -80 dB; so
+#   does the first such part, and a one-shot tween (ONCE_TWEENS), in a
+#   bus chain first fed at the launch (fix-bus-tween-1)
 # - :warm: warming every change before it lands (Session::Warming.always:
 #   copies built and played in sandboxes) gives the same mix, bit for bit
 # - :carry: a carrying rebuild of each patch track (what a bind or a build
@@ -95,6 +97,13 @@ module SessionFuzz
     'tween([0.0, 1.0, 0.3], 2.beats, curve: :bounce) * 0.5', 'tween([100.0, 900.0], 3.beats, curve: :elastic) * 0.0005',
     # (a curve per step, fewer curves than steps, uneven steps; tween-curves-1)
     'tween([0.0, 1.0, 0.25, 0.75], [1.beat, 2.beats], curve: [:fast, :hold, :sharp]) * 0.5',
+  ].freeze
+  # Tweens that don't loop, for :timeline's bus chain check (first steps
+  # long enough that launches in 2-3 bar songs land in them; fix-bus-tween-1)
+  ONCE_TWEENS = [
+    'tween([0.0, 1.0], 4.bars, loop: false, curve: :linear)',
+    'tween([0.2, 0.9, 0.4], [3.bars, 1.bar], loop: false)',
+    'tween([0.1, 0.8, 0.3, 0.6], [5.beats, 7.beats, 1.bar], loop: false, curve: [:fast, :slow, :elastic])',
   ].freeze
   # Library instruments for `track :t1, ...` (light ones: one voice each)
   INSTRUMENTS = [':dnb_sub', 'L.inst.jungle.jungle_sub', ':dnb_sub'].freeze
@@ -765,13 +774,30 @@ module SessionFuzz
 
       bpm = song.header.first[/\d+(\.\d+)?/]
       beats = song.header.any? { |l| l.start_with?('meter 3') } ? 3 : 4
-      parts.each do |_, bar, beat, sound|
-        launched = (song.header + ['bg :z, 0.constant', "at_bar(#{bar}#{beat == 1 ? '' : ", beat: #{beat}"}) { bg :p, #{sound}, on: :now }"]).join("\n")
+      parts.each_with_index do |(_, bar, beat, sound), i|
+        at = "at_bar(#{bar}#{beat == 1 ? '' : ", beat: #{beat}"})"
+        from = frame_of(bar, beat, bpm, beats)
+        launched = (song.header + ['bg :z, 0.constant', "#{at} { bg :p, #{sound}, on: :now }"]).join("\n")
         whole = (song.header + ["bg :p, #{sound}, on: :now"]).join("\n")
         a = render(launched, song.bars)
         b = render(whole, song.bars)
-        problem = compare(b, a, tolerance: 1e-4 * [peak(b), 1e-2].max, label: "#{sound} launched at bar #{bar} beat #{beat} vs from bar 1", from: frame_of(bar, beat, bpm, beats))
+        problem = compare(b, a, tolerance: 1e-4 * [peak(b), 1e-2].max, label: "#{sound} launched at bar #{bar} beat #{beat} vs from bar 1", from: from)
         return problem if problem
+        next if i > 0 # (the bus chain checks below for the first part only)
+
+        # (fix-bus-tween-1) the part in a bus chain that first gets signal
+        # at the launch point (the bus wakes there; its chain started with
+        # the song) plays what it plays on a track from bar 1, and so does
+        # a tween that doesn't loop (ONCE_TWEENS, picked by the song):
+        # woken in its first step, a one-shot tween's chase had no
+        # previous keyframe and jumped to the step's target
+        once = ONCE_TWEENS[Zlib.crc32(song.code) % ONCE_TWEENS.length]
+        variants = [[sound, b], [once, render((song.header + ["bg :p, #{once}, on: :now"]).join("\n"), song.bars)]]
+        variants.each do |s, ref|
+          bused = (song.header + ["bus(:tl) { |sig| sig * (#{s}) }", "#{at} { bg :p, 1.constant, on: :now, to: :tl }"]).join("\n")
+          problem = compare(ref, render(bused, song.bars), tolerance: 1e-4 * [peak(ref), 1e-2].max, label: "#{s} in a bus chain fed from bar #{bar} beat #{beat} vs on a track from bar 1", from: from)
+          return problem if problem
+        end
       end
       nil
     end
