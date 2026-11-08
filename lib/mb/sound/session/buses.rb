@@ -141,6 +141,8 @@ module MB
             desc = b.chains.last&.description || 'bypass'
             state = b.asleep ? ', asleep' : ''
             state += ', muted' if muted?(b.name)
+            late = b.chains.last&.latency.to_i
+            state += ", #{late} frames late" if late > 0
             [b.name, "#{desc} (to #{b.to || :master}#{state})"]
           }
         end
@@ -358,6 +360,17 @@ module MB
           @bus_read_offset
         end
 
+        # A number that changes with every routed span (see BusTap, whose
+        # readers ahead of the span append a span at a time).
+        def bus_span
+          @bus_span
+        end
+
+        # The frames in the routed span being rendered.
+        def bus_span_frames
+          @bus_span_count
+        end
+
         # The signal of bus or player +name+ (or the node +only+ in its
         # graph) in the span being rendered: an Array of one SFloat per
         # channel (the span's length), or nil if it didn't play.
@@ -474,6 +487,12 @@ module MB
           return true if taps.empty?
 
           taps.each { |t| t.bind(self) }
+          # Graphs reading a tap ahead (a resampler after it) get its frames
+          # late enough to read written ones (fix-bus-resample-1)
+          taps.each do |t|
+            k = GraphNode::ReadAhead.frames(nodes, t, sample_rate)
+            t.read_ahead = k if k > t.read_ahead
+          end
           added = []
           @mutex.synchronize {
             taps.each do |t|
@@ -894,6 +913,7 @@ module MB
             d = data[c % data.length]
             next if d.nil? || d.empty?
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
+            d = Numo::SFloat.cast(d) unless d.is_a?(Numo::SFloat) # (a DFloat added `inplace` to an SFloat view was lost; fix-bus-resample-1)
             len = MB::M.min(d.length, frames)
             next if meter.nil? && deliver_fast(d, len, ramp, reader, m, stem&.[](c), tap&.[](c), sends, c, offset)
             raw = d[0...len]
@@ -985,6 +1005,7 @@ module MB
             d = data[c % data.length]
             next if d.nil? || d.empty?
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
+            d = Numo::SFloat.cast(d) unless d.is_a?(Numo::SFloat) # (a DFloat added `inplace` to an SFloat view was lost; fix-bus-resample-1)
             len = MB::M.min(d.length, frames)
             acc_add(t, offset, d, len, reader, nil, 0) # (t[offset, len] += d[0, len] * reader)
           end

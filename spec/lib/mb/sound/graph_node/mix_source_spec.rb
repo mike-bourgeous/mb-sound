@@ -10,12 +10,49 @@ RSpec.describe(MB::Sound::GraphNode::MixSource) do
     expect(source.outputs[1].sample(3)).to eq(Numo::SFloat[7, 8, 9])
   end
 
-  it 'returns copies so graphs can sample a channel twice and modify the result' do
+  it 'returns copies so graphs can modify the result' do
     source.write(data)
     a = source.outputs[0].sample(3)
     a[0] = 10
-    expect(source.outputs[0].sample(3)).to eq(data[0])
     expect(data[0]).to eq(Numo::SFloat[1, 2, 3])
+    source.write(data)
+    expect(source.outputs[0].sample(3)).to eq(data[0])
+  end
+
+  # fix-bus-resample-1: a second whole read got the same buffer again, so a
+  # resampler's lookahead read the first buffer twice (consumers read a
+  # channel through a Tee branch, once per span)
+  it 'raises for a read past the written frames' do
+    source.write(data)
+    source.outputs[0].sample(3)
+    expect { source.outputs[0].sample(3) }.to raise_error(ArgumentError, /3 samples 3 samples into a 3-sample.*reads ahead/)
+  end
+
+  describe '#read_ahead' do
+    it 'starts the channels that many frames late, so reads past a write find written frames' do
+      source.read_ahead = 2
+      source.write(data)
+      expect(source.outputs[0].sample(4)).to eq(Numo::SFloat[0, 0, 1, 2])
+      expect(source.outputs[1].sample(2)).to eq(Numo::SFloat[0, 0])
+      expect(source.outputs[1].sample(1)).to eq(Numo::SFloat[-1])
+      source.write([Numo::SFloat[4, 5, 6], Numo::SFloat[7, 8, 9]])
+      expect(source.outputs[0].sample(1)).to eq(Numo::SFloat[3])
+      expect(source.outputs[0].sample(3)).to eq(Numo::SFloat[4, 5, 6])
+      expect(source.outputs[1].sample(5)).to eq(Numo::SFloat[-2, -3, 7, 8, 9])
+    end
+
+    it 'raises for a read further ahead than that' do
+      source.read_ahead = 2
+      source.write(data)
+      expect { source.outputs[0].sample(6) }.to raise_error(ArgumentError, /read 6 frames with 5 written \(2 frames of read-ahead\)/)
+    end
+
+    it 'grows the buffer for long writes' do
+      source.read_ahead = 1
+      long = Numo::SFloat.new(5000).seq
+      source.write([long, long])
+      expect(source.outputs[0].sample(5001)).to eq(Numo::SFloat.zeros(1).concatenate(long))
+    end
   end
 
   it 'works as the start of a graph' do
@@ -28,7 +65,7 @@ RSpec.describe(MB::Sound::GraphNode::MixSource) do
 
   it 'raises an error if the chain asks for a different sample count' do
     source.write(data)
-    expect { source.outputs[0].sample(4) }.to raise_error(ArgumentError, /asked for 4 samples.*has 3/)
+    expect { source.outputs[0].sample(4) }.to raise_error(ArgumentError, /asked for 4 samples 0 samples into a 3-sample/)
   end
 
   # Kez's K10: a Synth reads its lanes in windows (a lane waking inside a

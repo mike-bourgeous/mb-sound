@@ -653,7 +653,11 @@ module MB
           r = branch.reader
 
           while !@done && r.length < count
-            buf = @source.sample(count)
+            # (only the frames this branch lacks: reading a whole +count+
+            # more put the source up to a buffer ahead of every branch,
+            # past the span a Session-fed source (MixSource, bus tap) can
+            # give; fix-bus-resample-1)
+            buf = @source.sample(count - r.length)
             if buf.nil? || buf.empty?
               @done = true
             else

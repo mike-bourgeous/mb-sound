@@ -408,6 +408,7 @@ module MB
             d = data[c % data.length]
             next if d.nil? || d.empty?
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
+            d = Numo::SFloat.cast(d) unless d.is_a?(Numo::SFloat) # (a DFloat added `inplace` to an SFloat view was lost; fix-bus-resample-1)
             len = MB::M.min(d.length, frames)
             d = d[0...len]
             d = d * gains[0...len] if gains

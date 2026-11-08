@@ -73,6 +73,15 @@ module MB
             nodes.nil?
           end
 
+          # The frames this chain hears its input late: how far its nodes
+          # read ahead of their output (a #resample's filter lookahead; see
+          # GraphNode::ReadAhead), 0 for most chains.  The same at any
+          # buffer size.  A track playing the same graph reads its sources
+          # ahead instead and isn't late (fix-bus-resample-1).
+          def latency
+            source.read_ahead
+          end
+
           # The chain's nodes as one graph (a ChainGraph, the same object
           # for the chain's life), for the shared-node bookkeeping of
           # Strip#span_graphs and Strip#catch_up_waiting.
@@ -359,6 +368,9 @@ module MB
             raise ArgumentError, "The master block returned #{list.length} channels for a #{@channels}-channel session"
           end
           chain.nodes = list
+          # Nodes that read ahead of their output (resamplers) find written
+          # frames (see GraphNode::ReadAhead; fix-bus-resample-1)
+          source.read_ahead = GraphNode::ReadAhead.frames(list, source, source.sample_rate)
 
           chain.timeline_nodes = chain.nodes.uniq.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
           bind_bus_taps(chain.nodes, :master) if label == 'master' # readers of buses and players (see Buses)
@@ -608,6 +620,11 @@ module MB
             d = (results[n.__id__] ||= n.sample(count))
             raise "The master chain ended (got #{d&.length.inspect} of #{count} samples)" if d.nil? || d.length < count
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
+            # (the mix is SFloat: a DFloat output, e.g. a Ruby-mode
+            # resampler's, added through `o[skip..].inplace + d` made a new
+            # array and was lost, so the chain played silence;
+            # fix-bus-resample-1)
+            d = Numo::SFloat.cast(d) unless d.is_a?(Numo::SFloat)
             data << d
           end
           elapsed = MB::U.clock_now - t

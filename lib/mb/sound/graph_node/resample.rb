@@ -54,6 +54,11 @@ module MB
           @upstream = upstream.get_sampler
 
           @fast_resample = nil
+          @fed = 0 # Upstream frames given to libsamplerate (see #sample)
+          @produced = 0 # Frames libsamplerate returned
+          @want = 0 # Upstream frames the next read's first callback asks for
+          @lookahead = nil # libsamplerate's read-ahead (see #read_ahead)
+          @upstream_buf_gc_guard = nil
 
           self.sample_rate = sample_rate
 
@@ -203,8 +208,23 @@ module MB
             sample_interpolated(count, @mode)
 
           when :libsamplerate_best, :libsamplerate_fastest, :libsamplerate_zoh, :libsamplerate_linear
-            @fast_resample ||= MB::Sound::FastResample.new(@ratio, @mode) do |size|
-              d = @upstream.sample(size)
+            @lookahead ||= Resample.lookahead(@mode, @ratio)
+
+            # The first callback of a read asks for what this read
+            # consumes plus libsamplerate's lookahead, less what it already
+            # has; any further callback (rounding) asks for TOP_UP frames.
+            # So reads never run more than #read_ahead frames ahead of the
+            # output at any buffer size, which span-fed sources (bus and
+            # master chains' MixSource, bus taps) rely on: reading a whole
+            # chunk more each time libsamplerate needed a few frames put
+            # the reads up to a buffer ahead (fix-bus-resample-1).
+            @want = MB::M.max(((@produced + count) * @inv_ratio).ceil + @lookahead - @fed, MIN_READ)
+
+            @fast_resample ||= MB::Sound::FastResample.new(@ratio, @mode) do |_size|
+              n = @want
+              @want = TOP_UP
+              d = @upstream.sample(n)
+              @fed += d.length if d
 
               # TODO: handle complex by resampling real and imaginary separately?
               d = d.real if d.respond_to?(:real)
@@ -303,7 +323,58 @@ module MB
         def sample_libsamplerate(count)
           # TODO: handle complex by resampling real and imaginary separately?
           raise "call #sample first to initialize libsamplerate" unless @fast_resample
-          @fast_resample.read(count)&.not_inplace! # TODO: can we return inplace?
+          d = @fast_resample.read(count)
+          return nil if d.nil?
+
+          @produced += d.length
+          d.not_inplace! # TODO: can we return inplace?
+        end
+
+        # Upstream frames a libsamplerate read asks for after its first
+        # callback, when the lookahead estimate fell short (see #sample).
+        TOP_UP = 16
+
+        # The fewest upstream frames a libsamplerate callback asks for:
+        # libsamplerate's linear converter gave wrong samples when fed one
+        # frame at a time (measured: up to 0.64 off at one-frame reads of
+        # output, other converters bit-identical at any chunking).
+        MIN_READ = 2
+
+        # libsamplerate's read-ahead per [mode, ratio] (see .lookahead).
+        LOOKAHEADS = {}
+
+        # The most input frames libsamplerate converter +mode+ reads beyond
+        # the input its output so far covers, at +ratio+ (output rate over
+        # input rate): its sinc filter's half length (0 for zoh and
+        # linear).  Measured once per mode and ratio by feeding a converter
+        # one frame per callback (libsamplerate doesn't report it).
+        def self.lookahead(mode, ratio)
+          LOOKAHEADS[[mode, ratio]] ||= begin
+            fed = 0
+            one = Numo::SFloat.zeros(1)
+            fr = MB::Sound::FastResample.new(ratio, mode) { |_| fed += 1; one }
+            ahead = 0
+            256.times do |i|
+              fr.read(1)
+              ahead = MB::M.max(ahead, fed - ((i + 1) / ratio).ceil)
+            end
+            ahead
+          end
+        end
+
+        # The most frames this node reads from its upstream beyond the
+        # frames its output so far covers (at the upstream's rate), at any
+        # buffer size: libsamplerate's filter lookahead plus rounding, or
+        # two frames for the Ruby interpolators.  Used to give span-fed
+        # sources (bus and master chains' MixSource, bus taps) enough
+        # frames of delay (see GraphNode::ReadAhead).
+        def read_ahead
+          case @mode
+          when :ruby_zoh, :ruby_linear
+            2
+          else
+            (@lookahead || Resample.lookahead(@mode, @ratio)) + TOP_UP + 2
+          end
         end
 
         private
