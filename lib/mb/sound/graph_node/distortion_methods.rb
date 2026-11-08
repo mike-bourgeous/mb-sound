@@ -77,8 +77,7 @@ module MB
         alias ashape_curve aease
 
         # Shapes every sample through a transfer curve drawn in dB (DbShaper).
-        # Input level to output level, the sign kept (after Sonic Foundry's
-        # DirectX Distortion): points as for #compand
+        # Input level to output level, the sign kept: points as for #compand
         # (`-60.db => -30.db`, a Hash or [input, output(, shape)] rows; bare
         # numbers are linear gains), joined by straight lines in dB
         # (+interpolation+ :linear, the default) or monotone cubics
@@ -97,7 +96,7 @@ module MB
         # :unity (slope 1 from the first point), or :silence.  +above+ says
         # what happens over the last point: :line (the last line continues,
         # also for inputs over full scale) or :unity (slope 1 from the last
-        # point, as the DirectX Distortion does).  +mix+ (0..1) is the shaped
+        # point).  +mix+ (0..1) is the shaped
         # share, phase-aligned.
         #
         # Antialiased like #softclip (half a sample of delay; closed-form

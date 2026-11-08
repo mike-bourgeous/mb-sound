@@ -463,8 +463,7 @@ module MB
         # the upward boost's fall time, and per band (low, mid, high) the
         # downward threshold (dB) and ratio, upward threshold (dB) and
         # ratio, attack and release (seconds, scaled by +time+).  Values
-        # chosen by ear and measurement (inspired by, not copied from, the
-        # classic three-band upward/downward "OTT" preset).
+        # chosen by ear and measurement.
         # - :default - gentle glue: 3:1 down, 1.5:1 up, half depth
         # - :eleven - over the top: 66:1 down, 4:1 up, full depth, loud and
         #   crunchy (follow it with #limit)
@@ -491,11 +490,11 @@ module MB
             ].freeze
         end
 
-        # Multiband upward + downward compression ("squeeze it to eleven",
-        # OTT-style).  Three LR4 bands, each compressed downward above a
+        # Multiband upward + downward compression ("squeeze it to eleven").
+        # Three LR4 bands, each compressed downward above a
         # threshold and upward below a lower one (at most +max_gain+ of lift,
         # default 24.db), with :auto makeup per band.  +preset+ is :default
-        # (gentle glue) or :eleven (the extreme, OTT-style setting; see
+        # (gentle glue) or :eleven (the extreme setting; see
         # Squeeze.presets).  +downward+ and +upward+ (0..1) scale the ratios
         # toward 1:1; +time+ scales attack and release; +depth+ (0..1, default
         # from the preset) mixes each compressed band with the plain band

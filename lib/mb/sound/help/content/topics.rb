@@ -595,13 +595,13 @@ module MB
         `.stretch(4, mode: :spectral)` a phase vocoder with locked phases
         and sharp transients that land on the stretched beat (pads,
         chords, voices, bass, breaks), `.stretch(32, mode: :paul)`
-        Paulstretch (endless washes).  They are one algorithm:
-        `randomize:` 0..1 goes from the vocoder (0) to Paulstretch (1)
-        (`mode: :spectral, randomize: 1`: Paulstretch phases in the
+        random phases in long windows (endless washes).  They are one
+        algorithm: `randomize:` 0..1 goes from locked phases (0) to random
+        ones (1) (`mode: :spectral, randomize: 1`: random phases in the
         vocoder's shorter 4096-sample window), with `window:`,
-        `overlap:`, `shape: :paul` (the original's window), and `link:
-        false` (random phases per channel) for both; for voices try the
-        original's settings: `.stretch(8, mode: :paul, overlap: 2,
+        `overlap:`, `shape: :paul` (a smooth window for washes), and `link:
+        false` (random phases per channel) for both; for voices try
+        `.stretch(8, mode: :paul, overlap: 2,
         shape: :paul, link: false)`.
         They are offline edits: a new Sample, made once; results over 30
         s read with `mips: :octave` (smaller playback tables).
@@ -617,11 +617,11 @@ module MB
         riff = bounce(1.bar) { seq(A3, C4, E4, G4).n8.loop.then { |c| c.tone.saw.lp4(1500) * c.amp_env } }
         bg :try, riff.stretch(4, mode: :spectral).node.at(-12.db)
       end
-      example 'Paulstretch phases in the vocoder (randomize: 1)' do
+      example 'random phases in the vocoder (randomize: 1)' do
         riff = bounce(1.bar) { seq(A3, C4, E4, G4).n8.loop.then { |c| c.tone.saw.lp4(1500) * c.amp_env } }
         bg :try, riff.stretch(8, mode: :spectral, randomize: 1).node.at(-12.db)
       end
-      example "a voice Paulstretched the original's way" do
+      example 'a voice washed out with long windows and random phases' do
         voice = bounce(1.bar) { seq(A3.n4, C4.n4, E4.n4, D4.n4).legato(1).then { |c| c.tone.saw.formant(:a, :o) * c.amp_env * 0.5 } }
         bg :try, voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false).node.at(-10.db)
       end

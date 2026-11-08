@@ -959,7 +959,7 @@ module MB
       #
       #
       # +mode+ :spectral (aliases :pv, :vocoder) is a phase vocoder with
-      # identity phase locking (Laroche & Dolson): Hann windows of +window+
+      # identity phase locking (each peak's neighbors keep its phase): Hann windows of +window+
       # (4096 samples) with +overlap+ (4) frames per window, every channel
       # rotated by the phases of their mix (a steady stereo image), and
       # with +transients+ (true) each detected onset (Sample::Onsets)
@@ -967,8 +967,8 @@ module MB
       # decay between hits drawn out) and the phases of its rising bins
       # reset, so attacks stay sharp and breaks keep their groove; best on
       # pads, chords, voices, basses (pitch is kept exactly), and breaks.
-      # :paul (:paulstretch) is Paulstretch: windows of +window+ (0.25 s),
-      # +overlap+ (4; Nasca Paul's original uses 2: half as many phase
+      # :paul (:paulstretch) is long windows with random phases: windows of
+      # +window+ (0.25 s), +overlap+ (4; 2 gives half as many phase
       # changes per second, so each partial spreads over half the
       # bandwidth, less chorus), every phase random (from +seed+, 0 by
       # default, so the same stretch gives the same audio): glacial washes
@@ -978,14 +978,14 @@ module MB
       # The two are one algorithm: +randomize+ (0..1; 0 for :spectral, 1
       # for :paul) adds up to ± randomize × π of random phase to every bin
       # each frame, from the locked vocoder (0) through a smeared, diffuse
-      # vocoder to Paulstretch (1); the modes only choose the defaults
+      # vocoder to fully random phases (1); the modes only choose the defaults
       # (window, randomize, transients).  +link+ (true) gives every channel
       # the same random phases (the image keeps its level panning); false
-      # draws them per channel like the original Paulstretch (a wider,
+      # draws them per channel (a wider,
       # decorrelated stereo image; a mono sample stays mono).  +shape+
-      # (Spectral::SHAPES) is the window: :hann, or :paul, the original's
+      # (Spectral::SHAPES) is the window: :hann, or :paul, a
       # flatter (1 - x²)^1.25 (random phases smear partials less: a
-      # Paulstretched sine measured 6.6 Hz wide at -6 dB instead of 10.3).
+      # randomized sine measured 6.6 Hz wide at -6 dB instead of 10.3).
       #
       # Results longer than LONG_STRETCH (30 s) read with `mips: :octave`
       # unless this sample has its own mips (smaller playback tables for
@@ -996,9 +996,9 @@ module MB
       #     pad.stretch(2, cycle: 30.ms)               # cycles fitted to the sound
       #     brk.stretch(2, cycle: 30.ms, fit: :fixed)  # the plain cyclic stretch (stutter, buzz)
       #     pad.stretch(8, mode: :spectral)            # phase vocoder
-      #     pad.stretch(8, mode: :spectral, randomize: 1)     # Paulstretch-like phases in the vocoder's 4096-sample window
+      #     pad.stretch(8, mode: :spectral, randomize: 1)     # random phases in the vocoder's 4096-sample window
       #     bowl.stretch(100, mode: :paul, window: 0.5.seconds)  # an endless wash
-      #     voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false)   # like Nasca Paul's original (voices)
+      #     voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false)   # narrower partials, a wide image (voices)
       def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann,
                   slices: nil, fade: nil, fill: nil)
         if SLICE_MODES.include?(mode.to_sym)
@@ -1192,7 +1192,7 @@ module MB
 
       # Stretch results longer than this (seconds) read with :octave level
       # spacing unless the sample says otherwise (about 8x the audio for
-      # the band-limited levels instead of about 14x: a 160 s Paulstretch
+      # the band-limited levels instead of about 14x: a 160 s :paul stretch
       # would take ~420 MB at the default spacing; maintainer, 2026-10-14).
       LONG_STRETCH = 30
 

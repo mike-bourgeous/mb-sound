@@ -184,7 +184,7 @@ module MB
       end
 
       Kernels.register :inertia, c: FastControl.method(:inertia), ruby: Inertia.method(:process_ruby),
-        about: 'the acceleration-limited follower (GraphNode::Inertia, the DirectX Distortion slew)'
+        about: 'the acceleration-limited follower (GraphNode::Inertia)'
     end
   end
 end
