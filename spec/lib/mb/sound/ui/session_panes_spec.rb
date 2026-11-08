@@ -56,7 +56,7 @@ RSpec.describe('UI session panes', :aggregate_failures) do
       grid.to_text(:none).lines.map(&:rstrip)
     }
     lines = paint.()
-    expect(lines.last).to eq('+5 more (Enter, then Up/Down)')
+    expect(lines.last).to eq('+5 more')
     expect(pane.key_action(:scroll, state, 0)).to include('t1') # (the arrows pick here, not "nothing to scroll")
     6.times { pane.key_action(:pick, state, 1) }
     expect(state[:cursor]).to eq(:t7)

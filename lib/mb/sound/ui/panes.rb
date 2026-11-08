@@ -199,7 +199,6 @@ module MB
             if show.length < rows.length
               below = rows.length - top - show.length
               more = [top > 0 ? "#{top} above" : nil, below > 0 ? "+#{below} more" : nil].compact.join(', ')
-              more += ' (Enter, then Up/Down)' unless state[:cursor]
               c.text(0, c.h - 1, c.fit(more, c.w), :dim)
             elsif hidden > 0 && c.h > rows.length
               c.text(0, c.h - 1, c.fit("#{hidden} stopped hidden (v)", c.w), :dim)
