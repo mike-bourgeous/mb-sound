@@ -122,7 +122,8 @@ module MB
         # delete them, or change their volume"; "+5 more" with nothing to
         # scroll): Up/Down pick a track (the list scrolls to it),
         # Left/Right its level a dB down or up (`level :kick, -3.db`), 0
-        # back to 0 dB, x stops it, v hides or shows stopped tracks.
+        # back to 0 dB, x stops it, d (or Delete) twice removes it from the
+        # set (`untrack`, undoable), v hides or shows stopped tracks.
         class Tracks < Pane
           def initialize = super(:tracks, rate: 8, height: 6, width: 30, title: 'tracks', min_height: 2, description: 'tracks and players: state, clip, armed, recording')
 
@@ -136,6 +137,7 @@ module MB
             on [:right, 'l'], :level, 1, help: 'its level 1 dB up (level)', label: 'Left Right'
             on '0', :level, 0, help: 'its level back to 0 dB'
             on 'x', :stop_track, help: 'stop it (stop)'
+            on ['d', :delete], :untrack, help: 'remove it from the set (untrack; d twice; undo brings it back)', label: 'd Del'
             on 'v', :stopped_view, help: 'hide or show stopped tracks'
             on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
           end
@@ -232,6 +234,24 @@ module MB
           def key_stop_track(state)
             name = state[:cursor] or return 'pick a track first (Up Down)'
             PaneKeys::Run["stop #{name.inspect}", "#{name} stopping"]
+          end
+
+          # d (Delete): the picked track out of the set (`untrack :clap`) on
+          # the second press; the first says what it will do.
+          def key_untrack(state)
+            name = state[:cursor] or return 'pick a track first (Up Down)'
+            unless state[:snap]&.tracks&.any? { |x| x.name == name }
+              return "#{name}: not a track (stop #{name.inspect} ends a player)"
+            end
+            if state[:untracking] == name
+              state[:untracking] = nil
+              names = state[:names] || []
+              i = names.index(name)
+              state[:cursor] = i && (names[i + 1] || (i > 0 ? names[i - 1] : nil))
+              return PaneKeys::Run["untrack #{name.inspect}", "#{name} removed (undo brings it back)"]
+            end
+            state[:untracking] = name
+            "d again removes #{name} from the set (undo brings it back)"
           end
 
           # v: hides or shows stopped tracks (this pane only).

@@ -828,12 +828,14 @@ module MB
         :hall]`).  `fx :keys, L.fx.dub` swaps it at the launch point, the
         notes playing on and the old effect's tail ringing out (one undo
         step); `fx :keys, :off` takes it out, `fx :keys` says what it is.
-        It is a track's `master { }`: a Proc takes the track's signal,
+        `untrack :clap` removes a track from the set (it stops now; undo
+        brings it back; d twice in the tracks pane).
+        A track's insert is its `master { }`: a Proc takes the track's signal,
         `fx :drums, -> { it.softclip(0.1, 0.9).limiter(ceiling: -6.db) }`.
         In `ui :sound` the library picker's Enter on an effect does this
         for the inspected track.
       TEXT
-      commands :track, :tracks, :fx, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
+      commands :track, :tracks, :untrack, :fx, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement
       see :flow, :knobs, :now, :library
       example 'two scenes' do

@@ -70,6 +70,10 @@ RSpec.describe('UI session panes', :aggregate_failures) do
     expect(r.code).to eq('level :t3, -3.0.db')
     expect(pane.key_action(:level, state, 0).code).to eq('level :t3, 0.0.db')
     expect(pane.key_action(:stop_track, state).code).to eq('stop :t3')
+    # (d twice: untrack, the cursor on the next track)
+    expect(pane.key_action(:untrack, state)).to eq('d again removes t3 from the set (undo brings it back)')
+    expect(pane.key_action(:untrack, state).code).to eq('untrack :t3')
+    expect(state[:cursor]).to eq(:t4)
 
     # (all nine are stopped in the fake snapshot: v hides them)
     expect(pane.key_action(:stopped_view, state)).to include('hidden')

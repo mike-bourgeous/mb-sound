@@ -55,6 +55,18 @@ module MB
       end
       alias define_track track
 
+      # Removes track +name+ from the set: it stops now if it plays, its
+      # name is free again, and undo puts it back as it was (one undo
+      # step).  Its knobs, level, and routes stay.  A track a scene gives a
+      # value, or an armed one, is refused with why.  d in the tracks pane
+      # (twice) does it too.
+      #
+      #     untrack :clap_ref
+      #     undo               # it's back
+      def untrack(name)
+        Session.current.arrangement.untrack(name)
+      end
+
       # Gives track +name+ the effect insert +effects+ (Arrangement::Fx): a
       # library effect (`L.fx.reverb.hall`, `:hall`, `{ reverb: :plate }`),
       # a Proc taking the signal, or a list of those, processing what its
