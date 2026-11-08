@@ -59,6 +59,43 @@ module MB
           seconds = Array(roots).flatten.map { |r| walk.(GraphNode.graph_key(r, true)) }.compact.max
           seconds ? (seconds * rate.to_f - 1e-9).ceil : 0
         end
+
+        # Switches every Resample on a path from +roots+ to +leaves+ (as for
+        # .frames) that was given no mode and hasn't started to :min_phase,
+        # which reads nothing ahead (Resample::MinPhase): a live Session
+        # does this for bus and master chains and graphs reading bus taps,
+        # so they aren't late (the maintainer, 2026-11-08: "Use a minimum
+        # phase resampler for zero latency when live").  Returns the
+        # Resamples switched.
+        def self.use_min_phase(roots, leaves)
+          leafset = {}.compare_by_identity
+          Array(leaves).each do |l|
+            leafset[l] = true
+            l.outputs.each { |o| leafset[o] = true } if l.respond_to?(:outputs)
+          end
+
+          memo = {}.compare_by_identity
+          switched = []
+          walk = nil
+          walk = ->(n) {
+            return memo[n] if memo.key?(n)
+            return true if leafset[n]
+
+            memo[n] = false # (feedback edges back to an open node reach nothing)
+            reaches = GraphNode.graph_source_list(n, true).map { |src| walk.(src) }.any?
+            if reaches && n.is_a?(Resample) && !n.mode_given? && n.mode != :min_phase
+              begin
+                n.mode = :min_phase
+                switched << n
+              rescue RuntimeError
+                # (already resampling: keeps its mode, and its read-ahead counts)
+              end
+            end
+            memo[n] = reaches
+          }
+          Array(roots).flatten.each { |r| walk.(GraphNode.graph_key(r, true)) }
+          switched
+        end
       end
     end
   end

@@ -40,6 +40,62 @@ RSpec.describe(MB::Sound::GraphNode::ReadAhead) do
     end
   end
 
+  it 'gives :min_phase chains latency 0' do
+    ReadAheadSweep::CHAINS.each_key.grep(/min_phase/).each do |chain|
+      _, latency = ReadAheadSweep.render(chain, :bus, [800], frames: 1600)
+      expect(latency).to eq(0), chain.to_s
+    end
+  end
+
+  describe 'live Sessions' do
+    let(:sessions) { [] }
+    after { sessions.each(&:close) }
+
+    def session(realtime)
+      out = MB::Sound::NullOutput.new(channels: 1, sleep: realtime ? :virtual : false)
+      MB::Sound::Session.new(output: out, channels: 1, realtime: realtime, transport: MB::Sound::Sequence::Transport.new(bpm: 120)).tap { |s| sessions << s }
+    end
+
+    def modes(nodes)
+      nodes.flat_map { |n| [n, *n.graph] }.uniq.grep(MB::Sound::GraphNode::Resample).map(&:mode)
+    end
+
+    it 'switch bus and master chains\' resamplers given no mode to :min_phase, so the chains are not late' do
+      s = session(true)
+      s.bus(:b) { |sig| sig.resample(96000).lp4(9000).resample(48000) }
+      s.master { |mix| mix.resample(96000).resample(48000, mode: :libsamplerate_fastest) }
+      bus = s.instance_variable_get(:@buses)[:b].chains.last
+      master = s.instance_variable_get(:@master_chains).last
+      expect(modes(bus.nodes)).to eq([:min_phase, :min_phase])
+      expect(bus.latency).to eq(0)
+      expect(modes(master.nodes)).to contain_exactly(:min_phase, :libsamplerate_fastest) # (a given mode stays)
+      expect(master.latency).to be > 0
+    end
+
+    it 'switch graphs reading a bus tap, and leave resamplers that do not reach it alone' do
+      s = session(true)
+      tap = MB::Sound::GraphNode::BusTap.new(:src, channels: 1)
+      other = 3.hz.sine.resample(96000).resample(48000)
+      graph = tap.outputs[0].resample(96000).resample(48000) + other
+      s.route(:src, trigger: true)
+      s.add(0.constant, name: :src)
+      s.add(graph, name: :rd)
+      others = [other, *other.graph].uniq.grep(MB::Sound::GraphNode::Resample)
+      reaching = [graph, *graph.graph].uniq.grep(MB::Sound::GraphNode::Resample).reject { |r| others.any? { |o| o.equal?(r) } }
+      expect(reaching.map(&:mode)).to eq([:min_phase, :min_phase])
+      expect(others.map(&:mode)).to eq([:libsamplerate_best, :libsamplerate_best])
+      expect(tap.read_ahead).to eq(0)
+    end
+
+    it 'leave offline Sessions (renders) on the default mode' do
+      s = session(false)
+      s.bus(:b) { |sig| sig.resample(96000).resample(48000) }
+      bus = s.instance_variable_get(:@buses)[:b].chains.last
+      expect(modes(bus.nodes)).to eq([:libsamplerate_best, :libsamplerate_best])
+      expect(bus.latency).to eq(315)
+    end
+  end
+
   describe '.frames' do
     let(:src) { MB::Sound::GraphNode::MixSource.new(channels: 2) }
 

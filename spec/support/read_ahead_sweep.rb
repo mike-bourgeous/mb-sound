@@ -1,6 +1,7 @@
 # Read-ahead sweep (fix-bus-resample-1, 2026-11-08): chains whose nodes read
 # their sources ahead of their output (resamplers in every mode, a
-# BufferAdapter, an oversample region, a dry path beside a resampled one),
+# BufferAdapter, an oversample region, a dry path beside a resampled one;
+# :min_phase chains, which read nothing ahead and so have latency 0),
 # each played on a track, as a bus chain, as a master chain, and after a bus
 # tap, at several buffer sizes (spec/lib/mb/sound/graph_node/read_ahead_spec.rb).
 # On a track a chain reads its sources ahead and isn't late; span-fed
@@ -29,6 +30,11 @@ module ReadAheadSweep
     oversampled_region: ->(s) { s.resample(96000).lp4(9000).oversample(2).resample(48000) },
     buffer_adapter: ->(s) { s.with_buffer(300) },
     dry_beside: ->(s) { s * 0.5 + s.resample(96000).resample(48000) * 0.5 },
+    # (:min_phase reads nothing ahead: latency 0, what live chains use)
+    min_phase_pair: ->(s) { s.resample(96000, mode: :min_phase).resample(48000, mode: :min_phase) },
+    min_phase_44k: ->(s) { s.resample(44100, mode: :min_phase).resample(48000, mode: :min_phase) },
+    min_phase_region: ->(s) { s.resample(96000, mode: :min_phase).lp4(9000).oversample(2, mode: :min_phase).resample(48000, mode: :min_phase) },
+    min_phase_beside: ->(s) { s * 0.5 + s.resample(96000, mode: :min_phase).resample(48000, mode: :min_phase) * 0.5 },
   }.freeze
 
   # Where a chain plays.

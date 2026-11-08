@@ -370,6 +370,8 @@ module MB
           chain.nodes = list
           # Nodes that read ahead of their output (resamplers) find written
           # frames (see GraphNode::ReadAhead; fix-bus-resample-1)
+          # (live: resamplers given no mode read nothing ahead instead)
+          GraphNode::ReadAhead.use_min_phase(list, source) if @realtime
           source.read_ahead = GraphNode::ReadAhead.frames(list, source, source.sample_rate)
 
           chain.timeline_nodes = chain.nodes.uniq.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
