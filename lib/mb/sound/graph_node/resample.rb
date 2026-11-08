@@ -86,9 +86,9 @@ module MB
         end
 
         # Changes the resampling mode before the first #sample (a Session
-        # switches live bus and master chains' default-mode resamplers to
-        # :min_phase; see Session::Master#build_master).  Raises once
-        # resampling has started.
+        # switches bus and master chains' default-mode resamplers to
+        # :min_phase, live and offline; see GraphNode::ReadAhead.prepare).
+        # Raises once resampling has started.
         def mode=(mode)
           raise "Unsupported mode #{mode.inspect}" unless MODES.include?(mode)
           return if mode == @mode
