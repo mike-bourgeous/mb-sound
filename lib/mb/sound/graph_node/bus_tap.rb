@@ -31,19 +31,35 @@ module MB
 
           def_delegators :@owner, :sample_rate
 
+          # Frames of the source a channel keeps past what its reads need,
+          # so a graph whose reads lag a little behind the Session's (a
+          # :min_phase resampler reads just what its output covers) reads
+          # them in the next buffer instead of skipping them.
+          KEEP = 256
+
           # For internal use by BusTap.
           def initialize(owner, index)
             @owner = owner
             @index = index
             @serial = nil
-            @pos = 0
             @buf = nil
             @node_type_name = owner.label(index)
+            @span = nil # (the routed span whose frames @hist holds last)
+            @hist = nil # (the source's recent frames, from session frame @hist_start)
+            @spare = nil
+            @hist_start = 0
+            @hist_len = 0
+            @at = nil # (the session frame this channel's next read starts at)
           end
 
-          # The next +count+ samples of this channel of the source, in step
-          # with the read the Session is rendering (see
-          # Session::Buses#bus_read_serial).
+          # The next +count+ samples of this channel of the source: frames
+          # BusTap#read_ahead before the graph's own (0 for most graphs: in
+          # step with the read the Session is rendering, see
+          # Session::Buses#bus_read_serial; a graph with a resampler after
+          # the tap reads ahead, and hears the source that much later).
+          # Each read in a span starts where the graph's last read ended if
+          # that is near the read's own frame, else at it (a graph starting
+          # or waking); frames past the span read as silence.
           def sample(count)
             return nil if count == 0
 
@@ -53,28 +69,78 @@ module MB
               return BufferHelper.zero(@buf)
             end
 
+            k = @owner.read_ahead
+            span = session.bus_span
+            if @span != span
+              @span = span
+              keep_span(session, k)
+            end
+
             serial = session.bus_read_serial
             if @serial != serial
               @serial = serial
-              @pos = session.bus_read_offset
+              o = session.bus_span_start + session.bus_read_offset
+              @at = o if @at.nil? || @at < o - KEEP || @at > o + k
             end
 
-            data = session.bus_signal(@owner.source_name, @owner.only)
-            d = data && data[@index % data.length]
-            if d.nil? || @pos >= d.length
+            first = @at - k - @hist_start # (index into @hist)
+            last = first + count
+            lo = first < 0 ? 0 : first
+            hi = last > @hist_len ? @hist_len : last
+            if hi <= lo
               BufferHelper.zero(@buf)
             else
-              n = MB::M.min(count, d.length - @pos)
-              @buf[0...n] = d[@pos...(@pos + n)] unless Kernels.copy_range(@buf, 0, d, @pos, n)
-              (Kernels.fill_range(@buf, n, count, 0) || (@buf[n..] = 0)) if n < count
+              (Kernels.fill_range(@buf, 0, lo - first, 0) || (@buf[0...(lo - first)] = 0)) if lo > first
+              @buf[(lo - first)...(hi - first)] = @hist[lo...hi] unless Kernels.copy_range(@buf, lo - first, @hist, lo, hi - lo)
+              (Kernels.fill_range(@buf, hi - first, count, 0) || (@buf[(hi - first)..] = 0)) if hi < last
             end
-            @pos += count
+            @at += count
             @buf
           end
 
           def sources
             {}.freeze
           end
+
+          # Adds this routed span's frames of the source to @hist (silence
+          # if it didn't play), dropping all but the last +k+ + KEEP frames
+          # before them (all of them after a gap: spans nothing read).
+          def keep_span(session, k)
+            start = session.bus_span_start
+            frames = session.bus_span_frames || 0
+            data = session.bus_signal(@owner.source_name, @owner.only)
+            d = data && data[@index % data.length]
+
+            if @hist.nil?
+              @hist = Numo::SFloat.zeros(k + KEEP + 2048)
+              @spare = Numo::SFloat.zeros(@hist.length)
+            end
+            @hist_len = 0 if @hist_start + @hist_len != start
+            keep = k + KEEP
+            if @hist_len > keep
+              @spare[0...keep] = @hist[(@hist_len - keep)...@hist_len] unless Kernels.copy_range(@spare, 0, @hist, @hist_len - keep, keep)
+              @hist, @spare = @spare, @hist
+              @hist_len = keep
+            end
+            @hist_start = start - @hist_len
+
+            if @hist_len + frames > @hist.length
+              grown = Numo::SFloat.zeros((@hist_len + frames) * 2)
+              grown[0...@hist_len] = @hist[0...@hist_len] if @hist_len > 0
+              @hist = grown
+              @spare = Numo::SFloat.zeros(grown.length)
+            end
+            len = @hist_len
+            if d.nil?
+              Kernels.fill_range(@hist, len, len + frames, 0) || (@hist[len...(len + frames)] = 0) if frames > 0
+            else
+              m = MB::M.min(frames, d.length)
+              @hist[len...(len + m)] = d[0...m] if m > 0 && !Kernels.copy_range(@hist, len, d, 0, m)
+              (Kernels.fill_range(@hist, len + m, len + frames, 0) || (@hist[(len + m)...(len + frames)] = 0)) if m < frames
+            end
+            @hist_len = len + frames
+          end
+          private :keep_span
 
           # Raises unless +rate+ is the tap's rate (it reads a Session's
           # buffers as they are).
@@ -113,7 +179,21 @@ module MB
           @only = only
           @sample_rate = sample_rate.to_f
           @session = nil
+          @read_ahead = 0
           @outputs = Array.new(only ? 1 : channels) { |i| Channel.new(self, i) }.freeze
+        end
+
+        # Frames the tap gives its source late, so nodes after it that read
+        # ahead of their output (a #resample) find written frames: set by
+        # the Session from the graph it plays (see GraphNode::ReadAhead,
+        # Session::Buses#bind_bus_taps).  0 reads the source's frames in
+        # step with the Session.
+        attr_reader :read_ahead
+
+        # Sets #read_ahead (frames), before the tap is first read.
+        def read_ahead=(frames)
+          raise ArgumentError, "read_ahead must be a non-negative Integer (got #{frames.inspect})" unless frames.is_a?(Integer) && frames >= 0
+          @read_ahead = frames
         end
 
         # Reads from +session+ (called by the Session for every graph it

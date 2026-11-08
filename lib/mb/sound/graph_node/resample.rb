@@ -23,6 +23,7 @@ module MB
           :libsamplerate_linear,
           :libsamplerate_fastest,
           :libsamplerate_best,
+          :min_phase,
         ].freeze
 
         # The default mode if no mode is given to the constructor.
@@ -44,16 +45,31 @@ module MB
         # +:sample_rate+.  The +:mode+ parameter may be one of the supported
         # MODES listed above to change the resampling algorithm.  The default
         # is libsamplerate's best sinc converter.
-        def initialize(upstream:, sample_rate:, mode: DEFAULT_MODE)
+        def initialize(upstream:, sample_rate:, mode: nil)
           raise 'Upstream must respond to :sample' unless upstream.respond_to?(:sample)
           raise 'Upstream must respond to :sample_rate' unless upstream.respond_to?(:sample_rate)
 
-          raise "Unsupported mode #{mode.inspect}" unless MODES.include?(mode)
-          @mode = mode
+          raise "Unsupported mode #{mode.inspect}" unless mode.nil? || MODES.include?(mode)
+          @mode = mode || DEFAULT_MODE
+          @mode_given = !mode.nil?
+          @mp_buf = nil # (the :min_phase input: history, then new frames)
+          @mp_spare = nil
+          @mp_len = 0
+          @mp_base = 0
+          @mp_produced = 0
+          @mp_num = nil
+          @mp_den = nil
+          @mp_out = nil
+          @mp_ended = false
 
           @upstream = upstream.get_sampler
 
           @fast_resample = nil
+          @fed = 0 # Upstream frames given to libsamplerate (see #sample)
+          @produced = 0 # Frames libsamplerate returned
+          @want = 0 # Upstream frames the next read's first callback asks for
+          @lookahead = nil # libsamplerate's read-ahead (see #read_ahead)
+          @upstream_buf_gc_guard = nil
 
           self.sample_rate = sample_rate
 
@@ -61,6 +77,26 @@ module MB
           @circbuf_size = 0 # Desired capacity of circular buffer
 
           setup_buffer(length: 1024, double: true)
+        end
+
+        # True if the mode was given to the constructor (or #mode=), false
+        # for the default.
+        def mode_given?
+          @mode_given
+        end
+
+        # Changes the resampling mode before the first #sample (a Session
+        # switches live bus and master chains' default-mode resamplers to
+        # :min_phase; see Session::Master#build_master).  Raises once
+        # resampling has started.
+        def mode=(mode)
+          raise "Unsupported mode #{mode.inspect}" unless MODES.include?(mode)
+          return if mode == @mode
+          raise "Cannot change the resampling mode after resampling has started (#{@mode})" if @fast_resample || @mp_buf || @circbuf
+
+          @mode = mode
+          @mode_given = true
+          @lookahead = nil
         end
 
         # Changes the target sample rate of this resampling node, if possible.
@@ -202,9 +238,27 @@ module MB
           when :ruby_zoh, :ruby_linear
             sample_interpolated(count, @mode)
 
+          when :min_phase
+            sample_min_phase(count)
+
           when :libsamplerate_best, :libsamplerate_fastest, :libsamplerate_zoh, :libsamplerate_linear
-            @fast_resample ||= MB::Sound::FastResample.new(@ratio, @mode) do |size|
-              d = @upstream.sample(size)
+            @lookahead ||= Resample.lookahead(@mode, @ratio)
+
+            # The first callback of a read asks for what this read
+            # consumes plus libsamplerate's lookahead, less what it already
+            # has; any further callback (rounding) asks for TOP_UP frames.
+            # So reads never run more than #read_ahead frames ahead of the
+            # output at any buffer size, which span-fed sources (bus and
+            # master chains' MixSource, bus taps) rely on: reading a whole
+            # chunk more each time libsamplerate needed a few frames put
+            # the reads up to a buffer ahead (fix-bus-resample-1).
+            @want = MB::M.max(((@produced + count) * @inv_ratio).ceil + @lookahead - @fed, MIN_READ)
+
+            @fast_resample ||= MB::Sound::FastResample.new(@ratio, @mode) do |_size|
+              n = @want
+              @want = TOP_UP
+              d = @upstream.sample(n)
+              @fed += d.length if d
 
               # TODO: handle complex by resampling real and imaginary separately?
               d = d.real if d.respond_to?(:real)
@@ -303,7 +357,135 @@ module MB
         def sample_libsamplerate(count)
           # TODO: handle complex by resampling real and imaginary separately?
           raise "call #sample first to initialize libsamplerate" unless @fast_resample
-          @fast_resample.read(count)&.not_inplace! # TODO: can we return inplace?
+          d = @fast_resample.read(count)
+          return nil if d.nil?
+
+          @produced += d.length
+          d.not_inplace! # TODO: can we return inplace?
+        end
+
+        # The :min_phase resampler (see MinPhase): reads exactly the input
+        # frames up to the last output's position, runs the kernel, and
+        # keeps the filter's reach of history.  Returns a short read, then
+        # nil, once the upstream ends.
+        def sample_min_phase(count)
+          scale = @ratio < 1 ? @ratio : 1.0
+          reach = (MinPhase::TAPS / scale).ceil
+          if @mp_buf.nil?
+            # Input frames per output frame, exactly (positions computed
+            # from it don't depend on how reads split the stream)
+            step = @upstream.sample_rate.to_r / @sample_rate.to_r
+            step = step.rationalize(Rational(1, 10**9)) if step.denominator > 1_000_000
+            @mp_num = step.numerator
+            @mp_den = step.denominator
+            @mp_buf = Numo::SFloat.zeros(reach - 1 + 4096)
+            @mp_spare = Numo::SFloat.zeros(@mp_buf.length)
+            @mp_len = reach - 1 # zeros before the first frame
+            @mp_base = -(reach - 1) # (the input frame @mp_buf[0] holds)
+            @mp_produced = 0
+          end
+
+          last = (@mp_produced + count - 1) * @mp_num / @mp_den - @mp_base
+          need = last + 1 - @mp_len
+          if need > 0 && !@mp_ended
+            d = @upstream.sample(need)
+            if d.nil? || d.empty?
+              @mp_ended = true
+            else
+              d = d.real if d.respond_to?(:real) && !d.is_a?(Numo::SFloat)
+              d = Numo::SFloat.cast(d) unless d.is_a?(Numo::SFloat)
+              min_phase_append(d)
+            end
+          end
+
+          if last >= @mp_len
+            # (the upstream ended: the outputs its frames cover)
+            # (output m is covered while m * num / den < the input frames)
+            avail = @mp_len + @mp_base # input frames from frame 0
+            count = (avail * @mp_den - 1) / @mp_num + 1 - @mp_produced
+            return nil if count <= 0
+          end
+
+          out = @mp_out
+          out = @mp_out = Numo::SFloat.zeros(count) if out.nil? || out.length != count
+          Kernels.min_phase_resample(out, @mp_buf, MinPhase.table, MinPhase::PHASES, MinPhase::TAPS, scale, @mp_produced, @mp_num, @mp_den, @mp_base)
+          @mp_produced += count
+
+          drop = (@mp_produced * @mp_num / @mp_den - @mp_base) - (reach - 1)
+          drop = @mp_len if drop > @mp_len
+          if drop > 0
+            rest = @mp_len - drop
+            @mp_spare[0...rest] = @mp_buf[drop...@mp_len] if rest > 0 && !Kernels.copy_range(@mp_spare, 0, @mp_buf, drop, rest)
+            @mp_buf, @mp_spare = @mp_spare, @mp_buf
+            @mp_len = rest
+            @mp_base += drop
+          end
+
+          out
+        end
+        private :sample_min_phase
+
+        # Appends upstream frames +d+ to the :min_phase input.
+        def min_phase_append(d)
+          n = d.length
+          if @mp_len + n > @mp_buf.length
+            grown = Numo::SFloat.zeros((@mp_len + n) * 2)
+            grown[0...@mp_len] = @mp_buf[0...@mp_len] if @mp_len > 0
+            @mp_buf = grown
+            @mp_spare = Numo::SFloat.zeros(grown.length)
+          end
+          @mp_buf[@mp_len...(@mp_len + n)] = d unless Kernels.copy_range(@mp_buf, @mp_len, d, 0, n)
+          @mp_len += n
+        end
+        private :min_phase_append
+
+        # Upstream frames a libsamplerate read asks for after its first
+        # callback, when the lookahead estimate fell short (see #sample).
+        TOP_UP = 16
+
+        # The fewest upstream frames a libsamplerate callback asks for:
+        # libsamplerate's linear converter gave wrong samples when fed one
+        # frame at a time (measured: up to 0.64 off at one-frame reads of
+        # output, other converters bit-identical at any chunking).
+        MIN_READ = 2
+
+        # libsamplerate's read-ahead per [mode, ratio] (see .lookahead).
+        LOOKAHEADS = {}
+
+        # The most input frames libsamplerate converter +mode+ reads beyond
+        # the input its output so far covers, at +ratio+ (output rate over
+        # input rate): its sinc filter's half length (0 for zoh and
+        # linear).  Measured once per mode and ratio by feeding a converter
+        # one frame per callback (libsamplerate doesn't report it).
+        def self.lookahead(mode, ratio)
+          LOOKAHEADS[[mode, ratio]] ||= begin
+            fed = 0
+            one = Numo::SFloat.zeros(1)
+            fr = MB::Sound::FastResample.new(ratio, mode) { |_| fed += 1; one }
+            ahead = 0
+            256.times do |i|
+              fr.read(1)
+              ahead = MB::M.max(ahead, fed - ((i + 1) / ratio).ceil)
+            end
+            ahead
+          end
+        end
+
+        # The most frames this node reads from its upstream beyond the
+        # frames its output so far covers (at the upstream's rate), at any
+        # buffer size: libsamplerate's filter lookahead plus rounding, or
+        # two frames for the Ruby interpolators.  Used to give span-fed
+        # sources (bus and master chains' MixSource, bus taps) enough
+        # frames of delay (see GraphNode::ReadAhead).
+        def read_ahead
+          case @mode
+          when :min_phase
+            0
+          when :ruby_zoh, :ruby_linear
+            2
+          else
+            (@lookahead || Resample.lookahead(@mode, @ratio)) + TOP_UP + 2
+          end
         end
 
         private
@@ -358,3 +540,5 @@ module MB
     end
   end
 end
+
+require_relative 'resample_min_phase'

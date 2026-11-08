@@ -91,7 +91,12 @@ RSpec.describe(MB::Sound::GraphNode::Tee, aggregate_failures: true) do
 
   it 'does not zero pad if the source returns less data at the very end' do
     source = MB::Sound::ArrayInput.new(data: [Numo::SFloat[]])
-    expect(source).to receive(:sample).with(5).and_return(Numo::SFloat[1,2,3,4], Numo::SFloat[5,6,7], nil)
+    # (5, then the 1 frame still missing, then the 3 the second read
+    # lacks: a Tee asks only for what its branch lacks since
+    # fix-bus-resample-1; this source gives more, then ends)
+    expect(source).to receive(:sample).with(5).and_return(Numo::SFloat[1,2,3,4])
+    expect(source).to receive(:sample).with(1).and_return(Numo::SFloat[5,6,7])
+    expect(source).to receive(:sample).with(3).and_return(nil)
     allow(source).to receive(:tee).and_call_original
 
     t1, t2 = source.tee

@@ -14,6 +14,7 @@ module KernelsGuard
   # compares each with its mirror (the file must exist and name the
   # kernel's C function or its Kernels name).
   COMPARED_ELSEWHERE = {
+    min_phase_resample: 'spec/lib/mb/sound/graph_node/resample_min_phase_spec.rb', # (the sweep's resamplers use the default mode)
     noise_skip: 'spec/lib/mb/sound/sleep_catch_up_spec.rb', # (a sleeping voice's catch-up: the sweep's graphs never sleep in check mode)
     filter_tan: 'spec/lib/mb/sound/filter/four_pole_spec.rb',
     filter_tanh: 'spec/lib/mb/sound/filter/four_pole_spec.rb',

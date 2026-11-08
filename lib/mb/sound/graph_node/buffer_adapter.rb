@@ -54,6 +54,12 @@ module MB
           self
         end
 
+        # The most frames this node reads beyond its output (a block less
+        # one; see GraphNode::ReadAhead).
+        def read_ahead
+          @upstream_count - 1
+        end
+
         # Returns +count+ samples, using as many or as few reads from the
         # upstream as needed to fulfill the request.
         def sample(count)
