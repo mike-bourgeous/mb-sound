@@ -77,6 +77,28 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(keyed.grep(/\A (SOURCE|AMP|FX)  [safox] +\S/).length).to be >= 2
       empty = snap.with(slow: snap.slow.with(inspector: nil))
       expect(draw(:inspector, empty)[0]).to include('nothing to inspect')
+
+      # (tuner-fixes-1, "What is this 0.4Hz filter doing?": a knob setting
+      # a param through arithmetic shows its own value and unit, "via" it,
+      # not the knob's number in the param's Hz)
+      n = lp4.inspector.nodes[0]
+      cut = n.params.values[:cutoff].with(value: nil, label: nil, unit: nil)
+      via = n.with(params: n.params.with(values: n.params.values.merge(cutoff: cut)), param_knobs: { cutoff: :tone }.freeze)
+      tone = ui::KnobValue.new(name: :tone, value: 0.4, spec: MB::Sound::GraphNode::Knob::Spec.new(name: :tone, default: 0.4, range: 0.0..1.0))
+      s2 = lp4.with(knobs: [*lp4.knobs, tone].freeze, slow: lp4.slow.with(inspector: lp4.inspector.with(nodes: [via, *lp4.inspector.nodes.drop(1)].freeze)))
+      text = draw(:inspector, s2, { title_in_rule: true, mode: true }, w: 60, h: 14).join("\n")
+      expect(text).to match(/cutoff +█+.* 0\.4  via tone/)
+      expect(text).not_to include("0.4 Hz")
+      expect(text).to include("cut ← tone")
+
+      # (and "It says cutoff comes from mod env but mod env does not have a
+      # cutoff control; it should say where to adjust the base frequency":
+      # the knobs that set a modulated param's base)
+      fed = n.with(params: n.params.with(values: n.params.values.merge(cutoff: cut.with(label: 'clip 20..18000'))),
+                   param_feeds: { cutoff: %i[bass/cutoff bass/fenv].freeze }.freeze)
+      s3 = lp4.with(slow: lp4.slow.with(inspector: lp4.inspector.with(nodes: [fed, *lp4.inspector.nodes.drop(1)].freeze)))
+      text = draw(:inspector, s3, { title_in_rule: true, mode: true }, w: 80, h: 14).join("\n")
+      expect(text).to match(/cutoff +(→|->) clip 20\.\.18000; set by cutoff, fenv/)
     end
 
     it 'draws the signal chain on one line over the sections when there is room, the amp where the amp envelope is' do

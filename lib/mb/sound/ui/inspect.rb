@@ -42,10 +42,15 @@ module MB
         # turns this voice and clip can't make heard, with why (see
         # Inspect.masked_of), so the inspector says so instead of turning
         # numbers that change nothing (inspector-nav-1).
+        #
+        # +param_feeds+ ({ param => [knob names] }): params two or more knobs
+        # set through arithmetic (a bandpass at `sw_f * 2 ** (env *
+        # sw_amt)`), so a row modulated by an envelope says which knobs set
+        # its base (tuner-fixes-1).
         NodeInfo = Data.define(:key, :label, :role, :count, :params, :preview, :knobs, :live, :binds, :section, :what, :dest, :voice, :channels, :param_knobs,
-                               :recipe_key, :masked) do
+                               :recipe_key, :masked, :param_feeds) do
           def initialize(key:, label:, role:, count:, params:, preview:, knobs:, live: nil, binds: {}.freeze, section: nil, what: nil, dest: [].freeze,
-                         voice: nil, channels: 1, param_knobs: {}.freeze, recipe_key: nil, masked: {}.freeze)
+                         voice: nil, channels: 1, param_knobs: {}.freeze, recipe_key: nil, masked: {}.freeze, param_feeds: {}.freeze)
             super
           end
 
@@ -390,6 +395,7 @@ module MB
             n = r.nodes.first
             label = r.label
             pk = Inspect.param_knobs(n)
+            pf = Inspect.param_feeds(n)
             extras = r.knobs
             mine = unseen[i].reject { |kn| claimed[kn] }
             unless mine.empty?
@@ -402,7 +408,8 @@ module MB
                                 # (a node no section fits shows in MOD, marked: a row the
                                 # sections view leaves out can't be reached by Up and Down,
                                 # inspector-nav-1; the guard keeps Classify#unfit empty)
-                                section: r.section == :other ? :mod : r.section, what: r.section == :other ? 'unsorted'.freeze : r.what, dest: r.dest, voice: r.voice, channels: r.channels, param_knobs: pk)
+                                section: r.section == :other ? :mod : r.section, what: r.section == :other ? 'unsorted'.freeze : r.what, dest: r.dest, voice: r.voice, channels: r.channels, param_knobs: pk,
+                                param_feeds: pf)
             [n, info, r.nodes, extras]
           }
 
@@ -525,6 +532,19 @@ module MB
         # So a modulation depth knob further in (`cut * 2 ** v.lfo(...,
         # depth: lfo_depth)`, dnb_reese since reese-params-1) leaves the
         # cutoff its knob.
+        # { param => [knob names] } of +node+'s params that two or more
+        # knobs set through arithmetic (see NodeInfo#param_feeds).
+        def param_feeds(node)
+          return {}.freeze unless node.respond_to?(:params)
+          (node.params rescue {}).each_with_object({}) { |(name, src), h|
+            next if src.is_a?(Numeric)
+            s = GraphNode.climb_tee_tree(src)
+            next if s.is_a?(GraphNode::Knob::Reader) || s.is_a?(GraphNode::Knob)
+            found = knobs_in(s, 6, arithmetic: true, shapers: true).uniq
+            h[name] = found.freeze if found.length > 1
+          }.freeze
+        end
+
         def param_knobs(node)
           return {}.freeze unless node.respond_to?(:params)
           (node.params rescue {}).each_with_object({}) { |(name, src), h|
@@ -687,7 +707,11 @@ module MB
         # glide reading a knob for its time doesn't make the frequency it
         # moves that knob's).  With +nearest+, only the knobs of the
         # nearest depth that has any.
-        def knobs_in(src, depth, arithmetic: false, nearest: false)
+        #
+        # With +shapers+, arithmetic reads through clips and other Shapers
+        # too (a cutoff `(2 ** (env * fenv) * cutoff).clip(20, 18000)`:
+        # NodeInfo#param_feeds).
+        def knobs_in(src, depth, arithmetic: false, nearest: false, shapers: false)
           out = []
           frontier = [src]
           (depth + 1).times do
@@ -700,7 +724,8 @@ module MB
                 out << k.name if k.name && !out.include?(k.name)
                 next
               end
-              next if arithmetic && !(s.is_a?(GraphNode::Multiplier) || s.is_a?(GraphNode::Mixer) || s.is_a?(GraphNode::BinaryOperation) || s.is_a?(GraphNode::ProcNode))
+              next if arithmetic && !(s.is_a?(GraphNode::Multiplier) || s.is_a?(GraphNode::Mixer) || s.is_a?(GraphNode::BinaryOperation) || s.is_a?(GraphNode::ProcNode) ||
+                                      (shapers && s.is_a?(GraphNode::Shaper)))
               nxt.concat(s.sources.values.reject { |v| v.is_a?(Numeric) }) if s.respond_to?(:sources)
             end
             frontier = nxt

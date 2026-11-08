@@ -410,6 +410,9 @@ module MB
             bits << 'stereo' if n.channels > 1
             sum = shown_params(n).filter_map { |name, v|
               kn = n.knob_of(name)
+              # (a knob setting it through arithmetic: named, not its number
+              # in this param's unit; tuner-fixes-1)
+              next "#{SHORTS[name] || name} ← #{Session::Name[kn].leaf}" if kn && v.label != kn && n.param_knobs.key?(name)
               v = v.with(unit: Panes.unit_of(knobs[kn].spec, name)) if v.unit.nil? && kn && knobs[kn]&.spec
               t = value_text(v, param_value(n, name, v, knobs))
               t && "#{SHORTS[name] || name} #{t}"
@@ -448,13 +451,19 @@ module MB
             masked = n.masked[name]
             if k&.spec
               value, turning = shown_value(state, kn, k)
-              vtext = value_text(v.unit ? v : v.with(unit: Panes.unit_of(k.spec, name)), value) || Panes.fmt(value)
+              # (a knob that sets the param through arithmetic, a click's
+              # tone into its lowpass's cutoff: its own value and unit, not
+              # the param's; tuner-fixes-1, the maintainer's "What is this
+              # 0.4Hz filter doing?")
+              direct = v.label == kn || !n.param_knobs.key?(name)
+              vtext = (direct ? value_text(v.unit ? v : v.with(unit: Panes.unit_of(k.spec, name)), value) : value_text(v.with(unit: k.spec.unit), value)) ||
+                      Panes.fmt(value)
               more = mods.empty? ? '' : "← #{mods.join(', ')}"
               mw = (c.w - x - vtext.length - more.length - kn.to_s.length - 6).clamp(3, 16)
               x = c.meter(k.spec.position(value.to_f).to_f, width: mw, x: x + 1, y: y, role: :key)
               x = c.text(x + 1, y, vtext, turning ? :queued : (masked ? :dim : :text))
               x = c.text(x + 1, y, more, :dim) unless more.empty?
-              c.text(x, y, c.fit(masked ? "  #{sel ? masked : 'not heard here'}" : "  #{kn}", [c.w - x, 0].max), :dim)
+              c.text(x, y, c.fit(masked ? "  #{sel ? masked : 'not heard here'}" : "  #{direct ? '' : 'via '}#{kn}", [c.w - x, 0].max), :dim)
             elsif !v.value.nil?
               x = c.text(x + 1, y, value_text(v) || v.value.to_s, masked ? :dim : :text)
               hint = sel && (b = n.binds[name]) ? (b.line ? "  Enter: knob #{b.knob.inspect}" : "  #{b.reason}") : (v.detail == Inspect::LITERAL ? '  ·' : '')
@@ -463,7 +472,13 @@ module MB
               hint = sel ? "  #{masked}" : '  · not heard here' if masked
               c.text(x, y, c.fit(hint, [c.w - x, 0].max), :dim)
             else
-              c.text(x + 1, y, c.fit(mods.empty? ? "#{c.glyph(:arrow)} #{v.label || v.detail}" : "← #{mods.join(', ')}", [c.w - x - 1, 0].max), :dim)
+              # (the knobs that set a modulated param's base: the maintainer's
+              # "It says cutoff comes from mod env but mod env does not have a
+              # cutoff control; it should say where to adjust the base
+              # frequency"; tuner-fixes-1)
+              feeds = n.param_feeds[name]
+              base = feeds ? "; set by #{feeds.map { |f| Session::Name[f].leaf }.join(', ')}" : ''
+              c.text(x + 1, y, c.fit(mods.empty? ? "#{c.glyph(:arrow)} #{v.label || v.detail}#{base}" : "← #{mods.join(', ')}#{base}", [c.w - x - 1, 0].max), :dim)
             end
             y + 1
           end
