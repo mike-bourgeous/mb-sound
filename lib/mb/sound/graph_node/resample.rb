@@ -69,7 +69,6 @@ module MB
           @produced = 0 # Frames libsamplerate returned
           @want = 0 # Upstream frames the next read's first callback asks for
           @lookahead = nil # libsamplerate's read-ahead (see #read_ahead)
-          @upstream_buf_gc_guard = nil
 
           self.sample_rate = sample_rate
 
@@ -265,10 +264,8 @@ module MB
 
               d = Numo::SFloat.cast(d) unless d.is_a?(Numo::SFloat)
 
-              # Ensure GC does not deallocate the buffer (saw a single SIGSEGV
-              # during resampling once, might be due to this)
-              @upstream_buf_gc_guard = d
-
+              # (FastResample copies it: libsamplerate never holds a
+              # pointer into an upstream buffer)
               d
             end
 
@@ -446,7 +443,10 @@ module MB
         # The fewest upstream frames a libsamplerate callback asks for:
         # libsamplerate's linear converter gave wrong samples when fed one
         # frame at a time (measured: up to 0.64 off at one-frame reads of
-        # output, other converters bit-identical at any chunking).
+        # output, other converters bit-identical at any chunking), reading
+        # the frame before the block.  Since fix-batch22 FastResample hands
+        # it a copy after the previous block's last frame, so one-frame
+        # blocks are exact too; the minimum stays.
         MIN_READ = 2
 
         # libsamplerate's read-ahead per [mode, ratio] (see .lookahead).

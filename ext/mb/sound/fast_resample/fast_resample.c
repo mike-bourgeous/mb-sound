@@ -8,6 +8,7 @@
  * https://silverhammermba.github.io/emberb/c/
  */
 #include <math.h>
+#include <string.h>
 #include <samplerate.h>
 
 #include <ruby.h>
@@ -24,6 +25,8 @@ static ID sym_atcallback;
 static ID sym_atstate;
 static ID sym_atread_size;
 static ID sym_atview;
+static ID sym_atstage;
+static ID sym_atstage_n;
 static ID sym_array_lookup;
 static ID sym_array_assign;
 static ID sym_zeros;
@@ -176,13 +179,46 @@ static long read_callback(void *data, float **audio)
 		rb_raise(rb_eTypeError, "Data from read callback is %"PRIsVALUE", not Numo::SFloat", buf_class);
 	}
 
-	*audio = (float *)(nary_get_pointer_for_read(buf) + nary_get_offset(buf));
-
 	narray_t *na;
 	GetNArray(buf, na);
 	long samples_read = NA_SIZE(na);
 	mbfr_debug("Block gave us %ld samples\n", samples_read);
+	if (samples_read == 0) {
+		*audio = NULL;
+		return 0;
+	}
 
+	if (nary_check_contiguous(buf) != Qtrue) {
+		buf = rb_funcall(buf, rb_intern("dup"), 0);
+	}
+	const float *src = (const float *)(nary_get_pointer_for_read(buf) + nary_get_offset(buf));
+
+	// libsamplerate gets a copy in @stage, after the previous block's last
+	// frame: it keeps a pointer to the frames a read leaves for the next
+	// read (the block's buffer may be reused or freed by then), and its
+	// linear converter reads the frame before the block when it has one
+	// frame (an invalid read under memcheck from Resample.lookahead, which
+	// feeds one frame at a time; the frame before is what it means to
+	// read: the previous block's last, or before the first block the
+	// first frame, as libsamplerate starts its own history).
+	VALUE stage = rb_ivar_get(self, sym_atstage);
+	float last = src[0];
+	if (!NIL_P(stage)) {
+		float *old = (float *)nary_get_pointer_for_write(stage);
+		last = old[FIX2LONG(rb_ivar_get(self, sym_atstage_n))];
+	}
+	if (NIL_P(stage) || (long)RNARRAY_SIZE(stage) < samples_read + 1) {
+		long size = samples_read + 1 < 64 ? 64 : samples_read + 1;
+		stage = rb_funcall(numo_cSFloat, sym_zeros, 1, LONG2NUM(size));
+		rb_ivar_set(self, sym_atstage, stage);
+	}
+	float *stage_ptr = (float *)nary_get_pointer_for_write(stage);
+	stage_ptr[0] = last;
+	memcpy(stage_ptr + 1, src, samples_read * sizeof(float));
+	rb_ivar_set(self, sym_atstage_n, LONG2FIX(samples_read));
+	RB_GC_GUARD(buf);
+
+	*audio = stage_ptr + 1;
 	return samples_read;
 }
 
@@ -293,6 +329,8 @@ static VALUE ruby_fast_resample_initialize(int argc, VALUE *argv, VALUE self)
 	rb_ivar_set(self, sym_atread_size, INT2NUM(0));
 	rb_ivar_set(self, sym_atbuf, Qnil);
 	rb_ivar_set(self, sym_atview, Qnil);
+	rb_ivar_set(self, sym_atstage, Qnil);
+	rb_ivar_set(self, sym_atstage_n, INT2FIX(0));
 	rb_ivar_set(self, sym_atcallback, callback);
 
 	rb_funcall(self, rb_intern("setup_converter_type"), 1, mode);
@@ -471,6 +509,8 @@ void Init_fast_resample(void)
 	sym_atstate = rb_intern("@state");
 	sym_atread_size = rb_intern("@read_size");
 	sym_atview = rb_intern("@view");
+	sym_atstage = rb_intern("@stage");
+	sym_atstage_n = rb_intern("@stage_n");
 	sym_zeros = rb_intern("zeros");
 	sym_array_lookup = rb_intern("[]");
 	sym_array_assign = rb_intern("[]=");
