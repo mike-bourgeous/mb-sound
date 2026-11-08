@@ -276,6 +276,55 @@ module MB
         n && n.delete_prefix(PREFIX)
       end
 
+      # The plain value a Prism node spells, as this printer prints plain
+      # values: Integers, Floats (with Float::INFINITY, -Float::INFINITY,
+      # Float::NAN), Rationals (`3/4r`, `-3/4r`, `3r`), Strings, Symbols,
+      # nil, true, false, Arrays, Hashes (and keyword arguments), and
+      # Ranges of these.  Raises ArgumentError for anything else, so saved
+      # records written as Ruby (bar statistics sidecars) read back
+      # without running any code.
+      def literal(node)
+        case node
+        when Prism::IntegerNode, Prism::FloatNode, Prism::RationalNode then node.value
+        when Prism::StringNode then node.unescaped
+        when Prism::SymbolNode then node.unescaped.to_sym
+        when Prism::NilNode then nil
+        when Prism::TrueNode then true
+        when Prism::FalseNode then false
+        when Prism::ArrayNode then node.elements.map { |e| literal(e) }
+        when Prism::HashNode, Prism::KeywordHashNode
+          node.elements.to_h { |e|
+            raise ArgumentError, "not a plain value: #{node.slice[0, 60]}" unless e.is_a?(Prism::AssocNode)
+            [literal(e.key), literal(e.value)]
+          }
+        when Prism::ParenthesesNode
+          body = node.body&.body
+          raise ArgumentError, "not a plain value: #{node.slice[0, 60]}" unless body&.length == 1
+          literal(body[0])
+        when Prism::RangeNode
+          a = node.left && literal(node.left)
+          b = node.right && literal(node.right)
+          node.exclude_end? ? (a...b) : (a..b)
+        when Prism::ConstantPathNode
+          case node.slice
+          when 'Float::INFINITY' then Float::INFINITY
+          when 'Float::NAN' then Float::NAN
+          else raise ArgumentError, "not a plain value: #{node.slice[0, 60]}"
+          end
+        when Prism::CallNode
+          args = node.arguments&.arguments || []
+          if node.name == :-@ && args.empty? && node.receiver
+            v = literal(node.receiver)
+            return -v if v.is_a?(Numeric)
+          elsif node.name == :/ && args.length == 1 && node.receiver.is_a?(Prism::IntegerNode) && args[0].is_a?(Prism::RationalNode)
+            return node.receiver.value / args[0].value
+          end
+          raise ArgumentError, "not a plain value: #{node.slice[0, 60]}"
+        else
+          raise ArgumentError, "not a plain value: #{node.respond_to?(:slice) ? node.slice[0, 60] : node.inspect}"
+        end
+      end
+
       # Whether +text+ needs no parentheses as a receiver.
       def atom_text?(t)
         t.match?(/\A[A-Za-z_0-9.:]+(\(.*\))?\z/) && !t.include?('/') && !t.start_with?('-')

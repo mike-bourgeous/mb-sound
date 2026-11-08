@@ -50,6 +50,21 @@ RSpec.describe(MB::Sound::RubyValue, :aggregate_failures) do
     end
   end
 
+  it 'reads plain values back from Prism nodes without running anything (.literal)' do
+    plain = [1, -2, 0.5, -0.25, 1.0e-05, 3/4r, -3/4r, 3r, Float::INFINITY, -Float::INFINITY, 'a "b"', :sym, :"two words", nil, true, false,
+             [1, [2.5, :x]], { a: 1, "b c": [2, nil], 3 => 4 }, 1..2, 1.5...3, (..4)]
+    plain.each do |v|
+      text = rv.to_ruby(v)
+      got = rv.literal(Prism.parse(text).value.statements.body[0])
+      expect(got).to eq(v), "#{text} reads as #{got.inspect}"
+      expect(got.class).to eq(v.class)
+    end
+    expect(rv.literal(Prism.parse('Float::NAN').value.statements.body[0]).nan?).to be(true)
+    ['system("ls")', '`ls`', 'File', 'x', '1 + 2', '"#{x}"', 'Float::MAX', '[1, foo]'].each do |code|
+      expect { rv.literal(Prism.parse(code).value.statements.body[0]) }.to raise_error(ArgumentError, /not a plain value/), code
+    end
+  end
+
   it 'prints long Floats that are exactly k/10 dB as k.db only with gains: true' do
     g = 10 ** (-6 / 20.0)
     expect(rv.to_ruby(g)).to eq(g.to_s)
