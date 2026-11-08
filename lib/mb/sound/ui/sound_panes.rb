@@ -67,11 +67,13 @@ module MB
             on ['p'], :plumbing, help: 'every node as chips, the hidden plumbing too (again: back)', label: 'p'
             on ['b'], :ab, help: 'A/B: the reference or the patch (ab)'
             # (hand-tune-3: the tuner's step 3 keys, named by the tune strip)
-            on ['R'], :refine, help: 'refine against the reference (again: stop; then A/B it)'
-            on ['A'], :apply, help: "apply refine's proposal (one undo step)"
-            on ['S'], :save_fit, help: "save the knobs into the fit's file (save_fit)"
-            on ['Y'], :fit_saves, help: "the fit's saves, newest first (fit_saves; restore_fit puts one back)"
-            on ['E'], :retune, help: "reload the fit's edited file (retune; not a save)"
+            on ['R'], :refine, help: 'refine against the reference (again: stop; then A/B it)', label: 'R A C'
+            on ['A'], :apply, help: "apply refine's proposal (one undo step)", label: 'R A C'
+            on ['C'], :refine_clear, help: "clear refine's proposal (refine.off)", label: 'R A C'
+            on ['S'], :save_fit, help: "save the knobs into the fit's file (save_fit)", label: 'S Y'
+            on ['Y'], :fit_saves, help: "the fit's saves (fit_saves; restore_fit)", label: 'S Y'
+            on ['E'], :retune, help: "reload the fit's edited file (retune; not a save)", label: 'E G'
+            on ['G'], :generator, help: 'another clip or generator: bg :kick, ... (its reference follows)', label: 'E G'
             on ['#'], :note, help: 'a note about what you hear (ui.note)'
             on ['w'], :tuner_back, help: 'the tuner: back to the synths, the references', label: 'w W'
             on ['W'], :tuner_restart, help: 'the tuner: back to the synths, the references', label: 'w W'
@@ -766,6 +768,23 @@ module MB
             [*flush(state), PaneKeys::Run[code, note]]
           end
 
+          # C: refine's proposal and A/B copy gone (refine.off).
+          def key_refine_clear(state)
+            track = state[:snap]&.inspector&.track or return 'nothing to inspect'
+            s = Session.existing
+            r = s && HandTune.refinements[s]
+            return "refine #{track}: no proposal to clear" unless r && r.track == track
+            [*flush(state), PaneKeys::Run['refine.off', "refine #{track}: proposal cleared (R searches again)"]]
+          end
+
+          # G: `bg :kick, L.gen.` on the console line, to finish with a
+          # generator or a clip (Tab completes): the track plays it, and its
+          # A/B reference follows (Reference.follow).
+          def key_generator(state)
+            track = state[:snap]&.inspector&.track or return 'nothing to inspect'
+            PaneKeys::Paste["bg #{track.inspect}, L.gen.", "a generator (Tab completes) or a clip for #{track}; Enter plays it (the reference follows)"]
+          end
+
           def key_apply(state)
             return 'nothing to inspect' unless state[:snap]&.inspector&.track
             [*flush(state), PaneKeys::Run['refine.apply', 'refine: the proposal applied (undo takes it back)']]
@@ -1202,7 +1221,11 @@ module MB
             on '<', :cursor_freq, -1, help: 'the frequency marker lower (the spectrum)', label: '< >'
             on '>', :cursor_freq, 1, help: 'the frequency marker higher', label: '< >'
             on 'x', :cursor_clear, help: 'no markers'
+            on 'f', :reference, help: "the A/B reference's envelope over the patch's (ab), on or off"
           end
+
+          # The color of the A/B reference's envelope over the patch's.
+          REFERENCE = '#61afef'
 
           # Steps of the markers: the envelope view's length over
           # CURSOR_STEPS, a sixth of an octave.
@@ -1265,10 +1288,52 @@ module MB
               return
             end
             prev = state[:overlay] == false ? nil : driver.previous
+            state[:ref_env] = state[:reference] == false ? nil : Render.reference_envelope(r)
             areas(c.sub(0, 1, c.w, c.h - 1), state[:view] || :all).each do |view, body|
               chart = chart_for(r, prev, view, state)
               plot(body, chart, state, view, look) if chart
             end
+          end
+
+          # [key, hi, lo] of the A/B reference of Result +r+'s track (ab):
+          # its first channel's highest and lowest sample in as many columns
+          # as +r+'s envelope over the same length, scaled by the
+          # reference's matched level (as ab plays it), or nil without a
+          # reference.  Cached per reference, render length, and level.
+          def self.reference_envelope(r)
+            return nil unless r&.hi && r.track
+            session = UI.tiles&.session || Session.existing or return nil
+            pair = Reference.pairs(session)[r.track] or return nil
+            smp = pair.sample
+            cols = r.hi.length
+            key = [smp.__id__, r.frames, r.rate, cols, pair.level_db]
+            @ref_envelopes ||= {}
+            hit = @ref_envelopes[key]
+            return hit if hit
+            data = smp.to_a.first
+            sr = smp.sample_rate.to_f
+            n = [(r.frames.to_f / r.rate * sr).round, 1].max
+            gain = 10**(pair.level_db.to_f / 20)
+            hi = Numo::SFloat.zeros(cols)
+            lo = Numo::SFloat.zeros(cols)
+            cols.times do |i|
+              a = (i * n / cols)
+              b = [((i + 1) * n / cols), a + 1].max
+              next if a >= data.length
+              seg = data[a...[b, data.length].min]
+              hi[i] = seg.max * gain
+              lo[i] = seg.min * gain
+            end
+            @ref_envelopes.shift while @ref_envelopes.length > 8
+            @ref_envelopes[key] = [key, hi.freeze, lo.freeze].freeze
+          rescue StandardError
+            nil
+          end
+
+          # f: the A/B reference's envelope on or off.
+          def key_reference(state)
+            state[:reference] = state[:reference] == false
+            state[:reference] ? "the reference's envelope over the patch's (blue)" : "no reference envelope"
           end
 
           # [[view, canvas], ...]: the plots that fit +body+ for +view+ (:all:
@@ -1396,7 +1461,8 @@ module MB
           # change.
           def chart_for(r, prev, view, state)
             charts = (state[:charts] ||= {})
-            key = [r.seq, prev&.seq, view == :spectrum ? state[:cursor_freq] : (view == :envelope ? state[:cursor_time] : nil)]
+            ref = view == :envelope || view == :all ? state[:ref_env] : nil
+            key = [r.seq, prev&.seq, view == :spectrum ? state[:cursor_freq] : (view == :envelope ? state[:cursor_time] : nil), ref&.first]
             hit = charts[view]
             return hit[1] if hit && hit[0] == key
             b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
@@ -1422,7 +1488,7 @@ module MB
               r.cycle.each_with_index { |d, i| b.line(d, x: ms.(r), color: i) }
             else
               b.x :time, sample_rate: r.rate
-              peak = [r.hi.max, -r.lo.min, prev ? [prev.hi.max, -prev.lo.min].max : 0].max.to_f
+              peak = [r.hi.max, -r.lo.min, prev ? [prev.hi.max, -prev.lo.min].max : 0, ref ? [ref[1].max, -ref[2].min].max : 0].max.to_f
               peak = 1.0 if peak <= 0
               b.y Plot::Scale::Symmetric.new(-peak..peak, label: nil)
               # (two areas from 0 draw the min/max envelope: in C, where a
@@ -1433,6 +1499,14 @@ module MB
               end
               b.area(r.hi, x: 0..r.frames, base: 0.0, color: 0)
               b.area(r.lo, x: 0..r.frames, base: 0.0, color: 0)
+              if ref
+                # (the reference's envelope, loudness-matched as ab plays it,
+                # over the patch's: tuner-fixes-1, the maintainer's "I need
+                # to see overlaid waveforms of the reference and the synth")
+                _, rhi, rlo = ref
+                b.line(rhi, x: 0..r.frames, color: REFERENCE)
+                b.line(rlo, x: 0..r.frames, color: REFERENCE)
+              end
               b.rule(x: state[:cursor_time] * r.rate, color: MARKER) if state[:cursor_time]
             end
             chart = b.build

@@ -355,6 +355,36 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
     end
   end
 
+  # (tuner-fixes-1, the maintainer: "I need to see overlaid waveforms of
+  # the reference and the synth")
+  it "overlays the A/B reference's envelope, loudness-matched, on the RENDER pane's envelope" do
+    s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: false), realtime: false, channels: 1)
+    ref = MB::Sound::Sample.new([Numo::SFloat.new(24000).seq.map { |i| Math.exp(-i / 4800.0) * (i.to_i.even? ? 1 : -1) }], sample_rate: 48000, name: 'ref')
+    MB::Sound::Reference.pairs(s)[:kick] = MB::Sound::Reference::Pair.new(track: :kick, ref: :kick_ref, sample: ref, source: 'ref', hearing: :patch, level_db: -6.0)
+    allow(ui).to receive(:tiles).and_return(double(session: s))
+    cols = 64
+    r = ui::PatchRender::Result.new(seq: 1, key: :k, track: :kick, cycle: nil, periods: nil, settled: nil, frequency: nil,
+                                    lo: Numo::SFloat.zeros(cols) - 0.2, hi: Numo::SFloat.zeros(cols) + 0.2, frames: 24000, rate: 48000,
+                                    peak: 0.2, rms: 0.1, lufs: -20.0, spectrum: nil, ms: 1.0, input: 'C2', error: nil)
+    key, hi, lo = ui::Panes::Render.reference_envelope(r)
+    gain = 10**(-6.0 / 20)
+    expect(hi.length).to eq(cols)
+    expect(hi[0]).to be_within(1e-6).of(gain)
+    expect(lo[0]).to be_within(1e-3).of(-gain * Math.exp(-1 / 4800.0))
+    expect(hi[cols - 1]).to be < 0.01 * gain
+    expect(ui::Panes::Render.reference_envelope(r).first).to eq(key) # (cached)
+    pane = ui.panes.fetch(:render)
+    state = { ref_env: [key, hi, lo] }
+    chart = pane.send(:chart_for, r, nil, :envelope, state)
+    expect(chart.marks.grep(MB::Sound::Plot::Mark::Line).map(&:color)).to eq([ui::Panes::Render::REFERENCE] * 2)
+    expect(pane.key_action(:reference, state)).to eq('no reference envelope')
+    expect(pane.key_action(:reference, state)).to include("the reference's envelope")
+    MB::Sound::Reference.pairs(s).clear
+    expect(ui::Panes::Render.reference_envelope(r)).to be_nil
+  ensure
+    s&.close
+  end
+
   describe 'with a real Session' do
     before do
       @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)

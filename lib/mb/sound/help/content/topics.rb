@@ -1773,15 +1773,19 @@ module MB
         reference from a list (the hand-tune queue, a folder's sound files:
         `tuner 'refs/'`, d on the screen, remembered; Samples already read),
         each with its length and a summary (pitch, envelope); a listens
-        (at -20 LUFS), Enter picks.  Then a synth for it (the queue's fit,
+        (at -20 LUFS; then Up and Down play each reference they land on,
+        a again stops), Enter picks.  Then a synth for it (the queue's fit,
         your fit documents, the init voice, a blank sine, the library's
         instruments and kits), with an L3 score against the reference for
         the one under the cursor; a listens on the reference's note, b A/Bs
         it with the reference, e puts its tune line on the console, Enter
         runs it.  That opens the tuning screen (ui :tuning): the sound
         screen with a strip naming the keys (in the inspector: b A/B, R
-        refine, A apply, S save, Y saves, E reload the fit's file, # note, w W back
-        to the tuner's synths, references).  Esc goes a step back; `tuner off` closes it.  Your
+        refine, A apply, C clear the proposal, S save, Y saves, E reload
+        the fit's file, G another clip or generator (the reference
+        follows), # note, w W back to the tuner's synths, references; the
+        RENDER pane draws the reference's envelope over the patch's, f
+        hides it).  Esc goes a step back; `tuner off` closes it.  Your
         take keeps the tune line, not the tuner's steps.
 
         `tune :kick, code, ref: 'kick_ref.wav', tune: (30.0..110.0).at(51.3),
@@ -1852,7 +1856,8 @@ module MB
         `turn :kick, tune: 47.9, decay: 0.41` line.  Nothing changes until
         you say: `refine.ab` (or b, once set up) cycles yours, the refined
         copy (loudness-matched), and the reference; `refine.apply` turns
-        your knobs to it as one undo step; `refine.off` drops the copy.
+        your knobs to it as one undo step; `refine.off` (C) clears the
+        proposal and drops the copy.
         `staged: true` refines one block of knobs at a time (the body, the
         click, the noise).  Takes keep what it found, not the search.
 

@@ -126,7 +126,7 @@ RSpec.describe(MB::Sound::UI::Panes::Tuner, :aggregate_failures) do
     ui.run_line('turn :"kick/mix", 0.3', @session)
     2.times { @session.process_buffer } # (the turn lands on a frame)
     expect(wait_until { MB::Sound::HandTune.unsaved(@session, :kick).length == 1 }).to eq(true)
-    expect(text).to include('1 unsaved (S saves)', 'S save', 'E reload file')
+    expect(text).to include('1 unsaved (S saves)', 'S save', 'E reload')
     key('w')
     expect(@tiles.layout_name).to eq(:tuning)
     expect(text).to include("kick: 1 turn not saved in its fit's file: S saves; w again leaves without saving")
@@ -167,9 +167,30 @@ RSpec.describe(MB::Sound::UI::Panes::Tuner, :aggregate_failures) do
     expect(t).to include(' TUNE ', 'snare', 'snare_noise.wav')
   end
 
+  # (tuner-fixes-1, the maintainer: "the first step of the tuning wizard
+  # should play the reference so I know what I am picking")
+  it 'plays each reference the cursor lands on in step 1 after a, until a again' do
+    w = wizard.open(session: new_session)
+    pane = ui.panes.fetch(:tuner)
+    state = {}
+    expect(pane.key_action(:pick, state, 1)).to be_nil # (not listening yet)
+    w.cursor[:reference] = 0
+    r = pane.key_action(:audition, state)
+    expect(r.code).to start_with('audition ')
+    expect(state[:listening]).to eq(true)
+    r = pane.key_action(:pick, state, 1)
+    expect(r.code).to eq(w.audition_line(w.under_cursor))
+    expect(r.note).to include('a: stop listening')
+    expect(pane.key_action(:pick, state, -100)).to be_a(MB::Sound::UI::PaneKeys::Run) # (back to the first)
+    expect(pane.key_action(:pick, state, -1)).to be_nil # (the cursor didn't move)
+    expect(pane.key_action(:audition, state).code).to eq('audition off')
+    expect(state[:listening]).to eq(false)
+    expect(pane.key_action(:pick, state, 1)).to be_nil
+  end
+
   it 'names the inspector\'s hand-tune keys from its keymap, and every tuner key has help' do
     keys = ui::Panes::TuneStrip.keys
-    expect(keys.map(&:first)).to eq(%w[b R A S Y E # w W])
+    expect(keys.map(&:first)).to eq(%w[b R A C S Y E G # w W])
     expect(keys.map(&:last)).to all(satisfy { |h| !h.empty? })
     map = ui::Panes::Tuner.mode_keymap
     expect(map.entries.map(&:action).uniq).to include(:pick, :act, :audition, :ab, :find, :folder, :edit, :quit)

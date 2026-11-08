@@ -189,8 +189,14 @@ module MB
           self
         end
 
-        # Stops the A/B copy (the patch is heard).  Returns self.
+        # Stops the A/B copy (the patch is heard) and clears the proposal
+        # (tuner-fixes-1, the maintainer: "How do I clear refine's
+        # proposal?"; C in the inspector): the strip no longer offers it,
+        # R starts a new search.  A running search stops first (its best
+        # is dropped too).  Returns self.
         def off
+          stop unless done?
+          HandTune.refinements.delete(@session) if HandTune.refinements[@session].equal?(self)
           pair = Reference.pair(@session, @track)
           if pair&.alt
             Session.with_context(session: @session) do
