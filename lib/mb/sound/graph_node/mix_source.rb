@@ -72,17 +72,19 @@ module MB
 
           @sample_rate = sample_rate.to_f
           @outputs = Array.new(channels) { |i| Channel.new(self, i) }.freeze
-          @data = Array.new(channels) { Numo::SFloat[] }
-          @copies = Array.new(channels) # (reused by #channel_data)
-          @offsets = Array.new(channels, 0) # (where the next piece starts; see #channel_data)
+          @copies = Array.new(channels) # (reused by #channel_data for whole-buffer reads)
           @read_ahead = 0
-          @fifos = nil # (per channel [buffer, spare, length] while #read_ahead > 0)
+          @written = 0 # (frames in the latest #write)
+          # Per channel: [buffer, spare, length] (frames not read yet, in
+          # order) and whether the channel was read since the last write
+          @fifos = Array.new(channels) { [Numo::SFloat.zeros(1024), Numo::SFloat.zeros(1024), 0] }
+          @read = Array.new(channels, false)
         end
 
         # Frames of silence the channels start with, so a chain whose nodes
         # read ahead of their output (a #resample; see GraphNode::ReadAhead)
         # reads written frames: the chain hears the mix that many frames
-        # late.  0 (the default) serves each written buffer as it is.
+        # late.  0 (the default) serves each written buffer as it comes.
         attr_reader :read_ahead
 
         # Sets #read_ahead (frames), before the first #write.
@@ -90,7 +92,11 @@ module MB
           raise ArgumentError, "read_ahead must be a non-negative Integer (got #{frames.inspect})" unless frames.is_a?(Integer) && frames >= 0
 
           @read_ahead = frames
-          @fifos = frames > 0 ? Array.new(@outputs.length) { [Numo::SFloat.zeros(frames + 1024), Numo::SFloat.zeros(frames + 1024), frames] } : nil
+          @fifos.each do |f|
+            f[0] = Numo::SFloat.zeros(frames + 1024)
+            f[1] = Numo::SFloat.zeros(frames + 1024)
+            f[2] = frames
+          end
         end
 
         # A MixSource has no upstream nodes.
@@ -98,60 +104,78 @@ module MB
           {}.freeze
         end
 
-        # Sets the buffer that the channels return next: an Array of
-        # Numo::NArray with one element per channel.
+        # Adds the next buffer the channels return: an Array of
+        # Numo::NArray with one element per channel.  A channel nothing
+        # read since the last write (its chain doesn't use it, or skipped a
+        # buffer) drops what it held but its last #read_ahead frames, as
+        # chains that skip a buffer always have.
         def write(data)
           raise ArgumentError, "Expected #{@outputs.length} channels (got #{data.length})" unless data.length == @outputs.length
-          if @fifos
-            data.each_with_index { |d, idx| fifo_append(@fifos[idx], d) }
-          else
-            @data = data
-            @offsets.fill(0)
+
+          @written = data[0]&.length || 0
+          i = -1
+          while (i += 1) < data.length # (no each_with_index: an imemo a call)
+            f = @fifos[i]
+            fifo_keep(f, @read_ahead) unless @read[i]
+            @read[i] = false
+            fifo_append(f, data[i])
           end
         end
 
-        # For internal use by Channel#sample.  Returns a copy of one channel of
-        # the latest buffer (in a buffer of its own, reused every span).
+        # For internal use by Channel#sample.  Returns a copy of the next
+        # +count+ frames of one channel (nodes may work on it in place), in
+        # a buffer reused for whole-buffer reads, like any node's #sample
+        # buffer.
         #
-        # A read of fewer samples than the buffer holds is the next piece of
-        # it (the reads of a span must add up to the buffer).  A read past
-        # the written frames raises: a node read ahead of its output without
-        # saying so (#read_ahead; before fix-bus-resample-1 a second whole
-        # read got the same buffer again, so a resampler's lookahead read
-        # the first buffer twice and delayed the chain by a buffer).
+        # A read of fewer frames than a write gives the next piece of it (a
+        # Synth reading in windows), and frames a read leaves wait for the
+        # next one (a :min_phase resampler reads just what its output
+        # covers).  A read past the written frames raises: a node read
+        # ahead of its output without saying so (#read_ahead; before
+        # fix-bus-resample-1 a second whole read got the same buffer again,
+        # so a resampler's lookahead read the first buffer twice and the
+        # chain came out a buffer late).
         def channel_data(index, count)
-          return fifo_read(index, count) if @fifos
-
-          d = @data[index]
-          return channel_piece(index, d, count) if count < d.length && count > 0
-          unless count == d.length && @offsets[index] == 0
-            raise ArgumentError, "A mix chain asked for #{count} samples #{@offsets[index]} samples into a #{d.length}-sample mix buffer; " \
-              "a node in it reads ahead without saying how far (GraphNode::ReadAhead)"
+          f = @fifos[index]
+          buf, spare, len = f
+          if count > len
+            raise ArgumentError, "A mix chain read #{count} frames with #{len} written (#{@read_ahead} frames of read-ahead); " \
+              "a node in it reads further ahead than it says (GraphNode::ReadAhead)"
           end
-          @offsets[index] = d.length
-          # A copy (nodes may work on it in place) in a buffer reused
-          # every span, like any node's #sample buffer
-          c = @copies[index]
-          return c if c && c.class == d.class && c.length == d.length && MB::Sound::Kernels.copy(c, d)
-          @copies[index] = d.dup
+          @read[index] = true
+
+          if count == @written
+            c = @copies[index]
+            c = @copies[index] = Numo::SFloat.zeros(count) unless c && c.length == count
+          else
+            c = Numo::SFloat.zeros(count)
+          end
+          c[0...count] = buf[0...count] unless Kernels.copy_range(c, 0, buf, 0, count)
+          rest = len - count
+          spare[0...rest] = buf[count...len] if rest > 0 && !Kernels.copy_range(spare, 0, buf, count, rest)
+          f[0] = spare
+          f[1] = buf
+          f[2] = rest
+          c
         end
 
-        # The next +count+ samples of buffer +d+ for channel +index+ (see
-        # #channel_data).
-        def channel_piece(index, d, count)
-          off = @offsets[index]
-          if off + count > d.length
-            raise ArgumentError, "A mix chain asked for #{count} samples #{off} samples into a #{d.length}-sample mix buffer; " \
-              "a node in it reads ahead without saying how far (GraphNode::ReadAhead)"
+        # Drops all but the last +keep+ frames of channel FIFO +f+.
+        def fifo_keep(f, keep)
+          buf, spare, len = f
+          return if len <= keep
+
+          if keep > 0
+            spare[0...keep] = buf[(len - keep)...len] unless Kernels.copy_range(spare, 0, buf, len - keep, keep)
+            f[0] = spare
+            f[1] = buf
           end
-          @offsets[index] = off + count
-          d[off...(off + count)].dup
+          f[2] = keep
         end
-        private :channel_piece
+        private :fifo_keep
 
         # Appends +d+ to channel FIFO +f+ ([buffer, spare, length]).
         def fifo_append(f, d)
-          buf, spare, len = f
+          buf, _, len = f
           n = d.length
           if len + n > buf.length
             grown = Numo::SFloat.zeros((len + n) * 2)
@@ -163,27 +187,6 @@ module MB
           f[2] = len + n
         end
         private :fifo_append
-
-        # The next +count+ frames of channel +index+'s FIFO (see
-        # #read_ahead), in a buffer reused while reads keep their length.
-        def fifo_read(index, count)
-          f = @fifos[index]
-          buf, spare, len = f
-          if count > len
-            raise ArgumentError, "A mix chain read #{count} frames with #{len} written (#{@read_ahead} frames of read-ahead); " \
-              "a node in it reads further ahead than it says (GraphNode::ReadAhead)"
-          end
-          c = @copies[index]
-          c = @copies[index] = Numo::SFloat.zeros(count) unless c && c.length == count
-          c[0...count] = buf[0...count] unless Kernels.copy_range(c, 0, buf, 0, count)
-          rest = len - count
-          spare[0...rest] = buf[count...len] if rest > 0 && !Kernels.copy_range(spare, 0, buf, count, rest)
-          f[0] = spare
-          f[1] = buf
-          f[2] = rest
-          c
-        end
-        private :fifo_read
 
         # Raises an error unless +rate+ matches this mix's sample rate.
         def sample_rate=(rate)

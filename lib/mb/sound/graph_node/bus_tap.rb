@@ -31,21 +31,35 @@ module MB
 
           def_delegators :@owner, :sample_rate
 
+          # Frames of the source a channel keeps past what its reads need,
+          # so a graph whose reads lag a little behind the Session's (a
+          # :min_phase resampler reads just what its output covers) reads
+          # them in the next buffer instead of skipping them.
+          KEEP = 256
+
           # For internal use by BusTap.
           def initialize(owner, index)
             @owner = owner
             @index = index
             @serial = nil
-            @pos = 0
             @buf = nil
             @node_type_name = owner.label(index)
-            @fifo = nil # ([buffer, spare, length] while the tap reads ahead; see #sample_late)
-            @span = nil
+            @span = nil # (the routed span whose frames @hist holds last)
+            @hist = nil # (the source's recent frames, from session frame @hist_start)
+            @spare = nil
+            @hist_start = 0
+            @hist_len = 0
+            @at = nil # (the session frame this channel's next read starts at)
           end
 
-          # The next +count+ samples of this channel of the source, in step
-          # with the read the Session is rendering (see
-          # Session::Buses#bus_read_serial).
+          # The next +count+ samples of this channel of the source: frames
+          # BusTap#read_ahead before the graph's own (0 for most graphs: in
+          # step with the read the Session is rendering, see
+          # Session::Buses#bus_read_serial; a graph with a resampler after
+          # the tap reads ahead, and hears the source that much later).
+          # Each read in a span starts where the graph's last read ended if
+          # that is near the read's own frame, else at it (a graph starting
+          # or waking); frames past the span read as silence.
           def sample(count)
             return nil if count == 0
 
@@ -54,24 +68,33 @@ module MB
             if session.nil?
               return BufferHelper.zero(@buf)
             end
-            return sample_late(session, count) if @owner.read_ahead > 0
+
+            k = @owner.read_ahead
+            span = session.bus_span
+            if @span != span
+              @span = span
+              keep_span(session, k)
+            end
 
             serial = session.bus_read_serial
             if @serial != serial
               @serial = serial
-              @pos = session.bus_read_offset
+              o = session.bus_span_start + session.bus_read_offset
+              @at = o if @at.nil? || @at < o - KEEP || @at > o + k
             end
 
-            data = session.bus_signal(@owner.source_name, @owner.only)
-            d = data && data[@index % data.length]
-            if d.nil? || @pos >= d.length
+            first = @at - k - @hist_start # (index into @hist)
+            last = first + count
+            lo = first < 0 ? 0 : first
+            hi = last > @hist_len ? @hist_len : last
+            if hi <= lo
               BufferHelper.zero(@buf)
             else
-              n = MB::M.min(count, d.length - @pos)
-              @buf[0...n] = d[@pos...(@pos + n)] unless Kernels.copy_range(@buf, 0, d, @pos, n)
-              (Kernels.fill_range(@buf, n, count, 0) || (@buf[n..] = 0)) if n < count
+              (Kernels.fill_range(@buf, 0, lo - first, 0) || (@buf[0...(lo - first)] = 0)) if lo > first
+              @buf[(lo - first)...(hi - first)] = @hist[lo...hi] unless Kernels.copy_range(@buf, lo - first, @hist, lo, hi - lo)
+              (Kernels.fill_range(@buf, hi - first, count, 0) || (@buf[(hi - first)..] = 0)) if hi < last
             end
-            @pos += count
+            @at += count
             @buf
           end
 
@@ -79,64 +102,45 @@ module MB
             {}.freeze
           end
 
-          # #sample for a tap whose graph reads it ahead (BusTap#read_ahead
-          # frames; a #resample after it): the source's frames come
-          # read_ahead frames late through a FIFO, appended a span at a time
-          # from the frame the graph's first read in the span starts at, so
-          # reads ahead of the span find written frames (before
-          # fix-bus-resample-1 they read zeros and the stream slipped by a
-          # buffer).
-          def sample_late(session, count)
-            k = @owner.read_ahead
-            @fifo = [Numo::SFloat.zeros(k + 1024), Numo::SFloat.zeros(k + 1024), k] if @fifo.nil?
+          # Adds this routed span's frames of the source to @hist (silence
+          # if it didn't play), dropping all but the last +k+ + KEEP frames
+          # before them (all of them after a gap: spans nothing read).
+          def keep_span(session, k)
+            start = session.bus_span_start
+            frames = session.bus_span_frames || 0
+            data = session.bus_signal(@owner.source_name, @owner.only)
+            d = data && data[@index % data.length]
 
-            span = session.bus_span
-            if @span != span
-              @span = span
-              frames = session.bus_span_frames || (session.bus_read_offset + count)
-              off = session.bus_read_offset
-              data = session.bus_signal(@owner.source_name, @owner.only)
-              d = data && data[@index % data.length]
-              fifo_append(d, off, frames - off)
+            if @hist.nil?
+              @hist = Numo::SFloat.zeros(k + KEEP + 2048)
+              @spare = Numo::SFloat.zeros(@hist.length)
             end
-
-            buf, spare, len = @fifo
-            if count > len
-              raise ArgumentError, "#{@node_type_name} was read #{count} frames with #{len} written (#{k} frames of read-ahead); " \
-                "a node after it reads further ahead than it says (GraphNode::ReadAhead)"
+            @hist_len = 0 if @hist_start + @hist_len != start
+            keep = k + KEEP
+            if @hist_len > keep
+              @spare[0...keep] = @hist[(@hist_len - keep)...@hist_len] unless Kernels.copy_range(@spare, 0, @hist, @hist_len - keep, keep)
+              @hist, @spare = @spare, @hist
+              @hist_len = keep
             end
-            @buf[0...count] = buf[0...count] unless Kernels.copy_range(@buf, 0, buf, 0, count)
-            rest = len - count
-            spare[0...rest] = buf[count...len] if rest > 0 && !Kernels.copy_range(spare, 0, buf, count, rest)
-            @fifo[0] = spare
-            @fifo[1] = buf
-            @fifo[2] = rest
-            @buf
-          end
-          private :sample_late
+            @hist_start = start - @hist_len
 
-          # Appends +n+ frames of +d+ from +off+ (zeros for a nil +d+) to
-          # the FIFO.
-          def fifo_append(d, off, n)
-            return if n <= 0
-
-            buf, _, len = @fifo
-            if len + n > buf.length
-              grown = Numo::SFloat.zeros((len + n) * 2)
-              grown[0...len] = buf[0...len] if len > 0
-              buf = @fifo[0] = grown
-              @fifo[1] = Numo::SFloat.zeros(grown.length)
+            if @hist_len + frames > @hist.length
+              grown = Numo::SFloat.zeros((@hist_len + frames) * 2)
+              grown[0...@hist_len] = @hist[0...@hist_len] if @hist_len > 0
+              @hist = grown
+              @spare = Numo::SFloat.zeros(grown.length)
             end
-            if d.nil? || off >= d.length
-              Kernels.fill_range(buf, len, len + n, 0) || (buf[len...(len + n)] = 0)
+            len = @hist_len
+            if d.nil?
+              Kernels.fill_range(@hist, len, len + frames, 0) || (@hist[len...(len + frames)] = 0) if frames > 0
             else
-              m = MB::M.min(n, d.length - off)
-              buf[len...(len + m)] = d[off...(off + m)] unless Kernels.copy_range(buf, len, d, off, m)
-              (Kernels.fill_range(buf, len + m, len + n, 0) || (buf[(len + m)...(len + n)] = 0)) if m < n
+              m = MB::M.min(frames, d.length)
+              @hist[len...(len + m)] = d[0...m] if m > 0 && !Kernels.copy_range(@hist, len, d, 0, m)
+              (Kernels.fill_range(@hist, len + m, len + frames, 0) || (@hist[(len + m)...(len + frames)] = 0)) if m < frames
             end
-            @fifo[2] = len + n
+            @hist_len = len + frames
           end
-          private :fifo_append
+          private :keep_span
 
           # Raises unless +rate+ is the tap's rate (it reads a Session's
           # buffers as they are).

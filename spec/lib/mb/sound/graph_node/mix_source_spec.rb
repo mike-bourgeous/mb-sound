@@ -25,7 +25,7 @@ RSpec.describe(MB::Sound::GraphNode::MixSource) do
   it 'raises for a read past the written frames' do
     source.write(data)
     source.outputs[0].sample(3)
-    expect { source.outputs[0].sample(3) }.to raise_error(ArgumentError, /3 samples 3 samples into a 3-sample.*reads ahead/)
+    expect { source.outputs[0].sample(3) }.to raise_error(ArgumentError, /read 3 frames with 0 written.*reads further ahead/)
   end
 
   describe '#read_ahead' do
@@ -65,20 +65,29 @@ RSpec.describe(MB::Sound::GraphNode::MixSource) do
 
   it 'raises an error if the chain asks for a different sample count' do
     source.write(data)
-    expect { source.outputs[0].sample(4) }.to raise_error(ArgumentError, /asked for 4 samples 0 samples into a 3-sample/)
+    expect { source.outputs[0].sample(4) }.to raise_error(ArgumentError, /read 4 frames with 3 written/)
   end
 
   # Kez's K10: a Synth reads its lanes in windows (a lane waking inside a
   # buffer), so a bus chain through one read its input in pieces
-  it 'returns consecutive pieces of the buffer to reads of fewer samples, starting over at each write' do
+  # (frames a read leaves wait for the next read since fix-bus-resample-1:
+  # a :min_phase resampler reads just what its output covers)
+  it 'returns consecutive pieces of the buffer to reads of fewer samples, and keeps what they leave' do
     source.write(data)
     expect(source.outputs[0].sample(1)).to eq(Numo::SFloat[1])
     expect(source.outputs[0].sample(2)).to eq(Numo::SFloat[2, 3])
     expect(source.outputs[1].sample(2)).to eq(Numo::SFloat[-1, -2])
-    expect { source.outputs[1].sample(2) }.to raise_error(ArgumentError, /asked for 2 samples 2 samples into a 3-sample/)
+    expect { source.outputs[1].sample(2) }.to raise_error(ArgumentError, /read 2 frames with 1 written/)
     source.write(data)
-    expect(source.outputs[1].sample(2)).to eq(Numo::SFloat[-1, -2])
+    expect(source.outputs[1].sample(2)).to eq(Numo::SFloat[-3, -1])
     expect(source.outputs[0].sample(3)).to eq(data[0]) # (whole reads as before)
+  end
+
+  it 'drops what a channel nothing read held at the next write' do
+    source.write(data)
+    source.outputs[0].sample(3)
+    source.write([Numo::SFloat[4, 5, 6], Numo::SFloat[7, 8, 9]])
+    expect(source.outputs[1].sample(3)).to eq(Numo::SFloat[7, 8, 9])
   end
 
   it 'raises an error if given the wrong number of channels' do
