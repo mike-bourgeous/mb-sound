@@ -50,6 +50,7 @@ module MB
             @hist_start = 0
             @hist_len = 0
             @at = nil # (the session frame this channel's next read starts at)
+            @unread = 0 # (frames of spans kept by #catch_up since the last read)
           end
 
           # The next +count+ samples of this channel of the source: frames
@@ -70,6 +71,8 @@ module MB
             end
 
             k = @owner.read_ahead
+            @owner.keep_spans(session) if k > 0 && !@owner.keeping
+            @unread = 0
             span = session.bus_span
             if @span != span
               @span = span
@@ -100,6 +103,22 @@ module MB
 
           def sources
             {}.freeze
+          end
+
+          # Adds the routed span's frames to the history if no read did
+          # (see BusTap#catch_up).  Returns false once the graph hasn't
+          # read for longer than its reads can be apart (stopped, or
+          # asleep: it reads from its own frame when it wakes).
+          def catch_up(session)
+            span = session.bus_span
+            if @span == span
+              @unread = 0
+            else
+              @span = span
+              keep_span(session, @owner.read_ahead)
+              @unread += session.bus_span_frames || 0
+            end
+            @unread <= @owner.read_ahead + KEEP
           end
 
           # Adds this routed span's frames of the source to @hist (silence
@@ -180,6 +199,7 @@ module MB
           @sample_rate = sample_rate.to_f
           @session = nil
           @read_ahead = 0
+          @keeping = false
           @outputs = Array.new(only ? 1 : channels) { |i| Channel.new(self, i) }.freeze
         end
 
@@ -194,6 +214,35 @@ module MB
         def read_ahead=(frames)
           raise ArgumentError, "read_ahead must be a non-negative Integer (got #{frames.inspect})" unless frames.is_a?(Integer) && frames >= 0
           @read_ahead = frames
+        end
+
+        # Whether the Session gives this tap every routed span (see
+        # #keep_spans).
+        attr_reader :keeping
+
+        # Asks +session+ to give this tap every routed span, read or not
+        # (Session::Buses#keep_tap_spans): a graph reading ahead (a
+        # BufferAdapter's block, a resampler with frames in hand) skips
+        # spans, and the frames of a span it skipped were silence when it
+        # read them later (fix-batch22: a with_buffer(300) tap at 7- and
+        # 128-frame buffers).  Called by the first read of a tap with
+        # #read_ahead.
+        def keep_spans(session)
+          @keeping = true
+          session.keep_tap_spans(self)
+        end
+
+        # Keeps the routed span in every channel's history that no read
+        # kept (called by the Session after each routed span).  Returns
+        # false (and stops keeping) once no channel has been read for
+        # longer than #read_ahead + Channel::KEEP frames.
+        def catch_up(session)
+          keep = false
+          i = -1
+          while (i += 1) < @outputs.length
+            keep = true if @outputs[i].catch_up(session)
+          end
+          @keeping = keep
         end
 
         # Reads from +session+ (called by the Session for every graph it

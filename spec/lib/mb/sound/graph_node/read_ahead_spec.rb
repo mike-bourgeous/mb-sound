@@ -123,6 +123,38 @@ RSpec.describe(MB::Sound::GraphNode::ReadAhead) do
     end
   end
 
+  describe 'a tap read through a BufferAdapter (fix-batch22)' do
+    # (the batch 22 SLOW=1 suite: with_buffer(300) after a tap at 128,
+    # 801, and 7-frame buffers read nothing in spans its block covered,
+    # so those spans never reached the tap's history, and its next block
+    # read them as silence: -0.0 dB from the track)
+    it 'keeps the spans its graph skips, at buffers smaller than the block' do
+      expected = ReadAheadSweep.render(:buffer_adapter, :track, [800])[0]
+      out, latency = ReadAheadSweep.render(:buffer_adapter, :tap, [128, 801, 7])
+      expect(latency).to eq(299)
+      shifted = out[latency..]
+      expect(residual_db(shifted, expected[0...shifted.length])).to be < -80
+    end
+
+    it 'stops keeping spans once its graph stops reading' do
+      out = MB::Sound::NullOutput.new(channels: 1, sleep: false)
+      s = MB::Sound::Session.new(output: out, channels: 1, buffer_size: 100, realtime: false, raise_errors: true,
+                                 transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+      tap = MB::Sound::GraphNode::BusTap.new(:src, channels: 1)
+      s.route(:src, trigger: true)
+      s.add(0.5.constant, name: :src)
+      s.add(tap.outputs[0].with_buffer(300), name: :rd)
+      5.times { s.process_buffer(100) }
+      expect(tap.keeping).to eq(true)
+      s.remove(:rd, fade: 0)
+      10.times { s.process_buffer(100) }
+      expect(tap.keeping).to eq(false)
+      expect(s.instance_variable_get(:@ahead_taps)).to be_empty
+    ensure
+      s&.close
+    end
+  end
+
   describe '.frames' do
     let(:src) { MB::Sound::GraphNode::MixSource.new(channels: 2) }
 

@@ -376,6 +376,13 @@ module MB
           @frame
         end
 
+        # Gives +tap+ (a GraphNode::BusTap whose graph reads ahead) every
+        # routed span from now on, including spans its graph doesn't read
+        # in, until it says to stop (see BusTap#keep_spans, #catch_up).
+        def keep_tap_spans(tap)
+          @mutex.synchronize { @ahead_taps[tap] = true }
+        end
+
         # The signal of bus or player +name+ (or the node +only+ in its
         # graph) in the span being rendered: an Array of one SFloat per
         # channel (the span's length), or nil if it didn't play.
@@ -417,6 +424,7 @@ module MB
           @bus_span = 0
           @bus_read_serial = 0
           @bus_read_offset = 0
+          @ahead_taps = {}.compare_by_identity
           @bus_only_pos = {}
           @bus_only_pending = {}
           @send_knobs = []
@@ -880,6 +888,9 @@ module MB
               end
             end
           end
+
+          # Taps whose graphs read ahead keep spans their graphs skipped
+          @mutex.synchronize { @ahead_taps.delete_if { |t, _| !t.catch_up(self) } } unless @ahead_taps.empty?
 
           parts&.each { |name, data| @stems.add(name, @master_gain == 1 ? data : data.map { |d| d * @master_gain }, frame) }
           @ui_bus_meter&.end_span(count)
