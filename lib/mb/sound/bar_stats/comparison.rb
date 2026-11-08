@@ -379,7 +379,11 @@ module MB
                 mixed = rest - on
                 with = []
                 with << "while #{on.join(' and ')} #{on.length == 1 ? 'stays' : 'stay'} on time" unless on.empty?
-                with << "(#{mixed.map { |k| "#{k} #{format('%+.1f', known[k][0])} ms" }.join(', ')}: mixed)" unless mixed.empty?
+                unless mixed.empty?
+                  # (a band holding late and on-time parts: say how its bars split)
+                  near = ->(k, at) { @bars.count { |x| (v = x.deltas[:"lag_#{k}"]) && (v - at).abs <= [1.0, t[:timing] * 0.5].max } }
+                  with << "(#{mixed.map { |k| "#{k} mixed: #{near.(k, lag)} bars near #{lag.abs.round(1)} ms, #{near.(k, 0)} near 0" }.join('; ')})"
+                end
                 name = bands.length == 1 ? "the #{bands[0]} band of #{b} is" : "the #{bands.join(' and ')} bands of #{b} are"
                 out << Cause.new(kind: :band_offset, measure: :"lag_#{bands[0]}", value: lag, bars: agree,
                                  text: "#{name} #{lag.abs} ms #{lag > 0 ? 'late' : 'early'} in #{counts} of #{@bars.length} bars (#{Comparison.bar_list(agree)})#{with.empty? ? '' : " #{with.join(' ')}"}: #{CAUSES[:band_offset]}")
