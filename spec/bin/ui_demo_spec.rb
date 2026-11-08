@@ -20,4 +20,16 @@ RSpec.describe('bin/ui_demo.rb') do
     expect(text).to match(/^  note 1 at +[\d.]+ s: +[\d.]+ ms on the REPL thread \(with the first lookup\), largest buffer gap around it +[\d.]+ ms, underruns n\/a/)
     expect(Dir.glob(File.join(notes, '*.md')).length).to eq(1)
   end
+
+  # (tuner-fixes-1: --design with -q skipped its line and waited forever;
+  # --type types console lines into the REPL and measures each)
+  it 'opens the sound screen on a design line with -q, types console lines, and reports the playhead and each line' do
+    design = 'design :bass, L.inst.acid, seq(A1.n8, E1.n8).loop'
+    text = `OUTPUT_TYPE=null timeout 120 bin/ui_demo.rb --design #{design.shellescape} --type 5,:a --type-every 0.5 -s 3 -q 2>&1`
+    expect($?).to be_success, text
+    expect(text).to match(/^Envelope preview: \d+ charts, the playhead moved \d+ times .*charts by the note's stage: /)
+    expect(text).to match(/^Typed lines \(2\): /)
+    expect(text).to match(/^  5 +at +[\d.]+ s: result after +[\d.]+ ms, largest buffer gap around it +[\d.]+ ms/)
+    expect(text).to match(/^REPL thread GVL holds +n=\d+/)
+  end
 end
