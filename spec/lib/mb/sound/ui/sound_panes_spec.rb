@@ -346,7 +346,7 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(built.map(&:first)).to include('Up Down', 'Left Right', 'Enter', '0', 'm', 't T', 'n N')
       expect(built.first).to eq(ui::Panes::SoundKeys::PICKER) # (ui-scaffold-1: the library picker's keys in one line)
       expect(built.map(&:first)).to include('b') # (hand-tune-1: the A/B planned here is built: the reference)
-      expect(built.map(&:first)).to include('S') # (tuner-fixes-1: S saves a fit's knobs)
+      expect(built.map(&:first)).to include('S Y') # (tuner-fixes-1: S saves a fit's knobs, Y lists its saves)
       expect(planned.map(&:first)).to eq(%w[*])
       expect(draw(:sound_keys, snap, w: 50).join("\n")).to include('l          library: / find', 'Enter      type a value')
       expect(draw(:sound_keys, snap, w: 50, h: 30).join("\n")).to include('(later)')

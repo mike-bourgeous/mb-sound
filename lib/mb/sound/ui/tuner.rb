@@ -94,7 +94,7 @@ module MB
             on :home, :pick, -100_000, help: 'first, last entry', label: 'Home End'
             on :end, :pick, 100_000, help: 'first, last entry', label: 'Home End'
             on :enter, :act, help: 'pick the reference; tune with the synth'
-            on 'a', :audition, help: 'listen (step 1: then Up Down play each reference; the synth on its note; again: stop)'
+            on 'a', :audition, help: 'listen (step 1: Up Down then play each; again: stop)'
             on 'b', :ab, help: 'A/B the synth with the reference'
             on '/', :find, help: 'find as you type (Esc: back)'
             on :backspace, :unfind, help: 'a letter less of the find'
