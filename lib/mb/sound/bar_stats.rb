@@ -6,6 +6,7 @@ require_relative 'bar_stats/measures'
 require_relative 'bar_stats/broadcast'
 require_relative 'bar_stats/report'
 require_relative 'bar_stats/sidecar'
+require_relative 'bar_stats/comparison'
 
 module MB
   module Sound
@@ -20,6 +21,8 @@ module MB
     #
     #     r = BarStats.analyze('song.flac', bpm: 140)     # console: bar_stats
     #     r.bars[:lufs]; r.bar(9); puts r.broadcast
+    #     c = BarStats.compare('v13.flac', 'v15.flac', bpm: 140)   # compare_bars
+    #     puts c.narrative
     module BarStats
       # The rate statistics are measured at (files are resampled to it, as
       # Structure and Analysis read them; the broadcast report reads files
@@ -81,6 +84,14 @@ module MB
       def self.load(path)
         path = Sidecar.path(path) unless path.end_with?(Sidecar::EXTENSION)
         Sidecar.read(path)
+      end
+
+      # Compares +a+ with +b+ bar by bar (see Comparison): each a file,
+      # audio data, or a Report (sidecar statistics; per-band lags then
+      # need the audio).  Options for measuring go to .analyze; +b+ is
+      # measured on +a+'s grid (shifted by +align+ seconds when given).
+      def self.compare(a, b, align: 0, max_lag: Comparison::MAX_LAG, thresholds: {}, **options)
+        Comparison.of(a, b, align: align, max_lag: max_lag, thresholds: thresholds, **options)
       end
 
       # The settings recorded for a request (what a cached sidecar must
