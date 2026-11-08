@@ -828,6 +828,8 @@ module MB
         :hall]`).  `fx :keys, L.fx.dub` swaps it at the launch point, the
         notes playing on and the old effect's tail ringing out (one undo
         step); `fx :keys, :off` takes it out, `fx :keys` says what it is.
+        It is a track's `master { }`: a Proc takes the track's signal,
+        `fx :drums, -> { it.softclip(0.1, 0.9).limiter(ceiling: -6.db) }`.
         In `ui :sound` the library picker's Enter on an effect does this
         for the inspected track.
       TEXT
@@ -1650,7 +1652,10 @@ module MB
         Your own panes: `pane :name do |c, s| ... end` (s a snapshot of the
         session, c the pane's canvas); arrange them with `layout`, keep a
         layout with `ui.save`.  `ui.split :v`, `ui.zoom`, `ui.show :cpu`,
-        `ui.save :mine` change the tiles from the prompt; `ui.on C1, :zoom`
+        `ui.save :mine` change the tiles from the prompt; a pane grows
+        with Shift and the arrows in NAV (Ctrl-Shift: 5 at a time; on the
+        REPL, Shift-Up makes it taller upwards) or `ui.resize :up, 5,
+        name: :repl`; `ui.on C1, :zoom`
         maps a pad; `ui.theme :mono`.  Themes, pane files, and layouts are
         data files in the ui folder, reloaded when they change;
         `bin/ui_check.rb` reports what your terminal supports.
