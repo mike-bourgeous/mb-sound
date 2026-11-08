@@ -13,9 +13,10 @@ module MB
       # A/85, and streaming).  Prints a summary in the console.
       #
       # The grid: a render's own (`render 'song.flac', bar_stats: true`
-      # writes the sidecar with it), +bpm:+ and +offset:+ (bar 1's downbeat
-      # in seconds) for a known tempo, else beat tracking (+bpm:+ as a
-      # hint).  +save: true+ writes the sidecar beside the file
+      # writes the sidecar with it), a constant grid at +bpm:+ with bar 1's
+      # downbeat at +offset:+ seconds (0 by default), or beat tracking
+      # with +grid: :track+ (+bpm:+ then a hint) or without +bpm:+; the
+      # report's Grid line says which.  +save: true+ writes the sidecar beside the file
       # ("song.flac.bar_stats.rb", readable Ruby; BarStats.load reads it),
       # +cache: true+ reads a fresh one instead of measuring.  Other options
       # go to BarStats.analyze (+stems:+, +sections:+, +targets:+, ...).
@@ -49,8 +50,8 @@ module MB
       def compare_bars(a, b = nil, sections: nil, **options)
         result =
           if sections
-            report = a.is_a?(BarStats::Report) ? a : BarStats.analyze(a, **options.except(:thresholds))
-            BarStats::Comparison.sections(report, *sections, thresholds: options[:thresholds] || {})
+            report = a.is_a?(BarStats::Report) ? a : BarStats.analyze(a, **options.except(:thresholds, :silence))
+            BarStats::Comparison.sections(report, *sections, thresholds: options[:thresholds] || {}, silence: options.fetch(:silence, BarStats::Comparison::SILENCE_DB))
           else
             raise ArgumentError, 'Pass two recordings to compare (or one with sections: [a, b])' if b.nil?
             BarStats.compare(a, b, **options)

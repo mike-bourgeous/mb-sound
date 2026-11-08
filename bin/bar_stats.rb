@@ -18,8 +18,11 @@
 # missing band, a transpose, a mono fold, a level step), as a narrative.
 #
 # The grid: a fresh sidecar's (renders with `bar_stats: true` write one
-# on their exact grid), --bpm with --offset (bar 1's downbeat in seconds)
-# for a known tempo, else beat tracking (--bpm as a hint).
+# on their exact grid), --bpm for a known tempo (a constant grid, bar 1's
+# downbeat at --offset seconds, 0 by default), else beat tracking (also
+# with --track, --bpm then a hint).  The report's Grid line says which.
+# Comparing, bars whose RMS is under --silence dBFS in both files are left
+# out (digital zero against a noise floor isn't a +90 dB change).
 #
 # Examples:
 #     $0 song.flac                          # report: broadcast loudness, sections
@@ -44,8 +47,10 @@ end
 
 MB::Sound.script(
   args: 1..2,
-  bpm: [nil, Float, '-b', 'Tempo (BPM): with --offset a constant grid, else a hint for beat tracking', 20.0..400.0],
-  offset: [nil, Float, '-o', 'Seconds to bar 1\'s downbeat (with --bpm)', 0.0..3600.0],
+  bpm: [nil, Float, '-b', 'Tempo (BPM): a constant grid from --offset (a hint with --track)', 20.0..400.0],
+  offset: [nil, Float, '-o', 'Seconds to bar 1\'s downbeat (with --bpm; default 0)', 0.0..3600.0],
+  track: [false, 'Track the beats instead of a constant grid (--bpm as a hint)'],
+  silence: [-60.0, Float, 'Comparing: bar RMS (dBFS) under which a bar is silent', -200.0..0.0],
   beats_per_bar: [4, Integer, 'Beats in a bar (constant and tracked grids)', 1..32],
   sections: [true, 'Find sections (--no-sections leaves them out)'],
   bars: [false, 'Print a table of every bar'],
@@ -60,6 +65,7 @@ MB::Sound.script(
 ) { |files, p|
   targets = p.target ? p.target.split(',').map { |t| t.match?(/\A[-+]?\d/) ? Float(t) : t.strip.to_sym } : MB::Sound::BarStats::Broadcast::TARGETS
   options = { bpm: p.bpm, offset: p.offset, beats_per_bar: p.beats_per_bar, sections: p.sections ? :auto : false, targets: targets }
+  options[:grid] = :track if p.track
   files.each { |f| raise ArgumentError, "No such file: #{f}" unless File.file?(f) }
 
   $stderr.write("\r\e[KMeasuring #{files.first}") if $stderr.tty?
@@ -83,7 +89,7 @@ MB::Sound.script(
   thresholds = { timing: p.timing, lufs: p.lufs }.compact
   $stderr.write("\r\e[KComparing #{files.last}") if $stderr.tty?
   c = MB::Sound::BarStats.compare(a, files.last, align: p.align, thresholds: thresholds, labels: files.map { |f| File.basename(f) },
-                                  **options.except(:bpm, :offset, :sections))
+                                  silence: p.silence, **options.except(:bpm, :offset, :sections, :grid))
   $stderr.write("\r\e[K") if $stderr.tty?
   puts c.narrative
   worst = c.worst(p.worst).select { |b| b.score >= 1 }
