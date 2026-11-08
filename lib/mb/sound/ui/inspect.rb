@@ -548,10 +548,10 @@ module MB
           group.each do |e|
             stage, seg, pos, since, peak, rate = e.playhead_state
             next unless stage == :segment || stage == :sustain
-            best = [since, stage, seg, pos / rate, peak] if best.nil? || since < best[0]
+            best = [since, stage, seg, pos / rate, peak, since.to_f / rate] if best.nil? || since < best[0]
           end
           return nil unless best
-          { stage: best[1], segment: best[2], position: best[3], peak: best[4], at: Process.clock_gettime(Process::CLOCK_MONOTONIC) }.freeze
+          { stage: best[1], segment: best[2], position: best[3], peak: best[4], note: best[5], at: Process.clock_gettime(Process::CLOCK_MONOTONIC) }.freeze
         end
 
         # The amp envelope's release (seconds) under which another

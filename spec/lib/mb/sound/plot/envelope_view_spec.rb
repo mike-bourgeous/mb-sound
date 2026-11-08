@@ -84,6 +84,12 @@ RSpec.describe(MB::Sound::Plot::Panels::EnvelopeView, :aggregate_failures) do
     expect(rule.(chart_of(e, live: { stage: :segment, segment: 1, position: 0.1, elapsed: 0.05, peak: 1.0 }))).to be_within(1e-9).of(0.17)
     expect(rule.(chart_of(e, live: { stage: :segment, segment: 1, position: 0.25, elapsed: 1, peak: 1.0 }))).to be_within(1e-9).of(0.32) # (stops at the sustain point)
     expect(rule.(chart_of(e, live: { stage: :sustain, segment: 1, position: 0.4, peak: 1.0 }))).to be_within(1e-9).of(0.32)
+    # (tuner-fixes-1: a held sustain moves through the drawn hold by the
+    # note's time, from the sustain point to the release's start)
+    expect(rule.(chart_of(e, live: { stage: :sustain, segment: 1, position: 0.0, note: 0.2, peak: 1.0 }))).to be_within(1e-9).of(0.32)
+    expect(rule.(chart_of(e, live: { stage: :sustain, segment: 1, position: 0.0, note: 0.4, elapsed: 0.05, peak: 1.0 }))).to be_within(1e-9).of(0.45)
+    expect(rule.(chart_of(e, live: { stage: :sustain, segment: 1, position: 0.0, note: 30.0, peak: 1.0 }))).to be_within(1e-9).of(tr.release_start)
+    expect(0.45).to be < tr.release_start
     expect(rule.(chart_of(e, live: { stage: :segment, segment: 2, position: 0.1, peak: 1.0 }))).to be_within(1e-9).of(tr.release_start + 0.1)
     expect(rule.(chart_of(e, live: { stage: :segment, segment: 2, position: 0.1, elapsed: 9, peak: 1.0 }))).to be_within(1e-9).of(tr.release_end)
     expect(rule.(chart_of(e, live: { stage: :idle, peak: 0.5 }))).to be_nil
@@ -118,6 +124,7 @@ RSpec.describe(MB::Sound::Plot::Panels::EnvelopeView, :aggregate_failures) do
     expect(amp.live).to include(stage: :segment, segment: 1)
     expect(amp.live[:position]).to be_within(1e-9).of((6 * 800 - 0.05 * 48000) / 48000.0)
     expect(amp.live[:peak]).to be_between(0.1, 1.0)
+    expect(amp.live[:note]).to be_within(1e-9).of(6 * 800 / 48000.0) # (seconds since the note started)
     expect(Ractor.shareable?(info)).to eq(true)
     expect(g.call(s, { track: :bass, node: info.nodes.index { |n| n.label == 'lp4' } }).selected.live).to be_nil # (not an envelope)
     expect(g.call(s, { track: :bass, node: info.nodes.index { |n| n.label == 'filter_env' } }).selected.live).to include(stage: :segment)

@@ -128,7 +128,8 @@ module MB::Sound
         # the line; the preview's playhead counted by the chart it draws
         band.start
         UI.instance_variable_set(:@tiles, band)
-        puts MB::Sound.module_eval(p.design) unless quiet
+        opened = MB::Sound.module_eval(p.design) # (run with -q too: it was inside `puts ... unless quiet`)
+        puts opened unless quiet
         Thread.pass until session.running?
         if p.env
           # (the amp envelope's row, once the track lands)
@@ -138,14 +139,15 @@ module MB::Sound
           amp = info&.nodes&.index { |n| n.what == 'amp env' }
           UI::Inspect.target = { track: track, node: amp }.freeze if amp
         end
-        playhead = { draws: 0, moves: 0, last: nil, gaps: [], at: nil }
+        playhead = { draws: 0, moves: 0, last: nil, gaps: [], at: nil, stages: Hash.new(0) }
         UI::Panes::Preview.prepend(Module.new do
           define_method(:chart_for) do |n, state|
             chart = super(n, state)
             live = n.live
-            pos = live && live[:stage] == :segment ? [live[:segment], live[:position], state[:chart_of]&.last&.[](:elapsed)] : nil
+            pos = live && %i[segment sustain].include?(live[:stage]) ? [live[:segment], live[:position], live[:note], state[:chart_of]&.last&.[](:elapsed)] : nil
             now = MB::U.clock_now
             playhead[:draws] += 1
+            playhead[:stages][live ? live[:stage] : :none] += 1
             if pos && pos != playhead[:last]
               playhead[:moves] += 1
               playhead[:gaps] << now - playhead[:at] if playhead[:at]
@@ -299,7 +301,7 @@ module MB::Sound
         g = playhead[:gaps].sort
         q = ->(f) { g.empty? ? 0 : (g[((g.length - 1) * f).round] * 1000).round(1) }
         puts "Envelope preview: #{playhead[:draws]} charts, the playhead moved #{playhead[:moves]} times (#{(playhead[:moves] / p.seconds).round(1)}/s); " \
-             "gaps between moves p50 #{q.(0.5)} p99 #{q.(0.99)} max #{q.(1.0)} ms"
+             "gaps between moves p50 #{q.(0.5)} p99 #{q.(0.99)} max #{q.(1.0)} ms; charts by the note's stage: #{playhead[:stages].map { |k, v| "#{k} #{v}" }.join(', ')}"
       end
       %i[on off].each do |k|
         next if loads[k].empty?

@@ -1034,8 +1034,9 @@ module MB
 
           # The playhead's time step: elapsed time is rounded to it, finer
           # than a frame at 120 fps, so the playhead moves every frame
-          # while a segment runs (and a held sustain, without elapsed
-          # time, never rebuilds the chart).
+          # while a segment runs or the sustain is held (tuner-fixes-1; it
+          # stood at the sustain point while the key was down, over the
+          # sustain's breakpoint rule).
           PLAYHEAD_STEP = 1 / 240.0
 
           def initialize
@@ -1145,9 +1146,10 @@ module MB
           end
 
           # +live+ (NodeInfo#live) with +:elapsed+, the seconds since it was
-          # read while its segment runs (in PLAYHEAD_STEPs).
+          # read while its segment runs or its sustain is held (in
+          # PLAYHEAD_STEPs).
           def live_now(live)
-            return live unless live && live[:at] && live[:stage] == :segment
+            return live unless live && live[:at] && (live[:stage] == :segment || (live[:stage] == :sustain && live[:note]))
             live.merge(elapsed: ((Preview.now - live[:at]) / PLAYHEAD_STEP).floor * PLAYHEAD_STEP)
           end
         end
