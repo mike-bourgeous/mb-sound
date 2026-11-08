@@ -27,7 +27,11 @@ module BarStatsSounds
   # +transpose+: { bars => semitones } for the chord.
   # +tail+: a decaying noise tail after each hit (a reverb's), 300 ms.
   # +shift+: samples of silence put before everything (a file offset).
-  def song(bpm: 120, bars: 8, delay: {}, gain: nil, mono: [], drop: {}, transpose: {}, tail: false, shift: 0, seed: 1)
+  # +clap+: a noise burst in the mid band on beats 2 and 4 (delayed with
+  #         the mid band's +delay+).
+  # +pad+: steady noise in every band, never delayed (a part that stays
+  #        on time while +delay+ moves the hits: a late drum bus).
+  def song(bpm: 120, bars: 8, delay: {}, gain: nil, mono: [], drop: {}, transpose: {}, tail: false, shift: 0, pad: false, clap: false, seed: 1)
     spb = 60.0 / bpm
     n = ((OFFSET + bars * 4 * spb + 1) * RATE).round + shift
     l = Numo::DFloat.zeros(n)
@@ -35,6 +39,7 @@ module BarStatsSounds
     rng = Random.new(seed)
     hat = hat_burst(rng)
     tail_noise = tail ? noise_tail(rng) : nil
+    clap_burst = clap ? clap_noise(rng) : nil
     (bars * 4).times do |k|
       bar = k / 4 + 1
       g = gain ? gain.(bar) : 1.0
@@ -53,8 +58,21 @@ module BarStatsSounds
         add(l, r, hat, s + delay.fetch(:high, 0), g)
       end
       add(l, r, tail_noise, s + (0.02 * RATE).round, g) if tail_noise
+      add(l, r, clap_burst, s + delay.fetch(:mid, 0), g) if clap_burst && k.odd?
+    end
+    if pad
+      steady = pad_noise(n - shift)
+      l[shift..] += steady
+      r[shift..] += steady
     end
     [l, r]
+  end
+
+  # Steady noise in every band (the same in every song: its own seed),
+  # quieter than the hits.
+  def pad_noise(length)
+    rng = Random.new(99)
+    Numo::DFloat.cast(Array.new(length) { rng.rand * 2 - 1 }) * 0.05
   end
 
   # Adds +x+ times +g+ into +l+ (and +r+) from sample +s+.
@@ -95,6 +113,12 @@ module BarStatsSounds
   def hat_burst(rng)
     x = Numo::DFloat.cast(Array.new((0.03 * RATE).round) { rng.rand * 2 - 1 }) * Numo::NMath.exp(-times(0.03) * 150) * 0.3
     MB::Sound::BarStats::Bands.split(x, RATE)[2]
+  end
+
+  # A 60 ms noise burst in the mid band (a clap).
+  def clap_noise(rng)
+    x = Numo::DFloat.cast(Array.new((0.06 * RATE).round) { rng.rand * 2 - 1 }) * Numo::NMath.exp(-times(0.06) * 60) * 0.4
+    MB::Sound::BarStats::Bands.split(x, RATE)[1]
   end
 
   # 300 ms of decaying noise (a reverb tail), mid and high.

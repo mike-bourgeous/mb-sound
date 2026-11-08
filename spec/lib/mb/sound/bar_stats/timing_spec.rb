@@ -53,8 +53,8 @@ RSpec.describe(MB::Sound::BarStats::Timing, :aggregate_failures) do
     b = mono(BarStatsSounds.song(bars: 4, delay: { high: 37 }))
     spans = grid_of([a, a]).bars.first(4).map { |bar| [bar.seconds, bar.end_seconds] }
     lags = described_class.lags(a, b, rate, spans)
-    lags[:high].each { |lag, corr, _| expect(lag).to be_within(0.01).of(37); expect(corr).to be > 0.9 }
-    (lags[:low] + lags[:mid]).each { |lag, _| expect(lag.abs).to be < 0.05 }
+    lags[:high].each { |l| expect(l.samples).to be_within(0.01).of(37); expect(l.wave).to be > 0.9; expect(l.reliable?).to be(true) }
+    (lags[:low] + lags[:mid]).each { |l| expect(l.samples.abs).to be < 0.05 }
   end
 
   it 'finds a lag longer than a 16th between hits (the 66 ms drum bus case)' do
@@ -62,8 +62,8 @@ RSpec.describe(MB::Sound::BarStats::Timing, :aggregate_failures) do
     b = mono(BarStatsSounds.song(bpm: 140, bars: 4, delay: { low: 3168, high: 3168 })) # 66 ms
     g = MB::Sound::BarStats::Grid.constant(bpm: 140, offset: BarStatsSounds::OFFSET, duration: a.length / 48000.0)
     lags = described_class.lags(a, b, rate, g.bars.first(4).map { |bar| [bar.seconds, bar.end_seconds] })
-    expect(lags[:high].map(&:first)).to all(be_within(0.01).of(3168))
-    expect(lags[:low].map(&:first)).to all(be_within(0.2).of(3168)) # (the chord's leakage into the low band stays put)
-    expect(lags[:mid].map { |l, _| l.abs }).to all(be < 0.05)
+    expect(lags[:high].map(&:samples)).to all(be_within(0.01).of(3168))
+    expect(lags[:low].map(&:samples)).to all(be_within(0.2).of(3168)) # (the chord's leakage into the low band stays put)
+    expect(lags[:mid].map { |l| l.samples.abs }).to all(be < 0.05)
   end
 end

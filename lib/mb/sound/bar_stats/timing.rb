@@ -23,12 +23,16 @@ module MB
       # (#coarse_onsets: block mean squares).
       #
       # Between two recordings (#lags), per bar and band: the
-      # cross-correlation of their onset functions within +-max_lag finds
-      # the lag (several peaks within PEAK_TIE of the best: the one nearest
-      # the band's whole-song lag), then the cross-correlation of the band
-      # waveforms within +-REFINE of it, with a parabola through its peak,
-      # gives the lag to a fraction of a sample (exactly N for a copy
-      # delayed N samples).
+      # cross-correlation of their onset functions within +-max_lag gives
+      # candidate lags (peaks within PEAK_TIE of the best, at most
+      # MAX_CANDIDATES, nearest the band's whole-song lag first); each is
+      # refined on the band waveforms within +-REFINE with a parabola
+      # through the peak (exactly N for a copy delayed N samples), and the
+      # best waveform correlation wins.  Copies whose waveforms differ but
+      # whose hits line up (an MP3's top band against a render's) keep the
+      # onset lag when the onsets correlate (Lag#reliable?).  Lag#on_time
+      # says how much of the band still lines up at 0 beside a late part,
+      # which tells a late bus filling every band from a file offset.
       module Timing
         # Envelope width per band in seconds (a low band needs a few of
         # its cycles).
@@ -60,9 +64,42 @@ module MB
         # Onset-correlation peaks within this share of the best are ties.
         PEAK_TIE = 0.9
 
-        # A waveform correlation under this keeps the onset lag (rounded to
-        # a sample) instead of the waveform's.
+        # A waveform correlation under this keeps the onset lag (to about a
+        # millisecond) instead of the waveform's.
         MIN_WAVE_CORRELATION = 0.3
+
+        # A lag whose waveform correlation is under MIN_WAVE_CORRELATION
+        # still counts when its onset correlation reaches this (lossy or
+        # re-rendered copies whose waveforms differ but whose hits line
+        # up: an MP3's top band against a render's).
+        MIN_ONSET_CORRELATION = 0.25
+
+        # Lags farther than this (seconds) from 0 also read how much of the
+        # band lines up at 0 (Lag#on_time).
+        ON_TIME_GAP = 0.002
+
+        # Lags (seconds, either sign) whose waveform correlation says what
+        # an unrelated lag gives by chance (#on_time).
+        ON_TIME_PROBES = [0.003, 0.005, 0.007, 0.011].freeze
+
+        # Onset-correlation peaks refined on the waveform per span.
+        MAX_CANDIDATES = 4
+
+        # One band's lag in one span: +samples+ (B behind A; Float), +wave+
+        # (the waveform correlation there), +onset+ (the onset functions'
+        # correlation), and +on_time+ (the waveform correlation at lag 0
+        # when that is a peak of its own: content lined up beside a late
+        # part; 0 otherwise or for lags near 0).
+        Lag = Data.define(:samples, :wave, :onset, :on_time) do
+          # True if the waveform or the onsets agree well enough to trust.
+          def reliable? = wave >= MIN_WAVE_CORRELATION || onset >= MIN_ONSET_CORRELATION
+
+          # :wave (refined on the waveform) or :onset (onset lag only).
+          def by = wave >= MIN_WAVE_CORRELATION ? :wave : :onset
+
+          # The lag in milliseconds at +rate+.
+          def ms(rate = RATE) = (samples * 1000.0 / rate).round(3)
+        end
 
         module_function
 
@@ -185,10 +222,10 @@ module MB
         end
 
         # Per band, the lag of mono +b+ behind mono +a+ (both at +rate+) in
-        # each of +spans+ ([start, end] seconds of +a+, e.g. bars): {
-        # band => [[lag samples (Float), correlation, onset lag samples], ...] },
-        # nil entries where a band is silent in the span.  Positive lags
-        # mean +b+ is late.  Lags are searched within +-+max_lag+ seconds.
+        # each of +spans+ ([start, end] seconds of +a+, e.g. bars): { band
+        # => [Lag, ...] }, nil entries where a band is silent in the span.
+        # Positive lags mean +b+ is late.  Lags are searched within
+        # +-+max_lag+ seconds.
         def lags(a, b, rate, spans, max_lag: 0.125)
           m = (max_lag * rate).round
           r = (REFINE * rate).round
@@ -281,38 +318,75 @@ module MB
           ea = (body * body).sum
           return nil if ea <= 0
 
-          # Onset lag: onset functions at about 1 kHz (each block's peak)
+          # Onset lag candidates: onset functions at about 1 kHz (block
+          # mean squares), peaks within PEAK_TIE of the best (a chord's
+          # beating or a 16th-note pattern gives several)
           step = [(rate / 1000.0).round, 1].max
           md = (m / step.to_f).ceil
           oa = coarse_onsets(xa[margin...(margin + len)], band, rate, step)
           ob = coarse_onsets(xb[(margin - md * step)...(margin + len + md * step)], band, rate, step)
-          coarse =
-            if oa.max > 0 && ob.max > 0
-              c = full_window_corr(oa, ob, md)
-              best = c.max
-              peaks = (1...(c.length - 1)).select { |i| c[i] >= c[i - 1] && c[i] >= c[i + 1] && c[i] >= best * PEAK_TIE }
-              peaks = [c.max_index] if peaks.empty?
-              (peaks.min_by { |i| ((i - md) * step - hint).abs } - md) * step
-            else
-              hint
-            end
-          coarse = coarse.clamp(-m, m)
-
-          # Waveform lag within +-r of it (a dot product per lag)
-          c = Numo::DFloat.zeros(2 * r + 1)
-          (0..(2 * r)).each { |j| c[j] = body.dot(xb[(margin + coarse - r + j)...(margin + coarse - r + j + len)]) }
-          k = c.max_index
-          seg = xb[(margin + coarse - r + k)...(margin + coarse - r + k + len)]
-          eb = (seg * seg).sum
-          corr = eb > 0 ? c[k] / Math.sqrt(ea * eb) : 0.0
-          return [coarse.to_f, corr.round(3), coarse] if corr < MIN_WAVE_CORRELATION
-
-          frac = 0.0
-          if k > 0 && k < c.length - 1
-            den = c[k - 1] - 2 * c[k] + c[k + 1]
-            frac = 0.5 * (c[k - 1] - c[k + 1]) / den if den < 0
+          candidates = [[hint.clamp(-m, m), 0.0]]
+          if oa.max > 0 && ob.max > 0
+            c = full_window_corr(oa, ob, md)
+            best = c.max
+            peaks = (1...(c.length - 1)).select { |i| c[i] >= c[i - 1] && c[i] >= c[i + 1] && c[i] >= best * PEAK_TIE }
+            peaks = [c.max_index] if peaks.empty?
+            peaks = peaks.max_by(MAX_CANDIDATES) { |i| c[i] }.sort_by { |i| ((i - md) * step - hint).abs }
+            candidates = peaks.map { |i|
+              seg = ob[i...(i + oa.length)]
+              norm = Math.sqrt((oa * oa).sum * (seg * seg).sum)
+              [((i - md) * step).clamp(-m, m), norm > 0 ? c[i] / norm : 0.0]
+            }
           end
-          [(coarse - r + k + frac).round(3), corr.round(3), coarse]
+
+          # Each candidate refined on the waveform within +-r (a dot product
+          # per lag); the best waveform correlation wins, else the first
+          # candidate (nearest the whole-song lag) keeps its onset lag
+          tried = candidates.map { |coarse, onset|
+            wave = Numo::DFloat.zeros(2 * r + 1)
+            (0..(2 * r)).each { |j| wave[j] = body.dot(xb[(margin + coarse - r + j)...(margin + coarse - r + j + len)]) }
+            k = wave.max_index
+            [coarse, onset, wave, k, window_corr(body, ea, xb, margin + coarse - r + k, wave[k])]
+          }
+          pick = tried.max_by { |t| t[4] }
+          pick = tried.first if pick[4] < MIN_WAVE_CORRELATION
+          coarse, onset, wave, k, corr = pick
+          lag =
+            if corr < MIN_WAVE_CORRELATION
+              coarse.to_f
+            else
+              frac = 0.0
+              if k > 0 && k < wave.length - 1
+                den = wave[k - 1] - 2 * wave[k] + wave[k + 1]
+                frac = 0.5 * (wave[k - 1] - wave[k + 1]) / den if den < 0
+              end
+              (coarse - r + k + frac).round(3)
+            end
+
+          Lag.new(samples: lag, wave: corr.round(3), onset: onset.round(3), on_time: on_time(body, ea, xb, margin, lag, rate).round(3))
+        end
+
+        # How much of a band lines up with no lag at all beside a part at
+        # +lag+ samples (content on time beside a late part): the waveform
+        # correlation within 2 samples of 0 less twice its typical size at
+        # ON_TIME_PROBES (what any lag gives by chance), at least 0; 0 for
+        # lags within ON_TIME_GAP of 0.
+        def on_time(body, ea, xb, margin, lag, rate)
+          return 0.0 if lag.abs <= ON_TIME_GAP * rate
+          len = body.length
+          at = ->(j) { window_corr(body, ea, xb, margin + j, body.dot(xb[(margin + j)...(margin + j + len)])) }
+          zero = (-2..2).map { |j| at.(j) }.max
+          probes = ON_TIME_PROBES.flat_map { |t| [(t * rate).round, -(t * rate).round] }.reject { |j| (j - lag).abs < 0.002 * rate }
+          chance = Analysis::DSP.median(probes.map { |j| at.(j).abs }) || 0.0
+          [zero - 2 * chance, 0.0].max
+        end
+
+        # The normalized correlation +dot+ of +body+ (energy +ea+) with
+        # +xb+'s samples from +start+.
+        def window_corr(body, ea, xb, start, dot)
+          seg = xb[start...(start + body.length)]
+          eb = (seg * seg).sum
+          eb > 0 ? dot / Math.sqrt(ea * eb) : 0.0
         end
 
         # c[j] = sum(a[i] * w[i + j]) for j in 0..2m, where +w+ is +a+'s

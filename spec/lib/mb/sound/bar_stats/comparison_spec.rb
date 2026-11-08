@@ -15,9 +15,10 @@ RSpec.describe(MB::Sound::BarStats::Comparison, :aggregate_failures) do
     c = compare(BarStatsSounds.song(bars: 4, delay: { high: 37 }), thresholds: { timing: 0.5 })
     (1..4).each do |n|
       bar = c.bars.find { |x| x.bar == n }
-      expect(bar.lags[:high][0]).to be_within(0.001).of(37 / 48.0)
-      expect(bar.lags[:low][0].abs).to be < 0.002
-      expect(bar.lags[:mid][0].abs).to be < 0.002
+      expect(bar.lags[:high].ms).to be_within(0.001).of(37 / 48.0)
+      expect(bar.lags[:high].by).to eq(:wave)
+      expect(bar.lags[:low].ms.abs).to be < 0.002
+      expect(bar.lags[:mid].ms.abs).to be < 0.002
       expect(bar.moved).to eq([:lag_high])
     end
     expect(c.band_lags[:high][0]).to be_within(0.001).of(37 / 48.0)
@@ -35,6 +36,15 @@ RSpec.describe(MB::Sound::BarStats::Comparison, :aggregate_failures) do
     aligned = compare(shifted, align: 0.01)
     expect(aligned.pass?).to be(true)
     expect(aligned.band_lags.values.map(&:first)).to all(be_within(0.01).of(0))
+  end
+
+  it 'tells a late part filling every band (a drum bus) from a file offset by what still lines up' do
+    a = BarStatsSounds.song(bars: 4, pad: true, clap: true, drop: { mid: 1..4 })
+    b = BarStatsSounds.song(bars: 4, pad: true, clap: true, drop: { mid: 1..4 }, delay: { low: 3168, mid: 3168, high: 3168 })
+    c = compare(b, a)
+    expect(c.band_lags.values.map(&:first)).to all(be_within(0.1).of(66.0))
+    expect(kinds(c)).to eq([:late_part])
+    expect(c.causes[0].text).to include('part of every band of B is 66.0 ms late while the rest lines up', 'drums, usually')
   end
 
   it 'names a loudness step, its bars, and its size' do

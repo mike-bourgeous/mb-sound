@@ -64,6 +64,11 @@ module MB
           @mono = @channels.length == 1 ? @channels[0] : @channels.sum / @channels.length
           @spans = grid.beat_spans
           @window = window
+          # (every instance variable set here, nil until used, so instances
+          # keep one shape)
+          @beats = @bars = @sections = @song = @maps = nil
+          @lufs = @m_max = @s_max = @count = @sq = @tail_sq = @tail_count = @peak = @tp = @lr = @ll = @rr = nil
+          @mid_power = @side_power = @thirds = @nthirds = @chroma = @chroma_tuning = @onsets = nil
           measure
         end
 

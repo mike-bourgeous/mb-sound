@@ -52,12 +52,15 @@ module MB
         # A band "missing" (or added) when it moves this many dB.
         MISSING_DB = 12.0
 
-        # A lag counts when its waveform correlation reaches this.
-        MIN_LAG_CORRELATION = 0.3
+        # When every band is late alike, a median Timing::Lag#on_time of
+        # this or more means part of each band still lines up at 0 (a late
+        # bus or track whose hits fill every band), not a file offset.
+        ON_TIME_SPLIT = 0.2
 
         # One compared bar: +bar+ (A's bar number; +b_bar+ B's), +deltas+ ({
         # measure => B minus A }; +bands+ as one delta per octave band and
-        # +lag_*+ in ms), +lags+ ({ band => [lag ms, correlation] }),
+        # +lag_*+ in ms, for lags that are Timing::Lag#reliable?), +lags+
+        # ({ band => Timing::Lag }, nil without audio),
         # +scores+ ({ measure => |delta| / threshold }), and +score+ (the
         # largest).
         Bar = Data.define(:bar, :b_bar, :deltas, :lags, :scores, :score) do
@@ -87,7 +90,8 @@ module MB
         # The rules for likely causes and what each one suggests.
         CAUSES = {
           file_offset: 'every band offset alike: the files are offset (encoder delay or a trimmed start), not the mix',
-          band_offset: 'a constant onset offset in one band: a late (or early) bus or track',
+          late_part: 'a late (or early) bus or track whose hits fill every band (drums, usually)',
+          band_offset: 'a constant onset offset in some bands: a late (or early) bus or track',
           tail: 'tail energy after hits changed: reverb or delay',
           over_compression: 'louder with less crest: over-compression or limiting',
           band_level: 'a band missing or added: EQ, or a missing part',
@@ -216,9 +220,12 @@ module MB
         def check!(**thresholds)
           f = failures(**thresholds)
           return self if f.empty?
-          by = f.group_by(&:measure).map { |m, list| "#{m} in bars #{Comparison.bar_list(list.map(&:bar).uniq)}" }
+          by = f.group_by(&:measure).map { |m, list| "#{m} in #{Comparison.bars_text(list.map(&:bar).uniq)}" }
           raise RuntimeError, "#{@labels[1]} differs from #{@labels[0]}: #{by.join('; ')}\n#{f.first(10).map { |x| "  #{x}" }.join("\n")}"
         end
+
+        # "bar 3" or "bars 1-8, 12" for a list of bar numbers.
+        def self.bars_text(numbers) = "bar#{numbers.uniq.length == 1 ? '' : 's'} #{bar_list(numbers.uniq)}"
 
         # Bar numbers as ranges: "1-8, 12, 15-16".
         def self.bar_list(numbers)
@@ -229,7 +236,7 @@ module MB
         # lags), and the number of bars that had one.
         def band_lags
           Bands::NAMES.to_h { |band|
-            values = @bars.filter_map { |b| b.lags && b.lags[band] && b.lags[band][1] >= MIN_LAG_CORRELATION ? b.lags[band][0] : nil }
+            values = @bars.filter_map { |b| (l = b.lags && b.lags[band]) && l.reliable? ? l.ms : nil }
             [band, values.empty? ? nil : [Analysis::DSP.median(values).round(2), values.length]]
           }
         end
@@ -274,13 +281,10 @@ module MB
         # correlation, onset lag] or nil }).
         def compare_bar(ra, rb, lags)
           d = {}
-          lag_ms = {}
           if lags
             Bands::NAMES.each do |band|
               l = lags[band]
-              next unless l
-              lag_ms[band] = [(l[0] / RATE * 1000).round(2), l[1]]
-              d[:"lag_#{band}"] = l[1] >= MIN_LAG_CORRELATION ? lag_ms[band][0] : nil
+              d[:"lag_#{band}"] = l.ms.round(2) if l&.reliable?
             end
           else
             Bands::NAMES.each { |band| d[:"onset_#{band}"] = diff(ra[:"onset_#{band}"], rb[:"onset_#{band}"]) }
@@ -309,7 +313,7 @@ module MB
             value = m == :bands ? (v.compact.map(&:abs).max || 0) : v.abs
             [m, (value / limit).round(3)]
           }.to_h
-          Bar.new(bar: ra[:bar], b_bar: rb[:bar], deltas: d.freeze, lags: lags ? lag_ms.freeze : nil, scores: scores.freeze, score: scores.values.max || 0.0)
+          Bar.new(bar: ra[:bar], b_bar: rb[:bar], deltas: d.freeze, lags: lags&.compact&.freeze, scores: scores.freeze, score: scores.values.max || 0.0)
         end
 
         # +v+ at STEREO_FLOOR_DB or above (nil stays nil).
@@ -346,18 +350,39 @@ module MB
             known = lags.select { |_, v| v }
             if known.length == Bands::NAMES.length && known.values.map(&:first).minmax.then { |lo, hi| hi - lo } < 1.0 && known.values.first[0].abs >= t[:timing]
               lag = (known.values.sum { |v| v[0] } / known.length).round(1)
-              out << Cause.new(kind: :file_offset, measure: :timing, value: lag, bars: @bars.map(&:bar),
-                               text: "every band of #{b} is #{lag.abs} ms #{lag > 0 ? 'late' : 'early'} (#{CAUSES[:file_offset]}; align: #{format('%.4f', lag / 1000.0)})")
+              on_time = Analysis::DSP.median(@bars.flat_map { |x| (x.lags || {}).values.select(&:reliable?).map(&:on_time) }) || 0
+              late = lag > 0 ? 'late' : 'early'
+              out <<
+                if on_time >= ON_TIME_SPLIT
+                  Cause.new(kind: :late_part, measure: :timing, value: lag, bars: @bars.map(&:bar),
+                            text: "part of every band of #{b} is #{lag.abs} ms #{late} while the rest lines up (waveform correlation #{format('%.2f', on_time)} at 0 ms): #{CAUSES[:late_part]}")
+                else
+                  Cause.new(kind: :file_offset, measure: :timing, value: lag, bars: @bars.map(&:bar),
+                            text: "every band of #{b} is #{lag.abs} ms #{late} (#{CAUSES[:file_offset]}; align: #{format('%.4f', lag / 1000.0)})")
+                end
             else
-              known.each do |band, (lag, count)|
+              # Bands late alike make one cause (a drum bus fills several)
+              found = known.filter_map { |band, (lag, _)|
                 next if lag.abs < t[:timing]
                 key = :"lag_#{band}"
                 agree = where { |x| (v = x.deltas[key]) && (v - lag).abs <= [1.0, t[:timing] * 0.25].max }
-                next unless enough?(agree.length)
-                others = known.reject { |k, _| k == band }.select { |_, (l, _)| l.abs < t[:timing] }.keys
-                with = others.empty? ? '' : " while #{others.join(' and ')} #{others.length == 1 ? 'stays' : 'stay'} on time"
-                out << Cause.new(kind: :band_offset, measure: key, value: lag, bars: agree,
-                                 text: "the #{band} band of #{b} is #{lag.abs} ms #{lag > 0 ? 'late' : 'early'} in #{agree.length} of #{@bars.length} bars (#{Comparison.bar_list(agree)})#{with}: #{CAUSES[:band_offset]}")
+                [band, lag, agree] if enough?(agree.length)
+              }
+              groups = found.sort_by { |_, lag, _| lag }.slice_when { |x, y| (y[1] - x[1]).abs > 1.0 }.to_a
+              groups.each do |g|
+                bands = g.map(&:first)
+                lag = (g.sum { |_, l, _| l } / g.length).round(2)
+                agree = g.flat_map(&:last).uniq.sort
+                counts = g.map { |_, _, a| a.length }.join(' and ')
+                rest = known.keys - bands
+                on = rest.select { |k| known[k][0].abs < t[:timing] }
+                mixed = rest - on
+                with = []
+                with << "while #{on.join(' and ')} #{on.length == 1 ? 'stays' : 'stay'} on time" unless on.empty?
+                with << "(#{mixed.map { |k| "#{k} #{format('%+.1f', known[k][0])} ms" }.join(', ')}: mixed)" unless mixed.empty?
+                name = bands.length == 1 ? "the #{bands[0]} band of #{b} is" : "the #{bands.join(' and ')} bands of #{b} are"
+                out << Cause.new(kind: :band_offset, measure: :"lag_#{bands[0]}", value: lag, bars: agree,
+                                 text: "#{name} #{lag.abs} ms #{lag > 0 ? 'late' : 'early'} in #{counts} of #{@bars.length} bars (#{Comparison.bar_list(agree)})#{with.empty? ? '' : " #{with.join(' ')}"}: #{CAUSES[:band_offset]}")
               end
               # Without audio: onset offsets from the grid
               Bands::NAMES.each do |band|
@@ -382,7 +407,7 @@ module MB
               next if list.empty?
               med = Analysis::DSP.median(list.map { |n| @bars.find { |x| x.bar == n }.deltas[:tail] })
               out << Cause.new(kind: :tail, measure: :tail, value: med.round(1), bars: list,
-                               text: "tails after hits are #{word} in #{b} (#{format('%+.1f', med)} dB, bars #{Comparison.bar_list(list)}): #{CAUSES[:tail]}#{sign < 0 ? ' missing or shorter' : ' added or longer'}")
+                               text: "tails after hits are #{word} in #{b} (#{format('%+.1f', med)} dB, #{Comparison.bars_text(list)}): #{CAUSES[:tail]}#{sign < 0 ? ' missing or shorter' : ' added or longer'}")
             end
           end
 
@@ -391,7 +416,7 @@ module MB
             list = where { |x| (l = x.deltas[:lufs]) && (c = x.deltas[:crest]) && l >= t[:lufs] && c <= -t[:crest] }
             unless list.empty?
               out << Cause.new(kind: :over_compression, measure: :crest, value: nil, bars: list,
-                               text: "#{b} is louder with less crest in bars #{Comparison.bar_list(list)}: #{CAUSES[:over_compression]}")
+                               text: "#{b} is louder with less crest in #{Comparison.bars_text(list)}: #{CAUSES[:over_compression]}")
             end
           end
 
@@ -417,7 +442,7 @@ module MB
                 amount = (hi - lo) < 3 ? "#{Analysis::DSP.median(values).round(1)} dB" : "#{lo.round(0).to_i}-#{hi.round(0).to_i} dB"
                 bars = g[:bars].sort
                 out << Cause.new(kind: :band_level, measure: :bands, value: (sign * Analysis::DSP.median(values)).round(1), bars: bars,
-                                 text: "#{span} of #{b} #{g[:first] == g[:last] ? 'is' : 'are'} #{amount} #{dir} (#{what}) in bars #{Comparison.bar_list(bars)}: #{CAUSES[:band_level]}")
+                                 text: "#{span} of #{b} #{g[:first] == g[:last] ? 'is' : 'are'} #{amount} #{dir} (#{what}) in #{Comparison.bars_text(bars)}: #{CAUSES[:band_level]}")
               end
             end
           end
@@ -430,9 +455,9 @@ module MB
               common = shifts.tally.max_by(&:last)
               text =
                 if common && common[1] * 2 >= list.length && common[0] != 0
-                  "#{b}'s pitch classes are #{common[0] > 0 ? '+' : ''}#{common[0]} semitones from #{a}'s in bars #{Comparison.bar_list(list)}: a transpose"
+                  "#{b}'s pitch classes are #{common[0] > 0 ? '+' : ''}#{common[0]} semitones from #{a}'s in #{Comparison.bars_text(list)}: a transpose"
                 else
-                  "#{b} plays other pitch classes in bars #{Comparison.bar_list(list)}: #{CAUSES[:chroma]}"
+                  "#{b} plays other pitch classes in #{Comparison.bars_text(list)}: #{CAUSES[:chroma]}"
                 end
               out << Cause.new(kind: :chroma, measure: :chroma, value: common&.first, bars: list, text: text)
             end
@@ -443,7 +468,7 @@ module MB
             list = where { |x| (t[:width] && (w = x.deltas[:width]) && w <= -t[:width]) || (t[:correlation] && (c = x.deltas[:correlation]) && c >= t[:correlation]) }
             unless list.empty?
               out << Cause.new(kind: :stereo, measure: :width, value: nil, bars: list,
-                               text: "#{b} is narrower (closer to mono) in bars #{Comparison.bar_list(list)}: #{CAUSES[:stereo]}")
+                               text: "#{b} is narrower (closer to mono) in #{Comparison.bars_text(list)}: #{CAUSES[:stereo]}")
             end
           end
 
@@ -454,7 +479,7 @@ module MB
               next if list.empty?
               med = Analysis::DSP.median(list.map { |n| @bars.find { |x| x.bar == n }.deltas[:lufs] })
               out << Cause.new(kind: :level, measure: :lufs, value: med.round(1), bars: list,
-                               text: "#{b} is #{med.abs.round(1)} LU #{dir == :down ? 'quieter' : 'louder'} in bars #{Comparison.bar_list(list)} with the same crest: #{CAUSES[:level]}")
+                               text: "#{b} is #{med.abs.round(1)} LU #{dir == :down ? 'quieter' : 'louder'} in #{Comparison.bars_text(list)} with the same crest: #{CAUSES[:level]}")
             end
           end
           out
