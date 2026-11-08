@@ -371,6 +371,11 @@ module MB
           @bus_span_count
         end
 
+        # The session frame the routed span being rendered starts at.
+        def bus_span_start
+          @frame
+        end
+
         # The signal of bus or player +name+ (or the node +only+ in its
         # graph) in the span being rendered: an Array of one SFloat per
         # channel (the span's length), or nil if it didn't play.
