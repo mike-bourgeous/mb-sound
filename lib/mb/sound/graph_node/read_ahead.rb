@@ -60,13 +60,25 @@ module MB
           seconds ? (seconds * rate.to_f - 1e-9).ceil : 0
         end
 
+        # The rule for chains fed by span-fed sources (bus, master, and stem
+        # chains' MixSources, graphs reading bus taps), live and offline
+        # alike: switches their resamplers given no mode to :min_phase
+        # (.use_min_phase), then returns how many frames late the source
+        # must start for what still reads ahead (.frames; resamplers given
+        # a mode, BufferAdapters).  Sessions call only this, so live and
+        # rendered chains are the same samples (resample-render-minphase).
+        def self.prepare(roots, leaves, rate)
+          use_min_phase(roots, leaves)
+          frames(roots, leaves, rate)
+        end
+
         # Switches every Resample on a path from +roots+ to +leaves+ (as for
         # .frames) that was given no mode and hasn't started to :min_phase,
-        # which reads nothing ahead (Resample::MinPhase): a live Session
-        # does this for bus and master chains and graphs reading bus taps,
-        # so they aren't late (the maintainer, 2026-11-08: "Use a minimum
-        # phase resampler for zero latency when live").  Returns the
-        # Resamples switched.
+        # which reads nothing ahead (Resample::MinPhase): Sessions do this
+        # (.prepare) for bus, master, and stem chains and graphs reading bus
+        # taps, live and in renders, so they aren't late (the maintainer,
+        # 2026-11-08: "Use a minimum phase resampler for zero latency when
+        # live", and renders too until PDC).  Returns the Resamples switched.
         def self.use_min_phase(roots, leaves)
           leafset = {}.compare_by_identity
           Array(leaves).each do |l|

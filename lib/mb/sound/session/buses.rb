@@ -495,8 +495,7 @@ module MB
           # Graphs reading a tap ahead (a resampler after it) get its frames
           # late enough to read written ones (fix-bus-resample-1)
           taps.each do |t|
-            GraphNode::ReadAhead.use_min_phase(nodes, t) if @realtime
-            k = GraphNode::ReadAhead.frames(nodes, t, sample_rate)
+            k = GraphNode::ReadAhead.prepare(nodes, t, sample_rate)
             t.read_ahead = k if k > t.read_ahead
           end
           added = []
