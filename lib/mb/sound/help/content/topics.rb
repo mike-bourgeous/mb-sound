@@ -1780,8 +1780,8 @@ module MB
         it with the reference, e puts its tune line on the console, Enter
         runs it.  That opens the tuning screen (ui :tuning): the sound
         screen with a strip naming the keys (in the inspector: b A/B, R
-        refine, A apply, E retune, # note, w W back to the tuner's synths,
-        references).  Esc goes a step back; `tuner off` closes it.  Your
+        refine, A apply, S save, E reload the fit's file, # note, w W back
+        to the tuner's synths, references).  Esc goes a step back; `tuner off` closes it.  Your
         take keeps the tune line, not the tuner's steps.
 
         `tune :kick, code, ref: 'kick_ref.wav', tune: (30.0..110.0).at(51.3),
@@ -1791,6 +1791,16 @@ module MB
         :kick (`play:` a clip, else its role's note), and the reference
         for A/B (`as:` names the patch).  Then turn by ear, flip with b,
         note what you hear, and `take.save`.
+
+        Save your knobs with S in the inspector (or `save_fit :kick`): they
+        become the values of the fit's file (tmp/fits/kick_fit.mbg.rb),
+        and numbers you bound in the code (Enter on a param) become new
+        params.  The console says what it wrote where; the strip counts
+        turns not saved yet, and w or W with unsaved turns asks for the key
+        again.  Once saved, `tune` (and the tuner) starts from your values
+        instead of writing the fit's numbers over them; `tune ..., fresh:
+        true` starts from the fit's numbers again (your saved file stays in
+        tmp/fits/versions/).  E only reloads the file after you edit it.
 
         A fit (an agent matching a sound) prints its voice as console Ruby
         with the fitted numbers as literals.  `fit_patch :kick_fit, code,
@@ -1851,7 +1861,7 @@ module MB
         `MB::Sound::Take.read('take.rb')` reads a saved take the same way
         (walked, never run).
       TEXT
-      commands :tuner, :tune, :fit_patch, :ab, :retune, :refine, :audition
+      commands :tuner, :tune, :save_fit, :fit_patch, :ab, :retune, :refine, :audition
       note :hand_tune, :sound_design_ui
       see :inspector, :knobs, :ui
     end

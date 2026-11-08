@@ -581,7 +581,10 @@ module MB
             text = File.read(synth.path)
             name = synth.name.to_sym
             version = FitPatch.version_path(text, name)
-            "tune #{t}, #{version.inspect}#{tail}, as: #{name.inspect}"
+            # (an older version picked from the list replaces a saved
+            # tuning of the fit on purpose: fresh)
+            fresh = File.dirname(synth.path) == File.join(FitPatch.dir, 'versions') && HandTune.saved_tuning(name) ? ', fresh: true' : ''
+            "tune #{t}, #{version.inspect}#{tail}, as: #{name.inspect}#{fresh}"
           when :init, :library
             path = synth.entry.head_path
             synth.ears ? "tune #{t}, #{path}#{tail}" : "tune #{t}, #{path}#{tail}, as: :#{@track}_#{synth.entry.name}"
@@ -752,7 +755,8 @@ module MB
         def synths_for(ref)
           out = []
           if (q = ref.item)
-            out << Synth.new(kind: :queue, name: :"#{q.track}_fit", about: "the queue's fit: #{q.title}",
+            saved = HandTune.saved_tuning(:"#{q.track}_fit")
+            out << Synth.new(kind: :queue, name: :"#{q.track}_fit", about: "the queue's fit: #{q.title}#{saved ? " (your tuning saved #{saved} plays)" : ''}",
                              problem: q.status == :fails ? q.problem : nil)
           end
           mine, others = fit_documents.partition { |name, _| name.to_s.start_with?("#{@track}_") || name == @track }
@@ -772,13 +776,13 @@ module MB
           return [] unless File.directory?(dir)
           docs = Dir.glob(File.join(dir, "*#{GraphIO::EXTENSION}")).sort_by { |p| -File.mtime(p).to_f }
           out = docs.map { |p|
-            name = File.basename(p, GraphIO::EXTENSION).to_sym
+            name = FitPatch.name_for(File.basename(p, GraphIO::EXTENSION))
             [name, p, "fit document #{File.basename(p)} (#{File.mtime(p).strftime('%m-%d %H:%M')})"]
           }
           versions = Dir.glob(File.join(dir, 'versions', "#{@track}_*#{GraphIO::EXTENSION}")).sort_by { |p| -File.mtime(p).to_f }.first(5)
           versions.each do |p|
             base = File.basename(p, GraphIO::EXTENSION)
-            name = base.sub(/-[0-9a-f]{12}\z/, '').to_sym
+            name = FitPatch.name_for(base.sub(/-[0-9a-f]{12}\z/, ''))
             next if out.any? { |_, q, _| q && File.file?(q) && File.read(q) == File.read(p) }
             out << [name, p, "a version of #{name} (#{base[/[0-9a-f]{12}\z/]}, #{File.mtime(p).strftime('%m-%d %H:%M')})"]
           end

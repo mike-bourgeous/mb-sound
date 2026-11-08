@@ -336,7 +336,7 @@ module MB
           when :fit_patch then (f = read_fit(node)) && (@fits[f[2]] = f)
           when :track, :design then read_track(args)
           when :tune then read_tune(node, args)
-          when :retune then read_retune(node, args)
+          when :retune, :save_fit then read_retune(node, args) # (save_fit: `document:`, the version saved)
           when :ab then read_ab(node, args)
           when :refine then read_refine(node, args)
           when :undo then read_undo(node)
@@ -388,7 +388,7 @@ module MB
           return unless track.is_a?(Symbol)
           kw = keywords(node)
           as = kw[:as] ? value(kw[:as]) : nil
-          %i[ref play as].each { |k| kw.delete(k) }
+          %i[ref play as fresh].each { |k| kw.delete(k) }
           params = kw.to_h { |k, v|
             v = v.elements.first if v.is_a?(Prism::ArrayNode)
             v = value(v)

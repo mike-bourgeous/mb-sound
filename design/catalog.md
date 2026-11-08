@@ -231,4 +231,4 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `:now` Help and what is going on: help now lesson players knobs scenes tracks mutes changes markers ruby debug_dump
 - `:ui` Dashboard band and tiled screen: ui off pane layout keys fg jobs
 - `:inspector` Sound design: the patch inspector: design ui knob turn learn bind
-- `:hand_tune` Hand-tuning a fitted sound: tuner tune fit_patch ab retune refine audition
+- `:hand_tune` Hand-tuning a fitted sound: tuner tune save_fit fit_patch ab retune refine audition

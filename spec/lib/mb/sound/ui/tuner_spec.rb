@@ -121,6 +121,20 @@ RSpec.describe(MB::Sound::UI::Panes::Tuner, :aggregate_failures) do
     # (the REPL shows the line it ran, shortened or whole)
     expect(wait_until { @term.text.include?('tune :kick, L.inst.init') }).to be_truthy
 
+    # (tuner-fixes-1: a turn the fit's file doesn't hold; w asks first, S
+    # saves it, then w leaves)
+    ui.run_line('turn :"kick/mix", 0.3', @session)
+    2.times { @session.process_buffer } # (the turn lands on a frame)
+    expect(wait_until { MB::Sound::HandTune.unsaved(@session, :kick).length == 1 }).to eq(true)
+    expect(text).to include('1 unsaved (S saves)', 'S save', 'E reload file')
+    key('w')
+    expect(@tiles.layout_name).to eq(:tuning)
+    expect(text).to include("kick: 1 turn not saved in its fit's file: S saves; w again leaves without saving")
+    key('S')
+    expect(wait_until { MB::Sound::HandTune.unsaved(@session, :kick).empty? }).to eq(true)
+    expect(MB::Sound::FitPatch.tuned_at(File.read(MB::Sound::FitPatch.path_of(:kick_init)))).to be_a(String)
+    expect(wait_until { @term.text.include?('saved kick: 1 knob into') }).to be_truthy
+
     key('w')
     expect(wait_until { @tiles.layout_name == :tuner }).to eq(true)
     expect(w.state).to eq(:synth)
@@ -155,7 +169,7 @@ RSpec.describe(MB::Sound::UI::Panes::Tuner, :aggregate_failures) do
 
   it 'names the inspector\'s hand-tune keys from its keymap, and every tuner key has help' do
     keys = ui::Panes::TuneStrip.keys
-    expect(keys.map(&:first)).to eq(%w[b R A E # w W])
+    expect(keys.map(&:first)).to eq(%w[b R A S E # w W])
     expect(keys.map(&:last)).to all(satisfy { |h| !h.empty? })
     map = ui::Panes::Tuner.mode_keymap
     expect(map.entries.map(&:action).uniq).to include(:pick, :act, :audition, :ab, :find, :folder, :edit, :quit)

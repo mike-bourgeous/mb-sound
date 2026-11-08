@@ -69,7 +69,8 @@ module MB
             # (hand-tune-3: the tuner's step 3 keys, named by the tune strip)
             on ['R'], :refine, help: 'refine against the reference (again: stop; then A/B it)'
             on ['A'], :apply, help: "apply refine's proposal (one undo step)"
-            on ['E'], :retune, help: "retune from the fit's edited file"
+            on ['S'], :save_fit, help: "save the knobs into the fit's file (save_fit)"
+            on ['E'], :retune, help: "reload the fit's edited file (retune; not a save)"
             on ['#'], :note, help: 'a note about what you hear (ui.note)'
             on ['w'], :tuner_back, help: 'the tuner: back to the synths, the references', label: 'w W'
             on ['W'], :tuner_restart, help: 'the tuner: back to the synths, the references', label: 'w W'
@@ -754,10 +755,24 @@ module MB
             [*flush(state), PaneKeys::Run['refine.apply', 'refine: the proposal applied (undo takes it back)']]
           end
 
+          # S: the inspected track's knobs written into its fit's file
+          # (save_fit; tuner-fixes-1: E, reload, looked like save, and his
+          # tunings stayed only in the take).
+          def key_save_fit(state)
+            track = state[:snap]&.inspector&.track or return 'nothing to inspect'
+            [*flush(state), PaneKeys::Run["save_fit #{track.inspect}", "save_fit #{track}: its knobs into its fit's file (the console says where)"]]
+          end
+
           def key_retune(state)
             track = state[:snap]&.inspector&.track or return 'nothing to inspect'
-            [*flush(state), PaneKeys::Run["retune #{track.inspect}", "retune #{track}: from its fit's file"]]
+            n = unsaved_count(track)
+            more = n > 0 ? "; #{n} turn#{'s' unless n == 1} not saved (they carry; S saves)" : ''
+            [*flush(state), PaneKeys::Run["retune #{track.inspect}", "retune #{track}: reloaded from its fit's file#{more}"]]
           end
+
+          # How many of +track+'s knobs its fit's file doesn't hold
+          # (HandTune.unsaved).
+          def unsaved_count(track) = HandTune.unsaved_somewhere(track).length
 
           # #: a note, typed on a prompt line (key_noted runs ui.note).
           def key_note(_state) = PaneKeys::Ask['ui note: ', '', :noted]
@@ -777,9 +792,20 @@ module MB
 
           # The tuner a step back (+event+ :back or :restart), its screen
           # shown.
+          #
+          # With turns its fit's file doesn't hold, the first press says so
+          # and a second leaves (no prompts: the key again is the answer).
           def tuner_step(state, event)
             w = HandTune::Wizard.current or return 'no tuner open (tuner, or NAV h)'
             return 'the tuner is at its lists already (NAV h)' unless w.state == :tuning || event == :restart
+            track = w.tuned
+            n = track ? HandTune.unsaved_somewhere(track, w.session).length : 0
+            key = event == :back ? 'w' : 'W'
+            if n > 0 && state[:leaving] != [event, track]
+              state[:leaving] = [event, track]
+              return "#{track}: #{n} turn#{'s' unless n == 1} not saved in its fit's file: S saves; #{key} again leaves without saving"
+            end
+            state[:leaving] = nil
             out = flush(state)
             w.public_send(event)
             TunerScreen.show(w)
@@ -1511,7 +1537,7 @@ module MB
 
           # Keys the design plans but this build doesn't have yet.
           PLANNED = [
-            ['S', 'save (name, tags, params)'], ['*', 'favourite'],
+            ['*', 'favourite'],
           ].freeze
 
           # The library picker's keys in one line (NAV l goes in; its own
