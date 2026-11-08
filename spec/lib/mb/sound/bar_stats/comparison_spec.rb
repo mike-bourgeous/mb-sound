@@ -118,4 +118,35 @@ RSpec.describe(MB::Sound::BarStats::Comparison, :aggregate_failures) do
     expect(c.bars.map(&:b_bar)).to eq([3, 4])
     expect(c.causes.find { |x| x.kind == :level }.value).to be_within(0.1).of(-6.0)
   end
+
+  describe 'sparse stems (bar-stats-fix-1)' do
+    # A kick-only stem silent in bars 3-4, ending 8 samples into bar 9 as
+    # a 140.0001 BPM render of 8 bars does
+    let(:quiet) { BarStatsSounds.kick_stem(silent: [3, 4], extra: 8) }
+
+    it 'leaves out bars silent in both (digital zero against a noise floor), and names a part silent on one side' do
+      noisy = BarStatsSounds.kick_stem(silent: [3, 4, 6], extra: 8, floor: -70)
+      c = MB::Sound.compare_bars(quiet, noisy, bpm: 140.0001)
+      expect(c.silent_bars).to eq([3, 4])
+      expect(c.bars.select { |x| x.silent == :both }.map { |x| [x.deltas, x.score] }).to all(eq([{}, 0.0]))
+      expect(c.worst(1).map(&:bar)).to eq([6])
+      six = c.bars.find { |x| x.bar == 6 }
+      expect(six.silent).to eq(:b)
+      expect(six.deltas[:rms]).to be_within(0.1).of(-60 - c.a.bar(6)[:rms])
+      expect(kinds(c)).to eq([:silent_part])
+      expect(c.causes[0].bars).to eq([6])
+      expect(c.narrative).to include('Grid: constant 140.0001 BPM, bar 1 at 0.000 s (bpm: given)', 'Silent in both (RMS under -60.0 dBFS), left out: bars 3-4')
+      expect(c.narrative).not_to match(/\+[5-9]\d(\.\d)? dB/)
+      expect(MB::Sound.compare_bars(quiet, noisy, bpm: 140.0001, silence: -80).silent_bars).to eq([])
+    end
+
+    it 'compares a stem with itself and with itself shifted and aligned, at every bar, without raising' do
+      expect(compare(quiet, quiet, bpm: 140.0001, offset: 0).pass?).to be(true)
+      shifted = quiet.map { |ch| Numo::DFloat.zeros(480).concatenate(ch) }
+      c = compare(shifted, quiet, bpm: 140.0001, offset: 0, align: 0.01)
+      expect(c.pass?).to be(true)
+      expect(c.band_lags[:low][0]).to be_within(0.01).of(0)
+    end
+  end
+
 end

@@ -42,6 +42,11 @@ module MB
         # Levels under this (dB) count as silence in band comparisons.
         FLOOR_DB = -90.0
 
+        # A bar whose RMS is under this (dBFS) is silent (the +silence:+
+        # setting): digital zero in one file and a noise floor in the other
+        # compare as equal, not as +90 dB.
+        SILENCE_DB = -60.0
+
         # Beat tails (second half re the whole beat, dB) under this count as
         # silence.
         TAIL_FLOOR_DB = -60.0
@@ -61,15 +66,23 @@ module MB
         # measure => B minus A }; +bands+ as one delta per octave band and
         # +lag_*+ in ms, for lags that are Timing::Lag#reliable?), +lags+
         # ({ band => Timing::Lag }, nil without audio),
-        # +scores+ ({ measure => |delta| / threshold }), and +score+ (the
-        # largest).
-        Bar = Data.define(:bar, :b_bar, :deltas, :lags, :scores, :score) do
+        # +scores+ ({ measure => |delta| / threshold }), +score+ (the
+        # largest), and +silent+ (:both, :a, or :b when that side's RMS is
+        # under the comparison's +silence+ level; nil otherwise).  A bar
+        # silent in both has no deltas; one silent on one side compares its
+        # levels floored at +silence+ and leaves out the measures silence
+        # has no value for (timing, spectral shape, stereo, chroma, tails).
+        Bar = Data.define(:bar, :b_bar, :deltas, :lags, :scores, :score, :silent) do
+          def initialize(bar:, b_bar:, deltas:, lags:, scores:, score:, silent: nil) = super
+
           # The measures that moved (score 1 or more), largest first.
           def moved = scores.select { |_, s| s >= 1 }.sort_by { |_, s| -s }.map(&:first)
 
           def to_s
             parts = moved.first(3).map { |m| "#{m} #{Comparison.delta_text(m, deltas[m])}" }
-            "bar #{bar}#{b_bar == bar ? '' : " (B #{b_bar})"}: #{parts.empty? ? 'within thresholds' : parts.join(', ')}"
+            text = silent == :both ? 'silent in both' : (parts.empty? ? 'within thresholds' : parts.join(', '))
+            text += " (#{silent == :a ? 'A' : 'B'} silent)" if silent == :a || silent == :b
+            "bar #{bar}#{b_bar == bar ? '' : " (B #{b_bar})"}: #{text}"
           end
 
           def inspect = "#<Comparison::Bar #{self}>"
@@ -98,6 +111,7 @@ module MB
           chroma: 'different pitch classes: a wrong clip or a transpose',
           stereo: 'width or correlation changed: a mono fold or a missing wide part',
           level: 'a level change with the same crest: gain, automation, or a part missing',
+          silent_part: 'silent on one side where the other plays: a part missing or muted',
         }.freeze
 
         attr_reader :a, :b, :bars, :thresholds, :labels
@@ -105,7 +119,7 @@ module MB
         # Compares +a+ and +b+ (files, audio data, or Reports); see
         # BarStats.compare.  +b+ is measured on +a+'s grid shifted by
         # +align+ seconds (B's audio later by that much).
-        def self.of(a, b, align: 0, max_lag: MAX_LAG, thresholds: {}, labels: nil, **options)
+        def self.of(a, b, align: 0, max_lag: MAX_LAG, thresholds: {}, labels: nil, silence: SILENCE_DB, **options)
           ra = a.is_a?(Report) ? a : BarStats.analyze(a, **options)
           rb = b.is_a?(Report) ? b : BarStats.analyze(b, **options.except(:bpm, :offset, :grid, :sections), grid: ra.grid.shift(align), sections: ra.grid.sections.map { |s| s.with(seconds: s.seconds + align, end_seconds: s.end_seconds + align) })
           audio_a = audio_of(a)
@@ -121,13 +135,13 @@ module MB
             j = rb.bars.keys.index(n)
             j && [ra.bars.row(i), rb.bars.row(j), lags && Bands::NAMES.to_h { |band| [band, lags[band][i]] }]
           }
-          new(ra, rb, pairs, thresholds: thresholds, labels: labels || [name_of(a, 'A'), name_of(b, 'B')], align: align)
+          new(ra, rb, pairs, thresholds: thresholds, labels: labels || [name_of(a, 'A'), name_of(b, 'B')], align: align, silence: silence)
         end
 
         # Compares two sections of one Report (bar by bar from each
         # section's first bar; timing from the onset offsets, without
         # lags).
-        def self.sections(report, a_label, b_label, thresholds: {})
+        def self.sections(report, a_label, b_label, thresholds: {}, silence: SILENCE_DB)
           sa = report.grid.sections.find { |s| s.label == a_label.to_s } || raise(ArgumentError, "No section #{a_label.inspect} (#{report.grid.sections.map(&:label).join(', ')})")
           sb = report.grid.sections.find { |s| s.label == b_label.to_s } || raise(ArgumentError, "No section #{b_label.inspect} (#{report.grid.sections.map(&:label).join(', ')})")
           pairs = [sa.bars, sb.bars].min.times.filter_map { |k|
@@ -135,7 +149,7 @@ module MB
             rb = report.bar(sb.first_bar + k)
             ra && rb && [ra, rb, nil]
           }
-          new(report, report, pairs, thresholds: thresholds, labels: [a_label.to_s, b_label.to_s], align: 0)
+          new(report, report, pairs, thresholds: thresholds, labels: [a_label.to_s, b_label.to_s], align: 0, silence: silence)
         end
 
         # The mono audio of a source at RATE (nil for a Report without a
@@ -180,10 +194,13 @@ module MB
         end
 
         # +a+ and +b+ the Reports, +pairs+ [A bar row, B bar row, lags or
-        # nil] in A's order, +thresholds+ merged over THRESHOLDS.
-        def initialize(a, b, pairs, thresholds: {}, labels: %w[A B], align: 0)
+        # nil] in A's order, +thresholds+ merged over THRESHOLDS, +silence+
+        # the bar RMS (dBFS) under which a bar is silent (SILENCE_DB; nil
+        # for none).
+        def initialize(a, b, pairs, thresholds: {}, labels: %w[A B], align: 0, silence: SILENCE_DB)
           @a = a
           @b = b
+          @silence = silence
           @labels = labels
           @align = align
           @thresholds = THRESHOLDS.merge(thresholds).freeze
@@ -191,6 +208,12 @@ module MB
           @bars = pairs.map { |ra, rb, lags| compare_bar(ra, rb, lags) }.freeze
           @causes = nil
         end
+
+        # The silence level (bar RMS, dBFS; nil for none).
+        attr_reader :silence
+
+        # The bars silent in both recordings (left out of scores and causes).
+        def silent_bars = @bars.select { |x| x.silent == :both }.map(&:bar)
 
         # The compared bars, worst first (+n+ of them, or all).
         def worst(n = nil)
@@ -251,9 +274,12 @@ module MB
           a, b = @labels
           n = @bars.length
           bad = @bars.count { |x| x.score >= 1 }
+          quiet = silent_bars
           out = []
           out << "#{b} against #{a}, #{n} bar#{n == 1 ? '' : 's'} compared#{@align != 0 ? format(' (B aligned %+.1f ms)', @align * 1000) : ''}: " +
-                 (bad == 0 ? 'every bar is within the thresholds.' : "#{bad} bar#{bad == 1 ? '' : 's'} differ beyond the thresholds.")
+                 (bad == 0 ? 'every bar is within the thresholds.' : (bad == 1 ? '1 bar differs beyond the thresholds.' : "#{bad} bars differ beyond the thresholds."))
+          out << "Grid: #{@a.grid_text}." if @a.respond_to?(:grid_text)
+          out << "Silent in both (RMS under #{@silence.round(1)} dBFS), left out: #{Comparison.bars_text(quiet)}." unless quiet.empty?
           lags = band_lags.filter_map { |band, (lag, count)| lag && "#{band} #{format('%+.1f', lag)} ms" }
           out << "Band timing (median lag of #{b} behind #{a}): #{lags.join(', ')}." unless lags.empty?
           if bad > 0
@@ -280,6 +306,14 @@ module MB
         # The Bar for rows +ra+ and +rb+ with +lags+ ({ band => [lag samples,
         # correlation, onset lag] or nil }).
         def compare_bar(ra, rb, lags)
+          sa = silent?(ra)
+          sb = silent?(rb)
+          silent = sa && sb ? :both : sa ? :a : sb ? :b : nil
+          if silent == :both
+            return Bar.new(bar: ra[:bar], b_bar: rb[:bar], deltas: {}.freeze, lags: nil, scores: {}.freeze, score: 0.0, silent: :both)
+          end
+          return compare_levels(ra, rb, silent) if silent
+
           d = {}
           if lags
             Bands::NAMES.each do |band|
@@ -290,30 +324,107 @@ module MB
             Bands::NAMES.each { |band| d[:"onset_#{band}"] = diff(ra[:"onset_#{band}"], rb[:"onset_#{band}"]) }
           end
           %i[lufs rms true_peak crest tilt correlation].each { |m| d[m] = diff(ra[m], rb[m]) }
-          # (silence after the hits reads as TAIL_FLOOR_DB)
-          d[:tail] = diff(ra[:tail] && [ra[:tail], TAIL_FLOOR_DB].max, rb[:tail] && [rb[:tail], TAIL_FLOOR_DB].max)
+          # (silence after the hits reads as TAIL_FLOOR_DB, and a tail under
+          # the silence level as that level: a noise floor isn't a tail)
+          d[:tail] = diff(tail_of(ra), tail_of(rb))
           # (side levels under STEREO_FLOOR_DB read as it: mono is mono, and a
           # collapse to mono shows)
-          %i[width side_low side_mid side_high].each { |m| d[m] = diff(floored(ra[m]), floored(rb[m])) }
+          # (and a side quieter than the silence level, the bar's RMS plus
+          # its side ratio, as that level: a noise floor's side isn't width)
+          %i[width side_low side_mid side_high].each { |m| d[m] = side_diff(ra, rb, m) }
           d[:centroid] = ra[:centroid] && rb[:centroid] && ra[:centroid] > 0 ? (rb[:centroid] / ra[:centroid] - 1).round(4) : nil
           if ra[:bands] && rb[:bands]
+            # (bands under the silence level read as it)
+            floor = [FLOOR_DB, @silence || FLOOR_DB].max
             d[:bands] = ra[:bands].zip(rb[:bands]).map { |x, y|
-              x = [x || -Float::INFINITY, FLOOR_DB].max
-              y = [y || -Float::INFINITY, FLOOR_DB].max
-              x <= FLOOR_DB && y <= FLOOR_DB ? nil : (y - x).round(2)
+              x = [x || -Float::INFINITY, floor].max
+              y = [y || -Float::INFINITY, floor].max
+              x <= floor && y <= floor ? nil : (y - x).round(2)
             }
           end
           d[:chroma] = ra[:chroma] && rb[:chroma] ? (1 - cosine(ra[:chroma], rb[:chroma])).round(4) : nil
           d.compact!
 
-          scores = d.filter_map { |m, v|
+          scores = score(d)
+          Bar.new(bar: ra[:bar], b_bar: rb[:bar], deltas: d.freeze, lags: lags&.compact&.freeze, scores: scores.freeze, score: scores.values.max || 0.0)
+        end
+
+        # A row's tail (dB re its RMS), at least TAIL_FLOOR_DB, and with the
+        # tail's own level floored at #silence.
+        def tail_of(r)
+          t = r[:tail]
+          return nil if t.nil?
+          t = [t, TAIL_FLOOR_DB].max
+          t = [r[:rms] + t, @silence].max - r[:rms] if @silence && r[:rms]&.finite?
+          t
+        end
+
+        # True if bar row +r+ is silent (RMS under #silence, or none).
+        def silent?(r)
+          return false if @silence.nil?
+          r[:rms].nil? || r[:rms] < @silence
+        end
+
+        # A bar silent on one side: levels floored at #silence (rms, lufs,
+        # true peak, octave bands), nothing silence has no value for.
+        def compare_levels(ra, rb, silent)
+          f = ->(v) { [v || -Float::INFINITY, @silence].max }
+          d = %i[lufs rms true_peak].to_h { |m| [m, (f.(rb[m]) - f.(ra[m])).round(3)] }
+          if ra[:bands] || rb[:bands]
+            n = (ra[:bands] || rb[:bands]).length
+            d[:bands] = Array.new(n) { |k|
+              x = f.(ra[:bands]&.at(k))
+              y = f.(rb[:bands]&.at(k))
+              x <= @silence && y <= @silence ? nil : (y - x).round(2)
+            }
+          end
+          scores = score(d)
+          Bar.new(bar: ra[:bar], b_bar: rb[:bar], deltas: d.freeze, lags: nil, scores: scores.freeze, score: scores.values.max || 0.0, silent: silent)
+        end
+
+        # Scores of deltas +d+ against the thresholds.
+        def score(d)
+          d.filter_map { |m, v|
             group = m == :bands ? :bands : GROUP.fetch(m)
             limit = @thresholds[group]
             next if limit.nil? || limit == 0
             value = m == :bands ? (v.compact.map(&:abs).max || 0) : v.abs
             [m, (value / limit).round(3)]
           }.to_h
-          Bar.new(bar: ra[:bar], b_bar: rb[:bar], deltas: d.freeze, lags: lags&.compact&.freeze, scores: scores.freeze, score: scores.values.max || 0.0)
+        end
+
+        # The change of side ratio +m+ (dB re the mid) from +ra+ to +rb+,
+        # each at least STEREO_FLOOR_DB.  With a silence level, the side's
+        # own level (the mid's level plus the ratio: the bar's RMS for
+        # +width+, the octave bands of the Bands band for +side_*+) counts:
+        # nil when both sides' are under it (no side in either, whatever
+        # the noise floors) or a mid is, else the quieter one floored at it.
+        def side_diff(ra, rb, m)
+          x = floored(ra[m])
+          y = floored(rb[m])
+          return diff(x, y) if @silence.nil? || x.nil? || y.nil?
+          mx = side_mid(ra, m)
+          my = side_mid(rb, m)
+          return diff(x, y) if mx.nil? || my.nil?
+          return nil if mx < @silence || my < @silence
+          return nil if mx + x < @silence && my + y < @silence
+          diff([mx + x, @silence].max - mx, [my + y, @silence].max - my)
+        end
+
+        # The mid level under side ratio +m+ of row +r+ (see #side_diff).
+        def side_mid(r, m) = m == :width ? r[:rms] : band_level(r, m.to_s.delete_prefix('side_').to_sym)
+
+        # Octave bands summed for each Bands band (31.5-125 Hz, 250 Hz-1 kHz,
+        # 2-16 kHz: the octaves nearest the 150 Hz and 2 kHz edges).
+        BAND_OCTAVES = { low: 0..2, mid: 3..5, high: 6..9 }.freeze
+
+        # The level (dB RMS) of Bands band +band+ in row +r+ from its octave
+        # bands, or nil.
+        def band_level(r, band)
+          bands = r[:bands]
+          return nil unless bands
+          p = bands[BAND_OCTAVES.fetch(band)].compact.sum { |v| v.finite? ? 10**(v / 10) : 0.0 }
+          p > 0 ? 10 * Math.log10(p) : -Float::INFINITY
         end
 
         # +v+ at STEREO_FLOOR_DB or above (nil stays nil).
@@ -332,12 +443,17 @@ module MB
         end
 
         # The bar numbers where +block+ holds.
-        def where(&block) = @bars.select(&block).map(&:bar)
+        # The bar numbers where +block+ holds, among bars sounding on both
+        # sides (bars silent on a side have their own cause).
+        def where(&block) = @bars.select { |x| x.silent.nil? && block.call(x) }.map(&:bar)
 
         # Enough bars for a constant offset: at least 2 and a quarter of the
         # bars, or every bar of a short comparison.  (Localized causes need
         # one bar: finding those is what bar statistics are for.)
-        def enough?(count) = count >= [[2, (@bars.length * 0.25).ceil].max, @bars.length].min
+        def enough?(count)
+          n = @bars.count { |x| x.silent != :both }
+          count >= [[2, (n * 0.25).ceil].max, n].min
+        end
 
         def find_causes
           out = []
@@ -386,7 +502,7 @@ module MB
                 end
                 name = bands.length == 1 ? "the #{bands[0]} band of #{b} is" : "the #{bands.join(' and ')} bands of #{b} are"
                 out << Cause.new(kind: :band_offset, measure: :"lag_#{bands[0]}", value: lag, bars: agree,
-                                 text: "#{name} #{lag.abs} ms #{lag > 0 ? 'late' : 'early'} in #{counts} of #{@bars.length} bars (#{Comparison.bar_list(agree)})#{with.empty? ? '' : " #{with.join(' ')}"}: #{CAUSES[:band_offset]}")
+                                 text: "#{name} #{lag.abs} ms #{lag > 0 ? 'late' : 'early'} in #{counts} of #{@bars.count { |x| x.silent != :both }} sounding bars (#{Comparison.bar_list(agree)})#{with.empty? ? '' : " #{with.join(' ')}"}: #{CAUSES[:band_offset]}")
               end
               # Without audio: onset offsets from the grid
               Bands::NAMES.each do |band|
@@ -422,6 +538,14 @@ module MB
               out << Cause.new(kind: :over_compression, measure: :crest, value: nil, bars: list,
                                text: "#{b} is louder with less crest in #{Comparison.bars_text(list)}: #{CAUSES[:over_compression]}")
             end
+          end
+
+          # A side silent where the other plays
+          [[:b, b, a], [:a, a, b]].each do |side, quiet, other|
+            list = @bars.select { |x| x.silent == side }.map(&:bar)
+            next if list.empty?
+            out << Cause.new(kind: :silent_part, measure: :rms, value: nil, bars: list,
+                             text: "#{quiet} is silent (RMS under #{@silence.round(1)} dBFS) in #{Comparison.bars_text(list)} where #{other} plays: #{CAUSES[:silent_part]}")
           end
 
           # Bands missing or added (neighboring octaves moving in the same
