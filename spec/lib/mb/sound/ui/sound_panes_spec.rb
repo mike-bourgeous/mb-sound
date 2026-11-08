@@ -77,6 +77,28 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(keyed.grep(/\A (SOURCE|AMP|FX)  [safox] +\S/).length).to be >= 2
       empty = snap.with(slow: snap.slow.with(inspector: nil))
       expect(draw(:inspector, empty)[0]).to include('nothing to inspect')
+
+      # (tuner-fixes-1, "What is this 0.4Hz filter doing?": a knob setting
+      # a param through arithmetic shows its own value and unit, "via" it,
+      # not the knob's number in the param's Hz)
+      n = lp4.inspector.nodes[0]
+      cut = n.params.values[:cutoff].with(value: nil, label: nil, unit: nil)
+      via = n.with(params: n.params.with(values: n.params.values.merge(cutoff: cut)), param_knobs: { cutoff: :tone }.freeze)
+      tone = ui::KnobValue.new(name: :tone, value: 0.4, spec: MB::Sound::GraphNode::Knob::Spec.new(name: :tone, default: 0.4, range: 0.0..1.0))
+      s2 = lp4.with(knobs: [*lp4.knobs, tone].freeze, slow: lp4.slow.with(inspector: lp4.inspector.with(nodes: [via, *lp4.inspector.nodes.drop(1)].freeze)))
+      text = draw(:inspector, s2, { title_in_rule: true, mode: true }, w: 60, h: 14).join("\n")
+      expect(text).to match(/cutoff +█+.* 0\.4  via tone/)
+      expect(text).not_to include("0.4 Hz")
+      expect(text).to include("cut ← tone")
+
+      # (and "It says cutoff comes from mod env but mod env does not have a
+      # cutoff control; it should say where to adjust the base frequency":
+      # the knobs that set a modulated param's base)
+      fed = n.with(params: n.params.with(values: n.params.values.merge(cutoff: cut.with(label: 'clip 20..18000'))),
+                   param_feeds: { cutoff: %i[bass/cutoff bass/fenv].freeze }.freeze)
+      s3 = lp4.with(slow: lp4.slow.with(inspector: lp4.inspector.with(nodes: [fed, *lp4.inspector.nodes.drop(1)].freeze)))
+      text = draw(:inspector, s3, { title_in_rule: true, mode: true }, w: 80, h: 14).join("\n")
+      expect(text).to match(/cutoff +(→|->) clip 20\.\.18000; set by cutoff, fenv/)
     end
 
     it 'draws the signal chain on one line over the sections when there is room, the amp where the amp envelope is' do
@@ -324,12 +346,43 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(built.map(&:first)).to include('Up Down', 'Left Right', 'Enter', '0', 'm', 't T', 'n N')
       expect(built.first).to eq(ui::Panes::SoundKeys::PICKER) # (ui-scaffold-1: the library picker's keys in one line)
       expect(built.map(&:first)).to include('b') # (hand-tune-1: the A/B planned here is built: the reference)
-      expect(planned.map(&:first)).to eq(%w[S *])
+      expect(built.map(&:first)).to include('S Y') # (tuner-fixes-1: S saves a fit's knobs, Y lists its saves)
+      expect(planned.map(&:first)).to eq(%w[*])
       expect(draw(:sound_keys, snap, w: 50).join("\n")).to include('l          library: / find', 'Enter      type a value')
       expect(draw(:sound_keys, snap, w: 50, h: 30).join("\n")).to include('(later)')
       cue = snap.with(parts: [ui::PartLoad.new(name: :"acid/cue", kind: :player, state: :playing, load: 0.0)].freeze)
       expect(draw(:audition, cue, w: 90)[0]).to include('CUE ● acid')
     end
+  end
+
+  # (tuner-fixes-1, the maintainer: "I need to see overlaid waveforms of
+  # the reference and the synth")
+  it "overlays the A/B reference's envelope, loudness-matched, on the RENDER pane's envelope" do
+    s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: false), realtime: false, channels: 1)
+    ref = MB::Sound::Sample.new([Numo::SFloat.new(24000).seq.map { |i| Math.exp(-i / 4800.0) * (i.to_i.even? ? 1 : -1) }], sample_rate: 48000, name: 'ref')
+    MB::Sound::Reference.pairs(s)[:kick] = MB::Sound::Reference::Pair.new(track: :kick, ref: :kick_ref, sample: ref, source: 'ref', hearing: :patch, level_db: -6.0)
+    allow(ui).to receive(:tiles).and_return(double(session: s))
+    cols = 64
+    r = ui::PatchRender::Result.new(seq: 1, key: :k, track: :kick, cycle: nil, periods: nil, settled: nil, frequency: nil,
+                                    lo: Numo::SFloat.zeros(cols) - 0.2, hi: Numo::SFloat.zeros(cols) + 0.2, frames: 24000, rate: 48000,
+                                    peak: 0.2, rms: 0.1, lufs: -20.0, spectrum: nil, ms: 1.0, input: 'C2', error: nil)
+    key, hi, lo = ui::Panes::Render.reference_envelope(r)
+    gain = 10**(-6.0 / 20)
+    expect(hi.length).to eq(cols)
+    expect(hi[0]).to be_within(1e-6).of(gain)
+    expect(lo[0]).to be_within(1e-3).of(-gain * Math.exp(-1 / 4800.0))
+    expect(hi[cols - 1]).to be < 0.01 * gain
+    expect(ui::Panes::Render.reference_envelope(r).first).to eq(key) # (cached)
+    pane = ui.panes.fetch(:render)
+    state = { ref_env: [key, hi, lo] }
+    chart = pane.send(:chart_for, r, nil, :envelope, state)
+    expect(chart.marks.grep(MB::Sound::Plot::Mark::Line).map(&:color)).to eq([ui::Panes::Render::REFERENCE] * 2)
+    expect(pane.key_action(:reference, state)).to eq('no reference envelope')
+    expect(pane.key_action(:reference, state)).to include("the reference's envelope")
+    MB::Sound::Reference.pairs(s).clear
+    expect(ui::Panes::Render.reference_envelope(r)).to be_nil
+  ensure
+    s&.close
   end
 
   describe 'with a real Session' do

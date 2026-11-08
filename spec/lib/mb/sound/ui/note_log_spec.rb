@@ -36,7 +36,8 @@ RSpec.describe(MB::Sound::UI::NoteLog, :aggregate_failures) do
     n = described_class.save("the cutoff turns too slowly\nat the bottom of its range", session: @session, time: time,
                              capture: { layout: :sound, focus: :inspector, mode: :pane, size: [120, 40], text: "SOUND\n▸lp4  cutoff ████" })
     expect(n.path).to eq(File.join(@dir, '2026-10-30.md'))
-    expect(n.to_s).to eq("ui.note saved 14:03:12 (ui :sound, 120x40, focus inspector, pane mode) to #{n.path}, data #{n.data}")
+    expect(n.to_s).to eq("note saved 14:03:12 (ui :sound, 120x40, focus inspector, pane mode) in #{n.path.delete_prefix("#{Dir.pwd}/")}")
+    expect(n.pretty_inspect).to eq("#<ui.#{n}>\n") # (one line in Pry, not the record's fields)
     expect(n.data).to start_with(File.join(@dir, 'data', '')).and end_with('/140312.json')
     text = File.read(n.path)
     expect(text).to start_with("# UI notes 2026-10-30\n")
@@ -153,6 +154,10 @@ RSpec.describe(MB::Sound::UI::NoteLog, :aggregate_failures) do
     n = ui.facade.note('works without a screen')
     expect(n.where).to eq('no screen')
     expect(ui.facade.notes.entries.map(&:last)).to eq(['works without a screen'])
+    # (a bare `ui` before it shows no screen; tuner-fixes-1)
+    n2 = MB::Sound.ui.note('the bare ui too')
+    expect(n2.where).to eq('no screen')
+    expect(ui.screen).to be_nil
     expect(ui::HelpIndex.named('note').map(&:label)).to include('ui.note')
     expect(ui::HelpIndex.named('notes').map(&:label)).to include('ui.notes')
   end

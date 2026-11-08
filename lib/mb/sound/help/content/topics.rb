@@ -595,13 +595,13 @@ module MB
         `.stretch(4, mode: :spectral)` a phase vocoder with locked phases
         and sharp transients that land on the stretched beat (pads,
         chords, voices, bass, breaks), `.stretch(32, mode: :paul)`
-        Paulstretch (endless washes).  They are one algorithm:
-        `randomize:` 0..1 goes from the vocoder (0) to Paulstretch (1)
-        (`mode: :spectral, randomize: 1`: Paulstretch phases in the
+        random phases in long windows (endless washes).  They are one
+        algorithm: `randomize:` 0..1 goes from locked phases (0) to random
+        ones (1) (`mode: :spectral, randomize: 1`: random phases in the
         vocoder's shorter 4096-sample window), with `window:`,
-        `overlap:`, `shape: :paul` (the original's window), and `link:
-        false` (random phases per channel) for both; for voices try the
-        original's settings: `.stretch(8, mode: :paul, overlap: 2,
+        `overlap:`, `shape: :paul` (a smooth window for washes), and `link:
+        false` (random phases per channel) for both; for voices try
+        `.stretch(8, mode: :paul, overlap: 2,
         shape: :paul, link: false)`.
         They are offline edits: a new Sample, made once; results over 30
         s read with `mips: :octave` (smaller playback tables).
@@ -617,11 +617,11 @@ module MB
         riff = bounce(1.bar) { seq(A3, C4, E4, G4).n8.loop.then { |c| c.tone.saw.lp4(1500) * c.amp_env } }
         bg :try, riff.stretch(4, mode: :spectral).node.at(-12.db)
       end
-      example 'Paulstretch phases in the vocoder (randomize: 1)' do
+      example 'random phases in the vocoder (randomize: 1)' do
         riff = bounce(1.bar) { seq(A3, C4, E4, G4).n8.loop.then { |c| c.tone.saw.lp4(1500) * c.amp_env } }
         bg :try, riff.stretch(8, mode: :spectral, randomize: 1).node.at(-12.db)
       end
-      example "a voice Paulstretched the original's way" do
+      example 'a voice washed out with long windows and random phases' do
         voice = bounce(1.bar) { seq(A3.n4, C4.n4, E4.n4, D4.n4).legato(1).then { |c| c.tone.saw.formant(:a, :o) * c.amp_env * 0.5 } }
         bg :try, voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false).node.at(-10.db)
       end
@@ -828,10 +828,14 @@ module MB
         :hall]`).  `fx :keys, L.fx.dub` swaps it at the launch point, the
         notes playing on and the old effect's tail ringing out (one undo
         step); `fx :keys, :off` takes it out, `fx :keys` says what it is.
+        `untrack :clap` removes a track from the set (it stops now; undo
+        brings it back; d twice in the tracks pane).
+        A track's insert is its `master { }`: a Proc takes the track's signal,
+        `fx :drums, -> { it.softclip(0.1, 0.9).limiter(ceiling: -6.db) }`.
         In `ui :sound` the library picker's Enter on an effect does this
         for the inspected track.
       TEXT
-      commands :track, :tracks, :fx, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
+      commands :track, :tracks, :untrack, :fx, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement
       see :flow, :knobs, :now, :library
       example 'two scenes' do
@@ -1540,7 +1544,9 @@ module MB
         images: waveforms, spectra, spectrograms, histograms, and chart
         builders; `vis` shows the live mix on a band of master meters and
         a big scope (`vis spectrum: true`: a spectrum; `graphical: true`:
-        inline images).
+        inline images).  With the tiled screen up, a plot shows in a plot
+        pane beside the console, at the pane's size (the next plot
+        replaces it; q in it, or `ui.plot false`, closes it).
       TEXT
       commands :plot, :spectrum, :spectrogram, :time_freq, :hist, :density, :mag_phase, :overlay, :overlay_chart, :table, :chart, :figure, :vis
       note :plotting
@@ -1650,7 +1656,10 @@ module MB
         Your own panes: `pane :name do |c, s| ... end` (s a snapshot of the
         session, c the pane's canvas); arrange them with `layout`, keep a
         layout with `ui.save`.  `ui.split :v`, `ui.zoom`, `ui.show :cpu`,
-        `ui.save :mine` change the tiles from the prompt; `ui.on C1, :zoom`
+        `ui.save :mine` change the tiles from the prompt; a pane grows
+        with Shift and the arrows in NAV (Ctrl-Shift: 5 at a time; on the
+        REPL, Shift-Up makes it taller upwards) or `ui.resize :up, 5,
+        name: :repl`; `ui.on C1, :zoom`
         maps a pad; `ui.theme :mono`.  Themes, pane files, and layouts are
         data files in the ui folder, reloaded when they change;
         `bin/ui_check.rb` reports what your terminal supports.
@@ -1773,15 +1782,19 @@ module MB
         reference from a list (the hand-tune queue, a folder's sound files:
         `tuner 'refs/'`, d on the screen, remembered; Samples already read),
         each with its length and a summary (pitch, envelope); a listens
-        (at -20 LUFS), Enter picks.  Then a synth for it (the queue's fit,
+        (at -20 LUFS; then Up and Down play each reference they land on,
+        a again stops), Enter picks.  Then a synth for it (the queue's fit,
         your fit documents, the init voice, a blank sine, the library's
         instruments and kits), with an L3 score against the reference for
         the one under the cursor; a listens on the reference's note, b A/Bs
         it with the reference, e puts its tune line on the console, Enter
         runs it.  That opens the tuning screen (ui :tuning): the sound
         screen with a strip naming the keys (in the inspector: b A/B, R
-        refine, A apply, E retune, # note, w W back to the tuner's synths,
-        references).  Esc goes a step back; `tuner off` closes it.  Your
+        refine, A apply, C clear the proposal, S save, Y saves, E reload
+        the fit's file, G another clip or generator (the reference
+        follows), # note, w W back to the tuner's synths, references; the
+        RENDER pane draws the reference's envelope over the patch's, f
+        hides it).  Esc goes a step back; `tuner off` closes it.  Your
         take keeps the tune line, not the tuner's steps.
 
         `tune :kick, code, ref: 'kick_ref.wav', tune: (30.0..110.0).at(51.3),
@@ -1791,6 +1804,19 @@ module MB
         :kick (`play:` a clip, else its role's note), and the reference
         for A/B (`as:` names the patch).  Then turn by ear, flip with b,
         note what you hear, and `take.save`.
+
+        Save your knobs with S in the inspector (or `save_fit :kick`): they
+        become the values of the fit's file (tmp/fits/kick_fit.mbg.rb),
+        and numbers you bound in the code (Enter on a param) become new
+        params.  The console says what it wrote where; the strip counts
+        turns not saved yet, and w or W with unsaved turns asks for the key
+        again.  Once saved, `tune` (and the tuner) starts from your values
+        instead of writing the fit's numbers over them; `tune ..., fresh:
+        true` starts from the fit's numbers again (your saved file stays in
+        tmp/fits/versions/).  E only reloads the file after you edit it.
+        Every save is kept: `save_fit :kick, note: 'darker'` adds why,
+        `fit_saves :kick` (Y) lists them newest first, and `restore_fit
+        :kick, 2` plays save 2 again, knobs and all, as one undo step.
 
         A fit (an agent matching a sound) prints its voice as console Ruby
         with the fitted numbers as literals.  `fit_patch :kick_fit, code,
@@ -1839,7 +1865,8 @@ module MB
         `turn :kick, tune: 47.9, decay: 0.41` line.  Nothing changes until
         you say: `refine.ab` (or b, once set up) cycles yours, the refined
         copy (loudness-matched), and the reference; `refine.apply` turns
-        your knobs to it as one undo step; `refine.off` drops the copy.
+        your knobs to it as one undo step; `refine.off` (C) clears the
+        proposal and drops the copy.
         `staged: true` refines one block of knobs at a time (the body, the
         click, the noise).  Takes keep what it found, not the search.
 
@@ -1851,7 +1878,7 @@ module MB
         `MB::Sound::Take.read('take.rb')` reads a saved take the same way
         (walked, never run).
       TEXT
-      commands :tuner, :tune, :fit_patch, :ab, :retune, :refine, :audition
+      commands :tuner, :tune, :save_fit, :fit_saves, :restore_fit, :fit_patch, :ab, :retune, :refine, :audition
       note :hand_tune, :sound_design_ui
       see :inspector, :knobs, :ui
     end

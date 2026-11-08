@@ -28,8 +28,15 @@ RSpec.describe(MB::Sound::UI::Facade, :aggregate_failures) do
     end
     expect($stdout.string).to include('ui.split: a screen\'s: none is on')
 
-    band = MB::Sound.ui
-    expect(band).to equal(facade)
+    # (a bare `ui` with nothing on: the band when printed or a screen
+    # command follows, not for ui.note; tuner-fixes-1)
+    pending = MB::Sound.ui
+    expect(pending).to be_a(ui::Pending)
+    expect(pending.mode).to eq(:off)
+    pending.notes
+    expect(facade.mode).to eq(:off)
+    expect(pending.inspect).to start_with('#<UI::Band')
+    expect(MB::Sound.ui).to equal(facade) # (a screen on: the facade)
     expect(facade.mode).to eq(:band)
     expect(facade.screen).to be_a(ui::Band)
     tiles_only = ui::Tiles.public_instance_methods(false) - ui::Band.public_instance_methods(false) - %i[keys start stop hide refresh pump]

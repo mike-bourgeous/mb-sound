@@ -75,6 +75,17 @@ module MB
           MB::Sound.module_eval('binding')
         end
 
+        # Runs the block with a throwaway take as .current (console lines
+        # evaluated in it go to no take: UI.warm_up_console's).  Returns
+        # the block's value.
+        def discarding
+          old = @current
+          @current = new
+          yield
+        ensure
+          @current = old
+        end
+
         # The id of the console line being evaluated on this thread, or nil.
         def current_line_id
           Session.context&.take_line&.last&.id
@@ -97,7 +108,8 @@ module MB
         # is kept as `retune :kick, document: "..."` (HandTune.retune).
         # Returns true if the line was changed (false outside a take's
         # line, or when no call matched).  With +receiver: true+, calls
-        # with a receiver are yielded too (`refine.apply`).
+        # with a receiver are yielded too (`refine.apply`).  +code+ may be a
+        # Proc given the matched CallNode, returning the code.
         def record_call_as(name, code, receiver: false)
           _take, line = Session.context&.take_line
           return false unless line
@@ -108,7 +120,8 @@ module MB
             n = stack.shift
             if n.is_a?(Prism::CallNode) && n.name == name && (receiver || n.receiver.nil?) && (!block_given? || yield(n))
               src = line.code.b
-              src[n.location.start_offset...n.location.end_offset] = code.b
+              text = code.respond_to?(:call) ? code.call(n) : code
+              src[n.location.start_offset...n.location.end_offset] = text.b
               line.code = src.force_encoding(line.code.encoding)
               return true
             end

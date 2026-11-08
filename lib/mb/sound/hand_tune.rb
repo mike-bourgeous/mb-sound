@@ -246,12 +246,15 @@ module MB
       # What `tune` opened: +track+, +fit+ (FitPatch::Patch), +opened+
       # (UI::Design::Opened, or nil without a screen), +pair+
       # (Reference::Pair, or nil without a reference).
-      Opened = Data.define(:track, :fit, :opened, :pair, :instrument) do
-        def initialize(track:, fit:, opened:, pair:, instrument: nil) = super
+      Opened = Data.define(:track, :fit, :opened, :pair, :instrument, :kept, :lost, :carried) do
+        def initialize(track:, fit:, opened:, pair:, instrument: nil, kept: nil, lost: nil, carried: 0) = super
 
         def to_s
           what = fit ? fit.to_s : "#{track} plays #{instrument&.name} (built by Ruby code, not a graph document: turn its knobs by ear; retune and refine need a fit patch)"
-          [what, opened&.to_s, pair&.to_s, "turn by ear, ab (or b) to compare, ui.note 'what you hear', take.save :tmp, 'tuned #{track}'"].compact.join("\n")
+          keep = kept && "your tuning saved #{kept} in #{File.basename(fit.path)} plays (not the code's numbers: tune ..., fresh: true starts from them again)"
+          lose = lost ? "#{track}'s turns that weren't saved are gone from the track (#{lost} puts them back)" :
+                        (carried.to_i > 0 ? "#{carried} turned knob#{carried == 1 ? '' : 's'} of #{track} carried, not saved in the file yet (S or save_fit #{track.inspect} saves)" : nil)
+          [keep, what, opened&.to_s, pair&.to_s, lose, "turn by ear, ab (or b) to compare, S (save_fit #{track.inspect}) saves your knobs into the fit, ui.note 'what you hear', take.save :tmp, 'tuned #{track}'"].compact.join("\n")
         end
 
         def inspect = "#<HandTune::Opened #{track.inspect}: #{fit ? fit.name : instrument&.name}#{pair ? ", reference #{pair.source}" : ''}>"
@@ -266,26 +269,66 @@ module MB
       # that isn't a document (kits, struck and genre patches: Ruby builds
       # them) plays as itself, its knobs to turn by ear (no retune or
       # refine).  Returns an Opened.
-      def tune(track, code, ref: nil, play: nil, as: nil, **params)
+      def tune(track, code, ref: nil, play: nil, as: nil, fresh: false, **params)
         raise ArgumentError, "tune names a track: tune :kick, code, ref: 'kick.wav', tune: (30.0..110.0).at(51.3), ..." unless track.is_a?(Symbol)
         code = Library::Audition.entry_for(code) if code.is_a?(Symbol)
+        session = Session.current
+        before = unsaved(session, track) # (turns not in the file: tune may carry or drop them)
+        prior = (tr = session.arrangement.tracks[track]) && Arrangement::InstrumentPatch.entry_of(tr.patch)
         instrument = nil
+        kept = nil
+        name = (as || :"#{track}_fit").to_sym
+        doc_source = FitPatch.document_source?(code)
+        if doc_source
+          raise ArgumentError, "tune #{track.inspect}: a document's params are its knobs already (got #{params.keys.join(', ')})" unless params.empty?
+          instrument = code if code.is_a?(Library::Entry) && !(code.settings.is_a?(Hash) && code.settings[:document])
+        end
+        replay = !!Session.context&.replaying?
+        tuned = !instrument && !fresh && saved_tuning(name)
+        FitPatch.version_path(File.read(FitPatch.path_of(name)), name) if fresh && saved_tuning(name) # (kept before it is written over)
         fit =
-          if FitPatch.document_source?(code)
-            raise ArgumentError, "tune #{track.inspect}: a document's params are its knobs already (got #{params.keys.join(', ')})" unless params.empty?
-            if code.is_a?(Library::Entry) && !(code.settings.is_a?(Hash) && code.settings[:document])
-              instrument = code
-              nil
-            else
-              FitPatch.adopt(as || :"#{track}_fit", code)
-            end
+          if instrument
+            nil
+          elsif tuned && !replay
+            # (tuner-fixes-1: his saved tuning, not the code's numbers
+            # written over it; the take keeps the version that played)
+            kept = tuned
+            f = FitPatch.reopen(name)
+            Take.record_call_as(:tune, ->(n) { kept_line(n, track, f, name) })
+            f
+          elsif doc_source
+            FitPatch.adopt(name, code, file: !tuned)
           else
-            FitPatch.save(as || :"#{track}_fit", code, params)
+            FitPatch.save(name, code, params, file: !tuned)
           end
-        opened = UI::Design.open(track, fit || instrument, *[play].compact)
+        open = -> { UI::Design.open(track, fit || instrument, *[play].compact) }
+        # (fresh: the fit's numbers, turned knobs too)
+        opened = fresh ? Arrangement::TrackKnobs.resetting(&open) : open.()
         pair = ref ? Reference.setup(Session.current, track, ref) : nil
         Wizard.current&.note_tuned(track) # (the tuner's step 3: its line ran)
-        Opened.new(track: track, fit: fit, opened: opened, pair: pair, instrument: instrument)
+        # (another instrument, or fresh, starts every knob at its param's
+        # value, at the track's launch point; the same fit carries them)
+        same = fit && prior && Arrangement::InstrumentPatch.same_instrument?(prior, fit.entry)
+        lost = unsaved_line(session, track, fresh || !same ? before : {})
+        carried = fit && !lost ? unsaved(session, track).length : 0
+        Opened.new(track: track, fit: fit, opened: opened, pair: pair, instrument: instrument, kept: kept, lost: lost, carried: carried)
+      end
+
+      # The time fit +name+'s file holds saved tunings from (its
+      # `tuned:`; HandTune.save_fit), or nil.
+      def saved_tuning(name)
+        path = FitPatch.path_of(name)
+        File.file?(path) ? FitPatch.tuned_at(File.read(path)) : nil
+      end
+
+      # The take's line for a tune that played the saved fit +f+ (named
+      # +name+) instead of its code (Prism CallNode +node+ of the line's
+      # `tune` call): `tune :kick, "<version>", ref: ..., play: ..., as:
+      # :kick_fit`, so the take replays what played.
+      def kept_line(node, track, f, name)
+        kw = node.arguments&.arguments&.find { |a| a.is_a?(Prism::KeywordHashNode) }
+        keep = (kw&.elements || []).select { |e| e.is_a?(Prism::AssocNode) && e.key.is_a?(Prism::SymbolNode) && %i[ref play].include?(e.key.unescaped.to_sym) }
+        ["tune #{track.inspect}", f.version.inspect, *keep.map(&:slice), "as: #{name.inspect}"].join(', ')
       end
 
       # The library Entry head path +text+ names ("L.inst.init",
@@ -319,8 +362,14 @@ module MB
       #     tune :kick, "kit(grid(16, kick: 'X...'), seed: 1) { voice(:kick) { |h| ... } }", ref: 'kick.wav',
       #       tune: (30.0..110.0).at(51.33), decay: (0.1..2.0).at(0.469)
       #     # turn by ear; ab to compare; ui.note 'the click is late'; take.save :tmp, 'tuned kick'
-      def tune(track, code, ref: nil, play: nil, as: nil, **params)
-        o = HandTune.tune(track, code, ref: ref, play: play, as: as, **params)
+      #
+      # A fit whose file holds tunings you saved (save_fit, S) plays those
+      # instead of the code's numbers; `fresh: true` writes the fit from the
+      # code again (the saved file stays in tmp/fits/versions/).  Turns of
+      # the track not saved are listed with the `turn` line that puts them
+      # back.
+      def tune(track, code, ref: nil, play: nil, as: nil, fresh: false, **params)
+        o = HandTune.tune(track, code, ref: ref, play: play, as: as, fresh: fresh, **params)
         HandTune::Worker.prepare if MB::Sound.live? # (refine's worker loads while he turns knobs)
         puts o.to_s # (a pasted one-liner may end with another line: say what it did either way)
         o
@@ -338,3 +387,4 @@ require_relative 'hand_tune/refine_job'
 require_relative 'hand_tune/worker'
 require_relative 'hand_tune/refine'
 require_relative 'hand_tune/wizard'
+require_relative 'hand_tune/save'

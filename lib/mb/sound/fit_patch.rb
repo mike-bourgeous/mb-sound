@@ -195,14 +195,15 @@ module MB
       # as .declare takes them) to +path+ (default: .dir/NAME.mbg.rb,
       # replacing an older fit of that name) and its version (.write),
       # checks that it loads and plays a block, and returns a Patch.
-      def save(name, code, params, path: nil, description: nil, match: nil)
+      # +file:+ false writes only the version (see .write).
+      def save(name, code, params, path: nil, description: nil, match: nil, file: true)
         name = name.to_sym
         raise Error, "fit_patch takes a name for the patch (a Symbol like :kick_fit), got #{name.inspect}" unless name.to_s.match?(/\A[a-z_][a-z0-9_]*\z/)
         params = declare(params)
         raise Error, "fit_patch #{name}: give the fitted numbers as knobs (tune: (30.0..110.0).at(51.3), ...)" if params.empty?
         text, sites, missing, skipped = document(code, params, name: name, description: description, match: match)
         check(name, text)
-        path, version, entry = write(name, text, path: path)
+        path, version, entry = write(name, text, path: path, file: file)
         Patch.new(name: name, path: path, version: version, entry: entry, params: params.reject { |k, _| missing.include?(k) }.freeze, sites: sites,
                   missing: missing, skipped: skipped, text: text.freeze)
       end
@@ -219,12 +220,12 @@ module MB
       # isn't a graph document played from a `midi` notes input with
       # params.  Returns a Patch (no sites: its params were params
       # already).
-      def adopt(name, source, path: nil)
+      def adopt(name, source, path: nil, file: true)
         name = name.to_sym
         raise Error, "fit_patch takes a name for the patch (a Symbol like :kick_fit), got #{name.inspect}" unless name.to_s.match?(/\A[a-z_][a-z0-9_]*\z/)
         text, params = adopted(name, source)
         check(name, text)
-        path, version, entry = write(name, text, path: path)
+        path, version, entry = write(name, text, path: path, file: file)
         Patch.new(name: name, path: path, version: version, entry: entry, params: params, sites: [].freeze, missing: [].freeze,
                   skipped: {}.freeze, text: text.freeze)
       end
@@ -284,7 +285,8 @@ module MB
         end
         unless left.empty?
           at = (hash || call.arguments.arguments.last).location.end_offset
-          edits << [at, at, left.map { |k, v| ", #{k}: #{RubyValue.to_ruby(v)}" }.join]
+          sep = call.location.start_line == call.location.end_line ? ', ' : ",\n  " # (a header of one key a line keeps that)
+          edits << [at, at, left.map { |k, v| "#{sep}#{k}: #{RubyValue.to_ruby(v)}" }.join]
         end
         out = text.b
         edits.sort_by { |s, _, _| -s }.each { |s, e, t| out[s...e] = t.b }
@@ -312,14 +314,184 @@ module MB
       # file was edited, plays the text that was loaded), with the path as
       # its lineage (InstrumentPatch.same_instrument?: a new version of the
       # same fit is the same instrument, so turned knobs carry).
-      def write(name, text, path: nil)
+      #
+      # +file:+ false writes only the version (a take's replay of a save:
+      # his file stays as it is).
+      def write(name, text, path: nil, file: true)
         path = path_of(name, path)
-        FileUtils.mkdir_p(File.dirname(path))
-        File.write(path, text)
+        if file
+          FileUtils.mkdir_p(File.dirname(path))
+          File.write(path, text)
+        end
         version = version_path(text, name)
         entry = Library.document_entry(version, Library.session_shelf)
         entry = entry.with(settings: entry.settings.merge(lineage: path))
         [path, version, entry]
+      end
+
+      # The time document +text+'s tunings were saved (its header's
+      # `tuned:`, written by HandTune.save_fit; tuner-fixes-1), or nil.
+      def tuned_at(text)
+        GraphIO.parse(text.to_s).meta[:tuned]
+      rescue StandardError
+        nil
+      end
+
+      # Fit +name+'s document at +path+ (default .path_of) as it is, as a
+      # Patch (its params the knobs; no sites), written to its version:
+      # what `tune` plays instead of writing the fit again when the file
+      # holds saved tunings (.tuned_at).
+      def reopen(name, path = nil)
+        path = path_of(name, path)
+        text = File.read(path)
+        params = GraphIO.parse(text).declarations.select { |_, p| p.is_a?(Param) }.freeze
+        _path, version, entry = write(name, text, path: path, file: false)
+        Patch.new(name: name.to_sym, path: path, version: version, entry: entry, params: params, sites: [].freeze, missing: [].freeze,
+                  skipped: {}.freeze, text: text.freeze)
+      end
+
+      # A fit name for a document file's base name: its words, anything
+      # but lowercase letters, digits, and _ as one _
+      # (`kick_fit.tuned-2026-11-07` is fit :kick_fit_tuned_2026_11_07).
+      def name_for(base)
+        n = base.to_s.downcase.gsub(/[^a-z0-9_]+/, '_').gsub(/\A_+|_+\z/, '')
+        n = "fit_#{n}" unless n.match?(/\A[a-z_]/)
+        n.to_sym
+      end
+
+      # Document +text+ (a fit) with its params' values set to +values+
+      # ({ param => number }, as the track's knobs hold them; params not
+      # given keep theirs) and numbers of its code made params
+      # (+promote+: { name => (lo..hi).at(literal) }, each the literal as
+      # written in the code, then set to +values+[name]): HandTune.save_fit's
+      # file.  A literal is found where a bound knob's call put it (a
+      # promote value { at: (lo..hi).at(literal), call: :env, nth: 2, slot:
+      # [:arg, 0] }: the patch's nth call of that name in the code's order,
+      # its argument), else once among the code's numbers by fit_patch's
+      # literal rules.  The header's saved: and tuned: become +at+ when
+      # anything changed.  Returns [text, changed ({ param => [from, to] }),
+      # promoted (names), refused ({ name => why it stays a number })].
+      def retext(text, values, promote: {}, at: Time.now)
+        doc = GraphIO.parse(text)
+        promote = promote.transform_keys(&:to_sym)
+        refused = {}
+        promoted = []
+        unless promote.empty?
+          old = doc.declarations.select { |_, p| p.is_a?(Param) }
+          body = body_of(text)
+          given = {}
+          located = {} # { name => [start, end] } in body
+          promote.each do |pname, spec|
+            where = spec.is_a?(Hash) ? spec : {}
+            ranged = spec.is_a?(Hash) ? spec[:at] : spec
+            if old.key?(pname)
+              refused[pname] = 'the document has a param of that name'
+              next
+            end
+            begin
+              # (a knob's range in seconds or Hz: fits print plain numbers)
+              if ranged.is_a?(Param::Ranged) && !ranged.default.is_a?(Float) && !ranged.default.is_a?(Integer)
+                m = ->(v) { Param.magnitude(v).to_f }
+                ranged = (m.(ranged.range.begin)..m.(ranged.range.end)).at(m.(ranged.default))
+              end
+              one = declare(pname => ranged)
+              node = where[:call] && literal_at(body, where[:call], where[:nth].to_i, where[:slot])
+              if node && matches?(node, one[pname].default)
+                located[pname] = [node.location.start_offset, node.location.end_offset]
+                given.merge!(one)
+                next
+              end
+              _t, sites, missing, skipped = document(body, old.merge(one), name: doc.name || :fit, match: [pname], saved: nil)
+              n = sites.count { |s| s.name == pname }
+              if missing.include?(pname)
+                refused[pname] = skipped[pname] || "#{RubyValue.to_ruby(ranged.default)} isn't written in the code (a setting left at its default)"
+              elsif n != 1
+                refused[pname] = "#{RubyValue.to_ruby(ranged.default)} is written #{n} times in the code"
+              else
+                given.merge!(one)
+              end
+            rescue Error => e
+              refused[pname] = e.message.sub(/\Afit_patch \S+: /, '')
+            end
+          end
+          unless given.empty?
+            b = body.b
+            located.sort_by { |_, (st, _)| -st }.each { |pname, (st, en)| b[st...en] = pname.to_s.b }
+            b = b.force_encoding(body.encoding)
+            t, = document(b, old.merge(given), name: doc.name || :fit, match: given.keys - located.keys, saved: nil)
+            text = splice_body(text, body_of(t), given.map { |_, p| p.document_line(p.default) })
+            doc = GraphIO.parse(text)
+            promoted = given.keys
+          end
+        end
+
+        decls = doc.declarations
+        changed = {}
+        edits = []
+        Prism.parse(text).value.statements.body.each do |st|
+          next unless st.is_a?(Prism::CallNode) && st.receiver.nil? && st.name == :param
+          first = st.arguments&.arguments&.first
+          next unless first.is_a?(Prism::SymbolNode)
+          pname = first.unescaped.to_sym
+          decl = decls[pname]
+          next unless decl.is_a?(Param) && values[pname].is_a?(Numeric)
+          from = decl.default
+          to = typed_value(from, values[pname])
+          was = Param.magnitude(from).to_f
+          same = (Param.magnitude(to).to_f - was).abs <= 1e-12 * [1.0, was.abs].max
+          next if same && !promoted.include?(pname)
+          changed[pname] = [from, to]
+          edits << [st.location.start_offset, st.location.end_offset, decl.document_line(to)]
+        end
+        out = text.b
+        edits.sort_by { |s, _, _| -s }.each { |s, e, t| out[s...e] = t.b }
+        text = out.force_encoding(Encoding::UTF_8)
+        unless changed.empty? && promoted.empty?
+          stamp = at.utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+          text = rewrite_meta(text, saved: stamp, tuned: stamp)
+        end
+        [text, changed.freeze, promoted.freeze, refused.freeze]
+      end
+
+      # The numeric literal of +body+'s +nth+ call named +call+ (in the
+      # code's order) at +slot+ ([:arg, i]: its ith positional argument;
+      # [:kw, name]: a keyword's value), or nil.
+      def literal_at(body, call, nth, slot)
+        return nil unless slot.is_a?(Array) && slot.length == 2
+        calls = []
+        walk = ->(n) {
+          calls << n if n.is_a?(Prism::CallNode) && n.name == call.to_sym
+          n.compact_child_nodes.each(&walk)
+        }
+        walk.(Prism.parse(body).value)
+        c = calls.sort_by { |n| n.location.start_offset }[nth] or return nil
+        args = c.arguments&.arguments || []
+        kind, key = slot
+        node =
+          case kind
+          when :arg then args.reject { |a| a.is_a?(Prism::KeywordHashNode) || a.is_a?(Prism::BlockArgumentNode) }[key]
+          when :kw
+            kh = args.find { |a| a.is_a?(Prism::KeywordHashNode) }
+            kh&.elements&.find { |e| e.is_a?(Prism::AssocNode) && e.key.is_a?(Prism::SymbolNode) && e.key.unescaped.to_sym == key.to_sym }&.value
+          end
+        node.is_a?(Prism::FloatNode) || node.is_a?(Prism::IntegerNode) ? node : nil
+      end
+
+      # +number+ (a knob's value) as the type of param value +sample+ (a
+      # Float for a Float, an Integer when whole for an Integer, Hz for a
+      # Pitch, seconds for a Length).
+      def typed_value(sample, number)
+        return number.to_f if sample.is_a?(Float)
+        Arrangement::LiteralBinding.retype(sample, number)
+      end
+
+      # Document +text+ with its body replaced by +body+ and param lines
+      # +lines+ added after its last header line.
+      def splice_body(text, body, lines)
+        sts = Prism.parse(text).value.statements.body
+        header = sts.take_while { |st| st.is_a?(Prism::CallNode) && st.receiver.nil? && HEADER_CALLS.include?(st.name) }
+        head = text.byteslice(0...header.last.location.end_offset).force_encoding(text.encoding)
+        "#{head}\n#{lines.join("\n")}\n\n#{body.strip}\n"
       end
 
       # The immutable copy of document +text+ of fit +name+:

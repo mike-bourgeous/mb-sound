@@ -94,7 +94,7 @@ module MB
             on :home, :pick, -100_000, help: 'first, last entry', label: 'Home End'
             on :end, :pick, 100_000, help: 'first, last entry', label: 'Home End'
             on :enter, :act, help: 'pick the reference; tune with the synth'
-            on 'a', :audition, help: 'listen (the synth on its note; again: stop)'
+            on 'a', :audition, help: 'listen (step 1: Up Down then play each; again: stop)'
             on 'b', :ab, help: 'A/B the synth with the reference'
             on '/', :find, help: 'find as you type (Esc: back)'
             on :backspace, :unfind, help: 'a letter less of the find'
@@ -186,7 +186,7 @@ module MB
             elsif w.state == :reference && w.scanning?
               c.text(0, y, c.fit("#{n} references so far: reading #{w.folder}…", c.w), :dim)
             elsif w.state == :reference
-              c.text(0, y, c.fit(state[:mode] ? "#{n} references: Enter pick  a listen  / find  d folder  r again  Esc NAV" : "#{n} references (in: NAV h, or Enter on this pane)", c.w), :dim)
+              c.text(0, y, c.fit(state[:mode] ? "#{n} references: Enter pick  a listen (then Up Down play each)  / find  d folder  r again  Esc NAV" : "#{n} references (in: NAV h, or Enter on this pane)", c.w), :dim)
             else
               note = Note.new(w.note.to_i).name rescue '?'
               c.text(0, y, c.fit(state[:mode] ? "#{n} synths on #{note}: Enter tune  a listen  b A/B  / find  e edit the line  Esc back" : "#{n} synths (in: NAV h)", c.w), :dim)
@@ -277,11 +277,20 @@ module MB
             end
           end
 
-          def key_pick(_state, d)
+          # Up/Down.  In step 1 after a (listening), the reference the cursor
+          # lands on plays (tuner-fixes-1, the maintainer: "the first step
+          # of the tuning wizard should play the reference so I know what I
+          # am picking"); a again stops listening.
+          def key_pick(state, d)
             w = wizard or return closed_note
             n = w.shown.length
-            w.cursor[w.state] = (w.cursor[w.state].to_i + d).clamp(0, [n - 1, 0].max)
-            nil
+            was = w.cursor[w.state].to_i
+            w.cursor[w.state] = (was + d).clamp(0, [n - 1, 0].max)
+            return nil unless state[:listening] && w.state == :reference && w.cursor[w.state] != was
+            x = w.under_cursor or return nil
+            line = w.audition_line(x) or return nil
+            state[:auditioned] = line
+            PaneKeys::Run[line, "listening to #{x.name} (a: stop listening)"]
           end
 
           def key_act(state)
@@ -317,10 +326,11 @@ module MB
             w = wizard or return closed_note
             x = w.under_cursor or return 'nothing picked'
             line = w.audition_line(x) or return "#{x.name}: nothing to listen to before it loads"
-            return audition_off(state) if state[:auditioned] == line && auditioning?(state)
+            return audition_off(state) if (state[:auditioned] == line && auditioning?(state)) || (state[:listening] && w.state == :reference)
             state[:auditioned] = line
             state[:ab] = nil
-            PaneKeys::Run[line, "listening to #{x.name}"]
+            state[:listening] = true if w.state == :reference
+            PaneKeys::Run[line, w.state == :reference ? "listening to #{x.name} (Up Down play the others; a: stop)" : "listening to #{x.name}"]
           end
 
           def key_ab(state)
@@ -422,6 +432,7 @@ module MB
 
           def audition_off(state)
             state[:auditioned] = nil
+            state[:listening] = false
             PaneKeys::Run['audition off', 'stopped']
           end
         end
@@ -432,7 +443,7 @@ module MB
         # drift).
         class TuneStrip < Pane
           # The inspector's actions the strip names, in order.
-          ACTIONS = %i[ab refine apply retune note tuner_back tuner_restart].freeze
+          ACTIONS = %i[ab refine apply refine_clear save_fit fit_saves retune generator note tuner_back tuner_restart].freeze
 
           def initialize = super(:tune_strip, rate: 4, height: 2, width: 80, title: 'tune', description: 'the tuner\'s step 3: the reference, what is heard, refine, and the hand-tune keys')
 
@@ -447,7 +458,7 @@ module MB
             }
           end
 
-          SHORT = { ab: 'A/B', refine: 'refine', apply: 'apply', retune: 'retune', note: 'note', tuner_back: 'synths', tuner_restart: 'references' }.freeze
+          SHORT = { ab: 'A/B', refine: 'refine', apply: 'apply', refine_clear: 'clear', generator: 'clip', save_fit: 'save', fit_saves: 'saves', retune: 'reload', note: 'note', tuner_back: 'synths', tuner_restart: 'references' }.freeze
 
           def draw_body(c, _s, _state)
             w = HandTune::Wizard.current
@@ -461,6 +472,8 @@ module MB
               x = c.line(0, ['  hearing ', :dim], [heard.to_s, :ok], x: x) if heard
               ref_state = refine_text(session, track)
               x = c.line(0, ['  ', :dim], [ref_state, :text], x: x) if ref_state
+              n = HandTune.unsaved_somewhere(track, w&.session).length
+              x = c.line(0, ['  ', :dim], ["#{n} unsaved (S saves)", :warn], x: x) if n > 0
             else
               x = c.text(x, 0, ' nothing tuned yet (tuner: pick a reference and a synth)', :dim)
             end
@@ -483,7 +496,7 @@ module MB
             when :failed then "refine failed: #{r.error.to_s[0, 40]}"
             else
               pr = r.proposal || {}
-              pr.empty? ? 'refine: nothing moved' : "refine proposes #{pr.length} knob#{'s' unless pr.length == 1} (R: A/B it, A: apply)"
+              pr.empty? ? 'refine: nothing moved (C clears)' : "refine proposes #{pr.length} knob#{'s' unless pr.length == 1} (R: A/B it, A: apply, C: clear)"
             end
           rescue StandardError
             nil

@@ -24,6 +24,10 @@
 #     bin/ui_demo.rb --tiles -l studio --size 60x200
 #     bin/ui_demo.rb --tiles --notes 4 -s 40  # a ui.note every 4 s: what each costs the audio (the first one finds
 #                                           # tmp/ui-notes as a session's first note does; notes go to a temp dir)
+#     bin/ui_demo.rb --tiles --type 5,13,5,135,13,5 -s 30
+#                                           # console lines typed into the REPL, one every --type-every seconds from 2 s:
+#                                           # each one's largest buffer gap and GVL waits around it (tuner-fixes-1: "Typing
+#                                           # numbers in Pry made the music lose its step on the first couple of entries")
 #     bin/ui_demo.rb --tiles -l keys        # with the virtual keyboard, in KEYS mode: play along on z..m and q..]
 #                                           # (Ctrl-] back; `arm :lead`-style tracks aren't in this song, so a default patch plays)
 #     bin/ui_demo.rb --design 'design :bass, L.inst.acid, seq(E1, E1, G1, A1).n8.loop.legato(0.5)' -s 20
@@ -77,6 +81,9 @@ module MB::Sound
       design: [nil, 'A design line (design :bass, L.inst.acid, riff) for the sound screen instead of the song (implies --tiles)', String],
       env: [true, 'With --design: pick the amp envelope row (its preview has the playhead)'],
       press: [0.0, 'With --design and no terminal: press Down then Right (a turn) every this many seconds (0: none)', Float],
+      type: [nil, 'With --tiles: console lines (comma-separated) typed into the REPL one by one, measuring the buffer gaps around each', String],
+      type_every: [2.0, 'Seconds between --type lines', Float],
+      warm_console: [true, "Warm up the console's line path first (UI.warm_up_console, as bin/sound.rb does)"],
     ) { |_args, p|
       tiles = p.tiles || !p.design.nil?
       ENV['AUDIO_PROFILE'] = p.latency.to_s if p.latency
@@ -87,6 +94,7 @@ module MB::Sound
 
       MB::Sound.warm_up
       UI.warm_up
+      UI.warm_up_console if p.warm_console
       MB::Sound.last_stop(perform: true, seed: 1) unless p.design
       session = Session.current
       MB::Sound.seek(p.seek) if p.seek
@@ -120,7 +128,8 @@ module MB::Sound
         # the line; the preview's playhead counted by the chart it draws
         band.start
         UI.instance_variable_set(:@tiles, band)
-        puts MB::Sound.module_eval(p.design) unless quiet
+        opened = MB::Sound.module_eval(p.design) # (run with -q too: it was inside `puts ... unless quiet`)
+        puts opened unless quiet
         Thread.pass until session.running?
         if p.env
           # (the amp envelope's row, once the track lands)
@@ -130,14 +139,15 @@ module MB::Sound
           amp = info&.nodes&.index { |n| n.what == 'amp env' }
           UI::Inspect.target = { track: track, node: amp }.freeze if amp
         end
-        playhead = { draws: 0, moves: 0, last: nil, gaps: [], at: nil }
+        playhead = { draws: 0, moves: 0, last: nil, gaps: [], at: nil, stages: Hash.new(0) }
         UI::Panes::Preview.prepend(Module.new do
           define_method(:chart_for) do |n, state|
             chart = super(n, state)
             live = n.live
-            pos = live && live[:stage] == :segment ? [live[:segment], live[:position], state[:chart_of]&.last&.[](:elapsed)] : nil
+            pos = live && %i[segment sustain].include?(live[:stage]) ? [live[:segment], live[:position], live[:note], state[:chart_of]&.last&.[](:elapsed)] : nil
             now = MB::U.clock_now
             playhead[:draws] += 1
+            playhead[:stages][live ? live[:stage] : :none] += 1
             if pos && pos != playhead[:last]
               playhead[:moves] += 1
               playhead[:gaps] << now - playhead[:at] if playhead[:at]
@@ -151,6 +161,7 @@ module MB::Sound
 
       waits = { on: [], off: [] }
       holds = []
+      repl_holds = []
       blockers = { on: Hash.new(0), off: Hash.new(0) }
       gcs = { on: [0, 0.0], off: [0, 0.0] }
       xruns = { on: 0, off: 0 }
@@ -159,8 +170,11 @@ module MB::Sound
       # --notes: each note's time, the render thread's buffer gaps around it,
       # and underruns just after it
       tap_times = []
-      session.add_tap { |_| tap_times << MB::U.clock_now } if p.notes > 0
+      session.add_tap { |_| tap_times << MB::U.clock_now } if p.notes > 0 || p.type
       note_log = []
+      typed = p.type ? p.type.split(',').map(&:strip).reject(&:empty?) : []
+      type_log = []
+      next_type = MB::U.clock_now + 2.0
       next_note = MB::U.clock_now + [p.notes, 2.0].max
 
       # Windows of band on/off (one window unless --compare)
@@ -176,6 +190,10 @@ module MB::Sound
         # (GVLProbe watches up to 6 threads: with --tiles, the REPL's pty reader replaces main)
         names = [:render, :painter, :scheduler, tiles ? :pty : :main]
         threads = [session.render_thread, band.thread || Thread.current, scheduler || Thread.current, (tiles && band.pty_thread) || Thread.current]
+        if tiles && band.host&.thread
+          names << :repl # (the REPL's Pry thread: what console lines cost)
+          threads << band.host.thread
+        end
         FastUI::GVLProbe.start(threads)
         x0 = underruns.call
         gc0 = [GC.count, GC.stat(:time)]
@@ -196,6 +214,17 @@ module MB::Sound
           if flood && !flood[:done] && band.host.synchronize { band.host.vt.text.include?('=> :flood_done') }
             flood[:done] = MB::U.clock_now
             flood[:bytes] = band.host.bytes_read - flood[:bytes]
+          end
+          if tiles && !typed.empty? && band.active? && MB::U.clock_now >= next_type
+            next_type += p.type_every
+            line = typed.shift
+            x_before = underruns.call
+            t0 = MB::U.clock_now
+            n0 = band.host.synchronize { band.host.vt.text.scan('=> ').length }
+            band.host.write("#{line}\r")
+            Thread.pass until band.host.synchronize { band.host.vt.text.scan('=> ').length } > n0 || MB::U.clock_now - t0 > 5
+            t1 = MB::U.clock_now
+            type_log << { line: line, at: t0 - start, ms: (t1 - t0) * 1000, span: [t0, t1], xruns: x_before && underruns.call - x_before, gc: GC.count }
           end
           if p.notes > 0 && MB::U.clock_now >= next_note
             next_note += p.notes
@@ -232,6 +261,7 @@ module MB::Sound
         FastUI::GVLProbe.stop
         waits[state].concat(FastUI::GVLProbe.waits(0))
         holds.concat(FastUI::GVLProbe.holds(1)) if on
+        repl_holds.concat(FastUI::GVLProbe.holds(names.index(:repl))) if names.include?(:repl)
         FastUI::GVLProbe.blockers(0).each do |_wait, slot|
           who = slot < 0 ? :'other (GC, unwatched)' : names[slot]
           who = :main if slot >= 0 && threads[slot].equal?(Thread.current) # (placeholders)
@@ -256,6 +286,7 @@ module MB::Sound
       puts ui_demo_line('  band on', waits[:on]) if waits[:on].any? || p.ui
       puts ui_demo_line('  band off', waits[:off]) if waits[:off].any? || !p.ui
       puts ui_demo_line('Painter GVL holds', holds) if holds.any?
+      puts ui_demo_line('REPL thread GVL holds', repl_holds) if repl_holds.any?
       s = band_stats
       puts "Painter per refresh: #{s[:frames]} refreshes, CPU p50 #{s[:cpu_ms][:p50]} p99 #{s[:cpu_ms][:p99]} max #{s[:cpu_ms][:max]} ms (refreshes that drew: p50 #{s[:busy_cpu_ms][:p50]} p99 #{s[:busy_cpu_ms][:p99]}), #{MB::M.sigfigs(s[:panes], 3)} panes per refresh, #{s[:bytes][:mean]} bytes per written frame (max #{s[:bytes][:max]})" if s[:frames] > 0
       s[:slowest].each { |e| puts "  slow refresh at #{e[:at]}: #{e[:cpu_ms]} ms CPU #{e[:parts].map { |k, v| "#{k} #{v}" }.join(', ')}" } if s[:frames] > 0
@@ -270,7 +301,7 @@ module MB::Sound
         g = playhead[:gaps].sort
         q = ->(f) { g.empty? ? 0 : (g[((g.length - 1) * f).round] * 1000).round(1) }
         puts "Envelope preview: #{playhead[:draws]} charts, the playhead moved #{playhead[:moves]} times (#{(playhead[:moves] / p.seconds).round(1)}/s); " \
-             "gaps between moves p50 #{q.(0.5)} p99 #{q.(0.99)} max #{q.(1.0)} ms"
+             "gaps between moves p50 #{q.(0.5)} p99 #{q.(0.99)} max #{q.(1.0)} ms; charts by the note's stage: #{playhead[:stages].map { |k, v| "#{k} #{v}" }.join(', ')}"
       end
       %i[on off].each do |k|
         next if loads[k].empty?
@@ -298,6 +329,16 @@ module MB::Sound
           near = gaps.select { |_g, at| at >= n[:span][0] - 0.1 && at <= n[:span][1] + 0.1 }.map(&:first).max.to_f * 1000
           puts format('  note %d at %5.1f s: %6.2f ms on the REPL thread%s, largest buffer gap around it %5.1f ms, underruns %s',
                       i + 1, n[:at], n[:ms], i == 0 ? ' (with the first lookup)' : '', near, n[:xruns].nil? ? 'n/a' : n[:xruns])
+        end
+      end
+      unless type_log.empty?
+        gaps = tap_times.each_cons(2).map { |a, b| [b - a, a] }
+        p99 = gaps.map(&:first).sort[((gaps.length - 1) * 0.99).round].to_f * 1000
+        puts "Typed lines (#{type_log.length}): the render thread's buffer gaps are #{p99.round(1)} ms p99 overall"
+        type_log.each do |n|
+          near = gaps.select { |_g, at| at >= n[:span][0] - 0.1 && at <= n[:span][1] + 0.3 }.map(&:first).max.to_f * 1000
+          puts format('  %-8s at %5.1f s: result after %6.1f ms, largest buffer gap around it %5.1f ms, underruns %s',
+                      n[:line][0, 8], n[:at], n[:ms], near, n[:xruns].nil? ? 'n/a' : n[:xruns])
         end
       end
       if flood

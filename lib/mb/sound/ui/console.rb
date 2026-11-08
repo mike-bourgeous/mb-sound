@@ -22,8 +22,18 @@ module MB
         # Returns the `ui` facade (UI::Facade): the same commands whatever
         # is on screen (`ui.keys` from the band opens the tiles; `ui.screen`
         # is the Band or Tiles itself).
+        #
+        # With nothing on screen, a bare `ui` shows the band when the
+        # console prints it (`ui` alone at the prompt) or a screen command
+        # follows (`ui.split`), but not for commands that need no screen
+        # (`ui.note 'text'`, `ui.notes`, `ui.bind`; tuner-fixes-1: the
+        # maintainer's "Running ui.note without a UI up caused a UI to
+        # appear"): UI::Pending.
         def ui(layout = nil, at: nil, color: nil, look: nil, mouse: nil, nav_esc: nil)
           return UI.off if layout == :off || layout == false
+          if layout.nil? && at.nil? && color.nil? && look.nil? && mouse.nil? && nav_esc.nil? && UI.screen.nil?
+            return UI::Pending.new
+          end
           UI.show(layout, at: at, color: color, look: look, mouse: mouse, nav_esc: nav_esc) && UI.facade
         end
 

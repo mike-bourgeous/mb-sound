@@ -144,6 +144,19 @@ RSpec.describe(MB::Sound::RefineMethods, :aggregate_failures) do
     expect((data[0...live.length] - live).abs.max).to eq(0)
   end
 
+  # (tuner-fixes-1, the maintainer: "How do I clear refine's proposal?")
+  it 'clears the proposal and its A/B copy with refine.off' do
+    lines = setup.merge(10 => ['refine :lead, evals: 20, mode: :here'], 20 => ['refine.ab'], 30 => ['refine.off'])
+    expect { perform(lines, buffers: 40) }.to output(/refine :lead: loss/).to_stdout
+    expect(MB::Sound::HandTune.refinements[session]).to be_nil
+    pair = MB::Sound::Reference.pair(session, :lead)
+    expect(pair.alt).to be_nil
+    expect(pair.hearing).to eq(:patch)
+    MB::Sound::Session.with_context(session: session) do
+      expect { MB::Sound.refine }.to raise_error(ArgumentError, /nothing refined yet/)
+    end
+  end
+
   it 'turns a track\'s knobs together as one change, build knobs with one rebuild' do
     expect { perform(setup, buffers: 6) }.to output.to_stdout
     MB::Sound::Session.with_context(session: session) do

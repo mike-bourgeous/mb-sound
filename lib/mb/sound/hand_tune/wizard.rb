@@ -361,6 +361,7 @@ module MB
           @cursor = { reference: 0, synth: 0 }
           @query = { reference: '', synth: '' }
           @tuned = nil
+          @last_tuned = nil
         end
 
         # The cursor of each list ({ reference:, synth: }: indexes into
@@ -372,7 +373,7 @@ module MB
         attr_reader :tuned
 
         # Called by HandTune.tune when a tune line set up +track+.
-        def note_tuned(track) = @tuned = track
+        def note_tuned(track) = @tuned = @last_tuned = track
 
         # The list of the step (+state+: :reference or :synth) narrowed by
         # its find words (every word in the entry's name or about).
@@ -469,7 +470,7 @@ module MB
             raise ArgumentError, 'tuner: pick a synth (a Wizard::Synth)' unless arg.is_a?(Synth)
             raise ArgumentError, "tuner: #{arg.name} can't load: #{arg.problem}" if arg.problem
             @synth = arg
-            @line = tune_line(arg)
+            @line = stop_previous + tune_line(arg)
             @tuned = nil
           in [_, :restart]
             refresh
@@ -569,6 +570,18 @@ module MB
           end
         end
 
+        # A `stop` line for the track the tuner tuned last and its A/B and
+        # refined copies when the next tune is for another track
+        # (tuner-fixes-1, the maintainer: "it's annoying that the previous
+        # patch is still running when I try to load a new one with W"), or
+        # ''.
+        def stop_previous
+          prev = @last_tuned
+          return '' if prev.nil? || prev == @track
+          names = [prev, :"#{prev}_ref", :"#{prev}_refined"].select { |n| @session.arrangement.tracks.key?(n) }
+          names.empty? ? '' : "stop #{names.map(&:inspect).join(', ')}\n"
+        end
+
         # The `tune` line for +synth+ and the picked reference (what the
         # screen runs, and the take keeps).
         def tune_line(synth)
@@ -581,7 +594,10 @@ module MB
             text = File.read(synth.path)
             name = synth.name.to_sym
             version = FitPatch.version_path(text, name)
-            "tune #{t}, #{version.inspect}#{tail}, as: #{name.inspect}"
+            # (an older version picked from the list replaces a saved
+            # tuning of the fit on purpose: fresh)
+            fresh = File.dirname(synth.path) == File.join(FitPatch.dir, 'versions') && HandTune.saved_tuning(name) ? ', fresh: true' : ''
+            "tune #{t}, #{version.inspect}#{tail}, as: #{name.inspect}#{fresh}"
           when :init, :library
             path = synth.entry.head_path
             synth.ears ? "tune #{t}, #{path}#{tail}" : "tune #{t}, #{path}#{tail}, as: :#{@track}_#{synth.entry.name}"
@@ -752,7 +768,8 @@ module MB
         def synths_for(ref)
           out = []
           if (q = ref.item)
-            out << Synth.new(kind: :queue, name: :"#{q.track}_fit", about: "the queue's fit: #{q.title}",
+            saved = HandTune.saved_tuning(:"#{q.track}_fit")
+            out << Synth.new(kind: :queue, name: :"#{q.track}_fit", about: "the queue's fit: #{q.title}#{saved ? " (your tuning saved #{saved} plays)" : ''}",
                              problem: q.status == :fails ? q.problem : nil)
           end
           mine, others = fit_documents.partition { |name, _| name.to_s.start_with?("#{@track}_") || name == @track }
@@ -772,13 +789,13 @@ module MB
           return [] unless File.directory?(dir)
           docs = Dir.glob(File.join(dir, "*#{GraphIO::EXTENSION}")).sort_by { |p| -File.mtime(p).to_f }
           out = docs.map { |p|
-            name = File.basename(p, GraphIO::EXTENSION).to_sym
+            name = FitPatch.name_for(File.basename(p, GraphIO::EXTENSION))
             [name, p, "fit document #{File.basename(p)} (#{File.mtime(p).strftime('%m-%d %H:%M')})"]
           }
           versions = Dir.glob(File.join(dir, 'versions', "#{@track}_*#{GraphIO::EXTENSION}")).sort_by { |p| -File.mtime(p).to_f }.first(5)
           versions.each do |p|
             base = File.basename(p, GraphIO::EXTENSION)
-            name = base.sub(/-[0-9a-f]{12}\z/, '').to_sym
+            name = FitPatch.name_for(base.sub(/-[0-9a-f]{12}\z/, ''))
             next if out.any? { |_, q, _| q && File.file?(q) && File.read(q) == File.read(p) }
             out << [name, p, "a version of #{name} (#{base[/[0-9a-f]{12}\z/]}, #{File.mtime(p).strftime('%m-%d %H:%M')})"]
           end

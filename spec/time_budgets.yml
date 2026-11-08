@@ -40,9 +40,9 @@ files:
     example: 70
     reason: the slow tier's GC-off soak plays tunnel_vision live for 75 s of audio at 1.5x real time (paced by the clock, about 50 s on any machine) after its warm-up (59 s in the Mac container, 2026-10-28; dropouts-2)
   spec/bin/ui_demo_spec.rb:
-    file: 20
+    file: 32
     example: 10
-    reason: one real process playing bin/ui_demo.rb's song for 2.5 s after its form warm-up (about 7-10 s in the Mac container since alloc-2's per-track warm-up exercise, 2026-10-25), with the band drawn and measured; 18.99 s at PARALLEL=8 under load against the default 8 x2.33 = 18.6
+    reason: two real processes (tuner-fixes-1 added the sound screen with --design -q and --type, 9.6 s alone in the Mac container, 2026-11-08); one playing bin/ui_demo.rb's song for 2.5 s after its form warm-up (about 7-10 s in the Mac container since alloc-2's per-track warm-up exercise, 2026-10-25), with the band drawn and measured; 18.99 s at PARALLEL=8 under load against the default 8 x2.33 = 18.6
   spec/lib/mb/sound/session_fuzz_spec.rb:
     file: 40
     example: 18

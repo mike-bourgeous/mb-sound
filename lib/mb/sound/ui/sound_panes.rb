@@ -67,9 +67,13 @@ module MB
             on ['p'], :plumbing, help: 'every node as chips, the hidden plumbing too (again: back)', label: 'p'
             on ['b'], :ab, help: 'A/B: the reference or the patch (ab)'
             # (hand-tune-3: the tuner's step 3 keys, named by the tune strip)
-            on ['R'], :refine, help: 'refine against the reference (again: stop; then A/B it)'
-            on ['A'], :apply, help: "apply refine's proposal (one undo step)"
-            on ['E'], :retune, help: "retune from the fit's edited file"
+            on ['R'], :refine, help: 'refine against the reference (again: stop; then A/B it)', label: 'R A C'
+            on ['A'], :apply, help: "apply refine's proposal (one undo step)", label: 'R A C'
+            on ['C'], :refine_clear, help: "clear refine's proposal (refine.off)", label: 'R A C'
+            on ['S'], :save_fit, help: "save the knobs into the fit's file (save_fit)", label: 'S Y'
+            on ['Y'], :fit_saves, help: "the fit's saves (fit_saves; restore_fit)", label: 'S Y'
+            on ['E'], :retune, help: "reload the fit's edited file (retune; not a save)", label: 'E G'
+            on ['G'], :generator, help: 'another clip or generator: bg :kick, ... (its reference follows)', label: 'E G'
             on ['#'], :note, help: 'a note about what you hear (ui.note)'
             on ['w'], :tuner_back, help: 'the tuner: back to the synths, the references', label: 'w W'
             on ['W'], :tuner_restart, help: 'the tuner: back to the synths, the references', label: 'w W'
@@ -408,6 +412,9 @@ module MB
             bits << 'stereo' if n.channels > 1
             sum = shown_params(n).filter_map { |name, v|
               kn = n.knob_of(name)
+              # (a knob setting it through arithmetic: named, not its number
+              # in this param's unit; tuner-fixes-1)
+              next "#{SHORTS[name] || name} ← #{Session::Name[kn].leaf}" if kn && v.label != kn && n.param_knobs.key?(name)
               v = v.with(unit: Panes.unit_of(knobs[kn].spec, name)) if v.unit.nil? && kn && knobs[kn]&.spec
               t = value_text(v, param_value(n, name, v, knobs))
               t && "#{SHORTS[name] || name} #{t}"
@@ -446,13 +453,19 @@ module MB
             masked = n.masked[name]
             if k&.spec
               value, turning = shown_value(state, kn, k)
-              vtext = value_text(v.unit ? v : v.with(unit: Panes.unit_of(k.spec, name)), value) || Panes.fmt(value)
+              # (a knob that sets the param through arithmetic, a click's
+              # tone into its lowpass's cutoff: its own value and unit, not
+              # the param's; tuner-fixes-1, the maintainer's "What is this
+              # 0.4Hz filter doing?")
+              direct = v.label == kn || !n.param_knobs.key?(name)
+              vtext = (direct ? value_text(v.unit ? v : v.with(unit: Panes.unit_of(k.spec, name)), value) : value_text(v.with(unit: k.spec.unit), value)) ||
+                      Panes.fmt(value)
               more = mods.empty? ? '' : "← #{mods.join(', ')}"
               mw = (c.w - x - vtext.length - more.length - kn.to_s.length - 6).clamp(3, 16)
               x = c.meter(k.spec.position(value.to_f).to_f, width: mw, x: x + 1, y: y, role: :key)
               x = c.text(x + 1, y, vtext, turning ? :queued : (masked ? :dim : :text))
               x = c.text(x + 1, y, more, :dim) unless more.empty?
-              c.text(x, y, c.fit(masked ? "  #{sel ? masked : 'not heard here'}" : "  #{kn}", [c.w - x, 0].max), :dim)
+              c.text(x, y, c.fit(masked ? "  #{sel ? masked : 'not heard here'}" : "  #{direct ? '' : 'via '}#{kn}", [c.w - x, 0].max), :dim)
             elsif !v.value.nil?
               x = c.text(x + 1, y, value_text(v) || v.value.to_s, masked ? :dim : :text)
               hint = sel && (b = n.binds[name]) ? (b.line ? "  Enter: knob #{b.knob.inspect}" : "  #{b.reason}") : (v.detail == Inspect::LITERAL ? '  ·' : '')
@@ -461,7 +474,13 @@ module MB
               hint = sel ? "  #{masked}" : '  · not heard here' if masked
               c.text(x, y, c.fit(hint, [c.w - x, 0].max), :dim)
             else
-              c.text(x + 1, y, c.fit(mods.empty? ? "#{c.glyph(:arrow)} #{v.label || v.detail}" : "← #{mods.join(', ')}", [c.w - x - 1, 0].max), :dim)
+              # (the knobs that set a modulated param's base: the maintainer's
+              # "It says cutoff comes from mod env but mod env does not have a
+              # cutoff control; it should say where to adjust the base
+              # frequency"; tuner-fixes-1)
+              feeds = n.param_feeds[name]
+              base = feeds ? "; set by #{feeds.map { |f| Session::Name[f].leaf }.join(', ')}" : ''
+              c.text(x + 1, y, c.fit(mods.empty? ? "#{c.glyph(:arrow)} #{v.label || v.detail}#{base}" : "← #{mods.join(', ')}#{base}", [c.w - x - 1, 0].max), :dim)
             end
             y + 1
           end
@@ -749,15 +768,52 @@ module MB
             [*flush(state), PaneKeys::Run[code, note]]
           end
 
+          # C: refine's proposal and A/B copy gone (refine.off).
+          def key_refine_clear(state)
+            track = state[:snap]&.inspector&.track or return 'nothing to inspect'
+            s = Session.existing
+            r = s && HandTune.refinements[s]
+            return "refine #{track}: no proposal to clear" unless r && r.track == track
+            [*flush(state), PaneKeys::Run['refine.off', "refine #{track}: proposal cleared (R searches again)"]]
+          end
+
+          # G: `bg :kick, L.gen.` on the console line, to finish with a
+          # generator or a clip (Tab completes): the track plays it, and its
+          # A/B reference follows (Reference.follow).
+          def key_generator(state)
+            track = state[:snap]&.inspector&.track or return 'nothing to inspect'
+            PaneKeys::Paste["bg #{track.inspect}, L.gen.", "a generator (Tab completes) or a clip for #{track}; Enter plays it (the reference follows)"]
+          end
+
           def key_apply(state)
             return 'nothing to inspect' unless state[:snap]&.inspector&.track
             [*flush(state), PaneKeys::Run['refine.apply', 'refine: the proposal applied (undo takes it back)']]
           end
 
+          # S: the inspected track's knobs written into its fit's file
+          # (save_fit; tuner-fixes-1: E, reload, looked like save, and his
+          # tunings stayed only in the take).
+          def key_save_fit(state)
+            track = state[:snap]&.inspector&.track or return 'nothing to inspect'
+            [*flush(state), PaneKeys::Run["save_fit #{track.inspect}", "save_fit #{track}: its knobs into its fit's file (the console says where)"]]
+          end
+
+          # Y: the fit's save history on the console (fit_saves).
+          def key_fit_saves(state)
+            track = state[:snap]&.inspector&.track or return 'nothing to inspect'
+            [*flush(state), PaneKeys::Run["fit_saves #{track.inspect}", "fit_saves #{track}: its saves on the console (restore_fit #{track.inspect}, n)"]]
+          end
+
           def key_retune(state)
             track = state[:snap]&.inspector&.track or return 'nothing to inspect'
-            [*flush(state), PaneKeys::Run["retune #{track.inspect}", "retune #{track}: from its fit's file"]]
+            n = unsaved_count(track)
+            more = n > 0 ? "; #{n} turn#{'s' unless n == 1} not saved (they carry; S saves)" : ''
+            [*flush(state), PaneKeys::Run["retune #{track.inspect}", "retune #{track}: reloaded from its fit's file#{more}"]]
           end
+
+          # How many of +track+'s knobs its fit's file doesn't hold
+          # (HandTune.unsaved).
+          def unsaved_count(track) = HandTune.unsaved_somewhere(track).length
 
           # #: a note, typed on a prompt line (key_noted runs ui.note).
           def key_note(_state) = PaneKeys::Ask['ui note: ', '', :noted]
@@ -777,9 +833,20 @@ module MB
 
           # The tuner a step back (+event+ :back or :restart), its screen
           # shown.
+          #
+          # With turns its fit's file doesn't hold, the first press says so
+          # and a second leaves (no prompts: the key again is the answer).
           def tuner_step(state, event)
             w = HandTune::Wizard.current or return 'no tuner open (tuner, or NAV h)'
             return 'the tuner is at its lists already (NAV h)' unless w.state == :tuning || event == :restart
+            track = w.tuned
+            n = track ? HandTune.unsaved_somewhere(track, w.session).length : 0
+            key = event == :back ? 'w' : 'W'
+            if n > 0 && state[:leaving] != [event, track]
+              state[:leaving] = [event, track]
+              return "#{track}: #{n} turn#{'s' unless n == 1} not saved in its fit's file: S saves; #{key} again leaves without saving"
+            end
+            state[:leaving] = nil
             out = flush(state)
             w.public_send(event)
             TunerScreen.show(w)
@@ -1001,8 +1068,9 @@ module MB
 
           # The playhead's time step: elapsed time is rounded to it, finer
           # than a frame at 120 fps, so the playhead moves every frame
-          # while a segment runs (and a held sustain, without elapsed
-          # time, never rebuilds the chart).
+          # while a segment runs or the sustain is held (tuner-fixes-1; it
+          # stood at the sustain point while the key was down, over the
+          # sustain's breakpoint rule).
           PLAYHEAD_STEP = 1 / 240.0
 
           def initialize
@@ -1112,9 +1180,10 @@ module MB
           end
 
           # +live+ (NodeInfo#live) with +:elapsed+, the seconds since it was
-          # read while its segment runs (in PLAYHEAD_STEPs).
+          # read while its segment runs or its sustain is held (in
+          # PLAYHEAD_STEPs).
           def live_now(live)
-            return live unless live && live[:at] && live[:stage] == :segment
+            return live unless live && live[:at] && (live[:stage] == :segment || (live[:stage] == :sustain && live[:note]))
             live.merge(elapsed: ((Preview.now - live[:at]) / PLAYHEAD_STEP).floor * PLAYHEAD_STEP)
           end
         end
@@ -1152,7 +1221,11 @@ module MB
             on '<', :cursor_freq, -1, help: 'the frequency marker lower (the spectrum)', label: '< >'
             on '>', :cursor_freq, 1, help: 'the frequency marker higher', label: '< >'
             on 'x', :cursor_clear, help: 'no markers'
+            on 'f', :reference, help: "the A/B reference's envelope over the patch's (ab), on or off"
           end
+
+          # The color of the A/B reference's envelope over the patch's.
+          REFERENCE = '#61afef'
 
           # Steps of the markers: the envelope view's length over
           # CURSOR_STEPS, a sixth of an octave.
@@ -1215,10 +1288,52 @@ module MB
               return
             end
             prev = state[:overlay] == false ? nil : driver.previous
+            state[:ref_env] = state[:reference] == false ? nil : Render.reference_envelope(r)
             areas(c.sub(0, 1, c.w, c.h - 1), state[:view] || :all).each do |view, body|
               chart = chart_for(r, prev, view, state)
               plot(body, chart, state, view, look) if chart
             end
+          end
+
+          # [key, hi, lo] of the A/B reference of Result +r+'s track (ab):
+          # its first channel's highest and lowest sample in as many columns
+          # as +r+'s envelope over the same length, scaled by the
+          # reference's matched level (as ab plays it), or nil without a
+          # reference.  Cached per reference, render length, and level.
+          def self.reference_envelope(r)
+            return nil unless r&.hi && r.track
+            session = UI.tiles&.session || Session.existing or return nil
+            pair = Reference.pairs(session)[r.track] or return nil
+            smp = pair.sample
+            cols = r.hi.length
+            key = [smp.__id__, r.frames, r.rate, cols, pair.level_db]
+            @ref_envelopes ||= {}
+            hit = @ref_envelopes[key]
+            return hit if hit
+            data = smp.to_a.first
+            sr = smp.sample_rate.to_f
+            n = [(r.frames.to_f / r.rate * sr).round, 1].max
+            gain = 10**(pair.level_db.to_f / 20)
+            hi = Numo::SFloat.zeros(cols)
+            lo = Numo::SFloat.zeros(cols)
+            cols.times do |i|
+              a = (i * n / cols)
+              b = [((i + 1) * n / cols), a + 1].max
+              next if a >= data.length
+              seg = data[a...[b, data.length].min]
+              hi[i] = seg.max * gain
+              lo[i] = seg.min * gain
+            end
+            @ref_envelopes.shift while @ref_envelopes.length > 8
+            @ref_envelopes[key] = [key, hi.freeze, lo.freeze].freeze
+          rescue StandardError
+            nil
+          end
+
+          # f: the A/B reference's envelope on or off.
+          def key_reference(state)
+            state[:reference] = state[:reference] == false
+            state[:reference] ? "the reference's envelope over the patch's (blue)" : "no reference envelope"
           end
 
           # [[view, canvas], ...]: the plots that fit +body+ for +view+ (:all:
@@ -1346,7 +1461,8 @@ module MB
           # change.
           def chart_for(r, prev, view, state)
             charts = (state[:charts] ||= {})
-            key = [r.seq, prev&.seq, view == :spectrum ? state[:cursor_freq] : (view == :envelope ? state[:cursor_time] : nil)]
+            ref = view == :envelope || view == :all ? state[:ref_env] : nil
+            key = [r.seq, prev&.seq, view == :spectrum ? state[:cursor_freq] : (view == :envelope ? state[:cursor_time] : nil), ref&.first]
             hit = charts[view]
             return hit[1] if hit && hit[0] == key
             b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
@@ -1372,7 +1488,7 @@ module MB
               r.cycle.each_with_index { |d, i| b.line(d, x: ms.(r), color: i) }
             else
               b.x :time, sample_rate: r.rate
-              peak = [r.hi.max, -r.lo.min, prev ? [prev.hi.max, -prev.lo.min].max : 0].max.to_f
+              peak = [r.hi.max, -r.lo.min, prev ? [prev.hi.max, -prev.lo.min].max : 0, ref ? [ref[1].max, -ref[2].min].max : 0].max.to_f
               peak = 1.0 if peak <= 0
               b.y Plot::Scale::Symmetric.new(-peak..peak, label: nil)
               # (two areas from 0 draw the min/max envelope: in C, where a
@@ -1383,6 +1499,14 @@ module MB
               end
               b.area(r.hi, x: 0..r.frames, base: 0.0, color: 0)
               b.area(r.lo, x: 0..r.frames, base: 0.0, color: 0)
+              if ref
+                # (the reference's envelope, loudness-matched as ab plays it,
+                # over the patch's: tuner-fixes-1, the maintainer's "I need
+                # to see overlaid waveforms of the reference and the synth")
+                _, rhi, rlo = ref
+                b.line(rhi, x: 0..r.frames, color: REFERENCE)
+                b.line(rlo, x: 0..r.frames, color: REFERENCE)
+              end
               b.rule(x: state[:cursor_time] * r.rate, color: MARKER) if state[:cursor_time]
             end
             chart = b.build
@@ -1511,7 +1635,7 @@ module MB
 
           # Keys the design plans but this build doesn't have yet.
           PLANNED = [
-            ['S', 'save (name, tags, params)'], ['*', 'favourite'],
+            ['*', 'favourite'],
           ].freeze
 
           # The library picker's keys in one line (NAV l goes in; its own

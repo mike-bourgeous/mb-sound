@@ -55,7 +55,8 @@ module MB
             # +chart+, with +live+ (nil, or a Hash: +:stage+ (:segment or
             # :sustain), +:segment+, +:position+ (seconds into the segment),
             # +:elapsed+ (seconds since it was read, added while the
-            # segment runs), +:peak+ (the note's peak level)) for a
+            # segment runs or the sustain is held), +:note+ (seconds since
+            # the note started), +:peak+ (the note's peak level)) for a
             # playhead and the velocity trace.  Returns the chart.
             def draw(d, chart, live = nil)
               tr = trace(d)
@@ -118,11 +119,20 @@ module MB
             # The playhead's time on the plot for +live+ (see .draw), or nil
             # when the note isn't sounding: the segment's start plus where
             # it is (and +:elapsed+), up to the sustain point before the
-            # release and the release's end after it.
+            # release and the release's end after it.  While the sustain is
+            # held, with +:note+ (seconds since the note started), it moves
+            # through the drawn hold from the sustain point to the
+            # release's start and waits there (tuner-fixes-1: the
+            # maintainer's "I am still not seeing the envelope playback head
+            # consistently"; it stood on the sustain point's breakpoint rule
+            # for most of each held note, 401 of 432 frames of an acid line
+            # in bin/ui_demo.rb --design).
             def playhead(tr, live)
               case live[:stage]
               when :sustain
-                tr.sustain_at
+                note = live[:note]
+                return tr.sustain_at unless note
+                (note.to_f + live[:elapsed].to_f).clamp(tr.sustain_at, [tr.release_start, tr.sustain_at].max)
               when :segment
                 k = live[:segment].to_i
                 return nil unless k.between?(0, tr.starts.length - 1)

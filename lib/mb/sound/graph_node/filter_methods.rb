@@ -363,7 +363,7 @@ module MB
 
         # A formant filter (GraphNode::Formant): a bright source "says" a vowel.
         # Five parallel resonant bandpasses sit at a sung vowel's formants.
-        # +vowels+ are :a, :e, :i, :o, :u (Csound's formant tables for +voice+
+        # +vowels+ are :a, :e, :i, :o, :u (sung formant tables for +voice+
         # :soprano, :alto, :countertenor, :tenor (default), or :bass) or custom
         # Arrays of five [Hz, dB, bandwidth] triples; with several, +morph+
         # (0..1, a number or node) glides across the list.  +shift+ moves every
@@ -592,13 +592,12 @@ module MB
         # The change of velocity per substep is clamped to +-+rate+ (full
         # scale is 1; a number or a node), +substeps+ per sample: slow and
         # quiet signals pass exactly, fast loud ones overshoot into
-        # fixed-size limit cycles ("squelchy chirps"; the DirectX
-        # Distortion's slew, whose percentage s is `inertia(s * 0.0005,
-        # mode: :hardware)` at 48 kHz).  Not a slope limit (#clip_rate).
+        # fixed-size limit cycles ("squelchy chirps").  Not a slope limit
+        # (#clip_rate).
         #
         # +mode+ :musical (default) gives each channel its own previous
-        # sample as the first substep's input; :hardware (2 substeps)
-        # reproduces the plug-in's interleaved stereo stream: each channel's
+        # sample as the first substep's input; :hardware (2 substeps) runs
+        # the channels as one interleaved stream: each channel's
         # first substep reads the sample before it in L, R, L, R order (left:
         # the right channel's previous sample; right: the left's current
         # one), so mono material comes out slightly different left and

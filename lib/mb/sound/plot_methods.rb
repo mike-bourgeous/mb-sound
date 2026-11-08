@@ -510,7 +510,9 @@ module MB
             }.to_h,
             print: false
           )
-          puts @lines if p.respond_to?(:print) && p.print
+          # (a tiled screen shows it in its plot pane: Plot::Plotter.sink)
+          shown = p.respond_to?(:print) && p.print && p.respond_to?(:figure) && p.figure && Plot::Plotter.sink&.call(p.figure)
+          puts @lines if p.respond_to?(:print) && p.print && !shown
 
           @lines if p.respond_to?(:print) && !p.print
         end

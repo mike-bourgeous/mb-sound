@@ -93,7 +93,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `noise_gate(threshold:, range:, ...)` A noise gate: a steep expander (ratio 20, range -80.db by default)
 - `limit/brickwall/limiter(ceiling:, lookahead:, ...)` A lookahead brickwall limiter (Dynamics::Limiter): output stays under ceiling
 - `duck/sidechain_duck(sidechain, amount:, threshold:, ...)` Sidechain ducking: turns this signal down while sidechain is loud
-- `squeeze(preset, depth:, time:, ...)` Multiband upward + downward compression ("squeeze it to eleven", OTT-style)
+- `squeeze(preset, depth:, time:, ...)` Multiband upward + downward compression ("squeeze it to eleven")
 - `bands/multiband(*frequencies, order:)` Splits this signal into Linkwitz-Riley bands for the block to process
 - `mono_below(frequency, order:)` Makes everything below frequency (Hz or a Pitch) mono
 - `ride(target, start:, range:, ...)` Rides this signal's level toward target LUFS with a slow gain (Rider)
@@ -196,7 +196,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 
 ### Arrange a set
 
-- `:sets` Tracks, scenes, and undo: track tracks fx scene scenes go launch tweak quant undo redo! changes swap
+- `:sets` Tracks, scenes, and undo: track tracks untrack fx scene scenes go launch tweak quant undo redo! changes swap
 - `:flow` Song forms: flow start pause play_form section loop! onward goto skip finish practice seek marker meter
 - `:long_form` Long forms: markov, lsystem, generate: markov lsystem
 - `:demo` A demo set to explore: demo demos
@@ -231,4 +231,4 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `:now` Help and what is going on: help now lesson players knobs scenes tracks mutes changes markers ruby debug_dump
 - `:ui` Dashboard band and tiled screen: ui off pane layout keys fg jobs
 - `:inspector` Sound design: the patch inspector: design ui knob turn learn bind
-- `:hand_tune` Hand-tuning a fitted sound: tuner tune fit_patch ab retune refine audition
+- `:hand_tune` Hand-tuning a fitted sound: tuner tune save_fit fit_saves restore_fit fit_patch ab retune refine audition

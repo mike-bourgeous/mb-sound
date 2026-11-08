@@ -79,6 +79,56 @@ module MB
         session&.close
         sink&.close
       end
+
+      # Lines .warm_up_console types: the kinds of console lines a set
+      # takes (numbers, symbols, strings, assignments, method calls).
+      CONSOLE_LINES = ['5', '13', ':a', '"text"', 'x = [1, 2, 3]', 'x.length', 'nil', '1 + 2', '135', '0.25'].freeze
+
+      # Types CONSOLE_LINES (+rounds+ times) into a Pry of its own on a
+      # private pty (MB::Term::Input::ReplHost, reading through Reline as
+      # the console does, with the console's Pry hooks), so YJIT has
+      # compiled the console's line editing, evaluation, and printing
+      # before anything plays (tuner-fixes-1: the maintainer's "Entering
+      # numbers in Pry caused the music to lose its step ... on the first
+      # couple": measured with bin/ui_demo.rb --tiles --type, the first
+      # five console lines held the GVL in 10 ms slices while YJIT compiled
+      # them, 25 render-thread waits over 1 ms; YJIT's call threshold is 5,
+      # JIT::CALL_THRESHOLD).  The lines go to no take (Take.discarding),
+      # no history (Pry's and Reline's are put back), and Pry's line counter
+      # is put back.  Once per process; nil without YJIT.  Returns seconds.
+      def self.warm_up_console(rounds: 2, lines: CONSOLE_LINES, timeout: 5.0)
+        return nil if @console_warmed || !JIT.compiling?
+        @console_warmed = true
+        require 'pry'
+        t0 = MB::U.clock_now
+        saved = { history: Pry.config.history, save: Pry.config.history_save, line: Pry.current_line, buffer: Pry.line_buffer.dup,
+                  reline: (defined?(Reline::HISTORY) ? Reline::HISTORY.length : nil) }
+        Pry.config.history_save = false
+        Pry.config.history = Pry::History.new(file_path: File::NULL)
+        host = nil
+        Take.discarding do
+          host = MB::Term::Input::ReplHost.new(rows: 4 * lines.length * rounds + 10, cols: 120, mode: :thread, target: Take.console_binding,
+                                               pry: { prompt: Pry::Prompt.new(:warm_up, 'warm-up', [proc { 'w> ' }, proc { 'w* ' }]), pager: false })
+          host.start
+          results = 0
+          (lines * rounds).each do |line|
+            host.write("#{line}\r")
+            results += 1
+            deadline = MB::U.clock_now + timeout
+            sleep 0.001 until host.synchronize { host.vt.text.scan('=> ').length } >= results || MB::U.clock_now > deadline
+          end
+        end
+        MB::U.clock_now - t0
+      ensure
+        host&.stop
+        if saved
+          Pry.config.history = saved[:history]
+          Pry.config.history_save = saved[:save]
+          Pry.current_line = saved[:line]
+          Pry.line_buffer = saved[:buffer]
+          Reline::HISTORY.pop while saved[:reline] && Reline::HISTORY.length > saved[:reline]
+        end
+      end
     end
   end
 end

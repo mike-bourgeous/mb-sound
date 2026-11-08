@@ -116,32 +116,73 @@ module MB
         end
 
         # Tracks and other players: state, clip, armed and recording.
+        #
+        # In the pane (NAV Enter; tuner-fixes-1, the maintainer: "The tracks
+        # interface should let me use arrows to highlight tracks and then
+        # delete them, or change their volume"; "+5 more" with nothing to
+        # scroll): Up/Down pick a track (the list scrolls to it),
+        # Left/Right its level a dB down or up (`level :kick, -3.db`), 0
+        # back to 0 dB, x stops it, d (or Delete) twice removes it from the
+        # set (`untrack`, undoable), v hides or shows stopped tracks.
         class Tracks < Pane
           def initialize = super(:tracks, rate: 8, height: 6, width: 30, title: 'tracks', min_height: 2, description: 'tracks and players: state, clip, armed, recording')
+
+          mode_keys do
+            group 'Tracks'
+            on [:up, 'k'], :pick, -1, help: 'the track above', label: 'Up Down'
+            on [:down, 'j'], :pick, 1, help: 'the track below', label: 'Up Down'
+            on [:page_up], :pick, -5, help: 'five tracks up', label: 'PgUp PgDn'
+            on [:page_down], :pick, 5, help: 'five tracks down', label: 'PgUp PgDn'
+            on [:left, 'h'], :level, -1, help: 'its level 1 dB down (level)', label: 'Left Right'
+            on [:right, 'l'], :level, 1, help: 'its level 1 dB up (level)', label: 'Left Right'
+            on '0', :level, 0, help: 'its level back to 0 dB'
+            on 'x', :stop_track, help: 'stop it (stop)'
+            on ['d', :delete], :untrack, help: 'remove it from the set (untrack; d twice; undo brings it back)', label: 'd Del'
+            on 'v', :stopped_view, help: 'hide or show stopped tracks'
+            on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
+          end
 
           STATE_ROLES = {
             playing: :ok, starting: :queued, stopping: :warn, fading: :warn, ringing: :warn,
             muted: :dim, asleep: :dim, stopped: :dim,
           }.freeze
 
-          def draw_body(c, s, state)
-            return unless s
-
+          # [[name, clip, state, armed, trigger, level], ...] from snapshot
+          # +s+ (stopped ones left out when +hide+).
+          def self.rows(s, hide: false)
             parts = s.players.to_h { |p| [p.name, p] }
-            rec = s.recording.to_h { |r| [r.name, r] }
             rows = s.tracks.map { |t| [t.name, t.clip, parts[t.name]&.state || :stopped, t.armed, t.trigger, t.level] }
             names = s.tracks.map(&:name)
             parts.each_value do |p|
               next if names.include?(p.name) || Session::Name.monitored(p.name)
               rows << [p.name, 'bg', p.state, false]
             end
+            hide ? rows.reject { |r| r[2] == :stopped } : rows
+          end
+
+          def draw_body(c, s, state)
+            return unless s
+
+            state[:snap] = s
+            rec = s.recording.to_h { |r| [r.name, r] }
+            all = Tracks.rows(s)
+            rows = state[:hide_stopped] ? all.reject { |r| r[2] == :stopped } : all
+            hidden = all.length - rows.length
+            state[:names] = rows.map(&:first)
             if rows.empty?
-              c.puts ['nothing playing', :dim]
+              c.puts [hidden > 0 ? "#{hidden} stopped (v shows them)" : 'nothing playing', :dim]
               return
             end
 
             name_w = [[rows.map { |r| r[0].to_s.length }.max, 6].max, 12].min
-            show = rows.length > c.h ? rows.first(c.h - 1) : rows
+            cur = state[:cursor] && rows.index { |r| r[0] == state[:cursor] }
+            # (rows for tracks, less one for the "more" line when they don't fit)
+            fit = rows.length > c.h ? [c.h - 1, 1].max : rows.length
+            top = state[:top].to_i
+            top = cur if cur && cur < top
+            top = cur - fit + 1 if cur && cur >= top + fit
+            state[:top] = top = top.clamp(0, [rows.length - fit, 0].max)
+            show = rows[top, fit]
             show.each_with_index do |(name, clip, st, armed, trigger, level), y|
               r = rec[name]
               glyph, role =
@@ -150,13 +191,74 @@ module MB
                 elsif st == :stopped then [c.glyph(:off), :dim]
                 else [c.glyph(:on), STATE_ROLES.fetch(st, :text)]
                 end
-              x = c.line(y, [glyph, role], ' ', [c.pad(name, name_w), :name], ' ')
+              picked = name == state[:cursor]
+              x = c.line(y, [glyph, role], picked ? ['▸', :key] : ' ', [c.pad(name, name_w), picked ? :key : :name], ' ')
               what = r ? "rec #{c.glyph(:arrow)}#{r.ends}#{r.queued ? ' (queued)' : ''}" : st == :playing ? clip.to_s : "#{st} #{clip}"
               what = "trigger #{what}" if trigger # (a trigger track: heard only by sidechains)
               what = "#{level.finite? ? Panes.fmt(level) : '-inf'} dB #{what}" if level # (its level, when set away from unity)
               c.text(x, y, c.fit(what, c.w - x), r ? :rec : st == :playing ? :text : :dim)
             end
-            c.text(0, c.h - 1, "+#{rows.length - show.length} more", :dim) if show.length < rows.length
+            if show.length < rows.length
+              below = rows.length - top - show.length
+              more = [top > 0 ? "#{top} above" : nil, below > 0 ? "+#{below} more" : nil].compact.join(', ')
+              c.text(0, c.h - 1, c.fit(more, c.w), :dim)
+            elsif hidden > 0 && c.h > rows.length
+              c.text(0, c.h - 1, c.fit("#{hidden} stopped hidden (v)", c.w), :dim)
+            end
+          end
+
+          # Up/Down: the next or previous track (by +d+), scrolled into view.
+          def key_pick(state, d)
+            names = state[:names] || []
+            return 'no tracks' if names.empty?
+            i = names.index(state[:cursor])
+            i = i ? (i + d).clamp(0, names.length - 1) : (d > 0 ? 0 : names.length - 1)
+            state[:cursor] = names[i]
+            "#{names[i]} (Left Right level, x stop)"
+          end
+
+          # The arrows' scrolling (Pane's) picks here.
+          def key_scroll(state, *) = key_pick(state, 1)
+
+          # Left/Right: the picked track's level by +d+ dB (0: back to 0 dB).
+          def key_level(state, d)
+            name = state[:cursor] or return 'pick a track first (Up Down)'
+            t = state[:snap]&.tracks&.find { |x| x.name == name }
+            return "#{name}: not a track (a player of its own; its graph sets its level)" unless t
+            now = t.level && t.level.finite? ? t.level : 0.0
+            db = d.zero? ? 0.0 : (now + d).round(1)
+            PaneKeys::Run["level #{name.inspect}, #{RubyValue.to_ruby(db)}.db", "#{name} at #{Panes.fmt(db)} dB"]
+          end
+
+          # x: stops the picked track (`stop :kick`).
+          def key_stop_track(state)
+            name = state[:cursor] or return 'pick a track first (Up Down)'
+            PaneKeys::Run["stop #{name.inspect}", "#{name} stopping"]
+          end
+
+          # d (Delete): the picked track out of the set (`untrack :clap`) on
+          # the second press; the first says what it will do.
+          def key_untrack(state)
+            name = state[:cursor] or return 'pick a track first (Up Down)'
+            unless state[:snap]&.tracks&.any? { |x| x.name == name }
+              return "#{name}: not a track (stop #{name.inspect} ends a player)"
+            end
+            if state[:untracking] == name
+              state[:untracking] = nil
+              names = state[:names] || []
+              i = names.index(name)
+              state[:cursor] = i && (names[i + 1] || (i > 0 ? names[i - 1] : nil))
+              return PaneKeys::Run["untrack #{name.inspect}", "#{name} removed (undo brings it back)"]
+            end
+            state[:untracking] = name
+            "d again removes #{name} from the set (undo brings it back)"
+          end
+
+          # v: hides or shows stopped tracks (this pane only).
+          def key_stopped_view(state)
+            state[:hide_stopped] = !state[:hide_stopped]
+            state[:top] = 0
+            state[:hide_stopped] ? 'stopped tracks hidden (v shows them)' : 'stopped tracks shown'
           end
         end
 
@@ -431,6 +533,66 @@ module MB
             end
             "not found: #{@find}"
           end
+        end
+
+        # The console's last plot while the tiled screen is up (`plot`,
+        # `spectrum`, `chart { }`, ...: Plot::Plotter.sink, Tiles#plot),
+        # drawn at the pane's size (resizing redraws it), the REPL keeping
+        # its rows and keys: a pane of its own rather than a mode of the
+        # REPL pane, which hosts the console's terminal and is never
+        # replaced (tuner-fixes-1).  q closes it.
+        class PlotView < Pane
+          mode_keys do
+            group 'Plot'
+            on 'q', :close, help: 'close the plot (ui.plot false)'
+            on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
+          end
+
+          def initialize
+            super(:plot, rate: 4, height: 16, width: 80, title: 'plot', min_height: 4,
+                         description: "the console's last plot (plot, spectrum, chart { }) while the tiled screen is up; the next plot replaces it, q or ui.plot false closes it")
+            @figure = nil
+            @seq = 0
+          end
+
+          # The figure shown (a Plot::Chart or Figure), or nil.
+          attr_reader :figure
+
+          # Shows +figure+ next.
+          def show(figure)
+            @figure = figure
+            @seq += 1
+            self
+          end
+
+          def plot?
+            true
+          end
+
+          def draw(c, _s, state, look: nil)
+            c.clear
+            return if c.w <= 0 || c.h <= 0
+            if @title && !state[:title_in_rule]
+              c.text(0, 0, 'PLOT', :title)
+              c = c.sub(0, 1, c.w, c.h - 1)
+              return if c.h <= 0
+            end
+            unless @figure
+              c.text(0, 0, c.fit('no plot yet (plot 440.hz.sine, chart { ... })', c.w), :dim)
+              return
+            end
+            cells = c.grid.class
+            lk = look == :auto || look.nil? ? :scope : look
+            live = state[:live]
+            if live.nil? || live.width != c.w || live.height != c.h || state[:cells] != cells || state[:look] != lk
+              live = state[:live] = Plot::Live.new(width: c.w, height: c.h, look: lk, cells: cells)
+              state[:cells] = cells
+              state[:look] = lk
+            end
+            live.draw(@figure, c.grid, x: c.x, y: c.y)
+          end
+
+          def key_close(_state) = :close
         end
 
         # CPU per part: render load, then each player, bus, and master

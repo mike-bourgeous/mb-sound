@@ -223,6 +223,52 @@ module MB
         @mutex.synchronize { @tracks.dup }
       end
 
+      # Removes track +name+ from the set (tuner-fixes-1, the maintainer:
+      # "How do I remove a track from the tracks list?"): stopped now if it
+      # plays, its name freed, one undo step through Session#change (undo
+      # puts the track back as it was, playing again if it played).  Its
+      # knobs, level, mute, and routes stay (undo finds them; a new track of
+      # that name takes them).  Refused, with why, for a track a scene
+      # gives a value or that is armed.  Returns the journal entry of the
+      # stop, or true when it wasn't playing (nil when refused, in live
+      # mode).
+      def untrack(name)
+        tr = @mutex.synchronize { @tracks[name] } or return MB::Sound.live_error(ArgumentError.new("untrack: no track #{name.inspect}#{track_hint}"))
+        in_scenes = @mutex.synchronize { @scenes.values.select { |sc| sc.values.is_a?(Hash) && sc.values.key?(name) }.map(&:name) }
+        unless in_scenes.empty?
+          return MB::Sound.live_error(ArgumentError.new("untrack #{name.inspect}: scene#{'s' unless in_scenes.length == 1} #{in_scenes.map(&:inspect).join(', ')} " \
+                                                        "give#{'s' if in_scenes.length == 1} it a value; take it out of #{in_scenes.length == 1 ? 'that scene' : 'those scenes'} first"))
+        end
+        if @mutex.synchronize { @arms.key?(name) }
+          return MB::Sound.live_error(ArgumentError.new("untrack #{name.inspect}: it is armed (disarm #{name.inspect} first)"))
+        end
+        removal = TrackRemoval.new(self, @session, name)
+        result = true
+        Session.with_context(session: @session) do
+          @session.command("untrack #{name.inspect}") do
+            result = MB::Sound.stop(name, on: :now) if @session.playing_after_queue?(name)
+            removal.restore_undo_state(nil)
+            @session.note_undo_extra(removal, tr, nil)
+          end
+        end
+        result.nil? ? true : result
+      end
+
+      # The undo participant of #untrack: puts track +name+ back (a Track)
+      # or takes it out (nil), its name claimed or freed.
+      class TrackRemoval
+        def initialize(arrangement, session, name)
+          @arrangement = arrangement
+          @session = session
+          @name = name
+        end
+
+        def restore_undo_state(track)
+          @arrangement.send(:put_track, @name, track)
+          track ? @session.names.claim(@name, :track) : @session.names.release(@name)
+        end
+      end
+
       # The scenes (a Hash from name to Scene).
       def scenes
         @mutex.synchronize { @scenes.dup }
@@ -770,6 +816,12 @@ module MB
           parts << '(block)' if sc.block
           "#{sc.name == @current_scene ? '▶ ' : ''}#{parts.join(' ')}"
         }
+      end
+
+      # Track +name+ set to +track+ (a Track), or taken out (nil): #untrack
+      # and its undo.
+      private def put_track(name, track)
+        @mutex.synchronize { track ? @tracks[name] = track : @tracks.delete(name) }
       end
 
       # The Set state for undo (see Session#note_undo_extra).
