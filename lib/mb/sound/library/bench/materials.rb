@@ -45,6 +45,7 @@ module MB
           drums: %i[drums_beat drums_busy],
           texture: %i[texture],
           struck: %i[struck keys_comp],
+          boom: %i[boom_hits boom_velocity],
         }.freeze
 
         # Words in role names, tags, and entry names that say what an
@@ -282,6 +283,12 @@ module MB
             when :texture
               ['Held notes', 'A3 for a bar, four times (textures may ignore the notes)', 120, 10,
                -> { MB::Sound.seq(A3).n1.legato(0.98).repeat(4) }]
+            when :boom_hits
+              ['Boom hits', 'G1 on bar 1, E1 on bar 3 (4 s apart at 120 BPM)', 120, 14,
+               -> { MB::Sound.seq(G1.n1, R.n1, E1.n1, R.n1) }]
+            when :boom_velocity
+              ['Boom, hard then soft', 'G1 at full velocity on bar 1, then at half velocity on bar 3 (velocity to level, depth, and brightness)', 120, 14,
+               -> { MB::Sound.seq(G1.n1, R.n1).vel(1.0) | MB::Sound.seq(G1.n1, R.n1).vel(0.5) }]
             when :struck
               ['Struck phrase', "Struck.phrase: the demo phrase moved toward the resonator's typical pitch", 120, 12,
                -> { Struck.phrase(entry.name) }]
@@ -309,9 +316,10 @@ module MB
 
         # The role an instrument plays (ROLE_MATERIALS keys): from the
         # genre template role that plays it, its tags, then its name words;
-        # struck instruments are :struck; :keys otherwise.
+        # struck instruments are :struck, booms :boom; :keys otherwise.
         def role_of(entry)
           return :struck if entry.family == :struck
+          return :boom if entry.family == :boom
           words = [*template_roles(entry).map { |r| r[:role] }, *entry.tags, *entry.name_words]
           words.each do |w|
             ROLE_WORDS.each { |role, list| return role if list.include?(w) }

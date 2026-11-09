@@ -4,8 +4,8 @@ module MB
       # What `play entry` and `audition entry` play (Entry#to_playable;
       # library-instruments-1, audition-1, ui-scaffold-1): the maintainer's
       # guesses `play L.fx.bar`, `play L.inst.x`.  Instruments play a demo
-      # phrase (struck ones moved toward their resonator's typical pitch),
-      # kits a beat, resonator effects one strike of their struck
+      # phrase (struck ones moved toward their resonator's typical pitch;
+      # booms one hit), kits a beat, resonator effects one strike of their struck
       # instrument (Struck), clips on their instrument, other effects their
       # first Listening Bench material, the audition mix (Library::Bench,
       # audition-1, library-2), mastering chains the same mix through
@@ -62,6 +62,11 @@ module MB
             end
             return Playable.wrap(st.(Struck.phrase(st.name)), "#{path} playing a demo phrase", true,
               "a struck instrument plays notes: #{path}.(clip), track :x, #{path}")
+          end
+
+          if entry.family == :boom
+            return Playable.wrap(entry.ping, "#{path} hit once (at #{Boom.home_note(entry.name).name})", true,
+              "a boom hits once per note: #{path}.ping(E1) hits at a note, #{path}.(clip) plays it from notes, track :fx, #{path}")
           end
 
           case entry.kind

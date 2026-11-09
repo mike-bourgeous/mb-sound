@@ -107,6 +107,7 @@ require_relative 'sound/live_methods'
 require_relative 'sound/drum_methods'
 require_relative 'sound/sq80_methods'
 require_relative 'sound/struck_methods'
+require_relative 'sound/boom_methods'
 require_relative 'sound/structure_methods'
 require_relative 'sound/bar_stats_methods'
 require_relative 'sound/genre_methods'
@@ -159,6 +160,7 @@ module MB
     extend DrumMethods
     extend SQ80Methods
     extend StruckMethods
+    extend BoomMethods
     extend StructureMethods
     extend BarStatsMethods
     extend GenreMethods
@@ -200,6 +202,7 @@ require_relative 'sound/graph_node'
 require_relative 'sound/envelope'
 require_relative 'sound/sq80'
 require_relative 'sound/struck'
+require_relative 'sound/boom'
 require_relative 'sound/graph_node_input'
 
 require_relative 'sound/midi'

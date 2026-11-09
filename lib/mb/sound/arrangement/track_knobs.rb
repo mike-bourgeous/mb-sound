@@ -32,6 +32,8 @@ module MB
         # all knobs, above).
         ENTRY_PARAMS = {
           struck: ->(_entry) { MB::Sound::Struck::KNOB_PARAMS },
+          # (booms' voice settings and tail level; boom-1)
+          boom: ->(_entry) { MB::Sound::Boom::KNOB_PARAMS },
           genre_patch: ->(entry) { MB::Sound::Genre::PATCH_KNOBS.fetch(entry.name, {}).keys },
           # (generators' ranged params, read once a cycle; the clip, not the
           # patch, reads them: Library::Generators.track_clip; gen-knobs-1)

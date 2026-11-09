@@ -146,8 +146,11 @@ module MB
         # typical pitch).  Returns the graph (it ends when the ring does).
         # A clip (or other note source) plays as written, looping if it
         # loops: `L.fx.bar.ping(seq(C2, A2, C3, G1).loop.n16)`, the same as
-        # `seq(...).loop.n16.then(&L.inst.bar)`.
+        # `seq(...).loop.n16.then(&L.inst.bar)`.  A boom preset hits once
+        # the same way (`L.inst.boom.trailer.ping`, `.ping(E1)`; see
+        # MB::Sound::Boom).
         def ping(*pitches)
+          return MB::Sound::Boom.ping(self, pitches) if family == :boom
           MB::Sound::Struck.ping(self, pitches)
         end
 
