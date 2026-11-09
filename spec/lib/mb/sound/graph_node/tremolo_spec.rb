@@ -111,6 +111,13 @@ RSpec.describe(MB::Sound::GraphNode::Tremolo, :aggregate_failures) do
       expect(1.constant.tremolo(1, mix: 0.4).to_ruby).to include('tremolo(1, mix: 0.4)')
     end
 
+    it 'mixes a mono input with its stereo tremolo (stereo_phase: and mix:)' do
+      t = 1.constant.tremolo(1, depth: 0, law: :linear, shape: :triangle, stereo_phase: 0.5, mix: 0.5)
+      expect(t.channel_count).to eq(2)
+      l, r = take(t, 12000)
+      expect([l[0], r[0], l[6000], r[6000]]).to eq([0.75, 0.75, 0.875, 0.625])
+    end
+
     it 'leaves a frozen input buffer alone' do
       src = 1.constant
       t = src.tremolo(1, depth: 0, law: :linear)
