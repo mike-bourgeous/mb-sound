@@ -22,6 +22,12 @@ module MB
       # +:smoothing+ is given; gains are numbers or graph nodes (per sample).
       # The output is the same at any buffer size.
       #
+      # Taps may have loop filters (+:filters+, delay-dual-1): biquads
+      # (Filter::Biquad, e.g. a Filter::Cookbook) each tap's reads run
+      # through before they are output and fed back, so every trip around
+      # the loop passes them once (the dB-T dual delay's cuts, darkening
+      # ping-pong echoes: StereoDelayMethods#dual_delay, #ping_pong).
+      #
       # When every input has ended (nil or a short buffer), the network
       # rings out: silence goes in and the taps play until what the lines
       # get back has stayed below -90 dB (MB::Sound::QuietRun#advance) for the
@@ -160,7 +166,10 @@ module MB
         # line, one gain per tap: numbers, graph nodes, or nil/0 for none).
         # +:smoothing+ and +:interpolation+ are as for MultitapDelay;
         # +:initial_buffer+ (any length) sizes each line's starting buffer.
-        def initialize(inputs:, taps:, gains:, initial_buffer: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, smoothing: false, sample_rate: nil)
+        # +:filters+ is nil or an Array with an entry per tap: nil, a
+        # Filter::Biquad, or an Array of them run in series (fixed
+        # coefficients, copied; Cookbook filters follow sample rate changes).
+        def initialize(inputs:, taps:, gains:, filters: nil, initial_buffer: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, smoothing: false, sample_rate: nil)
           unless MB::Sound::DelayLine::INTERPOLATION.include?(interpolation)
             raise ArgumentError, "Unknown interpolation #{interpolation.inspect} (use one of #{MB::Sound::DelayLine::INTERPOLATION.keys.join(', ')})"
           end
@@ -225,7 +234,14 @@ module MB
           @gain_values = @gains.map { |row| Array.new(row.length) }
           @states = @taps.map(&:network_read_state)
           @tap_lines = @taps.map(&:line)
+          @filters = tap_filters(filters)
+          @filter_entries = nil
+          build_filter_entries
         end
+
+        # The loop filters: per tap, an Array of Filter::Biquads (empty for
+        # none).
+        attr_reader :filters
 
         # Sets the network's name (shown in graphs).
         def named(s)
@@ -242,6 +258,8 @@ module MB
         def sample_rate=(new_rate)
           super
           @sample_rate = sample_rate.to_f
+          @filters.each { |list| list.each { |f| f.sample_rate = @sample_rate if f.respond_to?(:sample_rate=) } }
+          build_filter_entries
           self
         end
         alias at_rate sample_rate=
@@ -261,7 +279,8 @@ module MB
         def carry_fits?(old)
           ol = old.instance_variable_get(:@lines)
           old.class == self.class && old.interpolation == @interpolation && ol.length == @lines.length && old.taps.length == @taps.length &&
-            old.taps.zip(@taps).all? { |a, b| a.line == b.line && a.smoothing == b.smoothing }
+            old.taps.zip(@taps).all? { |a, b| a.line == b.line && a.smoothing == b.smoothing } &&
+            old.filters.map(&:length) == @filters.map(&:length)
         end
 
         # Takes over network +old+'s lines, its taps' read states and
@@ -272,6 +291,8 @@ module MB
           NodeTraits.swap_contents(@ended, old.instance_variable_get(:@ended))
           NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
           @taps.zip(old.taps).each { |a, b| a.carry_adopt(b) }
+          old_entries = old.instance_variable_get(:@filter_entries)
+          @filter_entries&.each_with_index { |e, t| NodeTraits.swap_contents(e[1], old_entries[t][1]) if e }
         end
 
         ADOPT_IVARS = %i[@ring @ring_done @tail_start @longest].freeze
@@ -285,6 +306,11 @@ module MB
         # graph frame runs the network for every tap; each tap returns its
         # own output.
         def internal_sample(tap, count)
+          # (a tap read again after the network's last, short block: a Tee
+          # fanning the tap out asks again for the rest of the block it
+          # was short of; the other taps still get that last block)
+          return nil if @ring_done && @sampled.include?(tap.index)
+
           if @sampled.include?(tap.index)
             if @sampled.length < @taps.length
               warn "Delay network tap #{tap} on #{self} sampled again with #{@sampled.length} of #{@taps.length} sampled"
@@ -301,6 +327,42 @@ module MB
         end
 
         private
+
+        # Per tap, an Array of the Filter::Biquads in +filters+ (see
+        # #initialize).
+        def tap_filters(filters)
+          return Array.new(@taps.length) { [].freeze }.freeze if filters.nil?
+          unless filters.is_a?(Array) && filters.length == @taps.length
+            raise ArgumentError, "Delay network filters: needs one entry per tap (#{@taps.length}; nil for none)"
+          end
+
+          filters.map.with_index { |f, t|
+            list = f.nil? ? [] : Array(f)
+            list.each do |b|
+              unless b.is_a?(MB::Sound::Filter::Biquad)
+                raise ArgumentError, "Delay network tap #{t}'s filters must be Filter::Biquads (got #{b.class})"
+              end
+              unless b.coefficients.all? { |c| c.is_a?(Numeric) && c.real? }
+                raise ArgumentError, "Delay network tap #{t}'s filter coefficients must be real"
+              end
+            end
+            list.freeze
+          }.freeze
+        end
+
+        # Coefficient and state DFloats per filtered tap, for the kernel
+        # (states start at 0, or keep their values over a rebuild).
+        def build_filter_entries
+          old = @filter_entries
+          @filter_entries = @filters.map.with_index { |list, t|
+            next nil if list.empty?
+
+            co = Numo::DFloat.cast(list.flat_map { |b| b.coefficients.map(&:to_f) })
+            st = old&.[](t)&.[](1) || Numo::DFloat.zeros(list.length * 4)
+            [co, st]
+          }
+          @filter_entries = nil if @filter_entries.none?
+        end
 
         # A gain: nil/false/0 for none, a Float, or a graph node.
         def gain_value(g, j, t)
@@ -393,7 +455,7 @@ module MB
 
           delays = @delays.map { |d| d.is_a?(Numo::NArray) ? d[0...n] : d }
           gains = @gain_values.map { |row| row.map { |g| g.is_a?(Numo::NArray) ? g[0...n] : g } }
-          MB::Sound::DelayLine.network(@lines, @in_bufs, @tap_lines, delays, gains, n, interpolation: @interpolation, states: @states, outs: @outs)
+          MB::Sound::DelayLine.network(@lines, @in_bufs, @tap_lines, delays, gains, n, interpolation: @interpolation, states: @states, filters: @filter_entries, outs: @outs)
 
           return @outs unless @ended.all?
 
