@@ -232,6 +232,28 @@ RSpec.describe(MB::Sound::GraphNode::Phaser, :aggregate_failures) do
       expect(sweep[quarter]).to be_within(1e-4).of(1)
     end
 
+    it 'keeps following the tempo when it changes mid-render' do
+      transport = MB::Sound::Sequence.current_transport
+      old_bpm = transport.bpm
+      begin
+        MB::Sound.bpm(120)
+        MB::Sound.rewind
+        sweep = 110.hz.saw.phaser(1.bar).sources[:sweep]
+        bufs = Array.new(48) { sweep.sample(1000).dup } # one second: half a bar at 120 BPM
+        MB::Sound.bpm(60)
+        bufs += Array.new(300) { sweep.sample(1000).dup }
+        x = SpecBuffers.join(bufs).to_a
+        crossings = (1...x.length).select { |i| (x[i - 1] < 0) != (x[i] < 0) }
+        # half cycles of 48000 samples (2 s bars), then 96000 (4 s bars)
+        expect(crossings[0]).to be_within(2).of(48000)
+        expect(crossings.each_cons(2).map { |a, b| b - a }).to all(be_within(2).of(96000))
+        expect(crossings.length).to eq(4)
+      ensure
+        MB::Sound.bpm(old_bpm)
+        MB::Sound.rewind
+      end
+    end
+
     it 'takes Hz, Pitches, Lengths per cycle, triangle shapes, and a sweep node' do
       expect(collect(110.hz.saw.phaser(0.5), 2000)).to eq(collect(110.hz.saw.phaser(0.5.hz), 2000))
       expect(collect(110.hz.saw.phaser(2.seconds), 2000)).to eq(collect(110.hz.saw.phaser(0.5), 2000))
