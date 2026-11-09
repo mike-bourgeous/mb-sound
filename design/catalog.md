@@ -84,6 +84,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `reverb(preset, output_channels:, ...)` Appends a reverb to this node (see GraphNode::Reverb)
 - `convolve/ir(impulse, mix:, wet:, ...)` Convolves this signal with an impulse response (convolution reverb)
 - `chorus/juno_chorus(mode, ...)` Appends a Juno-60-style stereo chorus (see Chorus), returning a stereo bundle
+- `phaser(preset_or_rate, ...)` A phaser (GraphNode::Phaser): moving notches from LFO-swept allpass stages
 - `tremolo/amplitude_modulation/trem(rate, depth:, shape:, ...)` Tremolo: swings this signal's level down by depth: along an LFO
 - `feedback/fb(*args, compensate:, sustain:, &block)` Builds a feedback loop on this node from the block (a FeedbackLoop)
 
