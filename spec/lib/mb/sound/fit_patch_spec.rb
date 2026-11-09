@@ -76,6 +76,17 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
       expect(fps.map { |f| f.kernel_filter.mode }).to eq([:diode])
     end
 
+    # (tuner-fixes-2: the acid fit's amp sustain of 1.0 also named its
+    # softclip's limit of 1.0, so a sustain turned under the threshold
+    # failed to build)
+    it 'keeps a param to the places named like it when it is found at one' do
+      params = MB::Sound::FitPatch.declare(sustain: (0.0..1.0).at(1.0), th: (0.05..1.0).at(0.6636), amp_release: (0.001..2.0).at(0.5))
+      code = 'synth(CLIP, voices: 1) { |v| (v.hz.saw * v.env(0.002, 0.3, 1.0, 0.5)).softclip(0.6636, 1.0) * 0.5 }'
+      text, sites, = MB::Sound::FitPatch.document(code, params, name: :x)
+      expect(sites.map(&:name)).to eq(%i[sustain amp_release th])
+      expect(text).to include('v.env(0.002, 0.3, sustain, amp_release)).softclip(th, 1.0) * 0.5')
+    end
+
     # (tuner-fixes-2: the acid fit printed `resonance: 0.33` for reso
     # 0.3300036, and its resonance was no knob)
     it "takes a keyword's short literal for the param the keyword names" do

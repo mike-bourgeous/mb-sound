@@ -155,6 +155,7 @@ module MB
         skipped = {}
         matching = match ? params.slice(*match.map(&:to_sym)) : params
         times = {}
+        found = []
         literals(result.value) do |node, key, why, setting|
           hits = matching.select { |_, p| matches?(node, p.default) }.keys
           # (a keyword naming a param, or its alias, takes a value rounding
@@ -173,9 +174,19 @@ module MB
                          'give the values with more digits, or one of them under another name'
           end
           loc = node.location
-          edits << [loc.start_offset, loc.end_offset, pick.to_s]
-          sites << Site.new(name: pick, line: loc.start_line, column: loc.start_column + 1, text: node.slice)
-          (entry = time_entry(setting)) && times[pick] ||= entry
+          found << [pick, [loc.start_offset, loc.end_offset, pick.to_s], Site.new(name: pick, line: loc.start_line, column: loc.start_column + 1, text: node.slice),
+                    setting, setting && setting_param(setting)]
+        end
+        # (a param found where a setting of its name takes it keeps only
+        # such places: the acid fit's amp sustain of 1.0 also named the
+        # softclip's limit of 1.0, so turning the sustain moved the limit,
+        # and a sustain under the threshold failed to build; tuner-fixes-2)
+        named = found.select { |pk, _, _, _, arg| arg && same_name?(pk, arg) }.map(&:first).uniq
+        found.reject! { |pk, _, _, _, arg| named.include?(pk) && !(arg && same_name?(pk, arg)) }
+        found.each do |pk, edit, site, setting, _|
+          edits << edit
+          sites << site
+          (entry = time_entry(setting)) && times[pk] ||= entry
         end
         params = params.to_h { |n, p| [n, times[n] ? musical_time(p, times[n]) : p] }
         references(result.value, params.keys).each do |node|
@@ -819,6 +830,15 @@ module MB
         best = hits.min_by(2) { |_, v| (v - lit).abs }
         return best[0][0] if best.length == 1
         (best[0][1] - lit).abs + 1e-12 < (best[1][1] - lit).abs ? best[0][0] : nil
+      end
+
+      # True if param +pname+ is named like the setting argument +arg+ (its
+      # name, Param::NAME_ALIASES' pair, or a name ending in it:
+      # amp_sustain for sustain).
+      def same_name?(pname, arg)
+        a = Param.full_name(arg.to_sym).to_s
+        n = Param.full_name(pname.to_sym).to_s
+        n == a || n.end_with?("_#{a}")
       end
 
       # The param of +params+ ({ name => Param }) keyword +key+ names: its
