@@ -131,18 +131,21 @@ module MB
 
         # MB::Sound::Samples for Song#samples (nil for empty slots).
         def samples
-          @samples ||= @song.samples.each_with_index.map { |s, i| Import.sample_of(s, i) }
+          @samples ||= begin
+            names = Names.of(@song, file: @name)
+            @song.samples.each_with_index.map { |s, i| Import.sample_of(s, i, name: names[i]) }
+          end
         end
 
         # A Sample from SampleData +s+ (the +i+th), or nil if empty.
-        def self.sample_of(s, i)
+        def self.sample_of(s, i, name: nil)
           return nil if s.nil? || s.empty?
           data = s.data.length == 1 ? s.data[0] : s.data
           # (an IT sustain loop with no loop of its own plays as the loop:
           # a Sample has one, and the release is the volume envelope's)
           points, mode = s.loop ? [s.loop, s.loop_mode] : [s.sustain_loop, s.sustain_mode]
           loop = points && points[1] > points[0] ? points[0]...points[1] : nil
-          label = format('%02d %s', i + 1, s.name.to_s.strip).strip
+          label = name || format('%02d %s', i + 1, s.name.to_s.strip).strip
           Sample.new(data, sample_rate: s.rate.to_f, root: 60, loop: loop, loop_mode: loop ? (mode || :forward) : nil, name: label)
         end
 

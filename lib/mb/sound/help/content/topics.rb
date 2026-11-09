@@ -532,7 +532,10 @@ module MB
         song[:p03][:ch1].transpose(12)` moves a channel up an octave (notes
         carry their pitch as marks, the key picks the sample), and `tempo
         140` speeds the song up.  `mod_samples(path)` gives the samples
-        alone (`play mod_samples('tune.mod')[2]`).
+        alone (`play mod_samples('tune.mod')[2]`), named from the file's
+        instrument and sample names, or the file's name and the slot
+        (`tune 09`) where those hold the song's message, credits, or
+        greetings, as they often do.
 
         Each tick of the module is 1/96 of a whole note, so the session
         tempo is the module's tempo and rows at speed 6 are sixteenths.
@@ -1908,8 +1911,10 @@ module MB
         turn rebuilds the track.
 
         `ab :kick, 'kick_ref.wav'` puts the reference on its own track
-        (:kick_ref) playing the kick's clip at the sample's own pitch,
-        muted, its level matched to the patch's loudness (LUFS of one note
+        (:kick_ref) playing the kick's clip (a pitched voice's reference
+        at its own pitch on the clip's first note and transposed from it
+        on other notes, so a new clip or generator plays its melody; a
+        kit's at its own pitch on every note), muted, its level matched to the patch's loudness (LUFS of one note
         at the knobs now); `ab` (or b in the inspector) flips what you hear
         between the patch and the reference, matching again when the knobs
         moved; `ab :kick, :off` stops it.  Each flip is one console line in

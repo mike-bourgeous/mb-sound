@@ -45,13 +45,18 @@ module MB
       end
       alias tracker_import mod_import
 
-      # The samples of the tracker module at +path+, as Samples (named
-      # with their numbers; empty slots left out).
+      # The samples of the tracker module at +path+, as Samples named from
+      # the file's instrument and sample names where those name a sound,
+      # else the file's name and the slot (`tune 09`; Tracker::Names: names
+      # holding the song's message, credits, or greetings don't count);
+      # empty slots left out.
       #
       #     s = mod_samples('tune.mod'); play s[2]
+      #     mod_samples('tune.xm').map(&:name)    # => ["303-1", ..., "tune 13", ...]
       def mod_samples(path)
         song = Tracker.read(path)
-        song.samples.each_with_index.filter_map { |s, i| Tracker::Import.sample_of(s, i) }
+        names = Tracker::Names.of(song, file: path)
+        song.samples.each_with_index.filter_map { |s, i| Tracker::Import.sample_of(s, i, name: names[i]) }
       end
     end
   end

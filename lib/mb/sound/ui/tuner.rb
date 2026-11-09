@@ -474,6 +474,10 @@ module MB
               x = c.line(0, ['  ', :dim], [ref_state, :text], x: x) if ref_state
               n = HandTune.unsaved_somewhere(track, w&.session).length
               x = c.line(0, ['  ', :dim], ["#{n} unsaved (S saves)", :warn], x: x) if n > 0
+              # (knobs that change nothing audible at these settings: a
+              # marker, worked out in the tuner's worker; tuner-fixes-2)
+              dead = w && w.session == session ? w.dead_knobs(track) : nil
+              x = c.line(0, ['  no effect on its note: ', :dim], [dead.join(', '), :warn], x: x) if dead && !dead.empty?
             else
               x = c.text(x, 0, ' nothing tuned yet (tuner: pick a reference and a synth)', :dim)
             end

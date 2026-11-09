@@ -49,7 +49,7 @@ RSpec.describe(MB::Sound::Tracker::Set, :aggregate_failures) do
     out = MB::Sound::GraphIO.save(doc, set)
     expect(out).to end_with('song.mbg/song.mbg.rb')
     text = File.read(out)
-    expect(text).to include('kind: :set', 'asset "assets/01_saw.flac"', 'asset "assets/02_click.flac"', 'lanes: { smooth: 0.0015, law: :linear }')
+    expect(text).to include('kind: :set', 'asset "assets/saw.flac"', 'asset "assets/click.flac"', 'lanes: { smooth: 0.0015, law: :linear }')
     expect(text).to include('flow do', 'p00 ', 'p01 ')
 
     a = session
