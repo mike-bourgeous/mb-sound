@@ -50,8 +50,8 @@ module MB
       # it as a lane).
       #
       # Example (bin/sound.rb):
-      #     midi_tracks 'one_eighty.mid'
-      #     bass = midi_clip('one_eighty.mid', track: 'Bass', bars: 8, from: 16, cc: :fit)
+      #     midi_tracks 'song.mid'
+      #     bass = midi_clip('song.mid', track: 'Bass', bars: 8, from: 16, cc: :fit)
       #     bg :bass, bass.synth(voices: 1) { |v| v.hz.saw.lp4(v.mod.at(200..4000)) * v.amp_env }
       def midi_clip(filename, track: nil, channel: nil, bars: nil, from: 0, loop: true, slides: :auto, cc: :steps, timing: :score, sustain: true)
         MB::Sound::MIDI::Import.new(midi_import_path(filename)).clip(

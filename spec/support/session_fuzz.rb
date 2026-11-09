@@ -511,7 +511,7 @@ module SessionFuzz
     },
     ->(s) {
       # (fix-bus-resample-1) a bus whose chain reads ahead of its output
-      # (resamplers around a filter, the Nightfall drum bus), fed by a
+      # (resamplers around a filter, a converted song's drum bus), fed by a
       # melodic part: its latency is the chain's read-ahead at any buffer
       # size (before, two buffers late with its first buffer played three
       # times, so :buffer_size failed), the same through a bus tap
