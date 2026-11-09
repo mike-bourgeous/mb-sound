@@ -125,14 +125,16 @@ module MB
         # dry * sqrt(1 - mix), wet * sqrt(mix) (BlendMethods.gains'
         # :power law; until delays-2, 2026-10-31, the chorus's linear
         # dry * (1 - mix), wet * mix: the maintainer's "Equal power").
-        def self.mix_levels(dry, wet, mix)
+        # +law+ picks another BlendMethods::CURVES law (#dual_delay's
+        # +:mix_law+, e.g. :balance for the dB-T mix knob).
+        def self.mix_levels(dry, wet, mix, law: :power)
           return [dry, wet] if mix.nil?
 
           if mix.is_a?(Numeric)
             raise ArgumentError, "A delay's mix: is 0..1 (0 dry, 1 wet; got #{mix.inspect})" unless mix.real?
             mix = mix.to_f.clamp(0.0, 1.0)
           end
-          dg, wg = BlendMethods.gains(mix, :power)
+          dg, wg = BlendMethods.gains(mix, law)
           [StereoDelayMethods.level_product(dry, dg), StereoDelayMethods.level_product(wet, wg)]
         end
 
