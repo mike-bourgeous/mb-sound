@@ -76,6 +76,7 @@ require_relative 'tracker/s3m_reader'
 require_relative 'tracker/xm_reader'
 require_relative 'tracker/it_reader'
 require_relative 'tracker/player'
+require_relative 'tracker/names'
 require_relative 'tracker/import'
 require_relative 'tracker/set'
 

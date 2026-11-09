@@ -515,7 +515,10 @@ module MB
         song[:p03][:ch1].transpose(12)` moves a channel up an octave (notes
         carry their pitch as marks, the key picks the sample), and `tempo
         140` speeds the song up.  `mod_samples(path)` gives the samples
-        alone (`play mod_samples('tune.mod')[2]`).
+        alone (`play mod_samples('tune.mod')[2]`), named from the file's
+        instrument and sample names, or the file's name and the slot
+        (`tune 09`) where those hold the song's message, credits, or
+        greetings, as they often do.
 
         Each tick of the module is 1/96 of a whole note, so the session
         tempo is the module's tempo and rows at speed 6 are sixteenths.
