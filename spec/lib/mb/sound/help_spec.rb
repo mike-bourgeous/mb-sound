@@ -241,6 +241,7 @@ RSpec.describe MB::Sound::Help do
         end
       ensure
         MB::Sound::Help::LessonRunner.active = nil
+        MB::Sound::UI::Design.close # (lesson :design's steps open it; support/ui_screen_guard.rb)
         forget_lesson_ivars
         session&.close
       end
