@@ -67,6 +67,9 @@ RSpec.describe('Session::Carry over the shipped presets', :aggregate_failures) d
     tape_echo: ->(x) { x.tape_echo(:dub) },
     formant: ->(x) { x.formant(:a, :o) },
     squeeze: ->(x) { x.squeeze(:default, depth: 0.7, split: [250, 2500]) },
+    flanger: ->(x) { x.flanger(:jet, spread: 0.25) },
+    swell: ->(x) { x.swell(x * 0.5, amount: 6.db) },
+    limit: ->(x) { x.limit(ceiling: -6.db) }, # (a rebuild raised NoMethodError plan_snapshot until effects-2)
   }.freeze
 
   SWEEP_EFFECTS.each do |name, fx|
