@@ -37,6 +37,7 @@ module MB
         include DynamicsMethods
         include BlendMethods
         include MasteringMethods
+        include ModulationMethods
         include TremoloMethods
         node_traits memory: :none
 

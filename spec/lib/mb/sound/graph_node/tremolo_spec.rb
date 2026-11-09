@@ -77,6 +77,13 @@ RSpec.describe(MB::Sound::GraphNode::Tremolo, :aggregate_failures) do
       MB::Sound.rewind
     end
 
+    it 'reads a Length as one cycle, as every modulation effect does (ModulationLfo)' do
+      a = take(1.constant.tremolo(0.25.seconds, depth: 0, law: :linear, shape: :triangle), 12000)[0]
+      b = take(1.constant.tremolo(4, depth: 0, law: :linear, shape: :triangle), 12000)[0]
+      expect(a).to eq(b)
+      expect { 1.constant.tremolo(0.seconds) }.to raise_error(ArgumentError, /Length per cycle/)
+    end
+
     it 'starts at phase:' do
       b = take(1.constant.tremolo(1, depth: 0, law: :linear, shape: :triangle, phase: 0.25), 24000)[0]
       expect(b[0]).to eq(1.0)

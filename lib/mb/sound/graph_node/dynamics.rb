@@ -116,12 +116,15 @@ module MB
             @owner.sidechain_inputs || []
           end
 
+          # (owners that carry by adoption instead, the Limiter and the
+          # TransientShaper, give no snapshot: until effects-2 a track with
+          # a limiter failed its rebuild with a NoMethodError here)
           def plan_snapshot
-            @owner.plan_snapshot
+            @owner.respond_to?(:plan_snapshot) ? @owner.plan_snapshot : nil
           end
 
           def plan_restore(snapshot)
-            @owner.plan_restore(snapshot)
+            @owner.plan_restore(snapshot) if @owner.respond_to?(:plan_restore)
           end
 
           # Short sidechain and time inputs are padded by the node (see
@@ -769,3 +772,4 @@ end
 require_relative 'dynamics/transfer'
 require_relative 'dynamics/limiter'
 require_relative 'dynamics/crossover'
+require_relative 'dynamics/transient_shaper'

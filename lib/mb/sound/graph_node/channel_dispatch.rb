@@ -99,6 +99,8 @@ module MB
           :samples, :seconds,
           :loudness_meter, :lufs_meter,
           :chorus, :juno_chorus,
+          :flanger, # (stereo pairs: the sides' LFOs spread apart)
+          :rotary, :rotary_speaker, # (one cabinet: a stereo input is mixed to its one input)
           :phaser, # (stereo pairs: the sides' LFOs spread apart)
           *ConvolveMethods.public_instance_methods(false), # (one convolver: true stereo crosses the sides)
           *StereoDelayMethods.public_instance_methods(false), # (stereo in, stereo out)

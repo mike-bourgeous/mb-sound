@@ -17,8 +17,11 @@ module Catalog
   PATH = File.join(ROOT, 'design/catalog.md')
 
   # Bytes for the whole file (it loads into every session with CLAUDE.md;
-  # 15.8 KB, about 4,000 tokens, at its start in catalog-1)
-  BUDGET = 17_000
+  # 15.8 KB, about 4,000 tokens, at its start in catalog-1; 17 000 until
+  # effects-2 added five effects (flanger, rotary, swell, transients,
+  # chebyshev) with every description shortened: a question for the
+  # maintainer, with phaser-1's phaser coming too)
+  BUDGET = 17_500
 
   # Characters for a description, and bytes for a whole line
   DESCRIPTION_MAX = 80
@@ -37,9 +40,9 @@ module Catalog
     'Synthesis and oscillators' => %i[tone freq phase_table wavetable waveshape ping resonate adsr],
     'Arithmetic and math' => %i[+ - * / ** coerce at abs aabs real imag arg floor ceil round log log2 log10 ring],
     'Filters and EQ' => %i[filter lp1 hp1 lp4 diode formant peq peq_series bandpass_series hilbert_iir clip_rate inertia smooth],
-    'Distortion and shaping' => %i[softclip asoftclip clip aclip quantize aquantize decimate ease aease shape_db ashape_db sample_hold],
-    'Delays, reverb, chorus, tremolo, feedback' => %i[delay feedback_delay multitap haas ping_pong dual_delay tape_echo reverb convolve chorus phaser tremolo feedback],
-    'Dynamics, loudness, mastering' => %i[compress compand expand noise_gate limit duck squeeze bands mono_below ride master loudness_meter],
+    'Distortion and shaping' => %i[softclip asoftclip clip aclip quantize aquantize decimate ease aease shape_db ashape_db chebyshev sample_hold],
+    'Delays, reverb, chorus, tremolo, feedback' => %i[delay feedback_delay multitap haas ping_pong dual_delay tape_echo reverb convolve chorus phaser flanger rotary tremolo feedback],
+    'Dynamics, loudness, mastering' => %i[compress compand expand noise_gate limit duck swell transients squeeze bands mono_below ride master loudness_meter],
     'Channels, panning, blending' => %i[pan balance place stereo mono left right swap mid_side from_mid_side width matrix blend],
     'Time, length, and units' => %i[until and_then ringdown sounding seconds samples bars cycles radians],
     'Rates, rendering, and debugging' => %i[oversample resample bounce spy clear_spies debug],

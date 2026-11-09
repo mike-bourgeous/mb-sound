@@ -230,12 +230,24 @@ module MB
         and `inertia`, an acceleration-limited follower whose limit cycles
         chirp.
 
+        A flanger (`flanger`, presets in `L.fx.flanger`) mixes the sound
+        with a copy a few milliseconds late: the two cancel in a comb of
+        notches, and an LFO sweeping the delay moves the whole comb.
+        Feedback sharpens it (negative feedback sounds hollow and
+        metallic); rates take Hz or bars, `spread:` makes it stereo.  A
+        rotary speaker (`rotary`, `L.fx.rotary`) spins a treble horn and a
+        bass drum past two microphones: the pitch wavers as each comes
+        closer and recedes, the level as it turns toward and away, and a
+        knob on `speed:` spins them up and down with their inertia.
+
         `tremolo` swings the level along an LFO shape or a drawn cycle
         (`shape: [[0, 1], [0.25, -1], [1, -1]]`), tempo-synced or in Hz,
         with its depth in dB; `stereo_phase: 0.5` makes it an auto-pan.
+        `chebyshev` draws a waveshaper by the harmonics a full-scale sine
+        should get (`chebyshev(h2: 0.5, h3: 0.2)`, `L.fx.chebyshev`).
       TEXT
-      dsl :delay, :multitap, :ping_pong, :dual_delay, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :phaser, :tremolo, :softclip, :clip, :shape_db, :inertia, :decimate, :quantize, :ease, :oversample, :ring
-      note :delays, :feedback_loops, :reverbs, :chorus, :phaser
+      dsl :delay, :multitap, :ping_pong, :dual_delay, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :phaser, :flanger, :rotary, :tremolo, :softclip, :clip, :shape_db, :chebyshev, :inertia, :decimate, :quantize, :ease, :oversample, :ring
+      note :delays, :feedback_loops, :reverbs, :chorus, :phaser, :modulation
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do
         blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop
@@ -248,6 +260,14 @@ module MB
       example 'a dub tape echo' do
         blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop
         bg :try, (blip.tone.triangle.at(-14.db) * blip.amp_env).tape_echo(:dub)
+      end
+      example 'a jet flanger on a pad' do
+        bg :try, 110.hz.saw.at(-26.db).lp4(2000).flanger(:jet)
+      end
+      example 'an organ through a fast rotary speaker' do
+        organ = seq(A3, C4, E4).n2.loop
+        tones = (organ.tone.sine + organ.tone.transpose(12).sine.at(0.5) + organ.tone.transpose(19).sine.at(0.3)) * organ.amp_env
+        bg :try, tones.at(-18.db).rotary(:whirl)
       end
       example 'a phaser swirl on a drone' do
         bg :try, (110.hz.saw + 165.hz.saw).at(-20.db).phaser(:swirl)
@@ -269,11 +289,22 @@ module MB
         curves, a true-peak limiter, crossover bands, and squeeze.  Levels
         and gains in dB are written `-12.db` (`threshold: -18.db`,
         `makeup: 3.db`, `compand(-60.db => -80.db, 0.db => -12.db)`);
-        bare numbers are linear gains.
+        bare numbers are linear gains.  `swell` is `duck` mirrored: a
+        sidechain's level turns the signal up instead of down.
+
+        A transient shaper (`transients(attack: 6.db, sustain: -6.db)`)
+        compares envelope followers of different speeds: a fast one
+        running ahead of a slow one marks an attack, a slow one staying
+        above a fast one marks a decaying tail.  Each is turned up or down
+        by its amount, at any level.
       TEXT
-      dsl :compress, :expand, :noise_gate, :duck, :compand, :limit, :bands, :squeeze, :loudness_meter
+      dsl :compress, :expand, :noise_gate, :duck, :swell, :transients, :compand, :limit, :bands, :squeeze, :loudness_meter
       note :dynamics
       see :mixing
+      example 'punchier drums, shorter tails' do
+        beat = tr808(grid(16, kick: 'x...x...x...x...', snare: '....x.......x...', hat: 'x.x.x.x.x.x.x.x.').loop)
+        bg :try, beat.transients(attack: 6.db, sustain: -6.db).at(-12.db)
+      end
       example 'ducking a pad under a kick' do
         kick = tr808(grid(16, kick: 'x...x...x...x...').loop)
         bg :try, 110.hz.saw.at(-16.db).lp4(900).duck(kick.at(-12.db)) + kick.at(-12.db)

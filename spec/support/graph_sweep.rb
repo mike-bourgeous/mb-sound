@@ -237,6 +237,12 @@ module GraphSweep
       ['arithmetic', ->(c) { (c.sig * c.mod(0, 1) + 0.1.constant - c.sig(55) / 2.constant.+(c.mod(0, 1))) }],
       ['note numbers to Hz (NoteFrequency)', ->(c) { c.mod(48, 60).freq.tone.ramp * 0.5 + c.s::C4.saw * 0.1 }],
       ['power, abs, rounding, logs', ->(c) { (c.mod(0.1, 2) ** 2.constant) + c.sig.aabs + c.sig.abs + (c.mod(0.5, 3).log + c.mod(1, 4).log2 + c.mod(1, 4).log10).floor + c.sig.round + c.sig.ceil }],
+      # A shared (frozen) input with an operand that ends first: the trimmed
+      # view is copied, not written (effects-2)
+      ['power and divide of a shared input by a shorter operand', ->(c) {
+        m = c.mod(1, 2)
+        (m ** c.mod(0.5, 1).until(0.0021)) + (m / c.mod(1, 3).until(0.0013)) + m
+      }],
       ['complex parts', ->(c) { c.sig.real + 200.hz.complex_sine.imag + 200.hz.complex_sine.arg }],
       ['constant smooth', ->(c) { 0.5.constant(smoothing: 0.01) + c.sig }],
       ['smooth (B-spline, curve, adaptive, reset)', ->(c) {
@@ -427,7 +433,20 @@ module GraphSweep
       ['tape_echo live settings (tone, low_cut, drive, wow, flutter nodes; delays-2)', ->(c) {
         c.sig.tape_echo(:reel, time: 0.002, tone: c.mod(800, 6000), low_cut: c.mod(50, 400), drive: c.mod(0, 3), wow: c.mod(0, 0.5), flutter: c.mod(0, 0.1))
       }],
+      ['chebyshev (a polynomial curve, DC blocker)', ->(c) {
+        c.sig.chebyshev(:drawbar) + c.sig.chebyshev(h3: 0.5, h5: 0.2, drive: c.mod(0.5, 2)) + c.stereo_sig.chebyshev(:octaver, antialias: false).mixdown
+      }],
       ['chorus', ->(c) { c.stereo_sig.chorus(:juno2) }],
+      ['flanger presets and live settings (Flanger: swept delays, loops, through zero)', ->(c) {
+        c.sig.flanger(:jet, rate: 9, feedback: c.mod(-0.9, 0.9)).+(c.stereo_sig.flanger(:orbit, mix: c.mod(0, 1), depth: c.mod(0, 1)).mixdown) +
+          c.sig.flanger(:tape_flange, delay: c.mod(0.0005, 0.002), range: 0.5) * 0.5 + c.sig.flanger(:sheen, range: 0.5.ms..1.5.ms) +
+          c.sig.flanger(2.n16, law: :linear, feedback: 0, interpolation: :cubic, sweep: c.mod(-1, 1, 11)) +
+          c.sig.flanger(:steel, delay: 0.0002, range: c.mod(0, 3))
+      }],
+      ['rotary presets and a live speed (Rotary: crossover, rotors gliding, two microphones)', ->(c) {
+        c.sig.rotary(:whirl).mixdown + c.stereo_sig.rotary(speed: c.mod(0, 1, 3), horn: c.mod(0.5, 1), mix: c.mod(0.2, 1)).mixdown +
+          c.sig.rotary(:chorale, speed: :stop, crossover: 1200).mixdown
+      }],
       ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60.db) }],
       ['phaser (Phaser) mono, stereo, moving settings', ->(c) {
         st = c.stereo_sig.phaser(:swirl, feedback: c.mod(-0.9, 0.9), mix: c.mod(0.2, 0.8, 3))
@@ -441,7 +460,11 @@ module GraphSweep
                               upward_threshold: -40.db, attack: c.mod(0.001, 0.01), release: 1.n16, makeup: :auto)
       }],
       ['compand cubic, expand, noise_gate, duck', ->(c) {
-        c.sig.compand({ -60.db => -70.db, -20.db => -20.db, 0.db => -10.db }, interpolation: :cubic).expand(threshold: -30.db).noise_gate(threshold: -60.db).duck(c.trigger, amount: -6.db)
+        c.sig.compand({ -60.db => -70.db, -20.db => -20.db, 0.db => -10.db }, interpolation: :cubic).expand(threshold: -30.db).noise_gate(threshold: -60.db).duck(c.trigger, amount: -6.db).swell(c.trigger, amount: 6.db)
+      }],
+      ['transients (TransientShaper: followers, live amounts, linked and unlinked)', ->(c) {
+        c.sig.transients(attack: 6.db, sustain: -6.db) + c.stereo_sig.transients(attack: c.mod(0.5, 4), sustain: 3.db, link: false).mixdown +
+          (c.sig * c.trigger).transients(attack: -9.db, sustain: c.mod(1, 3), attack_time: 2.ms)
       }],
       ['compress, expand, duck with live threshold, ratio, mix (delays-2)', ->(c) {
         c.stereo_sig.compress(threshold: c.mod(0.02, 0.3), ratio: c.mod(1, 8), mix: c.mod(0, 1), makeup: :auto).mixdown.expand(threshold: c.mod(0.001, 0.05), ratio: c.mod(1, 4)).duck(c.trigger, threshold: c.mod(0.01, 0.2))

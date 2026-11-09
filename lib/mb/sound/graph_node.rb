@@ -32,6 +32,7 @@ require_relative 'graph_node/dynamics_methods'
 require_relative 'graph_node/sampling_methods'
 require_relative 'graph_node/blend_methods'
 require_relative 'graph_node/mastering_methods'
+require_relative 'graph_node/modulation_methods'
 require_relative 'graph_node/tremolo_methods'
 
 module MB
@@ -95,6 +96,7 @@ module MB
       include SamplingMethods
       include BlendMethods
       include MasteringMethods
+      include ModulationMethods
       include TremoloMethods
 
       # The per-channel DSL call that made this node, if any (see
@@ -553,6 +555,9 @@ require_relative 'graph_node/node_sequence'
 require_relative 'graph_node/ringdown'
 require_relative 'graph_node/sounding'
 require_relative 'graph_node/chorus_nodes'
+require_relative 'graph_node/modulation_lfo'
+require_relative 'graph_node/flanger'
+require_relative 'graph_node/rotary'
 require_relative 'graph_node/proc_node'
 require_relative 'graph_node/tee'
 require_relative 'graph_node/branch_watch'
@@ -580,6 +585,7 @@ require_relative 'graph_node/region_player'
 require_relative 'graph_node/shaper'
 require_relative 'graph_node/curve_shaper'
 require_relative 'graph_node/db_shaper'
+require_relative 'graph_node/chebyshev'
 require_relative 'graph_node/inertia'
 require_relative 'graph_node/four_pole'
 require_relative 'graph_node/formant'

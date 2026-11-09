@@ -54,7 +54,7 @@ module DocsIndex
     },
     'Sound' => {
       'oscillators' => 'Oscillators and antialiasing', 'envelopes' => 'Envelopes', 'filters' => 'Filters', 'delays' => 'Delays',
-      'chorus' => 'Chorus', 'phaser' => 'Phaser', 'reverbs' => 'Reverbs', 'dynamics' => 'Dynamics', 'drums' => 'Drum machines', 'sampler' => 'Sampler',
+      'chorus' => 'Chorus', 'phaser' => 'Phaser', 'modulation' => 'Modulation effects', 'reverbs' => 'Reverbs', 'dynamics' => 'Dynamics', 'drums' => 'Drum machines', 'sampler' => 'Sampler',
       'textures' => 'Textures', 'granular' => 'Granular and spectral stretch', 'loops' => 'Loop files and tempo-following loops',
       'regions' => 'Timeline regions',
       'sq80' => 'SQ-80 voice',

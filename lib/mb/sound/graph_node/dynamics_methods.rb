@@ -315,6 +315,48 @@ module MB
         end
         alias sidechain_duck duck
 
+        # #duck mirrored: turns this up while +sidechain+ is loud.
+        #
+        # A gain follower ("anti-duck").  It turns up by up to +amount+
+        # (e.g. 12.db; -12.db is the same, since a swell never cuts; a bare
+        # number is a linear gain of at least 1, see Decibels.boost_db)
+        # while +sidechain+ is above +threshold+, the boost growing 1 dB per
+        # dB above it, rising over +attack+ and falling back over +release+
+        # (one-pole time constants: seconds, Lengths, or Durations that
+        # follow the tempo) after +hold+.  The same detector, curve, and
+        # smoother as #duck with every gain negated: with the same settings
+        # and sidechain, `swell` boosts by exactly the dB `duck` cuts.
+        #
+        # Uses: a pad that breathes up with the drums, a reverb or delay
+        # return that opens while a part plays, a bass that swells with the
+        # kick instead of ducking under it, a texture that follows a voice.
+        #
+        # Example (bin/sound.rb):
+        #     kick = grid('x...x...x...x...').loop.trigger.ping(50, decay: 0.3)
+        #     pad = 110.hz.saw.at(-24.db).lp4(800)
+        #     bg [kick, pad.swell(kick, amount: 9.db, release: 1.n8)].sum
+        #     bg pad.swell(:drums, only: :kick)                    # a track's kick voice
+        #
+        # +sidechain+ may name a bus or track, as for #duck.
+        def swell(sidechain, amount: 12.db, threshold: -30.db, knee: 6, attack: 0.001, release: 1.n16, hold: 0.02,
+                  detector: :peak, rms: 0.01, link: true, lookahead: 0, only: nil)
+          raise ArgumentError, 'swell needs a sidechain node (e.g. the kick)' if sidechain.nil?
+          raise ArgumentError, 'only: picks a node inside a bus or track named by a Symbol (swell(:drums, only: :kick))' if only && !sidechain.is_a?(Symbol)
+          sidechain = BusTap.from(sidechain, only: only) if sidechain.is_a?(Symbol)
+          a = Decibels.boost_db(amount, 'amount')
+          t, _, shift, = DynamicsMethods.live_curve(threshold, nil, :swell)
+          transfer = Dynamics::Transfer.corners(t, [[t, 1.0, 2.0]], knee: knee, description: "swell #{dyn_fmt_db(a)} dB above #{threshold.respond_to?(:sample) ? 'a live threshold' : "#{dyn_fmt_db(t)} dB"}")
+          # (mirrored times: the gain rises over the attack and falls over
+          # the release, also above 0 dB (the boost time defaults to the
+          # fall), the hold delaying the fall)
+          finish_dynamics(Dynamics.new(
+            outputs, transfer: transfer, down: release, up: attack, hold: hold, hold_up: false,
+            detector: detector, rms: rms, link: link, sidechain: sidechain, lookahead: lookahead,
+            min_gain: 0.0, max_gain: a, shift: shift,
+          ))
+        end
+        alias anti_duck swell
+
         # A compander with any transfer curve (input dB to output dB).  The
         # curve is points, a block, or a Dynamics::Transfer.
         #
@@ -384,6 +426,36 @@ module MB
         end
         alias limiter limit
         alias brickwall limit
+
+        # A transient shaper: attack and sustain levels.
+        #
+        # See Dynamics::TransientShaper.
+        #
+        # Envelope followers of different speeds tell an attack (a fast
+        # follower running ahead of a slow-attack one) from a decaying tail
+        # (a slow-release follower staying above the fast one), whatever the
+        # level, so +attack+ (`6.db` punchier, `-6.db` softer) moves every
+        # onset by up to that much and +sustain+ (`6.db` longer, `-9.db`
+        # tighter, drier) every tail.  +attack_time+ (default 10 ms) is how
+        # long an onset counts as attack, +sustain_time+ (300 ms) how long
+        # a tail is followed, +release+ (50 ms) how fast the fast followers
+        # fall.  +attack+ and +sustain+ may be nodes (knobs; linear gains,
+        # read as dB every sample).  Linked across channels (+link+).  No
+        # latency.
+        #
+        # For one band only, split first: `drums.bands(200.hz) { |lo, hi|
+        # [lo, hi.transients(attack: 6.db)] }`.
+        #
+        # Examples (bin/sound.rb):
+        #     play drums.transients(attack: 6.db)                  # punchier hits
+        #     play drums.transients(attack: -6.db, sustain: 6.db)  # softer hits, longer tails
+        #     play room_mic.transients(sustain: -12.db)            # less room
+        def transients(attack: 0.db, sustain: 0.db, attack_time: 0.01, sustain_time: 0.3, release: 0.05, link: true)
+          finish_dynamics(Dynamics::TransientShaper.new(
+            outputs, attack: attack, sustain: sustain, attack_time: attack_time, sustain_time: sustain_time, release: release, link: link
+          ))
+        end
+        alias transient_shaper transients
 
         # Splits this signal into Linkwitz-Riley bands for the block to process.
         # The bands split at +frequencies+ (Hz numbers or Pitches, increasing)
