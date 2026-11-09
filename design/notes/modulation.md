@@ -63,4 +63,6 @@ The maintainer, 2026-10-24: "We should build a leslie sim in the effects project
 - **Microphones** `spread` turns apart (0.25 default: 90 degrees; 0 mono, 0.5 opposite).  Both end together `TAIL` (10 ms) after the input: the input is followed by silence and the delays don't ring out on their own (each would end at its own longest read, a different frame per side).
 - `horn:`/`drum:` levels (gains, Decibels, nodes), `mix:` linear (dry is the input's own sides).
 
+Cost (Mac container, YJIT, thread CPU per sample after a `110.hz.saw` source, while other sessions ran): 1658 ns (8.0% of realtime) at 128-sample buffers and 1165 ns (5.6%) at 800 for `:cabinet` and `:whirl` alike; a moving `speed:` node 1931 / 1254 ns.  Four moving sinc delays (two rotors x two microphones) are most of it; `:cubic` reads, or one delay per rotor read at two positions, would cut it (not built: a question).
+
 Presets: `:cabinet` (slow, the defaults), `:whirl` (fast), `:chorale` (horn 0.9, doppler 0.6, tremolo 0.5, spread 0.4, mix 0.8: gentle and wide).  Not modeled (questions): the horn's directivity filtering (a brighter sound pointing at the microphone), cabinet resonances, the amplifier's overdrive (a `softclip` before it does that), the brake; a stereo input kept per side.
