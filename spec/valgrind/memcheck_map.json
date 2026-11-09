@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-11-07",
+  "generated": "2026-11-09",
   "specs": {
     "gems/mb-term/spec/native_spec.rb": {
       "fast_term": [
@@ -547,6 +547,9 @@
       "fast_delay": [
         "FastDelay.network",
         "FastDelay.read"
+      ],
+      "fast_sound": [
+        "FastSound.cookbook"
       ]
     },
     "spec/lib/mb/sound/device_input_spec.rb": {
@@ -652,6 +655,7 @@
     },
     "spec/lib/mb/sound/filter/delay_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
         "FastArithmetic.min_max",
@@ -847,6 +851,7 @@
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
+        "FastArithmetic.copy_range",
         "FastArithmetic.divide",
         "FastArithmetic.fill_range",
         "FastArithmetic.last_at_least",
@@ -991,6 +996,7 @@
     },
     "spec/lib/mb/sound/graph_node/multitap_delay_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
@@ -1016,7 +1022,8 @@
       "fast_arithmetic": [
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
-        "FastArithmetic.copy"
+        "FastArithmetic.copy",
+        "FastArithmetic.copy_range"
       ],
       "fast_filter": [
         "FastFilter.svf"
@@ -1025,7 +1032,8 @@
         "FastResample#initialize",
         "FastResample#lookup_converter",
         "FastResample#read",
-        "FastResample#setup_converter_type"
+        "FastResample#setup_converter_type",
+        "FastResample.min_phase"
       ],
       "fast_sound": [
         "FastSound.cookbook",
@@ -1124,6 +1132,7 @@
         "FastArithmetic.circular_write",
         "FastArithmetic.complex_part",
         "FastArithmetic.copy",
+        "FastArithmetic.copy_range",
         "FastArithmetic.divide",
         "FastArithmetic.ease_plain",
         "FastArithmetic.fill_range",
@@ -1756,8 +1765,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -2242,10 +2249,12 @@
         "FastDelay"
       ],
       "includes": [
+        "ext/mb/sound/include/mb_biquad.h",
         "ext/mb/sound/include/mb_delay_interp.h"
       ],
       "depend": {
         "fast_delay.o": [
+          "ext/mb/sound/include/mb_biquad.h",
           "ext/mb/sound/include/mb_delay_interp.h"
         ]
       }
