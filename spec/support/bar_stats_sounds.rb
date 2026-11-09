@@ -109,14 +109,22 @@ module BarStatsSounds
   def times(seconds) = Numo::DFloat.new((seconds * RATE).round).seq / RATE
 
   # A 55 Hz kick decaying over about 150 ms.
+  # (Made once, frozen, as is each chord: #add only reads them; fix-batch23,
+  # 59 ms a 4-bar song before, 17 ms after)
   def kick
-    t = times(0.2)
-    Numo::NMath.sin(t * (2 * Math::PI * 55)) * Numo::NMath.exp(-t * 20) * 0.5
+    @kick ||= begin
+      t = times(0.2)
+      (Numo::NMath.sin(t * (2 * Math::PI * 55)) * Numo::NMath.exp(-t * 20) * 0.5).freeze
+    end
   end
 
   # The chord for +seconds+ (+semis+ up), left and right (a quarter cycle
   # apart on the right unless +mono+), with 5 ms fades.
   def chord(seconds, semis = 0, mono = false)
+    (@chords ||= {})[[seconds, semis, mono]] ||= make_chord(seconds, semis, mono).each(&:freeze).freeze
+  end
+
+  def make_chord(seconds, semis, mono)
     t = times(seconds)
     l = Numo::DFloat.zeros(t.length)
     r = Numo::DFloat.zeros(t.length)
