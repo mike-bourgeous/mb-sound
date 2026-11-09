@@ -180,6 +180,28 @@ module MB
           db_of(value, name, zero: true).abs
         end
 
+        # A swell amount as dB of boost (0 or more), the mirror of
+        # .reduction_db: a Decibels value's magnitude, so 12.db and -12.db
+        # both swell by 12 dB (a swell never cuts), a bare linear gain of at
+        # least 1 by its dB (4 swells by 12 dB).  A bare number from 0 up to
+        # 1 raises ("for 12 dB of swell write 12.db"), or in live mode is
+        # read as dB of boost with a warning; a bare negative number follows
+        # .db_of.
+        def boost_db(value, name)
+          return checked(value, name).db_value.abs if value.is_a?(Decibels)
+
+          v = checked(value, name).to_f
+          if v >= 0 && v < 1
+            message = "#{name}: #{value.inspect} is a linear gain below 1, and a swell never cuts; for #{value.inspect} dB of swell write #{value.inspect}.db"
+            raise ArgumentError, message unless MB::Sound.live?
+
+            warn_once(:live_boost, "#{name}: #{value.inspect} is read as #{value.inspect} dB of swell in live mode; write #{value.inspect}.db (bare numbers are linear gains)")
+            return v
+          end
+
+          db_of(value, name).abs
+        end
+
         # Raises unless +value+ is a real number (not NaN); returns it.
         def checked(value, name)
           unless value.is_a?(Numeric) && value.real? && !value.to_f.nan?

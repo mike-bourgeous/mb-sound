@@ -437,7 +437,7 @@ module GraphSweep
                               upward_threshold: -40.db, attack: c.mod(0.001, 0.01), release: 1.n16, makeup: :auto)
       }],
       ['compand cubic, expand, noise_gate, duck', ->(c) {
-        c.sig.compand({ -60.db => -70.db, -20.db => -20.db, 0.db => -10.db }, interpolation: :cubic).expand(threshold: -30.db).noise_gate(threshold: -60.db).duck(c.trigger, amount: -6.db)
+        c.sig.compand({ -60.db => -70.db, -20.db => -20.db, 0.db => -10.db }, interpolation: :cubic).expand(threshold: -30.db).noise_gate(threshold: -60.db).duck(c.trigger, amount: -6.db).swell(c.trigger, amount: 6.db)
       }],
       ['compress, expand, duck with live threshold, ratio, mix (delays-2)', ->(c) {
         c.stereo_sig.compress(threshold: c.mod(0.02, 0.3), ratio: c.mod(1, 8), mix: c.mod(0, 1), makeup: :auto).mixdown.expand(threshold: c.mod(0.001, 0.05), ratio: c.mod(1, 4)).duck(c.trigger, threshold: c.mod(0.01, 0.2))

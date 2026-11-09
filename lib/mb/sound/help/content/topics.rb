@@ -261,9 +261,10 @@ module MB
         curves, a true-peak limiter, crossover bands, and squeeze.  Levels
         and gains in dB are written `-12.db` (`threshold: -18.db`,
         `makeup: 3.db`, `compand(-60.db => -80.db, 0.db => -12.db)`);
-        bare numbers are linear gains.
+        bare numbers are linear gains.  `swell` is `duck` mirrored: a
+        sidechain's level turns the signal up instead of down.
       TEXT
-      dsl :compress, :expand, :noise_gate, :duck, :compand, :limit, :bands, :squeeze, :loudness_meter
+      dsl :compress, :expand, :noise_gate, :duck, :swell, :compand, :limit, :bands, :squeeze, :loudness_meter
       note :dynamics
       see :mixing
       example 'ducking a pad under a kick' do

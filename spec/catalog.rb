@@ -39,7 +39,7 @@ module Catalog
     'Filters and EQ' => %i[filter lp1 hp1 lp4 diode formant peq peq_series bandpass_series hilbert_iir clip_rate inertia smooth],
     'Distortion and shaping' => %i[softclip asoftclip clip aclip quantize aquantize decimate ease aease shape_db ashape_db sample_hold],
     'Delays, reverb, chorus, feedback' => %i[delay feedback_delay multitap haas ping_pong tape_echo reverb convolve chorus flanger feedback],
-    'Dynamics, loudness, mastering' => %i[compress compand expand noise_gate limit duck squeeze bands mono_below ride master loudness_meter],
+    'Dynamics, loudness, mastering' => %i[compress compand expand noise_gate limit duck swell squeeze bands mono_below ride master loudness_meter],
     'Channels, panning, blending' => %i[pan balance place stereo mono left right swap mid_side from_mid_side width matrix blend],
     'Time, length, and units' => %i[until and_then ringdown sounding seconds samples bars cycles radians],
     'Rates, rendering, and debugging' => %i[oversample resample bounce spy clear_spies debug],

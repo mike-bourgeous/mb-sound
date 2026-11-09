@@ -47,6 +47,6 @@ The input plus a copy through a delay of a few milliseconds swept by an LFO.  Mi
 | Stereo (LFO phase between sides) | `spread:` | degrees / 360 (0.5 = opposite) |
 | Mix (dry/wet %) | `mix:` | percent / 100 (assumes a linear crossfade) |
 
-**Cost** (Mac container, YJIT, thread CPU per sample after the source's own cost; `/claude/jobs/e84fa5c8/tmp/effects-2/proto/cpu.rb`): see the table added with the measurement below.
+**Cost** (Mac container, YJIT, thread CPU ns per sample after the source's own cost, best of 3 x 4 s on a `110.hz.saw`, while another session's memcheck ran; % of realtime in parentheses): mono presets `:sweep` 292 (1.40%) at 128-sample buffers, 186 (0.89%) at 800; `:jet` 308 / 189; `:steel` 295 / 176; stereo presets `:sheen` 580 (2.78%) / 345 (1.66%), `:orbit` 559 / 336; `:tape_flange` (mono, through zero: one more delay and a Mixer) 494 (2.37%) / 327 (1.57%).
 
 **Older script**: `bin/effects/flanger.rb` (2022) builds its own flanger from a delay, a feedback loop, softclips, and oversampling, with audio-rate LFO examples (to 3300 Hz); it is unchanged (whether it becomes a front end of `flanger` is a question: its examples depend on the softclips in the loop and the oversampling).

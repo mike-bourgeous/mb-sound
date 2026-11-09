@@ -345,6 +345,54 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
     end
   end
 
+  describe '#swell' do
+    it 'swells by the amount while the sidechain is loud, then falls back' do
+      kick = Numo::SFloat.zeros(96000)
+      kick[0...2400] = 1.0
+      node = 0.25.constant.swell(arr(kick), amount: 12.db, threshold: -30.db, attack: 0, release: 0.05, hold: 0, knee: 0)
+      out = render(node, 96000)[0]
+      expect(db(out[2000] / 0.25)).to be_within(1e-4).of(12)
+      expect(db(out[2400 + 2399] / 0.25)).to be_within(0.01).of(12 * Math.exp(-1))
+      expect(db(out[95999] / 0.25)).to be < 0.001
+      expect(db(out[95999] / 0.25)).to be >= 0
+    end
+
+    it 'boosts by exactly the dB a duck with the same settings cuts (the mirror of #duck)' do
+      MB::Sound.bpm(120)
+      kick = -> { MB::Sound.grid('x...x..x..x.x...').loop.trigger.ping(50, decay: 0.3) }
+      [{}, { amount: 6.db, release: 1.n8, hold: 0.05, knee: 0 }, { threshold: -12.db, attack: 0.01, detector: :rms }].each do |o|
+        amount = o[:amount] || 12.db
+        down = render(1.constant.duck(kick.(), **o.merge(amount: (-amount.db_value).db)), 96000)[0]
+        up = render(1.constant.swell(kick.(), **o.merge(amount: amount)), 96000)[0]
+        sum = 20 * Numo::NMath.log10(Numo::DFloat.cast(down)) + 20 * Numo::NMath.log10(Numo::DFloat.cast(up))
+        expect(sum.abs.max).to be < 1e-5, "#{o}: #{sum.abs.max} dB"
+        expect(20 * Math.log10(up.max)).to be > 1
+      end
+    end
+
+    it 'needs a sidechain, and swells by the magnitude of any dB amount (never cuts)' do
+      expect { 1.constant.swell(nil) }.to raise_error(ArgumentError, /sidechain/)
+      expect { 1.constant.swell(1.constant, amount: 0.5) }.to raise_error(ArgumentError, /amount: 0.5 is a linear gain below 1.*write 0\.5\.db/)
+      expect { 1.constant.swell(1.constant, amount: -6) }.to raise_error(ArgumentError, /amount: -6 is a linear gain/)
+      expect { 1.constant.swell(1.constant, only: :kick) }.to raise_error(ArgumentError, /only:/)
+
+      kick = Numo::SFloat.ones(4800)
+      s = ->(amount) { render(0.25.constant.swell(arr(kick), amount: amount, threshold: -30.db, attack: 0, hold: 0, knee: 0), 4800)[0][4000] }
+      expect(s.(12.db)).to eq(s.(-12.db))
+      expect(db(s.(4) / 0.25)).to be_within(1e-3).of(20 * Math.log10(4))
+      expect(1.constant.anti_duck(arr(kick)).to_ruby).to include('swell(')
+    end
+
+    it 'prints back as Ruby and loads from a graph document with the same samples' do
+      g = -> { 110.hz.saw.at(0.2).until(0.3).swell(MB::Sound.grid('x...x...').loop.trigger.ping(50, decay: 0.2), amount: 9.db, release: 1.n8) }
+      code = g.().to_ruby
+      expect(code).to include('swell(', 'amount: 9.db', 'release: 1.n8')
+      ref = RecipeHelpers.render(g.(), buffers: 30)
+      expect(RecipeHelpers.max_diff(ref, RecipeHelpers.render(RecipeHelpers.eval_recipe(code), buffers: 30))).to eq(0)
+      expect(RecipeHelpers.max_diff(ref, RecipeHelpers.render(MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g.())), buffers: 30))).to eq(0)
+    end
+  end
+
   describe '#expand and #noise_gate' do
     it 'expands below the threshold down to the range' do
       g = ->(level, **o) { db((10.0**(level / 20.0)).constant.expand(threshold: -40.db, ratio: 3, knee: 0, attack: 0, release: 0, **o).sample(4)[-1]) }

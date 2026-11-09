@@ -94,6 +94,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `noise_gate(threshold:, range:, ...)` A noise gate: a steep expander (ratio 20, range -80.db by default)
 - `limit/brickwall/limiter(ceiling:, lookahead:, ...)` A lookahead brickwall limiter (Dynamics::Limiter): output stays under ceiling
 - `duck/sidechain_duck(sidechain, amount:, threshold:, ...)` Sidechain ducking: turns this signal down while sidechain is loud
+- `swell/anti_duck(sidechain, amount:, threshold:, ...)` The mirror of #duck: turns this signal up while sidechain is loud
 - `squeeze(preset, depth:, time:, ...)` Multiband upward + downward compression ("squeeze it to eleven")
 - `bands/multiband(*frequencies, order:)` Splits this signal into Linkwitz-Riley bands for the block to process
 - `mono_below(frequency, order:)` Makes everything below frequency (Hz or a Pitch) mono
