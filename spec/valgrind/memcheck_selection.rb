@@ -82,6 +82,7 @@ module MemcheckSelection
     'spec/lib/mb/sound/sampler_spec.rb',             # FastSampler.play through SamplerVoice (synths, chops, SFZ)
     'spec/lib/mb/sound/granular_spec.rb',            # FastSampler.grains through Grains (scans, voices, buffer sizes)
     'spec/lib/mb/sound/graph_node/dynamics_spec.rb', # FastDynamics.compand/limit/crossover through the nodes
+    'spec/lib/mb/sound/graph_node/dynamics/transient_shaper_spec.rb', # FastDynamics.transient against its mirror
     'spec/lib/mb/sound/graph_node/reverb_spec.rb',   # FastReverb::Network through Reverb (modulation, loop processing, graph mode)
     'spec/lib/mb/sound/graph_node/convolver_spec.rb', # FastConvolve::Engine through Convolver (channels, buffer sizes, carry)
     'spec/lib/mb/sound/loudness_spec.rb',            # FastLoudness.true_peak

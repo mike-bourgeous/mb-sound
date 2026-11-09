@@ -263,10 +263,20 @@ module MB
         `makeup: 3.db`, `compand(-60.db => -80.db, 0.db => -12.db)`);
         bare numbers are linear gains.  `swell` is `duck` mirrored: a
         sidechain's level turns the signal up instead of down.
+
+        A transient shaper (`transients(attack: 6.db, sustain: -6.db)`)
+        compares envelope followers of different speeds: a fast one
+        running ahead of a slow one marks an attack, a slow one staying
+        above a fast one marks a decaying tail.  Each is turned up or down
+        by its amount, at any level.
       TEXT
-      dsl :compress, :expand, :noise_gate, :duck, :swell, :compand, :limit, :bands, :squeeze, :loudness_meter
+      dsl :compress, :expand, :noise_gate, :duck, :swell, :transients, :compand, :limit, :bands, :squeeze, :loudness_meter
       note :dynamics
       see :mixing
+      example 'punchier drums, shorter tails' do
+        beat = tr808(grid(16, kick: 'x...x...x...x...', snare: '....x.......x...', hat: 'x.x.x.x.x.x.x.x.').loop)
+        bg :try, beat.transients(attack: 6.db, sustain: -6.db).at(-12.db)
+      end
       example 'ducking a pad under a kick' do
         kick = tr808(grid(16, kick: 'x...x...x...x...').loop)
         bg :try, 110.hz.saw.at(-16.db).lp4(900).duck(kick.at(-12.db)) + kick.at(-12.db)

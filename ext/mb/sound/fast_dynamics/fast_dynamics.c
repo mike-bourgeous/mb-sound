@@ -1,11 +1,13 @@
 /*
  * Dynamics kernels for MB::Sound::GraphNode::Dynamics (compressors,
  * expanders, gates, ducking, companders), Dynamics::Limiter (lookahead
- * brickwall), and Dynamics::Crossover (Linkwitz-Riley band splitting).
+ * brickwall), Dynamics::Crossover (Linkwitz-Riley band splitting), and
+ * Dynamics::TransientShaper (attack and sustain from envelope followers).
  * See design/notes/dynamics.md.
  *
  * Every kernel has an exact Ruby mirror (Dynamics.process_ruby,
- * Dynamics::Limiter.process_ruby, Dynamics::Crossover.process_ruby) doing
+ * Dynamics::Limiter.process_ruby, Dynamics::Crossover.process_ruby,
+ * Dynamics::TransientShaper.process_ruby) doing
  * the same double operations in the same order (built with
  * -ffp-contract=off), so specs compare them for equality.  Signal inputs
  * are read as float32 values (see mb_read_signal_input).
@@ -374,6 +376,152 @@ static VALUE ruby_limit(VALUE self, VALUE outs, VALUE ins, VALUE params, VALUE s
 	return outs;
 }
 
+// Transient shaper settings (see ruby_transient and
+// Dynamics::TransientShaper#kernel_params).
+enum tsh_param {
+	TSH_PEAK, // the peak envelope's release coefficient
+	TSH_FAST, // the fast followers' attack coefficient
+	TSH_ATTACK, // the slow-attack follower's attack coefficient
+	TSH_RELEASE, // the fast followers' release coefficient
+	TSH_SUSTAIN, // the slow-release follower's release coefficient
+	TSH_LINK, // 1: one detector for every channel
+	TSH_DB_SCALE, // ln(10) / 20, so the gain is exp(dB * TSH_DB_SCALE)
+	TSH_COUNT
+};
+
+// Detector states per detector: peak, fast, slow attack, slow release.
+#define TSH_STATE 4
+
+// Envelopes below this count as silence (no attack or sustain).
+#define TSH_FLOOR 1e-10
+
+/*
+ * call-seq:
+ *   MB::Sound::FastDynamics.transient(outs, ins, params, amounts, state) -> outs
+ *
+ * A transient shaper (Dynamics::TransientShaper): each sample, a peak
+ * envelope p of the detector (|x|, or the loudest channel's with
+ * params[TSH_LINK]) feeds three one-pole followers: f (fast attack, fast
+ * release), sa (slow attack, fast release), and sr (fast attack, slow
+ * release).  The attack share a = 1 - sa / f (while f > sa) is near 1 at a
+ * sharp onset and 0 on steady sound; the sustain share s = 1 - f / sr
+ * (while sr > f) grows as the sound decays.  The gain is
+ * exp((attack_db * a + sustain_db * s) * params[TSH_DB_SCALE]).
+ *
+ * +outs+ is an Array of contiguous Numo::SFloats (one per channel, the
+ * sample count long); +ins+ an Array of the same number of signals.
+ * +params+ is a DFloat of TSH_COUNT settings, +amounts+ an Array of two
+ * signals (attack and sustain amounts in dB), +state+ a DFloat of
+ * TSH_STATE values per detector.  The exact Ruby mirror is
+ * Dynamics::TransientShaper.process_ruby.
+ */
+static VALUE ruby_transient(VALUE self, VALUE outs, VALUE ins, VALUE params, VALUE amounts, VALUE state)
+{
+	long n = dyn_check_outputs(outs);
+	long nch = RARRAY_LEN(outs);
+	Check_Type(ins, T_ARRAY);
+	if (RARRAY_LEN(ins) != nch) {
+		rb_raise(rb_eArgError, "Expected %ld inputs (got %ld)", nch, RARRAY_LEN(ins));
+	}
+	Check_Type(amounts, T_ARRAY);
+	if (RARRAY_LEN(amounts) != 2) {
+		rb_raise(rb_eArgError, "Expected two amounts (attack and sustain dB)");
+	}
+
+	const double *par = dyn_dfloat_read(params, TSH_COUNT, "Params");
+	double c_peak = par[TSH_PEAK];
+	double c_fast = par[TSH_FAST];
+	double c_att = par[TSH_ATTACK];
+	double c_rel = par[TSH_RELEASE];
+	double c_sus = par[TSH_SUSTAIN];
+	int link = par[TSH_LINK] != 0;
+	double db_scale = par[TSH_DB_SCALE];
+	long ndet = link ? 1 : nch;
+	double *st = dyn_dfloat_ptr(state, ndet * TSH_STATE, "State");
+
+	VALUE *in_v = ALLOCA_N(VALUE, nch);
+	struct mb_signal *in = ALLOCA_N(struct mb_signal, nch);
+	float **out = ALLOCA_N(float *, nch);
+	double *x = ALLOCA_N(double, nch);
+	double *gain = ALLOCA_N(double, ndet);
+	for (long c = 0; c < nch; c++) {
+		in_v[c] = rb_ary_entry(ins, c);
+		mb_signal_input(&in_v[c], n, "Input", &in[c]);
+		out[c] = mb_sfloat_ptr(rb_ary_entry(outs, c));
+	}
+	VALUE amount_v[2] = { rb_ary_entry(amounts, 0), rb_ary_entry(amounts, 1) };
+	struct mb_signal amount[2];
+	mb_signal_input(&amount_v[0], n, "Attack amount", &amount[0]);
+	mb_signal_input(&amount_v[1], n, "Sustain amount", &amount[1]);
+
+	for (long i = 0; i < n; i++) {
+		for (long c = 0; c < nch; c++) {
+			x[c] = mb_signal_at(&in[c], i);
+		}
+		double ad = mb_signal_at(&amount[0], i);
+		double sd = mb_signal_at(&amount[1], i);
+
+		for (long d = 0; d < ndet; d++) {
+			double l = fabs(x[d]);
+			if (link) {
+				for (long c = 1; c < nch; c++) {
+					double v = fabs(x[c]);
+					if (v > l) {
+						l = v;
+					}
+				}
+			}
+
+			double *ds = st + d * TSH_STATE;
+			double p = ds[0];
+			p = l > p ? l : l + (p - l) * c_peak;
+			double f = ds[1];
+			f = p + (f - p) * (p > f ? c_fast : c_rel);
+			double sa = ds[2];
+			sa = p + (sa - p) * (p > sa ? c_att : c_rel);
+			double sr = ds[3];
+			sr = p + (sr - p) * (p > sr ? c_fast : c_sus);
+			if (p < DYN_FLUSH) {
+				p = 0.0;
+			}
+			if (f < DYN_FLUSH) {
+				f = 0.0;
+			}
+			if (sa < DYN_FLUSH) {
+				sa = 0.0;
+			}
+			if (sr < DYN_FLUSH) {
+				sr = 0.0;
+			}
+			ds[0] = p;
+			ds[1] = f;
+			ds[2] = sa;
+			ds[3] = sr;
+
+			double a = f > sa && f > TSH_FLOOR ? 1.0 - sa / f : 0.0;
+			double s = sr > f && sr > TSH_FLOOR ? 1.0 - f / sr : 0.0;
+			gain[d] = exp((ad * a + sd * s) * db_scale);
+		}
+
+		for (long c = 0; c < nch; c++) {
+			out[c][i] = (float)(x[c] * gain[link ? 0 : c]);
+		}
+	}
+
+	for (long c = 0; c < nch; c++) {
+		RB_GC_GUARD(in_v[c]);
+	}
+	RB_GC_GUARD(amount_v[0]);
+	RB_GC_GUARD(amount_v[1]);
+	RB_GC_GUARD(outs);
+	RB_GC_GUARD(ins);
+	RB_GC_GUARD(params);
+	RB_GC_GUARD(amounts);
+	RB_GC_GUARD(state);
+
+	return outs;
+}
+
 // Crossover program rows (see ruby_crossover).
 #define XO_ROW 9
 enum xo_kind {
@@ -506,4 +654,5 @@ void Init_fast_dynamics(void)
 	rb_define_module_function(fast_dynamics, "compand", ruby_compand, 8);
 	rb_define_module_function(fast_dynamics, "limit", ruby_limit, 6);
 	rb_define_module_function(fast_dynamics, "crossover", ruby_crossover, 6);
+	rb_define_module_function(fast_dynamics, "transient", ruby_transient, 5);
 }

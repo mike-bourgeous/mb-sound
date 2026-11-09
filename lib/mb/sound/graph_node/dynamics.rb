@@ -772,3 +772,4 @@ end
 require_relative 'dynamics/transfer'
 require_relative 'dynamics/limiter'
 require_relative 'dynamics/crossover'
+require_relative 'dynamics/transient_shaper'

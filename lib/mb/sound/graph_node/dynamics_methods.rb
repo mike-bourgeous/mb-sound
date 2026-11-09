@@ -426,6 +426,34 @@ module MB
         alias limiter limit
         alias brickwall limit
 
+        # A transient shaper (Dynamics::TransientShaper): turns attacks and sustain up or down.
+        #
+        # Envelope followers of different speeds tell an attack (a fast
+        # follower running ahead of a slow-attack one) from a decaying tail
+        # (a slow-release follower staying above the fast one), whatever the
+        # level, so +attack+ (`6.db` punchier, `-6.db` softer) moves every
+        # onset by up to that much and +sustain+ (`6.db` longer, `-9.db`
+        # tighter, drier) every tail.  +attack_time+ (default 10 ms) is how
+        # long an onset counts as attack, +sustain_time+ (300 ms) how long
+        # a tail is followed, +release+ (50 ms) how fast the fast followers
+        # fall.  +attack+ and +sustain+ may be nodes (knobs; linear gains,
+        # read as dB every sample).  Linked across channels (+link+).  No
+        # latency.
+        #
+        # For one band only, split first: `drums.bands(200.hz) { |lo, hi|
+        # [lo, hi.transients(attack: 6.db)] }`.
+        #
+        # Examples (bin/sound.rb):
+        #     play drums.transients(attack: 6.db)                  # punchier hits
+        #     play drums.transients(attack: -6.db, sustain: 6.db)  # softer hits, longer tails
+        #     play room_mic.transients(sustain: -12.db)            # less room
+        def transients(attack: 0.db, sustain: 0.db, attack_time: 0.01, sustain_time: 0.3, release: 0.05, link: true)
+          finish_dynamics(Dynamics::TransientShaper.new(
+            outputs, attack: attack, sustain: sustain, attack_time: attack_time, sustain_time: sustain_time, release: release, link: link
+          ))
+        end
+        alias transient_shaper transients
+
         # Splits this signal into Linkwitz-Riley bands for the block to process.
         # The bands split at +frequencies+ (Hz numbers or Pitches, increasing)
         # with crossovers of +order+ 2, 4 (default), or 8; the block gets one

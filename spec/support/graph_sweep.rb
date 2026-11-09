@@ -439,6 +439,10 @@ module GraphSweep
       ['compand cubic, expand, noise_gate, duck', ->(c) {
         c.sig.compand({ -60.db => -70.db, -20.db => -20.db, 0.db => -10.db }, interpolation: :cubic).expand(threshold: -30.db).noise_gate(threshold: -60.db).duck(c.trigger, amount: -6.db).swell(c.trigger, amount: 6.db)
       }],
+      ['transients (TransientShaper: followers, live amounts, linked and unlinked)', ->(c) {
+        c.sig.transients(attack: 6.db, sustain: -6.db) + c.stereo_sig.transients(attack: c.mod(0.5, 4), sustain: 3.db, link: false).mixdown +
+          (c.sig * c.trigger).transients(attack: -9.db, sustain: c.mod(1, 3), attack_time: 2.ms)
+      }],
       ['compress, expand, duck with live threshold, ratio, mix (delays-2)', ->(c) {
         c.stereo_sig.compress(threshold: c.mod(0.02, 0.3), ratio: c.mod(1, 8), mix: c.mod(0, 1), makeup: :auto).mixdown.expand(threshold: c.mod(0.001, 0.05), ratio: c.mod(1, 4)).duck(c.trigger, threshold: c.mod(0.01, 0.2))
       }],
