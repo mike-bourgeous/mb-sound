@@ -99,9 +99,26 @@ RSpec.describe('kernel check mode over the graph sweep', :check_shared) do
     MB::Sound::Plan.enabled = old
   end
 
-  # Buffer sizes and counts: the everyday size, then (slow tier) one-sample
-  # buffers over the edges and a long buffer.
-  sizes = [[128, 3], *SlowTier.slow_tier([[7, 4], [800, 2]], keep: 0)]
+  # Tables made once per process from seconds of audio (the TR-909's ROM
+  # samples, 0.25-2.8 s each; NoiseColor's 2 s impulse energies) through
+  # kernels the sweep compares on its own buffers anyway: made in :c mode
+  # first, so check mode doesn't run their Ruby mirrors over all of it
+  # (fix-batch23: 2.9 s of biquad mirrors in the first TR-909 example,
+  # 1.4 s in NoiseColor pink's, measured alone)
+  before(:context) do
+    MB::Sound::Kernels.with(:c) do
+      MB::Sound::Drums::TR909::ROM.each_key { |name| MB::Sound::Drums::TR909.rom(name) }
+      %i[pink brown].each { |color| MB::Sound::Filter::NoiseColor.new(color) }
+    end
+  end
+
+  # Buffer sizes and counts: the everyday size, then (slow tier) short
+  # buffers over the edges and a long buffer.  (One long buffer since
+  # fix-batch23, not two: the feedback loops' per-sample mirror (:loop)
+  # was 21.6 of the sweep's 38 s of Ruby mirrors with the slow tier, most
+  # of it in the 800-sample buffers; the 128- and 7-sample buffers check
+  # state carried across buffers.)
+  sizes = [[128, 3], *SlowTier.slow_tier([[7, 4], [800, 1]], keep: 0)]
 
   GraphSweep.factories.each do |name, factory|
     it "matches the C kernels' Ruby mirrors for #{name}, planned and unplanned" do
