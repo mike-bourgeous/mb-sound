@@ -23,6 +23,22 @@ RSpec.describe(UIScreenGuard, :aggregate_failures) do
     MB::Sound::UI.instance_variable_set(:@tiles, nil)
   end
 
+  # (fix-fits-isolation: a design left open made a later spec's track of
+  # the same name rebuild on the next buffer instead of the next bar)
+  it 'names a sound design left open, and closes it' do
+    s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1, realtime: false)
+    MB::Sound::Session.with_context(session: s) { MB::Sound::UI::Design.open(:lead) }
+    expect(MB::Sound::UI::Design.designing?(:lead)).to eq(true)
+    expect(UIScreenGuard.problems).to eq(['sound design is still open on :lead (UI::Design.close)'])
+    UIScreenGuard.clean_up
+    expect(MB::Sound::UI::Design.designing?(:lead)).to eq(false)
+    expect(MB::Sound::UI::Design.last).to be_nil
+    expect(UIScreenGuard.problems).to eq([])
+  ensure
+    s&.close
+    MB::Sound.rewind
+  end
+
   it 'finds nothing after a spec screen that cleaned up' do
     tiles, term = ui_tiles(:tiles, rows: 24, cols: 80)
     expect(term.wait_for('t> ')).to eq(true)
