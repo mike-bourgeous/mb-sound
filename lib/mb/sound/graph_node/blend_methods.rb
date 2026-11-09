@@ -8,7 +8,7 @@ module MB
       # stereo).
       module BlendMethods
         # Crossfade laws #blend takes.
-        CURVES = %i[linear power].freeze
+        CURVES = %i[linear power balance].freeze
 
         # Mixes the effect the block builds from this node with the node itself.
         # +mix+ 0 is all dry, 1 all wet.  +mix+ is a number, a knob's name (a
@@ -18,7 +18,11 @@ module MB
         # options: dry * (1 - mix) + wet * mix, which keeps the level of
         # correlated signals) or :power (equal power: dry * sqrt(1 - mix) +
         # wet * sqrt(mix), which keeps the loudness of uncorrelated ones,
-        # like reverb tails).  +compensate:+ true (default) delays the dry
+        # like reverb tails), or :balance (both at full level at 0.5, the
+        # other side falling in a straight line toward each end: dry *
+        # min(1, 2 * (1 - mix)) + wet * min(1, 2 * mix), a one-knob dry/wet
+        # balance like the dB-T delay's mix knob; delay-dual-1).
+        # +compensate:+ true (default) delays the dry
         # path by the effect's reported latency (lookahead dynamics and
         # limiters: GraphNode#latency on the effect's own nodes, summed as
         # for a chain), so the two line up; other effects report none.
@@ -28,7 +32,7 @@ module MB
         #     stereo(l, r).blend(0.25, curve: :power) { |s| s.reverb(:hall, mix: 1) }
         def blend(mix = 0.5, curve: :linear, compensate: true, &block)
           raise ArgumentError, 'blend needs a block making the effect: sig.blend(0.3) { |s| s.reverb(:hall, mix: 1) }' unless block
-          raise ArgumentError, "blend curve: is #{CURVES.map(&:inspect).join(' or ')} (got #{curve.inspect})" unless CURVES.include?(curve)
+          raise ArgumentError, "blend curve: is #{CURVES.map(&:inspect).join(', ')} (got #{curve.inspect})" unless CURVES.include?(curve)
 
           amount = BlendMethods.amount(mix)
           wet = block.call(self)
@@ -57,10 +61,12 @@ module MB
         def self.gains(amount, curve)
           if amount.is_a?(Numeric)
             return [1 - amount, amount] if curve == :linear
+            return [MB::M.min(1.0, 2.0 * (1 - amount)), MB::M.min(1.0, 2.0 * amount)] if curve == :balance
             return [Math.sqrt(1 - amount), Math.sqrt(amount)]
           end
           dry = 1 - amount
           return [dry, amount] if curve == :linear
+          return [(dry * 2).aclip(0, 1), (amount * 2).aclip(0, 1)] if curve == :balance
           [dry.aclip(0, 1) ** 0.5, amount.aclip(0, 1) ** 0.5]
         end
 

@@ -290,6 +290,11 @@ module GraphSweep
       ['formant (Formant) constant and morphing', ->(c) {
         c.sig.formant(:a) + c.sig.formant(:a, :e, [[300, 0.db, 50], [900, -6.db, 60], [2500, -12.db, 100], [3300, -20.db, 120], [4000, -30.db, 150]], morph: c.mod(0, 1), shift: c.mod(-5, 5, 3), width: c.mod(0.5, 1.5, 2), voice: :soprano)
       }],
+      ['tremolo (Tremolo: LFO shapes, drawn shapes with a seam, depth nodes, stereo phase, tempo rates, mix)', ->(c) {
+        c.sig.tremolo(9, depth: 12.db) + c.sig.tremolo(c.mod(2, 30), shape: :square, depth: 0, law: :linear, smooth: 0.002) +
+          c.sig.trem(1.n32, shape: [[0, 1], [0.3, -1], [0.3, 0.5], [1, -0.2]], seam: true, depth: c.mod(0.05, 0.9)) +
+          c.stereo_sig.tremolo(11, stereo_phase: 0.5, shape: :triangle, mix: 0.6).mixdown + c.sig.tremolo(7, shape: :random, seed: 3, stereo_phase: 0.25).mixdown
+      }],
       ['decimate (Decimator)', ->(c) { c.sig.decimate(c.mod(500, 9000)) + c.sig.lp4(900, resonance: 0.6).decimate(3000.5, jitter: 0.3) + c.sig.srr(c.notes.freq * 3.5) + c.sig.decimate(2500, mix: 0.4) + c.sig.decimate(c.mod(800, 6000), mix: c.mod(0.1, 0.9)) + c.sig.decimate(c.mod(700, 7000), interpolation: :linear, jitter: 0.2) }],
 
       # Sampler (SamplerVoice: keys, velocity layers, loops, reverse, chops,
@@ -400,6 +405,12 @@ module GraphSweep
           c.stereo_sig.ping_pong(0.0013, feedback: -0.5, input: :stereo, interpolation: :cubic).mixdown +
           c.sig.haas(0.0007, side: :left, level: c.mod(0.5, 1)).mixdown
       }],
+      ['dual_delay (DelayNetwork with loop filters) and ping_pong cuts', ->(c) {
+        c.sig.dual_delay(c.mod(0.001, 0.002), 0.0013, feedback: [c.mod(0.2, 0.6), -0.4], level: [1, c.mod(0.5, 1)], high_cut: [3000, 9000], low_cut: 150,
+                         pan: [-0.5, c.mod(-0.3, 0.8)], mix: 0.4, mix_law: :balance).mixdown +
+          c.stereo_sig.dual_delay(0.0011, 0.0017, input: :stereo, high_cut: 5000).mixdown +
+          c.sig.ping_pong(0.0012, feedback: 0.6, low_cut: 200, high_cut: 4000).mixdown
+      }],
       ['reverb', ->(c) { c.stereo_sig.reverb(:room) }],
       ['convolve (Convolver)', ->(c) {
         ir = Numo::SFloat.new(700).seq.map { |i| Math.sin(i * 0.37) * Math.exp(-i / 150.0) }
@@ -437,6 +448,11 @@ module GraphSweep
           c.sig.rotary(:chorale, speed: :stop, crossover: 1200).mixdown
       }],
       ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60.db) }],
+      ['phaser (Phaser) mono, stereo, moving settings', ->(c) {
+        st = c.stereo_sig.phaser(:swirl, feedback: c.mod(-0.9, 0.9), mix: c.mod(0.2, 0.8, 3))
+        c.sig.phaser + c.sig.phaser(13, stages: 12, center: c.mod(200, 3000, 2), depth: c.mod(0, 1, 5), range: c.mod(1, 6, 0.7)) + c.sig.phaser(:jet, range: 200..6000) +
+          c.sig.phaser(sweep: c.mod(-1, 1, 11), feedback: -0.6, stages: 2) + st.outputs[0] + st.outputs[1]
+      }],
 
       # Dynamics
       ['compress (rms, sidechain, lookahead, hold, upward, node times)', ->(c) {

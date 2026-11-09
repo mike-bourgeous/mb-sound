@@ -214,15 +214,21 @@ module MB
         dry part plus its reverb); `(drone + hit).ring(:first)` (or
         `render(..., ring: :first)`) ends with the first.
         Delays (sinc-interpolated, tempo-synced lengths; regenerating
-        multitaps, ping-pong, Haas), tape echoes with presets (`L.fx.delay`:
-        :reel, :slapback, :ping_pong, :dub), feedback loops that run one
-        sample at a time in C, the FDN reverb with presets, convolution
+        multitaps, ping-pong, dual delays with cuts in the loop, Haas), tape
+        echoes with presets (`L.fx.delay`: :reel, :slapback, :ping_pong,
+        :dub), and feedback loops that run one sample at a time in C.
+
+        The FDN reverb with presets, convolution
         with impulse responses (`sig.ir('hall.wav')`, alias of `convolve`, zero
-        latency, wet -10 dB; `reverb_match('hall.wav')` fits the FDN to one), the Juno
-        chorus, and antialiased shapers, among them `shape_db`: transfer curves
-        drawn in dB, per sample, with presets (`L.fx.shape_db`: :soft_knee,
-        :fuzz, :fold_back, :gate, :asymmetric), and `inertia`, an
-        acceleration-limited follower whose limit cycles chirp.
+        latency, wet -10 dB; `reverb_match('hall.wav')` fits the FDN to one).
+
+        Modulation: the Juno chorus and phasers with presets (`L.fx.phaser`:
+        :vintage, :swirl, :ripple, :deep12, :jet; tempo-synced rates like
+        `phaser(1.bar)`, stereo `spread:`).  Antialiased shapers, among them
+        `shape_db`: transfer curves drawn in dB, per sample, with presets
+        (`L.fx.shape_db`: :soft_knee, :fuzz, :fold_back, :gate, :asymmetric),
+        and `inertia`, an acceleration-limited follower whose limit cycles
+        chirp.
 
         A flanger (`flanger`, presets in `L.fx.flanger`) mixes the sound
         with a copy a few milliseconds late: the two cancel in a comb of
@@ -234,15 +240,22 @@ module MB
         closer and recedes, the level as it turns toward and away, and a
         knob on `speed:` spins them up and down with their inertia.
 
+        `tremolo` swings the level along an LFO shape or a drawn cycle
+        (`shape: [[0, 1], [0.25, -1], [1, -1]]`), tempo-synced or in Hz,
+        with its depth in dB; `stereo_phase: 0.5` makes it an auto-pan.
         `chebyshev` draws a waveshaper by the harmonics a full-scale sine
         should get (`chebyshev(h2: 0.5, h3: 0.2)`, `L.fx.chebyshev`).
       TEXT
-      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :flanger, :rotary, :softclip, :clip, :shape_db, :chebyshev, :inertia, :decimate, :quantize, :ease, :oversample, :ring
-      note :delays, :feedback_loops, :reverbs, :chorus, :modulation
+      dsl :delay, :multitap, :ping_pong, :dual_delay, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :phaser, :flanger, :rotary, :tremolo, :softclip, :clip, :shape_db, :chebyshev, :inertia, :decimate, :quantize, :ease, :oversample, :ring
+      note :delays, :feedback_loops, :reverbs, :chorus, :phaser, :modulation
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do
         blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop
         bg :try, (blip.tone.triangle.at(-14.db) * blip.amp_env).delay(1.n8.dotted, feedback: 0.5)
+      end
+      example 'a dual delay: 3/16 left, 5/16 right, repeats darkening' do
+        blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop
+        bg :try, (blip.tone.triangle.at(-14.db) * blip.amp_env).dual_delay(3.n16, 5.n16, feedback: 0.45, low_cut: 150, high_cut: 4000)
       end
       example 'a dub tape echo' do
         blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop
@@ -255,6 +268,9 @@ module MB
         organ = seq(A3, C4, E4).n2.loop
         tones = (organ.tone.sine + organ.tone.transpose(12).sine.at(0.5) + organ.tone.transpose(19).sine.at(0.3)) * organ.amp_env
         bg :try, tones.at(-18.db).rotary(:whirl)
+      end
+      example 'a phaser swirl on a drone' do
+        bg :try, (110.hz.saw + 165.hz.saw).at(-20.db).phaser(:swirl)
       end
       example 'a fuzz drawn in dB' do
         bass = seq(A1, A1, C2, G1).n8.loop

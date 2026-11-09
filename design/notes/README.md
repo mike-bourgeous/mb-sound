@@ -18,6 +18,11 @@ Every graph remembers the DSL calls that built it (`GraphNode::Recipe`, `lib/mb/
 
 Every named thing (presets at every scale: effects, instruments, kits, clips, generators, masters, sets) is a frozen `Library::Entry` in one `Library.index` (`lib/mb/sound/library.rb` + `library/`), found by name, by `find 'dark bass'`, or through heads (`L.fx`, `L.inst`, `L.kit`; `L.gen` clip generators and `L.flow` section chains, recorded as their call, seed written out: `L.gen.techno_beat(seed: 5)`; on tracks their params are knobs).  Presettable classes have one `preset` line each; shelves are searched session racks, project, user (a git repository), gems, then built-ins, the first match winning.  `save` never replaces (`save!`, `bump: true`); library files load through `Library::FileLoader`, never eval.  `Library::Bench` (`L.fx.reverb.bench`, `bin/preset_bench.rb`) renders presets as loudness-matched Listening Bench sets.  `audition x` plays one (CUE, else MAIN).
 
+### [Importers: finding foreign files (`MB::Sound::MediaIndex`)](importers.md)
+
+`MB::Sound::MediaIndex.for(root)` (`lib/mb/sound/media_index.rb`) is the one way importers find the local copy of a file a foreign project names by another machine's path (Windows `D:\...` or POSIX): it walks a media root once, indexes files by name (lower case, NFC), and `#resolve(path)` returns a `Match` (path, `:found`/`:ambiguous`/`:missing`, matching trailing folders, candidates best first, ties), choosing among same-named files by the most matching trailing folders.
+`.for` caches an index per root and options while its folders' mtimes hold.  SFZ samples named in another letter case are found through it (every folder must match).  The .acd converter's own lookup (research branch) is to switch to it.
+
 ### [Plan layer (fused regions)](plan_layer.md)
 
 `lib/mb/sound/plan.rb` + `plan/` (executor `ext/mb/sound/fast_plan`) runs connected regions of a graph as one op list per block in C, installed automatically by `Synth` and `Session#add`: an as-if transformation (the same samples bit for bit, the user's graph untouched, node state kept in the nodes), with lane groups across same-shape regions and rebuilds off the render thread.  Nodes join through `Plan::Describable` (`plan_describe`, `plan_inputs`, snapshots); call `Plan.changed(node)` after structural edits, and `Plan.explain(graph)` says why nodes stay unfused.  `MB_SOUND_PLAN=0`, `MB_SOUND_KERNELS=fast_plan=ruby` (the Ruby mirror), `MB_SOUND_PLAN_CHECK=1`; specs use `plan_compare`, `rake plan:changed` decides on the 21-size sweep.
@@ -80,11 +85,15 @@ Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`
 
 ### [Delays](delays.md)
 
-`#delay` (`Filter::Delay`) and `#multitap` share `MB::Sound::DelayLine` (C reads, exact mirrors; `:sinc` interpolation by default, `:cubic`, `:linear`); times are any length or node (`96.samples`, `3.n16`, `lfo.samples`), `feedback:`/`wet:`/`dry:`/`mix:` numbers or nodes (`mix:` an equal-power crossfade for `#delay`, `ping_pong`, and `tape_echo`), and delays ring out after their input ends (`MB::Sound::QuietRun#advance`).  Delay networks (`FastDelay.network`) build `multitap(t1, t2, feedback: [g1, g2] | g)`, `ping_pong(t, feedback:, spread:, mix:, input: :mono | :stereo)`, and `haas(15.ms, side:)`; tape echoes are `sig.tape_echo(:reel | :slapback | :ping_pong | :dub, time:, feedback:, mix:, tone:, low_cut:, drive:, wow:, flutter:)` (library family `:delay`).  Same output at any buffer size.
+`#delay` (`Filter::Delay`) and `#multitap` share `MB::Sound::DelayLine` (C reads, exact mirrors; `:sinc` interpolation by default, `:cubic`, `:linear`); times are any length or node (`96.samples`, `3.n16`, `lfo.samples`), `feedback:`/`wet:`/`dry:`/`mix:` numbers or nodes (`mix:` an equal-power crossfade for `#delay`, `ping_pong`, and `tape_echo`), and delays ring out after their input ends (`MB::Sound::QuietRun#advance`).  Delay networks (`FastDelay.network`) build `multitap(t1, t2, feedback: [g1, g2] | g)`, `ping_pong(t, feedback:, spread:, mix:, input:)`, `dual_delay(left, right, ...)` (the dB-T's form: taps with loop cuts), and `haas(15.ms, side:)`; tape echoes are `sig.tape_echo(:reel | :slapback | :ping_pong | :dub, time:, feedback:, mix:, tone:, low_cut:, drive:, wow:, flutter:)` (library family `:delay`).  Same output at any buffer size.
 
-### [Chorus](chorus.md)
+### [Chorus and tremolo](chorus.md)
 
-`sig.chorus(:juno1 | :juno2 | :juno12 | :lush, rate:, depth:, mix:, bbd: false)` (`GraphNode::Chorus`, self-contained in `graph_node/chorus.rb` and `chorus_nodes.rb` for a later effects project) is a Juno-60-style two-tap chorus returning a stereo bundle: mono in like the Juno, clean by default, `bbd: true` adds the board's filters and hiss.
+`sig.chorus(:juno1 | :juno2 | :juno12 | :lush, rate:, depth:, mix:, bbd: false)` (`GraphNode::Chorus`, self-contained in `graph_node/chorus.rb` and `chorus_nodes.rb` for a later effects project) is a Juno-60-style two-tap chorus returning a stereo bundle: mono in like the Juno, clean by default, `bbd: true` adds the board's filters and hiss.  `sig.tremolo(rate, depth:, shape:, phase:, stereo_phase:, seam:, law:, smooth:, mix:)` (aliases `trem`, `amplitude_modulation`; `GraphNode::Tremolo`) is amplitude modulation on the library's LFOs (Hz or tempo-synced; named shapes or a drawn cycle of points), depth in dB down to a floor, `stereo_phase:` for auto-pan; it reproduces Sony Amplitude Modulation's renders to -37..-112 dB.
+
+### [Phaser](phaser.md)
+
+`sig.phaser(:vintage | :swirl | :ripple | :deep12 | :jet | rate, depth:, stages:, feedback:, mix:, center:, range:, spread:, shape:, sweep:)` (`GraphNode::Phaser`, kernel `FastFilter.phaser` with an exact Ruby mirror) is a chain of 2-12 first-order allpass stages at one LFO-swept frequency, feedback around the chain solved in closed form, a linear dry/wet mix, Tone LFOs (sine or triangle, Hz or tempo-synced lengths), and stereo pairs whose right LFO runs `spread:` cycles ahead.
 
 ### [Modulation effects (flanger, rotary speaker)](modulation.md)
 

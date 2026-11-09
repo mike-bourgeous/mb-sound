@@ -31,12 +31,14 @@ module MB
         include Traversable
         include Nameable
         include ChorusMethods
+        include PhaserMethods
         include StereoDelayMethods
         include ConvolveMethods
         include DynamicsMethods
         include BlendMethods
         include MasteringMethods
         include ModulationMethods
+        include TremoloMethods
         node_traits memory: :none
 
         # The channel nodes.

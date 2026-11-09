@@ -1,7 +1,8 @@
 /*
  * MB::Sound::FastFilter: analog-style filter kernels (the four-pole, the
  * diode ladder (ruby_diode_ladder below), the state-variable filter,
- * ruby_svf below, and a bank of SVF bandpasses for formants, ruby_formant).
+ * ruby_svf below, a bank of SVF bandpasses for formants, ruby_formant, and
+ * a phaser's allpass chain, ruby_phaser).
  *
  * four_pole: a 4-pole resonant lowpass in the style of the CEM3379 (and
  * CEM3320): four one-pole OTA-C stages in a cascade with resonance feedback
@@ -443,6 +444,142 @@ static VALUE ruby_formant(VALUE self, VALUE out, VALUE x, VALUE tables, VALUE mo
 }
 
 /*
+ * phaser: GraphNode::Phaser's chain of first-order allpass stages, all at
+ * one moving frequency, with feedback around the chain and a dry/wet sum.
+ *
+ * Each stage is the topology-preserving transform (trapezoidal integrator)
+ * one-pole allpass: with g = tan(pi fc / rate) (mb_tan_pade) and
+ * G = g / (1 + g), v = (u - s) G, lp = v + s, s' = lp + v, y = 2 lp - u
+ * (analog H(s) = (wc - s) / (wc + s): 0 degrees at DC, -90 at fc, -180 at
+ * Nyquist).  A stage's output is linear in its input, y = (2G - 1) u +
+ * 2 (1 - G) s, so the chain is Y = A u + B, and the feedback loop
+ * u = x + k Y is solved in closed form (zero-delay feedback):
+ * u = (x + k B) / (1 - k A), with |A| <= 1 and |k| <= PHASER_MAX_FEEDBACK.
+ *
+ * The frequency of every stage is fc = center * exp(ln(2) / 2 * range *
+ * depth * sweep): +sweep+ (an LFO, -1..1) moves it +depth+ times half of
+ * +range+ octaves either side of +center+ Hz, clamped to
+ * PHASER_MIN_HZ..rate * FP_MAX_CUTOFF_RATIO; coefficients are recomputed
+ * only when fc changes.  The output is dry * x + wet * Y as float32.
+ * +x+, +sweep+, +center+, +range+, +depth+, +feedback+ (clamped to
+ * +-PHASER_MAX_FEEDBACK), +dry+, and +wet+ are signal inputs.
+ *
+ * +state+ is a DFloat of one integrator state per stage plus the samples
+ * since the last flush grid point (MB_FLUSH_GRID in mb_svf.h), so the
+ * stage count is its length - 1.  Exact Ruby mirror:
+ * MB::Sound::GraphNode::Phaser.process_ruby.
+ */
+#define PHASER_MAX_STAGES 64
+#define PHASER_MIN_HZ 1.0
+#define PHASER_MAX_FEEDBACK 0.95
+
+static VALUE ruby_phaser(VALUE self, VALUE out, VALUE x, VALUE sweep, VALUE center, VALUE range, VALUE depth, VALUE feedback, VALUE dry, VALUE wet, VALUE state, VALUE rate_v)
+{
+	if (CLASS_OF(out) != numo_cSFloat || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
+		rb_raise(rb_eArgError, "The output must be a contiguous 1D SFloat");
+	}
+	if (CLASS_OF(state) != numo_cDFloat || RNARRAY_NDIM(state) != 1 ||
+			RNARRAY_SHAPE(state)[0] < 2 || RNARRAY_SHAPE(state)[0] > PHASER_MAX_STAGES + 1 ||
+			!RTEST(nary_check_contiguous(state))) {
+		rb_raise(rb_eArgError, "The phaser state must be a contiguous DFloat of 2 to %d values (one per stage and the flush grid count)", PHASER_MAX_STAGES + 1);
+	}
+	rb_check_frozen(out);
+	rb_check_frozen(state);
+
+	double rate = NUM2DBL(rate_v);
+	if (!(rate > 0) || !isfinite(rate)) {
+		rb_raise(rb_eArgError, "Sample rate must be positive and finite");
+	}
+
+	size_t length = RNARRAY_SHAPE(out)[0];
+	struct mb_signal xs, sws, cs, rs, ds, fs, drs, ws;
+	mb_signal_input(&x, length, "The input", &xs);
+	mb_signal_input(&sweep, length, "Sweep", &sws);
+	mb_signal_input(&center, length, "Center", &cs);
+	mb_signal_input(&range, length, "Range", &rs);
+	mb_signal_input(&depth, length, "Depth", &ds);
+	mb_signal_input(&feedback, length, "Feedback", &fs);
+	mb_signal_input(&dry, length, "Dry", &drs);
+	mb_signal_input(&wet, length, "Wet", &ws);
+
+	long stages = (long)RNARRAY_SHAPE(state)[0] - 1;
+	double *st = (double *)(nary_get_pointer_for_write(state) + nary_get_offset(state));
+	float *op = mb_sfloat_ptr(out);
+
+	double pi_over_rate = M_PI / rate;
+	double fc_max = rate * FP_MAX_CUTOFF_RATIO;
+	double half_ln2 = 0.5 * log(2.0);
+
+	long fk = 0;
+	if (st[stages] >= 0 && st[stages] < MB_FLUSH_GRID) {
+		fk = (long)st[stages];
+	}
+
+	double last_fc = NAN;
+	double gg = 0.0, alpha = 0.0, beta = 0.0, a_all = 0.0;
+	for (size_t i = 0; i < length; i++) {
+		double fc = mb_signal_at(&cs, i) * exp(half_ln2 * mb_signal_at(&rs, i) * mb_signal_at(&ds, i) * mb_signal_at(&sws, i));
+		if (!(fc >= PHASER_MIN_HZ)) {
+			fc = PHASER_MIN_HZ;
+		} else if (fc > fc_max) {
+			fc = fc_max;
+		}
+		if (fc != last_fc) {
+			last_fc = fc;
+			double g = mb_tan_pade(fc * pi_over_rate);
+			gg = g / (1.0 + g);
+			alpha = 2.0 * gg - 1.0;
+			beta = 2.0 * (1.0 - gg);
+			a_all = 1.0;
+			for (long j = 0; j < stages; j++) {
+				a_all = a_all * alpha;
+			}
+		}
+
+		double k = mb_signal_at(&fs, i);
+		if (!(k >= -PHASER_MAX_FEEDBACK)) {
+			k = isnan(k) ? 0.0 : -PHASER_MAX_FEEDBACK;
+		} else if (k > PHASER_MAX_FEEDBACK) {
+			k = PHASER_MAX_FEEDBACK;
+		}
+
+		double xi = mb_signal_at(&xs, i);
+		double b = 0.0;
+		for (long j = 0; j < stages; j++) {
+			b = alpha * b + beta * st[j];
+		}
+		double u = (xi + k * b) / (1.0 - k * a_all);
+		for (long j = 0; j < stages; j++) {
+			double s = st[j];
+			double v = (u - s) * gg;
+			double lp = v + s;
+			st[j] = lp + v;
+			u = 2.0 * lp - u;
+		}
+		op[i] = (float)(mb_signal_at(&drs, i) * xi + mb_signal_at(&ws, i) * u);
+
+		if (++fk >= MB_FLUSH_GRID) {
+			fk = 0;
+			for (long j = 0; j < stages; j++) {
+				mb_flush_value(&st[j]);
+			}
+		}
+	}
+	st[stages] = (double)fk;
+
+	RB_GC_GUARD(x);
+	RB_GC_GUARD(sweep);
+	RB_GC_GUARD(center);
+	RB_GC_GUARD(range);
+	RB_GC_GUARD(depth);
+	RB_GC_GUARD(feedback);
+	RB_GC_GUARD(dry);
+	RB_GC_GUARD(wet);
+
+	return out;
+}
+
+/*
  * diode_ladder: a TB-303-style 4-pole diode ladder lowpass (a behavioral
  * model, not a circuit simulation), with lp4's resonance scale, curves,
  * compensation, and drive.
@@ -674,6 +811,7 @@ void Init_fast_filter(void)
 	rb_define_module_function(fast_filter, "four_pole", ruby_four_pole, -1);
 	rb_define_module_function(fast_filter, "svf", ruby_svf, 7);
 	rb_define_module_function(fast_filter, "formant", ruby_formant, 9);
+	rb_define_module_function(fast_filter, "phaser", ruby_phaser, 11);
 	rb_define_module_function(fast_filter, "tan", ruby_tan, 1);
 	rb_define_module_function(fast_filter, "tanh", ruby_tanh, 1);
 	rb_define_module_function(fast_filter, "secant", ruby_secant, 2);

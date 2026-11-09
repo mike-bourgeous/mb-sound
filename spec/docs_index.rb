@@ -45,7 +45,7 @@ module DocsIndex
   # map (the index uses the note's own title); every note is in exactly one
   GROUPS = {
     'Signal graph' => {
-      'graph_nodes' => 'GraphNode DSL', 'graph_io' => 'Graph I/O: recipes, Ruby export, documents', 'library' => 'Library',
+      'graph_nodes' => 'GraphNode DSL', 'graph_io' => 'Graph I/O: recipes, Ruby export, documents', 'library' => 'Library', 'importers' => 'Importers: finding foreign files',
       'plan_layer' => 'Plan layer', 'feedback_loops' => 'Feedback loops', 'c_extensions' => 'C extensions', 'kernels' => 'Kernel registry', 'sound_guards' => 'Sound guards',
     },
     'Values, time, and channels' => {
@@ -54,7 +54,7 @@ module DocsIndex
     },
     'Sound' => {
       'oscillators' => 'Oscillators and antialiasing', 'envelopes' => 'Envelopes', 'filters' => 'Filters', 'delays' => 'Delays',
-      'chorus' => 'Chorus', 'modulation' => 'Modulation effects', 'reverbs' => 'Reverbs', 'dynamics' => 'Dynamics', 'drums' => 'Drum machines', 'sampler' => 'Sampler',
+      'chorus' => 'Chorus', 'phaser' => 'Phaser', 'modulation' => 'Modulation effects', 'reverbs' => 'Reverbs', 'dynamics' => 'Dynamics', 'drums' => 'Drum machines', 'sampler' => 'Sampler',
       'textures' => 'Textures', 'granular' => 'Granular and spectral stretch', 'loops' => 'Loop files and tempo-following loops',
       'regions' => 'Timeline regions',
       'sq80' => 'SQ-80 voice',

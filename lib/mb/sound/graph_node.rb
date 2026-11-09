@@ -25,6 +25,7 @@ require_relative 'graph_node/distortion_methods'
 require_relative 'graph_node/debug_methods'
 require_relative 'graph_node/channel_methods'
 require_relative 'graph_node/chorus'
+require_relative 'graph_node/phaser_methods'
 require_relative 'graph_node/stereo_delay_methods'
 require_relative 'graph_node/convolve_methods'
 require_relative 'graph_node/dynamics_methods'
@@ -32,6 +33,7 @@ require_relative 'graph_node/sampling_methods'
 require_relative 'graph_node/blend_methods'
 require_relative 'graph_node/mastering_methods'
 require_relative 'graph_node/modulation_methods'
+require_relative 'graph_node/tremolo_methods'
 
 module MB
   module Sound
@@ -87,6 +89,7 @@ module MB
       include DebugMethods
       include ChannelMethods
       include ChorusMethods
+      include PhaserMethods
       include StereoDelayMethods
       include ConvolveMethods
       include DynamicsMethods
@@ -94,6 +97,7 @@ module MB
       include BlendMethods
       include MasteringMethods
       include ModulationMethods
+      include TremoloMethods
 
       # The per-channel DSL call that made this node, if any (see
       # ChannelDispatch and ChannelGroup).  Used by #graphviz.
@@ -570,6 +574,7 @@ require_relative 'graph_node/buffer_adapter'
 require_relative 'graph_node/resample'
 require_relative 'graph_node/quantize'
 require_relative 'graph_node/sample_hold'
+require_relative 'graph_node/tremolo'
 require_relative 'graph_node/decimator'
 require_relative 'graph_node/sampler_voice'
 require_relative 'graph_node/zone_value'
@@ -584,6 +589,7 @@ require_relative 'graph_node/chebyshev'
 require_relative 'graph_node/inertia'
 require_relative 'graph_node/four_pole'
 require_relative 'graph_node/formant'
+require_relative 'graph_node/phaser'
 require_relative 'graph_node/data_shuffler'
 require_relative 'graph_node/wavetable'
 require_relative 'graph_node/harmonic_table'

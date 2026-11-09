@@ -255,6 +255,32 @@ RSpec.describe(MB::Sound::Sampler, :aggregate_failures) do
       expect(MB::Sound::Sampler::SFZ.note('db3')).to eq(49)
     end
 
+    it 'finds samples named in another letter case (a MediaIndex), only where every folder matches' do
+      MB::Sound::MediaIndex.clear_cache
+      wav('inst/samples/c4.wav', 0.25)
+      wav('Shared/Low/C2.Wav', 0.5)
+      wav('inst/other/d4.wav', 0.75)
+      File.write(File.join(dir, 'inst/kit.sfz'), <<~SFZ)
+        <region> sample=Samples\\C4.WAV key=60
+        <region> sample=..\\shared\\LOW\\c2.wav key=36
+      SFZ
+      inst = MB::Sound.sfz(File.join(dir, 'inst/kit.sfz'))
+      expect(inst.regions.map { |r| r.sample.name }).to eq(['c4.wav', 'C2.Wav'])
+
+      # A file of that name in another folder is not taken
+      File.write(File.join(dir, 'inst/bad.sfz'), "<region> sample=Samples/d4.wav key=62\n")
+      expect { MB::Sound.sfz(File.join(dir, 'inst/bad.sfz')) }.to raise_error(/d4\.wav/)
+
+      # In a graph document, the name found stays a document name
+      ctx = MB::Sound::GraphIO::FileGuard::Context.new(dir, 'doc', nil)
+      base = MB::Sound::GraphIO::FileGuard.register(+'inst/kit.sfz', ctx)
+      found = MB::Sound::Sampler::SFZ.local_sample(base, MB::Sound::Sampler::SFZ.sample_path(base, 'SAMPLES/C4.wav'))
+      expect(found).to eq('inst/samples/c4.wav')
+      expect(MB::Sound::GraphIO::FileGuard.document_string?(found)).to eq(true)
+    ensure
+      MB::Sound::MediaIndex.clear_cache
+    end
+
     it 'keeps sample paths inside a graph document directory' do
       ctx = MB::Sound::GraphIO::FileGuard::Context.new(dir, 'doc', nil)
       base = MB::Sound::GraphIO::FileGuard.register(+'kit.sfz', ctx)

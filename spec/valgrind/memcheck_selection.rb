@@ -75,6 +75,7 @@ module MemcheckSelection
     'spec/lib/mb/sound/filter/diode_ladder_spec.rb', # FastFilter.diode_ladder
     'spec/lib/mb/sound/filter/svf_spec.rb',          # FastFilter.svf
     'spec/lib/mb/sound/graph_node/formant_spec.rb',  # FastFilter.formant through Formant
+    'spec/lib/mb/sound/graph_node/phaser_spec.rb',   # FastFilter.phaser through Phaser
     'spec/lib/mb/sound/graph_node/resonator_spec.rb', # FastResonator.ping
     'spec/lib/mb/sound/graph_node/decimator_spec.rb', # FastLofi.decimate through Decimator
     'spec/lib/mb/sound/graph_node/modal_resonator_spec.rb', # FastResonator.modes through ModalResonator

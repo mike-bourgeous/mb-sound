@@ -73,19 +73,22 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `chebyshev(*amounts, ...)` Waveshaping by harmonic amounts (Chebyshev polynomials)
 - `sample_hold/sah(trigger, range:, seed:)` Samples and holds this node at each rising edge of trigger (SampleHold)
 
-### Delays, reverb, chorus, feedback
+### Delays, reverb, chorus, tremolo, feedback
 
 - `delay(time, seconds:, smooth:, ..., &block)` A delay line (Filter::Delay) of time with feedback, smoothing, and inserts
 - `feedback_delay(time, seconds:, smooth:, ..., &block)` #delay with a feedback insert block (see #delay)
 - `multitap/multitap_delay(*delays, name:, initial_buffer:, ...)` A multi-tap delay: one output per delay time, as a channel bundle
 - `haas(time, side:, level:)` A Haas (precedence effect) widener: one side delayed a few milliseconds
 - `ping_pong/pingpong(time, feedback:, spread:, ...)` A ping-pong delay: echoes alternate left and right (GraphNode::DelayNetwork)
+- `dual_delay/stereo_delay(left, right, feedback:, level:, ...)` A dual delay: two delay lines with their own times, feedback, and cuts
 - `tape_echo(preset, seed:, ...)` A tape echo (GraphNode::TapeEcho): repeats run through a tape sim each pass
 - `reverb(preset, output_channels:, ...)` Appends a reverb to this node (see GraphNode::Reverb)
 - `convolve/ir(impulse, mix:, wet:, ...)` Convolves this signal with an impulse response (convolution reverb)
 - `chorus/juno_chorus(mode, ...)` Appends a Juno-60-style stereo chorus (see Chorus), returning a stereo bundle
+- `phaser(preset_or_rate, ...)` A phaser (GraphNode::Phaser): moving notches from LFO-swept allpass stages
 - `flanger(preset_or_rate, ...)` A flanger: a short swept delay with feedback
 - `rotary/rotary_speaker(preset, ...)` A rotary speaker: spinning horn and drum
+- `tremolo/amplitude_modulation/trem(rate, depth:, shape:, ...)` Tremolo: swings this signal's level down by depth: along an LFO
 - `feedback/fb(*args, compensate:, sustain:, &block)` Builds a feedback loop on this node from the block (a FeedbackLoop)
 
 ### Dynamics, loudness, mastering

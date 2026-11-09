@@ -29,6 +29,19 @@ RSpec.describe(MB::Sound::GraphNode::BlendMethods, :aggregate_failures) do
     MB::Sound.rewind # (the shared transport)
   end
 
+  it 'keeps both sides at full level in the middle with curve: :balance (delay-dual-1)' do
+    g = MB::Sound::GraphNode::BlendMethods
+    expect(g.gains(0.5, :balance)).to eq([1.0, 1.0])
+    expect(g.gains(0.15, :balance)).to eq([1.0, 0.3])
+    expect(g.gains(0.75, :balance)).to eq([0.5, 1.0])
+    expect(g.gains(0, :balance)).to eq([1.0, 0.0])
+    expect(g.gains(1, :balance)).to eq([0.0, 1.0])
+    x = Numo::SFloat[1, 1, 1, 1]
+    sweep = arr(Numo::SFloat[0, 0.25, 0.75, 1])
+    out = arr(x).blend(sweep, curve: :balance) { |s| s * 3 }.sample(4)
+    expect(out.to_a).to eq([1, 2.5, 3.5, 3].map(&:to_f))
+  end
+
   it 'delays the dry path by the effect\'s lookahead so the two line up' do
     x = Numo::SFloat.zeros(64)
     x[5] = 0.5
@@ -44,6 +57,6 @@ RSpec.describe(MB::Sound::GraphNode::BlendMethods, :aggregate_failures) do
     expect(st.to_ruby).to include('.blend(0.3) { |s|', 'reverb(:hall, mix: 1)')
     expect { 1.constant.blend(1.5) { |s| s } }.to raise_error(ArgumentError, /0\.\.1/)
     expect { 1.constant.blend(0.5) }.to raise_error(ArgumentError, /needs a block/)
-    expect { 1.constant.blend(0.5, curve: :log) { |s| s } }.to raise_error(ArgumentError, /linear or :power/)
+    expect { 1.constant.blend(0.5, curve: :log) { |s| s } }.to raise_error(ArgumentError, /:linear, :power, :balance/)
   end
 end

@@ -101,12 +101,14 @@ module MB
           :chorus, :juno_chorus,
           :flanger, # (stereo pairs: the sides' LFOs spread apart)
           :rotary, :rotary_speaker, # (one cabinet: a stereo input is mixed to its one input)
+          :phaser, # (stereo pairs: the sides' LFOs spread apart)
           *ConvolveMethods.public_instance_methods(false), # (one convolver: true stereo crosses the sides)
           *StereoDelayMethods.public_instance_methods(false), # (stereo in, stereo out)
           :blend, # (the effect gets the whole bundle)
           :inertia, # (:hardware mode reads neighboring channels)
           *MasteringMethods.public_instance_methods(false), # (one chain for every channel)
           *DynamicsMethods.public_instance_methods(false),
+          *TremoloMethods.public_instance_methods(false), # (one LFO per channel phase: stereo_phase:)
         ].freeze
 
         # Modules included in GraphNode that aren't per-channel DSL methods.

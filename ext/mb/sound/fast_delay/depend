@@ -1,1 +1,1 @@
-fast_delay.o: $(srcdir)/../include/mb_delay_interp.h
+fast_delay.o: $(srcdir)/../include/mb_delay_interp.h $(srcdir)/../include/mb_biquad.h

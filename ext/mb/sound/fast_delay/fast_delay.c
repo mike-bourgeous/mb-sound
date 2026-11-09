@@ -19,6 +19,7 @@
 #include "numo/narray.h"
 
 #include "mb_delay_interp.h"
+#include "mb_biquad.h"
 
 // Casts *narray to a contiguous 1D SFloat NArray.
 static void ensure_sfloat(VALUE *narray)
@@ -288,6 +289,27 @@ static VALUE ruby_delay_read(VALUE self, VALUE buffer, VALUE target, VALUE block
 #define NETWORK_MAX 64
 
 /*
+ * Runs +x+ through a tap's loop filters (delay-dual-1): +sections+ direct
+ * form I biquads in series, coefficients +co+ (b0 b1 b2 a1 a2 per section)
+ * and state +st+ (x1 x2 y1 y2 per section, updated), in doubles.  The Ruby
+ * version is in DelayLine.network_values_ruby (Filter::Biquad.step_ruby).
+ */
+static inline double run_tap_filters(const double *co, double *st, long sections, double x)
+{
+	for (long s = 0; s < sections; s++) {
+		const double *c = co + 5 * s;
+		double *z = st + 4 * s;
+		double y = biquad_filter(c[0], c[1], c[2], c[3], c[4], x, z[0], z[1], z[2], z[3]);
+		z[1] = z[0];
+		z[0] = x;
+		z[3] = z[2];
+		z[2] = y;
+		x = y;
+	}
+	return x;
+}
+
+/*
  * Runs a delay network one sample at a time (GraphNode::DelayNetwork:
  * multitap feedback, ping-pong and cross-feedback): +buffers+ (an Array of
  * L real delay lines, SFloat) written at +offsets+ (an Array of L write
@@ -296,14 +318,18 @@ static VALUE ruby_delay_read(VALUE self, VALUE buffer, VALUE target, VALUE block
  * +tap_lines+ (an Array of T line indices), +delays+ (an Array of T delays
  * in samples: numbers or per-sample NArrays), +gains+ (an Array of L Arrays
  * of T gains: numbers, per-sample NArrays, or nil for none), +states+ (an
- * Array of T read-state Arrays, as for read; or nil).  Each sample writes
- * every line's input, reads every tap (as read does:
- * whole-sample delays directly unless sinc), then adds each line's gains
+ * Array of T read-state Arrays, as for read; or nil), +filters+ (nil, or an
+ * Array of T entries: nil, or [coefficients, state], contiguous DFloats of 5
+ * (b0 b1 b2 a1 a2) and 4 (x1 x2 y1 y2, updated) per biquad section).  Each
+ * sample writes every line's input, reads every tap (as read does:
+ * whole-sample delays directly unless sinc) and runs it through its
+ * filters (so a tap's echoes pass them once per trip around the loop, and
+ * its output is filtered too), then adds each line's gains
  * times the taps (in tap order, in double precision) to what it wrote, and
  * stores each tap's value in its output.  Returns an Array of the new
  * write offsets.  The Ruby version is DelayLine.network_ruby.
  */
-static VALUE ruby_delay_network(VALUE self, VALUE buffers, VALUE offsets, VALUE inputs, VALUE outs, VALUE tap_lines, VALUE delays, VALUE gains, VALUE mode, VALUE kernel, VALUE states, VALUE count_v)
+static VALUE ruby_delay_network(VALUE self, VALUE buffers, VALUE offsets, VALUE inputs, VALUE outs, VALUE tap_lines, VALUE delays, VALUE gains, VALUE mode, VALUE kernel, VALUE states, VALUE filters, VALUE count_v)
 {
 	Check_Type(buffers, T_ARRAY);
 	Check_Type(offsets, T_ARRAY);
@@ -405,6 +431,43 @@ static VALUE ruby_delay_network(VALUE self, VALUE buffers, VALUE offsets, VALUE 
 		}
 	}
 
+	// Tap filters: coefficient and state pointers, section counts (0: none)
+	const double *fco[NETWORK_MAX];
+	double *fst[NETWORK_MAX];
+	long nsec[NETWORK_MAX];
+	if (RTEST(filters)) {
+		Check_Type(filters, T_ARRAY);
+		if (RARRAY_LEN(filters) != taps) {
+			rb_raise(rb_eArgError, "A delay network needs one filter entry (or nil) per tap");
+		}
+	}
+	for (long t = 0; t < taps; t++) {
+		nsec[t] = 0;
+		fco[t] = NULL;
+		fst[t] = NULL;
+		VALUE e = RTEST(filters) ? rb_ary_entry(filters, t) : Qnil;
+		if (!RTEST(e)) {
+			continue;
+		}
+		Check_Type(e, T_ARRAY);
+		if (RARRAY_LEN(e) != 2) {
+			rb_raise(rb_eArgError, "A delay network tap filter is [coefficients, state]");
+		}
+		VALUE co = rb_ary_entry(e, 0);
+		VALUE st = rb_ary_entry(e, 1);
+		if (CLASS_OF(co) != numo_cDFloat || RNARRAY_NDIM(co) != 1 || !RTEST(nary_check_contiguous(co)) ||
+				CLASS_OF(st) != numo_cDFloat || RNARRAY_NDIM(st) != 1 || !RTEST(nary_check_contiguous(st))) {
+			rb_raise(rb_eArgError, "Delay network tap filter coefficients and states must be contiguous 1D DFloats");
+		}
+		long nc = (long)RNARRAY_SHAPE(co)[0];
+		if (nc == 0 || nc % 5 != 0 || (long)RNARRAY_SHAPE(st)[0] != nc / 5 * 4) {
+			rb_raise(rb_eArgError, "Delay network tap filters need 5 coefficients and 4 states per section");
+		}
+		nsec[t] = nc / 5;
+		fco[t] = (const double *)(nary_get_pointer_for_read(co) + nary_get_offset(co));
+		fst[t] = (double *)(nary_get_pointer_for_write(st) + nary_get_offset(st));
+	}
+
 	// Gains: an index into gctl per (line, tap), -1 for none
 	int gidx[NETWORK_MAX][NETWORK_MAX];
 	struct control_input *gctl = ALLOCA_N(struct control_input, lines * taps);
@@ -444,6 +507,9 @@ static VALUE ruby_delay_network(VALUE self, VALUE buffers, VALUE offsets, VALUE 
 			double rate = delay_rate(d, &prev[t], &have_prev[t], moving[t]);
 			_Bool whole = d == floor(d) && m != DELAY_SINC;
 			v[t] = whole ? (double)buf[j][wrap_index(w[j] - (long)d, cap[j])] : delay_interp_real(buf[j], cap[j], w[j], d, m, &k, rate);
+			if (nsec[t]) {
+				v[t] = run_tap_filters(fco[t], fst[t], nsec[t], v[t]);
+			}
 		}
 
 		for (long j = 0; j < lines; j++) {
@@ -477,6 +543,7 @@ static VALUE ruby_delay_network(VALUE self, VALUE buffers, VALUE offsets, VALUE 
 
 	RB_GC_GUARD(gain_values);
 	RB_GC_GUARD(kernel);
+	RB_GC_GUARD(filters);
 	for (long j = 0; j < lines; j++) {
 		RB_GC_GUARD(in_values[j]);
 	}
@@ -494,5 +561,5 @@ void Init_fast_delay(void)
 	VALUE fast_delay = rb_define_module_under(sound, "FastDelay");
 
 	rb_define_module_function(fast_delay, "read", ruby_delay_read, 7);
-	rb_define_module_function(fast_delay, "network", ruby_delay_network, 11);
+	rb_define_module_function(fast_delay, "network", ruby_delay_network, 12);
 }
