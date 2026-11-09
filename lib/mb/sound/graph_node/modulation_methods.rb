@@ -1,11 +1,14 @@
 module MB
   module Sound
     module GraphNode
-      # The #flanger DSL method, included in GraphNode and Channels.  Not
-      # run per channel (see ChannelDispatch::EXCLUDED): a stereo input's
-      # sides get LFOs +spread+ apart.
-      module FlangerMethods
-        # A flanger (GraphNode::Flanger): a short delay swept by an LFO sweeps a comb of notches.
+      # The modulation effects' DSL methods (#flanger, #rotary), included
+      # in GraphNode and Channels.  Not run per channel (see
+      # ChannelDispatch::EXCLUDED): a stereo input's sides get LFOs
+      # +spread+ apart, and a rotary speaker has one input.
+      module ModulationMethods
+        # A flanger: a short swept delay sweeping a comb of notches.
+        #
+        # See GraphNode::Flanger.
         #
         # +preset_or_rate+ is a preset name (:sweep, the default; :jet,
         # :sheen, :steel, :orbit, :tape_flange; `L.fx.flanger`) or the LFO rate:
@@ -51,6 +54,39 @@ module MB
         def flanger(preset_or_rate = nil, **options)
           Flanger.build(self, preset_or_rate, **options)
         end
+
+        # A rotary speaker: spinning horn and drum rotors.
+        #
+        # See GraphNode::Rotary.
+        #
+        # The sound splits at +:crossover+ (800 Hz) into a treble horn and a
+        # bass drum that spin; each rotor's distance to a microphone sweeps
+        # a short delay (Doppler: the pitch wavers) and its direction its
+        # level (tremolo), and the two microphones +:spread+ of a turn apart
+        # make the stereo.  +preset+ is :cabinet (default, slow), :whirl
+        # (fast), or :chorale (gentle and wide; `L.fx.rotary`).  Options
+        # override it:
+        # +:speed+ - :slow (chorale), :fast (tremolo), :stop, a number 0..1,
+        #            or a node of 0..1 (a knob) to switch live: the horn
+        #            spins up in about a second, the drum in about five.
+        # +:crossover+ - Hz between the drum and the horn.
+        # +:horn+, +:drum+ - levels (gains, `-3.db`, or nodes).
+        # +:doppler+, +:tremolo+ - depth scales (1 = the cabinet).
+        # +:spread+ - the microphones' angle in turns (0 mono, 0.5 opposite).
+        # +:ramp+ - scale on the spin-up and slow-down times.
+        # +:mix+ - linear dry/wet (1 the cabinet alone; number or node).
+        #
+        # Returns a stereo bundle (a stereo input is mixed to mono first,
+        # as the cabinet has one input).
+        #
+        # Examples (bin/sound.rb):
+        #     bg :organ, organ.rotary                         # slow
+        #     bg :organ, organ.rotary(:whirl)                 # fast
+        #     bg :organ, organ.rotary(speed: knob(:spin))     # turn :spin, 1 to speed up, 0 to slow down
+        def rotary(preset = nil, **options)
+          Rotary.build(self, preset, **options)
+        end
+        alias rotary_speaker rotary
       end
     end
   end

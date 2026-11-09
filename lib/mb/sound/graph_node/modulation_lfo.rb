@@ -35,7 +35,9 @@ module MB
                  end
           tone = shape == :triangle ? tone.triangle : tone.sine
           tone = tone.with_phase(phase) unless phase == 0
-          tone.at_rate(sample_rate)
+          # (only when it differs: a rate node's Tone has its rate already,
+          # and at_rate would reach upstream into the rate node's own graph)
+          tone.at_rate(sample_rate) unless tone.sample_rate == sample_rate
           tone
         end
 

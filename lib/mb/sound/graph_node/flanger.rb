@@ -22,7 +22,7 @@ module MB
       #
       # Presets are the :flanger family of the library (`L.fx.flanger.jet`,
       # `find 'metal'`); use them with GraphNode#flanger
-      # (FlangerMethods#flanger).  The settings share their names and
+      # (ModulationMethods#flanger).  The settings share their names and
       # meanings with GraphNode#phaser (rate, depth, feedback, mix, spread,
       # shape, phase, sweep).
       module Flanger
@@ -72,7 +72,7 @@ module MB
         # The default preset (GraphNode#flanger without a preset name).
         DEFAULT_PRESET = :sweep
 
-        # Builds a flanger on +input+ (see FlangerMethods#flanger): +rate+
+        # Builds a flanger on +input+ (see ModulationMethods#flanger): +rate+
         # is a preset name (Symbol) or the LFO rate, +options+ override the
         # preset's settings.  Returns one node for a mono input without
         # spread, else a stereo Channels bundle.

@@ -36,7 +36,7 @@ module MB
         include DynamicsMethods
         include BlendMethods
         include MasteringMethods
-        include FlangerMethods
+        include ModulationMethods
         node_traits memory: :none
 
         # The channel nodes.

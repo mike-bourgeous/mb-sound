@@ -315,8 +315,9 @@ module MB
         end
         alias sidechain_duck duck
 
-        # The mirror of #duck: turns this signal up while +sidechain+ is
-        # loud (a gain follower, "anti-duck").  It turns up by up to +amount+
+        # Turns this up while +sidechain+ is loud (#duck mirrored).
+        #
+        # A gain follower ("anti-duck").  It turns up by up to +amount+
         # (e.g. 12.db; -12.db is the same, since a swell never cuts; a bare
         # number is a linear gain of at least 1, see Decibels.boost_db)
         # while +sidechain+ is above +threshold+, the boost growing 1 dB per
@@ -426,7 +427,9 @@ module MB
         alias limiter limit
         alias brickwall limit
 
-        # A transient shaper (Dynamics::TransientShaper): turns attacks and sustain up or down.
+        # A transient shaper: attacks and tails up or down.
+        #
+        # See Dynamics::TransientShaper.
         #
         # Envelope followers of different speeds tell an attack (a fast
         # follower running ahead of a slow-attack one) from a decaying tail

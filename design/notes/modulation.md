@@ -1,13 +1,14 @@
-# Modulation effects (flanger)
+# Modulation effects (flanger, rotary speaker)
 
 <!-- summary -->
-`sig.flanger(:sweep | :jet | :sheen | :steel | :orbit | :tape_flange | rate, delay:, range:, depth:, feedback:, mix:, spread:, shape:, phase:, law:, through_zero:, sweep:)` (`GraphNode::Flanger`, library family `:flanger`) is a short delay swept by an LFO with signed feedback, built from `#delay`'s node-time DelayLine and feedback loop (no delay engine of its own); settings share names and meanings with `phaser` (rate in Hz or bars, linear mix, spread in cycles); same output at any buffer size.
+`sig.flanger(:sweep | :jet | :sheen | :steel | :orbit | :tape_flange | rate, delay:, range:, depth:, feedback:, mix:, spread:, shape:, phase:, law:, through_zero:, sweep:)` (`GraphNode::Flanger`, library family `:flanger`) is a short delay swept by an LFO with signed feedback, built from `#delay`'s node-time DelayLine and feedback loop (no delay engine of its own); settings share names and meanings with `phaser` (rate in Hz or bars, linear mix, spread in cycles).  `sig.rotary(:cabinet | :whirl | :chorale, speed:, ...)` (`GraphNode::Rotary`, family `:rotary`) is a two-rotor rotary speaker (Doppler delays, tremolo, two microphones, rotors gliding between speeds).  Same output at any buffer size.
 <!-- /summary -->
 
 ## Quick reference
 
 - `sig.flanger` (`:sweep`), `sig.flanger(:jet)`, `sig.flanger(2.bars, feedback: -0.7, spread: 0.25)`, `sig.flanger(:steel, range: 0.3.ms..3.ms)`, `sig.flanger(sweep: env * 2 - 1)`; presets `L.fx.flanger`.
-- Code `lib/mb/sound/graph_node/flanger.rb` (`Flanger.build`), `flanger_methods.rb`, the shared LFO `modulation_lfo.rb` (`ModulationLfo.tone`); spec `spec/lib/mb/sound/graph_node/flanger_spec.rb`; help `help :effects`.
+- `sig.rotary`, `sig.rotary(:whirl)`, `sig.rotary(speed: knob(:spin))` (turn :spin 0/1), `rotary(crossover: 1200, spread: 0.5, doppler: 0.5)`; presets `L.fx.rotary`.
+- Code `lib/mb/sound/graph_node/flanger.rb` (`Flanger.build`), `rotary.rb` (`Rotary.build`), `modulation_methods.rb`, the shared LFO `modulation_lfo.rb` (`ModulationLfo.tone`); specs `spec/lib/mb/sound/graph_node/flanger_spec.rb`, `rotary_spec.rb`; help `help :effects`.
 
 Built in effects-2 (2026-11-09; the maintainer's "Add effects to the plan including phaser, if time permits", the overnight plan in the workbench's `briefs/overnight-2026-11-08.md`, brief `briefs/effects-2.md`).  phaser-1 built `phaser` in parallel; the two share their settings' names and meanings.
 
@@ -50,3 +51,16 @@ The input plus a copy through a delay of a few milliseconds swept by an LFO.  Mi
 **Cost** (Mac container, YJIT, thread CPU ns per sample after the source's own cost, best of 3 x 4 s on a `110.hz.saw`, while another session's memcheck ran; % of realtime in parentheses): mono presets `:sweep` 292 (1.40%) at 128-sample buffers, 186 (0.89%) at 800; `:jet` 308 / 189; `:steel` 295 / 176; stereo presets `:sheen` 580 (2.78%) / 345 (1.66%), `:orbit` 559 / 336; `:tape_flange` (mono, through zero: one more delay and a Mixer) 494 (2.37%) / 327 (1.57%).
 
 **Older script**: `bin/effects/flanger.rb` (2022) builds its own flanger from a delay, a feedback loop, softclips, and oversampling, with audio-rate LFO examples (to 3300 Hz); it is unchanged (whether it becomes a front end of `flanger` is a question: its examples depend on the softclips in the loop and the oversampling).
+
+## Rotary speaker
+
+The maintainer, 2026-10-24: "We should build a leslie sim in the effects project".  `sig.rotary(preset = :cabinet, speed:, crossover:, horn:, drum:, doppler:, tremolo:, spread:, ramp:, mix:)` (alias `rotary_speaker`; `GraphNode::Rotary`, library family `:rotary`) models the classic two-rotor organ cabinet (the Leslie 122/147 kind; help names no product): one input (a stereo input is averaged), a crossover, a treble horn and a bass drum spinning, two microphones.  Built from library pieces only:
+
+- **Crossover**: Linkwitz-Riley 4th order at `crossover` (800 Hz, the cabinet's passive crossover) as two Butterworth SVFs per side (Q 1/sqrt(2)): flat sum (spec'd: 100 / 800 / 5000 Hz sines within 0.005 of their level with the rotors' effects off).  Not `#bands`: the Crossover's bands must be read in lockstep, and the input's end before the tail (a short read from `and_then`) put one band's Tee a frame ahead, printing "Crossover band 1 sampled again before the other bands" (a latent trap for any `bands` user with a short read upstream and Tee'd bands; recorded, not fixed).
+- **Rotation**: each rotor's angle is a Tone LFO whose frequency is the rotor's speed, so the phase stays continuous when the speed changes.  `speed:` is :slow (:chorale, 0), :fast (:tremolo, 1), :stop (both rotors still, at the microphones' angles), a number 0..1, or a node of 0..1 (a knob): mapped to each rotor's slow..fast Hz and glided with `#clip_rate` (linear in Hz, like a motor's roughly constant torque) from the slow speed: horn 0.8 / 6.7 Hz, 1.0 s up and 1.6 s down; drum 0.67 / 5.7 Hz, 5.0 s up and 5.5 s down (`ramp:` scales the times).  UNVERIFIED: speeds and times are the commonly published figures for the cabinet (about 48/400 rpm horn, 40/342 rpm drum; spin-up about 1 s and 5 s), not measured here.
+- **Doppler**: per rotor and microphone a `#delay` with a node time `CENTER - depth * cos(angle)` (1.2 ms center; horn +-0.44 ms, a 15 cm radius at the speed of sound; drum +-0.15 ms), sinc reads, `smooth: false`.  At the fast speed a 6 kHz tone wavers by 2 pi f_rot A f = +-111 Hz (+-32 cents; spec'd within 15% from zero crossings).
+- **Tremolo**: the level `1 - am/2 + am/2 cos(angle)` (horn am 0.5, drum 0.3 at `tremolo: 1`): loudest pointing at the microphone, when the delay is shortest (spec'd: a 5 kHz tone swings 0.5 to 0.25 at 0.8 Hz, the other microphone opposite at `spread: 0.5`).
+- **Microphones** `spread` turns apart (0.25 default: 90 degrees; 0 mono, 0.5 opposite).  Both end together `TAIL` (10 ms) after the input: the input is followed by silence and the delays don't ring out on their own (each would end at its own longest read, a different frame per side).
+- `horn:`/`drum:` levels (gains, Decibels, nodes), `mix:` linear (dry is the input's own sides).
+
+Presets: `:cabinet` (slow, the defaults), `:whirl` (fast), `:chorale` (horn 0.9, doppler 0.6, tremolo 0.5, spread 0.4, mix 0.8: gentle and wide).  Not modeled (questions): the horn's directivity filtering (a brighter sound pointing at the microphone), cabinet resonances, the amplifier's overdrive (a `softclip` before it does that), the brake; a stereo input kept per side.

@@ -228,9 +228,13 @@ module MB
         with a copy a few milliseconds late: the two cancel in a comb of
         notches, and an LFO sweeping the delay moves the whole comb.
         Feedback sharpens it (negative feedback sounds hollow and
-        metallic); rates take Hz or bars, `spread:` makes it stereo.
+        metallic); rates take Hz or bars, `spread:` makes it stereo.  A
+        rotary speaker (`rotary`, `L.fx.rotary`) spins a treble horn and a
+        bass drum past two microphones: the pitch wavers as each comes
+        closer and recedes, the level as it turns toward and away, and a
+        knob on `speed:` spins them up and down with their inertia.
       TEXT
-      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :flanger, :softclip, :clip, :shape_db, :inertia, :decimate, :quantize, :ease, :oversample, :ring
+      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :flanger, :rotary, :softclip, :clip, :shape_db, :inertia, :decimate, :quantize, :ease, :oversample, :ring
       note :delays, :feedback_loops, :reverbs, :chorus, :modulation
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do
@@ -243,6 +247,11 @@ module MB
       end
       example 'a jet flanger on a pad' do
         bg :try, 110.hz.saw.at(-26.db).lp4(2000).flanger(:jet)
+      end
+      example 'an organ through a fast rotary speaker' do
+        organ = seq(A3, C4, E4).n2.loop
+        tones = (organ.tone.sine + organ.tone.transpose(12).sine.at(0.5) + organ.tone.transpose(19).sine.at(0.3)) * organ.amp_env
+        bg :try, tones.at(-18.db).rotary(:whirl)
       end
       example 'a fuzz drawn in dB' do
         bass = seq(A1, A1, C2, G1).n8.loop

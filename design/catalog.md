@@ -83,7 +83,8 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `reverb(preset, output_channels:, ...)` Appends a reverb to this node (see GraphNode::Reverb)
 - `convolve/ir(impulse, mix:, wet:, ...)` Convolves this signal with an impulse response (convolution reverb)
 - `chorus/juno_chorus(mode, ...)` Appends a Juno-60-style stereo chorus (see Chorus), returning a stereo bundle
-- `flanger(preset_or_rate, ...)` A flanger: a short delay swept by an LFO sweeps a comb of notches
+- `flanger(preset_or_rate, ...)` A flanger: a short swept delay sweeping a comb of notches
+- `rotary/rotary_speaker(preset, ...)` A rotary speaker: spinning horn and drum rotors
 - `feedback/fb(*args, compensate:, sustain:, &block)` Builds a feedback loop on this node from the block (a FeedbackLoop)
 
 ### Dynamics, loudness, mastering
@@ -94,8 +95,8 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `noise_gate(threshold:, range:, ...)` A noise gate: a steep expander (ratio 20, range -80.db by default)
 - `limit/brickwall/limiter(ceiling:, lookahead:, ...)` A lookahead brickwall limiter (Dynamics::Limiter): output stays under ceiling
 - `duck/sidechain_duck(sidechain, amount:, threshold:, ...)` Sidechain ducking: turns this signal down while sidechain is loud
-- `swell/anti_duck(sidechain, amount:, threshold:, ...)` The mirror of #duck: turns this signal up while sidechain is loud
-- `transients/transient_shaper(attack:, sustain:, ...)` A transient shaper: turns attacks and sustain up or down
+- `swell/anti_duck(sidechain, amount:, threshold:, ...)` Turns this up while sidechain is loud (#duck mirrored)
+- `transients/transient_shaper(attack:, sustain:, ...)` A transient shaper: attacks and tails up or down
 - `squeeze(preset, depth:, time:, ...)` Multiband upward + downward compression ("squeeze it to eleven")
 - `bands/multiband(*frequencies, order:)` Splits this signal into Linkwitz-Riley bands for the block to process
 - `mono_below(frequency, order:)` Makes everything below frequency (Hz or a Pitch) mono
