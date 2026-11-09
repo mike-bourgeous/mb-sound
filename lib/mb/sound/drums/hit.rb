@@ -16,6 +16,8 @@ module MB
       # - #sample: a MB::Sound::Sample played from the start on every hit
       #   (sampler-style, pitched by +tune+ semitones);
       # - #fm: a two-operator FM tone (bells, zaps, FM toms);
+      # - #boom: a cinematic boom (MB::Sound::Boom's voice, without its
+      #   reverb tail);
       # - #env (decay envelopes), #sweep (pitch envelopes), #velocity
       #   (the hit's velocity, held), #bursts (repeated hits: claps),
       #   #repeats (the hit again at given delays), #mix.
@@ -36,7 +38,7 @@ module MB
       class Hit
         # Layer and helper names, which knobs may not use.
         METHODS = [
-          :trigger, :t, :velocity, :env, :sweep, :body, :ping, :noise, :click, :metal, :sample, :fm, :bursts, :repeats, :mix,
+          :trigger, :t, :velocity, :env, :sweep, :body, :ping, :noise, :click, :metal, :sample, :fm, :bursts, :repeats, :mix, :boom,
           :knobs, :name, :machine, :hz,
         ].freeze
 
@@ -180,6 +182,20 @@ module MB
           idx = index_decay ? env(index_decay, velocity: false) * index : index
           carrier = fnode.tone.sine.pm(mod, idx).reset(@trigger)
           carrier * env(decay)
+        end
+
+        # A cinematic boom (MB::Sound::Boom) of preset +name+ on every hit:
+        # its body falls onto +tune+ (Hz, a Pitch, or a node; the preset's
+        # note by default), with the preset's click, sub, noise, and drive,
+        # at the hit's velocity.  Kits are mono and dry, so the preset's
+        # reverb tail is left out (put the kit on a reverb or a bus).
+        # Settings override the preset's (`h.boom(:impact, decay: 0.8)`;
+        # knob readers work: `h.boom(:impact, decay: h.decay)`).
+        #
+        #     kit { voice(:boom, gm: 49) { |h| h.boom(:impact) }; tr909 except: :crash }
+        def boom(name = :cinematic, tune: nil, **settings)
+          s = MB::Sound::Boom.settings(name, **settings)
+          MB::Sound::Boom.voice(@trigger, tune.nil? ? MB::Sound::Boom.home_note(name).frequency : tune, s.slice(*MB::Sound::Boom::VOICE_KEYS))
         end
 
         # The trigger repeated +count+ times +spacing+ apart (seconds or a
