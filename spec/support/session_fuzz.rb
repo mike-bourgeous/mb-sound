@@ -154,6 +154,8 @@ module SessionFuzz
     first_clips = nil # (the first scene's clips, for kit swaps)
     scene_clips = [] # (every scene's clips, for kit swaps)
     swappable = nil # (synth tracks the first scene starts with looping clips: swaps need a player, and take Clips, not Kits)
+    scene_ends = {} # (the tracks each scene stops or gives a one-shot, for #track_events)
+    scene_loops = {} # (the tracks each scene gives a looping clip)
     rng.rand(1..2).times do |i|
       sname = :"s#{i + 1}"
       parts = tracks.keys.select { rng.rand < 0.75 }
@@ -163,6 +165,8 @@ module SessionFuzz
       swappable ||= clips.select { |t, c| tracks[t] == :synth && c.end_with?('.loop') }.keys
       first_clips ||= clips
       scene_clips << clips
+      scene_ends[sname] = (extra == ', others: :keep' ? [] : tracks.keys - parts) + clips.reject { |_, c| c.end_with?('.loop') }.keys
+      scene_loops[sname] = clips.select { |_, c| c.end_with?('.loop') }.keys
       lines << "scene :#{sname}, #{clips.map { |t, c| "#{t}: #{c}" }.join(', ')}#{extra}"
       scenes << sname
     end
@@ -349,7 +353,110 @@ module SessionFuzz
         end
       end
     end
+    events = track_events(lines, beats, scene_ends, scene_loops)
+    lines = without_swaps_of_stopped(lines, beats, tracks.keys, events)
+    lines = without_lost_cues(lines, beats, events, scene_clips.each_with_index.to_h { |c, k| [:"s#{k + 1}", c.keys] })
     Song.new(header: header, lines: lines, bars: bars)
+  end
+
+  # The beat (from 0) a scheduled line of a song runs on, or nil for a
+  # line run as the song starts.
+  def line_beat(line, beats)
+    m = line.match(%r{\Aat_bar\((\d+)(?:, beat: (\d+(?:/\d+r)?))?\)}) or return nil
+    (Integer(m[1]) - 1) * beats + (m[2] ? Rational(m[2].delete_suffix('r')) : 1) - 1
+  end
+
+  # Where a song's lines may stop and start its tracks, for the filters
+  # below: [stops, starts], track => [[beat, beat after which a start
+  # counts], ...] and track => [beat, ...].  A track stops with a `stop`
+  # (landing right away), a scene leaving it out or giving it a one-shot
+  # (+scene_ends+, landing within a bar), or a flow (which may launch any
+  # scene at any time); it plays again from a `bg` of it or a scene giving
+  # it a loop (+scene_loops+), `on: :now`.
+  def track_events(lines, beats, scene_ends, scene_loops)
+    stops = Hash.new { |h, k| h[k] = [] }
+    starts = Hash.new { |h, k| h[k] = [] }
+    lines.each do |l|
+      at = line_beat(l, beats) or next
+      now = l.include?('on: :now')
+      l.scan(/\bstop :(\w+)/) { |(t)| stops[t.to_sym] << [at, at] }
+      l.scan(/\bgo :(\w+)/) do |(s)|
+        scene_ends.fetch(s.to_sym, []).each { |t| stops[t] << [at, at + beats] }
+        scene_loops.fetch(s.to_sym, []).each { |t| starts[t] << at } if now
+      end
+      scene_ends.each_value { |list| list.each { |t| stops[t] << [at, Float::INFINITY] } } if l.include?('flow(')
+      l.scan(/\bbg :(\w+), (?:on: :now|[^;]*\.loop[^;]*, on: :now)/) { |(t)| starts[t.to_sym] << at }
+    end
+    [stops, starts]
+  end
+
+  # +lines+ without the swaps of a track that may have stopped by the time
+  # the swap lands (+events+, see #track_events: no start after the stop
+  # landed and by the swap's call): a swap of a track that isn't playing is
+  # a user error by design (PlaybackMethods#swap's guard when it's called,
+  # ClipSwaps' "No background player" where it lands), and those were
+  # generated songs' errors (INVALID).  Swaps land at their call `on: :now`,
+  # else within a bar.  Dropped, not drawn otherwise, so every other seed
+  # keeps its song (fix-batch23: batch 23's soak had 3 such songs in 48,
+  # seeds 776002, 776003, and 776046; 9 in seeds 776000-776799).
+  def without_swaps_of_stopped(lines, beats, names, events)
+    stops, starts = events
+    lines.reject do |l|
+      m = l.match(/\{ swap :(\w+),/) or next false
+      t = m[1].to_sym
+      at = line_beat(l, beats) or next false
+      lands = at + (l.include?('on: :now') ? 0 : beats)
+      names.include?(t) && stops[t].any? { |s, after| s <= lands && starts[t].none? { |r| r > after && r <= at } }
+    end
+  end
+
+  # +lines+ without the cue and bare `launch` pairs (SHRINK_TOGETHER's)
+  # where the cue may end before its launch: a player starting as the cued
+  # track ends its cue (`go` and `bg` end a cue, cue.md, decided
+  # 2026-10-18; Session::Cue#end_cue_at_start), so `launch` found nothing
+  # cued, a generated user error that failed :runs (fix-batch23: seeds
+  # 777277 and 777701 of 777000-777799, a flow's scene starting the cued
+  # track again between the cue and the launch, after a stop or a
+  # scene's one-shot; the pre-listen pairs, ending in `launch :t`, never
+  # raised there).  A pair goes where a `bg`, `stop`, or clip-slot
+  # `launch` of the track is called between the cue and the launch, or,
+  # if the track may not be playing by the launch (not started by the
+  # first scene, or stopped: +events+, see #track_events), a flow whose
+  # scenes give it a clip (+scene_tracks+) starts before the launch (it
+  # may launch a scene at any time) or a `go` of such a scene lands
+  # between them (`on: :now` at its call, else within a bar of it).
+  # Dropped, not drawn otherwise, so every other seed keeps its song.
+  def without_lost_cues(lines, beats, events, scene_tracks)
+    stops, starts = events
+    first, needs = SHRINK_TOGETHER[0]
+    drop = []
+    lines.each_with_index do |l, i|
+      m = l.match(first) or next
+      t = m[2].to_sym
+      launch = lines.index { |x| x.match?(needs.(m)) } or next
+      next unless lines[launch].include?('{ launch }')
+
+      from = line_beat(l, beats)
+      to = line_beat(lines[launch], beats)
+      scenes = scene_tracks.select { |_, list| list.include?(t) }.keys
+      # (the first scene starts at beat 0, `on: :now`)
+      restarts = !scenes.empty? && (starts[t].none? { |r| r == 0 } || stops[t].any? { |s, _| s <= to })
+      lost = lines.each_with_index.any? { |x, j|
+        next false if j == i || j == launch
+        at = line_beat(x, beats) or next false
+        # (lines on one beat run in order: before the cue, or after the
+        # launch, they don't end it)
+        next false if at > to || (at == to && j > launch)
+        next true if restarts && x.include?('flow(')
+
+        after_cue = at > from || (at == from && j > i)
+        go = x[/\bgo :(\w+)/, 1]
+        (restarts && go && scenes.include?(go.to_sym) && (after_cue || (at < from && !x.include?('on: :now') && at + beats >= from))) ||
+          (after_cue && x.match?(/\b(?:bg|stop) :#{t}\b|\blaunch :#{t}, /))
+      }
+      drop.push(i, launch) if lost
+    end
+    lines.reject.with_index { |_, k| drop.include?(k) }
   end
 
   # What a scheduled step of #generate can see: the RNG, the step's track
