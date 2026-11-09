@@ -63,6 +63,19 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
                               'h.mix(body.softclip(clip, 1.0), h.noise(decay: tick_decay, highpass: tick_hp) * tick) } }')
     end
 
+    # (tuner-fixes-2, the maintainer: "The acid_fit did not use the 303
+    # diode filter": its fitter wrote mode: :lp4; a fit written with the
+    # diode ladder keeps it, with the resonance a knob)
+    it "keeps an acid fit's diode ladder, its resonance a knob" do
+      code = 'synth(CLIP, voices: 1) { |v| v.hz.saw.lp4(830.5, resonance: 0.71, mode: :diode) * v.env(0.002, 0.3, 0.0, 0.05) }'
+      fit = MB::Sound::FitPatch.save(:acid_fit, code, { cutoff: (30.0..18000.0).at(830.5), reso: (0.0..1.0).at(0.7123) })
+      expect(fit.params.keys).to eq(%i[cutoff reso])
+      g = MB::Sound.preset(fit.path, midi: MB::Sound.seq(MB::Sound::A1).n4)
+      g.sample(800)
+      fps = MB::Sound::UI::Inspect.nodes_of(g).select { |n| n.is_a?(MB::Sound::GraphNode::FourPole) }
+      expect(fps.map { |f| f.kernel_filter.mode }).to eq([:diode])
+    end
+
     # (tuner-fixes-2: the acid fit printed `resonance: 0.33` for reso
     # 0.3300036, and its resonance was no knob)
     it "takes a keyword's short literal for the param the keyword names" do
