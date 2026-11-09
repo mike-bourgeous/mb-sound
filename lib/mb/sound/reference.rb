@@ -293,7 +293,8 @@ module MB
     module ReferenceMethods
       # A/B against a reference while tuning (see Reference): `ab :kick,
       # 'kick_ref.wav'` puts the reference on track :kick_ref, playing
-      # :kick's clip at the sample's own pitch, muted, loudness-matched to
+      # :kick's clip (transposed from its first note for a pitched voice,
+      # at the sample's own pitch for a kit), muted, loudness-matched to
       # the patch; `ab` (or `ab :kick`, or b in the inspector) flips what
       # you hear between the patch and the reference (matching again if
       # the knobs moved); `ab :kick, :off` stops the reference.  Returns

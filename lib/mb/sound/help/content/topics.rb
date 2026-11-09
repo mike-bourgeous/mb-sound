@@ -1894,8 +1894,10 @@ module MB
         turn rebuilds the track.
 
         `ab :kick, 'kick_ref.wav'` puts the reference on its own track
-        (:kick_ref) playing the kick's clip at the sample's own pitch,
-        muted, its level matched to the patch's loudness (LUFS of one note
+        (:kick_ref) playing the kick's clip (a pitched voice's reference
+        at its own pitch on the clip's first note and transposed from it
+        on other notes, so a new clip or generator plays its melody; a
+        kit's at its own pitch on every note), muted, its level matched to the patch's loudness (LUFS of one note
         at the knobs now); `ab` (or b in the inspector) flips what you hear
         between the patch and the reference, matching again when the knobs
         moved; `ab :kick, :off` stops it.  Each flip is one console line in
