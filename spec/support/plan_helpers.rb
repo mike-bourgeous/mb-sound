@@ -163,6 +163,11 @@ module PlanSpecHelpers
   # e.g. a rebuild once an input ended, is compared too), and cover at least
   # one pass; explicit +sizes+ that miss an event raise, so no event is
   # silently left out.  Result#sizes has the sizes used.
+  #
+  # The block may return a channel bundle: each block samples every
+  # channel in order (as a Session reads a player's channels), and the
+  # channels' buffers are compared joined end to end (nil once any channel
+  # ended).
   def plan_compare(sizes: nil, tolerance: nil, ruby_tolerance: nil, engines: [:c, :ruby], fallbacks: false, check: nil, &build)
     copies = ([:unfused] + engines).to_h { |e| [e, Copy.new(e)] }
     sources = []
@@ -197,7 +202,7 @@ module PlanSpecHelpers
     sizes.each_with_index do |n, i|
       copies.each do |e, ctx|
         ctx.events[i].each { |ev| ev.call }
-        out = in_engine.(e) { graphs[e].sample(n)&.dup }
+        out = in_engine.(e) { PlanSpecHelpers.sample_block(graphs[e], n) }
         outputs[e] << out
       end
 
@@ -240,6 +245,17 @@ module PlanSpecHelpers
     end
 
     Result.new(outputs: outputs, installations: installations, graphs: graphs, sizes: sizes)
+  end
+
+  # One block of +graph+ for #plan_compare: a copy of its buffer, or for a
+  # channel bundle its channels' buffers joined (nil once one ended).
+  def self.sample_block(graph, n)
+    return graph.sample(n)&.dup unless graph.is_a?(MB::Sound::GraphNode::Channels)
+
+    bufs = graph.outputs.map { |o| o.sample(n) }
+    return nil if bufs.any?(&:nil?)
+
+    bufs[0].class.zeros(0).concatenate(*bufs)
   end
 
   # The ops of a Result's first region, as op class names (e.g. [:Mul, :Tone]).

@@ -40,6 +40,17 @@ module RelationFuzz
   # and sah clocks flipped decisions only while unplanned sines were libm's.)
   KNOWN = {}.freeze
 
+  # The shrunk graphs of fixed failures, checked against every relation in
+  # every run (relation_fuzz_spec): a seed draws another graph whenever the
+  # generator or the graph sweep changes, so the seed alone stops guarding.
+  FOUND = [
+    # fix-batch23, seed 776870 (:plan_exact, :plan_fast): the sum's ended
+    # summand rebuilt the installation while the lane group of the
+    # product's two channels ran, and the regrouped channels computed
+    # their block again (LaneGroup#hand_off_block)
+    '((110.hz.saw.at(0.5).until(0.011) + 110.hz.triangle.at(0.2)) * (110.hz.saw.at(0.5) * 110.hz.saw.at(0.5).pan(-0.107)))',
+  ].freeze
+
   Expr = Struct.new(:kind, :args, :kids) do
     def to_s = RelationFuzz.code(self)
 
