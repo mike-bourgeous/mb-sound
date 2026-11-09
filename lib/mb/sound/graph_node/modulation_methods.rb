@@ -6,7 +6,7 @@ module MB
       # ChannelDispatch::EXCLUDED): a stereo input's sides get LFOs
       # +spread+ apart, and a rotary speaker has one input.
       module ModulationMethods
-        # A flanger: a short swept delay sweeping a comb of notches.
+        # A flanger: a short swept delay with feedback.
         #
         # See GraphNode::Flanger.
         #
@@ -55,7 +55,7 @@ module MB
           Flanger.build(self, preset_or_rate, **options)
         end
 
-        # A rotary speaker: spinning horn and drum rotors.
+        # A rotary speaker: spinning horn and drum.
         #
         # See GraphNode::Rotary.
         #

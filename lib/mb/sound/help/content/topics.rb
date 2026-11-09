@@ -233,8 +233,11 @@ module MB
         bass drum past two microphones: the pitch wavers as each comes
         closer and recedes, the level as it turns toward and away, and a
         knob on `speed:` spins them up and down with their inertia.
+
+        `chebyshev` draws a waveshaper by the harmonics a full-scale sine
+        should get (`chebyshev(h2: 0.5, h3: 0.2)`, `L.fx.chebyshev`).
       TEXT
-      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :flanger, :rotary, :softclip, :clip, :shape_db, :inertia, :decimate, :quantize, :ease, :oversample, :ring
+      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :flanger, :rotary, :softclip, :clip, :shape_db, :chebyshev, :inertia, :decimate, :quantize, :ease, :oversample, :ring
       note :delays, :feedback_loops, :reverbs, :chorus, :modulation
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do

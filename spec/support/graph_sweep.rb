@@ -422,6 +422,9 @@ module GraphSweep
       ['tape_echo live settings (tone, low_cut, drive, wow, flutter nodes; delays-2)', ->(c) {
         c.sig.tape_echo(:reel, time: 0.002, tone: c.mod(800, 6000), low_cut: c.mod(50, 400), drive: c.mod(0, 3), wow: c.mod(0, 0.5), flutter: c.mod(0, 0.1))
       }],
+      ['chebyshev (a polynomial curve, DC blocker)', ->(c) {
+        c.sig.chebyshev(:drawbar) + c.sig.chebyshev(h3: 0.5, h5: 0.2, drive: c.mod(0.5, 2)) + c.stereo_sig.chebyshev(:octaver, antialias: false).mixdown
+      }],
       ['chorus', ->(c) { c.stereo_sig.chorus(:juno2) }],
       ['flanger presets and live settings (Flanger: swept delays, loops, through zero)', ->(c) {
         c.sig.flanger(:jet, rate: 9, feedback: c.mod(-0.9, 0.9)).+(c.stereo_sig.flanger(:orbit, mix: c.mod(0, 1), depth: c.mod(0, 1)).mixdown) +

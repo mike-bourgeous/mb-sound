@@ -76,6 +76,27 @@ module MB
         end
         alias ashape_curve aease
 
+        # Waveshaping by harmonic amounts (Chebyshev polynomials).
+        #
+        # See GraphNode::Chebyshev.  T_n turns a full-scale sine into its nth
+        # harmonic, so the amounts are the harmonics a full-scale sine gets
+        # (quieter sounds get fewer of the high ones, brightening as they're
+        # driven).  Give a preset (:triode, the default; :pentode, :octaver,
+        # :drawbar, :reed; `L.fx.chebyshev`), amounts from the fundamental
+        # up (`chebyshev(1, 0.5, 0.25)`), or +h1:+ ... +h15:+ (`chebyshev(h2:
+        # 0.5, h3: 0.2)`, over a preset's: `chebyshev(:reed, h2: 0.2)`).
+        # +drive+ scales the input first (a number, `6.db`, or a node);
+        # inputs past full scale hold the curve's ends.  Silence stays
+        # silent; even harmonics get a DC blocker (5 Hz).  Antialiased like
+        # #softclip (half a sample of delay); `antialias: false` is exact.
+        #
+        #     play 220.hz.sine.at(0.9).chebyshev(:drawbar)
+        #     play 110.hz.triangle.chebyshev(h1: 1, h3: 0.4, drive: 2)
+        #     play keys.chebyshev(:triode, drive: 0.5.hz.lfo.at(0.5..2))
+        def chebyshev(*amounts, **options)
+          Chebyshev.build(self, amounts, **options)
+        end
+
         # Shapes every sample through a transfer curve drawn in dB (DbShaper).
         # Input level to output level, the sign kept: points as for #compand
         # (`-60.db => -30.db`, a Hash or [input, output(, shape)] rows; bare
