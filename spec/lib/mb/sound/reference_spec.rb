@@ -50,6 +50,42 @@ RSpec.describe(MB::Sound::Reference, :aggregate_failures) do
     expect(s.journal.changes.map(&:subject)).to include(:lead_ref)
   end
 
+  # (tuner-fixes-2, the maintainer: "when I changed the patch to use the
+  # techno acid generator, the reference kept playing just a single
+  # repeating note": it played every note at the sample's own pitch)
+  it "plays a pitched voice's reference at the notes of the clip given later, a kit's at its own pitch" do
+    s, out = session
+    sine = MB::Sound::Sample.new([Numo::NMath.sin(Numo::SFloat.new(48000).seq * (2 * Math::PI * 110 / 48000)) * 0.5], name: 'sine')
+    pair = nil
+    MB::Sound::Session.with_context(session: s) do
+      MB::Sound.track(:lead, fit)
+      MB::Sound.bg(:lead, clip) # (A2: the sine's own pitch)
+      pair = MB::Sound.ab(:lead, sine)
+      MB::Sound.ab(:lead)
+    end
+    expect(pair.root).to eq(MB::Sound::A2.number.to_f)
+    # (the loudest bin of the last half second, Hann-windowed: 2 Hz bins)
+    peak = -> {
+      x = Numo::DFloat.cast(out.captured[0][-24000..])
+      w = Numo::NMath.sin(Numo::DFloat.new(24000).seq * (Math::PI / 24000))**2
+      Numo::Pocketfft.rfft(x * w).abs.max_index * 2
+    }
+    60.times { s.process_buffer }
+    expect(peak.()).to eq(110)
+    MB::Sound::Session.with_context(session: s) { MB::Sound.bg(:lead, MB::Sound.seq(MB::Sound::A3).n4.loop) }
+    expect(s.arrangement.tracks[:lead_ref].clip).to equal(s.arrangement.tracks[:lead].clip)
+    120.times { s.process_buffer }
+    expect(peak.()).to eq(220)
+
+    kick = MB::Sound::FitPatch.save(:kick_fit, "kit(grid(16, kick: 'X...'), seed: 1) { voice(:kick) { |h| h.body(51.328155, decay: 0.468972) } }",
+                                    { tune: (30.0..110.0).at(51.328155) })
+    MB::Sound::Session.with_context(session: s) do
+      MB::Sound.track(:kick, kick)
+      MB::Sound.bg(:kick, MB::Sound.seq(MB::Sound::C2).n4.loop)
+      expect(MB::Sound.ab(:kick, sine).root).to be_nil
+    end
+  end
+
   it 'puts the reference on its own track, muted, playing the clip, loudness-matched' do
     s, out = session
     pair = nil

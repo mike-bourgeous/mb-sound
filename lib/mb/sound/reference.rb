@@ -4,8 +4,10 @@ module MB
     # research-voice-match-3's hand-tune loop: "the reference on a second
     # track muted, with a one-key A/B").  `ab :kick, 'kick_ref.wav'` puts
     # the reference on its own track (:kick_ref) playing the patch track's
-    # clip through a one-voice sampler at the sample's own pitch, so every
-    # note of the clip plays the reference from its start, muted, with its
+    # clip through a one-voice sampler, so every note of the clip plays the
+    # reference from its start (at its own pitch on the clip's first note
+    # and transposed from it on others for a pitched voice, at its own
+    # pitch on every note for a kit: Reference.root_of), muted, with its
     # level set so its loudness matches the patch's; `ab` (or `ab :kick`,
     # or b in the inspector) flips which of the two is heard: one undo
     # step that mutes one and unmutes the other, journaled and in the take,
@@ -37,8 +39,11 @@ module MB
       # match; nil when not measured), +values+ (the knob values of the
       # last match), +note+ (why it isn't matched, or nil), +alt+ (a third
       # track in the A/B: refine's proposal, :"<track>_refined", or nil;
-      # flips then cycle patch -> alt -> reference: hearing :alt).
-      Pair = Struct.new(:track, :ref, :sample, :source, :hearing, :level_db, :patch_lufs, :ref_lufs, :values, :note, :alt, keyword_init: true) do
+      # flips then cycle patch -> alt -> reference: hearing :alt), +root+
+      # (the note the reference sounds at, others transposed from it: a
+      # pitched voice's first clip note; nil: every note at its own pitch,
+      # for kits; Reference.root_of).
+      Pair = Struct.new(:track, :ref, :sample, :source, :hearing, :level_db, :patch_lufs, :ref_lufs, :values, :note, :alt, :root, keyword_init: true) do
         def to_s
           match = patch_lufs && ref_lufs ? "patch #{fmt(patch_lufs)} LUFS, reference #{fmt(ref_lufs)} LUFS, reference level #{fmt(level_db)} dB" : (note || 'not matched')
           heard = case hearing
@@ -82,9 +87,10 @@ module MB
           tr = arr.tracks[track] or raise ArgumentError, "ab: no track #{track.inspect} (#{arr.tracks.keys.map(&:inspect).join(', ')}): make it first (design :#{track}, fit)"
           sample = sound.is_a?(Sample) ? sound : Sample[sound.to_s]
           ref = as || :"#{track}_ref"
-          inst = sample.to_instrument(keytrack: 0)
+          root = root_of(tr)
+          inst = root ? sample.to_instrument(root: root, keytrack: 1) : sample.to_instrument(keytrack: 0)
           pair = Pair.new(track: track, ref: ref, sample: sample, source: sound.is_a?(Sample) ? (sample.name || 'a Sample') : sound.to_s,
-                          hearing: :patch, level_db: 0.0)
+                          hearing: :patch, level_db: 0.0, root: root)
           Session.with_context(session: session) do
             session.command("ab #{track.inspect}") do
               MB::Sound.track(ref) { |clip| MB::Sound.sampler(clip, inst) }
@@ -120,6 +126,34 @@ module MB
           pair.hearing = to
           @last = pair.track
           pair
+        end
+
+        # The note the reference sounds at for track +tr+ (Arrangement
+        # track): its clip's first note, fractional as played, when the
+        # track plays a pitched voice; nil for a kit (the reference then
+        # plays at its own pitch on every note, as a drum sample does) or a
+        # track without a clip note.  Other notes play the reference
+        # transposed from it (tuner-fixes-2; the maintainer, 2026-11-09:
+        # "when I changed the patch to use the techno acid generator, the
+        # reference kept playing just a single repeating note").
+        def root_of(tr)
+          return nil if kit?(tr)
+          ev = UI::PatchRender.send(:first_note, tr.clip) or return nil
+          v = ev.value
+          v.is_a?(Numeric) || v.is_a?(Note) ? Sample.note_number(v) : nil
+        rescue StandardError
+          nil
+        end
+
+        # True when track +tr+ plays a drum kit: a kit entry, or a graph
+        # document whose voice is a kit (kit, drum_kit, tr909, tr808).
+        def kit?(tr)
+          entry = Arrangement::InstrumentPatch.entry_of(tr.patch)
+          return true if entry.respond_to?(:kind) && entry.kind == :kit
+          loc = entry.respond_to?(:location) ? entry.location : nil
+          loc.is_a?(String) && File.file?(loc) && File.read(loc).match?(/\b(kit|drum_kit|tr909|tr808)\s*[({]/)
+        rescue StandardError
+          false
         end
 
         # Gives +track+'s reference (and refine's copy) the track's clip
