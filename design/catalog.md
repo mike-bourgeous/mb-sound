@@ -79,6 +79,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `multitap/multitap_delay(*delays, name:, initial_buffer:, ...)` A multi-tap delay: one output per delay time, as a channel bundle
 - `haas(time, side:, level:)` A Haas (precedence effect) widener: one side delayed a few milliseconds
 - `ping_pong/pingpong(time, feedback:, spread:, ...)` A ping-pong delay: echoes alternate left and right (GraphNode::DelayNetwork)
+- `dual_delay/stereo_delay(left, right, feedback:, level:, ...)` A dual delay: two delay lines with their own times, feedback, and cuts
 - `tape_echo(preset, seed:, ...)` A tape echo (GraphNode::TapeEcho): repeats run through a tape sim each pass
 - `reverb(preset, output_channels:, ...)` Appends a reverb to this node (see GraphNode::Reverb)
 - `convolve/ir(impulse, mix:, wet:, ...)` Convolves this signal with an impulse response (convolution reverb)

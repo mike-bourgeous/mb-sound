@@ -214,9 +214,11 @@ module MB
         dry part plus its reverb); `(drone + hit).ring(:first)` (or
         `render(..., ring: :first)`) ends with the first.
         Delays (sinc-interpolated, tempo-synced lengths; regenerating
-        multitaps, ping-pong, Haas), tape echoes with presets (`L.fx.delay`:
-        :reel, :slapback, :ping_pong, :dub), feedback loops that run one
-        sample at a time in C, the FDN reverb with presets, convolution
+        multitaps, ping-pong, dual delays with cuts in the loop, Haas), tape
+        echoes with presets (`L.fx.delay`: :reel, :slapback, :ping_pong,
+        :dub), and feedback loops that run one sample at a time in C.
+
+        The FDN reverb with presets, convolution
         with impulse responses (`sig.ir('hall.wav')`, alias of `convolve`, zero
         latency, wet -10 dB; `reverb_match('hall.wav')` fits the FDN to one), the Juno
         chorus, and antialiased shapers, among them `shape_db`: transfer curves
@@ -224,12 +226,16 @@ module MB
         :fuzz, :fold_back, :gate, :asymmetric), and `inertia`, an
         acceleration-limited follower whose limit cycles chirp.
       TEXT
-      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :softclip, :clip, :shape_db, :inertia, :decimate, :quantize, :ease, :oversample, :ring
+      dsl :delay, :multitap, :ping_pong, :dual_delay, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :softclip, :clip, :shape_db, :inertia, :decimate, :quantize, :ease, :oversample, :ring
       note :delays, :feedback_loops, :reverbs, :chorus
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do
         blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop
         bg :try, (blip.tone.triangle.at(-14.db) * blip.amp_env).delay(1.n8.dotted, feedback: 0.5)
+      end
+      example 'a dual delay: 3/16 left, 5/16 right, repeats darkening' do
+        blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop
+        bg :try, (blip.tone.triangle.at(-14.db) * blip.amp_env).dual_delay(3.n16, 5.n16, feedback: 0.45, low_cut: 150, high_cut: 4000)
       end
       example 'a dub tape echo' do
         blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop

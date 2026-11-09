@@ -394,6 +394,12 @@ module GraphSweep
           c.stereo_sig.ping_pong(0.0013, feedback: -0.5, input: :stereo, interpolation: :cubic).mixdown +
           c.sig.haas(0.0007, side: :left, level: c.mod(0.5, 1)).mixdown
       }],
+      ['dual_delay (DelayNetwork with loop filters) and ping_pong cuts', ->(c) {
+        c.sig.dual_delay(c.mod(0.001, 0.002), 0.0013, feedback: [c.mod(0.2, 0.6), -0.4], level: [1, c.mod(0.5, 1)], high_cut: [3000, 9000], low_cut: 150,
+                         pan: [-0.5, c.mod(-0.3, 0.8)], mix: 0.4, mix_law: :balance).mixdown +
+          c.stereo_sig.dual_delay(0.0011, 0.0017, input: :stereo, high_cut: 5000).mixdown +
+          c.sig.ping_pong(0.0012, feedback: 0.6, low_cut: 200, high_cut: 4000).mixdown
+      }],
       ['reverb', ->(c) { c.stereo_sig.reverb(:room) }],
       ['convolve (Convolver)', ->(c) {
         ir = Numo::SFloat.new(700).seq.map { |i| Math.sin(i * 0.37) * Math.exp(-i / 150.0) }
