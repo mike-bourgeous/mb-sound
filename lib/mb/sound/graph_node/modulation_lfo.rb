@@ -1,10 +1,11 @@
 module MB
   module Sound
     module GraphNode
-      # The sweep LFO of the modulation effects (GraphNode#flanger, the
-      # rotary speaker's motor; effects-2): one place that turns a +rate:+
+      # The sweep LFO of the modulation effects (GraphNode#phaser,
+      # GraphNode#flanger, the rotary speaker's rotors; effects-2, which
+      # moved phaser-1's Phaser.lfo here): one place that turns a +rate:+
       # setting into a Tone LFO, so every modulation effect reads rates the
-      # same way (phaser-1's Phaser.lfo takes the same values).
+      # same way.
       module ModulationLfo
         # LFO shapes.
         SHAPES = %i[sine triangle].freeze
@@ -21,12 +22,14 @@ module MB
 
           rate = GraphNode.build_setting(rate) unless rate.respond_to?(:sample)
           tone = case rate
+                 # (first: a Duration is a Length, and a NodeDuration may be a
+                 # node; both follow the tempo through their own #lfo)
+                 when Sequence::Duration, Sequence::NodeDuration, Pitch then rate.lfo
                  when Numeric
                    raise ArgumentError, "#{what} rate: must not be negative (got #{rate})" unless rate.real? && rate >= 0
                    rate.to_f.hz.lfo
-                 when GraphNode then rate.tone.lfo
-                 when Sequence::Duration, Pitch then rate.lfo # (a Duration is a Length: first, so it follows the tempo)
                  when Length then (1.0 / rate.to_seconds(sample_rate: sample_rate)).hz.lfo
+                 when GraphNode then rate.tone.lfo
                  else
                    unless rate.respond_to?(:lfo)
                      raise ArgumentError, "#{what} rate: is Hz, a Pitch, a musical length (1.bar), a Length, or a node of Hz (got #{rate.inspect})"

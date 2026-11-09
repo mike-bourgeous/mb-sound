@@ -417,7 +417,7 @@ module MB
           stereo = !l.equal?(r) || input.is_a?(Channels) && input.channel_count == 2 || spread != 0
           sample_rate = input.sample_rate
           make = ->(side, offset) {
-            sw = sweep || lfo(s[:rate], shape, phase + offset, sample_rate)
+            sw = sweep || ModulationLfo.tone(s[:rate], shape: shape, phase: phase + offset, sample_rate: sample_rate, what: 'phaser')
             new(side, sweep: sw, center: center, range: octaves, depth: s[:depth], feedback: feedback, dry: dry, wet: wet,
               stages: s[:stages], sample_rate: sample_rate)
           }
@@ -457,31 +457,6 @@ module MB
           return Decibels.gain_of(value, "phaser #{name}", zero: true, above_one: true) if value.is_a?(Decibels)
           return value if value.respond_to?(:sample) || (value.is_a?(Numeric) && value.real?)
           raise ArgumentError, "phaser #{name}: is a level (a number, Decibels, or a node; got #{value.inspect})"
-        end
-
-        # The sweep LFO, a Tone of +shape+ starting at +phase+ cycles: +rate+
-        # in Hz (a number, a Pitch, or a node of Hz), a musical length per
-        # cycle (`1.bar`, `knob.bars`; follows the tempo and the timeline),
-        # or a Length per cycle (`2.seconds`).
-        def self.lfo(rate, shape, phase, sample_rate)
-          rate = GraphNode.build_setting(rate) unless rate.respond_to?(:sample)
-          tone = case rate
-                 when Sequence::Duration, Sequence::NodeDuration, MB::Sound::Pitch then rate.lfo # (before Length: Durations are Lengths)
-                 when Numeric
-                   raise ArgumentError, "phaser rate: must not be negative (got #{rate})" unless rate.real? && rate >= 0
-                   rate.to_f.hz.lfo
-                 when Length then (1.0 / rate.to_seconds(sample_rate: sample_rate)).hz.lfo
-                 when GraphNode then rate.tone.lfo
-                 else
-                   unless rate.respond_to?(:lfo)
-                     raise ArgumentError, "phaser rate: is Hz, a Pitch, a musical length (1.bar), a Length, or a node of Hz (got #{rate.inspect})"
-                   end
-                   rate.lfo
-                 end
-          tone = shape == :triangle ? tone.triangle : tone.sine
-          tone = tone.with_phase(phase) unless phase == 0
-          tone.at_rate(sample_rate)
-          tone
         end
       end
     end
