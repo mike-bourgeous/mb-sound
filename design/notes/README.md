@@ -82,9 +82,9 @@ Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`
 
 `#delay` (`Filter::Delay`) and `#multitap` share `MB::Sound::DelayLine` (C reads, exact mirrors; `:sinc` interpolation by default, `:cubic`, `:linear`); times are any length or node (`96.samples`, `3.n16`, `lfo.samples`), `feedback:`/`wet:`/`dry:`/`mix:` numbers or nodes (`mix:` an equal-power crossfade for `#delay`, `ping_pong`, and `tape_echo`), and delays ring out after their input ends (`MB::Sound::QuietRun#advance`).  Delay networks (`FastDelay.network`) build `multitap(t1, t2, feedback: [g1, g2] | g)`, `ping_pong(t, feedback:, spread:, mix:, input: :mono | :stereo)`, and `haas(15.ms, side:)`; tape echoes are `sig.tape_echo(:reel | :slapback | :ping_pong | :dub, time:, feedback:, mix:, tone:, low_cut:, drive:, wow:, flutter:)` (library family `:delay`).  Same output at any buffer size.
 
-### [Chorus](chorus.md)
+### [Chorus and tremolo](chorus.md)
 
-`sig.chorus(:juno1 | :juno2 | :juno12 | :lush, rate:, depth:, mix:, bbd: false)` (`GraphNode::Chorus`, self-contained in `graph_node/chorus.rb` and `chorus_nodes.rb` for a later effects project) is a Juno-60-style two-tap chorus returning a stereo bundle: mono in like the Juno, clean by default, `bbd: true` adds the board's filters and hiss.
+`sig.chorus(:juno1 | :juno2 | :juno12 | :lush, rate:, depth:, mix:, bbd: false)` (`GraphNode::Chorus`, self-contained in `graph_node/chorus.rb` and `chorus_nodes.rb` for a later effects project) is a Juno-60-style two-tap chorus returning a stereo bundle: mono in like the Juno, clean by default, `bbd: true` adds the board's filters and hiss.  `sig.tremolo(rate, depth:, shape:, phase:, stereo_phase:, seam:, law:, smooth:, mix:)` (aliases `trem`, `amplitude_modulation`; `GraphNode::Tremolo`) is amplitude modulation on the library's LFOs (Hz or tempo-synced; named shapes or a drawn cycle of points), depth in dB down to a floor, `stereo_phase:` for auto-pan; it reproduces Sony Amplitude Modulation's renders to -37..-112 dB.
 
 ### [Reverbs](reverbs.md)
 
