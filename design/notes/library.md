@@ -9,6 +9,7 @@ Every named thing (presets at every scale: effects, instruments, kits, clips, ge
 - Presettable classes: `extend Presettable`, `preset_family :reverb, kind:, keys:, apply:`, `param`, one `preset :hall, ..., tags:, about:, aliases:` line each; `X.presets`, `.preset_settings(:hall)`, `.preset_entry`.  Migrated: Reverb, Chorus, ModalResonator (`.from_preset`), Envelope (`Envelope.from_preset`, `Envelope::Curves`), Lofi, `DynamicsMethods::Squeeze`, Mastering (`Mastering.from_preset`, `.built_presets`), SQ80; Genre::Patches, tr808/tr909, and the fitted kit designs (`L.kit.fit909_kick`, `Drums::Fits`) register entries in code.
 - Library files: `library 1`, family lines (`reverb :big_plate, decay: 3.5, tags: %i[bright]`), `instrument :x do |midi| ... end` (irack), `chain :x do |sig| ... end` (arack), `clip :x, seq(...)`.
 - Console help: `help :library`.  Curated instrument knobs come from the synth scripts' `*_KNOBS` tables (bin/save_presets.rb).
+- Booms (boom-1): `boom(G1)`, `boom(clip, :trailer, decay: 6)`, `L.inst.boom.impact.ping(E1)`, `h.boom(:impact)` in kits; `MB::Sound::Boom` presets cinematic, sub_drop, impact, trailer (below, Booms).
 - Struck instruments: `struck(clip, :bar)`, `L.inst.bar` (every resonator preset by reference), `L.fx.bar.ping(C5)`; auditions: `play L.fx.bar` / `play L.inst.x` / `play L.fx.hall` (`Library::Audition`; effects on the 4-bar audition mix, `presets/audition/effect_mix.flac`).
 - Params over time: give a node (`preset :dnb_reese, midi: clip, lfo_depth: 0, cutoff: tween([300.hz, 3000.hz], 4.bars)`, `knob(:cut)`); on a track `turn :"bass/cutoff", 0 => 400, 2.bars => 3000`; choice params are given, not knobs (`slope: 12`; below, The Reese's LFO params, slope and low cut).
 - Bench sets: `bin/preset_bench.rb reverb -d /app/tmp/listening` (or `L.fx.reverb.bench`), `--vs master-ai`, `--notes export.json SET_ID`; `L.fx.hall.audition(:break)`, `.auditions` (below).  A playing track given another instrument rebuilds at its launch point, one undo step (arrangement.md, Library instruments).
@@ -257,6 +258,53 @@ play L.gen.koto_motif; audition L.flow.dnb_chain   # 8 bars on its instrument; a
 ## Fitted kit designs (kick-lib-1, 2026-11-04)
 
 `L.kit.fit909_kick` is the first library entry fitted to a recording: the 909 kick of research-voice-match-3's round 3 structure fit, the maintainer's Bench pick ("I like the round 3 kick -- save it to the library").  Measurement source: "TR-909 House Beat.wav" by Thejames428 on Wikimedia Commons, CC BY-SA 4.0, measured only and never distributed; the library holds only the fitted numbers.  It is a one-voice `Drums::Machine` (`Drums::Fits`), so it plays on its own and lends its voice to kits (`borrow :fit909_kick`); its params are the voice's ranged knobs (`kick_tune`, `kick_decay`, `kick_punch`, `kick_drop`, `kick_drive`, `kick_attack`, `kick_tick`: the names `bind :drums, kit: :kick_decay` makes), it renders the fit's console code bit for bit, auditions play its own row of the demo beat (`settings[:voices]`), and pins fingerprint its method source.  Details, the knob mappings, and why this form: drums.md, Fitted voices.  More fits (the hand-tune queue's) go in `Drums::Fits::DESIGNS` with an entry each.
+
+## Booms (boom-1, 2026-11-09)
+
+The maintainer (relayed): "a cinematic boom instrument in the library" ("booms" or "impacts" in trailer and sound-design libraries; a "sub drop" is the falling sub without the hit).  `MB::Sound::Boom` (`lib/mb/sound/boom.rb`) is a Presettable family `:boom` (kind :instrument) and `boom` (`BoomMethods`; alias `cinematic_boom`) its console method, recorded like `struck` (graph documents print `boom(midi, :trailer, decay: 5, seed: drawn_seed(N))`; the drawn seed seeds the Synth's lanes, so the noise comes back on load).  No new node class: a Synth of Envelopes, Tones, noise, filters, softclip, and a Reverb.
+
+```ruby
+play boom(G1)                                     # one hit of the default (:cinematic)
+play boom(:trailer, E1)                           # one hit of a preset
+play boom(seq(G1, R, R, R).n1.loop, :impact)      # from notes (any MIDI source; nil: live midi)
+L.inst.boom.trailer.ping; L.inst.boom.trailer.ping(E1)   # Entry#ping
+track :fx, seq(G1, R, R, R).n1.loop, L.inst.boom.cinematic   # settings become :"fx/decay", ...
+kit(beat) { tr909 :kick; voice(:boom, gm: 49) { |h| h.boom(:impact) } }   # a kit piece (Hit#boom)
+```
+
+- **The voice** (`Boom.voice(trigger, freq, settings)`, shared by the Synth and kits): a sine (blended toward a triangle by `shape`) reset on each hit, its frequency `note × 2 ** (drop × dive)` where `dive` is a trigger decay envelope falling over `sweep` along `sweep_curve` dB; the body envelope rises over 1 ms, falls by `punch` over `punch_time`, then to silence over `decay` along `curve` (a 4-segment `adsr` list whose last segment is the release, so a hit without a gate plays all three); a noise burst (`noise`, `noise_tone`, `noise_decay`) with the body into the drive stage (always a `softclip(0.8, 1.2)`, gain `2 ** (3 × drive)`, so a drive knob at 0 plays what a number 0 plays); the click after the clipper, so its peak stays a peak: the trigger impulse scaled by `click × rate / (2.83 × click_tone)` through a 2-pole lowpass at `click_tone` (`Boom::CLICK_PEAK`: measured, the lowpassed impulse then peaks near `click` for tones up to 2 kHz); a sine `sub` on the note (`sub_decay`); a low noise `rumble` (`rumble_tone`, `rumble_decay`, along the body's curve).  Velocity is the level; `vel_depth` and `vel_bright` (0..1) scale the drop and the click, burst, and drive by `1 - a + a × velocity`.  Note lengths don't matter (one hit per note, as drums).
+- **The tail** (`Boom.tail`): `reverb(room_size: room, decay: tail_length, damping:, wet: tail, dry: 1, output_channels: 2, seed: Boom::TAIL_SEED)`, then `width` (ChannelMixer width).  A number 0 tail leaves the boom mono and dry.  Room, length, and damping are read when built; `tail` (the wet gain) is live.
+- **Params and knobs**: every setting is a Param (`Boom.preset_params`; ranges in the code); on a track `Boom::KNOB_PARAMS` become knobs (`TrackKnobs::ENTRY_PARAMS[:boom]`); note, room, tail_length, damping, and voices stay build-time and level is the fader.  Knobs at the preset's values render within 1e-5 of the numbers (about -117 dBFS: knobs are float32, as library-instruments-1's preset knobs).  Layers skipped for a number 0 (click, noise, rumble, sub, shape, the tail) are built when the setting is a knob, adding exact zeros.
+- **Kits** (`Drums::Hit#boom(name = :cinematic, tune: nil, **settings)`; a Hit method, so graph documents load it): the voice at the preset's note (or `tune:`, Hz, a Pitch, or a node), without the tail (kits are mono and dry: put the kit on a reverb or bus).  Grids need a GM row for a custom voice: `voice(:boom, gm: 49)` plays on the `crash:` row.
+- **One-shots and auditions**: `boom(pitch)` and `Entry#ping` play a one-note clip (`Boom.strike_clip`, the default velocity 0.75) at the preset's `note` (`Boom.home_note`) or the pitch given; `play L.inst.boom.x` and `audition` play that hit.  Bench sets give booms the role `:boom` (materials `boom_hits`: G1 then E1 two bars apart at 120 BPM; `boom_velocity`: G1 at velocity 1 then 0.5).
+- **Library files**: `boom :deep_hit, note: 28, drop: 3, decay: 4, tags: %i[deep]` (settings the line leaves out are the defaults, :cinematic's).
+
+**Presets** (a preset's settings are the defaults it changes; `:cinematic` is the defaults themselves):
+
+| preset | what | settings |
+|---|---|---|
+| cinematic | the fit (below): a punchy strike falling 2.6 octaves onto a long sub, a hard click, a rumble, a long dark mono-ish room | note G1, drop 2.58, sweep 0.203 s at 38.3 dB, punch 0.48 over 16.8 ms, decay 2.34 s at 4.5 dB, click 3.17 at 800 Hz, noise 0.061 at 18 kHz / 2 s, rumble 0.715 at 480 Hz / 5.6 s, drive 0.249, tail 0.308, 8.1 s, room 0.675, damping 0.62, width 0.2, level 1.03 |
+| sub_drop | a sine falling two octaves onto E1 over 1.6 s, no strike, click, or noise | sweep 1.6 s at 6 dB, decay 3.5 s, drive 0.15, no velocity depth or brightness, small tail, level 0.642 |
+| impact | short and tight: a fast dive (70 ms) onto A1, a hard 4 kHz click, a bright burst, a small room | decay 0.7 s at 30 dB, punch 0.6, drive 0.4, tail 1.5 s, level 1.461 |
+| trailer | long and wide: a strike onto E1 over a held sub, a rumble, a huge room | shape 0.2, decay 6 s, sub 0.5 for 7 s, rumble 0.5 for 5 s, tail 0.6, 8 s, room 0.9, width 0.9, level 0.515 |
+
+Levels: one hit at the default velocity at about -20.3 LUFS through the default master (the instrument convention, Struck::LEVELS), or its peak at -3 dBFS there when that comes first: :cinematic's click (its crest is 19.4 dB, like the reference's 19.3) caps it at -23.4 LUFS.  Before the master the click peaks near +7 dBFS (`render(gain: 1)` clips in integer formats).  The specs check each preset.
+
+**The fit** (the reference is private and stays local: a soft synth's "big kick" boom isolated from a song render; only the fitted numbers ship, generic boom settings): one hit at the default velocity, levels relative (the fit's own level 0.2678 matched the reference's), compared onset-aligned by the brief's measures.  Nelder-Mead over the Params' positions (the scratch scripts were not kept: they read the private file) on band levels (7 bands × 11 windows to 2.5 s), RMS per window (×2), a zero-crossing pitch track to 100 ms (×1.5, semitones), side level (×0.6), and the first 10 ms peak (×1); after 2.5 s the reference has other song material in it.  The click came last: without it the fit matched the bands as well but the reference's strike is a 0.57 spike over a 0.22 body 2 ms in (crest 19.3 dB), which a lowpassed impulse reproduces (0.58 over 0.2-0.25).
+
+| measure | reference | fit |
+|---|---|---|
+| pitch at 5, 10, 20, 30, 40, 60, 80, 100 ms (Hz) | 196, 174, 159, 109, 90, 64, 62, 51 | 187, 161, 138, 111, 93, 72, 57, 56 |
+| then | 50-51 Hz held about 2 s | 49 Hz (G1) |
+| RMS 0-20 ms, 20-60, 0.25-0.4 s, 1-1.5, 2-2.5, 2.5-3 (dB) | -16.3, -15.6, -18.5, -22.6, -29.4, -34.0 | -15.6, -18.4, -19.1, -22.9, -28.9, -32.2 |
+| side 0.4-0.7 s, 1-1.5 s (dB) | -37.6, -34.2 | -35.0, -33.1 |
+| attack peak, crest | -4.8 dBFS at +2.3 ms, 19.3 dB | -4.8 dBFS at +0.2 ms, 19.4 dB |
+| band error (7 bands × 12 windows to 3 s, RMS) | | 4.5 dB (largest: 600 Hz-4 kHz 0.1-0.7 s, +5 to +10 dB, the click and burst in the reverb; 60-120 Hz -3 to -7 dB, the reference's low "wobble" around the sub) |
+| `compare` (L3) | | 3.56 (spectral 1.80, modulation 0.67, attack 1.45); 3.00 without the click (attack 1.17, but the strike 7 dB lower) |
+
+The reference's low end after 0.3 s is the 50 Hz sine plus a spread of components at 47-87 Hz (-3 to -10 dB under it) that beat as the "wobble"; the rumble (lowpassed noise at 480 Hz under the body's decay) and the dark reverb stand in for it.  The high, flat noise floor from 0.1 s on (about -47 dB) is the long noise burst and the room.
+
+Not built: the click's delay (the reference's spike comes 2 ms after the body starts), a pitch envelope shape other than the Envelope's dB curves, a gated (note-length) mode, more presets (the maintainer's call on the Bench), a dedicated boom node class (a GraphNode with the voice's settings as ports, if the Synth form turns out short).
 
 ## Not built (phase 3 and later)
 

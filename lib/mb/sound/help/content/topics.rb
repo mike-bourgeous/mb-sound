@@ -344,6 +344,54 @@ module MB
       end
     end
 
+    Help.topic :booms, 'Booms and impacts', group: :sound do
+      about <<~TEXT
+        `boom` is a cinematic boom (trailer libraries' "booms" or
+        "impacts"): each note strikes a body that falls from a punchy tone
+        onto the note's pitch and rings on as a sub, with a noise click on
+        the strike, an optional sine sub and noise tail, soft clipping,
+        and a reverb tail.  Note lengths don't matter (one hit per note);
+        velocity sets the level and, by vel_depth and vel_bright, the
+        depth of the fall and the click and drive.  It takes a clip (or
+        any MIDI source; none: live `midi`), a pitch for one hit
+        (`boom(G1)`), a preset, and settings: `boom(clip, :trailer, decay:
+        6)`.  Presets: :cinematic (the default), :sub_drop (a slow falling
+        sub, no hit), :impact (short and tight), :trailer (long and wide;
+        `Boom.preset_names`).  Settings (Params, so they are knobs on a
+        track): note, drop (octaves), sweep and sweep_curve (the fall),
+        shape (sine to triangle), punch and punch_time, decay and curve,
+        sub and sub_decay, click, click_tone, click_decay, noise,
+        noise_tone, noise_decay, drive, vel_depth, vel_bright, tail,
+        tail_length, room, damping, width, level, voices.
+
+        The presets are library entries: `L.inst.boom.trailer.ping` hits
+        once (`.ping(E1)` at a note), `play L.inst.boom.impact` plays a
+        hit, `track :fx, seq(G1, R, R, R).n1.loop, L.inst.boom.cinematic`
+        plays one on a track with its settings as knobs (`:"fx/decay"`).
+        In a kit, `h.boom(:impact)` is the voice without its reverb
+        (`voice(:boom, gm: 49) { |h| h.boom(:impact) }` plays on the crash's
+        row and note).
+      TEXT
+      commands :boom, :cinematic_boom
+      note :library
+      see :drums, :library
+      example 'a boom every bar' do
+        bg :try, boom(seq(G1).n1.loop).at(-19.db)
+      end
+      example 'impacts on the half notes' do
+        bg :try, boom(seq(A1).n2.loop, :impact).at(-16.5.db)
+      end
+      example 'a sub drop every bar' do
+        bg :try, boom(seq(E1).n1.loop, :sub_drop).at(-14.db)
+      end
+      example 'a boom in a kit' do
+        bg :try, kit(grid(16, kick: 'x...x...x...x...', crash: 'x...............').loop) {
+          tr909 :kick
+          voice(:boom, gm: 49) { |h| h.boom(:impact) }
+        }.at(-15.5.db)
+      end
+    end
+
     Help.topic :sq80, 'SQ-80 voice and patches', group: :sound do
       about <<~TEXT
         `sq80` is an Ensoniq SQ-80-flavored synth built from the library's

@@ -10,6 +10,7 @@
 - Claps: `h.env(0.02, curve: 30, trigger: h.bursts(4, 11.ms, falloff: 0.9)) + h.env(0.5, trigger: h.repeats([[22.ms, 1.0]])) * 0.2` (`Hit#env` `trigger:`, `Hit#repeats`; the same as `Drums.decay_env(Drums::Repeats.new(h.t, ...), ...)`).
 - Code `lib/mb/sound/drums.rb`, `lib/mb/sound/drums/` (`Kit`, `Voice` with its `Tap`s, `Machine`, `Builder`); spec `spec/lib/mb/sound/drums/kit_spec.rb`; demo `bin/songs/kit_builder.rb`; help `help :drums`.
 - Idle voices sleep on the 800-sample `Synth::SKIP_GRID` and catch their noise up, so output is the same at any buffer size.
+- Booms as kit pieces (boom-1): `voice(:boom, gm: 49) { |h| h.boom(:impact) }` (`Hit#boom`: MB::Sound::Boom's voice at the preset's note or `tune:`, without its reverb tail; library.md, Booms).
 - Fitted voices: `L.kit.fit909_kick.(grid(16, kick: 'X...X...X...X...').loop)`, `kit(beat) { borrow :fit909_kick; tr909 except: :kick }`; ranged knobs `voice :kick, decay: (0.1..2.0).at(0.47)`; code `lib/mb/sound/drums/fits.rb`, spec `spec/lib/mb/sound/drums/fits_spec.rb`.
 
 Detailed notes moved from CLAUDE.md (2026-10-10); the summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.

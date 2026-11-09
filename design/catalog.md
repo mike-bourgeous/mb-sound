@@ -173,6 +173,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `:blend` Mixing an effect in (wet and dry): bus feed knob
 - `:stereo` Stereo and channels: stereo channels per_channel spread
 - `:drums` Drums: tr808 tr909 kit drum_kit grid euclid
+- `:booms` Booms and impacts: boom cinematic_boom
 - `:sq80` SQ-80 voice and patches: sq80 sq80_patches sq80_env
 - `:sampler` Sampler: bounce, slice, chop: bounce capture_audio chop sampler sfz breakbeat regions
 - `:trackers` Tracker modules: MOD, 669, S3M, XM, IT: mod_import tracker_import mod_samples
