@@ -63,6 +63,10 @@ module MB
         def sample(count)
           v = @input.sample(count)
           return nil if v.nil? || v.empty?
+          # (checked before trimming: a view of a frozen buffer isn't
+          # frozen itself, but writing to it raises; effects-2 found it
+          # with an operand that ends first)
+          frozen = v.frozen?
 
           if @operand.respond_to?(:sample)
             data = @operand.sample(v.length)
@@ -78,7 +82,7 @@ module MB
           end
 
           # (the result, not v: a type promotion makes a new object)
-          v = @copier.copy(v) if v.frozen?
+          v = @copier.copy(v) if frozen
           v.inplace!
           compute(v, data).not_inplace!
         end
