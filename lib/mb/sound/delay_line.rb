@@ -333,14 +333,21 @@ module MB
       # +outs+ an Array of SFloat buffers (one per tap, at least +count+
       # long) the taps are written into.  Returns +outs+.
       #
+      # +filters+ (delay-dual-1) is nil or an Array with an entry per tap:
+      # nil, or [coefficients, state], contiguous DFloats with 5 values
+      # (b0, b1, b2, a1, a2) and 4 (x1, x2, y1, y2; updated in place) per
+      # biquad section.  Each tap's read runs through its sections in series
+      # (direct form I in doubles, Filter::Biquad.step_ruby) before it is
+      # output and fed back, so echoes pass the filters once per trip.
+      #
       # (.network is the :delay_network kernel's dispatcher: .network_c, or
       # the Ruby mirror .network_ruby.)
-      def self.network_c(lines, inputs, tap_lines, delays, gains, count, interpolation: :linear, states: nil, outs:)
+      def self.network_c(lines, inputs, tap_lines, delays, gains, count, interpolation: :linear, states: nil, filters: nil, outs:)
         m = lines[0].send(:mode, interpolation)
         lines.each(&:begin_network_block)
         offsets = MB::Sound::FastDelay.network(
           lines.map(&:network_buffer), lines.map(&:write_offset_for_network), inputs, outs, tap_lines,
-          delays.map { |d| lines[0].send(:real_delay, d) }, gains, m, SINC_KERNEL, states, count
+          delays.map { |d| lines[0].send(:real_delay, d) }, gains, m, SINC_KERNEL, states, filters, count
         )
         lines.each_with_index { |l, j| l.end_network_block(offsets[j]) }
         outs
@@ -348,15 +355,15 @@ module MB
 
       # The Ruby version of .network (new SFloat tap outputs, copied into
       # +outs+ when given, which it then returns).
-      def self.network_ruby(lines, inputs, tap_lines, delays, gains, count, interpolation: :linear, states: nil, outs: nil)
-        result = network_values_ruby(lines, inputs, tap_lines, delays, gains, count, interpolation, states)
+      def self.network_ruby(lines, inputs, tap_lines, delays, gains, count, interpolation: :linear, states: nil, filters: nil, outs: nil)
+        result = network_values_ruby(lines, inputs, tap_lines, delays, gains, count, interpolation, states, filters)
         return result unless outs
 
         outs.each_with_index { |o, t| o[0...count] = result[t] }
         outs
       end
 
-      def self.network_values_ruby(lines, inputs, tap_lines, delays, gains, count, interpolation, states)
+      def self.network_values_ruby(lines, inputs, tap_lines, delays, gains, count, interpolation, states, filters = nil)
         m = lines[0].send(:mode, interpolation)
         lines.each(&:begin_network_block)
         sinc = INTERPOLATION[:sinc]
@@ -381,11 +388,12 @@ module MB
             d = l.send(:clamp, d.is_a?(Array) ? d[i] : d, m)
             rate = prev[t] && ds[t].is_a?(Array) ? (1.0 - (d - prev[t])).abs : 1.0
             prev[t] = d
-            if d == d.floor && m != sinc
+            x = if d == d.floor && m != sinc
               bufs[j][(w[j] - d.to_i) % l.capacity]
             else
               l.send(:interpolate, w[j], d, m, rate)
             end
+            filters&.[](t) ? network_filter_ruby(filters[t], x.to_f) : x
           }
 
           lines.each_index do |j|
@@ -403,6 +411,23 @@ module MB
         prev.each_with_index { |p, t| states[t][0] = p.to_f if states && states[t] && !p.nil? }
         lines.each_with_index { |l, j| l.end_network_block((offs[j] + count) % l.capacity) }
         outs
+      end
+
+      # The Ruby mirror of fast_delay.c's run_tap_filters: +x+ through the
+      # sections of a tap filter entry [coefficients, state] (see .network).
+      def self.network_filter_ruby(entry, x)
+        co, st = entry
+        (co.length / 5).times do |s|
+          c = 5 * s
+          z = 4 * s
+          y = Filter::Biquad.step_ruby(co[c], co[c + 1], co[c + 2], co[c + 3], co[c + 4], x, st[z], st[z + 1], st[z + 2], st[z + 3])
+          st[z + 1] = st[z]
+          st[z] = x
+          st[z + 3] = st[z + 2]
+          st[z + 2] = y
+          x = y
+        end
+        x
       end
 
       # For .network: the buffer (raises for complex lines).

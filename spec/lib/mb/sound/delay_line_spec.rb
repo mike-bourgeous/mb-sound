@@ -243,6 +243,50 @@ RSpec.describe(MB::Sound::DelayLine, :aggregate_failures) do
       end
     end
 
+    [:linear, :sinc].each do |interp|
+      it "matches its Ruby mirror exactly with tap loop filters (#{interp})" do
+        lp = MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 2500, quality: 0.7071)
+        hp = MB::Sound::Filter::Cookbook.new(:highpass, 48000, 300, quality: 0.7071)
+        entries = -> {
+          [
+            [Numo::DFloat.cast(hp.coefficients + lp.coefficients), Numo::DFloat.zeros(8)],
+            nil,
+            [Numo::DFloat.cast(lp.coefficients), Numo::DFloat.zeros(4)],
+          ]
+        }
+        make = ->(ls) { [ls, [input, nil], [0, 1, 0], [17, moving, 33.5], [[nil, 0.6, 0.3], [0.5, nil, 0.1]], 600] }
+
+        l1 = Array.new(2) { MB::Sound::DelayLine.new(300).tap { |l| l.prepare(600, 60) } }
+        l2 = Array.new(2) { MB::Sound::DelayLine.new(300).tap { |l| l.prepare(600, 60) } }
+        f1 = entries.()
+        f2 = entries.()
+
+        out = Array.new(3) { Numo::SFloat.zeros(600) }
+        MB::Sound::DelayLine.network_c(*make.(l1), interpolation: interp, filters: f1, outs: out)
+        ruby = MB::Sound::DelayLine.network_ruby(*make.(l2), interpolation: interp, filters: f2)
+
+        expect(out).to eq(ruby)
+        expect(f1).to eq(f2)
+        expect(f1[0][1].abs.max).to be > 0
+        expect(l1.map(&:unwrapped)).to eq(l2.map(&:unwrapped))
+
+        # (a filtered tap differs from an unfiltered one)
+        plain = Array.new(3) { Numo::SFloat.zeros(600) }
+        l3 = Array.new(2) { MB::Sound::DelayLine.new(300).tap { |l| l.prepare(600, 60) } }
+        MB::Sound::DelayLine.network_c(*make.(l3), interpolation: interp, outs: plain)
+        expect((plain[0] - out[0]).abs.max).to be > 0.01
+      end
+    end
+
+    it 'raises for malformed tap filters' do
+      l = MB::Sound::DelayLine.new(100)
+      args = ->(f) { [[l.network_buffer], [0], [nil], [Numo::SFloat.zeros(10)], [0], [3], [[0.5]], 0, nil, nil, f, 10] }
+      expect { MB::Sound::FastDelay.network(*args.([nil, nil])) }.to raise_error(ArgumentError, /one filter entry/)
+      expect { MB::Sound::FastDelay.network(*args.([[Numo::DFloat.zeros(4), Numo::DFloat.zeros(4)]])) }.to raise_error(ArgumentError, /5 coefficients/)
+      expect { MB::Sound::FastDelay.network(*args.([[Numo::SFloat.zeros(5), Numo::DFloat.zeros(4)]])) }.to raise_error(ArgumentError, /DFloats/)
+      expect { MB::Sound::FastDelay.network(*args.([[Numo::DFloat.zeros(5)]])) }.to raise_error(ArgumentError, /coefficients, state/)
+    end
+
     it 'raises for complex lines and mismatched Arrays' do
       l = MB::Sound::DelayLine.new(100)
       l.prepare(10, 5, Numo::SComplex)
@@ -250,10 +294,10 @@ RSpec.describe(MB::Sound::DelayLine, :aggregate_failures) do
 
       l = MB::Sound::DelayLine.new(100)
       expect {
-        MB::Sound::FastDelay.network([l.network_buffer], [0], [nil], [Numo::SFloat.zeros(10)], [0], [3, 4], [[0.5]], 0, nil, nil, 10)
+        MB::Sound::FastDelay.network([l.network_buffer], [0], [nil], [Numo::SFloat.zeros(10)], [0], [3, 4], [[0.5]], 0, nil, nil, nil, 10)
       }.to raise_error(ArgumentError, /lengths/)
       expect {
-        MB::Sound::FastDelay.network([l.network_buffer], [0], [nil], [Numo::SFloat.zeros(10)], [1], [3], [[0.5]], 0, nil, nil, 10)
+        MB::Sound::FastDelay.network([l.network_buffer], [0], [nil], [Numo::SFloat.zeros(10)], [1], [3], [[0.5]], 0, nil, nil, nil, 10)
       }.to raise_error(ArgumentError, /line 1/)
     end
   end
