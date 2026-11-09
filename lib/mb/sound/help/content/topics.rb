@@ -223,8 +223,12 @@ module MB
         drawn in dB, per sample, with presets (`L.fx.shape_db`: :soft_knee,
         :fuzz, :fold_back, :gate, :asymmetric), and `inertia`, an
         acceleration-limited follower whose limit cycles chirp.
+
+        `tremolo` swings the level along an LFO shape or a drawn cycle
+        (`shape: [[0, 1], [0.25, -1], [1, -1]]`), tempo-synced or in Hz,
+        with its depth in dB; `stereo_phase: 0.5` makes it an auto-pan.
       TEXT
-      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :softclip, :clip, :shape_db, :inertia, :decimate, :quantize, :ease, :oversample, :ring
+      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :tremolo, :softclip, :clip, :shape_db, :inertia, :decimate, :quantize, :ease, :oversample, :ring
       note :delays, :feedback_loops, :reverbs, :chorus
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do

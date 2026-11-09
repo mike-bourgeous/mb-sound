@@ -72,7 +72,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `ashape_db(points, ...)` The plain (exact, aliasing) version of #shape_db, for control signals
 - `sample_hold/sah(trigger, range:, seed:)` Samples and holds this node at each rising edge of trigger (SampleHold)
 
-### Delays, reverb, chorus, feedback
+### Delays, reverb, chorus, tremolo, feedback
 
 - `delay(time, seconds:, smooth:, ..., &block)` A delay line (Filter::Delay) of time with feedback, smoothing, and inserts
 - `feedback_delay(time, seconds:, smooth:, ..., &block)` #delay with a feedback insert block (see #delay)
@@ -83,6 +83,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `reverb(preset, output_channels:, ...)` Appends a reverb to this node (see GraphNode::Reverb)
 - `convolve/ir(impulse, mix:, wet:, ...)` Convolves this signal with an impulse response (convolution reverb)
 - `chorus/juno_chorus(mode, ...)` Appends a Juno-60-style stereo chorus (see Chorus), returning a stereo bundle
+- `tremolo/amplitude_modulation/trem(rate, depth:, shape:, ...)` Tremolo: swings this signal's level down by depth: along an LFO
 - `feedback/fb(*args, compensate:, sustain:, &block)` Builds a feedback loop on this node from the block (a FeedbackLoop)
 
 ### Dynamics, loudness, mastering
