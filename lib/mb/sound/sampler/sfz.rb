@@ -22,8 +22,9 @@ module MB
       # are substituted.  Other opcodes are counted and listed once in a
       # warning; regions triggered on release are skipped.
       #
-      # Sample paths are relative to the SFZ file (and default_path).  In a
-      # graph document they must stay inside the document's directory, like
+      # Sample paths are relative to the SFZ file (and default_path); a
+      # sample named in another letter case than the disk's is found
+      # (#local_sample, through a MediaIndex).  In a graph document they must stay inside the document's directory, like
       # every file a document reads (GraphIO::FileGuard).
       module SFZ
         # The opcodes read (others are ignored with one warning).
@@ -95,7 +96,7 @@ module MB
               raise ArgumentError, "SFZ #{name}: a region has no sample= opcode" unless r['sample']
 
               file = sample_path(base, prefix + r['sample'].tr('\\', '/'))
-              sample = cache[file] ||= Sample.from_file(file)
+              sample = cache[file] ||= Sample.from_file(local_sample(base, file))
 
               key = r['key'] && note(r['key'], offset)
               lo = r['lokey'] ? note(r['lokey'], offset) : key || 0
@@ -186,6 +187,41 @@ module MB
           joined = Pathname.new(File.dirname(base)).join(name).cleanpath.to_s
           return joined unless GraphIO::FileGuard.document_string?(base)
           GraphIO::FileGuard.register(+joined, base.instance_variable_get(:@graph_io_file_context))
+        end
+
+        # How many folders above the SFZ file's a sample may be looked up
+        # from when its name doesn't match the disk's letter case (see
+        # #local_sample): `../Samples/x.wav` indexes the parent folder.
+        CASE_FOLDERS_UP = 2
+
+        # +file+ (a sample path from #sample_path), or the file it names in
+        # another letter case when +file+ doesn't exist: SFZ files made on
+        # Windows or macOS often name `Samples\C4.WAV` for samples/c4.wav.
+        # Found through a MediaIndex of the folder holding both the SFZ file
+        # and the sample (at most CASE_FOLDERS_UP above the SFZ's), only
+        # when every folder below it matches in some case; otherwise +file+,
+        # whose read then fails as before.  A graph document's names stay
+        # document names (FileGuard).
+        def local_sample(base, file)
+          return file if base.nil?
+
+          real = File.expand_path(GraphIO::FileGuard.resolve(file, 'reading an SFZ sample').to_s)
+          return file if File.exist?(real)
+
+          root = File.dirname(File.expand_path(GraphIO::FileGuard.resolve(base, 'reading an SFZ file').to_s))
+          up = 0
+          until real.start_with?(root + '/')
+            return file if (up += 1) > CASE_FOLDERS_UP || root == File.dirname(root)
+            root = File.dirname(root)
+          end
+          return file unless File.directory?(root)
+
+          match = MediaIndex.for(root).resolve(real, warn: true)
+          return file unless match.found? && match.folders >= real.delete_prefix(root + '/').count('/')
+          return match.path unless GraphIO::FileGuard.document_string?(file)
+
+          ctx = file.instance_variable_get(:@graph_io_file_context)
+          GraphIO::FileGuard.register(+match.path.delete_prefix(File.expand_path(ctx.base_dir) + '/'), ctx)
         end
 
         # [attack, decay, sustain, release] from a region's ampeg_*, or nil.
