@@ -60,10 +60,12 @@ module MB
           members.each { |r| r.lane_group = self }
         end
 
-        # Stops grouping: every member runs alone from now on.
+        # Stops grouping: every member runs alone from now on.  A block in
+        # progress goes to the members' roots (see #hand_off_block).
         def dissolve
           @dissolved = true
           @members.each { |r| r.lane_group = nil if r.lane_group.equal?(self) }
+          hand_off_block unless @running
         end
 
         # True after #dissolve.
@@ -131,6 +133,23 @@ module MB
           return if idx.nil? || (@delivered[idx] && !in_progress?)
 
           region.root.instance_variable_set(:@plan_handoff, [self, region])
+        end
+
+        # Hands the block in progress (if any) to every member's root (see
+        # #hand_off): called when the group dissolves, or at the end of the
+        # run it dissolved in.  Regions a rebuild keeps join a new group
+        # (LaneGroups#refresh), which knew nothing of this block: the next
+        # member's read ran the new group, computing every member's block
+        # again, so their inputs advanced twice (fix-batch23, relation fuzz
+        # seed 776870: a sum dropping its ended summand rebuilt the
+        # installation while the group of a stereo product's two channels
+        # gathered the left one; the right channel ran a block ahead from
+        # then on).  Not during the run: the group's own #prepare of a
+        # member would take the hand-off.
+        def hand_off_block
+          return unless in_progress?
+
+          @members.each { |r| hand_off(r) }
         end
 
         # What #take_handoff returns (with +skip_ok+) for a member already
@@ -270,6 +289,8 @@ module MB
             execute(ready, count) unless ready.empty?
           ensure
             @running = false
+            # (dissolved during the run: see #hand_off_block)
+            hand_off_block if @dissolved
           end
         end
 

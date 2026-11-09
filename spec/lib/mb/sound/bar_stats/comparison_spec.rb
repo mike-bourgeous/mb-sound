@@ -5,15 +5,17 @@ require_relative '../../../../support/bar_stats_sounds'
 # and the likely cause, with pass/fail thresholds for specs and scripts.
 RSpec.describe(MB::Sound::BarStats::Comparison, :aggregate_failures) do
   let(:options) { { bpm: 120, offset: BarStatsSounds::OFFSET, sections: false } }
-  let(:base) { BarStatsSounds.song(bars: 4) }
+  # (3 bars, and 2 or 3 in the songs below: fix-batch23 cut them from 4,
+  # as the lag search takes about 0.3 s a bar per comparison)
+  let(:base) { BarStatsSounds.song(bars: 3) }
 
   def compare(b, a = base, **extra) = MB::Sound::BarStats.compare(a, b, **options, **extra)
 
   def kinds(c) = c.causes.map(&:kind)
 
   it 'finds exactly the band and the samples one band is late by, and names a late bus or track' do
-    c = compare(BarStatsSounds.song(bars: 4, delay: { high: 37 }), thresholds: { timing: 0.5 })
-    (1..4).each do |n|
+    c = compare(BarStatsSounds.song(bars: 3, delay: { high: 37 }), thresholds: { timing: 0.5 })
+    (1..3).each do |n|
       bar = c.bars.find { |x| x.bar == n }
       expect(bar.lags[:high].ms).to be_within(0.001).of(37 / 48.0)
       expect(bar.lags[:high].by).to eq(:wave)
@@ -29,7 +31,7 @@ RSpec.describe(MB::Sound::BarStats::Comparison, :aggregate_failures) do
   end
 
   it 'tells a file offset (every band alike) from a mix problem, and aligns it away' do
-    shifted = BarStatsSounds.song(bars: 4, shift: 480)
+    shifted = BarStatsSounds.song(bars: 3, shift: 480)
     c = compare(shifted)
     expect(kinds(c)).to eq([:file_offset])
     expect(c.causes[0].value).to eq(10.0)
@@ -39,8 +41,8 @@ RSpec.describe(MB::Sound::BarStats::Comparison, :aggregate_failures) do
   end
 
   it 'tells a late part filling every band (a drum bus) from a file offset by what still lines up' do
-    a = BarStatsSounds.song(bars: 4, pad: true, clap: true, drop: { mid: 1..4 })
-    b = BarStatsSounds.song(bars: 4, pad: true, clap: true, drop: { mid: 1..4 }, delay: { low: 3168, mid: 3168, high: 3168 })
+    a = BarStatsSounds.song(bars: 3, pad: true, clap: true, drop: { mid: 1..3 })
+    b = BarStatsSounds.song(bars: 3, pad: true, clap: true, drop: { mid: 1..3 }, delay: { low: 3168, mid: 3168, high: 3168 })
     c = compare(b, a)
     expect(c.band_lags.values.map(&:first)).to all(be_within(0.1).of(66.0))
     expect(kinds(c)).to eq([:late_part])
@@ -48,34 +50,34 @@ RSpec.describe(MB::Sound::BarStats::Comparison, :aggregate_failures) do
   end
 
   it 'names a loudness step, its bars, and its size' do
-    c = compare(BarStatsSounds.song(bars: 4, gain: ->(b) { b >= 3 ? 0.5 : 1.0 }))
+    c = compare(BarStatsSounds.song(bars: 3, gain: ->(b) { b >= 2 ? 0.5 : 1.0 }))
     level = c.causes.find { |x| x.kind == :level }
-    expect(level.bars).to eq([3, 4])
+    expect(level.bars).to eq([2, 3])
     expect(level.value).to be_within(0.1).of(-6.0)
-    expect(c.worst(2).map(&:bar).sort).to eq([3, 4])
+    expect(c.worst(2).map(&:bar).sort).to eq([2, 3])
     expect(c.worst.first.moved).to include(:lufs, :rms)
-    expect(c.failures.map(&:bar).uniq.sort).to eq([3, 4])
-    expect { c.check! }.to raise_error(RuntimeError, /lufs in bars 3-4/)
-    expect(c.failures(lufs: 7, rms: 7, true_peak: 7).map(&:to_s)).to eq(['bar 3: bands 31.5 Hz -6.0 dB (threshold 6.0)', 'bar 4: bands 31.5 Hz -6.0 dB (threshold 6.0)'])
+    expect(c.failures.map(&:bar).uniq.sort).to eq([2, 3])
+    expect { c.check! }.to raise_error(RuntimeError, /lufs in bars 2-3/)
+    expect(c.failures(lufs: 7, rms: 7, true_peak: 7).map(&:to_s)).to eq(['bar 2: bands 31.5 Hz -6.0 dB (threshold 6.0)', 'bar 3: bands 31.5 Hz -6.0 dB (threshold 6.0)'])
     expect(c.pass?(lufs: 7, rms: 7, true_peak: 7, bands: 7)).to be(true)
   end
 
   it 'names a stereo collapse in one section' do
-    c = compare(BarStatsSounds.song(bars: 4, mono: [3, 4]))
+    c = compare(BarStatsSounds.song(bars: 3, mono: [2, 3]))
     stereo = c.causes.find { |x| x.kind == :stereo }
-    expect(stereo.bars).to eq([3, 4])
+    expect(stereo.bars).to eq([2, 3])
     expect(kinds(c)).not_to include(:level, :band_level)
   end
 
   it 'names a missing band' do
-    c = compare(BarStatsSounds.song(bars: 4, drop: { low: 2..3 }))
+    c = compare(BarStatsSounds.song(bars: 3, drop: { low: 2..3 }))
     band = c.causes.find { |x| x.kind == :band_level }
     expect(band.bars).to eq([2, 3])
     expect(band.text).to match(/the 31.5 Hz to 125 Hz octaves of B are \d+-\d+ dB down \(missing\) in bars 2-3: .*EQ, or a missing part/)
   end
 
   it 'names a transpose' do
-    c = compare(BarStatsSounds.song(bars: 4, transpose: { 2..2 => 2 }))
+    c = compare(BarStatsSounds.song(bars: 3, transpose: { 2..2 => 2 }))
     chroma = c.causes.find { |x| x.kind == :chroma }
     expect(chroma.bars).to eq([2])
     expect(chroma.value).to eq(2)
@@ -101,9 +103,9 @@ RSpec.describe(MB::Sound::BarStats::Comparison, :aggregate_failures) do
   end
 
   it 'writes a narrative from the same data' do
-    c = compare(BarStatsSounds.song(bars: 4, delay: { high: 480 }))
+    c = compare(BarStatsSounds.song(bars: 3, delay: { high: 480 }))
     text = c.narrative
-    expect(text).to include('B against A, 5 bars compared', 'high +10.0 ms', 'Likely: the high band of B is 10.0 ms late')
+    expect(text).to include('B against A, 4 bars compared', 'high +10.0 ms', 'Likely: the high band of B is 10.0 ms late')
     expect(c.to_s).to include('bar 1: lag_high +10.0 ms')
   end
 
@@ -120,12 +122,13 @@ RSpec.describe(MB::Sound::BarStats::Comparison, :aggregate_failures) do
   end
 
   describe 'sparse stems (bar-stats-fix-1)' do
-    # A kick-only stem silent in bars 3-4, ending 8 samples into bar 9 as
-    # a 140.0001 BPM render of 8 bars does
-    let(:quiet) { BarStatsSounds.kick_stem(silent: [3, 4], extra: 8) }
+    # A kick-only stem silent in bars 3-4, ending 8 samples into bar 7 as
+    # a 140.0001 BPM render of 6 bars does (8 bars until fix-batch23, which
+    # cut the file's time: the comparisons' lag search is most of it)
+    let(:quiet) { BarStatsSounds.kick_stem(bars: 6, silent: [3, 4], extra: 8) }
 
     it 'leaves out bars silent in both (digital zero against a noise floor), and names a part silent on one side' do
-      noisy = BarStatsSounds.kick_stem(silent: [3, 4, 6], extra: 8, floor: -70)
+      noisy = BarStatsSounds.kick_stem(bars: 6, silent: [3, 4, 6], extra: 8, floor: -70)
       c = MB::Sound.compare_bars(quiet, noisy, bpm: 140.0001)
       expect(c.silent_bars).to eq([3, 4])
       expect(c.bars.select { |x| x.silent == :both }.map { |x| [x.deltas, x.score] }).to all(eq([{}, 0.0]))
@@ -137,7 +140,8 @@ RSpec.describe(MB::Sound::BarStats::Comparison, :aggregate_failures) do
       expect(c.causes[0].bars).to eq([6])
       expect(c.narrative).to include('Grid: constant 140.0001 BPM, bar 1 at 0.000 s (bpm: given)', 'Silent in both (RMS under -60.0 dBFS), left out: bars 3-4')
       expect(c.narrative).not_to match(/\+[5-9]\d(\.\d)? dB/)
-      expect(MB::Sound.compare_bars(quiet, noisy, bpm: 140.0001, silence: -80).silent_bars).to eq([])
+      # (the same reports at another threshold: silence is the comparison's)
+      expect(MB::Sound.compare_bars(c.a, c.b, silence: -80).silent_bars).to eq([])
     end
 
     it 'compares a stem with itself and with itself shifted and aligned, at every bar, without raising' do

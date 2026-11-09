@@ -26,13 +26,21 @@ RSpec.describe('bin/scene_profile.rb') do
     end
   end
 
+  # (generative_steer, a form of 4 tracks, since fix-batch23: small_talk's
+  # 8 tracks warmed up in 5 s of its 13.5 s, and the example took 18.2 s of
+  # its 17.9 s budget in batch 23's suite, a recurring near miss;
+  # generative_steer takes 11.3 s alone, its warm-up 1.8 s.  This is the
+  # example running the form warm-up's rehearsal, which needs YJIT, in a
+  # real process.)
   it 'plays a song on an emulated sound card with -R', :slow do
-    text = `bin/scene_profile.rb -R --band -n 512 --bars 1 -t 2 bin/songs/small_talk.rb -- --seed 2 2>&1`
+    text = `bin/scene_profile.rb -R --band -n 512 --bars 1 -t 2 bin/songs/generative_steer.rb 2>&1`
     expect($?).to be_success, text
     expect(text).not_to include('UI pane') # (the deck painted from the session, no pane failing)
 
-    expect(text).to match(/small_talk\.rb: realtime, 512-frame buffers, emulated card with a 50 ms queue, 1 bars in [\d.]+ s/)
+    expect(text).to match(/generative_steer\.rb: realtime, 512-frame buffers, emulated card with a 50 ms queue, 1 bars in [\d.]+ s, YJIT (on|off), form warm-up on/)
     expect(text).to match(/^underruns: \d+ \([\d.]+ ms of silence\)/)
+    expect(text).to match(/^form warm-up: \d+ tracks in [\d.]+ s/)
+    expect(text).to match(/^form warm-up: .* \(\d+ sections rehearsed in [\d.]+ s of it\)/) if text.include?('YJIT on')
     expect(text).to match(/^render buffers: \d+/)
     expect(text).to match(/^  render thread CPU: mean [\d.]+ ms/)
   end

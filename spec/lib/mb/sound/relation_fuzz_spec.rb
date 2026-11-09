@@ -35,6 +35,15 @@ RSpec.describe('relation fuzzing', :check_shared) do
     expect(failures).to eq([]), failures.map(&:to_s).join("\n\n")
   end
 
+  it 'holds every relation for the shrunk graphs of fixed failures (RelationFuzz::FOUND)' do
+    RelationFuzz::FOUND.each do |code|
+      RelationFuzz::RELATIONS.each do |rel|
+        result = RelationFuzz.check(rel, code)
+        expect(result).to be_nil, "#{rel} for #{code}: #{result.inspect}"
+      end
+    end
+  end
+
   # fuzz-fixes-1: sample_hold of a complex source raised Complex#to_f's
   # RangeError.  Every step the generator makes either takes a complex
   # input (complex out, or real: filters, dynamics, decimate, and formant

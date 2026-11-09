@@ -418,6 +418,45 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       end
     end
 
+    # fix-batch23 (relation fuzz seed 776870): the same, with the rebuild
+    # keeping both members.  The group of a stereo product's two channels
+    # gathers the left one; the sum's ended summand rebuilds the
+    # installation there (when the left channel reads the pan region), and
+    # the regrouping put the kept regions in a new group that knew nothing
+    # of the block, so the right channel's read ran it again: every input
+    # of the right channel a block ahead from sample 0 (0.089 off), and the
+    # left one a block ahead from its second block.  A dissolved group now
+    # hands its block in progress to its members' roots.
+    def ended_sum_product
+      MB::Sound.rewind
+      (110.hz.saw.at(0.5).until(0.011) + 110.hz.triangle.at(0.2)) * (110.hz.saw.at(0.5) * 110.hz.saw.at(0.5).pan(-0.107))
+    end
+
+    [:c, :ruby].each do |engine|
+      it "hands a block in progress to members a rebuild keeps (#{engine})" do
+        old = MB::Sound::Plan.enabled
+        MB::Sound::Plan.lanes = true
+        MB::Sound::Kernels.set(fast_plan: engine)
+        MB::Sound::Plan.enabled = false
+        ref = (g = ended_sum_product; 6.times.map { g.outputs.map { |o| o.sample(800).to_a } })
+        MB::Sound::Plan.enabled = true
+        g = ended_sum_product
+        inst = MB::Sound::Plan.install(g)
+        expect(inst.lane_groups.groups.map { |grp| grp.members.length }).to eq([2])
+        got = 6.times.map { g.outputs.map { |o| o.sample(800).to_a } }
+        expect(got[0][1][0]).to eq(0) # (every saw starts at 0)
+        expect(got).to eq(ref)
+        expect(inst.rebuilds).to be > 0
+      ensure
+        MB::Sound::Plan.enabled = old
+        MB::Sound.rewind
+      end
+    end
+
+    it 'gives a stereo product of a sum with an ended summand the unfused samples (plan_compare)' do
+      plan_compare(fallbacks: true) { |_c| ended_sum_product }
+    end
+
     it 'regroups after a rebuild' do
       b = make_bundle(true)
       inst = MB::Sound::Plan.install(b)

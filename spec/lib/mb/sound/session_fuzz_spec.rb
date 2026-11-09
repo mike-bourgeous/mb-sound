@@ -413,6 +413,60 @@ RSpec.describe('session fuzzing') do
     expect(SessionFuzz.check(:runs, song)).to be_nil
   end
 
+  # (batch 23's soak, fix-batch23: 3 of its 48 songs swapped a track after
+  # a stop (776002, 776003) or a scene leaving it out (776046), a user error
+  # by design, and 2 in one group of 12 failed the INVALID limit; swaps are
+  # dropped where the track may have stopped by the time they land)
+  it 'drops swaps of tracks that may have stopped (seeds 776002, 776003, 776046)', render_budget: { seconds: 90, reason: 'three random songs' } do
+    [776002, 776003, 776046].each do |seed|
+      song = SessionFuzz.generate(Random.new(seed))
+      expect(song.code).not_to include('swap :'), "seed #{seed}"
+      expect(SessionFuzz.check(:runs, song)).to be_nil, "seed #{seed}"
+    end
+
+    lines = [
+      'at_bar(1, beat: 2) { swap :t1, seq(C4).loop, on: :now }', # (before anything stops it)
+      'at_bar(1, beat: 3) { stop :t1, fade: 1/4r }',
+      'at_bar(1, beat: 3) { swap :t1, seq(C4).loop }', # (stopped)
+      'at_bar(1, beat: 4) { bg :t1, on: :now }',
+      'at_bar(2) { swap :t1, seq(C4).loop, on: :now }', # (playing again)
+      'at_bar(1, beat: 2) { swap :t2, seq(C4).loop }', # (lands at bar 2, where :s2 may stop it)
+      'at_bar(1, beat: 4) { go :s2 }',
+      'at_bar(3) { swap :t2, seq(C4).loop, on: :now }', # (:s2 left it out; no start since)
+      'at_bar(3) { flow(seed: 1, on: :beat) { generate markov(s1: { s1: 1, s2: 1 }, s2: { s1: 1 }, seed: 1), s1: 1, s2: 1 } }',
+      'at_bar(3, beat: 2) { swap :t1, seq(C4).loop, on: :now }', # (the flow may launch :s1)
+    ]
+    events = SessionFuzz.track_events(lines, 4, { s1: [:t1], s2: [:t2] }, { s1: [:t2], s2: [:t1] })
+    kept = SessionFuzz.without_swaps_of_stopped(lines, 4, %i[t1 t2], events)
+    expect(lines - kept).to eq(lines.values_at(2, 5, 7, 9))
+  end
+
+  # (found checking that fix: seeds 777277 and 777701 of 777000-777799,
+  # fix-batch23: a flow's scene started the cued track again between its
+  # cue and `launch`, which found nothing cued: a player starting as the
+  # track ends its cue, by design)
+  it 'drops cue and launch pairs where the cued track may start again in between (seeds 777277, 777701)', render_budget: { seconds: 60, reason: 'two random songs' } do
+    [777277, 777701].each do |seed|
+      song = SessionFuzz.generate(Random.new(seed))
+      expect(song.code).not_to include('cue :'), "seed #{seed}"
+      expect(SessionFuzz.check(:runs, song)).to be_nil, "seed #{seed}"
+    end
+
+    flow = 'at_bar(1, beat: 3) { flow(seed: 1, on: :beat) { generate markov(s1: { s1: 1 }, seed: 1), s1: 1 } }'
+    base = ['at_bar(1) { go :s1, on: :now }', 'at_bar(2) { cue :t1, seq(A4, C5).n8.loop }', 'at_bar(2, beat: 3) { launch }', flow]
+    filter = ->(lines) {
+      SessionFuzz.without_lost_cues(lines, 4, SessionFuzz.track_events(lines, 4, { s1: [] }, { s1: [:t1] }), { s1: [:t1] })
+    }
+    # (the first scene plays :t1 on: the flow relaunching it starts no player)
+    expect(filter.(base)).to eq(base)
+    # (stopped first: the flow's scene starts it again)
+    stopped = base + ['at_bar(1, beat: 2) { stop :t1, fade: 0 }']
+    expect(filter.(stopped)).to eq(stopped - base.values_at(1, 2))
+    # (a bg of the track between the cue and the launch, but not after it)
+    expect(filter.(base.first(3) + ['at_bar(2, beat: 2) { bg :t1, seq(C4).loop, on: :now }']).grep(/cue|launch/)).to eq([])
+    expect(filter.(base.first(3) + ['at_bar(2, beat: 3) { bg :t1, seq(C4).loop, on: :now }'])).to include(base[1], base[2])
+  end
+
   # The :carry relation's finds (carry-1), shrunk: each song's carrying
   # rebuilds come from its track lines and length (SessionFuzz.carry_lines)
   {
