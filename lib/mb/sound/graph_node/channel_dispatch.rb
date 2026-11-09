@@ -105,6 +105,7 @@ module MB
           :inertia, # (:hardware mode reads neighboring channels)
           *MasteringMethods.public_instance_methods(false), # (one chain for every channel)
           *DynamicsMethods.public_instance_methods(false),
+          *TremoloMethods.public_instance_methods(false), # (one LFO per channel phase: stereo_phase:)
         ].freeze
 
         # Modules included in GraphNode that aren't per-channel DSL methods.
