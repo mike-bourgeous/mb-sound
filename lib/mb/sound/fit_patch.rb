@@ -119,7 +119,8 @@ module MB
       # The document text for voice +code+ (console Ruby with the fit's
       # numbers as literals) with +params+ ({ name => MB::Sound::Param }:
       # see .declare) as `param` lines.  Returns [text, sites, missing,
-      # skipped ({ param => why its literal stays a number })].  Literals
+      # skipped ({ param => why its literal stays a number }), the params
+      # as written (times widened to musical lengths: .musical_time)].  Literals
       # inside a Range, typed values (`4.07.db`, `12.cents`), and runtime
       # blocks (`then`) stay numbers: those places take no nodes.
       #
@@ -153,8 +154,13 @@ module MB
         sites = []
         skipped = {}
         matching = match ? params.slice(*match.map(&:to_sym)) : params
-        literals(result.value) do |node, key, why|
+        times = {}
+        literals(result.value) do |node, key, why, setting|
           hits = matching.select { |_, p| matches?(node, p.default) }.keys
+          # (a keyword naming a param, or its alias, takes a value rounding
+          # to the literal however short it is: `resonance: 0.33` for reso
+          # 0.3300036, which the 6-places rule leaves out; tuner-fixes-2)
+          hits = [named_by(key, matching)].compact.select { |n| rounds_to?(node, matching[n].default) } if hits.empty? && key
           next if hits.empty?
           if why
             hits.each { |h| skipped[h] ||= "#{node.slice} is #{why}" }
@@ -169,7 +175,9 @@ module MB
           loc = node.location
           edits << [loc.start_offset, loc.end_offset, pick.to_s]
           sites << Site.new(name: pick, line: loc.start_line, column: loc.start_column + 1, text: node.slice)
+          (entry = time_entry(setting)) && times[pick] ||= entry
         end
+        params = params.to_h { |n, p| [n, times[n] ? musical_time(p, times[n]) : p] }
         references(result.value, params.keys).each do |node|
           loc = node.location
           sites << Site.new(name: node.name, line: loc.start_line, column: loc.start_column + 1, text: node.slice)
@@ -188,7 +196,56 @@ module MB
         lines << GraphIO.inputs_line(input => :notes)
         params.each { |pname, p| lines << p.document_line(p.default) unless missing.include?(pname) }
         lines << '' << body.strip
-        [lines.join("\n") + "\n", sites.freeze, missing.freeze, skipped.slice(*missing).freeze]
+        [lines.join("\n") + "\n", sites.freeze, missing.freeze, skipped.slice(*missing).freeze, params.freeze]
+      end
+
+      # Where DSL calls a fit's code makes are defined, to name positional
+      # arguments (.setting_param: `v.env(0.002, 0.3, ...)`'s first is
+      # attack): the voice's Notes and its pitches, nodes, drum hits,
+      # envelopes, clips, tones.
+      def call_sources
+        @call_sources ||= [Notes, Notes::NotePitch, GraphNode, Drums::Hit, EnvelopeMethods, Sequence::Clip, Tone].freeze
+      end
+
+      # The name of the argument of +setting+ ([call, keyword or index], as
+      # .literals yields it): the keyword, or the positional parameter of
+      # that index in the first of .call_sources defining the call (past
+      # recorders taking *args, **kwargs), or nil.
+      def setting_param(setting)
+        call, slot = setting
+        return nil if call.nil? || slot == :self || slot == :**
+        return slot if slot.is_a?(Symbol)
+        name = call.to_s.split('.').last.to_sym
+        call_sources.each do |mod|
+          m = mod.instance_method(name) rescue next
+          m = m.super_method while m.super_method && m.parameters.map(&:first) == %i[rest keyrest block]
+          pos = m.parameters.select { |type, _| type == :req || type == :opt }.map(&:last)
+          return pos[slot] if pos[slot]
+        end
+        nil
+      end
+
+      # The Param names-table entry of the time +setting+ takes (attack,
+      # decay, release, a glide or sweep time: Param.time_entry), or nil.
+      def time_entry(setting)
+        setting && (n = setting_param(setting)) ? Param.time_entry(n) : nil
+      end
+
+      # Param +p+ (a fitted time, plain seconds) with its range widened to
+      # hold names-table +entry+'s (0.1 ms to 10 s for an attack, 30 s for a
+      # decay or release) on an :exp curve, so a knob turns from a click to
+      # a swell whatever range the fit searched (tuner-fixes-2, the
+      # maintainer: "sliders on envelope times maxed out at 20ms").  A
+      # range starting at 0 widens upward only and stays linear.
+      def musical_time(p, entry)
+        return p unless p.range && p.default.is_a?(Float) && p.range.begin.is_a?(Float) && p.range.end.is_a?(Float)
+        lo = Param.magnitude(entry[:range].begin).to_f
+        hi = Param.magnitude(entry[:range].end).to_f
+        a = p.range.begin
+        b = [p.range.end, hi].max
+        a = [a, lo].min if a > 0
+        return p if a == p.range.begin && b == p.range.end && (a <= 0 || p.curve == :exp)
+        Param.declare(p.name, (a..b).at(p.default), description: p.description, curve: a > 0 ? :exp : p.curve, **(p.clamp == false ? { clamp: false } : {}))
       end
 
       # Writes the document for +code+ and +params+ (see .document; params
@@ -201,7 +258,7 @@ module MB
         raise Error, "fit_patch takes a name for the patch (a Symbol like :kick_fit), got #{name.inspect}" unless name.to_s.match?(/\A[a-z_][a-z0-9_]*\z/)
         params = declare(params)
         raise Error, "fit_patch #{name}: give the fitted numbers as knobs (tune: (30.0..110.0).at(51.3), ...)" if params.empty?
-        text, sites, missing, skipped = document(code, params, name: name, description: description, match: match)
+        text, sites, missing, skipped, params = document(code, params, name: name, description: description, match: match)
         check(name, text)
         path, version, entry = write(name, text, path: path, file: file)
         Patch.new(name: name, path: path, version: version, entry: entry, params: params.reject { |k, _| missing.include?(k) }.freeze, sites: sites,
@@ -762,6 +819,21 @@ module MB
         best = hits.min_by(2) { |_, v| (v - lit).abs }
         return best[0][0] if best.length == 1
         (best[0][1] - lit).abs + 1e-12 < (best[1][1] - lit).abs ? best[0][0] : nil
+      end
+
+      # The param of +params+ ({ name => Param }) keyword +key+ names: its
+      # own name, or one of Param::NAME_ALIASES' pairs (reso, resonance).
+      def named_by(key, params)
+        full = Param.full_name(key)
+        params.keys.find { |n| n == key || Param.full_name(n) == full }
+      end
+
+      # True if Float literal +node+ is +value+ rounded to the literal's
+      # decimals.
+      def rounds_to?(node, value)
+        return false unless node.is_a?(Prism::FloatNode) && value.is_a?(Float)
+        m = node.slice.delete('_').match(/\A-?\d+\.(\d+)\z/) or return false
+        (value - node.value).abs <= 0.5 * 10.0**-m[1].length * (1 + 1e-9)
       end
 
       # True if literal +node+ prints +value+ at its own precision: a

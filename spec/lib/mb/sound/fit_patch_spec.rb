@@ -44,7 +44,8 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
       expect(sites.first).to have_attributes(line: 1, text: '1234.5')
       expect(text).to include('synth(midi, voices: 1) { |v| (v.hz.saw.lp4(cutoff, resonance: resonance) * v.amp_env(attack, 0.2, 0.5, 0.1) * 4).softclip(clip, 1.0) }')
       expect(text).to include('param :cutoff, (100.0..8000.0).at(1234.5)')
-      expect(text).to include('param :attack, (0.001..1.0).at(0.01), description: "Amp attack in seconds"')
+      # (an envelope time reaches musical lengths whatever the fit searched)
+      expect(text).to include('param :attack, (0.0001..10.0).at(0.01), curve: :exp, description: "Amp attack in seconds"')
       expect(text).to include('inputs midi: :notes')
       doc = MB::Sound::GraphIO.parse(text)
       expect(doc.params.keys).to eq(%i[cutoff resonance attack clip])
@@ -60,6 +61,40 @@ RSpec.describe(MB::Sound::FitPatch, :aggregate_failures) do
       expect(sites.length).to eq(7)
       expect(text).to include('kit(midi, seed: 1) { voice(:kick) { |h| body = h.body(tune, decay: decay, sweep: sweep); ' \
                               'h.mix(body.softclip(clip, 1.0), h.noise(decay: tick_decay, highpass: tick_hp) * tick) } }')
+    end
+
+    # (tuner-fixes-2: the acid fit printed `resonance: 0.33` for reso
+    # 0.3300036, and its resonance was no knob)
+    it "takes a keyword's short literal for the param the keyword names" do
+      params = MB::Sound::FitPatch.declare(cutoff: (100.0..8000.0).at(1234.5), reso: (0.0..1.0).at(0.2500361), q: (0.1..20.0).at(0.7012))
+      code = 'synth(CLIP) { |v| v.hz.saw.lp4(1234.5, resonance: 0.25).filter(:highpass, cutoff: 30, quality: 0.7) * 0.25 }'
+      text, sites, missing = MB::Sound::FitPatch.document(code, params, name: :x)
+      expect(missing).to eq([])
+      expect(sites.map(&:name)).to eq(%i[cutoff reso q])
+      expect(text).to include('lp4(cutoff, resonance: reso).filter(:highpass, cutoff: 30, quality: q) * 0.25')
+    end
+
+    # (tuner-fixes-2, the maintainer: "sliders on envelope times maxed out
+    # at 20ms": a fit's search range was the knob's range)
+    it 'widens fitted times to musical lengths on an exp curve, wherever the code takes a time' do
+      params = MB::Sound::FitPatch.declare(
+        fattack: (0.0003..0.004).at(0.0026108), fdecay: (0.001..0.02).at(0.0066589), fsus: (0.0..1.0).at(0.8108), cutoff: (30.0..18000.0).at(3863.26),
+        attack: (0.0003..6.0).at(0.000627), decay: (0.005..12.0).at(1.240077), glide: (0.0..0.1).at(0.0312), sweep_t: (0.005..0.08).at(0.0277)
+      )
+      code = 'synth(CLIP, voices: 1) { |v| fe = v.env(0.0026, 0.0067, 0.8108, 0.05); a = v.env(0.0006, 1.2401, 1.0, 0.05); ' \
+             'v.hz.glide(0.0312).pulse(0.5).lp4((2 ** (fe * -2.5) * 3863.3).clip(20, 18000), resonance: 0.3, mode: :diode) * a + ' \
+             'MB::Sound::Drums::Hit.new.body(55.0, sweep_time: 0.0277) * 0.1 }'
+      text, _sites, missing, _skipped, out = MB::Sound::FitPatch.document(code, params, name: :x)
+      expect(missing).to eq([])
+      expect(out[:fattack]).to have_attributes(range: 0.0001..10.0, curve: :exp, default: 0.0026108)
+      expect(out[:fdecay]).to have_attributes(range: 0.0001..30.0, curve: :exp)
+      expect(out[:attack]).to have_attributes(range: 0.0001..10.0, curve: :exp)
+      expect(out[:decay]).to have_attributes(range: 0.0001..30.0, curve: :exp)
+      expect(out[:glide]).to have_attributes(range: 0.0..10.0, curve: :linear) # (from 0: wider, still linear)
+      expect(out[:sweep_t]).to have_attributes(range: 0.0001..10.0, curve: :exp)
+      expect(out[:fsus]).to eq(params[:fsus])
+      expect(out[:cutoff]).to eq(params[:cutoff])
+      expect(text).to include('param :fdecay, (0.0001..30.0).at(0.0066589), curve: :exp', "mode: :diode")
     end
 
     it 'lists params it finds nowhere and leaves short literals alone' do

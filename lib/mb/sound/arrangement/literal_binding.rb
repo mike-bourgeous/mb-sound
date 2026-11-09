@@ -569,7 +569,7 @@ module MB
         def knob_default(param, value, range = nil)
           v = value.is_a?(Pitch) ? value.frequency.to_f.hz : value
           v = v.to_f if v.is_a?(Length::Samples) || (v.is_a?(Numeric) && !v.is_a?(Length) && !v.is_a?(Decibels))
-          entry = Param.name_entry(param) || envelope_entry(param)
+          entry = Param.name_entry(param) || envelope_entry(param) || Param.time_entry(param)
           # (a frequency below the audio band, an lfo's: the rate range)
           entry = Param.name_entry(:rate) if param == :frequency && Param.magnitude(v).to_f < 20
           r = range || entry&.dig(:range)

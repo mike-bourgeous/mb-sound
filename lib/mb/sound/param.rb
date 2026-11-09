@@ -97,6 +97,12 @@ module MB
         gain threshold pan width rate depth feedback
       ].freeze
 
+      # Setting names that are times (Param.time_entry): attack, decay,
+      # release, or a time, alone or at the end of a name (`sweep_time`,
+      # `index_decay`; not `glide`, which is semitones in `resonate`, nor
+      # `hold`, steps in `beats`).
+      TIME_NAME = /(\A|_)(attack|decay|release|time)\z/
+
       # Types a plain number can count in (`type: :frequency` with 2400.0).
       UNIT_TYPES = %i[frequency seconds samples duration decibels interval phase tempo ratio].freeze
 
@@ -179,6 +185,18 @@ module MB
           # don't build the table before its unit classes exist)
           return nil unless NAME_KEYS.include?(key)
           names[key]
+        end
+
+        # The names-table entry for a time setting named +name+ (tuner-fixes-2:
+        # knobs for fitted and bound times reach musical lengths): attack,
+        # decay, and release (`index_decay` is a decay), and lengths named
+        # as times (`time`, `sweep_time`, `glide_time`: the attack's 0.1
+        # ms..10 s), or nil.  See TIME_NAME.
+        def time_entry(name)
+          return nil unless name.is_a?(Symbol) || name.is_a?(String)
+          leaf = Session::Name[name.to_sym].leaf.to_s
+          m = leaf.match(TIME_NAME) or return nil
+          names[%w[decay release].include?(m[2]) ? m[2].to_sym : :attack]
         end
 
         # The type of value +v+: an ArgTypes type, :boolean, :string, or
