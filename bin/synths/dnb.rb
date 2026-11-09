@@ -82,7 +82,7 @@ module MB::Sound
   # while playing, with no phase jump; GraphNode#bars).
   #
   # reese-slope-1 (2026-11-07): +slope: 12+ for the maintainer's Bench pick
-  # on One Eighty's microKORG reese ("closer"), and +low_cut+ (was
+  # on his 2006 dnb song's microKORG reese ("closer"), and +low_cut+ (was
   # +highpass:+) to let its fundamental through (the original's strongest
   # band is about 40 Hz): nil or a number 0 or below leaves both highpasses
   # out; a node (a param or knob) moves their cutoff live, 0 there being

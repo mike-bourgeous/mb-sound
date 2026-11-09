@@ -176,7 +176,7 @@ RSpec.describe(MB::Sound::GraphNode::ReadAhead) do
     end
   end
 
-  describe 'a resample pair in a bus (the Nightfall drum bus, 2026-11-08)' do
+  describe 'a resample pair in a bus (the drum bus of a converted song, 2026-11-08)' do
     # (given a mode, so the pair still reads ahead: its latency, since
     # resample-render-minphase only when a mode is given)
     [800, 367].each do |size|
