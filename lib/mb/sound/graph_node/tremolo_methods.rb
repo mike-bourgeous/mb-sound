@@ -41,7 +41,9 @@ module MB
         # +rate+ - Hz (a number, a Pitch like `5.hz`, or a node of Hz), or
         #          a musical length (`1.n8`, `2.bars`, `lfo_bars.bars`): one
         #          cycle per length, following the tempo and locked to the
-        #          timeline (Duration#lfo).
+        #          timeline (Duration#lfo), or a Length per cycle
+        #          (`0.25.seconds`); read by ModulationLfo.rate_tone, as the
+        #          phaser's, flanger's, and rotary's rates are.
         # +:depth+ - How far down the trough goes, read like a ducking
         #            amount: -12.db or 12.db is 12 dB down, a bare number
         #            the trough's linear gain (0.25 = 12 dB down, 0 = a full
@@ -137,19 +139,18 @@ module MB
           ok = case rate
                when Numeric then rate.real? && rate.finite? && rate >= 0
                when Sequence::Duration, Sequence::NodeDuration, Pitch then true
+               when Length then rate.to_seconds > 0 # (a period, as for every modulation effect: ModulationLfo)
                else rate.respond_to?(:sample)
                end
-          raise ArgumentError, "tremolo rate is Hz (a number, Pitch, or node) or a musical length like 1.n8 (got #{rate.inspect})" unless ok
+          raise ArgumentError, "tremolo rate is Hz (a number, Pitch, or node), a musical length like 1.n8, or a Length per cycle (got #{rate.inspect})" unless ok
         end
 
         # The LFO for #tremolo: a Tone in -1..1 at +rate+ playing +wave+ (a
         # Tone waveform, :noise for sample and hold) or +table+ (a drawn
         # Wavetable), starting at +phase+ cycles, smoothed over +smooth+.
         def self.lfo(rate, wave, table, phase, smooth, seed, sample_rate)
-          tone = case rate
-                 when Sequence::Duration, Sequence::NodeDuration, Pitch then rate.lfo
-                 else MB::Sound::Tone.new(frequency: rate, sample_rate: sample_rate).lfo
-                 end
+          # (the rate read as every modulation effect reads it)
+          tone = ModulationLfo.rate_tone(rate, sample_rate: sample_rate, what: 'tremolo')
           tone = if table
                    tone.wavetable(table)
                  else

@@ -1,9 +1,10 @@
 module MB
   module Sound
     module GraphNode
-      # The sweep LFO of the modulation effects (GraphNode#phaser,
-      # GraphNode#flanger, the rotary speaker's rotors; effects-2, which
-      # moved phaser-1's Phaser.lfo here): one place that turns a +rate:+
+      # The LFO of the modulation effects (GraphNode#phaser,
+      # GraphNode#flanger, GraphNode#tremolo, the rotary speaker's rotors;
+      # effects-2, which moved phaser-1's Phaser.lfo and tremolo-1's rate
+      # reading here): one place that turns a +rate:+
       # setting into a Tone LFO, so every modulation effect reads rates the
       # same way.
       module ModulationLfo
@@ -11,15 +12,25 @@ module MB
         SHAPES = %i[sine triangle].freeze
 
         # A Tone LFO of +shape+ (:sine or :triangle) starting at +phase+
-        # cycles, -1..1, at +rate+: Hz (a number, a Pitch, or a node of
-        # Hz), a musical length per cycle (`1.bar`, `knob.bars`; follows
-        # the tempo and the timeline), or a Length per cycle (`2.seconds`).
-        # +what+ names the effect in errors.
+        # cycles, -1..1, at +rate+ (see .rate_tone).  +what+ names the
+        # effect in errors.
         def self.tone(rate, shape: :sine, phase: 0, sample_rate:, what: 'lfo')
           unless SHAPES.include?(shape)
             raise ArgumentError, "#{what} shape: is #{SHAPES.map(&:inspect).join(' or ')} (got #{shape.inspect})"
           end
 
+          tone = rate_tone(rate, sample_rate: sample_rate, what: what)
+          tone = shape == :triangle ? tone.triangle : tone.sine
+          tone = tone.with_phase(phase) unless phase == 0
+          tone
+        end
+
+        # The Tone LFO (its waveform and phase left to the caller; tremolo
+        # draws its own shapes on it) at +rate+: Hz (a number, a Pitch, or
+        # a node of Hz), a musical length per cycle (`1.bar`, `knob.bars`;
+        # follows the tempo and the timeline), or a Length per cycle
+        # (`2.seconds`), at +sample_rate+.
+        def self.rate_tone(rate, sample_rate:, what: 'lfo')
           rate = GraphNode.build_setting(rate) unless rate.respond_to?(:sample)
           tone = case rate
                  # (first: a Duration is a Length, and a NodeDuration may be a
@@ -36,8 +47,6 @@ module MB
                    end
                    rate.lfo
                  end
-          tone = shape == :triangle ? tone.triangle : tone.sine
-          tone = tone.with_phase(phase) unless phase == 0
           # (only when it differs: a rate node's Tone has its rate already,
           # and at_rate would reach upstream into the rate node's own graph)
           tone.at_rate(sample_rate) unless tone.sample_rate == sample_rate
