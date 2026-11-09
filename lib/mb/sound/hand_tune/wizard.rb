@@ -510,6 +510,45 @@ module MB
           @background.want(key, -> { score_job(synth) }) { Wizard.score_of(**score_job(synth).transform_keys(&:to_sym).except(:do)) } && nil
         end
 
+        # What each knob of tuned track +track+'s document does to its note
+        # at the knobs now ({ param => dB }, HandTune.knob_effects) if
+        # worked out, else nil (+want+: work it out in the background, in
+        # the worker process; a turn asks again, since a knob can come
+        # alive when another moves: hat_tune with hat_level up).  Nil for a
+        # patch that isn't a graph document.
+        def knob_effects(track, want: true)
+          job = effects_job(track) or return nil
+          key = [:effects, job['document'], job['values'].to_a.sort]
+          r = @background.get(key)
+          return nil if r.is_a?(Exception)
+          return r if r || !want
+          @background.want(key, job) {
+            HandTune.knob_effects(job['document'], job['values'], note: job['note'], velocity: job['velocity'], hold: job['hold'], seconds: job['seconds'])
+          } && nil
+        end
+
+        # The knobs of +track+ that do nothing audible at the knobs now
+        # (below HandTune::DEAD_DB on one note), or nil until known.
+        def dead_knobs(track, want: true)
+          e = knob_effects(track, want: want) or return nil
+          HandTune.dead_knobs(e)
+        end
+
+        # What .knob_effects needs for +track+ as plain data (the worker
+        # gets it as JSON), or nil: the document, the knobs' values (6
+        # significant digits, so a job is one per setting), the note, and
+        # the reference's length (0.1 to 2 s, refine's), else 1 s.
+        def effects_job(track)
+          path = Reference.document_path(@session, track) or return nil
+          values = Reference.knob_values(@session, track).filter_map { |k, v| [k.to_s, v.to_f.round(6 - Math.log10([v.to_f.abs, 1e-12].max).ceil)] if v.is_a?(Numeric) }.to_h
+          n, vel, hold = Reference.note_of(@session, track)
+          pair = Reference.pairs(@session)[track]
+          seconds = pair ? (pair.sample.seconds.to_f.clamp(0.1, 2.0)) : 1.0
+          { 'do' => 'effects', 'document' => path, 'values' => values, 'note' => n.to_i, 'velocity' => vel.to_f, 'hold' => hold&.to_f, 'seconds' => seconds }
+        rescue StandardError
+          nil
+        end
+
         # The MIDI note the reference is played on: a queue item's, a drum
         # word's (DRUM_NOTES), the reference's pitch, else its role's.
         def note
@@ -1005,7 +1044,9 @@ module MB
       # and scores off the console's GVL.  Requests and answers are JSON
       # lines: {"id": n, "do": "summary", "path": ...} or {"id": n, "do":
       # "score", "ref":, "document":, "entry":, "note":, "bpm":} ->
-      # {"id": n, "summary": {...}} / {"id": n, "score": {...}}.
+      # {"id": n, "summary": {...}} / {"id": n, "score": {...}}; "effects"
+      # (HandTune.knob_effects: "document", "values", "note", "velocity",
+      # "hold", "seconds") -> {"id": n, "effects": {param: dB}}.
       class Wizard::Remote
         # True when a worker can start now: through the process starter,
         # or while nothing renders (else a start would fork with the GVL
@@ -1029,6 +1070,9 @@ module MB
               when 'scan' then { scan: Wizard.scan(msg['path'], msg['paths'] || []) }
               when 'score'
                 { score: Wizard.score_of(ref: msg['ref'], note: msg['note'].to_i, document: msg['document'], entry: msg['entry'], bpm: msg['bpm'].to_f).to_h }
+              when 'effects'
+                { effects: HandTune.knob_effects(msg['document'], msg['values'], note: msg['note'].to_i, velocity: msg['velocity'].to_f, hold: msg['hold'],
+                                                 seconds: msg['seconds'].to_f).transform_values { |db| db.finite? ? db : -999.0 } }
               else { error: "unknown request #{msg['do'].inspect}" }
               end
             output.puts(JSON.generate(out.merge(id: msg['id'])))
@@ -1059,6 +1103,7 @@ module MB
             return Wizard::Summary.new(**self.class.symbols(msg['summary'])) if msg['summary']
             return Wizard::Score.new(**self.class.symbols(msg['score'])) if msg['score']
             return msg['scan'] if msg['scan']
+            return msg['effects'].to_h { |k, db| [k.to_sym, db <= -999.0 ? -Float::INFINITY : db] } if msg['effects']
           end
         end
 
