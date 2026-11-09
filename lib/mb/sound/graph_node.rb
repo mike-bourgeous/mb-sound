@@ -25,6 +25,7 @@ require_relative 'graph_node/distortion_methods'
 require_relative 'graph_node/debug_methods'
 require_relative 'graph_node/channel_methods'
 require_relative 'graph_node/chorus'
+require_relative 'graph_node/phaser_methods'
 require_relative 'graph_node/stereo_delay_methods'
 require_relative 'graph_node/convolve_methods'
 require_relative 'graph_node/dynamics_methods'
@@ -86,6 +87,7 @@ module MB
       include DebugMethods
       include ChannelMethods
       include ChorusMethods
+      include PhaserMethods
       include StereoDelayMethods
       include ConvolveMethods
       include DynamicsMethods
@@ -578,6 +580,7 @@ require_relative 'graph_node/db_shaper'
 require_relative 'graph_node/inertia'
 require_relative 'graph_node/four_pole'
 require_relative 'graph_node/formant'
+require_relative 'graph_node/phaser'
 require_relative 'graph_node/data_shuffler'
 require_relative 'graph_node/wavetable'
 require_relative 'graph_node/harmonic_table'
