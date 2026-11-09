@@ -31,6 +31,7 @@ require_relative 'graph_node/dynamics_methods'
 require_relative 'graph_node/sampling_methods'
 require_relative 'graph_node/blend_methods'
 require_relative 'graph_node/mastering_methods'
+require_relative 'graph_node/flanger_methods'
 
 module MB
   module Sound
@@ -92,6 +93,7 @@ module MB
       include SamplingMethods
       include BlendMethods
       include MasteringMethods
+      include FlangerMethods
 
       # The per-channel DSL call that made this node, if any (see
       # ChannelDispatch and ChannelGroup).  Used by #graphviz.
@@ -549,6 +551,8 @@ require_relative 'graph_node/node_sequence'
 require_relative 'graph_node/ringdown'
 require_relative 'graph_node/sounding'
 require_relative 'graph_node/chorus_nodes'
+require_relative 'graph_node/modulation_lfo'
+require_relative 'graph_node/flanger'
 require_relative 'graph_node/proc_node'
 require_relative 'graph_node/tee'
 require_relative 'graph_node/branch_watch'

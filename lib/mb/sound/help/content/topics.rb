@@ -223,9 +223,15 @@ module MB
         drawn in dB, per sample, with presets (`L.fx.shape_db`: :soft_knee,
         :fuzz, :fold_back, :gate, :asymmetric), and `inertia`, an
         acceleration-limited follower whose limit cycles chirp.
+
+        A flanger (`flanger`, presets in `L.fx.flanger`) mixes the sound
+        with a copy a few milliseconds late: the two cancel in a comb of
+        notches, and an LFO sweeping the delay moves the whole comb.
+        Feedback sharpens it (negative feedback sounds hollow and
+        metallic); rates take Hz or bars, `spread:` makes it stereo.
       TEXT
-      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :softclip, :clip, :shape_db, :inertia, :decimate, :quantize, :ease, :oversample, :ring
-      note :delays, :feedback_loops, :reverbs, :chorus
+      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :flanger, :softclip, :clip, :shape_db, :inertia, :decimate, :quantize, :ease, :oversample, :ring
+      note :delays, :feedback_loops, :reverbs, :chorus, :modulation
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do
         blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop
@@ -234,6 +240,9 @@ module MB
       example 'a dub tape echo' do
         blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop
         bg :try, (blip.tone.triangle.at(-14.db) * blip.amp_env).tape_echo(:dub)
+      end
+      example 'a jet flanger on a pad' do
+        bg :try, 110.hz.saw.at(-26.db).lp4(2000).flanger(:jet)
       end
       example 'a fuzz drawn in dB' do
         bass = seq(A1, A1, C2, G1).n8.loop

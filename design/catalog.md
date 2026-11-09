@@ -83,6 +83,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `reverb(preset, output_channels:, ...)` Appends a reverb to this node (see GraphNode::Reverb)
 - `convolve/ir(impulse, mix:, wet:, ...)` Convolves this signal with an impulse response (convolution reverb)
 - `chorus/juno_chorus(mode, ...)` Appends a Juno-60-style stereo chorus (see Chorus), returning a stereo bundle
+- `flanger(preset_or_rate, ...)` A flanger: a short delay swept by an LFO sweeps a comb of notches
 - `feedback/fb(*args, compensate:, sustain:, &block)` Builds a feedback loop on this node from the block (a FeedbackLoop)
 
 ### Dynamics, loudness, mastering

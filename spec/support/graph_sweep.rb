@@ -423,6 +423,12 @@ module GraphSweep
         c.sig.tape_echo(:reel, time: 0.002, tone: c.mod(800, 6000), low_cut: c.mod(50, 400), drive: c.mod(0, 3), wow: c.mod(0, 0.5), flutter: c.mod(0, 0.1))
       }],
       ['chorus', ->(c) { c.stereo_sig.chorus(:juno2) }],
+      ['flanger presets and live settings (Flanger: swept delays, loops, through zero)', ->(c) {
+        c.sig.flanger(:jet, rate: 9, feedback: c.mod(-0.9, 0.9)).+(c.stereo_sig.flanger(:orbit, mix: c.mod(0, 1), depth: c.mod(0, 1)).mixdown) +
+          c.sig.flanger(:tape_flange, delay: c.mod(0.0005, 0.002), range: 0.5) * 0.5 + c.sig.flanger(:sheen, range: 0.5.ms..1.5.ms) +
+          c.sig.flanger(2.n16, law: :linear, feedback: 0, interpolation: :cubic, sweep: c.mod(-1, 1, 11)) +
+          c.sig.flanger(:steel, delay: 0.0002, range: c.mod(0, 3))
+      }],
       ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60.db) }],
 
       # Dynamics
