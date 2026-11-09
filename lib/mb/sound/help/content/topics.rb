@@ -218,14 +218,18 @@ module MB
         :reel, :slapback, :ping_pong, :dub), feedback loops that run one
         sample at a time in C, the FDN reverb with presets, convolution
         with impulse responses (`sig.ir('hall.wav')`, alias of `convolve`, zero
-        latency, wet -10 dB; `reverb_match('hall.wav')` fits the FDN to one), the Juno
-        chorus, and antialiased shapers, among them `shape_db`: transfer curves
-        drawn in dB, per sample, with presets (`L.fx.shape_db`: :soft_knee,
-        :fuzz, :fold_back, :gate, :asymmetric), and `inertia`, an
-        acceleration-limited follower whose limit cycles chirp.
+        latency, wet -10 dB; `reverb_match('hall.wav')` fits the FDN to one).
+
+        Modulation: the Juno chorus and phasers with presets (`L.fx.phaser`:
+        :vintage, :swirl, :ripple, :deep12, :jet; tempo-synced rates like
+        `phaser(1.bar)`, stereo `spread:`).  Antialiased shapers, among them
+        `shape_db`: transfer curves drawn in dB, per sample, with presets
+        (`L.fx.shape_db`: :soft_knee, :fuzz, :fold_back, :gate, :asymmetric),
+        and `inertia`, an acceleration-limited follower whose limit cycles
+        chirp.
       TEXT
-      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :softclip, :clip, :shape_db, :inertia, :decimate, :quantize, :ease, :oversample, :ring
-      note :delays, :feedback_loops, :reverbs, :chorus
+      dsl :delay, :multitap, :ping_pong, :haas, :tape_echo, :feedback, :reverb, :convolve, :chorus, :phaser, :softclip, :clip, :shape_db, :inertia, :decimate, :quantize, :ease, :oversample, :ring
+      note :delays, :feedback_loops, :reverbs, :chorus, :phaser
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do
         blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop
@@ -234,6 +238,9 @@ module MB
       example 'a dub tape echo' do
         blip = seq(E5, rest, rest, rest, B4, rest, rest, rest).n8.loop
         bg :try, (blip.tone.triangle.at(-14.db) * blip.amp_env).tape_echo(:dub)
+      end
+      example 'a phaser swirl on a drone' do
+        bg :try, (110.hz.saw + 165.hz.saw).at(-20.db).phaser(:swirl)
       end
       example 'a fuzz drawn in dB' do
         bass = seq(A1, A1, C2, G1).n8.loop

@@ -86,6 +86,10 @@ Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`
 
 `sig.chorus(:juno1 | :juno2 | :juno12 | :lush, rate:, depth:, mix:, bbd: false)` (`GraphNode::Chorus`, self-contained in `graph_node/chorus.rb` and `chorus_nodes.rb` for a later effects project) is a Juno-60-style two-tap chorus returning a stereo bundle: mono in like the Juno, clean by default, `bbd: true` adds the board's filters and hiss.
 
+### [Phaser](phaser.md)
+
+`sig.phaser(:vintage | :swirl | :ripple | :deep12 | :jet | rate, depth:, stages:, feedback:, mix:, center:, range:, spread:, shape:, sweep:)` (`GraphNode::Phaser`, kernel `FastFilter.phaser` with an exact Ruby mirror) is a chain of 2-12 first-order allpass stages at one LFO-swept frequency, feedback around the chain solved in closed form, a linear dry/wet mix, Tone LFOs (sine or triangle, Hz or tempo-synced lengths), and stereo pairs whose right LFO runs `spread:` cycles ahead.
+
 ### [Reverbs](reverbs.md)
 
 `#reverb` (`GraphNode::Reverb`, kernel `fast_reverb`) is the FDN reverb: `[l, r].reverb(:hall)` runs inputs through diffusion, a per-sample FDN, and energy-normalized output taps; presets `:room`, `:hall`, `:plate`, `:shimmer`, `:gated`, ...; the friendly form takes `room_size:`, `decay:`, `damping:`; options for modulation, in-loop filters, drive, shimmer, freeze, `duck:`, `gate:`; `mix:`/`wet:`/`dry:`/`level:`/`predelay:` take nodes read every sample.  One reverb serves all channels.  `sig.convolve('hall.wav')` (alias `ir`; `GraphNode::Convolver`, kernel `fast_convolve`) plays an impulse response with zero latency (wet -10 dB by default); `reverb_match('hall.wav')` fits the FDN to an impulse (`m.save :name`; presets `fit_room`, `fit_hall`, `fit_space`).

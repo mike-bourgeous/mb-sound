@@ -418,6 +418,11 @@ module GraphSweep
       }],
       ['chorus', ->(c) { c.stereo_sig.chorus(:juno2) }],
       ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60.db) }],
+      ['phaser (Phaser) mono, stereo, moving settings', ->(c) {
+        st = c.stereo_sig.phaser(:swirl, feedback: c.mod(-0.9, 0.9), mix: c.mod(0.2, 0.8, 3))
+        c.sig.phaser + c.sig.phaser(13, stages: 12, center: c.mod(200, 3000, 2), depth: c.mod(0, 1, 5), range: c.mod(1, 6, 0.7)) + c.sig.phaser(:jet, range: 200..6000) +
+          c.sig.phaser(sweep: c.mod(-1, 1, 11), feedback: -0.6, stages: 2) + st.outputs[0] + st.outputs[1]
+      }],
 
       # Dynamics
       ['compress (rms, sidechain, lookahead, hold, upward, node times)', ->(c) {

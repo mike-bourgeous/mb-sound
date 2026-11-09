@@ -466,6 +466,7 @@ module MB
         def self.lfo(rate, shape, phase, sample_rate)
           rate = GraphNode.build_setting(rate) unless rate.respond_to?(:sample)
           tone = case rate
+                 when Sequence::Duration, Sequence::NodeDuration, MB::Sound::Pitch then rate.lfo # (Durations are Numeric)
                  when Numeric
                    raise ArgumentError, "phaser rate: must not be negative (got #{rate})" unless rate.real? && rate >= 0
                    rate.to_f.hz.lfo

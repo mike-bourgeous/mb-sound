@@ -5,7 +5,7 @@ module MB
       # per channel (see ChannelDispatch::EXCLUDED): a stereo input's sides
       # get LFOs +spread+ apart.
       module PhaserMethods
-        # A phaser (GraphNode::Phaser): allpass stages swept by an LFO cut moving notches.
+        # A phaser (GraphNode::Phaser): moving notches from LFO-swept allpass stages.
         #
         # +preset_or_rate+ is a preset name (:vintage, the default; :swirl,
         # :ripple, :deep12, :jet; `L.fx.phaser`) or the LFO rate: Hz, a Pitch,
