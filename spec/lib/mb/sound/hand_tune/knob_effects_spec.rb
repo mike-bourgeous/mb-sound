@@ -37,6 +37,7 @@ RSpec.describe('MB::Sound::HandTune.knob_effects', :aggregate_failures) do
     end
   ensure
     MB::Sound::HandTune::Wizard.close
+    MB::Sound::UI::Design.close # (tune opened :lead in design; support/ui_screen_guard.rb)
     MB::Sound::HandTune::Wizard::Background.inline = nil
     s&.close
     MB::Sound.rewind
