@@ -972,7 +972,7 @@ FastDelay.network
 DelayLine.network_ruby
 GraphNode::DelayNetwork
 multitap(t1, t2, feedback: [g1, g2] | g)
-ping_pong(t, feedback:, spread:, mix:, input: :mono | :stereo)
+ping_pong(t, feedback:, spread:, mix:, input:)
 haas(15.ms, side:)
 sig.tape_echo(:reel | :slapback | :ping_pong | :dub, time:, feedback:, mix:, tone:, low_cut:, drive:, wow:, flutter:)
 GraphNode::TapeEcho
