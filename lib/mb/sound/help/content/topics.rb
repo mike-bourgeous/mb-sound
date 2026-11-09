@@ -461,21 +461,26 @@ module MB
       about <<~TEXT
         `boom` is a cinematic boom (trailer libraries' "booms" or
         "impacts"): each note strikes a body that falls from a punchy tone
-        onto the note's pitch and rings on as a sub, with a noise click on
-        the strike, an optional sine sub and noise tail, soft clipping,
-        and a reverb tail.  Note lengths don't matter (one hit per note);
+        onto the note's pitch and rings on as a sub, with a click on the
+        strike, an optional noise burst, sine sub, and noise rumble, soft
+        clipping, and a reverb tail (a library reverb preset: :space by
+        default).  Note lengths don't matter (one hit per note);
         velocity sets the level and, by vel_depth and vel_bright, the
         depth of the fall and the click and drive.  It takes a clip (or
         any MIDI source; none: live `midi`), a pitch for one hit
         (`boom(G1)`), a preset, and settings: `boom(clip, :trailer, decay:
         6)`.  Presets: :cinematic (the default), :sub_drop (a slow falling
-        sub, no hit), :impact (short and tight), :trailer (long and wide;
-        `Boom.preset_names`).  Settings (Params, so they are knobs on a
-        track): note, drop (octaves), sweep and sweep_curve (the fall),
-        shape (sine to triangle), punch and punch_time, decay and curve,
-        sub and sub_decay, click, click_tone, click_decay, noise,
-        noise_tone, noise_decay, drive, vel_depth, vel_bright, tail,
-        tail_length, room, damping, width, level, voices.
+        sub that fades out under 30 Hz, no hit), :impact (short and tight,
+        a room), :trailer (long and wide; `Boom.preset_names`).  Settings
+        (Params, so they are knobs on a track): note, drop (octaves),
+        sweep and sweep_curve (the fall), below (octaves the fall goes on
+        under the note) and floor (Hz the body fades out under), shape
+        (sine to triangle), punch and punch_time, decay and curve, sub and
+        sub_decay, click, click_tone, noise, noise_tone, noise_decay,
+        rumble, rumble_tone, rumble_decay, drive, vel_depth, vel_bright,
+        tail, tail_length, reverb (:space, :hall, :default, :room, or
+        :room_size with room), tail_cut (Hz), damping, width, level,
+        voices.
 
         The presets are library entries: `L.inst.boom.trailer.ping` hits
         once (`.ping(E1)` at a note), `play L.inst.boom.impact` plays a

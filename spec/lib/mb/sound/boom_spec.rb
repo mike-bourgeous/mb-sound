@@ -83,6 +83,87 @@ RSpec.describe(MB::Sound::Boom, :aggregate_failures) do
     expect { MB::Sound::L.inst.boom.impact.ping(MB::Sound::G1, HITS) }.to raise_error(ArgumentError, /ping takes pitches/)
   end
 
+  # +x+ through a 2 x 2-pole band filter (nil for no edge), as DFloat.
+  def band(x, lo, hi)
+    f = []
+    2.times { f << MB::Sound::Filter::Cookbook.new(:highpass, 48000, lo, quality: 0.7) } if lo
+    2.times { f << MB::Sound::Filter::Cookbook.new(:lowpass, 48000, hi, quality: 0.7) } if hi
+    Numo::DFloat.cast(MB::Sound::Filter::FilterChain.new(*f).process(Numo::SFloat.cast(x)))
+  end
+
+  # RMS level in dB of +x+ from +t0+ to +t1+ seconds.
+  def level(x, t0, t1)
+    10 * Math.log10((x[(t0 * 48000).to_i...(t1 * 48000).to_i]**2).mean + 1e-30)
+  end
+
+  # boom-2 (the maintainer on boom-1's tails: "Too metallic and wobbly",
+  # "almost gong like"): the tail is a library reverb preset; boom-1's
+  # room-size form (8 lines, subtle modulation) rang as separate modes
+  # under its 8 s decay
+  it 'rings its tail through a library reverb preset, smoother than the room-size form' do
+    imp = Numo::SFloat.zeros(300 * 800)
+    imp[0] = 1
+    s = described_class.settings(:cinematic).merge(tail: 1, width: 1, tail_length: 4.0)
+    flat = %i[space room_size].to_h { |r|
+      out = samples(described_class.tail(MB::Sound::ArrayInput.new(data: [imp]), s.merge(reverb: r)), 300)
+      [r, MB::Sound::Analysis::ImpulseResponse.new(out.map { |c| c - Numo::DFloat.cast(imp) }).tail_flatness]
+    }
+    expect(flat[:space].min).to be > 0.3 # (0.56 for noise; :space reads about 0.45)
+    expect(flat[:room_size].max).to be < 0.15 # (boom-1's: about 0.03)
+    expect(described_class.settings(:cinematic)[:reverb]).to eq(:space)
+    expect(described_class.settings(:impact)[:reverb]).to eq(:room)
+
+    described_class::REVERBS.each do |r|
+      MB::Sound.seed(1)
+      out = samples(MB::Sound.boom(MB::Sound::G1, :impact, reverb: r), 30)
+      expect(out.length).to eq(2)
+      expect(out[0].abs.max).to be > 0.1
+    end
+    expect { MB::Sound.boom(MB::Sound::G1, reverb: :stadium) }.to raise_error(ArgumentError, /stadium/)
+  end
+
+  it 'cuts the lows inside its tail with tail_cut' do
+    MB::Sound.seed(1)
+    dry = samples(MB::Sound.boom(MB::Sound::G1, tail: 0), 180)[0]
+    wet = { 0 => nil, 100 => nil }.to_h { |cut, _|
+      MB::Sound.seed(1)
+      out = samples(MB::Sound.boom(MB::Sound::G1, tail_cut: cut), 180)
+      [cut, band((out[0] + out[1]) / 2 - dry, nil, 100)]
+    }
+    expect(level(wet[100], 1, 3)).to be < level(wet[0], 1, 3) - 10
+  end
+
+  # boom-2 (the maintainer on boom-1's :sub_drop: "continued down and
+  # faded out below say 30Hz")
+  it 'falls through the note and fades out under the floor (below, floor)' do
+    MB::Sound.seed(1)
+    held = samples(MB::Sound.boom(MB::Sound::E1, :sub_drop, tail: 0, below: 0, floor: 0), 240)[0]
+    MB::Sound.seed(1)
+    drop = samples(MB::Sound.boom(MB::Sound::E1, :sub_drop, tail: 0), 240)[0]
+    expect(pitch_at(held, 2.5)).to be_within(1).of(MB::Sound::E1.frequency)
+    expect(pitch_at(drop, 1.6)).to be < 0.8 * MB::Sound::E1.frequency
+    peak = drop.abs.max
+    expect(level(drop, 2.4, 3.0)).to be < 20 * Math.log10(peak) - 60
+    expect(level(held, 2.4, 3.0)).to be > 20 * Math.log10(peak) - 30
+
+    # (below: 0 and floor: 0 play the boom-1 voice)
+    MB::Sound.seed(1)
+    a = samples(MB::Sound.boom(MB::Sound::G1, :trailer, tail: 0), 30)[0]
+    MB::Sound.seed(1)
+    b = samples(MB::Sound.boom(MB::Sound::G1, :trailer, tail: 0, below: 0, floor: 0), 30)[0]
+    expect(a).to eq(b)
+  end
+
+  it 'plays without its noise burst by default, with it as a setting' do
+    hi = %i[off on].to_h { |k|
+      MB::Sound.seed(1)
+      out = samples(MB::Sound.boom(MB::Sound::G1, tail: 0, **(k == :on ? { noise: 0.061 } : {})), 120)[0]
+      [k, level(band(out, 8000, nil), 0.5, 1.5)]
+    }
+    expect(described_class.settings(:cinematic)[:noise]).to eq(0)
+    expect(hi[:on]).to be > hi[:off] + 10
+  end
+
   it 'plays in kits without its tail' do
     beat = MB::Sound.grid(16, kick: 'x...............')
     MB::Sound.seed(1)
