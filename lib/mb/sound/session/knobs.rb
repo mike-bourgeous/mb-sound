@@ -705,6 +705,17 @@ module MB
           full
         end
 
+        # Runs the block with #knob_frame set to +frame+ (a knob following a
+        # Session knob from inside the span: GraphNode::Knob#render), then
+        # puts it back.  Returns the block's value.
+        def with_knob_frame(frame)
+          was = @knob_frame
+          @knob_frame = frame
+          yield
+        ensure
+          @knob_frame = was
+        end
+
         private
 
         def init_knobs
