@@ -15,6 +15,7 @@ RSpec.describe('help wording') do
   PRODUCTS = [
     'DirectX', 'Sonic Foundry', 'Sound Forge', 'OTT', 'Xfer', 'Serum', 'Csound', 'Paulstretch', 'Valhalla', 'Ableton', 'iZotope',
     'FabFilter', 'Soundtoys', 'Native Instruments', 'Kontakt', 'Reaktor', 'Max/MSP', 'Pure Data', 'SuperCollider', 'Sonic Pi',
+    'FluidSynth', 'REX', 'ReCycle',
   ].freeze
 
   def sources

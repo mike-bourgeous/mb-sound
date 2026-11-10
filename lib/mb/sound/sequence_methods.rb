@@ -304,8 +304,7 @@ module MB
       #
       # +curve+ may be a list, one curve per step (step i, from value i to
       # the next, takes entry i), cycling like +step+ lengths when shorter:
-      # breakpoint automation like ACID's envelopes, whose segments each
-      # have their own shape (`[:linear, :fast, :slow, :smooth, :sharp,
+      # breakpoint automation whose segments each have their own shape (`[:linear, :fast, :slow, :smooth, :sharp,
       # :hold]`; :hold keeps the step's first value until the next).
       # Entries are anything +curve+ takes (a bezier as its own Array of
       # four numbers); +overshoot:+ and +cycles:+ go to every name in the
