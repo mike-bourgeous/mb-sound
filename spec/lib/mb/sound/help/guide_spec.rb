@@ -14,14 +14,20 @@ RSpec.describe MB::Sound::Help::Guide do
 
   let(:lib) { File.expand_path('../../../../../lib', __dir__) }
 
+  # Help state and saves go to temp dirs; the monitor trim is restored
   around do |ex|
     old = ENV['MB_SOUND_HELP_DIR']
+    old_presets = ENV['MB_SOUND_PRESETS']
     old_trim = MB::Sound::Session.monitor_gain
     ENV['MB_SOUND_HELP_DIR'] = tmp_path('help')
+    ENV['MB_SOUND_PRESETS'] = tmp_path('presets')
+    MB::Sound::Library.reload!
     ex.run
   ensure
     ENV['MB_SOUND_HELP_DIR'] = old
+    ENV['MB_SOUND_PRESETS'] = old_presets
     MB::Sound::Session.monitor_gain = old_trim
+    MB::Sound::Library.reload!
   end
 
   def new_session
@@ -78,6 +84,8 @@ RSpec.describe MB::Sound::Help::Guide do
         session = new_session
         ref = self.class.reference
         problems = []
+        # (files the examples write land in a folder of their own)
+        Dir.chdir(tmp_path("#{chapter.name}_files").tap { |d| FileUtils.mkdir_p(d) }) do
         MB::Sound::Session.with_context(session: session) do
           console = MB::Sound.module_eval('binding')
           console_examples.each do |ex|
@@ -99,6 +107,7 @@ RSpec.describe MB::Sound::Help::Guide do
               problems << "#{where}: #{lufs.round(1)} LUFS, the level tone #{ref[:loudness].round(1)} (within #{MB::Sound::Help::Level::EXAMPLE_LOUDNESS_WINDOW} LU)"
             end
           end
+        end
         end
         expect(problems).to be_empty, problems.join("\n")
       ensure

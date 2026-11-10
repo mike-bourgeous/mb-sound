@@ -30,8 +30,7 @@ song.rb`.)
 The first line gives the file every console command and note name.  The
 program ends when everything has finished playing: `.repeat(2)` plays the
 bass line twice, and `.until(2.bars)` stops the hats after two bars.  A
-`.loop` without an end plays until Ctrl-C, and the program says so when it
-starts.
+`.loop` without an end plays until Ctrl-C (the program warns you).
 
 ## A song with a length
 
@@ -92,8 +91,8 @@ Each one is a default value, a description, and optionally a short flag:
 ```ruby
 require 'mb/sound/dsl'
 
-song_script(bars: 8, cutoff: [700, 'Bass filter cutoff in Hz', '-c'], root: [A1, 'Lowest note of the bass']) do |p|
-  bass = seq(p.root, rest, p.root, p.root.transpose(3), rest, p.root.transpose(7)).n8.loop
+song_script(bars: 8, cutoff: [700, 'Bass filter cutoff in Hz', '-c'], shift: [0, 'Semitones to move the bass up or down', '-t']) do |p|
+  bass = seq(A1, rest, A1, C2, rest, E2).n8.loop.transpose(p.shift)
   bg :bass, bass.tone.saw.lp4(p.cutoff, resonance: 0.4).at(-12.db) * bass.amp_env
   at_bar(7) { outro fade: 2 }
 end
@@ -101,10 +100,11 @@ end
 
 ```sh
 ruby song.rb -c 1500            # a brighter bass
-ruby song.rb --root E1 -o low.flac
+ruby song.rb --shift 5 -o up.flac
 ```
 
-`p.cutoff` and `p.root` read the settings inside the song.
+`p.cutoff` and `p.shift` read the settings inside the song, and
+`ruby song.rb --help` lists them with the rest.
 
 ## Things happening over time
 
