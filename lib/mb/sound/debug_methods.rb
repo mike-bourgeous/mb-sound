@@ -6,8 +6,7 @@ module MB
     # to diagnose a live problem to a folder, to read or send along.
     module DebugMethods
       # Writes the console's state to tmp/debug/<time>/ in mb-sound's folder
-      # (an installed gem: in the user data directory; Internal.scratch_dir)
-      # or +dir+: now.txt (`now`), players.txt, changes.txt (the
+      # (or +dir+): now.txt (`now`), players.txt, changes.txt (the
       # journal), graphs/<player>.rb (each player's graph as Ruby, or why
       # not), ui.txt (`ui.list`: mode, layout, terminal size, panes; the
       # screen's stats, messages, and text), take.rb (the
@@ -18,6 +17,9 @@ module MB
       # crash dump, written by bin/sound.rb on an exception that ends it)
       # exception.txt.  Each part that fails says why in its file and the
       # rest still write.  Returns the folder.
+      #
+      # An installed gem writes to the user data directory's tmp/debug/
+      # instead (Internal.scratch_dir).
       def debug_dump(dir = nil, exception: nil)
         dir ||= File.join(Internal.scratch_dir('debug'), Time.now.strftime('%Y%m%d_%H%M%S'))
         FileUtils.mkdir_p(File.join(dir, 'graphs'))
