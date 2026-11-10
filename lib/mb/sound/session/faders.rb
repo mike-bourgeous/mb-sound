@@ -199,6 +199,25 @@ module MB
           v.is_a?(Numo::SFloat) ? v : Numo::SFloat.cast(v)
         end
 
+        # The strip's tap points (contract K7's order: fade, level,
+        # mute/solo, CUE's MAIN share, then the routes), each a gain product
+        # that a destination hears the player through (nil for unity):
+        # - readers: after the fade (#reader_levels; times the key level),
+        # - pre-fader sends: after the fade, mute/solo, and MAIN share,
+        #   skipping the level (this method),
+        # - pre-mute sends: after the fade and MAIN share (this method with
+        #   no +strip+),
+        # - post-fader sends and the main out: after everything (the
+        #   +ramp+ Session#render_player computes; kept as its own product
+        #   so post-fader samples stay bit for bit what they were).
+        # A send row (Buses#send_rows) is the same primitive at either
+        # point: the send's level knob times the tap point's gains, added
+        # into the bus input by Buses#acc_add.
+        def pre_fader_levels(fade, strip, main)
+          g = fade ? (strip ? fade * strip : fade) : strip
+          main ? (g ? g * main : main) : g
+        end
+
         # What player +p+'s readers hear it through over the frames
         # [+frame+, +frame+ + +frames+) (see the module comment): its +fade+
         # (pre-fader), its fader +level+ too for a trigger track, times its

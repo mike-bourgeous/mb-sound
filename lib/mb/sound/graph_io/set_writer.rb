@@ -215,20 +215,22 @@ module MB
           }
         end
 
-        # A player's routing as track options (to:, send:), from
-        # Session#route_definitions: send levels as held gains or the knob
-        # names they follow.
+        # A player's routing as track options (to:, send:, pre_send:,
+        # pre_mute_send:), from Session#route_definitions: send levels as
+        # held gains or the knob names they follow.
         def route_options(name, routes)
           r = routes[name] or return {}
           opts = {}
           opts[:to] = r[:to] if r[:to]
-          sends = r[:send].to_h { |bus, v|
-            unless v.is_a?(Numeric) || v.is_a?(Symbol)
-              @problems << "track #{name.inspect}: its send to #{bus.inspect} follows a node that isn't a session knob (set documents save gains and knob names)"
-            end
-            [bus, v]
-          }
-          opts[:send] = sends unless sends.empty?
+          Session::Buses::SEND_KEYWORDS.each do |kw|
+            sends = (r[kw] || {}).to_h { |bus, v|
+              unless v.is_a?(Numeric) || v.is_a?(Symbol)
+                @problems << "track #{name.inspect}: its send to #{bus.inspect} follows a node that isn't a session knob (set documents save gains and knob names)"
+              end
+              [bus, v]
+            }
+            opts[kw] = sends unless sends.empty?
+          end
           opts
         end
 

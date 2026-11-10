@@ -526,12 +526,13 @@ module MB
       # if other changes for the same name are waiting.
       #
       # +:to+ and +:send+ set the name's routing (see Buses#route): the bus
-      # its main out feeds, and its sends (bus name => level).
+      # its main out feeds, and its sends (bus name => level; +:pre_send+
+      # and +:pre_mute_send+ pre-fader and pre-mute).
       #
       # +:warm+ is a Proc that builds a copy of the graph (a track's patch
       # again), for warming its code before it lands (see Warming; without
       # it, a copy is loaded from the graph's recipe).
-      def add(sound, at: nil, on: nil, in: nil, name: nil, fade: nil, description: nil, start_time: nil, to: :keep, send: nil, warm: nil, carry: false, clip: nil, spill: false,
+      def add(sound, at: nil, on: nil, in: nil, name: nil, fade: nil, description: nil, start_time: nil, to: :keep, send: nil, pre_send: nil, pre_mute_send: nil, warm: nil, carry: false, clip: nil, spill: false,
               full_now: nil)
         raise IOError, 'Session is closed' if @closed
         point = LaunchPoint.of(binding) or return nil
@@ -620,7 +621,7 @@ module MB
 
           # Routing, readers of buses and players, and spies for readers of
           # named nodes in this graph (see Buses)
-          route(name, to: to, send: send) unless to == :keep && send.nil?
+          route(name, to: to, send: send, pre_send: pre_send, pre_mute_send: pre_mute_send) unless to == :keep && send.nil? && pre_send.nil? && pre_mute_send.nil?
           bind_bus_taps(nodes, name, found: found) or return nil
           attach_bus_spies(name, nodes, found: found) if @bus_only.key?(name)
 
@@ -1985,10 +1986,22 @@ module MB
         # then), waking here if it slept before
         sidechained = false
         read_from = nil
+        reader_from = nil
         if @routed_span && bus_source?(p.name)
           read_from = bus_read_from(p.name, from, to, per_sample, offset)
           read_from = nil if read_from && read_from >= offset + frames
+          reader_from = read_from
           sidechained = !read_from.nil? && read_from <= offset
+        end
+        # So does a player with a pre-mute send on (Buses#pre_mute_from),
+        # from the frame it is switched on
+        pm = nil
+        if @routed_span && (pm_route = route_of(p.name)) && pm_route.pre
+          pm = pre_mute_from(pm_route, offset, frames)
+          if pm && (read_from.nil? || pm < read_from)
+            read_from = pm
+            sidechained = read_from <= offset
+          end
         end
         if sidechained && p.asleep
           wake_pos = Sequence::Transport.position_at(from, offset, per_sample)
@@ -2038,6 +2051,16 @@ module MB
           end
           if silent_from < base + offset + frames
             asleep_after = base + offset + frames - silent_from
+            frames -= asleep_after
+          end
+        end
+        # A muted player kept awake only by a pre-mute send stops on the
+        # frame the send turns off (Buses#pre_mute_off_at), as at a mute
+        # ramp's end, so it sleeps at the same point at any buffer size
+        if pm && reader_from.nil? && asleep_after == 0 && p.strip_level <= 0 && p.strip_ramp.nil?
+          off = pre_mute_off_at(pm_route, offset, frames)
+          if off && off > offset && off < offset + frames
+            asleep_after = offset + frames - off
             frames -= asleep_after
           end
         end
@@ -2117,11 +2140,22 @@ module MB
           strip = ramp_levels(p, :strip_level, :strip_ramp, base + offset, frames)
           ramp = gain ? (strip ? gain * strip : gain) : strip
           # The route: CUE gets its share, MAIN the rest (see Cue)
-          ramp = cue_route(p, data, ramp, offset, frames, base + offset) if p.cue
+          main = nil
+          if p.cue
+            ramp = cue_route(p, data, ramp, offset, frames, base + offset)
+            main = @cue_main
+          end
+          # The strip's pre-fader and pre-mute tap points, for a route with
+          # such sends (Faders#pre_fader_levels; +ramp+ is the post-fader one)
+          pre = pre_mute = nil
+          if routed && route_of(p.name)&.pre
+            pre = pre_fader_levels(fade, strip, main)
+            pre_mute = pre_fader_levels(fade, nil, main)
+          end
 
           if routed
             reader = bus_tapped?(p.name) ? reader_levels(p, fade, level, base + offset, frames, route_of(p.name)&.trigger) : nil
-            deliver_player(p, data, ramp, mix, stem, offset, frames, reader: reader)
+            deliver_player(p, data, ramp, mix, stem, offset, frames, reader: reader, pre: pre, pre_mute: pre_mute)
           else
             c = -1
             while (c += 1) < mix.length # (no each_with_index: an imemo per player per buffer)
@@ -2204,7 +2238,9 @@ module MB
         elsif faded
           note_rung_out(p, frame, output.sample_rate) if p.ring&.active
           retire(p, keep: true)
-        elsif p.strip_level <= 0 && p.strip_ramp.nil? && !(@routed_span && bus_source?(p.name))
+        elsif p.strip_level <= 0 && p.strip_ramp.nil? && !(@routed_span && (bus_source?(p.name) || pre_mute_on?(p.name)))
+          # (not a source a reader reads, or one with a pre-mute send on at
+          # the span's end: it renders on, waking only where it starts)
           p.asleep = true
         end
       end

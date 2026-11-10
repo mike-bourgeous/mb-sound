@@ -147,8 +147,9 @@ module MB
       #     outro      # fades everything out over four bars
       #     panic      # stops everything right away
       #
-      # +send:+ (bus name => level, e.g. `send: { verb: -12.db }`) and +to:+
-      # (a bus for its main out) route a named player (see BusMethods).
+      # +send:+ (bus name => level, e.g. `send: { verb: -12.db }`;
+      # +pre_send:+ pre-fader, +pre_mute_send:+ pre-mute) and +to:+ (a bus
+      # for its main out) route a named player (see BusMethods).
       #
       # On a track (see ArrangementMethods#track), a clip or generator
       # entry is its clip at the defaults: `bg :drums, L.gen.techno_beat`
@@ -159,7 +160,7 @@ module MB
       # +clock:+ plays the clip (or Sample loop, or the clips and loops in a
       # graph) on a clock (see MB::Sound::Clock): `bg :bass, bassline,
       # clock: :reese`, `bg :bowl, strike, clock: 19.7.seconds`.
-      def bg(name_or_sound, sound = nil, at: nil, on: nil, in: nil, fade: nil, to: nil, send: nil, clock: nil)
+      def bg(name_or_sound, sound = nil, at: nil, on: nil, in: nil, fade: nil, to: nil, send: nil, pre_send: nil, pre_mute_send: nil, clock: nil)
         point = LaunchPoint.of(binding) or return nil
         # `bg :pad` with a track's name: the track plays its clip again
         # (from the take of 2026-10-27; omnibus15)
@@ -231,7 +232,7 @@ module MB
 
         session_command(name, label: "bg #{name.inspect}", kind: :bg) { |session, time|
           land = landings.empty? ? nil : (time || session.send(:launch_time, point, session.timeline_nodes_in(playable)))
-          added = session.add(playable, at: point, name: name, fade: fade, start_time: point.given? ? nil : time, to: to || :keep, send: send)
+          added = session.add(playable, at: point, name: name, fade: fade, start_time: point.given? ? nil : time, to: to || :keep, send: send, pre_send: pre_send, pre_mute_send: pre_mute_send)
           Arrangement::TrackKnobs.land(session, landings, land) if land && added
           added
         }

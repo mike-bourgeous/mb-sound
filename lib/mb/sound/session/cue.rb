@@ -239,6 +239,7 @@ module MB
           @cue_spare = [] # (see #cue_frame)
           @cue_nil_parts = {} # (see #end_cue_span)
           @cue_span_mix = nil
+          @cue_main = nil # (MAIN's share in the last #cue_route, nil for all)
           @cue_span_count = 0
           @cue_warned = false
           @cue_split_from = nil
@@ -386,12 +387,14 @@ module MB
         # full level).  Called by #render_player for players with a route.
         def cue_route(p, data, ramp, offset, frames, frame)
           l = p.cue
+          @cue_main = nil
           if l.main_ramp.nil? && l.cue_ramp.nil? && l.main_level == 1.0 && l.cue_level == 0.0
             p.cue = nil # back to MAIN only
             return ramp
           end
 
           main = ramp_levels(l, :main_level, :main_ramp, frame, frames)
+          @cue_main = main # (for pre-fader sends: Session#render_player)
           if l.cue_ramp || l.cue_level != 0.0
             cue = ramp_levels(l, :cue_level, :cue_ramp, frame, frames)
             add_cue(data, cue && ramp ? cue * ramp : (cue || ramp), offset, frames)

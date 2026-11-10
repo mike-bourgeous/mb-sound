@@ -184,7 +184,7 @@ module MB
           routes = (s.routes rescue {})
           s.bus_info.map { |name, desc|
             to = desc[/\(to (\S+?)[,)]/, 1]&.to_sym || :master
-            sends = routes.select { |_, r| (r[:send] || {}).key?(name) }.keys.freeze
+            sends = routes.select { |_, r| Session::Buses::SEND_KEYWORDS.any? { |kw| (r[kw] || {}).key?(name) } }.keys.freeze
             sources = routes.select { |_, r| r[:to] == name }.keys.freeze
             BusInfo.new(name: name, to: to, description: desc.sub(/ \(to .*\z/, '').freeze, asleep: desc.include?(', asleep'), muted: desc.include?(', muted'),
                         sends: sends, sources: sources)

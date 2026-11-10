@@ -1233,7 +1233,12 @@ module MB
       about <<~TEXT
         Named buses with their own effects: tracks send a level to them
         (`send:`, `feed`) or play all of their sound into them (`to:`): one
-        kind of bus for reverbs, groups, and returns alike.  They ring out on their own,
+        kind of bus for reverbs, groups, and returns alike.  `send:` is
+        post-fader; `pre_send: { verb: -6.db }` is pre-fader (after fades,
+        before the level), so `level :lead, 0` silences the dry sound while
+        the reverb still gets it, though a muted track sends nothing;
+        `pre_mute_send:` keeps sending while muted too.  `feed :lead, :verb,
+        -6.db, pre: true` (`pre: :mute`, `pre: false`) switches live.  They ring out on their own,
         sleeping when quiet.  `duck(:drums, only: :kick)` and `bus(:drums)`
         read a bus or track by name on the exact sample, pre-fader (a
         track's `level` doesn't move the duck; `key_level :kick, -6.db`
@@ -1256,6 +1261,11 @@ module MB
       example 'a shared reverb send' do
         bus(:try_verb) { |sig| sig.reverb(:room, mix: 1) }
         bg :try, seq(A3, C4, E4, rest).n8.loop.tone.triangle.at(-20.db).until(1.bar), send: { try_verb: -6.db }
+      end
+      example 'a pre-fader send: only the reverb, no dry sound' do
+        bus(:try_wash) { |sig| sig.reverb(:hall, mix: 1) }
+        bg :try_lead, seq(E4, G4, B4, rest).n8.loop.tone.saw.at(-6.db).until(1.bar), pre_send: { try_wash: 1 }
+        level :try_lead, 0
       end
       example 'duck a pad by the kick of a drum track' do
         track(:try_drums) { |k| tr808(k).at(-14.db) }
