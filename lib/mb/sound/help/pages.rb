@@ -194,7 +194,8 @@ module MB
           d.lines(["#{c(:head, 'Learn it in:')} #{learn.map { |l, step, n| "#{c(:key, "lesson :#{l}")} #{c(:dim, "(step #{step} of #{n})")}" }.join(', ')}"]) unless learn.empty?
           more = []
           more << "See also: #{@topic.see.map { |s| "help :#{s}" }.join(', ')}." unless @topic.see.empty?
-          more << "Design notes: #{@topic.notes.map { |n| "design/notes/#{n}.md" }.join(', ')}." unless @topic.notes.empty?
+          # (design notes ship only in a checkout, not in the gem)
+          more << "Design notes: #{@topic.notes.map { |n| "design/notes/#{n}.md" }.join(', ')}." unless @topic.notes.empty? || !Internal.checkout_dir
           d.note(more.join(' ')) unless more.empty?
           d.to_s
         end

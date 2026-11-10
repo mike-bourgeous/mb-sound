@@ -327,12 +327,7 @@ module MB
         def user_presets_dir
           env = ENV['MB_SOUND_USER_PRESETS']
           return File.expand_path(env) unless env.to_s.empty?
-          if RUBY_PLATFORM.include?('darwin')
-            File.join(Dir.home, 'Library', 'Application Support', 'mb-sound', 'presets')
-          else
-            base = ENV['XDG_DATA_HOME'].to_s.empty? ? File.join(Dir.home, '.local', 'share') : ENV['XDG_DATA_HOME']
-            File.join(base, 'mb-sound', 'presets')
-          end
+          Internal.user_data_dir('presets')
         end
 
         # The song or album project around the working directory: the

@@ -356,8 +356,12 @@ module MB
         out << "#     ruby #{'this_file.rb'} -o take.flac     # renders it (-f overwrites)\n"
         out << "#     ruby #{'this_file.rb'}                  # plays it\n"
         out << "#     ruby #{'this_file.rb'} -o t.flac -b 367,368   # alternating buffer sizes\n"
-        out << "ENV['BUNDLE_GEMFILE'] ||= #{File.expand_path('../../../Gemfile', __dir__).inspect}\n"
-        out << "require 'bundler/setup'\n"
+        # In a checkout, its bundle; an installed gem's takes load the
+        # installed gems
+        if (checkout = Internal.checkout_dir)
+          out << "ENV['BUNDLE_GEMFILE'] ||= #{File.join(checkout, 'Gemfile').inspect}\n"
+          out << "require 'bundler/setup'\n"
+        end
         out << "require 'mb-sound'\n\n"
         out << "MB::Sound::Take::Replay.new(\n"
         @start.each do |k, v|
@@ -429,7 +433,7 @@ module MB
         raise ArgumentError, "take.save takes a path or :tmp (got #{path.inspect}), then a note: take.save :tmp, 'UX friction'" if path.is_a?(Symbol)
         path = File.expand_path(path.to_s) if path # `~/x.rb` is a home path, as in a shell
         path = "#{path}.rb" if path && File.extname(path).empty? # a take is a script (`take.save 'tmp/verse'` writes tmp/verse.rb)
-        path ||= File.join(home || (repo ? File.expand_path('../../../sets', __dir__) : self.class.data_dir), name)
+        path ||= File.join(home || (repo && Internal.checkout_dir ? File.join(Internal.checkout_dir, 'sets') : self.class.data_dir), name)
         FileUtils.mkdir_p(File.dirname(path))
         File.write(path, to_ruby(note: note))
         File.chmod(0o755, path)
@@ -499,20 +503,17 @@ module MB
         equal?(self.class.current) ? self.class.restart : self.class.new(session: @session)
       end
 
-      # mb-sound's tmp/takes/ (`take.save :tmp`).
+      # Where `take.save :tmp` writes: mb-sound's tmp/takes/ in a checkout,
+      # else the user data directory's tmp/takes (Internal.scratch_dir).
       def self.tmp_dir
-        File.expand_path('../../../tmp/takes', __dir__)
+        Internal.scratch_dir('takes')
       end
 
       # The user data directory for takes: $XDG_DATA_HOME/mb-sound/takes
       # (~/.local/share/mb-sound/takes) on Linux, ~/Library/Application
       # Support/mb-sound/takes on macOS.
       def self.data_dir
-        if RbConfig::CONFIG['host_os'] =~ /darwin/
-          File.join(Dir.home, 'Library', 'Application Support', 'mb-sound', 'takes')
-        else
-          File.join(ENV['XDG_DATA_HOME'].to_s.empty? ? File.join(Dir.home, '.local', 'share') : ENV['XDG_DATA_HOME'], 'mb-sound', 'takes')
-        end
+        Internal.user_data_dir('takes')
       end
 
       # How long the take has run, in seconds of the session's output (a
