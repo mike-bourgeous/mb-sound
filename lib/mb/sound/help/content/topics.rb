@@ -655,8 +655,9 @@ module MB
     Help.topic :loops, 'Loop files and tempo-following loops', group: :sound do
       about <<~TEXT
         Loop libraries: `Sample['Funk/break_98bpm.wav']` reads a loop with
-        its metadata: ACID chunks (tempo, beats, meter, root, one-shot),
-        `smpl` (root, loop points), cue points (`sample.markers`), FLAC
+        its metadata: ACID chunks (tempo, beats, meter, root, one-shot,
+        and ACID's stretch markers as `sample.markers`), `smpl` (root,
+        loop points), cue points (the markers when ACID gives none), FLAC
         tags, then tempo and key words in file and folder names ("98bpm",
         "98 BPM", "Am_120"; a name's tempo counts only when the file is a
         whole number of its beats).  Loops loop the whole file; one-shots
@@ -683,6 +684,15 @@ module MB
         each slice at its stretched time, attacks copied exactly:
         slowing down leaves a gap after each hit (`fill: :stretch` draws each
         decay out instead), speeding up truncates with a 4 ms fade.
+
+        ACID's own loop info counts: an ACIDized loop is sliced at ACID's
+        stretch markers, and a file ACID marks as a one-shot is never
+        stretched by `follow`: it plays as recorded from each loop start
+        (`stretch: :none`; give it a length to repeat at with
+        `shot.with(bpm: 120)` or a clock, `shot.clocked(2.seconds)`).
+        `stretch: { mode: :spectral, transients: :markers }` runs the
+        phase vocoder with its attacks at the markers instead of at
+        detected onsets.
       TEXT
       commands :loops
       dsl :follow
@@ -727,6 +737,11 @@ module MB
         false` (random phases per channel) for both; for voices try
         `.stretch(8, mode: :paul, overlap: 2,
         shape: :paul, link: false)`.
+        The vocoder finds the attacks it keeps sharp by itself
+        (`transients: true`); `transients: :markers` takes the sample's
+        markers instead (ACID's stretch markers of a loop file; detected
+        onsets when it has none), and `transients: [0, 1.n8, 13230.samples]`
+        any positions; `transients: false` is the plain vocoder.
         They are offline edits: a new Sample, made once; results over 30
         s read with `mips: :octave` (smaller playback tables).
       TEXT
