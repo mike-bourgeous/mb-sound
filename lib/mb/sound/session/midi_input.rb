@@ -438,6 +438,7 @@ module MB
           if @wire_pedal
             offs << MIDI::Event.parse([0xB0, 64, 0], time: 0r)
           end
+          @live_lock&.release(:wire) # (the lock never sees these notes' offs)
           return if offs.empty?
           (@pending_offs ||= []).concat(offs)
           @held.delete_if { |_, h| h.source == :wire }
@@ -493,7 +494,17 @@ module MB
           @live_lock ||= MIDI::Lock::Live.new(style)
           @live_lock.style = style || MIDI::Lock::Style.new(:off)
           t = @session.transport
-          stamped.flat_map { |st| @live_lock.process(st.event, st.pos, transport: t).map { |e| st.with(event: e) } }
+          stamped.flat_map { |st|
+            # (the mapped events keep their source, so #track_held knows a
+            # wired stream's notes and a wire's end owes their note-offs;
+            # fix-wire-lock-1110: they counted as the input's, and hung)
+            label = @span_sources&.[](st)
+            @live_lock.process(st.event, st.pos, transport: t, source: label || :input).map { |e|
+              out = st.with(event: e)
+              @span_sources[out] = label if label
+              out
+            }
+          }
         end
 
         # Updates the held notes (see #held_notes) from a span's events.

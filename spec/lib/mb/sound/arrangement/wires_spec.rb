@@ -146,6 +146,34 @@ RSpec.describe(MB::Sound::Arrangement::Wires) do
       expect(bar3).to eq([[0x80, 64, 0], [0x90, 69, 95]]) # (E4 ends on the rewire frame, not C4 again)
     end
 
+    it 'ends the notes a wired stream holds under the input lock on a hold and an unwire' do
+      # (fix-wire-lock-1110: the input lock's mapped events lost their
+      # source, so the stream's notes counted as the input's and neither a
+      # hold nor an unwire owed their note-offs: the note hung)
+      long = ['key :d, :dorian', 'lock :play', 'long = seq(C4).n1.loop.named(:long)']
+      [['hold :lead, on: :beat', 'unhold :lead, on: :bar'], ['unwire :lead, on: :beat']].each do |cmds|
+        results = [[800], [367], *slow_tier(other_sizes, keep: 0)].map { |sizes|
+          s = new_session
+          d = perform(s, { 0 => setup_lines + long, 10 => ['wire :lead, long.stream'], 140 => [cmds[0]], 200 => cmds.drop(1) }, 96000 * 3, sizes)
+          log = s.midi_log.select { |name, *| name == :"lead/wire" }.map { |_, _, pos, bytes| [pos, bytes] }
+          [d, log, s, sizes]
+        }
+        d, log, s, _ = results[0]
+        results.drop(1).each { |dd, ll, _, sizes| expect([dd, ll]).to eq([d, log]), "#{cmds[0]} at buffer sizes #{sizes}" }
+
+        expect(d[96000]).to eq(62)                           # C4 locked to D4 (D dorian, the root on every C)...
+        expect(log.first(2)).to eq([[1r, [0x90, 62, 95]], [5/4r, [0x80, 62, 0]]]) # ...ended on bar 2 beat 2
+        if cmds[0].start_with?('hold')
+          expect(d[120000...192000].abs.max).to eq(0)        # (the monitor plays on, its stream held)
+          expect(d[192000]).to eq(62)                        # unheld on bar 3: the stream's next note
+        else
+          expect(log.length).to eq(2)
+          expect(s.midi_in(:"lead/wire").held_notes).to eq([])
+          expect(s.arrangement.wires).to eq({})
+        end
+      end
+    end
+
     it 'records the stream with rec, as live input' do
       s = new_session
       perform(s, { 0 => setup_lines, 10 => ['wire :lead, riff.stream', 'rec 1'] }, 96000 * 3 + 800)
