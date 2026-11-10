@@ -12,7 +12,11 @@ module MB
     # shaper is split into x + g(x), with g = f - x zero wherever the shaper
     # is linear: ADAA applies to g only, and x passes through a half-sample
     # Thiran allpass so the two paths line up (flat level, half a sample of
-    # delay).  Measured at drive 4 into softclip(0.25, 1), non-harmonic power
+    # delay).  The high band the ADAA midpoint loses (allpass minus
+    # midpoint) is scaled by the shaper's mean slope over the two inputs
+    # (.band_gain: 1 where linear, 0 where flat, so bright input beyond the
+    # limits no longer leaks through the flat parts; 2026-11-10), and the
+    # result is limited to the shaper's output range (:lo, :hi).  Measured at drive 4 into softclip(0.25, 1), non-harmonic power
     # below 20 kHz: 1 kHz -57.7 -> -71.6 dB (aliases below the fundamental
     # -68.7 -> -102), 3 kHz -30.6 -> -41.6 (-40.1 -> -66.7), about as good as
     # 2x oversampling below the fundamental, at a fraction of its cost.
@@ -42,15 +46,17 @@ module MB
           b = l
           c = l - 2.0 * t
           k = 0.5 * t * t - b * t - (a != 0 ? a * Math.log(t + c) : 0)
-          { mode: mode, p1: t, p2: l, a: a, b: b, c: c, k: k }
+          { mode: mode, p1: t, p2: l, a: a, b: b, c: c, k: k, lo: -l, hi: l, trend: false }
         when :clip
           raise ArgumentError, 'Clip max must be greater than or equal to min' if p2 < p1
-          { mode: mode, p1: p1.to_f, p2: p2.to_f }
+          { mode: mode, p1: p1.to_f, p2: p2.to_f, lo: p1.to_f, hi: p2.to_f, trend: false }
         when :abs
-          { mode: mode, p1: p1.to_f, p2: p2.to_f }
+          { mode: mode, p1: p1.to_f, p2: p2.to_f, lo: 0.0, hi: Float::INFINITY, trend: false }
         when :quantize
           raise ArgumentError, 'Quantize step must be positive and finite' unless p1 > 0 && p1.to_f.finite?
-          { mode: mode, p1: p1.to_f, p2: p2.to_f }
+          # The quantizer's high band keeps the identity's slope (see
+          # mb_clip_run in mb_clip_shape.h)
+          { mode: mode, p1: p1.to_f, p2: p2.to_f, lo: -Float::INFINITY, hi: Float::INFINITY, trend: true }
         else
           raise ArgumentError, "Unknown shaper #{mode.inspect}"
         end
@@ -72,6 +78,28 @@ module MB
         when :quantize
           cp[:p1] * (x / cp[:p1] + 0.5).floor.to_f
         end
+      end
+
+      # Ruby mirror of clip_band_gain in mb_clip_shape.h: the gain of the dry
+      # path's high band for inputs +x1+..+x+ (+fx+, +fx1+ their shaped
+      # values, +m+ their midpoint), the mean slope of the shaper (the block)
+      # over them, or over TINY around +m+ for closer inputs, limited to
+      # -1..1.
+      def self.band_gain(x, x1, fx, fx1, m)
+        d = x - x1
+        w = if d.abs < TINY
+              ma = m - 0.5 * TINY
+              mb = m + 0.5 * TINY
+              (yield(mb) - yield(ma)) / (mb - ma)
+            else
+              (fx - fx1) / d
+            end
+        w < -1.0 ? -1.0 : (w > 1.0 ? 1.0 : w)
+      end
+
+      # Limits +v+ to +lo+..+hi+ (the C clip_limit).
+      def self.limit(v, lo, hi)
+        v < lo ? lo : (v > hi ? hi : v)
       end
 
       # The antiderivative of g = f - x (see clip_g_integral in fast_clip.c).
@@ -108,6 +136,9 @@ module MB
         cp = params(mode, p1, p2)
         x1, ap_x1, ap_y1, primed = state
         primed = primed != 0
+        fx1 = antialias && primed ? f(cp, x1) : 0.0
+        lo = cp[:lo]
+        hi = cp[:hi]
 
         out = Numo::SFloat.zeros(data.length)
         Numo::SFloat.cast(data).to_a.each_with_index do |x, i|
@@ -118,23 +149,28 @@ module MB
 
           unless primed
             x1 = ap_x1 = ap_y1 = x
+            fx1 = f(cp, x)
             primed = true
           end
 
           d = x - x1
+          m = 0.5 * (x + x1)
+          fx = f(cp, x)
           g = if d.abs < TINY
-                m = 0.5 * (x + x1)
                 f(cp, m) - m
               else
                 (g_integral(cp, x) - g_integral(cp, x1)) / d
               end
 
+          w = cp[:trend] ? 1.0 : band_gain(x, x1, fx, fx1, m) { |v| f(cp, v) }
+
           dry = ALLPASS * x + ap_x1 - ALLPASS * ap_y1
           ap_x1 = x
           ap_y1 = dry
           x1 = x
+          fx1 = fx
 
-          out[i] = dry + g
+          out[i] = limit(dry + g + (w - 1.0) * (dry - m), lo, hi)
         end
 
         state.replace([x1, ap_x1, ap_y1, 1]) if antialias && data.length > 0
