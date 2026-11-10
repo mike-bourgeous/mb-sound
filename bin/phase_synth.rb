@@ -34,7 +34,6 @@
 require 'bundler/setup'
 
 require 'benchmark'
-require 'pry-byebug'
 
 $LOAD_PATH << File.expand_path('../lib', __dir__)
 

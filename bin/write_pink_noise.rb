@@ -11,7 +11,6 @@
 require 'bundler/setup'
 
 require 'pry'
-require 'pry-byebug'
 
 $LOAD_PATH << File.expand_path('../lib', __dir__)
 

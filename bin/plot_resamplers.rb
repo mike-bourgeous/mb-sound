@@ -5,7 +5,7 @@
 
 require 'bundler/setup'
 
-require 'pry-byebug'
+require 'pry'
 
 require 'mb-sound'
 

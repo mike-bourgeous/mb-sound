@@ -16,7 +16,6 @@
 #     $0 sounds/synth0.flac /tmp/90.flac 20 1i 40 1i
 
 require 'bundler/setup'
-require 'pry-byebug'
 
 $LOAD_PATH << File.expand_path('../lib', __dir__)
 
