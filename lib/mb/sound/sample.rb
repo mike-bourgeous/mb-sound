@@ -95,7 +95,8 @@ module MB
         #
         # Loop files bring their metadata (see #bpm, #beats, #markers, and
         # Sample::LoopInfo): ACID chunks (tempo, beats, meter, root,
-        # one-shot), `smpl` (root, loop), cue points (markers), FLAC tags,
+        # one-shot; stretch markers as #markers), `smpl` (root, loop), cue
+        # points (markers when ACID gives none), FLAC tags,
         # then tempo and key words in the file and folder names.  With
         # +detect+ true a sample whose tempo or key is still unknown gets
         # one from detection (#detect_tempo, #detect_key); +detect: :bpm+
@@ -204,6 +205,8 @@ module MB
           # file's facts it didn't use become description, Sample::Source)
           facts = found && found[:riff] ? Facts.of_riff(found[:riff]) : nil
           out = { provenance: LoopInfo.provenance(src, why, facts, tags: tags, loop: e.loop) }
+          # (LoopInfo's loop or one-shot call, as description)
+          out[:meta] = { one_shot: e.one_shot }.freeze unless e.one_shot.nil?
           out[:bpm] = e.bpm if e.bpm
           out[:beats] = e.beats if e.beats
           out[:meter] = e.meter if e.meter
@@ -385,7 +388,7 @@ module MB
       include Provenance::Readers
 
       # Where each setting came from, in a word: { bpm: :acid | :tags |
-      # :name | :detected, beats: ..., key: :name, markers: :cue, ... } (the
+      # :name | :detected, beats: ..., key: :name, markers: :strc | :cue, ... } (the
       # +via+ of each #provenance; empty for samples not read from files).
       def meta_source
         @provenance ? @provenance.transform_values(&:via).compact : Provenance::EMPTY
@@ -413,9 +416,11 @@ module MB
         def to_s = label ? "#{position} #{label.inspect}" : position.to_s
       end
 
-      # The markers inside the region (cue points of WAV files, Markers
-      # given to #with), as Markers with positions from the region start in
-      # play order.
+      # The markers inside the region (ACID's stretch markers of ACIDized
+      # WAV files, else a WAV file's cue points; Markers given to #with),
+      # as Markers with positions from the region start in play order.
+      # They are where `stretch(r, mode: :slice)` cuts and where
+      # `stretch(r, mode: :spectral, transients: :markers)` keeps attacks.
       def markers
         return [].freeze unless @markers
         @markers.filter_map { |pos, label|
@@ -615,6 +620,14 @@ module MB
         @loop_mode == :one_shot
       end
 
+      # True if the file this sample was read from carries ACID's
+      # one-shot flag (its `acid` chunk): ACID never stretches such a
+      # file, and neither does #follow unless told to.
+      def acid_one_shot?
+        meta[:one_shot] == true && meta_source[:one_shot] == :acid
+      end
+      private :acid_one_shot?
+
       # A copy with +changes+ (any of #initialize's keywords: root, loop,
       # loop_mode, start, stop, reverse, fade_in, fade_out, tune, level,
       # bpm, name, interpolation, mips) sharing the audio.
@@ -768,15 +781,21 @@ module MB
       # the bar through tempo changes.  +mode+ :stretch keeps the pitch
       # (stretched offline per tempo with +stretch+, a stretch mode or a
       # Hash of #stretch options; :auto by default: :slice for percussive
-      # loops and :spectral for tonal ones, as #material says);
+      # loops and :spectral for tonal ones, as #material says; :none for
+      # files ACID marks as one-shots: they play as recorded from each
+      # loop start, see #stretch);
       # :resample speeds the sample up and down (pitch follows, like a
       # varispeed).  Needs a tempo (#bpm: from the file, a name,
-      # `Sample[path, bpm: 98]`, or `detect: true`).
+      # `Sample[path, bpm: 98]`, or `detect: true`).  The slice stretch
+      # cuts at the file's #markers (ACID's stretch markers) when it has
+      # them.
       #
       #     brk = Sample['Funk/break_98bpm.wav']
       #     bg :brk, brk.follow                     # stays in time at the session's tempo (drums: slices)
       #     bg :pad, pad.follow                     # tonal: the phase vocoder keeps notes whole
       #     bg :pad, pad.follow(stretch: :slice)    # say which
+      #     bg :pad, pad.follow(stretch: { mode: :spectral, transients: :markers })  # the vocoder, attacks at the markers
+      #     bg :hit, hit.follow(stretch: :none)     # as recorded, once per loop length
       #     bg :vinyl, brk.follow(:resample)         # pitch follows the tempo
       #     bpm 128                                  # every follower restretches
       #
@@ -787,10 +806,15 @@ module MB
           raise ArgumentError, "follow takes :stretch (pitch kept) or :resample (pitch follows) (got #{mode.inspect})"
         }
         reason = nil
-        if stretch == :auto
+        if stretch == :auto && mode == :stretch && acid_one_shot?
+          stretch = :none
+          reason = 'none: an ACID one-shot (the acid chunk\'s flag) plays as recorded'
+        elsif stretch == :auto
           m = mode == :stretch ? material : nil
           stretch = m&.kind == :tonal ? :spectral : :slice
           reason = m && "#{stretch}: #{m.why}"
+          marks = stretch == :slice ? markers.count { |k| k.position > 0 } : 0
+          reason = "#{reason}, at #{marks} #{'ACID ' if meta_source[:markers] == :strc}markers" if reason && marks > 0
         else
           reason = 'stretch: given'
         end
@@ -997,6 +1021,15 @@ module MB
       # decay between hits drawn out) and the phases of its rising bins
       # reset, so attacks stay sharp and breaks keep their groove; best on
       # pads, chords, voices, basses (pitch is kept exactly), and breaks.
+      # +transients+ also takes the positions itself, instead of
+      # detecting them: :markers (the sample's #markers, ACID's stretch
+      # markers for an ACIDized loop; detected onsets when the sample has
+      # none), or a list of positions as +slices:+ takes them (samples,
+      # Lengths, Durations at #bpm, Markers; from the region start in play
+      # order).  A position without an attack in the audio still lands on
+      # its stretched time with the sound around it unstretched (half a
+      # window either side), the stretch between positions making up for
+      # it; false leaves every position to the plain vocoder.
       # :paul (:paulstretch) is long windows with random phases: windows of
       # +window+ (0.25 s), +overlap+ (4; 2 gives half as many phase
       # changes per second, so each partial spreads over half the
@@ -1023,14 +1056,36 @@ module MB
       # offline (a new Sample, made once per audio and arguments; spectral
       # runs about 50x realtime per output channel).
       #
+      # +mode+ :slice (:slices, :beat, :rex) cuts at the hits and starts
+      # each slice at its stretched time (Sample::SliceStretch; +slices:+
+      # says where: the #markers, else onsets, else sixteenths).  +mode+
+      # :none (:unstretched, :as_recorded) doesn't stretch at all: the
+      # sample at its own speed in +ratio+ times its length, silence after
+      # it when that is longer and a fade-out over +fade+ (4 ms) at the cut
+      # when it is shorter; what #follow plays for files ACID marks as
+      # one-shots.
+      #
       #     pad.stretch(2, cycle: 30.ms)               # cycles fitted to the sound
       #     brk.stretch(2, cycle: 30.ms, fit: :fixed)  # the plain cyclic stretch (stutter, buzz)
       #     pad.stretch(8, mode: :spectral)            # phase vocoder
       #     pad.stretch(8, mode: :spectral, randomize: 1)     # random phases in the vocoder's 4096-sample window
       #     bowl.stretch(100, mode: :paul, window: 0.5.seconds)  # an endless wash
       #     voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false)   # narrower partials, a wide image (voices)
+      #     brk.stretch(1.25, mode: :spectral, transients: :markers)               # attacks kept at the file's markers
+      #     brk.stretch(1.25, mode: :spectral, transients: [0, 1.n8, 2.n8, 13230.samples])   # or at these positions
+      #     hit.stretch(1.25, mode: :none)             # as recorded, then silence
       def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann,
                   slices: nil, fade: nil, fill: nil)
+        if NONE_MODES.include?(mode.to_sym)
+          unless fit == :auto && window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann &&
+                 slices.nil? && fill.nil? && cycle == 25.ms && crossfade == CROSSFADE
+            raise ArgumentError, 'mode: :none takes only fade:'
+          end
+          return unstretched(ratio, fade)
+        end
+        # (Markers in lists are their positions: the edit then prints as plain Ruby)
+        slices = slices.map { |x| x.is_a?(Marker) ? x.position : x } if slices.is_a?(Array)
+        transients = transients.map { |x| x.is_a?(Marker) ? x.position : x } if transients.is_a?(Array)
         if SLICE_MODES.include?(mode.to_sym)
           unless fit == :auto && window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
             raise ArgumentError, 'mode: :slice takes slices:, fade:, fill:, and (for fill: :stretch) cycle: and crossfade:'
@@ -1061,6 +1116,33 @@ module MB
 
       # Names of the slice stretch's mode (see #stretch).
       SLICE_MODES = %i[slice slices beat beats].freeze
+
+      # Names of the mode that doesn't stretch (see #stretch).
+      NONE_MODES = %i[none unstretched as_recorded].freeze
+
+      # The sample at its own speed in +ratio+ times its length (see
+      # #stretch, mode: :none), in play order: zeros after it, or cut
+      # with a fade-out over +fade+.
+      def unstretched(ratio, fade)
+        raise ArgumentError, "Stretch ratios are positive (got #{ratio.inspect})" unless ratio.is_a?(Numeric) && ratio > 0
+        f = position(fade.nil? ? SliceStretch::FADE : fade).round
+        kw = { mode: :none }
+        kw[:fade] = fade unless fade.nil?
+        edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |chans|
+          n = chans[0].length
+          n_out = MB::M.max((n * ratio.to_f).round, 1)
+          keep = MB::M.min(n, n_out)
+          chans.map { |c|
+            c = c.reverse if @reversed
+            out = Numo::SFloat.zeros(n_out)
+            out[0...keep] = c[0...keep]
+            m = n_out < n ? MB::M.min(f, n_out) : 0
+            out[(n_out - m)...n_out] *= Numo::SFloat.cast(SliceStretch.ramp(m, false)) if m > 0
+            @reversed ? out.reverse : out
+          }
+        }
+      end
+      private :unstretched
 
       # The slice stretch (see #stretch and SliceStretch).
       def slice_stretch(ratio, slices, fade, fill, cycle, crossfade)
@@ -1109,12 +1191,44 @@ module MB
         when Integer
           raise ArgumentError, "Slice counts are positive (got #{slices})" unless slices > 0
           [Array.new(slices) { |i| (i * length / slices.to_r).round }, :grid]
-        when Array then [slices.map { |x| position(x).round }, :markers]
+        when Array then [mark_positions(slices), :markers]
         when Slices then [slices.starts, :markers]
         else raise ArgumentError, "slices: is :markers, :onsets, :grid, a Duration, a count, positions, or Slices (got #{slices.inspect})"
         end
       end
       private :slice_cuts
+
+      # +list+ (positions as #position takes them) as sample positions
+      # from the region start.
+      def mark_positions(list)
+        list.map { |x| position(x).round }
+      end
+      private :mark_positions
+
+      # The positions the spectral stretch treats as transients, in
+      # stored order from the region start (what Spectral.vocoder reads),
+      # or nil for none: +transients+ true or :onsets detects them
+      # (Sample::Onsets), :markers takes the sample's markers (detected
+      # onsets when it has none past its start), an Array (positions in
+      # play order) or a Slices its positions.
+      def transient_positions(transients)
+        list =
+          case transients
+          when false then return nil
+          when true, :onsets, :transients then return (@reversed ? reverse : self).onsets
+          when :markers
+            m = markers.map(&:position)
+            return transient_positions(true) unless m.any?(&:positive?)
+            m
+          when Array then mark_positions(transients)
+          when Slices then transients.starts
+          else
+            raise ArgumentError, "transients: is true (detected onsets), false, :markers (the sample's markers; detected onsets when it has none), or positions (got #{transients.inspect})"
+          end
+        list = list.map { |p| length - p } if @reversed
+        list.select { |p| p >= 0 && p < length }.uniq.sort
+      end
+      private :transient_positions
 
       # The onsets the slice stretch cuts at: #onsets, plus softer ones
       # (SOFT_ONSET rises) within SOFT_ONSET_REACH of a sixteenth when the
@@ -1242,6 +1356,7 @@ module MB
       def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape)
         paul = mode == :paul
         transients = !paul if transients.nil?
+        transients = true if %i[onsets transients].include?(transients)
         randomize = paul ? 1 : 0 if randomize.nil?
         raise ArgumentError, "randomize: is 0..1 (got #{randomize.inspect})" unless randomize.is_a?(Numeric) && randomize >= 0 && randomize <= 1
 
@@ -1257,7 +1372,7 @@ module MB
 
         n = position(window.nil? ? (paul ? Spectral::PAUL_WINDOW : Spectral::WINDOW.samples) : window).round
         n += 1 if n.odd?
-        onsets = transients ? (@reversed ? reverse : self).onsets : nil
+        onsets = transient_positions(transients)
         edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |chans|
           if randomize >= 1 && onsets.nil?
             Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)

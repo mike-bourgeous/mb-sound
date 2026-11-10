@@ -164,4 +164,219 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
       expect(e.sources[:markers]).to eq(:strc)
     end
   end
+
+  describe 'Sample markers and the slice stretch' do
+    let(:path) { write_wav('Loop 3.wav', loop_audio, acid: { tempo: 120.0, beats: 2 }, cues: [[0, 'Bar 1']], strc: [auto(0), 0, *hits[1..]]) }
+    let(:loop) { MB::Sound::Sample[path] }
+
+    after { MB::Sound.bpm(120) }
+
+    it 'has the stretch markers as its markers, at the sample\'s rate' do
+      expect(loop.length).to eq(48000)
+      expect(loop.markers.map(&:position)).to eq(at48(hits))
+      expect(loop.markers.map(&:label).uniq).to eq([nil])
+      expect(loop.meta_source[:markers]).to eq(:strc)
+      expect(loop.why(:markers)).to eq('strc: 6 stretch markers')
+      # (the cue point is a fact nothing used: description, at the file's own rate)
+      expect(loop.meta[:source][:fields]['cue.point[0]']).to eq([0, 'Bar 1'])
+      expect(loop.meta[:one_shot]).to eq(false)
+      expect(at48(hits)).to eq([0, 5999, 12000, 24000, 29999, 36000])
+      expect(loop.trim(6000..).markers.map(&:position)).to eq([6000, 18000, 23999, 30000])
+    end
+
+    it 'cuts slices at them by default, unless slices: says otherwise' do
+      cuts = at48(hits)
+      s = loop.stretch(1.25, mode: :slice)
+      expect(s.data(0)).to eq(loop.stretch(1.25, mode: :slice, slices: cuts).data(0))
+      expect(s.data(0)).to eq(loop.stretch(1.25, mode: :slice, slices: loop.markers).data(0))
+      expect(s.data(0)).to eq(loop.stretch(1.25, mode: :slice, slices: :markers).data(0))
+      cuts.each { |c| q = (c * 1.25).round; expect(s.data(0)[q...(q + 64)]).to eq(loop.data(0)[c...(c + 64)]) }
+      grid = loop.stretch(1.25, mode: :slice, slices: 3)
+      expect(grid.data(0)).not_to eq(s.data(0))
+      expect(grid.data(0)[20000...20064]).to eq(loop.data(0)[16000...16064])
+    end
+
+    it 'says so where follow picks the slice stretch' do
+      drums = loop.with(name: 'Drum Loop 3')
+      f = drums.follow
+      expect(f.stretch_reason).to eq("slice: name 'drum', at 5 ACID markers")
+      MB::Sound.bpm(96)
+      expect(f.sample(800)).to eq(drums.stretch(1.25, mode: :slice, slices: at48(hits)).data(0)[0...800])
+      # tonal loops keep the plain spectral stretch; the marker-guided one is there to ask for
+      pad = loop.with(name: 'Pad Loop 3')
+      expect(pad.follow.stretch_reason).to eq("spectral: name 'pad'")
+      guided = pad.follow(stretch: { mode: :spectral, transients: :markers })
+      expect(guided.stretch_reason).to eq('stretch: given')
+      expect(guided.sample(800)).to eq(pad.stretch(1.25, mode: :spectral, transients: at48(hits)).data(0)[0...800])
+      # markers a caller gives are plain markers
+      expect(MB::Sound::Sample[loop.to_a, bpm: 120, name: 'drums', markers: [0, 24000]].follow.stretch_reason).to eq("slice: name 'drums', at 1 markers")
+    end
+  end
+
+  describe 'ACID one-shots' do
+    let(:hit) { loop_audio[5512...16537] } # 0.25 s: two bursts
+    let(:shot) { MB::Sound::Sample[write_wav('Perc Shot.wav', hit, acid: { one_shot: true, tempo: 0.0, beats: 0 })] }
+    let(:timed) { shot.with(bpm: 120) } # half a beat: a loop length to repeat at
+
+    after { MB::Sound.bpm(120) }
+
+    def collect(node, count, size = 800)
+      out = Numo::SFloat.zeros(count)
+      i = 0
+      while i < count
+        k = [size, count - i].min
+        out[i...(i + k)] = node.sample(k)
+        i += k
+      end
+      out
+    end
+
+    it 'are marked by the acid chunk\'s flag' do
+      expect(shot).to be_one_shot
+      expect(shot.bpm).to be_nil
+      expect(shot.meta[:one_shot]).to eq(true)
+      expect(shot.meta_source[:one_shot]).to eq(:acid)
+      expect { shot.follow }.to raise_error(ArgumentError, /no tempo/)
+    end
+
+    it 'play as recorded under follow: silence after them at slower tempos, cut short at faster ones' do
+      f = timed.follow
+      expect(f.stretch_reason).to eq('none: an ACID one-shot (the acid chunk\'s flag) plays as recorded')
+      expect(f.to_s).to include('as recorded')
+      n = timed.length
+      expect(n).to eq(12000)
+
+      MB::Sound.bpm(60) # the loop length doubles
+      out = collect(timed.follow, n * 4, 367)
+      expect(out[0...n]).to eq(timed.data(0))
+      expect(out[n...(2 * n)].abs.max).to eq(0)
+      expect(out[(2 * n)...(3 * n)]).to eq(timed.data(0)) # again at the next loop start
+      expect(collect(timed.follow, n * 4)).to eq(out)      # the same at another buffer size
+
+      MB::Sound.bpm(240) # half the length: cut, faded over 4 ms
+      short = collect(timed.follow, n)
+      expect(short[0...(n / 2 - 192)]).to eq(timed.data(0)[0...(n / 2 - 192)])
+      expect(short[n / 2 - 1].abs).to be < 1e-3
+      expect(short[(n / 2)...(n - 192)]).to eq(timed.data(0)[0...(n / 2 - 192)])
+    end
+
+    it 'still stretch when asked to, and resample as before' do
+      MB::Sound.bpm(96)
+      sliced = timed.follow(stretch: :slice)
+      expect(sliced.stretch_reason).to eq('stretch: given')
+      expect(sliced.sample(800)).to eq(timed.stretch(1.25, mode: :slice).data(0)[0...800])
+      expect(timed.follow(:resample).stretch_reason).to be_nil
+      expect(timed.stretch(1.25).length).to eq(15000)          # an explicit stretch is a stretch
+      expect(timed.stretch(1.25, mode: :spectral).data(0)).not_to eq(timed.stretch(1.25, mode: :none).data(0))
+
+      # the flag is the file's: a loop from an ACID loop file, or a one-shot by name only, follows by its material
+      looped = MB::Sound::Sample[write_wav('Perc Loop.wav', hit, acid: { tempo: 120.0, beats: 1 })]
+      expect(looped.follow.stretch_reason).to start_with('slice: name')
+      named = MB::Sound::Sample[write_wav('Kick 120.wav', hit), bpm: 120]
+      expect(named.meta[:one_shot]).to eq(true)
+      expect(named.follow.stretch_reason).to start_with('slice: name')
+    end
+
+    it 'play as recorded on a clock\'s loop period' do
+      c = shot.clocked(0.5.seconds)
+      expect(c.stretch_reason).to start_with('none: an ACID one-shot')
+      out = collect(c, 36000)
+      expect(out[0...12000]).to eq(shot.data(0))
+      expect(out[12000...24000].abs.max).to eq(0)
+      expect(out[24000...36000]).to eq(shot.data(0))
+    end
+  end
+
+  describe 'Sample#stretch(mode: :none)' do
+    let(:smp) { MB::Sound::Sample[Numo::SFloat.new(4800).seq / 4800, bpm: 100] }
+
+    it 'keeps the audio and changes the length: zeros after it, or a faded cut' do
+      long = smp.stretch(1.5, mode: :none)
+      expect(long.length).to eq(7200)
+      expect(long.data(0)[0...4800]).to eq(smp.data(0))
+      expect(long.data(0)[4800..].abs.max).to eq(0)
+      expect(long.bpm).to be_within(1e-9).of(100 / 1.5)
+      expect(smp.stretch(1, mode: :none).data(0)).to eq(smp.data(0))
+
+      cut = smp.stretch(0.5, mode: :none)
+      expect(cut.length).to eq(2400)
+      expect(cut.data(0)[0...(2400 - 192)]).to eq(smp.data(0)[0...(2400 - 192)])
+      expect(cut.data(0)[-1].abs).to be < 1e-4
+      hard = smp.stretch(0.5, mode: :none, fade: 0)
+      expect(hard.data(0)).to eq(smp.data(0)[0...2400])
+      expect(smp.stretch(0.5, mode: :unstretched).data(0)).to eq(cut.data(0))
+      expect(smp.stretch(0.5, mode: :as_recorded).data(0)).to eq(cut.data(0))
+    end
+
+    it 'pads and cuts reversed samples in play order' do
+      r = smp.rev.stretch(1.5, mode: :none)
+      expect(r).to be_reversed
+      expect(r.data(0)[0...4800]).to eq(smp.rev.data(0))
+      expect(r.data(0)[4800..].abs.max).to eq(0)
+      expect(smp.rev.stretch(0.5, mode: :none, fade: 0).data(0)).to eq(smp.rev.data(0)[0...2400])
+    end
+
+    it 'takes only fade:' do
+      expect { smp.stretch(2, mode: :none, window: 1024) }.to raise_error(ArgumentError, /only fade/)
+      expect { smp.stretch(2, mode: :none, slices: 4) }.to raise_error(ArgumentError, /only fade/)
+      expect { smp.stretch(0, mode: :none) }.to raise_error(ArgumentError, /positive/)
+    end
+  end
+
+  describe 'Sample#stretch(mode: :spectral, transients:)' do
+    let(:hits48) { [0, 6000, 12000, 24000, 30000, 36000] }
+    let(:plain) { MB::Sound::Sample[bursts(48000, hits48), bpm: 120] }
+    let(:marked) { plain.with(markers: hits48) }
+
+    # RMS of the 64 samples from +pos+.
+    def rms(data, pos) = Math.sqrt((Numo::DFloat.cast(data[pos...(pos + 64)])**2).mean)
+
+    it 'takes positions, Lengths, Markers, and :markers in place of detection' do
+      want = MB::Sound::Sample::Spectral.vocoder([Numo::DFloat.cast(plain.data(0))], 1.5, onsets: hits48)[0]
+      byp = plain.stretch(1.5, mode: :spectral, transients: hits48)
+      expect(Numo::DFloat.cast(byp.data(0))).to eq(Numo::DFloat.cast(Numo::SFloat.cast(want)))
+      expect(byp.length).to eq(72000)
+      expect(marked.stretch(1.5, mode: :spectral, transients: :markers).data(0)).to eq(byp.data(0))
+      expect(plain.stretch(1.5, mode: :spectral, transients: marked.markers).data(0)).to eq(byp.data(0))
+      expect(plain.stretch(1.5, mode: :spectral, transients: hits48.map(&:samples)).data(0)).to eq(byp.data(0))
+      expect(plain.stretch(1.5, mode: :spectral, transients: hits48.map { |h| h / 48000.0 }).data(0)).to eq(byp.data(0))
+      expect(plain.stretch(1.5, mode: :spectral, transients: plain.slices(at: hits48)).data(0)).to eq(byp.data(0))
+    end
+
+    it 'keeps the attacks at the positions, where the plain vocoder smears them' do
+      guided = plain.stretch(1.5, mode: :spectral, transients: hits48).data(0)
+      smeared = plain.stretch(1.5, mode: :spectral, transients: false).data(0)
+      hits48[1..].each do |h|
+        q = (h * 1.5).round
+        expect(rms(guided, q)).to be > rms(smeared, q) * 1.2
+        expect(rms(guided, q)).to be > rms(plain.data(0), h) * 0.8
+      end
+    end
+
+    it 'detects onsets for :markers when the sample has none, and as before for true' do
+      detected = plain.stretch(1.5, mode: :spectral)
+      expect(plain.stretch(1.5, mode: :spectral, transients: :markers).data(0)).to eq(detected.data(0))
+      expect(plain.stretch(1.5, mode: :spectral, transients: true).data(0)).to eq(detected.data(0))
+      expect(plain.stretch(1.5, mode: :spectral, transients: :onsets).data(0)).to eq(detected.data(0))
+      expect(plain.with(markers: [0]).stretch(1.5, mode: :spectral, transients: :markers).data(0)).to eq(detected.data(0))
+      # an empty list is no transient handling at all
+      expect(plain.stretch(1.5, mode: :spectral, transients: []).data(0)).to eq(plain.stretch(1.5, mode: :spectral, transients: false).data(0))
+    end
+
+    it 'reads positions of reversed samples in play order' do
+      back = hits48.map { |h| 48000 - h }
+      expect(plain.rev.stretch(1.5, mode: :spectral, transients: back).data(0)).to eq(plain.stretch(1.5, mode: :spectral, transients: hits48).rev.data(0))
+      expect(marked.rev.stretch(1.5, mode: :spectral, transients: :markers).length).to eq(72000)
+    end
+
+    it 'keeps them out of the random phases of :paul too, and says what it takes' do
+      a = plain.stretch(2, mode: :paul, transients: hits48, window: 2048.samples)
+      b = plain.stretch(2, mode: :paul, window: 2048.samples)
+      expect(a.length).to eq(96000)
+      expect(a.data(0)).not_to eq(b.data(0))
+      expect { plain.stretch(1.5, mode: :spectral, transients: :grid) }.to raise_error(ArgumentError, /transients: is true/)
+      expect { plain.stretch(1.5, transients: [0]) }.to raise_error(ArgumentError, /for mode: :spectral/)
+      expect { plain.stretch(1.5, mode: :slice, transients: [0]) }.to raise_error(ArgumentError, /slice takes/)
+    end
+  end
 end
