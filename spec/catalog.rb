@@ -21,7 +21,9 @@ module Catalog
   # effects-2 added five effects (flanger, rotary, swell, transients,
   # chebyshev) with every description shortened: a question for the
   # maintainer, with phaser-1's phaser coming too)
-  BUDGET = 17_500
+  # 17 500 until source-meta-1 added the :meta topic and node metadata
+  # (17 554 bytes: also a question for the maintainer)
+  BUDGET = 17_600
 
   # Characters for a description, and bytes for a whole line
   DESCRIPTION_MAX = 80
@@ -60,7 +62,7 @@ module Catalog
   # per label (graph inspection and saving, not signal processing; these
   # lines are exempt from LINE_MAX).
   NAMES_ONLY = {
-    'Naming, printing, saving' => %w[MB::Sound::GraphNode::Nameable MB::Sound::GraphNode::Recipe::ToRuby MB::Sound::GraphNode::Inspect],
+    'Naming, printing, saving' => %w[MB::Sound::GraphNode::Nameable MB::Sound::Meta::Carrier MB::Sound::GraphNode::Recipe::ToRuby MB::Sound::GraphNode::Inspect],
     'Graph inspection' => %w[MB::Sound::GraphNode::Traversable],
   }.freeze
 

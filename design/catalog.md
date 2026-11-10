@@ -156,7 +156,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 
 ### Also on every node
 
-- Naming, printing, saving: graph_node_name inspect inspect_full name_or_id named to_ruby/to_rb
+- Naming, printing, saving: graph_node_name inspect inspect_full meta name_or_id named to_ruby/to_rb with_meta
 - Graph inspection: feedback_sources find_all_by_name find_by_name graph graph_edges graph_ranks graphviz input_port_info inputs open_graphviz output_port_info param_info param_range param_snapshot params plot_preview port_info port_role port_type preview_data source_names sources with_feedback
 
 ## Console help topics
@@ -231,6 +231,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 
 - `:record` Recording and takes: take arm disarm armed hold unhold rec capture captures rec_audio stop_rec_audio recordings render write
 - `:presets` Saving graphs and sets: ruby save preset presets set named_proc
+- `:meta` Metadata: where things came from: meta metas
 - `:library` The library: find, heads, shelves: find audition shelves save save! collect promote promote! struck
 
 ### Look and listen

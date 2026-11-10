@@ -45,7 +45,7 @@ module DocsIndex
   # map (the index uses the note's own title); every note is in exactly one
   GROUPS = {
     'Signal graph' => {
-      'graph_nodes' => 'GraphNode DSL', 'graph_io' => 'Graph I/O: recipes, Ruby export, documents', 'library' => 'Library', 'importers' => 'Importers: finding foreign files',
+      'graph_nodes' => 'GraphNode DSL', 'graph_io' => 'Graph I/O: recipes, Ruby export, documents', 'library' => 'Library', 'importers' => 'Importers: finding foreign files', 'metadata' => 'Source metadata',
       'plan_layer' => 'Plan layer', 'feedback_loops' => 'Feedback loops', 'c_extensions' => 'C extensions', 'kernels' => 'Kernel registry', 'sound_guards' => 'Sound guards',
     },
     'Values, time, and channels' => {
