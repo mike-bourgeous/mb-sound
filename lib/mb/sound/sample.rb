@@ -272,9 +272,15 @@ module MB
 
         # The Provenance of the settings +info+ (.saved_tags) holds.
         def saved_provenance(info)
-          SAVED_FIELDS.select { |f, _| info.key?(f) }.to_h { |f, tag|
+          out = SAVED_FIELDS.select { |f, _| info.key?(f) }.to_h { |f, tag|
             [f, Provenance.new(field: f, via: :saved, fact: "tag.#{TAG_PREFIX}#{tag}", record: 'tags', interpreter: 'Sample.saved_tags', why: 'saved by Sample#save')]
-          }.freeze
+          }
+          if info.dig(:meta, :one_shot)
+            # (the saved ACID one-shot flag keeps its source word)
+            out[:one_shot] = Provenance.new(field: :one_shot, via: :acid, fact: "tag.#{TAG_PREFIX}acid_one_shot", record: 'tags', interpreter: 'Sample.saved_tags',
+                                            why: 'saved by Sample#save')
+          end
+          out.freeze
         end
 
         # The settings read back from tags written by #save.
@@ -301,6 +307,8 @@ module MB
           out[:meter] = t[:meter].to_s.split('/').map { |x| Integer(x) } if t[:meter]
           out[:key] = t[:key].to_sym if t[:key]
           out[:markers] = Sample.parse_markers(t[:markers]) if t[:markers] && !t[:markers].to_s.empty?
+          # (the flag #follow obeys; see #acid_one_shot? and .saved_provenance)
+          out[:meta] = { one_shot: true }.freeze if t[:acid_one_shot].to_s == 'true'
           out[:interpolation] = t[:interpolation].to_sym if t[:interpolation]
           out[:mips] = saved_mips(t[:mips]) if t[:mips]
           out[:scale] = Float(t[:scale]) if t[:scale]
@@ -622,7 +630,8 @@ module MB
 
       # True if the file this sample was read from carries ACID's
       # one-shot flag (its `acid` chunk): ACID never stretches such a
-      # file, and neither does #follow unless told to.
+      # file, and neither does #follow unless told to.  #save keeps it
+      # (a tag), so graph documents that bundle the sample play the same.
       def acid_one_shot?
         meta[:one_shot] == true && meta_source[:one_shot] == :acid
       end
@@ -1226,7 +1235,8 @@ module MB
             raise ArgumentError, "transients: is true (detected onsets), false, :markers (the sample's markers; detected onsets when it has none), or positions (got #{transients.inspect})"
           end
         list = list.map { |p| length - p } if @reversed
-        list.select { |p| p >= 0 && p < length }.uniq.sort
+        list = list.select { |p| p >= 0 && p < length }.uniq.sort
+        list.empty? ? nil : list
       end
       private :transient_positions
 
@@ -1410,6 +1420,7 @@ module MB
           tune: @tune, level: @level, bpm: @bpm, interpolation: @interpolation, mips: @mips.nil? ? nil : @mips.to_s,
           beats: @beats, meter: @meter&.join('/'), key: @key,
           markers: @markers&.map { |p, l| l ? "#{p}:#{l.gsub('%', '%25').gsub(';', '%3B')}" : p.to_s }&.join(';'),
+          acid_one_shot: acid_one_shot? ? true : nil,
         }
         t.merge!(loop_start: @loop_points[0], loop_end: @loop_points[1]) if @loop_points
         t[:rate] = sample_rate if sample_rate != 48000 # (read back at this rate, so positions stay put)

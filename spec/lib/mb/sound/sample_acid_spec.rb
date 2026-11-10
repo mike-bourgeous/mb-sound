@@ -277,6 +277,25 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
       expect(named.follow.stretch_reason).to start_with('slice: name')
     end
 
+    it 'stay one-shots when saved, alone and in a graph document\'s bundle' do
+      timed.save(tmp_path('shot.flac'))
+      back = MB::Sound::Sample[tmp_path('shot.flac')]
+      expect(back.bpm).to eq(120.0)
+      expect(back.meta[:one_shot]).to eq(true)
+      expect(back.follow.stretch_reason).to start_with('none: an ACID one-shot')
+      expect(timed.tags).to include(mb_sample_acid_one_shot: 'true')
+      expect(MB::Sound::Sample[hit, bpm: 120].tags.keys).not_to include(:mb_sample_acid_one_shot)
+
+      # read with an option, the sample goes into the bundle as a FLAC file with tags, not as its WAV
+      MB::Sound.bpm(60)
+      g = MB::Sound::Sample[write_wav('Perc Shot 2.wav', hit, acid: { one_shot: true, tempo: 0.0, beats: 0 }), bpm: 120].follow
+      path = MB::Sound::GraphIO.save(File.join(File.dirname(tmp_path('x')), 'shot'), g, name: 'shot')
+      loaded = MB::Sound::GraphIO.load(path)
+      expect(loaded.stretch_reason).to eq(g.stretch_reason)
+      expect((collect(loaded, 24000) - collect(g, 24000)).abs.max).to be < 1e-6 # (the bundle's FLAC is 24-bit)
+      expect(collect(loaded, 24000)[12000...24000].abs.max).to eq(0)             # as recorded: silence after the hit
+    end
+
     it 'play as recorded on a clock\'s loop period' do
       c = shot.clocked(0.5.seconds)
       expect(c.stretch_reason).to start_with('none: an ACID one-shot')
