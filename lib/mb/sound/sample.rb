@@ -157,8 +157,11 @@ module MB
           end
           scale = info.delete(:scale)
           channels = channels.map { |c| c * scale } if scale
-          meta = info.empty? ? loop_metadata(real.to_s, tags, channels) : {}
-          new(channels, name: File.basename(path), file: options.empty? ? File.expand_path(real.to_s) : nil, **meta.merge(info).merge(options))
+          found = {}
+          meta = info.empty? ? loop_metadata(real.to_s, tags, channels, found: found) : {}
+          # (the file's own provenance as meta[:source]: Sample::Source)
+          settings = Source.add(meta.merge(info).merge(options), real.to_s, tags, found)
+          new(channels, name: File.basename(path), file: options.empty? ? File.expand_path(real.to_s) : nil, **settings)
         end
 
         # Sample options from a file's loop metadata (Sample::LoopInfo),
@@ -170,9 +173,10 @@ module MB
         # Files LoopInfo couldn't call (or called loops only from a
         # fitting name tempo) are one-shots when they decay after one hit
         # (.decays?).
-        def loop_metadata(path, tags, channels, sample_rate: 48000)
+        def loop_metadata(path, tags, channels, sample_rate: 48000, found: nil)
           length = channels[0]&.length
-          e = LoopInfo.read(path, seconds: length && length.to_f / sample_rate)
+          e = LoopInfo.read(path, seconds: length && length.to_f / sample_rate, riff_out: found)
+          found[:entry] = e if found
           src = e.sources.dup
           why = e.why.dup
           unless e.bpm && e.key
@@ -1384,3 +1388,4 @@ require_relative 'sample/riff'
 require_relative 'sample/loop_info'
 require_relative 'sample/slice_stretch'
 require_relative 'sample/clocked'
+require_relative 'sample/source'

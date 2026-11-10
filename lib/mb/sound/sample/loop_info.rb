@@ -115,8 +115,10 @@ module MB
         # +folders+ levels; name tempos only when the length fits, see
         # .fit_tempo), then .classify's loop/one-shot call.  +seconds+
         # gives the length when the caller knows it (Sample.from_file, for
-        # formats whose headers aren't read).
-        def read(path, folders: 3, seconds: nil, root: nil)
+        # formats whose headers aren't read).  +riff_out+ (a Hash) gets a
+        # WAV file's Riff::Info under :riff, for callers that want its
+        # chunk list without reading the file again (Sample::Source).
+        def read(path, folders: 3, seconds: nil, root: nil, riff_out: nil)
           path = path.to_s
           ext = File.extname(path).downcase
           f = {}
@@ -125,7 +127,9 @@ module MB
 
           if %w[.wav .wave .bwf .rf64].include?(ext) || sniff(path) == :wav
             format = :wav
-            from_riff(Riff.read(path), f, sources)
+            info = Riff.read(path)
+            riff_out[:riff] = info if riff_out && info
+            from_riff(info, f, sources)
           elsif ext == '.flac' || sniff(path) == :flac
             format = :flac
             from_flac(path, f, sources)
