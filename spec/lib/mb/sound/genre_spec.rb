@@ -333,14 +333,29 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       end
     end
 
-    it 'takes pre-fader sends in roles (pre_send:), sets them up, and prints them back' do
-      r = genre::Role.new(patch: :x, level: -3.db, send: { echo: :space }, pre_send: { hall: -12.db })
+    it 'takes pre-fader and pre-mute sends in roles (pre_send:, pre_mute_send:), sets them up, and prints them back' do
+      r = genre::Role.new(patch: :x, level: -3.db, send: { echo: :space }, pre_send: { hall: -12.db }, pre_mute_send: { room: 0.5 })
       expect(r.pre_sends).to eq(hall: -12.db)
+      expect(r.pre_mute_sends).to eq(room: 0.5)
       expect(r.level).to eq(-3.db)
-      expect(r.options).to include(send: { echo: :space }, pre_send: { hall: -12.db })
-      expect(r.with(level: nil).pre_sends).to eq(hall: -12.db)
+      expect(r.options).to include(send: { echo: :space }, pre_send: { hall: -12.db }, pre_mute_send: { room: 0.5 })
+      expect(r.with(level: nil)).to have_attributes(pre_sends: { hall: -12.db }, pre_mute_sends: { room: 0.5 })
       expect { genre::Role.new(patch: :x, send: { hall: 0.5 }, pre_send: { hall: -12.db }) }.to raise_error(ArgumentError, /both send: and pre_send:/)
-      expect { genre::Role.new(patch: :x, pre_send: { hall: -1 }) }.to raise_error(ArgumentError, /pre_send: must be a Hash/)
+      expect { genre::Role.new(patch: :x, pre_send: { hall: 0.5 }, pre_mute_send: { hall: 0.5 }) }.to raise_error(ArgumentError, /both pre_send: and pre_mute_send:/)
+      expect { genre::Role.new(patch: :x, pre_mute_send: { hall: -1 }) }.to raise_error(ArgumentError, /pre_mute_send: must be a Hash/)
+
+      # A template with them sets up the routes and prints them back
+      t = genre[:dnb].short
+      roles = t.roles.merge(bass: t.roles[:bass].with(sends: {}, pre_sends: { hall: -20.db }), drums: t.roles[:drums].with(sends: {}, pre_mute_sends: { hall: -24.db }))
+      t2 = t.with(roles: roles.freeze)
+      expect(in_sound(t2.to_ruby)).to eq(t2)
+      s = MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), channels: 2,
+                                 transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+      MB::Sound::Session.with_context(session: s) { t2.setup }
+      expect(s.route_definitions[:bass]).to include(pre_send: { hall: -20.db.to_f })
+      expect(s.route_definitions[:drums]).to include(pre_mute_send: { hall: -24.db.to_f })
+    ensure
+      s&.close
     end
 
     it 'sets up buses and routes, and saves them in a set document that loads to the same text' do
