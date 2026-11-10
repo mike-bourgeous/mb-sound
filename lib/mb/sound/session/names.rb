@@ -204,6 +204,13 @@ module MB
           def send_knob(name, bus)
             :"#{name}>#{bus}"
           end
+
+          # The hidden knob name of the mode of the send from player
+          # +name+ to bus +bus+ (:"keys>verb/pre", 1 pre-fader, 0
+          # post-fader; Session::Buses).
+          def send_mode_knob(name, bus)
+            :"#{name}>#{bus}/pre"
+          end
         end
 
         # The name as given (a Symbol, or an Integer player name).

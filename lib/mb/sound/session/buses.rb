@@ -552,7 +552,7 @@ module MB
           rate = output_open? ? sample_rate : 48000
           k = nil
           @render_lock.synchronize {
-            k = GraphNode::Knob.new(:"#{Name.send_knob(name, bus)}/pre", 0.0, session: self, sample_rate: rate, frame: @frame, range: 0.0..1.0)
+            k = GraphNode::Knob.new(Name.send_mode_knob(name, bus), 0.0, session: self, sample_rate: rate, frame: @frame, range: 0.0..1.0)
             k.set(value, frame: @frame, smooth: 0)
             @send_knobs << k
           }
