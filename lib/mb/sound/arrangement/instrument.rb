@@ -55,6 +55,13 @@ module MB
             hit = Library.index.entries(family: :preset).find { |e| e.location == found }
             return hit if hit
           end
+          # A named instrument rack of the session (`irack :glass_lead do
+          # ... end`), also once saved, where the session's rack shadows
+          # its document in the index (userdocs-1: `L.inst.glass_lead`
+          # listed it, but `track :lead, :glass_lead` said there was no
+          # such instrument)
+          rack = Library.index.entries(family: :preset).find { |e| e.name == name && e.shelf.name == :session && KINDS.include?(e.kind) }
+          return rack if rack
 
           hits = Library.index.entries.select { |e| e.name == name && e.family != :preset && (KINDS.include?(e.kind) || struck_twin(e)) }
           hits = hits.reject { |e| e.kind == :effect } if hits.length > 1

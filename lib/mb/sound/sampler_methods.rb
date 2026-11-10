@@ -139,7 +139,7 @@ module MB
       # `font['Pad']`, `font[128, 0]` choose one, and `font.play(v)` plays
       # the first.  Voices read tables at level spacing +mips+ (:octave by
       # default); +attenuation+ scales the font's initialAttenuation (0.4,
-      # FluidSynth's and the EMU hardware's factor, by default; 1.0 for the
+      # the factor of the original hardware and most players, by default; 1.0 for the
       # specification's own centibels); +wheel+ false leaves out the default
       # vibrato from the mod wheel and aftertouch (one LFO per voice).
       #

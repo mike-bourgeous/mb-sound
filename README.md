@@ -24,6 +24,20 @@ installing the dependencies, and launching the interactive command line.
 You might also be interested in [mb-math][4], [mb-geometry][5], and
 [mb-util][6].
 
+## Make music with it
+
+mb-sound is also an instrument for musicians who write a little code:
+synths, drum machines, samplers, effects, and a live set of tracks,
+scenes, and song forms, all played from a Ruby console or a song file,
+and rendered to files you can share.
+
+- **The guide**: [docs/guide](docs/guide/README.md), from a first sound
+  to a live set, a finished render, and sounds of your own.  In the
+  console, `guide` lists its chapters and `guide :drums` shows one.
+- **Help in the console**: `help` (a one-screen sheet of commands),
+  `help :knobs` (a topic with examples to try), `help /reverb/` (search).
+- **Lessons**: `lesson` lists guided lessons that check each step.
+
 ## Quick start
 
 Clone the repo, follow the [installation instructions
@@ -34,6 +48,7 @@ run `bin/sound.rb`.
 
 ```ruby
 help              # the one-screen sheet of commands; help :knobs etc. for topics
+guide             # the guide's chapters; guide :first_sounds to start reading
 lesson :set       # a guided lesson: tracks, scenes, and a song form, step by step
 demo              # a small set (the Night Bus), paused at bar 1; `play_form demo.form`
 play C4.saw.lp4(800).at(-20.db)   # Ctrl-C stops it
@@ -46,19 +61,18 @@ bin/sound.rb` plays silently and `render` writes files to listen to elsewhere;
 
 ### A script
 
-Scripts run inside `module MB::Sound` (note names like `C4` and the DSL
-methods live there; `include MB::Sound` at the top level doesn't bring the note
-names):
+A Ruby file that starts with `require 'mb/sound/dsl'` gets every console
+command and note name at its top level (chapter 3 of the guide has more,
+including song files that render with `-o`):
 
 ```ruby
-#!/usr/bin/env ruby
-require 'bundler/setup'
-require 'mb-sound'
+require 'mb/sound/dsl'
 
-module MB::Sound
-  render 'arp.flac', seq(C4, E4, G4, C5).n8.loop.synth(voices: 4) { |v| v.hz.saw.lp4(1200) * v.amp_env }, bars: 2
-end
+render 'arp.flac', seq(C4, E4, G4, C5).n8.loop.synth(voices: 4) { |v| v.hz.saw.lp4(1200) * v.amp_env }, bars: 2
 ```
+
+Run it with `ruby arp.rb` (or `bundle exec ruby arp.rb` inside the
+mb-sound folder).
 
 The scripts in `bin/` (`bin/effects/`, `bin/synths/`, `bin/songs/`) use the
 script helpers (`effect_script`, `synth_script`, `song_script`); run any of them
@@ -671,20 +685,10 @@ gem 'mb-util', git: 'https://github.com/mike-bourgeous/mb-util.git'
 gem 'mb-math', git: 'https://github.com/mike-bourgeous/mb-math.git'
 ```
 
-## Testing
-
-You can run the integrated test suite with `bundle exec rspec` (after `bundle
-exec rake compile`); `bundle exec rake spec:parallel` runs it in parallel.
-
 ## Contributing
 
-Since this library is meant to accompany a video series, most new features will
-be targeted at what's covered in episodes as they are released.  If you think of
-something cool to add that relates to the video series, then please open a pull
-request.
-
-Pull requests are also welcome if you want to add or improve support for new
-platforms.
+See [CONTRIBUTING.md](CONTRIBUTING.md): what contributions fit, running the
+tests, and where the design notes for each part of the library live.
 
 ## License
 

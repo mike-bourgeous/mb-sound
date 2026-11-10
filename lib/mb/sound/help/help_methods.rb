@@ -18,6 +18,8 @@ module MB
     #     help.level          # the listening level (sets the monitor trim)
     #     now                 # what's playing, and commands that apply
     #     lesson :set         # a lesson (lesson alone lists them)
+    #     guide               # the user guide's chapters
+    #     guide :drums        # one chapter (or guide 4)
     module HelpMethods
       # Help on anything: nothing for the one-screen sheet, a topic or
       # method name (Symbol or String), a Regexp to search names and doc
@@ -62,6 +64,13 @@ module MB
           Help::LessonRunner.active = runner = nil if runner&.done?
           runner || Help::LessonList.new
         end
+      end
+
+      # The user guide: without a chapter, the list of chapters (and the
+      # folder of their Markdown files); with one, that chapter as a page
+      # (`guide :drums`, `guide 4`, or the start of a name: `guide :dr`).
+      def guide(chapter = nil)
+        chapter.nil? ? Help::GuidePage.new : Help::GuideChapterPage.new(Help::Guide.chapter(chapter))
       end
     end
   end

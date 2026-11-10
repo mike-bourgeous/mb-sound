@@ -48,6 +48,26 @@ RSpec.describe(MB::Sound::Arrangement::InstrumentPatch, :aggregate_failures) do
     end
   end
 
+  # (userdocs-1: L.inst.glass_lead listed a named irack, but `track :lead,
+  # :glass_lead` said there was no such instrument, before and after a save)
+  it 'plays a named instrument rack of the session by name, also once saved' do
+    old = ENV['MB_SOUND_PRESETS']
+    ENV['MB_SOUND_PRESETS'] = tmp_path('presets')
+    MB::Sound::Library.reload!
+    [false, true].each do |saved|
+      _, got = run(->(_s) {
+        MB::Sound.irack(:guide_lead) { |notes| notes.synth(voices: 2) { |v| v.hz.saw * v.amp_env }.at(-12.db) }
+        MB::Sound.save(:guide_lead, MB::Sound.rack(:guide_lead)) if saved
+        MB::Sound.track(:lead, :guide_lead)
+        MB::Sound.bg(:lead, RIFF.transpose(24))
+      }, buffers: 60)
+      expect(got.abs.max).to be > 0.01
+    end
+  ensure
+    ENV['MB_SOUND_PRESETS'] = old
+    MB::Sound::Library.reload!
+  end
+
   it 'keeps the clip given with an instrument as the track clip, so a scene saying :on plays it' do
     s, got = run(->(_s) { MB::Sound.track(:bass, RIFF, :dnb_sub); MB::Sound.scene(:a, bass: :on); MB::Sound.go(:a, on: :now) })
     expect(s.arrangement.tracks[:bass].clip).to equal(RIFF)

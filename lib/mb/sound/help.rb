@@ -11,7 +11,9 @@ require_relative 'help/sheet'
 require_relative 'help/now'
 require_relative 'help/graph_page'
 require_relative 'help/rack_page'
+require_relative 'help/entry_page'
 require_relative 'help/lessons'
+require_relative 'help/guide'
 require_relative 'help/coverage'
 require_relative 'help/welcome'
 require_relative 'help/help_methods'
@@ -64,6 +66,7 @@ module MB
         when Pitch then topic_page(:pitch) # (`help 440.hz`, `help C4`: the values, not a graph)
         when GraphNode, GraphNode::Channels then GraphPage.new(subject, index)
         when Rack then RackPage.new(subject, index)
+        when Library::Entry then EntryPage.new(subject, index)
         else
           if subject.respond_to?(:to_ruby)
             GraphPage.new(subject, index)

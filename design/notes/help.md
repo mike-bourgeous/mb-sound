@@ -1,7 +1,7 @@
 # Console help
 
 <!-- summary -->
-Console help (`lib/mb/sound/help.rb` + `help/`, loaded by bin/sound.rb or on first use): `help` (the one-screen sheet), `help :knobs` (topics), `help :turn` (method pages from doc comments), `help /reson/` (search), `help node`, `now`, `demo`, and `lesson :set` (runnable lessons: `:generative` puts the library's generators on tracks; a lesson's saves go to its own shelf); every page is built with `Help::Doc` and shown through `Help.show`.  `help.level` sets the listening level as the live-only monitor trim.  The guard spec `spec/lib/mb/sound/help_spec.rb` requires every public console command to be in a topic (`help/content/topics.rb`), on the sheet, or exempt with a reason, and every example to play near the level tone.
+Console help (`lib/mb/sound/help.rb` + `help/`, loaded by bin/sound.rb or on first use): `help` (the one-screen sheet), `help :knobs` (topics), `help :turn` (method pages from doc comments), `help /reson/` (search), `help node`, `now`, `demo`, and `lesson :set` (runnable lessons: `:generative` puts the library's generators on tracks; a lesson's saves go to its own shelf); every page is built with `Help::Doc` and shown through `Help.show`.  `help.level` sets the listening level as the live-only monitor trim.  `guide` reads the user guide (docs/guide; `guide_spec.rb` runs its examples), and `help L.inst.x` explains a library entry.  The guard spec `spec/lib/mb/sound/help_spec.rb` requires every public console command to be in a topic (`help/content/topics.rb`), on the sheet, or exempt with a reason, and every example to play near the level tone.
 <!-- /summary -->
 
 ## Quick reference
@@ -9,6 +9,7 @@ Console help (`lib/mb/sound/help.rb` + `help/`, loaded by bin/sound.rb or on fir
 - Console: `help`, `help :knobs`, `help :turn`, `help /reson/`, `help node`, `now`, `demo`, `lesson :set`; `help.level` sets the listening level.
 - A new command needs a topic entry in `lib/mb/sound/help/content/topics.rb` or a `Help::Coverage` exemption; pages are built with `Help::Doc`, shown through `Help.show`.
 - Guard spec `spec/lib/mb/sound/help_spec.rb` (coverage, examples playing near the level tone).
+- The user guide: `docs/guide/NN-name.md` (+ README.md), `guide` / `guide :drums` / `help :guide` (`help/guide.rb`); `spec/lib/mb/sound/help/guide_spec.rb` runs each chapter's Ruby blocks in one Session and binding, level-checked; `<!-- check: bars=N | quiet | script | program | skip why -->` before a block.
 - Each topic is one line of the library catalog `design/catalog.md` (title, then its commands and non-GraphNode DSL names; `rake docs:index`, `spec/catalog_spec.rb`; graph_nodes.md); a topic change means rerunning `rake docs:index`.
 
 ## Current state (the overview CLAUDE.md carried until 2026-10-30)
@@ -48,6 +49,8 @@ Console help for `bin/sound.rb` (branch help-1, 2026-10-13), built on the resear
 | `help/now.rb`, `help/graph_page.rb` | `now`, `help node` |
 | `help/lessons.rb` | lessons, progress, the runner |
 | `help/coverage.rb` | the coverage guard's exemptions |
+| `help/guide.rb` | the user guide: chapters, their examples and check comments, `GuidePage`, `GuideChapterPage` |
+| `help/entry_page.rb` | `help L.inst.x`: a library entry's description, settings, and lines to use it |
 | `help/welcome.rb` | the welcome screen |
 | `help/content/` | the hand-written part, all Ruby: `topics.rb` (23 topics), `sheet.rb`, `lessons.rb` |
 
@@ -122,6 +125,17 @@ From the Mac's ux-review-1 (22 findings; workbench `briefs/ux-review-1-findings.
 - One-line inspect for nodes (`GraphNode::Inspect`, in Traversable and MultiOutput; Notes, Session): see graph_nodes.md.
 - Per-call-site warnings: `Internal.warn_once_per_site(key, message)` (`path:line: warning: ...`, once per line of user code): `at(-20)`, `delay(96)`, `delay(seconds:)`, a Pitch plus a number (`it.hz + 150`: `it.freq + 150` meant; ux-notes-2, numbers_lengths_phases.md).
 - Where pages go (`Help.show`; maintainer: "Help pages load in less pager and/or as ui overlay when ui is up"): pages are always whole.  While a tiled screen is up, the page pane (`UI::Panes::Page` through `Tiles#page`: a temporary pane split off the console's slot, which keeps REPL_MIN_ROWS; focused in its own mode: j k, PgUp PgDn b Space, g G, `/` search with n N, y copies the whole page; Esc goes back to what opened it (`Tiles#page_opener`: the REPL for console help and `ui.page`, else the focused pane, the REPL if that pane has closed; `Router#pane_key` asks `Tiles#pane_escape`), q closes it and goes back there too; Ctrl-] is NAV as anywhere; `ui.page false`; omnibus15: the focus used to stay on the REPL because `Tiles#tile` pinned it in REPL mode, now `#enter` doesn't pin.  Titled "HELP · <page>" (`Page#title` on every page class: the topic, method, section, `/search/`, node, now; plain HELP for the sheet), `ui.page text, title:` keeps a caller's title.  Pry's paged output goes there too while the tiles are up (`UI::PryPages`, installed by `UI.install_pry!`: show-doc, show-source, cat, ri always; ls, whereami, and others when taller than the REPL pane; titled with the command line); with the tiles down Pry pages as before); else at the console in a terminal that animates, Pry's pager (`$PAGER`, default `less -R -F -X`, so pages that fit print directly; plain under the color policy); into pipes and non-terminals, the whole plain text.  Pry's printer (`PagePrinter`) and the `help` Pry command both use it; lesson steps print directly.  Method pages head with their aliases (`saw  (alias ramp, sawtooth)`); pages lay out down to 40 columns.
+
+## The user guide (userdocs-1, 2026-11-10)
+
+Persona round 3 is a clean-room test of what ships (workbench `research/panel2-retro/retro.md`): musicians who code, with user-facing docs and `help` only; the design notes are engineer docs and stay out.  The maintainer (2026-11-10): "Start with the code prerequisites"; prerequisite 2 was docs good enough to make music with.
+
+- `docs/guide/` (shipped by the gemspec's `git ls-files`): ten chapters (first sounds, playing and stopping, song files, clips and drums, instruments and the library, effects and buses, a live set, recording and rendering, the screens, sound design) and a README listing them.  Musical language first, no architecture or engine words, no products named (the help wording rule), and no talk of exactness (round 2's priming).
+- Console: `guide` lists the chapters and the folder (`Help::GuidePage`); `guide :drums`, `guide 4`, or a unique start of a name shows one (`Help::GuideChapterPage`: Markdown as Doc blocks, check comments dropped, a link to another chapter read as `guide :name`, a "Next:" line); an unknown name raises with did-you-mean and the list.  `help :guide` (aliases :book, :manual, :tutorial, :docs) is a topic listing them.  HelpAutoload stubs `guide` like help/now/lesson.
+- `guide_spec.rb`: one example per chapter runs its console blocks in order in one non-realtime Session and one binding (`MB::Sound.module_eval('binding')`, as typed in the console, so later blocks use earlier locals), in a temp folder with saves on a temp shelf, playing each block's bars (2 by default; 1 for quiet blocks) and checking sounding ones against the level tone with the help examples' bounds.  Song files run as programs: `script` renders with `-o` (not clipping, not silent; they must use `song_script`), `program` plays on a silent output and must end by itself.  It also checks titles, summaries, links, the console pages (walls of text, 100 columns of prose), and a jargon list (`JARGON`, products).
+- `help L.inst.x` (`Help::EntryPage`, entry_page_spec.rb): before, an entry fell through to the graph page; now its path, kind, tags, shelf, description, settings, and lines that use it for its kind (each line runs in the spec).
+
+Found while writing it (fixed on the branch): `track :lead, :glass_lead` didn't find a named session irack (arrangement.md, Library instruments); help examples used repo `sounds/` files the gem doesn't ship; product names in help text (ACID's curves, REX-style, FluidSynth's scale).
 
 ## Takes
 

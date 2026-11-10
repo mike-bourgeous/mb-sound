@@ -46,8 +46,8 @@ module MB
       example 'play a clip on the default patch' do
         play seq(A3, C4, E4, A4, E4, C4, A3.n4).n8, gain: -14.db
       end
-      example 'play two seconds of a drum file as a Sample', bars: 1 do
-        play Sample['sounds/drums_short.flac'].trim(...2.seconds), gain: -8.db
+      example 'play two seconds of a break as a Sample', bars: 1 do
+        play breakbeat(:jungle).trim(...2.seconds), gain: -10.db
       end
       example 'play a grid on a TR-909' do
         play grid(16, kick: 'X...x...', snare: '....x...', hat: 'x.x.x.x.'), gain: -13.5.db
@@ -62,10 +62,34 @@ module MB
       commands :read, :write, :list, :file_input, :file_output, :input, :output, :use_output, :latency, :loopback, :close_outputs
       note :audio_io
       see :record
-      example 'two bars of a drum file' do
-        bg :try, file_input('sounds/drums.flac').at(-8.db).until(2.bars)
+      example 'render a beat to a file, then play the file' do
+        path = File.join(Dir.tmpdir, 'try_beat.flac')
+        render path, tr909(grid(16, kick: 'x...x...x...x...', hat: '..x...x...x...x.').loop), bars: 2, overwrite: true
+        bg :try, file_input(path).until(2.bars)
       end
     end
+
+    Help.topic :guide, 'The user guide', group: :start do
+      about <<~TEXT
+        The guide is a short book for musicians who write a little code:
+        first sounds, playing and stopping, a song as a script, clips and
+        drums, instruments and the library, effects and buses, a live set,
+        recording and rendering, the screens, and sound design.  Every
+        example in it runs as written.  `guide` lists the chapters (and
+        the folder of their Markdown files, to read in an editor), `guide
+        :drums` (or `guide 4`) shows one here.
+      TEXT
+      commands :guide, :lesson, :help
+      see :play, :sets, :library
+      section do |d|
+        d.heading('Chapters')
+        d.rows(Help::Guide.chapters.map { |c| ["guide #{c.name.inspect}", c.title] }, max_label: 24)
+      end
+      example 'the chapters', sound: false do
+        guide
+      end
+    end
+    Help::TOPIC_ALIASES.merge!(book: :guide, manual: :guide, tutorial: :guide, docs: :guide)
 
     Help.topic :tones, 'Oscillators and pitches', group: :sound do
       about <<~TEXT
@@ -169,8 +193,8 @@ module MB
         back down, then (looping) takes 2 more back to its first value;
         `tween([100.hz, 5000.hz], 2.bars)` is up and down in 4 bars.
         `curve:` may be a list, one per step, cycling like the steps
-        (breakpoint automation like ACID's envelopes: `:hold :linear
-        :fast :slow :smooth :sharp`), and so may a glide's `shape:`, one
+        (breakpoint automation, each segment with its own shape: `:hold
+        :linear :fast :slow :smooth :sharp`), and so may a glide's `shape:`, one
         per note in turn: `v.hz.glide(150.ms, shape: [:fast, :hold])`.
       TEXT
       commands :adsr, :env, :amp_env, :filter_env, :fm_env, :sq80_env, :tween, :bounce_hits
@@ -505,7 +529,7 @@ module MB
         fade_out: 1/4r, curve_out: :slow }], [vox, 7/4r, 2r, { fade_in:
         1/4r }])` is a lane of regions (sample, start and length in whole
         notes or Durations, `offset:` into the source in seconds, `gain:`,
-        `transpose:`, fades with ACID's curves `:linear :fast :slow :smooth
+        `transpose:`, fades shaped by the curves `:linear :fast :slow :smooth
         :sharp :hold`); overlaps add (a crossfade), and a seek inside a
         region plays it from the right source sample (`bg :vox, lane`).
 
@@ -618,8 +642,9 @@ module MB
         open hat over 3 ms in synth voices; `i.region(s, choke: :hat)`
         does the same in your own instruments, `group:`/`off_by:` like
         SFZ).  What doesn't (extra modulators, ROM samples) is listed once
-        per preset when it loads.  Levels follow FluidSynth's
-        attenuation scale (`attenuation: 1.0` for the specification's).
+        per preset when it loads.  Levels follow the attenuation scale
+        most SoundFont players use (`attenuation: 1.0` for the
+        specification's).
         `mips: :default` reads smoother tables (more memory) than the
         `:octave` default.
       TEXT
@@ -635,7 +660,7 @@ module MB
         tags, then tempo and key words in file and folder names ("98bpm",
         "98 BPM", "Am_120"; a name's tempo counts only when the file is a
         whole number of its beats).  Loops loop the whole file; one-shots
-        (ACID's flag, words like kick or hit, short files, one hit
+        (the ACID chunk's flag, words like kick or hit, short files, one hit
         decaying away) keep no name tempo.  `sample.bpm`, `.beats`,
         `.bars`, `.key`, `.meta_source` and `.meta[:why]` (where each came
         from, and why); `Sample[path, detect:
@@ -656,7 +681,7 @@ module MB
         the tempo like a varispeed.  `.stretch(r, mode: :slice)` cuts at
         the hits (markers, else onsets, else the 16th grid) and starts
         each slice at its stretched time, attacks copied exactly:
-        slowing down leaves REX-style gaps (`fill: :stretch` draws each
+        slowing down leaves a gap after each hit (`fill: :stretch` draws each
         decay out instead), speeding up truncates with a 4 ms fade.
       TEXT
       commands :loops
