@@ -120,6 +120,32 @@ RSpec.describe(MB::Sound::Arrangement::Wires) do
       expect(d[124800]).to eq(76)
     end
 
+    it 'ends the notes held on the rewire frame, also a note begun in the same buffer just before it (seed 777015)' do
+      # (fix-fuzz-1110: at 367 frames the rewire landing inside a buffer
+      # owed note-offs for the notes held at the buffer's start, so E4,
+      # begun 10 frames before bar 3, hung and C4 got a second note-off;
+      # at 800 the rewire lands on a buffer's start)
+      played = [[60, 3.5r, Rational(191990, 48000)], [64, Rational(191990, 48000), 4.75r]]
+      lines = { 0 => setup_lines, 10 => ['wire :lead, MB::Sound::Session.current.midi_in.stream, on: :bar'], 200 => ['wire :lead, hop.stream, on: :bar'] }
+      results = [[800], [367], *slow_tier(other_sizes, keep: 0)].map { |sizes|
+        s = new_session
+        s.midi_in.input = keyboard(*played)
+        d = perform(s, lines, 96000 * 3, sizes)
+        log = s.midi_log.select { |name, *| name == :"lead/wire" }.map { |_, _, pos, bytes| [pos, bytes] }
+        [d, log, sizes]
+      }
+      d, log, _ = results[0]
+      results.drop(1).each { |dd, ll, sizes| expect([dd, ll]).to eq([d, log]), "buffer sizes #{sizes}" }
+
+      expect(d[191989]).to eq(60)
+      expect(d[191990]).to eq(64)
+      expect(d[192000]).to eq(69)          # hop's A4 from bar 3...
+      expect(d[204000]).to eq(71)          # ...and B4
+      expect(d[216000 - 1]).to eq(71)
+      bar3 = log.select { |pos, _| pos == 2 }.map(&:last)
+      expect(bar3).to eq([[0x80, 64, 0], [0x90, 69, 95]]) # (E4 ends on the rewire frame, not C4 again)
+    end
+
     it 'records the stream with rec, as live input' do
       s = new_session
       perform(s, { 0 => setup_lines, 10 => ['wire :lead, riff.stream', 'rec 1'] }, 96000 * 3 + 800)

@@ -382,6 +382,16 @@ RSpec.describe('session fuzzing') do
         'at_bar(2) { bg :t2, seq(A4, C5).n8.loop, on: :now }',
       ], 2,
     ],
+    # (fix-fuzz-1110, batch 26's soak: the unwire landing inside a 367-frame
+    # buffer owed note-offs for the notes held at the buffer's start, so G4,
+    # echoed one frame before the unwire, hung in the monitor's fade;
+    # Session::MidiInput#read_cut tracks held notes per piece now)
+    'an unwire landing inside a buffer just after a note began (seed 777015)' => [
+      :buffer_size, ['bpm 112', 'knob :busy, 0.5'], [
+        'track(:t2, q: 1/4r) { |clip| clip.synth(voices: 3) { |v| v.hz.saw * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'at_bar(2, beat: 2) { wire :t2, seq(C4, E4, G4).n8.loop.stream.echo(1.n16, 2); after(in: 2.beats) { unwire :t2 if wires.key?(:t2) } }',
+      ], 2,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil
