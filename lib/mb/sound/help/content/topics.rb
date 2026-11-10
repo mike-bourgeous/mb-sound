@@ -1579,6 +1579,50 @@ module MB
       end
     end
 
+    Help.topic :meta, 'Metadata: where things came from', group: :keep do
+      about <<~TEXT
+        A set made from another program's file (an ACID project, a tracker
+        module, a MIDI file) keeps what that file said even where mb-sound
+        has no use for it yet: `meta :bass, source: { ... }` gives a track,
+        bus, mute group, knob, or rack plain facts to carry, and `meta
+        source: { ... }` (no name) the set itself.  Metadata never changes
+        the sound.  `meta :bass` reads it back (a frozen Hash), `metas`
+        lists a line per name, `meta :bass, notes: 'x'` merges by key
+        (`:source` stays), `meta :bass, nil` forgets.
+
+        The name needs no piece yet, so a song file can list its metadata
+        last, and it stays with the name through swaps, scenes, undo, and
+        `untrack`.  `save :gig, set` writes it as `meta` lines at the end
+        of the set document (`ruby set` prints the same text); takes replay
+        it.  Values are plain Ruby: numbers, Strings, Symbols, true, false,
+        nil, Arrays, and Hashes of those.
+
+        Importers put provenance under `:source`, with the same keys
+        everywhere: `format:`, `file:`, `version:`, `kind:` (what it was
+        there), `id:`, `name:` (its own name), `at:` (byte offset),
+        `bytes:`, `records:`, `unread:` (bytes not understood, or a
+        fraction), and `fields:` (understood values mb-sound doesn't use
+        yet, by name).
+
+        Objects without a name carry it themselves: `node.with_meta(source:
+        { ... })` (printed by `ruby node`, saved in graph documents) and
+        `sample.with_meta(...)`; `sample.meta[:source]` of a sample read
+        from a WAV file lists the file's chunks and what wasn't read.
+      TEXT
+      commands :meta, :metas
+      note :metadata
+      see :presets, :sets, :sampler
+      example 'a track that remembers the file it came from', sound: false do
+        track(:try_a3) { |c| c.synth(voices: 2) { |v| v.hz.triangle.at(-20.db) * v.env(0.005, 0.2, 0.3, 0.1) } }
+        meta :try_a3, source: { format: :acd, kind: :track, id: 3, at: 0x12340, bytes: 5678, fields: { color: 3, height: 80 } }
+        meta source: { format: :acd, file: 'project.acd', bytes: 1_234_567, unread: 0.19 }
+        metas
+      end
+      example 'a node that carries its source, printed back as Ruby', sound: false do
+        ruby 110.hz.saw.lp4(600).with_meta(source: { format: :xm, kind: :instrument, id: 2 })
+      end
+    end
+
     Help.topic :library, 'The library: find, heads, shelves', group: :keep do
       about <<~TEXT
         Every named thing (reverb and chorus presets, resonator banks,

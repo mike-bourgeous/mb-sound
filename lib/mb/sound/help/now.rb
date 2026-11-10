@@ -59,6 +59,16 @@ module MB
             out << "#{c(:head, 'scenes')} " + scenes.keys.map { |n| n == current ? c(:key, "▶#{n}") : n.to_s }.join('  ')
           end
 
+          # (what the set carries from the file it came from; `metas`)
+          meta = @s.metadata
+          unless meta.empty?
+            own = meta[nil]
+            parts = []
+            parts << Meta.summary(own, kind: :set) unless own.empty?
+            parts << "#{meta.size} piece#{'s' unless meta.size == 1} with metadata" if meta.size > 0
+            out << "#{c(:head, 'metadata')} #{parts.join('; ')} #{c(:dim, '(metas lists it)')}"
+          end
+
           queued = @s.journal.changes.select { |e| e.status == :queued }
           unless queued.empty?
             out << c(:head, 'queued')

@@ -45,6 +45,7 @@ require_relative 'sound/fast_latency'
 require_relative 'sound/kernels'
 
 require_relative 'sound/ruby_value'
+require_relative 'sound/meta'
 require_relative 'sound/length'
 require_relative 'sound/interval'
 require_relative 'sound/phase'
@@ -89,6 +90,7 @@ require_relative 'sound/generative_methods'
 require_relative 'sound/schedule_methods'
 require_relative 'sound/arrangement_methods'
 require_relative 'sound/form_methods'
+require_relative 'sound/meta_methods'
 require_relative 'sound/transport_methods'
 require_relative 'sound/knob_methods'
 require_relative 'sound/clock_methods'
@@ -142,6 +144,7 @@ module MB
     extend ScheduleMethods
     extend ArrangementMethods
     extend FormMethods
+    extend MetaMethods
     extend TransportMethods
     extend KnobMethods
     extend ClockMethods

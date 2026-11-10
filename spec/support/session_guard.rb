@@ -49,6 +49,8 @@ module SessionGuard
       out << "stopped players #{stopped.keys.map(&:inspect).join(', ')}" unless stopped.empty?
       scheduled = session.scheduled
       out << "#{scheduled.length} scheduled blocks" unless scheduled.empty?
+      meta = session.metadata
+      out << "metadata (#{[*(meta[nil].empty? ? [] : ['the set']), *meta.names.map(&:inspect)].join(', ')})" unless meta.empty?
       out.empty? ? nil : out.join('; ')
     end
   end

@@ -283,7 +283,8 @@ module MB
           # Adds recorders for DSL methods without one (e.g. after a *Methods
           # module gained methods).
           def refresh!
-            dsl = Surface.graph_node_dsl + [:named]
+            # (#named and #with_meta return their receiver: configuration calls)
+            dsl = Surface.graph_node_dsl + [:named, :with_meta]
             record(GraphNode, dsl - @wrapped[GraphNode].to_a, key: GraphNode)
 
             # Classes that define DSL methods themselves (Pitch#tone,

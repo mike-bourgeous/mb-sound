@@ -39,7 +39,7 @@ module MB
       # Commands that play in the foreground or show things (they would
       # block or draw during a replay), skipped by replays: lines that start
       # with one of these words are kept in the script as comments.
-      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers knobs snaps buses routes help now lesson monitor monitor_gain ls ui keys fg jobs debug_dump].freeze
+      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers metas knobs snaps buses routes help now lesson monitor monitor_gain ls ui keys fg jobs debug_dump].freeze
 
       # A `play` line with no sound (only launch points): the transport's
       # start (TransportMethods#start), which replays, unlike foreground
