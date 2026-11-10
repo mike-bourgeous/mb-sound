@@ -277,6 +277,14 @@ module GraphSweep
       # Shapers
       ['shapers', ->(c) { c.sig.softclip + c.sig.clip(-0.3, 0.3) + c.sig.quantize(0.1) + c.sig.asoftclip + c.sig.aclip(-0.5, 0.2) + c.sig.aquantize(0.2) }],
       ['ease (CurveShaper)', ->(c) { c.sig.ease(:elastic) + c.sig.aease(:smoothstep) + c.sig.ease(:bounce, edges: :mirror) }],
+      # (fix-clip-overshoot: bright input far past the limits, where the
+      # high band is scaled by the shaper's slope and the output limited)
+      ['hot shapers (bright input past the limits)', ->(c) {
+        hot = c.sig * 10 + 110.hz.square.at(c.mod(2, 6))
+        hot.clip(-0.9, 0.9) + hot.softclip(0.5, 0.9) + hot.abs * 0.1 + hot.ease(:smoothstep, symmetric: true, in: -1..1) +
+          hot.ease(:smootherstep, edges: :wrap) + hot.shape_db(:fuzz) +
+          c.sig.feedback { |fb, input| (input * 8 + fb.delay(31.samples) * 0.9).clip(-0.9, 0.9).softclip(0.5, 0.8) }
+      }],
       ['inertia (Inertia), musical and hardware', ->(c) {
         h = MB::Sound.stereo(c.sig, c.sig * 0.5).inertia(c.mod(0.002, 0.01), mode: :hardware)
         c.sig.inertia(0.005) + c.sig.inertia(0.02, substeps: 3) + h.outputs[0] + h.outputs[1]
