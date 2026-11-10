@@ -296,5 +296,20 @@ RSpec.describe(MB::Sound::MIDI::Lock, :midi_transforms) do
       expect(sounding.values.uniq - [0]).to eq([])
       expect(live.holding?).to eq(false)
     end
+
+    it 'Live: keeps each source\'s held notes, and #release forgets one source\'s' do
+      live = described_class::Live.new(described_class::Style.new(:play))
+      transport.key_change(MB::Sound::MusicalKey.new(root: 2, mode: :dorian), at: 0r)
+      wire_on = live.process(ev.note_on(60, time: 0r), 0r, transport: transport, source: :wire)
+      input_on = live.process(ev.note_on(60, time: 0r), 0r, transport: transport, source: :input)
+      expect(wire_on.map(&:note)).to eq(input_on.map(&:note))
+      expect(wire_on.map(&:note)).not_to eq([60]) # (mapped into D dorian)
+
+      live.release(:wire)
+      expect(live.holding?).to eq(true)
+      off = live.process(ev.note_off(60, time: 1r), 1r, transport: transport, source: :input)
+      expect(off.map { |e| [e.type, e.note] }).to eq([[:note_off, input_on[0].note]])
+      expect(live.holding?).to eq(false)
+    end
   end
 end

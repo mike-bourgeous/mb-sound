@@ -9,7 +9,10 @@
 # - :runs: the render finishes without an error (800-frame buffers);
 #   steps include re-bgs of looped clips after one-shots and cue/launch
 #   sequences (omnibus15), and flows generated as they play from a
-#   (sometimes knob-steered) Markov chain over the scenes (generative-g4)
+#   (sometimes knob-steered) Markov chain over the scenes (generative-g4);
+#   no wire input unwired or held still holds its stream's notes at the
+#   end, also under the input lock some songs with wires set
+#   (fix-wire-lock-1110)
 # - :buffer_size: 367-frame buffers give the same mix within -80 dB of the
 #   peak ("ears win"), and the same length
 # - :plan: plans off gives the same mix, bit for bit (both at the default
@@ -356,6 +359,12 @@ module SessionFuzz
     events = track_events(lines, beats, scene_ends, scene_loops)
     lines = without_swaps_of_stopped(lines, beats, tracks.keys, events)
     lines = without_lost_cues(lines, beats, events, scene_clips.each_with_index.to_h { |c, k| [:"s#{k + 1}", c.keys] })
+    # (fix-wire-lock-1110) sometimes the Session's input lock, which maps
+    # the wired streams' notes (a hold or unwire must end the notes as
+    # they sounded); a line run before the render, so it holds from the
+    # first sample at any buffer size; drawn last, so earlier draws keep
+    # their songs
+    lines << pick(rng, INPUT_LOCKS) if lines.any? { |l| l.include?('wire :') } && rng.rand < 0.5
     Song.new(header: header, lines: lines, bars: bars)
   end
 
@@ -645,6 +654,9 @@ module SessionFuzz
   # Clipless sounds for #generate's seeks across starts.
   HELD = ['0.05.constant', '0.05.constant.filter(:lowpass, cutoff: 800)', 'noise.at(0.02).lp4(600)'].freeze
 
+  # Session input locks for #generate (songs with wires).
+  INPUT_LOCKS = ['key :d, :dorian; lock :play', 'lock :mash', 'key :e, :phrygian; lock :chord', 'key :a, :minor; lock :along'].freeze
+
   # Bus chains for #generate.
   BUS_FX = ['reverb(:room, mix: 1)', 'delay(1.n8, feedback: 0.3) * 0.5', 'lp4(900) * 0.7'].freeze
 
@@ -704,12 +716,16 @@ module SessionFuzz
     err = StringIO.new
     old_err = $stderr
     $stderr = err # (see #warnings)
+    session = nil
     begin
-      MB::Sound.render(out, bars: bars, buffer_size: buffer_size, channels: 2, gain: 1, exact_lanes: true, max_seconds: RENDER_CAP) { RecipeHelpers.eval_recipe(code) }
+      MB::Sound.render(out, bars: bars, buffer_size: buffer_size, channels: 2, gain: 1, exact_lanes: true, max_seconds: RENDER_CAP) {
+        RecipeHelpers.eval_recipe(code).tap { session = MB::Sound::Session.current }
+      }
     ensure
       $stderr = old_err
     end
     @warnings = err.string.lines.reject { |l| EXPECTED_WARNINGS.any? { |re| l.match?(re) } }
+    @hung = hung_wire_notes(session)
     mix = out.captured.map { |c| Numo::DFloat.cast(c) }
     if mix.first && mix.first.length >= RENDER_CAP * 48000
       raise RenderCapped, "the song's #{bars}-bar render ran to SessionFuzz::RENDER_CAP (#{RENDER_CAP} s) without ending (a seek loop?)"
@@ -747,6 +763,22 @@ module SessionFuzz
 
   # The unexpected lines the last #render printed to stderr.
   def warnings = @warnings || []
+
+  # Notes still held at the end of the last #render on a wire input that
+  # was unwired or whose track was held, as text: an
+  # unwire or hold ends the stream's notes (fix-wire-lock-1110: under the
+  # input lock they counted as live input's and hung).
+  def hung = @hung || []
+
+  def hung_wire_notes(session)
+    return [] if session.nil?
+    session.midi_inputs.flat_map { |name, m|
+      track = MB::Sound::Session::Name.wired(name)
+      next [] unless track && (m.wired.nil? || session.send(:wire_held?, track))
+      # (any source: the stream's notes may be mislabeled, as they were)
+      m.held_notes.map { |h| "#{name} note #{h.note} (#{h.source}, from frame #{h.frame})" }
+    }
+  end
 
   def peak(mix) = mix.map { |c| c.length == 0 ? 0.0 : c.abs.max }.max || 0.0
 
@@ -838,7 +870,11 @@ module SessionFuzz
     when :runs
       begin
         render(code, song.bars)
-        warnings.empty? ? nil : "Warning: #{warnings.first(3).join}"
+        if !hung.empty?
+          "Hung wire notes: #{hung.first(3).join(', ')}"
+        elsif !warnings.empty?
+          "Warning: #{warnings.first(3).join}"
+        end
       rescue StandardError, SystemStackError => e
         raise if budget_exceeded?(e)
 

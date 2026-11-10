@@ -392,6 +392,19 @@ RSpec.describe('session fuzzing') do
         'at_bar(2, beat: 2) { wire :t2, seq(C4, E4, G4).n8.loop.stream.echo(1.n16, 2); after(in: 2.beats) { unwire :t2 if wires.key?(:t2) } }',
       ], 2,
     ],
+    # (fix-wire-lock-1110: under the Session's input lock a wired stream's
+    # notes counted as live input's, so an unwire or a hold never ended
+    # them; :runs checks wire inputs for hung notes since)
+    'an unwire and a hold of wired streams under the input lock' => [
+      :runs, ['bpm 120', 'knob :busy, 0.5'], [
+        'track(:t1, q: 1/4r) { |clip| clip.synth(voices: 2) { |v| v.hz.saw * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'track(:t2, q: 1/4r) { |clip| clip.synth(voices: 2) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'at_bar(1, beat: 2) { wire :t1, seq(C4.n2, E4.n2).loop.stream; after(in: 2.beats) { unwire :t1 if wires.key?(:t1) } }',
+        'at_bar(1, beat: 2) { wire :t2, seq(G4).n1.loop.stream.transpose(7) }',
+        'at_bar(2) { hold :t2, on: :now }',
+        'key :d, :dorian; lock :play',
+      ], 2,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil

@@ -393,13 +393,16 @@ module MB
         # each note-on at its timeline position through +style+ and sends
         # its note-off (and poly pressure) to the note it became, so held
         # notes keep their pitch when the style, key, or chord changes.
-        # Controllers feed the style's cc params.
+        # Controllers feed the style's cc params.  Each event's +source+
+        # (an input's sources: :input, :wire, ...) keeps its own held
+        # notes, so #release forgets one source's (a wired stream that
+        # ended, whose note-offs the lock will never see).
         class Live
           attr_reader :style
 
           def initialize(style)
             @style = style
-            @held = {} # [channel, played note] => Array of sounding notes (nil: silent), oldest first
+            @held = {} # [source, channel, played note] => Array of sounding notes (nil: silent), oldest first
             @reading = Param::Reading.new
           end
 
@@ -408,26 +411,36 @@ module MB
             @style = style
           end
 
-          # The events +e+ becomes at timeline position +pos+ (an Array).
-          def process(e, pos, transport:)
+          # The events +e+ (from +source+) becomes at timeline position
+          # +pos+ (an Array).
+          def process(e, pos, transport:, source: nil)
+            key = [source, e.channel, e.note]
             case e.type
             when :note_on
               out = e.note.is_a?(Numeric) ? @style.event(e, pos, transport: transport, stream: @reading) : e
-              (@held[[e.channel, e.note]] ||= []) << out&.note
+              (@held[key] ||= []) << out&.note
               out ? [out] : []
             when :note_off
-              list = @held[[e.channel, e.note]]
+              list = @held[key]
               return [e] if list.nil? # (a note pressed before the lock)
               n = list.shift
-              @held.delete([e.channel, e.note]) if list.empty?
+              @held.delete(key) if list.empty?
               n.nil? ? [] : [n == e.note ? e : Event.note_off(n.round, e.velocity, channel: e.channel, time: e.time)]
             when :poly_pressure
-              n = @held[[e.channel, e.note]]&.last
+              n = @held[key]&.last
               n.nil? ? [] : [n == e.note ? e : e.with_note(n.round)]
             else
               @reading.observe(e) if e.type == :cc
               [e]
             end
+          end
+
+          # Forgets the notes +source+ holds (their note-offs were sent
+          # elsewhere: Session::MidiInput's owed note-offs when a wire ends
+          # or its track is held).  Returns nil.
+          def release(source)
+            @held.delete_if { |(src, _, _), _| src == source }
+            nil
           end
 
           # True while notes it mapped are held.
