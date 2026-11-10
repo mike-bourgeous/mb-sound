@@ -37,8 +37,10 @@ RSpec.describe(MB::Sound::Sample::Source, :aggregate_failures) do
       expect(MB::Sound::Meta.check(src)).to equal(src)
       expect(MB::Sound::Meta.summary(s.meta)).to start_with("from loop_120bpm.wav, #{MB::Sound::Meta.bytes_text(File.size(path))}, 59 bytes unread, + ")
 
-      # the keys loop files had before stay as they were
-      expect(s.meta.keys).to eq(%i[why smpl_loops source])
+      # the keys loop files have stay as they are, :source after them
+      # (not an exact list: branches add loop-file keys)
+      expect(s.meta.keys.first(2)).to eq(%i[why smpl_loops])
+      expect(s.meta.keys.last).to eq(:source)
       expect(s.meta_source).to include(bpm: :acid)
       expect(s.bpm).to eq(120.0)
     end
@@ -80,7 +82,8 @@ RSpec.describe(MB::Sound::Sample::Source, :aggregate_failures) do
       c = s.with_meta(notes: 'dusty')
       d = c.with_meta({ source: s.meta[:source].merge(kind: :loop) }, tags: [:drums])
       expect(s.meta).not_to have_key(:notes)
-      expect(c.meta.keys).to eq(%i[why smpl_loops source notes])
+      expect(c.meta.keys.last(2)).to eq(%i[source notes])
+      expect(c.meta.slice(*s.meta.keys)).to eq(s.meta)
       expect(c.meta[:source]).to equal(s.meta[:source])
       expect(d.meta[:source][:kind]).to eq(:loop)
       expect(d.meta).to include(notes: 'dusty', tags: [:drums])
