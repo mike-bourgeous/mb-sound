@@ -129,7 +129,7 @@ or a recording.
 - `Sample['loop.wav']` reads a file (any format ffmpeg reads).  Loops
   with a tempo in their name or metadata know it (`.bpm`), and
   `.follow` plays them in time at any tempo.
-- `bounce(2.bars) { ... }` renders a graph into a Sample.
+- `bounce(2.bars) { ... }` renders any sound into a Sample.
 - `breakbeat(:jungle)` is a synthesized break that comes with mb-sound.
 
 Samples cut into slices and play back as clips (`help :sampler` has the

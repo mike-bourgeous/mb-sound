@@ -122,7 +122,7 @@ clubs; keep the true peak under -1 dB.
 ## Saving a whole set
 
 `save :my_set, set` saves the tracks, scenes, knobs, buses, and song form
-as a document; `preset :my_set` loads it back into the session, ready to
+as a document; `preset :my_set` loads it back into the console, ready to
 `go :verse` or `start` its form.  `help :presets` has the details.
 
 Next: [the screens](09-the-screens.md).

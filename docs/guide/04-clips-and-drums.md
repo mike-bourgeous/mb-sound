@@ -12,7 +12,7 @@ that doesn't have its own:
 - `.n1` whole notes, `.n2` halves, `.n4` quarters, `.n8` eighths,
   `.n16` sixteenths; `1.n8.dotted` and `.triplet` lengths work too.
 - `A3.n4` is one note a quarter long; `rest` (or `R`) is a gap.
-- An Array is a chord: `seq([A3, C4, E4], [F3, A3, C4]).n2`.
+- Square brackets make a chord: `seq([A3, C4, E4], [F3, A3, C4]).n2`.
 
 <!-- check: bars=1 -->
 ```ruby
