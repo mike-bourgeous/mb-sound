@@ -601,6 +601,39 @@ module MB
           SEND_KEYWORDS[(queued ? m.queued_state : m.state_at(@frame))[1].to_f.round.clamp(0, 2)]
         end
 
+        # True if player name +name+ has a pre-mute send on at the end of
+        # the routed span being rendered (see #pre_mute_from).
+        def pre_mute_on?(name)
+          r = route_of(name)
+          return false unless r&.pre
+
+          r.pre.each_value do |m|
+            v = m.read(@frame, @bus_span_count)
+            return true if (v.is_a?(Numeric) ? v : v[-1]) > 1
+          end
+          false
+        end
+
+        # The frame of the span (from +offset+, before +offset+ + +frames+)
+        # from which none of route +r+'s pre-mute sends is on again within
+        # those frames, or nil if one is still on at their end (see
+        # #pre_mute_from).
+        def pre_mute_off_at(r, offset, frames)
+          off = offset
+          r.pre.each_value do |m|
+            v = m.read(@frame, @bus_span_count)
+            if v.is_a?(Numeric)
+              return nil if v > 1
+            else
+              on = (v[offset...(offset + frames)] > 1).where
+              next if on.size == 0
+              return nil if on[-1] == frames - 1
+              off = offset + on[-1] + 1 if offset + on[-1] + 1 > off
+            end
+          end
+          off
+        end
+
         # The first frame of the span (from +offset+, before +offset+ +
         # +frames+) where any of route +r+'s pre-mute sends is on (its mode
         # past pre-fader), or nil: a muted player renders from there, as for

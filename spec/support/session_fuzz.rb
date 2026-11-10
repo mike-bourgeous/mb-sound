@@ -378,6 +378,15 @@ module SessionFuzz
         bar = rng.rand(1..bars)
         lines << "at_bar(#{bar}, beat: 2) { mute :#{t} }"
         lines << "at_bar(#{bar}, beat: 3) { unmute :#{t} }"
+      else
+        # (muted, switched off pre-mute, unmuted: a muted part kept awake
+        # by its pre-mute send sleeps on the switch's frame; seed 82 of
+        # session_fuzz_spec's tempo LFO trio found it sleeping on a
+        # buffer edge)
+        bar = rng.rand(1..bars)
+        lines << "at_bar(#{bar}, beat: 2) { mute :#{t} }"
+        lines << "at_bar(#{bar}, beat: 3) { feed :#{t}, :wet, pre: #{pick(rng, ['true', 'false'])} }"
+        lines << "at_bar(#{bar}, beat: #{beats}) { unmute :#{t} }"
       end
     end
     events = track_events(lines, beats, scene_ends, scene_loops)

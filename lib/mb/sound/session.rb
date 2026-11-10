@@ -1986,13 +1986,16 @@ module MB
         # then), waking here if it slept before
         sidechained = false
         read_from = nil
+        reader_from = nil
         if @routed_span && bus_source?(p.name)
           read_from = bus_read_from(p.name, from, to, per_sample, offset)
           read_from = nil if read_from && read_from >= offset + frames
+          reader_from = read_from
           sidechained = !read_from.nil? && read_from <= offset
         end
         # So does a player with a pre-mute send on (Buses#pre_mute_from),
         # from the frame it is switched on
+        pm = nil
         if @routed_span && (pm_route = route_of(p.name)) && pm_route.pre
           pm = pre_mute_from(pm_route, offset, frames)
           if pm && (read_from.nil? || pm < read_from)
@@ -2048,6 +2051,16 @@ module MB
           end
           if silent_from < base + offset + frames
             asleep_after = base + offset + frames - silent_from
+            frames -= asleep_after
+          end
+        end
+        # A muted player kept awake only by a pre-mute send stops on the
+        # frame the send turns off (Buses#pre_mute_off_at), as at a mute
+        # ramp's end, so it sleeps at the same point at any buffer size
+        if pm && reader_from.nil? && asleep_after == 0 && p.strip_level <= 0 && p.strip_ramp.nil?
+          off = pre_mute_off_at(pm_route, offset, frames)
+          if off && off > offset && off < offset + frames
+            asleep_after = offset + frames - off
             frames -= asleep_after
           end
         end
@@ -2225,7 +2238,9 @@ module MB
         elsif faded
           note_rung_out(p, frame, output.sample_rate) if p.ring&.active
           retire(p, keep: true)
-        elsif p.strip_level <= 0 && p.strip_ramp.nil? && !(@routed_span && bus_source?(p.name))
+        elsif p.strip_level <= 0 && p.strip_ramp.nil? && !(@routed_span && (bus_source?(p.name) || pre_mute_on?(p.name)))
+          # (not a source a reader reads, or one with a pre-mute send on at
+          # the span's end: it renders on, waking only where it starts)
           p.asleep = true
         end
       end

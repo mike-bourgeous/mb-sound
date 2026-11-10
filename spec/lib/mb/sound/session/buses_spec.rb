@@ -230,7 +230,7 @@ RSpec.describe(MB::Sound::Session::Buses) do
       expect(d[18000 + 480..].abs.max).to eq(0)
     end
 
-    it 'wakes a muted track on the exact frame a pre-mute switch lands, and sleeps it again, at any buffer size' do
+    it 'wakes a muted track on the exact frame a pre-mute switch lands, and sleeps it on the frame it turns off, at any buffer size' do
       # (an LFO: a graph woken on another frame would play another phase)
       results = [[800], *slow_tier([[367, 368], [7, 128, 333]])].map { |sizes|
         s = new_session
@@ -239,7 +239,8 @@ RSpec.describe(MB::Sound::Session::Buses) do
         s.level(:x, 0)
         s.mute(:x)
         s.feed(:x, :half, nil, pre: :mute, start_time: 1/16r) # frame 6000
-        s.feed(:x, :half, nil, pre: true, start_time: 5/16r) # frame 30000: muted, so silent again
+        s.feed(:x, :half, nil, pre: true, start_time: 5/16r) # frame 30000: muted, so silent again (the LFO sleeps there)
+        s.unmute(:x, start_time: 7/16r) # frame 42000: the LFO goes on from where it slept, pre-fader at level 0
         d = run(48000, sizes, s: s)
         s.close
         d
@@ -248,7 +249,8 @@ RSpec.describe(MB::Sound::Session::Buses) do
       d = results[0]
       expect(d[480...6000].abs.max).to eq(0) # (after the mute's declick)
       expect(d[6000...30000].abs.max).to be > 0.4
-      expect(d[30000 + 480..].abs.max).to eq(0)
+      expect(d[30000 + 480...42000].abs.max).to eq(0)
+      expect(d[42000 + 480..].abs.max).to be > 0.1
     end
 
     it 'sends nothing from a cue player (CUE is dry: MAIN 0 zeroes pre-fader and pre-mute sends too)' do
