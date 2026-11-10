@@ -27,7 +27,10 @@ module MB
       # the curve's excess over the straight line from the input range to
       # the output range, plus a half-sample Thiran allpass on that straight
       # line, so the output is delayed by half a sample and its level stays
-      # flat.  The edge mode is part of the integrated function, so the
+      # flat.  The allpass's high band is scaled by the curve's mean slope
+      # (limited to -1..1) and the output limited to the curve's extent for
+      # :clamp, :wrap, and :mirror (2026-11-10: bright input no longer
+      # leaks through flat parts).  The edge mode is part of the integrated function, so the
       # kinks of :clamp and the jumps of :wrap and :steps are antialiased
       # too.  Polynomial, cosine, and exponential curves integrate in closed
       # form; the others (elastic, bounce, squiggle, bezier, composed curves,
@@ -106,7 +109,7 @@ module MB
             @out_scale = @output.end - @output.begin
           end
 
-          @params = CurveShaper.kernel_params(@curve, @edges, [@in_lo, @in_scale, @out_lo, @out_scale]) if @antialias
+          @params = CurveShaper.kernel_params(@curve, @edges, [@in_lo, @in_scale, @out_lo, @out_scale], symmetric: @symmetric) if @antialias
           @state = [0.0, 0.0, 0.0, 0]
           @buf = nil
           @steady_in = FrozenView::Key.new # (see FrozenView)
@@ -223,8 +226,10 @@ module MB
 
         # The arguments for MB::Sound::FastClip.shape_curve: :form, :coeffs,
         # :ti, :tfl, :tfr, :map, and :edges for +curve+ with +edges+ and the
-        # input/output +mapping+ [in_lo, in_scale, out_lo, out_scale].
-        def self.kernel_params(curve, edges, mapping)
+        # input/output +mapping+ [in_lo, in_scale, out_lo, out_scale].  The
+        # map ends with the shaper's range in curve units (.range_of), to
+        # which the antialiased output is limited.
+        def self.kernel_params(curve, edges, mapping, symmetric: false)
           form = curve.form
           form = nil if form && form[0] == :exp && form[1].abs < EXP_MIN_CURVATURE
           form = nil if form && form[0] == :poly && form[1].length > 16
@@ -252,10 +257,27 @@ module MB
 
           natural = curve.natural? && !form.nil?
           s0, s1 = curve.slopes
-          map = [*mapping.map(&:to_f), curve.call(0.0), curve.call(1.0), s0, s1, 0.0, natural ? 1.0 : 0.0]
+          map = [*mapping.map(&:to_f), curve.call(0.0), curve.call(1.0), s0, s1, 0.0, natural ? 1.0 : 0.0, *range_of(curve, edges, symmetric)]
           map[8] = integral(params, 1.0)
           params[:map] = Numo::DFloat.cast(map).freeze
           params
+        end
+
+        # Points sampled by .range_of.
+        RANGE_POINTS = 4097
+
+        # The lowest and highest values [lo, hi] of +curve+ with +edges+ (odd
+        # if +symmetric+) in curve units: its extent on 0..1 for the edge
+        # modes that repeat or hold it (:clamp, :wrap, :mirror), else
+        # unbounded (-/+Infinity).  The antialiased shaper's output is
+        # limited to it (the C clip_limit in shape_curve).
+        def self.range_of(curve, edges, symmetric)
+          return [-Float::INFINITY, Float::INFINITY] unless %i[clamp wrap mirror].include?(edges)
+
+          lo, hi = curve.extent(RANGE_POINTS)
+          lo = [lo, curve.call(0.0), curve.call(1.0)].min.to_f
+          hi = [hi, curve.call(0.0), curve.call(1.0)].max.to_f
+          symmetric ? [[lo, -hi].min, [hi, -lo].max] : [lo, hi]
         end
 
         # Ruby mirror of the C curve_integral (the curve's integral from 0
@@ -378,40 +400,43 @@ module MB
         # through the antialiased curve shaper with kernel +params+ (see
         # .kernel_params), updating +state+ like the C version.
         def self.shape_ruby(data, params, symmetric, state)
-          in_lo, in_scale, out_lo, out_scale = params[:map].to_a
+          map = params[:map].to_a
+          in_lo, in_scale, out_lo, out_scale = map
+          range_lo, range_hi = map[10], map[11]
           x1, ap_x1, ap_y1, primed = state
           primed = primed != 0
+          sf = symmetric ? ->(u) { v = edge_f(params, u.abs); u < 0 ? -v : v } : ->(u) { edge_f(params, u) }
+          fx1 = primed ? sf.(x1) : 0.0
 
           out = Numo::SFloat.zeros(data.length)
           Numo::SFloat.cast(data).to_a.each_with_index do |s, i|
             x = (s - in_lo) * in_scale
             unless primed
               x1 = ap_x1 = ap_y1 = x
+              fx1 = sf.(x)
               primed = true
             end
 
             d = x - x1
+            mid = 0.5 * (x + x1)
+            fx = sf.(x)
             g = if d.abs < TINY
-                  mid = 0.5 * (x + x1)
-                  e = if symmetric
-                        v = edge_f(params, mid.abs)
-                        mid < 0 ? -v : v
-                      else
-                        edge_f(params, mid)
-                      end
-                  e - mid
+                  sf.(mid) - mid
                 else
                   fa = symmetric ? edge_integral(params, x.abs) : edge_integral(params, x)
                   fb = symmetric ? edge_integral(params, x1.abs) : edge_integral(params, x1)
                   (fa - fb) / d - 0.5 * (x + x1)
                 end
 
+            w = MB::Sound::Shaper.band_gain(x, x1, fx, fx1, mid, &sf)
+
             dry = ALLPASS * x + ap_x1 - ALLPASS * ap_y1
             ap_x1 = x
             ap_y1 = dry
             x1 = x
+            fx1 = fx
 
-            out[i] = out_lo + out_scale * (dry + g)
+            out[i] = out_lo + out_scale * MB::Sound::Shaper.limit(dry + g + (w - 1.0) * (dry - mid), range_lo, range_hi)
           end
 
           state.replace([x1, ap_x1, ap_y1, 1]) if data.length > 0

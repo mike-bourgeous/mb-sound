@@ -70,9 +70,9 @@ module MB
         # kernel's DB_LOG_Q).
         LOG_Q = 1e-9
 
-        # The kernel's map (identity in and out, natural) and edge mode
-        # (:none: the dB form holds for every input).
-        MAP = Numo::DFloat[0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0].freeze
+        # The kernel's map (identity in and out, natural, unbounded range)
+        # and edge mode (:none: the dB form holds for every input).
+        MAP = Numo::DFloat[0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, -Float::INFINITY, Float::INFINITY].freeze
         EDGES = CurveShaper::EDGES[:none]
 
         preset_family :shape_db, kind: :effect, label: 'shape_db preset', keys: KEYS,

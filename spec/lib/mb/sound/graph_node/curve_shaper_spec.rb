@@ -34,6 +34,42 @@ RSpec.describe(MB::Sound::GraphNode::CurveShaper) do
     end
   end
 
+  # fix-clip-overshoot (2026-11-10): the allpass's high band leaked through
+  # flat parts (noise at 5 into ease(:smootherstep) peaked at 5.0 for an
+  # output range of 0..1); it is now scaled by the curve's mean slope and the
+  # output limited to the curve's extent for :clamp, :wrap, and :mirror.
+  it 'keeps bright, hot input within the output range (C and Ruby)' do
+    MB::Sound.seed(11)
+    noise = Numo::SFloat.cast(MB::Sound.noise.at(5).multi_sample(800, 2))
+    saw = Numo::SFloat.cast(110.hz.ramp.at(5).multi_sample(800, 2))
+    [
+      [:smootherstep, :clamp, false, 0..1],
+      [:smoothstep, :clamp, true, -1..1],
+      [:smoothstep, :wrap, false, 0..1],
+      [:bounce, :mirror, false, 0..1],
+      [:steps, :clamp, false, 0..1],
+      [:back, :clamp, false, MB::Sound::Curve[:back].extent(CS::RANGE_POINTS).then { |lo, hi| lo..hi }],
+    ].each do |curve, edges, sym, range|
+      [noise, saw].each do |input|
+        node = CS.new(MB::Sound::ArrayInput.new(data: [input]), curve: curve, edges: edges, symmetric: sym, output: 0..1)
+        c = SpecBuffers.join([1, 799, 800].map { |n| node.sample(n).dup })
+        params = node.instance_variable_get(:@params)
+        state = [0.0, 0.0, 0.0, 0]
+        r = SpecBuffers.join([0...1, 1...800, 800...1600].map { |rg| CS.shape_ruby(input[rg], params, sym, state) })
+        expect(c).to eq(r), "#{curve} #{edges} #{sym}"
+        lo, hi = Numo::SFloat[range.begin, range.end].to_a
+        expect(c.min).to be >= lo, "#{curve} #{edges} #{sym}: min #{c.min}"
+        expect(c.max).to be <= hi, "#{curve} #{edges} #{sym}: max #{c.max}"
+      end
+    end
+  end
+
+  it 'gives an unbounded range for :extend and :none' do
+    expect(CS.range_of(MB::Sound::Curve[:smoothstep], :extend, false)).to eq([-Float::INFINITY, Float::INFINITY])
+    expect(CS.range_of(MB::Sound::Curve[:smoothstep], :none, true)).to eq([-Float::INFINITY, Float::INFINITY])
+    expect(CS.range_of(MB::Sound::Curve[:smoothstep], :clamp, true)).to eq([-1.0, 1.0])
+  end
+
   it 'is exact with antialias: false (#aease)' do
     sig = Numo::SFloat[0, 0.1, 0.25, 0.5, 0.9, 1.0, 1.5]
     out = MB::Sound::ArrayInput.new(data: [sig]).aease(:steps, cycles: 4).sample(7)
@@ -89,7 +125,7 @@ RSpec.describe(MB::Sound::GraphNode::CurveShaper) do
 end
 
 RSpec.describe('MB::Sound::FastClip.shape_curve arguments') do
-  let(:map) { Numo::DFloat[0, 1, 0, 1, 0, 1, 0, 0, 0.5, 0] }
+  let(:map) { Numo::DFloat[0, 1, 0, 1, 0, 1, 0, 0, 0.5, 0, -Float::INFINITY, Float::INFINITY] }
 
   it 'reuses its output for a steady (repeated frozen) input with #aease, the same values as shaping again' do
     steady = Numo::SFloat.new(16).fill(0.37).freeze

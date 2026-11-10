@@ -380,6 +380,23 @@ static double curve_edge_integral(const struct curve_params *p, double u)
 	return 0;
 }
 
+// The curve shaper's function (curve_edge_f, odd if +sym+) for
+// clip_band_gain.
+struct curve_shaper_ctx {
+	const struct curve_params *p;
+	_Bool sym;
+};
+
+static double curve_shaper_f(const void *ctxv, double u)
+{
+	const struct curve_shaper_ctx *ctx = ctxv;
+	if (ctx->sym) {
+		double e = curve_edge_f(ctx->p, fabs(u));
+		return u < 0 ? -e : e;
+	}
+	return curve_edge_f(ctx->p, u);
+}
+
 // Reads a contiguous DFloat's data, or NULL for nil.
 static const double *curve_dfloat_ptr(VALUE v, size_t min_length, const char *name)
 {
@@ -406,7 +423,11 @@ static const double *curve_dfloat_ptr(VALUE v, size_t min_length, const char *na
  * (DFloat, cells + 1 values each) hold the integral from 0
  * and the left and right limits of the curve at each node.  +map+ is a
  * DFloat [in_lo, in_scale, out_lo, out_scale, f(0), f(1), slope at 0, slope
- * at 1, integral to 1, natural (0 or 1)].  +edges+ is 0 (clamp), 1
+ * at 1, integral to 1, natural (0 or 1), lowest value, highest value] (the
+ * last two the shaper's range in curve units, to which the antialiased
+ * output is limited; -/+Infinity for none).  As in mb_clip_run, the dry
+ * path's high band is scaled by the curve's mean slope over the last two
+ * inputs, limited to -1..1 (clip_band_gain).  +edges+ is 0 (clamp), 1
  * (extend), 2 (wrap), 3 (mirror), or 4 (none).  With +symmetric+ the curve
  * shapes |x| and the sign is restored (odd).  +state+ is [last normalized
  * input, allpass last input, allpass last output, primed (0 or 1)].
@@ -427,7 +448,7 @@ static VALUE ruby_shape_curve(VALUE self, VALUE buffer, VALUE form, VALUE coeffs
 	p.form = (enum curve_form)form_int;
 	p.edges = (enum curve_edges)edges_int;
 
-	const double *m = curve_dfloat_ptr(map, 10, "map");
+	const double *m = curve_dfloat_ptr(map, 12, "map");
 	double in_lo = m[0], in_scale = m[1], out_lo = m[2], out_scale = m[3];
 	p.f0 = m[4];
 	p.f1 = m[5];
@@ -435,6 +456,7 @@ static VALUE ruby_shape_curve(VALUE self, VALUE buffer, VALUE form, VALUE coeffs
 	p.s1 = m[7];
 	p.i1 = m[8];
 	p.natural = m[9] != 0;
+	double range_lo = m[10], range_hi = m[11];
 
 	if (p.form == CURVE_TABLE) {
 		if (NIL_P(table_i)) {
@@ -492,6 +514,9 @@ static VALUE ruby_shape_curve(VALUE self, VALUE buffer, VALUE form, VALUE coeffs
 	size_t length = RNARRAY_SHAPE(buffer)[0];
 	float *data = mb_sfloat_ptr(buffer);
 
+	struct curve_shaper_ctx ctx = { .p = &p, .sym = sym };
+	double fx1 = primed ? curve_shaper_f(&ctx, x1) : 0;
+
 	for (size_t i = 0; i < length; i++) {
 		double x = ((double)data[i] - in_lo) * in_scale;
 
@@ -499,33 +524,31 @@ static VALUE ruby_shape_curve(VALUE self, VALUE buffer, VALUE form, VALUE coeffs
 			x1 = x;
 			ap_x1 = x;
 			ap_y1 = x;
+			fx1 = curve_shaper_f(&ctx, x);
 			primed = 1;
 		}
 
 		double d = x - x1;
+		double mid = 0.5 * (x + x1);
+		double fx = curve_shaper_f(&ctx, x);
 		double g;
 		if (fabs(d) < CLIP_TINY) {
-			double mid = 0.5 * (x + x1);
-			double e;
-			if (sym) {
-				e = curve_edge_f(&p, fabs(mid));
-				e = mid < 0 ? -e : e;
-			} else {
-				e = curve_edge_f(&p, mid);
-			}
-			g = e - mid;
+			g = curve_shaper_f(&ctx, mid) - mid;
 		} else {
 			double fa = sym ? curve_edge_integral(&p, fabs(x)) : curve_edge_integral(&p, x);
 			double fb = sym ? curve_edge_integral(&p, fabs(x1)) : curve_edge_integral(&p, x1);
 			g = (fa - fb) / d - 0.5 * (x + x1);
 		}
 
+		double w = clip_band_gain(curve_shaper_f, &ctx, x, x1, fx, fx1, mid);
+
 		double dry = CLIP_ALLPASS * x + ap_x1 - CLIP_ALLPASS * ap_y1;
 		ap_x1 = x;
 		ap_y1 = dry;
 		x1 = x;
+		fx1 = fx;
 
-		data[i] = out_lo + out_scale * (dry + g);
+		data[i] = out_lo + out_scale * clip_limit(dry + g + (w - 1.0) * (dry - mid), range_lo, range_hi);
 	}
 
 	if (length > 0) {
