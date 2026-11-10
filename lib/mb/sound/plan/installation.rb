@@ -404,6 +404,37 @@ module MB
           @changes += 1
         end
 
+        # Leaves out, until their streams jump (see #exclude), the
+        # event-driven nodes of every region that read a stream one of the
+        # finished feeders in +feeders+ (a region's, see Region#prepare)
+        # reads: nodes on one stream depend on each other, and the region
+        # running unfused reads the others' Tee branches.
+        def exclude_streams(feeders, why)
+          streams = []
+          feeders.each do |f|
+            next unless @excluded.key?(f) || (f.respond_to?(:plan_nodes) && f.plan_nodes.any? { |x| @excluded.key?(x) })
+            (f.respond_to?(:plan_nodes) ? f.plan_nodes : [f]).each do |x|
+              st = x.respond_to?(:plan_stream) ? x.plan_stream : nil
+              streams << st if st && streams.none? { |o| o.equal?(st) }
+            end
+          end
+          return if streams.empty?
+
+          @regions.each do |r|
+            r.feeders&.each do |g|
+              nodes = g.respond_to?(:plan_nodes) ? g.plan_nodes : [g]
+              next unless nodes.any? { |x| x.respond_to?(:plan_stream) && (st = x.plan_stream) && streams.any? { |o| o.equal?(st) } }
+
+              nodes.each do |x|
+                next if @excluded.key?(x)
+
+                exclude(x, why, until_restart: true)
+                x.plan_direct_readers.each { |rd| exclude(rd, "reads a node whose #{why.delete_prefix('its ')}", until_restart: true) } if x.respond_to?(:plan_direct_readers)
+              end
+            end
+          end
+        end
+
         # Called by Region#foreign_read.
         def foreign_read(node)
           return if @excluded.key?(node)

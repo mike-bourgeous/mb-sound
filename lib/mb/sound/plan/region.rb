@@ -34,6 +34,10 @@ module MB
         # The compiled program (nil before the region first plays).
         attr_reader :program
 
+        # The event-driven nodes (or feed groups) the compiled program runs
+        # per block (nil before it compiles; see EventList).
+        attr_reader :feeders
+
         # The products folded to zero in the program (Op::ZeroFold; see
         # Plan::Fold), after it compiled.
         attr_reader :folds
@@ -433,6 +437,12 @@ module MB
               }
             end
             if finished
+              # Their streams' nodes in other regions leave too: this block
+              # runs unfused, and its nodes read theirs through Tees before
+              # those regions run (an unseen reader otherwise; SessionFuzz
+              # seed 370295: a synth lane's GM time controllers, fused with
+              # another lane after an unmute restarted the stream)
+              @installation.exclude_streams(feeders, 'its event stream is over')
               @result = run_unfused(count)
               return :done
             end

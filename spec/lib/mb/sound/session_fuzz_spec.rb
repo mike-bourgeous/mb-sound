@@ -428,6 +428,21 @@ RSpec.describe('session fuzzing') do
         'bg :l, 1.constant * knob(:lift)',
       ], 1,
     ],
+    # (fix-batch27-1110's gate, fix-fuzz-370295: after an unmute
+    # restarted the one-shot clip's stream, the lane's region ran its
+    # finished block unfused and read the GM time controllers fused in
+    # another region, an unseen reader warning; Installation#exclude_streams)
+    'a synth track muted and unmuted while its one-shot clip plays (seed 370295)' => [
+      :runs, ['bpm 150', 'knob :busy, 0.5'], [
+        'knob :cut, 1200.0, range: 200.0..4000.0',
+        'track(:t2, q: 1/2r) { |clip| clip.synth(voices: 1) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) }.filter(:lowpass, cutoff: knob(:cut), quality: 2) * 0.3 }',
+        'track(:t3, q: 1/2r) { |kit| tr909(kit) * 0.5 }',
+        "scene :s1, t2: seq(C5, D5).n8, t3: grid(16, kick: 'x...x...', snare: '....x...').loop, others: :keep",
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 2) { mute :t2 }',
+        'at_bar(1, beat: 4) { unmute :t2 }',
+      ], 1,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil
@@ -441,6 +456,16 @@ RSpec.describe('session fuzzing') do
   # first one's rows)
   # (batch 27's soak: seed 777022 draws the pre-fader step's knob-level
   # feed; its whole song, every relation, as the soak checked it)
+  # (fix-batch27-1110's gate drew seed 370295: :runs warned of an unseen
+  # reader; its whole song, every relation)
+  it 'holds every relation for seed 370295', render_budget: { seconds: 120, reason: 'one random song, every relation' } do
+    song = SessionFuzz.generate(Random.new(370295))
+    expect(song.code).to include('mute :t2')
+    SessionFuzz::RELATIONS.each do |rel|
+      expect(SessionFuzz.check(rel, song)).to be_nil.or(eq(:skip)), "seed 370295 #{rel}"
+    end
+  end
+
   it 'holds every relation for seed 777022', render_budget: { seconds: 120, reason: 'one random song, every relation' } do
     song = SessionFuzz.generate(Random.new(777022))
     expect(song.code).to include('feed :t1, :wet, :busy, pre: :mute')
