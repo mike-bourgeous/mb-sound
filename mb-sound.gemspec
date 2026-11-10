@@ -18,15 +18,21 @@ Gem::Specification.new do |spec|
   spec.metadata["source_code_uri"] = "https://github.com/mike-bourgeous/mb-sound"
   #spec.metadata["changelog_uri"] = "TODO: Put your gem's CHANGELOG.md URL here."
 
-  # Specify which files should be added to the gem when it is released.
-  # The `git ls-files -z` loads the files in the RubyGem that have been added into git.
+  # The files git tracks, without what only the checkout uses: specs, the
+  # mb-term gem (its own .gem), design notes and research, the golden set,
+  # agent and container setup, and the bundle (an installed gem runs on
+  # RubyGems).  bin/ scripts, presets/, matrices/, and sounds/ (the help
+  # examples' files) ship.  See design/notes/release.md.
   spec.files         = Dir.chdir(File.expand_path('..', __FILE__)) do
-    `git ls-files -z`.split("\x0").reject { |f| f.match(%r{^(test|spec|features|sounds|tmp|coverage|gems)/}) }
+    `git ls-files -z`.split("\x0").reject { |f|
+      f.match(%r{\A(test|spec|features|tmp|coverage|gems|golden|experiments|research|design|release|\.claude|\.github)/}) ||
+        f.match(%r{\A(CLAUDE\.md|Rakefile|DOCKER\.md|Dockerfile|dock\.sh|Gemfile|Gemfile\.lock|\.[^/]+)\z})
+    }
   end
   spec.require_paths = ["lib"]
   spec.bindir        = "bin"
-  # TODO: decide what tools should be exposed when the gem is installed
-  #spec.executables   = spec.files.grep(%r{^bin/}) { |f| File.basename(f) }
+  # The console; the other scripts ship in bin/ (`gem contents mb-sound`)
+  spec.executables   = ['sound.rb']
 
   spec.extensions = Dir['ext/**/extconf.rb']
 
@@ -48,13 +54,18 @@ Gem::Specification.new do |spec|
   # For generating MIDI controller templates for ACID
   spec.add_runtime_dependency 'builder', '~> 3.2.4'
 
+  # The console (bin/sound.rb) runs in Pry
+  spec.add_runtime_dependency 'pry', '~> 0.16.0'
+
+  # Wrapped text (MB::U.wrap: play's header, help)
+  spec.add_runtime_dependency 'word_wrap', '~> 1.0.0'
+
   spec.add_development_dependency 'rake', '~> 13.0.1'
   spec.add_development_dependency 'bundler', '>= 4.0'
   spec.add_development_dependency 'rake-compiler', '~> 1.1.1'
 
   # Interactive command line gems
   spec.add_development_dependency 'irb', '~> 1.16.0'
-  spec.add_development_dependency 'pry', '~> 0.16.0'
   spec.add_development_dependency 'pry-byebug', '~> 3.12.0'
   spec.add_development_dependency 'pry-doc'
   spec.add_development_dependency 'yard'
@@ -66,6 +77,4 @@ Gem::Specification.new do |spec|
 
   spec.add_development_dependency 'getoptlong', '~> 0.2.1'
   spec.add_development_dependency 'forwardable', '~> 1.3.3'
-
-  spec.add_development_dependency 'word_wrap', '~> 1.0.0'
 end
