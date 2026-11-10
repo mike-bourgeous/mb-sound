@@ -696,12 +696,25 @@ module MB
     # The console's `ruby node`.
     module RecipeMethods
       # Prints Ruby code that builds +graph+ (a node, bundle, synth, or an
-      # Array of nodes) again (see GraphNode#to_ruby).  Returns nil.
+      # Array of nodes) again (see GraphNode#to_ruby).  `ruby set` prints
+      # the whole set as its set document, the text `save :gig, set` would
+      # write (tracks, scenes, the flow, and last the metadata they carry;
+      # GraphIO::SetWriter).  Returns nil.
       #
       # Example (bin/sound.rb):
       #     s = 220.hz.saw.filter(:lowpass, cutoff: 800).softclip
       #     ruby s
       def ruby(graph, inputs: {}, seeds: false)
+        if graph.is_a?(Arrangement) || graph.respond_to?(:to_arrangement)
+          begin
+            puts GraphIO.dump(graph)
+          rescue GraphIO::DumpError => e
+            # (what a save would refuse still prints, with why)
+            puts e.code if e.code
+            puts "# FIXME(graph-io): #{e.message}"
+          end
+          return
+        end
         puts GraphNode::Recipe::RubyWriter.new(graph, inputs: inputs, seeds: seeds).to_s
       end
     end

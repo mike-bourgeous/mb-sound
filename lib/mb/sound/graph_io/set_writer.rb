@@ -29,7 +29,9 @@ module MB
       # track's clip, or the first clip a scene gives it, keeping the random
       # state, and its recipe printed with the block's parameter name), the
       # clips and kits scenes play, scenes, mute groups, sections declared
-      # outside a flow, and the form playing (else the one built last).  Not
+      # outside a flow, the form playing (else the one built last), and the
+      # metadata the set and its named pieces carry (`meta` lines at the
+      # end; Meta).  Not
       # saved: what is playing, the journal, undo, markers, snapshots, and
       # recorded MIDI (takes keep those).  Scene blocks print as their
       # source when they hold only Loader::SCENE_COMMANDS (`scene(:gap) {
@@ -105,6 +107,7 @@ module MB
           body.concat(mute_groups)
           body.concat(sections)
           body.concat(form)
+          body.concat(meta_lines)
 
           unless @problems.empty?
             raise DumpError.new("can't save this set yet: #{@problems.uniq.join('; ')}", problems: @problems.uniq, code: body.join("\n"))
@@ -125,6 +128,20 @@ module MB
 
         def lit(v)
           @lit.literal(v)
+        end
+
+        # The set's metadata (Session#metadata; Meta), last so the song
+        # reads first: the set's own, then each name's in the order it was
+        # given, as the `meta` commands that carry it (names without a
+        # piece too: what an importer carried is kept).
+        def meta_lines
+          store = @session.metadata
+          return [] if store.empty?
+          lines = ['', '# Metadata: what the set and its pieces carry from where they came from (no effect on the sound; help :meta)']
+          own = store[nil]
+          lines.concat(Meta.statement(nil, own)) unless own.empty?
+          store.to_h.each { |name, m| lines.concat(Meta.statement(name, m)) }
+          lines
         end
 
         # Tempo, meter, master gain, and quantization.
