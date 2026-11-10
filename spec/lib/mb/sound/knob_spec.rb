@@ -191,6 +191,30 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       end
     end
 
+    it 'follows another Session knob from a frame inside a buffer with that knob\'s values on the same frames, at any buffer size' do
+      # fix-batch27-1110: a follow landing inside a span read its source
+      # knob from the span's first frame, so a send or knob following a
+      # knob that moved differed with the buffer size (SessionFuzz seed
+      # 777022: `feed :t1, :wet, :busy` on the beat :busy turned)
+      results = [800, *slow_tier([[367, 368], 64, 1031])].map { |size|
+        s = new_session(transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+        s.knob(:src, 0, smooth: 0)
+        k = s.knob(:dst, 0, smooth: 0)
+        s.turn(:src, 1, over: 4.beats)                   # frames 0...96000
+        s.add(k * 1, name: :a)
+        s.turn(:dst, :src, start_time: 107/320r)         # frame 32100 (inside an 800-frame buffer)
+        data = render(s, 96_000, size)
+        s.close
+        data
+      }
+      results.each { |r| expect(r).to eq(results[0]) }
+
+      d = results[0]
+      expect(d[32_099]).to eq(0)
+      expect(d[32_100]).to be_within(1e-4).of(32_100 / 96_000.0)
+      expect(d[50_000]).to be_within(1e-4).of(50_000 / 96_000.0)
+    end
+
     it 'gives players starting or waking partway through a buffer the values of their own frames' do
       # fixes-7: readers read from the buffer's first frame, so a player
       # launched (or unmuted) partway through a buffer read the knob up to

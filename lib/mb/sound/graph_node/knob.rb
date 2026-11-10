@@ -923,7 +923,10 @@ module MB
                 @value = out[stop - 1]
               end
             when Follow
-              v = follow_values(seg, n)
+              # (a followed Session knob is read from this piece's first
+              # frame, not the span's: a follow landing inside a span read
+              # its source up to a buffer early; fix-batch27-1110)
+              v = f != frame && @session&.knob_frame ? @session.with_knob_frame(f) { follow_values(seg, n) } : follow_values(seg, n)
               out[pos...stop] = v unless v.is_a?(Numo::SFloat) && MB::Sound::Kernels.copy_range(out, pos, v, 0, n)
               @value = out[stop - 1]
             end

@@ -405,6 +405,29 @@ RSpec.describe('session fuzzing') do
         'key :d, :dorian; lock :play',
       ], 2,
     ],
+    # (batch 27's soak, fix-batch27-1110: a send following knob :busy,
+    # fed on the beat :busy turned, read :busy from the span's first frame
+    # instead of the feed's landing frame, so the send's level differed
+    # with the buffer size; any knob following a Session knob did, since
+    # GraphNode::Knob#render reads it from the follow's first frame)
+    'a send following a knob that turns on the frame the feed lands (seed 777022)' => [
+      :buffer_size, ['bpm 112', 'knob :busy, 0.5'], [
+        'track(:t1, q: 1/4r) { |clip| clip.synth(voices: 1) { |v| v.hz.sine * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t1: seq(C4, E4, G4).n8.loop',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(1, beat: 2) { turn :busy, 0.4 }',
+        'bus(:wet) { |sig| sig.delay(1.n8, feedback: 0.3) * 0.5 }',
+        'at_bar(1, beat: 2) { feed :t1, :wet, :busy, pre: :mute, on: :beat }',
+      ], 1,
+    ],
+    'a knob following a knob that turns on the frame the follow lands' => [
+      :buffer_size, ['bpm 112', 'knob :busy, 0.5'], [
+        'knob :lift, 0.2',
+        'at_bar(1, beat: 2) { turn :busy, 0.4 }',
+        'at_bar(1, beat: 2) { turn :lift, :busy, on: :beat }',
+        'bg :l, 1.constant * knob(:lift)',
+      ], 1,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil
@@ -416,6 +439,16 @@ RSpec.describe('session fuzzing') do
   # rows: a user error by design, ClipSwaps#kit_swap_mapping; kit swaps
   # are generated only where every scene gives the track a grid with the
   # first one's rows)
+  # (batch 27's soak: seed 777022 draws the pre-fader step's knob-level
+  # feed; its whole song, every relation, as the soak checked it)
+  it 'holds every relation for seed 777022', render_budget: { seconds: 120, reason: 'one random song, every relation' } do
+    song = SessionFuzz.generate(Random.new(777022))
+    expect(song.code).to include('feed :t1, :wet, :busy, pre: :mute')
+    SessionFuzz::RELATIONS.each do |rel|
+      expect(SessionFuzz.check(rel, song)).to be_nil.or(eq(:skip)), "seed 777022 #{rel}"
+    end
+  end
+
   it 'swaps a kit only where every scene plays it a grid with those rows (seed 773034)', render_budget: { seconds: 60, reason: 'one random song' } do
     song = SessionFuzz.generate(Random.new(773034))
     expect(song.code).to include('t3: beats(16')
