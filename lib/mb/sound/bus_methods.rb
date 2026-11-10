@@ -11,8 +11,9 @@ module MB
     #     bg :keys, 220.hz.triangle.at(-20.db), send: { verb: -12.db, echo: -18.db }
     #     feed :keys, :verb, -6.db, over: 2.bars    # change a send (journaled, undoable)
     #     feed :keys, :echo, :space                 # a send following knob :space
-    #     track(:lead, send: { verb: [-6.db, :pre] }) { |c| ... }   # pre-fader: level 0 still sends
-    #     feed :lead, :verb, -6.db, pre: true       # make a send pre-fader (pre: false: post again)
+    #     track(:lead, pre_send: { verb: -6.db }) { |c| ... }   # pre-fader: level 0 still sends
+    #     track(:pad, pre_mute_send: { verb: -6.db }) { |c| ... } # pre-mute: muted, still sends
+    #     feed :lead, :verb, -6.db, pre: true       # switch a send live (pre: :mute, pre: false)
     #     track(:kick, to: :drums) { |k| tr808(k) } # a track's main out into a bus
     #     bg :bass, bass_line.duck(:drums, only: :kick)   # sidechain from a drum voice
     #     mute :verb; solo :keys                    # buses are strip names (a solo keeps its buses)
@@ -65,12 +66,13 @@ module MB
       # #send_level and #fx_send (`send` is every Ruby object's method-call
       # method).
       #
-      # +pre: true+ (or a level of `[level, :pre]`, as in `send:`) makes
-      # the send pre-fader: it hears the track after its fades and before
-      # its level, so `level :lead, 0` silences the dry sound while the bus
-      # still gets it (a reverb lead-in); a muted track sends nothing
-      # either way.  +pre: false+ makes it post-fader again; the level may
-      # be left out to switch only that.
+      # +pre: true+ makes the send pre-fader (like `pre_send:` on a
+      # track): it hears the track after its fades and before its level,
+      # so `level :lead, 0` silences the dry sound while the bus still gets
+      # it (a reverb lead-in); a muted track sends nothing.  +pre: :mute+
+      # makes it pre-mute (like `pre_mute_send:`): a muted track keeps
+      # feeding it too.  +pre: false+ makes it post-fader again; the level
+      # may be left out to switch only where it taps.
       #
       #     feed :keys, :verb, -6.db, over: 2, on: :bar
       #     feed :lead, :verb, -6.db, pre: true
@@ -86,7 +88,8 @@ module MB
       alias fx_send feed
 
       # The routing of every player name: name => { to:, send: { bus =>
-      # level } } (`[level, :pre]` for a pre-fader send).
+      # level } }, pre-fader and pre-mute sends under +pre_send:+ and
+      # +pre_mute_send:+.
       def routes
         Session.current.routes
       end

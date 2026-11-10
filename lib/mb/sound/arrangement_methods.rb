@@ -29,8 +29,9 @@ module MB
       # attack; capped at 1 bar unless +lead_max:+ says
       # otherwise), +nudge:+ moves its notes by a fixed time (e.g.
       # `nudge: 6.ms` pulls a backbeat late).  +send:+ sends it to buses
-      # (`send: { verb: -12.db }`) and +to:+ plays it into a bus instead of
-      # the master (see BusMethods).  +clock:+ plays its clips on a clock
+      # (`send: { verb: -12.db }`; +pre_send:+ pre-fader, +pre_mute_send:+
+      # pre-mute) and +to:+ plays it into a bus instead of the master (see
+      # BusMethods).  +clock:+ plays its clips on a clock
       # (`track :bowl, clock: :tide do |c| ... end`; see MB::Sound::Clock).
       # Also available as #define_track.
       # +trigger: true+ makes it a trigger track, heard only by sidechain readers
@@ -50,8 +51,8 @@ module MB
       # L.inst.tine_piano, fx: L.fx.reverb.hall`, a chain `fx: [:juno1,
       # :hall]`; it stays through new instruments until given again (#fx
       # swaps it on a playing track).
-      def track(name, *values, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, trigger: false, fx: Arrangement::KEEP_FX, &patch)
-        Session.current.arrangement.track(name, *values, q: q, fade: fade, lead: lead, nudge: nudge, lead_max: lead_max, to: to, send: send, clock: clock, trigger: trigger, fx: fx, &patch)
+      def track(name, *values, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, pre_send: nil, pre_mute_send: nil, clock: nil, trigger: false, fx: Arrangement::KEEP_FX, &patch)
+        Session.current.arrangement.track(name, *values, q: q, fade: fade, lead: lead, nudge: nudge, lead_max: lead_max, to: to, send: send, pre_send: pre_send, pre_mute_send: pre_mute_send, clock: clock, trigger: trigger, fx: fx, &patch)
       end
       alias define_track track
 

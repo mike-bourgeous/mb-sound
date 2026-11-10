@@ -353,21 +353,27 @@ module SessionFuzz
         end
       end
     end
-    # (prefader-sends-1) a pre-fader send: a part feeding a :wet bus
-    # pre-fader with its dry sound pulled down (level 0, now or over a
-    # ramp, so the bus alone carries it), sometimes switched back to
-    # post-fader on a beat, or muted (which cuts pre-fader sends too) and
-    # unmuted (drawn last, so every seed keeps the song it made before)
+    # (prefader-sends-1) pre-fader and pre-mute sends: a part feeding a
+    # :wet bus pre-fader or pre-mute (switched live by feed, or from a bg
+    # of its own) with its dry sound pulled down (level 0, now or over a
+    # ramp, so the bus alone carries it), sometimes switched to another tap
+    # point on a beat, or muted and unmuted (a pre-fader send goes quiet, a
+    # pre-mute one keeps sending; drawn last, so every seed keeps the song
+    # it made before)
     if rng.rand < 0.3
       t = pick(rng, names)
       level = pick(rng, ['-6.db', '0.5', ':busy'])
-      send = rng.rand < 0.5 ? "#{level}, pre: true" : "[#{level}, :pre]"
       lines << "bus(:wet) { |sig| sig.#{pick(rng, BUS_FX)} }"
-      lines << "at_bar(1, beat: 2) { feed :#{t}, :wet, #{send}#{pick(rng, ['', ', on: :beat'])} }"
+      if rng.rand < 0.75
+        lines << "at_bar(1, beat: 2) { feed :#{t}, :wet, #{level}, pre: #{pick(rng, ['true', ':mute'])}#{pick(rng, ['', ', on: :beat'])} }"
+      else
+        lines << "at_bar(1, beat: 2) { bg :prewet, #{pick(rng, HELD)}, #{pick(rng, %w[pre_send pre_mute_send])}: { wet: #{level} }, on: :now }"
+        t = 'prewet'
+      end
       lines << "at_bar(#{rng.rand(1..bars)}, beat: #{rng.rand(2..beats)}) { level :#{t}, 0#{pick(rng, ['', ', over: 1/2r', ', on: :beat'])} }"
       case rng.rand(3)
       when 0
-        lines << "at_bar(#{rng.rand(1..bars)}, beat: #{rng.rand(2..beats)}) { feed :#{t}, :wet, pre: false#{pick(rng, ['', ', on: :beat'])} }"
+        lines << "at_bar(#{rng.rand(1..bars)}, beat: #{rng.rand(2..beats)}) { feed :#{t}, :wet, pre: #{pick(rng, ['false', 'true', ':mute'])}#{pick(rng, ['', ', on: :beat'])} }"
       when 1
         bar = rng.rand(1..bars)
         lines << "at_bar(#{bar}, beat: 2) { mute :#{t} }"

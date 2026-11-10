@@ -29,33 +29,37 @@ module MB
       # its +sends+ to template buses ({ bus => gain or knob name }; the
       # keyword is +send:+, as for tracks, but the member is #sends: a
       # #send would hide Object#send; omnibus14's guard in
-      # data_member_names_spec.rb).
-      Role = Data.define(:patch, :level, :params, :filter, :duck, :q, :fade, :about, :to, :sends) do
-        def initialize(patch:, level: nil, params: {}, filter: nil, duck: nil, q: nil, fade: nil, about: nil, to: nil, send: {}, sends: nil)
+      # data_member_names_spec.rb), and its pre-fader sends +pre_sends+
+      # (keyword +pre_send:+, as for tracks; Session::Buses#route).
+      Role = Data.define(:patch, :level, :params, :filter, :duck, :q, :fade, :about, :to, :sends, :pre_sends) do
+        def initialize(patch:, level: nil, params: {}, filter: nil, duck: nil, q: nil, fade: nil, about: nil, to: nil, send: {}, sends: nil, pre_send: {}, pre_sends: nil)
           send = sends unless sends.nil? # (Data#with passes the member)
+          pre_send = pre_sends unless pre_sends.nil?
           raise ArgumentError, "A role's patch is a preset or method name (got #{patch.inspect})" unless patch.is_a?(Symbol)
           unless params.is_a?(Hash) && params.values.all? { |v| v.is_a?(Numeric) || v.is_a?(Symbol) }
             raise ArgumentError, "params: must be a Hash of numbers or knob names (got #{params.inspect})"
           end
           raise ArgumentError, "filter: names a knob (got #{filter.inspect})" unless filter.nil? || filter.is_a?(Symbol)
           raise ArgumentError, "to: names a template bus (got #{to.inspect})" unless to.nil? || to.is_a?(Symbol)
-          unless send.is_a?(Hash) && send.all? { |k, v|
-                   g = (Session::Buses.send_parts(v)[0] rescue nil) # (not `level`: that is this method's argument)
-                   k.is_a?(Symbol) && ((g.is_a?(Numeric) && g.real? && g >= 0) || g.is_a?(Symbol))
-                 }
-            raise ArgumentError, "send: must be a Hash from bus name to a gain (-12.db), a knob name, or [either, :pre] for pre-fader (got #{send.inspect})"
+          { send: send, pre_send: pre_send }.each do |kw, h|
+            unless h.is_a?(Hash) && h.all? { |k, v| k.is_a?(Symbol) && ((v.is_a?(Numeric) && v.real? && v >= 0) || v.is_a?(Symbol)) }
+              raise ArgumentError, "#{kw}: must be a Hash from bus name to a gain (-12.db) or a knob name (got #{h.inspect})"
+            end
           end
+          both = send.keys & pre_send.keys
+          raise ArgumentError, "A role sends to #{both.map(&:inspect).join(', ')} in both send: and pre_send: (one send per bus)" unless both.empty?
           super(
             patch: patch, level: level, params: params.dup.freeze, filter: filter, duck: duck, q: q, fade: fade,
-            about: about&.dup&.freeze, to: to, sends: send.dup.freeze
+            about: about&.dup&.freeze, to: to, sends: send.dup.freeze, pre_sends: pre_send.dup.freeze
           )
         end
 
         # The keyword options that rebuild this role (for Template#to_ruby).
         def options
-          h = to_h.except(:patch, :sends)
+          h = to_h.except(:patch, :sends, :pre_sends)
           h[:send] = sends
-          h.reject { |k, v| v.nil? || (%i[params send].include?(k) && v.empty?) }
+          h[:pre_send] = pre_sends
+          h.reject { |k, v| v.nil? || (%i[params send pre_send].include?(k) && v.empty?) }
         end
       end
 
@@ -625,7 +629,7 @@ module MB
         def setup_roles
           template = self
           roles.each { |n, r|
-            MB::Sound.track(n, q: r.q, fade: r.fade, to: r.to, send: (r.sends unless r.sends.empty?)) { |c| template.patch(n, c) }
+            MB::Sound.track(n, q: r.q, fade: r.fade, to: r.to, send: (r.sends unless r.sends.empty?), pre_send: (r.pre_sends unless r.pre_sends.empty?)) { |c| template.patch(n, c) }
           }
           scenes.each_key { |s| MB::Sound.scene(s, **scene(s)) }
           self
@@ -1091,12 +1095,11 @@ module MB
           end
           Genre.bus_order(t.buses) # (raises for loops)
           t.roles.each do |n, r|
-            [*([r.to] if r.to), *r.sends.keys].each do |b|
+            [*([r.to] if r.to), *r.sends.keys, *r.pre_sends.keys].each do |b|
               next if t.buses.key?(b)
               raise ArgumentError, "#{where}: role #{n.inspect} routes to #{b.inspect}, which is no bus#{Form.suggest(b, t.buses.keys)}"
             end
-            r.sends.each_value do |v|
-              v = Session::Buses.send_parts(v)[0]
+            [*r.sends.values, *r.pre_sends.values].each do |v|
               next unless v.is_a?(Symbol) && !t.knobs.key?(v)
               raise ArgumentError, "#{where}: role #{n.inspect} sends at #{v.inspect}, which is no knob#{Form.suggest(v, t.knobs.keys)}"
             end

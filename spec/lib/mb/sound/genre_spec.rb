@@ -333,12 +333,14 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       end
     end
 
-    it 'takes pre-fader sends in roles ([gain or knob, :pre]) and refuses other arrays' do
-      r = genre::Role.new(patch: :x, level: -3.db, send: { hall: [-12.db, :pre], echo: [:space, :pre] })
-      expect(r.sends).to eq(hall: [-12.db, :pre], echo: [:space, :pre])
-      expect(r.level).to eq(-3.db) # (a block local in the check once overwrote the level with a send's)
-      expect(r.options[:send]).to eq(r.sends)
-      expect { genre::Role.new(patch: :x, send: { hall: [-12.db, :prefader] }) }.to raise_error(ArgumentError, /\[either, :pre\]/)
+    it 'takes pre-fader sends in roles (pre_send:), sets them up, and prints them back' do
+      r = genre::Role.new(patch: :x, level: -3.db, send: { echo: :space }, pre_send: { hall: -12.db })
+      expect(r.pre_sends).to eq(hall: -12.db)
+      expect(r.level).to eq(-3.db)
+      expect(r.options).to include(send: { echo: :space }, pre_send: { hall: -12.db })
+      expect(r.with(level: nil).pre_sends).to eq(hall: -12.db)
+      expect { genre::Role.new(patch: :x, send: { hall: 0.5 }, pre_send: { hall: -12.db }) }.to raise_error(ArgumentError, /both send: and pre_send:/)
+      expect { genre::Role.new(patch: :x, pre_send: { hall: -1 }) }.to raise_error(ArgumentError, /pre_send: must be a Hash/)
     end
 
     it 'sets up buses and routes, and saves them in a set document that loads to the same text' do

@@ -205,6 +205,8 @@ module MB
         # - readers: after the fade (#reader_levels; times the key level),
         # - pre-fader sends: after the fade, mute/solo, and MAIN share,
         #   skipping the level (this method),
+        # - pre-mute sends: after the fade and MAIN share (this method with
+        #   no +strip+),
         # - post-fader sends and the main out: after everything (the
         #   +ramp+ Session#render_player computes; kept as its own product
         #   so post-fader samples stay bit for bit what they were).

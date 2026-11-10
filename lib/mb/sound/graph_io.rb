@@ -77,9 +77,10 @@ module MB
       # and a scene block's tempo change as `tempo`; `bpm` sets the song's
       # base tempo.  Older documents' scene and section `bpm:` values and
       # scene blocks' `bpm` lines load as `tempo:` and `tempo`.  Format 10
-      # (prefader-sends-1, 2026-11-10) writes a pre-fader send as `send: {
-      # verb: [-12.db, :pre] }`, which older mb-sound refuses as a send
-      # level (it stops at the format line instead).
+      # (prefader-sends-1, 2026-11-10) writes pre-fader and pre-mute sends
+      # as `track :lead, pre_send: { verb: -12.db }` and `pre_mute_send:`,
+      # which older mb-sound doesn't know (it stops at the format line
+      # instead).
       #
       # FORMATS names the change each version made, so loaders gate on a
       # name (GraphIO.since?) and branches adding versions touch only this

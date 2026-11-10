@@ -310,11 +310,13 @@ module MB
       #     track(:pad, lead: 0.5.attack) { |c| ... }   # half the attack before the beat
       #     track(:drums, nudge: 5.ms) { |k| tr808(k) }
       #
-      # +send:+ (bus name => level) and +to:+ (a bus for the track's main
+      # +send:+ (bus name => level), +pre_send:+ and +pre_mute_send:+ (the
+      # same, pre-fader and pre-mute), and +to:+ (a bus for the track's main
       # out, or :master) set the track's routing (see Session::Buses#route;
       # left as they are when not given):
       #
       #     track(:keys, send: { verb: -12.db }) { |c| c.synth { |v| v.hz.triangle * v.amp_env } }
+      #     track(:lead, pre_send: { verb: -6.db }) { |c| ... }   # `level :lead, 0` keeps feeding it
       #     track(:kick, to: :drums) { |k| tr808(k) }
       #
       # +clock:+ plays the track's clips on a clock (a clock's name, a
@@ -328,7 +330,7 @@ module MB
       # +trigger: true+ makes it a trigger track (SidechainMethods#sidechain): heard
       # only by readers such as `duck(:name)`, never mixed (see
       # Session::Buses#route); +to:+ and +send:+ don't apply.
-      def track(name, *values, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, trigger: false, fx: KEEP_FX, &patch)
+      def track(name, *values, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, pre_send: nil, pre_mute_send: nil, clock: nil, trigger: false, fx: KEEP_FX, &patch)
         raise ArgumentError, "Track names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
         values = track_values(name, values, patch) or return nil
         unless fx.equal?(KEEP_FX)
@@ -379,12 +381,12 @@ module MB
         end
         return note_failed_track(name, @last_patch_error) unless ok
         @mutex.synchronize { @failed_tracks.delete(name) }
-        raise ArgumentError, "A trigger track's sound goes only to its readers (duck(#{name.inspect})); it takes no to: or send:" if trigger && (to || send)
+        raise ArgumentError, "A trigger track's sound goes only to its readers (duck(#{name.inspect})); it takes no to: or send:" if trigger && (to || send || pre_send || pre_mute_send)
         return nil unless @session.names.claim(name, :track)
         if trigger || @session.trigger_track?(name)
           @session.route(name, trigger: !!trigger)
         end
-        @session.route(name, to: to || :keep, send: send) if to || send
+        @session.route(name, to: to || :keep, send: send, pre_send: pre_send, pre_mute_send: pre_mute_send) if to || send || pre_send || pre_mute_send
 
         tr = nil
         old = nil
@@ -1105,9 +1107,11 @@ module MB
           if r[:trigger]
             box.route(n, trigger: true)
           else
-            sends = r[:send].select { |b, v| Session::Buses.send_parts(v)[0].is_a?(Numeric) && box.bus_definitions.key?(b) }
+            sends = Session::Buses::SEND_KEYWORDS.to_h { |kw|
+              [kw, (r[kw] || {}).select { |b, v| v.is_a?(Numeric) && box.bus_definitions.key?(b) }]
+            }
             to = r[:to] == :master || box.bus_definitions.key?(r[:to]) ? r[:to] : :master
-            box.route(n, to: to, send: sends.empty? ? nil : sends)
+            box.route(n, to: to, **(sends.values.all?(&:empty?) ? {} : sends))
           end
         end
 
