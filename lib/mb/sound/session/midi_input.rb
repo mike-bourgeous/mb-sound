@@ -310,7 +310,7 @@ module MB
             unless events.empty?
               @history.concat(events)
               @session.send(:log_midi, self, events)
-              track_held(events)
+              track_held(events) if cuts.nil? # (read_cut tracks each piece)
             end
             trim_history(from)
             follow_gestures(events, frame, rate)
@@ -375,19 +375,31 @@ module MB
         end
 
         # A span read in pieces around the wire changes landing in it (see
-        # #pump).
+        # #pump).  The held notes follow each piece before the change after
+        # it lands, so an unwire owes note-offs for the notes held on its
+        # frame (fix-fuzz-1110: they were the span's first frame's, so a
+        # note started earlier in the span hung and one it ended got a
+        # second note-off, only at buffer sizes putting the unwire inside
+        # a span).
         def read_cut(frame, count, from, per_sample, epoch, rate, cuts)
           out = []
           at = 0
           cuts.each do |off, action|
             if off > at
-              out.concat(read_span(frame + at, off - at, Sequence::Transport.position_at(from, at, per_sample), per_sample, epoch, rate))
+              out.concat(read_piece(frame + at, off - at, Sequence::Transport.position_at(from, at, per_sample), per_sample, epoch, rate))
               at = off
             end
             action.call
           end
-          out.concat(read_span(frame + at, count - at, Sequence::Transport.position_at(from, at, per_sample), per_sample, epoch, rate)) if count > at
+          out.concat(read_piece(frame + at, count - at, Sequence::Transport.position_at(from, at, per_sample), per_sample, epoch, rate)) if count > at
           out
+        end
+
+        # One piece of a cut span (see #read_cut), its held notes tracked.
+        def read_piece(frame, count, from, per_sample, epoch, rate)
+          events = read_span(frame, count, from, per_sample, epoch, rate)
+          track_held(events) unless events.empty?
+          events
         end
 
         # Follows the track's hold (Session::Holds): while held, the wired
