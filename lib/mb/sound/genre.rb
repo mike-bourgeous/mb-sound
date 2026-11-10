@@ -39,8 +39,11 @@ module MB
           end
           raise ArgumentError, "filter: names a knob (got #{filter.inspect})" unless filter.nil? || filter.is_a?(Symbol)
           raise ArgumentError, "to: names a template bus (got #{to.inspect})" unless to.nil? || to.is_a?(Symbol)
-          unless send.is_a?(Hash) && send.all? { |k, v| k.is_a?(Symbol) && ((v.is_a?(Numeric) && v.real? && v >= 0) || v.is_a?(Symbol)) }
-            raise ArgumentError, "send: must be a Hash from bus name to a gain (-12.db) or a knob name (got #{send.inspect})"
+          unless send.is_a?(Hash) && send.all? { |k, v|
+                   level, _ = (Session::Buses.send_parts(v) rescue [nil])
+                   k.is_a?(Symbol) && ((level.is_a?(Numeric) && level.real? && level >= 0) || level.is_a?(Symbol))
+                 }
+            raise ArgumentError, "send: must be a Hash from bus name to a gain (-12.db), a knob name, or [either, :pre] for pre-fader (got #{send.inspect})"
           end
           super(
             patch: patch, level: level, params: params.dup.freeze, filter: filter, duck: duck, q: q, fade: fade,
@@ -1093,6 +1096,7 @@ module MB
               raise ArgumentError, "#{where}: role #{n.inspect} routes to #{b.inspect}, which is no bus#{Form.suggest(b, t.buses.keys)}"
             end
             r.sends.each_value do |v|
+              v = Session::Buses.send_parts(v)[0]
               next unless v.is_a?(Symbol) && !t.knobs.key?(v)
               raise ArgumentError, "#{where}: role #{n.inspect} sends at #{v.inspect}, which is no knob#{Form.suggest(v, t.knobs.keys)}"
             end

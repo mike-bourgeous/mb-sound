@@ -56,13 +56,17 @@ module MB
             draw_tree(c.sub(0, rows.length + 1, c.w, c.h - rows.length - 1), s, feeds)
           end
 
-          # What feeds each bus: { bus => [[player, :to or :send, gain], ...] }
-          # (gain a linear send level, a follow's name, or nil for to:).
+          # What feeds each bus: { bus => [[player, :to, :send, or :pre
+          # (a pre-fader send), gain], ...] } (gain a linear send level, a
+          # follow's name, or nil for to:).
           def feeds_of(s)
             feeds = Hash.new { |h, k| h[k] = [] }
             s.routes.each do |player, r|
               feeds[r[:to]] << [player, :to, nil] if r[:to] && r[:to] != :master
-              (r[:send] || {}).each { |bus, level| feeds[bus] << [player, :send, level] }
+              (r[:send] || {}).each do |bus, level|
+                level, pre = MB::Sound::Session::Buses.send_parts(level)
+                feeds[bus] << [player, pre ? :pre : :send, level]
+              end
             end
             feeds
           end
@@ -93,15 +97,16 @@ module MB
             end
           end
 
-          # A source: "← kick  to:" or "← bass  -12.0 dB" with the sent
-          # signal's meter.
+          # A source: "← kick  to:", "← bass  -12.0 dB", or (pre-fader)
+          # "← lead -12.0 pre" with the sent signal's meter.
           def feed_row(c, y, player, how, gain, send, name_w)
             x = c.line(y, [' ', nil], ["#{c.glyph(:sep) == '|' ? '<' : '←'} ", :dim], [c.pad(player, name_w - 2), :text], ' ')
             label = if how == :to
                       'to:'
                     else
                       db = send ? send.gain : level_db(gain)
-                      db ? "#{Panes.db(db)} dB" : "follows #{gain}"
+                      unit = how == :pre ? 'pre' : 'dB'
+                      db ? "#{Panes.db(db)} #{unit}" : "follows #{gain}#{how == :pre ? ' pre' : ''}"
                     end
             x = c.text(x, y, label.rjust(9), how == :to ? :key : :text)
             l = send&.level
@@ -131,7 +136,7 @@ module MB
             s.buses.each { |b| kids[key.(b.to)] << [:bus, b.name] }
             players = (s.routes.keys + s.players.map(&:name)).uniq
             players.each { |p| kids[key.(s.routes.dig(p, :to))] << [:player, p] }
-            feeds.each { |bus, list| list.each { |player, how, _| kids[[:bus, bus]] << [:send, player] if how == :send } }
+            feeds.each { |bus, list| list.each { |player, how, _| kids[[:bus, bus]] << [how, player] if how == :send || how == :pre } }
             kids.default_proc = nil
             root = [:node, :master]
             lines = TreeText.lines(root, children: ->(n) { n[0] == :bus || n == root ? kids[n] || [] : [] }, glyphs: c.glyph(:sep) == '|' ? :ascii : :unicode)
@@ -142,6 +147,7 @@ module MB
                             when :node then [name.to_s, :title]
                             when :bus then [name.to_s, :key]
                             when :send then ["#{name} (send)", :dim]
+                            when :pre then ["#{name} (pre-fader send)", :dim]
                             else [name.to_s, :name]
                             end
               c.text(x, i + 1, label, role)

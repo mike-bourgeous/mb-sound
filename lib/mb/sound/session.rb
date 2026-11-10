@@ -2117,11 +2117,18 @@ module MB
           strip = ramp_levels(p, :strip_level, :strip_ramp, base + offset, frames)
           ramp = gain ? (strip ? gain * strip : gain) : strip
           # The route: CUE gets its share, MAIN the rest (see Cue)
-          ramp = cue_route(p, data, ramp, offset, frames, base + offset) if p.cue
+          main = nil
+          if p.cue
+            ramp = cue_route(p, data, ramp, offset, frames, base + offset)
+            main = @cue_main
+          end
+          # The strip's pre-fader tap point, for a route with pre-fader
+          # sends (Faders#pre_fader_levels; +ramp+ is the post-fader one)
+          pre = routed && route_of(p.name)&.pre ? pre_fader_levels(fade, strip, main) : nil
 
           if routed
             reader = bus_tapped?(p.name) ? reader_levels(p, fade, level, base + offset, frames, route_of(p.name)&.trigger) : nil
-            deliver_player(p, data, ramp, mix, stem, offset, frames, reader: reader)
+            deliver_player(p, data, ramp, mix, stem, offset, frames, reader: reader, pre: pre)
           else
             c = -1
             while (c += 1) < mix.length # (no each_with_index: an imemo per player per buffer)

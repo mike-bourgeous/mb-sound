@@ -61,7 +61,32 @@ module MB
         # knob (a GraphNode::Knob), +trigger+ true for a trigger track (a sidechain
         # line: heard by readers only, never mixed; see #route).  Its level
         # is the player's level knob, like any player's (Faders).
-        Route = Struct.new(:to, :sends, :trigger, keyword_init: true)
+        #
+        # +pre+ (nil for none) is a Hash from bus name to the send's mode
+        # knob, for sends made pre-fader or switched since (`send: { verb:
+        # [-12.db, :pre] }`, `feed ..., pre: true`): 1 taps the player
+        # pre-fader, 0 post-fader, and a switch glides between them on its
+        # exact frame.  A send without one is post-fader.
+        Route = Struct.new(:to, :sends, :trigger, :pre, keyword_init: true)
+
+        # The send modes a send value may name after its level (`[-12.db,
+        # :pre]`): pre-fader (after the fades, before the level; muted
+        # tracks still send nothing) or post-fader (the default).
+        SEND_MODES = %i[pre post].freeze
+
+        # Splits a send value (a level: a gain, a knob name, or a node; or
+        # `[level, :pre]` / `[level, :post]`) into [level, pre], +pre+ true,
+        # false, or nil (not given).  Raises for other Arrays.
+        def self.send_parts(value)
+          return [value, nil] unless value.is_a?(Array)
+
+          level, mode, *rest = value
+          unless value.length == 2 && mode.is_a?(Symbol) && SEND_MODES.include?(mode) && rest.empty?
+            hint = mode.is_a?(Symbol) && !SEND_MODES.include?(mode) ? Form.suggest(mode, SEND_MODES) : ''
+            raise ArgumentError, "A send is a level (-12.db, a knob name) or [level, :pre] for pre-fader (got #{value.inspect})#{hint}"
+          end
+          [level, mode == :pre]
+        end
 
         # Undo subjects: a bus's chain, and one send of a player name.
         BusSubject = Data.define(:name)
@@ -73,6 +98,10 @@ module MB
         # A bus around a change, for undo: its chain's block (nil for
         # none), description, and destination.
         BusState = Struct.new(:block, :description, :to, keyword_init: true)
+
+        # A send around a change, for undo: its level knob's state (a
+        # Knobs::KnobState) and mode (1.0 pre-fader, 0.0 post-fader).
+        SendState = Struct.new(:level, :pre, keyword_init: true)
 
         # Defines (or redefines) bus +name+: its effect chain is built from
         # the block like a master chain (see Master#master: one parameter
@@ -159,15 +188,18 @@ module MB
         # The routing of every player name for saving: name => { to: a bus
         # name or nil (the master), send: { bus => level } }, each level the
         # send's held value (a linear gain), or the name of the Session knob
-        # it follows (a Symbol), or the node it follows.
+        # it follows (a Symbol), or the node it follows; `[level, :pre]` for
+        # a send that will be pre-fader after the changes queued so far.
         def route_definitions
           knobs = self.knobs
           @mutex.synchronize { @routes.dup }.transform_values { |r|
-            sends = r.sends.transform_values { |k|
+            sends = r.sends.to_h { |b, k|
               mode, v = k.queued_state
-              next v if mode == :hold
-              v = ValueSource.knob_of(v) || v
-              knobs.key(v) || v
+              unless mode == :hold
+                v = ValueSource.knob_of(v) || v
+                v = knobs.key(v) || v
+              end
+              [b, send_pre?(r, b, queued: true) ? [v, :pre] : v]
             }
             r.trigger ? { to: nil, send: {}, trigger: true } : { to: r.to, send: sends }
           }
@@ -227,7 +259,8 @@ module MB
         # see the module comment): +to:+ the bus its main out feeds
         # (:master or nil for the master), +send:+ a Hash from bus name to a
         # level (a linear gain such as `-12.db`, 0 for off, or a knob name or
-        # Knob to follow).  Applies right away (not journaled: track and
+        # Knob to follow), or `[level, :pre]` for a pre-fader send (see
+        # #feed).  Applies right away (not journaled: track and
         # `bg` definitions set it); see #feed to change a send while
         # playing.  Returns the name.
         #
@@ -253,7 +286,11 @@ module MB
           end
           send&.each_key { |k| check_bus_name(k, "#{name.inspect}'s send:") }
 
-          knobs = send&.to_h { |bus, level| [bus, send_knob(name, bus, level)] }
+          parts = send&.transform_values { |v| Buses.send_parts(v) }
+          parts&.each_value { |level, _| check_send_level(level) }
+          knobs = parts&.to_h { |bus, (level, _)| [bus, send_knob(name, bus, level)] }
+          pre = parts&.select { |_, (_, p)| p }&.to_h { |bus, _| [bus, mode_knob(name, bus, 1.0)] }
+          pre = nil if pre&.empty?
 
           old = nil
           dropped = nil
@@ -262,15 +299,19 @@ module MB
           (fader!(name) or return nil) if trigger
           @mutex.synchronize {
             old = @routes[name]
-            r = Route.new(to: old&.to, sends: (old&.sends || {}).dup, trigger: old&.trigger || false)
+            r = Route.new(to: old&.to, sends: (old&.sends || {}).dup, trigger: old&.trigger || false, pre: old&.pre)
             r.to = to unless to == :keep
-            r.sends = knobs if knobs
+            if knobs
+              r.sends = knobs
+              r.pre = pre
+            end
             unless trigger.nil?
               r.trigger = trigger
               if trigger
-                dropped = r.sends.values
+                dropped = r.sends.values + (r.pre&.values || [])
                 r.to = nil
                 r.sends = {}
+                r.pre = nil
               end
             end
             @routes[name] = r
@@ -281,21 +322,22 @@ module MB
 
           unless bus_acyclic?
             @mutex.synchronize { old ? @routes[name] = old : @routes.delete(name); @bus_order = nil }
-            drop_send_knobs(knobs&.values || [])
+            drop_send_knobs((knobs&.values || []) + (pre&.values || []))
             return MB::Sound.live_error(ArgumentError.new("routing #{name.inspect} there would make a loop (a bus can't feed what it reads)"))
           end
-          drop_send_knobs(old.sends.values) if knobs && old
+          drop_send_knobs(old.sends.values + (old.pre&.values || [])) if knobs && old
 
           @render_lock.synchronize { apply_strip(nil) } unless @soloed.empty?
           name
         end
 
         # The routing of every player name: name => { to:, send: { bus =>
-        # level } } (levels as linear gains, or "knob(:x)" for follows).
+        # level } } (levels as linear gains, or "knob(:x)" for follows;
+        # `[level, :pre]` for a pre-fader send).
         def routes
           @mutex.synchronize { @routes.dup }.transform_values { |r|
             next { to: nil, trigger: true } if r.trigger
-            { to: r.to || :master, send: r.sends.transform_values { |k| send_level_value(k) } }
+            { to: r.to || :master, send: r.sends.to_h { |b, k| [b, send_pre?(r, b) ? [send_level_value(k), :pre] : send_level_value(k)] } }
           }
         end
 
@@ -306,11 +348,29 @@ module MB
         # or a Length; linear in gain, shaped by +curve:+, from where it is or
         # +from:+).  Journaled (`send :keys lands 9:1`), undoable, and
         # replayed exactly by takes.  Returns the Change.
-        def feed(name, bus, value, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, smooth: nil, start_time: nil)
+        #
+        # +pre: true+ (or a value of `[level, :pre]`) makes the send
+        # pre-fader: it taps the player after its fades and before its
+        # level, so a track at level 0 still feeds the bus (a reverb
+        # lead-in with no dry sound); a muted or soloed-away track still
+        # sends nothing.  +pre: false+ (or `[level, :post]`) makes it
+        # post-fader again, nil keeps its mode.  The switch lands on the
+        # same frame as the level, gliding like a level change (+smooth:+),
+        # and +value+ may be nil to switch only the mode.
+        def feed(name, bus, value, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, smooth: nil, start_time: nil, pre: nil)
           point = LaunchPoint.of(binding) or return nil
           raise ArgumentError, "Player names must be Symbols or Integers (got #{name.inspect})" unless name.is_a?(Symbol) || name.is_a?(Integer)
           check_bus_name(bus, 'feed')
-          check_send_level(value)
+          value, given = Buses.send_parts(value)
+          raise ArgumentError, "pre: is true or false (got #{pre.inspect})" unless [nil, true, false].include?(pre)
+          raise ArgumentError, "pre: #{pre} and [level, :#{given ? 'pre' : 'post'}] disagree" if !pre.nil? && !given.nil? && pre != given
+          pre = given if pre.nil?
+          if value.nil?
+            raise ArgumentError, 'feed needs a level (e.g. -6.db), or pre: true/false to switch only the mode' if pre.nil?
+            raise ArgumentError, 'over: and from: ramp a level: give one' if over || from
+          else
+            check_send_level(value)
+          end
           if trigger_track?(name)
             raise ArgumentError, "#{name.inspect} is a trigger track (heard only by readers such as duck(#{name.inspect})); it has no sends"
           end
@@ -332,11 +392,19 @@ module MB
               return MB::Sound.live_error(ArgumentError.new("feed #{name.inspect} to #{bus.inspect} would make a loop (a bus can't feed what it reads)"))
             end
           end
+          # (a mode knob, post-fader until the change lands, for a send
+          # turning pre-fader the first time)
+          m = pre ? ensure_mode_knob(name, bus) : @mutex.synchronize { @routes[name]&.pre&.[](bus) }
 
           time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
-          data = { bus: bus }.merge(turn_data(value, over, curve)).merge(from ? { from: from } : {})
+          data = { bus: bus }
+          data.merge!(turn_data(value, over, curve)) unless value.nil?
+          data[:from] = from if from
+          data[:pre] = pre unless pre.nil?
           change(:send, name, time, data: data) { |t|
-            apply_turn(k, value, @landing_frame || @frame, t, over: over, curve: curve, smooth: smooth, from: from)
+            frame = @landing_frame || @frame
+            apply_turn(k, value, frame, t, over: over, curve: curve, smooth: smooth, from: from) unless value.nil?
+            m.set(pre ? 1.0 : 0.0, frame: frame, smooth: smooth) if m && !pre.nil?
           }
         end
 
@@ -474,6 +542,40 @@ module MB
             @send_knobs << k
           }
           k
+        end
+
+        # A new mode knob for the send from +name+ to +bus+ (1 pre-fader, 0
+        # post-fader; see Route), at +value+ from now on.
+        def mode_knob(name, bus, value)
+          rate = output_open? ? sample_rate : 48000
+          k = nil
+          @render_lock.synchronize {
+            k = GraphNode::Knob.new(:"#{Name.send_knob(name, bus)}/pre", 0.0, session: self, sample_rate: rate, frame: @frame, range: 0.0..1.0)
+            k.set(value, frame: @frame, smooth: 0)
+            @send_knobs << k
+          }
+          k
+        end
+
+        # The mode knob of the send from +name+ to +bus+ (which exists),
+        # made post-fader if it has none yet.
+        def ensure_mode_knob(name, bus)
+          m = @mutex.synchronize { @routes[name]&.pre&.[](bus) }
+          return m if m
+
+          m = mode_knob(name, bus, 0.0)
+          @mutex.synchronize {
+            r = @routes[name]
+            r.pre = (r.pre || {}).merge(bus => m)
+          }
+          m
+        end
+
+        # True if route +r+'s send to +bus+ is pre-fader now (or, with
+        # +queued+, after the changes queued so far).
+        def send_pre?(r, bus, queued: false)
+          m = r.pre&.[](bus) or return false
+          (queued ? m.queued_state[1] : m.value).to_f >= 0.5
         end
 
         # Stops advancing send level knobs no longer in use (replaced by
@@ -906,11 +1008,15 @@ module MB
         # a muted kick, and pulling the kick's fader down doesn't change the
         # duck.
         #
+        # Post-fader sends hear the player through +ramp+ (fade, level,
+        # mute/solo, CUE's MAIN share), pre-fader sends through +pre+ (the
+        # same without the level; nil for unity; see Session#render_player).
+        #
         # With stems, +stem+ gets the player's main out if it goes to the
         # master; what it sends or plays into buses goes through its own
         # copies of those buses into its stem (see #stem_shadow), so each
         # stem is the track as heard before the master chain.
-        def deliver_player(p, data, ramp, mix, stem, offset, frames, reader: nil)
+        def deliver_player(p, data, ramp, mix, stem, offset, frames, reader: nil, pre: nil)
           route = route_of(p.name)
           return deliver_trigger(p, route, data, offset, frames, reader) if route&.trigger
           main_bus = route&.to && bus_input(route.to)
@@ -918,7 +1024,7 @@ module MB
           tap = bus_tapped?(p.name) ? bus_signal_buffer(p.name) : nil
           track = stem && stem_name(p)
           meter = @ui_bus_meter
-          sends = route ? send_rows(p, route, track, meter) : NO_SENDS
+          sends = route ? send_rows(p, route, track, meter, ramp, pre, offset, frames) : NO_SENDS
           if stem && main_bus
             stem = stem_shadow_input(track, route.to)
           end
@@ -938,8 +1044,11 @@ module MB
             m[r].inplace + d
             stem[c][r].inplace + d if stem
             tap[c][r].inplace + (reader.equal?(ramp) ? d : (reader.is_a?(Numeric) ? raw * reader : (reader ? raw * reader[0...len] : raw))) if tap
-            sends.each do |input, v, shadow, bus|
-              x = v.is_a?(Numeric) ? (v == 1 ? d : d * v) : d * v[r]
+            sends.each do |input, v, shadow, bus, f|
+              # (+f+: what the send hears the player through, +ramp+ for a
+              # post-fader send)
+              base = f.equal?(ramp) ? d : (f.nil? ? raw : (f.is_a?(Numeric) ? raw * f : raw * f[0...len]))
+              x = v.is_a?(Numeric) ? (v == 1 ? base : base * v) : base * v[r]
               input[c][r].inplace + x
               shadow[c][r].inplace + x if shadow
               meter&.send_signal(p.name, bus, c, x, v.is_a?(Numeric) ? v : v[r])
@@ -950,13 +1059,17 @@ module MB
         NO_SENDS = [].freeze
 
         # #deliver_player's sends of player +p+ (routed by +route+): rows of
-        # [bus input, level, stem shadow input, bus name] for the sends
-        # that are on, in Arrays reused per route (dropouts-2: the
-        # filter_map's rows were ~1500 objects a second).
-        def send_rows(p, route, track, meter)
+        # [bus input, level, stem shadow input, bus name, what the send
+        # hears the player through] for the sends that are on, in Arrays
+        # reused per route (dropouts-2: the filter_map's rows were ~1500
+        # objects a second).  The last is +ramp+ for post-fader sends, +pre+
+        # for pre-fader ones, and a blend of the two (frames from 0, like
+        # +ramp+) while a send's mode knob glides between them.
+        def send_rows(p, route, track, meter, ramp, pre, offset, frames)
           return NO_SENDS if route.sends.empty?
 
           rows = (@send_rows[route] ||= [])
+          modes = route.pre
           n = 0
           route.sends.each_pair do |bus, k|
             input = bus_input(bus) or next
@@ -965,15 +1078,32 @@ module MB
               meter&.send_seen(p.name, bus, 0)
               next
             end
-            row = (rows[n] ||= Array.new(4))
+            row = (rows[n] ||= Array.new(5))
             row[0] = input
             row[1] = v
             row[2] = track && stem_shadow_input(track, bus)
             row[3] = bus
+            row[4] = modes.nil? || (m = modes[bus]).nil? ? ramp : send_factor(m.read(@frame, @bus_span_count), ramp, pre, offset, frames)
             n += 1
           end
           rows.pop while rows.length > n
           rows
+        end
+
+        # What a send with mode +m+ (its mode knob's values for the span: 0
+        # post-fader, 1 pre-fader) hears over the player's frames [+offset+,
+        # +offset+ + +frames+): +ramp+, +pre+, or a blend while it glides.
+        def send_factor(m, ramp, pre, offset, frames)
+          if m.is_a?(Numeric)
+            return ramp if m <= 0
+            return pre if m >= 1
+          else
+            m = m[offset...(offset + frames)]
+          end
+          post_part = ramp.nil? ? 1 - m : (ramp.is_a?(Numeric) ? ramp * (1 - m) : ramp[0...frames] * (1 - m))
+          pre_part = pre.nil? ? m : (pre.is_a?(Numeric) ? pre * m : pre[0...frames] * m)
+          f = post_part + pre_part
+          f.is_a?(Numo::NArray) ? Numo::SFloat.cast(f) : Numo::SFloat.new(frames).fill(f)
         end
 
         # #deliver_player's additions for one channel without Numo views or
@@ -983,15 +1113,15 @@ module MB
         # nothing) for anything else.
         def deliver_fast(d, len, ramp, reader, m, stem, tap, sends, c, offset)
           return false unless d.is_a?(Numo::SFloat) && acc_factor?(ramp) && acc_factor?(reader)
-          return false unless sends.all? { |row| acc_factor?(row[1]) } # (not a return inside the block: an imemo each)
+          return false unless sends.all? { |row| acc_factor?(row[1]) && acc_factor?(row[4]) } # (not a return inside the block: an imemo each)
 
           acc_add(m, offset, d, len, ramp, nil, 0)
           acc_add(stem, offset, d, len, ramp, nil, 0) if stem
           acc_add(tap, offset, d, len, reader, nil, 0) if tap
-          sends.each do |input, v, shadow, _|
+          sends.each do |input, v, shadow, _, f|
             g = v.is_a?(Numeric) && v == 1 ? nil : v
-            acc_add(input[c], offset, d, len, ramp, g, offset)
-            acc_add(shadow[c], offset, d, len, ramp, g, offset) if shadow
+            acc_add(input[c], offset, d, len, f, g, offset)
+            acc_add(shadow[c], offset, d, len, f, g, offset) if shadow
           end
           true
         end
@@ -1454,22 +1584,30 @@ module MB
           }
         end
 
-        # A send level's knob state, for undo (nil without the send).
+        # A send's level knob state and mode (1.0 pre-fader, 0.0
+        # post-fader), for undo (nil without the send).
         def send_undo_snapshot(subject)
-          k = @mutex.synchronize { @routes[subject.name]&.sends&.[](subject.bus) }
+          r = @mutex.synchronize { @routes[subject.name] }
+          k = r&.sends&.[](subject.bus)
           return nil unless k
-          mode, value = k.state_at(@landing_frame || @frame)
-          Knobs::KnobState.new(mode: mode, value: value)
+          frame = @landing_frame || @frame
+          mode, value = k.state_at(frame)
+          m = r.pre&.[](subject.bus)
+          SendState.new(level: Knobs::KnobState.new(mode: mode, value: value), pre: m ? m.state_at(frame)[1].to_f : 0.0)
         end
 
-        # Puts a send level back to before +original+ at +time+.
+        # Puts a send level and mode back to before +original+ at +time+.
         def restore_send_change(subject, original, time)
           state = original.before
+          # (a mode knob to switch back with, made before the change lands)
+          m = state && state.pre > 0 ? ensure_mode_knob(subject.name, subject.bus) : @mutex.synchronize { @routes[subject.name]&.pre&.[](subject.bus) }
           change(:send, subject.name, time, data: { bus: subject.bus }, undoes: original.seq) { |_t|
             k = @mutex.synchronize { @routes[subject.name]&.sends&.[](subject.bus) }
             if k && state
               frame = @landing_frame || @frame
-              state.mode == :follow ? k.refollow(state.value, frame: frame) : k.set(state.value, frame: frame)
+              level = state.level
+              level.mode == :follow ? k.refollow(level.value, frame: frame) : k.set(level.value, frame: frame)
+              m&.set(state.pre, frame: frame)
             end
           }
         end

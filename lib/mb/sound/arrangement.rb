@@ -1105,7 +1105,7 @@ module MB
           if r[:trigger]
             box.route(n, trigger: true)
           else
-            sends = r[:send].select { |b, v| v.is_a?(Numeric) && box.bus_definitions.key?(b) }
+            sends = r[:send].select { |b, v| Session::Buses.send_parts(v)[0].is_a?(Numeric) && box.bus_definitions.key?(b) }
             to = r[:to] == :master || box.bus_definitions.key?(r[:to]) ? r[:to] : :master
             box.route(n, to: to, send: sends.empty? ? nil : sends)
           end

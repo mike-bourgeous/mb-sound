@@ -223,7 +223,8 @@ module MB
           opts = {}
           opts[:to] = r[:to] if r[:to]
           sends = r[:send].to_h { |bus, v|
-            unless v.is_a?(Numeric) || v.is_a?(Symbol)
+            level = Session::Buses.send_parts(v)[0] # (`[level, :pre]`: a pre-fader send)
+            unless level.is_a?(Numeric) || level.is_a?(Symbol)
               @problems << "track #{name.inspect}: its send to #{bus.inspect} follows a node that isn't a session knob (set documents save gains and knob names)"
             end
             [bus, v]
