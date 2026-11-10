@@ -104,9 +104,15 @@ module MB
         # broadband sound comes out at about its input power), +predelay+
         # (samples) delays it, and +length+ (samples, or nil for all of it)
         # truncates it with a raised-cosine fade over its last +fade+
-        # samples.  +partition+ makes the plan uniform with blocks of that
-        # many samples (nil: the default non-uniform plan, Convolution.plan).
-        def initialize(inputs:, impulse:, sample_rate:, gain: 1.0, normalize: true, predelay: 0, length: nil, fade: nil, partition: nil)
+        # samples.  Then, before normalization: +reverse+ turns the kept
+        # impulse around, +attack+ (samples) fades its start in linearly
+        # from +attack_level+ (a linear gain), and +decay+ (a linear gain in
+        # 0..1, or nil) turns its end down to that level along an
+        # exponential across the kept length.  +partition+ makes the plan
+        # uniform with blocks of that many samples (nil: the default
+        # non-uniform plan, Convolution.plan).
+        def initialize(inputs:, impulse:, sample_rate:, gain: 1.0, normalize: true, predelay: 0, length: nil, fade: nil,
+                       reverse: false, attack: 0, attack_level: 0.0, decay: nil, partition: nil)
           inputs = Array(inputs)
           raise ArgumentError, "A convolver takes one or two inputs (got #{inputs.length})" unless [1, 2].include?(inputs.length)
           inputs.each_with_index do |i, idx|
@@ -125,7 +131,8 @@ module MB
           @paths = PATHS.fetch([@inputs.length, channels.length])
           @output_count = @paths.map { |p| p[1] }.max + 1
           @gain = gain.to_f
-          @impulse = shape_impulse(channels, normalize: normalize, predelay: Integer(predelay), length: length && Integer(length), fade: fade && Integer(fade))
+          @impulse = shape_impulse(channels, normalize: normalize, predelay: Integer(predelay), length: length && Integer(length), fade: fade && Integer(fade),
+                                   reverse: reverse, attack: Integer(attack || 0), attack_level: attack_level.to_f, decay: decay&.to_f)
           len = @impulse.map(&:length).max
           @partition = partition && Integer(partition)
           @length = len
@@ -224,10 +231,13 @@ module MB
 
         private
 
-        # Applies normalization, gain, predelay, and the length to the
-        # impulse channels.
-        def shape_impulse(channels, normalize:, predelay:, length:, fade:)
+        # Applies the length, reverse, attack, decay, normalization, gain,
+        # and predelay to the impulse channels, in that order.
+        def shape_impulse(channels, normalize:, predelay:, length:, fade:, reverse: false, attack: 0, attack_level: 0.0, decay: nil)
           raise ArgumentError, "Predelay can't be negative" if predelay < 0
+          raise ArgumentError, "Attack can't be negative" if attack < 0
+          raise ArgumentError, 'The attack level is a gain from 0 to 1' unless (0.0..1.0).cover?(attack_level)
+          raise ArgumentError, 'Decay is a gain above 0, up to 1' unless decay.nil? || (decay > 0 && decay <= 1)
 
           len = channels.map(&:length).max
           channels = channels.map { |c|
@@ -245,6 +255,20 @@ module MB
                 channels.each { |c| c[(length - f)..] = c[(length - f)..] * win }
               end
             end
+          end
+
+          channels = channels.map { |c| c.reverse.dup } if reverse
+
+          kept = channels[0].length
+          if attack > 0 && attack_level < 1
+            n = [attack, kept].min
+            ramp = (Numo::DFloat.new(n).seq(0.5) / attack) * (1 - attack_level) + attack_level # (sample centers)
+            channels.each { |c| c[0...n] = c[0...n] * ramp }
+          end
+          if decay && decay < 1 && kept > 1
+            # decay ** (t / kept): an even fall in dB, the given level at the end
+            env = Numo::NMath.exp(Numo::DFloat.new(kept).seq * (Math.log(decay) / kept))
+            channels = channels.map { |c| c * env }
           end
 
           # Drop the quiet end (under -120 dB of the peak)

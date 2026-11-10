@@ -169,6 +169,41 @@ RSpec.describe(MB::Sound::GraphNode::Convolver, :aggregate_failures) do
       expect { input(x).convolve(h, length: 1, trim: 1) }.to raise_error(ArgumentError, /not both/)
     end
 
+    it 'reverses, fades in, and decays the kept impulse before normalizing it' do
+      r = render(input(x).convolve(h, wet: 1, normalize: false, length: 400.samples, fade: 0, reverse: true), 128)[0]
+      expect(error_db(r, direct(x, h[0...400].reverse.dup))).to be < -140
+
+      a = render(input(x).convolve(h, wet: 1, normalize: false, attack: 200.samples, attack_level: 0.25), 128)[0]
+      ha = h.dup
+      ha[0...200] = ha[0...200] * ((Numo::DFloat.new(200).seq(0.5) / 200) * 0.75 + 0.25)
+      expect(error_db(a, direct(x, ha))).to be < -140
+
+      d = render(input(x).convolve(h, wet: 1, normalize: false, decay: -40.db), 128)[0]
+      hd = h * Numo::NMath.exp(Numo::DFloat.new(1000).seq * (Math.log(0.01) / 1000))
+      expect(error_db(d, direct(x, hd))).to be < -140
+      expect(render(input(x).convolve(h, wet: 1, normalize: false, decay: 0.01), 128)[0]).to eq(d)
+
+      # normalization sees the shaped impulse: unit energy whatever the decay
+      n = render(input(x).convolve(h, wet: 1, decay: -40.db), 128)[0]
+      expect(error_db(n, direct(x, hd / Math.sqrt((hd**2).sum)))).to be < -140
+
+      expect { input(x).convolve(h, decay: 2) }.to raise_error(ArgumentError)
+      expect { input(x).convolve(h, attack: -1) }.to raise_error(ArgumentError, /negative/)
+    end
+
+    it 'stretches the impulse by resampling it' do
+      long = render(input(x).convolve(h, wet: 1, normalize: false, stretch: 2), 128)[0]
+      expect(long.length).to be_within(4).of(2000 + 2 * 1000 - 1)
+      ref = MB::Sound::Analysis::DSP.resample(h, 48000.0, 96000.0)
+      expect(error_db(long, direct(x, ref))).to be < -140
+      short = render(input(x).convolve(h, wet: 1, normalize: false, stretch: 0.5), 128)[0]
+      expect(short.length).to be_within(4).of(2000 + 500 - 1)
+      # length: counts after the stretch
+      cut = render(input(x).convolve(h, wet: 1, normalize: false, stretch: 2, length: 600.samples, fade: 0), 128)[0]
+      expect(error_db(cut, direct(x, ref[0...600].dup))).to be < -140
+      expect { input(x).convolve(h, stretch: 100) }.to raise_error(ArgumentError, /stretch/)
+    end
+
     it 'raises for impulses it cannot use' do
       expect { input(x).convolve([h, h, h]) }.to raise_error(ArgumentError, /1, 2, or 4 channels/)
       expect { input(x).convolve(Numo::DFloat[1, Float::NAN]) }.to raise_error(ArgumentError, /finite/)
