@@ -154,7 +154,7 @@ RSpec.describe(MB::Sound::Arrangement::Wires) do
       [['hold :lead, on: :beat', 'unhold :lead, on: :bar'], ['unwire :lead, on: :beat']].each do |cmds|
         results = [[800], [367], *slow_tier(other_sizes, keep: 0)].map { |sizes|
           s = new_session
-          d = perform(s, { 0 => setup_lines + long, 10 => ['wire :lead, long.stream'], 140 => [cmds[0]], 200 => cmds.drop(1) }, 96000 * 3, sizes)
+          d = perform(s, { 0 => setup_lines + long, 10 => ['wire :lead, long.stream'], 140 => [cmds[0]], 200 => cmds.drop(1) }, 96000 * 2 + 800, sizes)
           log = s.midi_log.select { |name, *| name == :"lead/wire" }.map { |_, _, pos, bytes| [pos, bytes] }
           [d, log, s, sizes]
         }
