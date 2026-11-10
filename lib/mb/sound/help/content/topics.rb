@@ -67,7 +67,7 @@ module MB
       end
     end
 
-    Help.topic :guide, 'The user guide: from a first sound to a finished song', group: :start do
+    Help.topic :guide, 'The user guide', group: :start do
       about <<~TEXT
         The guide is a short book for musicians who write a little code:
         first sounds, playing and stopping, a song as a script, clips and
