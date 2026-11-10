@@ -177,4 +177,4 @@ back, rhythms steered by a knob.
 - MIDI files become clips too: `midi_clip 'song.mid', track: 'Bass'`
   (`help :midi_files`).
 
-Next: [instruments and the library](05-instruments-and-the-library.md).
+Next: [instruments and the library](05-library.md).

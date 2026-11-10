@@ -12,16 +12,16 @@ Every example runs as written; type them in order and listen.
    renders to a file, and takes options.
 4. [Clips, sequences, and drums](04-clips-and-drums.md): notes in time,
    chords, drum grids, drum machines, patterns that write themselves.
-5. [Instruments and the library](05-instruments-and-the-library.md):
+5. [Instruments and the library](05-library.md):
    finding, auditioning, and playing instruments and effects; samples;
    saving your own.
-6. [Effects and buses](06-effects-and-buses.md): echoes, reverbs,
+6. [Effects and buses](06-effects.md): echoes, reverbs,
    movement, drive, sends, ducking, the master.
-7. [A live set](07-a-live-set.md): tracks, scenes, song forms, knobs,
+7. [A live set](07-live-set.md): tracks, scenes, song forms, knobs,
    hearing a part first, playing a keyboard into a track.
-8. [Recording and rendering](08-recording-and-rendering.md): takes,
+8. [Recording and rendering](08-recording.md): takes,
    recording a keyboard and the mix, rendering, loudness.
-9. [The screens](09-the-screens.md): the dashboard, the tiled screen, the
+9. [The screens](09-screens.md): the dashboard, the tiled screen, the
    keyboard, plots.
 10. [Sound design](10-sound-design.md): voices in code, knobs, the
     sound-design screen, keeping a voice as an instrument.

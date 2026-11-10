@@ -176,4 +176,4 @@ bg :mine, preset(:fat_bass).until(2.bars)
 `help :library` and `help :presets` have the details: shelves, library
 files, and saving whole sets.
 
-Next: [effects and buses](06-effects-and-buses.md).
+Next: [effects and buses](06-effects.md).

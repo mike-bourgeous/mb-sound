@@ -201,4 +201,4 @@ end
 `ruby song.rb --from chorus -o chorus.flac` renders only the chorus, as
 it sounds in the whole song.
 
-Next: [recording and rendering](08-recording-and-rendering.md).
+Next: [recording and rendering](08-recording.md).

@@ -155,5 +155,5 @@ outro
 `help :mastering` has the presets' loudness targets and how to master
 like a reference track you love.
 
-Next: [a live set](07-a-live-set.md): tracks, scenes, song forms, and
+Next: [a live set](07-live-set.md): tracks, scenes, song forms, and
 knobs.
