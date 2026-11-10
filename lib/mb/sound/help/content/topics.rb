@@ -67,6 +67,28 @@ module MB
       end
     end
 
+    Help.topic :guide, 'The user guide: from a first sound to a finished song', group: :start do
+      about <<~TEXT
+        The guide is a short book for musicians who write a little code:
+        first sounds, playing and stopping, a song as a script, clips and
+        drums, instruments and the library, effects and buses, a live set,
+        recording and rendering, the screens, and sound design.  Every
+        example in it runs as written.  `guide` lists the chapters (and
+        the folder of their Markdown files, to read in an editor), `guide
+        :drums` (or `guide 4`) shows one here.
+      TEXT
+      commands :guide, :lesson, :help
+      see :play, :sets, :library
+      section do |d|
+        d.heading('Chapters')
+        d.rows(Help::Guide.chapters.map { |c| ["guide #{c.name.inspect}", c.title] }, max_label: 24)
+      end
+      example 'the chapters', sound: false do
+        guide
+      end
+    end
+    Help::TOPIC_ALIASES.merge!(book: :guide, manual: :guide, tutorial: :guide, docs: :guide)
+
     Help.topic :tones, 'Oscillators and pitches', group: :sound do
       about <<~TEXT
         `440.hz` is a Pitch; oscillator methods make a Tone (antialiased by

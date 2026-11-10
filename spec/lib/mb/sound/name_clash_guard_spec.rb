@@ -34,7 +34,7 @@ module NameClashGuard
     ['MB::Sound', :next_seed] => { reason: "Recipe::SeedRecording records each seed RandomMethods#next_seed draws while a call is recorded" },
     ['MB::Sound', :bg] => { reason: "Reference::FollowsClip gives a tuned track's A/B copies the clip PlaybackMethods#bg gave the track (tuner-fixes-1)" },
     ['MB::Sound', :with_seed] => { reason: "Recipe::SeedRecording counts seeded scopes around RandomMethods#with_seed, so calls inside don't print seeds" },
-    **%i[help now lesson].to_h { |name|
+    **%i[help now lesson guide].to_h { |name|
       [['MB::Sound', name], { reason: "HelpAutoload's stub loads mb/sound/help on first use, which extends HelpMethods with the real ##{name}", super: false }]
     },
     **%i[radians radian degrees degree].product(%w[Integer Float Rational]).to_h { |name, target|
