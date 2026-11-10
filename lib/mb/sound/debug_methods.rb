@@ -17,8 +17,11 @@ module MB
       # crash dump, written by bin/sound.rb on an exception that ends it)
       # exception.txt.  Each part that fails says why in its file and the
       # rest still write.  Returns the folder.
+      #
+      # An installed gem writes to the user data directory's tmp/debug/
+      # instead (Internal.scratch_dir).
       def debug_dump(dir = nil, exception: nil)
-        dir ||= File.join(File.expand_path('../../..', __dir__), 'tmp', 'debug', Time.now.strftime('%Y%m%d_%H%M%S'))
+        dir ||= File.join(Internal.scratch_dir('debug'), Time.now.strftime('%Y%m%d_%H%M%S'))
         FileUtils.mkdir_p(File.join(dir, 'graphs'))
         session = Session.existing
         part = lambda { |name, &block|

@@ -1,2 +1,5 @@
 # gvl_probe.c includes only Ruby headers
-fast_ui.o: $(srcdir)/../../../../gems/mb-term/ext/mb/term/include/mb_term_grid.h
+# mb-term's header: in this repository's gems/mb-term, or absent in an
+# installed gem, whose extconf.rb finds the mb-term gem's copy ($(wildcard):
+# no rule needed for a missing file; design/notes/release.md)
+fast_ui.o: $(wildcard $(srcdir)/../../../../gems/mb-term/ext/mb/term/include/mb_term_grid.h)

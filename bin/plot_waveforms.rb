@@ -7,7 +7,6 @@
 # (iTerm2, kitty, sixel), -S saves them (.svg, .png, .txt, .ans, .html).
 
 require 'bundler/setup'
-require 'pry-byebug'
 require 'mb-sound'
 
 MB::Sound.script(

@@ -239,6 +239,12 @@ Parameters are options only (`name: [default, 'description', '-x', Type, range]`
 Plain song files start with `require 'mb/sound/dsl'`: the console's commands at the top level, waiting for playback at the end.
 `bin/play.rb` plays files on player screens by type (`MB::Sound::Player`).
 
+### [Releases and installing (the gem without a checkout)](release.md)
+
+`rake release:local DIR=...` (`release/local_release.rb`) builds .gem files for mb-sound, mb-term, the git-pinned mb-math and mb-util, and the locked registry gems into DIR/gems, then installs them with `gem install --local` into a fresh DIR/gem_home outside any bundle; `rake release:smoke DIR=...` (`release/clean_room_smoke.rb`) runs mb-sound there as a musician would.
+An installed gem has no checkout: code that writes files uses `Internal.user_data_dir`/`scratch_dir`, code that needs the checkout asks `Internal.checkout_dir` (nil when installed), and `sound.rb` is the gem's executable.
+`spec/release/gemspec_spec.rb` guards what ships and that every gem lib/ requires is a runtime dependency.
+
 ## Audio I/O
 
 ### [Audio I/O](audio_io.md)

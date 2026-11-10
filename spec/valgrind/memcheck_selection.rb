@@ -632,7 +632,8 @@ module MemcheckSelection
       next unless line =~ /\A\s*([^\s:#]+)\s*:(.*)/
 
       obj = $1
-      deps = $2.split.map { |d| rel(File.expand_path(d.sub('$(srcdir)/', ''), dir)) }
+      # $(wildcard path): a header only the checkout has (fast_ui's mb-term header)
+      deps = $2.gsub(/\$\(wildcard\s+(\S+?)\)(?=\s|\z)/, '\\1').split.map { |d| rel(File.expand_path(d.sub('$(srcdir)/', ''), dir)) }
       (h[obj] ||= []).concat(deps)
     }
   end

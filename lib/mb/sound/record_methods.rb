@@ -213,7 +213,7 @@ module MB
       def record_audio_file(session, path, point, repo:, overwrite:)
         # (Help loads with bin/sound.rb)
         dir = Help::LessonRunner.active&.files_dir if !repo && defined?(Help::LessonRunner)
-        dir ||= Take.current.home || (repo ? File.expand_path('../../../sets', __dir__) : Take.data_dir)
+        dir ||= Take.current.home || (repo && Internal.checkout_dir ? File.join(Internal.checkout_dir, 'sets') : Take.data_dir)
         path ||= File.join(dir, "rec_#{Time.now.strftime('%Y%m%d_%H%M%S')}.flac")
         path = File.expand_path(path)
         replay = Session.context&.replaying?

@@ -110,9 +110,11 @@ module MB
         def initialize(serve: 'MB::Sound::HandTune::Worker.serve')
           raise ArgumentError, "Worker serve: is a method's name (got #{serve.inspect})" unless serve.match?(/\A[A-Z][\w:]*\.\w+\z/)
           lib = File.expand_path('../../..', __dir__)
-          gemfile = File.expand_path('../../../../Gemfile', __dir__)
-          code = "require 'bundler/setup'; require 'mb-sound'; #{serve}"
-          env = { 'BUNDLE_GEMFILE' => gemfile, 'MB_SOUND_YJIT' => '1', 'RUBYOPT' => ENV['RUBYOPT'].to_s }
+          # The checkout's bundle, or the installed gems (no Gemfile)
+          checkout = Internal.checkout_dir
+          code = "#{"require 'bundler/setup'; " if checkout}require 'mb-sound'; #{serve}"
+          env = { 'MB_SOUND_YJIT' => '1', 'RUBYOPT' => ENV['RUBYOPT'].to_s }
+          env['BUNDLE_GEMFILE'] = File.join(checkout, 'Gemfile') if checkout
           r_in, w_in = IO.pipe
           r_out, w_out = IO.pipe
           begin

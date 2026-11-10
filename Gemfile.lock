@@ -42,7 +42,9 @@ PATH
       numo-narray-alt (~> 0.10.5)
       numo-pocketfft (~> 0.6.0)
       ostruct (~> 0.6.3)
+      pry (~> 0.16.0)
       psych (~> 5.2.3)
+      word_wrap (~> 1.0.0)
 
 PATH
   remote: gems/mb-term
@@ -164,7 +166,6 @@ DEPENDENCIES
   mb-term!
   mb-util!
   numo-narray!
-  pry (~> 0.16.0)
   pry-byebug (~> 3.12.0)
   pry-doc
   rake (~> 13.0.1)
@@ -173,7 +174,6 @@ DEPENDENCIES
   rspec
   ruby_memcheck
   simplecov (~> 0.22.0)
-  word_wrap (~> 1.0.0)
   yard
 
 BUNDLED WITH

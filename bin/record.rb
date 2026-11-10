@@ -35,7 +35,7 @@ MB::Sound.script(args: 1) { |(outfile)|
       feed.push(data)
 
       if pry_next
-        require 'pry-byebug'; binding.pry
+        require 'pry'; binding.pry
         pry_next = false
       end
 

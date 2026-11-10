@@ -292,12 +292,36 @@ module MB
       def help_data_dir
         env = ENV['MB_SOUND_HELP_DIR']
         return File.expand_path(env) unless env.to_s.empty?
-        if RbConfig::CONFIG['host_os'] =~ /darwin/
-          File.join(Dir.home, 'Library', 'Application Support', 'mb-sound', 'help')
-        else
-          base = ENV['XDG_DATA_HOME'].to_s.empty? ? File.join(Dir.home, '.local', 'share') : ENV['XDG_DATA_HOME']
-          File.join(base, 'mb-sound', 'help')
-        end
+        user_data_dir('help')
+      end
+
+      # The user data directory's +parts+: ~/Library/Application
+      # Support/mb-sound/... on macOS, $XDG_DATA_HOME/mb-sound/... (default
+      # ~/.local/share/mb-sound/...) elsewhere.  Presets, takes, layouts,
+      # and help state live there (each with its own variable to move it).
+      def user_data_dir(*parts)
+        base = if RbConfig::CONFIG['host_os'] =~ /darwin/
+                 File.join(Dir.home, 'Library', 'Application Support')
+               else
+                 ENV['XDG_DATA_HOME'].to_s.empty? ? File.join(Dir.home, '.local', 'share') : ENV['XDG_DATA_HOME']
+               end
+        File.join(base, 'mb-sound', *parts.map(&:to_s))
+      end
+
+      # mb-sound's own directory when it runs from a git checkout (a
+      # worktree too) with its Gemfile, or nil for an installed gem
+      # (design/notes/release.md).
+      def checkout_dir
+        File.exist?(File.join(GEM_ROOT, '.git')) && File.file?(File.join(GEM_ROOT, 'Gemfile')) ? GEM_ROOT : nil
+      end
+
+      # Where scratch files of kind +name+ go (debug dumps, takes saved
+      # with :tmp): the checkout's tmp/<name>, or the user data directory's
+      # tmp/<name> for an installed gem (whose own directory may not be
+      # writable, and is replaced by the next install).
+      def scratch_dir(name)
+        root = checkout_dir
+        root ? File.join(root, 'tmp', name.to_s) : user_data_dir('tmp', name)
       end
 
       # mb-sound's own directory (the gem's root: lib/'s parent).

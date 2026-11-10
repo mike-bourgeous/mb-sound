@@ -2,6 +2,16 @@
 # Interactive sound environment.  Uses Pry within the MB::Sound module context.
 # See README.md for more info, including copyright and license.
 
+# Installed as a gem, `sound.rb` is RubyGems' wrapper, which starts Ruby
+# without the shebang's variables (Ruby reads RUBY_THREAD_TIMESLICE when it
+# starts; the render thread needs the short time slice, design/notes/audio_io.md):
+# start this file again with them, before anything loads
+# (design/notes/release.md)
+if File.basename($0) == 'sound.rb' && File.expand_path($0) != File.expand_path(__FILE__) && !ENV.key?('RUBY_THREAD_TIMESLICE')
+  require 'rbconfig'
+  exec({ 'RUBY_THREAD_TIMESLICE' => '10', 'MB_SOUND_YJIT' => ENV.fetch('MB_SOUND_YJIT', '1') }, RbConfig.ruby, __FILE__, *ARGV)
+end
+
 # Startup progress on a terminal: each step's name, then how long it took,
 # so a slow start shows where the time goes (nothing into pipes and logs)
 startup_began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -19,17 +29,22 @@ startup_step = ->(label, &block) {
 
 startup_step.('Loading Pry') do
   require 'rubygems'
+  # In a checkout (or a project with a Gemfile), its bundle; in an installed
+  # gem with no Gemfile around, bundler/setup does nothing and the installed
+  # gems load (design/notes/release.md)
   require 'bundler/setup'
-
-  require 'benchmark'
 
   require 'io/console'
   require 'pry'
-  require 'pry-byebug'
+  begin
+    require 'pry-byebug' # step/next/break in the console (a development gem)
+  rescue LoadError
+  end
 end
 
-# Bundler.require loads mb-sound itself too (the Gemfile names its gemspec)
-startup_step.('Loading mb-sound') { Bundler.require }
+# Bundler.require loads mb-sound itself too (the Gemfile names its gemspec);
+# an installed gem outside a bundle requires it
+startup_step.('Loading mb-sound') { Bundler::SharedHelpers.in_bundle? ? Bundler.require : require('mb-sound') }
 
 MB::U.sigquit_backtrace
 
@@ -126,11 +141,18 @@ Pry.config.multiline = false unless $stdin.tty?
 # See comments on https://github.com/mike-bourgeous/mb-sound/issues/37
 #
 # TODO: remove this workaround if/when a proper fix ends up upstream.
-class PryByebugWorkaround < Pry::REPL
-  def self.start(options = {})
-    return start_without_pry_byebug(options) unless options[:load_pry_byebug] != false
-    super
+#
+# Without pry-byebug (an installed gem), Pry's own REPL.
+if Pry::REPL.respond_to?(:start_without_pry_byebug)
+  class PryByebugWorkaround < Pry::REPL
+    def self.start(options = {})
+      return start_without_pry_byebug(options) unless options[:load_pry_byebug] != false
+      super
+    end
   end
+  console_driver = PryByebugWorkaround
+else
+  console_driver = Pry::REPL
 end
 
 # The console's line editing, evaluation, and printing compiled by YJIT before
@@ -158,7 +180,7 @@ begin
       output.puts(MB::Sound::ErrorFormat.console(exception, color: MB::Sound::ColorPolicy.color?(output)))
     },
     load_pry_byebug: false,
-    driver: PryByebugWorkaround
+    driver: console_driver
   )
 rescue Exception => e # rubocop:disable Lint/RescueException (SystemExit and Interrupt pass)
   raise if e.is_a?(SystemExit) || e.is_a?(Interrupt)

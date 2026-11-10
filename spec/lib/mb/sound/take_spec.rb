@@ -681,6 +681,14 @@ RSpec.describe(MB::Sound::Take) do
     expect(path).to end_with('/verse.take')
   end
 
+  it "loads the checkout's bundle in a checkout, the installed gems from an installed gem (release-1)" do
+    expect(take.to_ruby).to include("ENV['BUNDLE_GEMFILE'] ||= #{File.join(MB::Sound::Internal::GEM_ROOT, 'Gemfile').inspect}\nrequire 'bundler/setup'\nrequire 'mb-sound'\n")
+    allow(MB::Sound::Internal).to receive(:checkout_dir).and_return(nil)
+    text = take.to_ruby
+    expect(text).not_to include('bundler')
+    expect(text).to include("\nrequire 'mb-sound'\n")
+  end
+
   it 'saves to tmp/takes with take.save :tmp, even with a set home' do
     expect(described_class.tmp_dir).to end_with('/tmp/takes')
     allow(described_class).to receive(:tmp_dir).and_return(tmp_path('tmp_takes'))

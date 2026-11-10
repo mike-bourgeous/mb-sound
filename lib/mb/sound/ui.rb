@@ -545,12 +545,7 @@ module MB
       def self.layouts_dir
         env = ENV['MB_SOUND_UI_DIR']
         return File.expand_path(env) unless env.to_s.empty?
-        if RbConfig::CONFIG['host_os'] =~ /darwin/
-          File.join(Dir.home, 'Library', 'Application Support', 'mb-sound', 'ui')
-        else
-          base = ENV['XDG_DATA_HOME'].to_s.empty? ? File.join(Dir.home, '.local', 'share') : ENV['XDG_DATA_HOME']
-          File.join(base, 'mb-sound', 'ui')
-        end
+        Internal.user_data_dir('ui')
       end
 
       # The layout named +name+: defined, built in, or saved in
