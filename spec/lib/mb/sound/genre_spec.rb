@@ -334,8 +334,9 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
     end
 
     it 'takes pre-fader sends in roles ([gain or knob, :pre]) and refuses other arrays' do
-      r = genre::Role.new(patch: :x, send: { hall: [-12.db, :pre], echo: [:space, :pre] })
+      r = genre::Role.new(patch: :x, level: -3.db, send: { hall: [-12.db, :pre], echo: [:space, :pre] })
       expect(r.sends).to eq(hall: [-12.db, :pre], echo: [:space, :pre])
+      expect(r.level).to eq(-3.db) # (a block local in the check once overwrote the level with a send's)
       expect(r.options[:send]).to eq(r.sends)
       expect { genre::Role.new(patch: :x, send: { hall: [-12.db, :prefader] }) }.to raise_error(ArgumentError, /\[either, :pre\]/)
     end

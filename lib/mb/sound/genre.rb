@@ -40,8 +40,8 @@ module MB
           raise ArgumentError, "filter: names a knob (got #{filter.inspect})" unless filter.nil? || filter.is_a?(Symbol)
           raise ArgumentError, "to: names a template bus (got #{to.inspect})" unless to.nil? || to.is_a?(Symbol)
           unless send.is_a?(Hash) && send.all? { |k, v|
-                   level, _ = (Session::Buses.send_parts(v) rescue [nil])
-                   k.is_a?(Symbol) && ((level.is_a?(Numeric) && level.real? && level >= 0) || level.is_a?(Symbol))
+                   g = (Session::Buses.send_parts(v)[0] rescue nil) # (not `level`: that is this method's argument)
+                   k.is_a?(Symbol) && ((g.is_a?(Numeric) && g.real? && g >= 0) || g.is_a?(Symbol))
                  }
             raise ArgumentError, "send: must be a Hash from bus name to a gain (-12.db), a knob name, or [either, :pre] for pre-fader (got #{send.inspect})"
           end
