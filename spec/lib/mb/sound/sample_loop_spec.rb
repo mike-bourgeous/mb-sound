@@ -472,6 +472,12 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       expect(arp.material.why).to eq('tonal, spectral flatness 0.000')
       expect(arp.with(name: 'Perc Loop 3').material.then { |m| [m.kind, m.why] }).to eq([:percussive, "name 'perc'"])
       expect(drums.with(name: 'PadLoop').material.kind).to eq(:tonal)
+      # words run together, as loop packs name files: a list word at the end of a name word
+      expect(drums.with(name: 'Deepbass 04').material.then { |m| [m.kind, m.why] }).to eq([:tonal, "name 'bass' in 'deepbass'"])
+      expect(arp.with(name: 'Clubhats 12').material.then { |m| [m.kind, m.why] }).to eq([:percussive, "name 'hats' in 'clubhats'"])
+      expect(arp.with(name: 'Bigbeat 3').material.kind).to eq(:percussive)
+      expect(arp.with(name: 'bassdrum').material.kind).to eq(:percussive)      # percussive words first
+      expect(arp.with(name: 'that harp').material.why).to start_with('tonal, spectral flatness') # (no three-letter matches: hat, arp)
     end
 
     it 'follows with slices for percussive loops and the vocoder for tonal ones, unless told' do

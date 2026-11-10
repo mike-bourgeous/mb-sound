@@ -784,11 +784,22 @@ module MB
       # PERCUSSIVE_FLATNESS (0.04) splits them.  Loops of pitched drums
       # only (an 808 kick alone measures 0.001) read as tonal: the
       # spectral stretch keeps their transients too.  Cached per audio.
+      # Loop packs often run words together ("Deepbass 04",
+      # "Clubhats", "Bigbeat"): when no whole word matches, a name word
+      # that ends with a list word of COMPOUND_WORD_MIN letters or more
+      # decides ("name 'bass' in 'deepbass'").
       def material
         words = (@name || '').to_s.gsub(/([a-z])([A-Z])/, '\\1 \\2').downcase.split(/[^a-z]+/)
         MATERIAL_WORDS.each do |kind, list|
           w = words.find { |x| list.include?(x) }
           return Material.new(kind: kind, flatness: nil, why: "name '#{w}'") if w
+        end
+        MATERIAL_WORDS.each do |kind, list|
+          list.each do |part|
+            next if part.length < COMPOUND_WORD_MIN
+            w = words.find { |x| x.length > part.length && x.end_with?(part) }
+            return Material.new(kind: kind, flatness: nil, why: "name '#{part}' in '#{w}'") if w
+          end
         end
         f = @audio.edit([:flatness, @start, @stop]) { Sample.flatness(mono_mix, sample_rate) }
         kind = f >= PERCUSSIVE_FLATNESS ? :percussive : :tonal
@@ -803,6 +814,11 @@ module MB
         percussive: %w[drum drums drm beat beats break breaks breakbeat breakbeats perc percs percussion kick kicks snare snares hat hats hihat hihats cymbal ride top tops shaker tamb conga congas bongo bongos],
         tonal: %w[pad pads arp arps chord chords keys piano rhodes organ synth synths lead leads melody melodic bass basses vocal vocals vox guitar gtr string strings brass horn horns bell bells pluck plucks choir],
       }.freeze
+
+      # The shortest list word #material looks for at the end of a
+      # compound name word ("bass" in "deepbass"; shorter ones like "hat"
+      # or "arp" would match inside ordinary words).
+      COMPOUND_WORD_MIN = 4
 
       # #material's flatness split (see there).
       PERCUSSIVE_FLATNESS = 0.04
