@@ -710,3 +710,33 @@ namespace :docs do
     puts format('%7d  loaded with CLAUDE.md', DocsIndex.claude_text.bytesize + DocsIndex.imports.sum(&:last))
   end
 end
+
+# A local release (release/local_release.rb, design/notes/release.md): .gem
+# files for mb-sound, mb-term, the git-pinned mb-math and mb-util, and the
+# locked registry gems in DIR/gems, installed into a fresh DIR/gem_home with
+# no Bundler and no checkout; release:smoke runs the clean-room smoke test
+# (release/clean_room_smoke.rb) there.
+namespace :release do
+  release_dir = -> { ENV['DIR'] || File.join(__dir__, 'tmp', 'release') }
+
+  desc 'Build the .gem files into DIR/gems (default tmp/release) and install them into a fresh DIR/gem_home (no Bundler, extensions compiled at install)'
+  task :local do
+    require_relative 'release/local_release'
+    release = MB::Sound::LocalRelease.new(release_dir.call)
+    release.build
+    release.install
+  end
+
+  desc 'Build the .gem files into DIR/gems only'
+  task :build do
+    require_relative 'release/local_release'
+    MB::Sound::LocalRelease.new(release_dir.call).build
+  end
+
+  desc 'The clean-room smoke test in DIR (after release:local): render, play, help, library, the console, as a musician runs them'
+  task :smoke do
+    require_relative 'release/local_release'
+    require_relative 'release/clean_room_smoke'
+    abort 'release:smoke: failures' unless MB::Sound::CleanRoomSmoke.new(MB::Sound::LocalRelease.new(release_dir.call)).run
+  end
+end
