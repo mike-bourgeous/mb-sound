@@ -21,13 +21,18 @@ module MB
         # for loops, nil if nothing says; see .classify), +loop+ ([start,
         # stop, mode] frames, from `smpl`, never for ACID loops, which loop
         # the whole file), +smpl_loops+ (every `smpl` loop, as metadata),
-        # +markers+ ([[frame, label or nil], ...] from cue points),
+        # +markers+ ([[frame, label or nil], ...]: ACID's stretch markers
+        # (the `strc` chunk; sources[:markers] is :strc) when the file has
+        # them, else its cue points (:cue)), +cues+ (the cue points, also
+        # when stretch markers are the markers: in ACIDized files cue
+        # points are regions and labels, not slice points),
         # +seconds+, +sample_rate+, +format+ (:wav, :flac, :aiff, or
         # :other), +sources+ ({ bpm: :acid | :tags | :name, one_shot: :acid
-        # | :smpl | :name | :length | :tempo, ... } saying where each field
-        # came from), and +why+ ({ bpm: "name 98 (fits 8 beats)", one_shot:
-        # "name 'kick'" } in words, for listings).
-        Entry = Data.define(:path, :format, :bpm, :beats, :meter, :key, :root, :one_shot, :loop, :smpl_loops, :markers, :seconds, :sample_rate, :sources, :why) do
+        # | :smpl | :name | :length | :tempo, markers: :strc | :cue, ... }
+        # saying where each field came from), and +why+ ({ bpm: "name 98
+        # (fits 8 beats)", one_shot: "name 'kick'", markers: "strc: 17
+        # stretch markers (5 forced divisions)" } in words, for listings).
+        Entry = Data.define(:path, :format, :bpm, :beats, :meter, :key, :root, :one_shot, :loop, :smpl_loops, :markers, :cues, :seconds, :sample_rate, :sources, :why) do
           # +beats+ / beats per bar (the meter's numerator, else 4).
           def bars
             return nil unless beats
@@ -221,6 +226,7 @@ module MB
 
           f[:seconds] = seconds.to_f if seconds
           why = {}
+          why[:markers] = f[:markers_why] if f[:markers_why]
           names = names_of(path, folders: folders, root: root)
           if !f[:key] && (k = names.lazy.map { |n| parse_name(n)[:key] }.find(&:itself))
             f[:key] = k
@@ -236,7 +242,7 @@ module MB
 
           Entry.new(
             path: path, format: format, bpm: f[:bpm], beats: f[:beats], meter: f[:meter], key: f[:key], root: f[:root],
-            one_shot: f[:one_shot], loop: f[:loop], smpl_loops: (f[:smpl_loops] || []).freeze, markers: (f[:markers] || []).freeze,
+            one_shot: f[:one_shot], loop: f[:loop], smpl_loops: (f[:smpl_loops] || []).freeze, markers: (f[:markers] || []).freeze, cues: (f[:cues] || []).freeze,
             seconds: f[:seconds], sample_rate: f[:sample_rate], sources: sources.freeze, why: why.freeze
           )
         end
@@ -423,9 +429,33 @@ module MB
             end
           end
           unless info.cues.empty?
-            f[:markers] = info.cues.select { |c| !info.frames || c.position <= info.frames }.map { |c| [c.position, c.label].freeze }
+            f[:cues] = f[:markers] = info.cues.select { |c| !info.frames || c.position <= info.frames }.map { |c| [c.position, c.label].freeze }
             sources[:markers] = :cue
           end
+          # ACID's stretch markers are its slice points; a file that has
+          # them uses its cue points for regions and labels (two bars
+          # named, the first and last frame), so they outrank the cues
+          stretch_markers(info, f, sources) if info.strc
+        end
+
+        # ACID's stretch markers (Riff::Strc#markers) as the markers, with
+        # the forced divisions older ACID versions add when playing loops
+        # (Strc#forced).  A chunk with markers past the end of the audio
+        # was made for other audio (a copy at another sample rate or
+        # tempo that kept its chunks) and is left out.
+        def stretch_markers(info, f, sources)
+          marks = info.strc.markers
+          if info.frames && marks.any? { |m| m > info.frames }
+            f[:markers_why] = 'strc markers past the end (made for other audio): left out'
+            return
+          end
+          a = info.acid
+          forced = a && !a.one_shot? && a.beats > 0 ? info.strc.forced(info.frames, a.beats, marks) : []
+          marks = (marks + forced).uniq.sort.select { |m| !info.frames || m < info.frames }
+          return unless marks.any?(&:positive?)
+          f[:markers] = marks.map { |m| [m, nil].freeze }
+          sources[:markers] = :strc
+          f[:markers_why] = "strc: #{marks.length} stretch markers#{" (#{forced.length} forced divisions)" unless forced.empty?}"
         end
 
         # FLAC: STREAMINFO (length), VORBIS_COMMENT (BPM/TEMPO, KEY/
@@ -435,7 +465,7 @@ module MB
           File.open(path, 'rb') do |io|
             return unless io.read(4) == 'fLaC'
             size = io.size
-            riff = { format: nil, data_offset: nil, data_size: nil, acid: nil, smpl: nil, cue: [], labels: {}, lengths: {}, info: {}, chunks: [], ds64_data: nil }
+            riff = { format: nil, data_offset: nil, data_size: nil, acid: nil, smpl: nil, strc: nil, cue: [], labels: {}, lengths: {}, info: {}, chunks: [], ds64_data: nil }
             tags = {}
             100.times do
               h = io.read(4)
@@ -469,11 +499,11 @@ module MB
               break if last
             end
 
-            if riff[:acid] || riff[:smpl] || !riff[:cue].empty?
+            if riff[:acid] || riff[:smpl] || riff[:strc] || !riff[:cue].empty?
               frames = f[:seconds] && f[:sample_rate] ? (f[:seconds] * f[:sample_rate]).round : nil
               cues = riff[:cue].map { |id, pos| Riff::Cue.new(id: id, position: pos, label: riff[:labels][id], length: nil) }.sort_by(&:position)
               info = Riff::Info.new(path: path, container: :flac, format: nil, frames: frames, data_offset: nil, data_size: nil,
-                acid: riff[:acid], smpl: riff[:smpl], cues: cues, info: {}, chunks: [])
+                acid: riff[:acid], smpl: riff[:smpl], cues: cues, info: {}, chunks: [], strc: riff[:strc])
               seconds = f[:seconds]
               rate = f[:sample_rate]
               from_riff(info, f, sources)
