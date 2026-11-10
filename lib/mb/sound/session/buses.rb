@@ -21,7 +21,9 @@ module MB
       # output is the same at any buffer size.
       #
       # Routing belongs to player names, like mutes: each name has a main
-      # out (the master, or a bus) and sends, post-fader.  Send levels are
+      # out (the master, or a bus) and sends, post-fader, or pre-fader
+      # (`[level, :pre]`: after the fades and mute, before the level; see
+      # Faders#pre_fader_levels).  Send levels are
       # unregistered GraphNode::Knobs, so they ramp on exact frames and undo
       # like knob turns.
       #
@@ -571,11 +573,12 @@ module MB
           m
         end
 
-        # True if route +r+'s send to +bus+ is pre-fader now (or, with
-        # +queued+, after the changes queued so far).
+        # True if route +r+'s send to +bus+ is pre-fader now (where its
+        # mode lands, while it glides), or with +queued+, after the changes
+        # queued so far.
         def send_pre?(r, bus, queued: false)
           m = r.pre&.[](bus) or return false
-          (queued ? m.queued_state[1] : m.value).to_f >= 0.5
+          (queued ? m.queued_state : m.state_at(@frame))[1].to_f >= 0.5
         end
 
         # Stops advancing send level knobs no longer in use (replaced by

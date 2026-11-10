@@ -333,6 +333,13 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       end
     end
 
+    it 'takes pre-fader sends in roles ([gain or knob, :pre]) and refuses other arrays' do
+      r = genre::Role.new(patch: :x, send: { hall: [-12.db, :pre], echo: [:space, :pre] })
+      expect(r.sends).to eq(hall: [-12.db, :pre], echo: [:space, :pre])
+      expect(r.options[:send]).to eq(r.sends)
+      expect { genre::Role.new(patch: :x, send: { hall: [-12.db, :prefader] }) }.to raise_error(ArgumentError, /\[either, :pre\]/)
+    end
+
     it 'sets up buses and routes, and saves them in a set document that loads to the same text' do
       new_session = -> {
         MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), channels: 2,

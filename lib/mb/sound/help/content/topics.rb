@@ -1263,7 +1263,7 @@ module MB
       end
       example 'a pre-fader send: only the reverb, no dry sound' do
         bus(:try_wash) { |sig| sig.reverb(:hall, mix: 1) }
-        bg :try_lead, seq(E4, G4, B4, rest).n8.loop.tone.saw.at(-24.db).until(1.bar), send: { try_wash: [-3.db, :pre] }
+        bg :try_lead, seq(E4, G4, B4, rest).n8.loop.tone.saw.at(-6.db).until(1.bar), send: { try_wash: [1, :pre] }
         level :try_lead, 0
       end
       example 'duck a pad by the kick of a drum track' do

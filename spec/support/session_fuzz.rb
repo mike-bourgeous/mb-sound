@@ -353,6 +353,27 @@ module SessionFuzz
         end
       end
     end
+    # (prefader-sends-1) a pre-fader send: a part feeding a :wet bus
+    # pre-fader with its dry sound pulled down (level 0, now or over a
+    # ramp, so the bus alone carries it), sometimes switched back to
+    # post-fader on a beat, or muted (which cuts pre-fader sends too) and
+    # unmuted (drawn last, so every seed keeps the song it made before)
+    if rng.rand < 0.3
+      t = pick(rng, names)
+      level = pick(rng, ['-6.db', '0.5', ':busy'])
+      send = rng.rand < 0.5 ? "#{level}, pre: true" : "[#{level}, :pre]"
+      lines << "bus(:wet) { |sig| sig.#{pick(rng, BUS_FX)} }"
+      lines << "at_bar(1, beat: 2) { feed :#{t}, :wet, #{send}#{pick(rng, ['', ', on: :beat'])} }"
+      lines << "at_bar(#{rng.rand(1..bars)}, beat: #{rng.rand(2..beats)}) { level :#{t}, 0#{pick(rng, ['', ', over: 1/2r', ', on: :beat'])} }"
+      case rng.rand(3)
+      when 0
+        lines << "at_bar(#{rng.rand(1..bars)}, beat: #{rng.rand(2..beats)}) { feed :#{t}, :wet, pre: false#{pick(rng, ['', ', on: :beat'])} }"
+      when 1
+        bar = rng.rand(1..bars)
+        lines << "at_bar(#{bar}, beat: 2) { mute :#{t} }"
+        lines << "at_bar(#{bar}, beat: 3) { unmute :#{t} }"
+      end
+    end
     events = track_events(lines, beats, scene_ends, scene_loops)
     lines = without_swaps_of_stopped(lines, beats, tracks.keys, events)
     lines = without_lost_cues(lines, beats, events, scene_clips.each_with_index.to_h { |c, k| [:"s#{k + 1}", c.keys] })

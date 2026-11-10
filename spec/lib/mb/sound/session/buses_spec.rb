@@ -131,6 +131,195 @@ RSpec.describe(MB::Sound::Session::Buses) do
     end
   end
 
+  describe 'pre-fader sends' do
+    # A session where :x (a constant 1) sends to :half (a bus halving its
+    # input) with +send+, its dry sound turned off by its level.
+    def pre_session(send: { half: [1, :pre] }, level: 0, fade: false)
+      s = new_session
+      s.bus(:half) { |sig| sig * 0.5 }
+      s.add(1.constant, name: :x, send: send, fade: fade)
+      s.level(:x, level) if level
+      s
+    end
+
+    it 'keeps sending with the track level at 0, where a post-fader send stops' do
+      s = pre_session
+      expect(run(1600, s: s).to_a.uniq).to eq([0.5])
+      s.close
+
+      s = pre_session(send: { half: 1 })
+      expect(run(1600, s: s).to_a.uniq).to eq([0])
+      s.close
+    end
+
+    it 'hears what a post-fader send at unity hears, fades included, bit for bit at any buffer size' do
+      # (pre: level 0, so only the bus is heard; post: level 1, the dry
+      # sound into a bus that silences it)
+      results = [[800], *slow_tier([[367, 368], [7, 128, 333]])].flat_map { |sizes|
+        [[{ half: [1, :pre] }, 0, :keep], [{ half: 1 }, nil, :sink]].map { |send, level, to|
+          s = new_session
+          s.bus(:sink) { |sig| sig * 0 }
+          s.bus(:half) { |sig| sig * 0.5 }
+          s.add(1.constant, name: :x, send: send, fade: 1/8r, to: to)
+          s.level(:x, level) if level
+          s.remove(:x, fade: 1/8r, time: 1/4r)
+          d = run(48000, sizes, s: s)
+          s.close
+          d
+        }
+      }
+      results.each { |d| expect(d).to eq(results[0]) }
+      d = results[0]
+      expect(d[6000]).to be_within(1e-6).of(0.25) # halfway through the fade in
+      expect(d[12000 + 6000]).to be_within(1e-6).of(0.5)
+      expect(d[24000 + 6000]).to be_within(1e-6).of(0.25) # halfway through the fade out
+      expect(d[36000..].abs.max).to eq(0)
+    end
+
+    it 'sends nothing from a muted or soloed-away track (pre-fader, post-mute)' do
+      s = pre_session
+      s.add(0.25.constant, name: :y)
+      run(800, s: s)
+      s.mute(:x)
+      run(4800, s: s)
+      expect(run(800, s: s).to_a.uniq).to eq([0.25]) # only :y
+      s.unmute(:x)
+      run(4800, s: s)
+      expect(run(800, s: s).to_a.uniq).to eq([0.75])
+      s.solo(:y)
+      run(4800, s: s)
+      expect(run(800, s: s).to_a.uniq).to eq([0.25])
+      s.close
+    end
+
+    it 'switches to pre-fader and back with feed on the exact landing frame at any buffer size' do
+      results = [[800], *slow_tier([[367, 368], [7, 128, 333]])].map { |sizes|
+        s = pre_session(send: { half: 1 })
+        s.feed(:x, :half, nil, pre: true, start_time: 1/16r) # frame 6000
+        s.feed(:x, :half, 0.5, pre: false, start_time: 3/16r) # frame 18000: post-fader again, where the level 0 silences it
+        d = run(30000, sizes, s: s)
+        s.close
+        d
+      }
+      results.each { |d| expect(d).to eq(results[0]) }
+      d = results[0]
+      expect(d[0...6000].abs.max).to eq(0) # (the switch glides from its landing frame, over 5 ms)
+      expect(d[6000]).to be > 0
+      expect(d[6000 + 120]).to be_between(0.1, 0.4)
+      expect(d[7000...18000].to_a.uniq).to eq([0.5])
+      expect(d[18000 + 120]).to be_between(0.05, 0.4)
+      expect(d[18000 + 480..].abs.max).to eq(0)
+    end
+
+    it 'sends nothing from a cue player (CUE is dry: MAIN 0 zeroes pre-fader sends too)' do
+      session.bus(:half) { |sig| sig * 0.5 }
+      session.route(:b, send: { half: [1, :pre] })
+      session.route(:"b/cue", send: { half: [1, :pre] })
+      session.level(:b, 0)
+      session.cue_player(:b, 1.constant, start_time: 0)
+      expect(run(1600).to_a.uniq).to eq([0])
+    end
+
+    it 'ramps a pre-fader send with over: like a post-fader one' do
+      s = pre_session(send: { half: [0, :pre] })
+      run(800, s: s)
+      s.feed(:x, :half, 1.0, over: 1.n4, on: :now)
+      d = run(24000, s: s)
+      s.close
+      expect(d[12000]).to be_within(1e-3).of(0.25)
+      expect(d[-1]).to be_within(1e-4).of(0.5)
+    end
+
+    it 'is journaled with its mode, undoable, and redoable' do
+      session.bus(:half) { |sig| sig * 0.5 }
+      session.add(1.constant, name: :x, send: { half: 1 })
+      session.level(:x, 0)
+      run(4800)
+      _, changes = session.command('feed') { MB::Sound::Session.with_context(session: session) { MB::Sound.feed(:x, :half, pre: true) } }
+      expect(changes.map(&:kind)).to eq([:send])
+      expect(changes[0].entry.data).to include(bus: :half, pre: true)
+      run(4800)
+      expect(run(800).to_a.uniq).to eq([0.5])
+      expect(session.routes[:x][:send]).to eq(half: [1.0, :pre])
+
+      session.undo(on: :now)
+      run(4800)
+      expect(run(800).to_a.uniq).to eq([0])
+      expect(session.routes[:x][:send]).to eq(half: 1.0)
+
+      session.redo(on: :now)
+      run(4800)
+      expect(run(800).to_a.uniq).to eq([0.5])
+    end
+
+    it 'takes [level, :pre] in feed and refuses other modes with a suggestion' do
+      s = pre_session(send: { half: 1 })
+      s.feed(:x, :half, [0.5, :pre], on: :now)
+      run(4800, s: s)
+      expect(run(800, s: s).to_a.uniq).to eq([0.25])
+      expect { s.feed(:x, :half, [0.5, :pree]) }.to raise_error(ArgumentError, /\[level, :pre\].*:pre/m)
+      expect { s.feed(:x, :half, [0.5, :post], pre: true) }.to raise_error(ArgumentError, /disagree/)
+      expect { s.feed(:x, :half, nil) }.to raise_error(ArgumentError, /needs a level/)
+      expect { s.route(:x, send: { half: [0.5, :pre, 1] }) }.to raise_error(ArgumentError, /\[level, :pre\]/)
+      expect { s.route(:x, send: { half: [-0.5, :pre] }) }.to raise_error(ArgumentError, /-6\.db/)
+      s.close
+    end
+
+    it 'follows a knob pre-fader and lists it' do
+      session.knob(:amount, 0.5)
+      session.bus(:half) { |sig| sig * 0.5 }
+      session.add(1.constant, name: :x, send: { half: [:amount, :pre] })
+      session.level(:x, 0)
+      run(800)
+      expect(run(800).to_a.uniq).to eq([0.25])
+      expect(session.routes[:x][:send]).to eq(half: ['knob(:amount)', :pre])
+      expect(session.route_definitions[:x][:send]).to eq(half: [:amount, :pre])
+    end
+
+    it 'goes into stems at level 0 (the track as heard: its bus share alone)' do
+      Dir.mktmpdir do |dir|
+        MB::Sound.render(File.join(dir, 'mix.flac'), channels: 1, gain: 1, seconds: 0.5, stems: dir) do
+          MB::Sound.bus(:half) { |sig| sig * 0.5 }
+          MB::Sound.bg(:x, 0.25.constant, send: { half: [1, :pre] }, fade: 0)
+          MB::Sound.level(:x, 0)
+        end
+        x = MB::Sound.read(File.join(dir, 'x.flac'))[0]
+        mix = MB::Sound.read(File.join(dir, 'mix.flac'))[0]
+        expect(x[2000]).to be_within(1e-4).of(0.125)
+        expect((x - mix).abs.max).to be < 1e-4
+      end
+    end
+
+    it 'saves to set documents, which load it back' do
+      text = nil
+      MB::Sound::Session.with_context(session: session) do
+        MB::Sound.bus(:half) { |sig| sig * 0.5 }
+        MB::Sound.track(:pad, 1.constant, send: { half: [-6.db, :pre] })
+        MB::Sound.scene(:a, pad: :on)
+        MB::Sound.level(:pad, 0)
+      end
+      run(800) # (knobs save where they are: the level lands first)
+      MB::Sound::Session.with_context(session: session) { text = MB::Sound::GraphIO::SetWriter.new(session.arrangement).to_s }
+      expect(text).to match(/^graph #{MB::Sound::GraphIO::FORMAT},/)
+      expect(text).to include('send: { half: [-6.db, :pre] }')
+      s2 = new_session
+      MB::Sound::Session.with_context(session: s2) { MB::Sound::GraphIO.load(text, session: s2); MB::Sound.go(:a, on: :now) }
+      run(4800, s: s2)
+      expect(s2.routes[:pad]).to eq(session.routes[:pad])
+      expect(run(800, s: s2)[-1]).to be_within(1e-6).of(0.5 * -6.db)
+      s2.close
+    end
+
+    it 'shows in the buses pane as a pre-fader send' do
+      session.bus(:half) { |sig| sig * 0.5 }
+      session.route(:x, send: { half: [0.25, :pre] })
+      session.route(:y, send: { half: 0.25 })
+      run(800) # (send levels list where they were last read)
+      feeds = MB::Sound::UI::Panes::Buses.allocate.feeds_of(session)
+      expect(feeds[:half]).to contain_exactly([:x, :pre, 0.25], [:y, :send, 0.25])
+    end
+  end
+
   describe 'tails and sleep' do
     # A 0.25 s blip sent to a bus with a 0.5 s delay, at buffer sizes
     # +sizes+; returns the mix and the frame the bus fell asleep on.
