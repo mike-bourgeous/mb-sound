@@ -84,6 +84,39 @@ RSpec.describe('Plan rebuilds') do
     expect(lanes.map(&:rebuilds).max).to be <= 3
   end
 
+  it "leaves out a finished stream's nodes in every region at once, so no fused node has an unseen reader (a synth track muted and unmuted)" do
+    # fix-fuzz-370295 (SessionFuzz seed 370295, :runs): the unmute
+    # restarted the clip's stream, so the lane's nodes came back into the
+    # plans with its GM time controllers fused in another region; when the
+    # one-shot clip ended, the lane's region ran its block unfused and read
+    # the controllers' Tee branches before their region ran ("Plan:
+    # Notes::Control/... inside a fused region was read from outside it
+    # (an unseen reader)").  Installation#exclude_streams leaves the
+    # stream's nodes out everywhere in the same rebuild.
+    plan = MB::Sound::Plan
+    old = [plan.precision, plan.rebuilds]
+    plan.precision = :fast
+    plan.rebuilds = :inline
+    MB::Sound.rewind
+    out = MB::Sound::Sampler::CaptureOutput.new(channels: 2, buffer_size: 800)
+    expect {
+      MB::Sound.render(out, bars: 1, buffer_size: 800, channels: 2, gain: 1, exact_lanes: true) {
+        m = MB::Sound
+        m.bpm 150
+        m.knob :cut, 1200.0, range: 200.0..4000.0
+        m.track(:t2, q: 1/2r) { |clip| clip.synth(voices: 1) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) }.filter(:lowpass, cutoff: m.knob(:cut), quality: 2) * 0.3 }
+        m.track(:t3, q: 1/2r) { |kit| m.tr909(kit) * 0.5 }
+        m.scene :s1, t2: m.seq(m::C5, m::D5).n8, t3: m.grid(16, kick: 'x...x...', snare: '....x...').loop, others: :keep
+        m.at_bar(1) { m.go :s1, on: :now }
+        m.at_bar(1, beat: 2) { m.mute :t2 }
+        m.at_bar(1, beat: 4) { m.unmute :t2 }
+      }
+    }.not_to output.to_stderr
+    expect(out.captured[0].abs.max).to be > 0.05
+  ensure
+    plan.precision, plan.rebuilds = old
+  end
+
   it 'never plans a node another installation left out' do
     # The Session's installation reaches the lanes' nodes through the
     # Synth; it took over the nodes the lanes left out (45 here), then
