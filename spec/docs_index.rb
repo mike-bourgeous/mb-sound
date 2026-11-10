@@ -70,6 +70,7 @@ module DocsIndex
     'Console, UI, and scripts' => {
       'method_modules' => 'Method modules', 'help' => 'Console help', 'help_tutorial' => 'Help tutorial (design)', 'plotting' => 'Plotting',
       'terminal_ui' => 'Terminal UI', 'sound_design_ui' => 'Sound-design screen', 'scripts' => 'Scripts',
+      'release' => 'Releases and installing',
     },
     'Audio I/O' => { 'audio_io' => 'Audio I/O', 'latency_probe' => 'Latency probe' },
   }.freeze

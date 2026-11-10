@@ -635,6 +635,27 @@ bin/sound.rb
 
 See the Examples section for some things to try.
 
+### Installing as a gem (no checkout)
+
+mb-sound isn't on rubygems.org yet, but a directory of `.gem` files (mb-sound
+and the gems it needs; a checkout makes one with `bundle exec rake
+release:build DIR=some/dir`) installs without Bundler or a checkout.  With the
+OS packages and Ruby 4.0 from above:
+
+```bash
+cd some/dir/gems
+gem install --local mb-sound-*.gem     # compiles the C extensions (a few minutes)
+
+cd ~/music
+sound.rb                               # the interactive command line
+```
+
+Song files start with `require 'mb/sound/dsl'` and run with `ruby song.rb`.
+The examples' `sounds/...` files come with the gem.  Your presets, takes, and
+settings go in `~/.local/share/mb-sound` (`~/Library/Application
+Support/mb-sound` on macOS).  The other scripts are in the gem's `bin/`
+folder (`gem contents mb-sound | grep bin/`): run them with `ruby`.
+
 
 ### Using the project as a dependency
 
