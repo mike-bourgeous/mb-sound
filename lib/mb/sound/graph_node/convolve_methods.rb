@@ -38,6 +38,21 @@ module MB
         # +:length+ (alias +:trim+) - Keeps this much of the impulse
         #                (seconds or a Length), fading its end out over
         #                +:fade+ (default a quarter of the kept length).
+        # +:stretch+ - Resamples the impulse to this many times its length
+        #              (STRETCH_RANGE; 1.5 is a room half again as long and
+        #              a fifth lower, 0.5 half as long and an octave up),
+        #              before +:length+ counts.
+        # +:reverse+ - true plays the impulse backwards (reverse reverb),
+        #              after +:length+ keeps its start.
+        # +:attack+ - Fades the impulse's start in over this long (seconds
+        #             or a Length), from +:attack_level+ (dB or linear,
+        #             default 0: silence) up to full level: softens the
+        #             direct sound and early reflections.
+        # +:decay+ - An extra exponential decay: the level the impulse's
+        #            end is turned down to (dB or a linear gain under 1,
+        #            e.g. -40.db), falling evenly in dB from its start
+        #            across the kept length.  Shortens a room without
+        #            cutting it off.
         # +:partition+ - A uniform block size in samples (default nil: the
         #                non-uniform plan, a 128-tap head, then 128, 1024,
         #                and 8192-sample partitions; Convolution.plan).
@@ -47,11 +62,15 @@ module MB
         #     play file_input('drums.flac').ir('hall.wav')        # wet only, -10 dB
         #     play saw(110).convolve(ir, wet: -6.db, dry: 1, length: 2.5)
         #     [l, r].channels.convolve('true_stereo.wav')     # four channels
-        def convolve(impulse, mix: nil, wet: nil, dry: nil, gain: 1, normalize: true, predelay: 0, length: nil, trim: nil, fade: nil, partition: nil)
+        #     play saw(110).ir('hall.wav', stretch: 1.5, decay: -30.db)   # longer and darker, tighter tail
+        #     play file_input('drums.flac').ir('hall.wav', length: 1.5, reverse: true, mix: 0.4)
+        def convolve(impulse, mix: nil, wet: nil, dry: nil, gain: 1, normalize: true, predelay: 0, length: nil, trim: nil, fade: nil,
+                     stretch: 1, reverse: false, attack: 0, attack_level: 0, decay: nil, partition: nil)
           raise ArgumentError, 'convolve takes length: or trim: (the same option), not both' if length && trim
 
           ConvolveMethods.build(self, impulse, mix: mix, wet: wet, dry: dry, gain: gain, normalize: normalize, predelay: predelay,
-            length: length || trim, fade: fade, partition: partition)
+            length: length || trim, fade: fade, stretch: stretch, reverse: reverse, attack: attack, attack_level: attack_level,
+            decay: decay, partition: partition)
         end
 
         alias ir convolve
@@ -60,11 +79,22 @@ module MB
         # "wet -10dB normalized, dry 0").
         DEFAULT_WET = -10.db
 
+        # The +:stretch+ ratios #convolve takes.
+        STRETCH_RANGE = (0.125..8.0).freeze
+
         # The #convolve graph for +node+ (a mono node or a stereo bundle).
-        def self.build(node, impulse, mix:, wet:, dry:, gain:, normalize:, predelay:, length:, fade:, partition:)
+        def self.build(node, impulse, mix:, wet:, dry:, gain:, normalize:, predelay:, length:, fade:, partition:,
+                       stretch: 1, reverse: false, attack: 0, attack_level: 0, decay: nil)
           inputs = input_nodes(node)
           rate = inputs[0].sample_rate.to_f
           channels = impulse_channels(impulse, rate)
+
+          stretch = Float(stretch)
+          unless STRETCH_RANGE.cover?(stretch)
+            raise ArgumentError, "convolve's stretch is a ratio from #{STRETCH_RANGE.begin} to #{STRETCH_RANGE.end} (got #{stretch})"
+          end
+          # (resampled as if the impulse had been recorded at rate / stretch)
+          channels = channels.map { |c| Analysis::DSP.resample(c, rate, rate * stretch) } if stretch != 1
 
           to_samples = ->(v, name) {
             next nil if v.nil?
@@ -82,6 +112,10 @@ module MB
             predelay: to_samples.(predelay, 'predelay'),
             length: to_samples.(length, 'length'),
             fade: to_samples.(fade, 'fade'),
+            reverse: reverse ? true : false,
+            attack: to_samples.(attack, 'attack'),
+            attack_level: MB::Sound::Decibels.gain_of(attack_level, 'convolve attack_level', zero: true, above_one: false),
+            decay: decay.nil? ? nil : MB::Sound::Decibels.gain_of(decay, 'convolve decay', above_one: false),
             partition: partition
           )
 
