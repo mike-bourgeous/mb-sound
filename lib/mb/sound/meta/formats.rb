@@ -294,6 +294,15 @@ module MB
           prefer(ruby_text(ruby), h)
         end
 
+        # The metadata of MIDI::MIDIFile +file+ (+track+: one track's index,
+        # else the whole file's; .from_midi of MIDIFile#meta_events), with
+        # the file's sidecar over it.
+        def read_midi(file, track = nil)
+          m = from_midi(file.meta_events(track))
+          side = read_sidecar(file.filename)
+          side ? m.merge(side) : m
+        end
+
         # The metadata of SoundFont INFO texts +info+ ({ 'INAM' => ..., ... }).
         def from_sf2(info)
           h = {}

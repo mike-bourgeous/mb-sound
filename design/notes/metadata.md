@@ -11,7 +11,7 @@ Guards: a Prism scan of lib/ (`meta_guard_spec.rb`), `:meta` fuzz relations and 
 - Objects: `node.note('why').with_meta(author: 'mb')` (in place: nodes, bundles, clips, kits, takes; copies: Samples, `Library::Entry`); `node.meta.notes`; `to_ruby` prints `.note(...)`/`.with_meta(...)`.
 - Session pieces: `meta :a3, source: { ... }`, `meta :a3`, `meta :a3, nil`, `metas`; `Session#metadata.note(:a3, 'x')`; `help :meta`.
 - Documents: `GraphIO.dump(g, meta: { description:, tags:, meta: { author:, notes: } })` (`description:`/`tags:` top-level, the library's index; the rest `meta: { ... }`); `doc.header` (data) vs `doc.meta` (a Value); library lines `reverb :x, ..., meta: { ... }`; takes' `meta:`; set documents' `meta` lines; inline comments in graph and rack documents.
-- Files: `MB::Sound.write(path, data, meta:, meta_title:)`, `Sample#save` (whole metadata), `Sample[path].meta`, `MIDIFile#meta(track)`, `midi_clip(...).meta`, `SF2.open(path).meta`, `Meta::Formats.write_sidecar(path, meta)` / `.read_sidecar(path)`.
+- Files: `MB::Sound.write(path, data, meta:, meta_title:)`, `Sample#save` (whole metadata), `Sample[path].meta`, `Meta::Formats.read_midi(midi_file, track)`, `midi_clip(...).meta`, `SF2.open(path).meta`, `Meta::Formats.write_sidecar(path, meta)` / `.read_sidecar(path)`.
 - Display and guards: `Meta.summary`, `Meta.quote`, `Meta.word`, `Meta.notes_text` (foreign text always quoted and escaped); `spec/lib/mb/sound/meta_guard_spec.rb` (ALLOWED readers, FORBIDDEN_DEFS, FORBIDDEN_PATHS), `meta_invariance_spec.rb`, `spec/lib/mb/sound/meta/` (value, separation, documents, formats, comments), `RelationFuzz` `:meta`, `SessionFuzz` `:meta` (`FUZZ=N`), `GraphSweep::HOSTILE_META`.
 
 History: branch `source-meta-1` (Linux, 2026-11-10; the request: "Let's add metadata to every mb-sound type that maps from a converter so that understood but ignored fields get consumed.  Also include basic stats about the object like byte count and byte offset") built the value rule, the `:source` convention, the Store, and `with_meta`; branch `metadata-2` (Mac, 2026-11-11; "Generalize what Linux has built into a metadata helper/object/module/mixin/whatever built around Ruby-centric ideas like Hash and Struct, allow commentary on a GraphNode ..., figure out how each file format would represent metadata", then "Start building this broader metadata vision.  Try to guard against metadata becoming interpreted as data, as is always the risk") generalized it.  Both are design branches held for the maintainer.
@@ -62,7 +62,7 @@ Each format carries the vocabulary in its own tags for people and the whole Hash
 |---|---|---|
 | WAV / RF64 / BW64 | LIST INFO: INAM title, ICMT notes, IART author, ICOP license, IKEY tags | an `mbmt` chunk |
 | FLAC, Ogg, MP3 (ffmpeg) | title, comment, artist, copyright (Vorbis comments; ID3 TIT2, COMM, TPE1, TCOP) | MB_SOUND_META (ID3 TXXX) |
-| MIDI files (read; spec writer) | track name (title), copyright (license), text (notes), markers (`markers: [[seconds, text]]`) | a text event `mb-sound meta: {...}` |
+| MIDI files (read: `Formats.read_midi` of `MIDIFile#meta_events`, outside the I/O layer; spec writer) | track name (title), copyright (license), text (notes), markers (`markers: [[seconds, text]]`) | a text event `mb-sound meta: {...}` |
 | SoundFonts (read) | INFO: INAM, ICMT, IENG, ICOP, plus `source:` (format, file, version, bytes) | |
 | anything else | | a sidecar `<file>.meta.rb`: one `meta` statement |
 
@@ -79,7 +79,7 @@ Importers put provenance under `:source`; the library reads these keys only for 
 
 - Invariance: 310 sweep factories with hostile metadata on every node: identical samples unplanned and planned, identical plan regions, identical allocations over 20 buffers of 128; relation fuzz `:meta` over seeds 1000-1199: no failure (renders bit-identical; round trips exact for every printed node); session fuzz `:meta` over the first 12 seeds of 1-400 with metadata lines: bit-identical.
 - `render_allocations_spec.rb` budgets unchanged.
-- YJIT, against source-meta-1 (tunnel_vision, 24 bars rendered, 3 alternating runs per tree, YJIT stats at exit): compiled ISEQs 3812-3813 vs 3808-3810, inline code 4.199-4.200 MB vs 4.195-4.199 MB, code region 13.79 MB both, process CPU 25.6-26.0 s vs 25.8-26.2 s (noise).  bin/jit_bench.rb --quick: see the branch report.
+- YJIT, against source-meta-1 (tunnel_vision, 24 bars rendered, 3 alternating runs per tree, YJIT stats at exit): compiled ISEQs 3812-3813 vs 3808-3810, inline code 4.199-4.200 MB vs 4.195-4.199 MB, code region 13.79 MB both, process CPU 25.6-26.0 s vs 25.8-26.2 s (noise).  bin/jit_bench.rb --quick, alternating trees (two runs each, YJIT on): startup total 3.90/3.78 s vs 3.97/3.91 s; render mean at 128 frames tunnel_vision 50.3/48.2% vs 50.9/48.9%, night_bus_flow 10.3/10.1% vs 10.2/10.0%, techno 14.4/13.7% vs 14.1/14.2%, dense 36.7/36.7% vs 37.8/36.4%.  techno's slowest landing buffer looked ~2.7 ms slower in --quick (12.7-13.8 vs 10.0-10.5 ms), but three more alternating runs of 16 bars put both trees at 10.5-19.4 ms (noise).  The rendered audio is identical (same MD5).  Metadata adds no work per node: `@carried_meta` stays nil (preset or set to nil in constructors), and the loader checks one nil ivar per call when a document has no body comments.
 
 ## Open
 

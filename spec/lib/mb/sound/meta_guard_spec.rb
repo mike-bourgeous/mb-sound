@@ -49,7 +49,6 @@ module MetaGuard
     'lib/mb/sound/library.rb' => ['an Entry carries its document\'s description as Entry#meta (copied, never searched); gem shelves read gemspec metadata (a gem\'s own declaration of its shelf, not mb-sound metadata)', %i[document_entry gem_shelves]],
     'lib/mb/sound/library/saving.rb' => ['a replacing save keeps the old document\'s descriptive metadata', %i[save]],
     'lib/mb/sound/take.rb' => ['takes write their metadata as the replay\'s meta:', %i[to_ruby replay]],
-    'lib/mb/sound/midi/import.rb' => ['a MIDI import gives a clip its track\'s metadata (copied, never read to build)', %i[clip]],
     'lib/mb/sound/graph_io/comments.rb' => ['a document\'s comments become notes, and the writer asks which notes to print as comments', %i[args notes_of args_of]],
     'lib/mb/sound/ui/inspect.rb' => ['the inspector shows a node\'s notes (quoted: Meta.notes_text)', %i[notes_of]],
     # (other things named meta or metadata)

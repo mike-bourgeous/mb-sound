@@ -87,14 +87,14 @@ RSpec.describe(MB::Sound::Meta::Formats, :aggregate_failures) do
       path = tmp_path('meta.mid')
       MidiWriter.write(path, tracks: [{ name: nil, notes: [[0, 480, 48, 100], [480, 960, 52, 90]], meta: fmt.midi_events(meta, title: 'Bass') }])
       f = MB::Sound::MIDI::MIDIFile.new(path)
-      expect(f.meta(1)).to eq(meta)
+      expect(fmt.read_midi(f, 1)).to eq(meta)
       clip = MB::Sound.midi_clip(path)
       expect(clip.meta).to eq(meta)
       expect(clip.to_ruby).not_to include('with_meta') # (read again with the file)
 
       foreign = tmp_path('foreign.mid')
       MidiWriter.write(foreign, tracks: [{ name: 'Lead', notes: [[0, 480, 60, 100]], meta: [[0x02, '(c) 2001 Someone'], [0x01, 'played live'], [0x06, 'chorus', 960]] }])
-      m = MB::Sound::MIDI::MIDIFile.new(foreign).meta
+      m = fmt.read_midi(MB::Sound::MIDI::MIDIFile.new(foreign))
       expect(m[:title]).to eq('Conductor')
       expect(m.license).to eq('(c) 2001 Someone')
       expect(m.notes).to eq(['played live'])
@@ -136,7 +136,7 @@ RSpec.describe(MB::Sound::Meta::Formats, :aggregate_failures) do
       mid = tmp_path('m.mid')
       MidiWriter.write(mid, tracks: [{ name: 'Lead', notes: [[0, 480, 60, 100]] }])
       fmt.write_sidecar(mid, { pack: :demo })
-      expect(MB::Sound::MIDI::MIDIFile.new(mid).meta.pack).to eq(:demo)
+      expect(fmt.read_midi(MB::Sound::MIDI::MIDIFile.new(mid)).pack).to eq(:demo)
     end
 
     it 'refuses sidecars that are links, too long, or more than plain values' do

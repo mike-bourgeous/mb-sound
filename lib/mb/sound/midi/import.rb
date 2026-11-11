@@ -140,6 +140,7 @@ module MB
         # Reads +file+ (a path or a MIDIFile).
         def initialize(file)
           @midi_file = file.is_a?(MIDIFile) ? file : MIDIFile.new(file)
+          @track_meta = {} # (each track's metadata, read once: #clip)
           seq = @midi_file.seq
           @ppqn = seq.ppqn
           @path = @midi_file.filename
@@ -269,7 +270,7 @@ module MB
           clip = Sequence::Clip.new(events, length: length, loop: loop, performed: true, controls: lanes)
           clip = clip.fit_controls if cc == :fit
           # (the track's metadata, read again with the file: not recorded)
-          m = @midi_file.meta(idx)
+          m = @track_meta[idx] ||= Meta::Formats.read_midi(@midi_file, idx)
           m.empty? ? clip : GraphNode::Recipe.quietly { clip.with_meta(m) }
         end
 
