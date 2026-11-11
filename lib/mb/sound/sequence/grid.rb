@@ -118,6 +118,7 @@ module MB
         # patch's transform again (see Session::ClipSwaps).
         def initialize(rows, row_names: true)
           @instrument = nil # (see PlayedBy)
+          @carried_meta = nil # (Meta::Carrier, through Named)
           @rows = rows.freeze
           @rows.each { |name, clip| ROW_NAMES[clip] = name if clip.is_a?(Clip) } if row_names
         end

@@ -26,6 +26,10 @@ module MB
     #     take.save 'sets/night_bus.rb'
     #     take.restart         # starts a new take
     class Take
+      # Notes, tags, and other descriptions of the take (`take.note('the
+      # verse idea')`; Meta::Carrier), saved as the replay's `meta:`.
+      include Meta::Carrier
+
       # A console line: its +id+, the Ruby +code+, the Stamp where it was
       # +issued+, and the timeline positions (+lands+) where each change it
       # made landed, in the order they were made, and the +epoch+ (how many
@@ -179,6 +183,7 @@ module MB
         @decisions_from = (@session || Session.default).decision_log_length
         @autosave = nil # (the #autosave! thread)
         @autosave_path = nil
+        @carried_meta = nil # (Meta::Carrier: #note, #with_meta)
       end
 
       # Decisions made during the take by params read ahead of time (see
@@ -371,6 +376,7 @@ module MB
         out << "  ends: #{ruby_value(session.transport.position)},\n"
         out << "  ends_epoch: #{session.epoch - @start_epoch},\n" if session.epoch > @start_epoch
         out << "  seconds: #{length_seconds.round(3)},\n"
+        out << "  meta: #{meta.to_ruby},\n" unless meta.empty?
         out << ") do |r|\n"
         midi.each do |name, rows|
           out << "  r.midi [\n"
@@ -405,7 +411,7 @@ module MB
       # A Replay of this take (see Replay), as #save would write it.
       def replay
         lines = @mutex.synchronize { @lines.reject(&:skipped) }
-        Replay.new(**@start.except(:time), ends: session.transport.position, ends_epoch: session.epoch - @start_epoch, seconds: length_seconds) do |r|
+        Replay.new(**@start.except(:time), ends: session.transport.position, ends_epoch: session.epoch - @start_epoch, seconds: length_seconds, meta: meta) do |r|
           midi.each { |name, rows| r.midi(rows, input: name) }
           r.decisions(decisions)
           r.gestures(gestures)

@@ -31,8 +31,9 @@ module MB
     #     meta :a3, source: { format: :acd, kind: :track, at: 0x12340, bytes: 5678,
     #                         name: "the track's own name", fields: { color: 3, height: 80 } }
     module Meta
-      # What a piece without metadata has.
-      EMPTY = {}.freeze
+      # (an empty frozen Hash and Array, shared)
+      EMPTY_HASH = {}.freeze
+      EMPTY_LIST = [].freeze
 
       # The keys importers use inside +:source+, in the order summaries
       # and documents read best, with what each holds.  Other keys are
@@ -106,14 +107,17 @@ module MB
       # merged in, checked and frozen: a key given again replaces its
       # value whole (`meta :a3, notes: 'x'` keeps `:source`; a second
       # `source:` replaces the first).  Top-level keys are Symbols.
+      # Returns a frozen Hash (Value.of wraps it; +old+ may be a Value).
       def merge(old, values)
+        values = values.to_h if values.is_a?(Value)
         raise ArgumentError, "metadata is a Hash of plain values (got #{describe(values)})" unless values.is_a?(Hash)
         values.each_key do |k|
           raise ArgumentError, "meta[#{k.inspect}]: top-level metadata keys are Symbols, like source: or notes: (got #{describe(k)})" unless k.instance_of?(Symbol)
         end
         check(values)
-        return old || EMPTY if values.empty?
-        (old || EMPTY).merge(frozen(values)).freeze
+        old = old.to_h if old.is_a?(Value)
+        return old || EMPTY_HASH if values.empty?
+        (old || EMPTY_HASH).merge(frozen(values)).freeze
       end
 
       # One line about +meta+ for listings: "from project.acd, track at
@@ -124,6 +128,7 @@ module MB
       # source doesn't say.
       def summary(meta, kind: nil, file: nil)
         return '(none)' if meta.nil? || meta.empty?
+        meta = meta.to_h
         parts = []
         src = meta[:source]
         if src.is_a?(Hash)
@@ -178,6 +183,7 @@ module MB
       # Arrays opened with their entries filled to the width.  Values
       # print through RubyValue.
       def statement(name, meta, width: 120)
+        meta = meta.to_h
         one = "meta #{[name&.inspect, RubyValue.kwargs(meta)].compact.join(', ')}"
         return [one] if one.length <= width
         lines = [name.nil? ? 'meta(' : "meta(#{name.inspect},"]
@@ -304,16 +310,16 @@ module MB
       # lock, lands at once, and is not an undo step.
       class Store
         def initialize
-          @set = EMPTY
+          @set = Value::EMPTY
           @pieces = {}
           @mutex = Mutex.new
         end
 
         # The metadata of piece +name+ (a Symbol), or the set's own for
-        # nil: a frozen Hash, empty when there is none.
+        # nil: a Meta::Value, empty when there is none.
         def [](name = nil)
           Store.check_name(name)
-          @mutex.synchronize { name.nil? ? @set : (@pieces[name] || EMPTY) }
+          @mutex.synchronize { name.nil? ? @set : (@pieces[name] || Value::EMPTY) }
         end
 
         # Merges +values+' top-level keys into what +name+ has (see
@@ -321,16 +327,30 @@ module MB
         def merge(name, values)
           Store.check_name(name)
           @mutex.synchronize do
-            merged = Meta.merge(name.nil? ? @set : @pieces[name], values)
-            if name.nil?
-              @set = merged
-            elsif merged.empty?
-              @pieces.delete(name)
-            else
-              @pieces[name] = merged
-            end
-            merged
+            merged = (name.nil? ? @set : (@pieces[name] || Value::EMPTY)).merge(values)
+            store(name, merged)
           end
+        end
+
+        # Adds commentary to +name+'s metadata (the set's own for nil): one
+        # note per String (Value#note).  Returns the piece's metadata.
+        def note(name, *texts)
+          Store.check_name(name)
+          @mutex.synchronize do
+            store(name, (name.nil? ? @set : (@pieces[name] || Value::EMPTY)).note(*texts))
+          end
+        end
+
+        # (keeps +merged+ for +name+; under the lock)
+        private def store(name, merged)
+          if name.nil?
+            @set = merged
+          elsif merged.empty?
+            @pieces.delete(name)
+          else
+            @pieces[name] = merged
+          end
+          merged
         end
 
         # Forgets the metadata of +name+ (the set's own for nil).  Returns
@@ -340,10 +360,10 @@ module MB
           @mutex.synchronize do
             if name.nil?
               old = @set
-              @set = EMPTY
+              @set = Value::EMPTY
               old
             else
-              @pieces.delete(name) || EMPTY
+              @pieces.delete(name) || Value::EMPTY
             end
           end
         end
@@ -375,49 +395,90 @@ module MB
         end
       end
 
-      # Metadata on an object itself, for objects without a Session name:
-      # graph nodes and bundles (GraphNode includes this).  Importers that
-      # build objects rather than text (trackers, MIDI files) tag what they
-      # build:
+      # Metadata on an object itself: one mixin for every mb-sound object
+      # that saves or prints (metadata-2).  Graph nodes and bundles
+      # (GraphNode, Channels), clips and kits, takes, Samples, and library
+      # entries include it; a Session's named pieces carry theirs in the
+      # Session's Meta::Store.  Importers that build objects rather than
+      # text (trackers, MIDI files) tag what they build:
       #
       #     voice = sampler(sample).with_meta(source: { format: :xm, kind: :instrument, id: 3, at: 0x1f40, bytes: 263 })
       #     voice.meta[:source][:id]   # => 3
+      #     pad = 220.hz.saw.lp4(900).note('slow attack hides the click')
+      #     pad.meta.notes             # => ["slow attack hides the click"]
+      #
+      # Objects that change in place (graph nodes, bundles, clips, kits,
+      # takes) return themselves, so the calls chain like #named; value
+      # objects (Samples, library entries) return a copy (they override
+      # #carry_meta).
       #
       # Carried metadata is not sound: it changes no sample, no plan, and
-      # no allocation while rendering.  `to_ruby` prints it (as
-      # `.with_meta(...)`, like `.named`), so recipes and graph documents
-      # keep it.
+      # no allocation while rendering, and nothing reads it to build or
+      # find anything (meta_guard_spec.rb).  `to_ruby` prints it (as
+      # `.with_meta(...)` and `.note(...)`, like `.named`), so recipes and
+      # graph documents keep it.
       module Carrier
         # Merges +values+ (a Hash, or keywords) into this object's metadata
-        # by top-level key (see Meta.merge; `:source` by convention holds
-        # where it came from, Meta::SOURCE_KEYS) and returns the object,
-        # so it chains like #named.  `with_meta(nil)` forgets it all.
+        # by top-level key (see Value#merge; `:source` by convention holds
+        # where it came from, Meta::SOURCE_KEYS) and returns the object (a
+        # copy for value objects), so it chains like #named.
+        # `with_meta(nil)` forgets it all.
         def with_meta(values = Carrier::NONE, **more)
-          if values.nil? && more.empty?
-            @carried_meta = nil
-            return self
-          end
+          return carry_meta(nil) if values.nil? && more.empty?
           values = Carrier::NONE.equal?(values) ? more : Carrier.both(values, more)
-          @carried_meta = Meta.merge(@carried_meta, values)
-          @carried_meta = nil if @carried_meta.empty?
+          carry_meta(meta.merge(values))
+        end
+
+        # Adds commentary: one note (a String) per argument at the end of
+        # `meta.notes` (`meta[:notes]`, an Array of Strings).  Returns the
+        # object (a copy for value objects), so it chains:
+        #
+        #     220.hz.saw.note('a little detuned on purpose').lp4(900).note('darker')
+        #
+        # `to_ruby` prints it back as `.note("...")`.
+        def note(*texts)
+          carry_meta(meta.note(*texts))
+        end
+
+        # This object's metadata (see #with_meta): a Meta::Value (frozen,
+        # Hash-like), empty when it carries none.
+        def meta
+          @carried_meta || Value::EMPTY
+        end
+
+        private
+
+        # Keeps +value+ (a Meta::Value, or nil to forget) as this object's
+        # metadata and returns the object.  Value objects override it to
+        # return a copy.
+        def carry_meta(value)
+          @carried_meta = value.nil? || value.empty? ? nil : value
           self
         end
 
-        # This object's metadata (see #with_meta): a frozen Hash, empty
-        # when it carries none.
-        def meta
-          @carried_meta || EMPTY
-        end
+        public
 
         # (no positional argument given)
         NONE = Object.new.freeze
 
         # (a positional Hash and keywords as one Hash)
         def self.both(values, more)
+          values = values.to_h if values.is_a?(Value)
           raise ArgumentError, "metadata is a Hash of plain values (got #{Meta.describe(values)})" unless values.is_a?(Hash)
           more.empty? ? values : values.merge(more)
         end
       end
+    end
+  end
+end
+
+require_relative 'meta/value'
+
+module MB
+  module Sound
+    module Meta
+      # What an object without metadata has (an empty Meta::Value).
+      EMPTY = Value::EMPTY
     end
   end
 end

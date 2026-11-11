@@ -372,13 +372,17 @@ module MB
         @meta_source || {}
       end
 
-      # More loop-file metadata: { why: { bpm: "name 98 (fits 8 beats)",
-      # one_shot: "name 'kick'" } (the reasons in words), smpl_loops:
-      # [[start, stop, mode], ...] (every `smpl` loop in source samples,
-      # also for ACID loops, which ignore them) } (empty when not from a
-      # loop file).
+      # The sample's metadata (a Meta::Value; Meta::Carrier, see
+      # Sample::Source): what the library read from a loop file, { why: {
+      # bpm: "name 98 (fits 8 beats)", one_shot: "name 'kick'" } (the
+      # reasons in words), smpl_loops: [[start, stop, mode], ...] (every
+      # `smpl` loop in source samples, also for ACID loops, which ignore
+      # them) }, the file's own `:source`, and anything given with
+      # #with_meta or #note (empty when none).  Nothing plays from it: the
+      # loop, tempo, and key a voice uses are the Sample's own settings
+      # (#loop_points, #bpm, #key; design/notes/metadata.md, the audit).
       def meta
-        @meta || {}
+        @meta || Meta::EMPTY
       end
 
       # A position in a sample (Sample#markers): source samples from the
@@ -450,7 +454,7 @@ module MB
         @key = key&.to_sym
         @markers = markers.nil? ? nil : Sample.marker_list(markers)
         @meta_source = meta_source
-        @meta = meta
+        @meta = meta.nil? || meta.empty? ? nil : Meta::Value.of(meta)
         @loop_points = loop.nil? ? nil : Sample.loop_points(loop, self)
         @loop_mode = (loop_mode || (@loop_points ? :forward : :one_shot)).to_sym
         raise ArgumentError, "Unknown loop mode #{@loop_mode.inspect} (#{LOOP_MODES.join(', ')})" unless LOOP_MODES.include?(@loop_mode)

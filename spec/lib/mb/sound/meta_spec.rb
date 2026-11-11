@@ -41,7 +41,7 @@ RSpec.describe(MB::Sound::Meta, :aggregate_failures) do
       expect(c).to eq(source: { format: :mod }, notes: 'x')
       expect([a, b, c]).to all(be_frozen)
       expect(meta.merge(b, {})).to equal(b)
-      expect(meta.merge(nil, {})).to equal(meta::EMPTY)
+      expect(meta.merge(nil, {})).to equal(meta::EMPTY_HASH)
     end
 
     it 'keeps deeply frozen copies, so the caller\'s values stay theirs' do

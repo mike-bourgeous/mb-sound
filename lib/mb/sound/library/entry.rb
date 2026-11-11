@@ -70,11 +70,18 @@ module MB
       #   the family's arguments (nil for entries that only hold data)
       # - +source+ is the entry's own Ruby (a library file's statement, or
       #   nil): what collect and promote copy
+      # - +meta+ (a Meta::Value) describes it: notes, author, license,
+      #   links, pack, and the descriptive metadata of the document or
+      #   library line it came from (Meta::Carrier: #with_meta and #note
+      #   return a copy).  The library never searches or builds from it:
+      #   +tags+ and +about+ are what searches read.
       # Params of entries made when first read (see Entry#params).
       LAZY_PARAMS = ObjectSpace::WeakKeyMap.new
 
-      Entry = Data.define(:name, :kind, :family, :tags, :facets, :about, :params, :shelf, :location, :settings, :builder, :source) do
-        def initialize(name:, kind:, family:, tags: [], facets: {}, about: nil, params: {}, shelf: nil, location: nil, settings: nil, builder: nil, source: nil)
+      Entry = Data.define(:name, :kind, :family, :tags, :facets, :about, :params, :shelf, :location, :settings, :builder, :source, :meta) do
+        include MB::Sound::Meta::Carrier
+
+        def initialize(name:, kind:, family:, tags: [], facets: {}, about: nil, params: {}, shelf: nil, location: nil, settings: nil, builder: nil, source: nil, meta: nil)
           raise ArgumentError, "Entry names are Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
           raise ArgumentError, "Unknown entry kind #{kind.inspect} (#{KINDS.join(', ')})" unless KINDS.include?(kind)
           raise ArgumentError, "Entry families are Symbols (got #{family.inspect})" unless family.is_a?(Symbol)
@@ -90,9 +97,19 @@ module MB
           super(
             name: name, kind: kind, family: family, tags: tags, facets: facets.dup.freeze, about: about&.dup&.freeze,
             params: params.respond_to?(:call) ? params : params.dup.freeze, shelf: shelf || Library.builtin_shelf, location: location&.to_s&.freeze,
-            settings: settings && Library.deep_freeze(settings), builder: builder, source: source&.dup&.freeze
+            settings: settings && Library.deep_freeze(settings), builder: builder, source: source&.dup&.freeze,
+            meta: MB::Sound::Meta::Value.of(meta)
           )
         end
+
+        private
+
+        # (Meta::Carrier: an Entry is a value, so a copy with +value+)
+        def carry_meta(value)
+          with(meta: value || MB::Sound::Meta::EMPTY)
+        end
+
+        public
 
         # The params ({ name => MB::Sound::Param }; made when first read for
         # class presets, whose declarations may name units that load after

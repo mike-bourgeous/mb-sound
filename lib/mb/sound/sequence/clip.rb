@@ -110,6 +110,7 @@ module MB
         def initialize(events, length: nil, loop: false, seed: 0, align: :timeline, variations: [], performed: false, values: nil, controls: nil)
           @instrument = nil # (see PlayedBy)
           @clock = nil # (see Clocked)
+          @carried_meta = nil # (Meta::Carrier, through Named)
           @events = events.sort_by(&:start).freeze
           @values = values&.uniq&.freeze
           @performed = !!performed

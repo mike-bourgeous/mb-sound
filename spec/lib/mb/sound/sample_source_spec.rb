@@ -86,7 +86,7 @@ RSpec.describe(MB::Sound::Sample::Source, :aggregate_failures) do
       expect(c.meta.slice(*s.meta.keys)).to eq(s.meta)
       expect(c.meta[:source]).to equal(s.meta[:source])
       expect(d.meta[:source][:kind]).to eq(:loop)
-      expect(d.meta).to include(notes: 'dusty', tags: [:drums])
+      expect(d.meta.to_h).to include(notes: 'dusty', tags: [:drums])
       expect(d.meta).to be_frozen
       expect(d.audio).to equal(s.audio)
       expect { s.with_meta(source: { sample: s }) }.to raise_error(ArgumentError, /meta\[:source\]\[:sample\] is a MB::Sound::Sample/)

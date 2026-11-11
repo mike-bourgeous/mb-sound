@@ -40,8 +40,15 @@ module MB
         #     kick.reverse.meta[:source]         # views and edits keep it
         def with_meta(values = Meta::Carrier::NONE, **more)
           values = Meta::Carrier::NONE.equal?(values) ? more : Meta::Carrier.both(values, more)
-          merged = Meta.merge(meta, values)
+          merged = meta.merge(values)
           with(meta: merged, lineage: [self, :with_meta, [], Meta.frozen(values)].freeze)
+        end
+
+        # A copy with one more note per argument (Strings) at the end of
+        # `meta.notes` (Meta::Carrier#note), recorded in the lineage, so
+        # documents print `Sample["x.wav"].note("...")`.
+        def note(*texts)
+          with(meta: meta.note(*texts), lineage: [self, :note, Meta.frozen(texts), {}].freeze)
         end
 
         # The tags #save writes, with `meta[:source]` as Source::TAG.
@@ -63,10 +70,10 @@ module MB
           # Sample#save carries in its tags, else .of_file.  A `:source`
           # the caller gave (`Sample[path, meta: { source: ... }]`) stays.
           def add(kw, path, tags, found)
-            meta = kw[:meta] || Meta::EMPTY
+            meta = Meta::Value.of(kw[:meta])
             return kw if meta.key?(:source)
             src = saved(tags) || of_file(path, found)
-            src ? kw.merge(meta: meta.merge(source: src).freeze) : kw
+            src ? kw.merge(meta: meta.merge(source: src)) : kw
           end
 
           # The `:source` in a saved file's +tags+ (see TAG), or nil (also
@@ -118,6 +125,7 @@ module MB
         end
       end
 
+      include Meta::Carrier
       prepend Source
     end
   end
