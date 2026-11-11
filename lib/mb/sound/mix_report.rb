@@ -133,7 +133,8 @@ module MB
           sections: @sections.map { |s| s.to_h.merge(loudness: s.loudness.transform_values(&fix), peak: fix.(s.peak)) },
           codec_peaks: @codec_peaks&.transform_values(&fix),
           mastering: @mastering && @mastering.to_h.except(:target, :trim, :ceiling).merge(
-            target: @mastering.target.lufs, trim: @mastering.trim.db_value, ceiling: @mastering.ceiling.db_value
+            target: @mastering.target.lufs, trim: @mastering.trim.db_value, ceiling: @mastering.ceiling.db_value,
+            chain_effect: @mastering.chain_effect&.to_h
           ).transform_values(&fix),
         }
       end

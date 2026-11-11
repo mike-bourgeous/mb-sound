@@ -335,12 +335,12 @@ module MB
         # the target unless lufs: was given).
         Result = Data.define(:preset, :trim, :target, :ceiling, :integrated, :short_term_max, :range, :true_peak, :side, :side_hz,
                              :first_pass, :runs, :held, :codec_peaks, :measure, :loudest, :loudest_bars, :drive, :percentile, :side_in,
-                             :trims, :sections, :energy, :reference, :tilt, :tilt_in, :tilt_out, :histogram, :reference_level) do
+                             :trims, :sections, :energy, :reference, :tilt, :tilt_in, :tilt_out, :histogram, :reference_level, :chain_effect) do
           def initialize(drive: nil, percentile: nil, side_in: nil, trims: nil, sections: nil, energy: nil, reference: nil, tilt: nil, tilt_in: nil, tilt_out: nil,
-                         histogram: nil, reference_level: nil, **rest)
+                         histogram: nil, reference_level: nil, chain_effect: nil, **rest)
             super(drive: drive, percentile: percentile, side_in: side_in, trims: trims, sections: sections, energy: energy,
               reference: reference, tilt: tilt, tilt_in: tilt_in, tilt_out: tilt_out, histogram: histogram,
-              reference_level: reference_level, **rest)
+              reference_level: reference_level, chain_effect: chain_effect, **rest)
           end
 
           # The loudness the target was reached with (integrated, the
@@ -392,6 +392,9 @@ module MB
             # N16: measure the side before mono_below, so the report says
             # whether the lows were mono already)
             side_text = side_in ? "#{db_text.(side_in)} in the mix, #{db_text.(side)} mastered" : db_text.(side)
+            # (omnibus19, Kez: what the chain did to the music, beside the
+            # bookkeeping above)
+            lines << "  #{chain_effect}" if chain_effect
             lines << format('  true peak %.2f dBTP (ceiling %.1f), side below %d Hz %s re mid', true_peak, ceiling.db_value, side_hz, side_text)
             if reference
               level = case (reference_level && measure)
@@ -583,6 +586,7 @@ module MB
           side = out.length == 2 ? Genre.low_side_db(out, frequency: hz, sample_rate: session.sample_rate) : nil
           input = input_from(records.last, origin, length)
           side_in = input.length == 2 ? Genre.low_side_db(input, frequency: hz, sample_rate: session.sample_rate) : nil
+          effect = chain_effect(input, out, trims ? trims.db_at(origin, length) : x1, session, origin, length, hz)
 
           Result.new(
             preset: presets.last.name, trim: x1.db, target: target, ceiling: ceiling,
@@ -593,8 +597,28 @@ module MB
             drive: drive, percentile: mode == :bars ? presets.last.percentile : nil, side_in: side_in,
             trims: trims, sections: rows&.map(&:freeze)&.freeze, energy: mode == :sections ? presets.last.energy : nil,
             reference: presets.last.reference, tilt: tilt, tilt_in: tilt_in,
-            tilt_out: presets.last.reference ? Analysis::Spectrum.new(out, sample_rate: session.sample_rate).tilt : nil
+            tilt_out: presets.last.reference ? Analysis::Spectrum.new(out, sample_rate: session.sample_rate).tilt : nil,
+            chain_effect: effect
           )
+        end
+
+        # What the chain did to the music (Mastering::ChainEffect): its
+        # output +out+ against its +input+ at +trim+ (dB, a number or per
+        # frame), per bar of the render (+length+ frames from session frame
+        # +origin+; labeled with the song's bar numbers, or seconds without
+        # a transport), the low band below +hz+.
+        def self.chain_effect(input, out, trim, session, origin, length, hz)
+          rate = session.sample_rate
+          tr = session.transport
+          ranges = bar_windows(tr, origin, length, rate, nil)[:ranges] || []
+          labels =
+            if tr
+              first = tr.bar_at(tr.whole_notes_of(Rational(origin, rate.to_i))).ceil
+              ranges.each_index.map { |i| first + i }
+            else
+              ranges.map { |a, _| format('at %.1f s', a) }
+            end
+          ChainEffect.measure(input, out, trim, sample_rate: rate, bars: ranges, labels: labels, low_hz: hz)
         end
 
         # The section passes of measure: :sections over a render of +length+
