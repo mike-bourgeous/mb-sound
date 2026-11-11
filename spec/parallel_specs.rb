@@ -21,8 +21,18 @@ module ParallelSpecs
   TIMES_PATH = File.join(ROOT, 'tmp', ENV['SLOW'] == '1' ? 'spec_file_times_full.json' : 'spec_file_times.json')
   # Time budgets per file and per example (see #check_budgets)
   BUDGETS_PATH = File.join(ROOT, 'spec', 'time_budgets.yml')
-  # Each host's speed at each parallelism (see #host_speed)
-  HOST_SPEED_PATH = File.join(ROOT, 'tmp', 'spec_host_speed.json')
+  # Each host's speed at each parallelism (see #host_speed), kept in the
+  # main checkout's tmp/ (git's common directory's parent), not the
+  # worktree's: batch and branch worktrees are new for every run, so each
+  # measured the host again, and its idle readings put the Mac's scale
+  # anywhere from x2.24 to x3.83 (batches 27-31, 2026-11-11): files near
+  # their budgets failed one batch and passed the next.
+  # MB_SOUND_SPEC_HOST_SPEED names another file.
+  HOST_SPEED_PATH = ENV['MB_SOUND_SPEC_HOST_SPEED'].then { |e| File.expand_path(e) unless e.nil? || e.empty? } || begin
+    common = IO.popen(['git', '-C', ROOT, 'rev-parse', '--path-format=absolute', '--git-common-dir'], err: File::NULL, &:read).to_s.strip
+    main = File.dirname(common) if $?&.success? && !common.empty?
+    File.join(main || ROOT, 'tmp', 'spec_host_speed.json')
+  end
   HOST_SPEED_SCRIPT = File.join(ROOT, 'spec', 'host_speed_bench.rb')
 
   # Files slower than this (seconds) or examples slower than SLOW_EXAMPLE
@@ -103,7 +113,7 @@ module ParallelSpecs
 
   # The seconds spec/host_speed_bench.rb takes on this machine with +count+
   # copies running at once (the median copy), measured on the first
-  # spec:parallel run at that parallelism and kept in tmp/spec_host_speed.json
+  # spec:parallel run at that parallelism and kept in the main checkout's tmp/spec_host_speed.json
   # (MB_SOUND_SPEC_CALIBRATE=1 measures again).  Time budgets scale by it
   # over the reference machine's (#budget_scale; maintainer, 2026-10-21:
   # "Set them relative to each machine's performance on first run maybe?").
