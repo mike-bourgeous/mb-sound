@@ -120,6 +120,13 @@ RSpec.describe('kernel check mode over the graph sweep', :check_shared) do
   # state carried across buffers.)
   sizes = [[128, 3], *SlowTier.slow_tier([[7, 4], [800, 1]], keep: 0)]
 
+  # Kernels the unplanned pass runs in C: a feedback loop runs the same
+  # per-sample program planned or not (it is a plan boundary, and planned
+  # == unplanned bit for bit), so its mirror is compared once, in the
+  # planned pass (omnibus19: :loop was 14.8 of the file's 37.8 s of check
+  # mode with the slow tier, measured per kernel; this halves it).
+  ONCE = { loop: :c, loop_pitch: :c }.freeze
+
   GraphSweep.factories.each do |name, factory|
     it "matches the C kernels' Ruby mirrors for #{name}, planned and unplanned" do
       KernelCheckExtras.reaching([:factory, name]) do
@@ -130,7 +137,7 @@ RSpec.describe('kernel check mode over the graph sweep', :check_shared) do
             graph = MB::Sound::Kernels.with(:check) { factory.call(GraphSweep::Context.new) }
             MB::Sound::Plan.install(graph) if planned
             begin
-              MB::Sound::Kernels.with(:check) { GraphSweep.run(graph, size, buffers) }
+              MB::Sound::Kernels.with(:check, **(planned ? {} : ONCE)) { GraphSweep.run(graph, size, buffers) }
             rescue => e
               raise e.class, "#{name} (#{planned ? 'planned' : 'unplanned'}, #{size}-sample buffers): #{e.message}", e.backtrace
             end
