@@ -14,9 +14,9 @@ module MB
       # options, mode: :slice by default; one stretch per BPM_STEP of
       # tempo, cached) and read sample by sample at the timeline's
       # position (with the stretch mode :none, Sample#follow's choice for
-      # ACID one-shots, the sample plays as recorded from each loop
-      # start: silence after it at slower tempos, cut short at faster
-      # ones).  :resample plays
+      # files that declare themselves one-shots, the sample plays as
+      # recorded from each loop start: silence after it at slower tempos,
+      # cut short at faster ones).  :resample plays
       # the original at the speed the tempo asks (pitch follows, like a
       # turntable or varispeed), with cubic (Catmull-Rom) interpolation and
       # no band-limiting (speeding up aliases a little).

@@ -18,7 +18,11 @@ module MB
         # Float estimate from bpm and length), +meter+ ([numerator,
         # denominator]), +key+ (a Symbol like :Am, :"F#", :Eb), +root+ (a
         # MIDI note number, Float), +one_shot+ (true for one-shots, false
-        # for loops, nil if nothing says; see .classify), +loop+ ([start,
+        # for loops, nil if nothing says; see .classify),
+        # +declared_one_shot+ (what the file itself declares: true for a
+        # one-shot, false for a loop, nil when it doesn't say; today the
+        # `acid` chunk's flag.  +one_shot+ is the call, also guessed from
+        # names and lengths; this is the declaration alone), +loop+ ([start,
         # stop, mode] frames, from `smpl`, never for ACID loops, which loop
         # the whole file), +smpl_loops+ (every `smpl` loop, as metadata),
         # +markers+ ([[frame, label or nil], ...]: ACID's stretch markers
@@ -32,7 +36,7 @@ module MB
         # saying where each field came from), and +why+ ({ bpm: "name 98
         # (fits 8 beats)", one_shot: "name 'kick'", markers: "strc: 17
         # stretch markers (5 forced divisions)" } in words, for listings).
-        Entry = Data.define(:path, :format, :bpm, :beats, :meter, :key, :root, :one_shot, :loop, :smpl_loops, :markers, :cues, :seconds, :sample_rate, :sources, :why) do
+        Entry = Data.define(:path, :format, :bpm, :beats, :meter, :key, :root, :one_shot, :declared_one_shot, :loop, :smpl_loops, :markers, :cues, :seconds, :sample_rate, :sources, :why) do
           # +beats+ / beats per bar (the meter's numerator, else 4).
           def bars
             return nil unless beats
@@ -121,6 +125,7 @@ module MB
         FIELD_FACTS = {
           %i[bpm acid] => 'acid.tempo', %i[beats acid] => 'acid.beats', %i[meter acid] => 'acid.meter',
           %i[root acid] => 'acid.root_note', %i[one_shot acid] => 'acid.flags', %i[root smpl] => 'smpl.unity_note',
+          %i[declared_one_shot acid] => 'acid.flags',
         }.freeze
 
         # Tag names (Facts keys) each tagged field may come from, in the
@@ -227,6 +232,9 @@ module MB
           f[:seconds] = seconds.to_f if seconds
           why = {}
           why[:markers] = f[:markers_why] if f[:markers_why]
+          unless f[:declared_one_shot].nil?
+            why[:declared_one_shot] = f[:declared_one_shot] ? "the file's one-shot flag is set" : "the file's one-shot flag is not set: a loop"
+          end
           names = names_of(path, folders: folders, root: root)
           if !f[:key] && (k = names.lazy.map { |n| parse_name(n)[:key] }.find(&:itself))
             f[:key] = k
@@ -242,7 +250,7 @@ module MB
 
           Entry.new(
             path: path, format: format, bpm: f[:bpm], beats: f[:beats], meter: f[:meter], key: f[:key], root: f[:root],
-            one_shot: f[:one_shot], loop: f[:loop], smpl_loops: (f[:smpl_loops] || []).freeze, markers: (f[:markers] || []).freeze, cues: (f[:cues] || []).freeze,
+            one_shot: f[:one_shot], declared_one_shot: f[:declared_one_shot], loop: f[:loop], smpl_loops: (f[:smpl_loops] || []).freeze, markers: (f[:markers] || []).freeze, cues: (f[:cues] || []).freeze,
             seconds: f[:seconds], sample_rate: f[:sample_rate], sources: sources.freeze, why: why.freeze
           )
         end
@@ -411,8 +419,8 @@ module MB
               f[:root] = a.root.to_f
               sources[:root] = :acid
             end
-            f[:one_shot] = a.one_shot?
-            sources[:one_shot] = :acid
+            f[:one_shot] = f[:declared_one_shot] = a.one_shot?
+            sources[:one_shot] = sources[:declared_one_shot] = :acid
           end
           if (s = info.smpl)
             if !f[:root] && s.unity_note <= 127 && (s.unity_note != 60 || s.pitch_fraction != 0 || !s.loops.empty?)

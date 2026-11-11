@@ -30,6 +30,9 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
 
   def auto(position, **more) = { position: position, automatic: true, **more }
 
+  # A Provenance saying +field+ came from +via+ (description for a Sample).
+  def prov(field, via, **more) = MB::Sound::Provenance.new(field: field, via: via, **more)
+
   describe MB::Sound::Sample::Riff do
     it 'reads the strc header and entries, and leaves out disabled markers' do
       path = write_wav('old.wav', loop_audio, acid: { tempo: 120.0, beats: 2 },
@@ -135,6 +138,18 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
       expect(info.read(write_wav('noacid.wav', loop_audio, strc: strc)).markers.map(&:first)).to eq([0, 11020, 16537, 33075])
     end
 
+    it 'says what the file itself declares, beside its own loop or one-shot call' do
+      declared = info.read(write_wav('Loop A.wav', loop_audio, acid: { one_shot: true, tempo: 0.0, beats: 0 }))
+      expect([declared.one_shot, declared.declared_one_shot, declared.sources[:one_shot]]).to eq([true, true, :acid])
+      looped = info.read(write_wav('Kick B.wav', loop_audio, acid: { tempo: 120.0, beats: 2 }))
+      expect([looped.one_shot, looped.declared_one_shot, looped.sources[:one_shot]]).to eq([false, false, :acid])
+      # a one-shot by its name or length is the interpreter's call, not the file's declaration
+      named = info.read(write_wav('Kick C.wav', loop_audio))
+      expect([named.one_shot, named.declared_one_shot, named.sources[:one_shot]]).to eq([true, nil, :name])
+      short = info.read(write_wav('x.wav', loop_audio[0...4410]))
+      expect([short.one_shot, short.declared_one_shot, short.sources[:one_shot]]).to eq([true, nil, :length])
+    end
+
     it 'leaves out markers made for other audio, and a marker on the last frame' do
       # a copy at half the rate that kept its chunks: markers past the end
       stale = info.read(write_wav('stale.wav', loop_audio[0...22050], acid: { tempo: 120.0, beats: 1 }, cues: [50], strc: [auto(0), 0, 11025, 22050, 33075]))
@@ -175,11 +190,16 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
       expect(loop.length).to eq(48000)
       expect(loop.markers.map(&:position)).to eq(at48(hits))
       expect(loop.markers.map(&:label).uniq).to eq([nil])
+      expect(loop.provenance(:markers).via).to eq(:strc)
       expect(loop.meta_source[:markers]).to eq(:strc)
       expect(loop.why(:markers)).to eq('strc: 6 stretch markers')
       # (the cue point is a fact nothing used: description, at the file's own rate)
       expect(loop.meta[:source][:fields]['cue.point[0]']).to eq([0, 'Bar 1'])
-      expect(loop.meta[:one_shot]).to eq(false)
+      # the file declares a loop: no setting, and the declaration's provenance says so
+      expect(loop).not_to be_declared_one_shot
+      d = loop.provenance(:declared_one_shot)
+      expect([d.via, d.fact, d.why]).to eq([:acid, 'acid.flags', "the file's one-shot flag is not set: a loop"])
+      expect(loop.meta.key?(:one_shot)).to be(false)
       expect(at48(hits)).to eq([0, 5999, 12000, 24000, 29999, 36000])
       expect(loop.trim(6000..).markers.map(&:position)).to eq([6000, 18000, 23999, 30000])
     end
@@ -199,7 +219,7 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
     it 'says so where follow picks the slice stretch' do
       drums = loop.with(name: 'Drum Loop 3')
       f = drums.follow
-      expect(f.stretch_reason).to eq("slice: name 'drum', at 5 ACID markers")
+      expect(f.stretch_reason).to eq("slice: name 'drum', at 5 markers")
       MB::Sound.bpm(96)
       expect(f.sample(800)).to eq(drums.stretch(1.25, mode: :slice, slices: at48(hits)).data(0)[0...800])
       # tonal loops keep the plain spectral stretch; the marker-guided one is there to ask for
@@ -208,12 +228,16 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
       guided = pad.follow(stretch: { mode: :spectral, transients: :markers })
       expect(guided.stretch_reason).to eq('stretch: given')
       expect(guided.sample(800)).to eq(pad.stretch(1.25, mode: :spectral, transients: at48(hits)).data(0)[0...800])
-      # markers a caller gives are plain markers
+      # markers a caller gives count the same: where they came from is description, which follow doesn't read
       expect(MB::Sound::Sample[loop.to_a, bpm: 120, name: 'drums', markers: [0, 24000]].follow.stretch_reason).to eq("slice: name 'drums', at 1 markers")
+      relabeled = drums.with(provenance: { markers: prov(:markers, :cue) }, meta: {})
+      expect(relabeled.meta_source).to eq(markers: :cue)
+      expect(relabeled.follow.stretch_reason).to eq(f.stretch_reason)
+      expect(relabeled.stretch(1.25, mode: :slice).data(0)).to eq(drums.stretch(1.25, mode: :slice).data(0))
     end
   end
 
-  describe 'ACID one-shots' do
+  describe 'files that declare themselves one-shots (the acid chunk\'s flag)' do
     let(:hit) { loop_audio[5512...16537] } # 0.25 s: two bursts
     let(:shot) { MB::Sound::Sample[write_wav('Perc Shot.wav', hit, acid: { one_shot: true, tempo: 0.0, beats: 0 })] }
     let(:timed) { shot.with(bpm: 120) } # half a beat: a loop length to repeat at
@@ -231,17 +255,63 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
       out
     end
 
-    it 'are marked by the acid chunk\'s flag' do
+    it 'are marked as data: a setting of the Sample, with its provenance' do
       expect(shot).to be_one_shot
       expect(shot.bpm).to be_nil
-      expect(shot.meta[:one_shot]).to eq(true)
-      expect(shot.meta_source[:one_shot]).to eq(:acid)
+      expect(shot).to be_declared_one_shot
+      d = shot.provenance(:declared_one_shot)
+      expect([d.via, d.fact, d.record, d.interpreter, d.why]).to eq([:acid, 'acid.flags', 'acid', 'Sample::LoopInfo', "the file's one-shot flag is set"])
+      expect(shot.meta_source).to include(one_shot: :acid, declared_one_shot: :acid)
+      expect(shot.meta.key?(:one_shot)).to be(false) # (description keeps no copy of the call)
+      expect(shot.summary).to include('declared_one_shot: acid "acid.flags"')
       expect { shot.follow }.to raise_error(ArgumentError, /no tempo/)
+
+      # views, copies, and edits keep the setting; with: changes it
+      expect([timed, timed.trim(100..), timed.reverse, timed.gain(-6.db), timed.looped(0...6000), timed.stretch(2), timed.mono]).to all(be_declared_one_shot)
+      expect(timed.with(declared_one_shot: false)).not_to be_declared_one_shot
+      expect(MB::Sound::Sample[hit]).not_to be_declared_one_shot
+      expect(MB::Sound::Sample[hit, declared_one_shot: true]).to be_declared_one_shot
+      expect { MB::Sound::Sample[hit, declared_one_shot: :acid] }.to raise_error(ArgumentError, /declared_one_shot: is true or false/)
+    end
+
+    it 'follow by the setting, whatever the metadata and provenance say' do
+      MB::Sound.bpm(96) # the loop lasts 15000 samples: the second burst at 6000 as recorded, at 7500 in slices
+      n = 12000
+      as_recorded = collect(timed.follow, n)
+      sliced = collect(timed.follow(stretch: :slice), n)
+      expect(as_recorded).to eq(timed.data(0))
+      expect(sliced).to eq(timed.stretch(1.25, mode: :slice).data(0)[0...n])
+      expect((as_recorded - sliced).abs.max).to be > 0.1
+
+      # the description and provenance gone, or saying loop: still as recorded
+      says_loop = { one_shot: prov(:one_shot, :name, why: "name 'loop'"), declared_one_shot: prov(:declared_one_shot, :name, why: 'a loop') }
+      [{ meta: {}, provenance: {} }, { meta: { one_shot: false, declared_one_shot: false }, provenance: says_loop }].each do |described|
+        s = timed.with(**described)
+        expect(s.meta[:declared_one_shot]).not_to eq(true)
+        expect(s.provenance(:declared_one_shot)&.via).not_to eq(:acid)
+        expect(s.follow.stretch_reason).to eq(timed.follow.stretch_reason)
+        expect(collect(s.follow, n)).to eq(as_recorded)
+      end
+
+      # the description and provenance saying "a declared one-shot, from the acid chunk" without the setting: stretched by its material
+      said = MB::Sound::Sample[shot.to_a, bpm: 120, name: 'Perc Shot', meta: { one_shot: true, declared_one_shot: true }, provenance: shot.provenance]
+      expect([said.meta[:declared_one_shot], said.provenance(:declared_one_shot).via, said.why(:declared_one_shot)]).to eq([true, :acid, "the file's one-shot flag is set"])
+      expect(said).not_to be_declared_one_shot
+      expect(said.follow.stretch_reason).to start_with('slice: name')
+      expect(collect(said.follow, n)).to eq(sliced)
+      unset = timed.with(declared_one_shot: false)
+      expect(unset.provenance(:declared_one_shot)).to eq(shot.provenance(:declared_one_shot)) # (still described as declared)
+      expect(collect(unset.follow, n)).to eq(sliced)
+
+      # the setting without any description or provenance
+      set = MB::Sound::Sample[shot.to_a, bpm: 120, name: 'Perc Shot', declared_one_shot: true]
+      expect([set.meta, set.provenance]).to all(be_empty)
+      expect(collect(set.follow, n)).to eq(as_recorded)
     end
 
     it 'play as recorded under follow: silence after them at slower tempos, cut short at faster ones' do
       f = timed.follow
-      expect(f.stretch_reason).to eq('none: an ACID one-shot (the acid chunk\'s flag) plays as recorded')
+      expect(f.stretch_reason).to eq('none: a one-shot by its file\'s loop info plays as recorded')
       expect(f.to_s).to include('as recorded')
       n = timed.length
       expect(n).to eq(12000)
@@ -271,9 +341,11 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
 
       # the flag is the file's: a loop from an ACID loop file, or a one-shot by name only, follows by its material
       looped = MB::Sound::Sample[write_wav('Perc Loop.wav', hit, acid: { tempo: 120.0, beats: 1 })]
+      expect(looped).not_to be_declared_one_shot
       expect(looped.follow.stretch_reason).to start_with('slice: name')
       named = MB::Sound::Sample[write_wav('Kick 120.wav', hit), bpm: 120]
-      expect(named.meta[:one_shot]).to eq(true)
+      expect([named.one_shot?, named.meta_source[:one_shot], named.provenance(:declared_one_shot)]).to eq([true, :name, nil])
+      expect(named).not_to be_declared_one_shot
       expect(named.follow.stretch_reason).to start_with('slice: name')
     end
 
@@ -281,10 +353,16 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
       timed.save(tmp_path('shot.flac'))
       back = MB::Sound::Sample[tmp_path('shot.flac')]
       expect(back.bpm).to eq(120.0)
-      expect(back.meta[:one_shot]).to eq(true)
-      expect(back.follow.stretch_reason).to start_with('none: an ACID one-shot')
-      expect(timed.tags).to include(mb_sample_acid_one_shot: 'true')
-      expect(MB::Sound::Sample[hit, bpm: 120].tags.keys).not_to include(:mb_sample_acid_one_shot)
+      expect(back).to be_declared_one_shot
+      expect([back.provenance(:declared_one_shot).via, back.provenance(:declared_one_shot).fact]).to eq([:saved, 'tag.mb_sample_declared_one_shot'])
+      expect(back.follow.stretch_reason).to start_with('none: a one-shot by its file')
+      expect(timed.tags).to include(mb_sample_declared_one_shot: 'true')
+      expect(MB::Sound::Sample[hit, bpm: 120].tags.keys).not_to include(:mb_sample_declared_one_shot)
+      # the tag is the setting alone: metadata and provenance changed before saving don't change what is saved or played
+      timed.with(meta: {}, provenance: {}).save(tmp_path('bare.flac'))
+      expect(MB::Sound::Sample[tmp_path('bare.flac')]).to be_declared_one_shot
+      timed.with(declared_one_shot: false).save(tmp_path('loop.flac'))
+      expect(MB::Sound::Sample[tmp_path('loop.flac')]).not_to be_declared_one_shot
 
       # read with an option, the sample goes into the bundle as a FLAC file with tags, not as its WAV
       MB::Sound.bpm(60)
@@ -298,7 +376,7 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
 
     it 'play as recorded on a clock\'s loop period' do
       c = shot.clocked(0.5.seconds)
-      expect(c.stretch_reason).to start_with('none: an ACID one-shot')
+      expect(c.stretch_reason).to start_with('none: a one-shot by its file')
       out = collect(c, 36000)
       expect(out[0...12000]).to eq(shot.data(0))
       expect(out[12000...24000].abs.max).to eq(0)

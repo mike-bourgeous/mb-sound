@@ -95,8 +95,8 @@ module MB
         #
         # Loop files bring their metadata (see #bpm, #beats, #markers, and
         # Sample::LoopInfo): ACID chunks (tempo, beats, meter, root,
-        # one-shot; stretch markers as #markers), `smpl` (root, loop), cue
-        # points (markers when ACID gives none), FLAC tags,
+        # one-shot, stretch markers), `smpl` (root, loop), cue points (the
+        # markers of a file without stretch markers), FLAC tags,
         # then tempo and key words in the file and folder names.  With
         # +detect+ true a sample whose tempo or key is still unknown gets
         # one from detection (#detect_tempo, #detect_key); +detect: :bpm+
@@ -205,13 +205,12 @@ module MB
           # file's facts it didn't use become description, Sample::Source)
           facts = found && found[:riff] ? Facts.of_riff(found[:riff]) : nil
           out = { provenance: LoopInfo.provenance(src, why, facts, tags: tags, loop: e.loop) }
-          # (LoopInfo's loop or one-shot call, as description)
-          out[:meta] = { one_shot: e.one_shot }.freeze unless e.one_shot.nil?
           out[:bpm] = e.bpm if e.bpm
           out[:beats] = e.beats if e.beats
           out[:meter] = e.meter if e.meter
           out[:key] = e.key if e.key
           out[:root] = e.root if e.root
+          out[:declared_one_shot] = true if e.declared_one_shot
           if e.loop && length
             a, b, mode = scale.([e.loop])[0]
             out[:loop] = [a, b]
@@ -268,19 +267,15 @@ module MB
 
         # Fields whose provenance a saved file's tags give (Sample#save
         # wrote them; Sample.saved_tags read them back).
-        SAVED_FIELDS = { bpm: 'bpm', beats: 'beats', meter: 'meter', key: 'key', root: 'root', loop: 'loop_start', markers: 'markers' }.freeze
+        SAVED_FIELDS = {
+          bpm: 'bpm', beats: 'beats', meter: 'meter', key: 'key', root: 'root', loop: 'loop_start', markers: 'markers', declared_one_shot: 'declared_one_shot',
+        }.freeze
 
         # The Provenance of the settings +info+ (.saved_tags) holds.
         def saved_provenance(info)
-          out = SAVED_FIELDS.select { |f, _| info.key?(f) }.to_h { |f, tag|
+          SAVED_FIELDS.select { |f, _| info.key?(f) }.to_h { |f, tag|
             [f, Provenance.new(field: f, via: :saved, fact: "tag.#{TAG_PREFIX}#{tag}", record: 'tags', interpreter: 'Sample.saved_tags', why: 'saved by Sample#save')]
-          }
-          if info.dig(:meta, :one_shot)
-            # (the saved ACID one-shot flag keeps its source word)
-            out[:one_shot] = Provenance.new(field: :one_shot, via: :acid, fact: "tag.#{TAG_PREFIX}acid_one_shot", record: 'tags', interpreter: 'Sample.saved_tags',
-                                            why: 'saved by Sample#save')
-          end
-          out.freeze
+          }.freeze
         end
 
         # The settings read back from tags written by #save.
@@ -307,8 +302,7 @@ module MB
           out[:meter] = t[:meter].to_s.split('/').map { |x| Integer(x) } if t[:meter]
           out[:key] = t[:key].to_sym if t[:key]
           out[:markers] = Sample.parse_markers(t[:markers]) if t[:markers] && !t[:markers].to_s.empty?
-          # (the flag #follow obeys; see #acid_one_shot? and .saved_provenance)
-          out[:meta] = { one_shot: true }.freeze if t[:acid_one_shot].to_s == 'true'
+          out[:declared_one_shot] = true if t[:declared_one_shot].to_s == 'true'
           out[:interpolation] = t[:interpolation].to_sym if t[:interpolation]
           out[:mips] = saved_mips(t[:mips]) if t[:mips]
           out[:scale] = Float(t[:scale]) if t[:scale]
@@ -408,12 +402,11 @@ module MB
       # `:source` with the facts no interpreter used under `fields:` (a
       # loop the file lists that the sample doesn't play, an encoder's
       # name), and anything given with #with_meta or #note (empty when
-      # none).  Description keys loop-file readers add (one_shot:, cues:,
-      # a reason of their own) are description too.  Nothing plays from
-      # it: the loop, tempo, root, key, and one-shot call a voice uses are
-      # the Sample's own settings (#loop_points, #bpm, #root, #key), and
-      # where each came from is #provenance (design/notes/metadata.md,
-      # the layers).
+      # none).  Nothing plays from it: the loop, tempo, root, key, and
+      # one-shot call a voice uses, and the file's one-shot declaration
+      # #follow obeys, are the Sample's own settings (#loop_points, #bpm,
+      # #root, #key, #declared_one_shot?), and where each came from is
+      # #provenance (design/notes/metadata.md, the layers).
       def meta
         @meta || Meta::EMPTY
       end
@@ -424,11 +417,15 @@ module MB
         def to_s = label ? "#{position} #{label.inspect}" : position.to_s
       end
 
-      # The markers inside the region (ACID's stretch markers of ACIDized
-      # WAV files, else a WAV file's cue points; Markers given to #with),
-      # as Markers with positions from the region start in play order.
-      # They are where `stretch(r, mode: :slice)` cuts and where
+      # The markers inside the region (a loop file's stretch markers, its
+      # slice points, else its cue points; Markers given to #with), as
+      # Markers with positions from the region start in play order.  They
+      # are where `stretch(r, mode: :slice)` cuts and where
       # `stretch(r, mode: :spectral, transients: :markers)` keeps attacks.
+      # Which of the two a file gave is `provenance(:markers)` (its +via+
+      # and #why); the cue points of a file whose stretch markers are the
+      # markers stay description (`meta[:source][:fields]`, facts nothing
+      # used).
       def markers
         return [].freeze unless @markers
         @markers.filter_map { |pos, label|
@@ -471,7 +468,7 @@ module MB
       # :one_shot).
       def initialize(data, root: 60, loop: nil, loop_mode: nil, start: nil, stop: nil, reverse: false, fade_in: 0, fade_out: 0, tune: 0, level: 1.0,
                      bpm: nil, name: nil, interpolation: nil, mips: nil, sample_rate: 48000, audio: nil, lineage: nil, file: nil,
-                     beats: nil, meter: nil, key: nil, markers: nil, provenance: nil, meta: nil)
+                     beats: nil, meter: nil, key: nil, markers: nil, declared_one_shot: false, provenance: nil, meta: nil)
         @audio = audio || Audio.new(Sample.channels_of(data), sample_rate)
         @start = Integer(start || 0)
         @stop = Integer(stop || @audio.length)
@@ -487,6 +484,10 @@ module MB
         @meter = meter.nil? ? nil : meter.map { |m| Integer(m) }.freeze
         raise ArgumentError, "meter: is [beats per bar, beat note] (got #{meter.inspect})" if @meter && !(@meter.length == 2 && @meter.all?(&:positive?))
         @key = key&.to_sym
+        unless [true, false, nil].include?(declared_one_shot)
+          raise ArgumentError, "declared_one_shot: is true or false (got #{declared_one_shot.inspect})"
+        end
+        @declared_one_shot = declared_one_shot == true
         @markers = markers.nil? ? nil : Sample.marker_list(markers)
         @provenance = provenance.nil? || provenance.empty? ? nil : provenance.freeze
         @meta = meta.nil? || meta.empty? ? nil : Meta::Value.of(meta)
@@ -628,14 +629,19 @@ module MB
         @loop_mode == :one_shot
       end
 
-      # True if the file this sample was read from carries ACID's
-      # one-shot flag (its `acid` chunk): ACID never stretches such a
-      # file, and neither does #follow unless told to.  #save keeps it
-      # (a tag), so graph documents that bundle the sample play the same.
-      def acid_one_shot?
-        meta[:one_shot] == true && meta_source[:one_shot] == :acid
+      # True if the file this sample was read from declares itself a
+      # one-shot in its loop info (Sample::LoopInfo's +declared_one_shot+;
+      # `Sample[data, declared_one_shot: true]` and #with set it too):
+      # such a sample is never stretched by #follow unless told to; it
+      # plays as recorded.  A setting of the Sample like #bpm and #beats:
+      # views and edits keep it, and #save writes it (a tag), so graph
+      # documents that bundle the sample play the same.  Not #one_shot?
+      # (how a voice plays the sample; LoopInfo's wider call from names,
+      # lengths, and decays sets that).  Where the declaration came from
+      # is `provenance(:declared_one_shot)`, which nothing plays from.
+      def declared_one_shot?
+        @declared_one_shot
       end
-      private :acid_one_shot?
 
       # A copy with +changes+ (any of #initialize's keywords: root, loop,
       # loop_mode, start, stop, reverse, fade_in, fade_out, tune, level,
@@ -655,7 +661,7 @@ module MB
           root: @root, loop: @loop_points, loop_mode: mode, start: @start, stop: @stop,
           reverse: @reversed, fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: @bpm, name: @name,
           interpolation: @interpolation, mips: @mips, audio: @audio, lineage: @lineage,
-          beats: @beats, meter: @meter, key: @key, markers: @markers, provenance: @provenance, meta: @meta,
+          beats: @beats, meter: @meter, key: @key, markers: @markers, declared_one_shot: @declared_one_shot, provenance: @provenance, meta: @meta,
         }
         Sample.new(nil, **kw.merge(changes))
       end
@@ -791,13 +797,13 @@ module MB
       # (stretched offline per tempo with +stretch+, a stretch mode or a
       # Hash of #stretch options; :auto by default: :slice for percussive
       # loops and :spectral for tonal ones, as #material says; :none for
-      # files ACID marks as one-shots: they play as recorded from each
-      # loop start, see #stretch);
+      # files that declare themselves one-shots, #declared_one_shot?:
+      # they play as recorded from each loop start, see #stretch);
       # :resample speeds the sample up and down (pitch follows, like a
       # varispeed).  Needs a tempo (#bpm: from the file, a name,
       # `Sample[path, bpm: 98]`, or `detect: true`).  The slice stretch
-      # cuts at the file's #markers (ACID's stretch markers) when it has
-      # them.
+      # cuts at the sample's #markers (a loop file's stretch markers) when
+      # it has them.
       #
       #     brk = Sample['Funk/break_98bpm.wav']
       #     bg :brk, brk.follow                     # stays in time at the session's tempo (drums: slices)
@@ -815,15 +821,15 @@ module MB
           raise ArgumentError, "follow takes :stretch (pitch kept) or :resample (pitch follows) (got #{mode.inspect})"
         }
         reason = nil
-        if stretch == :auto && mode == :stretch && acid_one_shot?
+        if stretch == :auto && mode == :stretch && @declared_one_shot
           stretch = :none
-          reason = 'none: an ACID one-shot (the acid chunk\'s flag) plays as recorded'
+          reason = 'none: a one-shot by its file\'s loop info plays as recorded'
         elsif stretch == :auto
           m = mode == :stretch ? material : nil
           stretch = m&.kind == :tonal ? :spectral : :slice
           reason = m && "#{stretch}: #{m.why}"
           marks = stretch == :slice ? markers.count { |k| k.position > 0 } : 0
-          reason = "#{reason}, at #{marks} #{'ACID ' if meta_source[:markers] == :strc}markers" if reason && marks > 0
+          reason = "#{reason}, at #{marks} markers" if reason && marks > 0
         else
           reason = 'stretch: given'
         end
@@ -1031,8 +1037,8 @@ module MB
       # reset, so attacks stay sharp and breaks keep their groove; best on
       # pads, chords, voices, basses (pitch is kept exactly), and breaks.
       # +transients+ also takes the positions itself, instead of
-      # detecting them: :markers (the sample's #markers, ACID's stretch
-      # markers for an ACIDized loop; detected onsets when the sample has
+      # detecting them: :markers (the sample's #markers, a loop file's
+      # stretch markers when it has them; detected onsets when the sample has
       # none), or a list of positions as +slices:+ takes them (samples,
       # Lengths, Durations at #bpm, Markers; from the region start in play
       # order).  A position without an attack in the audio still lands on
@@ -1065,14 +1071,14 @@ module MB
       # offline (a new Sample, made once per audio and arguments; spectral
       # runs about 50x realtime per output channel).
       #
-      # +mode+ :slice (:slices, :beat, :rex) cuts at the hits and starts
-      # each slice at its stretched time (Sample::SliceStretch; +slices:+
-      # says where: the #markers, else onsets, else sixteenths).  +mode+
+      # +mode+ :slice (SLICE_MODES) cuts at the hits and starts each
+      # slice at its stretched time (Sample::SliceStretch; +slices:+ says
+      # where: the #markers, else onsets, else sixteenths).  +mode+
       # :none (:unstretched, :as_recorded) doesn't stretch at all: the
       # sample at its own speed in +ratio+ times its length, silence after
       # it when that is longer and a fade-out over +fade+ (4 ms) at the cut
-      # when it is shorter; what #follow plays for files ACID marks as
-      # one-shots.
+      # when it is shorter; what #follow plays for files that declare
+      # themselves one-shots (#declared_one_shot?).
       #
       #     pad.stretch(2, cycle: 30.ms)               # cycles fitted to the sound
       #     brk.stretch(2, cycle: 30.ms, fit: :fixed)  # the plain cyclic stretch (stutter, buzz)
@@ -1420,7 +1426,7 @@ module MB
           tune: @tune, level: @level, bpm: @bpm, interpolation: @interpolation, mips: @mips.nil? ? nil : @mips.to_s,
           beats: @beats, meter: @meter&.join('/'), key: @key,
           markers: @markers&.map { |p, l| l ? "#{p}:#{l.gsub('%', '%25').gsub(';', '%3B')}" : p.to_s }&.join(';'),
-          acid_one_shot: acid_one_shot? ? true : nil,
+          declared_one_shot: @declared_one_shot ? true : nil,
         }
         t.merge!(loop_start: @loop_points[0], loop_end: @loop_points[1]) if @loop_points
         t[:rate] = sample_rate if sample_rate != 48000 # (read back at this rate, so positions stay put)
@@ -1493,7 +1499,7 @@ module MB
       # the length) and read as +read+ says (see #read_as).
       def edit(method, args, kwargs = {}, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips }, bpm: @bpm, &block)
         key = [@start, @stop, @root, @loop_points, @loop_mode, @reversed, @fade_in, @fade_out, @tune, @level, @bpm, @interpolation, @mips,
-               @beats, @meter, @key, @markers, method, args, kwargs]
+               @beats, @meter, @key, @markers, @declared_one_shot, method, args, kwargs]
         @audio.edit(key) { edit_uncached(method, args, kwargs, channels: channels, whole: whole, read: read, bpm: bpm, &block) }
       end
 
@@ -1514,7 +1520,8 @@ module MB
           out, root: @root, loop: loop, loop_mode: loop ? @loop_mode : (@loop_points ? :one_shot : @loop_mode), reverse: @reversed,
           fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: bpm, name: @name, sample_rate: sample_rate,
           interpolation: read[:interpolation], mips: read[:mips], lineage: [self, method, args, kwargs].freeze,
-          beats: full_region? ? @beats : nil, meter: @meter, key: @key, markers: markers, provenance: @provenance, meta: @meta
+          beats: full_region? ? @beats : nil, meter: @meter, key: @key, markers: markers, declared_one_shot: @declared_one_shot,
+          provenance: @provenance, meta: @meta
         )
       end
 

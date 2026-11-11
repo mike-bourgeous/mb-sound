@@ -656,8 +656,8 @@ module MB
       about <<~TEXT
         Loop libraries: `Sample['Funk/break_98bpm.wav']` reads a loop with
         its metadata: ACID chunks (tempo, beats, meter, root, one-shot,
-        and ACID's stretch markers as `sample.markers`), `smpl` (root,
-        loop points), cue points (the markers when ACID gives none), FLAC
+        stretch markers), `smpl` (root, loop points), cue points
+        (`sample.markers` are the stretch markers, else the cue points), FLAC
         tags, then tempo and key words in file and folder names ("98bpm",
         "98 BPM", "Am_120"; a name's tempo counts only when the file is a
         whole number of its beats).  Loops loop the whole file; one-shots
@@ -685,9 +685,10 @@ module MB
         slowing down leaves a gap after each hit (`fill: :stretch` draws each
         decay out instead), speeding up truncates with a 4 ms fade.
 
-        ACID's own loop info counts: an ACIDized loop is sliced at ACID's
-        stretch markers, and a file ACID marks as a one-shot is never
-        stretched by `follow`: it plays as recorded from each loop start
+        A file's own loop info counts: a loop with stretch markers is
+        sliced at them, and a file that declares itself a one-shot
+        (`sample.declared_one_shot?`) is never stretched by `follow`: it
+        plays as recorded from each loop start
         (`stretch: :none`; give it a length to repeat at with
         `shot.with(bpm: 120)` or a clock, `shot.clocked(2.seconds)`).
         `stretch: { mode: :spectral, transients: :markers }` runs the
@@ -739,7 +740,7 @@ module MB
         shape: :paul, link: false)`.
         The vocoder finds the attacks it keeps sharp by itself
         (`transients: true`); `transients: :markers` takes the sample's
-        markers instead (ACID's stretch markers of a loop file; detected
+        markers instead (a loop file's stretch markers; detected
         onsets when it has none), and `transients: [0, 1.n8, 13230.samples]`
         any positions; `transients: false` is the plain vocoder.
         They are offline edits: a new Sample, made once; results over 30
