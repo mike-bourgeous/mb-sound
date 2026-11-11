@@ -2,10 +2,13 @@ module MB
   module Sound
     class Sample
       # A Sample's carried metadata (source-meta-1; MB::Sound::Meta):
-      # `sample.meta` holds what the library read from a loop file
-      # (`:why`, `:smpl_loops`, see Sample#meta) and, beside those, plain
+      # `sample.meta` holds the file's description and the facts no
+      # interpreter used (under `:source`'s `fields:`, e.g. a `smpl` loop
+      # the sample doesn't play; see Sample#meta) and, beside those, plain
       # facts given with #with_meta, by convention where the sample came
-      # from under `:source` (Meta::SOURCE_KEYS).
+      # from under `:source` (Meta::SOURCE_KEYS).  Where each setting came
+      # from, with its reason in words, is provenance (Sample#provenance,
+      # #why), not metadata.
       #
       # A Sample read from a file brings the file's own `:source` (see
       # Source.of_file): its name and size, the rate it stores, and for a

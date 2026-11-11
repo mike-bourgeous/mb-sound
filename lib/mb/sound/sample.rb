@@ -790,7 +790,7 @@ module MB
         if stretch == :auto
           m = mode == :stretch ? material : nil
           stretch = m&.kind == :tonal ? :spectral : :slice
-          reason = m && "#{stretch}: #{m.why}"
+          reason = m&.stretch_reason(stretch)
         else
           reason = 'stretch: given'
         end
@@ -826,7 +826,12 @@ module MB
       end
 
       # What #material found.
-      Material = Data.define(:kind, :flatness, :why)
+      Material = Data.define(:kind, :flatness, :why) do
+        # The printed reason #follow gives its LoopPlayer for choosing
+        # +stretch+ ("spectral: name 'pad'"): the only place the material's
+        # why is read (the metadata guard allows this printer, not #follow).
+        def stretch_reason(stretch) = "#{stretch}: #{why}"
+      end
 
       # Name words for #material (percussive words first).
       MATERIAL_WORDS = {

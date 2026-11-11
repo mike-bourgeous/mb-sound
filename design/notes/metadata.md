@@ -54,7 +54,7 @@ A node's name (`named`, `graph_node_name`, `find_by_name`) and a Session name (t
 
 ### Samples (the audit)
 
-Nothing plays from a Sample's metadata: the loop, tempo, root, and key a voice uses are its own settings, read from the file into them (LoopInfo); `meta[:smpl_loops]` (every `smpl` loop, also of ACID loops, which ignore them) and `meta[:why]` (the reasons in words) describe, and `meta_source` says where each setting came from.  The separation spec renders a Sample with contradicting metadata (other loops, tempo, `loop:`) and gets the same samples.
+Nothing plays from a Sample's metadata: the loop, tempo, root, and key a voice uses are its own settings, read from the file into them (LoopInfo); loops the file lists that the sample doesn't play sit in `meta[:source][:fields]` (unconsumed facts) and describe, and `provenance(field)`/`why(field)`/`meta_source` say where each setting came from and why.  The separation spec renders a Sample with contradicting metadata (other loops, tempo, `loop:`) and gets the same samples.
 
 ## Documents
 
