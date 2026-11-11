@@ -19,6 +19,13 @@
 # reason), or, if code needs the fact to decide something, make the fact
 # data with its own reader (a Document#header key, an Entry field, a node
 # setting) and keep the description in metadata.
+#
+# Layer-aware (round 2's layers, design/notes/metadata.md): raw facts
+# (MB::Sound::Facts readers, `facts`, MIDIFile#meta_events, Riff.read and
+# friends) may be read only by interpreters and readers (ALLOWED_RAW, per
+# method); typed data anywhere; description and provenance (`meta`,
+# `meta_source`, `provenance`, `why`, ...) only by printers, writers, and
+# interpreters recording it (ALLOWED).
 require 'prism'
 
 module MetaGuard
@@ -28,7 +35,26 @@ module MetaGuard
   # things' file tags, FFMPEGInput#metadata and Wavetable#metadata: those
   # reads are listed below with that reason, so every reader of the name
   # stays visible.)
-  READS = %i[meta metadata carried_meta meta_source].freeze
+  # (Provenance is description too: `provenance` and `why`.  `why` also
+  # names other things' reasons, listed below as such.)
+  READS = %i[meta metadata carried_meta meta_source provenance why].freeze
+
+  # Calls that read the raw layer: Facts (`facts`, `Facts.of_*`), a MIDI
+  # file's meta events, and the WAV chunk reader (`Riff.read`, `read!`,
+  # `parse`, `chunk`).
+  RAW_CALLS = %i[facts meta_events].freeze
+  RAW_RECEIVERS = { 'Facts' => /\Aof_/, 'Riff' => /\A(read!?|parse|chunk)\z/ }.freeze
+
+  # Interpreters and readers: the only methods that may read raw facts,
+  # with why.
+  ALLOWED_RAW = {
+    'lib/mb/sound/sample.rb' => ['Sample.loop_metadata interprets a loop file (offsets for provenance)', %i[loop_metadata]],
+    'lib/mb/sound/sample/source.rb' => ['the facts of a sound file, for Facts.interpret', %i[file_facts]],
+    'lib/mb/sound/sample/loop_info.rb' => ['LoopInfo, the loop file interpreter, reads WAV chunks (and those FLAC keeps)', %i[read from_flac]],
+    'lib/mb/sound/meta/formats.rb' => ['the format readers and writers', %i[append_wav read_sidecar read_wav read_midi]],
+    'lib/mb/sound/sampler/sf2.rb' => ['the SoundFont INFO list\'s facts, interpreted into Font#name and description', %i[meta]],
+    'lib/mb/sound/graph_io/document.rb' => ['the graph line\'s facts, interpreted into #header and #meta', %i[read_graph_line]],
+  }.freeze
 
   # Files that may read metadata, with why (and what they do with it):
   # a reason alone for files whose every method shows or writes metadata,
@@ -43,7 +69,11 @@ module MetaGuard
     'lib/mb/sound/help/content/topics.rb' => 'help :meta examples',
     'lib/mb/sound/graph_io/set_writer.rb' => 'set documents write the `meta` lines',
     'lib/mb/sound/sample/source.rb' => ['Sample#with_meta/#note make copies with more metadata; #tags writes :source as the mb_sample_source tag', %i[with_meta note tags]],
-    'lib/mb/sound/sample.rb' => ['#save writes the metadata into the file; #summary prints it', %i[save summary]],
+    'lib/mb/sound/sample.rb' => ['#save writes the metadata into the file; #summary prints it and the provenance; loop_metadata and detect_tempo/detect_key record provenance (interpreters); #follow names its material\'s reason (Material#why, another thing\'s why) in a message', %i[save summary loop_metadata detect_tempo detect_key follow]],
+    'lib/mb/sound/sample/loop_info.rb' => ['LoopInfo::Entry#reason prints its reasons; .detected records a detected key\'s reason', %i[reason detected]],
+    'lib/mb/sound/provenance.rb' => 'Provenance itself (its readers and printer)',
+    'lib/mb/sound/graph_io/document.rb' => ['the graph line\'s interpreters record provenance', %i[read_graph_line]],
+    'lib/mb/sound/analysis/perceived_pitch.rb' => ['a pitch candidate\'s reason in its printer (another thing named why)', %i[to_s]],
     'lib/mb/sound/graph_io.rb' => ['GraphIO.header_split: the descriptive metadata a save writes again', %i[header_split]],
     'lib/mb/sound/library.rb' => ['an Entry carries its document\'s description as Entry#meta (copied, never searched); gem shelves read gemspec metadata (a gem\'s own declaration of its shelf, not mb-sound metadata)', %i[document_entry gem_shelves]],
     'lib/mb/sound/library/saving.rb' => ['a replacing save keeps the old document\'s descriptive metadata', %i[save]],
@@ -57,6 +87,12 @@ module MetaGuard
     'lib/mb/sound/latency_probe.rb' => 'the latency probe\'s own meta.json (its measurement header, not mb-sound metadata)',
     'lib/mb/sound/dropout_probe.rb' => 'the dropout probe\'s own report header (not mb-sound metadata)',
     'lib/mb/sound/dropout_probe/report.rb' => 'the dropout probe\'s own report header (not mb-sound metadata)',
+  }.freeze
+
+  # Reads of other things that share a name with metadata readers, in
+  # files the rules would otherwise refuse (by "file: name", with why).
+  NOT_METADATA = {
+    'lib/mb/sound/library/index.rb: why' => 'a search hit\'s reasons, printed in the results table (Index::Hit#why)',
   }.freeze
 
   # Methods that render, plan, build, or look things up: no metadata read
@@ -88,7 +124,9 @@ module MetaGuard
     until stack.empty?
       n, d = stack.pop
       d = n.name if n.is_a?(Prism::DefNode)
-      if n.is_a?(Prism::CallNode) && READS.include?(n.name)
+      if n.is_a?(Prism::CallNode) && raw?(n)
+        out << [file, n.location.start_line, d, n.name.to_s, :raw]
+      elsif n.is_a?(Prism::CallNode) && READS.include?(n.name)
         out << [file, n.location.start_line, d, n.name.to_s]
       elsif n.is_a?(Prism::InstanceVariableReadNode) && n.name == :@carried_meta && file != 'lib/mb/sound/meta.rb'
         out << [file, n.location.start_line, d, '@carried_meta']
@@ -96,6 +134,13 @@ module MetaGuard
       n.compact_child_nodes.each { |c| stack << [c, d] }
     end
     out.sort_by { |_, line, _, _| line }
+  end
+
+  # True if call +n+ reads raw facts.
+  def self.raw?(n)
+    return true if RAW_CALLS.include?(n.name)
+    r = n.receiver&.slice.to_s
+    RAW_RECEIVERS.any? { |name, re| (r == name || r.end_with?("::#{name}")) && n.name.to_s.match?(re) }
   end
 
   def self.all_reads
@@ -106,7 +151,13 @@ module MetaGuard
   end
 
   def self.problems(reads)
-    reads.filter_map do |file, line, d, what|
+    reads.filter_map do |file, line, d, what, layer|
+      next if NOT_METADATA.key?("#{file}: #{what}")
+      if layer == :raw
+        allowed = ALLOWED_RAW[file]
+        next if allowed && allowed[1].include?(d)
+        next "#{file}:#{line}: reads raw facts (#{what}) in #{d ? "##{d}" : 'the file body'}, not an interpreter in ALLOWED_RAW: raw facts are read only by interpreters; use the typed data they make"
+      end
       if FORBIDDEN_PATHS.any? { |re| file.match?(re) }
         "#{file}:#{line}: reads #{what} in a file that renders, builds, loads, or looks up (FORBIDDEN_PATHS)"
       elsif FORBIDDEN_DEFS.include?(d)
@@ -128,8 +179,10 @@ RSpec.describe('metadata guard: metadata never acts as data') do
   end
 
   it 'lists only files that exist and read metadata' do
-    reading = MetaGuard.all_reads.map(&:first).uniq
-    stale = MetaGuard::ALLOWED.keys.select { |f| File.exist?(File.join(MetaGuard::ROOT, f)) && !reading.include?(f) }
+    reading = MetaGuard.all_reads.reject { |r| r[4] == :raw }.map(&:first).uniq
+    raw = MetaGuard.all_reads.select { |r| r[4] == :raw }.map(&:first).uniq
+    stale = MetaGuard::ALLOWED.keys.select { |f| File.exist?(File.join(MetaGuard::ROOT, f)) && !reading.include?(f) } +
+            MetaGuard::ALLOWED_RAW.keys.reject { |f| raw.include?(f) }
     missing = MetaGuard::ALLOWED.keys.reject { |f| File.exist?(File.join(MetaGuard::ROOT, f)) }
     expect(stale).to eq([]), "ALLOWED files that no longer read metadata (remove them): #{stale.join(', ')}"
     expect(missing).to eq([])
@@ -157,5 +210,20 @@ RSpec.describe('metadata guard: metadata never acts as data') do
     # (acid-loop-info-1's Sample#acid_one_shot? read meta[:one_shot] to decide #follow)
     one_shot = MetaGuard.problems(MetaGuard.reads("def acid_one_shot? = meta[:one_shot] == true\n", 'lib/mb/sound/sample.rb'))
     expect(one_shot[0]).to include('not one of the methods ALLOWED there')
+  end
+
+  it 'lets only interpreters read raw facts, and only printers read provenance' do
+    src = <<~RUBY
+      def follow = Riff.read(path).acid.tempo
+      def stretch_to(x) = Facts.of_riff(riff)['acid.tempo']
+      def loop_metadata = Sample::Riff.read(path)
+      def sample(n) = provenance(:bpm).via == :acid ? 1 : 0
+    RUBY
+    r = MetaGuard.reads(src, 'lib/mb/sound/sample.rb')
+    expect(r.map { |_, l, d, w, k| [l, d, w, k] }).to eq([[1, :follow, 'read', :raw], [2, :stretch_to, 'of_riff', :raw], [3, :loop_metadata, 'read', :raw], [4, :sample, 'provenance', nil]])
+    p = MetaGuard.problems(r)
+    expect(p.length).to eq(3)
+    expect(p[0]).to include('reads raw facts (read) in #follow, not an interpreter')
+    expect(p[2]).to include('in #sample, a render')
   end
 end

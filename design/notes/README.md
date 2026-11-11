@@ -25,8 +25,8 @@ Every named thing (presets at every scale: effects, instruments, kits, clips, ge
 
 ### [Metadata (`MB::Sound::Meta`)](metadata.md)
 
-Metadata describes; it never decides.  `Meta::Value` (`lib/mb/sound/meta/value.rb`): a frozen, Hash-backed value with vocabulary readers (notes, tags, author, license, links, source, pack) and free plain-Ruby keys; `Meta::Carrier` gives `with_meta`, `meta`, `note("...")` to nodes, bundles, clips, takes, Samples, and library entries; Session pieces keep theirs in `Meta::Store`.
-Guards: a Prism scan of lib/ (`meta_guard_spec.rb`), `:meta` fuzz relations and sweep invariance, `Document#header` (data) vs `#meta`, literal-only loading within `LIMITS[:meta_bytes]`, quoted display.  Documents carry it as `meta:`, `.note`, and inline comments (`GraphIO::Comments`); files as native tags plus one Ruby literal (`Meta::Formats`: WAV INFO + `mbmt`, MB_SOUND_META, MIDI, SF2, `.meta.rb` sidecars).
+Metadata describes; it never decides.  Reading is layered: readers make `MB::Sound::Facts` (raw, with offsets), interpreters consume chosen facts into typed data with `Provenance` (`sample.provenance(:bpm)`, `#why`), and unconsumed facts become description (`meta[:source][:fields]`).  `Meta::Value`: a frozen, Hash-backed value (notes, tags, author, license, links, source, pack, free keys); `Meta::Carrier` (`with_meta`, `meta`, `note`) on nodes, clips, takes, Samples, entries.
+Guards: `meta_guard_spec.rb` (raw facts only in interpreters, description and provenance only in printers), `format_words_spec.rb` (format names at the edges), `:meta` fuzzing and sweep invariance, literal-only loading.  Files carry it as native tags plus one Ruby literal (`Meta::Formats`).
 
 ### [Plan layer (fused regions)](plan_layer.md)
 
