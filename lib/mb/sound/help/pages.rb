@@ -386,12 +386,15 @@ module MB
       class SearchPage
         include Page
 
-        def title = @pattern.inspect
+        def title = @words ? @words.join(' ') : @pattern.inspect
         include Text
 
-        def initialize(pattern, index)
+        # +words+: the words a typed `help` line searched for (printed in
+        # place of the Regexp they make).
+        def initialize(pattern, index, words: nil)
           @pattern = pattern
           @index = index
+          @words = words
         end
 
         def hits
@@ -424,9 +427,13 @@ module MB
           by_name = h.select { |e| e.name.to_s.match?(@pattern) }
           by_doc = h - by_name
           d = Doc.new
-          d.title("help #{@pattern.inspect}", "#{h.length + ts.length + ui.length} matches")
+          d.title(@words ? "help (words: #{@words.join(', ')})" : "help #{@pattern.inspect}", "#{h.length + ts.length + ui.length} matches")
           if h.empty? && ts.empty? && ui.empty?
-            Help.nothing_found(d, @pattern)
+            if @words
+              Help.nothing_found(d, Regexp.new(Regexp.escape(@words.max_by(&:length))), "the words #{@words.join(', ')}")
+            else
+              Help.nothing_found(d, @pattern)
+            end
             return d.to_s
           end
           d.heading('Topics').rows(ts.map { |t| [":#{t.name}", t.title] }) unless ts.empty?
@@ -464,11 +471,11 @@ module MB
       # What a search page says when nothing matched: near names (topics,
       # commands, node methods, UI panes, layouts, and methods), and how to
       # search with a regular expression.
-      def self.nothing_found(doc, pattern)
+      def self.nothing_found(doc, pattern, label = pattern.inspect)
         word = pattern.source.gsub(/\\(.)/, '\1').gsub(/[^\w:.?!]/, '')
         dict = (TOPICS.keys.map(&:to_s) + TOPIC_ALIASES.keys.map(&:to_s) + (index.console_methods + index.dsl_methods).map { |e| e.name.to_s } + UI::HelpIndex.names).uniq
         near = word.empty? ? [] : DidYouMean::SpellChecker.new(dictionary: dict).correct(word).first(5)
-        doc.para("Nothing matches #{pattern.inspect}.")
+        doc.para("Nothing matches #{label}.")
         doc.rows(near.map { |n| ["help #{n}", 'did you mean?'] }) unless near.empty?
         doc.note('help /regex/ searches names and docs with a regular expression (help /reson|filter/); help.topics lists the topics.')
         doc

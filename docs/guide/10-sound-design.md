@@ -120,7 +120,12 @@ track :glass, :glass_lead
 bg :glass, riff
 ```
 
-`help L.inst.glass_lead` describes it like the built-in ones, and
+<!-- check: quiet -->
+```ruby
+help L.inst.glass_lead
+```
+
+describes it like the built-in ones, and
 `turn :"glass_lead/bright", 3000` turns its knob.
 
 ## Matching a sound by ear

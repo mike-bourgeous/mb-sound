@@ -912,6 +912,31 @@ RSpec.describe MB::Sound::Help do
       expect(text(MB::Sound.help(:dry))).to include('beat.blend(0.4) { |s|')
     end
 
+    # (omnibus19, Kez's panel 3 dry run: the guide's own `help
+    # L.inst.house_bass` searched for "l", "inst", "house_bass": 937
+    # matches, titled with Regexp#inspect)
+    it 'looks up a library entry typed as help L.inst.name, and searches only words of two letters or more' do
+      require 'pry'
+      commands = Pry::CommandSet.new.import(Pry::Commands)
+      commands.rename_command('pry-help', 'help')
+      MB::Sound::Help.install_commands(commands)
+      out = StringIO.new
+      lb = Pry.binding_for(MB::Sound) # (as bin/sound.rb: Pry.start(MB::Sound))
+      pry = Pry.new(output: out, commands: commands, target: lb)
+      pry.eval('help L.inst.house_bass')
+      expect(text(out.string)).to include('house_bass')
+      expect(text(out.string)).not_to include('matches')
+      expect(text(MB::Sound::Help.page_for_text('L.fx', lb))).not_to include('matches')
+      # (other call chains stay words, never calls: `help play foo` never plays)
+      expect(MB::Sound).not_to receive(:play)
+      expect(text(MB::Sound::Help.page_for_text('MB::Sound.play.x', lb))).to include('help :play')
+      # (searches print their words and drop one-letter ones)
+      s = text(MB::Sound::Help.page_for_text('q xyzzy plugh', lb))
+      expect(s).to include('help (words: xyzzy, plugh)')
+      expect(s).not_to include('(?i-mx:')
+      expect(s).to include('Nothing matches the words xyzzy, plugh')
+    end
+
     it 'runs as Pry commands, leaving help(...) and lesson.next to Ruby' do
       require 'pry'
       commands = Pry::CommandSet.new.import(Pry::Commands)

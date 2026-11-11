@@ -29,8 +29,13 @@ L.fx.reverb
 find 'warm bass'
 ```
 
-`help L.inst.house_bass` describes one entry: what it is, its settings,
-and lines that use it.
+<!-- check: quiet -->
+```ruby
+help L.inst.house_bass
+```
+
+describes one entry: what it is, its settings, and lines that use it
+(type it as it is, with or without brackets).
 
 ## Listening
 
