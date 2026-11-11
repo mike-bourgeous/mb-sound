@@ -30,27 +30,32 @@ module MetaGuard
   # stays visible.)
   READS = %i[meta metadata carried_meta meta_source].freeze
 
-  # Files that may read metadata, with why (and what they do with it).
+  # Files that may read metadata, with why (and what they do with it):
+  # a reason alone for files whose every method shows or writes metadata,
+  # else [reason, methods] naming the only methods that may read it (a
+  # new reader in a file of data code, such as a Sample method deciding
+  # something from meta, fails even though the file reads metadata
+  # elsewhere).
   ALLOWED = {
     'lib/mb/sound/meta.rb' => 'the metadata module itself (Carrier, Store, summaries, statements)',
     'lib/mb/sound/meta_methods.rb' => 'console commands that show and add metadata (meta, metas)',
-    'lib/mb/sound/sample/source.rb' => 'Sample#with_meta/#note (copies) and #save writing :source as a tag',
-    'lib/mb/sound/sample.rb' => 'Sample copies and edits passing the description along (detect_tempo/detect_key record where the tempo and key came from)',
-    'lib/mb/sound/sample/loop_info.rb' => 'LoopInfo reporting why a key was detected (text for people)',
-    'lib/mb/sound/graph_io.rb' => 'GraphIO.header_split: the descriptive metadata a save writes again',
-    'lib/mb/sound/graph_io/set_writer.rb' => 'set documents write the `meta` lines',
-    'lib/mb/sound/library.rb' => 'library entries carry a document\'s description as Entry#meta (copied, never searched); gem shelves read gemspec metadata (a gem\'s own declaration of its shelf, not mb-sound metadata)',
-    'lib/mb/sound/library/saving.rb' => 'a replacing save keeps the old document\'s descriptive metadata',
-    'lib/mb/sound/take.rb' => 'takes write their metadata as the replay\'s meta:',
     'lib/mb/sound/help/now.rb' => '`now` shows one line about the set\'s metadata',
     'lib/mb/sound/help/content/topics.rb' => 'help :meta examples',
-    'lib/mb/sound/midi/import.rb' => 'MIDI imports give a clip its track\'s metadata (copied, never read to build)',
-    'lib/mb/sound/graph_io/comments.rb' => 'a document\'s comments become notes, and the writer asks which notes to print as comments',
-    'lib/mb/sound/ui/inspect.rb' => 'the inspector shows a node\'s notes (quoted: Meta.notes_text)',
+    'lib/mb/sound/graph_io/set_writer.rb' => 'set documents write the `meta` lines',
+    'lib/mb/sound/sample/source.rb' => ['Sample#with_meta/#note make copies with more metadata', %i[with_meta note]],
+    'lib/mb/sound/sample.rb' => ['detect_tempo/detect_key record why (text); #save writes the metadata into the file', %i[detect_tempo detect_key save]],
+    'lib/mb/sound/sample/loop_info.rb' => ['LoopInfo reports why a key was detected (text for people)', %i[detected]],
+    'lib/mb/sound/graph_io.rb' => ['GraphIO.header_split: the descriptive metadata a save writes again', %i[header_split]],
+    'lib/mb/sound/library.rb' => ['an Entry carries its document\'s description as Entry#meta (copied, never searched); gem shelves read gemspec metadata (a gem\'s own declaration of its shelf, not mb-sound metadata)', %i[document_entry gem_shelves]],
+    'lib/mb/sound/library/saving.rb' => ['a replacing save keeps the old document\'s descriptive metadata', %i[save]],
+    'lib/mb/sound/take.rb' => ['takes write their metadata as the replay\'s meta:', %i[to_ruby replay]],
+    'lib/mb/sound/midi/import.rb' => ['a MIDI import gives a clip its track\'s metadata (copied, never read to build)', %i[clip]],
+    'lib/mb/sound/graph_io/comments.rb' => ['a document\'s comments become notes, and the writer asks which notes to print as comments', %i[args notes_of args_of]],
+    'lib/mb/sound/ui/inspect.rb' => ['the inspector shows a node\'s notes (quoted: Meta.notes_text)', %i[notes_of]],
     # (other things named meta or metadata)
-    'lib/mb/sound/io_methods.rb' => 'MB::Sound.read hands back an FFMPEGInput\'s file tags (not mb-sound metadata)',
-    'lib/mb/sound/player/items.rb' => 'the player shows a file\'s ffmpeg tags (not mb-sound metadata)',
-    'lib/mb/sound/wavetable.rb' => 'a wavetable file\'s own tags (its frame layout; file data, not mb-sound metadata)',
+    'lib/mb/sound/io_methods.rb' => ['MB::Sound.read hands back an FFMPEGInput\'s file tags (not mb-sound metadata)', %i[read]],
+    'lib/mb/sound/player/items.rb' => ['the player shows a file\'s ffmpeg tags (not mb-sound metadata)', %i[load_file]],
+    'lib/mb/sound/wavetable.rb' => ['a wavetable file\'s own tags (its frame layout; file data, not mb-sound metadata)', %i[save]],
     'lib/mb/sound/latency_probe.rb' => 'the latency probe\'s own meta.json (its measurement header, not mb-sound metadata)',
     'lib/mb/sound/dropout_probe.rb' => 'the dropout probe\'s own report header (not mb-sound metadata)',
     'lib/mb/sound/dropout_probe/report.rb' => 'the dropout probe\'s own report header (not mb-sound metadata)',
@@ -110,6 +115,8 @@ module MetaGuard
         "#{file}:#{line}: reads #{what} in ##{d}, a render, plan, build, or lookup method"
       elsif !ALLOWED.key?(file)
         "#{file}:#{line}: reads #{what} in #{d ? "##{d}" : 'the file body'}, a file not in ALLOWED (a printer or format adds itself with its reason; code that decides needs data, not metadata)"
+      elsif ALLOWED[file].is_a?(Array) && !ALLOWED[file][1].include?(d)
+        "#{file}:#{line}: reads #{what} in #{d ? "##{d}" : 'the file body'}, not one of the methods ALLOWED there (#{ALLOWED[file][1].join(', ')}): show it, or make the fact data"
       end
     end
   end
@@ -148,6 +155,9 @@ RSpec.describe('metadata guard: metadata never acts as data') do
     expect(p[0]).to include('in #sample, a render')
     expect(p[2]).to include('not in ALLOWED')
     expect(MetaGuard.problems(MetaGuard.reads("def x = doc.meta[:rack]\n", 'lib/mb/sound/graph_io/loader.rb'))[0]).to include('FORBIDDEN_PATHS')
-    expect(MetaGuard.problems(MetaGuard.reads("def x = doc.meta[:rack]\n", 'lib/mb/sound/take.rb'))).to eq([])
+    expect(MetaGuard.problems(MetaGuard.reads("def to_ruby = doc.meta[:rack]\n", 'lib/mb/sound/take.rb'))).to eq([])
+    # (acid-loop-info-1's Sample#acid_one_shot? read meta[:one_shot] to decide #follow)
+    one_shot = MetaGuard.problems(MetaGuard.reads("def acid_one_shot? = meta[:one_shot] == true\n", 'lib/mb/sound/sample.rb'))
+    expect(one_shot[0]).to include('not one of the methods ALLOWED there')
   end
 end
