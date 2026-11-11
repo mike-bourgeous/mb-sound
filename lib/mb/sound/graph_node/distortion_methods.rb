@@ -120,6 +120,13 @@ module MB
         # point).  +mix+ (0..1) is the shaped
         # share, phase-aligned.
         #
+        # +table+ reads the curve as a table plug-ins build: an entry every
+        # 0.1 dB of input (+true+) or every +table+ dB (e.g. 0.25.db), and
+        # straight lines in amplitude between entries, so a vertical step
+        # plays as a short amplitude ramp over the entry below it and a
+        # very steep segment as that ramp too; gentle lines are unchanged
+        # (within 0.01 dB; DbShaper.tabulate).
+        #
         # Antialiased like #softclip (half a sample of delay; closed-form
         # ADAA of the power laws that dB lines are); #ashape_db is the exact
         # version for control signals.
@@ -127,8 +134,10 @@ module MB
         #     play 110.hz.saw.at(-6.db).shape_db(-84.db => -60.db, -48.db => -18.db, 0.db => -6.db)   # a dense fuzz
         #     play 110.hz.saw.shape_db(:fold_back, mix: 0.5)
         #     play 220.hz.triangle.shape_db(-40.db => -40.db, 0.db => -10.db, negative: { -40.db => -40.db, -10.db => -10.db, 0.db => -10.db })
-        def shape_db(points = nil, negative: nil, interpolation: nil, below: nil, above: nil, mix: nil, antialias: true, **more_points)
-          DbShaper.build(self, points, more_points, negative: negative, interpolation: interpolation, below: below, above: above, mix: mix, antialias: antialias)
+        #     play 110.hz.saw.shape_db({ -84.db => -84.db, -30.db => [-60.db, -18.db], 0.db => -6.db }, below: :unity, table: true)   # a step read as a 0.1 dB table
+        def shape_db(points = nil, negative: nil, interpolation: nil, below: nil, above: nil, mix: nil, antialias: true, table: nil, **more_points)
+          DbShaper.build(self, points, more_points, negative: negative, interpolation: interpolation, below: below, above: above, mix: mix,
+                         antialias: antialias, table: table)
         end
 
         # The plain (exact, aliasing) version of #shape_db, for control

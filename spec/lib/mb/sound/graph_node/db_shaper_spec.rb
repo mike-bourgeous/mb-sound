@@ -268,6 +268,82 @@ RSpec.describe(MB::Sound::GraphNode::DbShaper) do
     end
   end
 
+  describe 'table: (a curve read as a table straight in amplitude between entries, db-step-1)' do
+    let(:step) { [[-84.db, -84.db], [-34.db, -40.db], [-34.db, -12.db], [0.db, -6.db]] }
+
+    # Plain shaper output at input level +db+ (dB), in dB.
+    def out_db(node, db)
+      20 * Math.log10(node.plain(Numo::SFloat[10**(db / 20.0)])[0].abs)
+    end
+
+    it 'plays a vertical step as a straight amplitude ramp across the 0.1 dB entry below it' do
+      plain = input(levels).ashape_db(step)
+      table = input(levels).ashape_db(step, table: true)
+      lo = 10**(-34.1 / 20)
+      hi = 10**(-34.0 / 20)
+      ya = 10**(-40 / 20.0) * (lo / 10**(-34 / 20.0))**(44 / 50.0) # the first line's value at -34.1 dB
+      yb = 10**(-12 / 20.0)
+      (1..9).each do |k|
+        u = lo + (hi - lo) * k / 10.0
+        expect(20 * Math.log10(table.plain(Numo::SFloat[u])[0] / (ya + (yb - ya) * (u - lo) / (hi - lo)))).to be_within(0.011).of(0)
+        expect(table.plain(Numo::SFloat[-u])[0]).to eq(-table.plain(Numo::SFloat[u])[0]) # (mirrored)
+      end
+      # unchanged outside the entry: below it, at the step, above it
+      [-60, -34.11, -33.99, -20, 0, 6].each { |d| expect(out_db(table, d)).to be_within(1e-4).of(out_db(plain, d)), "#{d} dB" }
+      expect(out_db(plain, -34.05)).to be_within(0.01).of(-40 + 44 * (-34.05 + 34) / 50.0)
+      expect(out_db(table, -34.05)).to be_within(0.02).of(-17.708) # (amplitude-straight; dB-straight would be -26)
+    end
+
+    it 'plays a segment drawn steeper than an entry as the amplitude ramp (a plug-in render: -7.83 dB 0.041 dB into a 0.1 dB drop)' do
+      drop = [[-84.db, -84.db], [-20.db, -3.5.db], [-19.9.db, -32.3.db], [0.db, -6.db]]
+      expect(out_db(input(levels).ashape_db(drop, table: true), -19.959)).to be_within(0.03).of(-7.83)
+      expect(out_db(input(levels).ashape_db(drop), -19.959)).to be_within(0.05).of(-15.31)
+    end
+
+    it 'leaves gentle curves unchanged and takes other entry spacings' do
+      %i[fuzz soft_knee fold_back asymmetric gate].each do |name|
+        expect(input(levels).ashape_db(name, table: true).sample(levels.length)).to eq(input(levels).ashape_db(name).sample(levels.length)), name.to_s
+      end
+      wide = input(levels).ashape_db(step, table: 0.25.db)
+      expect(out_db(wide, -34.26)).to be_within(1e-4).of(out_db(input(levels).ashape_db(step), -34.26))
+      expect(out_db(wide, -34.125)).to be > -20
+      expect { 1.constant.shape_db(step, table: 0.1) }.to raise_error(ArgumentError, /table/)
+      expect { 1.constant.shape_db(step, table: -0.1.db) }.to raise_error(ArgumentError, /table/)
+    end
+
+    it 'integrates across the ramps in closed form and antialiases them like any curve' do
+      curve = DB_SHAPER_CURVES['steps up and down']
+      node = input(levels).shape_db(db_points(curve[0]), negative: db_points(curve[1]), table: true)
+      c = node.instance_variable_get(:@rows)
+      [[0.015, 0.03], [0.05, 0.4], [-0.3, -0.05], [-0.5, 0.5]].each do |lo, hi|
+        n = 200_000
+        h = (hi - lo) / n
+        numeric = (0...n).sum { |k| DBS.form_f(c, lo + (k + 0.5) * h) } * h
+        expect(DBS.form_integral(c, hi) - DBS.form_integral(c, lo)).to be_within(2e-6 * (hi - lo).abs).of(numeric), "#{lo}..#{hi}"
+      end
+      # the antialiased version reads the same table curve: the plain table curve at the midpoints (a slow sine)
+      t = Numo::DFloat.new(4800).seq
+      x = Numo::SFloat.cast(Numo::NMath.sin(t * 2 * Math::PI * 20 / 48000) * 0.9)
+      out = input(x).shape_db(step, table: true).sample(4800)
+      mid = input(x).ashape_db(step, table: true).plain((x[1..] + x[0...-1]) * 0.5)
+      lo = 10**(-34.12 / 20)
+      hi = 10**(-33.98 / 20)
+      away = (1...4800).select { |i| [x[i - 1].abs, x[i].abs].max < lo || [x[i - 1].abs, x[i].abs].min > hi || x[i - 1] * x[i] <= 0 }
+      expect(away.length).to be > 4000
+      expect(away.map { |i| (out[i] - mid[i - 1]).abs }.max).to be < 2e-3
+    end
+
+    it 'gives the same output at any buffer size, prints, and loads' do
+      expect_invariant(-> { 110.hz.saw.at(0.9).shape_db(-84.db => -84.db, -30.db => [-60.db, -18.db], 0.db => -6.db, table: true) }, seconds: 0.3)
+      g = 110.hz.saw.shape_db(-84.db => -84.db, -30.db => [-60.db, -18.db], 0.db => -6.db, below: :unity, table: true)
+      expect(g.to_ruby).to eq('110.hz.saw.shape_db(-84.db => -84.db, -30.db => [-60.db, -18.db], 0.db => -6.db, below: :unity, table: true)')
+      loaded = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g))
+      expect(SpecBuffers.join(3.times.map { loaded.sample(400).dup })).to eq(SpecBuffers.join(3.times.map { g.sample(400).dup }))
+      expect(110.hz.saw.ashape_db(:fuzz, table: 0.2.db).to_ruby).to eq('110.hz.saw.ashape_db(:fuzz, table: 0.2.db)')
+      expect(g.to_s).to include('table 0.1 dB')
+    end
+  end
+
   describe 'settings' do
     it 'reads points by the dB rule (bare numbers are linear gains)' do
       a = input(Numo::SFloat[0.3]).ashape_db(0.001 => 0.01, 1 => 0.5).sample(1)

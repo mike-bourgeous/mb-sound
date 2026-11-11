@@ -27,6 +27,17 @@ module MB
       # - :unity continues from the first point with slope 1 (a fixed gain)
       # - :silence gives 0 (a per-sample gate: crossover distortion)
       #
+      # With +table+ (DbShaper.build, GraphNode#shape_db), the curve is read
+      # as a table with an entry every +table+ dB of input (on a grid from 0
+      # dB) and straight lines in AMPLITUDE between entries, wherever that
+      # differs from the drawn curve by more than CHORD_DB: a vertical step
+      # becomes an amplitude ramp over the entry below it, and a segment
+      # drawn steeper than an entry is wide plays as that ramp too, as
+      # table-driven plug-ins (the DirectX Distortion's 0.1 dB table) play
+      # them.  The ramps are written as dB-linear chords within CHORD_DB of
+      # the amplitude line, so both versions (and the ADAA integral, closed
+      # form per chord) use the same curve.  See DbShaper.tabulate.
+      #
       # +mix+ (0..1) blends the shaped signal with the input, phase-aligned
       # in the antialiased version too (it scales the shaper's departure
       # from the input inside the ADAA).
@@ -65,6 +76,18 @@ module MB
 
         # The most chords per cubic segment.
         MAX_CHORDS = 4096
+
+        # The table entry spacing in dB that +table: true+ means (the
+        # DirectX Distortion's).
+        TABLE_DB = 0.1
+
+        # Evaluations per table interval when looking for the drawn curve's
+        # departure from the amplitude line (DbShaper.tabulate).
+        TABLE_PROBES = 16
+
+        # The deepest bisection of an amplitude ramp into dB-linear chords
+        # (2^12 = 4096 chords at most).
+        TABLE_DEPTH = 12
 
         # Exponents this close to -1 integrate as a logarithm (the C
         # kernel's DB_LOG_Q).
@@ -217,7 +240,11 @@ module MB
         # keyword points +more+) with the other settings over the preset's.
         # A first segment that can't continue below (:line with a slope at
         # most 0) goes through MB::Sound.live_error (live mode: :unity).
-        def self.build(input, points, more, negative: nil, interpolation: nil, below: nil, above: nil, mix: nil, antialias: true)
+        #
+        # +table+ (nil, true for TABLE_DB, or an entry spacing like 0.1.db)
+        # reads both curves as tables straight in amplitude between entries
+        # (DbShaper.tabulate).
+        def self.build(input, points, more, negative: nil, interpolation: nil, below: nil, above: nil, mix: nil, antialias: true, table: nil)
           bad = more.keys.reject { |k| k.is_a?(Numeric) }
           raise ArgumentError, "Unknown shape_db options: #{bad.map(&:inspect).join(', ')}#{Library.suggest(bad[0], KEYS + [:antialias])}" unless bad.empty?
 
@@ -235,8 +262,13 @@ module MB
           raise ArgumentError, "negative must be :mirror or points (got #{negative.inspect})" if negative.is_a?(Symbol) && negative != :mirror
           raise ArgumentError, "below must be one of #{BELOW.inspect} (got #{below.inspect})" unless BELOW.include?(below)
 
+          width = table_width(table)
           pos = transfer(points, more, interpolation)
           neg = negative == :mirror ? nil : transfer(negative, {}, interpolation)
+          if width
+            pos = tabulate(pos, width)
+            neg &&= tabulate(neg, width)
+          end
           if below == :line
             problem = [pos, neg].compact.lazy.map { |t| below_problem(t) }.find(&:itself)
             if problem
@@ -254,6 +286,110 @@ module MB
           rows = DynamicsMethods.point_rows(points, more, 'shape_db')
           t = Dynamics::Transfer.points(rows, interpolation: interpolation, monotonic: false, steps: true)
           Dynamics::Transfer.new(t.segments, description: t.description.sub(/\Acompand /, ''))
+        end
+
+        # The table entry spacing in dB for #build's +table+ option (nil for
+        # none).
+        def self.table_width(table)
+          return nil if table.nil? || table == false
+          return TABLE_DB if table == true
+          unless table.is_a?(MB::Sound::Decibels) && table.to_db > 0 && table.to_db.finite?
+            raise ArgumentError, "shape_db's table is true (#{TABLE_DB} dB entries) or an entry spacing in dB above 0, like 0.1.db (got #{table.inspect})"
+          end
+          table.to_db.to_f.round(9) # (0.25.db.to_db is 0.2500000000000005)
+        end
+
+        # Dynamics::Transfer +transfer+ read as a table with an entry every
+        # +width+ dB of input (entries at whole multiples of +width+, each
+        # the curve's value there, the later point at a vertical step) and
+        # straight lines in amplitude between them, where those differ from
+        # the curve by more than CHORD_DB somewhere in the interval: those
+        # intervals become dB-linear chords within CHORD_DB of the amplitude
+        # line; the rest of the curve is unchanged.  Only whole intervals
+        # between the first and last points count (below and above them the
+        # +below+ and +above+ rules apply).
+        def self.tabulate(transfer, width)
+          segs = transfer.segments
+          x_first = segs[0][0]
+          x_last = segs[-1][0]
+          curve = ->(x) { Dynamics::Transfer.evaluate(segs, x) }
+          k0 = (x_first / width - 1e-9).ceil
+          k1 = (x_last / width + 1e-9).floor
+          ramps = []
+          (k0...k1).each do |k|
+            ta = (k * width).round(9) # (entries at whole tenths read as written: -34.1, not -34.10000000000001)
+            tb = ((k + 1) * width).round(9)
+            ea = curve.(ta)
+            eb = curve.(tb)
+            line = amplitude_line(ta, ea, tb, eb)
+            probes = (1...TABLE_PROBES).map { |j| ta + (tb - ta) * j / TABLE_PROBES } << (tb - (tb - ta) * 1e-9)
+            next if probes.all? { |x| (curve.(x) - line.(x)).abs <= CHORD_DB }
+            if ramps.last && (ramps.last[1] - ta).abs < 1e-9 * width
+              ramps.last[1] = tb # (adjacent ramps merge their bounds; their chords still follow each entry)
+              ramps.last[2] << [tb, eb]
+            else
+              ramps << [ta, tb, [[ta, ea], [tb, eb]]]
+            end
+          end
+          return transfer if ramps.empty?
+
+          inner = []
+          starts = (segs[1...-1].map(&:first) + ramps.flat_map { |r| r[0, 2] }).uniq.sort
+          starts.each do |a|
+            next if a >= x_last
+            next if ramps.any? { |ra, rb, _| a > ra && a < rb } # (inside a ramp)
+            ramp = ramps.find { |ra, _, _| ra == a }
+            if ramp
+              ramp[2].each_cons(2) { |(xa, ya), (xb, yb)| inner.concat(ramp_chords(xa, ya, xb, yb)) }
+            else
+              inner << rebase(segs, a)
+            end
+          end
+          described = "#{transfer.description}, table #{fmt(width)} dB"
+          Dynamics::Transfer.new([segs[0], *inner, segs[-1]].map(&:freeze).freeze, description: described)
+        end
+
+        # The amplitude line from (+xa+ dB in, +ya+ dB out) to (+xb+, +yb+)
+        # as a function of dB in giving dB out.
+        def self.amplitude_line(xa, ya, xb, yb)
+          ua = 10.0**(xa / 20.0)
+          ub = 10.0**(xb / 20.0)
+          va = 10.0**(ya / 20.0)
+          vb = 10.0**(yb / 20.0)
+          ->(x) { 20.0 * Math.log10(va + (vb - va) * (10.0**(x / 20.0) - ua) / (ub - ua)) }
+        end
+
+        # dB-linear segments within CHORD_DB of the amplitude line from
+        # (+xa+, +ya+) to (+xb+, +yb+) (dB in, dB out), by bisection.
+        def self.ramp_chords(xa, ya, xb, yb)
+          line = amplitude_line(xa, ya, xb, yb)
+          out = []
+          split = lambda do |x0, y0, x1, y1, depth|
+            ok = depth >= TABLE_DEPTH || [0.25, 0.5, 0.75].all? { |f|
+              x = x0 + (x1 - x0) * f
+              (y0 + (y1 - y0) * f - line.(x)).abs <= CHORD_DB
+            }
+            if ok
+              out << [x0, y0, (y1 - y0) / (x1 - x0), 0.0, 0.0]
+            else
+              xm = (x0 + x1) * 0.5
+              ym = line.(xm)
+              split.(x0, y0, xm, ym, depth + 1)
+              split.(xm, ym, x1, y1, depth + 1)
+            end
+          end
+          split.(xa, ya, xb, yb, 0)
+          out
+        end
+
+        # The segment of +segs+ in effect at +x+ (the last starting at or
+        # below it), rewritten to start at +x+ (a Taylor shift of its cubic).
+        def self.rebase(segs, x)
+          s = segs.select { |seg| seg[0] <= x }.last
+          return s if s[0] == x
+          h = x - s[0]
+          _, y0, a, b, c = s
+          [x, y0 + h * (a + h * (b + h * c)), a + h * (2 * b + 3 * c * h), b + 3 * c * h, c]
         end
 
         # Why +transfer+ can't continue its first segment's line below its

@@ -286,6 +286,10 @@ module GraphSweep
           c.sig.shape_db(-60.db => -40.db, -20.db => -12.db, 0.db => -6.db, below: :silence, interpolation: :cubic) +
           c.sig.shape_db(-84.db => -84.db, -34.db => [-40.db, -12.db], 0.db => -6.db, negative: [[-84.db, -84.db], [-20.db, -30.db], [-20.db, -10.db], [0.db, -6.db]])
       }],
+      ['shape_db read as a table (DbShaper table:, db-step-1)', ->(c) {
+        c.sig.shape_db(-84.db => -84.db, -34.db => [-40.db, -12.db], 0.db => -6.db, below: :unity, table: true) +
+          c.sig.ashape_db([[-84.db, -84.db], [-20.db, -3.5.db], [-19.9.db, -32.3.db], [0.db, -6.db]], table: 0.2.db)
+      }],
       ['Quantize node', ->(c) { c.sig.quantize(c.mod(0.01, 0.2)) }],
       ['formant (Formant) constant and morphing', ->(c) {
         c.sig.formant(:a) + c.sig.formant(:a, :e, [[300, 0.db, 50], [900, -6.db, 60], [2500, -12.db, 100], [3300, -20.db, 120], [4000, -30.db, 150]], morph: c.mod(0, 1), shift: c.mod(-5, 5, 3), width: c.mod(0.5, 1.5, 2), voice: :soprano)
