@@ -166,7 +166,7 @@ RSpec.describe(MB::Sound::GraphNode::Tremolo, :aggregate_failures) do
       expect(db(b[36000])).to be_within(1e-4).of(-6)
     end
 
-    it 'blends the wrap over seam: of a cycle (Sony "blend graph edges": a tenth of a cycle)' do
+    it 'blends the wrap over seam: of a cycle with a straight line (as Sony "blend graph edges" plays a sawtooth)' do
       b = take(1.constant.tremolo(1, depth: 24.db, shape: [[0, -1], [1, 1]], seam: true), 48000)[0]
       # measured on Sony's render: -1.2 dB at 0.95, -22.8 dB at 0.05, a dB line between
       expect(db(b[45600])).to be_within(1e-3).of(-1.2)
@@ -174,6 +174,57 @@ RSpec.describe(MB::Sound::GraphNode::Tremolo, :aggregate_failures) do
       expect(db(b[0])).to be_within(1e-3).of(-12)
       expect(db(b[46800])).to be_within(1e-3).of(-6.6)
       expect(db(b[24000])).to be_within(1e-3).of(-12)
+    end
+
+    describe 'seam_mode: :jump (tremolo-seam-1)' do
+      # The table's values (the shape with its seam) at +x+ cycles
+      def table_at(shape, x, **opts)
+        t = methods.drawn_table(shape, **opts)
+        t.frames[0, (x * methods::DRAWN_SIZE).round]
+      end
+
+      it 'takes out only the jump between the ends, half on each side, keeping the shape\'s lines' do
+        shape = [[0, -1], [0.5, 1], [1, 0]] # ends 0 and -1: a jump of 1 at the wrap
+        { 0.97 => (1 - 0.47 / 0.5) - 0.2, 0.99 => (1 - 0.49 / 0.5) - 0.4, 0.02 => (-1 + 0.04 * 2) + 0.3, 0.04 => (-1 + 0.08 * 2) + 0.1 }.each do |x, want|
+          expect(table_at(shape, x, seam: true, mode: :jump)).to be_within(1e-6).of(want), x.to_s
+        end
+        expect(table_at(shape, 0, seam: true, mode: :jump)).to be_within(1e-6).of(-0.5) # (both sides meet at the ends' average)
+        expect(table_at(shape, 0.5, seam: true, mode: :jump)).to eq(table_at(shape, 0.5))
+        # continuous across the wrap: no step bigger than the steepest line's
+        data = methods.drawn_table(shape, seam: true, mode: :jump).frames[0, true]
+        steps = (data[1..] - data[0...-1]).abs.to_a << (data[0] - data[-1]).abs
+        expect(steps.max).to be < 21.0 / methods::DRAWN_SIZE * 1.01 # (the seam's ramp of 1 per 0.1 cycle plus the line's 2 per cycle; 1.01 for float32)
+      end
+
+      it 'plays a shape whose ends meet as drawn and keeps a trough at the wrap (the straight line cuts it)' do
+        tri = [[0, -1], [0.5, 1], [1, -1]]
+        expect(methods.drawn_table(tri, seam: true, mode: :jump).frames).to eq(methods.drawn_table(tri).frames)
+        jump = take(1.constant.tremolo(1, depth: 24.db, shape: tri, seam: true, seam_mode: :jump), 48000)[0]
+        line = take(1.constant.tremolo(1, depth: 24.db, shape: tri, seam: true), 48000)[0]
+        expect(db(jump[0])).to be_within(1e-3).of(-24)
+        expect(db(line[0])).to be_within(1e-3).of(-24 * 0.9) # (the line from 0.95 to 0.05 holds the trough 2.4 dB up)
+      end
+
+      it 'agrees with the straight line for a sawtooth (the one shape where the two readings match)' do
+        saw = [[0, -1], [1, 1]]
+        a = methods.drawn_table(saw, seam: true, mode: :jump).frames
+        b = methods.drawn_table(saw, seam: true).frames
+        expect((a - b).abs.max).to be < 1e-6
+        expect(methods.drawn_table(saw, seam: true, mode: :jump)).not_to equal(methods.drawn_table(saw, seam: true))
+      end
+
+      it 'clamps to the shape range, raises for unknown modes, prints, and gives the same output at any buffer size' do
+        expect(table_at([[0, 0], [0.02, 1], [0.5, -1], [1, 1]], 0.02, seam: true, mode: :jump)).to eq(1) # (1 + 0.3, clamped)
+        expect { 1.constant.tremolo(1, shape: [[0, 1], [1, -1]], seam: true, seam_mode: :smooth) }.to raise_error(ArgumentError, /seam_mode/)
+        t = 110.hz.saw.trem(1.n8, depth: 6.db, shape: [[0, 1], [0.5, -1], [1, 0]], seam: true, seam_mode: :jump)
+        expect(t.to_ruby).to include('seam: true, seam_mode: :jump)')
+        loaded = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(t))
+        expect(take(loaded, 4800)).to eq(take(t, 4800))
+        mk = -> { 220.hz.tremolo(7.3, shape: [[0, 1], [0.3, -1], [0.7, 0.2], [1, -0.6]], seam: 0.2, seam_mode: :jump, depth: 30.db) }
+        ref = take(mk.(), 9600, 800)
+        expect(take(mk.(), 9600, 367)).to eq(ref)
+        expect(take(mk.(), 9600, 1)).to eq(ref)
+      end
     end
 
     it 'evaluates points around the cycle, jumps from either side' do
