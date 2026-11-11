@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-11-09",
+  "generated": "2026-11-11",
   "specs": {
     "gems/mb-term/spec/native_spec.rb": {
       "fast_term": [
@@ -763,6 +763,37 @@
         "FastSampler.grains"
       ]
     },
+    "spec/lib/mb/sound/graph_node/calculus_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_control": [
+        "FastControl.derivative",
+        "FastControl.integral"
+      ],
+      "fast_filter": [
+        "FastFilter.svf"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_resample": [
+        "FastResample#initialize",
+        "FastResample#lookup_converter",
+        "FastResample#read",
+        "FastResample#setup_converter_type"
+      ],
+      "fast_sound": [
+        "FastSound.biquad_narray",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
     "spec/lib/mb/sound/graph_node/constant_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.fill_range"
@@ -845,6 +876,25 @@
         "FastSynth.oscillate_bl"
       ]
     },
+    "spec/lib/mb/sound/graph_node/dynamics/transient_shaper_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.copy",
+        "FastArithmetic.product"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
+      ],
+      "fast_dynamics": [
+        "FastDynamics.transient"
+      ],
+      "fast_sound": [
+        "FastSound.narray_log10",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
     "spec/lib/mb/sound/graph_node/dynamics_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.add_at",
@@ -874,6 +924,9 @@
       ],
       "fast_recipe": [
         "FastRecipe.frame_binding"
+      ],
+      "fast_resonator": [
+        "FastResonator.ping"
       ],
       "fast_sound": [
         "FastSound.matrix_mix",
@@ -1018,6 +1071,20 @@
         "FastSound.oscillate"
       ]
     },
+    "spec/lib/mb/sound/graph_node/phaser_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.mix"
+      ],
+      "fast_filter": [
+        "FastFilter.phaser"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
     "spec/lib/mb/sound/graph_node/resample_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.circular_read",
@@ -1157,7 +1224,9 @@
         "FastControl.adaptive",
         "FastControl.curve",
         "FastControl.damped",
+        "FastControl.derivative",
         "FastControl.inertia",
+        "FastControl.integral",
         "FastControl.reset_run",
         "FastControl.slew",
         "FastControl.smooth"
@@ -1179,7 +1248,8 @@
       "fast_dynamics": [
         "FastDynamics.compand",
         "FastDynamics.crossover",
-        "FastDynamics.limit"
+        "FastDynamics.limit",
+        "FastDynamics.transient"
       ],
       "fast_envelope": [
         "FastEnvelope.process"
@@ -1188,6 +1258,7 @@
         "FastFilter.diode_ladder",
         "FastFilter.formant",
         "FastFilter.four_pole",
+        "FastFilter.phaser",
         "FastFilter.svf"
       ],
       "fast_lofi": [
@@ -1792,6 +1863,9 @@
       "fast_envelope": [
         "FastEnvelope.process"
       ],
+      "fast_filter": [
+        "FastFilter.svf"
+      ],
       "fast_plan": [
         "FastPlan.run",
         "FastPlan.run_lanes"
@@ -1800,8 +1874,16 @@
         "FastRecipe.frame_binding"
       ],
       "fast_sound": [
+        "FastSound.fast_math=",
         "FastSound.number_to_freq",
         "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.jump_queue",
+        "FastSynth.oscillate_bl"
+      ],
+      "fast_texture": [
+        "FastTexture.noise_skip"
       ]
     },
     "spec/lib/mb/sound/plan/resonator_op_spec.rb": {
@@ -1836,8 +1918,6 @@
         "FastSampler.play"
       ],
       "fast_sound": [
-        "FastSound.biquad_narray",
-        "FastSound.cookbook",
         "FastSound.fast_math=",
         "FastSound.oscillate"
       ]
@@ -1929,6 +2009,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -2213,11 +2295,13 @@
         "FastControl"
       ],
       "includes": [
+        "ext/mb/sound/include/mb_calculus.h",
         "ext/mb/sound/include/mb_ext_helpers.h",
         "ext/mb/sound/include/mb_smooth.h"
       ],
       "depend": {
         "fast_control.o": [
+          "ext/mb/sound/include/mb_calculus.h",
           "ext/mb/sound/include/mb_ext_helpers.h",
           "ext/mb/sound/include/mb_smooth.h"
         ]
@@ -2475,6 +2559,7 @@
         "ext/mb/sound/fast_plan/plan_filters.h",
         "ext/mb/sound/include/mb_biquad.h",
         "ext/mb/sound/include/mb_bl_osc.h",
+        "ext/mb/sound/include/mb_calculus.h",
         "ext/mb/sound/include/mb_clip_shape.h",
         "ext/mb/sound/include/mb_decimate.h",
         "ext/mb/sound/include/mb_dynamics.h",
@@ -2497,6 +2582,7 @@
         "fast_plan.o": [
           "ext/mb/sound/fast_plan/plan_filters.h",
           "ext/mb/sound/include/mb_bl_osc.h",
+          "ext/mb/sound/include/mb_calculus.h",
           "ext/mb/sound/include/mb_clip_shape.h",
           "ext/mb/sound/include/mb_envelope.h",
           "ext/mb/sound/include/mb_ext_helpers.h",
