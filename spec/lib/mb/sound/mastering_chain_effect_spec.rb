@@ -1,13 +1,13 @@
 # (omnibus19; Kez, persona panel 3: the mastering report should say what the
 # chain did to the music, e.g. the sub ducking under the snare)
 RSpec.describe(MB::Sound::Mastering::ChainEffect) do
-  RATE = 48000 unless defined?(RATE)
+  CHAIN_EFFECT_RATE = 48000 unless defined?(CHAIN_EFFECT_RATE)
 
   # 8 seconds: a held 50 Hz sub and a 4 kHz burst every half second; +duck+
   # dB off the sub for 0.15 s after each burst in the output, which is the
   # input +trim+ dB louder and +extra+ dB off everything in seconds 4-6.
   def signals(duck:, trim: 6.0, extra: 0.0)
-    t = Numo::DFloat.new(8 * RATE).seq / RATE
+    t = Numo::DFloat.new(8 * CHAIN_EFFECT_RATE).seq / CHAIN_EFFECT_RATE
     sub = Numo::NMath.sin(t * 2 * Math::PI * 50) * 0.5
     burst = Numo::NMath.sin(t * 2 * Math::PI * 4000) * 0.3 * ((t % 0.5) < 0.05)
     gain = Numo::DFloat.ones(t.length)
@@ -24,7 +24,7 @@ RSpec.describe(MB::Sound::Mastering::ChainEffect) do
 
   it 'finds the low end ducking under the hits (pumping) and names it' do
     input, output = signals(duck: 6)
-    e = described_class.measure(input, output, 6.0, sample_rate: RATE, bars: bars, labels: [1, 2, 3, 4], low_hz: 120)
+    e = described_class.measure(input, output, 6.0, sample_rate: CHAIN_EFFECT_RATE, bars: bars, labels: [1, 2, 3, 4], low_hz: 120)
     expect(e.low_swing).to be_within(1.0).of(6)
     expect(e.to_s).to include('below 120 Hz the gain swings').and include('pumping')
     # (the trim isn't counted as the chain's doing)
@@ -33,7 +33,7 @@ RSpec.describe(MB::Sound::Mastering::ChainEffect) do
 
   it 'says nothing of pumping for a steady chain, and names the bars it took the most off' do
     input, output = signals(duck: 0, extra: 4)
-    e = described_class.measure(input, output, 6.0, sample_rate: RATE, bars: bars, labels: [9, 10, 11, 12], low_hz: 120)
+    e = described_class.measure(input, output, 6.0, sample_rate: CHAIN_EFFECT_RATE, bars: bars, labels: [9, 10, 11, 12], low_hz: 120)
     expect(e.low_swing).to be < 1
     expect(e.to_s).not_to include('pumping')
     expect(e.typical).to be_within(0.5).of(0)
@@ -44,7 +44,7 @@ RSpec.describe(MB::Sound::Mastering::ChainEffect) do
 
   it 'gives nil for silence' do
     z = [Numo::SFloat.zeros(48000)] * 2
-    expect(described_class.measure(z, z, 0.0, sample_rate: RATE, bars: [[0.0, 1.0]], labels: [1])).to be_nil
+    expect(described_class.measure(z, z, 0.0, sample_rate: CHAIN_EFFECT_RATE, bars: [[0.0, 1.0]], labels: [1])).to be_nil
   end
 
   it 'reports in a mastered render' do
