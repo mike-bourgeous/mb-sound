@@ -215,6 +215,8 @@ module MB
           raise ArgumentError, "integral takes a graph node (got #{source.inspect})" unless source.respond_to?(:sample)
           raise ArgumentError, "Integral reset must be a graph node of triggers (got #{reset.inspect})" unless reset.nil? || reset.respond_to?(:sample)
 
+          # (a document's param is its number while the graph builds: GraphIO::NumberOnly's sweep)
+          leak = GraphNode.build_setting(leak)
           leak = nil if leak == false
           unless leak.nil?
             raise ArgumentError, "The leak is a fixed time constant: seconds or a Length (got #{leak.inspect})" if leak.respond_to?(:sample) || !(leak.is_a?(Numeric) || leak.is_a?(Length))
