@@ -134,16 +134,22 @@ RSpec.describe(MB::Sound::Player, :aggregate_failures) do
     run_player(pl) do
       item = pl.item
       starts = item.sections.map(&:first)
-      MB::Sound::Internal.wait_audio(pl.session, 0.5)
+      # (omnibus19: where each seek landed, read as it lands; the position
+      # read afterwards depends on how much audio the player's thread
+      # consumed meanwhile, which grew past a quarter note under 3x load)
+      landed = []
+      s = pl.session
+      allow(s).to receive(:apply_seek).and_wrap_original { |m, *a| m.call(*a).tap { landed << s.transport.position } }
+      MB::Sound::Internal.wait_audio(s, 0.5)
       act(pl, :jump_forward)
       settle(pl)
       expect(pl.said[0]).to start_with('p01')
-      expect(pl.session.transport.position).to be >= starts[1]
-      expect(pl.session.transport.position).to be < starts[1] + 1/4r
+      expect(landed).to eq([starts[1]])
+      expect(s.transport.position).to be >= starts[1]
       act(pl, :jump_back) # (within a second of p01's start: back to p00)
       settle(pl)
       expect(pl.said[0]).to start_with('p00')
-      expect(pl.session.transport.position).to be < 1/4r
+      expect(landed.last).to eq(0)
       act(pl, :seek_forward)
       settle(pl)
       expect(pl.said[0]).to eq('bar 2')
