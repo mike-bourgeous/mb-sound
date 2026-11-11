@@ -94,7 +94,7 @@ Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`
 
 ### [Chorus and tremolo](chorus.md)
 
-`sig.chorus(:juno1 | :juno2 | :juno12 | :lush, rate:, depth:, mix:, bbd: false)` (`GraphNode::Chorus`, self-contained in `graph_node/chorus.rb` and `chorus_nodes.rb` for a later effects project) is a Juno-60-style two-tap chorus returning a stereo bundle: mono in like the Juno, clean by default, `bbd: true` adds the board's filters and hiss.  `sig.tremolo(rate, depth:, shape:, phase:, stereo_phase:, seam:, law:, smooth:, mix:)` (aliases `trem`, `amplitude_modulation`; `GraphNode::Tremolo`) is amplitude modulation on the library's LFOs (Hz or tempo-synced; named shapes or a drawn cycle of points), depth in dB down to a floor, `stereo_phase:` for auto-pan; it reproduces Sony Amplitude Modulation's renders to -37..-112 dB.
+`sig.chorus(:juno1 | :juno2 | :juno12 | :lush, rate:, depth:, mix:, bbd: false)` (`GraphNode::Chorus`, self-contained in `graph_node/chorus.rb` and `chorus_nodes.rb` for a later effects project) is a Juno-60-style two-tap chorus returning a stereo bundle: mono in like the Juno, clean by default, `bbd: true` adds the board's filters and hiss.  `sig.tremolo(rate, depth:, shape:, phase:, stereo_phase:, seam:, seam_mode:, law:, smooth:, mix:)` (aliases `trem`, `amplitude_modulation`; `GraphNode::Tremolo`) is amplitude modulation on the library's LFOs (Hz or tempo-synced; named shapes or a drawn cycle of points), depth in dB down to a floor, `stereo_phase:` for auto-pan; it reproduces Sony Amplitude Modulation's renders to -37..-112 dB.
 
 ### [Phaser](phaser.md)
 
