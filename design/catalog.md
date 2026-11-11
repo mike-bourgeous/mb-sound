@@ -56,6 +56,8 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `clip_rate(max_rise, max_fall, reset:, sample_rate:)` Limits this node's slope to max_rise and max_fall units per second
 - `inertia(rate, substeps:, mode:)` Follows this node with its acceleration limited (GraphNode::Inertia)
 - `smooth(length, reset:, curve:, ...)` Smooths this node over length with an S-curve step (Filter::Smooth)
+- `derivative/differentiate/slope(mode:, per:)` The slope of this signal: how fast it changes, per second or per sample
+- `integral/accumulate/integrate(leak:, reset:, ...)` The running sum of this signal: its area so far, per second or per sample
 
 ### Distortion and shaping
 

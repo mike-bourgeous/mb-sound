@@ -57,6 +57,8 @@ module MB
           # (Ruby's spelling suggestions for these, write and collect, lead
           # nowhere)
           suggestions.replace([hint.call(*e.args.first(1))])
+        elsif e.is_a?(NoMethodError) && (hint = node_guess(e))
+          suggestions.replace([hint])
         end
         message = message.sub(/ for module MB::Sound\z/, '').sub(/ for module MB::Sound(?=\n)/, '')
         [message.rstrip, suggestions.uniq]
@@ -73,6 +75,36 @@ module MB
           "or wire #{n}, stream (a MIDI stream into #{n}'s instrument)"
       }
       GUESSES = { attach: CLIP_ON_TRACK }.freeze
+
+      # Method names people reach for on graph nodes, and what they meant
+      # (feedback-api-guesses: the omnibus19 name test's runners-up for
+      # derivative and integral; Kez's `transpose` on a tone after `.fm`,
+      # where Ruby suggested "transients"): name => suggestion, or a Proc of
+      # the receiver giving one (nil to keep Ruby's).
+      SLOPE = 'derivative (the slope of a signal; aliases slope, differentiate)'
+      SUM = 'integral (the running sum of a signal; aliases integrate, accumulate)'
+      NODE_GUESSES = {
+        delta: SLOPE, diff: SLOPE, difference: SLOPE, deriv: SLOPE, ddt: SLOPE,
+        cumsum: SUM, running_sum: SUM, accum: SUM, sum: SUM, integ: SUM,
+        transpose: ->(node) {
+          next nil unless node.is_a?(Tone)
+
+          'v.hz.transpose(7).fm(...) (transpose the pitch first: .fm, .saw, and the like make it a Tone, ' \
+            'which has no transpose) or v.hz.vibrato(5.5, depth: 30.cents) (vibrato that stays a pitch)'
+        },
+      }.freeze
+
+      # The NODE_GUESSES suggestion for NoMethodError +e+ on a graph node,
+      # or nil.
+      def node_guess(e)
+        node = e.receiver
+        return nil unless node.is_a?(GraphNode) || node.is_a?(GraphNode::Channels)
+
+        hint = NODE_GUESSES[e.name]
+        hint.respond_to?(:call) ? hint.call(node) : hint
+      rescue StandardError
+        nil
+      end
 
       # For a bare word the console doesn't know that names something in
       # the current Session (a track, scene, or knob), the Symbol to write

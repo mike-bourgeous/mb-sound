@@ -163,7 +163,14 @@ module RelationFuzz
       when 6 then [:quantize, [0.05, 0.1, 0.25][rng.rand(3)]]
       when 7 then [:delay, control(rng, 0.0005, 0.004), rng.rand < 0.5 ? (rng.rand * 0.6).round(2) : nil]
       when 8 then [:decimate, control(rng, 800, 9000)]
-      when 9 then [:at, control(rng, 0.2, 1.0)]
+      # (omnibus19: a third of the gains are a derivative or an integral:
+      # per sample, central, leaking, true sums under a range, resets)
+      when 9
+        if rng.rand < 0.67
+          [:at, control(rng, 0.2, 1.0)]
+        else
+          [[:derivative, :backward], [:derivative, :central], [:integral, :leak], [:integral, :range], [:integral, :reset]][rng.rand(5)]
+        end
       when 10 then [:compress, -[6, 12, 20][rng.rand(3)], [2, 4, 8][rng.rand(3)]]
       when 11 then [:feedback, rng.rand(20..120), (0.2 + rng.rand * 0.5).round(2)]
       when 12 then [:ease, %i[smoothstep elastic bounce][rng.rand(3)]]
@@ -194,6 +201,7 @@ module RelationFuzz
       [:quantize, 0.1], [:delay, [:const, 0.001], nil], [:delay, [:const, 0.001], 0.3], [:decimate, [:const, 4000]],
       [:at, [:const, 0.5]], [:compress, -12, 4], [:feedback, 30, 0.5], [:ease, :smoothstep], [:formant, :a],
       [:pan, [:const, 0.2]], [:abs], [:until, 0.011], [:period_delay, 110], [:sample_hold, false], [:shape_db, :fuzz],
+      [:derivative, :central], [:integral, :reset],
     ].map { |op| Expr.new(op.first, op.drop(1), [kid]) }
   end
 
@@ -253,6 +261,13 @@ module RelationFuzz
       # (a mono input becomes stereo first: itself and a scaled copy)
       input = e.kids[0].stereo? ? k[0] : "#{k[0]}.then { |x| stereo(x, x * -0.5) }"
       "#{input}.balance(#{ctl(a[1])}, law: #{a[0].inspect})"
+    when :derivative then "#{k[0]}.derivative(#{a[0] == :central ? 'mode: :central, ' : ''}per: :sample)"
+    when :integral
+      case a[0]
+      when :leak then "(#{k[0]}.integral(leak: 32.samples, per: :sample) * 0.05)"
+      when :range then "#{k[0]}.integral(range: -0.5..0.5)"
+      else "#{k[0]}.integral(reset: seq(C4.n64, E4.n64).loop.notes.trigger, per: :sample, leak: 64.samples) * 0.02"
+      end
     when :sample_hold
       trig = 'seq(C4.n64, E4.n64).loop.notes.trigger'
       "#{k[0]}.sample_hold(#{a[0] ? "stereo(#{trig}, #{trig})" : trig})"

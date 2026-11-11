@@ -58,6 +58,7 @@
 #include "mb_smooth.h"
 #include "mb_vec_exp2.h"
 #include "mb_jump_step.h"
+#include "mb_calculus.h"
 
 #include "plan_filters.h"
 
@@ -103,6 +104,8 @@ enum {
 	OP_PAN_GAIN,  // dst, a, law, side, sc       dst = one side's pan law gain for positions a (see run_pan_gain; Plan::Op::PanGain)
 	OP_RESONATOR, // dst, a, freq, decay, object, sc, modal  dst = GraphNode::Resonator on a (see run_resonator; Plan::Op::Resonator)
 	OP_UNISON,    // dst, d, f, sc               dst = a Unison::Detune copy's frequency (see run_unison; Plan::Op::UnisonCopy)
+	OP_DERIVATIVE,// dst, a, object              dst = GraphNode::Derivative of a (see run_derivative; Plan::Op::Derivative)
+	OP_INTEGRAL,  // dst, a, reset, object       dst = GraphNode::Integral of a, reset a register or -1 (see run_integral; Plan::Op::Integral)
 };
 
 // Functions of OP_UNARY (Plan::Op::Unary::FUNCTIONS)
@@ -120,7 +123,7 @@ typedef struct { float r, i; } mb_cf;
 
 static ID id_phase, id_blep, id_noise, id_jump_buffer, id_jump_left, id_last_freq, id_last_width;
 static ID id_plan_start, id_plan_reset, id_note, id_frequency, id_state, id_ring1, id_ring2, id_table, id_plan_wavetable;
-static ID id_held, id_prev, id_plan_draw;
+static ID id_held, id_prev, id_plan_draw, id_settings;
 
 // The register file of one call.
 struct regs {
@@ -1005,8 +1008,11 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 		case OP_CLIP: case OP_EXP: case OP_TIME_SCALE: case OP_UNARY:
 			len = 4;
 			break;
-		case OP_SAMPLE_HOLD:
+		case OP_SAMPLE_HOLD: case OP_INTEGRAL:
 			len = 5;
+			break;
+		case OP_DERIVATIVE:
+			len = 4;
 			break;
 		case OP_DECIMATE:
 			len = 7;
@@ -1176,6 +1182,55 @@ static void run_sample_hold(const int32_t *op, size_t pc, const struct regs *R, 
 
 	rb_ivar_set(node, id_prev, DBL2NUM(T[n - 1]));
 	rb_ivar_set(node, id_held, DBL2NUM(held));
+	RB_GC_GUARD(node);
+}
+
+// A contiguous 1D DFloat ivar +id+ of +node+ with exactly +len+ values, for
+// writing if +write+ (a derivative's or integral's state and settings).
+static double *calculus_ivar(VALUE node, ID id, long len, _Bool write, const char *what)
+{
+	VALUE v = rb_ivar_get(node, id);
+	if (CLASS_OF(v) != numo_cDFloat || RNARRAY_NDIM(v) != 1 || !RTEST(nary_check_contiguous(v)) || (long)RNARRAY_SIZE(v) != len) {
+		rb_raise(rb_eArgError, "A planned %s must be a contiguous DFloat of %ld values", what, len);
+	}
+	if (!write) return (double *)(nary_get_pointer_for_read(v) + nary_get_offset(v));
+	if (OBJ_FROZEN(v)) rb_raise(rb_eFrozenError, "A planned %s is frozen", what);
+	return (double *)(nary_get_pointer_for_write(v) + nary_get_offset(v));
+}
+
+/*
+ * OP_DERIVATIVE: dst, a, object: GraphNode::Derivative (FastControl.derivative)
+ * of the real register a, on the node's @state and @settings (see
+ * mb_calculus.h).
+ */
+static void run_derivative(const int32_t *op, size_t pc, const struct regs *R, VALUE objects, size_t n)
+{
+	if (R->c[op[1]] || R->c[op[2]]) rb_raise(rb_eArgError, "Plan derivatives are real");
+	if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan derivative object at word %zu", pc);
+	VALUE node = rb_ary_entry(objects, op[3]);
+	double *st = calculus_ivar(node, id_state, MB_DERIVATIVE_STATE_LENGTH, 1, "derivative's state");
+	const double *set = calculus_ivar(node, id_settings, MB_DERIVATIVE_SETTINGS_LENGTH, 0, "derivative's settings");
+	if (set[0] != 0 && set[0] != 1) rb_raise(rb_eArgError, "The derivative mode must be 0 (backward) or 1 (central)");
+	mb_derivative(R->p[op[1]], R->p[op[2]], st, set[0] != 0, set[1], n);
+	RB_GC_GUARD(node);
+}
+
+/*
+ * OP_INTEGRAL: dst, a, reset, object: GraphNode::Integral
+ * (FastControl.integral) of the real register a, restarting at rising edges
+ * of the reset register (-1: none), on the node's @state and @settings (see
+ * mb_calculus.h).
+ */
+static void run_integral(const int32_t *op, size_t pc, const struct regs *R, long nregs, VALUE objects, size_t n)
+{
+	if (R->c[op[1]] || R->c[op[2]]) rb_raise(rb_eArgError, "Plan integrals are real");
+	if (op[3] >= nregs || (op[3] >= 0 && (R->c[op[3]] || !R->p[op[3]]))) rb_raise(rb_eArgError, "Bad plan integral reset at word %zu", pc);
+	if (op[4] < 0 || op[4] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan integral object at word %zu", pc);
+	VALUE node = rb_ary_entry(objects, op[4]);
+	double *st = calculus_ivar(node, id_state, MB_INTEGRAL_STATE_LENGTH, 1, "integral's state");
+	const double *set = calculus_ivar(node, id_settings, MB_INTEGRAL_SETTINGS_LENGTH, 0, "integral's settings");
+	if (set[2] != 0 && set[2] != 1) rb_raise(rb_eArgError, "The integral clamp flag must be 0 or 1");
+	mb_integral(R->p[op[1]], R->p[op[2]], op[3] >= 0 ? R->p[op[3]] : NULL, st, set[0], set[1], set[2] != 0, set[3], set[4], n);
 	RB_GC_GUARD(node);
 }
 
@@ -1604,6 +1659,14 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 			run_sample_hold(op, pc, R, nregs, objects, n);
 			break;
 
+		case OP_DERIVATIVE:
+			run_derivative(op, pc, R, objects, n);
+			break;
+
+		case OP_INTEGRAL:
+			run_integral(op, pc, R, nregs, objects, n);
+			break;
+
 		case OP_UNARY:
 			run_unary(op, pc, R, n);
 			break;
@@ -1914,6 +1977,8 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("dynamics")), INT2NUM(OP_DYNAMICS));
 	rb_hash_aset(h, ID2SYM(rb_intern("mix")), INT2NUM(OP_MIX));
 	rb_hash_aset(h, ID2SYM(rb_intern("decimate")), INT2NUM(OP_DECIMATE));
+	rb_hash_aset(h, ID2SYM(rb_intern("derivative")), INT2NUM(OP_DERIVATIVE));
+	rb_hash_aset(h, ID2SYM(rb_intern("integral")), INT2NUM(OP_INTEGRAL));
 	rb_hash_aset(h, ID2SYM(rb_intern("pan_gain")), INT2NUM(OP_PAN_GAIN));
 	rb_hash_aset(h, ID2SYM(rb_intern("resonator")), INT2NUM(OP_RESONATOR));
 	rb_hash_aset(h, ID2SYM(rb_intern("unison")), INT2NUM(OP_UNISON));
@@ -1971,6 +2036,7 @@ void Init_fast_plan(void)
 	id_held = rb_intern("@held");
 	id_prev = rb_intern("@prev");
 	id_plan_draw = rb_intern("plan_draw");
+	id_settings = rb_intern("@settings");
 
 	rb_define_module_function(fast_plan, "run", ruby_run, 8);
 	rb_define_module_function(fast_plan, "run_lanes", ruby_run_lanes, 8);
