@@ -400,7 +400,7 @@ module MB
       # The time document +text+'s tunings were saved (its header's
       # `tuned:`, written by HandTune.save_fit; tuner-fixes-1), or nil.
       def tuned_at(text)
-        GraphIO.parse(text.to_s).meta[:tuned]
+        GraphIO.parse(text.to_s).header[:tuned]
       rescue StandardError
         nil
       end

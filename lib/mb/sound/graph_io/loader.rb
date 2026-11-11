@@ -219,7 +219,7 @@ module MB
           unless @document.params.values.all? { |p| p[:knob] }
             raise LoadError.new("#{@label}: rack documents keep settings in knob lines, not param lines", path: @path)
           end
-          constructor = @document.meta[:rack]
+          constructor = @document.header[:rack]
           unless constructor.is_a?(Symbol) && Rack::CONSTRUCTORS.include?(constructor)
             raise LoadError.new("#{@label}: rack: must name a rack constructor (#{Rack::CONSTRUCTORS.to_a.join(', ')}), not #{constructor.inspect}", path: @path)
           end
@@ -518,7 +518,7 @@ module MB
               @old_ring = !GraphIO.since?(version, :ring_all_typed_inputs)
               @old_shift = !GraphIO.since?(version, :clip_shift)
               @old_tempo = !GraphIO.since?(version, :tempo_live)
-              @document.meta = kwargs
+              @document.graph_keywords = kwargs
             when :inputs
               bad = args.reject { |a| a.is_a?(Symbol) }
               raise error(node, "inputs takes Symbols (inputs :midi), not #{bad.map(&:inspect).join(', ')}") unless bad.empty?
@@ -610,7 +610,11 @@ module MB
           kwargs = {}
           (node.arguments&.arguments || []).each do |a|
             if a.is_a?(Prism::KeywordHashNode)
-              a.elements.each { |el| kwargs[value_key(el.key)] = eval_node(el.value, Scope.new) }
+              a.elements.each do |el|
+                key = value_key(el.key)
+                # (`graph ..., meta: { ... }`: metadata, read as plain values, never run)
+                kwargs[key] = key == :meta && node.name == :graph ? meta_literal(el.value) : eval_node(el.value, Scope.new)
+              end
             else
               args << eval_node(a, Scope.new)
             end
@@ -654,7 +658,7 @@ module MB
         # through a resampling Tee branch since omnibus4, correct but not
         # the same graph).  Document#set changes them all.
         def bind_params
-          baked = (@document.meta[:options] || {})
+          baked = (@document.header[:options] || {})
           @overrides.each_key do |k|
             next if @document.params.key?(k)
             if baked.respond_to?(:key?) && baked.key?(k)
@@ -1195,11 +1199,17 @@ module MB
         end
 
         def call_args(node, scope)
+          return meta_args(node) if META_CALLS.include?(node.name)
           args = []
           kwargs = {}
           (node.arguments&.arguments || []).each do |a|
             if a.is_a?(Prism::KeywordHashNode)
-              a.elements.each { |el| kwargs[eval_node(el.key, scope)] = eval_node(el.value, scope) }
+              a.elements.each do |el|
+                key = eval_node(el.key, scope)
+                # (a `meta:` keyword anywhere, e.g. a library line's or
+                # Sample[..., meta: {...}]: metadata, read as plain values)
+                kwargs[key] = key == :meta ? meta_literal(el.value) : eval_node(el.value, scope)
+              end
             elsif a.is_a?(Prism::BlockArgumentNode)
               raise error(a, 'block arguments go last') # Prism keeps &blk in #block
             else
@@ -1207,6 +1217,52 @@ module MB
             end
           end
           [args, kwargs]
+        end
+
+        # Calls whose arguments are metadata (Meta::Carrier#with_meta and
+        # #note, the set documents' `meta` lines): read as plain values from
+        # the syntax tree (Meta.literal), never evaluated, so nothing in
+        # them can build, call, or read anything (metadata-2: metadata
+        # never acts as data).
+        META_CALLS = %i[with_meta note meta].freeze
+
+        # The arguments of metadata call +node+ (see META_CALLS), as
+        # call_args returns them.
+        def meta_args(node)
+          args = []
+          kwargs = {}
+          check_meta_size(node.arguments) if node.arguments
+          (node.arguments&.arguments || []).each do |a|
+            if a.is_a?(Prism::KeywordHashNode)
+              a.elements.each do |el|
+                raise error(el, "#{node.name} takes plain values (no ** in its arguments)") unless el.is_a?(Prism::AssocNode)
+                kwargs[meta_value(el.key)] = meta_value(el.value)
+              end
+            elsif a.is_a?(Prism::BlockArgumentNode)
+              raise error(a, "#{node.name} takes no block")
+            else
+              args << meta_value(a)
+            end
+          end
+          [args, kwargs]
+        end
+
+        # The plain value of metadata syntax +node+, within the size limit.
+        def meta_literal(node)
+          check_meta_size(node)
+          meta_value(node)
+        end
+
+        def meta_value(node)
+          MB::Sound::Meta.literal(node)
+        rescue ArgumentError => e
+          raise error(node, "metadata holds plain values only, written out (numbers, Strings, Symbols, true, false, nil, Arrays, Hashes): #{e.message.sub(/\Ametadata text holds plain values only ?/, '')}")
+        end
+
+        def check_meta_size(node)
+          n = node.location.length
+          return if n <= @limits[:meta_bytes]
+          raise error(node, "metadata of #{n} bytes is over the limit of #{@limits[:meta_bytes]} (GraphIO::LIMITS[:meta_bytes])")
         end
 
         # The block for a call: a build block (walked per call), a runtime

@@ -31,10 +31,47 @@ module MB
         # MB::Sound::RackMethods#rack_knob).
         RACK_KNOB_KEYS = %i[share follow].freeze
 
-        # Metadata keys GraphIO.dump writes (others are kept as given).
-        META_KEYS = %i[name kind saved mb_sound from options].freeze
+        # Keys of the `graph` line that decide something: data, validated
+        # as before, read by the loader and the tools (#header).  The
+        # document's name and kind, a rack document's constructor, baked
+        # options, the tool that wrote it (`from: 'fit_patch'` gates the
+        # hand-tune tools) and when its tunings were saved (`tuned:`), and
+        # the library's index words (`description:` ranks finds, `tags:`
+        # narrows a head to one entry).  Everything else on the line, and
+        # the `meta: { ... }` keyword, is descriptive metadata (#meta):
+        # nothing reads it to build or find anything (metadata-2,
+        # meta_guard_spec.rb).
+        STRUCTURE_KEYS = %i[name kind rack options from tuned description tags].freeze
 
-        attr_accessor :format, :meta, :inputs, :params, :path, :knob_nodes, :input_objects
+        # Descriptive keys the writers fill on every save (metadata, written
+        # top-level as before): when and by which mb-sound.
+        STAMP_KEYS = %i[saved mb_sound].freeze
+
+        # Keys GraphIO.dump writes on the `graph` line, in order (others are
+        # kept as given: structural ones top-level, descriptive ones in
+        # `meta:`).
+        META_KEYS = %i[name kind rack saved mb_sound from tuned description tags meta options].freeze
+
+        attr_accessor :format, :inputs, :params, :path, :knob_nodes, :input_objects
+
+        # The `graph` line's structural keys (STRUCTURE_KEYS; a frozen Hash).
+        attr_reader :header
+
+        # The document's descriptive metadata (a Meta::Value): `saved:`,
+        # `mb_sound:`, other keys of the `graph` line, and its `meta: { ...
+        # }` keyword.  Shown and saved again, never read to build.
+        attr_reader :meta
+
+        # Sets #header and #meta from the `graph` line's keywords (+kwargs+;
+        # `meta:` already read as plain values): structural keys to #header,
+        # the rest to #meta, where `meta:`'s own keys can't reach the header
+        # (a `meta: { rack: :irack }` stays description).
+        def graph_keywords=(kwargs)
+          extra = kwargs[:meta]
+          raise ArgumentError, "meta: is a Hash of plain values (got #{MB::Sound::Meta.describe(extra)})" unless extra.nil? || extra.is_a?(Hash)
+          @header = kwargs.slice(*STRUCTURE_KEYS).freeze
+          @meta = MB::Sound::Meta::Value.of(kwargs.except(*STRUCTURE_KEYS, :meta)).merge(extra || {})
+        end
 
         # The MB::Sound::Param of a `param` line named +name+ with +value+
         # and header keywords +spec+ (range:, description:, cc:, curve:,
@@ -90,7 +127,8 @@ module MB
         def initialize(path: nil)
           @path = path
           @format = GraphIO::FORMAT
-          @meta = {}
+          @header = MB::Sound::Meta::EMPTY_HASH
+          @meta = MB::Sound::Meta::EMPTY
           @inputs = []
           @params = {}
           @knob_nodes = {}
@@ -135,26 +173,31 @@ module MB
 
         # The document's name (from its header, else its file name).
         def name
-          @meta[:name] || (@path && File.basename(@path).delete_suffix(GraphIO::EXTENSION))
+          @header[:name] || (@path && File.basename(@path).delete_suffix(GraphIO::EXTENSION))
         end
 
         # :effect, :synth, :graph, ... (informational).
         def kind
-          @meta[:kind]
+          @header[:kind]
         end
 
         # True for a rack document (`graph 4, ..., rack: :arack`): loading it
         # gives a Rack (applied when its inputs are given), and its knob
         # lines are the rack's knobs.
         def rack?
-          !@meta[:rack].nil?
+          !@header[:rack].nil?
         end
 
         # What the graph is and where it came from (the header's
         # `description:`, e.g. from a script's synth_script description),
         # or nil.
         def description
-          @meta[:description]
+          @header[:description]
+        end
+
+        # The tool that wrote the document (`from: 'fit_patch'`), or nil.
+        def from
+          @header[:from]
         end
 
         # Sets param +name+ of a loaded graph to +value+ (every Constant
@@ -213,9 +256,9 @@ module MB
           @inputs = @doc.input_objects.merge(@inputs) if @doc && @inputs.empty?
           @params = normalize_params(params.empty? && @doc ? @doc.params : params)
           @options = options
-          @options = @doc.meta[:options] || {} if @doc && options.empty?
-          @from = from || @doc&.meta&.[](:from)
-          @meta = (@doc ? @doc.meta.slice(:description, :tags) : {}).merge(meta) # (a loaded document keeps its description)
+          @options = @doc.header[:options] || {} if @doc && options.empty?
+          @from = from || @doc&.from
+          @index, @described = GraphIO.header_split(@doc, meta) # (a loaded document keeps its description, tags, and metadata)
         end
 
         # The document text.  Raises GraphIO::DumpError if part of the graph
@@ -350,7 +393,8 @@ module MB
           fields[:saved] = Time.now.utc.iso8601
           fields[:mb_sound] = GraphIO.library_version
           fields[:from] = @from if @from
-          fields.merge!(@meta.reject { |k, _| fields.key?(k) })
+          fields.merge!(@index.reject { |k, _| fields.key?(k) })
+          fields[:meta] = @described.to_h unless @described.empty?
           fields[:options] = options unless options.empty?
           parts = fields.map { |k, v| "#{k}: #{writer.literal(v)}" }
           GraphIO.graph_line(parts)

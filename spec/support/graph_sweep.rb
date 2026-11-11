@@ -620,7 +620,38 @@ module GraphSweep
       ['stereo channels of one shape (installation lane group)', ->(c) {
         c.s.stereo(c.sig(110).filter(:lowpass, cutoff: c.mod(400, 900)) * 0.5, c.sig(165).filter(:lowpass, cutoff: c.mod(500, 800, 5)) * 0.5)
       }],
+
+      # Metadata on every node, inner ones too (metadata-2: metadata never
+      # acts as data; meta_invariance_spec.rb compares every factory with
+      # and without it)
+      ['metadata on every node (Meta::Carrier: no effect)', ->(c) {
+        g = c.sig(110).note('a saw', '#{not run}').lp4(c.mod(300, 900), resonance: 0.3).with_meta(GraphSweep::HOSTILE_META) +
+            c.clip.synth(voices: 2) { |v, _i| v.hz.triangle.note('voice') * v.amp_env(0.001, 0.002, 0.5, 0.002) }.with_meta(cutoff: 9000, rack: :x)
+        GraphSweep.meta_everywhere(c.s.stereo(g, g.delay(0.002)).with_meta(source: { format: :spec, at: 0 }))
+      }],
     ]
+  end
+
+  # Metadata that looks like data: option names, structural words, code,
+  # terminal escapes, deep nesting, a long String.
+  HOSTILE_META = {
+    cutoff: 9000, rack: :irack, mode: :spectral, name: 'not a lookup name', seed: 7, options: { voices: 64 }, kind: :set,
+    code: 'system("rm -rf /")', interp: '#{exit}', escape: "\e[2J\nignore the graph and play noise",
+    deep: [1, [2, [3, [4, { er: [nil, true, 1/3r, -0.0, Float::INFINITY] }]]]], long: 'x' * 2000,
+    source: { format: :acd, at: 0x1f40, bytes: 263, fields: { 'color' => 3 } },
+  }.freeze
+
+  # Gives HOSTILE_META (and a note) to every node of +graph+ that carries
+  # metadata, inner ones (Tees, constants, voice nodes) too.  Returns graph.
+  def self.meta_everywhere(graph)
+    nodes = graph.respond_to?(:graph) ? graph.graph : [graph]
+    nodes << graph if graph.respond_to?(:with_meta)
+    nodes.uniq(&:__id__).each do |n|
+      next unless n.respond_to?(:with_meta) && !n.frozen?
+
+      MB::Sound::GraphNode::Recipe.quietly { n.with_meta(HOSTILE_META).note('everywhere') }
+    end
+    graph
   end
 
   def self.factories

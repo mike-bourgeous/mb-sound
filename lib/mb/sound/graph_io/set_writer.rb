@@ -57,7 +57,7 @@ module MB
           @params = {}
           @options = {}
           @from = from
-          @meta = meta
+          @index, @described = GraphIO.header_split(nil, meta)
           @assets = assets
           @warnings = []
         end

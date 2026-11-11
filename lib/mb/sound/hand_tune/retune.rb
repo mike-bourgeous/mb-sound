@@ -39,7 +39,7 @@ module MB
         tr = session.arrangement.tracks[track] or raise ArgumentError, "retune: no track #{track.inspect} (tune #{track.inspect}, code, ... first)"
         path = Reference.document_path(session, track)
         doc = path && GraphIO.parse(path)
-        unless doc && doc.meta[:from] == 'fit_patch'
+        unless doc && doc.from == 'fit_patch'
           raise ArgumentError, "retune: #{track.inspect} plays no fit patch (tune #{track.inspect}, code, ...; or design #{track.inspect}, fit_patch(...))"
         end
         e = Arrangement::InstrumentPatch.entry_of(tr.patch)

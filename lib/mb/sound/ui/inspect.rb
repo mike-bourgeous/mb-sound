@@ -47,10 +47,13 @@ module MB
         # set through arithmetic (a bandpass at `sw_f * 2 ** (env *
         # sw_amt)`), so a row modulated by an envelope says which knobs set
         # its base (tuner-fixes-1).
+        #
+        # +notes+ (frozen Strings): the node's commentary (`meta.notes`,
+        # Meta::Carrier#note), shown quoted as text (metadata-2).
         NodeInfo = Data.define(:key, :label, :role, :count, :params, :preview, :knobs, :live, :binds, :section, :what, :dest, :voice, :channels, :param_knobs,
-                               :recipe_key, :masked, :param_feeds) do
+                               :recipe_key, :masked, :param_feeds, :notes) do
           def initialize(key:, label:, role:, count:, params:, preview:, knobs:, live: nil, binds: {}.freeze, section: nil, what: nil, dest: [].freeze,
-                         voice: nil, channels: 1, param_knobs: {}.freeze, recipe_key: nil, masked: {}.freeze, param_feeds: {}.freeze)
+                         voice: nil, channels: 1, param_knobs: {}.freeze, recipe_key: nil, masked: {}.freeze, param_feeds: {}.freeze, notes: [].freeze)
             super
           end
 
@@ -409,7 +412,7 @@ module MB
                                 # sections view leaves out can't be reached by Up and Down,
                                 # inspector-nav-1; the guard keeps Classify#unfit empty)
                                 section: r.section == :other ? :mod : r.section, what: r.section == :other ? 'unsorted'.freeze : r.what, dest: r.dest, voice: r.voice, channels: r.channels, param_knobs: pk,
-                                param_feeds: pf)
+                                param_feeds: pf, notes: Inspect.notes_of(n))
             [n, info, r.nodes, extras]
           }
 
@@ -770,6 +773,11 @@ module MB
         # (lp4, softclip), a tone's wave, or CLASS_LABELS, else its class's
         # short name in snake_case (FadeIn: fade_in), never the class name
         # itself.
+        # A node's notes (Meta::Carrier#note) for display, or none.
+        def notes_of(node)
+          node.respond_to?(:meta) && node.meta.is_a?(Meta::Value) ? node.meta.notes : [].freeze
+        end
+
         def label_of(node)
           return node.graph_node_name.to_s.freeze if node.respond_to?(:named?) && node.named?
           d = node.respond_to?(:preview_data) ? (node.preview_data rescue nil) : nil

@@ -67,17 +67,17 @@ RSpec.describe(MB::Sound::Meta, :aggregate_failures) do
 
   describe '.summary' do
     it 'says where a piece came from in one line' do
-      expect(meta.summary({ source: source.merge(file: 'project.acd') })).to eq(%(from project.acd, track "the track's own name" at 0x12340, 5.5 KB, 2 fields carried))
-      expect(meta.summary({ source: source }, kind: :bus, file: 'D:\\Songs\\old\\project.acd')).to start_with('from project.acd, track ')
+      expect(meta.summary({ source: source.merge(file: 'project.acd') })).to eq(%(from "project.acd", track "the track's own name" at 0x12340, 5.5 KB, 2 fields carried))
+      expect(meta.summary({ source: source }, kind: :bus, file: 'D:\\Songs\\old\\project.acd')).to start_with('from "project.acd", track ')
       expect(meta.summary({ source: { format: :acd, file: '/a/b/project.acd', bytes: 1_234_567, version: '7.0', unread: 0.19 } }, kind: :set))
-        .to eq('from project.acd (acd 7.0), set, 1.2 MB, 19% unread')
+        .to eq('from "project.acd" (acd "7.0"), set, 1.2 MB, 19% unread')
       expect(meta.summary({ source: { format: :mod, kind: :sample, id: 4, records: 31, unread: 12, tracker: 'x' } })).to eq('from mod, sample #4, 31 records, 12 bytes unread, + tracker')
-      expect(meta.summary({ source: { format: :wav, a: 1, b: 2, c: 3, d: 4 }, notes: 'x' })).to eq('from wav, + 4 more, also notes')
+      expect(meta.summary({ source: { format: :wav, a: 1, b: 2, c: 3, d: 4 }, notes: 'x' })).to eq('from wav, + 4 more, notes "x"')
       expect(meta.summary({ source: { unread: 0.005 } }, kind: :track)).to eq('track, 0.5% unread')
     end
 
     it 'lists the keys of metadata without a source, and says when there is none' do
-      expect(meta.summary({ notes: 'x', tags: [:a] }, kind: :knob)).to eq('knob, notes, tags')
+      expect(meta.summary({ notes: 'x', tags: [:a] }, kind: :knob)).to eq('knob, notes "x", tags')
       expect(meta.summary({ source: 'a tape' })).to eq('source "a tape"')
       expect(meta.summary({})).to eq('(none)')
       expect(meta.summary(nil)).to eq('(none)')

@@ -117,7 +117,7 @@ RSpec.describe('metadata in set documents', :aggregate_failures) do
     io.load("#{head}meta :a3, source: { at: 16, list: [1, nil, \"x\"] }\nmeta notes: \"n\"\n", session: s)
     expect(s.metadata[:a3]).to eq(source: { at: 16, list: [1, nil, 'x'] })
     expect(s.metadata[nil]).to eq(notes: 'n')
-    expect { io.load("#{head}meta :a3, source: { osc: 440.hz }\n", session: session) }.to raise_error(io::LoadError, /meta raised ArgumentError: meta\[:source\]\[:osc\] is a/)
+    expect { io.load("#{head}meta :a3, source: { osc: 440.hz }\n", session: session) }.to raise_error(io::LoadError, /metadata holds plain values only.*the call 440\.hz/)
     expect { io.load("#{head}meta(:a3) { 1 }\n", session: session) }.to raise_error(io::LoadError, /meta takes no block/)
     expect { io.load("#{head}meta :a3, source: system(\"true\")\n", session: session) }.to raise_error(io::LoadError)
   end

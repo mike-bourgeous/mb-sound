@@ -120,8 +120,9 @@ module MB
         (old || EMPTY_HASH).merge(frozen(values)).freeze
       end
 
-      # One line about +meta+ for listings: "from project.acd, track at
-      # 0x12340, 5.5 KB, 2 fields carried" (the +:source+ convention's
+      # One line about +meta+ for listings: 'from "project.acd", track at
+      # 0x12340, 5.5 KB, 2 fields carried' (text from the metadata always
+      # quoted: .quote) (the +:source+ convention's
       # keys, then the names of any other top-level keys); "(none)" when
       # empty.  +kind+ (what the piece is in the Session, e.g. :track) and
       # +file+ (the set's source file) stand in when the piece's own
@@ -135,10 +136,11 @@ module MB
           own = src[:file]
           name = own.is_a?(String) && !own.empty? ? own : file
           name = name.split(%r{[/\\]}).last if name.is_a?(String)
-          format = [src[:format], src[:version]].compact.join(' ')
+          name = quote(name) if name
+          format = [src[:format], src[:version]].compact.map { |v| word(v) }.join(' ')
           from = name ? (src[:version] ? "#{name} (#{format})" : name) : format
           parts << "from #{from}" unless from.to_s.empty?
-          what = [src[:kind] || kind, (src[:id] && "##{src[:id]}"), (src[:name] && src[:name].to_s.inspect)].compact.map(&:to_s)
+          what = [src[:kind] ? word(src[:kind]) : kind&.to_s, (src[:id] && "##{word(src[:id])}"), (src[:name] && quote(src[:name]))].compact
           what << "at 0x#{src[:at].to_s(16)}" if src[:at].is_a?(Integer)
           parts << what.join(' ') unless what.empty?
           parts << bytes_text(src[:bytes]) if src[:bytes].is_a?(Integer)
@@ -152,15 +154,52 @@ module MB
             parts << "#{pct == pct.to_i ? pct.to_i : pct}% unread"
           end
           extra = src.keys - SOURCE_KEYS.keys
-          parts << (extra.length <= 3 ? "+ #{extra.join(', ')}" : "+ #{extra.length} more") unless extra.empty?
+          parts << (extra.length <= 3 ? "+ #{extra.map { |e| word(e) }.join(', ')}" : "+ #{extra.length} more") unless extra.empty?
         elsif !src.nil?
-          parts << "source #{src.inspect}"
+          parts << "source #{src.is_a?(String) ? quote(src) : quote(src.inspect)}"
         elsif kind
-          parts << kind.to_s
+          parts << kind.to_s # (the caller's word, not the metadata's)
         end
-        others = meta.keys - [:source]
-        parts << "#{src.nil? ? '' : 'also '}#{others.join(', ')}" unless others.empty?
+        notes = meta[:notes]
+        notes = [notes] if notes.is_a?(String)
+        parts << "notes #{notes_text(notes)}" if notes.is_a?(Array) && !notes.empty? && notes.all?(String)
+        others = meta.keys - [:source, :notes]
+        parts << "#{src.nil? ? '' : 'also '}#{others.map { |o| word(o) }.join(', ')}" unless others.empty?
         parts.join(', ')
+      end
+
+      # The longest text .quote shows of one value (characters).
+      QUOTE_MAX = 60
+
+      # Text from metadata (+text+, often from a foreign file: a track
+      # name, a comment, a preset name) as data for a listing: always in
+      # quotes, escaped (newlines, terminal escapes, and other control
+      # characters print as \n, \e, ...), at most +max+ characters with
+      # "..." inside the quotes.  Untrusted text never reaches a listing,
+      # the help, or the inspector as prose that could read like an
+      # instruction or a command: it reads as a quoted value.
+      def quote(text, max: QUOTE_MAX)
+        s = text.to_s.dup.force_encoding(Encoding::UTF_8).scrub('?')
+        s = "#{s[0, [max - 3, 1].max]}..." if s.length > max
+        s.inspect
+      end
+
+      # A word for a listing: a plain Symbol or number as is
+      # (`:track` as track), anything else quoted (.quote).
+      def word(v)
+        case v
+        when Symbol then v.to_s.match?(/\A[A-Za-z_][\w.]*\z/) ? v.to_s : quote(v)
+        when Integer, Float, Rational then v.to_s
+        else quote(v)
+        end
+      end
+
+      # Notes (Strings) for a one-line display: the first quoted, then how
+      # many more (`"slow attack" +2 notes`).
+      def notes_text(notes, max: QUOTE_MAX)
+        return '' if notes.nil? || notes.empty?
+        more = notes.length - 1
+        "#{quote(notes.first, max: max)}#{more > 0 ? " +#{more} note#{'s' unless more == 1}" : ''}"
       end
 
       # A byte count in words: "812 bytes", "5.5 KB", "1.2 MB".

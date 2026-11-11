@@ -113,10 +113,10 @@ RSpec.describe(MB::Sound::MetaMethods, :aggregate_failures) do
         meta source: set_meta
       end
       expect(within(s) { metas }).to eq(
-        nil => 'from project.acd (acd 7.0), set, 1.2 MB, 19% unread',
-        a3: %(from project.acd, track "the track's own name" at 0x12340, 5.5 KB, 2 fields carried),
-        fx1: 'from project.acd, bus #2, 1 field carried',
-        ghost: 'not defined, notes'
+        nil => 'from "project.acd" (acd "7.0"), set, 1.2 MB, 19% unread',
+        a3: %(from "project.acd", track "the track's own name" at 0x12340, 5.5 KB, 2 fields carried),
+        fx1: 'from "project.acd", bus #2, 1 field carried',
+        ghost: 'not defined, notes "x"'
       )
     end
 
@@ -127,7 +127,7 @@ RSpec.describe(MB::Sound::MetaMethods, :aggregate_failures) do
       expect(text).not_to include('metadata')
       within(s) { meta source: set_meta; meta :a3, notes: 'x'; meta :b, notes: 'y' }
       text = within(s) { MB::U.remove_ansi(MB::Sound::Help::Now.new(s).to_s) }
-      expect(text).to include('metadata from project.acd (acd 7.0), set, 1.2 MB, 19% unread; 2 pieces with metadata (metas lists it)')
+      expect(text).to include('metadata from "project.acd" (acd "7.0"), set, 1.2 MB, 19% unread; 2 pieces with metadata (metas lists it)')
     end
   end
 

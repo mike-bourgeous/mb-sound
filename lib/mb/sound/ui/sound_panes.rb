@@ -944,7 +944,7 @@ module MB
               end
             Inspect.target = { track: info.track, node: i, voice: info.voice }.freeze
             sec = n.section && n.section != :plumbing ? "#{Inspect::SECTION_TITLES[n.section]} " : ''
-            "#{sec}#{row_title(n)}#{n.what ? " (#{n.what})" : ''}"
+            "#{sec}#{row_title(n)}#{n.what ? " (#{n.what})" : ''}#{n.notes.empty? ? '' : "  #{Meta.notes_text(n.notes)}"}"
           end
 
           # What Up/Down step through, in display order: the knobs (the

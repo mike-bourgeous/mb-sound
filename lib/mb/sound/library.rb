@@ -165,7 +165,7 @@ module MB
           name = (doc.name || File.basename(path).delete_suffix(GraphIO::EXTENSION)).to_s
           name = File.basename(path).delete_suffix(GraphIO::EXTENSION) unless name.match?(/\A[\w.-]+\z/)
           kind = document_kind(doc)
-          tags = Array(doc.meta[:tags]).select { |t| t.is_a?(Symbol) || t.is_a?(String) }
+          tags = Array(doc.header[:tags]).select { |t| t.is_a?(Symbol) || t.is_a?(String) }
           first = name.split('_').first&.to_sym
           tags = [first, *tags] if first && GENRE_WORDS.include?(first) && name.include?('_')
           params = doc.declarations rescue {}
@@ -173,7 +173,8 @@ module MB
           inputs = doc.inputs
           Entry.new(
             name: name.to_sym, kind: kind, family: :preset, tags: tags, about: about, params: params.is_a?(Hash) ? params.select { |_, v| v.is_a?(MB::Sound::Param) } : {},
-            shelf: shelf, location: path, settings: { inputs: inputs, document: true }, builder: document_builder(path, inputs)
+            shelf: shelf, location: path, settings: { inputs: inputs, document: true }, builder: document_builder(path, inputs),
+            meta: doc.meta.without(*GraphIO::Document::STAMP_KEYS) # (description, not index: Entry#meta)
           )
         end
 
@@ -195,7 +196,7 @@ module MB
         # The kind of a parsed graph Document.
         def document_kind(doc)
           if doc.rack?
-            ctor = doc.meta[:rack]
+            ctor = doc.header[:rack]
             return :instrument if %i[irack instrument_rack].include?(ctor)
             return :listener if %i[lrack amrack listener_rack].include?(ctor)
             types = doc.input_types

@@ -112,7 +112,9 @@ module MB
       # document bytes, syntax nodes, nesting depth, DSL calls made, build
       # time, delay times (positional, seconds:, max_delay:), silence and
       # until lengths, with_buffer sizes, oversampling factors, synth
-      # voices, unison/swarm copies, and clip repeat counts.
+      # voices, unison/swarm copies, and clip repeat counts, and the text of
+      # one call's metadata (`meta:`, `.with_meta(...)`, `.note(...)`,
+      # `meta :name, ...`; bytes of source).
       LIMITS = {
         bytes: 1_000_000,
         nodes: 250_000,
@@ -129,6 +131,7 @@ module MB
         repeats: 4096,
         steps: 4096,
         wavetable_size: 1 << 16,
+        meta_bytes: 65_536,
       }.freeze
 
       # A document that can't be loaded: syntax outside the subset, an
@@ -471,6 +474,22 @@ module MB
 
         # `graph N, ...` with the metadata +parts+ (texts), on several lines
         # when long.
+        # What a save writes on the `graph` line beside its own fields:
+        # structural keys (Document::STRUCTURE_KEYS, top-level; a loaded
+        # document +doc+ keeps its description: and tags:) and descriptive
+        # metadata (a Meta::Value, written as `meta: { ... }`; +doc+'s kept,
+        # less the stamps a save writes anew).  +meta+ is the caller's Hash:
+        # structural keys go top-level, `meta:` and other keys to the
+        # metadata, so a description given as metadata never becomes the
+        # library's index word unless it is the top-level description:.
+        def header_split(doc, meta)
+          given = meta.to_h
+          index = (doc ? doc.header.slice(:description, :tags) : {}).merge(given.slice(*Document::STRUCTURE_KEYS))
+          described = doc ? doc.meta.without(*Document::STAMP_KEYS) : MB::Sound::Meta::EMPTY
+          described = described.merge(given.except(*Document::STRUCTURE_KEYS, *Document::STAMP_KEYS, :meta)).merge(given[:meta] || {})
+          [index, described]
+        end
+
         def graph_line(parts)
           line = "graph #{FORMAT}, #{parts.join(', ')}"
           return line if line.length <= 120
