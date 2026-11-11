@@ -80,7 +80,11 @@ ruby song.rb --help             # every option
 
 A render sounds the same as playing; it just doesn't wait for real time,
 and it needs no sound card.  `.flac`, `.wav`, `.mp3`, and anything else
-ffmpeg knows work as file names.
+ffmpeg knows work as file names.  Like playing, a render keeps the master
+10 dB down (chapter 2), so a part at full scale peaks near -10 dB in the
+file and in `--report`; `master_gain 0.db` at the top of the song turns
+that off.  `--master` adds a mastering preset; leaving it out means no
+preset, not unity gain.
 
 ## Your own options
 

@@ -99,7 +99,9 @@ Useful options:
 - `master: :streaming` masters the render to a loudness target
   (`:club`, `:vinyl`, `:quiet` too; chapter 6).
 - `loudness: -14` makes the file that loud (in LUFS).
-- `report: :tracks` prints each part's loudness and peak.
+- `report: :tracks` prints each part's loudness and peak, measured
+  after the master gain (-10 dB unless `master_gain` or `gain:` changed
+  it; `master: nil`, the default, only means no mastering preset).
 
 The file's extension picks its format: `.flac`, `.wav`, `.mp3`, `.ogg`,
 and anything else ffmpeg writes.

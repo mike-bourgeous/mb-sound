@@ -67,6 +67,35 @@ RSpec.describe(MB::Sound::BarStats::Timing, :aggregate_failures) do
     expect(lags[:mid].map { |l| l.samples.abs }).to all(be < 0.05)
   end
 
+  # (omnibus19, the Linux session's report on a kick stem after
+  # bar-stats-fix-1: a stutter fill, 16 hits of a 64th at 140 BPM, read
+  # lag_high +107 ms, four hits away.)  Clicks every beat, bar 4 a stutter
+  # fill; in B the fill's hits sit where floor puts them instead of round
+  # (a conversion's own rounding), so lag 0 correlates a little worse than
+  # a repeat four hits away (0.74 against 0.77 before WAVE_TIE).
+  it "keeps a periodic stutter fill's lag at 0, not a neighbouring repeat" do
+    spb = 60 / 140.0
+    n = ((6 * 4 * spb + 1) * rate).round
+    cr = Random.new(5)
+    raw = Numo::DFloat.cast(Array.new(96) { cr.rand - 0.5 }) * Numo::NMath.exp(-Numo::DFloat.new(96).seq / 20.0)
+    click = Numo::DFloat.cast((0...96).map { |i| raw[[i - 2, 0].max..i].mean }) # (a softer, band-limited click)
+    put = ->(x, at) { x[at...(at + 96)] += click * 0.8 }
+    a = Numo::DFloat.zeros(n)
+    (6 * 4).times { |i| put.(a, (i * spb * rate).round) unless i / 4 == 3 }
+    b = a.dup
+    16.times do |j|
+      t = (3 * 4 * spb + j * spb / 4) * rate
+      put.(a, t.round)
+      put.(b, t.floor)
+    end
+    noise = Random.new(1)
+    b = (b + Numo::DFloat.cast(Array.new(n) { (noise.rand - 0.5) * 1e-3 })) * 0.95
+    b[1..] = b[1..] * 0.7 + b[0...-1] * 0.3
+    spans = (0...6).map { |i| [i * 4 * spb, (i + 1) * 4 * spb] }
+    lags = described_class.lags(a, b, rate, spans)
+    expect(lags[:high].map { |l| (l.samples / rate * 1000).round(1) }).to all(be_within(0.1).of(0))
+  end
+
   it 'gives no lag for spans of a few samples or bands with nothing in them' do
     a = mono(BarStatsSounds.kick_stem(bars: 2, extra: 8))
     n = a.length

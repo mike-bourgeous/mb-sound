@@ -179,13 +179,16 @@ module MB
           node = stmts[0]
           node = :local if node.is_a?(Prism::CallNode) && node.receiver.nil? && node.arguments.nil? && node.block.nil? &&
                            binding&.local_variable_defined?(node.name)
-          if node == :local || EVAL_NODES.any? { |k| node.is_a?(k) }
+          node = :library if binding && library_chain?(node, binding)
+          if node == :local || node == :library || EVAL_NODES.any? { |k| node.is_a?(k) }
             value = begin
               binding ? binding.eval(text) : nil
             rescue NameError
               nil
             end
             value = Prism.parse(text).value.statements.body[0].unescaped.to_sym if value.nil? && stmts[0].is_a?(Prism::SymbolNode)
+            # (a Regexp literal without a binding: as typed, not as words)
+            value = Regexp.new(stmts[0].unescaped, stmts[0].ignore_case? ? Regexp::IGNORECASE : 0) if value.nil? && stmts[0].is_a?(Prism::RegularExpressionNode)
             return page_for(value) unless value.nil?
           end
         end
@@ -197,9 +200,31 @@ module MB
         end
         best = words_topic(words)
         return topic_page(best) if best
-        kept = words.reject { |x| STOP_WORDS.include?(x) }
+        # (one-letter words match nearly everything: Kez's `help L.inst.x`
+        # searched for "l" and listed 937 matches)
+        kept = words.reject { |x| STOP_WORDS.include?(x) || x.length < 2 }
         kept = words if kept.empty? # (`help on`: a UI method named like a stop word)
-        SearchPage.new(Regexp.union(kept.map { |x| /#{Regexp.escape(x)}/i }), index)
+        SearchPage.new(Regexp.union(kept.map { |x| /#{Regexp.escape(x)}/i }), index, words: kept)
+      end
+
+      # True for a chain of argument-free calls on a library root
+      # (`L.inst.house_bass`, `L.fx`; guide chapters 5 and 10 write `help
+      # L.inst.house_bass`): library heads are lookups, so `help` may
+      # evaluate them.  Other call chains stay words (`help play foo` never
+      # plays).
+      def self.library_chain?(node, binding)
+        n = node
+        while n.is_a?(Prism::CallNode)
+          return false unless n.arguments.nil? && n.block.nil? && n.receiver && n.name.to_s.match?(/\A[a-z_]\w*[?!]?\z/)
+          n = n.receiver
+        end
+        return false unless n.is_a?(Prism::ConstantReadNode) || n.is_a?(Prism::ConstantPathNode)
+        return false if n.equal?(node)
+
+        root = binding.eval(n.slice)
+        root.is_a?(Library::Heads::Root)
+      rescue NameError
+        false
       end
 
       # Words `help` ignores when matching text.

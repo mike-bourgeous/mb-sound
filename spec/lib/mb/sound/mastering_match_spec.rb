@@ -219,7 +219,7 @@ RSpec.describe('MB::Sound::Mastering :match', :aggregate_failures) do
       out = tmp_path('out.flac')
       expect {
         MB::Sound.render(out, seconds: 3) { MB::Sound.master :match, reference: ref_path; MB::Sound.bg :x, dark_mix }
-      }.to output(/mastering :match: pass .*\n.*\n.*\n  like bright_ref\.flac .*tilt: reference \+1\.\d\d dB\/oct, mix -3\.\d\d, EQ \+1\.50, mastered -2\.\d\d/).to_stdout
+      }.to output(/mastering :match: pass .*\n.*\n  what the chain did: .*\n.*\n  like bright_ref\.flac .*tilt: reference \+1\.\d\d dB\/oct, mix -3\.\d\d, EQ \+1\.50, mastered -2\.\d\d/).to_stdout
       r = MB::Sound::Mastering::Targeting.last
       expect(r.integrated).to be_within(0.05).of(ref.lufs)
       expect(r.tilt).to eq(MB::Sound::Mastering::MAX_TILT)

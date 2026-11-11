@@ -955,7 +955,10 @@ module MB
       # Mastering::Targeting.last keeps the result, and a line is printed).
       # +:loudness+ then overrides the preset's target instead of
       # normalizing the file afterwards, and `loudness: false` renders once
-      # with the presets' own drive.  The block must build its graphs (a
+      # with the presets' own drive.  Without +master:+ (nil, the default)
+      # there is no preset, but the master gain (-10 dB by default; +gain:+,
+      # #master_gain) still applies: levels, reports, and the over-full-scale
+      # warning are after it.  The block must build its graphs (a
       # graph built outside it would play on from where the first pass
       # left it, which raises).
       #
@@ -1362,6 +1365,7 @@ module MB
         if meter
           meter.finish(session.frame - (hold.trimmed || 0))
           MixReport.last = meter.report
+          MixReport.last.master_gain_db = 20 * Math.log10(session.master_gain) if session.master_gain > 0
           puts MixReport.last unless mastering[:defer_report]
         end
 

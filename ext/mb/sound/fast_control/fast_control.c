@@ -18,6 +18,9 @@
  * Filter::LinearFollower's slew limiter (delay-time smoothing, clip_rate).
  * inertia(x, out, first, lag, rate, substeps, state): GraphNode::Inertia's
  * acceleration-limited follower (the DirectX Distortion's "slew").
+ * derivative(x, out, state, settings) and integral(x, out, reset, state,
+ * settings): GraphNode::Derivative's slope and GraphNode::Integral's running
+ * sum (see mb_calculus.h for the state and settings).
  *
  * The Ruby mirrors (Notes::Smoother.smooth_ruby and the others) give exactly the same
  * samples (specs check it), so keep the operations identical; built with
@@ -33,6 +36,7 @@
 
 #include "mb_ext_helpers.h"
 #include "mb_smooth.h"
+#include "mb_calculus.h"
 
 #define STATE_LENGTH 7
 #define ADAPTIVE_STATE_LENGTH 8
@@ -284,6 +288,77 @@ static VALUE ruby_inertia(VALUE self, VALUE x, VALUE out, VALUE first, VALUE lag
 	return out;
 }
 
+// Checks that +narray+ is a DFloat of exactly +len+ values (see
+// check_array); returns a pointer to its values.
+static double *exact_dfloat(VALUE narray, size_t len, const char *name, _Bool write)
+{
+	if (check_array(narray, numo_cDFloat, 0, name) != len) {
+		rb_raise(rb_eArgError, "%s must have %zu values", name, len);
+	}
+	if (write) {
+		rb_check_frozen(narray);
+		return dfloat_ptr(narray);
+	}
+	return (double *)(nary_get_pointer_for_read(narray) + nary_get_offset(narray));
+}
+
+// derivative(x, out, state, settings): GraphNode::Derivative's slope of x
+// (SFloat) into out (see mb_derivative); +state+ and +settings+ are DFloats
+// (MB_DERIVATIVE_STATE_LENGTH and MB_DERIVATIVE_SETTINGS_LENGTH values).
+static VALUE ruby_derivative(VALUE self, VALUE x, VALUE out, VALUE state, VALUE settings)
+{
+	size_t length = check_array(x, numo_cSFloat, 0, "The input");
+	if (check_array(out, numo_cSFloat, 0, "The output") != length) {
+		rb_raise(rb_eArgError, "The output must have as many values as the input");
+	}
+	rb_check_frozen(out);
+	double *st = exact_dfloat(state, MB_DERIVATIVE_STATE_LENGTH, "The state", 1);
+	const double *set = exact_dfloat(settings, MB_DERIVATIVE_SETTINGS_LENGTH, "The settings", 0);
+	if (set[0] != 0 && set[0] != 1) rb_raise(rb_eArgError, "The derivative mode must be 0 (backward) or 1 (central)");
+
+	const float *xp = (const float *)(nary_get_pointer_for_read(x) + nary_get_offset(x));
+	mb_derivative(mb_sfloat_ptr(out), xp, st, set[0] != 0, set[1], length);
+
+	RB_GC_GUARD(x);
+	RB_GC_GUARD(out);
+	RB_GC_GUARD(state);
+	RB_GC_GUARD(settings);
+	return out;
+}
+
+// integral(x, out, reset, state, settings): GraphNode::Integral's running
+// sum of x (SFloat) into out (see mb_integral), restarting at rising edges
+// of +reset+ (an SFloat as long as x, or nil); +state+ and +settings+ are
+// DFloats (MB_INTEGRAL_STATE_LENGTH and MB_INTEGRAL_SETTINGS_LENGTH values).
+static VALUE ruby_integral(VALUE self, VALUE x, VALUE out, VALUE reset, VALUE state, VALUE settings)
+{
+	size_t length = check_array(x, numo_cSFloat, 0, "The input");
+	if (check_array(out, numo_cSFloat, 0, "The output") != length) {
+		rb_raise(rb_eArgError, "The output must have as many values as the input");
+	}
+	rb_check_frozen(out);
+	const float *rp = NULL;
+	if (!NIL_P(reset)) {
+		if (check_array(reset, numo_cSFloat, 0, "The reset") != length) {
+			rb_raise(rb_eArgError, "The reset must have as many values as the input");
+		}
+		rp = (const float *)(nary_get_pointer_for_read(reset) + nary_get_offset(reset));
+	}
+	double *st = exact_dfloat(state, MB_INTEGRAL_STATE_LENGTH, "The state", 1);
+	const double *set = exact_dfloat(settings, MB_INTEGRAL_SETTINGS_LENGTH, "The settings", 0);
+	if (set[2] != 0 && set[2] != 1) rb_raise(rb_eArgError, "The integral clamp flag must be 0 or 1");
+
+	const float *xp = (const float *)(nary_get_pointer_for_read(x) + nary_get_offset(x));
+	mb_integral(mb_sfloat_ptr(out), xp, rp, st, set[0], set[1], set[2] != 0, set[3], set[4], length);
+
+	RB_GC_GUARD(x);
+	RB_GC_GUARD(out);
+	RB_GC_GUARD(reset);
+	RB_GC_GUARD(state);
+	RB_GC_GUARD(settings);
+	return out;
+}
+
 // reset_run(x, out, state, ring1, ring2, reset): Notes::Smoother over all
 // of x into out (SFloat) with the kernel the state's length picks, jumping
 // to the input at every nonzero sample of +reset+ (an SFloat at least as
@@ -336,4 +411,6 @@ void Init_fast_control(void)
 	rb_define_module_function(fast_control, "slew", ruby_slew, 5);
 	rb_define_module_function(fast_control, "reset_run", ruby_reset_run, 6);
 	rb_define_module_function(fast_control, "inertia", ruby_inertia, 7);
+	rb_define_module_function(fast_control, "derivative", ruby_derivative, 4);
+	rb_define_module_function(fast_control, "integral", ruby_integral, 5);
 }

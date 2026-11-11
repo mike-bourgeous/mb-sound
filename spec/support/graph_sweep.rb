@@ -277,6 +277,10 @@ module GraphSweep
       # Shapers
       ['shapers', ->(c) { c.sig.softclip + c.sig.clip(-0.3, 0.3) + c.sig.quantize(0.1) + c.sig.asoftclip + c.sig.aclip(-0.5, 0.2) + c.sig.aquantize(0.2) }],
       ['ease (CurveShaper)', ->(c) { c.sig.ease(:elastic) + c.sig.aease(:smoothstep) + c.sig.ease(:bounce, edges: :mirror) }],
+      ['derivative and integral (Derivative, Integral)', ->(c) {
+        c.sig.derivative(per: :sample) + c.mod(-1, 1).slope(mode: :central) * 0.01 + c.sig.integral(leak: 0.002) * 100 +
+          c.mod(0, 1).integral(reset: c.trigger, range: 0..0.2) + c.notes.number.integrate(per: :sample, leak: 64.samples) * 1e-3
+      }],
       ['inertia (Inertia), musical and hardware', ->(c) {
         h = MB::Sound.stereo(c.sig, c.sig * 0.5).inertia(c.mod(0.002, 0.01), mode: :hardware)
         c.sig.inertia(0.005) + c.sig.inertia(0.02, substeps: 3) + h.outputs[0] + h.outputs[1]

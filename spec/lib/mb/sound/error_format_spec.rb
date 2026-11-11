@@ -36,6 +36,20 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect(described_class.console(e, color: false)).to eq("NoMethodError: undefined method 'plya' (did you mean play?)")
     end
 
+    it 'suggests what people meant by common method guesses on nodes (NODE_GUESSES)' do
+      e = (220.hz.sine.delta rescue $!)
+      expect(described_class.summary(e)).to include('did you mean derivative (the slope of a signal')
+      e = (MB::Sound.stereo(1.constant, 2.constant).cumsum rescue $!)
+      expect(described_class.summary(e)).to include('did you mean integral (the running sum')
+      # (Kez, panel 3: transpose after .fm made a Tone; Ruby suggested "transients")
+      e = (220.hz.fm(5.hz.at(2)).transpose(0.1) rescue $!)
+      expect(described_class.summary(e)).to include('did you mean v.hz.transpose(7).fm(...) (transpose the pitch first')
+      expect(described_class.summary(e)).not_to include('transients')
+      # (a node that isn't a Tone keeps Ruby's suggestions)
+      e = ((1.constant + 2).transpose(1) rescue $!)
+      expect(described_class.summary(e)).not_to include('pitch first')
+    end
+
     it 'turns Did you mean blocks in messages into a parenthesis' do
       e = ArgumentError.new("no scene :dorp\nDid you mean?  :drop\n                :dorm")
       expect(described_class.summary(e)).to eq('ArgumentError: no scene :dorp (did you mean :drop, :dorm?)')

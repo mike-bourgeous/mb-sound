@@ -211,6 +211,9 @@ module MB
           when false
             raise ArgumentError, 'Cannot sequence false; `!A1.n8` is `!(A1.n8)`: write `(!A1).n8`, `A1.acc.n8`, or `A1.n8.acc`'
 
+          when MB::Sound::Sequence::Kit
+            raise ArgumentError, 'A drum grid goes in seq only with other drum grids (seq(verse, fill) plays them in turn as one grid); ' \
+              'for notes and grids together, use the grid\'s rows (grid[:bd]) or bars joined with | in one grid'
           else
             raise ArgumentError, "Cannot sequence #{item.inspect}; use Notes (e.g. C4), numbers, nil for a rest, other clips, or an Array of notes for a chord ([C3, E3, G3])"
           end

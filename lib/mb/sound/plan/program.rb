@@ -15,7 +15,7 @@ module MB
         # Register kinds and opcodes of the C executor (see fast_plan.c;
         # specs compare them with FastPlan.constants).
         REG_KINDS = { slot: 0, input: 1, param: 2, out: 3 }.freeze
-        OPCODES = { fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, part: 9, tone: 10, copy: 11, shape: 12, note_freq: 13, events: 14, keep: 15, envelope: 16, smooth: 17, max: 18, powf: 19, svf: 20, four_pole: 21, biquad: 22, clip: 23, exp: 24, time_scale: 25, sample_hold: 26, unary: 27, tap: 28, dynamics: 29, mix: 30, decimate: 31, pan_gain: 32, resonator: 33, unison: 34 }.freeze
+        OPCODES = { fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, part: 9, tone: 10, copy: 11, shape: 12, note_freq: 13, events: 14, keep: 15, envelope: 16, smooth: 17, max: 18, powf: 19, svf: 20, four_pole: 21, biquad: 22, clip: 23, exp: 24, time_scale: 25, sample_hold: 26, unary: 27, tap: 28, dynamics: 29, mix: 30, decimate: 31, pan_gain: 32, resonator: 33, unison: 34, derivative: 35, integral: 36 }.freeze
 
         attr_reader :ops, :inputs, :params, :output
 
@@ -363,6 +363,12 @@ module MB
             when Op::FilterBiquad
               @objects << op.filter
               [OPCODES[:biquad], reg(op.dst), reg(op.a), reg(op.cutoff), reg(op.quality), @objects.length - 1, op.type_id]
+            when Op::Derivative
+              @objects << op.derivative
+              [OPCODES[:derivative], reg(op.dst), reg(op.a), @objects.length - 1]
+            when Op::Integral
+              @objects << op.integral
+              [OPCODES[:integral], reg(op.dst), reg(op.a), op.reset ? reg(op.reset) : -1, @objects.length - 1]
             when Op::SampleHold
               @objects << op.hold
               [OPCODES[:sample_hold], reg(op.dst), reg(op.trigger), value_reg(op.source), @objects.length - 1]

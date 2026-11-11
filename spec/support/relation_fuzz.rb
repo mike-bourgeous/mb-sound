@@ -163,7 +163,14 @@ module RelationFuzz
       when 6 then [:quantize, [0.05, 0.1, 0.25][rng.rand(3)]]
       when 7 then [:delay, control(rng, 0.0005, 0.004), rng.rand < 0.5 ? (rng.rand * 0.6).round(2) : nil]
       when 8 then [:decimate, control(rng, 800, 9000)]
-      when 9 then [:at, control(rng, 0.2, 1.0)]
+      # (omnibus19: a third of the gains are a derivative or an integral:
+      # per sample, central, leaking, true sums under a range, resets)
+      when 9
+        if rng.rand < 0.67
+          [:at, control(rng, 0.2, 1.0)]
+        else
+          [[:derivative, :backward], [:derivative, :central], [:integral, :leak], [:integral, :range], [:integral, :reset]][rng.rand(5)]
+        end
       when 10 then [:compress, -[6, 12, 20][rng.rand(3)], [2, 4, 8][rng.rand(3)]]
       when 11 then [:feedback, rng.rand(20..120), (0.2 + rng.rand * 0.5).round(2)]
       when 12 then [:ease, %i[smoothstep elastic bounce][rng.rand(3)]]
@@ -194,6 +201,7 @@ module RelationFuzz
       [:quantize, 0.1], [:delay, [:const, 0.001], nil], [:delay, [:const, 0.001], 0.3], [:decimate, [:const, 4000]],
       [:at, [:const, 0.5]], [:compress, -12, 4], [:feedback, 30, 0.5], [:ease, :smoothstep], [:formant, :a],
       [:pan, [:const, 0.2]], [:abs], [:until, 0.011], [:period_delay, 110], [:sample_hold, false], [:shape_db, :fuzz],
+      [:derivative, :central], [:integral, :reset],
     ].map { |op| Expr.new(op.first, op.drop(1), [kid]) }
   end
 
@@ -253,6 +261,13 @@ module RelationFuzz
       # (a mono input becomes stereo first: itself and a scaled copy)
       input = e.kids[0].stereo? ? k[0] : "#{k[0]}.then { |x| stereo(x, x * -0.5) }"
       "#{input}.balance(#{ctl(a[1])}, law: #{a[0].inspect})"
+    when :derivative then "#{k[0]}.derivative(#{a[0] == :central ? 'mode: :central, ' : ''}per: :sample)"
+    when :integral
+      case a[0]
+      when :leak then "(#{k[0]}.integral(leak: 32.samples, per: :sample) * 0.05)"
+      when :range then "#{k[0]}.integral(range: -0.5..0.5)"
+      else "#{k[0]}.integral(reset: seq(C4.n64, E4.n64).loop.notes.trigger, per: :sample, leak: 64.samples) * 0.02"
+      end
     when :sample_hold
       trig = 'seq(C4.n64, E4.n64).loop.notes.trigger'
       "#{k[0]}.sample_hold(#{a[0] ? "stereo(#{trig}, #{trig})" : trig})"
@@ -300,6 +315,25 @@ module RelationFuzz
   # unfused rerun of every block changes what :fast regions compute, so the
   # planned-vs-unplanned relations compare plain plans; :plan_check runs
   # check mode itself, omnibus13).
+  # The render of +code+ unplanned (Plan off) or +planned+ (Plan.install),
+  # at +precision+ (nil: the current one), the references several
+  # relations compare against: kept per seed while #run_seed checks it
+  # (omnibus19: :meta, :kernel_check, and :plan_fast rendered the same
+  # references again), else rendered each time.  Builds reseed and rewind,
+  # so a kept render is the one a new build would give.
+  def reference(code, planned:, precision: nil)
+    key = [code, planned, precision || MB::Sound::Plan.precision]
+    return @references[key] if @references&.key?(key)
+
+    out = with_plan(enabled: planned, precision: precision) {
+      g = build(code)
+      MB::Sound::Plan.install(g) if planned
+      render(g)
+    }
+    @references[key] = out if @references
+    out
+  end
+
   def with_plan(enabled: true, precision: nil, check: nil)
     plan = MB::Sound::Plan
     old = [plan.enabled, plan.precision, plan.check]
@@ -343,12 +377,8 @@ module RelationFuzz
       # planned == unplanned bit for bit at either precision (fast-sine-1:
       # the unfused kernels use the plans' fast sine and 2^x at :fast)
       precision = relation == :plan_exact ? :exact : :fast
-      ref = with_plan(enabled: false, precision: precision) { render(build(code)) }
-      got = with_plan(precision: precision) {
-        g = build(code)
-        MB::Sound::Plan.install(g)
-        render(g)
-      }
+      ref = reference(code, planned: false, precision: precision)
+      got = reference(code, planned: true, precision: precision)
       compare(ref, got, label: "planned (#{precision}) vs unplanned")
     when :plan_check
       # (:fast since fast-sine-1: unfused blocks compute the same fast
@@ -364,7 +394,7 @@ module RelationFuzz
       # mode, kernels-1): no Kernels::Mismatch, and C's samples (check mode
       # returns them)
       planned = ->() { g = build(code); MB::Sound::Plan.install(g); render(g) }
-      ref = with_plan(&planned)
+      ref = reference(code, planned: true)
       got = MB::Sound::Kernels.with(:check) { with_plan(&planned) }
       compare(ref, got, label: 'kernels in check mode vs C')
     when :recipe
@@ -459,7 +489,7 @@ module RelationFuzz
       [g, attach_meta(g, Random.new(Zlib.crc32(code)))]
     }
 
-    ref = with_plan(enabled: false) { render(build(code)) }
+    ref = reference(code, planned: false)
     got = with_plan(enabled: false) {
       g, given = with_meta.call
       return :skip if given.empty?
@@ -468,7 +498,7 @@ module RelationFuzz
     bad = compare(ref, got, label: 'metadata on the nodes vs none (unplanned)')
     return bad if bad
 
-    ref = with_plan { g = build(code); MB::Sound::Plan.install(g); render(g) }
+    ref = reference(code, planned: true)
     got = with_plan { g, _ = with_meta.call; MB::Sound::Plan.install(g); render(g) }
     bad = compare(ref, got, label: 'metadata on the nodes vs none (planned)')
     return bad if bad
@@ -557,6 +587,13 @@ module RelationFuzz
   def invalid_examples = @invalid_examples || []
 
   def run_seed(seed, relations: RELATIONS, counts: Hash.new(0))
+    @references = {}
+    run_seed_relations(seed, relations, counts)
+  ensure
+    @references = nil
+  end
+
+  def run_seed_relations(seed, relations, counts)
     rng = Random.new(seed)
     expr = generate(rng)
     text = code(expr)

@@ -49,9 +49,12 @@ module MB
         return "Render #{name} has non-finite samples (written as full scale or zero)" if @peak.nan? || @peak.infinite?
 
         over = 20 * Math.log10(@peak)
-        fix = (20 * Math.log10(gain) - over).floor
+        gain_db = 20 * Math.log10(gain)
+        fix = (gain_db - over).floor
+        # (Kez, panel 3: name the master gain, which levels are after)
         "Render #{name} went #{format('%.1f', over)} dB over full scale (clipped in integer formats such as FLAC and WAV, " \
-          "before any loudness: normalization); render with gain: #{fix}.db for headroom"
+          "before any loudness: normalization) after the master gain of #{format('%.1f', gain_db)} dB; " \
+          "render with gain: #{fix}.db for headroom"
       end
 
       def respond_to_missing?(name, include_private = false)

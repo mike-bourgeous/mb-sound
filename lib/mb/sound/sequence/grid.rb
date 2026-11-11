@@ -124,6 +124,25 @@ module MB
           @rows.each { |name, clip| ROW_NAMES[clip] = name if clip.is_a?(Clip) } if row_names
         end
 
+        # A Kit playing +kits+ one after another (MB::Sound#seq of drum
+        # grids; Kez, persona panel 3, wrote `seq(two_step, two_step_b)` and
+        # got "use ... other clips"): each row is that row of every kit in
+        # turn (Clip#|), a kit without the row resting for its length (its
+        # longest row's), rows in the order they first appear.
+        #
+        #     beat = seq(grid(16, bd: 'x...x...', sd: '....x...'), grid(16, bd: 'x.x.x...', sd: '....x.xx'))
+        def self.sequence(kits)
+          raise ArgumentError, 'seq of drum grids needs at least one grid' if kits.empty?
+
+          names = kits.flat_map { |k| k.rows.keys }.uniq
+          lengths = kits.map { |k| k.rows.values.map(&:length).max || 0 }
+          rows = names.to_h { |name|
+            parts = kits.each_with_index.map { |k, i| k.rows[name] || Clip.new([], length: lengths[i]) }
+            [name, parts.drop(1).reduce(parts.first) { |a, b| a | b }]
+          }
+          new(rows)
+        end
+
         # Returns the Clip for the row with the given +name+.
         def [](name)
           @rows.fetch(name) { raise KeyError, "No row #{name.inspect} (rows: #{@rows.keys.map(&:inspect).join(', ')})" }

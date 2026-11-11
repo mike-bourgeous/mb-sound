@@ -644,6 +644,15 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       b = biquad.sample(24000)
       expect(20 * Math.log10((a - b).abs.max / b.abs.max)).to be < -100
     end
+
+    # (omnibus19; Kez, panel 3: a moving frequency raised `to_f` on a
+    # TempoNode, and an LFO Tone quietly used its own rate)
+    it 'refuses a moving frequency, naming filter(:peak/:notch, cutoff: node)' do
+      [3.hz.lfo.at(200..400), 1.bar.lfo.at(200..400), 300.constant].each do |f|
+        expect { 100.hz.saw.peq(f => [-14.db, 0.8]) }.to raise_error(ArgumentError, /peq takes fixed frequencies.*filter\(:peak, cutoff: node.*filter\(:notch, cutoff: node/)
+      end
+      expect(100.hz.saw.peq(MB::Sound::A4 => -3.db, 1000 => 2.db).sample(10)).to be_a(Numo::SFloat)
+    end
   end
 
   pending '#peq_series'

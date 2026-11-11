@@ -77,7 +77,13 @@ RSpec.describe(MB::Sound::MixReport) do
   it 'prints a table and a Hash' do
     r = render
     text = r.to_s
-    expect(text.lines.first).to match(/\ATrack\s+LUFS\s+ST max\s+dBTP\s+PLR/)
+    # (omnibus19, Kez: the levels are after the -10 dB master, and the
+    # header says so; master: nil is no preset, not unity)
+    expect(text.lines.first).to eq("Levels after the master gain of -10.0 dB (gain: or master_gain sets it; master: nil only means no mastering preset).\n")
+    expect(text.lines[1]).to match(/\ATrack\s+LUFS\s+ST max\s+dBTP\s+PLR/)
+    expect(r.to_h[:master_gain_db]).to eq(-10.0)
+    r.master_gain_db = 0.0
+    expect(r.to_s.lines.first).to match(/\ATrack/)
     expect(text).to match(/^mix\s+-\d+\.\d/)
     expect(text).to match(/^Section\s+Start\s+Mix\s+Peak\s+lead\s+bass/)
     h = r.to_h

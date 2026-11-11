@@ -44,14 +44,21 @@ RSpec.describe(MB::Sound::PlaybackEnd, :aggregate_failures) do
     # (a scene launch that finishes after its time: the scheduler skips the
     # late block's commands, so :fin never cuts the looping tracks, and the
     # old rule waited for them forever)
+    #
+    # (omnibus19: the block is held until the timeline is a quarter note
+    # past its time, counted in rendered audio, so it lands the same amount
+    # late on any machine; a 1.5 s wall-clock busy wait let the unpaced
+    # render run 45 s of song ahead on the Linux desktop, every run, and
+    # the example rendered past its budget)
     allow_any_instance_of(MB::Sound::Arrangement).to receive(:go).and_wrap_original { |m, name, *a, **kw|
       if name == :fin
-        t = MB::U.clock_now
-        Thread.pass while MB::U.clock_now - t < 1.5
+        s = MB::Sound::Session.default
+        time = MB::Sound::Session.context.time
+        Timeout.timeout(30) { Thread.pass until s.closed? || s.transport.position >= time + 1/4r }
       end
       m.call(name, *a, **kw)
     }
-    expect { play_within(module_path) }.to output(/Playing.*stopped what still played after 1 s/m).to_stderr
+    expect { play_within(module_path) }.to output(/Playing.*LateChange: scene :fin for .* would land \d+ ms late.*stopped what still played after 1 s/m).to_stderr
     s = MB::Sound::Session.default
     MB::Sound::Internal.wait_audio(s, 0.05)
     expect(s.idle?).to eq(true)

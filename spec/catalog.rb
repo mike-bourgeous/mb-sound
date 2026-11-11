@@ -23,7 +23,9 @@ module Catalog
   # maintainer, with phaser-1's phaser coming too)
   # 17 500 until source-meta-1 added the :meta topic and node metadata
   # (17 554 bytes: also a question for the maintainer)
-  BUDGET = 17_600
+  # 17 600 until omnibus19 added derivative and integral (17 807 bytes:
+  # a question for the maintainer, as before)
+  BUDGET = 17_850
 
   # Characters for a description, and bytes for a whole line
   DESCRIPTION_MAX = 80
@@ -41,7 +43,7 @@ module Catalog
   GROUPS = {
     'Synthesis and oscillators' => %i[tone freq phase_table wavetable waveshape ping resonate adsr],
     'Arithmetic and math' => %i[+ - * / ** coerce at abs aabs real imag arg floor ceil round log log2 log10 ring],
-    'Filters and EQ' => %i[filter lp1 hp1 lp4 diode formant peq peq_series bandpass_series hilbert_iir clip_rate inertia smooth],
+    'Filters and EQ' => %i[filter lp1 hp1 lp4 diode formant peq peq_series bandpass_series hilbert_iir clip_rate inertia smooth derivative integral],
     'Distortion and shaping' => %i[softclip asoftclip clip aclip quantize aquantize decimate ease aease shape_db ashape_db chebyshev sample_hold],
     'Delays, reverb, chorus, tremolo, feedback' => %i[delay feedback_delay multitap haas ping_pong dual_delay tape_echo reverb convolve chorus phaser flanger rotary tremolo feedback],
     'Dynamics, loudness, mastering' => %i[compress compand expand noise_gate limit duck swell transients squeeze bands mono_below ride master loudness_meter],

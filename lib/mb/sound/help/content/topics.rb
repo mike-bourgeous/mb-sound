@@ -196,9 +196,16 @@ module MB
         (breakpoint automation, each segment with its own shape: `:hold
         :linear :fast :slow :smooth :sharp`), and so may a glide's `shape:`, one
         per note in turn: `v.hz.glide(150.ms, shape: [:fast, :hold])`.
+
+        `derivative` (aliases `slope`, `differentiate`) is how fast a
+        signal moves, per second (`per: :sample` for the plain difference);
+        `integral` (`integrate`, `accumulate`) is its running sum, a true
+        sum by default, with `leak:` (a time constant) to let it fall back,
+        `reset:` triggers, and a `range:` clamp.  An LFO's slope opens a
+        filter only while it rises; a summed LFO drifts.
       TEXT
       commands :adsr, :env, :amp_env, :filter_env, :fm_env, :sq80_env, :tween, :bounce_hits
-      dsl :smooth, :ease
+      dsl :smooth, :ease, :derivative, :integral
       note :envelopes, :curves
       example 'a plucked note' do
         bg :try, 220.hz.saw.at(-12.db).lp4(300 + env([[3000, 0.002], [0, 0.4, 40]])) * env([[1, 0.002], [0, 0.8, 60]])
@@ -208,6 +215,12 @@ module MB
       end
       example 'a glide shape per note: :fast, then :hold, in turn' do
         bg :try, seq(A2, E3, C3, G3).n4.loop.synth(voices: 1) { |v| v.hz.glide(150.ms, shape: [:fast, :hold]).saw.at(-18.db) * v.amp_env }.until(2.bars)
+      end
+      example 'a filter that opens only while an LFO rises (its slope)' do
+        bg :try, 110.hz.saw.at(-16.db).lp4(400 + 0.5.hz.lfo.derivative.aclip(0, 3.2) * 800).until(2.bars)
+      end
+      example 'a drifting pitch: a slow LFO summed, with a leak' do
+        bg :try, (220 + 0.5.hz.lfo.integral(leak: 1) * 30).tone.triangle.at(-22.db).until(2.bars)
       end
     end
 
@@ -395,6 +408,9 @@ module MB
         Shipped designs lend voices too: `borrow :fit909_kick` (the 909
         kick fitted to a recorded house beat, `L.kit.fit909_kick` on its
         own), with `tr909 except: :kick` leaving the 909's kick out.
+
+        Grids join two ways: bars with `|` in one grid (`bd: 'x...x... |
+        x.x.x...'`), or whole grids in turn with `seq(verse, fill)`.
       TEXT
       commands :tr808, :tr909, :kit, :drum_kit, :grid, :euclid
       note :drums
@@ -1211,7 +1227,10 @@ module MB
         `measure:` reads the song and the reference alike: `:integrated`
         (the default), `:loudest` (the loudest `loudest_bars:` bars), or
         `:histogram` (the center of the bars' loudness distribution).
-        Without a master chain the live output (not renders or recordings)
+        The master gain (-10 dB by default: `master_gain`, `render(gain:)`)
+        applies with or without a preset, so `master: nil` (no preset, the
+        default) is not unity gain, and render reports and warnings measure
+        after it.  Without a master chain the live output (not renders or recordings)
         ends in a transparent safety limiter at -1 dBFS; `master` says so,
         and any chain or preset replaces it.  For the mix unprocessed up
         to full scale (a test tone straight to the sound card): `master {

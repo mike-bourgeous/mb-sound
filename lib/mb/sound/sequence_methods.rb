@@ -10,7 +10,14 @@ module MB
       #
       #     seq(C4, E4, G4.n4).n8     # two eighth notes and a quarter note
       #     seq(C4.n8.d, E4.n16, rest.n4, seq(G4, A4).n16 * 2)
+      #
+      # Drum grids (#grid Kits) in turn make one Kit (Sequence::Kit.sequence):
+      #
+      #     beat = seq(grid(16, bd: 'x...x...', sd: '....x...'), grid(16, bd: 'x.x.x...', sd: '....x.xx'))
       def seq(*items, seed: 0)
+        # (drum grids in turn make a Kit: Sequence::Kit.sequence)
+        return Sequence::Kit.sequence(items) if !items.empty? && items.all?(Sequence::Kit)
+
         Sequence::Seq.new(items, seed: seed)
       end
 

@@ -401,7 +401,14 @@ module MB
           raise "PEQ frequency/gain pairs must be a Hash from frequency to gain (got #{pairs.class})" unless pairs.is_a?(Hash)
 
           filters = pairs.map { |freq, gain|
-            freq = freq.frequency if freq.is_a?(Tone) || freq.is_a?(Pitch)
+            # (Kez, panel 3: an LFO as the frequency surfaced as `to_f` on a
+            # TempoNode through Tee::Branch#method_missing, and an LFO Tone
+            # quietly gave its own rate, 3 Hz, as the frequency)
+            freq = freq.frequency if (freq.is_a?(Pitch) && freq.constant?) || freq.is_a?(Note)
+            unless freq.is_a?(Numeric) && freq.real?
+              raise ArgumentError, "peq takes fixed frequencies (numbers or pitches; got #{freq.respond_to?(:sample) ? 'a moving node' : freq.inspect}); " \
+                'for a moving one use filter(:peak, cutoff: node, quality: 2, gain: 0.5) or filter(:notch, cutoff: node, quality: 2)'
+            end
             freq = freq.to_f
 
             case gain
@@ -608,6 +615,41 @@ module MB
         def inertia(rate, substeps: 2, mode: :musical)
           Inertia.build(self, rate, substeps: substeps, mode: mode)
         end
+
+        # The slope of this signal (GraphNode::Derivative): how fast it
+        # changes, per second (+per+ :second, the default: a full-scale sine
+        # at f Hz peaks at 2 pi f) or per sample (+per+ :sample: the
+        # difference of neighbouring samples, a 6 dB per octave tilt).
+        # +mode+ :backward (default, x[n] - x[n - 1], half a sample late) or
+        # :central ((x[n] - x[n - 2]) / 2, one sample late, nothing at the
+        # Nyquist frequency).  Integrating it gives this signal back
+        # (#integral).  Aliases #slope, #differentiate.
+        #
+        #     play 110.hz.saw.at(0.3) * (1 + 0.5.hz.lfo.derivative.aclip(0, 4) * 0.2)  # louder while the LFO rises
+        #     play noise.slope(per: :sample).at(0.2)                                      # brighter noise
+        def derivative(mode: :backward, per: :second)
+          Derivative.new(self, mode: mode, per: per)
+        end
+        alias slope derivative
+        alias differentiate derivative
+
+        # The running sum of this signal (GraphNode::Integral): its area so
+        # far, per second (+per+ :second, the default: a constant 1 climbs 1
+        # per second, Hz integrate to cycles) or per sample (+per+ :sample).
+        # Without +leak+ it is a true sum that holds and accumulates forever
+        # (control signals); +leak+ (a time constant: seconds or a Length)
+        # lets it fall back toward zero, so audio with DC stays bounded.
+        # +reset+ (a node of triggers) restarts it at zero on each rising
+        # edge; +range+ clamps it (`0..1`, `0..`).  Aliases #integrate,
+        # #accumulate.
+        #
+        #     play 220.hz.sine.fm(0.3.hz.lfo.integral(leak: 2) * 300)                  # wandering vibrato
+        #     play 110.hz.saw.lp4(200 + 1.constant.integral(reset: 2.hz.lfo.square, range: 0..1) * 3000)  # repeating sweep
+        def integral(leak: nil, reset: nil, range: nil, per: :second)
+          Integral.new(self, leak: leak, reset: reset, range: range, per: per)
+        end
+        alias integrate integral
+        alias accumulate integral
       end
     end
   end

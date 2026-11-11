@@ -69,7 +69,7 @@ module MetaGuard
     'lib/mb/sound/help/content/topics.rb' => 'help :meta examples',
     'lib/mb/sound/graph_io/set_writer.rb' => 'set documents write the `meta` lines',
     'lib/mb/sound/sample/source.rb' => ['Sample#with_meta/#note make copies with more metadata; #tags writes :source as the mb_sample_source tag', %i[with_meta note tags]],
-    'lib/mb/sound/sample.rb' => ['#save writes the metadata into the file; #summary prints it and the provenance; loop_metadata and detect_tempo/detect_key record provenance (interpreters); #follow names its material\'s reason (Material#why, another thing\'s why) in a message', %i[save summary loop_metadata detect_tempo detect_key follow]],
+    'lib/mb/sound/sample.rb' => ['#save writes the metadata into the file; #summary prints it and the provenance; loop_metadata and detect_tempo/detect_key record provenance (interpreters); Material#stretch_reason prints its material\'s reason (Material#why, another thing\'s why) for #follow\'s message', %i[save summary loop_metadata detect_tempo detect_key stretch_reason]],
     'lib/mb/sound/sample/loop_info.rb' => ['LoopInfo::Entry#reason prints its reasons; .detected records a detected key\'s reason', %i[reason detected]],
     'lib/mb/sound/provenance.rb' => 'Provenance itself (its readers and printer)',
     'lib/mb/sound/graph_io/document.rb' => ['the graph line\'s interpreters record provenance', %i[read_graph_line]],
@@ -225,5 +225,13 @@ RSpec.describe('metadata guard: metadata never acts as data') do
     expect(p.length).to eq(3)
     expect(p[0]).to include('reads raw facts (read) in #follow, not an interpreter')
     expect(p[2]).to include('in #sample, a render')
+    # (omnibus19, from Linux's review: #follow is no reader; only the
+    # Material#stretch_reason printer reads its why)
+    %w[provenance(:bpm).via meta[:why] meta_source(:bpm) why].each do |read|
+      f = MetaGuard.problems(MetaGuard.reads("def follow = #{read}\n", 'lib/mb/sound/sample.rb'))
+      expect(f.length).to eq(1), read
+      expect(f[0]).to include('not one of the methods ALLOWED there')
+    end
+    expect(MetaGuard.problems(MetaGuard.reads("def stretch_reason(s) = \"\#{s}: \#{why}\"\n", 'lib/mb/sound/sample.rb'))).to eq([])
   end
 end

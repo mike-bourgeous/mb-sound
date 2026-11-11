@@ -790,7 +790,7 @@ module MB
         if stretch == :auto
           m = mode == :stretch ? material : nil
           stretch = m&.kind == :tonal ? :spectral : :slice
-          reason = m && "#{stretch}: #{m.why}"
+          reason = m&.stretch_reason(stretch)
         else
           reason = 'stretch: given'
         end
@@ -826,7 +826,12 @@ module MB
       end
 
       # What #material found.
-      Material = Data.define(:kind, :flatness, :why)
+      Material = Data.define(:kind, :flatness, :why) do
+        # The printed reason #follow gives its LoopPlayer for choosing
+        # +stretch+ ("spectral: name 'pad'"): the only place the material's
+        # why is read (the metadata guard allows this printer, not #follow).
+        def stretch_reason(stretch) = "#{stretch}: #{why}"
+      end
 
       # Name words for #material (percussive words first).
       MATERIAL_WORDS = {
@@ -980,13 +985,13 @@ module MB
       # cycle to cycle so the count doesn't jump), each splice where the
       # sound matches what would have followed (the S950's "cycle
       # fudging"), so tones keep their pitch and breaks get smaller seams.
+      #
       # :fixed is the plain cyclic stretch: cycles of exactly +cycle+, cut
       # anywhere (crossfaded like :auto's; `crossfade: 0` for the raw
       # splices); short cycles buzz at 1 / cycle (metallic), long ones
       # stutter, and tones whose period doesn't divide the cycle retune (a
       # 55 Hz bass at 2x with 30 ms cycles sounds about an octave low; see
       # Lofi::FITS).  Every channel cuts in the same places.
-      #
       #
       # +mode+ :spectral (aliases :pv, :vocoder) is a phase vocoder with
       # identity phase locking (each peak's neighbors keep its phase): Hann windows of +window+
@@ -997,6 +1002,7 @@ module MB
       # decay between hits drawn out) and the phases of its rising bins
       # reset, so attacks stay sharp and breaks keep their groove; best on
       # pads, chords, voices, basses (pitch is kept exactly), and breaks.
+      #
       # :paul (:paulstretch) is long windows with random phases: windows of
       # +window+ (0.25 s), +overlap+ (4; 2 gives half as many phase
       # changes per second, so each partial spreads over half the
@@ -1009,7 +1015,9 @@ module MB
       # for :paul) adds up to ± randomize × π of random phase to every bin
       # each frame, from the locked vocoder (0) through a smeared, diffuse
       # vocoder to fully random phases (1); the modes only choose the defaults
-      # (window, randomize, transients).  +link+ (true) gives every channel
+      # (window, randomize, transients).
+      #
+      # +link+ (true) gives every channel
       # the same random phases (the image keeps its level panning); false
       # draws them per channel (a wider,
       # decorrelated stereo image; a mono sample stays mono).  +shape+

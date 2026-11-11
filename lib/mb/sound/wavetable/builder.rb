@@ -274,11 +274,15 @@ module MB
         # as periodic; callers pad with zeros where it isn't).  Returns a 1D
         # SFloat or SComplex (complex if +complex+; a real input then becomes
         # analytic).  With +emphasis+ (:optimal or :sinc), frequencies are
-        # boosted for that interpolator (see Emphasis).
-        def resample_band(data, band, new_length, complex, emphasis = nil)
+        # boosted for that interpolator (see Emphasis).  +spectrum+ is
+        # data's forward transform when the caller already has it
+        # (.spectrum_of; .sample_levels resamples one padded sound to every
+        # band, omnibus19: a 16 s stereo stretch built its levels in 2.4 s,
+        # one full-length FFT per band): the same bins, so the same output.
+        def resample_band(data, band, new_length, complex, emphasis = nil, spectrum: nil)
           n = data.length
           if complex
-            bins = Numo::Pocketfft.fft(Numo::DComplex.cast(data))
+            bins = spectrum || spectrum_of(data, true)
             freqs = Numo::DFloat.new(n).seq / n
             freqs[(n / 2 + 1)..] = freqs[(n / 2 + 1)..] - 1 if n > 2
             keep = band_mask(freqs, band)
@@ -297,19 +301,24 @@ module MB
             out[0..half] = out[0..half] * Emphasis.gains(half + 1, new_length, emphasis) if emphasis
             Numo::SComplex.cast(Numo::Pocketfft.ifft(out) * (new_length.to_f / n))
           else
-            bins = Numo::Pocketfft.rfft(Numo::DFloat.cast(data))
-            freqs = Numo::DFloat.new(bins.length).seq / n
-            bins = bins * band_mask(freqs, band)
-
+            bins = spectrum || spectrum_of(data, false)
             out = Numo::DComplex.zeros(new_length / 2 + 1)
             m = [bins.length, out.length].min
-            out[0...m] = bins[0...m]
+            # (only the bins kept: the mask of each is what it was over all)
+            freqs = Numo::DFloat.new(m).seq / n
+            out[0...m] = bins[0...m] * band_mask(freqs, band)
             # An even-length input's Nyquist bin stands for both of its
             # sides; above the new Nyquist it is an ordinary bin
             out[n / 2] = out[n / 2] * 0.5 if n.even? && new_length > n && n / 2 < m
             out = out * Emphasis.gains(out.length, new_length, emphasis) if emphasis
             Numo::SFloat.cast(Numo::Pocketfft.irfft(out)[0...new_length] * (new_length.to_f / n))
           end
+        end
+
+        # The forward transform .resample_band takes of +data+: the FFT of
+        # its DComplex cast if +complex+, else the real FFT of its DFloat cast.
+        def spectrum_of(data, complex)
+          complex ? Numo::Pocketfft.fft(Numo::DComplex.cast(data)) : Numo::Pocketfft.rfft(Numo::DFloat.cast(data))
         end
 
         # Builds the sample-mode levels of +data+ (1D audio): [levels,
@@ -347,11 +356,12 @@ module MB
           padded = head.class.zeros(total)
           padded[0...head.length] = head
 
+          spectrum = spectrum_of(padded, complex)
           levels = bands.map { |band|
             rate = 2.0 * OVERSAMPLE * band
             new_total = (total * rate / 2).round * 2
             rate = new_total.to_f / total
-            res = resample_band(padded, band, new_total, complex, emphasis)
+            res = resample_band(padded, band, new_total, complex, emphasis, spectrum: spectrum)
             count = (valid * rate).ceil
             row = res.class.zeros(count + 2 * GUARD)
             idx = Numo::Int64.new(count + 2 * GUARD).seq - GUARD
@@ -359,10 +369,11 @@ module MB
             { data: row.reshape(1, row.length), count: count, rate: rate, bandwidth: band }
           }
 
+          loop_spectrum = loop && spectrum_of(data[ls...le], complex)
           loop_levels = loop && bands.map { |band|
             len = le - ls
             m = [(len * OVERSAMPLE * band).round * 2, 8].max
-            res = resample_band(data[ls...le], band, m, complex, emphasis)
+            res = resample_band(data[ls...le], band, m, complex, emphasis, spectrum: loop_spectrum)
             { data: wrap_guard(res.reshape(1, m)), count: m, rate: m.to_f / len, bandwidth: band }
           }
 
