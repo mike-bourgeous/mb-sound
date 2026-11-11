@@ -44,6 +44,7 @@ promote :dark_hall, to: :user
 - `params` are `MB::Sound::Param`s (Presettable declarations with the preset's values as defaults, a library rack's literal `knob` lines, a document's param/knob lines); a Proc that makes them on first read is allowed (class presets declare them while mb-sound loads, before unit values like `2400.hz` exist), cached in a WeakKeyMap.
 - `builder` makes the thing: `entry.(sig)`, `entry.(midi)`, `entry.(input: mic)`; `to_proc` for `then(&entry)`; `to_ruby` the family's code form.
 - `source` is a library-file statement's text (after the top-level locals it reads): what collect and promote copy.
+- `meta` (metadata-2; metadata.md) is the entry's description, a `Meta::Value`: a library line's `meta: { ... }`, a graph document's descriptive metadata (`Document#meta`); `Entry#with_meta`/`#note` return copies.  Never searched or resolved: `tags` and `about` are the index (a document's `tags:` and `description:` stay structural header keys for that reason).
 - Frozen, deep-frozen settings, no setters (the JavaBeans lesson: values, not bags).
 
 ## Presettable (`library/presettable.rb`)

@@ -23,10 +23,10 @@ Every named thing (presets at every scale: effects, instruments, kits, clips, ge
 `MB::Sound::MediaIndex.for(root)` (`lib/mb/sound/media_index.rb`) is the one way importers find the local copy of a file a foreign project names by another machine's path (Windows `D:\...` or POSIX): it walks a media root once, indexes files by name (lower case, NFC), and `#resolve(path)` returns a `Match` (path, `:found`/`:ambiguous`/`:missing`, matching trailing folders, candidates best first, ties), choosing among same-named files by the most matching trailing folders.
 `.for` caches an index per root and options while its folders' mtimes hold.  SFZ samples named in another letter case are found through it (every folder must match).  The .acd converter's own lookup (research branch) is to switch to it.
 
-### [Source metadata (`MB::Sound::Meta`)](metadata.md)
+### [Metadata (`MB::Sound::Meta`)](metadata.md)
 
-`MB::Sound::Meta` (`lib/mb/sound/meta.rb`) lets the objects importers make carry what the foreign file said but mb-sound doesn't turn into sound: `meta :bass, source: { ... }` for a Session's named pieces and the set itself (`Meta::Store`, saved as `meta` lines at the end of set documents), `node.with_meta(...)` for graph nodes and bundles (`Meta::Carrier`, printed by `to_ruby`), `sample.with_meta(...)` for Samples (a Sample read from a WAV brings the file's own `meta[:source]`).
-Values are plain Ruby (numbers, Strings, Symbols, true/false/nil, Arrays, Hashes); provenance goes under `:source` with shared keys (`Meta::SOURCE_KEYS`: format, file, kind, id, name, at, bytes, records, unread, fields).  Metadata is never part of the sound: renders with and without it are bit-identical.
+Metadata describes; it never decides.  `Meta::Value` (`lib/mb/sound/meta/value.rb`): a frozen, Hash-backed value with vocabulary readers (notes, tags, author, license, links, source, pack) and free plain-Ruby keys; `Meta::Carrier` gives `with_meta`, `meta`, `note("...")` to nodes, bundles, clips, takes, Samples, and library entries; Session pieces keep theirs in `Meta::Store`.
+Guards: a Prism scan of lib/ (`meta_guard_spec.rb`), `:meta` fuzz relations and sweep invariance, `Document#header` (data) vs `#meta`, literal-only loading within `LIMITS[:meta_bytes]`, quoted display.  Documents carry it as `meta:`, `.note`, and inline comments (`GraphIO::Comments`); files as native tags plus one Ruby literal (`Meta::Formats`: WAV INFO + `mbmt`, MB_SOUND_META, MIDI, SF2, `.meta.rb` sidecars).
 
 ### [Plan layer (fused regions)](plan_layer.md)
 

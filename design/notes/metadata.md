@@ -1,98 +1,92 @@
-# Source metadata (`MB::Sound::Meta`)
+# Metadata (`MB::Sound::Meta`)
 
 <!-- summary -->
-`MB::Sound::Meta` (`lib/mb/sound/meta.rb`) lets the objects importers make carry what the foreign file said but mb-sound doesn't turn into sound: `meta :bass, source: { ... }` for a Session's named pieces and the set itself (`Meta::Store`, saved as `meta` lines at the end of set documents), `node.with_meta(...)` for graph nodes and bundles (`Meta::Carrier`, printed by `to_ruby`), `sample.with_meta(...)` for Samples (a Sample read from a WAV brings the file's own `meta[:source]`).
-Values are plain Ruby (numbers, Strings, Symbols, true/false/nil, Arrays, Hashes); provenance goes under `:source` with shared keys (`Meta::SOURCE_KEYS`: format, file, kind, id, name, at, bytes, records, unread, fields).  Metadata is never part of the sound: renders with and without it are bit-identical.
+Metadata describes; it never decides.  `Meta::Value` (`lib/mb/sound/meta/value.rb`): a frozen, Hash-backed value with vocabulary readers (notes, tags, author, license, links, source, pack) and free plain-Ruby keys; `Meta::Carrier` gives `with_meta`, `meta`, `note("...")` to nodes, bundles, clips, takes, Samples, and library entries; Session pieces keep theirs in `Meta::Store`.
+Guards: a Prism scan of lib/ (`meta_guard_spec.rb`), `:meta` fuzz relations and sweep invariance, `Document#header` (data) vs `#meta`, literal-only loading within `LIMITS[:meta_bytes]`, quoted display.  Documents carry it as `meta:`, `.note`, and inline comments (`GraphIO::Comments`); files as native tags plus one Ruby literal (`Meta::Formats`: WAV INFO + `mbmt`, MB_SOUND_META, MIDI, SF2, `.meta.rb` sidecars).
 <!-- /summary -->
 
 ## Quick reference
 
-- Console: `meta :a3, source: { format: :acd, kind: :track, at: 0x12340, bytes: 5678, fields: { color: 3 } }` (merges by top-level key), `meta source: { ... }` (the set), `meta :a3` / `meta` (frozen Hashes, `{}` when none), `meta :a3, nil` (forgets), `metas` (one line per name); `help :meta`.
-- Objects: `node.with_meta(source: { ... })` and `node.meta` (every GraphNode and `Channels` bundle), `sample.with_meta(...)`, `sample.meta[:source]`.
-- Rules: `Meta.check` (plain values, an ArgumentError naming the key path), `Meta.merge`, `Meta.summary`, `Meta.statement` (the saved `meta` lines), `Meta.parse` (text back to values, never run).
-- Saved: set documents (`save :gig, set`, `ruby set`), graph documents and recipes (`.with_meta(...)`), a Sample's `:source` in its saved file's `mb_sample_source` tag; takes replay `meta` lines.
-- Specs: `spec/lib/mb/sound/meta_spec.rb`, `spec/lib/mb/sound/meta_methods_spec.rb`, `spec/lib/mb/sound/graph_io_meta_spec.rb`, `spec/lib/mb/sound/sample_source_spec.rb`.
+- Values: `Meta::Value[notes: 'x', source: { ... }]`, `.of(hash)`, `.parse(text)` (Prism, never run); readers `notes tags links author license source pack`; `#[] #dig #fetch #key? #each #to_h`, `== {...}`, pattern matching; `#with`/`#merge` (a key given again is replaced whole), `#note`, `#without`, `#slice`, `#to_ruby`; `Meta::EMPTY`.
+- Objects: `node.note('why').with_meta(author: 'mb')` (in place: nodes, bundles, clips, kits, takes; copies: Samples, `Library::Entry`); `node.meta.notes`; `to_ruby` prints `.note(...)`/`.with_meta(...)`.
+- Session pieces: `meta :a3, source: { ... }`, `meta :a3`, `meta :a3, nil`, `metas`; `Session#metadata.note(:a3, 'x')`; `help :meta`.
+- Documents: `GraphIO.dump(g, meta: { description:, tags:, meta: { author:, notes: } })` (`description:`/`tags:` top-level, the library's index; the rest `meta: { ... }`); `doc.header` (data) vs `doc.meta` (a Value); library lines `reverb :x, ..., meta: { ... }`; takes' `meta:`; set documents' `meta` lines; inline comments in graph and rack documents.
+- Files: `MB::Sound.write(path, data, meta:, meta_title:)`, `Sample#save` (whole metadata), `Sample[path].meta`, `MIDIFile#meta(track)`, `midi_clip(...).meta`, `SF2.open(path).meta`, `Meta::Formats.write_sidecar(path, meta)` / `.read_sidecar(path)`.
+- Display and guards: `Meta.summary`, `Meta.quote`, `Meta.word`, `Meta.notes_text` (foreign text always quoted and escaped); `spec/lib/mb/sound/meta_guard_spec.rb` (ALLOWED readers, FORBIDDEN_DEFS, FORBIDDEN_PATHS), `meta_invariance_spec.rb`, `spec/lib/mb/sound/meta/` (value, separation, documents, formats, comments), `RelationFuzz` `:meta`, `SessionFuzz` `:meta` (`FUZZ=N`), `GraphSweep::HOSTILE_META`.
 
-Branch `source-meta-1`, 2026-11-10: a design branch, held for the maintainer's decision.  The request (2026-11-10): "Let's add metadata to every mb-sound type that maps from a converter so that understood but ignored fields get consumed.  Also include basic stats about the object like byte count and byte offset, and anything else that seems interesting or useful."  The .acd research converter accounts for every byte of a project file as read, understood-but-unused, or unread; the understood-but-unused facts and the provenance statistics are what this carries.
+History: branch `source-meta-1` (Linux, 2026-11-10; the request: "Let's add metadata to every mb-sound type that maps from a converter so that understood but ignored fields get consumed.  Also include basic stats about the object like byte count and byte offset") built the value rule, the `:source` convention, the Store, and `with_meta`; branch `metadata-2` (Mac, 2026-11-11; "Generalize what Linux has built into a metadata helper/object/module/mixin/whatever built around Ruby-centric ideas like Hash and Struct, allow commentary on a GraphNode ..., figure out how each file format would represent metadata", then "Start building this broader metadata vision.  Try to guard against metadata becoming interpreted as data, as is always the risk") generalized it.  Both are design branches held for the maintainer.
 
-## What the library had (survey, 2026-11-10)
+## The central rule: metadata never acts as data
 
-- `Sample#meta` (`{ why:, smpl_loops: }`, facts read from loop files) and `Sample#meta_source` (where each of `bpm`, `key`, `root`, ... came from): the convention this generalizes.  `with(meta: h)` replaces the whole Hash.
-- Graph documents have header keywords (`graph 10, name:, kind:, description:, tags:`; `Document#meta`): facts about the document, not about what it holds.
-- `Session::Names`: tracks, mute groups, knobs, buses, and racks share one namespace; scenes, sections, and markers have their own tables.
-- Nothing on graph nodes but `named`.
+Nothing in mb-sound reads metadata to choose what plays, how a graph builds, what a lookup finds, or what a loader constructs.  Facts that decide something are data with their own readers (a node's settings, `Document#header`, an `Entry`'s `tags`/`about`, a Sample's `loop_points`/`bpm`); metadata only describes them.  The mechanisms, each with what it catches:
 
-## The value rule
+1. **Static guard** (`meta_guard_spec.rb`): a Prism scan of every lib/ file for metadata reads (calls named `meta`, `metadata`, `carried_meta`, `meta_source`; `@carried_meta` outside meta.rb).  Every reading file is in `ALLOWED` with its reason (printers and summaries, writers and readers of formats, the inspector, help; things also called meta, such as ffmpeg file tags and the latency probe's header, listed as such, so every reader of the name stays visible).  No read may sit in a method of `FORBIDDEN_DEFS` (`sample`, `plan_*`, `find_by_name`, `resolve`, `build`, `load`, `eval_call`, `process_buffer`, ...), and no file of `FORBIDDEN_PATHS` may read it at all: the plan layer, kernels, the DSL method modules, the loader, registry and FileGuard, the library's index/heads/finder/file loader, and Session names.  It catches a new read anywhere; the fix is to show it (a printer adds itself) or to make the fact data.
+2. **Invariance**: the relation fuzz's `:meta` relation gives random metadata (option names like `cutoff:`/`rack:`/`mode:`, structural words, code, terminal escapes, deep nesting, 700-character Strings) to the printable nodes of every random graph and checks the same samples bit for bit, unplanned and planned, and that `to_ruby` and graph documents give each printed node its metadata back; `meta_invariance_spec.rb` builds all graph sweep factories again with `GraphSweep::HOSTILE_META` on every node, inner ones (Tees, constants, voices) too: the same samples unplanned and planned, the same plan regions, and the same allocations while rendering; a graph sweep factory carries metadata everywhere through every sweep check (memcheck light included); the session fuzz's last command gives metadata to pieces, the set, unknown names, and nodes mid-song, and its `:meta` relation renders each such song without it, bit for bit.
+3. **Data and description apart** (`meta/separation_spec.rb`): see Documents (the header split), Names, and Samples below.
+4. **Loaders**: metadata arguments (`meta:` keywords anywhere, `.with_meta`, `.note`, set documents' `meta` lines; `Loader::META_CALLS`) are read from the syntax tree as written literals (`Meta.literal`), never evaluated, so `meta: { at: 440.hz }` or `.note("a" * 3)` is a load error before anything runs; each call's metadata source is capped by `GraphIO::LIMITS[:meta_bytes]` (64 KB); metadata keys can't reach structural ones (a document's `meta: { rack: :irack }` stays description); unknown keys are kept.  Text from files (tags, chunks, sidecars, MIDI events) goes through `Value.parse`; anything but plain values is ignored.
+5. **Untrusted text**: metadata from foreign files (names, comments, preset names) is data, never prose.  Listings (`Meta.summary`: `metas`, `now`) and the inspector (a node's notes in its row title) print every text from it through `Meta.quote`: in quotes, escaped (newlines, terminal escapes), cut to 60 characters; plain Symbols and numbers print as words (`Meta.word`).  Nothing from metadata reaches the help or a listing as unquoted text that could read like an instruction or a command.
 
-A piece's metadata is one frozen Hash with Symbol keys at the top.  Values are Integers, Floats, Rationals, Strings, Symbols, true, false, nil, and Arrays and Hashes of those (nested keys: Symbols, Strings, or Integers), at most 32 levels deep.  Anything else raises an ArgumentError naming the key path (`meta[:source][:fields][:env] is a MB::Sound::Tone ...`), and nothing changes.  Value objects of the library (Decibels, Lengths, Notes, Ranges) are refused on purpose: metadata is what a foreign file said, in the file's own terms, and every allowed value prints through `RubyValue` and reads back through `Meta.parse` or the document loader as the same value of the same class (Rationals stay Rationals).  Stored values are deep-frozen copies; the caller's objects stay theirs.
+## The value and the mixin
 
-Merging is by top-level key: `meta :a3, notes: 'x'` keeps `:source`; a second `source:` replaces the first whole (no deep merge, so what an importer wrote is never half-updated).
+`Meta::Value` holds one frozen Hash with Symbol keys at the top; values are Integers, Floats, Rationals, Strings, Symbols, true, false, nil, and Arrays and Hashes of those (nested keys Symbols, Strings, or Integers), at most 32 levels deep (`Meta.check`, an ArgumentError naming the key path).  Library value objects (Decibels, Lengths, Notes, Ranges) are refused on purpose: metadata is what something said in its own terms, and every value prints through `RubyValue` and reads back as the same value of the same class.  The vocabulary's shapes are checked (`Value::VOCABULARY`): notes are Strings (one or an Array; `#notes` always an Array), tags Symbols or Strings, links Strings, author/license/pack a String or Symbol, source a Hash.  Values merged in that are already frozen stay the same objects.  It reads like the Hash (`#[]`, `#dig`, `#to_hash`, `== {...}` both ways), so source-meta-1's `meta[:source][:id]` and `meta == { ... }` work; RSpec's `include` matcher wants `meta.to_h`.
+
+`Meta::Carrier` (`with_meta`, `note`, `meta`) is the one mixin: objects that change in place (GraphNode, Channels, clips and kits through `Sequence::Named`, Take) keep `@carried_meta` (nil until set: `GraphNode::IvarPreset` for nodes, the constructors for the others; no allocation per object), and value objects override the private `#carry_meta` to return a copy (`Library::Entry`, a Data member `meta`; `Sample`, through its lineage).  Metadata belongs to the object it was given to: a node or clip made from it carries none (as with names).  `with_meta` and `note` are recorded like `named` (GraphNode, Clip, Kit; Sample lineage), so `to_ruby`, graph documents, and set documents print them.  Session pieces keep theirs by name in the Session's `Meta::Store` (`meta :name, ...`): not a Session change (its own lock, lands at once, journals nothing, no undo step), kept through swaps, scenes, undo, and `untrack`.
+
+### Names are identity
+
+A node's name (`named`, `graph_node_name`, `find_by_name`) and a Session name (tracks, knobs, buses, racks) are lookups: data.  They stay as they were and show beside metadata read-only (the keys of `metas`, the inspector's row titles); a `with_meta(name: ...)` or an importer's `source: { name: }` is description and never a lookup name (separation spec).  Open question 1.
+
+### Samples (the audit)
+
+Nothing plays from a Sample's metadata: the loop, tempo, root, and key a voice uses are its own settings, read from the file into them (LoopInfo); `meta[:smpl_loops]` (every `smpl` loop, also of ACID loops, which ignore them) and `meta[:why]` (the reasons in words) describe, and `meta_source` says where each setting came from.  The separation spec renders a Sample with contradicting metadata (other loops, tempo, `loop:`) and gets the same samples.
+
+## Documents
+
+- **Graph and rack documents**: the `graph` line is split (`GraphIO::Document#header`, `#meta`, `Document#graph_keywords=`).  `STRUCTURE_KEYS` are data, validated and read as before: `name`, `kind`, `rack` (a rack document's constructor), `options` (baked params), `from` (the tool that wrote it: `from: 'fit_patch'` gates the hand-tune tools and take readers), `tuned` (when its tunings were saved: the hand-tune save reads it), and the library's index words `description` (finds rank by it) and `tags` (they narrow a head to one entry).  Everything else is the descriptive `Document#meta`: `saved:` and `mb_sound:` (written top-level as before, `STAMP_KEYS`), unknown keys, and a new `meta: { ... }` keyword.  Saves keep a loaded document's metadata (less the stamps), a replacing library save keeps the old one's, and `GraphIO.dump(meta:)` sends structural keys top-level and the rest to `meta:` (`GraphIO.header_split`).  Readers that used `doc.meta[:rack|:tags|:options|:from|:tuned]` read `doc.header`.  Nodes carry theirs as `.with_meta(...)`/`.note(...)`.
+- **Set documents**: `meta` lines at the end for the set and its names (source-meta-1), clips' and nodes' notes where they print, and a `meta:` on the graph line.
+- **Library files**: entry lines take `meta: { ... }` (`Entry#meta`, never searched: `tags:`/`about:` stay the index); entries of graph documents carry the document's metadata.
+- **Takes**: `take.note('...')` / `take.with_meta(...)`, saved as the replay's `meta:` (`Replay#meta`; replays never read it).
+- No `GraphIO::FORMATS` bump: documents without metadata are byte for byte what they were (open question 2).
+
+### Inline comments (`GraphIO::Comments`)
+
+Graph and rack documents' comments become metadata: the loader calls `Prism::ParseResult#attach_comments!` and gives each comment to what its node builds (in `Loader#eval_node`'s call and local-write branches, only when the body has comments: otherwise one nil check).  A leading comment, or one trailing a statement, goes to the statement's object; one trailing a chain link (`220.hz.saw # bright` then `.lp4(800)`) to that link's node; both land in `meta[:notes]`, given quietly (not recorded).  Comments inside an argument list go to the call's object as `meta[:arg_notes]`, keyed by the argument's index or keyword.  The writer (`RubyWriter`) prints them back: a statement's notes as leading lines (an object with two or more such notes becomes a statement of its own, since a chain link takes one trailing comment), a chain link's one note as a trailing comment before the next link, argument notes after their argument (one argument a line), and notes it can't place as comments (a node used as an argument or an operand, statements inside build blocks) as `.note("...")`, which are recorded from then on.  The second save of a commented document is the first's text.
+
+Approximate: blank lines and alignment; a comment trailing a statement comes back leading it (on the same object); a comment heading several statements goes to the first; comment lines between chain links (Prism attaches them to nothing) and `=begin` blocks are dropped; variable names aren't kept (a commented statement prints as `fx = ...`); comments on values that carry no metadata (numbers, Symbols, Samples) are dropped unless inside an argument list; set documents' comments are left alone (their writer's own comments would come back as notes); the writers' own comments (`# FIXME(graph-io)`, `# WARNING(graph-io)`, `# inputs:`, the header lines) never become notes.  Executed song files (his music Ruby) aren't parsed; see open question 4.
+
+## Foreign formats (`Meta::Formats`)
+
+Each format carries the vocabulary in its own tags for people and the whole Hash as one Ruby literal for agents and mb-sound.  A file with the Ruby text reads back from it alone (mb-sound wrote the native tags from it, plus a title from the object's name), so saves round-trip exactly; a foreign file's native tags become description (`title:`, `notes:`, `author:`, `license:`, `tags:`), never a Sample's name or a setting.
+
+| format | native tags | the whole Hash |
+|---|---|---|
+| WAV / RF64 / BW64 | LIST INFO: INAM title, ICMT notes, IART author, ICOP license, IKEY tags | an `mbmt` chunk |
+| FLAC, Ogg, MP3 (ffmpeg) | title, comment, artist, copyright (Vorbis comments; ID3 TIT2, COMM, TPE1, TCOP) | MB_SOUND_META (ID3 TXXX) |
+| MIDI files (read; spec writer) | track name (title), copyright (license), text (notes), markers (`markers: [[seconds, text]]`) | a text event `mb-sound meta: {...}` |
+| SoundFonts (read) | INFO: INAM, ICMT, IENG, ICOP, plus `source:` (format, file, version, bytes) | |
+| anything else | | a sidecar `<file>.meta.rb`: one `meta` statement |
+
+- WAV: `Formats.append_wav` adds the LIST INFO and `mbmt` chunks after the audio of a file mb-sound just wrote (RIFF size, or RF64's ds64 size, updated); reading uses `Riff::Info`'s chunk list and INFO texts (riff.rb unchanged).  ffprobe shows the INFO tags.
+- `MB::Sound.write(path, data, meta:, meta_title:)` writes either way; `Sample#save` writes the whole metadata, replacing source-meta-1's `mb_sample_source` tag (still read from older files: open question 3).  Ogg keeps comments on the stream: `Sample::Source` reads them with one more ffprobe for .ogg/.oga/.opus (FFMPEGInput's own tags stay the container's: reading the stream's there exposed saved Sample tags whose stop lies past a lossy decode's length).
+- Sidecars: `Formats.write_sidecar`/`.read_sidecar`; `GraphIO::FileGuard.sidecar` allows only a plain file (not a link) of at most 64 KB beside a file its reader already checked; its one `meta` statement is read with `Meta.literal`.  Samples, MIDI files, and SoundFonts merge a sidecar over what the file carries.
+- Ruby texts over 64 KB (`Formats::MAX_TEXT`) are left out with a warning when written and ignored when read.
 
 ## The `:source` convention
 
-Importers put provenance under `:source`; the library reads these keys only for summaries (`Meta.summary`, `metas`, `now`) and enforces nothing inside but the value rule.  `Meta::SOURCE_KEYS`:
+Importers put provenance under `:source`; the library reads these keys only for summaries and checks nothing inside but the value rule.  `Meta::SOURCE_KEYS`: `format`, `file`, `version`, `kind`, `id`, `name`, `at` (byte offset), `bytes`, `records`, `unread` (bytes, or a fraction), `fields` (understood-but-unused values).  Other keys are welcome (`chunks`, `tracker`).  A Sample read from a sound file brings the file's own `:source` (format, file name without folders, bytes, stored rate; a WAV's container, channels, bits, frames, data offset and size, chunk rows, skipped chunk ids, unread bytes; `Sample::Source.of_file`, from the `Riff::Info` the read made anyway).
 
-| key | holds |
-|---|---|
-| `format` | the foreign format (`:acd`, `:wav`, `:mod`, `:mid`, `:sf2`, `:sfz`) |
-| `file` | the file the object came from (a name or path, as the importer was given it) |
-| `version` | the format version the file says it is |
-| `kind` | what the object was in the file (`:track`, `:bus`, `:clip`, `:plugin`, `:envelope`, ...) |
-| `id` | the object's own ID or index in the file |
-| `name` | the object's own name in the file, when mb-sound names it otherwise |
-| `at` | the byte offset of the object in the file |
-| `bytes` | the object's size in bytes (for the file itself: its size) |
-| `records` | how many records, events, or entries the object holds |
-| `unread` | what was not understood: bytes (Integer) or the fraction of the object (Float, 0..1) |
-| `fields` | understood-but-unused values by name (a Hash) |
+## Measured (2026-11-11, Mac container)
 
-Other keys are welcome (a WAV's `chunks`, a tracker's `tracker`); summaries count them (`+ 4 more`).  Top-level keys beside `:source` are free (`notes:`, `tags:`).
-
-## Named pieces and the set (`Meta::Store`, `MetaMethods`)
-
-- `Session#metadata` is a `Meta::Store` (`@metadata`, made in the constructor, so the Session keeps one instance variable layout; `ivar_layout_spec.rb` gives a Session metadata too).  The console's `meta` and `metas` (`lib/mb/sound/meta_methods.rb`; alias `metadata`) read and write it.
-- Keyed by name alone: any Symbol, with or without a piece.  A song file may list its metadata first or last, and an importer may carry facts for a piece it didn't make (the listing says `not defined`).  `:master`, structured names (`:"a3/level"`), and names of every `Session::Names` kind work the same.
-- Not a Session change: nothing here is read while rendering and nothing here changes what plays, so `meta` has its own lock, lands at once (also from scheduled blocks), journals nothing, and is not an undo step.  The rule "Session changes go through `Session#change`" is about things that land on a sample.
-- What it survives: swaps, scene changes, undo and redo (they never touch it), and `untrack`: metadata stays with the name, as the name's knobs, level, mute, and routes do, so `untrack`'s undo and a new track of that name have it; `meta :name, nil` forgets it.  A new Session starts empty.
-- `metas` returns `{ name => line }` like `tracks`, `markers`, and `wires` (the set's own under `nil`); a piece without a `file` of its own shows the set's.  `meta` with no arguments is the set's own Hash (the contract), so the listing has its own name.  `now` shows one line when there is any.  Takes replay `meta` lines; `metas` is a listing (`Take::FOREGROUND`).
-- `spec/support/session_guard.rb` counts metadata as set state left in the default Session.
-
-## Saved (`GraphIO::SetWriter#meta_lines`, `Loader::SET_COMMANDS`)
-
-Set documents end with the metadata, after the flow, so the song reads first: a comment line, the set's own `meta source: { ... }`, then each name's in the order it was first given.  One line when it fits 120 columns, else `meta(:name,` with a top-level key per line and long Hashes and Arrays opened, their entries filled to the width (`Meta.statement`).  Names without a piece are saved too.  `meta` is a set command for the loader (plain values through the document rules; no block), so a loaded set has the same store and saves the same text; the same set with its metadata forgotten saves the same document minus those lines and plays the same (`graph_io_meta_spec.rb`).  `ruby set` prints the set document (it printed a FIXME for an Arrangement before).
-
-No format bump (`GraphIO::FORMAT` stays 10): documents without metadata are byte for byte what they were, and a new line kind follows `wire` and tracker sets, which didn't bump either.  A reader older than this branch stops at `meta` as an unknown set command.  Open question 4 below.
-
-## Graph nodes and bundles (`Meta::Carrier`)
-
-`GraphNode` and `Channels` include `Meta::Carrier`: `with_meta(values)` merges and returns the receiver (it chains like `named`), `meta` reads.  The Hash lives in `@carried_meta`, declared with `GraphNode::IvarPreset` (and set in `Channels#initialize`), so no node changes shape.  Nothing reads it while sampling: no `#sample`, plan, `plan_describe`, node trait, or allocation budget is involved (`meta_spec.rb` compares a graph with and without metadata bit for bit, unplanned and through `plan_compare`).
-
-`with_meta` is recorded like `named` (`Recipe::Surface.refresh!`), as a configuration call: `to_ruby` prints `.with_meta(source: { ... })`, graph documents save it, and the loader's registry allows it because it is recorded.  Metadata belongs to the object it was given to: a node made from it (`node.lp4(300)`) carries none, and a Tee branch reads its own.
-
-## Samples (`Sample::Source`, `lib/mb/sound/sample/source.rb`)
-
-- `sample.with_meta(values)` returns a copy with the values merged into `#meta` beside the loop-file keys (`:why`, `:smpl_loops`), recorded in the lineage, so documents print `Sample["x.wav"].with_meta(...)`.  Copies, views, and edits already passed `@meta` along.
-- `Sample#save` keeps `meta[:source]` as the tag `mb_sample_source` (its `RubyValue` text; at most 32 KB, a larger one is left out with a warning), and `Sample.from_file` reads it back through `Meta.parse`, a Prism walk over literals that runs nothing (a tag is data from a file).  Other top-level keys given with `with_meta` are kept by documents (lineage) but not by a bare `save`.
-- A Sample read from a sound file brings the file's own `:source`: `format`, `file` (the name without folders: saved tags and bundles must not carry a machine's paths), `bytes`, `sample_rate` as stored; for a WAV also `container`, `channels`, `bits`, `frames`, `data: { at:, bytes: }`, `chunks` (`[id, offset, size]` rows from `Sample::Riff`, the first 64), `chunk_count`, `skipped` (ids of chunks mb-sound doesn't read), and `unread` (their bytes with headers).  No extra read: `LoopInfo.read(..., riff_out:)` hands over the `Riff::Info` it parsed anyway; the file's size is one `File.size`.  A `:source` the caller gives (`Sample[path, meta: { source: ... }]`) or a saved file's tag wins.
-- `strc` counts as read once `Riff::Info` has it (acid-loop-info-1, held): `Source::READ_CHUNKS` plus `riff.respond_to?(:strc)`.
-
-## Measured (2026-11-10, Linux container)
-
-- A four-bar set (patch track, graph track, bus with a send, two scenes, a swap) with metadata given before, between, mid-song from scheduled blocks, and on a node inside the patch: both channels bit-identical to the same set without any, and the journal's changes land on the same positions (`meta_methods_spec.rb`).
-- `render_allocations_spec.rb` budgets unchanged (nothing on the render path).
+- Invariance: 310 sweep factories with hostile metadata on every node: identical samples unplanned and planned, identical plan regions, identical allocations over 20 buffers of 128; relation fuzz `:meta` over seeds 1000-1199: no failure (renders bit-identical; round trips exact for every printed node); session fuzz `:meta` over the first 12 seeds of 1-400 with metadata lines: bit-identical.
+- `render_allocations_spec.rb` budgets unchanged.
+- YJIT, against source-meta-1 (tunnel_vision, 24 bars rendered, 3 alternating runs per tree, YJIT stats at exit): compiled ISEQs 3812-3813 vs 3808-3810, inline code 4.199-4.200 MB vs 4.195-4.199 MB, code region 13.79 MB both, process CPU 25.6-26.0 s vs 25.8-26.2 s (noise).  bin/jit_bench.rb --quick: see the branch report.
 
 ## Open
 
-1. Pieces outside `Session::Names`: scenes, sections, markers, and clips have no place yet.  Today an importer can use a structured name (`meta :"a3/clip7", ...`) or nest under the owner's `fields`.  Options: a kind-qualified form (`meta :scene, :verse, ...`), `Clip#with_meta` (clips print through recipes, so set documents would keep it), both, or neither.
-2. `meta` is not an undo step, and stays through `untrack`.  Both follow "metadata is not sound"; either could go the other way.
-3. `Sample#save` keeps `:source` only.
-4. No format bump (above).
-5. The session fuzz has no `meta` command: appending one changes every seed's song for a command the render never sees; the as-if specs and `ivar_layout_spec.rb` cover it instead.
-6. The catalog budget went from 17 500 to 17 600 bytes for the `:meta` topic line and `meta`/`with_meta` (17 565 used).
-7. The next importers to fill `meta[:source]`, with what each has at hand (none built here):
-   - Tracker modules (`mod_import`/`tracker_import`, `mod_samples`): the set: format, file, bytes, `tracker` (the tracker that wrote it), title, channels, pattern and order counts, `Song#problems`, the effects the player skipped (`Tracker::Set#unsupported`); each track: channel index, its pan and volume; each Sample: sample index, the module's name for it, stored rate, bits, finetune, relative note, default volume, and (once the readers keep them) its offset and length in the file.
-   - MIDI files (`midi_file`, `midi_clip`, `midi_kit`, `midi_tracks`): the file: format 0/1, division, track count, bytes; each track or clip: track index and name, channel, event count, the meta events mb-sound doesn't play (text, lyrics, cue points, key signature), program and bank numbers when the clip takes another instrument.
-   - SoundFonts (`sf2`): the font: its INFO names, version, bytes; each instrument: bank, program, preset name and index, zone count, the generators skipped (`Font#skipped`); each Sample: the sample header's name, index, stored rate, original pitch and correction, link and type, its offset and length in `smpl`.
-   - SFZ (`sfz`): the file and its control settings; each region: header index and line, its group's and global's opcodes, the opcodes ignored (already counted for the warning), the sample path as written beside the one found.
-   - Loop files (`loops`, `Sample[]`): WAV is done here; next FLAC (its metadata blocks with offsets and sizes, the foreign RIFF chunks kept in APPLICATION blocks) and AIFF chunks, the same shape as the WAV list.
-   - The .acd converter (research): its emitted `meta` lines per the contract above.
+1. Names as identity: kept `named`/`graph_node_name` and Session names as lookups, shown read-only beside metadata; `meta name:` and `source: { name: }` never become lookup names.  The alternative (names folded into metadata) would make metadata decide lookups.
+2. No `GraphIO::FORMATS` bump for `meta:` on the graph line, `.note`, comments as notes, or the header split (documents without metadata are unchanged; older readers stop at `.note`).
+3. `Sample#save` writes the whole metadata (MB_SOUND_META / `mbmt`) instead of source-meta-1's `mb_sample_source` tag, which is still read.
+4. Executed song files: nothing built.  Option (a) of the proposal (each node's creating file:line recorded with `caller_locations` at build time, comments resolved lazily) costs an allocation per node built; not prototyped.  Tools never rewrite his files.
+5. `description:` and `tags:` stay structural (the library's index reads them to rank and narrow), as do `from:` and `tuned:` (tools branch on them), though the brief listed them as descriptive; moving them would make the library and hand-tune tools read metadata to decide.
+6. From source-meta-1: pieces outside `Session::Names` (scenes, sections, markers) still have no place of their own (clips now carry their own); `meta` is not an undo step and stays through `untrack`; the catalog budget.
+7. Next importers to fill `meta[:source]` (none built here): tracker modules, MIDI files' per-track facts, SoundFont presets and samples, SFZ regions, FLAC/AIFF chunk lists, the .acd converter.
