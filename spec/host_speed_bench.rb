@@ -5,7 +5,7 @@
 # over the reference machine's.  Prints the fastest of three passes in
 # seconds.  Keep the workload fixed: changing it changes every host's
 # calibration (then update `reference:` in spec/time_budgets.yml and remove
-# tmp/spec_host_speed.json).
+# tmp/spec_host_speed.json in the main checkout; see ParallelSpecs::HOST_SPEED_PATH).
 #
 # The work is what specs spend their time on: graph sampling (Ruby
 # dispatch plus C kernels) and plain Ruby objects (Hashes, Arrays, Strings).
