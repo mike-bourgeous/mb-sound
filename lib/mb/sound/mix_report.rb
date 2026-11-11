@@ -51,17 +51,34 @@ module MB
       # set its loudness.
       attr_accessor :mastering
 
-      def initialize(tracks, mix, sections)
+      # The master gain (dB) every level here is measured after, or nil
+      # when unknown.
+      attr_accessor :master_gain_db
+
+      def initialize(tracks, mix, sections, master_gain_db: nil)
         @tracks = tracks.freeze
         @mix = mix
         @sections = sections.freeze
         @codec_peaks = nil
         @mastering = nil
+        @master_gain_db = master_gain_db
+      end
+
+      # The header line naming the master gain the levels are after (Kez,
+      # panel 3: a clipper "peaking at -12 dBTP" was the -10 dB master; she
+      # read `master: nil` as unity), or nil at 0 dB or when unknown.
+      def master_gain_note
+        return nil if @master_gain_db.nil? || @master_gain_db.round(1).zero?
+
+        format('Levels after the master gain of %.1f dB (gain: or master_gain sets it; master: nil only means no mastering preset).', @master_gain_db)
       end
 
       # The report as plain-text tables.
       def to_s
         lines = []
+        if (note = master_gain_note)
+          lines << note
+        end
         rows = @tracks.values + [@mix]
         width = [rows.map { |r| r.name.to_s.length }.max, 5].max
         lines << format("%-#{width}s  %9s  %9s  %8s  %6s", 'Track', 'LUFS', 'ST max', 'dBTP', 'PLR')
@@ -112,6 +129,7 @@ module MB
         {
           tracks: @tracks.transform_values(&row),
           mix: row.(@mix),
+          master_gain_db: fix.(@master_gain_db),
           sections: @sections.map { |s| s.to_h.merge(loudness: s.loudness.transform_values(&fix), peak: fix.(s.peak)) },
           codec_peaks: @codec_peaks&.transform_values(&fix),
           mastering: @mastering && @mastering.to_h.except(:target, :trim, :ceiling).merge(

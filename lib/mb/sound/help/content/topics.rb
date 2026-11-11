@@ -1224,7 +1224,10 @@ module MB
         `measure:` reads the song and the reference alike: `:integrated`
         (the default), `:loudest` (the loudest `loudest_bars:` bars), or
         `:histogram` (the center of the bars' loudness distribution).
-        Without a master chain the live output (not renders or recordings)
+        The master gain (-10 dB by default: `master_gain`, `render(gain:)`)
+        applies with or without a preset, so `master: nil` (no preset, the
+        default) is not unity gain, and render reports and warnings measure
+        after it.  Without a master chain the live output (not renders or recordings)
         ends in a transparent safety limiter at -1 dBFS; `master` says so,
         and any chain or preset replaces it.  For the mix unprocessed up
         to full scale (a test tone straight to the sound card): `master {

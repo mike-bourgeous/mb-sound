@@ -860,7 +860,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     it 'warns when the mix went over full scale (clipped in the file, even with loudness:), with the gain: for headroom' do
       expect {
         MB::Sound.render(filename, 1000.hz.sine.at(2), seconds: 0.1, loudness: -18)
-      }.to output(/went 6\.0 dB over full scale .*render with gain: -7\.db for headroom/).to_stderr
+      }.to output(/went 6\.0 dB over full scale .* after the master gain of 0\.0 dB; render with gain: -7\.db for headroom/).to_stderr
       expect(MB::Sound.loudness(filename).true_peak).to be < -10 # (normalized after clipping)
 
       expect { MB::Sound.render(filename, 1000.hz.sine, seconds: 0.1, overwrite: true) }.not_to output.to_stderr
