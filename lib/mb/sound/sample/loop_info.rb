@@ -134,14 +134,14 @@ module MB
 
         # Sources in words, for fields without a reason of their own.
         SOURCE_WORDS = {
-          acid: 'the ACID chunk', smpl: "the sampler chunk's loop", cue: "the file's cue points", tags: "the file's tags",
+          acid: 'the ACID chunk', smpl: "the sampler chunk's loop", cue: "the file's cue points", strc: "the file's stretch markers", tags: "the file's tags",
           name: 'the file or folder name', length: 'its length', tempo: 'a name tempo that fits its length',
           decay: 'one hit decaying to silence', detected: 'detected in the audio', saved: 'saved by Sample#save',
         }.freeze
 
         # The interpreter's declaration for Facts.interpret: the facts
         # LoopInfo may read, and those its provenance names as used.
-        CONSUMES = %w[acid.* smpl.* cue.* tag.bpm tag.tbpm tag.tempo tag.key tag.initialkey tag.tkey fmt.sample_rate data.bytes].freeze
+        CONSUMES = %w[acid.* smpl.* cue.* strc.* tag.bpm tag.tbpm tag.tempo tag.key tag.initialkey tag.tkey fmt.sample_rate data.bytes].freeze
 
         module_function
 
@@ -164,6 +164,8 @@ module MB
               key = facts&.select_keys('smpl.loop[*')&.first&.key
             elsif via == :cue
               key = facts&.select_keys('cue.point[*')&.first&.key
+            elsif via == :strc
+              key = facts&.select_keys('strc.entry[*')&.first&.key
             end
             fact = key && facts&.[](key)
             record = fact&.record || (via == :name ? 'file name' : (via == :tags ? 'tags' : nil))
@@ -173,11 +175,14 @@ module MB
         end
 
         # The fact keys +provenance+ (as .provenance made it) used: each
-        # field's fact, every cue point for markers, and a `smpl` root's
-        # pitch fraction.
+        # field's fact, every cue point or the whole stretch marker chunk
+        # for markers (cue points stay unused, description, when stretch
+        # markers are the markers, and so does a stretch marker chunk left
+        # out), and a `smpl` root's pitch fraction.
         def consumed(provenance, facts)
           keys = provenance.values.filter_map(&:fact)
           keys += facts.select_keys('cue.point[*').keys if facts && provenance.values.any? { |p| p.via == :cue }
+          keys += facts.select_keys('strc.*').keys if facts && provenance.values.any? { |p| p.via == :strc }
           keys << 'smpl.pitch_fraction' if provenance[:root]&.via == :smpl
           keys += %w[fmt.sample_rate data.bytes].select { |k| facts&.key?(k) }
           keys.uniq

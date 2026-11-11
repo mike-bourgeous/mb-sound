@@ -36,9 +36,8 @@ module MB
         # Ogg file extensions (comments on the stream).
         OGG = %w[.ogg .oga .opus].freeze
 
-        # The WAV chunks Sample::Riff reads ('strc' too once Riff reads
-        # ACID's stretch markers); the others count as unread.
-        READ_CHUNKS = ['fmt ', 'data', 'ds64', 'acid', 'smpl', 'cue ', 'LIST'].freeze
+        # The WAV chunks Sample::Riff reads; the others count as unread.
+        READ_CHUNKS = ['fmt ', 'data', 'ds64', 'acid', 'smpl', 'cue ', 'LIST', 'strc'].freeze
 
         # The most chunks listed (a file's first; `chunk_count` says how
         # many it has).
@@ -154,9 +153,8 @@ module MB
               src[:bits] = riff.format.bits if riff.format
               src[:frames] = riff.frames if riff.frames
               src[:data] = { at: riff.data_offset, bytes: riff.data_size } if riff.data_offset
-              read = READ_CHUNKS + (riff.respond_to?(:strc) ? ['strc'] : [])
               rows = riff.chunks
-              skipped = rows.reject { |id, _, _| read.include?(id) }
+              skipped = rows.reject { |id, _, _| READ_CHUNKS.include?(id) }
               src[:chunks] = rows.first(CHUNKS_LISTED).map { |id, at, size| [id, at, size] }
               src[:chunk_count] = rows.length
               src[:skipped] = skipped.map(&:first).uniq

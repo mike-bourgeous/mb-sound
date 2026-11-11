@@ -204,6 +204,38 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
       expect(loop.trim(6000..).markers.map(&:position)).to eq([6000, 18000, 23999, 30000])
     end
 
+    it 'reads the chunk as facts the interpreter consumes, with the markers\' provenance' do
+      info = riff.read(path)
+      chunk = info.chunks.find { |id, _, _| id == 'strc' }
+      facts = MB::Sound::Facts.of_riff(info)
+      expect(facts['strc.count'].value).to eq(7)
+      expect(facts['strc.settings'].value).to eq([0, 0, 1, 0, 0])
+      expect(facts['strc.entry[0]'].to_h).to include(value: [2, 0, 0, 0], record: 'strc', at: chunk[1] + 36, bytes: 32)
+      expect(facts['strc.entry[2]'].value).to eq([0, hits[1], hits[1], 0])
+      expect(facts.select_keys('strc.entry[*').size).to eq(7)
+      expect(facts.key?('chunk.strc')).to be(false)
+      expect(facts.keys.last(9)).to eq(%w[strc.count strc.settings] + Array.new(7) { |i| "strc.entry[#{i}]" }) # (after the other chunks' facts)
+
+      m = loop.provenance(:markers)
+      expect([m.via, m.fact, m.record, m.at, m.interpreter]).to eq([:strc, 'strc.entry[0]', 'strc', chunk[1] + 36, 'Sample::LoopInfo'])
+      fields = loop.meta[:source][:fields].to_h
+      expect(fields.keys.grep(/\Astrc\./)).to eq([]) # (consumed: not description)
+      expect(fields.keys.grep(/\Acue\./)).to eq(['cue.point[0]'])
+      expect(loop.meta[:source][:skipped]).to eq([])
+      expect(loop.summary).to include('markers: strc "strc.entry[0]" (wav strc chunk at 0x')
+
+      # a file with cue points only: they are the markers, and consumed
+      cued = MB::Sound::Sample[write_wav('Loop 4.wav', loop_audio, acid: { tempo: 120.0, beats: 2 }, cues: [[0, 'Bar 1'], [22050, 'Bar 2']])]
+      expect([cued.provenance(:markers).via, cued.provenance(:markers).fact]).to eq([:cue, 'cue.point[0]'])
+      expect((cued.meta.dig(:source, :fields) || {}).to_h.keys.grep(/\Acue\./)).to eq([])
+
+      # a chunk made for other audio is left out: its facts stay description, and the reason says so
+      stale = MB::Sound::Sample[write_wav('Loop 5.wav', loop_audio[0...22050], acid: { tempo: 120.0, beats: 1 }, strc: [auto(0), 0, 11025, 22050, 33075])]
+      expect(stale.markers).to eq([])
+      expect([stale.provenance(:markers).via, stale.why(:markers)]).to eq([nil, 'strc markers past the end (made for other audio): left out'])
+      expect(stale.meta[:source][:fields]).to include('strc.count' => 5, 'strc.entry[4]' => [0, 33075, 33075, 0])
+    end
+
     it 'cuts slices at them by default, unless slices: says otherwise' do
       cuts = at48(hits)
       s = loop.stretch(1.25, mode: :slice)
