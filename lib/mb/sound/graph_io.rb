@@ -80,7 +80,11 @@ module MB
       # (prefader-sends-1, 2026-11-10) writes pre-fader and pre-mute sends
       # as `track :lead, pre_send: { verb: -12.db }` and `pre_mute_send:`,
       # which older mb-sound doesn't know (it stops at the format line
-      # instead).
+      # instead).  Format 11 (metadata-2, 2026-11-11; the maintainer chose
+      # the bump) carries descriptive metadata: a `meta: { ... }` keyword
+      # on the `graph` line, `.note(...)` calls, and inline comments read
+      # as notes (GraphIO::Comments); older documents' comments stay
+      # comments.
       #
       # FORMATS names the change each version made, so loaders gate on a
       # name (GraphIO.since?) and branches adding versions touch only this
@@ -95,6 +99,7 @@ module MB
         8 => :library_calls,
         9 => :tempo_live,
         10 => :prefader_sends,
+        11 => :metadata,
       }.freeze
       FORMAT = FORMATS.keys.max
 

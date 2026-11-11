@@ -46,7 +46,7 @@ Nothing plays from a Sample's metadata: the loop, tempo, root, and key a voice u
 - **Set documents**: `meta` lines at the end for the set and its names (source-meta-1), clips' and nodes' notes where they print, and a `meta:` on the graph line.
 - **Library files**: entry lines take `meta: { ... }` (`Entry#meta`, never searched: `tags:`/`about:` stay the index); entries of graph documents carry the document's metadata.
 - **Takes**: `take.note('...')` / `take.with_meta(...)`, saved as the replay's `meta:` (`Replay#meta`; replays never read it).
-- No `GraphIO::FORMATS` bump: documents without metadata are byte for byte what they were (open question 2).
+- `GraphIO::FORMATS` 11 (`:metadata`; the maintainer chose the bump, 2026-11-11): documents write `graph 11`; inline comments become notes only in format 11 documents (older documents' comments stay comments).
 
 ### Inline comments (`GraphIO::Comments`)
 
@@ -67,7 +67,7 @@ Each format carries the vocabulary in its own tags for people and the whole Hash
 | anything else | | a sidecar `<file>.meta.rb`: one `meta` statement |
 
 - WAV: `Formats.append_wav` adds the LIST INFO and `mbmt` chunks after the audio of a file mb-sound just wrote (RIFF size, or RF64's ds64 size, updated); reading uses `Riff::Info`'s chunk list and INFO texts (riff.rb unchanged).  ffprobe shows the INFO tags.
-- `MB::Sound.write(path, data, meta:, meta_title:)` writes either way; `Sample#save` writes the whole metadata, replacing source-meta-1's `mb_sample_source` tag (still read from older files: open question 3).  Ogg keeps comments on the stream: `Sample::Source` reads them with one more ffprobe for .ogg/.oga/.opus (FFMPEGInput's own tags stay the container's: reading the stream's there exposed saved Sample tags whose stop lies past a lossy decode's length).
+- `MB::Sound.write(path, data, meta:, meta_title:)` writes either way; `Sample#save` writes the whole metadata and also source-meta-1's `mb_sample_source` tag (`:source` alone, at most 32 KB); both are read (the maintainer, 2026-11-11: "Keep both tags").  Ogg keeps comments on the stream: `Sample::Source` reads them with one more ffprobe for .ogg/.oga/.opus (FFMPEGInput's own tags stay the container's: reading the stream's there exposed saved Sample tags whose stop lies past a lossy decode's length).
 - Sidecars: `Formats.write_sidecar`/`.read_sidecar`; `GraphIO::FileGuard.sidecar` allows only a plain file (not a link) of at most 64 KB beside a file its reader already checked; its one `meta` statement is read with `Meta.literal`.  Samples, MIDI files, and SoundFonts merge a sidecar over what the file carries.
 - Ruby texts over 64 KB (`Formats::MAX_TEXT`) are left out with a warning when written and ignored when read.
 
@@ -83,11 +83,10 @@ Importers put provenance under `:source`; the library reads these keys only for 
 
 ## Open
 
-1. Names as identity: kept `named`/`graph_node_name` and Session names as lookups, shown read-only beside metadata; `meta name:` and `source: { name: }` never become lookup names.  The alternative (names folded into metadata) would make metadata decide lookups.
-2. No `GraphIO::FORMATS` bump for `meta:` on the graph line, `.note`, comments as notes, or the header split (documents without metadata are unchanged; older readers stop at `.note`).
-3. `Sample#save` writes the whole metadata (MB_SOUND_META / `mbmt`) instead of source-meta-1's `mb_sample_source` tag, which is still read.
-4. Executed song files: nothing built.  Option (a) of the proposal (each node's creating file:line recorded with `caller_locations` at build time, comments resolved lazily) costs an allocation per node built; not prototyped.  Tools never rewrite his files.
-5. Cross-branch: acid-loop-info-1 (held) adds `Sample#acid_one_shot?`, which reads `meta[:one_shot]` (and `meta_source`) to decide whether `#follow` stretches: metadata deciding playback.  Merged with this branch, the guard's per-method list fails it; the fix is a data field (e.g. the ACID one-shot flag as a Sample setting read by LoopInfo, kept by `#save` as a tag), with `meta[:one_shot]` only describing.
-6. `description:` and `tags:` stay structural (the library's index reads them to rank and narrow), as do `from:` and `tuned:` (tools branch on them), though the brief listed them as descriptive; moving them would make the library and hand-tune tools read metadata to decide.
-7. From source-meta-1: pieces outside `Session::Names` (scenes, sections, markers) still have no place of their own (clips now carry their own); `meta` is not an undo step and stays through `untrack`; the catalog budget.
-8. Next importers to fill `meta[:source]` (none built here): tracker modules, MIDI files' per-track facts, SoundFont presets and samples, SFZ regions, FLAC/AIFF chunk lists, the .acd converter.
+Answered (maintainer, 2026-11-11): names stay identity; GraphIO::FORMATS bumped to 11; no song-file comments for now; keep both tags.
+
+1. Executed song files: not now (the maintainer).  Option (a) of the proposal (each node's creating file:line recorded with `caller_locations` at build time, comments resolved lazily) would cost an allocation per node built.
+2. Cross-branch: acid-loop-info-1 (held) adds `Sample#acid_one_shot?`, which reads `meta[:one_shot]` (and `meta_source`) to decide whether `#follow` stretches: metadata deciding playback.  Merged with this branch, the guard's per-method list fails it; the fix is a data field (e.g. the ACID one-shot flag as a Sample setting read by LoopInfo, kept by `#save` as a tag), with `meta[:one_shot]` only describing.
+3. `description:` and `tags:` stay structural (the library's index reads them to rank and narrow), as do `from:` and `tuned:` (tools branch on them), though the brief listed them as descriptive; moving them would make the library and hand-tune tools read metadata to decide.
+4. From source-meta-1: pieces outside `Session::Names` (scenes, sections, markers) still have no place of their own (clips now carry their own); `meta` is not an undo step and stays through `untrack`; the catalog budget.
+5. Next importers to fill `meta[:source]` (none built here): tracker modules, MIDI files' per-track facts, SoundFont presets and samples, SFZ regions, FLAC/AIFF chunk lists, the .acd converter.

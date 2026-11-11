@@ -98,6 +98,13 @@ RSpec.describe(MB::Sound::GraphIO::Comments, :aggregate_failures) do
     expect(MB::Sound::Meta.notes_text(g.meta.notes)).to start_with('"system(\\"touch')
   end
 
+  it 'leaves comments of documents before format 11 as comments' do
+    expect(MB::Sound::GraphIO::FORMAT).to eq(11)
+    g = io.load(head.sub(/graph \d+/, 'graph 10') + body)
+    expect(g.meta.notes).to eq([])
+    expect(g.graph.map { |n| n.respond_to?(:meta) ? n.meta.notes : [] }.flatten).to eq([])
+  end
+
   it 'collects nothing for a document without comments of its own' do
     text = io.dump(220.hz.saw.lp4(800))
     result = Prism.parse(text)

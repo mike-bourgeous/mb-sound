@@ -42,7 +42,7 @@ module MetaGuard
     'lib/mb/sound/help/now.rb' => '`now` shows one line about the set\'s metadata',
     'lib/mb/sound/help/content/topics.rb' => 'help :meta examples',
     'lib/mb/sound/graph_io/set_writer.rb' => 'set documents write the `meta` lines',
-    'lib/mb/sound/sample/source.rb' => ['Sample#with_meta/#note make copies with more metadata', %i[with_meta note]],
+    'lib/mb/sound/sample/source.rb' => ['Sample#with_meta/#note make copies with more metadata; #tags writes :source as the mb_sample_source tag', %i[with_meta note tags]],
     'lib/mb/sound/sample.rb' => ['detect_tempo/detect_key record why (text); #save writes the metadata into the file', %i[detect_tempo detect_key save]],
     'lib/mb/sound/sample/loop_info.rb' => ['LoopInfo reports why a key was detected (text for people)', %i[detected]],
     'lib/mb/sound/graph_io.rb' => ['GraphIO.header_split: the descriptive metadata a save writes again', %i[header_split]],

@@ -15,11 +15,15 @@ module MB
       # keeps `:source` (a tag), so a sample saved into a bundle still
       # says where its audio came from.
       module Source
-        # The tag source-meta-1's #save kept `meta[:source]` in (its Ruby
-        # text), read from older files.  #save now writes the whole
-        # metadata in the file's tags and as Ruby text (Meta::Formats:
-        # MB_SOUND_META, a WAV's `mbmt` chunk).
+        # The tag #save keeps `meta[:source]` in (its Ruby text, read back
+        # by Meta.parse), beside the whole metadata in MB_SOUND_META (a
+        # WAV's `mbmt` chunk; Meta::Formats).  Both are written and read
+        # (the maintainer, 2026-11-11: "Keep both tags").
         TAG = :"#{TAG_PREFIX}source"
+
+        # The largest `:source` text #save writes as a tag (bytes; a
+        # larger one is left out with a warning).
+        TAG_MAX = 32_768
 
         # Ogg file extensions (comments on the stream).
         OGG = %w[.ogg .oga .opus].freeze
@@ -50,6 +54,19 @@ module MB
         # documents print `Sample["x.wav"].note("...")`.
         def note(*texts)
           with(meta: meta.note(*texts), lineage: [self, :note, Meta.frozen(texts), {}].freeze)
+        end
+
+        # The tags #save writes, with `meta[:source]` as Source::TAG.
+        def tags
+          t = super
+          src = meta[:source]
+          return t if src.nil?
+          text = RubyValue.to_ruby(src)
+          if text.bytesize > TAG_MAX
+            warn "Sample #{name.inspect}: its :source metadata is #{Meta.bytes_text(text.bytesize)} as text, too large for a tag (#{Meta.bytes_text(TAG_MAX)}); saved without it"
+            return t
+          end
+          t.merge(TAG => text)
         end
 
         class << self

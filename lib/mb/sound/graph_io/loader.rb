@@ -171,6 +171,7 @@ module MB
           @base_dir = base_dir || (path && File.dirname(File.expand_path(path)))
           @parse_result = nil # (#parse)
           @note_comments = nil # (#load: GraphIO::Comments, nil without comments)
+          @comment_notes = true # (#read_header: false for documents before format 11)
           @arg_comments = nil
           raise ArgumentError, "trust: must be nil or :code (got #{trust.inspect})" unless trust.nil? || trust == :code
         end
@@ -189,7 +190,7 @@ module MB
           raise error(tree, 'the document has no graph (only a header)') if body.empty?
           # (inline comments as notes on what each statement and link builds:
           # Comments; nil, and nothing checked while building, without any)
-          @note_comments, @arg_comments = Comments.collect(@parse_result, body)
+          @note_comments, @arg_comments = Comments.collect(@parse_result, body) if @comment_notes
           return load_rack(body) if @document.rack?
 
           bind_inputs
@@ -525,6 +526,7 @@ module MB
               @old_ring = !GraphIO.since?(version, :ring_all_typed_inputs)
               @old_shift = !GraphIO.since?(version, :clip_shift)
               @old_tempo = !GraphIO.since?(version, :tempo_live)
+              @comment_notes = GraphIO.since?(version, :metadata)
               @document.graph_keywords = kwargs
             when :inputs
               bad = args.reject { |a| a.is_a?(Symbol) }
