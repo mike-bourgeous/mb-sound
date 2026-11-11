@@ -485,6 +485,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
         'sampler lanes (a tracker channel)' => 'Samples made from NArrays (bundles save them as assets; see tracker/set_spec.rb)',
         'capture tap (CaptureTap)' => 'live capture plumbing (capture_audio), not graph structure',
         'convolve (Convolver)' => 'Samples made from NArrays (file paths and Samples read from files print; see convolver_spec.rb)',
+        'convolve attack curve and impulse width (convolve-attack-1)' => 'Samples made from NArrays (convolver_spec.rb round trips a file impulse with these options)',
       }.freeze
 
       # Factories whose graphs print, but with state that isn't graph
