@@ -23,7 +23,7 @@ RSpec.describe(MB::Sound::Meta::Formats, :aggregate_failures) do
         path = tmp_path("tone.#{ext}")
         sample.save(path)
         back = MB::Sound::Sample[path]
-        expect(back.meta.without(:why, :smpl_loops)).to eq(meta)
+        expect(back.meta.slice(*meta.keys)).to eq(meta) # (only the keys written: readers may add their own)
         expect(back.meta.dig(:source, :fields, 'vol')).to eql(1/2r)
         expect(back.name).to eq("tone.#{ext}") # (a file's title never names the Sample)
         info = MB::Sound::FFMPEGInput.parse_info(path)

@@ -158,7 +158,7 @@ module MB
           scale = info.delete(:scale)
           channels = channels.map { |c| c * scale } if scale
           found = {}
-          meta = info.empty? ? loop_metadata(real.to_s, tags, channels, found: found) : {}
+          meta = info.empty? ? loop_metadata(real.to_s, tags, channels, found: found) : { provenance: saved_provenance(info) }
           # (the file's own provenance as meta[:source]: Sample::Source)
           settings = Source.add(meta.merge(info).merge(options), real.to_s, tags, found)
           new(channels, name: File.basename(path), file: options.empty? ? File.expand_path(real.to_s) : nil, **settings)
@@ -200,8 +200,10 @@ module MB
 
           k = e.sample_rate && e.sample_rate > 0 ? sample_rate.to_f / e.sample_rate : 1.0
           scale = ->(pts) { pts.map { |a, b, mode| x = (a * k).round.clamp(0, length - 1); [x.to_f, (b * k).round.clamp(x + 1, length).to_f, mode] } }
-          out = { meta_source: src.freeze }
-          out[:meta] = { why: why.freeze, smpl_loops: (length ? scale.(e.smpl_loops) : []).freeze }.freeze
+          # (where each field came from: the interpreter's provenance; the
+          # file's facts it didn't use become description, Sample::Source)
+          facts = found && found[:riff] ? Facts.of_riff(found[:riff]) : nil
+          out = { provenance: LoopInfo.provenance(src, why, facts, tags: tags, loop: e.loop) }
           out[:bpm] = e.bpm if e.bpm
           out[:beats] = e.beats if e.beats
           out[:meter] = e.meter if e.meter
@@ -259,6 +261,17 @@ module MB
           when /\A[0-9.]+\z/ then Float(text)
           else text.to_sym
           end
+        end
+
+        # Fields whose provenance a saved file's tags give (Sample#save
+        # wrote them; Sample.saved_tags read them back).
+        SAVED_FIELDS = { bpm: 'bpm', beats: 'beats', meter: 'meter', key: 'key', root: 'root', loop: 'loop_start', markers: 'markers' }.freeze
+
+        # The Provenance of the settings +info+ (.saved_tags) holds.
+        def saved_provenance(info)
+          SAVED_FIELDS.select { |f, _| info.key?(f) }.to_h { |f, tag|
+            [f, Provenance.new(field: f, via: :saved, fact: "tag.#{TAG_PREFIX}#{tag}", record: 'tags', interpreter: 'Sample.saved_tags', why: 'saved by Sample#save')]
+          }.freeze
         end
 
         # The settings read back from tags written by #save.
@@ -365,22 +378,31 @@ module MB
       # :"F#", :Eb), or nil.
       attr_reader :key
 
-      # Where loop metadata came from: { bpm: :acid | :tags | :name |
-      # :detected, beats: ..., key: :name, markers: :cue, ... } (empty for
-      # samples not read from loop files).
+      # Where each setting came from (Provenance::Readers): #provenance
+      # (field) is a Provenance (the fact, its chunk or tag and offset, the
+      # interpreter, why in words), #why(field) the words.  Description:
+      # printers read it, nothing plays from it.
+      include Provenance::Readers
+
+      # Where each setting came from, in a word: { bpm: :acid | :tags |
+      # :name | :detected, beats: ..., key: :name, markers: :cue, ... } (the
+      # +via+ of each #provenance; empty for samples not read from files).
       def meta_source
-        @meta_source || {}
+        @provenance ? @provenance.transform_values(&:via).compact : Provenance::EMPTY
       end
 
       # The sample's metadata (a Meta::Value; Meta::Carrier, see
-      # Sample::Source): what the library read from a loop file, { why: {
-      # bpm: "name 98 (fits 8 beats)", one_shot: "name 'kick'" } (the
-      # reasons in words), smpl_loops: [[start, stop, mode], ...] (every
-      # `smpl` loop in source samples, also for ACID loops, which ignore
-      # them) }, the file's own `:source`, and anything given with
-      # #with_meta or #note (empty when none).  Nothing plays from it: the
-      # loop, tempo, and key a voice uses are the Sample's own settings
-      # (#loop_points, #bpm, #key; design/notes/metadata.md, the audit).
+      # Sample::Source): the file's description (its title, comment,
+      # author, ... and Ruby text: Meta::Formats), the file's own
+      # `:source` with the facts no interpreter used under `fields:` (a
+      # loop the file lists that the sample doesn't play, an encoder's
+      # name), and anything given with #with_meta or #note (empty when
+      # none).  Description keys loop-file readers add (one_shot:, cues:,
+      # a reason of their own) are description too.  Nothing plays from
+      # it: the loop, tempo, root, key, and one-shot call a voice uses are
+      # the Sample's own settings (#loop_points, #bpm, #root, #key), and
+      # where each came from is #provenance (design/notes/metadata.md,
+      # the layers).
       def meta
         @meta || Meta::EMPTY
       end
@@ -436,7 +458,7 @@ module MB
       # :one_shot).
       def initialize(data, root: 60, loop: nil, loop_mode: nil, start: nil, stop: nil, reverse: false, fade_in: 0, fade_out: 0, tune: 0, level: 1.0,
                      bpm: nil, name: nil, interpolation: nil, mips: nil, sample_rate: 48000, audio: nil, lineage: nil, file: nil,
-                     beats: nil, meter: nil, key: nil, markers: nil, meta_source: nil, meta: nil)
+                     beats: nil, meter: nil, key: nil, markers: nil, provenance: nil, meta: nil)
         @audio = audio || Audio.new(Sample.channels_of(data), sample_rate)
         @start = Integer(start || 0)
         @stop = Integer(stop || @audio.length)
@@ -453,7 +475,7 @@ module MB
         raise ArgumentError, "meter: is [beats per bar, beat note] (got #{meter.inspect})" if @meter && !(@meter.length == 2 && @meter.all?(&:positive?))
         @key = key&.to_sym
         @markers = markers.nil? ? nil : Sample.marker_list(markers)
-        @meta_source = meta_source
+        @provenance = provenance.nil? || provenance.empty? ? nil : provenance.freeze
         @meta = meta.nil? || meta.empty? ? nil : Meta::Value.of(meta)
         @loop_points = loop.nil? ? nil : Sample.loop_points(loop, self)
         @loop_mode = (loop_mode || (@loop_points ? :forward : :one_shot)).to_sym
@@ -611,7 +633,7 @@ module MB
           root: @root, loop: @loop_points, loop_mode: mode, start: @start, stop: @stop,
           reverse: @reversed, fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: @bpm, name: @name,
           interpolation: @interpolation, mips: @mips, audio: @audio, lineage: @lineage,
-          beats: @beats, meter: @meter, key: @key, markers: @markers, meta_source: @meta_source, meta: @meta,
+          beats: @beats, meter: @meter, key: @key, markers: @markers, provenance: @provenance, meta: @meta,
         }
         Sample.new(nil, **kw.merge(changes))
       end
@@ -1135,7 +1157,9 @@ module MB
         }
         b = seconds * bpm / 60.0
         bpm = b.round * 60.0 / seconds if b.round > 0 && (b - b.round).abs <= 0.05 * b
-        with(bpm: bpm, meta_source: meta_source.merge(bpm: :detected, beats: :detected).freeze)
+        why = "detected #{format('%.2f', bpm).sub(/\.?0+\z/, '')} BPM in the audio"
+        detected = %i[bpm beats].to_h { |f| [f, Provenance.new(field: f, via: :detected, interpreter: 'Sample#detect_tempo', why: why)] }
+        with(bpm: bpm, provenance: provenance.merge(detected))
       end
 
       # The key of the sample's audio by the Krumhansl-Schmuckler method
@@ -1158,7 +1182,7 @@ module MB
       # Analysis::Key::MIN_CORRELATION and a margin over the runner-up)
       # and the sound is tonal (#material: drum loops have no key, though
       # a tuned kick folds onto one); otherwise the sample as it is.  The
-      # reason is in `meta[:why][:key]` either way ("detected A minor (r
+      # reason is `why(:key)` (its provenance) either way ("detected A minor (r
       # 0.90, next C major 0.77)", "no clear key: ...", "percussive ...: no
       # key ...").  +force+ takes the best pick whatever the material and
       # correlation.  `Sample[path, detect: true]` calls it for files
@@ -1175,9 +1199,9 @@ module MB
                      else
                        ["detected #{k}", true]
                      end
-        changes = { meta: meta.merge(why: (meta[:why] || {}).merge(key: why).freeze).freeze }
-        changes.merge!(key: k.key, meta_source: meta_source.merge(key: :detected).freeze) if found
-        with(**changes)
+        # (the reason either way: a key found, or why none)
+        prov = provenance.merge(key: Provenance.new(field: :key, via: found ? :detected : provenance(:key)&.via, interpreter: 'Sample#detect_key', why: why))
+        found ? with(key: k.key, provenance: prov) : with(provenance: prov)
       end
 
       # What Sample.from_file's +detect:+ may name.
@@ -1306,6 +1330,22 @@ module MB
         "#<#{self.class.name} #{self}>"
       end
 
+      # The sample in lines for people and agents: #to_s, where each
+      # setting came from (#provenance, one line a field), and its
+      # metadata (Meta.summary); text from files quoted.
+      #
+      #     puts Sample['loop.wav'].summary
+      #     # loop.wav (2.000 s, root C4, 120 BPM, loop forward)
+      #     #   bpm: acid "acid.tempo" (wav acid chunk at 0x24, Sample::LoopInfo): "the ACID chunk"
+      #     #   ...
+      #     #   metadata: from "loop.wav", 9.5 KB, 3 fields carried
+      def summary
+        lines = [to_s]
+        lines.concat(Provenance.lines(provenance).map { |l| "  #{l}" })
+        lines << "  metadata: #{Meta.summary(meta)}" unless meta.empty?
+        lines.join("\n")
+      end
+
       # A note name for note number +n+ (e.g. C4), or the number.
       def self.note_name(n)
         n == n.round ? Note.new(n.round).name : MB::M.sigfigs(n, 5).to_s
@@ -1348,7 +1388,7 @@ module MB
           out, root: @root, loop: loop, loop_mode: loop ? @loop_mode : (@loop_points ? :one_shot : @loop_mode), reverse: @reversed,
           fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: bpm, name: @name, sample_rate: sample_rate,
           interpolation: read[:interpolation], mips: read[:mips], lineage: [self, method, args, kwargs].freeze,
-          beats: full_region? ? @beats : nil, meter: @meter, key: @key, markers: markers, meta_source: @meta_source, meta: @meta
+          beats: full_region? ? @beats : nil, meter: @meter, key: @key, markers: markers, provenance: @provenance, meta: @meta
         )
       end
 

@@ -62,15 +62,70 @@ module MB
         # }` keyword.  Shown and saved again, never read to build.
         attr_reader :meta
 
+        # An interpreter of the `graph` line's facts (round 2's layers):
+        # +keys+ become header data with provenance naming +name+ (what
+        # reads them) and +why+.
+        class HeaderKeys
+          include MB::Sound::Facts::Interpreter
+
+          attr_reader :name
+
+          def initialize(name, keys, why)
+            @name = name
+            @keys = keys
+            @why = why
+            freeze
+          end
+
+          def consumes = @keys.map { |k| "graph.#{k}" }
+
+          def interpret(facts)
+            mine = facts.select { |f| consumes?(f.key) }
+            data = mine.to_h { |f| [f.key.delete_prefix('graph.').to_sym, f.value] }
+            prov = mine.to_h { |f|
+              k = f.key.delete_prefix('graph.').to_sym
+              [k, MB::Sound::Provenance.new(field: k, via: :header, fact: f.key, format: :mbg, record: f.record, at: f.at, interpreter: @name, why: @why)]
+            }
+            MB::Sound::Facts::Interpretation.new(interpreter: @name, data: data, consumed: mine.map(&:key), provenance: prov)
+          end
+        end
+
+        # The `graph` line's interpreters: what reads each structural key.
+        HEADER_INTERPRETERS = [
+          HeaderKeys.new('GraphIO::Loader', %i[name kind rack options], 'the document says how to build it'),
+          HeaderKeys.new('the fit tools (FitPatch, HandTune, Take::Reader)', %i[from tuned], 'the tool that wrote the document'),
+          HeaderKeys.new('Library::Index', %i[description tags], "the library's index words"),
+          MB::Sound::Facts::Consumer.new('GraphIO::Document#meta', %w[graph.meta]),
+        ].freeze
+
+        # The `graph` line's facts (MB::Sound::Facts: `graph.<key>`, the
+        # raw layer), and where each header key came from (#provenance).
+        attr_reader :facts
+
+        include MB::Sound::Provenance::Readers
+
         # Sets #header and #meta from the `graph` line's keywords (+kwargs+;
-        # `meta:` already read as plain values): structural keys to #header,
-        # the rest to #meta, where `meta:`'s own keys can't reach the header
-        # (a `meta: { rack: :irack }` stays description).
-        def graph_keywords=(kwargs)
+        # `meta:` already read as plain values; +offsets+: { key => byte
+        # offset } in the text), by round 2's layers: the keywords are
+        # facts; HEADER_INTERPRETERS consume the structural keys into
+        # #header (with #provenance); the facts none consumed (saved:,
+        # mb_sound:, unknown keys) and `meta:`'s Hash are #meta, where
+        # `meta:`'s own keys can't reach the header (a `meta: { rack:
+        # :irack }` stays description).
+        def read_graph_line(kwargs, offsets: {})
           extra = kwargs[:meta]
           raise ArgumentError, "meta: is a Hash of plain values (got #{MB::Sound::Meta.describe(extra)})" unless extra.nil? || extra.is_a?(Hash)
-          @header = kwargs.slice(*STRUCTURE_KEYS).freeze
-          @meta = MB::Sound::Meta::Value.of(kwargs.except(*STRUCTURE_KEYS, :meta)).merge(extra || {})
+          @facts = MB::Sound::Facts.of_graph_line(kwargs, offsets: offsets)
+          r = MB::Sound::Facts.interpret(@facts, *HEADER_INTERPRETERS)
+          @header = r.data.freeze
+          @provenance = r.provenance.empty? ? nil : r.provenance.freeze
+          rest = r.unconsumed.to_fields.transform_keys { |k| k.delete_prefix('graph.').to_sym }
+          @meta = MB::Sound::Meta::Value.of(rest).merge(extra || {})
+        end
+
+        # (read_graph_line without offsets)
+        def graph_keywords=(kwargs)
+          read_graph_line(kwargs)
         end
 
         # The MB::Sound::Param of a `param` line named +name+ with +value+
@@ -129,6 +184,8 @@ module MB
           @format = GraphIO::FORMAT
           @header = MB::Sound::Meta::EMPTY_HASH
           @meta = MB::Sound::Meta::EMPTY
+          @facts = nil
+          @provenance = nil
           @inputs = []
           @params = {}
           @knob_nodes = {}

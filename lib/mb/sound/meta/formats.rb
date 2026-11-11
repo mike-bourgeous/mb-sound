@@ -49,6 +49,36 @@ module MB
         # The sidecar of a file: `kick.wav.meta.rb`.
         SIDECAR = '.meta.rb'
 
+        # The interpreter of the facts that describe a file for people and
+        # agents (Facts.interpret): LIST INFO texts and the `mbmt` chunk, or
+        # ffmpeg's title/comment/artist/copyright and MB_SOUND_META (and
+        # source-meta-1's mb_sample_source), and sidecar keys; it makes
+        # description (.from_riff, .from_tags), never data.
+        class TextInterpreter
+          include Facts::Interpreter
+
+          def name = 'Meta::Formats'
+
+          def consumes
+            @consumes ||= [*RIFF_INFO.values.map { |id| "INFO.#{id}" }, CHUNK, *FFMPEG_TAGS.values.map { |t| "tag.#{t}" },
+                           "tag.#{TAG.downcase}", 'tag.mb_sample_source', 'sidecar.*'].freeze
+          end
+
+          def interpret(facts)
+            mine = facts.select { |f| consumes?(f.key) }
+            info = mine.select { |f| f.key.start_with?('INFO.') }.to_h { |f| [f.key.delete_prefix('INFO.'), f.value] }
+            text = mine.find { |f| f.key == CHUNK }&.value
+            tags = mine.select { |f| f.key.start_with?('tag.') }.to_h { |f| [f.key.delete_prefix('tag.'), f.value] }
+            side = mine.select { |f| f.key.start_with?('sidecar.') }.to_h { |f| [f.key.delete_prefix('sidecar.').to_sym, f.value] }
+            desc = info.empty? && text.nil? ? Formats.from_tags(tags) : Formats.from_riff(info, text)
+            desc = desc.merge(side) unless side.empty?
+            Facts::Interpretation.new(interpreter: name, consumed: mine.map(&:key), description: desc)
+          end
+        end
+
+        # The interpreter of descriptive facts (see TextInterpreter).
+        TEXT = TextInterpreter.new
+
         module_function
 
         ### Writing
@@ -186,7 +216,8 @@ module MB
         # run.  A sidecar that breaks a rule is ignored with a warning.
         def read_sidecar(path)
           side = GraphIO::FileGuard.sidecar(sidecar_path(path.to_s)) or return nil
-          parse_sidecar(File.read(side, encoding: 'UTF-8'), side)
+          # (a sidecar's facts, all of which the text interpreter describes)
+          Facts.interpret(Facts.of_sidecar(parse_sidecar(File.read(side, encoding: 'UTF-8'), side)), TEXT).description
         rescue ArgumentError, SystemCallError => e
           warn "#{side || sidecar_path(path)}: metadata ignored (#{e.message})"
           nil
@@ -255,12 +286,15 @@ module MB
         def read_wav(path, riff = nil)
           riff ||= Sample::Riff.read(path)
           return EMPTY unless riff
+          from_riff(riff.info, wav_text(path, riff))
+        end
+
+        # The `mbmt` chunk's text of the WAV file at +path+ (+riff+ its
+        # Riff::Info), or nil.
+        def wav_text(path, riff)
           row = riff.chunks.find { |id, _, _| id == CHUNK }
-          text = nil
-          if row && row[2] <= MAX_TEXT
-            text = File.open(path, 'rb') { |f| f.pread(row[2], row[1] + 8) }
-          end
-          from_riff(riff.info, text)
+          return nil unless row && row[2] <= MAX_TEXT
+          File.open(path, 'rb') { |f| f.pread(row[2], row[1] + 8) }
         end
 
         # The metadata of MIDI meta events: +events+ as [type, text] pairs
@@ -295,13 +329,68 @@ module MB
         end
 
         # The metadata of MIDI::MIDIFile +file+ (+track+: one track's index,
-        # else the whole file's; .from_midi of MIDIFile#meta_events), with
-        # the file's sidecar over it.
+        # else the whole file's): its meta events' facts (Facts.of_midi of
+        # MIDIFile#meta_events), the descriptive ones read by MIDI_TEXT
+        # (.from_midi), the rest (instrument names, lyrics, cue points)
+        # under `source: { fields: }`, and the file's sidecar over it all.
         def read_midi(file, track = nil)
-          m = from_midi(file.meta_events(track))
+          facts = Facts.of_midi(file.meta_events(track))
+          r = Facts.interpret(facts, MIDI_TEXT)
+          m = r.description
+          if !r.consumed.any? { |k| k.include?('.text[') && facts[k].value.start_with?(MIDI_PREFIX) }
+            src = { format: :mid, file: File.basename(file.filename.to_s), track: track }.compact
+            fields = r.unconsumed.to_fields.first(64).to_h
+            src[:fields] = fields unless fields.empty?
+            m = m.merge(source: src) unless m.key?(:source)
+          end
           side = read_sidecar(file.filename)
           side ? m.merge(side) : m
         end
+
+        # The interpreter of a MIDI file's descriptive meta events: track
+        # names (the first is the title), copyright, text, markers, and the
+        # `mb-sound meta:` text (.from_midi).
+        class MidiTextInterpreter
+          include Facts::Interpreter
+
+          def name = 'Meta::Formats (MIDI)'
+          def consumes = ['track[*'].freeze
+          def consumes?(key) = key.match?(/\Atrack\[\d+\]\.(name|copyright|text\[\d+\]|marker\[\d+\])\z/)
+
+          def interpret(facts)
+            mine = facts.select { |f| consumes?(f.key) }
+            rows = mine.map do |f|
+              case f.key
+              when /\.name\z/ then [0x03, f.value]
+              when /\.copyright\z/ then [0x02, f.value]
+              when /\.marker\[/ then [0x06, f.value[1], f.value[0]]
+              else [0x01, f.value]
+              end
+            end
+            Facts::Interpretation.new(interpreter: name, consumed: mine.map(&:key), description: Formats.from_midi(rows))
+          end
+        end
+
+        # The interpreter of a MIDI file's descriptive meta events.
+        MIDI_TEXT = MidiTextInterpreter.new
+
+        # The interpreter of a SoundFont's descriptive INFO texts
+        # (.from_sf2).
+        class Sf2TextInterpreter
+          include Facts::Interpreter
+
+          def name = 'Meta::Formats (SoundFont)'
+          def consumes = @consumes ||= SF2_INFO.values.map { |id| "INFO.#{id}" }.freeze
+
+          def interpret(facts)
+            mine = facts.select { |f| consumes?(f.key) }
+            info = mine.to_h { |f| [f.key.delete_prefix('INFO.'), f.value] }
+            Facts::Interpretation.new(interpreter: name, consumed: mine.map(&:key), description: Formats.from_sf2(info))
+          end
+        end
+
+        # The interpreter of a SoundFont's descriptive INFO texts.
+        SF2_TEXT = Sf2TextInterpreter.new
 
         # The metadata of SoundFont INFO texts +info+ ({ 'INAM' => ..., ... }).
         def from_sf2(info)

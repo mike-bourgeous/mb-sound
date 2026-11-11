@@ -108,7 +108,88 @@ module MB
         # Extensions read as sound files by LoopInfo.scan.
         EXTENSIONS = %w[.wav .wave .flac .aif .aiff .aifc .mp3 .ogg .m4a].freeze
 
+        # The facts (Facts keys) each field of an Entry came from, by
+        # [field, source] (round 2's layers: LoopInfo is the interpreter of
+        # a loop file's facts; its words for sources are provenance, the
+        # edge of the app, where the library says loop, one-shot, beats,
+        # root, and markers).
+        FIELD_FACTS = {
+          %i[bpm acid] => 'acid.tempo', %i[beats acid] => 'acid.beats', %i[meter acid] => 'acid.meter',
+          %i[root acid] => 'acid.root_note', %i[one_shot acid] => 'acid.flags', %i[root smpl] => 'smpl.unity_note',
+        }.freeze
+
+        # Tag names (Facts keys) each tagged field may come from, in the
+        # order .from_tags reads them.
+        TAG_FACTS = { bpm: %w[tag.bpm tag.tbpm tag.tempo], key: %w[tag.key tag.initialkey tag.tkey] }.freeze
+
+        # Sources in words, for fields without a reason of their own.
+        SOURCE_WORDS = {
+          acid: 'the ACID chunk', smpl: "the sampler chunk's loop", cue: "the file's cue points", tags: "the file's tags",
+          name: 'the file or folder name', length: 'its length', tempo: 'a name tempo that fits its length',
+          decay: 'one hit decaying to silence', detected: 'detected in the audio', saved: 'saved by Sample#save',
+        }.freeze
+
+        # The interpreter's declaration for Facts.interpret: the facts
+        # LoopInfo may read, and those its provenance names as used.
+        CONSUMES = %w[acid.* smpl.* cue.* tag.bpm tag.tbpm tag.tempo tag.key tag.initialkey tag.tkey fmt.sample_rate data.bytes].freeze
+
         module_function
+
+        # The Provenance of each field of an Entry ({ field => Provenance }):
+        # +sources+ and +why+ (the Entry's, as Sample.loop_metadata
+        # adjusted them), +facts+ (the file's Facts, for where each fact
+        # sits; nil for formats read without them), +tags+ (ffmpeg's), and
+        # +loop+ (the loop used, to name its `smpl` loop).
+        def provenance(sources, why, facts, tags: {}, loop: nil)
+          tag_keys = tags.keys.map { |k| "tag.#{k.to_s.downcase}" }
+          # (a field with a reason and no source: why it has no value, e.g.
+          # a name tempo dropped from a one-shot)
+          (sources.keys | why.keys).to_h do |field|
+            via = sources[field]
+            key = FIELD_FACTS[[field, via]]
+            key = TAG_FACTS[field]&.find { |k| tag_keys.include?(k) } if via == :tags
+            if via == :smpl && field == :loop && facts && loop
+              key = facts.select_keys('smpl.loop[*').find { |f| f.value[0] == loop[0] && f.value[1] == loop[1] }&.key
+            elsif via == :smpl && field == :one_shot
+              key = facts&.select_keys('smpl.loop[*')&.first&.key
+            elsif via == :cue
+              key = facts&.select_keys('cue.point[*')&.first&.key
+            end
+            fact = key && facts&.[](key)
+            record = fact&.record || (via == :name ? 'file name' : (via == :tags ? 'tags' : nil))
+            [field, Provenance.new(field: field, via: via, fact: key, format: facts&.format, record: record, at: fact&.at,
+                                   interpreter: 'Sample::LoopInfo', why: why[field] || SOURCE_WORDS[via])]
+          end.freeze
+        end
+
+        # The fact keys +provenance+ (as .provenance made it) used: each
+        # field's fact, every cue point for markers, and a `smpl` root's
+        # pitch fraction.
+        def consumed(provenance, facts)
+          keys = provenance.values.filter_map(&:fact)
+          keys += facts.select_keys('cue.point[*').keys if facts && provenance.values.any? { |p| p.via == :cue }
+          keys << 'smpl.pitch_fraction' if provenance[:root]&.via == :smpl
+          keys += %w[fmt.sample_rate data.bytes].select { |k| facts&.key?(k) }
+          keys.uniq
+        end
+
+        # LoopInfo as a Facts interpreter (Facts.interpret): reports the
+        # facts its provenance names (the reading happened in .read).
+        class Interpreter
+          include Facts::Interpreter
+
+          def initialize(provenance)
+            @provenance = provenance || Provenance::EMPTY
+          end
+
+          def name = 'Sample::LoopInfo'
+          def consumes = CONSUMES
+
+          def interpret(facts)
+            mine = @provenance.select { |_, p| p.interpreter == name }
+            Facts::Interpretation.new(interpreter: name, consumed: LoopInfo.consumed(mine, facts).select { |k| facts.key?(k) }, provenance: mine)
+          end
+        end
 
         # The Entry of the file at +path+ (no audio is decoded).  Chunks
         # first, then tags, then the file and folder names (up to
@@ -627,7 +708,7 @@ module MB
             if need.include?(:key)
               s = s.detect_key
               out[:key] = s.key
-              out[:why][:key] = s.meta.dig(:why, :key)
+              out[:why][:key] = s.why(:key)
             end
             out.freeze
           rescue StandardError => e

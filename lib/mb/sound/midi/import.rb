@@ -269,7 +269,16 @@ module MB
           lanes = cc ? lanes(evs, start, stop, pos, cc, sustain: sustain) : []
           clip = Sequence::Clip.new(events, length: length, loop: loop, performed: true, controls: lanes)
           clip = clip.fit_controls if cc == :fit
-          # (the track's metadata, read again with the file: not recorded)
+          # (where the clip's notes and length came from: provenance; the
+          # track's metadata, read again with the file: not recorded)
+          name = tracks[idx].name
+          what = "track #{idx}#{" #{Meta.quote(name)}" unless name.to_s.empty?}#{", channel #{channel}" if channel}, ticks #{start}...#{stop}"
+          Provenance.attach(clip, {
+            events: Provenance.new(field: :events, via: :track, fact: "track[#{idx}].notes", format: :mid, record: "track #{idx}", interpreter: 'MIDI::Import',
+                                   why: "#{notes.length} notes of #{what} (#{timing} timing)"),
+            length: Provenance.new(field: :length, via: :meter, fact: 'meters', format: :mid, record: "track #{idx}", interpreter: 'MIDI::Import',
+                                   why: "#{bars ? "#{bars} bars" : 'whole bars'} from the file's time signatures"),
+          })
           m = @track_meta[idx] ||= Meta::Formats.read_midi(@midi_file, idx)
           m.empty? ? clip : GraphNode::Recipe.quietly { clip.with_meta(m) }
         end

@@ -170,6 +170,7 @@ module MB
           @limits = GraphIO::LIMITS.merge(limits)
           @base_dir = base_dir || (path && File.dirname(File.expand_path(path)))
           @parse_result = nil # (#parse)
+          @header_offsets = nil # (#header_args: where the graph line's keys sit)
           @note_comments = nil # (#load: GraphIO::Comments, nil without comments)
           @comment_notes = true # (#read_header: false for documents before format 11)
           @arg_comments = nil
@@ -527,7 +528,7 @@ module MB
               @old_shift = !GraphIO.since?(version, :clip_shift)
               @old_tempo = !GraphIO.since?(version, :tempo_live)
               @comment_notes = GraphIO.since?(version, :metadata)
-              @document.graph_keywords = kwargs
+              @document.read_graph_line(kwargs, offsets: @header_offsets || {})
             when :inputs
               bad = args.reject { |a| a.is_a?(Symbol) }
               raise error(node, "inputs takes Symbols (inputs :midi), not #{bad.map(&:inspect).join(', ')}") unless bad.empty?
@@ -621,6 +622,7 @@ module MB
             if a.is_a?(Prism::KeywordHashNode)
               a.elements.each do |el|
                 key = value_key(el.key)
+                (@header_offsets ||= {})[key] = el.location.start_offset if node.name == :graph
                 # (`graph ..., meta: { ... }`: metadata, read as plain values, never run)
                 kwargs[key] = key == :meta && node.name == :graph ? meta_literal(el.value) : eval_node(el.value, Scope.new)
               end

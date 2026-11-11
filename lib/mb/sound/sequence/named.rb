@@ -20,6 +20,8 @@ module MB
       # metadata only describes it.
       module Named
         include MB::Sound::Meta::Carrier
+        # (where an importer's clip came from: #provenance, #why)
+        include MB::Sound::Provenance::Readers
         # Gives this clip or kit a +name+ (a Symbol or String, kept as a
         # Symbol; nil removes it).  Returns self.
         def named(name)

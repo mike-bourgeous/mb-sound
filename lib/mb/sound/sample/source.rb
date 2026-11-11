@@ -25,6 +25,14 @@ module MB
         # larger one is left out with a warning).
         TAG_MAX = 32_768
 
+        # The audio decoder as a Facts interpreter: the format, the audio,
+        # and the encoder's name are what ffmpeg reads to decode.
+        AUDIO = Facts::Consumer.new('Sample::Audio (ffmpeg)', %w[riff.container fmt.* data.bytes chunk.ds64 tag.encoder tag.duration])
+
+        # Sample.saved_tags as a Facts interpreter: the settings Sample#save
+        # keeps in tags.
+        SAVED = Facts::Consumer.new('Sample.saved_tags', ["tag.#{TAG_PREFIX}*"])
+
         # Ogg file extensions (comments on the stream).
         OGG = %w[.ogg .oga .opus].freeze
 
@@ -78,28 +86,36 @@ module MB
           # wins.
           def add(kw, path, tags, found)
             given = Meta::Value.of(kw[:meta])
-            file = file_meta(path, tags, found)
-            src = given.key?(:source) || file.key?(:source) ? nil : (saved(tags) || of_file(path, found))
+            # (round 2's layers: the file's facts; the interpreters that
+            # made the sample's settings (the audio decoder, LoopInfo,
+            # Sample.saved_tags) and its description (Meta::Formats); the
+            # facts none consumed become meta[:source][:fields])
+            facts = file_facts(path, tags, found)
+            result = Facts.interpret(facts, AUDIO, SAVED, LoopInfo::Interpreter.new(kw[:provenance]), Meta::Formats::TEXT)
+            file = result.description
+            side = Meta::Formats.read_sidecar(path)
+            file = file.merge(side) if side
+            fields = result.unconsumed.to_fields.first(CHUNKS_LISTED).to_h
+            src = given.key?(:source) || file.key?(:source) ? nil : (saved(tags) || of_file(path, found, fields: fields))
             # (the caller's keys first and winning, then the file's, then :source)
             meta = given.merge(file.to_h.reject { |k, _| given.key?(k) })
             meta = meta.merge(source: src) if src
             meta.empty? ? kw : kw.merge(meta: meta)
           end
 
-          # The metadata the file at +path+ carries (Meta::Formats): its
-          # native tags and Ruby text (a WAV's LIST INFO and `mbmt` chunk,
-          # else +tags+, ffmpeg's), with its sidecar's over them.
-          def file_meta(path, tags, found)
+          # The facts of the file at +path+ (the raw layer): a WAV's chunks
+          # (Facts.of_riff, with its `mbmt` text), else +tags+ (ffmpeg's;
+          # an Ogg file's stream tags too).
+          def file_facts(path, tags, found)
             wav = %w[.wav .wave .bwf .rf64].include?(File.extname(path).downcase)
             riff = found[:riff] || (Riff.read(path) if wav)
-            if !riff && OGG.include?(File.extname(path).downcase) && tags.keys.none? { |k| k.to_s.casecmp?(Meta::Formats::TAG) }
+            return Facts.of_riff(riff, text: Meta::Formats.wav_text(path, riff)) if riff
+            if OGG.include?(File.extname(path).downcase) && tags.keys.none? { |k| k.to_s.casecmp?(Meta::Formats::TAG) }
               # (Ogg keeps its comments on the stream, which ffmpeg's
               # format tags leave out)
               tags = ((FFMPEGInput.parse_info(path).dig(:streams, 0, :tags) rescue nil) || {}).merge(tags)
             end
-            m = riff ? Meta::Formats.read_wav(path, riff) : Meta::Formats.from_tags(tags)
-            side = Meta::Formats.read_sidecar(path)
-            side ? m.merge(side) : m
+            Facts.of_tags(tags, format: File.extname(path).delete_prefix('.').downcase.to_sym)
           end
 
           # The `:source` in a saved file's +tags+ (see TAG), or nil (also
@@ -122,7 +138,9 @@ module MB
           # audio sits), `chunks` ([id, offset, size] rows, sizes as
           # declared), `chunk_count`, `skipped` (ids of chunks mb-sound
           # doesn't read), and `unread` (their bytes, headers included).
-          def of_file(path, found = {})
+          # +fields+ (understood but unused facts by key, from
+          # Facts.interpret) go under `fields:` when there are any.
+          def of_file(path, found = {}, fields: {})
             entry = found[:entry]
             riff = found[:riff]
             ext = File.extname(path).delete_prefix('.').downcase
@@ -144,6 +162,7 @@ module MB
               src[:skipped] = skipped.map(&:first).uniq
               src[:unread] = skipped.sum { |_, at, size| [size + 8, src[:bytes] - at].min.clamp(0, nil) }
             end
+            src[:fields] = fields unless fields.empty?
             Meta.frozen(src)
           rescue SystemCallError
             nil

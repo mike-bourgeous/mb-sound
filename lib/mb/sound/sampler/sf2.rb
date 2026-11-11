@@ -244,21 +244,40 @@ module MB
             @mutex = Mutex.new
             @meta = nil
             File.open(@file, 'rb') { |f| read_riff(f) }
+            @provenance = @info['INAM'].to_s.empty? ? nil : {
+              name: Provenance.new(field: :name, via: :info, fact: 'INFO.INAM', format: :sf2, record: 'INFO', interpreter: 'Sampler::SF2::Font#name', why: "the font's INAM text")
+            }.freeze
           end
 
-          # The font's metadata (a Meta::Value): its INFO texts as
-          # description (INAM `title:`, ICMT `notes:`, IENG `author:`, ICOP
-          # `license:`; Meta::Formats.from_sf2) with where it came from
-          # (`source:` format, file, version, bytes), and a sidecar
-          # (`font.sf2.meta.rb`) over them.  Nothing plays from it.
+          # Where the font's name came from (#provenance, #why).
+          include Provenance::Readers
+
+          # The font's metadata (a Meta::Value), by round 2's layers: the
+          # INFO list's facts (Facts.of_sf2); #name consumes INAM as data;
+          # Meta::Formats::SF2_TEXT describes INAM (`title:`), ICMT
+          # (`notes:`), IENG (`author:`), ICOP (`license:`); the other INFO
+          # texts (ISNG, IPRD, ICRD, ISFT, ...) under `source: { fields: }`
+          # with where it came from (format, file, version, bytes); a
+          # sidecar (`font.sf2.meta.rb`) over them.  Nothing plays from it.
           def meta
             @meta ||= begin
+              facts = Facts.of_sf2(@info, version: @version)
+              r = Facts.interpret(facts, NAME, Meta::Formats::SF2_TEXT, VERSION)
               src = { format: :sf2, file: File.basename(@path), version: @version&.join('.'), bytes: (File.size(@file) rescue nil) }.compact
-              m = Meta::Value[source: src].merge(Meta::Formats.from_sf2(@info))
+              fields = r.unconsumed.to_fields
+              src[:fields] = fields unless fields.empty?
+              m = Meta::Value[source: src].merge(r.description)
               side = Meta::Formats.read_sidecar(@file)
               side ? m.merge(side) : m
             end
           end
+
+          # Font#name as a Facts interpreter: the INAM text is the font's
+          # name (data: listings and preset paths show it).
+          NAME = Facts::Consumer.new('Sampler::SF2::Font#name', %w[INFO.INAM])
+
+          # The version the reader checks (INFO ifil).
+          VERSION = Facts::Consumer.new('Sampler::SF2 (reader)', %w[INFO.ifil])
 
           # The font's name (INFO INAM), else the file's.
           def name

@@ -111,6 +111,7 @@ module MB
           @instrument = nil # (see PlayedBy)
           @clock = nil # (see Clocked)
           @carried_meta = nil # (Meta::Carrier, through Named)
+          @provenance = nil # (Provenance::Readers, through Named: an importer's)
           @events = events.sort_by(&:start).freeze
           @values = values&.uniq&.freeze
           @performed = !!performed

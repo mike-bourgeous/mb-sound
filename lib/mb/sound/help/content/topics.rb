@@ -662,8 +662,8 @@ module MB
         whole number of its beats).  Loops loop the whole file; one-shots
         (the ACID chunk's flag, words like kick or hit, short files, one hit
         decaying away) keep no name tempo.  `sample.bpm`, `.beats`,
-        `.bars`, `.key`, `.meta_source` and `.meta[:why]` (where each came
-        from, and why); `Sample[path, detect:
+        `.bars`, `.key`, `.provenance(:bpm)` and `.why(:bpm)` (where each
+        came from, and why; `puts sample.summary` lists them); `Sample[path, detect:
         true]` (or `.detect_tempo`, `.detect_key`) finds a missing tempo
         and key (`sample.key_analysis` shows the key's scores).  `loops
         '~/Loops/Funk'` lists a folder (headers and names only, nothing

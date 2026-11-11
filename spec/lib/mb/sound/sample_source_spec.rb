@@ -19,7 +19,7 @@ RSpec.describe(MB::Sound::Sample::Source, :aggregate_failures) do
       s = sample[path]
       src = s.meta[:source]
       expect(src).to be_frozen
-      expect(src.keys).to eq(%i[format file bytes sample_rate container channels bits frames data chunks chunk_count skipped unread])
+      expect(src.keys - [:fields]).to eq(%i[format file bytes sample_rate container channels bits frames data chunks chunk_count skipped unread])
       expect(src.slice(:format, :file, :bytes, :sample_rate, :container, :channels, :bits, :frames))
         .to eq(format: :wav, file: 'loop_120bpm.wav', bytes: File.size(path), sample_rate: 44100, container: :riff, channels: 1, bits: 16, frames: 4800)
 
@@ -35,11 +35,10 @@ RSpec.describe(MB::Sound::Sample::Source, :aggregate_failures) do
       expect(src[:skipped]).to eq(%w[bext junk])
       expect(src[:unread]).to eq((10 + 8) + (33 + 8))
       expect(MB::Sound::Meta.check(src)).to equal(src)
-      expect(MB::Sound::Meta.summary(s.meta)).to start_with("from \"loop_120bpm.wav\", #{MB::Sound::Meta.bytes_text(File.size(path))}, 59 bytes unread, + ")
+      expect(MB::Sound::Meta.summary(s.meta)).to match(/\Afrom "loop_120bpm.wav", #{Regexp.escape(MB::Sound::Meta.bytes_text(File.size(path)))}, (\d+ fields? carried, )?59 bytes unread, \+ /)
 
-      # the keys loop files have stay as they are, :source after them
-      # (not an exact list: branches add loop-file keys)
-      expect(s.meta.keys.first(2)).to eq(%i[why smpl_loops])
+      # (round 2's layers: the loop file's facts no interpreter used are
+      # source fields; settings' sources are provenance, not metadata)
       expect(s.meta.keys.last).to eq(:source)
       expect(s.meta_source).to include(bpm: :acid)
       expect(s.bpm).to eq(120.0)

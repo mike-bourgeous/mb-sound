@@ -119,6 +119,7 @@ module MB
         def initialize(rows, row_names: true)
           @instrument = nil # (see PlayedBy)
           @carried_meta = nil # (Meta::Carrier, through Named)
+          @provenance = nil # (Provenance::Readers, through Named: an importer's)
           @rows = rows.freeze
           @rows.each { |name, clip| ROW_NAMES[clip] = name if clip.is_a?(Clip) } if row_names
         end
