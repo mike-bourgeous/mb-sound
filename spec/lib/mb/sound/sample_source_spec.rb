@@ -35,7 +35,7 @@ RSpec.describe(MB::Sound::Sample::Source, :aggregate_failures) do
       expect(src[:skipped]).to eq(%w[bext junk])
       expect(src[:unread]).to eq((10 + 8) + (33 + 8))
       expect(MB::Sound::Meta.check(src)).to equal(src)
-      expect(MB::Sound::Meta.summary(s.meta)).to start_with("from loop_120bpm.wav, #{MB::Sound::Meta.bytes_text(File.size(path))}, 59 bytes unread, + ")
+      expect(MB::Sound::Meta.summary(s.meta)).to start_with("from \"loop_120bpm.wav\", #{MB::Sound::Meta.bytes_text(File.size(path))}, 59 bytes unread, + ")
 
       # the keys loop files have stay as they are, :source after them
       # (not an exact list: branches add loop-file keys)
@@ -110,13 +110,13 @@ RSpec.describe(MB::Sound::Sample::Source, :aggregate_failures) do
   end
 
   describe '#save' do
-    it 'keeps :source in a tag, read back as the same values' do
-      s = sample[audio, name: 'kick'].with_meta(source: xm, notes: 'not saved')
-      expect(s.tags[:mb_sample_source]).to eq(MB::Sound::RubyValue.to_ruby(xm))
+    it 'keeps its whole metadata in the file (MB_SOUND_META), read back as the same values' do
+      s = sample[audio, name: 'kick'].with_meta(source: xm, notes: 'saved too (metadata-2)')
+      expect(s.tags).not_to have_key(:mb_sample_source) # (metadata-2: MB_SOUND_META replaces it)
       path = tmp_path('kick.flac')
       s.save(path)
       back = sample[path]
-      expect(back.meta).to eq(source: xm)
+      expect(back.meta).to eq(source: xm, notes: 'saved too (metadata-2)')
       expect(back.meta[:source][:fields][:ratio]).to eql(3/4r)
       expect(back.meta[:source]).to be_frozen
     end
@@ -129,12 +129,14 @@ RSpec.describe(MB::Sound::Sample::Source, :aggregate_failures) do
       expect(sample[path].meta[:source][:file]).to eq('origin.wav')
     end
 
-    it 'saves no tag without a source, and leaves out one too large for a tag with a warning' do
-      expect(sample[audio, name: 'bare'].tags).not_to have_key(:mb_sample_source)
-      big = sample[audio, name: 'big'].with_meta(source: { fields: { blob: 'x' * 40_000 } })
-      tags = nil
-      expect { tags = big.tags }.to output(/Sample "big": its :source metadata is 39.1 KB as text, too large for a tag \(32.0 KB\); saved without it/).to_stderr
-      expect(tags).not_to have_key(:mb_sample_source)
+    it 'saves no metadata tag without metadata, and leaves out metadata too large for a file with a warning' do
+      path = tmp_path('bare.flac')
+      sample[audio, name: 'bare'].save(path)
+      expect(MB::Sound::FFMPEGInput.parse_info(path).dig(:format, :tags).keys.map(&:to_s).grep(/meta/i)).to eq([])
+      big = sample[audio, name: 'big'].with_meta(source: { fields: { blob: 'x' * 70_000 } })
+      out = tmp_path('big.flac')
+      expect { big.save(out) }.to output(/big\.flac: its metadata is 68.4 KB as text, more than a file holds \(64.0 KB\); saved without it/).to_stderr
+      expect(sample[out].meta[:source][:fields]).to be_nil # (the file's own provenance instead)
     end
 
     it 'runs nothing from a tag: text that is not plain values is ignored' do

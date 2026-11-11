@@ -267,7 +267,10 @@ module MB
           length = timing == :performed ? performed_length(pos.call(stop), transport) : (stop - start) * whole_notes_per_tick
           lanes = cc ? lanes(evs, start, stop, pos, cc, sustain: sustain) : []
           clip = Sequence::Clip.new(events, length: length, loop: loop, performed: true, controls: lanes)
-          cc == :fit ? clip.fit_controls : clip
+          clip = clip.fit_controls if cc == :fit
+          # (the track's metadata, read again with the file: not recorded)
+          m = @midi_file.meta(idx)
+          m.empty? ? clip : GraphNode::Recipe.quietly { clip.with_meta(m) }
         end
 
         # A Sequence::Kit of the drum tracks (channel 10, or names like

@@ -242,7 +242,22 @@ module MB
             @instrument_cache = {}
             @preset_headers = nil
             @mutex = Mutex.new
+            @meta = nil
             File.open(@file, 'rb') { |f| read_riff(f) }
+          end
+
+          # The font's metadata (a Meta::Value): its INFO texts as
+          # description (INAM `title:`, ICMT `notes:`, IENG `author:`, ICOP
+          # `license:`; Meta::Formats.from_sf2) with where it came from
+          # (`source:` format, file, version, bytes), and a sidecar
+          # (`font.sf2.meta.rb`) over them.  Nothing plays from it.
+          def meta
+            @meta ||= begin
+              src = { format: :sf2, file: File.basename(@path), version: @version&.join('.'), bytes: (File.size(@file) rescue nil) }.compact
+              m = Meta::Value[source: src].merge(Meta::Formats.from_sf2(@info))
+              side = Meta::Formats.read_sidecar(@file)
+              side ? m.merge(side) : m
+            end
           end
 
           # The font's name (INFO INAM), else the file's.

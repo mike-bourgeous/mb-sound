@@ -15,13 +15,14 @@ module MB
       # keeps `:source` (a tag), so a sample saved into a bundle still
       # says where its audio came from.
       module Source
-        # The tag #save keeps `meta[:source]` in (its Ruby text, read back
-        # by Meta.parse).
+        # The tag source-meta-1's #save kept `meta[:source]` in (its Ruby
+        # text), read from older files.  #save now writes the whole
+        # metadata in the file's tags and as Ruby text (Meta::Formats:
+        # MB_SOUND_META, a WAV's `mbmt` chunk).
         TAG = :"#{TAG_PREFIX}source"
 
-        # The largest `:source` text #save writes as a tag (bytes; a
-        # larger one is left out with a warning).
-        TAG_MAX = 32_768
+        # Ogg file extensions (comments on the stream).
+        OGG = %w[.ogg .oga .opus].freeze
 
         # The WAV chunks Sample::Riff reads ('strc' too once Riff reads
         # ACID's stretch markers); the others count as unread.
@@ -51,29 +52,37 @@ module MB
           with(meta: meta.note(*texts), lineage: [self, :note, Meta.frozen(texts), {}].freeze)
         end
 
-        # The tags #save writes, with `meta[:source]` as Source::TAG.
-        def tags
-          t = super
-          src = meta[:source]
-          return t if src.nil?
-          text = RubyValue.to_ruby(src)
-          if text.bytesize > TAG_MAX
-            warn "Sample #{name.inspect}: its :source metadata is #{Meta.bytes_text(text.bytesize)} as text, too large for a tag (#{Meta.bytes_text(TAG_MAX)}); saved without it"
-            return t
-          end
-          t.merge(TAG => text)
-        end
-
         class << self
           # Sample options +kw+ (as Sample.from_file gathered them) with
-          # the file's `:source` in their `meta:`: the one a file saved by
-          # Sample#save carries in its tags, else .of_file.  A `:source`
-          # the caller gave (`Sample[path, meta: { source: ... }]`) stays.
+          # the file's metadata in their `meta:`: what the file carries
+          # (.file_meta: a file saved by Sample#save brings back its whole
+          # metadata), and a `:source` from .of_file when it brings none.
+          # What the caller gave (`Sample[path, meta: { source: ... }]`)
+          # wins.
           def add(kw, path, tags, found)
-            meta = Meta::Value.of(kw[:meta])
-            return kw if meta.key?(:source)
-            src = saved(tags) || of_file(path, found)
-            src ? kw.merge(meta: meta.merge(source: src)) : kw
+            given = Meta::Value.of(kw[:meta])
+            file = file_meta(path, tags, found)
+            src = given.key?(:source) || file.key?(:source) ? nil : (saved(tags) || of_file(path, found))
+            # (the caller's keys first and winning, then the file's, then :source)
+            meta = given.merge(file.to_h.reject { |k, _| given.key?(k) })
+            meta = meta.merge(source: src) if src
+            meta.empty? ? kw : kw.merge(meta: meta)
+          end
+
+          # The metadata the file at +path+ carries (Meta::Formats): its
+          # native tags and Ruby text (a WAV's LIST INFO and `mbmt` chunk,
+          # else +tags+, ffmpeg's), with its sidecar's over them.
+          def file_meta(path, tags, found)
+            wav = %w[.wav .wave .bwf .rf64].include?(File.extname(path).downcase)
+            riff = found[:riff] || (Riff.read(path) if wav)
+            if !riff && OGG.include?(File.extname(path).downcase) && tags.keys.none? { |k| k.to_s.casecmp?(Meta::Formats::TAG) }
+              # (Ogg keeps its comments on the stream, which ffmpeg's
+              # format tags leave out)
+              tags = ((FFMPEGInput.parse_info(path).dig(:streams, 0, :tags) rescue nil) || {}).merge(tags)
+            end
+            m = riff ? Meta::Formats.read_wav(path, riff) : Meta::Formats.from_tags(tags)
+            side = Meta::Formats.read_sidecar(path)
+            side ? m.merge(side) : m
           end
 
           # The `:source` in a saved file's +tags+ (see TAG), or nil (also

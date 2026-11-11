@@ -93,6 +93,29 @@ module MB
           @count = @events.count
         end
 
+        # The file's metadata (a Meta::Value; Meta::Formats.from_midi): the
+        # first track name as `title:`, copyright as `license:`, text events
+        # as `notes:`, markers as `markers: [[seconds, "text"], ...]`, or the
+        # whole Hash a text event `mb-sound meta: {...}` holds; with
+        # +track+ (an index) only that track's events.  A sidecar
+        # (`song.mid.meta.rb`) merges over it.  Description only: nothing
+        # plays from it.
+        def meta(track = nil)
+          @meta ||= {}
+          @meta[track] ||= begin
+            tracks = track.nil? ? @seq.tracks : [@seq.tracks.fetch(track)]
+            rows = tracks.flat_map { |t|
+              t.events.filter_map { |e|
+                next unless e.is_a?(::MIDI::MetaEvent) && [0x01, 0x02, 0x03, 0x06].include?(e.meta_type)
+                [e.meta_type, e.data_as_str, e.meta_type == 0x06 ? pulse_time(e.time_from_start) : nil]
+              }
+            }
+            m = Meta::Formats.from_midi(rows)
+            side = Meta::Formats.read_sidecar(@filename)
+            side ? m.merge(side) : m
+          end
+        end
+
         # Returns information about each track in the underlying midilib
         # sequence object (see #seq).
         def tracks

@@ -13,7 +13,10 @@ require 'midilib'
 # Hashes: +name+ (nil writes no name: midilib reads "Unnamed"), +channel+
 # (0-based), +notes+ [[on, off, note, velocity, channel]] (channel
 # optional), +cc+ [[tick, controller, value]], +bend+ [[tick, 0..16383]],
-# +pressure+ [[tick, value]], +program+.
+# +pressure+ [[tick, value]], +program+, +meta+ [[type, text], ...] or
+# [[type, text, tick], ...] (meta events: 0x01 text, 0x02 copyright, 0x03
+# track name, 0x06 marker; MB::Sound::Meta::Formats.midi_events makes
+# them from metadata).
 #
 # The fixtures below reproduce features of real files (the maintainer's
 # survey, 2026-10-28) with made-up music.
@@ -40,6 +43,7 @@ module MidiWriter
       t.events.concat(meta)
       meta = []
       ch = spec[:channel] || 0
+      (spec[:meta] || []).each { |type, text, tick| t.events << at(MIDI::MetaEvent.new(type, text.b.bytes, 0), tick || 0) }
       t.events << at(MIDI::ProgramChange.new(ch, spec[:program], 0), 0) if spec[:program]
       (spec[:notes] || []).each do |on, off, note, vel, nch|
         t.events << at(MIDI::NoteOn.new(nch || ch, note, vel || 100, 0), on)

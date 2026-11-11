@@ -512,6 +512,7 @@ module MB
 end
 
 require_relative 'meta/value'
+require_relative 'meta/formats'
 
 module MB
   module Sound

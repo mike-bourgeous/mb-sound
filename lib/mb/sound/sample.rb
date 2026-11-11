@@ -1258,7 +1258,9 @@ module MB
         peak = chans.map { |c| c.abs.max.to_f }.max
         scale = peak > 1 ? peak : nil
         chans = chans.map { |c| c / scale } if scale
-        MB::Sound.write(path, chans, sample_rate: sample_rate, overwrite: overwrite, metadata: tags.merge(scale ? { "#{TAG_PREFIX}scale": scale } : {}))
+        # (the metadata in the file's tags and as Ruby text: Meta::Formats)
+        MB::Sound.write(path, chans, sample_rate: sample_rate, overwrite: overwrite, metadata: tags.merge(scale ? { "#{TAG_PREFIX}scale": scale } : {}),
+                        meta: meta, meta_title: name)
         path
       end
 
