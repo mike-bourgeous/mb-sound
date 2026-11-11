@@ -169,6 +169,9 @@ module MB
           @trust = trust
           @limits = GraphIO::LIMITS.merge(limits)
           @base_dir = base_dir || (path && File.dirname(File.expand_path(path)))
+          @parse_result = nil # (#parse)
+          @note_comments = nil # (#load: GraphIO::Comments, nil without comments)
+          @arg_comments = nil
           raise ArgumentError, "trust: must be nil or :code (got #{trust.inspect})" unless trust.nil? || trust == :code
         end
 
@@ -184,6 +187,9 @@ module MB
           body = stmts[index..] || []
           return load_set(body) if set?
           raise error(tree, 'the document has no graph (only a header)') if body.empty?
+          # (inline comments as notes on what each statement and link builds:
+          # Comments; nil, and nothing checked while building, without any)
+          @note_comments, @arg_comments = Comments.collect(@parse_result, body)
           return load_rack(body) if @document.rack?
 
           bind_inputs
@@ -401,6 +407,7 @@ module MB
             raise LoadError.new("#{@label}:#{e.location.start_line}: syntax error: #{e.message}", path: @path, line: e.location.start_line)
           end
           @comments = result.comments.map { |c| [c.location.start_line, c.location.slice] }
+          @parse_result = result
           check_shape(result.value)
           result.value
         end
@@ -1025,7 +1032,9 @@ module MB
             eval_statements(node, scope)
           when Prism::LocalVariableWriteNode
             raise error(node, "#{node.name} is an input or param and can't be assigned") if bound?(node.name)
-            scope.up(node.depth).vars[node.name] = eval_node(node.value, scope)
+            v = scope.up(node.depth).vars[node.name] = eval_node(node.value, scope)
+            Comments.note(v, @note_comments[node]) if @note_comments&.key?(node)
+            v
           when Prism::LocalVariableReadNode
             s = scope.up(node.depth)
             raise error(node, "#{node.name} is used before it is assigned") unless s.vars.key?(node.name)
@@ -1033,7 +1042,12 @@ module MB
           when Prism::ConstantReadNode, Prism::ConstantPathNode
             constant(node)
           when Prism::CallNode
-            eval_call(node, scope)
+            v = eval_call(node, scope)
+            if @note_comments
+              Comments.note(v, @note_comments[node]) if @note_comments.key?(node)
+              Comments.args(v, @arg_comments[node]) if @arg_comments.key?(node)
+            end
+            v
           when Prism::LambdaNode
             runtime_proc(node, scope, lambda: true)
           else

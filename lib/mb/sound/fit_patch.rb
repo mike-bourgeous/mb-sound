@@ -781,14 +781,17 @@ module MB
           else
             label = call_label(node)
             walk.(node.receiver, nil, why, [label, :self]) if node.receiver
+            # (metadata is never a setting: its numbers never become knobs,
+            # and documents read it as written values, metadata-2)
+            meta = GraphIO::Loader::META_CALLS.include?(node.name) ? 'metadata (description, never a setting)' : nil
             (node.arguments&.arguments || []).each_with_index do |a, i|
               if a.is_a?(Prism::KeywordHashNode)
                 a.elements.each do |el|
                   kw = el.is_a?(Prism::AssocNode) && el.key.is_a?(Prism::SymbolNode) ? el.key.unescaped.to_sym : :**
-                  walk.(el, nil, why, [label, kw])
+                  walk.(el, nil, why || meta || (kw == :meta ? 'metadata (description, never a setting)' : nil), [label, kw])
                 end
               else
-                walk.(a, nil, why, [label, i])
+                walk.(a, nil, why || meta, [label, i])
               end
             end
             if node.block

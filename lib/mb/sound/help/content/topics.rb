@@ -1586,7 +1586,9 @@ module MB
         has no use for it yet: `meta :bass, source: { ... }` gives a track,
         bus, mute group, knob, or rack plain facts to carry, and `meta
         source: { ... }` (no name) the set itself.  Metadata never changes
-        the sound.  `meta :bass` reads it back (a frozen Hash), `metas`
+        the sound, and nothing reads it to build or find anything: it
+        describes, it never decides.  `meta :bass` reads it back (a frozen
+        Meta::Value, read like a Hash), `metas`
         lists a line per name, `meta :bass, notes: 'x'` merges by key
         (`:source` stays), `meta :bass, nil` forgets.
 
@@ -1605,9 +1607,20 @@ module MB
         yet, by name).
 
         Objects without a name carry it themselves: `node.with_meta(source:
-        { ... })` (printed by `ruby node`, saved in graph documents) and
-        `sample.with_meta(...)`; `sample.meta[:source]` of a sample read
-        from a WAV file lists the file's chunks and what wasn't read.
+        { ... })` and `node.note('why it sounds like this')` (printed by
+        `ruby node`, saved in graph documents), clips, takes
+        (`take.note('the good one')`), and `sample.with_meta(...)`;
+        `node.meta.notes` reads the notes.  Comments in a graph document
+        become notes on what each line builds, and saves print them back
+        as comments.
+
+        Files keep it too: `sample.save('x.wav')` writes the name, notes,
+        author, license, and tags as the file's own tags (any player shows
+        them) and the whole metadata as Ruby text that `Sample['x.wav']`
+        reads back; MIDI files' track names, text, and copyright, and a
+        SoundFont's INFO, read as metadata.  For other files, a sidecar
+        `x.aiff.meta.rb` holds one `meta` line.  Text from foreign files is
+        shown in quotes, as data.
       TEXT
       commands :meta, :metas
       note :metadata
@@ -1620,6 +1633,10 @@ module MB
       end
       example 'a node that carries its source, printed back as Ruby', sound: false do
         ruby 110.hz.saw.lp4(600).with_meta(source: { format: :xm, kind: :instrument, id: 2 })
+      end
+      example 'notes on a patch', sound: false do
+        pad = 220.hz.saw.note('a little detuned on purpose').lp4(900).note('darker for the verse')
+        pad.meta.notes
       end
     end
 

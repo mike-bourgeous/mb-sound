@@ -45,6 +45,7 @@ module MetaGuard
     'lib/mb/sound/help/now.rb' => '`now` shows one line about the set\'s metadata',
     'lib/mb/sound/help/content/topics.rb' => 'help :meta examples',
     'lib/mb/sound/midi/import.rb' => 'MIDI imports give a clip its track\'s metadata (copied, never read to build)',
+    'lib/mb/sound/graph_io/comments.rb' => 'a document\'s comments become notes, and the writer asks which notes to print as comments',
     'lib/mb/sound/ui/inspect.rb' => 'the inspector shows a node\'s notes (quoted: Meta.notes_text)',
     # (other things named meta or metadata)
     'lib/mb/sound/io_methods.rb' => 'MB::Sound.read hands back an FFMPEGInput\'s file tags (not mb-sound metadata)',
