@@ -245,7 +245,10 @@ module MB
             lines =
               if w.state == :reference
                 sm = w.summary(x, want: false)
-                [x.path, x.about.to_s, sm ? "#{sm}#{sm.seconds ? " (#{format('%.2f', sm.seconds)} s read)" : ''}" : 'reading the sound in the background…']
+                # (a long path keeps its end, the file's name: "…/refs/kick.wav")
+                path = x.path.to_s
+                path = "…#{path[-(c.w - 1)..]}" if c.w > 1 && path.length > c.w
+                [path, x.about.to_s, sm ? "#{sm}#{sm.seconds ? " (#{format('%.2f', sm.seconds)} s read)" : ''}" : 'reading the sound in the background…']
               else
                 sc = w.score(x, want: false)
                 score =

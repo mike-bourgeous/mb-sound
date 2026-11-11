@@ -86,7 +86,12 @@ RSpec.describe(MB::Sound::UI::Panes::Tuner, :aggregate_failures) do
     expect(t).to include('TUNER', '1 reference', '2 synth', '3 tune', 'kick_sine.wav', 'snare_noise.wav')
     expect(t).to match(/\d references: Enter pick/) # (2, and Samples other examples of this process read)
     expect(t).to match(/kick_sine\.wav\s+0\.40 s\s+A2 [+-]\d+ cents, percussive/)
-    expect(t).to include(File.join(@root, 'refs', 'kick_sine.wav')) # (the picked one's path below)
+    # (the picked one's path below; a long one keeps its end: temp paths
+    # with 7-digit PIDs overflowed the 92-column pane)
+    path = File.join(@root, 'refs', 'kick_sine.wav')
+    shown = t.lines.filter_map { |l| l[%r{(?:…|/)\S*/refs/kick_sine\.wav}] }.first
+    expect(shown).to eq(path).or start_with('…')
+    expect(path).to end_with(shown.delete_prefix('…'))
 
     key("\r")
     w = wizard.current
