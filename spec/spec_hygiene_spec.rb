@@ -39,6 +39,27 @@ RSpec.describe('spec hygiene') do
     expect(dupes).to eq([]), dupes.join("\n")
   end
 
+  # fork_script runs bin/ scripts inside a fork of the spec process, so a
+  # script's top-level constant meets every spec constant already loaded:
+  # omnibus19's mastering_chain_effect_spec RATE made bin/phase_synth.rb's
+  # RATE warn in the batch 30 smoke run (2026-11-11).
+  it 'has no spec constant named like a bin/ script constant' do
+    bin = Hash.new { |h, k| h[k] = [] }
+    Dir.chdir(root) { Dir['bin/**/*.rb'] }.each do |f|
+      File.foreach(File.join(root, f)) { |line| (m = line.match(/\A([A-Z][A-Z0-9_]*)\s*=[^=~]/)) && bin[m[1]] << f }
+    end
+    hits = []
+    Dir.chdir(root) { Dir['spec/**/*_spec.rb'] }.each do |f|
+      top = nil
+      File.foreach(File.join(root, f)) do |line|
+        top = Regexp.last_match(1) if line.match(/\A(module|class|RSpec\.describe|describe)\b/)
+        m = line.match(/\A {0,2}([A-Z][A-Z0-9_]*)\s*=[^=~]/)
+        hits << "#{m[1]}: #{f} and #{bin[m[1]].uniq.join(', ')}" if m && top != 'module' && top != 'class' && bin.key?(m[1])
+      end
+    end
+    expect(hits).to eq([]), "#{hits.join("\n")}\nGive the spec's constant a name unique to its file"
+  end
+
   # omnibus12: set state left in the default Session reached later
   # examples (support/session_guard.rb; spec_helper closes such a Session
   # before every example)
