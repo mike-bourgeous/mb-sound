@@ -23,10 +23,10 @@ riff = seq(A3, C4, E4, rest, G4.n4, E4, C4).n8
 play riff, gain: -14.db
 ```
 
-<!-- check: quiet -->
+<!-- check: bars=1 -->
 ```ruby
-held = seq(F2, T, T, rest, Ab2, T, C3.len(2.n16)).n16
-puts held.show
+held = seq(F2, T, T, rest, Ab2, T, C3.len(2.n16), rest.n2).n16
+play held, gain: -14.db
 ```
 
 A clip plays once; `.loop` repeats it forever and `.repeat(4)` four times.
