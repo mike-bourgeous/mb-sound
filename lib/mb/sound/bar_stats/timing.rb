@@ -28,7 +28,9 @@ module MB
       # MAX_CANDIDATES, nearest the band's whole-song lag first); each is
       # refined on the band waveforms within +-REFINE with a parabola
       # through the peak (exactly N for a copy delayed N samples), and the
-      # best waveform correlation wins.  Copies whose waveforms differ but
+      # best waveform correlation wins unless a candidate nearer the
+      # whole-song lag comes within WAVE_TIE of it (a periodic pattern, a
+      # stutter fill, correlates about as well a repeat away).  Copies whose waveforms differ but
       # whose hits line up (an MP3's top band against a render's) keep the
       # onset lag when the onsets correlate (Lag#reliable?).  Lag#on_time
       # says how much of the band still lines up at 0 beside a late part,
@@ -91,6 +93,15 @@ module MB
 
         # Onset-correlation peaks refined on the waveform per span.
         MAX_CANDIDATES = 4
+
+        # Waveform correlations within this of the best are ties, won by
+        # the candidate nearest the band's whole-song lag (omnibus19: a
+        # kick stem's stutter fill, 16 hits of a 64th at 140 BPM, read
+        # +107 ms, four hits away: its hits sat a rounding apart in the
+        # conversion, so lag 0 correlated 0.74 and a repeat 0.77).  Kept
+        # small: a chord's partials repeat too (66 against 81 ms, where the
+        # best waveform is right and the song lag isn't; see bar_stats.md).
+        WAVE_TIE = 0.05
 
         # One band's lag in one span: +samples+ (B behind A; Float), +wave+
         # (the waveform correlation there), +onset+ (the onset functions'
@@ -366,6 +377,8 @@ module MB
           }
           pick = tried.max_by { |t| t[4] }
           pick = tried.first if pick[4] < MIN_WAVE_CORRELATION
+          # (candidates are nearest the whole-song lag first)
+          pick = tried.find { |t| t[4] >= pick[4] - WAVE_TIE } if pick[4] >= MIN_WAVE_CORRELATION
           coarse, onset, wave, k, corr = pick
           lag =
             if corr < MIN_WAVE_CORRELATION
