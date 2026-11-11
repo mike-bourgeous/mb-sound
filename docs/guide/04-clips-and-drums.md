@@ -12,12 +12,21 @@ that doesn't have its own:
 - `.n1` whole notes, `.n2` halves, `.n4` quarters, `.n8` eighths,
   `.n16` sixteenths; `1.n8.dotted` and `.triplet` lengths work too.
 - `A3.n4` is one note a quarter long; `rest` (or `R`) is a gap.
+- Long notes: `T` (a tie) holds the note before it one more step, and
+  `.len` gives one note any length: `F1.len(5.n16)` is a single note
+  five sixteenths long (`F1.n16 * 5` would be five short notes).
 - Square brackets make a chord: `seq([A3, C4, E4], [F3, A3, C4]).n2`.
 
 <!-- check: bars=1 -->
 ```ruby
 riff = seq(A3, C4, E4, rest, G4.n4, E4, C4).n8
 play riff, gain: -14.db
+```
+
+<!-- check: quiet -->
+```ruby
+held = seq(F2, T, T, rest, Ab2, T, C3.len(2.n16)).n16
+puts held.show
 ```
 
 A clip plays once; `.loop` repeats it forever and `.repeat(4)` four times.
