@@ -33,6 +33,7 @@ module MB
         def doc(text)
           text.to_s
             .gsub(/\+([\w:.?!]+)\+/) { c(:key, $1) }
+            .gsub(/\+(\w+: [^+\s`]+)\+/) { c(:key, $1) } # (`+ring: true+`; omnibus19: help :stop printed it raw)
             .gsub(/`([^`\n]+)`/) { code($1) }
         end
 

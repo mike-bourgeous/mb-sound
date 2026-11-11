@@ -105,8 +105,28 @@ module MB
                 Entry.new(name: n, owner: c, surface: c.name.sub('MB::Sound::', ''), original: (um.original_name == n ? nil : um.original_name), unbound: um)
               }
             }
-            dsl + classes
+            dsl + classes + builder_methods(dsl + classes)
           end
+        end
+
+        # Classes whose documented public methods are help entries though
+        # they aren't recorded DSL (omnibus19; Kez, panel 3: `help :voice`
+        # found only Sampler::Instrument#voice, `help :body`/`:metal`/`:lofi`
+        # fell back to searches, `help :stretch` had no Sample#stretch):
+        # the `kit { }` builder and its voices' layers, and Sample's views,
+        # which print through their lineage.
+        BUILDER_CLASSES = %w[MB::Sound::Drums::Builder MB::Sound::Drums::Hit MB::Sound::Sample].freeze
+
+        # Where an entry sorts among others of its name (lower first):
+        # console, node DSL, builders and views people write (above), other
+        # surfaces; undocumented ones last (see #find_all).
+        def rank(entry)
+          base = case entry.surface
+                 when 'console' then 0
+                 when 'GraphNode DSL' then 1
+                 else BUILDER_CLASSES.include?(entry.owner.name) ? 2 : 3
+                 end
+          entry.documented? ? base : base + 10
         end
 
         def numeric_methods
@@ -158,10 +178,25 @@ module MB
         # a node method, e.g. delay or reverb).
         def find_all(name)
           name = name.to_sym
-          (console_methods + dsl_methods).select { |e| e.name == name }
+          (console_methods + dsl_methods).select { |e| e.name == name }.each_with_index.sort_by { |e, i| [rank(e), i] }.map(&:first)
         end
 
         private
+
+        # Documented public methods of BUILDER_CLASSES not already in
+        # +entries+.
+        def builder_methods(entries)
+          have = entries.map { |e| [e.owner, e.name] }.to_h { |k| [k, true] }
+          BUILDER_CLASSES.flat_map { |name|
+            c = Object.const_get(name)
+            c.public_instance_methods(false).sort.filter_map { |n|
+              next if have[[c, n]] || n.to_s.end_with?('=') || n.to_s.start_with?('plan_')
+              um = DocIndex.unwrap(c.instance_method(n))
+              e = Entry.new(name: n, owner: c, surface: name.sub('MB::Sound::', ''), original: (um.original_name == n ? nil : um.original_name), unbound: um)
+              e if e.documented?
+            }
+          }
+        end
 
         def entries_for(mod, surface)
           mod.public_instance_methods(false).sort.map { |n|
