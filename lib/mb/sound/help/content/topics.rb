@@ -408,6 +408,9 @@ module MB
         Shipped designs lend voices too: `borrow :fit909_kick` (the 909
         kick fitted to a recorded house beat, `L.kit.fit909_kick` on its
         own), with `tr909 except: :kick` leaving the 909's kick out.
+
+        Grids join two ways: bars with `|` in one grid (`bd: 'x...x... |
+        x.x.x...'`), or whole grids in turn with `seq(verse, fill)`.
       TEXT
       commands :tr808, :tr909, :kit, :drum_kit, :grid, :euclid
       note :drums

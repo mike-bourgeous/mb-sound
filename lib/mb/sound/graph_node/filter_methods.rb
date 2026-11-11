@@ -401,7 +401,14 @@ module MB
           raise "PEQ frequency/gain pairs must be a Hash from frequency to gain (got #{pairs.class})" unless pairs.is_a?(Hash)
 
           filters = pairs.map { |freq, gain|
-            freq = freq.frequency if freq.is_a?(Tone) || freq.is_a?(Pitch)
+            # (Kez, panel 3: an LFO as the frequency surfaced as `to_f` on a
+            # TempoNode through Tee::Branch#method_missing, and an LFO Tone
+            # quietly gave its own rate, 3 Hz, as the frequency)
+            freq = freq.frequency if (freq.is_a?(Pitch) && freq.constant?) || freq.is_a?(Note)
+            unless freq.is_a?(Numeric) && freq.real?
+              raise ArgumentError, "peq takes fixed frequencies (numbers or pitches; got #{freq.respond_to?(:sample) ? 'a moving node' : freq.inspect}); " \
+                'for a moving one use filter(:peak, cutoff: node, quality: 2, gain: 0.5) or filter(:notch, cutoff: node, quality: 2)'
+            end
             freq = freq.to_f
 
             case gain

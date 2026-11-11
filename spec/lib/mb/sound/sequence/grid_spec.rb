@@ -66,4 +66,26 @@ RSpec.describe(MB::Sound::Sequence::Grid) do
       expect { MB::Sound.grid(16, kick: 'x')[:snare] }.to raise_error(KeyError, /No row/)
     end
   end
+
+  # (omnibus19; Kez, panel 3: seq(two_step, two_step_b) raised, though its
+  # message invited "other clips")
+  describe 'MB::Sound#seq of drum grids' do
+    it 'plays the grids in turn as one Kit, resting rows a grid lacks' do
+      a = MB::Sound.grid(16, bd: 'x...x...x...x...', sd: '....x.......x...')
+      b = MB::Sound.grid(16, bd: 'x.x.x...', hh: 'xxxxxxxx')
+      k = MB::Sound.seq(a, b)
+      expect(k).to be_a(MB::Sound::Sequence::Kit)
+      expect(k.rows.keys).to eq(%i[bd sd hh])
+      expect(k.rows.values.map(&:length)).to eq([3/2r] * 3)
+      expect(k[:bd].events.map(&:start)).to eq([0, 1/4r, 1/2r, 3/4r, 1, 9/8r, 5/4r])
+      expect(k[:sd].events.map(&:start)).to eq([1/4r, 3/4r])
+      expect(k[:hh].events.map(&:start)).to eq((0...8).map { |i| 1 + i / 16r })
+      expect(MB::Sound.tr808(k).to_ruby).to eq('tr808(seq(grid(16, bd: "x...x...x...x...", sd: "....x.......x..."), grid(16, bd: "x.x.x...", hh: "xxxxxxxx")))')
+    end
+
+    it 'refuses a grid among notes, saying what works' do
+      a = MB::Sound.grid(16, bd: 'x...')
+      expect { MB::Sound.seq(a, MB::Sound::C4) }.to raise_error(ArgumentError, /drum grid goes in seq only with other drum grids.*grid\[:bd\].*\|/)
+    end
+  end
 end
