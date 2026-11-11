@@ -94,6 +94,10 @@ module MB
         # Onset-correlation peaks refined on the waveform per span.
         MAX_CANDIDATES = 4
 
+        # Lags either side of a candidate's FFT-found best whose waveform
+        # correlations #span_lag computes exactly (dot products).
+        EXACT_AROUND = 4
+
         # Waveform correlations within this of the best are ties, won by
         # the candidate nearest the band's whole-song lag (omnibus19: a
         # kick stem's stutter fill, 16 hits of a 64th at 140 BPM, read
@@ -366,13 +370,24 @@ module MB
             candidates << [hint.clamp(-m, m), 0.0] unless candidates.any? { |l, _| (l - hint).abs <= step }
           end
 
-          # Each candidate refined on the waveform within +-r (a dot product
-          # per lag); the best waveform correlation wins, else the first
-          # candidate (nearest the whole-song lag) keeps its onset lag
+          # Each candidate refined on the waveform within +-r; the best
+          # waveform correlation wins, else the first candidate (nearest
+          # the whole-song lag) keeps its onset lag.  The correlations at
+          # every lag the candidates reach come from one FFT, then exact
+          # dot products around each candidate's best (omnibus19: a dot
+          # product per lag was 9 of 12.6 s over 91 bars), so the lag, its
+          # parabola, and its correlation are the dot products' own.
+          lo = candidates.map(&:first).min - r
+          span = candidates.map(&:first).max + r - lo
+          approx = window_correlations(body, xb[(margin + lo)...(margin + lo + span + len)], span + 1)
           tried = candidates.map { |coarse, onset|
-            wave = Numo::DFloat.zeros(2 * r + 1)
-            (0..(2 * r)).each { |j| wave[j] = body.dot(xb[(margin + coarse - r + j)...(margin + coarse - r + j + len)]) }
-            k = wave.max_index
+            from = coarse - r - lo
+            wave = approx[from..(from + 2 * r)].dup
+            k0 = wave.max_index
+            exact = [k0 - EXACT_AROUND, 0].max..[k0 + EXACT_AROUND, 2 * r].min
+            exact.each { |j| wave[j] = body.dot(xb[(margin + coarse - r + j)...(margin + coarse - r + j + len)]) }
+            inner = [k0 - EXACT_AROUND + 1, 0].max..[k0 + EXACT_AROUND - 1, 2 * r].min
+            k = inner.begin + wave[inner].max_index
             [coarse, onset, wave, k, window_corr(body, ea, xb, margin + coarse - r + k, wave[k])]
           }
           pick = tried.max_by { |t| t[4] }
@@ -418,6 +433,16 @@ module MB
           seg = xb[start...(start + body.length)]
           eb = (seg * seg).sum
           eb > 0 ? dot / Math.sqrt(ea * eb) : 0.0
+        end
+
+        # c[j] = sum(body[i] * seg[i + j]) for j in 0...count (seg at least
+        # body.length + count - 1 long), by FFT: within rounding of the dot
+        # products (#span_lag recomputes the ones it keeps exactly).
+        def window_correlations(body, seg, count)
+          n = 1
+          n *= 2 while n < seg.length
+          fb = Numo::Pocketfft.rfft(Bands.pad(body, n))
+          Numo::Pocketfft.irfft(fb.conj * Numo::Pocketfft.rfft(Bands.pad(seg, n)))[0...count].dup
         end
 
         # c[j] = sum(a[i] * w[i + j]) for j in 0..2m, where +w+ is +a+'s
