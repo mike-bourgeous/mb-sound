@@ -54,9 +54,7 @@ module FormatWords
 
   # Format words in the library's vocabulary still, each an open question
   # for the maintainer.
-  QUESTIONS = {
-    'lib/mb/sound/sample.rb: rex' => 'SLICE_MODES\' :rex alias of the slice stretch (REX, a format name as a mode name; kept, conservative)',
-  }.freeze
+  QUESTIONS = {}.freeze
 
   module_function
 

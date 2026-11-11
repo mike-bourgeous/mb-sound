@@ -1060,7 +1060,7 @@ module MB
       CROSSFADE = 3.ms
 
       # Names of the slice stretch's mode (see #stretch).
-      SLICE_MODES = %i[slice slices beat beats rex].freeze
+      SLICE_MODES = %i[slice slices beat beats].freeze
 
       # The slice stretch (see #stretch and SliceStretch).
       def slice_stretch(ratio, slices, fade, fill, cycle, crossfade)
