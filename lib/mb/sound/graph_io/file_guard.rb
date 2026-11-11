@@ -92,6 +92,23 @@ module MB
           end
         end
 
+        class << self
+          # +path+ (a metadata sidecar, Meta::Formats.read_sidecar) if it
+          # may be read: a plain file, not a link, at most
+          # Meta::Formats::MAX_TEXT bytes.  nil when there is none; raises
+          # ArgumentError for one that breaks a rule.  (Sidecars sit beside
+          # a file the reader already checked, so they stay in its
+          # directory unless they are links.)
+          def sidecar(path)
+            return nil unless File.exist?(path) || File.symlink?(path)
+            raise ArgumentError, 'a link (sidecars are read only as plain files)' if File.symlink?(path)
+            raise ArgumentError, 'not a plain file' unless File.file?(path)
+            size = File.size(path)
+            raise ArgumentError, "#{size} bytes, over the limit of #{MB::Sound::Meta::Formats::MAX_TEXT}" if size > MB::Sound::Meta::Formats::MAX_TEXT
+            path
+          end
+        end
+
         # Wavetable.from_file
         module WavetableFile
           def from_file(path, **kwargs)

@@ -80,7 +80,11 @@ module MB
       # (prefader-sends-1, 2026-11-10) writes pre-fader and pre-mute sends
       # as `track :lead, pre_send: { verb: -12.db }` and `pre_mute_send:`,
       # which older mb-sound doesn't know (it stops at the format line
-      # instead).
+      # instead).  Format 11 (metadata-2, 2026-11-11; the maintainer chose
+      # the bump) carries descriptive metadata: a `meta: { ... }` keyword
+      # on the `graph` line, `.note(...)` calls, and inline comments read
+      # as notes (GraphIO::Comments); older documents' comments stay
+      # comments.
       #
       # FORMATS names the change each version made, so loaders gate on a
       # name (GraphIO.since?) and branches adding versions touch only this
@@ -95,6 +99,7 @@ module MB
         8 => :library_calls,
         9 => :tempo_live,
         10 => :prefader_sends,
+        11 => :metadata,
       }.freeze
       FORMAT = FORMATS.keys.max
 
@@ -112,7 +117,9 @@ module MB
       # document bytes, syntax nodes, nesting depth, DSL calls made, build
       # time, delay times (positional, seconds:, max_delay:), silence and
       # until lengths, with_buffer sizes, oversampling factors, synth
-      # voices, unison/swarm copies, and clip repeat counts.
+      # voices, unison/swarm copies, and clip repeat counts, and the text of
+      # one call's metadata (`meta:`, `.with_meta(...)`, `.note(...)`,
+      # `meta :name, ...`; bytes of source).
       LIMITS = {
         bytes: 1_000_000,
         nodes: 250_000,
@@ -129,6 +136,7 @@ module MB
         repeats: 4096,
         steps: 4096,
         wavetable_size: 1 << 16,
+        meta_bytes: 65_536,
       }.freeze
 
       # A document that can't be loaded: syntax outside the subset, an
@@ -471,6 +479,22 @@ module MB
 
         # `graph N, ...` with the metadata +parts+ (texts), on several lines
         # when long.
+        # What a save writes on the `graph` line beside its own fields:
+        # structural keys (Document::STRUCTURE_KEYS, top-level; a loaded
+        # document +doc+ keeps its description: and tags:) and descriptive
+        # metadata (a Meta::Value, written as `meta: { ... }`; +doc+'s kept,
+        # less the stamps a save writes anew).  +meta+ is the caller's Hash:
+        # structural keys go top-level, `meta:` and other keys to the
+        # metadata, so a description given as metadata never becomes the
+        # library's index word unless it is the top-level description:.
+        def header_split(doc, meta)
+          given = meta.to_h
+          index = (doc ? doc.header.slice(:description, :tags) : {}).merge(given.slice(*Document::STRUCTURE_KEYS))
+          described = doc ? doc.meta.without(*Document::STAMP_KEYS) : MB::Sound::Meta::EMPTY
+          described = described.merge(given.except(*Document::STRUCTURE_KEYS, *Document::STAMP_KEYS, :meta)).merge(given[:meta] || {})
+          [index, described]
+        end
+
         def graph_line(parts)
           line = "graph #{FORMAT}, #{parts.join(', ')}"
           return line if line.length <= 120
@@ -809,6 +833,7 @@ require_relative 'graph_io/registry'
 require_relative 'graph_io/number_only'
 require_relative 'graph_io/document'
 require_relative 'graph_io/loader'
+require_relative 'graph_io/comments'
 require_relative 'graph_io/old_decibels'
 require_relative 'graph_io/trusted_code'
 require_relative 'graph_io/file_guard'

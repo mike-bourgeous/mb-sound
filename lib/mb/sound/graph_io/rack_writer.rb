@@ -25,8 +25,8 @@ module MB
           @rack = rack
           @doc = GraphIO.rack_document(rack)
           @name = name || @doc&.name || rack.name&.to_s
-          @from = from || @doc&.meta&.[](:from)
-          @meta = (@doc ? @doc.meta.slice(:description, :tags) : {}).merge(meta)
+          @from = from || @doc&.from
+          @index, @described = GraphIO.header_split(@doc, meta)
           @assets = assets
         end
 
@@ -57,7 +57,8 @@ module MB
           fields[:saved] = Time.now.utc.iso8601
           fields[:mb_sound] = GraphIO.library_version
           fields[:from] = @from if @from
-          fields.merge!(@meta.reject { |k, _| fields.key?(k) })
+          fields.merge!(@index.reject { |k, _| fields.key?(k) })
+          fields[:meta] = @described.to_h unless @described.empty?
 
           header = []
           header << '# mb-sound rack document: a Ruby subset that MB::Sound.preset and'

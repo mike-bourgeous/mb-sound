@@ -6,7 +6,7 @@ RSpec.describe(MB::Sound::Session, 'instance variable layout') do
   # landing buffer of a new bus ~10 ms of compiling even after a
   # warm-up).  So every Session sets each of its instance variables in
   # the constructor (GraphNode::IvarPreset's rule for nodes).
-  it 'keeps the same instance variables through buses, sends, master chains, tracks, knobs, mutes, and cues' do
+  it 'keeps the same instance variables through buses, sends, master chains, tracks, knobs, mutes, cues, and metadata' do
     out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
     s = MB::Sound::Session.new(output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 2, buffer_size: 256, realtime: false, raise_errors: true, master_gain: 1)
     before = s.instance_variables
@@ -24,6 +24,8 @@ RSpec.describe(MB::Sound::Session, 'instance variable layout') do
       MB::Sound.solo(:keys)
       MB::Sound.cue(:lead, 330.hz.saw.at(0.05))
       MB::Sound.marker(:here, at: MB::Sound.bar(2))
+      MB::Sound.meta(:keys, source: { format: :spec, kind: :track, at: 16 })
+      MB::Sound.meta(notes: 'the set')
       200.times { s.process_buffer }
       MB::Sound.launch(:lead)
       MB::Sound.unsolo

@@ -10,8 +10,18 @@ module MB
       #
       # A name belongs to the object it was given to: a clip made from a
       # named one (`bass_a.transpose(12)`, `.loop`) has no name until it
-      # gets its own, so name a clip after its last transform.
+      # gets its own, so name a clip after its last transform.  The same
+      # goes for metadata (#with_meta, #note: Meta::Carrier, included
+      # here), which recipes print like the name:
+      #
+      #     seq(A1, A1, Rest, A2).n8.loop.named(:bass_a).note('from the old demo')
+      #
+      # A clip's name is its identity in a Set (swaps, listings); its
+      # metadata only describes it.
       module Named
+        include MB::Sound::Meta::Carrier
+        # (where an importer's clip came from: #provenance, #why)
+        include MB::Sound::Provenance::Readers
         # Gives this clip or kit a +name+ (a Symbol or String, kept as a
         # Symbol; nil removes it).  Returns self.
         def named(name)

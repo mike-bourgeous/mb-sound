@@ -93,6 +93,21 @@ module MB
           @count = @events.count
         end
 
+        # The file's text meta events as [type, text, seconds, track] rows
+        # (type 0x01 text, 0x02 copyright, 0x03 track name, 0x04
+        # instrument, 0x05 lyric, 0x06 marker, 0x07 cue point; seconds of
+        # each event; the track's index), all tracks or track +track+ (an
+        # index): the raw facts Meta::Formats.read_midi reads.
+        def meta_events(track = nil)
+          indexes = track.nil? ? (0...@seq.tracks.length).to_a : [track]
+          indexes.flat_map { |i|
+            @seq.tracks.fetch(i).events.filter_map { |e|
+              next unless e.is_a?(::MIDI::MetaEvent) && (0x01..0x07).cover?(e.meta_type)
+              [e.meta_type, e.data_as_str, pulse_time(e.time_from_start), i]
+            }
+          }
+        end
+
         # Returns information about each track in the underlying midilib
         # sequence object (see #seq).
         def tracks

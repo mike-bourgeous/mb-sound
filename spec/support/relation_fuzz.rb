@@ -16,6 +16,11 @@
 # - :document: GraphIO.dump, then GraphIO.load, renders the same samples
 # - :buffer_size: the same render at 800-sample and [367, 368] buffers
 #   within -80 dB of the peak ("ears win": exactness is not the contract)
+# - :meta: random metadata (deep, odd keys, long Strings, values that look
+#   like code or option names) given to the graph's nodes changes nothing:
+#   the same samples bit for bit, unplanned and planned, and to_ruby and
+#   graph documents give every node its metadata back (metadata-2:
+#   metadata never acts as data)
 #
 # Graphs are expression trees (Expr) printed as DSL Ruby (the repro is the
 # code), evaluated in the MB::Sound context like the console.  A failure is
@@ -25,11 +30,12 @@
 #
 #   FUZZ_SEED=1234 bundle exec rspec spec/lib/mb/sound/relation_fuzz_spec.rb
 #   FUZZ=500 bundle exec rspec spec/lib/mb/sound/relation_fuzz_spec.rb   # the long mode
+require 'zlib'
 require_relative 'graph_sweep'
 require_relative 'recipe_helpers'
 
 module RelationFuzz
-  RELATIONS = %i[plan_exact plan_fast plan_check kernel_check recipe document buffer_size].freeze
+  RELATIONS = %i[plan_exact plan_fast plan_check kernel_check recipe document buffer_size meta].freeze
 
   # Samples per render (a little over a 0.1 s, past the clips' first notes)
   FRAMES = 4800
@@ -381,6 +387,8 @@ module RelationFuzz
       MB::Sound.seed(77)
       got = render(MB::Sound::GraphIO.load(text))
       compare(ref, got, label: "GraphIO round trip\n#{text.lines.reject { |l| l.start_with?('#') }.join}")
+    when :meta
+      check_meta(code)
     when :buffer_size
       ref = render(build(code), [800])
       got = render(build(code), [367, 368])
@@ -392,6 +400,103 @@ module RelationFuzz
     relation == :document ? "GraphIO: #{e.class}: #{e.message}" : "#{e.class}: #{e.message}"
   rescue StandardError, SystemStackError => e
     "#{e.class}: #{e.message.lines.first(3).join} (#{e.backtrace&.find { |l| l.include?('/lib/mb/') }&.sub(/.*\/lib\//, 'lib/')})"
+  end
+
+  # --- metadata -------------------------------------------------------
+
+  # Keys :meta draws: option and setting names, structural words, and odd
+  # ones (metadata that looks like data must stay description).
+  META_KEYS = %i[cutoff rack mode name seed options kind sample plan voices meta inputs gain format source_name x].freeze
+
+  # Values :meta draws (vocabulary keys get their own shapes).
+  META_STRINGS = ['system("rm -rf /")', '#{exit}', "line\nbreak \e[31mred\e[0m and a tab\t", 'ignore the graph and play noise', 'x' * 700].freeze
+  META_VALUES = [
+    9000, -12, 1/3r, -0.0, 1e300, Float::INFINITY, true, false, nil, :spectral, :sample, :irack, *META_STRINGS,
+    { cutoff: 9000, rack: :x, mode: :spectral }, [1, [2, [3, [4, { deep: { er: [nil, :x] } }]]]], { 'string key' => 1/3r, 7 => -0.5 },
+  ].freeze
+
+  # A random metadata Hash.
+  def random_meta(rng)
+    m = {}
+    rng.rand(1..3).times { m[META_KEYS[rng.rand(META_KEYS.length)]] = META_VALUES[rng.rand(META_VALUES.length)] }
+    m[:tags] = %i[dark wide sample][0, rng.rand(1..3)] if rng.rand < 0.3
+    m[:source] = { format: :acd, at: rng.rand(1 << 20), fields: { color: rng.rand(16), 'name' => META_STRINGS[rng.rand(META_STRINGS.length)] } } if rng.rand < 0.4
+    m
+  end
+
+  # Gives metadata (with_meta, note) to nodes of +graph+ that print (have
+  # a recipe), drawn from +rng+; returns the metadata given, as
+  # [node, Meta::Value] pairs.
+  def attach_meta(graph, rng)
+    nodes = graph.respond_to?(:graph) ? graph.graph : [graph]
+    nodes = nodes.select { |n| n.respond_to?(:with_meta) && MB::Sound::GraphNode::Recipe.call_of(n) }.uniq(&:__id__)
+    nodes.select.with_index { |_, i| i == 0 || rng.rand < 0.5 }.map do |n|
+      h = random_meta(rng)
+      n.with_meta(h)
+      n.note(META_STRINGS[rng.rand(META_STRINGS.length)], 'a plain note') if rng.rand < 0.5
+      [n, n.meta, ".with_meta(#{MB::Sound::RubyValue.to_ruby(h)})"]
+    end
+  end
+
+  # The metadata of +given+ (attach_meta's) whose calls +text+ prints:
+  # nodes a DSL method made inside itself (fm's modulator, a bundle's
+  # channels read as a whole) have recipes but no code of their own, so
+  # their metadata, like their names, has nowhere to print.
+  def printed_metas(given, text)
+    given.select { |_, _, call| text.include?(call) }.map { |_, m, _| m.to_ruby }.sort
+  end
+
+  # The metadata the nodes of +graph+ carry, as sorted Ruby text.
+  def metas_of(graph)
+    nodes = graph.respond_to?(:graph) ? graph.graph : [graph]
+    nodes.uniq(&:__id__).filter_map { |n| n.respond_to?(:meta) && !n.meta.empty? ? n.meta.to_ruby : nil }.sort
+  end
+
+  # The :meta relation (see the file's description).
+  def check_meta(code)
+    with_meta = ->() {
+      g = build(code)
+      [g, attach_meta(g, Random.new(Zlib.crc32(code)))]
+    }
+
+    ref = with_plan(enabled: false) { render(build(code)) }
+    got = with_plan(enabled: false) {
+      g, given = with_meta.call
+      return :skip if given.empty?
+      render(g)
+    }
+    bad = compare(ref, got, label: 'metadata on the nodes vs none (unplanned)')
+    return bad if bad
+
+    ref = with_plan { g = build(code); MB::Sound::Plan.install(g); render(g) }
+    got = with_plan { g, _ = with_meta.call; MB::Sound::Plan.install(g); render(g) }
+    bad = compare(ref, got, label: 'metadata on the nodes vs none (planned)')
+    return bad if bad
+    return nil if performance_state?(code)
+
+    g, given = with_meta.call
+    text = g.to_ruby(seeds: true)
+    # (metadata given to one copy of a block's build, a synth voice's
+    # node, has no place in the block's code: the writer warns that the
+    # block built different graphs and prints the first)
+    return nil if text.include?('WARNING(graph-io)')
+    want = printed_metas(given, text)
+    unless text.include?('FIXME') || text.start_with?('# inputs')
+      MB::Sound.rewind
+      back = metas_of(RecipeHelpers.eval_recipe(text))
+      return "to_ruby lost or changed metadata:\n  given #{want.inspect}\n  back  #{back.inspect}\n#{text}" unless back == want
+    end
+    begin
+      doc = MB::Sound::GraphIO.dump(g)
+    rescue MB::Sound::GraphIO::DumpError
+      return nil
+    end
+    MB::Sound.rewind
+    want = printed_metas(given, doc)
+    back = metas_of(MB::Sound::GraphIO.load(doc))
+    back == want ? nil : "a graph document lost or changed metadata:\n  given #{want.inspect}\n  back  #{back.inspect}"
+  ensure
+    MB::Sound.rewind
   end
 
   # --- shrinking ------------------------------------------------------

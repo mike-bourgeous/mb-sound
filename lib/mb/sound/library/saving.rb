@@ -13,7 +13,8 @@ module MB
         # Saves +graph+ as preset +name+ (see GraphIOMethods#save):
         # +replace+ allows replacing an existing preset, +bump+ picks the
         # next free version name, +tags+/+about+ go into the header (tags:,
-        # description:).  Prints what happened; returns the path or nil.
+        # description:; the library's index words), and +meta:+ keys other
+        # than those into the header's descriptive `meta: { ... }`.  Prints what happened; returns the path or nil.
         def save(name, graph, replace:, bump:, tags: nil, about: nil, **opts)
           return save_generator(name, graph, replace: replace, bump: bump, tags: tags, about: about, **opts) if generator?(graph)
           meta = (opts.delete(:meta) || {}).dup
@@ -32,8 +33,11 @@ module MB
             # unless new ones are given)
             old = GraphIO.parse(File.file?(target) ? target : GraphIO.bundle_document(GraphIO.bundle_dir(target))) rescue nil
             meta = (opts[:meta] || {}).dup
-            meta[:tags] = old.meta[:tags] if tags.nil? && old&.meta&.[](:tags)
+            meta[:tags] = old.header[:tags] if tags.nil? && old&.header&.[](:tags)
             meta[:description] = old.description if about.nil? && old&.description && !meta.key?(:description)
+            # (and its descriptive metadata: notes, author, ...)
+            kept = old ? old.meta.without(*GraphIO::Document::STAMP_KEYS) : MB::Sound::Meta::EMPTY
+            meta[:meta] = kept.merge(meta[:meta] || {}).to_h unless kept.empty?
             opts[:meta] = meta unless meta.empty?
           end
           if existed && !replace

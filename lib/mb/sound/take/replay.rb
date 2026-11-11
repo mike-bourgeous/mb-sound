@@ -57,7 +57,8 @@ module MB
         # transport's tempo map as rows (Sequence::TempoMap#rows) when it
         # wasn't one constant tempo (takes saved before tempo-2 don't give
         # it, and replay from the tempo alone).
-        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, replace_declick: false, meters: [], key: nil, ends: nil, ends_epoch: 0, seconds: nil, run_frame: 0, odometer: 0, tempo_map: nil)
+        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, replace_declick: false, meters: [], key: nil, ends: nil, ends_epoch: 0, seconds: nil, run_frame: 0, odometer: 0, tempo_map: nil, meta: nil)
+          @meta = MB::Sound::Meta::Value.of(meta) # (Take#meta, saved; never read to replay)
           @start = { bpm: bpm, tempo_map: tempo_map, bar_length: bar_length, meters: meters, key: key, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, replace_declick: replace_declick, rng: rng, run_frame: run_frame, odometer: odometer }
           @ends = ends&.to_r
           @ends_epoch = ends_epoch
@@ -70,6 +71,10 @@ module MB
           yield self if block_given?
           self.class.last = self
         end
+
+        # The take's metadata (Take#with_meta, Take#note; a Meta::Value):
+        # it describes the take and changes nothing about the replay.
+        attr_reader :meta
 
         # Adds a console line typed at +issued+ (whole notes) whose changes
         # landed at +lands+ (each a position, or [position, time] for a

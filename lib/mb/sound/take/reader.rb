@@ -511,7 +511,7 @@ module MB
           text = path.include?("\n") ? path : File.read(path)
           doc = GraphIO.parse(text)
           name = (doc.name || File.basename(path, GraphIO::EXTENSION)).to_sym
-          start_version(track, name, text) if doc.meta[:from] == 'fit_patch' || path.include?("\n")
+          start_version(track, name, text) if doc.from == 'fit_patch' || path.include?("\n")
           @tracks[track] = path.include?("\n") ? @versions[track].last.path : path
           doc.declarations.each { |p, decl| seed(Session::Name.param(track, p), decl.default) }
         rescue StandardError

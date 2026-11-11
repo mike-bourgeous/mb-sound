@@ -365,6 +365,7 @@ module MB
         init_cue(cue_output)
         init_warming
         @names = Names.new
+        @metadata = Meta::Store.new
         @racks = Racks.new(self)
         @arrangement = nil
 
@@ -407,6 +408,11 @@ module MB
 
       # The Session's top-level names (see Names).
       attr_reader :names
+
+      # The metadata the set and its named pieces carry (a Meta::Store:
+      # `meta :bass, source: { ... }`, MetaMethods).  Never read while
+      # rendering; saved by set documents.
+      attr_reader :metadata
 
       # Named racks (see Session::Racks and MB::Sound::RackMethods).
       attr_reader :racks

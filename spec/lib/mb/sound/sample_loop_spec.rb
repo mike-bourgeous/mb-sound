@@ -170,7 +170,10 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       expect(s.root).to eq(57)
       expect(s.loop_points).to eq([0.0, 48000.0]) # ACID loops loop the whole file, whatever smpl says
       expect(s.loop_mode).to eq(:forward)
-      expect(s.meta[:smpl_loops]).to eq([[109.0, 43537.0, :forward]])
+      # (round 2's layers: the smpl loop is a fact the ACID loop didn't use, so description)
+      expect(s.meta[:source][:fields]['smpl.loop[0]']).to eq([100, 40000, :forward])
+      expect(s.provenance(:bpm).fact).to eq('acid.tempo')
+      expect(s.provenance(:markers).via).to eq(:cue)
       expect(s.markers.map(&:to_h)).to eq([{ position: 0, label: 'kick' }, { position: 12000, label: 'snare' }])
       expect(s.meta_source).to include(bpm: :acid, one_shot: :acid, markers: :cue)
 
@@ -413,7 +416,8 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       expect([e.one_shot, e.loop, e.smpl_loops]).to eq([false, nil, [[100, 20000, :forward]]])
       s = MB::Sound::Sample[file('piano c3.wav', 1.0, smpl: { unity_note: 48, loops: [[100, 20000, :ping_pong]] })]
       expect([s.loop_points, s.loop_mode, s.root]).to eq([[100.0, 20000.0], :ping_pong, 48.0])
-      expect(s.meta[:smpl_loops]).to eq([[100.0, 20000.0, :ping_pong]])
+      expect(s.provenance(:loop).fact).to eq('smpl.loop[0]') # (consumed: not description)
+      expect(s.meta[:source][:fields].to_h.keys.grep(/smpl\.loop/)).to eq([])
     end
 
     it 'loops loops and calls one hit decaying to silence a one-shot' do
@@ -423,8 +427,8 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       t = Numo::DFloat.new(96000).seq / 48000
       hit = Numo::SFloat.cast(Numo::NMath.sin(t * 2 * Math::PI * 180) * Numo::NMath.exp(-t * 8) * 0.8)
       s = MB::Sound::Sample[file('boom 120.wav', data: hit)] # 2 s = 4 beats at 120, but one decaying hit
-      expect([s.one_shot?, s.bpm, s.meta_source[:one_shot], s.meta[:why][:one_shot]]).to eq([true, nil, :decay, 'one hit decaying to silence'])
-      expect(s.meta[:why][:bpm]).to eq('name 120 (fits 4 beats); dropped: a one-shot')
+      expect([s.one_shot?, s.bpm, s.meta_source[:one_shot], s.why(:one_shot)]).to eq([true, nil, :decay, 'one hit decaying to silence'])
+      expect(s.why(:bpm)).to eq('name 120 (fits 4 beats); dropped: a one-shot')
 
       drums = MB::Sound.bounce(1.bar, bpm: 120) { MB::Sound.tr808(MB::Sound.grid(16, kick: 'X...X...X...X...', hat: 'x.x.x.x.x.x.x.x.')) }
       s = MB::Sound::Sample[file('drums 120.wav', data: drums.data(0))]

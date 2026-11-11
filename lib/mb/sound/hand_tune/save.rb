@@ -48,7 +48,7 @@ module MB
         e = Arrangement::InstrumentPatch.entry_of(tr.patch)
         lineage = (e.settings[:lineage] if e&.settings.is_a?(Hash)) || path
         base = parsed(File.file?(lineage) ? lineage : path) || parsed(path) or return {}
-        return {} unless base.meta[:from] == 'fit_patch'
+        return {} unless base.from == 'fit_patch'
         decls = base.declarations
         out = {}
         decls.each do |p, decl|

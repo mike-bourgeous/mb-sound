@@ -30,6 +30,7 @@ module MB
         include MultiOutput
         include Traversable
         include Nameable
+        include Meta::Carrier
         include ChorusMethods
         include PhaserMethods
         include StereoDelayMethods
@@ -63,6 +64,7 @@ module MB
           }
           raise ArgumentError, 'A channel bundle needs at least one channel' if nodes.empty?
 
+          @carried_meta = nil # (Meta::Carrier#with_meta: the bundle's own metadata)
           @outputs = nodes.freeze
 
           if names

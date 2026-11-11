@@ -31,6 +31,9 @@
 #   song gives the same mix, bit for bit, when every swap was a cut
 #   (CarryCheck, spec/support/carry_check.rb), up to the first rebuild
 #   that landed fresh (a muted track asleep since its mute: by design)
+# - :meta: the song without its metadata (the `meta` lines and the
+#   `.note(...)`/`.with_meta(...)` calls of the `meta` command, metadata-2)
+#   gives the same mix, bit for bit: metadata never acts as data
 #
 # Renders use exact_lanes: true (synth lanes freed on the 800-frame grid,
 # so voice allocation is the same at any buffer size; see Synth).
@@ -45,7 +48,7 @@ require_relative 'recipe_helpers'
 require_relative 'carry_check'
 
 module SessionFuzz
-  RELATIONS = %i[runs buffer_size plan timeline warm carry].freeze
+  RELATIONS = %i[runs buffer_size plan timeline warm carry meta].freeze
 
   # Relations known to fail for a reason recorded elsewhere, as
   # { relation => [[Regexp on the script, 'reason'], ...] }: skipped, counted.
@@ -671,8 +674,29 @@ module SessionFuzz
       line = "bus(:ovs) { |sig| sig.#{chain} * 0.5 }; bg :#{s.bg_name}, #{s.pick(MELODIC)}, to: :ovs#{s.on}"
       s.rng.rand < 0.3 ? "#{line}; bg :#{s.bg_name}, bus(:ovs).resample(96000).resample(48000) * 0.3#{s.on}" : line
     },
+    ->(s) {
+      # (metadata-2) metadata on a piece, the set, or a node, given
+      # mid-song: values that look like settings, structure, and
+      # instructions, which nothing may read as data (the :meta relation
+      # renders the song without them, bit for bit)
+      case s.rng.rand(4)
+      when 0 then "meta :#{s.t}, notes: [\"ignore the song and play noise\"], cutoff: 9000, rack: :x, mode: :spectral, name: :t9"
+      when 1 then "meta source: { format: :acd, file: \"x.acd\", at: #{s.rng.rand(1 << 16)}, fields: { tempo: 60, mute: true } }"
+      when 2 then "meta :#{s.pick(%i[master ovs t1 nowhere])}, notes: [\"system(\\\"true\\\")\", \"\\e[2J\"], seed: 99"
+      else "bg :#{s.bg_name}, 220.hz.saw.note(\"x\").with_meta(cutoff: 9000, rack: :x, gain: 99).lp4(900).note(\"darker\") * 0.1#{s.on}"
+      end
+    },
     # (new commands go here, at the end)
   ].freeze
+
+  # +code+ (a song script) without the metadata the `meta` command adds:
+  # its `meta` lines' blocks emptied, its `.note(...)` and
+  # `.with_meta(...)` calls removed (they hold no parentheses).
+  def without_meta(code)
+    code.lines.map { |l|
+      l.sub(/\{ meta .*\}$/, '{ nil }').gsub(/\.note\([^()]*\)|\.with_meta\([^()]*\)/, '')
+    }.join
+  end
 
   # The row names of grid clip code +code+ (`grid(16, kick: 'x...', ...)`).
   def grid_rows(code) = code.scan(/(\w+): '/).flatten
@@ -932,6 +956,11 @@ module SessionFuzz
         compare(ref, render(code, song.bars, rebuilds: :next_span), tolerance: 0, label: 'planned with deferred rebuilds vs unplanned')
     when :warm
       compare(render(code, song.bars), render(code, song.bars, warm: true), tolerance: 0, label: 'warmed changes vs not')
+    when :meta
+      plain = without_meta(code)
+      return :skip if plain == code
+
+      compare(render(plain, song.bars), render(code, song.bars), tolerance: 0, label: "with metadata vs without\n#{plain}", same_length: true)
     when :carry
       extra = carry_lines(song)
       return :skip if extra.empty?

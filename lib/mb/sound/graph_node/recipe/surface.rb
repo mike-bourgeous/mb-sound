@@ -283,7 +283,9 @@ module MB
           # Adds recorders for DSL methods without one (e.g. after a *Methods
           # module gained methods).
           def refresh!
-            dsl = Surface.graph_node_dsl + [:named]
+            # (#named, #with_meta, and #note return their receiver:
+            # configuration calls)
+            dsl = Surface.graph_node_dsl + [:named, :with_meta, :note]
             record(GraphNode, dsl - @wrapped[GraphNode].to_a, key: GraphNode)
 
             # Classes that define DSL methods themselves (Pitch#tone,
@@ -298,7 +300,7 @@ module MB
               names = Surface.own_surface(c)
               names |= dsl + ELEMENT_ACCESS + [:coerce] if c == Channels
               names |= MB::Sound::Sequence::NoteMethods.public_instance_methods(false) if c == MB::Sound::Sequence::Seq
-              names |= [:named] if c == MB::Sound::Sequence::Clip || c == MB::Sound::Sequence::Kit # Sequence::Named
+              names |= [:named, :with_meta, :note] if c == MB::Sound::Sequence::Clip || c == MB::Sound::Sequence::Kit # Sequence::Named (Meta::Carrier)
               names |= MB::Sound::Sampler::ClipMethods.public_instance_methods(false) if c == MB::Sound::Sequence::Clip
               names |= Surface.mixin_surface(c)
               names |= MB::Sound::ModMethods.public_instance_methods(false) if c == MB::Sound::Notes

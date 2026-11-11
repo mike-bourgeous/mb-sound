@@ -39,7 +39,9 @@ module MB
           note_fx: [:mrack, :notes, nil],
         }.freeze
 
-        # Keywords every entry line takes.
+        # Keywords every entry line takes (index data the library searches
+        # and resolves), beside `meta: { ... }` (the entry's description,
+        # Entry#meta: plain values, never read to find or build).
         ENTRY_KEYS = %i[tags about facets aliases].freeze
 
         # Generator verbs (Library::Generators): their settings.
@@ -122,14 +124,23 @@ module MB
           name = args.shift
           raise error(node, "#{node.name} needs a name (#{node.name} :name, ...)") unless name.is_a?(Symbol)
           raise error(node, "#{name}: entry names are words (#{name.inspect})") unless name.to_s.match?(/\A[a-z_][a-z0-9_]*\z/)
-          meta = kwargs.slice(*ENTRY_KEYS)
-          kwargs = kwargs.except(*ENTRY_KEYS)
-          tags = Array(meta[:tags])
+          # (the entry's index fields: data the library searches and
+          # resolves; `meta:` is its description, Entry#meta, never read
+          # to find or build)
+          index = kwargs.slice(*ENTRY_KEYS)
+          given = kwargs[:meta] # (read as plain values: Loader#call_args)
+          kwargs = kwargs.except(*ENTRY_KEYS, :meta)
+          tags = Array(index[:tags])
           raise error(node, "#{name}: tags: are words (%i[dark wide])") unless tags.all? { |t| t.is_a?(Symbol) || t.is_a?(String) }
-          about = meta[:about]
+          about = index[:about]
           raise error(node, "#{name}: about: is a String") unless about.nil? || about.is_a?(String)
           location = "#{@path}:#{node.location.start_line}"
-          common = { name: name, tags: tags, about: about && String.new(about), facets: meta[:facets] || {}, shelf: @shelf, location: location, source: source_of(node) }
+          described = begin
+            MB::Sound::Meta::Value.of(given)
+          rescue ArgumentError => e
+            raise error(node, "#{name}: meta: #{e.message}")
+          end
+          common = { name: name, tags: tags, about: about && String.new(about), facets: index[:facets] || {}, shelf: @shelf, location: location, source: source_of(node), meta: described }
 
           if RACKS.key?(node.name)
             rack_entry(node, scope, name, args, kwargs, common)
@@ -150,7 +161,7 @@ module MB
               raise error(node, "#{node.name} #{name.inspect}: unknown setting#{'s' if bad.length > 1} #{bad.map(&:inspect).join(', ')}#{GraphIO.suggest(bad[0], keys)}")
             end
             family = node.name
-            Array(meta[:aliases]).each { |a| Library.index.add_alias(family, a, name) }
+            Array(index[:aliases]).each { |a| Library.index.add_alias(family, a, name) }
             Entry.new(
               kind: Library.families[family].kind, family: family, settings: kwargs,
               params: -> { PresetHelpers.params_for(owner.preset_params, kwargs) },

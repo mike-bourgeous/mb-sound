@@ -662,8 +662,8 @@ module MB
         whole number of its beats).  Loops loop the whole file; one-shots
         (the ACID chunk's flag, words like kick or hit, short files, one hit
         decaying away) keep no name tempo.  `sample.bpm`, `.beats`,
-        `.bars`, `.key`, `.meta_source` and `.meta[:why]` (where each came
-        from, and why); `Sample[path, detect:
+        `.bars`, `.key`, `.provenance(:bpm)` and `.why(:bpm)` (where each
+        came from, and why; `puts sample.summary` lists them); `Sample[path, detect:
         true]` (or `.detect_tempo`, `.detect_key`) finds a missing tempo
         and key (`sample.key_analysis` shows the key's scores).  `loops
         '~/Loops/Funk'` lists a folder (headers and names only, nothing
@@ -1576,6 +1576,67 @@ module MB
       note :graph_io
       example 'print a graph back as Ruby', sound: false do
         ruby 110.hz.saw.at(-20.db).lp4(800, resonance: 0.3).softclip
+      end
+    end
+
+    Help.topic :meta, 'Metadata: where things came from', group: :keep do
+      about <<~TEXT
+        A set made from another program's file (an ACID project, a tracker
+        module, a MIDI file) keeps what that file said even where mb-sound
+        has no use for it yet: `meta :bass, source: { ... }` gives a track,
+        bus, mute group, knob, or rack plain facts to carry, and `meta
+        source: { ... }` (no name) the set itself.  Metadata never changes
+        the sound, and nothing reads it to build or find anything: it
+        describes, it never decides.  `meta :bass` reads it back (a frozen
+        Meta::Value, read like a Hash), `metas`
+        lists a line per name, `meta :bass, notes: 'x'` merges by key
+        (`:source` stays), `meta :bass, nil` forgets.
+
+        The name needs no piece yet, so a song file can list its metadata
+        last, and it stays with the name through swaps, scenes, undo, and
+        `untrack`.  `save :gig, set` writes it as `meta` lines at the end
+        of the set document (`ruby set` prints the same text); takes replay
+        it.  Values are plain Ruby: numbers, Strings, Symbols, true, false,
+        nil, Arrays, and Hashes of those.
+
+        Importers put provenance under `:source`, with the same keys
+        everywhere: `format:`, `file:`, `version:`, `kind:` (what it was
+        there), `id:`, `name:` (its own name), `at:` (byte offset),
+        `bytes:`, `records:`, `unread:` (bytes not understood, or a
+        fraction), and `fields:` (understood values mb-sound doesn't use
+        yet, by name).
+
+        Objects without a name carry it themselves: `node.with_meta(source:
+        { ... })` and `node.note('why it sounds like this')` (printed by
+        `ruby node`, saved in graph documents), clips, takes
+        (`take.note('the good one')`), and `sample.with_meta(...)`;
+        `node.meta.notes` reads the notes.  Comments in a graph document
+        become notes on what each line builds, and saves print them back
+        as comments.
+
+        Files keep it too: `sample.save('x.wav')` writes the name, notes,
+        author, license, and tags as the file's own tags (any player shows
+        them) and the whole metadata as Ruby text that `Sample['x.wav']`
+        reads back; MIDI files' track names, text, and copyright, and a
+        SoundFont's INFO, read as metadata.  For other files, a sidecar
+        `x.aiff.meta.rb` holds one `meta` line.  Text from foreign files is
+        shown in quotes, as data.
+      TEXT
+      commands :meta, :metas
+      note :metadata
+      see :presets, :sets, :sampler
+      example 'a track that remembers the file it came from', sound: false do
+        track(:try_a3) { |c| c.synth(voices: 2) { |v| v.hz.triangle.at(-20.db) * v.env(0.005, 0.2, 0.3, 0.1) } }
+        meta :try_a3, source: { format: :acd, kind: :track, id: 3, at: 0x12340, bytes: 5678, fields: { color: 3, height: 80 } }
+        meta source: { format: :acd, file: 'project.acd', bytes: 1_234_567, unread: 0.19 }
+        metas
+      end
+      example 'a node that carries its source, printed back as Ruby', sound: false do
+        ruby 110.hz.saw.lp4(600).with_meta(source: { format: :xm, kind: :instrument, id: 2 })
+      end
+      example 'notes on a patch', sound: false do
+        pad = 220.hz.saw.note('a little detuned on purpose').lp4(900).note('darker for the verse')
+        pad.meta.notes
       end
     end
 

@@ -169,6 +169,11 @@ module MB
           @trust = trust
           @limits = GraphIO::LIMITS.merge(limits)
           @base_dir = base_dir || (path && File.dirname(File.expand_path(path)))
+          @parse_result = nil # (#parse)
+          @header_offsets = nil # (#header_args: where the graph line's keys sit)
+          @note_comments = nil # (#load: GraphIO::Comments, nil without comments)
+          @comment_notes = true # (#read_header: false for documents before format 11)
+          @arg_comments = nil
           raise ArgumentError, "trust: must be nil or :code (got #{trust.inspect})" unless trust.nil? || trust == :code
         end
 
@@ -184,6 +189,9 @@ module MB
           body = stmts[index..] || []
           return load_set(body) if set?
           raise error(tree, 'the document has no graph (only a header)') if body.empty?
+          # (inline comments as notes on what each statement and link builds:
+          # Comments; nil, and nothing checked while building, without any)
+          @note_comments, @arg_comments = Comments.collect(@parse_result, body) if @comment_notes
           return load_rack(body) if @document.rack?
 
           bind_inputs
@@ -219,7 +227,7 @@ module MB
           unless @document.params.values.all? { |p| p[:knob] }
             raise LoadError.new("#{@label}: rack documents keep settings in knob lines, not param lines", path: @path)
           end
-          constructor = @document.meta[:rack]
+          constructor = @document.header[:rack]
           unless constructor.is_a?(Symbol) && Rack::CONSTRUCTORS.include?(constructor)
             raise LoadError.new("#{@label}: rack: must name a rack constructor (#{Rack::CONSTRUCTORS.to_a.join(', ')}), not #{constructor.inspect}", path: @path)
           end
@@ -330,7 +338,9 @@ module MB
 
         # Set commands of `kind: :set` documents (see #load_set), called
         # with their evaluated arguments on the set's Session.
-        SET_COMMANDS = %i[bpm meter master_gain quant master bus track sidechain wire scene mutes section flow].freeze
+        # (`meta`: the metadata lines at a set document's end, see
+        # MetaMethods#meta; plain values only, like every argument here)
+        SET_COMMANDS = %i[bpm meter master_gain quant master bus track sidechain wire scene mutes section flow meta].freeze
 
         # Commands a scene block may hold (they land at the scene's launch
         # point, as in an #at_bar block): meter and tempo, knob turns and
@@ -399,6 +409,7 @@ module MB
             raise LoadError.new("#{@label}:#{e.location.start_line}: syntax error: #{e.message}", path: @path, line: e.location.start_line)
           end
           @comments = result.comments.map { |c| [c.location.start_line, c.location.slice] }
+          @parse_result = result
           check_shape(result.value)
           result.value
         end
@@ -516,7 +527,8 @@ module MB
               @old_ring = !GraphIO.since?(version, :ring_all_typed_inputs)
               @old_shift = !GraphIO.since?(version, :clip_shift)
               @old_tempo = !GraphIO.since?(version, :tempo_live)
-              @document.meta = kwargs
+              @comment_notes = GraphIO.since?(version, :metadata)
+              @document.read_graph_line(kwargs, offsets: @header_offsets || {})
             when :inputs
               bad = args.reject { |a| a.is_a?(Symbol) }
               raise error(node, "inputs takes Symbols (inputs :midi), not #{bad.map(&:inspect).join(', ')}") unless bad.empty?
@@ -608,7 +620,12 @@ module MB
           kwargs = {}
           (node.arguments&.arguments || []).each do |a|
             if a.is_a?(Prism::KeywordHashNode)
-              a.elements.each { |el| kwargs[value_key(el.key)] = eval_node(el.value, Scope.new) }
+              a.elements.each do |el|
+                key = value_key(el.key)
+                (@header_offsets ||= {})[key] = el.location.start_offset if node.name == :graph
+                # (`graph ..., meta: { ... }`: metadata, read as plain values, never run)
+                kwargs[key] = key == :meta && node.name == :graph ? meta_literal(el.value) : eval_node(el.value, Scope.new)
+              end
             else
               args << eval_node(a, Scope.new)
             end
@@ -652,7 +669,7 @@ module MB
         # through a resampling Tee branch since omnibus4, correct but not
         # the same graph).  Document#set changes them all.
         def bind_params
-          baked = (@document.meta[:options] || {})
+          baked = (@document.header[:options] || {})
           @overrides.each_key do |k|
             next if @document.params.key?(k)
             if baked.respond_to?(:key?) && baked.key?(k)
@@ -1019,7 +1036,9 @@ module MB
             eval_statements(node, scope)
           when Prism::LocalVariableWriteNode
             raise error(node, "#{node.name} is an input or param and can't be assigned") if bound?(node.name)
-            scope.up(node.depth).vars[node.name] = eval_node(node.value, scope)
+            v = scope.up(node.depth).vars[node.name] = eval_node(node.value, scope)
+            Comments.note(v, @note_comments[node]) if @note_comments&.key?(node)
+            v
           when Prism::LocalVariableReadNode
             s = scope.up(node.depth)
             raise error(node, "#{node.name} is used before it is assigned") unless s.vars.key?(node.name)
@@ -1027,7 +1046,12 @@ module MB
           when Prism::ConstantReadNode, Prism::ConstantPathNode
             constant(node)
           when Prism::CallNode
-            eval_call(node, scope)
+            v = eval_call(node, scope)
+            if @note_comments
+              Comments.note(v, @note_comments[node]) if @note_comments.key?(node)
+              Comments.args(v, @arg_comments[node]) if @arg_comments.key?(node)
+            end
+            v
           when Prism::LambdaNode
             runtime_proc(node, scope, lambda: true)
           else
@@ -1193,11 +1217,17 @@ module MB
         end
 
         def call_args(node, scope)
+          return meta_args(node) if META_CALLS.include?(node.name)
           args = []
           kwargs = {}
           (node.arguments&.arguments || []).each do |a|
             if a.is_a?(Prism::KeywordHashNode)
-              a.elements.each { |el| kwargs[eval_node(el.key, scope)] = eval_node(el.value, scope) }
+              a.elements.each do |el|
+                key = eval_node(el.key, scope)
+                # (a `meta:` keyword anywhere, e.g. a library line's or
+                # Sample[..., meta: {...}]: metadata, read as plain values)
+                kwargs[key] = key == :meta ? meta_literal(el.value) : eval_node(el.value, scope)
+              end
             elsif a.is_a?(Prism::BlockArgumentNode)
               raise error(a, 'block arguments go last') # Prism keeps &blk in #block
             else
@@ -1205,6 +1235,52 @@ module MB
             end
           end
           [args, kwargs]
+        end
+
+        # Calls whose arguments are metadata (Meta::Carrier#with_meta and
+        # #note, the set documents' `meta` lines): read as plain values from
+        # the syntax tree (Meta.literal), never evaluated, so nothing in
+        # them can build, call, or read anything (metadata-2: metadata
+        # never acts as data).
+        META_CALLS = %i[with_meta note meta].freeze
+
+        # The arguments of metadata call +node+ (see META_CALLS), as
+        # call_args returns them.
+        def meta_args(node)
+          args = []
+          kwargs = {}
+          check_meta_size(node.arguments) if node.arguments
+          (node.arguments&.arguments || []).each do |a|
+            if a.is_a?(Prism::KeywordHashNode)
+              a.elements.each do |el|
+                raise error(el, "#{node.name} takes plain values (no ** in its arguments)") unless el.is_a?(Prism::AssocNode)
+                kwargs[meta_value(el.key)] = meta_value(el.value)
+              end
+            elsif a.is_a?(Prism::BlockArgumentNode)
+              raise error(a, "#{node.name} takes no block")
+            else
+              args << meta_value(a)
+            end
+          end
+          [args, kwargs]
+        end
+
+        # The plain value of metadata syntax +node+, within the size limit.
+        def meta_literal(node)
+          check_meta_size(node)
+          meta_value(node)
+        end
+
+        def meta_value(node)
+          MB::Sound::Meta.literal(node)
+        rescue ArgumentError => e
+          raise error(node, "metadata holds plain values only, written out (numbers, Strings, Symbols, true, false, nil, Arrays, Hashes): #{e.message.sub(/\Ametadata text holds plain values only ?/, '')}")
+        end
+
+        def check_meta_size(node)
+          n = node.location.length
+          return if n <= @limits[:meta_bytes]
+          raise error(node, "metadata of #{n} bytes is over the limit of #{@limits[:meta_bytes]} (GraphIO::LIMITS[:meta_bytes])")
         end
 
         # The block for a call: a build block (walked per call), a runtime

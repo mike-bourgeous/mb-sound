@@ -153,6 +153,7 @@ module MB
             @knobs_used = Set.new
             @clocks_used = Set.new
             @rack_defs = @shared_rack_defs || {}
+            @commented = Set.new.compare_by_identity
             @used.merge(@knobs.keys)
             @used.merge(@knob_nodes.values)
           end
@@ -169,6 +170,7 @@ module MB
           def build
             roots = @root.is_a?(Array) ? @root : [@root]
             lines = emit_scope(nil, roots, [], '')
+            lines.concat(comment_lines(@root, '')) if Recipe.graph_object?(@root)
             final = Recipe.graph_object?(@root) ? expr(@root, top: true) : value(@root)
             @parts = [finish_lines(lines.join("\n").split("\n")), finish_lines(final.split("\n"))]
             lines << final
@@ -225,13 +227,18 @@ module MB
             vars = info[:order].select { |o|
               next false if scope.nil? && o.equal?(@root)
               next false if knob_for(o) || o.is_a?(Knob) || o.is_a?(Knob::Reader) || o.is_a?(BusTap::Channel)
-              info[:counts][o] > 1 || info[:forced].include?(o) || local_name(o) || seeded.include?(o)
+              info[:counts][o] > 1 || info[:forced].include?(o) || local_name(o) || seeded.include?(o) ||
+                # (two or more comment notes print as leading lines of a
+                # statement of their own: a chain link takes only one
+                # trailing comment, GraphIO::Comments)
+                comment_notes(o).to_a.length > 1
             }
             vars.sort_by.with_index { |o, i| [order_key(o), i] }.each do |o|
               next if @names.key?(o)
               # The name first: in `noise = noise()`, the right side must
               # see the new local (see #call_text)
               name = unique(local_name(o) || base_name(o))
+              lines.concat(comment_lines(o, indent))
               text = expr(o, top: true, indent: indent)
               lines << "#{indent}#{name} = #{text}"
               @names[o] = name
@@ -416,7 +423,33 @@ module MB
           # [text, precedence] of +o+.  +arith+ is true where a number would
           # do (operands of arithmetic): an unrecorded Constant prints as its
           # value there.
-          def expr_p(o, indent: '', arith: false)
+          def expr_p(o, indent: '', arith: false, receiver: false)
+            text, prec = expr_raw(o, indent: indent, arith: arith)
+            return [text, prec] if receiver || @names.key?(o) || @commented.include?(o)
+
+            # Notes a document's comments gave (GraphIO::Comments) where no
+            # comment can go (an argument or an operand): as calls
+            notes = comment_notes(o) or return [text, prec]
+            @commented << o
+            ["#{prec < ATOM ? "(#{text})" : text}.note(#{notes.map { |n| value(n) }.join(', ')})", ATOM]
+          end
+
+          # The comment notes of +o+ (GraphIO::Comments.notes_of), or nil.
+          def comment_notes(o)
+            return nil unless o.is_a?(GraphNode) || o.is_a?(Channels) || o.is_a?(MB::Sound::Sequence::Named)
+            GraphIO::Comments.notes_of(o)
+          end
+
+          # Leading comment lines for statement object +o+'s comment notes
+          # (marking them printed), or none.
+          def comment_lines(o, indent)
+            notes = comment_notes(o) or return []
+            @commented << o
+            notes.map { |n| "#{indent}# #{n}" }
+          end
+
+          # [text, precedence] of +o+ without its comment notes (see #expr_p).
+          def expr_raw(o, indent: '', arith: false)
             return [@names[o], ATOM] if @names.key?(o)
             if (k = knob_for(o))
               @knobs_used << k
@@ -454,7 +487,7 @@ module MB
             elsif c.name == :[] && c.block.nil?
               text = "#{receiver_text(recv_obj, indent)}[#{c.args.map { |a| value(a, indent) }.join(', ')}]"
             else
-              text = call_text(receiver_text(recv_obj, indent), c, indent)
+              text = call_text(receiver_text(recv_obj, indent), c, indent, obj: o)
             end
             Recipe.config_of(o).each { |k| text = call_text(text, k, indent) }
             [text, ATOM]
@@ -490,9 +523,16 @@ module MB
             return nil if r.equal?(MB::Sound)
             return class_name(r) if r.is_a?(Module)
 
-            t, p = Recipe.graph_object?(r) ? expr_p(r, indent: indent) : [value(r, indent), r.is_a?(Numeric) ? num_prec(r) : ATOM]
+            t, p = Recipe.graph_object?(r) ? expr_p(r, indent: indent, receiver: true) : [value(r, indent), r.is_a?(Numeric) ? num_prec(r) : ATOM]
             # Unary note marks bind after calls: (!A1).n8
-            p < ATOM || t.match?(/\A[!~]/) ? "(#{t})" : t
+            t = p < ATOM || t.match?(/\A[!~]/) ? "(#{t})" : t
+            # A chain link's comment notes (GraphIO::Comments) trail it,
+            # the next link on the next line
+            notes = !@names.key?(r) && !@commented.include?(r) && comment_notes(r)
+            return t unless notes
+
+            @commented << r
+            "#{t} # #{notes[0]}\n#{notes.drop(1).map { |n| "#{indent}  # #{n}\n" }.join}#{indent}  "
           end
 
           def class_name(k)
@@ -640,7 +680,7 @@ module MB
           # Calls whose first argument may name a Session clock.
           CLOCK_CALLS = Set[:clocked].freeze
 
-          def call_text(recv, c, indent)
+          def call_text(recv, c, indent, obj: nil)
             if c.name == :events && recv.nil? && c.receiver.equal?(MB::Sound) && c.block.nil?
               return events_text(c.args, c.kwargs, indent)
             end
@@ -677,7 +717,18 @@ module MB
 
             name = c.name.to_s
             text = recv ? "#{recv}.#{name}" : name
-            if args.any?
+            arg_notes = obj && !args.empty? && (obj.is_a?(GraphNode) || obj.is_a?(Channels)) && GraphIO::Comments.args_of(obj)
+            if arg_notes && !arg_notes.empty?
+              # (a document's argument comments, GraphIO::Comments: one
+              # argument a line, each comment after its argument)
+              keys = (0...c.args.length).to_a + kwargs.keys
+              inner = "#{indent}    "
+              rows = args.each_with_index.map { |a, i|
+                note = arg_notes[keys[i]]
+                "#{inner}#{a}#{',' if i < args.length - 1}#{" # #{note}" if note}"
+              }
+              text += "(\n#{rows.join("\n")}\n#{indent}  )"
+            elsif args.any?
               text += "(#{args.join(', ')})"
             elsif c.receiver.is_a?(MB::Sound::Library::Generators::Path)
               # A library entry's call at its defaults: `L.gen.techno_beat.()`

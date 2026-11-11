@@ -99,7 +99,7 @@ RSpec.describe(MB::Sound::Analysis) do
       s = pad.detect_key
       expect(s.key).to eq(:Am)
       expect(s.meta_source[:key]).to eq(:detected)
-      expect(s.meta[:why][:key]).to match(/\Adetected A minor \(r 0\.\d+, next /)
+      expect(s.why(:key)).to match(/\Adetected A minor \(r 0\.\d+, next /)
       expect(pad.key_analysis).to equal(pad.key_analysis)
     end
 
@@ -107,7 +107,7 @@ RSpec.describe(MB::Sound::Analysis) do
       noise = MB::Sound::Sample[[Numo::DFloat.new(rate).rand(-0.5, 0.5)]]
       s = noise.detect_key
       expect(s.key).to be_nil
-      expect(s.meta[:why][:key]).to match(/percussive, spectral flatness .*: no key \(best /)
+      expect(s.why(:key)).to match(/percussive, spectral flatness .*: no key \(best /)
       expect(noise.detect_key(force: true).key).to eq(noise.key_analysis.key)
     end
 

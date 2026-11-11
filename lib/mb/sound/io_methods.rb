@@ -37,8 +37,20 @@ module MB
       # The +:sample_rate+ defaults to 48kHz to match the default resampling of
       # #read, and the default sample rate of #input and #output.
       #
+      # +:meta+ (a Meta::Value or Hash; +:meta_title+ the title when it
+      # has none) is written in the file's own tags and as Ruby text
+      # (Meta::Formats: a WAV's LIST INFO and `mbmt` chunk, other formats'
+      # TITLE/COMMENT/ARTIST/COPYRIGHT and MB_SOUND_META); Sample.from_file
+      # and Meta::Formats read it back.
+      #
       # See MB::Sound::FFMPEGOutput for more flexible sound output.
-      def write(filename, data, sample_rate: 48000, overwrite: false, max_length: nil, metadata: nil)
+      def write(filename, data, sample_rate: 48000, overwrite: false, max_length: nil, metadata: nil, meta: nil, meta_title: nil)
+        meta = Meta::Value.of(meta)
+        wav = %w[.wav .wave .rf64 .bwf].include?(File.extname(filename.to_s).downcase)
+        unless meta.empty? && meta_title.nil?
+          metadata = (metadata || {}).merge(Meta::Formats.ffmpeg_tags(meta, title: meta_title, what: File.basename(filename.to_s))) unless wav
+        end
+        written = false
         if Playable.audio_data?(data)
           data = Internal.any_sound_to_array(data)
           output = file_output(filename, sample_rate: sample_rate, channels: data.length, overwrite: overwrite, metadata: metadata)
@@ -70,8 +82,10 @@ module MB
             break if max_length && t >= max_length
           end
         end
+        written = true
       ensure
         output&.close
+        Meta::Formats.append_wav(filename.to_s, meta, title: meta_title, what: File.basename(filename.to_s)) if written && wav && !(meta.empty? && meta_title.nil?)
       end
 
       # Lists all files under the given directory, or under a 'sounds' directory

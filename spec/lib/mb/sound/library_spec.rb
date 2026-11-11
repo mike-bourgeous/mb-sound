@@ -185,6 +185,27 @@ RSpec.describe MB::Sound::Library do
       MB::Sound::Session.existing&.close
     end
 
+    it 'keeps an entry line\'s meta: as the entry\'s description, never its index (metadata-2)' do
+      write('fx/described.rb', <<~RUBY)
+        library 1
+        reverb :dusty_room, decay: 1.5, tags: %i[small], about: 'A small room',
+          meta: { author: 'mb', notes: ['from the old demo'], tags: [:huge], about: 'not searched', pack: :demo }
+        clip :walk_b, seq(A2, C3).n8.loop, meta: { license: 'CC0-1.0' }
+      RUBY
+      e = index.lookup(:reverb, :dusty_room)
+      expect(e.meta).to eq(author: 'mb', notes: ['from the old demo'], tags: [:huge], about: 'not searched', pack: :demo)
+      expect(e.tags).to eq([:small])
+      expect(e.about).to eq('A small room')
+      expect(index.lookup(:clip, :walk_b).meta.license).to eq('CC0-1.0')
+      expect(MB::Sound::GraphNode::Reverb.preset_settings(:dusty_room)).not_to have_key(:meta)
+      # (a search for a word only its metadata holds finds nothing)
+      expect(index.find('huge').entries.map(&:name)).not_to include(:dusty_room)
+      expect(index.find('small').entries.map(&:name)).to include(:dusty_room)
+
+      write('fx/bad_meta.rb', "library 1\nreverb :z1, decay: 2, meta: { by: 220.hz }\n")
+      expect { lib::FileLoader.load(File.join(user, 'fx/bad_meta.rb'), shelf: lib.shelf(:user)) }.to raise_error(MB::Sound::GraphIO::LoadError, /plain values only/)
+    end
+
     it 'refuses files outside the format, listing them as problems' do
       write('bad.rb', "reverb :x, decay: 2\nif true then 1 end\n")
       write('typo.rb', "reverb :y, decya: 2\n")
@@ -230,7 +251,7 @@ RSpec.describe MB::Sound::Library do
       expect { path = MB::Sound.save(:quarter, graph, tags: %i[test quiet], about: 'A quarter') }.to output(/Saved quarter to .*quarter\.mbg\.rb \(committed\)/).to_stdout
       expect(path).to eq(File.join(user, 'quarter.mbg.rb'))
       doc = MB::Sound::GraphIO.parse(path)
-      expect(doc.meta[:tags]).to eq(%i[test quiet])
+      expect(doc.header[:tags]).to eq(%i[test quiet])
       expect(doc.description).to eq('A quarter')
       expect(index.lookup(:preset, :quarter, note: false)).to be_nil # (documents aren't file entries)
       expect(MB::Sound.find('quiet test').first.name).to eq(:quarter)
@@ -241,7 +262,7 @@ RSpec.describe MB::Sound::Library do
       expect { MB::Sound.save(:quarter_v3, graph, bump: true) }.to output(/Saved quarter_v4 to/).to_stdout
       other = MB::Sound::GraphIO.load("inputs :input\nparam :mix, 0.5\ninput * mix", inputs: { input: 1.constant })
       expect { MB::Sound.save!(:quarter, other) }.to output(/Saved quarter to .*\(replaced\) \(committed\)/).to_stdout
-      expect(MB::Sound::GraphIO.parse(path).meta[:tags]).to eq(%i[test quiet]) # (kept by save!)
+      expect(MB::Sound::GraphIO.parse(path).header[:tags]).to eq(%i[test quiet]) # (kept by save!)
 
       log = `git -C #{user} log --format=%s`.lines.map(&:chomp)
       expect(log.first).to eq('mb-sound: save :quarter (replaced)')

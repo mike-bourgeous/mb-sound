@@ -459,7 +459,7 @@ RSpec.describe('session fuzzing') do
   # (fix-batch27-1110's gate drew seed 370295: :runs warned of an unseen
   # reader; its whole song, every relation)
   it 'holds every relation for seed 370295', render_budget: { seconds: 120, reason: 'one random song, every relation' } do
-    song = SessionFuzz.generate(Random.new(370295))
+    song = SessionFuzz.generate(Random.new(370295), commands: 26)
     expect(song.code).to include('mute :t2')
     SessionFuzz::RELATIONS.each do |rel|
       expect(SessionFuzz.check(rel, song)).to be_nil.or(eq(:skip)), "seed 370295 #{rel}"
@@ -467,7 +467,7 @@ RSpec.describe('session fuzzing') do
   end
 
   it 'holds every relation for seed 777022', render_budget: { seconds: 120, reason: 'one random song, every relation' } do
-    song = SessionFuzz.generate(Random.new(777022))
+    song = SessionFuzz.generate(Random.new(777022), commands: 26)
     expect(song.code).to include('feed :t1, :wet, :busy, pre: :mute')
     SessionFuzz::RELATIONS.each do |rel|
       expect(SessionFuzz.check(rel, song)).to be_nil.or(eq(:skip)), "seed 777022 #{rel}"
@@ -475,7 +475,7 @@ RSpec.describe('session fuzzing') do
   end
 
   it 'swaps a kit only where every scene plays it a grid with those rows (seed 773034)', render_budget: { seconds: 60, reason: 'one random song' } do
-    song = SessionFuzz.generate(Random.new(773034))
+    song = SessionFuzz.generate(Random.new(773034), commands: 26)
     expect(song.code).to include('t3: beats(16')
     expect(song.code).not_to match(/swap :t3, grid/)
     expect(SessionFuzz.check(:runs, song)).to be_nil
@@ -488,7 +488,7 @@ RSpec.describe('session fuzzing') do
   # (fix-bufsize-1107's soak: the ducked-kick step's grid without a snare
   # took over t1 before a kit swap with one: a user error by design)
   it 'drops a kit swap whose rows the ducked-kick step\'s grid lacks (seed 611894)', render_budget: { seconds: 60, reason: 'one random song' } do
-    song = SessionFuzz.generate(Random.new(611894))
+    song = SessionFuzz.generate(Random.new(611894), commands: 26)
     expect(song.code).to include("{ bg :t1, grid(16, kick: 'x...x...', open_hat: '..x...x.').loop")
     expect(song.code).not_to match(/swap :t1, grid/)
     expect(SessionFuzz.check(:runs, song)).to be_nil
