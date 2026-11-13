@@ -9,14 +9,15 @@
 # (:"keys/index").
 #
 # Patches (-p), by approach:
-#   ring_bell     AM and ring modulation: a sine times a sine at an
-#                 inharmonic ratio, the ring fading as the note decays
-#   fm_ep         two-operator phase modulation: an electric piano whose
-#                 index falls after the strike, plus a short high tine
+#   ring_mod_keys AM and ring modulation: a sine times a sine at an
+#                 inharmonic ratio, the modulation fading as the note decays
+#   fm_ep         phase modulation, two operator pairs: an electric piano
+#                 whose bark falls after the strike, a short metallic tine,
+#                 chord notes humanized by a few milliseconds
 #   fm_bass       operator feedback (fm_feedback): a sine that turns
 #                 saw-like as its feedback envelope opens, with a sub sine
 #   sync_lead     hard sync: a saw restarted by the note, its own pitch
-#                 swept down by an envelope (the classic sync lead)
+#                 swept down by an envelope on every note (the classic sync lead)
 #   pwm_strings   pulse width modulation: two pulses whose widths drift on
 #                 slow LFOs, a gentle lowpass, a Juno-style chorus
 #   scan_pad      wavetable scanning: a table from a sine to a saw through
@@ -26,10 +27,10 @@
 #   ladder_lead   subtractive: two detuned saws and a square sub through the
 #                 four-pole ladder (lp4) with its envelope, glide
 #   supersaw      unison: seven detuned saws spread in stereo
-#   breath_vowel  formant: a saw and breath noise through vowel formants,
-#                 the vowel morphing on a knob, delayed vibrato
-#   noise_bands   noise-band harmonics: white noise through bandpasses at the
-#                 note's harmonics (narrow: pitched, wide: airy)
+#   breath_vowel  formant: a saw and breath (noise in narrow bands at the
+#                 harmonics) through vowel formants, the vowel on a knob
+#   noise_bands   noise-band harmonics: white noise through narrow bandpasses
+#                 at the note's harmonics, widening up the series
 #   bowed_glass   modal: noise bowing the glass resonator, sustained for as
 #                 long as the key is held
 #   nylon_pluck   Karplus-Strong: the plucked string of bin/synths/pluck.rb
@@ -72,22 +73,26 @@ module MB::Sound
     :saw,
   ].freeze
 
+  # Breath band widths in cents for breath_vowel, harmonic 1 to 16: 20 at
+  # the fundamental to 120 at the 16th, growing evenly in ratio.
+  LIBRARY_VOICE_BREATH_WIDTHS = (0...16).map { |i| (20.0 * 6.0**(i / 15.0)).round(1) }.freeze
+
   # The patches: +:approach+ (a few words), +:about+ (the preset's
   # description), +:tags+, +:voices+, +:knobs+ ({ name => [default, range,
   # description] }: the preset's params), +:level+ (the output gain), and
   # +:build+, a Proc of the voice (a Notes lane) and the knobs (a Hash of
   # nodes or numbers by name) giving the voice's signal before the level.
   LIBRARY_VOICES = {
-    ring_bell: {
+    ring_mod_keys: {
       approach: 'AM / ring modulation',
-      about: 'Ring-modulated bell: a sine times a sine at an inharmonic ratio (sum and difference tones), ' \
-             'the ring fading toward a plain sine as the note decays',
+      about: 'Ring-modulated keys: a sine times a sine at an inharmonic ratio (sum and difference tones, a ' \
+             'metallic clang), the modulation fading toward the plain sine as the note decays',
       tags: %i[am ring_mod metallic keys],
       voices: 8,
       knobs: {
-        ratio: [3.53, 0.25..8.0, 'Modulator frequency over the note\'s (3.53: bell-like; whole numbers: harmonic)'],
-        ring: [1.0, 0.0..1.0, 'Modulation: 0 a plain sine, 0.5 AM, 1 ring modulation (at the strike; it fades with ring_decay)'],
-        ring_decay: [0.8, 0.01..10.0, 'Seconds the ring takes to fade toward the plain sine'],
+        ratio: [3.53, 0.25..8.0, 'Modulator frequency over the note\'s (3.53: clangy; whole numbers: harmonic)'],
+        depth: [1.0, 0.0..1.0, 'Modulation at the strike: 0 a plain sine, 0.5 AM, 1 ring modulation (it fades with depth_decay)'],
+        depth_decay: [0.8, 0.01..10.0, 'Seconds the modulation takes to fade toward a quarter of its depth'],
         decay: [2.5, 0.05..10.0, 'Amplitude decay in seconds'],
         release: [0.6, 0.01..5.0, 'Release in seconds'],
       },
@@ -95,32 +100,41 @@ module MB::Sound
       build: ->(v, k) {
         car = v.hz.sine
         mod = (v.freq * k[:ratio]).tone.sine
-        depth = k[:ring] * v.env(0.0, k[:ring_decay], 0.25, k[:release], gm: false).no_velocity
-        bell = car * (1 - depth + mod * depth)
-        bell * v.env(0.002, k[:decay], 0.0, k[:release], gm: false)
+        depth = k[:depth] * v.env(0.0, k[:depth_decay], 0.25, k[:release], gm: false).no_velocity
+        ring = car * (1 - depth + mod * depth)
+        ring * v.env(0.002, k[:decay], 0.0, k[:release], gm: false)
       },
     },
 
     fm_ep: {
-      approach: 'FM / PM (two operators)',
-      about: 'Two-operator FM electric piano: a sine phase-modulated by a sine whose index falls after the strike ' \
-             '(harder notes brighter), plus a short high tine for the bark',
+      approach: 'FM / PM (two operator pairs)',
+      about: 'FM electric piano: a sine phase-modulated by a sine at the note (the body, its bark falling fast ' \
+             'after the strike, harder notes brighter) plus a tine pair, a sine modulated at 14 times the note for ' \
+             'a short metallic ting; a quick drop after the strike into a long decay, shorter up the keyboard; chord ' \
+             'notes humanized by a few milliseconds',
       tags: %i[fm pm electric_piano keys],
       voices: 8,
       knobs: {
-        index: [2.2, 0.0..10.0, 'Modulation index in radians at the strike (brightness)'],
-        ratio: [1.0, 0.5..8.0, 'Modulator frequency over the note\'s (1: harmonic; 3.5: bell-like)'],
-        tine: [0.6, 0.0..2.0, 'Level of the short high tine (14x) at the strike'],
-        decay: [2.0, 0.05..10.0, 'Amplitude decay in seconds'],
-        release: [0.35, 0.01..5.0, 'Release in seconds'],
+        index: [2.5, 0.0..10.0, 'Body modulation index in radians at the strike (the bark; velocity scales it)'],
+        ratio: [1.0, 0.5..8.0, 'Body modulator frequency over the note\'s (1: harmonic; 3.5: bell-like)'],
+        tine: [1.4, 0.0..4.0, 'Tine pair\'s modulation index at the strike (the metallic ting)'],
+        decay: [4.0, 0.05..12.0, 'Seconds the tail decays at C4 (an octave up: 0.7 times as long)'],
+        release: [0.3, 0.01..5.0, 'Release in seconds'],
       },
-      level: 0.41,
+      level: 0.33,
       dc_block: 20,
+      # (notes later by up to 10 ms each, seeded: chord notes don't strike
+      # on one sample; live notes are delayed by up to that much)
+      humanize: 0.01,
       build: ->(v, k) {
-        idx = k[:index] * v.env(0.001, 0.9, 0.2, k[:release], gm: false)
-        tine = (v.freq * 14).tone.sine * k[:tine] * v.env(0.0, 0.06, 0, 0.05, gm: false)
-        mod = (v.freq * k[:ratio]).tone.sine * idx + tine
-        v.hz.sine.pm(mod.radians) * v.env(0.002, k[:decay], 0.0, k[:release], gm: false)
+        vel = v.velocity
+        keyed = 2 ** ((60 - v.number) / 24.0)
+        idx = k[:index] * (0.3 + 0.7 * vel) * v.env(0.001, 0.25, 0.3, k[:release], gm: false).no_velocity
+        body = v.hz.sine.pm(((v.freq * k[:ratio]).tone.sine * idx).radians)
+        tidx = k[:tine] * vel * v.env(0.0, 0.18, 0, 0.05, gm: false, curve: :dx).no_velocity
+        ting = v.hz.sine.pm(((v.freq * 14).tone.sine * tidx).radians) * 0.5 * v.env(0.001, 0.4, 0, 0.1, gm: false).no_velocity
+        drop = v.env(0.001, 0.35, 0, k[:release], gm: false) * 0.45 + v.env(0.001, k[:decay] * keyed, 0, k[:release], gm: false) * 0.55
+        body * drop + ting * vel
       },
     },
 
@@ -150,7 +164,7 @@ module MB::Sound
     sync_lead: {
       approach: 'hard sync',
       about: 'Hard-sync lead: a saw restarted by the note\'s cycle, its own pitch swept down from above by an ' \
-             'envelope on each note, through a gentle lowpass, with glide and delayed vibrato',
+             'envelope that restarts on every note, through a gentle lowpass, with glide between overlapping notes and vibrato',
       tags: %i[sync saw lead],
       voices: 1,
       knobs: {
@@ -164,9 +178,11 @@ module MB::Sound
       dc_block: 20,
       build: ->(v, k) {
         f = v.hz.glide(k[:glide], legato: true).vibrato(5.2, depth: 0.15)
-        ratio = k[:sync] + k[:sweep] * v.env(0.0, k[:sweep_decay], 0, 0.1, gm: false).no_velocity.legato
+        # (every note restarts the sweep and the amplitude envelope, legato
+        # or not; glide still slides between overlapping notes)
+        ratio = k[:sync] + k[:sweep] * v.env(0.0, k[:sweep_decay], 0, 0.1, gm: false).no_velocity
         saw = f.ramp.sync(ratio: ratio)
-        saw.lp4(k[:cutoff], resonance: 0.1) * v.env(0.004, 0.3, 0.85, 0.12, gm: false).legato
+        saw.lp4(k[:cutoff], resonance: 0.1) * v.env(0.004, 0.3, 0.85, 0.12, gm: false)
       },
     },
 
@@ -285,13 +301,15 @@ module MB::Sound
 
     breath_vowel: {
       approach: 'formant',
-      about: 'Breathy vowel: a saw and breath noise through vowel formants, the vowel morphing from oo through ' \
-             'oh and ah to ee on a knob, with delayed vibrato and glide',
+      about: 'Breathy vowel: a saw and breath through vowel formants, the vowel morphing from oo through oh and ' \
+             'ah to ee on a knob; the breath is noise in narrow bands at the note\'s harmonics (20 cents wide at ' \
+             'the fundamental to 120 at the 16th), a puff at each note settling lower while it holds; vibrato and glide',
       tags: %i[formant vowel vocal breath lead],
       voices: 4,
       knobs: {
         vowel: [0.45, 0.0..1.0, 'Vowel: 0 oo, 0.33 oh, 0.67 ah, 1 ee (morphs between)'],
-        breath: [0.35, 0.0..1.0, 'Breath noise level'],
+        breath: [0.35, 0.0..1.0, 'Breath level at the start of a note'],
+        hold: [0.3, 0.0..1.0, 'Breath kept while the note holds, as a share of the start\'s'],
         vibrato: [0.25, 0.0..1.0, 'Vibrato depth in semitones (it fades in over half a second)'],
         attack: [0.06, 0.001..3.0, 'Attack in seconds'],
         release: [0.3, 0.01..5.0, 'Release in seconds'],
@@ -301,27 +319,32 @@ module MB::Sound
       build: ->(v, k) {
         vib = k[:vibrato] * v.env(0.5, 0, 1, 0.1, gm: false).no_velocity
         f = v.hz.glide(k[:glide], legato: true).vibrato(5.3, depth: vib)
-        src = f.ramp + noise * k[:breath] * 1.5
-        src.formant(:u, :o, :a, :i, morph: k[:vowel]) * v.env(k[:attack], 0.3, 0.9, k[:release], gm: false)
+        puff = k[:hold] + (1 - k[:hold]) * v.env(0.005, 0.25, 0, 0.1, gm: false).no_velocity
+        widths = LIBRARY_VOICE_BREATH_WIDTHS.map { |c| (1200 / Math.log(2) / c).round(2) }
+        breath = noise.bandpass_series(f.freq, count: widths.length, quality: widths, normalize: true) * k[:breath] * puff
+        (f.ramp + breath * 4).formant(:u, :o, :a, :i, morph: k[:vowel]) * v.env(k[:attack], 0.3, 0.9, k[:release], gm: false)
       },
     },
 
     noise_bands: {
       approach: 'noise-band harmonics',
-      about: 'Noise-band pad: white noise through bandpasses at the note\'s first twelve harmonics (levels ' \
-             'falling with the harmonic), pitched when the bands are narrow and airy when they are wide',
+      about: 'Noise-band pad: white noise through narrow bandpasses at the note\'s first twelve harmonics (levels ' \
+             'falling with the harmonic), each band wider than the one below; pitched when narrow, airy when wide',
       tags: %i[noise bandpass harmonics pad airy],
       voices: 6,
       knobs: {
-        focus: [40.0, 2.0..400.0, 'Band Q: higher is narrower and more pitched'],
+        width: [6.0, 1.0..200.0, 'Width of the lowest band in cents (narrow: pitched; wide: airy)'],
+        flare: [4.0, 1.0..10.0, 'The top band\'s width over the lowest\'s (the widths grow evenly in ratio)'],
         stretch: [1.0, 0.5..2.0, 'Spacing of the bands in harmonics (1: harmonic; others: inharmonic)'],
         attack: [0.5, 0.001..8.0, 'Attack in seconds'],
         release: [1.2, 0.01..8.0, 'Release in seconds'],
       },
-      level: 0.85,
+      level: 0.52,
       build: ->(v, k) {
-        bands = noise.bandpass_series(v.freq, count: 12, ratio: k[:stretch], quality: k[:focus], gain: ->(i) { 1.0 / (i + 1) })
-        bands * k[:focus]**0.5 * v.env(k[:attack], 0.5, 0.9, k[:release], gm: false)
+        # (Q from a width in cents: Q = 1200 / (ln 2 cents), close for narrow bands)
+        q = (0...12).map { |i| 1200 / Math.log(2) / (k[:width] * k[:flare]**(i / 11.0)) }
+        bands = noise.bandpass_series(v.freq, count: 12, ratio: k[:stretch], quality: q, gain: (1..12).map { |n| (1.0 / n).round(4) }, normalize: true)
+        bands * v.env(k[:attack], 0.5, 0.9, k[:release], gm: false)
       },
     },
 
@@ -423,6 +446,7 @@ module MB::Sound
       [name, value.is_a?(Numeric) ? value.to_f.constant.named(name.to_s) : value]
     }
     k = k.merge(s[:prepare].call) if s[:prepare]
+    midi = midi.humanize(s[:humanize], seed: next_seed) if s[:humanize]
     out = synth(midi, voices: voices || s[:voices]) { |v| s[:build].call(v, k) * s[:level] }
     out = out.filter(:highpass, cutoff: s[:dc_block], quality: 0.7071) if s[:dc_block]
     s[:chorus] ? out.chorus(s[:chorus]) : out

@@ -41,6 +41,44 @@ RSpec.describe('bin/synths/library_voices.rb') do
     end
   end
 
+  # The energy more than 3% away from every harmonic of +f0+, in dB under
+  # the total, of +data+ from +a+ to +b+ seconds.
+  def between_harmonics_db(data, f0, a, b)
+    s = seconds(data, a, b)
+    n = 16384
+    s = s.concatenate(Numo::SFloat.zeros([n - s.length, 0].max))[0...n]
+    m = MB::Sound.real_fft(s * Numo::SFloat.new(n).seq.map { |i| 0.5 - 0.5 * Math.cos(2 * Math::PI * i / n) }).abs**2
+    h = (Numo::DFloat.new(m.length).seq * 48000.0 / n / f0)
+    near = ((h - h.round).abs / h.round.clip(1, nil)).lt(0.03) & h.round.gt(0)
+    10 * Math.log10(m[near.eq(0)].sum / m.sum)
+  end
+
+  def held(name, note, seconds, **knobs)
+    MB::Sound.with_seed(0) { render_patch(MB::Sound.library_voice(patch_notes([note, 0, seconds - 0.2, 0.8]), name, **knobs), seconds)[0] }
+  end
+
+  it 'keeps breath_vowel\'s breath near the harmonics, lower while a note holds (Bench round 2)' do
+    data = held(:breath_vowel, 69, 1.4, vibrato: 0)
+    early = between_harmonics_db(data, 440, 0.03, 0.2)
+    steady = between_harmonics_db(data, 440, 0.6, 1.2)
+    expect(steady).to be < -28 # (round 1, broadband breath: -22.9 dB; now -33.4)
+    expect(steady).to be < early - 10
+  end
+
+  it 'plays noise_bands in narrow bands (Bench round 2: "Bands too wide")' do
+    expect(between_harmonics_db(held(:noise_bands, 57, 1.4), 220, 0.6, 1.2)).to be < -12 # (round 1, Q 40: -6.6 dB; now -13.9)
+  end
+
+  it 'restarts sync_lead\'s sweep on every note, legato or not (Bench round 2: "only one attack")' do
+    # (each note's start is brighter than its end: crossings of zero per second)
+    zc = ->(x) { (x[1..] * x[0...-1]).lt(0).count_true / (x.length / 48000.0) }
+    notes = [[69, 0, 0.26], [72, 0.25, 0.51], [76, 0.5, 0.76], [74, 0.75, 1.0]]
+    data = MB::Sound.with_seed(0) { render_patch(MB::Sound.library_voice(patch_notes(*notes), :sync_lead), 1.0)[0] }
+    notes.each do |_, on, _|
+      expect(zc.(seconds(data, on + 0.005, on + 0.03))).to be > 1.3 * zc.(seconds(data, on + 0.17, on + 0.24)), "note at #{on}"
+    end
+  end
+
   it 'takes nodes for knobs and refuses knobs a voice lacks' do
     a = render(:fm_ep, index: 3.0)
     b = render(:fm_ep, index: 3.0.constant)
