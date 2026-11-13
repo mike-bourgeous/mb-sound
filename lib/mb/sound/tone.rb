@@ -1285,6 +1285,20 @@ module MB
         end
       end
 
+      # Band +index+'s copy of this tone for MB::Sound#per_harmonic's tone
+      # form (`per_harmonic(0.2.hz.lfo, phase: 0...1)`; MB::Sound::PerHarmonic):
+      # a new Tone with this tone's settings and a fresh state, reading the
+      # same inputs through new branches, its random phase and noise seeds
+      # derived from this tone's (seed + 1 + index, as unison copies do),
+      # +phase+ cycles added to its starting phase, and its frequency times
+      # +rate+ (a tone with a fixed frequency).  With +copy: false+ this
+      # tone (a fresh one, e.g. a Pitch's) takes the spreads itself.  Copies
+      # carry no recipe: graphs print the per_harmonic value.
+      def per_band_copy(index, phase: nil, rate: nil, copy: true)
+        t = copy ? dup.reset_band_copy(index) : self
+        t.spread_band(phase, rate)
+      end
+
       # Adds the given other +tone+ as a frequency modulator for this tone,
       # using the given modulation +index+ (good values range from 100 to
       # 10000, and the modulation index can also be applied to the other Tone
@@ -2197,6 +2211,66 @@ module MB
         raise "Cannot compare dynamic frequencies" unless f1.is_a?(Numeric) && f2.is_a?(Numeric)
 
         f1 <=> f2
+      end
+
+      protected
+
+      # Turns a #dup of a tone into a fresh copy (see #per_band_copy): graph
+      # node bookkeeping (GraphNode::IvarPreset's variables: names, recipe,
+      # Tee, plan membership) and running state cleared, inputs re-branched,
+      # seeds derived from the original's.
+      def reset_band_copy(index)
+        GraphNode::IvarPreset.ivars_for(self.class).each { |iv| instance_variable_set(iv, nil) }
+        instance_variables.each do |iv|
+          v = instance_variable_get(iv)
+          case v
+          when GraphNode::Tee::Branch then instance_variable_set(iv, v.owner_tee.add_branch)
+          when GraphNode::Knob::Reader then instance_variable_set(iv, v.knob.get_sampler)
+          end
+        end
+
+        @state = nil
+        @kernel = nil
+        @advance = nil
+        @started = nil
+        @start_cycles = nil
+        @osc_buf = nil
+        @sync_bufs = nil
+        @sync_flip = 0
+        @truncated = false
+        @quiet_resets = GraphNode::FrozenView::Key.new
+        @quiet_locks = GraphNode::FrozenView::Key.new
+        @random_advance = nil
+        @gain = nil
+        @offset = nil
+        @sync_reset = nil
+        @fade_band = nil
+        @osc_view_buf = nil
+        @osc_view = nil
+        @upstream_inputs = nil
+        @plan_wavetables = nil
+        @plan_fast_shapes = nil
+        @seed += 1 + index if @seed
+        @noise_seed += 1 + index if @noise_seed
+        Plan.changed(self)
+        self
+      end
+
+      # Adds +phase+ cycles to the starting phase and multiplies the
+      # frequency by +rate+ (each nil for no change; see #per_band_copy).
+      def spread_band(phase, rate)
+        unless rate.nil?
+          unless @frequency.is_a?(Numeric)
+            raise ArgumentError, "rate: spreads a tone with a fixed frequency (#{self} follows a node or the tempo); " \
+              'give per_harmonic a list of tones instead (per_harmonic(1.bar.lfo, 2.bars.lfo))'
+          end
+          raise ArgumentError, "rate: must be positive and finite (got #{rate})" unless rate > 0 && rate.finite?
+
+          f = @frequency * rate
+          configure { set_frequency(f) }
+        end
+        with_phase(@phase + phase) unless phase.nil?
+        self
       end
 
       private

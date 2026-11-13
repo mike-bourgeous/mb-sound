@@ -61,16 +61,26 @@ module MB
       # #peq_series): a Range spreads across the bands along +curve+ (any
       # MB::Sound::Curve: `:linear`, the default, `:exp`, `:smooth`,
       # `Curve.power(2)`, ...; band i of N gets a + (b - a) curve(i / (N -
-      # 1))), and a list gives one value per band, repeating.  Endpoints may
-      # be Intervals, Pitches, Decibels, or numbers.  A bare Range given to
-      # a band setting is per_harmonic with the linear curve.  The band-level
-      # sibling of #per_channel and #per_voice (MB::Sound::PerHarmonic).
+      # 1)), or curve(i / N) for an exclusive Range such as `0...1`), and a
+      # list gives one value per band, repeating.  Endpoints may be
+      # Intervals, Pitches, Decibels, or numbers.  A bare Range given to a
+      # band setting is per_harmonic with the linear curve.
+      #
+      # A tone with +phase:+ and/or +rate:+ gives every band its own copy of
+      # the tone (an LFO, e.g. `0.2.hz.lfo` or `4.bars.lfo`), its starting
+      # phase moved by +phase+ cycles and its frequency multiplied by +rate+
+      # (fixed frequencies only), each one value or per band (a Range, a
+      # list, a per_harmonic value), so each band moves on its own: a moving
+      # pan across the harmonics.  The band-level sibling of #per_channel and
+      # #per_voice (MB::Sound::PerHarmonic).
       #
       # Examples (bin/sound.rb):
       #     play 0.5.hz.saw.at(20).bandpass_series(110, count: 24, width: per_harmonic(15.cents..90.cents, curve: :exp)).softclip(0.9)
       #     play noise.at(0.3).bandpass_series(220, count: 12, width: 20.cents, pan: per_harmonic(-1, 1), normalize: true)
-      def per_harmonic(*items, curve: nil)
-        PerHarmonic.new(*items, curve: curve)
+      #     # each band panned by its own LFO, phases spread around the cycle, rates 0.15-0.3 Hz
+      #     play noise.at(0.3).bandpass_series(110, count: 24, width: 20.cents, pan: per_harmonic(0.15.hz.lfo, phase: 0...1, rate: 1..2), normalize: true)
+      def per_harmonic(*items, curve: nil, phase: nil, rate: nil)
+        PerHarmonic.new(*items, curve: curve, phase: phase, rate: rate)
       end
     end
   end
