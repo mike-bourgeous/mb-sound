@@ -407,9 +407,12 @@ RSpec.describe MB::Sound::Library do
       expect(l.inst.reese.inspect).to eq('#<L.inst.reese: 2 entries (dnb_reese, jungle_reese)>')
       expect(l.inst.reese.pretty_inspect).to start_with('L.inst.reese: 2 entries') # (the console's table)
       expect { l.inst.reese.(1) }.to raise_error(ArgumentError, /L\.inst\.reese is 2 entries \(dnb_reese, jungle_reese\); name one to call it/)
-      expect { MB::Sound.play(l.inst.reese) }.to raise_error(MB::Sound::Playable::Unplayable, /\Aplay: L\.inst\.reese is 2 entries .*name one \(L\.inst\.reese\.dnb_reese\)/)
       session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
       MB::Sound::Session.with_context(session: session) do
+        # In the session: play reads the session's sample rate before it checks
+        # the sound, and the default Session opens the real output device
+        # (batch 34: DeviceOutput::Unavailable when no earlier example had set one).
+        expect { MB::Sound.play(l.inst.reese) }.to raise_error(MB::Sound::Playable::Unplayable, /\Aplay: L\.inst\.reese is 2 entries .*name one \(L\.inst\.reese\.dnb_reese\)/)
         expect { MB::Sound.track(:bass, l.inst.reese) }.to raise_error(ArgumentError, /\Atrack :bass: L\.inst\.reese is 2 entries/)
       end
     ensure
