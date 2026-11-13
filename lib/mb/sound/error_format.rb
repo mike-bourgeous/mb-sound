@@ -74,7 +74,14 @@ module MB
         "swap #{n}, clip (a clip on #{n}'s instrument, at its next launch point; bg #{n}, clip starts a stopped track) " \
           "or wire #{n}, stream (a MIDI stream into #{n}'s instrument)"
       }
-      GUESSES = { attach: CLIP_ON_TRACK }.freeze
+      # (sd-ux-fixes-1, the review's #19: `note :lead, "..."` to keep a
+      # note with a track's sound; no command by that name, by choice)
+      NOTE_ON_TRACK = ->(name = :lead, *) {
+        n = name.is_a?(Symbol) ? name.inspect : ':lead'
+        "meta #{n}, notes: '...' (kept with #{n}, saved with the set), about: '...' when you save a graph, " \
+          "or ui.note '...' (a note about what you hear, with the screen)"
+      }
+      GUESSES = { attach: CLIP_ON_TRACK, note: NOTE_ON_TRACK }.freeze
 
       # Method names people reach for on graph nodes, and what they meant
       # (feedback-api-guesses: the omnibus19 name test's runners-up for
