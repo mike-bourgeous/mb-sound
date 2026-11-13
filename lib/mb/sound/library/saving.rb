@@ -16,6 +16,7 @@ module MB
         # description:; the library's index words), and +meta:+ keys other
         # than those into the header's descriptive `meta: { ... }`.  Prints what happened; returns the path or nil.
         def save(name, graph, replace:, bump:, tags: nil, about: nil, **opts)
+          return nil unless graph_given?(name, graph, replace)
           return save_generator(name, graph, replace: replace, bump: bump, tags: tags, about: about, **opts) if generator?(graph)
           meta = (opts.delete(:meta) || {}).dup
           meta[:tags] = check_tags(tags) if tags
@@ -52,6 +53,29 @@ module MB
         rescue GraphIO::DumpError => e
           warn "Not saved: #{e.message}"
           nil
+        end
+
+        # True if +graph+ is something save writes (a graph, a rack, a set,
+        # a clip); else MB::Sound.live_error with what save takes and how to
+        # keep a track's sound today (sd-ux-fixes-1, the review's #3:
+        # `save :ghost_lead, :lead` printed "Saved" and wrote a document
+        # whose body was `:lead`; `save :x, track(:lead)` raised).
+        def graph_given?(name, graph, replace)
+          what =
+            case graph
+            when Symbol then "#{graph.inspect} is a name"
+            when Arrangement::Track then "track #{graph.name.inspect} is a track (its patch, clip, and routing), not a graph"
+            when nil, true, false, String, Numeric then "#{graph.inspect} isn't a graph"
+            end
+          return true unless what
+          cmd = replace ? 'save!' : 'save'
+          track = graph.is_a?(Symbol) ? graph : graph.is_a?(Arrangement::Track) ? graph.name : :lead
+          MB::Sound.live_error(ArgumentError.new(
+            "#{cmd} #{name.inspect}, ...: #{what}; #{cmd} takes a graph (a node chain, a rack, a clip) or the set " \
+            "(#{cmd} #{name.inspect}, set).  To keep a track's sound today: `save :my_set, set` saves every track with its knobs, " \
+            "`ruby set` prints its track #{track.inspect} line to paste, and a fitted sound saves with save_fit #{track.inspect}; nothing was saved"
+          ))
+          false
         end
 
         # True if +value+ saves as a library generator statement (see

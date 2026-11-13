@@ -36,6 +36,13 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect(described_class.console(e, color: false)).to eq("NoMethodError: undefined method 'plya' (did you mean play?)")
     end
 
+    it 'points a note for a track at meta notes:, about:, and ui.note (GUESSES)' do
+      e = (MB::Sound.note(:lead, 'breathy') rescue $!)
+      expect(e).to be_a(NoMethodError)
+      expect(described_class.summary(e)).to eq("NoMethodError: undefined method 'note' (did you mean meta :lead, notes: '...' (kept with :lead, saved with the set), " \
+                                               "about: '...' when you save a graph, or ui.note '...' (a note about what you hear, with the screen)?)")
+    end
+
     it 'suggests what people meant by common method guesses on nodes (NODE_GUESSES)' do
       e = (220.hz.sine.delta rescue $!)
       expect(described_class.summary(e)).to include('did you mean derivative (the slope of a signal')

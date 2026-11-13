@@ -410,6 +410,9 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       expect(draw(snap, st, h: 9).join("\n")).to include('time (')
       expect(pane.key_action(:view, st)).to include('spectrum')
       expect(draw(snap, st, h: 9).join("\n")).to include('frequency')
+      # (sd-ux-fixes-1, the review's #20: o said "no previous render")
+      expect(pane.key_action(:overlay, {})).to eq('render: overlay off')
+      expect(pane.key_action(:overlay, { overlay: false })).to start_with('render: overlay on')
 
       first = @driver.shown
       expect(pane.key_action(:phrase, st)).to include('guessed note')

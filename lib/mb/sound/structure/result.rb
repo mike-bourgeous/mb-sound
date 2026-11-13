@@ -12,6 +12,7 @@ module MB
           "#{bar}:#{b}"
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect
           "#<Beat #{self} at #{format('%.3f', seconds)} s>"
         end
@@ -46,6 +47,7 @@ module MB
           "bar #{number} (#{meter}) at #{format('%.3f', seconds)} s"
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect
           "#<Bar #{self}>"
         end

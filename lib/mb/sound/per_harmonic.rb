@@ -91,8 +91,10 @@ module MB
         to_ruby
       end
 
+      # (short and whole: messages that cut an inspect at 40 characters
+      # showed "per_harmonic(20)", the Range lost; sd-ux-fixes-1)
       def inspect
-        "#<#{self.class.name} #{to_ruby}>"
+        "#<#{to_ruby}>"
       end
 
       def ==(other)

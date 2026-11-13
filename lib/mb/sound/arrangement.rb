@@ -448,6 +448,8 @@ module MB
           if v.is_a?(Library::Entry) && v.kind == :clip && v.builder
             v = v.call
           end
+          # (several library entries where one goes: L.inst.reese; sd-ux-fixes-1)
+          raise ArgumentError, Library::Heads.several(v, "track #{name.inspect}") if v.is_a?(Library::Heads::Query)
           # (a generator's params the call left out become the track's
           # knobs, :"drums/energy": Library::Generators.track_clip)
           v = Library::Generators.track_clip(v, name, @session) if v.is_a?(Library::Entry) || v.is_a?(Sequence::Clip)
@@ -479,6 +481,14 @@ module MB
         raise ArgumentError, 'Give a track a patch block or a graph, not both' if graph && patch
         raise ArgumentError, "track #{name.inspect}: give it an instrument or a patch block, not both" if entry && patch
         unless graph || patch || entry
+          if (tr = @tracks[name])
+            # (sd-ux-fixes-1, the review's #30: `ruby track(:ghost)` on a
+            # track with a patch; track(:name) alone defines, never reads)
+            plays = (e = InstrumentPatch.entry_of(tr.patch)) ? "plays #{e.name}" : tr.patch ? 'has a patch block' : 'plays a graph'
+            raise ArgumentError, "track #{name.inspect} #{plays}; track(#{name.inspect}) alone would define it again (with nothing).  " \
+              "To see it: `ruby set` prints its track line (and the set), `design #{name.inspect}` shows its knobs, " \
+              "`tracks` lists the tracks; to change it: track #{name.inspect}, L.inst..., or track(#{name.inspect}) { |clip| ... }"
+          end
           raise ArgumentError, "Give track #{name.inspect} a patch block, an instrument, or a graph (track #{name.inspect}, L.inst.dnb.dnb_reese; " \
             "track(#{name.inspect}) { |clip| ... }; track #{name.inspect}, riff, :dnb_reese)"
         end

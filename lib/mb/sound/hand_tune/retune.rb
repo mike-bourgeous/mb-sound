@@ -26,6 +26,7 @@ module MB
           "retune #{track.inspect}: #{name} now has #{kept.length + added.length} knobs: #{parts.join('; ')}#{match}"
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect = "#<HandTune::Retuned #{track.inspect}: +#{added.length} -#{removed.length} =#{kept.length}>"
       end
 

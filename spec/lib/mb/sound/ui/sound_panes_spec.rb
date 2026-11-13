@@ -65,7 +65,7 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(text).to include(' SOURCE  s', '▸FILTER  f', ' AMP  a', ' FX  x', '▸lp4', 'stereo  cut 2400 Hz  reso 0.25')
       expect(text).to match(/cutoff +█+.* 2400 Hz  cut/) # (the knob's meter on the param it drives)
       expect(text).to include('resonance  0.25  ·') # (a literal: dim, Enter offers its bind)
-      expect(text).to include('saw ×6', 'highpass ×2', '61 plumbing nodes hidden (p shows)')
+      expect(text).to include('saw ×6', 'highpass ×2', 'plumbing hidden (p shows it)')
       expect(lines.index { |l| l.match?(/\A[ ▸]SOURCE/) }).to be < lines.index { |l| l.match?(/\A[ ▸]FILTER/) }
       # Every row open when they all fit; the picked one alone, others on one line, when short
       tall = draw(:inspector, lp4, { title_in_rule: true }, w: 60, h: 30).join("\n")
@@ -259,9 +259,16 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       st.delete(:gesture)
       expect(key(:inspector, st, :reset).last).to eq(ui::PaneKeys::Turn['turn :cut, 800', 'cut 800'])
       ask = key(:inspector, st, :ask).last
-      expect(ask).to eq(ui::PaneKeys::Ask['turn :cut, ', 800, :typed]) # (the value just set stands in until the snapshot has it)
+      expect(ask).to eq(ui::PaneKeys::Ask['turn :cut, ', 800, :typed, select: true]) # (the value just set stands in until the snapshot has it)
       expect(key(:inspector, st, :typed, '3000.hz')).to eq(ui::PaneKeys::Turn['turn :cut, 3000.hz', 'cut 3000.hz'])
       expect(key(:inspector, st, :typed, '  ')).to eq('nothing typed')
+      # (sd-ux-fixes-1, the review's #15: junk read with Prism, never run,
+      # with what fits instead of a raw NameError or SyntaxError)
+      expect(key(:inspector, st, :typed, 'abc')).to match(/\Acut: abc isn't a console command or value; type a number \(3000\), a value with its unit/)
+      expect(key(:inspector, st, :typed, '3000.hzz')).to match(/numbers have no \.hzz \(did you mean \.hz\?\)/)
+      expect(key(:inspector, st, :typed, '30(')).to match(/"30\(" isn't a value \(/)
+      expect(key(:inspector, st, :typed, '-6.db')).to eq(ui::PaneKeys::Turn['turn :cut, -6.db', 'cut -6.db'])
+      expect(key(:inspector, st, :typed, 'C4')).to be_a(ui::PaneKeys::Turn)
       expect(key(:inspector, st, :learn).last.code).to eq('learn :cut')
       expect(key(:inspector, st, :track, 1)).to include('inspecting pad')
       expect(ui::Inspect.target).to eq({ track: :pad, node: nil })

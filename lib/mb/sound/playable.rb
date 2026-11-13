@@ -178,6 +178,9 @@ module MB
         when nil
           raise Unplayable, 'Nothing to play (got nil)'
 
+        when Library::Heads::Query
+          raise Unplayable, Library::Heads.several(sound, 'play')
+
         else
           if sound.respond_to?(:to_playable)
             graph(sound.to_playable, sample_rate: sample_rate)

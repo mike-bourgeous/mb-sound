@@ -534,26 +534,89 @@ module MB
               next if name.nil? || taken[name]
               target = nil
               seen = {}
-              queue = [rd]
+              # (each entry: a node and the row its path's first gain stage
+              # scales, if any: `noise.bandpass_series(...) * breath` is the
+              # bank's level, so a knob reaching a row's main input after
+              # it sits on the bank's row, not on the first SOURCE row the
+              # mix starts from; sd-ux-fixes-1, the review's #14)
+              queue = [[rd, nil]]
               until queue.empty? || target
-                m = queue.shift
+                m, gain = queue.shift
                 next if seen[m.__id__]
                 seen[m.__id__] = true
                 users[m.__id__].each do |u, _port, role|
                   next unless (i = row_of[u.__id__])
                   target = if role != :main || SHAPERS.include?(short_class(u)) then i
-                           else upstream_source(u, row_of, rows) || i
+                           elsif gain then gain
+                           else
+                             # (the first SOURCE row feeding it when the knob
+                             # reaches that row, else the row itself when none
+                             # feeds it; a SOURCE row the knob doesn't reach
+                             # leaves it a loose knob, never on a row it
+                             # doesn't drive: funk_choir's looper keep sat on
+                             # its saw)
+                             src = upstream_source(u, row_of, rows)
+                             if src.nil? then i
+                             elsif reaches?(rd, rows[src].nodes, users) then src
+                             else :loose
+                             end
                            end
                   break
                 end
-                users[m.__id__].each { |u, _, _| queue << u if !row_of[u.__id__] } unless target
+                next if target
+                users[m.__id__].each do |u, _, _|
+                  next if row_of[u.__id__]
+                  queue << [u, gain || (u.is_a?(GraphNode::Multiplier) ? gain_row(u, m, row_of, rows) : nil)]
+                end
               end
               taken[name] = true
-              next unless target
+              next unless target.is_a?(Integer)
               next if own[target].include?(name) || rows.each_with_index.any? { |r, i| i != target && own[i].include?(name) && r.voice == rows[target].voice }
               extra[target] << [Session::Name[name].leaf, rd]
             end
             rows.each_with_index.map { |r, i| extra.key?(i) ? r.with(knobs: extra[i].uniq(&:first).freeze) : r }
+          end
+
+          # True if reader +rd+'s value reaches one of +nodes+ (downstream
+          # along +users+).
+          def reaches?(rd, nodes, users)
+            want = nodes.to_h { |n| [n.__id__, true] }
+            seen = {}
+            queue = [rd]
+            until queue.empty?
+              m = queue.shift
+              next if seen[m.__id__]
+              seen[m.__id__] = true
+              return true if want[m.__id__]
+              users[m.__id__].each { |u, _, _| queue << u }
+            end
+            false
+          end
+
+          # The row multiplier +u+ scales, seen from its input +from+ (the
+          # knob's side): the nearest row up its other inputs that isn't an
+          # envelope (`x * amp_env` scales x's rows; `(1 - hold) * env`
+          # scales only an envelope: nil, and the next multiplier down
+          # decides), or nil.
+          def gain_row(u, from, row_of, rows)
+            seen = {}
+            queue = ins(u).reject { |_, _, s| s.equal?(from) }.map(&:last)
+            8.times do
+              break if queue.empty?
+              nxt = []
+              queue.each do |m|
+                next if seen[m.__id__]
+                seen[m.__id__] = true
+                if (i = row_of[m.__id__])
+                  r = rows[i]
+                  next if r.label == 'env' || r.what.to_s.end_with?(' env') # (an envelope scales too: look past it)
+                  return i
+                end
+                ins(m).each { |_, role, s| nxt << s if role == :main }
+              end
+              queue = nxt
+            end
+            nil
           end
 
           # The first SOURCE row feeding node +u+'s main input (backward

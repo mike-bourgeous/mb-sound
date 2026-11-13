@@ -68,6 +68,8 @@ RSpec.describe(MB::Sound::Param) do
       expect(described_class.declare(:voices, 4).stepped?).to eq(true)
       expect(described_class.declare(:reso, 0.3).range).to eq(0.0..1.0)
       expect(described_class.declare(:"dub/mix", 0.3).range).to eq(0.0..1.0)
+      expect(described_class.declare(:morph, 0.5).range).to eq(0.0..1.0) # (sd-ux-fixes-1: a bound formant morph)
+      expect(MB::Sound::Arrangement::LiteralBinding.knob_default(:morph, 0.5).range).to eq(0.0..1.0)
       expect(described_class.declare(:attack, 10.ms).range).to eq(0.1.ms..10.seconds)
       expect(described_class.declare(:attack, 10.ms).curve).to eq(:exp)
       expect(described_class.declare(:detune, 12.cents).range).to eq(0.cents..150.cents)

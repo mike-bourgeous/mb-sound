@@ -190,7 +190,8 @@ module MB
           # The track line: name, which of the tracks, and the keys.
           def draw_header(c, info, state, hint)
             idx = info.tracks.index(info.track)
-            x = c.line(0, [info.track.to_s, :name], [info.document ? "  #{info.document}" : '', :text], ["  #{idx ? idx + 1 : '?'}/#{info.tracks.length}", :dim])
+            name = info.document || info.instrument # (a preset's document, else a library instrument's name: acid)
+            x = c.line(0, [info.track.to_s, :name], [name ? "  #{name}" : '', :text], ["  #{idx ? idx + 1 : '?'}/#{info.tracks.length}", :dim])
             c.text(x, 0, c.fit(state[:mode] ? "  #{hint}" : '', [c.w - x, 0].max), :dim)
             y = 1
             if info.error
@@ -336,7 +337,7 @@ module MB
                 end
               end
             end
-            c.text(0, c.h - 1, c.fit("#{hidden} plumbing nodes hidden (p shows)", c.w), :dim) if foot == 1
+            c.text(0, c.h - 1, c.fit('plumbing hidden (p shows it)', c.w), :dim) if foot == 1 # (no count: 1708 read as noise)
           end
 
           # Section heading roles (the theme's section colors).
@@ -400,9 +401,14 @@ module MB
 
           # A row's title: its DSL words and copies ("saw ×6", "lp4").
           def row_title(n)
+            hit = TITLES[n]
+            return hit if hit
             label = n.label == 'env' && n.what&.end_with?(' env') ? n.what : n.label
-            "#{label}#{n.count > 1 ? " ×#{n.count}" : ''}"
+            TITLES[n] = "#{label}#{n.count > 1 ? " ×#{n.count}" : ''}".freeze
           end
+
+          # #row_title by row (weak, by identity; drawn every frame).
+          TITLES = ObjectSpace::WeakMap.new
 
           # A row's dim tail: its role, where it goes, its first settings.
           def row_tail(n, knobs)
@@ -415,9 +421,11 @@ module MB
               # (a knob setting it through arithmetic: named, not its number
               # in this param's unit; tuner-fixes-1)
               next "#{SHORTS[name] || name} ← #{Session::Name[kn].leaf}" if kn && v.label != kn && n.param_knobs.key?(name)
-              v = v.with(unit: Panes.unit_of(knobs[kn].spec, name)) if v.unit.nil? && kn && knobs[kn]&.spec
-              t = value_text(v, param_value(n, name, v, knobs))
-              t && "#{SHORTS[name] || name} #{t}"
+              unit = v.unit.nil? && kn && knobs[kn]&.spec ? Panes.unit_of(knobs[kn].spec, name) : v.unit
+              t = value_text(v, param_value(n, name, v, knobs), unit: unit)
+              # (a knob's param by the knob's name, as its knob row says it:
+              # "resonance", not "reso"; the review's minor items)
+              t && "#{kn ? Session::Name[kn].leaf : SHORTS[name] || name} #{t}"
             }.first(4)
             (bits + sum).join('  ')
           end
@@ -429,11 +437,11 @@ module MB
             kn && knobs[kn] ? knobs[kn].value : v.value
           end
 
-          # +value+ (of ParamValue +v+) as text with its unit (seconds as ms
-          # below 1 s), or nil.
-          def value_text(v, value = v.value)
+          # +value+ (of ParamValue +v+) as text with its +unit+ (v's by
+          # default; seconds as ms below 1 s), or nil.
+          def value_text(v, value = v.value, unit: v.unit)
             return nil unless value.is_a?(Numeric)
-            unit = v.unit&.strip
+            unit = unit.strip if unit && (unit.start_with?(' ') || unit.end_with?(' '))
             if unit == 's'
               value.abs < 1 ? "#{Panes.fmt(value * 1000)}ms" : "#{Panes.fmt(value)}s"
             elsif unit && !unit.empty? && unit != 'Q'
@@ -458,7 +466,7 @@ module MB
               # the param's; tuner-fixes-1, the maintainer's "What is this
               # 0.4Hz filter doing?")
               direct = v.label == kn || !n.param_knobs.key?(name)
-              vtext = (direct ? value_text(v.unit ? v : v.with(unit: Panes.unit_of(k.spec, name)), value) : value_text(v.with(unit: k.spec.unit), value)) ||
+              vtext = (direct ? value_text(v, value, unit: v.unit || Panes.unit_of(k.spec, name)) : value_text(v, value, unit: k.spec.unit)) ||
                       Panes.fmt(value)
               more = mods.empty? ? '' : "← #{mods.join(', ')}"
               mw = (c.w - x - vtext.length - more.length - kn.to_s.length - 6).clamp(3, 16)
@@ -496,11 +504,23 @@ module MB
           end
 
           # The params a row shows: note plumbing left out (see NOTE_PARAMS).
+          # Kept per row (NodeInfo, by identity; a new snapshot's rows are
+          # new objects): drawing reads it several times a frame
+          # (sd-ux-fixes-1).
           def shown_params(n)
+            hit = SHOWN[n]
+            return hit if hit
             vals = n.params.values.to_a
-            return vals unless n.section
-            vals.reject { |name, v| v.value.nil? && NOTE_PARAMS.include?(name) }
+            vals = vals.reject { |name, v| v.value.nil? && NOTE_PARAMS.include?(name) } if n.section
+            # (an oscillator's start phase last: rarely what you came for,
+            # and bound it rebuilds the track on every press; the review's
+            # #22, where it was the first SOURCE stop)
+            vals = vals.partition { |name, v| !(name == :phase && v.value.is_a?(Numeric)) }.flatten(1) if vals.any? { |name, _| name == :phase }
+            SHOWN[n] = vals.freeze
           end
+
+          # #shown_params by row (weak, by identity).
+          SHOWN = ObjectSpace::WeakMap.new
 
           # Columns of a panel cell, at least.
           CELL = 24
@@ -581,7 +601,7 @@ module MB
             if kn && (k = knobs[kn])&.spec
               value, = shown_value(state, kn, k)
               v = e[0] == :param ? e[2] : GraphNode::Traversable::ParamValue.new(value: value, type: :control, unit: nil, range: nil, label: kn, detail: nil)
-              return value_text(v.unit ? v : v.with(unit: Panes.unit_of(k.spec, e[1])), value) || Panes.fmt(value)
+              return value_text(v, value, unit: v.unit || Panes.unit_of(k.spec, e[1])) || Panes.fmt(value)
             end
             e[0] == :param ? (value_text(e[2]) || '-') : '-'
           end
@@ -608,7 +628,8 @@ module MB
           def draw_plumbing(c, info, knobs, list, pick, state)
             y = draw_header(c, info, state, 't: next track')
             if info.knobs.empty?
-              c.text(0, y, c.fit('no knobs: knob :cut, 800.hz then knob(:cut) in the patch', c.w), :dim)
+              # (bind, not a hand-written knob line; the review's #27)
+              c.text(0, y, c.fit("no knobs yet: Enter on a dim · binds a literal (bind #{info.track.inspect}, lp4: :cutoff)", c.w), :dim)
               y += 1
             end
             y = draw_knob_rows(c, y, info.knobs, knobs, pick, state)
@@ -720,7 +741,7 @@ module MB
             cell = picked(state) or return no_knob_note
             kn, k = cell
             value, = shown_value(state, kn, k)
-            [*flush(state), PaneKeys::Ask["turn #{kn.inspect}, ", TurnGesture.number(value), :typed]]
+            [*flush(state), PaneKeys::Ask["turn #{kn.inspect}, ", TurnGesture.number(value), :typed, select: true]]
           end
 
           # The typed answer to #key_ask: one `turn` line with it (Ruby:
@@ -729,8 +750,55 @@ module MB
             cell = picked(state) or return no_knob_note
             text = text.to_s.strip
             return 'nothing typed' if text.empty?
+            problem = Inspector.typed_problem(text) and return "#{cell[0]}: #{problem}"
             PaneKeys::Turn["turn #{cell[0].inspect}, #{text}", "#{cell[0]} #{text}"]
           end
+
+          # What fits the value prompt, for its messages.
+          TYPED_FITS = 'type a number (3000), a value with its unit (3000.hz, -6.db, 250.ms, 1.bars), or a knob\'s name to follow (:mix)'
+
+          # Why +text+ typed into the value prompt can't be a turn's value,
+          # or nil (sd-ux-fixes-1, the review's #15: junk gave a raw
+          # NameError "for module MB::Sound" or a SyntaxError "(eval at
+          # take.rb:267)"): read with Prism, never run.  Numbers, numbers
+          # with a unit method, Symbols, and other expressions pass; a
+          # syntax error, several statements, a number method that doesn't
+          # exist, or a bare name the console doesn't know get words.
+          def self.typed_problem(text)
+            r = Prism.parse(text)
+            return "#{text.inspect} isn't a value (#{r.errors.first.message}); #{TYPED_FITS}" unless r.errors.empty?
+            body = r.value.statements&.body || []
+            return "#{text.inspect} is #{body.length} statements; #{TYPED_FITS}" unless body.length == 1
+            node = body[0]
+            case node
+            when Prism::CallNode
+              recv = node.receiver
+              if recv.nil? && node.arguments.nil? && node.block.nil?
+                return nil if MB::Sound.respond_to?(node.name)
+                return "#{node.name} isn't a console command or value; #{TYPED_FITS}"
+              end
+              number = recv.is_a?(Prism::IntegerNode) || recv.is_a?(Prism::FloatNode) || recv.is_a?(Prism::RationalNode)
+              if number && node.arguments.nil? && !1.respond_to?(node.name)
+                near = DidYouMean::SpellChecker.new(dictionary: UNIT_WORDS).correct(node.name.to_s).first
+                return "numbers have no .#{node.name}#{" (did you mean .#{near}?)" if near}; #{TYPED_FITS}"
+              end
+            when Prism::ConstantReadNode
+              # (note names like C4 come from const_missing)
+              known = begin
+                MB::Sound.const_get(node.name)
+                true
+              rescue NameError
+                false
+              end
+              return "#{node.name} isn't a constant of the console; #{TYPED_FITS}" unless known
+            when Prism::StringNode, Prism::InterpolatedStringNode, Prism::ArrayNode, Prism::HashNode, Prism::NilNode, Prism::TrueNode, Prism::FalseNode
+              return "#{text} isn't a number; #{TYPED_FITS}"
+            end
+            nil
+          end
+
+          # Unit words on numbers, for #typed_problem's did-you-mean.
+          UNIT_WORDS = %w[hz khz db ms seconds samples bars beats cents semitones cycles bpm n1 n2 n4 n8 n16 n32 st oct].freeze
 
           # The `bind` line #key_ask offered, as typed (Enter runs it).
           def key_bind(state, text)
@@ -911,9 +979,14 @@ module MB
           # knobs already (the maintainer, 2026-10-30: "Toggle").
           def key_fixed(state)
             info = state[:snap]&.inspector
+            unless info&.document
+              # (why not, by what the track plays; the review's #26)
+              track = info&.track || 'the track'
+              return "#{track} plays #{info.instrument}, library code rather than a graph document: its knobs are the cells, its other numbers are set in its code (F shows a preset document's numbers)" if info&.instrument
+              return "#{track} plays a patch block: its literals are cells already (F shows a preset document's numbers)"
+            end
             state[:fixed] = !state[:fixed]
             state[:pick] = state[:at] = nil
-            return "#{info&.track || 'the track'} plays no preset: its literals are cells already (F shows a preset's numbers)" unless info&.document
             state[:fixed] ? "#{info.document}'s numbers shown (Enter or Left/Right binds one; F hides them)" : "#{info.document}'s numbers hidden (F shows them)"
           end
 
@@ -926,7 +999,7 @@ module MB
 
           private
 
-          def no_knob_note = 'no knob to turn: the graph reads none (knob :cut, 800.hz; then knob(:cut) in the patch)'
+          def no_knob_note = 'no knob to turn here: Enter on a dim · binds a literal to one (bind :track, lp4: :cutoff)'
 
           # Picks row +i+ (the inspector, preview, and code follow).
           def pick_row(state, info, i)
@@ -959,8 +1032,19 @@ module MB
           # Entries are [:knob, name], [:param, name, ParamValue, row], or
           # [:row, nil, nil, row].
           def pick_list(state, info)
+            v = view(state, info)
+            hit = state[:pick_list]
+            return hit[3] if hit && hit[0].equal?(info) && hit[1] == v && hit[2] == state[:fixed]
+            list = build_pick_list(state, info, v).freeze
+            state[:pick_list] = [info, v, state[:fixed], list].freeze
+            list
+          end
+
+          # The stops of #pick_list (built once per snapshot, view, and F:
+          # a frame asks for them several times; sd-ux-fixes-1).
+          def build_pick_list(state, info, view)
             n = info.selected
-            case view(state, info)
+            case view
             when :plumbing
               info.knobs.map { |k| [:knob, k] } + (n ? n.params.values.map { |name, v| [:param, name, v, info.node] } : [])
             when :panel
@@ -972,7 +1056,11 @@ module MB
                   # (and a preset's numbers: its params are the knobs already, so F
                   # shows them, bindable: the maintainer, 2026-10-30: "Toggle")
                   next [:param, name, v, j] if m.knob_of(name)
-                  next unless v.detail == Inspect::LITERAL && !Arrangement::LiteralBinding.count?(name, v.value)
+                  # (a written literal, or a plain number a node keeps, an
+                  # envelope's attack: the review's #26, where a hand-written
+                  # patch's panel showed one cell and none of its env's)
+                  literal = v.detail == Inspect::LITERAL || (v.detail.nil? && v.value.is_a?(Numeric) && name != :phase)
+                  next unless literal && !Arrangement::LiteralBinding.count?(name, v.value)
                   [:param, name, v, j] if !info.document || state[:fixed]
                 }
               }
@@ -995,6 +1083,18 @@ module MB
           # A #pick_list entry's identity: [kind, name, row].
           def stop_key(e) = [e[0], e[1], e[3]]
 
+          # True for a stop a row's pick skips past when it has others: an
+          # oscillator's start phase, an unnamed input, a count, or a param a
+          # build knob drives.
+          def last_resort_stop?(info, e)
+            return false unless e[0] == :param
+            # (a start phase; an unnamed node input, a filter bank's param_1;
+            # a count, read-only; the review's #14 and #22)
+            return true if e[1] == :phase || e[1].to_s.match?(/\Aparam_\d+\z/) || (e[2] && Arrangement::LiteralBinding.count?(e[1], e[2].value))
+            kn = info.nodes[e[3]]&.knob_of(e[1])
+            !kn.nil? && info.build_knobs&.include?(kn) == true
+          end
+
           # The index in +list+ (the sections view's #pick_list) of the
           # picked stop (state[:at]), kept by name across polls; a row
           # picked from outside the keys (design, a voice or track switch,
@@ -1011,7 +1111,9 @@ module MB
             i ||= at && at[2] && list.index { |e| e[3] == at[2] }
             # (an index a caller set, without a stop: that stop)
             i ||= state[:pick] if at.nil? && state[:pick].is_a?(Integer) && state[:pick].between?(0, list.length - 1)
-            i ||= list.index { |e| e[3] == info.node } || 0
+            # (a row's first stop that isn't a last resort: a start phase,
+            # or a build knob, which rebuilds the track on every press)
+            i ||= list.index { |e| e[3] == info.node && !last_resort_stop?(info, e) } || list.index { |e| e[3] == info.node } || 0
             state[:at] = stop_key(list[i])
             state[:at_track] = info.track
             state[:pick] = i
@@ -1394,7 +1496,9 @@ module MB
 
           def key_overlay(state)
             state[:overlay] = state[:overlay] == false
-            state[:overlay] ? 'render: the previous render behind' : 'render: no previous render'
+            # (on by default: o turns it off first; sd-ux-fixes-1, the
+            # review's #20, where "no previous render" read as a missing one)
+            state[:overlay] ? 'render: overlay on (the previous render, faint, behind)' : 'render: overlay off'
           end
 
           def key_phrase(state)
@@ -1554,7 +1658,11 @@ module MB
           # `knob :cut, (150.hz..8000.hz).at(3100.hz)` for KnobValue +k+ at
           # its value now.
           def self.knob_line(k)
-            "knob #{k.spec.call_args(value: k.value).join(', ')}"
+            # (a value a crossfade or a ramp left as 0.30000000000000004:
+            # 12 significant figures, then RubyValue's exact literal; the
+            # review's #25)
+            v = k.value.is_a?(Float) && k.value.finite? ? Float(format('%.12g', k.value)) : k.value
+            "knob #{k.spec.call_args(value: v).join(', ')}"
           rescue StandardError
             "knob #{k.name.inspect}, #{TurnGesture.number(k.value)}"
           end

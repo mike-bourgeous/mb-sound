@@ -1563,7 +1563,13 @@ module MB
           return copy_pane(name) if action == :copy_text
           pane = @panes[name]
           return flash("#{name}: no pane", :warn) unless pane.respond_to?(:key_action)
+          hint = pane.respond_to?(:enter_hint) ? pane.enter_hint(@states[name]) : nil
           r = pane.key_action(action, @states[name], *args)
+          # (a key that changed what Enter does and says nothing of its own,
+          # Down after a section jump: the Enter hint replaces the earlier
+          # flash at once; sd-ux-fixes-1, the review's #10, where the jump's
+          # "AMP amp env" stayed 3.5 s and a build knob got turned as decay)
+          @flash = nil if @flash && (r.nil? || (r.is_a?(Array) && r.none?(String))) && hint != (pane.respond_to?(:enter_hint) ? pane.enter_hint(@states[name]) : nil)
           pane_result(name, r)
         end
 
@@ -1601,7 +1607,9 @@ module MB
               # (a value to type: a prompt line; #line_done hands the text to the pane)
               @asking = [name, x]
               @router.open_line(:pane_value, x.prompt)
-              @router.line.insert(x.text) unless x.text.empty?
+              unless x.text.empty?
+                x.select ? @router.line.prefill(x.text) : @router.line.insert(x.text) # (selected: typing replaces it)
+              end
             when PaneKeys::Paste
               # (a line to edit on the REPL's prompt, not run: the REPL, the text typed in)
               if @host
@@ -1707,7 +1715,8 @@ module MB
         # panel if shown").
         def run_turn_line(name, turn)
           out = StringIO.new
-          r = with_output_to(out) { UI.run_line(turn.code, @session || Session.existing) }
+          clamped = []
+          r = Internal.with_local(:mb_sound_clamp_notes, clamped) { with_output_to(out) { UI.run_line(turn.code, @session || Session.existing) } }
         rescue StandardError, ScriptError => e
           result = "#{e.class}: #{e.message}"
           print_to_repl("# #{turn.note || 'ui'}\n#{Tiles.shown_code(turn.code)}\n#{out.string}#{result}\n")
@@ -1715,8 +1724,14 @@ module MB
           nil
         else
           shown = Tiles.one_line(Tiles.shown_code(turn.code))
-          @states[name][:turn_line] = shown
-          flash(Tiles.one_line(turn.note || shown), :ok)
+          if clamped.empty?
+            @states[name][:turn_line] = shown
+            flash(Tiles.one_line(turn.note || shown), :ok)
+          else
+            # (a value past the knob's range, every time: Session::Knobs#warn_clamp)
+            @states[name][:turn_line] = "#{shown}: #{clamped.last}"
+            flash(Tiles.one_line("#{turn.note || shown}: #{clamped.last}"), :warn)
+          end
           r
         end
 
@@ -2356,7 +2371,15 @@ module MB
           mode = @router.mode
           if mode == :line
             l = @router.line
-            c.line(0, [l.prompt, :key], l.text)
+            if l.selected?
+              # (a value prompt's prefilled text, shown selected: the first
+              # printable key replaces it; sd-ux-fixes-1)
+              c.line(0, [l.prompt, :key])
+              w = @cols - l.prompt.length
+              @grid.put_run(l.prompt.length, y, l.text[0, w], MB::Term::Cells.pack(Theme.rgb(:key)), nil, MB::Term::Cells::REVERSE) if w > 0
+            else
+              c.line(0, [l.prompt, :key], l.text)
+            end
             @line_cursor = [y, l.prompt.length + l.cursor]
             return
           end

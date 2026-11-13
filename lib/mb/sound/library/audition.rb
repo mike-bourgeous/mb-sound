@@ -34,6 +34,7 @@ module MB
             "audition #{path}: #{what}, #{where_text}; audition off stops it"
           end
 
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<#{self}>"
         end
 

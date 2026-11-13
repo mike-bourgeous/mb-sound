@@ -696,7 +696,7 @@ module MB
         end
 
         def line_paste(e, *)
-          @line.insert(e.text.delete("\r\n"))
+          @line.type(e.text.delete("\r\n"))
           @host.act(Action.of(:line_changed))
         end
 
@@ -728,7 +728,7 @@ module MB
           when :tab then @host.act(Action.of(:complete))
           else
             if k.text?
-              l.insert(k.key)
+              l.type(k.key)
             elsif k.mods == [:ctrl]
               case k.key
               when 'a' then l.move(-l.cursor)
@@ -756,6 +756,16 @@ module MB
       end
 
       # A one-line prompt (the palette, search): text, cursor, history.
+      #
+      # The text is always a frozen String, replaced on every edit, never
+      # changed in place: a pane or host keeping the text it was handed
+      # keeps what it saw (sd-ux-fixes-1: the library picker kept the
+      # editor's own String as its query and cache key, so its list lagged
+      # find-as-you-type by up to 2 s).
+      #
+      # #prefill puts text in selected: the first printable key or paste
+      # replaces it (a value prompt prefilled with the old value), and
+      # any other key keeps it, unselected.
       class LineInput
         attr_reader :kind, :prompt, :text, :cursor
 
@@ -764,61 +774,100 @@ module MB
           @prompt = prompt
           @history = history
           @hpos = history.length
-          @text = +''
+          @text = ''.freeze
           @cursor = 0
+          @selected = false
+        end
+
+        # True while #prefill's text is selected (see the class comment).
+        def selected? = @selected
+
+        # Keeps the text, unselected.
+        def unselect
+          @selected = false
+        end
+
+        # Inserts +s+ selected (see the class comment).
+        def prefill(s)
+          insert(s)
+          @selected = !@text.empty?
+        end
+
+        # Inserts typed or pasted +s+ at the cursor, replacing the text
+        # while it is selected.
+        def type(s)
+          if @selected
+            @text = ''.freeze
+            @cursor = 0
+          end
+          insert(s)
         end
 
         def insert(s)
-          @text.insert(@cursor, s)
-          @cursor += s.length
+          @selected = false
+          set(@text[0, @cursor] + s + @text[@cursor..], @cursor + s.length)
         end
 
         def backspace
+          @selected = false
           return if @cursor == 0
-          @text.slice!(@cursor - 1)
-          @cursor -= 1
+          set(@text[0, @cursor - 1] + @text[@cursor..], @cursor - 1)
         end
 
         def delete
-          @text.slice!(@cursor) if @cursor < @text.length
+          @selected = false
+          set(@text[0, @cursor] + @text[(@cursor + 1)..].to_s, @cursor) if @cursor < @text.length
         end
 
         def delete_word
+          @selected = false
           start = @text[0, @cursor].rstrip.rindex(/[\s.(:,]/)
           start = start ? start + 1 : 0
-          @text.slice!(start...@cursor)
-          @cursor = start
+          set(@text[0, start] + @text[@cursor..], start)
         end
 
         def delete_word_forward
+          @selected = false
           rest = @text[@cursor..]
           n = rest[/\A[\s.(:,]*[^\s.(:,]*/].length
-          @text.slice!(@cursor, n)
+          set(@text[0, @cursor] + rest[n..], @cursor)
         end
 
         def kill_back
-          @text.slice!(0, @cursor)
-          @cursor = 0
+          @selected = false
+          set(@text[@cursor..], 0)
         end
 
         def kill_forward
-          @text.slice!(@cursor..)
+          @selected = false
+          set(@text[0, @cursor], @cursor)
         end
 
         def move(n)
+          @selected = false
           @cursor = (@cursor + n).clamp(0, @text.length)
         end
 
         def history_step(d)
+          @selected = false
           return if @history.empty?
           @hpos = (@hpos + d).clamp(0, @history.length)
-          @text = (@history[@hpos] || '').dup
-          @cursor = @text.length
+          t = (@history[@hpos] || '').dup # (the caller's history Strings stay as they are)
+          set(t, t.length)
         end
 
         def remember
-          @history << @text.dup unless @text.empty? || @history.last == @text
+          @history << @text unless @text.empty? || @history.last == @text
           @history.shift while @history.length > 100
+        end
+
+        private
+
+        # The text becomes +t+ (a String made for it), frozen, and the
+        # cursor +cursor+.
+        def set(t, cursor)
+          @text = t.freeze
+          @cursor = cursor
         end
       end
     end

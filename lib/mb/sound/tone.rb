@@ -1863,6 +1863,11 @@ module MB
         @advance
       end
 
+      # True for a tone that is all noise (#noise with blend true or 1:
+      # MB::Sound.noise), whose frequency and phase set nothing you hear
+      # (the inspector hides them; sd-ux-fixes-1).
+      def noise_only? = @noise == 1.0
+
       # The maximum random addition to the phase advance per Hz per sample,
       # in cycles (see #noise).
       def random_advance

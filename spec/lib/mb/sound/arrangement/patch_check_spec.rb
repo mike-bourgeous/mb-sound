@@ -48,6 +48,14 @@ RSpec.describe(MB::Sound::Arrangement::PatchCheck) do
       expect(s.names.kind(:y)).to be_nil
     end
 
+    # sd-ux-fixes-1 (the review's #18)
+    it 'suggests spellings for a misspelled method or keyword, still saying nothing was changed' do
+      s = new_session
+      expect { in_session(s) { MB::Sound.track(:y) { |c| c.hz.sawz } } }.to raise_error(error, /undefined method 'sawz'.* \(did you mean \.saw\?\) \(at .*nothing was changed/)
+      expect { in_session(s) { MB::Sound.track(:y) { |c| c.hz.saw.lp4(800, resonanse: 0.5, drve: 2) } } }.to raise_error(error, /unknown keywords: :resonanse, :drve \(did you mean resonance: and drive:\?\) \(at .*nothing was changed/)
+      expect(s.arrangement.tracks).to be_empty
+    end
+
     it 'keeps the old patch when a redefinition fails, and checks it with the clip the track plays' do
       s = new_session
       in_session(s) do

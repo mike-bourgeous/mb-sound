@@ -13,7 +13,7 @@ inst fx kit seq     → bass│▸FX ──────────────�
 ▸●dnb_reese    dnb bass   │  cutoff     150 Hz                           │ 0.2┤⠄⠄⠄⠄⠄⢄⣄⠴⠞⠍⠝⠖⠤⣄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄
   dnb_sub      dnb bass s…│  quality    0.7                              │    │  ⣀⠤⠚⠉    ⠅  ⠈⠉⠲⢤⣀  ⠨         ⠨
   glass_keys   keys bright│                                              │ 0.0┤⠖⠏⠅⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠌⠕⠦⢬⡄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⣤⠤⠄⠄
-  init         init       │61 plumbing nodes hidden (p shows)            │    │          ⠅         ⠨⠉⠑⠲⣄⡀    ⠨  ⣀⡴⠒⠉⠁
+  init         init       │plumbing hidden (p shows it)                  │    │          ⠅         ⠨⠉⠑⠲⣄⡀    ⠨  ⣀⡴⠒⠉⠁
   jungle_reese jungle bass├─ PREVIEW ──────────────────────────────── 8 ─┤-0.2┤⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠪⠂⠂⠂⠂⠊⠛⠦⢆⣢⠮⠖⠋⠂⠂⠂⠂⠂⠂⠂⠂
                           │level (dB)                                    │    └┬─────────┬─────────┬─────────┬─────────┬
                           │ 20┤⠂⠂⠂⠂⠂⠂⠂⠂⠂⠪⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠪⠂⠂⠂⠂⠂│     0         2         4         6        ms

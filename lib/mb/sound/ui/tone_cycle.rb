@@ -71,7 +71,7 @@ module MB
             Thread.current[:mb_sound_preview_frames] = pace ? src.frames : nil
             pr.send(:slack, src.frames, pace)
             return failed(job, t0, src.note || 'no voice to copy') if src.synth.nil?
-            return failed(job, t0, 'no recorded call to copy (an oscillator made outside the voice)') if job.tone.nil?
+            return failed(job, t0, 'this oscillator was made outside the voice, so it can\'t be rebuilt alone for a preview') if job.tone.nil?
 
             cj = job.copy_job
             copies = (cache[:copies] ||= {})

@@ -141,6 +141,7 @@ module MB
             list = w.shown
             detail = c.h >= 14 ? 5 : c.h >= 9 ? 2 : 0
             rows = [c.h - 2 - detail, 1].max
+            rows -= 1 if list.length > rows && rows > 1 # (the last row for "+N more", as the picker's)
             pick = list.empty? ? 0 : w.cursor[w.state].to_i.clamp(0, list.length - 1)
             w.cursor[w.state] = pick
             tops = (state[:tops] ||= {})
@@ -156,7 +157,7 @@ module MB
               shown.each_with_index { |x, i| draw_row(c, 2 + i, w, x, width, top + i == pick, state) }
               # (the cursor's entry last: the background works on it first)
               w.state == :synth ? want_score(w, list[pick], state) : w.summary(list[pick])
-              c.text(c.w - 8, 1 + rows, " +#{list.length - top - rows} ", :dim) if top + rows < list.length && c.w > 14
+              c.text(0, 2 + rows, c.fit("  +#{list.length - top - rows} more", c.w), :dim) if top + rows < list.length
             end
             draw_detail(c, c.h - detail, w, list[pick], detail) if detail > 0 && !list.empty?
           end

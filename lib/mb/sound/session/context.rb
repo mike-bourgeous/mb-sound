@@ -63,6 +63,7 @@ module MB
           perform_source == :replay
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect
           "#<Session::Context #{to_h.compact.map { |k, v| "#{k}: #{v.inspect}" }.join(', ')}>"
         end

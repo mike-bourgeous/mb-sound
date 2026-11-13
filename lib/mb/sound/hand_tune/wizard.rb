@@ -68,6 +68,7 @@ module MB
             [path]
           end
 
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<HandTune::Wizard::Ref #{kind} #{name}>"
         end
 
@@ -78,6 +79,7 @@ module MB
         # clip's code), +note+ (its first note's number, or nil), +lines+
         # (the item's code: the tune line and the lines after it).
         QueueItem = Data.define(:path, :number, :title, :status, :problem, :track, :ref, :ref_path, :play, :note, :lines) do
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<HandTune::Wizard::QueueItem #{number} #{title}>"
         end
 
@@ -89,6 +91,7 @@ module MB
         Synth = Data.define(:kind, :name, :about, :entry, :path, :ears, :problem) do
           def initialize(kind:, name:, about: nil, entry: nil, path: nil, ears: false, problem: nil) = super
 
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<HandTune::Wizard::Synth #{kind} #{name}>"
         end
 

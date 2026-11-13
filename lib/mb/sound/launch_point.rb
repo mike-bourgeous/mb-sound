@@ -59,6 +59,7 @@ module MB
           (bar.to_r - 1) * bar_length + (beat.to_r - 1) / 4
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def to_s
           beat == 1 ? "bar(#{bar})" : "bar(#{bar}, beat: #{beat})"
         end

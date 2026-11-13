@@ -443,6 +443,22 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
       expect(wait_settled(@tiles) { @tiles.tiler.focus == :tracks && !@tiles.tiler.layout.panes.include?(:page) }).to eq(true), state.inspect
     end
 
+    # sd-ux-fixes-1 (the review's #5): a result taller than the REPL pane
+    # opened the console Pry's pager (its own config, copied at start), and
+    # the next typed lines went into it
+    it 'prints results taller than the REPL pane without a pager while the tiles host it' do
+      prompt = Pry::Prompt.new('ui-spec', 'ui spec', [proc { 't> ' }, proc { 't* ' }])
+      start(:studio, rows: 30, cols: 100, pry: { prompt: prompt, color: false, correct_indent: false, pager: true })
+      MB::Sound::UI.instance_variable_set(:@tiles, @tiles)
+      expect(MB::Sound::UI::PryPages.tiles_own_repl?).to eq(true)
+      @term.type("(1..80).map { |i| \"pager_row_\#{i}\" * 4 }\r")
+      expect(@term.wait_for(/pager_row_80/)).to eq(true), @term.text
+      @term.type("6 * 7\r")
+      expect(@term.wait_for('=> 42')).to eq(true), @term.text
+      MB::Sound::UI.instance_variable_set(:@tiles, nil)
+      expect(MB::Sound::UI::PryPages.tiles_own_repl?).to eq(false)
+    end
+
     it "shows Pry's show-source and long output in the page pane, and short output in the REPL" do
       start(:studio, rows: 40, cols: 120)
       MB::Sound::UI.instance_variable_set(:@tiles, @tiles)

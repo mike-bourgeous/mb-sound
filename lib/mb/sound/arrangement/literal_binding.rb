@@ -249,9 +249,7 @@ module MB
           else
             raise Error, "#{param} isn't an argument of #{method}(...) (a setting a chained call gave without a name)"
           end
-          unless LiteralBinding.literal?(value)
-            raise Error, "#{param} of #{method} is #{value.is_a?(Sequence::Duration) ? 'a tempo length' : 'not a number'} (#{value.inspect[0, 40]}): only numbers become knobs"
-          end
+          raise not_a_number(param, method, value, call) unless LiteralBinding.literal?(value)
           if LiteralBinding.count?(arg, value)
             raise Error, "#{param} of #{method} is a count (#{value}; read once while the patch builds): shown read-only, no knob"
           end
@@ -295,7 +293,7 @@ module MB
           method = call.written || call.name
           name = :"#{voice.name}_#{setting}"
           value = voice.knobs[setting]
-          raise Error, "#{name} of #{method} is not a number (#{value.inspect[0, 40]}): only numbers become knobs" unless literal?(value)
+          raise not_a_number(name, method, value, nil) unless literal?(value)
           kw = call.kwargs.keys.find { |k| kit_voice_name(kit, call, k) == voice.name } || voice.name
           nth = keys_of(roots, method, all: all).index(key) or raise Error, "#{method} isn't in the track's graph"
           declared = voice.knob_params[setting]&.range
@@ -441,6 +439,35 @@ module MB
             result.__send__(@at, @value.call) if @kind == :after # (with_phase, or Tone's own set_frequency)
             result
           end
+        end
+
+        # The Error for binding setting +param+ of +method+ whose +value+
+        # isn't a number (sd-ux-fixes-1, the review's #9: a per_harmonic
+        # width printed cut off at 40 characters, "#<MB::Sound::PerHarmonic
+        # per_harmonic(20)...", with nothing about what binds instead): the
+        # value as Ruby, what kind it is, and the numbers of +call+ that do
+        # bind.
+        def not_a_number(param, method, value, call)
+          kind = case value
+                 when Sequence::Duration then 'a tempo length'
+                 when PerHarmonic then 'a per-harmonic spread'
+                 when Range then 'a range'
+                 else 'not a number'
+                 end
+          text = (value.respond_to?(:to_ruby) ? value.to_ruby : RubyValue.text(value)) rescue nil
+          text ||= value.inspect
+          text = "#{text[0, 57]}..." if text.length > 60
+          # (a voice's v.hz is a Pitch the notes move, not a number to bind)
+          others = call ? literals_of_call(call).filter_map { |n, v| n if n != param && literal?(v) && !v.is_a?(Notes::NotePitch) && !count?(n, v) }.uniq : []
+          instead = others.empty? ? "#{method} has no other numbers to bind (the inspector's dim · rows are what binds)" : "#{method}'s numbers bind: #{others.join(', ')}"
+          instead = "per_harmonic spreads don't bind (yet); #{instead}" if value.is_a?(PerHarmonic)
+          Error.new("#{param} of #{method} is #{kind} (#{text}): only numbers become knobs; #{instead}")
+        end
+
+        # [[name, value], ...] of +call+'s arguments (positional by name).
+        def literals_of_call(call)
+          names = positional_names(call) || []
+          call.args.each_with_index.filter_map { |v, i| names[i] && [names[i], v] } + call.kwargs.to_a
         end
 
         # The literals a node's code wrote that #param_info doesn't name, as

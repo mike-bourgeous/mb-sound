@@ -113,6 +113,8 @@ module MB
           @map = {}
           @docs = []
           @group = nil
+          @seq = 0
+          @help_groups = nil
           instance_exec(&block) if block
         end
 
@@ -130,6 +132,7 @@ module MB
         # previous param, Down: the next), each line names its own keys
         # (#help_groups).
         def on(keys, action, *args, help: nil, label: nil)
+          @help_groups = nil
           seq = (@seq = @seq.to_i + 1)
           each_chord(keys) do |key|
             @map[key.chord] = [action, args, keys.is_a?(Range), help, @group, label, seq, keys]
@@ -140,12 +143,14 @@ module MB
         # A key-table line for keys handled outside the keymap (note
         # keys, chords a mode reads itself).
         def doc(keys, help)
+          @help_groups = nil
           @docs << [@group, keys, help, (@seq = @seq.to_i + 1)]
           self
         end
 
         # Removes the bindings of +keys+.
         def off(keys)
+          @help_groups = nil
           each_chord(keys) { |key| @map.delete(key.chord) }
           self
         end
@@ -176,8 +181,13 @@ module MB
         # its bindings only where they all have one help; otherwise each
         # line names its own keys (inspector-nav-1: the maintainer,
         # 2026-11-02, "Inspector help shows "s f a o x" repeated as the
-        # key for all sections").
+        # key for all sections").  Built once until the bindings change,
+        # frozen (sd-ux-fixes-1: status lines read it every frame).
         def help_groups
+          @help_groups ||= build_help_groups
+        end
+
+        def build_help_groups
           groups = {}
           helps = Hash.new { |h, k| h[k] = [] }
           @map.each_value { |_a, _args, _pass, help, group, label, _seq, _keys| helps[[group, label]] << help if label && help }
@@ -191,8 +201,9 @@ module MB
             lines = (groups[group] ||= {})
             (lines[help] ||= []) << name unless lines[help]&.include?(name)
           end
-          groups.map { |group, lines| [group || @name.to_s.capitalize, lines.map { |help, names| [names.uniq.reject(&:empty?).join(" "), help] }] }
+          groups.map { |group, lines| [group || @name.to_s.capitalize, lines.map { |help, names| [names.uniq.reject(&:empty?).join(" ").freeze, help].freeze }.freeze].freeze }.freeze
         end
+        private :build_help_groups
 
         def inspect
           "#<MB::Term::Input::Keymap #{@name.inspect} #{@map.length} keys>"

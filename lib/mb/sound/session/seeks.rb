@@ -93,6 +93,7 @@ module MB
         # A seek target given as a length (`12.bars`, `32.seconds`), which
         # journal entries print as written.
         LengthTarget = Data.define(:length) do
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = Seeks.seek_text(length)
           def to_s = inspect
         end

@@ -236,6 +236,7 @@ module MB
         end
 
         def inspect = "#<MB::Term::Viewports::Layout #{name.inspect}: #{panes.map(&:inspect).join(' ')}#{zoom ? " (#{zoom.inspect} zoomed)" : ''}>"
+        def pretty_print(q) = q.text(inspect) # (pp, as Pry prints results: the inspect, not Data's field dump)
       end
 
       module_function
