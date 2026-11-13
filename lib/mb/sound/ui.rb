@@ -536,9 +536,35 @@ module MB
           private
 
           def best_available
-            return Pry::Pager::NullPager.new(pry_instance.output) if PryPages.tiles_own_repl?
+            return PryPages.buffered_pager.new(pry_instance.output) if PryPages.tiles_own_repl?
             super
           end
+        end
+
+        # A pager that doesn't page: the output written at once when the
+        # result is done, as Pry's SystemPager does for output under a page
+        # (a NullPager writes every piece pp prints separately, each a trip
+        # through the REPL pane's reader).  Pry's NullPager subclass, made
+        # when first used (Pry loads after mb-sound).
+        module BufferedWrites
+          def initialize(out)
+            super
+            @text = +''
+          end
+
+          def write(str)
+            @text << str
+          end
+
+          def close
+            @out.write(@text) unless @text.empty?
+            @text = +''
+          end
+        end
+
+        # The pager class of NoPagerInTiles (see BufferedWrites).
+        def self.buffered_pager
+          @buffered_pager ||= Class.new(::Pry::Pager::NullPager) { include BufferedWrites }
         end
 
         # True while a tiled screen is up and hosts the console (its REPL
