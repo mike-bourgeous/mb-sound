@@ -42,7 +42,7 @@ Rejected alternatives (for the question): a build block (`per_harmonic(0...1) { 
 
 **Kernel.**  Before, any signal change recomputed every band's design (the octave-width sinh and sin per band, the coefficient compares) and every node pan's law per band, so one moving pan on 24 bands of `20.cents` cost 10x a constant pan.  Now (C and the Ruby mirror alike, bit for bit as before): a signal change recomputes the designs only when a design setting (frequency, ratio, width, gain, morph settings) reads that signal, and pans only when a signal changed, once per distinct pan signal (bands sharing a pan node share its gains: the first band reading it computes them).  Specs compare the kernel with the mirror for pans moving while the design holds still, shared pans, and a pan node also read as a gain.
 
-**Measurements** (Mac container, 24-band `bandpass_series(110, count: 24, normalize: true)` on noise, 10 s at 800-frame blocks unplanned, best of 3, two alternating rounds against a master-ai 6bb30a5f worktree, old / new):
+**Measurements** (Mac container, 24-band `bandpass_series(110, count: 24, normalize: true)` on noise, 10 s at 800-frame blocks unplanned, best of 3, two alternating rounds against a master-ai 0db820b1 worktree (its filter bank, Tone, and PerHarmonic code as at 6bb30a5f), old / new):
 
 | pan | width 20.cents | Q 40 |
 |---|---|---|
