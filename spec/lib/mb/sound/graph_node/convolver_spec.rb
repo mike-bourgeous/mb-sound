@@ -191,6 +191,73 @@ RSpec.describe(MB::Sound::GraphNode::Convolver, :aggregate_failures) do
       expect { input(x).convolve(h, attack: -1) }.to raise_error(ArgumentError, /negative/)
     end
 
+    it 'fades the attack in evenly in dB with attack_curve: :db, or along any Curve (convolve-attack-1)' do
+      lvl = -30.db
+      t = Numo::DFloat.new(300).seq(0.5) / 300
+      d = render(input(x).convolve(h, wet: 1, normalize: false, attack: 300.samples, attack_level: lvl, attack_curve: :db), 128)[0]
+      hd = h.dup
+      hd[0...300] = hd[0...300] * (Numo::DFloat.cast(lvl.to_f)**(1 - t)) # level ** (1 - t): straight in dB
+      expect(error_db(d, direct(x, hd))).to be < -130
+
+      # Mid-attack, the linear ramp from -30 dB is 9.25 dB above the dB-even one (a plug-in drawing it in dB)
+      one = Numo::SFloat.zeros(1).tap { |z| z[0] = 1 }
+      flat = Numo::DFloat.ones(300)
+      env = ->(curve) { render(input(one).convolve(flat, wet: 1, normalize: false, attack: 300.samples, attack_level: lvl, attack_curve: curve), 128)[0] }
+      even = env.(:db)
+      lin = env.(:linear)
+      expect(20 * Math.log10(even[150])).to be_within(0.01).of(-30 * (1 - 150.5 / 300))
+      expect(20 * Math.log10(lin[150] / even[150])).to be_within(0.05).of(9.25)
+      expect(env.(:linear)).to eq(render(input(one).convolve(flat, wet: 1, normalize: false, attack: 300.samples, attack_level: lvl), 128)[0])
+
+      s = env.(:smooth)
+      expect(s[150]).to be_within(1e-6).of(lvl.to_f + (1 - lvl.to_f) * MB::Sound::Curve[:smooth].(150.5 / 300))
+
+      expect { input(x).convolve(h, attack: 100.samples, attack_curve: :db) }.to raise_error(ArgumentError, /above 0/)
+      expect { input(x).convolve(h, attack: 100.samples, attack_curve: :nope) }.to raise_error(ArgumentError, /attack_curve/)
+    end
+
+    it 'scales the impulse side by impulse_width before the convolution (convolve-attack-1)' do
+      hl = impulse(1000, 21)
+      hr = impulse(1000, 22)
+      xl = noise(2000, 23)
+      xr = noise(2000, 24)
+      stereo = MB::Sound::GraphNode::Channels.new([input(xl), input(xr)])
+      # 0.5: each side 0.75 of its own channel and 0.25 of the other (the measured plug-in knob law)
+      y = render(stereo.convolve([hl, hr], wet: 1, normalize: false, impulse_width: 0.5), 128)
+      expect(error_db(y[0], direct(xl, hl * 0.75 + hr * 0.25))).to be < -130
+      expect(error_db(y[1], direct(xr, hl * 0.25 + hr * 0.75))).to be < -130
+      zero = render(MB::Sound::GraphNode::Channels.new([input(xl), input(xr)]).convolve([hl, hr], wet: 1, normalize: false, impulse_width: 0), 128)
+      expect(error_db(zero[0], direct(xl, (hl + hr) * 0.5))).to be < -130
+
+      # after normalization: the impulse normalizes as given, then the side scales
+      n = render(input(x).convolve([hl, hr], wet: 1, impulse_width: 0.5), 128)
+      e = Math.sqrt(((hl**2).sum + (hr**2).sum) / 2)
+      expect(error_db(n[0], direct(x, (hl * 0.75 + hr * 0.25) / e))).to be < -130
+
+      # with a mono input it equals #width after the convolution
+      w = render(input(x).convolve([hl, hr], wet: 1, normalize: false).width(0.3), 128)
+      iw = render(input(x).convolve([hl, hr], wet: 1, normalize: false, impulse_width: 0.3), 128)
+      expect(error_db(iw[0], w[0])).to be < -120
+      expect(error_db(iw[1], w[1])).to be < -120
+
+      # true stereo: each input's pair of paths
+      four = [hl, hr, hr * 0.5, hl * -0.5]
+      t4 = render(MB::Sound::GraphNode::Channels.new([input(xl), input(xr)]).convolve(four, wet: 1, normalize: false, impulse_width: 0.5), 128)
+      expect(error_db(t4[0], direct(xl, hl * 0.75 + hr * 0.25) + direct(xr, hr * 0.375 - hl * 0.125))).to be < -130
+
+      # one channel and width 1: unchanged
+      expect(render(input(x).convolve(h, wet: 1, impulse_width: 0), 128)).to eq(render(input(x).convolve(h, wet: 1), 128))
+      expect(render(input(x).convolve([hl, hr], wet: 1, impulse_width: 1), 128)).to eq(render(input(x).convolve([hl, hr], wet: 1), 128))
+      expect { input(x).convolve(h, impulse_width: -1) }.to raise_error(ArgumentError, /impulse_width/)
+    end
+
+    it 'gives the same output at any buffer size with the attack curve and impulse width' do
+      outs = sizes.map do |bs|
+        render(input(x).convolve([h, h.reverse.dup], attack: 200.samples, attack_level: -40.db, attack_curve: :db, impulse_width: 0.4), bs)
+      end
+      outs.each { |o| expect(o).to eq(outs[0]) }
+    end
+
     it 'stretches the impulse by resampling it' do
       long = render(input(x).convolve(h, wet: 1, normalize: false, stretch: 2), 128)[0]
       expect(long.length).to be_within(4).of(2000 + 2 * 1000 - 1)
@@ -249,6 +316,23 @@ RSpec.describe(MB::Sound::GraphNode::Convolver, :aggregate_failures) do
       b = Array.new(5) { g.sample(800).dup }
       expect(a).to eq(b)
       expect(a.map { |v| v.abs.max }.max).to be > 0.1
+    end
+
+    it 'saves and loads the attack curve and impulse width in documents (convolve-attack-1)' do
+      dir = File.dirname(tmp_path('docs/x'))
+      FileUtils.mkdir_p(dir)
+      MB::Sound.write(File.join(dir, 'hall.wav'), [h, h.reverse.dup], sample_rate: 48000)
+      code = "220.hz.saw.at(0.5).convolve('hall.wav', mix: 0.3, attack: 0.02, attack_level: -40.db, attack_curve: :db, impulse_width: 0.5)"
+      g = MB::Sound::GraphIO.load(code, base_dir: dir)
+      expect(g.to_ruby).to include('attack_curve: :db, impulse_width: 0.5)')
+      path = File.join(dir, 'conv.mbg.rb')
+      File.write(path, MB::Sound::GraphIO.dump(g, name: 'conv'))
+      loaded = MB::Sound::GraphIO.load(path)
+      expect(loaded.to_ruby).to eq(g.to_ruby)
+      a = Array.new(5) { loaded.outputs.map { |o| o.sample(800).dup } }
+      b = Array.new(5) { g.outputs.map { |o| o.sample(800).dup } }
+      expect(a.flatten.map { |v| v.abs.max }.max).to be > 0.05
+      expect(a).to eq(b)
     end
 
     it 'refuses impulse files outside the document' do

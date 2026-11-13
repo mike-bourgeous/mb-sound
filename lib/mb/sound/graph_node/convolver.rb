@@ -105,14 +105,17 @@ module MB
         # (samples) delays it, and +length+ (samples, or nil for all of it)
         # truncates it with a raised-cosine fade over its last +fade+
         # samples.  Then, before normalization: +reverse+ turns the kept
-        # impulse around, +attack+ (samples) fades its start in linearly
-        # from +attack_level+ (a linear gain), and +decay+ (a linear gain in
-        # 0..1, or nil) turns its end down to that level along an
-        # exponential across the kept length.  +partition+ makes the plan
+        # impulse around, +attack+ (samples) fades its start in from
+        # +attack_level+ (a linear gain), linearly or along +attack_curve+ (a
+        # Curve mapping the attack's progress, or nil), and +decay+ (a linear
+        # gain in 0..1, or nil) turns its end down to that level along an
+        # exponential across the kept length.  After normalization and
+        # +gain+, +impulse_width+ scales the side of a two- or four-channel
+        # impulse's output pairs (Convolver.widen).  +partition+ makes the plan
         # uniform with blocks of that many samples (nil: the default
         # non-uniform plan, Convolution.plan).
         def initialize(inputs:, impulse:, sample_rate:, gain: 1.0, normalize: true, predelay: 0, length: nil, fade: nil,
-                       reverse: false, attack: 0, attack_level: 0.0, decay: nil, partition: nil)
+                       reverse: false, attack: 0, attack_level: 0.0, attack_curve: nil, decay: nil, impulse_width: 1.0, partition: nil)
           inputs = Array(inputs)
           raise ArgumentError, "A convolver takes one or two inputs (got #{inputs.length})" unless [1, 2].include?(inputs.length)
           inputs.each_with_index do |i, idx|
@@ -132,7 +135,8 @@ module MB
           @output_count = @paths.map { |p| p[1] }.max + 1
           @gain = gain.to_f
           @impulse = shape_impulse(channels, normalize: normalize, predelay: Integer(predelay), length: length && Integer(length), fade: fade && Integer(fade),
-                                   reverse: reverse, attack: Integer(attack || 0), attack_level: attack_level.to_f, decay: decay&.to_f)
+                                   reverse: reverse, attack: Integer(attack || 0), attack_level: attack_level.to_f, attack_curve: attack_curve,
+                                   decay: decay&.to_f, impulse_width: impulse_width.to_f)
           len = @impulse.map(&:length).max
           @partition = partition && Integer(partition)
           @length = len
@@ -233,11 +237,13 @@ module MB
 
         # Applies the length, reverse, attack, decay, normalization, gain,
         # and predelay to the impulse channels, in that order.
-        def shape_impulse(channels, normalize:, predelay:, length:, fade:, reverse: false, attack: 0, attack_level: 0.0, decay: nil)
+        def shape_impulse(channels, normalize:, predelay:, length:, fade:, reverse: false, attack: 0, attack_level: 0.0, attack_curve: nil,
+                          decay: nil, impulse_width: 1.0)
           raise ArgumentError, "Predelay can't be negative" if predelay < 0
           raise ArgumentError, "Attack can't be negative" if attack < 0
           raise ArgumentError, 'The attack level is a gain from 0 to 1' unless (0.0..1.0).cover?(attack_level)
           raise ArgumentError, 'Decay is a gain above 0, up to 1' unless decay.nil? || (decay > 0 && decay <= 1)
+          raise ArgumentError, 'The impulse width is 0 or more' unless impulse_width >= 0 && impulse_width.finite?
 
           len = channels.map(&:length).max
           channels = channels.map { |c|
@@ -262,7 +268,9 @@ module MB
           kept = channels[0].length
           if attack > 0 && attack_level < 1
             n = [attack, kept].min
-            ramp = (Numo::DFloat.new(n).seq(0.5) / attack) * (1 - attack_level) + attack_level # (sample centers)
+            pos = Numo::DFloat.new(n).seq(0.5) / attack # (sample centers)
+            pos = Numo::DFloat.cast(attack_curve.map(pos)) if attack_curve
+            ramp = pos * (1 - attack_level) + attack_level
             channels.each { |c| c[0...n] = c[0...n] * ramp }
           end
           if decay && decay < 1 && kept > 1
@@ -289,11 +297,22 @@ module MB
             scale /= Math.sqrt(mean) if mean > 0
           end
           channels = channels.map { |c| c * scale } if scale != 1
+          channels = Convolver.widen(channels, impulse_width) if impulse_width != 1 && channels.length > 1
 
           if predelay > 0
             channels = channels.map { |c| Numo::DFloat.zeros(predelay + c.length).tap { |z| z[predelay..] = c } }
           end
           channels
+        end
+
+        # The impulse +channels+ (2: left, right; 4: true stereo, each input's
+        # pair to the left and right outputs) with the side of each output
+        # pair scaled by +width+: (L + R) / 2 + width * (L - R) / 2 on the
+        # left, minus on the right.
+        def self.widen(channels, width)
+          a = (1 + width) * 0.5
+          b = (1 - width) * 0.5
+          channels.each_slice(2).flat_map { |l, r| [l * a + r * b, l * b + r * a] }
         end
 
         # Convolves the next +count+ samples into this buffer's output set.

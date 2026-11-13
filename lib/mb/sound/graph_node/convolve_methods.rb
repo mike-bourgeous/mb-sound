@@ -48,6 +48,20 @@ module MB
         #             or a Length), from +:attack_level+ (dB or linear,
         #             default 0: silence) up to full level: softens the
         #             direct sound and early reflections.
+        # +:attack_curve+ - How the attack rises: :linear (default; straight
+        #                   in amplitude), :db (evenly in dB from
+        #                   +:attack_level+, which must then be above 0, as
+        #                   convolution reverb plug-ins draw it), or any
+        #                   Curve (a name like :smooth, a Curve, a Proc).
+        # +:impulse_width+ - The stereo width of a two- or four-channel
+        #                    impulse (1, the default: as recorded; 0: both
+        #                    sides the same; above 1 wider): the impulse's
+        #                    side (L - R) / 2 scaled before the convolution,
+        #                    after +:normalize+ (so narrowing turns the side
+        #                    down rather than renormalizing).  Unlike #width
+        #                    after the convolution, it keeps a stereo
+        #                    input's own image.  No effect on a one-channel
+        #                    impulse.
         # +:decay+ - An extra exponential decay: the level the impulse's
         #            end is turned down to (dB or a linear gain under 1,
         #            e.g. -40.db), falling evenly in dB from its start
@@ -64,13 +78,15 @@ module MB
         #     [l, r].channels.convolve('true_stereo.wav')     # four channels
         #     play saw(110).ir('hall.wav', stretch: 1.5, decay: -30.db)   # longer and darker, tighter tail
         #     play file_input('drums.flac').ir('hall.wav', length: 1.5, reverse: true, mix: 0.4)
+        #     play saw(110).ir('hall.wav', attack: 80.ms, attack_level: -40.db, attack_curve: :db, impulse_width: 0.5)
         def convolve(impulse, mix: nil, wet: nil, dry: nil, gain: 1, normalize: true, predelay: 0, length: nil, trim: nil, fade: nil,
-                     stretch: 1, reverse: false, attack: 0, attack_level: 0, decay: nil, partition: nil)
+                     stretch: 1, reverse: false, attack: 0, attack_level: 0, attack_curve: :linear, decay: nil, impulse_width: 1,
+                     partition: nil)
           raise ArgumentError, 'convolve takes length: or trim: (the same option), not both' if length && trim
 
           ConvolveMethods.build(self, impulse, mix: mix, wet: wet, dry: dry, gain: gain, normalize: normalize, predelay: predelay,
             length: length || trim, fade: fade, stretch: stretch, reverse: reverse, attack: attack, attack_level: attack_level,
-            decay: decay, partition: partition)
+            attack_curve: attack_curve, decay: decay, impulse_width: impulse_width, partition: partition)
         end
 
         alias ir convolve
@@ -84,7 +100,7 @@ module MB
 
         # The #convolve graph for +node+ (a mono node or a stereo bundle).
         def self.build(node, impulse, mix:, wet:, dry:, gain:, normalize:, predelay:, length:, fade:, partition:,
-                       stretch: 1, reverse: false, attack: 0, attack_level: 0, decay: nil)
+                       stretch: 1, reverse: false, attack: 0, attack_level: 0, attack_curve: :linear, decay: nil, impulse_width: 1)
           inputs = input_nodes(node)
           rate = inputs[0].sample_rate.to_f
           channels = impulse_channels(impulse, rate)
@@ -103,6 +119,10 @@ module MB
             s.round
           }
 
+          attack_level = MB::Sound::Decibels.gain_of(attack_level, 'convolve attack_level', zero: true, above_one: false)
+          width = Float(impulse_width)
+          raise ArgumentError, "convolve's impulse_width is 0 or more (got #{impulse_width.inspect})" unless width >= 0 && width.finite?
+
           conv = Convolver.new(
             inputs: inputs,
             impulse: channels,
@@ -114,8 +134,10 @@ module MB
             fade: to_samples.(fade, 'fade'),
             reverse: reverse ? true : false,
             attack: to_samples.(attack, 'attack'),
-            attack_level: MB::Sound::Decibels.gain_of(attack_level, 'convolve attack_level', zero: true, above_one: false),
+            attack_level: attack_level,
+            attack_curve: attack_curve(attack_curve, attack_level),
             decay: decay.nil? ? nil : MB::Sound::Decibels.gain_of(decay, 'convolve decay', above_one: false),
+            impulse_width: width,
             partition: partition
           )
 
@@ -134,6 +156,23 @@ module MB
             dry_sides = inputs.length == 1 ? [inputs[0], inputs[0]] : inputs
             StereoDelayMethods.wet_dry(dry_sides, wet_sides, dry: dg, wet: wg, mix: nil)
           end
+        end
+
+        # The Curve for #convolve's +:attack_curve+ (nil for the plain
+        # linear fade): :db rises evenly in dB from +level+ (a linear gain
+        # above 0), which is Curve.db of that level in dB.
+        def self.attack_curve(value, level)
+          return nil if value.nil? || value == :linear
+          if value == :db
+            unless level > 0
+              raise ArgumentError, "convolve's attack_curve: :db rises evenly in dB from attack_level:, which must be above 0 (e.g. -60.db)"
+            end
+            return MB::Sound::Curve.db(20 * Math.log10(level))
+          end
+          MB::Sound::Curve.from(value)
+        rescue ArgumentError => e
+          raise if value == :db
+          raise ArgumentError, "convolve's attack_curve is :linear, :db, or a Curve (#{e.message})"
         end
 
         # The input nodes of +node+: one or two.

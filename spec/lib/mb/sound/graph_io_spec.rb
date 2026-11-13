@@ -136,6 +136,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       'sampler lanes (a tracker channel)' => 'a Sample made from audio in memory',
       'capture tap (CaptureTap)' => "can't print a MB::Sound::Sampler::AudioCapture",
       'convolve (Convolver)' => 'a Sample made from audio in memory',
+      'convolve attack curve and impulse width (convolve-attack-1)' => 'a Sample made from audio in memory', # (convolver_spec.rb round trips a file impulse with these options)
     }.freeze
 
     # Factories whose documents keep values but not moves: they save with a

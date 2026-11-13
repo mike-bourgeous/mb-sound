@@ -432,6 +432,11 @@ module GraphSweep
         c.sig.convolve(mono, partition: 64) + c.sig.convolve(two, mix: c.mod(0.2, 0.8), predelay: 0.001).mixdown +
           c.stereo_sig.convolve(four, partition: 128, length: 0.01).mixdown
       }],
+      ['convolve attack curve and impulse width (convolve-attack-1)', ->(c) {
+        ir = Numo::SFloat.new(500).seq.map { |i| Math.sin(i * 0.29) * Math.exp(-i / 120.0) }
+        c.stereo_sig.convolve(c.s::Sample[[ir, ir.reverse]], attack: 0.003, attack_level: -40.db, attack_curve: :db, impulse_width: 0.5).mixdown +
+          c.sig.convolve(c.s::Sample[ir], attack: 0.002, attack_curve: :smooth)
+      }],
       ['reverb room-size factory', ->(c) { c.sig.reverb(room_size: 0.3, decay: 0.5, damping: 0.5) + c.sig.reverb(room_size: 0.2, decay: 0.3, output_channels: 2).mixdown }],
       ['reverb modulation and loop processing', ->(c) {
         c.stereo_sig.reverb(:room, mod: :lush, diffusion_mod: :subtle, lowpass: 4000, highpass: 80, drive: 2, crush: 10, shimmer: 0.3).mixdown
