@@ -107,6 +107,25 @@ RSpec.describe('rack slots') do
       expect(out[(sw + 1)..].to_a.uniq).to eq([0.75])
     end
 
+    it 'lands on the exact frame from a scheduled block, traced from inside the slot, at any buffer size' do
+      [800, 367].each do |size|
+        sess = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false, buffer_size: size),
+                                      transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: size, realtime: false, raise_errors: true)
+        MB::Sound::Session.with_context(session: sess) {
+          sess.add(1.constant.slot(:x) { |c| c * 0.25 }, name: :p)
+          slot = sess.racks.slots_for(:"p/x").first
+          started = nil
+          s.at_bar(2, beat: 2) { s.swap(:"p/x", ->(c) { c.proc { |b| started ||= MB::Sound::Session.span.frame; b } * 0.75 }, on: :now, fade: 0) }
+          out = render(frame_of(1) + frame_of(1/4r) + 1000, size, sess)
+          sw = frame_of(1) + frame_of(1/4r)
+          expect(out[sw - 1]).to eq(0.25)
+          expect(out[sw]).to eq(0.75)
+          expect(slot.current.start).to eq(sw)
+          expect(started).to be <= sw # (the span holding the landing)
+        }.tap { sess.close }
+      end
+    end
+
     it 'spills the old content over by default: its tail rings out, silence in' do
       session.add(1.constant.slot(:x) { |c| c.delay(480.samples) }, name: :p)
       render(800)

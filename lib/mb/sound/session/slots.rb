@@ -376,6 +376,7 @@ module MB
           old = slot.instance_of
           return unless old
           warm(:slot, rack.name, chain.nodes, at) { |box, land, _, live|
+            box.plan_rebuilds = :next_span # (the new instance runs unfused until its plan lands, as live)
             box.add(warm_input(slot).then(&old), name: :warm_slot, start_time: 0r)
             box.swap_rack_instances(rack.name, rack, start_time: land)
             copy = box.racks.instance_variable_get(:@session).send(:rack_instance_slots, rack.name).flat_map { |s| s.waiting.flat_map { |c| c.nodes.flat_map { |n| [n, *n.graph] } } }
@@ -394,6 +395,7 @@ module MB
           warm(:slot, slot.path, chain.nodes, at) { |box, land, _, live|
             # (the slot's content playing now spills over, or fades, as it
             # will live)
+            box.plan_rebuilds = :next_span # (the new content runs unfused until its plan lands, as live)
             box.add(warm_input(slot).slot(:warm, &playing), name: :warm_slot, start_time: 0r)
             box.swap_slot(:"warm_slot/warm", content, start_time: land)
             copy = box.racks.slots_for(:"warm_slot/warm").flat_map { |s| s.chains.flat_map { |c| c.nodes.flat_map { |n| [n, *n.graph] } } + s.waiting.flat_map { |c| c.nodes.flat_map { |n| [n, *n.graph] } } }

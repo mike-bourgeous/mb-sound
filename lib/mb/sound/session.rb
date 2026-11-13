@@ -347,6 +347,7 @@ module MB
         @closed = false
         @file_readers = ObjectSpace::WeakMap.new # (process-backed inputs its graphs read; see #close_file_readers)
         @plan_deferral = nil # (see #plan_deferral)
+        @plan_rebuilds = nil # (see #plan_rebuilds)
         @generation = @transport.generation
         @scheduler = Scheduler.new(self, realtime: realtime, raise_errors: raise_errors)
 
@@ -1365,11 +1366,18 @@ module MB
       end
       private :render_span
 
+      # Where this Session's plan rebuilds happen instead of Plan.rebuilds
+      # (nil: as Plan.rebuilds says).  A slot swap's warm-up sandbox defers
+      # them to the next span (see Slots#warm_slot_swap), so the new
+      # content's unfused first buffers run there, as they do live while
+      # the rebuild runs in the background.
+      attr_accessor :plan_rebuilds
+
       # The Plan::Deferral for plan rebuilds in this span, or nil to rebuild
       # at once (see Plan.rebuilds: by default a realtime Session's render
       # thread defers them).
       def plan_deferral
-        case Plan.rebuilds
+        case @plan_rebuilds || Plan.rebuilds
         when :inline
           nil
         when :auto

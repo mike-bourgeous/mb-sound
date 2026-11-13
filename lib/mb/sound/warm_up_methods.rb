@@ -118,6 +118,7 @@ module MB
         Plan.install(graph)
         calls.times { graph.sample(buffer) }
         warm_up_plans(buffer)
+        warm_up_slots(buffer)
 
         if midi
           warm_up_notes(calls: [calls, 60].min, buffer: buffer)
@@ -170,6 +171,35 @@ module MB
           member = inst.regions.first&.members&.last
         end
         inst.uninstall
+      end
+
+      # Rack slots (racks R3): swaps landing in a sandbox Session, by
+      # spill-over, crossfade, and cut, on an effect slot and an instrument
+      # slot (patch persist), so the handover, the slot's activation, and
+      # the plan rebuild a swap makes are compiled before the first live
+      # swap (cold, the first landing took 66-233 ms on the Mac container;
+      # later ones 2-16 ms at 800-frame buffers).
+      def warm_up_slots(buffer)
+        s = Session.new(realtime: false, output: NullOutput.new(channels: 2, sleep: false, buffer_size: buffer), channels: 2, buffer_size: buffer)
+        Session.with_context(session: s) do
+          GraphNode::Recipe.quietly do
+            notes = seq(Note.new(48), Note.new(55), nil, Note.new(60)).n16.loop
+            voice = ->(shape) { ->(n) { n.synth(voices: 2) { |v| v.hz.send(shape) * v.amp_env(0.002, 0.05, 0.6, 0.05) * 0.2 } } }
+            fx = [->(x) { x.lp4(900).delay(0.01, feedback: 0.3) }, ->(x) { x.softclip(0.3, 0.6) }]
+            s.add(notes.synth(voices: 2) { |v| v.hz.ramp * v.amp_env(0.002, 0.05, 0.6, 0.05) * 0.2 }.slot(:fx, &fx[0]), name: :warm_fx, start_time: 0r)
+            s.add(notes.notes.slot(:inst, &voice.(:square)), name: :warm_inst, start_time: 0r)
+            per = s.transport.whole_notes_of(Rational(buffer, s.sample_rate))
+            9.times do |i|
+              fade = [nil, 1/64r, 0][i % 3]
+              at = s.transport.position + per * 5 / 2
+              s.swap_slot(:"warm_fx/fx", fx[(i + 1) % 2], start_time: at, fade: fade)
+              s.swap_slot(:"warm_inst/inst", voice.(i.even? ? :ramp : :square), start_time: at, fade: fade)
+              8.times { s.process_buffer }
+            end
+          end
+        end
+      ensure
+        s&.close
       end
 
       # The MIDI path: a LiveSource on a fake input (live MIDI timing), a

@@ -500,6 +500,15 @@ module MB
         # (no positional argument given)
         NONE = Object.new.freeze
 
+        # Gives +to+ the metadata +from+ carries (when +to+ stands for
+        # +from+: a rack instance slot's output for its block's result,
+        # racks R3).  Returns +to+.
+        def self.carry_over(from, to)
+          return to unless from.is_a?(Carrier) && to.is_a?(Carrier)
+          m = from.meta
+          m.empty? ? to : to.send(:carry_meta, m)
+        end
+
         # (a positional Hash and keywords as one Hash)
         def self.both(values, more)
           values = values.to_h if values.is_a?(Value)

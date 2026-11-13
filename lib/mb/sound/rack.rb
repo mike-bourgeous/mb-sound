@@ -536,8 +536,7 @@ module MB
             out = slot.returned
             # (the instance's output carries what the block's result carried:
             # comments in a rack document's body)
-            m = slot.last_result.respond_to?(:meta) ? slot.last_result.meta : nil
-            out.send(:carry_meta, m) if m && !m.empty? && out.respond_to?(:carry_meta, true)
+            Meta::Carrier.carry_over(slot.last_result, out)
             return slot.result = out
           rescue GraphNode::Slot::NotAudio
             app.slots.clear

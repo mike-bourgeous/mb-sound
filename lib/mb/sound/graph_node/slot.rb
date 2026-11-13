@@ -142,7 +142,7 @@ module MB
           def own_copy(b)
             own = @own
             unless own && own.class == b.class && own.length == b.length && !own.frozen?
-              own = @own = b.class.new(b.length)
+              own = @own = b.class.zeros(b.length)
             end
             Kernels.copy(own, b) || own.store(b)
             own
