@@ -64,8 +64,15 @@ module MB
         # A pane's kind from its class (Panes::Meters => :meters), nil for
         # nil or an anonymous class.
         def self.kind_of(pane)
-          pane&.class&.name&.split('::')&.last&.downcase&.to_sym
+          return nil if pane.nil?
+          c = pane.class
+          return KINDS[c] if KINDS.key?(c)
+          KINDS[c] = c.name&.split('::')&.last&.downcase&.to_sym
         end
+
+        # .kind_of by class (asked every frame by the painter's pane rates;
+        # sd-ux-fixes-1).
+        KINDS = {}.compare_by_identity
 
         module ClassMethods
           # Declares (or extends) the kind's keymap.

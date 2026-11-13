@@ -400,9 +400,14 @@ module MB
 
           # A row's title: its DSL words and copies ("saw ×6", "lp4").
           def row_title(n)
+            hit = TITLES[n]
+            return hit if hit
             label = n.label == 'env' && n.what&.end_with?(' env') ? n.what : n.label
-            "#{label}#{n.count > 1 ? " ×#{n.count}" : ''}"
+            TITLES[n] = "#{label}#{n.count > 1 ? " ×#{n.count}" : ''}".freeze
           end
+
+          # #row_title by row (weak, by identity; drawn every frame).
+          TITLES = ObjectSpace::WeakMap.new
 
           # A row's dim tail: its role, where it goes, its first settings.
           def row_tail(n, knobs)
@@ -415,8 +420,8 @@ module MB
               # (a knob setting it through arithmetic: named, not its number
               # in this param's unit; tuner-fixes-1)
               next "#{SHORTS[name] || name} ← #{Session::Name[kn].leaf}" if kn && v.label != kn && n.param_knobs.key?(name)
-              v = v.with(unit: Panes.unit_of(knobs[kn].spec, name)) if v.unit.nil? && kn && knobs[kn]&.spec
-              t = value_text(v, param_value(n, name, v, knobs))
+              unit = v.unit.nil? && kn && knobs[kn]&.spec ? Panes.unit_of(knobs[kn].spec, name) : v.unit
+              t = value_text(v, param_value(n, name, v, knobs), unit: unit)
               t && "#{SHORTS[name] || name} #{t}"
             }.first(4)
             (bits + sum).join('  ')
@@ -429,11 +434,11 @@ module MB
             kn && knobs[kn] ? knobs[kn].value : v.value
           end
 
-          # +value+ (of ParamValue +v+) as text with its unit (seconds as ms
-          # below 1 s), or nil.
-          def value_text(v, value = v.value)
+          # +value+ (of ParamValue +v+) as text with its +unit+ (v's by
+          # default; seconds as ms below 1 s), or nil.
+          def value_text(v, value = v.value, unit: v.unit)
             return nil unless value.is_a?(Numeric)
-            unit = v.unit&.strip
+            unit = unit.strip if unit && (unit.start_with?(' ') || unit.end_with?(' '))
             if unit == 's'
               value.abs < 1 ? "#{Panes.fmt(value * 1000)}ms" : "#{Panes.fmt(value)}s"
             elsif unit && !unit.empty? && unit != 'Q'
@@ -458,7 +463,7 @@ module MB
               # the param's; tuner-fixes-1, the maintainer's "What is this
               # 0.4Hz filter doing?")
               direct = v.label == kn || !n.param_knobs.key?(name)
-              vtext = (direct ? value_text(v.unit ? v : v.with(unit: Panes.unit_of(k.spec, name)), value) : value_text(v.with(unit: k.spec.unit), value)) ||
+              vtext = (direct ? value_text(v, value, unit: v.unit || Panes.unit_of(k.spec, name)) : value_text(v, value, unit: k.spec.unit)) ||
                       Panes.fmt(value)
               more = mods.empty? ? '' : "← #{mods.join(', ')}"
               mw = (c.w - x - vtext.length - more.length - kn.to_s.length - 6).clamp(3, 16)
@@ -496,11 +501,19 @@ module MB
           end
 
           # The params a row shows: note plumbing left out (see NOTE_PARAMS).
+          # Kept per row (NodeInfo, by identity; a new snapshot's rows are
+          # new objects): drawing reads it several times a frame
+          # (sd-ux-fixes-1).
           def shown_params(n)
+            hit = SHOWN[n]
+            return hit if hit
             vals = n.params.values.to_a
-            return vals unless n.section
-            vals.reject { |name, v| v.value.nil? && NOTE_PARAMS.include?(name) }
+            vals = vals.reject { |name, v| v.value.nil? && NOTE_PARAMS.include?(name) } if n.section
+            SHOWN[n] = vals.freeze
           end
+
+          # #shown_params by row (weak, by identity).
+          SHOWN = ObjectSpace::WeakMap.new
 
           # Columns of a panel cell, at least.
           CELL = 24
@@ -581,7 +594,7 @@ module MB
             if kn && (k = knobs[kn])&.spec
               value, = shown_value(state, kn, k)
               v = e[0] == :param ? e[2] : GraphNode::Traversable::ParamValue.new(value: value, type: :control, unit: nil, range: nil, label: kn, detail: nil)
-              return value_text(v.unit ? v : v.with(unit: Panes.unit_of(k.spec, e[1])), value) || Panes.fmt(value)
+              return value_text(v, value, unit: v.unit || Panes.unit_of(k.spec, e[1])) || Panes.fmt(value)
             end
             e[0] == :param ? (value_text(e[2]) || '-') : '-'
           end
@@ -959,8 +972,19 @@ module MB
           # Entries are [:knob, name], [:param, name, ParamValue, row], or
           # [:row, nil, nil, row].
           def pick_list(state, info)
+            v = view(state, info)
+            hit = state[:pick_list]
+            return hit[3] if hit && hit[0].equal?(info) && hit[1] == v && hit[2] == state[:fixed]
+            list = build_pick_list(state, info, v).freeze
+            state[:pick_list] = [info, v, state[:fixed], list].freeze
+            list
+          end
+
+          # The stops of #pick_list (built once per snapshot, view, and F:
+          # a frame asks for them several times; sd-ux-fixes-1).
+          def build_pick_list(state, info, view)
             n = info.selected
-            case view(state, info)
+            case view
             when :plumbing
               info.knobs.map { |k| [:knob, k] } + (n ? n.params.values.map { |name, v| [:param, name, v, info.node] } : [])
             when :panel

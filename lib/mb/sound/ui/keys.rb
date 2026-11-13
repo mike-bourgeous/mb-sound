@@ -162,9 +162,20 @@ module MB
 
         # A screen's status-line hints from its keymap ("q Esc quit  Space
         # pause ..."): the first words of each help line.
+        # Kept per keymap until its bindings change (the status line reads
+        # them every frame; sd-ux-fixes-1: about 11k objects/s of the idle
+        # inspector's 145k).
         def self.hints(map)
-          map.help_groups.flat_map { |_, lines| lines.map { |k, what| "#{k} #{what.split(/[(;]/).first.strip}" } }.join('  ')
+          groups = map.help_groups
+          hit = HINTS[map]
+          return hit[1] if hit && hit[0].equal?(groups)
+          text = groups.flat_map { |_, lines| lines.map { |k, what| "#{k} #{what.split(/[(;]/).first.strip}" } }.join('  ').freeze
+          HINTS[map] = [groups, text].freeze
+          text
         end
+
+        # .hints by keymap (identity, weak): [help groups, text].
+        HINTS = ObjectSpace::WeakMap.new
 
         # What the UI keys do where the tiled screen isn't up: [key, in the
         # band, with no UI].  Every key the tiles read from the REPL has a

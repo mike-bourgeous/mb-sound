@@ -26,7 +26,7 @@ module MB
         # the knob's or the param's name (a preset's cutoff param, a plain
         # number, shows in Hz), else nil.
         def unit_of(spec, name = nil)
-          Param.implied_unit(spec, *name)
+          Param.implied_unit(spec, name)
         end
 
         # A dB value to one decimal ("-8.1", "-inf").

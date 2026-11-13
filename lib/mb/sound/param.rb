@@ -200,21 +200,29 @@ module MB
           names[%w[decay release].include?(m[2]) ? m[2].to_sym : :attack]
         end
 
-        # The unit of a knob with Knob::Spec +spec+ (or nil) driving params
-        # named +names+: the spec's unit, else what the names table implies
-        # for the spec's name or one of +names+ ('Hz' for a cutoff, 's' for
-        # an attack or a sweep_time: #time_entry), else nil.  A preset's cutoff param is a plain number
-        # in Hz, so the inspector shows "Hz" and a typed 3000.hz turns it to
-        # 3000 (sd-ux-fixes-1; UI::Panes.unit_of, Session::Knobs).
-        def implied_unit(spec, *names)
+        # The unit of a knob with Knob::Spec +spec+ (or nil) driving a param
+        # named +name+: the spec's unit, else what the names table implies
+        # for the spec's name or +name+ ('Hz' for a cutoff, 's' for an
+        # attack or a sweep_time: #time_entry), else nil.  A preset's cutoff
+        # param is a plain number in Hz, so the inspector shows "Hz" and a
+        # typed 3000.hz turns it to 3000 (sd-ux-fixes-1; UI::Panes.unit_of,
+        # Session::Knobs).
+        def implied_unit(spec, name = nil)
           return spec.unit if spec&.unit
-          [spec&.respond_to?(:name) ? spec.name : nil, *names].compact.each do |n|
-            e = name_entry(n) || time_entry(n) or next
-            b = e[:range].begin
-            return 'Hz' if b.is_a?(MB::Sound::Pitch)
-            return 's' if b.is_a?(MB::Sound::Length)
-          end
-          nil
+          (spec.respond_to?(:name) ? name_unit(spec.name) : nil) || name_unit(name)
+        end
+
+        # 'Hz' or 's' for a setting named +name+ by the names table (see
+        # #implied_unit), or nil.
+        # Kept per name (the inspector asks every frame).
+        def name_unit(name)
+          name = name.to_sym if name.is_a?(String)
+          return nil unless name.is_a?(Symbol)
+          units = (@name_units ||= {})
+          return units[name] if units.key?(name)
+          e = name_entry(name) || time_entry(name)
+          b = e && e[:range].begin
+          units[name] = b.is_a?(MB::Sound::Pitch) ? 'Hz' : b.is_a?(MB::Sound::Length) ? 's' : nil
         end
 
         # The type of value +v+: an ArgTypes type, :boolean, :string, or
