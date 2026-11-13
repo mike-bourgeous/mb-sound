@@ -94,7 +94,7 @@ module MB
       # The names in the names table (Param.names), aliases included.
       NAME_KEYS = %i[
         cutoff frequency freq resonance reso quality q drive mix detune voices attack decay sustain release
-        gain threshold pan width rate depth feedback
+        gain threshold pan width rate depth feedback morph
       ].freeze
 
       # Setting names that are times (Param.time_entry): attack, decay,
@@ -441,6 +441,10 @@ module MB
             rate: [0.01.hz..50.hz, 'Modulation rate'],
             depth: [0.0..1.0, 'Modulation depth'],
             feedback: [-1.0..1.0, 'Feedback gain'],
+            # (a formant's vowels, a wavetable's frames: 0 the first, 1 the
+            # last; sd-ux-fixes-1, the review's #21: a bound morph got the
+            # 0..4x fallback, 0..2)
+            morph: [0.0..1.0, 'Morph position, 0 the first shape or vowel to 1 the last'],
           }
           table = rows.to_h { |n, (range, desc, curve)| [n, { range: range, curve: curve, description: desc }.compact.freeze] }
           NAME_ALIASES.each { |a, n| table[a] = table[n] }
