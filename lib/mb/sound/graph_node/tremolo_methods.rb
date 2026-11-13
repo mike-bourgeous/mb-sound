@@ -21,11 +21,18 @@ module MB
         # resolution, and the default seam's ends land on table samples).
         DRAWN_SIZE = 16000
 
-        # The seam (fraction of a cycle) that `seam: true` gives: Sony
-        # Amplitude Modulation's "blend graph edges", measured on its
-        # renders (a straight line from 5% before the end of the cycle to
-        # 5% after its start).
+        # The seam (fraction of a cycle) that `seam: true` gives: the width
+        # of Sony Amplitude Modulation's "blend graph edges" (5% before the
+        # end of the cycle to 5% after its start).  Its blend is the :jump
+        # seam mode (measured, the .acd study 2026-11-11); the :line mode
+        # matches it only for a sawtooth (straight through the wrap).
         DEFAULT_SEAM = 0.1
+
+        # Ways #tremolo's +:seam+ blends the wrap (+:seam_mode+): :line
+        # draws a straight line across the seam whatever the shape does
+        # there, :jump takes out only the jump between the shape's end and
+        # start, spread over the seam, keeping the shape's own lines.
+        SEAM_MODES = %i[line jump].freeze
 
         # Wavetables of drawn shapes, by [points, seam] (see .drawn_table).
         @drawn = {}
@@ -67,10 +74,18 @@ module MB
         #            when it is nonzero; with more channels, channel k of N
         #            leads by k / (N - 1) of it.
         # +:seam+ - Drawn shapes only: blends the end of the cycle into its
-        #            start over this fraction of a cycle (a straight line
-        #            across the wrap, as Sony Amplitude Modulation's "blend
-        #            graph edges"; true for its 0.1), so a jump at the wrap
-        #            doesn't click.
+        #            start over this fraction of a cycle (true for 0.1), so
+        #            a jump at the wrap doesn't click; how is +:seam_mode+.
+        # +:seam_mode+ - :line (default): a straight line across the seam,
+        #            from the shape's value seam / 2 before the end to its
+        #            value seam / 2 after the start, whatever it does in
+        #            between (a trough at the wrap is cut off).  :jump: only
+        #            the jump between the shape's last and first values is
+        #            taken out, half of it ramped in over each side of the
+        #            seam, so the shape keeps its own lines and a shape whose
+        #            ends meet plays as drawn.  :jump is what Sony Amplitude
+        #            Modulation's "blend graph edges" does; the two agree only
+        #            for a sawtooth (straight through the wrap).
         # +:law+ - :db (default; the gain moves evenly in dB, stopping at
         #            +:floor+, -80 dB, for deeper troughs) or :linear (evenly
         #            in amplitude, the classic tremolo).  See Tremolo.
@@ -87,9 +102,10 @@ module MB
         #     play 220.hz.saw.at(-12.db).tremolo(5, depth: 12.db)
         #     play 220.hz.saw.at(-12.db).tremolo(1.n8, shape: :square, depth: 0, law: :linear, smooth: 3.ms)
         #     play 110.hz.saw.at(-12.db).trem(1.n16, shape: [[0, 1], [0.25, -1], [1, -1]])   # a gate on each 16th
+        #     play 110.hz.saw.at(-12.db).trem(1.n8, shape: [[0, -1], [0.5, 1], [1, 0]], seam: true, seam_mode: :jump)   # the jump at the wrap smoothed out
         #     play keys.tremolo(1.bar, stereo_phase: 0.5, depth: 24.db, shape: :triangle)   # auto-pan
-        def tremolo(rate = 5.0, depth: 12.db, shape: :sine, phase: 0, stereo_phase: 0, seam: nil, law: :db, floor: Tremolo::DEFAULT_FLOOR.db,
-                    smooth: nil, mix: 1, seed: nil)
+        def tremolo(rate = 5.0, depth: 12.db, shape: :sine, phase: 0, stereo_phase: 0, seam: nil, seam_mode: :line, law: :db,
+                    floor: Tremolo::DEFAULT_FLOOR.db, smooth: nil, mix: 1, seed: nil)
           amount = mix == 1 ? nil : BlendMethods.amount(mix)
           # (build-time settings: a graph document's params become their numbers)
           phase = GraphNode.build_setting(phase)
@@ -101,7 +117,10 @@ module MB
             raise ArgumentError, "tremolo shape: is one of #{TremoloMethods.shapes.keys.map(&:inspect).join(', ')} or an Array of [x, y] points (got #{shape.inspect})"
           }
           raise ArgumentError, 'tremolo seam: is for drawn shapes (an Array of [x, y] points)' if seam && !drawn
-          table = drawn ? TremoloMethods.drawn_table(shape, seam: seam) : nil
+          unless SEAM_MODES.include?(seam_mode)
+            raise ArgumentError, "tremolo seam_mode: is #{SEAM_MODES.map(&:inspect).join(' or ')} (got #{seam_mode.inspect})"
+          end
+          table = drawn ? TremoloMethods.drawn_table(shape, seam: seam, mode: seam_mode) : nil
           phase = Phase.cycles(phase)
           raise ArgumentError, "tremolo phase: must be a number of cycles or a Phase (got #{phase.inspect})" unless phase.is_a?(Numeric)
           stereo_phase = Phase.cycles(stereo_phase)
@@ -193,20 +212,42 @@ module MB
         end
 
         # The value of drawn shape +points+ at +x+ with the seam blended
-        # over +seam+ cycles (see #tremolo's +:seam+): within seam / 2 of the
-        # cycle's start, the straight line from the shape's value at 1 -
-        # seam / 2 to its value at seam / 2.
-        def self.seamed_value(points, x, seam, side: :right)
+        # over +seam+ cycles (see #tremolo's +:seam+ and +:seam_mode+):
+        # within seam / 2 of the cycle's start, with +mode+ :line the
+        # straight line from the shape's value at 1 - seam / 2 to its value
+        # at seam / 2; with :jump the shape's value plus a ramp taking out
+        # the jump J between its last value (just before x = 1) and its
+        # first (at x = 0): -J (x - (1 - h)) / seam before the wrap and
+        # J (h - x) / seam after it (h = seam / 2), within -1..1.
+        def self.seamed_value(points, x, seam, side: :right, mode: :line)
           return drawn_value(points, x, side: side) if seam.nil? || seam == 0
 
           h = seam / 2.0
           x -= x.floor
           return drawn_value(points, x, side: side) if x >= h && x <= 1 - h
 
+          if mode == :jump
+            jump = end_value(points) - drawn_value(points, 0.0, side: :right)
+            ramp = x < h ? jump * (h - x) / seam : -jump * (x - (1 - h)) / seam
+            return (drawn_value(points, x, side: side) + ramp).clamp(-1.0, 1.0)
+          end
+
           a = drawn_value(points, 1 - h, side: :left)
           b = drawn_value(points, h, side: :right)
           t = x < h ? x + h : x - (1 - h)
           a + (b - a) * t / seam
+        end
+
+        # The value of drawn shape +points+ just before the end of the cycle
+        # (x = 1 approached from below): the first point at x = 1, or the
+        # wrapping line from the last point toward the first's next cycle.
+        def self.end_value(points)
+          at_end = points.find { |(px, _)| px >= 1.0 }
+          return at_end[1] if at_end
+          x0, y0 = points[-1]
+          x1 = points[0][0] + 1
+          y1 = points[0][1]
+          x1 == x0 ? y0 : y0 + (y1 - y0) * (1.0 - x0) / (x1 - x0)
         end
 
         # Checks drawn shape +points+ and returns them as frozen [x, y]
@@ -233,8 +274,9 @@ module MB
         # +:shape+ and +:seam+): DRAWN_SIZE samples of the shape (the value
         # after any jump), unfiltered (no levels) and read with linear
         # interpolation, so the lines stay straight and a jump takes one
-        # table step (1/16000 of a cycle).  Kept per shape and seam.
-        def self.drawn_table(points, seam: nil)
+        # table step (1/16000 of a cycle).  Kept per shape, seam, and seam
+        # +mode+ (SEAM_MODES).
+        def self.drawn_table(points, seam: nil, mode: :line)
           pts = check_points(points)
           seam = DEFAULT_SEAM if seam == true
           seam = nil if seam == false || seam == 0
@@ -242,7 +284,9 @@ module MB
             raise ArgumentError, "tremolo seam: is a fraction of a cycle (0..1), true for #{DEFAULT_SEAM}, or nil (got #{seam.inspect})"
           end
           seam = seam&.to_f
-          key = [pts, seam].freeze
+          raise ArgumentError, "tremolo seam_mode: is #{SEAM_MODES.map(&:inspect).join(' or ')} (got #{mode.inspect})" unless SEAM_MODES.include?(mode)
+          mode = :line if seam.nil? # (no seam, one table)
+          key = [pts, seam, mode].freeze
           @drawn_lock.synchronize do
             if (t = @drawn.delete(key))
               return @drawn[key] = t
@@ -250,7 +294,7 @@ module MB
           end
 
           n = DRAWN_SIZE
-          data = Numo::SFloat.cast(Array.new(n) { |i| seamed_value(pts, i / n.to_f, seam) })
+          data = Numo::SFloat.cast(Array.new(n) { |i| seamed_value(pts, i / n.to_f, seam, mode: mode) })
           table = MB::Sound::Wavetable.from_samples(data, mips: false, interpolation: :linear, align: false, name: 'tremolo shape')
 
           @drawn_lock.synchronize do

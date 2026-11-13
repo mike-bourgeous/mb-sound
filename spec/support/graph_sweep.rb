@@ -306,6 +306,10 @@ module GraphSweep
       ['formant (Formant) constant and morphing', ->(c) {
         c.sig.formant(:a) + c.sig.formant(:a, :e, [[300, 0.db, 50], [900, -6.db, 60], [2500, -12.db, 100], [3300, -20.db, 120], [4000, -30.db, 150]], morph: c.mod(0, 1), shift: c.mod(-5, 5, 3), width: c.mod(0.5, 1.5, 2), voice: :soprano)
       }],
+      ['tremolo drawn shape with a jump-cancelling seam (tremolo-seam-1)', ->(c) {
+        c.sig.trem(1.n32, shape: [[0, -1], [0.4, 1], [0.4, 0.3], [1, 0.5]], seam: true, seam_mode: :jump, depth: 18.db) +
+          c.stereo_sig.tremolo(13, shape: [[0, 1], [0.5, -1], [1, 0]], seam: 0.2, seam_mode: :jump, stereo_phase: 0.25).mixdown
+      }],
       ['tremolo (Tremolo: LFO shapes, drawn shapes with a seam, depth nodes, stereo phase, tempo rates, mix)', ->(c) {
         c.sig.tremolo(9, depth: 12.db) + c.sig.tremolo(c.mod(2, 30), shape: :square, depth: 0, law: :linear, smooth: 0.002) +
           c.sig.trem(1.n32, shape: [[0, 1], [0.3, -1], [0.3, 0.5], [1, -0.2]], seam: true, depth: c.mod(0.05, 0.9)) +
