@@ -25,21 +25,21 @@ module MB
       # the table's levels play as given (F1 at 0 dB peak gain, so the
       # output is much quieter than the input).
       #
-      # The kernel is MB::Sound::FastFilter.formant (five Filter::SVF
-      # bandpass sections in one call; exact Ruby mirror .process_ruby):
+      # A FilterBank of five :bandpass bands whose settings come from the
+      # bank's morph tables (MB::Sound::FastFilter.filter_bank, exact Ruby
+      # mirror FilterBank.process_ruby; filterbank-1 moved the old
+      # FastFilter.formant loop into the bank kernel, the same operations):
       # settings are recomputed only on samples where morph, shift, or width
       # change, and the output is the same at any buffer size.  Ends when
-      # the input or any parameter node ends.  A plan boundary.
+      # the input or any parameter node ends.  A plan op (Plan::Op::FilterBank)
+      # since filterbank-1 (a plan boundary before).
       #
       # Examples (bin/sound.rb):
       #     play 110.hz.saw.formant(:a)
       #     play 110.hz.saw.formant(:a, :e, :i, :o, :u, morph: 0.2.hz.lfo.at(0..1))
       #     play 110.hz.pulse(0.1).formant(:o, :a, morph: 2.hz.lfo.at(0..1), voice: :soprano, width: 0.5)
-      class Formant
-        include GraphNode
-        include SampleRateHelper
-        # (its sections' state moves to a rebuilt formant: #carry_adopt)
-        node_traits memory: :short, carry: :adopt
+      class Formant < FilterBank
+        # (FilterBank's traits: its sections' state carries by snapshot)
 
         # Formant tables from the Csound manual's "Formant Values" appendix
         # (https://csound.com/docs/manual/MiscFormants.html; the same tables
@@ -103,9 +103,6 @@ module MB
         # The narrowest width (bandwidth scale), as in the kernel.
         MIN_WIDTH = 0.01
 
-        # The input node (a sampler branch).
-        attr_reader :input
-
         # The vowels as given (Symbols or custom formant Arrays).
         attr_reader :vowels
 
@@ -118,9 +115,6 @@ module MB
         # The formant shift in semitones (a Float or a node).
         attr_reader :shift
 
-        # Whether vowels are level-normalized (see the class description).
-        attr_reader :normalize
-
         # The formants of each vowel after normalization: an Array (one per
         # vowel) of five [Hz, dB, bandwidth Hz] triples.
         attr_reader :table
@@ -132,62 +126,41 @@ module MB
           vowels = Array(vowels) if vowels.is_a?(Symbol)
           raise ArgumentError, 'Give at least one vowel' if vowels.empty?
 
-          @input = input.get_sampler
-          @sample_rate = (sample_rate || input.sample_rate).to_f
+          rate = (sample_rate || input.sample_rate).to_f
           @vowels = vowels.freeze
           @voice = voice
-          @normalize = !!normalize
-          @morph = param(morph, 'morph')
+          @formant_normalize = !!normalize
           shift = shift.to_semitones if shift.is_a?(MB::Sound::Interval)
-          @shift = param(shift, 'shift')
-          @width = param(width, 'width')
-          raise ArgumentError, "Formant width must be positive (got #{@width})" if @width.is_a?(Float) && !(@width > 0)
+          morph = param(morph, 'morph')
+          shift = param(shift, 'shift')
+          width = param(width, 'width')
+          raise ArgumentError, "Formant width must be positive (got #{width})" if width.is_a?(Float) && !(width > 0)
 
           raw = vowels.map { |v| vowel_formants(v) }
-          @table = raw.map { |f| @normalize ? normalized(f) : f }.freeze
+          @table = raw.map { |f| @formant_normalize ? normalized(f, rate) : f }.freeze
 
-          # The kernel's tables: natural logs of each vowel's section
-          # frequencies, qualities, and linear gains (see .process_ruby)
-          @tables = Numo::DFloat.cast(
-            @table.flat_map { |f| f.map { |hz, _, _| Math.log(hz) } } +
-            @table.flat_map { |f| f.map { |hz, _, bw| Math.log(hz.to_f / bw) } } +
-            @table.flat_map { |f| f.map { |_, db, _| db * DB_LOG } }
-          ).freeze
-          @state = Numo::DFloat.zeros(2 * SECTIONS + 1) # (and the flush grid count; see Filter::SVF::FLUSH_GRID)
-          @out = nil
+          # The bank's morph tables: natural logs of each vowel's section
+          # frequencies, qualities, and linear gains
+          logs = @table.flat_map { |f| f.map { |hz, _, _| Math.log(hz) } } +
+                 @table.flat_map { |f| f.map { |hz, _, bw| Math.log(hz.to_f / bw) } } +
+                 @table.flat_map { |f| f.map { |_, db, _| db * DB_LOG } }
+          bands = Array.new(SECTIONS) { { type: :bandpass, frequency: 1000.0 } } # (frequencies and widths from the tables)
+
+          super(input, bands: bands, normalize: @formant_normalize ? :width_law : false, sample_rate: rate,
+                       morph: { logs: logs, position: morph, shift: shift, scale: width })
+
+          # The morph position, shift, and width as Floats or the bank's
+          # sampler branches
+          @morph = branch_of(morph)
+          @shift = branch_of(shift)
+          @width = branch_of(width)
           @node_type_name = 'Formant'
         end
 
-        def sample(count)
-          x = @input.sample(count)
-          return nil if x.nil? || x.empty?
-          n = x.length
-
-          m = @morph.is_a?(Float) ? @morph : @morph.sample(n)
-          s = @shift.is_a?(Float) ? @shift : @shift.sample(n)
-          w = @width.is_a?(Float) ? @width : @width.sample(n)
-          # (no Arrays, no return from a block: every buffer; dropouts-2)
-          return nil if (!m.is_a?(Float) && (m.nil? || m.empty?)) || (!s.is_a?(Float) && (s.nil? || s.empty?)) || (!w.is_a?(Float) && (w.nil? || w.empty?))
-          n = m.length if !m.is_a?(Float) && m.length < n
-          n = s.length if !s.is_a?(Float) && s.length < n
-          n = w.length if !w.is_a?(Float) && w.length < n
-          x = x[0...n] if x.length > n
-          m = m[0...n] unless m.is_a?(Float) || m.length == n
-          s = s[0...n] unless s.is_a?(Float) || s.length == n
-          w = w[0...n] unless w.is_a?(Float) || w.length == n
-
-          @out = Numo::SFloat.zeros(n) if @out.nil? || @out.length != n
-          Kernels.formant(@out, x, @tables, m, s, w, @state, @sample_rate, @normalize)
+        # Whether vowels are level-normalized (see the class description).
+        def normalize
+          @formant_normalize
         end
-
-        # Takes over formant +old+'s section states (Session::Carry's
-        # adoption, NodeTraits' +carry+ :adopt: the vowels and settings may
-        # differ, the sections continue).
-        def carry_adopt(old)
-          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
-        end
-
-        ADOPT_IVARS = %i[@state].freeze
 
         def sources
           s = { input: @input }
@@ -197,12 +170,6 @@ module MB
           s
         end
 
-        # Clears the sections' states.
-        def reset
-          @state.fill(0)
-          self
-        end
-
         def to_s
           names = @vowels.map { |v| v.is_a?(Symbol) ? v.to_s : 'custom' }.join('>')
           "Formant #{names} (#{@voice})"
@@ -210,145 +177,27 @@ module MB
 
         # The combined response (complex, a DComplex) at +freqs+ Hz of
         # five formants given as [Hz, dB, bandwidth Hz] triples, at this
-        # node's sample rate.
-        def response(formants, freqs)
-          omega = Numo::DFloat.cast(freqs) * (2 * Math::PI / @sample_rate)
+        # node's sample rate (or +rate+).
+        def response(formants, freqs, rate = @sample_rate)
+          omega = Numo::DFloat.cast(freqs) * (2 * Math::PI / rate)
           formants.sum(Numo::DComplex.zeros(omega.length)) do |f, db, bw|
-            Filter::SVF.new(:bandpass, @sample_rate, f, quality: f.to_f / bw, db_gain: db).response(omega)
+            Filter::SVF.new(:bandpass, rate, f, quality: f.to_f / bw, db_gain: db).response(omega)
           end
         end
-
-        # The exact Ruby mirror of MB::Sound::FastFilter.formant (same
-        # arguments; see ruby_formant in ext/mb/sound/fast_filter): the same
-        # double operations in the same order (Filter::SVF.coefficients for
-        # each section's design), inputs read as float32 values, so specs
-        # compare the two for equality.
-        def self.process_ruby(out, x, tables, morph, shift, width, state, sample_rate, normalize)
-          rate = sample_rate.to_f
-          raise ArgumentError, 'Sample rate must be positive and finite' unless rate > 0 && rate.finite?
-          raise ArgumentError, "The formant tables must have 3 * #{SECTIONS} values per vowel" unless tables.length > 0 && tables.length % (3 * SECTIONS) == 0
-          counted = state.length == 2 * SECTIONS + 1
-          raise ArgumentError, "The formant state must have #{2 * SECTIONS} values (#{2 * SECTIONS + 1} with the flush grid count)" unless counted || state.length == 2 * SECTIONS
-
-          n = out.length
-          xs = signal_values(x, n)
-          ms = signal_values(morph, n)
-          ss = signal_values(shift, n)
-          ws = signal_values(width, n)
-          vowels = tables.length / (3 * SECTIONS)
-          block = vowels * SECTIONS
-          t = tables.to_a
-          st = state.to_a
-          fk = counted ? st.pop : 0
-          fk = fk >= 0 && fk < Filter::SVF::FLUSH_GRID ? fk.to_i : 0
-          flush = ->(v) { (!v.finite? || v.abs < Filter::SVF::FLUSH) ? 0.0 : v }
-          semitone_log = Math.log(2.0) / 12.0
-          type_id = Filter::SVF::FILTER_TYPE_IDS[:bandpass]
-
-          coeffs = Array.new(SECTIONS) { [1.0, 0.0, 0.0, 0.0, 0.0, 0.0] }
-          last_c = Array.new(SECTIONS) { [Float::NAN, Float::NAN, Float::NAN] }
-          last_m = last_s = last_w = Float::NAN
-
-          n.times do |i|
-            m = ms.is_a?(Array) ? ms[i] : ms
-            sh = ss.is_a?(Array) ? ss[i] : ss
-            w = ws.is_a?(Array) ? ws[i] : ws
-
-            # NaN != NaN, as in C
-            if m != last_m || sh != last_s || w != last_w
-              last_m = m
-              last_s = sh
-              last_w = w
-
-              lo = hi = 0
-              frac = 0.0
-              if vowels > 1
-                mc = m
-                if !(mc >= 0.0)
-                  mc = 0.0
-                elsif mc > 1.0
-                  mc = 1.0
-                end
-                pos = mc * (vowels - 1).to_f
-                lo = pos.floor
-                lo = vowels - 2 if lo > vowels - 2
-                hi = lo + 1
-                frac = pos - lo.to_f
-              end
-
-              shift_log = sh * semitone_log
-              wc = w
-              wc = MIN_WIDTH unless wc >= MIN_WIDTH
-              width_log = Math.log(wc)
-              level_log = normalize ? width_log * -0.5 : 0.0
-
-              SECTIONS.times do |k|
-                a = lo * SECTIONS + k
-                b = hi * SECTIONS + k
-                lf = t[a] + (t[b] - t[a]) * frac + shift_log
-                lq = t[block + a] + (t[block + b] - t[block + a]) * frac - width_log
-                lg = t[2 * block + a] + (t[2 * block + b] - t[2 * block + a]) * frac + level_log
-                fc = Math.exp(lf)
-                q = Math.exp(lq)
-                g = Math.exp(lg)
-                next if fc == last_c[k][0] && q == last_c[k][1] && g == last_c[k][2]
-
-                last_c[k] = [fc, q, g]
-                gg, _k, a1, m0, m1, m2 = Filter::SVF.coefficients(type_id, fc, q, g, rate)
-                a2 = gg * a1
-                coeffs[k] = [a1, a2, gg * a2, m0, m1, m2]
-              end
-            end
-
-            xi = xs.is_a?(Array) ? xs[i] : xs
-            sum = 0.0
-            SECTIONS.times do |k|
-              a1, a2, a3, m0, m1, m2 = coeffs[k]
-              ic1 = st[2 * k]
-              ic2 = st[2 * k + 1]
-              v3 = xi - ic2
-              v1 = a1 * ic1 + a2 * v3
-              v2 = ic2 + a2 * ic1 + a3 * v3
-              st[2 * k] = 2.0 * v1 - ic1
-              st[2 * k + 1] = 2.0 * v2 - ic2
-              sum += m0 * xi + m1 * v1 + m2 * v2
-            end
-            out[i] = sum
-
-            if counted && (fk += 1) >= Filter::SVF::FLUSH_GRID
-              fk = 0
-              st.map!(&flush)
-            end
-          end
-
-          st.map!(&flush) unless counted
-          st.each_with_index { |v, k| state[k] = v }
-          state[2 * SECTIONS] = fk.to_f if counted
-          out
-        end
-
-        # A signal input as the kernels read it: a Float, or an Array of
-        # float32 values (real parts of complex inputs).
-        def self.signal_values(value, n)
-          case value
-          when nil then 0.0
-          when Numeric then value.to_f
-          when Numo::NArray
-            raise ArgumentError, 'array length does not match sample buffer length' unless value.length == n
-            v = value.is_a?(Numo::SComplex) || value.is_a?(Numo::DComplex) ? value.real : value
-            Numo::SFloat.cast(v).to_a
-          else
-            raise ArgumentError, "Expected a number or NArray (got #{value.class})"
-          end
-        end
-        private_class_method :signal_values
 
         private
 
+        # A setting as a Float, or the node itself (the bank takes its
+        # sampler branch).
         def param(value, name)
           return value.to_f if value.is_a?(Numeric) && !value.is_a?(Complex)
-          return value.get_sampler if value.respond_to?(:sample)
+          return value if value.respond_to?(:sample)
           raise ArgumentError, "Formant #{name} must be a number or a node (got #{value.inspect})"
+        end
+
+        # A setting's Float, or the sampler branch the bank reads for it.
+        def branch_of(value)
+          value.is_a?(Float) ? value : @signals[@signal_index.fetch(value)]
         end
 
         # The five [Hz, dB, bandwidth] triples of vowel +v+.
@@ -370,17 +219,16 @@ module MB
 
         # +formants+ with every level raised so the vowel's mean power gain
         # over NORMALIZE_RANGE (log-spaced, so equal weight per octave) is 1.
-        def normalized(formants)
+        def normalized(formants, rate)
           lo = Math.log(NORMALIZE_RANGE.begin)
           hi = Math.log(NORMALIZE_RANGE.end)
           freqs = Numo::NMath.exp(Numo::DFloat.linspace(lo, hi, NORMALIZE_POINTS))
-          power = (response(formants, freqs).abs ** 2).mean
+          power = (response(formants, freqs, rate).abs ** 2).mean
           offset = -10 * Math.log10(power)
           formants.map { |f, db, bw| [f, db + offset, bw] }
         end
       end
 
-      Kernels.register :formant, c: FastFilter.method(:formant), ruby: Formant.method(:process_ruby)
     end
   end
 end

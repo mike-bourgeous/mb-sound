@@ -60,6 +60,7 @@ module MB
             'MIDI::Stream' => 'MIDI', 'MIDI::ClipSource' => 'MIDI', 'MIDI::Allocator' => 'MIDI', 'MIDI::Allocator::Lane' => 'MIDI',
             'Synth' => 'synth wiring', 'Synth::Output' => 'synth wiring', 'GraphNode::ChannelMixer::Output' => 'multi-output wiring',
             'GraphNode::Reverb::ReverbOutput' => 'multi-output wiring', 'GraphNode::Dynamics::Output' => 'multi-output wiring',
+            'GraphNode::FilterBank::Output' => 'multi-output wiring',
             'GraphNode::Chorus::Tail' => 'multi-output wiring', 'GraphNode::MultitapDelay::DelayTap' => 'multi-output wiring',
             'GraphNode::FeedbackLoop::Variable' => 'multi-output wiring', 'Drums::Voice::Tap' => 'multi-output wiring',
             'Sequence::TempoNode' => 'tempo', 'SQ80::TimeScale' => 'tempo',
@@ -75,7 +76,7 @@ module MB
           ENVELOPES = %w[Envelope Notes::NoteEnvelope].freeze
           MODULATORS = %w[GraphNode::Drift GraphNode::SampleHold GraphNode::Dust GraphNode::Quantize].freeze
           OSCILLATORS = %w[Tone Notes::KeyedTone GraphNode::ChannelMixer::Unison GraphNode::SamplerVoice GraphNode::Grains].freeze
-          FILTERS = %w[GraphNode::FourPole GraphNode::Formant GraphNode::DiodeLadder].freeze
+          FILTERS = %w[GraphNode::FourPole GraphNode::Formant GraphNode::DiodeLadder GraphNode::FilterBank GraphNode::FilterBank::Router].freeze
           RESONATORS = %w[GraphNode::ModalResonator GraphNode::Resonator].freeze
           SHAPERS = %w[GraphNode::Shaper GraphNode::CurveShaper].freeze
           EFFECTS = %w[
@@ -95,7 +96,7 @@ module MB
           WORDS = {
             'GraphNode::FourPole' => 'lp4', 'GraphNode::DiodeLadder' => 'diode', 'Notes::NoteEnvelope' => 'env', 'Envelope' => 'env',
             'GraphNode::ChannelMixer::Unison' => 'unison', 'GraphNode::Reverb' => 'reverb', 'GraphNode::Chorus' => 'chorus',
-            'GraphNode::Dynamics' => 'compress', 'GraphNode::Formant' => 'formant', 'GraphNode::ModalResonator' => 'resonate',
+            'GraphNode::Dynamics' => 'compress', 'GraphNode::Formant' => 'formant', 'GraphNode::FilterBank' => 'filter_bank', 'GraphNode::FilterBank::Router' => 'filter_bank', 'GraphNode::ModalResonator' => 'resonate',
             'GraphNode::Resonator' => 'ping', 'Notes::Glide' => 'glide', 'GraphNode::Decimator' => 'decimate',
             'GraphNode::ChannelMixer::Pan' => 'pan', 'GraphNode::Drift' => 'drift', 'GraphNode::SampleHold' => 'sample_hold',
             'GraphNode::Dust' => 'dust', 'GraphNode::MultitapDelay' => 'multitap', 'GraphNode::FeedbackLoop' => 'feedback',

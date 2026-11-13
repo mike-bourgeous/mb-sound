@@ -35,8 +35,9 @@ RSpec.describe(MB::Sound::Plan::Op::FilterBank) do
     expect(bank_region(r).root).to be_a(MB::Sound::GraphNode::FilterBank::Router)
   end
 
-  it 'plans serial banks and banks with constants folded' do
+  it 'plans serial banks, formants (a plan boundary before), and banks with constants folded' do
     plan_compare { |_c| src.new(seed: 4).peq(300 => [-6.db, 0.5], 2000 => 4.db) * 0.5 }
+    plan_compare { |_c| src.new(seed: 5).formant(:a, :o, morph: 0.3.hz.lfo.at(0..1), shift: 2.hz.lfo.at(-3..3)) * 0.5 }
     plan_compare { |_c| src.new(seed: 6).bandpass_series(300.constant, count: 3, quality: 0 * src.new(seed: 7) + 9) * 0.5 }
   end
 

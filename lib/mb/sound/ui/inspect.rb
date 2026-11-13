@@ -741,7 +741,7 @@ module MB
         # own (synth lanes), by class name.
         CLASS_LABELS = {
           'FourPole' => 'lp4', 'DiodeLadder' => 'diode', 'NoteEnvelope' => 'env', 'Envelope' => 'env', 'Unison' => 'unison',
-          'Reverb' => 'reverb', 'Chorus' => 'chorus', 'Dynamics' => 'dynamics', 'Limiter' => 'limit', 'Formant' => 'formant',
+          'Reverb' => 'reverb', 'Chorus' => 'chorus', 'Dynamics' => 'dynamics', 'Limiter' => 'limit', 'Formant' => 'formant', 'FilterBank' => 'filter_bank',
           'SampleWrapper' => 'filter', 'Decimator' => 'decimate', 'ModalResonator' => 'resonate', 'Resonator' => 'ping',
         }.freeze
 
@@ -753,7 +753,8 @@ module MB
           'MB::Sound::Tone' => 'osc', 'MB::Sound::GraphNode::Wavetable' => 'osc',
           'MB::Sound::GraphNode::SamplerVoice' => 'osc', 'MB::Sound::GraphNode::Grains' => 'osc',
           'MB::Sound::Filter::SampleWrapper' => 'filter', 'MB::Sound::GraphNode::FourPole' => 'filter',
-          'MB::Sound::GraphNode::Formant' => 'filter', 'MB::Sound::GraphNode::Resonator' => 'filter',
+          'MB::Sound::GraphNode::Formant' => 'filter', 'MB::Sound::GraphNode::FilterBank' => 'filter', 'MB::Sound::GraphNode::FilterBank::Router' => 'filter',
+          'MB::Sound::GraphNode::Resonator' => 'filter',
           'MB::Sound::Envelope' => 'env',
           'MB::Sound::GraphNode::Shaper' => 'shaper', 'MB::Sound::GraphNode::Decimator' => 'lofi',
           'MB::Sound::GraphNode::Reverb' => 'fx', 'MB::Sound::GraphNode::Chorus' => 'fx', 'MB::Sound::GraphNode::FeedbackLoop' => 'fx',
