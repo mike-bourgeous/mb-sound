@@ -178,7 +178,8 @@ module MB
       # slot (patch persist), so the handover, the slot's activation, and
       # the plan rebuild a swap makes are compiled before the first live
       # swap (cold, the first landing took 66-233 ms on the Mac container;
-      # later ones 2-16 ms at 800-frame buffers).
+      # later ones 2-16 ms at 800-frame buffers).  Costs about 0.6 s of
+      # warm_up (0.8 -> 1.4 s on the Mac container).
       def warm_up_slots(buffer)
         s = Session.new(realtime: false, output: NullOutput.new(channels: 2, sleep: false, buffer_size: buffer), channels: 2, buffer_size: buffer)
         Session.with_context(session: s) do
@@ -189,12 +190,12 @@ module MB
             s.add(notes.synth(voices: 2) { |v| v.hz.ramp * v.amp_env(0.002, 0.05, 0.6, 0.05) * 0.2 }.slot(:fx, &fx[0]), name: :warm_fx, start_time: 0r)
             s.add(notes.notes.slot(:inst, &voice.(:square)), name: :warm_inst, start_time: 0r)
             per = s.transport.whole_notes_of(Rational(buffer, s.sample_rate))
-            9.times do |i|
+            4.times do |i|
               fade = [nil, 1/64r, 0][i % 3]
               at = s.transport.position + per * 5 / 2
               s.swap_slot(:"warm_fx/fx", fx[(i + 1) % 2], start_time: at, fade: fade)
               s.swap_slot(:"warm_inst/inst", voice.(i.even? ? :ramp : :square), start_time: at, fade: fade)
-              8.times { s.process_buffer }
+              6.times { s.process_buffer }
             end
           end
         end
