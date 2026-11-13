@@ -508,24 +508,8 @@ module MB
             end
             chain.mode = mode
 
-            if mode == :spill
-              chain.input_from = offset
-              chains[0...-1].each do |c|
-                next unless c.started && c.feeding
-                c.feeding = false
-                c.input_until = offset
-              end
-            else
-              step = mode == :fade ? fade_step(chain.fade, rate) : 1.0
-              chain.gain = 0.0
-              chain.gain_step = step
-              chain.ramp_from = offset
-              chains[0...-1].each do |c|
-                next unless c.started
-                c.gain_step = -step
-                c.ramp_from = offset
-              end
-            end
+            step = mode == :fade ? fade_step(chain.fade, rate) : 1.0
+            Handover.start(chain, chains[0...-1], offset, mode, step)
           end
         end
 
@@ -650,17 +634,7 @@ module MB
         # Returns per-frame gains for a chain that is fading (holding its
         # level until frame +offset+), or nil at full level.
         def master_ramp(c, count, offset)
-          return nil if c.gain >= 1 && c.gain_step >= 0
-
-          ramp = Numo::SFloat.new(count).fill(c.gain)
-          if c.gain_step != 0 && offset < count
-            ramp[offset..] = Numo::SFloat.new(count - offset).seq(c.gain + c.gain_step, c.gain_step)
-          end
-          ramp = ramp.clip(0, 1)
-
-          c.gain = MB::M.clamp(c.gain + c.gain_step * (count - offset), 0.0, 1.0)
-          c.gain_step = 0.0 if c.gain >= 1 && c.gain_step > 0
-          ramp
+          Handover.ramp(c, count, offset)
         end
 
         # Follows a spillover chain's tail (+data+, +count+ frames from
@@ -674,34 +648,14 @@ module MB
         # them, or fewer when the tail ends inside them (the chain is then
         # dropped).
         def track_master_tail(c, data, count, rate, frame)
-          unless c.tail_start
-            c.tail_start = frame + (c.input_until || 0)
-            c.quiet = QuietRun.new((QuietRun::QUIET_SECONDS * rate).round, from: c.tail_start)
-          end
-
-          cap = c.tail_start + (MAX_TAIL_SECONDS * rate).round
-          if c.gain_step >= 0 && cap < frame + count
-            c.gain_step = -1.0 / (TAIL_FADE_SECONDS * rate)
-            c.ramp_from = MB::M.max(cap - frame, 0)
-          end
-
-          c.quiet.track_all(data, frame)
-          ends = c.quiet.ends_at
-          return count if ends > frame + count
-
-          c.tail_done = true
-          MB::M.max(ends - frame, 0)
+          Handover.track_tail(c, data, count, rate, frame)
         end
 
         # Returns true if a chain can be dropped: it was replaced and has
         # faded out or gone quiet.  +list+ is the chains it belongs to (a
         # bus's, see Buses).
         def master_chain_done?(c, list = @master_chains)
-          return false if c.equal?(list.last) || !c.started
-
-          faded = c.gain <= 0 && c.gain_step < 0
-          silent = !c.feeding && (c.bypass? || c.tail_done)
-          faded || silent
+          Handover.done?(c, list)
         end
 
         # Warns once if a master chain takes most of the time available for

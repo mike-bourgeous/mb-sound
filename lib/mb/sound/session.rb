@@ -12,6 +12,7 @@ require_relative 'session/undo' # (before the modules registering undo subjects)
 require_relative 'session/strip'
 require_relative 'session/holds'
 require_relative 'session/faders'
+require_relative 'session/handover'
 require_relative 'session/master'
 require_relative 'session/tails'
 require_relative 'session/markers'
