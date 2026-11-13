@@ -505,6 +505,13 @@ module MB
         raise ArgumentError, "Unknown interpolation #{@interpolation.inspect} (#{INTERPOLATIONS.keys.join(', ')})" unless INTERPOLATIONS.include?(@interpolation)
 
         @normalize = normalize
+
+        # The builders and lazy readers set the rest; preset them all so cycle
+        # and sample tables keep one shape (batch 34: "reached 8 shape
+        # variations" in a suite run).
+        @frames = @data = @size = @frame_count = @spectra = @half_means = nil
+        @root = @loop = @sample_rate = @level_sets = @derivative_spectra = @sync_levels = nil
+
         if mode == :cycle
           build_cycle(spectra, frames, size, align)
         else
