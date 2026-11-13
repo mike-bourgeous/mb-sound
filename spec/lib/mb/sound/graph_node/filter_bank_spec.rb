@@ -186,9 +186,9 @@ RSpec.describe(MB::Sound::GraphNode::FilterBank, :aggregate_failures) do
         10 * Math.log10(power.sum * dlnf * klass::NORMALIZE_REFERENCE / sum / klass::NORMALIZE_REFERENCE)
       }
       # (narrow bands hold within 0.3 dB; bands that overlap, as fixed-Q
-      # bands do up a harmonic series, cancel partly between their peaks,
-      # which the sum of powers leaves out: about 1 dB at Q 20 over 16
-      # harmonics of 150 Hz)
+      # bands do up a harmonic series, add between their peaks, which the
+      # sum of powers leaves out: +0.9 dB at Q 10 over 8 harmonics of 150
+      # Hz, +1.0 at Q 20 over 16, +1.7 at Q 3 over 4)
       expect(levels[1].abs).to be < 0.3
       levels.each { |l| expect(l.abs).to be < 2.5 }
 
