@@ -1353,6 +1353,10 @@ module MB
         you swap while it plays: `swap :"dub/color", arack { |s|
         s.diode(800) }` lands on the next bar, the old content ringing out
         (`fade: 1.n8` crossfades, `fade: 0` cuts; undo and takes too).
+        `midi.slot(:keys) { |n| n.synth { |v| ... } }` swaps instruments:
+        notes still sounding stay on the old one.  Defining a named rack
+        again swaps the instances playing on the next bar (`swap :dub,
+        arack { ... }, fade: 0` picks the launch point and handover).
         `help rack(:dub)` shows ports, knobs, slots, and latency.  `save :dub,
         rack(:dub)` writes a rack document: `preset :dub` gives the rack
         back, `preset :dub, sig: mic` plays it on an input (try the library

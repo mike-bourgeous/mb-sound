@@ -51,15 +51,45 @@ module MB
           rack
         end
 
+        # Gives Rack::Application +app+ the instance key +from+ (another
+        # Application) was given (a re-defined rack's new instance takes
+        # the old one's place: its knobs keep their names).
+        def inherit_key(app, from)
+          @mutex.synchronize {
+            key = from && @app_keys[from]
+            @app_keys[app] = key if key
+          }
+        end
+
+        # Defines rack +rack+ again (its name already a rack's): later
+        # applications use it, and instances playing swap to it at a
+        # launch point (+at:+/+on:+/+in:+, +fade:+, +start_time+; see
+        # Slots#swap_rack_instances), as one undo step labeled +label+.
+        # Returns +rack+.
+        def redefine(rack, label:, **swap)
+          name = rack.name
+          before = self[name]
+          Session.with_context(session: @session) {
+            @session.command(label) {
+              define(rack) or next
+              @session.note_undo_extra(self, { name => before }, { name => rack })
+              @session.swap_rack_instances(name, rack, **swap) if before && !before.block.equal?(rack.block)
+            }
+          }
+          rack
+        end
+
         # Replaces the definition of rack +name+ with +rack+ as one undo
-        # step labeled +label+ (instances already built keep playing as they
-        # were; later applications use +rack+).  Returns +rack+.
+        # step labeled +label+ (instances playing swap to it at the next
+        # launch point: see #redefine; later applications use +rack+).
+        # Returns +rack+.
         def replace(name, rack, label:)
           before = self[name]
           Session.with_context(session: @session) {
             @session.command(label) {
               define(rack)
               @session.note_undo_extra(self, { name => before }, { name => rack })
+              @session.swap_rack_instances(name, rack) if before && !before.block.equal?(rack.block)
             }
           }
           rack

@@ -1126,6 +1126,15 @@ module MB
         merge(other)
       end
 
+      # An instrument slot (racks R3): a named, swappable hole whose block
+      # makes audio from these notes (`midi.slot(:keys) { |n| n.synth { |v|
+      # ... } }`).  A swap hands over with patch persist: the old content
+      # keeps the notes it started and rings out, new notes go to the new
+      # one (see GraphNode::Slot, MIDI::Transform::SlotGate).
+      def slot(name, &block)
+        GraphNode::SlotMethods.make(self, name, block)
+      end
+
       # A polyphonic MB::Sound::Synth playing this instance's stream (see
       # Synth.new for the options and the block), for console and script
       # code that has a mono Notes (`midi`) and wants voices.

@@ -27,6 +27,10 @@ module MB
         include MultiOutput
         node_traits memory: :none
 
+        # Raised when a content makes something other than audio (notes,
+        # control values from a listener rack).
+        class NotAudio < ArgumentError; end
+
         # One output channel of a Slot (the node the graph reads).
         class Output
           include GraphNode
@@ -56,9 +60,11 @@ module MB
             @owner
           end
 
-          # The contents' nodes for this channel: the current content as
-          # +input+, older ones still spilling over (or waiting to start)
-          # as input_2, input_3, ...
+          # The contents' nodes for this channel (the current content as
+          # +input+, older ones still spilling over as input_2, input_3,
+          # ...) and the slot's input for this channel (+source+: what the
+          # contents' Feeds give them; Feeds have no sources, so a
+          # content's graph ends at its Feeds).
           def sources
             @owner.channel_sources(@index)
           end
@@ -81,14 +87,19 @@ module MB
             @index = index
             @buf = nil
             @pos = 0
+            @expected = 0
+            @own = nil
             @node_type_name = 'Slot input'
             @graph_node_name = nil
           end
 
-          # Gives the next read +buf+ (nil: the input ended).  For the Slot.
-          def push(buf)
+          # Gives the next read +buf+ (nil: the input ended) for +expected+
+          # frames (fewer in +buf+: the input ends inside them).  For the
+          # Slot.
+          def push(buf, expected = buf&.length || 0)
             @buf = buf
             @pos = 0
+            @expected = expected
           end
 
           def sample(count)
@@ -96,14 +107,23 @@ module MB
             return nil if b.nil?
             if @pos == 0 && count == b.length
               @pos = count
-              return b
+              return own_copy(b)
             end
             if @pos + count <= b.length
               v = b[@pos...(@pos + count)].dup
               @pos += count
               return v
             end
-            return nil if @pos >= b.length && b.length < @slot.last_count # (the input ended inside the buffer)
+            if b.length < @expected
+              # The input ended inside the buffer: its last frames, then
+              # nil, as the content would read the input itself (a delay
+              # rings out from the frame it ended; SessionFuzz seeds 80,
+              # 142: a one-shot clip's synth)
+              return nil if @pos >= b.length
+              v = @pos == 0 ? b.dup : b[@pos..].dup
+              @pos = b.length
+              return v
+            end
 
             raise ArgumentError, "slot #{@slot.name.inspect}: its content read #{count} samples with #{b.length - @pos} left in the buffer " \
                                  '(nodes that read ahead of their output, like a resample with a lookahead, go outside slots)'
@@ -113,9 +133,29 @@ module MB
             @slot.sample_rate
           end
 
-          # The slot's input for this channel (what the feed stands for).
+          # +b+ copied into the feed's own reused buffer, on the read: the
+          # slot reads its input before the content's Tees check their
+          # shared buffers, so handing on the input's own (reused) buffer
+          # would look to them as if a node downstream had changed it
+          # (MB_SOUND_CHECK_SHARED; the smoke run's rack_demo).  No
+          # allocation once the buffer exists.
+          def own_copy(b)
+            own = @own
+            unless own && own.class == b.class && own.length == b.length && !own.frozen?
+              own = @own = b.class.new(b.length)
+            end
+            Kernels.copy(own, b) || own.store(b)
+            own
+          end
+
+          # None: the slot reads its input and pushes it (Slot::Output lists
+          # the input), so walks of a content's graph (its timeline nodes,
+          # knobs, slots, a warm-up's node set) stay inside the content.
+          # (racks-r3: the feed listed the slot's input once, and a swap
+          # restarted the player's own clips as the new content's timeline
+          # nodes.)
           def sources
-            { input: @slot.input_node(@index) }
+            {}
           end
         end
 
@@ -152,6 +192,9 @@ module MB
         # The count of the latest read (for Feed).
         attr_reader :last_count
 
+        # What the latest content's block returned (before branching).
+        attr_reader :last_result
+
         # Creates a slot named +name+ on +input+ (a node or bundle) whose
         # content +content+ builds (a block or anything callable taking
         # the input's stand-in: a node for one channel, else a bundle).
@@ -159,8 +202,9 @@ module MB
         # slot (see MB::Sound::Rack#call).
         def initialize(input, name:, content:, default: nil, instance_of: nil, ports: {}, application: Rack.application)
           raise ArgumentError, "Slot names are Symbols (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol)
-          unless input.is_a?(GraphNode) || input.is_a?(MultiOutput)
-            raise ArgumentError, "A slot's input is a graph node or bundle (got #{input.class}); notes slots come later"
+          notes = Slot.notes?(input)
+          unless notes || input.is_a?(GraphNode) || input.is_a?(MultiOutput)
+            raise ArgumentError, "A slot's input is a graph node, bundle, note stream, or Notes (got #{input.class})"
           end
 
           @name = name
@@ -173,9 +217,14 @@ module MB
           @instance_key = nil
           @receiver = nil
           @result = nil
-          ins = input.outputs
-          @inputs = ins.map(&:get_sampler)
-          @sample_rate = @inputs[0].sample_rate.to_f
+          # Notes in (an instrument slot): contents read the input stream
+          # through SlotGates (see MIDI::Transform::SlotGate), and the slot
+          # keeps a reader on it as its clock
+          @notes_in = notes ? input : nil
+          @stream = notes ? (input.is_a?(MB::Sound::Notes) ? input.stream : MIDI::Stream.for(input)) : nil
+          @notes_clock = notes ? @stream.reader : nil
+          @inputs = notes ? [] : input.outputs.map(&:get_sampler)
+          @sample_rate = notes ? (input.respond_to?(:sample_rate) ? input.sample_rate : Session.existing&.sample_rate || 48000).to_f : @inputs[0].sample_rate.to_f
           @chains = []
           @pending = []
           @frame = nil
@@ -189,6 +238,7 @@ module MB
           @session = nil
           @scratch = {}.compare_by_identity
           @default_content = nil
+          @last_result = nil
 
           @default_content = default || content
           first = build(content)
@@ -206,9 +256,19 @@ module MB
           @channels == 1 ? @outputs[0] : Channels.new(@outputs)
         end
 
-        # The number of input channels.
+        # The number of input channels (1 for notes).
         def input_channels
-          @inputs.length
+          @notes_in ? 1 : @inputs.length
+        end
+
+        # True for a slot with a notes input (an instrument slot).
+        def notes?
+          !@notes_in.nil?
+        end
+
+        # True if +input+ is notes (a Stream, Notes, Clip, or MIDI source).
+        def self.notes?(input)
+          input.is_a?(MIDI::Stream) || input.is_a?(MB::Sound::Notes) || input.is_a?(Sequence::Clip) || input.is_a?(MIDI::Source)
         end
 
         # The slot input for channel +index+ (see Feed#sources).
@@ -255,6 +315,7 @@ module MB
             src[k == 0 ? :input : :"input_#{k + 1}"] = n
             k += 1
           end
+          src[:source] = @notes_in ? @stream : (@inputs[index] || @inputs[0]) # (a mono input under a content with more channels)
           src
         end
 
@@ -263,9 +324,19 @@ module MB
         # stand-in), on new Feeds.  Raises if it gives another number of
         # channels than the slot has (one channel plays on every channel).
         def build(content)
-          feeds = Array.new(@inputs.length) { |i| Feed.new(self, i) }
-          arg = feeds.length == 1 ? feeds[0] : Channels.new(feeds)
+          if @notes_in
+            # (the first content hears everything; later ones wait for their
+            # swap: see #activate)
+            gate = MIDI::Transform::SlotGate.new(@stream, mode: @chains.empty? && @channels.nil? ? :all : :new)
+            stream = MIDI::Stream.new(gate)
+            feeds = [gate]
+            arg = @notes_in.is_a?(MB::Sound::Notes) ? MB::Sound::Notes.new(stream, sustain: @notes_in.sustain?, sample_rate: @sample_rate) : stream
+          else
+            feeds = Array.new(@inputs.length) { |i| Feed.new(self, i) }
+            arg = feeds.length == 1 ? feeds[0] : Channels.new(feeds)
+          end
           result = Slot.call_content(content, arg)
+          @last_result = result
           list = Slot.nodes_of(result, @name)
           if @channels && list.length != @channels
             raise ArgumentError, "slot #{(@path || @name).inspect} has #{@channels} channel#{'s' if @channels != 1}; the new content gives #{list.length}" unless list.length == 1
@@ -310,7 +381,8 @@ module MB
         # (or on the first read), then gives channel +index+.
         def sample_internal(count, index)
           if @out.nil? || @sampled[index]
-            @sampled.fill(false)
+            k = -1
+            @sampled[k] = false while (k += 1) < @sampled.length
             @out = render(count)
           end
           @sampled[index] = true
@@ -335,7 +407,7 @@ module MB
           when Array then result.flat_map { |r| nodes_of(r, name) }
           when GraphNode, MultiOutput then result.outputs
           else
-            raise ArgumentError, "slot #{name.inspect}: its content must return audio (a graph node or bundle; got #{result.class})"
+            raise NotAudio, "slot #{name.inspect}: its content must return audio (a graph node or bundle; got #{result.class})"
           end
         end
 
@@ -383,11 +455,20 @@ module MB
             c.started = true
             c.skip = offset > 0 ? offset : nil
             Session::Handover.start(c, @chains, offset, c.mode, c.mode == :fade ? c.fade : 1.0)
+            if @notes_in
+              # Patch persist: older contents keep the notes they started,
+              # notes from the switch frame on go to the new one
+              now = @notes_clock.cursor
+              t = now + Rational(offset) / @sample_rate.to_r
+              @chains.each { |o| o.source[0].hand_over(t) if o.source[0].mode != :old }
+              c.source[0].start(t)
+            end
             @chains << c
             changed!
             # (documents print the content playing: see Session#swap_slot)
             rec = @result&.instance_variable_get(:@graph_recipe)
             rec.call = c.recipe if rec && c.recipe
+            @instance_of = c.instance if c.instance
             start_timeline(c, frame + offset)
             @session&.slot_started(self, c, offset)
           end
@@ -407,7 +488,6 @@ module MB
         def render(count)
           @last_count = count
           frame = frame_for(count)
-          activate(frame, count) unless @pending.empty?
 
           ins = @in_bufs
           i = -1
@@ -416,6 +496,13 @@ module MB
             ins[i] = @inputs[i].sample(count)
             ended = true if ins[i].nil?
           end
+          activate(frame, count) unless @pending.empty?
+          if @notes_in
+            # (the slot's clock on the input stream: where a swap's notes
+            # start, see #activate)
+            from = @notes_clock.cursor
+            @notes_clock.events(from, @stream.advance(from, count, @sample_rate))
+          end
 
           if @chains.length == 1
             c = @chains[0]
@@ -423,9 +510,7 @@ module MB
               return steady(c, ins, count)
             end
           end
-          return nil if ended
-
-          handover(ins, frame, count)
+          handover(ins, frame, count, ended)
         end
 
         # One content at full level: the input to its feeds, its output out
@@ -434,8 +519,8 @@ module MB
         def steady(c, ins, count)
           feeds = c.source
           i = -1
-          while (i += 1) < feeds.length
-            feeds[i].push(ins[i])
+          while !@notes_in && (i += 1) < feeds.length
+            feeds[i].push(ins[i], count)
           end
           data = @data
           data.clear
@@ -452,10 +537,15 @@ module MB
         # Several contents (or one fading or starting): each fed its part of
         # the input, mixed with its ramp, spilling tails followed and
         # dropped on their last frame.
-        def handover(ins, frame, count)
-          n = ins[0].length
+        def handover(ins, frame, count, ended)
+          # (an input ending gives fewer frames, then nil: feeding contents
+          # get its end, nil, and ring out by their own rules; spilling
+          # ones get silence)
+          n = count
           out = out_bufs(n)
           fed = @chains.count { |c| c.started && (c.feeding || c.input_until) }
+          last = @chains.last
+          length = n
 
           @chains.each do |c|
             next unless c.started
@@ -464,8 +554,10 @@ module MB
             len = n - skip
             next if len <= 0
 
-            c.source.each_with_index do |f, idx|
-              f.push(feed_part(c, ins[idx], skip, n, fed))
+            unless @notes_in
+              c.source.each_with_index do |f, idx|
+                f.push(feed_part(c, ins[idx], skip, n, fed), len)
+              end
             end
             data = c.nodes.map { |node|
               d = node.sample(len)
@@ -474,20 +566,26 @@ module MB
               d
             }
             if data.any?(&:nil?)
-              # (a content that ended: done)
+              # The current content ended: so does the slot, on that frame
+              # (the frames before it still mix older contents; tails still
+              # spilling over after it are cut; SessionFuzz seed 142: a swap
+              # landing after the input ended); an older one is done
+              length = MB::M.min(length, skip) if c.equal?(last)
               c.tail_done = true
               c.feeding = false
               c.gain = 0.0
               c.gain_step = -1.0
               next
             end
+            got = data.map(&:length).min
+            length = skip + got if c.equal?(last) && got < len # (the current content ends inside the buffer)
 
-            mix_n = c.feeding && !c.input_until ? len : Session::Handover.track_tail(c, data, len, @sample_rate, frame + skip)
-            ramp = Session::Handover.ramp(c, len, MB::M.max((c.ramp_from || 0) - skip, 0))
+            mix_n = c.feeding && !c.input_until ? got : Session::Handover.track_tail(c, data, got, @sample_rate, frame + skip)
+            ramp = Session::Handover.ramp(c, got, MB::M.max((c.ramp_from || 0) - skip, 0))
             data.each_with_index do |d, idx|
               next if mix_n <= 0
               o = out[idx]
-              next if d.length == len && (ramp.nil? || ramp.length == len) && mix_n == len && Kernels.add_at(o, skip, d, len, ramp)
+              next if d.length == got && (ramp.nil? || ramp.length == got) && mix_n == got && Kernels.add_at(o, skip, d, got, ramp)
               d = d[0...mix_n] if mix_n < d.length
               d = d * (ramp.length == mix_n ? ramp : ramp[0...mix_n]) if ramp
               o[skip...(skip + mix_n)].inplace + d
@@ -505,21 +603,28 @@ module MB
             changed!
             @session&.slot_dropped(self)
           end
-          out
+          return nil if length <= 0
+          length < n ? out.map { |o| o[0...length] } : out
         end
 
         # The input +buf+ as content +c+ hears it from frame +skip+ of +n+:
         # all of it, silence after its input stopped (a spill), or silence.
         def feed_part(c, buf, skip, n, fed)
+          if buf.nil?
+            return nil if c.feeding && c.input_until.nil?
+            z = @scratch[c]
+            z = @scratch[c] = Numo::SFloat.zeros(n - skip) if z.nil? || z.length != n - skip
+            return z
+          end
           if !c.feeding && c.input_until.nil?
             z = @scratch[c]
             z = @scratch[c] = Numo::SFloat.zeros(n - skip) if z.nil? || z.length != n - skip
             return z
           end
-          part = skip > 0 ? buf[skip..].dup : buf
-          if c.input_until && c.input_until < n
+          part = skip > 0 ? (skip < buf.length ? buf[skip..].dup : Numo::SFloat.zeros(0)) : buf
+          if c.input_until && c.input_until < buf.length
             part = part.dup if part.equal?(buf)
-            part[MB::M.max(c.input_until - skip, 0)..] = 0
+            part[MB::M.max(c.input_until - skip, 0)..] = 0 if c.input_until - skip < part.length
           elsif fed > 1 && part.equal?(buf)
             part = buf.dup
           end

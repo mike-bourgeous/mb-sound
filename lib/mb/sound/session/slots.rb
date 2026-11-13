@@ -13,11 +13,17 @@ module MB
         SlotSubject = Data.define(:name)
         Undo.subject SlotSubject, snapshot: :slot_undo_snapshot, restore: :restore_slot_change
 
+        # Undo subject of the instance swaps of a re-defined named rack
+        # (subject: the rack's name; see #swap_rack_instances).
+        RackSubject = Data.define(:name)
+        Undo.subject RackSubject, snapshot: :rack_undo_snapshot, restore: :restore_rack_change
+
         # What a slot swap's undo puts back: [Slot, content] pairs (content:
         # the Proc or Rack that built the content playing before).
         SlotState = Data.define(:contents)
 
         Undo.claim :slot_undo_subject, order: 25
+        Undo.claim :rack_undo_subject, order: 26
 
         # Contents waiting in the change queue to land (a :slot change's
         # graph, kept in step with nodes shared with playing graphs while
@@ -90,12 +96,12 @@ module MB
           point = LaunchPoint.of(binding) or return nil
           content ||= block
           raise ArgumentError, "swap #{name.inspect} needs the new content: a rack (arack { |s| ... }) or a block" if content.nil?
-          content = slot_content(name, content)
           targets = racks.slots_for(name)
           if targets.empty?
             known = racks.slot_names
             raise ArgumentError, "No slot named #{name.inspect} is playing#{MB::Sound::Rack.suggest(name, known)}#{" (slots: #{known.map(&:inspect).join(', ')})" unless known.empty?}"
           end
+          content = slot_content(name, content, targets.first.notes? ? :notes : :audio)
           mode, bars = master_mode(fade)
           built = targets.map { |s| [s, build_slot_content(s, content)] }
           chains = built.map(&:last)
@@ -108,6 +114,58 @@ module MB
           }
           start_thread if @realtime
           c
+        end
+
+        # Swaps the playing instances of named rack +name+ for instances of
+        # +rack+ (its new definition), each on the same input with the same
+        # extra port values, at a launch point (+at:+ a LaunchPoint, else
+        # the next bar while anything plays) or +start_time+, handing over
+        # as #swap_slot does (+fade:+).  Each new instance's rack knobs join
+        # the old instance's (same names, values kept).  Instances in
+        # players that aren't playing (stopped for resume) keep theirs.
+        # Returns the Change, or nil if no instance plays.  Called by
+        # Racks#redefine inside its undo step.
+        def swap_rack_instances(name, rack, at: nil, on: nil, in: nil, fade: nil, start_time: nil)
+          raise IOError, 'Session is closed' if @closed
+          point = LaunchPoint.of(binding) or return nil
+          slots = rack_instance_slots(name)
+          return nil if slots.empty?
+
+          mode, bars = master_mode(fade)
+          built = slots.filter_map do |sl|
+            [sl, build_instance_content(sl, rack)]
+          rescue ArgumentError, TypeError, NoMethodError => e
+            MB::Sound.live_error(e)
+            nil
+          end
+          return nil if built.empty?
+          chains = built.map(&:last)
+          desc = "rack #{name.inspect} -> #{built.length} instance#{'s' if built.length != 1}"
+          warm_rack_swap(rack, built.first[0], chains.first, warm_time(point, start_time))
+          time = start_time ? start_time.to_r : launch_time(point, chains.flat_map(&:timeline_nodes))
+          c = change(:rack, name, time, data: { description: desc, fade: fade }, graph: SlotGraph.new(chains, nil)) { |_t|
+            land_slot_swap(built, mode, bars)
+          }
+          start_thread if @realtime
+          c
+        end
+
+        # The instance slots of named rack +name+ in the graphs of the
+        # players playing (GraphNode::Slot made by MB::Sound::Rack#call).
+        def rack_instance_slots(name)
+          players = @mutex.synchronize { @players.values.select(&:current?) }
+          found = []
+          seen = {}.compare_by_identity
+          players.each do |p|
+            p.input.nodes.flat_map { |n| [n, *n.graph] }.each do |n|
+              next unless n.is_a?(GraphNode::Slot::Output)
+              sl = n.owner_slot
+              next if seen[sl] || sl.instance_of&.name != name
+              seen[sl] = true
+              found << sl
+            end
+          end
+          found
         end
 
         # Called by a Slot when content +chain+ starts, +offset+ frames into
@@ -153,11 +211,11 @@ module MB
 
         # Content given to #swap_slot as something a Slot builds: Racks
         # taking audio, Procs and callables as they are.
-        def slot_content(name, content)
+        def slot_content(name, content, type = :audio)
           case content
           when MB::Sound::Rack
-            unless content.input.type == :audio
-              raise ArgumentError, "slot #{name.inspect} carries audio; #{content.label} takes #{content.input.type} (swap in an arack)"
+            unless content.input.type == type
+              raise ArgumentError, "slot #{name.inspect} takes #{type}; #{content.label} takes #{content.input.type} (swap in #{type == :audio ? 'an arack' : 'an irack'})"
             end
             content
           when Proc, Method then content
@@ -197,6 +255,48 @@ module MB
           chain.block = content
           found = chain.nodes.uniq(&:__id__).flat_map { |n| [n, *n.graph] }
           adopt_knobs(chain.nodes, player: s.player, found: found)
+          adopt_slots(found, player: s.player) # (slots inside the new content)
+          chain
+        end
+
+        # A new instance of +rack+ for instance slot +sl+ (a Master::Chain):
+        # built on the slot's stand-in with the old instance's extra port
+        # values, under a new seed, as a new Rack::Application keeping the
+        # old one's instance key (so its rack knobs join the same names);
+        # recorded as the old `then` call with the new rack, so documents
+        # print the new definition once it plays.
+        def build_instance_content(sl, rack)
+          old = sl.instance_of
+          kw = sl.instance_ports.select { |k, _| rack.ports.key?(k) }
+          missing = rack.ports.select { |k, p| p.required && !kw.key?(k) }.keys
+          raise ArgumentError, "#{rack.label}: the instance in #{sl.player.inspect} has no value for port#{'s' if missing.length > 1} #{missing.join(', ')} (apply it again with .with(...))" unless missing.empty?
+          want = sl.notes? ? :notes : :audio
+          if rack.input.type != want
+            raise ArgumentError, "#{rack.label} takes #{rack.input.type} now; instances playing take #{want} (they keep playing as they were)"
+          end
+
+          seed = Internal.root_rng.rand(1 << 62)
+          app = MB::Sound::Rack::Application.new(rack, start: old&.settings&.[](:knobs) || {})
+          racks.inherit_key(app, sl.application)
+          applied = rack.using(seed: seed)
+          block = rack.block
+          content = ->(feed) {
+            MB::Sound::Rack.applying(app) { MB::Sound.with_seed(seed) { kw.empty? ? block.call(feed) : block.call(feed, **kw) } }
+          }
+          chain = GraphNode::Recipe.quietly { sl.build(content) }
+          chain.block = content
+          chain.instance = applied.send(:copy, settings: applied.settings.merge(drawn: true, application: app))
+          chain.description = "rack #{rack.name.inspect}"
+          rec = sl.result&.instance_variable_get(:@graph_recipe)
+          if rec&.call
+            fresh = rec.call.dup
+            fresh.args = [chain.instance]
+            fresh.block = block
+            chain.recipe = fresh
+          end
+          found = chain.nodes.uniq(&:__id__).flat_map { |n| [n, *n.graph] }
+          adopt_knobs(chain.nodes, player: sl.player, found: found)
+          adopt_slots(found, player: sl.player) # (the new definition's slots take the old ones' names)
           chain
         end
 
@@ -243,20 +343,75 @@ module MB
           }
         end
 
+        # A rack re-definition's subject (see Undo.claim).
+        def rack_undo_subject(c)
+          RackSubject.new(c.subject) if c.kind == :rack
+        end
+
+        # What the instances of the rack +subject+ names play (a SlotState
+        # of [Slot, the Rack applied]).
+        def rack_undo_snapshot(subject)
+          SlotState.new(contents: rack_instance_slots(subject.name).map { |sl| [sl, sl.latest.instance || sl.instance_of] })
+        end
+
+        # Puts the rack's instances back to the definitions they played
+        # before +original+ (rebuilt), handed over as the swap was.
+        def restore_rack_change(subject, original, time)
+          state = original.before
+          return nil unless state.is_a?(SlotState)
+          fade = original.entry.data[:fade]
+          mode, bars = master_mode(fade)
+          built = state.contents.filter_map { |sl, applied| applied && [sl, build_instance_content(sl, applied)] }
+          desc = "rack #{subject.name.inspect} -> #{built.length} instance#{'s' if built.length != 1}"
+          change(:rack, subject.name, time, data: { description: desc, fade: fade }, undoes: original.seq, graph: SlotGraph.new(built.map(&:last), nil)) { |_t|
+            land_slot_swap(built, mode, bars)
+          }
+        end
+
+        # Warms a rack re-definition's instance swap (see #warm_slot_swap):
+        # in a sandbox, an instance of the rack as it plays (+slot+'s rack,
+        # with its port values) on a noise stand-in swaps to +rack+.
+        def warm_rack_swap(rack, slot, chain, at)
+          return unless warming?
+          old = slot.instance_of
+          return unless old
+          warm(:slot, rack.name, chain.nodes, at) { |box, land, _, live|
+            box.add(warm_input(slot).then(&old), name: :warm_slot, start_time: 0r)
+            box.swap_rack_instances(rack.name, rack, start_time: land)
+            copy = box.racks.instance_variable_get(:@session).send(:rack_instance_slots, rack.name).flat_map { |s| s.waiting.flat_map { |c| c.nodes.flat_map { |n| [n, *n.graph] } } }
+            next :built if warm_shares?(copy, live)
+            :played
+          }
+        end
+
         # Warms a slot swap (see Warming): in a sandbox, a copy of the
         # content swaps into a slot playing a noise stand-in, so the
         # content's code and the handover compile before it lands live.
         def warm_slot_swap(content, slot, chain, at)
           return unless warming?
+          now = slot.current.block
+          playing = now.is_a?(MB::Sound::Rack) ? ->(x) { now.call(x) } : now
           warm(:slot, slot.path, chain.nodes, at) { |box, land, _, live|
-            noise = warm_noise
-            noise = noise.stereo if slot.input_channels > 1
-            box.add(noise.slot(:warm) { |x| x }, name: :warm_slot, start_time: 0r)
+            # (the slot's content playing now spills over, or fades, as it
+            # will live)
+            box.add(warm_input(slot).slot(:warm, &playing), name: :warm_slot, start_time: 0r)
             box.swap_slot(:"warm_slot/warm", content, start_time: land)
-            copy = box.racks.slots_for(:"warm_slot/warm").flat_map { |s| s.waiting.flat_map { |c| c.nodes.flat_map { |n| [n, *n.graph] } } }
+            copy = box.racks.slots_for(:"warm_slot/warm").flat_map { |s| s.chains.flat_map { |c| c.nodes.flat_map { |n| [n, *n.graph] } } + s.waiting.flat_map { |c| c.nodes.flat_map { |n| [n, *n.graph] } } }
             next :built if warm_shares?(copy, live)
             :played
           }
+        end
+
+        # A stand-in for +slot+'s input in a warm-up: noise (a stereo pair
+        # for a stereo slot), or for an instrument slot a looping chord of
+        # notes (as Notes when the slot's input is Notes).
+        def warm_input(slot)
+          if slot.notes?
+            clip = MB::Sound.seq([MB::Sound::C4, MB::Sound::E4], MB::Sound::G4, MB::Sound::C5).n8.loop
+            return slot.instance_variable_get(:@notes_in).is_a?(MB::Sound::Notes) ? clip.notes : clip.notes.stream
+          end
+          noise = warm_noise
+          slot.input_channels > 1 ? noise.stereo : noise
         end
 
         def init_slots

@@ -68,6 +68,7 @@ module MB
           :input_from, :input_until, :ramp_from, :skip, :read_to, :cpu,
           :preset, :mastering, :capture, :rng,
           :recipe, # (a slot content's recorded `slot` call; see GraphNode::Slot)
+          :instance, # (a rack instance slot's content: the Rack applied; see Session::Slots)
           keyword_init: true
         ) do
           def bypass?

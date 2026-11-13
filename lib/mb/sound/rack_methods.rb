@@ -175,7 +175,16 @@ module MB
         end
 
         r = Rack.new(name, in: main, out: out, constructor: constructor, block: block, ports: ports, listener: listener)
-        Session.current.racks.define(r) if name
+        if name
+          racks = Session.current.racks
+          # (defined again: instances playing swap to it on the next bar;
+          # racks R3, see Session::Slots#swap_rack_instances)
+          if racks[name]
+            racks.redefine(r, label: "#{constructor} #{name.inspect}")
+          else
+            racks.define(r)
+          end
+        end
         r
       end
     end

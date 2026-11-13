@@ -686,8 +686,47 @@ module SessionFuzz
       else "bg :#{s.bg_name}, 220.hz.saw.note(\"x\").with_meta(cutoff: 9000, rack: :x, gain: 99).lp4(900).note(\"darker\") * 0.1#{s.on}"
       end
     },
+    ->(s) {
+      # (racks-r3) a part through a named rack with a slot (or a slot of
+      # its own), the slot swapped a beat or two later by spill-over,
+      # crossfade, or cut, and sometimes the rack defined again: its
+      # instances swap at a launch point (bit for bit at any buffer size,
+      # plans off and on, mid-song launches)
+      name = s.bg_name
+      part = "#{s.pick(MELODIC)}.synth(voices: 2) { |v| v.hz.saw * v.amp_env(0.002, 0.05, 0.6, 0.02) * 0.2 }"
+      fade = s.pick(['', ', fade: 0', ', fade: 1/8r'])
+      later = s.pick(['1.beat', '2.beats'])
+      roll = s.rng.rand
+      if roll < 0.3
+        "bg :#{name}, #{part}.slot(:tint) { |x| x.#{s.pick(SLOT_FX)} }#{s.on}; " \
+          "after(in: #{later}) { swap :\"#{name}/tint\", arack { |x| x.#{s.pick(SLOT_FX)} }#{fade}#{s.on} }"
+      elsif roll < 0.5
+        # (an instrument slot, or an instrument rack defined again: the
+        # old voices keep their notes, new notes go to the new one)
+        voice = ->(shape) { "n.synth(voices: 2) { |v| v.hz.#{shape} * v.amp_env(0.002, 0.05, 0.6, 0.1) * 0.2 }" }
+        clip = s.pick(MELODIC)
+        if s.rng.rand < 0.5
+          "bg :#{name}, #{clip}.notes.slot(:inst) { |n| #{voice.(s.pick(SHAPES))} }#{s.on}; " \
+            "after(in: #{later}) { swap :\"#{name}/inst\", irack { |n| #{voice.(s.pick(SHAPES))} }#{fade}#{s.on} }"
+        else
+          "irack(:fi) { |n| #{voice.(s.pick(SHAPES))} }; bg :#{name}, #{clip}.then(&rack(:fi))#{s.on}; " \
+            "after(in: #{later}) { irack(:fi) { |n| #{voice.(s.pick(SHAPES))} } }"
+        end
+      else
+        rack = "arack(:fz) { |sig| sig.slot(:color) { |x| x.#{s.pick(SLOT_FX)} } * knob(:lvl, 0.5) }"
+        swap = if s.rng.rand < 0.35
+                 "arack(:fz) { |sig| sig.#{s.pick(SLOT_FX)} * knob(:lvl, 0.5) }"
+               else
+                 "swap :\"fz/color\", arack { |x| x.#{s.pick(SLOT_FX)} }#{fade}#{s.on}"
+               end
+        "#{rack}; bg :#{name}, #{part}.then(&rack(:fz))#{s.on}; after(in: #{later}) { #{swap} }"
+      end
+    },
     # (new commands go here, at the end)
   ].freeze
+
+  # Mono effects for slot contents (racks-r3's command).
+  SLOT_FX = ['softclip(0.2, 0.5)', 'lp4(900, resonance: 0.4)', 'delay(1.n16, feedback: 0.3)', 'diode(600, resonance: 0.5)', 'lp1(700) * 2'].freeze
 
   # +code+ (a song script) without the metadata the `meta` command adds:
   # its `meta` lines' blocks emptied, its `.note(...)` and

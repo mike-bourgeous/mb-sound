@@ -19,6 +19,13 @@ module MB
         #     end
         #     swap :"dub/color", arack { |s| s.diode(900, resonance: 0.6) }, fade: 1.n8
         def slot(name, &block)
+          SlotMethods.make(self, name, block)
+        end
+
+        # Makes a slot named +name+ on +input+ (a node, bundle, note stream,
+        # or Notes) with default content +block+ (see #slot).  Returns the
+        # slot's output.
+        def self.make(input, name, block)
           raise ArgumentError, "Slot names are Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
           raise ArgumentError, "slot #{name.inspect} needs a block making its default content: sig.slot(#{name.inspect}) { |s| s.softclip }" unless block
 
@@ -32,9 +39,9 @@ module MB
             raise ArgumentError, "#{app.rack.label}: slot #{name.inspect} has the name of a knob" if app.knobs.key?(name)
           end
 
-          s = Slot.new(self, name: name, content: start || block, default: block, application: app)
+          s = Slot.new(input, name: name, content: start || block, default: block, application: app)
           app.slots[name] = s if app
-          s.receiver = self
+          s.receiver = input
           s.result = s.returned
         end
       end

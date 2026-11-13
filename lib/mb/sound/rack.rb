@@ -146,6 +146,13 @@ module MB
       # Latencies of racks by Rack (identity; see #latency).
       LATENCIES = ObjectSpace::WeakMap.new
 
+      @instance_slots = true
+      class << self
+        # Whether named audio racks wrap each application in an instance
+        # slot (see #instance_slot?; default true).
+        attr_accessor :instance_slots
+      end
+
       # One application of a rack (Rack#call) while its block builds: the
       # knobs made so far by name.  Rack.application is the innermost one
       # on this thread.
@@ -487,7 +494,7 @@ module MB
         applied = (ports.empty? ? self : with(**ports)).send(:copy, settings: @settings.merge(seed: seed, drawn: drawn, application: app))
         result = GraphNode::Recipe.call(main, :then, [applied], {}, @block, kind: :build) { |blk|
           explain_errors(values_by_port) {
-            r = Rack.applying(app) { MB::Sound.with_seed(seed) { kw.empty? ? blk.call(main) : blk.call(main, **kw) } }
+            r = Rack.applying(app) { MB::Sound.with_seed(seed) { build_instance(blk, main, kw, applied, app, seed) } }
             # A note rack on a Notes gives a Notes (console midi stays mono-capable)
             r = MB::Sound::Notes.new(r, sustain: main.sustain?, sample_rate: main.sample_rate) if main.is_a?(MB::Sound::Notes) && r.is_a?(MIDI::Stream)
             r
@@ -499,6 +506,46 @@ module MB
         result
       end
       alias [] call
+
+      # True if applications of this rack on +main+ are wrapped in an
+      # instance slot (racks R3): named racks taking audio and making audio,
+      # and named instrument racks (notes in, `out: :audio`: irack), so
+      # re-defining the rack swaps instances that play (see
+      # Session::Slots#swap_rack_instances).  Rack.instance_slots = false
+      # turns it off.
+      def instance_slot?(main)
+        return false unless Rack.instance_slots && !@name.nil? && !@listener
+        if @input.type == :notes
+          # (instruments: notes in, audio out; swapped with patch persist)
+          @out == :audio && GraphNode::Slot.notes?(main)
+        else
+          @input.type == :audio && @out != :notes && @out != :control && (main.is_a?(GraphNode) || main.is_a?(GraphNode::MultiOutput))
+        end
+      end
+
+      # Runs the block (+blk+, the recorder's wrapper of it) on +main+ with
+      # extra port values +kw+: in an instance slot when #instance_slot?
+      # (the block builds on the slot's stand-in for +main+), else directly.
+      # A block that turns out to make notes or control (an arack used as
+      # a listener) is built again without the slot.
+      def build_instance(blk, main, kw, applied, app, seed)
+        if instance_slot?(main)
+          begin
+            slot = GraphNode::Slot.new(main, name: nil, content: ->(f) { kw.empty? ? blk.call(f) : blk.call(f, **kw) }, instance_of: applied, ports: kw, application: app)
+            slot.receiver = main
+            out = slot.returned
+            # (the instance's output carries what the block's result carried:
+            # comments in a rack document's body)
+            m = slot.last_result.respond_to?(:meta) ? slot.last_result.meta : nil
+            out.send(:carry_meta, m) if m && !m.empty? && out.respond_to?(:carry_meta, true)
+            return slot.result = out
+          rescue GraphNode::Slot::NotAudio
+            app.slots.clear
+            return MB::Sound.with_seed(seed) { kw.empty? ? blk.call(main) : blk.call(main, **kw) }
+          end
+        end
+        kw.empty? ? blk.call(main) : blk.call(main, **kw)
+      end
 
       # A copy of this rack named +name+ (a Symbol, or nil for anonymous;
       # not registered anywhere): how a document's rack loads under a new
@@ -827,6 +874,9 @@ module MB
         yield
       rescue NoMethodError => e
         port = values_by_port.find { |_, v| e.receiver.equal?(v) }&.first
+        # (an instance slot's stand-in for the main input; see #build_instance)
+        feed = e.receiver.is_a?(GraphNode::Slot::Feed) || (e.receiver.is_a?(GraphNode::Channels) && e.receiver.outputs.all?(GraphNode::Slot::Feed))
+        port ||= @input if feed
         hint = port&.hint(e.name)
         raise unless hint
 

@@ -185,6 +185,51 @@ RSpec.describe('rack slots') do
       expect(slot.result.to_ruby).to include('c * 0.75')
     end
 
+    it "leaves the player's clips alone: a pass-through swap renders bit for bit like no swap" do
+      # (racks-r3's session fuzz: Feeds listed the slot's input, so the new
+      # content's timeline nodes included the player's clip, restarted on
+      # the swap frame)
+      outs = [false, true].map { |swap|
+        sess = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false, buffer_size: 367),
+                                      transport: MB::Sound::Sequence::Transport.new(bpm: 137.5), channels: 1, buffer_size: 367, realtime: false, raise_errors: true)
+        MB::Sound::Session.with_context(session: sess) {
+          part = s.seq(MB::Sound::C4, MB::Sound::E4, MB::Sound::G4).n8.loop.synth(voices: 2) { |v| v.hz.saw * v.amp_env(0.002, 0.05, 0.6, 0.02) * 0.2 }
+          sess.add(part.slot(:tint) { |x| x * 1.0 }, name: :x1)
+          render(800, 367, sess)
+          sess.swap_slot(:"x1/tint", ->(x) { x * 1.0 }, start_time: 3/7r, fade: 0) if swap
+          render(48000 * 2, 367, sess)
+        }.tap { sess.close }
+      }
+      expect(outs[1]).to eq(outs[0])
+    end
+
+    it 'plays to the end like its content alone when the input ends (a one-shot clip into a delay)' do
+      # (racks-r3's session fuzz, seeds 80 and 142: the content read the
+      # whole buffer while the input had ended inside it; a swap landing
+      # after the input ended dropped the frames before it)
+      outs = [[:plain, 800], [:slot, 800], [:slot, 367], [:swap, 367], [:swap, 800]].map { |kind, size|
+        sess = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false, buffer_size: size),
+                                      transport: MB::Sound::Sequence::Transport.new(bpm: 174), channels: 1, buffer_size: size, realtime: false, raise_errors: true)
+        MB::Sound::Session.with_context(session: sess) {
+          part = s.seq(MB::Sound::C5, MB::Sound::D5).n8.synth(voices: 2) { |v| v.hz.saw * v.amp_env(0.002, 0.05, 0.6, 0.02) * 0.2 }
+          g = kind == :plain ? part.delay(1.n16, feedback: 0.3) : part.slot(:tint) { |x| x.delay(1.n16, feedback: 0.3) }
+          sess.add(g, name: :x2)
+          sess.swap_slot(:"x2/tint", ->(x) { x.lp1(600) }, start_time: 1/2r) if kind == :swap
+          out = []
+          out << sess.process_buffer[0].dup while sess.players.any? && out.length < 2000
+          SpecBuffers.join(out)
+        }.tap { sess.close }
+      }
+      same = ->(a, b) {
+        n = [a.length, b.length].min
+        expect(a[0...n]).to eq(b[0...n])
+        expect((a.length > n ? a[n..] : b[n..]).abs.max.to_f).to eq(0) unless a.length == b.length
+      }
+      expect(outs[1]).to eq(outs[0])
+      same.(outs[2], outs[0])
+      same.(outs[3], outs[4])
+    end
+
     it 'explains an unknown slot name' do
       play_constant
       expect { session.swap_slot(:"p/y", ->(c) { c }) }.to raise_error(ArgumentError, /No slot named :"p\/y".*did you mean\? p\/x/)
@@ -192,7 +237,7 @@ RSpec.describe('rack slots') do
 
     it 'refuses a rack of another input type' do
       play_constant
-      expect { session.swap_slot(:"p/x", s.mrack { it }) }.to raise_error(ArgumentError, /carries audio/)
+      expect { session.swap_slot(:"p/x", s.mrack { it }) }.to raise_error(ArgumentError, /slot :"p\/x" takes audio; anonymous mrack takes notes/)
     end
   end
 
@@ -227,7 +272,7 @@ RSpec.describe('rack slots') do
       expect(doc).to include('color: arack { |c| c.lp4(500) }')
       expect(doc).not_to include('osc.slot') # (the rack's definition keeps its default)
       loaded = MB::Sound::GraphIO.load(doc)
-      slot = loaded.graph.grep(MB::Sound::GraphNode::Slot::Output).first.owner_slot
+      slot = loaded.graph.grep(MB::Sound::GraphNode::Slot::Output).map(&:owner_slot).find { |sl| sl.name == :color }
       expect(slot.current.description).to eq('FourPole')
       expect(MB::Sound::GraphIO.dump(loaded, name: 'x').sub(/saved: "[^"]*"/, '')).to eq(doc.sub(/saved: "[^"]*"/, ''))
     end
@@ -240,6 +285,121 @@ RSpec.describe('rack slots') do
       expect(g.to_ruby).to match(/slot\(:tint\) \{ \|c\|\s+c \* 0\.75\s+\}/)
       loaded = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g, name: 'y'))
       expect(loaded.sample(10).to_a.uniq).to eq([1.75])
+    end
+  end
+
+  describe 're-defining a named rack' do
+    it 'swaps every playing instance on the next bar, keeping its knobs and ports, as one undo step' do
+      s.arack(:dub, side: :audio) { |sig, side:| sig * s.knob(:space, 0.5) + side * 0.0 }
+      session.add(1.constant.then(&s.rack(:dub).with(side: 0.constant)), name: :bass)
+      session.add(2.constant.then(&s.rack(:dub).with(side: 0.constant)), name: :keys)
+      render(800)
+      s.turn(:"bass/dub/space", 0.25)
+      render(800)
+      expect(render(800).to_a.uniq).to eq([1.25])
+
+      s.arack(:dub, side: :audio) { |sig, side:| sig * s.knob(:space, 0.5) * 2 + side }
+      bar = frame_of(1) - 2400
+      e = session.journal.changes.last
+      expect(e.kind).to eq(:rack)
+      expect(e.lands.pos).to eq(1)
+      out = render(bar + 48000 * 2)
+      expect(out[bar - 1]).to eq(1.25)
+      expect(out[bar]).to eq(2.5) # (the old instances spill over: silent in, silent out)
+      expect(out[-1]).to eq(2.5)
+      expect(session.knobs.keys).to contain_exactly(:"bass/dub/space", :"keys/dub/space")
+      expect(s.rack(:dub).block).not_to be_nil
+
+      session.undo(on: :now)
+      render(800)
+      expect(render(800).to_a.uniq).to eq([1.25])
+      expect(s.rack(:dub).to_ruby).not_to include('* 2')
+    end
+
+    it "lands on the exact frame with swap :name, rack, on:, fade: 0, and documents print the new definition" do
+      s.arack(:tone) { |sig| sig * 0.25 }
+      g = 1.constant.then(&s.rack(:tone))
+      session.add(g, name: :a)
+      render(800)
+      e = s.swap(:tone, s.arack { |x| x * 0.75 }, at: s.bar(1, beat: 3), on: :now, fade: 0)
+      expect(e.kind).to eq(:rack)
+      sw = frame_of(1/2r) - 800
+      out = render(sw + 100)
+      expect(out[sw - 1]).to eq(0.25)
+      expect(out[sw]).to eq(0.75)
+      expect(MB::Sound::GraphIO.dump(g, name: 'x')).to include("arack(:tone) { |x|\n  x * 0.75\n}")
+    end
+
+    it "names the new definition's slots as the old ones were, so swaps find them" do
+      s.arack(:dc) { |sig| sig.slot(:color) { |x| x * 0.25 } }
+      session.add(1.constant.then(&s.rack(:dc)), name: :a)
+      render(800)
+      s.arack(:dc) { |sig| sig.slot(:color) { |x| x * 0.5 } + 1 }
+      render(48000 * 2)
+      expect(render(800).to_a.uniq).to eq([1.5])
+      session.swap_slot(:"dc/color", ->(x) { x * 2 }, on: :now, fade: 0)
+      render(800)
+      expect(render(800).to_a.uniq).to eq([3.0])
+    end
+
+    it 'leaves listener racks and anonymous racks unwrapped' do
+      expect(1.constant.then(&s.arack { |x| x * 2 })).to be_a(MB::Sound::GraphNode::Multiplier)
+      s.lrack(:lvl) { |x| x.abs }
+      expect(1.constant.then(&s.rack(:lvl))).not_to be_a(MB::Sound::GraphNode::Slot::Output)
+      s.arack(:wrapped) { |x| x * 2 }
+      expect(1.constant.then(&s.rack(:wrapped))).to be_a(MB::Sound::GraphNode::Slot::Output)
+    end
+  end
+
+  describe 'instrument slots (notes in, audio out)' do
+    # Old voices keep the notes they started (patch persist); notes from the
+    # swap frame on go to the new content
+    def persist_render(size, swap_at: 1/8r, fade: nil, rack: false)
+      sess = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false, buffer_size: size),
+                                    transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: size, realtime: false, raise_errors: true)
+      MB::Sound::Session.with_context(session: sess) {
+        clip = s.events([0r, 1/2r, 60, 0.8], [1/4r, 1/8r, 64, 0.8], length: 1)
+        if rack
+          s.irack(:keys) { |n| n.synth(voices: 4) { |v| v.gate * 0.25 } }
+          sess.add(clip.then(&s.rack(:keys)), name: :lead)
+          s.swap(:keys, s.irack { |n| n.synth(voices: 4) { |v| v.gate * 0.5 } }, at: s.bar(1, beat: 1.5), on: :now, fade: fade)
+        else
+          sess.add(clip.notes.slot(:keys) { |n| n.synth(voices: 4) { |v| v.gate * 0.25 } }, name: :lead)
+          sess.swap_slot(:"lead/keys", ->(n) { n.synth(voices: 4) { |v| v.gate * 0.5 } }, start_time: swap_at, fade: fade)
+        end
+        out = []
+        (96000 * 2 / size).times { out << sess.process_buffer(size)[0].dup }
+        SpecBuffers.join(out)
+      }.tap { sess.close }
+    end
+
+    it 'keeps sounding notes on the old content and gives new notes to the new one, on exact frames' do
+      [800, 367].each do |size|
+        x = persist_render(size)
+        f = ->(pos) { (pos * 96000).round }
+        expect(x[f.(1/8r) - 1]).to eq(0.25)
+        expect(x[f.(1/8r)]).to eq(0.25)  # (the held note stays on the old content)
+        expect(x[f.(1/4r) - 1]).to eq(0.25)
+        expect(x[f.(1/4r)]).to eq(0.75)  # (the new note on the new one)
+        expect(x[f.(3/8r)]).to eq(0.25)
+        expect(x[f.(1/2r)]).to eq(0)
+      end
+    end
+
+    it 'swaps an instrument rack defined again with patch persist' do
+      x = persist_render(800, rack: true)
+      f = ->(pos) { (pos * 96000).round }
+      expect(x[f.(1/8r)]).to eq(0.25)
+      expect(x[f.(1/4r)]).to eq(0.75)
+      expect(x[f.(1/2r)]).to eq(0)
+    end
+
+    it 'cuts the old voices with fade: 0' do
+      x = persist_render(800, fade: 0)
+      f = ->(pos) { (pos * 96000).round }
+      expect(x[f.(1/8r) - 1]).to eq(0.25)
+      expect(x[f.(1/8r)]).to eq(0)
+      expect(x[f.(1/4r)]).to eq(0.5)
     end
   end
 

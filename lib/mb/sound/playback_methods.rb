@@ -618,6 +618,10 @@ module MB
           # A rack slot (racks R3): its content swaps on the launch point
           return swap_slot_command(name, clips || block, point, fade)
         end
+        if name.is_a?(Symbol) && pairs.empty? && Session.existing&.names&.kind(name) == :rack
+          # A named rack (racks R3): defined again, its instances swap
+          return swap_rack_command(name, clips || block, point, fade)
+        end
         raise ArgumentError, "swap #{name.inspect}: fade: goes with rack slots (swap :\"dub/color\", arack { ... }, fade: 1.n8)" unless fade.nil?
         if name.is_a?(Hash) && clips.nil? && pairs.empty?
           # (ux-notes-1: the maintainer's `swap({bowl: riff})`, a Hash in
@@ -676,6 +680,25 @@ module MB
         }
       end
       private :swap_slot_command
+
+      # The console side of #swap for a named rack: +content+ (a Rack, or a
+      # block taking what the rack takes) becomes rack +name+'s definition,
+      # and its instances playing swap to it on the launch point (see
+      # Session::Racks#redefine).
+      def swap_rack_command(name, content, point, fade)
+        session = Session.current
+        old = session.racks.fetch(name)
+        rack = case content
+               when Rack then content.composed? ? raise(ArgumentError, "swap #{name.inspect}: a composed rack (>>) can't be a named rack's definition") : content.renamed(name)
+               when Proc then Rack.new(name, in: old.input.type, out: old.out, constructor: old.constructor, block: content, ports: old.ports.transform_values(&:type), quiet: true)
+               else raise ArgumentError, "swap #{name.inspect}: the rack's new definition is a rack or a block (got #{content.class})"
+               end
+        context = Session.context
+        last = session.journal.changes.last&.seq || -1
+        session.racks.redefine(rack, label: "swap #{name.inspect}", at: point, fade: fade, start_time: point.given? ? nil : context&.time)
+        session.journal.changes.reverse.find { |c| c.seq > last && c.kind == :rack && c.subject == name } || rack
+      end
+      private :swap_rack_command
 
       # Brings back a named background player that was stopped (see #bg and
       # #stop), unchanged, e.g. to fade a track back in.  With no name,

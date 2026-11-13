@@ -413,7 +413,8 @@ module MB
             what = if !sl.waiting.empty? then 'about to swap (a swap queued)'
                    elsif sl.chains.length > 1 then 'handing over to a new content'
                    end
-            "# slot #{(sl.path || sl.name).inspect} was #{what} when saved; documents keep the content playing" if what
+            who = sl.name ? "slot #{(sl.path || sl.name).inspect}" : "an instance of rack #{sl.instance_of&.name.inspect}"
+            "# #{who} was #{what} when saved; documents keep the content playing" if what
           }
         end
 

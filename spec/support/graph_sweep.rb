@@ -649,7 +649,9 @@ module GraphSweep
       # Rack slots (racks R3): a slot and its content's Feed, and one handing
       # over by its own frame count (a spill-over with a delay tail, then a
       # crossfade) as a Session swap does on its landing frame
-      ['slot (Slot, Feed, Output)', ->(c) { c.sig(110).slot(:color) { |x| x.lp4(c.mod(300, 900), resonance: 0.3).softclip(0.3, 0.6) } }],
+      # (the content reads its input twice: its Tee shares the feed's
+      # buffer, which must stay the feed's own; the smoke run's rack_demo)
+      ['slot (Slot, Feed, Output)', ->(c) { c.sig(110).slot(:color) { |x| x.lp4(c.mod(300, 900), resonance: 0.3).softclip(0.3, 0.6) + x * 0.5 } }],
       ['slot handing over (spill-over)', ->(c) {
         out = c.s.stereo(c.sig(110), c.sig(165)).slot(:hand) { |x| x.delay(0.003) }
         slot = out.outputs[0].owner_slot
