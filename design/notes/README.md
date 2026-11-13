@@ -90,7 +90,7 @@ Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`
 
 ### [Filter banks (`GraphNode::FilterBank`)](filter_bank.md)
 
-`sig.filter_bank(freqs, width:, gain:, pan:, normalize:)` (`GraphNode::FilterBank`, filterbank-1, 2026-11-13) runs N SVF sections in one node and one C kernel (`include/mb_filter_bank.h`, `FastFilter.filter_bank`, exact Ruby mirror `FilterBank.process_ruby`), each band with its own type, frequency, width, gain, and pan, summed into C output channels (stereo now, written for N) or chained (`serial: true`).  `bandpass_series`, `peq_series`, `peq`, and `formant` are built on it; widths are unit-typed (`30.cents` octaves, `40.hz` Hz, a number Q) and any per-band argument takes `per_harmonic(a..b, curve:)`, a bare Range, a list, or a Proc.  A plan op (`Plan::Op::FilterBank`) fuses it and lane-groups it across voices.
+`sig.filter_bank(freqs, width:, gain:, pan:, normalize:)` (`GraphNode::FilterBank`, filterbank-1, 2026-11-13) runs N SVF sections in one node and one C kernel (`include/mb_filter_bank.h`, `FastFilter.filter_bank`, exact Ruby mirror `FilterBank.process_ruby`), each band with its own type, frequency, width, gain, and pan, summed into C output channels (stereo now, written for N) or chained (`serial: true`).  `bandpass_series`, `peq_series`, `peq`, and `formant` are built on it; widths are unit-typed (`30.cents` octaves, `40.hz` Hz, a number Q) and any per-band argument takes `per_harmonic(a..b, curve:)`, a bare Range, a list, or a Proc; `per_harmonic(0.2.hz.lfo, phase: 0...1, rate: 1..2)` gives each band its own copy of an LFO (moving pans per band, filterbank-pan-1).  A plan op (`Plan::Op::FilterBank`) fuses it and lane-groups it across voices.
 
 ### [Delays](delays.md)
 

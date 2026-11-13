@@ -1,14 +1,15 @@
 # Filter banks (`GraphNode::FilterBank`)
 
 <!-- summary -->
-`sig.filter_bank(freqs, width:, gain:, pan:, normalize:)` (`GraphNode::FilterBank`, filterbank-1, 2026-11-13) runs N SVF sections in one node and one C kernel (`include/mb_filter_bank.h`, `FastFilter.filter_bank`, exact Ruby mirror `FilterBank.process_ruby`), each band with its own type, frequency, width, gain, and pan, summed into C output channels (stereo now, written for N) or chained (`serial: true`).  `bandpass_series`, `peq_series`, `peq`, and `formant` are built on it; widths are unit-typed (`30.cents` octaves, `40.hz` Hz, a number Q) and any per-band argument takes `per_harmonic(a..b, curve:)`, a bare Range, a list, or a Proc.  A plan op (`Plan::Op::FilterBank`) fuses it and lane-groups it across voices.
+`sig.filter_bank(freqs, width:, gain:, pan:, normalize:)` (`GraphNode::FilterBank`, filterbank-1, 2026-11-13) runs N SVF sections in one node and one C kernel (`include/mb_filter_bank.h`, `FastFilter.filter_bank`, exact Ruby mirror `FilterBank.process_ruby`), each band with its own type, frequency, width, gain, and pan, summed into C output channels (stereo now, written for N) or chained (`serial: true`).  `bandpass_series`, `peq_series`, `peq`, and `formant` are built on it; widths are unit-typed (`30.cents` octaves, `40.hz` Hz, a number Q) and any per-band argument takes `per_harmonic(a..b, curve:)`, a bare Range, a list, or a Proc; `per_harmonic(0.2.hz.lfo, phase: 0...1, rate: 1..2)` gives each band its own copy of an LFO (moving pans per band, filterbank-pan-1).  A plan op (`Plan::Op::FilterBank`) fuses it and lane-groups it across voices.
 <!-- /summary -->
 
 ## Quick reference
 
 - `sig.filter_bank([300, 900, 2400], width: 50.cents, gain: [1, 0.5, 0.25], pan: per_harmonic(-0.8..0.8), normalize: true)`; `sig.bandpass_series(f0, count: 32, width: 15.cents..90.cents, pan: -1..1)`; `sig.peq_series(f0, count: 8, gain: -6.db)`; `sig.peq(200.hz => -6.db)`; `sig.formant(:a, :o, morph:)`.
 - Widths: an Interval is an octave bandwidth (`30.cents`, `0.25.oct`; the cookbook's digital bandwidth, so Q follows a moving band), a Pitch a bandwidth in Hz (`40.hz`: Q = f / 40 on every change), a number or node Q (`quality:` too; `peq`/`peq_series` keep plain numbers as octaves).
-- Per band: `per_harmonic(a..b, curve: :exp)` (band i of N at a + (b - a) curve(i / (N - 1)); Intervals, Pitches, Decibels, numbers), `per_harmonic(v1, v2, ...)` (one per band, cycling), a bare Range (`per_harmonic` with the linear curve), an Array, or a Proc of the band index.
+- Per band: `per_harmonic(a..b, curve: :exp)` (band i of N at a + (b - a) curve(i / (N - 1)); `a...b` at curve(i / N), evenly around a cycle; Intervals, Pitches, Decibels, numbers), `per_harmonic(v1, v2, ...)` (one per band, cycling), a bare Range (`per_harmonic` with the linear curve), an Array, or a Proc of the band index.
+- Moving pans per band: `pan: per_harmonic(0.2.hz.lfo, phase: 0...1, rate: 1..2)` (a copy of the tone per band, `Tone#per_band_copy`; any LFO Tone or a Pitch; `rate:` for fixed frequencies).
 - Code `lib/mb/sound/graph_node/filter_bank.rb` (node, router, outputs), `lib/mb/sound/per_harmonic.rb`, kernel `ext/mb/sound/include/mb_filter_bank.h` (fast_filter, fast_plan's `plan_filter_bank.c`), plan op `lib/mb/sound/plan/filter_bank_op.rb`; spec `spec/lib/mb/sound/graph_node/filter_bank_spec.rb`; help `help :filters`.
 
 ## The node (filterbank-1, 2026-11-13)
@@ -28,6 +29,28 @@ Maintainer, choosing option 3 of the FilterSum review: "Do 3 now, with the futur
 **Kernel and rules.**  `include/mb_filter_bank.h` (`mb_fbank_run`) is shared by fast_filter (`FastFilter.filter_bank(outs, x, config, signals, state, rate)`) and fast_plan (`OP_FILTER_BANK`, `plan_filter_bank.c`).  The node keeps its settings in a DFloat (`@config`: a header, then each band's type, parameter slots, constants, and channel gains, then any morph tables) and its state in another (2 integrator states per band, then the flush grid count, `MB_FLUSH_GRID`), both read by the C op each block, so sample-rate changes and rebuilds need no recompile.  Node parameters are sampled once per block into a signal list (one entry per distinct node: a fundamental shared by 32 bands is read once) and bands refer to them by slot.  Coefficients are recomputed only on samples where a signal changes; the same output at any buffer size (state carried; flushes on its own 800-sample grid).  `node_traits memory: :short, carry: :snapshot` (the state; a snapshot of another band count starts fresh).  The bank ends when its input or any parameter node ends (as Formant did).
 
 **Plan.**  `Plan::Op::FilterBank` (one dst per channel, `extra_dsts` for C > 1; the node is the op's object) fuses the bank with its input and parameter nodes and runs it inside lane groups (a voice per lane, one `run_lanes` call; each lane runs the kernel in turn: no lane-major kernel yet).  Mono banks are `Plan::Describable` nodes; multichannel banks plan through their router.  Before, `bandpass_series` and `formant` were plan boundaries.
+
+## Moving pans per band (filterbank-pan-1, 2026-11-13)
+
+The maintainer on the filterbank-1 Bench set (2026-11-13), preferring "break pan alternating": "Break pan moving sounds like a normal pan.  It needs multiple lfos."  One LFO given to `pan:` moves every band together, so the bank swings as one sound.
+
+**API (the conservative choice, an open question).**  `per_harmonic` gained a third form: a tone with spreads, `per_harmonic(0.2.hz.lfo, phase: 0...1, rate: 1..2)`.  Each band gets its own copy of the tone (`Tone#per_band_copy`): the same settings and a fresh state, reading the tone's inputs through new branches (a moving rate, a tempo LFO's timeline ports), `phase` cycles added to its starting phase and its frequency times `rate` (fixed frequencies only: tempo LFOs and node rates raise, pointing at a list of tones).  Spreads are a number, a Range (an exclusive Range `0...1` spaces the bands evenly around the cycle: band i of N at i / N, so the first and last bands differ; inclusive Ranges reach their end as before), a list, or a per_harmonic Range or list.  Random-phase and noise seeds of the copies are derived from the tone's own (seed + 1 + band, as unison copies), so the tone's printed seed rebuilds every copy.  A Pitch plays as its sine (`per_harmonic(0.3.hz, phase: 0...1)`).  The value prints as written (`PerHarmonic#to_ruby`, the tone through the graph writer), and documents load it bit for bit; the tone itself is a pattern and isn't played (a tempo LFO's pattern keeps three unread Tee branches of the tempo node, as abandoned branches do elsewhere).
+
+Copying: `dup`, then GraphNode::IvarPreset's variables (names, recipe, Tee, plan membership) cleared, every Tee branch or knob reader replaced by a new branch of the same source, and the running state and caches reset.  A guard spec (`per_harmonic_spec.rb`, "shares no running state") samples six kinds of tones and their copies and fails for any instance variable a copy shares with its tone that isn't a value, frozen, or listed (`@tempo`, wavetables), so a new Tone variable holding running state is caught (checked by removing one reset: the spec named it).
+
+Rejected alternatives (for the question): a build block (`per_harmonic(0...1) { |p| 0.2.hz.lfo.with_phase(p) }`, general but wordier, and blocks typed in the console don't print back); copying by replaying the tone's recorded DSL calls (exact for any recorded node, but sound would depend on recording being on and fail for graphs built inside library code); a Proc (works today, prints, but documents refuse it without `trust: :code`); a list of LFOs (works today; prints every LFO).
+
+**Kernel.**  Before, any signal change recomputed every band's design (the octave-width sinh and sin per band, the coefficient compares) and every node pan's law per band, so one moving pan on 24 bands of `20.cents` cost 10x a constant pan.  Now (C and the Ruby mirror alike, bit for bit as before): a signal change recomputes the designs only when a design setting (frequency, ratio, width, gain, morph settings) reads that signal, and pans only when a signal changed, once per distinct pan signal (bands sharing a pan node share its gains: the first band reading it computes them).  Specs compare the kernel with the mirror for pans moving while the design holds still, shared pans, and a pan node also read as a gain.
+
+**Measurements** (Mac container, 24-band `bandpass_series(110, count: 24, normalize: true)` on noise, 10 s at 800-frame blocks unplanned, best of 3, two alternating rounds against a master-ai 6bb30a5f worktree, old / new):
+
+| pan | width 20.cents | Q 40 |
+|---|---|---|
+| constant (`-1..1`) | 0.060-0.063 / 0.055 s | 0.060-0.067 / 0.055-0.056 s |
+| one LFO | 0.575-0.618 / 0.077-0.079 s | 0.293-0.298 / 0.078 s |
+| 24 LFOs (per band) | 0.665-0.680 / 0.338-0.342 s | 0.386-0.395 / 0.336-0.339 s |
+
+The 24 LFOs alone take 0.083 s; the rest of the per-band case is the bank plus 24 equal-power pan laws (a cos and a sin) per sample: 3.4% of realtime for 24 moving pans, 0.8% for one.  Allocations per 128-frame buffer in steady state: 0.8 objects for constant, one-LFO, and per-band LFO pans alike.
 
 ## Measurements (filterbank-1, Mac container, against a master-ai 3314d3af worktree)
 
