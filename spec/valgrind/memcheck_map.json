@@ -989,6 +989,22 @@
         "FastSynth.oscillate_bl"
       ]
     },
+    "spec/lib/mb/sound/graph_node/filter_bank_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.copy"
+      ],
+      "fast_filter": [
+        "FastFilter.filter_bank",
+        "FastFilter.svf"
+      ],
+      "fast_sound": [
+        "FastSound.cookbook",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
     "spec/lib/mb/sound/graph_node/formant_spec.rb": {
       "fast_filter": [
         "FastFilter.filter_bank"
@@ -1861,6 +1877,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1943,8 +1961,6 @@
         "FastSampler.play"
       ],
       "fast_sound": [
-        "FastSound.biquad_narray",
-        "FastSound.cookbook",
         "FastSound.fast_math=",
         "FastSound.oscillate"
       ]
