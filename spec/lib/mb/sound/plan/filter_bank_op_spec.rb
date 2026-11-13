@@ -35,6 +35,16 @@ RSpec.describe(MB::Sound::Plan::Op::FilterBank) do
     expect(bank_region(r).root).to be_a(MB::Sound::GraphNode::FilterBank::Router)
   end
 
+  it 'fuses per-band moving pans (per_harmonic tone copies) into the router region, in check mode too' do
+    r = plan_compare(check: :raise) { |_c|
+      l, rt = src.new(seed: 3).bandpass_series(220, count: 6, width: 20.cents, pan: MB::Sound.per_harmonic(1.hz.lfo, phase: 0...1, rate: 1..2), normalize: true).to_a
+      l + rt * 0.25
+    }
+    reg = bank_region(r)
+    expect(reg.root).to be_a(MB::Sound::GraphNode::FilterBank::Router)
+    expect(reg.members.count { |m| m.is_a?(MB::Sound::Tone) }).to eq(6)
+  end
+
   it 'plans serial banks, formants (a plan boundary before), and banks with constants folded' do
     plan_compare { |_c| src.new(seed: 4).peq(300 => [-6.db, 0.5], 2000 => 4.db) * 0.5 }
     plan_compare { |_c| src.new(seed: 5).formant(:a, :o, morph: 0.3.hz.lfo.at(0..1), shift: 2.hz.lfo.at(-3..3)) * 0.5 }
@@ -53,6 +63,29 @@ RSpec.describe(MB::Sound::Plan::Op::FilterBank) do
       MB::Sound.seed(0)
       MB::Sound.synth('spec/test_data/c_major.mid', voices: 4, spares: 1, skip_idle: false) { |v|
         (v.amp_env * v.hz.saw * 0.2).bandpass_series(v.hz, count: 8, width: 40.cents, gain: [1, 0.6], normalize: true)
+      }
+    }
+    sizes = [128, 1, 37, 512, 800, 128] * 3
+    render = ->(s) { sizes.flat_map { |n| s.sample(n)&.to_a || [] } }
+    grouped = make.(true)
+    a = render.(grouped)
+    expect(grouped.lane_groups.groups.map { |g| g.members.length }.max).to eq(5)
+    expect(grouped.lane_groups.groups.sum(&:lane_runs)).to be > 0
+    b = render.(make.(false))
+    expect(a.length).to be > 3000
+    expect(a).to eq(b)
+  ensure
+    MB::Sound::Plan.lanes = old
+  end
+
+  it 'groups voices\' stereo banks with per-band moving pans in lane groups, bit for bit as each lane alone' do
+    old = MB::Sound::Plan.lanes
+    make = ->(lanes) {
+      MB::Sound::Plan.lanes = lanes
+      MB::Sound.seed(0)
+      MB::Sound.synth('spec/test_data/c_major.mid', voices: 4, spares: 1, skip_idle: false) { |v|
+        l, r = (v.amp_env * v.hz.saw * 0.2).bandpass_series(v.hz, count: 6, width: 40.cents, pan: MB::Sound.per_harmonic(0.7.hz.lfo, phase: 0...1)).to_a
+        l + r * 0.5
       }
     }
     sizes = [128, 1, 37, 512, 800, 128] * 3

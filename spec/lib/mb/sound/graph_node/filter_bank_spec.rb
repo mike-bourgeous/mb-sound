@@ -96,6 +96,26 @@ RSpec.describe(MB::Sound::GraphNode::FilterBank, :aggregate_failures) do
       compare(900, x, klass.new(110.hz.saw, bands: bands + matched), [noise(900, 3000, 9000)])
     end
 
+    it 'matches the Ruby mirror with pans moving on their own: per band, shared, and a pan node also read as a gain' do
+      f, w, p1, p2, p3 = sig
+      bands = [
+        { frequency: f, harmonic: 0, width: 20.cents, pan: p1 },
+        { frequency: f, ratio: 1, harmonic: 1, width: 20.cents, pan: p2 },
+        { frequency: f, ratio: 1, harmonic: 2, width: w, pan: p1 },
+        { frequency: 900, width: 40.hz, gain: p3, pan: p3 },
+        { frequency: 1300, width: 3, pan: 0.4 },
+      ]
+      node = klass.new(110.hz.saw, bands: bands, normalize: true)
+      x = noise(1500)
+      # (design settings steady while pans move, then everything moving)
+      compare(1500, x, node, [220.0, 14.0, noise(1500, 2), noise(1500, 2), noise(1500, 1, 0.5)])
+      compare(1500, x, node, [220.0, 14.0, noise(1500, 2), 0.25, 0.5])
+      compare(1500, x, node, [noise(1500, 200, 300), noise(1500, 10, 12), noise(1500, 2), noise(1500, 2), noise(1500, 1, 0.5)])
+      steady = Numo::SFloat.zeros(1500) + 0.3
+      steady[700..] = -0.6
+      compare(1500, x, node, [220.0, 14.0, steady, noise(1500, 2), 0.7])
+    end
+
     it 'matches the Ruby mirror for edge-case settings (NaN, infinities, negatives, zero)' do
       odd = Numo::SFloat.cast([Float::NAN, -1, 2, 0, 0.5, 1, Float::INFINITY, -Float::INFINITY] * 30)
       f, r, w, g, pn = sig
@@ -260,6 +280,43 @@ RSpec.describe(MB::Sound::GraphNode::FilterBank, :aggregate_failures) do
                                   gain: [1, 0.7.hz.lfo.at(0.2..1)], pan: 1.hz.lfo, normalize: true)
     }
     expect(collect_stereo(make.(), 9600, [1, 7, 128, 33])).to eq(collect_stereo(make.(), 9600, 800))
+  end
+
+  describe 'pans moving per band (per_harmonic(lfo, phase:))' do
+    it 'gives each band its own copy of the LFO, bit for bit as a list of LFOs' do
+      make = ->(pan) { noise_input.bandpass_series(220, count: 6, width: 20.cents, pan: pan, normalize: true) }
+      lfos = Array.new(6) { |i| (0.4 * MB::Sound.per_harmonic(1..2).value(i, 6)).hz.lfo.at(-0.9..0.9).with_phase(i / 6.0) }
+      a = make.(MB::Sound.per_harmonic(0.4.hz.lfo.at(-0.9..0.9), phase: 0...1, rate: 1..2))
+      bank = a.outputs[0].sources[:owner].bank
+      expect(bank.config[6]).to eq(6) # (six pan signals)
+      expect(collect_stereo(a, 24000)).to eq(collect_stereo(make.(MB::Sound.per_harmonic(*lfos)), 24000))
+
+      # the bands move apart: one LFO swings every band together
+      one = collect_stereo(make.(0.4.hz.lfo.at(-0.9..0.9)), 48000)
+      each = collect_stereo(make.(MB::Sound.per_harmonic(0.4.hz.lfo.at(-0.9..0.9), phase: 0...1)), 48000)
+      balance = ->((l, r)) { Array.new(8) { |k| w = (k * 6000)...((k + 1) * 6000); (rms(r[w]) / rms(l[w])).to_db } }
+      expect(balance.(one).minmax.then { |lo, hi| hi - lo }).to be > 12, balance.(one).inspect
+      expect(balance.(each).minmax.then { |lo, hi| hi - lo }).to be < 6, balance.(each).inspect
+    end
+
+    it 'gives the same output at any buffer size' do
+      make = -> {
+        noise_input.bandpass_series(0.5.hz.lfo.at(150..300), count: 5, width: 25.cents,
+                                    pan: MB::Sound.per_harmonic(3.hz.lfo, phase: 0...1, rate: 1..1.7), normalize: true)
+      }
+      expect(collect_stereo(make.(), 9600, [1, 7, 128, 33])).to eq(collect_stereo(make.(), 9600, 800))
+    end
+
+    it 'prints, saves, and loads back bit for bit' do
+      g = noise_input.bandpass_series(110, count: 8, width: 20.cents, pan: MB::Sound.per_harmonic(0.2.hz.triangle.lfo, phase: 0...1, rate: 1..1.5), normalize: true)
+      expect(g.to_ruby).to include('bandpass_series(110, count: 8, width: 20.cents, pan: per_harmonic(0.2.hz.triangle.lfo, phase: 0...1, rate: 1..1.5), normalize: true)')
+      t = 110.hz.saw.bandpass_series(110, count: 4, pan: MB::Sound.per_harmonic(2.bars.lfo.rnd(seed: 5), phase: [0, 0.5]))
+      doc = MB::Sound::GraphIO.dump(t)
+      expect(doc).to include('per_harmonic(2.bars.hz.lfo.random_phase(seed: 5), phase: [0, 0.5])')
+      expect(collect_stereo(MB::Sound::GraphIO.load(doc), 4800)).to eq(collect_stereo(t, 4800))
+      h = 110.hz.saw.bandpass_series(110, count: 4, pan: MB::Sound.per_harmonic(0.2.hz.triangle.lfo, phase: 0...1, rate: 1..1.5))
+      expect(collect_stereo(MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(h)), 4800)).to eq(collect_stereo(h, 4800))
+    end
   end
 
   it 'reads a node shared by every band once (one signal per distinct node)' do

@@ -450,7 +450,18 @@ module MB
           power = Array.new(nbands, 0.0)
           last_pan = Array.new(nbands, Float::NAN)
           pan_gain = Array.new(nbands) { [0.0, 0.0] }
-          mix = Array.new(nbands) { |b| band.(b)[11] >= 0 ? pan_gain[b] : band.(b)[BAND, nch] }
+          # Signals read by design settings (frequency, ratio, width, gain,
+          # morph settings), and the first band reading each pan signal,
+          # whose gains every band with that pan shares (as the kernel)
+          design = Array.new(sigs.length, false)
+          [8, 10, 12].each { |k| design[cfg[k].to_i] = true if cfg[k] >= 0 } if nsnap > 0
+          first = {}
+          pan_owner = Array.new(nbands) do |b|
+            bd = band.(b)
+            [1, 3, 7, 9].each { |k| design[bd[k].to_i] = true if bd[k] >= 0 } if nsnap == 0
+            bd[11] >= 0 ? (first[bd[11].to_i] ||= b) : -1
+          end
+          mix = Array.new(nbands) { |b| pan_owner[b] >= 0 ? pan_gain[pan_owner[b]] : band.(b)[BAND, nch] }
           vals = Array.new(sigs.length, Float::NAN)
           value = ->(slot, c) { slot >= 0 ? vals[slot.to_i] : c }
           update = ->(b, type, fc, q, g) {
@@ -477,12 +488,14 @@ module MB
 
           scale = 1.0
           n.times do |i|
-            changed = i == 0
+            changed = i == 0 # (a design signal changed)
+            panned = i == 0 # (a signal changed: pans to check)
             sigs.each_with_index do |s, k|
               v = s.is_a?(Array) ? s[i] : s
               if v != vals[k]
                 vals[k] = v
-                changed = true
+                changed = true if design[k]
+                panned = true
               end
             end
 
@@ -557,12 +570,13 @@ module MB
                 power.each { |p| sum += p }
                 scale = sum > 0.0 ? Math.sqrt(NORMALIZE_REFERENCE / sum) : 1.0
               end
+            end
 
+            if panned
               nbands.times do |b|
-                slot = band.(b)[11]
-                next unless slot >= 0
+                next unless pan_owner[b] == b
 
-                p = vals[slot.to_i]
+                p = vals[band.(b)[11].to_i]
                 next if p == last_pan[b]
 
                 last_pan[b] = p
