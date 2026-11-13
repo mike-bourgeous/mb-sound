@@ -262,6 +262,13 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(ask).to eq(ui::PaneKeys::Ask['turn :cut, ', 800, :typed, select: true]) # (the value just set stands in until the snapshot has it)
       expect(key(:inspector, st, :typed, '3000.hz')).to eq(ui::PaneKeys::Turn['turn :cut, 3000.hz', 'cut 3000.hz'])
       expect(key(:inspector, st, :typed, '  ')).to eq('nothing typed')
+      # (sd-ux-fixes-1, the review's #15: junk read with Prism, never run,
+      # with what fits instead of a raw NameError or SyntaxError)
+      expect(key(:inspector, st, :typed, 'abc')).to match(/\Acut: abc isn't a console command or value; type a number \(3000\), a value with its unit/)
+      expect(key(:inspector, st, :typed, '3000.hzz')).to match(/numbers have no \.hzz \(did you mean \.hz\?\)/)
+      expect(key(:inspector, st, :typed, '30(')).to match(/"30\(" isn't a value \(/)
+      expect(key(:inspector, st, :typed, '-6.db')).to eq(ui::PaneKeys::Turn['turn :cut, -6.db', 'cut -6.db'])
+      expect(key(:inspector, st, :typed, 'C4')).to be_a(ui::PaneKeys::Turn)
       expect(key(:inspector, st, :learn).last.code).to eq('learn :cut')
       expect(key(:inspector, st, :track, 1)).to include('inspecting pad')
       expect(ui::Inspect.target).to eq({ track: :pad, node: nil })
