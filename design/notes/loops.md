@@ -21,7 +21,7 @@ brk.bpm  brk.beats  brk.bars  brk.meter  brk.key  brk.root  brk.markers  brk.met
 Sample['take3.wav', detect: true]              # tempo detection when nothing says (cached)
 brk.detect_tempo                               # the same on any Sample
 brk.stretch(1.25, mode: :slice)                # slices at the hits, attacks exact
-brk.stretch(1.25, mode: :slice, fill: :stretch)   # each decay drawn out instead of a gap
+brk.stretch(1.25, mode: :slice, fill: :stretch)   # each hit whole, its tail drawn out instead of a gap
 brk.stretch(0.8, mode: :slice, slices: :grid)  # markers / onsets / grid / a Duration / a count / positions / Slices
 bg :brk, brk.follow                            # follows the session tempo (pitch kept, slice stretch)
 bg :pad, pad.follow(stretch: :spectral)        # any stretch mode or a Hash of stretch options
@@ -91,10 +91,28 @@ Ideas not built (cheap signals for later):
 ACID/REX-style: cut at the hits, start slice i at round(r × its start), copy it exactly.
 
 - Slices: markers, else onsets (Sample::Onsets), else sixteenths at the sample's bpm; or `slices:` given.
-- Slowing down: `fill: :gap` (default) plays the slice's own audio, fading out over `fade:` (4 ms) before its end, then silence until the next hit; `fill: :stretch` keeps 15 ms of attack and draws the rest out with the fitted cyclic stretch (falls back to a gap for slices shorter than the attack plus two cycles).
+- Slowing down: `fill: :gap` (default) plays the slice's own audio, fading out over `fade:` (4 ms) before its end, then silence until the next hit; `fill: :stretch` keeps each hit whole and draws what it has died down to out to the next hit (below; falls back to a gap for slices shorter than the 15 ms attack plus two cycles); `fill: :cyclic` is what `:stretch` was before stretch-fixes-1 (15 ms of attack, then the fitted cyclic stretch of everything else), kept for the A/B.
 - Speeding up: each slice is cut at the next one's new time with the same fade.
 - Pre-rolls: a slice that doesn't follow on from the one before (as in the input) gets the input's last `fade` samples before its hit faded in ahead of it, crossfading with the outgoing fade, so the attack is exact and joins what led into it (no step out of silence).  The first slice's pre-roll comes from the loop's end, at the output's end, so seamless loops stay seamless.
-- Ratio 1 gives the input back exactly.  Reversed samples stretch in play order.  Pure Ruby + Numo; a two-bar 909 loop takes 3-13 ms (`:gap`), 5-90 ms (`:stretch`).
+- Ratio 1 gives the input back exactly.  Reversed samples stretch in play order.  Pure Ruby + Numo; a two-bar 909 loop takes 3-13 ms (`:gap`), 5-90 ms (`:cyclic`); `:stretch` took 130-150 ms on a 2 s loop of eight slices (Linux, 2026-11-13).
+
+### Filled slices (stretch-fixes-1, 2026-11-13; waits for the maintainer's ears)
+
+The maintainer on the stretch study's Bench set (a generated drum loop at 1.25x, slices with filled decays): "sounds really bad, like there's a bug in how it's lining up the stretch".  Measured on that loop (16 slices of about 166 ms; its kick is a 20-40 Hz body about 100 ms long that stops abruptly, with a quiet rumble after it):
+
+- Hits land where they should: every slice's first 15 ms is the input's, sample for sample, at round(cut × ratio), and the fill follows on from it with no step (the first cycle starts on the input's next sample).  No fill plays the next slice's audio.
+- The fill was the fitted cyclic stretch of everything after 15 ms.  Its splice search prefers the place that simply carries on (correlation 1) while that is within reach, so the first 40-65 ms after each hit played unstretched, and then the plan caught up in jumps of 12-25 ms back into the kick's body: its last lobe played again 115 ms after the hit, 20 dB above the decay around it, at -9 to -11 dB re the loop's peak (5 of 16 hits at 1.25x; at 2x a step of up to +26 dB to -5 dB, 34 steps of 6 dB or more).  The last cycle was forced to the end of the slice (jumps of up to 25 ms), and the fill stopped up to 14 ms short of the slice's end.
+- So: not a mis-set offset, but a second, off-grid hit made of the first one's body (a hit's body is not a decay that can be cycled).
+
+`fill: :stretch` now (`SliceStretch.fill_slice`):
+- A time map by level (`fill_map`): each sample's share of the stretch is 0 where the slice's envelope is within 6 dB of its loudest (`FILL_HOLD`), full where it has fallen 20 dB or more (`FILL_DECAY`), in proportion between, plus 2% everywhere (`FILL_EVEN`: a held note is drawn out evenly).  A hit's body, and any other hit the slice holds, keeps its length; the quiet after it takes the stretch.
+- The envelope (`SliceStretch.envelope`) is the analytic signal's magnitude, squared and smoothed by two 10 ms moving averages (a short RMS ripples at twice a kick's frequency).
+- A cyclic plan anchored at both ends (`Lofi.anchored_plan`: equal cycles, each starting where the input best matches what followed the one before, within the usual search radius of its place on the map; the last ends at the slice's end or up to two radii before it).
+- Every cycle's level follows the envelope read at the mapped time (`Lofi.play_plan(gain:)`, -36 to +6 dB), so a cycle that repeats a louder part is turned down to where the decay has got to.
+
+Measured on the generated loop, old against new (splices whose replayed audio is 6 dB or more above what would have followed, and above -30 dB re the loop's peak): 1.25x 11 → 5, the loudest at -6 dB → -15 dB, the biggest +20 dB (to -11 dB) → +15 dB (to -19 dB); 2x 34 → 21, the biggest +26 dB (to -5 dB) → +16 dB (to -19 dB), and those reaching -7 dB or louder 12 → 2 (at 1.25x: those reaching -12 dB or louder 7 → 0; at 2x the kick's last lobe, 9 dB down, still takes part of the stretch and plays once more).  Played exactly as the input after each hit: median 65 ms → 119 ms at 1.25x, 40 → 112 ms at 2x.  Detected onsets that are no hit of the input, louder than -30 dB and rising 3 dB or more: 2x 10 → 4 (the loudest -2 dB → -16 dB); 1.25x 0 → 2 (the rumble's bumps, -17 and -18 dB).  On a synthetic gated kick (`sample_loop_spec.rb`) the first 83 ms of each hit differ from the input by 0.018 of 0.8 at 1.25x (the old fill: 0.53).
+
+Not fixed, the method's nature: a cyclic fill repeats what is there, so a tail with events of its own (the rumble's bumps here) has more of them; slices under 65 ms are not filled.  `fill: :cyclic` keeps the old fill for the A/B (question for the maintainer: remove it after his verdict?).
 
 ## Tempo-following loops (`GraphNode::LoopPlayer`, `Sample#follow`)
 

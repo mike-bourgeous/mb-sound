@@ -245,9 +245,93 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       end
     end
 
+    # Eight gated kicks, one every 12000 samples (a click, a 45-120 Hz
+    # body that stops after 70 ms, and a quiet 220 Hz ring to the next
+    # hit): hit times known to the sample, and a decay that has somewhere
+    # to be drawn out
+    def kick_loop(hits: 8, step: 12000)
+      t = Numo::DFloat.new(step).seq / 48000.0
+      phase = 50 * t + 70 * 0.03 * (1 - Numo::NMath.exp(-t / 0.03))
+      body = Numo::NMath.sin(phase * 2 * Math::PI) * Numo::NMath.exp(-(t - 0.07).clip(0, nil) / 0.005) * 0.8
+      click = Numo::NMath.sin(t * (2 * Math::PI * 3000)) * Numo::NMath.exp(-t / 0.002) * 0.4
+      ring = Numo::NMath.sin(t * (2 * Math::PI * 220)) * Numo::NMath.exp(-t / 0.4) * 0.03
+      x = Numo::DFloat.zeros(hits * step)
+      hits.times { |i| x[(i * step)...((i + 1) * step)] = (body + click + ring) * (i.odd? ? 0.7 : 1.0) }
+      x
+    end
+
+    # The largest and smallest 5 ms RMS of v, measured every 2.5 ms
+    def rms_range(v)
+      levels = (0..(v.length - 240)).step(120).map { |k| Math.sqrt((v[k...(k + 240)]**2).mean) }
+      [levels.max, levels.min]
+    end
+
+    it 'fill: :stretch keeps each hit whole and draws its tail out to the next hit' do
+      x = kick_loop
+      smp = MB::Sound::Sample[Numo::SFloat.cast(x), bpm: 120]
+      cuts = (1...8).map { |i| (i * 12000).samples }
+      { 1.25 => [0.03, 0.02], 2 => [0.08, 0.02] }.each do |r, (body_limit, tail_limit)|
+        slot = 12000 * r
+        fills = %i[gap stretch cyclic].to_h { |fill| [fill, Numo::DFloat.cast(smp.stretch(r, mode: :slice, slices: cuts, fill: fill).data(0))] }
+        body = fills.transform_values { 0.0 }
+        tails = fills.transform_values { [0.0, 1.0] }
+        8.times do |i|
+          q = (i * slot).round
+          a = i * 12000
+          fills.each do |fill, y|
+            # (every attack lands on its stretched time, sample for sample)
+            expect((y[q...(q + 720)] - x[a...(a + 720)]).abs.max).to be < 1e-6
+            body[fill] = [body[fill], (y[q...(q + 4000)] - x[a...(a + 4000)]).abs.max].max
+            hi, lo = rms_range(y[(q + 7000)...(q + slot - 480)])
+            tails[fill] = [[tails[fill][0], hi].max, [tails[fill][1], lo].min]
+          end
+        end
+
+        # The hit's body (its first 83 ms) is the input's, within the
+        # level correction's fraction of a dB; the plain cyclic fill
+        # stretched it (the kick played on past its end, spliced)
+        expect(body[:gap]).to be < 1e-6
+        expect(body[:stretch]).to be < body_limit
+        expect(body[:cyclic]).to be > 0.3
+
+        # After the hit the ring carries on at its own level (0.015 RMS
+        # in the input) to the next hit: no gap, and nothing louder (no
+        # second hit)
+        expect(tails[:gap][1]).to eq(0)
+        expect(tails[:stretch][1]).to be > 0.005
+        expect(tails[:stretch][0]).to be < tail_limit
+      end
+    end
+
+    it 'fill: :stretch draws a held sound out evenly, without steps in level' do
+      # (a 110 Hz tone with a slow 3 Hz tremolo, cut in four: no part of
+      # it dies down, so the whole of each slice takes the stretch)
+      t = Numo::DFloat.new(48000).seq / 48000.0
+      x = Numo::NMath.sin(t * (2 * Math::PI * 110)) * (0.6 + 0.2 * Numo::NMath.sin(t * (2 * Math::PI * 3)))
+      smp = MB::Sound::Sample[Numo::SFloat.cast(x), bpm: 120]
+      y = Numo::DFloat.cast(smp.stretch(1.5, mode: :slice, slices: 4, fill: :stretch).data(0))
+      expect(y.length).to eq(72000)
+      env = MB::Sound::Sample::SliceStretch.envelope(y, 480)
+      want = MB::Sound::Sample::SliceStretch.envelope(x, 480)
+      (2400...69600).step(600) do |k|
+        expect(env[k] / want[(k / 1.5).round]).to be_within(0.12).of(1)
+      end
+    end
+
+    it 'plans a fill that starts with the input and ends where it ends (Lofi.anchored_plan)' do
+      x = kick_loop(hits: 1)[720..]
+      plan = MB::Sound::Sample::Lofi.anchored_plan(x, 15000, 1200)
+      expect(plan.first[0..1]).to eq([0, 0])
+      expect(plan.map { |c| c[2] }.sum).to eq(15000)
+      plan.each_cons(2) { |a, b| expect(b[0]).to eq(a[0] + a[2]) }
+      expect(plan.last[1] + plan.last[2]).to be_between(x.length - 2 * 660, x.length)
+      expect(plan.map { |c| c[1] + c[2] }.max).to be <= x.length
+      expect { MB::Sound::Sample::Lofi.anchored_plan(x[0...500], 3000, 1200) }.to raise_error(ArgumentError, /at least a cycle/)
+    end
+
     it 'fades instead of clicking' do
       [0.7, 1.4].each do |r|
-        [:gap, :stretch].each do |fill|
+        [:gap, :stretch, :cyclic].each do |fill|
           y = Numo::DFloat.cast(rec.stretch(r, mode: :slice, fill: fill).data(0))
           jumps = (y[1..] - y[0...-1]).abs
           expect(jumps.max).to be < (Numo::DFloat.cast(rec.data(0))[1..] - Numo::DFloat.cast(rec.data(0))[0...-1]).abs.max * 1.01

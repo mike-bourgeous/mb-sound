@@ -1057,7 +1057,7 @@ module MB
                   slices: nil, fade: nil, fill: nil)
         if SLICE_MODES.include?(mode.to_sym)
           unless fit == :auto && window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
-            raise ArgumentError, 'mode: :slice takes slices:, fade:, fill:, and (for fill: :stretch) cycle: and crossfade:'
+            raise ArgumentError, 'mode: :slice takes slices:, fade:, fill:, and (for fill: :stretch and :cyclic) cycle: and crossfade:'
           end
           return slice_stretch(ratio, slices, fade, fill || :gap, cycle, crossfade)
         end

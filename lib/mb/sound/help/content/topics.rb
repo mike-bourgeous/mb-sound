@@ -706,8 +706,9 @@ module MB
         the tempo like a varispeed.  `.stretch(r, mode: :slice)` cuts at
         the hits (markers, else onsets, else the 16th grid) and starts
         each slice at its stretched time, attacks copied exactly:
-        slowing down leaves a gap after each hit (`fill: :stretch` draws each
-        decay out instead), speeding up truncates with a 4 ms fade.
+        slowing down leaves a gap after each hit (`fill: :stretch` keeps
+        each hit whole and draws what it has died down to out to the next
+        hit instead), speeding up truncates with a 4 ms fade.
       TEXT
       commands :loops
       dsl :follow
