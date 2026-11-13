@@ -337,7 +337,7 @@ module MB
                 end
               end
             end
-            c.text(0, c.h - 1, c.fit("#{hidden} plumbing nodes hidden (p shows)", c.w), :dim) if foot == 1
+            c.text(0, c.h - 1, c.fit('plumbing hidden (p shows it)', c.w), :dim) if foot == 1 # (no count: 1708 read as noise)
           end
 
           # Section heading roles (the theme's section colors).
@@ -423,7 +423,9 @@ module MB
               next "#{SHORTS[name] || name} ← #{Session::Name[kn].leaf}" if kn && v.label != kn && n.param_knobs.key?(name)
               unit = v.unit.nil? && kn && knobs[kn]&.spec ? Panes.unit_of(knobs[kn].spec, name) : v.unit
               t = value_text(v, param_value(n, name, v, knobs), unit: unit)
-              t && "#{SHORTS[name] || name} #{t}"
+              # (a knob's param by the knob's name, as its knob row says it:
+              # "resonance", not "reso"; the review's minor items)
+              t && "#{kn ? Session::Name[kn].leaf : SHORTS[name] || name} #{t}"
             }.first(4)
             (bits + sum).join('  ')
           end
@@ -626,7 +628,8 @@ module MB
           def draw_plumbing(c, info, knobs, list, pick, state)
             y = draw_header(c, info, state, 't: next track')
             if info.knobs.empty?
-              c.text(0, y, c.fit('no knobs: knob :cut, 800.hz then knob(:cut) in the patch', c.w), :dim)
+              # (bind, not a hand-written knob line; the review's #27)
+              c.text(0, y, c.fit("no knobs yet: Enter on a dim · binds a literal (bind #{info.track.inspect}, lp4: :cutoff)", c.w), :dim)
               y += 1
             end
             y = draw_knob_rows(c, y, info.knobs, knobs, pick, state)
@@ -996,7 +999,7 @@ module MB
 
           private
 
-          def no_knob_note = 'no knob to turn: the graph reads none (knob :cut, 800.hz; then knob(:cut) in the patch)'
+          def no_knob_note = 'no knob to turn here: Enter on a dim · binds a literal to one (bind :track, lp4: :cutoff)'
 
           # Picks row +i+ (the inspector, preview, and code follow).
           def pick_row(state, info, i)

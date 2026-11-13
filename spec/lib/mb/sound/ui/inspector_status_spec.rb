@@ -143,4 +143,20 @@ RSpec.describe('the inspector\'s status line', :aggregate_failures) do
     @tiles.refresh
     expect(pane.key_action(:fixed, st)).to match(/bass plays acid, library code rather than a graph document/)
   end
+
+  # The review's minor items: a row's tail said "reso" where its knob row
+  # said "resonance"; the plumbing count read as noise
+  it 'names a knob-driven param in a row\'s tail as its knob row does, and hides the plumbing count' do
+    screen
+    pane = ui.panes.fetch(:inspector)
+    st = @tiles.instance_variable_get(:@states)[:inspector]
+    info = st[:snap].inspector
+    lp4 = info.nodes.find { |n| n.knob_of(:resonance) }
+    expect(lp4).not_to be_nil
+    knobs = st[:snap].knobs.to_h { |k| [k.name, k] }
+    tail = pane.send(:row_tail, lp4, knobs)
+    expect(tail).to include('resonance ')
+    expect(tail).not_to include('reso ')
+    expect(@tiles.to_text).not_to match(/\d+ plumbing nodes/)
+  end
 end

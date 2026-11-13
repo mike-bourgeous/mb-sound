@@ -65,7 +65,7 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(text).to include(' SOURCE  s', '▸FILTER  f', ' AMP  a', ' FX  x', '▸lp4', 'stereo  cut 2400 Hz  reso 0.25')
       expect(text).to match(/cutoff +█+.* 2400 Hz  cut/) # (the knob's meter on the param it drives)
       expect(text).to include('resonance  0.25  ·') # (a literal: dim, Enter offers its bind)
-      expect(text).to include('saw ×6', 'highpass ×2', '61 plumbing nodes hidden (p shows)')
+      expect(text).to include('saw ×6', 'highpass ×2', 'plumbing hidden (p shows it)')
       expect(lines.index { |l| l.match?(/\A[ ▸]SOURCE/) }).to be < lines.index { |l| l.match?(/\A[ ▸]FILTER/) }
       # Every row open when they all fit; the picked one alone, others on one line, when short
       tall = draw(:inspector, lp4, { title_in_rule: true }, w: 60, h: 30).join("\n")
