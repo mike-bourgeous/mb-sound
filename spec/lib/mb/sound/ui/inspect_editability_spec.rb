@@ -102,10 +102,76 @@ RSpec.describe('Inspector editability (Note 15)', :aggregate_failures) do
     got.is_a?(Exception) ? "#{line}: #{got.message}" : nil
   end
 
+  # The knob row guard (sd-ux-fixes-1, the review's #14: breath_vowel's
+  # breath and hold sat on the saw's row, vibrato on the filter bank's,
+  # and the bank's unnamed param_1 was the default pick).  Every knob that
+  # joins a row through hidden arithmetic (Classify.attach_knobs) must
+  # drive the row: the row's nodes are downstream of the knob's reader, or
+  # meet its path at a multiplier as the signal it scales.  Returns
+  # problems as [row, knob].
+  def knob_row_problems(session)
+    roots = inspect.roots(session.ui_graphs[:t])
+    w = inspect.walk(roots)
+    users = Hash.new { |h, k| h[k] = [] }
+    sources = {}.compare_by_identity
+    cls = MB::Sound::UI::Inspect::Classify
+    cls.send(:walk, roots).each do |n|
+      ins = cls.send(:ins, n).map(&:last)
+      sources[n] = ins
+      ins.each { |x| users[x.__id__] << n }
+    end
+    upstream = ->(starts) {
+      seen = {}.compare_by_identity
+      q = starts.dup
+      until q.empty?
+        m = q.shift
+        next if seen[m]
+        seen[m] = true
+        q.concat(sources[m] || [])
+      end
+      seen
+    }
+    out = []
+    w[:extras].each_with_index do |extras, i|
+      row = w[:groups][i]
+      extras.each do |leaf, rd|
+        down = {}.compare_by_identity
+        q = [rd]
+        until q.empty?
+          m = q.shift
+          next if down[m]
+          down[m] = true
+          q.concat(users[m.__id__])
+        end
+        next if row.any? { |x| down[x] }
+        scaled = down.keys.any? { |m|
+          m.is_a?(MB::Sound::GraphNode::Multiplier) && (u = upstream.((sources[m] || []).reject { |x| down[x] })) && row.any? { |x| u[x] }
+        }
+        out << [w[:nodes][i].label, leaf] unless scaled
+      end
+    end
+    out
+  end
+
+  # The default stop of the inspector's sections view for track :t, as
+  # [kind, name].
+  def default_stop(session)
+    info = inspect::Gatherer.new.call(session, { track: :t, node: nil })
+    pane = MB::Sound::UI.panes.fetch(:inspector)
+    st = {}
+    list = pane.send(:pick_list, st, info)
+    return nil if list.empty?
+    e = list[pane.send(:stop_index, st, info, list)]
+    [e[0], e[1]]
+  end
+
   def check(name, &build)
     session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
     MB::Sound::Session.with_context(session: session, &build)
     2.times { session.process_buffer }
+    expect(knob_row_problems(session)).to eq([]), "#{name}: knobs on rows they don't drive"
+    stop = default_stop(session)
+    expect(stop&.last.to_s).not_to match(/\Aparam_\d+\z/), "#{name}: an unnamed param is the default pick (#{stop.inspect})"
     found, lines = gaps(session, name)
     expect(found).to eq([]), "#{name}: #{found.length} params the inspector shows but can't edit:\n#{found.map(&:inspect).join("\n")}"
     picks = pick(name, lines)

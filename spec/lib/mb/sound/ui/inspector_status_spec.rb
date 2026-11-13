@@ -159,4 +159,33 @@ RSpec.describe('the inspector\'s status line', :aggregate_failures) do
     expect(tail).not_to include('reso ')
     expect(@tiles.to_text).not_to match(/\d+ plumbing nodes/)
   end
+
+  # The review's #14 (breath_vowel, on the held library-voices-1 branch,
+  # built the same way): a knob scaling a bank's output before it mixes into
+  # the voice sat on the saw's row, and the bank's unnamed param_1 was the
+  # default pick
+  it 'puts a knob on the row whose output it scales, and never picks an unnamed input first' do
+    MB::Sound::Session.with_context(session: @session) do
+      MB::Sound.knob(:breath, 0.35)
+      MB::Sound.knob(:hold, 0.3)
+      MB::Sound.track(:t) { |c|
+        c.synth { |v|
+          breath = MB::Sound.noise.bandpass_series(v.hz.freq, count: 4) * MB::Sound.knob(:breath) * (MB::Sound.knob(:hold) + (1 - MB::Sound.knob(:hold)) * v.env(0.005, 0.25, 0, 0.1))
+          (v.hz.saw + breath * 4).formant(:u, :a, morph: 0.4) * v.amp_env
+        }
+      }
+      MB::Sound.bg(:t, MB::Sound.seq(MB::Sound::C3).n4.loop, on: :now)
+    end
+    4.times { @session.process_buffer }
+    g = ui::Inspect::Gatherer.new
+    info = g.call(@session, { track: :t, node: nil })
+    on = ->(kn) { info.nodes.find { |n| n.params.values.any? { |p, _| n.knob_of(p) == kn } }&.label }
+    expect(on.(:breath)).to eq('bandpass_series')
+    expect(on.(:hold)).to eq('bandpass_series')
+    pane = ui.panes.fetch(:inspector)
+    st = {}
+    list = pane.send(:pick_list, st, info)
+    stop = list[pane.send(:stop_index, st, info, list)]
+    expect(stop[1].to_s).not_to match(/\Aparam_\d+\z/)
+  end
 end

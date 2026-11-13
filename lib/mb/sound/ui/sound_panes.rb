@@ -1084,10 +1084,13 @@ module MB
           def stop_key(e) = [e[0], e[1], e[3]]
 
           # True for a stop a row's pick skips past when it has others: an
-          # oscillator's start phase, or a param a build knob drives.
+          # oscillator's start phase, an unnamed input, a count, or a param a
+          # build knob drives.
           def last_resort_stop?(info, e)
             return false unless e[0] == :param
-            return true if e[1] == :phase
+            # (a start phase; an unnamed node input, a filter bank's param_1;
+            # a count, read-only; the review's #14 and #22)
+            return true if e[1] == :phase || e[1].to_s.match?(/\Aparam_\d+\z/) || (e[2] && Arrangement::LiteralBinding.count?(e[1], e[2].value))
             kn = info.nodes[e[3]]&.knob_of(e[1])
             !kn.nil? && info.build_knobs&.include?(kn) == true
           end
