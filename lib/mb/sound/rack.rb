@@ -149,12 +149,16 @@ module MB
       class Application
         attr_reader :rack, :knobs
 
-        # Knob start values by name (see Rack#using).
+        # The slots made so far by name (GraphNode::Slot; racks R3).
+        attr_reader :slots
+
+        # Knob start values and slot contents by name (see Rack#using).
         attr_reader :start
 
         def initialize(rack, start: {})
           @rack = rack
           @knobs = {}
+          @slots = {}
           @start = start
         end
 

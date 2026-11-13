@@ -510,6 +510,7 @@ module MB
           chains = @master_chains
           chains&.each { |c| (waiting ||= []) << c.chain_graph unless c.started || c.bypass? }
           bus_chain_graphs(waiting: true).each { |g| (waiting ||= []) << g }
+          slot_waiting_graphs.each { |g| (waiting ||= []) << g } unless @waiting_slots.empty? # (racks R3; see Slots)
           if waiting.nil?
             @waiting_graphs.clear unless @waiting_graphs.empty?
             return

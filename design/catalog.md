@@ -156,6 +156,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `with_buffer(length)` Appends a BufferAdapter that samples this node in length chunks
 - `as_input(num_channels, buffer_size:)` Returns an input object (GraphNodeInput) whose #read samples this node
 - `multi_sample(count, times)` Concatenates times calls of #sample(count) into one array
+- `slot(name, &block)` A named hole whose content swaps live (rack slots)
 
 ### Also on every node
 

@@ -359,6 +359,7 @@ module MB
             next unless used.include?(name.to_s)
             header.concat(knob_lines(writer, k))
           end
+          header.concat(slot_lines)
           writer.clocks_used.each do |name|
             c = MB::Sound::Session.existing&.clock_named(name)
             spec = @doc&.clocks&.[](name)
@@ -401,6 +402,20 @@ module MB
         end
 
         private
+
+        # Comments for slots swapping when saved (racks R3): documents keep
+        # the content playing (GraphNode::Slot prints it), as they keep a
+        # moving knob's value; swaps are performance (takes replay them).
+        def slot_lines
+          roots = @graph.is_a?(Array) ? @graph : [@graph]
+          slots = roots.flat_map { |r| r.respond_to?(:graph) ? r.graph : [] }.grep(GraphNode::Slot::Output).map(&:owner_slot).uniq(&:__id__)
+          slots.filter_map { |sl|
+            what = if !sl.waiting.empty? then 'about to swap (a swap queued)'
+                   elsif sl.chains.length > 1 then 'handing over to a new content'
+                   end
+            "# slot #{(sl.path || sl.name).inspect} was #{what} when saved; documents keep the content playing" if what
+          }
+        end
 
         # The `knob` header line for +knob+ (as the console's `knob`
         # command takes it, with the knob's held value), after a comment

@@ -646,6 +646,23 @@ module GraphSweep
         c.s.stereo(c.sig(110).filter(:lowpass, cutoff: c.mod(400, 900)) * 0.5, c.sig(165).filter(:lowpass, cutoff: c.mod(500, 800, 5)) * 0.5)
       }],
 
+      # Rack slots (racks R3): a slot and its content's Feed, and one handing
+      # over by its own frame count (a spill-over with a delay tail, then a
+      # crossfade) as a Session swap does on its landing frame
+      ['slot (Slot, Feed, Output)', ->(c) { c.sig(110).slot(:color) { |x| x.lp4(c.mod(300, 900), resonance: 0.3).softclip(0.3, 0.6) } }],
+      ['slot handing over (spill-over)', ->(c) {
+        out = c.s.stereo(c.sig(110), c.sig(165)).slot(:hand) { |x| x.delay(0.003) }
+        slot = out.outputs[0].owner_slot
+        slot.queue(slot.build(->(x) { x.lp4(c.mod(400, 1200)) }), 300, mode: :spill)
+        out
+      }],
+      ['slot handing over (crossfade)', ->(c) {
+        out = c.sig(110).slot(:hand) { |x| x.softclip(0.2, 0.4) }
+        slot = out.owner_slot
+        slot.queue(slot.build(->(x) { x * c.mod(0.2, 0.6) }), 300, mode: :fade, step: 1.0 / 500)
+        out
+      }],
+
       # Metadata on every node, inner ones too (metadata-2: metadata never
       # acts as data; meta_invariance_spec.rb compares every factory with
       # and without it)
@@ -694,6 +711,8 @@ module GraphSweep
   PERFORMANCE_STATE = {
     'knob moves (Knob, Knob::Reader: a ramp, a jump, a followed node)' => 'knob moves are performance (turns, in a take), not the graph',
     'drums with knob settings (live kit knobs)' => 'knob moves are performance (turns, in a take), not the graph',
+    'slot handing over (spill-over)' => 'slot swaps are performance (swap commands, in a take), not the graph',
+    'slot handing over (crossfade)' => 'slot swaps are performance (swap commands, in a take), not the graph',
   }.freeze
 
   # Node classes the sweep doesn't build, with reasons.

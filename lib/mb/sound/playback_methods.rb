@@ -612,8 +612,13 @@ module MB
       #     beat2 = grid(16, kick: 'x..x..x.', snare: '....x..x')
       #     swap :drums, beat => beat2               # swaps each matching row
       #     swap :drums, beat2                       # the same: rows by name (rows it lacks go silent)
-      def swap(name, clips = nil, at: nil, on: nil, in: nil, **pairs)
+      def swap(name, clips = nil, at: nil, on: nil, in: nil, fade: nil, **pairs, &block)
         point = LaunchPoint.of(binding) or return nil
+        if name.is_a?(Symbol) && pairs.empty? && Internal.slot_name?(name)
+          # A rack slot (racks R3): its content swaps on the launch point
+          return swap_slot_command(name, clips || block, point, fade)
+        end
+        raise ArgumentError, "swap #{name.inspect}: fade: goes with rack slots (swap :\"dub/color\", arack { ... }, fade: 1.n8)" unless fade.nil?
         if name.is_a?(Hash) && clips.nil? && pairs.empty?
           # (ux-notes-1: the maintainer's `swap({bowl: riff})`, a Hash in
           # parentheses, which Ruby passes as the name)
@@ -662,6 +667,15 @@ module MB
           name
         }
       end
+
+      # The console side of #swap for a rack slot (see Session#swap_slot).
+      def swap_slot_command(name, content, point, fade)
+        session_command(name, label: "swap #{name.inspect}", kind: :slot) { |session, time|
+          session.swap_slot(name, content, at: point, fade: fade, start_time: point.given? ? nil : time)
+          name
+        }
+      end
+      private :swap_slot_command
 
       # Brings back a named background player that was stopped (see #bg and
       # #stop), unchanged, e.g. to fade a track back in.  With no name,

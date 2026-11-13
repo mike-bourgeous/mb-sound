@@ -67,6 +67,7 @@ module MB
           :tail_start, :quiet, :tail_done, :slow_warned, :loads,
           :input_from, :input_until, :ramp_from, :skip, :read_to, :cpu,
           :preset, :mastering, :capture, :rng,
+          :recipe, # (a slot content's recorded `slot` call; see GraphNode::Slot)
           keyword_init: true
         ) do
           def bypass?

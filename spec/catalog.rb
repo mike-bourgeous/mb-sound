@@ -25,7 +25,8 @@ module Catalog
   # (17 554 bytes: also a question for the maintainer)
   # 17 600 until omnibus19 added derivative and integral (17 807 bytes:
   # a question for the maintainer, as before)
-  BUDGET = 17_850
+  # 17 850 until racks-r3 added slot (17 915 bytes: a question again)
+  BUDGET = 17_950
 
   # Characters for a description, and bytes for a whole line
   DESCRIPTION_MAX = 80
@@ -50,7 +51,7 @@ module Catalog
     'Channels, panning, blending' => %i[pan balance place stereo mono left right swap mid_side from_mid_side width matrix blend],
     'Time, length, and units' => %i[until and_then ringdown sounding seconds samples bars cycles radians],
     'Rates, rendering, and debugging' => %i[oversample resample bounce spy clear_spies debug],
-    'Plumbing' => %i[tee get_sampler proc with_buffer as_input multi_sample],
+    'Plumbing' => %i[tee get_sampler proc with_buffer as_input multi_sample slot],
   }.freeze
 
   # Methods defined by metaprogramming (so with no doc comment of their

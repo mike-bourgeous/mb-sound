@@ -136,7 +136,7 @@ module MB
           raise ArgumentError, "A filter bank has 1 to #{MAX_CHANNELS} channels (got #{@channels})" unless (1..MAX_CHANNELS).cover?(@channels)
           check_settings(explicit[0], morph)
 
-          morph_slots = morph ? %i[position shift scale].flat_map { |k| slot(morph.fetch(k), "morph #{k}") } : [-1.0, 0.0] * 3
+          morph_slots = morph ? %i[position shift scale].flat_map { |k| signal_slot(morph.fetch(k), "morph #{k}") } : [-1.0, 0.0] * 3
           logs = morph ? morph.fetch(:logs).map(&:to_f) : []
           snapshots = morph ? logs.length / (3 * @band_count) : 0
           raise ArgumentError, "Morph tables need 3 values per band per snapshot (got #{logs.length})" if morph && (logs.empty? || logs.length % (3 * @band_count) != 0)
@@ -703,13 +703,13 @@ module MB
           return v.to_f if v.is_a?(Numeric)
           raise ArgumentError, "Filter bank settings are numbers or nodes (got #{v.inspect})" unless v.respond_to?(:sample)
 
-          @signals[slot(v, 'setting')[0].to_i]
+          @signals[signal_slot(v, 'setting')[0].to_i]
         end
 
         # [slot, constant] for a setting (see mb_filter_bank.h): a number is
         # a constant, a node a slot (the same node, or its branch, the same
         # slot).
-        def slot(v, name)
+        def signal_slot(v, name)
           return [-1.0, v.to_f] if v.is_a?(Numeric) && v.real?
           raise ArgumentError, "The #{name} must be a number or a node (got #{v.inspect})" unless v.respond_to?(:sample)
 

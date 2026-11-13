@@ -34,6 +34,7 @@ require_relative 'graph_node/blend_methods'
 require_relative 'graph_node/mastering_methods'
 require_relative 'graph_node/modulation_methods'
 require_relative 'graph_node/tremolo_methods'
+require_relative 'graph_node/slot_methods'
 
 module MB
   module Sound
@@ -99,6 +100,7 @@ module MB
       include MasteringMethods
       include ModulationMethods
       include TremoloMethods
+      include SlotMethods
 
       # The per-channel DSL call that made this node, if any (see
       # ChannelDispatch and ChannelGroup).  Used by #graphviz.
@@ -611,6 +613,7 @@ require_relative 'graph_node/modal_resonator'
 require_relative 'graph_node/dust'
 require_relative 'graph_node/drift'
 require_relative 'graph_node/dynamics'
+require_relative 'graph_node/slot'
 
 # Generates per-channel DSL methods, so it must load after every *Methods module
 require_relative 'graph_node/channel_dispatch'

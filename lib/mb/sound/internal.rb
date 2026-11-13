@@ -406,6 +406,15 @@ module MB
         @checkout_tmp_dir = main && File.join(main, 'tmp')
       end
 
+      # True if +name+ is a rack slot (or slot group) in the current
+      # Session (console #swap swaps its content; racks R3).
+      def slot_name?(name)
+        s = Session.existing
+        return false unless s
+        kind = s.names.kind(name)
+        kind == :slot || kind == :slot_group
+      end
+
       # An ArgumentError saying how to play the MIDI::Stream (or Notes)
       # +stream+ on player +name+'s instrument, for console +command+ (bg,
       # cue, swap), or nil when +stream+ isn't one or +name+ isn't a track

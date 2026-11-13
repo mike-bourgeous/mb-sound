@@ -230,7 +230,7 @@ module MB
           unless rack_knobs.empty?
             prune_rack_knobs
             names, renames = racks.instance_knob_names(rack_knobs, player)
-            renames.each { |k, name| rename_knob(k, name) }
+            renames.each { |k, name| k.is_a?(GraphNode::Slot) ? rename_slot(k, name) : rename_knob(k, name) } # (a rack's slots share its keys: see Slots)
             names.each { |k, (name, rack, key)|
               k.respec(name: name)
               rack_knob_keys[k] = [rack, key]
@@ -295,12 +295,13 @@ module MB
         # go stale.  Called when graphs join (#adopt_knobs) and when players
         # are forgotten.
         def prune_rack_knobs
-          gone, groups = racks.prune_knob_instances { |player| player_around?(player) }
+          gone, groups, slots = racks.prune_knob_instances { |player| player_around?(player) }
           gone.each do |k|
             removed = @knob_lock.synchronize { @knobs.delete(k.name) if @knobs[k.name].equal?(k) }
             @names.release(k.name) if removed
           end
-          groups.each { |g| @names.release(g) if @names.kind(g) == :knob_group }
+          groups.each { |g| @names.release(g) if @names.kind(g) == :knob_group || @names.kind(g) == :slot_group }
+          slots.each { |s| @names.release(s.path) if s.path && @names.kind(s.path) == :slot } # (racks R3; see Slots)
         end
 
         # True if player +name+ is playing, stopped for #resume, waiting to

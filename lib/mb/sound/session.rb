@@ -35,6 +35,7 @@ require_relative 'session/pause_fade'
 require_relative 'session/safety_limiter'
 require_relative 'session/buses'
 require_relative 'session/racks'
+require_relative 'session/slots'
 require_relative 'session/ui_feed'
 require_relative 'session/warming'
 require_relative 'session/carry'
@@ -102,6 +103,7 @@ module MB
       include Warming
       include Buses # (strip rules and steps, undo subjects: registered, so include order doesn't matter)
       include Cue
+      include Slots
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
@@ -365,6 +367,7 @@ module MB
         init_buses
         init_cue(cue_output)
         init_warming
+        init_slots
         @names = Names.new
         @metadata = Meta::Store.new
         @racks = Racks.new(self)
@@ -563,6 +566,7 @@ module MB
         # (#adopt_knobs: then walked again).
         found = graph_nodes(nodes)
         joined = adopt_knobs(nodes, player: name, found: found) # graph documents' knobs and rack knobs join the Session (see Knobs#adopt_knobs)
+        adopt_slots(found, player: name) # rack slots' names (see Slots#adopt_slots)
         found = graph_nodes(nodes) if knobs_redirected?(joined, found)
         note_file_readers(found)
         adopt_clocks(playable.nodes) # graph documents' clocks too (see Clocks#adopt_clocks)
