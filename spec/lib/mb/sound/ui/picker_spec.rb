@@ -43,6 +43,16 @@ RSpec.describe(MB::Sound::UI::Picker, :aggregate_failures) do
     expect(names(:inst, 'walking')).to eq([]) # (a clip's tag: not an instrument)
   end
 
+  # sd-ux-fixes-1 (the review's #23: the marker overwrote the last row's
+  # family text, "dn +48")
+  it 'gives a longer list\'s last row to "+N more", leaving every entry\'s text whole' do
+    lines = draw(ui_fake_snapshot, {}, w: 40, h: 6)
+    expect(lines.last).to eq('  +3 more') # (5 instruments, 2 rows shown)
+    entries = lines[-3..-2]
+    expect(entries.map { |l| l[/[a-z_]+/] }).to eq(%w[dnb_reese dnb_sub])
+    expect(entries.join).not_to include('+')
+  end
+
   it 'names the likely action per kind: a load into the track, an audition, a line to edit' do
     a = described_class.action(entry(:dnb_reese), track: :bass, patch: true)
     expect(a).to have_attributes(kind: :run, code: 'track :bass, L.inst.dnb_reese')

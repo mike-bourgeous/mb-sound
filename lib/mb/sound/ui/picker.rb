@@ -243,6 +243,9 @@ module MB
             list = results(state)
             detail = c.h >= 12 ? 4 : 0
             rows = c.h - 2 - detail
+            # (a longer list gives its last row to "+N more", never over an
+            # entry's text; sd-ux-fixes-1, the review's #23: "dn +48")
+            rows -= 1 if list.length > rows && rows > 1
             pick = state[:pick] = list.empty? ? 0 : state[:pick].to_i.clamp(0, list.length - 1)
             top = state[:top].to_i
             top = pick if pick < top
@@ -256,9 +259,7 @@ module MB
               list[top, rows].each_with_index do |e, i|
                 draw_entry(c, 2 + i, e, width, top + i == pick, state, playing)
               end
-              if top + rows < list.length && c.w > 14
-                c.text(c.w - 8, c.h - 1 - detail, " +#{list.length - top - rows} ", :dim)
-              end
+              c.text(0, 2 + rows, c.fit("  +#{list.length - top - rows} more", c.w), :dim) if top + rows < list.length
             end
             draw_detail(c, c.h - detail, picked(state)) if detail > 0 && !list.empty?
           end
