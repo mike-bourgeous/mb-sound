@@ -43,6 +43,13 @@ RSpec.describe(MB::Sound::Arrangement) do
     set.scene(:two, a: a2, b: b1)
   end
 
+  # sd-ux-fixes-1 (the review's #30): `ruby track(:ghost)` on a track with a
+  # patch said "Give track :ghost a patch block..."
+  it 'says a track exists, and where to see it, when track(:name) alone names one' do
+    expect { set.track(:a) }.to raise_error(ArgumentError, /track :a has a patch block; track\(:a\) alone would define it again .*`ruby set` prints its track line/)
+    expect { set.track(:nope) }.to raise_error(ArgumentError, /Give track :nope a patch block, an instrument, or a graph/)
+  end
+
   it 'launches scenes on the next bar, changing only what differs' do
     set.go(:one, at: :now)
     run(1600)
