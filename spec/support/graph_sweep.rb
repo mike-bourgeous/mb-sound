@@ -289,6 +289,10 @@ module GraphSweep
           c.sig.shape_db(-60.db => -40.db, -20.db => -12.db, 0.db => -6.db, below: :silence, interpolation: :cubic) +
           c.sig.shape_db(-84.db => -84.db, -34.db => [-40.db, -12.db], 0.db => -6.db, negative: [[-84.db, -84.db], [-20.db, -30.db], [-20.db, -10.db], [0.db, -6.db]])
       }],
+      ['shape_db read as a table (DbShaper table:, db-step-1)', ->(c) {
+        c.sig.shape_db(-84.db => -84.db, -34.db => [-40.db, -12.db], 0.db => -6.db, below: :unity, table: true) +
+          c.sig.ashape_db([[-84.db, -84.db], [-20.db, -3.5.db], [-19.9.db, -32.3.db], [0.db, -6.db]], table: 0.2.db)
+      }],
       ['Quantize node', ->(c) { c.sig.quantize(c.mod(0.01, 0.2)) }],
       ['filter banks (FilterBank: bandpass_series with node inputs, stereo pans, normalize; filter_bank; peq/peq_series serial)', ->(c) {
         st = c.sig.bandpass_series(c.notes.freq, count: 6, ratio: c.mod(0.9, 1.1), width: MB::Sound.per_harmonic(15.cents..90.cents, curve: :exp),
