@@ -3,8 +3,8 @@
 graph 11,
   name: "fm_bass",
   kind: :synth,
-  saved: "2026-11-13T02:06:32Z",
-  mb_sound: "0.12.0.usegit (3314d3a)",
+  saved: "2026-11-13T02:28:29Z",
+  mb_sound: "0.12.0.usegit (fa5909f)",
   from: "bin/synths/library_voices.rb",
   description: "Feedback FM bass: a sine operator fed back into its own phase, turning saw-like as the feedback envelope opens on each note, with a sine an octave down (FM operator feedback; from bin/synths/library_voices.rb, library-voices-1, 2026-11-13)",
   tags: [:fm, :feedback, :dx, :bass],
@@ -19,4 +19,4 @@ param :release, (0.005..2.0).at(0.08), description: "Release in seconds"
 synth(midi, voices: 2) { |v|
   sig = v.hz
   (sig.fm_feedback((feedback * v.env(0.001, fdecay, hold, release, gm: false).no_velocity).radians) + sig.transpose(-12).sine * sub) * v.env(0.002, 0.6, 0.8, release, gm: false) * 0.6
-}.hp1(20)
+}.filter(:highpass, cutoff: 20, quality: 0.7071)

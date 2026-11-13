@@ -3,8 +3,8 @@
 graph 11,
   name: "fm_ep",
   kind: :synth,
-  saved: "2026-11-13T02:06:32Z",
-  mb_sound: "0.12.0.usegit (3314d3a)",
+  saved: "2026-11-13T02:28:29Z",
+  mb_sound: "0.12.0.usegit (fa5909f)",
   from: "bin/synths/library_voices.rb",
   description: "Two-operator FM electric piano: a sine phase-modulated by a sine whose index falls after the strike (harder notes brighter), plus a short high tine for the bark (FM / PM (two operators); from bin/synths/library_voices.rb, library-voices-1, 2026-11-13)",
   tags: [:fm, :pm, :electric_piano, :keys],
@@ -19,4 +19,4 @@ param :release, (0.01..5.0).at(0.35), description: "Release in seconds"
 synth(midi, voices: 8) { |v|
   sig = v.freq
   v.hz.sine.pm(((sig * ratio).tone.sine * (index * v.env(0.001, 0.9, 0.2, release, gm: false)) + (sig * 14).tone.sine * tine * v.env(0.0, 0.06, 0, 0.05, gm: false)).radians) * v.env(0.002, decay, 0.0, release, gm: false) * 0.41
-}.hp1(20)
+}.filter(:highpass, cutoff: 20, quality: 0.7071)

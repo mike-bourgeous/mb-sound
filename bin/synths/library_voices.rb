@@ -424,7 +424,7 @@ module MB::Sound
     }
     k = k.merge(s[:prepare].call) if s[:prepare]
     out = synth(midi, voices: voices || s[:voices]) { |v| s[:build].call(v, k) * s[:level] }
-    out = out.hp1(s[:dc_block]) if s[:dc_block]
+    out = out.filter(:highpass, cutoff: s[:dc_block], quality: 0.7071) if s[:dc_block]
     s[:chorus] ? out.chorus(s[:chorus]) : out
   end
 

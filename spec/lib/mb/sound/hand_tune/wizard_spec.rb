@@ -157,7 +157,7 @@ RSpec.describe(MB::Sound::HandTune::Wizard, :aggregate_failures) do
     expect(w.track).to eq(:bass)
     expect(w.play_code).to eq('seq(A1).n4.loop') # (0.42 s: a quarter note at 120 BPM)
     expect(w.role).to eq(:bass)
-    expect(w.synths.select { |x| x.kind == :library }.first(3).map(&:name)).to all(satisfy { |n| %i[dnb_sub funk_bass jungle_reese jungle_sub sq80_prime_bass square_bass house_bass acid roller dnb_reese].include?(n) })
+    expect(w.synths.select { |x| x.kind == :library }.first(3).map(&:name)).to all(satisfy { |n| %i[dnb_sub funk_bass jungle_reese jungle_sub sq80_prime_bass square_bass house_bass acid roller dnb_reese fm_bass cheby_bass].include?(n) })
   end
 
   it 'writes one tune line per kind, each read back by the take reader' do

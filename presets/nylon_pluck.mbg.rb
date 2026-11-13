@@ -3,8 +3,8 @@
 graph 11,
   name: "nylon_pluck",
   kind: :synth,
-  saved: "2026-11-13T02:10:15Z",
-  mb_sound: "0.12.0.usegit (3314d3a)",
+  saved: "2026-11-13T02:28:30Z",
+  mb_sound: "0.12.0.usegit (fa5909f)",
   from: "bin/synths/library_voices.rb",
   description: "Plucked string: a feedback loop one period long, excited by a noise pick and damped in the loop (bin/synths/pluck.rb's string), dry (Karplus-Strong (feedback loop); from bin/synths/library_voices.rb, library-voices-1, 2026-11-13)",
   tags: [:karplus, :feedback, :string, :guitar, :pluck],
@@ -29,4 +29,4 @@ synth(midi, voices: 6) { |v|
     s = ((d + d.delay(1.samples)) * (sig6 * 0.5)).filter(:lowpass, cutoff: sig7, quality: 0.7071067811865476)
     s + sig5
   } * v.amp_env([[0, sig2 * sig4, 0, :exp], [1, sig2 * (sig4 + 1), 0, :exp], [0, 0.08]]) * 4 * 0.5
-}.hp1(20)
+}.filter(:highpass, cutoff: 20, quality: 0.7071)
