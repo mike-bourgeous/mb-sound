@@ -385,6 +385,9 @@ module MB
           point = LaunchPoint.of(binding) or return nil
           k = knob!(name)
           if !build && @arrangement&.build_knob?(k.name) && !(rebuilds = @arrangement.build_knob_tracks(k.name)).empty?
+            # (3000.hz for a build knob's cutoff: its number; see #knob_value)
+            typed = value.is_a?(MB::Sound::Pitch) || !(value.nil? || value.is_a?(Numeric) || value.respond_to?(:sample))
+            value = (knob_value(k, value) or return nil) if typed && keys.empty? && follow.nil?
             unless keys.empty? && over.nil? && follow.nil? && from.nil? && value.is_a?(Numeric)
               now = k.value.to_f == k.value.round ? k.value.round : k.value
               return MB::Sound.live_error(ArgumentError.new("#{k.name.inspect} is read when #{rebuilds.join(', ')} build#{'s' if rebuilds.length == 1}, so it takes plain values (turn #{k.name.inspect}, #{now}): each turn rebuilds"))
@@ -400,8 +403,11 @@ module MB
             return turn_keys(k, keys, curve, point, start_time)
           end
           return turn_keys(k, { 0 => value }, nil, point, start_time) if gesture_for?(k, value, over, follow, point)
-          value = follow unless follow.nil?
-          value = knob_value(k, value)
+          asked = !follow.nil?
+          value = follow if asked
+          given = value
+          value = knob_value(k, value, follow: asked)
+          return nil if value.nil? && !given.nil? # (a unit value it can't read, refused live)
           check_turn_value(k, value)
           raise ArgumentError, "from: needs over: (a ramp)" if from && !over
           raise ArgumentError, "from: must be a number (got #{from.inspect})" unless from.nil? || (from.is_a?(Numeric) && from.real?)
@@ -426,6 +432,11 @@ module MB
           tracks = []
           pairs.each do |name, value|
             k = knob!(control_name(name))
+            # (3000.hz for a cutoff: its number; see #knob_value)
+            unless value.is_a?(Numeric) || value.nil?
+              value = knob_value(k, value)
+              next if value.nil?
+            end
             unless value.is_a?(Numeric)
               raise ArgumentError, "turn several knobs to plain numbers (#{k.name.inspect} got #{value.inspect}); ramps and keyframes take one knob: turn #{k.name.inspect}, ..."
             end
@@ -784,14 +795,45 @@ module MB
         # -6.db for one declared in dB) as the knob's plain number; other
         # values as they are.  (A Pitch is a value here, not a sine to
         # follow, when the knob is a frequency.)
-        def knob_value(k, value)
+        #
+        # A unit value of another type (sd-ux-fixes-1, the review's #1:
+        # 3000.hz typed into a preset's plain-number cutoff followed the
+        # Pitch as a 3 kHz sine, limited to the knob's bottom): its number
+        # when the knob's unit (Param.implied_unit: the spec's unit, or the
+        # names table's for its name) matches, Hz for a Pitch, seconds for
+        # a Length; else refused through MB::Sound.live_error (nil live).
+        # +follow+ (a turn's follow:) follows it as a signal instead.
+        def knob_value(k, value, follow: false)
           t = Param.type_of(value)
           # (a gain like -6.db turning a plain-number knob, e.g. a level:
           # the knob holds the Float gain, so set documents print a number
           # its range can read; omnibus17)
           return value.to_f if t == :decibels && k.spec.param.type == :number
-          return value if t.nil? || t == :number || t == :node || t == :name || t != k.spec.param.type
-          Param.magnitude(value).to_f
+          return value if t.nil? || t == :number || t == :node || t == :name || t == :ratio || t == :boolean || t == :string
+          # (a node tagged as a frequency, v.freq: a signal to follow)
+          return value if follow || (value.respond_to?(:sample) && !value.is_a?(MB::Sound::Pitch))
+          return Param.magnitude(value).to_f if t == k.spec.param.type
+          unit = Param.implied_unit(k.spec, k.name)
+          return value.frequency.to_f if unit == 'Hz' && value.is_a?(MB::Sound::Pitch)
+          if unit == 's' && value.is_a?(MB::Sound::Length)
+            return Length.seconds(value, sample_rate: output_open? ? sample_rate : 48000, transport: @transport).to_f
+          end
+          refuse_unit_value(k, value, unit)
+        end
+
+        # The error for a unit value a knob can't read (see #knob_value):
+        # raised in scripts and specs, warned live (returning nil).
+        def refuse_unit_value(k, value, unit)
+          n = GraphNode::Knob.method(:number)
+          r = k.spec.range
+          what = ArgTypes.describe(Param.type_of(value)).sub(/ \(.*\)\z/, '')
+          holds = unit ? "#{unit == 's' ? 'seconds' : unit}" : 'plain numbers'
+          MB::Sound.live_error(Param::Error.new(
+            "turn #{k.name.inspect}, #{value.respond_to?(:to_ruby) ? value.to_ruby : value.inspect}: knob #{k.name.inspect} holds #{holds} " \
+            "(#{n.(r.begin)}..#{n.(r.end)}), not #{what}; turn it to a number (turn #{k.name.inspect}, #{n.(k.value)}), " \
+            "or follow: the value to follow it as a signal; nothing was changed"
+          ))
+          nil
         end
 
         # +range+ widened to hold +value+, to a round number.

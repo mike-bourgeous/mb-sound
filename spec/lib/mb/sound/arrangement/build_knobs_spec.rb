@@ -48,5 +48,8 @@ RSpec.describe(MB::Sound::Arrangement::BuildKnobs, :aggregate_failures) do
     start
     expect { run { turn :"lead/sync", 1, over: 1 } }.to raise_error(ArgumentError, /read when lead builds, so it takes plain values \(turn :"lead\/sync", 0\)/)
     expect { run { turn :"lead/sync", follow: :"lead/mix" } }.to raise_error(ArgumentError, /takes plain values/)
+    # (sd-ux-fixes-1: a unit value it can't read is refused, not followed)
+    expect { run { turn :"lead/sync", 440.hz } }.to raise_error(MB::Sound::Param::Error, /holds plain numbers.*not a frequency/)
+    expect(@session.knobs[:"lead/sync"].value).to eq(0)
   end
 end

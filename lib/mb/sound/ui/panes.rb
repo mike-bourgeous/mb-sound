@@ -26,14 +26,7 @@ module MB
         # the knob's or the param's name (a preset's cutoff param, a plain
         # number, shows in Hz), else nil.
         def unit_of(spec, name = nil)
-          return spec.unit if spec&.unit
-          [spec&.respond_to?(:name) ? spec.name : nil, name].compact.each do |n|
-            e = Param.name_entry(n) or next
-            b = e[:range].begin
-            return 'Hz' if b.is_a?(MB::Sound::Pitch)
-            return 's' if b.is_a?(MB::Sound::Length)
-          end
-          nil
+          Param.implied_unit(spec, *name)
         end
 
         # A dB value to one decimal ("-8.1", "-inf").
