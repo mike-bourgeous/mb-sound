@@ -182,7 +182,6 @@ module GraphSweep
       ['Cookbook object as biquad', ->(c) { c.sig.filter(f::Cookbook.new(:lowpass, 48000, 1000, quality: 2), structure: :biquad) }],
       ['SVF object', ->(c) { c.sig.filter(f::SVF.new(:notch, 48000, 1000, quality: 2)) }],
       ['FilterChain', ->(c) { c.sig.filter(f::FilterChain.new(f::FirstOrder.new(:lowpass, 48000, 2000), f::Cookbook.new(:highpass, 48000, 100, quality: 0.7))) }],
-      ['FilterSum', ->(c) { c.sig.filter(f::FilterSum.new(f::FirstOrder.new(:lowpass, 48000, 400), f::FirstOrder.new(:highpass, 48000, 4000))) }],
       ['Filter::Delay object', ->(c) { c.sig.filter(f::Delay.new(delay: 0.003, sample_rate: 48000, wet: 0.5, dry: 1)) }],
       ['NoiseColor pink', ->(c) { c.sig.filter(f::NoiseColor.new(:pink)) }],
       ['NoiseColor brown', ->(c) { c.sig.filter(f::NoiseColor.new(:brown)) }],
@@ -696,7 +695,6 @@ module GraphSweep
     'MB::Sound::InputBufferWrapper' => 'wraps an input stream for window readers, not a graph node in use',
     'MB::Sound::OutputBufferWrapper' => 'wraps an output stream for window writers',
     'MB::Sound::GraphNode::DataShuffler' => 'test/debug helper with no DSL entry point',
-    'MB::Sound::Filter::FilterBank' => 'parallel filters over Arrays of plain data, not used in graphs',
   }.freeze
 
   # Buffer size and count of the Notes reference path pass (Kernels
