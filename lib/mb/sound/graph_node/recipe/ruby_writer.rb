@@ -797,7 +797,37 @@ module MB
               v = cur.moving? || cur.target.nil? ? cur.value : cur.target
               args << "#{key_text(name)} #{knob_literal(v)}" unless v == k.spec.default
             end
+            # Swapped slots print their content playing (racks R3)
+            (st[:application]&.slots || {}).each do |name, sl|
+              next if sl.default?
+              text = slot_content_text(sl.content, name)
+              args << "#{key_text(name)} #{text}" if text
+            end
             args
+          end
+
+          # A slot's content (a Rack or block) as document Ruby: rack(:x)
+          # for a named rack (its definition printed too), an anonymous
+          # rack's constructor and block, a block as an arack.  Nil (and a
+          # problem) if the block's source wasn't found.
+          def slot_content_text(content, name)
+            if content.is_a?(MB::Sound::Rack)
+              if content.name
+                define_rack(content, nil, nil) if @define_racks
+                return "rack(#{content.name.inspect})"
+              end
+              return content.to_ruby
+            end
+            src = GraphNode::Recipe.block_source(content, :arack)
+            if src && (m = src.match(/\A->\s*\(([^)]*)\)\s*(\{.*\}|do.*end)\z/m))
+              body = m[2]
+              src = body.start_with?('{') ? "{ |#{m[1]}|#{body[1..]}" : "do |#{m[1]}|#{body[2..]}"
+            end
+            unless src&.start_with?('{', 'do')
+              @problems << "slot #{name.inspect} plays a block whose source wasn't found"
+              return nil
+            end
+            "arack #{src}"
           end
 
           # Remembers the definition of named rack +rack+ for the lines

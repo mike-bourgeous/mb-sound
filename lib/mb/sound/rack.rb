@@ -102,10 +102,13 @@ module MB
       # - knobs: frozen Array of the instance's Session knob names (a
       #   rack not playing: its knob names)
       # - knob_specs: frozen { knob name => Knob::Spec }
-      # - slots: frozen Array (slots come in phase R3)
+      # - slots: frozen Array of frozen Hashes { name:, path: (the Session
+      #   name, nil for a rack not playing), type: (:audio), content: (a
+      #   description of the content playing, or the default) } (racks R3)
       RackInfo = Data.define(:name, :path, :kind, :signature, :ports, :latency, :knobs, :knob_specs, :slots) do
         def to_s
-          "#{path || name || 'rack'} #{kind} #{signature}#{latency.to_i > 0 ? ", latency #{latency} samples" : ''}#{knobs.empty? ? '' : ", knobs #{knobs.join(', ')}"}"
+          "#{path || name || 'rack'} #{kind} #{signature}#{latency.to_i > 0 ? ", latency #{latency} samples" : ''}#{knobs.empty? ? '' : ", knobs #{knobs.join(', ')}"}" \
+            "#{slots.empty? ? '' : ", slots #{slots.map { |sl| "#{sl[:path] || sl[:name]} (#{sl[:content]})" }.join(', ')}"}"
         end
       end
 
@@ -431,14 +434,17 @@ module MB
       # exactly): +seed:+ the random seed the block builds under (without
       # it each application draws one from the root generator), and knob
       # start values by knob name (`space: 0.7`; knobs not given start
-      # at their defaults).
+      # at their defaults), and slot contents by slot name (racks R3: a
+      # Rack or block for `sig.slot(:color) { ... }`, playing instead of its
+      # default; how documents save a swapped slot).
       #
       #     bass.then(&rack(:dub).using(seed: 1234, space: 0.7))
+      #     bass.then(&rack(:dub).using(color: arack { |s| s.diode(900) }))
       def using(seed: nil, **knobs)
         raise ArgumentError, "#{label} is composed (>>); set its parts" if @parts
         raise ArgumentError, "seed: must be an Integer (got #{seed.inspect})" unless seed.nil? || seed.is_a?(Integer)
-        bad = knobs.reject { |_, v| v.is_a?(Numeric) && v.real? }
-        raise ArgumentError, "knob values are numbers (got #{bad.map { |k, v| "#{k}: #{v.inspect}" }.join(', ')})" unless bad.empty?
+        bad = knobs.reject { |_, v| (v.is_a?(Numeric) && v.real?) || v.is_a?(Rack) || v.is_a?(Proc) }
+        raise ArgumentError, "knob values are numbers and slot contents racks or blocks (got #{bad.map { |k, v| "#{k}: #{v.inspect}" }.join(', ')})" unless bad.empty?
         clash = knobs.keys & [@input.name, *@ports.keys]
         raise ArgumentError, "#{clash.join(', ')} #{clash.length > 1 ? 'are ports' : 'is a port'}; bind ports with .with" unless clash.empty?
         # A seed a graph document marked as drawn (`seed: drawn_seed(N)`,
@@ -530,6 +536,19 @@ module MB
         app.knobs.transform_values(&:spec)
       end
 
+      # The rack's slots with their default contents, from a stand-in build
+      # (see #build_on_stand_ins): frozen Hashes as RackInfo#slots holds
+      # them (path nil).
+      def slot_specs
+        _, _, app = build_on_stand_ins
+        app.slots.map { |n, sl| Rack.slot_info(sl, nil) }
+      end
+
+      # A RackInfo#slots entry for Slot +sl+ (Session name +path+).
+      def self.slot_info(sl, path)
+        { name: sl.name, path: path, type: :audio, content: sl.current.description.dup.freeze }.freeze
+      end
+
       # Remembers the values of this rack's knobs (every instance's, in
       # the current Session) as snapshot :"name/+snap+" (a named rack's
       # variation; see KnobMethods#snap).  Returns the journal entry.
@@ -566,13 +585,14 @@ module MB
 
       # A frozen RackInfo for this rack (+path+ and +knobs+ for one
       # instance; see Session::Racks#rack_info).
-      def info(path: nil, knobs: nil, specs: nil, out: nil)
+      def info(path: nil, knobs: nil, specs: nil, out: nil, slots: nil)
         specs ||= (knob_specs rescue {})
+        slots ||= (slot_specs rescue [])
         ports = [{ name: @input.name, type: @input.type, role: :main, required: true }.freeze]
         @ports.each_value { |p| ports << { name: p.name, type: p.type, role: :side, required: p.required }.freeze }
         RackInfo.new(
           name: @name, path: path, kind: kind(@out || out), signature: signature(@out || out).freeze, ports: ports.freeze, latency: latency,
-          knobs: (knobs || specs.keys).map(&:to_sym).freeze, knob_specs: specs.dup.freeze, slots: [].freeze
+          knobs: (knobs || specs.keys).map(&:to_sym).freeze, knob_specs: specs.dup.freeze, slots: slots.dup.freeze
         )
       end
 

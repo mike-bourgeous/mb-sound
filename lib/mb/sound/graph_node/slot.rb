@@ -157,7 +157,7 @@ module MB
         # the input's stand-in: a node for one channel, else a bundle).
         # +instance_of+ (a Rack) and +ports+ make a named rack's instance
         # slot (see MB::Sound::Rack#call).
-        def initialize(input, name:, content:, instance_of: nil, ports: {}, application: Rack.application)
+        def initialize(input, name:, content:, default: nil, instance_of: nil, ports: {}, application: Rack.application)
           raise ArgumentError, "Slot names are Symbols (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol)
           unless input.is_a?(GraphNode) || input.is_a?(MultiOutput)
             raise ArgumentError, "A slot's input is a graph node or bundle (got #{input.class}); notes slots come later"
@@ -188,7 +188,9 @@ module MB
           @sampled = nil
           @session = nil
           @scratch = {}.compare_by_identity
+          @default_content = nil
 
+          @default_content = default || content
           first = build(content)
           @channels = first.nodes.length
           @outputs = Array.new(@channels) { |i| Output.new(self, i) }.freeze
@@ -222,6 +224,12 @@ module MB
         # What built the current content (a Proc or Rack).
         def content
           current.block
+        end
+
+        # True while the content playing is the slot's own default (its
+        # block; not a swapped one or a rack application's `using` one).
+        def default?
+          current.block.equal?(@default_content)
         end
 
         # The contents playing: spilling over, and current last.

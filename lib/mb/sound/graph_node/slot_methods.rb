@@ -32,7 +32,7 @@ module MB
             raise ArgumentError, "#{app.rack.label}: slot #{name.inspect} has the name of a knob" if app.knobs.key?(name)
           end
 
-          s = Slot.new(self, name: name, content: start || block, application: app)
+          s = Slot.new(self, name: name, content: start || block, default: block, application: app)
           app.slots[name] = s if app
           s.receiver = self
           s.result = s.returned

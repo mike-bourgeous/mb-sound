@@ -136,7 +136,7 @@ module MB
             out = r.out || e.out
             used = uses_text(e)
             list = e.knobs.empty? ? '' : "knobs #{e.knobs.map { |n, spec| Racks.spec_text(n, spec) }.join(', ')}, "
-            [r.name, "#{r.kind(out)} #{r.signature(out)}, #{list}#{used}"]
+            [r.name, "#{r.kind(out)} #{r.signature(out)}, #{list}#{slots_text(r)}#{used}"]
           }
         end
 
@@ -159,13 +159,17 @@ module MB
             r = e.rack
             instances = knob_instances(r.name)
             specs = e.knobs.empty? ? (r.knob_specs rescue {}) : e.knobs
-            infos = if instances.empty?
+            slot_keys = @mutex.synchronize { (@knob_keys[r.name] || []).select { |key| @instance_slots[[r.name, key]] } }
+            infos = if instances.empty? && slot_keys.empty?
                       [r.info(specs: specs, out: e.out)]
                     else
-                      instances.map { |key, knobs|
+                      keys = instances.keys | slot_keys
+                      keys.map { |key|
+                        knobs = instances[key] || {}
+                        slots = @mutex.synchronize { (@instance_slots[[r.name, key]] || {}).values }
                         names = knobs.values.map(&:name)
-                        path = Name[names.first].base
-                        r.info(path: path, knobs: names, specs: specs, out: e.out)
+                        path = Name[names.first || slots.first&.path].base
+                        r.info(path: path, knobs: names, specs: specs, out: e.out, slots: slots.map { |sl| MB::Sound::Rack.slot_info(sl, sl.path) })
                       }
                     end
             [r.name, infos.freeze]
@@ -405,6 +409,21 @@ module MB
         end
 
         private
+
+        # "slots color (softclip), " for rack +r+: its slots' contents
+        # playing (each instance's when they differ), else the defaults.
+        def slots_text(r)
+          playing = rack_slots(r.name)
+          list = if playing.empty?
+                   (r.slot_specs rescue []).map { |sl| "#{sl[:name]} (#{sl[:content]})" }
+                 else
+                   playing.values.group_by(&:name).map { |n, sls|
+                     contents = sls.map { |sl| sl.current.description }.uniq
+                     contents.length == 1 ? "#{n} (#{contents[0]})" : sls.map { |sl| "#{sl.path} (#{sl.current.description})" }.join(', ')
+                   }
+                 end
+          list.empty? ? '' : "slots #{list.join(', ')}, "
+        end
 
         def uses_text(e)
           used = e.uses.zero? ? 'not used yet' : "#{e.uses} use#{'s' if e.uses != 1}"

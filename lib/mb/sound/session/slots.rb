@@ -52,7 +52,9 @@ module MB
           end
           return slots if slots.empty?
 
-          prune_rack_knobs
+          # (no pruning here: #adopt_knobs pruned before this graph's rack
+          # knobs joined, and its player isn't queued yet; forgotten
+          # players' slots go with Knobs#prune_rack_knobs)
           slots.each { |s| s.player = player }
           members = slots.select { |s| s.application && s.name }
           unless members.empty?
@@ -179,7 +181,15 @@ module MB
               chain = s.build(blk)
               s.result
             }
-            chain.recipe = rec&.call
+            fresh = rec&.call
+            if fresh && saved
+              # (in the original call's place: inside the rack application's
+              # block that made the slot, in its order)
+              fresh.scope = saved.scope
+              fresh.seq = saved.seq
+              fresh.ordinal = saved.ordinal
+            end
+            chain.recipe = fresh
             rec.call = saved if rec
           else
             chain = s.build(block)

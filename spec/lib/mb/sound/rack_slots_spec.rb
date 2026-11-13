@@ -196,6 +196,53 @@ RSpec.describe('rack slots') do
     end
   end
 
+  describe 'listings and documents' do
+    before do
+      s.arack(:dub) { |sig| sig.slot(:color) { |x| x.softclip(0.3, 0.6) } * s.knob(:space, 0.5) }
+    end
+
+    it "lists slots in racks, RackInfo, and help rack(:x), with the content playing" do
+      expect(s.racks[:dub]).to include('slots color (Shaper)')
+      expect(s.rack(:dub).info.slots).to eq([{ name: :color, path: nil, type: :audio, content: 'Shaper' }])
+      expect(Ractor.shareable?(s.rack(:dub).info)).to eq(true)
+
+      session.add(220.hz.saw.then(&s.rack(:dub)), name: :bass)
+      session.swap_slot(:"dub/color", ->(c) { c.lp4(500) }, on: :now, fade: 0)
+      render(800)
+      expect(s.racks[:dub]).to include('slots color (FourPole)')
+      info = session.racks.rack_info[:dub].first
+      expect(info.slots).to eq([{ name: :color, path: :"dub/color", type: :audio, content: 'FourPole' }])
+      expect(info.knobs).to eq([:"dub/space"])
+      require 'mb/sound/help'
+      page = MB::Sound::Help::RackPage.new(s.rack(:dub), nil).to_s
+      expect(page).to match(/slots.*\n\s+color\s+FourPole\s+:"dub\/color"/)
+    end
+
+    it "saves a named rack instance's swapped slot with using, and loads it back" do
+      g = 220.hz.saw.then(&s.rack(:dub))
+      session.add(g, name: :bass)
+      session.swap_slot(:"dub/color", ->(c) { c.lp4(500) }, on: :now, fade: 0)
+      render(800)
+      doc = MB::Sound::GraphIO.dump(g, name: 'x')
+      expect(doc).to include('color: arack { |c| c.lp4(500) }')
+      expect(doc).not_to include('osc.slot') # (the rack's definition keeps its default)
+      loaded = MB::Sound::GraphIO.load(doc)
+      slot = loaded.graph.grep(MB::Sound::GraphNode::Slot::Output).first.owner_slot
+      expect(slot.current.description).to eq('FourPole')
+      expect(MB::Sound::GraphIO.dump(loaded, name: 'x').sub(/saved: "[^"]*"/, '')).to eq(doc.sub(/saved: "[^"]*"/, ''))
+    end
+
+    it 'prints a swapped slot inside an anonymous rack with its content' do
+      g = 1.constant.then(&s.arack { |sig| sig.slot(:tint) { |x| x * 0.25 } + 1 })
+      session.add(g, name: :lead)
+      session.swap_slot(:"lead/tint", ->(c) { c * 0.75 }, on: :now, fade: 0)
+      render(800)
+      expect(g.to_ruby).to match(/slot\(:tint\) \{ \|c\|\s+c \* 0\.75\s+\}/)
+      loaded = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g, name: 'y'))
+      expect(loaded.sample(10).to_a.uniq).to eq([1.75])
+    end
+  end
+
   describe 'console swap' do
     it 'swaps a slot by name with a rack or block' do
       session.add(1.constant.slot(:x) { |c| c * 0.25 }, name: :p)
