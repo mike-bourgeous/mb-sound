@@ -41,7 +41,9 @@
 #
 # The voices use library nodes only (no engine of their own).  Each output
 # sits near -12 LUFS before the master (about -22 LUFS through its default
-# -10 dB) on a phrase in its role, with its true peak under 0 dBTP.
+# -10 dB) on its role's louder phrase (four-note chords for keys and pads),
+# true peaks at most +1.4 dBTP there; the pluck is quieter (-18 LUFS), its
+# attack peaking as bin/synths/pluck.rb's does.
 #
 # Usage:
 #     bin/synths/library_voices.rb -p fm_ep                       # live MIDI

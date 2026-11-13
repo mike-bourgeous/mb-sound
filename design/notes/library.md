@@ -306,6 +306,39 @@ The reference's low end after 0.3 s is the 50 Hz sine plus a spread of component
 
 Not built: the click's delay (the reference's spike comes 2 ms after the body starts), a pitch envelope shape other than the Envelope's dB curves, a gated (note-length) mode, more presets (the maintainer's call on the Bench), a dedicated boom node class (a GraphNode with the voice's settings as ports, if the Synth form turns out short).
 
+## Library voices (library-voices-1, 2026-11-13)
+
+The maintainer, 2026-11-13: "build some sample library voices based on the different design options that already exist (am, fm/pm, etc.) and put some samples on the bench" (from a talk about SUBsynth/PADsynth-style sounds and widening harmonics).  One playable instrument per synthesis approach, each from library nodes only, in one table: `LIBRARY_VOICES` in `bin/synths/library_voices.rb` (approach, description, tags, knobs as `[default, range, description]`, level, a build Proc of the voice and its knobs; optional `dc_block:` Hz for an `hp1` after the synth, `chorus:`, and `prepare:`, a Proc whose Hash joins the knobs once per build).  `MB::Sound.library_voice(midi, :fm_ep, index: 3)` builds one (knobs are numbers or nodes; unknown knobs raise with the voice's list); the script plays them (`-p fm_ep --index 3`, the union of knob options, refusing a knob the patch lacks).  `bin/save_presets.rb` saves each in its own process (`LIBRARY_PRESET_VOICES`; not through the script's `--save`, which writes only a description) so the header gets `tags:` beside the description; every knob is a param, so on a track or a named bg player each is a knob (`:"keys/index"`).
+
+| preset | approach | knobs | role tag |
+|---|---|---|---|
+| ring_bell | AM / ring: a sine times a sine at 3.53x, the ring fading toward the plain sine | ratio ring ring_decay decay release | keys |
+| fm_ep | two-operator PM, index falling after the strike, a 14x tine | index ratio tine decay release | keys |
+| fm_bass | `fm_feedback` with a feedback envelope, a sine an octave down | feedback hold fdecay sub release | bass |
+| sync_lead | `sync(ratio:)` swept down from above by an envelope, mono, glide | sync sweep sweep_decay cutoff glide | lead |
+| pwm_strings | two `pwm` pulses on slow LFOs, lp4, `chorus(:juno2)` (stereo) | width depth rate cutoff attack release | pad |
+| scan_pad | `wavetable_of` five frames (sine, hollow, vocal, bright, saw) scanned by an envelope and an LFO | scan sweep swell wobble rate release | pad |
+| partial_keys | `harmonics` with a decay per harmonic (n^0.8 faster) | bright odd decay release | keys |
+| ladder_lead | two saws and a square sub through lp4 with its envelope, mono, glide | cutoff reso fenv fdecay glide | lead |
+| supersaw | `unison(7, spread:)` saws (stereo) | detune spread mix cutoff attack release | pad |
+| breath_vowel | a saw and breath noise through `formant(:u, :o, :a, :i, morph:)` | vowel breath vibrato attack release glide | lead |
+| noise_bands | `noise.bandpass_series(v.freq, count: 12, ...)`, level by sqrt(Q) | focus stretch attack release | pad |
+| bowed_glass | noise bowing `resonate(:glass, v.freq, decay:)` while the key is held | bow tone decay attack release | pad |
+| nylon_pluck | `pluck_voice` (bin/synths/pluck.rb's Karplus-Strong string), dry | none | pluck |
+| cheby_bass | `chebyshev` driven by an envelope (alternating-sign amounts) | drive hold ddecay release | bass |
+| grain_pad | `v.grains` of a 2 s tone bounced from oscillators (stereo; a bundle with a 24-bit FLAC asset) | position spread density size detune attack release | pad |
+
+Measured (Mac container, offline renders, 120 BPM, before the master):
+- Levels: -11.4 to -13.8 LUFS on each role's louder phrase (four-note chords for keys and pads), true peaks -7.7 to +1.4 dBTP; nylon_pluck -18.1 LUFS at +0.7 dBTP (the pluck's crest is about 18 dB with every pluck.rb option tried: click 0.25-1, clean, dark).  DC: at most 0.0003 of full scale (mean over a phrase) after `hp1(20)` (1:1 PM, sync, feedback FM, the pluck, and even Chebyshev harmonics measured 0.0015-0.045 before).
+- Chebyshev amounts: same-sign amounts cancel the fundamental at low drive (T3's -3x against T1's x): at drive 0.7 and 0.4 the level fell 9.6 and 15.3 dB and the spectrum turned odd; alternating signs (h3, h4, h7 negative) held the level within 0.8 dB while the harmonics fell with the drive (h3 -9 dB at drive 1, -18 at 0.4), so cheby_bass's drive envelope changes brightness, not loudness.  `shape_db`'s power-law segments are scale-invariant (a sine's harmonics stay the same at any level along a segment), so its brightness changes only across knees; it was not used for the envelope-driven voice.
+- Cost, 4 s of four-note chords, YJIT, including the build: partial_keys 25% of realtime (16 envelopes per voice), supersaw 20%, nylon_pluck 22%, pwm_strings 14%, ring_bell 13%, noise_bands 11%, the rest 1-9%.
+- Aliasing comes from the library's oscillators (hard sync at 1760 Hz, ratio 4.5: -52 dB inharmonic; PolyBLEP saws and pulses -32 dB there); the voices add none beyond intent (detuned copies and vibrato aside).
+- Bench set library-voices-1-2026-11-13 (`/app/tmp/listening/library-voices-1/`, `tools/render_set.rb`): every voice on two 4 s phrases through its saved preset (`L.inst.x.(clip)`), matched to -19.8 LUFS (the loudest every render reaches at -1 dBTP; the pluck sets it), MP3, 6.0 MB; each variant's code plays it and, on a second line, with a contrasting knob.
+
+Guards: each document plays bit for bit like its patch, with its tags and params (grain_pad within -100 dB: its asset is 24-bit; measured -129 dB), in save_presets_spec; every voice plays finite, without DC, at a usable level, and turning any knob changes its sound (library_voices_spec, one example per voice); the shipped-name guard in library_spec kept `bell` and `glass` out of the tags (struck entries' names).
+
+Not built (questions for the maintainer): the older FM scripts (`bin/synths/fm_bass.rb`, `fm_epiano.rb`, `fm_bell.rb`, `vocal_lead.rb`, ...) are not library entries, and fm_ep/fm_bass/breath_vowel overlap them; tags through the script runner's `--save` (a small ScriptRunner change would let synth scripts give tags); stereo spread for bowed_glass (`resonate(spread:)`); a knob for nylon_pluck (pluck_voice's settings are build-time numbers).
+
 ## Not built (phase 3 and later)
 
 - Instrument params as block keywords (`instrument :reese do |midi, cutoff: 2400.hz|`, the draft's long form): rack blocks take ports as keywords, so params would need a value port type, and saving such a rack as a rack document a new `inputs` entry (a format change): library racks use `knob` lines inside for now.
