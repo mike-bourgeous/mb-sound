@@ -268,6 +268,21 @@ RSpec.describe MB::Sound::Library do
       expect(log.first).to eq('mb-sound: save :quarter (replaced)')
       expect(log.length).to eq(5)
     end
+
+    # sd-ux-fixes-1 (the review's #3): `save :ghost_lead, :lead` printed
+    # "Saved" and wrote a document whose body was `:lead`
+    it 'refuses a name or anything else that isn\'t a graph, saying what save takes, and writes nothing' do
+      expect { MB::Sound.save(:ghost_lead, :lead) }.to raise_error(ArgumentError, /save :ghost_lead, \.\.\.: :lead is a name; save takes a graph .*`ruby set` prints its track :lead line.*nothing was saved/)
+      expect { MB::Sound.save!(:ghost_lead, 'lead') }.to raise_error(ArgumentError, /save! :ghost_lead, \.\.\.: "lead" isn't a graph/)
+      track = MB::Sound::Arrangement::Track.new(name: :lead)
+      expect { MB::Sound.save(:ghost_lead, track) }.to raise_error(ArgumentError, /track :lead is a track .*not a graph/)
+      expect(File.exist?(File.join(user, 'ghost_lead.mbg.rb'))).to eq(false)
+      live = MB::Sound.live?
+      MB::Sound.live = true
+      expect { expect(MB::Sound.save(:ghost_lead, :lead)).to be_nil }.to output(/:lead is a name/).to_stderr
+    ensure
+      MB::Sound.live = live
+    end
   end
 
   describe 'collect and promote' do
