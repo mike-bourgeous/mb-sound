@@ -107,4 +107,11 @@ RSpec.describe('the inspector\'s status line', :aggregate_failures) do
   ensure
     session&.close
   end
+
+  # The review's #24: the header left out the instrument for acid (a
+  # library instrument written in Ruby, not a graph document)
+  it 'names the library instrument in the header' do
+    screen(:acid)
+    expect(@tiles.to_text).to match(/bass  acid  1\/1/)
+  end
 end

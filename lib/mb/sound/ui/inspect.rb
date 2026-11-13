@@ -100,12 +100,16 @@ module MB
         # built, such as the init voice's sync: turning one rebuilds the
         # track, so the inspector turns them a step a key, never as a held
         # sweep; Arrangement::BuildKnobs).
+        # +instrument+ is the name of the library instrument the track plays
+        # (`design :bass, L.inst.acid`: :acid, for the header; nil for a
+        # patch block or a graph; sd-ux-fixes-1, the review's #24).
         InspectInfo = Data.define(:track, :tracks, :knobs, :nodes, :node, :code, :error, :loose, :hidden, :voices, :voice, :unfit, :document, :voice_knobs,
-                                  :build_knobs) do
+                                  :build_knobs, :instrument) do
           def initialize(track:, tracks:, knobs:, nodes:, node:, code:, error:, loose: nil, hidden: {}.freeze, voices: [].freeze, voice: nil, unfit: 0, document: nil,
-                         voice_knobs: {}.freeze, build_knobs: [].freeze)
+                         voice_knobs: {}.freeze, build_knobs: [].freeze, instrument: nil)
             super(track: track, tracks: tracks, knobs: knobs, nodes: nodes, node: node, code: code, error: error, loose: loose || knobs,
-                  hidden: hidden, voices: voices, voice: voice, unfit: unfit, document: document, voice_knobs: voice_knobs, build_knobs: build_knobs)
+                  hidden: hidden, voices: voices, voice: voice, unfit: unfit, document: document, voice_knobs: voice_knobs, build_knobs: build_knobs,
+                  instrument: instrument)
           end
 
           # The selected NodeInfo, or nil.
@@ -197,7 +201,7 @@ module MB
             end
             InspectInfo.new(track: track, tracks: tracks, knobs: entry[:knobs], nodes: nodes, node: sel, code: entry[:code], error: nil,
                             loose: entry[:loose], hidden: entry[:hidden], voices: voices, voice: voice, unfit: entry[:unfit], document: entry[:document],
-                            voice_knobs: entry[:voice_knobs], build_knobs: build_knobs_of(session, track, entry))
+                            voice_knobs: entry[:voice_knobs], build_knobs: build_knobs_of(session, track, entry), instrument: instrument_of(session, track))
           rescue StandardError => e
             info = InspectInfo.new(track: track, tracks: tracks || [].freeze, knobs: entry&.[](:knobs) || [].freeze, nodes: entry&.[](:nodes) || [].freeze,
                                    node: nil, code: entry&.[](:code), error: "#{e.class}: #{e.message}".freeze)
@@ -251,6 +255,16 @@ module MB
             return found unless arr.respond_to?(:build_knobs_of)
             noted = arr.build_knobs_of(track)
             noted.all? { |k| found.include?(k) } ? found : (found | noted).freeze
+          end
+
+          # The name of the library instrument track +track+ plays (a
+          # Symbol), or nil.
+          def instrument_of(session, track)
+            arr = session.respond_to?(:arrangement) ? session.arrangement : nil
+            tr = arr&.tracks&.[](track) or return nil
+            Arrangement::InstrumentPatch.entry_of(tr.patch)&.name
+          rescue StandardError
+            nil
           end
 
           # The Binds of node +n+ (index +sel+ of +entry+'s graph) of track

@@ -190,7 +190,8 @@ module MB
           # The track line: name, which of the tracks, and the keys.
           def draw_header(c, info, state, hint)
             idx = info.tracks.index(info.track)
-            x = c.line(0, [info.track.to_s, :name], [info.document ? "  #{info.document}" : '', :text], ["  #{idx ? idx + 1 : '?'}/#{info.tracks.length}", :dim])
+            name = info.document || info.instrument # (a preset's document, else a library instrument's name: acid)
+            x = c.line(0, [info.track.to_s, :name], [name ? "  #{name}" : '', :text], ["  #{idx ? idx + 1 : '?'}/#{info.tracks.length}", :dim])
             c.text(x, 0, c.fit(state[:mode] ? "  #{hint}" : '', [c.w - x, 0].max), :dim)
             y = 1
             if info.error
