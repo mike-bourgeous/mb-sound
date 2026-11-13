@@ -720,7 +720,7 @@ module MB
             cell = picked(state) or return no_knob_note
             kn, k = cell
             value, = shown_value(state, kn, k)
-            [*flush(state), PaneKeys::Ask["turn #{kn.inspect}, ", TurnGesture.number(value), :typed]]
+            [*flush(state), PaneKeys::Ask["turn #{kn.inspect}, ", TurnGesture.number(value), :typed, select: true]]
           end
 
           # The typed answer to #key_ask: one `turn` line with it (Ruby:

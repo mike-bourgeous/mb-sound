@@ -146,9 +146,13 @@ module MB
         # whose result it handles like a key's.  Esc cancels.  With
         # +changed+ (find-as-you-type: the library picker's /), each edit of
         # the line also calls key_<+changed+>(state, text so far), and Esc
-        # calls it with the starting text again.
-        Ask = Data.define(:prompt, :text, :answer, :changed) do
-          def self.[](prompt, text, answer, changed: nil) = new(prompt: prompt.freeze, text: text.to_s.freeze, answer: answer, changed: changed)
+        # calls it with the starting text again.  With +select+ the starting
+        # text is shown selected and the first printable key replaces it
+        # (the inspector's value prompt: typing 3000.hz over the old value,
+        # not after it; sd-ux-fixes-1); without, typing edits it (a bind
+        # line, a find to narrow).
+        Ask = Data.define(:prompt, :text, :answer, :changed, :select) do
+          def self.[](prompt, text, answer, changed: nil, select: false) = new(prompt: prompt.freeze, text: text.to_s.freeze, answer: answer, changed: changed, select: select)
         end
 
         # Console Ruby a pane key puts on the REPL's line, not run (the

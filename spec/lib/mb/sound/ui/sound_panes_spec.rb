@@ -259,7 +259,7 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       st.delete(:gesture)
       expect(key(:inspector, st, :reset).last).to eq(ui::PaneKeys::Turn['turn :cut, 800', 'cut 800'])
       ask = key(:inspector, st, :ask).last
-      expect(ask).to eq(ui::PaneKeys::Ask['turn :cut, ', 800, :typed]) # (the value just set stands in until the snapshot has it)
+      expect(ask).to eq(ui::PaneKeys::Ask['turn :cut, ', 800, :typed, select: true]) # (the value just set stands in until the snapshot has it)
       expect(key(:inspector, st, :typed, '3000.hz')).to eq(ui::PaneKeys::Turn['turn :cut, 3000.hz', 'cut 3000.hz'])
       expect(key(:inspector, st, :typed, '  ')).to eq('nothing typed')
       expect(key(:inspector, st, :learn).last.code).to eq('learn :cut')

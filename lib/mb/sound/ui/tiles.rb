@@ -1601,7 +1601,9 @@ module MB
               # (a value to type: a prompt line; #line_done hands the text to the pane)
               @asking = [name, x]
               @router.open_line(:pane_value, x.prompt)
-              @router.line.insert(x.text) unless x.text.empty?
+              unless x.text.empty?
+                x.select ? @router.line.prefill(x.text) : @router.line.insert(x.text) # (selected: typing replaces it)
+              end
             when PaneKeys::Paste
               # (a line to edit on the REPL's prompt, not run: the REPL, the text typed in)
               if @host
@@ -2356,7 +2358,15 @@ module MB
           mode = @router.mode
           if mode == :line
             l = @router.line
-            c.line(0, [l.prompt, :key], l.text)
+            if l.selected?
+              # (a value prompt's prefilled text, shown selected: the first
+              # printable key replaces it; sd-ux-fixes-1)
+              c.line(0, [l.prompt, :key])
+              w = @cols - l.prompt.length
+              @grid.put_run(l.prompt.length, y, l.text[0, w], MB::Term::Cells.pack(Theme.rgb(:key)), nil, MB::Term::Cells::REVERSE) if w > 0
+            else
+              c.line(0, [l.prompt, :key], l.text)
+            end
             @line_cursor = [y, l.prompt.length + l.cursor]
             return
           end
