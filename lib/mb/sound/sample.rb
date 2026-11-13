@@ -1044,7 +1044,12 @@ module MB
       # order).  A position without an attack in the audio still lands on
       # its stretched time with the sound around it unstretched (half a
       # window either side), the stretch between positions making up for
-      # it; false leaves every position to the plain vocoder.
+      # it; false leaves every position to the plain vocoder.  +confirm+
+      # (true: within TRANSIENT_REACH, 15 ms; or a length) keeps only
+      # the given positions (and the region's start) that have a detected
+      # onset that near, each moved onto its onset: markers set by a
+      # grid sit a few ms before their hits or on sound with no attack
+      # (a held pad's grid markers then leave the plain vocoder).
       # :paul (:paulstretch) is long windows with random phases: windows of
       # +window+ (0.25 s), +overlap+ (4; 2 gives half as many phase
       # changes per second, so each partial spreads over half the
@@ -1088,9 +1093,15 @@ module MB
       #     voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false)   # narrower partials, a wide image (voices)
       #     brk.stretch(1.25, mode: :spectral, transients: :markers)               # attacks kept at the file's markers
       #     brk.stretch(1.25, mode: :spectral, transients: [0, 1.n8, 2.n8, 13230.samples])   # or at these positions
+      #     brk.stretch(1.25, mode: :spectral, transients: :markers, confirm: true)   # only markers with an attack, on the attack
       #     hit.stretch(1.25, mode: :none)             # as recorded, then silence
       def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann,
-                  slices: nil, fade: nil, fill: nil)
+                  slices: nil, fade: nil, fill: nil, confirm: nil)
+        unless confirm.nil? || confirm == false
+          unless transients == :markers || transients.is_a?(Array) || transients.is_a?(Slices)
+            raise ArgumentError, 'confirm: is for transients: :markers or positions (mode: :spectral and :paul)'
+          end
+        end
         if NONE_MODES.include?(mode.to_sym)
           unless fit == :auto && window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann &&
                  slices.nil? && fill.nil? && cycle == 25.ms && crossfade == CROSSFADE
@@ -1110,7 +1121,7 @@ module MB
         raise ArgumentError, 'slices:, fade:, and fill: are for mode: :slice' unless slices.nil? && fade.nil? && fill.nil?
 
         mode = Spectral.mode_name(mode)
-        return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape) unless mode == :cyclic
+        return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, confirm) unless mode == :cyclic
         unless window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
           raise ArgumentError, 'window:, overlap:, shape:, transients:, seed:, randomize:, and link: are for mode: :spectral and :paul'
         end
@@ -1225,8 +1236,10 @@ module MB
       # or nil for none: +transients+ true or :onsets detects them
       # (Sample::Onsets), :markers takes the sample's markers (detected
       # onsets when it has none past its start), an Array (positions in
-      # play order) or a Slices its positions.
-      def transient_positions(transients)
+      # play order) or a Slices its positions.  +confirm+ (true, or a
+      # reach as #position takes it) keeps of given positions only the
+      # detected onsets near them (#confirmed_onsets).
+      def transient_positions(transients, confirm = nil)
         list =
           case transients
           when false then return nil
@@ -1241,10 +1254,30 @@ module MB
             raise ArgumentError, "transients: is true (detected onsets), false, :markers (the sample's markers; detected onsets when it has none), or positions (got #{transients.inspect})"
           end
         list = list.map { |p| length - p } if @reversed
+        list = confirmed_onsets(list, confirm) if confirm
         list = list.select { |p| p >= 0 && p < length }.uniq.sort
         list.empty? ? nil : list
       end
       private :transient_positions
+
+      # How near (seconds) a detected onset must be to a position for
+      # `confirm: true` to keep it (see #stretch).
+      TRANSIENT_REACH = 0.015
+
+      # The detected onsets (Sample::Onsets, stored order) within +reach+
+      # (true: TRANSIENT_REACH) of one of +positions+ (stored order) or
+      # of the region's start: the positions that have an attack, each
+      # on its attack.  On a generated drum loop four of thirteen grid
+      # markers sat 5 to 9 ms before their hits, and the vocoder's
+      # unstretched span and phase resets sat that much early with them:
+      # the decay before three of those hits came out 13 to 18 dB
+      # different for 40 to 100 ms (stretch-fixes-1).
+      def confirmed_onsets(positions, reach)
+        reach = position(reach == true ? TRANSIENT_REACH : reach)
+        marks = [0, *positions]
+        (@reversed ? reverse : self).onsets.select { |o| marks.any? { |m| (m - o).abs <= reach } }
+      end
+      private :confirmed_onsets
 
       # The onsets the slice stretch cuts at: #onsets, plus softer ones
       # (SOFT_ONSET rises) within SOFT_ONSET_REACH of a sixteenth when the
@@ -1369,7 +1402,7 @@ module MB
       # vocoder whose +randomize+ goes from locked phases (0) to random
       # ones (1, Spectral.paul's magnitude-only frames when no onsets are
       # kept); the modes set the defaults.
-      def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape)
+      def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, confirm = nil)
         paul = mode == :paul
         transients = !paul if transients.nil?
         transients = true if %i[onsets transients].include?(transients)
@@ -1380,6 +1413,7 @@ module MB
         kw[:window] = window unless window.nil?
         kw[:overlap] = overlap unless overlap == Spectral::OVERLAP
         kw[:transients] = transients unless transients == !paul
+        kw[:confirm] = confirm if confirm
         kw[:randomize] = randomize unless randomize == (paul ? 1 : 0)
         kw[:link] = link unless link == true
         kw[:shape] = shape unless shape == :hann
@@ -1388,7 +1422,7 @@ module MB
 
         n = position(window.nil? ? (paul ? Spectral::PAUL_WINDOW : Spectral::WINDOW.samples) : window).round
         n += 1 if n.odd?
-        onsets = transient_positions(transients)
+        onsets = transient_positions(transients, confirm)
         edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |chans|
           if randomize >= 1 && onsets.nil?
             Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)

@@ -492,6 +492,48 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
       expect(plain.stretch(1.5, mode: :spectral, transients: []).data(0)).to eq(plain.stretch(1.5, mode: :spectral, transients: false).data(0))
     end
 
+    describe 'confirm:' do
+      # Grid markers as a loop file's tend to be: two a few ms before
+      # their hits, one after its hit, one on held sound with no attack,
+      # none at the loop's start
+      let(:grid) { [6000 - 300, 12000 - 430, 18000, 24000 + 40, 30000, 36000] }
+      let(:found) { plain.onsets }
+
+      it 'keeps the positions with an attack, each on its attack, and the start' do
+        # (the detector puts each hit on its first sample that moves)
+        expect(found).to eq([0, 6001, 12001, 24001, 30001, 36001])
+        want = plain.stretch(1.5, mode: :spectral, transients: found).data(0)
+        expect(plain.stretch(1.5, mode: :spectral, transients: grid, confirm: true).data(0)).to eq(want)
+        expect(plain.with(markers: grid).stretch(1.5, mode: :spectral, transients: :markers, confirm: true).data(0)).to eq(want)
+        expect(plain.stretch(1.5, mode: :spectral, transients: plain.slices(at: [0] + grid), confirm: true).data(0)).to eq(want)
+        # (as given, the markers put the unstretched spans and resets
+        # early, and one on the held chord)
+        expect(plain.stretch(1.5, mode: :spectral, transients: grid).data(0)).not_to eq(want)
+        expect(plain.stretch(1.5, mode: :spectral, transients: grid, confirm: false).data(0)).to eq(plain.stretch(1.5, mode: :spectral, transients: grid).data(0))
+      end
+
+      it 'takes a reach' do
+        # (5 ms leaves out the two hits whose markers are 6 and 9 ms early)
+        expect(plain.stretch(1.5, mode: :spectral, transients: grid, confirm: 5.ms).data(0)).to eq(plain.stretch(1.5, mode: :spectral, transients: [0, 24001, 30001, 36001]).data(0))
+        expect(plain.stretch(1.5, mode: :spectral, transients: grid, confirm: 480).data(0)).to eq(plain.stretch(1.5, mode: :spectral, transients: grid, confirm: 10.ms).data(0))
+      end
+
+      it 'leaves a held sound\'s grid markers to the plain vocoder' do
+        t = Numo::DFloat.new(48000).seq
+        held = MB::Sound::Sample[Numo::SFloat.cast(Numo::NMath.sin(t * (2 * Math::PI * 220 / 48000)) * 0.3), bpm: 120]
+        # (only its start counts, a sound that starts loud)
+        expect(held.stretch(1.5, mode: :spectral, transients: [6000, 12000, 18000, 24000], confirm: true).data(0)).to eq(held.stretch(1.5, mode: :spectral, transients: [0]).data(0))
+      end
+
+      it 'reads reversed samples in play order, prints, and says what it is for' do
+        back = grid.map { |h| 48000 - h }
+        expect(plain.rev.stretch(1.5, mode: :spectral, transients: back, confirm: true).data(0)).to eq(plain.stretch(1.5, mode: :spectral, transients: found).rev.data(0))
+        expect(plain.stretch(1.5, mode: :spectral, transients: grid, confirm: true).lineage[3]).to eq({ mode: :spectral, transients: grid, confirm: true })
+        expect { plain.stretch(1.5, mode: :spectral, confirm: true) }.to raise_error(ArgumentError, /confirm: is for transients: :markers or positions/)
+        expect { plain.stretch(1.5, mode: :slice, confirm: true) }.to raise_error(ArgumentError, /confirm: is for/)
+      end
+    end
+
     it 'reads positions of reversed samples in play order' do
       back = hits48.map { |h| 48000 - h }
       expect(plain.rev.stretch(1.5, mode: :spectral, transients: back).data(0)).to eq(plain.stretch(1.5, mode: :spectral, transients: hits48).rev.data(0))

@@ -375,6 +375,7 @@ module GraphSweep
         shot = MB::Sound::Sample[d[750...2250], bpm: 960, declared_one_shot: true]
         smp.follow * 0.3 + smp.follow(:resample, align: :launch) * 0.3 + st.follow(stretch: { mode: :slice, slices: 4, fill: :stretch, cycle: 0.001 })[1] * 0.3 +
           marked.follow(stretch: :slice) * 0.2 + marked.follow(stretch: { mode: :spectral, transients: :markers, window: 256.samples }) * 0.2 + smp.follow(stretch: :none) * 0.2 +
+          marked.follow(stretch: { mode: :spectral, transients: :markers, confirm: true, window: 256.samples }) * 0.2 +
           shot.follow * 0.2
       }],
       # Region lanes (regions-1): overlapping regions with crossfades in

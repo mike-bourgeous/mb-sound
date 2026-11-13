@@ -693,7 +693,8 @@ module MB
         `shot.with(bpm: 120)` or a clock, `shot.clocked(2.seconds)`).
         `stretch: { mode: :spectral, transients: :markers }` runs the
         phase vocoder with its attacks at the markers instead of at
-        detected onsets.
+        detected onsets; add `confirm: true` to keep only the markers
+        that have an attack, each on its attack.
       TEXT
       commands :loops
       dsl :follow
@@ -743,6 +744,9 @@ module MB
         markers instead (a loop file's stretch markers; detected
         onsets when it has none), and `transients: [0, 1.n8, 13230.samples]`
         any positions; `transients: false` is the plain vocoder.
+        `confirm: true` keeps only the markers or positions with a
+        detected attack within 15 ms (`confirm: 5.ms` for another
+        reach), each moved onto its attack.
         They are offline edits: a new Sample, made once; results over 30
         s read with `mips: :octave` (smaller playback tables).
       TEXT
