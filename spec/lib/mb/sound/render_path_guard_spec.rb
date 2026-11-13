@@ -62,7 +62,7 @@ RSpec.describe('render path code guards') do
     ['lib/mb/sound/notes/poly_pressure.rb', 'Numo::SFloat.new(count).fill(v)', 'a new steady buffer only when the value changes'],
     ['lib/mb/sound/sq80.rb', 'Numo::SFloat.new(s.length).fill(value)', 'a new steady buffer only when the value changes'],
     ['lib/mb/sound/null_input.rb', 'Numo::SFloat.new(frames).fill(@fill)', 'grows the buffer (rarely)'],
-    *%w[dynamics.rb dynamics/crossover.rb loudness_meter.rb rider.rb].map { |f| ["lib/mb/sound/graph_node/#{f}", '@sampled.fill(false)', 'an Array (no allocation)'] },
+    *%w[dynamics.rb dynamics/crossover.rb loudness_meter.rb rider.rb filter_bank.rb].map { |f| ["lib/mb/sound/graph_node/#{f}", '@sampled.fill(false)', 'an Array (no allocation)'] },
     ['lib/mb/sound/mastering/targeting.rb', '@sampled.fill(false)', 'an Array (no allocation)'],
     ['lib/mb/sound/graph_node/convolver.rb', '@sampled.fill(false)', 'an Array (no allocation)'],
     ['lib/mb/sound/convolution.rb', 'y.fill(0.0)', "RubyEngine's per-output sums, an Array (the mirror)"],
