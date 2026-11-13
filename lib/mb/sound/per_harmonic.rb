@@ -68,7 +68,7 @@ module MB
 
         if !phase.nil? || !rate.nil?
           t = items[0]
-          unless items.length == 1 && (t.is_a?(Tone) || (t.is_a?(Pitch) && !t.is_a?(Tone)))
+          unless items.length == 1 && (t.is_a?(Tone) || t.is_a?(Pitch))
             raise ArgumentError, "phase: and rate: spread one tone across the bands (per_harmonic(0.2.hz.lfo, phase: 0...1); got #{items.map { |v| v.respond_to?(:sample) ? v.class.name : v.inspect }.join(', ')}); " \
               'for other per-band nodes give a list (per_harmonic(a, b, c))'
           end
