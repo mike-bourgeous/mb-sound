@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-11-11",
+  "generated": "2026-11-13",
   "specs": {
     "gems/mb-term/spec/native_spec.rb": {
       "fast_term": [
@@ -991,7 +991,7 @@
     },
     "spec/lib/mb/sound/graph_node/formant_spec.rb": {
       "fast_filter": [
-        "FastFilter.formant"
+        "FastFilter.filter_bank"
       ],
       "fast_sound": [
         "FastSound.oscillate"
@@ -1256,7 +1256,7 @@
       ],
       "fast_filter": [
         "FastFilter.diode_ladder",
-        "FastFilter.formant",
+        "FastFilter.filter_bank",
         "FastFilter.four_pole",
         "FastFilter.phaser",
         "FastFilter.svf"
@@ -1591,6 +1591,31 @@
         "FastSound.oscillate"
       ]
     },
+    "spec/lib/mb/sound/plan/filter_bank_op_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.fill_range",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_filter": [
+        "FastFilter.filter_bank"
+      ],
+      "fast_plan": [
+        "FastPlan.run",
+        "FastPlan.run_lanes"
+      ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
+      ],
+      "fast_sound": [
+        "FastSound.fast_math=",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.jump_queue"
+      ]
+    },
     "spec/lib/mb/sound/plan/filter_ops_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.copy",
@@ -1918,6 +1943,8 @@
         "FastSampler.play"
       ],
       "fast_sound": [
+        "FastSound.biquad_narray",
+        "FastSound.cookbook",
         "FastSound.fast_math=",
         "FastSound.oscillate"
       ]
@@ -2391,6 +2418,7 @@
       ],
       "includes": [
         "ext/mb/sound/include/mb_ext_helpers.h",
+        "ext/mb/sound/include/mb_filter_bank.h",
         "ext/mb/sound/include/mb_four_pole.h",
         "ext/mb/sound/include/mb_four_pole_tuning.h",
         "ext/mb/sound/include/mb_svf.h"
@@ -2398,6 +2426,7 @@
       "depend": {
         "fast_filter.o": [
           "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_filter_bank.h",
           "ext/mb/sound/include/mb_four_pole.h",
           "ext/mb/sound/include/mb_four_pole_tuning.h",
           "ext/mb/sound/include/mb_svf.h"
@@ -2546,6 +2575,7 @@
         "fast_plan.c",
         "plan_biquad.c",
         "plan_dynamics.c",
+        "plan_filter_bank.c",
         "plan_filters.c",
         "plan_filters.h",
         "plan_lofi.c",
@@ -2565,6 +2595,7 @@
         "ext/mb/sound/include/mb_dynamics.h",
         "ext/mb/sound/include/mb_envelope.h",
         "ext/mb/sound/include/mb_ext_helpers.h",
+        "ext/mb/sound/include/mb_filter_bank.h",
         "ext/mb/sound/include/mb_four_pole.h",
         "ext/mb/sound/include/mb_four_pole_tuning.h",
         "ext/mb/sound/include/mb_jump_step.h",
@@ -2586,10 +2617,12 @@
           "ext/mb/sound/include/mb_clip_shape.h",
           "ext/mb/sound/include/mb_envelope.h",
           "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_filter_bank.h",
           "ext/mb/sound/include/mb_jump_step.h",
           "ext/mb/sound/include/mb_osc_shapes.h",
           "ext/mb/sound/include/mb_phase.h",
           "ext/mb/sound/include/mb_smooth.h",
+          "ext/mb/sound/include/mb_svf.h",
           "ext/mb/sound/include/mb_vec_exp2.h",
           "ext/mb/sound/include/mb_vec_sine.h",
           "ext/mb/sound/include/mb_vec_sine_osc.h"
@@ -2602,6 +2635,12 @@
           "ext/mb/sound/fast_plan/plan_filters.h",
           "ext/mb/sound/include/mb_dynamics.h",
           "ext/mb/sound/include/mb_ext_helpers.h"
+        ],
+        "plan_filter_bank.o": [
+          "ext/mb/sound/fast_plan/plan_filters.h",
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_filter_bank.h",
+          "ext/mb/sound/include/mb_svf.h"
         ],
         "plan_filters.o": [
           "ext/mb/sound/fast_plan/plan_filters.h",
