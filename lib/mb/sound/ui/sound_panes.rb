@@ -1465,7 +1465,9 @@ module MB
 
           def key_overlay(state)
             state[:overlay] = state[:overlay] == false
-            state[:overlay] ? 'render: the previous render behind' : 'render: no previous render'
+            # (on by default: o turns it off first; sd-ux-fixes-1, the
+            # review's #20, where "no previous render" read as a missing one)
+            state[:overlay] ? 'render: overlay on (the previous render, faint, behind)' : 'render: overlay off'
           end
 
           def key_phrase(state)
