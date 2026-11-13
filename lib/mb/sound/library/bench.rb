@@ -122,9 +122,13 @@ module MB
         # parent, as golden's approved renders: so sets rendered in a
         # worktree survive its removal; the maintainer, 2026-10-31), else
         # in the project (GraphIO.project_dir) or the working directory.
+        # $MB_SOUND_CHECKOUT_TMP stands for that tmp/ (see
+        # Internal.checkout_tmp_dir).
         def default_root
           env = ENV['MB_SOUND_BENCH_DIR']
           return File.expand_path(env) unless env.nil? || env.empty?
+          o = Internal.checkout_tmp_override
+          return File.join(o, 'listening') if o
           base = GraphIO.project_dir || Dir.pwd
           File.join(Internal.main_checkout(base) || base, 'tmp', 'listening')
         end

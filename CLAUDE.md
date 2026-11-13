@@ -157,6 +157,7 @@ The container has no audio device, so check sound-producing code by rendering it
 - `multitap` and other multi-output results are `Channels` bundles, which are deliberately not Enumerable (`.to_a` for `shuffle`, `reverse`, etc.).
 - C4 = 60 (C3 = 48).  Derive expected values in specs from note constants or a quick script; hand-computed notes and offsets caused several wrong assertions.
 - A realtime Session's render thread runs until `close`; close sessions in spec `after` blocks.  `kill -QUIT <pid>` prints every thread's backtrace (`MB::U.sigquit_backtrace`, set up in spec_helper).
+- Agents running the console, the tuner, or `ui.note` from a worktree export `MB_SOUND_CHECKOUT_TMP=<their scratch>` first: fits, tuner files, ui notes, and Bench sets otherwise go to the main checkout's `/app/tmp` (a review run once replaced one of the maintainer's fits; hand_tune.md).
 - Before adding `bin/sound.rb` commands, check for collisions with `MB::Sound` methods and Pry commands (`Pry::Commands`; e.g. `reset` and `watch` are taken).
 
 ### Process

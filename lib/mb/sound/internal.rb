@@ -400,10 +400,28 @@ module MB
       # runs from a git checkout (a worktree's main checkout, so the files
       # outlive the worktree and the containers sharing /app see them), or
       # nil for an installed gem.  Looked up once.
+      #
+      # $MB_SOUND_CHECKOUT_TMP (#checkout_tmp_override) takes its place for
+      # every file the console keeps there: fits/ (and its versions/,
+      # history/, refine/), the tuner's tuner.json, tuner/,
+      # hand-tune-queue/, and refs/, ui-notes/, and the Bench's listening/
+      # (sd-ux-fixes-1: a review agent's tuner runs from a worktree wrote
+      # the maintainer's /app/tmp and replaced one of his fits).  The
+      # specific overrides ($MB_SOUND_FITS, $MB_SOUND_UI_NOTES, ...) still
+      # win over it.
       def checkout_tmp_dir
+        o = checkout_tmp_override
+        return o if o
         return @checkout_tmp_dir if defined?(@checkout_tmp_dir)
         main = File.exist?(File.join(GEM_ROOT, '.git')) ? main_checkout(GEM_ROOT) : nil
         @checkout_tmp_dir = main && File.join(main, 'tmp')
+      end
+
+      # $MB_SOUND_CHECKOUT_TMP as a full path, or nil (see
+      # #checkout_tmp_dir).
+      def checkout_tmp_override
+        env = ENV['MB_SOUND_CHECKOUT_TMP']
+        env.nil? || env.empty? ? nil : File.expand_path(env)
       end
 
       # An ArgumentError saying how to play the MIDI::Stream (or Notes)
