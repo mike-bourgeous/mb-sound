@@ -658,6 +658,12 @@ module MB
             end
           lits = literal_params(node, snap.values)
           snap = snap.with(values: snap.values.merge(lits).freeze) unless lits.empty?
+          # (noise's frequency and phase as plain numbers set nothing you
+          # hear: dead ends the review's #22 found offered as knobs)
+          if node.is_a?(Tone) && node.noise_only?
+            dead = %i[frequency phase].select { |k| (v = snap.values[k]) && v.detail.nil? && v.value.is_a?(Numeric) }
+            snap = snap.with(values: snap.values.except(*dead).freeze) unless dead.empty?
+          end
           return snap if extras.nil? || extras.empty?
           more = extras.each_with_object({}) { |(name, rd), h|
             key = snap.values.key?(name) ? rd.knob.name : name

@@ -80,4 +80,31 @@ RSpec.describe('the inspector\'s status line', :aggregate_failures) do
   ensure
     MB::Sound.live = live
   end
+
+  # The review's #22: noise rows offered frequency and phase (dead ends),
+  # and an oscillator's start phase was the first SOURCE stop
+  it 'hides noise\'s frequency and phase, and starts a row past its start phase' do
+    screen(:init)
+    act(:section, :source)
+    st = @tiles.instance_variable_get(:@states)[:inspector]
+    expect(st[:at]).not_to be_nil
+    expect(st[:at][1]).not_to eq(:phase)
+    info = st[:snap].inspector
+    osc = info.nodes[st[:at][2]]
+    expect(osc.section).to eq(:source)
+    expect(ui.panes.fetch(:inspector).shown_params(osc).map(&:first).last).to eq(:phase)
+
+    session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+    MB::Sound::Session.with_context(session: session) do
+      MB::Sound.track(:n) { |c| c.synth { |v| (v.hz.saw + MB::Sound.noise.at(0.1)) * v.amp_env } }
+      MB::Sound.bg(:n, MB::Sound.seq(MB::Sound::C3).n4.loop)
+    end
+    4.times { session.process_buffer }
+    g = ui::Inspect::Gatherer.new
+    info = g.call(session, { track: :n, node: nil })
+    noise = info.nodes.index { |n| n.label == 'noise' }
+    expect(g.call(session, { track: :n, node: noise }).nodes[noise].params.values.keys).not_to include(:frequency, :phase)
+  ensure
+    session&.close
+  end
 end

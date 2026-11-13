@@ -509,6 +509,10 @@ module MB
             return hit if hit
             vals = n.params.values.to_a
             vals = vals.reject { |name, v| v.value.nil? && NOTE_PARAMS.include?(name) } if n.section
+            # (an oscillator's start phase last: rarely what you came for,
+            # and bound it rebuilds the track on every press; the review's
+            # #22, where it was the first SOURCE stop)
+            vals = vals.partition { |name, v| !(name == :phase && v.value.is_a?(Numeric)) }.flatten(1) if vals.any? { |name, _| name == :phase }
             SHOWN[n] = vals.freeze
           end
 
@@ -1066,6 +1070,15 @@ module MB
           # A #pick_list entry's identity: [kind, name, row].
           def stop_key(e) = [e[0], e[1], e[3]]
 
+          # True for a stop a row's pick skips past when it has others: an
+          # oscillator's start phase, or a param a build knob drives.
+          def last_resort_stop?(info, e)
+            return false unless e[0] == :param
+            return true if e[1] == :phase
+            kn = info.nodes[e[3]]&.knob_of(e[1])
+            !kn.nil? && info.build_knobs&.include?(kn) == true
+          end
+
           # The index in +list+ (the sections view's #pick_list) of the
           # picked stop (state[:at]), kept by name across polls; a row
           # picked from outside the keys (design, a voice or track switch,
@@ -1082,7 +1095,9 @@ module MB
             i ||= at && at[2] && list.index { |e| e[3] == at[2] }
             # (an index a caller set, without a stop: that stop)
             i ||= state[:pick] if at.nil? && state[:pick].is_a?(Integer) && state[:pick].between?(0, list.length - 1)
-            i ||= list.index { |e| e[3] == info.node } || 0
+            # (a row's first stop that isn't a last resort: a start phase,
+            # or a build knob, which rebuilds the track on every press)
+            i ||= list.index { |e| e[3] == info.node && !last_resort_stop?(info, e) } || list.index { |e| e[3] == info.node } || 0
             state[:at] = stop_key(list[i])
             state[:at_track] = info.track
             state[:pick] = i
