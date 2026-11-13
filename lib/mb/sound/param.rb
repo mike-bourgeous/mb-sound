@@ -131,6 +131,7 @@ module MB
           "(#{Param.literal(range)}).at(#{Param.literal(default)})"
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect = "#<Param::Ranged #{to_ruby}>"
         def to_s = to_ruby
 
@@ -733,6 +734,7 @@ module MB
       end
 
       def to_s = help_line
+      include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
       def inspect = "#<MB::Sound::Param #{to_ruby}>"
 
       # Value equality (see Param.value_key).

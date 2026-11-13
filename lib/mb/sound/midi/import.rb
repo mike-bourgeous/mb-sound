@@ -68,6 +68,7 @@ module MB
             "#{index} #{name.inspect} #{ch}, #{notes} notes#{range}#{kind}#{ctl}"
           end
 
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<MIDI track #{self}>"
         end
 

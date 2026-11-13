@@ -161,6 +161,7 @@ module MB
           ].join("\n")
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect = "#<HandTune::Inference #{track}: #{disagreements.length} of #{steps.length} steps disagree>"
       end
 
@@ -257,6 +258,7 @@ module MB
           [keep, what, opened&.to_s, pair&.to_s, lose, "turn by ear, ab (or b) to compare, S (save_fit #{track.inspect}) saves your knobs into the fit, ui.note 'what you hear', take.save :tmp, 'tuned #{track}'"].compact.join("\n")
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect = "#<HandTune::Opened #{track.inspect}: #{fit ? fit.name : instrument&.name}#{pair ? ", reference #{pair.source}" : ''}>"
       end
 

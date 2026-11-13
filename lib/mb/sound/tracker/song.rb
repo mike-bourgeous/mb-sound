@@ -117,6 +117,7 @@ module MB
             "#{samples.count { |s| !s.empty? }} samples#{", #{instruments.length} instruments" if instruments}"
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect
           "#<MB::Sound::Tracker::Song #{self}>"
         end

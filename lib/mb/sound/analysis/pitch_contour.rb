@@ -51,6 +51,7 @@ module MB
         Vibrato = Data.define(:rate, :depth, :share, :rate_error) do
           def to_h = { rate_hz: rate.frequency, rate_error_hz: rate_error, depth_cents: depth.to_cents.to_f, share: share }
           def to_s = "vibrato #{Analysis.rate_label(rate.frequency)} (rate ±#{Analysis.rate_label(rate_error).sub(' Hz', '')}), ±#{depth.to_cents.round} cents"
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<PitchContour::Vibrato #{self}, #{(share * 100).round}% of the fluctuation>"
         end
 
@@ -64,6 +65,7 @@ module MB
             "pitch #{cents < 0 ? 'falls' : 'rises'} from #{Analysis.hz_label(from.frequency)} to #{Analysis.hz_label(to.frequency)} " \
               "(#{Analysis.seconds_label(start.to_f)}-#{Analysis.seconds_label(stop.to_f)})"
           end
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<PitchContour::Sweep #{self}>"
         end
 

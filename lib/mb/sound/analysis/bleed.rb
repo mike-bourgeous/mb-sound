@@ -53,6 +53,7 @@ module MB
         # :between_harmonics), +text+ (the evidence), +mask+ (a Hash or nil).
         Flag = Data.define(:kind, :text, :mask) do
           def to_s = text
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<Bleed::Flag #{kind}: #{text}>"
         end
 

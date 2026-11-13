@@ -66,6 +66,7 @@ module MB
             "#{Key.words(key)} (r #{format('%.2f', correlation)}, next #{Key.words(next_key)} #{format('%.2f', correlation - margin)})"
           end
 
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect
             "#<Analysis::Key #{self}>"
           end

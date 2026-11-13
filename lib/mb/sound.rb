@@ -44,6 +44,7 @@ require_relative 'sound/fast_latency'
 # The kernel registry and its one switch (MB::Sound.kernels)
 require_relative 'sound/kernels'
 
+require_relative 'sound/one_line_print'
 require_relative 'sound/ruby_value'
 require_relative 'sound/meta'
 require_relative 'sound/length'

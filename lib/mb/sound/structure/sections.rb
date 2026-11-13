@@ -21,6 +21,7 @@ module MB
           format('%-4s bar %d, %d bar%s at %s', label, first_bar, bars, bars == 1 ? '' : 's', Structure.clock(seconds))
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect
           "#<Section #{self}>"
         end

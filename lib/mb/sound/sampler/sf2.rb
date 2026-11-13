@@ -124,6 +124,7 @@ module MB
         # (0..127), +name+, and its index in the file.
         Preset = Data.define(:bank, :program, :name, :index) do
           def to_s = format('%03d:%03d %s', bank, program, name)
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<SF2 preset #{self}>"
         end
 

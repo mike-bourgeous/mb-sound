@@ -23,6 +23,7 @@ module MB
             "design #{track.inspect}: #{what}, #{play}; #{k}#{row ? "; #{row} picked" : ''}"
           end
 
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<#{self}>"
         end
 

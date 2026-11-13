@@ -21,6 +21,7 @@ module MB
         def shipped? = name == :builtin
 
         def to_s = label
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect = "#<Library::Shelf #{label}>"
       end
 
@@ -225,6 +226,7 @@ module MB
           "#{name} (#{kind}, #{family})#{extra} #{shelf.name}"
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect
           "#<Library::Entry #{self}>"
         end

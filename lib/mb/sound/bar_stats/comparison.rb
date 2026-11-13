@@ -85,6 +85,7 @@ module MB
             "bar #{bar}#{b_bar == bar ? '' : " (B #{b_bar})"}: #{text}"
           end
 
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<Comparison::Bar #{self}>"
         end
 

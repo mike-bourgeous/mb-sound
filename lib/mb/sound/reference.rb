@@ -60,6 +60,7 @@ module MB
         # What #hearing names each track of #cycle.
         def hearings = alt ? %i[patch alt ref] : %i[patch ref]
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect = "#<#{self}>"
 
         private def fmt(x) = format('%+.1f', x).sub('+-', '-')

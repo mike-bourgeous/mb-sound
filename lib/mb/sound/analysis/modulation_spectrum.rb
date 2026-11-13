@@ -72,6 +72,7 @@ module MB
               "±#{format('%.1f', depth.decibels)} dB in #{range}"
           end
 
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<ModulationSpectrum::Peak #{self}, #{(share * 100).round}% of its fluctuation>"
         end
 

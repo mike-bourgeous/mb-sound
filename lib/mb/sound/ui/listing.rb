@@ -5,6 +5,7 @@ module MB
       # x columns, as `stty size` prints them).
       Size = Data.define(:rows, :cols) do
         def to_s = "#{rows}x#{cols}"
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect = to_s
         def to_a = [rows, cols]
       end

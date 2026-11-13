@@ -113,6 +113,7 @@ module MB
           lines.join("\n")
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect
           "#<Structure::Comparison #{to_s.lines.first.chomp}>"
         end

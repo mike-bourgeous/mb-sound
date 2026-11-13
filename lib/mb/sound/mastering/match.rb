@@ -32,6 +32,7 @@ module MB
           format('%s: %.1f LUFS, %.1f dBTP, LRA %.1f LU, tilt %+.2f dB/oct', name, lufs, true_peak, range, tilt)
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect
           "#<Mastering::Reference #{self}>"
         end

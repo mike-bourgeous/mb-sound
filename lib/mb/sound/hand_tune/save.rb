@@ -28,6 +28,7 @@ module MB
           parts.join("\n")
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect = "#<HandTune::Saved #{track.inspect}: #{changed.length} changed#{nothing ? ', nothing written' : ''}>"
 
         private

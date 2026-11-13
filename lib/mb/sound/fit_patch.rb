@@ -81,6 +81,7 @@ module MB
           "fit patch #{name}: #{params.length} knob#{'s' unless params.length == 1} (#{knobs}) in #{path}#{miss}"
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect = "#<#{self}>"
       end
 
