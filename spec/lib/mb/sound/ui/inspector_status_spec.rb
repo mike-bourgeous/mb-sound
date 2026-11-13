@@ -114,4 +114,33 @@ RSpec.describe('the inspector\'s status line', :aggregate_failures) do
     screen(:acid)
     expect(@tiles.to_text).to match(/bass  acid  1\/1/)
   end
+
+  # The review's #26: the P panel of a hand-written patch showed one cell
+  # and none of its envelope's literals; F worked only on presets
+  it 'shows a hand-written patch\'s envelope literals as panel cells, and F says why it does nothing there' do
+    MB::Sound::Session.with_context(session: @session) do
+      MB::Sound.track(:hand) { |c| c.synth { |v| v.hz.saw.lp4(900) * v.amp_env(0.01, 0.2, 0.6, 0.4) } }
+    end
+    screen(:acid)
+    MB::Sound::Session.with_context(session: @session) { MB::Sound.bg(:hand, MB::Sound.seq(MB::Sound::C3).n4.loop, on: :now) }
+    4.times { @session.process_buffer }
+    pane = ui.panes.fetch(:inspector)
+    st = @tiles.instance_variable_get(:@states)[:inspector]
+    3.times do
+      break if st[:snap]&.inspector&.track == :hand
+      act(:track, 1)
+      @now += 0.5
+      @tiles.refresh
+    end
+    act(:view)
+    info = st[:snap].inspector
+    expect(info.track).to eq(:hand)
+    cells = pane.send(:pick_list, st, info).select { |e| e[0] == :param }.map { |e| e[1] }
+    expect(cells).to include(:attack, :decay, :sustain, :release)
+    expect(pane.key_action(:fixed, st)).to match(/hand plays a patch block: its literals are cells already/)
+    act(:track, 1)
+    @now += 0.5
+    @tiles.refresh
+    expect(pane.key_action(:fixed, st)).to match(/bass plays acid, library code rather than a graph document/)
+  end
 end

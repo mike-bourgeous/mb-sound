@@ -976,9 +976,14 @@ module MB
           # knobs already (the maintainer, 2026-10-30: "Toggle").
           def key_fixed(state)
             info = state[:snap]&.inspector
+            unless info&.document
+              # (why not, by what the track plays; the review's #26)
+              track = info&.track || 'the track'
+              return "#{track} plays #{info.instrument}, library code rather than a graph document: its knobs are the cells, its other numbers are set in its code (F shows a preset document's numbers)" if info&.instrument
+              return "#{track} plays a patch block: its literals are cells already (F shows a preset document's numbers)"
+            end
             state[:fixed] = !state[:fixed]
             state[:pick] = state[:at] = nil
-            return "#{info&.track || 'the track'} plays no preset: its literals are cells already (F shows a preset's numbers)" unless info&.document
             state[:fixed] ? "#{info.document}'s numbers shown (Enter or Left/Right binds one; F hides them)" : "#{info.document}'s numbers hidden (F shows them)"
           end
 
@@ -1048,7 +1053,11 @@ module MB
                   # (and a preset's numbers: its params are the knobs already, so F
                   # shows them, bindable: the maintainer, 2026-10-30: "Toggle")
                   next [:param, name, v, j] if m.knob_of(name)
-                  next unless v.detail == Inspect::LITERAL && !Arrangement::LiteralBinding.count?(name, v.value)
+                  # (a written literal, or a plain number a node keeps, an
+                  # envelope's attack: the review's #26, where a hand-written
+                  # patch's panel showed one cell and none of its env's)
+                  literal = v.detail == Inspect::LITERAL || (v.detail.nil? && v.value.is_a?(Numeric) && name != :phase)
+                  next unless literal && !Arrangement::LiteralBinding.count?(name, v.value)
                   [:param, name, v, j] if !info.document || state[:fixed]
                 }
               }
