@@ -290,11 +290,13 @@ module GraphSweep
           c.sig.shape_db(-84.db => -84.db, -34.db => [-40.db, -12.db], 0.db => -6.db, negative: [[-84.db, -84.db], [-20.db, -30.db], [-20.db, -10.db], [0.db, -6.db]])
       }],
       ['Quantize node', ->(c) { c.sig.quantize(c.mod(0.01, 0.2)) }],
-      ['filter banks (FilterBank: bandpass_series with node inputs, stereo pans, normalize; filter_bank; peq/peq_series serial)', ->(c) {
+      ['filter banks (FilterBank: bandpass_series with node inputs, stereo pans, per-band moving pans, normalize; filter_bank; peq/peq_series serial)', ->(c) {
         st = c.sig.bandpass_series(c.notes.freq, count: 6, ratio: c.mod(0.9, 1.1), width: MB::Sound.per_harmonic(15.cents..90.cents, curve: :exp),
                                    gain: MB::Sound.per_harmonic(0.db, -3.db), pan: c.mod(-1, 1), normalize: true)
         fb = c.sig.filter_bank([300, 900, 2400], width: 40.hz, gain: [1, 0.5, c.mod(0.1, 0.9)], pan: -0.8..0.8, pan_law: :linear)
-        st.outputs[0] + st.outputs[1] * 0.5 + fb.outputs[0] + fb.outputs[1] +
+        # (each band panned by its own copy of an LFO: per_harmonic's tone form)
+        pb = c.sig.bandpass_series(330, count: 3, width: 30.cents, pan: MB::Sound.per_harmonic(c.mod(-1, 1), phase: 0...1, rate: 1..1.5), normalize: true)
+        st.outputs[0] + st.outputs[1] * 0.5 + fb.outputs[0] + fb.outputs[1] + pb.outputs[0] - pb.outputs[1] * 0.5 +
           c.sig.bandpass_series(220, count: 4, quality: c.mod(5, 20), normalize: true) + c.sig.peq(300 => [-6.db, 0.5], 2000 => 4.db) +
           c.sig.peq_series(c.mod(100, 200), count: 3, gain: -4.db, width: 20.cents) +
           c.sig.filter_bank([200, 2000], type: [:lowpass, :highpass], response: :matched, quality: 0.7, serial: true)
