@@ -448,6 +448,8 @@ module MB
           if v.is_a?(Library::Entry) && v.kind == :clip && v.builder
             v = v.call
           end
+          # (several library entries where one goes: L.inst.reese; sd-ux-fixes-1)
+          raise ArgumentError, Library::Heads.several(v, "track #{name.inspect}") if v.is_a?(Library::Heads::Query)
           # (a generator's params the call left out become the track's
           # knobs, :"drums/energy": Library::Generators.track_clip)
           v = Library::Generators.track_clip(v, name, @session) if v.is_a?(Library::Entry) || v.is_a?(Sequence::Clip)
