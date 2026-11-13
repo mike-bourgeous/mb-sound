@@ -1563,7 +1563,13 @@ module MB
           return copy_pane(name) if action == :copy_text
           pane = @panes[name]
           return flash("#{name}: no pane", :warn) unless pane.respond_to?(:key_action)
+          hint = pane.respond_to?(:enter_hint) ? pane.enter_hint(@states[name]) : nil
           r = pane.key_action(action, @states[name], *args)
+          # (a key that changed what Enter does and says nothing of its own,
+          # Down after a section jump: the Enter hint replaces the earlier
+          # flash at once; sd-ux-fixes-1, the review's #10, where the jump's
+          # "AMP amp env" stayed 3.5 s and a build knob got turned as decay)
+          @flash = nil if @flash && (r.nil? || (r.is_a?(Array) && r.none?(String))) && hint != (pane.respond_to?(:enter_hint) ? pane.enter_hint(@states[name]) : nil)
           pane_result(name, r)
         end
 
