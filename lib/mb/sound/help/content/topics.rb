@@ -232,11 +232,20 @@ module MB
         one-poles, and `response: :matched` keeps the analog shape up to
         20 kHz (`:bilinear` is the default).  `lp4` is a
         CEM3379-style four-pole, `diode` a 303-style ladder with the same
-        knobs.
+        knobs.  Filter banks (`filter_bank`, `bandpass_series`,
+        `peq_series`, `peq`, `formant`) run many SVF bands in one node:
+        widths are `30.cents` (musical), `40.hz` (Hz), or a number (Q),
+        and any band setting takes `per_harmonic(a..b, curve:)`, a Range,
+        or a list.
       TEXT
-      dsl :filter, :lp1, :hp1, :lp4, :diode, :peq, :formant, :smooth
+      commands :per_harmonic
+      dsl :filter, :lp1, :hp1, :lp4, :diode, :filter_bank, :bandpass_series, :peq_series, :peq, :formant, :smooth
       note :filters
+      note :filter_bank
       see :knobs
+      example 'a harmonic bandpass bank, wider up the series and spread across the stereo field' do
+        bg :try, 0.5.hz.saw.at(6).bandpass_series(110, count: 16, width: per_harmonic(15.cents..90.cents, curve: :exp), pan: -1..1, normalize: true).softclip(0.9).at(-14.db).until(2.bars)
+      end
       example 'a swept four-pole (one bar up, one bar down: the length is per step)' do
         bg :try, 55.hz.saw.at(-16.db).lp4(tween([200.hz, 4000.hz], 1.bar), resonance: 0.6).until(2.bars)
       end

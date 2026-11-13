@@ -60,6 +60,7 @@
 #include "mb_jump_step.h"
 #include "mb_calculus.h"
 
+#include "mb_filter_bank.h"
 #include "plan_filters.h"
 
 // The most lanes FastPlan.run_lanes takes at once.
@@ -106,6 +107,7 @@ enum {
 	OP_UNISON,    // dst, d, f, sc               dst = a Unison::Detune copy's frequency (see run_unison; Plan::Op::UnisonCopy)
 	OP_DERIVATIVE,// dst, a, object              dst = GraphNode::Derivative of a (see run_derivative; Plan::Op::Derivative)
 	OP_INTEGRAL,  // dst, a, reset, object       dst = GraphNode::Integral of a, reset a register or -1 (see run_integral; Plan::Op::Integral)
+	OP_FILTER_BANK,// dst, nch, object, a, nsig, sc, nch - 1 more dst regs, nsig signal regs  dst... = GraphNode::FilterBank (see run_filter_bank; Plan::Op::FilterBank)
 };
 
 // Functions of OP_UNARY (Plan::Op::Unary::FUNCTIONS)
@@ -1034,6 +1036,10 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 			if (pc + 6 > pw->nwords || op[2] < 1 || op[2] > 64 || op[5] < 1 || op[5] > 64) rb_raise(rb_eArgError, "Bad plan dynamics op at word %zu", pc);
 			len = 6 + 2 * (size_t)op[2] - 1 + (size_t)op[5] + MB_PLAN_DYN_SIGNALS;
 			break;
+		case OP_FILTER_BANK:
+			if (pc + 7 > pw->nwords || op[2] < 1 || op[2] > MB_FB_MAX_CHANNELS || op[5] < 0 || op[5] > MB_FB_MAX_SIGNALS) rb_raise(rb_eArgError, "Bad plan filter bank op at word %zu", pc);
+			len = 7 + (size_t)op[2] - 1 + (size_t)op[5];
+			break;
 		case OP_ENVELOPE:
 			if (pc + 5 > pw->nwords || op[4] < 2 || op[4] > ENV_MAX_SEGMENTS) rb_raise(rb_eArgError, "Bad plan envelope at word %zu", pc);
 			len = 5 + 4 * (size_t)op[4] + 7;
@@ -1053,7 +1059,7 @@ static void check_op(const int32_t *op, size_t pc, const struct regs *R, long nr
 	float *const *ptrs = R->p;
 	int d = op[1];
 	if (d < 0 || d >= nregs || !ptrs[d]) rb_raise(rb_eArgError, "Bad plan destination at word %zu", pc);
-	if (op[0] != OP_FILL && op[0] != OP_TONE && op[0] != OP_EVENTS && op[0] != OP_ENVELOPE && op[0] != OP_DYNAMICS && op[0] != OP_MIX) {
+	if (op[0] != OP_FILL && op[0] != OP_TONE && op[0] != OP_EVENTS && op[0] != OP_ENVELOPE && op[0] != OP_DYNAMICS && op[0] != OP_MIX && op[0] != OP_FILTER_BANK) {
 		if (op[2] < 0 || op[2] >= nregs || !ptrs[op[2]]) rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
 	}
 	if ((op[0] == OP_MUL || op[0] == OP_ADD || op[0] == OP_DIV || op[0] == OP_POW || op[0] == OP_POWF || op[0] == OP_MAX) && (op[3] < 0 || op[3] >= nregs || !ptrs[op[3]])) {
@@ -1313,6 +1319,37 @@ static void run_dynamics(const int32_t *op, size_t pc, const struct regs *R, lon
 	for (long k = 0; k < nside; k++) op_signal(&side[k], R, nregs, sides[k], 0.0, pc);
 	for (long k = 0; k < MB_PLAN_DYN_SIGNALS; k++) op_signal(&tim[k], R, nregs, times[k], sc[op[4] + k], pc);
 	mb_plan_dynamics(out, nch, in, side, nside, tim, rb_ary_entry(objects, op[3]), n);
+}
+
+// OP_FILTER_BANK: dst, nch, object, a, nsig, sc, nch - 1 more destination
+// registers (channels 1 and up; channel 0 is dst), then nsig signal
+// registers (-1: the scalar sc[k]); object: the GraphNode::FilterBank (see
+// mb_plan_filter_bank).  Every channel comes from one kernel call.  The
+// register allocator gives every destination its own slot, apart from the
+// operands.
+static void run_filter_bank(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, VALUE objects, size_t n)
+{
+	long nch = op[2];
+	long nsig = op[5];
+	if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan filter bank object at word %zu", pc);
+	if (op[6] < 0 || (size_t)op[6] + (size_t)nsig > nscalars) rb_raise(rb_eArgError, "Bad plan filter bank scalars at word %zu", pc);
+	if (op[4] < 0 || op[4] >= nregs || !R->p[op[4]]) rb_raise(rb_eArgError, "Bad plan filter bank input at word %zu", pc);
+	const int32_t *dsts = op + 7;
+	const int32_t *sigs = dsts + nch - 1;
+
+	float *out[MB_FB_MAX_CHANNELS];
+	for (long c = 0; c < nch; c++) {
+		int d = c == 0 ? op[1] : dsts[c - 1];
+		if (d < 0 || d >= nregs || !R->p[d] || R->c[d]) rb_raise(rb_eArgError, "Bad plan filter bank destination at word %zu", pc);
+		out[c] = R->p[d];
+	}
+	struct mb_signal x, sig[nsig > 0 ? nsig : 1];
+	op_signal(&x, R, nregs, op[4], 0.0, pc);
+	for (long k = 0; k < nsig; k++) {
+		if (sigs[k] >= nregs || (sigs[k] >= 0 && !R->p[sigs[k]])) rb_raise(rb_eArgError, "A planned filter bank's input is missing at word %zu", pc);
+		op_signal(&sig[k], R, nregs, sigs[k], sc[op[6] + k], pc);
+	}
+	mb_plan_filter_bank(out, nch, &x, sig, nsig, rb_ary_entry(objects, op[3]), n);
 }
 
 // OP_MIX: dst, nterms, sc, then nterms real registers: one output row of
@@ -1680,6 +1717,10 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 			run_mix(op, pc, R, nregs, sc, nscalars, n);
 			break;
 
+		case OP_FILTER_BANK:
+			run_filter_bank(op, pc, R, nregs, sc, nscalars, objects, n);
+			break;
+
 		case OP_DECIMATE:
 			run_decimate(op, pc, R, nregs, sc, nscalars, objects, n);
 			break;
@@ -1981,6 +2022,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("integral")), INT2NUM(OP_INTEGRAL));
 	rb_hash_aset(h, ID2SYM(rb_intern("pan_gain")), INT2NUM(OP_PAN_GAIN));
 	rb_hash_aset(h, ID2SYM(rb_intern("resonator")), INT2NUM(OP_RESONATOR));
+	rb_hash_aset(h, ID2SYM(rb_intern("filter_bank")), INT2NUM(OP_FILTER_BANK));
 	rb_hash_aset(h, ID2SYM(rb_intern("unison")), INT2NUM(OP_UNISON));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));

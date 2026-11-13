@@ -146,7 +146,7 @@ module MB
         # with_seed: a block whose random draws start from a given seed
         # (MB::Sound.with_seed; fit-patch-2: fits print it around a voice),
         # walked as document code.)
-        TOP_EXTRA = (Set[:per_voice, :per_channel, :scale, :tones, :weights, :harmony, :markov, :lsystem, :knob, :cc, :modes, :breakbeat, :with_seed] |
+        TOP_EXTRA = (Set[:per_voice, :per_channel, :per_harmonic, :scale, :tones, :weights, :harmony, :markov, :lsystem, :knob, :cc, :modes, :breakbeat, :with_seed] |
                      MB::Sound::Rack::CONSTRUCTORS).freeze
 
         # Methods whose blocks build graphs (run once per call as document

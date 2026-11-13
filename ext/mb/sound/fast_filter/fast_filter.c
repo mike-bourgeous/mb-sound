@@ -1,8 +1,9 @@
 /*
  * MB::Sound::FastFilter: analog-style filter kernels (the four-pole, the
  * diode ladder (ruby_diode_ladder below), the state-variable filter,
- * ruby_svf below, a bank of SVF bandpasses for formants, ruby_formant, and
- * a phaser's allpass chain, ruby_phaser).
+ * ruby_svf below, a bank of SVF bandpasses for formants, ruby_formant, the
+ * filter bank, ruby_filter_bank (mb_filter_bank.h), and a phaser's allpass
+ * chain, ruby_phaser).
  *
  * four_pole: a 4-pole resonant lowpass in the style of the CEM3379 (and
  * CEM3320): four one-pole OTA-C stages in a cascade with resonance feedback
@@ -58,6 +59,7 @@
 #include "mb_ext_helpers.h"
 #include "mb_svf.h"
 #include "mb_four_pole.h"
+#include "mb_filter_bank.h"
 
 /*
  * Filters +buffer+ (SFloat, modified in place if marked inplace):
@@ -444,6 +446,85 @@ static VALUE ruby_formant(VALUE self, VALUE out, VALUE x, VALUE tables, VALUE mo
 }
 
 /*
+ *   filter_bank(outs, x, config, signals, state, sample_rate)
+ *
+ * GraphNode::FilterBank's kernel (mb_filter_bank.h, which describes the
+ * config): +outs+ is an Array of one contiguous 1D SFloat per channel, all
+ * the block's length; +x+ the input and +signals+ an Array of the bank's
+ * signal inputs (Numerics or NArrays of the block's length, read as
+ * float32); +config+ and +state+ contiguous 1D DFloats (the state
+ * updated).  Returns +outs+.  Exact Ruby mirror:
+ * MB::Sound::GraphNode::FilterBank.process_ruby.
+ */
+static VALUE ruby_filter_bank(VALUE self, VALUE outs, VALUE x, VALUE config, VALUE signals, VALUE state, VALUE rate_v)
+{
+	Check_Type(outs, T_ARRAY);
+	Check_Type(signals, T_ARRAY);
+	if (CLASS_OF(config) != numo_cDFloat || RNARRAY_NDIM(config) != 1 || !RTEST(nary_check_contiguous(config))) {
+		rb_raise(rb_eArgError, "The filter bank config must be a contiguous 1D DFloat");
+	}
+	if (CLASS_OF(state) != numo_cDFloat || RNARRAY_NDIM(state) != 1 || !RTEST(nary_check_contiguous(state))) {
+		rb_raise(rb_eArgError, "The filter bank state must be a contiguous 1D DFloat");
+	}
+	rb_check_frozen(state);
+
+	double rate = NUM2DBL(rate_v);
+	if (!(rate > 0) || !isfinite(rate)) {
+		rb_raise(rb_eArgError, "Sample rate must be positive and finite");
+	}
+
+	long nouts = RARRAY_LEN(outs);
+	long nsig = RARRAY_LEN(signals);
+	const double *cfg = (const double *)(nary_get_pointer_for_read(config) + nary_get_offset(config));
+	mb_fbank_check(cfg, RNARRAY_SHAPE(config)[0], nsig, nouts, RNARRAY_SHAPE(state)[0]);
+
+	size_t length = 0;
+	float *op[MB_FB_MAX_CHANNELS];
+	for (long c = 0; c < nouts; c++) {
+		VALUE o = rb_ary_entry(outs, c);
+		if (CLASS_OF(o) != numo_cSFloat || RNARRAY_NDIM(o) != 1 || !RTEST(nary_check_contiguous(o))) {
+			rb_raise(rb_eArgError, "Filter bank outputs must be contiguous 1D SFloats");
+		}
+		rb_check_frozen(o);
+		if (c == 0) {
+			length = RNARRAY_SHAPE(o)[0];
+		} else if (RNARRAY_SHAPE(o)[0] != length) {
+			rb_raise(rb_eArgError, "Filter bank outputs must have the same length");
+		}
+		op[c] = mb_sfloat_ptr(o);
+	}
+
+	struct mb_signal xs;
+	mb_signal_input(&x, length, "The input", &xs);
+
+	// (cast copies, made only for signals that aren't contiguous SFloats or
+	// numbers, are kept in +held+, guarded below; no allocation otherwise)
+	VALUE held = Qnil;
+	struct mb_signal sig[nsig > 0 ? nsig : 1];
+	for (long s = 0; s < nsig; s++) {
+		VALUE orig = rb_ary_entry(signals, s);
+		VALUE v = orig;
+		mb_signal_input(&v, length, "A filter bank signal", &sig[s]);
+		if (v != orig) {
+			if (NIL_P(held)) {
+				held = rb_ary_new();
+			}
+			rb_ary_push(held, v);
+		}
+	}
+
+	double *st = (double *)(nary_get_pointer_for_write(state) + nary_get_offset(state));
+	mb_fbank_run(cfg, &xs, sig, nsig, op, st, rate, length);
+
+	RB_GC_GUARD(x);
+	RB_GC_GUARD(held);
+	RB_GC_GUARD(config);
+	RB_GC_GUARD(outs);
+
+	return outs;
+}
+
+/*
  * phaser: GraphNode::Phaser's chain of first-order allpass stages, all at
  * one moving frequency, with feedback around the chain and a dry/wet sum.
  *
@@ -811,6 +892,7 @@ void Init_fast_filter(void)
 	rb_define_module_function(fast_filter, "four_pole", ruby_four_pole, -1);
 	rb_define_module_function(fast_filter, "svf", ruby_svf, 7);
 	rb_define_module_function(fast_filter, "formant", ruby_formant, 9);
+	rb_define_module_function(fast_filter, "filter_bank", ruby_filter_bank, 6);
 	rb_define_module_function(fast_filter, "phaser", ruby_phaser, 11);
 	rb_define_module_function(fast_filter, "tan", ruby_tan, 1);
 	rb_define_module_function(fast_filter, "tanh", ruby_tanh, 1);
