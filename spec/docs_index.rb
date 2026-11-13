@@ -53,7 +53,7 @@ module DocsIndex
       'curves' => 'Tweening curves', 'tempo_sync' => 'Tempo sync', 'multichannel' => 'Multichannel',
     },
     'Sound' => {
-      'oscillators' => 'Oscillators and antialiasing', 'envelopes' => 'Envelopes', 'filters' => 'Filters', 'delays' => 'Delays',
+      'oscillators' => 'Oscillators and antialiasing', 'envelopes' => 'Envelopes', 'filters' => 'Filters', 'filter_bank' => 'Filter banks', 'delays' => 'Delays',
       'chorus' => 'Chorus', 'phaser' => 'Phaser', 'modulation' => 'Modulation effects', 'reverbs' => 'Reverbs', 'dynamics' => 'Dynamics', 'drums' => 'Drum machines', 'sampler' => 'Sampler',
       'textures' => 'Textures', 'granular' => 'Granular and spectral stretch', 'loops' => 'Loop files and tempo-following loops',
       'regions' => 'Timeline regions',

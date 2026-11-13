@@ -182,7 +182,6 @@ module GraphSweep
       ['Cookbook object as biquad', ->(c) { c.sig.filter(f::Cookbook.new(:lowpass, 48000, 1000, quality: 2), structure: :biquad) }],
       ['SVF object', ->(c) { c.sig.filter(f::SVF.new(:notch, 48000, 1000, quality: 2)) }],
       ['FilterChain', ->(c) { c.sig.filter(f::FilterChain.new(f::FirstOrder.new(:lowpass, 48000, 2000), f::Cookbook.new(:highpass, 48000, 100, quality: 0.7))) }],
-      ['FilterSum', ->(c) { c.sig.filter(f::FilterSum.new(f::FirstOrder.new(:lowpass, 48000, 400), f::FirstOrder.new(:highpass, 48000, 4000))) }],
       ['Filter::Delay object', ->(c) { c.sig.filter(f::Delay.new(delay: 0.003, sample_rate: 48000, wet: 0.5, dry: 1)) }],
       ['NoiseColor pink', ->(c) { c.sig.filter(f::NoiseColor.new(:pink)) }],
       ['NoiseColor brown', ->(c) { c.sig.filter(f::NoiseColor.new(:brown)) }],
@@ -291,6 +290,15 @@ module GraphSweep
           c.sig.shape_db(-84.db => -84.db, -34.db => [-40.db, -12.db], 0.db => -6.db, negative: [[-84.db, -84.db], [-20.db, -30.db], [-20.db, -10.db], [0.db, -6.db]])
       }],
       ['Quantize node', ->(c) { c.sig.quantize(c.mod(0.01, 0.2)) }],
+      ['filter banks (FilterBank: bandpass_series with node inputs, stereo pans, normalize; filter_bank; peq/peq_series serial)', ->(c) {
+        st = c.sig.bandpass_series(c.notes.freq, count: 6, ratio: c.mod(0.9, 1.1), width: MB::Sound.per_harmonic(15.cents..90.cents, curve: :exp),
+                                   gain: MB::Sound.per_harmonic(0.db, -3.db), pan: c.mod(-1, 1), normalize: true)
+        fb = c.sig.filter_bank([300, 900, 2400], width: 40.hz, gain: [1, 0.5, c.mod(0.1, 0.9)], pan: -0.8..0.8, pan_law: :linear)
+        st.outputs[0] + st.outputs[1] * 0.5 + fb.outputs[0] + fb.outputs[1] +
+          c.sig.bandpass_series(220, count: 4, quality: c.mod(5, 20), normalize: true) + c.sig.peq(300 => [-6.db, 0.5], 2000 => 4.db) +
+          c.sig.peq_series(c.mod(100, 200), count: 3, gain: -4.db, width: 20.cents) +
+          c.sig.filter_bank([200, 2000], type: [:lowpass, :highpass], response: :matched, quality: 0.7, serial: true)
+      }],
       ['formant (Formant) constant and morphing', ->(c) {
         c.sig.formant(:a) + c.sig.formant(:a, :e, [[300, 0.db, 50], [900, -6.db, 60], [2500, -12.db, 100], [3300, -20.db, 120], [4000, -30.db, 150]], morph: c.mod(0, 1), shift: c.mod(-5, 5, 3), width: c.mod(0.5, 1.5, 2), voice: :soprano)
       }],
@@ -687,7 +695,6 @@ module GraphSweep
     'MB::Sound::InputBufferWrapper' => 'wraps an input stream for window readers, not a graph node in use',
     'MB::Sound::OutputBufferWrapper' => 'wraps an output stream for window writers',
     'MB::Sound::GraphNode::DataShuffler' => 'test/debug helper with no DSL entry point',
-    'MB::Sound::Filter::FilterBank' => 'parallel filters over Arrays of plain data, not used in graphs',
   }.freeze
 
   # Buffer size and count of the Notes reference path pass (Kernels

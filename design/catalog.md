@@ -48,10 +48,11 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `hp1/highpass1(cutoff, response:)` A 6 dB/octave one-pole highpass, -3 dB at the cutoff
 - `lp4/four_pole/lowpass4(cutoff, resonance:, quality:, ...)` A CEM3379-style 4-pole resonant lowpass (24 dB/octave; GraphNode::FourPole)
 - `diode/diode_ladder(cutoff, resonance:, ...)` A TB-303-style diode ladder lowpass: #lp4 with `mode: :diode`
-- `formant/vowel(*vowels, voice:, morph:, ...)` A formant filter (GraphNode::Formant): a bright source "says" a vowel
-- `peq(pairs, structure:, ...)` Adds a filter chain that applies parametric peaking EQ
-- `peq_series(fundamental_hz, count:, ratio:, ...)` Peaking filters in series at the harmonics of fundamental_hz
-- `bandpass_series(fundamental_hz, count:, ratio:, ...)` Bandpass filters in parallel at the harmonics of fundamental_hz
+- `formant/vowel(*vowels, voice:, morph:, ...)` A formant filter: a bright source "says" a vowel (Formant)
+- `filter_bank(frequencies, type:, width:, ...)` SVF bands in one node (FilterBank)
+- `peq(pairs, ...)` Parametric peaking EQ (a serial FilterBank)
+- `peq_series(fundamental_hz, count:, ratio:, ...)` Serial peaks at harmonics of fundamental_hz
+- `bandpass_series(fundamental_hz, count:, ratio:, ...)` Parallel bandpasses at harmonics of fundamental_hz
 - `hilbert_iir(sample_rate:)` A complex analytic signal from an IIR phase difference network (Hilbert)
 - `clip_rate(max_rise, max_fall, reset:, sample_rate:)` Limits this node's slope to max_rise and max_fall units per second
 - `inertia(rate, substeps:, mode:)` Follows this node with its acceleration limited (GraphNode::Inertia)
@@ -178,7 +179,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `:wavetables` Wavetables and shape morphs: wavetable_of .harmonics
 - `:unison` Unison and supersaws: .unison .swarm
 - `:envelopes` Envelopes and curves: adsr env amp_env filter_env fm_env sq80_env tween bounce_hits
-- `:filters` Filters
+- `:filters` Filters: per_harmonic
 - `:effects` Effects
 - `:dynamics` Dynamics
 - `:blend` Mixing an effect in (wet and dry): bus feed knob

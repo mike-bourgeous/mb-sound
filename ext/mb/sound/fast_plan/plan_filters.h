@@ -99,4 +99,9 @@ void mb_plan_decimate(float *d, const struct mb_signal *in, const struct mb_sign
 // objects.
 void mb_plan_resonator(float *d, const struct mb_signal *in, const struct mb_signal *freq, const struct mb_signal *decay, int modal, VALUE obj, size_t n);
 
+// GraphNode::FilterBank on input x into +nch+ outputs, with the bank's
+// +nsig+ signals (plan_filter_bank.c, OP_FILTER_BANK).
+struct mb_signal;
+void mb_plan_filter_bank(float *const *out, long nch, const struct mb_signal *x, const struct mb_signal *sig, long nsig, VALUE obj, size_t n);
+
 #endif

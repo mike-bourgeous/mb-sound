@@ -634,15 +634,35 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
   end
 
   describe '#peq' do
-    it 'builds SVF peaking filters by default and biquads on request, with the same response' do
+    it 'builds a serial filter bank of peaks with the cookbook biquads\' response' do
       noise = MB::Sound.with_seed(4) { Numo::SFloat.cast(MB::Sound.noise.sample(24000)) }
       svf = MB::Sound::ArrayInput.new(data: [noise]).peq(200.hz => -6.db, 2000.hz => [10.db, 2])
-      biquad = MB::Sound::ArrayInput.new(data: [noise]).peq({ 200.hz => -6.db, 2000.hz => [10.db, 2] }, structure: :biquad)
-      expect(svf.base_filter.filters.map(&:class)).to eq([MB::Sound::Filter::SVF] * 2)
-      expect(biquad.base_filter.filters.map(&:class)).to eq([MB::Sound::Filter::Cookbook] * 2)
+      biquad = MB::Sound::ArrayInput.new(data: [noise]).filter(:peak, cutoff: 200, gain: -6.db, quality: MB::Sound::Filter::Cookbook.new(:peak, 48000, 200, db_gain: -6, bandwidth_oct: 1.0 / 3).quality, structure: :biquad)
+        .filter(:peak, cutoff: 2000, gain: 10.db, quality: MB::Sound::Filter::Cookbook.new(:peak, 48000, 2000, db_gain: 10, bandwidth_oct: 2).quality, structure: :biquad)
+      expect(svf).to be_a(MB::Sound::GraphNode::FilterBank)
+      expect(svf.serial?).to eq(true)
+      expect(svf.band_list.map { |b| b[:type] }).to eq([:peak, :peak])
       a = svf.sample(24000)
       b = biquad.sample(24000)
       expect(20 * Math.log10((a - b).abs.max / b.abs.max)).to be < -100
+    end
+
+    it 'gives the samples of chained SVF peaks, bit for bit' do
+      noise = MB::Sound.with_seed(4) { Numo::SFloat.cast(MB::Sound.noise.sample(4800)) }
+      bank = MB::Sound::ArrayInput.new(data: [noise]).peq(200.hz => -6.db, 2000.hz => [10.db, 2], 5000 => { gain: 0.5, width: 0.5 })
+      # (the old peq: a FilterChain of SVFs, each filtering the buffer in place)
+      svfs = [[200, -6.db, 1.0 / 3], [2000, 10.db, 2], [5000, 0.5, 0.5]].map { |f, g, bw|
+        MB::Sound::Filter::SVF.new(:peak, 48000, f, db_gain: MB::Sound::Decibels.db_of(g, 'gain'), bandwidth_oct: bw)
+      }
+      chain = MB::Sound::ArrayInput.new(data: [noise]).filter(MB::Sound::Filter::FilterChain.new(svfs))
+      expect(bank.sample(4800)).to eq(chain.sample(4800))
+    end
+
+    it 'takes typed bandwidths: Intervals as octaves, frequencies as Hz' do
+      a = 100.hz.saw.peq(1000 => [6.db, 0.5]).sample(2000).dup
+      expect(100.hz.saw.peq(1000 => [6.db, 6.semitones]).sample(2000)).to eq(a)
+      q = 100.hz.saw.peq(1000 => [6.db, 100.hz]).band_list[0][:width]
+      expect([q.mode, q.value]).to eq([:hz, 100.0])
     end
 
     # (omnibus19; Kez, panel 3: a moving frequency raised `to_f` on a
@@ -655,20 +675,44 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     end
   end
 
-  pending '#peq_series'
+  describe '#peq_series' do
+    it 'chains peaks at the harmonics, the same as peq at those frequencies' do
+      a = 110.hz.saw.peq_series(110, count: 4, gain: -6.db, width: 0.2).sample(4800).dup
+      b = 110.hz.saw.peq(110 => [-6.db, 0.2], 220 => [-6.db, 0.2], 330 => [-6.db, 0.2], 440 => [-6.db, 0.2]).sample(4800)
+      expect(a).to eq(b)
+    end
+
+    it 'takes per-band settings and a moving fundamental' do
+      node = 110.hz.saw.peq_series(2.hz.lfo.at(100..200), count: 3, gain: MB::Sound.per_harmonic(-3.db..-12.db), width: 10.cents..40.cents)
+      expect(node.band_list.map { |b| b[:width].value }).to eq([10, 25, 40].map { |c| c / 1200.0 })
+      expect(node.band_list.map { |b| b[:gain].to_db.round(6) }).to eq([-3.0, -7.5, -12.0])
+      expect(node.sample(800).abs.max).to be > 0.1
+    end
+  end
 
   describe '#bandpass_series' do
-    it 'rings at each harmonic with SVF or biquad bandpasses' do
-      [nil, :biquad].each do |structure|
-        [440, 440.constant].each do |f0|
-          imp = Numo::SFloat.zeros(48000)
-          imp[0] = 1
-          node = MB::Sound::ArrayInput.new(data: [imp]).bandpass_series(f0, count: 3, ratio: 1, quality: 50, structure: structure)
-          spectrum = MB::Sound.real_fft(node.sample(48000)).abs
-          peaks = [440, 880, 1320].map { |hz| spectrum[hz] }
-          expect(peaks.min).to be > 10 * spectrum[660]
-        end
+    it 'rings at each harmonic' do
+      [440, 440.constant].each do |f0|
+        imp = Numo::SFloat.zeros(48000)
+        imp[0] = 1
+        node = MB::Sound::ArrayInput.new(data: [imp]).bandpass_series(f0, count: 3, ratio: 1, quality: 50)
+        spectrum = MB::Sound.real_fft(node.sample(48000)).abs
+        peaks = [440, 880, 1320].map { |hz| spectrum[hz] }
+        expect(peaks.min).to be > 10 * spectrum[660]
       end
+    end
+
+    it 'sums SVF bandpasses (within float32 rounding of the old sum of filters)' do
+      noise = MB::Sound.with_seed(4) { Numo::SFloat.cast(MB::Sound.noise.sample(4800)) }
+      bank = MB::Sound::ArrayInput.new(data: [noise]).bandpass_series(220, count: 5, ratio: 1.5, quality: 20).sample(4800)
+      sum = Numo::DFloat.zeros(4800)
+      5.times { |i| sum += MB::Sound::ArrayInput.new(data: [noise]).filter(:bandpass, cutoff: 220 * (1 + 1.5 * i), quality: 20).sample(4800) }
+      expect((bank - sum).abs.max).to be < 1e-6
+    end
+
+    it 'no longer takes structure: (chain filter(..., structure: :biquad) for direct-form bands)' do
+      expect { 110.hz.saw.bandpass_series(220, structure: :biquad) }.to raise_error(ArgumentError, /structure/)
+      expect { 110.hz.saw.peq(200 => -3.db, structure: :biquad) }.to raise_error(ArgumentError, /structure|frequenc/)
     end
   end
 

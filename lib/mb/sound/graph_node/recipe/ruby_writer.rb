@@ -351,6 +351,7 @@ module MB
             when MB::Sound::Sequence::NodeDuration then objects_in(v.count, acc)
             when MB::Sound::Phase then objects_in(v.cycles, acc) unless v.cycles.is_a?(Numeric)
             when ChannelValues then objects_in(v.values, acc)
+            when MB::Sound::PerHarmonic then objects_in(v.items, acc)
             else
               acc << v if Recipe.graph_object?(v)
               objects_in(tempo_origin(v), acc) if v.is_a?(MB::Sound::Pitch) && tempo_origin(v)
@@ -1095,6 +1096,7 @@ module MB
               return phase_text(v, indent)
             when ChannelValues then return "per_channel(#{v.values.map { |x| value(x, indent) }.join(', ')})"
             when ChannelSpread then return "per_channel(#{leaf(v.range, indent)})"
+            when MB::Sound::PerHarmonic then return v.to_ruby { |x| value(x, indent) }
             when Module then return class_name(v)
             when MB::Sound::Wavetable then return wavetable_text(v, indent)
             when MB::Sound::Sample then return sample_text(v, indent)

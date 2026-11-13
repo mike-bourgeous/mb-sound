@@ -34,48 +34,50 @@ RSpec.describe(MB::Sound::GraphNode::Formant, :aggregate_failures) do
       Numo::SFloat.cast(Array.new(n) { (rng.rand - 0.5) * scale + offset })
     end
 
-    # Runs FastFilter.formant and the mirror from the same state and expects
-    # identical samples and states.
-    def compare(n, x, node, morph, shift, width, normalize: true)
-      tables = node.instance_variable_get(:@tables)
+    # A formant whose morph, shift, and width are bank signals 0, 1, 2 (so
+    # specs can feed them any values).
+    def signal_formant(*vowels, **opts)
+      110.hz.saw.formant(*vowels, morph: 0.constant, shift: 0.constant, width: 1.constant, **opts)
+    end
+
+    # Runs the bank kernel (FastFilter.filter_bank, morph tables) and the
+    # mirror from the same state and expects identical samples and states.
+    def compare(n, x, node, morph, shift, width)
       a = Numo::SFloat.zeros(n)
       b = Numo::SFloat.zeros(n)
-      sa = Numo::DFloat.cast(noise(10, 0.01))
+      sa = Numo::DFloat.cast(noise(11, 0.01))
       sb = sa.dup
-      MB::Sound::FastFilter.formant(a, x, tables, morph, shift, width, sa, 48000, normalize)
-      klass.process_ruby(b, x, tables, morph, shift, width, sb, 48000, normalize)
-      expect(a).to eq(b)
-      expect(sa).to eq(sb)
+      config = node.config
+      MB::Sound::FastFilter.filter_bank([a], x, config, [morph, shift, width], sa, 48000)
+      MB::Sound::GraphNode::FilterBank.process_ruby([b], x, config, [morph, shift, width], sb, 48000)
+      expect(a.to_binary).to eq(b.to_binary)
+      expect(sa.to_binary).to eq(sb.to_binary)
       a
     end
 
     it 'matches the Ruby mirror with constant and moving settings' do
-      one = 110.hz.saw.formant(:a)
-      three = 110.hz.saw.formant(:a, :i, :u, voice: :soprano)
+      one = signal_formant(:a)
+      raw = signal_formant(:a, normalize: false)
+      three = signal_formant(:a, :i, :u, voice: :soprano)
       x = noise(1500)
       compare(1500, x, one, 0.0, 0.0, 1.0)
-      compare(1500, x, one, noise(1500), noise(1500, 24), noise(1500, 1, 1), normalize: false)
+      compare(1500, x, raw, noise(1500), noise(1500, 24), noise(1500, 1, 1))
       compare(1500, x, three, noise(1500, 1.4, 0.5), 3.0, 0.7)
       compare(1500, Numo::DFloat.cast(x), three, Numo::DFloat.cast(noise(1500, 1.4, 0.5)), noise(1500, 10), noise(1500, 2, 1))
       compare(10, 0.5, three, 0.3, -2.0, 1.0)
     end
 
     it 'matches the Ruby mirror for edge-case settings' do
-      node = 110.hz.saw.formant(:a, :o)
+      node = signal_formant(:a, :o)
       odd = Numo::SFloat.cast([Float::NAN, -1, 2, 0, 0.5, 1, Float::INFINITY] * 30)
       compare(odd.length, noise(odd.length), node, odd, odd * 50, odd)
     end
 
-    it 'raises for bad arguments' do
-      node = 110.hz.saw.formant(:a)
-      t = node.instance_variable_get(:@tables)
-      out = Numo::SFloat.zeros(4)
-      st = Numo::DFloat.zeros(10)
-      expect { MB::Sound::FastFilter.formant(out, 0.0, t[0...14], 0, 0, 1, st, 48000, true) }.to raise_error(ArgumentError, /tables/)
-      expect { MB::Sound::FastFilter.formant(out, 0.0, t, 0, 0, 1, Numo::DFloat.zeros(9), 48000, true) }.to raise_error(ArgumentError, /state/)
-      expect { MB::Sound::FastFilter.formant(out, 0.0, t, 0, 0, 1, st, 0, true) }.to raise_error(ArgumentError, /rate/)
-      expect { MB::Sound::FastFilter.formant(out, Numo::SFloat.zeros(3), t, 0, 0, 1, st, 48000, true) }.to raise_error(ArgumentError, /length/)
-      expect { MB::Sound::FastFilter.formant(Numo::DFloat.zeros(4), 0.0, t, 0, 0, 1, st, 48000, true) }.to raise_error(ArgumentError, /output/)
+    it 'runs on the filter bank kernel, as a five-band bank with morph tables' do
+      node = 110.hz.saw.formant(:a, :e)
+      expect(node).to be_a(MB::Sound::GraphNode::FilterBank)
+      expect(node.band_count).to eq(5)
+      expect(node.config[7]).to eq(2) # (morph snapshots)
     end
   end
 

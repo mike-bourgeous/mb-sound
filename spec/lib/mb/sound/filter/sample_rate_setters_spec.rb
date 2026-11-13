@@ -60,19 +60,17 @@ RSpec.describe('Filter#sample_rate=', :aggregate_failures) do
     expect_retuned_like_new(->(rate) { MB::Sound::GraphNode::Dynamics::SimpleEnvelopeFollower.new(sample_rate: rate, decay_s: 0.01) })
   end
 
-  it 'sets every filter in a FilterBank' do
-    make = ->(rate) { MB::Sound::Filter::FilterBank.new(3) { |i| MB::Sound::Filter::Cookbook.new(:bandpass, rate, 500 * (i + 1), quality: 2) } }
+  it 'retunes a GraphNode::FilterBank (the kernel reads the rate each block)' do
+    make = ->(rate) {
+      saw = 220.hz.saw
+      saw.sample_rate = rate
+      saw.bandpass_series(500, count: 3, width: 30.cents, pan: -1..1).outputs[0].sources[:owner].bank
+    }
     retuned = make.call(44100)
     retuned.sample_rate = 48000
     fresh = make.call(48000)
     expect(retuned.sample_rate).to eq(48000)
-    expect(retuned.filters.map(&:sample_rate)).to eq([48000] * 3)
-
-    # A bank processes one sample per filter per call
-    300.times do |i|
-      frame = noise[(i * 3)...(i * 3 + 3)]
-      expect(retuned.process(frame.dup)).to eq(fresh.process(frame.dup))
-    end
+    expect(retuned.frame(900).map(&:dup)).to eq(fresh.frame(900).map(&:dup))
   end
 
   it 'retunes an Envelope' do

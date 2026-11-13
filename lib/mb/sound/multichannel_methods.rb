@@ -55,6 +55,23 @@ module MB
 
         channels(*items)
       end
+
+      # Per-band values for a filter bank's band settings (`width:`,
+      # `gain:`, `pan:`, ... of #filter_bank, #bandpass_series,
+      # #peq_series): a Range spreads across the bands along +curve+ (any
+      # MB::Sound::Curve: `:linear`, the default, `:exp`, `:smooth`,
+      # `Curve.power(2)`, ...; band i of N gets a + (b - a) curve(i / (N -
+      # 1))), and a list gives one value per band, repeating.  Endpoints may
+      # be Intervals, Pitches, Decibels, or numbers.  A bare Range given to
+      # a band setting is per_harmonic with the linear curve.  The band-level
+      # sibling of #per_channel and #per_voice (MB::Sound::PerHarmonic).
+      #
+      # Examples (bin/sound.rb):
+      #     play 0.5.hz.saw.at(20).bandpass_series(110, count: 24, width: per_harmonic(15.cents..90.cents, curve: :exp)).softclip(0.9)
+      #     play noise.at(0.3).bandpass_series(220, count: 12, width: 20.cents, pan: per_harmonic(-1, 1), normalize: true)
+      def per_harmonic(*items, curve: nil)
+        PerHarmonic.new(*items, curve: curve)
+      end
     end
   end
 end

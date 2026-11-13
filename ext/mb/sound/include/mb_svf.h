@@ -354,7 +354,7 @@ static inline double mb_svf_step(const struct mb_svf *s, double x, double *ic1p,
 	return mb_svf_step_with(s->a1, s->a2, s->a3, s->m0, s->m1, s->m2, x, ic1p, ic2p);
 }
 
-// Filters (SVF, four-pole, diode ladder, formant) flush states below
+// Filters (SVF, four-pole, diode ladder, filter bank) flush states below
 // MB_FLUSH_MIN, or not finite, to zero on a grid of MB_FLUSH_GRID samples of
 // the filter's own time (fixes-7, 2026-10-13: at the end of each buffer
 // before, so tails below 1e-30 differed by buffer size), right after the

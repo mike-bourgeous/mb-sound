@@ -361,7 +361,7 @@ module MB
         end
         alias diode_ladder diode
 
-        # A formant filter (GraphNode::Formant): a bright source "says" a vowel.
+        # A formant filter: a bright source "says" a vowel (Formant).
         # Five parallel resonant bandpasses sit at a sung vowel's formants.
         # +vowels+ are :a, :e, :i, :o, :u (sung formant tables for +voice+
         # :soprano, :alto, :countertenor, :tenor (default), or :bass) or custom
@@ -380,10 +380,50 @@ module MB
         end
         alias vowel formant
 
-        # Adds a filter chain that applies parametric peaking EQ.  The +pairs+
-        # parameter should be a Hash mapping a frequency in Hz (or a Tone) to a
-        # linear gain, or an Array with gain and bandwith in octaves (the default
-        # bandwidth is 1/3 octave).
+        # SVF bands in one node (FilterBank).  One band per
+        # frequency in +frequencies+ (Hz, Pitches, or nodes), each an SVF
+        # section of +type+ (:bandpass by default; any Filter::SVF
+        # type, e.g. :peak or :notch for EQs) with its +width+, +gain+, and
+        # +pan+.  The bands are summed (into two channels when any band has
+        # a pan, returning a stereo bundle) or chained (+serial: true+).
+        #
+        # Every band setting is one value for every band, or per band: a
+        # per_harmonic(...) value (a Range along a curve, or a list), a bare
+        # Range (per_harmonic with the linear curve), an Array (one per band,
+        # repeating), or a Proc of the band's index.  Settings may be nodes
+        # (read every sample).
+        #
+        # +width+ is typed (MB::Sound::ArgTypes): an Interval (`30.cents`,
+        # `0.25.oct`) is the same musical width on every band, a frequency
+        # (`40.hz`) the same width in Hz, a plain number or node a Q
+        # (+quality:+ is the same; default Q 0.7071).  +gain+ is linear
+        # (Decibels read exactly).  +pan+ is a position -1..1 with
+        # +pan_law+ (:equal_power, :linear, :minus_4_5db).
+        # +normalize: true+ keeps pink noise's power through the bank
+        # whatever the widths (bandpass bands; see GraphNode::FilterBank).
+        #
+        # Examples:
+        #     play noise.at(0.5).filter_bank([300, 800, 2500], width: 40.cents, gain: [1, 0.5, 0.3], normalize: true)
+        #     play 110.hz.saw.at(0.4).filter_bank([200, 600, 1800, 5400], width: 1.oct, pan: -0.9..0.9)
+        #     play 220.hz.saw.at(0.4).filter_bank([100, 1000, 8000], type: [:lowshelf, :peak, :highshelf], quality: 0.7, gain: [3.db, -6.db, 4.db], serial: true)
+        def filter_bank(frequencies, type: :bandpass, width: nil, quality: nil, gain: 1, pan: nil, response: :bilinear,
+                        normalize: false, channels: nil, serial: false, pan_law: :equal_power)
+          freqs = frequencies.is_a?(Array) ? frequencies : [frequencies]
+          raise ArgumentError, 'filter_bank needs at least one frequency' if freqs.empty?
+          width = bank_width(width, quality, nil)
+          count = freqs.length
+          bands = Array.new(count) { |i|
+            band_settings(count, i, type: type, frequency: freqs[i], width: width, gain: gain, pan: pan, response: response)
+          }
+          FilterBank.new(self, bands: bands, channels: channels, serial: serial, normalize: normalize, pan_law: pan_law, sample_rate: sample_rate).output
+        end
+
+        # Parametric peaking EQ (a serial FilterBank).  Its bands are :peak; the +pairs+ parameter
+        # should be a Hash mapping a frequency in Hz (or a Pitch) to a
+        # linear gain (or Decibels), or an Array with the gain and a
+        # bandwidth, or a Hash of gain: and width:.  Bandwidths are octaves
+        # (plain numbers; default 1/3 octave), Intervals (`50.cents`), or
+        # frequencies (`80.hz`).
         #
         # Example:
         #     # Reduce second harmonic (or first if you count from zero)
@@ -392,15 +432,14 @@ module MB
         #     # Cut mids
         #     100.hz.saw.peq(500.hz => [-10.db, 4])
         #
-        # +structure:+ is :svf (default) or :biquad (see FILTER_STRUCTURES;
-        # the static responses are the same).  Ruby passes a Hash without
-        # braces as keywords, so +freq_pairs+ collects it.
-        def peq(pairs = nil, structure: nil, **freq_pairs)
+        # Ruby passes a Hash without braces as keywords, so +freq_pairs+
+        # collects it.
+        def peq(pairs = nil, **freq_pairs)
           pairs ||= freq_pairs
-          structure = filter_structure(structure)
           raise "PEQ frequency/gain pairs must be a Hash from frequency to gain (got #{pairs.class})" unless pairs.is_a?(Hash)
+          raise ArgumentError, 'peq needs at least one frequency' if pairs.empty?
 
-          filters = pairs.map { |freq, gain|
+          bands = pairs.map { |freq, gain|
             # (Kez, panel 3: an LFO as the frequency surfaced as `to_f` on a
             # TempoNode through Tee::Branch#method_missing, and an LFO Tone
             # quietly gave its own rate, 3 Hz, as the frequency)
@@ -409,106 +448,120 @@ module MB
               raise ArgumentError, "peq takes fixed frequencies (numbers or pitches; got #{freq.respond_to?(:sample) ? 'a moving node' : freq.inspect}); " \
                 'for a moving one use filter(:peak, cutoff: node, quality: 2, gain: 0.5) or filter(:notch, cutoff: node, quality: 2)'
             end
-            freq = freq.to_f
 
             case gain
             when Array
               gain, bandwidth = gain
-
             when Hash
-              bandwidth = gain[:width] || 1.0 / 3.0
+              bandwidth = gain[:width]
               gain = gain[:gain] || 1.0
-
-            else
-              bandwidth = 1.0 / 3.0
             end
 
-            db_gain = Decibels.db_of(gain, 'gain')
-            if structure == :biquad
-              MB::Sound::Filter::Cookbook.new(:peak, self.sample_rate, freq, db_gain: db_gain, bandwidth_oct: bandwidth)
-            else
-              MB::Sound::Filter::SVF.new(:peak, self.sample_rate, freq, db_gain: db_gain, bandwidth_oct: bandwidth)
-            end
+            { type: :peak, frequency: freq.to_f, width: peq_width(bandwidth.nil? ? 1.0 / 3.0 : bandwidth), gain: peq_gain(gain) }
           }
 
-          # TODO: Expose PEQ parameters for MIDI control
-          chain = MB::Sound::Filter::FilterChain.new(filters)
-
-          self.filter(chain)
+          FilterBank.new(self, bands: bands, serial: true, sample_rate: sample_rate)
         end
 
-        # Peaking filters in series at the harmonics of +fundamental_hz+.
+        # Serial peaks at harmonics of +fundamental_hz+ (a serial
+        # GraphNode::FilterBank of :peak bands at fundamental * (1 + ratio *
+        # index)).
         #
+        # +fundamental_hz+ - The first filter frequency (Hz, a Pitch, or a node).
         # +:count+ - The number of filters to create.
-        # +:ratio+ - The increment between harmonics (1.0 for integer harmonics).
-        # +:gain+ - The gain of the peaking filters.
-        # +:width+ - The bandwidth of the filters in octaves.
-        def peq_series(fundamental_hz, count: 5, ratio: 1.0, gain: 0.db, width: 0.1, structure: nil)
-          # TODO: support GraphNode inputs like in #bandpass_series
-          pairs = Array.new(count) do |idx|
-            g = gain.respond_to?(:call) ? gain.call(idx) : gain
-            w = width.respond_to?(:call) ? width.call(idx) : width
-            [fundamental_hz * (1 + ratio * idx), { gain: g, width: w }]
-          end
+        # +:ratio+ - The increment between harmonics (1.0 for integer
+        #            harmonics; a number or node).
+        # +:gain+ - The gain of the peaking filters (linear or Decibels, or a
+        #           node).
+        # +:width+ - The bandwidth of the filters: octaves (plain numbers),
+        #            an Interval (`20.cents`), or a frequency (`30.hz`).
+        # Band settings may be per band (per_harmonic, a Range, an Array, or
+        # a Proc of the index; see #filter_bank).
+        def peq_series(fundamental_hz, count: 5, ratio: 1.0, gain: 0.db, width: 0.1)
+          raise ArgumentError, "peq_series needs a count of at least 1 (got #{count.inspect})" unless count.is_a?(Integer) && count >= 1
 
-          peq(pairs.to_h, structure: structure)
+          bands = Array.new(count) { |i|
+            g = FilterBank.per_band(gain, i, count)
+            {
+              type: :peak, frequency: FilterBank.per_band(fundamental_hz, i, count), ratio: FilterBank.per_band(ratio, i, count), harmonic: i,
+              width: peq_width(FilterBank.per_band(width, i, count)), gain: g.respond_to?(:sample) ? g : peq_gain(g),
+            }
+          }
+          FilterBank.new(self, bands: bands, serial: true, sample_rate: sample_rate)
         end
 
-        # Bandpass filters in parallel at the harmonics of +fundamental_hz+.
+        # Parallel bandpasses at harmonics of +fundamental_hz+ (a
+        # GraphNode::FilterBank of :bandpass bands at fundamental * (1 +
+        # ratio * index)).
         #
-        # +fundamental_hz+ - The first filter frequency (Proc, GraphNode, or Numeric).
+        # +fundamental_hz+ - The first filter frequency (Hz, a Pitch, or a node).
         # +:count+ - The number of filters to create (Integer).
-        # +:ratio+ - The increment between harmonics (1.0 for integer harmonics)
-        #            (Proc, GraphNode, or Numeric).
-        # +:gain+ - The linear gain for the bandpass filters (Proc or Numeric).
+        # +:ratio+ - The increment between harmonics (1.0 for integer
+        #            harmonics; a number or node).
         # +:quality+ - The Q factor (higher is narrower; 0.001 octaves =>
-        #              Q~=1414; 1 octave => Q~=1.414) (Proc, GraphNode, or
-        #              Numeric).
+        #              Q~=1414; 1 octave => Q~=1.414; a number or node;
+        #              default 14.14).
+        # +:width+ - Instead of +quality+: a typed width (`30.cents` the same
+        #            musical width on every band, `40.hz` the same width in
+        #            Hz, a number a Q).
+        # +:gain+ - The linear gain of each band's peak (or Decibels, or a node).
+        # +:pan+ - A position -1..1 per band (two output channels: returns a
+        #          stereo bundle).
+        # +:normalize+ - Keep pink noise's power through the bank whatever
+        #                the widths and count (default false: each band's
+        #                peak at +gain+).
+        # Band settings may be per band: per_harmonic(...), a Range, an
+        # Array, or a Proc of the index (see #filter_bank).
         #
         # Example:
         #     # Filter pinging bell ringing
         #     play 0.5.hz.saw.at(50).filter(:lowpass, cutoff: 1000, quality: 0.5).bandpass_series(440, quality: 1414, count: 20, ratio: 1.7).softclip(0.9)
         #
+        #     # Wider bands up the series, spread across the stereo field
+        #     play 0.5.hz.saw.at(20).bandpass_series(110, count: 24, width: per_harmonic(15.cents..90.cents, curve: :exp), pan: -1..1).softclip(0.9)
+        #
         #     # MIDI controlled
         #     play (midi.env(0.0, 0.00005, 0, 0.00005) * 100).bandpass_series(midi.frequency, quality: 500, count: 16, ratio: midi.cc(1, range: 1..4)).softclip(0.9).oversample(4)
-        #
-        # +structure:+ is :svf (default) or :biquad (see FILTER_STRUCTURES).
-        def bandpass_series(fundamental_hz, count: 5, ratio: 1.0, quality: 14.14, gain: 0.db, structure: nil)
-          filter_class = filter_structure(structure) == :biquad ? MB::Sound::Filter::Cookbook : MB::Sound::Filter::SVF
+        def bandpass_series(fundamental_hz, count: 5, ratio: 1.0, quality: nil, width: nil, gain: 0.db, pan: nil, normalize: false,
+                            channels: nil, pan_law: :equal_power)
+          raise ArgumentError, "bandpass_series needs a count of at least 1 (got #{count.inspect})" unless count.is_a?(Integer) && count >= 1
           # TODO: figure out why lower frequencies ping softer with a single impulse
+          width = bank_width(width, quality, 14.14)
 
-          fs = MB::Sound::Filter::FilterSum.new(
-            Array.new(count) do |idx|
-              f_hz = fundamental_hz
-              f_hz = f_hz.call(idx) if f_hz.respond_to?(:call)
+          bands = Array.new(count) { |i|
+            band_settings(count, i, type: :bandpass, frequency: fundamental_hz, ratio: ratio, harmonic: i, width: width, gain: gain, pan: pan)
+          }
+          FilterBank.new(self, bands: bands, channels: channels, normalize: normalize, pan_law: pan_law, sample_rate: sample_rate).output
+        end
 
-              r = ratio
-              r = r.call(idx) if r.respond_to?(:call)
+        # The width of a bank method from +width+ or +quality+ (not both),
+        # or +default+.
+        private def bank_width(width, quality, default)
+          raise ArgumentError, 'Give width: or quality:, not both' if width && quality
 
-              q = quality
-              q = q.call(idx) if q.respond_to?(:call)
+          width || quality || default
+        end
 
-              g = gain
-              g = g.call(idx) if g.respond_to?(:call)
+        # One band's settings for #filter_bank and #bandpass_series: each
+        # setting read for band +index+ of +count+ (FilterBank.per_band).
+        private def band_settings(count, index, **settings)
+          b = settings.to_h { |k, v| [k, FilterBank.per_band(v, index, count)] }.compact
+          b.delete(:width) if b[:width].nil?
+          b
+        end
 
-              freq = f_hz * (1 + r * idx)
+        # A peq bandwidth: plain numbers are octaves (peq's meaning; a param
+        # or knob is its number, read while the graph builds), other values
+        # typed as for #filter_bank (Intervals, frequencies).
+        private def peq_width(w)
+          w = GraphNode.build_setting(w)
+          w.is_a?(Numeric) && !w.is_a?(Decibels) ? FilterBank::Width.new(:octaves, w.to_f) : FilterBank.width_of(w, 'peq width')
+        end
 
-              if freq.respond_to?(:sample) || q.respond_to?(:sample)
-                f = filter_class.new(:bandpass, self.sample_rate, 1000, quality: 1, db_gain: Decibels.db_of(g, 'gain'))
-                {
-                  filter: f,
-                  inputs: {
-                    cutoff: freq,
-                    quality: q,
-                  },
-                }
-              else
-                filter_class.new(:bandpass, self.sample_rate, freq, quality: q, db_gain: Decibels.db_of(g, 'gain'))
-              end
-            end
-          )
-
-          self.filter(fs)
+        # A peq gain as the linear gain its peak filter gets (10 ** (dB /
+        # 20) of the gain's dB, as Filter::SVF computes it from db_gain:).
+        private def peq_gain(g)
+          10.0 ** (Decibels.db_of(g, 'gain') / 20.0)
         end
 
         # Checks a +structure:+ option (nil for DEFAULT_FILTER_STRUCTURE).

@@ -62,7 +62,7 @@ module RelationFuzz
 
     def size = 1 + kids.sum(&:size)
 
-    def stereo? = kind == :pan || kind == :balance || kids.any?(&:stereo?)
+    def stereo? = kind == :pan || kind == :balance || (kind == :bank && args[0] == :stereo) || kids.any?(&:stereo?)
   end
 
   Failure = Struct.new(:seed, :relation, :code, :message, :original, keyword_init: true) do
@@ -174,7 +174,15 @@ module RelationFuzz
       when 10 then [:compress, -[6, 12, 20][rng.rand(3)], [2, 4, 8][rng.rand(3)]]
       when 11 then [:feedback, rng.rand(20..120), (0.2 + rng.rand * 0.5).round(2)]
       when 12 then [:ease, %i[smoothstep elastic bounce][rng.rand(3)]]
-      when 13 then [:formant, %i[a e i o u][rng.rand(5)]]
+      # (filterbank-1: half the formants are filter banks instead: a
+      # normalized bandpass_series on a moving fundamental, the same
+      # spread across stereo with moving pans, or serial peq_series peaks)
+      when 13
+        if rng.rand < 0.5
+          [:formant, %i[a e i o u][rng.rand(5)]]
+        else
+          [:bank, %i[mono stereo serial][rng.rand(3)], control(rng, 150, 400), rng.rand(2..6)]
+        end
       when 14
         # (pan-laws-1: half the pans balance a stereo input by one of the
         # stereo laws instead)
@@ -188,7 +196,7 @@ module RelationFuzz
       else [:sample_hold, kid.stereo? && rng.rand < 0.5]
       end
     # (a stereo bundle under a mono-only step: mix it down first)
-    kid = Expr.new(:mixdown, [], [kid]) if kid.stereo? && %i[pan feedback].include?(op.first)
+    kid = Expr.new(:mixdown, [], [kid]) if kid.stereo? && (%i[pan feedback].include?(op.first) || (op.first == :bank && op[1] == :stereo))
     Expr.new(op.first, op.drop(1), [kid])
   end
 
@@ -201,7 +209,7 @@ module RelationFuzz
       [:quantize, 0.1], [:delay, [:const, 0.001], nil], [:delay, [:const, 0.001], 0.3], [:decimate, [:const, 4000]],
       [:at, [:const, 0.5]], [:compress, -12, 4], [:feedback, 30, 0.5], [:ease, :smoothstep], [:formant, :a],
       [:pan, [:const, 0.2]], [:abs], [:until, 0.011], [:period_delay, 110], [:sample_hold, false], [:shape_db, :fuzz],
-      [:derivative, :central], [:integral, :reset],
+      [:derivative, :central], [:integral, :reset], [:bank, :mono, c, 3], [:bank, :stereo, c, 2], [:bank, :serial, c, 3],
     ].map { |op| Expr.new(op.first, op.drop(1), [kid]) }
   end
 
@@ -256,6 +264,12 @@ module RelationFuzz
     when :ease then "#{k[0]}.ease(#{a[0].inspect})"
     when :shape_db then "#{k[0]}.shape_db(#{a[0].inspect})"
     when :formant then "#{k[0]}.formant(#{a[0].inspect})"
+    when :bank
+      case a[0]
+      when :mono then "#{k[0]}.bandpass_series(#{ctl(a[1])}, count: #{a[2]}, width: per_harmonic(20.cents..80.cents, curve: :exp), normalize: true)"
+      when :stereo then "#{k[0]}.bandpass_series(#{ctl(a[1])}, count: #{a[2]}, quality: 12, pan: #{a[2] > 3 ? '-0.9..0.9' : '1.5.hz.lfo'})"
+      else "#{k[0]}.peq_series(#{ctl(a[1])}, count: #{a[2]}, gain: -4.db, width: 30.cents)"
+      end
     when :pan then "#{k[0]}.pan(#{ctl(a[0])})"
     when :balance
       # (a mono input becomes stereo first: itself and a scaled copy)
