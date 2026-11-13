@@ -27,6 +27,7 @@ RSpec.describe(MB::Sound::Session::Context, :aggregate_failures) do
     mb_steer_origin: 'Generative::Steer.origin while a ClipSource reads (render path)',
     sound_io_log_depth: 'nesting depth of sound I/O logs',
     mb_sound_ui_repl: 'the UI REPL host on its thread',
+    mb_sound_clamp_notes: 'the notes of knob turns limited to their ranges, while a screen runs a pane\'s turn line (UI::Tiles#run_turn_line)',
     mb_sound_ui_tiles: 'the tiles screen on its thread',
     mb_sound_rack_applications: 'racks being applied (nested), for their ports',
     mb_sound_preview_slack: 'the sound-design preview worker pacing state',

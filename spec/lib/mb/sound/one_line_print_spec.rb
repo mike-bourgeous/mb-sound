@@ -13,7 +13,7 @@ RSpec.describe(MB::Sound::OneLinePrint) do
   PP_DUMPERS = [Data, Struct, Array, Hash, Set, Range].freeze
 
   # Classes left printing pp's dump, with why.
-  ALLOWED = {}.freeze
+  PRINT_ALLOWED = {}.freeze
 
   before(:all) { LibraryFiles.require_all }
 
@@ -26,13 +26,13 @@ RSpec.describe(MB::Sound::OneLinePrint) do
       next if c.ancestors.index(io) >= c.ancestors.index(base) # (the core inspect)
       po = c.instance_method(:pretty_print).owner
       next unless c.ancestors.index(po) >= c.ancestors.index(base)
-      next if ALLOWED.key?(c.name)
+      next if PRINT_ALLOWED.key?(c.name)
       [c.name, c.instance_method(:inspect).source_location&.join(':')]
     }.sort
   end
 
   it 'prints every MB:: Data, Struct, and collection class with its own inspect through that inspect' do
-    expect(dumped).to eq([]), "include MB::Sound::OneLinePrint in these (or list them in ALLOWED with why):\n#{dumped.map { |n, l| "#{n} (#{l})" }.join("\n")}"
+    expect(dumped).to eq([]), "include MB::Sound::OneLinePrint in these (or list them in PRINT_ALLOWED with why):\n#{dumped.map { |n, l| "#{n} (#{l})" }.join("\n")}"
   end
 
   it 'prints the inspect in one line through pp, as Pry does' do
