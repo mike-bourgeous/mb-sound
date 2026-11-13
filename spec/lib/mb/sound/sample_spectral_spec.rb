@@ -156,6 +156,85 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
     expect(short.read_as(:drop).stretch(64, mode: :paul).mips).to eq(false)
   end
 
+  describe 'loops (wrap:)' do
+    # A pad that loops seamlessly: partials with whole numbers of cycles
+    # in one second, and a slow swell that also closes
+    let(:held) {
+      i = Numo::DFloat.new(48000).seq / 48000
+      (Numo::NMath.sin(i * (2 * Math::PI * 110)) * 0.3 + Numo::NMath.sin(i * (2 * Math::PI * 165) + 1) * 0.2 + Numo::NMath.sin(i * (2 * Math::PI * 331) + 2) * 0.1) *
+        (0.8 + 0.2 * Numo::NMath.cos(i * (2 * Math::PI * 2)))
+    }
+    let(:plain) { MB::Sound::Sample[Numo::SFloat.cast(held)] }
+
+    # [the step from the last sample back to the first, the largest step
+    # between neighbours inside]
+    def wrap_step(d)
+      d = Numo::DFloat.cast(d)
+      [(d[0] - d[-1]).abs, (d[1..] - d[0...-1]).abs.max]
+    end
+
+    it 'joins the end of a looping sample\'s stretch to its start' do
+      step, inside = wrap_step(held)
+      expect(step).to be < inside
+      [0.77, 1.25].each do |r|
+        old = plain.looped.stretch(r, mode: :spectral, wrap: false)
+        new = plain.looped.stretch(r, mode: :spectral)
+        # (a stretch ends wherever its phases have got to: a step at
+        # every pass of the loop, a click on a sustained sound)
+        expect(wrap_step(old.data(0))[0]).to be > 3 * inside
+        step, inside_now = wrap_step(new.data(0))
+        expect(step).to be < inside
+        expect(inside_now).to be < 1.2 * inside
+        # Only the last hop (a quarter window) changes, with no dip in
+        # level
+        expect(new.data(0)[0...-1024]).to eq(old.data(0)[0...-1024])
+        expect(new.data(0)[-1024..]).not_to eq(old.data(0)[-1024..])
+        expect(rms(new.data(0)[-1024..]) / rms(old.data(0)[-1024..])).to be_within(0.3).of(1)
+        expect(new).to be_whole_loop
+      end
+    end
+
+    it 'follows the sample\'s loop unless told' do
+      expect(plain).not_to be_whole_loop
+      expect(plain.looped).to be_whole_loop
+      expect(plain.looped(0.1..0.5)).not_to be_whole_loop
+      expect(plain.stretch(0.77, mode: :spectral).data(0)).to eq(plain.stretch(0.77, mode: :spectral, wrap: false).data(0))
+      expect(plain.stretch(0.77, mode: :spectral, wrap: true).data(0)).to eq(plain.looped.stretch(0.77, mode: :spectral).data(0))
+      expect(plain.stretch(0.77, mode: :spectral, wrap: true).lineage[3]).to eq({ mode: :spectral, wrap: true })
+      expect { plain.stretch(0.77, wrap: true) }.to raise_error(ArgumentError, /wrap: is for/)
+      expect { plain.stretch(0.77, mode: :slice, wrap: true) }.to raise_error(ArgumentError, /wrap: is for/)
+      expect { plain.stretch(0.77, mode: :spectral, wrap: 1) }.to raise_error(ArgumentError, /wrap: is true/)
+    end
+
+    it 'leaves a hit at the loop start as sharp as it was' do
+      x = held * 0.3
+      x[0...2400] += Numo::NMath.sin(Numo::DFloat.new(2400).seq * 0.9) * Numo::NMath.exp(-Numo::DFloat.new(2400).seq / 300.0) * 0.6
+      hit = MB::Sound::Sample[Numo::SFloat.cast(x)].looped
+      expect(hit.onsets.first).to eq(0)
+      old = hit.stretch(1.25, mode: :spectral, wrap: false).data(0)
+      new = hit.stretch(1.25, mode: :spectral).data(0)
+      expect(new[0...240]).to eq(old[0...240])
+      expect((Numo::DFloat.cast(new[0...240]) - x[0...240]).abs.max).to be < 1e-3
+      # (the end leads into the hit as the input's end did)
+      expect((Numo::DFloat.cast(new[-48..]) - x[-48..]).abs.max).to be < 0.02
+    end
+
+    it 'stretches for loop players with the seam joined' do
+      player = MB::Sound::GraphNode::LoopPlayer
+      expect(player.loop_stretch({ mode: :spectral })).to eq({ mode: :spectral, wrap: true })
+      expect(player.loop_stretch({ mode: :pv, transients: false })).to eq({ mode: :pv, transients: false, wrap: true })
+      expect(player.loop_stretch({ mode: :spectral, wrap: false })).to eq({ mode: :spectral, wrap: false })
+      expect(player.loop_stretch({ mode: :slice })).to eq({ mode: :slice })
+      expect(player.loop_stretch({})).to eq({})
+      # (a sample with no loop points, played as a loop a fifth slower)
+      loop = MB::Sound::Sample[Numo::SFloat.cast(held), bpm: 150, beats: 2.5]
+      played = loop.follow(stretch: :spectral).sample(60000).dup
+      expect(played).to eq(loop.stretch(1.25, mode: :spectral, wrap: true).data(0))
+      expect(played).not_to eq(loop.stretch(1.25, mode: :spectral).data(0))
+      expect(loop.follow(stretch: { mode: :spectral, wrap: false }).sample(60000)).to eq(loop.stretch(1.25, mode: :spectral).data(0))
+    end
+  end
+
   it 'raises on bad modes and mixed options' do
     expect { pad.stretch(2, mode: :nope) }.to raise_error(ArgumentError, /mode/)
     expect { pad.stretch(2, window: 2048) }.to raise_error(ArgumentError, /spectral/)

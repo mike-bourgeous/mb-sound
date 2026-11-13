@@ -78,8 +78,10 @@ module MB
         # +seed+; the same offsets for every channel with +link+, else
         # each channel its own), so 0 is the phase-locked vocoder and 1 is
         # Paulstretch (uniformly random phases; #paul does that case);
-        # attack bins near onsets stay unrandomized.
-        def vocoder(channels, ratio, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann)
+        # attack bins near onsets stay unrandomized.  +wrap+ is for audio
+        # that loops (its end flows into its start): the output's end is
+        # joined to its start too (#seam).
+        def vocoder(channels, ratio, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false)
           randomize = randomize.to_f
           raise ArgumentError, "randomize: is 0..1 (got #{randomize})" unless randomize >= 0 && randomize <= 1
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
@@ -178,9 +180,41 @@ module MB
             end
           end
 
-          return finish(buf, wsum, n, out_len) if randomize == 0
+          out =
+            if randomize == 0
+              finish(buf, wsum, n, out_len)
+            else
+              finish(buf, wsum, n, out_len, power: w2.mean.to_f, coherent: csum, coherent2: c2sum)
+            end
+          wrap ? seam(out, xs, hs) : out
+        end
 
-          finish(buf, wsum, n, out_len, power: w2.mean.to_f, coherent: csum, coherent2: c2sum)
+        # +out+ (a stretch of the looping audio +xs+, channel by channel;
+        # changed in place) with its last +fade+ samples crossfaded into
+        # the input's own last samples (Lofi.crossfade_gains on the
+        # channels' mixes: equal gain where the two match, equal power
+        # where they don't).  The vocoder starts a stretch with the
+        # input's phases, and with an onset at the start (a loop that
+        # starts loud has one, Sample::Onsets) plays the start
+        # unstretched, so the output starts as the input does; its end
+        # arrives with whatever phases the stretch has reached, and a loop
+        # of it stepped at every wrap (a sustained pad at 0.77x: a step of
+        # 0.0056 where the input's own wrap steps 0.0003, a click every
+        # pass).  Ending on the input's end (a pre-roll into the loop
+        # start, as the slice stretch has) makes the wrap the input's own.
+        def seam(out, xs, fade)
+          f = [fade, out[0].length / 2, xs[0].length / 2].min
+          return out if f < 2
+
+          n = out[0].length
+          len = xs[0].length
+          tail = out.sum[(n - f)...n] / out.length
+          head = xs.sum[(len - f)...len] / xs.length
+          g_out, g_in = Lofi.crossfade_gains(tail, head)
+          out.each_with_index do |y, ch|
+            y[(n - f)...n] = y[(n - f)...n] * g_out + xs[ch][(len - f)...len] * g_in
+          end
+          out
         end
 
         # Identity phase locking (Laroche & Dolson 1999): peak bins keep

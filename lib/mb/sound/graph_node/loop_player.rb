@@ -87,6 +87,7 @@ module MB
           @channel = Integer(channel)
           @follow_mode = mode
           @stretch_options = stretch.dup.freeze
+          @loop_stretch = LoopPlayer.loop_stretch(@stretch_options)
           @stretch_reason = mode == :stretch ? reason : nil
           @align = align
           @transport = transport
@@ -186,11 +187,21 @@ module MB
           Sequence::TempoMap.seconds_at(@whole_notes, bpm).to_f / @loop_sample.seconds
         end
 
+        # Sample#stretch +options+ for audio a player loops: the
+        # spectral stretches join their end to their start (wrap: true)
+        # whether or not the sample has loop points, unless the options
+        # say.
+        def self.loop_stretch(options)
+          mode = (options[:mode] || :cyclic).to_sym
+          spectral = %i[spectral paul].include?(Sample::Spectral::MODE_ALIASES.fetch(mode, mode))
+          spectral && !options.key?(:wrap) ? options.merge(wrap: true).freeze : options
+        end
+
         # The channel's data stretched by +ratio+ (cached).
         def stretched(ratio)
           key = ratio.round(12)
           d = @stretches.delete(key)
-          d ||= (ratio - 1).abs < 1e-12 ? @source_data : @loop_sample.stretch(ratio, **@stretch_options).data(@channel)
+          d ||= (ratio - 1).abs < 1e-12 ? @source_data : @loop_sample.stretch(ratio, **@loop_stretch).data(@channel)
           @stretches[key] = d
           @stretches.delete(@stretches.keys.first) while @stretches.length > CACHE
           d

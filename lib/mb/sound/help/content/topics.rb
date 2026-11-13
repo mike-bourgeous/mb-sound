@@ -752,7 +752,10 @@ module MB
         `overlap:`, `shape: :paul` (a smooth window for washes), and `link:
         false` (random phases per channel) for both; for voices try
         `.stretch(8, mode: :paul, overlap: 2,
-        shape: :paul, link: false)`.
+        shape: :paul, link: false)`.  A sample that loops (a loop file,
+        `.looped`, anything `follow` plays) gets a spectral stretch
+        whose end runs into its start (`wrap: true` asks for it, `wrap:
+        false` leaves the end as the stretch made it).
         They are offline edits: a new Sample, made once; results over 30
         s read with `mips: :octave` (smaller playback tables).
       TEXT
