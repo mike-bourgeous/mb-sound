@@ -785,6 +785,11 @@ module MB
           message = "turn #{k.name.inspect}, #{n.(value)}: limited to #{n.(value.to_f.clamp(r.begin, r.end))} (knob #{k.name.inspect} goes #{n.(r.begin)}..#{n.(r.end)}#{"; #{desc}" if desc}; " \
                     "knob #{k.name.inspect}, #{n.(k.spec.default)}, range: #{widened(r, value)} widens it)"
           MB::Sound.live_error(Param::Error.new(message)) unless MB::Sound.live?
+          # (every time, for a screen running the turn: the inspector's
+          # turn line says "limited to" after the warning's first time;
+          # sd-ux-fixes-1, the review's #16; UI::Tiles#run_turn_line)
+          notes = Thread.current[:mb_sound_clamp_notes]
+          notes << "limited to #{n.(value.to_f.clamp(r.begin, r.end))} (#{k.name} goes #{n.(r.begin)}..#{n.(r.end)})" if notes.is_a?(Array)
           @clamp_warned ||= {}
           return if @clamp_warned[k.name]
           @clamp_warned[k.name] = true

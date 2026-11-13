@@ -1715,7 +1715,8 @@ module MB
         # panel if shown").
         def run_turn_line(name, turn)
           out = StringIO.new
-          r = with_output_to(out) { UI.run_line(turn.code, @session || Session.existing) }
+          clamped = []
+          r = Internal.with_local(:mb_sound_clamp_notes, clamped) { with_output_to(out) { UI.run_line(turn.code, @session || Session.existing) } }
         rescue StandardError, ScriptError => e
           result = "#{e.class}: #{e.message}"
           print_to_repl("# #{turn.note || 'ui'}\n#{Tiles.shown_code(turn.code)}\n#{out.string}#{result}\n")
@@ -1723,8 +1724,14 @@ module MB
           nil
         else
           shown = Tiles.one_line(Tiles.shown_code(turn.code))
-          @states[name][:turn_line] = shown
-          flash(Tiles.one_line(turn.note || shown), :ok)
+          if clamped.empty?
+            @states[name][:turn_line] = shown
+            flash(Tiles.one_line(turn.note || shown), :ok)
+          else
+            # (a value past the knob's range, every time: Session::Knobs#warn_clamp)
+            @states[name][:turn_line] = "#{shown}: #{clamped.last}"
+            flash(Tiles.one_line("#{turn.note || shown}: #{clamped.last}"), :warn)
+          end
           r
         end
 

@@ -34,7 +34,7 @@ RSpec.describe('the inspector\'s status line', :aggregate_failures) do
     }
     @now = 1.0
     @term = UIHelpers::FakeTerminal.new(40, 140)
-    @tiles = ui::Tiles.new(layout: ui.tiles_layout_named(:sound), input: @term.slave, output: @term.slave, repl: :none,
+    @tiles = ui::Tiles.new(layout: ui.tiles_layout_named(:sound), input: @term.slave, output: @term.slave, repl: :none, session: @session,
                            probe: false, size: [40, 140], clock: -> { @now }, source: snap,
                            keyboard: ui::Keyboard.new(out: UIHelpers::NullKeyboardOut.new))
     @tiles.start(thread: false)
@@ -59,5 +59,25 @@ RSpec.describe('the inspector\'s status line', :aggregate_failures) do
     act(:pick, 1)
     expect(status).to include('Enter: ')
     expect(status).not_to match(/AMP \w/)
+  end
+
+  # The review's #16: after the first time (the warning is once per knob), a
+  # typed value past the range was limited silently
+  it 'says "limited to" on the turn line and the status line every time a typed value is limited' do
+    screen
+    live = MB::Sound.live?
+    MB::Sound.live = true
+    turn = ui::PaneKeys::Turn['turn :"bass/cutoff", 99999', 'cutoff 99999']
+    2.times do
+      @tiles.send(:pane_result, :inspector, turn)
+      @now += 0.05
+      @tiles.refresh
+      expect(status).to match(/cutoff 99999: limited to \d+ \(bass\/cutoff goes \d+\.\.\d+\)/)
+      expect(@tiles.instance_variable_get(:@states)[:inspector][:turn_line]).to match(/limited to \d+/)
+    end
+    4.times { @session.process_buffer }
+    expect(@session.knobs[:"bass/cutoff"].value).to eq(@session.knobs[:"bass/cutoff"].spec.range.end)
+  ensure
+    MB::Sound.live = live
   end
 end
