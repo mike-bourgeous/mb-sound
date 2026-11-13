@@ -36,6 +36,8 @@
 #                 (a feedback loop one period long), dry
 #   cheby_bass    waveshaping: a sine through Chebyshev polynomials driven
 #                 by an envelope, so the harmonics follow the note's level
+#   grain_pad     granular: grains of a bounced oscillator tone, tuned to the
+#                 note, spread in stereo
 #
 # The voices use library nodes only (no engine of their own).  Each output
 # sits near -12 LUFS before the master (about -22 LUFS through its default
@@ -375,6 +377,35 @@ module MB::Sound
         shaped * v.env(0.002, 0.5, 0.9, k[:release], gm: false)
       },
     },
+    grain_pad: {
+      approach: 'granular',
+      about: 'Grain pad: a cloud of short grains read from a two-second tone bounced from oscillators (an A3 triangle ' \
+             'with upper partials slightly off their harmonics, slowly beating), each grain tuned to the note, spread in stereo',
+      tags: %i[granular grains cloud pad],
+      voices: 6,
+      knobs: {
+        position: [0.35, 0.0..1.0, 'Where in the source tone the grains read (0..1)'],
+        spread: [0.15, 0.0..0.5, 'Random spread of the read position (0..1 of the source)'],
+        density: [30.0, 1.0..120.0, 'Grains per second per note'],
+        size: [0.15, 0.01..1.0, 'Grain length in seconds'],
+        detune: [0.08, 0.0..1.0, 'Random detune per grain in semitones'],
+        attack: [0.6, 0.001..8.0, 'Attack in seconds'],
+        release: [1.5, 0.01..8.0, 'Release in seconds'],
+      },
+      level: 0.38,
+      # (bounced once per build, so the voices share one Sample; a saved
+      # document keeps it as a FLAC asset in its bundle)
+      prepare: -> {
+        { source: bounce(2.seconds, root: A3, name: 'grain_source') {
+          220.hz.triangle * 0.5 + 440.35.hz.sine * 0.25 + 659.4.hz.sine * 0.12 + 881.1.hz.sine * 0.06
+        } }
+      },
+      build: ->(v, k) {
+        cloud = v.grains(k[:source], density: k[:density], size: k[:size], position: k[:position], spread: k[:spread],
+          pitch_spread: k[:detune], pan_spread: 0.7)
+        cloud * v.env(k[:attack], 0.5, 0.9, k[:release], gm: false)
+      },
+    },
   }.freeze
 
   # Library voice +patch+ playing +midi+ (Notes, a Clip, a MIDI file, or a
@@ -389,6 +420,7 @@ module MB::Sound
       value = knobs[name].nil? ? default : knobs[name]
       [name, value.is_a?(Numeric) ? value.to_f.constant.named(name.to_s) : value]
     }
+    k = k.merge(s[:prepare].call) if s[:prepare]
     out = synth(midi, voices: voices || s[:voices]) { |v| s[:build].call(v, k) * s[:level] }
     out = out.hp1(s[:dc_block]) if s[:dc_block]
     s[:chorus] ? out.chorus(s[:chorus]) : out

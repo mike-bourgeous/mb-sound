@@ -85,7 +85,13 @@ RSpec.describe('bin/save_presets.rb') do
       direct = MB::Sound.with_seed(0) { MB::Sound.library_voice(midi.(), name) }
       expected = render_buffers(direct, 40)
       got = render_buffers(io.load(file, inputs: { midi: midi.() }), 40)
-      expect(got).to eq(expected)
+      if s[:prepare]
+        # (a bounced source: the document keeps it as a 24-bit FLAC asset)
+        join = ->(bufs) { Numo::SFloat.cast(SpecBuffers.join(bufs.flat_map { |b| b.compact })) }
+        expect(rms_db(join.(got) - join.(expected)) - rms_db(join.(expected))).to be < -100
+      else
+        expect(got).to eq(expected)
+      end
       expect(expected.flatten.compact.map { |b| b.abs.max }.max).to be > 0
     end
   end
