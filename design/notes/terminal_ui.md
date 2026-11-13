@@ -449,4 +449,3 @@ The maintainer (2026-11-02): "I'd like to see bin/play.rb adopt the tiled UI, ch
 - **Results print their own inspect through pp** (`MB::Sound::OneLinePrint`): Data's and Struct's `pretty_print` ignore a class's `#inspect`; `one_line_print_spec.rb` fails an MB:: Data/Struct/collection class defining `#inspect` without it.
 - **Idle frames** (Mac container, focused inspector, 10 s windows): 145.6k objects/s and 3 GCs before, 47.7k/s and 1 GC after (the REPL focused 59.6k -> 45.9k/s, about 21k/s of it the playing clip's render).  mb-term `Keymap#help_groups` is built once until the bindings change, `Keys.hints` kept per keymap, `PaneKeys.kind_of` per class, and the inspector's per-row texts and pick list per snapshot; `inspector_allocations_spec.rb` caps a frame at 700 objects (443 now).
 - **`$MB_SOUND_CHECKOUT_TMP`** replaces `Internal.checkout_tmp_dir` for every console file kept in the main checkout's tmp/ (hand_tune.md).
-
