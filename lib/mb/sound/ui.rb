@@ -525,6 +525,29 @@ module MB
           end
         end
 
+        # Prepended to Pry::Pager: no pager while a tiled screen hosts the
+        # REPL pane (sd-ux-fixes-1, the review's #5: a result taller than
+        # the pane, `snaps` or `design` at 80x24, opened Pry's pager in
+        # the pane and the next typed lines went into it; the console's Pry
+        # copied Pry.config.pager when it started, so only its own config
+        # turns it off).  Output prints as it comes; the pane's scrollback
+        # (Alt-PgUp) has it all.  Back to the pager once the tiles go.
+        module NoPagerInTiles
+          private
+
+          def best_available
+            return Pry::Pager::NullPager.new(pry_instance.output) if PryPages.tiles_own_repl?
+            super
+          end
+        end
+
+        # True while a tiled screen is up and hosts the console (its REPL
+        # pane).
+        def self.tiles_own_repl?
+          screen = UI.screen
+          screen.is_a?(Tiles) && screen.active? && !screen.hidden? && !screen.host.nil?
+        end
+
         # True if Pry command +line+'s +text+ goes to +tiles+' page pane.
         def self.to_page?(line, text, tiles)
           return true if ALWAYS.include?(line.split(' ', 2).first)
@@ -536,6 +559,7 @@ module MB
           return if @installed
           ::Pry::Command.prepend(CommandLine)
           ::Pry::Pager.prepend(ToPage)
+          ::Pry::Pager.prepend(NoPagerInTiles)
           @installed = true
         end
       end
