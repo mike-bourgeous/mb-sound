@@ -34,6 +34,7 @@ require_relative 'synths/funk'
 require_relative 'synths/ambient'
 require_relative 'synths/electric_pianos'
 require_relative 'synths/init_voice'
+require_relative 'synths/library_voices'
 
 module MB::Sound
   # Command-line options giving a patch's curated knobs (a Hash: name =>
@@ -173,8 +174,15 @@ module MB::Sound
     },
   }.freeze
 
+  # The library voices (bin/synths/library_voices.rb, library-voices-1,
+  # 2026-11-13): one instrument per synthesis approach, saved in this
+  # process (not through the script's --save) so their tags go into the
+  # header with the description; every knob is a param.
+  LIBRARY_PRESET_VOICES = LIBRARY_VOICES.keys.freeze
+
   def self.library_preset_names
-    LIBRARY_PRESET_PATCHES.keys + LIBRARY_PRESET_EFFECTS.keys + LIBRARY_PRESET_RACKS.keys + LIBRARY_PRESET_SETS.keys + LIBRARY_PRESET_FITS.keys
+    LIBRARY_PRESET_PATCHES.keys + LIBRARY_PRESET_VOICES + LIBRARY_PRESET_EFFECTS.keys + LIBRARY_PRESET_RACKS.keys + LIBRARY_PRESET_SETS.keys +
+      LIBRARY_PRESET_FITS.keys
   end
 
   # Saves library preset +name+ into +dir+ (presets/ by default), returning
@@ -187,6 +195,19 @@ module MB::Sound
       out = IO.popen(env, [File.join(root, script), '-q', '-p', which.to_s, *extra, '--save', name.to_s, File.join(root, LIBRARY_PRESET_MIDI), err: [:child, :out]], chdir: root, &:read)
       raise "#{script} -p #{which} --save #{name} failed: #{out}" unless $?.success?
       library_preset_file(dir, name)
+    elsif LIBRARY_PRESET_VOICES.include?(name)
+      s = LIBRARY_VOICES.fetch(name)
+      MB::Sound.with_seed(0) do
+        Dir.chdir(root) do
+          midi = Notes.new(LIBRARY_PRESET_MIDI)
+          params = s[:knobs].to_h { |k, (value, range, description)| [k, { value: value, range: range, description: description }] }
+          GraphIO.save(
+            File.join(dir, "#{name}#{GraphIO::EXTENSION}"), library_voice(midi, name),
+            inputs: { midi: midi }, params: params, options: { patch: name }, from: 'bin/synths/library_voices.rb', kind: :synth,
+            meta: { description: library_voices_description(name), tags: s[:tags] }
+          )
+        end
+      end
     elsif (effect = LIBRARY_PRESET_EFFECTS[name])
       script, params, builder = effect
       require File.join(root, script)
@@ -274,6 +295,7 @@ module MB::Sound
       if p.list
         names.each do |n|
           src = LIBRARY_PRESET_PATCHES[n]&.then { |s, w, *| "#{s} -p #{w}" } ||
+                (LIBRARY_PRESET_VOICES.include?(n) ? "bin/synths/library_voices.rb -p #{n}" : nil) ||
                 LIBRARY_PRESET_RACKS[n]&.then { |s, m, *| "#{s} #{m} (rack)" } ||
                 LIBRARY_PRESET_SETS[n]&.then { |s, m, *| "#{s} #{m} (set)" } ||
                 LIBRARY_PRESET_FITS[n]&.then { 'reverb_match fit (effect)' } ||
