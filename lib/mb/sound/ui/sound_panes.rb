@@ -1643,7 +1643,11 @@ module MB
           # `knob :cut, (150.hz..8000.hz).at(3100.hz)` for KnobValue +k+ at
           # its value now.
           def self.knob_line(k)
-            "knob #{k.spec.call_args(value: k.value).join(', ')}"
+            # (a value a crossfade or a ramp left as 0.30000000000000004:
+            # 12 significant figures, then RubyValue's exact literal; the
+            # review's #25)
+            v = k.value.is_a?(Float) && k.value.finite? ? Float(format('%.12g', k.value)) : k.value
+            "knob #{k.spec.call_args(value: v).join(', ')}"
           rescue StandardError
             "knob #{k.name.inspect}, #{TurnGesture.number(k.value)}"
           end
