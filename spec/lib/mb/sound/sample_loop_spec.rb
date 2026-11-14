@@ -342,7 +342,7 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
         end
       end
       # (under 5 ms a slice plays with a gap)
-      tiny = (1...100).map { |i| (i * 200).samples }
+      tiny = (1...126).map { |i| (i * 200).samples }
       expect(stab.stretch(2, mode: :slice, slices: tiny, fill: :stretch).data(0)).to eq(stab.stretch(2, mode: :slice, slices: tiny).data(0))
       expect { stab.stretch(2, mode: :slice, fill: :cyclic) }.to raise_error(ArgumentError, /fill: is one of/)
     end
