@@ -1125,14 +1125,17 @@ module MB
       #     bowl.stretch(100, mode: :paul, window: 0.5.seconds)  # an endless wash
       #     voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false)   # narrower partials, a wide image (voices)
       def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann,
-                  slices: nil, fade: nil, fill: nil, wrap: nil, passes: nil, noise: nil)
+                  slices: nil, fade: nil, fill: nil, wrap: nil, passes: nil, noise: nil, confirm: nil, threshold: nil)
+        unless (confirm.nil? && threshold.nil?) || (SLICE_MODES.include?(mode.to_sym) && slices == :transients)
+          raise ArgumentError, 'confirm: and threshold: are for mode: :slice with slices: :transients'
+        end
         raise ArgumentError, "wrap: is true, false, or nil (by the sample's loop; got #{wrap.inspect})" unless wrap.nil? || wrap == true || wrap == false
         raise ArgumentError, 'wrap:, passes:, and noise: are for mode: :spectral and :paul' unless (wrap.nil? && passes.nil? && noise.nil?) || (!SLICE_MODES.include?(mode.to_sym) && Spectral.mode_name(mode) != :cyclic)
         if SLICE_MODES.include?(mode.to_sym)
           unless fit == :auto && window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
             raise ArgumentError, 'mode: :slice takes slices:, fade:, fill:, and (for fill: :stretch) cycle: and crossfade:'
           end
-          return slice_stretch(ratio, slices, fade, fill || :gap, cycle, crossfade)
+          return slice_stretch(ratio, slices, fade, fill || :gap, cycle, crossfade, confirm, threshold)
         end
         raise ArgumentError, 'slices:, fade:, and fill: are for mode: :slice' unless slices.nil? && fade.nil? && fill.nil?
 
@@ -1160,13 +1163,15 @@ module MB
       SLICE_MODES = %i[slice slices beat beats].freeze
 
       # The slice stretch (see #stretch and SliceStretch).
-      def slice_stretch(ratio, slices, fade, fill, cycle, crossfade)
+      def slice_stretch(ratio, slices, fade, fill, cycle, crossfade, confirm = nil, threshold = nil)
         raise ArgumentError, "Stretch ratios are positive (got #{ratio.inspect})" unless ratio.is_a?(Numeric) && ratio > 0
         raise ArgumentError, "fill: is one of #{SliceStretch::FILLS.inspect} (got #{fill.inspect})" unless SliceStretch::FILLS.include?(fill)
-        cuts, = slice_cuts(slices)
+        cuts, = slices == :transients ? [transient_cuts(confirm, threshold), :onsets] : slice_cuts(slices)
         f = position(fade.nil? ? SliceStretch::FADE : fade).round
         kw = { mode: :slice }
         kw[:slices] = slices unless slices.nil?
+        kw[:confirm] = confirm unless confirm.nil?
+        kw[:threshold] = threshold unless threshold.nil?
         kw[:fade] = fade unless fade.nil?
         kw[:fill] = fill unless fill == :gap
         kw[:cycle] = cycle unless cycle == 25.ms
@@ -1184,13 +1189,10 @@ module MB
 
       # The slice points (play order, from the region start) for the
       # slice stretch, and where they came from: +slices+ :markers,
-      # :onsets, :grid (sixteenths at #bpm), a Duration (a grid of it at
-      # #bpm), :beats (one slice a beat of #beats: each beat's marker
-      # where one sits within BEAT_REACH of the beat, else the beat's
-      # place on the grid; for sounds whose markers also fall inside
-      # their notes, which slices at every marker cut up), an Integer
-      # (equal slices), an Array of positions, or a Sample::Slices; nil
-      # picks markers, else onsets, else the grid.
+      # :onsets, :transients (#transient_cuts), :grid (sixteenths at
+      # #bpm), a Duration (a grid of it at #bpm), an Integer (equal
+      # slices), an Array of positions, or a Sample::Slices; nil picks
+      # markers, else onsets, else the grid.
       def slice_cuts(slices)
         case slices
         when nil
@@ -1200,19 +1202,9 @@ module MB
           return [o, :onsets] unless o.empty? && @bpm
           slice_cuts(:grid)
         when :markers then [markers.map(&:position), :markers]
-        when :onsets, :transients then [slice_onsets, :onsets]
+        when :onsets then [slice_onsets, :onsets]
+        when :transients then [transient_cuts, :onsets]
         when :grid then slice_cuts(1.n16)
-        when :beats, :beat
-          count = beats
-          raise ArgumentError, 'Slices at beats need the sample\'s beats or bpm (Sample[..., bpm: 98] or beats: 8)' unless count && count > 0
-          step = length / count.to_f
-          marks = markers.map(&:position)
-          cuts = Array.new((count - 1e-9).ceil) { |i|
-            at = i * step
-            near = marks.min_by { |m| (m - at).abs }
-            near && (near - at).abs <= step * BEAT_REACH ? near : at.round
-          }
-          [cuts, :grid]
         when Sequence::Duration
           slices.check_length('A slice grid')
           raise ArgumentError, 'A grid of slices needs the sample\'s bpm (Sample[..., bpm: 98])' unless @bpm
@@ -1223,14 +1215,40 @@ module MB
           [Array.new(slices) { |i| (i * length / slices.to_r).round }, :grid]
         when Array then [slices.map { |x| position(x).round }, :markers]
         when Slices then [slices.starts, :markers]
-        else raise ArgumentError, "slices: is :markers, :onsets, :grid, :beats, a Duration, a count, positions, or Slices (got #{slices.inspect})"
+        else raise ArgumentError, "slices: is :markers, :onsets, :transients, :grid, a Duration, a count, positions, or Slices (got #{slices.inspect})"
         end
       end
       private :slice_cuts
 
-      # How near a beat (in beats) a marker must be for `slices: :beats`
-      # to cut at it instead of at the beat's place on the grid.
-      BEAT_REACH = 0.125
+      # The cuts of `slices: :transients`: only where a transient is, so
+      # every hit stays whole and lands on its stretched time (the loop's
+      # timing holds).  A sample with markers past its start (a loop
+      # file's stretch markers) cuts at the detected onsets (#onsets,
+      # +threshold+ 9 dB by default, `threshold: 6.db` for softer
+      # attacks) that a marker (or the start) confirms within +confirm+
+      # (nil or true: TRANSIENT_REACH, 15 ms; or a length), each on its
+      # attack: a marker inside a hit's decay or on held sound does not
+      # cut, and one set a few ms early by a grid cuts on the attack.
+      # Without markers, or with `confirm: false`, at every detected
+      # onset.  (stretch-fixes-3: the maintainer on slices at beats,
+      # one a beat, of a texture pad: "By 'beats' I meant transients.
+      # As is this just breaks the timing of the loop"; the notes
+      # inside each beat played at their old spacing.)
+      def transient_cuts(confirm = nil, threshold = nil)
+        raise ArgumentError, "confirm: is true, false, or a reach (a length; got #{confirm.inspect})" if confirm.is_a?(Symbol) || confirm.is_a?(String)
+        found = threshold.nil? ? onsets : onsets(threshold: threshold)
+        marks = markers.map(&:position).select(&:positive?)
+        return found if confirm == false || marks.empty?
+
+        reach = position(confirm.nil? || confirm == true ? TRANSIENT_REACH : confirm)
+        marks = [0, *marks]
+        found.select { |o| marks.any? { |m| (m - o).abs <= reach } }
+      end
+      private :transient_cuts
+
+      # How near (seconds) a detected onset must be to a marker for
+      # `slices: :transients` to cut there.
+      TRANSIENT_REACH = 0.015
 
       # The onsets the slice stretch cuts at: #onsets, plus softer ones
       # (SOFT_ONSET rises) within SOFT_ONSET_REACH of a sixteenth when the

@@ -380,19 +380,38 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       expect { rec.stretch(2, fill: :gap) }.to raise_error(ArgumentError, /for mode: :slice/)
     end
 
-    it 'cuts at beats with slices: :beats: the beat\'s marker where one is near, else the grid' do
-      # (two bars at 100 BPM: 8 beats of 28800 samples; markers at
-      # beats 0 and 2, one 500 samples after beat 4, and three inside
-      # the beats' sounds)
-      m = rec.with(markers: [0, 9000, 57600, 70000, 115700, 130000])
-      expect(m.beats).to eq(8)
-      want = [0, 28800, 57600, 86400, 115700, 144000, 172800, 201600]
-      expect(m.stretch(1.5, mode: :slice, slices: :beats).data(0)).to eq(m.stretch(1.5, mode: :slice, slices: want).data(0))
-      expect(m.stretch(1.5, mode: :slice, slices: :beats).data(0)).not_to eq(m.stretch(1.5, mode: :slice).data(0))
-      # (no markers: the grid of beats; no beats or tempo: nothing to count)
-      expect(rec.stretch(1.5, mode: :slice, slices: :beats).data(0)).to eq(rec.stretch(1.5, mode: :slice, slices: 8).data(0))
-      expect(rec.stretch(1.5, mode: :slice, slices: :beats).lineage[3]).to eq({ mode: :slice, slices: :beats })
-      expect { MB::Sound::Sample[rec.to_a].stretch(2, mode: :slice, slices: :beats) }.to raise_error(ArgumentError, /beats or bpm/)
+    it 'cuts only where a transient is with slices: :transients, so the timing holds' do
+      on = rec.onsets
+      expect(on.length).to be >= 12
+      # (markers: one 5 ms before a hit, one inside a decay, one on a hit,
+      # one 75 ms after a hit)
+      m = rec.with(markers: [on[1] - 240, on[1] + 7200, on[3], on[5] + 3600])
+      want = [on[0], on[1], on[3]]
+      expect(m.stretch(1.5, mode: :slice, slices: :transients).data(0)).to eq(m.stretch(1.5, mode: :slice, slices: want).data(0))
+      expect(m.stretch(1.5, mode: :slice, slices: :transients, confirm: 0.002).data(0)).to eq(m.stretch(1.5, mode: :slice, slices: [on[0], on[3]]).data(0))
+      expect(m.stretch(1.5, mode: :slice, slices: :transients, confirm: false).data(0)).to eq(m.stretch(1.5, mode: :slice, slices: on).data(0))
+      expect(m.stretch(1.5, mode: :slice, slices: :transients, confirm: false).lineage[3]).to eq({ mode: :slice, slices: :transients, confirm: false })
+
+      # Without markers every detected onset (+threshold+ as Onsets takes it)
+      expect(rec.stretch(1.5, mode: :slice, slices: :transients).data(0)).to eq(rec.stretch(1.5, mode: :slice, slices: on).data(0))
+      loud = rec.onsets(threshold: 20.db)
+      expect(loud.length).to be < on.length
+      expect(rec.stretch(1.5, mode: :slice, slices: :transients, threshold: 20.db).data(0)).to eq(rec.stretch(1.5, mode: :slice, slices: loud).data(0))
+
+      # Every hit lands on its stretched time, and the loop keeps its length
+      st = rec.stretch(1.5, mode: :slice, slices: :transients)
+      expect(st.length).to eq((rec.length * 1.5).round)
+      got = st.onsets
+      out = Numo::DFloat.cast(st.data(0))
+      src = Numo::DFloat.cast(rec.data(0))
+      on.each { |o| q = (o * 1.5).round; expect((out[q...(q + 480)] - src[o...(o + 480)]).abs.max).to be < 1e-6 }
+      # (detected again within the 4 ms pre-roll that leads into each)
+      expect(on.map { |o| got.map { |g| (g - o * 1.5).abs }.min }.max).to be <= 192
+
+      expect { rec.stretch(1.5, mode: :slice, slices: :markers, confirm: true) }.to raise_error(ArgumentError, /slices: :transients/)
+      expect { rec.stretch(1.5, mode: :spectral, threshold: 6.db) }.to raise_error(ArgumentError, /slices: :transients/)
+      expect { m.stretch(1.5, mode: :slice, slices: :transients, confirm: :yes) }.to raise_error(ArgumentError, /confirm: is/)
+      expect { rec.stretch(1.5, mode: :slice, slices: :beats) }.to raise_error(ArgumentError, /slices: is/)
     end
 
     it 'stretches reversed samples in play order' do

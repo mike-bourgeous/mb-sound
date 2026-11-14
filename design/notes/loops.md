@@ -22,7 +22,7 @@ Sample['take3.wav', detect: true]              # tempo detection when nothing sa
 brk.detect_tempo                               # the same on any Sample
 brk.stretch(1.25, mode: :slice)                # slices at the hits, attacks exact
 brk.stretch(1.25, mode: :slice, fill: :stretch)   # each hit whole, its tail drawn out instead of a gap
-brk.stretch(0.8, mode: :slice, slices: :grid)  # markers / onsets / grid / beats / a Duration / a count / positions / Slices
+brk.stretch(0.8, mode: :slice, slices: :grid)  # markers / onsets / transients / grid / a Duration / a count / positions / Slices
 bg :brk, brk.follow                            # follows the session tempo (pitch kept, slice stretch)
 bg :pad, pad.follow(stretch: :spectral)        # any stretch mode or a Hash of stretch options
 bg :vinyl, brk.follow(:resample)               # pitch follows the tempo (varispeed)
@@ -91,7 +91,18 @@ Ideas not built (cheap signals for later):
 ACID/REX-style: cut at the hits, start slice i at round(r × its start), copy it exactly.
 
 - Slices: markers, else onsets (Sample::Onsets), else sixteenths at the sample's bpm; or `slices:` given.
-- `slices: :beats` (stretch-fixes-1 round 2, 2026-11-14): one slice a beat of `beats`, cut at the beat's marker where one sits within an eighth of a beat (`Sample::BEAT_REACH`), else at the beat's place on the grid.  The maintainer on slices at every marker of a texture pad at 2x: "A sounds like it should only be using the beat markers, not the stretch markers, so each hit doesn't get cut up", and on a drum loop: "A is wrong because there are markers in the middle of drum hit decays".  Cuts that go through sound within 20 dB of the loop's loudest with no detected onset there (10 ms before the cut): the texture pad 4 of 48 at every marker, 0 of 11 at beats; the drum loop 6 of 16, 0 of 4 (and 0 of 6 at its onsets); a sax riff 14 of 19, 2 of 4.  Beats alone leave a drum loop's hits between the beats on their old spacing (at 1.18x an off-beat hit lands 32 ms early), so for drums the cut points that fit are the attacks: `slices: :onsets`, or the markers an onset confirms (`confirm:`, on the branch with the stretch markers).
+- `slices: :transients` (stretch-fixes-3, 2026-11-14; `Sample#transient_cuts`): cuts only where a transient is, so every hit stays whole and lands on its stretched time.  With markers past the start (a loop file's stretch markers), the detected onsets that a marker (or the start) confirms within `confirm:` (true: `Sample::TRANSIENT_REACH`, 15 ms; or a length), each on its attack; without markers, or `confirm: false`, every detected onset; `threshold:` is the detector's (9 dB).  It replaced round 2's `slices: :beats` (one slice a beat, at the beat's marker or the grid; removed), after the maintainer heard it on a texture pad at 2x: "By 'beats' I meant transients.  As is this just breaks the timing of the loop."  Measured (the study's source renders with their project markers; a cut "through loud sound" is within 20 dB of the loop's loudest 10 ms with no onset within 15 ms; hit timing: where each detected onset's attack lands against ratio × its time, with `fill: :gap`):
+
+  | Loop | Cuts | Through loud sound | 1-8 ms into an attack | Hits off their time: median, worst |
+  |---|---|---|---|---|
+  | Texture pad 2x, every marker | 49 | 5 | 12 | 0.3, 7.1 ms |
+  | Texture pad 2x, beats (removed) | 12 | 1 | 0 | 341, 682 ms |
+  | Texture pad 2x, transients | 39 | 0 | 0 | 0, 0 |
+  | Drum loop 1.18x, every marker | 17 | 7 | 3 | 0.8, 1.4 ms |
+  | Drum loop 1.18x, beats (removed) | 5 | 0 | 3 | 1.4, 20 ms |
+  | Drum loop 1.18x, transients | 5 | 0 | 0 | 0, 0 |
+
+  The length is round(ratio × length) in every case.  On these two loops every detected onset has a marker within 15 ms, so `:transients` equals `:onsets` there; `:onsets` also takes softer rises near the sixteenth grid when the sample has a bpm (#slice_onsets), `:transients` only the detector's.  The markers sit within 1 ms of their onsets mostly, but 12 of the texture's sit 1-7 ms after them, so cutting at every marker leaves those attacks' first milliseconds on the slice before.
 - Slowing down: `fill: :gap` (default) plays the slice's own audio, fading out over `fade:` (4 ms) before its end, then silence until the next hit; `fill: :stretch` keeps each hit whole and draws what it has died down to out to the next hit (below; slices shorter than the 15 ms attack plus two cycles keep a quarter of themselves and cycle half of the rest; under 5 ms a slice plays with a gap).
 - Speeding up: each slice is cut at the next one's new time with the same fade.
 - Pre-rolls: a slice that doesn't follow on from the one before (as in the input) gets the input's last `fade` samples before its hit faded in ahead of it, crossfading with the outgoing fade, so the attack is exact and joins what led into it (no step out of silence).  The first slice's pre-roll comes from the loop's end, at the output's end, so seamless loops stay seamless.
@@ -144,7 +155,7 @@ From the maintainer's verdicts on the stretch study's Bench set and its follow-u
 | guitar phrase (recorded) | B (0.87x) | (no note) | | |
 | sax riff | | C | | |
 | sustained pad | (source: the vocoder's wrap; fixed since, to judge again) | (the same) | | |
-| texture pad | | | F (2x): the vocoder "too rhythmic/buzzy", A "should only be using the beat markers" | B (8x), wanting it less buzzy or a transient-aware D |
+| texture pad | | | F (2x): the vocoder "too rhythmic/buzzy", A "should only be using the beat markers" (he meant transients: `slices: :transients`) | B (8x), wanting it less buzzy or a transient-aware D |
 | chord stab (one-shot as a loop) | | | | B (3.8x, 8x); D "too much phase randomization" |
 | cymbal splash (one-shot as a loop) | | | | D (2.9x, 8x): "the noisiness of paulstretch is a good fit" |
 
