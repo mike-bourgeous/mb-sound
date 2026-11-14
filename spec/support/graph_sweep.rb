@@ -502,7 +502,11 @@ module GraphSweep
           c.sig.phaser(:barberpole, rate: 6, direction: c.mod(-2, 2, 3)) + c.sig.phaser(:barberpole, rate: 1.n8, direction: -1.5) +
           c.sig.phaser(:jet, above: nil, rate: 4) + c.sig.phaser(:jet, rate: 3, lean: -1) + c.stereo_sig.phaser(:swirl, rate: 2, lean: c.mod(-1, 1, 2)).mixdown +
           # (effects-4: the self-oscillating loop, a feedback node swept past 1, both signs)
-          c.sig.phaser(4, stages: 8, feedback: c.mod(-1.25, 1.25, 3), oscillate: 1) + c.stereo_sig.phaser(:swirl, feedback: -1.1, oscillate: true).mixdown
+          c.sig.phaser(4, stages: 8, feedback: c.mod(-1.25, 1.25, 3), oscillate: 1) + c.stereo_sig.phaser(:swirl, feedback: -1.1, oscillate: true).mixdown +
+          # (effects-5: mode, level, and pitch nodes; modes in a list; lanes; a whistling barber pole)
+          c.sig.phaser(5, stages: 8, feedback: -1.1, oscillate: c.mod(0, 3, 2), level: c.mod(0.5, 2, 3), pitch: c.mod(300, 900, 0.7)) +
+          c.stereo_sig.phaser(:swirl, feedback: [-1.1, c.mod(-1.2, -0.8, 2)], oscillate: [0, 2], level: [1, 0.5]).mixdown +
+          c.stereo_sig.phaser(:circle, rate: 3).mixdown + c.sig.phaser(:barberpole, rate: 5, feedback: -1.05, oscillate: 1, pitch: 200..800)
       }],
 
       # Dynamics

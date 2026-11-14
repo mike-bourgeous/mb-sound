@@ -8,7 +8,7 @@ module MB
         # A phaser (GraphNode::Phaser): moving notches from LFO-swept allpass stages.
         #
         # +preset_or_rate+ is a preset name (:vintage, the default; :swirl,
-        # :ripple, :deep12, :jet, :barberpole; `L.fx.phaser`) or the LFO rate: Hz, a Pitch,
+        # :ripple, :deep12, :jet, :barberpole, :circle; `L.fx.phaser`) or the LFO rate: Hz, a Pitch,
         # a musical length per cycle that follows the tempo (`1.bar`,
         # `2.bars`, `knob(:len).bars`), a Length per cycle (`4.seconds`), or
         # a node of Hz.  Options override the preset's settings (numbers or
@@ -49,7 +49,9 @@ module MB
         #                the way the notches move, its size the speed (1
         #                the preset's rate, 2 twice as fast, 0 held still);
         #                turned live it slows, stops, and reverses the
-        #                notches where they are, with no jump.
+        #                notches where they are, with no jump.  At most
+        #                40 passes a second (rate x direction; a moving
+        #                direction is clipped there).
         # +:lean+ - Feedback on one half of the LFO's sweep (-1..1, or a
         #           node): 1 keeps the feedback only while the notches rise
         #           (none while they fall), -1 only while they fall, 0.5
@@ -65,9 +67,28 @@ module MB
         #                loop sets, input or not.  Negative feedback's
         #                modes are the notches from the bottom, positive
         #                feedback's the peaks between them
-        #                (Phaser.mode_frequency; Phaser.mode_center fits
-        #                +:center+/+:range+ to a whistle's frequencies).
-        #                Not with +:direction+.
+        #                (Phaser.mode_frequency; Phaser.mode_center).  A
+        #                fraction tunes the loop between two modes, a node
+        #                moves it (each new mode kicked from silence once),
+        #                and a list whistles on several modes at once (a
+        #                loop each on one sweep, the dry signal once), with
+        #                +:feedback+, +:level+, and +:pitch+ as lists too.
+        #                With +:direction+ the barber pole whistles.
+        # +:level+ - The oscillating loop's level (a number, Decibels, or
+        #            a node; 1 by default): its saturator is
+        #            level * tanh(y / level), so the whistle's level
+        #            follows it (`level: 14` is the input scaled by 1/14
+        #            and the output by 14).
+        # +:pitch+ - The whistle's frequency at the sweep's middle (Hz, a
+        #            Pitch, or a node such as `notes.freq`), in place of
+        #            +:center+: the stages' center is set from the mode,
+        #            every sample.  A Range is the whistle's sweep ends
+        #            (`pitch: 250..2110`, in place of +:range+).
+        # +:lanes+ - N phasers in series, their LFOs spread evenly around
+        #            the circle (phases i / N), so with an even N as many
+        #            notches fall as rise at every moment (the :circle
+        #            preset: 4 lanes of 4 stages).  Not with +:sweep+ or
+        #            +:direction+.
         #
         # Examples (bin/sound.rb):
         #     bg :pad, 110.hz.saw.at(-12.db).phaser                    # :vintage
@@ -80,7 +101,10 @@ module MB
         #     bg :pad, pad.phaser(:barberpole)                          # forever rising (direction: :down falls)
         #     bg :pad, pad.phaser(:barberpole, direction: knob(:dir, 1, range: -2..2))   # turn it: up, stop, down, faster
         #     bg :pad, pad.phaser(:jet, lean: -1)                       # the whoosh only on the way down
-        #     bg :pad, pad.phaser(stages: 32, oscillate: 7, feedback: -1.05, range: 276..2325, rate: 4.bars, mix: 0.1)   # a whistle 250-2110 Hz
+        #     bg :pad, pad.phaser(stages: 32, oscillate: 7, feedback: -1.05, pitch: 250..2110, rate: 4.bars, mix: 0.1)   # a whistle 250-2110 Hz
+        #     bg :pad, pad.phaser(stages: 16, oscillate: [2, 4, 6], pitch: [A4, E5, C6], feedback: [0, 1, 2].map { |i| 4.bars.lfo.with_phase(i / 3.0).at(-0.9..-1.2) }, range: 2, rate: 8.bars, mix: 0.1)   # three whistles swelling in turn
+        #     bg :lead, pad.phaser(stages: 8, oscillate: 1, feedback: -1.15, pitch: seq(A4, C5, E5).n4.loop.freq, mix: 0.1)   # a whistle singing a melody
+        #     bg :pad, pad.phaser(:circle)                              # as many notches falling as rising
         def phaser(preset_or_rate = nil, **options)
           Phaser.build(self, preset_or_rate, **options)
         end
