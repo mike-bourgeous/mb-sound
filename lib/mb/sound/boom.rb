@@ -27,7 +27,7 @@ module MB
       # The settings a voice reads (all Params, below).
       VOICE_KEYS = %i[
         note drop sweep sweep_curve shape punch punch_time decay curve sub sub_decay click click_tone
-        noise noise_tone noise_decay rumble rumble_tone rumble_decay drive vel_depth vel_bright below floor
+        noise noise_tone noise_decay rumble rumble_tone rumble_decay rumble_fall drive vel_depth vel_bright below floor
       ].freeze
 
       # The library reverb presets a tail may use (+reverb:+): the classic
@@ -37,7 +37,7 @@ module MB
       # boom-2).
       REVERBS = %i[space hall default room room_size].freeze
 
-      preset_family :boom, kind: :instrument, label: 'boom preset', keys: VOICE_KEYS + %i[tail tail_length reverb tail_cut room damping width level voices],
+      preset_family :boom, kind: :instrument, label: 'boom preset', keys: VOICE_KEYS + %i[tail tail_length reverb tail_cut tail_tone room damping width level voices],
         about: 'Cinematic booms and impacts: boom(clip, :trailer), L.inst.boom.trailer.(clip), L.inst.boom.trailer.ping',
         apply: ->(name, source = nil, **o) { MB::Sound.boom(source, name, **o) },
         code: ->(e) { "boom(midi, #{e.name.inspect})" }
@@ -61,6 +61,7 @@ module MB
       param :rumble, 0.715, range: 0.0..1.0, description: 'Level of a low noise tail under the boom'
       param :rumble_tone, 480.0, range: 40.0..4000.0, curve: :exp, unit: 'Hz', description: 'Lowpass cutoff of the rumble in Hz'
       param :rumble_decay, 5.6, range: 0.05..20.0, curve: :exp, unit: 's', description: 'Seconds the rumble takes to fall silent (along the body\'s curve)'
+      param :rumble_fall, 0.0, range: 0.0..6.0, description: 'Octaves the rumble\'s lowpass falls over its decay (along the body\'s curve), so it darkens as it fades (0 none)'
       param :drive, 0.249, range: 0.0..1.0, description: 'Soft clipping of the body and noise burst (0 clean, 1 up to +18 dB into the clipper)'
       param :vel_depth, 0.5, range: 0.0..1.0, description: 'How much velocity scales the drop (0 none, 1 all)'
       param :below, 0.0, range: 0.0..4.0, description: 'Octaves under the note the fall lands (0 on the note; with floor, a drop that fades out instead of holding a tone)'
@@ -70,6 +71,7 @@ module MB
       param :tail_length, 8.1, range: 0.2..30.0, curve: :exp, unit: 's', description: 'Reverb decay time (RT60) in seconds (read when built)'
       param :reverb, :space, range: REVERBS, description: 'The library reverb preset of the tail (:room_size: the room-size form with room; read when built)'
       param :tail_cut, 0.0, range: 0.0..1000.0, unit: 'Hz', description: 'Low cut inside the reverb in Hz (lows die away sooner; 0 none; read when built)'
+      param :tail_tone, 0.0, range: 0.0..8000.0, unit: 'Hz', description: 'Lowpass inside the reverb in Hz: highs die sooner on every pass, so the tail darkens as it decays (0: the damping filter instead; read when built)'
       param :room, 0.675, range: 0.0..1.0, description: 'Reverb room size of the room-size form (read when built)'
       param :damping, 0.62, range: 0.0..1.0, description: 'Reverb high-frequency damping (0 bright, 1 dark; read when built)'
       param :width, 0.278, range: 0.0..1.0, description: 'Stereo width of the tail (0 mono, 1 the reverb as it is)'
@@ -103,7 +105,7 @@ module MB
       # level is the track's fader.
       KNOB_PARAMS = %i[
         drop sweep sweep_curve shape punch punch_time decay curve sub sub_decay click click_tone
-        noise noise_tone noise_decay rumble rumble_tone rumble_decay drive vel_depth vel_bright below tail width
+        noise noise_tone noise_decay rumble rumble_tone rumble_decay rumble_fall drive vel_depth vel_bright below tail width
       ].freeze
 
       # The default boom (the params' defaults): fitted to a soft synth's
@@ -207,7 +209,13 @@ module MB
         sub = amount?(s[:sub]) ? f.tone.sine.reset(trigger) * Drums.decay_env(trigger, s[:sub_decay], attack: SUB_ATTACK, curve: s[:curve]) * s[:sub] : nil
         rumble = nil
         if amount?(s[:rumble])
-          n = white.filter(:lowpass, cutoff: s[:rumble_tone], quality: 0.7)
+          tone = s[:rumble_tone]
+          if amount?(s[:rumble_fall])
+            # (the cutoff falls in octaves along the rumble's own decay)
+            fall = Drums.decay_env(trigger, s[:rumble_decay], attack: 0, curve: s[:curve], velocity: false)
+            tone = tone * 2**((fall - 1) * s[:rumble_fall])
+          end
+          n = white.filter(:lowpass, cutoff: tone, quality: 0.7)
           rumble = n * Drums.decay_env(trigger, s[:rumble_decay], attack: SUB_ATTACK, curve: s[:curve]) * s[:rumble]
         end
         Drums.mix(hit, click || 0, sub || 0, rumble || 0)
@@ -234,7 +242,12 @@ module MB
         return out unless amount?(s[:tail])
         type = s[:reverb].to_sym
         raise ArgumentError, "Unknown boom reverb #{type.inspect} (#{REVERBS.map(&:inspect).join(', ')})" unless REVERBS.include?(type)
-        opts = { decay: s[:tail_length], damping: s[:damping], wet: s[:tail], dry: 1, output_channels: 2 }
+        opts = { decay: s[:tail_length], wet: s[:tail], dry: 1, output_channels: 2 }
+        if amount?(s[:tail_tone])
+          opts[:lowpass] = Float(s[:tail_tone])
+        else
+          opts[:damping] = s[:damping]
+        end
         opts[:highpass] = Float(s[:tail_cut]) if amount?(s[:tail_cut])
         out = if type == :room_size
           out.reverb(room_size: s[:room], seed: TAIL_SEED, **opts)

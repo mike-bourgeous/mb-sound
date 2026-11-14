@@ -477,10 +477,15 @@ module MB
         under the note) and floor (Hz the body fades out under), shape
         (sine to triangle), punch and punch_time, decay and curve, sub and
         sub_decay, click, click_tone, noise, noise_tone, noise_decay,
-        rumble, rumble_tone, rumble_decay, drive, vel_depth, vel_bright,
+        rumble, rumble_tone, rumble_decay, rumble_fall (octaves the
+        rumble's lowpass falls as it fades), drive, vel_depth, vel_bright,
         tail, tail_length, reverb (:space, :hall, :default, :room, or
-        :room_size with room), tail_cut (Hz), damping, width, level,
-        voices.
+        :room_size with room), tail_cut (Hz), damping (0..1, how much
+        sooner the highs die), tail_tone (Hz, a lowpass inside the reverb
+        instead of damping), width, level, voices.  A slower sub drop that
+        creeps toward 20 Hz as it fades: `boom(E1, :sub_drop, sweep: 4.5,
+        sweep_curve: 30, below: 1.04, floor: 40)` (sweep_curve shapes the
+        fall: 0 even in octaves, higher dives sooner and settles).
 
         The presets are library entries: `L.inst.boom.trailer.ping` hits
         once (`.ping(E1)` at a note), `play L.inst.boom.impact` plays a

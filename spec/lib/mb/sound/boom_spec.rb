@@ -154,6 +154,60 @@ RSpec.describe(MB::Sound::Boom, :aggregate_failures) do
     expect(a).to eq(b)
   end
 
+  # The level of +x+ in the 600-2400 Hz band over the 150-600 Hz band (dB)
+  # from +t0+ to +t1+ seconds: lower is darker.
+  def tilt(x, t0, t1)
+    level(band(x, 600, 2400), t0, t1) - level(band(x, 150, 600), t0, t1)
+  end
+
+  # The pitch of +x+ in Hz around +t+ seconds (zero crossings within
+  # +half+ seconds either side; for the sub drop's slow end).
+  def pitch_around(x, t, half = 0.1)
+    seg = x[((t - half) * 48000).to_i...((t + half) * 48000).to_i]
+    zc = (1...seg.size).select { |k| seg[k - 1] < 0 && seg[k] >= 0 }
+    (zc.length - 1) * 48000.0 / (zc[-1] - zc[0])
+  end
+
+  # boom-3 (the maintainer on boom-2's tails: "Too much noise in the tail.
+  # I'd want more damping with the apparent frequency of the tail decaying
+  # over time."): the rumble's lowpass falls as it fades (rumble_fall), and
+  # tail_tone puts a lowpass inside the reverb, so the tail can darken as
+  # it decays instead of keeping one spectrum
+  it 'darkens its rumble and tail as they decay with rumble_fall and tail_tone' do
+    mono = ->(o) { (o[0] + o[1]) / 2 }
+
+    # The rumble alone: its lowpass falls 2 octaves over rumble_decay
+    rumble = { 0 => nil, 2 => nil }.to_h { |fall, _|
+      MB::Sound.seed(1)
+      [fall, samples(MB::Sound.boom(MB::Sound::G1, tail: 0, click: 0, punch: 0, decay: 0.05, drive: 0, rumble_fall: fall), 240)[0]]
+    }
+    expect(tilt(rumble[2], 3, 4)).to be < tilt(rumble[2], 0.2, 0.7) - 6
+    expect((tilt(rumble[0], 3, 4) - tilt(rumble[0], 0.2, 0.7)).abs).to be < 3
+
+    # tail_tone: a lowpass inside the reverb in place of damping
+    dry = samples(MB::Sound.boom(MB::Sound::G1, tail: 0, rumble: 0), 180)[0]
+    wet = { 0 => nil, 800 => nil }.to_h { |tone, _|
+      out = samples(MB::Sound.boom(MB::Sound::G1, rumble: 0, damping: 0, tail_tone: tone), 180)
+      [tone, mono.(out) - dry]
+    }
+    expect(level(band(wet[800], 600, 2400), 1, 2)).to be < level(band(wet[0], 600, 2400), 1, 2) - 10
+  end
+
+  # boom-3 (the maintainer on :sub_drop: "slowing the pitch curve, so the
+  # pitch velocity gets close to (but not equal to) zero around
+  # 25Hz/fadeout"): sweep_curve is the fall's ease-out (Curve.db), so a
+  # higher one settles toward where below lands as the floor fades it out
+  it 'slows its sub drop toward the fade with sweep_curve' do
+    MB::Sound.seed(1)
+    x = samples(MB::Sound.boom(MB::Sound::E1, :sub_drop, tail: 0, sweep: 4.5, sweep_curve: 30, below: 1.04, floor: 40), 240)[0]
+    f = [1.5, 2.0, 2.5, 3.0].map { |t| pitch_around(x, t) }
+    expect(f[2]).to be_between(24, 28)
+    expect(f[3]).to be_between(21, 25.5)
+    expect(Math.log2(f[2] / f[3])).to be < 0.6 * Math.log2(f[0] / f[1]) # (still falling, but slower)
+    expect(f[3]).to be < f[2]
+    expect(level(x, 3.4, 3.6)).to be < 20 * Math.log10(x.abs.max) - 60
+  end
+
   it 'plays without its noise burst by default, with it as a setting' do
     hi = %i[off on].to_h { |k|
       MB::Sound.seed(1)
