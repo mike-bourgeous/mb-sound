@@ -19,8 +19,9 @@ module MB
       class Grains
         include MultiOutput
         include Nameable
-        # (draws per onset, caught up by sleepers: #catch_up_grains)
-        node_traits memory: :short, random: :catch_up_grains, fresh: 'its grain slots and random stream (not moved yet)'
+        # (draws per onset, caught up by sleepers: #catch_up_grains;
+        # carried by adoption, #carry_adopt)
+        node_traits memory: :short, random: :catch_up_grains, carry: :adopt
 
         # One output channel (0 left, 1 right).
         class Output
@@ -130,6 +131,7 @@ module MB
           @outputs = [Output.new(self, 0), Output.new(self, 1)].freeze
           @node_type_name = 'Grains'
           @sampled = []
+          @out = nil
           @bufs = nil
           @flip = 0
           @held_values = Array.new(INPUTS.length) # (inputs last read, for #catch_up_grains)
@@ -228,6 +230,31 @@ module MB
           Kernels.grains(NodeTraits.scratch(frames, 0), NodeTraits.scratch(frames, 1), @specs, @slots, @state, @rng, @window, @held_values, config)
           nil
         end
+
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # +old+ has as many grain slots and plays a sample of the same
+        # length and channels at this rate (so its grains' read positions
+        # fit this one's sample).
+        def carry_fits?(old)
+          return false unless old.class == self.class && old.max_grains == @max_grains && old.sample_rate == @sample_rate
+
+          o = old.sample
+          o.equal?(@sample) || (o.length == @sample.length && o.channel_count == @sample.channel_count)
+        end
+
+        # Takes over +old+'s sounding grains, onset phase and playhead,
+        # random stream, and the inputs it last read (for a sleeper's
+        # catch-up); the old one gets this one's fresh state.  A grain
+        # keeps the settings of its onset, so new settings start with the
+        # next grain.  On the swap frame; O(1).
+        def carry_adopt(old)
+          NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+          @out = nil # (computed again from the adopted state on the next read)
+          @sampled.clear
+          nil
+        end
+
+        ADOPT_IVARS = %i[@slots @state @rng @held_values].freeze
 
         private
 
