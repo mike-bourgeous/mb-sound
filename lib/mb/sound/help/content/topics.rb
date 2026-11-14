@@ -472,7 +472,8 @@ module MB
         (`boom(G1)`), a preset, and settings: `boom(clip, :trailer, decay:
         6)`.  Presets: :cinematic (the default), :sub_drop (a slow falling
         sub that fades out under 30 Hz, no hit), :impact (short and tight,
-        a room), :trailer (long and wide; `Boom.preset_names`).  Settings
+        a low thud in a small room), :trailer (long and wide;
+        `Boom.preset_names`).  Settings
         (Params, so they are knobs on a track): note, drop (octaves),
         sweep and sweep_curve (the fall), below (octaves the fall goes on
         under the note) and floor (Hz the body fades out under), shape

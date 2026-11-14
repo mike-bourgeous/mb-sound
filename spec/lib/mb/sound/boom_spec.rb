@@ -79,7 +79,7 @@ RSpec.describe(MB::Sound::Boom, :aggregate_failures) do
     expect(samples(MB::Sound::L.inst.boom.impact.ping, 10)[0].abs.max).to be > 0.05
     expect(samples(MB::Sound::L.inst.boom.impact.ping(MB::Sound::E1), 10)[0].abs.max).to be > 0.05
     expect(described_class.home_note(:cinematic).name).to eq('G1')
-    expect(MB::Sound::Playable.graph(MB::Sound::L.inst.boom.impact).description).to eq('L.inst.impact hit once (at A1)')
+    expect(MB::Sound::Playable.graph(MB::Sound::L.inst.boom.impact).description).to eq('L.inst.impact hit once (at E1)')
     expect { MB::Sound::L.inst.boom.impact.ping(MB::Sound::G1, HITS) }.to raise_error(ArgumentError, /ping takes pitches/)
   end
 
@@ -110,7 +110,8 @@ RSpec.describe(MB::Sound::Boom, :aggregate_failures) do
     }
     expect(flat[:space].min).to be > 0.3 # (0.56 for noise; :space reads about 0.45)
     expect(flat[:room_size].max).to be < 0.15 # (boom-1's: about 0.03)
-    expect(described_class.settings(:cinematic)[:reverb]).to eq(:space)
+    expect(described_class.settings(:cinematic)[:reverb]).to eq(:hall) # (boom-4: his kick-alone pick)
+    expect(described_class.settings(:sub_drop)[:reverb]).to eq(:space)
     expect(described_class.settings(:impact)[:reverb]).to eq(:room)
     expect(described_class.settings(:impact)[:tail_length]).to eq(0.3) # (boom-3: the maintainer's pick, :room at 0.3 s)
     expect(described_class.settings(:trailer)[:reverb]).to eq(:hall) # (boom-3: his pick over :space)
@@ -174,16 +175,19 @@ RSpec.describe(MB::Sound::Boom, :aggregate_failures) do
   # I'd want more damping with the apparent frequency of the tail decaying
   # over time."): the reverb's highs die sooner (damping 0.95), and the
   # rumble's lowpass falls as it fades (rumble_fall), so the tail darkens
-  # as it decays instead of keeping one spectrum
+  # as it decays instead of keeping one spectrum.  boom-4 (his picks):
+  # :trailer darkens with tail_tone 800 and rumble_fall 2; :cinematic
+  # keeps damping 0.95 with the rumble as before (rumble_fall 0)
   it 'darkens its tail as it decays' do
     mono = ->(o) { (o[0] + o[1]) / 2 }
     MB::Sound.seed(1)
-    now = mono.(samples(MB::Sound.boom(MB::Sound::G1), 300))
+    now = mono.(samples(MB::Sound.boom(MB::Sound::E1, :trailer), 300))
     MB::Sound.seed(1)
-    old = mono.(samples(MB::Sound.boom(MB::Sound::G1, damping: 0.62, rumble_fall: 0), 300)) # (boom-2's tail)
-    expect(tilt(now, 3, 4)).to be < tilt(now, 0.5, 1) - 8
-    expect((tilt(old, 3, 4) - tilt(old, 0.5, 1)).abs).to be < 4
-    expect(described_class.settings(:trailer)[:damping]).to eq(0.95)
+    old = mono.(samples(MB::Sound.boom(MB::Sound::E1, :trailer, damping: 0.5, tail_tone: 0, rumble_fall: 0), 300)) # (boom-2's damping)
+    expect(tilt(now, 4, 5)).to be < tilt(now, 0.5, 1) - 5 # (measured -16.4 -> -24.3 dB)
+    expect(tilt(now, 4, 5)).to be < tilt(old, 4, 5) - 12 # (the undarkened :hall brightens to -5.8)
+    expect(described_class.settings(:trailer)).to include(tail_tone: 800, rumble_fall: 2)
+    expect(described_class.settings(:cinematic)).to include(damping: 0.95, rumble_fall: 0)
     expect(described_class.settings(:impact)[:rumble_fall]).to eq(0) # (impact keeps its short rumble's tone)
 
     # The rumble alone: its lowpass falls 2 octaves over rumble_decay
@@ -226,6 +230,20 @@ RSpec.describe(MB::Sound::Boom, :aggregate_failures) do
     }
     expect(described_class.settings(:cinematic)[:noise]).to eq(0)
     expect(hi[:on]).to be > hi[:off] + 10
+  end
+
+  # boom-4 (the maintainer on :impact: "Too much sine sustain at too high
+  # a frequency"): its body lands on E1 (was A1) and falls silent sooner
+  # (-20 dB by about 0.17 s, was 0.41), a thud rather than a held tone
+  it 'ends its impact body as a short low thud' do
+    note = described_class.home_note(:impact)
+    MB::Sound.seed(1)
+    x = samples(MB::Sound.boom(note, :impact, click: 0, noise: 0, rumble: 0, tail: 0), 60)[0]
+    expect(note.frequency).to be < 45
+    start = level(x, 0, 0.05)
+    expect(level(x, 0.2, 0.3)).to be < start - 25
+    expect(level(x, 0.4, 0.6)).to be < start - 60
+    expect(pitch_at(x, 0.1)).to be_within(1.5).of(note.frequency)
   end
 
   it 'plays in kits without its tail' do
