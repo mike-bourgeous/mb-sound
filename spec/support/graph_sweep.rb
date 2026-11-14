@@ -381,11 +381,11 @@ module GraphSweep
         d = Numo::SFloat.cast(Array.new(3000) { |i| Math.sin(i * 0.07) * Math.exp(-(i % 750) / 200.0) })
         smp = MB::Sound::Sample[d, bpm: 960, beats: 1]
         st = MB::Sound::Sample[[d, d * -0.5], bpm: 960]
-        # (one slice, so the fills have a decay to draw out: slices of 750
-        # samples are shorter than the 15 ms attack plus two cycles and
-        # play with a gap; stretch-fixes-1)
+        # (one slice with short cycles, and four slices shorter than the
+        # 15 ms attack plus two 25 ms cycles, which are filled with a
+        # shorter attack and cycles; stretch-fixes-1)
         smp.follow * 0.3 + smp.follow(:resample, align: :launch) * 0.3 + st.follow(stretch: { mode: :slice, slices: 4, fill: :stretch, cycle: 0.001 })[1] * 0.3 +
-          smp.follow(stretch: { mode: :slice, slices: 1, fill: :stretch, cycle: 0.004 }) * 0.2 + smp.follow(stretch: { mode: :slice, slices: 1, fill: :cyclic, cycle: 0.004 }) * 0.2 +
+          smp.follow(stretch: { mode: :slice, slices: 1, fill: :stretch, cycle: 0.004 }) * 0.2 + smp.follow(stretch: { mode: :slice, slices: 4, fill: :stretch }) * 0.2 +
           # (the spectral stretch of the loop as a loop, as players ask
           # for it, and with its own ends)
           smp.follow(stretch: { mode: :spectral, window: 256 }) * 0.2 + smp.follow(stretch: { mode: :spectral, window: 256, wrap: false }) * 0.2 +

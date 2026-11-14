@@ -272,7 +272,7 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       cuts = (1...8).map { |i| (i * 12000).samples }
       { 1.25 => [0.03, 0.02], 2 => [0.08, 0.02] }.each do |r, (body_limit, tail_limit)|
         slot = 12000 * r
-        fills = %i[gap stretch cyclic].to_h { |fill| [fill, Numo::DFloat.cast(smp.stretch(r, mode: :slice, slices: cuts, fill: fill).data(0))] }
+        fills = %i[gap stretch].to_h { |fill| [fill, Numo::DFloat.cast(smp.stretch(r, mode: :slice, slices: cuts, fill: fill).data(0))] }
         body = fills.transform_values { 0.0 }
         tails = fills.transform_values { [0.0, 1.0] }
         8.times do |i|
@@ -288,11 +288,11 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
         end
 
         # The hit's body (its first 83 ms) is the input's, within the
-        # level correction's fraction of a dB; the plain cyclic fill
-        # stretched it (the kick played on past its end, spliced)
+        # level correction's fraction of a dB (the fill before
+        # stretch-fixes-1, the plain cyclic stretch of everything after
+        # 15 ms, was 0.5 off: the kick played on past its end, spliced)
         expect(body[:gap]).to be < 1e-6
         expect(body[:stretch]).to be < body_limit
-        expect(body[:cyclic]).to be > 0.3
 
         # After the hit the ring carries on at its own level (0.015 RMS
         # in the input) to the next hit: no gap, and nothing louder (no
@@ -318,6 +318,35 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       end
     end
 
+    it 'fill: :stretch fills slices too short for its usual attack and cycles (a one-shot saved as a loop)' do
+      # (a ringing stab, a marker every 58 ms: slices of 2800 samples
+      # against the 3120 of a 15 ms attack and two 25 ms cycles)
+      t = Numo::DFloat.new(25200).seq / 48000.0
+      x = (Numo::NMath.sin(t * (2 * Math::PI * 220)) + Numo::NMath.sin(t * (2 * Math::PI * 277)) * 0.7) * Numo::NMath.exp(-t / 0.25) * 0.4
+      stab = MB::Sound::Sample[Numo::SFloat.cast(x), bpm: 120]
+      cuts = (1...9).map { |i| (i * 2800).samples }
+      [2, 3.82, 8].each do |r|
+        gap = Numo::DFloat.cast(stab.stretch(r, mode: :slice, slices: cuts).data(0))
+        filled = Numo::DFloat.cast(stab.stretch(r, mode: :slice, slices: cuts, fill: :stretch).data(0))
+        9.times do |i|
+          q = (i * 2800 * r).round
+          expect((filled[q...(q + 700)] - x[(i * 2800)...(i * 2800 + 700)]).abs.max).to be < 1e-6
+          # Each slot rings to its end at about the slice's level; with
+          # gaps it is silent from the slice's end on
+          tail = (q + 2800 + 240)...((q + 2800 * r).round - 240)
+          expect(rms_range(gap[tail])[0]).to eq(0)
+          hi, lo = rms_range(filled[tail])
+          level = Math.sqrt((x[(i * 2800)...((i + 1) * 2800)]**2).mean)
+          expect(lo).to be > 0.25 * level
+          expect(hi).to be < 1.6 * level
+        end
+      end
+      # (under 5 ms a slice plays with a gap)
+      tiny = (1...100).map { |i| (i * 200).samples }
+      expect(stab.stretch(2, mode: :slice, slices: tiny, fill: :stretch).data(0)).to eq(stab.stretch(2, mode: :slice, slices: tiny).data(0))
+      expect { stab.stretch(2, mode: :slice, fill: :cyclic) }.to raise_error(ArgumentError, /fill: is one of/)
+    end
+
     it 'plans a fill that starts with the input and ends where it ends (Lofi.anchored_plan)' do
       x = kick_loop(hits: 1)[720..]
       plan = MB::Sound::Sample::Lofi.anchored_plan(x, 15000, 1200)
@@ -331,7 +360,7 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
 
     it 'fades instead of clicking' do
       [0.7, 1.4].each do |r|
-        [:gap, :stretch, :cyclic].each do |fill|
+        [:gap, :stretch].each do |fill|
           y = Numo::DFloat.cast(rec.stretch(r, mode: :slice, fill: fill).data(0))
           jumps = (y[1..] - y[0...-1]).abs
           expect(jumps.max).to be < (Numo::DFloat.cast(rec.data(0))[1..] - Numo::DFloat.cast(rec.data(0))[0...-1]).abs.max * 1.01

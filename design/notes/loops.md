@@ -91,12 +91,12 @@ Ideas not built (cheap signals for later):
 ACID/REX-style: cut at the hits, start slice i at round(r × its start), copy it exactly.
 
 - Slices: markers, else onsets (Sample::Onsets), else sixteenths at the sample's bpm; or `slices:` given.
-- Slowing down: `fill: :gap` (default) plays the slice's own audio, fading out over `fade:` (4 ms) before its end, then silence until the next hit; `fill: :stretch` keeps each hit whole and draws what it has died down to out to the next hit (below; falls back to a gap for slices shorter than the 15 ms attack plus two cycles); `fill: :cyclic` is what `:stretch` was before stretch-fixes-1 (15 ms of attack, then the fitted cyclic stretch of everything else), kept for the A/B.
+- Slowing down: `fill: :gap` (default) plays the slice's own audio, fading out over `fade:` (4 ms) before its end, then silence until the next hit; `fill: :stretch` keeps each hit whole and draws what it has died down to out to the next hit (below; slices shorter than the 15 ms attack plus two cycles keep a quarter of themselves and cycle half of the rest; under 5 ms a slice plays with a gap).
 - Speeding up: each slice is cut at the next one's new time with the same fade.
 - Pre-rolls: a slice that doesn't follow on from the one before (as in the input) gets the input's last `fade` samples before its hit faded in ahead of it, crossfading with the outgoing fade, so the attack is exact and joins what led into it (no step out of silence).  The first slice's pre-roll comes from the loop's end, at the output's end, so seamless loops stay seamless.
-- Ratio 1 gives the input back exactly.  Reversed samples stretch in play order.  Pure Ruby + Numo; a two-bar 909 loop takes 3-13 ms (`:gap`), 5-90 ms (`:cyclic`); `:stretch` took 130-150 ms on a 2 s loop of eight slices (Linux, 2026-11-13).
+- Ratio 1 gives the input back exactly.  Reversed samples stretch in play order.  Pure Ruby + Numo; a two-bar 909 loop takes 3-13 ms (`:gap`); `:stretch` took 130-150 ms on a 2 s loop of eight slices (Linux, 2026-11-13).
 
-### Filled slices (stretch-fixes-1, 2026-11-13; waits for the maintainer's ears)
+### Filled slices (stretch-fixes-1, 2026-11-13; round 2 2026-11-14)
 
 The maintainer on the stretch study's Bench set (a generated drum loop at 1.25x, slices with filled decays): "sounds really bad, like there's a bug in how it's lining up the stretch".  Measured on that loop (16 slices of about 166 ms; its kick is a 20-40 Hz body about 100 ms long that stops abruptly, with a quiet rumble after it):
 
@@ -112,7 +112,11 @@ The maintainer on the stretch study's Bench set (a generated drum loop at 1.25x,
 
 Measured on the generated loop, old against new (splices whose replayed audio is 6 dB or more above what would have followed, and above -30 dB re the loop's peak): 1.25x 11 → 5, the loudest at -6 dB → -15 dB, the biggest +20 dB (to -11 dB) → +15 dB (to -19 dB); 2x 34 → 21, the biggest +26 dB (to -5 dB) → +16 dB (to -19 dB), and those reaching -7 dB or louder 12 → 2 (at 1.25x: those reaching -12 dB or louder 7 → 0; at 2x the kick's last lobe, 9 dB down, still takes part of the stretch and plays once more).  Played exactly as the input after each hit: median 65 ms → 119 ms at 1.25x, 40 → 112 ms at 2x.  Detected onsets that are no hit of the input, louder than -30 dB and rising 3 dB or more: 2x 10 → 4 (the loudest -2 dB → -16 dB); 1.25x 0 → 2 (the rumble's bumps, -17 and -18 dB).  On a synthetic gated kick (`sample_loop_spec.rb`) the first 83 ms of each hit differ from the input by 0.018 of 0.8 at 1.25x (the old fill: 0.53).
 
-Not fixed, the method's nature: a cyclic fill repeats what is there, so a tail with events of its own (the rumble's bumps here) has more of them; slices under 65 ms are not filled.  `fill: :cyclic` keeps the old fill for the A/B (question for the maintainer: remove it after his verdict?).
+Not fixed, the method's nature: a cyclic fill repeats what is there, so a tail with events of its own (the rumble's bumps here) has more of them.
+
+Round 2 (his Bench verdicts, 2026-11-14: "after better than before, phase vocoder better than after"; at 2x he picked slices with gaps):
+- The old fill is gone (`fill: :cyclic` and `cyclic_fill_slice` removed; the two repo callers, a spec and a sweep case, migrated).
+- "F isn't filling in the slices at all; each slice should be cyclicly stretched to fill its slice I think", "F didn't even fill anything in" (a chord stab and a cymbal splash, each a one-shot saved as a loop, at 2.9x to 8x): their markers are 58 ms apart, and a slice shorter than the 15 ms attack plus two 25 ms cycles (65 ms) played with a gap: the cymbal's filled stretch was its gapped stretch bit for bit, the stab's had two slices of ten filled.  Now such a slice keeps a quarter of itself as its attack and cycles half of the rest (`SliceStretch::FILL_SHORTEST`: under 5 ms a slice still plays with a gap).  Share of 5 ms frames more than 40 dB under the loudest: the cymbal at 2.86x and 8x 0.61 and 0.86 with gaps, 0.00 filled; the stab at 3.82x and 8x 0.78 and 0.89 with gaps, 0.68 and 0.78 filled before, 0.24 and 0.25 now (its own decay to silence).  Cycles of 21 ms repeat at 48 Hz at these ratios: the sound of a cyclic stretch held long (he picked the vocoder and Paulstretch on these; the fill is now what he said it should be).
 
 ## Tempo-following loops (`GraphNode::LoopPlayer`, `Sample#follow`)
 

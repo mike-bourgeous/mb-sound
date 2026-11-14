@@ -14,10 +14,10 @@ module MB
       # with :stretch the slice keeps its hit (its first +attack+ samples
       # exactly, and its length for as long as it is loud) and what it has
       # died down to is drawn out to the next hit (#fill_slice: a cyclic
-      # stretch that follows the decay's level), so it rings on; :cyclic
-      # is the plain cyclic stretch of everything after the attack (what
-      # :stretch was before stretch-fixes-1, kept for comparing: it plays
-      # parts of a hit's body twice).  Speeding up (+ratio+ < 1)
+      # stretch that follows the decay's level), so it rings on; a slice
+      # shorter than the attack and two cycles is filled with a shorter
+      # attack and shorter cycles (down to FILL_SHORTEST).  Speeding up
+      # (+ratio+ < 1)
       # truncates each slice, fading out over +fade+ before the next one's
       # new time.  Every slice that doesn't follow on from the one before
       # (as it did in the input) fades in its input's last +fade+ samples
@@ -39,12 +39,17 @@ module MB
         # its decay is stretched (seconds).
         ATTACK = 0.015
 
-        # +fill+ values: :gap (silence after each slice), :stretch (each
-        # decay drawn out: an anchored cyclic stretch whose level follows
-        # the decay's stretched envelope), and :cyclic (the plain fitted
-        # cyclic stretch of each decay, as :stretch was before
-        # stretch-fixes-1: kept for comparing the two).
-        FILLS = [:gap, :stretch, :cyclic].freeze
+        # +fill+ values: :gap (silence after each slice) and :stretch
+        # (each decay drawn out: an anchored cyclic stretch whose level
+        # follows the decay's stretched envelope).
+        FILLS = [:gap, :stretch].freeze
+
+        # The shortest slice (seconds) the :stretch fill fills: shorter
+        # ones play with a gap.  A slice too short for the usual attack
+        # and two cycles keeps a quarter of itself as its attack and
+        # cycles half of the rest (a one-shot saved as a loop has a
+        # marker every 58 ms: none of its slices was filled before).
+        FILL_SHORTEST = 0.005
 
         # How far the :stretch fill turns a cycle down or up to keep the
         # level on the decay's stretched envelope.
@@ -85,6 +90,7 @@ module MB
           out = x.map { Numo::DFloat.zeros(n_out) }
           guide = fill == :gap ? nil : x.sum / x.length
           joined = [] # whether slice i follows on from slice i - 1
+          shortest = MB::M.max(64, (FILL_SHORTEST * sample_rate).round)
 
           (p.length - 1).times do |i|
             a, b = p[i], p[i + 1]
@@ -94,10 +100,14 @@ module MB
             next if slot <= 0
 
             segs =
-              if fill == :stretch && slot > own && own - attack >= 2 * cycle
-                fill_slice(x, guide, a, b, slot, attack, cycle, crossfade, sample_rate)
-              elsif fill == :cyclic && slot > own && own - attack >= 2 * cycle
-                cyclic_fill_slice(x, guide, a, b, slot, attack, cycle, crossfade, sample_rate)
+              if fill == :stretch && slot > own && own >= shortest
+                if own - attack >= 2 * cycle
+                  fill_slice(x, guide, a, b, slot, attack, cycle, crossfade, sample_rate)
+                else
+                  att = MB::M.min(attack, own / 4)
+                  cyc = MB::M.min(cycle, (own - att) / 2)
+                  fill_slice(x, guide, a, b, slot, att, cyc, MB::M.min(crossfade, cyc / 4), sample_rate)
+                end
               else
                 m = MB::M.min(slot, own)
                 x.map { |c| c[a...(a + m)].dup }
@@ -141,9 +151,9 @@ module MB
         # slice's own envelope (#envelope of +guide+, the channels' mix)
         # read at the stretched time.  A cycle that repeats an earlier,
         # louder part is turned down to where the decay has got to, so
-        # nothing sounds like a second hit.  (The plain cyclic fill,
-        # #cyclic_fill_slice, stretched everything after the attack
-        # evenly: a kick's body played at its old time and then again, in
+        # nothing sounds like a second hit.  (Before stretch-fixes-1 the
+        # fill was the plain cyclic stretch of everything after the
+        # attack: a kick's body played at its old time and then again, in
         # part, at its stretched time.)
         def fill_slice(x, guide, a, b, slot, attack, cycle, crossfade, sample_rate)
           need = slot - attack
@@ -222,24 +232,6 @@ module MB
             e = (c[hi] - c[lo]) / count
           end
           Numo::NMath.sqrt(e.clip(0, nil))
-        end
-
-        # A slice from +a+ to +b+ filled out to +slot+ samples the way
-        # fill: :stretch was before stretch-fixes-1 (fill: :cyclic): the
-        # first +attack+ samples as they are, the rest through the fitted
-        # cyclic stretch (Lofi.stretch).
-        def cyclic_fill_slice(x, guide, a, b, slot, attack, cycle, crossfade, sample_rate)
-          rest = b - (a + attack)
-          r = (slot - attack).to_f / rest
-          g = guide[(a + attack)...b]
-          x.map { |c|
-            tail = Lofi.stretch(c[(a + attack)...b], r, cycle, crossfade, fit: :auto, guide: g, sample_rate: sample_rate)
-            seg = Numo::DFloat.zeros(slot)
-            seg[0...attack] = c[a...(a + attack)]
-            k = MB::M.min(tail.length, slot - attack)
-            seg[attack...(attack + k)] = Numo::DFloat.cast(tail[0...k])
-            seg
-          }
         end
 
         # A raised-cosine fade of +n+ samples (in or out).
