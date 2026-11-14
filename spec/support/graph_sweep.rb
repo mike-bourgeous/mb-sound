@@ -490,7 +490,11 @@ module GraphSweep
       ['phaser (Phaser) mono, stereo, moving settings', ->(c) {
         st = c.stereo_sig.phaser(:swirl, feedback: c.mod(-0.9, 0.9), mix: c.mod(0.2, 0.8, 3))
         c.sig.phaser + c.sig.phaser(13, stages: 12, center: c.mod(200, 3000, 2), depth: c.mod(0, 1, 5), range: c.mod(1, 6, 0.7)) + c.sig.phaser(:jet, range: 200..6000) +
-          c.sig.phaser(sweep: c.mod(-1, 1, 11), feedback: -0.6, stages: 2) + st.outputs[0] + st.outputs[1]
+          c.sig.phaser(sweep: c.mod(-1, 1, 11), feedback: -0.6, stages: 2) + st.outputs[0] + st.outputs[1] +
+          # (effects-3: a dry low band, the amount macro on a node, barber poles, 32 stages)
+          c.sig.phaser(:ripple, above: 180) + c.stereo_sig.phaser(:swirl, amount: c.mod(0, 1, 2), above: 300).mixdown +
+          c.sig.phaser(:barberpole, rate: 7) + c.stereo_sig.phaser(:jet, direction: :down, rate: 5, spread: 0.3).mixdown +
+          c.sig.phaser(9, stages: 32, feedback: c.mod(-0.9, 0.9))
       }],
 
       # Dynamics

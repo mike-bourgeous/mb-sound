@@ -102,7 +102,7 @@ Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`
 
 ### [Phaser](phaser.md)
 
-`sig.phaser(:vintage | :swirl | :ripple | :deep12 | :jet | rate, depth:, stages:, feedback:, mix:, center:, range:, spread:, shape:, sweep:)` (`GraphNode::Phaser`, kernel `FastFilter.phaser` with an exact Ruby mirror) is a chain of 2-12 first-order allpass stages at one LFO-swept frequency, feedback around the chain solved in closed form, a linear dry/wet mix, Tone LFOs (sine or triangle, Hz or tempo-synced lengths), and stereo pairs whose right LFO runs `spread:` cycles ahead.
+`sig.phaser(:vintage | :swirl | :ripple | :deep12 | :jet | :barberpole | rate, depth:, stages:, feedback:, mix:, center:, range:, spread:, shape:, sweep:, above:, amount:, direction:)` (`GraphNode::Phaser`, kernel `FastFilter.phaser` with an exact Ruby mirror) is a chain of 2-32 first-order allpass stages at one LFO-swept frequency, feedback around the chain solved in closed form, a linear dry/wet mix, Tone LFOs (sine or triangle, Hz or tempo-synced lengths), and stereo pairs whose right LFO runs `spread:` cycles ahead; `above:` keeps the lows dry (a Linkwitz-Riley split), `amount:` turns depth, mix, feedback, and stages from light to extreme, and `direction: :up/:down` makes a barber pole.
 
 ### [Modulation effects (flanger, rotary speaker)](modulation.md)
 

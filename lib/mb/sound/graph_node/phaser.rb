@@ -46,14 +46,29 @@ module MB
         MIN_HZ = 1.0
 
         # Stage counts (even: odd counts leave the chain at -90 degrees at
-        # DC... and Nyquist, a tilt instead of a notch pair).
-        STAGES = (2..12).step(2).to_a.freeze
+        # DC... and Nyquist, a tilt instead of a notch pair).  Up to 32
+        # since effects-3 (the plug-in in the maintainer's .acd song reads
+        # 32; the kernel takes 64).
+        STAGES = (2..32).step(2).to_a.freeze
+
+        # Sweep directions for a barber-pole phaser (+direction:+; nil is
+        # the LFO's back-and-forth sweep).
+        DIRECTIONS = %i[up down].freeze
+
+        # Staggered chains of a barber-pole phaser: each sweeps the range
+        # one way in turn, faded in and out by a raised cosine so its jump
+        # back is silent; three a third of a cycle apart sum to a steady
+        # wet level (each window scaled by 2/3).
+        BARBER_CHAINS = 3
 
         # LFO shapes.
         SHAPES = %i[sine triangle].freeze
 
         # The settings GraphNode#phaser takes (besides a preset name or rate).
-        KEYS = %i[rate depth stages feedback mix dry wet spread center range shape phase sweep].freeze
+        KEYS = %i[rate depth stages feedback mix dry wet spread center range shape phase sweep above amount direction].freeze
+
+        # Feedback magnitude that amount: 1 reaches (see .amount_settings).
+        AMOUNT_FEEDBACK = 0.9
 
         preset_family :phaser, kind: :effect, label: 'phaser preset', keys: KEYS,
           about: 'Phasers: sig.phaser(:swirl)',
@@ -62,7 +77,7 @@ module MB
 
         param :rate, 0.5, range: 0.01..20.0, unit: 'Hz', description: 'LFO rate (Hz, or a musical length per cycle: 1.bar)'
         param :depth, 1.0, range: 0.0..1.0, description: 'Share of the range the LFO sweeps (0 holds the center)'
-        param :stages, 4, range: 2..12, description: 'Allpass stages (even): notch pairs = stages / 2'
+        param :stages, 4, range: 2..32, description: 'Allpass stages (even): notch pairs = stages / 2'
         param :feedback, 0.0, range: -MAX_FEEDBACK..MAX_FEEDBACK, description: 'Feedback around the stages (negative inverts; resonant peaks)'
         param :mix, 0.5, range: 0.0..1.0, description: 'Dry/wet crossfade, linear (0.5 deepest notches)'
         param :spread, 0.0, range: 0.0..1.0, unit: 'cycles', description: "Right LFO's phase offset from the left (0.5 opposite); stereo out"
@@ -70,6 +85,9 @@ module MB
         param :range, 4.0, range: 0.0..10.0, unit: 'octaves', description: 'Sweep width in octaves at depth 1'
         param :shape, :sine, range: SHAPES, description: 'LFO shape'
         param :phase, 0.0, range: 0.0..1.0, unit: 'cycles', description: "Left LFO's starting phase"
+        param :above, nil, range: 20.0..2000.0, unit: 'Hz', description: 'Keeps the lows dry below this crossover (Linkwitz-Riley, 4th order)'
+        param :amount, 0.5, range: 0.0..1.0, description: 'Light (0) to extreme (1): depth, mix, feedback, and stages together (0.5 the preset)'
+        param :direction, nil, range: DIRECTIONS, description: 'Barber pole: notches climbing (:up) or falling (:down) forever'
 
         preset :vintage, rate: 0.5, depth: 1.0, stages: 4, feedback: 0.0, mix: 0.5, spread: 0.0, center: 700.0, range: 4.0, shape: :sine,
           tags: %i[gentle four_stage classic], about: 'A four-stage phaser, two notches swept 175-2800 Hz at 0.5 Hz (the defaults)'
@@ -81,6 +99,8 @@ module MB
           tags: %i[deep twelve_stage stereo], about: 'Deep twelve-stage phasing (six notches), the sides opposite'
         preset :jet, rate: 0.08, depth: 1.0, stages: 8, feedback: 0.85, mix: 0.5, spread: 0.0, center: 1000.0, range: 6.0, shape: :triangle,
           tags: %i[resonant whoosh drums], about: 'A resonant jet whoosh: eight stages, strong feedback, a slow six-octave triangle'
+        preset :barberpole, rate: 0.1, depth: 1.0, stages: 8, feedback: 0.6, mix: 0.5, spread: 0.0, center: 1000.0, range: 6.0, shape: :sine, direction: :up,
+          tags: %i[endless rising shepard], about: 'A barber pole: notches climbing forever (direction: :down falls), staggered sweeps crossfaded'
 
         # The default preset (GraphNode#phaser without a preset name).
         DEFAULT_PRESET = :vintage
@@ -372,6 +392,12 @@ module MB
             raise ArgumentError, "phaser: unknown option#{'s' if bad.length > 1} #{bad.map(&:inspect).join(', ')}#{guess ? " (did you mean #{guess.inspect}?)" : ''}"
           end
 
+          above = options[:above]
+          if above
+            # (the lows split off and kept dry; the phaser on the highs)
+            return crossover(input, above, rate, options.except(:above))
+          end
+
           if rate.is_a?(Symbol) || rate.is_a?(String)
             preset = rate.to_sym
           else
@@ -379,9 +405,10 @@ module MB
             raise ArgumentError, 'phaser: give the rate once (positional or rate:)' if !rate.nil? && options.key?(:rate)
             options = options.merge(rate: rate) unless rate.nil?
           end
-          s = { dry: 1, wet: 1, phase: 0.0, sweep: nil }.merge(preset_settings(preset))
+          s = { dry: 1, wet: 1, phase: 0.0, sweep: nil, above: nil, amount: nil, direction: nil }.merge(preset_settings(preset))
           s.delete(:center) if options[:range].is_a?(Range)
           s.merge!(options)
+          amount_settings(s) unless s[:amount].nil?
 
           center, octaves = sweep_band(s[:center], s[:range], options.key?(:center))
           shape = s[:shape]
@@ -412,11 +439,19 @@ module MB
             raise ArgumentError, 'phaser: a sweep: node drives both sides alike; spread: needs the built-in LFO'
           end
           raise ArgumentError, "phaser sweep: is a node (-1..1; got #{sweep.inspect})" if sweep && !sweep.respond_to?(:sample)
+          direction = GraphNode.build_setting(s[:direction])
+          unless direction.nil? || DIRECTIONS.include?(direction)
+            raise ArgumentError, "phaser direction: is #{DIRECTIONS.map(&:inspect).join(' or ')} (a barber pole) or nil (got #{direction.inspect})"
+          end
+          raise ArgumentError, 'phaser: direction: makes its own sweeps; give it or sweep:, not both' if direction && sweep
 
           l, r = StereoDelayMethods.sides(input, 'phaser')
           stereo = !l.equal?(r) || input.is_a?(Channels) && input.channel_count == 2 || spread != 0
           sample_rate = input.sample_rate
           make = ->(side, offset) {
+            if direction
+              next barber(side, s, direction, phase + offset, center, octaves, feedback, dry, wet, sample_rate)
+            end
             sw = sweep || ModulationLfo.tone(s[:rate], shape: shape, phase: phase + offset, sample_rate: sample_rate, what: 'phaser')
             new(side, sweep: sw, center: center, range: octaves, depth: s[:depth], feedback: feedback, dry: dry, wet: wet,
               stages: s[:stages], sample_rate: sample_rate)
@@ -424,6 +459,102 @@ module MB
 
           return make.(l, 0.0) unless stereo
           Channels.new([make.(l, 0.0), make.(r, spread.to_f)])
+        end
+
+        # A barber-pole phaser on +side+ (+direction+ :up or :down):
+        # BARBER_CHAINS phasers, each swept once across the range per LFO
+        # cycle by a ramp (exact: an aliased saw, below audio rates), a
+        # third of a cycle apart, each chain's wet faded by a raised cosine
+        # that is silent where its ramp jumps back, so the notches seem to
+        # climb (or fall) forever, like a Shepard-Risset tone.  The windows
+        # sum to 1 (2/3 each at three chains); the dry signal once.
+        def self.barber(side, s, direction, phase, center, octaves, feedback, dry, wet, sample_rate)
+          side = side.get_sampler
+          n = BARBER_CHAINS
+          chains = Array.new(n) { |i|
+            offset = phase + i / n.to_f
+            ramp = ModulationLfo.rate_tone(s[:rate], sample_rate: sample_rate, what: 'phaser').asaw
+            ramp.with_phase(offset % 1) unless offset % 1 == 0
+            # (the ramp is at its middle at phase 0 and jumps at 0.5; the
+            # window peaks at its middle and is 0 at the jump)
+            win = ModulationLfo.tone(s[:rate], shape: :sine, phase: offset + 0.25, sample_rate: sample_rate, what: 'phaser')
+            win = win * (1.0 / n) + (1.0 / n)
+            sw = direction == :up ? ramp : ramp * -1
+            new(side, sweep: sw, center: center, range: octaves, depth: s[:depth], feedback: feedback, dry: 0, wet: Chorus.scale(win, wet) || win * 0,
+              stages: s[:stages], sample_rate: sample_rate)
+          }
+          d = Chorus.scale(side, dry)
+          Mixer.new(d ? [d, *chains] : chains, sample_rate: sample_rate, stop_early: false)
+        end
+
+        # Phaser +rate+ (a preset name or rate, as for .build) with +options+ on the highs of +input+ above
+        # +frequency+ (Hz or a Pitch), the lows kept dry: a 4th-order
+        # Linkwitz-Riley split (#bands), so the two sum flat (an allpass) where
+        # the phaser leaves the highs alone.  A mono input with spread comes
+        # back stereo, the low band in both sides.
+        def self.crossover(input, frequency, rate, options)
+          frequency = GraphNode.build_setting(frequency)
+          frequency = frequency.oscillator_frequency if frequency.is_a?(MB::Sound::Pitch)
+          unless frequency.is_a?(Numeric) && frequency.real? && frequency > 0 && frequency < input.sample_rate / 2
+            raise ArgumentError, "phaser above: is a crossover frequency in Hz below Nyquist (got #{frequency.inspect})"
+          end
+          lo, hi = input.bands(frequency.to_f)
+          wet = build(hi, rate, **options)
+          lows = lo.outputs
+          outs = wet.outputs.each_with_index.map { |w, i|
+            Mixer.new([lows.length == 1 ? lows[0] : lows[i], w], sample_rate: input.sample_rate, stop_early: false)
+          }
+          outs.length == 1 ? outs[0] : Channels.new(outs)
+        end
+
+        # Applies the +:amount+ macro to settings +s+ (in place): 0.5 leaves
+        # them as they are; toward 0 depth falls to a quarter, the mix to
+        # 0.3 of itself, and feedback to 0; toward 1 depth rises to 1, the mix
+        # to 0.5 (the deepest notches), feedback to +-AMOUNT_FEEDBACK (the
+        # preset's sign), and a numeric amount doubles the stages (up to
+        # 32; halves them toward 0, at least 2).  A node amount moves depth,
+        # mix, and feedback live (stages stay).  Settings given as nodes
+        # stay as given.
+        def self.amount_settings(s)
+          a = GraphNode.build_setting(s[:amount])
+          if a.is_a?(Numeric)
+            raise ArgumentError, "phaser amount: is from 0 (light) to 1 (extreme; got #{a.inspect})" unless a.real? && a >= 0 && a <= 1
+            a = a.to_f
+            t = MB::M.min(a * 2, 1.0)
+            u = MB::M.max(a * 2 - 1, 0.0)
+            st = GraphNode.build_setting(s[:stages])
+            if st.is_a?(Integer)
+              scaled = st * 2.0**(u - (1 - t))
+              s[:stages] = ((scaled / 2).round * 2).clamp(STAGES.first, STAGES.last)
+            end
+          elsif a.respond_to?(:sample)
+            a = a.get_sampler
+            a2 = a.aclip(0, 1).tee(2)
+            t = (a2[0] * 2).aclip(0, 1)
+            u = (a2[1] * 2 - 1).aclip(0, 1)
+          else
+            raise ArgumentError, "phaser amount: is a number from 0 (light) to 1 (extreme) or a node (got #{a.inspect})"
+          end
+
+          ts = t.respond_to?(:sample) ? t.tee(3) : [t, t, t]
+          us = u.respond_to?(:sample) ? u.tee(3) : [u, u, u]
+          # (numbers: v (1 - k (1 - t)) + (top - v) u, exactly v at 0.5)
+          depth = GraphNode.build_setting(s[:depth])
+          s[:depth] = amount_curve(depth, 0.75, 1.0, ts[0], us[0]) if depth.is_a?(Numeric)
+          mix = GraphNode.build_setting(s[:mix])
+          s[:mix] = amount_curve(mix, 0.7, MB::M.max(mix, 0.5), ts[1], us[1]) if mix.is_a?(Numeric)
+          fb = GraphNode.build_setting(s[:feedback])
+          s[:feedback] = amount_curve(fb, 1.0, (fb < 0 ? -1 : 1) * AMOUNT_FEEDBACK, ts[2], us[2]) if fb.is_a?(Numeric)
+          s
+        end
+
+        # Setting +v+ under the amount macro: v (1 - +k+ (1 - t)) on the way
+        # up to 0.5 (t 0..1), then on toward +top+ (u 0..1); t and u numbers
+        # or nodes.
+        def self.amount_curve(v, k, top, t, u)
+          v = v.to_f
+          return v * (1 - k * (1 - t)) + (top - v) * u if t.is_a?(Numeric)
+          t * (k * v) + (v * (1 - k)) + u * (top - v)
         end
 
         # [center Hz, octaves] for the +center+ and +range+ settings: a

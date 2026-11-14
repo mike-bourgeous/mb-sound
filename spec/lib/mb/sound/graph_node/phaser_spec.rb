@@ -74,7 +74,7 @@ RSpec.describe(MB::Sound::GraphNode::Phaser, :aggregate_failures) do
     it 'matches the Ruby mirror with constant and moving settings at every stage count' do
       x = noise(1200)
       sweep = Numo::SFloat.cast(Numo::DFloat.linspace(-1, 1, 1200))
-      [2, 4, 8, 12].each do |stages|
+      [2, 4, 8, 12, 32].each do |stages|
         compare(1200, x, sweep, 700.0, 4.0, 1.0, 0.6, 0.5, 0.5, stages: stages)
         compare(1200, x, 0.0, 300.0, 4.0, 1.0, -0.8, 1.0, -1.0, stages: stages)
         compare(1200, Numo::DFloat.cast(x), noise(1200, 2), noise(1200, 1000, 1500), noise(1200, 6, 3), noise(1200, 1, 0.5),
@@ -103,7 +103,7 @@ RSpec.describe(MB::Sound::GraphNode::Phaser, :aggregate_failures) do
 
   describe 'notches' do
     it 'puts notches at fc tan((2k + 1) pi / (2 stages)) for each stage count and center' do
-      [[2, 1000.0], [4, 700.0], [6, 400.0], [12, 2000.0]].each do |stages, center|
+      [[2, 1000.0], [4, 700.0], [6, 400.0], [12, 2000.0], [32, 2000.0]].each do |stages, center|
         expected = klass.notch_frequencies(stages, center)
         expect(expected.length).to eq(stages / 2)
 
@@ -174,6 +174,14 @@ RSpec.describe(MB::Sound::GraphNode::Phaser, :aggregate_failures) do
       a = out[48000...96000].abs.max
       b = out[96000..].abs.max
       expect(b).to be < a * 1.5
+    end
+
+    it 'stays stable at 32 stages at the feedback limit (effects-3)' do
+      node = MB::Sound.noise(seed: 6).phaser(30, stages: 32, feedback: 0.95, range: 10, center: 600)
+      out = collect(node, 48000 * 3)
+      expect(out.isfinite.all?).to eq(true)
+      expect(out.abs.max).to be < 30
+      expect(out[96000..].abs.max).to be < out[48000...96000].abs.max * 1.5
     end
 
     it 'clamps feedback nodes to the limit and rejects numbers past it' do
@@ -331,7 +339,7 @@ RSpec.describe(MB::Sound::GraphNode::Phaser, :aggregate_failures) do
 
   it 'rejects bad arguments with helpful messages' do
     expect { 110.hz.saw.phaser(stages: 5) }.to raise_error(ArgumentError, /even/)
-    expect { 110.hz.saw.phaser(stages: 14) }.to raise_error(ArgumentError, /even/)
+    expect { 110.hz.saw.phaser(stages: 34) }.to raise_error(ArgumentError, /even/)
     expect { 110.hz.saw.phaser(stage: 4) }.to raise_error(ArgumentError, /did you mean :stages/)
     expect { 110.hz.saw.phaser(:nope) }.to raise_error(ArgumentError, /phaser preset/)
     expect { 110.hz.saw.phaser(range: 200..3000, center: 500) }.to raise_error(ArgumentError, /range/)
@@ -348,5 +356,94 @@ RSpec.describe(MB::Sound::GraphNode::Phaser, :aggregate_failures) do
     expect(node.to_s).to eq('Phaser 8 stages around 1000.0 Hz, feedback 0.6')
     stereo = 110.hz.saw.phaser(1.bar, spread: 0.25)
     expect(stereo.to_ruby).to include('phaser(1.bar, spread: 0.25)')
+  end
+
+  describe 'effects-3: above:, amount:, direction:' do
+    it 'keeps the lows dry below above: (a Linkwitz-Riley split), so a notch there leaves a kick alone' do
+      # four stages at 145 Hz notch 60 Hz (0.414 fc) and 350 Hz
+      plain = collect(60.hz.sine.phaser(stages: 4, center: 145, depth: 0), 48000)
+      split = collect(60.hz.sine.phaser(stages: 4, center: 145, depth: 0, above: 400), 48000)
+      expect(plain[24000..].abs.max).to be < 0.05
+      expect(split[24000..].abs.max).to be_within(0.03).of(1) # (the low band through the split's allpass)
+      # well above the split the phaser works as without it
+      hi_plain = collect(3000.hz.sine.phaser(:jet, depth: 0), 48000)[24000..].abs.max
+      hi_split = collect(3000.hz.sine.phaser(:jet, depth: 0, above: 150), 48000)[24000..].abs.max
+      expect(hi_split).to be_within(0.02 * hi_plain).of(hi_plain)
+      # a mono input with spread comes back stereo; a rate positional too
+      st = 110.hz.saw.phaser(:swirl, above: 150)
+      expect(st).to be_a(MB::Sound::GraphNode::Channels)
+      expect(110.hz.saw.phaser(2, above: 150.hz)).to be_a(MB::Sound::GraphNode::Mixer)
+      expect { 110.hz.saw.phaser(above: 30000) }.to raise_error(ArgumentError, /above/)
+    end
+
+    it 'ends with a finite input and gives the same output at any buffer size with above:' do
+      file = 'spec/test_data/arp_a7.flac'
+      make = -> { MB::Sound.file_input(file).phaser(:swirl, above: 200) }
+      a = make.()
+      la, ra = collect_stereo(a, 48000, 800)
+      close_inputs(a)
+      b = make.()
+      lb, rb = collect_stereo(b, 48000, [1, 7, 128, 33, 367])
+      close_inputs(b)
+      expect(la.length).to be < 48000 # (it ended)
+      expect(lb).to eq(la)
+      expect(rb).to eq(ra)
+    end
+
+    it 'turns one amount: from light (0) to extreme (1), 0.5 the preset as it is' do
+      ref = collect(110.hz.saw.phaser(:swirl, spread: 0), 9600)
+      expect(collect(110.hz.saw.phaser(:swirl, spread: 0, amount: 0.5), 9600)).to eq(ref)
+      s = klass.amount_settings(klass.preset_settings(:swirl).merge(amount: 1))
+      expect(s.slice(:depth, :mix, :stages)).to eq(depth: 1.0, mix: 0.5, stages: 12)
+      expect(s[:feedback]).to be_within(1e-12).of(klass::AMOUNT_FEEDBACK)
+      s = klass.amount_settings(klass.preset_settings(:swirl).merge(amount: 0))
+      expect(s[:depth]).to be_within(1e-12).of(0.25)
+      expect(s[:mix]).to be_within(1e-12).of(0.15)
+      expect(s[:feedback]).to eq(0)
+      expect(s[:stages]).to eq(4) # (6 halved, rounded to even)
+      expect(klass.amount_settings(klass.preset_settings(:deep12).merge(amount: 1))[:stages]).to eq(24)
+      expect(klass.amount_settings(klass.preset_settings(:jet).merge(amount: 1, feedback: -0.4))[:feedback]).to be_within(1e-12).of(-klass::AMOUNT_FEEDBACK)
+      # a node moves depth, mix, and feedback (stages stay)
+      a = collect_stereo(110.hz.saw.phaser(:swirl, amount: 0.3.constant, stages: 4), 9600)
+      b = collect_stereo(110.hz.saw.phaser(:swirl, amount: 0.3), 9600)
+      2.times { |c| expect((a[c] - b[c]).abs.max).to be < 1e-5 }
+      expect { 110.hz.saw.phaser(amount: 1.2) }.to raise_error(ArgumentError, /amount/)
+    end
+
+    it 'makes a barber pole with direction:, whose crossfaded chains sum to one phaser where they agree' do
+      # held at the center (depth 0) every chain is the same phaser, and the windows sum to 1
+      ref = collect(110.hz.saw.phaser(:jet, depth: 0), 9600)
+      pole = collect(110.hz.saw.phaser(:jet, depth: 0, direction: :up), 9600)
+      expect((pole - ref).abs.max).to be < 1e-4
+      up = collect(110.hz.saw.at(0.5).phaser(:barberpole), 48000)
+      down = collect(110.hz.saw.at(0.5).phaser(:barberpole, direction: :down), 48000)
+      [up, down].each { |b| expect(b.isfinite.all?).to eq(true); expect(b.abs.max).to be_between(0.05, 4) }
+      expect(up).not_to eq(down)
+      l, r = collect_stereo(110.hz.saw.phaser(:barberpole, spread: 0.5), 9600)
+      expect(l).not_to eq(r)
+      expect { 110.hz.saw.phaser(direction: :sideways) }.to raise_error(ArgumentError, /direction/)
+      expect { 110.hz.saw.phaser(direction: :up, sweep: 0.constant) }.to raise_error(ArgumentError, /sweep/)
+    end
+
+    it 'climbs: the notch of a held-tone barber pole moves up through each chain\'s pass' do
+      # a 1 kHz sine through :barberpole without feedback: the level dips each
+      # time a notch crosses 1 kHz; :up and :down cross at the same times,
+      # mirrored, so their level curves are each other's reverse in time
+      opts = { rate: 1, feedback: 0, stages: 2, range: 4, center: 1000 }
+      up = collect(1000.hz.sine.phaser(:barberpole, **opts), 48000)
+      down = collect(1000.hz.sine.phaser(:barberpole, direction: :down, **opts), 48000)
+      env = ->(x) { (0...48).map { |k| x[(k * 1000)...((k + 1) * 1000)].abs.max } }
+      eu = env.(up)
+      ed = env.(down)
+      expect(eu.max - eu.min).to be > 0.1
+      # (one cycle: 48 blocks; the down curve runs the up curve backward)
+      expect(eu[1...47].zip(ed[1...47].reverse).map { |a, b| (a - b).abs }.max).to be < 0.05
+    end
+  end
+
+  it 'prints the effects-3 settings back as Ruby' do
+    node = 110.hz.saw.phaser(:jet, above: 150, amount: 0.7)
+    expect(node.to_ruby).to include('phaser(:jet, above: 150, amount: 0.7)')
+    expect(110.hz.saw.phaser(:barberpole, direction: :down).to_ruby).to include('phaser(:barberpole, direction: :down)')
   end
 end

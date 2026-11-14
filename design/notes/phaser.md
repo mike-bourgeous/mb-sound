@@ -1,12 +1,13 @@
 # Phaser
 
 <!-- summary -->
-`sig.phaser(:vintage | :swirl | :ripple | :deep12 | :jet | rate, depth:, stages:, feedback:, mix:, center:, range:, spread:, shape:, sweep:)` (`GraphNode::Phaser`, kernel `FastFilter.phaser` with an exact Ruby mirror) is a chain of 2-12 first-order allpass stages at one LFO-swept frequency, feedback around the chain solved in closed form, a linear dry/wet mix, Tone LFOs (sine or triangle, Hz or tempo-synced lengths), and stereo pairs whose right LFO runs `spread:` cycles ahead.
+`sig.phaser(:vintage | :swirl | :ripple | :deep12 | :jet | :barberpole | rate, depth:, stages:, feedback:, mix:, center:, range:, spread:, shape:, sweep:, above:, amount:, direction:)` (`GraphNode::Phaser`, kernel `FastFilter.phaser` with an exact Ruby mirror) is a chain of 2-32 first-order allpass stages at one LFO-swept frequency, feedback around the chain solved in closed form, a linear dry/wet mix, Tone LFOs (sine or triangle, Hz or tempo-synced lengths), and stereo pairs whose right LFO runs `spread:` cycles ahead; `above:` keeps the lows dry (a Linkwitz-Riley split), `amount:` turns depth, mix, feedback, and stages from light to extreme, and `direction: :up/:down` makes a barber pole.
 <!-- /summary -->
 
 ## Quick reference
 
 - `sig.phaser` (the :vintage preset), `sig.phaser(:jet)`, `sig.phaser(1.bar, stages: 8, feedback: 0.6)`, `sig.phaser(:swirl, range: 200..6000)`, `sig.phaser(sweep: env * 2 - 1)`; presets `L.fx.phaser` (`Phaser.preset_names`).
+- effects-3: `drums.phaser(:ripple, above: 150)` (lows dry), `pad.phaser(:swirl, amount: knob(:amt))` (0 light, 0.5 the preset, 1 extreme), `pad.phaser(:barberpole)` / `phaser(:jet, direction: :down)` (endless sweeps), `stages: 32`.
 - Code `lib/mb/sound/graph_node/phaser.rb` (node, presets, build) and `phaser_methods.rb` (the DSL method); kernel `ruby_phaser` in `ext/mb/sound/fast_filter/fast_filter.c`; spec `spec/lib/mb/sound/graph_node/phaser_spec.rb`; help `help :effects`.
 - Analysis helpers: `Phaser.notch_frequencies(stages, fc)`, `Phaser.response(freqs, stages:, frequency:, feedback:, dry:, wet:)`.
 
@@ -35,6 +36,7 @@ Measured (Mac container, i9-9880H, 800-sample buffers, a moving sweep, ns per sa
 | `:ripple` | 4 | 4 Hz | 1 oct | 1200 | 0.2 | 0 | sine | fast shallow shimmer |
 | `:deep12` | 12 | 0.2 Hz | 5 oct | 800 | 0.4 | 0.5 | sine | deep, six notches |
 | `:jet` | 8 | 0.08 Hz | 6 oct | 1000 | 0.85 | 0 | triangle | resonant jet on drums |
+| `:barberpole` (effects-3) | 8 x 3 chains | 0.1 Hz per pass | 6 oct | 1000 | 0.6 | 0 | (ramps, `direction: :up`) | endless rising notches |
 
 Names are open questions (`:classic` collided with a library tag, so the default is `:vintage`).  Bench set: `/app/tmp/listening/phaser-1/` (presets on a drum loop, a pad, a hi-hat pattern, loudness-matched).
 
@@ -47,7 +49,7 @@ The plug-ins' states don't decode yet and their references (his next Windows run
 | Rate (Hz) / tempo sync | `rate` (Hz, or `1.bar`, `1.n4`) | Blue Cat: Hz |
 | Depth (%) | `depth` (0..1) | Blue Cat "amount of delay variation around the average"; maybe range rather than depth if its center is fixed: fit from the impulse renders |
 | Feedback (%, signed) | `feedback` (-0.95..0.95) | Blue Cat allows +-100% (it warns of runaway); scale x 0.95 or clamp, decided from the renders |
-| Stages / Order | `stages` (2-12 even) | Blue Cat up to 32: raise the limit if his settings go past 12 (question) |
+| Stages / Order | `stages` (2-32 even) | Blue Cat up to 32 (the limit since effects-3) |
 | Center / Manual / Frequency | `center` (Hz) | |
 | Min / Max frequency | `range: lo..hi` | sets center too |
 | Sweep width (octaves) | `range` | |
@@ -56,5 +58,16 @@ The plug-ins' states don't decode yet and their references (his next Windows run
 | Mix (%) | `mix` | linear |
 | LFO shape (sine/triangle) | `shape` | |
 | Gain (dB) | `.at(gain)` before the phaser | |
-| BassPhaser-style low split | not built: `bands(f) { |lo, hi| [lo, hi.phaser] }` keeps the bass dry | |
+| BassPhaser-style low split | `above: f` (effects-3) keeps the bass dry | |
 | Envelope-follower sweep | `sweep:` a follower node | |
+
+## effects-3 (2026-11-14): crossover, amount, barber pole, 32 stages
+
+From the maintainer's phaser-1 Bench notes (2026-11-13; brief `briefs/effects-3.md` in the workbench).
+
+- **`above:`** ("Some of the variants cut out the kick too much, so a crossover option to only process above X hz might be good"): `phaser(..., above: f)` (Hz or a Pitch) splits the input with `#bands(f)` (Linkwitz-Riley 4th order) and phases only the high band, the low band summed back dry (`Phaser.crossover`; a Mixer per side reading both to the end, `stop_early: false`; a mono input with spread comes back stereo, the low band in both sides).  The low band passes through the split's allpass, not untouched; a notch tuned to 60 Hz takes a 60 Hz sine to under 0.05 without `above:` and leaves it within 0.03 of 1 with `above: 400` (spec).  A finite input (the arp file) ends cleanly, the same at 1/7/128/33/367-sample buffers as at 800 (the Crossover's lockstep trap noted in modulation.md didn't show: both bands are read every buffer by one Mixer).  Name: `above:` reads "phase above 150 Hz" (`mono_below` is the precedent); alternatives `dry_below:`, `low:`, `crossover:` (the rotary's split, where both bands are processed), `keep_lows:` (question).  The flanger could take the same option (question).
+- **`amount:`** ("I'd want knobs to tweak to go from light to extreme across all the variants"): one Param, 0..1, 0.5 the preset unchanged (exactly: the formulas give each setting back at 0.5, and an absent amount builds nothing).  Mapping (`Phaser.amount_settings`; t = min(2a, 1), u = max(2a - 1, 0)): depth `v (1 - 0.75 (1 - t)) + (1 - v) u` (a quarter at 0, full at 1), mix `v (1 - 0.7 (1 - t)) + (max(v, 0.5) - v) u` (0.3 of itself at 0, the deepest notches at 1), feedback `v t + (+-0.9 - v) u` (none at 0, 0.9 with the preset's sign at 1, `AMOUNT_FEEDBACK`), and for a numeric amount stages `v 2^(u - (1 - t))` rounded to even within 2..32 (halved at 0, doubled at 1: :swirl 6 -> 4 / 12, :deep12 -> 24).  A node amount (a knob) moves depth, mix, and feedback live through the same formulas as node arithmetic; stages, structural, stay.  Settings given as nodes are left alone, and explicit numeric settings are scaled like the preset's.  Range and rate stay (question: should extreme also widen the range?).
+- **`direction: :up / :down`** ("Could the :jet be modified to act like a risset tone / barber pole tone where it sounds like it's always rising or always falling?"): `Phaser.barber` builds `BARBER_CHAINS` (3) phasers per side, each swept once across the whole range per LFO cycle by an exact ramp (an aliased saw: LFO rates), a third of a cycle apart, each chain's wet faded by a raised cosine of the same LFO that is 0 where its ramp jumps back (aligned: the ramp jumps at phase 0.5, the window there is 0.0 to six places), the windows summing to 1 (2/3 each, within 2.4e-7), the dry signal once.  Held at the center (depth 0) the pole equals one phaser within 1e-4 (spec); :down mirrors :up in time (a held 1 kHz tone's level curve runs backward, spec).  Conservative choice: a new option usable with any preset plus a `:barberpole` preset (8 stages, 0.1 Hz, 6 octaves around 1 kHz, feedback 0.6, sine LFO for the windows, `direction: :up`), rather than changing `:jet` (`phaser(:jet, direction: :up)` gives the jet as a pole).  Three chains cost three phasers.  A sweep: node and a direction raise together.
+- **32 stages** (the plug-in in his .acd song reads 32; he confirmed the 4-stage match by ear, "just a bit more feedback on the original phaser"): `STAGES` 2..32 even (the C kernel already took 64; no ext change).  The kernel matches the Ruby mirror at 32 stages, the rendered response the analysis (32 stages at 2 kHz: 16 notches, each within a bin), and noise swept over 10 octaves at 30 Hz with feedback 0.95 stays bounded (peak under 30 and not growing, as at 12).
+- **Cost** (Mac container, YJIT, thread CPU per sample after a `110.hz.saw` source, best of 3 x 3 s, % of realtime; 128 / 800-sample buffers): 12 stages 150 / 110 ns (0.72 / 0.53%), 32 stages 266 / 244 ns (1.28 / 1.17%); `:jet` 124 / 106, `:jet, above: 150` 183 / 112 (the split's four SVFs and a Mixer); `:barberpole` 513 / 348 (2.46 / 1.67%: three chains and their window LFOs); `:swirl, amount: knob` 224 / 181 (stereo, the macro's node arithmetic).
+

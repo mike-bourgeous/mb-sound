@@ -274,8 +274,10 @@ module MB
         latency, wet -10 dB; `reverb_match('hall.wav')` fits the FDN to one).
 
         Modulation: the Juno chorus and phasers with presets (`L.fx.phaser`:
-        :vintage, :swirl, :ripple, :deep12, :jet; tempo-synced rates like
-        `phaser(1.bar)`, stereo `spread:`).  Antialiased shapers, among them
+        :vintage, :swirl, :ripple, :deep12, :jet, :barberpole; tempo-synced
+        rates like `phaser(1.bar)`, stereo `spread:`, `above: 150` to keep
+        a kick dry, `amount:` from light to extreme, `direction: :up` for
+        notches that climb forever).  Antialiased shapers, among them
         `shape_db`: transfer curves drawn in dB, per sample, with presets
         (`L.fx.shape_db`: :soft_knee, :fuzz, :fold_back, :gate, :asymmetric),
         and `inertia`, an acceleration-limited follower whose limit cycles
