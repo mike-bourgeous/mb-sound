@@ -47,7 +47,7 @@ RSpec.describe(MB::Sound::Boom, :aggregate_failures) do
   it 'plays from notes: the body falls onto each note, as hard as its velocity' do
     MB::Sound.seed(1)
     out = samples(MB::Sound.boom(MB::Sound.seq(MB::Sound::G1.n1, MB::Sound::E1.n1), tail: 0), 240)[0] # (dry: mono)
-    expect(out.abs.max).to be_between(0.5, 3.0) # (presets are at -20.3 LUFS through the -10 dB master, or peak at -3 dBFS there)
+    expect(out.abs.max).to be_between(0.25, 1.5) # (presets are at -26.3 LUFS through the -10 dB master, or peak at -9 dBFS there)
     expect(pitch_at(out, 0.5)).to be_within(1.5).of(MB::Sound::G1.frequency)
     expect(pitch_at(out, 2.5)).to be_within(1.5).of(MB::Sound::E1.frequency)
     expect(pitch_at(out, 2.0)).to be > 1.5 * MB::Sound::E1.frequency # (the strike starts octaves up)
@@ -112,6 +112,8 @@ RSpec.describe(MB::Sound::Boom, :aggregate_failures) do
     expect(flat[:room_size].max).to be < 0.15 # (boom-1's: about 0.03)
     expect(described_class.settings(:cinematic)[:reverb]).to eq(:space)
     expect(described_class.settings(:impact)[:reverb]).to eq(:room)
+    expect(described_class.settings(:impact)[:tail_length]).to eq(0.3) # (boom-3: the maintainer's pick, :room at 0.3 s)
+    expect(described_class.settings(:trailer)[:reverb]).to eq(:hall) # (boom-3: his pick over :space)
 
     described_class::REVERBS.each do |r|
       MB::Sound.seed(1)
@@ -170,11 +172,19 @@ RSpec.describe(MB::Sound::Boom, :aggregate_failures) do
 
   # boom-3 (the maintainer on boom-2's tails: "Too much noise in the tail.
   # I'd want more damping with the apparent frequency of the tail decaying
-  # over time."): the rumble's lowpass falls as it fades (rumble_fall), and
-  # tail_tone puts a lowpass inside the reverb, so the tail can darken as
-  # it decays instead of keeping one spectrum
-  it 'darkens its rumble and tail as they decay with rumble_fall and tail_tone' do
+  # over time."): the reverb's highs die sooner (damping 0.95), and the
+  # rumble's lowpass falls as it fades (rumble_fall), so the tail darkens
+  # as it decays instead of keeping one spectrum
+  it 'darkens its tail as it decays' do
     mono = ->(o) { (o[0] + o[1]) / 2 }
+    MB::Sound.seed(1)
+    now = mono.(samples(MB::Sound.boom(MB::Sound::G1), 300))
+    MB::Sound.seed(1)
+    old = mono.(samples(MB::Sound.boom(MB::Sound::G1, damping: 0.62, rumble_fall: 0), 300)) # (boom-2's tail)
+    expect(tilt(now, 3, 4)).to be < tilt(now, 0.5, 1) - 8
+    expect((tilt(old, 3, 4) - tilt(old, 0.5, 1)).abs).to be < 4
+    expect(described_class.settings(:trailer)[:damping]).to eq(0.95)
+    expect(described_class.settings(:impact)[:rumble_fall]).to eq(0) # (impact keeps its short rumble's tone)
 
     # The rumble alone: its lowpass falls 2 octaves over rumble_decay
     rumble = { 0 => nil, 2 => nil }.to_h { |fall, _|
@@ -306,19 +316,21 @@ RSpec.describe(MB::Sound::Boom, :aggregate_failures) do
     end
   end
 
-  # Levels: one hit at the default velocity at about -20.3 LUFS through the
-  # default master (the library's instrument loudness), or its peak at -3
-  # dBFS there when that comes first (:cinematic's click)
+  # Levels: one hit at the default velocity at about -26.3 LUFS through the
+  # default master (6 dB under the library's instrument loudness, so a boom
+  # sits against a 909 beat at its default level; boom-3, the maintainer's
+  # pick), or its peak at -9 dBFS there when that comes first (:cinematic's
+  # click)
   MB::Sound::Boom.preset_names.each do |name|
-    it "plays #{name} at about -20.3 LUFS, or peaking at -3 dBFS, through the default master" do
+    it "plays #{name} at about -26.3 LUFS, or peaking at -9 dBFS, through the default master" do
       MB::Sound.seed(0)
       out = MB::Sound::Sampler::CaptureOutput.new(channels: 2, buffer_size: 800)
       MB::Sound.render(out, MB::Sound.boom(described_class.home_note(name), name), seconds: 12)
       data = out.captured.map { |c| Numo::DFloat.cast(c) }
       peak = 20 * Math.log10(data.map { |c| c.abs.max }.max)
       lufs = MB::Sound.loudness(data).integrated
-      expect(peak).to be <= -2.5
-      expect(lufs <= -19.3 && (lufs >= -21.3 || peak >= -3.5)).to eq(true), "#{name}: #{lufs.round(2)} LUFS, peak #{peak.round(2)} dBFS"
+      expect(peak).to be <= -8.5
+      expect(lufs <= -25.3 && (lufs >= -27.3 || peak >= -9.5)).to eq(true), "#{name}: #{lufs.round(2)} LUFS, peak #{peak.round(2)} dBFS"
     end
   end
 end

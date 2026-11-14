@@ -464,7 +464,8 @@ module MB
         onto the note's pitch and rings on as a sub, with a click on the
         strike, an optional noise burst, sine sub, and noise rumble, soft
         clipping, and a reverb tail (a library reverb preset: :space by
-        default).  Note lengths don't matter (one hit per note);
+        default) whose highs die sooner than its lows, so it darkens as it
+        decays.  Note lengths don't matter (one hit per note);
         velocity sets the level and, by vel_depth and vel_bright, the
         depth of the fall and the click and drive.  It takes a clip (or
         any MIDI source; none: live `midi`), a pitch for one hit
@@ -499,13 +500,13 @@ module MB
       note :library
       see :drums, :library
       example 'a boom every bar' do
-        bg :try, boom(seq(G1).n1.loop).at(-19.db)
+        bg :try, boom(seq(G1).n1.loop).at(-13.db)
       end
       example 'impacts on the half notes' do
-        bg :try, boom(seq(A1).n2.loop, :impact).at(-16.5.db)
+        bg :try, boom(seq(A1).n2.loop, :impact).at(-10.5.db)
       end
       example 'a sub drop every bar' do
-        bg :try, boom(seq(E1).n1.loop, :sub_drop).at(-14.db)
+        bg :try, boom(seq(E1).n1.loop, :sub_drop).at(-8.db)
       end
       example 'a boom in a kit' do
         bg :try, kit(grid(16, kick: 'x...x...x...x...', crash: 'x...............').loop) {

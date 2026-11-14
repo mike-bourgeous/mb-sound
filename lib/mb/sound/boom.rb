@@ -61,7 +61,7 @@ module MB
       param :rumble, 0.715, range: 0.0..1.0, description: 'Level of a low noise tail under the boom'
       param :rumble_tone, 480.0, range: 40.0..4000.0, curve: :exp, unit: 'Hz', description: 'Lowpass cutoff of the rumble in Hz'
       param :rumble_decay, 5.6, range: 0.05..20.0, curve: :exp, unit: 's', description: 'Seconds the rumble takes to fall silent (along the body\'s curve)'
-      param :rumble_fall, 0.0, range: 0.0..6.0, description: 'Octaves the rumble\'s lowpass falls over its decay (along the body\'s curve), so it darkens as it fades (0 none)'
+      param :rumble_fall, 2.0, range: 0.0..6.0, description: 'Octaves the rumble\'s lowpass falls over its decay (along the body\'s curve), so it darkens as it fades (0 none)'
       param :drive, 0.249, range: 0.0..1.0, description: 'Soft clipping of the body and noise burst (0 clean, 1 up to +18 dB into the clipper)'
       param :vel_depth, 0.5, range: 0.0..1.0, description: 'How much velocity scales the drop (0 none, 1 all)'
       param :below, 0.0, range: 0.0..4.0, description: 'Octaves under the note the fall lands (0 on the note; with floor, a drop that fades out instead of holding a tone)'
@@ -73,9 +73,9 @@ module MB
       param :tail_cut, 0.0, range: 0.0..1000.0, unit: 'Hz', description: 'Low cut inside the reverb in Hz (lows die away sooner; 0 none; read when built)'
       param :tail_tone, 0.0, range: 0.0..8000.0, unit: 'Hz', description: 'Lowpass inside the reverb in Hz: highs die sooner on every pass, so the tail darkens as it decays (0: the damping filter instead; read when built)'
       param :room, 0.675, range: 0.0..1.0, description: 'Reverb room size of the room-size form (read when built)'
-      param :damping, 0.62, range: 0.0..1.0, description: 'Reverb high-frequency damping (0 bright, 1 dark; read when built)'
+      param :damping, 0.95, range: 0.0..1.0, description: 'Reverb high-frequency damping (0 bright, 1 dark; read when built)'
       param :width, 0.278, range: 0.0..1.0, description: 'Stereo width of the tail (0 mono, 1 the reverb as it is)'
-      param :level, 1.03, range: 0.0..4.0, description: 'Output gain (presets: one hit at the default velocity at about -20.3 LUFS through the default master, or its peak at -3 dBFS there)'
+      param :level, 0.517, range: 0.0..4.0, description: 'Output gain (presets: one hit at the default velocity at about -26.3 LUFS through the default master, or its peak at -9 dBFS there: 6 dB under the instrument convention)'
       param :voices, 4, range: 1..16, description: 'Booms that ring at once'
 
       # Body attack in seconds (the strike's rise).
@@ -109,7 +109,12 @@ module MB
       ].freeze
 
       # The default boom (the params' defaults): fitted to a soft synth's
-      # "big kick" boom (boom-1; see design/notes/library.md, Booms).
+      # "big kick" boom (boom-1; see design/notes/library.md, Booms), with
+      # a tail that darkens as it decays (boom-3: damping 0.95, rumble_fall
+      # 2).  Every preset's level puts one hit 6 dB under the library's
+      # instrument loudness (about -26.3 LUFS through the default master,
+      # or its peak at -9 dBFS there; boom-3, the maintainer's pick against
+      # a 909 beat at its default level).
       preset :cinematic, about: 'A cinematic boom: a punchy strike falling two octaves onto a long sub, a click, a dark room',
         tags: %i[deep sub hit]
 
@@ -117,20 +122,20 @@ module MB
         tags: %i[sub drop slow],
         note: 28, drop: 2.0, sweep: 2.4, sweep_curve: 6.0, punch: 0.0, decay: 3.5, curve: 6.0, click: 0.0, noise: 0.0, rumble: 0.0,
         drive: 0.15, vel_depth: 0.0, vel_bright: 0.0, below: 1.5, floor: 30.0,
-        tail: 0.3, tail_length: 3.0, damping: 0.6, width: 0.5, level: 0.575
+        tail: 0.3, tail_length: 3.0, damping: 0.6, width: 0.5, level: 0.288
 
       preset :impact, about: 'A short, tight impact: a fast dive, a hard click, a small bright room',
         tags: %i[short tight hit],
         note: 33, drop: 2.5, sweep: 0.07, sweep_curve: 40.0, punch: 0.6, punch_time: 0.03, decay: 0.7, curve: 30.0,
         click: 0.8, click_tone: 4000.0, noise: 0.15, noise_tone: 5000.0, noise_decay: 0.25, rumble: 0.1, rumble_tone: 1500.0, rumble_decay: 0.4,
-        drive: 0.4, tail: 0.307, tail_length: 0.6, reverb: :room, damping: 0.5, width: 0.6, level: 1.521
+        rumble_fall: 0.0, drive: 0.4, tail: 0.331, tail_length: 0.3, reverb: :room, damping: 0.5, width: 0.6, level: 0.76
 
       preset :trailer, about: 'A long trailer boom: a deep strike over a held sub, a rumble, a huge wide room',
         tags: %i[huge long wide],
         note: 28, drop: 2.0, sweep: 0.4, sweep_curve: 30.0, shape: 0.2, punch: 0.35, punch_time: 0.1, decay: 6.0, curve: 6.0,
         sub: 0.5, sub_decay: 7.0, click: 0.6, click_tone: 1500.0, noise: 0.15, noise_tone: 3000.0, noise_decay: 1.5,
-        rumble: 0.5, rumble_tone: 600.0, rumble_decay: 5.0, drive: 0.35, tail: 0.912, tail_length: 8.0, damping: 0.5, width: 0.9,
-        level: 0.511
+        rumble: 0.5, rumble_tone: 600.0, rumble_decay: 5.0, drive: 0.35, tail: 0.768, tail_length: 8.0, reverb: :hall, width: 0.9,
+        level: 0.218
 
       module_function
 
