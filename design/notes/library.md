@@ -312,7 +312,7 @@ The maintainer, 2026-11-13: "build some sample library voices based on the diffe
 
 | preset | approach | knobs | role tag |
 |---|---|---|---|
-| ring_mod_keys | AM / ring: a sine times a sine at 3.53x, the modulation fading toward the plain sine (ring_bell in round 1) | ratio depth depth_decay decay release | keys |
+| ring_mod_bell | AM / ring: a sine times a sine at 3.53x, the modulation fading toward the plain sine (ring_bell in round 1, ring_mod_keys in round 2) | ratio depth depth_decay decay release | keys |
 | fm_ep | PM in two pairs: a 1:1 body whose bark falls in about 50 ms, a 14x tine pair; a quick drop into a long keytracked decay; `midi.humanize(0.01)` | index ratio tine decay release | keys |
 | fm_bass | `fm_feedback` with a feedback envelope, a sine an octave down | feedback hold fdecay sub release | bass |
 | sync_lead | `sync(ratio:)` swept down from above by an envelope restarting on every note, mono, glide | sync sweep sweep_decay cutoff glide | lead |
@@ -331,7 +331,7 @@ The maintainer, 2026-11-13: "build some sample library voices based on the diffe
 Measured (Mac container, offline renders, 120 BPM, before the master):
 - Levels: -11.4 to -13.8 LUFS on each role's louder phrase (four-note chords for keys and pads), true peaks -7.7 to +1.4 dBTP; nylon_pluck -18.1 LUFS at +0.7 dBTP (the pluck's crest is about 18 dB with every pluck.rb option tried: click 0.25-1, clean, dark).  DC: at most 0.0003 of full scale (mean over a phrase) after the 20 Hz highpass (1:1 PM, sync, feedback FM, the pluck, and even Chebyshev harmonics measured 0.0015-0.045 before).
 - Chebyshev amounts: same-sign amounts cancel the fundamental at low drive (T3's -3x against T1's x): at drive 0.7 and 0.4 the level fell 9.6 and 15.3 dB and the spectrum turned odd; alternating signs (h3, h4, h7 negative) held the level within 0.8 dB while the harmonics fell with the drive (h3 -9 dB at drive 1, -18 at 0.4), so cheby_bass's drive envelope changes brightness, not loudness.  `shape_db`'s power-law segments are scale-invariant (a sine's harmonics stay the same at any level along a segment), so its brightness changes only across knees; it was not used for the envelope-driven voice.
-- Cost, 4 s of four-note chords, YJIT, including the build: partial_keys 25% of realtime (16 envelopes per voice), supersaw 20%, nylon_pluck 22%, pwm_strings 14%, ring_mod_keys 13%, noise_bands 11%, the rest 1-9%.
+- Cost, 4 s of four-note chords, YJIT, including the build: partial_keys 25% of realtime (16 envelopes per voice), supersaw 20%, nylon_pluck 22%, pwm_strings 14%, ring_mod_bell 13%, noise_bands 11%, the rest 1-9%.
 - Aliasing comes from the library's oscillators (hard sync at 1760 Hz, ratio 4.5: -52 dB inharmonic; PolyBLEP saws and pulses -32 dB there); the voices add none beyond intent (detuned copies and vibrato aside).
 - Bench set library-voices-1-2026-11-13 (`/app/tmp/listening/library-voices-1/`, `tools/render_set.rb`): every voice on two 4 s phrases through its saved preset (`L.inst.x.(clip)`), matched to -19.8 LUFS (the loudest every render reaches at -1 dBTP; the pluck sets it), MP3, 6.0 MB; each variant's code plays it and, on a second line, with a contrasting knob.
 
@@ -345,6 +345,11 @@ Guards: each document plays bit for bit like its patch, with its tags and params
 - noise_bands: "Bands too wide."  Round 1's Q 40 is about 43 cents; now `width` (6 cents at the lowest band) and `flare` (the top band 4 times as wide, evenly in ratio) give per-band Q nodes (Q = 1200 / (ln 2 cents)), `normalize: true` keeps the level as they move.  Between-harmonics energy of a held A3: -6.6 dB in round 1, -13.9 dB now (the SVF skirts).  `per_harmonic` takes numbers and Intervals, not nodes, so the knobs go through Q nodes with the same even-ratio curve.
 - nylon_pluck: "Chords with strum would be nice": its Bench chords are strummed (`.strum(30.ms)`, a clip transform), the voice unchanged.
 - Bench: the six items got round 2 variants beside round 1 (`*-r2.mp3`), matched to round 1's -19.8 LUFS at most -1 dBTP; round 1's code lines name the round 1 commit.  Guards: one spec each for the breath's and the bands' leakage and sync_lead's restarted sweep (library_voices_spec).
+
+**Round 3** (the maintainer's verdicts on round 2, 2026-11-14, through main):
+- ring_mod_keys: "ring_mod_bell and call it good" (round 2's melody picked).  Renamed ring_mod_bell (the voice, its preset, its description, and the Bench set's title and code lines; item ids unchanged); the sound is the same.  Its tags keep `keys` (its role) and leave out `bell`, a struck entry's name.
+- fm_ep: round 2's chords picked.
+- sync_lead: round 2's long notes picked ("The legato version sounds vaguely like a stylophone": round 1, with legato envelopes).
 
 Not built (questions for the maintainer): the older FM scripts (`bin/synths/fm_bass.rb`, `fm_epiano.rb`, `fm_bell.rb`, `vocal_lead.rb`, ...) are not library entries, and fm_ep/fm_bass/breath_vowel overlap them; tags through the script runner's `--save` (a small ScriptRunner change would let synth scripts give tags); stereo spread for bowed_glass (`resonate(spread:)`); a knob for nylon_pluck (pluck_voice's settings are build-time numbers).
 

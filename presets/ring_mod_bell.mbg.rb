@@ -1,14 +1,14 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
 graph 11,
-  name: "ring_mod_keys",
+  name: "ring_mod_bell",
   kind: :synth,
-  saved: "2026-11-13T06:46:32Z",
-  mb_sound: "0.12.0.usegit (366bde7)",
+  saved: "2026-11-14T06:31:42Z",
+  mb_sound: "0.12.0.usegit (7d1c04e)",
   from: "bin/synths/library_voices.rb",
-  description: "Ring-modulated keys: a sine times a sine at an inharmonic ratio (sum and difference tones, a metallic clang), the modulation fading toward the plain sine as the note decays (AM / ring modulation; from bin/synths/library_voices.rb, library-voices-1, 2026-11-13)",
+  description: "Ring-modulated bell: a sine times a sine at an inharmonic ratio (sum and difference tones, a metallic clang), the modulation fading toward the plain sine as the note decays (AM / ring modulation; from bin/synths/library_voices.rb, library-voices-1, 2026-11-13)",
   tags: [:am, :ring_mod, :metallic, :keys],
-  options: { patch: :ring_mod_keys }
+  options: { patch: :ring_mod_bell }
 inputs midi: :notes
 param :ratio, (0.25..8.0).at(3.53), description: "Modulator frequency over the note's (3.53: clangy; whole numbers: harmonic)"
 param :depth, (0.0..1.0).at(1.0), description: "Modulation at the strike: 0 a plain sine, 0.5 AM, 1 ring modulation (it fades with depth_decay)"

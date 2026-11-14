@@ -9,7 +9,7 @@
 # (:"keys/index").
 #
 # Patches (-p), by approach:
-#   ring_mod_keys AM and ring modulation: a sine times a sine at an
+#   ring_mod_bell AM and ring modulation: a sine times a sine at an
 #                 inharmonic ratio, the modulation fading as the note decays
 #   fm_ep         phase modulation, two operator pairs: an electric piano
 #                 whose bark falls after the strike, a short metallic tine,
@@ -83,9 +83,9 @@ module MB::Sound
   # +:build+, a Proc of the voice (a Notes lane) and the knobs (a Hash of
   # nodes or numbers by name) giving the voice's signal before the level.
   LIBRARY_VOICES = {
-    ring_mod_keys: {
+    ring_mod_bell: {
       approach: 'AM / ring modulation',
-      about: 'Ring-modulated keys: a sine times a sine at an inharmonic ratio (sum and difference tones, a ' \
+      about: 'Ring-modulated bell: a sine times a sine at an inharmonic ratio (sum and difference tones, a ' \
              'metallic clang), the modulation fading toward the plain sine as the note decays',
       tags: %i[am ring_mod metallic keys],
       voices: 8,
