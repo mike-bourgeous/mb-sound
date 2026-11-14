@@ -705,8 +705,8 @@ module MB
         to say); `follow(:resample)` lets the pitch follow
         the tempo like a varispeed.  `.stretch(r, mode: :slice)` cuts at
         the hits (markers, else onsets, else the 16th grid; `slices:
-        :transients` cuts only at attacks, the markers an onset confirms,
-        so no hit is cut in two) and starts
+        :transients` cuts only at attacks, the clear ones and the softer
+        ones a marker stands for, so no hit is cut in two) and starts
         each slice at its stretched time, attacks copied exactly:
         slowing down leaves a gap after each hit (`fill: :stretch` draws
         each slice out to the next hit instead: evenly, so what is inside

@@ -426,13 +426,42 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       on = rec.onsets
       expect(on.length).to be >= 12
       # (markers: one 5 ms before a hit, one inside a decay, one on a hit,
-      # one 75 ms after a hit)
+      # one 75 ms after a hit: with or without them every hit the
+      # detector is sure of cuts on its attack)
       m = rec.with(markers: [on[1] - 240, on[1] + 7200, on[3], on[5] + 3600])
-      want = [on[0], on[1], on[3]]
-      expect(m.stretch(1.5, mode: :slice, slices: :transients).data(0)).to eq(m.stretch(1.5, mode: :slice, slices: want).data(0))
-      expect(m.stretch(1.5, mode: :slice, slices: :transients, confirm: 0.002).data(0)).to eq(m.stretch(1.5, mode: :slice, slices: [on[0], on[3]]).data(0))
+      with_markers = Numo::DFloat.cast(m.stretch(1.5, mode: :slice, slices: :transients).data(0))
+      on.each { |o| q = (o * 1.5).round; expect((with_markers[q...(q + 480)] - rec.data(0)[o...(o + 480)]).abs.max).to be < 1e-6 }
       expect(m.stretch(1.5, mode: :slice, slices: :transients, confirm: false).data(0)).to eq(m.stretch(1.5, mode: :slice, slices: on).data(0))
       expect(m.stretch(1.5, mode: :slice, slices: :transients, confirm: false).lineage[3]).to eq({ mode: :slice, slices: :transients, confirm: false })
+
+      # Soft hits (two bursts of hiss 6 dB up, between two loud ones): a
+      # marker stands for the first (set 5 ms after its attack), none for
+      # the second.  The first gets a cut, on its attack; the second
+      # keeps its distance from the cut before it (early when slowing).
+      Numo::NArray.srand(21)
+      x = Numo::DFloat.new(96000).rand(-0.05, 0.05)
+      burst = Numo::NMath.sin(Numo::DFloat.new(2400).seq * 0.9) * Numo::NMath.exp(-Numo::DFloat.new(2400).seq / 300.0) * 0.6
+      [12000, 60000].each { |h| x[h...(h + 2400)] += burst }
+      [30000, 80000].each { |h| x[h...(h + 4800)] += Numo::DFloat.new(4800).rand(-0.09, 0.09) * Numo::NMath.exp(-Numo::DFloat.new(4800).seq / 2400.0) }
+      hiss = MB::Sound::Sample[Numo::SFloat.cast(x)]
+      sure = hiss.onsets
+      soft = hiss.onsets(threshold: 4.db) - sure
+      expect(sure.map { |o| (o / 100.0).round }).to eq([0, 120, 600])
+      expect(soft.map { |o| (o / 1000.0).round }).to eq([30, 80])
+      marked = hiss.with(markers: [soft[0] + 240, sure[1] + 3000])
+      cut = marked.stretch(1.25, mode: :slice, slices: :transients)
+      expect(cut.data(0)).to eq(hiss.stretch(1.25, mode: :slice, slices: sure + [soft[0]]).data(0))
+      out = Numo::DFloat.cast(cut.data(0))
+      q = (soft[0] * 1.25).round
+      expect((out[q...(q + 480)] - x[soft[0]...(soft[0] + 480)]).abs.max).to be < 1e-6
+      late = soft[1] + ((sure[2] * 1.25).round - sure[2])
+      expect((out[late...(late + 480)] - x[soft[1]...(soft[1] + 480)]).abs.max).to be < 1e-6
+      expect(late - soft[1] * 1.25).to be < -4000
+      # (a reach of 2 ms: the marker 5 ms off stands for nothing; a
+      # threshold given: the onsets of that threshold, no softer ones)
+      expect(marked.stretch(1.25, mode: :slice, slices: :transients, confirm: 0.002).data(0)).to eq(hiss.stretch(1.25, mode: :slice, slices: sure).data(0))
+      expect(marked.stretch(1.25, mode: :slice, slices: :transients, threshold: 9.db).data(0)).to eq(hiss.stretch(1.25, mode: :slice, slices: sure).data(0))
+      expect(marked.stretch(1.25, mode: :slice, slices: :transients, confirm: false, threshold: 4.db).data(0)).to eq(hiss.stretch(1.25, mode: :slice, slices: sure + soft).data(0))
 
       # Without markers every detected onset (+threshold+ as Onsets takes it)
       expect(rec.stretch(1.5, mode: :slice, slices: :transients).data(0)).to eq(rec.stretch(1.5, mode: :slice, slices: on).data(0))

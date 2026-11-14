@@ -1223,14 +1223,22 @@ module MB
       # The cuts of `slices: :transients`: only where a transient is, so
       # every hit stays whole and lands on its stretched time (the loop's
       # timing holds).  A sample with markers past its start (a loop
-      # file's stretch markers) cuts at the detected onsets (#onsets,
-      # +threshold+ 9 dB by default, `threshold: 6.db` for softer
-      # attacks) that a marker (or the start) confirms within +confirm+
+      # file's stretch markers) cuts at every detected onset (#onsets,
+      # +threshold+ 9 dB by default) and at the softer ones (SOFT_ONSET,
+      # 4 dB) that a marker (or the start) stands for within +confirm+
       # (nil or true: TRANSIENT_REACH, 15 ms; or a length), each on its
       # attack: a marker inside a hit's decay or on held sound does not
-      # cut, and one set a few ms early by a grid cuts on the attack.
-      # Without markers, or with `confirm: false`, at every detected
-      # onset.  (stretch-fixes-3: the maintainer on slices at beats,
+      # cut, and one set a few ms off its hit cuts on the attack (a
+      # marker 7.5 ms after a kick's attack cut the attack off, and as a
+      # slice's last samples it played 15.6 ms before the rest of the
+      # kick at 1.18x: stretch-fixes-4).  With +threshold+ given, at the
+      # onsets of that threshold that a marker confirms, plus none
+      # softer.  Without markers, or with `confirm: false`, at every
+      # detected onset.  A hit that gets no cut keeps its distance from
+      # the cut before it: with `fill: :gap` it plays (ratio - 1) × that
+      # distance early when slowing down (late when speeding up); the
+      # even fill (`fill: :stretch`) puts it near its stretched time.
+      # (stretch-fixes-3: the maintainer on slices at beats,
       # one a beat, of a texture pad: "By 'beats' I meant transients.
       # As is this just breaks the timing of the loop"; the notes
       # inside each beat played at their old spacing.)
@@ -1240,9 +1248,15 @@ module MB
         marks = markers.map(&:position).select(&:positive?)
         return found if confirm == false || marks.empty?
 
+        # Every attack the detector is sure of, and the softer ones a
+        # marker stands for (a kick in a snare's tail rises 4 to 9 dB:
+        # left uncut it plays at its old distance from the hit before it)
         reach = position(confirm.nil? || confirm == true ? TRANSIENT_REACH : confirm)
         marks = [0, *marks]
-        found.select { |o| marks.any? { |m| (m - o).abs <= reach } }
+        soft = threshold.nil? ? onsets(threshold: SOFT_ONSET) : found
+        soft = soft.select { |o| marks.any? { |m| (m - o).abs <= reach } }
+        soft.reject! { |o| found.any? { |f| (f - o).abs <= reach } }
+        (found + soft).sort
       end
       private :transient_cuts
 
