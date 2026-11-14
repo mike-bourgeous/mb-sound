@@ -35,7 +35,8 @@ module MB
         #            knob, an LFO of your own), on both sides.
         # +:above+ - Keeps the lows dry below this frequency (Hz or a Pitch;
         #            a 4th-order Linkwitz-Riley split), so a kick keeps its
-        #            weight: `drums.phaser(:jet, above: 200)`.
+        #            weight: `drums.phaser(:ripple, above: 200)`.  :jet has
+        #            150 Hz; `above: nil` phases everything.
         # +:amount+ - One knob from light (0) to extreme (1); 0.5 is the
         #             preset as it is.  Moves depth, mix, and feedback
         #             together (and stages, for a number: halved at 0,
@@ -44,6 +45,11 @@ module MB
         #                crossfaded so the notches climb (or fall) forever,
         #                one pass over +:range+ per LFO cycle (the
         #                :barberpole preset; `phaser(:jet, direction: :down)`).
+        #                A number or a node is a direction knob: its sign
+        #                the way the notches move, its size the speed (1
+        #                the preset's rate, 2 twice as fast, 0 held still);
+        #                turned live it slows, stops, and reverses the
+        #                notches where they are, with no jump.
         #
         # Examples (bin/sound.rb):
         #     bg :pad, 110.hz.saw.at(-12.db).phaser                    # :vintage
@@ -54,6 +60,7 @@ module MB
         #     bg :drums, drums.phaser(:ripple, above: 150)             # the kick stays dry
         #     bg :pad, pad.phaser(:swirl, amount: knob(:phase_amt))     # light to extreme on a knob
         #     bg :pad, pad.phaser(:barberpole)                          # forever rising (direction: :down falls)
+        #     bg :pad, pad.phaser(:barberpole, direction: knob(:dir, 1, range: -2..2))   # turn it: up, stop, down, faster
         def phaser(preset_or_rate = nil, **options)
           Phaser.build(self, preset_or_rate, **options)
         end

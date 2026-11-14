@@ -53,8 +53,8 @@ module MB
 
         param :rate, 0.2, range: 0.01..20.0, unit: 'Hz', description: 'LFO rate (Hz, or a musical length per cycle: 2.bars)'
         param :depth, 1.0, range: 0.0..1.0, description: 'Share of the range the LFO sweeps (0 holds the delay)'
-        param :delay, 0.002, range: 0.0001..0.03, unit: 's', description: 'Sweep center delay (seconds or a length: 2.ms)'
-        param :range, 4.0, range: 0.0..8.0, unit: 'octaves', description: 'Sweep width in octaves of delay at depth 1'
+        param :delay, 0.001, range: 0.0001..0.03, unit: 's', description: 'Sweep center delay (seconds or a length: 2.ms)'
+        param :range, 2.0, range: 0.0..8.0, unit: 'octaves', description: 'Sweep width in octaves of delay at depth 1'
         param :feedback, 0.5, range: -MAX_FEEDBACK..MAX_FEEDBACK, description: 'Feedback around the delay (negative: hollow, metallic)'
         param :mix, 0.5, range: 0.0..1.0, description: 'Dry/wet crossfade, linear (0.5 deepest notches)'
         param :spread, 0.0, range: 0.0..1.0, unit: 'cycles', description: "Right LFO's phase offset from the left (0.5 opposite); stereo out"
@@ -63,10 +63,10 @@ module MB
         param :law, :octaves, range: LAWS, description: 'Sweep law: :octaves (even in pitch) or :linear (even in time)'
         param :noise, nil, range: 0.0..0.5, description: "Hiss in the feedback loop, scaled by the input's envelope (BBD-style; needs feedback)"
 
-        preset :sweep, rate: 0.2, depth: 1.0, delay: 0.002, range: 4.0, feedback: 0.5, mix: 0.5, spread: 0.0, shape: :triangle,
-          tags: %i[classic medium], about: 'A classic flanger: 0.5-8 ms swept by a slow triangle, medium feedback (the defaults)'
-        preset :jet, rate: 0.08, depth: 1.0, delay: 0.0025, range: 5.0, feedback: 0.85, mix: 0.5, spread: 0.0, shape: :triangle,
-          tags: %i[resonant whoosh drums], about: 'A resonant jet-plane whoosh: strong feedback, a slow five-octave sweep'
+        preset :sweep, rate: 0.2, depth: 1.0, delay: 0.001, range: 2.0, feedback: 0.5, mix: 0.5, spread: 0.0, shape: :triangle,
+          tags: %i[classic medium], about: 'A classic flanger: 0.5-2 ms swept by a slow triangle, medium feedback (the defaults; comby on drums too)'
+        preset :jet, rate: 0.08, depth: 1.0, delay: 0.0025, range: 5.0, feedback: 0.85, mix: 0.5, spread: 0.0, shape: :triangle, noise: 0.1,
+          tags: %i[resonant whoosh drums], about: 'A resonant jet-plane whoosh: strong feedback, a slow five-octave sweep, hiss breathing in the loop'
         preset :sheen, rate: 0.35, depth: 1.0, delay: 0.004, range: 1.5, feedback: 0.2, mix: 0.35, spread: 0.25, shape: :sine,
           tags: %i[gentle subtle stereo], about: 'A gentle stereo shimmer: a narrow sweep around 4 ms, light feedback, mostly dry'
         preset :steel, rate: 0.15, depth: 1.0, delay: 0.001, range: 3.0, feedback: -0.85, mix: 0.5, spread: 0.0, shape: :triangle,

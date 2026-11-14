@@ -497,7 +497,10 @@ module GraphSweep
           # (effects-3: a dry low band, the amount macro on a node, barber poles, 32 stages)
           c.sig.phaser(:ripple, above: 180) + c.stereo_sig.phaser(:swirl, amount: c.mod(0, 1, 2), above: 300).mixdown +
           c.sig.phaser(:barberpole, rate: 7) + c.stereo_sig.phaser(:jet, direction: :down, rate: 5, spread: 0.3).mixdown +
-          c.sig.phaser(9, stages: 32, feedback: c.mod(-0.9, 0.9))
+          c.sig.phaser(9, stages: 32, feedback: c.mod(-0.9, 0.9)) +
+          # (effects-4: a direction knob through zero, a scaled numeric direction on a tempo rate, :jet without its split)
+          c.sig.phaser(:barberpole, rate: 6, direction: c.mod(-2, 2, 3)) + c.sig.phaser(:barberpole, rate: 1.n8, direction: -1.5) +
+          c.sig.phaser(:jet, above: nil, rate: 4)
       }],
 
       # Dynamics

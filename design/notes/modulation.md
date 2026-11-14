@@ -6,7 +6,7 @@
 
 ## Quick reference
 
-- `sig.flanger` (`:sweep`), `sig.flanger(:jet)`, `sig.flanger(:jet, noise: 0.05)` (hiss in the loop following the input), `sig.flanger(2.bars, feedback: -0.7, spread: 0.25)`, `sig.flanger(:steel, range: 0.3.ms..3.ms)`, `sig.flanger(sweep: env * 2 - 1)`; presets `L.fx.flanger`.
+- `sig.flanger` (`:sweep`), `sig.flanger(:jet)` (hiss in the loop at 0.1 since effects-4), `sig.flanger(:jet, noise: nil)` (without it), `sig.flanger(2.bars, feedback: -0.7, spread: 0.25)`, `sig.flanger(:steel, range: 0.3.ms..3.ms)`, `sig.flanger(sweep: env * 2 - 1)`; presets `L.fx.flanger`.
 - `sig.rotary`, `sig.rotary(:whirl)`, `sig.rotary(speed: knob(:spin))` (turn :spin 0/1), `rotary(crossover: 1200, spread: 0.5, doppler: 0.5)`; presets `L.fx.rotary`.
 - Code `lib/mb/sound/graph_node/flanger.rb` (`Flanger.build`), `rotary.rb` (`Rotary.build`), `modulation_methods.rb`, the shared LFO `modulation_lfo.rb` (`ModulationLfo.tone`); specs `spec/lib/mb/sound/graph_node/flanger_spec.rb`, `rotary_spec.rb`; help `help :effects`.
 
@@ -30,8 +30,8 @@ The input plus a copy through a delay of a few milliseconds swept by an LFO.  Mi
 
 | preset | rate | delay, range | feedback | mix | spread | shape | about |
 |---|---|---|---|---|---|---|---|
-| `:sweep` (default) | 0.2 Hz | 2 ms, 4 oct (0.5-8 ms) | 0.5 | 0.5 | 0 | triangle | classic |
-| `:jet` | 0.08 Hz | 2.5 ms, 5 oct (0.44-14 ms) | 0.85 | 0.5 | 0 | triangle | resonant whoosh |
+| `:sweep` (default) | 0.2 Hz | 1 ms, 2 oct (0.5-2 ms; 0.5-8 ms before effects-4) | 0.5 | 0.5 | 0 | triangle | classic, comby on drums |
+| `:jet` | 0.08 Hz | 2.5 ms, 5 oct (0.44-14 ms) | 0.85 | 0.5 | 0 | triangle | resonant whoosh, `noise: 0.1` (effects-4) |
 | `:sheen` | 0.35 Hz | 4 ms, 1.5 oct | 0.2 | 0.35 | 0.25 | sine | subtle stereo shimmer |
 | `:steel` | 0.15 Hz | 1 ms, 3 oct (0.35-2.8 ms) | -0.85 | 0.5 | 0 | triangle | hollow, metallic |
 | `:orbit` | 0.25 Hz | 3 ms, 3 oct | 0.4 | 0.5 | 0.5 | sine | sides opposite |
@@ -53,6 +53,8 @@ The input plus a copy through a delay of a few milliseconds swept by an LFO.  Mi
 **Hiss in the loop** (effects-3, 2026-11-14; the maintainer on `:jet`: "Would this work better with input-dependent noise injected into the feedback chain?"): `noise:` (a level, number or node; needs feedback) adds white noise times the input's envelope (`Dynamics::SimpleEnvelopeFollower` on `aabs`: instant rise, `NOISE_DECAY_DB` -20 dB per `NOISE_DECAY_S` 0.1 s) inside the feedback loop, through `#delay`'s insert block (`{ |d| d + hiss }`: the loop's output and what it feeds back, times the feedback), so the comb rings the hiss while the sound plays and the hiss dies with it: silence in gives silence out (spec), and 0.25 s after a gated saw stops the added hiss is 1/20 of its level at the stop.  Seeded per side from `MB::Sound.next_seed`, the same at any buffer size.  A bucket-brigade flanger's breath; whether it helps `:jet` is the Bench's question (set effects-3, 0.02 / 0.05 / 0.1 on alternating arp, beat, and pad).  Cost (Mac, YJIT, 128 / 800-sample buffers): `:jet` 314 / 179 ns per sample, with noise 731 / 284 (the block makes the loop a FeedbackLoop with an insert and adds a follower and a noise source).  `seed:` fixes the noise (recordings write the drawn seed).
 
 **The :sweep preset's longest delay** (effects-3; his note on the pluck arp: "The longest delay starts to sound echoey rather than comby with the percussive hit"): at 8 ms a pluck's copy separates from it (echoes start around 10 ms).  Bench A/B on alternating arp, beat, and pad: `:sweep` (0.5-8 ms), capped at 4 ms (`range: 0.5.ms..4.ms`), depth 0.75 (0.7-5.7 ms), capped at 2 ms; the preset stays until he picks (question).
+
+**effects-4 presets** (2026-11-14, his picks on effects-3): `:jet` gets `noise: 0.1` (his pick of 0.02/0.05/0.1; the preset now draws a seed from `MB::Sound.next_seed` when built, so a graph built after it draws different seeds than before unless seeded) and `:sweep` (the default) runs 0.5-2 ms (`delay: 0.001, range: 2.0`, his pick of the caps; the params' defaults follow).  Levels (integrated loudness, 24 s of the alternating arp/beat/pad sections, old vs new): `:jet` +0.1 LU, `:sweep` +0.9 LU.
 
 **Older script**: `bin/effects/flanger.rb` (2022) builds its own flanger from a delay, a feedback loop, softclips, and oversampling, with audio-rate LFO examples (to 3300 Hz); it is unchanged (whether it becomes a front end of `flanger` is a question: its examples depend on the softclips in the loop and the oversampling).
 

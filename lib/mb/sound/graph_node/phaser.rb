@@ -51,8 +51,9 @@ module MB
         # 32; the kernel takes 64).
         STAGES = (2..32).step(2).to_a.freeze
 
-        # Sweep directions for a barber-pole phaser (+direction:+; nil is
-        # the LFO's back-and-forth sweep).
+        # Named sweep directions for a barber-pole phaser (+direction:+,
+        # also a signed number or node of speed; nil is the LFO's
+        # back-and-forth sweep).
         DIRECTIONS = %i[up down].freeze
 
         # Staggered chains of a barber-pole phaser: each sweeps the range
@@ -87,7 +88,7 @@ module MB
         param :phase, 0.0, range: 0.0..1.0, unit: 'cycles', description: "Left LFO's starting phase"
         param :above, nil, range: 20.0..2000.0, unit: 'Hz', description: 'Keeps the lows dry below this crossover (Linkwitz-Riley, 4th order)'
         param :amount, 0.5, range: 0.0..1.0, description: 'Light (0) to extreme (1): depth, mix, feedback, and stages together (0.5 the preset)'
-        param :direction, nil, range: DIRECTIONS, description: 'Barber pole: notches climbing (:up) or falling (:down) forever'
+        param :direction, nil, range: -4.0..4.0, description: 'Barber pole: notches climbing (:up, > 0) or falling (:down, < 0) forever, the size scaling the speed'
 
         preset :vintage, rate: 0.5, depth: 1.0, stages: 4, feedback: 0.0, mix: 0.5, spread: 0.0, center: 700.0, range: 4.0, shape: :sine,
           tags: %i[gentle four_stage classic], about: 'A four-stage phaser, two notches swept 175-2800 Hz at 0.5 Hz (the defaults)'
@@ -97,8 +98,8 @@ module MB
           tags: %i[fast shallow subtle], about: 'A fast, shallow shimmer: one octave around 1.2 kHz at 4 Hz'
         preset :deep12, rate: 0.2, depth: 1.0, stages: 12, feedback: 0.4, mix: 0.5, spread: 0.5, center: 800.0, range: 5.0, shape: :sine,
           tags: %i[deep twelve_stage stereo], about: 'Deep twelve-stage phasing (six notches), the sides opposite'
-        preset :jet, rate: 0.08, depth: 1.0, stages: 8, feedback: 0.85, mix: 0.5, spread: 0.0, center: 1000.0, range: 6.0, shape: :triangle,
-          tags: %i[resonant whoosh drums], about: 'A resonant jet whoosh: eight stages, strong feedback, a slow six-octave triangle'
+        preset :jet, rate: 0.08, depth: 1.0, stages: 8, feedback: 0.85, mix: 0.5, spread: 0.0, center: 1000.0, range: 6.0, shape: :triangle, above: 150.0,
+          tags: %i[resonant whoosh drums], about: 'A resonant jet whoosh: eight stages, strong feedback, a slow six-octave triangle, dry below 150 Hz'
         preset :barberpole, rate: 0.1, depth: 1.0, stages: 8, feedback: 0.6, mix: 0.5, spread: 0.0, center: 1000.0, range: 6.0, shape: :sine, direction: :up,
           tags: %i[endless rising shepard], about: 'A barber pole: notches climbing forever (direction: :down falls), staggered sweeps crossfaded'
 
@@ -392,12 +393,6 @@ module MB
             raise ArgumentError, "phaser: unknown option#{'s' if bad.length > 1} #{bad.map(&:inspect).join(', ')}#{guess ? " (did you mean #{guess.inspect}?)" : ''}"
           end
 
-          above = options[:above]
-          if above
-            # (the lows split off and kept dry; the phaser on the highs)
-            return crossover(input, above, rate, options.except(:above))
-          end
-
           if rate.is_a?(Symbol) || rate.is_a?(String)
             preset = rate.to_sym
           else
@@ -405,7 +400,17 @@ module MB
             raise ArgumentError, 'phaser: give the rate once (positional or rate:)' if !rate.nil? && options.key?(:rate)
             options = options.merge(rate: rate) unless rate.nil?
           end
-          s = { dry: 1, wet: 1, phase: 0.0, sweep: nil, above: nil, amount: nil, direction: nil }.merge(preset_settings(preset))
+          preset_s = preset_settings(preset)
+
+          # (given, or the preset's: :jet keeps its lows dry since effects-4;
+          # above: nil turns that off)
+          above = options.key?(:above) ? options[:above] : preset_s[:above]
+          if above
+            # (the lows split off and kept dry; the phaser on the highs)
+            return crossover(input, above, preset, options.merge(above: nil))
+          end
+
+          s = { dry: 1, wet: 1, phase: 0.0, sweep: nil, above: nil, amount: nil, direction: nil }.merge(preset_s)
           s.delete(:center) if options[:range].is_a?(Range)
           s.merge!(options)
           amount_settings(s) unless s[:amount].nil?
@@ -439,17 +444,14 @@ module MB
             raise ArgumentError, 'phaser: a sweep: node drives both sides alike; spread: needs the built-in LFO'
           end
           raise ArgumentError, "phaser sweep: is a node (-1..1; got #{sweep.inspect})" if sweep && !sweep.respond_to?(:sample)
-          direction = GraphNode.build_setting(s[:direction])
-          unless direction.nil? || DIRECTIONS.include?(direction)
-            raise ArgumentError, "phaser direction: is #{DIRECTIONS.map(&:inspect).join(' or ')} (a barber pole) or nil (got #{direction.inspect})"
-          end
-          raise ArgumentError, 'phaser: direction: makes its own sweeps; give it or sweep:, not both' if direction && sweep
+          direction = barber_speed(s[:direction])
+          raise ArgumentError, 'phaser: direction: makes its own sweeps; give it or sweep:, not both' if !direction.nil? && sweep
 
           l, r = StereoDelayMethods.sides(input, 'phaser')
           stereo = !l.equal?(r) || input.is_a?(Channels) && input.channel_count == 2 || spread != 0
           sample_rate = input.sample_rate
           make = ->(side, offset) {
-            if direction
+            unless direction.nil?
               next barber(side, s, direction, phase + offset, center, octaves, feedback, dry, wet, sample_rate)
             end
             sw = sweep || ModulationLfo.tone(s[:rate], shape: shape, phase: phase + offset, sample_rate: sample_rate, what: 'phaser')
@@ -461,30 +463,85 @@ module MB
           Channels.new([make.(l, 0.0), make.(r, spread.to_f)])
         end
 
-        # A barber-pole phaser on +side+ (+direction+ :up or :down):
-        # BARBER_CHAINS phasers, each swept once across the range per LFO
-        # cycle by a ramp (exact: an aliased saw, below audio rates), a
-        # third of a cycle apart, each chain's wet faded by a raised cosine
-        # that is silent where its ramp jumps back, so the notches seem to
-        # climb (or fall) forever, like a Shepard-Risset tone.  The windows
-        # sum to 1 (2/3 each at three chains); the dry signal once.
+        # A barber-pole phaser on +side+ at signed speed +direction+ (a
+        # number or a node; see .barber_speed): BARBER_CHAINS phasers, each
+        # swept once across the range per LFO cycle by a ramp (exact: an
+        # aliased saw, below audio rates), a third of a cycle apart, each
+        # chain's wet faded by a raised cosine that is silent where its ramp
+        # jumps back, so the notches seem to climb (or fall) forever, like a
+        # Shepard-Risset tone.  The windows sum to 1 (2/3 each at three
+        # chains); the dry signal once.  Ramps and windows read one phase
+        # per chain, so a speed node that changes sign turns the notches
+        # around where they are (no jump, no crossfade needed), and 0 holds
+        # them still.
         def self.barber(side, s, direction, phase, center, octaves, feedback, dry, wet, sample_rate)
           side = side.get_sampler
           n = BARBER_CHAINS
+          numeric = direction.is_a?(Numeric)
+          rate = barber_rate(s[:rate], numeric ? direction.abs : direction, sample_rate)
           chains = Array.new(n) { |i|
             offset = phase + i / n.to_f
-            ramp = ModulationLfo.rate_tone(s[:rate], sample_rate: sample_rate, what: 'phaser').asaw
+            ramp = ModulationLfo.rate_tone(rate, sample_rate: sample_rate, what: 'phaser').asaw
             ramp.with_phase(offset % 1) unless offset % 1 == 0
             # (the ramp is at its middle at phase 0 and jumps at 0.5; the
             # window peaks at its middle and is 0 at the jump)
-            win = ModulationLfo.tone(s[:rate], shape: :sine, phase: offset + 0.25, sample_rate: sample_rate, what: 'phaser')
+            win = ModulationLfo.tone(rate, shape: :sine, phase: offset + 0.25, sample_rate: sample_rate, what: 'phaser')
             win = win * (1.0 / n) + (1.0 / n)
-            sw = direction == :up ? ramp : ramp * -1
+            # (a node speed runs the phase itself backward when negative)
+            sw = numeric && direction < 0 ? ramp * -1 : ramp
             new(side, sweep: sw, center: center, range: octaves, depth: s[:depth], feedback: feedback, dry: 0, wet: Chorus.scale(win, wet) || win * 0,
               stages: s[:stages], sample_rate: sample_rate)
           }
           d = Chorus.scale(side, dry)
           Mixer.new(d ? [d, *chains] : chains, sample_rate: sample_rate, stop_early: false)
+        end
+
+        # The barber pole's signed speed for the +direction:+ setting: nil
+        # (no barber pole), :up (1.0), :down (-1.0), a number, or a node.
+        # The sign is the way the notches move, the magnitude scales the
+        # sweep rate (1 the preset's rate, 2 twice as fast, 0 held still).
+        def self.barber_speed(direction)
+          direction = GraphNode.build_setting(direction) unless direction.respond_to?(:sample)
+          case direction
+          when nil then nil
+          when :up then 1.0
+          when :down then -1.0
+          when Numeric
+            unless direction.real? && direction.finite?
+              raise ArgumentError, "phaser direction: is a finite number (got #{direction.inspect})"
+            end
+            direction.to_f
+          else
+            return direction if direction.respond_to?(:sample)
+            raise ArgumentError, "phaser direction: is #{DIRECTIONS.map(&:inspect).join(' or ')}, a number (its sign the way the notches " \
+              "move, its size the speed; 1 the preset's rate), or a node, for a barber pole; or nil (got #{direction.inspect})"
+          end
+        end
+
+        # The rate of a barber pole's ramps for the phaser +rate+ setting at
+        # +speed+: a number at least 0 (the rate itself at 1; a musical
+        # length shortened, so it stays locked to the timeline) or a node
+        # (signed: a node of Hz, the rate times the speed, its phase free of
+        # the timeline).
+        def self.barber_rate(rate, speed, sample_rate)
+          rate = GraphNode.build_setting(rate) unless rate.respond_to?(:sample)
+          if speed.is_a?(Numeric)
+            return rate if speed == 1
+            return 0.0 if speed == 0
+            return rate / speed if rate.is_a?(Sequence::Duration)
+          end
+
+          hz = case rate
+               when Sequence::Duration, Sequence::NodeDuration then rate.hz.oscillator_frequency
+               when Pitch then rate.oscillator_frequency
+               when Numeric then rate.to_f
+               when Length then 1.0 / rate.to_seconds(sample_rate: sample_rate)
+               else
+                 raise ArgumentError, "phaser rate: is Hz, a Pitch, a musical length, a Length, or a node of Hz (got #{rate.inspect})" unless rate.respond_to?(:sample)
+                 rate
+               end
+          return hz * speed if hz.is_a?(Numeric) && speed.is_a?(Numeric)
+          hz.is_a?(Numeric) ? speed * hz : hz * speed
         end
 
         # Phaser +rate+ (a preset name or rate, as for .build) with +options+ on the highs of +input+ above

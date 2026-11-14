@@ -295,9 +295,9 @@ RSpec.describe(MB::Sound::GraphNode::Phaser, :aggregate_failures) do
 
     it 'lets options override a preset and a rate the default preset' do
       jet = klass.preset_settings(:jet)
-      node = 110.hz.saw.phaser(:jet, stages: 4)
+      node = 110.hz.saw.phaser(:jet, stages: 4, above: nil)
       expect(node.stages).to eq(4)
-      expect(110.hz.saw.phaser(:jet).stages).to eq(jet[:stages])
+      expect(110.hz.saw.phaser(:jet, above: nil).stages).to eq(jet[:stages])
       expect(110.hz.saw.phaser(3).stages).to eq(klass.preset_settings(:vintage)[:stages])
     end
   end
@@ -351,8 +351,8 @@ RSpec.describe(MB::Sound::GraphNode::Phaser, :aggregate_failures) do
   end
 
   it 'prints itself back as Ruby and describes itself' do
-    node = 110.hz.saw.phaser(:jet, feedback: 0.6)
-    expect(node.to_ruby).to include('phaser(:jet, feedback: 0.6)')
+    node = 110.hz.saw.phaser(:jet, feedback: 0.6, above: nil)
+    expect(node.to_ruby).to include('phaser(:jet, feedback: 0.6, above: nil)')
     expect(node.to_s).to eq('Phaser 8 stages around 1000.0 Hz, feedback 0.6')
     stereo = 110.hz.saw.phaser(1.bar, spread: 0.25)
     expect(stereo.to_ruby).to include('phaser(1.bar, spread: 0.25)')
@@ -438,6 +438,50 @@ RSpec.describe(MB::Sound::GraphNode::Phaser, :aggregate_failures) do
       expect(eu.max - eu.min).to be > 0.1
       # (one cycle: 48 blocks; the down curve runs the up curve backward)
       expect(eu[1...47].zip(ed[1...47].reverse).map { |a, b| (a - b).abs }.max).to be < 0.05
+    end
+  end
+
+  describe 'effects-4: :jet above 150 Hz, direction: as a knob' do
+    it 'keeps the lows of :jet dry below 150 Hz unless above: nil' do
+      expect(collect(110.hz.saw.phaser(:jet), 9600)).to eq(collect(110.hz.saw.phaser(:jet, above: 150), 9600))
+      expect(110.hz.saw.phaser(:jet)).to be_a(MB::Sound::GraphNode::Mixer)
+      expect(110.hz.saw.phaser(:jet, above: nil)).to be_a(klass)
+      expect(collect(110.hz.saw.phaser(:jet, above: 300), 9600)).not_to eq(collect(110.hz.saw.phaser(:jet), 9600))
+    end
+
+    it 'scales the barber pole\'s speed by the size of a numeric direction:, its sign the way' do
+      opts = { stages: 4, feedback: 0.3 }
+      bp = ->(**o) { collect(110.hz.saw.phaser(:barberpole, **opts, **o), 24000) }
+      expect(bp.(direction: 1)).to eq(bp.())
+      expect(bp.(direction: -1)).to eq(bp.(direction: :down))
+      expect(bp.(direction: 2)).to eq(bp.(rate: 0.2))
+      expect(bp.(direction: -0.5)).to eq(bp.(rate: 0.05, direction: :down))
+      # a musical rate stays a (shorter) musical length, locked to the timeline
+      expect(bp.(rate: 1.bar, direction: 4)).to eq(bp.(rate: 1.n4))
+      held = bp.(direction: 0)
+      expect(held.isfinite.all?).to eq(true)
+      expect(held).to eq(bp.(rate: 0))
+    end
+
+    it 'takes a node direction: that turns the notches around live without a jump' do
+      opts = { rate: 1, feedback: 0, stages: 2, range: 4, center: 1000 }
+      # a constant node plays like the number (float32 node values: within rounding)
+      a = collect(1000.hz.sine.phaser(:barberpole, direction: 1.5.constant, **opts), 24000)
+      b = collect(1000.hz.sine.phaser(:barberpole, direction: 1.5, **opts), 24000)
+      expect((a - b).abs.max).to be < 1e-3
+      # up for half a second, then down: the second half's dips run the first's backward
+      turn = 1.0.constant.until(0.5).and_then((-1.0).constant)
+      x = collect(1000.hz.sine.phaser(:barberpole, direction: turn, **opts), 48000)
+      expect(x.isfinite.all?).to eq(true)
+      steady = collect(1000.hz.sine.phaser(:barberpole, direction: 1, **opts), 48000)
+      step = ->(v) { (v[1..] - v[0...-1]).abs.max }
+      expect(step.(x)).to be < step.(steady) * 1.05 # (no click at the turn)
+      env = ->(v, r) { r.map { |k| v[(k * 1000)...((k + 1) * 1000)].abs.max } }
+      first = env.(x, 1...24) # (block 0: the chains starting up)
+      second = env.(x, 24...47)
+      expect(first.reverse.zip(second).map { |p, q| (p - q).abs }.max).to be < 0.002
+      expect { 110.hz.saw.phaser(direction: Float::NAN) }.to raise_error(ArgumentError, /finite/)
+      expect(110.hz.saw.phaser(:barberpole, direction: -2).to_ruby).to include('phaser(:barberpole, direction: -2)')
     end
   end
 
