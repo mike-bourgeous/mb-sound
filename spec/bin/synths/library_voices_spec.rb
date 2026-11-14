@@ -69,6 +69,19 @@ RSpec.describe('bin/synths/library_voices.rb') do
     expect(between_harmonics_db(held(:noise_bands, 57, 1.4), 220, 0.6, 1.2)).to be < -12 # (round 1, Q 40: -6.6 dB; now -13.9)
   end
 
+  # The spectral centroid in Hz of +data+ from +a+ to +b+ seconds.
+  def centroid(data, a, b)
+    m = MB::Sound.real_fft(seconds(data, a, b)).abs**2
+    f = Numo::DFloat.new(m.length).seq * 24000.0 / (m.length - 1)
+    (m * f).sum / m.sum
+  end
+
+  it 'plays noise_bands darker by default, brighter with rolloff (voices-tweak-1: "Better, too bright")' do
+    now = centroid(held(:noise_bands, 57, 1.4), 0.6, 1.2)
+    round2 = centroid(held(:noise_bands, 57, 1.4, rolloff: 1), 0.6, 1.2)
+    expect(now).to be < 0.7 * round2 # (a held A3: 848 Hz; round 2's 1 / n levels, rolloff 1: 1448)
+  end
+
   it 'restarts sync_lead\'s sweep on every note, legato or not (Bench round 2: "only one attack")' do
     # (each note's start is brighter than its end: crossings of zero per second)
     zc = ->(x) { (x[1..] * x[0...-1]).lt(0).count_true / (x.length / 48000.0) }

@@ -345,7 +345,7 @@ The maintainer, 2026-11-13: "build some sample library voices based on the diffe
 | ladder_lead | two saws and a square sub through lp4 with its envelope, mono, glide | cutoff reso fenv fdecay glide | lead |
 | supersaw | `unison(7, spread:)` saws (stereo) | detune spread mix cutoff attack release | pad |
 | breath_vowel | a saw and breath through `formant(:u, :o, :a, :i, morph:)`; the breath is noise through `bandpass_series` at the harmonics (20 to 120 cents wide), a puff settling to `hold` | vowel breath hold vibrato attack release glide | lead |
-| noise_bands | `noise.bandpass_series(v.freq, count: 12, normalize: true)`, per-band Q nodes from a width in cents growing up the series | width flare stretch attack release | pad |
+| noise_bands | `noise.bandpass_series(v.freq, count: 12, normalize: true)`, per-band Q nodes from a width in cents growing up the series, band n's level `1 / n ** rolloff` | width flare stretch rolloff attack release | pad |
 | bowed_glass | noise bowing `resonate(:glass, v.freq, decay:)` while the key is held | bow tone decay attack release | pad |
 | nylon_pluck | `pluck_voice` (bin/synths/pluck.rb's Karplus-Strong string), dry | none | pluck |
 | cheby_bass | `chebyshev` driven by an envelope (alternating-sign amounts) | drive hold ddecay release | bass |
@@ -373,6 +373,11 @@ Guards: each document plays bit for bit like its patch, with its tags and params
 - ring_mod_keys: "ring_mod_bell and call it good" (round 2's melody picked).  Renamed ring_mod_bell (the voice, its preset, its description, and the Bench set's title and code lines; item ids unchanged); the sound is the same.  Its tags keep `keys` (its role) and leave out `bell`, a struck entry's name.
 - fm_ep: round 2's chords picked.
 - sync_lead: round 2's long notes picked ("The legato version sounds vaguely like a stylophone": round 1, with legato envelopes).
+
+**voices-tweak-1** (the maintainer's verdicts, 2026-11-14, through main: noise_bands round 2's chords, "Better, too bright"; breath_vowel round 2's melody; nylon_pluck round 2's strummed chords, "Chords with strum would be nice"):
+- noise_bands: a `rolloff` knob, band n's level `1 / n ** rolloff` (round 2: `1 / n`, rolloff 1), default 1.5; the bands' gains are param expressions in the preset (`0.5 ** rolloff`, ...), and `normalize: true` recomputes as it turns.  The bands filter white noise, so each band's power grows with its width in Hz: at `1 / n` the 1-4 kHz octaves held most of the energy.  Spectral centroid of the Bench's four-note chords (whole render): 1591 Hz in round 2, 810 Hz at 1.5, 429 Hz at 2 (pwm_strings 411, scan_pad 831, grain_pad 379); 2-4 kHz -5.8 / -10.9 / -18.2 dB of the total.  Level 0.52 -> 0.834 keeps the chords at -11.9 LUFS (-1.3 dBTP); rolloff 2 plays 1.9 LU quieter there.  Guard: a held A3's centroid under 0.7 of rolloff 1's (848 vs 1448 Hz; library_voices_spec).
+- nylon_pluck: satisfied by the strummed Bench chords; the strum stays a clip transform (`.strum(30.ms)`, any voice), not a voice option.
+- Bench set voices-tweak-1-2026-11-14 (`/app/tmp/listening/voices-tweak-1/`): noise_bands round 2 against rolloff 1.5 and 2, chords and line, matched to library-voices-1's -19.8 LUFS.
 
 Not built (questions for the maintainer): the older FM scripts (`bin/synths/fm_bass.rb`, `fm_epiano.rb`, `fm_bell.rb`, `vocal_lead.rb`, ...) are not library entries, and fm_ep/fm_bass/breath_vowel overlap them; tags through the script runner's `--save` (a small ScriptRunner change would let synth scripts give tags); stereo spread for bowed_glass (`resonate(spread:)`); a knob for nylon_pluck (pluck_voice's settings are build-time numbers).
 

@@ -336,14 +336,16 @@ module MB::Sound
         width: [6.0, 1.0..200.0, 'Width of the lowest band in cents (narrow: pitched; wide: airy)'],
         flare: [4.0, 1.0..10.0, 'The top band\'s width over the lowest\'s (the widths grow evenly in ratio)'],
         stretch: [1.0, 0.5..2.0, 'Spacing of the bands in harmonics (1: harmonic; others: inharmonic)'],
+        rolloff: [1.5, 0.0..4.0, 'How fast the bands fade up the series: band n\'s level is 1 / n ** rolloff (higher: darker; 1 falls 6 dB per octave)'],
         attack: [0.5, 0.001..8.0, 'Attack in seconds'],
         release: [1.2, 0.01..8.0, 'Release in seconds'],
       },
-      level: 0.52,
+      level: 0.834,
       build: ->(v, k) {
         # (Q from a width in cents: Q = 1200 / (ln 2 cents), close for narrow bands)
         q = (0...12).map { |i| 1200 / Math.log(2) / (k[:width] * k[:flare]**(i / 11.0)) }
-        bands = noise.bandpass_series(v.freq, count: 12, ratio: k[:stretch], quality: q, gain: (1..12).map { |n| (1.0 / n).round(4) }, normalize: true)
+        gain = (1..12).map { |n| n == 1 ? 1.0 : (1.0 / n)**k[:rolloff] }
+        bands = noise.bandpass_series(v.freq, count: 12, ratio: k[:stretch], quality: q, gain: gain, normalize: true)
         bands * v.env(k[:attack], 0.5, 0.9, k[:release], gm: false)
       },
     },
