@@ -32,11 +32,11 @@ module MB
       # rings, tape echoes), reverbs (their network kernels, predelays, and
       # padded inputs), choruses' tails, formants, crossovers, limiters,
       # drum kit voices and their repeats, flams, and chokes, sampler
-      # voices, curve shapers' antialiasing, gates, wavetables, time limits,
-      # and MIDI clip sources (the old one's clip and timing).  A pair whose
-      # state doesn't fit (#carry_fits?: a reverb of another size) starts
-      # fresh, and the swap crossfades.  What starts fresh: inputs, grains,
-      # loop players, resamplers, and the other kinds that say why
+      # voices, grain clouds, curve shapers' antialiasing, gates, wavetables,
+      # time limits, and MIDI clip sources (the old one's clip and timing).
+      # A pair whose state doesn't fit (#carry_fits?: a reverb of another
+      # size) starts fresh, and the swap crossfades.  What starts fresh:
+      # inputs, loop players, resamplers, and the other kinds that say why
       # (NodeTraits' +fresh+).  Times are moved to the new graph's stream
       # time (graphs count stream time from their own start), and the new
       # player goes on as the old one: its start and launch (for seeks), its
@@ -218,7 +218,7 @@ module MB
         # True if +node+ (a graph node) has running state a carry doesn't
         # copy (NodeTraits: memory other than :none, carry :fresh): delay
         # lines, reverbs, feedback loops, choruses, formants, crossovers,
-        # limiters, sampler voices, grains, loop players, ..., filters other
+        # limiters, sampler voices, loop players, ..., filters other
         # than SVFs, cookbook biquads, and chains of them, and drum kit
         # voices (their idle sleeping; their hits' nodes carry).  Unknown
         # node kinds (classes that declare no traits) count: the swap then
