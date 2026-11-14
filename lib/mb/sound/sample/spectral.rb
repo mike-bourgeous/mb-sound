@@ -79,142 +79,294 @@ module MB
         # each channel its own), so 0 is the phase-locked vocoder and 1 is
         # Paulstretch (uniformly random phases; #paul does that case);
         # attack bins near onsets stay unrandomized.  +wrap+ is for audio
-        # that loops (its end flows into its start): the output's end is
-        # joined to its start too (#seam).
+        # that loops (its end flows into its start): the stretch reads it
+        # as an endless stream and its own end flows into its start
+        # (#looped with one pass).
         def vocoder(channels, ratio, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false)
-          randomize = randomize.to_f
-          raise ArgumentError, "randomize: is 0..1 (got #{randomize})" unless randomize >= 0 && randomize <= 1
-          raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
-          n = Integer(window)
-          raise ArgumentError, "The window must be an even number of samples, 64 or more (got #{window})" unless n >= 64 && n.even?
-          hs = n / Integer(overlap)
-          raise ArgumentError, 'The overlap must leave a hop of at least 8 samples' unless hs >= 8
+          return looped(channels, ratio, window: window, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape) if wrap
 
-          xs = channels.map { |c| Numo::DFloat.cast(c) }
-          len = xs[0].length
+          raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
+          voc = Vocoder.new(channels, window: window, overlap: overlap, randomize: randomize, seed: seed, link: link, shape: shape)
+          n = voc.window
+          hs = voc.hop
+          len = voc.length
           out_len = (len * ratio).round
-          mix = xs.length == 1 ? xs[0] : xs.sum / xs.length
           map, resets = time_map(len, ratio, onsets, n, hs)
-          w = shaped_window(shape, n)
-          nb = n / 2 + 1
-          omega = Numo::DFloat.new(nb).seq * (TWO_PI / n)
-          hr = n / 8 # the fixed offset for instantaneous frequencies
 
           frames = out_len / hs + 2
-          buf = Array.new(xs.length) { Numo::DFloat.zeros(frames * hs + n) }
-          wsum = Numo::DFloat.zeros(frames * hs + n)
-          w2 = w * w
-          # Partly random frames add partly in amplitude, partly in power:
-          # the mean of a frame's random phase offsets' unit vectors (its
-          # coherence, sinc(randomize)), summed with the windows for #finish
-          c = randomize > 0 ? Math.sin(Math::PI * randomize) / (Math::PI * randomize) : 1.0
-          csum = Numo::DFloat.zeros(wsum.length) if randomize > 0
-          c2sum = Numo::DFloat.zeros(wsum.length) if randomize > 0
-
-          theta = nil
-          phi_prev = nil
-          mag_prev = nil
-          prev_center = nil
+          sums = Sums.new(voc.channels, frames * hs + n, voc.randomize > 0)
           attack_until = nil
           ri = 0
 
           frames.times do |m|
             center = map.call(m * hs).round
-            spec = Numo::Pocketfft.rfft(segment(mix, center, n) * w)
-            phi = spec.arg
-            mag = spec.abs
-
             while ri < resets.length && center + n / 2 > resets[ri]
               attack_until = resets[ri] + n / 2
               ri += 1
             end
+            attack = !attack_until.nil? && center < attack_until
+            sums.add(m * hs, voc.frame(m, center, attack: attack), voc, attack)
+          end
 
-            if theta.nil?
-              theta = phi.dup
+          sums.finish(n / 2, out_len, voc)
+        end
+
+        # The phase vocoder for audio that loops: +channels+ are read as
+        # an endless stream (every frame wraps around the ends, so no
+        # frame sees an edge), stretched by +ratio+ for +passes+ passes
+        # of the loop, and the output is overlap-added in a circle of
+        # +passes+ × the stretched length, so its own end flows into its
+        # start with the same sound on both sides (no unstretched join, no
+        # crossfade).  Options as #vocoder; +onsets+ are those of one
+        # pass, an onset at the start being an attack only if the level
+        # rises across the wrap (Sample::Onsets, wrap: true).
+        #
+        # A stretch's partials don't come round to their starting phases
+        # by themselves (a partial of f Hz turns f × the output's length
+        # times, rarely a whole number), so a first pass over the loop
+        # measures how far every bin's phase is from closing (after the
+        # last frame, back at the first frame's content), and the second
+        # adds that, spread evenly over the frames, to each frame's phase
+        # advance before locking: every partial is moved by less than
+        # half a cycle per loop length (0.3 Hz for a 1.6 s loop) and ends
+        # on its starting phase.  Phases that an onset resets close by
+        # themselves.  What the spreading leaves (bins whose peaks moved)
+        # is in +report+ (a Hash, if given): :closure, the magnitude-
+        # weighted mean of |phase error| at the wrap in cycles, before
+        # and after.
+        def looped(channels, ratio, passes: 1, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, report: nil)
+          raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
+          passes = Integer(passes)
+          raise ArgumentError, "passes: is 1 or more (got #{passes})" unless passes >= 1
+
+          voc = Vocoder.new(channels, window: window, overlap: overlap, randomize: randomize, seed: seed, link: link, shape: shape, wrap: true)
+          n = voc.window
+          hs = voc.hop
+          len = voc.length
+          pass_len = (len * ratio).round
+          out_len = pass_len * passes
+          raise ArgumentError, 'The stretched loop must be at least one sample long' unless out_len >= 1
+
+          # The time map of the middle of three passes (the passes before
+          # and after are its neighbours across the wrap)
+          on3 = onsets && !onsets.empty? ? (0...3).flat_map { |k| onsets.map { |o| o + k * len } } : nil
+          map3, resets3 = time_map(3 * len, ratio, on3, n, hs)
+          centers = []
+          t = 0
+          while t < out_len
+            pass, rem = t.divmod(pass_len)
+            centers << [t, map3.call(rem + len * ratio.to_f).round - len + pass * len]
+            t += hs
+          end
+          # (the frame after the last is the first again, a loop later)
+          centers << [out_len, centers[0][1] + passes * len]
+          resets = (-1..passes).flat_map { |k| resets3.select { |o| o >= len && o < 2 * len }.map { |o| o - len + k * len } }
+
+          run = ->(extra, sums) {
+            voc.restart
+            attack_until = nil
+            ri = 0
+            last = nil
+            centers.each_with_index do |(pos, center), m|
+              while ri < resets.length && center + n / 2 > resets[ri]
+                attack_until = resets[ri] + n / 2
+                ri += 1
+              end
+              attack = !attack_until.nil? && center < attack_until
+              hop = m.zero? ? hs : pos - centers[m - 1][0]
+              closing = m == centers.length - 1
+              ys = voc.frame(m, center, attack: attack, hop: hop, extra: extra && m > 0 ? extra * (hop.to_f / out_len) : nil, synth: !sums.nil? && !closing)
+              sums.add_wrapped(pos, ys, voc, attack) if sums && !closing
+              last = voc.rotation if closing
+            end
+            last
+          }
+
+          sums = Sums.new(voc.channels, out_len, voc.randomize > 0)
+          if voc.randomize >= 1
+            # (every phase random: nothing to close)
+            run.call(nil, sums)
+          else
+            error = run.call(nil, nil)
+            weights = voc.magnitudes
+            before = (error.abs * weights).sum / (TWO_PI * weights.sum + 1e-300)
+            left = run.call(-error, sums)
+            report[:closure] = [before, (left.abs * weights).sum / (TWO_PI * weights.sum + 1e-300)] if report
+          end
+          sums.finish(0, out_len, voc)
+        end
+
+        # A phase vocoder's running state (see Spectral.vocoder): the
+        # windows, the input, and the phases the last frame reached.
+        # #frame makes the next frame from wherever its center is, so
+        # Spectral.vocoder (a whole sample at once), Spectral.looped (a
+        # loop, read in a circle), and Spectral::Stream (a loop followed
+        # live) are one vocoder.
+        class Vocoder
+          attr_reader :window, :hop, :length, :channels, :randomize, :squares, :coherence
+
+          # +channels+ as Spectral.vocoder takes them.  With +wrap+ the
+          # frames read the input in a circle (a loop); without, zeros
+          # outside it.
+          def initialize(channels, window: WINDOW, overlap: OVERLAP, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false)
+            @randomize = randomize.to_f
+            raise ArgumentError, "randomize: is 0..1 (got #{@randomize})" unless @randomize >= 0 && @randomize <= 1
+            @window = Integer(window)
+            raise ArgumentError, "The window must be an even number of samples, 64 or more (got #{window})" unless @window >= 64 && @window.even?
+            @hop = @window / Integer(overlap)
+            raise ArgumentError, 'The overlap must leave a hop of at least 8 samples' unless @hop >= 8
+
+            @xs = channels.map { |c| Numo::DFloat.cast(c) }
+            @channels = @xs.length
+            @length = @xs[0].length
+            @mix = @xs.length == 1 ? @xs[0] : @xs.sum / @xs.length
+            @wrap = wrap
+            @seed = seed
+            @link = link
+            @w = Spectral.shaped_window(shape, @window)
+            @squares = @w * @w
+            @bins = @window / 2 + 1
+            @omega = Numo::DFloat.new(@bins).seq * (TWO_PI / @window)
+            @reference = @window / 8 # the fixed offset for instantaneous frequencies
+            @base = Numo::Int64.new(@window).seq - @window / 2
+            # Partly random frames add partly in amplitude, partly in
+            # power: the mean of a frame's random phase offsets' unit
+            # vectors (its coherence, sinc(randomize)), summed with the
+            # windows for Sums#finish
+            @coherence = @randomize > 0 ? Math.sin(Math::PI * @randomize) / (Math::PI * @randomize) : 1.0
+            restart
+          end
+
+          # Forgets the phases: the next frame starts with its input's.
+          def restart
+            @theta = nil
+            @phi = nil
+            @mag = nil
+            @center = nil
+          end
+
+          # The last frame's phase rotation (output phase minus input
+          # phase per bin, -pi...pi) and its magnitudes.
+          def rotation = Spectral.princarg(@theta - @phi)
+          def magnitudes = @mag
+
+          # The +window+ samples of +x+ centered on +center+.
+          def read(x, center)
+            return Spectral.segment(x, center, @window) unless @wrap
+
+            x[(@base + center) % @length]
+          end
+
+          # The next frame, centered on input sample +center+ and +hop+
+          # output samples after the last: each channel's windowed output
+          # (to overlap-add; nil without +synth+, when only the phases
+          # are wanted).  +attack+ says the frame holds an onset: bins
+          # whose level jumps (the attack) take their input phases, so
+          # the attack is rebuilt as it was; steady bins (a bass note
+          # ringing through) keep theirs, so nothing cancels; and the
+          # frame is not randomized.  +extra+ (radians per bin) is added
+          # to the phase advance before locking (Spectral.looped's
+          # closing).  +index+ numbers the frame for the random phases.
+          def frame(index, center, attack: false, hop: @hop, extra: nil, synth: true)
+            spec = Numo::Pocketfft.rfft(read(@mix, center) * @w)
+            phi = spec.arg
+            mag = spec.abs
+
+            if @theta.nil?
+              @theta = phi.dup
             else
-              ha = center - prev_center
-              if ha == hs
+              ha = center - @center
+              if ha == hop
                 # Unstretched frames (around transients): the exact phase
                 # difference over the real hop, so the frames rebuild the
                 # input
-                winst_h = omega * hs + princarg(phi - phi_prev - omega * hs)
+                winst_h = @omega * hop + Spectral.princarg(phi - @phi - @omega * hop)
               else
-                ref = Numo::Pocketfft.rfft(segment(mix, center - hr, n) * w).arg
-                winst_h = (omega + princarg(phi - ref - omega * hr) / hr) * hs
+                ref = Numo::Pocketfft.rfft(read(@mix, center - @reference) * @w).arg
+                winst_h = (@omega + Spectral.princarg(phi - ref - @omega * @reference) / @reference) * hop
               end
-              theta = lock(theta + winst_h, phi, mag)
-              if attack_until && center < attack_until
-                # Frames holding an onset: bins whose level jumps (the
-                # attack) take their analysis phases, so the attack is
-                # rebuilt as it was; steady bins (a bass note ringing
-                # through) keep their phases, so nothing cancels
-                rising = mag.gt(mag_prev * RESET_RISE)
-                theta[rising] = phi[rising] if rising.count_true > 0
+              winst_h += extra if extra
+              @theta = Spectral.lock(@theta + winst_h, phi, mag)
+              if attack
+                rising = mag.gt(@mag * RESET_RISE)
+                @theta[rising] = phi[rising] if rising.count_true > 0
               end
             end
-            phi_prev = phi
-            mag_prev = mag
-            prev_center = center
+            @phi = phi
+            @mag = mag
+            @center = center
+            return nil unless synth
 
-            rot = theta - phi
+            rot = @theta - phi
             # (frames holding an attack stay unrandomized: crisp attacks
             # even in Paulstretch)
-            random = randomize > 0 && !(attack_until && center < attack_until)
+            random = @randomize > 0 && !attack
             rotc = nil
-            pos = m * hs
-            xs.each_with_index do |x, ch|
-              if random && (rotc.nil? || !link)
-                r = rot + (random_phases(seed, m, nb, link ? 0 : ch) - 0.5) * (TWO_PI * randomize)
+            @xs.each_with_index.map do |x, ch|
+              if random && (rotc.nil? || !@link)
+                r = rot + (Spectral.random_phases(@seed, index, @bins, @link ? 0 : ch) - 0.5) * (TWO_PI * @randomize)
                 rotc = Numo::DComplex.cast(Numo::NMath.cos(r)) + Numo::NMath.sin(r) * Complex::I
               end
               rotc ||= Numo::DComplex.cast(Numo::NMath.cos(rot)) + Numo::NMath.sin(rot) * Complex::I
-              cs = ch == 0 && xs.length == 1 ? spec : Numo::Pocketfft.rfft(segment(x, center, n) * w)
-              y = Numo::Pocketfft.irfft(cs * rotc) * w
-              buf[ch][pos...(pos + n)] += y
-            end
-            wsum[pos...(pos + n)] += w2
-            if randomize > 0
-              cm = random ? c : 1.0
-              csum[pos...(pos + n)] += w2 * cm
-              c2sum[pos...(pos + n)] += w2 * (cm * cm)
+              cs = ch == 0 && @xs.length == 1 ? spec : Numo::Pocketfft.rfft(read(x, center) * @w)
+              Numo::Pocketfft.irfft(cs * rotc) * @w
             end
           end
-
-          out =
-            if randomize == 0
-              finish(buf, wsum, n, out_len)
-            else
-              finish(buf, wsum, n, out_len, power: w2.mean.to_f, coherent: csum, coherent2: c2sum)
-            end
-          wrap ? seam(out, xs, hs) : out
         end
 
-        # +out+ (a stretch of the looping audio +xs+, channel by channel;
-        # changed in place) with its last +fade+ samples crossfaded into
-        # the input's own last samples (Lofi.crossfade_gains on the
-        # channels' mixes: equal gain where the two match, equal power
-        # where they don't).  The vocoder starts a stretch with the
-        # input's phases, and with an onset at the start (a loop that
-        # starts loud has one, Sample::Onsets) plays the start
-        # unstretched, so the output starts as the input does; its end
-        # arrives with whatever phases the stretch has reached, and a loop
-        # of it stepped at every wrap (a sustained pad at 0.77x: a step of
-        # 0.0056 where the input's own wrap steps 0.0003, a click every
-        # pass).  Ending on the input's end (a pre-roll into the loop
-        # start, as the slice stretch has) makes the wrap the input's own.
-        def seam(out, xs, fade)
-          f = [fade, out[0].length / 2, xs[0].length / 2].min
-          return out if f < 2
-
-          n = out[0].length
-          len = xs[0].length
-          tail = out.sum[(n - f)...n] / out.length
-          head = xs.sum[(len - f)...len] / xs.length
-          g_out, g_in = Lofi.crossfade_gains(tail, head)
-          out.each_with_index do |y, ch|
-            y[(n - f)...n] = y[(n - f)...n] * g_out + xs[ch][(len - f)...len] * g_in
+        # The overlap-added frames of a Vocoder and the sums of their
+        # squared windows (and, with random phases, of the windows times
+        # each frame's coherence and its square): #add in a line (a frame
+        # at +pos+ fills +pos+...+pos+ + window), #add_wrapped in a circle
+        # (a frame centered on +pos+, wrapping around the ends).
+        class Sums
+          def initialize(channels, length, random)
+            @length = length
+            @buf = Array.new(channels) { Numo::DFloat.zeros(length) }
+            @wsum = Numo::DFloat.zeros(length)
+            @csum = random ? Numo::DFloat.zeros(length) : nil
+            @c2sum = random ? Numo::DFloat.zeros(length) : nil
           end
-          out
+
+          def add(pos, frames, voc, attack)
+            n = voc.window
+            frames.each_with_index { |y, ch| @buf[ch][pos...(pos + n)] += y }
+            @wsum[pos...(pos + n)] += voc.squares
+            return unless @csum
+
+            cm = attack ? 1.0 : voc.coherence
+            @csum[pos...(pos + n)] += voc.squares * cm
+            @c2sum[pos...(pos + n)] += voc.squares * (cm * cm)
+          end
+
+          def add_wrapped(pos, frames, voc, attack)
+            n = voc.window
+            cm = attack ? 1.0 : voc.coherence
+            from = 0
+            at = (pos - n / 2) % @length
+            while from < n
+              k = MB::M.min(n - from, @length - at)
+              frames.each_with_index { |y, ch| @buf[ch][at...(at + k)] += y[from...(from + k)] }
+              w2 = voc.squares[from...(from + k)]
+              @wsum[at...(at + k)] += w2
+              if @csum
+                @csum[at...(at + k)] += w2 * cm
+                @c2sum[at...(at + k)] += w2 * (cm * cm)
+              end
+              from += k
+              at = 0
+            end
+          end
+
+          # The +out_len+ output samples from +offset+ on, normalized
+          # (Spectral.finish).
+          def finish(offset, out_len, voc)
+            if @csum
+              Spectral.finish(@buf, @wsum, 2 * offset, out_len, power: voc.squares.mean.to_f, coherent: @csum, coherent2: @c2sum)
+            else
+              Spectral.finish(@buf, @wsum, 2 * offset, out_len)
+            end
+          end
         end
 
         # Identity phase locking (Laroche & Dolson 1999): peak bins keep

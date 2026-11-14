@@ -173,25 +173,73 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       [(d[0] - d[-1]).abs, (d[1..] - d[0...-1]).abs.max]
     end
 
-    it 'joins the end of a looping sample\'s stretch to its start' do
+    # [the largest spectral flux across the wrap, the largest inside a
+    # pass] of three passes of +d+: the change between the magnitude
+    # spectra of 2048-sample frames 1024 samples apart, as a share of
+    # their sum
+    def flux(d)
+      d = Numo::DFloat.cast(d)
+      l = d.length
+      tiled = Numo::DFloat.zeros(3 * l)
+      3.times { |k| tiled[(k * l)...((k + 1) * l)] = d }
+      w = described_class.hann(2048)
+      mags = (0...((tiled.length - 2048) / 512)).map { |k| Numo::Pocketfft.rfft(tiled[(k * 512)...(k * 512 + 2048)] * w).abs }
+      at = []
+      inside = []
+      (2...mags.length).each do |k|
+        f = (mags[k] - mags[k - 2]).abs.sum / (mags[k].sum + mags[k - 2].sum)
+        ([l, 2 * l].any? { |e| (k - 2) * 512 < e && e < k * 512 + 2048 } ? at : inside) << f
+      end
+      [at.max, inside.max]
+    end
+
+    it 'stretches a looping sample as an endless stream: no step and no change of tone at the wrap' do
       step, inside = wrap_step(held)
       expect(step).to be < inside
+      at, within = flux(held)
+      expect(at).to be < within
       [0.77, 1.25].each do |r|
         old = plain.looped.stretch(r, mode: :spectral, wrap: false)
         new = plain.looped.stretch(r, mode: :spectral)
-        # (a stretch ends wherever its phases have got to: a step at
-        # every pass of the loop, a click on a sustained sound)
+        # (a stretch with its own ends stops wherever its phases have
+        # got to: a step at every pass of the loop, and a jump in tone)
         expect(wrap_step(old.data(0))[0]).to be > 3 * inside
+        at, within = flux(old.data(0))
+        expect(at).to be > 4 * within
         step, inside_now = wrap_step(new.data(0))
         expect(step).to be < inside
         expect(inside_now).to be < 1.2 * inside
-        # Only the last hop (a quarter window) changes, with no dip in
-        # level
-        expect(new.data(0)[0...-1024]).to eq(old.data(0)[0...-1024])
-        expect(new.data(0)[-1024..]).not_to eq(old.data(0)[-1024..])
-        expect(rms(new.data(0)[-1024..]) / rms(old.data(0)[-1024..])).to be_within(0.3).of(1)
+        at, within = flux(new.data(0))
+        expect(at).to be < within
+        expect(rms(new.data(0)) / rms(held)).to be_within(0.02).of(1)
+        expect(new.length).to eq((48000 * r).round)
         expect(new).to be_whole_loop
+        # Every partial comes round to its starting phase
+        report = {}
+        described_class.looped([held], r, report: report)
+        expect(report[:closure][0]).to be > 0.1
+        expect(report[:closure][1]).to be < 0.01
       end
+    end
+
+    it 'stretches several passes as one piece (passes:), and Paulstretch loops too' do
+      loop = plain.looped.with(bpm: 120, beats: 2)
+      three = loop.stretch(1.25, mode: :spectral, passes: 3)
+      expect([three.length, three.beats, three.bpm]).to eq([180000, 6, 96.0])
+      expect(three).to be_whole_loop
+      at, within = flux(three.data(0))
+      expect(at).to be < within
+      # (its passes differ in their phases: the middle one alone does not loop)
+      at, within = flux(three.data(0)[60000...120000])
+      expect(at).to be > 2 * within
+      expect(three.lineage[3]).to eq({ mode: :spectral, passes: 3 })
+      expect { plain.stretch(1.25, mode: :spectral, passes: 2) }.to raise_error(ArgumentError, /passes: is 1 or more, for a sample that loops/)
+      expect { loop.stretch(1.25, passes: 2) }.to raise_error(ArgumentError, /wrap: and passes: are for/)
+
+      wash = plain.looped.stretch(2, mode: :paul).data(0)
+      step, inside = wrap_step(wash)
+      expect(step).to be < inside
+      expect(rms(wash) / rms(held)).to be_within(0.1).of(1)
     end
 
     it 'follows the sample\'s loop unless told' do
@@ -201,25 +249,27 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       expect(plain.stretch(0.77, mode: :spectral).data(0)).to eq(plain.stretch(0.77, mode: :spectral, wrap: false).data(0))
       expect(plain.stretch(0.77, mode: :spectral, wrap: true).data(0)).to eq(plain.looped.stretch(0.77, mode: :spectral).data(0))
       expect(plain.stretch(0.77, mode: :spectral, wrap: true).lineage[3]).to eq({ mode: :spectral, wrap: true })
-      expect { plain.stretch(0.77, wrap: true) }.to raise_error(ArgumentError, /wrap: is for/)
-      expect { plain.stretch(0.77, mode: :slice, wrap: true) }.to raise_error(ArgumentError, /wrap: is for/)
+      expect { plain.stretch(0.77, wrap: true) }.to raise_error(ArgumentError, /wrap: and passes: are for/)
+      expect { plain.stretch(0.77, mode: :slice, wrap: true) }.to raise_error(ArgumentError, /wrap: and passes: are for/)
       expect { plain.stretch(0.77, mode: :spectral, wrap: 1) }.to raise_error(ArgumentError, /wrap: is true/)
     end
 
-    it 'leaves a hit at the loop start as sharp as it was' do
+    it 'keeps a hit at the loop start, and hears no attack where a held sound wraps' do
       x = held * 0.3
       x[0...2400] += Numo::NMath.sin(Numo::DFloat.new(2400).seq * 0.9) * Numo::NMath.exp(-Numo::DFloat.new(2400).seq / 300.0) * 0.6
       hit = MB::Sound::Sample[Numo::SFloat.cast(x)].looped
-      expect(hit.onsets.first).to eq(0)
-      old = hit.stretch(1.25, mode: :spectral, wrap: false).data(0)
-      new = hit.stretch(1.25, mode: :spectral).data(0)
-      expect(new[0...240]).to eq(old[0...240])
-      expect((Numo::DFloat.cast(new[0...240]) - x[0...240]).abs.max).to be < 1e-3
-      # (the end leads into the hit as the input's end did)
-      expect((Numo::DFloat.cast(new[-48..]) - x[-48..]).abs.max).to be < 0.02
+      expect(hit.onsets(wrap: true)).to eq([0])
+      # (a pad that starts loud has an onset at 0 only when nothing
+      # comes before it)
+      expect(plain.onsets).to eq([0])
+      expect(plain.onsets(wrap: true)).to eq([])
+      new = Numo::DFloat.cast(hit.stretch(1.25, mode: :spectral).data(0))
+      # The hit is the input's, and so is what leads into it
+      expect((new[0...240] - x[0...240]).abs.max).to be < 0.005
+      expect((new[-240..] - x[-240..]).abs.max).to be < 0.005
     end
 
-    it 'stretches for loop players with the seam joined' do
+    it 'stretches for loop players as a loop' do
       player = MB::Sound::GraphNode::LoopPlayer
       expect(player.loop_stretch({ mode: :spectral })).to eq({ mode: :spectral, wrap: true })
       expect(player.loop_stretch({ mode: :pv, transients: false })).to eq({ mode: :pv, transients: false, wrap: true })

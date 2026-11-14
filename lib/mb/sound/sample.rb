@@ -1048,14 +1048,17 @@ module MB
       # randomized sine measured 6.6 Hz wide at -6 dB instead of 10.3).
       #
       # A sample that loops over its whole region (a loop file, or
-      # #looped) gets a :spectral stretch that loops too: its last
-      # 1 / +overlap+ window (21 ms) crossfades into the input's own end,
-      # which leads into the start as it did before the stretch
-      # (Spectral.seam).  +wrap+ says otherwise: true for any sample that
-      # will be looped (`brk.stretch(1.5, mode: :spectral, wrap:
-      # true).looped`), false for the stretch's own end (what every
-      # sample got before stretch-fixes-1: a loop of it can click at the
-      # wrap).  :paul with every phase random has no seam handling.
+      # #looped) is stretched as a loop by :spectral and :paul: read as
+      # an endless stream (no frame sees an edge), its stretch flowing
+      # from its end into its start with every partial on its starting
+      # phase (Spectral.looped), and an onset at its start only where the
+      # level rises across the loop point.  +wrap+ says otherwise: true
+      # for any sample that will be looped (`brk.stretch(1.5, mode:
+      # :spectral, wrap: true).looped`), false for a stretch with its own
+      # start and end (a loop of it steps, in level and in tone, at every
+      # pass).  +passes+ (1) stretches that many passes of the loop as
+      # one piece, no two alike in their phases (the result is +passes+
+      # times as long and loops as a whole).
       #
       # Results longer than LONG_STRETCH (30 s) read with `mips: :octave`
       # unless this sample has its own mips (smaller playback tables for
@@ -1070,9 +1073,9 @@ module MB
       #     bowl.stretch(100, mode: :paul, window: 0.5.seconds)  # an endless wash
       #     voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false)   # narrower partials, a wide image (voices)
       def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann,
-                  slices: nil, fade: nil, fill: nil, wrap: nil)
+                  slices: nil, fade: nil, fill: nil, wrap: nil, passes: nil)
         raise ArgumentError, "wrap: is true, false, or nil (by the sample's loop; got #{wrap.inspect})" unless wrap.nil? || wrap == true || wrap == false
-        raise ArgumentError, 'wrap: is for mode: :spectral and :paul' unless wrap.nil? || (!SLICE_MODES.include?(mode.to_sym) && Spectral.mode_name(mode) != :cyclic)
+        raise ArgumentError, 'wrap: and passes: are for mode: :spectral and :paul' unless (wrap.nil? && passes.nil?) || (!SLICE_MODES.include?(mode.to_sym) && Spectral.mode_name(mode) != :cyclic)
         if SLICE_MODES.include?(mode.to_sym)
           unless fit == :auto && window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
             raise ArgumentError, 'mode: :slice takes slices:, fade:, fill:, and (for fill: :stretch and :cyclic) cycle: and crossfade:'
@@ -1082,7 +1085,7 @@ module MB
         raise ArgumentError, 'slices:, fade:, and fill: are for mode: :slice' unless slices.nil? && fade.nil? && fill.nil?
 
         mode = Spectral.mode_name(mode)
-        return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap) unless mode == :cyclic
+        return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap, passes) unless mode == :cyclic
         unless window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
           raise ArgumentError, 'window:, overlap:, shape:, transients:, seed:, randomize:, and link: are for mode: :spectral and :paul'
         end
@@ -1281,7 +1284,7 @@ module MB
       # vocoder whose +randomize+ goes from locked phases (0) to random
       # ones (1, Spectral.paul's magnitude-only frames when no onsets are
       # kept); the modes set the defaults.
-      def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap = nil)
+      def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap = nil, passes = nil)
         paul = mode == :paul
         transients = !paul if transients.nil?
         randomize = paul ? 1 : 0 if randomize.nil?
@@ -1298,15 +1301,20 @@ module MB
         kw[:seed] = seed unless seed == 0 || randomize == 0
         kw[:wrap] = wrap unless wrap.nil?
         wrap = whole_loop? if wrap.nil?
+        passes = passes.nil? ? 1 : Integer(passes)
+        raise ArgumentError, "passes: is 1 or more, for a sample that loops (or wrap: true; got #{passes})" unless passes == 1 || (passes > 1 && wrap)
+        kw[:passes] = passes unless passes == 1
 
         n = position(window.nil? ? (paul ? Spectral::PAUL_WINDOW : Spectral::WINDOW.samples) : window).round
         n += 1 if n.odd?
-        onsets = transients ? (@reversed ? reverse : self).onsets : nil
-        edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |chans|
-          if randomize >= 1 && onsets.nil?
+        onsets = transients ? (@reversed ? reverse : self).onsets(wrap: wrap) : nil
+        edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio * passes), bpm: @bpm && @bpm / ratio.to_f, beats: passes > 1 && @beats ? @beats * passes : nil) { |chans|
+          if wrap
+            Spectral.looped(chans, ratio.to_f, passes: passes, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape)
+          elsif randomize >= 1 && onsets.nil?
             Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
           else
-            Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, wrap: wrap)
+            Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape)
           end
         }
       end
@@ -1409,13 +1417,13 @@ module MB
       # block (called with each channel's SFloat, returning the new
       # channel), with the loop and settings kept (loop points scaled with
       # the length) and read as +read+ says (see #read_as).
-      def edit(method, args, kwargs = {}, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips }, bpm: @bpm, &block)
+      def edit(method, args, kwargs = {}, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips }, bpm: @bpm, beats: nil, &block)
         key = [@start, @stop, @root, @loop_points, @loop_mode, @reversed, @fade_in, @fade_out, @tune, @level, @bpm, @interpolation, @mips,
                @beats, @meter, @key, @markers, method, args, kwargs]
-        @audio.edit(key) { edit_uncached(method, args, kwargs, channels: channels, whole: whole, read: read, bpm: bpm, &block) }
+        @audio.edit(key) { edit_uncached(method, args, kwargs, channels: channels, whole: whole, read: read, bpm: bpm, beats: beats, &block) }
       end
 
-      def edit_uncached(method, args, kwargs, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips }, bpm: @bpm)
+      def edit_uncached(method, args, kwargs, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips }, bpm: @bpm, beats: nil)
         src = Array.new(channel_count) { |c| @audio.channels[c][@start...@stop].dup }
         out = channels || (whole ? yield(src).map { |d| Numo::SFloat.cast(d) } : src.map { |d| Numo::SFloat.cast(yield(d)) })
         len = out[0].length
@@ -1432,7 +1440,7 @@ module MB
           out, root: @root, loop: loop, loop_mode: loop ? @loop_mode : (@loop_points ? :one_shot : @loop_mode), reverse: @reversed,
           fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: bpm, name: @name, sample_rate: sample_rate,
           interpolation: read[:interpolation], mips: read[:mips], lineage: [self, method, args, kwargs].freeze,
-          beats: full_region? ? @beats : nil, meter: @meter, key: @key, markers: markers, provenance: @provenance, meta: @meta
+          beats: full_region? ? (beats || @beats) : nil, meter: @meter, key: @key, markers: markers, provenance: @provenance, meta: @meta
         )
       end
 

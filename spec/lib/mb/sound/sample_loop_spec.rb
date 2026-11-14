@@ -574,7 +574,7 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       expect(a.stretch_reason).to eq('spectral: tonal, spectral flatness 0.000')
       expect(a.to_s).to include('spectral stretch')
       MB::Sound.bpm(125)
-      expect(a.sample(800)).to eq(arp.stretch(0.8, mode: :spectral).data(0)[0...800])
+      expect(a.sample(800)).to eq(arp.stretch(0.8, mode: :spectral, wrap: true).data(0)[0...800])
       b = arp.follow(stretch: :slice)
       expect(b.stretch_reason).to eq('stretch: given')
       expect(b.sample(800)).to eq(arp.stretch(0.8, mode: :slice).data(0)[0...800])
