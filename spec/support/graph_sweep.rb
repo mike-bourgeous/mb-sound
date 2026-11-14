@@ -385,7 +385,7 @@ module GraphSweep
         # 15 ms attack plus two 25 ms cycles, which are filled with a
         # shorter attack and cycles; stretch-fixes-1)
         smp.follow * 0.3 + smp.follow(:resample, align: :launch) * 0.3 + st.follow(stretch: { mode: :slice, slices: 4, fill: :stretch, cycle: 0.001 })[1] * 0.3 +
-          smp.follow(stretch: { mode: :slice, slices: 1, fill: :stretch, cycle: 0.004 }) * 0.2 + smp.follow(stretch: { mode: :slice, slices: 4, fill: :stretch }) * 0.2 +
+          smp.follow(stretch: { mode: :slice, slices: 1, fill: :stretch, cycle: 0.004 }) * 0.2 + smp.follow(stretch: { mode: :slice, slices: 4, fill: :stretch }) * 0.2 + smp.follow(stretch: { mode: :slice, slices: 2, fill: :even }) * 0.1 + smp.follow(stretch: { mode: :slice, slices: 2, fill: :decay }) * 0.1 +
           # (the spectral stretch of the loop as a loop, as players ask
           # for it, and with its own ends)
           smp.follow(stretch: { mode: :spectral, window: 256 }) * 0.2 + smp.follow(stretch: { mode: :spectral, window: 256, wrap: false }) * 0.2 +

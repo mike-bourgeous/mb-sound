@@ -11,10 +11,16 @@ module MB
       # +fill+ :gap (default) the slice plays its own audio and fades out
       # over +fade+ before its end (where the next hit was), then silence
       # until its next hit (the classic REX sound: tight, a little gated);
-      # with :stretch the slice keeps its hit (its first +attack+ samples
-      # exactly, and its length for as long as it is loud) and what it has
-      # died down to is drawn out to the next hit (#fill_slice: a cyclic
-      # stretch that follows the decay's level), so it rings on; a slice
+      # with :stretch the slice keeps its first +attack+ samples and the
+      # rest is drawn out to the next hit by a cyclic stretch, one of two
+      # ways, picked slice by slice (#fill_kind): :even stretches
+      # everything after the attack evenly (#even_fill_slice: the fitted
+      # cyclic stretch), so what is inside the slice (a second note, a
+      # tone that swells) lands on its stretched time; :decay
+      # (#fill_slice), for a slice that is one hit dying down, keeps the
+      # hit's body at its length and draws out what it has died down to,
+      # its level following the decay (an even stretch plays part of a
+      # kick's body twice).  Either can be asked for by name.  A slice
       # shorter than the attack and two cycles is filled with a shorter
       # attack and shorter cycles (down to FILL_SHORTEST).  Speeding up
       # (+ratio+ < 1)
@@ -39,10 +45,12 @@ module MB
         # its decay is stretched (seconds).
         ATTACK = 0.015
 
-        # +fill+ values: :gap (silence after each slice) and :stretch
-        # (each decay drawn out: an anchored cyclic stretch whose level
-        # follows the decay's stretched envelope).
-        FILLS = [:gap, :stretch].freeze
+        # +fill+ values: :gap (silence after each slice), :stretch (each
+        # slice drawn out, :even or :decay as #fill_kind picks), :even
+        # (the fitted cyclic stretch of everything after the attack), and
+        # :decay (the hit whole, what it has died down to drawn out along
+        # the decay's envelope).
+        FILLS = [:gap, :stretch, :even, :decay].freeze
 
         # The shortest slice (seconds) the :stretch fill fills: shorter
         # ones play with a gap.  A slice too short for the usual attack
@@ -67,6 +75,16 @@ module MB
         # plus FILL_EVEN of the full share everywhere, so a sound that
         # never dies down (a held note) is drawn out evenly.
         FILL_HOLD = -6.db
+
+        # fill: :stretch gives a slice the :decay fill when it is one hit
+        # that dies down: its level falls by FILL_DIES after its loudest
+        # point, and nothing comes up again by FILL_SECOND (to within
+        # FILL_DECAY of the loudest).  On a generated drum loop that is
+        # its eight kick slices, where the even fill replayed the kick's
+        # body, and none of the others; on a tonal drum loop with a
+        # shaker 8 slices of 49.
+        FILL_DIES = -15.db
+        FILL_SECOND = 6.db
         FILL_DECAY = -20.db
         FILL_EVEN = 0.02
 
@@ -100,13 +118,20 @@ module MB
             next if slot <= 0
 
             segs =
-              if fill == :stretch && slot > own && own >= shortest
-                if own - attack >= 2 * cycle
-                  fill_slice(x, guide, a, b, slot, attack, cycle, crossfade, sample_rate)
-                else
+              if fill != :gap && slot > own && own >= shortest
+                att, cyc, xf = attack, cycle, crossfade
+                if own - attack < 2 * cycle
+                  # (a short slice: a quarter of it as its attack, cycles
+                  # of half the rest)
                   att = MB::M.min(attack, own / 4)
                   cyc = MB::M.min(cycle, (own - att) / 2)
-                  fill_slice(x, guide, a, b, slot, att, cyc, MB::M.min(crossfade, cyc / 4), sample_rate)
+                  xf = MB::M.min(crossfade, cyc / 4)
+                end
+                kind = fill == :stretch ? fill_kind(guide, a, b, sample_rate) : fill
+                if kind == :decay
+                  fill_slice(x, guide, a, b, slot, att, cyc, xf, sample_rate)
+                else
+                  even_fill_slice(x, guide, a, b, slot, att, cyc, xf, sample_rate)
                 end
               else
                 m = MB::M.min(slot, own)
@@ -232,6 +257,52 @@ module MB
             e = (c[hi] - c[lo]) / count
           end
           Numo::NMath.sqrt(e.clip(0, nil))
+        end
+
+        # A slice from +a+ to +b+ filled out to +slot+ samples evenly
+        # (fill: :even): the first +attack+ samples as they are, the rest
+        # through the fitted cyclic stretch (Lofi.stretch: cycles a whole
+        # number of the sound's periods, each starting where the sound
+        # matches what would have followed), so everything in the slice
+        # lands near its stretched time.
+        def even_fill_slice(x, guide, a, b, slot, attack, cycle, crossfade, sample_rate)
+          rest = b - (a + attack)
+          r = (slot - attack).to_f / rest
+          g = guide[(a + attack)...b]
+          x.map { |c|
+            tail = Lofi.stretch(c[(a + attack)...b], r, cycle, crossfade, fit: :auto, guide: g, sample_rate: sample_rate)
+            seg = Numo::DFloat.zeros(slot)
+            seg[0...attack] = c[a...(a + attack)]
+            k = MB::M.min(tail.length, slot - attack)
+            seg[attack...(attack + k)] = Numo::DFloat.cast(tail[0...k])
+            seg
+          }
+        end
+
+        # Which fill a slice from +a+ to +b+ of +guide+ gets under fill:
+        # :stretch.  :decay if the slice is one hit that dies down: after
+        # its loudest point its level (#envelope) falls by FILL_DIES or
+        # more, and no second sound comes up after that (a rise of
+        # FILL_SECOND from the lowest level so far, to within FILL_DECAY
+        # of the loudest).  Else :even: a slice that stays loud, or holds
+        # more than one sound, is drawn out evenly, so what is inside it
+        # lands on its stretched time.
+        def fill_kind(guide, a, b, sample_rate)
+          lead = MB::M.min(a, (4 * FILL_SMOOTH * sample_rate).round)
+          env = envelope(guide[(a - lead)...b], (FILL_SMOOTH * sample_rate).round)[lead..]
+          top = env.max
+          return :even if top <= 0
+
+          level = (env / top).to_a
+          dies = FILL_DIES.to_f
+          second = FILL_SECOND.to_f
+          floor = FILL_DECAY.to_f
+          lowest = 1.0
+          level[level.index(level.max)..].each do |v|
+            lowest = v if v < lowest
+            return :even if v >= floor && v >= lowest * second
+          end
+          lowest <= dies ? :decay : :even
         end
 
         # A raised-cosine fade of +n+ samples (in or out).

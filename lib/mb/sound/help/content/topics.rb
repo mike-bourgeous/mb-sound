@@ -708,9 +708,11 @@ module MB
         :transients` cuts only at attacks, the markers an onset confirms,
         so no hit is cut in two) and starts
         each slice at its stretched time, attacks copied exactly:
-        slowing down leaves a gap after each hit (`fill: :stretch` keeps
-        each hit whole and draws what it has died down to out to the next
-        hit instead), speeding up truncates with a 4 ms fade.
+        slowing down leaves a gap after each hit (`fill: :stretch` draws
+        each slice out to the next hit instead: evenly, so what is inside
+        it stays in time, or, for a hit that dies down, the hit whole and
+        its tail drawn out; `fill: :even` and `:decay` say which),
+        speeding up truncates with a 4 ms fade.
       TEXT
       commands :loops
       dsl :follow

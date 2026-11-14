@@ -345,6 +345,48 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       tiny = (1...126).map { |i| (i * 200).samples }
       expect(stab.stretch(2, mode: :slice, slices: tiny, fill: :stretch).data(0)).to eq(stab.stretch(2, mode: :slice, slices: tiny).data(0))
       expect { stab.stretch(2, mode: :slice, fill: :cyclic) }.to raise_error(ArgumentError, /fill: is one of/)
+      # (both named fills fill them too)
+      %i[even decay].each do |fill|
+        filled = Numo::DFloat.cast(stab.stretch(3.82, mode: :slice, slices: cuts, fill: fill).data(0))
+        expect(rms_range(filled[4000...(25200 * 3.82).round - 4000])[1]).to be > 0.002
+      end
+    end
+
+    it 'fill: :stretch picks per slice: a hit that dies down keeps its body, anything else is drawn out evenly' do
+      pick = MB::Sound::Sample::SliceStretch.method(:fill_kind)
+      kick = kick_loop(hits: 1)
+      t = Numo::DFloat.new(12000).seq / 48000.0
+      held = Numo::NMath.sin(t * (2 * Math::PI * 220)) * Numo::NMath.exp(-t / 0.5) * 0.5
+      second = kick.dup
+      second[6000...12000] += Numo::NMath.sin(t[0...6000] * (2 * Math::PI * 330)) * Numo::NMath.exp(-t[0...6000] / 0.05) * 0.3
+      expect(pick.call(kick, 0, 12000, 48000)).to eq(:decay)
+      expect(pick.call(held, 0, 12000, 48000)).to eq(:even)
+      expect(pick.call(second, 0, 12000, 48000)).to eq(:even)
+      expect(pick.call(Numo::DFloat.zeros(12000), 0, 12000, 48000)).to eq(:even)
+
+      # Two slices of each kind in one loop: the picker's result is the
+      # named fill's in each slot
+      x = Numo::DFloat.zeros(48000)
+      [kick, second, held, kick].each_with_index { |v, i| x[(i * 12000)...((i + 1) * 12000)] = v }
+      smp = MB::Sound::Sample[Numo::SFloat.cast(x), bpm: 120]
+      cuts = [12000, 24000, 36000].map(&:samples)
+      fills = %i[stretch even decay gap].to_h { |f| [f, Numo::DFloat.cast(smp.stretch(1.5, mode: :slice, slices: cuts, fill: f).data(0))] }
+      { 0 => :decay, 1 => :even, 2 => :even, 3 => :decay }.each do |i, kind|
+        slot = (i * 18000 + 1000)...(i * 18000 + 17000)
+        expect(fills[:stretch][slot]).to eq(fills[kind][slot])
+        expect(fills[:stretch][slot]).not_to eq(fills[kind == :even ? :decay : :even][slot])
+      end
+
+      # The second sound of slice 1 (6000 samples in) lands near its
+      # stretched time under the even fill (9000 samples in: within
+      # 25 ms, early, as the fitted cyclic stretch runs), 62 ms early
+      # with a gap, and where the level sends it under :decay
+      ref = x[18000...18480]
+      place = ->(y) { (18000...18000 + 18000 - 480).max_by { |q| (y[q...(q + 480)] * ref).sum / Math.sqrt((y[q...(q + 480)]**2).sum + 1e-12) } - 18000 }
+      expect(place.call(fills[:gap])).to eq(6000)
+      expect(place.call(fills[:even])).to be_between(9000 - 1200, 9000 + 240)
+      expect(place.call(fills[:stretch])).to eq(place.call(fills[:even]))
+      expect(fills[:stretch].length).to eq(72000)
     end
 
     it 'plans a fill that starts with the input and ends where it ends (Lofi.anchored_plan)' do
@@ -360,7 +402,7 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
 
     it 'fades instead of clicking' do
       [0.7, 1.4].each do |r|
-        [:gap, :stretch].each do |fill|
+        [:gap, :stretch, :even, :decay].each do |fill|
           y = Numo::DFloat.cast(rec.stretch(r, mode: :slice, fill: fill).data(0))
           jumps = (y[1..] - y[0...-1]).abs
           expect(jumps.max).to be < (Numo::DFloat.cast(rec.data(0))[1..] - Numo::DFloat.cast(rec.data(0))[0...-1]).abs.max * 1.01
