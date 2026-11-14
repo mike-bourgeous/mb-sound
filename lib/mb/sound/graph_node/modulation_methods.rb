@@ -44,9 +44,16 @@ module MB
         #            knob, an LFO of your own), on both sides.
         # +:interpolation+ - The delay's reads (:sinc, :cubic, :linear;
         #                    see #delay).
+        # +:noise+ - Hiss inside the feedback loop, white noise times this
+        #            level times the input's envelope (instant rise, -20 dB
+        #            per 0.1 s), so it rides the comb while the input plays,
+        #            like a bucket-brigade flanger's: `flanger(:jet, noise:
+        #            0.05)`.  Needs feedback.  A number or a node; :jet has
+        #            0.1 (`noise: nil` for none).
+        # +:seed+ - For the noise (default: drawn from MB::Sound.seed).
         #
         # Examples (bin/sound.rb):
-        #     bg :pad, 110.hz.saw.at(-12.db).flanger                   # :sweep
+        #     bg :pad, 110.hz.saw.at(-12.db).flanger                   # :sweep (0.5-2 ms)
         #     bg :drums, drums.flanger(:jet)
         #     bg :pad, 110.hz.saw.at(-12.db).flanger(2.bars, feedback: -0.7, spread: 0.25)
         #     bg :pad, 110.hz.saw.at(-12.db).flanger(:steel, range: 0.3.ms..3.ms)
@@ -83,6 +90,8 @@ module MB
         #     bg :organ, organ.rotary                         # slow
         #     bg :organ, organ.rotary(:whirl)                 # fast
         #     bg :organ, organ.rotary(speed: knob(:spin))     # turn :spin, 1 to speed up, 0 to slow down
+        #     # slow 4 bars, fast 4 bars, and so on (an 8-bar cycle: `16.bars.lfo` would be 8 and 8)
+        #     bg :organ, organ.rotary(speed: 8.bars.lfo.square.with_phase(0.5).at(0..1))
         def rotary(preset = nil, **options)
           Rotary.build(self, preset, **options)
         end

@@ -274,8 +274,13 @@ module MB
         latency, wet -10 dB; `reverb_match('hall.wav')` fits the FDN to one).
 
         Modulation: the Juno chorus and phasers with presets (`L.fx.phaser`:
-        :vintage, :swirl, :ripple, :deep12, :jet; tempo-synced rates like
-        `phaser(1.bar)`, stereo `spread:`).  Antialiased shapers, among them
+        :vintage, :swirl, :ripple, :deep12, :jet, :barberpole; tempo-synced
+        rates like `phaser(1.bar)`, stereo `spread:`, `above: 150` to keep
+        a kick dry, `amount:` from light to extreme, `direction: :up` for
+        notches that climb forever (a number or knob: its sign the way, its
+        size the speed), `lean: -1` for feedback only on the way down,
+        `oscillate: 0, feedback: -1.05` for a self-oscillating whistle).
+        Antialiased shapers, among them
         `shape_db`: transfer curves drawn in dB, per sample, with presets
         (`L.fx.shape_db`: :soft_knee, :fuzz, :fold_back, :gate, :asymmetric),
         and `inertia`, an acceleration-limited follower whose limit cycles
@@ -285,7 +290,8 @@ module MB
         with a copy a few milliseconds late: the two cancel in a comb of
         notches, and an LFO sweeping the delay moves the whole comb.
         Feedback sharpens it (negative feedback sounds hollow and
-        metallic); rates take Hz or bars, `spread:` makes it stereo.  A
+        metallic); rates take Hz or bars, `spread:` makes it stereo, and
+        `noise: 0.05` breathes hiss through the loop while the sound plays.  A
         rotary speaker (`rotary`, `L.fx.rotary`) spins a treble horn and a
         bass drum past two microphones: the pitch wavers as each comes
         closer and recedes, the level as it turns toward and away, and a
@@ -294,6 +300,11 @@ module MB
         `tremolo` swings the level along an LFO shape or a drawn cycle
         (`shape: [[0, 1], [0.25, -1], [1, -1]]`), tempo-synced or in Hz,
         with its depth in dB; `stereo_phase: 0.5` makes it an auto-pan.
+        `law: 0.3` blends its linear (0) and dB (1) laws, `law: :sqrt` (any
+        curve) shapes the gain, `shape: :random` steps to random levels
+        (gliding over 3 ms; `smooth: 0` for hard steps), `shape:
+        :smooth_random` glides between them, and `seam: true` softens a
+        drawn shape's wrap over about 3 ms (or `seam: 5.ms`).
         `chebyshev` draws a waveshaper by the harmonics a full-scale sine
         should get (`chebyshev(h2: 0.5, h3: 0.2)`, `L.fx.chebyshev`).
       TEXT

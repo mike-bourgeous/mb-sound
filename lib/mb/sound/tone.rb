@@ -1276,6 +1276,8 @@ module MB
       #
       # Example: 123.hz.with_phase(0.25)
       def with_phase(phase)
+        # (a graph document's param becomes its number; effects-3)
+        phase = GraphNode.build_setting(phase)
         phase = Phase.cycles(phase)
         raise ArgumentError, "A starting phase must be a number of cycles or a Phase (got #{phase.inspect})" unless phase.is_a?(Numeric)
 

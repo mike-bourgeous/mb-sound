@@ -323,7 +323,12 @@ module GraphSweep
       ['tremolo (Tremolo: LFO shapes, drawn shapes with a seam, depth nodes, stereo phase, tempo rates, mix)', ->(c) {
         c.sig.tremolo(9, depth: 12.db) + c.sig.tremolo(c.mod(2, 30), shape: :square, depth: 0, law: :linear, smooth: 0.002) +
           c.sig.trem(1.n32, shape: [[0, 1], [0.3, -1], [0.3, 0.5], [1, -0.2]], seam: true, depth: c.mod(0.05, 0.9)) +
-          c.stereo_sig.tremolo(11, stereo_phase: 0.5, shape: :triangle, mix: 0.6).mixdown + c.sig.tremolo(7, shape: :random, seed: 3, stereo_phase: 0.25).mixdown
+          c.stereo_sig.tremolo(11, stereo_phase: 0.5, shape: :triangle, mix: 0.6).mixdown + c.sig.tremolo(7, shape: :random, seed: 3, stereo_phase: 0.25).mixdown +
+          # (effects-3: law blends and curves, smooth random, the :auto seam)
+          c.sig.tremolo(6, law: 0.4, depth: c.mod(0.05, 0.9)) + c.sig.tremolo(1.n32, law: :bounce, depth: 0) +
+          c.sig.tremolo(9, shape: :smooth_random, seed: 4, law: :sqrt) + c.sig.trem(1.n16, shape: [[0, -1], [1, 1]], seam: :auto) +
+          # (effects-4: a seam as a Length, random glides of 3 ms by default and hard steps with smooth: 0)
+          c.sig.trem(5, shape: [[0, 1], [0.5, -1], [1, 0]], seam: 4.ms) + c.sig.tremolo(c.mod(3, 20), shape: :random, seed: 6, smooth: 0)
       }],
       ['decimate (Decimator)', ->(c) { c.sig.decimate(c.mod(500, 9000)) + c.sig.lp4(900, resonance: 0.6).decimate(3000.5, jitter: 0.3) + c.sig.srr(c.notes.freq * 3.5) + c.sig.decimate(2500, mix: 0.4) + c.sig.decimate(c.mod(800, 6000), mix: c.mod(0.1, 0.9)) + c.sig.decimate(c.mod(700, 7000), interpolation: :linear, jitter: 0.2) }],
 
@@ -476,17 +481,28 @@ module GraphSweep
         c.sig.flanger(:jet, rate: 9, feedback: c.mod(-0.9, 0.9)).+(c.stereo_sig.flanger(:orbit, mix: c.mod(0, 1), depth: c.mod(0, 1)).mixdown) +
           c.sig.flanger(:tape_flange, delay: c.mod(0.0005, 0.002), range: 0.5) * 0.5 + c.sig.flanger(:sheen, range: 0.5.ms..1.5.ms) +
           c.sig.flanger(2.n16, law: :linear, feedback: 0, interpolation: :cubic, sweep: c.mod(-1, 1, 11)) +
-          c.sig.flanger(:steel, delay: 0.0002, range: c.mod(0, 3))
+          c.sig.flanger(:steel, delay: 0.0002, range: c.mod(0, 3)) +
+          c.sig.flanger(:jet, noise: c.mod(0, 0.1)) + c.stereo_sig.flanger(:orbit, noise: 0.05).mixdown # (hiss in the loop: effects-3)
       }],
       ['rotary presets and a live speed (Rotary: crossover, rotors gliding, two microphones)', ->(c) {
         c.sig.rotary(:whirl).mixdown + c.stereo_sig.rotary(speed: c.mod(0, 1, 3), horn: c.mod(0.5, 1), mix: c.mod(0.2, 1)).mixdown +
-          c.sig.rotary(:chorale, speed: :stop, crossover: 1200).mixdown
+          c.sig.rotary(:chorale, speed: :stop, crossover: 1200).mixdown +
+          c.sig.rotary(speed: 1.n8.lfo.square.with_phase(0.5).at(0..1)).mixdown # (a tempo-synced speed: effects-3)
       }],
       ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60.db) }],
       ['phaser (Phaser) mono, stereo, moving settings', ->(c) {
         st = c.stereo_sig.phaser(:swirl, feedback: c.mod(-0.9, 0.9), mix: c.mod(0.2, 0.8, 3))
         c.sig.phaser + c.sig.phaser(13, stages: 12, center: c.mod(200, 3000, 2), depth: c.mod(0, 1, 5), range: c.mod(1, 6, 0.7)) + c.sig.phaser(:jet, range: 200..6000) +
-          c.sig.phaser(sweep: c.mod(-1, 1, 11), feedback: -0.6, stages: 2) + st.outputs[0] + st.outputs[1]
+          c.sig.phaser(sweep: c.mod(-1, 1, 11), feedback: -0.6, stages: 2) + st.outputs[0] + st.outputs[1] +
+          # (effects-3: a dry low band, the amount macro on a node, barber poles, 32 stages)
+          c.sig.phaser(:ripple, above: 180) + c.stereo_sig.phaser(:swirl, amount: c.mod(0, 1, 2), above: 300).mixdown +
+          c.sig.phaser(:barberpole, rate: 7) + c.stereo_sig.phaser(:jet, direction: :down, rate: 5, spread: 0.3).mixdown +
+          c.sig.phaser(9, stages: 32, feedback: c.mod(-0.9, 0.9)) +
+          # (effects-4: a direction knob through zero, a scaled numeric direction on a tempo rate, :jet without its split)
+          c.sig.phaser(:barberpole, rate: 6, direction: c.mod(-2, 2, 3)) + c.sig.phaser(:barberpole, rate: 1.n8, direction: -1.5) +
+          c.sig.phaser(:jet, above: nil, rate: 4) + c.sig.phaser(:jet, rate: 3, lean: -1) + c.stereo_sig.phaser(:swirl, rate: 2, lean: c.mod(-1, 1, 2)).mixdown +
+          # (effects-4: the self-oscillating loop, a feedback node swept past 1, both signs)
+          c.sig.phaser(4, stages: 8, feedback: c.mod(-1.25, 1.25, 3), oscillate: 1) + c.stereo_sig.phaser(:swirl, feedback: -1.1, oscillate: true).mixdown
       }],
 
       # Dynamics

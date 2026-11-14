@@ -69,6 +69,78 @@ RSpec.describe(MB::Sound::GraphNode::Tremolo, :aggregate_failures) do
       expect(a.max - a.min).to be > 0.05
     end
 
+    it 'glides to each random level over 3 ms by default, smooth: overriding it and smooth: 0 the hard steps (effects-4)' do
+      mk = ->(**o) { take(1.constant.tremolo(4, depth: 0, law: :linear, shape: :random, seed: 5, **o), 48000)[0] }
+      soft = mk.()
+      hard = mk.(smooth: 0)
+      expect(mk.(smooth: 3.ms)).to eq(soft)
+      expect(mk.(smooth: methods::RANDOM_SMOOTH)).to eq(soft)
+      # hard steps at the cycle edges (12000 samples at 4 Hz)
+      steps = (hard[1..] - hard[0...-1]).abs
+      expect(steps.max).to be > 0.05
+      expect(steps.to_a.each_index.select { |i| steps[i] > 0 }).to eq([11999, 23999, 35999].select { |i| steps[i] > 0 })
+      # the same levels, reached 3 ms (144 samples) after each edge
+      [12000, 24000, 36000].each { |e| expect(soft[e + 144 + 10]).to be_within(1e-5).of(hard[e + 144 + 10]) }
+      expect((soft[1..] - soft[0...-1]).abs.max).to be < steps.max / 50
+      slow = mk.(smooth: 10.ms)
+      expect((slow[1..] - slow[0...-1]).abs.max).to be < (soft[1..] - soft[0...-1]).abs.max / 2
+    end
+
+    it 'glides between seeded random levels with shape: :smooth_random (effects-3)' do
+      held = take(1.constant.tremolo(1.n16, depth: 18.db, shape: :random, seed: 3, smooth: 0), 36000)[0]
+      a = take(1.constant.tremolo(1.n16, depth: 18.db, shape: :smooth_random, seed: 3), 36000)[0]
+      b = take(1.constant.tremolo(1.n16, depth: 18.db, shape: :wander, seed: 3), 36000, 367)[0]
+      expect(b).to eq(a)
+      # the held levels' steps (up to 0.64 a sample) become glides
+      expect((held[1..] - held[0...-1]).abs.max).to be > 0.3
+      expect((a[1..] - a[0...-1]).abs.max).to be < 0.001
+      # each held level is reached by the end of its cycle (a 16th: 6000 samples at 120 BPM)
+      (1..5).each { |k| expect(a[6000 * k - 1]).to be_within(1e-4).of(held[6000 * k - 1]) }
+      expect(a.min).to be >= held.min - 1e-6
+      expect(a.max).to be <= held.max + 1e-6
+      expect { 1.constant.tremolo(2.hz.lfo.at(1..3), shape: :smooth_random) }.to raise_error(ArgumentError, /fixed rate/)
+    end
+
+    it 'blends the :linear and :db laws with a number from 0 (:linear) to 1 (:db) (effects-3)' do
+      m = Numo::SFloat.linspace(-1, 1, 9)
+      gain = ->(law, depth = 12.db) { MB::Sound::GraphNode::Tremolo.new(1.constant, 0.constant, depth: depth, law: law).gain(m, nil, 9).dup }
+      [0, 18.db].each do |depth|
+        lin = gain.(:linear, depth)
+        dbl = gain.(:db, depth)
+        expect(gain.(0, depth).to_a).to eq(lin.to_a)
+        expect(gain.(1, depth).to_a.zip(dbl.to_a).map { |x, y| (x - y).abs }.max).to be < 1e-6
+        half = gain.(0.25, depth)
+        9.times { |i| expect(half[i]).to be_within(1e-6).of(lin[i] * 0.75 + dbl[i] * 0.25) }
+        expect(half[8]).to be_within(1e-7).of(1)
+      end
+      # a node depth too
+      t = MB::Sound::GraphNode::Tremolo.new(1.constant, 0.constant, depth: 0.5.constant, law: 0.5)
+      g = t.gain(m, Numo::SFloat.new(9).fill(0.25), 9)
+      expect(g[0]).to be_within(1e-6).of(0.25)
+      expect(g[4]).to be_within(1e-6).of((0.625 + 0.5) / 2)
+      expect { 1.constant.tremolo(1, law: 1.5) }.to raise_error(ArgumentError, /0 to 1/)
+    end
+
+    it 'shapes the gain with a Curve law: trough + (1 - trough) curve(LFO from bottom to top) (effects-3)' do
+      m = Numo::SFloat.linspace(-1, 1, 9)
+      gain = ->(law, depth = 0) { MB::Sound::GraphNode::Tremolo.new(1.constant, 0.constant, depth: depth, law: law).gain(m, nil, 9).dup }
+      lin = gain.(:linear, 12.db)
+      gain.(MB::Sound::Curve[:linear], 12.db).each_with_index { |v, i| expect(v).to be_within(1e-7).of(lin[i]) }
+      sq = gain.(:sqrt)
+      9.times { |i| expect(sq[i]).to be_within(1e-6).of(Math.sqrt(i / 8.0)) }
+      expect(gain.(MB::Sound::Curve.power(0.5)).to_a).to eq(sq.to_a)
+      t = 10**(-12 / 20.0)
+      bounce = gain.(:bounce, 12.db)
+      c = MB::Sound::Curve[:bounce]
+      9.times { |i| expect(bounce[i]).to be_within(1e-6).of(t + (1 - t) * c.call(i / 8.0)) }
+      back = gain.(MB::Sound::Curve[:back, overshoot: 1])
+      expect(back.min).to eq(0) # (stops at 0 below)
+      b = take(1.constant.tremolo(1, depth: 0, law: :sqrt, shape: :triangle), 48000)[0]
+      expect([b[0], b[12000], b[36000]].map { |v| v.round(6) }).to eq([Math.sqrt(0.5).round(6), 1.0, 0.0])
+      expect(1.constant.tremolo(1, law: :sqrt).to_s).to include('law power(0.5)')
+      expect { 1.constant.tremolo(1, law: :sqr) }.to raise_error(ArgumentError, /law: .*Unknown curve :sqr/)
+    end
+
     it 'follows the tempo for musical lengths' do
       MB::Sound.bpm(120)
       b = take(1.constant.tremolo(1.n4, depth: 0, law: :linear, shape: :triangle), 24000)[0]
@@ -149,6 +221,15 @@ RSpec.describe(MB::Sound::GraphNode::Tremolo, :aggregate_failures) do
       ref = take(t, 4000)
       MB::Sound.rewind
       expect(take(RecipeHelpers.eval_recipe(text), 4000)).to eq(ref)
+
+      # effects-3's settings
+      t = 110.hz.saw.trem(1.n8, law: MB::Sound::Curve[:back, overshoot: 0.3], shape: :smooth_random, seed: 2) +
+        110.hz.saw.trem(1.n16, law: 0.3, shape: [[0, -1], [1, 1]], seam: :auto)
+      text = t.to_ruby
+      expect(text).to include('law: Curve[:back, overshoot: 0.3], shape: :smooth_random, seed: 2)').and include('law: 0.3, shape: [[0, -1], [1, 1]], seam: :auto)')
+      ref = take(t, 4000)
+      MB::Sound.rewind
+      expect(take(RecipeHelpers.eval_recipe(text), 4000)).to eq(ref)
     end
 
     it 'raises for seam: on a named shape and for bad rates' do
@@ -167,7 +248,7 @@ RSpec.describe(MB::Sound::GraphNode::Tremolo, :aggregate_failures) do
     end
 
     it 'blends the wrap over seam: of a cycle with a straight line (as Sony "blend graph edges" plays a sawtooth)' do
-      b = take(1.constant.tremolo(1, depth: 24.db, shape: [[0, -1], [1, 1]], seam: true), 48000)[0]
+      b = take(1.constant.tremolo(1, depth: 24.db, shape: [[0, -1], [1, 1]], seam: 0.1), 48000)[0]
       # measured on Sony's render: -1.2 dB at 0.95, -22.8 dB at 0.05, a dB line between
       expect(db(b[45600])).to be_within(1e-3).of(-1.2)
       expect(db(b[2400])).to be_within(1e-3).of(-22.8)
@@ -186,36 +267,36 @@ RSpec.describe(MB::Sound::GraphNode::Tremolo, :aggregate_failures) do
       it 'takes out only the jump between the ends, half on each side, keeping the shape\'s lines' do
         shape = [[0, -1], [0.5, 1], [1, 0]] # ends 0 and -1: a jump of 1 at the wrap
         { 0.97 => (1 - 0.47 / 0.5) - 0.2, 0.99 => (1 - 0.49 / 0.5) - 0.4, 0.02 => (-1 + 0.04 * 2) + 0.3, 0.04 => (-1 + 0.08 * 2) + 0.1 }.each do |x, want|
-          expect(table_at(shape, x, seam: true, mode: :jump)).to be_within(1e-6).of(want), x.to_s
+          expect(table_at(shape, x, seam: 0.1, mode: :jump)).to be_within(1e-6).of(want), x.to_s
         end
-        expect(table_at(shape, 0, seam: true, mode: :jump)).to be_within(1e-6).of(-0.5) # (both sides meet at the ends' average)
-        expect(table_at(shape, 0.5, seam: true, mode: :jump)).to eq(table_at(shape, 0.5))
+        expect(table_at(shape, 0, seam: 0.1, mode: :jump)).to be_within(1e-6).of(-0.5) # (both sides meet at the ends' average)
+        expect(table_at(shape, 0.5, seam: 0.1, mode: :jump)).to eq(table_at(shape, 0.5))
         # continuous across the wrap: no step bigger than the steepest line's
-        data = methods.drawn_table(shape, seam: true, mode: :jump).frames[0, true]
+        data = methods.drawn_table(shape, seam: 0.1, mode: :jump).frames[0, true]
         steps = (data[1..] - data[0...-1]).abs.to_a << (data[0] - data[-1]).abs
         expect(steps.max).to be < 21.0 / methods::DRAWN_SIZE * 1.01 # (the seam's ramp of 1 per 0.1 cycle plus the line's 2 per cycle; 1.01 for float32)
       end
 
       it 'plays a shape whose ends meet as drawn and keeps a trough at the wrap (the straight line cuts it)' do
         tri = [[0, -1], [0.5, 1], [1, -1]]
-        expect(methods.drawn_table(tri, seam: true, mode: :jump).frames).to eq(methods.drawn_table(tri).frames)
-        jump = take(1.constant.tremolo(1, depth: 24.db, shape: tri, seam: true, seam_mode: :jump), 48000)[0]
-        line = take(1.constant.tremolo(1, depth: 24.db, shape: tri, seam: true), 48000)[0]
+        expect(methods.drawn_table(tri, seam: 0.1, mode: :jump).frames).to eq(methods.drawn_table(tri).frames)
+        jump = take(1.constant.tremolo(1, depth: 24.db, shape: tri, seam: 0.1, seam_mode: :jump), 48000)[0]
+        line = take(1.constant.tremolo(1, depth: 24.db, shape: tri, seam: 0.1), 48000)[0]
         expect(db(jump[0])).to be_within(1e-3).of(-24)
         expect(db(line[0])).to be_within(1e-3).of(-24 * 0.9) # (the line from 0.95 to 0.05 holds the trough 2.4 dB up)
       end
 
       it 'agrees with the straight line for a sawtooth (the one shape where the two readings match)' do
         saw = [[0, -1], [1, 1]]
-        a = methods.drawn_table(saw, seam: true, mode: :jump).frames
-        b = methods.drawn_table(saw, seam: true).frames
+        a = methods.drawn_table(saw, seam: 0.1, mode: :jump).frames
+        b = methods.drawn_table(saw, seam: 0.1).frames
         expect((a - b).abs.max).to be < 1e-6
-        expect(methods.drawn_table(saw, seam: true, mode: :jump)).not_to equal(methods.drawn_table(saw, seam: true))
+        expect(methods.drawn_table(saw, seam: 0.1, mode: :jump)).not_to equal(methods.drawn_table(saw, seam: 0.1))
       end
 
       it 'clamps to the shape range, raises for unknown modes, prints, and gives the same output at any buffer size' do
-        expect(table_at([[0, 0], [0.02, 1], [0.5, -1], [1, 1]], 0.02, seam: true, mode: :jump)).to eq(1) # (1 + 0.3, clamped)
-        expect { 1.constant.tremolo(1, shape: [[0, 1], [1, -1]], seam: true, seam_mode: :smooth) }.to raise_error(ArgumentError, /seam_mode/)
+        expect(table_at([[0, 0], [0.02, 1], [0.5, -1], [1, 1]], 0.02, seam: 0.1, mode: :jump)).to eq(1) # (1 + 0.3, clamped)
+        expect { 1.constant.tremolo(1, shape: [[0, 1], [1, -1]], seam: 0.1, seam_mode: :smooth) }.to raise_error(ArgumentError, /seam_mode/)
         t = 110.hz.saw.trem(1.n8, depth: 6.db, shape: [[0, 1], [0.5, -1], [1, 0]], seam: true, seam_mode: :jump)
         expect(t.to_ruby).to include('seam: true, seam_mode: :jump)')
         loaded = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(t))
@@ -247,9 +328,45 @@ RSpec.describe(MB::Sound::GraphNode::Tremolo, :aggregate_failures) do
     end
 
     it 'keeps one table per shape and seam' do
-      a = methods.drawn_table([[0, 1], [1, -1]], seam: true)
+      a = methods.drawn_table([[0, 1], [1, -1]], seam: 0.1)
       expect(methods.drawn_table([[0, 1.0], [1, -1]], seam: 0.1)).to equal(a)
       expect(methods.drawn_table([[0, 1], [1, -1]])).not_to equal(a)
+    end
+
+    it 'takes seam: :auto, about 3 ms or 0.1 of a cycle where that is shorter, with a knee (effects-3)' do
+      ms = ->(f) { methods.auto_seam(f) / f * 1000 }
+      [1, 2, 4, 8].each { |f| expect(ms.(f)).to be_within(0.01).of(3) }
+      expect(methods.auto_seam(33)).to be_between(0.08, 0.09) # the knee: 0.84 of either
+      expect(methods.auto_seam(200)).to eq(0.1)
+      expect(methods.auto_seam(1.n4)).to eq(methods.auto_seam(2)) # 120 BPM
+      expect(methods.auto_seam(4.hz)).to eq(methods.auto_seam(4))
+      expect(methods.auto_seam(0.25.seconds)).to eq(methods.auto_seam(4))
+      expect(methods.auto_seam(3.constant)).to eq(0.1) # (a node rate: no fixed cycle)
+      expect(methods.auto_seam(0.01) * methods::DRAWN_SIZE).to eq(2) # (at least two table steps)
+      # the ramp at 2 Hz blends its wrap over 3 ms (144 samples) instead of 0.1 of a cycle (24 ms)
+      a = take(1.constant.tremolo(2, depth: 24.db, shape: [[0, -1], [1, 1]], seam: :auto), 24000)[0]
+      b = take(1.constant.tremolo(2, depth: 24.db, shape: [[0, -1], [1, 1]], seam: 0.006), 24000)[0]
+      expect(a).to eq(b)
+      expect(db(a[72])).to be_within(1e-3).of(-24 * (1 - 0.003)) # (the seam's end at x = 0.003: the shape's own value)
+      expect(db(a[0])).to be_within(1e-3).of(-12) # (its middle)
+    end
+
+    it 'takes seam: true as :auto, a Length as that long, and a number as a fraction of a cycle (effects-4)' do
+      ramp = [[0, -1], [1, 1]]
+      mk = ->(rate, seam) { take(1.constant.tremolo(rate, depth: 24.db, shape: ramp, seam: seam), 12000)[0] }
+      expect(mk.(2, true)).to eq(mk.(2, :auto))
+      expect(mk.(25, true)).to eq(mk.(25, :auto))
+      expect(mk.(2, 3.ms)).to eq(mk.(2, 0.006)) # 3 ms at 2 Hz: 0.006 of a cycle
+      expect(mk.(1.n4, 3.ms)).to eq(mk.(2, 0.006)) # (a tempo rate at 120 BPM)
+      expect(methods.seam_cycles(5.ms, 4)).to eq(0.02)
+      expect(methods.seam_cycles(1.n64, 1.n4)).to eq(0.0625)
+      expect(methods.seam_cycles(10.ms, 500)).to eq(1.0) # (at most a cycle)
+      expect(methods.seam_cycles(0.ms, 4)).to be_nil
+      expect(methods.seam_cycles(0.1, 4)).to eq(0.1)
+      expect(methods.seam_cycles(false, 4)).to be_nil
+      expect { 1.constant.tremolo(2.constant, shape: ramp, seam: 3.ms) }.to raise_error(ArgumentError, /fixed rate/)
+      expect { 1.constant.tremolo(2, shape: ramp, seam: :wide) }.to raise_error(ArgumentError, /seam: is true or :auto/)
+      expect(1.constant.tremolo(2, shape: ramp, seam: 3.ms).to_ruby).to include('seam: 3.ms')
     end
   end
 end

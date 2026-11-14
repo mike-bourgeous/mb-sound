@@ -290,7 +290,7 @@ RSpec.describe('MB::Sound::Curve#lookup') do
       limit = case c.to_s
               when /bounce/ then 5e-4 # kinks inside cells
               when /bezier\(0.42, 0.0, 1.0|bezier\(0.0, 0.0/ then 2e-3 # vertical end slopes
-              when /custom/ then 0.025 # sqrt: an infinite slope, wrong in the first cell (1/2048)
+              when /custom|power\(0.5\)/ then 0.025 # sqrt (:sqrt too): an infinite slope, wrong in the first cell (1/2048)
               when /steps/ then 1e-15
               when /hold/ then 1.0 # its jump at 1 ramps over the table's last cell (1/2048)
               else 1e-7
