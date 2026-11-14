@@ -313,15 +313,23 @@ module MB
           return false unless op && !old.instance_variable_get(:@fallback)
 
           op.rings.length == @program.rings.length && op.ops.map(&:class) == @program.ops.map(&:class) &&
-            op.histories.length == @program.histories.length
+            op.histories.length == @program.histories.length && op.sustain.nil? == @program.sustain.nil?
         end
 
-        # Takes over loop +old+'s one-sample history, pitch tracking, and
-        # ring-out (its delay lines move with its delay nodes, adopted as
-        # their own pairs).  On the swap frame; O(1).
+        # Takes over loop +old+'s one-sample history, pitch tracking,
+        # sustain shelf, and ring-out (its delay lines move with its delay
+        # nodes, adopted as their own pairs, and its filters' states with
+        # their filter nodes).  On the swap frame; O(1).
         def carry_adopt(old)
           op = old.instance_variable_get(:@program)
           @program.histories.zip(op.histories).each { |a, b| NodeTraits.swap_contents(a.state, b.state) }
+          # (the shelf's lowpass is the loop's own, not a node a carry pairs:
+          # without its state the rebuilt loop's ring took a fresh shelf, a
+          # -85 dB difference one period after the swap in nylon_pluck,
+          # fix-batch36-1114)
+          if (mine = @program.sustain) && (theirs = op.sustain)
+            NodeTraits.swap_contents(mine[:filter].instance_variable_get(:@state), theirs[:filter].instance_variable_get(:@state))
+          end
           @program.swap_carry_state(op)
           NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
         end

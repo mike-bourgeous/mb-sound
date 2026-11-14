@@ -72,6 +72,9 @@ RSpec.describe('Session::Carry over the shipped presets', :aggregate_failures) d
     rotary: ->(x) { x.rotary(:whirl) },
     swell: ->(x) { x.swell(x * 0.5, amount: 6.db) },
     limit: ->(x) { x.limit(ceiling: -6.db) }, # (a rebuild raised NoMethodError plan_snapshot until effects-2)
+    # (a loop with an SVF has its own sustain shelf lowpass, whose state
+    # started fresh, -90 dB, until fix-batch36-1114; nylon_pluck found it)
+    feedback_svf: ->(x) { x.feedback { |fb, input| (fb + input).delay(0.005, smooth: false).filter(:lowpass, cutoff: 2500, quality: 0.7) * 0.9 } },
   }.freeze
 
   SWEEP_EFFECTS.each do |name, fx|
