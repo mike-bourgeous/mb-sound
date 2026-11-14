@@ -390,7 +390,9 @@ module GraphSweep
           # for it, and with its own ends)
           smp.follow(stretch: { mode: :spectral, window: 256 }) * 0.2 + smp.follow(stretch: { mode: :spectral, window: 256, wrap: false }) * 0.2 +
           # (and the vocoder running live, both channels on one stream)
-          smp.follow(stretch: { mode: :spectral, window: 256, live: true }) * 0.2 + st.follow(stretch: { mode: :spectral, window: 256, live: true })[0] * 0.2
+          smp.follow(stretch: { mode: :spectral, window: 256, live: true }) * 0.2 + st.follow(stretch: { mode: :spectral, window: 256, live: true })[0] * 0.2 +
+          # (noise kept noise: random phases for the bins that are no partial, cached and live)
+          smp.follow(stretch: { mode: :spectral, window: 256, noise: 1 }) * 0.2 + st.follow(stretch: { mode: :spectral, window: 256, live: true, noise: 1, transients: 0.5 })[1] * 0.2
       }],
       # Region lanes (regions-1): overlapping regions with crossfades in
       # ACID's shapes, an offset, a transposed (Catmull-Rom) region off the

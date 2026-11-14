@@ -234,7 +234,7 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       expect(at).to be > 2 * within
       expect(three.lineage[3]).to eq({ mode: :spectral, passes: 3 })
       expect { plain.stretch(1.25, mode: :spectral, passes: 2) }.to raise_error(ArgumentError, /passes: is 1 or more, for a sample that loops/)
-      expect { loop.stretch(1.25, passes: 2) }.to raise_error(ArgumentError, /wrap: and passes: are for/)
+      expect { loop.stretch(1.25, passes: 2) }.to raise_error(ArgumentError, /wrap:, passes:, and noise: are for/)
 
       wash = plain.looped.stretch(2, mode: :paul).data(0)
       step, inside = wrap_step(wash)
@@ -249,8 +249,8 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       expect(plain.stretch(0.77, mode: :spectral).data(0)).to eq(plain.stretch(0.77, mode: :spectral, wrap: false).data(0))
       expect(plain.stretch(0.77, mode: :spectral, wrap: true).data(0)).to eq(plain.looped.stretch(0.77, mode: :spectral).data(0))
       expect(plain.stretch(0.77, mode: :spectral, wrap: true).lineage[3]).to eq({ mode: :spectral, wrap: true })
-      expect { plain.stretch(0.77, wrap: true) }.to raise_error(ArgumentError, /wrap: and passes: are for/)
-      expect { plain.stretch(0.77, mode: :slice, wrap: true) }.to raise_error(ArgumentError, /wrap: and passes: are for/)
+      expect { plain.stretch(0.77, wrap: true) }.to raise_error(ArgumentError, /wrap:, passes:, and noise: are for/)
+      expect { plain.stretch(0.77, mode: :slice, wrap: true) }.to raise_error(ArgumentError, /wrap:, passes:, and noise: are for/)
       expect { plain.stretch(0.77, mode: :spectral, wrap: 1) }.to raise_error(ArgumentError, /wrap: is true/)
     end
 
@@ -399,6 +399,98 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
     expect(step.call(hits.stretch(4, mode: :spectral, randomize: 0.6).data(0))).to be > 4
     expect(step.call(hits.stretch(4, mode: :spectral, randomize: 1).data(0))).to be > 4
     expect(step.call(hits.stretch(4, mode: :paul).data(0))).to be < 2
+  end
+
+  describe 'noise:' do
+    # How alike the sound is to itself +lag+ samples later, tones taken
+    # out: the autocorrelation of 16384-sample frames whose spectra are
+    # divided by their own smoothed level, at +lag+ (re lag 0)
+    def self_similarity(d, lag)
+      d = Numo::DFloat.cast(d)
+      w = MB::Sound::Sample::Spectral.hann(16384)
+      power = Numo::DFloat.zeros(8193)
+      (0..(d.length - 16384)).step(8192) do |from|
+        p2 = Numo::Pocketfft.rfft(d[from...(from + 16384)] * w).abs**2
+        c = Numo::DFloat.zeros(8194)
+        c[1..] = p2.cumsum
+        idx = Numo::Int64.new(8193).seq
+        lo = (idx - 32).clip(0, 8193)
+        hi = (idx + 32).clip(0, 8193)
+        power += p2 / ((c[hi] - c[lo]) / Numo::DFloat.cast(hi - lo) + 1e-20)
+      end
+      acf = Numo::Pocketfft.irfft(Numo::DComplex.cast(power))
+      acf[(lag - 2)..(lag + 2)].max / acf[0]
+    end
+
+    let(:hiss) { Numo::NArray.srand(11); Numo::DFloat.new(96000).rand(-0.5, 0.5) }
+    let(:tones) {
+      i = Numo::DFloat.new(96000).seq / 48000
+      (Numo::NMath.sin(i * (2 * Math::PI * 220)) + Numo::NMath.sin(i * (2 * Math::PI * 277.2)) + Numo::NMath.sin(i * (2 * Math::PI * 329.6))) * 0.2
+    }
+
+    it 'keeps the vocoder\'s window from sounding in stretched noise, and the noise\'s level' do
+      smp = MB::Sound::Sample[Numo::SFloat.cast(hiss)]
+      expect(self_similarity(hiss, 4096)).to be < 0.03
+      # (every bin held as a partial on a grid of 48000 / 4096 Hz: the
+      # stretch repeats itself a window later, and the more the longer
+      # the stretch; more overlap or another window only moves it)
+      plain = smp.stretch(8, mode: :spectral, transients: false)
+      expect(self_similarity(plain.data(0), 4096)).to be > 0.12
+      expect(self_similarity(smp.stretch(8, mode: :spectral, transients: false, overlap: 8).data(0), 4096)).to be > 0.12
+      expect(self_similarity(smp.stretch(8, mode: :spectral, transients: false, window: 2048).data(0), 2048)).to be > 0.12
+      loose = smp.stretch(8, mode: :spectral, transients: false, noise: 1)
+      expect(self_similarity(loose.data(0), 4096)).to be < 0.03
+      expect(rms(loose.data(0)) / rms(hiss)).to be_within(0.05).of(1)
+      expect(rms(plain.data(0)) / rms(hiss)).to be < 0.9
+      expect(loose.lineage[3]).to eq({ mode: :spectral, transients: false, noise: 1 })
+      expect(smp.stretch(8, mode: :spectral, transients: false, noise: 1, seed: 3).data(0)).not_to eq(loose.data(0))
+      expect(smp.stretch(8, mode: :spectral, noise: true)).to equal(smp.stretch(8, mode: :spectral, noise: 1))
+      expect(smp.stretch(8, mode: :spectral, noise: 0)).to equal(smp.stretch(8, mode: :spectral))
+    end
+
+    it 'leaves partials and attacks alone' do
+      # (a chord with hiss 14 dB under it: the partial at 220 Hz stays
+      # a line, the hiss stops repeating)
+      mix = MB::Sound::Sample[Numo::SFloat.cast(tones + hiss * 0.2)]
+      line = ->(d) {
+        sp = Numo::Pocketfft.rfft(Numo::DFloat.cast(d)[0...65536] * described_class.hann(65536)).abs**2
+        sp[296..305].sum / sp[259..341].sum
+      }
+      plain = mix.stretch(8, mode: :spectral, transients: false).data(0)
+      loose = mix.stretch(8, mode: :spectral, transients: false, noise: 1).data(0)
+      expect(line.call(plain)).to be > 0.99
+      expect(line.call(loose)).to be > 0.99
+      expect(self_similarity(plain, 4096)).to be > 0.12
+      expect(self_similarity(loose, 4096)).to be < 0.04
+      # (a pure chord is not touched beyond rounding)
+      pure = MB::Sound::Sample[Numo::SFloat.cast(tones)]
+      expect((Numo::DFloat.cast(pure.stretch(8, mode: :spectral, transients: false, noise: 1).data(0)) - pure.stretch(8, mode: :spectral, transients: false).data(0))[8192...-8192].abs.max).to be < 0.01
+
+      # A burst in hiss: the frames that hold it are not randomized
+      x = hiss * 0.05
+      x[24000...26000] += Numo::NMath.sin(Numo::DFloat.new(2000).seq * 0.9) * Numo::NMath.exp(-Numo::DFloat.new(2000).seq / 250.0) * 0.6
+      hit = MB::Sound::Sample[Numo::SFloat.cast(x)]
+      q = 4 * hit.onsets.last
+      a = Numo::DFloat.cast(hit.stretch(4, mode: :spectral).data(0))[q...(q + 480)]
+      b = Numo::DFloat.cast(hit.stretch(4, mode: :spectral, noise: 1).data(0))[q...(q + 480)]
+      expect((a - b).abs.max).to be < 0.02
+      expect { hit.stretch(4, mode: :spectral, noise: 2) }.to raise_error(ArgumentError, /noise: is 0..1/)
+      expect { hit.stretch(4, noise: 1) }.to raise_error(ArgumentError, /noise: are for mode: :spectral/)
+    end
+
+    it 'runs in loops and live streams' do
+      smp = MB::Sound::Sample[Numo::SFloat.cast(hiss[0...48000])].looped
+      closed = smp.stretch(4, mode: :spectral, noise: 1)
+      expect(closed.length).to eq(192000)
+      expect(self_similarity(closed.data(0), 4096)).to be < 0.04
+      expect(self_similarity(smp.stretch(4, mode: :spectral).data(0), 4096)).to be > 0.05
+      stream = smp.spectral_stream(noise: 1)
+      step = 1.0 / 192000
+      out = Numo::DFloat.zeros(96000)
+      120.times { |b| phases = (Numo::DFloat.new(800).seq + b * 800) * step; out[(b * 800)...((b + 1) * 800)] = stream.pull(0, phases - phases.floor, step) }
+      expect(self_similarity(out, 4096)).to be < 0.04
+      expect(rms(out) / rms(hiss)).to be_within(0.08).of(1)
+    end
   end
 
   it 'raises on bad modes and mixed options' do

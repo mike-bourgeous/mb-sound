@@ -84,11 +84,11 @@ module MB
         # that loops (its end flows into its start): the stretch reads it
         # as an endless stream and its own end flows into its start
         # (#looped with one pass).
-        def vocoder(channels, ratio, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false, span: 1.0)
-          return looped(channels, ratio, window: window, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span) if wrap
+        def vocoder(channels, ratio, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false, span: 1.0, noise: 0)
+          return looped(channels, ratio, window: window, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise) if wrap
 
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
-          voc = Vocoder.new(channels, window: window, overlap: overlap, randomize: randomize, seed: seed, link: link, shape: shape)
+          voc = Vocoder.new(channels, window: window, overlap: overlap, randomize: randomize, seed: seed, link: link, shape: shape, noise: noise)
           n = voc.window
           hs = voc.hop
           len = voc.length
@@ -96,7 +96,7 @@ module MB
           map, resets = time_map(len, ratio, onsets, n, hs, span)
 
           frames = out_len / hs + 2
-          sums = Sums.new(voc.channels, frames * hs + n, voc.randomize > 0)
+          sums = Sums.new(voc.channels, frames * hs + n, voc.frames_random?)
           attack_until = nil
           ri = 0
 
@@ -136,12 +136,12 @@ module MB
         # is in +report+ (a Hash, if given): :closure, the magnitude-
         # weighted mean of |phase error| at the wrap in cycles, before
         # and after.
-        def looped(channels, ratio, passes: 1, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, report: nil, span: 1.0)
+        def looped(channels, ratio, passes: 1, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, report: nil, span: 1.0, noise: 0)
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
           passes = Integer(passes)
           raise ArgumentError, "passes: is 1 or more (got #{passes})" unless passes >= 1
 
-          voc = Vocoder.new(channels, window: window, overlap: overlap, randomize: randomize, seed: seed, link: link, shape: shape, wrap: true)
+          voc = Vocoder.new(channels, window: window, overlap: overlap, randomize: randomize, seed: seed, link: link, shape: shape, wrap: true, noise: noise)
           n = voc.window
           hs = voc.hop
           len = voc.length
@@ -184,7 +184,7 @@ module MB
             last
           }
 
-          sums = Sums.new(voc.channels, out_len, voc.randomize > 0)
+          sums = Sums.new(voc.channels, out_len, voc.frames_random?)
           if voc.randomize >= 1
             # (every phase random: nothing to close)
             run.call(nil, sums)
@@ -210,9 +210,11 @@ module MB
           # +channels+ as Spectral.vocoder takes them.  With +wrap+ the
           # frames read the input in a circle (a loop); without, zeros
           # outside it.
-          def initialize(channels, window: WINDOW, overlap: OVERLAP, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false)
+          def initialize(channels, window: WINDOW, overlap: OVERLAP, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false, noise: 0)
             @randomize = randomize.to_f
             raise ArgumentError, "randomize: is 0..1 (got #{@randomize})" unless @randomize >= 0 && @randomize <= 1
+            @noise = noise.to_f
+            raise ArgumentError, "noise: is 0..1 (got #{@noise})" unless @noise >= 0 && @noise <= 1
             @window = Integer(window)
             raise ArgumentError, "The window must be an even number of samples, 64 or more (got #{window})" unless @window >= 64 && @window.even?
             @hop = @window / Integer(overlap)
@@ -236,7 +238,41 @@ module MB
             # vectors (its coherence, sinc(randomize)), summed with the
             # windows for Sums#finish
             @coherence = @randomize > 0 ? Math.sin(Math::PI * @randomize) / (Math::PI * @randomize) : 1.0
+            # (for #noisiness: each bin's neighbourhood, and how much
+            # quieter frames with unrelated phases add up than frames in
+            # step: a frame with random phases spreads its power over the
+            # whole window, so overlapped and normalized it comes out at
+            # hop / window of the power, -6 dB at four frames a window)
+            reach = MB::M.max(8, @bins / 85)
+            idx = Numo::Int64.new(@bins).seq
+            @floor_lo = (idx - reach).clip(0, @bins)
+            @floor_hi = (idx + reach + 1).clip(0, @bins)
+            @floor_count = Numo::DFloat.cast(@floor_hi - @floor_lo)
+            @power = @hop.to_f / @window
             restart
+          end
+
+          # True if whole frames get random phases (randomize: alone): the
+          # sums then normalize by the frames' coherence.  With noise: the
+          # frames make up for it bin by bin themselves.
+          def frames_random? = @randomize > 0 && @noise <= 0
+
+          # How much like noise each bin of +mag+ is, 0 (a partial) to 1:
+          # by how far the peak its region belongs to (Spectral.regions)
+          # stands above the level around it (the mean of the log
+          # magnitudes a few dozen bins either side): NOISE_BELOW dB or
+          # less is noise, TONE_ABOVE dB or more a partial.  Peaks of
+          # noise under a Hann window stand 3 to 8 dB above their
+          # surroundings; a partial 20 dB above the noise it sits in, 20.
+          def noisiness(mag)
+            owner = Spectral.regions(mag)
+            return Numo::DFloat.ones(@bins) if owner.nil?
+
+            lg = Numo::NMath.log(mag + 1e-30)
+            c = Numo::DFloat.zeros(@bins + 1)
+            c[1..] = lg.cumsum
+            prominence = (lg - (c[@floor_hi] - c[@floor_lo]) / @floor_count)[owner] * (20 / Math.log(10))
+            1 - ((prominence - NOISE_BELOW) / (TONE_ABOVE - NOISE_BELOW)).clip(0, 1)
           end
 
           # Forgets the phases: the next frame starts with its input's.
@@ -303,9 +339,26 @@ module MB
             # (frames holding an attack stay unrandomized: crisp attacks
             # even in Paulstretch)
             random = @randomize > 0 && !attack
+            amount = nil
+            if @noise > 0 && !attack
+              # Noise as noise: each bin's phase gets a random offset of
+              # up to ± noise × its noisiness × π (at least randomize's),
+              # and the gain that keeps its level when frames with
+              # unrelated phases overlap (they add in power)
+              amount = noisiness(mag) * @noise
+              amount = amount.clip(@randomize, nil) if @randomize > 0
+              turn = amount * Math::PI
+              coherence = Numo::NMath.sin(turn) / turn.clip(1e-9, nil)
+              coherence[turn < 1e-9] = 1.0
+              gain = 1 / Numo::NMath.sqrt(coherence**2 + (1 - coherence**2) * @power)
+              random = false
+            end
             rotc = nil
             @xs.each_with_index.map do |x, ch|
-              if random && (rotc.nil? || !@link)
+              if amount && (rotc.nil? || !@link)
+                r = rot + (Spectral.random_phases(@seed, index, @bins, @link ? 0 : ch) - 0.5) * (amount * TWO_PI)
+                rotc = (Numo::DComplex.cast(Numo::NMath.cos(r)) + Numo::NMath.sin(r) * Complex::I) * gain
+              elsif random && (rotc.nil? || !@link)
                 r = rot + (Spectral.random_phases(@seed, index, @bins, @link ? 0 : ch) - 0.5) * (TWO_PI * @randomize)
                 rotc = Numo::DComplex.cast(Numo::NMath.cos(r)) + Numo::NMath.sin(r) * Complex::I
               end
@@ -390,8 +443,8 @@ module MB
         class Stream
           attr_reader :channels
 
-          def initialize(channels, onsets: nil, window: WINDOW, overlap: OVERLAP, shape: :hann, link: true, span: 1.0)
-            @voc = Vocoder.new(channels, window: window, overlap: overlap, shape: shape, link: link, wrap: true)
+          def initialize(channels, onsets: nil, window: WINDOW, overlap: OVERLAP, shape: :hann, link: true, span: 1.0, noise: 0, seed: 0)
+            @voc = Vocoder.new(channels, window: window, overlap: overlap, shape: shape, link: link, wrap: true, noise: noise, seed: seed)
             @channels = @voc.channels
             @n = @voc.window
             @hs = @voc.hop
@@ -504,6 +557,32 @@ module MB
             @wring = Numo::DFloat.zeros(size).tap { |b| b[new] = @wring[old] }
             @size = size
           end
+        end
+
+        # For Vocoder#noisiness (noise: of the spectral stretches): a
+        # region whose peak stands this many dB or less above its
+        # surroundings is noise, this many or more a partial.
+        NOISE_BELOW = 8.0
+        TONE_ABOVE = 16.0
+
+        # The peak each bin of +mag+ belongs to (peaks are bins above
+        # their two neighbours on each side; regions split midway between
+        # peaks, as #lock has them), or nil without peaks.
+        def regions(mag)
+          nb = mag.length
+          return nil if nb < 5
+
+          c = mag[2...(nb - 2)]
+          is_peak = (c > mag[1...(nb - 3)]) & (c > mag[0...(nb - 4)]) & (c >= mag[3...(nb - 1)]) & (c >= mag[4...nb])
+          peaks = is_peak.where + 2
+          return nil if peaks.empty?
+
+          marker = Numo::Int32.zeros(nb)
+          if peaks.length > 1
+            bounds = ((peaks[0...-1] + peaks[1..]) / 2) + 1
+            marker[bounds] = 1
+          end
+          peaks[marker.cumsum]
         end
 
         # Identity phase locking (Laroche & Dolson 1999): peak bins keep

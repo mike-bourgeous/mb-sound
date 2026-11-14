@@ -814,14 +814,14 @@ module MB
       # true })` plays through): +window+, +overlap+, +shape+, +link+,
       # and +transients+ (true, false, or an amount) as #stretch takes
       # them.
-      def spectral_stream(mode: :spectral, window: nil, overlap: Spectral::OVERLAP, shape: :hann, link: true, transients: true, **others)
+      def spectral_stream(mode: :spectral, window: nil, overlap: Spectral::OVERLAP, shape: :hann, link: true, transients: true, noise: 0, seed: 0, **others)
         unless others.empty? && Spectral::MODE_ALIASES.fetch(mode.to_sym, mode.to_sym) == :spectral && (transients == true || transients == false || (transients.is_a?(Numeric) && transients >= 0 && transients <= 1))
-          raise ArgumentError, 'live: follows with the phase vocoder (mode: :spectral, with window:, overlap:, shape:, link:, and transients: true, false, or an amount)'
+          raise ArgumentError, 'live: follows with the phase vocoder (mode: :spectral, with window:, overlap:, shape:, link:, noise:, seed:, and transients: true, false, or an amount)'
         end
         transients = false if transients == 0
         n = position(window.nil? ? Spectral::WINDOW.samples : window).round
         n += 1 if n.odd?
-        Spectral::Stream.new(to_a, onsets: transients ? onsets(wrap: true) : nil, window: n, overlap: overlap, shape: shape, link: link, span: transients == true ? 1.0 : (transients || 0).to_f)
+        Spectral::Stream.new(to_a, onsets: transients ? onsets(wrap: true) : nil, window: n, overlap: overlap, shape: shape, link: link, span: transients == true ? 1.0 : (transients || 0).to_f, noise: noise == true ? 1 : (noise || 0), seed: seed)
       end
 
       # What kind of sound this is, for choosing a stretch (Sample#follow's
@@ -1070,6 +1070,18 @@ module MB
       # the wash); `mode: :paul, transients: true` does it in :paul's
       # quarter-second window, for hits further apart than that.
       #
+      # +noise+ (0..1; 0, off, by default) keeps noise noise: at long
+      # ratios the vocoder holds every bin as a steady partial on its
+      # grid of sample rate / +window+ Hz, so whatever is not a partial
+      # (breath, hiss, a cymbal, a texture) turns into a buzz that
+      # repeats once a window (4096 samples: 11.7 times a second).  With
+      # +noise+ the bins that belong to no clear partial (their region's
+      # peak less than 8 to 16 dB above its surroundings:
+      # Spectral::Vocoder#noisiness) get random phases every frame (from
+      # +seed+), up to +noise+ × ±π, their level kept; partials and
+      # attacks stay as they are (`pad.stretch(8, mode: :spectral, noise:
+      # 1)`).
+      #
       # +link+ (true) gives every channel
       # the same random phases (the image keeps its level panning); false
       # draws them per channel (a wider,
@@ -1104,9 +1116,9 @@ module MB
       #     bowl.stretch(100, mode: :paul, window: 0.5.seconds)  # an endless wash
       #     voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false)   # narrower partials, a wide image (voices)
       def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann,
-                  slices: nil, fade: nil, fill: nil, wrap: nil, passes: nil)
+                  slices: nil, fade: nil, fill: nil, wrap: nil, passes: nil, noise: nil)
         raise ArgumentError, "wrap: is true, false, or nil (by the sample's loop; got #{wrap.inspect})" unless wrap.nil? || wrap == true || wrap == false
-        raise ArgumentError, 'wrap: and passes: are for mode: :spectral and :paul' unless (wrap.nil? && passes.nil?) || (!SLICE_MODES.include?(mode.to_sym) && Spectral.mode_name(mode) != :cyclic)
+        raise ArgumentError, 'wrap:, passes:, and noise: are for mode: :spectral and :paul' unless (wrap.nil? && passes.nil? && noise.nil?) || (!SLICE_MODES.include?(mode.to_sym) && Spectral.mode_name(mode) != :cyclic)
         if SLICE_MODES.include?(mode.to_sym)
           unless fit == :auto && window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
             raise ArgumentError, 'mode: :slice takes slices:, fade:, fill:, and (for fill: :stretch) cycle: and crossfade:'
@@ -1116,7 +1128,7 @@ module MB
         raise ArgumentError, 'slices:, fade:, and fill: are for mode: :slice' unless slices.nil? && fade.nil? && fill.nil?
 
         mode = Spectral.mode_name(mode)
-        return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap, passes) unless mode == :cyclic
+        return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap, passes, noise) unless mode == :cyclic
         unless window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
           raise ArgumentError, 'window:, overlap:, shape:, transients:, seed:, randomize:, and link: are for mode: :spectral and :paul'
         end
@@ -1334,7 +1346,7 @@ module MB
       # vocoder whose +randomize+ goes from locked phases (0) to random
       # ones (1, Spectral.paul's magnitude-only frames when no onsets are
       # kept); the modes set the defaults.
-      def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap = nil, passes = nil)
+      def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap = nil, passes = nil, noise = nil)
         paul = mode == :paul
         transients = !paul if transients.nil?
         transients = false if transients == 0
@@ -1354,7 +1366,11 @@ module MB
         kw[:link] = link unless link == true
         kw[:shape] = shape unless shape == :hann
         Spectral.shaped_window(shape, 64) # (checks the name)
-        kw[:seed] = seed unless seed == 0 || randomize == 0
+        noise = 0 if noise.nil? || noise == false
+        noise = 1 if noise == true
+        raise ArgumentError, "noise: is 0..1 (got #{noise.inspect})" unless noise.is_a?(Numeric) && noise >= 0 && noise <= 1
+        kw[:noise] = noise unless noise == 0
+        kw[:seed] = seed unless seed == 0 || (randomize == 0 && noise == 0)
         kw[:wrap] = wrap unless wrap.nil?
         wrap = whole_loop? if wrap.nil?
         passes = passes.nil? ? 1 : Integer(passes)
@@ -1366,11 +1382,11 @@ module MB
         onsets = transients ? (@reversed ? reverse : self).onsets(wrap: wrap) : nil
         edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio * passes), bpm: @bpm && @bpm / ratio.to_f, beats: passes > 1 && @beats ? @beats * passes : nil) { |chans|
           if wrap
-            Spectral.looped(chans, ratio.to_f, passes: passes, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span)
+            Spectral.looped(chans, ratio.to_f, passes: passes, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise)
           elsif randomize >= 1 && onsets.nil?
             Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
           else
-            Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span)
+            Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise)
           end
         }
       end

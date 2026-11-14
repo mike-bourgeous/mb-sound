@@ -150,15 +150,15 @@ From the maintainer's verdicts on the stretch study's Bench set and its follow-u
 
 What the picks say:
 1. Direction matters more than material.  Faster: slices for every loop with a grid (drums, bass), the vocoder for recorded phrases.  A little slower: the vocoder for all of them, drums included (slices only where the hit must not get longer: a kick pattern).
-2. From 2x on it is the material: hits that must stay as they are take slices with gaps; noise takes Paulstretch; tonal one-shots and textures the vocoder, loosened (the randomize and transients amounts, granular.md).
+2. From 2x on it is the material: hits that must stay as they are take slices with gaps; noise takes Paulstretch; tonal one-shots and textures the vocoder, with its window's buzz taken out (`noise:`, granular.md).
 3. Markers help the vocoder when they are thinned to attacks (confirm:) or the phrase is sung or blown (C on the vocal and the sax); every marker on drums cuts decays.
 
 `follow`'s `stretch: :auto` today: percussive material → slices, tonal → the vocoder, at any ratio.  Options:
 - (a) Leave it.  For: known, simple.  Against: a drum loop slowed 20% gets slices where he picked the vocoder; a bass loop sped up gets the vocoder where he picked slices.
 - (b) By direction: at or under the file's tempo (ratio up to 1) slices for loops, the vocoder for recorded phrases (no tempo grid, or marked non-looping); above it the vocoder, with confirmed markers where there are markers.  For: his picks from 0.7x to 1.25x, every row.  Against: a change of kind at ratio 1 (a tempo ramp through the file's tempo switches engines); kick patterns slowed want slices.
-- (c) (b) up to about 1.5x, then by material: percussive → slices with gaps, noisy (spectral flatness; a cymbal) → Paulstretch, tonal → the vocoder with `randomize:` rising with the ratio.  For: every pick in the table.  Against: three thresholds read from fifteen loops; a second change of kind at 1.5x.
+- (c) (b) up to about 1.5x, then by material: percussive → slices with gaps, noisy (spectral flatness; a cymbal) → Paulstretch, tonal → the vocoder with `noise:` on.  For: every pick in the table.  Against: three thresholds read from fifteen loops; a second change of kind at 1.5x.
 - (d) No automatic rule beyond (a), but the picks as named presets of stretch options (`stretch: :tight`, `:smooth`, `:wash`...) for him to choose per loop.  For: his "depending on whether I want the same hits but timed slower, or the hits themselves slowed too" is a choice, not a property of the file.  Against: nothing gets better by itself.
-- Recommendation: (b) for the converter of his old projects (their loops play within 0.7x to 1.25x, 10th to 90th percentile 0.71 to 1.12), and (d) alongside for playing; (c)'s long-ratio rules after another listening round with the loosened vocoder.  The sustained pad rows need hearing again first: its only fault was the wrap.
+- Recommendation: (b) for the converter of his old projects (their loops play within 0.7x to 1.25x, 10th to 90th percentile 0.71 to 1.12), and (d) alongside for playing; (c)'s long-ratio rules after another listening round with `noise:`.  The sustained pad rows need hearing again first: its only fault was the wrap.
 
 ## Not yet
 
