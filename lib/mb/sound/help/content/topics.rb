@@ -461,21 +461,33 @@ module MB
       about <<~TEXT
         `boom` is a cinematic boom (trailer libraries' "booms" or
         "impacts"): each note strikes a body that falls from a punchy tone
-        onto the note's pitch and rings on as a sub, with a noise click on
-        the strike, an optional sine sub and noise tail, soft clipping,
-        and a reverb tail.  Note lengths don't matter (one hit per note);
+        onto the note's pitch and rings on as a sub, with a click on the
+        strike, an optional noise burst, sine sub, and noise rumble, soft
+        clipping, and a reverb tail (a library reverb preset: :space by
+        default) whose highs die sooner than its lows, so it darkens as it
+        decays.  Note lengths don't matter (one hit per note);
         velocity sets the level and, by vel_depth and vel_bright, the
         depth of the fall and the click and drive.  It takes a clip (or
         any MIDI source; none: live `midi`), a pitch for one hit
         (`boom(G1)`), a preset, and settings: `boom(clip, :trailer, decay:
         6)`.  Presets: :cinematic (the default), :sub_drop (a slow falling
-        sub, no hit), :impact (short and tight), :trailer (long and wide;
-        `Boom.preset_names`).  Settings (Params, so they are knobs on a
-        track): note, drop (octaves), sweep and sweep_curve (the fall),
-        shape (sine to triangle), punch and punch_time, decay and curve,
-        sub and sub_decay, click, click_tone, click_decay, noise,
-        noise_tone, noise_decay, drive, vel_depth, vel_bright, tail,
-        tail_length, room, damping, width, level, voices.
+        sub that fades out under 30 Hz, no hit), :impact (short and tight,
+        a low thud in a small room), :trailer (long and wide;
+        `Boom.preset_names`).  Settings
+        (Params, so they are knobs on a track): note, drop (octaves),
+        sweep and sweep_curve (the fall), below (octaves the fall goes on
+        under the note) and floor (Hz the body fades out under), shape
+        (sine to triangle), punch and punch_time, decay and curve, sub and
+        sub_decay, click, click_tone, noise, noise_tone, noise_decay,
+        rumble, rumble_tone, rumble_decay, rumble_fall (octaves the
+        rumble's lowpass falls as it fades), drive, vel_depth, vel_bright,
+        tail, tail_length, reverb (:space, :hall, :default, :room, or
+        :room_size with room), tail_cut (Hz), damping (0..1, how much
+        sooner the highs die), tail_tone (Hz, a lowpass inside the reverb
+        instead of damping), width, level, voices.  A slower sub drop that
+        creeps toward 20 Hz as it fades: `boom(E1, :sub_drop, sweep: 4.5,
+        sweep_curve: 30, below: 1.04, floor: 40)` (sweep_curve shapes the
+        fall: 0 even in octaves, higher dives sooner and settles).
 
         The presets are library entries: `L.inst.boom.trailer.ping` hits
         once (`.ping(E1)` at a note), `play L.inst.boom.impact` plays a
@@ -489,13 +501,13 @@ module MB
       note :library
       see :drums, :library
       example 'a boom every bar' do
-        bg :try, boom(seq(G1).n1.loop).at(-19.db)
+        bg :try, boom(seq(G1).n1.loop).at(-13.db)
       end
       example 'impacts on the half notes' do
-        bg :try, boom(seq(A1).n2.loop, :impact).at(-16.5.db)
+        bg :try, boom(seq(A1).n2.loop, :impact).at(-10.5.db)
       end
       example 'a sub drop every bar' do
-        bg :try, boom(seq(E1).n1.loop, :sub_drop).at(-14.db)
+        bg :try, boom(seq(E1).n1.loop, :sub_drop).at(-8.db)
       end
       example 'a boom in a kit' do
         bg :try, kit(grid(16, kick: 'x...x...x...x...', crash: 'x...............').loop) {

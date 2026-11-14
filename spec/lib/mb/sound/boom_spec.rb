@@ -47,7 +47,7 @@ RSpec.describe(MB::Sound::Boom, :aggregate_failures) do
   it 'plays from notes: the body falls onto each note, as hard as its velocity' do
     MB::Sound.seed(1)
     out = samples(MB::Sound.boom(MB::Sound.seq(MB::Sound::G1.n1, MB::Sound::E1.n1), tail: 0), 240)[0] # (dry: mono)
-    expect(out.abs.max).to be_between(0.5, 3.0) # (presets are at -20.3 LUFS through the -10 dB master, or peak at -3 dBFS there)
+    expect(out.abs.max).to be_between(0.25, 1.5) # (presets are at -26.3 LUFS through the -10 dB master, or peak at -9 dBFS there)
     expect(pitch_at(out, 0.5)).to be_within(1.5).of(MB::Sound::G1.frequency)
     expect(pitch_at(out, 2.5)).to be_within(1.5).of(MB::Sound::E1.frequency)
     expect(pitch_at(out, 2.0)).to be > 1.5 * MB::Sound::E1.frequency # (the strike starts octaves up)
@@ -79,8 +79,171 @@ RSpec.describe(MB::Sound::Boom, :aggregate_failures) do
     expect(samples(MB::Sound::L.inst.boom.impact.ping, 10)[0].abs.max).to be > 0.05
     expect(samples(MB::Sound::L.inst.boom.impact.ping(MB::Sound::E1), 10)[0].abs.max).to be > 0.05
     expect(described_class.home_note(:cinematic).name).to eq('G1')
-    expect(MB::Sound::Playable.graph(MB::Sound::L.inst.boom.impact).description).to eq('L.inst.impact hit once (at A1)')
+    expect(MB::Sound::Playable.graph(MB::Sound::L.inst.boom.impact).description).to eq('L.inst.impact hit once (at E1)')
     expect { MB::Sound::L.inst.boom.impact.ping(MB::Sound::G1, HITS) }.to raise_error(ArgumentError, /ping takes pitches/)
+  end
+
+  # +x+ through a 2 x 2-pole band filter (nil for no edge), as DFloat.
+  def band(x, lo, hi)
+    f = []
+    2.times { f << MB::Sound::Filter::Cookbook.new(:highpass, 48000, lo, quality: 0.7) } if lo
+    2.times { f << MB::Sound::Filter::Cookbook.new(:lowpass, 48000, hi, quality: 0.7) } if hi
+    Numo::DFloat.cast(MB::Sound::Filter::FilterChain.new(*f).process(Numo::SFloat.cast(x)))
+  end
+
+  # RMS level in dB of +x+ from +t0+ to +t1+ seconds.
+  def level(x, t0, t1)
+    10 * Math.log10((x[(t0 * 48000).to_i...(t1 * 48000).to_i]**2).mean + 1e-30)
+  end
+
+  # boom-2 (the maintainer on boom-1's tails: "Too metallic and wobbly",
+  # "almost gong like"): the tail is a library reverb preset; boom-1's
+  # room-size form (8 lines, subtle modulation) rang as separate modes
+  # under its 8 s decay
+  it 'rings its tail through a library reverb preset, smoother than the room-size form' do
+    imp = Numo::SFloat.zeros(300 * 800)
+    imp[0] = 1
+    s = described_class.settings(:cinematic).merge(tail: 1, width: 1, tail_length: 4.0)
+    flat = %i[space room_size].to_h { |r|
+      out = samples(described_class.tail(MB::Sound::ArrayInput.new(data: [imp]), s.merge(reverb: r)), 300)
+      [r, MB::Sound::Analysis::ImpulseResponse.new(out.map { |c| c - Numo::DFloat.cast(imp) }).tail_flatness]
+    }
+    expect(flat[:space].min).to be > 0.3 # (0.56 for noise; :space reads about 0.45)
+    expect(flat[:room_size].max).to be < 0.15 # (boom-1's: about 0.03)
+    expect(described_class.settings(:cinematic)[:reverb]).to eq(:hall) # (boom-4: his kick-alone pick)
+    expect(described_class.settings(:sub_drop)[:reverb]).to eq(:space)
+    expect(described_class.settings(:impact)[:reverb]).to eq(:room)
+    expect(described_class.settings(:impact)[:tail_length]).to eq(0.3) # (boom-3: the maintainer's pick, :room at 0.3 s)
+    expect(described_class.settings(:trailer)[:reverb]).to eq(:hall) # (boom-3: his pick over :space)
+
+    described_class::REVERBS.each do |r|
+      MB::Sound.seed(1)
+      out = samples(MB::Sound.boom(MB::Sound::G1, :impact, reverb: r), 30)
+      expect(out.length).to eq(2)
+      expect(out[0].abs.max).to be > 0.1
+    end
+    expect { MB::Sound.boom(MB::Sound::G1, reverb: :stadium) }.to raise_error(ArgumentError, /stadium/)
+  end
+
+  it 'cuts the lows inside its tail with tail_cut' do
+    MB::Sound.seed(1)
+    dry = samples(MB::Sound.boom(MB::Sound::G1, tail: 0), 180)[0]
+    wet = { 0 => nil, 100 => nil }.to_h { |cut, _|
+      MB::Sound.seed(1)
+      out = samples(MB::Sound.boom(MB::Sound::G1, tail_cut: cut), 180)
+      [cut, band((out[0] + out[1]) / 2 - dry, nil, 100)]
+    }
+    expect(level(wet[100], 1, 3)).to be < level(wet[0], 1, 3) - 10
+  end
+
+  # boom-2 (the maintainer on boom-1's :sub_drop: "continued down and
+  # faded out below say 30Hz")
+  it 'falls through the note and fades out under the floor (below, floor)' do
+    MB::Sound.seed(1)
+    held = samples(MB::Sound.boom(MB::Sound::E1, :sub_drop, tail: 0, below: 0, floor: 0), 240)[0]
+    MB::Sound.seed(1)
+    drop = samples(MB::Sound.boom(MB::Sound::E1, :sub_drop, tail: 0), 240)[0]
+    expect(pitch_at(held, 2.5)).to be_within(1).of(MB::Sound::E1.frequency)
+    expect(pitch_at(drop, 1.6)).to be < 0.8 * MB::Sound::E1.frequency
+    peak = drop.abs.max
+    expect(level(drop, 2.4, 3.0)).to be < 20 * Math.log10(peak) - 60
+    expect(level(held, 2.4, 3.0)).to be > 20 * Math.log10(peak) - 30
+
+    # (below: 0 and floor: 0 play the boom-1 voice)
+    MB::Sound.seed(1)
+    a = samples(MB::Sound.boom(MB::Sound::G1, :trailer, tail: 0), 30)[0]
+    MB::Sound.seed(1)
+    b = samples(MB::Sound.boom(MB::Sound::G1, :trailer, tail: 0, below: 0, floor: 0), 30)[0]
+    expect(a).to eq(b)
+  end
+
+  # The level of +x+ in the 600-2400 Hz band over the 150-600 Hz band (dB)
+  # from +t0+ to +t1+ seconds: lower is darker.
+  def tilt(x, t0, t1)
+    level(band(x, 600, 2400), t0, t1) - level(band(x, 150, 600), t0, t1)
+  end
+
+  # The pitch of +x+ in Hz around +t+ seconds (zero crossings within
+  # +half+ seconds either side; for the sub drop's slow end).
+  def pitch_around(x, t, half = 0.1)
+    seg = x[((t - half) * 48000).to_i...((t + half) * 48000).to_i]
+    zc = (1...seg.size).select { |k| seg[k - 1] < 0 && seg[k] >= 0 }
+    (zc.length - 1) * 48000.0 / (zc[-1] - zc[0])
+  end
+
+  # boom-3 (the maintainer on boom-2's tails: "Too much noise in the tail.
+  # I'd want more damping with the apparent frequency of the tail decaying
+  # over time."): the reverb's highs die sooner (damping 0.95), and the
+  # rumble's lowpass falls as it fades (rumble_fall), so the tail darkens
+  # as it decays instead of keeping one spectrum.  boom-4 (his picks):
+  # :trailer darkens with tail_tone 800 and rumble_fall 2; :cinematic
+  # keeps damping 0.95 with the rumble as before (rumble_fall 0)
+  it 'darkens its tail as it decays' do
+    mono = ->(o) { (o[0] + o[1]) / 2 }
+    MB::Sound.seed(1)
+    now = mono.(samples(MB::Sound.boom(MB::Sound::E1, :trailer), 300))
+    MB::Sound.seed(1)
+    old = mono.(samples(MB::Sound.boom(MB::Sound::E1, :trailer, damping: 0.5, tail_tone: 0, rumble_fall: 0), 300)) # (boom-2's damping)
+    expect(tilt(now, 4, 5)).to be < tilt(now, 0.5, 1) - 5 # (measured -16.4 -> -24.3 dB)
+    expect(tilt(now, 4, 5)).to be < tilt(old, 4, 5) - 12 # (the undarkened :hall brightens to -5.8)
+    expect(described_class.settings(:trailer)).to include(tail_tone: 800, rumble_fall: 2)
+    expect(described_class.settings(:cinematic)).to include(damping: 0.95, rumble_fall: 0)
+    expect(described_class.settings(:impact)[:rumble_fall]).to eq(0) # (impact keeps its short rumble's tone)
+
+    # The rumble alone: its lowpass falls 2 octaves over rumble_decay
+    rumble = { 0 => nil, 2 => nil }.to_h { |fall, _|
+      MB::Sound.seed(1)
+      [fall, samples(MB::Sound.boom(MB::Sound::G1, tail: 0, click: 0, punch: 0, decay: 0.05, drive: 0, rumble_fall: fall), 240)[0]]
+    }
+    expect(tilt(rumble[2], 3, 4)).to be < tilt(rumble[2], 0.2, 0.7) - 6
+    expect((tilt(rumble[0], 3, 4) - tilt(rumble[0], 0.2, 0.7)).abs).to be < 3
+
+    # tail_tone: a lowpass inside the reverb in place of damping
+    dry = samples(MB::Sound.boom(MB::Sound::G1, tail: 0, rumble: 0), 180)[0]
+    wet = { 0 => nil, 800 => nil }.to_h { |tone, _|
+      out = samples(MB::Sound.boom(MB::Sound::G1, rumble: 0, damping: 0, tail_tone: tone), 180)
+      [tone, mono.(out) - dry]
+    }
+    expect(level(band(wet[800], 600, 2400), 1, 2)).to be < level(band(wet[0], 600, 2400), 1, 2) - 10
+  end
+
+  # boom-3 (the maintainer on :sub_drop: "slowing the pitch curve, so the
+  # pitch velocity gets close to (but not equal to) zero around
+  # 25Hz/fadeout"): sweep_curve is the fall's ease-out (Curve.db), so a
+  # higher one settles toward where below lands as the floor fades it out
+  it 'slows its sub drop toward the fade with sweep_curve' do
+    MB::Sound.seed(1)
+    x = samples(MB::Sound.boom(MB::Sound::E1, :sub_drop, tail: 0, sweep: 4.5, sweep_curve: 30, below: 1.04, floor: 40), 240)[0]
+    f = [1.5, 2.0, 2.5, 3.0].map { |t| pitch_around(x, t) }
+    expect(f[2]).to be_between(24, 28)
+    expect(f[3]).to be_between(21, 25.5)
+    expect(Math.log2(f[2] / f[3])).to be < 0.6 * Math.log2(f[0] / f[1]) # (still falling, but slower)
+    expect(f[3]).to be < f[2]
+    expect(level(x, 3.4, 3.6)).to be < 20 * Math.log10(x.abs.max) - 60
+  end
+
+  it 'plays without its noise burst by default, with it as a setting' do
+    hi = %i[off on].to_h { |k|
+      MB::Sound.seed(1)
+      out = samples(MB::Sound.boom(MB::Sound::G1, tail: 0, **(k == :on ? { noise: 0.061 } : {})), 120)[0]
+      [k, level(band(out, 8000, nil), 0.5, 1.5)]
+    }
+    expect(described_class.settings(:cinematic)[:noise]).to eq(0)
+    expect(hi[:on]).to be > hi[:off] + 10
+  end
+
+  # boom-4 (the maintainer on :impact: "Too much sine sustain at too high
+  # a frequency"): its body lands on E1 (was A1) and falls silent sooner
+  # (-20 dB by about 0.17 s, was 0.41), a thud rather than a held tone
+  it 'ends its impact body as a short low thud' do
+    note = described_class.home_note(:impact)
+    MB::Sound.seed(1)
+    x = samples(MB::Sound.boom(note, :impact, click: 0, noise: 0, rumble: 0, tail: 0), 60)[0]
+    expect(note.frequency).to be < 45
+    start = level(x, 0, 0.05)
+    expect(level(x, 0.2, 0.3)).to be < start - 25
+    expect(level(x, 0.4, 0.6)).to be < start - 60
+    expect(pitch_at(x, 0.1)).to be_within(1.5).of(note.frequency)
   end
 
   it 'plays in kits without its tail' do
@@ -171,19 +334,21 @@ RSpec.describe(MB::Sound::Boom, :aggregate_failures) do
     end
   end
 
-  # Levels: one hit at the default velocity at about -20.3 LUFS through the
-  # default master (the library's instrument loudness), or its peak at -3
-  # dBFS there when that comes first (:cinematic's click)
+  # Levels: one hit at the default velocity at about -26.3 LUFS through the
+  # default master (6 dB under the library's instrument loudness, so a boom
+  # sits against a 909 beat at its default level; boom-3, the maintainer's
+  # pick), or its peak at -9 dBFS there when that comes first (:cinematic's
+  # click)
   MB::Sound::Boom.preset_names.each do |name|
-    it "plays #{name} at about -20.3 LUFS, or peaking at -3 dBFS, through the default master" do
+    it "plays #{name} at about -26.3 LUFS, or peaking at -9 dBFS, through the default master" do
       MB::Sound.seed(0)
       out = MB::Sound::Sampler::CaptureOutput.new(channels: 2, buffer_size: 800)
       MB::Sound.render(out, MB::Sound.boom(described_class.home_note(name), name), seconds: 12)
       data = out.captured.map { |c| Numo::DFloat.cast(c) }
       peak = 20 * Math.log10(data.map { |c| c.abs.max }.max)
       lufs = MB::Sound.loudness(data).integrated
-      expect(peak).to be <= -2.5
-      expect(lufs <= -19.3 && (lufs >= -21.3 || peak >= -3.5)).to eq(true), "#{name}: #{lufs.round(2)} LUFS, peak #{peak.round(2)} dBFS"
+      expect(peak).to be <= -8.5
+      expect(lufs <= -25.3 && (lufs >= -27.3 || peak >= -9.5)).to eq(true), "#{name}: #{lufs.round(2)} LUFS, peak #{peak.round(2)} dBFS"
     end
   end
 end
