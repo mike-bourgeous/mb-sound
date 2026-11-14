@@ -380,6 +380,21 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       expect { rec.stretch(2, fill: :gap) }.to raise_error(ArgumentError, /for mode: :slice/)
     end
 
+    it 'cuts at beats with slices: :beats: the beat\'s marker where one is near, else the grid' do
+      # (two bars at 100 BPM: 8 beats of 28800 samples; markers at
+      # beats 0 and 2, one 500 samples after beat 4, and three inside
+      # the beats' sounds)
+      m = rec.with(markers: [0, 9000, 57600, 70000, 115700, 130000])
+      expect(m.beats).to eq(8)
+      want = [0, 28800, 57600, 86400, 115700, 144000, 172800, 201600]
+      expect(m.stretch(1.5, mode: :slice, slices: :beats).data(0)).to eq(m.stretch(1.5, mode: :slice, slices: want).data(0))
+      expect(m.stretch(1.5, mode: :slice, slices: :beats).data(0)).not_to eq(m.stretch(1.5, mode: :slice).data(0))
+      # (no markers: the grid of beats; no beats or tempo: nothing to count)
+      expect(rec.stretch(1.5, mode: :slice, slices: :beats).data(0)).to eq(rec.stretch(1.5, mode: :slice, slices: 8).data(0))
+      expect(rec.stretch(1.5, mode: :slice, slices: :beats).lineage[3]).to eq({ mode: :slice, slices: :beats })
+      expect { MB::Sound::Sample[rec.to_a].stretch(2, mode: :slice, slices: :beats) }.to raise_error(ArgumentError, /beats or bpm/)
+    end
+
     it 'stretches reversed samples in play order' do
       r = rec.rev.stretch(1.25, mode: :slice)
       expect(r).to be_reversed

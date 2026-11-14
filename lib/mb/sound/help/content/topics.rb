@@ -704,7 +704,9 @@ module MB
         words or how noisy it sounds; `stretch: :slice` or `:spectral`
         to say); `follow(:resample)` lets the pitch follow
         the tempo like a varispeed.  `.stretch(r, mode: :slice)` cuts at
-        the hits (markers, else onsets, else the 16th grid) and starts
+        the hits (markers, else onsets, else the 16th grid; `slices:
+        :beats` for one slice a beat, so notes with markers inside them
+        stay whole) and starts
         each slice at its stretched time, attacks copied exactly:
         slowing down leaves a gap after each hit (`fill: :stretch` keeps
         each hit whole and draws what it has died down to out to the next

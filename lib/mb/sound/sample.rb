@@ -1149,8 +1149,12 @@ module MB
       # The slice points (play order, from the region start) for the
       # slice stretch, and where they came from: +slices+ :markers,
       # :onsets, :grid (sixteenths at #bpm), a Duration (a grid of it at
-      # #bpm), an Integer (equal slices), an Array of positions, or a
-      # Sample::Slices; nil picks markers, else onsets, else the grid.
+      # #bpm), :beats (one slice a beat of #beats: each beat's marker
+      # where one sits within BEAT_REACH of the beat, else the beat's
+      # place on the grid; for sounds whose markers also fall inside
+      # their notes, which slices at every marker cut up), an Integer
+      # (equal slices), an Array of positions, or a Sample::Slices; nil
+      # picks markers, else onsets, else the grid.
       def slice_cuts(slices)
         case slices
         when nil
@@ -1162,6 +1166,17 @@ module MB
         when :markers then [markers.map(&:position), :markers]
         when :onsets, :transients then [slice_onsets, :onsets]
         when :grid then slice_cuts(1.n16)
+        when :beats, :beat
+          count = beats
+          raise ArgumentError, 'Slices at beats need the sample\'s beats or bpm (Sample[..., bpm: 98] or beats: 8)' unless count && count > 0
+          step = length / count.to_f
+          marks = markers.map(&:position)
+          cuts = Array.new((count - 1e-9).ceil) { |i|
+            at = i * step
+            near = marks.min_by { |m| (m - at).abs }
+            near && (near - at).abs <= step * BEAT_REACH ? near : at.round
+          }
+          [cuts, :grid]
         when Sequence::Duration
           slices.check_length('A slice grid')
           raise ArgumentError, 'A grid of slices needs the sample\'s bpm (Sample[..., bpm: 98])' unless @bpm
@@ -1172,10 +1187,14 @@ module MB
           [Array.new(slices) { |i| (i * length / slices.to_r).round }, :grid]
         when Array then [slices.map { |x| position(x).round }, :markers]
         when Slices then [slices.starts, :markers]
-        else raise ArgumentError, "slices: is :markers, :onsets, :grid, a Duration, a count, positions, or Slices (got #{slices.inspect})"
+        else raise ArgumentError, "slices: is :markers, :onsets, :grid, :beats, a Duration, a count, positions, or Slices (got #{slices.inspect})"
         end
       end
       private :slice_cuts
+
+      # How near a beat (in beats) a marker must be for `slices: :beats`
+      # to cut at it instead of at the beat's place on the grid.
+      BEAT_REACH = 0.125
 
       # The onsets the slice stretch cuts at: #onsets, plus softer ones
       # (SOFT_ONSET rises) within SOFT_ONSET_REACH of a sixteenth when the
