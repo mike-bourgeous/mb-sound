@@ -33,6 +33,14 @@ module MB
       # when the clock's rate changes (a speed knob) by more than
       # CLOCK_STEP; :resample bends the pitch with it (tape).
       #
+      # With `live: true` among +stretch+'s options (mode: :spectral) the
+      # phase vocoder runs as the loop plays instead (+stream+, a
+      # Sample::Spectral::Stream shared by the sample's channels, made by
+      # Sample#follow): it reads the loop wherever the timeline is, at
+      # whatever tempo, as one endless stream, so nothing is restretched
+      # or cached and tempo ramps are smooth (about 3% of one core for a
+      # stereo loop at 800-sample buffers, 5% at 128; Linux, 2026-11-14).
+      #
       # The stretch for a new tempo is made on the render thread the first
       # time that tempo plays (the slice stretch of a two-bar loop takes
       # 3-15 ms; spectral modes much longer: call #prepare for tempos
@@ -73,7 +81,7 @@ module MB
         # "spectral: tonal, spectral flatness 0.000"), or nil.
         attr_reader :stretch_reason
 
-        def initialize(sample, channel: 0, mode: :stretch, stretch: { mode: :slice }, align: :timeline, transport: nil, sample_rate: 48000, reason: nil, clock: nil)
+        def initialize(sample, channel: 0, mode: :stretch, stretch: { mode: :slice }, align: :timeline, transport: nil, sample_rate: 48000, reason: nil, clock: nil, stream: nil)
           raise ArgumentError, "Give a Sample to follow the tempo (got #{sample.class})" unless sample.is_a?(Sample)
           raise ArgumentError, "mode: is one of #{MODES.inspect} (got #{mode.inspect})" unless MODES.include?(mode)
           raise ArgumentError, "align: is one of #{ALIGNS.inspect} (got #{align.inspect})" unless ALIGNS.include?(align)
@@ -87,7 +95,9 @@ module MB
           @channel = Integer(channel)
           @follow_mode = mode
           @stretch_options = stretch.dup.freeze
-          @loop_stretch = LoopPlayer.loop_stretch(@stretch_options)
+          @loop_stretch = LoopPlayer.loop_stretch(@stretch_options.except(:live))
+          raise ArgumentError, 'live: true needs the stream Sample#follow makes (sample.follow(stretch: { mode: :spectral, live: true }))' if stretch[:live] && mode == :stretch && stream.nil?
+          @stream = mode == :stretch ? stream : nil
           @stretch_reason = mode == :stretch ? reason : nil
           @align = align
           @transport = transport
@@ -107,7 +117,7 @@ module MB
           @timeline_launch = nil
           @node_type_name = 'LoopPlayer'
           @graph_node_name = sample.name
-          prepare if mode == :stretch && clock.nil?
+          prepare if mode == :stretch && clock.nil? && @stream.nil?
         end
 
         # The clock this loop plays on (a Clock or a clock's name), or nil
@@ -151,7 +161,9 @@ module MB
           phase = Numo::DFloat.new(count).seq * (step / @whole_notes).to_f + base.to_f
           phase -= phase.floor
 
-          if @follow_mode == :stretch
+          if @stream
+            @buf[true] = @stream.pull(@channel, phase, (step / @whole_notes).to_f)
+          elsif @follow_mode == :stretch
             data = stretched(ratio_for(wnps))
             n = data.length
             idx = Numo::Int64.cast((phase * n + 1e-6).floor) % n # (positions on whole samples stay there)
@@ -174,7 +186,7 @@ module MB
 
         def to_s
           len = @whole_notes ? "#{MB::M.sigfigs(@whole_notes.to_f * 4, 4)} beats" : "#{MB::M.sigfigs(@loop_sample.seconds, 4)} s"
-          "LoopPlayer #{@loop_sample.name || 'sample'}#{" ch#{@channel}" unless @loop_sample.mono?} (#{@follow_mode == :stretch ? "#{@stretch_options[:mode] || :cyclic} stretch" : 'resample'}, #{len}#{", #{@clock.is_a?(MB::Sound::Clock) ? @clock : "clock #{@clock.inspect}"}" if @clock}#{"; #{@stretch_reason}" if @stretch_reason})"
+          "LoopPlayer #{@loop_sample.name || 'sample'}#{" ch#{@channel}" unless @loop_sample.mono?} (#{@follow_mode == :stretch ? "#{@stretch_options[:mode] || :cyclic} stretch#{', live' if @stream}" : 'resample'}, #{len}#{", #{@clock.is_a?(MB::Sound::Clock) ? @clock : "clock #{@clock.inspect}"}" if @clock}#{"; #{@stretch_reason}" if @stretch_reason})"
         end
 
         private
@@ -274,6 +286,7 @@ module MB
           a = @clock_rf
           phase = Numo::DFloat.zeros(count)
           step0 = nil
+          last_inc = 0.0
           c.pieces(a, a + count, ctx).each do |r0, r1, _pos0, step|
             bp_rf, bp_pos, _ = c.breakpoint(r0, ctx)
             i0 = (r0 - a).to_i
@@ -282,12 +295,15 @@ module MB
             base = (((bp_pos - @clock_zero) % len) / len).to_f
             inc = (step / len).to_f
             phase[i0...(i0 + n)] = (Numo::DFloat.new(n).seq + (r0 - bp_rf).to_f) * inc + base
+            last_inc = inc
             step0 ||= step
           end
           phase -= phase.floor
           @clock_rf = a + count
 
-          if @follow_mode == :stretch
+          if @stream
+            @buf[true] = @stream.pull(@channel, phase, last_inc)
+          elsif @follow_mode == :stretch
             # The loop's length in seconds at the clock's rate now
             seconds = step0 && step0 > 0 ? len / (step0 * ctx.clock_rate) : @loop_sample.seconds.to_r
             data = stretched(clock_ratio(seconds))

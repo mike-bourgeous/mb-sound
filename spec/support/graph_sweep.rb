@@ -386,9 +386,11 @@ module GraphSweep
         # play with a gap; stretch-fixes-1)
         smp.follow * 0.3 + smp.follow(:resample, align: :launch) * 0.3 + st.follow(stretch: { mode: :slice, slices: 4, fill: :stretch, cycle: 0.001 })[1] * 0.3 +
           smp.follow(stretch: { mode: :slice, slices: 1, fill: :stretch, cycle: 0.004 }) * 0.2 + smp.follow(stretch: { mode: :slice, slices: 1, fill: :cyclic, cycle: 0.004 }) * 0.2 +
-          # (the spectral stretch with its end joined to its start, as
-          # players ask for it, and with its own end)
-          smp.follow(stretch: { mode: :spectral, window: 256 }) * 0.2 + smp.follow(stretch: { mode: :spectral, window: 256, wrap: false }) * 0.2
+          # (the spectral stretch of the loop as a loop, as players ask
+          # for it, and with its own ends)
+          smp.follow(stretch: { mode: :spectral, window: 256 }) * 0.2 + smp.follow(stretch: { mode: :spectral, window: 256, wrap: false }) * 0.2 +
+          # (and the vocoder running live, both channels on one stream)
+          smp.follow(stretch: { mode: :spectral, window: 256, live: true }) * 0.2 + st.follow(stretch: { mode: :spectral, window: 256, live: true })[0] * 0.2
       }],
       # Region lanes (regions-1): overlapping regions with crossfades in
       # ACID's shapes, an offset, a transposed (Catmull-Rom) region off the

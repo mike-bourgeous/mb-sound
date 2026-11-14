@@ -369,6 +369,140 @@ module MB
           end
         end
 
+        # The phase vocoder following a loop live: #pull gives the next
+        # output samples for the loop positions asked (a phase per
+        # sample, as a tempo-following player counts them), each frame
+        # read from the loop wherever the positions have got to, so the
+        # stretch follows any tempo, and tempo changes, as one endless
+        # stream: no pass has an end, and nothing is restretched.  At a
+        # steady tempo the frames are Spectral.looped's (the same time
+        # map around +onsets+, the same Vocoder), without the closing:
+        # a stream never comes back to its start.
+        #
+        # Frames are a hop apart on the stream's own sample count,
+        # whatever the buffer sizes; a frame is centered up to half a
+        # window ahead of the samples it helps make, so the positions
+        # that far ahead are those the current speed leads to (a tempo
+        # change is heard within half a window, 43 ms).  A jump in the
+        # positions (a seek, a relaunch) starts the phases again.
+        class Stream
+          attr_reader :channels
+
+          def initialize(channels, onsets: nil, window: WINDOW, overlap: OVERLAP, shape: :hann, link: true)
+            @voc = Vocoder.new(channels, window: window, overlap: overlap, shape: shape, link: link, wrap: true)
+            @channels = @voc.channels
+            @n = @voc.window
+            @hs = @voc.hop
+            @len = @voc.length
+            @onsets = onsets && !onsets.empty? ? onsets.sort.freeze : nil
+            @size = 1 << Math.log2(4 * @n).ceil
+            @ring = Array.new(@channels) { Numo::DFloat.zeros(@size) }
+            @wring = Numo::DFloat.zeros(@size)
+            @floor = @voc.squares.sum / @hs * 1e-3
+            @time = 0        # output samples made
+            @frames = 0      # frames made (frame k is centered on output sample k × hop)
+            @line = nil      # the last frame's place on the loop, unwrapped (samples)
+            @phase = nil     # and its phase
+            @ratio = nil
+            @map = nil
+            @resets = nil
+            @block = nil
+            @block_start = nil
+            @reads = Array.new(@channels, 0)
+          end
+
+          # The next +phases+.length output samples of channel +channel+,
+          # for loop positions +phases+ (0...1, one per sample) moving on
+          # by +step+ per sample after the last.  Channels are read side
+          # by side: the first to ask for a stretch of time makes it for
+          # all of them.
+          def pull(channel, phases, step)
+            count = phases.length
+            if @reads[channel] == @block_start && @block && @block[0].length == count
+              @reads[channel] += count
+              return @block[channel]
+            end
+
+            grow(count) if count + 2 * @n > @size
+            stop = @time + count
+            while @frames * @hs < stop + @n / 2
+              at = @frames * @hs
+              phase = at < stop ? phases[at - @time] : phases[count - 1] + (at - stop + 1) * step
+              make_frame(at, phase, step)
+            end
+
+            idx = (Numo::Int64.new(count).seq + @time) % @size
+            w = @wring[idx]
+            w[w < @floor] = @floor
+            @block = @ring.map { |r| o = r[idx] / w; r[idx] = 0; o }
+            @wring[idx] = 0
+            @block_start = @time
+            @time = stop
+            @reads[channel] = stop
+            @block[channel]
+          end
+
+          private
+
+          # Frame centered on output sample +at+, the loop at +phase+
+          def make_frame(at, phase, step)
+            move = step * @len * @hs
+            if @line.nil?
+              @line = phase * @len
+            else
+              d = phase - @phase
+              d -= d.round
+              # (a jump: not where the speed leads, by more than a window)
+              if (d * @len - move).abs > @n
+                @voc.restart
+                @line = phase * @len
+              else
+                @line += d * @len
+              end
+            end
+            @phase = phase
+
+            center = @line.round
+            attack = false
+            if @onsets && move > 0
+              ratio = (@hs / move).round(4)
+              if ratio != @ratio
+                @ratio = ratio
+                on3 = (0...3).flat_map { |k| @onsets.map { |o| o + k * @len } }
+                @map, kept = Spectral.time_map(3 * @len, ratio, on3, @n, @hs)
+                @resets = kept.select { |o| o >= @len && o < 2 * @len }.map { |o| o - @len }
+              end
+              pass, rem = @line.divmod(@len)
+              center = @map.call((rem + @len) * @ratio).round - @len + pass * @len
+              in_loop = center % @len
+              attack = @resets.any? { |o| (((in_loop - o + @len / 2) % @len) - @len / 2).abs < @n / 2 }
+            end
+
+            ys = @voc.frame(@frames, center, attack: attack)
+            # (what would land before the samples still to come is left out)
+            from = MB::M.max(0, @time - (at - @n / 2))
+            pos = (at - @n / 2 + from) % @size
+            while from < @n
+              k = MB::M.min(@n - from, @size - pos)
+              ys.each_with_index { |y, ch| @ring[ch][pos...(pos + k)] += y[from...(from + k)] }
+              @wring[pos...(pos + k)] += @voc.squares[from...(from + k)]
+              from += k
+              pos = 0
+            end
+            @frames += 1
+          end
+
+          # A ring big enough for buffers of +count+ samples.
+          def grow(count)
+            size = 1 << Math.log2(count + 2 * @n).ceil
+            old = (Numo::Int64.new(@size).seq + @time) % @size
+            new = (Numo::Int64.new(@size).seq + @time) % size
+            @ring = @ring.map { |r| Numo::DFloat.zeros(size).tap { |b| b[new] = r[old] } }
+            @wring = Numo::DFloat.zeros(size).tap { |b| b[new] = @wring[old] }
+            @size = size
+          end
+        end
+
         # Identity phase locking (Laroche & Dolson 1999): peak bins keep
         # +advanced+ (their phases moved on by their frequencies); every
         # other bin takes its peak's phase plus its own analysis phase

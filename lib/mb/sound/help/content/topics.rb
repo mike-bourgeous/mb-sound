@@ -754,8 +754,11 @@ module MB
         `.stretch(8, mode: :paul, overlap: 2,
         shape: :paul, link: false)`.  A sample that loops (a loop file,
         `.looped`, anything `follow` plays) gets a spectral stretch
-        whose end runs into its start (`wrap: true` asks for it, `wrap:
-        false` leaves the end as the stretch made it).
+        that is a loop itself: read round and round, its end flowing
+        into its start (`wrap: true` asks for it, `wrap: false` gives a
+        stretch with its own ends, `passes: 4` four passes as one
+        piece).  `follow(stretch: { mode: :spectral, live: true })` runs
+        the vocoder as the loop plays: any tempo, nothing restretched.
         They are offline edits: a new Sample, made once; results over 30
         s read with `mips: :octave` (smaller playback tables).
       TEXT

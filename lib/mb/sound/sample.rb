@@ -785,6 +785,7 @@ module MB
       #     bg :pad, pad.follow(stretch: :slice)    # say which
       #     bg :vinyl, brk.follow(:resample)         # pitch follows the tempo
       #     bpm 128                                  # every follower restretches
+      #     bg :pad, pad.follow(stretch: { mode: :spectral, live: true })   # the vocoder runs as it plays: any tempo, nothing restretched
       #
       # +clock:+ plays it on a clock instead of the session tempo (see
       # #clocked).
@@ -802,8 +803,23 @@ module MB
         end
         opts = stretch.is_a?(Hash) ? stretch : { mode: stretch }
         clock = Sequence::Clocked.check_name(clock) if clock.is_a?(Symbol)
-        nodes = Array.new(channel_count) { |c| GraphNode::LoopPlayer.new(self, channel: c, mode: mode, stretch: opts, align: align, reason: reason, clock: clock) }
+        # (live: one vocoder stream for every channel's player)
+        stream = mode == :stretch && opts[:live] ? spectral_stream(**opts.except(:live)) : nil
+        nodes = Array.new(channel_count) { |c| GraphNode::LoopPlayer.new(self, channel: c, mode: mode, stretch: opts, align: align, reason: reason, clock: clock, stream: stream) }
         nodes.length == 1 ? nodes[0] : GraphNode::Channels.new(nodes)
+      end
+
+      # The phase vocoder following this sample as a loop, live (a
+      # Spectral::Stream, what `follow(stretch: { mode: :spectral, live:
+      # true })` plays through): +window+, +overlap+, +shape+, +link+,
+      # and +transients+ (true or false) as #stretch takes them.
+      def spectral_stream(mode: :spectral, window: nil, overlap: Spectral::OVERLAP, shape: :hann, link: true, transients: true, **others)
+        unless others.empty? && Spectral::MODE_ALIASES.fetch(mode.to_sym, mode.to_sym) == :spectral && (transients == true || transients == false)
+          raise ArgumentError, 'live: follows with the phase vocoder (mode: :spectral, with window:, overlap:, shape:, link:, and transients: true or false)'
+        end
+        n = position(window.nil? ? Spectral::WINDOW.samples : window).round
+        n += 1 if n.odd?
+        Spectral::Stream.new(to_a, onsets: transients ? onsets(wrap: true) : nil, window: n, overlap: overlap, shape: shape, link: link)
       end
 
       # What kind of sound this is, for choosing a stretch (Sample#follow's

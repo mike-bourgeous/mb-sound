@@ -7,7 +7,7 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
   def peak_hz(d)
     m = d.length / 2
     seg = Numo::DFloat.cast(d[(m - 4096)...(m + 4096)])
-    (Numo::Pocketfft.rfft(seg * described_class.hann(8192)).abs.max_index * 48000.0 / 8192)
+    (Numo::Pocketfft.rfft(seg * MB::Sound::Sample::Spectral.hann(8192)).abs.max_index * 48000.0 / 8192)
   end
 
   def rms(d)
@@ -182,7 +182,7 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       l = d.length
       tiled = Numo::DFloat.zeros(3 * l)
       3.times { |k| tiled[(k * l)...((k + 1) * l)] = d }
-      w = described_class.hann(2048)
+      w = MB::Sound::Sample::Spectral.hann(2048)
       mags = (0...((tiled.length - 2048) / 512)).map { |k| Numo::Pocketfft.rfft(tiled[(k * 512)...(k * 512 + 2048)] * w).abs }
       at = []
       inside = []
@@ -282,6 +282,88 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       expect(played).to eq(loop.stretch(1.25, mode: :spectral, wrap: true).data(0))
       expect(played).not_to eq(loop.stretch(1.25, mode: :spectral).data(0))
       expect(loop.follow(stretch: { mode: :spectral, wrap: false }).sample(60000)).to eq(loop.stretch(1.25, mode: :spectral).data(0))
+    end
+  end
+
+  describe MB::Sound::Sample::Spectral::Stream do
+    let(:held) {
+      i = Numo::DFloat.new(48000).seq / 48000
+      (Numo::NMath.sin(i * (2 * Math::PI * 110)) * 0.3 + Numo::NMath.sin(i * (2 * Math::PI * 165) + 1) * 0.2 + Numo::NMath.sin(i * (2 * Math::PI * 331) + 2) * 0.1) *
+        (0.8 + 0.2 * Numo::NMath.cos(i * (2 * Math::PI * 2)))
+    }
+
+    # +seconds+ of a stream of +stream+ at +ratio+ in buffers of +size+,
+    # per channel
+    def run(stream, ratio, seconds, size)
+      total = (48000 * seconds).round
+      step = 1.0 / (48000 * ratio)
+      out = Array.new(stream.channels) { Numo::DFloat.zeros(total) }
+      pos = 0
+      while pos < total
+        count = [size, total - pos].min
+        phases = (Numo::DFloat.new(count).seq + pos) * step
+        phases -= phases.floor
+        stream.channels.times { |ch| out[ch][pos...(pos + count)] = stream.pull(ch, phases, step) }
+        pos += count
+      end
+      out
+    end
+
+    it 'stretches a loop as it plays: no wrap to hear, the level kept, the same at any buffer size' do
+      [0.77, 1.25].each do |r|
+        y = run(described_class.new([held]), r, 3.2, 800)[0]
+        expect(rms(y) / rms(held)).to be_within(0.02).of(1)
+        expect((y[1..] - y[0...-1]).abs.max).to be < 1.1 * (held[1..] - held[0...-1]).abs.max
+        expect(peak_hz(y)).to be_within(6).of(110)
+        expect(run(described_class.new([held]), r, 3.2, 367)[0]).to eq(y)
+      end
+    end
+
+    it 'turns the channels together and keeps a hit at the loop start' do
+      # (a quiet pad under the hit: a stream's held partials come round
+      # with other phases each pass, its attacks with the input's)
+      x = held * 0.02
+      x[0...2400] += Numo::NMath.sin(Numo::DFloat.new(2400).seq * 0.9) * Numo::NMath.exp(-Numo::DFloat.new(2400).seq / 300.0) * 0.6
+      l, r = run(described_class.new([x, x * 0.5], onsets: [0]), 1.25, 3, 800)
+      expect((r - l * 0.5).abs.max).to be < 1e-9
+      # (the second and third time round: the hit as it is in the input)
+      [60000, 120000].each { |q| expect((l[q...(q + 240)] - x[0...240]).abs.max).to be < 0.04 }
+    end
+
+    it 'follows tempo ramps and jumps without clicks' do
+      stream = described_class.new([held])
+      phase = 0.0
+      out = []
+      step = 0.0
+      150.times do |b|
+        phases = Numo::DFloat.zeros(800)
+        800.times do |k|
+          t = (b * 800 + k) / 48000.0
+          step = 1.0 / (48000 * (0.77 + 0.24 * [t, 2].min))
+          phases[k] = phase % 1.0
+          phase += step
+        end
+        phase += 0.37 if b == 120
+        out << stream.pull(0, phases, step).dup
+      end
+      y = SpecBuffers.join(out)
+      expect(y.isnan.any?).to be(false)
+      expect((y[1..] - y[0...-1]).abs.max).to be < 1.5 * (held[1..] - held[0...-1]).abs.max
+      [0...48000, 48000...96000, 100000...120000].each { |range| expect(rms(y[range]) / rms(held)).to be_within(0.1).of(1) }
+    end
+
+    it 'plays under follow with live: true' do
+      loop = MB::Sound::Sample[[Numo::SFloat.cast(held), Numo::SFloat.cast(held * 0.5)], bpm: 150, beats: 2.5]
+      node = loop.follow(stretch: { mode: :spectral, live: true })
+      expect(node[0].to_s).to include('spectral stretch, live')
+      l = node[0].sample(800).dup
+      r = node[1].sample(800).dup
+      want = run(loop.spectral_stream, 1.25, 800 / 48000.0, 800)
+      expect(l).to eq(Numo::SFloat.cast(want[0]))
+      expect(r).to eq(Numo::SFloat.cast(want[1]))
+      expect { loop.follow(stretch: { mode: :slice, live: true }) }.to raise_error(ArgumentError, /live: follows with the phase vocoder/)
+      expect { loop.follow(stretch: { mode: :spectral, live: true, randomize: 0.5 }) }.to raise_error(ArgumentError, /live: follows with the phase vocoder/)
+      expect { MB::Sound::GraphNode::LoopPlayer.new(loop, stretch: { mode: :spectral, live: true }) }.to raise_error(ArgumentError, /needs the stream/)
     end
   end
 
