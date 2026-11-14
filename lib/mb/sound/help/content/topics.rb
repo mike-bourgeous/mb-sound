@@ -694,7 +694,8 @@ module MB
         `stretch: { mode: :spectral, transients: :markers }` runs the
         phase vocoder with its attacks at the markers instead of at
         detected onsets; add `confirm: true` to keep only the markers
-        that have an attack, each on its attack.
+        that have an attack, each on its attack (for `stretch: :slice`
+        too: no cut inside a hit's decay).
       TEXT
       commands :loops
       dsl :follow

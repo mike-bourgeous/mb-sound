@@ -1049,7 +1049,10 @@ module MB
       # the given positions (and the region's start) that have a detected
       # onset that near, each moved onto its onset: markers set by a
       # grid sit a few ms before their hits or on sound with no attack
-      # (a held pad's grid markers then leave the plain vocoder).
+      # (a held pad's grid markers then leave the plain vocoder).  With
+      # mode: :slice, +confirm+ does the same for +slices+ (the markers
+      # or positions given): cuts only at attacks, so a marker inside a
+      # hit's decay does not cut the hit in two.
       # :paul (:paulstretch) is long windows with random phases: windows of
       # +window+ (0.25 s), +overlap+ (4; 2 gives half as many phase
       # changes per second, so each partial spreads over half the
@@ -1094,12 +1097,15 @@ module MB
       #     brk.stretch(1.25, mode: :spectral, transients: :markers)               # attacks kept at the file's markers
       #     brk.stretch(1.25, mode: :spectral, transients: [0, 1.n8, 2.n8, 13230.samples])   # or at these positions
       #     brk.stretch(1.25, mode: :spectral, transients: :markers, confirm: true)   # only markers with an attack, on the attack
+      #     brk.stretch(1.25, mode: :slice, confirm: true)                             # slices only at markers with an attack
       #     hit.stretch(1.25, mode: :none)             # as recorded, then silence
       def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann,
                   slices: nil, fade: nil, fill: nil, confirm: nil)
         unless confirm.nil? || confirm == false
-          unless transients == :markers || transients.is_a?(Array) || transients.is_a?(Slices)
-            raise ArgumentError, 'confirm: is for transients: :markers or positions (mode: :spectral and :paul)'
+          slicing = SLICE_MODES.include?(mode.to_sym)
+          given = slicing ? slices : transients
+          unless given == :markers || given.is_a?(Array) || given.is_a?(Slices) || (slicing && given.nil?)
+            raise ArgumentError, 'confirm: is for transients: :markers or positions (mode: :spectral and :paul) and slices: :markers or positions (mode: :slice)'
           end
         end
         if NONE_MODES.include?(mode.to_sym)
@@ -1116,7 +1122,7 @@ module MB
           unless fit == :auto && window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
             raise ArgumentError, 'mode: :slice takes slices:, fade:, fill:, and (for fill: :stretch) cycle: and crossfade:'
           end
-          return slice_stretch(ratio, slices, fade, fill || :gap, cycle, crossfade)
+          return slice_stretch(ratio, slices, fade, fill || :gap, cycle, crossfade, confirm)
         end
         raise ArgumentError, 'slices:, fade:, and fill: are for mode: :slice' unless slices.nil? && fade.nil? && fill.nil?
 
@@ -1171,13 +1177,20 @@ module MB
       private :unstretched
 
       # The slice stretch (see #stretch and SliceStretch).
-      def slice_stretch(ratio, slices, fade, fill, cycle, crossfade)
+      def slice_stretch(ratio, slices, fade, fill, cycle, crossfade, confirm = nil)
         raise ArgumentError, "Stretch ratios are positive (got #{ratio.inspect})" unless ratio.is_a?(Numeric) && ratio > 0
         raise ArgumentError, "fill: is one of #{SliceStretch::FILLS.inspect} (got #{fill.inspect})" unless SliceStretch::FILLS.include?(fill)
         cuts, = slice_cuts(slices)
+        if confirm
+          # (the marked positions that have an attack, each on its attack:
+          # a marker inside a hit's decay no longer cuts the hit in two)
+          reach = position(confirm == true ? TRANSIENT_REACH : confirm)
+          cuts = onsets.select { |o| cuts.any? { |c| (c - o).abs <= reach } }
+        end
         f = position(fade.nil? ? SliceStretch::FADE : fade).round
         kw = { mode: :slice }
         kw[:slices] = slices unless slices.nil?
+        kw[:confirm] = confirm if confirm
         kw[:fade] = fade unless fade.nil?
         kw[:fill] = fill unless fill == :gap
         kw[:cycle] = cycle unless cycle == 25.ms

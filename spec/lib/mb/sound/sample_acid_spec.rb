@@ -525,12 +525,26 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
         expect(held.stretch(1.5, mode: :spectral, transients: [6000, 12000, 18000, 24000], confirm: true).data(0)).to eq(held.stretch(1.5, mode: :spectral, transients: [0]).data(0))
       end
 
+      it 'cuts slices only at the marked attacks (mode: :slice)' do
+        m = plain.with(markers: grid)
+        want = plain.stretch(1.5, mode: :slice, slices: found).data(0)
+        expect(m.stretch(1.5, mode: :slice, confirm: true).data(0)).to eq(want)
+        expect(m.stretch(1.5, mode: :slice, slices: :markers, confirm: true).data(0)).to eq(want)
+        expect(plain.stretch(1.5, mode: :slice, slices: grid, confirm: true).data(0)).to eq(want)
+        # (as given, the marker on the held chord and the early ones cut
+        # where no hit starts)
+        expect(m.stretch(1.5, mode: :slice).data(0)).not_to eq(want)
+        expect(m.stretch(1.5, mode: :slice, confirm: true).lineage[3]).to eq({ mode: :slice, confirm: true })
+        expect(plain.stretch(1.5, mode: :slice, slices: grid, confirm: 5.ms).data(0)).to eq(plain.stretch(1.5, mode: :slice, slices: [24001, 30001, 36001]).data(0))
+        expect { plain.stretch(1.5, mode: :slice, slices: 8, confirm: true) }.to raise_error(ArgumentError, /confirm: is for/)
+      end
+
       it 'reads reversed samples in play order, prints, and says what it is for' do
         back = grid.map { |h| 48000 - h }
         expect(plain.rev.stretch(1.5, mode: :spectral, transients: back, confirm: true).data(0)).to eq(plain.stretch(1.5, mode: :spectral, transients: found).rev.data(0))
         expect(plain.stretch(1.5, mode: :spectral, transients: grid, confirm: true).lineage[3]).to eq({ mode: :spectral, transients: grid, confirm: true })
         expect { plain.stretch(1.5, mode: :spectral, confirm: true) }.to raise_error(ArgumentError, /confirm: is for transients: :markers or positions/)
-        expect { plain.stretch(1.5, mode: :slice, confirm: true) }.to raise_error(ArgumentError, /confirm: is for/)
+        expect { plain.stretch(1.5, confirm: true) }.to raise_error(ArgumentError, /confirm: is for/)
       end
     end
 
