@@ -483,6 +483,41 @@ RSpec.describe(MB::Sound::GraphNode::Phaser, :aggregate_failures) do
       expect { 110.hz.saw.phaser(direction: Float::NAN) }.to raise_error(ArgumentError, /finite/)
       expect(110.hz.saw.phaser(:barberpole, direction: -2).to_ruby).to include('phaser(:barberpole, direction: -2)')
     end
+
+    it 'leans the feedback to one half of the sweep with lean: (his hypothesis)' do
+      # the feedback's scale: 1 while the LFO rises (its first quarter cycle and last), 1 - |lean| while it falls
+      scale = klass.lean_feedback(1.0, 0.5, 1, 0, 48000)
+      v = collect(scale, 48000)
+      expect(v[0...9000].to_a.uniq).to eq([1.0])
+      expect(v[15000...33000].to_a.uniq).to eq([0.5])
+      expect(v[39000..].to_a.uniq).to eq([1.0])
+      expect(v[12000 + 2400 - 1]).to be_within(1e-6).of(0.5) # (the turn glides over LEAN_SMOOTH, 2400 samples)
+      down = collect(klass.lean_feedback(0.8, -1, 1, 0, 48000), 48000)
+      expect(down[0...9000].to_a.uniq).to eq([0.0])
+      expect(down[15000...33000].to_a.uniq.length).to eq(1)
+      expect(down[20000]).to be_within(1e-6).of(0.8)
+      # rising first: lean 1 plays the full feedback there, lean -1 none (as feedback 0)
+      opts = { rate: 1, above: nil, shape: :triangle }
+      full = collect(110.hz.saw.phaser(:jet, **opts), 9000)
+      none = collect(110.hz.saw.phaser(:jet, **opts, feedback: 0), 9000)
+      expect((collect(110.hz.saw.phaser(:jet, **opts, lean: 1), 9000) - full).abs.max).to be < 1e-4
+      expect((collect(110.hz.saw.phaser(:jet, **opts, lean: -1), 9000) - none).abs.max).to be < 1e-4
+      expect(collect(110.hz.saw.phaser(:jet, **opts, lean: 0), 9000)).to eq(full)
+      # a moving lean node, read once per sample (while rising: 1 for a positive lean, 1 + lean for a negative one)
+      lv = collect(3.hz.lfo, 9000)
+      v = collect(klass.lean_feedback(1.0, 3.hz.lfo, 1, 0, 48000), 9000)
+      want = lv.to_a.map { |l| l < 0 ? 1 + l : 1.0 }
+      expect((v - Numo::SFloat.cast(want)).abs.max).to be < 1e-6
+      # a node lean, stereo, and a feedback node
+      a = collect_stereo(110.hz.saw.phaser(:swirl, lean: -0.7.constant), 24000)
+      b = collect_stereo(110.hz.saw.phaser(:swirl, lean: -0.7), 24000)
+      2.times { |c| expect((a[c] - b[c]).abs.max).to be < 1e-4 }
+      expect(collect(110.hz.saw.phaser(:jet, **opts, lean: -1, feedback: 0.3.constant), 9600).isfinite.all?).to eq(true)
+      expect { 110.hz.saw.phaser(lean: 1.5) }.to raise_error(ArgumentError, /lean/)
+      expect { 110.hz.saw.phaser(lean: 1, sweep: 0.constant) }.to raise_error(ArgumentError, /sweep/)
+      expect { 110.hz.saw.phaser(:barberpole, lean: 1) }.to raise_error(ArgumentError, /barber/)
+      expect(110.hz.saw.phaser(:jet, lean: -1).to_ruby).to include('phaser(:jet, lean: -1)')
+    end
   end
 
   it 'prints the effects-3 settings back as Ruby' do

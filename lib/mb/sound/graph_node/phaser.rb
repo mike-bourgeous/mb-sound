@@ -66,10 +66,14 @@ module MB
         SHAPES = %i[sine triangle].freeze
 
         # The settings GraphNode#phaser takes (besides a preset name or rate).
-        KEYS = %i[rate depth stages feedback mix dry wet spread center range shape phase sweep above amount direction].freeze
+        KEYS = %i[rate depth stages feedback mix dry wet spread center range shape phase sweep above amount direction lean].freeze
 
         # Feedback magnitude that amount: 1 reaches (see .amount_settings).
         AMOUNT_FEEDBACK = 0.9
+
+        # Seconds over which +lean:+'s feedback moves between the LFO's
+        # halves (a #smooth S-curve at each turn of the sweep).
+        LEAN_SMOOTH = 0.05
 
         preset_family :phaser, kind: :effect, label: 'phaser preset', keys: KEYS,
           about: 'Phasers: sig.phaser(:swirl)',
@@ -89,6 +93,7 @@ module MB
         param :above, nil, range: 20.0..2000.0, unit: 'Hz', description: 'Keeps the lows dry below this crossover (Linkwitz-Riley, 4th order)'
         param :amount, 0.5, range: 0.0..1.0, description: 'Light (0) to extreme (1): depth, mix, feedback, and stages together (0.5 the preset)'
         param :direction, nil, range: -4.0..4.0, description: 'Barber pole: notches climbing (:up, > 0) or falling (:down, < 0) forever, the size scaling the speed'
+        param :lean, nil, range: -1.0..1.0, description: 'Feedback on one half of the sweep: 1 only while it rises, -1 only while it falls (a one-way whoosh)'
 
         preset :vintage, rate: 0.5, depth: 1.0, stages: 4, feedback: 0.0, mix: 0.5, spread: 0.0, center: 700.0, range: 4.0, shape: :sine,
           tags: %i[gentle four_stage classic], about: 'A four-stage phaser, two notches swept 175-2800 Hz at 0.5 Hz (the defaults)'
@@ -410,7 +415,7 @@ module MB
             return crossover(input, above, preset, options.merge(above: nil))
           end
 
-          s = { dry: 1, wet: 1, phase: 0.0, sweep: nil, above: nil, amount: nil, direction: nil }.merge(preset_s)
+          s = { dry: 1, wet: 1, phase: 0.0, sweep: nil, above: nil, amount: nil, direction: nil, lean: nil }.merge(preset_s)
           s.delete(:center) if options[:range].is_a?(Range)
           s.merge!(options)
           amount_settings(s) unless s[:amount].nil?
@@ -445,6 +450,17 @@ module MB
           end
           raise ArgumentError, "phaser sweep: is a node (-1..1; got #{sweep.inspect})" if sweep && !sweep.respond_to?(:sample)
           direction = barber_speed(s[:direction])
+          lean = s[:lean]
+          lean = GraphNode.build_setting(lean) unless lean.respond_to?(:sample)
+          lean = nil if lean.is_a?(Numeric) && lean == 0
+          unless lean.nil? || lean.respond_to?(:sample) || (lean.is_a?(Numeric) && lean.real? && lean.abs <= 1)
+            raise ArgumentError, "phaser lean: is from -1 (feedback only while the sweep falls) to 1 (only while it rises), or a node (got #{lean.inspect})"
+          end
+          raise ArgumentError, 'phaser lean: follows the built-in LFO; give it or sweep:, not both' if lean && sweep
+          raise ArgumentError, 'phaser lean: is for a back-and-forth sweep; a barber pole (direction:) only moves one way' if lean && !direction.nil?
+          # (a node's |lean| once for both sides: a .tee of the node per side
+          # trips the shared-buffer check, see design/notes/phaser.md)
+          lean = [lean, lean.aabs] if lean.respond_to?(:sample)
           raise ArgumentError, 'phaser: direction: makes its own sweeps; give it or sweep:, not both' if !direction.nil? && sweep
 
           l, r = StereoDelayMethods.sides(input, 'phaser')
@@ -455,7 +471,8 @@ module MB
               next barber(side, s, direction, phase + offset, center, octaves, feedback, dry, wet, sample_rate)
             end
             sw = sweep || ModulationLfo.tone(s[:rate], shape: shape, phase: phase + offset, sample_rate: sample_rate, what: 'phaser')
-            new(side, sweep: sw, center: center, range: octaves, depth: s[:depth], feedback: feedback, dry: dry, wet: wet,
+            fb = lean ? lean_feedback(feedback, lean, s[:rate], phase + offset, sample_rate) : feedback
+            new(side, sweep: sw, center: center, range: octaves, depth: s[:depth], feedback: fb, dry: dry, wet: wet,
               stages: s[:stages], sample_rate: sample_rate)
           }
 
@@ -494,6 +511,34 @@ module MB
           }
           d = Chorus.scale(side, dry)
           Mixer.new(d ? [d, *chains] : chains, sample_rate: sample_rate, stop_early: false)
+        end
+
+        # Feedback +feedback+ (a number or node) leaning to one half of the
+        # LFO's cycle by +lean+ (-1..1 or a node; effects-4, the
+        # maintainer's hypothesis "setting the feedback high on the
+        # descending half of the LFO phase and low on the ascending phase
+        # ... will give exactly the descending-only or ascending-only
+        # sound"): the full feedback while the sweep moves the leaning way
+        # (rising for a positive lean), feedback x (1 - |lean|) while it
+        # moves back, moving between them over LEAN_SMOOTH at each turn.
+        # The LFO (sine or triangle, middle rising at phase 0) rises from
+        # phase -0.25 to 0.25: a square a quarter cycle ahead at +rate+
+        # and +phase+ marks it (+1 rising), locked to the LFO.
+        def self.lean_feedback(feedback, lean, rate, phase, sample_rate)
+          return feedback if feedback.is_a?(Numeric) && feedback == 0
+          rising = ModulationLfo.rate_tone(rate, sample_rate: sample_rate, what: 'phaser').asquare
+          rising.with_phase((phase + 0.25) % 1) unless (phase + 0.25) % 1 == 0
+          rising = rising.smooth(LEAN_SMOOTH)
+          # scale = 1 - (|lean| - lean x rising) / 2; a node lean comes as
+          # [lean, |lean|] (built once by .build for both sides, each reader
+          # taking its own branch)
+          scale = if lean.is_a?(Numeric)
+                    rising * (0.5 * lean) + (1 - 0.5 * lean.abs)
+                  else
+                    lean, lean_abs = lean.is_a?(Array) ? lean : [lean, lean.aabs]
+                    lean_abs * -0.5 + lean * rising * 0.5 + 1
+                  end
+          feedback.is_a?(Numeric) ? scale * feedback.to_f : scale * feedback
         end
 
         # The barber pole's signed speed for the +direction:+ setting: nil

@@ -500,7 +500,7 @@ module GraphSweep
           c.sig.phaser(9, stages: 32, feedback: c.mod(-0.9, 0.9)) +
           # (effects-4: a direction knob through zero, a scaled numeric direction on a tempo rate, :jet without its split)
           c.sig.phaser(:barberpole, rate: 6, direction: c.mod(-2, 2, 3)) + c.sig.phaser(:barberpole, rate: 1.n8, direction: -1.5) +
-          c.sig.phaser(:jet, above: nil, rate: 4)
+          c.sig.phaser(:jet, above: nil, rate: 4) + c.sig.phaser(:jet, rate: 3, lean: -1) + c.stereo_sig.phaser(:swirl, rate: 2, lean: c.mod(-1, 1, 2)).mixdown
       }],
 
       # Dynamics

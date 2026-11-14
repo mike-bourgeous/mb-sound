@@ -277,7 +277,9 @@ module MB
         :vintage, :swirl, :ripple, :deep12, :jet, :barberpole; tempo-synced
         rates like `phaser(1.bar)`, stereo `spread:`, `above: 150` to keep
         a kick dry, `amount:` from light to extreme, `direction: :up` for
-        notches that climb forever).  Antialiased shapers, among them
+        notches that climb forever (a number or knob: its sign the way, its
+        size the speed), `lean: -1` for feedback only on the way down).
+        Antialiased shapers, among them
         `shape_db`: transfer curves drawn in dB, per sample, with presets
         (`L.fx.shape_db`: :soft_knee, :fuzz, :fold_back, :gate, :asymmetric),
         and `inertia`, an acceleration-limited follower whose limit cycles

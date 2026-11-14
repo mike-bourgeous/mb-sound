@@ -50,6 +50,13 @@ module MB
         #                the preset's rate, 2 twice as fast, 0 held still);
         #                turned live it slows, stops, and reverses the
         #                notches where they are, with no jump.
+        # +:lean+ - Feedback on one half of the LFO's sweep (-1..1, or a
+        #           node): 1 keeps the feedback only while the notches rise
+        #           (none while they fall), -1 only while they fall, 0.5
+        #           half of it on the way back; the resonant whistle sweeps
+        #           one way, the plain notches sweep back quietly
+        #           (`phaser(:jet, lean: -1)`).  Not with +:sweep+ or
+        #           +:direction+.
         #
         # Examples (bin/sound.rb):
         #     bg :pad, 110.hz.saw.at(-12.db).phaser                    # :vintage
@@ -61,6 +68,7 @@ module MB
         #     bg :pad, pad.phaser(:swirl, amount: knob(:phase_amt))     # light to extreme on a knob
         #     bg :pad, pad.phaser(:barberpole)                          # forever rising (direction: :down falls)
         #     bg :pad, pad.phaser(:barberpole, direction: knob(:dir, 1, range: -2..2))   # turn it: up, stop, down, faster
+        #     bg :pad, pad.phaser(:jet, lean: -1)                       # the whoosh only on the way down
         def phaser(preset_or_rate = nil, **options)
           Phaser.build(self, preset_or_rate, **options)
         end
