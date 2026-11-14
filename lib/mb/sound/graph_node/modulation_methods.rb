@@ -49,6 +49,7 @@ module MB
         #            per 0.1 s), so it rides the comb while the input plays,
         #            like a bucket-brigade flanger's: `flanger(:jet, noise:
         #            0.05)`.  Needs feedback.  A number or a node.
+        # +:seed+ - For the noise (default: drawn from MB::Sound.seed).
         #
         # Examples (bin/sound.rb):
         #     bg :pad, 110.hz.saw.at(-12.db).flanger                   # :sweep

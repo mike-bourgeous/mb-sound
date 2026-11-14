@@ -47,6 +47,8 @@ module MB
         # 1 (:db), or a Curve (names other than LAWS, Procs, and Arrays read
         # with Curve.from).  Raises for anything else.
         def self.check_law(law)
+          # (a graph document's param becomes its number)
+          law = GraphNode.build_setting(law)
           return law if LAWS.include?(law)
           if law.is_a?(Numeric)
             unless law.real? && law >= 0 && law <= 1

@@ -157,7 +157,7 @@ module MB
           stereo_phase = Phase.cycles(stereo_phase)
           raise ArgumentError, "tremolo stereo_phase: must be a number of cycles or a Phase (got #{stereo_phase.inspect})" unless stereo_phase.is_a?(Numeric)
           TremoloMethods.check_rate(rate)
-          Tremolo.check_law(law)
+          law = Tremolo.check_law(law)
           seed = MB::Sound.next_seed if (wave == :noise || wave == :smooth_noise) && seed.nil?
           if wave == :smooth_noise
             # (one cycle: each new value is reached as the next arrives)

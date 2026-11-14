@@ -38,7 +38,7 @@ module MB
 
         # The settings GraphNode#flanger takes (besides a preset name or
         # rate).
-        KEYS = %i[rate depth delay range feedback mix dry wet spread shape phase sweep law through_zero interpolation noise].freeze
+        KEYS = %i[rate depth delay range feedback mix dry wet spread shape phase sweep law through_zero interpolation noise seed].freeze
 
         # How fast the input's envelope falls for +noise:+ (a
         # Dynamics::SimpleEnvelopeFollower: instant rise, this many dB per
@@ -97,7 +97,7 @@ module MB
             raise ArgumentError, 'flanger: give the rate once (positional or rate:)' if !rate.nil? && options.key?(:rate)
             options = options.merge(rate: rate) unless rate.nil?
           end
-          s = { dry: 1, wet: 1, phase: 0.0, sweep: nil, law: :octaves, through_zero: false, noise: nil,
+          s = { dry: 1, wet: 1, phase: 0.0, sweep: nil, law: :octaves, through_zero: false, noise: nil, seed: nil,
                 interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION }.merge(preset_settings(preset))
           s.delete(:delay) if options[:range].is_a?(Range)
           s.merge!(options)
@@ -138,7 +138,8 @@ module MB
           if noise && feedback.is_a?(Numeric) && feedback == 0
             raise ArgumentError, 'flanger noise: rides the feedback loop, so it needs feedback: (not 0)'
           end
-          seed = noise ? MB::Sound.next_seed : nil
+          seed = noise ? (GraphNode.build_setting(s[:seed]) || MB::Sound.next_seed) : nil
+          raise ArgumentError, "flanger seed: is an Integer (got #{seed.inspect})" unless seed.nil? || seed.is_a?(Integer)
 
           l, r = StereoDelayMethods.sides(input, 'flanger')
           stereo = !l.equal?(r) || input.is_a?(Channels) && input.channel_count == 2 || spread != 0
