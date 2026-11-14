@@ -209,7 +209,7 @@ module RelationFuzz
       [:quantize, 0.1], [:delay, [:const, 0.001], nil], [:delay, [:const, 0.001], 0.3], [:decimate, [:const, 4000]],
       [:at, [:const, 0.5]], [:compress, -12, 4], [:feedback, 30, 0.5], [:ease, :smoothstep], [:formant, :a],
       [:pan, [:const, 0.2]], [:abs], [:until, 0.011], [:period_delay, 110], [:sample_hold, false], [:shape_db, :fuzz],
-      [:derivative, :central], [:integral, :reset], [:bank, :mono, c, 3], [:bank, :stereo, c, 2], [:bank, :serial, c, 3],
+      [:derivative, :central], [:integral, :reset], [:bank, :mono, c, 3], [:bank, :stereo, c, 2], [:bank, :stereo, c, 3], [:bank, :serial, c, 3],
     ].map { |op| Expr.new(op.first, op.drop(1), [kid]) }
   end
 
@@ -267,7 +267,10 @@ module RelationFuzz
     when :bank
       case a[0]
       when :mono then "#{k[0]}.bandpass_series(#{ctl(a[1])}, count: #{a[2]}, width: per_harmonic(20.cents..80.cents, curve: :exp), normalize: true)"
-      when :stereo then "#{k[0]}.bandpass_series(#{ctl(a[1])}, count: #{a[2]}, quality: 12, pan: #{a[2] > 3 ? '-0.9..0.9' : '1.5.hz.lfo'})"
+      when :stereo
+        # (three bands: each panned by its own copy of the LFO, per_harmonic's tone form)
+        pan = a[2] > 3 ? '-0.9..0.9' : a[2] == 3 ? 'per_harmonic(1.5.hz.lfo, phase: 0...1, rate: 1..1.4)' : '1.5.hz.lfo'
+        "#{k[0]}.bandpass_series(#{ctl(a[1])}, count: #{a[2]}, quality: 12, pan: #{pan})"
       else "#{k[0]}.peq_series(#{ctl(a[1])}, count: #{a[2]}, gain: -4.db, width: 30.cents)"
       end
     when :pan then "#{k[0]}.pan(#{ctl(a[0])})"
