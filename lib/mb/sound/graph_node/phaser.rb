@@ -143,7 +143,7 @@ module MB
         preset :barberpole, rate: 0.1, depth: 1.0, stages: 8, feedback: 0.6, mix: 0.5, spread: 0.0, center: 1000.0, range: 6.0, shape: :sine, direction: :up,
           tags: %i[endless rising shepard], about: 'A barber pole: notches climbing forever (direction: :down falls), staggered sweeps crossfaded'
         preset :circle, rate: 0.1, depth: 1.0, stages: 4, feedback: 0.3, mix: 0.5, spread: 0.0, center: 900.0, range: 5.0, shape: :triangle, lanes: 4,
-          tags: %i[contrary even circle], about: 'Four four-stage phasers in series, their LFOs a quarter cycle apart: as many notches falling as rising'
+          above: 150.0, tags: %i[contrary even circle], about: 'Four four-stage phasers in series, their LFOs a quarter cycle apart: as many notches falling as rising (dry below 150 Hz)'
 
         # The default preset (GraphNode#phaser without a preset name).
         DEFAULT_PRESET = :vintage

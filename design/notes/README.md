@@ -102,7 +102,7 @@ Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`
 
 ### [Phaser](phaser.md)
 
-`sig.phaser(:vintage | :swirl | :ripple | :deep12 | :jet | :barberpole | rate, depth:, stages:, feedback:, mix:, center:, range:, spread:, shape:, sweep:, above:, amount:, direction:)` (`GraphNode::Phaser`, kernel `FastFilter.phaser` with an exact Ruby mirror) is a chain of 2-32 first-order allpass stages at one LFO-swept frequency, feedback around the chain solved in closed form, a linear dry/wet mix, Tone LFOs (sine or triangle, Hz or tempo-synced lengths), and stereo pairs whose right LFO runs `spread:` cycles ahead; `above:` keeps the lows dry (a Linkwitz-Riley split), `amount:` turns depth, mix, feedback, and stages from light to extreme, and `direction:` makes a barber pole (`:up`/`:down`, or a signed number or knob: its sign the way, its size the speed), `lean:` keeps the feedback on one half of the sweep, and `oscillate:` self-oscillates on one mode.
+`sig.phaser(preset | rate, ...)` (`GraphNode::Phaser`, kernels `FastFilter.phaser`/`phaser_osc` with exact Ruby mirrors; presets :vintage :swirl :ripple :deep12 :jet :barberpole :circle) chains 2-32 first-order allpasses at one LFO-swept frequency with zero-delay feedback and a linear mix, tempo-synced Tone LFOs, stereo `spread:`; `above:` keeps the lows dry, `amount:` goes light to extreme, `direction:` makes a barber pole (a knob: sign the way, size the speed), `lean:` feeds back on one half of the sweep, `lanes:` puts phasers in series with LFOs around the circle, and `oscillate:` whistles on a mode (an index, fraction, node, or list), with `level:` and `pitch:` (a note node sings a melody).
 
 ### [Modulation effects (flanger, rotary speaker)](modulation.md)
 
