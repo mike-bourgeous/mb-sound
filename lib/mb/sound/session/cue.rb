@@ -404,6 +404,29 @@ module MB
           ramp ? ramp * main : main
         end
 
+        # The first frame of the span (an offset from session frame +base+,
+        # from +first+, before +limit+) where player +p+'s MAIN share is up
+        # or ramping up, or nil: a cue player sends nothing (MAIN 0), so a
+        # pre-mute send wakes a muted player only from the frame its launch
+        # starts ramping MAIN in (Session#render_player).  A launch renames
+        # the player from the first frame of the span it lands in, its MAIN
+        # ramp starting on the exact landing frame, so waking from the
+        # rename ran the graph from the span's start, a buffer-size
+        # dependent number of frames early (fix-batch35-1114, SessionFuzz
+        # seed 781023: a muted track launched from CUE with a pre-mute send).
+        def cue_main_from(p, base, first, limit)
+          l = p.cue
+          return first if l.nil?
+
+          r = l.main_ramp
+          return(l.main_level > 0 ? first : nil) if r.nil?
+          return first if r.at(base + first) > 0
+          return nil if r.to <= 0
+
+          start = MB::M.max(r.start - base, first)
+          start < limit ? start : nil
+        end
+
         # Adds +data+ times +gains+ (nil for 1) to the span's cue mix.
         def add_cue(data, gains, offset, frames)
           mix = (@cue_span_mix ||= Array.new(@channels) { Numo::SFloat.zeros(@cue_span_count) })
