@@ -712,7 +712,12 @@ module MB
         each slice out to the next hit instead: evenly, so what is inside
         it stays in time, or, for a hit that dies down, the hit whole and
         its tail drawn out; `fill: :even` and `:decay` say which),
-        speeding up truncates with a 4 ms fade.
+        speeding up truncates with a 4 ms fade.  `slot_fade: 2/3r,
+        fade_law: :power` makes that a crossfade over two thirds of each
+        cut slice's slot (its time until the next slice starts), at
+        equal power, into what led up to the next hit, so a soft hit
+        just before a cut keeps its place.  `positions:` (one per cut)
+        puts each slice at a place of its own: a groove.
       TEXT
       commands :loops
       dsl :follow

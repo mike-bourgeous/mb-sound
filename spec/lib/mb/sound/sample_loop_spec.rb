@@ -485,6 +485,161 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       expect { rec.stretch(1.5, mode: :slice, slices: :beats) }.to raise_error(ArgumentError, /slices: is/)
     end
 
+    # The rule slot_fade: follows, written out per slot: a slice cut
+    # short plays from its cut for its slot (to the next cut's new
+    # place), as it is for the first 1 - share of the slot, then fading
+    # out over the rest while the audio that led up to the next cut
+    # fades in over the same samples, arriving at the next cut in step.
+    # law :power: a cosine out and a sine in; :linear: raised cosines.
+    def slot_fade_reference(x, cuts, ratio, share, law, places = nil)
+      len = x.length
+      p = (cuts.select { |c| c > 0 && c < len } + [0, len]).uniq.sort
+      q = places || p.map { |c| (c * ratio).round }
+      out = Numo::DFloat.zeros(q.last)
+      (p.length - 1).times do |i|
+        slot = q[i + 1] - q[i]
+        raise 'the reference is for slices cut short' unless slot < p[i + 1] - p[i]
+        f = (slot * share).round
+        theta = Numo::DFloat.zeros(slot)
+        theta[(slot - f)..] = (Numo::DFloat.new(f).seq + 0.5) / f * (Math::PI / 2) if f > 0
+        gain_out = law == :power ? Numo::NMath.cos(theta) : Numo::NMath.cos(theta)**2
+        gain_in = law == :power ? Numo::NMath.sin(theta) : Numo::NMath.sin(theta)**2
+        out[q[i]...q[i + 1]] = x[p[i]...(p[i] + slot)] * gain_out + x[(p[i + 1] - slot)...p[i + 1]] * gain_in
+      end
+      out
+    end
+
+    # Two seconds of quiet stereo noise (the channels differ) with a
+    # click on every cut and one 10 ms before every cut and the end
+    def clicks_and_cuts
+      Numo::NArray.srand(11)
+      cuts = [0, 12000, 24000, 24100, 40000, 61000, 72000, 84000]
+      len = 96000
+      x = [Numo::DFloat.new(len).rand(-0.05, 0.05), Numo::DFloat.new(len).rand(-0.05, 0.05)]
+      cuts.each { |c| x.each { |ch| ch[c] = 0.9 } }
+      (cuts[1..] + [len]).each { |c| x.each { |ch| ch[c - 480] = -0.7 } }
+      [MB::Sound::Sample[x.map { |ch| Numo::SFloat.cast(ch) }, bpm: 120], cuts]
+    end
+
+    it 'slot_fade: crossfades each slice cut short into what led up to the next cut, in proportion to its slot' do
+      smp, cuts = clicks_and_cuts
+      len = smp.length
+      x = [0, 1].map { |ch| Numo::DFloat.cast(smp.data(ch)) }
+      [0.8, 0.528].each do |r|
+        q = (cuts + [len]).map { |c| (c * r).round }
+        [[2/3r, :power], [2/3r, :linear], [0.25, :power], [1, :power]].each do |share, law|
+          kw = law == :linear ? { slot_fade: share } : { slot_fade: share, fade_law: law }
+          s = smp.stretch(r, mode: :slice, slices: cuts, **kw)
+          expect(s.length).to eq((len * r).round)
+          # (the reference within 1e-6 of full scale, -120 dB: the
+          # output is single precision)
+          2.times { |ch| expect((Numo::DFloat.cast(s.data(ch)) - slot_fade_reference(x[ch], cuts, r, share, law)).abs.max).to be < 1e-6 }
+        end
+
+        s = smp.stretch(r, mode: :slice, slices: cuts, slot_fade: 2/3r, fade_law: :power)
+        y = Numo::DFloat.cast(s.data(0))
+        plain = Numo::DFloat.cast(smp.stretch(r, mode: :slice, slices: cuts).data(0))
+        cuts.each_with_index do |c, i|
+          # A hit on a cut: there, and the first third of its slot the input's, sample for sample
+          third = (q[i + 1] - q[i]) - ((q[i + 1] - q[i]) * 2/3r).round
+          expect(s.data(0)[q[i]...(q[i] + third)]).to eq(smp.data(0)[c...(c + third)])
+          # A hit 10 ms before the next cut (or the loop's end, which
+          # leads into the first cut): 10 ms before it still, within 4%
+          # of its level (its gain is 0.984 or more there, and the
+          # noise going out adds up to 0.009); the fixed 4 ms fade has
+          # cut it off, except in a slot too short to (the 100-sample
+          # slice)
+          at = q[i + 1] - 480
+          next if at < q[i]
+          expect(y[at]).to be_within(0.028).of(-0.7)
+          expect(y[(at - 24)..(at + 24)].abs.max_index).to eq(24)
+          expect(plain[at].abs).to be < 0.06 if q[i + 1] - q[i] > 4000
+        end
+      end
+
+      # A slot shorter than the fixed fade (the 100-sample slice plays
+      # for 80 samples at 0.8x; `fade:` is 192): the fade is the slot's
+      # share, out and in alike, and stays inside the slot (the fixed
+      # fade's pre-roll into the next cut is 192 samples whatever the
+      # slot, so it plays over this slice's first half too)
+      s = smp.stretch(0.8, mode: :slice, slices: cuts, slot_fade: 0.5, fade_law: :power)
+      a = (24000 * 0.8).round
+      expect(s.data(0)[a...(a + 40)]).to eq(smp.data(0)[24000...24040])
+      expect(smp.stretch(0.8, mode: :slice, slices: cuts).data(0)[a...(a + 40)]).not_to eq(smp.data(0)[24000...24040])
+
+      # Ratio 1 is the input, and slices drawn out are as without it
+      expect(smp.stretch(1, mode: :slice, slices: cuts, slot_fade: 2/3r, fade_law: :power).data(1)).to eq(smp.data(1))
+      [:gap, :stretch].each do |fill|
+        expect(smp.stretch(1.25, mode: :slice, slices: cuts, fill: fill, slot_fade: 2/3r).data(0)).to eq(smp.stretch(1.25, mode: :slice, slices: cuts, fill: fill).data(0))
+      end
+      # (fade_law: is every fade's: at 1.25x the 4 ms fades change shape)
+      expect(smp.stretch(1.25, mode: :slice, slices: cuts, fade_law: :power).data(0)).not_to eq(smp.stretch(1.25, mode: :slice, slices: cuts).data(0))
+
+      # The defaults by name are the default, and print as nothing
+      expect(smp.stretch(0.8, mode: :slice, slices: cuts, slot_fade: nil, fade_law: :linear)).to equal(smp.stretch(0.8, mode: :slice, slices: cuts))
+      expect(smp.stretch(0.8, mode: :slice, slot_fade: 2/3r, fade_law: :power).lineage[3]).to eq({ mode: :slice, slot_fade: 2/3r, fade_law: :power })
+
+      expect { smp.stretch(0.8, mode: :slice, slot_fade: 1.5) }.to raise_error(ArgumentError, /share of each slot/)
+      expect { smp.stretch(0.8, mode: :slice, slot_fade: 4.ms) }.to raise_error(ArgumentError, /share of each slot/)
+      expect { smp.stretch(0.8, mode: :slice, fade_law: :cosine) }.to raise_error(ArgumentError, /fade_law: is one of/)
+      expect { smp.stretch(0.8, mode: :spectral, slot_fade: 0.5) }.to raise_error(ArgumentError, /for mode: :slice/)
+      expect { smp.stretch(0.8, fade_law: :power) }.to raise_error(ArgumentError, /for mode: :slice/)
+    end
+
+    it 'positions: puts each slice at its own place in the output' do
+      smp, cuts = clicks_and_cuts
+      len = smp.length
+      x = Numo::DFloat.cast(smp.data(0))
+
+      # The stretched times by name are the stretch
+      at = cuts.map { |c| (c * 0.8).round }
+      expect(smp.stretch(0.8, mode: :slice, slices: cuts, positions: at).data(0)).to eq(smp.stretch(0.8, mode: :slice, slices: cuts).data(0))
+
+      # Slices moved off those times (a groove): every cut's hit lands
+      # on its position, and the length is still ratio × the input's
+      moved = at.zip([0, 300, 0, 0, -250, 200, -100, 150]).map(&:sum)
+      s = smp.stretch(0.8, mode: :slice, slices: cuts, positions: moved, slot_fade: 2/3r, fade_law: :power)
+      expect(s.length).to eq((len * 0.8).round)
+      expect(s.lineage[3][:positions]).to eq(moved)
+      y = Numo::DFloat.cast(s.data(0))
+      cuts.zip(moved) { |c, v| expect(s.data(0)[v...(v + 16)]).to eq(smp.data(0)[c...(c + 16)]) }
+      expect((y - slot_fade_reference(x, cuts, 0.8, 2/3r, :power, moved + [s.length])).abs.max).to be < 1e-6
+
+      # One slot cut short and one drawn out in the same loop (at the
+      # input's length: the second cut 2000 samples early, so the first
+      # slice is cut and the second has 2000 more than its own length):
+      # the cut one crossfades by its slot, the drawn-out one is filled,
+      # the rest follow on untouched
+      early = cuts.dup
+      early[1] -= 2000
+      mixed = smp.stretch(1, mode: :slice, slices: cuts, positions: early, fill: :even, slot_fade: 2/3r, fade_law: :power)
+      m = Numo::DFloat.cast(mixed.data(0))
+      head = slot_fade_reference(x[0...12000], [], 10000 / 12000.0, 2/3r, :power)
+      expect((m[0...10000] - head).abs.max).to be < 1e-6
+      expect(mixed.data(0)[10000...10720]).to eq(smp.data(0)[12000...12720])
+      gapped = Numo::DFloat.cast(smp.stretch(1, mode: :slice, slices: cuts, positions: early, slot_fade: 2/3r, fade_law: :power).data(0))
+      expect(gapped[22200...23800].abs.max).to eq(0)
+      expect(m[22200...23800].abs.max).to be > 0.01
+      expect(mixed.data(0)[24000..]).to eq(smp.data(0)[24000..])
+
+      # Seconds, Lengths, and Durations at the stretched tempo (120 BPM
+      # at 0.8x is 150: a quarter note is 19200 samples)
+      three = [0, 24000, 48000]
+      by_grid = smp.stretch(0.8, mode: :slice, slices: three, positions: [0, 1.n4, 0.75])
+      expect(by_grid.data(0)).to eq(smp.stretch(0.8, mode: :slice, slices: three, positions: [0, 19200, 36000]).data(0))
+      expect(by_grid.data(0)[19200...19216]).to eq(smp.data(0)[24000...24016])
+
+      st = MB::Sound::Sample::SliceStretch
+      expect(st.places([0, 100, 300], nil, 0.5, 400, 200)).to eq([[0, 100, 300, 400], [0, 50, 150, 200]])
+      expect(st.places([300, 100], [170, 20], 0.5, 400, 200)).to eq([[0, 100, 300, 400], [0, 20, 170, 200]])
+      expect { smp.stretch(0.8, mode: :slice, slices: cuts, positions: at[1..]) }.to raise_error(ArgumentError, /one output position per cut \(8 cuts/)
+      expect { smp.stretch(0.8, mode: :slice, slices: three, positions: [0, 40000, 30000]) }.to raise_error(ArgumentError, /run forward/)
+      expect { smp.stretch(0.8, mode: :slice, slices: three, positions: [100, 20000, 30000]) }.to raise_error(ArgumentError, /stays at 0/)
+      expect { smp.stretch(0.8, mode: :slice, slices: three, positions: [0, 20000, 90000]) }.to raise_error(ArgumentError, /within the output/)
+      expect { smp.stretch(0.8, mode: :slice, slices: three, positions: [0, :late, 30000]) }.to raise_error(ArgumentError, /output positions/)
+      expect { smp.stretch(0.8, mode: :spectral, positions: [0]) }.to raise_error(ArgumentError, /for mode: :slice/)
+    end
+
     it 'stretches reversed samples in play order' do
       r = rec.rev.stretch(1.25, mode: :slice)
       expect(r).to be_reversed
@@ -510,6 +665,25 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       want = rec.stretch(0.8, mode: :slice).data(0)
       [800, *slow_tier([7, 1, 128])].each do |n|
         f = rec.follow
+        out = Numo::SFloat.zeros(want.length)
+        i = 0
+        while i < want.length
+          k = [n, want.length - i].min
+          out[i...(i + k)] = f.sample(k)
+          i += k
+        end
+        expect(out).to eq(want)
+      end
+    end
+
+    it 'takes slot_fade: and fade_law: with its stretch options, through the loop point, the same at any buffer size' do
+      MB::Sound.bpm(125)
+      kw = { mode: :slice, slot_fade: 2/3r, fade_law: :power }
+      once = rec.stretch(0.8, **kw).data(0)
+      expect(once).not_to eq(rec.stretch(0.8, mode: :slice).data(0))
+      want = SpecBuffers.join([once, once[0...4000]])
+      [800, *slow_tier([367, 128])].each do |n|
+        f = rec.follow(stretch: kw)
         out = Numo::SFloat.zeros(want.length)
         i = 0
         while i < want.length

@@ -1116,6 +1116,29 @@ module MB
       # stretch ended on 190 ms of the input's own tail, with a flutter
       # near 10.5 Hz in the tail before it (stretch-fixes-4).
       #
+      # +mode+ :slice (SliceStretch; loops) cuts the sample at +slices+
+      # (markers, else onsets, else sixteenths; :markers, :onsets,
+      # :transients with +confirm+ and +threshold+, :grid, a Duration, a
+      # count, positions, or Slices) and starts each slice at its
+      # stretched time, its attack copied exactly.  Slowed down, a slice
+      # fades out over +fade+ (4 ms) and leaves a gap, or is drawn out
+      # to the next one (+fill+ :stretch, :even, :decay); sped up, it is
+      # cut at the next slice's new time with the same fade, and the
+      # +fade+ before each cut of the input fades in ahead of it.
+      # +slot_fade+ (a share, 0 to 1) makes that a crossfade in
+      # proportion to each slot (the time a cut slice has, to the next
+      # slice's start): the slice plays as it is, then fades over that
+      # share of its slot into the audio that led up to the next cut,
+      # so a hit just before a cut keeps its distance to it.
+      # +fade_law+ :linear (default) or :power (equal power) is how the
+      # fades add up.  `slot_fade: 2/3r, fade_law: :power` is how a
+      # loop-based sequencer's renders of sliced loops played faster
+      # measured.  +positions+ (one per cut that +slices+ gives, in
+      # order: samples, seconds, Lengths, or Durations at the stretched
+      # tempo) puts each slice where it says in the output instead of
+      # at its stretched time (a groove; the length stays +ratio+ times
+      # the sample's).
+      #
       # Results longer than LONG_STRETCH (30 s) read with `mips: :octave`
       # unless this sample has its own mips (smaller playback tables for
       # long drones; voices' and grains' mips: still win).  Both are
@@ -1128,8 +1151,10 @@ module MB
       #     pad.stretch(8, mode: :spectral, randomize: 1)     # random phases in the vocoder's 4096-sample window
       #     bowl.stretch(100, mode: :paul, window: 0.5.seconds)  # an endless wash
       #     voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false)   # narrower partials, a wide image (voices)
+      #     brk.stretch(1.25, mode: :slice)            # slices at the hits, attacks exact
+      #     brk.stretch(0.8, mode: :slice, slot_fade: 2/3r, fade_law: :power)   # faster: each slice crossfades into the next hit's lead-in
       def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann,
-                  slices: nil, fade: nil, fill: nil, wrap: nil, noise: nil, confirm: nil, threshold: nil)
+                  slices: nil, fade: nil, fill: nil, wrap: nil, noise: nil, confirm: nil, threshold: nil, slot_fade: nil, fade_law: nil, positions: nil)
         unless (confirm.nil? && threshold.nil?) || (SLICE_MODES.include?(mode.to_sym) && slices == :transients)
           raise ArgumentError, 'confirm: and threshold: are for mode: :slice with slices: :transients'
         end
@@ -1137,11 +1162,13 @@ module MB
         raise ArgumentError, 'wrap: and noise: are for mode: :spectral and :paul' unless (wrap.nil? && noise.nil?) || (!SLICE_MODES.include?(mode.to_sym) && Spectral.mode_name(mode) != :cyclic)
         if SLICE_MODES.include?(mode.to_sym)
           unless fit == :auto && window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
-            raise ArgumentError, 'mode: :slice takes slices:, fade:, fill:, and (for fill: :stretch) cycle: and crossfade:'
+            raise ArgumentError, 'mode: :slice takes slices:, positions:, fade:, slot_fade:, fade_law:, fill:, and (for fill: :stretch) cycle: and crossfade:'
           end
-          return slice_stretch(ratio, slices, fade, fill || :gap, cycle, crossfade, confirm, threshold)
+          return slice_stretch(ratio, slices, fade, fill || :gap, cycle, crossfade, confirm, threshold, slot_fade: slot_fade, fade_law: fade_law, positions: positions)
         end
-        raise ArgumentError, 'slices:, fade:, and fill: are for mode: :slice' unless slices.nil? && fade.nil? && fill.nil?
+        unless slices.nil? && fade.nil? && fill.nil? && slot_fade.nil? && fade_law.nil? && positions.nil?
+          raise ArgumentError, 'slices:, positions:, fade:, slot_fade:, fade_law:, and fill: are for mode: :slice'
+        end
 
         mode = Spectral.mode_name(mode)
         return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap, noise) unless mode == :cyclic
@@ -1167,16 +1194,26 @@ module MB
       SLICE_MODES = %i[slice slices beat beats].freeze
 
       # The slice stretch (see #stretch and SliceStretch).
-      def slice_stretch(ratio, slices, fade, fill, cycle, crossfade, confirm = nil, threshold = nil)
+      def slice_stretch(ratio, slices, fade, fill, cycle, crossfade, confirm = nil, threshold = nil, slot_fade: nil, fade_law: nil, positions: nil)
         raise ArgumentError, "Stretch ratios are positive (got #{ratio.inspect})" unless ratio.is_a?(Numeric) && ratio > 0
         raise ArgumentError, "fill: is one of #{SliceStretch::FILLS.inspect} (got #{fill.inspect})" unless SliceStretch::FILLS.include?(fill)
+        unless fade_law.nil? || SliceStretch::LAWS.include?(fade_law)
+          raise ArgumentError, "fade_law: is one of #{SliceStretch::LAWS.inspect} (got #{fade_law.inspect})"
+        end
+        unless slot_fade.nil? || (slot_fade.is_a?(Numeric) && slot_fade >= 0 && slot_fade <= 1)
+          raise ArgumentError, "slot_fade: is a share of each slot, from 0 to 1 (got #{slot_fade.inspect}; fade: takes a length)"
+        end
         cuts, = slices == :transients ? [transient_cuts(confirm, threshold), :onsets] : slice_cuts(slices)
+        places = positions && slice_positions(positions, cuts, ratio)
         f = position(fade.nil? ? SliceStretch::FADE : fade).round
         kw = { mode: :slice }
         kw[:slices] = slices unless slices.nil?
         kw[:confirm] = confirm unless confirm.nil?
         kw[:threshold] = threshold unless threshold.nil?
+        kw[:positions] = positions unless positions.nil?
         kw[:fade] = fade unless fade.nil?
+        kw[:slot_fade] = slot_fade unless slot_fade.nil?
+        kw[:fade_law] = fade_law unless fade_law.nil? || fade_law == :linear
         kw[:fill] = fill unless fill == :gap
         kw[:cycle] = cycle unless cycle == 25.ms
         kw[:crossfade] = crossfade unless crossfade == CROSSFADE
@@ -1185,11 +1222,32 @@ module MB
         x = position(crossfade).round
         edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |chans|
           chans = chans.map(&:reverse) if @reversed
-          out = SliceStretch.stretch(chans, ratio.to_f, cuts, fade: f, fill: fill, attack: att, cycle: c, crossfade: x, sample_rate: sample_rate)
+          out = SliceStretch.stretch(chans, ratio.to_f, cuts, fade: f, fill: fill, attack: att, cycle: c, crossfade: x, sample_rate: sample_rate,
+                                     slot_fade: slot_fade, fade_law: fade_law || :linear, positions: places)
           @reversed ? out.map(&:reverse) : out
         }
       end
       private :slice_stretch
+
+      # The slice stretch's +positions+ in output samples, one per cut
+      # of +cuts+: Integers are samples, other numbers seconds, Lengths
+      # as they say, Durations counted at the stretched tempo (the
+      # sample's #bpm divided by +ratio+; without one, the session's).
+      def slice_positions(positions, cuts, ratio)
+        unless positions.is_a?(Array) && positions.length == cuts.length
+          raise ArgumentError, "positions: is an Array of one output position per cut (#{cuts.length} cuts here; got #{positions.is_a?(Array) ? "#{positions.length} positions" : positions.inspect})"
+        end
+        stretched = @bpm ? Sequence::Transport.new(bpm: @bpm / ratio.to_f) : Sequence.current_transport
+        positions.map { |v|
+          case v
+          when Integer then v
+          when Numeric then (v * sample_rate).round
+          when Length then Length.samples(v, sample_rate: sample_rate, transport: stretched).round
+          else raise ArgumentError, "positions: are output positions (samples as Integers, seconds, Lengths, or Durations; got #{v.inspect})"
+          end
+        }
+      end
+      private :slice_positions
 
       # The slice points (play order, from the region start) for the
       # slice stretch, and where they came from: +slices+ :markers,

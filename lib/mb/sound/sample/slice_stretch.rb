@@ -35,11 +35,39 @@ module MB
       # next as in the input (ratio 1) nothing is faded: the output is the
       # input.
       #
+      # Two settings shape those fades.  +slot_fade+ (nil, or a share of
+      # 0 to 1) is for slices cut short: instead of the fixed +fade+,
+      # such a slice plays as it is for the rest of its slot (the time
+      # from its start to the next slice's) and crossfades over that
+      # share of the slot into the audio that led up to the next cut in
+      # the input, fade-out and fade-in the same length, however short
+      # or long the slot.  A hit just before a cut then keeps its
+      # distance to that cut (with the short fixed fade it is cut off, or
+      # plays late).  +fade_law+ is how every pair of fades adds up:
+      # :linear (default; gains that sum to 1, raised cosines) or :power
+      # (their square roots: a cosine going out and a sine coming in,
+      # equal power, for a fade between sounds that are not alike).
+      # `slot_fade: 2/3r, fade_law: :power` is what renders of sliced
+      # loops played faster by a loop-based sequencer measured as (the
+      # first third of each slot as in the file, then an equal-power
+      # crossfade into the lead-in of the next hit).  Slices drawn out,
+      # and slices that follow on, are as without it.
+      #
+      # +positions+ gives each cut its own place in the output (samples)
+      # instead of the cut × +ratio+, for slices moved off the grid of
+      # the stretch (a groove); each slot is then cut short, drawn out
+      # (+fill+), or left to follow on by its own length.
+      #
       # Pure Ruby + Numo (per slice copies; the fills plan and play a
       # cyclic stretch per slice).  Every channel cuts in the same places.
       module SliceStretch
         # The default fade at a slice's end (seconds).
         FADE = 0.004
+
+        # +fade_law+ values: :linear (the two sides' gains sum to 1) and
+        # :power (their squares do: equal power), as GraphNode#blend's
+        # +curve:+.
+        LAWS = [:linear, :power].freeze
 
         # With fill: :stretch, the part of each slice kept exactly before
         # its decay is stretched (seconds).
@@ -93,21 +121,27 @@ module MB
         # +channels+ (DFloat or SFloat arrays in play order) stretched by
         # +ratio+, cut at +cuts+ (sample positions, 0 first; the end is
         # added).  +fade+ in samples; +attack+, +cycle+, and +crossfade+
-        # (the fill's stretch) in samples.  Returns Arrays of SFloat.
-        def stretch(channels, ratio, cuts, fade:, fill: :gap, attack: 720, cycle: 1200, crossfade: 144, sample_rate: 48000)
+        # (the fill's stretch) in samples.  +slot_fade+ (nil or 0..1) and
+        # +fade_law+ (LAWS) as the module says; +positions+ (nil, or one
+        # output sample per cut, in the cuts' order) as #places reads
+        # them.  Returns Arrays of SFloat.
+        def stretch(channels, ratio, cuts, fade:, fill: :gap, attack: 720, cycle: 1200, crossfade: 144, sample_rate: 48000, slot_fade: nil, fade_law: :linear, positions: nil)
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio.is_a?(Numeric) && ratio > 0
           raise ArgumentError, "fill: is one of #{FILLS.inspect} (got #{fill.inspect})" unless FILLS.include?(fill)
+          raise ArgumentError, "fade_law: is one of #{LAWS.inspect} (got #{fade_law.inspect})" unless LAWS.include?(fade_law)
+          unless slot_fade.nil? || (slot_fade.is_a?(Numeric) && slot_fade >= 0 && slot_fade <= 1)
+            raise ArgumentError, "slot_fade: is a share of each slot, from 0 to 1 (got #{slot_fade.inspect})"
+          end
 
           x = channels.map { |c| Numo::DFloat.cast(c) }
           len = x[0].length
           n_out = (len * ratio).round
-          p = (cuts.map { |c| Integer(c) }.select { |c| c > 0 && c < len } + [0, len]).uniq.sort
-          q = p.map { |c| (c * ratio).round }
-          q[-1] = n_out
+          p, q = places(cuts, positions, ratio, len, n_out)
 
           out = x.map { Numo::DFloat.zeros(n_out) }
           guide = fill == :gap ? nil : x.sum / x.length
           joined = [] # whether slice i follows on from slice i - 1
+          lead = []   # the pre-roll into slice i, where the slot before it sets it (slot_fade)
           shortest = MB::M.max(64, (FILL_SHORTEST * sample_rate).round)
 
           (p.length - 1).times do |i|
@@ -141,9 +175,19 @@ module MB
             continuous = m == own && slot == own
             joined[i + 1] = continuous
 
-            fo = continuous ? 0 : MB::M.min(fade, m / 2)
+            fo =
+              if continuous
+                0
+              elsif slot_fade && slot < own
+                # (a slice cut short: it fades over its share of the
+                # slot, and the lead-in to the next cut, which is this
+                # slice's own end, fades in over the same samples)
+                lead[i + 1] = (slot * slot_fade).round
+              else
+                MB::M.min(fade, m / 2)
+              end
             segs.each_with_index do |seg, ch|
-              seg[(m - fo)...m] *= ramp(fo, false) if fo > 0
+              seg[(m - fo)...m] *= ramp(fo, false, fade_law) if fo > 0
               out[ch][qa...(qa + m)] += seg
             end
           end
@@ -154,15 +198,47 @@ module MB
             next if joined[i]
             if i == 0
               next if joined[p.length - 1] || n_out < 2
-              f = [fade, len / 2, n_out / 2].min
-              x.each_with_index { |c, ch| out[ch][(n_out - f)...n_out] += c[(len - f)...len] * ramp(f, true) } if f > 0
+              f = lead[p.length - 1] || [fade, len / 2, n_out / 2].min
+              x.each_with_index { |c, ch| out[ch][(n_out - f)...n_out] += c[(len - f)...len] * ramp(f, true, fade_law) } if f > 0
             else
-              f = [fade, p[i], q[i]].min
-              x.each_with_index { |c, ch| out[ch][(q[i] - f)...q[i]] += c[(p[i] - f)...p[i]] * ramp(f, true) } if f > 0
+              f = lead[i] || [fade, p[i], q[i]].min
+              x.each_with_index { |c, ch| out[ch][(q[i] - f)...q[i]] += c[(p[i] - f)...p[i]] * ramp(f, true, fade_law) } if f > 0
             end
           end
 
           out.map { |o| Numo::SFloat.cast(o) }
+        end
+
+        # Where the slices are cut and where each starts in the output:
+        # [input positions, output positions], both from 0 to the end
+        # (+len+, +n_out+), for +cuts+ (cuts at or outside the ends are
+        # left out).  Without +positions+ a cut lands at itself × +ratio+,
+        # rounded; with them (one output sample per cut, in the cuts'
+        # order) where its position says: within the output, never
+        # before the cut before it, and a cut at 0 at 0.
+        def places(cuts, positions, ratio, len, n_out)
+          cuts = cuts.map { |c| Integer(c) }
+          if positions.nil?
+            p = (cuts.select { |c| c > 0 && c < len } + [0, len]).uniq.sort
+            q = p.map { |c| (c * ratio).round }
+            q[-1] = n_out
+            return [p, q]
+          end
+
+          raise ArgumentError, "positions: takes one output position per cut (#{cuts.length} cuts, got #{positions.length} positions)" unless positions.length == cuts.length
+          at = { 0 => 0, len => n_out }
+          cuts.zip(positions.map { |v| Integer(v) }) do |c, v|
+            next if c < 0 || c > len
+            raise ArgumentError, "positions: a cut at the start stays at 0 (got #{v})" if c == 0 && v != 0
+            raise ArgumentError, "positions: a cut at the end stays at the end, #{n_out} (got #{v})" if c == len && v != n_out
+            raise ArgumentError, "positions: the cut at #{c} has two positions (#{at[c]} and #{v})" if at.key?(c) && at[c] != v
+            raise ArgumentError, "positions: are within the output, 0 to #{n_out} (got #{v})" unless v >= 0 && v <= n_out
+            at[c] = v
+          end
+          p = at.keys.sort
+          q = p.map { |c| at[c] }
+          q.each_cons(2).with_index { |(u, v), i| raise ArgumentError, "positions: run forward with their cuts (the cut at #{p[i + 1]} is at #{v}, before #{u})" if v < u }
+          [p, q]
         end
 
         # A slice from +a+ to +b+ filled out to +slot+ samples (fill:
@@ -305,10 +381,13 @@ module MB
           lowest <= dies ? :decay : :even
         end
 
-        # A raised-cosine fade of +n+ samples (in or out).
-        def ramp(n, rising)
+        # A fade of +n+ samples (in or out): a raised cosine (+law+
+        # :linear: with its mirror it sums to 1), or its square root
+        # (:power: a quarter of a sine; the squares sum to 1).
+        def ramp(n, rising, law = :linear)
           t = (Numo::DFloat.new(n).seq + 0.5) / n
           w = 0.5 - 0.5 * Numo::NMath.cos(t * Math::PI)
+          w = Numo::NMath.sqrt(w) if law == :power
           rising ? w : w.reverse
         end
       end
