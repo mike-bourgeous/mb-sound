@@ -268,6 +268,21 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       wash = Numo::DFloat.cast(hit.stretch(2, mode: :paul).data(0))
       expect(wash).to eq(Numo::DFloat.cast(hit.stretch(2, mode: :paul, wrap: false).data(0)))
       expect(Numo::DFloat.cast(hit.stretch(2, mode: :paul, wrap: true).data(0))).to eq(wash)
+      # With transients: true as well: the hit is the input's, and the
+      # stretch does not end on the input's own tail (in the circle the
+      # frames before the loop point hold the attack and stay as they are)
+      # (a splash: a burst of noise dying away over a second)
+      Numo::NArray.srand(5)
+      c = Numo::DFloat.new(48000).rand(-0.5, 0.5) * Numo::NMath.exp(-Numo::DFloat.new(48000).seq / 12000.0)
+      splash = MB::Sound::Sample[Numo::SFloat.cast(c)].looped
+      expect(splash.onsets(wrap: true)).to eq([0])
+      kept = Numo::DFloat.cast(splash.stretch(2, mode: :paul, transients: true).data(0))
+      expect(kept).to eq(Numo::DFloat.cast(splash.stretch(2, mode: :paul, transients: true, wrap: false).data(0)))
+      expect((kept[0...240] - c[0...240]).abs.max).to be < 0.01
+      ring = MB::Sound::Sample::Spectral.looped(splash.to_a, 2, window: 12000, randomize: 1, onsets: [0])[0]
+      alike = ->(d) { (d[-3000..] * c[-3000..]).sum / Math.sqrt((d[-3000..]**2).sum * (c[-3000..]**2).sum) }
+      expect(alike.call(ring)).to be > 0.5
+      expect(alike.call(kept).abs).to be < 0.2
       circle = MB::Sound::Sample::Spectral.looped(hit.to_a, 2, window: 12000, randomize: 1)[0]
       expect(rms(wash[0...960]) / rms(wash[-960..])).to be > 2
       expect(rms(circle[0...960]) / rms(circle[-960..])).to be < 1.5

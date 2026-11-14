@@ -1103,14 +1103,18 @@ module MB
       # start and end (a loop of it steps, in level and in tone, at every
       # pass).  A loop whose loop point is
       # an attack (a one-shot saved as a loop: Sample::Onsets finds an
-      # onset at its start with wrap: true) is stretched by plain :paul
-      # (no transients:, one pass) with its own start and end, as before
-      # loops were read in a circle: random phases spread a frame's sound
+      # onset at its start with wrap: true) is stretched by :paul (and
+      # by `randomize: 1`) with its own start and end, as before loops
+      # were read in a circle: random phases spread a frame's sound
       # over its whole quarter-second window, so read across the loop
       # point the attack also sounded up to 125 ms before itself (a
       # cymbal at 2.86x: a step at the loop point of 0.6 dB instead of
       # its 15.6, stretch-fixes-3); at the edge it starts on the loop
-      # point and the decay before it fades out.
+      # point and the decay before it fades out.  With transients: true
+      # too: in the circle the frames before the loop point hold the
+      # attack, so they stayed unrandomized and unstretched and the
+      # stretch ended on 190 ms of the input's own tail, with a flutter
+      # near 10.5 Hz in the tail before it (stretch-fixes-4).
       #
       # Results longer than LONG_STRETCH (30 s) read with `mips: :octave`
       # unless this sample has its own mips (smaller playback tables for
@@ -1420,11 +1424,11 @@ module MB
         n = position(window.nil? ? (paul ? Spectral::PAUL_WINDOW : Spectral::WINDOW.samples) : window).round
         n += 1 if n.odd?
         onsets = transients ? (@reversed ? reverse : self).onsets(wrap: wrap) : nil
+        # (a hit on the loop point stays on it under random phases, with
+        # or without transients: see #stretch)
+        wrap = false if wrap && randomize >= 1 && attack_at_loop_point?
         edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |chans|
-          if wrap && randomize >= 1 && onsets.nil? && attack_at_loop_point?
-            # (a hit on the loop point stays on it: see #stretch)
-            Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
-          elsif wrap
+          if wrap
             Spectral.looped(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise)
           elsif randomize >= 1 && onsets.nil?
             Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
