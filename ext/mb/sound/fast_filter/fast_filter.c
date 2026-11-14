@@ -739,8 +739,8 @@ static VALUE ruby_resonance_curve(VALUE self, VALUE r)
  * u = x + k w, so Y = C1 + C2 tanh(Y) with C1 = A (x + k Q0) + B and
  * C2 = A k P (|C2| < 0.14: P <= R / (R + 1)), solved by PHASER_OSC_NEWTON
  * Newton steps from the last Y.  While |k| > 1 and the bandpass is
- * silent (|s1| + |s2| < PHASER_OSC_QUIET), x gets PHASER_OSC_KICK so the
- * oscillation starts from silence.  +feedback+ is clamped to
+ * silent (|s1| + |s2| < PHASER_OSC_QUIET), its first state gets
+ * PHASER_OSC_KICK so the oscillation starts from silence, at the mode.  +feedback+ is clamped to
  * +-PHASER_OSC_MAX_FEEDBACK.
  *
  * +state+: the stages' states, the bandpass's two, the last Y, and the
@@ -852,7 +852,8 @@ static VALUE ruby_phaser_osc(int argc, VALUE *argv, VALUE self)
 		double xd = mb_signal_at(&xs, i);
 		double xi = xd;
 		if (fabs(k) > 1.0 && fabs(s1) + fabs(s2) < PHASER_OSC_QUIET) {
-			xi = xi + PHASER_OSC_KICK;
+			// (into the bandpass, so the kick starts at the mode)
+			s1 = s1 + PHASER_OSC_KICK;
 		}
 
 		double g2 = g * (k < 0.0 ? tan_neg : tan_pos);

@@ -46,8 +46,8 @@ module MB
         # MB::Sound::FastFilter.phaser_osc): feedback up to this magnitude
         # (the loop gain at the oscillating mode; above 1 it oscillates),
         # the mode bandpass's Q, Newton steps per sample, and the kick that
-        # starts an oscillation from silence (added to the input while
-        # |feedback| > 1 and the bandpass's states sum under OSC_QUIET).
+        # starts an oscillation from silence (added to the bandpass's first
+        # state while |feedback| > 1 and its states sum under OSC_QUIET).
         OSC_MAX_FEEDBACK = 1.25
         OSC_Q = 4.0
         OSC_NEWTON = 3
@@ -484,7 +484,7 @@ module MB
 
             xd = at(xs, i)
             xi = xd
-            xi = xi + OSC_KICK if k.abs > 1.0 && s1.abs + s2.abs < OSC_QUIET
+            s1 = s1 + OSC_KICK if k.abs > 1.0 && s1.abs + s2.abs < OSC_QUIET
 
             g2 = g * (k < 0.0 ? tan_neg : tan_pos)
             g2 = g2_max if g2 > g2_max
