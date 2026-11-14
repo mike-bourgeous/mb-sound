@@ -287,7 +287,8 @@ module MB
         with a copy a few milliseconds late: the two cancel in a comb of
         notches, and an LFO sweeping the delay moves the whole comb.
         Feedback sharpens it (negative feedback sounds hollow and
-        metallic); rates take Hz or bars, `spread:` makes it stereo.  A
+        metallic); rates take Hz or bars, `spread:` makes it stereo, and
+        `noise: 0.05` breathes hiss through the loop while the sound plays.  A
         rotary speaker (`rotary`, `L.fx.rotary`) spins a treble horn and a
         bass drum past two microphones: the pitch wavers as each comes
         closer and recedes, the level as it turns toward and away, and a

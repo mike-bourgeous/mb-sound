@@ -44,6 +44,11 @@ module MB
         #            knob, an LFO of your own), on both sides.
         # +:interpolation+ - The delay's reads (:sinc, :cubic, :linear;
         #                    see #delay).
+        # +:noise+ - Hiss inside the feedback loop, white noise times this
+        #            level times the input's envelope (instant rise, -20 dB
+        #            per 0.1 s), so it rides the comb while the input plays,
+        #            like a bucket-brigade flanger's: `flanger(:jet, noise:
+        #            0.05)`.  Needs feedback.  A number or a node.
         #
         # Examples (bin/sound.rb):
         #     bg :pad, 110.hz.saw.at(-12.db).flanger                   # :sweep

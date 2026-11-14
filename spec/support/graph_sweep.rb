@@ -479,7 +479,8 @@ module GraphSweep
         c.sig.flanger(:jet, rate: 9, feedback: c.mod(-0.9, 0.9)).+(c.stereo_sig.flanger(:orbit, mix: c.mod(0, 1), depth: c.mod(0, 1)).mixdown) +
           c.sig.flanger(:tape_flange, delay: c.mod(0.0005, 0.002), range: 0.5) * 0.5 + c.sig.flanger(:sheen, range: 0.5.ms..1.5.ms) +
           c.sig.flanger(2.n16, law: :linear, feedback: 0, interpolation: :cubic, sweep: c.mod(-1, 1, 11)) +
-          c.sig.flanger(:steel, delay: 0.0002, range: c.mod(0, 3))
+          c.sig.flanger(:steel, delay: 0.0002, range: c.mod(0, 3)) +
+          c.sig.flanger(:jet, noise: c.mod(0, 0.1)) + c.stereo_sig.flanger(:orbit, noise: 0.05).mixdown # (hiss in the loop: effects-3)
       }],
       ['rotary presets and a live speed (Rotary: crossover, rotors gliding, two microphones)', ->(c) {
         c.sig.rotary(:whirl).mixdown + c.stereo_sig.rotary(speed: c.mod(0, 1, 3), horn: c.mod(0.5, 1), mix: c.mod(0.2, 1)).mixdown +

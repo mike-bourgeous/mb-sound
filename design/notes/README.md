@@ -106,7 +106,7 @@ Every node has `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`
 
 ### [Modulation effects (flanger, rotary speaker)](modulation.md)
 
-`sig.flanger(:sweep | :jet | :sheen | :steel | :orbit | :tape_flange | rate, delay:, range:, depth:, feedback:, mix:, spread:, shape:, phase:, law:, through_zero:, sweep:)` (`GraphNode::Flanger`, library family `:flanger`) is a short delay swept by an LFO with signed feedback, built from `#delay`'s node-time DelayLine and feedback loop (no delay engine of its own); settings share names and meanings with `phaser` (rate in Hz or bars, linear mix, spread in cycles).  `sig.rotary(:cabinet | :whirl | :chorale, speed:, ...)` (`GraphNode::Rotary`, family `:rotary`) is a two-rotor rotary speaker (Doppler delays, tremolo, two microphones, rotors gliding between speeds).  Same output at any buffer size.
+`sig.flanger(:sweep | :jet | :sheen | :steel | :orbit | :tape_flange | rate, delay:, range:, depth:, feedback:, mix:, spread:, shape:, phase:, law:, through_zero:, sweep:, noise:)` (`GraphNode::Flanger`, library family `:flanger`) is a short delay swept by an LFO with signed feedback, built from `#delay`'s node-time DelayLine and feedback loop (no delay engine of its own); settings share names and meanings with `phaser` (rate in Hz or bars, linear mix, spread in cycles).  `sig.rotary(:cabinet | :whirl | :chorale, speed:, ...)` (`GraphNode::Rotary`, family `:rotary`) is a two-rotor rotary speaker (Doppler delays, tremolo, two microphones, rotors gliding between speeds).  Same output at any buffer size.
 
 ### [Reverbs](reverbs.md)
 

@@ -230,6 +230,32 @@ RSpec.describe(MB::Sound::GraphNode::Flanger, :aggregate_failures) do
     expect(RecipeHelpers.max_diff(ref, RecipeHelpers.render(loaded, buffers: 20))).to eq(0)
   end
 
+  describe 'noise: (effects-3)' do
+    it 'adds hiss to the feedback loop that follows the input and stops with it' do
+      src = -> { 220.hz.saw.at(0.3) * 2.hz.lfo.square.at(0..1) } # on 0.25 s, off 0.25 s
+      plain = collect(src.().flanger(:jet), 48000)
+      hiss = MB::Sound.with_seed(4) { collect(src.().flanger(:jet, noise: 0.05), 48000) }
+      again = MB::Sound.with_seed(4) { collect(src.().flanger(:jet, noise: 0.05), 48000, [367, 128, 1]) }
+      expect(again).to eq(hiss)
+      d = hiss - plain
+      expect(d[2000...12000].abs.max).to be_between(0.005, 0.1) # while playing
+      expect(d[22000...24000].abs.max).to be < d[12000...14000].abs.max / 20 # fading with the input's envelope
+      # silence in, silence out (no hiss of its own)
+      quiet = collect(MB::Sound.silence(0.5).flanger(:jet, noise: 0.2), 24000)
+      expect(quiet.abs.max).to eq(0)
+      expect(collect(220.hz.saw.flanger(:jet, noise: 0), 4800)).to eq(collect(220.hz.saw.flanger(:jet), 4800))
+    end
+
+    it 'takes a node level and stereo, and needs feedback' do
+      out = collect_stereo(220.hz.saw.at(0.3).flanger(:orbit, noise: 0.1.hz.lfo.at(0..0.1)), 9600)
+      out.each { |b| expect(b.isfinite.all?).to eq(true) }
+      expect(out[0]).not_to eq(out[1])
+      expect { 220.hz.saw.flanger(:tape_flange, noise: 0.1) }.to raise_error(ArgumentError, /feedback/)
+      expect { 220.hz.saw.flanger(noise: -0.1) }.to raise_error(ArgumentError, /noise/)
+      expect(220.hz.saw.flanger(:jet, noise: 0.05).to_ruby).to include('flanger(:jet, noise: 0.05)')
+    end
+  end
+
   it 'takes nodes for depth, feedback, mix, and the delay' do
     out = collect(110.hz.saw.flanger(depth: 0.1.hz.lfo.at(0..1), feedback: 0.2.hz.lfo.at(-0.9..0.9), mix: 0.3.constant,
       delay: 0.05.hz.lfo.at(0.001..0.003), range: 1.constant), 9600)

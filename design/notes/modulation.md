@@ -1,12 +1,12 @@
 # Modulation effects (flanger, rotary speaker)
 
 <!-- summary -->
-`sig.flanger(:sweep | :jet | :sheen | :steel | :orbit | :tape_flange | rate, delay:, range:, depth:, feedback:, mix:, spread:, shape:, phase:, law:, through_zero:, sweep:)` (`GraphNode::Flanger`, library family `:flanger`) is a short delay swept by an LFO with signed feedback, built from `#delay`'s node-time DelayLine and feedback loop (no delay engine of its own); settings share names and meanings with `phaser` (rate in Hz or bars, linear mix, spread in cycles).  `sig.rotary(:cabinet | :whirl | :chorale, speed:, ...)` (`GraphNode::Rotary`, family `:rotary`) is a two-rotor rotary speaker (Doppler delays, tremolo, two microphones, rotors gliding between speeds).  Same output at any buffer size.
+`sig.flanger(:sweep | :jet | :sheen | :steel | :orbit | :tape_flange | rate, delay:, range:, depth:, feedback:, mix:, spread:, shape:, phase:, law:, through_zero:, sweep:, noise:)` (`GraphNode::Flanger`, library family `:flanger`) is a short delay swept by an LFO with signed feedback, built from `#delay`'s node-time DelayLine and feedback loop (no delay engine of its own); settings share names and meanings with `phaser` (rate in Hz or bars, linear mix, spread in cycles).  `sig.rotary(:cabinet | :whirl | :chorale, speed:, ...)` (`GraphNode::Rotary`, family `:rotary`) is a two-rotor rotary speaker (Doppler delays, tremolo, two microphones, rotors gliding between speeds).  Same output at any buffer size.
 <!-- /summary -->
 
 ## Quick reference
 
-- `sig.flanger` (`:sweep`), `sig.flanger(:jet)`, `sig.flanger(2.bars, feedback: -0.7, spread: 0.25)`, `sig.flanger(:steel, range: 0.3.ms..3.ms)`, `sig.flanger(sweep: env * 2 - 1)`; presets `L.fx.flanger`.
+- `sig.flanger` (`:sweep`), `sig.flanger(:jet)`, `sig.flanger(:jet, noise: 0.05)` (hiss in the loop following the input), `sig.flanger(2.bars, feedback: -0.7, spread: 0.25)`, `sig.flanger(:steel, range: 0.3.ms..3.ms)`, `sig.flanger(sweep: env * 2 - 1)`; presets `L.fx.flanger`.
 - `sig.rotary`, `sig.rotary(:whirl)`, `sig.rotary(speed: knob(:spin))` (turn :spin 0/1), `rotary(crossover: 1200, spread: 0.5, doppler: 0.5)`; presets `L.fx.rotary`.
 - Code `lib/mb/sound/graph_node/flanger.rb` (`Flanger.build`), `rotary.rb` (`Rotary.build`), `modulation_methods.rb`, the shared LFO `modulation_lfo.rb` (`ModulationLfo.tone`); specs `spec/lib/mb/sound/graph_node/flanger_spec.rb`, `rotary_spec.rb`; help `help :effects`.
 
@@ -49,6 +49,10 @@ The input plus a copy through a delay of a few milliseconds swept by an LFO.  Mi
 | Mix (dry/wet %) | `mix:` | percent / 100 (assumes a linear crossfade) |
 
 **Cost** (Mac container, YJIT, thread CPU ns per sample after the source's own cost, best of 3 x 4 s on a `110.hz.saw`, while another session's memcheck ran; % of realtime in parentheses): mono presets `:sweep` 292 (1.40%) at 128-sample buffers, 186 (0.89%) at 800; `:jet` 308 / 189; `:steel` 295 / 176; stereo presets `:sheen` 580 (2.78%) / 345 (1.66%), `:orbit` 559 / 336; `:tape_flange` (mono, through zero: one more delay and a Mixer) 494 (2.37%) / 327 (1.57%).
+
+**Hiss in the loop** (effects-3, 2026-11-14; the maintainer on `:jet`: "Would this work better with input-dependent noise injected into the feedback chain?"): `noise:` (a level, number or node; needs feedback) adds white noise times the input's envelope (`Dynamics::SimpleEnvelopeFollower` on `aabs`: instant rise, `NOISE_DECAY_DB` -20 dB per `NOISE_DECAY_S` 0.1 s) inside the feedback loop, through `#delay`'s insert block (`{ |d| d + hiss }`: the loop's output and what it feeds back, times the feedback), so the comb rings the hiss while the sound plays and the hiss dies with it: silence in gives silence out (spec), and 0.25 s after a gated saw stops the added hiss is 1/20 of its level at the stop.  Seeded per side from `MB::Sound.next_seed`, the same at any buffer size.  A bucket-brigade flanger's breath; whether it helps `:jet` is the Bench's question (set effects-3, 0.02 / 0.05 / 0.1 on alternating arp, beat, and pad).  Cost (Mac, YJIT, 128 / 800-sample buffers): `:jet` 314 / 179 ns per sample, with noise 731 / 284 (the block makes the loop a FeedbackLoop with an insert and adds a follower and a noise source).
+
+**The :sweep preset's longest delay** (effects-3; his note on the pluck arp: "The longest delay starts to sound echoey rather than comby with the percussive hit"): at 8 ms a pluck's copy separates from it (echoes start around 10 ms).  Bench A/B on alternating arp, beat, and pad: `:sweep` (0.5-8 ms), capped at 4 ms (`range: 0.5.ms..4.ms`), depth 0.75 (0.7-5.7 ms), capped at 2 ms; the preset stays until he picks (question).
 
 **Older script**: `bin/effects/flanger.rb` (2022) builds its own flanger from a delay, a feedback loop, softclips, and oversampling, with audio-rate LFO examples (to 3300 Hz); it is unchanged (whether it becomes a front end of `flanger` is a question: its examples depend on the softclips in the loop and the oversampling).
 
