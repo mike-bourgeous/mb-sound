@@ -19,6 +19,14 @@ module MB
       #   (default -80 dB, where Sony puts an amplitude of -inf) stops there.
       # - :linear: evenly in amplitude (gain = 1 - (1 - trough) x (1 - m) /
       #   2), the classic tremolo; a full cut reaches silence.
+      # - a number from 0 to 1: a blend of the two laws' gains, 0 :linear
+      #   and 1 :db (0.5 halfway between them; effects-3).
+      # - a Curve (`Curve[:bounce]`, `Curve.power(0.5)`, or a curve name
+      #   such as :sqrt, :sine_out, :bounce; Curve.from): the gain is
+      #   trough + (1 - trough) x curve((m + 1) / 2), the curve mapping the
+      #   LFO from its bottom (0) to its top (1) onto the way from the
+      #   trough to unity (a :linear curve is the :linear law; overshooting
+      #   curves pass unity, and the gain stops at 0 below).
       #
       # The modulator is clamped to -1..1 (a band-limited square's ripple
       # never lifts the gain above unity).  Ends when the input or the
@@ -31,14 +39,38 @@ module MB
         # (a gain computed from its inputs: no running state)
         node_traits memory: :none
 
-        # Gain laws (see the class description).
+        # Named gain laws (see the class description; a number blends them,
+        # and any Curve shapes the gain).
         LAWS = %i[db linear].freeze
+
+        # The law setting as given: a LAWS name, a blend from 0 (:linear) to
+        # 1 (:db), or a Curve (names other than LAWS, Procs, and Arrays read
+        # with Curve.from).  Raises for anything else.
+        def self.check_law(law)
+          return law if LAWS.include?(law)
+          if law.is_a?(Numeric)
+            unless law.real? && law >= 0 && law <= 1
+              raise ArgumentError, "tremolo law: a number blends :linear (0) and :db (1), so it is from 0 to 1 (got #{law.inspect})"
+            end
+            return law.to_f
+          end
+          return law if law.is_a?(MB::Sound::Curve)
+          if law.is_a?(Symbol) || law.is_a?(String) || law.is_a?(Proc) || law.is_a?(Array)
+            begin
+              return MB::Sound::Curve.from(law)
+            rescue ArgumentError => e
+              raise ArgumentError, "tremolo law: is :db, :linear, a blend from 0 (:linear) to 1 (:db), or a Curve (#{e.message})"
+            end
+          end
+          raise ArgumentError, "tremolo law: is :db, :linear, a blend from 0 (:linear) to 1 (:db), or a Curve (got #{law.inspect})"
+        end
 
         # The default deepest trough of the :db law (Sony Amplitude
         # Modulation's amplitude of -inf, measured on its renders).
         DEFAULT_FLOOR = -80.0
 
-        # The law (:db or :linear).
+        # The law: :db, :linear, a blend (Float, 0 :linear to 1 :db), or a
+        # Curve.
         attr_reader :law
 
         # The trough's reduction in dB (Float, Infinity for a full cut), or
@@ -53,11 +85,14 @@ module MB
         def initialize(input, modulator, depth: 12.db, law: :db, floor: DEFAULT_FLOOR.db)
           raise ArgumentError, 'Tremolo input must respond to #sample' unless input.respond_to?(:sample)
           raise ArgumentError, "Tremolo modulator must be a graph node (got #{modulator.inspect})" unless modulator.respond_to?(:sample)
-          raise ArgumentError, "tremolo law: is #{LAWS.map(&:inspect).join(' or ')} (got #{law.inspect})" unless LAWS.include?(law)
+          law = Tremolo.check_law(law)
 
           @input = input.get_sampler
           @modulator = modulator.get_sampler
           @law = law
+          @blend = law.is_a?(Float) ? law : nil
+          @curve = law.is_a?(MB::Sound::Curve) ? law : nil
+          @scratch = nil
           @floor_db = -Decibels.reduction_db(floor, 'floor')
           raise ArgumentError, "tremolo floor: must be below 0 dB and finite (got #{floor.inspect})" unless @floor_db < 0 && @floor_db.finite?
 
@@ -80,13 +115,17 @@ module MB
         end
 
         # The trough's linear gain (Float) for a numeric depth, as the law
-        # reaches it (the :db law stops at its floor).
+        # reaches it (the :db law stops at its floor; a blend reaches the
+        # blend of both troughs).
         def trough
           return nil if @depth_db.nil?
-          return 0.0 if @law == :linear && @depth_db.infinite?
+          return 0.0 if @law != :db && @blend.nil? && @depth_db.infinite?
 
-          db = @law == :db ? MB::M.min(@depth_db, -@floor_db) : @depth_db
-          10.0 ** (-db / 20.0)
+          lin = @depth_db.infinite? ? 0.0 : 10.0 ** (-@depth_db / 20.0)
+          db = 10.0 ** (-MB::M.min(@depth_db, -@floor_db) / 20.0)
+          return db if @law == :db
+          return lin + (db - lin) * @blend if @blend
+          lin
         end
 
         def sample(count)
@@ -125,6 +164,8 @@ module MB
           g * -0.5
           g + 0.5
 
+          return shaped_gain(g, d, n) if @blend || @curve
+
           if d.nil?
             t = trough
             if @law == :db
@@ -146,9 +187,43 @@ module MB
           g.not_inplace!
         end
 
+        private
+
+        # #gain for a blend or a Curve law: +g+ holds u (0 at the
+        # modulator's top, 1 at its bottom) in place.
+        def shaped_gain(g, d, n)
+          if d.nil?
+            lin_t = @depth_db.infinite? ? 0.0 : 10.0 ** (-@depth_db / 20.0)
+            db_t = 10.0 ** (-MB::M.min(@depth_db, -@floor_db) / 20.0)
+          else
+            lin_t = Numo::SFloat.cast(d.length == n ? d : d[0...n]).clip(0, 1)
+            db_t = lin_t.clip(10.0 ** (@floor_db / 20.0), 1)
+          end
+
+          if @curve
+            # trough + (1 - trough) curve(v), v = 1 - u the LFO from its bottom
+            v = @curve.map(1 - g.not_inplace!)
+            out = (v * (1 - lin_t) + lin_t).clip(0, Float::INFINITY)
+            g.inplace!
+            g[0...n] = out
+          else
+            # (1 - b) linear + b dB
+            db = Numo::SFloat.cast(Numo::NMath.exp(g.not_inplace! * Numo::NMath.log(db_t)))
+            g.inplace!
+            g * -(1 - lin_t)
+            g + 1
+            g * (1 - @blend)
+            g + db * @blend
+          end
+          g.not_inplace!
+        end
+
+        public
+
         def to_s
           depth = @depth_db.nil? ? 'depth node' : (@depth_db.infinite? ? '-inf dB' : "-#{MB::M.sigfigs(@depth_db, 4)} dB")
-          "#{super} -- #{depth}, #{@law}"
+          law = @blend ? "law #{MB::M.sigfigs(@blend, 3)} (linear 0, dB 1)" : @curve ? "law #{@curve}" : @law
+          "#{super} -- #{depth}, #{law}"
         end
       end
     end

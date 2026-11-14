@@ -42,6 +42,7 @@ module MB
     #   both ends (smootherstep also zero curvature)
     # - :sine (in-out), :sine_in, :sine_out
     # - :quad, :cubic, :quart, :quint (powers 2 to 5; in), Curve.power(n)
+    # - :sqrt (Curve.power(0.5): out, quick off its start; effects-3)
     # - :exp (Curve.db(60): fast first, like an analog decay), Curve.db(d)
     #   for any signed dB (Envelope's curvature: positive fast first, 0
     #   linear, negative slow first); Curve.s(d) is Envelope's :s shape

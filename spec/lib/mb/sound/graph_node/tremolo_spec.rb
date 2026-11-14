@@ -69,6 +69,61 @@ RSpec.describe(MB::Sound::GraphNode::Tremolo, :aggregate_failures) do
       expect(a.max - a.min).to be > 0.05
     end
 
+    it 'glides between seeded random levels with shape: :smooth_random (effects-3)' do
+      held = take(1.constant.tremolo(1.n16, depth: 18.db, shape: :random, seed: 3), 36000)[0]
+      a = take(1.constant.tremolo(1.n16, depth: 18.db, shape: :smooth_random, seed: 3), 36000)[0]
+      b = take(1.constant.tremolo(1.n16, depth: 18.db, shape: :wander, seed: 3), 36000, 367)[0]
+      expect(b).to eq(a)
+      # the held levels' steps (up to 0.64 a sample) become glides
+      expect((held[1..] - held[0...-1]).abs.max).to be > 0.3
+      expect((a[1..] - a[0...-1]).abs.max).to be < 0.001
+      # each held level is reached by the end of its cycle (a 16th: 6000 samples at 120 BPM)
+      (1..5).each { |k| expect(a[6000 * k - 1]).to be_within(1e-4).of(held[6000 * k - 1]) }
+      expect(a.min).to be >= held.min - 1e-6
+      expect(a.max).to be <= held.max + 1e-6
+      expect { 1.constant.tremolo(2.hz.lfo.at(1..3), shape: :smooth_random) }.to raise_error(ArgumentError, /fixed rate/)
+    end
+
+    it 'blends the :linear and :db laws with a number from 0 (:linear) to 1 (:db) (effects-3)' do
+      m = Numo::SFloat.linspace(-1, 1, 9)
+      gain = ->(law, depth = 12.db) { MB::Sound::GraphNode::Tremolo.new(1.constant, 0.constant, depth: depth, law: law).gain(m, nil, 9).dup }
+      [0, 18.db].each do |depth|
+        lin = gain.(:linear, depth)
+        dbl = gain.(:db, depth)
+        expect(gain.(0, depth).to_a).to eq(lin.to_a)
+        expect(gain.(1, depth).to_a.zip(dbl.to_a).map { |x, y| (x - y).abs }.max).to be < 1e-6
+        half = gain.(0.25, depth)
+        9.times { |i| expect(half[i]).to be_within(1e-6).of(lin[i] * 0.75 + dbl[i] * 0.25) }
+        expect(half[8]).to be_within(1e-7).of(1)
+      end
+      # a node depth too
+      t = MB::Sound::GraphNode::Tremolo.new(1.constant, 0.constant, depth: 0.5.constant, law: 0.5)
+      g = t.gain(m, Numo::SFloat.new(9).fill(0.25), 9)
+      expect(g[0]).to be_within(1e-6).of(0.25)
+      expect(g[4]).to be_within(1e-6).of((0.625 + 0.5) / 2)
+      expect { 1.constant.tremolo(1, law: 1.5) }.to raise_error(ArgumentError, /0 to 1/)
+    end
+
+    it 'shapes the gain with a Curve law: trough + (1 - trough) curve(LFO from bottom to top) (effects-3)' do
+      m = Numo::SFloat.linspace(-1, 1, 9)
+      gain = ->(law, depth = 0) { MB::Sound::GraphNode::Tremolo.new(1.constant, 0.constant, depth: depth, law: law).gain(m, nil, 9).dup }
+      lin = gain.(:linear, 12.db)
+      gain.(MB::Sound::Curve[:linear], 12.db).each_with_index { |v, i| expect(v).to be_within(1e-7).of(lin[i]) }
+      sq = gain.(:sqrt)
+      9.times { |i| expect(sq[i]).to be_within(1e-6).of(Math.sqrt(i / 8.0)) }
+      expect(gain.(MB::Sound::Curve.power(0.5)).to_a).to eq(sq.to_a)
+      t = 10**(-12 / 20.0)
+      bounce = gain.(:bounce, 12.db)
+      c = MB::Sound::Curve[:bounce]
+      9.times { |i| expect(bounce[i]).to be_within(1e-6).of(t + (1 - t) * c.call(i / 8.0)) }
+      back = gain.(MB::Sound::Curve[:back, overshoot: 1])
+      expect(back.min).to eq(0) # (stops at 0 below)
+      b = take(1.constant.tremolo(1, depth: 0, law: :sqrt, shape: :triangle), 48000)[0]
+      expect([b[0], b[12000], b[36000]].map { |v| v.round(6) }).to eq([Math.sqrt(0.5).round(6), 1.0, 0.0])
+      expect(1.constant.tremolo(1, law: :sqrt).to_s).to include('law power(0.5)')
+      expect { 1.constant.tremolo(1, law: :sqr) }.to raise_error(ArgumentError, /law: .*Unknown curve :sqr/)
+    end
+
     it 'follows the tempo for musical lengths' do
       MB::Sound.bpm(120)
       b = take(1.constant.tremolo(1.n4, depth: 0, law: :linear, shape: :triangle), 24000)[0]
@@ -146,6 +201,15 @@ RSpec.describe(MB::Sound::GraphNode::Tremolo, :aggregate_failures) do
       text = t.to_ruby
       # (aliases record as the method's own name)
       expect(text).to include('tremolo(1.n8, depth: 6.db, shape: [[0, 1], [0.5, -1], [1, 1]], seam: true, stereo_phase: 0.5)')
+      ref = take(t, 4000)
+      MB::Sound.rewind
+      expect(take(RecipeHelpers.eval_recipe(text), 4000)).to eq(ref)
+
+      # effects-3's settings
+      t = 110.hz.saw.trem(1.n8, law: MB::Sound::Curve[:back, overshoot: 0.3], shape: :smooth_random, seed: 2) +
+        110.hz.saw.trem(1.n16, law: 0.3, shape: [[0, -1], [1, 1]], seam: :auto)
+      text = t.to_ruby
+      expect(text).to include('law: Curve[:back, overshoot: 0.3], shape: :smooth_random, seed: 2)').and include('law: 0.3, shape: [[0, -1], [1, 1]], seam: :auto)')
       ref = take(t, 4000)
       MB::Sound.rewind
       expect(take(RecipeHelpers.eval_recipe(text), 4000)).to eq(ref)
@@ -250,6 +314,24 @@ RSpec.describe(MB::Sound::GraphNode::Tremolo, :aggregate_failures) do
       a = methods.drawn_table([[0, 1], [1, -1]], seam: true)
       expect(methods.drawn_table([[0, 1.0], [1, -1]], seam: 0.1)).to equal(a)
       expect(methods.drawn_table([[0, 1], [1, -1]])).not_to equal(a)
+    end
+
+    it 'takes seam: :auto, about 3 ms or 0.1 of a cycle where that is shorter, with a knee (effects-3)' do
+      ms = ->(f) { methods.auto_seam(f) / f * 1000 }
+      [1, 2, 4, 8].each { |f| expect(ms.(f)).to be_within(0.01).of(3) }
+      expect(methods.auto_seam(33)).to be_between(0.08, 0.09) # the knee: 0.84 of either
+      expect(methods.auto_seam(200)).to eq(0.1)
+      expect(methods.auto_seam(1.n4)).to eq(methods.auto_seam(2)) # 120 BPM
+      expect(methods.auto_seam(4.hz)).to eq(methods.auto_seam(4))
+      expect(methods.auto_seam(0.25.seconds)).to eq(methods.auto_seam(4))
+      expect(methods.auto_seam(3.constant)).to eq(0.1) # (a node rate: no fixed cycle)
+      expect(methods.auto_seam(0.01) * methods::DRAWN_SIZE).to eq(2) # (at least two table steps)
+      # the ramp at 2 Hz blends its wrap over 3 ms (144 samples) instead of 0.1 of a cycle (24 ms)
+      a = take(1.constant.tremolo(2, depth: 24.db, shape: [[0, -1], [1, 1]], seam: :auto), 24000)[0]
+      b = take(1.constant.tremolo(2, depth: 24.db, shape: [[0, -1], [1, 1]], seam: 0.006), 24000)[0]
+      expect(a).to eq(b)
+      expect(db(a[72])).to be_within(1e-3).of(-24 * (1 - 0.003)) # (the seam's end at x = 0.003: the shape's own value)
+      expect(db(a[0])).to be_within(1e-3).of(-12) # (its middle)
     end
   end
 end

@@ -323,7 +323,10 @@ module GraphSweep
       ['tremolo (Tremolo: LFO shapes, drawn shapes with a seam, depth nodes, stereo phase, tempo rates, mix)', ->(c) {
         c.sig.tremolo(9, depth: 12.db) + c.sig.tremolo(c.mod(2, 30), shape: :square, depth: 0, law: :linear, smooth: 0.002) +
           c.sig.trem(1.n32, shape: [[0, 1], [0.3, -1], [0.3, 0.5], [1, -0.2]], seam: true, depth: c.mod(0.05, 0.9)) +
-          c.stereo_sig.tremolo(11, stereo_phase: 0.5, shape: :triangle, mix: 0.6).mixdown + c.sig.tremolo(7, shape: :random, seed: 3, stereo_phase: 0.25).mixdown
+          c.stereo_sig.tremolo(11, stereo_phase: 0.5, shape: :triangle, mix: 0.6).mixdown + c.sig.tremolo(7, shape: :random, seed: 3, stereo_phase: 0.25).mixdown +
+          # (effects-3: law blends and curves, smooth random, the :auto seam)
+          c.sig.tremolo(6, law: 0.4, depth: c.mod(0.05, 0.9)) + c.sig.tremolo(1.n32, law: :bounce, depth: 0) +
+          c.sig.tremolo(9, shape: :smooth_random, seed: 4, law: :sqrt) + c.sig.trem(1.n16, shape: [[0, -1], [1, 1]], seam: :auto)
       }],
       ['decimate (Decimator)', ->(c) { c.sig.decimate(c.mod(500, 9000)) + c.sig.lp4(900, resonance: 0.6).decimate(3000.5, jitter: 0.3) + c.sig.srr(c.notes.freq * 3.5) + c.sig.decimate(2500, mix: 0.4) + c.sig.decimate(c.mod(800, 6000), mix: c.mod(0.1, 0.9)) + c.sig.decimate(c.mod(700, 7000), interpolation: :linear, jitter: 0.2) }],
 

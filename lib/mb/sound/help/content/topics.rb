@@ -294,6 +294,10 @@ module MB
         `tremolo` swings the level along an LFO shape or a drawn cycle
         (`shape: [[0, 1], [0.25, -1], [1, -1]]`), tempo-synced or in Hz,
         with its depth in dB; `stereo_phase: 0.5` makes it an auto-pan.
+        `law: 0.3` blends its linear (0) and dB (1) laws, `law: :sqrt` (any
+        curve) shapes the gain, `shape: :smooth_random` glides between
+        random levels, and `seam: :auto` softens a drawn shape's wrap over
+        about 3 ms.
         `chebyshev` draws a waveshaper by the harmonics a full-scale sine
         should get (`chebyshev(h2: 0.5, h3: 0.2)`, `L.fx.chebyshev`).
       TEXT
