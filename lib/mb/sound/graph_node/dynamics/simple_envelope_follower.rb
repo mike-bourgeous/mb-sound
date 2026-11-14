@@ -14,7 +14,9 @@ module MB
         # compander's own detector (peak/RMS in dB, in fast_dynamics) is a
         # different design, so nothing duplicates it today.
         class SimpleEnvelopeFollower < MB::Sound::Filter
-          node_traits memory: :short
+          # (its level moves to a rebuilt follower: #carry_adopt; effects-4,
+          # since the flanger's :jet preset hisses through one per side)
+          node_traits memory: :short, carry: :adopt
 
           attr_reader :decay_db, :decay_s, :decay_per_sample, :sample_rate
 
@@ -34,6 +36,20 @@ module MB
             @sample_rate = rate.to_f
             @decay_per_sample = @decay_db.db ** (1.0 / (@decay_s * @sample_rate))
           end
+
+          # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+          # follower +old+ is a follower (its level fits any decay).
+          def carry_fits?(old)
+            old.class == self.class
+          end
+
+          # Takes over follower +old+'s level (the old one gets this one's).
+          def carry_adopt(old)
+            NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
+          end
+
+          # The running state #carry_adopt swaps.
+          ADOPT_IVARS = %i[@v].freeze
 
           # Resets the envelope to 0, or to the given value.
           def reset(initial_value = 0)
