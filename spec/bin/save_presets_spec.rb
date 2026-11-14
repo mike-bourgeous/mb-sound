@@ -70,6 +70,32 @@ RSpec.describe('bin/save_presets.rb') do
     end
   end
 
+  MB::Sound::LIBRARY_PRESET_VOICES.each do |name|
+    it "loads the #{name} library voice and plays it like library_voices.rb -p #{name}" do
+      s = MB::Sound::LIBRARY_VOICES.fetch(name)
+      file = MB::Sound.library_preset_file(io.library_presets_dir, name)
+      doc = io.parse(file)
+      expect(doc.inputs).to eq([:midi])
+      expect(doc.kind).to eq(:synth)
+      expect(doc.description).to eq(MB::Sound.library_voices_description(name)).and include('library-voices-1')
+      expect(doc.header[:tags]).to eq(s[:tags])
+      expect(doc.params.keys).to eq(s[:knobs].keys)
+
+      midi = -> { MB::Sound::Notes.new(midi_file) }
+      direct = MB::Sound.with_seed(0) { MB::Sound.library_voice(midi.(), name) }
+      expected = render_buffers(direct, 40)
+      got = render_buffers(io.load(file, inputs: { midi: midi.() }), 40)
+      if s[:prepare]
+        # (a bounced source: the document keeps it as a 24-bit FLAC asset)
+        join = ->(bufs) { Numo::SFloat.cast(SpecBuffers.join(bufs.flat_map { |b| b.compact })) }
+        expect(rms_db(join.(got) - join.(expected)) - rms_db(join.(expected))).to be < -100
+      else
+        expect(got).to eq(expected)
+      end
+      expect(expected.flatten.compact.map { |b| b.abs.max }.max).to be > 0
+    end
+  end
+
   MB::Sound::LIBRARY_PRESET_EFFECTS.each do |name, (_script, params, builder)|
     it "loads the #{name} effect and plays it like its method" do
       file = MB::Sound.library_preset_file(io.library_presets_dir, name)

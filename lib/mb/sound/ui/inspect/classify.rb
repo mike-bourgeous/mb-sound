@@ -61,7 +61,7 @@ module MB
             'Synth' => 'synth wiring', 'Synth::Output' => 'synth wiring', 'GraphNode::ChannelMixer::Output' => 'multi-output wiring',
             'GraphNode::Reverb::ReverbOutput' => 'multi-output wiring', 'GraphNode::Dynamics::Output' => 'multi-output wiring',
             'GraphNode::FilterBank::Output' => 'multi-output wiring',
-            'GraphNode::Chorus::Tail' => 'multi-output wiring', 'GraphNode::MultitapDelay::DelayTap' => 'multi-output wiring',
+            'GraphNode::Chorus::Tail' => 'multi-output wiring', 'GraphNode::Grains::Output' => 'multi-output wiring', 'GraphNode::MultitapDelay::DelayTap' => 'multi-output wiring',
             'GraphNode::FeedbackLoop::Variable' => 'multi-output wiring', 'Drums::Voice::Tap' => 'multi-output wiring',
             'Sequence::TempoNode' => 'tempo', 'SQ80::TimeScale' => 'tempo',
             'GraphNodeInput' => 'synth wiring', 'Drums::Kit' => 'synth wiring',
@@ -75,7 +75,7 @@ module MB
 
           ENVELOPES = %w[Envelope Notes::NoteEnvelope].freeze
           MODULATORS = %w[GraphNode::Drift GraphNode::SampleHold GraphNode::Dust GraphNode::Quantize].freeze
-          OSCILLATORS = %w[Tone Notes::KeyedTone GraphNode::ChannelMixer::Unison GraphNode::SamplerVoice GraphNode::Grains].freeze
+          OSCILLATORS = %w[Tone Notes::KeyedTone GraphNode::ChannelMixer::Unison GraphNode::SamplerVoice GraphNode::Grains GraphNode::HarmonicTable].freeze
           FILTERS = %w[GraphNode::FourPole GraphNode::Formant GraphNode::DiodeLadder GraphNode::FilterBank GraphNode::FilterBank::Router].freeze
           RESONATORS = %w[GraphNode::ModalResonator GraphNode::Resonator].freeze
           SHAPERS = %w[GraphNode::Shaper GraphNode::CurveShaper].freeze

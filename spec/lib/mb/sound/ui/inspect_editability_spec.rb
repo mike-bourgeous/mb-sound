@@ -46,6 +46,15 @@ RSpec.describe('Inspector editability (Note 15)', :aggregate_failures) do
     [:dnb_neuro, 'lfo', :constant] => 'Notes#lfo internals', [:dnb_reese, 'lfo', :constant] => 'Notes#lfo internals',
     [:funk_talkbox, 'lfo', :constant] => 'Notes#lfo internals',
     [:dnb_neuro, 'phasor', :phase] => 'Notes#lfo internals',
+    # The library voices (library-voices-1): their vibratos as above; a
+    # Juno chorus's triangle LFOs (the chorus mode sets them, as in
+    # jungle_pad's chorus, listed above as its vibrato); Tone#sync's master
+    # phasor; unison copies' phases (random per copy by design).
+    [:breath_vowel, 'sine', :frequency] => 'vibrato internals', [:breath_vowel, 'sine', :phase] => 'vibrato internals',
+    [:sync_lead, 'sine', :frequency] => 'vibrato internals', [:sync_lead, 'sine', :phase] => 'vibrato internals',
+    [:sync_lead, 'phasor', :phase] => 'sync master internals',
+    [:pwm_strings, 'triangle', :frequency] => 'chorus LFO internals', [:pwm_strings, 'triangle', :phase] => 'chorus LFO internals',
+    [:supersaw, 'ramp', :phase] => 'unison copy phases',
     # A lowpass inside a feedback loop whose row's first node has a call
     # recorded without an ordinal (one of the copies; the others have
     # keys): to investigate.
