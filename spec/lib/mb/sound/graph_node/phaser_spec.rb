@@ -773,6 +773,18 @@ RSpec.describe(MB::Sound::GraphNode::Phaser, :aggregate_failures) do
       expect { 110.hz.saw.phaser(sweep: 1.hz.lfo, lanes: 2) }.to raise_error(ArgumentError, /lanes/)
     end
 
+    it 'limits a barber pole to BARBER_MAX_HZ passes a second (direction at audio rate)' do
+      fast = collect(110.hz.saw.phaser(:barberpole, direction: 1000.constant), 9600)
+      expect(fast).to eq(collect(110.hz.saw.phaser(:barberpole, direction: 400.constant), 9600)) # (both 40 passes a second)
+      expect { 110.hz.saw.phaser(:barberpole, direction: 401) }.to raise_error(ArgumentError, /passes a second/)
+      expect { 110.hz.saw.phaser(:barberpole, rate: 20, direction: 2.5) }.to raise_error(ArgumentError, /passes a second/)
+      expect { 110.hz.saw.phaser(:barberpole, rate: 1.n16, direction: 4) }.not_to raise_error
+      # (a direction knob swung +-2 at 80 Hz barely moves the notches: its sweep integrates to +-0.002 octaves)
+      held = collect(110.hz.saw.phaser(:barberpole, direction: 0), 48000)
+      buzz = collect(110.hz.saw.phaser(:barberpole, direction: 80.hz.lfo.at(-2..2)), 48000)
+      expect(Math.sqrt(((buzz - held)**2).mean) / Math.sqrt((held**2).mean)).to be < 0.05
+    end
+
     it 'gives the same samples at any buffer size with the new options' do
       mk = -> {
         110.hz.saw.phaser(:jet, above: nil, rate: 3, stages: 8, feedback: 0.5.hz.lfo.at(-1.25..1.25), oscillate: 0.3.hz.lfo.at(0..3),

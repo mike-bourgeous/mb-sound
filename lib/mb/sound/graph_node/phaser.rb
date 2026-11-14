@@ -82,6 +82,14 @@ module MB
         # wet level (each window scaled by 2/3).
         BARBER_CHAINS = 3
 
+        # The fastest barber pole in passes a second (effects-5, rate x
+        # direction; a moving direction is clipped here, a fixed one past it
+        # raises): past audio rate each chain's jump back is a transient
+        # whose timing jitters by a sample, aliasing that grows with the
+        # speed (a 1 kHz sine: -46 dB off the pole's sideband grid at 13.7
+        # passes a second, -42 at 37, -35 at 137, -27 at 370, -14 at 1370).
+        BARBER_MAX_HZ = 40.0
+
         # LFO shapes.
         SHAPES = %i[sine triangle].freeze
 
@@ -1022,9 +1030,12 @@ module MB
         def self.barber_rate(rate, speed, sample_rate)
           rate = GraphNode.build_setting(rate) unless rate.respond_to?(:sample)
           if speed.is_a?(Numeric)
-            return rate if speed == 1
             return 0.0 if speed == 0
-            return rate / speed if rate.is_a?(Sequence::Duration)
+            if rate.is_a?(Sequence::Duration)
+              d = speed == 1 ? rate : rate / speed
+              barber_hz_check(d.hz.oscillator_frequency)
+              return d
+            end
           end
 
           hz = case rate
@@ -1036,8 +1047,26 @@ module MB
                  raise ArgumentError, "phaser rate: is Hz, a Pitch, a musical length, a Length, or a node of Hz (got #{rate.inspect})" unless rate.respond_to?(:sample)
                  rate
                end
-          return hz * speed if hz.is_a?(Numeric) && speed.is_a?(Numeric)
-          hz.is_a?(Numeric) ? speed * hz : hz * speed
+          if hz.is_a?(Numeric) && speed.is_a?(Numeric)
+            barber_hz_check(hz * speed)
+            return speed == 1 ? rate : hz * speed
+          end
+          # (a moving speed or rate: limited to BARBER_MAX_HZ passes a second)
+          node = if hz.is_a?(Numeric)
+                   speed * hz
+                 elsif speed.is_a?(Numeric) && speed == 1
+                   hz
+                 else
+                   hz * speed
+                 end
+          node.aclip(-BARBER_MAX_HZ, BARBER_MAX_HZ)
+        end
+
+        # Raises if a barber pole's +hz+ (passes a second) is past
+        # BARBER_MAX_HZ.
+        def self.barber_hz_check(hz)
+          return unless hz.is_a?(Numeric) && hz.abs > BARBER_MAX_HZ
+          raise ArgumentError, "phaser: a barber pole makes at most #{BARBER_MAX_HZ} passes a second (rate x direction; got #{MB::M.sigfigs(hz.abs, 4)})"
         end
 
         # Phaser +rate+ (a preset name or rate, as for .build) with +options+ on the highs of +input+ above
