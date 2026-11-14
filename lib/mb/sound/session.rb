@@ -2000,10 +2000,12 @@ module MB
           sidechained = !read_from.nil? && read_from <= offset
         end
         # So does a player with a pre-mute send on (Buses#pre_mute_from),
-        # from the frame it is switched on
+        # from the frame it is switched on (for one launched from CUE, the
+        # frame its MAIN share ramps in: Cue#cue_main_from)
         pm = nil
         if @routed_span && (pm_route = route_of(p.name)) && pm_route.pre
           pm = pre_mute_from(pm_route, offset, frames)
+          pm = cue_main_from(p, base, pm, offset + frames) if pm && p.cue
           if pm && (read_from.nil? || pm < read_from)
             read_from = pm
             sidechained = read_from <= offset

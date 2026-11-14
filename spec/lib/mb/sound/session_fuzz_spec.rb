@@ -443,6 +443,22 @@ RSpec.describe('session fuzzing') do
         'at_bar(1, beat: 4) { unmute :t2 }',
       ], 1,
     ],
+    # (fix-batch35-1114, post-merge batch 35's soak seed 781023: a launch
+    # renames the cue player from the first frame of the span it lands
+    # in, so its pre-mute send woke the muted graph there, up to a buffer
+    # before the launch frame its MAIN share ramps in from;
+    # Cue#cue_main_from.  The bus passes the send through, so a wrong
+    # wake shows as the square's phase from the first sample.)
+    'a muted track launched from CUE with a pre-mute send (seed 781023)' => [
+      :buffer_size, ['bpm 150'], [
+        'track(:t2, q: 1) { |clip| clip.synth(voices: 3) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'at_bar(3) { cue :t2, seq(A4, C5).n8.loop }',
+        'at_bar(3, beat: 3) { launch }',
+        'bus(:wet) { |sig| sig }',
+        'at_bar(1, beat: 2) { feed :t2, :wet, -6.db, pre: :mute, on: :beat }',
+        'at_bar(3, beat: 2) { mute :t2 }',
+      ], 3,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil
