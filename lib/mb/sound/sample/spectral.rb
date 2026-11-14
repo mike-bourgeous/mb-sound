@@ -115,9 +115,8 @@ module MB
 
         # The phase vocoder for audio that loops: +channels+ are read as
         # an endless stream (every frame wraps around the ends, so no
-        # frame sees an edge), stretched by +ratio+ for +passes+ passes
-        # of the loop, and the output is overlap-added in a circle of
-        # +passes+ × the stretched length, so its own end flows into its
+        # frame sees an edge), stretched by +ratio+, and the output is
+        # overlap-added in a circle, so its own end flows into its
         # start with the same sound on both sides (no unstretched join, no
         # crossfade).  Options as #vocoder; +onsets+ are those of one
         # pass, an onset at the start being an attack only if the level
@@ -135,7 +134,10 @@ module MB
         # themselves.  What the spreading leaves (bins whose peaks moved)
         # is in +report+ (a Hash, if given): :closure, the magnitude-
         # weighted mean of |phase error| at the wrap in cycles, before
-        # and after.
+        # and after.  +passes+ stretches that many passes of the loop as
+        # one piece (for measuring: any one of them alone does not loop,
+        # which is why the phases are closed; a single closed pass sounds
+        # the same at the wrap, so Sample#stretch makes one).
         def looped(channels, ratio, passes: 1, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, report: nil, span: 1.0, noise: 0)
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
           passes = Integer(passes)

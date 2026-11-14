@@ -1101,9 +1101,7 @@ module MB
       # for any sample that will be looped (`brk.stretch(1.5, mode:
       # :spectral, wrap: true).looped`), false for a stretch with its own
       # start and end (a loop of it steps, in level and in tone, at every
-      # pass).  +passes+ (1) stretches that many passes of the loop as
-      # one piece, no two alike in their phases (the result is +passes+
-      # times as long and loops as a whole).  A loop whose loop point is
+      # pass).  A loop whose loop point is
       # an attack (a one-shot saved as a loop: Sample::Onsets finds an
       # onset at its start with wrap: true) is stretched by plain :paul
       # (no transients:, one pass) with its own start and end, as before
@@ -1127,12 +1125,12 @@ module MB
       #     bowl.stretch(100, mode: :paul, window: 0.5.seconds)  # an endless wash
       #     voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false)   # narrower partials, a wide image (voices)
       def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann,
-                  slices: nil, fade: nil, fill: nil, wrap: nil, passes: nil, noise: nil, confirm: nil, threshold: nil)
+                  slices: nil, fade: nil, fill: nil, wrap: nil, noise: nil, confirm: nil, threshold: nil)
         unless (confirm.nil? && threshold.nil?) || (SLICE_MODES.include?(mode.to_sym) && slices == :transients)
           raise ArgumentError, 'confirm: and threshold: are for mode: :slice with slices: :transients'
         end
         raise ArgumentError, "wrap: is true, false, or nil (by the sample's loop; got #{wrap.inspect})" unless wrap.nil? || wrap == true || wrap == false
-        raise ArgumentError, 'wrap:, passes:, and noise: are for mode: :spectral and :paul' unless (wrap.nil? && passes.nil? && noise.nil?) || (!SLICE_MODES.include?(mode.to_sym) && Spectral.mode_name(mode) != :cyclic)
+        raise ArgumentError, 'wrap: and noise: are for mode: :spectral and :paul' unless (wrap.nil? && noise.nil?) || (!SLICE_MODES.include?(mode.to_sym) && Spectral.mode_name(mode) != :cyclic)
         if SLICE_MODES.include?(mode.to_sym)
           unless fit == :auto && window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
             raise ArgumentError, 'mode: :slice takes slices:, fade:, fill:, and (for fill: :stretch) cycle: and crossfade:'
@@ -1142,7 +1140,7 @@ module MB
         raise ArgumentError, 'slices:, fade:, and fill: are for mode: :slice' unless slices.nil? && fade.nil? && fill.nil?
 
         mode = Spectral.mode_name(mode)
-        return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap, passes, noise) unless mode == :cyclic
+        return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap, noise) unless mode == :cyclic
         unless window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
           raise ArgumentError, 'window:, overlap:, shape:, transients:, seed:, randomize:, and link: are for mode: :spectral and :paul'
         end
@@ -1389,7 +1387,7 @@ module MB
       # vocoder whose +randomize+ goes from locked phases (0) to random
       # ones (1, Spectral.paul's magnitude-only frames when no onsets are
       # kept); the modes set the defaults.
-      def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap = nil, passes = nil, noise = nil)
+      def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap = nil, noise = nil)
         paul = mode == :paul
         transients = !paul if transients.nil?
         transients = false if transients == 0
@@ -1418,19 +1416,16 @@ module MB
         kw[:seed] = seed unless seed == 0 || (randomize == 0 && noise == 0)
         kw[:wrap] = wrap unless wrap.nil?
         wrap = whole_loop? if wrap.nil?
-        passes = passes.nil? ? 1 : Integer(passes)
-        raise ArgumentError, "passes: is 1 or more, for a sample that loops (or wrap: true; got #{passes})" unless passes == 1 || (passes > 1 && wrap)
-        kw[:passes] = passes unless passes == 1
 
         n = position(window.nil? ? (paul ? Spectral::PAUL_WINDOW : Spectral::WINDOW.samples) : window).round
         n += 1 if n.odd?
         onsets = transients ? (@reversed ? reverse : self).onsets(wrap: wrap) : nil
-        edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio * passes), bpm: @bpm && @bpm / ratio.to_f, beats: passes > 1 && @beats ? @beats * passes : nil) { |chans|
-          if wrap && randomize >= 1 && onsets.nil? && passes == 1 && attack_at_loop_point?
+        edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |chans|
+          if wrap && randomize >= 1 && onsets.nil? && attack_at_loop_point?
             # (a hit on the loop point stays on it: see #stretch)
             Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
           elsif wrap
-            Spectral.looped(chans, ratio.to_f, passes: passes, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise)
+            Spectral.looped(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise)
           elsif randomize >= 1 && onsets.nil?
             Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
           else
@@ -1544,13 +1539,13 @@ module MB
       # block (called with each channel's SFloat, returning the new
       # channel), with the loop and settings kept (loop points scaled with
       # the length) and read as +read+ says (see #read_as).
-      def edit(method, args, kwargs = {}, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips }, bpm: @bpm, beats: nil, &block)
+      def edit(method, args, kwargs = {}, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips }, bpm: @bpm, &block)
         key = [@start, @stop, @root, @loop_points, @loop_mode, @reversed, @fade_in, @fade_out, @tune, @level, @bpm, @interpolation, @mips,
                @beats, @meter, @key, @markers, method, args, kwargs]
-        @audio.edit(key) { edit_uncached(method, args, kwargs, channels: channels, whole: whole, read: read, bpm: bpm, beats: beats, &block) }
+        @audio.edit(key) { edit_uncached(method, args, kwargs, channels: channels, whole: whole, read: read, bpm: bpm, &block) }
       end
 
-      def edit_uncached(method, args, kwargs, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips }, bpm: @bpm, beats: nil)
+      def edit_uncached(method, args, kwargs, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips }, bpm: @bpm)
         src = Array.new(channel_count) { |c| @audio.channels[c][@start...@stop].dup }
         out = channels || (whole ? yield(src).map { |d| Numo::SFloat.cast(d) } : src.map { |d| Numo::SFloat.cast(yield(d)) })
         len = out[0].length
@@ -1567,7 +1562,7 @@ module MB
           out, root: @root, loop: loop, loop_mode: loop ? @loop_mode : (@loop_points ? :one_shot : @loop_mode), reverse: @reversed,
           fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: bpm, name: @name, sample_rate: sample_rate,
           interpolation: read[:interpolation], mips: read[:mips], lineage: [self, method, args, kwargs].freeze,
-          beats: full_region? ? (beats || @beats) : nil, meter: @meter, key: @key, markers: markers, provenance: @provenance, meta: @meta
+          beats: full_region? ? @beats : nil, meter: @meter, key: @key, markers: markers, provenance: @provenance, meta: @meta
         )
       end
 

@@ -222,19 +222,14 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       end
     end
 
-    it 'stretches several passes as one piece (passes:), and Paulstretch loops too' do
-      loop = plain.looped.with(bpm: 120, beats: 2)
-      three = loop.stretch(1.25, mode: :spectral, passes: 3)
-      expect([three.length, three.beats, three.bpm]).to eq([180000, 6, 96.0])
-      expect(three).to be_whole_loop
-      at, within = flux(three.data(0))
+    it 'needs its phases closed: a pass of several stretched as one does not loop alone; Paulstretch loops too' do
+      three = described_class.looped([held], 1.25, passes: 3)[0]
+      expect(three.length).to eq(180000)
+      at, within = flux(three)
       expect(at).to be < within
-      # (its passes differ in their phases: the middle one alone does not loop)
-      at, within = flux(three.data(0)[60000...120000])
+      at, within = flux(three[60000...120000])
       expect(at).to be > 2 * within
-      expect(three.lineage[3]).to eq({ mode: :spectral, passes: 3 })
-      expect { plain.stretch(1.25, mode: :spectral, passes: 2) }.to raise_error(ArgumentError, /passes: is 1 or more, for a sample that loops/)
-      expect { loop.stretch(1.25, passes: 2) }.to raise_error(ArgumentError, /wrap:, passes:, and noise: are for/)
+      expect { plain.looped.stretch(1.25, mode: :spectral, passes: 3) }.to raise_error(ArgumentError, /passes/)
 
       wash = plain.looped.stretch(2, mode: :paul).data(0)
       step, inside = wrap_step(wash)
@@ -249,8 +244,8 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       expect(plain.stretch(0.77, mode: :spectral).data(0)).to eq(plain.stretch(0.77, mode: :spectral, wrap: false).data(0))
       expect(plain.stretch(0.77, mode: :spectral, wrap: true).data(0)).to eq(plain.looped.stretch(0.77, mode: :spectral).data(0))
       expect(plain.stretch(0.77, mode: :spectral, wrap: true).lineage[3]).to eq({ mode: :spectral, wrap: true })
-      expect { plain.stretch(0.77, wrap: true) }.to raise_error(ArgumentError, /wrap:, passes:, and noise: are for/)
-      expect { plain.stretch(0.77, mode: :slice, wrap: true) }.to raise_error(ArgumentError, /wrap:, passes:, and noise: are for/)
+      expect { plain.stretch(0.77, wrap: true) }.to raise_error(ArgumentError, /wrap: and noise: are for/)
+      expect { plain.stretch(0.77, mode: :slice, wrap: true) }.to raise_error(ArgumentError, /wrap: and noise: are for/)
       expect { plain.stretch(0.77, mode: :spectral, wrap: 1) }.to raise_error(ArgumentError, /wrap: is true/)
     end
 
