@@ -44,6 +44,11 @@ module MB
         AUTO_SEAM_TIME = 0.003
         AUTO_SEAM_KNEE = 4.0
 
+        # Seconds over which shape: :random glides to each new level unless
+        # +:smooth+ is given (effects-4; the maintainer wanted "3ms smooth"
+        # on the held steps; `smooth: 0` keeps the hard steps).
+        RANDOM_SMOOTH = 0.003
+
         # Ways #tremolo's +:seam+ blends the wrap (+:seam_mode+): :line
         # draws a straight line across the seam whatever the shape does
         # there, :jump takes out only the jump between the shape's end and
@@ -74,7 +79,8 @@ module MB
         #            trough's linear gain.  Default 12 dB.
         # +:shape+ - :sine (default), :triangle (:tri), :saw (rising;
         #            :ramp), :square (:sqr), :random (:noise, :sh; a value
-        #            held each cycle: steps), :smooth_random (:wander; a
+        #            held each cycle: steps, each glided to over 3 ms; see
+        #            +:smooth+), :smooth_random (:wander; a
         #            random value each cycle, glided to along an S-curve
         #            over the whole cycle, so no steps; needs a fixed rate:
         #            Hz, a Pitch, a musical length, or a Length), or a
@@ -94,12 +100,14 @@ module MB
         #            when it is nonzero; with more channels, channel k of N
         #            leads by k / (N - 1) of it.
         # +:seam+ - Drawn shapes only: blends the end of the cycle into its
-        #            start over this fraction of a cycle (true for 0.1), so
-        #            a jump at the wrap doesn't click; how is +:seam_mode+.
-        #            :auto takes about 3 ms, or 0.1 of a cycle where that is
-        #            shorter (above about 33 Hz), with a smooth knee between
-        #            (.auto_seam; from the rate when built, so a node rate
-        #            gets 0.1).
+        #            start, so a jump at the wrap doesn't click; how is
+        #            +:seam_mode+.  true or :auto (effects-4) takes about 3
+        #            ms, or 0.1 of a cycle where that is shorter (above about
+        #            33 Hz), with a smooth knee between (.auto_seam; from the
+        #            rate when built, so a node rate gets 0.1); a Length
+        #            (`3.ms`, `1.n64`) takes that long (at most a cycle; needs
+        #            a fixed rate); a number is a fraction of a cycle (0.1 is
+        #            Sony Amplitude Modulation's "blend graph edges").
         # +:seam_mode+ - :line (default): a straight line across the seam,
         #            from the shape's value seam / 2 before the end to its
         #            value seam / 2 after the start, whatever it does in
@@ -119,7 +127,9 @@ module MB
         #            onto the gain from the trough to unity.  See Tremolo.
         # +:smooth+ - Smooths the LFO over this length (GraphNode#smooth;
         #            e.g. `5.ms` to soften a square's clicks); nil (default)
-        #            keeps exact edges.
+        #            keeps exact edges, except for shape: :random, whose
+        #            steps glide over RANDOM_SMOOTH (3 ms) unless +:smooth+
+        #            says otherwise (0 for the hard steps).
         # +:mix+ - 1 (default) all tremolo, 0 dry, between them a linear
         #            crossfade through #blend (a number, knob name, or node).
         # +:seed+ - For the random shapes (default: drawn from MB::Sound.seed).
@@ -140,8 +150,7 @@ module MB
           # (build-time settings: a graph document's params become their numbers)
           phase = GraphNode.build_setting(phase)
           stereo_phase = GraphNode.build_setting(stereo_phase)
-          seam = GraphNode.build_setting(seam)
-          seam = TremoloMethods.auto_seam(rate) if seam == :auto
+          seam = TremoloMethods.seam_cycles(GraphNode.build_setting(seam), rate)
           drawn = TremoloMethods.drawn?(shape)
           shape = shape.map { |p| p.is_a?(Array) ? p.map { |v| GraphNode.build_setting(v) } : p } if drawn
           wave = drawn ? nil : TremoloMethods.shapes.fetch(shape) {
@@ -159,11 +168,16 @@ module MB
           TremoloMethods.check_rate(rate)
           law = Tremolo.check_law(law)
           seed = MB::Sound.next_seed if (wave == :noise || wave == :smooth_noise) && seed.nil?
+          smooth = GraphNode.build_setting(smooth) unless smooth.nil? || smooth.respond_to?(:sample)
           if wave == :smooth_noise
             # (one cycle: each new value is reached as the next arrives)
             smooth ||= TremoloMethods.period(rate)
             wave = :noise
+          elsif wave == :noise
+            # (effects-4, the maintainer: "I was looking for 3ms smooth")
+            smooth = RANDOM_SMOOTH if smooth.nil?
           end
+          smooth = nil if smooth.is_a?(Numeric) && smooth == 0
 
           build = lambda do |src|
             inputs = src.outputs
@@ -190,20 +204,55 @@ module MB
         # the current tempo, and a node rate (no fixed cycle) gets
         # DEFAULT_SEAM.
         def self.auto_seam(rate)
-          rate = GraphNode.build_setting(rate) unless rate.respond_to?(:sample)
-          hz = case rate
-               when Sequence::Duration, Length then 1.0 / rate.to_seconds(sample_rate: 48000)
-               when Pitch then rate.oscillator_frequency
-               when Numeric then rate.to_f
-               end
+          hz = fixed_hz(rate)
           return DEFAULT_SEAM if hz.nil? || !(hz > 0) || !hz.finite?
 
           a = DEFAULT_SEAM
           b = AUTO_SEAM_TIME * hz
           p = AUTO_SEAM_KNEE
-          seam = (a**-p + b**-p)**(-1.0 / p)
-          steps = [(seam * DRAWN_SIZE / 2.0).round * 2, 2].max
+          table_steps((a**-p + b**-p)**(-1.0 / p))
+        end
+
+        # The seam in cycles (or nil) for #tremolo's +:seam+ setting +seam+
+        # at +rate+: nil, false, or 0 for none; true or :auto for
+        # .auto_seam; a Length for that long at the rate (at most a cycle;
+        # raises for a node rate); a number for itself (checked by
+        # .drawn_table).  Lengths and :auto round to an even number of
+        # table samples (at least 2).
+        def self.seam_cycles(seam, rate)
+          case seam
+          when nil, false then nil
+          when true, :auto then auto_seam(rate)
+          when Length
+            hz = fixed_hz(rate)
+            raise ArgumentError, "tremolo seam: #{seam} needs a fixed rate (Hz, a Pitch, a musical length, or a Length; got a node)" if hz.nil?
+            secs = seam.to_seconds(sample_rate: 48000)
+            raise ArgumentError, "tremolo seam: is a length above 0 (got #{seam})" unless secs.is_a?(Numeric) && secs >= 0 && secs.finite?
+            return nil if secs == 0 || hz == 0
+            table_steps(MB::M.min(secs * hz, 1.0))
+          when Symbol
+            raise ArgumentError, "tremolo seam: is true or :auto (about 3 ms), a Length, a fraction of a cycle, or nil (got #{seam.inspect})"
+          else
+            seam
+          end
+        end
+
+        # +cycles+ rounded to an even number of drawn-table samples, at
+        # least 2, at most the whole table.
+        def self.table_steps(cycles)
+          steps = ((cycles * DRAWN_SIZE / 2.0).round * 2).clamp(2, DRAWN_SIZE)
           steps / DRAWN_SIZE.to_f
+        end
+
+        # The fixed rate in Hz of +rate+ (a #tremolo rate; a tempo rate at
+        # the current tempo), or nil for a node rate.
+        def self.fixed_hz(rate)
+          rate = GraphNode.build_setting(rate) unless rate.respond_to?(:sample)
+          case rate
+          when Sequence::Duration, Length then 1.0 / rate.to_seconds(sample_rate: 48000)
+          when Pitch then rate.constant? ? rate.frequency.to_f : nil
+          when Numeric then rate.to_f
+          end
         end
 
         # True if +shape+ is a drawn shape (an Array of points).
@@ -353,10 +402,9 @@ module MB
         # +mode+ (SEAM_MODES).
         def self.drawn_table(points, seam: nil, mode: :line)
           pts = check_points(points)
-          seam = DEFAULT_SEAM if seam == true
           seam = nil if seam == false || seam == 0
           unless seam.nil? || (seam.is_a?(Numeric) && seam.real? && seam > 0 && seam <= 1)
-            raise ArgumentError, "tremolo seam: is a fraction of a cycle (0..1), true for #{DEFAULT_SEAM}, or nil (got #{seam.inspect})"
+            raise ArgumentError, "tremolo seam: is a fraction of a cycle (0..1), true or :auto (about 3 ms), a Length, or nil (got #{seam.inspect})"
           end
           seam = seam&.to_f
           raise ArgumentError, "tremolo seam_mode: is #{SEAM_MODES.map(&:inspect).join(' or ')} (got #{mode.inspect})" unless SEAM_MODES.include?(mode)

@@ -298,9 +298,10 @@ module MB
         (`shape: [[0, 1], [0.25, -1], [1, -1]]`), tempo-synced or in Hz,
         with its depth in dB; `stereo_phase: 0.5` makes it an auto-pan.
         `law: 0.3` blends its linear (0) and dB (1) laws, `law: :sqrt` (any
-        curve) shapes the gain, `shape: :smooth_random` glides between
-        random levels, and `seam: :auto` softens a drawn shape's wrap over
-        about 3 ms.
+        curve) shapes the gain, `shape: :random` steps to random levels
+        (gliding over 3 ms; `smooth: 0` for hard steps), `shape:
+        :smooth_random` glides between them, and `seam: true` softens a
+        drawn shape's wrap over about 3 ms (or `seam: 5.ms`).
         `chebyshev` draws a waveshaper by the harmonics a full-scale sine
         should get (`chebyshev(h2: 0.5, h3: 0.2)`, `L.fx.chebyshev`).
       TEXT
