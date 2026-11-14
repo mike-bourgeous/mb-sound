@@ -1101,7 +1101,16 @@ module MB
       # start and end (a loop of it steps, in level and in tone, at every
       # pass).  +passes+ (1) stretches that many passes of the loop as
       # one piece, no two alike in their phases (the result is +passes+
-      # times as long and loops as a whole).
+      # times as long and loops as a whole).  A loop whose loop point is
+      # an attack (a one-shot saved as a loop: Sample::Onsets finds an
+      # onset at its start with wrap: true) is stretched by plain :paul
+      # (no transients:, one pass) with its own start and end, as before
+      # loops were read in a circle: random phases spread a frame's sound
+      # over its whole quarter-second window, so read across the loop
+      # point the attack also sounded up to 125 ms before itself (a
+      # cymbal at 2.86x: a step at the loop point of 0.6 dB instead of
+      # its 15.6, stretch-fixes-3); at the edge it starts on the loop
+      # point and the decay before it fades out.
       #
       # Results longer than LONG_STRETCH (30 s) read with `mips: :octave`
       # unless this sample has its own mips (smaller playback tables for
@@ -1381,7 +1390,10 @@ module MB
         n += 1 if n.odd?
         onsets = transients ? (@reversed ? reverse : self).onsets(wrap: wrap) : nil
         edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio * passes), bpm: @bpm && @bpm / ratio.to_f, beats: passes > 1 && @beats ? @beats * passes : nil) { |chans|
-          if wrap
+          if wrap && randomize >= 1 && onsets.nil? && passes == 1 && attack_at_loop_point?
+            # (a hit on the loop point stays on it: see #stretch)
+            Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
+          elsif wrap
             Spectral.looped(chans, ratio.to_f, passes: passes, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise)
           elsif randomize >= 1 && onsets.nil?
             Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
@@ -1391,6 +1403,13 @@ module MB
         }
       end
       private :spectral_stretch
+
+      # True if the sound rises into an attack across the loop point
+      # (Sample::Onsets with wrap: true finds an onset at the start).
+      def attack_at_loop_point?
+        (@reversed ? reverse : self).onsets(wrap: true).first == 0
+      end
+      private :attack_at_loop_point?
 
       # The channels mixed to one.
       def mono

@@ -267,6 +267,17 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       # The hit is the input's, and so is what leads into it
       expect((new[0...240] - x[0...240]).abs.max).to be < 0.005
       expect((new[-240..] - x[-240..]).abs.max).to be < 0.005
+
+      # Paulstretch keeps it on the loop point (its own edges: read in a
+      # circle, the random phases also played it up to 125 ms early)
+      wash = Numo::DFloat.cast(hit.stretch(2, mode: :paul).data(0))
+      expect(wash).to eq(Numo::DFloat.cast(hit.stretch(2, mode: :paul, wrap: false).data(0)))
+      expect(Numo::DFloat.cast(hit.stretch(2, mode: :paul, wrap: true).data(0))).to eq(wash)
+      circle = MB::Sound::Sample::Spectral.looped(hit.to_a, 2, window: 12000, randomize: 1)[0]
+      expect(rms(wash[0...960]) / rms(wash[-960..])).to be > 2
+      expect(rms(circle[0...960]) / rms(circle[-960..])).to be < 1.5
+      # (a pad held through the loop point is still read in a circle)
+      expect(plain.looped.stretch(2, mode: :paul).data(0)).not_to eq(plain.stretch(2, mode: :paul, wrap: false).data(0))
     end
 
     it 'stretches for loop players as a loop' do
