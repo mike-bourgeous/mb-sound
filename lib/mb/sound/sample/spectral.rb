@@ -252,6 +252,12 @@ module MB
             restart
           end
 
+          # Sets how much the bins that are no partial get random phases
+          # (0..1) from the next frame on.
+          def noise=(amount)
+            @noise = MB::M.clamp(amount.to_f, 0.0, 1.0)
+          end
+
           # True if whole frames get random phases (randomize: alone): the
           # sums then normalize by the frames' coherence.  With noise: the
           # frames make up for it bin by bin themselves.
@@ -443,8 +449,10 @@ module MB
         class Stream
           attr_reader :channels
 
-          def initialize(channels, onsets: nil, window: WINDOW, overlap: OVERLAP, shape: :hann, link: true, span: 1.0, noise: 0, seed: 0)
-            @voc = Vocoder.new(channels, window: window, overlap: overlap, shape: shape, link: link, wrap: true, noise: noise, seed: seed)
+          def initialize(channels, onsets: nil, window: WINDOW, overlap: OVERLAP, shape: :hann, link: true, span: 1.0, noise: nil, seed: 0)
+            # (noise: nil: by the ratio the loop is playing at, Spectral.noise_for)
+            @auto_noise = noise.nil?
+            @voc = Vocoder.new(channels, window: window, overlap: overlap, shape: shape, link: link, wrap: true, noise: noise || 0, seed: seed)
             @channels = @voc.channels
             @n = @voc.window
             @hs = @voc.hop
@@ -520,6 +528,7 @@ module MB
 
             center = @line.round
             attack = false
+            @voc.noise = Spectral.noise_for(@hs / move) if @auto_noise && move > 0
             if @onsets && move > 0
               ratio = (@hs / move).round(4)
               if ratio != @ratio
@@ -558,6 +567,20 @@ module MB
             @size = size
           end
         end
+
+        # The default noise: of the spectral stretches by +ratio+: 0 up
+        # to NOISE_FROM (1.5x), 1 from NOISE_FULL (2x) on, a straight line
+        # between.  The vocoder's window is heard in what is no partial
+        # the more the longer the stretch (self-similarity one window
+        # later 0.02 at 2x, 0.2 at 8x on a tonal drum loop with a
+        # shaker); the maintainer picked noise: 1 at 2x and 8x, and the
+        # plain vocoder on drums at 1.18x and 1.25x.
+        def noise_for(ratio)
+          MB::M.clamp((ratio.to_f - NOISE_FROM) / (NOISE_FULL - NOISE_FROM), 0.0, 1.0)
+        end
+
+        NOISE_FROM = 1.5
+        NOISE_FULL = 2.0
 
         # For Vocoder#noisiness (noise: of the spectral stretches): a
         # region whose peak stands this many dB or less above its

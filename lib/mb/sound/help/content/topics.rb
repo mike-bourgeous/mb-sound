@@ -757,10 +757,12 @@ module MB
         false` (random phases per channel) for both; for voices try
         `.stretch(8, mode: :paul, overlap: 2,
         shape: :paul, link: false)`.  At long ratios the vocoder's
-        window becomes a buzz (the stretch repeats itself 11.7 times a
-        second): `noise: 1` gives everything that is not a clear partial
-        random phases, so noise stays noise while partials and hits stay
-        as they are.  `randomize: 0.3` to `0.6` loosens every phase
+        window would become a buzz (the stretch repeating itself 11.7
+        times a second), so from 1.5x up (fully from 2x) everything that
+        is not a clear partial gets random phases: noise stays noise
+        while partials and hits stay as they are (`noise: 0` for the
+        plain vocoder, `noise: 1` at any ratio).  `randomize: 0.3` to
+        `0.6` loosens every phase
         (`randomize: 1` is a wash that keeps its hits), and `transients:
         0.5` (an amount, 0 to 1) keeps less of the sound around each hit
         unstretched.  A sample that loops (a loop file,

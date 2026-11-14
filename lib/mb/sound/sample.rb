@@ -814,14 +814,14 @@ module MB
       # true })` plays through): +window+, +overlap+, +shape+, +link+,
       # and +transients+ (true, false, or an amount) as #stretch takes
       # them.
-      def spectral_stream(mode: :spectral, window: nil, overlap: Spectral::OVERLAP, shape: :hann, link: true, transients: true, noise: 0, seed: 0, **others)
+      def spectral_stream(mode: :spectral, window: nil, overlap: Spectral::OVERLAP, shape: :hann, link: true, transients: true, noise: nil, seed: 0, **others)
         unless others.empty? && Spectral::MODE_ALIASES.fetch(mode.to_sym, mode.to_sym) == :spectral && (transients == true || transients == false || (transients.is_a?(Numeric) && transients >= 0 && transients <= 1))
           raise ArgumentError, 'live: follows with the phase vocoder (mode: :spectral, with window:, overlap:, shape:, link:, noise:, seed:, and transients: true, false, or an amount)'
         end
         transients = false if transients == 0
         n = position(window.nil? ? Spectral::WINDOW.samples : window).round
         n += 1 if n.odd?
-        Spectral::Stream.new(to_a, onsets: transients ? onsets(wrap: true) : nil, window: n, overlap: overlap, shape: shape, link: link, span: transients == true ? 1.0 : (transients || 0).to_f, noise: noise == true ? 1 : (noise || 0), seed: seed)
+        Spectral::Stream.new(to_a, onsets: transients ? onsets(wrap: true) : nil, window: n, overlap: overlap, shape: shape, link: link, span: transients == true ? 1.0 : (transients || 0).to_f, noise: noise == true ? 1 : (noise == false ? 0 : noise), seed: seed)
       end
 
       # What kind of sound this is, for choosing a stretch (Sample#follow's
@@ -1070,17 +1070,19 @@ module MB
       # the wash); `mode: :paul, transients: true` does it in :paul's
       # quarter-second window, for hits further apart than that.
       #
-      # +noise+ (0..1; 0, off, by default) keeps noise noise: at long
-      # ratios the vocoder holds every bin as a steady partial on its
-      # grid of sample rate / +window+ Hz, so whatever is not a partial
-      # (breath, hiss, a cymbal, a texture) turns into a buzz that
-      # repeats once a window (4096 samples: 11.7 times a second).  With
-      # +noise+ the bins that belong to no clear partial (their region's
-      # peak less than 8 to 16 dB above its surroundings:
-      # Spectral::Vocoder#noisiness) get random phases every frame (from
-      # +seed+), up to +noise+ × ±π, their level kept; partials and
-      # attacks stay as they are (`pad.stretch(8, mode: :spectral, noise:
-      # 1)`).
+      # +noise+ (0..1) keeps noise noise: at long ratios the vocoder
+      # holds every bin as a steady partial on its grid of sample rate /
+      # +window+ Hz, so whatever is not a partial (breath, hiss, a
+      # cymbal, a shaker) turns into a buzz that repeats once a window
+      # (4096 samples: 11.7 times a second).  With +noise+ the bins that
+      # belong to no clear partial (their region's peak less than 8 to
+      # 16 dB above its surroundings: Spectral::Vocoder#noisiness) get
+      # random phases every frame (from +seed+), up to +noise+ × ±π,
+      # their level kept; partials and attacks stay as they are.  By
+      # default it follows the ratio (Spectral.noise_for): 0 up to 1.5x
+      # (the plain vocoder: drums a little slower are what they were),
+      # rising to 1 at 2x and beyond; `noise: 0` turns it off, `noise: 1`
+      # on at any ratio.
       #
       # +link+ (true) gives every channel
       # the same random phases (the image keeps its level panning); false
@@ -1407,10 +1409,12 @@ module MB
         kw[:link] = link unless link == true
         kw[:shape] = shape unless shape == :hann
         Spectral.shaped_window(shape, 64) # (checks the name)
-        noise = 0 if noise.nil? || noise == false
+        noise = 0 if noise == false
         noise = 1 if noise == true
-        raise ArgumentError, "noise: is 0..1 (got #{noise.inspect})" unless noise.is_a?(Numeric) && noise >= 0 && noise <= 1
-        kw[:noise] = noise unless noise == 0
+        raise ArgumentError, "noise: is 0..1 (got #{noise.inspect})" unless noise.nil? || (noise.is_a?(Numeric) && noise >= 0 && noise <= 1)
+        kw[:noise] = noise unless noise.nil?
+        # (by default by the ratio: none up to 1.5x, all of it from 2x)
+        noise = paul ? 0 : Spectral.noise_for(ratio) if noise.nil?
         kw[:seed] = seed unless seed == 0 || (randomize == 0 && noise == 0)
         kw[:wrap] = wrap unless wrap.nil?
         wrap = whole_loop? if wrap.nil?
