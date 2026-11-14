@@ -480,7 +480,8 @@ module GraphSweep
       }],
       ['rotary presets and a live speed (Rotary: crossover, rotors gliding, two microphones)', ->(c) {
         c.sig.rotary(:whirl).mixdown + c.stereo_sig.rotary(speed: c.mod(0, 1, 3), horn: c.mod(0.5, 1), mix: c.mod(0.2, 1)).mixdown +
-          c.sig.rotary(:chorale, speed: :stop, crossover: 1200).mixdown
+          c.sig.rotary(:chorale, speed: :stop, crossover: 1200).mixdown +
+          c.sig.rotary(speed: 1.n8.lfo.square.with_phase(0.5).at(0..1)).mixdown # (a tempo-synced speed: effects-3)
       }],
       ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60.db) }],
       ['phaser (Phaser) mono, stereo, moving settings', ->(c) {

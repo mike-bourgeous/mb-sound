@@ -83,6 +83,8 @@ module MB
         #     bg :organ, organ.rotary                         # slow
         #     bg :organ, organ.rotary(:whirl)                 # fast
         #     bg :organ, organ.rotary(speed: knob(:spin))     # turn :spin, 1 to speed up, 0 to slow down
+        #     # slow 4 bars, fast 4 bars, and so on (an 8-bar cycle: `16.bars.lfo` would be 8 and 8)
+        #     bg :organ, organ.rotary(speed: 8.bars.lfo.square.with_phase(0.5).at(0..1))
         def rotary(preset = nil, **options)
           Rotary.build(self, preset, **options)
         end
