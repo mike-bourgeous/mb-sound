@@ -57,6 +57,17 @@ module MB
         #           one way, the plain notches sweep back quietly
         #           (`phaser(:jet, lean: -1)`).  Not with +:sweep+ or
         #           +:direction+.
+        # +:oscillate+ - true (mode 0) or a mode index: a self-oscillating
+        #                loop on that one resonance (the chain's output
+        #                saturated and bandpassed at the mode in the
+        #                feedback path); +:feedback+ then goes to +-1.25
+        #                and past +-1 the phaser whistles at a level the
+        #                loop sets, input or not.  Negative feedback's
+        #                modes are the notches from the bottom, positive
+        #                feedback's the peaks between them
+        #                (Phaser.mode_frequency; Phaser.mode_center fits
+        #                +:center+/+:range+ to a whistle's frequencies).
+        #                Not with +:direction+.
         #
         # Examples (bin/sound.rb):
         #     bg :pad, 110.hz.saw.at(-12.db).phaser                    # :vintage
@@ -69,6 +80,7 @@ module MB
         #     bg :pad, pad.phaser(:barberpole)                          # forever rising (direction: :down falls)
         #     bg :pad, pad.phaser(:barberpole, direction: knob(:dir, 1, range: -2..2))   # turn it: up, stop, down, faster
         #     bg :pad, pad.phaser(:jet, lean: -1)                       # the whoosh only on the way down
+        #     bg :pad, pad.phaser(stages: 32, oscillate: 7, feedback: -1.05, range: 276..2325, rate: 4.bars, mix: 0.1)   # a whistle 250-2110 Hz
         def phaser(preset_or_rate = nil, **options)
           Phaser.build(self, preset_or_rate, **options)
         end

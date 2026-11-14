@@ -278,7 +278,8 @@ module MB
         rates like `phaser(1.bar)`, stereo `spread:`, `above: 150` to keep
         a kick dry, `amount:` from light to extreme, `direction: :up` for
         notches that climb forever (a number or knob: its sign the way, its
-        size the speed), `lean: -1` for feedback only on the way down).
+        size the speed), `lean: -1` for feedback only on the way down,
+        `oscillate: 0, feedback: -1.05` for a self-oscillating whistle).
         Antialiased shapers, among them
         `shape_db`: transfer curves drawn in dB, per sample, with presets
         (`L.fx.shape_db`: :soft_knee, :fuzz, :fold_back, :gate, :asymmetric),

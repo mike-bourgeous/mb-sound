@@ -520,6 +520,116 @@ RSpec.describe(MB::Sound::GraphNode::Phaser, :aggregate_failures) do
     end
   end
 
+  describe 'effects-4: oscillate: (self-oscillation on one mode)' do
+    let(:rng) { Random.new(23) }
+
+    def noise(n, scale = 1.0, offset = 0.0)
+      Numo::SFloat.cast(Array.new(n) { (rng.rand - 0.5) * scale + offset })
+    end
+
+    # The C kernel and its Ruby mirror on the same arguments: identical samples and states.
+    def compare_osc(n, x, sweep, center, range, depth, feedback, dry, wet, stages: 4, mode: 0, state: nil)
+      a = Numo::SFloat.zeros(n)
+      b = Numo::SFloat.zeros(n)
+      sa = state || Numo::DFloat.zeros(stages + 4)
+      sa[stages + 3] = 795 # (the flush grid point inside the buffer)
+      sb = sa.dup
+      MB::Sound::FastFilter.phaser_osc(a, x, sweep, center, range, depth, feedback, dry, wet, sa, 48000, mode)
+      klass.process_osc_ruby(b, x, sweep, center, range, depth, feedback, dry, wet, sb, 48000, mode)
+      expect(a).to eq(b)
+      expect(sa).to eq(sb)
+      a
+    end
+
+    # The strongest spectral line of +x+ in Hz, and the next strongest away from it in dB below it.
+    def lines(x)
+      w = x.length
+      win = Numo::DFloat.new(w).seq.map { |i| 0.5 - 0.5 * Math.cos(2 * Math::PI * i / w) }
+      s = Numo::Pocketfft.rfft(Numo::DFloat.cast(x) * win).abs
+      i = s.max_index
+      j = (1...s.length).reject { |k| (k - i).abs < [i * 0.05, 3].max }.max_by { |k| s[k] }
+      [i * 48000.0 / w, 20 * Math.log10(s[j] / s[i])]
+    end
+
+    it 'matches the Ruby mirror (silence, a kick, moving settings, a feedback sweep past 1, every mode and sign)' do
+      sweep = Numo::SFloat.cast(Numo::DFloat.linspace(-1, 1, 1200))
+      fb = Numo::SFloat.cast(Numo::DFloat.linspace(-1.3, 1.3, 1200))
+      [2, 4, 8, 32].each do |stages|
+        [0, 1, 40].each do |mode|
+          compare_osc(1200, 0.0, 0.0, 1000.0, 4.0, 0.0, -1.1, 0.5, 0.5, stages: stages, mode: mode)
+          compare_osc(1200, noise(1200), sweep, 700.0, 4.0, 1.0, fb, 0.5, 0.5, stages: stages, mode: mode)
+          compare_osc(1200, noise(1200, 2), noise(1200, 2), noise(1200, 1000, 1500), noise(1200, 6, 3), noise(1200, 1, 0.5),
+            noise(1200, 2.6), noise(1200), noise(1200), stages: stages, mode: mode, state: Numo::DFloat.cast(noise(stages + 4, 0.2)))
+        end
+      end
+      odd = Numo::SFloat.cast([Float::NAN, -1, 2, 0, 0.5, 1, Float::INFINITY, -Float::INFINITY] * 30)
+      compare_osc(odd.length, noise(odd.length), odd, odd * 30000, odd * 20, odd, odd, 0.5, 0.5, stages: 8, mode: 2)
+      f = MB::Sound::FastFilter
+      out = Numo::SFloat.zeros(4)
+      expect { f.phaser_osc(out, 0.0, 0.0, 700, 4, 1, 0, 0.5, 0.5, Numo::DFloat.zeros(5), 48000, 0) }.to raise_error(ArgumentError, /state/)
+      expect { f.phaser_osc(out, 0.0, 0.0, 700, 4, 1, 0, 0.5, 0.5, Numo::DFloat.zeros(8), 48000, -1) }.to raise_error(ArgumentError, /mode/)
+      expect { f.phaser_osc(out, 0.0, 0.0, 700, 4, 1, 0, 0.5, 0.5, Numo::DFloat.zeros(8), 48000) }.to raise_error(ArgumentError, /arguments/)
+    end
+
+    it 'whistles on one line at the mode frequency from silence, at a level the loop sets, only past |feedback| 1' do
+      [[4, 0, -1.1], [8, 2, 1.1], [32, 7, -1.1], [12, 3, -1.02]].each do |stages, mode, fb|
+        x = collect(0.constant.phaser(stages: stages, center: 1000, depth: 0, feedback: fb, oscillate: mode, mix: 1), 48000 * 3)
+        expect(x.isfinite.all?).to eq(true)
+        hz, next_db = lines(x[-32768..])
+        want = klass.mode_frequency(stages, 1000, mode: mode, feedback: fb)
+        expect(hz).to be_within(48000.0 / 32768).of(want), "#{stages} stages, mode #{mode}"
+        expect(next_db).to be < -40 # (one line: the saturator's third harmonic about -50 dB)
+        expect(x[-48000..].abs.max).to be_between(0.2, 1.1)
+      end
+      # the level grows with the loop gain past 1; at 1 and below, silence stays silent
+      peak = ->(fb) { collect(0.constant.phaser(center: 1000, depth: 0, feedback: fb, oscillate: 0, mix: 1), 48000 * 2)[-24000..].abs.max }
+      expect(peak.(-1.05)).to be < peak.(-1.25)
+      expect(peak.(-1.0)).to eq(0)
+      expect(peak.(0.9)).to eq(0)
+    end
+
+    it 'stays bounded with full-scale input and a feedback node swept past 1, and equal at any buffer size' do
+      mk = -> { 110.hz.saw.phaser(:jet, above: nil, rate: 3, stages: 8, feedback: 0.5.hz.lfo.at(-1.25..1.25), oscillate: 1) }
+      a = collect(mk.(), 96000)
+      b = collect(mk.(), 96000, [1, 7, 128, 33, 367])
+      expect(b).to eq(a)
+      expect(a.isfinite.all?).to eq(true)
+      expect(a.abs.max).to be < 4
+      loud = collect(MB::Sound.noise(seed: 3).phaser(stages: 32, feedback: -1.25, oscillate: 7, rate: 5, mix: 0.5), 48000)
+      expect(loud.isfinite.all?).to eq(true)
+      expect(loud.abs.max).to be < 4
+    end
+
+    it 'leaves the linear loop as it was, carries only to the same loop, and checks its settings' do
+      ref = collect(110.hz.saw.phaser(:vintage, feedback: 0.9), 9600)
+      expect(collect(110.hz.saw.phaser(:vintage, feedback: 0.9, oscillate: false), 9600)).to eq(ref)
+      osc = 110.hz.saw.phaser(feedback: -1.1, oscillate: true)
+      expect(osc.oscillate).to eq(0)
+      expect(osc.to_s).to include('oscillating on mode 0')
+      expect(osc.to_ruby).to include('phaser(feedback: -1.1, oscillate: true)')
+      plain = 110.hz.saw.phaser(feedback: -0.5)
+      collect(plain, 800)
+      fresh = 110.hz.saw.phaser(feedback: -1.1, oscillate: 0)
+      fresh.carry_adopt(plain) # (another loop: starts fresh)
+      expect(fresh.instance_variable_get(:@state).length).to eq(8)
+      expect { 110.hz.saw.phaser(feedback: -1.1) }.to raise_error(ArgumentError, /oscillate/)
+      expect { 110.hz.saw.phaser(feedback: -1.3, oscillate: 0) }.to raise_error(ArgumentError, /feedback/)
+      expect { 110.hz.saw.phaser(oscillate: -1) }.to raise_error(ArgumentError, /oscillate/)
+      expect { 110.hz.saw.phaser(:barberpole, oscillate: 0) }.to raise_error(ArgumentError, /barber/)
+    end
+
+    it 'gives mode frequencies and their inverse for fitting a measured whistle' do
+      expect(klass.mode_frequency(4, 1000)).to be_within(1e-9).of(klass.notch_frequencies(4, 1000)[0])
+      expect(klass.mode_frequency(8, 1000, mode: 3)).to be_within(1e-9).of(klass.notch_frequencies(8, 1000)[3])
+      expect(klass.mode_frequency(4, 1000, mode: 9)).to eq(klass.mode_frequency(4, 1000, mode: 1)) # (past the last: the last)
+      lo = klass.mode_center(32, 250, mode: 7)
+      hi = klass.mode_center(32, 2110, mode: 7)
+      expect(klass.mode_frequency(32, lo, mode: 7)).to be_within(1e-6).of(250)
+      expect(klass.mode_frequency(32, hi, mode: 7)).to be_within(1e-6).of(2110)
+      expect(klass.mode_frequency(8, 1000, mode: 0, feedback: 1)).to be_within(1e-6).of(Math.atan(Math.tan(Math::PI / 48) * Math.tan(Math::PI / 8)) * 48000 / Math::PI)
+    end
+  end
+
   it 'prints the effects-3 settings back as Ruby' do
     node = 110.hz.saw.phaser(:jet, above: 150, amount: 0.7)
     expect(node.to_ruby).to include('phaser(:jet, above: 150, amount: 0.7)')

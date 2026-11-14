@@ -3,7 +3,7 @@
  * diode ladder (ruby_diode_ladder below), the state-variable filter,
  * ruby_svf below, the filter bank (GraphNode::FilterBank and Formant),
  * ruby_filter_bank (mb_filter_bank.h), and a phaser's allpass chain,
- * ruby_phaser).
+ * ruby_phaser, with a self-oscillating loop in ruby_phaser_osc).
  *
  * four_pole: a 4-pole resonant lowpass in the style of the CEM3379 (and
  * CEM3320): four one-pole OTA-C stages in a cascade with resonance feedback
@@ -717,6 +717,216 @@ static VALUE ruby_resonance_curve(VALUE self, VALUE r)
 }
 
 // Exposes the self-oscillation curves' loop gain for specs.
+/*
+ * phaser_osc: ruby_phaser's chain with a self-oscillating loop (effects-4:
+ * the maintainer's phaser plug-in "whistle", feedback -100%).  The
+ * feedback path saturates the chain's output (tanh) and runs it through a
+ * bandpass (a TPT state-variable filter, Q PHASER_OSC_Q, unity gain at its
+ * center) tuned to one resonance of the chain, so the loop gain is |k| at
+ * that mode and below 1 at the others: above |k| = 1 the loop oscillates
+ * on that one mode at a level the saturator sets, input or not.
+ *
+ * Modes: with negative feedback the chain's phase must be an odd multiple
+ * of -180 degrees, the dry-mixed phaser's notches: mode m (0 the lowest)
+ * is at tan(pi f / rate) = g tan((2m + 1) pi / (2 stages)); with positive
+ * feedback a whole number of turns, the peaks between the notches: mode m
+ * at g tan((m + 1) pi / stages) (DC and Nyquist left out).  +mode+ is
+ * clamped to the modes there are (stages / 2 or stages / 2 - 1); the
+ * bandpass center is clamped below rate * FP_MAX_CUTOFF_RATIO.
+ *
+ * The loop, zero-delay: the chain is Y = A u + B, the bandpass of the
+ * saturated output w = P tanh(Y) + Q0 (TPT SVF, linear in its input), and
+ * u = x + k w, so Y = C1 + C2 tanh(Y) with C1 = A (x + k Q0) + B and
+ * C2 = A k P (|C2| < 0.14: P <= R / (R + 1)), solved by PHASER_OSC_NEWTON
+ * Newton steps from the last Y.  While |k| > 1 and the bandpass is
+ * silent (|s1| + |s2| < PHASER_OSC_QUIET), x gets PHASER_OSC_KICK so the
+ * oscillation starts from silence.  +feedback+ is clamped to
+ * +-PHASER_OSC_MAX_FEEDBACK.
+ *
+ * +state+: the stages' states, the bandpass's two, the last Y, and the
+ * samples since the last flush grid point (stages + 4 values).  Exact Ruby
+ * mirror: MB::Sound::GraphNode::Phaser.process_osc_ruby.
+ */
+#define PHASER_OSC_MAX_FEEDBACK 1.25
+#define PHASER_OSC_Q 4.0
+#define PHASER_OSC_NEWTON 3
+#define PHASER_OSC_QUIET 1e-9
+#define PHASER_OSC_KICK 1e-3
+
+static VALUE ruby_phaser_osc(int argc, VALUE *argv, VALUE self)
+{
+	if (argc != 12) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 12)", argc);
+	}
+	VALUE out = argv[0], x = argv[1], sweep = argv[2], center = argv[3], range = argv[4], depth = argv[5];
+	VALUE feedback = argv[6], dry = argv[7], wet = argv[8], state = argv[9], rate_v = argv[10], mode_v = argv[11];
+
+	if (CLASS_OF(out) != numo_cSFloat || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
+		rb_raise(rb_eArgError, "The output must be a contiguous 1D SFloat");
+	}
+	if (CLASS_OF(state) != numo_cDFloat || RNARRAY_NDIM(state) != 1 ||
+			RNARRAY_SHAPE(state)[0] < 6 || RNARRAY_SHAPE(state)[0] > PHASER_MAX_STAGES + 4 ||
+			!RTEST(nary_check_contiguous(state))) {
+		rb_raise(rb_eArgError, "The oscillating phaser state must be a contiguous DFloat of 6 to %d values (one per stage, two bandpass states, the last output, and the flush grid count)", PHASER_MAX_STAGES + 4);
+	}
+	rb_check_frozen(out);
+	rb_check_frozen(state);
+
+	double rate = NUM2DBL(rate_v);
+	if (!(rate > 0) || !isfinite(rate)) {
+		rb_raise(rb_eArgError, "Sample rate must be positive and finite");
+	}
+	long mode = NUM2LONG(mode_v);
+	if (mode < 0) {
+		rb_raise(rb_eArgError, "The oscillation mode must be at least 0");
+	}
+
+	size_t length = RNARRAY_SHAPE(out)[0];
+	struct mb_signal xs, sws, cs, rs, ds, fs, drs, ws;
+	mb_signal_input(&x, length, "The input", &xs);
+	mb_signal_input(&sweep, length, "Sweep", &sws);
+	mb_signal_input(&center, length, "Center", &cs);
+	mb_signal_input(&range, length, "Range", &rs);
+	mb_signal_input(&depth, length, "Depth", &ds);
+	mb_signal_input(&feedback, length, "Feedback", &fs);
+	mb_signal_input(&dry, length, "Dry", &drs);
+	mb_signal_input(&wet, length, "Wet", &ws);
+
+	long stages = (long)RNARRAY_SHAPE(state)[0] - 4;
+	double *st = (double *)(nary_get_pointer_for_write(state) + nary_get_offset(state));
+	float *op = mb_sfloat_ptr(out);
+
+	double pi_over_rate = M_PI / rate;
+	double fc_max = rate * FP_MAX_CUTOFF_RATIO;
+	double half_ln2 = 0.5 * log(2.0);
+	double g2_max = mb_tan_pade(fc_max * pi_over_rate);
+	double r2 = 1.0 / PHASER_OSC_Q; // (2R, R = 1 / (2 Q))
+
+	// the modes' tangents (see above), negative and positive feedback
+	long neg_count = stages / 2;
+	long pos_count = stages / 2 - 1;
+	long mn = mode < neg_count ? mode : neg_count - 1;
+	double tan_neg = tan((2.0 * mn + 1.0) * M_PI / (2.0 * stages));
+	double tan_pos = 1.0;
+	if (pos_count > 0) {
+		long mp = mode < pos_count ? mode : pos_count - 1;
+		tan_pos = tan((mp + 1.0) * M_PI / stages);
+	}
+
+	double s1 = st[stages];
+	double s2 = st[stages + 1];
+	double yl = st[stages + 2];
+	long fk = 0;
+	if (st[stages + 3] >= 0 && st[stages + 3] < MB_FLUSH_GRID) {
+		fk = (long)st[stages + 3];
+	}
+
+	double last_fc = NAN;
+	double g = 0.0, gg = 0.0, alpha = 0.0, beta = 0.0, a_all = 0.0;
+	for (size_t i = 0; i < length; i++) {
+		double fc = mb_signal_at(&cs, i) * exp(half_ln2 * mb_signal_at(&rs, i) * mb_signal_at(&ds, i) * mb_signal_at(&sws, i));
+		if (!(fc >= PHASER_MIN_HZ)) {
+			fc = PHASER_MIN_HZ;
+		} else if (fc > fc_max) {
+			fc = fc_max;
+		}
+		if (fc != last_fc) {
+			last_fc = fc;
+			g = mb_tan_pade(fc * pi_over_rate);
+			gg = g / (1.0 + g);
+			alpha = 2.0 * gg - 1.0;
+			beta = 2.0 * (1.0 - gg);
+			a_all = 1.0;
+			for (long j = 0; j < stages; j++) {
+				a_all = a_all * alpha;
+			}
+		}
+
+		double k = mb_signal_at(&fs, i);
+		if (!(k >= -PHASER_OSC_MAX_FEEDBACK)) {
+			k = isnan(k) ? 0.0 : -PHASER_OSC_MAX_FEEDBACK;
+		} else if (k > PHASER_OSC_MAX_FEEDBACK) {
+			k = PHASER_OSC_MAX_FEEDBACK;
+		}
+
+		double xd = mb_signal_at(&xs, i);
+		double xi = xd;
+		if (fabs(k) > 1.0 && fabs(s1) + fabs(s2) < PHASER_OSC_QUIET) {
+			xi = xi + PHASER_OSC_KICK;
+		}
+
+		double g2 = g * (k < 0.0 ? tan_neg : tan_pos);
+		if (g2 > g2_max) {
+			g2 = g2_max;
+		}
+		double dd = 1.0 + r2 * g2 + g2 * g2;
+		double p = r2 * g2 / dd;
+		double q0 = r2 * (s1 - g2 * ((r2 + g2) * s1 + s2) / dd);
+
+		double b = 0.0;
+		for (long j = 0; j < stages; j++) {
+			b = alpha * b + beta * st[j];
+		}
+		double c1 = a_all * (xi + k * q0) + b;
+		double c2 = a_all * k * p;
+		double y = yl;
+		for (int n = 0; n < PHASER_OSC_NEWTON; n++) {
+			double t = tanh(y);
+			double f = y - c2 * t - c1;
+			double fp = 1.0 - c2 * (1.0 - t * t);
+			y = y - f / fp;
+		}
+		double sat = tanh(y);
+		double w = p * sat + q0;
+
+		double u = xi + k * w;
+		for (long j = 0; j < stages; j++) {
+			double s = st[j];
+			double v = (u - s) * gg;
+			double lp = v + s;
+			st[j] = lp + v;
+			u = 2.0 * lp - u;
+		}
+
+		// (the bandpass takes the saturated output)
+		double hp = (sat - (r2 + g2) * s1 - s2) / dd;
+		double v1 = g2 * hp;
+		double bp = v1 + s1;
+		s1 = bp + v1;
+		double v2 = g2 * bp;
+		double lpo = v2 + s2;
+		s2 = lpo + v2;
+		yl = u;
+
+		op[i] = (float)(mb_signal_at(&drs, i) * xd + mb_signal_at(&ws, i) * u);
+
+		if (++fk >= MB_FLUSH_GRID) {
+			fk = 0;
+			for (long j = 0; j < stages; j++) {
+				mb_flush_value(&st[j]);
+			}
+			mb_flush_value(&s1);
+			mb_flush_value(&s2);
+			mb_flush_value(&yl);
+		}
+	}
+	st[stages] = s1;
+	st[stages + 1] = s2;
+	st[stages + 2] = yl;
+	st[stages + 3] = (double)fk;
+
+	RB_GC_GUARD(x);
+	RB_GC_GUARD(sweep);
+	RB_GC_GUARD(center);
+	RB_GC_GUARD(range);
+	RB_GC_GUARD(depth);
+	RB_GC_GUARD(feedback);
+	RB_GC_GUARD(dry);
+	RB_GC_GUARD(wet);
+
+	return out;
+}
+
 static VALUE ruby_self_osc_gain(VALUE self, VALUE r, VALUE db, VALUE k_max)
 {
 	return rb_float_new(fp_self_osc_gain(NUM2DBL(r), RTEST(db), NUM2DBL(k_max)));
@@ -732,6 +942,7 @@ void Init_fast_filter(void)
 	rb_define_module_function(fast_filter, "svf", ruby_svf, 7);
 	rb_define_module_function(fast_filter, "filter_bank", ruby_filter_bank, 6);
 	rb_define_module_function(fast_filter, "phaser", ruby_phaser, 11);
+	rb_define_module_function(fast_filter, "phaser_osc", ruby_phaser_osc, -1);
 	rb_define_module_function(fast_filter, "tan", ruby_tan, 1);
 	rb_define_module_function(fast_filter, "tanh", ruby_tanh, 1);
 	rb_define_module_function(fast_filter, "secant", ruby_secant, 2);
