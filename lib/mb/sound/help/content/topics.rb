@@ -754,7 +754,12 @@ module MB
         `overlap:`, `shape: :paul` (a smooth window for washes), and `link:
         false` (random phases per channel) for both; for voices try
         `.stretch(8, mode: :paul, overlap: 2,
-        shape: :paul, link: false)`.  A sample that loops (a loop file,
+        shape: :paul, link: false)`.  At long ratios the vocoder can
+        sound rhythmic and buzzy: `randomize: 0.3` to `0.6` loosens its
+        phases while hits stay sharp (`randomize: 1` is a wash that
+        keeps its hits), and `transients: 0.5` (an amount, 0 to 1) keeps
+        less of the sound around each hit unstretched, for a more even
+        stretch.  A sample that loops (a loop file,
         `.looped`, anything `follow` plays) gets a spectral stretch
         that is a loop itself: read round and round, its end flowing
         into its start (`wrap: true` asks for it, `wrap: false` gives a

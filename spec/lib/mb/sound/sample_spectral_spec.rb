@@ -367,6 +367,40 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
     end
   end
 
+  it 'takes an amount for transients: how much around each onset stays unstretched' do
+    # (four bursts over a quiet chord)
+    x = chord * 0.1
+    [3000, 9000, 15000, 21000].each { |h| x[h...(h + 1500)] += Numo::NMath.sin(Numo::DFloat.new(1500).seq * 0.9) * Numo::NMath.exp(-Numo::DFloat.new(1500).seq / 200.0) * 0.6 }
+    hits = MB::Sound::Sample[x]
+    on = hits.onsets
+    expect(on).to eq([3001, 9001, 15001, 21001])
+    half = hits.stretch(4, mode: :spectral, transients: 0.5)
+    expect(Numo::DFloat.cast(half.data(0))).to eq(Numo::DFloat.cast(Numo::SFloat.cast(described_class.vocoder([Numo::DFloat.cast(hits.data(0))], 4.0, onsets: on, span: 0.5)[0])))
+    expect(half.lineage[3]).to eq({ mode: :spectral, transients: 0.5 })
+    expect(hits.stretch(4, mode: :spectral, transients: 1)).to equal(hits.stretch(4, mode: :spectral))
+    expect(hits.stretch(4, mode: :spectral, transients: 0)).to equal(hits.stretch(4, mode: :spectral, transients: false))
+
+    # Half the span: every hit still lands on its stretched time, and
+    # more of the sound between hits shares the stretch (the map between
+    # the first two hits is nearer 4x)
+    full_map, = described_class.time_map(24000, 4.0, on, 4096, 1024)
+    half_map, = described_class.time_map(24000, 4.0, on, 4096, 1024, 0.5)
+    on.each { |o| expect(half_map.call(o * 4.0)).to be_within(1e-6).of(o) }
+    slope = ->(map) { (map.call(4 * 6000 + 1024) - map.call(4 * 6000)) / 1024.0 }
+    expect(1 / slope.call(full_map)).to be > 1 / slope.call(half_map)
+    expect(1 / slope.call(half_map)).to be_between(4, 7)
+    [2, -0.1, :some].each { |bad| expect { hits.stretch(4, mode: :spectral, transients: bad) }.to raise_error(ArgumentError, /transients: is true, false, or an amount/) }
+
+    # Random phases with transients: the hits stay hits in the
+    # vocoder's window (Paulstretch's wash alone has none; its quarter-
+    # second window keeps only hits that are further apart than these)
+    q = 4 * 9000
+    step = ->(d) { rms(d[q...(q + 480)]) / (rms(d[(q - 480)...q]) + 1e-9) }
+    expect(step.call(hits.stretch(4, mode: :spectral, randomize: 0.6).data(0))).to be > 4
+    expect(step.call(hits.stretch(4, mode: :spectral, randomize: 1).data(0))).to be > 4
+    expect(step.call(hits.stretch(4, mode: :paul).data(0))).to be < 2
+  end
+
   it 'raises on bad modes and mixed options' do
     expect { pad.stretch(2, mode: :nope) }.to raise_error(ArgumentError, /mode/)
     expect { pad.stretch(2, window: 2048) }.to raise_error(ArgumentError, /spectral/)

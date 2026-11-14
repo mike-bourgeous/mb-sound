@@ -812,14 +812,16 @@ module MB
       # The phase vocoder following this sample as a loop, live (a
       # Spectral::Stream, what `follow(stretch: { mode: :spectral, live:
       # true })` plays through): +window+, +overlap+, +shape+, +link+,
-      # and +transients+ (true or false) as #stretch takes them.
+      # and +transients+ (true, false, or an amount) as #stretch takes
+      # them.
       def spectral_stream(mode: :spectral, window: nil, overlap: Spectral::OVERLAP, shape: :hann, link: true, transients: true, **others)
-        unless others.empty? && Spectral::MODE_ALIASES.fetch(mode.to_sym, mode.to_sym) == :spectral && (transients == true || transients == false)
-          raise ArgumentError, 'live: follows with the phase vocoder (mode: :spectral, with window:, overlap:, shape:, link:, and transients: true or false)'
+        unless others.empty? && Spectral::MODE_ALIASES.fetch(mode.to_sym, mode.to_sym) == :spectral && (transients == true || transients == false || (transients.is_a?(Numeric) && transients >= 0 && transients <= 1))
+          raise ArgumentError, 'live: follows with the phase vocoder (mode: :spectral, with window:, overlap:, shape:, link:, and transients: true, false, or an amount)'
         end
+        transients = false if transients == 0
         n = position(window.nil? ? Spectral::WINDOW.samples : window).round
         n += 1 if n.odd?
-        Spectral::Stream.new(to_a, onsets: transients ? onsets(wrap: true) : nil, window: n, overlap: overlap, shape: shape, link: link)
+        Spectral::Stream.new(to_a, onsets: transients ? onsets(wrap: true) : nil, window: n, overlap: overlap, shape: shape, link: link, span: transients == true ? 1.0 : (transients || 0).to_f)
       end
 
       # What kind of sound this is, for choosing a stretch (Sample#follow's
@@ -1054,6 +1056,19 @@ module MB
       # each frame, from the locked vocoder (0) through a smeared, diffuse
       # vocoder to fully random phases (1); the modes only choose the defaults
       # (window, randomize, transients).
+      #
+      # +transients+ also takes an amount from 0 to 1: how much of the
+      # sound around each onset stays unstretched (1 is true: a window
+      # and a hop before the attack, half a window after; 0 is false).
+      # Less leaves more of the sound to share the stretch evenly: at
+      # long ratios, where full spans can hold half the input and the
+      # rest is stretched half again as far, the stretch is less
+      # rhythmic and less buzzy (`pad.stretch(8, mode: :spectral,
+      # transients: 0.25, randomize: 0.3)`).  For a long stretch that
+      # keeps its hits, random phases in the vocoder's window:
+      # `brk.stretch(8, mode: :spectral, randomize: 1)` (0.6 for less of
+      # the wash); `mode: :paul, transients: true` does it in :paul's
+      # quarter-second window, for hits further apart than that.
       #
       # +link+ (true) gives every channel
       # the same random phases (the image keeps its level panning); false
@@ -1322,6 +1337,12 @@ module MB
       def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap = nil, passes = nil)
         paul = mode == :paul
         transients = !paul if transients.nil?
+        transients = false if transients == 0
+        unless transients == true || transients == false || (transients.is_a?(Numeric) && transients > 0 && transients <= 1)
+          raise ArgumentError, "transients: is true, false, or an amount from 0 to 1 (got #{transients.inspect})"
+        end
+        span = transients == true ? 1.0 : (transients || 0).to_f
+        transients = true if transients == 1
         randomize = paul ? 1 : 0 if randomize.nil?
         raise ArgumentError, "randomize: is 0..1 (got #{randomize.inspect})" unless randomize.is_a?(Numeric) && randomize >= 0 && randomize <= 1
 
@@ -1345,11 +1366,11 @@ module MB
         onsets = transients ? (@reversed ? reverse : self).onsets(wrap: wrap) : nil
         edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio * passes), bpm: @bpm && @bpm / ratio.to_f, beats: passes > 1 && @beats ? @beats * passes : nil) { |chans|
           if wrap
-            Spectral.looped(chans, ratio.to_f, passes: passes, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape)
+            Spectral.looped(chans, ratio.to_f, passes: passes, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span)
           elsif randomize >= 1 && onsets.nil?
             Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
           else
-            Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape)
+            Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span)
           end
         }
       end

@@ -130,6 +130,36 @@ Round 2 (his Bench verdicts, 2026-11-14: "after better than before, phase vocode
 - `:resample`: Catmull-Rom reads of the original at the phase (pitch follows; no band-limiting).
 - Same output at any buffer size.  A plan boundary.  Stereo samples give a Channels bundle of one player per channel.
 
+## His picks by material and ratio, and a default-selection proposal (2026-11-14; a proposal, nothing changed)
+
+From the maintainer's verdicts on the stretch study's Bench set and its follow-up (one listener, one pass each, 15 loops; A slices at the project's markers with gaps, B the phase vocoder with its own onsets, C the vocoder guided by every marker, D Paulstretch, F slices with filled decays, G/confirm the vocoder at markers that have an attack):
+
+| material | faster (0.7x to 0.9x) | a little slower (1.2x to 1.25x) | 1.9x to 2x | long (2.9x to 8x) |
+|---|---|---|---|---|
+| drum loop (generated) | A (0.75x) | B; A and G "both work" (same hits timed slower, or the hits slowed too); round 2: confirmed markers over G, B, C | A, over both fills | |
+| drum loop (pack, 1 bar) | A (0.87x) | B (1.18x): "A is wrong because there are markers in the middle of drum hit decays", B = G, F decent | | |
+| kick pattern | | | A (1.88x): "generally don't want to make the kick itself longer", sometimes B | A (4x): A, then B, then F |
+| bass loop | A (0.87x) | B | | |
+| vocal phrase (recorded) | C (0.715x) | B | | |
+| guitar phrase (recorded) | B (0.87x) | (no note) | | |
+| sax riff | | C | | |
+| sustained pad | (source: the vocoder's wrap; fixed since, to judge again) | (the same) | | |
+| texture pad | | | F (2x): the vocoder "too rhythmic/buzzy", A "should only be using the beat markers" | B (8x), wanting it less buzzy or a transient-aware D |
+| chord stab (one-shot as a loop) | | | | B (3.8x, 8x); D "too much phase randomization" |
+| cymbal splash (one-shot as a loop) | | | | D (2.9x, 8x): "the noisiness of paulstretch is a good fit" |
+
+What the picks say:
+1. Direction matters more than material.  Faster: slices for every loop with a grid (drums, bass), the vocoder for recorded phrases.  A little slower: the vocoder for all of them, drums included (slices only where the hit must not get longer: a kick pattern).
+2. From 2x on it is the material: hits that must stay as they are take slices with gaps; noise takes Paulstretch; tonal one-shots and textures the vocoder, loosened (the randomize and transients amounts, granular.md).
+3. Markers help the vocoder when they are thinned to attacks (confirm:) or the phrase is sung or blown (C on the vocal and the sax); every marker on drums cuts decays.
+
+`follow`'s `stretch: :auto` today: percussive material → slices, tonal → the vocoder, at any ratio.  Options:
+- (a) Leave it.  For: known, simple.  Against: a drum loop slowed 20% gets slices where he picked the vocoder; a bass loop sped up gets the vocoder where he picked slices.
+- (b) By direction: at or under the file's tempo (ratio up to 1) slices for loops, the vocoder for recorded phrases (no tempo grid, or marked non-looping); above it the vocoder, with confirmed markers where there are markers.  For: his picks from 0.7x to 1.25x, every row.  Against: a change of kind at ratio 1 (a tempo ramp through the file's tempo switches engines); kick patterns slowed want slices.
+- (c) (b) up to about 1.5x, then by material: percussive → slices with gaps, noisy (spectral flatness; a cymbal) → Paulstretch, tonal → the vocoder with `randomize:` rising with the ratio.  For: every pick in the table.  Against: three thresholds read from fifteen loops; a second change of kind at 1.5x.
+- (d) No automatic rule beyond (a), but the picks as named presets of stretch options (`stretch: :tight`, `:smooth`, `:wash`...) for him to choose per loop.  For: his "depending on whether I want the same hits but timed slower, or the hits themselves slowed too" is a choice, not a property of the file.  Against: nothing gets better by itself.
+- Recommendation: (b) for the converter of his old projects (their loops play within 0.7x to 1.25x, 10th to 90th percentile 0.71 to 1.12), and (d) alongside for playing; (c)'s long-ratio rules after another listening round with the loosened vocoder.  The sustained pad rows need hearing again first: its only fault was the wrap.
+
 ## Not yet
 
 AIFF loop chunks (`basc`/Apple Loops, `INST`/`MARK`), REX files, ACID `strc`, stretching in a background thread with a fallback, band-limited resample reads, a live "follow the detected tempo" for captured audio.

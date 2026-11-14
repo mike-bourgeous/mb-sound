@@ -111,6 +111,19 @@ The maintainer on the stretch study's Bench set (a sustained pad loop at 0.77x, 
 - Drum attacks do not change: the 10 ms after every onset differ from the stretch with its own ends by -34 dB re peak at worst on a drum loop at 1.18x (median -48 dB), -56 dB on the generated loop at 1.25x, -133 dB on a kick pattern at 1.88x; attack steps (10 ms before to 10 ms after) median 23.07 and 7.31 dB both ways.
 - A stretch called before `.looped` on a file without loop info (`s.stretch(1.25, mode: :spectral).looped`) cannot know it will loop: `wrap: true`, or `s.looped.stretch(...)`.
 
+## Long ratios: rhythm and buzz (stretch-fixes-1 round 2, 2026-11-14)
+
+The maintainer on the stretch study's Bench set (a texture pad at 2x and 8x, a cymbal splash at 2.9x): "The phase vocoder gets too rhythmic/buzzy at these longer stretch ratios", "B and C both get rhythmic", "a less buzzy version of B", "If there was a transient-aware version of D with a bit less phase randomization I might prefer that", and on a kick pattern at 4x: "Is there a transient-detecting version of D?" (D: Paulstretch).  Measured on the texture pad (8.2 s, 39 detected onsets):
+
+- Not the hop's periodicity: the band above 1.5 kHz correlates with itself one hop later no more than the source does (0.03 at 2x and 8x, any window or overlap), and each band's amplitude modulation has no line at the frame rate (1 to 2 dB over its neighbourhood; the source 5 dB there).
+- Rhythm: the time map.  Every onset keeps a window and a hop before it and half a window after it at ratio 1 (107 ms): at 2x that is 20% of the output in 39 pieces with the rest at 2.66x; at 8x the spans are 5% of the output but hold half the input, so the rest is stretched 12.75x.
+- Buzz: noise turned into tones.  Locked phases hold every bin as a steady partial for as long as the stretch lasts.  Spectral flatness at fine resolution (32768-sample frames, the median third-octave band from 0.5 to 8 kHz; the source 0.82): the vocoder 0.72 at 2x and 0.57 at 8x; without transients 0.73 and 0.62; a 16384-sample window 0.73 and 0.60; `randomize: 0.3` 0.72 and 0.62, `0.6` 0.74 and 0.69; Paulstretch 0.81 and 0.82.
+
+What there is for it (all options, no default changed):
+- `randomize:` 0..1 was already the amount between the vocoder and Paulstretch (granular-2), and frames holding an attack stay unrandomized, so "a transient-aware D with a bit less randomization" is `stretch(8, mode: :spectral, randomize: 0.6)`: random phases in the vocoder's window, hits kept (the texture's attack steps 4.1 dB against the source's 4.3 and Paulstretch's -1.1; flatness 0.69).  `mode: :paul, transients: true` does the same in Paulstretch's quarter-second window, which keeps hits only when they are further apart than that (a kick pattern at 4x: attack steps 32.7 dB, the source's, where Paulstretch alone has -1.0; four bursts 125 ms apart: lost).
+- New: `transients:` takes an amount from 0 to 1 (`Spectral.time_map`'s `span`: how much of each onset's surroundings stays at ratio 1; 1 is `true`, 0 is `false`).  On the texture pad at 8x: 0.5 leaves the rest at 9.4x (flatness 0.61, attack steps 3.1 dB), 0.25 at 8.2x (0.62, 1.9 dB); at 2x 0.5 has 8% of the output at ratio 1 and the rest at 2.18x.  A kick pattern at 4x keeps its attacks at 0.5 (32.1 dB) and loses them at 0.25 (9.5 dB): the spans must still cover the frames that hold an attack.
+- A candidate for "a less buzzy B": `stretch(8, mode: :spectral, transients: 0.5, randomize: 0.3)` (on the Bench for his ears).  Not built: spans that shrink by themselves as the ratio grows (a default change for breaks at 4x and 8x, which he picked as they are).
+
 ## Not yet
 
 Live rolling grain buffer; grains in plans; per-grain filters; spectral freeze as a node; the ambient genre's optional grain layer (not changing its default sound without the maintainer).

@@ -78,12 +78,14 @@ module MB
         # +seed+; the same offsets for every channel with +link+, else
         # each channel its own), so 0 is the phase-locked vocoder and 1 is
         # Paulstretch (uniformly random phases; #paul does that case);
-        # attack bins near onsets stay unrandomized.  +wrap+ is for audio
+        # attack bins near onsets stay unrandomized.  +span+ (0..1) is how
+        # much of each onset's surroundings stays unstretched (#time_map).
+        # +wrap+ is for audio
         # that loops (its end flows into its start): the stretch reads it
         # as an endless stream and its own end flows into its start
         # (#looped with one pass).
-        def vocoder(channels, ratio, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false)
-          return looped(channels, ratio, window: window, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape) if wrap
+        def vocoder(channels, ratio, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false, span: 1.0)
+          return looped(channels, ratio, window: window, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span) if wrap
 
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
           voc = Vocoder.new(channels, window: window, overlap: overlap, randomize: randomize, seed: seed, link: link, shape: shape)
@@ -91,7 +93,7 @@ module MB
           hs = voc.hop
           len = voc.length
           out_len = (len * ratio).round
-          map, resets = time_map(len, ratio, onsets, n, hs)
+          map, resets = time_map(len, ratio, onsets, n, hs, span)
 
           frames = out_len / hs + 2
           sums = Sums.new(voc.channels, frames * hs + n, voc.randomize > 0)
@@ -134,7 +136,7 @@ module MB
         # is in +report+ (a Hash, if given): :closure, the magnitude-
         # weighted mean of |phase error| at the wrap in cycles, before
         # and after.
-        def looped(channels, ratio, passes: 1, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, report: nil)
+        def looped(channels, ratio, passes: 1, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, report: nil, span: 1.0)
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
           passes = Integer(passes)
           raise ArgumentError, "passes: is 1 or more (got #{passes})" unless passes >= 1
@@ -150,7 +152,7 @@ module MB
           # The time map of the middle of three passes (the passes before
           # and after are its neighbours across the wrap)
           on3 = onsets && !onsets.empty? ? (0...3).flat_map { |k| onsets.map { |o| o + k * len } } : nil
-          map3, resets3 = time_map(3 * len, ratio, on3, n, hs)
+          map3, resets3 = time_map(3 * len, ratio, on3, n, hs, span)
           centers = []
           t = 0
           while t < out_len
@@ -388,13 +390,14 @@ module MB
         class Stream
           attr_reader :channels
 
-          def initialize(channels, onsets: nil, window: WINDOW, overlap: OVERLAP, shape: :hann, link: true)
+          def initialize(channels, onsets: nil, window: WINDOW, overlap: OVERLAP, shape: :hann, link: true, span: 1.0)
             @voc = Vocoder.new(channels, window: window, overlap: overlap, shape: shape, link: link, wrap: true)
             @channels = @voc.channels
             @n = @voc.window
             @hs = @voc.hop
             @len = @voc.length
             @onsets = onsets && !onsets.empty? ? onsets.sort.freeze : nil
+            @span = span
             @size = 1 << Math.log2(4 * @n).ceil
             @ring = Array.new(@channels) { Numo::DFloat.zeros(@size) }
             @wring = Numo::DFloat.zeros(@size)
@@ -469,7 +472,7 @@ module MB
               if ratio != @ratio
                 @ratio = ratio
                 on3 = (0...3).flat_map { |k| @onsets.map { |o| o + k * @len } }
-                @map, kept = Spectral.time_map(3 * @len, ratio, on3, @n, @hs)
+                @map, kept = Spectral.time_map(3 * @len, ratio, on3, @n, @hs, @span)
                 @resets = kept.select { |o| o >= @len && o < 2 * @len }.map { |o| o - @len }
               end
               pass, rem = @line.divmod(@len)
@@ -621,14 +624,17 @@ module MB
         # decay drawn out).  Where onsets are closer than a span (in the
         # input, or in the output when compressing), the spans shrink to
         # fit, leaving at least MIN_GAP hops between them; onsets closer
-        # than that are left in the span before.
-        def time_map(len, ratio, onsets, n, hs)
+        # than that are left in the span before.  +span+ (0..1) scales the
+        # spans: less of each attack's surroundings at ratio 1, a more
+        # even stretch between attacks (at long ratios full spans can
+        # hold half the input).
+        def time_map(len, ratio, onsets, n, hs, span = 1.0)
           r = ratio.to_f
           plain = ->(t) { t / r }
           return [plain, []] if onsets.nil? || onsets.empty?
 
-          pre = n / 2 + hs
-          post = n / 2
+          pre = ((n / 2 + hs) * span).round
+          post = (n / 2 * span).round
           gap_min = MIN_GAP * hs
           kept = []
           onsets.sort.uniq.each do |o|
