@@ -716,7 +716,10 @@ module MB
         fade_law: :power` makes that a crossfade over two thirds of each
         cut slice's slot (its time until the next slice starts), at
         equal power, into what led up to the next hit, so a soft hit
-        just before a cut keeps its place.  `positions:` (one per cut)
+        just before a cut keeps its place.  `fill: :repeat, slot_fade:
+        1/2r, fade_law: :parabola` fills a slowed slice by playing it
+        twice, crossfaded in the middle of its slot, instead of a gap
+        (a noisy sound stays smooth).  `positions:` (one per cut)
         puts each slice at a place of its own: a groove.
       TEXT
       commands :loops

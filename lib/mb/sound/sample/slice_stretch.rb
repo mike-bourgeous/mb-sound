@@ -22,7 +22,15 @@ module MB
       # its level following the decay (an even stretch plays part of a
       # kick's body twice).  Either can be asked for by name.  A slice
       # shorter than the attack and two cycles is filled with a shorter
-      # attack and shorter cycles (down to FILL_SHORTEST).  Speeding up
+      # attack and shorter cycles (down to FILL_SHORTEST).  With :repeat
+      # (#repeat_slice) nothing is stretched: the slice plays from its
+      # start as it is and crossfades into itself again, placed to end
+      # at the next slice's start, so the slot is filled with the
+      # slice's own samples, part of it heard twice under the crossfade,
+      # and the sound runs on into the next slice as it did in the input
+      # (no fade at the cut, no gap: a noisy tail stays smooth where a
+      # gap makes it stutter).  A slot too long for two copies (over
+      # 1 + REPEAT_HOP slices) takes more, evenly spaced.  Speeding up
       # (+ratio+ < 1)
       # truncates each slice, fading out over +fade+ before the next one's
       # new time.  Every slice that doesn't follow on from the one before
@@ -43,15 +51,25 @@ module MB
       # the input, fade-out and fade-in the same length, however short
       # or long the slot.  A hit just before a cut then keeps its
       # distance to that cut (with the short fixed fade it is cut off, or
-      # plays late).  +fade_law+ is how every pair of fades adds up:
-      # :linear (default; gains that sum to 1, raised cosines) or :power
-      # (their square roots: a cosine going out and a sine coming in,
-      # equal power, for a fade between sounds that are not alike).
-      # `slot_fade: 2/3r, fade_law: :power` is what renders of sliced
-      # loops played faster by a loop-based sequencer measured as (the
-      # first third of each slot as in the file, then an equal-power
-      # crossfade into the lead-in of the next hit).  Slices drawn out,
-      # and slices that follow on, are as without it.
+      # plays late).  Under fill: :repeat it also sets the crossfade of a
+      # slice drawn out by two copies: that share of the slot, in the
+      # slot's middle (nil: wherever both copies play).  An Array gives
+      # each slice its own share or nil, one entry per slice in order
+      # (the slice from 0 first).  +fade_law+ is how every pair of fades
+      # adds up: :linear (default; gains that sum to 1, raised cosines),
+      # :power (their square roots: a cosine going out and a sine coming
+      # in, equal power, for a fade between sounds that are not alike),
+      # or :parabola (1 - t^2 going out and its mirror coming in: a
+      # little over equal power, 0.5 dB at the middle).  Renders of
+      # sliced loops by a loop-based sequencer measured as `slot_fade:
+      # 2/3r, fade_law: :power` played faster (the first third of each
+      # slot as in the file, then an equal-power crossfade into the
+      # lead-in of the next hit) and as `fill: :repeat, fade_law:
+      # :parabola` played slower, with `slot_fade: 1/2r` for slots up to
+      # about 128 ms and nil for longer ones (a drum loop at 1.09 times
+      # its length: each slice within -60 dB of the render, the median
+      # -69 dB).  Other slices drawn out, and slices that follow on, are
+      # as without it.
       #
       # +positions+ gives each cut its own place in the output (samples)
       # instead of the cut × +ratio+, for slices moved off the grid of
@@ -66,8 +84,9 @@ module MB
 
         # +fade_law+ values: :linear (the two sides' gains sum to 1) and
         # :power (their squares do: equal power), as GraphNode#blend's
-        # +curve:+.
-        LAWS = [:linear, :power].freeze
+        # +curve:+, and :parabola (1 - t^2 out, 1 - (1 - t)^2 in: the
+        # squares sum to 1.125 at the middle).
+        LAWS = [:linear, :power, :parabola].freeze
 
         # With fill: :stretch, the part of each slice kept exactly before
         # its decay is stretched (seconds).
@@ -75,10 +94,24 @@ module MB
 
         # +fill+ values: :gap (silence after each slice), :stretch (each
         # slice drawn out, :even or :decay as #fill_kind picks), :even
-        # (the fitted cyclic stretch of everything after the attack), and
+        # (the fitted cyclic stretch of everything after the attack),
         # :decay (the hit whole, what it has died down to drawn out along
-        # the decay's envelope).
-        FILLS = [:gap, :stretch, :even, :decay].freeze
+        # the decay's envelope), and :repeat (the slice crossfading into
+        # itself again, placed to end at the next slice).
+        FILLS = [:gap, :stretch, :even, :decay, :repeat].freeze
+
+        # fill: :repeat places each further copy of a slice at most this
+        # share of the slice after the one before it: a slot up to 1.65
+        # slices long takes two copies, up to 2.3 three (the hops equal).
+        # (Renders of a loop-based sequencer were read as two copies at
+        # 1.09 and 1.25 times the length, three at 2, five at 3, hops of
+        # half the slice; only the two-copy case is nulled against them.)
+        REPEAT_HOP = 0.65
+
+        # With three or more copies, each crossfades into the next over
+        # this share of the slice, ending where the earlier copy ends
+        # (read from renders at hops of half the slice; not nulled).
+        REPEAT_FADE = 0.25
 
         # The shortest slice (seconds) the :stretch fill fills: shorter
         # ones play with a gap.  A slice too short for the usual attack
@@ -121,7 +154,7 @@ module MB
         # +channels+ (DFloat or SFloat arrays in play order) stretched by
         # +ratio+, cut at +cuts+ (sample positions, 0 first; the end is
         # added).  +fade+ in samples; +attack+, +cycle+, and +crossfade+
-        # (the fill's stretch) in samples.  +slot_fade+ (nil or 0..1) and
+        # (the fill's stretch) in samples.  +slot_fade+ (nil, 0..1, or one per slice) and
         # +fade_law+ (LAWS) as the module says; +positions+ (nil, or one
         # output sample per cut, in the cuts' order) as #places reads
         # them.  Returns Arrays of SFloat.
@@ -129,17 +162,21 @@ module MB
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio.is_a?(Numeric) && ratio > 0
           raise ArgumentError, "fill: is one of #{FILLS.inspect} (got #{fill.inspect})" unless FILLS.include?(fill)
           raise ArgumentError, "fade_law: is one of #{LAWS.inspect} (got #{fade_law.inspect})" unless LAWS.include?(fade_law)
-          unless slot_fade.nil? || (slot_fade.is_a?(Numeric) && slot_fade >= 0 && slot_fade <= 1)
-            raise ArgumentError, "slot_fade: is a share of each slot, from 0 to 1 (got #{slot_fade.inspect})"
+          share = ->(v) { v.nil? || (v.is_a?(Numeric) && v >= 0 && v <= 1) }
+          unless share.(slot_fade) || (slot_fade.is_a?(Array) && slot_fade.all?(&share))
+            raise ArgumentError, "slot_fade: is a share of each slot, from 0 to 1, or an Array of them (nil too) per slice (got #{slot_fade.inspect})"
           end
 
           x = channels.map { |c| Numo::DFloat.cast(c) }
           len = x[0].length
           n_out = (len * ratio).round
           p, q = places(cuts, positions, ratio, len, n_out)
+          if slot_fade.is_a?(Array) && slot_fade.length != p.length - 1
+            raise ArgumentError, "slot_fade: takes one share (or nil) per slice (#{p.length - 1} slices, got #{slot_fade.length})"
+          end
 
           out = x.map { Numo::DFloat.zeros(n_out) }
-          guide = fill == :gap ? nil : x.sum / x.length
+          guide = fill == :gap || fill == :repeat ? nil : x.sum / x.length
           joined = [] # whether slice i follows on from slice i - 1
           lead = []   # the pre-roll into slice i, where the slot before it sets it (slot_fade)
           shortest = MB::M.max(64, (FILL_SHORTEST * sample_rate).round)
@@ -150,9 +187,13 @@ module MB
             slot = q[i + 1] - qa
             own = b - a
             next if slot <= 0
+            sf = slot_fade.is_a?(Array) ? slot_fade[i] : slot_fade
 
+            repeated = fill == :repeat && slot > own && own > 1
             segs =
-              if fill != :gap && slot > own && own >= shortest
+              if repeated
+                repeat_slice(x, a, b, slot, sf, fade_law)
+              elsif fill != :gap && fill != :repeat && slot > own && own >= shortest
                 att, cyc, xf = attack, cycle, crossfade
                 if own - attack < 2 * cycle
                   # (a short slice: a quarter of it as its attack, cycles
@@ -172,17 +213,19 @@ module MB
                 x.map { |c| c[a...(a + m)].dup }
               end
             m = segs[0].length
-            continuous = m == own && slot == own
+            # (a repeated slice ends on its own last samples, at the
+            # next slice's start: the sound follows on as in the input)
+            continuous = repeated || (m == own && slot == own)
             joined[i + 1] = continuous
 
             fo =
               if continuous
                 0
-              elsif slot_fade && slot < own
+              elsif sf && slot < own
                 # (a slice cut short: it fades over its share of the
                 # slot, and the lead-in to the next cut, which is this
                 # slice's own end, fades in over the same samples)
-                lead[i + 1] = (slot * slot_fade).round
+                lead[i + 1] = (slot * sf).round
               else
                 MB::M.min(fade, m / 2)
               end
@@ -239,6 +282,46 @@ module MB
           q = p.map { |c| at[c] }
           q.each_cons(2).with_index { |(u, v), i| raise ArgumentError, "positions: run forward with their cuts (the cut at #{p[i + 1]} is at #{v}, before #{u})" if v < u }
           [p, q]
+        end
+
+        # A slice from +a+ to +b+ drawn out to +slot+ samples by playing
+        # it again (fill: :repeat): copies of the slice, the first at the
+        # slot's start, the last ending at the slot's end, any between
+        # evenly spaced (hops of at most REPEAT_HOP of the slice), each
+        # crossfading into the next by +law+ (#ramp).  Two copies
+        # crossfade wherever both play (from the second's start to the
+        # first's end), or with +share+ over that share of the slot, in
+        # the slot's middle; three or more over REPEAT_FADE of the slice,
+        # up to each copy's end.  Every sample is the slice's own, at the
+        # slice's speed.
+        def repeat_slice(x, a, b, slot, share, law)
+          own = b - a
+          extra = slot - own
+          hops = MB::M.max(1, (extra / (REPEAT_HOP * own)).ceil)
+          starts = (0..hops).map { |j| (extra * j.to_f / hops).round }
+          gains = Array.new(hops + 1) { Numo::DFloat.ones(own) }
+          hops.times do |j|
+            # (both copies play from the later one's start to the earlier one's end)
+            both = starts[j] + own - starts[j + 1]
+            if hops == 1
+              n = share ? MB::M.min((slot * share).round, both) : both
+              from = share ? (slot - n) / 2 : starts[1]
+            else
+              n = MB::M.min((own * REPEAT_FADE).round, both)
+              from = starts[j] + own - n
+            end
+            o = from - starts[j]
+            gains[j][o...(o + n)] *= ramp(n, false, law) if n > 0
+            gains[j][(o + n)...own] = 0 if o + n < own
+            i = from - starts[j + 1]
+            gains[j + 1][0...i] = 0 if i > 0
+            gains[j + 1][i...(i + n)] *= ramp(n, true, law) if n > 0
+          end
+          x.map { |c|
+            seg = Numo::DFloat.zeros(slot)
+            starts.each_with_index { |s, j| seg[s...(s + own)] += c[a...b] * gains[j] }
+            seg
+          }
         end
 
         # A slice from +a+ to +b+ filled out to +slot+ samples (fill:
@@ -382,11 +465,18 @@ module MB
         end
 
         # A fade of +n+ samples (in or out): a raised cosine (+law+
-        # :linear: with its mirror it sums to 1), or its square root
-        # (:power: a quarter of a sine; the squares sum to 1).
+        # :linear: with its mirror it sums to 1), its square root
+        # (:power: a quarter of a sine; the squares sum to 1), or a
+        # parabola (:parabola: 1 - (1 - t)^2 coming in, 1 - t^2 going
+        # out).
         def ramp(n, rising, law = :linear)
           t = (Numo::DFloat.new(n).seq + 0.5) / n
-          w = 0.5 - 0.5 * Numo::NMath.cos(t * Math::PI)
+          w =
+            if law == :parabola
+              1 - (1 - t)**2
+            else
+              0.5 - 0.5 * Numo::NMath.cos(t * Math::PI)
+            end
           w = Numo::NMath.sqrt(w) if law == :power
           rising ? w : w.reverse
         end

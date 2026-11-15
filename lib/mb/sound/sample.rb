@@ -1122,18 +1122,25 @@ module MB
       # count, positions, or Slices) and starts each slice at its
       # stretched time, its attack copied exactly.  Slowed down, a slice
       # fades out over +fade+ (4 ms) and leaves a gap, or is drawn out
-      # to the next one (+fill+ :stretch, :even, :decay); sped up, it is
+      # to the next one (+fill+ :stretch, :even, :decay), or crossfades
+      # into a second copy of itself that ends at the next slice (+fill+
+      # :repeat: no gap, no stretch); sped up, it is
       # cut at the next slice's new time with the same fade, and the
       # +fade+ before each cut of the input fades in ahead of it.
       # +slot_fade+ (a share, 0 to 1) makes that a crossfade in
       # proportion to each slot (the time a cut slice has, to the next
       # slice's start): the slice plays as it is, then fades over that
       # share of its slot into the audio that led up to the next cut,
-      # so a hit just before a cut keeps its distance to it.
-      # +fade_law+ :linear (default) or :power (equal power) is how the
-      # fades add up.  `slot_fade: 2/3r, fade_law: :power` is how a
-      # loop-based sequencer's renders of sliced loops played faster
-      # measured.  +positions+ (one per cut that +slices+ gives, in
+      # so a hit just before a cut keeps its distance to it; with
+      # fill: :repeat it is the share of the slot, in its middle, that
+      # the two copies crossfade over (nil: wherever both play).  An
+      # Array gives each slice its own (nil too), in play order.
+      # +fade_law+ :linear (default), :power (equal power), or
+      # :parabola (1 - t^2 out) is how the fades add up.  `slot_fade:
+      # 2/3r, fade_law: :power` is how a loop-based sequencer's renders
+      # of sliced loops played faster measured, and `fill: :repeat,
+      # fade_law: :parabola` with `slot_fade: 1/2r` for slots up to
+      # about 128 ms (nil for longer ones) played slower.  +positions+ (one per cut that +slices+ gives, in
       # order: samples, seconds, Lengths, or Durations at the stretched
       # tempo) puts each slice where it says in the output instead of
       # at its stretched time (a groove; the length stays +ratio+ times
@@ -1153,6 +1160,7 @@ module MB
       #     voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false)   # narrower partials, a wide image (voices)
       #     brk.stretch(1.25, mode: :slice)            # slices at the hits, attacks exact
       #     brk.stretch(0.8, mode: :slice, slot_fade: 2/3r, fade_law: :power)   # faster: each slice crossfades into the next hit's lead-in
+      #     brk.stretch(1.2, mode: :slice, fill: :repeat, slot_fade: 1/2r, fade_law: :parabola)   # slower: each slice plays twice, crossfaded, no gaps
       def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann,
                   slices: nil, fade: nil, fill: nil, wrap: nil, noise: nil, confirm: nil, threshold: nil, slot_fade: nil, fade_law: nil, positions: nil)
         unless (confirm.nil? && threshold.nil?) || (SLICE_MODES.include?(mode.to_sym) && slices == :transients)
@@ -1200,8 +1208,9 @@ module MB
         unless fade_law.nil? || SliceStretch::LAWS.include?(fade_law)
           raise ArgumentError, "fade_law: is one of #{SliceStretch::LAWS.inspect} (got #{fade_law.inspect})"
         end
-        unless slot_fade.nil? || (slot_fade.is_a?(Numeric) && slot_fade >= 0 && slot_fade <= 1)
-          raise ArgumentError, "slot_fade: is a share of each slot, from 0 to 1 (got #{slot_fade.inspect}; fade: takes a length)"
+        share = ->(v) { v.nil? || (v.is_a?(Numeric) && v >= 0 && v <= 1) }
+        unless share.(slot_fade) || (slot_fade.is_a?(Array) && slot_fade.all?(&share))
+          raise ArgumentError, "slot_fade: is a share of each slot, from 0 to 1, or an Array of them per slice (got #{slot_fade.inspect}; fade: takes a length)"
         end
         cuts, = slices == :transients ? [transient_cuts(confirm, threshold), :onsets] : slice_cuts(slices)
         places = positions && slice_positions(positions, cuts, ratio)
