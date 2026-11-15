@@ -1176,6 +1176,24 @@ module MB
       # stretch ended on 190 ms of the input's own tail, with a flutter
       # near 10.5 Hz in the tail before it (stretch-fixes-4).
       #
+      # The vocoder keeps each partial's level, but its partials' phases
+      # drift apart (the waveform changes shape while it sounds the
+      # same), which a distortion or waveshaper after it hears.  +lock+
+      # :shape (Spectral.shape_lock) keeps the partials that fit at the
+      # input's relative phases, moved in time, so a tone keeps its
+      # waveform; a loop then closes its phases over the last half
+      # second or so (Spectral::SHAPE_CLOSING windows), where it runs
+      # free.  How a loop's phases close: +closure+ :spread (default)
+      # spreads each partial's error evenly over the loop, :shift
+      # closes a harmonic sound with a pitch change of up to
+      # Spectral::SHIFT_CENTS (keeping its shape, but it dulls the
+      # top above 2 kHz: the frames disagree by a few samples), and
+      # +closure_length+ (seconds or a Length) closes only that long
+      # before the loop point, the rest as with its own ends.  (A
+      # bass loop through its track's waveshaper lost 2.4 dB of sub
+      # with the closed loop; lock: :shape gave it back,
+      # stretch-fixes-6.)
+      #
       # +mode+ :slice (SliceStretch; loops) cuts the sample at +slices+
       # (markers, else onsets, else sixteenths; :markers, :onsets,
       # :transients with +confirm+ and +threshold+, :grid, a Duration, a
@@ -1232,9 +1250,10 @@ module MB
       #     brk.stretch(1.25, mode: :spectral, transients: [0, 1.n8, 2.n8, 13230.samples])   # or at these positions
       #     brk.stretch(1.25, mode: :spectral, transients: :markers, confirm: true)   # only markers with an attack, on the attack
       #     brk.stretch(1.25, mode: :slice, confirm: true)                             # slices only at markers with an attack
+      #     bass.stretch(1.29, mode: :spectral, lock: :shape)  # the waveform kept (for a distortion after it)
       #     hit.stretch(1.25, mode: :none)             # as recorded, then silence
       def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann,
-                  slices: nil, fade: nil, fill: nil, wrap: nil, noise: nil, confirm: nil, threshold: nil, slot_fade: nil, fade_law: nil, positions: nil)
+                  slices: nil, fade: nil, fill: nil, wrap: nil, noise: nil, confirm: nil, threshold: nil, slot_fade: nil, fade_law: nil, positions: nil, closure: nil, closure_length: nil, lock: nil)
         unless confirm.nil? && threshold.nil?
           # (confirm: for slices: :transients, or for given markers or
           # positions; threshold: only for slices: :transients)
@@ -1253,7 +1272,9 @@ module MB
           return unstretched(ratio, fade)
         end
         raise ArgumentError, "wrap: is true, false, or nil (by the sample's loop; got #{wrap.inspect})" unless wrap.nil? || wrap == true || wrap == false
-        raise ArgumentError, 'wrap: and noise: are for mode: :spectral and :paul' unless (wrap.nil? && noise.nil?) || (!SLICE_MODES.include?(mode.to_sym) && Spectral.mode_name(mode) != :cyclic)
+        spectral = !SLICE_MODES.include?(mode.to_sym) && Spectral.mode_name(mode) != :cyclic
+        raise ArgumentError, 'wrap: and noise: are for mode: :spectral and :paul' unless (wrap.nil? && noise.nil?) || spectral
+        raise ArgumentError, 'closure:, closure_length:, and lock: are for mode: :spectral and :paul' unless (closure.nil? && closure_length.nil? && lock.nil?) || spectral
         # (Markers in lists are their positions: the edit then prints as plain Ruby)
         slices = slices.map { |x| x.is_a?(Marker) ? x.position : x } if slices.is_a?(Array)
         transients = transients.map { |x| x.is_a?(Marker) ? x.position : x } if transients.is_a?(Array)
@@ -1268,7 +1289,7 @@ module MB
         end
 
         mode = Spectral.mode_name(mode)
-        return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap, noise, confirm) unless mode == :cyclic
+        return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap, noise, confirm, closure, closure_length, lock) unless mode == :cyclic
         unless window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
           raise ArgumentError, 'window:, overlap:, shape:, transients:, seed:, randomize:, and link: are for mode: :spectral and :paul'
         end
@@ -1649,7 +1670,7 @@ module MB
       # vocoder whose +randomize+ goes from locked phases (0) to random
       # ones (1, Spectral.paul's magnitude-only frames when no onsets are
       # kept); the modes set the defaults.
-      def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap = nil, noise = nil, confirm = nil)
+      def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap = nil, noise = nil, confirm = nil, closure = nil, closure_length = nil, lock = nil)
         paul = mode == :paul
         transients = !paul if transients.nil?
         transients = true if %i[onsets transients].include?(transients)
@@ -1679,6 +1700,15 @@ module MB
         kw[:seed] = seed unless seed == 0 || (randomize == 0 && noise == 0)
         kw[:wrap] = wrap unless wrap.nil?
         wrap = whole_loop? if wrap.nil?
+        unless closure.nil?
+          raise ArgumentError, "closure: is one of #{Spectral::CLOSURES.map(&:inspect).join(', ')} (got #{closure.inspect})" unless Spectral::CLOSURES.include?(closure)
+          kw[:closure] = closure
+        end
+        kw[:closure_length] = closure_length unless closure_length.nil?
+        raise ArgumentError, "lock: is one of #{Spectral::LOCKS.map(&:inspect).join(', ')} (got #{lock.inspect})" unless lock.nil? || Spectral::LOCKS.include?(lock)
+        kw[:lock] = lock unless lock.nil?
+        close_n = closure_length.nil? ? nil : position(closure_length).round
+        raise ArgumentError, "closure_length: is a length above zero (got #{closure_length.inspect})" unless close_n.nil? || close_n > 0
 
         n = position(window.nil? ? (paul ? Spectral::PAUL_WINDOW : Spectral::WINDOW.samples) : window).round
         n += 1 if n.odd?
@@ -1688,11 +1718,12 @@ module MB
         wrap = false if wrap && randomize >= 1 && attack_at_loop_point?
         edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |chans|
           if wrap
-            Spectral.looped(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise)
+            Spectral.looped(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise,
+                            closure: closure || :spread, closure_length: close_n, lock: lock || :peaks)
           elsif randomize >= 1 && onsets.nil?
             Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
           else
-            Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise)
+            Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise, lock: lock || :peaks)
           end
         }
       end
