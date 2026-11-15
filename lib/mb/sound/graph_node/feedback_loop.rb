@@ -150,6 +150,12 @@ module MB
             {}
           end
 
+          # The loop it reads, as a feedback edge (drawings route it under
+          # the boxes; #port_info lists it with role :feedback).
+          def feedback_sources
+            @feedback_sources ||= { loop: @loop }.freeze
+          end
+
           def sample_rate
             @loop.sample_rate
           end

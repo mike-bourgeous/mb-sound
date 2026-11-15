@@ -4,12 +4,12 @@ require_relative '../../../../support/boundary_check'
 # maintainer's D4 = option 2 on 2026-10-30: a guard now, the extraction
 # after his native Mac check of mb-term).  A second user exists: mb-math's
 # gnuplot MB::M::Plot.  The previews of mb-sound's nodes (panels.rb,
-# envelope_view.rb, presets.rb) are mb-sound's side of the line; the rest
+# envelope_view.rb, presets.rb) and its graph walk (graph_view.rb) are mb-sound's side of the line; the rest
 # reads only Ruby, Numo, mb-math, mb-util, mb-term, and the ADAPTERS below
 # (spec/support/boundary_check.rb has the rules).
 module PlotBoundary
   # mb-sound's side: node previews and signal presets, which would stay.
-  MB_SOUND_SIDE = %w[mb/sound/plot/panels.rb mb/sound/plot/envelope_view.rb mb/sound/plot/presets.rb].freeze
+  MB_SOUND_SIDE = %w[mb/sound/plot/panels.rb mb/sound/plot/envelope_view.rb mb/sound/plot/presets.rb mb/sound/plot/graph_view.rb].freeze
 
   FILES = (['mb/sound/plot.rb'] + Dir[File.join(BoundaryCheck::LIB, 'mb/sound/plot/*.rb')].map { |f| f.delete_prefix("#{BoundaryCheck::LIB}/") }.sort - MB_SOUND_SIDE).freeze
 
@@ -23,8 +23,8 @@ module PlotBoundary
     "the plot kernels' and cell grid's one switch (MB::Sound::Kernels, kernels-1): an extracted plot gem would keep a registry of its own that mb-sound's drives, as mb-term's Grid.native is" => [
       'mb/sound/plot/live.rb: Kernels', 'mb/sound/plot/mark.rb: Kernels', 'mb/sound/plot/raster.rb: Kernels', 'mb/sound/plot/text.rb: Kernels',
     ],
-    "plot.rb loads mb-sound's previews (MB_SOUND_SIDE); mb-sound would require them itself" => [
-      'mb/sound/plot.rb: require_relative plot/panels', 'mb/sound/plot.rb: require_relative plot/presets',
+    "plot.rb loads mb-sound's previews and graph walk (MB_SOUND_SIDE); mb-sound would require them itself" => [
+      'mb/sound/plot.rb: require_relative plot/panels', 'mb/sound/plot.rb: require_relative plot/presets', 'mb/sound/plot.rb: require_relative plot/graph_view',
     ],
   }.freeze
 
@@ -33,7 +33,7 @@ end
 
 RSpec.describe('plot boundary') do
   it 'covers the plot files except the previews of mb-sound' do
-    expect(PlotBoundary::FILES.length).to eq(18)
+    expect(PlotBoundary::FILES.length).to eq(19)
     expect(PlotBoundary::FILES).to include('mb/sound/plot.rb', 'mb/sound/plot/text.rb', 'mb/sound/plot/live.rb')
     PlotBoundary::MB_SOUND_SIDE.each { |f| expect(File.exist?(File.join(BoundaryCheck::LIB, f))).to eq(true), "#{f} is gone" }
   end

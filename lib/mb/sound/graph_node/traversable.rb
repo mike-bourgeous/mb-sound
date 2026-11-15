@@ -364,6 +364,18 @@ module MB
           graph.select { |s| s.respond_to?(:graph_node_name) && s.graph_node_name == name }
         end
 
+        # Draws this node's graph by rank in the terminal (a Plot::Graph:
+        # boxes from the inputs on the left to this node on the right, typed
+        # wires, constants inline, feedback under the boxes), shown when the
+        # console prints it.  Options as Plot.graph: +title+, +max_boxes+.
+        # See design/notes/drawing.md.
+        #
+        #     110.hz.saw.lp4(1200).draw
+        #     110.hz.saw.lp4(1200).draw.save('lp4.txt')
+        def draw(**opts)
+          MB::Sound::Plot.graph(self, **opts)
+        end
+
         # Returns a String containing a GraphViz representation of the signal
         # graph.
         #

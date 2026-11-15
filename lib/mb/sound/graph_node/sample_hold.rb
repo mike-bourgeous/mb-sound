@@ -73,7 +73,7 @@ module MB
           raise ArgumentError, "sample_hold can't process complex data (the source; take .real, .imag, or .abs first)" if complex_data?(data)
           raise ArgumentError, "sample_hold can't process complex data (the trigger; take .real, .imag, or .abs first)" if complex_data?(trig)
 
-          @held ||= data ? data[0].to_f : draw
+          @held ||= data ? data[0].to_f : draw_value
 
           # Rising edges: sample i > 0 after i - 1 <= 0.  Most buffers of a
           # slow trigger have no change (all high or all low).
@@ -95,7 +95,7 @@ module MB
           start = 0
           edges.each do |i|
             @buf[start...i] = @held if i > start
-            @held = data ? data[i].to_f : draw
+            @held = data ? data[i].to_f : draw_value
             start = i
           end
           @buf[start...n] = @held
@@ -131,7 +131,7 @@ module MB
 
         # For plans: the next random value (random mode).
         def plan_draw
-          draw
+          draw_value
         end
 
         def plan_snapshot
@@ -145,7 +145,7 @@ module MB
 
         private
 
-        def draw
+        def draw_value
           @range.begin + (@range.end - @range.begin) * @random.rand
         end
       end

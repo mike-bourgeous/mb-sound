@@ -8,7 +8,7 @@ Every terminal drawing goes one way: Plot builds cells into an `MB::Term` grid (
 
 - `node.draw` (any Traversable) or `MB::Sound::Plot.graph(node)` returns a `Plot::Graph` that prints itself in Pry; `#lines(color:)`, `#to_s`, `#show`, `#save('g.txt' | 'g.ans' | 'g.html')`, `#size`; `rack(:dub).draw` draws a rack's inside on stand-ins, its ports as the left edge.
 - The rack pane: `ui.show :rack` in the tiles (it follows the racks pane's picked knob's instance; arrows pan the drawing in its mode, `n`/`p` the next or previous instance).
-- Code and specs: listed here as they land on racks-v-1 (the note came first; the design below is the plan they follow).
+- Code: `lib/mb/sound/plot/graph.rb` (generic layout and text drawing), `lib/mb/sound/plot/graph_view.rb` (mb-sound's side: graph walks to boxes and wires); spec `spec/lib/mb/sound/plot/graph_spec.rb` (every graph sweep factory lays out and draws).
 
 Phase V of the racks proposal (`research-racks`, `research/racks/PROPOSAL.md` section 5 and row V of section 7; approved with the rest by the maintainer, 2026-10-17: "Racks look good; go ahead"), the roadmap's "Drawing consolidation (racks V)": "One UI code path for plots, `vis`, racks, graph drawings and lanes: a rack pane, `Plot.graph` rank layout, `view`/`lanes` stacked on one time axis, the live lanes pane."  First slice (racks-v-1, 2026-11-15): this note, `Plot.graph`, and the rack pane.  Left for the next slices: `view`/`lanes`, the live lanes pane, owner groups, typed panels inside the boxes, `highlight: :plan`, SVG/PNG drawings of graphs.
 
@@ -17,7 +17,7 @@ Phase V of the racks proposal (`research-racks`, `research/racks/PROPOSAL.md` se
 | Drawing | Built by | Cells from | Console | Pane |
 |---|---|---|---|---|
 | charts and figures (plots, `vis`, spectra, previews) | `Plot.chart`/`figure`, presets, `Plot::Panels` | `Text::Frame` (layout once, marks per frame) | `Renderable#show`/`lines` | `Plot::Live#draw(chart, grid, x:, y:)` blits |
-| graph drawings | `Plot.graph(node)` -> `Plot::Graph` (layout once) | `Plot::Graph#cells` (boxes, port text, wires) | `Plot::Graph#show`/`lines` | `Plot::Graph#draw(grid, x:, y:, w:, h:, scroll:)` blits the window |
+| graph drawings | `Plot.graph(node)` -> `Plot::Graph` (layout and picture once) | `Plot::Graph#draw` (runs of styled cells, `put_run` as `UI::Canvas` writes) | `Plot::Graph#show`/`lines` (a `MB::Term::Cells` grid) | `Plot::Graph#draw(grid, x:, y:, w:, h:, scroll:)` writes the window into the screen's grid |
 | lanes (next slice) | `view`/`lanes` -> a Figure of lanes sharing one `Plot::Scale::Time` and gutter | `Text::Frame`, `Mark::Notes` | as charts | `Plot::Live#draw` |
 
 - A drawing never writes terminal bytes: it fills a grid of the screen's class (`Kernels.cell_grid`, or the class of the pane's grid), and the screen's one frame writer sends the changed cells (terminal_ui.md: panes never write their own bytes, ui-fix-3).  The console prints the same grid's lines in the terminal's color mode, so a pane and `node.draw` show the same picture.
