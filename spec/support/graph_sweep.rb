@@ -414,6 +414,9 @@ module GraphSweep
         # shorter attack and cycles; stretch-fixes-1)
         smp.follow * 0.3 + smp.follow(:resample, align: :launch) * 0.3 + st.follow(stretch: { mode: :slice, slices: 4, fill: :stretch, cycle: 0.001 })[1] * 0.3 +
           smp.follow(stretch: { mode: :slice, slices: 1, fill: :stretch, cycle: 0.004 }) * 0.2 + smp.follow(stretch: { mode: :slice, slices: 4, fill: :stretch }) * 0.2 + smp.follow(stretch: { mode: :slice, slices: 2, fill: :even }) * 0.1 + smp.follow(stretch: { mode: :slice, slices: 2, fill: :decay }) * 0.1 +
+          # (slices drawn out by playing each twice, crossfaded: a share
+          # of the slot per slice, nil for the whole overlap)
+          smp.follow(stretch: { mode: :slice, slices: 4, fill: :repeat, slot_fade: [1/2r, nil, 1/2r, nil], fade_law: :parabola }) * 0.1 +
           # (a loop slower than the sweep's tempo, played at 0.8x its
           # length: slices cut short crossfading by their slots, and
           # slices at their own positions, some cut short and one drawn

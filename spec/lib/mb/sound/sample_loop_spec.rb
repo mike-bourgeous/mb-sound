@@ -588,6 +588,96 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       expect { smp.stretch(0.8, fade_law: :power) }.to raise_error(ArgumentError, /for mode: :slice/)
     end
 
+    # The rule fill: :repeat follows for two copies, written out per
+    # slot: copy A is the slice from the slot's start, copy B the same
+    # slice placed to end at the slot's end (the next cut's new place);
+    # A plays alone, then the two crossfade, then B plays alone into the
+    # next slice.  The crossfade covers +share+ of the slot in its middle,
+    # or (share nil) all of the overlap, from B's start to A's end; law
+    # :parabola: A's gain 1 - t^2, B's 1 - (1 - t)^2, t from 0 to 1
+    # counted from the middle of each sample.
+    def repeat_reference(x, cuts, ratio, shares)
+      len = x.length
+      p = (cuts.select { |c| c > 0 && c < len } + [0, len]).uniq.sort
+      q = p.map { |c| (c * ratio).round }
+      out = Numo::DFloat.zeros(q.last)
+      (p.length - 1).times do |i|
+        own = p[i + 1] - p[i]
+        slot = q[i + 1] - q[i]
+        raise 'the reference is for two copies' unless slot > own && slot <= own * 1.65
+        share = shares.is_a?(Array) ? shares[i] : shares
+        d = slot - own
+        n = share ? [(slot * share).round, own - d].min : own - d
+        from = share ? (slot - n) / 2 : d
+        t = ((Numo::DFloat.new(slot).seq - from + 0.5) / n).clip(0, 1)
+        a = Numo::DFloat.zeros(slot)
+        b = Numo::DFloat.zeros(slot)
+        a[0...own] = x[p[i]...p[i + 1]]
+        b[d...slot] = x[p[i]...p[i + 1]]
+        out[q[i]...q[i + 1]] = a * (1 - t**2) + b * (1 - (1 - t)**2)
+      end
+      out
+    end
+
+    it 'fill: :repeat fills each drawn-out slot with its slice played twice, crossfaded, ending where the next slice starts' do
+      smp, cuts = clicks_and_cuts
+      len = smp.length
+      x = [0, 1].map { |ch| Numo::DFloat.cast(smp.data(ch)) }
+      [1.09, 1.25, 1.6].each do |r|
+        q = (cuts + [len]).map { |c| (c * r).round }
+        [1/2r, nil, 0.3].each do |share|
+          kw = { fill: :repeat, fade_law: :parabola }
+          kw[:slot_fade] = share if share
+          s = smp.stretch(r, mode: :slice, slices: cuts, **kw)
+          expect(s.length).to eq((len * r).round)
+          2.times { |ch| expect((Numo::DFloat.cast(s.data(ch)) - repeat_reference(x[ch], cuts, r, share)).abs.max).to be < 1e-6 }
+        end
+        # Every hit at its cut, sample for sample, and each slot's end the
+        # input's own lead-in to the next cut (no gap, no fade at a cut)
+        s = smp.stretch(r, mode: :slice, slices: cuts, fill: :repeat, slot_fade: 1/2r, fade_law: :parabola)
+        cuts.each_with_index do |c, i|
+          expect(s.data(0)[q[i]...(q[i] + 16)]).to eq(smp.data(0)[c...(c + 16)])
+          tail = (q[i + 1] - q[i]) / 5
+          expect(s.data(1)[(q[i + 1] - tail)...q[i + 1]]).to eq(smp.data(1)[((cuts + [len])[i + 1] - tail)...(cuts + [len])[i + 1]])
+        end
+        # The gap fill's silences are gone: no 5 ms window of the noise is quiet
+        y = Numo::DFloat.cast(s.data(0))
+        quiet = (0...(y.length / 240)).count { |w| y[(w * 240)...((w + 1) * 240)].abs.max < 0.01 }
+        expect(quiet).to eq(0)
+        plain = Numo::DFloat.cast(smp.stretch(r, mode: :slice, slices: cuts).data(0))
+        expect((0...(plain.length / 240)).count { |w| plain[(w * 240)...((w + 1) * 240)].abs.max < 0.01 }).to be > 0
+      end
+
+      # Slots longer than 1.65 slices take more copies, evenly spaced, and
+      # still end on the slice's last samples with no quiet window
+      s = smp.stretch(2.5, mode: :slice, slices: cuts, fill: :repeat, fade_law: :parabola)
+      y = Numo::DFloat.cast(s.data(0))
+      expect((0...(y.length / 240)).count { |w| y[(w * 240)...((w + 1) * 240)].abs.max < 0.01 }).to eq(0)
+      expect(s.data(0)[(s.length - 500)..]).to eq(smp.data(0)[(len - 500)..])
+      expect(s.data(0)[60000...60016]).to eq(smp.data(0)[24000...24016])
+
+      # One share per slice (nil: the whole overlap), as the reference has it
+      shares = [1/2r, nil, 1/2r, nil, 0.3, 1/2r, nil, 1/2r]
+      s = smp.stretch(1.25, mode: :slice, slices: cuts, fill: :repeat, slot_fade: shares, fade_law: :parabola)
+      expect((Numo::DFloat.cast(s.data(0)) - repeat_reference(x[0], cuts, 1.25, shares)).abs.max).to be < 1e-6
+      expect(s.lineage[3]).to eq({ mode: :slice, slices: cuts, slot_fade: shares, fade_law: :parabola, fill: :repeat })
+      # (and for slices cut short: each its own share, the same share for all as one number)
+      faster = smp.stretch(0.8, mode: :slice, slices: cuts, slot_fade: [2/3r] * 8, fade_law: :power)
+      expect(faster.data(0)).to eq(smp.stretch(0.8, mode: :slice, slices: cuts, slot_fade: 2/3r, fade_law: :power).data(0))
+
+      # The parabola law: 1 - (1 - t)^2 coming in, 1 - t^2 going out
+      st = MB::Sound::Sample::SliceStretch
+      expect(st.ramp(4, true, :parabola).to_a).to eq([0.234375, 0.609375, 0.859375, 0.984375])
+      expect(st.ramp(4, false, :parabola).to_a).to eq([0.984375, 0.859375, 0.609375, 0.234375])
+      expect(smp.stretch(0.8, mode: :slice, slices: cuts, slot_fade: 1, fade_law: :parabola).data(0)).not_to eq(smp.stretch(0.8, mode: :slice, slices: cuts, slot_fade: 1, fade_law: :power).data(0))
+
+      # Ratio 1 is the input; the default (gap) and other fills are unchanged
+      expect(smp.stretch(1, mode: :slice, slices: cuts, fill: :repeat).data(0)).to eq(smp.data(0))
+      expect { smp.stretch(1.25, mode: :slice, slices: cuts, fill: :repeat, slot_fade: [1/2r] * 7) }.to raise_error(ArgumentError, /one share \(or nil\) per slice \(8 slices, got 7\)/)
+      expect { smp.stretch(1.25, mode: :slice, slices: cuts, slot_fade: [1/2r, 2] * 4) }.to raise_error(ArgumentError, /share of each slot/)
+      expect { smp.stretch(1.25, mode: :slice, fill: :loop) }.to raise_error(ArgumentError, /fill: is one of/)
+    end
+
     it 'positions: puts each slice at its own place in the output' do
       smp, cuts = clicks_and_cuts
       len = smp.length
