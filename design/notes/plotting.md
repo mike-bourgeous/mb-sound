@@ -9,6 +9,7 @@
 - Text looks: `Plot::Text::LOOKS` (`:scope` Braille, `:blocks`, `:mosaic`, `:quad`, `:spark`, `:ascii`).
 - Builders: `Plot.chart(title:) { ... }`, `Plot.figure { chart { ... } }`; charts `save('x.svg' | .png | .txt | .ans | .html)`.
 - Live panes: `Plot::Live.new(width:, height:, look:)` with `#redraw(chart)`, `#frame(chart, row:, col:)` / `#write(io, chart, ...)`, and `#draw(chart, grid, x:, y:)`, which blits into a screen grid so overlays stay on top (`overlay_guard_spec.rb`).
+- Graph drawings (`Plot.graph(node)`, `node.draw`) and the one drawing path for charts, graphs, and lanes: drawing.md.
 
 `MB::Sound::Plot` (`lib/mb/sound/plot.rb`, `lib/mb/sound/plot/`) draws every plot in mb-sound in pure Ruby, from Numo arrays, with no external process.  Built 2026-10-11 on branch `plot-1` after a gnuplot output race made `plot_methods_spec.rb:169` flaky (gnuplot's end-marker echo leaked into captured output); the maintainer asked to "bump up the priority of our custom plotting code and remove gnuplot usage", with "a few variations" and "a good architecture for scales axes legends etc."  mb-math's gnuplot pipe (`MB::M::Plot`) is untouched but no longer used by mb-sound; `spec/support/no_gnuplot.rb` fails any spec that starts it.  No gnuplot fallback was kept: PlotMethods builds charts directly now, so a fallback could only have covered the old Hash interface (a `plotter` override with MB::M::Plot's `#plot` still works for the Hash-based methods).
 

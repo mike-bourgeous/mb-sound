@@ -101,6 +101,7 @@ Full-word aliases: `note_rack`, `audio_rack`, `instrument_rack`, `listener_rack`
 - Static vs. dynamic: `Plot.graph` and the lanes Figure split into a layout built once (ranks, boxes, wire paths, scale domains, time window) and per-frame updates from snapshot data; a `structure_version` counter (Session/graph/rack epoch) bumps on graph and rack changes.
 - Rack pane data: a frozen `RackInfo` per instance through UI::Poll (name, ports from `port_info`, latency, rack knobs, slots); pane actions only through public commands.
 - `Mark::Notes` and every panel draw through Plot's cell layer; changes to `Plot::Live`, `UI::Feed`, or `UI::Snapshot` go to the UI branch owner as a struct/API or a patch.
+- Phase V's first slice (racks-v-1, 2026-11-15): `Plot.graph`, `node.draw`/`rack(:dub).draw`, `RackInfo#graph`, and the `:rack` pane; the one drawing path and what is left are in drawing.md.
 
 ## Rack knobs (R2)
 
