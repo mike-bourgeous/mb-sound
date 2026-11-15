@@ -821,7 +821,12 @@ module MB
         `.looped`, anything `follow` plays) gets a spectral stretch
         that is a loop itself: read round and round, its end flowing
         into its start (`wrap: true` asks for it, `wrap: false` gives a
-        stretch with its own ends).  `follow(stretch: { mode: :spectral, live: true })` runs
+        stretch with its own ends).  `lock: :shape` keeps a tone's
+        waveform as it stretches (its harmonics in step with each
+        other: what a distortion after it hears); a loop's phases close
+        evenly over the loop, or over `closure_length: 0.5` before its
+        end, or with a pitch change of a few cents (`closure: :shift`).
+        `follow(stretch: { mode: :spectral, live: true })` runs
         the vocoder as the loop plays: any tempo, nothing restretched.
         The vocoder finds the attacks it keeps sharp by itself
         (`transients: true`); `transients: :markers` takes the sample's
