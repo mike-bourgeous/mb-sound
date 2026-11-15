@@ -7,8 +7,8 @@ Every terminal drawing goes one way: Plot builds cells into an `MB::Term` grid (
 ## Quick reference
 
 - `node.draw` (any Traversable) or `MB::Sound::Plot.graph(node)` returns a `Plot::Graph` that prints itself in Pry; `#lines(color:)`, `#to_s`, `#show`, `#save('g.txt' | 'g.ans' | 'g.html')`, `#size`; `rack(:dub).draw` draws a rack's inside on stand-ins, its ports as the left edge.
-- The rack pane: `ui.show :rack` in the tiles (it follows the racks pane's picked knob's instance; arrows pan the drawing in its mode, `n`/`p` the next or previous instance).
-- Code: `lib/mb/sound/plot/graph.rb` (generic layout and text drawing), `lib/mb/sound/plot/graph_view.rb` (mb-sound's side: graph walks to boxes and wires); spec `spec/lib/mb/sound/plot/graph_spec.rb` (every graph sweep factory lays out and draws).
+- The rack pane: `ui.show :rack` in the tiles (it follows the racks pane's picked knob's instance; in its mode arrows pan the drawing, Shift by a quarter of the pane, Home back, `n`/`p` the next or previous instance).
+- Code: `lib/mb/sound/plot/graph.rb` (generic layout and text drawing), `lib/mb/sound/plot/graph_view.rb` (mb-sound's side: graph walks to boxes and wires); `lib/mb/sound/ui/rack_pane.rb` (`Panes::RackDetail`); specs `spec/lib/mb/sound/plot/graph_spec.rb` (every graph sweep factory lays out and draws), `spec/lib/mb/sound/ui/rack_pane_spec.rb`; help `help :racks`, `help :plots`.
 
 Phase V of the racks proposal (`research-racks`, `research/racks/PROPOSAL.md` section 5 and row V of section 7; approved with the rest by the maintainer, 2026-10-17: "Racks look good; go ahead"), the roadmap's "Drawing consolidation (racks V)": "One UI code path for plots, `vis`, racks, graph drawings and lanes: a rack pane, `Plot.graph` rank layout, `view`/`lanes` stacked on one time axis, the live lanes pane."  First slice (racks-v-1, 2026-11-15): this note, `Plot.graph`, and the rack pane.  Left for the next slices: `view`/`lanes`, the live lanes pane, owner groups, typed panels inside the boxes, `highlight: :plan`, SVG/PNG drawings of graphs.
 
@@ -51,15 +51,16 @@ What it replaces: the graph drawing replaces nothing yet; `graphviz`/`open_graph
 
 ## The rack pane
 
-`Panes::Rack` (`:rack`, a set pane beside `:racks`; `ui.show :rack`): the instance the racks pane's pick is on (else the first), drawn from `Snapshot#racks` (`Rack::RackInfo`, Poll, no render lock) and knob values from `Snapshot#knobs`:
+`Panes::RackDetail` (`:rack`, a set pane beside `:racks`, so not on the `:wall`; `ui.show :rack`): the instance the racks pane's pick is on (else the first), drawn from `Snapshot#racks` (`Rack::RackInfo`, Poll, no render lock) and knob values from `Snapshot#knobs`:
 
 - header: path (or name), kind, signature, latency;
 - ports: typed, optional ones marked `?` (`sig:audio side:audio?`);
 - knobs: one row each with its value and range (read-only here: turning stays in the racks pane, which journals `turn` lines);
 - slots: `RackInfo#slots` (empty until R3: the line says so);
-- the inner graph: `RackInfo#graph`, a `Plot::Graph` of the rack's stand-in build (the rack's definition, the same for every instance), blitted below the header; in the pane's mode arrows pan it and `n`/`p` change the instance (view state only: no Session change, so nothing to journal).
+- the inner graph: `RackInfo#graph`, a `Plot::Graph` of the rack's stand-in build (the rack's definition, the same for every instance), its window written into the screen's grid below the header (a dim `…` in the corner while more lies beyond an edge); in the pane's mode arrows pan it (Shift: a quarter of the pane; Home: back) and `n`/`p` change the instance with a flash (view state only: no Session change, so nothing to journal).
+- Lines whose segments run past the edge end in an ellipsis (`RackDetail.line`; `text_fit_spec`).
 
-`RackInfo` gained `graph` (nil when the stand-in build fails); `Rack#graph` builds it once per Rack value together with the latency.
+`RackInfo` gained `graph` (nil when the stand-in build fails; a default, so older constructors keep working); `Rack#graph` builds it once per Rack value from the same stand-in build as the latency (`Rack::GRAPHS` beside `Rack::LATENCIES`).  `Racks.selected` is the instance whose knob the racks pane picked while in its mode (per process, like `Clips.selected`).
 
 ## Questions (racks-v-1, for the maintainer)
 

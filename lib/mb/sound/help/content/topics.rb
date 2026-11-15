@@ -1380,7 +1380,10 @@ module MB
         `:space`, `follow: :space` maps it onto this knob's range, and
         `.mod(lfo, depth: 0.2)` swings around it.  `rack(:dub).snap :wide`
         and `recall :"dub/wide", only: [:space]` keep variations.  `help
-        rack(:dub)` shows ports, knobs, and latency.  `save :dub,
+        rack(:dub)` shows ports, knobs, and latency; `rack(:dub).draw` draws
+        its inside by rank (its ports at the left), and `ui.show :rack` puts
+        the rack pane in the tiles: the instance the racks pane picked, its
+        knobs, and that drawing.  `save :dub,
         rack(:dub)` writes a rack document: `preset :dub` gives the rack
         back, `preset :dub, sig: mic` plays it on an input (try the library
         rack `preset :dub_echo`); a saved rack that differs from the
@@ -1800,12 +1803,18 @@ module MB
         a big scope (`vis spectrum: true`: a spectrum; `graphical: true`:
         inline images).  With the tiled screen up, a plot shows in a plot
         pane beside the console, at the pane's size (the next plot
-        replaces it; q in it, or `ui.plot false`, closes it).
+        replaces it; q in it, or `ui.plot false`, closes it).  `node.draw`
+        draws a graph by rank: boxes from the inputs on the left to the node
+        on the right, typed wires (audio solid, control dotted, notes
+        dashed, feedback double), constants on their inputs.
       TEXT
       commands :plot, :spectrum, :spectrogram, :time_freq, :hist, :density, :mag_phase, :overlay, :overlay_chart, :table, :chart, :figure, :vis
       note :plotting
       example 'one cycle of a pulse', sound: false do
         plot 100.hz.pulse, samples: 480
+      end
+      example 'a graph drawn by rank', sound: false do
+        110.hz.saw.filter(:lowpass, cutoff: 3.hz.lfo.at(300..1200)).draw
       end
     end
 

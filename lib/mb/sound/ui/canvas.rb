@@ -89,6 +89,10 @@ module MB
         # A glyph by name (see GLYPHS).
         def glyph(name) = @glyphs.fetch(name)
 
+        # The glyph set: :unicode or :ascii (drawings in the pane use the
+        # same; Plot::Graph#draw's +glyphs+).
+        def glyph_set = @glyph_set
+
         # Blanks the rectangle and moves #row to the top.
         def clear
           blank = (@blank ||= (' ' * @w).freeze)
