@@ -230,4 +230,3 @@ The `strc` chunk, as read (`Sample::Riff::Strc`; 18058 WAV files of the maintain
 AIFF loop chunks (`basc`/Apple Loops, `INST`/`MARK`), REX files, ACID `strc` pins and stretching method (above), stretching in a background thread with a fallback, band-limited resample reads, a live "follow the detected tempo" for captured audio.
 
 Clocks (time-automation, 2026-10-18): `loop.clocked(19.7.seconds, fit: :stretch | :resample)` / `sample.follow(mode, clock: :tide)` play a LoopPlayer on a clock instead of the session tempo (one loop per period on period clocks, no tempo needed; beats at the clock's tempo otherwise), phase from session run frames, per-sample phases from each 800-frame cell's exact base (identical at any buffer size); `:stretch` restretches past `LoopPlayer::CLOCK_STEP` (1/2000) of length change, `:resample` bends pitch with a speed knob.  See arrangement.md "Clocks".
-
