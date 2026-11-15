@@ -11,11 +11,14 @@ module MB
       # attack's peak (then back to the last quieter sample before it).
       # +threshold+ and +floor+ are written in dB (`9.db`, `-45.db`; bare
       # numbers are linear gains, see Decibels.db_of).  Pure Ruby and Numo; returns sample positions from the region start
-      # in play order.
+      # in play order.  A sound that starts loud has an onset at 0; with
+      # +wrap+ (a loop: what comes before its start is its end) only if
+      # the envelope rises by +threshold+ from the loop's end to its
+      # start (a pad held through the loop point has no attack there).
       module Onsets
         module_function
 
-        def detect(sample, threshold: 9.db, floor: -45.db, min_gap: 0.04, hop: 64, window: 256)
+        def detect(sample, threshold: 9.db, floor: -45.db, min_gap: 0.04, hop: 64, window: 256, wrap: false)
           threshold = Decibels.db_of(threshold, 'threshold')
           floor = Decibels.db_of(floor, 'floor', zero: true)
           x = sample.to_a.sum / sample.channel_count
@@ -41,7 +44,9 @@ module MB
           rise = Numo::DFloat.zeros(frames)
           rise[lag..] = db[lag..] - db[0...-lag] if frames > lag
           found = []
-          found << 0 if db[0] > top + floor # a sound that starts loud
+          if db[0] > top + floor # a sound that starts loud
+            found << 0 unless wrap && frames > 2 * lag && (0...lag).all? { |k| db[k] - db[frames - lag + k] <= threshold }
+          end
           (lag...frames).each do |k|
             r = rise[k]
             next unless r > threshold && db[k] > top + floor

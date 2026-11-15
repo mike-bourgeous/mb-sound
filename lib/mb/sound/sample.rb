@@ -609,6 +609,12 @@ module MB
         !@loop_points.nil?
       end
 
+      # True if it loops forward over its whole region (a loop file, or
+      # #looped with no range): what plays after its end is its start.
+      def whole_loop?
+        @loop_mode == :forward && !@loop_points.nil? && @loop_points[0] <= @start && @loop_points[1] >= @stop
+      end
+
       # True if a synth voice stays busy until the sample ends (see
       # LOOP_MODES).
       def one_shot?
@@ -779,6 +785,7 @@ module MB
       #     bg :pad, pad.follow(stretch: :slice)    # say which
       #     bg :vinyl, brk.follow(:resample)         # pitch follows the tempo
       #     bpm 128                                  # every follower restretches
+      #     bg :pad, pad.follow(stretch: { mode: :spectral, live: true })   # the vocoder runs as it plays: any tempo, nothing restretched
       #
       # +clock:+ plays it on a clock instead of the session tempo (see
       # #clocked).
@@ -796,8 +803,25 @@ module MB
         end
         opts = stretch.is_a?(Hash) ? stretch : { mode: stretch }
         clock = Sequence::Clocked.check_name(clock) if clock.is_a?(Symbol)
-        nodes = Array.new(channel_count) { |c| GraphNode::LoopPlayer.new(self, channel: c, mode: mode, stretch: opts, align: align, reason: reason, clock: clock) }
+        # (live: one vocoder stream for every channel's player)
+        stream = mode == :stretch && opts[:live] ? spectral_stream(**opts.except(:live)) : nil
+        nodes = Array.new(channel_count) { |c| GraphNode::LoopPlayer.new(self, channel: c, mode: mode, stretch: opts, align: align, reason: reason, clock: clock, stream: stream) }
         nodes.length == 1 ? nodes[0] : GraphNode::Channels.new(nodes)
+      end
+
+      # The phase vocoder following this sample as a loop, live (a
+      # Spectral::Stream, what `follow(stretch: { mode: :spectral, live:
+      # true })` plays through): +window+, +overlap+, +shape+, +link+,
+      # and +transients+ (true, false, or an amount) as #stretch takes
+      # them.
+      def spectral_stream(mode: :spectral, window: nil, overlap: Spectral::OVERLAP, shape: :hann, link: true, transients: true, noise: nil, seed: 0, **others)
+        unless others.empty? && Spectral::MODE_ALIASES.fetch(mode.to_sym, mode.to_sym) == :spectral && (transients == true || transients == false || (transients.is_a?(Numeric) && transients >= 0 && transients <= 1))
+          raise ArgumentError, 'live: follows with the phase vocoder (mode: :spectral, with window:, overlap:, shape:, link:, noise:, seed:, and transients: true, false, or an amount)'
+        end
+        transients = false if transients == 0
+        n = position(window.nil? ? Spectral::WINDOW.samples : window).round
+        n += 1 if n.odd?
+        Spectral::Stream.new(to_a, onsets: transients ? onsets(wrap: true) : nil, window: n, overlap: overlap, shape: shape, link: link, span: transients == true ? 1.0 : (transients || 0).to_f, noise: noise == true ? 1 : (noise == false ? 0 : noise), seed: seed)
       end
 
       # What kind of sound this is, for choosing a stretch (Sample#follow's
@@ -1033,6 +1057,33 @@ module MB
       # vocoder to fully random phases (1); the modes only choose the defaults
       # (window, randomize, transients).
       #
+      # +transients+ also takes an amount from 0 to 1: how much of the
+      # sound around each onset stays unstretched (1 is true: a window
+      # and a hop before the attack, half a window after; 0 is false).
+      # Less leaves more of the sound to share the stretch evenly: at
+      # long ratios, where full spans can hold half the input and the
+      # rest is stretched half again as far, the stretch is less
+      # rhythmic and less buzzy (`pad.stretch(8, mode: :spectral,
+      # transients: 0.25, randomize: 0.3)`).  For a long stretch that
+      # keeps its hits, random phases in the vocoder's window:
+      # `brk.stretch(8, mode: :spectral, randomize: 1)` (0.6 for less of
+      # the wash); `mode: :paul, transients: true` does it in :paul's
+      # quarter-second window, for hits further apart than that.
+      #
+      # +noise+ (0..1) keeps noise noise: at long ratios the vocoder
+      # holds every bin as a steady partial on its grid of sample rate /
+      # +window+ Hz, so whatever is not a partial (breath, hiss, a
+      # cymbal, a shaker) turns into a buzz that repeats once a window
+      # (4096 samples: 11.7 times a second).  With +noise+ the bins that
+      # belong to no clear partial (their region's peak less than 8 to
+      # 16 dB above its surroundings: Spectral::Vocoder#noisiness) get
+      # random phases every frame (from +seed+), up to +noise+ × ±π,
+      # their level kept; partials and attacks stay as they are.  By
+      # default it follows the ratio (Spectral.noise_for): 0 up to 1.5x
+      # (the plain vocoder: drums a little slower are what they were),
+      # rising to 1 at 2x and beyond; `noise: 0` turns it off, `noise: 1`
+      # on at any ratio.
+      #
       # +link+ (true) gives every channel
       # the same random phases (the image keeps its level panning); false
       # draws them per channel (a wider,
@@ -1040,6 +1091,53 @@ module MB
       # (Spectral::SHAPES) is the window: :hann, or :paul, a
       # flatter (1 - x²)^1.25 (random phases smear partials less: a
       # randomized sine measured 6.6 Hz wide at -6 dB instead of 10.3).
+      #
+      # A sample that loops over its whole region (a loop file, or
+      # #looped) is stretched as a loop by :spectral and :paul: read as
+      # an endless stream (no frame sees an edge), its stretch flowing
+      # from its end into its start with every partial on its starting
+      # phase (Spectral.looped), and an onset at its start only where the
+      # level rises across the loop point.  +wrap+ says otherwise: true
+      # for any sample that will be looped (`brk.stretch(1.5, mode:
+      # :spectral, wrap: true).looped`), false for a stretch with its own
+      # start and end (a loop of it steps, in level and in tone, at every
+      # pass).  A loop whose loop point is
+      # an attack (a one-shot saved as a loop: Sample::Onsets finds an
+      # onset at its start with wrap: true) is stretched by :paul (and
+      # by `randomize: 1`) with its own start and end, as before loops
+      # were read in a circle: random phases spread a frame's sound
+      # over its whole quarter-second window, so read across the loop
+      # point the attack also sounded up to 125 ms before itself (a
+      # cymbal at 2.86x: a step at the loop point of 0.6 dB instead of
+      # its 15.6, stretch-fixes-3); at the edge it starts on the loop
+      # point and the decay before it fades out.  With transients: true
+      # too: in the circle the frames before the loop point hold the
+      # attack, so they stayed unrandomized and unstretched and the
+      # stretch ended on 190 ms of the input's own tail, with a flutter
+      # near 10.5 Hz in the tail before it (stretch-fixes-4).
+      #
+      # +mode+ :slice (SliceStretch; loops) cuts the sample at +slices+
+      # (markers, else onsets, else sixteenths; :markers, :onsets,
+      # :transients with +confirm+ and +threshold+, :grid, a Duration, a
+      # count, positions, or Slices) and starts each slice at its
+      # stretched time, its attack copied exactly.  Slowed down, a slice
+      # fades out over +fade+ (4 ms) and leaves a gap, or is drawn out
+      # to the next one (+fill+ :stretch, :even, :decay); sped up, it is
+      # cut at the next slice's new time with the same fade, and the
+      # +fade+ before each cut of the input fades in ahead of it.
+      # +slot_fade+ (a share, 0 to 1) makes that a crossfade in
+      # proportion to each slot (the time a cut slice has, to the next
+      # slice's start): the slice plays as it is, then fades over that
+      # share of its slot into the audio that led up to the next cut,
+      # so a hit just before a cut keeps its distance to it.
+      # +fade_law+ :linear (default) or :power (equal power) is how the
+      # fades add up.  `slot_fade: 2/3r, fade_law: :power` is how a
+      # loop-based sequencer's renders of sliced loops played faster
+      # measured.  +positions+ (one per cut that +slices+ gives, in
+      # order: samples, seconds, Lengths, or Durations at the stretched
+      # tempo) puts each slice where it says in the output instead of
+      # at its stretched time (a groove; the length stays +ratio+ times
+      # the sample's).
       #
       # Results longer than LONG_STRETCH (30 s) read with `mips: :octave`
       # unless this sample has its own mips (smaller playback tables for
@@ -1053,18 +1151,27 @@ module MB
       #     pad.stretch(8, mode: :spectral, randomize: 1)     # random phases in the vocoder's 4096-sample window
       #     bowl.stretch(100, mode: :paul, window: 0.5.seconds)  # an endless wash
       #     voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false)   # narrower partials, a wide image (voices)
+      #     brk.stretch(1.25, mode: :slice)            # slices at the hits, attacks exact
+      #     brk.stretch(0.8, mode: :slice, slot_fade: 2/3r, fade_law: :power)   # faster: each slice crossfades into the next hit's lead-in
       def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann,
-                  slices: nil, fade: nil, fill: nil)
+                  slices: nil, fade: nil, fill: nil, wrap: nil, noise: nil, confirm: nil, threshold: nil, slot_fade: nil, fade_law: nil, positions: nil)
+        unless (confirm.nil? && threshold.nil?) || (SLICE_MODES.include?(mode.to_sym) && slices == :transients)
+          raise ArgumentError, 'confirm: and threshold: are for mode: :slice with slices: :transients'
+        end
+        raise ArgumentError, "wrap: is true, false, or nil (by the sample's loop; got #{wrap.inspect})" unless wrap.nil? || wrap == true || wrap == false
+        raise ArgumentError, 'wrap: and noise: are for mode: :spectral and :paul' unless (wrap.nil? && noise.nil?) || (!SLICE_MODES.include?(mode.to_sym) && Spectral.mode_name(mode) != :cyclic)
         if SLICE_MODES.include?(mode.to_sym)
           unless fit == :auto && window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
-            raise ArgumentError, 'mode: :slice takes slices:, fade:, fill:, and (for fill: :stretch) cycle: and crossfade:'
+            raise ArgumentError, 'mode: :slice takes slices:, positions:, fade:, slot_fade:, fade_law:, fill:, and (for fill: :stretch) cycle: and crossfade:'
           end
-          return slice_stretch(ratio, slices, fade, fill || :gap, cycle, crossfade)
+          return slice_stretch(ratio, slices, fade, fill || :gap, cycle, crossfade, confirm, threshold, slot_fade: slot_fade, fade_law: fade_law, positions: positions)
         end
-        raise ArgumentError, 'slices:, fade:, and fill: are for mode: :slice' unless slices.nil? && fade.nil? && fill.nil?
+        unless slices.nil? && fade.nil? && fill.nil? && slot_fade.nil? && fade_law.nil? && positions.nil?
+          raise ArgumentError, 'slices:, positions:, fade:, slot_fade:, fade_law:, and fill: are for mode: :slice'
+        end
 
         mode = Spectral.mode_name(mode)
-        return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape) unless mode == :cyclic
+        return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap, noise) unless mode == :cyclic
         unless window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
           raise ArgumentError, 'window:, overlap:, shape:, transients:, seed:, randomize:, and link: are for mode: :spectral and :paul'
         end
@@ -1087,14 +1194,26 @@ module MB
       SLICE_MODES = %i[slice slices beat beats].freeze
 
       # The slice stretch (see #stretch and SliceStretch).
-      def slice_stretch(ratio, slices, fade, fill, cycle, crossfade)
+      def slice_stretch(ratio, slices, fade, fill, cycle, crossfade, confirm = nil, threshold = nil, slot_fade: nil, fade_law: nil, positions: nil)
         raise ArgumentError, "Stretch ratios are positive (got #{ratio.inspect})" unless ratio.is_a?(Numeric) && ratio > 0
         raise ArgumentError, "fill: is one of #{SliceStretch::FILLS.inspect} (got #{fill.inspect})" unless SliceStretch::FILLS.include?(fill)
-        cuts, = slice_cuts(slices)
+        unless fade_law.nil? || SliceStretch::LAWS.include?(fade_law)
+          raise ArgumentError, "fade_law: is one of #{SliceStretch::LAWS.inspect} (got #{fade_law.inspect})"
+        end
+        unless slot_fade.nil? || (slot_fade.is_a?(Numeric) && slot_fade >= 0 && slot_fade <= 1)
+          raise ArgumentError, "slot_fade: is a share of each slot, from 0 to 1 (got #{slot_fade.inspect}; fade: takes a length)"
+        end
+        cuts, = slices == :transients ? [transient_cuts(confirm, threshold), :onsets] : slice_cuts(slices)
+        places = positions && slice_positions(positions, cuts, ratio)
         f = position(fade.nil? ? SliceStretch::FADE : fade).round
         kw = { mode: :slice }
         kw[:slices] = slices unless slices.nil?
+        kw[:confirm] = confirm unless confirm.nil?
+        kw[:threshold] = threshold unless threshold.nil?
+        kw[:positions] = positions unless positions.nil?
         kw[:fade] = fade unless fade.nil?
+        kw[:slot_fade] = slot_fade unless slot_fade.nil?
+        kw[:fade_law] = fade_law unless fade_law.nil? || fade_law == :linear
         kw[:fill] = fill unless fill == :gap
         kw[:cycle] = cycle unless cycle == 25.ms
         kw[:crossfade] = crossfade unless crossfade == CROSSFADE
@@ -1103,17 +1222,39 @@ module MB
         x = position(crossfade).round
         edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |chans|
           chans = chans.map(&:reverse) if @reversed
-          out = SliceStretch.stretch(chans, ratio.to_f, cuts, fade: f, fill: fill, attack: att, cycle: c, crossfade: x, sample_rate: sample_rate)
+          out = SliceStretch.stretch(chans, ratio.to_f, cuts, fade: f, fill: fill, attack: att, cycle: c, crossfade: x, sample_rate: sample_rate,
+                                     slot_fade: slot_fade, fade_law: fade_law || :linear, positions: places)
           @reversed ? out.map(&:reverse) : out
         }
       end
       private :slice_stretch
 
+      # The slice stretch's +positions+ in output samples, one per cut
+      # of +cuts+: Integers are samples, other numbers seconds, Lengths
+      # as they say, Durations counted at the stretched tempo (the
+      # sample's #bpm divided by +ratio+; without one, the session's).
+      def slice_positions(positions, cuts, ratio)
+        unless positions.is_a?(Array) && positions.length == cuts.length
+          raise ArgumentError, "positions: is an Array of one output position per cut (#{cuts.length} cuts here; got #{positions.is_a?(Array) ? "#{positions.length} positions" : positions.inspect})"
+        end
+        stretched = @bpm ? Sequence::Transport.new(bpm: @bpm / ratio.to_f) : Sequence.current_transport
+        positions.map { |v|
+          case v
+          when Integer then v
+          when Numeric then (v * sample_rate).round
+          when Length then Length.samples(v, sample_rate: sample_rate, transport: stretched).round
+          else raise ArgumentError, "positions: are output positions (samples as Integers, seconds, Lengths, or Durations; got #{v.inspect})"
+          end
+        }
+      end
+      private :slice_positions
+
       # The slice points (play order, from the region start) for the
       # slice stretch, and where they came from: +slices+ :markers,
-      # :onsets, :grid (sixteenths at #bpm), a Duration (a grid of it at
-      # #bpm), an Integer (equal slices), an Array of positions, or a
-      # Sample::Slices; nil picks markers, else onsets, else the grid.
+      # :onsets, :transients (#transient_cuts), :grid (sixteenths at
+      # #bpm), a Duration (a grid of it at #bpm), an Integer (equal
+      # slices), an Array of positions, or a Sample::Slices; nil picks
+      # markers, else onsets, else the grid.
       def slice_cuts(slices)
         case slices
         when nil
@@ -1123,7 +1264,8 @@ module MB
           return [o, :onsets] unless o.empty? && @bpm
           slice_cuts(:grid)
         when :markers then [markers.map(&:position), :markers]
-        when :onsets, :transients then [slice_onsets, :onsets]
+        when :onsets then [slice_onsets, :onsets]
+        when :transients then [transient_cuts, :onsets]
         when :grid then slice_cuts(1.n16)
         when Sequence::Duration
           slices.check_length('A slice grid')
@@ -1135,10 +1277,54 @@ module MB
           [Array.new(slices) { |i| (i * length / slices.to_r).round }, :grid]
         when Array then [slices.map { |x| position(x).round }, :markers]
         when Slices then [slices.starts, :markers]
-        else raise ArgumentError, "slices: is :markers, :onsets, :grid, a Duration, a count, positions, or Slices (got #{slices.inspect})"
+        else raise ArgumentError, "slices: is :markers, :onsets, :transients, :grid, a Duration, a count, positions, or Slices (got #{slices.inspect})"
         end
       end
       private :slice_cuts
+
+      # The cuts of `slices: :transients`: only where a transient is, so
+      # every hit stays whole and lands on its stretched time (the loop's
+      # timing holds).  A sample with markers past its start (a loop
+      # file's stretch markers) cuts at every detected onset (#onsets,
+      # +threshold+ 9 dB by default) and at the softer ones (SOFT_ONSET,
+      # 4 dB) that a marker (or the start) stands for within +confirm+
+      # (nil or true: TRANSIENT_REACH, 15 ms; or a length), each on its
+      # attack: a marker inside a hit's decay or on held sound does not
+      # cut, and one set a few ms off its hit cuts on the attack (a
+      # marker 7.5 ms after a kick's attack cut the attack off, and as a
+      # slice's last samples it played 15.6 ms before the rest of the
+      # kick at 1.18x: stretch-fixes-4).  With +threshold+ given, at the
+      # onsets of that threshold that a marker confirms, plus none
+      # softer.  Without markers, or with `confirm: false`, at every
+      # detected onset.  A hit that gets no cut keeps its distance from
+      # the cut before it: with `fill: :gap` it plays (ratio - 1) × that
+      # distance early when slowing down (late when speeding up); the
+      # even fill (`fill: :stretch`) puts it near its stretched time.
+      # (stretch-fixes-3: the maintainer on slices at beats,
+      # one a beat, of a texture pad: "By 'beats' I meant transients.
+      # As is this just breaks the timing of the loop"; the notes
+      # inside each beat played at their old spacing.)
+      def transient_cuts(confirm = nil, threshold = nil)
+        raise ArgumentError, "confirm: is true, false, or a reach (a length; got #{confirm.inspect})" if confirm.is_a?(Symbol) || confirm.is_a?(String)
+        found = threshold.nil? ? onsets : onsets(threshold: threshold)
+        marks = markers.map(&:position).select(&:positive?)
+        return found if confirm == false || marks.empty?
+
+        # Every attack the detector is sure of, and the softer ones a
+        # marker stands for (a kick in a snare's tail rises 4 to 9 dB:
+        # left uncut it plays at its old distance from the hit before it)
+        reach = position(confirm.nil? || confirm == true ? TRANSIENT_REACH : confirm)
+        marks = [0, *marks]
+        soft = threshold.nil? ? onsets(threshold: SOFT_ONSET) : found
+        soft = soft.select { |o| marks.any? { |m| (m - o).abs <= reach } }
+        soft.reject! { |o| found.any? { |f| (f - o).abs <= reach } }
+        (found + soft).sort
+      end
+      private :transient_cuts
+
+      # How near (seconds) a detected onset must be to a marker for
+      # `slices: :transients` to cut there.
+      TRANSIENT_REACH = 0.015
 
       # The onsets the slice stretch cuts at: #onsets, plus softer ones
       # (SOFT_ONSET rises) within SOFT_ONSET_REACH of a sixteenth when the
@@ -1263,9 +1449,15 @@ module MB
       # vocoder whose +randomize+ goes from locked phases (0) to random
       # ones (1, Spectral.paul's magnitude-only frames when no onsets are
       # kept); the modes set the defaults.
-      def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape)
+      def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape, wrap = nil, noise = nil)
         paul = mode == :paul
         transients = !paul if transients.nil?
+        transients = false if transients == 0
+        unless transients == true || transients == false || (transients.is_a?(Numeric) && transients > 0 && transients <= 1)
+          raise ArgumentError, "transients: is true, false, or an amount from 0 to 1 (got #{transients.inspect})"
+        end
+        span = transients == true ? 1.0 : (transients || 0).to_f
+        transients = true if transients == 1
         randomize = paul ? 1 : 0 if randomize.nil?
         raise ArgumentError, "randomize: is 0..1 (got #{randomize.inspect})" unless randomize.is_a?(Numeric) && randomize >= 0 && randomize <= 1
 
@@ -1277,20 +1469,40 @@ module MB
         kw[:link] = link unless link == true
         kw[:shape] = shape unless shape == :hann
         Spectral.shaped_window(shape, 64) # (checks the name)
-        kw[:seed] = seed unless seed == 0 || randomize == 0
+        noise = 0 if noise == false
+        noise = 1 if noise == true
+        raise ArgumentError, "noise: is 0..1 (got #{noise.inspect})" unless noise.nil? || (noise.is_a?(Numeric) && noise >= 0 && noise <= 1)
+        kw[:noise] = noise unless noise.nil?
+        # (by default by the ratio: none up to 1.5x, all of it from 2x)
+        noise = paul ? 0 : Spectral.noise_for(ratio) if noise.nil?
+        kw[:seed] = seed unless seed == 0 || (randomize == 0 && noise == 0)
+        kw[:wrap] = wrap unless wrap.nil?
+        wrap = whole_loop? if wrap.nil?
 
         n = position(window.nil? ? (paul ? Spectral::PAUL_WINDOW : Spectral::WINDOW.samples) : window).round
         n += 1 if n.odd?
-        onsets = transients ? (@reversed ? reverse : self).onsets : nil
+        onsets = transients ? (@reversed ? reverse : self).onsets(wrap: wrap) : nil
+        # (a hit on the loop point stays on it under random phases, with
+        # or without transients: see #stretch)
+        wrap = false if wrap && randomize >= 1 && attack_at_loop_point?
         edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |chans|
-          if randomize >= 1 && onsets.nil?
+          if wrap
+            Spectral.looped(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise)
+          elsif randomize >= 1 && onsets.nil?
             Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
           else
-            Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape)
+            Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise)
           end
         }
       end
       private :spectral_stretch
+
+      # True if the sound rises into an attack across the loop point
+      # (Sample::Onsets with wrap: true finds an onset at the start).
+      def attack_at_loop_point?
+        (@reversed ? reverse : self).onsets(wrap: true).first == 0
+      end
+      private :attack_at_loop_point?
 
       # The channels mixed to one.
       def mono

@@ -735,10 +735,20 @@ module MB
         words or how noisy it sounds; `stretch: :slice` or `:spectral`
         to say); `follow(:resample)` lets the pitch follow
         the tempo like a varispeed.  `.stretch(r, mode: :slice)` cuts at
-        the hits (markers, else onsets, else the 16th grid) and starts
+        the hits (markers, else onsets, else the 16th grid; `slices:
+        :transients` cuts only at attacks, the clear ones and the softer
+        ones a marker stands for, so no hit is cut in two) and starts
         each slice at its stretched time, attacks copied exactly:
-        slowing down leaves a gap after each hit (`fill: :stretch` draws each
-        decay out instead), speeding up truncates with a 4 ms fade.
+        slowing down leaves a gap after each hit (`fill: :stretch` draws
+        each slice out to the next hit instead: evenly, so what is inside
+        it stays in time, or, for a hit that dies down, the hit whole and
+        its tail drawn out; `fill: :even` and `:decay` say which),
+        speeding up truncates with a 4 ms fade.  `slot_fade: 2/3r,
+        fade_law: :power` makes that a crossfade over two thirds of each
+        cut slice's slot (its time until the next slice starts), at
+        equal power, into what led up to the next hit, so a soft hit
+        just before a cut keeps its place.  `positions:` (one per cut)
+        puts each slice at a place of its own: a groove.
       TEXT
       commands :loops
       dsl :follow
@@ -782,7 +792,21 @@ module MB
         `overlap:`, `shape: :paul` (a smooth window for washes), and `link:
         false` (random phases per channel) for both; for voices try
         `.stretch(8, mode: :paul, overlap: 2,
-        shape: :paul, link: false)`.
+        shape: :paul, link: false)`.  At long ratios the vocoder's
+        window would become a buzz (the stretch repeating itself 11.7
+        times a second), so from 1.5x up (fully from 2x) everything that
+        is not a clear partial gets random phases: noise stays noise
+        while partials and hits stay as they are (`noise: 0` for the
+        plain vocoder, `noise: 1` at any ratio).  `randomize: 0.3` to
+        `0.6` loosens every phase
+        (`randomize: 1` is a wash that keeps its hits), and `transients:
+        0.5` (an amount, 0 to 1) keeps less of the sound around each hit
+        unstretched.  A sample that loops (a loop file,
+        `.looped`, anything `follow` plays) gets a spectral stretch
+        that is a loop itself: read round and round, its end flowing
+        into its start (`wrap: true` asks for it, `wrap: false` gives a
+        stretch with its own ends).  `follow(stretch: { mode: :spectral, live: true })` runs
+        the vocoder as the loop plays: any tempo, nothing restretched.
         They are offline edits: a new Sample, made once; results over 30
         s read with `mips: :octave` (smaller playback tables).
       TEXT

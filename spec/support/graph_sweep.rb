@@ -404,7 +404,25 @@ module GraphSweep
         d = Numo::SFloat.cast(Array.new(3000) { |i| Math.sin(i * 0.07) * Math.exp(-(i % 750) / 200.0) })
         smp = MB::Sound::Sample[d, bpm: 960, beats: 1]
         st = MB::Sound::Sample[[d, d * -0.5], bpm: 960]
-        smp.follow * 0.3 + smp.follow(:resample, align: :launch) * 0.3 + st.follow(stretch: { mode: :slice, slices: 4, fill: :stretch, cycle: 0.001 })[1] * 0.3
+        quick = MB::Sound::Sample[[d, d * -0.5], bpm: 96]
+        # (one slice with short cycles, and four slices shorter than the
+        # 15 ms attack plus two 25 ms cycles, which are filled with a
+        # shorter attack and cycles; stretch-fixes-1)
+        smp.follow * 0.3 + smp.follow(:resample, align: :launch) * 0.3 + st.follow(stretch: { mode: :slice, slices: 4, fill: :stretch, cycle: 0.001 })[1] * 0.3 +
+          smp.follow(stretch: { mode: :slice, slices: 1, fill: :stretch, cycle: 0.004 }) * 0.2 + smp.follow(stretch: { mode: :slice, slices: 4, fill: :stretch }) * 0.2 + smp.follow(stretch: { mode: :slice, slices: 2, fill: :even }) * 0.1 + smp.follow(stretch: { mode: :slice, slices: 2, fill: :decay }) * 0.1 +
+          # (a loop slower than the sweep's tempo, played at 0.8x its
+          # length: slices cut short crossfading by their slots, and
+          # slices at their own positions, some cut short and one drawn
+          # out and filled)
+          quick.follow(stretch: { mode: :slice, slices: 4, slot_fade: 2/3r, fade_law: :power })[0] * 0.2 +
+          quick.mono.follow(stretch: { mode: :slice, slices: [0, 750, 1500, 2250], positions: [0, 500, 0.03, 1900], slot_fade: 0.5, fill: :even }) * 0.1 +
+          # (the spectral stretch of the loop as a loop, as players ask
+          # for it, and with its own ends)
+          smp.follow(stretch: { mode: :spectral, window: 256 }) * 0.2 + smp.follow(stretch: { mode: :spectral, window: 256, wrap: false }) * 0.2 +
+          # (and the vocoder running live, both channels on one stream)
+          smp.follow(stretch: { mode: :spectral, window: 256, live: true }) * 0.2 + st.follow(stretch: { mode: :spectral, window: 256, live: true })[0] * 0.2 +
+          # (noise kept noise: random phases for the bins that are no partial, cached and live)
+          smp.follow(stretch: { mode: :spectral, window: 256, noise: 1 }) * 0.2 + st.follow(stretch: { mode: :spectral, window: 256, live: true, noise: 1, transients: 0.5 })[1] * 0.2
       }],
       # Region lanes (regions-1): overlapping regions with crossfades in
       # ACID's shapes, an offset, a transposed (Catmull-Rom) region off the
