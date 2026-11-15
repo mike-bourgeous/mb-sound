@@ -36,7 +36,7 @@ What it replaces: the graph drawing replaces nothing yet; `graphviz`/`open_graph
 - Numbers and Constants read by one input show inline on the input's slot (`cutoff 1200`); a Constant read in several places is a box.
 - Boxes say what the node is in DSL words: its name, else the recipe's method (`filter`, `delay`, `duck`), arithmetic as `+`/`×`/the operator, a tone's wave, a knob's name, else its type in words (`Traversable.words_of` at depth 0); never a class name.
 - Input slots are `port_info[:in]` in order (main inputs first as the node lists them), each wire typed by its edge (`:audio`, `:control`, `:notes`) and dimmed when `port_active?` is false.  Feedback edges (`feedback_sources`; a feedback loop's variable reads its loop as one since this slice) get slots after the others.
-- A rack's stand-ins become port boxes at the left edge, named by the port (`sig`, `side`, `keys`), and its result feeds an `out` box at the right.
+- A rack's stand-ins become port boxes at the left edge, named by the port (`sig`, `side`, `keys`), their main and side wires typed by the port's declared type (`port_types:`; a stand-in is a Constant, which would read as control), and its result feeds an `out` box at the right (an input per channel of a bundle).
 
 **The layout** (Sugiyama-style, deterministic):
 
@@ -44,7 +44,7 @@ What it replaces: the graph drawing replaces nothing yet; `graphviz`/`open_graph
 2. A wire skipping columns passes through one-row placeholders in the columns between (drawn faded: "wires that skip ranks drawn faded and behind").
 3. Order within columns: start from the walk's order (main inputs first), then barycenter sweeps toward the output and back.
 4. Rows: boxes stacked in column order with a blank row between, each pulled toward the rows of the wires it connects (a straight wire where there is room), columns padded so the drawing is about as tall as its tallest column.
-5. Gaps between columns hold one vertical track per net (a source slot and every wire from it, so fan-outs branch with `┬├┤`); crossings of different nets draw the horizontal wire over the vertical.
+5. Gaps between columns hold one vertical track per net (a source slot's wires of one style, so fan-outs branch with `┬├┤`, and an audio and a control wire from one slot keep their looks); crossings of different nets draw the horizontal wire over the vertical.
 6. Feedback wires leave the source's output into the gap after it, run along their own lane below every box, and come up the gap before the target into its feedback slot.
 
 **The look** (text cells): a box is a frame with its title set in the top rule, one row per input slot (an arrowhead `▸` where a wire arrives, the slot's name, an inline value in the value color), and output slots on its right edge (`├` where a wire leaves; several outputs numbered).  Wires: audio `─│` solid, control `┄┆` dotted, notes `╌╎` dashed in the note hue, feedback `═║` double in the warning color, skipped ranks dim.  `glyphs: :ascii` draws `- | + > =`.  Titles and slot names are cut to 18 and 14 columns with an ellipsis.
@@ -69,3 +69,5 @@ What it replaces: the graph drawing replaces nothing yet; `graphviz`/`open_graph
 3. `graphviz`/`open_graphviz` stay beside `node.draw`; the proposal's SVG/PNG graph drawings through Plot's renderers would replace `open_graphviz` later.  Keep both, or retire graphviz once SVG drawings exist?
 4. Bus routing (`UI::TreeText`) stays a tree; `Plot.graph` could draw buses and sends as boxes and wires later.
 5. Constants read once show inline; knobs stay boxes.  Inline knobs too (`cutoff ◂ tone 2400`), as the inspector shows them?
+
+Known gaps (for the next slices): settings a node keeps as plain numbers rather than inputs don't show (`lp4(1200)` lists no cutoff in `#sources`; the typed panels from `param_snapshot`/`preview_data` will show them); a Synth draws every lane (an irack's drawing is ~150 boxes: owner groups collapse them); long rank-skipping wires make drawings wide (owner groups and panning help; no compaction yet); the layout is only as good as a few barycenter sweeps (no transposition step).

@@ -250,6 +250,9 @@ RSpec.describe(MB::Sound::Plot::Graph) do
       ports = d.boxes.each_index.select { |i| d.boxes[i].kind == :port }
       expect(ports.map { |i| d.boxes[i].title }).to contain_exactly('sig', 'side')
       expect(ports.map { |i| d.placements[i].col }.uniq).to eq([0])
+      # (stand-ins are Constants, but the ports' wires carry their declared type)
+      expect(d.wires.select { |w| ports.include?(w.from) }.map(&:type).uniq).to eq([:audio])
+      expect(ports.map { |i| d.boxes[i].outs[0].type }.uniq).to eq([:audio])
       out = d.boxes.index { |b| b.kind == :out }
       expect(d.placements[out].col).to eq(d.placements.map(&:col).max)
       expect(d.boxes.map(&:title)).to include('duck', 'knob space')

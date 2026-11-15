@@ -7,14 +7,16 @@ module MB
       # #port_info, names, recipes), never samples.
       #
       # +ports+ ({ name => node }) names nodes drawn as a rack's input
-      # ports (boxes at the left edge); +out+ adds an output box at the
+      # ports (boxes at the left edge), +port_types+ ({ name => :audio,
+      # :control, :notes }) their declared types (a stand-in Constant
+      # would read as control); +out+ adds an output box at the
       # right fed by the roots; +title+ a line above the drawing;
       # +max_boxes+ stops the walk (the inputs left unwalked show "…").
       #
       #     MB::Sound::Plot.graph(110.hz.saw.filter(:lowpass, cutoff: 800)).show
       #     110.hz.saw.lp4(1200).draw     # the same, as a node method
-      def self.graph(node, ports: nil, out: false, title: nil, max_boxes: GraphView::MAX_BOXES)
-        GraphView.new(node, ports: ports, out: out, title: title, max_boxes: max_boxes).graph
+      def self.graph(node, ports: nil, port_types: nil, out: false, title: nil, max_boxes: GraphView::MAX_BOXES)
+        GraphView.new(node, ports: ports, port_types: port_types, out: out, title: title, max_boxes: max_boxes).graph
       end
 
       # The walk behind Plot.graph (mb-sound's side of the plot boundary).
@@ -25,8 +27,9 @@ module MB
 
         attr_reader :graph
 
-        def initialize(node, ports: nil, out: false, title: nil, max_boxes: MAX_BOXES)
+        def initialize(node, ports: nil, port_types: nil, out: false, title: nil, max_boxes: MAX_BOXES)
           @max = max_boxes
+          @port_types = port_types || {}
           @port_names = {}.compare_by_identity
           (ports || {}).each { |name, n| @port_names[key(n)[0]] = name }
           @ids = {}.compare_by_identity # node => box index
@@ -208,7 +211,7 @@ module MB
         def fill(n, queue)
           i = @ids[n]
           if (pname = @port_names[n])
-            @boxes[i] = Graph::Box.new(title: pname.to_s, ins: [], outs: [Graph::Out.new(name: :out, type: output_type(n))], kind: :port)
+            @boxes[i] = Graph::Box.new(title: pname.to_s, ins: [], outs: [Graph::Out.new(name: :out, type: @port_types.fetch(pname, output_type(n)))], kind: :port)
             return
           end
 
@@ -225,6 +228,8 @@ module MB
             end
 
             k, idx = key(src)
+            # (a port's main and side edges carry its declared type)
+            type = @port_types.fetch(@port_names[k], type) if @port_names.key?(k) && role != :param && !fb
             from = box_for(k, queue)
             if from.nil?
               @dropped += 1

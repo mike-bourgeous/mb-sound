@@ -579,7 +579,7 @@ module MB
       #     rack(:dub).draw
       def draw(max_boxes: MB::Sound::Plot::GraphView::MAX_BOXES)
         result, stand, = build_on_stand_ins
-        MB::Sound::Plot.graph(result, ports: stand, out: true, title: "#{label}: #{signature}", max_boxes: max_boxes)
+        MB::Sound::Plot.graph(result, ports: stand, port_types: port_types, out: true, title: "#{label}: #{signature}", max_boxes: max_boxes)
       end
 
       # One stand-in build for #latency and #graph (each nil when it
@@ -596,13 +596,19 @@ module MB
           nil
         end
         GRAPHS[self] = begin
-          result && MB::Sound::Plot.graph(result, ports: stand, out: true)
+          result && MB::Sound::Plot.graph(result, ports: stand, port_types: port_types, out: true)
         rescue StandardError
           nil
         end
         nil
       end
       private :inspect_build
+
+      # { port name => type } of the main input and the extra ports.
+      def port_types
+        { @input.name => @input.type }.merge(@ports.transform_values(&:type))
+      end
+      private :port_types
 
       # A frozen RackInfo for this rack (+path+ and +knobs+ for one
       # instance; see Session::Racks#rack_info).

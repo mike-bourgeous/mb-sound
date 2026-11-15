@@ -550,9 +550,11 @@ module MB
           (0...@nn).each { |i| @cw[@ncol[i]] = [@cw[@ncol[i]], @bw[i] || 1].max }
 
           # Nets crossing each gap (gap c is after column c; gap -1 before
-          # column 0): a source slot and its segments
+          # column 0): a source slot, a wire style, and its segments
           @nets = Hash.new { |h, k| h[k] = [] } # [node, row] => segment indexes
-          @segs.each_with_index { |s, si| @nets[[s[0], s[1]]] << si }
+          # (wires of different types from one slot are separate nets: each
+          # keeps its look)
+          @segs.each_with_index { |s, si| @nets[[s[0], s[1], wire_style(s[4])]] << si }
           tracks = Hash.new { |h, k| h[k] = [] } # gap => [[sort key, net key], ...]
           @nets.each do |key, list|
             src_y = slot_y(key[0], key[1], :out)
@@ -710,12 +712,12 @@ module MB
           end
 
           @nets.each do |key, list|
-            src, row = key
+            src, row, = key
             wi0 = @segs[list[0]][4]
             dim = list.any? { |si| @dummy_of[@segs[si][0]] || @dummy_of[@segs[si][2]] }
             style = wire_style(wi0)
             style = DIM[style] || style if dim
-            net = [:net, src, row]
+            net = [:net, *key]
             sx = out_x(src) + 1
             sy = slot_y(src, row, :out)
             if @track_x.key?(key)
