@@ -18,16 +18,25 @@ module MB
         # Float estimate from bpm and length), +meter+ ([numerator,
         # denominator]), +key+ (a Symbol like :Am, :"F#", :Eb), +root+ (a
         # MIDI note number, Float), +one_shot+ (true for one-shots, false
-        # for loops, nil if nothing says; see .classify), +loop+ ([start,
+        # for loops, nil if nothing says; see .classify),
+        # +declared_one_shot+ (what the file itself declares: true for a
+        # one-shot, false for a loop, nil when it doesn't say; today the
+        # `acid` chunk's flag.  +one_shot+ is the call, also guessed from
+        # names and lengths; this is the declaration alone), +loop+ ([start,
         # stop, mode] frames, from `smpl`, never for ACID loops, which loop
         # the whole file), +smpl_loops+ (every `smpl` loop, as metadata),
-        # +markers+ ([[frame, label or nil], ...] from cue points),
+        # +markers+ ([[frame, label or nil], ...]: ACID's stretch markers
+        # (the `strc` chunk; sources[:markers] is :strc) when the file has
+        # them, else its cue points (:cue)), +cues+ (the cue points, also
+        # when stretch markers are the markers: in ACIDized files cue
+        # points are regions and labels, not slice points),
         # +seconds+, +sample_rate+, +format+ (:wav, :flac, :aiff, or
         # :other), +sources+ ({ bpm: :acid | :tags | :name, one_shot: :acid
-        # | :smpl | :name | :length | :tempo, ... } saying where each field
-        # came from), and +why+ ({ bpm: "name 98 (fits 8 beats)", one_shot:
-        # "name 'kick'" } in words, for listings).
-        Entry = Data.define(:path, :format, :bpm, :beats, :meter, :key, :root, :one_shot, :loop, :smpl_loops, :markers, :seconds, :sample_rate, :sources, :why) do
+        # | :smpl | :name | :length | :tempo, markers: :strc | :cue, ... }
+        # saying where each field came from), and +why+ ({ bpm: "name 98
+        # (fits 8 beats)", one_shot: "name 'kick'", markers: "strc: 17
+        # stretch markers (5 forced divisions)" } in words, for listings).
+        Entry = Data.define(:path, :format, :bpm, :beats, :meter, :key, :root, :one_shot, :declared_one_shot, :loop, :smpl_loops, :markers, :cues, :seconds, :sample_rate, :sources, :why) do
           # +beats+ / beats per bar (the meter's numerator, else 4).
           def bars
             return nil unless beats
@@ -116,6 +125,7 @@ module MB
         FIELD_FACTS = {
           %i[bpm acid] => 'acid.tempo', %i[beats acid] => 'acid.beats', %i[meter acid] => 'acid.meter',
           %i[root acid] => 'acid.root_note', %i[one_shot acid] => 'acid.flags', %i[root smpl] => 'smpl.unity_note',
+          %i[declared_one_shot acid] => 'acid.flags',
         }.freeze
 
         # Tag names (Facts keys) each tagged field may come from, in the
@@ -124,14 +134,14 @@ module MB
 
         # Sources in words, for fields without a reason of their own.
         SOURCE_WORDS = {
-          acid: 'the ACID chunk', smpl: "the sampler chunk's loop", cue: "the file's cue points", tags: "the file's tags",
+          acid: 'the ACID chunk', smpl: "the sampler chunk's loop", cue: "the file's cue points", strc: "the file's stretch markers", tags: "the file's tags",
           name: 'the file or folder name', length: 'its length', tempo: 'a name tempo that fits its length',
           decay: 'one hit decaying to silence', detected: 'detected in the audio', saved: 'saved by Sample#save',
         }.freeze
 
         # The interpreter's declaration for Facts.interpret: the facts
         # LoopInfo may read, and those its provenance names as used.
-        CONSUMES = %w[acid.* smpl.* cue.* tag.bpm tag.tbpm tag.tempo tag.key tag.initialkey tag.tkey fmt.sample_rate data.bytes].freeze
+        CONSUMES = %w[acid.* smpl.* cue.* strc.* tag.bpm tag.tbpm tag.tempo tag.key tag.initialkey tag.tkey fmt.sample_rate data.bytes].freeze
 
         module_function
 
@@ -154,6 +164,8 @@ module MB
               key = facts&.select_keys('smpl.loop[*')&.first&.key
             elsif via == :cue
               key = facts&.select_keys('cue.point[*')&.first&.key
+            elsif via == :strc
+              key = facts&.select_keys('strc.entry[*')&.first&.key
             end
             fact = key && facts&.[](key)
             record = fact&.record || (via == :name ? 'file name' : (via == :tags ? 'tags' : nil))
@@ -163,11 +175,14 @@ module MB
         end
 
         # The fact keys +provenance+ (as .provenance made it) used: each
-        # field's fact, every cue point for markers, and a `smpl` root's
-        # pitch fraction.
+        # field's fact, every cue point or the whole stretch marker chunk
+        # for markers (cue points stay unused, description, when stretch
+        # markers are the markers, and so does a stretch marker chunk left
+        # out), and a `smpl` root's pitch fraction.
         def consumed(provenance, facts)
           keys = provenance.values.filter_map(&:fact)
           keys += facts.select_keys('cue.point[*').keys if facts && provenance.values.any? { |p| p.via == :cue }
+          keys += facts.select_keys('strc.*').keys if facts && provenance.values.any? { |p| p.via == :strc }
           keys << 'smpl.pitch_fraction' if provenance[:root]&.via == :smpl
           keys += %w[fmt.sample_rate data.bytes].select { |k| facts&.key?(k) }
           keys.uniq
@@ -221,6 +236,10 @@ module MB
 
           f[:seconds] = seconds.to_f if seconds
           why = {}
+          why[:markers] = f[:markers_why] if f[:markers_why]
+          unless f[:declared_one_shot].nil?
+            why[:declared_one_shot] = f[:declared_one_shot] ? "the file's one-shot flag is set" : "the file's one-shot flag is not set: a loop"
+          end
           names = names_of(path, folders: folders, root: root)
           if !f[:key] && (k = names.lazy.map { |n| parse_name(n)[:key] }.find(&:itself))
             f[:key] = k
@@ -236,7 +255,7 @@ module MB
 
           Entry.new(
             path: path, format: format, bpm: f[:bpm], beats: f[:beats], meter: f[:meter], key: f[:key], root: f[:root],
-            one_shot: f[:one_shot], loop: f[:loop], smpl_loops: (f[:smpl_loops] || []).freeze, markers: (f[:markers] || []).freeze,
+            one_shot: f[:one_shot], declared_one_shot: f[:declared_one_shot], loop: f[:loop], smpl_loops: (f[:smpl_loops] || []).freeze, markers: (f[:markers] || []).freeze, cues: (f[:cues] || []).freeze,
             seconds: f[:seconds], sample_rate: f[:sample_rate], sources: sources.freeze, why: why.freeze
           )
         end
@@ -405,8 +424,8 @@ module MB
               f[:root] = a.root.to_f
               sources[:root] = :acid
             end
-            f[:one_shot] = a.one_shot?
-            sources[:one_shot] = :acid
+            f[:one_shot] = f[:declared_one_shot] = a.one_shot?
+            sources[:one_shot] = sources[:declared_one_shot] = :acid
           end
           if (s = info.smpl)
             if !f[:root] && s.unity_note <= 127 && (s.unity_note != 60 || s.pitch_fraction != 0 || !s.loops.empty?)
@@ -423,9 +442,33 @@ module MB
             end
           end
           unless info.cues.empty?
-            f[:markers] = info.cues.select { |c| !info.frames || c.position <= info.frames }.map { |c| [c.position, c.label].freeze }
+            f[:cues] = f[:markers] = info.cues.select { |c| !info.frames || c.position <= info.frames }.map { |c| [c.position, c.label].freeze }
             sources[:markers] = :cue
           end
+          # ACID's stretch markers are its slice points; a file that has
+          # them uses its cue points for regions and labels (two bars
+          # named, the first and last frame), so they outrank the cues
+          stretch_markers(info, f, sources) if info.strc
+        end
+
+        # ACID's stretch markers (Riff::Strc#markers) as the markers, with
+        # the forced divisions older ACID versions add when playing loops
+        # (Strc#forced).  A chunk with markers past the end of the audio
+        # was made for other audio (a copy at another sample rate or
+        # tempo that kept its chunks) and is left out.
+        def stretch_markers(info, f, sources)
+          marks = info.strc.markers
+          if info.frames && marks.any? { |m| m > info.frames }
+            f[:markers_why] = 'strc markers past the end (made for other audio): left out'
+            return
+          end
+          a = info.acid
+          forced = a && !a.one_shot? && a.beats > 0 ? info.strc.forced(info.frames, a.beats, marks) : []
+          marks = (marks + forced).uniq.sort.select { |m| !info.frames || m < info.frames }
+          return unless marks.any?(&:positive?)
+          f[:markers] = marks.map { |m| [m, nil].freeze }
+          sources[:markers] = :strc
+          f[:markers_why] = "strc: #{marks.length} stretch markers#{" (#{forced.length} forced divisions)" unless forced.empty?}"
         end
 
         # FLAC: STREAMINFO (length), VORBIS_COMMENT (BPM/TEMPO, KEY/
@@ -435,7 +478,7 @@ module MB
           File.open(path, 'rb') do |io|
             return unless io.read(4) == 'fLaC'
             size = io.size
-            riff = { format: nil, data_offset: nil, data_size: nil, acid: nil, smpl: nil, cue: [], labels: {}, lengths: {}, info: {}, chunks: [], ds64_data: nil }
+            riff = { format: nil, data_offset: nil, data_size: nil, acid: nil, smpl: nil, strc: nil, cue: [], labels: {}, lengths: {}, info: {}, chunks: [], ds64_data: nil }
             tags = {}
             100.times do
               h = io.read(4)
@@ -469,11 +512,11 @@ module MB
               break if last
             end
 
-            if riff[:acid] || riff[:smpl] || !riff[:cue].empty?
+            if riff[:acid] || riff[:smpl] || riff[:strc] || !riff[:cue].empty?
               frames = f[:seconds] && f[:sample_rate] ? (f[:seconds] * f[:sample_rate]).round : nil
               cues = riff[:cue].map { |id, pos| Riff::Cue.new(id: id, position: pos, label: riff[:labels][id], length: nil) }.sort_by(&:position)
               info = Riff::Info.new(path: path, container: :flac, format: nil, frames: frames, data_offset: nil, data_size: nil,
-                acid: riff[:acid], smpl: riff[:smpl], cues: cues, info: {}, chunks: [])
+                acid: riff[:acid], smpl: riff[:smpl], cues: cues, info: {}, chunks: [], strc: riff[:strc])
               seconds = f[:seconds]
               rate = f[:sample_rate]
               from_riff(info, f, sources)

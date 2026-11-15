@@ -32,9 +32,14 @@ module MB
       #   sample length, purpose, country, language, dialect, code page,
       #   text).
       #
-      # ACID's `strc` chunk (slice/stretch data) is listed in #chunks but not
-      # decoded: no public description of its layout could be confirmed
-      # (2026-10-15), so slices come from cue points or onsets instead.
+      # - `strc` (ACID's stretch markers; Sony published no layout, so this
+      #   one was worked out from loop libraries, 2026-11-10, see Strc and
+      #   design/notes/loops.md for what is verified and what is assumed):
+      #   a 28-byte header (uint32 28, uint32 entry count, five uint32
+      #   settings), then 32-byte entries: uint32 flags (0x01 disabled, 0x02
+      #   automatic), uint32 unused, uint64 sample position (frames at the
+      #   file's rate), uint64 pin (the position again, 0, or the grid time
+      #   in frames the marker is pinned to), uint32 value, uint32 unused.
       module Riff
         # The audio format from `fmt `: +tag+ (1 PCM, 3 float, 0xFFFE
         # extensible), +subformat+ (the extensible GUID's format code, else
@@ -64,11 +69,131 @@ module MB
         # `labl` text (or nil) and `ltxt` length (frames, or nil).
         Cue = Data.define(:id, :position, :label, :length)
 
+        # One entry of the `strc` chunk: +flags+, +position+ (frames at the
+        # file's rate), +pin+ (see Strc), and +value+ (the raw uint32).
+        StrcEntry = Data.define(:flags, :position, :pin, :value) do
+          # A marker ACID keeps but doesn't use (never among the stretch
+          # markers ACID projects hold for the same file).
+          def disabled? = flags & 0x01 != 0
+
+          # Placed by ACID (a detected transient or a grid division), not
+          # moved or added by hand.
+          def automatic? = flags & 0x02 != 0
+
+          # A detected transient with its #strength: a candidate ACID
+          # keeps beside the markers, not a marker.
+          def hint? = automatic? && pin == 0 && value != 0
+
+          # A hint's strength (+value+ as a float32; 1.2 to several
+          # hundred), else nil.
+          def strength = hint? ? [value].pack('V').unpack1('e') : nil
+
+          # True if the marker is pinned to another time than its own
+          # position (see Strc: the audio at #position belongs at #pin
+          # on the grid).
+          def pinned? = pin != 0 && pin != position
+        end
+
+        # The `strc` chunk, ACID's stretch markers: +count+ (the header's
+        # entry count, at most the entries present), +settings+ (the
+        # header's five other words, not decoded), and +entries+ (every
+        # StrcEntry in the chunk, in file order).
+        #
+        # Worked out from the 13385 chunks of a loop library (many packs
+        # and ACID versions) and from the stretch markers 864 ACID
+        # projects hold for the same files (1641 takes; 2026-11-10).
+        # Verified there: the header is 28 bytes and says so in its first
+        # word; entries are 32 bytes; the sample position (the entry's
+        # uint64 at +8, frames at the file's own rate) is the source sample
+        # of the projects' markers (84% of 83333 markers are among them
+        # as they are; projects move and drop markers by their own
+        # settings) and is where the audio rises (by over 6 dB at 36% of
+        # 13482 markers in 400 loops, against 2% of the points halfway
+        # between markers); flag 0x01 markers are not among the projects'
+        # (1 of 1318); the header's fourth word is the stretching method
+        # and its sixth the stretch spacing (they match the projects'
+        # settings in 1572 of 1609 and 514 of 521 takes).  Likely: a pin
+        # that differs from its position is the marker's time on the grid
+        # in frames (the projects pin 543 of 1734 such markers there).
+        # Assumed: how the entries divide into lists (#lists) and which
+        # list holds the markers (#markers); flag 0x02 as "automatic"; the
+        # header's count as the end of what its writer meant (the oldest
+        # files carry more entries after it, appended by later ACID
+        # versions; projects agree with the counted ones more often).  Not
+        # decoded: the header's other settings, the fraction some ACID
+        # versions keep in +value+, and the pin of the first marker in the
+        # oldest files (an offset of the audio's first hit).
+        Strc = Data.define(:count, :settings, :entries) do
+          # The counted entries as lists: ACID writes several lists one
+          # after the other, each sorted by position (detected transients
+          # with strengths, automatic markers, often several copies, then
+          # the markers with their pins), so a new list starts wherever
+          # the position goes down.
+          def lists
+            out = []
+            entries.first(count).each do |e|
+              out << [] if out.empty? || e.position < out.last.last.position
+              out.last << e
+            end
+            out
+          end
+
+          # The stretch markers' positions (frames at the file's rate,
+          # rising, 0 included when the file has it): the last list that
+          # isn't transient hints, without its disabled markers; when that
+          # list holds only markers set by hand (ACID then keeps the
+          # automatic ones in the list before it), both.
+          def markers
+            ls = lists.reject { |l| l.count(&:hint?) * 2 > l.length }
+            return [].freeze if ls.empty?
+            final = ls.last
+            final = ls[-2] + final if ls.length > 1 && final.none?(&:automatic?)
+            final.reject { |e| e.disabled? || e.hint? }.map(&:position).uniq.sort.freeze
+          end
+
+          # The stretching method of ACID's Stretch tab (the header's
+          # fourth word): :looping or :nonlooping segments, or nil.
+          def stretch_method = STRC_METHODS[settings[2]]
+
+          # The stretch spacing ("force divisions at"; the header's sixth
+          # word) as divisions per whole note: 8 for eighth notes, 16 for
+          # sixteenths, nil when the file sets none.
+          def spacing = settings[4].between?(1, 8) ? 1 << settings[4] : nil
+
+          # The forced divisions ACID adds when it plays a file of the
+          # older generations (one list of markers; newer versions write
+          # the divisions into the list): the #spacing grid over +beats+
+          # quarter-note beats of +frames+ frames, each division that has
+          # no marker within a quarter of a division of it (ACID keeps a
+          # division unless a marker is within about 2 ms; slices that
+          # short are no use to a slice stretch).  Rising positions; empty
+          # for newer files, files without a spacing, and unknown lengths.
+          # +marks+ are #markers, for a caller that has them.
+          def forced(frames, beats, marks = nil)
+            return [].freeze unless spacing && frames && beats && frames > 0 && beats > 0
+            step = frames * 4.0 / (beats * spacing)
+            return [].freeze if step < 64 || entries.first(count).each_cons(2).any? { |a, b| b.position < a.position }
+            marks ||= markers
+            k = 0
+            out = []
+            (1...(frames / step).ceil).each do |i|
+              g = (i * step).round
+              k += 1 while k < marks.length - 1 && (marks[k + 1] - g).abs <= (marks[k] - g).abs
+              out << g if g < frames && (marks.empty? || (marks[k] - g).abs >= step / 4)
+            end
+            out.freeze
+          end
+        end
+
+        # Strc#stretch_method's names.
+        STRC_METHODS = { 1 => :looping, 2 => :nonlooping }.freeze
+
         # Everything Riff.read found.  +container+ is :riff, :rf64, or
         # :bw64; +frames+ the audio length (from the data chunk, clamped to
         # the file); +chunks+ [id, offset, size] for every chunk (sizes as
-        # declared); +info+ the LIST/INFO texts by id (e.g. "INAM").
-        Info = Data.define(:path, :container, :format, :frames, :data_offset, :data_size, :acid, :smpl, :cues, :info, :chunks) do
+        # declared); +info+ the LIST/INFO texts by id (e.g. "INAM"); +strc+
+        # ACID's stretch markers (a Strc) or nil.
+        Info = Data.define(:path, :container, :format, :frames, :data_offset, :data_size, :acid, :smpl, :cues, :info, :chunks, :strc) do
           def sample_rate = format&.sample_rate
           def channels = format&.channels
 
@@ -114,7 +239,7 @@ module MB
           raise NotWave, "#{path || 'input'} is not a RIFF WAVE file (#{head[0, 4].inspect})" unless container
 
           file_size = io.size
-          state = { format: nil, data_offset: nil, data_size: nil, acid: nil, smpl: nil, cue: [], labels: {}, lengths: {}, info: {}, chunks: [], ds64_data: nil }
+          state = { format: nil, data_offset: nil, data_size: nil, acid: nil, smpl: nil, strc: nil, cue: [], labels: {}, lengths: {}, info: {}, chunks: [], ds64_data: nil }
 
           pos = 12
           while pos + 8 <= file_size && state[:chunks].length < MAX_CHUNKS
@@ -152,7 +277,7 @@ module MB
 
           Info.new(
             path: path, container: container, format: format, frames: frames, data_offset: state[:data_offset], data_size: state[:data_size],
-            acid: state[:acid], smpl: state[:smpl], cues: cues, info: state[:info].freeze, chunks: state[:chunks].freeze
+            acid: state[:acid], smpl: state[:smpl], cues: cues, info: state[:info].freeze, chunks: state[:chunks].freeze, strc: state[:strc]
           )
         end
 
@@ -181,6 +306,8 @@ module MB
             state[:acid] = acid(body)
           when 'smpl'
             state[:smpl] = smpl(body)
+          when 'strc'
+            state[:strc] = strc(body)
           when 'cue '
             state[:cue] = cue(body)
           when 'LIST'
@@ -213,6 +340,22 @@ module MB
           _ = extra
           Smpl.new(unity_note: unity, pitch_fraction: fraction / 4294967296.0, period: period, loops: loops.freeze)
         end
+
+        # The Strc of a `strc` chunk's +body+ (see Strc), or nil if it is
+        # too short for its header.
+        def strc(body)
+          return nil if body.bytesize < STRC_HEADER
+          head, count, *settings = body.unpack('V7')
+          return nil unless head >= STRC_HEADER && head <= body.bytesize
+          n = (body.bytesize - head) / STRC_ENTRY
+          words = body.unpack("@#{head}#{'VVQ<Q<VV' * n}")
+          entries = Array.new(n) { |i| StrcEntry.new(words[6 * i], words[6 * i + 2], words[6 * i + 3], words[6 * i + 4]) }
+          Strc.new(count: [count, n].min, settings: settings.freeze, entries: entries.freeze)
+        end
+
+        # The sizes of the `strc` chunk's header and entries.
+        STRC_HEADER = 28
+        STRC_ENTRY = 32
 
         def cue(body)
           return [] if body.bytesize < 4
@@ -267,13 +410,15 @@ module MB
         # or 32-bit float (+bits+ :float).  Optional chunks: +acid+ (a Hash
         # of flags/one_shot/root/beats/meter/tempo), +smpl+ (a Hash of
         # unity_note/pitch_fraction/loops: [[start, stop, type], ...]),
-        # +cues+ (an Array of frames, or of [frame, label] pairs), +info+
+        # +cues+ (an Array of frames, or of [frame, label] pairs), +strc+
+        # (ACID stretch markers: an Array of entries, or a Hash of
+        # entries:, count:, settings:, and tail:; see .strc_bytes), +info+
         # (a Hash of INFO ids to text), +extra+ ([[id, bytes], ...] written
         # before the data, e.g. odd-sized unknown chunks), +rf64+ (an RF64
         # header with a ds64 chunk and 0xFFFFFFFF sizes), +extensible+
         # (WAVE_FORMAT_EXTENSIBLE), +pad+ (false leaves out the pad bytes
         # after odd-sized chunks, as some writers do).
-        def write(path, channels, sample_rate: 48000, bits: 16, acid: nil, smpl: nil, cues: nil, info: nil, extra: [], rf64: false, extensible: false, pad: true, overwrite: false)
+        def write(path, channels, sample_rate: 48000, bits: 16, acid: nil, smpl: nil, cues: nil, strc: nil, info: nil, extra: [], rf64: false, extensible: false, pad: true, overwrite: false)
           raise ArgumentError, "#{path} exists" if File.exist?(path) && !overwrite
           channels = [channels] unless channels.is_a?(Array)
           channels = channels.map { |c| Numo::DFloat.cast(c) }
@@ -295,6 +440,7 @@ module MB
           chunks << ['fmt ', fmt]
           chunks << ['acid', acid_bytes(acid)] if acid
           chunks << ['smpl', smpl_bytes(smpl)] if smpl
+          chunks << ['strc', strc_bytes(strc)] if strc
           if cues && !cues.empty?
             pts = cues.map { |c| c.is_a?(Array) ? c : [c, nil] }
             body = [pts.length].pack('V')
@@ -355,6 +501,28 @@ module MB
           }
           num, den = acid.fetch(:meter, [4, 4])
           [flags, acid.fetch(:root, 60), 0x8000, 0.0, acid.fetch(:beats, 0), den, num, acid.fetch(:tempo, 0.0).to_f].pack('VvveVvve')
+        end
+
+        # A `strc` chunk for fixtures.  +strc+ is an Array of entries, each
+        # a frame (a marker as the oldest ACID versions wrote it: flags 0,
+        # pinned to itself) or a Hash of position:, pin: (the position
+        # unless given), flags: (or disabled: and automatic:), and value:
+        # (or strength:, a hint's float32); or a Hash of entries:, count:
+        # (the header's; every entry unless given), settings: (the
+        # header's five other words), and tail: (zero bytes after the
+        # entries; one ACID generation leaves 8).  Lists (Strc#lists) are
+        # entries whose positions start over.
+        def strc_bytes(strc)
+          strc = { entries: strc } if strc.is_a?(Array)
+          entries = strc.fetch(:entries)
+          body = [STRC_HEADER, strc.fetch(:count, entries.length), *strc.fetch(:settings, [0, 0, 1, 0, 0])].pack('V7')
+          entries.each do |e|
+            e = { position: e } unless e.is_a?(Hash)
+            flags = e.fetch(:flags) { (e[:disabled] ? 0x01 : 0) | (e[:automatic] ? 0x02 : 0) }
+            value = e.key?(:strength) ? [e[:strength]].pack('e').unpack1('V') : e.fetch(:value, 0)
+            body << [flags, 0, e.fetch(:position), e.fetch(:pin, e.fetch(:position)), value, 0].pack('VVQ<Q<VV')
+          end
+          body << ("\0".b * strc.fetch(:tail, 0))
         end
 
         def smpl_bytes(smpl)
