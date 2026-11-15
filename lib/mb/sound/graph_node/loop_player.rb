@@ -13,7 +13,10 @@ module MB
       # offline to the current tempo (Sample#stretch with +stretch+'s
       # options, mode: :slice by default; one stretch per BPM_STEP of
       # tempo, cached) and read sample by sample at the timeline's
-      # position.  :resample plays
+      # position (with the stretch mode :none, Sample#follow's choice for
+      # files that declare themselves one-shots, the sample plays as
+      # recorded from each loop start: silence after it at slower tempos,
+      # cut short at faster ones).  :resample plays
       # the original at the speed the tempo asks (pitch follows, like a
       # turntable or varispeed), with cubic (Catmull-Rom) interpolation and
       # no band-limiting (speeding up aliases a little).
@@ -98,6 +101,7 @@ module MB
           @loop_stretch = LoopPlayer.loop_stretch(@stretch_options.except(:live))
           raise ArgumentError, 'live: true needs the stream Sample#follow makes (sample.follow(stretch: { mode: :spectral, live: true }))' if stretch[:live] && mode == :stretch && stream.nil?
           @stream = mode == :stretch ? stream : nil
+          @as_recorded = Sample::NONE_MODES.include?(stretch[:mode])
           @stretch_reason = mode == :stretch ? reason : nil
           @align = align
           @transport = transport
@@ -186,7 +190,8 @@ module MB
 
         def to_s
           len = @whole_notes ? "#{MB::M.sigfigs(@whole_notes.to_f * 4, 4)} beats" : "#{MB::M.sigfigs(@loop_sample.seconds, 4)} s"
-          "LoopPlayer #{@loop_sample.name || 'sample'}#{" ch#{@channel}" unless @loop_sample.mono?} (#{@follow_mode == :stretch ? "#{@stretch_options[:mode] || :cyclic} stretch#{', live' if @stream}" : 'resample'}, #{len}#{", #{@clock.is_a?(MB::Sound::Clock) ? @clock : "clock #{@clock.inspect}"}" if @clock}#{"; #{@stretch_reason}" if @stretch_reason})"
+          how = @as_recorded ? 'as recorded' : "#{@stretch_options[:mode] || :cyclic} stretch#{', live' if @stream}"
+          "LoopPlayer #{@loop_sample.name || 'sample'}#{" ch#{@channel}" unless @loop_sample.mono?} (#{@follow_mode == :stretch ? how : 'resample'}, #{len}#{", #{@clock.is_a?(MB::Sound::Clock) ? @clock : "clock #{@clock.inspect}"}" if @clock}#{"; #{@stretch_reason}" if @stretch_reason})"
         end
 
         private
@@ -317,9 +322,12 @@ module MB
         end
 
         # The stretch ratio for a loop lasting +seconds+ (quantized to
-        # CLOCK_STEP steps around 1, so a moving speed reuses stretches).
+        # CLOCK_STEP steps around 1, so a moving speed reuses stretches;
+        # exact for a sample played as recorded, which costs nothing to
+        # make and must not drop or repeat a sample).
         def clock_ratio(seconds)
           r = seconds.to_r / @loop_sample.seconds.to_r
+          return r.to_f if @as_recorded
           steps = (Math.log(r.to_f) / Math.log(1 + CLOCK_STEP.to_f)).round
           steps.zero? ? 1.0 : (1 + CLOCK_STEP.to_f) ** steps
         end

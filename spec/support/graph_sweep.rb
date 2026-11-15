@@ -405,6 +405,10 @@ module GraphSweep
         smp = MB::Sound::Sample[d, bpm: 960, beats: 1]
         st = MB::Sound::Sample[[d, d * -0.5], bpm: 960]
         quick = MB::Sound::Sample[[d, d * -0.5], bpm: 96]
+        # (acid-loop-info-1: slices and the vocoder's transients at markers, and a sample played as recorded,
+        # by the stretch mode and by the Sample's declared_one_shot: setting under follow's default)
+        marked = MB::Sound::Sample[d[0...1500], bpm: 960, markers: [0, 750]]
+        shot = MB::Sound::Sample[d[750...2250], bpm: 960, declared_one_shot: true]
         # (one slice with short cycles, and four slices shorter than the
         # 15 ms attack plus two 25 ms cycles, which are filled with a
         # shorter attack and cycles; stretch-fixes-1)
@@ -422,7 +426,12 @@ module GraphSweep
           # (and the vocoder running live, both channels on one stream)
           smp.follow(stretch: { mode: :spectral, window: 256, live: true }) * 0.2 + st.follow(stretch: { mode: :spectral, window: 256, live: true })[0] * 0.2 +
           # (noise kept noise: random phases for the bins that are no partial, cached and live)
-          smp.follow(stretch: { mode: :spectral, window: 256, noise: 1 }) * 0.2 + st.follow(stretch: { mode: :spectral, window: 256, live: true, noise: 1, transients: 0.5 })[1] * 0.2
+          smp.follow(stretch: { mode: :spectral, window: 256, noise: 1 }) * 0.2 + st.follow(stretch: { mode: :spectral, window: 256, live: true, noise: 1, transients: 0.5 })[1] * 0.2 +
+          marked.follow(stretch: :slice) * 0.2 + marked.follow(stretch: { mode: :spectral, transients: :markers, window: 256.samples }) * 0.2 + smp.follow(stretch: :none) * 0.2 +
+          marked.follow(stretch: { mode: :spectral, transients: :markers, confirm: true, window: 256.samples }) * 0.2 +
+          shot.follow * 0.2 +
+          # (a marker confirmed by its attack: slices at markers with confirm:, and slices: :transients)
+          marked.follow(stretch: { mode: :slice, confirm: true }) * 0.1 + marked.follow(stretch: { mode: :slice, slices: :transients }) * 0.1
       }],
       # Region lanes (regions-1): overlapping regions with crossfades in
       # ACID's shapes, an offset, a transposed (Catmull-Rom) region off the

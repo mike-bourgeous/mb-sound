@@ -711,8 +711,9 @@ module MB
     Help.topic :loops, 'Loop files and tempo-following loops', group: :sound do
       about <<~TEXT
         Loop libraries: `Sample['Funk/break_98bpm.wav']` reads a loop with
-        its metadata: ACID chunks (tempo, beats, meter, root, one-shot),
-        `smpl` (root, loop points), cue points (`sample.markers`), FLAC
+        its metadata: ACID chunks (tempo, beats, meter, root, one-shot,
+        stretch markers), `smpl` (root, loop points), cue points
+        (`sample.markers` are the stretch markers, else the cue points), FLAC
         tags, then tempo and key words in file and folder names ("98bpm",
         "98 BPM", "Am_120"; a name's tempo counts only when the file is a
         whole number of its beats).  Loops loop the whole file; one-shots
@@ -749,6 +750,18 @@ module MB
         equal power, into what led up to the next hit, so a soft hit
         just before a cut keeps its place.  `positions:` (one per cut)
         puts each slice at a place of its own: a groove.
+
+        A file's own loop info counts: a loop with stretch markers is
+        sliced at them, and a file that declares itself a one-shot
+        (`sample.declared_one_shot?`) is never stretched by `follow`: it
+        plays as recorded from each loop start
+        (`stretch: :none`; give it a length to repeat at with
+        `shot.with(bpm: 120)` or a clock, `shot.clocked(2.seconds)`).
+        `stretch: { mode: :spectral, transients: :markers }` runs the
+        phase vocoder with its attacks at the markers instead of at
+        detected onsets; add `confirm: true` to keep only the markers
+        that have an attack, each on its attack (for `stretch: :slice`
+        too: no cut inside a hit's decay).
       TEXT
       commands :loops
       dsl :follow
@@ -807,6 +820,14 @@ module MB
         into its start (`wrap: true` asks for it, `wrap: false` gives a
         stretch with its own ends).  `follow(stretch: { mode: :spectral, live: true })` runs
         the vocoder as the loop plays: any tempo, nothing restretched.
+        The vocoder finds the attacks it keeps sharp by itself
+        (`transients: true`); `transients: :markers` takes the sample's
+        markers instead (a loop file's stretch markers; detected
+        onsets when it has none), and `transients: [0, 1.n8, 13230.samples]`
+        any positions; `transients: false` is the plain vocoder.
+        `confirm: true` keeps only the markers or positions with a
+        detected attack within 15 ms (`confirm: 5.ms` for another
+        reach), each moved onto its attack.
         They are offline edits: a new Sample, made once; results over 30
         s read with `mips: :octave` (smaller playback tables).
       TEXT

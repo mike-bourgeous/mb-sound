@@ -479,7 +479,9 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       # (detected again within the 4 ms pre-roll that leads into each)
       expect(on.map { |o| got.map { |g| (g - o * 1.5).abs }.min }.max).to be <= 192
 
-      expect { rec.stretch(1.5, mode: :slice, slices: :markers, confirm: true) }.to raise_error(ArgumentError, /slices: :transients/)
+      # (confirm: also takes slices: :markers or positions, sample_acid_spec.rb; threshold: only :transients)
+      expect { rec.stretch(1.5, mode: :slice, slices: :markers, threshold: 6.db) }.to raise_error(ArgumentError, /slices: :transients/)
+      expect { rec.stretch(1.5, mode: :slice, slices: :onsets, confirm: true) }.to raise_error(ArgumentError, /confirm: is for/)
       expect { rec.stretch(1.5, mode: :spectral, threshold: 6.db) }.to raise_error(ArgumentError, /slices: :transients/)
       expect { m.stretch(1.5, mode: :slice, slices: :transients, confirm: :yes) }.to raise_error(ArgumentError, /confirm: is/)
       expect { rec.stretch(1.5, mode: :slice, slices: :beats) }.to raise_error(ArgumentError, /slices: is/)
