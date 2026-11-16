@@ -65,7 +65,13 @@ module MB
         Target = Data.define(:label, :kind, :watch, :keys, :view)
 
         # Keys published per node kind.
-        KEYS = { tone: %i[frequency width scan].freeze, four_pole: %i[cutoff resonance].freeze, lfo: %i[frequency width scan phase].freeze }.freeze
+        KEYS = {
+          tone: %i[frequency width scan].freeze, four_pole: %i[cutoff resonance].freeze, lfo: %i[frequency width scan phase].freeze,
+          svf: %i[cutoff quality gain].freeze, biquad: %i[cutoff quality].freeze,
+        }.freeze
+
+        # Target kinds drawn by a FilterDisplay.
+        FILTER_KINDS = %i[four_pole svf biquad].freeze
 
         # Points of an LFO's drawn cycle (LFOs play naive shapes: the shape
         # is the same at any rate).
@@ -218,9 +224,27 @@ module MB
             v.is_a?(Float) ? v : (v.is_a?(Numeric) ? v.to_f : Float::NAN)
           when GraphNode::FourPole
             node.send(:last_of, key).to_f
+          when Filter::SampleWrapper
+            # (SVF and Cookbook remember the last cutoff, quality, and gain
+            # they read, planned or not)
+            v = case key
+                when :cutoff then node.instance_variable_get(:@base_filter).cutoff
+                when :quality then node.instance_variable_get(:@base_filter).quality
+                when :gain then (f = node.instance_variable_get(:@base_filter)).is_a?(Filter::SVF) ? f.gain : nil
+                end
+            v.is_a?(Float) ? v : (v.is_a?(Numeric) ? v.to_f : Float::NAN)
           else
             Float::NAN
           end
+        end
+
+        # The FilterDisplay kind of +node+ (:four_pole, :svf, :biquad), or
+        # nil.
+        def self.filter_kind(node)
+          return :four_pole if node.is_a?(GraphNode::FourPole)
+          return nil unless node.is_a?(Filter::SampleWrapper)
+          f = node.instance_variable_get(:@base_filter)
+          f.is_a?(Filter::SVF) ? :svf : (f.is_a?(Filter::Cookbook) ? :biquad : nil)
         end
 
         # The render thread's side: a ring of the watched values, written
@@ -296,7 +320,7 @@ module MB
           return clear(feed) unless feed && info&.node && live?
           group = gatherer.group_of(info) or return clear(feed)
           first = group.first
-          kind = first.is_a?(Tone) ? (first.lfo? ? :lfo : :tone) : first.is_a?(GraphNode::FourPole) ? :four_pole : nil
+          kind = first.is_a?(Tone) ? (first.lfo? ? :lfo : :tone) : filter_kind(first)
           unless kind
             # (an LFO row: Notes#lfo's mixer over its oscillator, which the
             # sections list as LFO internals; only rows the sections call
@@ -310,7 +334,7 @@ module MB
           node = group[lane] || group.first
           t = @target
           unless t && t.watch[0] && t.watch[0][0].equal?(node)
-            display = (t && t.view.node.equal?(node)) ? t.view : (kind == :four_pole ? FilterDisplay.new(node) : ToneDisplay.new(node))
+            display = (t && t.view.node.equal?(node)) ? t.view : (FILTER_KINDS.include?(kind) ? FilterDisplay.new(node) : ToneDisplay.new(node))
             keys = KEYS.fetch(kind)
             watch = keys.map { |k| [node, k].freeze }.freeze
             t = @target = Target.new(label: info.nodes[info.node].label, kind: kind, watch: watch, keys: keys, view: display)
@@ -552,11 +576,19 @@ module MB
           end
         end
 
-        # A four-pole's (or diode ladder's) closed-form response at the
-        # published cutoff and resonance: its preview data's settings, one
-        # filter kept and retuned.
+        # A filter's response at the published settings, from its transfer
+        # function (#z_polynomials) through the :plot_response kernel,
+        # allocating nothing while the settings only move (an SVF retuned
+        # allocates its coefficients' Array): a four-pole or diode ladder at
+        # its cutoff and resonance, an SVF at its cutoff, quality, and gain,
+        # a cookbook biquad at its cutoff and quality.  One filter made from
+        # the node's preview data (as Plot::Panels draws it), kept and
+        # retuned; the dB axis is the chart preview's.
         class FilterDisplay
-          attr_reader :node, :why, :picture, :lo, :hi
+          attr_reader :node, :why, :picture, :lo, :hi, :kind
+
+          # Points of a response curve (as Presets.response_db draws it).
+          POINTS = 256
 
           def initialize(node)
             @node = node
@@ -564,46 +596,82 @@ module MB
             @picture = Picture.new(nil, -60.0, 0.0, -1, String.new(capacity: 96, encoding: Encoding::UTF_8))
             @lo = -60.0
             @hi = 0.0
-            @d = node.preview_data
-            @rate = @d[:sample_rate]
-            @filter = Filter::FourPole.new(
-              cutoff: @d[:cutoff], resonance: @d[:resonance].clamp(0.0, 1.0), mode: @d[:mode], self_oscillate: @d[:self_oscillate], compensation: @d[:compensation],
-              resonance_curve: @d[:resonance_curve], normalize: @d[:normalize], tuning: @d[:tuning], sample_rate: @rate,
-              drive_mode: @d[:drive_mode] == :stages && @d[:mode] == :diode ? :input : @d[:drive_mode], clip: @d[:drive_mode] == :feedback ? @d[:clip] : :soft
-            )
-            @top = Plot::Panels.four_pole_top(@d)
-            @hi = @top.to_f
-            @kc = @kr = nil
+            @kind = WaveView.filter_kind(node)
+            @k1 = @k2 = @k3 = nil
             @db = Numo::SFloat.new(POINTS)
             @b = Array.new(5, 0.0)
             @a = Array.new(5, 0.0)
+            @mm = [0.0, 0.0]
+            @d = node.preview_data
+            raise ArgumentError, 'no preview data' unless @d
+            @rate = @d[:sample_rate].to_f
+            case @kind
+            when :four_pole
+              @filter = Filter::FourPole.new(
+                cutoff: @d[:cutoff], resonance: @d[:resonance].clamp(0.0, 1.0), mode: @d[:mode], self_oscillate: @d[:self_oscillate], compensation: @d[:compensation],
+                resonance_curve: @d[:resonance_curve], normalize: @d[:normalize], tuning: @d[:tuning], sample_rate: @rate,
+                drive_mode: @d[:drive_mode] == :stages && @d[:mode] == :diode ? :input : @d[:drive_mode], clip: @d[:drive_mode] == :feedback ? @d[:clip] : :soft
+              )
+              @top = Plot::Panels.four_pole_top(@d).to_f
+            when :svf
+              @filter = Filter::SVF.new(@d[:filter_type], @rate, @d[:cutoff], quality: @d[:quality], gain: @d[:gain])
+              @top = Plot::Panels.cookbook_top(@d).to_f
+            when :biquad
+              @filter = Filter::Cookbook.new(@d[:filter_type], @rate, @d[:cutoff], quality: @d[:quality], db_gain: @d[:db_gain])
+              @top = Plot::Panels.cookbook_top(@d).to_f
+            else
+              raise ArgumentError, "no live response for #{node.class}"
+            end
+            @hi = @top
           rescue StandardError => e
             @why = "#{e.class}: #{e.message}"
           end
 
           def supported? = @why.nil?
 
-          # Points of a response curve (as Presets.response_db draws it).
-          POINTS = 256
-
           # The response in dB (at least -60) at POINTS log-spaced
-          # frequencies from 20 Hz to Nyquist (an SFloat, reused),
-          # recomputed when the cutoff moves by more than a 96th of an octave
-          # or the resonance by 0.002: the filter's transfer function
-          # (FourPole#z_polynomials) through the :plot_response kernel,
-          # allocating nothing.
-          def curve(cutoff, resonance)
+          # frequencies from 20 Hz to Nyquist (an SFloat, reused) for the
+          # cutoff and the second and third settings (a four-pole's
+          # resonance; an SVF's or biquad's quality, an SVF's gain; NaN: the
+          # preview's), recomputed when the cutoff moves by more than a 96th
+          # of an octave or a setting by about 0.2 %.  Sets #hi to the
+          # preview's top, raised in 6 dB steps if the curve passes it
+          # (Panels.db_range).
+          def curve(cutoff, second, third = Float::NAN)
             cutoff = @d[:cutoff] unless cutoff.is_a?(Float) && cutoff.finite?
-            resonance = @d[:resonance] unless resonance.is_a?(Float) && resonance.finite?
-            kc = (Math.log2(cutoff > 1.0 ? cutoff : 1.0) * 96).round
-            kr = (resonance * 500).round
-            return @db if kc == @kc && kr == @kr
-            @kc = kc
-            @kr = kr
-            @filter.cutoff = cutoff.clamp(20.0, @rate * 0.45)
-            @filter.resonance = resonance.clamp(0.0, 1.0)
+            k1 = (Math.log2(cutoff > 1.0 ? cutoff : 1.0) * 96).round
+            if @kind == :four_pole
+              second = @d[:resonance] unless second.is_a?(Float) && second.finite?
+              k2 = (second * 500).round
+              k3 = 0
+            else
+              second = (@d[:quality] || 0.7071).to_f unless second.is_a?(Float) && second.finite? && second > 0
+              k2 = (Math.log2(second) * 500).round
+              third = nil unless @kind == :svf && third.is_a?(Float) && third.finite? && third > 0
+              k3 = third ? (Math.log2(third) * 500).round : 0
+            end
+            return @db if k1 == @k1 && k2 == @k2 && k3 == @k3
+            @k1 = k1
+            @k2 = k2
+            @k3 = k3
+            case @kind
+            when :four_pole
+              @filter.cutoff = cutoff.clamp(20.0, @rate * 0.45)
+              @filter.resonance = second.clamp(0.0, 1.0)
+            when :svf
+              @filter.cutoff = cutoff.clamp(20.0, @rate * 0.49)
+              @filter.quality = second
+              @filter.gain = third if third
+            when :biquad
+              @filter.center_frequency = cutoff.clamp(20.0, @rate * 0.49)
+              @filter.quality = second
+            end
             @filter.z_polynomials(@b, @a)
             Plot::Response.db(@db, @b, @a, @rate, 20.0, @rate * 0.4995, -60.0)
+            Kernels.min_max(@db, @mm)
+            peak = @mm[1]
+            @hi = peak.finite? && peak > @top ? ((peak / 6.0).ceil * 6).to_f : @top
+            @db
           end
         end
 
@@ -716,15 +784,15 @@ module MB
             Label.hz(title, f.abs) << ' live'
             Label.fixed(title << ' pw ', wd, 2) if wd.finite?
             Label.fixed(title << ' scan ', sc, 2) if sc.finite?
-          when :four_pole
-            cut, res = vals[0], vals[1]
-            pic.data = v.curve(cut, res)
+          when :four_pole, :svf, :biquad
+            cut, second = vals[0], vals[1]
+            pic.data = v.curve(cut, second, t.kind == :svf ? vals[2] : Float::NAN)
             pic.lo = v.lo
             pic.hi = v.hi
             pic.mark = -1
             title.clear << n.label << ' '
-            Label.hz(title, cut.finite? ? cut : 0.0) << ' reso '
-            res.finite? ? Label.fixed(title, res, 2) : title << '?'
+            Label.hz(title, cut.finite? ? cut : 0.0) << (t.kind == :four_pole ? ' reso ' : ' Q ')
+            second.finite? ? Label.fixed(title, second, 2) : title << '?'
             title << ' live'
           else
             return nil

@@ -128,12 +128,14 @@ RSpec.describe('wave display budgets', :aggregate_failures) do
                             ->(k, i) { [110.0, Float::NAN, (k % 40) / 40.0][i] }],
     'an LFO with its marker' => [-> { 0.5.hz.triangle.lfo }, :lfo, ->(k, i) { [0.5, Float::NAN, Float::NAN, (k % 97) / 97.0][i] }],
     'a four-pole response' => [-> { 110.hz.saw.lp4(800.constant, resonance: 0.4) }, :four_pole, ->(k, i) { [300.0 * 2**(4 * (k % 40) / 40.0), 0.4][i] }],
+    'an SVF peak response' => [-> { 110.hz.saw.filter(:peak, cutoff: 800.constant, quality: 2.0, gain: 4.0) }, :svf,
+                               ->(k, i) { [300.0 * 2**(4 * (k % 40) / 40.0), 2.0, 0.5 + (k % 30) / 5.0][i] }],
     'a diode ladder response' => [-> { 110.hz.saw.diode(800.constant, resonance: 0.6) }, :four_pole, ->(k, i) { [300.0 * 2**(4 * (k % 40) / 40.0), 0.6][i] }],
   }.each do |what, (make, kind, values)|
     it "draws #{what} that moves every frame allocating nothing, in a fraction of a millisecond" do
       node = make.call
       node.sample(64)
-      display = kind == :four_pole ? wv::FilterDisplay.new(node) : wv::ToneDisplay.new(node)
+      display = wv::FILTER_KINDS.include?(kind) ? wv::FilterDisplay.new(node) : wv::ToneDisplay.new(node)
       expect(display.why).to be_nil
       move, draw = live_frames(node, kind, display, values)
       objects, m = frame_objects(move, draw)
@@ -142,6 +144,16 @@ RSpec.describe('wave display budgets', :aggregate_failures) do
       slow = slowdown
       expect(ms).to be <= 0.25 * slow, "#{ms.round(4)} ms at slowdown #{slow.round(2)}"
     end
+  end
+
+  it 'draws a cookbook biquad response that moves every frame with only its retuning\'s Array' do
+    node = 110.hz.saw.filter(:lowpass, cutoff: 800.constant, quality: 3.0, structure: :biquad)
+    node.sample(64)
+    move, draw = live_frames(node, :biquad, wv::FilterDisplay.new(node), ->(k, i) { [300.0 * 2**(4 * (k % 40) / 40.0), 3.0][i] })
+    objects, m = frame_objects(move, draw)
+    # (FastSound.cookbook returns the new coefficients as an Array: 1-2
+    # objects on frames whose cutoff moved)
+    expect(objects).to be <= 2.5, m.report
   end
 
   it 'draws an envelope with its moving playhead allocating nothing' do

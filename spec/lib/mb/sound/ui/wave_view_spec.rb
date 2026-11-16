@@ -124,6 +124,24 @@ RSpec.describe(MB::Sound::UI::WaveView, :aggregate_failures) do
       expect((c - Numo::SFloat.cast(db.clip(-60.0, nil))).abs.max).to be < 1e-4
       expect(d.curve(2000.0, 0.6)).to equal(c)
     end
+
+    it 'draws SVF and cookbook responses at the published cutoff, quality, and gain, on the chart preview\'s axis' do
+      [
+        [110.hz.saw.filter(:peak, cutoff: 800.constant, quality: 2.0, gain: 2.0), :svf, ->(c, q, g) { MB::Sound::Filter::SVF.new(:peak, 48000, c, quality: q, gain: g) }],
+        [110.hz.saw.filter(:highpass, cutoff: 800.constant, quality: 0.7, structure: :biquad), :biquad, ->(c, q, _) { MB::Sound::Filter::Cookbook.new(:highpass, 48000, c, quality: q) }],
+      ].each do |node, kind, make|
+        node.sample(128)
+        expect(wv.filter_kind(node)).to eq(kind)
+        expect(wv.value_of(node, :cutoff)).to be_within(1e-3).of(800.0)
+        d = described_class.new(node)
+        expect(d.why).to be_nil
+        c = d.curve(1500.0, 4.0, 3.0)
+        _, db = MB::Sound::Plot::Presets.response_db(make.(1500.0, 4.0, 3.0), 48000)
+        expect((c - Numo::SFloat.cast(db.clip(-60.0, nil))).abs.max).to be < 1e-3, kind.to_s
+        expect(d.lo).to eq(-60.0)
+        expect(d.hi).to eq(MB::Sound::Plot::Panels.db_range(MB::Sound::Plot::Panels.cookbook_top(node.preview_data), db).end.to_f)
+      end
+    end
   end
 
   describe 'watch_for' do
@@ -131,6 +149,34 @@ RSpec.describe(MB::Sound::UI::WaveView, :aggregate_failures) do
       MB::Sound::UI::Inspect.target = nil
       @session&.close
       MB::Sound.rewind
+    end
+
+    it 'picks a live response for an SVF row, and the tap publishes the cutoff its LFO moves' do
+      out = MB::Sound::Sampler::CaptureOutput.new(channels: 2)
+      @session = s = MB::Sound::Session.new(output: out, realtime: false)
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.instance_eval do
+          track(:sv) { |clip| synth(clip) { |v| v.hz.saw.filter(:lowpass, cutoff: 800 * 2**v.lfo(3, depth: 1), quality: 2.0) * v.amp_env(0.01, 0.3, 0.7, 0.3) } }
+          bg :sv, seq(MB::Sound::A2).n2.loop
+        end
+      end
+      s.ui_feed = MB::Sound::UI::Feed.new unless s.ui_feed
+      wv.mode = :live
+      g = MB::Sound::UI::Inspect::Gatherer.new
+      8.times { s.process_buffer }
+      info = g.call(s, { track: :sv })
+      targets = info.nodes.each_index.map { |i| wv.watch_for(s, g, info.with(node: i)) }
+      i = targets.index { |t| t&.kind == :svf }
+      expect(i).not_to be_nil, info.nodes.map { |n| [n.label, n.what] }.inspect
+      t = wv.watch_for(s, g, info.with(node: i))
+      vals = Array.new(wv::Tap::MAX)
+      seen = Array.new(30) { s.process_buffer; s.ui_feed.wave_tap.read(t.watch, vals) ? vals[0] : nil }.compact
+      expect(seen.length).to be > 20
+      expect(seen.min).to be_between(390.0, 1610.0)
+      expect(seen.max - seen.min).to be > 10.0 # (the LFO moves it)
+      expect(vals[1]).to be_within(1e-6).of(2.0)
+      pic = wv.picture(t, vals, info.nodes[i], 40)
+      expect(pic.title).to match(/ Hz Q 2.00 live\z/)
     end
 
     it 'picks a live display for oscillator, filter, and LFO rows only, and the tap publishes what the voice used' do

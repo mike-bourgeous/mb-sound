@@ -64,4 +64,30 @@ RSpec.describe(MB::Sound::Plot::Response, :aggregate_failures) do
     m = AllocationBudget.measure(buffers: 100) { MB::Sound::FastUI.response_db(out, b, a, 48000.0, 20.0, 23976.0, -60.0) }
     expect(m.objects_per_buffer).to be <= 0.2, m.report
   end
+
+  it 'draws SVF and cookbook filters of every type from their z_polynomials as their #response gives' do
+    w = Numo::DFloat.logspace(Math.log10(20.0), Math.log10(23976.0), 64) * (2 * Math::PI / 48000)
+    b = Array.new(5, 1.0)
+    a = Array.new(5, 1.0)
+    rng = Random.new(9)
+    filters = MB::Sound::Filter::SVF::FILTER_TYPES.map { |t|
+      first = MB::Sound::Filter::SVF::FIRST_ORDER_TYPES.include?(t)
+      MB::Sound::Filter::SVF.new(t, 48000, 20 * 2**(rng.rand * 10), quality: first ? nil : 0.3 + rng.rand * 8, gain: 0.25 + rng.rand * 3)
+    } + %i[lowpass highpass bandpass notch allpass peak lowshelf highshelf].map { |t|
+      MB::Sound::Filter::Cookbook.new(t, 48000, 20 * 2**(rng.rand * 10), quality: 0.3 + rng.rand * 8, db_gain: rng.rand * 24 - 12)
+    }
+    filters.each do |f|
+      expect(f.z_polynomials(b, a)).to equal(b)
+      expect(b[3..] + a[3..]).to eq([0.0] * 4) # (further entries zeroed)
+      out = resp.db_ruby(Numo::SFloat.new(64), b, a, 48000, 20.0, 23976.0, -60.0)
+      ref = Numo::SFloat.cast((20 * Numo::NMath.log10(Numo::DComplex.cast(f.response(w)).abs)).clip(-60.0, nil))
+      expect((out - ref).abs.max).to be < 1e-3, f.to_s
+    end
+    f = MB::Sound::Filter::SVF.new(:peak, 48000, 800, quality: 2.0, gain: 2.0)
+    f.z_polynomials(b, a)
+    before = GC.stat(:total_allocated_objects)
+    100.times { |i| f.cutoff = 300.0 + i; f.z_polynomials(b, a) }
+    expect(GC.stat(:total_allocated_objects) - before).to be <= 2
+  end
 end
+
