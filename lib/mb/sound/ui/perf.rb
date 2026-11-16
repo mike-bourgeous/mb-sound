@@ -576,8 +576,15 @@ module MB
         # /proc/self/task), or nil without /proc.  A run whose delay is
         # small against its wall time was clean whatever the load average.
         def self.run_delay(thread = nil)
-          path = thread&.native_thread_id ? "/proc/self/task/#{thread.native_thread_id}/schedstat" : '/proc/self/schedstat'
-          File.read(path).split[1].to_i / 1e9
+          if thread
+            return nil unless thread.native_thread_id
+            File.read("/proc/self/task/#{thread.native_thread_id}/schedstat").split[1].to_i / 1e9
+          else
+            # (the process: every thread's sum.  /proc/self/schedstat is
+            # the main thread's alone, which the Mac's Docker VM once
+            # counted as 8 s of delay in 8 s while it slept, at load 0.46)
+            Dir.glob('/proc/self/task/*/schedstat').sum { |f| (File.read(f).split[1].to_i rescue 0) } / 1e9
+          end
         rescue SystemCallError, NoMethodError
           nil
         end

@@ -264,6 +264,8 @@ module MB::Sound
       every_buffer: [false, 'Snapshots at every render buffer the painter took the last one in (UI::Feed.every_buffer; an option)'],
       deadlines: [false, 'Panes due by the painter\'s frame deadlines (UI::PaneRates.on_deadlines; an option)'],
       file_watch: [false, 'Record file system calls from the screen\'s threads (UI::FileWatch)'],
+      gc_off: [false, 'Diagnosis: GC disabled while recording (what the garbage collector costs the waits; memory grows)'],
+      holders: [false,'Name who holds the GVL while the render thread waits (FastUI::GVLProbe on the render thread, the painter, and worker threads)'],
       quiet_header: [false, 'Skip the header line (one scenario of a multi-scenario run)'],
     ) { |_args, p|
       ENV['AUDIO_PROFILE'] = p.latency.to_s if p.latency
@@ -296,6 +298,8 @@ module MB::Sound
           args << '--every-buffer' if p.every_buffer
           args << '--deadlines' if p.deadlines
           args << '--file-watch' if p.file_watch
+          args << '--holders' if p.holders
+          args << '--gc-off' if p.gc_off
           ok = system(RbConfig.ruby, __FILE__, *args, '-S', sc.to_s, '-j', part, '--quiet-header')
           raise "ui_bench: scenario #{sc} failed (#{$?.inspect})" unless ok
           results.concat(JSON.parse(File.read(part)))
@@ -412,6 +416,25 @@ module MB::Sound
         pub0 = the_feed.published
         bufs = 0
         tap = session.add_tap { |_| bufs += 1 }
+        holders = nil
+        if p.holders
+          # Who holds the GVL while the render thread waits: the probe on
+          # the render thread, the painter, and the worker threads by name
+          # (PatchRender's and the previews' renders, the scheduler, the
+          # input thread), at most 6; ui.perf then leaves the probe alone
+          th = { render: session.render_thread, painter: screen&.thread || plot_thread }
+          Thread.list.each do |t|
+            break if th.length >= 6
+            n = t.name.to_s
+            next if th.value?(t) || n.empty?
+            th[n.sub(/\Amb-sound /i, '').tr(' ', '_').to_sym] = t if n.match?(/render|scheduler|poll|preview|worker/i) && !n.match?(/\AMB::Sound::Session render/)
+          end
+          th[:input] = screen.instance_variable_get(:@reader) if th.length < 6 && screen.is_a?(UI::Tiles)
+          th.compact!
+          FastUI::GVLProbe.start(th.values)
+          holders = th.keys
+        end
+        GC.disable if p.gc_off
         if screen
           perf = screen.start_perf
         else
@@ -428,7 +451,31 @@ module MB::Sound
         sleep p.seconds
         file_calls = p.file_watch ? UI::FileWatch.stop : nil
         screen ? screen.stop_perf : perf.stop
+        GC.enable if p.gc_off
         wall = UIBench.now - wall0
+        holder_table = nil
+        if holders
+          # Per watched thread: its GVL holds (total, longest, over 2 ms), and
+          # the render thread's waits of 1 ms or more by who held the GVL
+          by = Hash.new { |h, k| h[k] = [0, 0.0, 0.0] }
+          FastUI::GVLProbe.blockers(0).each do |w, slot|
+            who = slot < 0 ? :other : holders[slot]
+            e = by[who]
+            e[0] += 1
+            e[1] += w
+            e[2] = w if w > e[2]
+          end
+          waits = FastUI::GVLProbe.waits(0)
+          holder_table = {
+            render_waits: { n: waits.length, over_1ms: waits.count { |w| w >= 0.001 }, over_2ms: waits.count { |w| w > 0.002 }, max_ms: ((waits.max || 0) * 1000).round(2) },
+            blockers: by.to_h { |k, (n, tot, mx)| [k, { waits_over_1ms: n, wait_ms_total: (tot * 1000).round(1), longest_wait_ms: (mx * 1000).round(2) }] },
+            holds: holders.each_with_index.to_h { |n, i|
+              h = FastUI::GVLProbe.holds(i)
+              [n, { total_ms: (h.sum * 1000).round(1), longest_ms: ((h.max || 0) * 1000).round(2), over_2ms: h.count { |x| x > 0.002 }, n: h.length }]
+            },
+          }
+          FastUI::GVLProbe.stop
+        end
         published = the_feed.published - pub0
         session.remove_tap(tap) rescue nil
         cpu = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - cpu0
@@ -452,13 +499,16 @@ module MB::Sound
         sink = JSON.parse(File.read(sink_out))
         File.write(p.screen, (sink['screen'] || []).join("\n") + "\n") if p.screen
         s = perf.summary
-        delay = d0.to_h { |k, v| [k, v && d1[k] ? ((d1[k] - v) * 1000).round(1) : nil] }
+        # (ms; a counter that moved by more than the wall time, or back, is
+        # left out as nil: no thread waits longer than it ran)
+        delay = d0.to_h { |k, v| [k, v && d1[k] && (d = (d1[k] - v) * 1000) >= 0 && d <= wall * 1000 ? d.round(1) : nil] }
         row = {
-          scenario: sc, knob: knob, ui_waves: ENV['MB_SOUND_UI_WAVES'], every_buffer: UI::Feed.every_buffer, deadlines: UI::PaneRates.on_deadlines, sink: cfg, size: [rows, cols], buffer: session.buffer_size, seconds: p.seconds, loadavg: [load0, load1],
-          run_delay_ms: delay, clean: delay[:process] && delay[:process] < wall * 1000 * 0.01, cpu_s: cpu.round(2), wall_s: wall.round(2),
+          scenario: sc, knob: knob, ui_waves: ENV['MB_SOUND_UI_WAVES'], holders: holder_table, every_buffer: UI::Feed.every_buffer, deadlines: UI::PaneRates.on_deadlines, sink: cfg, size: [rows, cols], buffer: session.buffer_size, seconds: p.seconds, loadavg: [load0, load1],
+          run_delay_ms: delay, clean: %i[painter render].all? { |k| delay[k] && delay[k] < wall * 1000 * 0.01 }, cpu_s: cpu.round(2), wall_s: wall.round(2),
           snapshots_per_s: (published / wall).round(1), buffers_per_s: (bufs / wall).round(1),
           file_calls: file_calls && file_calls.map { |m, path, loc, th| [m, path, loc, th] },
           perf: s, sink_report: UIBench.sink_report(sink, rects, warm, key_panes: UIBench::KEY_PANES[sc] || []), machine: machine,
+          pane_cpu_ms: screen.is_a?(UI::Tiles) ? screen.stats[:pane_cpu_ms] : nil, # (each pane's draws, the last 200)
         }
         results << row
 
@@ -475,8 +525,10 @@ module MB::Sound
              %w[bytes esc cup sgr cells].map { |k| "#{k} #{sr[:shape][k].values_at(:p50, :max).join('/')}" }.join(', ') + " (p50/max); answers #{s[:acks][:from_write_end_ms].values_at(:p50, :p95, :max).join('/')} ms after the write"
         sr[:panes].sort_by { |_, v| -(v[:max] || 0) }.each do |name, v|
           pa = s[:panes][name] || {}
-          puts format('  %-12s visible %5.1f/s, visible gaps p50/p95/max %s/%s/%s ms; painter draws %s/s, age p95/max %s/%s ms',
-                      name, v[:visible_per_s], v[:p50] || '-', v[:p95] || '-', v[:max] || '-', pa[:rate] || '-', pa[:p95] || '-', pa[:max] || '-')
+          pc = (row[:pane_cpu_ms] || {})[name] || {}
+          puts format('  %-12s visible %5.1f/s, visible gaps p50/p95/max %s/%s/%s ms; painter draws %s/s, age p95/max %s/%s ms; draw CPU p50/p99/max %s/%s/%s ms',
+                      name, v[:visible_per_s], v[:p50] || '-', v[:p95] || '-', v[:max] || '-', pa[:rate] || '-', pa[:p95] || '-', pa[:max] || '-',
+                      pc[:p50] || '-', pc[:p99] || '-', pc[:max] || '-')
         end
         if file_calls
           puts "  file calls from the screen's threads: #{file_calls.length}#{file_calls.empty? ? '' : " (#{(file_calls.length / wall).round(1)}/s)"}"
@@ -485,6 +537,18 @@ module MB::Sound
           end
         end
         puts "  keys: #{s[:keys].values_at(:n, :p50, :p95, :max).then { |n, *q| n.to_i > 0 ? "#{n} keys, p50/p95/max #{q.join('/')} ms" : 'none' }}"
+        if (ht = row[:holders])
+          rw = ht[:render_waits]
+          puts "  GVL holders (render waits #{rw[:n]}, #{rw[:over_1ms]} of 1 ms or more, #{rw[:over_2ms]} over 2 ms, max #{rw[:max_ms]} ms):"
+          ht[:holds].each do |n, h|
+            b = ht[:blockers][n] || {}
+            puts format('    %-22s holds %7.1f ms total, longest %6.2f ms, %3d over 2 ms; held the GVL in %3d render waits >= 1 ms (%6.1f ms, longest %5.2f)',
+                        n, h[:total_ms], h[:longest_ms], h[:over_2ms], b[:waits_over_1ms] || 0, b[:wait_ms_total] || 0, b[:longest_wait_ms] || 0)
+          end
+          if (o = ht[:blockers][:other])
+            puts format('    %-22s (GC, unwatched threads) held the GVL in %3d render waits >= 1 ms (%6.1f ms, longest %5.2f)', 'other', o[:waits_over_1ms], o[:wait_ms_total], o[:longest_wait_ms])
+          end
+        end
         kv = sr[:key_to_visible]
         puts "  key to visible (#{kv[:panes].join(', ')} at the sink): #{kv[:n]} keys, p50/p95/max #{kv.values_at(:p50, :p95, :max).join('/')} ms, #{kv[:unseen]} unseen" unless kv[:panes].empty?
         puts "  render wake delay p50/p99/p99.9/max #{r.values_at(:p50, :p99, :p999, :max).join('/')} ms, >2 ms #{r[:over_2ms_per_min]}/min; painter GVL waits p99/max #{(a[:painter] || {}).values_at(:p99, :max).join('/')} ms" if r[:n].to_i > 0
