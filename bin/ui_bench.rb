@@ -231,7 +231,102 @@ module MB::Sound
     # with no interrupt check, so a screen's first seconds hold it long.
     def yjit_stats
       return nil unless defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
-      RubyVM::YJIT.runtime_stats.slice(:compiled_block_count, :compile_time_ns, :invalidation_count, :code_gc_count)
+      RubyVM::YJIT.runtime_stats.slice(:compiled_block_count, :compile_time_ns, :invalidation_count, :code_gc_count, :invalidate_method_lookup, :invalidate_bop_redefined, :invalidate_constant_state_bump, :invalidate_constant_ic_fill, :invalidate_no_singleton_class, :invalidate_ep_escape, :invalidate_everything)
+    end
+
+    # --holders: per render buffer, from the output's #write (a module
+    # prepended to that one output's singleton class, for the run): when
+    # each write began and returned, and GC and YJIT counters at both, so
+    # a buffer's render (the previous write's return to this write's call,
+    # on the render thread) is told apart from its write's wait for the
+    # output.  Preallocated Arrays of Integers and flonums: nothing
+    # allocates on the render path.
+    class BufferLog
+      FIELDS = %i[t_in t_out gc_in gc_out gcn_in gcn_out jit_in jit_out blk_in blk_out inv_in inv_out].freeze
+
+      # Prepended to the output's singleton class.
+      module Hook
+        def write(data)
+          l = @ui_bench_log
+          l&.enter
+          r = super
+          l&.leave
+          r
+        end
+      end
+
+      def initialize(output, session, size = 20_000)
+        @output = output
+        @session = session
+        @n = size
+        FIELDS.each { |f| instance_variable_set(:"@#{f}", Array.new(size, 0)) }
+        @pos = Array.new(size)
+        @i = 0
+        @jit = defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
+        @transport = session.transport
+        output.instance_variable_set(:@ui_bench_log, nil)
+        output.singleton_class.prepend(Hook) unless output.singleton_class.include?(Hook)
+      end
+
+      def start = @output.instance_variable_set(:@ui_bench_log, self)
+      def stop = @output.instance_variable_set(:@ui_bench_log, nil)
+
+      def enter
+        i = @i
+        return if i >= @n
+        @t_in[i] = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        @gc_in[i] = GC.total_time
+        @gcn_in[i] = GC.count
+        if @jit
+          @jit_in[i] = RubyVM::YJIT.runtime_stats(:compile_time_ns)
+          @blk_in[i] = RubyVM::YJIT.runtime_stats(:compiled_block_count)
+          @inv_in[i] = RubyVM::YJIT.runtime_stats(:invalidation_count)
+        end
+        @pos[i] = @transport.position
+      end
+
+      def leave
+        i = @i
+        return if i >= @n
+        @t_out[i] = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        @gc_out[i] = GC.total_time
+        @gcn_out[i] = GC.count
+        if @jit
+          @jit_out[i] = RubyVM::YJIT.runtime_stats(:compile_time_ns)
+          @blk_out[i] = RubyVM::YJIT.runtime_stats(:compiled_block_count)
+          @inv_out[i] = RubyVM::YJIT.runtime_stats(:invalidation_count)
+        end
+        @i = i + 1
+      end
+
+      # Per buffer after the first: its render window (ms), GC and YJIT
+      # time inside it, and whether its write returned without waiting.
+      def report(period, t0)
+        n = @i
+        wall = Time.now.to_f - Process.clock_gettime(Process::CLOCK_MONOTONIC) # (the wall clock at a monotonic time: YJIT's --yjit-log stamps)
+        rows = (1...n).map { |i|
+          {
+            i: i, at_s: (@t_in[i] - t0).round(3), wall: Time.at(@t_out[i - 1] + wall).strftime('%H:%M:%S.%6N'), render_ms: ((@t_in[i] - @t_out[i - 1]) * 1000).round(3),
+            gc_ms: ((@gc_in[i] - @gc_out[i - 1]) / 1e6).round(2), gcs: @gcn_in[i] - @gcn_out[i - 1],
+            jit_ms: ((@jit_in[i] - @jit_out[i - 1]) / 1e6).round(2), blocks: @blk_in[i] - @blk_out[i - 1], inv: @inv_in[i] - @inv_out[i - 1], inv_before: @inv_out[i - 1] - @inv_in[i - 1],
+            write_ms: ((@t_out[i] - @t_in[i]) * 1000).round(3),
+            jit_in_write_ms: ((@jit_out[i] - @jit_in[i]) / 1e6).round(2),
+            bar: (@transport.bar_at(@pos[i]).to_f.round(3) rescue nil),
+          }
+        }
+        r = rows.map { |x| x[:render_ms] / 1000.0 }
+        p_ms = period * 1000
+        over = rows.select { |x| x[:render_ms] > p_ms }
+        {
+          n: rows.length, period_ms: p_ms.round(3), render_ms: UI::Perf.stats(r),
+          over_period: over.length, over_half: rows.count { |x| x[:render_ms] > p_ms / 2 },
+          over_per_min: rows.empty? ? 0 : (over.length * 60.0 / (rows.length * period)).round(1),
+          no_wait_writes: rows.count { |x| x[:write_ms] < 0.2 },
+          render_jit_ms: rows.sum { |x| x[:jit_ms] }.round(1), write_jit_ms: rows.sum { |x| x[:jit_in_write_ms] }.round(1),
+          render_gc_ms: rows.sum { |x| x[:gc_ms] }.round(1),
+          worst: rows.max_by(8) { |x| x[:render_ms] },
+        }
+      end
     end
 
     # Percentiles of +v+ in ms.
@@ -483,6 +578,7 @@ module MB::Sound
         bufs = 0
         tap = session.add_tap { |_| bufs += 1 }
         holders = nil
+        blog = nil
         yield0 = nil
         if p.holders
           # Who holds the GVL while the render thread waits: the probe on
@@ -504,6 +600,8 @@ module MB::Sound
           end
           FastUI::GVLProbe.start(th.values)
           holders = th.keys
+          blog = UIBench::BufferLog.new(session.output, session)
+          blog.start
           if p.late
             FastUI::GVLProbe.log_start(0.002, 0.0005)
             FastUI::GVLYield.late_log(true)
@@ -525,6 +623,7 @@ module MB::Sound
           UI::FileWatch.start(watched)
         end
         sleep p.seconds
+        blog&.stop
         file_calls = p.file_watch ? UI::FileWatch.stop : nil
         screen ? screen.stop_perf : perf.stop
         GC.enable if p.gc_off
@@ -553,6 +652,7 @@ module MB::Sound
               h = FastUI::GVLProbe.holds(i)
               [n, { total_ms: (h.sum * 1000).round(1), longest_ms: ((h.max || 0) * 1000).round(2), over_2ms: h.count { |x| x > 0.002 }, n: h.length }]
             },
+            buffers: blog.report(session.buffer_size.to_f / session.output.sample_rate, wall0),
           }
           FastUI::GVLProbe.stop
         end
@@ -601,7 +701,7 @@ module MB::Sound
         puts "== #{sc} (#{kind} sink, #{session.buffer_size}-frame buffers#{UI::Feed.every_buffer ? ', every-buffer snapshots' : ''}#{UI::PaneRates.on_deadlines ? ', deadline due' : ''}#{UI::FrameRate.snapshot_timed ? ', snapshot-timed' : ''}#{UI::Tiles.echo_wake ? ', echo wake' : ''}#{p.out_latency ? ", output latency #{p.out_latency} buffers" : ''}#{knob ? ", turning #{knob.inspect}" : ''}#{ENV['MB_SOUND_UI_WAVES'] ? ", MB_SOUND_UI_WAVES=#{ENV['MB_SOUND_UI_WAVES']}" : ''}): load #{load0&.first}->#{load1&.first}, run delay ms #{delay.map { |k, v| "#{k} #{v}" }.join(' ')} (#{row[:clean] ? 'clean' : 'contended'}), CPU #{row[:cpu_s]} s of #{row[:wall_s]} s"
         perf.headline(s).each { |l| puts "  #{l}" }
         puts "  feed: #{row[:snapshots_per_s]} snapshots/s published, #{row[:buffers_per_s]} render buffers/s"
-        puts "  YJIT while recording: #{yjit[:compiled_block_count]} blocks compiled in #{(yjit[:compile_time_ns] / 1e6).round(1)} ms, #{yjit[:invalidation_count]} invalidations, #{yjit[:code_gc_count]} code GCs" if yjit
+        puts "  YJIT while recording: #{yjit[:compiled_block_count]} blocks compiled in #{(yjit[:compile_time_ns] / 1e6).round(1)} ms, #{yjit[:invalidation_count]} invalidations (#{yjit.select { |k, v| k.start_with?('invalidate_') && v.to_i > 0 }.map { |k, v| "#{k.to_s.delete_prefix('invalidate_')} #{v}" }.join(', ')}), #{yjit[:code_gc_count]} code GCs" if yjit
         puts "  frames: #{s[:refreshes_per_s]}/s refreshed, #{s[:written_per_s]}/s written; lateness p50/p99/max #{s[:late_ms].values_at(:p50, :p99, :max).join('/')} ms; " \
              "write p99/max #{s[:write_ms].values_at(:p99, :max).join('/')} ms (#{s[:writes_over_2ms]} over 2 ms); bytes p50/p95/max #{s[:bytes_per_written].values_at(:p50, :p95, :max).join('/')}; full #{s[:full_redraws]}; GC #{s[:gc][:runs]} (max #{s[:gc][:max_ms]} ms)"
         puts "  sink: #{sr[:frames]} frames, intervals p50/p95/p99/max #{sr[:intervals_ms].values_at(:p50, :p95, :p99, :max).join('/')} ms; per frame: " +
@@ -632,6 +732,11 @@ module MB::Sound
             puts "  priority #{lt[:priority].inspect}; yielders: #{lt[:yielders].join(', ')}; #{lt[:yield_stats].map { |k, v| "#{k} #{v}" }.join(', ')}"
             puts "  late handovers (more than 1 ms after the kick): #{lt[:n]}, #{lt[:over_gc]} overlapping a GC step; render waits over 2 ms: #{lt[:waits]}, #{lt[:waits_gc]} overlapping a GC step (#{lt[:gc_steps]} GC steps over 0.5 ms)"
             lt[:sites].first(10).each { |s| puts format('    %4d late, %7.1f ms, longest %5.2f ms  %-8s %s', s[:n], s[:ms], s[:max_ms], s[:thread], s[:at]) }
+          end
+          if (bf = ht[:buffers])
+            rm = bf[:render_ms]
+            puts "  render buffers: #{bf[:n]}, period #{bf[:period_ms]} ms; render p50/p95/p99/max #{rm.values_at(:p50, :p95, :p99, :max).join('/')} ms; over the period #{bf[:over_period]} (#{bf[:over_per_min]}/min), over half #{bf[:over_half]}; writes that did not wait #{bf[:no_wait_writes]}; YJIT #{bf[:render_jit_ms]} ms in renders, #{bf[:write_jit_ms]} ms while the render thread waited; GC #{bf[:render_gc_ms]} ms in renders"
+            bf[:worst].first(5).each { |x| puts format('    buffer %5d at %6.2f s (bar %s, from %s): render %6.2f ms (YJIT %5.2f ms %4d blocks, %d invalidations, %d during the wait before; GC %5.2f ms %d steps), write %5.2f ms', x[:i], x[:at_s], x[:bar].inspect, x[:wall], x[:render_ms], x[:jit_ms], x[:blocks], x[:inv], x[:inv_before], x[:gc_ms], x[:gcs], x[:write_ms]) }
           end
           if (o = ht[:blockers][:other])
             puts format('    %-22s (GC, unwatched threads) held the GVL in %3d render waits >= 1 ms (%6.1f ms, longest %5.2f)', 'other', o[:waits_over_1ms], o[:wait_ms_total], o[:longest_wait_ms])
