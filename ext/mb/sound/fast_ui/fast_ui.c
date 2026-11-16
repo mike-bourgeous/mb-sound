@@ -735,6 +735,173 @@ static VALUE grid_compose(int argc, VALUE *argv, VALUE self)
 	return Qnil;
 }
 
+// Braille dot bits by dot row in a cell (0..3) and dot column (0..1)
+static const uint8_t braille_bit[4][2] = { { 0x01, 0x08 }, { 0x02, 0x10 }, { 0x04, 0x20 }, { 0x40, 0x80 } };
+
+// The dot row (0 top .. rows - 1 bottom) of +v+ between +lo+ and +hi+
+static inline long wave_row(double v, double lo, double hi, long rows)
+{
+	double r = round((hi - v) / (hi - lo) * (double)(rows - 1));
+	if (!(r > 0.0)) {
+		return 0;
+	}
+	if (r > (double)(rows - 1)) {
+		return rows - 1;
+	}
+	return (long)r;
+}
+
+/*
+ * wave(grid, data, x, y, w, h, lo, hi, fg, mark, mark_fg) -> nil
+ *
+ * Draws +data+ (a contiguous 1D SFloat, e.g. one cycle of an oscillator)
+ * as a Braille line across the grid's rectangle of +w+ x +h+ cells at
+ * (+x+, +y+), +lo+ at the bottom dot row and +hi+ at the top, clearing
+ * the rectangle first (ui-wave-perf-1; mirror Plot::Wave.draw_ruby).
+ * Each of the 2 * w dot columns shows the min and max of the samples it
+ * covers (as many samples as columns or more) or the value linearly
+ * interpolated at its position (fewer), joined to the previous column's
+ * last value so the line has no gaps.  +mark+ is a dot column for a
+ * dotted vertical marker (a playhead; -1 for none), drawn in +mark_fg+
+ * where its cells hold no line.  Colors are packed (0xRRGGBB,
+ * MB_TERM_COLOR_INDEXED | n, -1 none).  NaN samples leave their column
+ * empty.
+ */
+static VALUE ruby_wave(VALUE self, VALUE grid, VALUE data, VALUE x_v, VALUE y_v, VALUE w_v, VALUE h_v, VALUE lo_v, VALUE hi_v,
+		VALUE fg_v, VALUE mark_v, VALUE mark_fg_v)
+{
+	(void)self;
+	struct mb_term_grid *g = mb_term_grid_get(grid);
+	if (!contiguous_1d(data, numo_cSFloat)) {
+		rb_raise(rb_eArgError, "The data must be a contiguous 1D Numo::SFloat");
+	}
+	long x0 = NUM2LONG(x_v), y0 = NUM2LONG(y_v), w = NUM2LONG(w_v), h = NUM2LONG(h_v);
+	double lo = NUM2DBL(lo_v), hi = NUM2DBL(hi_v);
+	int32_t fg = NUM2INT(fg_v);
+	long mark = NUM2LONG(mark_v);
+	int32_t mark_fg = NUM2INT(mark_fg_v);
+	const float *d = (const float *)(nary_get_pointer_for_read(data) + nary_get_offset(data));
+	long n = (long)RNARRAY_SIZE(data);
+	if (w <= 0 || h <= 0) {
+		return Qnil;
+	}
+
+	// Clear the rectangle (clipped to the grid)
+	for (long cy = 0; cy < h; cy++) {
+		long gy = y0 + cy;
+		if (gy < 0 || gy >= g->height) {
+			continue;
+		}
+		for (long cx = 0; cx < w; cx++) {
+			long gx = x0 + cx;
+			if (gx < 0 || gx >= g->width) {
+				continue;
+			}
+			long i = gy * g->width + gx;
+			g->cp[i] = ' ';
+			g->fg[i] = -1;
+			g->bg[i] = -1;
+			g->attr[i] = 0;
+		}
+	}
+	if (n <= 0 || !(hi > lo)) {
+		return Qnil;
+	}
+
+	long cols = 2 * w, rows = 4 * h;
+	uint8_t *bits = ALLOC_N(uint8_t, h);
+	uint8_t *marks = ALLOC_N(uint8_t, h);
+	long prev = -1;
+	for (long cx = 0; cx < w; cx++) {
+		memset(bits, 0, (size_t)h);
+		memset(marks, 0, (size_t)h);
+		for (int dx = 0; dx < 2; dx++) {
+			long c = 2 * cx + dx;
+			long top, bot, last;
+			if (n >= cols) {
+				long i0 = c * n / cols;
+				long i1 = (c + 1) * n / cols;
+				if (i1 <= i0) {
+					i1 = i0 + 1;
+				}
+				int seen = 0;
+				double mn = 0.0, mx = 0.0;
+				for (long i = i0; i < i1; i++) {
+					double v = (double)d[i];
+					if (isnan(v)) {
+						continue;
+					}
+					if (!seen) {
+						mn = mx = v;
+						seen = 1;
+					} else if (v < mn) {
+						mn = v;
+					} else if (v > mx) {
+						mx = v;
+					}
+				}
+				if (!seen) {
+					prev = -1;
+					continue;
+				}
+				double lv = (double)d[i1 - 1];
+				top = wave_row(mx, lo, hi, rows);
+				bot = wave_row(mn, lo, hi, rows);
+				last = isnan(lv) ? -1 : wave_row(lv, lo, hi, rows);
+			} else {
+				double pos = cols > 1 ? (double)c * (double)(n - 1) / (double)(cols - 1) : 0.0;
+				long j = (long)floor(pos);
+				if (j > n - 1) {
+					j = n - 1;
+				}
+				long j1 = j + 1 < n ? j + 1 : n - 1;
+				double a = (double)d[j], b = (double)d[j1];
+				double v = a + (b - a) * (pos - (double)j);
+				if (isnan(v)) {
+					prev = -1;
+					continue;
+				}
+				top = bot = last = wave_row(v, lo, hi, rows);
+			}
+			if (prev >= 0) {
+				if (prev < top) {
+					top = prev;
+				}
+				if (prev > bot) {
+					bot = prev;
+				}
+			}
+			for (long r = top; r <= bot; r++) {
+				bits[r / 4] |= braille_bit[r % 4][dx];
+			}
+			prev = last;
+		}
+		if (mark >= 0 && mark / 2 == cx) {
+			int dx = (int)(mark % 2);
+			for (long r = 0; r < rows; r += 2) {
+				marks[r / 4] |= braille_bit[r % 4][dx];
+			}
+		}
+		long gx = x0 + cx;
+		if (gx < 0 || gx >= g->width) {
+			continue;
+		}
+		for (long cy = 0; cy < h; cy++) {
+			long gy = y0 + cy;
+			uint8_t b = bits[cy] | marks[cy];
+			if (b == 0 || gy < 0 || gy >= g->height) {
+				continue;
+			}
+			long i = gy * g->width + gx;
+			g->cp[i] = 0x2800u + b;
+			g->fg[i] = bits[cy] ? fg : mark_fg;
+		}
+	}
+	xfree(bits);
+	xfree(marks);
+	return Qnil;
+}
+
 /* ANSI colors (Plot::Text::ANSI) */
 void Init_fast_ui(void)
 {
@@ -750,6 +917,7 @@ void Init_fast_ui(void)
 	rb_define_module_function(mFastUI, "area", ruby_area, 6);
 	rb_define_module_function(mFastUI, "project", ruby_project, 7);
 	rb_define_module_function(mFastUI, "monotonic", ruby_monotonic, 1);
+	rb_define_module_function(mFastUI, "wave", ruby_wave, 11);
 
 	// (mb-term's fast_term, loaded by require 'mb/term' before this file:
 	// its mb_term_grid_get is linked at load time)
