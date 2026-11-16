@@ -92,6 +92,26 @@ RSpec.describe(MB::Sound::UI::WaveView, :aggregate_failures) do
     end
   end
 
+  describe 'LFO displays' do
+    it 'draws the LFO\'s shape with a marker at its phase now' do
+      lfo = 2.hz.lfo.triangle
+      lfo.sample(4800) # (a tenth of a second: a fifth of a cycle)
+      expect(wv.value_of(lfo, :phase)).to be_within(1e-6).of(0.2)
+      expect(wv.lfo_tone_of(lfo)).to equal(lfo)
+      d = MB::Sound::UI::WaveView::ToneDisplay.new(lfo)
+      expect(d.why).to be_nil
+      t = MB::Sound::UI::WaveView::Target.new(label: 'lfo', kind: :lfo, watch: [].freeze, keys: wv::KEYS[:lfo], display: d)
+      n = Struct.new(:label).new('lfo')
+      data, lo, hi, title, mark = wv.picture(t, [2.0, Float::NAN, Float::NAN, 0.2], n, 40)
+      expect(data.length).to eq(wv::LFO_POINTS)
+      expect([lo, hi]).to eq([-1.0, 1.0])
+      expect(mark).to eq(16) # (0.2 of 80 dot columns)
+      expect(title).to eq('lfo 2 Hz live, now at 0.20')
+      ref = 1.hz.lfo.triangle # (the same shape at any rate, within a third of a sample step: 0.0026)
+      expect((data - ref.at_rate(wv::LFO_POINTS).sample(wv::LFO_POINTS)).abs.max).to be < 0.004
+    end
+  end
+
   describe MB::Sound::UI::WaveView::FilterDisplay do
     it 'draws the closed-form response at the given cutoff and resonance' do
       f = 110.hz.saw.lp4(1200.constant + 0.0 * 1.hz.lfo, resonance: 0.4)

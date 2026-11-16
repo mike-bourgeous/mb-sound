@@ -61,7 +61,11 @@ module MB
         Target = Data.define(:label, :kind, :watch, :keys, :display)
 
         # Keys published per node kind.
-        KEYS = { tone: %i[frequency width scan].freeze, four_pole: %i[cutoff resonance].freeze }.freeze
+        KEYS = { tone: %i[frequency width scan].freeze, four_pole: %i[cutoff resonance].freeze, lfo: %i[frequency width scan phase].freeze }.freeze
+
+        # Points of an LFO's drawn cycle (LFOs play naive shapes: the shape
+        # is the same at any rate).
+        LFO_POINTS = 512
 
         # The value node +node+ last used for +key+ (render thread; nothing
         # allocated): a Float, or NaN when not known.
@@ -74,6 +78,7 @@ module MB
                 when :frequency then st.last_freq
                 when :width then st.last_width
                 when :scan then st.last_scan
+                when :phase then st.phi
                 end
             v.is_a?(Float) ? v : (v.is_a?(Numeric) ? v.to_f : Float::NAN)
           when GraphNode::FourPole
@@ -153,13 +158,19 @@ module MB
           return clear(feed) unless feed && info&.node && live?
           group = gatherer.group_of(info) or return clear(feed)
           first = group.first
-          kind = first.is_a?(Tone) ? :tone : first.is_a?(GraphNode::FourPole) ? :four_pole : nil
-          return clear(feed) unless kind
+          kind = first.is_a?(Tone) ? (first.lfo? ? :lfo : :tone) : first.is_a?(GraphNode::FourPole) ? :four_pole : nil
+          unless kind
+            # (an LFO row: Notes#lfo's mixer over its oscillator, which the
+            # sections list as LFO internals)
+            group = group.map { |n| lfo_tone_of(n) }
+            return clear(feed) if group.any?(&:nil?)
+            kind = :lfo
+          end
           lane = newest_lane(gatherer.amp_env_group(info), group.length)
-          node = group[lane] || first
+          node = group[lane] || group.first
           t = @target
           unless t && t.watch[0] && t.watch[0][0].equal?(node)
-            display = (t && t.display.node.equal?(node)) ? t.display : (kind == :tone ? ToneDisplay.new(node) : FilterDisplay.new(node))
+            display = (t && t.display.node.equal?(node)) ? t.display : (kind == :four_pole ? FilterDisplay.new(node) : ToneDisplay.new(node))
             keys = KEYS.fetch(kind)
             watch = keys.map { |k| [node, k].freeze }.freeze
             t = @target = Target.new(label: info.nodes[info.node].label, kind: kind, watch: watch, keys: keys, display: display)
@@ -168,6 +179,15 @@ module MB
           tap = (feed.wave_tap ||= Tap.new)
           tap.watch = t.watch unless tap.watch.equal?(t.watch)
           t
+        end
+
+        # The LFO oscillator under +node+ (a Notes#lfo row), or nil.
+        def self.lfo_tone_of(node)
+          return node if node.is_a?(Tone) && node.lfo?
+          return nil unless node.respond_to?(:graph)
+          node.graph.find { |n| n.is_a?(Tone) && n.lfo? }
+        rescue StandardError
+          nil
         end
 
         def self.clear(feed)
@@ -196,7 +216,7 @@ module MB
         # Constants set to the published values each frame; reset to the
         # same phase every frame, sampled for one period.
         class ToneDisplay
-          attr_reader :node, :why
+          attr_reader :node, :why, :rate
 
           # Frames of the longest period drawn (an LFO's slower cycle shows
           # its start).
@@ -221,6 +241,7 @@ module MB
               t = t.wavetable(node.instance_variable_get(:@table), scan: @scan, interpolation: node.instance_variable_get(:@interpolation),
                               scan_wrap: node.instance_variable_get(:@scan_wrap))
             end
+            t = t.lfo if node.lfo? # (an LFO's exact edges)
             @tone = t
             # (the state a fresh tone starts from, then a first sample for
             # the tone's own start-up; every cycle starts from that state)
@@ -370,7 +391,7 @@ module MB
             vals = (state[:wave_vals] ||= Array.new(Tap::MAX, Float::NAN))
             got = feed_tap && feed_tap.read(t.watch, vals)
             return super unless got || state[:wave_data]
-            data, lo, hi, title = WaveView.picture(t, vals, n)
+            data, lo, hi, title, mark = WaveView.picture(t, vals, n, c.w)
             return super unless data
             @wave_live = true
             state[:wave_data] = data
@@ -381,15 +402,23 @@ module MB
             c.text(0, 0, c.fit(title, w), :dim)
             if h > 1
               fg = MB::Term::Cells.pack(Theme.rgb(:key)) || -1
-              Plot::Wave.draw(c.grid, data, x: c.x, y: c.y + 1, w: w, h: h - 1, lo: lo, hi: hi, fg: fg)
+              Plot::Wave.draw(c.grid, data, x: c.x, y: c.y + 1, w: w, h: h - 1, lo: lo, hi: hi, fg: fg,
+                              mark: mark || -1, mark_fg: MB::Term::Cells.pack(Theme.rgb(:warn)) || -1)
             end
             nil
           end
         end
 
-        # [data, lo, hi, title] for Target +t+ at values +vals+ (row +n+).
-        def self.picture(t, vals, n)
+        # [data, lo, hi, title, marker dot column or nil] for Target +t+ at
+        # values +vals+ (row +n+), drawn +w+ cells wide.
+        def self.picture(t, vals, n, w = 0)
           case t.kind
+          when :lfo
+            f, wd, sc, ph = vals[0], vals[1], vals[2], vals[3]
+            d = t.display.cycle(t.display.rate / LFO_POINTS, wd, sc) or return nil
+            peak = [d.abs.max.to_f, 1.0].max
+            mark = ph.finite? && w > 0 ? ((ph % 1.0) * 2 * w).floor.clamp(0, 2 * w - 1) : nil
+            [d, -peak, peak, "#{n.label} #{f.finite? ? Plot::Panels.hz_text(f.abs) : '?'} live, now at #{ph.finite? ? format('%.2f', ph % 1.0) : '?'}", mark]
           when :tone
             f, wd, sc = vals[0], vals[1], vals[2]
             d = t.display.cycle(f, wd, sc) or return nil
