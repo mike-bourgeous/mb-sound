@@ -199,6 +199,41 @@ module MB::Sound
       end
     end
 
+    # --late: the late handovers grouped by thread and innermost frames, and
+    # the render waits over 2 ms and late handovers that overlap a GC step
+    # (from the probe's log: [kind, slot, holder, a, b, c, gc_count]).
+    def late_report(names, late, log)
+      log = log.map { |k, slot, holder, a, b, c, n| [k, slot, holder, a.to_i / 1e9, b.to_i / 1e9, c.to_i / 1e9, n] }
+      gcs = log.select { |r| r[0] == :gc }.map { |r| [r[3], r[4]] }
+      overlap = ->(a, b) { gcs.any? { |x, y| x < b && y > a } }
+      waits = log.select { |r| r[0] == :thread && r[1] == 0 && r[5] > 0 && r[4] > 0 && r[5] - r[4] > 0.002 }
+      th = names.each_with_index.to_h { |n, i| [i, n] }
+      by = Hash.new { |h, k| h[k] = [0, 0.0, 0.0] }
+      over_gc = 0
+      late.each do |at, by_s, thread, frames|
+        over_gc += 1 if overlap.call(at - by_s, at)
+        tn = (thread.name || 'thread').sub(/\AMB::Sound::/, '')
+        site = frames.first(3).map { |label, path, line| "#{label} #{File.basename(path.to_s)}:#{line}" }.join(' < ')
+        e = by[[tn, site]]
+        e[0] += 1
+        e[1] += by_s * 1000
+        e[2] = by_s * 1000 if by_s * 1000 > e[2]
+      end
+      {
+        n: late.length, over_gc: over_gc, gc_steps: gcs.length, waits: waits.length,
+        waits_gc: waits.count { |r| overlap.call(r[4], r[5]) },
+        waits_by_holder: waits.group_by { |r| th[r[2]] || :other }.transform_values(&:length),
+        sites: by.map { |(t, at), (n, ms, mx)| { thread: t, at: at, n: n, ms: ms.round(1), max_ms: mx.round(2) } }.sort_by { |x| -x[:ms] },
+      }
+    end
+
+    # YJIT's compile counters (nil without YJIT): compiling holds the GVL
+    # with no interrupt check, so a screen's first seconds hold it long.
+    def yjit_stats
+      return nil unless defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
+      RubyVM::YJIT.runtime_stats.slice(:compiled_block_count, :compile_time_ns, :invalidation_count, :code_gc_count)
+    end
+
     # Percentiles of +v+ in ms.
     def stats(v) = UI::Perf.stats(v)
 
@@ -275,6 +310,7 @@ module MB::Sound
       snapshot_timed: [false, 'Frames timed to the render thread\'s snapshots (UI::FrameRate.snapshot_timed; an option)'],
       file_watch: [false, 'Record file system calls from the screen\'s threads (UI::FileWatch)'],
       gc_off: [false, 'Diagnosis: GC disabled while recording (what the garbage collector costs the waits; memory grows)'],
+      late: [false, 'With --holders: which calls hand the GVL to the render thread late (FastUI::GVLYield.late_log), and the render waits over 2 ms that overlap a GC step'],
       holders: [false,'Name who holds the GVL while the render thread waits (FastUI::GVLProbe on the render thread, the painter, and worker threads)'],
       quiet_header: [false, 'Skip the header line (one scenario of a multi-scenario run)'],
     ) { |_args, p|
@@ -319,6 +355,7 @@ module MB::Sound
           args << '--echo-wake' if p.echo_wake
           args << '--file-watch' if p.file_watch
           args << '--holders' if p.holders
+          args << '--late' if p.late
           args << '--gc-off' if p.gc_off
           ok = system(RbConfig.ruby, __FILE__, *args, '-S', sc.to_s, '-j', part, '--quiet-header')
           raise "ui_bench: scenario #{sc} failed (#{$?.inspect})" unless ok
@@ -440,11 +477,13 @@ module MB::Sound
         d0 = UI::Perf.run_delays(named.call)
         wall0 = UIBench.now
         cpu0 = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID)
+        yjit0 = UIBench.yjit_stats
         the_feed = screen ? screen.feed : feed
         pub0 = the_feed.published
         bufs = 0
         tap = session.add_tap { |_| bufs += 1 }
         holders = nil
+        yield0 = nil
         if p.holders
           # Who holds the GVL while the render thread waits: the probe on
           # the render thread, the painter, and the worker threads by name
@@ -465,6 +504,11 @@ module MB::Sound
           end
           FastUI::GVLProbe.start(th.values)
           holders = th.keys
+          if p.late
+            FastUI::GVLProbe.log_start(0.002, 0.0005)
+            FastUI::GVLYield.late_log(true)
+            yield0 = FastUI::GVLYield.stats
+          end
         end
         GC.disable if p.gc_off
         if screen
@@ -498,9 +542,13 @@ module MB::Sound
             e[2] = w if w > e[2]
           end
           waits = FastUI::GVLProbe.waits(0)
+          late = p.late ? UIBench.late_report(holders, FastUI::GVLYield.late_log(false), FastUI::GVLProbe.log_drain) : nil
+          late&.merge!(priority: [FastUI::GVLYield.priority&.name, FastUI::GVLYield.priority.equal?(session.render_thread)], yielders: FastUI::GVLYield.yielders.map { |t| t.name.to_s }, yield_stats: FastUI::GVLYield.stats.to_h { |k, v| [k, v - yield0.fetch(k, 0)] })
+          FastUI::GVLProbe.log_stop if p.late
           holder_table = {
             render_waits: { n: waits.length, over_1ms: waits.count { |w| w >= 0.001 }, over_2ms: waits.count { |w| w > 0.002 }, max_ms: ((waits.max || 0) * 1000).round(2) },
             blockers: by.to_h { |k, (n, tot, mx)| [k, { waits_over_1ms: n, wait_ms_total: (tot * 1000).round(1), longest_wait_ms: (mx * 1000).round(2) }] },
+            late: late,
             holds: holders.each_with_index.to_h { |n, i|
               h = FastUI::GVLProbe.holds(i)
               [n, { total_ms: (h.sum * 1000).round(1), longest_ms: ((h.max || 0) * 1000).round(2), over_2ms: h.count { |x| x > 0.002 }, n: h.length }]
@@ -511,6 +559,7 @@ module MB::Sound
         published = the_feed.published - pub0
         session.remove_tap(tap) rescue nil
         cpu = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - cpu0
+        yjit = yjit0 && UIBench.yjit_stats.to_h { |k, v| [k, v - yjit0[k]] }
         d1 = UI::Perf.run_delays(named.call)
         load1 = UI::Perf.loadavg
         rects = screen.is_a?(UI::Tiles) ? screen.tiler.rects.to_h { |n, r| [n, r] } : (screen ? {} : { scope: Struct.new(:x, :y, :w, :h).new(0, 0, cols, rows) })
@@ -536,6 +585,7 @@ module MB::Sound
         delay = d0.to_h { |k, v| [k, v && d1[k] && (d = (d1[k] - v) * 1000) >= 0 && d <= wall * 1000 ? d.round(1) : nil] }
         row = {
           scenario: sc, knob: knob, ui_waves: ENV['MB_SOUND_UI_WAVES'], holders: holder_table, every_buffer: UI::Feed.every_buffer, deadlines: UI::PaneRates.on_deadlines, snapshot_timed: UI::FrameRate.snapshot_timed, echo_wake: UI::Tiles.echo_wake, out_latency: p.out_latency, sink: cfg, size: [rows, cols], buffer: session.buffer_size, seconds: p.seconds, loadavg: [load0, load1],
+          yjit: yjit,
           run_delay_ms: delay, clean: %i[painter render].all? { |k| delay[k] && delay[k] < wall * 1000 * 0.01 }, cpu_s: cpu.round(2), wall_s: wall.round(2),
           snapshots_per_s: (published / wall).round(1), buffers_per_s: (bufs / wall).round(1),
           file_calls: file_calls && file_calls.map { |m, path, loc, th| [m, path, loc, th] },
@@ -551,6 +601,7 @@ module MB::Sound
         puts "== #{sc} (#{kind} sink, #{session.buffer_size}-frame buffers#{UI::Feed.every_buffer ? ', every-buffer snapshots' : ''}#{UI::PaneRates.on_deadlines ? ', deadline due' : ''}#{UI::FrameRate.snapshot_timed ? ', snapshot-timed' : ''}#{UI::Tiles.echo_wake ? ', echo wake' : ''}#{p.out_latency ? ", output latency #{p.out_latency} buffers" : ''}#{knob ? ", turning #{knob.inspect}" : ''}#{ENV['MB_SOUND_UI_WAVES'] ? ", MB_SOUND_UI_WAVES=#{ENV['MB_SOUND_UI_WAVES']}" : ''}): load #{load0&.first}->#{load1&.first}, run delay ms #{delay.map { |k, v| "#{k} #{v}" }.join(' ')} (#{row[:clean] ? 'clean' : 'contended'}), CPU #{row[:cpu_s]} s of #{row[:wall_s]} s"
         perf.headline(s).each { |l| puts "  #{l}" }
         puts "  feed: #{row[:snapshots_per_s]} snapshots/s published, #{row[:buffers_per_s]} render buffers/s"
+        puts "  YJIT while recording: #{yjit[:compiled_block_count]} blocks compiled in #{(yjit[:compile_time_ns] / 1e6).round(1)} ms, #{yjit[:invalidation_count]} invalidations, #{yjit[:code_gc_count]} code GCs" if yjit
         puts "  frames: #{s[:refreshes_per_s]}/s refreshed, #{s[:written_per_s]}/s written; lateness p50/p99/max #{s[:late_ms].values_at(:p50, :p99, :max).join('/')} ms; " \
              "write p99/max #{s[:write_ms].values_at(:p99, :max).join('/')} ms (#{s[:writes_over_2ms]} over 2 ms); bytes p50/p95/max #{s[:bytes_per_written].values_at(:p50, :p95, :max).join('/')}; full #{s[:full_redraws]}; GC #{s[:gc][:runs]} (max #{s[:gc][:max_ms]} ms)"
         puts "  sink: #{sr[:frames]} frames, intervals p50/p95/p99/max #{sr[:intervals_ms].values_at(:p50, :p95, :p99, :max).join('/')} ms; per frame: " +
@@ -576,6 +627,11 @@ module MB::Sound
             b = ht[:blockers][n] || {}
             puts format('    %-22s holds %7.1f ms total, longest %6.2f ms, %3d over 2 ms; held the GVL in %3d render waits >= 1 ms (%6.1f ms, longest %5.2f)',
                         n, h[:total_ms], h[:longest_ms], h[:over_2ms], b[:waits_over_1ms] || 0, b[:wait_ms_total] || 0, b[:longest_wait_ms] || 0)
+          end
+          if (lt = ht[:late])
+            puts "  priority #{lt[:priority].inspect}; yielders: #{lt[:yielders].join(', ')}; #{lt[:yield_stats].map { |k, v| "#{k} #{v}" }.join(', ')}"
+            puts "  late handovers (more than 1 ms after the kick): #{lt[:n]}, #{lt[:over_gc]} overlapping a GC step; render waits over 2 ms: #{lt[:waits]}, #{lt[:waits_gc]} overlapping a GC step (#{lt[:gc_steps]} GC steps over 0.5 ms)"
+            lt[:sites].first(10).each { |s| puts format('    %4d late, %7.1f ms, longest %5.2f ms  %-8s %s', s[:n], s[:ms], s[:max_ms], s[:thread], s[:at]) }
           end
           if (o = ht[:blockers][:other])
             puts format('    %-22s (GC, unwatched threads) held the GVL in %3d render waits >= 1 ms (%6.1f ms, longest %5.2f)', 'other', o[:waits_over_1ms], o[:wait_ms_total], o[:longest_wait_ms])

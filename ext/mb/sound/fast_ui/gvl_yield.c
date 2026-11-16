@@ -63,6 +63,21 @@ static uint64_t stat_late1; // handovers more than 1 ms after their first kick
 static uint64_t stat_late2; // ... more than 2 ms
 static int64_t stat_late_max_ns;
 
+// The late log (GVLYield.late_log; a diagnostic, off until asked): for each
+// handover more than 1 ms after its first kick, when it happened, how late,
+// the thread, and its innermost Ruby frames (rb_profile_frames) at the
+// interrupt check that ran the job: the frame that called the C function
+// (or allocated into the GC step) that checked no interrupts, at its line.
+#define LATE_SLOTS 128
+#define LATE_DEPTH 8
+static int late_on;
+static uint64_t late_head;
+static int64_t late_at_ns[LATE_SLOTS];
+static int64_t late_by_ns[LATE_SLOTS];
+static int late_depth[LATE_SLOTS];
+static int late_lines[LATE_SLOTS][LATE_DEPTH];
+static VALUE late_store = Qnil; // [thread, frame * LATE_DEPTH] * LATE_SLOTS, preallocated
+
 static sem_t kick_sem;
 static pthread_t kick_thread;
 static rb_postponed_job_handle_t yield_job_handle = POSTPONED_JOB_HANDLE_INVALID;
@@ -104,6 +119,21 @@ static void yield_job(void *data)
 		}
 		if (late > LOAD(stat_late_max_ns)) {
 			STORE(stat_late_max_ns, late);
+		}
+		if (late > 1000000 && late_on) {
+			// (the GVL is held: the store's slots are written in place, no
+			// allocation)
+			int i = (int)(late_head++ % LATE_SLOTS);
+			VALUE frames[LATE_DEPTH];
+			int n = rb_profile_frames(0, LATE_DEPTH, frames, late_lines[i]);
+			late_at_ns[i] = k + late;
+			late_by_ns[i] = late;
+			late_depth[i] = n;
+			long base = (long)i * (LATE_DEPTH + 1);
+			rb_ary_store(late_store, base, rb_thread_current());
+			for (int j = 0; j < LATE_DEPTH; j++) {
+				rb_ary_store(late_store, base + 1 + j, j < n ? frames[j] : Qnil);
+			}
 		}
 		STORE(kick_ns, 0);
 	}
@@ -320,8 +350,41 @@ static VALUE yield_stats(VALUE self)
 	return h;
 }
 
+// GVLYield.late_log(on = nil) -> Array of [at (monotonic seconds), late
+// (seconds), thread, [[label, path, line], ...] innermost first] for the
+// handovers recorded since the last call (at most the last 128), oldest
+// first; true starts recording, false stops.  A diagnostic for
+// bin/ui_bench.rb --late (which calls keep a yielder from handing over).
+static VALUE yield_late_log(int argc, VALUE *argv, VALUE self)
+{
+	VALUE on = argc > 0 ? argv[0] : Qnil;
+	VALUE out = rb_ary_new();
+	uint64_t head = late_head;
+	uint64_t first = head > LATE_SLOTS ? head - LATE_SLOTS : 0;
+	for (uint64_t h = first; h < head; h++) {
+		int i = (int)(h % LATE_SLOTS);
+		long base = (long)i * (LATE_DEPTH + 1);
+		VALUE frames = rb_ary_new();
+		for (int j = 0; j < late_depth[i]; j++) {
+			VALUE f = rb_ary_entry(late_store, base + 1 + j);
+			rb_ary_push(frames, rb_ary_new_from_args(3, rb_profile_frame_full_label(f), rb_profile_frame_path(f), INT2NUM(late_lines[i][j])));
+		}
+		rb_ary_push(out, rb_ary_new_from_args(4, DBL2NUM(late_at_ns[i] / 1e9), DBL2NUM(late_by_ns[i] / 1e9), rb_ary_entry(late_store, base), frames));
+	}
+	late_head = 0;
+	if (!NIL_P(on)) {
+		late_on = RTEST(on);
+	}
+	return out;
+}
+
 void mb_fast_ui_init_gvl_yield(VALUE mFastUI)
 {
+	late_store = rb_ary_new_capa(LATE_SLOTS * (LATE_DEPTH + 1));
+	for (long i = 0; i < LATE_SLOTS * (LATE_DEPTH + 1); i++) {
+		rb_ary_push(late_store, Qnil);
+	}
+	rb_gc_register_address(&late_store);
 	for (int i = 0; i < YIELD_SLOTS; i++) {
 		yield_threads[i] = Qnil;
 	}
@@ -348,4 +411,5 @@ void mb_fast_ui_init_gvl_yield(VALUE mFastUI)
 	rb_define_module_function(mYield, "yielders", yield_yielders, 0);
 	rb_define_module_function(mYield, "active?", yield_active, 0);
 	rb_define_module_function(mYield, "stats", yield_stats, 0);
+	rb_define_module_function(mYield, "late_log", yield_late_log, -1);
 }

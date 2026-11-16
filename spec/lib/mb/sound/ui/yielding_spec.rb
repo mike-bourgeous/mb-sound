@@ -81,6 +81,30 @@ RSpec.describe(MB::Sound::UI::Yielding) do
     end
   end
 
+  it 'logs late handovers with the yielder\'s Ruby frames (GVLYield.late_log, a diagnostic)' do
+    skip 'handover timing is native-only (Valgrind serializes threads)' if defined?(SPEC_MEMCHECK) && SPEC_MEMCHECK
+    expect(gy.late_log(true)).to be_an(Array)
+    stop = false
+    render = Thread.new { sleep 0.002 until stop }
+    busy = Thread.new { Numo::DFloat.new(2_000_000).rand.sort until stop } # (a long C call: no interrupt check)
+    expect(described_class.join(busy, render: render)).to eq(true)
+    expect(wait_until { gy.stats[:kicks] > 0 }).to eq(true)
+    s0 = gy.stats[:late_1ms]
+    wait_until(timeout: 10) { gy.stats[:late_1ms] > s0 + 2 }
+    log = gy.late_log
+    expect(log).not_to be_empty, "#{gy.stats.inspect} #{s0}"
+    at, late, thread, frames = log.first
+    expect(at).to be_a(Float)
+    expect(late).to be > 0.001
+    expect(thread).to equal(busy)
+    expect(frames.flatten.join(' ')).to include('yielding_spec.rb')
+  ensure
+    gy.late_log(false)
+    stop = true
+    busy&.join
+    render&.join
+  end
+
   it 'does nothing (saying so once) without the extension, or when off' do
     allow(described_class).to receive(:available?).and_return(false)
     described_class.instance_variable_set(:@said, false)
@@ -127,7 +151,8 @@ RSpec.describe(MB::Sound::UI::Yielding) do
     ensure
       described_class.leave
     end
-    described_class.join(busy, render: render)
+    expect(described_class.join(busy, render: render)).to eq(true)
+    expect(wait_until { gy.stats[:kicks] > 0 }).to eq(true)
     2.times { go << true }
     sleep 0.4
     stop = true
