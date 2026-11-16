@@ -53,9 +53,17 @@ RSpec.describe('the idle inspector\'s allocations', :aggregate_failures) do
     # (the picker's KEEP-second library re-read lands in the measured
     # frames when its process-wide cache, made by an earlier example, turns
     # KEEP seconds old there: seen once in a loaded parallel run, 43
-    # objects a frame from Library::Index#all_entries; ui-perf-2 round 4)
+    # objects a frame from Library::Index#all_entries; ui-perf-2 round 4).
+    # The detail line's memo (Panes::Picker::DETAILS, a WeakMap: its values
+    # go at any GC, and the measurement starts with GC.start) starts empty
+    # too, so the warm-up keeps the picked entry's head path: one an
+    # earlier example drew kept its line through the warm-up, and its
+    # rebuild in the measured frames read the whole index for the path
+    # (29 objects a frame, seed 42219 of the UI directory).
     stub_const('MB::Sound::UI::Picker::KEEP', 1e9)
     ui::Picker.instance_variable_set(:@cache, nil)
+    details = ui::Panes::Picker::DETAILS
+    details.keys.each { |k| details.delete(k) }
     @tiles.start(thread: false)
     @tiles.enter(:inspector)
     expect(@tiles.router.mode).to eq(:pane)
