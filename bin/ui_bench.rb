@@ -180,10 +180,11 @@ module MB::Sound
         end
         list
       when :design
-        # (the inspector opens on the FILTER section's diode row, which has
-        # no knob: two Downs pick the drive knob, then Right/Left turn it)
-        list = [[warm + 0.1, "\e[B"], [warm + 0.2, "\e[B"]]
-        t = warm + 0.4
+        # (the inspector opens on a node row, which has no knob: the bench
+        # picks a knob row during --warm, UI::Perf::Capture.pick_knob, and
+        # the sink's Right/Left turn it)
+        list = []
+        t = warm + 0.3
         k = 0
         while t < warm + seconds
           list << [t, (k / 8).even? ? "\e[C" : "\e[D"]
@@ -314,6 +315,7 @@ module MB::Sound
 
       scenarios.each do |sc|
         session = nil
+        knob = nil # (design: the knob the arrows turn)
         master, slave = PTY.open
         slave.winsize = [rows, cols]
         t0 = UIBench.now
@@ -388,8 +390,15 @@ module MB::Sound
         if sc == :design
           MB::Sound.module_eval("design :bass, L.inst.acid, seq(E1, E1, G1, A1).n8.loop.legato(0.5)")
           Thread.pass until session.running?
+          # A knob row picked before the sink's arrows start (on the Mac
+          # two fixed Downs came before the inspector had its first
+          # snapshot, and the arrows turned nothing; 2026-11-16)
+          until (knob = UI::Perf::Capture.pick_knob(screen)) || UIBench.now - t0 > warm
+            sleep 0.05
+          end
+          warn "ui_bench: design found no knob row in the inspector before the keys (its key times show no change)" unless knob
         end
-        sleep warm
+        sleep [warm - (UIBench.now - t0), 0.0].max
         if sc == :flood
           screen.host.write("40000.times { |i| pry_instance.output.puts \"flood line \#{i} \#{'=' * 60}\" }; :flood_done\r")
         end
@@ -445,7 +454,7 @@ module MB::Sound
         s = perf.summary
         delay = d0.to_h { |k, v| [k, v && d1[k] ? ((d1[k] - v) * 1000).round(1) : nil] }
         row = {
-          scenario: sc, every_buffer: UI::Feed.every_buffer, deadlines: UI::PaneRates.on_deadlines, sink: cfg, size: [rows, cols], buffer: session.buffer_size, seconds: p.seconds, loadavg: [load0, load1],
+          scenario: sc, knob: knob, ui_waves: ENV['MB_SOUND_UI_WAVES'], every_buffer: UI::Feed.every_buffer, deadlines: UI::PaneRates.on_deadlines, sink: cfg, size: [rows, cols], buffer: session.buffer_size, seconds: p.seconds, loadavg: [load0, load1],
           run_delay_ms: delay, clean: delay[:process] && delay[:process] < wall * 1000 * 0.01, cpu_s: cpu.round(2), wall_s: wall.round(2),
           snapshots_per_s: (published / wall).round(1), buffers_per_s: (bufs / wall).round(1),
           file_calls: file_calls && file_calls.map { |m, path, loc, th| [m, path, loc, th] },
@@ -457,7 +466,7 @@ module MB::Sound
         r = a[:render] || {}
         sr = row[:sink_report]
         puts
-        puts "== #{sc} (#{kind} sink, #{session.buffer_size}-frame buffers#{UI::Feed.every_buffer ? ', every-buffer snapshots' : ''}#{UI::PaneRates.on_deadlines ? ', deadline due' : ''}): load #{load0&.first}->#{load1&.first}, run delay ms #{delay.map { |k, v| "#{k} #{v}" }.join(' ')} (#{row[:clean] ? 'clean' : 'contended'}), CPU #{row[:cpu_s]} s of #{row[:wall_s]} s"
+        puts "== #{sc} (#{kind} sink, #{session.buffer_size}-frame buffers#{UI::Feed.every_buffer ? ', every-buffer snapshots' : ''}#{UI::PaneRates.on_deadlines ? ', deadline due' : ''}#{knob ? ", turning #{knob.inspect}" : ''}#{ENV['MB_SOUND_UI_WAVES'] ? ", MB_SOUND_UI_WAVES=#{ENV['MB_SOUND_UI_WAVES']}" : ''}): load #{load0&.first}->#{load1&.first}, run delay ms #{delay.map { |k, v| "#{k} #{v}" }.join(' ')} (#{row[:clean] ? 'clean' : 'contended'}), CPU #{row[:cpu_s]} s of #{row[:wall_s]} s"
         perf.headline(s).each { |l| puts "  #{l}" }
         puts "  feed: #{row[:snapshots_per_s]} snapshots/s published, #{row[:buffers_per_s]} render buffers/s"
         puts "  frames: #{s[:refreshes_per_s]}/s refreshed, #{s[:written_per_s]}/s written; lateness p50/p99/max #{s[:late_ms].values_at(:p50, :p99, :max).join('/')} ms; " \

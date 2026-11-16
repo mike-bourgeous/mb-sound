@@ -473,11 +473,18 @@ module MB
 
         # The three lines (worst stall, stalest pane, key-to-frame p95).
         def headline(s = summary)
+          # (the stall is the longest time the painter didn't run: between
+          # frame starts.  Between written frames it can be a screen with
+          # nothing to change, which a person doesn't see as a hitch: the
+          # design screen's 128-234 ms "stalls" on the Mac were that, its
+          # frame starts at most 48 ms apart; 2026-11-16)
+          st = s[:worst_start_gap]
           w = s[:worst_written_gap]
           sp = s[:stalest_pane]
           k = s[:keys]
           [
-            "worst stall: #{w[:ms]} ms between written frames at #{w[:at]} s (frame lateness p99 #{s[:late_ms][:p99] || '-'} ms, max #{s[:late_ms][:max] || '-'} ms)",
+            "worst stall: #{st[:ms]} ms between frames at #{st[:at]} s (frame lateness p99 #{s[:late_ms][:p99] || '-'} ms, max #{s[:late_ms][:max] || '-'} ms; " \
+            "longest without a change written #{w[:ms]} ms)",
             sp ? "stalest pane: #{sp[:name]} went #{sp[:max_ms]} ms without a redraw (p95 #{sp[:p95_ms]} ms)" : 'stalest pane: (no pane redraws recorded)',
             k[:n].to_i > 0 ? "key to frame: p95 #{k[:p95]} ms (p50 #{k[:p50]}, max #{k[:max]}, #{k[:n]} keys)" : 'key to frame: (no keys typed while recording)',
           ]
