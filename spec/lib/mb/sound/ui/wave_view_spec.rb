@@ -64,10 +64,16 @@ RSpec.describe(MB::Sound::UI::WaveView, :aggregate_failures) do
       c = d.cycle(110.0, 0.2, Float::NAN)
       expect(c.length).to eq((48000 / 110.0).ceil)
       ref = MB::Sound::Tone.new(wave_type: :square, frequency: 110.0.constant).pwm(0.2.constant)
-      ref.sample(1)
-      expect(c.to_a).to eq(ref.sample(c.length).to_a)
+      expect(c.to_a).to eq(ref.sample(c.length).to_a) # (a fresh tone's first period)
+      first = c.to_a
       expect(d.cycle(110.0, 0.2, Float::NAN)).to equal(c) # (kept while nothing changes)
-      expect(d.cycle(110.0, 0.7, Float::NAN).to_a).not_to eq(c.to_a)
+      expect(d.cycle(110.0, 0.7, Float::NAN).to_a).not_to eq(first)
+      # (each cycle starts from the same state: the same samples as a fresh tone, in any order)
+      [[0.2, 110.0], [0.7, 220.0], [0.2, 110.0], [0.45, 55.0]].each do |w, f|
+        ref = MB::Sound::Tone.new(wave_type: :square, frequency: f.constant).pwm(w.constant)
+        got = d.cycle(f, w, Float::NAN).to_a
+        expect(got).to eq(ref.sample(got.length).to_a), "width #{w} at #{f} Hz"
+      end
     end
 
     it 'moves a wavetable through its frames by the scan' do

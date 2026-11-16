@@ -222,8 +222,11 @@ module MB
                               scan_wrap: node.instance_variable_get(:@scan_wrap))
             end
             @tone = t
+            # (the state a fresh tone starts from, then a first sample for
+            # the tone's own start-up; every cycle starts from that state)
+            @tone.state
+            @reset = saved_state
             @tone.sample(1)
-            @reset = @tone.plan_snapshot
           rescue StandardError => e
             @why = "#{e.class}: #{e.message}"
           end
@@ -242,13 +245,42 @@ module MB
             @width.constant = key[1] if @width && key[1]
             @scan.constant = key[2] if @scan && key[2]
             n = (@rate / freq.abs).ceil.clamp(2, MAX_FRAMES)
-            @tone.plan_restore(@reset)
+            restore_state
             d = @tone.sample(n)
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
-            @cycle = d.is_a?(Numo::SFloat) ? d.dup : Numo::SFloat.cast(d)
+            # (the tone's own buffer, kept until the next new cycle; the
+            # display copy is sampled nowhere else)
+            @cycle = d.is_a?(Numo::SFloat) ? d : Numo::SFloat.cast(d)
           end
 
           private
+
+          # The display tone's State fields as [getter, setter, value]
+          # (copies), restored in place before each cycle (#restore_state;
+          # Tone#plan_restore makes a new State, ~30 objects a call).
+          def saved_state
+            st = @tone.instance_variable_get(:@state)
+            (Tone::State::FIELDS - %i[seed jump_residual]).map { |f|
+              v = st.public_send(f)
+              [f, :"#{f}=", v.is_a?(Array) || v.is_a?(Numo::NArray) ? v.dup : v].freeze
+            }.freeze
+          end
+
+          # Puts the State fields saved by #saved_state back, in place where
+          # they are Arrays or NArrays of the same size.
+          def restore_state
+            st = @tone.instance_variable_get(:@state)
+            @reset.each do |getter, setter, v|
+              cur = st.public_send(getter)
+              if v.is_a?(Array) && cur.is_a?(Array) && cur.length == v.length
+                cur.replace(v)
+              elsif v.is_a?(Numo::NArray) && cur.is_a?(Numo::NArray) && cur.size == v.size && cur.class == v.class
+                cur[] = v
+              else
+                st.public_send(setter, v.is_a?(Array) || v.is_a?(Numo::NArray) ? v.dup : v)
+              end
+            end
+          end
 
           def numeric(v) = v.is_a?(Numeric) ? v : nil
 
