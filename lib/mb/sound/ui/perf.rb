@@ -355,6 +355,32 @@ module MB
           }
         end
 
+        # The settings a capture ran with: ui.smooth's three switches,
+        # ui.waves, GVL yielding (on, the painter, the input thread, and
+        # whether the hook runs), Ruby and YJIT (its call threshold and
+        # blocks compiled so far: a cold process has compiled few), and the
+        # screen's age in seconds (+screen+: a Tiles, or nil).
+        def self.settings(screen = nil)
+          yjit = defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
+          {
+            smooth: Feed.every_buffer && FrameRate.snapshot_timed && Tiles.echo_wake ? :on : (Feed.every_buffer || FrameRate.snapshot_timed || Tiles.echo_wake ? :partly : :off),
+            every_buffer: Feed.every_buffer, snapshot_timed: FrameRate.snapshot_timed, echo_wake: Tiles.echo_wake,
+            waves: WaveView.mode,
+            yielding: { on: Yielding.on, painter: Yielding.painter, input: Yielding.input, active: Yielding.active? },
+            ruby: RUBY_VERSION, yjit: yjit ? true : false, yjit_threshold: JIT.threshold,
+            yjit_blocks: yjit ? RubyVM::YJIT.runtime_stats(:compiled_block_count) : nil,
+            screen_seconds: screen.respond_to?(:seconds_up) && (up = screen.seconds_up) ? up.round(1) : nil,
+          }
+        end
+
+        # One line of .settings for the capture's printout.
+        def self.settings_line(st)
+          y = st[:yielding]
+          "settings: smooth #{st[:smooth]}, waves #{st[:waves]}, yielding #{y[:on] ? "on (painter #{y[:painter] ? 'on' : 'off'}, input #{y[:input] ? 'on' : 'off'})" : 'off'}; " \
+            "Ruby #{st[:ruby]} #{st[:yjit] ? "YJIT (threshold #{st[:yjit_threshold] || 'Ruby\'s'}, #{st[:yjit_blocks]} blocks compiled)" : 'no YJIT'}; " \
+            "screen up #{st[:screen_seconds] ? "#{st[:screen_seconds]} s" : '-'}#{st[:screen_seconds] && st[:screen_seconds] < 20 ? ' (cold: its first 20 s compile)' : ''}"
+        end
+
         # The 1, 5, and 15 minute load averages, or nil (no /proc).
         def self.loadavg
           File.read('/proc/loadavg').split.first(3).map(&:to_f)
@@ -554,7 +580,8 @@ module MB
           s = summary
           dir ||= File.join(Perf.captures_dir, Perf.folder_name(@identity))
           FileUtils.mkdir_p(dir)
-          File.write(File.join(dir, 'report.txt'), MB::U.remove_ansi(report(s).to_s) + "\n")
+          head = extra[:settings] ? "#{Perf.settings_line(extra[:settings])}\n\n" : ''
+          File.write(File.join(dir, 'report.txt'), head + MB::U.remove_ansi(report(s).to_s) + "\n")
           File.write(File.join(dir, 'summary.json'), JSON.pretty_generate(s.merge(machine: Perf.machine, **extra)))
           File.write(File.join(dir, 'frames.json'), JSON.generate(records.merge(panes: @panes.to_h { |n, (r, c, _)| [n, r.first([c, PANE_RING].min)] })))
           dir
@@ -702,6 +729,7 @@ module MB
             half = seconds / 2.0
             loads = [Perf.loadavg]
             delays0 = Perf.run_delays(render: session.render_thread, painter: tiles&.thread)
+            settings = Perf.settings(tiles)
             t0 = MB::U.clock_now
             p1 = p2 = nil
             k = 0
@@ -757,13 +785,14 @@ module MB
             # Saved once, at the end (both phases; never while recording)
             id = p1.identity
             dir ||= File.join(Perf.captures_dir, Perf.folder_name(id)) # (named for the terminal, once it answered)
-            p1.save(File.join(dir, 'tiles'), extra: { notes: notes })
-            p2&.save(File.join(dir, 'design'), extra: { notes: notes, scripted_keys: k, knob: knob })
-            File.write(File.join(dir, 'capture.json'), JSON.pretty_generate({ seconds: seconds, notes: notes, loadavg: loads, run_delay_s: { before: delays0, after: delays1 },
+            p1.save(File.join(dir, 'tiles'), extra: { notes: notes, settings: settings })
+            p2&.save(File.join(dir, 'design'), extra: { notes: notes, settings: settings, scripted_keys: k, knob: knob })
+            File.write(File.join(dir, 'capture.json'), JSON.pretty_generate({ seconds: seconds, notes: notes, settings: settings, loadavg: loads, run_delay_s: { before: delays0, after: delays1 },
                                                                               machine: Perf.machine, identity: id }))
             lines = p1.headline
             lines += p2.headline.map { |l| "design: #{l}" } if p2
             out.puts "\e[1mui.perf :capture\e[0m saved #{dir}"
+            out.puts "  #{Perf.settings_line(settings)}"
             lines.first(p2 ? 6 : 3).each { |l| out.puts "  #{l}" }
             notes.each { |n| out.puts "\e[2m  #{n}\e[0m" }
             out.puts "\e[2m  terminal: #{id[:xtversion] || 'did not answer XTVERSION'}; acks #{p1.summary[:acks][:answered]}/#{p1.summary[:acks][:queries]}\e[0m"

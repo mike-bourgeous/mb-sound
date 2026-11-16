@@ -142,6 +142,22 @@ RSpec.describe(MB::Sound::UI::Perf) do
       cap.thread&.join(2)
     end
 
+    it 'names the settings it ran with (smooth, waves, yielding, YJIT, the screen\'s age) in one line' do
+      perf = MB::Sound::UI::Perf
+      st = perf.settings(nil)
+      expect(st[:smooth]).to eq(:off)
+      expect(st[:waves]).to eq(:off)
+      expect(perf.settings_line(st)).to match(/\Asettings: smooth off, waves off, yielding on \(painter on, input on\); Ruby \S+ (no YJIT|YJIT .*); screen up -\z/)
+      was = [MB::Sound::UI::Feed.every_buffer, MB::Sound::UI::FrameRate.snapshot_timed, MB::Sound::UI::Tiles.echo_wake, MB::Sound::UI::WaveView.mode]
+      MB::Sound::UI::Feed.every_buffer = MB::Sound::UI::FrameRate.snapshot_timed = MB::Sound::UI::Tiles.echo_wake = true
+      MB::Sound::UI::WaveView.mode = :live
+      screen = Struct.new(:seconds_up).new(4.25)
+      line = perf.settings_line(perf.settings(screen))
+      expect(line).to include('smooth on, waves live', 'screen up 4.3 s (cold: its first 20 s compile)')
+    ensure
+      MB::Sound::UI::Feed.every_buffer, MB::Sound::UI::FrameRate.snapshot_timed, MB::Sound::UI::Tiles.echo_wake, MB::Sound::UI::WaveView.mode = was if was
+    end
+
     it 'refuses a second capture while one runs, and :cancel stops a running one' do
       release = Queue.new
       allow(cap).to receive(:run) { |**| release.pop; cap.wait(30) ? :done : :cancelled }

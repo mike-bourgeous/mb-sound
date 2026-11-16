@@ -497,6 +497,13 @@ module MB
           @lock.synchronize { @grid.to_text(mode) }
         end
 
+        # Seconds since this screen's first frame (on its clock), or nil
+        # before it (ui.perf :capture says it: a screen's first 10-20 s
+        # compile under YJIT).
+        def seconds_up
+          @first_refresh && @clock.call - @first_refresh
+        end
+
         # Painter costs, as for Band#stats, plus the REPL's pty bytes and
         # reader CPU.
         def stats
