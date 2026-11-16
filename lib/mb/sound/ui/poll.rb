@@ -116,6 +116,9 @@ module MB
             render_source: needs&.include?(:render) ? render_source(s, arr, info) : nil,
             cue_heard: (s.cue_heard? rescue false)
           )
+          # (live wave displays: the node the preview shows, watched by the
+          # render thread's tap; off by default, ui-wave-perf-1)
+          WaveView.watch_for(s, @inspector, info) if WaveView.live? && info
           [slow, knobs.to_a.freeze]
         end
 

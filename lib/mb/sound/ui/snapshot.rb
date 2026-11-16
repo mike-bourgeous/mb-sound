@@ -475,6 +475,11 @@ module MB
         # Snapshots published so far.
         attr_reader :published
 
+        # The live wave displays' tap (UI::WaveView::Tap; the render thread
+        # publishes its watched values after every buffer), or nil (the
+        # default: nothing to do; ui-wave-perf-1).
+        attr_accessor :wave_tap
+
         def initialize(scope_length: SCOPE_LENGTH)
           @scope_length = scope_length
           @needs = [].freeze
@@ -482,6 +487,7 @@ module MB
           @taken = true
           @latest = nil
           @published = 0
+          @wave_tap = nil
           reset_interval
         end
 
@@ -536,6 +542,7 @@ module MB
             @scope ||= ScopeRing.new(mix.length, @scope_length)
             @scope.write(mix)
           end
+          @wave_tap&.publish
 
           return unless @parts && @record
 
