@@ -77,7 +77,7 @@ RSpec.describe(MB::Sound::UI::Yielding) do
     [render, busy].each(&:join)
     late = late.sort
     p95 = late[(late.length * 0.95).floor]
-    expect(described_class.stats[:yields]).to be > 0
+    expect(described_class.stats[:yields]).to be > 0 unless SPEC_MEMCHECK # (Valgrind serializes threads)
     # (without yielding each wake waits out the busy thread's timeslice,
     # 10-100 ms; Valgrind serializes threads)
     expect(p95).to be < 0.003 unless SPEC_MEMCHECK

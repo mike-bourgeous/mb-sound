@@ -292,7 +292,9 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
       x += 1 until done || MB::U.clock_now - t0 > 20
       elapsed = MB::U.clock_now - t0
       waiter.join
-      expect(gy.stats[:yields]).to be > before
+      # (Valgrind serializes threads: the busy thread's own timeslice may
+      # come first, so no handover is counted there)
+      expect(gy.stats[:yields]).to be > before unless SPEC_MEMCHECK
       # (20 wakes: about 0.05 s when each gets the GVL at once, 0.2-2 s when
       # each waits out a timeslice; Valgrind serializes threads)
       expect(elapsed).to be < 0.5 unless SPEC_MEMCHECK
