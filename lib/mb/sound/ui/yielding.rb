@@ -30,7 +30,7 @@ module MB
       module Yielding
         @on = ENV['MB_SOUND_YIELD'] != '0' && ENV['MB_SOUND_PREVIEW_YIELD'] != '0'
         @painter = ENV['MB_SOUND_PAINTER_YIELD'] != '0'
-        @input = ENV['MB_SOUND_INPUT_YIELD'] == '1'
+        @input = ENV['MB_SOUND_INPUT_YIELD'] != '0'
         @closing = nil
         @said = false
 
@@ -43,8 +43,10 @@ module MB
           # ui-perf-2).  Read when a painter first follows a render thread.
           attr_accessor :painter
 
-          # True (MB_SOUND_INPUT_YIELD=1; off by default): the tiled screen's
-          # input thread yields too, joined by its painter.
+          # True (the default; MB_SOUND_INPUT_YIELD=0 turns it off): the
+          # tiled screen's input thread yields too, joined by its painter
+          # (a knob key's handler held the GVL up to 19 ms on the Mac i9
+          # during a sweep, as often as the painter; ui-perf-2).
           attr_accessor :input
 
           # True when the extension's GVLYield is there.
