@@ -270,6 +270,42 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     expect_meters_only_in_place
   end
 
+  it 'sends a full repaint as the cells that changed, the terminal showing the grid after focus moves, zooms, overlays, and modes (ui-perf-1)' do
+    start(source: -> { ui_fake_snapshot })
+    expect(@term.wait_for('LUFS')).to eq(true)
+    whole = -> { [@term.text, @tiles.to_text].map { |t| t.lines.map(&:rstrip).join("\n") } }
+    same = lambda do |what|
+      @term.read_and_settle
+      ok = wait_until(timeout: 2) { a, b = whole.(); a == b }
+      a, b = whole.()
+      expect(ok).to eq(true), "#{what}: the terminal shows\n#{a}\n\nthe grid holds\n#{b}"
+    end
+    same.('start')
+
+    cleared = @term.bytes
+    nav('2')
+    same.('focus 2')
+    nav('3')
+    same.('focus 3')
+    nav('z')
+    same.('zoom')
+    nav('z')
+    same.('unzoom')
+    nav('?')
+    expect(@term.wait_for('keys (Esc closes')).to eq(true)
+    same.('key overlay')
+    @term.write("\e")
+    same.('overlay closed')
+    @term.type('i')
+    same.('back to the REPL')
+    # (every step sent the whole screen before: 34 KB for these seven
+    # steps; their changed cells are 10 KB, 2026-11-16)
+    expect(@term.bytes - cleared).to be < 20_000
+
+    @tiles.act(MB::Term::Input::Action.of(:redraw)) # Ctrl-L still sends everything
+    same.('redraw')
+  end
+
   it 'draws rules between stacked panes, joined, with the lower pane\'s title set into the rule (ux-1 item 9)' do
     %i[unicode ascii].each do |glyphs|
       @tiles&.stop

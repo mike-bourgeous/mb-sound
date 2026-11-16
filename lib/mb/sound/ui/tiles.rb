@@ -252,6 +252,10 @@ module MB
           @status_note = nil
           @note_capture = nil # (UI::NoteLog.capture when NAV # opened its prompt)
           @features = {} # (the terminal probe's findings, for ui.perf's identity)
+          # (with @full: clear the terminal and send every cell, for a screen
+          # the terminal may not show as we left it; without, a full repaint
+          # of the grid is sent as the cells that differ from what it shows)
+          @clear = false
         end
 
         # The virtual keyboard (UI::Keyboard) KEYS mode plays.
@@ -312,7 +316,7 @@ module MB
           @active = true
           @stopping = false
           install_signals
-          @full = true
+          @full = @clear = true
           @term.typed_during_probe.each { |e| handle(e) }
           hook_keyboard
           keys if @start_keys && @tiler.layout.panes.include?(:keyboard)
@@ -415,7 +419,7 @@ module MB
             @rows, @cols = terminal_size
             @tiler.resize_screen(@cols, @rows - 1)
             @relayout = true
-            @full = true
+            @full = @clear = true
             @repl_full = true
             @host.vt.invalidate
           end
@@ -506,9 +510,9 @@ module MB
         # Panes that raised (name => message).
         def failures = @failures.dup
 
-        # Redraws everything on the next frame.
+        # Redraws everything on the next frame (the terminal cleared first).
         def invalidate
-          @full = true
+          @full = @clear = true
         end
 
         def inspect
@@ -1282,7 +1286,7 @@ module MB
           when :search_next then @search ? search(@search, a.args[0] || 1) : flash('no search yet (/)', :warn)
           when :copy then copy
           when :palette then @router.open_line(:palette, ':', history: @palette_history)
-          when :redraw then @full = true
+          when :redraw then @full = @clear = true
           when :panic # (a script screen's own panic, e.g. a synth screen's notes off, else the console's)
             @on_action ? @on_action.call(a) : run_safely { UI.run_line('panic', keys_session || Session.current) }
           when :pause # (a script screen's own pause, else the console's transport toggle: start or pause, a take line)
@@ -1922,7 +1926,7 @@ module MB
               tile { |t| t.focus!(name) } if name
             end
           when MB::Term::Input::Focus
-            @full = true if e.in
+            @full = @clear = true if e.in
             # Key releases go to the focused window: notes off on the way out
             @keyboard.all_off(mono_now) unless e.in
           end
@@ -2093,6 +2097,7 @@ module MB
           if @grid.nil? || @grid.width != @cols || @grid.height != @rows
             @grid = klass.new(@cols, @rows)
             @shown = klass.new(@cols, @rows)
+            @clear = true # (a new size: the terminal's cells aren't the new @shown)
           end
           names = @placed.map(&:name).compact
           @feed.needs = names.flat_map { |n| @panes[n]&.needs || [] }.uniq
@@ -2200,6 +2205,14 @@ module MB
           # for, instead of being cleared when the frame ends
           full = @full
           @full = false
+          # ui-perf-1: a full repaint (a focus move, a mode change, a pane
+          # key, a relayout) redraws every pane into a cleared grid, but
+          # only a cleared terminal (start, a new size, Ctrl-L, focus in,
+          # #invalidate) is sent every cell; otherwise the frame is the
+          # cells that differ from what the terminal shows.  (Every pane key
+          # on the sound screen sent the whole screen: 13 KB a step.)
+          clear = full && @clear
+          @clear = false if full
           if full
             @grid.clear
             Chrome.paint(@grid, @chrome, glyphs: @glyphs, nav: %i[nav once].include?(@router.mode))
@@ -2261,22 +2274,22 @@ module MB
           note_long_output
           draw_status(now, snap)
 
-          cells = @grid.frame(full ? nil : @shown, @mode, row: 1, col: 1, sync: false)
+          cells = @grid.frame(clear ? nil : @shown, @mode, row: 1, col: 1, sync: false)
           cells = '' if cells == "\e[0m" || cells.empty?
           @shown.copy_from(@grid)
           cursor = cursor_bytes
           out = nil
           perf = @pacer.perf
-          if !cells.empty? || cursor != @last_cursor || full
+          if !cells.empty? || cursor != @last_cursor || clear
             # (ui.perf: a terminal query after some frames; its answer times the terminal's parse)
             ack = perf&.ack_query(now)
-            out = "\e[?2026h\e[?25l#{full ? "\e[0m\e[H\e[2J" : ''}#{cells}#{cursor}\e[?2026l#{ack}"
-            perf&.painted(drawn, repl_drawn, full, out.bytesize)
+            out = "\e[?2026h\e[?25l#{clear ? "\e[0m\e[H\e[2J" : ''}#{cells}#{cursor}\e[?2026l#{ack}"
+            perf&.painted(drawn, repl_drawn, clear, out.bytesize)
             write(out)
             note_written(now, out.bytesize)
             @last_cursor = cursor
           else
-            perf&.painted(drawn, repl_drawn, full, 0)
+            perf&.painted(drawn, repl_drawn, clear, 0)
           end
           cpu = thread_cpu - cpu0
           @frames << [cpu, out&.bytesize || 0, drawn]
