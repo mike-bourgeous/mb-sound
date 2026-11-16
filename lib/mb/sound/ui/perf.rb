@@ -622,9 +622,10 @@ module MB
             session = Session.current
             started_demo = false
             if session.players.empty? && session.arrangement.tracks.empty?
-              MB::Sound.demo
+              # (console lines, journaled as if typed: UI.run_line)
+              UI.run_line('demo', session)
               scene = session.arrangement.scenes.keys[1] || session.arrangement.scenes.keys[0]
-              MB::Sound.go(scene) if scene
+              UI.run_line("go #{scene.inspect}", session) if scene
               started_demo = true
               notes << "nothing played: loaded demo :night_bus and went to #{scene.inspect}"
             end
@@ -655,7 +656,7 @@ module MB
                 target = :ui_perf
                 made = true
               end
-              Design.open(target)
+              UI.run_line("design #{target.inspect}", session)
               tiles = UI.tiles
               sleep 1.0 # (the screen settles: first walks, warm-up frames)
               p2 = tiles.start_perf(label: "design #{target.inspect}")
@@ -675,13 +676,13 @@ module MB
             rescue => e
               notes << "phase 2 skipped: #{e.class}: #{e.message} (run `design :name` once, then ui.perf :capture)"
             ensure
-              Design.close rescue nil
+              UI.run_line('design off', session) rescue nil
               if made
-                MB::Sound.stop(:ui_perf, fade: 0) rescue nil
-                MB::Sound.untrack(:ui_perf) rescue nil
+                UI.run_line('stop :ui_perf, fade: 0', session) rescue nil
+                UI.run_line('untrack :ui_perf', session) rescue nil
               end
             end
-            MB::Sound.stop(:all) if started_demo
+            UI.run_line('stop :all', session) if started_demo
             loads << Perf.loadavg
             delays1 = Perf.run_delays(render: session.render_thread, painter: UI.tiles&.thread)
             File.write(File.join(dir, 'capture.json'), JSON.pretty_generate({ seconds: seconds, notes: notes, loadavg: loads, run_delay_s: { before: delays0, after: delays1 },

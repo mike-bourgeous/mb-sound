@@ -239,13 +239,24 @@ module MB
         # The breakdown as one line for the status bar (NAV f): refreshes
         # against the target, frames written, where a frame's time went
         # (p50s), and the window's p99 lateness and longest gap between
-        # frames (ui-perf-1: smooth is p99 and gaps, not means).
+        # frames when they hitch (ui-perf-1: smooth is p99 and gaps, not
+        # means; #hitches decides, so steady frames keep the line short).
         def readout(window: 2.0)
           b = breakdown(window: window)
           f = ->(v) { v.nil? ? '-' : format('%.1f', v) }
           "#{b[:refreshes].round}/#{b[:target].round} Hz · #{b[:written].round} written · paint #{f.(b[:paint_ms][:p50])} write #{f.(b[:write_ms][:p50])} " \
-            "wait #{f.(b[:sleep_ms][:p50])}+#{f.(b[:oversleep_ms][:p50])} ms · late p99 #{f.(b[:late_ms][:p99])} gap #{b[:gap_ms]&.round || '-'} ms" \
+            "wait #{f.(b[:sleep_ms][:p50])}+#{f.(b[:oversleep_ms][:p50])} ms" \
+            "#{hitches(b) ? " · late p99 #{f.(b[:late_ms][:p99])} / stall #{b[:gap_ms]&.round || '-'} ms" : ''}" \
             "#{b[:skipped] > 0 ? " · #{b[:skipped]} missed" : ''}"
+        end
+
+        # True when a #breakdown's frames hitch: p99 lateness over half a
+        # frame period, or a gap between frame starts over two periods.
+        def hitches(b = breakdown)
+          period_ms = @period * 1000
+          late = b[:late_ms][:p99]
+          gap = b[:gap_ms]
+          (!late.nil? && late > period_ms / 2) || (!gap.nil? && gap > period_ms * 2)
         end
 
         # The transition table as text lines (for the spec and help).

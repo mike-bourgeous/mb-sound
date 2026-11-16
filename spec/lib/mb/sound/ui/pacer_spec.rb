@@ -118,7 +118,21 @@ RSpec.describe(MB::Sound::UI::Pacer, :aggregate_failures) do
     expect(b[:paint_ms][:p50]).to be_within(1e-9).of(2.0)
     expect(b[:write_ms][:p50]).to be_within(1e-9).of(1.0)
     expect(b[:refreshes]).to be_within(1).of(50)
-    expect(p.readout(window: 1.0)).to match(%r{\A(49|50)/50 Hz · (49|50) written · paint 2\.0 write 1\.0 wait 17\.0\+0\.0 ms · late p99 0\.0 gap 20 ms\z})
+    expect(p.readout(window: 1.0)).to match(%r{\A(49|50)/50 Hz · (49|50) written · paint 2\.0 write 1\.0 wait 17\.0\+0\.0 ms\z})
+    expect(p.hitches(b)).to eq(false)
+  end
+
+  it 'names p99 lateness and the longest stall in the readout only when frames hitch (ui-perf-1)' do
+    p = fake(50)
+    n = 0
+    p.run(-> { @t >= 1.0 }) do
+      n += 1
+      @t += n == 20 ? 0.1 : 0.003 # (one 100 ms frame: a stall over two periods)
+      'bytes'
+    end
+    b = p.breakdown(window: 1.0)
+    expect(p.hitches(b)).to eq(true)
+    expect(p.readout(window: 1.0)).to match(%r{ · late p99 [0-9.]+ / stall 1\d\d ms})
   end
 
   it 'defines every (state, event) pair: the table\'s transitions, StateError for the rest' do
