@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module MB
   module Sound
     module UI
@@ -171,7 +173,12 @@ module MB
               c.puts ['nothing to inspect ', :dim], ['(play a track: bg :bass, clip)', :dim]
               return
             end
-            knobs = s.knobs.to_h { |k| [k.name, k] }
+            # (by name, kept while the snapshot's knob list is the same)
+            knobs = state[:knobs_by_name] if state[:knobs_of].equal?(s.knobs)
+            unless knobs
+              knobs = state[:knobs_by_name] = s.knobs.to_h { |k| [k.name, k] }
+              state[:knobs_of] = s.knobs
+            end
             list = pick_list(state, info)
             # (nothing picked yet: the panel starts on the picked row's first cell)
             state[:pick] ||= list.index { |e| e[0] == :param && e[3] == info.node } if view(state, info) == :panel
@@ -257,45 +264,17 @@ module MB
             loose = info.loose
             y = draw_knob_rows(c, y, loose, knobs, pick, state, 0, bottom: c.h - 3) unless loose.empty?
 
-            rows = info.shown
-            secs = Inspect::SECTIONS.select { |sec| rows.any? { |i| info.nodes[i].section == sec } }
             # (the open row is the picked stop's: before the next poll
             # brings its info, the shown node is still the last one)
             stop = pick && list[pick]
             sel = stop&.[](3) || info.node
             cur = sel && info.nodes[sel]&.section
-            hidden = info.hidden.values.sum
-            foot = hidden > 0 && c.h - y > secs.length + 3 ? 1 : 0
-            room = c.h - y - foot
-            params = ->(i) { shown_params(info.nodes[i]).length }
-            # (every row open when all fit; else the picked row open, and
-            # sections collapsed to one line each, farthest from the
-            # picked one first, until the rest fit)
-            srows = secs.to_h { |sec| [sec, rows.select { |i| info.nodes[i].section == sec }] }
-            all_open = secs.sum { |sec| 1 + srows[sec].sum { |i| 1 + params.(i) } }
-            open = all_open <= room ? :all : :picked
-            need = ->(sec) { 1 + srows[sec].length + (srows[sec].include?(sel) ? params.(sel) : 0) }
-            collapsed = {}
-            if open == :picked
-              total = secs.sum { |sec| need.(sec) }
-              ci = secs.index(cur) || 0
-              far = secs.each_with_index.sort_by { |sec, i| [-(i - ci).abs, -need.(sec)] }.map(&:first) - [cur]
-              far.each do |sec|
-                break if total <= room
-                collapsed[sec] = true
-                total -= need.(sec) - 1
-              end
-              # (still too tall: the farthest collapsed lines go too)
-              far.each do |sec|
-                break if total <= room
-                collapsed[sec] = :omit
-                total -= 1
-              end
-            end
+            secs, srows, open, collapsed, foot = section_plan(info, sel, cur, c.h - y, state)
             # (the picked param's place in its row, or nil: a knob, or the
             # row itself when it has no params)
             psel = stop && stop[0] == :param ? shown_params(info.nodes[sel]).index { |name, _| name == stop[1] } : nil
             row_picked = stop && stop[0] == :row
+            params = ->(i) { shown_params(info.nodes[i]).length }
 
             secs.each do |sec|
               break if y >= c.h - foot
@@ -340,6 +319,48 @@ module MB
             c.text(0, c.h - 1, c.fit('plumbing hidden (p shows it)', c.w), :dim) if foot == 1 # (no count: 1708 read as noise)
           end
 
+          # The sections view's plan for +info+ with row +sel+ (in section
+          # +cur+) open and +left+ rows below the header: [sections, rows by
+          # section, :all or :picked open, collapsed sections, footer rows],
+          # kept in +state+ while those stay the same (drawn every frame).
+          def section_plan(info, sel, cur, left, state)
+            p = state[:section_plan]
+            return p[5] if p && p[0].equal?(info) && p[1] == sel && p[2] == left
+            rows = info.shown
+            secs = Inspect::SECTIONS.select { |sec| rows.any? { |i| info.nodes[i].section == sec } }
+            hidden = info.hidden.values.sum
+            foot = hidden > 0 && left > secs.length + 3 ? 1 : 0
+            room = left - foot
+            params = ->(i) { shown_params(info.nodes[i]).length }
+            # (every row open when all fit; else the picked row open, and
+            # sections collapsed to one line each, farthest from the
+            # picked one first, until the rest fit)
+            srows = secs.to_h { |sec| [sec, rows.select { |i| info.nodes[i].section == sec }] }
+            all_open = secs.sum { |sec| 1 + srows[sec].sum { |i| 1 + params.(i) } }
+            open = all_open <= room ? :all : :picked
+            need = ->(sec) { 1 + srows[sec].length + (srows[sec].include?(sel) ? params.(sel) : 0) }
+            collapsed = {}
+            if open == :picked
+              total = secs.sum { |sec| need.(sec) }
+              ci = secs.index(cur) || 0
+              far = secs.each_with_index.sort_by { |sec, i| [-(i - ci).abs, -need.(sec)] }.map(&:first) - [cur]
+              far.each do |sec|
+                break if total <= room
+                collapsed[sec] = true
+                total -= need.(sec) - 1
+              end
+              # (still too tall: the farthest collapsed lines go too)
+              far.each do |sec|
+                break if total <= room
+                collapsed[sec] = :omit
+                total -= 1
+              end
+            end
+            plan = [secs, srows, open, collapsed, foot].freeze
+            state[:section_plan] = [info, sel, left, nil, nil, plan]
+            plan
+          end
+
           # Section heading roles (the theme's section colors).
           SECTION_ROLES = { source: :band_source, filter: :band_filter, amp: :band_amp, mod: :band_mod, fx: :band_fx }.freeze
 
@@ -355,11 +376,21 @@ module MB
           # padded to it.  Returns the column after it.
           def heading(c, y, sec, title, key, cur, state, chip: nil)
             role = SECTION_ROLES[sec] || :band_knobs
-            k = state[:mode] && key && !key.empty? ? "  #{key}" : ''
-            text = "#{cur ? '▸' : ' '}#{title}#{k}"
-            return c.text(0, y, c.pad("#{text} ", [chip, text.length + 1].max.clamp(0, c.w)), role, bold: cur) if chip
-            x = c.text(0, y, text, role, bold: cur)
-            c.text(x, y, " #{c.glyph(:hrule) * [c.w - x - 2, 0].max}", role)
+            # (its text kept per section while what decides it stays: drawn
+            # every frame)
+            heads = (state[:headings] ||= {})
+            h = heads[sec]
+            mode = !!state[:mode]
+            unless h && h[0] == cur && h[1] == mode && h[2] == c.w && h[3] == chip && h[4].equal?(title) && h[5].equal?(key)
+              k = mode && key && !key.empty? ? "  #{key}" : ''
+              text = "#{cur ? '▸' : ' '}#{title}#{k}"
+              chipped = chip ? c.pad("#{text} ", [chip, text.length + 1].max.clamp(0, c.w)) : nil
+              rule = chip ? nil : " #{c.glyph(:hrule) * [c.w - text.length - 2, 0].max}"
+              h = heads[sec] = [cur, mode, c.w, chip, title, key, text.freeze, chipped.freeze, rule.freeze]
+            end
+            return c.text(0, y, h[7], role, bold: cur) if chip
+            x = c.text(0, y, h[6], role, bold: cur)
+            c.text(x, y, h[8], role)
           end
 
           # A collapsed line's title chip width (a section title, its key
@@ -371,12 +402,40 @@ module MB
           # the audio path's rows in section order, the amp where an amp
           # envelope is, the picked row bright.  Returns the next row.
           def draw_chain(c, info, y)
+            blocks = chain_blocks(info)
+            return y if blocks.length < 2
+            x = c.text(0, y, 'notes', :dim)
+            prev = nil
+            blocks.each do |b, j, sec|
+              # (sources side by side are layers: +, not a chain)
+              x = c.text(x, y, prev == :source && sec == :source ? ' + ' : CHAIN_ARROWS[c.glyph(:arrow)], :dim)
+              x = c.text(x, y, b == :amp ? 'amp' : b, j && j == info.node ? :key : :name)
+              prev = sec
+              break if x >= c.w
+            end
+            c.text(x, y, CHAIN_OUT[c.glyph(:arrow)], :dim) if x < c.w
+            y + 1
+          end
+
+          # " → " and " → out" by arrow glyph (made once each).
+          CHAIN_ARROWS = Hash.new { |h, g| h[g] = " #{g} ".freeze }
+          CHAIN_OUT = Hash.new { |h, g| h[g] = " #{g} out".freeze }
+
+          # Rows the chain leaves out by what they are.
+          CHAIN_SKIP = ['pitch', 'FM operator'].freeze
+
+          # The chain's blocks for InspectInfo +info+: [title or :amp, row,
+          # section], kept per info (by identity: a poll's info is new when
+          # anything in it changed).
+          def chain_blocks(info)
+            hit = CHAINS[info]
+            return hit if hit
             rows = info.shown.sort_by { |j| [Inspect::SECTIONS.index(info.nodes[j].section) || 99, j] }
             blocks = []
             amp = false
             rows.each do |j|
               n = info.nodes[j]
-              next if n.section == :mod || n.label == 'unison' || ['pitch', 'FM operator'].include?(n.what)
+              next if n.section == :mod || n.label == 'unison' || CHAIN_SKIP.include?(n.what)
               if n.what.to_s.end_with?(' env') || n.what == 'bursts'
                 amp ||= n.what == 'amp env'
                 next
@@ -385,19 +444,11 @@ module MB
               blocks << [row_title(n), j, n.section]
             end
             blocks << [:amp, nil, nil] if amp && blocks.none? { |b, _, _| b == :amp }
-            return y if blocks.length < 2
-            x = c.text(0, y, 'notes', :dim)
-            prev = nil
-            blocks.each do |b, j, sec|
-              # (sources side by side are layers: +, not a chain)
-              x = c.text(x, y, prev == :source && sec == :source ? ' + ' : " #{c.glyph(:arrow)} ", :dim)
-              x = c.text(x, y, b == :amp ? 'amp' : b, j && j == info.node ? :key : :name)
-              prev = sec
-              break if x >= c.w
-            end
-            c.text(x, y, " #{c.glyph(:arrow)} out", :dim) if x < c.w
-            y + 1
+            CHAINS[info] = blocks.freeze
           end
+
+          # #chain_blocks by info (weak, by identity).
+          CHAINS = ObjectSpace::WeakMap.new
 
           # A row's title: its DSL words and copies ("saw ×6", "lp4").
           def row_title(n)
@@ -412,6 +463,39 @@ module MB
 
           # A row's dim tail: its role, where it goes, its first settings.
           def row_tail(n, knobs)
+            # (kept per row with the values of the knobs it shows: drawn
+            # every frame, rebuilt when a knob it shows turns)
+            hit = TAILS[n]
+            return hit[1] if hit && tail_knobs_same?(hit[0], n, knobs)
+            text = build_row_tail(n, knobs)
+            TAILS[n] = [tail_knobs(n, knobs), text].freeze
+            text
+          end
+
+          # #row_tail by row (weak, by identity).
+          TAILS = ObjectSpace::WeakMap.new
+
+          # The values of the knobs row +n+'s shown params read (an Array).
+          def tail_knobs(n, knobs)
+            shown_params(n).filter_map { |name, _| (kn = n.knob_of(name)) && knobs[kn]&.value }.freeze
+          end
+
+          # True when the knobs row +n+'s params read have +vals+ (no objects
+          # made).
+          def tail_knobs_same?(vals, n, knobs)
+            i = 0
+            shown_params(n).each do |name, _|
+              kn = n.knob_of(name) or next
+              v = knobs[kn]&.value
+              next if v.nil?
+              return false unless i < vals.length && vals[i] == v
+              i += 1
+            end
+            i == vals.length
+          end
+
+          # (#row_tail's text)
+          def build_row_tail(n, knobs)
             bits = []
             bits << n.what if n.what && !%w[drive lfo pitch].include?(n.what) && n.what != n.label && !(n.label == 'env' && n.what.end_with?(' env'))
             bits << "→ #{n.dest.join(', ')}" unless n.dest.empty?
@@ -1107,7 +1191,7 @@ module MB
               at = nil
               state[:pick] = nil
             end
-            i = at && list.index { |e| stop_key(e) == at }
+            i = at && list.index { |e| e[0] == at[0] && e[1] == at[1] && e[3] == at[2] } # (stop_key(e) == at, made without Arrays)
             i ||= at && at[2] && list.index { |e| e[3] == at[2] }
             # (an index a caller set, without a stop: that stop)
             i ||= state[:pick] if at.nil? && state[:pick].is_a?(Integer) && state[:pick].between?(0, list.length - 1)
@@ -1202,39 +1286,74 @@ module MB
             n = s&.inspector&.selected
             @playhead = !n&.live.nil?
             why = nil
-            chart =
-              if n && Preview.tone?(n)
-                chart, why = tone_chart(n, s, state)
-                chart
-              elsif n&.preview
-                chart_for(n, state)
-              end
-            unless chart
-              c.clear
-              c.text(0, 0, c.fit(why || (n ? "#{n.label}: no preview (filters, shapers, envelopes, and oscillators have one)" : 'no node selected (the inspector: n)'), w), :dim)
-              return
+            key = nil
+            if n && Preview.tone?(n)
+              key, why = tone_key(n, s, state)
+            elsif n&.preview
+              key = node_key(n)
             end
             cells = c.grid.class
             lk = look && look != :auto ? look : Scope.auto_look(w, h)
-            live = state[:live]
-            if live.nil? || live.width != w || live.height != h || state[:cells] != cells || state[:look] != lk
-              live = state[:live] = Plot::Live.new(width: w, height: h, look: lk, cells: cells)
-              state[:cells] = cells
-              state[:look] = lk
+            if key && @playhead
+              # (an envelope's playhead moves every frame: built and drawn
+              # here, as the frame's own picture)
+              chart = chart_of(key, n, state)
+              if chart
+                live = state[:live]
+                if live.nil? || live.width != w || live.height != h || state[:cells] != cells || state[:look] != lk
+                  live = state[:live] = Plot::Live.new(width: w, height: h, look: lk, cells: cells)
+                  state[:cells] = cells
+                  state[:look] = lk
+                end
+                live.draw(chart, c.grid, x: c.x, y: c.y)
+                return
+              end
+            elsif key
+              # (a turned knob's chart: built and drawn on a ChartWorker,
+              # the cells copied here; the last picture stays meanwhile)
+              cw = (state[:chart_worker] ||= ChartWorker.new)
+              pic = cw.draw(key, w, h, lk, cells, s&.render_source) { Preview.chart_of_key(key, n) }
+              if pic
+                c.grid.blit(pic, c.x, c.y)
+                return
+              end
             end
-            live.draw(chart, c.grid, x: c.x, y: c.y)
+            c.clear
+            c.text(0, 0, c.fit(why || (n ? "#{n.label}: no preview (filters, shapers, envelopes, and oscillators have one)" : 'no node selected (the inspector: n)'), w), :dim)
           end
 
           # True if NodeInfo +n+ is an oscillator (its preview is one cycle,
           # UI::ToneCycle).
           def self.tone?(n) = !n.params.node_class.nil? && n.params.node_class <= Tone
 
+          # The chart for +key+ (#tone_key's or #node_key's) of row +n+, or
+          # nil.  Pure (no pane state): ChartWorker threads call it.
+          def self.chart_of_key(key, n)
+            b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
+            if key[0] == :tone
+              _, r, pending = key
+              ms = (r.frames - 1) * 1000.0 / r.rate
+              what = r.noise ? "noise  #{Panes.fmt(ms)} ms" : "#{Plot::Panels.hz_text(r.frequency)}  one cycle #{Panes.fmt(ms)} ms#{r.synced ? ' (its sync master\'s)' : ''}"
+              label = "#{n.label} #{what}" \
+                      "#{r.partial ? " (the first #{Panes.fmt(ToneCycle::MAX_SECONDS)} s)" : ''}  #{r.input}#{pending ? ' …' : ''}"
+              live = { cycle: r.cycle, rate: r.rate, frequency: r.frequency, frames: r.frames, synced: r.synced, partial: r.partial, label: label }
+              Plot::Panels.preview(n.params.node_class, n.params, b, live: live) ? b.build : nil
+            else
+              _, params, live = key
+              Plot::Panels.preview(params.node_class, params, b, live: live) ? b.build : nil
+            end
+          rescue StandardError => e
+            warn "preview of #{n.label}: #{e.class}: #{e.message}"
+            nil
+          end
+
           private
 
-          # An oscillator's chart (one cycle of it rendered by a copy of the
-          # voice, UI::ToneCycle; ux-notes-2) and, without one, why: [chart
-          # or nil, text or nil].  Rebuilt only when the render changes.
-          def tone_chart(n, s, state)
+          # An oscillator's chart key (one cycle of it rendered by a copy of
+          # the voice, UI::ToneCycle; ux-notes-2: [:tone, the render, whether
+          # a newer one is coming]) and, without one, why: [key or nil, text
+          # or nil].
+          def tone_key(n, s, state)
             src = s&.render_source
             return [nil, "#{n.label}: #{src&.note || 'its cycle needs a voice to copy (a synth track)'}"] unless src&.synth
             driver = (state[:tone_driver] ||= ToneCycle::Driver.new)
@@ -1242,51 +1361,39 @@ module MB
             r = driver.shown
             return [nil, "#{n.label}: rendering one cycle..."] unless r
             return [nil, "#{n.label}: #{r.error}"] if r.error
-            pending = driver.pending?
-            key = [:tone, r.seq, r.key, pending]
-            return [state[:chart], nil] if state[:chart_of] == key && state[:chart]
-            ms = (r.frames - 1) * 1000.0 / r.rate
-            what = r.noise ? "noise  #{Panes.fmt(ms)} ms" : "#{Plot::Panels.hz_text(r.frequency)}  one cycle #{Panes.fmt(ms)} ms#{r.synced ? ' (its sync master\'s)' : ''}"
-            label = "#{n.label} #{what}" \
-                    "#{r.partial ? " (the first #{Panes.fmt(ToneCycle::MAX_SECONDS)} s)" : ''}  #{r.input}#{pending ? ' …' : ''}"
-            live = { cycle: r.cycle, rate: r.rate, frequency: r.frequency, frames: r.frames, synced: r.synced, partial: r.partial, label: label }
-            b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
-            chart = Plot::Panels.preview(n.params.node_class, n.params, b, live: live) ? b.build : nil
-            state[:chart_of] = key
-            state[:chart] = chart
-            [chart, chart ? nil : "#{n.label}: no cycle to draw"]
-          rescue StandardError => e
-            state[:chart_of] = nil
-            warn "preview of #{n.label}: #{e.class}: #{e.message}"
-            [nil, "#{n.label}: #{e.class}"]
+            [[:tone, r, driver.pending?], nil]
           end
 
-          # The node's chart, rebuilt only when its params (or a playhead)
-          # change.
-          def chart_for(n, state)
+          # A node's chart key: [:node, its params, its live state (a
+          # playhead) with the inspector's picked param as +:focus+].
+          def node_key(n)
             live = live_now(n.live)
             # (the inspector's picked param: an envelope marks its point)
             focus = Inspect.target&.[](:param)
             live = (live || {}).merge(focus: focus) if focus
-            key = [n.params, live]
+            [:node, n.params, live]
+          end
+
+          # The chart for +key+ built here, kept while the key stays.
+          def chart_of(key, n, state)
             return state[:chart] if state[:chart_of] == key
-            b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
-            chart = Plot::Panels.preview(n.params.node_class, n.params, b, live: live) ? b.build : nil
             state[:chart_of] = key
-            state[:chart] = chart
-          rescue StandardError => e
-            state[:chart_of] = key
-            state[:chart] = nil
-            warn "preview of #{n.label}: #{e.class}: #{e.message}"
-            nil
+            state[:chart] = Preview.chart_of_key(key, n)
           end
 
           # +live+ (NodeInfo#live) with +:elapsed+, the seconds since it was
           # read while its segment runs or its sustain is held (in
           # PLAYHEAD_STEPs).
           def live_now(live)
-            return live unless live && live[:at] && (live[:stage] == :segment || (live[:stage] == :sustain && live[:note]))
-            live.merge(elapsed: ((Preview.now - live[:at]) / PLAYHEAD_STEP).floor * PLAYHEAD_STEP)
+            e = elapsed_now(live)
+            e ? live.merge(elapsed: e) : live
+          end
+
+          # The +:elapsed+ of #live_now (nil when it adds none), allocating
+          # nothing (the live wave view's envelope, every frame).
+          def elapsed_now(live)
+            return nil unless live && live[:at] && (live[:stage] == :segment || (live[:stage] == :sustain && live[:note]))
+            ((Preview.now - live[:at]) / PLAYHEAD_STEP).floor * PLAYHEAD_STEP
           end
         end
 
@@ -1380,6 +1487,11 @@ module MB
             end
             driver = Render.driver(state)
             driver.guess = !!state[:guess]
+            body = c.h >= 2 ? c.sub(0, 1, c.w, c.h - 1) : nil
+            # (renders come back with their plots drawn on the worker for
+            # this want: the painter copies their cells)
+            driver.picturer ||= Render.method(:pictures)
+            driver.want = body && Render.want(body, state, look)
             driver.tick(src, s.knobs, s.inspector&.knobs || [].freeze)
             r = driver.shown
             r = nil if r && r.track != src.track
@@ -1390,11 +1502,70 @@ module MB
               return
             end
             prev = state[:overlay] == false ? nil : driver.previous
-            state[:ref_env] = state[:reference] == false ? nil : Render.reference_envelope(r)
-            areas(c.sub(0, 1, c.w, c.h - 1), state[:view] || :all).each do |view, body|
-              chart = chart_for(r, prev, view, state)
-              plot(body, chart, state, view, look) if chart
+            pics = r.pictures
+            if pics && pics[0].equal?(driver.want) && pics[1] == prev&.seq
+              pics[0][0].each_with_index do |area, i|
+                cells = pics[2][i] or next
+                body.grid.blit(cells, body.x + area[1], body.y + area[2])
+              end
+              return
             end
+            # (the want changed since the render started: a marker key, the
+            # overlay, a resize; built here)
+            state[:ref_env] = state[:reference] == false ? nil : Render.reference_envelope(r)
+            areas(body, state[:view] || :all).each do |view, area|
+              chart = chart_for(r, prev, view, state)
+              plot(area, chart, state, view, look) if chart
+            end
+          end
+
+          # What the pane draws in +body+ (a Canvas) with +state+ and
+          # +look+, for a render's pictures (PatchRender::Driver#want): a
+          # frozen [areas, cursor time, cursor frequency, reference on],
+          # areas [[view, x, y, w, h, look, cells class], ...] relative to
+          # +body+.  The same object while none of it changes (Result#pictures
+          # are matched by identity), made without objects otherwise.
+          def self.want(body, state, look)
+            of = state[:want_of]
+            if of && of[0] == body.w && of[1] == body.h && of[2].equal?(state[:view]) && of[3].equal?(look) && of[4].equal?(body.grid.class) &&
+               of[5] == state[:cursor_time] && of[6] == state[:cursor_freq] && of[7] == state[:reference]
+              return state[:want]
+            end
+            state[:want_of] = [body.w, body.h, state[:view], look, body.grid.class, state[:cursor_time], state[:cursor_freq], state[:reference]]
+            areas = Render.areas_of(body, state[:view] || :all).map { |view, a|
+              lk = look && look != :auto ? look : Scope.auto_look(a.w, a.h)
+              [view, a.x - body.x, a.y - body.y, a.w, a.h, lk, body.grid.class].freeze
+            }.freeze
+            state[:want] = [areas, state[:cursor_time], state[:cursor_freq], state[:reference] != false].freeze
+          end
+
+          # The pictures of Result +r+ (with +prev+ faintly behind, or nil)
+          # for +want+ (.want): [want, prev's seq, [cells per area (nil
+          # where there is no chart)]], each area's chart (.chart_of) drawn
+          # by a Plot::Live kept per area on the calling thread (the
+          # Worker's: renders draw their plots there, pausing between them
+          # with +pace+), or nil for a failed render.
+          def self.pictures(r, prev, want, pace = false)
+            return nil if r.error
+            areas, ct, cf, ref_on = want
+            ref = ref_on ? reference_envelope(r) : nil
+            lives = (Thread.current[:mb_sound_render_lives] ||= {})
+            cells = areas.map { |area|
+              view, _x, _y, w, h, lk, klass = area
+              chart = chart_of(r, prev, view, ct, cf, view == :envelope ? ref : nil)
+              PatchRender.send(:rest, pace)
+              next nil unless chart
+              live = (lives[area] ||= Plot::Live.new(width: w, height: h, look: lk, cells: klass))
+              lives.shift while lives.length > 8
+              out = klass.new(w, h)
+              live.draw(chart, out, x: 0, y: 0)
+              PatchRender.send(:rest, pace)
+              out
+            }
+            [want, prev&.seq, cells.freeze].freeze
+          rescue StandardError => e
+            warn "render pane: #{e.class}: #{e.message}"
+            nil
           end
 
           # [key, hi, lo] of the A/B reference of Result +r+'s track (ab):
@@ -1441,7 +1612,10 @@ module MB
           # [[view, canvas], ...]: the plots that fit +body+ for +view+ (:all:
           # the cycle above the spectrum above the envelope, as many as fit
           # STACK_ROWS rows each; side by side in a wide, short pane).
-          def areas(body, view)
+          def areas(body, view) = Render.areas_of(body, view)
+
+          # (see #areas)
+          def self.areas_of(body, view)
             return [[view, body]] unless view == :all
             rows = body.h / STACK_ROWS
             if rows >= 2
@@ -1569,6 +1743,23 @@ module MB
             key = [r.seq, prev&.seq, view == :spectrum ? state[:cursor_freq] : (view == :envelope ? state[:cursor_time] : nil), ref&.first]
             hit = charts[view]
             return hit[1] if hit && hit[0] == key
+            chart = Render.chart_of(r, prev, view, state[:cursor_time], state[:cursor_freq], ref)
+            charts[view] = [key, chart]
+            chart
+          rescue StandardError => e
+            charts[view] = [key, nil]
+            warn "render pane: #{e.class}: #{e.message}"
+            nil
+          end
+
+          public
+
+          # The chart of Result +r+ (and +prev+ faintly behind, if any) in
+          # +view+ (:cycle, :envelope, or :spectrum), with the markers at
+          # +cursor_time+ (seconds, the envelope) and +cursor_freq+ (Hz, the
+          # spectrum) and +ref+ (.reference_envelope, the envelope), or nil
+          # when there is nothing to draw.
+          def self.chart_of(r, prev, view, cursor_time, cursor_freq, ref)
             b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
             case view
             when :spectrum
@@ -1580,7 +1771,7 @@ module MB
               b.y Plot::Scale::DB.new(-90.0..[(top / 10.0).ceil * 10, -40].max.to_f)
               b.line(ps[1], x: ps[0], color: PREVIOUS) if ps
               b.line(db, x: f)
-              b.rule(x: state[:cursor_freq], color: MARKER) if state[:cursor_freq]
+              b.rule(x: cursor_freq, color: MARKER) if cursor_freq
             when :cycle
               return nil unless r.cycle && r.cycle[0].length > 1
               ms = ->(res) { (0..(res.cycle[0].length - 1) * 1000.0 / res.rate) }
@@ -1611,15 +1802,9 @@ module MB
                 b.line(rhi, x: 0..r.frames, color: REFERENCE)
                 b.line(rlo, x: 0..r.frames, color: REFERENCE)
               end
-              b.rule(x: state[:cursor_time] * r.rate, color: MARKER) if state[:cursor_time]
+              b.rule(x: cursor_time * r.rate, color: MARKER) if cursor_time
             end
-            chart = b.build
-            charts[view] = [key, chart]
-            chart
-          rescue StandardError => e
-            charts[view] = [key, nil]
-            warn "render pane: #{e.class}: #{e.message}"
-            nil
+            b.build
           end
         end
 

@@ -13,8 +13,10 @@ RSpec.describe('the idle inspector\'s allocations', :aggregate_failures) do
   let(:ui) { MB::Sound::UI }
 
   # Objects per frame, at most.  Measured 2026-11-13 on the Mac container:
-  # 2210 before (master-ai 90e685fc), 443 after.
-  FRAME_BUDGET = 700
+  # 2210 before (master-ai 90e685fc), 443 after; 2026-11-16 (ui-wave-perf-1
+  # round 3, Linux): 430 before, 192 after (the inspector's row tails,
+  # headings, chain, and sections plan kept; frozen literals).
+  FRAME_BUDGET = 320
 
   before do
     ui::Inspect.target = nil

@@ -26,17 +26,20 @@ module MB
           @height = height
           @frame = Text::Frame.new(width: width, height: height, look: look, color: color, theme: theme, cells: cells)
           @shown = nil
+          @drawn = nil # (the chart #draw drew last, while the frame's cells are its)
         end
 
         # Draws +chart+ (a Chart or Figure) and returns its text: the lines
         # joined by newlines, with ANSI colors unless the color mode is
         # :none.
         def redraw(chart)
+          @drawn = nil
           @frame.text(chart)
         end
 
         # Draws +chart+ and returns its lines (see #redraw).
         def lines(chart)
+          @drawn = nil
           @frame.render(chart)
         end
 
@@ -49,8 +52,16 @@ module MB
         # Returns +grid+.
         #
         #     live.draw(MB::Sound::Plot.waveform(buffer, range: -1.0..1.0), screen_grid, x: 10, y: 2)
+        #
+        # The same chart object as the last #draw (charts are immutable: a
+        # pane keeping its chart while nothing changed) is blitted again
+        # without drawing it (ui-wave-perf-1: the RENDER pane redrew its
+        # unchanged chart 10 times a second).
         def draw(chart, grid, x:, y:)
-          @frame.update(chart)
+          unless chart.equal?(@drawn)
+            @frame.update(chart)
+            @drawn = chart
+          end
           grid.blit(@frame.cells, x, y)
         end
 
@@ -62,6 +73,7 @@ module MB
         #
         #     print pane.frame(MB::Sound::Plot.waveform(buffer, range: -1.0..1.0), row: 2)
         def frame(chart, row: 1, col: 1, full: false, sync: true)
+          @drawn = nil
           @frame.update(chart)
           prev = shown(full)
           out = @frame.cells.frame(prev, color, row: row, col: col, sync: sync)
@@ -73,6 +85,7 @@ module MB
         # encoding and writing without holding the GVL, so the audio
         # thread can run); returns the number of bytes written.
         def write(io, chart, row: 1, col: 1, full: false, sync: true)
+          @drawn = nil
           @frame.update(chart)
           prev = shown(full)
           cells = @frame.cells

@@ -123,6 +123,26 @@ module MB
           }
         end
 
+        # The transfer function as polynomials in z^-1 (H = (b0 + b1 z^-1 +
+        # b2 z^-2) / (1 + a1 z^-1 + a2 z^-2), as #response): into +b+ and +a+
+        # (Arrays of at least three; further entries zeroed), for the live
+        # filter curves (Plot::Response; ui-wave-perf-1).  Returns +b+.
+        def z_polynomials(b, a)
+          b[0] = @b0.to_f
+          b[1] = @b1.to_f
+          b[2] = @b2.to_f
+          a[0] = 1.0
+          a[1] = @a1.to_f
+          a[2] = @a2.to_f
+          i = 3
+          while i < b.length || i < a.length
+            b[i] = 0.0 if i < b.length
+            a[i] = 0.0 if i < a.length
+            i += 1
+          end
+          b
+        end
+
         # Returns the complex z-plane response of the filter transfer function at
         # the given angular frequency on the unit circle from 0 to Math::PI (0Hz
         # to fs/2).  Call .abs on the result to get the magnitude, and .arg to

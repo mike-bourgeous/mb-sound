@@ -1952,6 +1952,7 @@ module MB
         state = @state
         state.last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
         state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
+        state.last_scan = scan.is_a?(Numo::NArray) ? scan[-1] : scan if @table
         state.last_pivot = pivot[-1] if pivot.is_a?(Numo::NArray)
 
         buf.not_inplace!

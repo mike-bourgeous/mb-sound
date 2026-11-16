@@ -77,6 +77,12 @@ module MB
         # segments] (see the class description).
         attr_accessor :frame_phase, :frame_freq, :frame_segments
 
+        # A wavetable tone's scan position of the last sample played (nil
+        # before one, and for other tones), written as last_width is, for
+        # the sound-design screen's live displays (UI::WaveView,
+        # ui-wave-perf-1).  Not part of #to_h: nothing is restored from it.
+        attr_accessor :last_scan
+
         # Creates a state at +phase+ (cycles), ready to play.  Keywords
         # restore any field (see #to_h).
         def initialize(phase: 0.0, **fields)
@@ -95,6 +101,7 @@ module MB
           @last_freq = 0.0
           @last_width = nil
           @last_pivot = nil
+          @last_scan = nil
           @seed = nil
           @draws = 0
           @rng = nil

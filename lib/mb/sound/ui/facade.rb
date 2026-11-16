@@ -163,6 +163,19 @@ module MB
           end
         end
 
+        # The sound-design preview's wave mode: with no argument, :off or
+        # :live; :live draws the preview every frame from the values the
+        # playing voice used in its latest buffer (UI::WaveView, a
+        # prototype), :off the 4/s chart previews (the default;
+        # MB_SOUND_UI_WAVES=live at start sets :live).  Returns the mode.
+        #
+        #     ui.waves :live
+        #     ui.waves          # => :live
+        def waves(mode = nil)
+          return WaveView.mode if mode.nil?
+          WaveView.mode = mode.to_sym
+        end
+
         def respond_to_missing?(name, include_private = false)
           Tiles.public_method_defined?(name) || Band.public_method_defined?(name) || super
         end

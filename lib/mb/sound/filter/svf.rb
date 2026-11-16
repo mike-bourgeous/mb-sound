@@ -191,6 +191,7 @@ module MB
         # see .matched_design).
         def initialize(filter_type, sample_rate, f_center, quality: nil, db_gain: nil, gain: nil, bandwidth_oct: nil, shelf_slope: nil, response: :bilinear)
           raise ArgumentError, "Invalid filter type #{filter_type.inspect}" unless FILTER_TYPE_IDS.include?(filter_type)
+          @z_coefficients = nil # (#z_polynomials' scratch)
           response = self.class.check_response(response, filter_type)
           if FIRST_ORDER_TYPES.include?(filter_type)
             raise ArgumentError, "First-order filters (#{filter_type.inspect}) take no quality, bandwidth, or shelf slope" if bandwidth_oct || shelf_slope
@@ -302,6 +303,53 @@ module MB
           m0 + (m1 * s + m2) / (s * s + k * s + 1)
         end
 
+        # The response (#response) as polynomials in z^-1: the numerator's
+        # coefficients into +b+ and the denominator's into +a+ (Arrays of at
+        # least three, lowest power first; any further entries zeroed), for
+        # the live filter curves (Plot::Response; ui-wave-perf-1).  The
+        # prototype times (g (1 + z^-1))^2.  Returns +b+.
+        def z_polynomials(b, a)
+          c = (@z_coefficients ||= Array.new(6, 0.0))
+          self.class.coefficients(@type_id, @cutoff, @quality, @gain || 1.0, @sample_rate, c)
+          g = c[0]
+          k = c[1]
+          m0 = c[3]
+          m1 = c[4]
+          m2 = c[5]
+          # (1 - z)^2, (1 - z)(1 + z), (1 + z)^2 in z = z^-1
+          gg = g * g
+          a0 = 1.0 + k * g + gg
+          a1 = -2.0 + 2.0 * gg
+          a2 = 1.0 - k * g + gg
+          a[0] = a0
+          a[1] = a1
+          a[2] = a2
+          # (terms with a zero mix left out: a 0.0 times a negative number
+          # is -0.0, which Ruby allocates as an object)
+          b0 = m2 * gg
+          b1 = 2.0 * m2 * gg
+          b2 = m2 * gg
+          if m1 != 0.0
+            b0 += m1 * g
+            b2 -= m1 * g
+          end
+          if m0 != 0.0
+            b0 += m0 * a0
+            b1 += m0 * a1
+            b2 += m0 * a2
+          end
+          b[0] = b0
+          b[1] = b1
+          b[2] = b2
+          i = 3
+          while i < b.length || i < a.length
+            b[i] = 0.0 if i < b.length
+            a[i] = 0.0 if i < a.length
+            i += 1
+          end
+          b
+        end
+
         # Filters +source+ through this filter at its current settings (see
         # Filter#wrap; GraphNode#filter passes nodes as inputs instead).
         def wrap(source, in_place: false)
@@ -327,8 +375,9 @@ module MB
         # The kernel's per-change coefficients for a +type_id+, cutoff +fc+
         # (Hz), quality +q+, linear gain +gain+, and +rate+, clamped as in
         # the kernel: [g, k, a1, m0, m1, m2] (k is the peak filter's
-        # 1 / (Q A); a2 = g a1, a3 = g a2).
-        def self.coefficients(type_id, fc, q, gain, rate)
+        # 1 / (Q A); a2 = g a1, a3 = g a2).  With +out+ (an Array), written
+        # into it instead of a new Array.
+        def self.coefficients(type_id, fc, q, gain, rate, out = nil)
           fc = fc.to_f
           q = q.to_f
           gain = gain.to_f
@@ -343,7 +392,7 @@ module MB
 
           if type_id >= MATCHED
             g, k, m0, m1, m2 = matched_design(type_id - MATCHED, 2.0 * fc * (Math::PI / rate), q, gain)
-            return [g, k, 1.0 / (1.0 + g * (g + k)), m0, m1, m2]
+            return coefficient_array(out, g, k, 1.0 / (1.0 + g * (g + k)), m0, m1, m2)
           end
 
           g = FourPole.tan(fc * (Math::PI / rate))
@@ -391,8 +440,21 @@ module MB
           end
 
           a1 = 1.0 / (1.0 + g * (g + k))
-          [g, k, a1, m0, m1, m2]
+          coefficient_array(out, g, k, a1, m0, m1, m2)
         end
+
+        # [g, k, a1, m0, m1, m2] in +out+, or a new Array without one.
+        def self.coefficient_array(out, g, k, a1, m0, m1, m2)
+          return [g, k, a1, m0, m1, m2] unless out
+          out[0] = g
+          out[1] = k
+          out[2] = a1
+          out[3] = m0
+          out[4] = m1
+          out[5] = m2
+          out
+        end
+        private_class_method :coefficient_array
 
         # The matched-response design (mb_svf_matched in mb_svf.h;
         # filters-acd-1, 2026-11-07) of the type with id +base_id+ (without

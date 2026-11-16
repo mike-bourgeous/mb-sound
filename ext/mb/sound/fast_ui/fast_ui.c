@@ -25,7 +25,9 @@
  * Built with -ffp-contract=off so no multiply-add is fused.
  *
  * gvl_probe.c adds FastUI::GVLProbe (GVL wait and hold times of chosen
- * threads) for the dashboard band (ui-3; design/notes/terminal_ui.md).
+ * threads) for the dashboard band (ui-3; design/notes/terminal_ui.md);
+ * gvl_yield.c FastUI::GVLYield (preview workers hand the GVL to the render
+ * thread when it wants it; design/notes/sound_design_ui.md).
  */
 
 #include <stdint.h>
@@ -51,6 +53,8 @@ static VALUE cGrid;
 
 // gvl_probe.c
 void mb_fast_ui_init_gvl_probe(VALUE mFastUI);
+// gvl_yield.c
+void mb_fast_ui_init_gvl_yield(VALUE mFastUI);
 
 // numo's double to Int32 conversion (xint_macro.h m_from_real)
 static inline int32_t to_i32(double x)
@@ -735,7 +739,246 @@ static VALUE grid_compose(int argc, VALUE *argv, VALUE self)
 	return Qnil;
 }
 
+// Braille dot bits by dot row in a cell (0..3) and dot column (0..1)
+static const uint8_t braille_bit[4][2] = { { 0x01, 0x08 }, { 0x02, 0x10 }, { 0x04, 0x20 }, { 0x40, 0x80 } };
+
+// The dot row (0 top .. rows - 1 bottom) of +v+ between +lo+ and +hi+
+static inline long wave_row(double v, double lo, double hi, long rows)
+{
+	double r = round((hi - v) / (hi - lo) * (double)(rows - 1));
+	if (!(r > 0.0)) {
+		return 0;
+	}
+	if (r > (double)(rows - 1)) {
+		return rows - 1;
+	}
+	return (long)r;
+}
+
+/*
+ * wave(grid, data, x, y, w, h, lo, hi, fg, mark, mark_fg) -> nil
+ *
+ * Draws +data+ (a contiguous 1D SFloat, e.g. one cycle of an oscillator)
+ * as a Braille line across the grid's rectangle of +w+ x +h+ cells at
+ * (+x+, +y+), +lo+ at the bottom dot row and +hi+ at the top, clearing
+ * the rectangle first (ui-wave-perf-1; mirror Plot::Wave.draw_ruby).
+ * Each of the 2 * w dot columns shows the min and max of the samples it
+ * covers (as many samples as columns or more) or the value linearly
+ * interpolated at its position (fewer), joined to the previous column's
+ * last value so the line has no gaps.  +mark+ is a dot column for a
+ * dotted vertical marker (a playhead; -1 for none), drawn in +mark_fg+
+ * where its cells hold no line.  Colors are packed (0xRRGGBB,
+ * MB_TERM_COLOR_INDEXED | n, -1 none).  NaN samples leave their column
+ * empty.
+ */
+static VALUE ruby_wave(VALUE self, VALUE grid, VALUE data, VALUE x_v, VALUE y_v, VALUE w_v, VALUE h_v, VALUE lo_v, VALUE hi_v,
+		VALUE fg_v, VALUE mark_v, VALUE mark_fg_v)
+{
+	(void)self;
+	struct mb_term_grid *g = mb_term_grid_get(grid);
+	if (!contiguous_1d(data, numo_cSFloat)) {
+		rb_raise(rb_eArgError, "The data must be a contiguous 1D Numo::SFloat");
+	}
+	long x0 = NUM2LONG(x_v), y0 = NUM2LONG(y_v), w = NUM2LONG(w_v), h = NUM2LONG(h_v);
+	double lo = NUM2DBL(lo_v), hi = NUM2DBL(hi_v);
+	int32_t fg = NUM2INT(fg_v);
+	long mark = NUM2LONG(mark_v);
+	int32_t mark_fg = NUM2INT(mark_fg_v);
+	const float *d = (const float *)(nary_get_pointer_for_read(data) + nary_get_offset(data));
+	long n = (long)RNARRAY_SIZE(data);
+	if (w <= 0 || h <= 0) {
+		return Qnil;
+	}
+
+	// Clear the rectangle (clipped to the grid)
+	for (long cy = 0; cy < h; cy++) {
+		long gy = y0 + cy;
+		if (gy < 0 || gy >= g->height) {
+			continue;
+		}
+		for (long cx = 0; cx < w; cx++) {
+			long gx = x0 + cx;
+			if (gx < 0 || gx >= g->width) {
+				continue;
+			}
+			long i = gy * g->width + gx;
+			g->cp[i] = ' ';
+			g->fg[i] = -1;
+			g->bg[i] = -1;
+			g->attr[i] = 0;
+		}
+	}
+	if (n <= 0 || !(hi > lo)) {
+		return Qnil;
+	}
+
+	long cols = 2 * w, rows = 4 * h;
+	uint8_t *bits = ALLOC_N(uint8_t, h);
+	uint8_t *marks = ALLOC_N(uint8_t, h);
+	long prev = -1;
+	for (long cx = 0; cx < w; cx++) {
+		memset(bits, 0, (size_t)h);
+		memset(marks, 0, (size_t)h);
+		for (int dx = 0; dx < 2; dx++) {
+			long c = 2 * cx + dx;
+			long top, bot, last;
+			if (n >= cols) {
+				long i0 = c * n / cols;
+				long i1 = (c + 1) * n / cols;
+				if (i1 <= i0) {
+					i1 = i0 + 1;
+				}
+				int seen = 0;
+				double mn = 0.0, mx = 0.0;
+				for (long i = i0; i < i1; i++) {
+					double v = (double)d[i];
+					if (isnan(v)) {
+						continue;
+					}
+					if (!seen) {
+						mn = mx = v;
+						seen = 1;
+					} else if (v < mn) {
+						mn = v;
+					} else if (v > mx) {
+						mx = v;
+					}
+				}
+				if (!seen) {
+					prev = -1;
+					continue;
+				}
+				double lv = (double)d[i1 - 1];
+				top = wave_row(mx, lo, hi, rows);
+				bot = wave_row(mn, lo, hi, rows);
+				last = isnan(lv) ? -1 : wave_row(lv, lo, hi, rows);
+			} else {
+				double pos = cols > 1 ? (double)c * (double)(n - 1) / (double)(cols - 1) : 0.0;
+				long j = (long)floor(pos);
+				if (j > n - 1) {
+					j = n - 1;
+				}
+				long j1 = j + 1 < n ? j + 1 : n - 1;
+				double a = (double)d[j], b = (double)d[j1];
+				double v = a + (b - a) * (pos - (double)j);
+				if (isnan(v)) {
+					prev = -1;
+					continue;
+				}
+				top = bot = last = wave_row(v, lo, hi, rows);
+			}
+			if (prev >= 0) {
+				if (prev < top) {
+					top = prev;
+				}
+				if (prev > bot) {
+					bot = prev;
+				}
+			}
+			for (long r = top; r <= bot; r++) {
+				bits[r / 4] |= braille_bit[r % 4][dx];
+			}
+			prev = last;
+		}
+		if (mark >= 0 && mark / 2 == cx) {
+			int dx = (int)(mark % 2);
+			for (long r = 0; r < rows; r += 2) {
+				marks[r / 4] |= braille_bit[r % 4][dx];
+			}
+		}
+		long gx = x0 + cx;
+		if (gx < 0 || gx >= g->width) {
+			continue;
+		}
+		for (long cy = 0; cy < h; cy++) {
+			long gy = y0 + cy;
+			uint8_t b = bits[cy] | marks[cy];
+			if (b == 0 || gy < 0 || gy >= g->height) {
+				continue;
+			}
+			long i = gy * g->width + gx;
+			g->cp[i] = 0x2800u + b;
+			g->fg[i] = bits[cy] ? fg : mark_fg;
+		}
+	}
+	xfree(bits);
+	xfree(marks);
+	return Qnil;
+}
+
 /* ANSI colors (Plot::Text::ANSI) */
+#define MB_RESPONSE_MAX_COEFFS 16
+
+// Reads up to MB_RESPONSE_MAX_COEFFS coefficients from Ruby Array +ary+
+static long response_coeffs(VALUE ary, double *c, const char *name)
+{
+	Check_Type(ary, T_ARRAY);
+	long n = RARRAY_LEN(ary);
+	if (n < 1 || n > MB_RESPONSE_MAX_COEFFS) {
+		rb_raise(rb_eArgError, "The %s coefficients must be 1 to %d numbers (got %ld)", name, MB_RESPONSE_MAX_COEFFS, n);
+	}
+	for (long i = 0; i < n; i++) {
+		c[i] = NUM2DBL(RARRAY_AREF(ary, i));
+	}
+	return n;
+}
+
+/*
+ * response_db(out, b, a, rate, lo, hi, floor) -> out
+ *
+ * The magnitude in dB of H(z) = B(z^-1) / A(z^-1) (+b+ and +a+: Arrays of
+ * up to 16 coefficients, lowest power first) at out.size log-spaced
+ * frequencies from +lo+ to +hi+ Hz at sample rate +rate+, written into
+ * +out+ (a contiguous 1D SFloat), each at least +floor+ dB.  Allocates
+ * nothing (the sound-design screen's live filter curves, every frame;
+ * ui-wave-perf-1; mirror Plot::Response.db_ruby).
+ */
+static VALUE ruby_response_db(VALUE self, VALUE out, VALUE b_v, VALUE a_v, VALUE rate_v, VALUE lo_v, VALUE hi_v, VALUE floor_v)
+{
+	(void)self;
+	if (!contiguous_1d(out, numo_cSFloat)) {
+		rb_raise(rb_eArgError, "The output must be a contiguous 1D Numo::SFloat");
+	}
+	rb_check_frozen(out);
+	double b[MB_RESPONSE_MAX_COEFFS], a[MB_RESPONSE_MAX_COEFFS];
+	long nb = response_coeffs(b_v, b, "numerator");
+	long na = response_coeffs(a_v, a, "denominator");
+	double rate = NUM2DBL(rate_v), lo = NUM2DBL(lo_v), hi = NUM2DBL(hi_v), floor_db = NUM2DBL(floor_v);
+	if (!(rate > 0.0) || !(lo > 0.0) || !(hi > 0.0) || !isfinite(rate) || !isfinite(lo) || !isfinite(hi) || isnan(floor_db)) {
+		rb_raise(rb_eArgError, "The rate and frequencies must be positive and finite, and the floor a number");
+	}
+	float *o = (float *)(nary_get_pointer_for_write(out) + nary_get_offset(out));
+	long n = (long)RNARRAY_SIZE(out);
+	double l0 = log10(lo), l1 = log10(hi);
+	double step = n > 1 ? (l1 - l0) / (double)(n - 1) : 0.0;
+	double floor_mag = pow(10.0, floor_db / 20.0);
+	for (long i = 0; i < n; i++) {
+		double f = pow(10.0, l0 + step * (double)i);
+		double w = 2.0 * 3.14159265358979323846 * f / rate;
+		// z^-1 = cos w - j sin w; Horner from the highest power
+		double zr = cos(w), zi = -sin(w);
+		double br = b[nb - 1], bi = 0.0;
+		for (long k = nb - 2; k >= 0; k--) {
+			double tr = br * zr - bi * zi + b[k];
+			bi = br * zi + bi * zr;
+			br = tr;
+		}
+		double ar = a[na - 1], ai = 0.0;
+		for (long k = na - 2; k >= 0; k--) {
+			double tr = ar * zr - ai * zi + a[k];
+			ai = ar * zi + ai * zr;
+			ar = tr;
+		}
+		double mag = sqrt((br * br + bi * bi) / (ar * ar + ai * ai));
+		if (!(mag >= floor_mag)) {
+			mag = floor_mag; // (NaN too: a zero over a zero)
+		}
+		o[i] = (float)(20.0 * log10(mag));
+	}
+	RB_GC_GUARD(out);
+	return out;
+}
+
 void Init_fast_ui(void)
 {
 #ifdef HAVE_RB_EXT_RACTOR_SAFE
@@ -750,6 +993,8 @@ void Init_fast_ui(void)
 	rb_define_module_function(mFastUI, "area", ruby_area, 6);
 	rb_define_module_function(mFastUI, "project", ruby_project, 7);
 	rb_define_module_function(mFastUI, "monotonic", ruby_monotonic, 1);
+	rb_define_module_function(mFastUI, "wave", ruby_wave, 11);
+	rb_define_module_function(mFastUI, "response_db", ruby_response_db, 7);
 
 	// (mb-term's fast_term, loaded by require 'mb/term' before this file:
 	// its mb_term_grid_get is linked at load time)
@@ -758,4 +1003,5 @@ void Init_fast_ui(void)
 	rb_define_method(cGrid, "compose", grid_compose, -1);
 
 	mb_fast_ui_init_gvl_probe(mFastUI);
+	mb_fast_ui_init_gvl_yield(mFastUI);
 }

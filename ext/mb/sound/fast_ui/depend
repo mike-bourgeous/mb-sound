@@ -1,4 +1,4 @@
-# gvl_probe.c includes only Ruby headers
+# gvl_probe.c and gvl_yield.c include only Ruby (and system) headers
 # mb-term's header: in this repository's gems/mb-term, or absent in an
 # installed gem, whose extconf.rb finds the mb-term gem's copy ($(wildcard):
 # no rule needed for a missing file; design/notes/release.md)
