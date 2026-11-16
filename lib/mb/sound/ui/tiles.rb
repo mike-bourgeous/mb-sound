@@ -1967,6 +1967,12 @@ module MB
               data = io.read_nonblock(4096, exception: false)
               return if data == :wait_readable
               raise IOError, 'terminal closed' if data.nil?
+              if (pf = @pacer.perf)
+                # (ui.perf's queries: their answers parse as Replies, set
+                # before the bytes are decoded)
+                @decoder.expect_cpr = pf.expect_cpr?
+                @decoder.expect_dcs = pf.expect_dcs?(@clock.call)
+              end
               @decoder.feed(data)
             elsif @decoder.pending?
               @decoder.flush
@@ -1985,8 +1991,8 @@ module MB
               handle(e)
               perf.key(arrival, @clock.call, repl) if e.is_a?(MB::Term::Input::Key) && !e.release?
             end
-            @decoder.expect_cpr = perf.expect_cpr?
-            @decoder.expect_dcs = perf.expect_dcs?(@clock.call)
+            @decoder.expect_cpr = false
+            @decoder.expect_dcs = false
           else
             events.each { |e| handle(e) }
           end
@@ -2205,7 +2211,8 @@ module MB
             next if p.tabs || p.name == :repl || !@panes[p.name]
             [p.name, p.name, @panes[p.name], p.opts[:rate], @drawn_at[p.name]]
           end
-          draw = panes_to_draw(items, now, full, snap)
+          ft = frame_time(now)
+          draw = panes_to_draw(items, ft, full, snap)
           @placed.each do |p|
             if p.tabs
               draw_tabs(p) if full
@@ -2240,7 +2247,7 @@ module MB
             rescue => e
               pane_failed(p, e)
             end
-            @drawn_at[p.name] = now
+            @drawn_at[p.name] = ft
             @rates.drew(p.name, now)
             d = thread_cpu - t0
             (q = @pane_cpu[p.name]) << d

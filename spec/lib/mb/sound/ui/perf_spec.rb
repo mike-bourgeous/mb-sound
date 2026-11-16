@@ -138,6 +138,10 @@ RSpec.describe(MB::Sound::UI::Perf) do
       @tiles, @term = ui_tiles(:tiles, rows: 30, cols: 100)
       @term.wait_for('t> ')
       p = @tiles.start_perf(ack_every: 0.05)
+      # An XTVERSION answer (a DCS the decoder would otherwise read as
+      # Alt-P and text) and a DA2 answer, as a terminal sends them
+      @term.write("\eP>|Konsole 24.08.3\e\\\e[>1;240802;0c")
+      wait_until { p.identity[:da2] }
       wait_until { p.summary[:acks][:answered] >= 3 }
       @term.type('12')
       wait_until { p.summary[:keys][:n] >= 2 }
@@ -150,6 +154,9 @@ RSpec.describe(MB::Sound::UI::Perf) do
       # The answers never reached Reline (no "62;22c" typed) nor the status line
       expect(@term.text).not_to include('62;22c')
       expect(@tiles.host.vt.text).not_to include('62')
+      expect(@tiles.host.vt.text).not_to include('Konsole')
+      expect(p.identity[:xtversion]).to eq('Konsole 24.08.3')
+      expect(s[:keys][:n]).to eq(2) # (the answers aren't keys)
       expect(@tiles.perf).to be_nil
     end
   end

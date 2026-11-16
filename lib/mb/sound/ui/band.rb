@@ -183,7 +183,8 @@ module MB
           top = band_top
           drawn = 0
           paint_chrome if full
-          draw = panes_to_draw(@placed.map { |p| [p, p.pane.name, p.pane, nil, p.drawn_at] }, now, full, snap)
+          ft = frame_time(now)
+          draw = panes_to_draw(@placed.map { |p| [p, p.pane.name, p.pane, nil, p.drawn_at] }, ft, full, snap)
           @placed.each do |p|
             next unless draw.include?(p)
 
@@ -206,7 +207,7 @@ module MB
             rescue => e
               pane_failed(p, e)
             end
-            p.drawn_at = now
+            p.drawn_at = ft
             @rates.drew(p.pane.name, now)
             d = thread_cpu - c
             (parts ||= {})[p.pane.name] = d if d > SLOW_PART
@@ -223,8 +224,11 @@ module MB
           out = nil
           if !cells.empty? || reassert
             out = "\e[?2026h\e7#{region_cmd}#{cells}\e8\e[?2026l"
+            @pacer.perf&.painted(drawn, false, full, out.bytesize)
             write(out)
             note_written(now, out.bytesize)
+          else
+            @pacer.perf&.painted(drawn, false, full, 0)
           end
 
           cpu = thread_cpu - cpu0

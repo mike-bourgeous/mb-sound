@@ -505,17 +505,45 @@ module MB
           @bus_meter ||= BusMeter.new(ch, session.sample_rate)
         end
 
+        class << self
+          # ui-perf-1 (an option, off by default): capture the parts and
+          # the transport at every buffer and publish at the end of any
+          # buffer during which the painter took the last snapshot.  With
+          # the default handshake a snapshot is captured only at the start
+          # of a buffer after the painter took the last one, so a painter
+          # taking mid-buffer (the usual case) waits a buffer more: 800-frame
+          # buffers come 60 times a second but snapshots 30 (measured with
+          # bin/ui_bench.rb), and the scope and meters change on screen 30
+          # times a second while the painter draws 60.  Costs a capture per
+          # buffer (the parts, a few objects) while a screen is up.
+          # MB_SOUND_UI_EVERY_BUFFER=1 turns it on at start.
+          attr_accessor :every_buffer
+        end
+        self.every_buffer = ENV['MB_SOUND_UI_EVERY_BUFFER'] == '1'
+
         # True when the painter has taken the last snapshot (the Session
-        # then calls #capture).
+        # then calls #capture), or every buffer with Feed.every_buffer.
         def wants_capture?
-          @taken
+          @taken || Feed.every_buffer
         end
 
         # The render thread, with the render lock held: reads the parts and
-        # the transport record for the next snapshot.
+        # the transport record for the next snapshot.  A capture replacing
+        # one not yet published (Feed.every_buffer) carries its parts' CPU
+        # times into the new parts (ui_parts resets them as it reads).
         def capture(session)
+          prev = @parts
           @parts = session.ui_parts
+          @parts = Feed.carry_cpu(prev, @parts) if prev
           @record = session.transport_record
+        end
+
+        # +parts+ with the CPU times of +prev+ (by name and kind) added.
+        def self.carry_cpu(prev, parts)
+          parts.map do |q|
+            old = prev.find { |o| o.name == q.name && o.kind == q.kind }
+            old && old.cpu > 0 ? q.with(cpu: q.cpu + old.cpu) : q
+          end
         end
 
         # The render thread, after each buffer is written: accumulates it,
@@ -538,6 +566,7 @@ module MB
           end
 
           return unless @parts && @record
+          return unless @taken # (Feed.every_buffer: captured, but the painter hasn't taken the last one yet)
 
           @latest = build(session)
           @published += 1

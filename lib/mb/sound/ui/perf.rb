@@ -83,6 +83,7 @@ module MB
           @started_at = @clock.call
           @stopped_at = nil
           @frame_start = 0.0
+          @begun = false
           @gc_count0 = 0
           @gc_time0 = 0
           @frame_bytes = 0
@@ -136,6 +137,7 @@ module MB
 
         # A frame starts at +start+ (the Pacer, before the refresh).
         def begin_frame(start)
+          @begun = true
           @frame_start = start
           @gc_count0 = GC.count
           @gc_time0 = GC.stat(:time)
@@ -184,7 +186,7 @@ module MB
 
         # The frame (a UI::Pacer::Frame) ended: one record.
         def end_frame(f)
-          return unless running?
+          return unless running? && @begun # (a frame already painting when recording started)
           i = @count % @ring
           c = @cols
           c[:at][i] = f.at - @started_at
@@ -238,9 +240,12 @@ module MB
         # as a Reply then, not Shift-F3).
         def expect_cpr? = @ack_kind == :dsr && !@ack_sent.nil?
 
-        # True while an XTVERSION answer (a DCS) may come (2 s after
-        # #identify asked).
-        def expect_dcs?(now) = !@probe.nil? && now - @probe[:sent] < ACK_TIMEOUT && !@identity.key?(:xtversion)
+        # True while an XTVERSION answer (a DCS) may come (IDENTITY_WAIT
+        # seconds after #identify asked; a DCS after that is Alt-P again).
+        def expect_dcs?(now) = !@probe.nil? && now - @probe[:sent] < IDENTITY_WAIT && !@identity.key?(:xtversion)
+
+        # Seconds an XTVERSION answer is waited for.
+        IDENTITY_WAIT = 5.0
 
         ### The input thread's hooks
 
