@@ -49,6 +49,16 @@ RSpec.describe(MB::Sound::UI::Facade, :aggregate_failures) do
     expect(facade.inspect).to start_with('#<UI::Band')
   end
 
+  it 'switches the live wave view with ui.waves, off by default' do
+    expect(facade.waves).to eq(:off)
+    expect(facade.waves(:live)).to eq(:live)
+    expect(MB::Sound::UI::WaveView.live?).to eq(true)
+    expect(facade.waves).to eq(:live)
+    expect { facade.waves(:loud) }.to raise_error(ArgumentError, /one of \[:off, :live\]/)
+  ensure
+    MB::Sound::UI::WaveView.mode = :off
+  end
+
   it 'opens KEYS from the band with ui.keys (ux-1 round 3 item 8 bug: NoMethodError)' do
     term = UIHelpers::FakeTerminal.new(30, 100)
     MB::Sound.ui(:band)

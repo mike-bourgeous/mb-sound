@@ -2086,6 +2086,15 @@ module MB
         of the voice (a settled cycle, its spectrum, half a second of
         envelope) after the knobs stop moving.  Small screens get fewer
         panes: the voice, its preview, and the console at 80x24.
+
+        `ui.waves :live` (a prototype, off by default; `ui.waves :off`
+        goes back, `ui.waves` says which) draws the preview every frame
+        from what the playing voice used in its latest buffer, the way a
+        wavetable synth's display moves: an oscillator's cycle with its
+        pulse width and wavetable scan, a filter's response at the cutoff
+        an LFO or envelope moves it to, an LFO's shape with a marker at its
+        phase, an envelope's playhead; an oscillator with no cheap cycle
+        (FM, sync, noise) shows one period of the voice's output.
       TEXT
       commands :design, :ui, :knob, :turn, :learn, :bind
       note :sound_design_ui
