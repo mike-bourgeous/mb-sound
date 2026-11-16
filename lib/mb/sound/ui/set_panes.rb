@@ -154,7 +154,7 @@ module MB
               x = c.line(c.h - 1, ['⏱ ', :dim])
               s.clocks.each do |k|
                 break if x >= c.w - 4
-                x = c.text(x, c.h - 1, c.fit("#{k.name} ", c.w - x), :name)
+                x = c.text_fit(x, c.h - 1, "#{k.name} ", c.w - x, :name)
                 x = c.meter(k.phase, width: 4, x: x, y: c.h - 1, role: :key) if x < c.w - 5
                 x = c.text(x, c.h - 1, '  ', nil)
               end
@@ -165,15 +165,15 @@ module MB
             state[:top] = top = [top, 0].max
 
             # Header: scene names (▶ current, ◆ queued), then "more"
-            c.text(0, 0, c.fit(left > 0 ? '…' : '', name_w), :dim)
+            c.text_fit(0, 0, left > 0 ? '…' : '', name_w, :dim)
             (left...[left + vis_cols, cols].min).each do |j|
               x = name_w + (j - left) * cell_w
               if j < m.scenes.length
                 sc = m.scenes[j]
                 mark = sc.current ? c.glyph(:play) : sc.queued ? '◆' : ' '
-                c.text(x, 0, c.fit("#{mark}#{sc.name}", cell_w - 1), sc.current ? :ok : sc.queued ? :queued : :title)
+                c.text_fit(x, 0, "#{mark}#{sc.name}", cell_w - 1, sc.current ? :ok : sc.queued ? :queued : :title)
               elsif j == m.scenes.length
-                c.text(x, 0, c.fit(' slots', cell_w - 1), :dim)
+                c.text_fit(x, 0, ' slots', cell_w - 1, :dim)
               end
             end
 
@@ -183,7 +183,7 @@ module MB
               lstate = s.lane_state(t.name)
               on = %i[playing starting].include?(lstate)
               x = c.text(0, y, on ? c.glyph(:play) : ' ', on ? :ok : :dim)
-              c.text(x, y, c.fit("#{t.name}#{lstate == :muted ? ' m' : ''}", name_w - 2), lstate == :muted ? :dim : :name)
+              c.text_fit(x, y, "#{t.name}#{lstate == :muted ? ' m' : ''}", name_w - 2, lstate == :muted ? :dim : :name)
               (left...[left + vis_cols, cols].min).each do |j|
                 draw_cell(c, s, m, t, j, name_w + (j - left) * cell_w, y, cell_w - 1, state[:mode] && r == row && j == col, lstate)
               end
@@ -323,11 +323,11 @@ module MB
             hist = clip.respond_to?(:history) ? clip.history : []
             if !hist.empty? && c.h > 5
               # (what made this tweak version: tweak keys name versions bass_a_v2, _v3, ...)
-              c.text(0, y, c.fit("#{hist[0]} → #{hist.drop(1).join(' → ')}", c.w), :dim)
+              c.text_fit(0, y, "#{hist[0]} → #{hist.drop(1).join(' → ')}", c.w, :dim)
               y += 1
             end
             if clip.ruby && c.h > 4
-              c.text(0, y, c.fit(clip.ruby.lines.first.to_s.strip, c.w), :key)
+              c.text_fit(0, y, clip.ruby.lines.first.to_s.strip, c.w, :key)
               y += 1
             end
             roll(c.sub(0, y, c.w, c.h - y), clip, len.to_r)
@@ -356,7 +356,7 @@ module MB
             return if span < 4
             shown = keys.first(c.h)
             shown.each_with_index do |k, y|
-              c.text(0, y, c.fit(kit ? k.to_s : note_name(k), label_w), k.is_a?(Integer) && k % 12 == 0 ? :key : :dim)
+              c.text_fit(0, y, kit ? k.to_s : note_name(k), label_w, k.is_a?(Integer) && k % 12 == 0 ? :key : :dim)
               c.text(label_w + 1, y, '·' * span, :dim)
             end
             clip.events.each do |e|
@@ -447,7 +447,7 @@ module MB
               # Title: path kind  latency
               lat = r.latency.nil? ? '' : r.latency.to_i > 0 ? "  lat #{r.latency} smp" : '  lat 0'
               x = c.line(y, [(r.path || r.name || 'rack').to_s, :name], ['  ', nil], [r.kind.to_s, :key])
-              c.text(x, y, c.fit(lat, [c.w - x, 0].max), :dim)
+              c.text_fit(x, y, lat, [c.w - x, 0].max, :dim)
               y += 1
               break if y >= c.h
               ins = r.ports.map { |p| "#{p[:name]}:#{p[:type]}#{p[:role] == :main ? '' : p[:required] ? '' : '?'}" }
@@ -470,7 +470,7 @@ module MB
                 x = c.meter(spec ? spec.position(value).to_f : 0.0, width: mw, x: x + 1, y: y, role: k ? :key : :dim)
                 # (the queued color while a gesture turns it: its line comes when the keys stop)
                 x = c.text(x + 1, y, vtext, target ? :queued : :text)
-                c.text(x, y, c.fit(range, [c.w - x, 0].max), :dim)
+                c.text_fit(x, y, range, [c.w - x, 0].max, :dim)
                 y += 1
               end
             end

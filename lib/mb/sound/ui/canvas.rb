@@ -111,8 +111,83 @@ module MB
             str = str[-x..] || ''
             x = 0
           end
-          @grid.text(@x + x, @y + y, Canvas.clip(str, @w - x), fg: Theme.rgb(role), bold: bold || MB::Term::Themes.bold?(role), max: @w - x)
+          room = @w - x
+          if str.length > room && str.match?(NONBLANK, room)
+            # (Canvas.clip without a new String: the first room - 1
+            # characters, then the ellipsis; ui-perf-2 round 3)
+            fg = Theme.rgb(role)
+            b = bold || MB::Term::Themes.bold?(role)
+            @grid.text(@x + x, @y + y, str, fg: fg, bold: b, max: room - 1)
+            @grid.text(@x + x + room - 1, @y + y, ELLIPSIS, fg: fg, bold: b)
+          else
+            # (fits, or only blanks cut: max: chops them)
+            @grid.text(@x + x, @y + y, str, fg: Theme.rgb(role), bold: bold || MB::Term::Themes.bold?(role), max: room)
+          end
           x + str.length
+        end
+
+        # Anything but the blanks String#strip removes (Canvas.clip keeps
+        # a cut that loses only those without an ellipsis).
+        NONBLANK = /[^\s\0]/
+
+        # The cut mark.
+        ELLIPSIS = '…'
+
+        # Blanks for #text_pad and #run_pad.
+        BLANKS = (' ' * 400).freeze
+
+        # #text of #fit(+str+, +n+), without new Strings where the result
+        # fits the pane (ui-perf-2 round 3: #fit and #pad made about a
+        # quarter of the sound screen's garbage).  Returns the column after
+        # it.
+        def text_fit(x, y, str, n, role = nil, bold: false)
+          str = str.to_s
+          len = str.length
+          return text(x, y, str, role, bold: bold) if len <= n
+          return text(x, y, fit(str, n), role, bold: bold) if x < 0 || n > @w - x || n < 2 || !@grid.respond_to?(:put_text)
+          return x + n if y < 0 || y >= @h
+
+          fg = Theme.rgb(role)
+          b = bold || MB::Term::Themes.bold?(role)
+          @grid.text(@x + x, @y + y, str, fg: fg, bold: b, max: n - 1)
+          @grid.text(@x + x + n - 1, @y + y, ELLIPSIS, fg: fg, bold: b)
+          x + n
+        end
+
+        # #text of #pad(+str+, +n+), without new Strings where it fits the
+        # pane.  Returns the column after it.
+        def text_pad(x, y, str, n, role = nil, bold: false)
+          str = str.to_s
+          m = str.length < n ? str.length : n
+          return text(x, y, pad(str, n), role, bold: bold) if x < 0 || n > @w - x || n - m > BLANKS.length || !@grid.respond_to?(:put_text)
+          return x + n if y < 0 || y >= @h
+
+          text_fit(x, y, str, n, role, bold: bold)
+          @grid.text(@x + x + m, @y + y, BLANKS, fg: Theme.rgb(role), bold: bold || MB::Term::Themes.bold?(role), max: n - m) if m < n
+          x + n
+        end
+
+        # #run of #pad(+str+, +n+) (no background), without new Strings
+        # where it fits the pane: a native grid's put_text writes what
+        # put_run would with no background.  Returns the column after it.
+        def run_pad(x, y, str, n, role = nil, reverse: false, bold: false)
+          str = str.to_s
+          m = str.length < n ? str.length : n
+          return run(x, y, pad(str, n), role, reverse: reverse, bold: bold) if x < 0 || n > @w - x || n - m > BLANKS.length || !@grid.respond_to?(:put_text) || n < 2
+          return x + n if y < 0 || y >= @h
+
+          attr = (reverse ? MB::Term::Cells::REVERSE : 0) | (bold || MB::Term::Themes.bold?(role) ? MB::Term::Cells::BOLD : 0)
+          fg = MB::Term::Cells.pack(Theme.rgb(role))
+          gx = @x + x
+          gy = @y + y
+          if str.length > n
+            @grid.put_text(gx, gy, str, fg, attr, n - 1)
+            @grid.put_text(gx + n - 1, gy, ELLIPSIS, fg, attr, nil)
+          else
+            @grid.put_text(gx, gy, str, fg, attr, nil)
+            @grid.put_text(gx + m, gy, BLANKS, fg, attr, n - m) if m < n
+          end
+          x + n
         end
 
         # +str+ cut to +room+ columns: with a final ellipsis when anything

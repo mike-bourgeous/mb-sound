@@ -2475,7 +2475,7 @@ module MB
             @grid.put_run(x0 + box_w - 1, y0 + dy, rule[2], border, nil, 0)
           end
           title = ' keys (Esc closes; a key listed here closes and acts) '
-          c.text([(box_w - title.length) / 2, 1].max, 0, c.fit(title, box_w - 2), :title)
+          c.text_fit([(box_w - title.length) / 2, 1].max, 0, title, box_w - 2, :title)
           x = 2
           columns.each_with_index do |column, i|
             y = 2
@@ -2483,7 +2483,7 @@ module MB
               lines.each do |a, b|
                 break if y >= box_h - 1
                 if b.nil?
-                  c.text(x, y, c.fit(a, box_w - x - 2), :title)
+                  c.text_fit(x, y, a, box_w - x - 2, :title)
                 else
                   c.line(y, [a, :key], '  ', [c.fit(b, [box_w - x - a.length - 4, 0].max), :dim], x: x)
                 end
@@ -2538,7 +2538,7 @@ module MB
           x = @tiler.layout.zoom ? c.text(x, 0, -' (zoomed)', :warn) : c.text(x, 0, -' ')
           room = @cols - x - right.length - 1
           if flash
-            c.text(x + 1, 0, c.fit(flash[0], room), flash[1])
+            c.text_fit(x + 1, 0, flash[0], room, flash[1])
           else
             hint =
               if @router.state == :pending then "#{MB::Term::Input::Keymap.chord_name(@router.prefix.key.chord)} ..."
@@ -2546,7 +2546,7 @@ module MB
               elsif mode == :pane then "#{enter_hint}Esc nav  ? keys  #{(m = @panes[@tiler.focus]&.mode_keymap) ? Keys.hints(m) : ''}"
               else HINTS[step ? :step : mode] || ''
               end
-            c.text(x + 1, 0, c.fit(hint, room), @status_note && mode == :play ? :key : :dim)
+            c.text_fit(x + 1, 0, hint, room, @status_note && mode == :play ? :key : :dim)
           end
           c.text(@cols - right.length, 0, right, :key) unless right.empty?
           c.text(warn_at, 0, badge_w, :warn) if warn_at

@@ -87,4 +87,49 @@ RSpec.describe('UI text fitting', :aggregate_failures) do
   ensure
     ui.messages.clear
   end
+
+  # ui-perf-2 round 3: Canvas#text cuts without a new String, and
+  # #text_fit, #text_pad, #run_pad write what #text of #fit, #text of #pad
+  # and #run of #pad write, on both grids, for any text, width, and place
+  it 'writes the same cells through the allocation-free variants' do
+    rng = Random.new(7)
+    words = ['abc', 'saw ×6', '日本語', '   ', 'x', "tab\tend", 'ab  ', '…', '', 'longer words here']
+    [MB::Sound::Plot::Text::NativeCells, MB::Term::Cells].each do |cells|
+      300.times do
+        w = rng.rand(1..30)
+        str = Array.new(rng.rand(0..4)) { words.sample(random: rng) }.join(rng.rand < 0.5 ? ' ' : '')
+        x = rng.rand(-3..w + 2)
+        y = rng.rand(-1..2)
+        n = rng.rand(-2..w + 4)
+        role = %i[dim key text].sample(random: rng)
+        rev = rng.rand < 0.5
+        cases = {
+          text: [->(c) { c.text(x, y, str, role) }, ->(c) { c.text(x, y, str.dup, role) }],
+          fit: [->(c) { c.text(x, y, c.fit(str, n), role) }, ->(c) { c.text_fit(x, y, str, n, role) }],
+          pad: [->(c) { c.text(x, y, c.pad(str, n.abs), role) }, ->(c) { c.text_pad(x, y, str, n.abs, role) }], # (pad of a negative width raises in both)
+          run_pad: [->(c) { c.run(x, y, c.pad(str, n.abs), role, reverse: rev) }, ->(c) { c.run_pad(x, y, str, n.abs, role, reverse: rev) }],
+        }
+        cases.each do |kind, (old, new)|
+          ga = cells.new(40, 4)
+          gb = cells.new(40, 4)
+          ra = old.(ui::Canvas.new(ga, 3, 1, w, 2))
+          rb = new.(ui::Canvas.new(gb, 3, 1, w, 2))
+          expect([rb, gb.to_text(:truecolor)]).to eq([ra, ga.to_text(:truecolor)]), "#{cells} #{kind} #{str.inspect} w=#{w} x=#{x} y=#{y} n=#{n}"
+        end
+      end
+    end
+  end
+
+  it 'cuts, fits, and pads into a native grid without new objects' do
+    c = ui::Canvas.new(MB::Sound::Plot::Text::NativeCells.new(40, 4), 2, 1, 12, 2)
+    long = 'a much longer line than fits'
+    run = -> { c.text(0, 0, long, :dim); c.text_fit(1, 1, long, 8, :key); c.text_pad(0, 1, -'ab', 6); c.run_pad(0, 0, -'abc', 9, :name, reverse: true) } # (-'': literals allocate in a spec file)
+    3.times { run.() }
+    GC.disable
+    a = GC.stat(:total_allocated_objects)
+    100.times { run.() }
+    expect(GC.stat(:total_allocated_objects) - a).to be <= 2 # (none; slack for a stray one)
+  ensure
+    GC.enable
+  end
 end

@@ -252,14 +252,14 @@ module MB
               what = r ? "rec #{c.glyph(:arrow)}#{r.ends}#{r.queued ? ' (queued)' : ''}" : st == :playing ? clip.to_s : "#{st} #{clip}"
               what = "trigger #{what}" if trigger # (a trigger track: heard only by sidechains)
               what = "#{level.finite? ? Panes.fmt(level) : '-inf'} dB #{what}" if level # (its level, when set away from unity)
-              c.text(x, y, c.fit(what, c.w - x), r ? :rec : st == :playing ? :text : :dim)
+              c.text_fit(x, y, what, c.w - x, r ? :rec : st == :playing ? :text : :dim)
             end
             if show.length < rows.length
               below = rows.length - top - show.length
               more = [top > 0 ? "#{top} above" : nil, below > 0 ? "+#{below} more" : nil].compact.join(', ')
-              c.text(0, c.h - 1, c.fit(more, c.w), :dim)
+              c.text_fit(0, c.h - 1, more, c.w, :dim)
             elsif hidden > 0 && c.h > rows.length
-              c.text(0, c.h - 1, c.fit("#{hidden} stopped hidden (v)", c.w), :dim)
+              c.text_fit(0, c.h - 1, "#{hidden} stopped hidden (v)", c.w, :dim)
             end
           end
 
@@ -332,7 +332,7 @@ module MB
             end
             q.first(c.h).each_with_index do |e, y|
               x = c.line(y, [e.lands.ljust(6), :queued], ' ', [e.kind.to_s, :dim], ' ')
-              c.text(x, y, c.fit(e.subject.inspect, c.w - x), :name)
+              c.text_fit(x, y, e.subject.inspect, c.w - x, :name)
             end
           end
         end
@@ -565,12 +565,12 @@ module MB
             @rows = [c.h - 1, 1].max
             @offset = @offset.clamp(0, [@lines.length - @rows, 0].max)
             @lines[@offset, @rows].to_a.each_with_index do |l, y|
-              c.text(0, y, c.fit(l, c.w), :text)
+              c.text_fit(0, y, l, c.w, :text)
             end
             last = [@offset + @rows, @lines.length].min
             status = "lines #{@offset + 1}-#{last} of #{@lines.length}#{@found ? "  /#{@find}" : ''}  " \
                      "#{state[:mode] ? 'j k PgUp PgDn g G, / search, y copy, Esc back, q closes' : 'Enter reads, q closes'}"
-            c.text(0, c.h - 1, c.fit(status, c.w), :dim)
+            c.text_fit(0, c.h - 1, status, c.w, :dim)
           end
 
           # / : the search prompt (its answer: #key_found).
@@ -668,7 +668,7 @@ module MB
               return if c.h <= 0
             end
             unless @figure
-              c.text(0, 0, c.fit('no plot yet (plot 440.hz.sine, chart { ... })', c.w), :dim)
+              c.text_fit(0, 0, 'no plot yet (plot 440.hz.sine, chart { ... })', c.w, :dim)
               return
             end
             cells = c.grid.class

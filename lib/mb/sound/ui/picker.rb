@@ -252,14 +252,14 @@ module MB
             top = pick - rows + 1 if pick >= top + rows
             top = state[:top] = top.clamp(0, [list.length - rows, 0].max)
             if list.empty?
-              c.text(0, 2, c.fit(state[:query].to_s.empty? ? "nothing under L.#{head(state)}" : "no match for '#{state[:query]}' under L.#{head(state)} (Tab: other heads)", c.w), :dim)
+              c.text_fit(0, 2, state[:query].to_s.empty? ? "nothing under L.#{head(state)}" : "no match for '#{state[:query]}' under L.#{head(state)} (Tab: other heads)", c.w, :dim)
             else
               playing = playing_entry(s)
               width = [list[top, rows].map { |e| e.name.length }.max.to_i, c.w / 2 + 2].min
               list[top, rows].each_with_index do |e, i|
                 draw_entry(c, 2 + i, e, width, top + i == pick, state, playing)
               end
-              c.text(0, 2 + rows, c.fit("  +#{list.length - top - rows} more", c.w), :dim) if top + rows < list.length
+              c.text_fit(0, 2 + rows, "  +#{list.length - top - rows} more", c.w, :dim) if top + rows < list.length
             end
             draw_detail(c, c.h - detail, picked(state)) if detail > 0 && !list.empty?
           end
@@ -296,7 +296,7 @@ module MB
             if state[:finding]
               c.line(y, ['find ', :key], [q, :text], ['▏', :key])
             elsif q.empty?
-              c.text(0, y, c.fit(state[:mode] ? '/ find  a listen  Enter load  e edit' : '/ find (in: NAV l)', c.w), :dim)
+              c.text_fit(0, y, state[:mode] ? '/ find  a listen  Enter load  e edit' : '/ find (in: NAV l)', c.w, :dim)
             else
               c.line(y, ['find ', :dim], [q, :text], [" (#{results(state).length})", :dim])
             end
@@ -308,10 +308,10 @@ module MB
           def draw_entry(c, y, e, width, on, state, playing)
             c.run(0, y, on ? '▸' : ' ', :key)
             c.run(1, y, playing && playing.family == e.family && playing.name == e.name ? '●' : ' ', :ok)
-            x = c.run(2, y, c.pad(e.name.to_s, width), on ? :key : :name, reverse: on && state[:mode])
+            x = c.run_pad(2, y, e.name.to_s, width, on ? :key : :name, reverse: on && state[:mode])
             what = head(state) == :all ? e.kind.to_s : (e.family == :preset ? nil : e.family.to_s)
             words = [what, *e.tags.first(3)].compact.join(' ')
-            c.text(x + 1, y, c.fit(words, [c.w - x - 1, 0].max), :dim)
+            c.text_fit(x + 1, y, words, [c.w - x - 1, 0].max, :dim)
           end
 
           # The picked entry's description, tags and params, and where it
@@ -325,8 +325,8 @@ module MB
             words = []
             words << "tags #{e.tags.join(' ')}" unless e.tags.empty?
             words << "params #{params.join(' ')}" unless params.empty?
-            c.text(0, y + 2, c.fit(words.join('  '), c.w), :dim)
-            c.text(0, y + 3, c.fit("#{UI::Picker.path_of(e)}  #{e.shelf&.name}", c.w), :dim)
+            c.text_fit(0, y + 2, words.join('  '), c.w, :dim)
+            c.text_fit(0, y + 3, "#{UI::Picker.path_of(e)}  #{e.shelf&.name}", c.w, :dim)
           end
 
           def key_pick(state, d)

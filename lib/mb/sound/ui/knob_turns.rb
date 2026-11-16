@@ -94,7 +94,7 @@ module MB
         def turn_line_canvas(c, state)
           line = state[:turn_line]
           return c if line.nil? || c.h < TURN_LINE_ROWS
-          c.text(0, c.h - 1, c.fit(line, c.w), :dim)
+          c.text_fit(0, c.h - 1, line, c.w, :dim)
           c.sub(0, 0, c.w, c.h - 1)
         end
 

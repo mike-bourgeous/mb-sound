@@ -199,10 +199,10 @@ module MB
             idx = info.tracks.index(info.track)
             name = info.document || info.instrument # (a preset's document, else a library instrument's name: acid)
             x = c.line(0, [info.track.to_s, :name], [name ? "  #{name}" : '', :text], ["  #{idx ? idx + 1 : '?'}/#{info.tracks.length}", :dim])
-            c.text(x, 0, c.fit(state[:mode] ? "  #{hint}" : '', [c.w - x, 0].max), :dim)
+            c.text_fit(x, 0, state[:mode] ? "  #{hint}" : '', [c.w - x, 0].max, :dim)
             y = 1
             if info.error
-              c.text(0, y, c.fit(info.error, c.w), :warn)
+              c.text_fit(0, y, info.error, c.w, :warn)
               y += 1
             end
             if info.voices.length > 1
@@ -213,13 +213,13 @@ module MB
                 sel = v == info.voice
                 x = c.run(x, y, " #{v} ", sel ? :key : :name, reverse: sel)
               end
-              c.text(x, y, c.fit('  v V', [c.w - x, 0].max), :dim)
+              c.text_fit(x, y, '  v V', [c.w - x, 0].max, :dim)
               y += 1
               # (the voice's knob values: the kit's per-voice settings,
               # `tr909(clip, kick: { decay: 0.4 })`)
               if (vk = info.voice_knobs[info.voice]) && !vk.empty? && y < c.h - 2
                 text = vk.map { |k, v| "#{k} #{v.is_a?(Float) ? Panes.fmt(v) : v}" }.join('  ')
-                c.text(1, y, c.fit("#{info.voice}: #{text}", c.w - 1), :dim)
+                c.text_fit(1, y, "#{info.voice}: #{text}", c.w - 1, :dim)
                 y += 1
               end
             end
@@ -247,7 +247,7 @@ module MB
               mw = (c.w - x - vtext.length - range.length - 3).clamp(3, 32)
               x = c.meter(spec.position(value.to_f).to_f, width: mw, x: x + 1, y: y, role: :key)
               x = c.text(x + 1, y, vtext, turning ? :queued : :text)
-              c.text(x, y, c.fit(range, [c.w - x, 0].max), :dim)
+              c.text_fit(x, y, range, [c.w - x, 0].max, :dim)
               y += 1
             end
             y
@@ -284,7 +284,7 @@ module MB
               next if collapsed[sec] == :omit
               if collapsed[sec]
                 x = heading(c, y, sec, title, key, false, state, chip: chip_width(state))
-                c.text(x + 1, y, c.fit(list.map { |i| row_title(info.nodes[i]) }.join(' · '), [c.w - x - 1, 0].max), :text)
+                c.text_fit(x + 1, y, list.map { |i| row_title(info.nodes[i]) }.join(' · '), [c.w - x - 1, 0].max, :text)
                 y += 1
                 next
               end
@@ -302,8 +302,8 @@ module MB
                 n = info.nodes[i]
                 on = i == sel
                 x = c.run(0, y, on ? '▸' : ' ', :key)
-                x = c.run(x, y, c.pad(row_title(n), 14), on && psel.nil? ? :key : :name, reverse: on && state[:mode] && row_picked)
-                c.text(x + 1, y, c.fit(row_tail(n, knobs), [c.w - x - 1, 0].max), :dim)
+                x = c.run_pad(x, y, row_title(n), 14, on && psel.nil? ? :key : :name, reverse: on && state[:mode] && row_picked)
+                c.text_fit(x + 1, y, row_tail(n, knobs), [c.w - x - 1, 0].max, :dim)
                 y += 1
                 next unless on || open == :all
                 # (a picked param below the pane's bottom: the row's params
@@ -316,7 +316,7 @@ module MB
                 end
               end
             end
-            c.text(0, c.h - 1, c.fit('plumbing hidden (p shows it)', c.w), :dim) if foot == 1 # (no count: 1708 read as noise)
+            c.text_fit(0, c.h - 1, 'plumbing hidden (p shows it)', c.w, :dim) if foot == 1 # (no count: 1708 read as noise)
           end
 
           # The sections view's plan for +info+ with row +sel+ (in section
@@ -538,7 +538,7 @@ module MB
           # One param row: name, a meter for a knob, the value, what else
           # moves it (a knob's name dim).  Returns the next row.
           def draw_param(c, y, info, n, name, v, knobs, state, sel:, indent: 2)
-            x = c.run(indent, y, c.pad(name.to_s, 10), sel ? :key : :name, reverse: sel)
+            x = c.run_pad(indent, y, name.to_s, 10, sel ? :key : :name, reverse: sel)
             kn = n.knob_of(name)
             k = kn && knobs[kn]
             mods = modulators(info, n, name)
@@ -557,14 +557,14 @@ module MB
               x = c.meter(k.spec.position(value.to_f).to_f, width: mw, x: x + 1, y: y, role: :key)
               x = c.text(x + 1, y, vtext, turning ? :queued : (masked ? :dim : :text))
               x = c.text(x + 1, y, more, :dim) unless more.empty?
-              c.text(x, y, c.fit(masked ? "  #{sel ? masked : 'not heard here'}" : "  #{direct ? '' : 'via '}#{kn}", [c.w - x, 0].max), :dim)
+              c.text_fit(x, y, masked ? "  #{sel ? masked : 'not heard here'}" : "  #{direct ? '' : 'via '}#{kn}", [c.w - x, 0].max, :dim)
             elsif !v.value.nil?
               x = c.text(x + 1, y, value_text(v) || v.value.to_s, masked ? :dim : :text)
               hint = sel && (b = n.binds[name]) ? (b.line ? "  Enter: knob #{b.knob.inspect}" : "  #{b.reason}") : (v.detail == Inspect::LITERAL ? '  ·' : '')
               # (a turn this voice and clip can't make heard, with why when
               # picked: Inspect.masked_of; inspector-nav-1)
               hint = sel ? "  #{masked}" : '  · not heard here' if masked
-              c.text(x, y, c.fit(hint, [c.w - x, 0].max), :dim)
+              c.text_fit(x, y, hint, [c.w - x, 0].max, :dim)
             else
               # (the knobs that set a modulated param's base: the maintainer's
               # "It says cutoff comes from mod env but mod env does not have a
@@ -572,7 +572,7 @@ module MB
               # frequency"; tuner-fixes-1)
               feeds = n.param_feeds[name]
               base = feeds ? "; set by #{feeds.map { |f| Session::Name[f].leaf }.join(', ')}" : ''
-              c.text(x + 1, y, c.fit(mods.empty? ? "#{c.glyph(:arrow)} #{v.label || v.detail}#{base}" : "← #{mods.join(', ')}#{base}", [c.w - x - 1, 0].max), :dim)
+              c.text_fit(x + 1, y, mods.empty? ? "#{c.glyph(:arrow)} #{v.label || v.detail}#{base}" : "← #{mods.join(', ')}#{base}", [c.w - x - 1, 0].max, :dim)
             end
             y + 1
           end
@@ -621,7 +621,7 @@ module MB
             y = draw_header(c, info, state, "#{keys}  P sections#{info.document ? "  F #{state[:fixed] ? 'hide' : 'show'} numbers" : ''}")
             if list.empty?
               text = info.voices.length > 1 ? "no knobs: the voice's settings are above (a kit's knob Hash: #{info.voice}: { decay: 0.4 }); P the sections" : 'no knobs or literals to show (P: the sections, p: every node)'
-              c.text(0, y, c.fit(text, c.w), :dim)
+              c.text_fit(0, y, text, c.w, :dim)
               return
             end
             groups = list.each_with_index.group_by { |e, _| cell_section(info, e) }
@@ -642,7 +642,7 @@ module MB
               if tight && sec != cur
                 x = heading(c, y, sec, title, key, false, state, chip: chip_width(state))
                 summary = cells.each_with_index.map { |(e, _), j| "#{names[j]} #{cell_value_text(info, e, knobs, state)}" }.join('  ')
-                c.text(x + 1, y, c.fit(summary, [c.w - x - 1, 0].max), :dim)
+                c.text_fit(x + 1, y, summary, [c.w - x - 1, 0].max, :dim)
                 y += 1
                 next
               end
@@ -693,17 +693,17 @@ module MB
           # One panel cell on +c+ (a one-row canvas): name, a meter (a knob)
           # or dots (a literal), the value.
           def draw_cell(c, info, e, name, knobs, state, sel)
-            x = c.run(0, 0, c.pad(name, 8), sel ? :key : :name, reverse: sel)
+            x = c.run_pad(0, 0, name, 8, sel ? :key : :name, reverse: sel)
             kn = e[0] == :knob ? e[1] : info.nodes[e[3]].knob_of(e[1])
             vtext = cell_value_text(info, e, knobs, state)
             mw = (c.w - x - vtext.length - 2).clamp(2, 10)
             if kn && (k = knobs[kn])&.spec
               value, turning = shown_value(state, kn, k)
               x = c.meter(k.spec.position(value.to_f).to_f, width: mw, x: x + 1, y: 0, role: :key)
-              c.text(x + 1, 0, c.fit(vtext, [c.w - x - 1, 0].max), turning ? :queued : :text)
+              c.text_fit(x + 1, 0, vtext, [c.w - x - 1, 0].max, turning ? :queued : :text)
             else
               x = c.text(x + 1, 0, '·' * mw, :dim)
-              c.text(x + 1, 0, c.fit(vtext, [c.w - x - 1, 0].max), :dim)
+              c.text_fit(x + 1, 0, vtext, [c.w - x - 1, 0].max, :dim)
             end
           end
 
@@ -713,12 +713,12 @@ module MB
             y = draw_header(c, info, state, 't: next track')
             if info.knobs.empty?
               # (bind, not a hand-written knob line; the review's #27)
-              c.text(0, y, c.fit("no knobs yet: Enter on a dim · binds a literal (bind #{info.track.inspect}, lp4: :cutoff)", c.w), :dim)
+              c.text_fit(0, y, "no knobs yet: Enter on a dim · binds a literal (bind #{info.track.inspect}, lp4: :cutoff)", c.w, :dim)
               y += 1
             end
             y = draw_knob_rows(c, y, info.knobs, knobs, pick, state)
             if pick && state[:mode] && y < c.h && pick < info.knobs.length && (desc = knobs[info.knobs[pick]]&.spec&.param&.description)
-              c.text(1, y, c.fit(desc, c.w - 1), :dim)
+              c.text_fit(1, y, desc, c.w - 1, :dim)
               y += 1
             end
             draw_node(c, info, y + (y < c.h - 2 ? 1 : 0), state[:mode] && pick && pick >= info.knobs.length ? pick - info.knobs.length : nil) if y < c.h - 1
@@ -750,7 +750,7 @@ module MB
             return if y >= c.h
             role = n.role && n.role != n.label ? "  #{n.role}" : ''
             x = c.line(y, [n.label, :key], ["#{role}#{n.count > 1 ? " ×#{n.count}" : ''}", :dim], ["  #{info.node + 1}/#{info.nodes.length}", :dim])
-            c.text(x, y, c.fit('  n N: other nodes', [c.w - x, 0].max), :dim)
+            c.text_fit(x, y, '  n N: other nodes', [c.w - x, 0].max, :dim)
             y += 1
             # (a picked param below the pane's last row scrolls the list)
             vals = n.params.values.to_a
@@ -759,15 +759,15 @@ module MB
               next if i < first
               break if y >= c.h
               sel = i == psel
-              x = c.run(1, y, c.pad(name.to_s, 10), sel ? :key : :name, reverse: sel)
+              x = c.run_pad(1, y, name.to_s, 10, sel ? :key : :name, reverse: sel)
               text, role =
                 if v.label.is_a?(Symbol) then ["#{c.glyph(:arrow)} knob #{v.label} #{Panes.fmt(v.value)}#{v.unit ? " #{v.unit}" : ''}", :key]
                 elsif !v.value.nil? then ["#{Panes.fmt(v.value)}#{v.unit ? " #{v.unit}" : ''}", :text]
                 else ["#{c.glyph(:arrow)} #{v.label || v.detail}", :dim]
                 end
-              x = c.text(x + 1, y, c.fit(text, [c.w - x - 1, 0].max), role)
+              x = c.text_fit(x + 1, y, text, [c.w - x - 1, 0].max, role)
               if sel && (b = n.binds[name])
-                c.text(x, y, c.fit(b.line ? "  Enter: knob #{b.knob.inspect}" : "  #{b.reason}", [c.w - x, 0].max), :dim)
+                c.text_fit(x, y, b.line ? "  Enter: knob #{b.knob.inspect}" : "  #{b.reason}", [c.w - x, 0].max, :dim)
               end
               y += 1
             end
@@ -1319,7 +1319,7 @@ module MB
               end
             end
             c.clear
-            c.text(0, 0, c.fit(why || (n ? "#{n.label}: no preview (filters, shapers, envelopes, and oscillators have one)" : 'no node selected (the inspector: n)'), w), :dim)
+            c.text_fit(0, 0, why || (n ? "#{n.label}: no preview (filters, shapers, envelopes, and oscillators have one)" : 'no node selected (the inspector: n)'), w, :dim)
           end
 
           # True if NodeInfo +n+ is an oscillator (its preview is one cycle,
@@ -1478,11 +1478,11 @@ module MB
             end
             src = s&.render_source
             unless src
-              c.text(0, 0, c.fit('nothing to render (play a track: bg :bass, clip)', c.w), :dim)
+              c.text_fit(0, 0, 'nothing to render (play a track: bg :bass, clip)', c.w, :dim)
               return
             end
             unless src.synth
-              c.text(0, 0, c.fit(src.note || 'no voice to copy', c.w), :dim)
+              c.text_fit(0, 0, src.note || 'no voice to copy', c.w, :dim)
               return
             end
             driver = Render.driver(state)
@@ -1498,7 +1498,7 @@ module MB
             draw_header(c, r, driver, Render.cursor_text(state))
             return if c.h < 2
             if r.nil? || r.error
-              c.text(0, 1, c.fit(r ? r.error : 'rendering...', c.w), r ? :warn : :dim)
+              c.text_fit(0, 1, r ? r.error : 'rendering...', c.w, r ? :warn : :dim)
               return
             end
             prev = state[:overlay] == false ? nil : driver.previous
@@ -1657,7 +1657,7 @@ module MB
             else
               tail = r ? "  #{r.input}" : ''
             end
-            x = c.text(x, 0, c.fit(tail, [c.w - x - 2, 0].max), :dim)
+            x = c.text_fit(x, 0, tail, [c.w - x - 2, 0].max, :dim)
             c.text(x, 0, ' …', :queued) if driver.pending? && x + 2 <= c.w
           end
 
@@ -1861,7 +1861,7 @@ module MB
             lines = Code.wrapped(Code.lines(info, s.knobs, state), c.w, state)
             top = state[:top] = state[:top].to_i.clamp(0, [lines.length - c.h, 0].max)
             lines[top, c.h].each_with_index do |(l, role), y|
-              c.text(0, y, c.fit(l, c.w), role)
+              c.text_fit(0, y, l, c.w, role)
             end
             c.text(c.w - 6, c.h - 1, ' more ', :dim) if top + c.h < lines.length && c.w > 12
           end
@@ -1959,14 +1959,14 @@ module MB
             y = 0
             built.each do |label, help|
               break if y >= c.h
-              x = c.text(0, y, c.pad(label, w), :key)
-              c.text(x + 1, y, c.fit(help, [c.w - x - 1, 0].max), :text)
+              x = c.text_pad(0, y, label, w, :key)
+              c.text_fit(x + 1, y, help, [c.w - x - 1, 0].max, :text)
               y += 1
             end
             planned.each do |label, help|
               break if y >= c.h
-              x = c.text(0, y, c.pad(label, w), :dim)
-              c.text(x + 1, y, c.fit("#{help} (later)", [c.w - x - 1, 0].max), :dim)
+              x = c.text_pad(0, y, label, w, :dim)
+              c.text_fit(x + 1, y, "#{help} (later)", [c.w - x - 1, 0].max, :dim)
               y += 1
             end
           end
