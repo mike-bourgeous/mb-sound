@@ -109,6 +109,24 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       expect(e.submit?(0.05 + q * 0.8)).to eq(false)
       expect(e.submit?(0.05 + q * 1.05)).to eq(true)
     end
+
+    it 'with hold_sweeps renders only once changes stop for DEBOUNCE' do
+      pr.hold_sweeps = true
+      d = pr::Debounce.new
+      t = 0.0
+      40.times do
+        d.change(t)
+        expect(d.submit?(t)).to eq(false)
+        t += 0.05
+      end
+      expect(d.submit?(t - 0.05 + pr::DEBOUNCE * 0.8)).to eq(false)
+      expect(d.submit?(t - 0.05 + pr::DEBOUNCE * 1.05)).to eq(true)
+      e = pr::Debounce.new
+      e.change(0.0)
+      expect(e.submit?(0.0, urgent: true)).to eq(true) # (nothing shown yet: at once)
+    ensure
+      pr.hold_sweeps = false
+    end
   end
 
   describe MB::Sound::UI::PatchRender::Driver do

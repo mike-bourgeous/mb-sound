@@ -284,6 +284,7 @@ module MB
         end
 
         @seconds = SECONDS
+        @hold_sweeps = ENV['MB_SOUND_RENDER_HOLD'] == '1'
         @inline = false
         @clock = nil
         @duty = Float(ENV['MB_SOUND_RENDER_DUTY'] || DUTY)
@@ -292,6 +293,14 @@ module MB
         class << self
           # The length of the envelope view (seconds).
           attr_reader :seconds
+
+          # True: no renders while changes keep coming (a held sweep), one
+          # once they stop for DEBOUNCE (the RENDER pane and the oscillator
+          # preview stand still during a sweep); false (the default, or
+          # MB_SOUND_RENDER_HOLD unset): a render at most every SWEEP while
+          # they come.  The maintainer's question 5 (ui-wave-perf-1), an
+          # option to compare by eye and ear.
+          attr_accessor :hold_sweeps
 
           # True: Drivers render on the calling thread (InlineWorker), for
           # specs and the golden captures.
@@ -1012,7 +1021,8 @@ module MB
         #   idle      change                                  waiting  pending since now
         #   waiting   change                                  waiting  last change now
         #   waiting   tick    quiet DEBOUNCE, or pending       busy     submit
-        #                     SWEEP, or nothing shown yet
+        #                     SWEEP (unless .hold_sweeps), or
+        #                     nothing shown yet
         #   busy      change                                  dirty    pending since now
         #   busy      done                                    idle
         #   dirty     change                                  dirty    last change now
@@ -1050,7 +1060,7 @@ module MB
           # (nothing shown for the track yet).
           def submit?(now, urgent: false)
             return false unless @state == :waiting
-            return false unless urgent || now - @changed_at >= DEBOUNCE || now - @pending_since >= SWEEP
+            return false unless urgent || now - @changed_at >= DEBOUNCE || (!PatchRender.hold_sweeps && now - @pending_since >= SWEEP)
             go(:submit)
             true
           end
