@@ -77,6 +77,10 @@ module MB
         OFFSET_GAIN = 0.1
         MAX_OFFSET = 0.5
 
+        # Seconds short of the sleep asked for that count as woken early
+        # (Thread#wakeup) rather than a timer firing a little early.
+        WOKEN_EARLY = 0.001
+
         attr_reader :state, :period, :deadline, :skipped
 
         # Seconds the deadline spacing is shortened by (the rate trim), and
@@ -107,6 +111,7 @@ module MB
           @offset = 0.0
           @window_at = nil
           @window_frames = 0
+          @woken = false
           self.fps = fps
         end
 
@@ -161,7 +166,11 @@ module MB
           # less than a period past it starts at once, and only the
           # deadlines a frame overran by more than a whole period are skipped
           step = @period - @trim
-          nxt = @deadline + step
+          # (a frame woken before its deadline, by a key, leaves that
+          # deadline for the next frame: ui-perf-1, a woken frame used to
+          # push the next one a whole period past the deadline it slept
+          # toward)
+          nxt = @woken && done < @deadline ? @deadline : @deadline + step
           missed = 0
           if done > nxt + step
             missed = ((done - nxt) / step).floor
@@ -173,7 +182,9 @@ module MB
           @sleeper.call(want) if want > 0
           woke = @clock.call
           slept = woke - done
-          adapt(woke, want)
+          # (woken early: Thread#wakeup ended the sleep before its time)
+          @woken = want > 0 && slept < want - WOKEN_EARLY
+          adapt(woke, @woken ? 0.0 : want)
           event!(:woke)
           f = Frame.new(at: start, paint: done - start - @write, write: @write, sleep: want, slept: slept, late: late, skipped: missed,
                         wrote: out.is_a?(String) ? out.bytesize : 0)

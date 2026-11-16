@@ -37,6 +37,34 @@ RSpec.describe(MB::Sound::UI::Pacer, :aggregate_failures) do
     expect(b[:late_ms][:p50]).to be < 0.1 # (the wake offset learned the 2 ms: frames start on their deadlines; ui-api-1)
   end
 
+  # ui-perf-1: a key wakes the painter early (Thread#wakeup ends its sleep);
+  # the deadline it slept toward is still served, a period after the last
+  # one, instead of the woken frame taking it and pushing the next frame a
+  # whole period past it (typing showed on screen 22-31 ms after the key:
+  # the woken frame ran before the REPL's echo, 0.6 ms later, and the next
+  # one came up to two periods on)
+  it 'keeps the deadline a woken frame started before (a key wakes the painter)' do
+    @t = 0.0
+    wake_at = [0.1055, 0.2027]
+    p = described_class.new(50, clock: -> { @t }, sleeper: lambda { |s|
+      w = wake_at.find { |x| x > @t && x < @t + s }
+      @t = w || @t + s
+    })
+    starts = []
+    p.run(-> { @t >= 0.4 }) do |now|
+      starts << now
+      @t += 0.001
+      'x'
+    end
+    # Frames at 0, 20, ... 100 ms, the woken one at 105.5, then 120 (not 140)
+    i = starts.index { |s| (s - 0.1055).abs < 1e-9 }
+    expect(starts[i + 1]).to be_within(1e-6).of(0.12)
+    j = starts.index { |s| (s - 0.2027).abs < 1e-9 }
+    expect(starts[j + 1]).to be_within(1e-6).of(0.22)
+    expect(starts.length).to eq(22) # (20 on the grid and the 2 woken ones)
+    expect(p.offset).to eq(0.0) # (early wakes don't teach the wake offset)
+  end
+
   it 'skips only the whole periods a long frame overran, starting at once after a partial one' do
     p = fake(100)
     # Every 10th frame takes 35 ms (3.5 periods): it skips 2 deadlines and
