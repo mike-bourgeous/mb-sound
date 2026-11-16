@@ -162,7 +162,7 @@ module MB::Sound
         pay.call
       end
     ensure
-      File.write(out, JSON.generate({ frames: frames, keys_sent: sent, replies: replies,
+      File.write(out, JSON.generate({ frames: frames, keys_sent: sent, replies: replies, screen: prev, # (the last frame's screen)
                                       cpu: Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - cpu0 }))
     end
 
@@ -180,8 +180,10 @@ module MB::Sound
         end
         list
       when :design
-        t = warm + 0.3
-        list = []
+        # (the inspector opens on the FILTER section's diode row, which has
+        # no knob: two Downs pick the drive knob, then Right/Left turn it)
+        list = [[warm + 0.1, "\e[B"], [warm + 0.2, "\e[B"]]
+        t = warm + 0.4
         k = 0
         while t < warm + seconds
           list << [t, (k / 8).even? ? "\e[C" : "\e[D"]
@@ -198,19 +200,47 @@ module MB::Sound
     def stats(v) = UI::Perf.stats(v)
 
     # The sink's findings for the screen's +rects+ ({name => Rect}).
-    def sink_report(data, rects, t_from)
+    def sink_report(data, rects, t_from, key_panes: [])
       frames = data['frames'].select { |f| f[0] >= t_from }
       times = frames.map(&:first)
       intervals = times.each_cons(2).map { |a, b| b - a }
       shape = %w[bytes esc cup sgr cells].each_with_index.to_h { |k, i| [k, UI::Perf.stats(frames.map { |f| f[i + 1].to_f }, ms: false)] }
+      hit = ->(f, r) { f[6].any? { |y, x0, x1| y >= r.y && y < r.y + r.h && x1 >= r.x && x0 < r.x + r.w } }
       panes = rects.to_h do |name, r|
-        hits = frames.select { |f| f[6].any? { |y, x0, x1| y >= r.y && y < r.y + r.h && x1 >= r.x && x0 < r.x + r.w } }.map(&:first)
+        hits = frames.select { |f| hit.(f, r) }.map(&:first)
         gaps = hits.each_cons(2).map { |a, b| b - a }
         span = times.empty? ? 1.0 : [times.last - times.first, 1e-6].max
         [name, stats(gaps).merge(visible_per_s: (hits.length / span).round(1))]
       end
-      { frames: frames.length, intervals_ms: stats(intervals), shape: shape, panes: panes, replies: data['replies'], cpu_s: data['cpu'].round(3) }
+      # Key to visible: a typed key's send to the first frame changing a
+      # cell of the panes it acts on (the terminal's end of key-to-frame;
+      # a key whose change never shows before the next key is "unseen")
+      kr = key_panes.filter_map { |n| rects[n] }
+      sent = (data['keys_sent'] || []).select { |t| t >= t_from }
+      lat = []
+      unseen = 0
+      unless kr.empty?
+        sent.each_with_index do |t, i|
+          limit = [sent[i + 1] || Float::INFINITY, t + 1.0].min
+          f = frames.find { |fr| fr[0] >= t && fr[0] < limit && kr.any? { |r| hit.(fr, r) } }
+          f ? lat << f[0] - t : unseen += 1
+        end
+      end
+      # (which panes the frames right after keys change, counted: where a
+      # key's effect shows)
+      after = Hash.new(0)
+      sent.each_with_index do |t, i|
+        limit = [sent[i + 1] || Float::INFINITY, t + 0.2].min
+        frames.select { |fr| fr[0] >= t && fr[0] < limit }.each do |fr|
+          rects.each { |n, r| after[n] += 1 if hit.(fr, r) }
+        end
+      end
+      { frames: frames.length, intervals_ms: stats(intervals), shape: shape, panes: panes, replies: data['replies'], cpu_s: data['cpu'].round(3),
+        key_to_visible: stats(lat).merge(unseen: unseen, panes: key_panes, each_ms: lat.map { |v| (v * 1000).round(1) }), changed_after_keys: after }
     end
+
+    # The panes a scenario's keys act on (for the sink's key-to-visible).
+    KEY_PANES = { design: %i[inspector], typing: %i[repl] }.freeze
   end
 
   if main_script?(__FILE__)
@@ -228,6 +258,7 @@ module MB::Sound
       look: [:auto, 'Plot look for the scope panes and the standalone plot', Symbol],
       fps: [60, 'Target frame rate', Integer],
       json: [nil, 'Write every result as JSON to this file', '-j', String],
+      screen: [nil, 'Write the sink\'s last frame as text to this file (one scenario)', String],
       sink_cpus: [nil, 'Pin the sink process to these CPUs (taskset list, e.g. 30,31)', String],
       every_buffer: [false, 'Snapshots at every render buffer the painter took the last one in (UI::Feed.every_buffer; an option)'],
       deadlines: [false, 'Panes due by the painter\'s frame deadlines (UI::PaneRates.on_deadlines; an option)'],
@@ -410,6 +441,7 @@ module MB::Sound
         slave.close
         Process.wait(pid)
         sink = JSON.parse(File.read(sink_out))
+        File.write(p.screen, (sink['screen'] || []).join("\n") + "\n") if p.screen
         s = perf.summary
         delay = d0.to_h { |k, v| [k, v && d1[k] ? ((d1[k] - v) * 1000).round(1) : nil] }
         row = {
@@ -417,7 +449,7 @@ module MB::Sound
           run_delay_ms: delay, clean: delay[:process] && delay[:process] < wall * 1000 * 0.01, cpu_s: cpu.round(2), wall_s: wall.round(2),
           snapshots_per_s: (published / wall).round(1), buffers_per_s: (bufs / wall).round(1),
           file_calls: file_calls && file_calls.map { |m, path, loc, th| [m, path, loc, th] },
-          perf: s, sink_report: UIBench.sink_report(sink, rects, warm), machine: machine,
+          perf: s, sink_report: UIBench.sink_report(sink, rects, warm, key_panes: UIBench::KEY_PANES[sc] || []), machine: machine,
         }
         results << row
 
@@ -444,6 +476,8 @@ module MB::Sound
           end
         end
         puts "  keys: #{s[:keys].values_at(:n, :p50, :p95, :max).then { |n, *q| n.to_i > 0 ? "#{n} keys, p50/p95/max #{q.join('/')} ms" : 'none' }}"
+        kv = sr[:key_to_visible]
+        puts "  key to visible (#{kv[:panes].join(', ')} at the sink): #{kv[:n]} keys, p50/p95/max #{kv.values_at(:p50, :p95, :max).join('/')} ms, #{kv[:unseen]} unseen" unless kv[:panes].empty?
         puts "  render wake delay p50/p99/p99.9/max #{r.values_at(:p50, :p99, :p999, :max).join('/')} ms, >2 ms #{r[:over_2ms_per_min]}/min; painter GVL waits p99/max #{(a[:painter] || {}).values_at(:p99, :max).join('/')} ms" if r[:n].to_i > 0
       end
 
