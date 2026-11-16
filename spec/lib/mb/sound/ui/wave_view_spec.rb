@@ -102,7 +102,8 @@ RSpec.describe(MB::Sound::UI::WaveView, :aggregate_failures) do
       expect(d.why).to be_nil
       t = MB::Sound::UI::WaveView::Target.new(label: 'lfo', kind: :lfo, watch: [].freeze, keys: wv::KEYS[:lfo], view: d)
       n = Struct.new(:label).new('lfo')
-      data, lo, hi, title, mark = wv.picture(t, [2.0, Float::NAN, Float::NAN, 0.2], n, 40)
+      pic = wv.picture(t, [2.0, Float::NAN, Float::NAN, 0.2], n, 40)
+      data, lo, hi, title, mark = pic.data, pic.lo, pic.hi, pic.title, pic.mark
       expect(data.length).to eq(wv::LFO_POINTS)
       expect([lo, hi]).to eq([-1.0, 1.0])
       expect(mark).to eq(16) # (0.2 of 80 dot columns)

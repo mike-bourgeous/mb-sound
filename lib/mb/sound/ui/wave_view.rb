@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module MB
   module Sound
     module UI
@@ -69,6 +71,137 @@ module MB
         # is the same at any rate).
         LFO_POINTS = 512
 
+        # What a live display draws this frame: +data+ (an SFloat, the
+        # view's own buffer), the value range +lo+..+hi+, a marker dot
+        # column (+mark+, -1 for none), and the +title+ (a String the view
+        # rewrites in place).  One per view, changed in place.
+        Picture = Struct.new(:data, :lo, :hi, :mark, :title)
+
+        # Number text appended to a String in place, allocating nothing
+        # (the live titles change every frame under an LFO: String#format
+        # and interpolation would allocate a few Strings a frame).  Digits
+        # come from rounding the scaled value half to even, as Kernel#format
+        # does for 0.025 ("0.02"); the scaling's own rounding can still make
+        # a value within an ulp of halfway print one step from format's.
+        module Label
+          module_function
+
+          # Appends +v+ with +dec+ (0..6) decimals, as format('%.<dec>f').
+          def fixed(buf, v, dec)
+            return buf << QUESTION unless v.is_a?(Numeric) && v.finite?
+            scale = POW10[dec]
+            q = round_even(v.abs * scale)
+            buf << MINUS if v < 0
+            int(buf, q / scale)
+            return buf if dec == 0
+            buf << DOT
+            frac = q % scale
+            d = scale / 10
+            while d > 0
+              buf << (ZERO + (frac / d) % 10)
+              d /= 10
+            end
+            buf
+          end
+
+          # +x+ (a non-negative Float) rounded to an Integer, halves to even
+          # (Kernel#format rounds the shortest decimal form of a value, so
+          # 1.015 prints "1.02" and 0.025 "0.02"; a scaled value within a
+          # few ulps of a half counts as a half).
+          def round_even(x)
+            q = x.floor
+            r = x - q
+            tie = (r - 0.5).abs <= x * 4e-16 # (a decimal tie such as 2.5 for 0.025 * 100, or 101.49999999999999 for 1.015 * 100)
+            tie ? (q.odd? ? q + 1 : q) : (r > 0.5 ? q + 1 : q)
+          end
+
+          # Appends a non-negative Integer.
+          def int(buf, n)
+            int(buf, n / 10) if n >= 10
+            buf << (ZERO + n % 10)
+          end
+
+          # Appends +v+ with three significant digits and no trailing zeros,
+          # as format('%.3g') for 1e-4 <= v < 1e6 (outside that, through
+          # format).
+          def g3(buf, v)
+            return buf << ZERO if v == 0
+            neg = v < 0
+            a = v.abs
+            return buf << format('%.3g', v) unless a >= 1e-4 && a < 1e6
+            e = Math.log10(a).floor
+            q = round_even(a / 10.0**(e - 2))
+            if q >= 1000
+              e += 1
+              q = round_even(a / 10.0**(e - 2))
+            elsif q < 100
+              e -= 1
+              q = round_even(a / 10.0**(e - 2))
+            end
+            buf << MINUS if neg
+            if e >= 2
+              int(buf, q * POW10[e - 2])
+            elsif e >= 0
+              # (e + 1 digits before the point)
+              div = POW10[2 - e]
+              int(buf, q / div)
+              frac = q % div
+              if frac != 0
+                buf << DOT
+                while frac != 0
+                  div /= 10
+                  buf << (ZERO + frac / div)
+                  frac %= div
+                end
+              end
+            else
+              buf << ZERO << DOT
+              (-e - 1).times { buf << ZERO }
+              div = 100
+              frac = q
+              while frac != 0
+                buf << (ZERO + frac / div)
+                frac %= div
+                div /= 10
+              end
+            end
+            buf
+          end
+
+          # Appends Plot::Panels.hz_text(hz): "2400 Hz", "12.5 kHz".
+          def hz(buf, hz)
+            if hz >= 10_000
+              g3(buf, hz / 1000.0) << KHZ
+            elsif hz >= 100
+              int(buf, hz.round) << HZ
+            else
+              g3(buf, hz) << HZ
+            end
+          end
+
+          # Cuts +buf+ to +n+ characters in place, ending in an ellipsis
+          # when cut (as Canvas#fit).
+          def fit(buf, n)
+            len = buf.length
+            return buf if len <= n
+            if n < 2
+              buf[n, len - n] = '' if n >= 0
+            else
+              buf[n - 1, len - n + 1] = ELLIPSIS
+            end
+            buf
+          end
+
+          POW10 = [1, 10, 100, 1000, 10_000, 100_000, 1_000_000].freeze
+          ZERO = 48
+          DOT = 46
+          MINUS = 45
+          QUESTION = 63
+          HZ = ' Hz'
+          KHZ = ' kHz'
+          ELLIPSIS = '…'
+        end
+
         # The value node +node+ last used for +key+ (render thread; nothing
         # allocated): a Float, or NaN when not known.
         def self.value_of(node, key)
@@ -134,14 +267,17 @@ module MB
 
           # Painter: copies the newest values published for +watch+ (that
           # same list) into +out+ (an Array); true if they were read whole.
+          # (A while loop: a return out of a block allocates.)
           def read(watch, out)
-            3.times do
+            tries = 0
+            n = watch.length
+            while tries < 3
+              tries += 1
               s = @seq
               slot = s % SLOTS
               return false unless @slot_watch[slot].equal?(watch)
               base = slot * MAX
               i = 0
-              n = watch.length
               while i < n
                 out[i] = @values[base + i]
                 i += 1
@@ -214,13 +350,46 @@ module MB
           best ? best[1] : 0
         end
 
+        # A held value as a display tone's input: one reused SFloat per
+        # frame count, filled in place when the value changes, so drawing a
+        # cycle allocates nothing (a Constant queues each change as a new
+        # Array and fills a new frozen buffer).  Not a GraphNode: only the
+        # display copies read it, never a graph.
+        class Hold
+          attr_reader :sample_rate
+          attr_accessor :value
+
+          def initialize(value, sample_rate:)
+            @value = value.to_f
+            @sample_rate = sample_rate.to_f
+            @buf = nil
+            @filled = nil
+          end
+
+          def sample(count)
+            buf = @buf
+            unless buf && buf.length == count
+              buf = @buf = Numo::SFloat.new(count)
+              @filled = nil
+            end
+            v = @value
+            unless v.eql?(@filled)
+              BufferHelper.fill(buf, v, 0, count)
+              @filled = v
+            end
+            buf
+          end
+        end
+
         # One cycle of an oscillator from its own kernel: a display copy of
         # the tone (its shape, band-limiting, pulse width and pivot,
         # wavetable and interpolation), whose frequency, width, and scan are
-        # Constants set to the published values each frame; reset to the
-        # same phase every frame, sampled for one period.
+        # Holds set to the published values each frame; reset to the same
+        # phase every frame, sampled for one period.  Allocates nothing
+        # while the period's length stays the same (a new length: a new
+        # input and output buffer).
         class ToneDisplay
-          attr_reader :node, :why, :rate
+          attr_reader :node, :why, :rate, :picture
 
           # Frames of the longest period drawn (an LFO's slower cycle shows
           # its start).
@@ -230,17 +399,27 @@ module MB
             @node = node
             @why = unsupported(node)
             @rate = node.sample_rate.to_f
+            @picture = Picture.new(nil, -1.0, 1.0, -1, String.new(capacity: 96, encoding: Encoding::UTF_8))
             @freq = nil
-            @last_key = nil
+            @kf = @kw = @ks = nil
             @cycle = nil
+            @real = nil
+            @peak = 1.0
+            @mm = [0.0, 0.0]
+            @tk = nil
             return if @why
-            # (Constants that jump: no smoothing between frames)
-            @freq = GraphNode::Constant.new(110.0, smoothing: false, sample_rate: @rate)
-            @width = node.pwm_width.nil? ? nil : GraphNode::Constant.new(0.5, smoothing: false, sample_rate: @rate)
-            @scan = node.wavetable? ? GraphNode::Constant.new(0.0, smoothing: false, sample_rate: @rate) : nil
+            @freq = Hold.new(110.0, sample_rate: @rate)
+            @width = node.pwm_width.nil? ? nil : Hold.new(0.5, sample_rate: @rate)
+            @scan = node.wavetable? ? Hold.new(0.0, sample_rate: @rate) : nil
             wt = node.instance_variable_get(:@wave_type)
             t = Tone.new(wave_type: wt == :wavetable ? :sine : wt, frequency: @freq, sample_rate: @rate)
-            t = t.pwm(@width, dc: node.instance_variable_get(:@keep_dc), pivot: numeric(node.instance_variable_get(:@pivot))) if @width
+            # (the warp's pivot as a held input too: a number would be
+            # rounded to a float through a packed String every cycle)
+            if @width
+              pv = node.instance_variable_get(:@pivot)
+              pv = pv.is_a?(Numeric) ? pv.to_f : t.warp_pivot
+              t = t.pwm(@width, dc: node.instance_variable_get(:@keep_dc), pivot: Hold.new(Kernels::Arithmetic.f32(pv), sample_rate: @rate))
+            end
             if @scan
               t = t.wavetable(node.instance_variable_get(:@table), scan: @scan, interpolation: node.instance_variable_get(:@interpolation),
                               scan_wrap: node.instance_variable_get(:@scan_wrap))
@@ -260,23 +439,41 @@ module MB
 
           # One period at +freq+ Hz with +width+ and +scan+ (NaN or nil:
           # the node's own fixed setting): an SFloat, reused when nothing
-          # changed since the last call.
+          # changed since the last call (by the frequency to a hundredth of
+          # a hertz, width and scan to 1e-4).  #peak is its largest
+          # absolute value.
           def cycle(freq, width, scan)
             return nil if @why || !(freq.is_a?(Float) && freq.finite? && freq.abs > 0)
-            key = [freq.round(2), width && width.finite? ? width.round(4) : nil, scan && scan.finite? ? scan.round(4) : nil]
-            return @cycle if key == @last_key && @cycle
-            @last_key = key
-            @freq.constant = freq.abs
-            @width.constant = key[1] if @width && key[1]
-            @scan.constant = key[2] if @scan && key[2]
+            kf = (freq * 100).round
+            kw = width && width.finite? ? (width * 10_000).round : nil
+            ks = scan && scan.finite? ? (scan * 10_000).round : nil
+            return @cycle if @cycle && kf == @kf && kw == @kw && ks == @ks
+            @kf = kf
+            @kw = kw
+            @ks = ks
+            @freq.value = freq.abs
+            @width.value = width.round(4) if @width && kw
+            @scan.value = scan.round(4) if @scan && ks
             n = (@rate / freq.abs).ceil.clamp(2, MAX_FRAMES)
             restore_state
             d = @tone.sample(n)
-            d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
+            if d.is_a?(Numo::SComplex)
+              @real = Numo::SFloat.new(n) unless @real && @real.length == n
+              Kernels.complex_part(@real, d, false)
+              d = @real
+            end
+            d = Numo::SFloat.cast(d) unless d.is_a?(Numo::SFloat)
             # (the tone's own buffer, kept until the next new cycle; the
             # display copy is sampled nowhere else)
-            @cycle = d.is_a?(Numo::SFloat) ? d : Numo::SFloat.cast(d)
+            Kernels.min_max(d, @mm)
+            lo = @mm[0]
+            hi = @mm[1]
+            @peak = -lo > hi ? -lo : hi
+            @cycle = d
           end
+
+          # The largest absolute value of the last #cycle.
+          attr_reader :peak
 
           private
 
@@ -292,22 +489,44 @@ module MB
           end
 
           # Puts the State fields saved by #saved_state back, in place where
-          # they are Arrays or NArrays of the same size.
+          # they are Arrays or NArrays of the same size (nothing allocated
+          # then: Array#replace of a same-length Array, Kernels.copy).
           def restore_state
             st = @tone.instance_variable_get(:@state)
             @reset.each do |getter, setter, v|
               cur = st.public_send(getter)
               if v.is_a?(Array) && cur.is_a?(Array) && cur.length == v.length
+                restore_array(cur, v)
+              elsif v.is_a?(Array) && cur.is_a?(Array) && v.none?(Array) && !cur.frozen?
+                # (a state the kernel lengthens on its first buffer, such as
+                # a wavetable's: back to its first length, in place)
                 cur.replace(v)
-              elsif v.is_a?(Numo::NArray) && cur.is_a?(Numo::NArray) && cur.size == v.size && cur.class == v.class
-                cur[] = v
-              else
+              elsif v.is_a?(Numo::NArray) && cur.is_a?(Numo::NArray) && cur.size == v.size && cur.class == v.class && !cur.frozen? && Kernels.copy(cur, v)
+                nil
+              elsif !v.equal?(cur)
                 st.public_send(setter, v.is_a?(Array) || v.is_a?(Numo::NArray) ? v.dup : v)
               end
             end
           end
 
-          def numeric(v) = v.is_a?(Numeric) ? v : nil
+          # Copies Array +v+ into +cur+ element by element (nested Arrays
+          # of the same shape in place too).
+          def restore_array(cur, v)
+            i = 0
+            n = v.length
+            while i < n
+              x = v[i]
+              c = cur[i]
+              if x.is_a?(Array) && c.is_a?(Array) && c.length == x.length
+                restore_array(c, x)
+              elsif x.is_a?(Numo::NArray) && c.is_a?(Numo::NArray) && c.size == x.size && c.class == x.class && !c.frozen? && Kernels.copy(c, x)
+                nil
+              elsif !x.equal?(c)
+                cur[i] = x.is_a?(Array) || x.is_a?(Numo::NArray) ? x.dup : x
+              end
+              i += 1
+            end
+          end
 
           # Why a live cycle of +node+ isn't drawn (FM, sync, phase or
           # output modulation, noise, feedback have no cheap form), or nil.
@@ -337,11 +556,14 @@ module MB
         # published cutoff and resonance: its preview data's settings, one
         # filter kept and retuned.
         class FilterDisplay
-          attr_reader :node, :why
+          attr_reader :node, :why, :picture, :lo, :hi
 
           def initialize(node)
             @node = node
             @why = nil
+            @picture = Picture.new(nil, -60.0, 0.0, -1, String.new(capacity: 96, encoding: Encoding::UTF_8))
+            @lo = -60.0
+            @hi = 0.0
             @d = node.preview_data
             @rate = @d[:sample_rate]
             @filter = Filter::FourPole.new(
@@ -350,6 +572,7 @@ module MB
               drive_mode: @d[:drive_mode] == :stages && @d[:mode] == :diode ? :input : @d[:drive_mode], clip: @d[:drive_mode] == :feedback ? @d[:clip] : :soft
             )
             @top = Plot::Panels.four_pole_top(@d)
+            @hi = @top.to_f
             @last_key = nil
             @db = nil
           rescue StandardError => e
@@ -357,9 +580,6 @@ module MB
           end
 
           def supported? = @why.nil?
-
-          # dB axis: -60 to the four-pole's fixed top.
-          def range = (-60.0..@top.to_f)
 
           # The response in dB at 256 log-spaced frequencies (an SFloat),
           # recomputed when the cutoff moves by more than a 96th of an octave
@@ -396,19 +616,19 @@ module MB
             vals = (state[:wave_vals] ||= Array.new(Tap::MAX, Float::NAN))
             got = feed_tap && feed_tap.read(t.watch, vals)
             return super unless got || state[:wave_data]
-            data, lo, hi, title, mark = WaveView.picture(t, vals, n, c.w)
-            return super unless data
+            pic = WaveView.picture(t, vals, n, c.w)
+            return super unless pic
             @wave_live = true
-            state[:wave_data] = data
+            state[:wave_data] = pic.data
             w = c.w
             h = c.h
             return if w <= 0 || h <= 0
             c.clear
-            c.text(0, 0, c.fit(title, w), :dim)
+            c.text(0, 0, Label.fit(pic.title, w), :dim)
             if h > 1
               fg = MB::Term::Cells.pack(Theme.rgb(:key)) || -1
-              Plot::Wave.draw(c.grid, data, x: c.x, y: c.y + 1, w: w, h: h - 1, lo: lo, hi: hi, fg: fg,
-                              mark: mark || -1, mark_fg: MB::Term::Cells.pack(Theme.rgb(:warn)) || -1)
+              Plot::Wave.draw(c.grid, pic.data, x: c.x, y: c.y + 1, w: w, h: h - 1, lo: pic.lo, hi: pic.hi, fg: fg,
+                              mark: pic.mark, mark_fg: MB::Term::Cells.pack(Theme.rgb(:warn)) || -1)
             end
             nil
           end
@@ -446,29 +666,53 @@ module MB
           end
         end
 
-        # [data, lo, hi, title, marker dot column or nil] for Target +t+ at
-        # values +vals+ (row +n+), drawn +w+ cells wide.
+        # The Picture of Target +t+ at values +vals+ (row +n+), drawn +w+
+        # cells wide: the view's own Picture, changed in place (nothing
+        # allocated while the values only move), or nil.
         def self.picture(t, vals, n, w = 0)
+          v = t.view
+          pic = v.picture
+          title = pic.title
           case t.kind
           when :lfo
             f, wd, sc, ph = vals[0], vals[1], vals[2], vals[3]
-            d = t.view.cycle(t.view.rate / LFO_POINTS, wd, sc) or return nil
-            peak = [d.abs.max.to_f, 1.0].max
-            mark = ph.finite? && w > 0 ? ((ph % 1.0) * 2 * w).floor.clamp(0, 2 * w - 1) : nil
-            [d, -peak, peak, "#{n.label} #{f.finite? ? Plot::Panels.hz_text(f.abs) : '?'} live, now at #{ph.finite? ? format('%.2f', ph % 1.0) : '?'}", mark]
+            d = v.cycle(v.rate / LFO_POINTS, wd, sc) or return nil
+            peak = v.peak > 1.0 ? v.peak : 1.0
+            pic.data = d
+            pic.lo = -peak
+            pic.hi = peak
+            pic.mark = ph.finite? && w > 0 ? ((ph % 1.0) * 2 * w).floor.clamp(0, 2 * w - 1) : -1
+            title.clear << n.label << ' '
+            f.finite? ? Label.hz(title, f.abs) : title << '?'
+            title << ' live, now at '
+            ph.finite? ? Label.fixed(title, ph % 1.0, 2) : title << '?'
           when :tone
             f, wd, sc = vals[0], vals[1], vals[2]
-            d = t.view.cycle(f, wd, sc) or return nil
-            peak = [d.abs.max.to_f, 1.0].max
+            d = v.cycle(f, wd, sc) or return nil
+            peak = v.peak > 1.0 ? v.peak : 1.0
             peak = (peak * 4).ceil / 4.0 if peak > 1.0
-            extra = [wd.finite? ? "pw #{format('%.2f', wd)}" : nil, sc.finite? ? "scan #{format('%.2f', sc)}" : nil].compact.join(' ')
-            [d, -peak, peak, "#{n.label} #{Plot::Panels.hz_text(f.abs)} live #{extra}".rstrip]
+            pic.data = d
+            pic.lo = -peak
+            pic.hi = peak
+            pic.mark = -1
+            title.clear << n.label << ' '
+            Label.hz(title, f.abs) << ' live'
+            Label.fixed(title << ' pw ', wd, 2) if wd.finite?
+            Label.fixed(title << ' scan ', sc, 2) if sc.finite?
           when :four_pole
             cut, res = vals[0], vals[1]
-            d = t.view.curve(cut, res)
-            r = t.view.range
-            [d, r.begin, r.end, "#{n.label} #{Plot::Panels.hz_text(cut.finite? ? cut : 0.0)} reso #{res.finite? ? format('%.2f', res) : '?'} live"]
+            pic.data = v.curve(cut, res)
+            pic.lo = v.lo
+            pic.hi = v.hi
+            pic.mark = -1
+            title.clear << n.label << ' '
+            Label.hz(title, cut.finite? ? cut : 0.0) << ' reso '
+            res.finite? ? Label.fixed(title, res, 2) : title << '?'
+            title << ' live'
+          else
+            return nil
           end
+          pic
         end
 
         Panes::Preview.prepend(PreviewLive)
