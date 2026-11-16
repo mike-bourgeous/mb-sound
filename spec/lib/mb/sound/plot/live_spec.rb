@@ -90,6 +90,26 @@ RSpec.describe(MB::Sound::Plot::Live, :aggregate_failures) do
     expect(live.inspect).to include('60x16', 'scope', '4 layouts')
   end
 
+  it 'blits the same chart again without drawing it, and draws a new one' do
+    live = described_class.new(width: 40, height: 10, look: :scope)
+    a = plot.waveform(Numo::DFloat.linspace(-1, 1, 300), range: -1.0..1.0)
+    b = plot.waveform(Numo::DFloat.linspace(1, -1, 300), range: -1.0..1.0)
+    g = MB::Sound::Plot::Text::NativeCells.new(50, 12)
+    live.draw(a, g, x: 2, y: 1)
+    first = g.lines(:truecolor)
+    frame = live.instance_variable_get(:@frame)
+    expect(frame).not_to receive(:update)
+    g.clear
+    live.draw(a, g, x: 2, y: 1)
+    expect(g.lines(:truecolor)).to eq(first)
+    RSpec::Mocks.space.proxy_for(frame).reset
+    live.draw(b, g, x: 2, y: 1)
+    expect(g.lines(:truecolor)).not_to eq(first)
+    live.redraw(a) # (another path draws into the frame: the next #draw of b draws it again)
+    live.draw(b, g, x: 2, y: 1)
+    expect(g.lines(:truecolor)).to eq(MB::Sound::Plot::Text::NativeCells.new(50, 12).tap { |h| h.blit(MB::Sound::Plot::Live.new(width: 40, height: 10, look: :scope).instance_variable_get(:@frame).tap { |f| f.update(b) }.cells, 2, 1) }.lines(:truecolor))
+  end
+
   it 'draws what a new layout draws when only titles change' do
     t = Numo::DFloat.new(400).seq / 48000
     titles = ['lp4 ~2580 Hz reso 0.25', 'lp4 ~312 Hz reso 0.25', 'a much longer title than the pane is wide, cut at its edge', 'x']
