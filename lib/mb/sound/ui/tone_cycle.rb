@@ -69,7 +69,7 @@ module MB
             t0 = PatchRender.send(:now)
             src = job.source
             Thread.current[:mb_sound_preview_frames] = pace ? src.frames : nil
-            PatchRender::Yielding.follow(src) if pace
+            UI::Yielding.follow(src&.thread&.call) if pace
             pr.send(:slack, src.frames, pace)
             return failed(job, t0, src.note || 'no voice to copy') if src.synth.nil?
             return failed(job, t0, 'this oscillator was made outside the voice, so it can\'t be rebuilt alone for a preview') if job.tone.nil?

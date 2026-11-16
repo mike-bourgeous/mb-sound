@@ -57,6 +57,7 @@ static int forked_child;
 static uint64_t stat_kicks;
 static uint64_t stat_yields;
 static uint64_t stat_retries;
+static uint64_t stat_wakeups;
 
 static sem_t kick_sem;
 static pthread_t kick_thread;
@@ -93,6 +94,7 @@ static void *yield_kicker(void *arg)
 	while (1) {
 		while (sem_wait(&kick_sem) != 0 && errno == EINTR) {
 		}
+		ADD(stat_wakeups, 1);
 		if (!LOAD(kicker_running)) {
 			break;
 		}
@@ -128,6 +130,17 @@ static void yield_event(rb_event_flag_t event, const rb_internal_thread_event_da
 		return;
 	}
 	if (!yield_is_yielder(thread)) {
+		return;
+	}
+	if (event & RUBY_INTERNAL_THREAD_EVENT_EXITED) {
+		// (a yielder that ends leaves the table; its slot is written by
+		// no one else while it holds the thread's VALUE)
+		for (int i = 0; i < YIELD_SLOTS; i++) {
+			if (LOAD(yield_threads[i]) == thread) {
+				STORE(yield_threads[i], Qnil);
+			}
+		}
+		STORE(yielder_holds, 0);
 		return;
 	}
 	if (event & RUBY_INTERNAL_THREAD_EVENT_RESUMED) {
@@ -168,7 +181,8 @@ static void yield_update(void)
 			rb_raise(rb_eRuntimeError, "GVLYield: could not start the kicker thread");
 		}
 		yield_hook = rb_internal_thread_add_event_hook(yield_event,
-				RUBY_INTERNAL_THREAD_EVENT_READY | RUBY_INTERNAL_THREAD_EVENT_RESUMED | RUBY_INTERNAL_THREAD_EVENT_SUSPENDED, NULL);
+				RUBY_INTERNAL_THREAD_EVENT_READY | RUBY_INTERNAL_THREAD_EVENT_RESUMED | RUBY_INTERNAL_THREAD_EVENT_SUSPENDED |
+				RUBY_INTERNAL_THREAD_EVENT_EXITED, NULL);
 	} else if (!want && kicker_running) {
 		rb_internal_thread_remove_event_hook(yield_hook);
 		yield_hook = NULL;
@@ -261,15 +275,17 @@ static VALUE yield_active(VALUE self)
 	return kicker_running ? Qtrue : Qfalse;
 }
 
-// GVLYield.stats -> { kicks:, retries:, yields: } since the process started:
-// times the priority thread waited on a yielder (a kick), kicks repeated
-// while it still waited, and handovers made.
+// GVLYield.stats -> { kicks:, retries:, yields:, wakeups: } since the
+// process started: times the priority thread waited on a yielder (a kick),
+// kicks repeated while it still waited, handovers made, and times the
+// kicker thread woke (it sleeps on a semaphore otherwise).
 static VALUE yield_stats(VALUE self)
 {
 	VALUE h = rb_hash_new();
 	rb_hash_aset(h, ID2SYM(rb_intern("kicks")), ULL2NUM(LOAD(stat_kicks)));
 	rb_hash_aset(h, ID2SYM(rb_intern("retries")), ULL2NUM(LOAD(stat_retries)));
 	rb_hash_aset(h, ID2SYM(rb_intern("yields")), ULL2NUM(LOAD(stat_yields)));
+	rb_hash_aset(h, ID2SYM(rb_intern("wakeups")), ULL2NUM(LOAD(stat_wakeups)));
 	return h;
 }
 

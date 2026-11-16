@@ -141,63 +141,6 @@ module MB
           def initialize(words: nil, live: nil, synth: nil, frames: nil, thread: nil, **rest) = super(words: words, live: live, synth: synth, frames: frames, thread: thread, **rest)
         end
 
-        # Worker threads (and other registered threads) hand the GVL to the
-        # live render thread as soon as it wants it (FastUI::GVLYield; round
-        # 3 of ui-wave-perf-1, design/notes/sound_design_ui.md "The workers
-        # yield").  Ruby otherwise switches threads only at its timer
-        # (RUBY_THREAD_TIMESLICE, 10 ms) or when the running thread blocks,
-        # and a copy's build or first blocks run 10-30 ms of Ruby: the
-        # render thread, woken for its next buffer, waited until then.
-        # Thread switches don't change what a render computes, so its
-        # pictures are the same either way.  +on+ false (or
-        # MB_SOUND_PREVIEW_YIELD=0) turns it off for new Worker threads.
-        module Yielding
-          @on = ENV['MB_SOUND_PREVIEW_YIELD'] != '0'
-          @closing = nil
-
-          class << self
-            # True: Worker threads yield to the render thread.
-            attr_accessor :on
-
-            # Makes +thread+ (default: the calling thread) give the GVL to
-            # the render thread whenever it waits for it (while .on).
-            # Returns true if it does.
-            def join(thread = Thread.current)
-              return false unless @on
-              # (the kicker thread and hook stop at exit, before Ruby's
-              # threads are torn down)
-              @closing ||= ExitClose.register(self)
-              FastUI::GVLYield.add(thread)
-            end
-
-            # Stops all yielding (ExitClose at exit).
-            def close
-              FastUI::GVLYield.yielders.each { |t| FastUI::GVLYield.remove(t) }
-              FastUI::GVLYield.priority = nil
-              nil
-            end
-
-            # +thread+ stops yielding; the render thread is let go when no
-            # thread yields any more.
-            def leave(thread = Thread.current)
-              FastUI::GVLYield.remove(thread)
-              FastUI::GVLYield.priority = nil if FastUI::GVLYield.yielders.empty? && !FastUI::GVLYield.priority.nil?
-              nil
-            end
-
-            # The thread yielders give the GVL to: the live session's render
-            # thread from +source+ (a Source), when one runs.
-            def follow(source)
-              t = source&.thread&.call
-              FastUI::GVLYield.priority = t if t && @on && !FastUI::GVLYield.priority.equal?(t) && t.alive?
-              nil
-            end
-
-            # { kicks:, retries:, yields: } (FastUI::GVLYield.stats).
-            def stats = FastUI::GVLYield.stats
-          end
-        end
-
         # A drum kit standing in for a Synth in a Source (hand-tune-1: a
         # fitted kick or clap is a kit voice): #voice_block and #seed key the
         # copy as a Synth's do, #copy_voice builds a copy of the kit
@@ -418,7 +361,7 @@ module MB
             t0 = now
             src = job.source
             Thread.current[:mb_sound_preview_frames] = pace ? src.frames : nil
-            Yielding.follow(src) if pace
+            UI::Yielding.follow(src&.thread&.call) if pace
             slack(src.frames, pace) # (everything from here on in the windows after buffers)
             return failed(job, t0, src.note || 'no voice to copy') if src.synth.nil?
             want = @rate || rate_for(live_cutoffs(job))
@@ -1197,10 +1140,10 @@ module MB
           end
 
           def run
-            Yielding.join
+            UI::Yielding.join
             run_jobs
           ensure
-            Yielding.leave
+            UI::Yielding.leave
           end
 
           def run_jobs

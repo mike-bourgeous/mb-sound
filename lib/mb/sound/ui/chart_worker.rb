@@ -7,7 +7,7 @@ module MB
       # turns (a filter's response, a shaper's curve, an oscillator's
       # rendered cycle), and building and drawing it took the painter 3-7 ms
       # (up to 28) holding the GVL.  Here a low-priority thread (a
-      # PatchRender::Yielding yielder: it gives the GVL to the render thread
+      # UI::Yielding yielder: it gives the GVL to the render thread
       # whenever that wants it) builds the newest chart asked for and draws
       # it into its own cells; the painter only copies cells.
       #
@@ -106,7 +106,7 @@ module MB
         end
 
         def run
-          PatchRender::Yielding.join
+          UI::Yielding.join
           loop do
             job = @mutex.synchronize {
               deadline = MB::U.clock_now + IDLE
@@ -126,7 +126,7 @@ module MB
               @job = nil
               @running
             }
-            PatchRender::Yielding.follow(job.source)
+            UI::Yielding.follow(job.source&.thread&.call)
             out = begin
               ChartWorker.render(@lives, job.w, job.h, job.look, job.cells, job.build.call)
             rescue StandardError => e
@@ -139,7 +139,7 @@ module MB
             }
           end
         ensure
-          PatchRender::Yielding.leave
+          UI::Yielding.leave
         end
       end
     end

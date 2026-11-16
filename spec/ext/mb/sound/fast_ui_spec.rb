@@ -275,7 +275,7 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
       expect(gy).not_to be_active
       expect { gy.add(1) }.to raise_error(TypeError)
       expect { gy.priority = :x }.to raise_error(TypeError)
-      expect(gy.stats.keys).to eq(%i[kicks retries yields])
+      expect(gy.stats.keys).to eq(%i[kicks retries yields wakeups])
     ensure
       other&.kill&.join
     end
