@@ -1202,39 +1202,74 @@ module MB
             n = s&.inspector&.selected
             @playhead = !n&.live.nil?
             why = nil
-            chart =
-              if n && Preview.tone?(n)
-                chart, why = tone_chart(n, s, state)
-                chart
-              elsif n&.preview
-                chart_for(n, state)
-              end
-            unless chart
-              c.clear
-              c.text(0, 0, c.fit(why || (n ? "#{n.label}: no preview (filters, shapers, envelopes, and oscillators have one)" : 'no node selected (the inspector: n)'), w), :dim)
-              return
+            key = nil
+            if n && Preview.tone?(n)
+              key, why = tone_key(n, s, state)
+            elsif n&.preview
+              key = node_key(n)
             end
             cells = c.grid.class
             lk = look && look != :auto ? look : Scope.auto_look(w, h)
-            live = state[:live]
-            if live.nil? || live.width != w || live.height != h || state[:cells] != cells || state[:look] != lk
-              live = state[:live] = Plot::Live.new(width: w, height: h, look: lk, cells: cells)
-              state[:cells] = cells
-              state[:look] = lk
+            if key && @playhead
+              # (an envelope's playhead moves every frame: built and drawn
+              # here, as the frame's own picture)
+              chart = chart_of(key, n, state)
+              if chart
+                live = state[:live]
+                if live.nil? || live.width != w || live.height != h || state[:cells] != cells || state[:look] != lk
+                  live = state[:live] = Plot::Live.new(width: w, height: h, look: lk, cells: cells)
+                  state[:cells] = cells
+                  state[:look] = lk
+                end
+                live.draw(chart, c.grid, x: c.x, y: c.y)
+                return
+              end
+            elsif key
+              # (a turned knob's chart: built and drawn on a ChartWorker,
+              # the cells copied here; the last picture stays meanwhile)
+              cw = (state[:chart_worker] ||= ChartWorker.new)
+              pic = cw.draw(key, w, h, lk, cells, s&.render_source) { Preview.chart_of_key(key, n) }
+              if pic
+                c.grid.blit(pic, c.x, c.y)
+                return
+              end
             end
-            live.draw(chart, c.grid, x: c.x, y: c.y)
+            c.clear
+            c.text(0, 0, c.fit(why || (n ? "#{n.label}: no preview (filters, shapers, envelopes, and oscillators have one)" : 'no node selected (the inspector: n)'), w), :dim)
           end
 
           # True if NodeInfo +n+ is an oscillator (its preview is one cycle,
           # UI::ToneCycle).
           def self.tone?(n) = !n.params.node_class.nil? && n.params.node_class <= Tone
 
+          # The chart for +key+ (#tone_key's or #node_key's) of row +n+, or
+          # nil.  Pure (no pane state): ChartWorker threads call it.
+          def self.chart_of_key(key, n)
+            b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
+            if key[0] == :tone
+              _, r, pending = key
+              ms = (r.frames - 1) * 1000.0 / r.rate
+              what = r.noise ? "noise  #{Panes.fmt(ms)} ms" : "#{Plot::Panels.hz_text(r.frequency)}  one cycle #{Panes.fmt(ms)} ms#{r.synced ? ' (its sync master\'s)' : ''}"
+              label = "#{n.label} #{what}" \
+                      "#{r.partial ? " (the first #{Panes.fmt(ToneCycle::MAX_SECONDS)} s)" : ''}  #{r.input}#{pending ? ' …' : ''}"
+              live = { cycle: r.cycle, rate: r.rate, frequency: r.frequency, frames: r.frames, synced: r.synced, partial: r.partial, label: label }
+              Plot::Panels.preview(n.params.node_class, n.params, b, live: live) ? b.build : nil
+            else
+              _, params, live = key
+              Plot::Panels.preview(params.node_class, params, b, live: live) ? b.build : nil
+            end
+          rescue StandardError => e
+            warn "preview of #{n.label}: #{e.class}: #{e.message}"
+            nil
+          end
+
           private
 
-          # An oscillator's chart (one cycle of it rendered by a copy of the
-          # voice, UI::ToneCycle; ux-notes-2) and, without one, why: [chart
-          # or nil, text or nil].  Rebuilt only when the render changes.
-          def tone_chart(n, s, state)
+          # An oscillator's chart key (one cycle of it rendered by a copy of
+          # the voice, UI::ToneCycle; ux-notes-2: [:tone, the render, whether
+          # a newer one is coming]) and, without one, why: [key or nil, text
+          # or nil].
+          def tone_key(n, s, state)
             src = s&.render_source
             return [nil, "#{n.label}: #{src&.note || 'its cycle needs a voice to copy (a synth track)'}"] unless src&.synth
             driver = (state[:tone_driver] ||= ToneCycle::Driver.new)
@@ -1242,43 +1277,24 @@ module MB
             r = driver.shown
             return [nil, "#{n.label}: rendering one cycle..."] unless r
             return [nil, "#{n.label}: #{r.error}"] if r.error
-            pending = driver.pending?
-            key = [:tone, r.seq, r.key, pending]
-            return [state[:chart], nil] if state[:chart_of] == key && state[:chart]
-            ms = (r.frames - 1) * 1000.0 / r.rate
-            what = r.noise ? "noise  #{Panes.fmt(ms)} ms" : "#{Plot::Panels.hz_text(r.frequency)}  one cycle #{Panes.fmt(ms)} ms#{r.synced ? ' (its sync master\'s)' : ''}"
-            label = "#{n.label} #{what}" \
-                    "#{r.partial ? " (the first #{Panes.fmt(ToneCycle::MAX_SECONDS)} s)" : ''}  #{r.input}#{pending ? ' …' : ''}"
-            live = { cycle: r.cycle, rate: r.rate, frequency: r.frequency, frames: r.frames, synced: r.synced, partial: r.partial, label: label }
-            b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
-            chart = Plot::Panels.preview(n.params.node_class, n.params, b, live: live) ? b.build : nil
-            state[:chart_of] = key
-            state[:chart] = chart
-            [chart, chart ? nil : "#{n.label}: no cycle to draw"]
-          rescue StandardError => e
-            state[:chart_of] = nil
-            warn "preview of #{n.label}: #{e.class}: #{e.message}"
-            [nil, "#{n.label}: #{e.class}"]
+            [[:tone, r, driver.pending?], nil]
           end
 
-          # The node's chart, rebuilt only when its params (or a playhead)
-          # change.
-          def chart_for(n, state)
+          # A node's chart key: [:node, its params, its live state (a
+          # playhead) with the inspector's picked param as +:focus+].
+          def node_key(n)
             live = live_now(n.live)
             # (the inspector's picked param: an envelope marks its point)
             focus = Inspect.target&.[](:param)
             live = (live || {}).merge(focus: focus) if focus
-            key = [n.params, live]
+            [:node, n.params, live]
+          end
+
+          # The chart for +key+ built here, kept while the key stays.
+          def chart_of(key, n, state)
             return state[:chart] if state[:chart_of] == key
-            b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
-            chart = Plot::Panels.preview(n.params.node_class, n.params, b, live: live) ? b.build : nil
             state[:chart_of] = key
-            state[:chart] = chart
-          rescue StandardError => e
-            state[:chart_of] = key
-            state[:chart] = nil
-            warn "preview of #{n.label}: #{e.class}: #{e.message}"
-            nil
+            state[:chart] = Preview.chart_of_key(key, n)
           end
 
           # +live+ (NodeInfo#live) with +:elapsed+, the seconds since it was
@@ -1387,6 +1403,11 @@ module MB
             end
             driver = Render.driver(state)
             driver.guess = !!state[:guess]
+            body = c.h >= 2 ? c.sub(0, 1, c.w, c.h - 1) : nil
+            # (renders come back with their plots drawn on the worker for
+            # this want: the painter copies their cells)
+            driver.picturer ||= Render.method(:pictures)
+            driver.want = body && Render.want(body, state, look)
             driver.tick(src, s.knobs, s.inspector&.knobs || [].freeze)
             r = driver.shown
             r = nil if r && r.track != src.track
@@ -1397,11 +1418,70 @@ module MB
               return
             end
             prev = state[:overlay] == false ? nil : driver.previous
-            state[:ref_env] = state[:reference] == false ? nil : Render.reference_envelope(r)
-            areas(c.sub(0, 1, c.w, c.h - 1), state[:view] || :all).each do |view, body|
-              chart = chart_for(r, prev, view, state)
-              plot(body, chart, state, view, look) if chart
+            pics = r.pictures
+            if pics && pics[0].equal?(driver.want) && pics[1] == prev&.seq
+              pics[0][0].each_with_index do |area, i|
+                cells = pics[2][i] or next
+                body.grid.blit(cells, body.x + area[1], body.y + area[2])
+              end
+              return
             end
+            # (the want changed since the render started: a marker key, the
+            # overlay, a resize; built here)
+            state[:ref_env] = state[:reference] == false ? nil : Render.reference_envelope(r)
+            areas(body, state[:view] || :all).each do |view, area|
+              chart = chart_for(r, prev, view, state)
+              plot(area, chart, state, view, look) if chart
+            end
+          end
+
+          # What the pane draws in +body+ (a Canvas) with +state+ and
+          # +look+, for a render's pictures (PatchRender::Driver#want): a
+          # frozen [areas, cursor time, cursor frequency, reference on],
+          # areas [[view, x, y, w, h, look, cells class], ...] relative to
+          # +body+.  The same object while none of it changes (Result#pictures
+          # are matched by identity), made without objects otherwise.
+          def self.want(body, state, look)
+            of = state[:want_of]
+            if of && of[0] == body.w && of[1] == body.h && of[2].equal?(state[:view]) && of[3].equal?(look) && of[4].equal?(body.grid.class) &&
+               of[5] == state[:cursor_time] && of[6] == state[:cursor_freq] && of[7] == state[:reference]
+              return state[:want]
+            end
+            state[:want_of] = [body.w, body.h, state[:view], look, body.grid.class, state[:cursor_time], state[:cursor_freq], state[:reference]]
+            areas = Render.areas_of(body, state[:view] || :all).map { |view, a|
+              lk = look && look != :auto ? look : Scope.auto_look(a.w, a.h)
+              [view, a.x - body.x, a.y - body.y, a.w, a.h, lk, body.grid.class].freeze
+            }.freeze
+            state[:want] = [areas, state[:cursor_time], state[:cursor_freq], state[:reference] != false].freeze
+          end
+
+          # The pictures of Result +r+ (with +prev+ faintly behind, or nil)
+          # for +want+ (.want): [want, prev's seq, [cells per area (nil
+          # where there is no chart)]], each area's chart (.chart_of) drawn
+          # by a Plot::Live kept per area on the calling thread (the
+          # Worker's: renders draw their plots there, pausing between them
+          # with +pace+), or nil for a failed render.
+          def self.pictures(r, prev, want, pace = false)
+            return nil if r.error
+            areas, ct, cf, ref_on = want
+            ref = ref_on ? reference_envelope(r) : nil
+            lives = (Thread.current[:mb_sound_render_lives] ||= {})
+            cells = areas.map { |area|
+              view, _x, _y, w, h, lk, klass = area
+              chart = chart_of(r, prev, view, ct, cf, view == :envelope ? ref : nil)
+              PatchRender.send(:rest, pace)
+              next nil unless chart
+              live = (lives[area] ||= Plot::Live.new(width: w, height: h, look: lk, cells: klass))
+              lives.shift while lives.length > 8
+              out = klass.new(w, h)
+              live.draw(chart, out, x: 0, y: 0)
+              PatchRender.send(:rest, pace)
+              out
+            }
+            [want, prev&.seq, cells.freeze].freeze
+          rescue StandardError => e
+            warn "render pane: #{e.class}: #{e.message}"
+            nil
           end
 
           # [key, hi, lo] of the A/B reference of Result +r+'s track (ab):
@@ -1448,7 +1528,10 @@ module MB
           # [[view, canvas], ...]: the plots that fit +body+ for +view+ (:all:
           # the cycle above the spectrum above the envelope, as many as fit
           # STACK_ROWS rows each; side by side in a wide, short pane).
-          def areas(body, view)
+          def areas(body, view) = Render.areas_of(body, view)
+
+          # (see #areas)
+          def self.areas_of(body, view)
             return [[view, body]] unless view == :all
             rows = body.h / STACK_ROWS
             if rows >= 2
@@ -1576,6 +1659,23 @@ module MB
             key = [r.seq, prev&.seq, view == :spectrum ? state[:cursor_freq] : (view == :envelope ? state[:cursor_time] : nil), ref&.first]
             hit = charts[view]
             return hit[1] if hit && hit[0] == key
+            chart = Render.chart_of(r, prev, view, state[:cursor_time], state[:cursor_freq], ref)
+            charts[view] = [key, chart]
+            chart
+          rescue StandardError => e
+            charts[view] = [key, nil]
+            warn "render pane: #{e.class}: #{e.message}"
+            nil
+          end
+
+          public
+
+          # The chart of Result +r+ (and +prev+ faintly behind, if any) in
+          # +view+ (:cycle, :envelope, or :spectrum), with the markers at
+          # +cursor_time+ (seconds, the envelope) and +cursor_freq+ (Hz, the
+          # spectrum) and +ref+ (.reference_envelope, the envelope), or nil
+          # when there is nothing to draw.
+          def self.chart_of(r, prev, view, cursor_time, cursor_freq, ref)
             b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
             case view
             when :spectrum
@@ -1587,7 +1687,7 @@ module MB
               b.y Plot::Scale::DB.new(-90.0..[(top / 10.0).ceil * 10, -40].max.to_f)
               b.line(ps[1], x: ps[0], color: PREVIOUS) if ps
               b.line(db, x: f)
-              b.rule(x: state[:cursor_freq], color: MARKER) if state[:cursor_freq]
+              b.rule(x: cursor_freq, color: MARKER) if cursor_freq
             when :cycle
               return nil unless r.cycle && r.cycle[0].length > 1
               ms = ->(res) { (0..(res.cycle[0].length - 1) * 1000.0 / res.rate) }
@@ -1618,15 +1718,9 @@ module MB
                 b.line(rhi, x: 0..r.frames, color: REFERENCE)
                 b.line(rlo, x: 0..r.frames, color: REFERENCE)
               end
-              b.rule(x: state[:cursor_time] * r.rate, color: MARKER) if state[:cursor_time]
+              b.rule(x: cursor_time * r.rate, color: MARKER) if cursor_time
             end
-            chart = b.build
-            charts[view] = [key, chart]
-            chart
-          rescue StandardError => e
-            charts[view] = [key, nil]
-            warn "render pane: #{e.class}: #{e.message}"
-            nil
+            b.build
           end
         end
 

@@ -463,6 +463,31 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       pr.seconds = pr::SECONDS
     end
 
+    it 'draws the plots of a render on the worker (the painter copies their cells), the same as drawing them on the painter' do
+      snap = ui_fake_snapshot
+      now = 0.0
+      drawn = []
+      [true, false].each do |worker|
+        st = { title_in_rule: true, driver: pr::Driver.new(clock: -> { now }) }
+        allow(ui::Panes::Render).to receive(:pictures).and_return(nil) unless worker
+        2.times do
+          [[90, 18], [100, 9], [60, 9]].each { |w, h| drawn << [worker, draw(snap, st, w: w, h: h)] }
+          st[:guess] = !st[:guess]
+          now += 0.3
+          draw(snap, st, w: 90, h: 18) # (a second render: the first drawn faintly behind it)
+          now += 0.3
+        end
+        r = st[:driver].shown
+        expect(r.pictures.nil?).to eq(!worker)
+        expect(r.pictures[2].compact.length).to eq(3) if worker # (the cycle, the spectrum, the envelope)
+      end
+      with, without = drawn.partition(&:first)
+      expect(with.map(&:last)).to eq(without.map(&:last))
+      expect(with.map(&:last).uniq.length).to be > 3
+    ensure
+      pr.seconds = pr::SECONDS
+    end
+
     it 'gets its source from Poll: the Synth in the inspected graph, the live nodes, and the clip, or why a graph track has none' do
       @session, = bass_session
       poll = ui::Poll.new(@session)
