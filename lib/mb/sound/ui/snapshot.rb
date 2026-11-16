@@ -529,7 +529,7 @@ module MB
           # MB_SOUND_UI_EVERY_BUFFER=1 turns it on at start.
           attr_accessor :every_buffer
         end
-        self.every_buffer = ENV['MB_SOUND_UI_EVERY_BUFFER'] == '1'
+        self.every_buffer = ENV['MB_SOUND_UI_EVERY_BUFFER'] == '1' || ENV['MB_SOUND_UI_SMOOTH'] == '1'
 
         # True when no capture is pending and the painter has taken the last
         # snapshot (the Session then calls #capture), or with

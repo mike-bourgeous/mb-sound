@@ -176,6 +176,29 @@ module MB
           WaveView.mode = mode.to_sym
         end
 
+        # Smooth frames (ui-perf-2; off by default): with :on the render
+        # thread publishes a snapshot after every buffer the painter took
+        # the last one in (Feed.every_buffer), the painter times its frames
+        # to new snapshots (FrameRate.snapshot_timed), and the REPL's echo
+        # wakes the painter once per key (Tiles.echo_wake), so scopes and
+        # meters change on every frame at 60 fps at any buffer size and
+        # typing shows in about a millisecond (bin/ui_bench.rb --smooth).
+        # With no argument, :on or :off; MB_SOUND_UI_SMOOTH=1 at start sets
+        # :on.  Takes effect on the running screen.  Returns the mode.
+        #
+        #     ui.smooth :on
+        #     ui.smooth          # => :on
+        def smooth(mode = nil)
+          return UI.smooth? ? :on : :off if mode.nil?
+          on = { on: true, off: false, true => true, false => false }.fetch(mode) {
+            raise ArgumentError, "ui.smooth takes :on or :off (got #{mode.inspect})"
+          }
+          Feed.every_buffer = FrameRate.snapshot_timed = Tiles.echo_wake = on
+          s = screen
+          s.apply_timing if s.respond_to?(:apply_timing)
+          on ? :on : :off
+        end
+
         def respond_to_missing?(name, include_private = false)
           Tiles.public_method_defined?(name) || Band.public_method_defined?(name) || super
         end

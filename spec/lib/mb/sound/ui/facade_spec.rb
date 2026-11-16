@@ -59,6 +59,23 @@ RSpec.describe(MB::Sound::UI::Facade, :aggregate_failures) do
     MB::Sound::UI::WaveView.mode = :off
   end
 
+  it 'turns every-buffer snapshots, snapshot-timed frames, and echo wake on and off together with ui.smooth, off by default (ui-perf-2)' do
+    ui = MB::Sound::UI
+    expect(facade.smooth).to eq(:off)
+    expect(facade.smooth(:on)).to eq(:on)
+    expect([ui::Feed.every_buffer, ui::FrameRate.snapshot_timed, ui::Tiles.echo_wake]).to eq([true, true, true])
+    expect(facade.smooth).to eq(:on)
+    t, = ui_tiles(:tiles)
+    allow(facade).to receive(:screen).and_return(t)
+    expect(t.instance_variable_get(:@pacer).timing).to be_a(ui::FrameRate::SnapshotTiming)
+    expect(facade.smooth(:off)).to eq(:off) # (the running screen too)
+    expect(t.instance_variable_get(:@pacer).timing).to be_nil
+    expect([ui::Feed.every_buffer, ui::FrameRate.snapshot_timed, ui::Tiles.echo_wake]).to eq([false, false, false])
+    expect { facade.smooth(:fast) }.to raise_error(ArgumentError, /:on or :off/)
+  ensure
+    ui::Feed.every_buffer = ui::FrameRate.snapshot_timed = ui::Tiles.echo_wake = false
+  end
+
   it 'opens KEYS from the band with ui.keys (ux-1 round 3 item 8 bug: NoMethodError)' do
     term = UIHelpers::FakeTerminal.new(30, 100)
     MB::Sound.ui(:band)

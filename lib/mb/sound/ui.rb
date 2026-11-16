@@ -90,6 +90,10 @@ module MB
         # The tiled screen on screen (or last shown), or nil.
         attr_reader :tiles
 
+        # True while `ui.smooth` is on: every-buffer snapshots, frames timed
+        # to them, and echo wake (see Facade#smooth).
+        def smooth? = Feed.every_buffer && FrameRate.snapshot_timed && Tiles.echo_wake ? true : false
+
         # The binding the console evaluates in (set before each line by
         # the hook from .install_pry!): the palette evaluates there.
         attr_accessor :console_binding

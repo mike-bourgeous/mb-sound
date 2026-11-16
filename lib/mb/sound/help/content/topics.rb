@@ -1966,6 +1966,10 @@ module MB
         `ui.perf :report`, `:stop`, `:save`; `ui.perf :capture` records a
         minute of the tiles and the sound screen in your terminal and saves
         it under tmp/ui-perf/captures/ (`ui.perf :cancel` stops it early).
+        `ui.smooth :on` (off by default; `ui.smooth` says which) makes the
+        scope and meters change on every frame at any buffer size and typing
+        show at once: a snapshot after every buffer, frames timed to them,
+        and the console's echo waking the screen.
 
         `ui.note 'the cutoff turns too slowly'` keeps a note for the next
         UI refinement round with the screen as text, the layout and focused

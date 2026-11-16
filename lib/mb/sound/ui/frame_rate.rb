@@ -19,7 +19,7 @@ module MB
           # MB_SOUND_UI_SNAPSHOT_TIMED=1 turns it on at start.
           attr_accessor :snapshot_timed
         end
-        self.snapshot_timed = ENV['MB_SOUND_UI_SNAPSHOT_TIMED'] == '1'
+        self.snapshot_timed = ENV['MB_SOUND_UI_SNAPSHOT_TIMED'] == '1' || ENV['MB_SOUND_UI_SMOOTH'] == '1'
 
         # When the newest snapshot's data becomes visible, for
         # Pacer#timing, read on the painter thread from the Feed's newest
@@ -221,13 +221,27 @@ module MB
           @rates = PaneRates.new(target, clock: @clock)
           @render_load = nil
           @pacer.on_frame = ->(f) { @rates.observe(f.paint + f.write, @render_load, f.at) }
+          apply_timing
+        end
+
+        public
+
+        # Times frames to snapshots or not, as FrameRate.snapshot_timed says
+        # now (at start, and from `ui.smooth` while the screen runs).
+        def apply_timing
           if FrameRate.snapshot_timed
-            @pacer.timing = SnapshotTiming.new(-> { @feed }, @pacer)
+            @pacer.timing ||= SnapshotTiming.new(-> { @feed }, @pacer)
             # (timed frames come up to the window early: panes at the
             # painter's rate stay due on each of them)
             @rates.slack = Pacer::TIMING_WINDOW
+          else
+            @pacer.timing = nil
+            @rates.slack = 0.0
           end
+          nil
         end
+
+        private
 
         # Which of the panes due this frame draw (UI::PaneRates): +items+
         # are [key, name, pane, explicit rate or nil, drawn_at]; all of

@@ -267,6 +267,8 @@ module MB::Sound
       design_line: [nil, 'design: the console line that opens the sound-design screen (default: the acid bass)', String],
       key_rate: [nil, 'design: knob turns per second by arrow keys (default 8.3; 0 for none, e.g. an LFO patch held)', Float],
       out_latency: [nil, 'Output latency the null output reports, in buffers (a device\'s queue: meters and scopes show what is heard)', Float],
+      smooth: [false, 'ui.smooth :on: every-buffer snapshots, snapshot-timed frames, and echo wake (off by default)'],
+      live_waves: [false, 'ui.waves :live (MB_SOUND_UI_WAVES=live, passed to each scenario)'],
       every_buffer: [false, 'Snapshots at every render buffer the painter took the last one in (UI::Feed.every_buffer; an option)'],
       deadlines: [false, 'Panes due by the painter\'s frame deadlines (UI::PaneRates.on_deadlines; an option)'],
       echo_wake: [false, 'The REPL\'s echo wakes the painter once after each key (UI::Tiles.echo_wake; an option)'],
@@ -277,6 +279,11 @@ module MB::Sound
       quiet_header: [false, 'Skip the header line (one scenario of a multi-scenario run)'],
     ) { |_args, p|
       ENV['AUDIO_PROFILE'] = p.latency.to_s if p.latency
+      UI::Feed.every_buffer = UI::FrameRate.snapshot_timed = UI::Tiles.echo_wake = true if p.smooth
+      if p.live_waves
+        ENV['MB_SOUND_UI_WAVES'] = 'live'
+        UI::WaveView.mode = :live
+      end
       UI::Feed.every_buffer = true if p.every_buffer
       UI::PaneRates.on_deadlines = true if p.deadlines
       UI::FrameRate.snapshot_timed = true if p.snapshot_timed
@@ -305,6 +312,7 @@ module MB::Sound
             v = p.public_send(k)
             args.push(flag, v.to_s) unless v.nil?
           end
+          args << '--smooth' if p.smooth
           args << '--every-buffer' if p.every_buffer
           args << '--deadlines' if p.deadlines
           args << '--snapshot-timed' if p.snapshot_timed

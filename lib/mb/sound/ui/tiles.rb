@@ -332,7 +332,7 @@ module MB
             @host = MB::Term::Input::ReplHost.new(rows: r.h, cols: r.w, mode: @repl_mode, scrollback: @scrollback, ambiguous_width: @ambiguous,
                                         target: @context || TOPLEVEL_BINDING, pry: @pry_opts)
             @host.start
-            @host.on_output = method(:echo_output) if Tiles.echo_wake
+            @host.on_output = method(:echo_output) # (does nothing unless Tiles.echo_wake armed it for a key)
             # A Pry of our own (:thread) reads through the global Reline,
             # whose Ctrl-]/F2 bindings (ConsoleKeys) act on the screen that
             # owns the reading thread: this one, not a new one on the real
@@ -2047,7 +2047,7 @@ module MB
           # after).
           attr_accessor :echo_wake
         end
-        self.echo_wake = ENV['MB_SOUND_UI_ECHO_WAKE'] == '1'
+        self.echo_wake = ENV['MB_SOUND_UI_ECHO_WAKE'] == '1' || ENV['MB_SOUND_UI_SMOOTH'] == '1'
 
         # Seconds after a REPL key its echo may wake the painter.
         ECHO_WINDOW = 0.1
