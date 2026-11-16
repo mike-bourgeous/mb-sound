@@ -38,29 +38,46 @@ module MB
         end
       end
 
+      # Buffer sizes of UI.warm_up's short sessions (one session each).
+      RENDER_SESSIONS = [256, 800, 128, 512, 256, 800].freeze
+
       # Draws every built-in pane for +frames+ refreshes of Demo snapshots
       # into grids nobody sees (and runs a Poll on a silent Session), so
       # YJIT has compiled the painter before a band goes on screen (its
       # first frames otherwise hold the GVL for tens of milliseconds while
-      # compiling).  Once per process; nil without YJIT.  Returns seconds.
+      # compiling).  Before that, the render thread's side of a screen
+      # (snapshots, meters, the scope) in short sessions.  Once per
+      # process; nil without YJIT.  Returns seconds.
       def self.warm_up(frames: 130)
         return nil if @warmed || !JIT.compiling?
         @warmed = true
         t0 = MB::U.clock_now
 
-        session = Session.new(output: NullOutput.new(channels: 2, sleep: false), realtime: false, transport: Sequence::Transport.new)
-        session.knob(:warm_up, 0.5)
-        poll = Poll.new(session)
-
-        # The render thread's side: snapshots with meters and a scope
-        feed = Feed.new
-        feed.needs = %i[meters scope]
-        session.ui_feed = feed
-        session.add(110.hz.triangle.at(-20.db), name: :warm_up)
-        (frames / 2).times do
-          session.process_buffer(256)
-          feed.take
+        # The render thread's side: snapshots with meters and a scope, in
+        # RENDER_SESSIONS short sessions of different buffer sizes, with
+        # the painter taking every other snapshot.  A session's, a
+        # player's, and a feed's first buffers run code once each (their
+        # setup, the meters' filters), which YJIT compiles at its fifth
+        # call: with one session here, the next four songs a process played
+        # compiled it in their first buffer on the render thread (ui-perf-2
+        # step 2: a 26-41 ms buffer at bar 1 on the emulated i9, ~500
+        # blocks, about half of them the feed's).
+        session = nil
+        RENDER_SESSIONS.each_with_index do |n, k|
+          session&.close
+          session = Session.new(output: NullOutput.new(channels: 2, sleep: false), realtime: false, transport: Sequence::Transport.new)
+          session.knob(:warm_up, 0.5)
+          feed = Feed.new
+          feed.needs = %i[meters scope]
+          session.ui_feed = feed
+          session.add(110.hz.triangle.at(-20.db), name: :warm_up)
+          session.add(165.hz.ramp.at(-24.db), name: :warm_up_2) if k.odd?
+          (frames / 10).times do |i|
+            session.process_buffer(n)
+            feed.take if i.even?
+          end
         end
+        poll = Poll.new(session)
 
         # Every pane (the deck has them all) drawn each refresh, then the
         # diffed path
