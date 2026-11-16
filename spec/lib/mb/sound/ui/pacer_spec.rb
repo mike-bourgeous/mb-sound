@@ -122,6 +122,27 @@ RSpec.describe(MB::Sound::UI::Pacer, :aggregate_failures) do
       expect(seqs.each_cons(2).map { |a, b| b - a }.uniq).to eq([1])
     end
 
+    it 'shows the snapshot heard nearest the frame with timing on (Follow#heard), the last one passed without' do
+      screen = Class.new {
+        include MB::Sound::UI::Follow
+        def initialize(pacer) = (@pacer = pacer; @heard = nil)
+        public :heard
+      }.new(described_class.new(60, clock: -> { 0.0 }))
+      now = MB::U.clock_now
+      a = MB::Sound::UI::Snapshot.fake(seq: 1, time: now - 0.030, latency: 0.020) # (heard 10 ms ago)
+      b = MB::Sound::UI::Snapshot.fake(seq: 2, time: now - 0.016, latency: 0.020) # (heard in 4 ms: under half a period)
+      old = MB::Sound::UI::FrameRate.snapshot_timed
+      begin
+        MB::Sound::UI::FrameRate.snapshot_timed = false
+        screen.heard(a, now)
+        expect(screen.heard(b, now).seq).to eq(1)
+        MB::Sound::UI::FrameRate.snapshot_timed = true
+        expect(screen.heard(b, now).seq).to eq(2)
+      ensure
+        MB::Sound::UI::FrameRate.snapshot_timed = old
+      end
+    end
+
     it 'keeps the grid when snapshots stop (a stopped render thread still gets frames)' do
       _, starts = shown(true, feed(phase: 0.003, jitter: 0.0, stop_at: 0.5))
       late = starts.select { |s| s > 0.7 }

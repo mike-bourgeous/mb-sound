@@ -73,8 +73,18 @@ module MB
           ring = (@heard ||= [])
           ring << snap unless ring.last.equal?(snap)
           ring.shift while ring.length > HEARD
-          wall = MB::U.clock_now
-          ring.reverse_each { |x| return x if x.heard_at <= wall }
+          # (with frames timed to snapshots, the one heard nearest this
+          # frame: up to half a period ahead, so a heard time just after a
+          # frame starts doesn't wait a whole frame; an output latency near
+          # a frame period otherwise made the visible updates 33 ms apart
+          # now and then, ui-perf-1)
+          wall = MB::U.clock_now + (FrameRate.snapshot_timed && @pacer ? @pacer.period * 0.5 : 0.0)
+          i = ring.length - 1
+          while i >= 0
+            x = ring[i]
+            return x if x.heard_at <= wall
+            i -= 1
+          end
           ring.first
         end
 
