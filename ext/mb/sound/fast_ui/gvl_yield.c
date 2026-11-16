@@ -58,6 +58,10 @@ static uint64_t stat_kicks;
 static uint64_t stat_yields;
 static uint64_t stat_retries;
 static uint64_t stat_wakeups;
+static int64_t kick_ns; // when the current wait's first kick was triggered (0: none)
+static uint64_t stat_late1; // handovers more than 1 ms after their first kick
+static uint64_t stat_late2; // ... more than 2 ms
+static int64_t stat_late_max_ns;
 
 static sem_t kick_sem;
 static pthread_t kick_thread;
@@ -85,6 +89,24 @@ static void yield_job(void *data)
 		return;
 	}
 	ADD(stat_yields, 1);
+	int64_t k = LOAD(kick_ns);
+	if (k) {
+		// (how long the holder ran on after the first kick: a long C call
+		// or a GC step checks no interrupts)
+		struct timespec ts;
+		clock_gettime(CLOCK_MONOTONIC, &ts);
+		int64_t late = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec - k;
+		if (late > 1000000) {
+			ADD(stat_late1, 1);
+		}
+		if (late > 2000000) {
+			ADD(stat_late2, 1);
+		}
+		if (late > LOAD(stat_late_max_ns)) {
+			STORE(stat_late_max_ns, late);
+		}
+		STORE(kick_ns, 0);
+	}
 	rb_thread_schedule();
 }
 
@@ -101,6 +123,9 @@ static void *yield_kicker(void *arg)
 		for (int k = 0; k < KICK_RETRIES && LOAD(kicker_running) && LOAD(priority_waiting) && LOAD(yielder_holds); k++) {
 			if (k == 0) {
 				ADD(stat_kicks, 1);
+				struct timespec ts;
+				clock_gettime(CLOCK_MONOTONIC, &ts);
+				STORE(kick_ns, (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec);
 			} else {
 				ADD(stat_retries, 1);
 			}
@@ -275,10 +300,13 @@ static VALUE yield_active(VALUE self)
 	return kicker_running ? Qtrue : Qfalse;
 }
 
-// GVLYield.stats -> { kicks:, retries:, yields:, wakeups: } since the
+// GVLYield.stats -> { kicks:, retries:, yields:, wakeups:, late_1ms:,
+// late_2ms:, late_max_ns: } since the
 // process started: times the priority thread waited on a yielder (a kick),
-// kicks repeated while it still waited, handovers made, and times the
-// kicker thread woke (it sleeps on a semaphore otherwise).
+// kicks repeated while it still waited, handovers made, times the kicker
+// thread woke (it sleeps on a semaphore otherwise), and handovers that came
+// more than 1 and 2 ms after their first kick, with the longest (ns): the
+// holder was in a C call or a GC step, which check no interrupts.
 static VALUE yield_stats(VALUE self)
 {
 	VALUE h = rb_hash_new();
@@ -286,6 +314,9 @@ static VALUE yield_stats(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("retries")), ULL2NUM(LOAD(stat_retries)));
 	rb_hash_aset(h, ID2SYM(rb_intern("yields")), ULL2NUM(LOAD(stat_yields)));
 	rb_hash_aset(h, ID2SYM(rb_intern("wakeups")), ULL2NUM(LOAD(stat_wakeups)));
+	rb_hash_aset(h, ID2SYM(rb_intern("late_1ms")), ULL2NUM(LOAD(stat_late1)));
+	rb_hash_aset(h, ID2SYM(rb_intern("late_2ms")), ULL2NUM(LOAD(stat_late2)));
+	rb_hash_aset(h, ID2SYM(rb_intern("late_max_ns")), LL2NUM(LOAD(stat_late_max_ns)));
 	return h;
 }
 
