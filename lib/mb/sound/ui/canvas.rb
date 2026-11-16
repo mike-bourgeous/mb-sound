@@ -70,7 +70,7 @@ module MB
         # Levels for sparklines (lowest to highest).
         SPARKS = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'].freeze
 
-        attr_reader :x, :y, :w, :h, :grid
+        attr_reader :x, :y, :w, :h, :grid, :glyph_set
 
         # The row #puts writes next.
         attr_accessor :row
@@ -84,6 +84,8 @@ module MB
           @row = 0
           @glyph_set = glyphs
           @glyphs = MB::Term::Themes.glyphs(glyphs)
+          @blank = nil
+          @spark = nil
         end
 
         # A glyph by name (see GLYPHS).
@@ -245,12 +247,16 @@ module MB
         # A sparkline of +values+ from +lo+ to +hi+ (the last values that
         # fit +width+).  Returns the column after it.
         def sparkline(values, lo: 0.0, hi: 1.0, width: @w, x: 0, y: @row, role: :key)
-          vals = values.last(width)
           span = (hi - lo).to_f
-          str = vals.map { |v|
-            f = span > 0 ? ((v.to_f - lo) / span).clamp(0.0, 1.0) : 0.0
-            SPARKS[(f * (SPARKS.length - 1)).round]
-          }.join
+          # (one String per canvas, refilled: no Arrays per draw; ui-perf-1)
+          str = (@spark ||= +'')
+          str.clear
+          i = values.length > width ? values.length - width : 0
+          while i < values.length
+            f = span > 0 ? ((values[i].to_f - lo) / span).clamp(0.0, 1.0) : 0.0
+            str << SPARKS[(f * (SPARKS.length - 1)).round]
+            i += 1
+          end
           text(x, y, str, role)
         end
 

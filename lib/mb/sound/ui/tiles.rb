@@ -162,6 +162,7 @@ module MB
           @match = @search = @flash = @painter_warned = @reloaded_at = @size_checked_at = @resized = nil
           @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = nil
           @line_cursor = @old_winch = @signals = @wake_r = @wake_w = nil
+          @status_canvas = @status_right = @status_right_key = nil # (draw_status's canvas and right-hand text, kept)
           @attached = @poll = @polled_at = @poll_warned = @last = nil
           @asking = nil # ([pane name, PaneKeys::Ask] while a pane's value prompt is open)
           @overlay_from_play = false # (see #key_help)
@@ -2307,7 +2308,7 @@ module MB
           draw_status(now, snap)
 
           cells = @grid.frame(clear ? nil : @shown, @mode, row: 1, col: 1, sync: false)
-          cells = '' if cells == "\e[0m" || cells.empty?
+          cells = -'' if cells == -"\e[0m" || cells.empty?
           @shown.copy_from(@grid)
           cursor = cursor_bytes
           out = nil
@@ -2460,7 +2461,9 @@ module MB
 
         def draw_status(now, snap)
           y = @rows - 1
-          c = Canvas.new(@grid, 0, y, @cols, 1, glyphs: @glyphs)
+          # (one canvas while the size and glyphs stay; ui-perf-1)
+          c = @status_canvas
+          c = @status_canvas = Canvas.new(@grid, 0, y, @cols, 1, glyphs: @glyphs) unless c && c.grid.equal?(@grid) && c.y == y && c.w == @cols && c.glyph_set == @glyphs
           c.clear
           mode = @router.mode
           if mode == :line
@@ -2479,11 +2482,11 @@ module MB
           end
           @line_cursor = nil
           step = mode == :grab && @keyboard.entry == :step
-          badge = mode == :once || (mode == :overlay && @router.once_return) ? ' ^W ' : %i[nav overlay].include?(mode) ? ' NAV ' : mode == :grab ? (step ? ' STEP ' : ' KEYS ') : mode == :pane ? " #{@tiler.focus.to_s.upcase} " : @host ? ' REPL ' : ' PLAY '
+          badge = mode == :once || (mode == :overlay && @router.once_return) ? -' ^W ' : %i[nav overlay].include?(mode) ? -' NAV ' : mode == :grab ? (step ? -' STEP ' : -' KEYS ') : mode == :pane ? " #{@tiler.focus.to_s.upcase} " : @host ? -' REPL ' : -' PLAY '
           role = %i[nav overlay once].include?(mode) ? :armed : mode == :grab ? (step ? :queued : :rec) : mode == :pane ? :queued : :key
           @grid.put_run(0, y, badge, MB::Term::Cells.pack(Theme.rgb(role)), nil, MB::Term::Cells::REVERSE | MB::Term::Cells::BOLD)
           x = badge.length + 1
-          right = snap ? "#{snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} " : ''
+          right = status_right(snap, c)
           right = "#{frame_rate[:text]}  #{right}" if @show_fps
           unread = UI.messages.unread
           if unread > 0 && !@tiler.layout.panes.include?(:messages)
@@ -2493,14 +2496,16 @@ module MB
           end
           flash = @flash && now < @flash[2] ? @flash : nil
           @flash = nil if @flash && !flash
-          x = c.line(0, [@tiler.focus.to_s, :name], (@tiler.layout.zoom ? [' (zoomed)', :warn] : ' '), x: x)
+          f = @tiler.focus
+          x = c.text(x, 0, f.is_a?(Symbol) ? f.name : f.to_s, :name)
+          x = @tiler.layout.zoom ? c.text(x, 0, -' (zoomed)', :warn) : c.text(x, 0, -' ')
           room = @cols - x - right.length - 1
           if flash
             c.text(x + 1, 0, c.fit(flash[0], room), flash[1])
           else
             hint =
               if @router.state == :pending then "#{MB::Term::Input::Keymap.chord_name(@router.prefix.key.chord)} ..."
-              elsif mode == :play then @status_note || @hints || ''
+              elsif mode == :play then @status_note || @hints || -''
               elsif mode == :pane then "#{enter_hint}Esc nav  ? keys  #{(m = @panes[@tiler.focus]&.mode_keymap) ? Keys.hints(m) : ''}"
               else HINTS[step ? :step : mode] || ''
               end
@@ -2508,6 +2513,22 @@ module MB
           end
           c.text(@cols - right.length, 0, right, :key) unless right.empty?
           c.text(warn_at, 0, badge_w, :warn) if warn_at
+        end
+
+        # The status line's right-hand text: play state and bar:beat ("▶
+        # 17:3 "), or "" without a snapshot, kept while they stay.
+        def status_right(snap, c)
+          return -'' unless snap
+          beat = snap.beat.floor
+          k = @status_right_key ||= [nil, nil, nil, nil]
+          unless k[0] == snap.playing && k[1] == snap.bar && k[2] == beat && k[3] == @glyphs
+            k[0] = snap.playing
+            k[1] = snap.bar
+            k[2] = beat
+            k[3] = @glyphs
+            @status_right = "#{snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} ".freeze
+          end
+          @status_right
         end
 
         # "Enter: <what it does>  " for the focused pane in its mode, when
@@ -2526,7 +2547,7 @@ module MB
             return "\e[#{@line_cursor[0] + 1};#{@line_cursor[1] + 1}H\e[?25h"
           end
           r = repl_rect
-          return '' unless r && @host && @router.mode == :repl && @scroll == 0
+          return -'' unless r && @host && @router.mode == :repl && @scroll == 0
           vt = @host.vt
           row, col, visible = @host.synchronize { [vt.row, vt.col, vt.cursor_visible?] }
           return '' unless visible && row < r.h && col < r.w

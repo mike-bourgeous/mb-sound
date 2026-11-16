@@ -48,6 +48,16 @@ module MB
           end
         end
 
+        # .db right-justified to 5 columns, kept per value.
+        def db5(v)
+          return -'    -' if v.nil?
+          DB5_MEMO[v] ||= begin
+            DB5_MEMO.clear if DB5_MEMO.length >= MEMO_MAX
+            db(v).rjust(5).freeze
+          end
+        end
+        DB5_MEMO = {}
+
         # 0..1 for a dBFS level on the meter scale.
         def db_frac(v)
           return 0.0 if v.nil? || !v.finite?
@@ -58,8 +68,27 @@ module MB
         def load_text(load)
           return ['-', :dim] if load.nil?
           pct = (load * 100).round
-          [format('%d%%', pct), load < 0.5 ? :ok : load < 0.8 ? :warn : :bad]
+          [format('%d%%', pct), load_role(load)]
         end
+
+        # The role of a load fraction (see .load_text).
+        def load_role(load)
+          return :dim if load.nil?
+          load < 0.5 ? :ok : load < 0.8 ? :warn : :bad
+        end
+
+        # .load_text's text right-justified to 4 columns, kept per
+        # percentage (the transport pane each frame).
+        def load_text4(load)
+          return LOAD_DASH if load.nil?
+          pct = (load * 100).round
+          LOAD_MEMO[pct] ||= begin
+            LOAD_MEMO.clear if LOAD_MEMO.length >= MEMO_MAX
+            format('%d%%', pct).rjust(4).freeze
+          end
+        end
+        LOAD_DASH = '   -'.freeze
+        LOAD_MEMO = {}
 
         # Transport: play state, bar:beat, tempo, meter, render load, and
         # output underruns.
@@ -79,17 +108,38 @@ module MB
               state[:seq] = s.seq
             end
 
-            load, role = Panes.load_text(s.load)
-            segs = [
-              [s.playing ? c.glyph(:play) : c.glyph(:stop), s.playing ? :ok : :dim], ' ',
-              [s.stamp.ljust(6), :key], ' ',
-              [Panes.fmt(s.bpm), :name], [' bpm ', :dim], [s.meter, :name],
-              ['  load ', :dim], [load.rjust(4), role], ' ',
-            ]
-            x = c.line(0, *segs)
+            # (one text call per segment and strings kept while their values
+            # stay, instead of segment Arrays and new strings each frame: the
+            # same cells, no garbage in the steady state; ui-perf-1)
+            role = Panes.load_role(s.load)
+            beat = s.beat.floor
+            unless state[:stamp_bar] == s.bar && state[:stamp_beat] == beat
+              state[:stamp_bar] = s.bar
+              state[:stamp_beat] = beat
+              state[:stamp] = s.stamp.ljust(6).freeze
+            end
+            unless state[:meter_of].equal?(s.bar_length) || state[:meter_of] == s.bar_length
+              state[:meter_of] = s.bar_length
+              state[:meter] = s.meter.freeze
+            end
+            x = c.text(0, 0, s.playing ? c.glyph(:play) : c.glyph(:stop), s.playing ? :ok : :dim)
+            x = c.text(x, 0, -' ')
+            x = c.text(x, 0, state[:stamp], :key)
+            x = c.text(x, 0, -' ')
+            x = c.text(x, 0, Panes.fmt(s.bpm), :name)
+            x = c.text(x, 0, -' bpm ', :dim)
+            x = c.text(x, 0, state[:meter], :name)
+            x = c.text(x, 0, -'  load ', :dim)
+            x = c.text(x, 0, Panes.load_text4(s.load), role)
+            x = c.text(x, 0, -' ')
             x = c.sparkline(hist, lo: 0.0, hi: 1.0, width: 8, x: x, y: 0, role: role)
             if s.underruns
-              c.line(0, ['  xruns ', :dim], [s.underruns.to_s, s.underruns > (state[:xruns_at_start] ||= s.underruns) ? :bad : :ok], x: x)
+              unless state[:xruns_of] == s.underruns
+                state[:xruns_of] = s.underruns
+                state[:xruns] = s.underruns.to_s.freeze
+              end
+              x = c.text(x, 0, -'  xruns ', :dim)
+              c.text(x, 0, state[:xruns], s.underruns > (state[:xruns_at_start] ||= s.underruns) ? :bad : :ok)
             end
           end
         end
@@ -316,6 +366,9 @@ module MB
           # Seconds a peak is held.
           HOLD = 1.5
 
+          # Channel labels of a stereo master.
+          LR = %w[L R].freeze
+
           def initialize = super(:meters, rate: 30, height: 6, width: 30, needs: [:meters], title: 'master', min_height: 4, description: 'master meters: peak with hold, RMS, short-term LUFS, true peak')
 
           def draw_body(c, s, state)
@@ -325,21 +378,52 @@ module MB
               return
             end
 
+            # (text calls, held peaks updated in place, strings kept per
+            # value: the same cells without garbage each frame; ui-perf-1)
             holds = (state[:holds] ||= [])
-            labels = m.peak.length == 2 ? %w[L R] : m.peak.each_index.map { |i| (i + 1).to_s }
-            rows = [c.h - 2, m.peak.length].min
+            n = m.peak.length
+            rows = c.h - 2 < n ? c.h - 2 : n
             rows.times do |ch|
               peak = m.peak[ch]
               h = holds[ch]
-              holds[ch] = h = [peak, s.time] if h.nil? || peak >= h[0] || s.time - h[1] > HOLD
-              x = c.line(ch, [labels[ch], :dim], ' ')
-              mw = [c.w - x - 6, 3].max
+              if h.nil?
+                holds[ch] = h = [peak, s.time]
+              elsif peak >= h[0] || s.time - h[1] > HOLD
+                h[0] = peak
+                h[1] = s.time
+              end
+              x = c.text(0, ch, n == 2 ? LR[ch] : (ch + 1).to_s, :dim)
+              x = c.text(x, ch, -' ')
+              mw = c.w - x - 6
+              mw = 3 if mw < 3
               x = c.meter(Panes.db_frac(peak), width: mw, x: x, y: ch, zones: DB_ZONES, hold: Panes.db_frac(h[0]))
-              c.text(x + 1, ch, Panes.db(h[0]).rjust(5), h[0] > -1.0 ? :bad : :text)
+              c.text(x + 1, ch, Panes.db5(h[0]), h[0] > -1.0 ? :bad : :text)
             end
             y = rows
-            c.line(y, ['S ', :dim], [Panes.db(m.lufs_s), :key], [' LUFS  ', :dim], ['TP ', :dim], [Panes.db(m.true_peak), m.true_peak > -1.0 ? :bad : :text])
-            c.line(y + 1, ['RMS ', :dim], m.rms.map { |r| Panes.db(r) }.join(' '))
+            x = c.text(0, y, -'S ', :dim)
+            x = c.text(x, y, Panes.db(m.lufs_s), :key)
+            x = c.text(x, y, -' LUFS  ', :dim)
+            x = c.text(x, y, -'TP ', :dim)
+            c.text(x, y, Panes.db(m.true_peak), m.true_peak > -1.0 ? :bad : :text)
+            x = c.text(0, y + 1, -'RMS ', :dim)
+            c.text(x, y + 1, rms_line(m.rms, state))
+          end
+
+          # The RMS values as one line ("-8.1 -9.2"), rebuilt only when a
+          # value's text changed (Panes.db keeps one String per value).
+          def rms_line(rms, state)
+            parts = (state[:rms_parts] ||= [])
+            same = parts.length == rms.length
+            i = 0
+            while i < rms.length
+              t = Panes.db(rms[i])
+              same = false unless parts[i].equal?(t)
+              parts[i] = t
+              i += 1
+            end
+            parts.pop while parts.length > rms.length
+            return state[:rms_line] if same && state[:rms_line]
+            state[:rms_line] = parts.join(' ').freeze
           end
         end
 
