@@ -347,7 +347,7 @@ module MB
             # (an oscillator without a cheap cycle: the voice's output)
             view = ToneDisplay.new(node) unless view
             unless view.supported? || view.is_a?(VoiceView)
-              why = view.why
+              why = view.reason
               view = nil
               kind = :voice
             end
@@ -521,6 +521,9 @@ module MB
 
           def supported? = @why.nil?
 
+          # The text of #why for the live title (the voice's output then).
+          def reason = @why
+
           # One period at +freq+ Hz with +width+ and +scan+ (NaN or nil:
           # the node's own fixed setting): an SFloat, reused when nothing
           # changed since the last call (by the frequency to a hundredth of
@@ -581,13 +584,13 @@ module MB
               cur = st.public_send(getter)
               if v.is_a?(Array) && cur.is_a?(Array) && cur.length == v.length
                 restore_array(cur, v)
-              elsif v.is_a?(Array) && cur.is_a?(Array) && v.none?(Array) && !cur.frozen?
+              elsif v.is_a?(Array) && cur.is_a?(Array) && v.none?(Array)
                 # (a state the kernel lengthens on its first buffer, such as
                 # a wavetable's: back to its first length, in place)
                 cur.replace(v)
-              elsif v.is_a?(Numo::NArray) && cur.is_a?(Numo::NArray) && cur.size == v.size && cur.class == v.class && !cur.frozen? && Kernels.copy(cur, v)
+              elsif v.is_a?(Numo::NArray) && cur.is_a?(Numo::NArray) && cur.size == v.size && cur.class == v.class && Kernels.copy(cur, v)
                 nil
-              elsif !v.equal?(cur)
+              else
                 st.public_send(setter, v.is_a?(Array) || v.is_a?(Numo::NArray) ? v.dup : v)
               end
             end
@@ -603,9 +606,9 @@ module MB
               c = cur[i]
               if x.is_a?(Array) && c.is_a?(Array) && c.length == x.length
                 restore_array(c, x)
-              elsif x.is_a?(Numo::NArray) && c.is_a?(Numo::NArray) && c.size == x.size && c.class == x.class && !c.frozen? && Kernels.copy(c, x)
+              elsif x.is_a?(Numo::NArray) && c.is_a?(Numo::NArray) && c.size == x.size && c.class == x.class && Kernels.copy(c, x)
                 nil
-              elsif !x.equal?(c)
+              else
                 cur[i] = x.is_a?(Array) || x.is_a?(Numo::NArray) ? x.dup : x
               end
               i += 1

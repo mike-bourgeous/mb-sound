@@ -38,6 +38,24 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
     expect { fast.wave(Object.new, Numo::SFloat[1], 0, 0, 4, 4, -1.0, 1.0, 0, -1, 0) }.to raise_error(TypeError)
   end
 
+  # FastUI.response_db (ui-wave-perf-1; mirror Plot::Response.db_ruby,
+  # compared in plot/response_spec.rb): sizes 0, 1, and many, the longest
+  # coefficient lists, views, and wrong arguments (for memcheck)
+  it 'writes filter responses into SFloats of any size and checks its arguments' do
+    b = Array.new(16) { |i| 1.0 / (i + 1) }
+    a = Array.new(16) { |i| i == 0 ? 1.0 : 0.01 * i }
+    [0, 1, 2, 257].each do |n|
+      out = Numo::SFloat.new(n)
+      expect(fast.response_db(out, b, a, 48000.0, 20.0, 23976.0, -60.0)).to equal(out)
+      expect(out.to_a).to all(be >= -60.0) if n > 0
+    end
+    view = Numo::SFloat.zeros(20)[2...12]
+    expect { fast.response_db(view, [1.0], [1.0, 0.5], 48000.0, 20.0, 2000.0, -60.0) }.not_to raise_error
+    expect { fast.response_db(Numo::SFloat.zeros(20)[(0..19) % 2], [1.0], [1.0], 48000.0, 20.0, 2000.0, -60.0) }.to raise_error(ArgumentError, /contiguous/)
+    expect { fast.response_db(Numo::SFloat.new(4), [1.0, 'x'], [1.0], 48000.0, 20.0, 2000.0, -60.0) }.to raise_error(TypeError)
+    expect { fast.response_db(Numo::SFloat.new(4), Array.new(17, 1.0), [1.0], 48000.0, 20.0, 2000.0, -60.0) }.to raise_error(ArgumentError)
+  end
+
   # Values with NaNs comparable by eq (NaN never equals NaN)
   def comparable(v)
     case v
