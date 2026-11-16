@@ -2295,8 +2295,7 @@ module MB
             row[4] = @drawn_at[p.name]
             items << row
           end
-          ft = frame_time(now)
-          draw = panes_to_draw(items, ft, full, snap)
+          draw = panes_to_draw(items, now, full, snap)
           @placed.each do |p|
             if p.tabs
               draw_tabs(p) if full
@@ -2331,7 +2330,7 @@ module MB
             rescue => e
               pane_failed(p, e)
             end
-            @drawn_at[p.name] = ft
+            @drawn_at[p.name] = now
             @rates.drew(p.name, now)
             d = thread_cpu - t0
             (q = @pane_cpu[p.name]) << d

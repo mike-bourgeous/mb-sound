@@ -275,14 +275,6 @@ module MB
           out
         end
 
-        # The time panes are due by this frame: +now+, or with
-        # PaneRates.on_deadlines the painter's deadline for the frame it
-        # paints (on the painter thread; refreshes from elsewhere use +now+).
-        def frame_time(now)
-          return now unless PaneRates.on_deadlines && @pacer.state == :painting && Thread.current.equal?(thread)
-          @pacer.deadline || now
-        end
-
         # A pane's rate for NAV f's badges: measured redraws per second
         # ("60/s").
         def rate_text(name, now = @clock.call)

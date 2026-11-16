@@ -170,22 +170,6 @@ module MB
           now - drawn_at >= 1.0 / rate(priority, own_rate, explicit) - 0.001 - @slack / @fps
         end
 
-        class << self
-          # ui-perf-1 (an option, off by default): panes are due by the
-          # painter's frame deadlines instead of the frames' start times
-          # (FrameRate#frame_time).  A frame that starts late ends near the
-          # next deadline, and the next frame starts at once (UI::Pacer
-          # catches up), under a millisecond after it: no pane is due then,
-          # so a pane at the painter's rate skips that frame and its picture
-          # is a frame older (measured with bin/ui_bench.rb on a loaded
-          # machine: 21 such pairs in 5 s, scope 55.8 draws/s at a 60
-          # target, update age p95 33 ms).  On deadlines, frames are a
-          # period apart however late they start.
-          # MB_SOUND_UI_DEADLINES=1 turns it on at start.
-          attr_accessor :on_deadlines
-        end
-        self.on_deadlines = ENV['MB_SOUND_UI_DEADLINES'] == '1'
-
         # From +candidates+ ([[key, priority, lateness], ...]: panes due this
         # frame, lateness in periods past due), the ones that draw: every
         # meter, and the others in order of lateness up to the level's

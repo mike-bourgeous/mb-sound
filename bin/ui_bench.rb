@@ -414,7 +414,6 @@ module MB::Sound
       smooth: [false, 'ui.smooth :on: every-buffer snapshots, snapshot-timed frames, and echo wake (off by default)'],
       live_waves: [false, 'ui.waves :live (MB_SOUND_UI_WAVES=live, passed to each scenario)'],
       every_buffer: [false, 'Snapshots at every render buffer the painter took the last one in (UI::Feed.every_buffer; an option)'],
-      deadlines: [false, 'Panes due by the painter\'s frame deadlines (UI::PaneRates.on_deadlines; an option)'],
       echo_wake: [false, 'The REPL\'s echo wakes the painter once after each key (UI::Tiles.echo_wake; an option)'],
       snapshot_timed: [false, 'Frames timed to the render thread\'s snapshots (UI::FrameRate.snapshot_timed; an option)'],
       file_watch: [false, 'Record file system calls from the screen\'s threads (UI::FileWatch)'],
@@ -430,7 +429,6 @@ module MB::Sound
         UI::WaveView.mode = :live
       end
       UI::Feed.every_buffer = true if p.every_buffer
-      UI::PaneRates.on_deadlines = true if p.deadlines
       UI::FrameRate.snapshot_timed = true if p.snapshot_timed
       UI::Tiles.echo_wake = true if p.echo_wake
       rows, cols = p.size.split('x').map(&:to_i)
@@ -459,7 +457,6 @@ module MB::Sound
           end
           args << '--smooth' if p.smooth
           args << '--every-buffer' if p.every_buffer
-          args << '--deadlines' if p.deadlines
           args << '--snapshot-timed' if p.snapshot_timed
           args << '--echo-wake' if p.echo_wake
           args << '--file-watch' if p.file_watch
@@ -701,7 +698,7 @@ module MB::Sound
         # left out as nil: no thread waits longer than it ran)
         delay = d0.to_h { |k, v| [k, v && d1[k] && (d = (d1[k] - v) * 1000) >= 0 && d <= wall * 1000 ? d.round(1) : nil] }
         row = {
-          scenario: sc, knob: knob, ui_waves: ENV['MB_SOUND_UI_WAVES'], holders: holder_table, every_buffer: UI::Feed.every_buffer, deadlines: UI::PaneRates.on_deadlines, snapshot_timed: UI::FrameRate.snapshot_timed, echo_wake: UI::Tiles.echo_wake, out_latency: p.out_latency, sink: cfg, size: [rows, cols], buffer: session.buffer_size, seconds: p.seconds, loadavg: [load0, load1],
+          scenario: sc, knob: knob, ui_waves: ENV['MB_SOUND_UI_WAVES'], holders: holder_table, every_buffer: UI::Feed.every_buffer, snapshot_timed: UI::FrameRate.snapshot_timed, echo_wake: UI::Tiles.echo_wake, out_latency: p.out_latency, sink: cfg, size: [rows, cols], buffer: session.buffer_size, seconds: p.seconds, loadavg: [load0, load1],
           yjit: yjit,
           run_delay_ms: delay, clean: %i[painter render].all? { |k| delay[k] && delay[k] < wall * 1000 * 0.01 }, cpu_s: cpu.round(2), wall_s: wall.round(2),
           snapshots_per_s: (published / wall).round(1), buffers_per_s: (bufs / wall).round(1),
@@ -715,7 +712,7 @@ module MB::Sound
         r = a[:render] || {}
         sr = row[:sink_report]
         puts
-        puts "== #{sc} (#{kind} sink, #{session.buffer_size}-frame buffers#{UI::Feed.every_buffer ? ', every-buffer snapshots' : ''}#{UI::PaneRates.on_deadlines ? ', deadline due' : ''}#{UI::FrameRate.snapshot_timed ? ', snapshot-timed' : ''}#{UI::Tiles.echo_wake ? ', echo wake' : ''}#{p.out_latency ? ", output latency #{p.out_latency} buffers" : ''}#{knob ? ", turning #{knob.inspect}" : ''}#{ENV['MB_SOUND_UI_WAVES'] ? ", MB_SOUND_UI_WAVES=#{ENV['MB_SOUND_UI_WAVES']}" : ''}): load #{load0&.first}->#{load1&.first}, run delay ms #{delay.map { |k, v| "#{k} #{v}" }.join(' ')} (#{row[:clean] ? 'clean' : 'contended'}), CPU #{row[:cpu_s]} s of #{row[:wall_s]} s"
+        puts "== #{sc} (#{kind} sink, #{session.buffer_size}-frame buffers#{UI::Feed.every_buffer ? ', every-buffer snapshots' : ''}#{UI::FrameRate.snapshot_timed ? ', snapshot-timed' : ''}#{UI::Tiles.echo_wake ? ', echo wake' : ''}#{p.out_latency ? ", output latency #{p.out_latency} buffers" : ''}#{knob ? ", turning #{knob.inspect}" : ''}#{ENV['MB_SOUND_UI_WAVES'] ? ", MB_SOUND_UI_WAVES=#{ENV['MB_SOUND_UI_WAVES']}" : ''}): load #{load0&.first}->#{load1&.first}, run delay ms #{delay.map { |k, v| "#{k} #{v}" }.join(' ')} (#{row[:clean] ? 'clean' : 'contended'}), CPU #{row[:cpu_s]} s of #{row[:wall_s]} s"
         puts format('  clocks: screen started at %.6f, recording from %.6f (%.1f s after the screen; epoch seconds, as --yjit-log stamps)', screen_epoch, rec_epoch, rec_epoch - screen_epoch) if screen_epoch
         perf.headline(s).each { |l| puts "  #{l}" }
         puts "  feed: #{row[:snapshots_per_s]} snapshots/s published, #{row[:buffers_per_s]} render buffers/s"
