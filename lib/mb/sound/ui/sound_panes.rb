@@ -194,12 +194,29 @@ module MB
             end
           end
 
+          # The section keys ("s f a o x") and the views' header hints.
+          SECTION_KEY_LIST = Inspect::SECTIONS.map { |sec| Inspect::SECTION_KEYS[sec] }.join(' ').freeze
+          SECTIONS_HINT = "#{SECTION_KEY_LIST}  n N rows  P panel".freeze
+          PANEL_HINT = "#{SECTION_KEY_LIST}  P sections".freeze
+          PANEL_HINT_HIDE = "#{PANEL_HINT}  F hide numbers".freeze
+          PANEL_HINT_SHOW = "#{PANEL_HINT}  F show numbers".freeze
+
           # The track line: name, which of the tracks, and the keys.
           def draw_header(c, info, state, hint)
-            idx = info.tracks.index(info.track)
-            name = info.document || info.instrument # (a preset's document, else a library instrument's name: acid)
-            x = c.line(0, [info.track.to_s, :name], [name ? "  #{name}" : '', :text], ["  #{idx ? idx + 1 : '?'}/#{info.tracks.length}", :dim])
-            c.text_fit(x, 0, state[:mode] ? "  #{hint}" : '', [c.w - x, 0].max, :dim)
+            # (its texts kept while the info, mode, and hint stay: drawn
+            # every frame; ui-perf-2 round 3)
+            mode = !!state[:mode]
+            hd = state[:header]
+            unless hd && hd[0].equal?(info) && hd[1] == mode && hd[2] == hint
+              idx = info.tracks.index(info.track)
+              name = info.document || info.instrument # (a preset's document, else a library instrument's name: acid)
+              hd = state[:header] = [info, mode, hint.frozen? ? hint : hint.dup.freeze, info.track.to_s.freeze, (name ? "  #{name}" : '').freeze,
+                                     "  #{idx ? idx + 1 : '?'}/#{info.tracks.length}".freeze, (mode ? "  #{hint}" : '').freeze].freeze
+            end
+            x = c.text(0, 0, hd[3], :name)
+            x = c.text(x, 0, hd[4], :text)
+            x = c.text(x, 0, hd[5], :dim)
+            c.text_fit(x, 0, hd[6], [c.w - x, 0].max, :dim)
             y = 1
             if info.error
               c.text_fit(0, y, info.error, c.w, :warn)
@@ -229,26 +246,39 @@ module MB
           # Knob rows (name, meter on the knob's curve, value, range) for
           # +names+ from row +y+; +first+ the pick index of the first.
           def draw_knob_rows(c, y, names, knobs, pick, state, first = 0, bottom: c.h - 1)
-            names.each_with_index do |kn, i|
+            # (texts kept per knob in the pane's state, the value's rebuilt
+            # when it changes: drawn every frame; ui-perf-2 round 3)
+            memo = (state[:knob_rows] ||= {})
+            i = 0
+            while i < names.length
+              kn = names[i]
               break if y >= bottom && i > 0
               k = knobs[kn]
               value, turning = shown_value(state, kn, k)
               spec = k&.spec
               sel = state[:mode] && first + i == pick
-              x = c.run(0, y, " #{c.fit(kn.to_s, 9).ljust(9)}", sel ? :key : :name, reverse: sel)
+              km = (memo[kn] ||= Array.new(5))
+              x = c.run(0, y, (km[0] ||= " #{c.fit(kn.to_s, 9).ljust(9)}".freeze), sel ? :key : :name, reverse: sel)
               unless spec
                 c.text(x + 1, y, '(not in the session yet)', :dim)
                 y += 1
+                i += 1
                 next
               end
-              vtext = "#{Panes.fmt(value)}#{spec.unit ? " #{spec.unit}" : ''}"
-              range = " #{Panes.fmt(spec.range.begin)}..#{Panes.fmt(spec.range.end)}#{spec.curve == :exp ? ' exp' : ''}"
-              range = '' if c.w < 40
+              unless km[3] && km[1].eql?(value) && km[2].equal?(spec)
+                km[1] = value
+                km[2] = spec
+                km[3] = "#{Panes.fmt(value)}#{spec.unit ? " #{spec.unit}" : ''}".freeze
+                km[4] = " #{Panes.fmt(spec.range.begin)}..#{Panes.fmt(spec.range.end)}#{spec.curve == :exp ? ' exp' : ''}".freeze
+              end
+              vtext = km[3]
+              range = c.w < 40 ? '' : km[4]
               mw = (c.w - x - vtext.length - range.length - 3).clamp(3, 32)
               x = c.meter(spec.position(value.to_f).to_f, width: mw, x: x + 1, y: y, role: :key)
               x = c.text(x + 1, y, vtext, turning ? :queued : :text)
               c.text_fit(x, y, range, [c.w - x, 0].max, :dim)
               y += 1
+              i += 1
             end
             y
           end
@@ -258,8 +288,7 @@ module MB
           # other than the picked one on one line each when short of
           # room).
           def draw_sections(c, info, knobs, list, pick, state)
-            keys = Inspect::SECTIONS.map { |sec| Inspect::SECTION_KEYS[sec] }.join(' ')
-            y = draw_header(c, info, state, "#{keys}  n N rows  P panel")
+            y = draw_header(c, info, state, SECTIONS_HINT)
             y = draw_chain(c, info, y) if c.h >= 14
             loose = info.loose
             y = draw_knob_rows(c, y, loose, knobs, pick, state, 0, bottom: c.h - 3) unless loose.empty?
@@ -274,7 +303,6 @@ module MB
             # row itself when it has no params)
             psel = stop && stop[0] == :param ? shown_params(info.nodes[sel]).index { |name, _| name == stop[1] } : nil
             row_picked = stop && stop[0] == :row
-            params = ->(i) { shown_params(info.nodes[i]).length }
 
             secs.each do |sec|
               break if y >= c.h - foot
@@ -294,7 +322,7 @@ module MB
               # its params on screen)
               if sel && list.include?(sel)
                 before = list.index(sel)
-                fit = c.h - foot - y - params.(sel) - 1
+                fit = c.h - foot - y - shown_params(info.nodes[sel]).length - 1
                 list = list.drop(before - [fit, 0].max) if before > fit
               end
               list.each do |i|
@@ -309,10 +337,14 @@ module MB
                 # (a picked param below the pane's bottom: the row's params
                 # scroll so it shows)
                 skip = on && psel ? [psel - (c.h - foot - y) + 1, 0].max : 0
-                shown_params(n).each_with_index do |(name, v), pi|
-                  next if pi < skip
+                # (a while loop: each_with_index makes an imemo a call)
+                ps = shown_params(n)
+                pi = skip
+                while pi < ps.length
                   break if y >= c.h - foot
+                  name, v = ps[pi]
                   y = draw_param(c, y, info, n, name, v, knobs, state, sel: on && state[:mode] && pi == psel, indent: 2)
+                  pi += 1
                 end
               end
             end
@@ -538,11 +570,15 @@ module MB
           # One param row: name, a meter for a knob, the value, what else
           # moves it (a knob's name dim).  Returns the next row.
           def draw_param(c, y, info, n, name, v, knobs, state, sel:, indent: 2)
-            x = c.run_pad(indent, y, name.to_s, 10, sel ? :key : :name, reverse: sel)
+            x = c.run_pad(indent, y, name.is_a?(Symbol) ? name.name : name.to_s, 10, sel ? :key : :name, reverse: sel)
             kn = n.knob_of(name)
             k = kn && knobs[kn]
             mods = modulators(info, n, name)
             masked = n.masked[name]
+            # (the row's texts kept per row and param, by identity: a poll's
+            # rows are new objects; values rebuilt when they change; drawn
+            # every frame; ui-perf-2 round 3)
+            pm = ((PARAM_TEXTS[n] ||= {})[name] ||= Array.new(13))
             if k&.spec
               value, turning = shown_value(state, kn, k)
               # (a knob that sets the param through arithmetic, a click's
@@ -550,36 +586,75 @@ module MB
               # the param's; tuner-fixes-1, the maintainer's "What is this
               # 0.4Hz filter doing?")
               direct = v.label == kn || !n.param_knobs.key?(name)
-              vtext = (direct ? value_text(v, value, unit: v.unit || Panes.unit_of(k.spec, name)) : value_text(v, value, unit: k.spec.unit)) ||
-                      Panes.fmt(value)
-              more = mods.empty? ? '' : "← #{mods.join(', ')}"
-              mw = (c.w - x - vtext.length - more.length - kn.to_s.length - 6).clamp(3, 16)
+              unless pm[3] && pm[0].eql?(value) && pm[1] == direct && pm[2].equal?(k.spec)
+                pm[0] = value
+                pm[1] = direct
+                pm[2] = k.spec
+                pm[3] = ((direct ? value_text(v, value, unit: v.unit || Panes.unit_of(k.spec, name)) : value_text(v, value, unit: k.spec.unit)) ||
+                         Panes.fmt(value)).freeze
+              end
+              vtext = pm[3]
+              more = (pm[4] ||= (mods.empty? ? '' : "← #{mods.join(', ')}").freeze)
+              mw = (c.w - x - vtext.length - more.length - (kn.is_a?(Symbol) ? kn.length : kn.to_s.length) - 6).clamp(3, 16)
               x = c.meter(k.spec.position(value.to_f).to_f, width: mw, x: x + 1, y: y, role: :key)
               x = c.text(x + 1, y, vtext, turning ? :queued : (masked ? :dim : :text))
               x = c.text(x + 1, y, more, :dim) unless more.empty?
-              c.text_fit(x, y, masked ? "  #{sel ? masked : 'not heard here'}" : "  #{direct ? '' : 'via '}#{kn}", [c.w - x, 0].max, :dim)
+              tail =
+                if masked then sel ? (pm[5] ||= "  #{masked}".freeze) : NOT_HEARD_TAIL
+                elsif direct then (pm[6] ||= "  #{kn}".freeze)
+                else (pm[7] ||= "  via #{kn}".freeze)
+                end
+              c.text_fit(x, y, tail, [c.w - x, 0].max, :dim)
             elsif !v.value.nil?
-              x = c.text(x + 1, y, value_text(v) || v.value.to_s, masked ? :dim : :text)
-              hint = sel && (b = n.binds[name]) ? (b.line ? "  Enter: knob #{b.knob.inspect}" : "  #{b.reason}") : (v.detail == Inspect::LITERAL ? '  ·' : '')
-              # (a turn this voice and clip can't make heard, with why when
-              # picked: Inspect.masked_of; inspector-nav-1)
-              hint = sel ? "  #{masked}" : '  · not heard here' if masked
+              x = c.text(x + 1, y, (pm[8] ||= (value_text(v) || v.value.to_s).freeze), masked ? :dim : :text)
+              hint = sel ? pm[9] : pm[10]
+              unless hint
+                hint = sel && (b = n.binds[name]) ? (b.line ? "  Enter: knob #{b.knob.inspect}" : "  #{b.reason}") : (v.detail == Inspect::LITERAL ? '  ·' : '')
+                # (a turn this voice and clip can't make heard, with why when
+                # picked: Inspect.masked_of; inspector-nav-1)
+                hint = sel ? "  #{masked}" : '  · not heard here' if masked
+                hint = hint.frozen? ? hint : hint.dup.freeze
+                sel ? (pm[9] = hint) : (pm[10] = hint)
+              end
               c.text_fit(x, y, hint, [c.w - x, 0].max, :dim)
             else
               # (the knobs that set a modulated param's base: the maintainer's
               # "It says cutoff comes from mod env but mod env does not have a
               # cutoff control; it should say where to adjust the base
               # frequency"; tuner-fixes-1)
-              feeds = n.param_feeds[name]
-              base = feeds ? "; set by #{feeds.map { |f| Session::Name[f].leaf }.join(', ')}" : ''
-              c.text_fit(x + 1, y, mods.empty? ? "#{c.glyph(:arrow)} #{v.label || v.detail}#{base}" : "← #{mods.join(', ')}#{base}", [c.w - x - 1, 0].max, :dim)
+              unless pm[11] && pm[12] == c.glyph_set
+                feeds = n.param_feeds[name]
+                base = feeds ? "; set by #{feeds.map { |f| Session::Name[f].leaf }.join(', ')}" : ''
+                pm[11] = (mods.empty? ? "#{c.glyph(:arrow)} #{v.label || v.detail}#{base}" : "← #{mods.join(', ')}#{base}").freeze
+                pm[12] = c.glyph_set
+              end
+              c.text_fit(x + 1, y, pm[11], [c.w - x - 1, 0].max, :dim)
             end
             y + 1
           end
 
+          # #draw_param's texts by row (weak, by identity): { param => [...] }.
+          PARAM_TEXTS = ObjectSpace::WeakMap.new
+
+          # A masked param's tail when not picked.
+          NOT_HEARD_TAIL = '  not heard here'.freeze
+
           # The envelopes and modulators going to row +n+'s param +name+
           # ("lfo", "filter env"), from their rows' destinations.
           def modulators(info, n, name)
+            # (kept per info and row by identity: drawn every frame)
+            per = MODS[info] ||= {}.compare_by_identity
+            row = per[n] ||= {}
+            hit = row[name]
+            return hit if hit
+            row[name] = modulators_of(info, n, name).freeze
+          end
+
+          # #modulators by info (weak, by identity): { row => { param => list } }.
+          MODS = ObjectSpace::WeakMap.new
+
+          # (#modulators' list)
+          def modulators_of(info, n, name)
             want = "#{n.label} #{name}"
             info.nodes.filter_map { |m|
               next if m.section == :plumbing || m.equal?(n) || (n.voice && m.voice && m.voice != n.voice)
@@ -617,8 +692,7 @@ module MB
           # (the row a cell belongs to becomes the picked row: its preview
           # follows), Left/Right turn, Enter types or binds.
           def draw_panel(c, info, knobs, list, pick, state)
-            keys = Inspect::SECTIONS.map { |sec| Inspect::SECTION_KEYS[sec] }.join(' ')
-            y = draw_header(c, info, state, "#{keys}  P sections#{info.document ? "  F #{state[:fixed] ? 'hide' : 'show'} numbers" : ''}")
+            y = draw_header(c, info, state, info.document ? (state[:fixed] ? PANEL_HINT_HIDE : PANEL_HINT_SHOW) : PANEL_HINT)
             if list.empty?
               text = info.voices.length > 1 ? "no knobs: the voice's settings are above (a kit's knob Hash: #{info.voice}: { decay: 0.4 }); P the sections" : 'no knobs or literals to show (P: the sections, p: every node)'
               c.text_fit(0, y, text, c.w, :dim)

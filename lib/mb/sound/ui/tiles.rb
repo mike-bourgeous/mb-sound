@@ -164,6 +164,7 @@ module MB
           @line_cursor = @old_winch = @signals = @wake_r = @wake_w = nil
           @echo_key_at = nil # (Tiles.echo_wake: when the last REPL key arrived, until its echo wakes the painter)
           @status_canvas = @status_right = @status_right_key = nil # (draw_status's canvas and right-hand text, kept)
+          @pane_badge = @pane_hint = nil # (draw_status's pane badge and hint, kept: #pane_badge, #pane_hint)
           @attached = @poll = @polled_at = @poll_warned = @last = nil
           @asking = nil # ([pane name, PaneKeys::Ask] while a pane's value prompt is open)
           @overlay_from_play = false # (see #key_help)
@@ -2362,8 +2363,13 @@ module MB
             perf&.painted(drawn, repl_drawn, clear, 0)
           end
           cpu = thread_cpu - cpu0
-          @frames << [cpu, out&.bytesize || 0, drawn]
-          @frames.shift if @frames.length > STATS
+          # (the oldest row refilled once the window is full: no Array
+          # per frame)
+          row = @frames.length >= STATS ? @frames.shift : Array.new(3)
+          row[0] = cpu
+          row[1] = out&.bytesize || 0
+          row[2] = drawn
+          @frames << row
           note_slow(now, cpu)
           out
         end
@@ -2519,7 +2525,7 @@ module MB
           end
           @line_cursor = nil
           step = mode == :grab && @keyboard.entry == :step
-          badge = mode == :once || (mode == :overlay && @router.once_return) ? -' ^W ' : %i[nav overlay].include?(mode) ? -' NAV ' : mode == :grab ? (step ? -' STEP ' : -' KEYS ') : mode == :pane ? " #{@tiler.focus.to_s.upcase} " : @host ? -' REPL ' : -' PLAY '
+          badge = mode == :once || (mode == :overlay && @router.once_return) ? -' ^W ' : %i[nav overlay].include?(mode) ? -' NAV ' : mode == :grab ? (step ? -' STEP ' : -' KEYS ') : mode == :pane ? pane_badge : @host ? -' REPL ' : -' PLAY '
           role = %i[nav overlay once].include?(mode) ? :armed : mode == :grab ? (step ? :queued : :rec) : mode == :pane ? :queued : :key
           @grid.put_run(0, y, badge, MB::Term::Cells.pack(Theme.rgb(role)), nil, MB::Term::Cells::REVERSE | MB::Term::Cells::BOLD)
           x = badge.length + 1
@@ -2543,7 +2549,7 @@ module MB
             hint =
               if @router.state == :pending then "#{MB::Term::Input::Keymap.chord_name(@router.prefix.key.chord)} ..."
               elsif mode == :play then @status_note || @hints || -''
-              elsif mode == :pane then "#{enter_hint}Esc nav  ? keys  #{(m = @panes[@tiler.focus]&.mode_keymap) ? Keys.hints(m) : ''}"
+              elsif mode == :pane then pane_hint
               else HINTS[step ? :step : mode] || ''
               end
             c.text_fit(x + 1, 0, hint, room, @status_note && mode == :play ? :key : :dim)
@@ -2566,6 +2572,35 @@ module MB
             @status_right = "#{snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} ".freeze
           end
           @status_right
+        end
+
+        # The status line's badge in a pane's mode (" INSPECTOR "), kept
+        # while the focus stays.
+        def pane_badge
+          f = @tiler.focus
+          k = @pane_badge
+          return k[1] if k && k[0].equal?(f)
+          @pane_badge = [f, " #{f.to_s.upcase} ".freeze]
+          @pane_badge[1]
+        end
+
+        # The status line's hint in a pane's mode ("Enter: ...  Esc nav  ?
+        # keys  ..."), kept while the pane, its Enter hint, and its keys'
+        # hints stay (ui-perf-2 round 3: three Strings a frame).
+        def pane_hint
+          p = @panes[@tiler.focus]
+          h = p.respond_to?(:enter_hint) ? p.enter_hint(@states[@tiler.focus]) : nil
+          m = p&.mode_keymap
+          keys = m ? Keys.hints(m) : nil
+          k = (@pane_hint ||= [nil, nil, nil, nil, nil])
+          unless k[4] && k[0].equal?(p) && k[1] == h && k[2].equal?(keys) && k[3] == h.nil?
+            k[0] = p
+            k[1] = h
+            k[2] = keys
+            k[3] = h.nil?
+            k[4] = "#{h ? "Enter: #{h}  " : ''}Esc nav  ? keys  #{keys || ''}".freeze
+          end
+          k[4]
         end
 
         # "Enter: <what it does>  " for the focused pane in its mode, when
@@ -2619,7 +2654,7 @@ module MB
         # MIDI notes and controllers for `ui.on` bindings, from the
         # Session's MIDI log (read without the render lock).
         def poll_midi
-          return if @router.midi_map.empty?
+          return unless @router.midi_bound?
           s = @attached or return
           n = s.midi_log_length
           @midi_seen = n if @midi_seen.nil? || @midi_seen > n

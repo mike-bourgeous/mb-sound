@@ -88,6 +88,7 @@ module MB
           @refresh_lock = Mutex.new
           @active = false
           @frames = []
+          @draw_items = @draw_rows = nil # (the painter's reused pane rows: #refresh)
           @slowest = []
           @yields = 0
           @failures = {}
@@ -183,7 +184,21 @@ module MB
           top = band_top
           drawn = 0
           paint_chrome if full
-          draw = panes_to_draw(@placed.map { |p| [p, p.pane.name, p.pane, nil, p.drawn_at] }, now, full, snap)
+          # (reused rows, as the tiles' painter keeps them: no Arrays per
+          # frame; ui-perf-2 round 3)
+          items = (@draw_items ||= [])
+          items.clear
+          rows = (@draw_rows ||= {}.compare_by_identity)
+          @placed.each do |p|
+            row = (rows[p] ||= Array.new(5))
+            row[0] = p
+            row[1] = p.pane.name
+            row[2] = p.pane
+            row[3] = nil
+            row[4] = p.drawn_at
+            items << row
+          end
+          draw = panes_to_draw(items, now, full, snap)
           @placed.each do |p|
             next unless draw.include?(p)
 
@@ -231,8 +246,14 @@ module MB
           end
 
           cpu = thread_cpu - cpu0
-          @frames << [cpu, out&.bytesize || 0, drawn, GC.count != gc0]
-          @frames.shift if @frames.length > STATS
+          # (the oldest row refilled once the window is full: no Array
+          # per frame)
+          row = @frames.length >= STATS ? @frames.shift : Array.new(4)
+          row[0] = cpu
+          row[1] = out&.bytesize || 0
+          row[2] = drawn
+          row[3] = GC.count != gc0
+          @frames << row
           note_slow(now, cpu, parts) if cpu > SLOW_PART
           out
         end

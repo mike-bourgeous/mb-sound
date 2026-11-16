@@ -102,9 +102,18 @@ module MB
         # gesture's target, else a value a key just set, else the
         # snapshot's.  Returns [value, turning?].
         def shown_value(state, kn, k)
+          # (one reused pair per thread: callers take it apart at once, and
+          # rows ask every frame; ui-perf-2 round 3)
+          r = (Thread.current[:mb_sound_shown_value] ||= [nil, false])
           g = state[:gesture]
-          return [g.value, true] if g&.turning? && g.knob == kn
-          [pending(state, kn) || k&.value, false]
+          if g&.turning? && g.knob == kn
+            r[0] = g.value
+            r[1] = true
+          else
+            r[0] = pending(state, kn) || k&.value
+            r[1] = false
+          end
+          r
         end
 
         private
