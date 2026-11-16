@@ -116,7 +116,8 @@ module MB
         # (report.txt, summary.json, frames.json under
         # tmp/ui-perf/captures/), :capture (about a minute of the tiles
         # with the set playing, then the sound-design screen with a knob
-        # moving; saved, three lines printed).  The report: frame lateness,
+        # moving; saved, three lines printed; :cancel stops it early and
+        # saves what it has).  The report: frame lateness,
         # paint and write times, the worst stall between written frames,
         # bytes, GC, each pane's update age, key-to-frame latency, the
         # terminal's answer time to a query sent after sampled frames, the
@@ -154,8 +155,11 @@ module MB
             d
           when :capture
             Perf::Capture.start(seconds: seconds, design: design, dir: dir)
+          when :cancel
+            puts(Perf::Capture.cancel ? 'ui.perf :capture: stopping; it saves what it recorded' : "\e[33mui.perf: no capture is running\e[0m")
+            nil
           else
-            raise ArgumentError, "ui.perf takes :start, :report, :stop, :save, or :capture (got #{what.inspect})"
+            raise ArgumentError, "ui.perf takes :start, :report, :stop, :save, :capture, or :cancel (got #{what.inspect})"
           end
         end
 

@@ -131,6 +131,41 @@ RSpec.describe(MB::Sound::UI::Perf) do
     end
   end
 
+  # ui.perf :capture as a user hits it (the run itself needs a real
+  # screen: bin/ui_bench.rb and the pty runs in the report cover it)
+  describe 'capture' do
+    let(:cap) { MB::Sound::UI::Perf::Capture }
+    let(:out) { StringIO.new }
+
+    after do
+      cap.cancel
+      cap.thread&.join(2)
+    end
+
+    it 'refuses a second capture while one runs, and :cancel stops a running one' do
+      release = Queue.new
+      allow(cap).to receive(:run) { |**| release.pop; cap.wait(30) ? :done : :cancelled }
+      expect(cap.cancel).to eq(false) # (none running)
+      cap.start(seconds: 1, out: out)
+      expect(cap.start(seconds: 1, out: out)).to be_nil
+      expect(out.string).to include('is running already', 'ui.perf :cancel')
+      release << true
+      expect(cap.cancel).to eq(true)
+      expect(cap.thread.join(2)&.value).to eq(:cancelled)
+    end
+
+    it 'says in one line what failed, and a new capture can start after it' do
+      allow(cap).to receive(:run).and_raise(RuntimeError, 'could not open ui :tiles (is this console in a terminal?)')
+      cap.start(seconds: 1, out: out)
+      cap.thread.join(2)
+      fail_lines = out.string.lines.grep(/failed/)
+      expect(fail_lines.length).to eq(1)
+      expect(fail_lines[0]).to include('RuntimeError: could not open ui :tiles')
+      expect(out.string.lines.length).to eq(2) # (the start line and the failure)
+      expect(cap.thread.alive?).to eq(false)
+    end
+  end
+
   describe "on the tiled screen" do
     after { @tiles&.stop; @term&.close }
 

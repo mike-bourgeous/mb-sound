@@ -611,22 +611,44 @@ module MB
           class << self
             attr_reader :thread
           end
+          @thread = nil
+          @cancel = false
 
           def self.start(seconds: SECONDS, design: nil, dir: nil, out: $stdout)
             if @thread&.alive?
-              out.puts "\e[33mui.perf :capture is running already\e[0m"
+              out.puts "\e[33mui.perf :capture is running already (ui.perf :cancel stops it and saves what it has)\e[0m"
               return nil
             end
+            @cancel = false
             out.puts "\e[1mui.perf :capture\e[0m: #{seconds.round} s.  Phase 1: the tiles with the set playing (type a few keys, scroll, NAV around).  " \
-                     'Phase 2: the sound-design screen with a knob moving.  Results print here.'
+                     'Phase 2: the sound-design screen with a knob moving.  Results print here (ui.perf :cancel stops early).'
             @thread = Thread.new do
               Thread.current.name = 'MB::Sound::UI perf capture'
+              Thread.current.report_on_exception = false
               run(seconds: seconds, design: design, dir: dir, out: out)
             rescue => e
-              out.puts "\e[31mui.perf :capture failed: #{e.class}: #{e.message}\e[0m"
-              out.puts e.backtrace.first(5).map { |l| "  #{l}" }
+              # (one line: what failed and where; the screen and the set are
+              # left as run's ensure blocks put them)
+              at = e.backtrace&.find { |l| l.include?('/mb/sound/') }&.sub(%r{\A.*/lib/}, '')
+              out.puts "\e[31mui.perf :capture failed: #{e.class}: #{e.message}#{at ? " (#{at})" : ''}\e[0m"
             end
             nil
+          end
+
+          # Stops a running capture early: it saves what it recorded and
+          # prints its lines.  Returns true if one was running.
+          def self.cancel
+            return false unless @thread&.alive?
+            @cancel = true
+          end
+
+          # Sleeps +seconds+ in short steps; false when cancelled.
+          def self.wait(seconds)
+            t_end = MB::U.clock_now + seconds
+            until @cancel || (left = t_end - MB::U.clock_now) <= 0
+              sleep(left < 0.1 ? left : 0.1)
+            end
+            !@cancel
           end
 
           # Steps the sound screen's inspector down (as typed: Down) until
@@ -664,68 +686,83 @@ module MB
               notes << "nothing played: loaded demo :night_bus and went to #{scene.inspect}"
             end
             tiles = UI.tiles
-            unless tiles&.active? && tiles.layout_name != :sound
+            # (the design screen open at the start stays open at the end)
+            was_design = tiles&.active? && tiles.layout_name == :sound
+            unless tiles&.active? && !was_design
               UI.show(:tiles)
               tiles = UI.tiles
+              raise 'could not open ui :tiles (is this console in a terminal?)' unless tiles&.active?
               notes << 'phase 1 opened ui :tiles'
             end
             # (a set just started, or a screen just opened: its first walks,
             # warm-ups, and pane rates stepped down by them settle first; in
             # a pty run they were a 120-160 ms stall at 0.3 s and the list
             # panes at their slowest rate, 2026-11-16)
-            sleep 2.0 if started_demo || notes.include?('phase 1 opened ui :tiles')
+            wait(2.0) if started_demo || notes.include?('phase 1 opened ui :tiles')
             half = seconds / 2.0
             loads = [Perf.loadavg]
             delays0 = Perf.run_delays(render: session.render_thread, painter: tiles&.thread)
+            t0 = MB::U.clock_now
+            p1 = p2 = nil
+            k = 0
+            knob = nil
+            begin
+              # Phase 1: the tiles
+              p1 = tiles.start_perf(label: "tiles #{tiles.layout_name}")
+              wait(half)
+              tiles.stop_perf
 
-            # Phase 1: the tiles
-            p1 = tiles.start_perf(label: "tiles #{tiles.layout_name}")
-            sleep half
-            tiles.stop_perf
+              # Phase 2: the sound-design screen with a knob sweeping
+              target = design || Design.last
+              made = false
+              begin
+                unless @cancel
+                  unless target
+                    target = :ui_perf
+                    made = true
+                  end
+                  UI.run_line("design #{target.inspect}", session)
+                  tiles = UI.tiles
+                  wait(1.0) # (the screen settles: first walks, warm-up frames)
+                  knob = Capture.pick_knob(tiles)
+                  notes << (knob ? "phase 2 turns #{knob.inspect}" : 'phase 2 found no knob row in the inspector: its arrows turn nothing (key times are frames, not changes)')
+                  p2 = tiles.start_perf(label: "design #{target.inspect}")
+                  t_end = MB::U.clock_now + half - 1.0
+                  while MB::U.clock_now < t_end && !@cancel
+                    tiles.type_scripted((k / SWEEP).even? ? "\e[C" : "\e[D")
+                    k += 1
+                    sleep STEP
+                  end
+                  tiles.stop_perf
+                end
+              rescue => e
+                notes << "phase 2 skipped: #{e.class}: #{e.message} (run `design :name` once, then ui.perf :capture)"
+              ensure
+                UI.run_line('design off', session) rescue nil unless was_design
+                if made
+                  UI.run_line('stop :ui_perf, fade: 0', session) rescue nil
+                  UI.run_line('untrack :ui_perf', session) rescue nil
+                end
+              end
+            ensure
+              # (a failure or a cancel: recording stops, a demo the capture
+              # started stops)
+              UI.tiles&.stop_perf rescue nil
+              UI.run_line('stop :all', session) rescue nil if started_demo
+            end
+            notes << "cancelled after #{(MB::U.clock_now - t0).round} s: saved what was recorded" if @cancel
+            loads << Perf.loadavg
+            delays1 = Perf.run_delays(render: session.render_thread, painter: UI.tiles&.thread)
+
+            # Saved once, at the end (both phases; never while recording)
             id = p1.identity
             dir ||= File.join(Perf.captures_dir, Perf.folder_name(id)) # (named for the terminal, once it answered)
             p1.save(File.join(dir, 'tiles'), extra: { notes: notes })
-
-            # Phase 2: the sound-design screen with a knob sweeping
-            p2 = nil
-            target = design || Design.last
-            made = false
-            begin
-              unless target
-                target = :ui_perf
-                made = true
-              end
-              UI.run_line("design #{target.inspect}", session)
-              tiles = UI.tiles
-              sleep 1.0 # (the screen settles: first walks, warm-up frames)
-              knob = Capture.pick_knob(tiles)
-              notes << (knob ? "phase 2 turns #{knob.inspect}" : 'phase 2 found no knob row in the inspector: its arrows turn nothing (key times are frames, not changes)')
-              p2 = tiles.start_perf(label: "design #{target.inspect}")
-              t_end = MB::U.clock_now + half - 1.0
-              k = 0
-              while MB::U.clock_now < t_end
-                tiles.type_scripted((k / SWEEP).even? ? "\e[C" : "\e[D")
-                k += 1
-                sleep STEP
-              end
-              tiles.stop_perf
-              p2.save(File.join(dir, 'design'), extra: { notes: notes, scripted_keys: k, knob: knob })
-            rescue => e
-              notes << "phase 2 skipped: #{e.class}: #{e.message} (run `design :name` once, then ui.perf :capture)"
-            ensure
-              UI.run_line('design off', session) rescue nil
-              if made
-                UI.run_line('stop :ui_perf, fade: 0', session) rescue nil
-                UI.run_line('untrack :ui_perf', session) rescue nil
-              end
-            end
-            UI.run_line('stop :all', session) if started_demo
-            loads << Perf.loadavg
-            delays1 = Perf.run_delays(render: session.render_thread, painter: UI.tiles&.thread)
+            p2&.save(File.join(dir, 'design'), extra: { notes: notes, scripted_keys: k, knob: knob })
             File.write(File.join(dir, 'capture.json'), JSON.pretty_generate({ seconds: seconds, notes: notes, loadavg: loads, run_delay_s: { before: delays0, after: delays1 },
                                                                               machine: Perf.machine, identity: id }))
             lines = p1.headline
-            lines += p2.headline.drop(0).map { |l| "design: #{l}" } if p2
+            lines += p2.headline.map { |l| "design: #{l}" } if p2
             out.puts "\e[1mui.perf :capture\e[0m saved #{dir}"
             lines.first(p2 ? 6 : 3).each { |l| out.puts "  #{l}" }
             notes.each { |n| out.puts "\e[2m  #{n}\e[0m" }

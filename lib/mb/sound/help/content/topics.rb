@@ -1965,7 +1965,7 @@ module MB
         a query after a frame, the render thread's wake delay):
         `ui.perf :report`, `:stop`, `:save`; `ui.perf :capture` records a
         minute of the tiles and the sound screen in your terminal and saves
-        it under tmp/ui-perf/captures/.
+        it under tmp/ui-perf/captures/ (`ui.perf :cancel` stops it early).
 
         `ui.note 'the cutoff turns too slowly'` keeps a note for the next
         UI refinement round with the screen as text, the layout and focused
