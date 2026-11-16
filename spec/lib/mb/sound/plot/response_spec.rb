@@ -90,4 +90,3 @@ RSpec.describe(MB::Sound::Plot::Response, :aggregate_failures) do
     expect(GC.stat(:total_allocated_objects) - before).to be <= 2
   end
 end
-
