@@ -329,8 +329,8 @@ module MB
           # name, then its family (its kind under L.all; nothing for
           # presets, whose head says what they are) and tags.
           def draw_entry(c, y, e, width, on, state, playing)
-            c.run(0, y, on ? '▸' : ' ', :key)
-            c.run(1, y, playing && playing.family == e.family && playing.name == e.name ? '●' : ' ', :ok)
+            c.run(0, y, on ? -'▸' : -' ', :key)
+            c.run(1, y, playing && playing.family == e.family && playing.name == e.name ? -'●' : -' ', :ok)
             name = e.name
             x = c.run_pad(2, y, name.is_a?(Symbol) ? name.name : name.to_s, width, on ? :key : :name, reverse: on && state[:mode])
             c.text_fit(x + 1, y, entry_words(e, head(state) == :all), [c.w - x - 1, 0].max, :dim)

@@ -109,6 +109,35 @@ module MB
           # What Enter does now, for the status line (the design's rule:
           # name Enter's action before it is pressed).
           def enter_hint(state)
+            # (kept while the info, view, pick, and knob list stay: the
+            # status line asks every frame; ui-perf-2 round 3)
+            s = state[:snap]
+            info = s&.inspector
+            return enter_hint_of(state) unless info
+            v = view(state, info)
+            m = state[:enter_hint]
+            return m[5] if m && m[0].equal?(info) && m[1] == v && m[2] == state[:fixed] && m[3] == state[:pick] && (m[4].equal?(s.knobs) || same_knob_names?(m[4], s.knobs))
+            h = enter_hint_of(state)
+            h = h.dup.freeze if h && !h.frozen?
+            state[:enter_hint] = [info, v, state[:fixed], state[:pick], s.knobs, h].freeze
+            h
+          end
+
+          # True when KnobValue lists +a+ and +b+ name the same knobs in the
+          # same order (the hint reads which knobs exist, not their values:
+          # a turning knob keeps it).
+          def same_knob_names?(a, b)
+            return false unless a.length == b.length
+            i = 0
+            while i < a.length
+              return false unless a[i].name.equal?(b[i].name)
+              i += 1
+            end
+            true
+          end
+
+          # (#enter_hint's text)
+          def enter_hint_of(state)
             if (pp = picked_param(state)) && !knob_of(state, pp)
               b = pp[2]
               return nil unless b
@@ -312,7 +341,7 @@ module MB
               next if collapsed[sec] == :omit
               if collapsed[sec]
                 x = heading(c, y, sec, title, key, false, state, chip: chip_width(state))
-                c.text_fit(x + 1, y, list.map { |i| row_title(info.nodes[i]) }.join(' · '), [c.w - x - 1, 0].max, :text)
+                c.text_fit(x + 1, y, collapsed_titles(info, sec, list), [c.w - x - 1, 0].max, :text)
                 y += 1
                 next
               end
@@ -350,6 +379,20 @@ module MB
             end
             c.text_fit(0, c.h - 1, 'plumbing hidden (p shows it)', c.w, :dim) if foot == 1 # (no count: 1708 read as noise)
           end
+
+          # A collapsed section's row titles ("saw ×6 · sub"), kept per info
+          # and section (drawn every frame).
+          def collapsed_titles(info, sec, list)
+            per = COLLAPSED[info] ||= {}
+            hit = per[sec]
+            return hit[1] if hit && hit[0].equal?(list)
+            text = list.map { |i| row_title(info.nodes[i]) }.join(' · ').freeze
+            per[sec] = [list, text].freeze
+            text
+          end
+
+          # #collapsed_titles by info (weak, by identity).
+          COLLAPSED = ObjectSpace::WeakMap.new
 
           # The sections view's plan for +info+ with row +sel+ (in section
           # +cur+) open and +left+ rows below the header: [sections, rows by
@@ -1903,19 +1946,35 @@ module MB
           # The code's lines for +info+ with the snapshot's +knobs+ (cached
           # in +state+ while neither changes).
           def self.lines(info, knobs, state = {})
+            # (the same info and knob list: the last lines, nothing made;
+            # ui-perf-2 round 3)
+            return state[:lines] if state[:lines] && state[:lines_info].equal?(info) && state[:lines_knobs].equal?(knobs)
             read = info.knobs.filter_map { |kn| knobs.find { |k| k.name == kn } }
             key = [info.code, read.map(&:value)]
-            return state[:lines] if state[:lines_of] == key
-            out = read.map { |k| Code.knob_line(k) }
-            out << '' unless out.empty?
-            out << "# #{info.track}: the graph it plays (to_ruby)"
-            out.concat((info.code || '# (no recipe: this graph was not built by the DSL)').lines.map(&:chomp))
-            state[:lines_of] = key
-            state[:lines] = out.freeze
+            unless state[:lines_of] == key
+              # (a knob turn rebuilds its knob line; the graph's text and
+              # the other knobs' lines are kept)
+              out = read.map { |k| KNOB_LINES[k] ||= Code.knob_line(k).freeze }
+              out << '' unless out.empty?
+              out.concat(Code.code_lines(info))
+              state[:lines_of] = key
+              state[:lines] = out.freeze
+            end
+            state[:lines_info] = info
+            state[:lines_knobs] = knobs
+            state[:lines]
           end
 
-          # `knob :cut, (150.hz..8000.hz).at(3100.hz)` for KnobValue +k+ at
-          # its value now.
+          # The header and the graph's Ruby as lines, kept per info.
+          def self.code_lines(info)
+            CODE_LINES[info] ||= ["# #{info.track}: the graph it plays (to_ruby)", *(info.code || '# (no recipe: this graph was not built by the DSL)').lines.map(&:chomp)].freeze
+          end
+
+          # .lines' knob lines by KnobValue, and .code_lines by info (weak,
+          # by identity).
+          KNOB_LINES = ObjectSpace::WeakMap.new
+          CODE_LINES = ObjectSpace::WeakMap.new
+
           def self.knob_line(k)
             # (a value a crossfade or a ramp left as 0.30000000000000004:
             # 12 significant figures, then RubyValue's exact literal; the
@@ -1934,8 +1993,11 @@ module MB
             end
             lines = Code.wrapped(Code.lines(info, s.knobs, state), c.w, state)
             top = state[:top] = state[:top].to_i.clamp(0, [lines.length - c.h, 0].max)
-            lines[top, c.h].each_with_index do |(l, role), y|
+            y = 0
+            while y < c.h && top + y < lines.length
+              l, role = lines[top + y]
               c.text_fit(0, y, l, c.w, role)
+              y += 1
             end
             c.text(c.w - 6, c.h - 1, ' more ', :dim) if top + c.h < lines.length && c.w > 12
           end
@@ -1944,17 +2006,32 @@ module MB
           # line's own), as [text, role] pairs (knob lines in the key color,
           # comments dim), cached in +state+ per lines and width.
           def self.wrapped(lines, width, state = {})
-            key = [lines.object_id, width]
-            return state[:wrapped] if state[:wrapped_of] == key
-            out = lines.flat_map { |l|
-              role = l.start_with?('knob ') ? :key : l.lstrip.start_with?('#') ? :dim : :text
-              ind = l[/\A */].length
-              next [[l, role]] if l.length <= width || width - ind < 12
-              Canvas.wrap(l.lstrip, width - ind, indent: 4).map { |x| [' ' * ind + x, role] }
-            }
-            state[:wrapped_of] = key
+            return state[:wrapped] if state[:wrapped] && state[:wrapped_lines].equal?(lines) && state[:wrapped_width] == width
+            # (each line's rows kept per line and width: a knob turn
+            # rewraps its own line, not the graph's text)
+            out = []
+            lines.each do |l|
+              rows = WRAPS[l]
+              unless rows && rows[0] == width
+                rows = WRAPS[l] = [width, wrap_line(l, width)].freeze
+              end
+              out.concat(rows[1])
+            end
+            state[:wrapped_lines] = lines
+            state[:wrapped_width] = width
             state[:wrapped] = out.freeze
           end
+
+          # One line's [text, role] rows at +width+.
+          def self.wrap_line(l, width)
+            role = l.start_with?('knob ') ? :key : l.lstrip.start_with?('#') ? :dim : :text
+            ind = l[/\A */].length
+            return [[l, role].freeze].freeze if l.length <= width || width - ind < 12
+            Canvas.wrap(l.lstrip, width - ind, indent: 4).map { |x| [' ' * ind + x, role].freeze }.freeze
+          end
+
+          # .wrapped's rows by line (weak, by identity).
+          WRAPS = ObjectSpace::WeakMap.new
 
           def key_scroll(state, d = 1)
             state[:top] = state[:top].to_i + d
