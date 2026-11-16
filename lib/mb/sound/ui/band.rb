@@ -139,6 +139,7 @@ module MB
           @thread&.wakeup rescue nil
           @thread&.join(2)
           @thread = nil
+          @placed.each { |p| Pane.close_workers(p.state) } # (the panes' preview workers)
           @active = false
           restore_winch
           detach

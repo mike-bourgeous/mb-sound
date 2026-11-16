@@ -383,6 +383,7 @@ module MB
           (@reader.join(0.5) || @reader.kill) if @reader && !Thread.current.equal?(@reader)
           @painter&.join(1)
           @painter = @reader = nil
+          @states.each_value { |st| Pane.close_workers(st) } # (the panes' preview workers)
           [@wake_r, @wake_w].each { |io| io&.close rescue nil }
           @wake_r = @wake_w = nil
           restore_signals
