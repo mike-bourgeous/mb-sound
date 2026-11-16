@@ -252,6 +252,53 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
     end
   end
 
+  describe 'GVLYield' do
+    let(:gy) { MB::Sound::FastUI::GVLYield }
+
+    after {
+      gy.yielders.each { |t| gy.remove(t) }
+      gy.priority = nil
+    }
+
+    it 'runs its hook only while a priority thread and a yielder are set' do
+      other = Thread.new { sleep }
+      expect(gy).not_to be_active
+      expect(gy.add(Thread.current)).to eq(true)
+      expect(gy.add(Thread.current)).to eq(true)
+      expect(gy.yielders).to eq([Thread.current])
+      expect(gy).not_to be_active
+      gy.priority = other
+      expect(gy.priority).to equal(other)
+      expect(gy).to be_active
+      expect(gy.remove(Thread.current)).to eq(true)
+      expect(gy.remove(Thread.current)).to eq(false)
+      expect(gy).not_to be_active
+      expect { gy.add(1) }.to raise_error(TypeError)
+      expect { gy.priority = :x }.to raise_error(TypeError)
+      expect(gy.stats.keys).to eq(%i[kicks retries yields])
+    ensure
+      other&.kill&.join
+    end
+
+    it 'hands the GVL from a busy yielder to the priority thread when it wakes' do
+      done = false
+      waiter = Thread.new { 20.times { sleep 0.002 }; done = true }
+      gy.priority = waiter
+      gy.add(Thread.current)
+      before = gy.stats[:yields]
+      t0 = MB::U.clock_now
+      # Ruby code that never blocks (a timeslice, 10-100 ms, without yielding)
+      x = 0
+      x += 1 until done || MB::U.clock_now - t0 > 20
+      elapsed = MB::U.clock_now - t0
+      waiter.join
+      expect(gy.stats[:yields]).to be > before
+      # (20 wakes: about 0.05 s when each gets the GVL at once, 0.2-2 s when
+      # each waits out a timeslice; Valgrind serializes threads)
+      expect(elapsed).to be < 0.5 unless SPEC_MEMCHECK
+    end
+  end
+
   describe 'GVLProbe' do
     let(:probe) { MB::Sound::FastUI::GVLProbe }
 

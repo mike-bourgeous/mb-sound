@@ -25,7 +25,9 @@
  * Built with -ffp-contract=off so no multiply-add is fused.
  *
  * gvl_probe.c adds FastUI::GVLProbe (GVL wait and hold times of chosen
- * threads) for the dashboard band (ui-3; design/notes/terminal_ui.md).
+ * threads) for the dashboard band (ui-3; design/notes/terminal_ui.md);
+ * gvl_yield.c FastUI::GVLYield (preview workers hand the GVL to the render
+ * thread when it wants it; design/notes/sound_design_ui.md).
  */
 
 #include <stdint.h>
@@ -51,6 +53,8 @@ static VALUE cGrid;
 
 // gvl_probe.c
 void mb_fast_ui_init_gvl_probe(VALUE mFastUI);
+// gvl_yield.c
+void mb_fast_ui_init_gvl_yield(VALUE mFastUI);
 
 // numo's double to Int32 conversion (xint_macro.h m_from_real)
 static inline int32_t to_i32(double x)
@@ -999,4 +1003,5 @@ void Init_fast_ui(void)
 	rb_define_method(cGrid, "compose", grid_compose, -1);
 
 	mb_fast_ui_init_gvl_probe(mFastUI);
+	mb_fast_ui_init_gvl_yield(mFastUI);
 }

@@ -381,6 +381,34 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       w.close
       expect(w.thread).to be_nil
     end
+
+    it 'gives the GVL to the live render thread while it renders, with the same results as without' do
+      was = pr::Yielding.on
+      @session, = bass_session
+      fake = Thread.new { loop { sleep 0.001 } } # (standing in for the live render thread)
+      src = source_of(@session, :saw).with(thread: -> { fake })
+      gy = MB::Sound::FastUI::GVLYield
+      results = [true, false].map do |on|
+        pr::Yielding.on = on
+        done = Queue.new
+        seen = nil
+        w = pr::Worker.new { |r|
+          seen = [gy.yielders.include?(Thread.current), gy.priority.equal?(fake)]
+          done << r
+        }
+        w.submit(job_for(@session, 1, source: src))
+        r = done.pop(timeout: 30)
+        w.close
+        expect(seen).to eq([on, on])
+        expect([gy.yielders, gy.priority]).to eq([[], nil]) # (let go when the thread ends)
+        r
+      end
+      expect(results[0].error).to be_nil
+      %i[cycle lo hi spectrum peak rms lufs periods settled].each { |k| expect(results[0].send(k)).to eq(results[1].send(k)), k.to_s }
+    ensure
+      pr::Yielding.on = was
+      fake&.kill&.join
+    end
   end
 
   describe 'the pane' do

@@ -82,6 +82,7 @@ module MB
         'FastLatency.system_sample' => 'system load and memory reads (instrumentation)',
         'FastLatency::Probe' => 'a pthread timing loop (instrumentation; its histograms are mirrored by LatencyProbe::Histogram)',
         'FastUI::GVLProbe' => 'a Ruby thread event hook (instrumentation)',
+        'FastUI::GVLYield' => 'a Ruby thread event hook and a kicker pthread that hand the GVL to the render thread (scheduling, no computation)',
         'FastRecipe.frame_binding' => "the VM's debug inspector (a block frame's Binding; no Ruby equivalent: a TracePoint makes YJIT discard its code and also sees nested blocks' locals)",
         'FastPlan.enums' => 'op-code tables the Ruby lowering reads (no computation)',
         'FastLoop.constants' => 'op-code tables the Ruby lowering reads (no computation)',
