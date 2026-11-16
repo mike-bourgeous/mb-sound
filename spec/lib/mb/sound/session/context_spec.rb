@@ -32,6 +32,7 @@ RSpec.describe(MB::Sound::Session::Context, :aggregate_failures) do
     mb_sound_rack_applications: 'racks being applied (nested), for their ports',
     mb_sound_preview_slack: 'the sound-design preview worker pacing state',
     mb_sound_preview_frames: 'the sound-design preview worker frame source',
+    mb_sound_render_lives: 'the RENDER pane\'s Plot::Live per drawn area on the thread that draws a render\'s pictures (its worker)',
     mb_sound_mixer_ring: 'Mixer.with_ring: how sums built in the block end',
     mb_sound_bound_document_params: 'Arrangement::LiteralBinding: bound graph document params',
     mb_wavetable_shape: 'wavetable shape cache of this thread',
