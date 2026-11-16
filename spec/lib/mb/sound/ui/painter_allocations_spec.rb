@@ -24,11 +24,15 @@ require_relative '../../../../support/allocation_budget'
 # tiles 105, sound 105.  ui-perf-2 round 3: the meters' zone lookup
 # returned out of a block (an imemo per meter cell, 77 a frame, which the
 # site table can't show: count_objects or dump_all does): band 25, tiles
-# 26.  The budgets sit about 15 % above the after numbers.
+# 26; fit and pad written into the grid (Canvas#text_fit, #text_pad,
+# #run_pad), the inspector's rows, the picker, the status line, and the
+# Code pane kept while their inputs stay: band 18, tiles 22, sound 17,
+# and with a knob moving every frame 170 -> 50.  The budgets sit about
+# 15-20 % above the after numbers.
 RSpec.describe('the painter\'s allocations per frame', :aggregate_failures) do
   let(:ui) { MB::Sound::UI }
 
-  BUDGETS = { band: 30, tiles: 30, sound: 120 }.freeze
+  BUDGETS = { band: 22, tiles: 26, sound: 20, sweep: 60 }.freeze
 
   after do
     ui::Inspect.target = nil
@@ -70,7 +74,7 @@ RSpec.describe('the painter\'s allocations per frame', :aggregate_failures) do
     expect(m.objects_per_buffer).to be <= BUDGETS[:tiles], m.report
   end
 
-  it 'keeps the sound screen (the inspector focused, snapshots moving) under its budget' do
+  def sound_setup
     @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
     MB::Sound::Session.with_context(session: @session) do
       MB::Sound.track(:bass, :dnb_reese)
@@ -80,8 +84,31 @@ RSpec.describe('the painter\'s allocations per frame', :aggregate_failures) do
     ui::Inspect.target = { track: :bass, node: nil }
     slow, = ui::Poll.new(@session).call([:inspect])
     knobs = @session.knobs.map { |n, k| ui::KnobValue.new(name: n, value: k.value, spec: k.spec) }.freeze
+    [slow, knobs]
+  end
+
+  it 'keeps the sound screen (the inspector focused, snapshots moving) under its budget' do
+    slow, knobs = sound_setup
     m = measure_tiles(:sound, moving_snaps(slow: slow, knobs: knobs), focus: :inspector)
     puts m.report(15) if ENV['ALLOC_REPORT']
     expect(m.objects_per_buffer).to be <= BUDGETS[:sound], m.report
+  end
+
+  # A knob turning every frame (a sweep: the feed gives a new KnobValue
+  # for the turned knob and keeps the others): the inspector's value
+  # texts, the row's tail, and the Code pane's knob line are rebuilt,
+  # nothing else
+  it 'keeps the sound screen under its budget with a knob moving every frame' do
+    slow, knobs = sound_setup
+    i0 = knobs.index { |k| k.name.to_s.end_with?('cutoff') } || 0
+    kv = knobs[i0]
+    snaps = Array.new(240) { |i|
+      ks = knobs.dup
+      ks[i0] = kv.with(value: kv.spec.range.begin.to_f + (kv.spec.range.end.to_f - kv.spec.range.begin.to_f) * (i % 60) / 60.0)
+      ui_fake_snapshot(t: 1.0 + i / 60.0, seq: i + 1).with(slow: slow, knobs: ks.freeze)
+    }
+    m = measure_tiles(:sound, snaps, focus: :inspector)
+    puts m.report(15) if ENV['ALLOC_REPORT']
+    expect(m.objects_per_buffer).to be <= BUDGETS[:sweep], m.report
   end
 end
