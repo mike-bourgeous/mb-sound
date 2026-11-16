@@ -436,17 +436,21 @@ module MB::Sound
         if p.holders
           # Who holds the GVL while the render thread waits: the probe on
           # the render thread, the painter, and the worker threads by name
-          # (PatchRender's and the previews' renders, the scheduler, the
-          # input thread), at most 6; ui.perf then leaves the probe alone
+          # (the input thread, the REPL's Pry thread, then PatchRender's and
+          # the previews' renders, the scheduler, the poll), at most 6;
+          # ui.perf then leaves the probe alone
           th = { render: session.render_thread, painter: screen&.thread || plot_thread }
+          if screen.is_a?(UI::Tiles)
+            th[:input] = screen.instance_variable_get(:@reader)
+            th[:repl] = screen.host&.thread
+          end
+          th.compact!
           Thread.list.each do |t|
             break if th.length >= 6
             n = t.name.to_s
             next if th.value?(t) || n.empty?
             th[n.sub(/\Amb-sound /i, '').tr(' ', '_').to_sym] = t if n.match?(/render|scheduler|poll|preview|worker/i) && !n.match?(/\AMB::Sound::Session render/)
           end
-          th[:input] = screen.instance_variable_get(:@reader) if th.length < 6 && screen.is_a?(UI::Tiles)
-          th.compact!
           FastUI::GVLProbe.start(th.values)
           holders = th.keys
         end
