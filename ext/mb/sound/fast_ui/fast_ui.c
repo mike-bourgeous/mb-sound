@@ -903,6 +903,78 @@ static VALUE ruby_wave(VALUE self, VALUE grid, VALUE data, VALUE x_v, VALUE y_v,
 }
 
 /* ANSI colors (Plot::Text::ANSI) */
+#define MB_RESPONSE_MAX_COEFFS 16
+
+// Reads up to MB_RESPONSE_MAX_COEFFS coefficients from Ruby Array +ary+
+static long response_coeffs(VALUE ary, double *c, const char *name)
+{
+	Check_Type(ary, T_ARRAY);
+	long n = RARRAY_LEN(ary);
+	if (n < 1 || n > MB_RESPONSE_MAX_COEFFS) {
+		rb_raise(rb_eArgError, "The %s coefficients must be 1 to %d numbers (got %ld)", name, MB_RESPONSE_MAX_COEFFS, n);
+	}
+	for (long i = 0; i < n; i++) {
+		c[i] = NUM2DBL(RARRAY_AREF(ary, i));
+	}
+	return n;
+}
+
+/*
+ * response_db(out, b, a, rate, lo, hi, floor) -> out
+ *
+ * The magnitude in dB of H(z) = B(z^-1) / A(z^-1) (+b+ and +a+: Arrays of
+ * up to 16 coefficients, lowest power first) at out.size log-spaced
+ * frequencies from +lo+ to +hi+ Hz at sample rate +rate+, written into
+ * +out+ (a contiguous 1D SFloat), each at least +floor+ dB.  Allocates
+ * nothing (the sound-design screen's live filter curves, every frame;
+ * ui-wave-perf-1; mirror Plot::Response.db_ruby).
+ */
+static VALUE ruby_response_db(VALUE self, VALUE out, VALUE b_v, VALUE a_v, VALUE rate_v, VALUE lo_v, VALUE hi_v, VALUE floor_v)
+{
+	(void)self;
+	if (!contiguous_1d(out, numo_cSFloat)) {
+		rb_raise(rb_eArgError, "The output must be a contiguous 1D Numo::SFloat");
+	}
+	rb_check_frozen(out);
+	double b[MB_RESPONSE_MAX_COEFFS], a[MB_RESPONSE_MAX_COEFFS];
+	long nb = response_coeffs(b_v, b, "numerator");
+	long na = response_coeffs(a_v, a, "denominator");
+	double rate = NUM2DBL(rate_v), lo = NUM2DBL(lo_v), hi = NUM2DBL(hi_v), floor_db = NUM2DBL(floor_v);
+	if (!(rate > 0.0) || !(lo > 0.0) || !(hi > 0.0) || !isfinite(rate) || !isfinite(lo) || !isfinite(hi) || isnan(floor_db)) {
+		rb_raise(rb_eArgError, "The rate and frequencies must be positive and finite, and the floor a number");
+	}
+	float *o = (float *)(nary_get_pointer_for_write(out) + nary_get_offset(out));
+	long n = (long)RNARRAY_SIZE(out);
+	double l0 = log10(lo), l1 = log10(hi);
+	double step = n > 1 ? (l1 - l0) / (double)(n - 1) : 0.0;
+	double floor_mag = pow(10.0, floor_db / 20.0);
+	for (long i = 0; i < n; i++) {
+		double f = pow(10.0, l0 + step * (double)i);
+		double w = 2.0 * 3.14159265358979323846 * f / rate;
+		// z^-1 = cos w - j sin w; Horner from the highest power
+		double zr = cos(w), zi = -sin(w);
+		double br = b[nb - 1], bi = 0.0;
+		for (long k = nb - 2; k >= 0; k--) {
+			double tr = br * zr - bi * zi + b[k];
+			bi = br * zi + bi * zr;
+			br = tr;
+		}
+		double ar = a[na - 1], ai = 0.0;
+		for (long k = na - 2; k >= 0; k--) {
+			double tr = ar * zr - ai * zi + a[k];
+			ai = ar * zi + ai * zr;
+			ar = tr;
+		}
+		double mag = sqrt((br * br + bi * bi) / (ar * ar + ai * ai));
+		if (!(mag >= floor_mag)) {
+			mag = floor_mag; // (NaN too: a zero over a zero)
+		}
+		o[i] = (float)(20.0 * log10(mag));
+	}
+	RB_GC_GUARD(out);
+	return out;
+}
+
 void Init_fast_ui(void)
 {
 #ifdef HAVE_RB_EXT_RACTOR_SAFE
@@ -918,6 +990,7 @@ void Init_fast_ui(void)
 	rb_define_module_function(mFastUI, "project", ruby_project, 7);
 	rb_define_module_function(mFastUI, "monotonic", ruby_monotonic, 1);
 	rb_define_module_function(mFastUI, "wave", ruby_wave, 11);
+	rb_define_module_function(mFastUI, "response_db", ruby_response_db, 7);
 
 	// (mb-term's fast_term, loaded by require 'mb/term' before this file:
 	// its mb_term_grid_get is linked at load time)

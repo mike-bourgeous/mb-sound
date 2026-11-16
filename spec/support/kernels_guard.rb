@@ -16,6 +16,7 @@ module KernelsGuard
   COMPARED_ELSEWHERE = {
     min_phase_resample: 'spec/lib/mb/sound/graph_node/resample_min_phase_spec.rb', # (the sweep's resamplers use the default mode)
     noise_skip: 'spec/lib/mb/sound/sleep_catch_up_spec.rb', # (a sleeping voice's catch-up: the sweep's graphs never sleep in check mode)
+    plot_response: 'spec/lib/mb/sound/plot/response_spec.rb', # (the live wave view's filter curves: a UI kernel the audio sweep never reaches)
     filter_tan: 'spec/lib/mb/sound/filter/four_pole_spec.rb',
     filter_tanh: 'spec/lib/mb/sound/filter/four_pole_spec.rb',
     filter_secant: 'spec/lib/mb/sound/filter/four_pole_spec.rb',

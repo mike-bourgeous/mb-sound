@@ -204,6 +204,33 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
     end
   end
 
+  describe '#z_polynomials' do
+    it 'gives the response as polynomials in z^-1 in every mode, allocating nothing' do
+      w = Numo::DFloat.logspace(Math.log10(20.0), Math.log10(23976.0), 128) * (2 * Math::PI / 48000)
+      z = Numo::NMath.exp(Numo::DComplex.cast(w) * -1i)
+      b = Array.new(5, 0.0)
+      a = Array.new(5, 0.0)
+      rng = Random.new(5)
+      %i[lp4 lp2 bp2 bp4 hp2 hp4 diode].each do |mode|
+        [false, true].each do |selfosc|
+          [:musical, :hardware].each do |tuning|
+            f = MB::Sound::Filter::FourPole.new(cutoff: 20 * 2**(rng.rand * 10), resonance: rng.rand, mode: mode, self_oscillate: selfosc, tuning: tuning, sample_rate: 48000)
+            expect(f.z_polynomials(b, a)).to equal(b)
+            h = b.reverse.inject(Numo::DComplex.zeros(128)) { |acc, c| acc * z + c } / a.reverse.inject(Numo::DComplex.zeros(128)) { |acc, c| acc * z + c }
+            db = 20 * Numo::NMath.log10(h.abs.clip(1e-3, nil))
+            ref = 20 * Numo::NMath.log10(f.response(w).abs.clip(1e-3, nil))
+            expect((db - ref).abs.max).to be < 1e-3, "#{mode} self-oscillating #{selfosc} #{tuning}: #{(db - ref).abs.max}"
+          end
+        end
+      end
+      f = MB::Sound::Filter::FourPole.new(cutoff: 800, resonance: 0.4, mode: :diode, sample_rate: 48000)
+      f.z_polynomials(b, a)
+      before = GC.stat(:total_allocated_objects)
+      100.times { |i| f.cutoff = 300.0 + i; f.z_polynomials(b, a) }
+      expect(GC.stat(:total_allocated_objects) - before).to be <= 2
+    end
+  end
+
   describe 'response' do
     it 'is -6 dB at the cutoff with no resonance, 0 dB at DC, and 24 dB/octave above' do
       f = FP.new(cutoff: 1000, resonance: 0)
