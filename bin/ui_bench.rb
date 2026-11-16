@@ -242,7 +242,7 @@ module MB::Sound
     # output.  Preallocated Arrays of Integers and flonums: nothing
     # allocates on the render path.
     class BufferLog
-      FIELDS = %i[t_in t_out gc_in gc_out gcn_in gcn_out jit_in jit_out blk_in blk_out inv_in inv_out].freeze
+      FIELDS = %i[t_in t_out gc_in gc_out gcn_in gcn_out maj_in maj_out jit_in jit_out blk_in blk_out inv_in inv_out].freeze
 
       # Prepended to the output's singleton class.
       module Hook
@@ -277,6 +277,7 @@ module MB::Sound
         @t_in[i] = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @gc_in[i] = GC.total_time
         @gcn_in[i] = GC.count
+        @maj_in[i] = GC.stat(:major_gc_count)
         if @jit
           @jit_in[i] = RubyVM::YJIT.runtime_stats(:compile_time_ns)
           @blk_in[i] = RubyVM::YJIT.runtime_stats(:compiled_block_count)
@@ -291,6 +292,7 @@ module MB::Sound
         @t_out[i] = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @gc_out[i] = GC.total_time
         @gcn_out[i] = GC.count
+        @maj_out[i] = GC.stat(:major_gc_count)
         if @jit
           @jit_out[i] = RubyVM::YJIT.runtime_stats(:compile_time_ns)
           @blk_out[i] = RubyVM::YJIT.runtime_stats(:compiled_block_count)
@@ -307,7 +309,8 @@ module MB::Sound
         rows = (1...n).map { |i|
           {
             i: i, at_s: (@t_in[i] - t0).round(3), wall: Time.at(@t_out[i - 1] + wall).strftime('%H:%M:%S.%6N'), render_ms: ((@t_in[i] - @t_out[i - 1]) * 1000).round(3),
-            gc_ms: ((@gc_in[i] - @gc_out[i - 1]) / 1e6).round(2), gcs: @gcn_in[i] - @gcn_out[i - 1],
+            gc_ms: ((@gc_in[i] - @gc_out[i - 1]) / 1e6).round(2), gcs: @gcn_in[i] - @gcn_out[i - 1], majors: @maj_in[i] - @maj_out[i - 1],
+            gc_in_write_ms: ((@gc_out[i] - @gc_in[i]) / 1e6).round(2), gcs_in_write: @gcn_out[i] - @gcn_in[i],
             jit_ms: ((@jit_in[i] - @jit_out[i - 1]) / 1e6).round(2), blocks: @blk_in[i] - @blk_out[i - 1], inv: @inv_in[i] - @inv_out[i - 1], inv_before: @inv_out[i - 1] - @inv_in[i - 1],
             write_ms: ((@t_out[i] - @t_in[i]) * 1000).round(3),
             jit_in_write_ms: ((@jit_out[i] - @jit_in[i]) / 1e6).round(2),
@@ -324,6 +327,17 @@ module MB::Sound
           no_wait_writes: rows.count { |x| x[:write_ms] < 0.2 },
           render_jit_ms: rows.sum { |x| x[:jit_ms] }.round(1), write_jit_ms: rows.sum { |x| x[:jit_in_write_ms] }.round(1),
           render_gc_ms: rows.sum { |x| x[:gc_ms] }.round(1),
+          # GC on the render thread: buffers whose render ran a GC step
+          # (their render window holds the GVL: a step there is the render
+          # thread's own), and steps elsewhere while it waited
+          gc_steps: {
+            render: rows.count { |x| x[:gcs] > 0 }, render_majors: rows.count { |x| x[:majors] > 0 },
+            render_per_min: rows.empty? ? 0 : (rows.count { |x| x[:gcs] > 0 } * 60.0 / (rows.length * period)).round(1),
+            render_max_ms: rows.map { |x| x[:gcs] > 0 ? x[:gc_ms] : 0 }.max.to_f.round(2),
+            render_ms: rows.sum { |x| x[:gcs] > 0 ? x[:gc_ms] : 0 }.round(1),
+            elsewhere: rows.sum { |x| x[:gcs_in_write] }, elsewhere_ms: rows.sum { |x| x[:gc_in_write_ms] }.round(1),
+            list: rows.select { |x| x[:gcs] > 0 }.map { |x| x.slice(:i, :at_s, :bar, :render_ms, :gc_ms, :majors) },
+          },
           worst: rows.max_by(8) { |x| x[:render_ms] },
         }
       end
@@ -502,6 +516,7 @@ module MB::Sound
         end
 
         screen = nil
+        screen_epoch = nil
         plot_thread = nil
         stop_plot = false
         case sc
@@ -549,6 +564,7 @@ module MB::Sound
 
         if screen
           screen.start
+          screen_epoch = Time.now.to_f # (for matching --yjit-log stamps: the screen's first seconds compile)
           UI.instance_variable_set(screen.is_a?(UI::Tiles) ? :@tiles : :@band, screen)
         end
         if sc == :design
@@ -571,6 +587,7 @@ module MB::Sound
         named = -> { { painter: screen&.thread || plot_thread, render: session.render_thread } }
         d0 = UI::Perf.run_delays(named.call)
         wall0 = UIBench.now
+        rec_epoch = Time.now.to_f
         cpu0 = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID)
         yjit0 = UIBench.yjit_stats
         the_feed = screen ? screen.feed : feed
@@ -699,6 +716,7 @@ module MB::Sound
         sr = row[:sink_report]
         puts
         puts "== #{sc} (#{kind} sink, #{session.buffer_size}-frame buffers#{UI::Feed.every_buffer ? ', every-buffer snapshots' : ''}#{UI::PaneRates.on_deadlines ? ', deadline due' : ''}#{UI::FrameRate.snapshot_timed ? ', snapshot-timed' : ''}#{UI::Tiles.echo_wake ? ', echo wake' : ''}#{p.out_latency ? ", output latency #{p.out_latency} buffers" : ''}#{knob ? ", turning #{knob.inspect}" : ''}#{ENV['MB_SOUND_UI_WAVES'] ? ", MB_SOUND_UI_WAVES=#{ENV['MB_SOUND_UI_WAVES']}" : ''}): load #{load0&.first}->#{load1&.first}, run delay ms #{delay.map { |k, v| "#{k} #{v}" }.join(' ')} (#{row[:clean] ? 'clean' : 'contended'}), CPU #{row[:cpu_s]} s of #{row[:wall_s]} s"
+        puts format('  clocks: screen started at %.6f, recording from %.6f (%.1f s after the screen; epoch seconds, as --yjit-log stamps)', screen_epoch, rec_epoch, rec_epoch - screen_epoch) if screen_epoch
         perf.headline(s).each { |l| puts "  #{l}" }
         puts "  feed: #{row[:snapshots_per_s]} snapshots/s published, #{row[:buffers_per_s]} render buffers/s"
         puts "  YJIT while recording: #{yjit[:compiled_block_count]} blocks compiled in #{(yjit[:compile_time_ns] / 1e6).round(1)} ms, #{yjit[:invalidation_count]} invalidations (#{yjit.select { |k, v| k.start_with?('invalidate_') && v.to_i > 0 }.map { |k, v| "#{k.to_s.delete_prefix('invalidate_')} #{v}" }.join(', ')}), #{yjit[:code_gc_count]} code GCs" if yjit
@@ -736,6 +754,9 @@ module MB::Sound
           if (bf = ht[:buffers])
             rm = bf[:render_ms]
             puts "  render buffers: #{bf[:n]}, period #{bf[:period_ms]} ms; render p50/p95/p99/max #{rm.values_at(:p50, :p95, :p99, :max).join('/')} ms; over the period #{bf[:over_period]} (#{bf[:over_per_min]}/min), over half #{bf[:over_half]}; writes that did not wait #{bf[:no_wait_writes]}; YJIT #{bf[:render_jit_ms]} ms in renders, #{bf[:write_jit_ms]} ms while the render thread waited; GC #{bf[:render_gc_ms]} ms in renders"
+            g = bf[:gc_steps]
+            puts "  GC steps on the render thread: #{g[:render]} (#{g[:render_per_min]}/min, #{g[:render_majors]} major), #{g[:render_ms]} ms, longest #{g[:render_max_ms]} ms; elsewhere while it waited: #{g[:elsewhere]} (#{g[:elsewhere_ms]} ms)"
+            g[:list].sort_by { -_1[:gc_ms] }.first(3).each { |x| puts format('    GC in buffer %5d at %6.2f s (bar %s): %5.2f ms of a %5.2f ms render%s', x[:i], x[:at_s], x[:bar].inspect, x[:gc_ms], x[:render_ms], x[:majors] > 0 ? ', major' : '') }
             bf[:worst].first(5).each { |x| puts format('    buffer %5d at %6.2f s (bar %s, from %s): render %6.2f ms (YJIT %5.2f ms %4d blocks, %d invalidations, %d during the wait before; GC %5.2f ms %d steps), write %5.2f ms', x[:i], x[:at_s], x[:bar].inspect, x[:wall], x[:render_ms], x[:jit_ms], x[:blocks], x[:inv], x[:inv_before], x[:gc_ms], x[:gcs], x[:write_ms]) }
           end
           if (o = ht[:blockers][:other])
