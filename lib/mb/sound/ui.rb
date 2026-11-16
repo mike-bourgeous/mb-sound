@@ -30,6 +30,7 @@ require_relative 'ui/follow'
 require_relative 'ui/pacer'
 require_relative 'ui/pane_rates'
 require_relative 'ui/frame_rate'
+require_relative 'ui/perf'
 require_relative 'ui/signals'
 require_relative 'ui/band'
 require_relative 'ui/reline_guard'
@@ -717,6 +718,12 @@ module MB
           messages.clear
         end
         nil
+      end
+
+      class << self
+        # The last UI::Perf `ui.perf` started (kept after it stops, for
+        # its report).
+        attr_accessor :last_perf
       end
 
       # The screen on (the tiled screen or the band), or nil.

@@ -114,7 +114,11 @@ module MB
           @turns_left = nil
           @draws = Hash.new { |h, k| h[k] = [] }
           @lock = Mutex.new
+          @perf = nil
         end
+
+        # A UI::Perf noting each pane's draws (`ui.perf`), or nil.
+        attr_accessor :perf
 
         # The painter's target rate (live panes run at it).
         attr_accessor :fps
@@ -175,6 +179,7 @@ module MB
         def drew(name, now)
           @lock.synchronize do
             q = @draws[name]
+            @perf&.pane_drew(name, now, q.last)
             q << now
             q.shift while q.length > 1 && q[0] < now - WINDOW
           end

@@ -251,6 +251,7 @@ module MB
           @hints = hints || (play_keys && Keys.hints(play_keys))
           @status_note = nil
           @note_capture = nil # (UI::NoteLog.capture when NAV # opened its prompt)
+          @features = {} # (the terminal probe's findings, for ui.perf's identity)
         end
 
         # The virtual keyboard (UI::Keyboard) KEYS mode plays.
@@ -290,6 +291,7 @@ module MB
           @term = MB::Term::Terminal.new(input: @input.dup, output: @output.dup)
           @term.enter(mouse: @mouse, kitty: @kitty)
           features = @probe ? @term.probe : {}
+          @features = features
           @ambiguous = features[:ambiguous] || (::Reline.core.instance_variable_get(:@ambiguous_width) rescue nil) || 1
           @glyphs = :ascii if @ambiguous == 2 && @glyphs == :unicode && ENV['MB_SOUND_UI_GLYPHS'].to_s.empty?
           @rows, @cols = terminal_size
@@ -484,6 +486,21 @@ module MB
             pane_cpu_ms: @pane_cpu.to_h { |name, q| [name, UI.percentiles(q.map { |c| c * 1000 })] },
             slowest: @slowest.map { |at, cpu| { at: MB::M.sigfigs(at, 4), cpu_ms: MB::M.sigfigs(cpu * 1000, 3), parts: {} } },
           }
+        end
+
+        # ui.perf on the tiles asks the terminal (it owns the input): a DA1
+        # query after a sampled frame, and XTVERSION / DA2 for its identity.
+        private def perf_ack = @term ? :da1 : nil
+
+        private def perf_identify(p)
+          p.identify(features: @features || {}, term: @term, size: [@rows, @cols])
+          # The render thread's wake delay and the painter's, input's, pty
+          # reader's, and REPL's GVL waits while recording
+          s = @session || Session.existing
+          threads = { render: s&.render_thread, painter: @painter, input: @reader }
+          threads[:pty] = @host.reader if @host&.reader
+          threads[:repl] = @host.thread if @host&.thread
+          p.start_probe(threads.compact) if threads[:render] && threads[:painter]
         end
 
         # Panes that raised (name => message).
@@ -1957,7 +1974,22 @@ module MB
               []
             end
           @input_lock.synchronize { @router.tick(Process.clock_gettime(Process::CLOCK_MONOTONIC)) }
-          events.each { |e| handle(e) }
+          if (perf = @pacer.perf)
+            # (ui.perf: replies to its queries are taken out here, never
+            # reaching the Router, Pry, or NAV; keys are timed to the frame
+            # that shows them)
+            arrival = @clock.call
+            events.each do |e|
+              next if e.is_a?(MB::Term::Input::Reply) && perf.reply(e, arrival)
+              repl = e.is_a?(MB::Term::Input::Key) && @router.state == :repl
+              handle(e)
+              perf.key(arrival, @clock.call, repl) if e.is_a?(MB::Term::Input::Key) && !e.release?
+            end
+            @decoder.expect_cpr = perf.expect_cpr?
+            @decoder.expect_dcs = perf.expect_dcs?(@clock.call)
+          else
+            events.each { |e| handle(e) }
+          end
           @input_lock.synchronize { tick_panes } # (gestures whose keys stopped: their lines)
           (@painter&.wakeup rescue nil) if @keyboard.tick(mono_now)
           (@painter&.wakeup rescue nil) unless events.empty?
@@ -2168,6 +2200,7 @@ module MB
           end
 
           drawn = 0
+          repl_drawn = false
           items = @placed.filter_map do |p|
             next if p.tabs || p.name == :repl || !@panes[p.name]
             [p.name, p.name, @panes[p.name], p.opts[:rate], @drawn_at[p.name]]
@@ -2179,7 +2212,10 @@ module MB
               next
             end
             if p.name == :repl
-              drawn += 1 if draw_repl(p, full)
+              if draw_repl(p, full)
+                drawn += 1
+                repl_drawn = true
+              end
               next
             end
             pane = @panes[p.name]
@@ -2223,11 +2259,17 @@ module MB
           @shown.copy_from(@grid)
           cursor = cursor_bytes
           out = nil
+          perf = @pacer.perf
           if !cells.empty? || cursor != @last_cursor || full
-            out = "\e[?2026h\e[?25l#{full ? "\e[0m\e[H\e[2J" : ''}#{cells}#{cursor}\e[?2026l"
+            # (ui.perf: a terminal query after some frames; its answer times the terminal's parse)
+            ack = perf&.ack_query(now)
+            out = "\e[?2026h\e[?25l#{full ? "\e[0m\e[H\e[2J" : ''}#{cells}#{cursor}\e[?2026l#{ack}"
+            perf&.painted(drawn, repl_drawn, full, out.bytesize)
             write(out)
             note_written(now, out.bytesize)
             @last_cursor = cursor
+          else
+            perf&.painted(drawn, repl_drawn, full, 0)
           end
           cpu = thread_cpu - cpu0
           @frames << [cpu, out&.bytesize || 0, drawn]

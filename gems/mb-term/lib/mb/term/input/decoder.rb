@@ -40,11 +40,17 @@ module MB
         # Reply, not F3 with modifiers).
         attr_accessor :expect_cpr
 
+        # True while a device control string reply is expected (an
+        # XTVERSION answer, ESC P >| name ST, is then a Reply of kind :dcs;
+        # otherwise ESC P is Alt-P, as before).
+        attr_accessor :expect_dcs
+
         def initialize(esc_timeout: ESC_TIMEOUT)
           @esc_timeout = esc_timeout
           @buf = +''.b
           @paste = nil
           @expect_cpr = false
+          @expect_dcs = false
         end
 
         # True when bytes wait for the rest of a sequence (or a paste is
@@ -186,6 +192,18 @@ module MB
             key = SS3_KEYS[f]
             out << (key ? Key.new(key: key, bytes: b.byteslice(i, 3)) : Key.new(key: f, mods: [:alt], bytes: b.byteslice(i, 3)))
             i + 3
+          when 0x50 # P: a device control string (only while one is expected)
+            if @expect_dcs
+              j = b.index("\e\\", i + 2)
+              if j.nil?
+                return nil unless final
+              else
+                out << Reply.new(kind: :dcs, data: utf8(b.byteslice(i + 2, j - i - 2)))
+                return j + 2
+              end
+            end
+            out << Key.new(key: 'P', mods: [:alt], bytes: b.byteslice(i, 2))
+            i + 2
           when 0x1B
             # ESC ESC: an Escape key (the second may start a sequence)
             out << Key.new(key: :escape, bytes: "\e".b)
@@ -231,6 +249,11 @@ module MB
             when 'c' then out << Reply.new(kind: :device, data: params[1..].split(';').map(&:to_i))
             when 'u' then out << Reply.new(kind: :kitty, data: params[1..].to_i)
             end
+            return
+          end
+          if lead == '>' && final == 'c'
+            # Secondary device attributes (DA2): terminal type, version
+            out << Reply.new(kind: :device2, data: params[1..].split(';').map(&:to_i))
             return
           end
           if params.empty? && (final == 'I' || final == 'O')

@@ -118,7 +118,7 @@ RSpec.describe(MB::Sound::UI::Pacer, :aggregate_failures) do
     expect(b[:paint_ms][:p50]).to be_within(1e-9).of(2.0)
     expect(b[:write_ms][:p50]).to be_within(1e-9).of(1.0)
     expect(b[:refreshes]).to be_within(1).of(50)
-    expect(p.readout(window: 1.0)).to match(%r{\A(49|50)/50 Hz · (49|50) written · paint 2\.0 write 1\.0 wait 17\.0\+0\.0 ms\z})
+    expect(p.readout(window: 1.0)).to match(%r{\A(49|50)/50 Hz · (49|50) written · paint 2\.0 write 1\.0 wait 17\.0\+0\.0 ms · late p99 0\.0 gap 20 ms\z})
   end
 
   it 'defines every (state, event) pair: the table\'s transitions, StateError for the rest' do

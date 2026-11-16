@@ -87,6 +87,9 @@ module MB
         # Called with each Frame after it (UI::PaneRates#observe).
         attr_accessor :on_frame
 
+        # A UI::Perf recording frames (`ui.perf`), or nil.
+        attr_accessor :perf
+
         # +fps+ the target rate; +clock+ a Proc of seconds; +sleeper+ a
         # Proc that sleeps (fake clocks advance their time there).
         def initialize(fps, clock:, sleeper: ->(s) { sleep(s) })
@@ -99,6 +102,7 @@ module MB
           @write = 0.0
           @lock = Mutex.new
           @on_frame = nil
+          @perf = nil
           @trim = 0.0
           @offset = 0.0
           @window_at = nil
@@ -148,6 +152,7 @@ module MB
           start = @clock.call
           late = [start - @deadline, 0.0].max
           @write = 0.0
+          @perf&.begin_frame(start)
           out = yield start
           done = @clock.call
           event!(:painted)
@@ -177,6 +182,7 @@ module MB
             @frames.shift if @frames.length > KEEP
           end
           @on_frame&.call(f)
+          @perf&.end_frame(f)
           f
         end
 
@@ -207,9 +213,9 @@ module MB
         end
 
         # The last frames' timing over +window+ seconds: refreshes per
-        # second, written frames per second, and p50/max milliseconds of
-        # paint, write, sleep asked, oversleep, and lateness, plus skipped
-        # deadlines.
+        # second, written frames per second, and p50/p99/max milliseconds
+        # of paint, write, sleep asked, oversleep, and lateness, skipped
+        # deadlines, and the longest gap between frame starts.
         def breakdown(window: 2.0)
           now = @clock.call
           fs = @lock.synchronize { @frames.select { |f| f.at > now - window } }
@@ -224,16 +230,22 @@ module MB
             oversleep_ms: ms.(fs.map { |f| f.slept - f.sleep }),
             late_ms: ms.(fs.map(&:late)),
             skipped: fs.sum(&:skipped),
+            # (ui-perf-1: the longest time between two frames' starts in
+            # the window, the stall a steady rate can hide)
+            gap_ms: fs.each_cons(2).map { |a, b| (b.at - a.at) * 1000 }.max&.then { |v| MB::M.sigfigs(v, 3) },
           }
         end
 
         # The breakdown as one line for the status bar (NAV f): refreshes
-        # against the target, frames written, and where a frame's time went.
+        # against the target, frames written, where a frame's time went
+        # (p50s), and the window's p99 lateness and longest gap between
+        # frames (ui-perf-1: smooth is p99 and gaps, not means).
         def readout(window: 2.0)
           b = breakdown(window: window)
           f = ->(v) { v.nil? ? '-' : format('%.1f', v) }
           "#{b[:refreshes].round}/#{b[:target].round} Hz · #{b[:written].round} written · paint #{f.(b[:paint_ms][:p50])} write #{f.(b[:write_ms][:p50])} " \
-            "wait #{f.(b[:sleep_ms][:p50])}+#{f.(b[:oversleep_ms][:p50])} ms#{b[:skipped] > 0 ? " · #{b[:skipped]} missed" : ''}"
+            "wait #{f.(b[:sleep_ms][:p50])}+#{f.(b[:oversleep_ms][:p50])} ms · late p99 #{f.(b[:late_ms][:p99])} gap #{b[:gap_ms]&.round || '-'} ms" \
+            "#{b[:skipped] > 0 ? " · #{b[:skipped]} missed" : ''}"
         end
 
         # The transition table as text lines (for the spec and help).

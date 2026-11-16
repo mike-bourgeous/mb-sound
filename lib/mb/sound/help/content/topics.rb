@@ -1959,7 +1959,13 @@ module MB
         it; `ui off` sums them up).  NAV f shows the frame rate and each
         pane's rate beside its number (`ui.fps` is what was drawn,
         `ui.target_fps` the painter's rate; meters and scopes run at it and
-        everything slows in steps when the CPU is busy).
+        everything slows in steps when the CPU is busy).  `ui.perf` records
+        what that number can't see (frame lateness, the worst stall, each
+        pane's update age, key-to-frame time, the terminal's answer time to
+        a query after a frame, the render thread's wake delay):
+        `ui.perf :report`, `:stop`, `:save`; `ui.perf :capture` records a
+        minute of the tiles and the sound screen in your terminal and saves
+        it under tmp/ui-perf/captures/.
 
         `ui.note 'the cutoff turns too slowly'` keeps a note for the next
         UI refinement round with the screen as text, the layout and focused

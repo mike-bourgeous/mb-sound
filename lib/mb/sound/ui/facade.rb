@@ -19,7 +19,7 @@ module MB
       class Pending
         # Facade commands that need no screen (a bare `ui` before them
         # shows nothing).
-        QUIET = %i[note notes bind unbind key_table keyboard mode off keys].freeze
+        QUIET = %i[note notes bind unbind key_table keyboard mode off keys perf].freeze
 
         def method_missing(name, *args, **opts, &block)
           return super unless UI.facade.respond_to?(name)
@@ -109,6 +109,55 @@ module MB
         #
         #     ui.notes
         def notes(day = :today) = NoteLog.list(day)
+
+        # Frame instruments (UI::Perf): what the frame rate can't see.
+        # `ui.perf` starts recording on the screen (or, while recording,
+        # prints the report); :report, :stop (and the report), :save
+        # (report.txt, summary.json, frames.json under
+        # tmp/ui-perf/captures/), :capture (about a minute of the tiles
+        # with the set playing, then the sound-design screen with a knob
+        # moving; saved, three lines printed).  The report: frame lateness,
+        # paint and write times, the worst stall between written frames,
+        # bytes, GC, each pane's update age, key-to-frame latency, the
+        # terminal's answer time to a query sent after sampled frames, the
+        # render thread's wake delay, and the terminal's identity.
+        #
+        #     ui.perf             # start
+        #     ui.perf :report
+        #     ui.perf :capture    # one minute in your real terminal; type a few keys in phase 1
+        def perf(what = nil, seconds: Perf::Capture::SECONDS, design: nil, dir: nil)
+          require_relative '../help' # (the report is a help page)
+          s = screen
+          rec = s.respond_to?(:perf) ? s.perf : nil
+          what ||= rec ? :report : :start
+          case what
+          when :start
+            return puts("\e[33mui.perf: no screen is on (ui :tiles, or ui.perf :capture)\e[0m") unless s
+            UI.last_perf = s.start_perf
+            puts "\e[2mui.perf: recording #{s.class.name.split('::').last.downcase} frames (ui.perf :report, :stop, :save)\e[0m"
+            UI.last_perf
+          when :stop
+            p = s&.stop_perf || UI.last_perf
+            return puts("\e[33mui.perf: nothing recorded\e[0m") unless p
+            puts Help.for_output(p.report.to_s)
+            p
+          when :report
+            p = rec || UI.last_perf
+            return puts("\e[33mui.perf: nothing recorded (ui.perf starts)\e[0m") unless p
+            puts Help.for_output(p.report.to_s)
+            nil
+          when :save
+            p = rec || UI.last_perf
+            return puts("\e[33mui.perf: nothing recorded (ui.perf starts)\e[0m") unless p
+            d = p.save(dir)
+            puts "ui.perf: saved #{d}"
+            d
+          when :capture
+            Perf::Capture.start(seconds: seconds, design: design, dir: dir)
+          else
+            raise ArgumentError, "ui.perf takes :start, :report, :stop, :save, or :capture (got #{what.inspect})"
+          end
+        end
 
         def respond_to_missing?(name, include_private = false)
           Tiles.public_method_defined?(name) || Band.public_method_defined?(name) || super

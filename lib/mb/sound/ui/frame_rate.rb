@@ -79,7 +79,41 @@ module MB
           { fps: f, cpu_ms: cpu, kb_per_s: kbs.round(1), pacing: pace, rates: @rates.to_h, live_panes: slow && { name: slow[0], fps: slow[1] }, text: text }
         end
 
+        # The UI::Perf recording this screen's frames (`ui.perf`), or nil.
+        def perf = @pacer.perf
+
+        # Starts recording frames into a new UI::Perf (replacing one that
+        # runs); options as for Perf.new (+ack:+ defaults to the screen's
+        # #perf_ack).  Returns it.
+        def start_perf(**opts)
+          stop_perf
+          p = Perf.new(clock: @clock, ack: perf_ack, **opts)
+          perf_identify(p)
+          @pacer.perf = p
+          @rates.perf = p
+          p
+        end
+
+        # Stops recording; returns the UI::Perf (kept for its report), or
+        # nil.
+        def stop_perf
+          p = @pacer.perf
+          @pacer.perf = nil
+          @rates.perf = nil
+          p&.stop
+        end
+
         private
+
+        # The terminal query kind ui.perf uses on this screen (nil: none,
+        # the band's input is Reline's).
+        def perf_ack = nil
+
+        # Fills in the terminal's identity (screens with a terminal of
+        # their own also ask it).
+        def perf_identify(p)
+          p.identify(size: [@rows, @cols])
+        end
 
         # [name, measured redraws/s] of the slowest visible pane that wants
         # the painter's rate (meters and live panes, UI::PaneRates), or nil
@@ -145,7 +179,9 @@ module MB
           t = @clock.call
           yield
         ensure
-          @pacer.note_write(@clock.call - t)
+          t1 = @clock.call
+          @pacer.note_write(t1 - t)
+          @pacer.perf&.wrote(t, t1)
         end
 
         # Notes a frame of +bytes+ written at +now+.
