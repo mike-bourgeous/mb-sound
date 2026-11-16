@@ -78,6 +78,7 @@ module MB
           end
         end
         poll = Poll.new(session)
+        warm_up_poll
 
         # Every pane (the deck has them all) drawn each refresh, then the
         # diffed path
@@ -96,6 +97,43 @@ module MB
         session&.close
         sink&.close
       end
+
+      # Polls (Poll#call: slow data, as the painter does 4 times a second)
+      # a small set in a session of its own: tracks, a kit with a fill,
+      # sequences with rests, ties, swing, and legato, scenes, and a knob.
+      # A set's first poll writes each clip's Ruby (ClipInfo#ruby), and
+      # cold that compiled the recipe writer and the poll on the painter:
+      # Last Stop's first poll took 111 ms natively, 94 ms of it YJIT
+      # compiling 3422 blocks in stretches no handover can interrupt; after
+      # this, 18 ms (13 ms, 592 blocks; ui-perf-2 step 3).  Costs ~135 ms
+      # natively once per process.
+      def self.warm_up_poll
+        ws = Session.new(output: NullOutput.new(channels: 2, sleep: false), realtime: false, transport: Sequence::Transport.new)
+        Session.with_context(session: ws) do
+          MB::Sound.instance_eval do
+            knob :wu_cut, 900, range: 100..8000
+            kit = grid(16, kick: 'x...x...x...x...', hat: '..x...x...x...x.', clap: '....X.......X...')
+              .fill(:turn, clap: grid(16, '....X...x.x.xXXX', value: 39)).loop(align: :launch)
+            n = ->(m) { Note.new(m) } # (A1 = 33; the note constants are the console's)
+            a = seq(R, n[33], R, n[33], R, n[33], R, n[33]).n8.loop(align: :launch)
+            b = seq(R, R, !n[33], n[33], R, n[36], R, n[31]).n16.swing(0.56).loop(align: :launch)
+            c = seq(n[76], Tie, Tie, Tie).n1.loop(align: :launch).named(:wu_tension)
+            d = seq(n[45], n[45], n[45], n[43]).n1.legato(0.98).loop(align: :launch)
+            e = seq(n[81], n[84], n[88], n[83]).n16.loop(align: :launch)
+            track(:wu_drums) { |k| k.tone.sine.at(0.1) }
+            track(:wu_bass) { |clip| clip.tone.saw.at(0.1).filter(:lowpass, cutoff: knob(:wu_cut)) * clip.env(0.01, 0.1, 0.5, 0.1) }
+            track(:wu_lead) { |clip| clip.tone.triangle.at(0.1) * clip.env(0.01, 0.1, 0.5, 0.1) }
+            scene :wu_a, wu_drums: kit, wu_bass: a, wu_lead: c
+            scene :wu_b, wu_drums: kit, wu_bass: b, wu_lead: d
+            scene :wu_c, wu_bass: a, wu_lead: e, wu_cut: 2000
+          end
+        end
+        # (a new Poll each time: each caches its clips' Ruby)
+        6.times { Poll.new(ws).call(%i[meters scope]) }
+      ensure
+        ws&.close
+      end
+      private_class_method :warm_up_poll
 
       # Lines .warm_up_console types: the kinds of console lines a set
       # takes (numbers, symbols, strings, assignments, method calls).
