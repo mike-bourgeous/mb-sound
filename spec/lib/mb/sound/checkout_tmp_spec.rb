@@ -11,6 +11,7 @@ RSpec.describe('MB_SOUND_CHECKOUT_TMP', :aggregate_failures) do
   READERS = {
     'lib/mb/sound/fit_patch.rb' => 'FitPatch.dir (fits/; the tuner\'s files sit beside it)',
     'lib/mb/sound/ui/note_log.rb' => 'NoteLog.dir (ui-notes/)',
+    'lib/mb/sound/ui/perf.rb' => 'Perf.captures_dir (ui-perf/captures/, ui.perf :save and :capture)',
     'lib/mb/sound/library/bench.rb' => 'Bench.default_root (listening/)',
     'lib/mb/sound/internal.rb' => 'the definitions',
   }.freeze
