@@ -50,6 +50,12 @@ RSpec.describe('the idle inspector\'s allocations', :aggregate_failures) do
     @tiles = ui::Tiles.new(layout: ui.tiles_layout_named(:sound), input: @term.slave, output: @term.slave, repl: :none,
                            probe: false, size: [40, 140], clock: -> { 1.0 + frame / 60.0 }, source: -> { snaps[frame % snaps.length] },
                            keyboard: ui::Keyboard.new(out: UIHelpers::NullKeyboardOut.new))
+    # (the picker's KEEP-second library re-read lands in the measured
+    # frames when its process-wide cache, made by an earlier example, turns
+    # KEEP seconds old there: seen once in a loaded parallel run, 43
+    # objects a frame from Library::Index#all_entries; ui-perf-2 round 4)
+    stub_const('MB::Sound::UI::Picker::KEEP', 1e9)
+    ui::Picker.instance_variable_set(:@cache, nil)
     @tiles.start(thread: false)
     @tiles.enter(:inspector)
     expect(@tiles.router.mode).to eq(:pane)
