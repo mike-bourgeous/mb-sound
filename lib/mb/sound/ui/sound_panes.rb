@@ -118,7 +118,7 @@ module MB
             m = state[:enter_hint]
             return m[5] if m && m[0].equal?(info) && m[1] == v && m[2] == state[:fixed] && m[3] == state[:pick] && (m[4].equal?(s.knobs) || same_knob_names?(m[4], s.knobs))
             h = enter_hint_of(state)
-            h = h.dup.freeze if h && !h.frozen?
+            h = -h if h # (frozen: kept)
             state[:enter_hint] = [info, v, state[:fixed], state[:pick], s.knobs, h].freeze
             h
           end
@@ -239,7 +239,7 @@ module MB
             unless hd && hd[0].equal?(info) && hd[1] == mode && hd[2] == hint
               idx = info.tracks.index(info.track)
               name = info.document || info.instrument # (a preset's document, else a library instrument's name: acid)
-              hd = state[:header] = [info, mode, hint.frozen? ? hint : hint.dup.freeze, info.track.to_s.freeze, (name ? "  #{name}" : '').freeze,
+              hd = state[:header] = [info, mode, -hint, info.track.to_s.freeze, (name ? "  #{name}" : '').freeze,
                                      "  #{idx ? idx + 1 : '?'}/#{info.tracks.length}".freeze, (mode ? "  #{hint}" : '').freeze].freeze
             end
             x = c.text(0, 0, hd[3], :name)
@@ -656,7 +656,7 @@ module MB
                 # (a turn this voice and clip can't make heard, with why when
                 # picked: Inspect.masked_of; inspector-nav-1)
                 hint = sel ? "  #{masked}" : '  · not heard here' if masked
-                hint = hint.frozen? ? hint : hint.dup.freeze
+                hint = -hint
                 sel ? (pm[9] = hint) : (pm[10] = hint)
               end
               c.text_fit(x, y, hint, [c.w - x, 0].max, :dim)
