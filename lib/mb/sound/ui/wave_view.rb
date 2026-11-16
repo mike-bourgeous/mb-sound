@@ -161,7 +161,9 @@ module MB
           kind = first.is_a?(Tone) ? (first.lfo? ? :lfo : :tone) : first.is_a?(GraphNode::FourPole) ? :four_pole : nil
           unless kind
             # (an LFO row: Notes#lfo's mixer over its oscillator, which the
-            # sections list as LFO internals)
+            # sections list as LFO internals; only rows the sections call
+            # an LFO, so a shaper after a scan-modulated oscillator isn't one)
+            return clear(feed) unless info.nodes[info.node].what == 'lfo'
             group = group.map { |n| lfo_tone_of(n) }
             return clear(feed) if group.any?(&:nil?)
             kind = :lfo

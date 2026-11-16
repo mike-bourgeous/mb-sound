@@ -125,6 +125,54 @@ RSpec.describe(MB::Sound::UI::WaveView, :aggregate_failures) do
     end
   end
 
+  describe 'watch_for' do
+    after do
+      MB::Sound::UI::Inspect.target = nil
+      @session&.close
+      MB::Sound.rewind
+    end
+
+    it 'picks a live display for oscillator, filter, and LFO rows only, and the tap publishes what the voice used' do
+      out = MB::Sound::Sampler::CaptureOutput.new(channels: 2)
+      @session = s = MB::Sound::Session.new(output: out, realtime: false)
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.instance_eval do
+          track(:wob) { |clip|
+            synth(clip, voices: 2) { |v|
+              f = v.hz
+              o1 = f.wavetable(:basic_norm, scan: v.lfo(0.3, unipolar: true)).named('osc1')
+              o2 = f.transpose(-12).square.pwm(v.lfo(0.7, unipolar: true) * 0.8 + 0.1).named('osc2')
+              (o1 + o2 * 0.5).lp4(1200 * 2 ** v.lfo(1.5, depth: 1.5), resonance: 0.4).softclip(0.5, 1.0) * v.amp_env(0.01, 0.3, 0.7, 0.3)
+            }
+          }
+          bg :wob, seq(MB::Sound::A2).n2.loop
+        end
+      end
+      s.ui_feed = MB::Sound::UI::Feed.new unless s.ui_feed
+      wv.mode = :live
+      g = MB::Sound::UI::Inspect::Gatherer.new
+      8.times { s.process_buffer }
+      info = g.call(s, { track: :wob })
+      kinds = info.nodes.each_index.to_h { |i|
+        t = wv.watch_for(s, g, info.with(node: i))
+        [[info.nodes[i].label, info.nodes[i].what], t&.kind]
+      }
+      expect(kinds.select { |(l, _), _| %w[osc1 osc2].include?(l) }.values).to eq(%i[tone tone]), kinds.inspect
+      expect(kinds.find { |(l, _), _| l == 'lp4' }&.last).to eq(:four_pole)
+      # (the LFO rows, and the plumbing view's LFO oscillators themselves)
+      expect(kinds.select { |(_, w), _| w.to_s.start_with?('lfo') }.values.uniq).to eq([:lfo]), kinds.inspect
+      expect(kinds.reject { |(l, w), _| %w[osc1 osc2 lp4].include?(l) || w.to_s.start_with?('lfo') }.values.uniq).to eq([nil]), kinds.inspect
+
+      osc2 = info.nodes.index { |n| n.label == 'osc2' }
+      t = wv.watch_for(s, g, info.with(node: osc2))
+      4.times { s.process_buffer }
+      vals = Array.new(wv::Tap::MAX)
+      expect(s.ui_feed.wave_tap.read(t.watch, vals)).to eq(true)
+      expect(vals[0]).to be_within(0.5).of(MB::Sound::A1.frequency) # (the note an octave down)
+      expect(vals[1]).to be_between(0.1, 0.9) # (the PWM LFO's width now)
+    end
+  end
+
   describe 'the preview pane' do
     it 'draws the live cycle from the tap every frame while live, and today\'s preview while off' do
       tone = MB::Sound::Tone.new(wave_type: :square, frequency: 110).pwm(0.3.constant)
