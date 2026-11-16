@@ -11,28 +11,31 @@ module MB
       # the parameter values the voice used in its latest buffer, not from a
       # second copy of the voice played in windows.
       #
-      # Off by default (`UI::WaveView.mode = :live`, or
+      # Off by default (`ui.waves :live`, `UI::WaveView.mode = :live`, or
       # MB_SOUND_UI_WAVES=live before start).  When live:
       #
       # - The render thread copies the moving values the shown node used
       #   (an oscillator's frequency, pulse width, and wavetable scan; a
-      #   four-pole's cutoff and resonance) into a preallocated ring after
-      #   every buffer (Tap#publish: Floats into an Array, nothing
-      #   allocated), only while a display watches them.
+      #   four-pole's cutoff and resonance; an SVF's or biquad's cutoff,
+      #   quality, and gain; a voice's note frequency) into a preallocated
+      #   ring after every buffer (Tap#publish: Floats into an Array,
+      #   nothing allocated), only while a display watches them.
       # - The painter's poll (4/s) picks the node (the synth lane of the
       #   newest sounding note, by the voice's amp envelope, as the
       #   envelope preview's playhead does) and sets the watch list.
       # - The preview pane, a live pane while it shows a live display,
-      #   reads the newest values each frame (Tap#read) and draws: one cycle
-      #   of the oscillator from its own kernel (a display copy of the tone
-      #   with its shape settings, at those values: ToneDisplay), or a
-      #   four-pole's closed-form response at that cutoff and resonance
-      #   (FilterDisplay), or an LFO's shape with a marker at its phase
-      #   now, straight into the screen's cells through the :plot_wave
-      #   kernel (Plot::Wave).  Envelope rows draw EnvelopeView's trace the
-      #   same way, the playhead as the marker.  What has no cheap form (FM, sync,
-      #   phase modulation, AM, noise; the patch's settled cycle) keeps the
-      #   rendered previews (UI::ToneCycle, the RENDER pane).
+      #   reads the newest values each frame (Tap#read) and draws, without
+      #   allocating (wave_budgets_spec): one cycle of the oscillator from
+      #   its own kernel (ToneDisplay), a filter's response from its
+      #   transfer function through the :plot_response kernel
+      #   (FilterDisplay), an LFO's shape with a marker at its phase now,
+      #   an envelope's trace with its playhead, straight into the screen's
+      #   cells through the :plot_wave kernel (Plot::Wave).  An oscillator
+      #   with no cheap cycle (FM, sync, phase modulation, AM, noise,
+      #   feedback) shows one period of its voice's output instead
+      #   (OutputTap on the Synth's lane, VoiceView).  Shapers keep the
+      #   chart preview (their curve has no moving input), and so does the
+      #   RENDER pane (UI::PatchRender: the patch's settled note).
       module WaveView
         MODES = %i[off live].freeze
 
@@ -70,7 +73,7 @@ module MB
         KEYS = {
           tone: %i[frequency width scan].freeze, four_pole: %i[cutoff resonance].freeze, lfo: %i[frequency width scan phase].freeze,
           svf: %i[cutoff quality gain].freeze, biquad: %i[cutoff quality].freeze,
-          voice: %i[value value value value].freeze,
+          voice: %i[value].freeze, # (one per Notes::Frequency of the lane, up to four)
         }.freeze
 
         # Target kinds drawn by a FilterDisplay.
@@ -365,7 +368,7 @@ module MB
             view ||= FILTER_KINDS.include?(kind) ? FilterDisplay.new(node) : ToneDisplay.new(node)
             keys = KEYS.fetch(kind)
             watch = if kind == :voice
-                      view.frequencies.first(keys.length).map { |f| [f, :value].freeze }.freeze
+                      view.frequencies.map { |f| [f, :value].freeze }.freeze
                     else
                       keys.map { |k| [node, k].freeze }.freeze
                     end
