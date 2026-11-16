@@ -247,6 +247,7 @@ module MB
         @control_notes = nil
         @skip_idle = nil
         @output_tap = nil
+        @zeros_entry = [nil]
         @skipping = nil
         @skip_generation = nil
         @lane_runs = nil
@@ -1352,7 +1353,11 @@ module MB
         if pieces
           bufs.replace(@lane_piece_bufs[idx])
         elsif whole == :zeros
-          measure_lane(idx, [zeros(count)])
+          # (one reused Array: a new one per skipped lane per buffer was
+          # the render thread's top allocation with a voice idle)
+          z = @zeros_entry
+          z[0] = zeros(count)
+          measure_lane(idx, z)
           return outs.length == 1 && @channels == 1 ? zeros(count) : Array.new(outs.length) { zeros(count) }
         else
           bufs.replace(whole)
