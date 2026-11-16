@@ -266,6 +266,27 @@ module MB
         # by ui.note (UI::NoteLog.capture) to say what was looked at.
         def pane_state(name) = @states.key?(name) ? @states[name] : nil
 
+        # The pane object named +name+ in the current layout, or nil
+        # (ui.perf :capture asks the inspector whether a knob is picked).
+        def pane_object(name) = @panes[name]
+
+        # Handles +bytes+ (e.g. "\e[C") as if typed: decoded, each key
+        # through the Router, timed by ui.perf like a typed key, and the
+        # painter woken as the input thread does (ui.perf :capture's
+        # scripted knob turns).  Returns self.
+        def type_scripted(bytes)
+          events = MB::Term::Input::Decoder.new.feed(bytes)
+          perf = @pacer.perf
+          events.each do |e|
+            arrival = @clock.call
+            repl = e.is_a?(MB::Term::Input::Key) && @router.state == :repl
+            handle(e)
+            perf&.key(arrival, @clock.call, repl) if e.is_a?(MB::Term::Input::Key) && !e.release?
+          end
+          @painter&.wakeup rescue nil
+          self
+        end
+
         # The Session this screen shows (nil: the default one).
         def session = @session
 

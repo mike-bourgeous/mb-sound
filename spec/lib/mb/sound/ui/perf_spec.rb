@@ -159,5 +159,18 @@ RSpec.describe(MB::Sound::UI::Perf) do
       expect(s[:keys][:n]).to eq(2) # (the answers aren't keys)
       expect(@tiles.perf).to be_nil
     end
+
+    it 'times scripted keys (the capture\'s knob turns) like typed ones, handled through the Router' do
+      @tiles, @term = ui_tiles(:tiles, rows: 30, cols: 100)
+      @term.wait_for('t> ')
+      p = @tiles.start_perf
+      @tiles.type_scripted('ab')
+      expect(@term.wait_for('t> ab')).to eq(true) # (to the REPL, as typed)
+      wait_until { p.summary[:keys][:n] >= 2 }
+      expect(p.summary[:keys][:n]).to eq(2)
+      @tiles.stop_perf
+      expect(@tiles.pane_object(:no_such_pane)).to be_nil
+      expect(MB::Sound::UI::Perf::Capture.pick_knob(@tiles)).to be_nil # (no inspector on this layout)
+    end
   end
 end

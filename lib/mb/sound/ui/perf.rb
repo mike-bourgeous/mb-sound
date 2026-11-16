@@ -615,6 +615,26 @@ module MB
             nil
           end
 
+          # Steps the sound screen's inspector down (as typed: Down) until
+          # its picked row has a knob to turn, at most +tries+ rows (the
+          # inspector opens on a node row, which turns nothing).  Returns
+          # the knob's name, or nil.
+          def self.pick_knob(tiles, tries: 24)
+            insp = tiles.pane_object(:inspector) or return nil
+            return nil unless insp.respond_to?(:picked, true)
+            tries.times do
+              # (Inspector#picked is the pane's own private helper: read,
+              # never changed, from here)
+              state = tiles.pane_state(:inspector) or return nil # (not on this screen)
+              if (kn = insp.__send__(:picked, state))
+                return kn[0]
+              end
+              tiles.type_scripted("\e[B")
+              sleep 0.05
+            end
+            nil
+          end
+
           # The capture itself (on the calling thread).  Returns the
           # directory it saved.
           def self.run(seconds: SECONDS, design: nil, dir: nil, out: $stdout)
@@ -635,6 +655,11 @@ module MB
               tiles = UI.tiles
               notes << 'phase 1 opened ui :tiles'
             end
+            # (a set just started, or a screen just opened: its first walks,
+            # warm-ups, and pane rates stepped down by them settle first; in
+            # a pty run they were a 120-160 ms stall at 0.3 s and the list
+            # panes at their slowest rate, 2026-11-16)
+            sleep 2.0 if started_demo || notes.include?('phase 1 opened ui :tiles')
             half = seconds / 2.0
             loads = [Perf.loadavg]
             delays0 = Perf.run_delays(render: session.render_thread, painter: tiles&.thread)
@@ -659,20 +684,18 @@ module MB
               UI.run_line("design #{target.inspect}", session)
               tiles = UI.tiles
               sleep 1.0 # (the screen settles: first walks, warm-up frames)
+              knob = Capture.pick_knob(tiles)
+              notes << (knob ? "phase 2 turns #{knob.inspect}" : 'phase 2 found no knob row in the inspector: its arrows turn nothing (key times are frames, not changes)')
               p2 = tiles.start_perf(label: "design #{target.inspect}")
               t_end = MB::U.clock_now + half - 1.0
               k = 0
               while MB::U.clock_now < t_end
-                dir_key = (k / SWEEP).even? ? "\e[C" : "\e[D"
-                key = MB::Term::Input::Decoder.new.feed(dir_key).first
-                arrival = tiles.instance_variable_get(:@clock).call
-                tiles.send(:handle, key)
-                p2.key(arrival, tiles.instance_variable_get(:@clock).call, false)
+                tiles.type_scripted((k / SWEEP).even? ? "\e[C" : "\e[D")
                 k += 1
                 sleep STEP
               end
               tiles.stop_perf
-              p2.save(File.join(dir, 'design'), extra: { notes: notes, scripted_keys: k })
+              p2.save(File.join(dir, 'design'), extra: { notes: notes, scripted_keys: k, knob: knob })
             rescue => e
               notes << "phase 2 skipped: #{e.class}: #{e.message} (run `design :name` once, then ui.perf :capture)"
             ensure
