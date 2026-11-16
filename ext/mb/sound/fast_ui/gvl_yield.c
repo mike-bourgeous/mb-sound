@@ -42,7 +42,7 @@
 #include <ruby/thread.h>
 #include <ruby/debug.h>
 
-#define YIELD_SLOTS 8
+#define YIELD_SLOTS 16
 #define KICK_RETRY_NS 200000
 #define KICK_RETRIES 50
 

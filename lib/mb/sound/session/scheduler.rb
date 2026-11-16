@@ -623,6 +623,11 @@ module MB
           end
           @thread.name = 'MB::Sound::Session scheduler'
           @thread.priority = THREAD_PRIORITY
+          # (hands the GVL to the render thread whenever that wakes once a
+          # screen names it: a scheduled block held it up to 75 ms on the
+          # Mac i9 with the tiles up; ui-perf-2.  Thread switches change
+          # nothing a block computes: changes still land under the lock.)
+          MB::Sound::UI::Yielding.join(@thread) if defined?(MB::Sound::UI::Yielding)
           Generative::Ahead.attach(self)
         end
 

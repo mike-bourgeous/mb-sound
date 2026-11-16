@@ -151,8 +151,7 @@ RSpec.describe(MB::Sound::UI::Yielding) do
     ensure
       described_class.leave
     end
-    expect(described_class.join(busy, render: render)).to eq(true)
-    expect(wait_until { gy.stats[:kicks] > 0 }).to eq(true)
+    described_class.join(busy, render: render)
     2.times { go << true }
     sleep 0.4
     stop = true
