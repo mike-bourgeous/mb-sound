@@ -283,7 +283,15 @@ module MB
         private
 
         def zone_role(zones, at)
-          zones.each { |upto, role| return role if at <= upto }
+          # (a while loop: a return out of a block allocates an imemo, once
+          # per meter cell; 77 of the tiles' 104 objects a frame)
+          i = 0
+          n = zones.length
+          while i < n
+            z = zones[i]
+            return z[1] if at <= z[0]
+            i += 1
+          end
           zones.last[1]
         end
       end
