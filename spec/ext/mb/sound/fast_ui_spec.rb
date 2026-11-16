@@ -15,6 +15,29 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
     expect(out.lines.last.to_s.strip).to eq('3'), out
   end
 
+  # FastUI.wave (ui-wave-perf-1; mirror Plot::Wave.draw_ruby, compared in
+  # plot/wave_spec.rb): placements past every edge, rectangles larger than
+  # the grid, one-cell grids, NaN and infinite samples, a marker past the
+  # end, and wrong argument types (for memcheck: every cell write in bounds)
+  it 'draws waves into grids at any placement without writing outside them' do
+    data = [Numo::SFloat.linspace(-2, 2, 3001), Numo::SFloat[Float::NAN, 1, Float::INFINITY, -Float::INFINITY], Numo::SFloat[0.5], Numo::SFloat[]]
+    [[1, 1], [7, 3], [40, 12]].each do |gw, gh|
+      g = MB::Sound::Plot::Text::NativeCells.new(gw, gh)
+      data.each do |d|
+        [[-5, -2, 10, 4], [0, 0, gw, gh], [gw - 1, gh - 1, 50, 20], [-60, 0, 30, 3], [3, -9, 4, 8], [0, 0, 0, 5]].each do |x, y, w, h|
+          [-1, 0, 7, 10_000].each do |mark|
+            expect(fast.wave(g, d, x, y, w, h, -1.0, 1.0, 0xffffff, mark, 0x808080)).to be_nil
+          end
+        end
+      end
+      expect(g.lines(:none).length).to eq(gh)
+    end
+    g = MB::Sound::Plot::Text::NativeCells.new(4, 4)
+    expect { fast.wave(g, Numo::DFloat[1, 2], 0, 0, 4, 4, -1.0, 1.0, 0, -1, 0) }.to raise_error(ArgumentError, /SFloat/)
+    expect { fast.wave(g, Numo::SFloat.zeros(4, 2), 0, 0, 4, 4, -1.0, 1.0, 0, -1, 0) }.to raise_error(ArgumentError, /1D/)
+    expect { fast.wave(Object.new, Numo::SFloat[1], 0, 0, 4, 4, -1.0, 1.0, 0, -1, 0) }.to raise_error(TypeError)
+  end
+
   # Values with NaNs comparable by eq (NaN never equals NaN)
   def comparable(v)
     case v
