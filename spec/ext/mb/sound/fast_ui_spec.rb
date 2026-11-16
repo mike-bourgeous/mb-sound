@@ -193,6 +193,42 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
     end
   end
 
+  describe '.trace' do
+    it 'writes what project then regular decimate give into its buffers, for SFloat and DFloat samples, and declines what it cannot take' do
+      ys = Numo::SFloat.new(803).rand(-1, 1)
+      ys[7] = Float::NAN
+      dx = MB::Sound::FastUI.project(Numo::DFloat.new(803).seq, 0, 0.0, 802.0, false, 159.0, false)
+      [false, true].each do |ends|
+        [ys, ys.cast_to(Numo::DFloat)].each do |y|
+          dy = MB::Sound::FastUI.project(Numo::DFloat.cast(y), 0, -1.0, 2.0, false, 47.0, true)
+          ex, ey = MB::Sound::FastUI.decimate(dx, dy, 160, true, ends)
+          ox = Numo::DFloat.zeros(ex.length)
+          oy = Numo::DFloat.zeros(ey.length)
+          expect(MB::Sound::FastUI.trace(ox, oy, dx, y, 0, -1.0, 2.0, false, 47.0, true, 160, ends)).to eq(true)
+          expect(ox.to_a).to eq(ex.to_a)
+          expect(oy.to_a.map { |v| v.nan? ? :nan : v }).to eq(ey.to_a.map { |v| v.nan? ? :nan : v })
+        end
+      end
+      short = Numo::DFloat.zeros(3)
+      expect(MB::Sound::FastUI.trace(short, short, dx, ys, 0, -1.0, 2.0, false, 47.0, true, 160, false)).to be_nil
+      expect(MB::Sound::FastUI.trace(short, short, dx, ys[0...100], 0, -1.0, 2.0, false, 47.0, true, 160, false)).to be_nil
+      expect { MB::Sound::FastUI.trace(short) }.to raise_error(ArgumentError)
+    end
+  end
+
+  describe '.copy' do
+    it 'copies equal-shaped contiguous arrays and declines others' do
+      a = Numo::UInt16.zeros(4, 6)
+      b = Numo::UInt16.new(4, 6).seq
+      expect(MB::Sound::FastUI.copy(a, b)).to eq(true)
+      expect(a).to eq(b)
+      expect(MB::Sound::FastUI.copy(a, Numo::UInt16.zeros(6, 4))).to be_nil
+      expect(MB::Sound::FastUI.copy(a, Numo::Int16.zeros(4, 6))).to be_nil
+      expect(MB::Sound::FastUI.copy(a, b[true, 0..2])).to be_nil
+      expect(MB::Sound::FastUI.copy(Numo::UInt16.zeros(0), Numo::UInt16.zeros(0))).to eq(true)
+    end
+  end
+
   describe '.monotonic' do
     it 'agrees with Geometry.monotonic_ruby' do
       [

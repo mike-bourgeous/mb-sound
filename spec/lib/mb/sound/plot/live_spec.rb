@@ -210,4 +210,55 @@ RSpec.describe(MB::Sound::Plot::Live, :aggregate_failures) do
       expect(bytes.force_encoding('UTF-8')).to eq(other.frame(chart, row: 4))
     end
   end
+
+  # (the :plot_trace and :plot_copy kernels, FastUI.trace and FastUI.copy, against their mirrors)
+  describe '#retrace (the live scope; ui-perf-2)' do
+    def scope_case(w, h, look, mode)
+      MB::Sound::Kernels.with(mode) do
+        a = MB::Sound::UI::Panes::Scope.new(look: look)
+        b = MB::Sound::UI::Panes::Scope.new(look: look)
+        ga = MB::Sound::Kernels.cell_grid.new(w + 4, h + 2)
+        gb = MB::Sound::Kernels.cell_grid.new(w + 4, h + 2)
+        ca = MB::Sound::UI::Canvas.new(ga, 2, 1, w, h)
+        cb = MB::Sound::UI::Canvas.new(gb, 2, 1, w, h)
+        state = {}
+        rng = Random.new(7)
+        [800, 800, 801, 800].each do |n|
+          4.times do |i|
+            data = [Numo::SFloat.cast(Array.new(n) { rng.rand(-1.2..1.2) }), Numo::SFloat.cast(Array.new(n) { rng.rand(-1.0..1.0) })]
+            data[0][5] = Float::NAN if i == 3
+            snap = Struct.new(:scope, :sample_rate).new(data, 48000)
+            a.draw(ca, snap, state) # (traced after its first frame of each length)
+            b.draw(cb, snap, {}) # (the chart path every time)
+            expect(ga.lines(:truecolor)).to eq(gb.lines(:truecolor)), "#{mode} #{w}x#{h} #{look} n=#{n} frame #{i}"
+          end
+        end
+      end
+    end
+
+    it 'draws the scope\'s cells exactly as its chart does, with the C kernels and their mirrors' do
+      [[80, 12], [140, 8], [30, 20]].each do |w, h|
+        %i[scope quad spark ascii blocks].each do |look|
+          %i[c ruby].each { |mode| scope_case(w, h, look, mode) }
+        end
+      end
+    end
+
+    it 'allocates nothing in a steady scope frame' do
+      pane = MB::Sound::UI::Panes::Scope.new
+      g = MB::Sound::Kernels.cell_grid.new(80, 12)
+      c = MB::Sound::UI::Canvas.new(g, 0, 0, 80, 12)
+      data = [Numo::SFloat.new(800).rand(-1, 1), Numo::SFloat.new(800).rand(-1, 1)]
+      snap = Struct.new(:scope, :sample_rate).new(data, 48000)
+      state = {}
+      3.times { pane.draw(c, snap, state) }
+      a = GC.stat(:total_allocated_objects)
+      i = 0
+      while i < 100
+        pane.draw(c, snap, state)
+        i += 1
+      end
+      expect(GC.stat(:total_allocated_objects) - a).to be <= 3
+    end
+  end
 end

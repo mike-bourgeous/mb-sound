@@ -27,6 +27,117 @@ module MB
           @frame = Text::Frame.new(width: width, height: height, look: look, color: color, theme: theme, cells: cells)
           @shown = nil
           @drawn = nil # (the chart #draw drew last, while the frame's cells are its)
+          @trace = nil
+        end
+
+        # A live scope's lines drawn again from new samples without a chart
+        # (ui-perf-2: the scope's chart path allocated about 220 objects a
+        # frame).  Made by Live#trace from a chart this Live drew: one panel
+        # of plain lines over the index (no steps, dashes, or polar
+        # coordinates), each longer than two points a column, so every frame
+        # is a regular min/max decimation of fixed length.  Keeps the device
+        # x of each index, the y projection, the colors, and buffers for the
+        # decimated points (#points, the :plot_trace kernel).
+        class Trace
+          attr_reader :ox, :oy, :rgbs, :compose_colors, :compose_prio, :compose_count
+
+          # +lines+ the chart's Mark::Lines, +surface+ its panel's surface,
+          # +coord+ its coordinates, +rgbs+ the lines' colors.
+          def initialize(lines, surface, coord, rgbs)
+            n = lines[0].y.length
+            @n = n
+            @count = lines.length
+            @columns = surface.width
+            @ends = Mark.vector?(surface)
+            @dx = Mark::Base.instance_method(:device_c).bind_call(lines[0], surface, coord, lines[0].x, Numo::DFloat[0.0])[0]
+            @py = coord.y.projection
+            @mul = surface.height - 1
+            g = @ends ? (n / @columns.to_f).ceil : (n / @columns.to_f).floor
+            g = 1 if g < 1
+            len = (n / g.to_f).ceil * 2
+            @ox = Array.new(@count) { Numo::DFloat.zeros(len) }
+            @oy = Array.new(@count) { Numo::DFloat.zeros(len) }
+            @rgbs = rgbs
+            @compose_colors = @compose_prio = @compose_count = nil
+          end
+
+          # True for +lines+ (Arrays of samples) this trace can draw.
+          def fits?(lines)
+            return false unless lines.length == @count
+            i = 0
+            while i < @count
+              return false unless lines[i].length == @n
+              i += 1
+            end
+            true
+          end
+
+          # (Panel#compose's packed colors and priorities for this trace.)
+          def keep_compose(count, colors, prio)
+            @compose_count = count
+            @compose_colors = colors
+            @compose_prio = prio
+          end
+
+          # Fills ox[k] and oy[k] with line +k+'s device points from samples
+          # +ys+ (a DFloat or SFloat): what Mark::Line#draw gives the surface.
+          # The :plot_trace kernel: #points_c (FastUI.trace) or #points_ruby.
+          def points_c(ys, k)
+            return if FastUI.trace(@ox[k], @oy[k], @dx, ys, @py[0], @py[1], @py[2], @py[3], @mul, true, @columns, @ends)
+
+            points_ruby(ys, k)
+          end
+
+          # The Ruby mirror of FastUI.trace: FastUI.project's map, then the
+          # regular decimation's mirror.
+          def points_ruby(ys, k)
+            kind, lo, span, reverse = @py
+            v = Numo::DFloat.cast(ys)
+            if kind == 1
+              v = v.dup
+              v[v <= 0] = Float::NAN
+              u = (Numo::NMath.log10(v) - lo) / span
+            else
+              u = (v - lo) / span
+            end
+            u = 1 - u if reverse
+            dy = (1 - u) * @mul
+            ox, oy = Geometry.decimate_ruby(@dx, dy, @columns, regular: true, ends: @ends)
+            @ox[k].store(ox)
+            @oy[k].store(oy)
+            nil
+          end
+        end
+
+        # Keeps a Trace of +chart+ (the chart the last #draw drew) for
+        # #retrace when it can be traced (see Trace); returns it or nil.
+        def trace(chart)
+          @trace = nil
+          parts = @frame.single_panel or return nil
+          panel, layout, coord = parts
+          return nil if coord.polar? || !chart.respond_to?(:marks) || chart.marks.empty?
+          lines = chart.marks
+          surface = layout.surface
+          return nil unless lines.all? { |m| m.instance_of?(Mark::Line) && !m.step && m.dash.nil? && m.regular? && m.y.length == lines[0].y.length }
+          return nil unless lines[0].y.length > surface.width * 2 && coord.x.linear? && coord.x.projection && coord.y.projection
+          # (filling looks draw an Area whose x is an Array, decimated as
+          # irregular points: left to the chart)
+          return nil if look.fill
+          @trace = Trace.new(lines, surface, coord, chart.colors(theme))
+        end
+
+        # Draws the kept Trace's lines from new samples +lines+ (Arrays of
+        # DFloat or SFloat, as long as the traced ones) into +grid+ at
+        # (+x+, +y+) like #draw of the traced chart with these samples, the
+        # same cells, without building a chart.  Returns false (nothing
+        # drawn) when there is no trace or the samples don't fit it.
+        def retrace(lines, grid, x:, y:)
+          t = @trace
+          return false unless t&.fits?(lines)
+          @frame.retrace(t, lines)
+          @drawn = nil
+          grid.blit(@frame.cells, x, y)
+          true
         end
 
         # Draws +chart+ (a Chart or Figure) and returns its text: the lines
@@ -138,6 +249,8 @@ module MB
           "#<#{self.class.name} #{@width}x#{@height} #{look.name} #{color} #{layouts} layout#{'s' unless layouts == 1}>"
         end
       end
+
+      Kernels.register :plot_trace, on: Live::Trace, as: :points, c: :points_c, ruby: :points_ruby, state: %i[@ox @oy], covers: %w[FastUI.trace]
 
       # A Plot::Live pane (see there).
       def self.live(width:, height:, **opts)

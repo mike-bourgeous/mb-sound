@@ -129,6 +129,34 @@ static uint16_t *dots_ptr(VALUE dots, long *width, long *height)
 	return (uint16_t *)(nary_get_pointer_for_write(dots) + nary_get_offset(dots));
 }
 
+// One value of #project's map (see ruby_project)
+static inline double project_one(double x, int kind, double lo, double span, int reverse, double mul, int flip)
+{
+	double u;
+	if (kind == 1) {
+		if (x <= 0) {
+			x = NAN;
+		}
+		u = (log10(x) - lo) / span;
+	} else {
+		u = (x - lo) / span;
+	}
+	if (reverse) {
+		u = 1 - u;
+	}
+	return flip ? (1 - u) * mul : u * mul;
+}
+
+// Groups the regular decimation makes of +n+ points over +columns+
+static inline void regular_groups(long n, long columns, int ends, long *g, long *groups)
+{
+	*g = ends ? (long)ceil((double)n / (double)columns) : (long)floor((double)n / (double)columns);
+	if (*g < 1) {
+		*g = 1;
+	}
+	*groups = (long)ceil((double)n / (double)*g);
+}
+
 /*
  * decimate(xs, ys, columns, regular, ends) -> [xs, ys] (new DFloats), or nil
  * when the inputs aren't contiguous 1D DFloats of the same length (the
@@ -155,11 +183,8 @@ static VALUE ruby_decimate(VALUE self, VALUE xs_v, VALUE ys_v, VALUE columns_v, 
 	if (RTEST(regular_v)) {
 		// Geometry.decimate_regular: equal groups of g points, the last
 		// padded with the last point
-		long g = ends ? (long)ceil((double)n / (double)columns) : (long)floor((double)n / (double)columns);
-		if (g < 1) {
-			g = 1;
-		}
-		long groups = (long)ceil((double)n / (double)g);
+		long g, groups;
+		regular_groups(n, columns, ends, &g, &groups);
 		double *buf = ALLOC_N(double, g);
 		ox_v = new_dfloat((size_t)groups * 2, &ox);
 		oy_v = new_dfloat((size_t)groups * 2, &oy);
@@ -266,22 +291,110 @@ static VALUE ruby_project(VALUE self, VALUE v_v, VALUE kind_v, VALUE lo_v, VALUE
 	double *out;
 	VALUE out_v = new_dfloat(n, &out);
 	for (size_t i = 0; i < n; i++) {
-		double u;
-		if (kind == 1) {
-			double x = v[i];
-			if (x <= 0) {
-				x = NAN;
-			}
-			u = (log10(x) - lo) / span;
-		} else {
-			u = (v[i] - lo) / span;
-		}
-		if (reverse) {
-			u = 1 - u;
-		}
-		out[i] = flip ? (1 - u) * mul : u * mul;
+		out[i] = project_one(v[i], kind, lo, span, reverse, mul, flip);
 	}
 	return out_v;
+}
+
+// Longest group #trace takes (its projected values live on the stack)
+#define TRACE_GROUP_MAX 4096
+
+/*
+ * trace(ox, oy, dx, ys, kind, lo, span, reverse, mul, flip, columns, ends)
+ * -> true, or nil when it can't take the arguments (the caller runs its
+ * Ruby mirror): a live scope's line without allocating (ui-perf-2;
+ * Plot::Trace).  Writes into +ox+ and +oy+ (contiguous 1D DFloats of the
+ * regular decimation's length, 2 points a group) exactly what
+ * decimate(dx, project(ys, kind, lo, span, reverse, mul, flip), columns,
+ * true, ends) returns, +dx+ being the device x of each point (a contiguous
+ * DFloat, as long as +ys+) and +ys+ a contiguous 1D DFloat or SFloat (read
+ * as doubles, as Numo's cast to DFloat does).  Needs ys.length > columns * 2.
+ */
+static VALUE ruby_trace(int argc, VALUE *argv, VALUE self)
+{
+	if (argc != 12) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 12)", argc);
+	}
+	VALUE ox_v = argv[0], oy_v = argv[1], dx_v = argv[2], ys_v = argv[3];
+	int single = contiguous_1d(ys_v, numo_cSFloat);
+	if (!contiguous_1d(ox_v, numo_cDFloat) || !contiguous_1d(oy_v, numo_cDFloat) || !contiguous_1d(dx_v, numo_cDFloat) ||
+			(!single && !contiguous_1d(ys_v, numo_cDFloat))) {
+		return Qnil;
+	}
+	long n = (long)RNARRAY_SHAPE(ys_v)[0];
+	long columns = NUM2LONG(argv[10]);
+	int ends = RTEST(argv[11]);
+	if ((long)RNARRAY_SHAPE(dx_v)[0] != n || n <= columns * 2 || columns < 1) {
+		return Qnil;
+	}
+	long g, groups;
+	regular_groups(n, columns, ends, &g, &groups);
+	if (g > TRACE_GROUP_MAX || (long)RNARRAY_SHAPE(ox_v)[0] != groups * 2 || (long)RNARRAY_SHAPE(oy_v)[0] != groups * 2) {
+		return Qnil;
+	}
+	int kind = NUM2INT(argv[4]);
+	double lo = NUM2DBL(argv[5]);
+	double span = NUM2DBL(argv[6]);
+	int reverse = RTEST(argv[7]);
+	double mul = NUM2DBL(argv[8]);
+	int flip = RTEST(argv[9]);
+
+	const double *xs = dfloat_ptr(dx_v);
+	const char *yp = nary_get_pointer_for_read(ys_v) + nary_get_offset(ys_v);
+	const float *yf = (const float *)yp;
+	const double *yd = (const double *)yp;
+	double *ox = (double *)(nary_get_pointer_for_write(ox_v) + nary_get_offset(ox_v));
+	double *oy = (double *)(nary_get_pointer_for_write(oy_v) + nary_get_offset(oy_v));
+	double buf[TRACE_GROUP_MAX];
+	for (long k = 0; k < groups; k++) {
+		long a = k * g;
+		for (long j = 0; j < g; j++) {
+			long i = a + j;
+			i = i < n ? i : n - 1;
+			buf[j] = project_one(single ? (double)yf[i] : yd[i], kind, lo, span, reverse, mul, flip);
+		}
+		double ymin = nmin(buf, (size_t)g);
+		double ymax = nmax(buf, (size_t)g);
+		int rising = (buf[g - 1] - buf[0]) >= 0;
+		double x0 = xs[a < n ? a : n - 1];
+		double x1 = xs[a + g - 1 < n ? a + g - 1 : n - 1];
+		if (ends) {
+			ox[2 * k] = x0;
+			ox[2 * k + 1] = x1;
+		} else {
+			double xc = (x0 + x1) * 0.5;
+			ox[2 * k] = xc;
+			ox[2 * k + 1] = xc;
+		}
+		oy[2 * k] = rising ? ymin : ymax;
+		oy[2 * k + 1] = rising ? ymax : ymin;
+	}
+	return Qtrue;
+}
+
+/*
+ * copy(dst, src) -> true, or nil unless both are contiguous NArrays of the
+ * same class and shape (the caller assigns in Ruby): src's elements into
+ * dst without allocating (Raster#restore; ui-perf-2).
+ */
+static VALUE ruby_copy(VALUE self, VALUE dst_v, VALUE src_v)
+{
+	if (!rb_obj_is_kind_of(dst_v, numo_cNArray) || CLASS_OF(dst_v) != CLASS_OF(src_v) ||
+			RNARRAY_NDIM(dst_v) != RNARRAY_NDIM(src_v) || RNARRAY_SIZE(dst_v) != RNARRAY_SIZE(src_v) ||
+			!RTEST(nary_check_contiguous(dst_v)) || !RTEST(nary_check_contiguous(src_v))) {
+		return Qnil;
+	}
+	for (int i = 0; i < RNARRAY_NDIM(dst_v); i++) {
+		if (RNARRAY_SHAPE(dst_v)[i] != RNARRAY_SHAPE(src_v)[i]) {
+			return Qnil;
+		}
+	}
+	size_t bytes = RNARRAY_SIZE(dst_v) * nary_element_stride(dst_v);
+	if (bytes) {
+		memmove(nary_get_pointer_for_write(dst_v) + nary_get_offset(dst_v),
+			nary_get_pointer_for_read(src_v) + nary_get_offset(src_v), bytes);
+	}
+	return Qtrue;
 }
 
 /*
@@ -993,6 +1106,8 @@ void Init_fast_ui(void)
 	rb_define_module_function(mFastUI, "area", ruby_area, 6);
 	rb_define_module_function(mFastUI, "project", ruby_project, 7);
 	rb_define_module_function(mFastUI, "monotonic", ruby_monotonic, 1);
+	rb_define_module_function(mFastUI, "trace", ruby_trace, -1);
+	rb_define_module_function(mFastUI, "copy", ruby_copy, 2);
 	rb_define_module_function(mFastUI, "wave", ruby_wave, 11);
 	rb_define_module_function(mFastUI, "response_db", ruby_response_db, 7);
 

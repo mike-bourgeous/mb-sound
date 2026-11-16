@@ -18,12 +18,14 @@ require_relative '../../../../support/allocation_budget'
 # are 205).  Second round (the transport and meters panes and the status
 # line as text calls with kept strings; string literals in files without
 # the frozen-string-literal comment allocate each time, so the painter's
-# use -'text'): band 341 -> 281, tiles 394 -> 320, sound 374 -> 328.  The
-# budgets sit about 15 % above the after numbers.
+# use -'text'): band 341 -> 281, tiles 394 -> 320, sound 374 -> 328.
+# ui-perf-2 (the combined branches: the inspector rows kept by value, and
+# the live scope drawn by Plot::Live#retrace without a chart): band 65,
+# tiles 105, sound 105.  The budgets sit about 15 % above the after numbers.
 RSpec.describe('the painter\'s allocations per frame', :aggregate_failures) do
   let(:ui) { MB::Sound::UI }
 
-  BUDGETS = { band: 325, tiles: 370, sound: 380 }.freeze
+  BUDGETS = { band: 75, tiles: 120, sound: 120 }.freeze
 
   after do
     ui::Inspect.target = nil

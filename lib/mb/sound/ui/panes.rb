@@ -760,8 +760,22 @@ module MB
             end
             data = s&.scope
             data = state[:silence] ||= [Numo::SFloat.zeros(256)] if data.nil? || data.empty?
-            live.draw(chart(data, s&.sample_rate || 48000), c.grid, x: c.x, y: c.y)
+            rate = s&.sample_rate || 48000
+            # (the same sample count, channels, and rate as the traced
+            # chart: its lines again from the new samples, nothing allocated;
+            # ui-perf-2.  Otherwise the chart, and a new trace of it.)
+            return if traced? && state[:trace_rate] == rate && live.retrace(data, c.grid, x: c.x, y: c.y)
+            ch = chart(data, rate)
+            live.draw(ch, c.grid, x: c.x, y: c.y)
+            if traced?
+              live.trace(ch)
+              state[:trace_rate] = rate
+            end
           end
+
+          # True for panes whose chart is plain lines of the samples (the
+          # scope), which Plot::Live#retrace draws without a chart.
+          def traced? = self.class == Scope
 
           private
 
