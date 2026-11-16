@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module MB
   module Sound
     module UI
@@ -171,7 +173,12 @@ module MB
               c.puts ['nothing to inspect ', :dim], ['(play a track: bg :bass, clip)', :dim]
               return
             end
-            knobs = s.knobs.to_h { |k| [k.name, k] }
+            # (by name, kept while the snapshot's knob list is the same)
+            knobs = state[:knobs_by_name] if state[:knobs_of].equal?(s.knobs)
+            unless knobs
+              knobs = state[:knobs_by_name] = s.knobs.to_h { |k| [k.name, k] }
+              state[:knobs_of] = s.knobs
+            end
             list = pick_list(state, info)
             # (nothing picked yet: the panel starts on the picked row's first cell)
             state[:pick] ||= list.index { |e| e[0] == :param && e[3] == info.node } if view(state, info) == :panel
@@ -257,45 +264,17 @@ module MB
             loose = info.loose
             y = draw_knob_rows(c, y, loose, knobs, pick, state, 0, bottom: c.h - 3) unless loose.empty?
 
-            rows = info.shown
-            secs = Inspect::SECTIONS.select { |sec| rows.any? { |i| info.nodes[i].section == sec } }
             # (the open row is the picked stop's: before the next poll
             # brings its info, the shown node is still the last one)
             stop = pick && list[pick]
             sel = stop&.[](3) || info.node
             cur = sel && info.nodes[sel]&.section
-            hidden = info.hidden.values.sum
-            foot = hidden > 0 && c.h - y > secs.length + 3 ? 1 : 0
-            room = c.h - y - foot
-            params = ->(i) { shown_params(info.nodes[i]).length }
-            # (every row open when all fit; else the picked row open, and
-            # sections collapsed to one line each, farthest from the
-            # picked one first, until the rest fit)
-            srows = secs.to_h { |sec| [sec, rows.select { |i| info.nodes[i].section == sec }] }
-            all_open = secs.sum { |sec| 1 + srows[sec].sum { |i| 1 + params.(i) } }
-            open = all_open <= room ? :all : :picked
-            need = ->(sec) { 1 + srows[sec].length + (srows[sec].include?(sel) ? params.(sel) : 0) }
-            collapsed = {}
-            if open == :picked
-              total = secs.sum { |sec| need.(sec) }
-              ci = secs.index(cur) || 0
-              far = secs.each_with_index.sort_by { |sec, i| [-(i - ci).abs, -need.(sec)] }.map(&:first) - [cur]
-              far.each do |sec|
-                break if total <= room
-                collapsed[sec] = true
-                total -= need.(sec) - 1
-              end
-              # (still too tall: the farthest collapsed lines go too)
-              far.each do |sec|
-                break if total <= room
-                collapsed[sec] = :omit
-                total -= 1
-              end
-            end
+            secs, srows, open, collapsed, foot = section_plan(info, sel, cur, c.h - y, state)
             # (the picked param's place in its row, or nil: a knob, or the
             # row itself when it has no params)
             psel = stop && stop[0] == :param ? shown_params(info.nodes[sel]).index { |name, _| name == stop[1] } : nil
             row_picked = stop && stop[0] == :row
+            params = ->(i) { shown_params(info.nodes[i]).length }
 
             secs.each do |sec|
               break if y >= c.h - foot
@@ -340,6 +319,48 @@ module MB
             c.text(0, c.h - 1, c.fit('plumbing hidden (p shows it)', c.w), :dim) if foot == 1 # (no count: 1708 read as noise)
           end
 
+          # The sections view's plan for +info+ with row +sel+ (in section
+          # +cur+) open and +left+ rows below the header: [sections, rows by
+          # section, :all or :picked open, collapsed sections, footer rows],
+          # kept in +state+ while those stay the same (drawn every frame).
+          def section_plan(info, sel, cur, left, state)
+            p = state[:section_plan]
+            return p[5] if p && p[0].equal?(info) && p[1] == sel && p[2] == left
+            rows = info.shown
+            secs = Inspect::SECTIONS.select { |sec| rows.any? { |i| info.nodes[i].section == sec } }
+            hidden = info.hidden.values.sum
+            foot = hidden > 0 && left > secs.length + 3 ? 1 : 0
+            room = left - foot
+            params = ->(i) { shown_params(info.nodes[i]).length }
+            # (every row open when all fit; else the picked row open, and
+            # sections collapsed to one line each, farthest from the
+            # picked one first, until the rest fit)
+            srows = secs.to_h { |sec| [sec, rows.select { |i| info.nodes[i].section == sec }] }
+            all_open = secs.sum { |sec| 1 + srows[sec].sum { |i| 1 + params.(i) } }
+            open = all_open <= room ? :all : :picked
+            need = ->(sec) { 1 + srows[sec].length + (srows[sec].include?(sel) ? params.(sel) : 0) }
+            collapsed = {}
+            if open == :picked
+              total = secs.sum { |sec| need.(sec) }
+              ci = secs.index(cur) || 0
+              far = secs.each_with_index.sort_by { |sec, i| [-(i - ci).abs, -need.(sec)] }.map(&:first) - [cur]
+              far.each do |sec|
+                break if total <= room
+                collapsed[sec] = true
+                total -= need.(sec) - 1
+              end
+              # (still too tall: the farthest collapsed lines go too)
+              far.each do |sec|
+                break if total <= room
+                collapsed[sec] = :omit
+                total -= 1
+              end
+            end
+            plan = [secs, srows, open, collapsed, foot].freeze
+            state[:section_plan] = [info, sel, left, nil, nil, plan]
+            plan
+          end
+
           # Section heading roles (the theme's section colors).
           SECTION_ROLES = { source: :band_source, filter: :band_filter, amp: :band_amp, mod: :band_mod, fx: :band_fx }.freeze
 
@@ -355,11 +376,21 @@ module MB
           # padded to it.  Returns the column after it.
           def heading(c, y, sec, title, key, cur, state, chip: nil)
             role = SECTION_ROLES[sec] || :band_knobs
-            k = state[:mode] && key && !key.empty? ? "  #{key}" : ''
-            text = "#{cur ? '▸' : ' '}#{title}#{k}"
-            return c.text(0, y, c.pad("#{text} ", [chip, text.length + 1].max.clamp(0, c.w)), role, bold: cur) if chip
-            x = c.text(0, y, text, role, bold: cur)
-            c.text(x, y, " #{c.glyph(:hrule) * [c.w - x - 2, 0].max}", role)
+            # (its text kept per section while what decides it stays: drawn
+            # every frame)
+            heads = (state[:headings] ||= {})
+            h = heads[sec]
+            mode = !!state[:mode]
+            unless h && h[0] == cur && h[1] == mode && h[2] == c.w && h[3] == chip && h[4].equal?(title) && h[5].equal?(key)
+              k = mode && key && !key.empty? ? "  #{key}" : ''
+              text = "#{cur ? '▸' : ' '}#{title}#{k}"
+              chipped = chip ? c.pad("#{text} ", [chip, text.length + 1].max.clamp(0, c.w)) : nil
+              rule = chip ? nil : " #{c.glyph(:hrule) * [c.w - text.length - 2, 0].max}"
+              h = heads[sec] = [cur, mode, c.w, chip, title, key, text.freeze, chipped.freeze, rule.freeze]
+            end
+            return c.text(0, y, h[7], role, bold: cur) if chip
+            x = c.text(0, y, h[6], role, bold: cur)
+            c.text(x, y, h[8], role)
           end
 
           # A collapsed line's title chip width (a section title, its key
@@ -371,12 +402,40 @@ module MB
           # the audio path's rows in section order, the amp where an amp
           # envelope is, the picked row bright.  Returns the next row.
           def draw_chain(c, info, y)
+            blocks = chain_blocks(info)
+            return y if blocks.length < 2
+            x = c.text(0, y, 'notes', :dim)
+            prev = nil
+            blocks.each do |b, j, sec|
+              # (sources side by side are layers: +, not a chain)
+              x = c.text(x, y, prev == :source && sec == :source ? ' + ' : CHAIN_ARROWS[c.glyph(:arrow)], :dim)
+              x = c.text(x, y, b == :amp ? 'amp' : b, j && j == info.node ? :key : :name)
+              prev = sec
+              break if x >= c.w
+            end
+            c.text(x, y, CHAIN_OUT[c.glyph(:arrow)], :dim) if x < c.w
+            y + 1
+          end
+
+          # " → " and " → out" by arrow glyph (made once each).
+          CHAIN_ARROWS = Hash.new { |h, g| h[g] = " #{g} ".freeze }
+          CHAIN_OUT = Hash.new { |h, g| h[g] = " #{g} out".freeze }
+
+          # Rows the chain leaves out by what they are.
+          CHAIN_SKIP = ['pitch', 'FM operator'].freeze
+
+          # The chain's blocks for InspectInfo +info+: [title or :amp, row,
+          # section], kept per info (by identity: a poll's info is new when
+          # anything in it changed).
+          def chain_blocks(info)
+            hit = CHAINS[info]
+            return hit if hit
             rows = info.shown.sort_by { |j| [Inspect::SECTIONS.index(info.nodes[j].section) || 99, j] }
             blocks = []
             amp = false
             rows.each do |j|
               n = info.nodes[j]
-              next if n.section == :mod || n.label == 'unison' || ['pitch', 'FM operator'].include?(n.what)
+              next if n.section == :mod || n.label == 'unison' || CHAIN_SKIP.include?(n.what)
               if n.what.to_s.end_with?(' env') || n.what == 'bursts'
                 amp ||= n.what == 'amp env'
                 next
@@ -385,19 +444,11 @@ module MB
               blocks << [row_title(n), j, n.section]
             end
             blocks << [:amp, nil, nil] if amp && blocks.none? { |b, _, _| b == :amp }
-            return y if blocks.length < 2
-            x = c.text(0, y, 'notes', :dim)
-            prev = nil
-            blocks.each do |b, j, sec|
-              # (sources side by side are layers: +, not a chain)
-              x = c.text(x, y, prev == :source && sec == :source ? ' + ' : " #{c.glyph(:arrow)} ", :dim)
-              x = c.text(x, y, b == :amp ? 'amp' : b, j && j == info.node ? :key : :name)
-              prev = sec
-              break if x >= c.w
-            end
-            c.text(x, y, " #{c.glyph(:arrow)} out", :dim) if x < c.w
-            y + 1
+            CHAINS[info] = blocks.freeze
           end
+
+          # #chain_blocks by info (weak, by identity).
+          CHAINS = ObjectSpace::WeakMap.new
 
           # A row's title: its DSL words and copies ("saw ×6", "lp4").
           def row_title(n)
@@ -412,6 +463,39 @@ module MB
 
           # A row's dim tail: its role, where it goes, its first settings.
           def row_tail(n, knobs)
+            # (kept per row with the values of the knobs it shows: drawn
+            # every frame, rebuilt when a knob it shows turns)
+            hit = TAILS[n]
+            return hit[1] if hit && tail_knobs_same?(hit[0], n, knobs)
+            text = build_row_tail(n, knobs)
+            TAILS[n] = [tail_knobs(n, knobs), text].freeze
+            text
+          end
+
+          # #row_tail by row (weak, by identity).
+          TAILS = ObjectSpace::WeakMap.new
+
+          # The values of the knobs row +n+'s shown params read (an Array).
+          def tail_knobs(n, knobs)
+            shown_params(n).filter_map { |name, _| (kn = n.knob_of(name)) && knobs[kn]&.value }.freeze
+          end
+
+          # True when the knobs row +n+'s params read have +vals+ (no objects
+          # made).
+          def tail_knobs_same?(vals, n, knobs)
+            i = 0
+            shown_params(n).each do |name, _|
+              kn = n.knob_of(name) or next
+              v = knobs[kn]&.value
+              next if v.nil?
+              return false unless i < vals.length && vals[i] == v
+              i += 1
+            end
+            i == vals.length
+          end
+
+          # (#row_tail's text)
+          def build_row_tail(n, knobs)
             bits = []
             bits << n.what if n.what && !%w[drive lfo pitch].include?(n.what) && n.what != n.label && !(n.label == 'env' && n.what.end_with?(' env'))
             bits << "→ #{n.dest.join(', ')}" unless n.dest.empty?
@@ -1107,7 +1191,7 @@ module MB
               at = nil
               state[:pick] = nil
             end
-            i = at && list.index { |e| stop_key(e) == at }
+            i = at && list.index { |e| e[0] == at[0] && e[1] == at[1] && e[3] == at[2] } # (stop_key(e) == at, made without Arrays)
             i ||= at && at[2] && list.index { |e| e[3] == at[2] }
             # (an index a caller set, without a stop: that stop)
             i ||= state[:pick] if at.nil? && state[:pick].is_a?(Integer) && state[:pick].between?(0, list.length - 1)
