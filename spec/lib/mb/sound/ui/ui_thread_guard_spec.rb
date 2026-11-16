@@ -68,6 +68,8 @@ RSpec.describe(UIThreadGuard, :aggregate_failures) do
     expect(threads.none?(&:alive?)).to eq(true)
     expect(state.key?(:chart_worker) || state.key?(:driver)).to eq(false) # (a started-again screen makes new ones)
   ensure
+    tiles&.stop
+    term&.close
     ui::PatchRender.inline = was
   end
 

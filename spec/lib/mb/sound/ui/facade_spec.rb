@@ -65,7 +65,7 @@ RSpec.describe(MB::Sound::UI::Facade, :aggregate_failures) do
     expect(facade.smooth(:on)).to eq(:on)
     expect([ui::Feed.every_buffer, ui::FrameRate.snapshot_timed, ui::Tiles.echo_wake]).to eq([true, true, true])
     expect(facade.smooth).to eq(:on)
-    t, = ui_tiles(:tiles)
+    t, tiles_term = ui_tiles(:tiles)
     allow(facade).to receive(:screen).and_return(t)
     expect(t.instance_variable_get(:@pacer).timing).to be_a(ui::FrameRate::SnapshotTiming)
     expect(facade.smooth(:off)).to eq(:off) # (the running screen too)
@@ -74,16 +74,19 @@ RSpec.describe(MB::Sound::UI::Facade, :aggregate_failures) do
     expect { facade.smooth(:fast) }.to raise_error(ArgumentError, /:on or :off/)
   ensure
     ui::Feed.every_buffer = ui::FrameRate.snapshot_timed = ui::Tiles.echo_wake = false
+    t&.stop
+    tiles_term&.close
   end
 
   it 'opens KEYS from the band with ui.keys (ux-1 round 3 item 8 bug: NoMethodError)' do
+    keys_term = nil # (the KEYS screen's terminal, made in the stub below)
     term = UIHelpers::FakeTerminal.new(30, 100)
     MB::Sound.ui(:band)
     expect(facade.mode).to eq(:band)
     allow(ui).to receive(:show).and_wrap_original do |orig, name = nil, **opts|
       next orig.call(name, **opts) unless name == :keys
       ui.band&.stop
-      t, = ui_tiles(:keys)
+      t, keys_term = ui_tiles(:keys)
       ui.instance_variable_set(:@tiles, t)
       t
     end
@@ -95,5 +98,6 @@ RSpec.describe(MB::Sound::UI::Facade, :aggregate_failures) do
   ensure
     ui.tiles&.stop
     term&.close
+    keys_term&.close
   end
 end
