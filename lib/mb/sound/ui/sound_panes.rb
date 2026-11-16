@@ -1285,8 +1285,15 @@ module MB
           # read while its segment runs or its sustain is held (in
           # PLAYHEAD_STEPs).
           def live_now(live)
-            return live unless live && live[:at] && (live[:stage] == :segment || (live[:stage] == :sustain && live[:note]))
-            live.merge(elapsed: ((Preview.now - live[:at]) / PLAYHEAD_STEP).floor * PLAYHEAD_STEP)
+            e = elapsed_now(live)
+            e ? live.merge(elapsed: e) : live
+          end
+
+          # The +:elapsed+ of #live_now (nil when it adds none), allocating
+          # nothing (the live wave view's envelope, every frame).
+          def elapsed_now(live)
+            return nil unless live && live[:at] && (live[:stage] == :segment || (live[:stage] == :sustain && live[:note]))
+            ((Preview.now - live[:at]) / PLAYHEAD_STEP).floor * PLAYHEAD_STEP
           end
         end
 

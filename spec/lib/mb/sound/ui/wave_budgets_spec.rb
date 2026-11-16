@@ -71,9 +71,10 @@ RSpec.describe('wave display budgets', :aggregate_failures) do
   end
 
   # The live preview pane's frame for +node+ (a Tone or four-pole) whose
-  # watched values the tap publishes, the published values moving each
-  # frame through +move+.
-  def live_frames(node, kind, display, move)
+  # watched values move every frame (+values+ gives them for frame k,
+  # written straight into the tap's newest slot, as Tap#publish writes
+  # them, which allocates nothing).  Returns [move, draw] lambdas.
+  def live_frames(node, kind, display, values)
     feed = MB::Sound::UI::Feed.new
     tap = feed.wave_tap = wv::Tap.new
     keys = wv::KEYS.fetch(kind)
@@ -89,36 +90,78 @@ RSpec.describe('wave display budgets', :aggregate_failures) do
     grid = MB::Sound::Plot::Text::NativeCells.new(60, 12)
     canvas = MB::Sound::UI::Canvas.new(grid, 0, 0, 60, 12)
     state = {}
+    ring = tap.instance_variable_get(:@values)
+    slots = tap.instance_variable_get(:@slot_watch)
     k = 0
-    -> { move.(k += 1); tap.publish; pane.draw(canvas, snap, state) }
+    move = lambda {
+      k += 1
+      s = (tap.seq + 1) % wv::Tap::SLOTS
+      i = 0
+      while i < keys.length
+        ring[s * wv::Tap::MAX + i] = values.(k, i)
+        i += 1
+      end
+      slots[s] = watch
+      tap.instance_variable_set(:@seq, tap.seq + 1)
+    }
+    draw = -> { move.(); pane.draw(canvas, snap, state) }
+    10.times { draw.() }
+    expect(pane.priority).to eq(:live)
+    [move, draw]
   end
 
-  it 'draws a live oscillator cycle that moves every frame in a fraction of a millisecond and a hundred-odd objects' do
-    width = MB::Sound::GraphNode::Constant.new(0.3, smoothing: false, sample_rate: 48000)
-    tone = MB::Sound::Tone.new(wave_type: :square, frequency: 110).pwm(width)
-    tone.sample(64)
-    frame = live_frames(tone, :tone, wv::ToneDisplay.new(tone), ->(k) { width.constant = 0.1 + 0.8 * (k % 40) / 40.0; tone.sample(32) })
-    10.times { frame.call }
-    m = AllocationBudget.measure(buffers: 80, &frame)
+  # Objects a live frame allocates beyond moving the values.
+  def frame_objects(move, draw)
+    m = AllocationBudget.measure(buffers: 80, &draw)
+    base = AllocationBudget.measure(buffers: 80, &move)
     puts m.report(10) if ENV['ALLOC_REPORT']
-    # (measured 2026-11-16: ~120 objects a frame, the tone's sample and the title)
-    expect(m.objects_per_buffer).to be <= 250, m.report
-    ms = median_ms(80, &frame)
-    slow = slowdown
-    expect(ms).to be <= 0.5 * slow, "#{ms.round(4)} ms at slowdown #{slow.round(2)}"
+    [m.objects_per_buffer - base.objects_per_buffer, m]
   end
 
-  it 'draws a live four-pole response that moves every frame in a fraction of a millisecond' do
-    cut = MB::Sound::GraphNode::Constant.new(800.0, smoothing: false, sample_rate: 48000)
-    f = 110.hz.saw.lp4(cut, resonance: 0.4)
-    f.sample(64)
-    frame = live_frames(f, :four_pole, wv::FilterDisplay.new(f), ->(k) { cut.constant = 300.0 * 2**(4 * (k % 40) / 40.0); f.sample(32) })
-    10.times { frame.call }
-    m = AllocationBudget.measure(buffers: 80, &frame)
-    puts m.report(10) if ENV['ALLOC_REPORT']
-    expect(m.objects_per_buffer).to be <= 400, m.report
-    ms = median_ms(80, &frame)
+  # (measured 2026-11-16 on the 7950X, values moving every frame: 0
+  # objects a frame for every kind, 0.012-0.031 ms; before round 2 of
+  # ui-wave-perf-1: 40 for a PWM cycle, 39 wavetable, 20 LFO, 173 four-pole)
+  {
+    'a PWM oscillator cycle' => [-> { MB::Sound::Tone.new(wave_type: :square, frequency: 110).pwm(0.3.constant) }, :tone,
+                                 ->(k, i) { [110.0, 0.1 + 0.8 * (k % 40) / 40.0, Float::NAN][i] }],
+    'a wavetable cycle' => [-> { MB::Sound::Tone.new(wave_type: :sine, frequency: 110).wavetable(:basic_norm, scan: 0.5.constant) }, :tone,
+                            ->(k, i) { [110.0, Float::NAN, (k % 40) / 40.0][i] }],
+    'an LFO with its marker' => [-> { 0.5.hz.triangle.lfo }, :lfo, ->(k, i) { [0.5, Float::NAN, Float::NAN, (k % 97) / 97.0][i] }],
+    'a four-pole response' => [-> { 110.hz.saw.lp4(800.constant, resonance: 0.4) }, :four_pole, ->(k, i) { [300.0 * 2**(4 * (k % 40) / 40.0), 0.4][i] }],
+    'a diode ladder response' => [-> { 110.hz.saw.diode(800.constant, resonance: 0.6) }, :four_pole, ->(k, i) { [300.0 * 2**(4 * (k % 40) / 40.0), 0.6][i] }],
+  }.each do |what, (make, kind, values)|
+    it "draws #{what} that moves every frame allocating nothing, in a fraction of a millisecond" do
+      node = make.call
+      node.sample(64)
+      display = kind == :four_pole ? wv::FilterDisplay.new(node) : wv::ToneDisplay.new(node)
+      expect(display.why).to be_nil
+      move, draw = live_frames(node, kind, display, values)
+      objects, m = frame_objects(move, draw)
+      expect(objects).to be <= 0.1, m.report
+      ms = median_ms(80, &draw)
+      slow = slowdown
+      expect(ms).to be <= 0.25 * slow, "#{ms.round(4)} ms at slowdown #{slow.round(2)}"
+    end
+  end
+
+  it 'draws an envelope with its moving playhead allocating nothing' do
+    env = MB::Sound::Envelope.new(attack: 0.01, decay: 0.3, sustain: 0.6, release: 0.4, sample_rate: 48000)
+    live = { stage: :segment, segment: 1, position: 0.1, peak: 1.0, at: MB::Sound::UI::Panes::Preview.now }.freeze
+    node = MB::Sound::UI::Inspect::NodeInfo.new(key: 0, label: 'amp env', role: :env, count: 1, params: env.param_snapshot, preview: nil, knobs: [].freeze, live: live)
+    info = MB::Sound::UI::Inspect::InspectInfo.new(track: :t, tracks: [:t].freeze, knobs: [].freeze, nodes: [node].freeze, node: 0, code: nil, error: nil)
+    snap = MB::Sound::UI::Snapshot.fake.then { |s| s.with(slow: s.slow.with(inspector: info)) }
+    pane = MB::Sound::UI::Panes::Preview.new
+    canvas = MB::Sound::UI::Canvas.new(MB::Sound::Plot::Text::NativeCells.new(60, 12), 0, 0, 60, 12)
+    state = {}
+    wv.mode = :live
+    draw = -> { pane.draw(canvas, snap, state) }
+    10.times { draw.() }
+    expect(pane.priority).to eq(:live)
+    m = AllocationBudget.measure(buffers: 80, &draw)
+    # (measured 2026-11-16: 0 objects, 0.016 ms; 3 before round 2)
+    expect(m.objects_per_buffer).to be <= 0.1, m.report
+    ms = median_ms(80, &draw)
     slow = slowdown
-    expect(ms).to be <= 0.5 * slow, "#{ms.round(4)} ms at slowdown #{slow.round(2)}"
+    expect(ms).to be <= 0.25 * slow, "#{ms.round(4)} ms at slowdown #{slow.round(2)}"
   end
 end

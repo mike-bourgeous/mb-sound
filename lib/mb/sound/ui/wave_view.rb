@@ -573,27 +573,37 @@ module MB
             )
             @top = Plot::Panels.four_pole_top(@d)
             @hi = @top.to_f
-            @last_key = nil
-            @db = nil
+            @kc = @kr = nil
+            @db = Numo::SFloat.new(POINTS)
+            @b = Array.new(5, 0.0)
+            @a = Array.new(5, 0.0)
           rescue StandardError => e
             @why = "#{e.class}: #{e.message}"
           end
 
           def supported? = @why.nil?
 
-          # The response in dB at 256 log-spaced frequencies (an SFloat),
+          # Points of a response curve (as Presets.response_db draws it).
+          POINTS = 256
+
+          # The response in dB (at least -60) at POINTS log-spaced
+          # frequencies from 20 Hz to Nyquist (an SFloat, reused),
           # recomputed when the cutoff moves by more than a 96th of an octave
-          # or the resonance by 0.002.
+          # or the resonance by 0.002: the filter's transfer function
+          # (FourPole#z_polynomials) through the :plot_response kernel,
+          # allocating nothing.
           def curve(cutoff, resonance)
             cutoff = @d[:cutoff] unless cutoff.is_a?(Float) && cutoff.finite?
             resonance = @d[:resonance] unless resonance.is_a?(Float) && resonance.finite?
-            key = [(Math.log2([cutoff, 1.0].max) * 96).round, (resonance * 500).round]
-            return @db if key == @last_key && @db
-            @last_key = key
+            kc = (Math.log2(cutoff > 1.0 ? cutoff : 1.0) * 96).round
+            kr = (resonance * 500).round
+            return @db if kc == @kc && kr == @kr
+            @kc = kc
+            @kr = kr
             @filter.cutoff = cutoff.clamp(20.0, @rate * 0.45)
             @filter.resonance = resonance.clamp(0.0, 1.0)
-            _f, db = Plot::Presets.response_db(@filter, @rate)
-            @db = Numo::SFloat.cast(db.clip(-60.0, nil))
+            @filter.z_polynomials(@b, @a)
+            Plot::Response.db(@db, @b, @a, @rate, 20.0, @rate * 0.4995, -60.0)
           end
         end
 
@@ -646,17 +656,24 @@ module MB
               state[:env_trace] = tr
               state[:env_data] = Numo::SFloat.cast(tr.level)
               state[:env_range] = [[tr.level.min, 0.0].min, [tr.level.max, 1.0].max]
+              state[:env_title] ||= String.new(capacity: 64, encoding: Encoding::UTF_8)
+              state[:env_title_w] = nil
             end
             @playhead = !n.live.nil?
             @wave_live = @playhead # (a live pane while a note's playhead moves, as before)
             w = c.w
             h = c.h
             return true if w <= 0 || h <= 0
-            live = n.live && live_now(n.live)
-            at = live && Plot::Panels::EnvelopeView.playhead(tr, live)
+            live = n.live
+            at = live && Plot::Panels::EnvelopeView.playhead(tr, live, elapsed_now(live) || live[:elapsed])
             mark = at && tr.total > 0 ? ((at / tr.total) * 2 * w).floor.clamp(0, 2 * w - 1) : -1
+            title = state[:env_title]
+            unless state[:env_title_w] == w
+              state[:env_title_w] = w
+              Label.fit(title.clear << tr.label.to_s << ' live', w)
+            end
             c.clear
-            c.text(0, 0, c.fit("#{tr.label} live", w), :dim)
+            c.text(0, 0, title, :dim)
             if h > 1
               lo, hi = state[:env_range]
               Plot::Wave.draw(c.grid, state[:env_data], x: c.x, y: c.y + 1, w: w, h: h - 1, lo: lo, hi: hi,
