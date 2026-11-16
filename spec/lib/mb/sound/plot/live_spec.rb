@@ -81,9 +81,41 @@ RSpec.describe(MB::Sound::Plot::Live, :aggregate_failures) do
     live.redraw(plot.waveform(Numo::DFloat[3, -3, 3]))
     expect(live.layouts).to eq(3)
 
+    # A title's text alone (no legend on its row) redraws only the header
+    # (ui-wave-perf-1: live previews put a moving cutoff in their titles)
     live.redraw(plot.waveform(Numo::DFloat[3, -3, 3], title: 'other'))
+    expect(live.layouts).to eq(3)
+    live.redraw(plot.waveform(Numo::DFloat[3, -3, 3], title: nil))
     expect(live.layouts).to eq(4)
     expect(live.inspect).to include('60x16', 'scope', '4 layouts')
+  end
+
+  it 'draws what a new layout draws when only titles change' do
+    t = Numo::DFloat.new(400).seq / 48000
+    titles = ['lp4 ~2580 Hz reso 0.25', 'lp4 ~312 Hz reso 0.25', 'a much longer title than the pane is wide, cut at its edge', 'x']
+    [[60, 16], [30, 5], [44, 4]].each do |w, h|
+      %i[scope blocks ascii].each do |look|
+        [true, false].each do |nat|
+          MB::Sound::Kernels.set(fast_ui: nat ? :c : :ruby)
+          live = described_class.new(width: w, height: h, look: look, color: :truecolor)
+          (titles * 2).each_with_index do |title, k|
+            chart = plot.chart(title: title) {
+              x :frequency, 20.0..24000.0
+              y :linear, -60..30, label: 'dB'
+              line Numo::NMath.sin(t * 2 * Math::PI * (110 + k)) * 30, x: Numo::DFloat.logspace(Math.log10(20), Math.log10(24000), 400)
+            }
+            expect(live.redraw(chart)).to eq(plot::Text.render(chart, width: w, height: h, look: look, color: :truecolor).join("\n")), "#{w}x#{h} #{look} #{title.inspect} native=#{nat}"
+          end
+          expect(live.layouts).to eq(1)
+        end
+      end
+    end
+    fig = ->(a, b) { plot.figure { chart(title: a) { line [1, 2, 3] }; chart(title: b) { line [3, 2, 1] } } }
+    live = described_class.new(width: 70, height: 12, look: :scope, color: :none)
+    [%w[a b], %w[a c], %w[dd c]].each do |a, b|
+      expect(live.redraw(fig.(a, b))).to eq(plot::Text.render(fig.(a, b), width: 70, height: 12, look: :scope, color: :none).join("\n"))
+    end
+    expect(live.layouts).to eq(1)
   end
 
   # Replays terminal bytes (cursor moves, SGR, synchronized output) onto a

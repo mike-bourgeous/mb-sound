@@ -100,17 +100,43 @@ module MB
             self
           end
 
+          # +key+ (a layout key from #draw) with the panels' titles left
+          # out where nothing else depends on their text: no legend shares
+          # the title row (legend entries empty), so a title is a header
+          # row of its own text.
+          def self.title_key(key)
+            return nil unless key
+            t, r, c, keys = key
+            [t, r, c, keys.map { |k| k[3].empty? ? [k[0].nil?, *k[1..]] : k }]
+          end
+
           private
 
           def new_cells
             @cells_class.new(@width, @height)
           end
 
+          # Draws the changed panel titles into the kept layout (see #draw).
+          def retitle(figure, coords, keys)
+            old = @key[3]
+            @panels.zip(figure.charts, coords, keys, old).each do |(panel, _layout), chart, coord, k, o|
+              panel.retitle(@base, chart, coord) if k[0] != o[0]
+            end
+            @key = [figure.title, figure.rows, figure.columns, keys]
+          end
+
           # Lays out (or reuses the layout) and paints the marks into @cells
           def draw(figure)
             figure = figure.figure
             coords = figure.charts.map(&:coord)
-            key = [figure.title, figure.rows, figure.columns, figure.charts.zip(coords).map { |ch, co| Panel.layout_key(ch, co, @theme) }]
+            keys = figure.charts.zip(coords).map { |ch, co| Panel.layout_key(ch, co, @theme) }
+            key = [figure.title, figure.rows, figure.columns, keys]
+
+            # Only a panel title's text changed (a moving cutoff or
+            # frequency in a live preview's title; ui-wave-perf-1): the
+            # header rows are drawn again, the rest of the layout kept.
+            # The cells are what a new layout draws (live_spec).
+            retitle(figure, coords, keys) if @base && key != @key && Frame.title_key(key) == Frame.title_key(@key)
 
             if @base && key == @key
               @cells.copy_from(@base)
@@ -335,6 +361,20 @@ module MB
           # A scale's class and settings (scales are immutable values).
           def self.scale_key(scale)
             [scale.class, *scale.instance_variables.map { |v| scale.instance_variable_get(v) }]
+          end
+
+          # Draws +chart+'s title (and its header row's y axis title) into
+          # +base+ in place of the last one: a chart whose layout key
+          # differs only in its title's text (Frame.title_key).
+          def retitle(base, chart, coord)
+            painted = @cells
+            @cells = base
+            @chart = chart
+            return unless chart.title && @h >= 4
+            @w.times { |i| base.set(@x + i, @y, ' ') }
+            draw_header([], nil, coord, chart.polar ? :none : @look.frame)
+          ensure
+            @cells = painted
           end
 
           # Draws the chart: #layout, then #paint.
