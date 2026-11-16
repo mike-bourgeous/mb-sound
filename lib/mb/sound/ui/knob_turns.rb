@@ -33,7 +33,11 @@ module MB
           attr_writer :clock
 
           # The gestures' clock.
-          def clock = @clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+          def clock = @clock || MONOTONIC
+
+          # The default clock (one Proc: a new lambda a call was two objects
+          # a key).
+          MONOTONIC = -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
         end
 
         # The value one turn by +step+ (a position step: STEP, FINE, or

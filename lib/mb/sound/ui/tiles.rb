@@ -62,10 +62,17 @@ module MB
         # (Keys.table lists the REPL keys in effect).
         KEY_HELP = Keys.table(live: false).freeze
 
+        # What .one_line changes (newlines and escapes are control
+        # characters too).
+        ONE_LINE_CONTROL = /[\x00-\x1f\x7f]/
+
         # +text+ as one line for a cell row: control characters become
         # spaces, and a multi-line text keeps its first line and " ...".
         def self.one_line(text)
           t = text.to_s
+          # (one line with no control characters is itself: a key's note
+          # flashes on every turn; ui-perf-2 round 3)
+          return t unless t.match?(ONE_LINE_CONTROL)
           first, rest = t.split("\n", 2)
           first = first.to_s.gsub(/\e\[[0-9;?]*[A-Za-z]/, '').gsub(/[\x00-\x1f\x7f]/, ' ')
           rest.to_s.strip.empty? ? first : "#{first} ..."
@@ -165,6 +172,7 @@ module MB
           @echo_key_at = nil # (Tiles.echo_wake: when the last REPL key arrived, until its echo wakes the painter)
           @status_canvas = @status_right = @status_right_key = nil # (draw_status's canvas and right-hand text, kept)
           @pane_badge = @pane_hint = nil # (draw_status's pane badge and hint, kept: #pane_badge, #pane_hint)
+          @layout_panes = nil # ([layout, its pane names]: #layout_panes)
           @attached = @poll = @polled_at = @poll_warned = @last = nil
           @asking = nil # ([pane name, PaneKeys::Ask] while a pane's value prompt is open)
           @overlay_from_play = false # (see #key_help)
@@ -1731,12 +1739,30 @@ module MB
         # Seconds until a pane on screen has a line due (UI::PaneKeys
         # key_wait: a gesture ending), or nil.
         def pane_wait
-          @tiler.layout.panes.filter_map { |n| (p = @panes[n]).respond_to?(:key_wait) ? p.key_wait(@states[n]) : nil }.min
+          # (no Arrays: the input thread asks before every read)
+          best = nil
+          layout_panes.each do |n|
+            p = @panes[n]
+            next unless p.respond_to?(:key_wait)
+            w = p.key_wait(@states[n])
+            best = w if w && (best.nil? || w < best)
+          end
+          best
+        end
+
+        # The layout's pane names, kept per layout (the input thread asks
+        # several times a key; Layout#panes walks the tree into new Arrays).
+        def layout_panes
+          l = @tiler.layout
+          k = @layout_panes
+          return k[1] if k && k[0].equal?(l)
+          @layout_panes = [l, l.panes.freeze].freeze
+          @layout_panes[1]
         end
 
         # Runs the lines panes on screen have due (key_tick).
         def tick_panes
-          @tiler.layout.panes.each do |n|
+          layout_panes.each do |n|
             p = @panes[n]
             next unless p.respond_to?(:key_tick) && p.respond_to?(:key_wait) && p.key_wait(@states[n])
             r = p.key_tick(@states[n])
@@ -1995,8 +2021,15 @@ module MB
           io = @term.input
           now = @clock.call
           mono = mono_now
-          waits = [@decoder.pending? ? @decoder.esc_timeout : nil, @router.wait(mono), @keyboard.wait(mono), @input_lock.synchronize { pane_wait }, timeout].compact
-          wait = waits.min
+          # (the soonest of the waits, without an Array a read)
+          wait = @decoder.pending? ? @decoder.esc_timeout : nil
+          w = @router.wait(mono)
+          wait = w if w && (wait.nil? || w < wait)
+          w = @keyboard.wait(mono)
+          wait = w if w && (wait.nil? || w < wait)
+          w = @input_lock.synchronize { pane_wait }
+          wait = w if w && (wait.nil? || w < wait)
+          wait = timeout if timeout && (wait.nil? || timeout < wait)
           wait = 0.25 if wait.nil? && !timeout.nil?
           ready = wait_input(io, wait.nil? ? 0.5 : wait)
           return now if @stopping
