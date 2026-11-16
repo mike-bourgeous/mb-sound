@@ -260,6 +260,8 @@ module MB
           @block_frames = 0
           @energies = []
           @frames = []
+          @peak = Array.new(channels, 0.0)
+          @sumsq = Array.new(channels, 0.0)
           reset_interval
         end
 
@@ -394,8 +396,9 @@ module MB
         end
 
         def reset_interval
-          @peak = Array.new(@channels, 0.0)
-          @sumsq = Array.new(@channels, 0.0)
+          # (refilled: #take maps them into new Arrays, so these never leave)
+          @peak.fill(0.0)
+          @sumsq.fill(0.0)
           @true_peak = 0.0
           @count = 0
         end
@@ -438,7 +441,20 @@ module MB
 
         # The samples oldest first (new frozen SFloats, one per channel).
         def to_a
-          @rings.map { |r| (@pos == 0 ? r.dup : r[@pos..].concatenate(r[0...@pos])).freeze }.freeze
+          # (Kernels.circular_read into a new SFloat: one object a channel;
+          # Numo's concatenate of two views was about 25; ui-perf-2 round 3)
+          out = Array.new(@rings.length)
+          c = 0
+          while c < @rings.length
+            r = @rings[c]
+            a = Numo::SFloat.zeros(@length)
+            unless MB::Sound::Kernels.circular_read(r, @pos, @length, a)
+              a = @pos == 0 ? r.dup : r[@pos..].concatenate(r[0...@pos])
+            end
+            out[c] = a.freeze
+            c += 1
+          end
+          out.freeze
         end
       end
 
@@ -452,6 +468,9 @@ module MB
       class Feed
         # Samples per channel kept for scope panes.
         SCOPE_LENGTH = 1024
+
+        # (#build's bus and send levels without a :buses pane)
+        NO_BUS_LEVELS = [nil, nil].freeze
 
         # What visible panes need besides the basics (:meters, :scope).
         attr_reader :needs
@@ -489,6 +508,8 @@ module MB
           @published = 0
           @parts = @record = nil # (a capture waiting to be published)
           @wave_tap = nil
+          @knob_values = [].freeze # (the last snapshot's KnobValues, see #knob_values)
+          @knob_objects = [] # (the knobs they were read from)
           reset_interval
         end
 
@@ -602,7 +623,7 @@ module MB
           }.freeze
           out = session.output
           underruns = out.respond_to?(:underruns) ? out.underruns : nil
-          bus_levels, send_levels = @needs.include?(:buses) && @bus_meter ? @bus_meter.take : [nil, nil]
+          bus_levels, send_levels = @needs.include?(:buses) && @bus_meter ? @bus_meter.take : NO_BUS_LEVELS
           slow, refs = @polled
 
           Snapshot.new(
@@ -614,13 +635,47 @@ module MB
             master: @needs.include?(:meters) && @meter ? @meter.take : nil,
             scope: @needs.include?(:scope) && @scope ? @scope.to_a : nil,
             underruns: underruns,
-            knobs: refs.map { |name, k| KnobValue.new(name: name, value: k.value, spec: k.spec) }.freeze,
+            knobs: knob_values(refs),
             slow: slow,
             latency: out.respond_to?(:latency) ? out.latency.to_f : 0.0,
             bus_levels: bus_levels, send_levels: send_levels,
             notes: session.respond_to?(:held_notes) ? session.held_notes : [].freeze,
             sounding: nil
           )
+        end
+
+        # The snapshot's KnobValues for +refs+ ([name, knob] pairs): the last
+        # snapshot's frozen Array when no knob changed (nothing allocated on
+        # the render thread, and panes keyed on the Array's identity keep
+        # their caches), else a new one reusing the unchanged KnobValues
+        # (ui-perf-2 round 3: 2 objects per knob per snapshot before).
+        def knob_values(refs)
+          prev = @knob_values
+          held = @knob_objects
+          n = refs.length
+          same = prev.length == n
+          i = 0
+          while same && i < n
+            name, k = refs[i]
+            kv = prev[i]
+            same = kv.name.equal?(name) && held[i].equal?(k) && kv.spec.equal?(k.spec) && kv.value.eql?(k.value)
+            i += 1
+          end
+          return prev if same
+
+          out = Array.new(n)
+          i = 0
+          while i < n
+            name, k = refs[i]
+            kv = prev[i]
+            value = k.value
+            spec = k.spec
+            out[i] = kv && kv.name.equal?(name) && held[i].equal?(k) && kv.spec.equal?(spec) && kv.value.eql?(value) ? kv : KnobValue.new(name: name, value: value, spec: spec)
+            held[i] = k
+            i += 1
+          end
+          held.slice!(n..) if held.length > n
+          @knob_values = out.freeze
         end
 
         def reset_interval
