@@ -189,6 +189,14 @@ module MB
       # The Notes instance of each lane (in lane order).
       attr_reader :notes
 
+      # An object whose #write(lanes) gets every buffer's lane outputs (an
+      # Array: one entry per lane, a buffer, an Array of channel buffers,
+      # or nil), right after the lanes are sampled, or nil (the default).
+      # The sound-design screen's live view copies one lane into a ring
+      # (UI::WaveView::OutputTap; ui-wave-perf-1): it must copy, never keep
+      # the buffers, and allocate nothing.  Set from any thread.
+      attr_accessor :output_tap
+
       # The seed of lane 0 (lane i uses seed + i; see the class
       # description).
       attr_reader :seed
@@ -238,6 +246,7 @@ module MB
         # Synth has one instance variable layout; see GraphNode::IvarPreset)
         @control_notes = nil
         @skip_idle = nil
+        @output_tap = nil
         @skipping = nil
         @skip_generation = nil
         @lane_runs = nil
@@ -1117,6 +1126,14 @@ module MB
       # at a different note at 367/368 than at 800, and the note went to
       # another lane).
       def sample_lanes(count)
+        data = sample_lanes_whole(count)
+        tap = @output_tap
+        tap.write(data) if tap
+        data
+      end
+
+      # #sample_lanes without the output tap.
+      def sample_lanes_whole(count)
         @grid_started = true
         tail = tail_mode?(count)
         return sample_lanes_piece(count) unless @exact_lanes || tail

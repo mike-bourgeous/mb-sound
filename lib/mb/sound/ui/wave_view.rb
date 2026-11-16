@@ -39,6 +39,8 @@ module MB
         @mode = ENV['MB_SOUND_UI_WAVES'].to_s == 'live' ? :live : :off
         @target = nil
         @feed = nil
+        @output_tap = nil
+        @tapped = nil
 
         class << self
           # :off (the rendered previews, as before) or :live.
@@ -68,6 +70,7 @@ module MB
         KEYS = {
           tone: %i[frequency width scan].freeze, four_pole: %i[cutoff resonance].freeze, lfo: %i[frequency width scan phase].freeze,
           svf: %i[cutoff quality gain].freeze, biquad: %i[cutoff quality].freeze,
+          voice: %i[value value value value].freeze,
         }.freeze
 
         # Target kinds drawn by a FilterDisplay.
@@ -224,6 +227,9 @@ module MB
             v.is_a?(Float) ? v : (v.is_a?(Numeric) ? v.to_f : Float::NAN)
           when GraphNode::FourPole
             node.send(:last_of, key).to_f
+          when Notes::Frequency
+            v = node.value
+            v.is_a?(Float) ? v : (v.is_a?(Numeric) ? v.to_f : Float::NAN)
           when Filter::SampleWrapper
             # (SVF and Cookbook remember the last cutoff, quality, and gain
             # they read, planned or not)
@@ -333,16 +339,66 @@ module MB
           lane = newest_lane(gatherer.amp_env_group(info), group.length)
           node = group[lane] || group.first
           t = @target
-          unless t && t.watch[0] && t.watch[0][0].equal?(node)
-            display = (t && t.view.node.equal?(node)) ? t.view : (FILTER_KINDS.include?(kind) ? FilterDisplay.new(node) : ToneDisplay.new(node))
+          view = t && t.view.node.equal?(node) ? t.view : nil
+          if kind == :tone
+            # (an oscillator without a cheap cycle: the voice's output)
+            view = ToneDisplay.new(node) unless view
+            unless view.supported? || view.is_a?(VoiceView)
+              why = view.why
+              view = nil
+              kind = :voice
+            end
+            kind = :voice if view.is_a?(VoiceView)
+          end
+          if kind == :voice
+            synth = gatherer.synth_of(info, group.length) or return clear(feed)
+            unless view.is_a?(VoiceView) && view.lane == lane
+              freqs = frequencies_of(synth, lane)
+              return clear(feed) if freqs.empty?
+              view = VoiceView.new(node, (@output_tap ||= OutputTap.new), lane, freqs, why || (view.respond_to?(:reason) ? view.reason : nil))
+            end
+            attach_output(synth, lane)
+          else
+            attach_output(nil, 0)
+          end
+          unless t && view && t.view.equal?(view) && t.kind == kind
+            view ||= FILTER_KINDS.include?(kind) ? FilterDisplay.new(node) : ToneDisplay.new(node)
             keys = KEYS.fetch(kind)
-            watch = keys.map { |k| [node, k].freeze }.freeze
-            t = @target = Target.new(label: info.nodes[info.node].label, kind: kind, watch: watch, keys: keys, view: display)
+            watch = if kind == :voice
+                      view.frequencies.first(keys.length).map { |f| [f, :value].freeze }.freeze
+                    else
+                      keys.map { |k| [node, k].freeze }.freeze
+                    end
+            t = @target = Target.new(label: info.nodes[info.node].label, kind: kind, watch: watch, keys: keys, view: view)
           end
           @feed = feed
           tap = (feed.wave_tap ||= Tap.new)
           tap.watch = t.watch unless tap.watch.equal?(t.watch)
           t
+        end
+
+        # The Notes::Frequency nodes of +synth+'s lane +lane+ (the voice's
+        # note frequencies: v.hz and its transpositions), at most four.
+        def self.frequencies_of(synth, lane)
+          outs = synth.instance_variable_get(:@lanes)&.[](lane) or return [].freeze
+          Array(outs).flat_map { |o| o.respond_to?(:graph) ? o.graph.grep(Notes::Frequency) : [] }.uniq.first(4).freeze
+        rescue StandardError
+          [].freeze
+        end
+
+        # Sets +synth+'s output tap to lane +lane+ (nil: detaches the tap
+        # from the Synth it was on).
+        def self.attach_output(synth, lane)
+          old = @tapped
+          return if synth.nil? && old.nil?
+          if old && !old.equal?(synth)
+            old.output_tap = nil if old.output_tap.equal?(@output_tap)
+            @tapped = nil
+          end
+          return unless synth
+          @output_tap.lane = lane
+          synth.output_tap = @output_tap unless synth.output_tap.equal?(@output_tap)
+          @tapped = synth
         end
 
         # The LFO oscillator under +node+ (a Notes#lfo row), or nil.
@@ -356,6 +412,7 @@ module MB
 
         def self.clear(feed)
           @target = nil
+          attach_output(nil, 0)
           feed.wave_tap.watch = [].freeze if feed&.wave_tap && !feed.wave_tap.watch.empty?
           nil
         end
@@ -675,6 +732,202 @@ module MB
           end
         end
 
+        # The render thread's copy of one Synth lane's output (the voice
+        # the inspector shows), for what has no closed form (FM, sync,
+        # phase or amplitude modulation, noise, feedback: VoiceView).  Set
+        # as the Synth's #output_tap; every buffer #write copies the lane's
+        # first channel into a ring (Kernels.circular_write: nothing
+        # allocated, the buffer itself never kept: #sample buffers may be
+        # shared and reused); the painter copies the newest samples out
+        # with #read.
+        class OutputTap
+          # Samples kept (about 170 ms at 48 kHz).
+          SIZE = 8192
+
+          # Samples written so far, and the number of lane changes (a new
+          # lane's samples don't continue the old one's).
+          attr_reader :written, :generation, :lane
+
+          def initialize
+            @ring = Numo::SFloat.zeros(SIZE)
+            @written = 0
+            @generation = 0
+            @lane = 0
+          end
+
+          # Painter: shows lane +i+ from now on.
+          def lane=(i)
+            return if i == @lane
+            @lane = i
+            @generation += 1
+          end
+
+          # Render thread (Synth#sample_lanes): copies the lane's buffer.
+          def write(data)
+            e = data && data[@lane]
+            e = e[0] if e.is_a?(Array)
+            return unless e.is_a?(Numo::SFloat)
+            n = e.size
+            return if n == 0 || n > SIZE
+            return unless Kernels.circular_write(@ring, e, @written % SIZE)
+            @written += n
+          end
+
+          # Painter: copies the newest +len+ samples into +out+ (an SFloat
+          # of at least +len+); returns the count written before them (the
+          # absolute index of out[0]), or nil (too few yet, or the render
+          # thread overwrote them meanwhile).
+          def read(out, len)
+            w0 = @written
+            return nil if w0 < len || len > SIZE / 2
+            return nil unless Kernels.circular_read(@ring, (w0 - len) % SIZE, len, out)
+            return nil if @written - w0 > SIZE - len
+            w0 - len
+          end
+        end
+
+        # One period of the shown voice's output, from the OutputTap, every
+        # frame: the period from the voice's note frequency (the lowest of
+        # its Notes::Frequency nodes' latest values, published by the value
+        # tap), its start locked to the rising zero crossing nearest where
+        # the last frame's start falls a whole number of periods later (so
+        # a steady sound stands still instead of swimming), interpolated to
+        # a sub-sample start; the amplitude range follows the peak with a
+        # slow decay.  Allocates nothing while the note stays (a new period
+        # length makes a new view of the cycle buffer).
+        class VoiceView
+          attr_reader :node, :why, :picture, :rate, :tap, :frequencies, :lane
+
+          # Longest period drawn, in samples (a 12 Hz cycle at 48 kHz).
+          MAX_PERIOD = 4000
+
+          def initialize(node, tap, lane, frequencies, why)
+            @node = node
+            @tap = tap
+            @lane = lane
+            @frequencies = frequencies
+            @why = nil
+            @reason = why
+            @rate = node.respond_to?(:sample_rate) ? node.sample_rate.to_f : 48_000.0
+            @picture = Picture.new(nil, -1.0, 1.0, -1, String.new(capacity: 96, encoding: Encoding::UTF_8))
+            @win = Numo::SFloat.zeros(OutputTap::SIZE / 2)
+            @buf = Numo::SFloat.zeros(MAX_PERIOD + 1)
+            @cycle = nil
+            @n = 0
+            @anchor = nil
+            @gen = nil
+            @hold = 0.0
+            @low = 0
+            @mm = [0.0, 0.0]
+            @start = nil
+          end
+
+          def supported? = true
+
+          # Why the oscillator itself isn't drawn ("frequency modulated").
+          attr_reader :reason
+
+          # The last cycle's start (absolute sample index, fractional), for
+          # measuring how steady the picture is.
+          attr_reader :start
+
+          # One period at fundamental +f+ Hz (an SFloat), or nil before
+          # enough samples; the last one again when the ring was busy.
+          def cycle(f)
+            return @cycle unless f.is_a?(Float) && f.finite? && f > 0
+            p = @rate / f
+            return @cycle if p < 2 || p > MAX_PERIOD
+            n = p.round
+            len = (p * 3).ceil + 2
+            len = @win.size if len > @win.size
+            base = @tap.read(@win, len) or return @cycle
+            unless @gen == @tap.generation
+              @gen = @tap.generation
+              @anchor = nil
+              @hold = 0.0
+            end
+            # (a start whose period ends half a period before the newest sample)
+            desired = base + len - 1 - 1.5 * p
+            pred = @anchor ? @anchor + ((desired - @anchor) / p).round * p : desired
+            lo = (pred - p * 0.5 - base).floor
+            lo = 1 if lo < 1
+            hi = (pred + p * 0.5 - base).ceil
+            top = len - 2 - n
+            hi = top if hi > top
+            best = nil
+            bestd = 0.0
+            win = @win
+            i = lo
+            while i <= hi
+              a = win[i - 1]
+              b = win[i]
+              if a < 0.0 && b >= 0.0
+                x = base + i - 1 + a / (a - b)
+                d = (x - pred).abs
+                if best.nil? || d < bestd
+                  best = x
+                  bestd = d
+                end
+              end
+              i += 1
+            end
+            start = best || pred
+            rel = start - base
+            if rel < 0.0 || rel + p > len - 1
+              rel = len - 1 - 1.5 * p
+              start = base + rel
+            end
+            @anchor = start
+            @start = start
+            unless @n == n
+              @n = n
+              @cycle = @buf[0...n]
+            end
+            c = @cycle
+            step = p / n
+            j = 0
+            while j < n
+              pos = rel + j * step
+              k = pos.floor
+              a = win[k]
+              c[j] = a + (win[k + 1] - a) * (pos - k)
+              j += 1
+            end
+            Kernels.min_max(c, @mm)
+            peak = -@mm[0] > @mm[1] ? -@mm[0] : @mm[1]
+            hold_range(peak)
+            c
+          end
+
+          # The amplitude range's half height: the peak rounded up to a step
+          # of 1.5 dB, raised at once, lowered only after the peak stays
+          # under 70 % of it for RANGE_FRAMES frames (a band-limited edge's
+          # peak differs a little from period to period: a range following
+          # it moved the whole picture by a dot every frame).
+          def range = @hold
+
+          RANGE_FRAMES = 30
+          RANGE_STEP = 2**0.25
+
+          private
+
+          def hold_range(peak)
+            peak = 1e-4 unless peak > 1e-4
+            if peak > @hold
+              @hold = RANGE_STEP**(Math.log(peak) / Math.log(RANGE_STEP)).ceil
+              @low = 0
+            elsif peak < @hold * 0.7
+              @low += 1
+              if @low >= RANGE_FRAMES
+                @hold = RANGE_STEP**(Math.log(peak) / Math.log(RANGE_STEP)).ceil
+                @low = 0
+              end
+            else
+              @low = 0
+            end
+          end
+        end
+
         # The preview pane's live drawing (prepended to Panes::Preview):
         # while #live? and the selected row is the Target, one title row and
         # the wave below it, every frame (a live pane).
@@ -793,6 +1046,24 @@ module MB
             title.clear << n.label << ' '
             Label.hz(title, cut.finite? ? cut : 0.0) << (t.kind == :four_pole ? ' reso ' : ' Q ')
             second.finite? ? Label.fixed(title, second, 2) : title << '?'
+            title << ' live'
+          when :voice
+            f = Float::NAN
+            i = 0
+            while i < t.watch.length
+              x = vals[i]
+              f = x if x.is_a?(Float) && x.finite? && x > 0 && !(f <= x)
+              i += 1
+            end
+            d = v.cycle(f) or return nil
+            pic.data = d
+            pic.lo = -v.range
+            pic.hi = v.range
+            pic.mark = -1
+            title.clear << n.label << ' '
+            title << v.reason << ': ' if v.reason
+            title << 'voice out '
+            f.finite? ? Label.hz(title, f) : title << '?'
             title << ' live'
           else
             return nil

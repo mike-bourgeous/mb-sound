@@ -250,6 +250,18 @@ module MB
             entry[:groups][sel]
           end
 
+          # The Synth playing +info+'s track whose lanes are the +lanes+
+          # copies of a row (the first Synth with that many lanes, else the
+          # first), kept with the cache entry, or nil (UI::WaveView's voice
+          # output tap; ui-wave-perf-1).
+          def synth_of(info, lanes)
+            entry = @cache[info&.track] or return nil
+            found = (entry[:synths] ||= entry[:roots].flat_map { |r| r.respond_to?(:graph) ? r.graph.grep(MB::Sound::Synth) : [] }.uniq.freeze)
+            found.find { |sy| sy.lanes.length == lanes } || found.first
+          rescue StandardError
+            nil
+          end
+
           # The copies of the voice's amp envelope for +info+'s selected
           # row (same voice), or nil.
           def amp_env_group(info)

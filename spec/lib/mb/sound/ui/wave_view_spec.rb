@@ -1,3 +1,5 @@
+require_relative '../../../../support/allocation_budget'
+
 RSpec.describe(MB::Sound::UI::WaveView, :aggregate_failures) do
   let(:wv) { MB::Sound::UI::WaveView }
 
@@ -144,6 +146,74 @@ RSpec.describe(MB::Sound::UI::WaveView, :aggregate_failures) do
     end
   end
 
+  describe MB::Sound::UI::WaveView::OutputTap do
+    it 'copies a lane\'s first channel into its ring without allocating, and reads the newest samples back' do
+      tap = described_class.new
+      a = Numo::SFloat.new(800).seq
+      b = Numo::SFloat.new(800).seq(10_000)
+      tap.lane = 1
+      tap.write([a, [b, a], nil])
+      out = Numo::SFloat.zeros(100)
+      expect(tap.read(out, 100)).to eq(700)
+      expect(out.to_a).to eq(b[700..].to_a)
+      expect(tap.read(out, described_class::SIZE)).to be_nil # (more than half the ring)
+      tap.write([a, nil]) # (an ended lane: nothing)
+      expect(tap.written).to eq(800)
+      frozen = b.dup.freeze
+      lanes = [a, frozen]
+      m = AllocationBudget.measure(buffers: 200) { tap.write(lanes) }
+      expect(m.objects_per_buffer).to be <= 0.1, m.report
+      g = tap.generation
+      tap.lane = 0
+      expect(tap.generation).to eq(g + 1)
+    end
+
+    it 'leaves a Synth\'s samples as they were while it taps a lane' do
+      make = -> { MB::Sound::Synth.new(MB::Sound.seq(MB::Sound::A2, MB::Sound::C3).n4.loop, voices: 2) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.1) } }
+      plain = make.call
+      tapped = make.call
+      tapped.output_tap = described_class.new
+      a = Array.new(40) { plain.sample(367).dup }
+      b = Array.new(40) { tapped.sample(367).dup }
+      expect(b.map(&:to_a)).to eq(a.map(&:to_a))
+      expect(tapped.output_tap.written).to eq(40 * 367)
+    end
+  end
+
+  describe MB::Sound::UI::WaveView::VoiceView do
+    it 'draws one period of a steady tapped sound that stands still from frame to frame' do
+      tap = MB::Sound::UI::WaveView::OutputTap.new
+      node = MB::Sound::Tone.new(wave_type: :ramp, frequency: 110)
+      # (a sine: a band-limited edge's ripple falls on other samples each
+      # period at a period of 436.36 samples, moving a dot or two there)
+      src = MB::Sound::Tone.new(wave_type: :sine, frequency: 110.0).softclip(0.3, 0.9)
+      view = described_class.new(node, tap, 0, [].freeze, 'frequency modulated')
+      starts = []
+      pics = []
+      grid = MB::Sound::Plot::Text::NativeCells.new(40, 8)
+      30.times do
+        tap.write([src.sample(800)])
+        c = view.cycle(110.0)
+        next unless c
+        starts << view.start
+        MB::Sound::Plot::Wave.draw(grid, c, x: 0, y: 0, w: 40, h: 8, lo: -view.range, hi: view.range, fg: 0xffffff)
+        pics << grid.lines(:none)
+      end
+      period = 48000 / 110.0
+      expect(c = view.cycle(110.0).length).to eq(period.round)
+      phases = starts.map { |x| (x % period) / period }
+      expect(phases.each_cons(2).map { |p0, p1| [(p1 - p0).abs, 1 - (p1 - p0).abs].min }.max).to be < 1e-3
+      # (after the first frames, once the range is set: at most a dot, where
+      # a value lands within float rounding of a dot row's edge)
+      changed = pics.last(20).each_cons(2).map { |a, b| a.join.each_char.zip(b.join.each_char).count { |x, y| x != y } }
+      expect(changed.max).to be <= 1, changed.inspect
+      peak = view.cycle(110.0).abs.max
+      expect(view.range).to be_between(peak, peak * 2**0.25)
+      m = AllocationBudget.measure(buffers: 200) { view.cycle(110.0) }
+      expect(m.objects_per_buffer).to be <= 0.1, m.report
+    end
+  end
+
   describe 'watch_for' do
     after do
       MB::Sound::UI::Inspect.target = nil
@@ -177,6 +247,41 @@ RSpec.describe(MB::Sound::UI::WaveView, :aggregate_failures) do
       expect(vals[1]).to be_within(1e-6).of(2.0)
       pic = wv.picture(t, vals, info.nodes[i], 40)
       expect(pic.title).to match(/ Hz Q 2.00 live\z/)
+    end
+
+    it 'shows an FM oscillator row through the voice\'s output tap, and takes the tap off the Synth when leaving it' do
+      out = MB::Sound::Sampler::CaptureOutput.new(channels: 2)
+      @session = s = MB::Sound::Session.new(output: out, realtime: false)
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.instance_eval do
+          track(:fm) { |clip| synth(clip, voices: 1) { |v| (v.freq + v.hz.transpose(12).sine.at(220)).tone.named('car') * v.amp_env(0.01, 0.2, 0.8, 0.3) } }
+          bg :fm, seq(MB::Sound::A2).n1.loop
+        end
+      end
+      s.ui_feed = MB::Sound::UI::Feed.new unless s.ui_feed
+      wv.mode = :live
+      g = MB::Sound::UI::Inspect::Gatherer.new
+      8.times { s.process_buffer }
+      info = g.call(s, { track: :fm })
+      row = info.nodes.index { |n| n.label == 'car' }
+      t = wv.watch_for(s, g, info.with(node: row))
+      expect(t.kind).to eq(:voice)
+      expect(t.view.reason).to eq('frequency modulated')
+      synth = g.synth_of(info, 1)
+      expect(synth.output_tap).to be_a(wv::OutputTap)
+      vals = Array.new(wv::Tap::MAX)
+      pic = nil
+      12.times { s.process_buffer; s.ui_feed.wave_tap.read(t.watch, vals) && (pic = wv.picture(t, vals, info.nodes[row], 40)) }
+      expect(pic.data.length).to eq((48000 / MB::Sound::A2.frequency).round)
+      expect(pic.title).to eq("car frequency modulated: voice out #{MB::Sound::A2.frequency.round} Hz live")
+      env = info.nodes.index { |n| n.what == 'amp env' }
+      wv.watch_for(s, g, info.with(node: env))
+      expect(synth.output_tap).to be_nil
+      wv.watch_for(s, g, info.with(node: row))
+      expect(synth.output_tap).not_to be_nil
+      wv.mode = :off
+      wv.watch_for(s, g, info.with(node: row))
+      expect(synth.output_tap).to be_nil
     end
 
     it 'picks a live display for oscillator, filter, and LFO rows only, and the tap publishes what the voice used' do
