@@ -171,6 +171,9 @@ module MB
         def paced_loop(stop)
           Thread.current.name = 'MB::Sound::UI'
           Thread.current.priority = -1
+          # (a live thread: code it calls takes cached data rather than
+          # reading files, e.g. Library::Index#document_entries)
+          Thread.current[:mb_sound_live] = true
           @pacer.run(stop) do |now|
             refresh(now)
           rescue => e

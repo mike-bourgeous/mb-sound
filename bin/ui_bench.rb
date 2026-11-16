@@ -231,6 +231,7 @@ module MB::Sound
       sink_cpus: [nil, 'Pin the sink process to these CPUs (taskset list, e.g. 30,31)', String],
       every_buffer: [false, 'Snapshots at every render buffer the painter took the last one in (UI::Feed.every_buffer; an option)'],
       deadlines: [false, 'Panes due by the painter\'s frame deadlines (UI::PaneRates.on_deadlines; an option)'],
+      file_watch: [false, 'Record file system calls from the screen\'s threads (UI::FileWatch)'],
       quiet_header: [false, 'Skip the header line (one scenario of a multi-scenario run)'],
     ) { |_args, p|
       ENV['AUDIO_PROFILE'] = p.latency.to_s if p.latency
@@ -262,6 +263,7 @@ module MB::Sound
           end
           args << '--every-buffer' if p.every_buffer
           args << '--deadlines' if p.deadlines
+          args << '--file-watch' if p.file_watch
           ok = system(RbConfig.ruby, __FILE__, *args, '-S', sc.to_s, '-j', part, '--quiet-header')
           raise "ui_bench: scenario #{sc} failed (#{$?.inspect})" unless ok
           results.concat(JSON.parse(File.read(part)))
@@ -377,7 +379,14 @@ module MB::Sound
           pacer.perf = perf
           perf.start_probe(render: session.render_thread, painter: plot_thread)
         end
+        if p.file_watch
+          # File system calls from the screen's own threads (the painter,
+          # input, the pty reader; the REPL's Pry thread is the console's)
+          watched = [screen&.thread || plot_thread, screen.is_a?(UI::Tiles) ? screen.instance_variable_get(:@reader) : nil, screen.respond_to?(:pty_thread) ? screen.pty_thread : nil].compact
+          UI::FileWatch.start(watched)
+        end
         sleep p.seconds
+        file_calls = p.file_watch ? UI::FileWatch.stop : nil
         screen ? screen.stop_perf : perf.stop
         wall = UIBench.now - wall0
         published = the_feed.published - pub0
@@ -407,6 +416,7 @@ module MB::Sound
           scenario: sc, every_buffer: UI::Feed.every_buffer, deadlines: UI::PaneRates.on_deadlines, sink: cfg, size: [rows, cols], buffer: session.buffer_size, seconds: p.seconds, loadavg: [load0, load1],
           run_delay_ms: delay, clean: delay[:process] && delay[:process] < wall * 1000 * 0.01, cpu_s: cpu.round(2), wall_s: wall.round(2),
           snapshots_per_s: (published / wall).round(1), buffers_per_s: (bufs / wall).round(1),
+          file_calls: file_calls && file_calls.map { |m, path, loc, th| [m, path, loc, th] },
           perf: s, sink_report: UIBench.sink_report(sink, rects, warm), machine: machine,
         }
         results << row
@@ -426,6 +436,12 @@ module MB::Sound
           pa = s[:panes][name] || {}
           puts format('  %-12s visible %5.1f/s, visible gaps p50/p95/max %s/%s/%s ms; painter draws %s/s, age p95/max %s/%s ms',
                       name, v[:visible_per_s], v[:p50] || '-', v[:p95] || '-', v[:max] || '-', pa[:rate] || '-', pa[:p95] || '-', pa[:max] || '-')
+        end
+        if file_calls
+          puts "  file calls from the screen's threads: #{file_calls.length}#{file_calls.empty? ? '' : " (#{(file_calls.length / wall).round(1)}/s)"}"
+          file_calls.group_by { |m, _, loc, th| [m, loc, th] }.sort_by { |_, v| -v.length }.first(12).each do |(m, loc, th), v|
+            puts format('    %5d  %-8s %-40s %s  e.g. %s', v.length, m, loc, th, v[0][1].to_s[-60..] || v[0][1])
+          end
         end
         puts "  keys: #{s[:keys].values_at(:n, :p50, :p95, :max).then { |n, *q| n.to_i > 0 ? "#{n} keys, p50/p95/max #{q.join('/')} ms" : 'none' }}"
         puts "  render wake delay p50/p99/p99.9/max #{r.values_at(:p50, :p99, :p999, :max).join('/')} ms, >2 ms #{r[:over_2ms_per_min]}/min; painter GVL waits p99/max #{(a[:painter] || {}).values_at(:p99, :max).join('/')} ms" if r[:n].to_i > 0
