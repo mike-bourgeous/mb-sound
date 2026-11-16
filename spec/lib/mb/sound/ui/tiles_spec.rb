@@ -270,6 +270,35 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     expect_meters_only_in_place
   end
 
+  it 'wakes the painter once for the REPL output after a key with Tiles.echo_wake (ui-perf-1, an option)' do
+    old = MB::Sound::UI::Tiles.echo_wake
+    MB::Sound::UI::Tiles.echo_wake = true
+    start
+    host = @tiles.instance_variable_get(:@host)
+    expect(host.on_output).not_to be_nil
+    painter = @tiles.instance_variable_get(:@painter)
+    wakes = 0
+    fake = Object.new
+    fake.define_singleton_method(:wakeup) { wakes += 1 if Thread.current.name == 'MB::Term pty' } # (the echo's wakes, not the key's)
+    begin
+      @tiles.instance_variable_set(:@painter, fake)
+      @term.type('1')
+      ok = wait_until(timeout: 2) { wakes >= 1 }
+      expect(ok).to eq(true)
+      @term.type('2')
+      expect(wait_until(timeout: 2) { wakes >= 2 }).to eq(true)
+      settled = wakes
+      @tiles.send(:echo_output) # (more output: no key since the last wake)
+      expect(wakes).to eq(settled)
+      @tiles.instance_variable_set(:@echo_key_at, @tiles.instance_variable_get(:@clock).call - 1.0)
+      @tiles.send(:echo_output) # (a key long ago: no wake)
+      expect(wakes).to eq(settled)
+    ensure
+      @tiles.instance_variable_set(:@painter, painter)
+      MB::Sound::UI::Tiles.echo_wake = old
+    end
+  end
+
   it 'sends a full repaint as the cells that changed, the terminal showing the grid after focus moves, zooms, overlays, and modes (ui-perf-1)' do
     start(source: -> { ui_fake_snapshot })
     expect(@term.wait_for('LUFS')).to eq(true)

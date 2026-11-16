@@ -261,8 +261,12 @@ module MB::Sound
       json: [nil, 'Write every result as JSON to this file', '-j', String],
       screen: [nil, 'Write the sink\'s last frame as text to this file (one scenario)', String],
       sink_cpus: [nil, 'Pin the sink process to these CPUs (taskset list, e.g. 30,31)', String],
+      buffer: [nil, 'Render buffer size in frames for the null output (default 800; 128, 256, ...)', Integer],
+      out_latency: [nil, 'Output latency the null output reports, in buffers (a device\'s queue: meters and scopes show what is heard)', Float],
       every_buffer: [false, 'Snapshots at every render buffer the painter took the last one in (UI::Feed.every_buffer; an option)'],
       deadlines: [false, 'Panes due by the painter\'s frame deadlines (UI::PaneRates.on_deadlines; an option)'],
+      echo_wake: [false, 'The REPL\'s echo wakes the painter once after each key (UI::Tiles.echo_wake; an option)'],
+      snapshot_timed: [false, 'Frames timed to the render thread\'s snapshots (UI::FrameRate.snapshot_timed; an option)'],
       file_watch: [false, 'Record file system calls from the screen\'s threads (UI::FileWatch)'],
       gc_off: [false, 'Diagnosis: GC disabled while recording (what the garbage collector costs the waits; memory grows)'],
       holders: [false,'Name who holds the GVL while the render thread waits (FastUI::GVLProbe on the render thread, the painter, and worker threads)'],
@@ -271,6 +275,8 @@ module MB::Sound
       ENV['AUDIO_PROFILE'] = p.latency.to_s if p.latency
       UI::Feed.every_buffer = true if p.every_buffer
       UI::PaneRates.on_deadlines = true if p.deadlines
+      UI::FrameRate.snapshot_timed = true if p.snapshot_timed
+      UI::Tiles.echo_wake = true if p.echo_wake
       rows, cols = p.size.split('x').map(&:to_i)
       scenarios = p.scenarios.split(',').map { |s| s.strip.to_sym }
       bad = scenarios - UIBench::SCENARIOS
@@ -291,12 +297,14 @@ module MB::Sound
           part = File.join(tmp, "#{sc}.json")
           # (the options parsed, passed on: ARGV is consumed by now)
           args = ['-s', p.seconds.to_s, '--warm', p.warm.to_s, '--size', p.size, '--sink', kind.to_s, '--look', p.look.to_s, '--fps', p.fps.to_s]
-          { bps: '--bps', esc_us: '--esc-us', cell_us: '--cell-us', frame_us: '--frame-us', latency: '-L', sink_cpus: '--sink-cpus' }.each do |k, flag|
+          { bps: '--bps', esc_us: '--esc-us', cell_us: '--cell-us', frame_us: '--frame-us', latency: '-L', sink_cpus: '--sink-cpus', buffer: '--buffer', out_latency: '--out-latency' }.each do |k, flag|
             v = p.public_send(k)
             args.push(flag, v.to_s) unless v.nil?
           end
           args << '--every-buffer' if p.every_buffer
           args << '--deadlines' if p.deadlines
+          args << '--snapshot-timed' if p.snapshot_timed
+          args << '--echo-wake' if p.echo_wake
           args << '--file-watch' if p.file_watch
           args << '--holders' if p.holders
           args << '--gc-off' if p.gc_off
@@ -313,6 +321,14 @@ module MB::Sound
       MB::Sound.warm_up
       UI.warm_up
       UI.warm_up_console
+      if p.buffer || p.out_latency
+        # (a null output of the asked size, optionally reporting a device's
+        # latency, before the scenario starts the song)
+        out = NullOutput.new(channels: 2, buffer_size: p.buffer || 800)
+        lat = p.out_latency.to_f * out.buffer_size / 48000.0
+        out.define_singleton_method(:latency) { lat } if p.out_latency
+        Session.use_output(out)
+      end
       warm = p.warm
       results = []
       tmp = Dir.mktmpdir('ui_bench')
@@ -503,7 +519,7 @@ module MB::Sound
         # left out as nil: no thread waits longer than it ran)
         delay = d0.to_h { |k, v| [k, v && d1[k] && (d = (d1[k] - v) * 1000) >= 0 && d <= wall * 1000 ? d.round(1) : nil] }
         row = {
-          scenario: sc, knob: knob, ui_waves: ENV['MB_SOUND_UI_WAVES'], holders: holder_table, every_buffer: UI::Feed.every_buffer, deadlines: UI::PaneRates.on_deadlines, sink: cfg, size: [rows, cols], buffer: session.buffer_size, seconds: p.seconds, loadavg: [load0, load1],
+          scenario: sc, knob: knob, ui_waves: ENV['MB_SOUND_UI_WAVES'], holders: holder_table, every_buffer: UI::Feed.every_buffer, deadlines: UI::PaneRates.on_deadlines, snapshot_timed: UI::FrameRate.snapshot_timed, echo_wake: UI::Tiles.echo_wake, out_latency: p.out_latency, sink: cfg, size: [rows, cols], buffer: session.buffer_size, seconds: p.seconds, loadavg: [load0, load1],
           run_delay_ms: delay, clean: %i[painter render].all? { |k| delay[k] && delay[k] < wall * 1000 * 0.01 }, cpu_s: cpu.round(2), wall_s: wall.round(2),
           snapshots_per_s: (published / wall).round(1), buffers_per_s: (bufs / wall).round(1),
           file_calls: file_calls && file_calls.map { |m, path, loc, th| [m, path, loc, th] },
@@ -516,7 +532,7 @@ module MB::Sound
         r = a[:render] || {}
         sr = row[:sink_report]
         puts
-        puts "== #{sc} (#{kind} sink, #{session.buffer_size}-frame buffers#{UI::Feed.every_buffer ? ', every-buffer snapshots' : ''}#{UI::PaneRates.on_deadlines ? ', deadline due' : ''}#{knob ? ", turning #{knob.inspect}" : ''}#{ENV['MB_SOUND_UI_WAVES'] ? ", MB_SOUND_UI_WAVES=#{ENV['MB_SOUND_UI_WAVES']}" : ''}): load #{load0&.first}->#{load1&.first}, run delay ms #{delay.map { |k, v| "#{k} #{v}" }.join(' ')} (#{row[:clean] ? 'clean' : 'contended'}), CPU #{row[:cpu_s]} s of #{row[:wall_s]} s"
+        puts "== #{sc} (#{kind} sink, #{session.buffer_size}-frame buffers#{UI::Feed.every_buffer ? ', every-buffer snapshots' : ''}#{UI::PaneRates.on_deadlines ? ', deadline due' : ''}#{UI::FrameRate.snapshot_timed ? ', snapshot-timed' : ''}#{UI::Tiles.echo_wake ? ', echo wake' : ''}#{p.out_latency ? ", output latency #{p.out_latency} buffers" : ''}#{knob ? ", turning #{knob.inspect}" : ''}#{ENV['MB_SOUND_UI_WAVES'] ? ", MB_SOUND_UI_WAVES=#{ENV['MB_SOUND_UI_WAVES']}" : ''}): load #{load0&.first}->#{load1&.first}, run delay ms #{delay.map { |k, v| "#{k} #{v}" }.join(' ')} (#{row[:clean] ? 'clean' : 'contended'}), CPU #{row[:cpu_s]} s of #{row[:wall_s]} s"
         perf.headline(s).each { |l| puts "  #{l}" }
         puts "  feed: #{row[:snapshots_per_s]} snapshots/s published, #{row[:buffers_per_s]} render buffers/s"
         puts "  frames: #{s[:refreshes_per_s]}/s refreshed, #{s[:written_per_s]}/s written; lateness p50/p99/max #{s[:late_ms].values_at(:p50, :p99, :max).join('/')} ms; " \

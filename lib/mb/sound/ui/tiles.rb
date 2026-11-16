@@ -162,6 +162,7 @@ module MB
           @match = @search = @flash = @painter_warned = @reloaded_at = @size_checked_at = @resized = nil
           @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = nil
           @line_cursor = @old_winch = @signals = @wake_r = @wake_w = nil
+          @echo_key_at = nil # (Tiles.echo_wake: when the last REPL key arrived, until its echo wakes the painter)
           @status_canvas = @status_right = @status_right_key = nil # (draw_status's canvas and right-hand text, kept)
           @attached = @poll = @polled_at = @poll_warned = @last = nil
           @asking = nil # ([pane name, PaneKeys::Ask] while a pane's value prompt is open)
@@ -331,6 +332,7 @@ module MB
             @host = MB::Term::Input::ReplHost.new(rows: r.h, cols: r.w, mode: @repl_mode, scrollback: @scrollback, ambiguous_width: @ambiguous,
                                         target: @context || TOPLEVEL_BINDING, pry: @pry_opts)
             @host.start
+            @host.on_output = method(:echo_output) if Tiles.echo_wake
             # A Pry of our own (:thread) reads through the global Reline,
             # whose Ctrl-]/F2 bindings (ConsoleKeys) act on the screen that
             # owns the reading thread: this one, not a new one on the real
@@ -2027,7 +2029,33 @@ module MB
           @input_lock.synchronize { tick_panes } # (gestures whose keys stopped: their lines)
           (@painter&.wakeup rescue nil) if @keyboard.tick(mono_now)
           (@painter&.wakeup rescue nil) unless events.empty?
+          @echo_key_at = @clock.call if Tiles.echo_wake && @router.state == :repl && events.any? { |e| e.is_a?(MB::Term::Input::Key) }
           now
+        end
+
+        class << self
+          # ui-perf-1 (an option, off by default): the REPL's output wakes
+          # the painter once after each key typed into it.  A key wakes the
+          # painter at once, but Pry's echo comes back through the pty about
+          # 0.6 ms later and misses that frame, so typing showed on the next
+          # deadline (key to visible ~9 ms at 60/s).  One wake per key, within
+          # ECHO_WINDOW of it: a flood of console output wakes nothing more.
+          # MB_SOUND_UI_ECHO_WAKE=1 turns it on at start (for screens started
+          # after).
+          attr_accessor :echo_wake
+        end
+        self.echo_wake = ENV['MB_SOUND_UI_ECHO_WAKE'] == '1'
+
+        # Seconds after a REPL key its echo may wake the painter.
+        ECHO_WINDOW = 0.1
+
+        # The pty reader, after REPL output reached the VT (Tiles.echo_wake):
+        # wakes the painter if this is the first output since a key.
+        def echo_output
+          k = @echo_key_at or return
+          @echo_key_at = nil
+          return if @clock.call - k > ECHO_WINDOW
+          @painter&.wakeup rescue nil
         end
 
         def handle(e)
