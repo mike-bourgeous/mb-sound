@@ -316,6 +316,21 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
       other&.kill&.join
     end
 
+    it 'reuses the slots of yielders that ended without a priority thread (no hook saw them exit)' do
+      # (graph warming's workers in a non-realtime Session: after 16 of
+      # them no thread could join; spec:quick 2026-11-16)
+      20.times do
+        t = Thread.new { Thread.stop }
+        Thread.pass until t.stop?
+        expect(gy.add(t)).to eq(true)
+        t.wakeup
+        t.join
+      end
+      expect(gy.yielders).to eq([])
+      expect(gy.add(Thread.current)).to eq(true)
+      expect(gy.yielders).to eq([Thread.current])
+    end
+
     it 'hands the GVL from a busy yielder to the priority thread when it wakes' do
       done = false
       waiter = Thread.new { 20.times { sleep 0.002 }; done = true }

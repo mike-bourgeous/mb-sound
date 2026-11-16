@@ -275,9 +275,32 @@ static VALUE yield_get_priority(VALUE self)
 	return yield_priority;
 }
 
+// Frees the slots of yielders that ended (GVL held).  The hook drops a
+// yielder at its EXITED event, but the hook runs only while a priority
+// thread is set: threads that joined and ended without one (graph
+// warming's sandbox workers in a non-realtime Session, previews before
+// the song plays) kept their slots, and after 16 of them no thread could
+// join (the 2026-11-16 spec:quick failure in patch_render_spec).
+static int yield_sweep_dead(void)
+{
+	int freed = 0;
+	static ID id_alive;
+	if (!id_alive) {
+		id_alive = rb_intern("alive?");
+	}
+	for (int i = 0; i < YIELD_SLOTS; i++) {
+		VALUE t = LOAD(yield_threads[i]);
+		if (t != Qnil && !RTEST(rb_funcall(t, id_alive, 0))) {
+			STORE(yield_threads[i], Qnil);
+			freed++;
+		}
+	}
+	return freed;
+}
+
 // GVLYield.add(thread) -> true, or false when the table is full (or in a
 // forked child): +thread+ gives the GVL to the priority thread whenever
-// that wants it.
+// that wants it.  Slots of yielders that ended are reused.
 static VALUE yield_add(VALUE self, VALUE thread)
 {
 	yield_check_thread(thread);
@@ -287,10 +310,11 @@ static VALUE yield_add(VALUE self, VALUE thread)
 	if (yield_is_yielder(thread)) {
 		return Qtrue;
 	}
+	yield_sweep_dead();
 	for (int i = 0; i < YIELD_SLOTS; i++) {
 		if (yield_threads[i] == Qnil) {
 			STORE(yield_threads[i], thread);
-					yield_update();
+			yield_update();
 			return Qtrue;
 		}
 	}
@@ -308,14 +332,17 @@ static VALUE yield_remove(VALUE self, VALUE thread)
 		}
 	}
 	if (found) {
-			yield_update();
+		yield_update();
 	}
 	return found ? Qtrue : Qfalse;
 }
 
-// GVLYield.yielders -> Array of the registered threads.
+// GVLYield.yielders -> Array of the registered threads (those still alive).
 static VALUE yield_yielders(VALUE self)
 {
+	if (yield_sweep_dead()) {
+		yield_update();
+	}
 	VALUE out = rb_ary_new();
 	for (int i = 0; i < YIELD_SLOTS; i++) {
 		if (yield_threads[i] != Qnil) {
