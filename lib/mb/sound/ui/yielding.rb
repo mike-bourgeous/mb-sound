@@ -29,12 +29,23 @@ module MB
       # returns false (saying why once).
       module Yielding
         @on = ENV['MB_SOUND_YIELD'] != '0' && ENV['MB_SOUND_PREVIEW_YIELD'] != '0'
+        @painter = ENV['MB_SOUND_PAINTER_YIELD'] != '0'
+        @input = ENV['MB_SOUND_INPUT_YIELD'] == '1'
         @closing = nil
         @said = false
 
         class << self
           # True: .join registers threads (new joins only).
           attr_accessor :on
+
+          # True (the default; MB_SOUND_PAINTER_YIELD=0 turns it off): the
+          # screens' painter threads yield (FrameRate#yield_to_render;
+          # ui-perf-2).  Read when a painter first follows a render thread.
+          attr_accessor :painter
+
+          # True (MB_SOUND_INPUT_YIELD=1; off by default): the tiled screen's
+          # input thread yields too, joined by its painter.
+          attr_accessor :input
 
           # True when the extension's GVLYield is there.
           def available? = defined?(FastUI::GVLYield) ? true : false

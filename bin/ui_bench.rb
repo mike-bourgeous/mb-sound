@@ -167,7 +167,7 @@ module MB::Sound
     end
 
     # Keys the sink types for +scenario+: [[seconds from the start, bytes]].
-    def keys_for(scenario, warm, seconds)
+    def keys_for(scenario, warm, seconds, key_rate: nil)
       case scenario
       when :typing
         t = warm + 0.3
@@ -184,11 +184,13 @@ module MB::Sound
         # picks a knob row during --warm, UI::Perf::Capture.pick_knob, and
         # the sink's Right/Left turn it)
         list = []
+        return list if key_rate && key_rate <= 0
+        dt = key_rate ? 1.0 / key_rate : 0.12
         t = warm + 0.3
         k = 0
         while t < warm + seconds
           list << [t, (k / 8).even? ? "\e[C" : "\e[D"]
-          t += 0.12
+          t += dt
           k += 1
         end
         list
@@ -262,6 +264,8 @@ module MB::Sound
       screen: [nil, 'Write the sink\'s last frame as text to this file (one scenario)', String],
       sink_cpus: [nil, 'Pin the sink process to these CPUs (taskset list, e.g. 30,31)', String],
       buffer: [nil, 'Render buffer size in frames for the null output (default 800; 128, 256, ...)', Integer],
+      design_line: [nil, 'design: the console line that opens the sound-design screen (default: the acid bass)', String],
+      key_rate: [nil, 'design: knob turns per second by arrow keys (default 8.3; 0 for none, e.g. an LFO patch held)', Float],
       out_latency: [nil, 'Output latency the null output reports, in buffers (a device\'s queue: meters and scopes show what is heard)', Float],
       every_buffer: [false, 'Snapshots at every render buffer the painter took the last one in (UI::Feed.every_buffer; an option)'],
       deadlines: [false, 'Panes due by the painter\'s frame deadlines (UI::PaneRates.on_deadlines; an option)'],
@@ -297,7 +301,7 @@ module MB::Sound
           part = File.join(tmp, "#{sc}.json")
           # (the options parsed, passed on: ARGV is consumed by now)
           args = ['-s', p.seconds.to_s, '--warm', p.warm.to_s, '--size', p.size, '--sink', kind.to_s, '--look', p.look.to_s, '--fps', p.fps.to_s]
-          { bps: '--bps', esc_us: '--esc-us', cell_us: '--cell-us', frame_us: '--frame-us', latency: '-L', sink_cpus: '--sink-cpus', buffer: '--buffer', out_latency: '--out-latency' }.each do |k, flag|
+          { bps: '--bps', esc_us: '--esc-us', cell_us: '--cell-us', frame_us: '--frame-us', latency: '-L', sink_cpus: '--sink-cpus', buffer: '--buffer', out_latency: '--out-latency', design_line: '--design-line', key_rate: '--key-rate' }.each do |k, flag|
             v = p.public_send(k)
             args.push(flag, v.to_s) unless v.nil?
           end
@@ -340,7 +344,7 @@ module MB::Sound
         slave.winsize = [rows, cols]
         t0 = UIBench.now
         sink_out = File.join(tmp, "sink_#{sc}.json")
-        keys = UIBench.keys_for(sc, warm, p.seconds)
+        keys = UIBench.keys_for(sc, warm, p.seconds, key_rate: p.key_rate)
         pid = fork do
           slave.close
           UIBench.sink(master, rows, cols, cfg, keys, sink_out, t0)
@@ -408,7 +412,7 @@ module MB::Sound
           UI.instance_variable_set(screen.is_a?(UI::Tiles) ? :@tiles : :@band, screen)
         end
         if sc == :design
-          MB::Sound.module_eval("design :bass, L.inst.acid, seq(E1, E1, G1, A1).n8.loop.legato(0.5)")
+          MB::Sound.module_eval(p.design_line || "design :bass, L.inst.acid, seq(E1, E1, G1, A1).n8.loop.legato(0.5)")
           Thread.pass until session.running?
           # A knob row picked before the sink's arrows start (on the Mac
           # two fixed Downs came before the inspector had its first

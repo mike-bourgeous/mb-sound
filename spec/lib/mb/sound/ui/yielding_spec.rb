@@ -24,6 +24,63 @@ RSpec.describe(MB::Sound::UI::Yielding) do
     worker&.kill&.join
   end
 
+  describe 'the painter (FrameRate#yield_to_render; ui-perf-2)' do
+    let(:screen) {
+      Class.new {
+        include MB::Sound::UI::FrameRate
+        attr_accessor :attached, :reader
+        def initialize
+          @attached = @reader = @yield_render = nil
+        end
+      }.new
+    }
+
+    it 'joins the painter (and with .input the input thread) when the followed render thread appears, allocates nothing while it stays, and leaves when it goes' do
+      render = Thread.new { sleep }
+      input = Thread.new { sleep }
+      screen.instance_variable_set(:@reader, input)
+      session = Struct.new(:render_thread).new(nil)
+      screen.attached = session
+      was_input = described_class.input
+      described_class.input = true
+      screen.send(:yield_to_render)
+      expect(gy.yielders).to eq([])
+      session.render_thread = render
+      screen.send(:yield_to_render)
+      expect(gy.yielders).to contain_exactly(Thread.current, input)
+      expect(gy.priority).to equal(render)
+      screen.send(:yield_to_render)
+      a = GC.stat(:total_allocated_objects)
+      i = 0
+      while i < 1000
+        screen.send(:yield_to_render)
+        i += 1
+      end
+      expect(GC.stat(:total_allocated_objects) - a).to be <= 1 # (the measurement's own; 0 a call)
+      render.kill.join
+      screen.send(:yield_to_render) # (a dead render thread: stop yielding)
+      expect(gy.yielders).to eq([])
+      expect(gy.priority).to be_nil
+    ensure
+      described_class.input = was_input
+      screen.send(:stop_yielding)
+      render&.kill&.join
+      input&.kill&.join
+    end
+
+    it 'does nothing with Yielding.painter false' do
+      render = Thread.new { sleep }
+      screen.attached = Struct.new(:render_thread).new(render)
+      was = described_class.painter
+      described_class.painter = false
+      screen.send(:yield_to_render)
+      expect(gy.yielders).to eq([])
+    ensure
+      described_class.painter = was
+      render&.kill&.join
+    end
+  end
+
   it 'does nothing (saying so once) without the extension, or when off' do
     allow(described_class).to receive(:available?).and_return(false)
     described_class.instance_variable_set(:@said, false)

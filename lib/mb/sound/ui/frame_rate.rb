@@ -285,6 +285,7 @@ module MB
           # reading files, e.g. Library::Index#document_entries)
           Thread.current[:mb_sound_live] = true
           @pacer.run(stop) do |now|
+            yield_to_render
             refresh(now)
           rescue => e
             warn "UI painter: #{e.class}: #{e.message}" unless @painter_warned
@@ -293,6 +294,38 @@ module MB
           end
         rescue => e
           warn "UI painter stopped: #{e.class}: #{e.message}"
+        ensure
+          stop_yielding
+        end
+
+        # The painter (and, on the tiled screen, its input thread) hand the
+        # GVL to the followed Session's render thread whenever that wakes
+        # (UI::Yielding, Yielding.painter; ui-perf-2): a pane draw otherwise
+        # kept the render thread waiting up to Ruby's 10 ms timeslice.
+        # Joins when the render thread is first known or changes (a new
+        # Session), on the painter thread before each frame: two ivar reads
+        # and a comparison when nothing changed, no allocation.
+        def yield_to_render
+          return unless Yielding.painter
+          t = @attached&.render_thread
+          t = nil unless t&.alive?
+          return if t.equal?(@yield_render)
+          @yield_render = t
+          input = Yielding.input && defined?(@reader) ? @reader : nil
+          if t
+            Yielding.join(Thread.current, render: t)
+            Yielding.join(input, render: t) if input
+          else
+            stop_yielding
+          end
+        end
+
+        # The painter and input threads stop yielding (the painter's loop
+        # ended, or no render thread to follow).
+        def stop_yielding
+          @yield_render = nil
+          Yielding.leave(Thread.current)
+          Yielding.leave(@reader) if defined?(@reader) && @reader
         end
 
         # Times a terminal write for the Pacer's breakdown.
