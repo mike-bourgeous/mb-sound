@@ -191,6 +191,29 @@ module MB
           (meters + others).map(&:first)
         end
 
+        # #pick without new Arrays: appends to +out+ the keys of the
+        # candidates other than meters (+keys+ with their lateness in
+        # +lates+, parallel Arrays) that draw: all of them, or the most late
+        # first up to the level's turns.  +keys+ and +lates+ are used up.
+        def pick_into(out, keys, lates)
+          turns = @turns_left
+          if turns.nil? || keys.length <= turns
+            keys.each { |k| out << k }
+            return out
+          end
+          turns.times do
+            best = 0
+            i = 1
+            while i < lates.length
+              best = i if lates[i] > lates[best]
+              i += 1
+            end
+            out << keys[best]
+            lates[best] = -Float::INFINITY
+          end
+          out
+        end
+
         # Notes that pane +name+ drew at +now+ (for #measured).
         def drew(name, now)
           @lock.synchronize do

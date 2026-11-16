@@ -256,6 +256,8 @@ module MB
           # the terminal may not show as we left it; without, a full repaint
           # of the grid is sent as the cells that differ from what it shows)
           @clear = false
+          @draw_items = [] # (the painter's reused pane rows: #refresh_unlocked)
+          @draw_rows = {}
         end
 
         # The virtual keyboard (UI::Keyboard) KEYS mode plays.
@@ -2241,9 +2243,18 @@ module MB
 
           drawn = 0
           repl_drawn = false
-          items = @placed.filter_map do |p|
-            next if p.tabs || p.name == :repl || !@panes[p.name]
-            [p.name, p.name, @panes[p.name], p.opts[:rate], @drawn_at[p.name]]
+          # (one reused row per pane, refilled each frame: no per-frame
+          # Arrays; ui-perf-1)
+          items = @draw_items
+          items.clear
+          @placed.each do |p|
+            next if p.tabs || p.name == :repl || !(pane = @panes[p.name])
+            row = (@draw_rows[p.name] ||= Array.new(5))
+            row[0] = row[1] = p.name
+            row[2] = pane
+            row[3] = p.opts[:rate]
+            row[4] = @drawn_at[p.name]
+            items << row
           end
           ft = frame_time(now)
           draw = panes_to_draw(items, ft, full, snap)

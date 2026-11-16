@@ -16,10 +16,20 @@ module MB
         # to 3 significant figures.
         def fmt(v)
           return '-' if v.nil?
-          v = v.to_f
-          return '-inf' if v == -Float::INFINITY
-          v.abs >= 100 || v == v.round ? v.round.to_s : format('%.3g', v)
+          # (frozen strings kept per value: the painter formats the same
+          # values frame after frame; ui-perf-1, 28 objects a frame on the
+          # sound screen)
+          FMT_MEMO[v] ||= begin
+            FMT_MEMO.clear if FMT_MEMO.length >= MEMO_MAX
+            f = v.to_f
+            (f == -Float::INFINITY ? '-inf' : f.abs >= 100 || f == f.round ? f.round.to_s : format('%.3g', f)).freeze
+          end
         end
+
+        # Formatted values kept (.fmt, .db), at most MEMO_MAX each.
+        FMT_MEMO = {}
+        DB_MEMO = {}
+        MEMO_MAX = 4096
 
         # The unit of a knob with Knob::Spec +spec+ driving a param named
         # +name+: the spec's, else what the Param names table implies for
@@ -32,7 +42,10 @@ module MB
         # A dB value to one decimal ("-8.1", "-inf").
         def db(v)
           return '-' if v.nil?
-          v.finite? ? format('%.1f', v) : '-inf'
+          DB_MEMO[v] ||= begin
+            DB_MEMO.clear if DB_MEMO.length >= MEMO_MAX
+            (v.finite? ? format('%.1f', v) : '-inf').freeze
+          end
         end
 
         # 0..1 for a dBFS level on the meter scale.

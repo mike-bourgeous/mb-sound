@@ -194,8 +194,7 @@ module MB
         # role] pairs.  Returns the column after them.
         def line(y, *segments, x: 0)
           segments.each do |seg|
-            str, role = seg.is_a?(Array) ? seg : [seg, nil]
-            x = text(x, y, str, role)
+            x = seg.is_a?(Array) ? text(x, y, seg[0], seg[1]) : text(x, y, seg, nil)
           end
           x
         end
@@ -219,7 +218,10 @@ module MB
           hold_at = hold && hold > 0 ? (hold.to_f.clamp(0.0, 1.0) * width).floor : nil
           # Runs of one color become one write
           cx = x
-          run = +''
+          # (one buffer per thread, cleared per run: the grid copies what
+          # #text writes; ui-perf-1)
+          run = (Thread.current[:mb_sound_meter_run] ||= +'')
+          run.clear
           run_role = nil
           width.times do |i|
             e = (eighths - i * 8).clamp(0, 8)
@@ -231,7 +233,7 @@ module MB
             end
             if r != run_role && !run.empty?
               cx = text(cx, y, run, run_role)
-              run = +''
+              run.clear
             end
             run_role = r
             run << ch

@@ -142,13 +142,29 @@ module MB
         def panes_to_draw(items, now, full, snap)
           @render_load = snap&.load
           @rates.begin_frame(now)
-          cands = items.filter_map do |key, name, pane, explicit, drawn_at|
+          # (reused Arrays, no per-pane candidate Arrays: the painter's
+          # steady state allocates nothing here; ui-perf-1.  The keys come
+          # back in no particular order: callers ask include?)
+          out = (@draw_keys ||= [])
+          keys = (@cand_keys ||= [])
+          lates = (@cand_lates ||= [])
+          out.clear
+          keys.clear
+          lates.clear
+          items.each do |key, name, pane, explicit, drawn_at|
             pr = PaneRates.priority_of(name, pane)
-            next [key, pr, Float::INFINITY] if full || drawn_at.nil?
-            next unless @rates.due?(pr, pane.rate, explicit, drawn_at, now)
-            [key, pr, (now - drawn_at) * @rates.rate(pr, pane.rate, explicit)]
+            if full || (pr == :meter && (drawn_at.nil? || @rates.due?(pr, pane.rate, explicit, drawn_at, now)))
+              out << key
+            elsif drawn_at.nil?
+              keys << key
+              lates << Float::INFINITY
+            elsif pr != :meter && @rates.due?(pr, pane.rate, explicit, drawn_at, now)
+              keys << key
+              lates << (now - drawn_at) * @rates.rate(pr, pane.rate, explicit)
+            end
           end
-          full ? cands.map(&:first) : @rates.pick(cands)
+          @rates.pick_into(out, keys, lates)
+          out
         end
 
         # The time panes are due by this frame: +now+, or with
