@@ -2010,6 +2010,10 @@ module MB
               []
             end
           @input_lock.synchronize { @router.tick(Process.clock_gettime(Process::CLOCK_MONOTONIC)) }
+          # (Tiles.echo_wake: armed before the keys reach the pty, so an echo
+          # that comes back before this thread runs again still wakes the
+          # painter)
+          @echo_key_at = @clock.call if Tiles.echo_wake && @router.state == :repl && events.any? { |e| e.is_a?(MB::Term::Input::Key) }
           if (perf = @pacer.perf)
             # (ui.perf: replies to its queries are taken out here, never
             # reaching the Router, Pry, or NAV; keys are timed to the frame
@@ -2029,7 +2033,6 @@ module MB
           @input_lock.synchronize { tick_panes } # (gestures whose keys stopped: their lines)
           (@painter&.wakeup rescue nil) if @keyboard.tick(mono_now)
           (@painter&.wakeup rescue nil) unless events.empty?
-          @echo_key_at = @clock.call if Tiles.echo_wake && @router.state == :repl && events.any? { |e| e.is_a?(MB::Term::Input::Key) }
           now
         end
 
