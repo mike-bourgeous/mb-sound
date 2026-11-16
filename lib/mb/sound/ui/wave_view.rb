@@ -25,8 +25,10 @@ module MB
       #   of the oscillator from its own kernel (a display copy of the tone
       #   with its shape settings, at those values: ToneDisplay), or a
       #   four-pole's closed-form response at that cutoff and resonance
-      #   (FilterDisplay), straight into the screen's cells through the
-      #   :plot_wave kernel (Plot::Wave).  What has no cheap form (FM, sync,
+      #   (FilterDisplay), or an LFO's shape with a marker at its phase
+      #   now, straight into the screen's cells through the :plot_wave
+      #   kernel (Plot::Wave).  Envelope rows draw EnvelopeView's trace the
+      #   same way, the playhead as the marker.  What has no cheap form (FM, sync,
       #   phase modulation, AM, noise; the patch's settled cycle) keeps the
       #   rendered previews (UI::ToneCycle, the RENDER pane).
       module WaveView
