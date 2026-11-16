@@ -65,6 +65,70 @@ RSpec.describe(MB::Sound::UI::Pacer, :aggregate_failures) do
     expect(p.offset).to eq(0.0) # (early wakes don't teach the wake offset)
   end
 
+  # ui-perf-1 (an option): frames timed to the render thread's snapshots
+  # (FrameRate::SnapshotTiming).  800-frame buffers at 48 kHz come 60 times
+  # a second, as do the painter's frames; on the grid alone the two beat,
+  # and with jitter a frame now and then shows the snapshot before (the
+  # scope's visible updates 33 ms apart).
+  describe 'frames timed to snapshots' do
+    snap = Struct.new(:seq, :time, :buffer_size, :sample_rate, :latency)
+
+    # A feed publishing a snapshot every 800 frames from +phase+ seconds,
+    # each up to +jitter+ seconds late (a render thread's wake), until
+    # +stop_at+; its #latest is what has been published by @t, #times all
+    # the publish times.
+    define_method(:feed) do |phase:, jitter:, stop_at: Float::INFINITY, latency: 0.0|
+      buf = 800 / 48000.0
+      rnd = Random.new(3)
+      times = (0...200).map { |k| phase + k * buf + rnd.rand * jitter }.select { |t| t < stop_at }
+      f = Object.new
+      t = -> { @t }
+      f.define_singleton_method(:times) { times }
+      f.define_singleton_method(:latest) {
+        n = times.count { |x| x <= t.call }
+        n == 0 ? nil : snap.new(n, times[n - 1], 800, 48000, latency)
+      }
+      f
+    end
+
+    # [snapshot seq shown, frame start] per frame after the first 10:
+    # shown is the newest heard at the frame's start (Follow#heard).
+    def shown(timed, fd, seconds: 1.5)
+      @t = 0.0
+      p = described_class.new(60, clock: -> { @t }, sleeper: ->(s) { @t += s })
+      p.timing = MB::Sound::UI::FrameRate::SnapshotTiming.new(-> { fd }, p) if timed
+      seqs = []
+      starts = []
+      p.run(-> { @t >= seconds }) do |now|
+        lat = fd.latest&.latency.to_f
+        seqs << fd.times.count { |x| x + lat <= now }
+        starts << now
+        @t += 0.0015 # (the frame's work)
+        'x'
+      end
+      [seqs.drop(10), starts.drop(10)]
+    end
+
+    it 'shows each snapshot once, a buffer apart, where the grid repeats and skips them' do
+      seqs, starts = shown(true, feed(phase: 0.0161, jitter: 0.001))
+      expect(seqs.each_cons(2).map { |a, b| b - a }.uniq).to eq([1])
+      expect(starts.each_cons(2).map { |a, b| b - a }.max).to be < 1 / 60.0 + 0.0012
+      grid, = shown(false, feed(phase: 0.0161, jitter: 0.001))
+      expect(grid.each_cons(2).map { |a, b| b - a }.uniq.sort).to include(0, 2)
+    end
+
+    it 'shows each heard snapshot once under output latency (kept snapshot times)' do
+      seqs, = shown(true, feed(phase: 0.005, jitter: 0.002, latency: 3 * 800 / 48000.0))
+      expect(seqs.each_cons(2).map { |a, b| b - a }.uniq).to eq([1])
+    end
+
+    it 'keeps the grid when snapshots stop (a stopped render thread still gets frames)' do
+      _, starts = shown(true, feed(phase: 0.003, jitter: 0.0, stop_at: 0.5))
+      late = starts.select { |s| s > 0.7 }
+      expect(late.each_cons(2).map { |a, b| (b - a).round(4) }.uniq).to eq([(1 / 60.0).round(4)])
+    end
+  end
+
   it 'skips only the whole periods a long frame overran, starting at once after a partial one' do
     p = fake(100)
     # Every 10th frame takes 35 ms (3.5 periods): it skips 2 deadlines and

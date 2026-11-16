@@ -115,10 +115,16 @@ module MB
           @draws = Hash.new { |h, k| h[k] = [] }
           @lock = Mutex.new
           @perf = nil
+          @slack = 0.0
         end
 
         # A UI::Perf noting each pane's draws (`ui.perf`), or nil.
         attr_accessor :perf
+
+        # The share of a frame period a pane may be early and still be due
+        # (besides a millisecond): 0, or UI::Pacer::TIMING_WINDOW with
+        # frames timed to snapshots, which come up to that early.
+        attr_accessor :slack
 
         # The painter's target rate (live panes run at it).
         attr_accessor :fps
@@ -161,7 +167,7 @@ module MB
         # overdue first; see #pick.
         def due?(priority, own_rate, explicit, drawn_at, now)
           return true if drawn_at.nil?
-          now - drawn_at >= 1.0 / rate(priority, own_rate, explicit) - 0.001
+          now - drawn_at >= 1.0 / rate(priority, own_rate, explicit) - 0.001 - @slack / @fps
         end
 
         class << self

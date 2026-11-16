@@ -81,7 +81,28 @@ module MB
         # (Thread#wakeup) rather than a timer firing a little early.
         WOKEN_EARLY = 0.001
 
+        # Frames timed to new data (#timing): the share of a period a
+        # frame may move from its deadline to meet the data, the seconds
+        # after the data's predicted time the painter wakes, and the
+        # seconds between looks while the data is late.
+        TIMING_WINDOW = 0.25
+        TIMING_MARGIN = 0.0003
+        TIMING_POLL = 0.0005
+
         attr_reader :state, :period, :deadline, :skipped
+
+        # ui-perf-1 (an option, off by default; FrameRate.snapshot_timed):
+        # an object timing frames to new data (FrameRate::SnapshotTiming:
+        # #mark at each frame's start, #next_after(time) the time new data
+        # becomes visible at or after +time+ or nil, #arrived? whether it
+        # has).  A frame whose next deadline is within TIMING_WINDOW of a
+        # period of new data moves to the data's time (then waits for it to
+        # arrive, at most to the window's end), and the deadlines follow
+        # from there; otherwise frames keep the deadline grid.  Without it
+        # the painter's 60 Hz and 800-frame buffers (also 60 a second) beat:
+        # a frame just before a buffer's snapshot shows the old one, and
+        # the scope's visible updates come 33 ms apart now and then.
+        attr_accessor :timing
 
         # Seconds the deadline spacing is shortened by (the rate trim), and
         # seconds before each deadline the painter asks to wake (the wake
@@ -112,6 +133,7 @@ module MB
           @window_at = nil
           @window_frames = 0
           @woken = false
+          @timing = nil
           self.fps = fps
         end
 
@@ -158,6 +180,7 @@ module MB
           late = [start - @deadline, 0.0].max
           @write = 0.0
           @perf&.begin_frame(start)
+          @timing&.mark
           out = yield start
           done = @clock.call
           event!(:painted)
@@ -177,14 +200,36 @@ module MB
             nxt += missed * step
           end
           @skipped += missed
+          # (timed to new data: the deadline moves to the data's time when
+          # that is within the window, without the wake offset)
+          timed = false
+          limit = nil
+          if @timing && missed == 0
+            win = TIMING_WINDOW * @period
+            t = @timing.next_after(nxt - win)
+            if t && t <= nxt + win
+              limit = nxt + win
+              nxt = t + TIMING_MARGIN
+              timed = true
+            end
+          end
           @deadline = nxt
-          want = nxt - @offset - done
+          want = nxt - (timed ? 0.0 : @offset) - done
           @sleeper.call(want) if want > 0
           woke = @clock.call
           slept = woke - done
           # (woken early: Thread#wakeup ended the sleep before its time)
           @woken = want > 0 && slept < want - WOKEN_EARLY
-          adapt(woke, @woken ? 0.0 : want)
+          if timed && !@woken
+            # (the data late: look again until it comes or the window ends;
+            # the frame's deadline is then when it starts, so the next
+            # deadline follows the data)
+            @sleeper.call(TIMING_POLL) until @timing.arrived? || @clock.call >= limit
+            woke = @clock.call
+            slept = woke - done
+            @deadline = woke
+          end
+          adapt(woke, @woken || timed ? 0.0 : want)
           event!(:woke)
           f = Frame.new(at: start, paint: done - start - @write, write: @write, sleep: want, slept: slept, late: late, skipped: missed,
                         wrote: out.is_a?(String) ? out.bytesize : 0)

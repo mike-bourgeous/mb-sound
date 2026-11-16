@@ -12,6 +12,94 @@ module MB
         # Seconds of written frames #fps counts.
         WINDOW = 2.0
 
+        class << self
+          # ui-perf-1 (an option, off by default): the painter times its
+          # frames to the render thread's snapshots (UI::Pacer#timing,
+          # SnapshotTiming), for screens made after it is set.
+          # MB_SOUND_UI_SNAPSHOT_TIMED=1 turns it on at start.
+          attr_accessor :snapshot_timed
+        end
+        self.snapshot_timed = ENV['MB_SOUND_UI_SNAPSHOT_TIMED'] == '1'
+
+        # When the newest snapshot's data becomes visible, for
+        # Pacer#timing, read on the painter thread from the Feed's newest
+        # snapshot alone (the render thread does nothing more): snapshots
+        # are published at the end of each buffer (with Feed.every_buffer;
+        # else every other one), so the next comes about a buffer after
+        # the newest, and with an output latency they become visible
+        # (Follow#heard) that much later; the times of the last snapshots
+        # seen are kept, so a heard time is exact rather than predicted.
+        # Buffers shorter than MIN_SHARE of a frame period time nothing:
+        # every frame on the grid has a new snapshot then.  Allocates
+        # nothing.
+        class SnapshotTiming
+          MIN_SHARE = 0.5
+
+          # Snapshot times kept (for heard times under output latency).
+          KEEP = 8
+
+          # Seconds without a snapshot after which frames keep the grid (a
+          # paused or stopped render thread).
+          STALE = 0.1
+
+          # +feed+ a Proc returning the screen's Feed; +pacer+ its Pacer.
+          def initialize(feed, pacer)
+            @feed = feed
+            @pacer = pacer
+            @seq = nil
+            @times = Array.new(KEEP, -Float::INFINITY)
+            @pos = 0
+            @last_seq = nil
+            @exact = false
+          end
+
+          # At each frame's start: notes the newest snapshot.
+          def mark
+            s = @feed.call&.latest
+            @seq = s&.seq
+            note(s)
+          end
+
+          # The time at or after +time+ when new data becomes visible, or
+          # nil (no snapshots, stale ones, or short buffers).
+          def next_after(time)
+            s = @feed.call&.latest or return nil
+            note(s)
+            buf = s.buffer_size.to_f / s.sample_rate
+            return nil if buf < MIN_SHARE * @pacer.period || time - s.time > STALE + buf
+            lat = s.latency.to_f
+            # (a kept snapshot heard at or after +time+: exact)
+            best = nil
+            i = 0
+            while i < KEEP
+              h = @times[i] + lat
+              best = h if h >= time && (best.nil? || h < best)
+              i += 1
+            end
+            @exact = !best.nil?
+            return best if best
+            base = s.time + lat
+            base + ((time - base) / buf).ceil * buf
+          end
+
+          # True when the data #next_after named has arrived: a kept
+          # snapshot's heard time, or a snapshot newer than the frame's.
+          def arrived?
+            return true if @exact
+            s = @feed.call&.latest
+            !s.nil? && s.seq != @seq
+          end
+
+          private
+
+          def note(s)
+            return if s.nil? || s.seq == @last_seq
+            @last_seq = s.seq
+            @times[@pos] = s.time
+            @pos = (@pos + 1) % KEEP
+          end
+        end
+
         # Frames per second the painter ran lately: its refreshes over the
         # last WINDOW seconds, the first number of the status line's
         # readout (NAV f, "60/60 Hz"; ui-api-1: `ui.fps` counted written
@@ -133,6 +221,12 @@ module MB
           @rates = PaneRates.new(target, clock: @clock)
           @render_load = nil
           @pacer.on_frame = ->(f) { @rates.observe(f.paint + f.write, @render_load, f.at) }
+          if FrameRate.snapshot_timed
+            @pacer.timing = SnapshotTiming.new(-> { @feed }, @pacer)
+            # (timed frames come up to the window early: panes at the
+            # painter's rate stay due on each of them)
+            @rates.slack = Pacer::TIMING_WINDOW
+          end
         end
 
         # Which of the panes due this frame draw (UI::PaneRates): +items+
