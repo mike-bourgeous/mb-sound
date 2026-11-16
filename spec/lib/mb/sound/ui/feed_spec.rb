@@ -26,6 +26,34 @@ RSpec.describe(MB::Sound::UI::Feed, :aggregate_failures) do
     expect(kept.tracks.map(&:clip)).to eq(['roll'])
   end
 
+  # ui-perf-1: a painter taking the snapshot while the output write blocks
+  # (as with 800-frame buffers at 60/s) comes after that buffer's capture
+  # point, so by default every other buffer publishes; Feed.every_buffer
+  # captures whenever none is pending, so every buffer publishes, with one
+  # capture per snapshot either way (no extra render-thread garbage).
+  it 'publishes every buffer for a painter taking during the write with Feed.every_buffer, one capture per snapshot' do
+    session.ui_feed = feed
+    take_in_write = output.method(:write)
+    f = feed
+    output.define_singleton_method(:write) { |data| take_in_write.call(data).tap { f.take } }
+    captures = 0
+    allow(session).to receive(:ui_parts).and_wrap_original { |m| captures += 1; m.call }
+    run = lambda do |eb|
+      old = described_class.every_buffer
+      described_class.every_buffer = eb
+      p0 = feed.published
+      c0 = captures
+      20.times { session.process_buffer }
+      [feed.published - p0, captures - c0]
+    ensure
+      described_class.every_buffer = old
+    end
+    expect(run.(false)).to eq([10, 10])
+    published, caps = run.(true)
+    expect(published).to be >= 19
+    expect(caps).to eq(published)
+  end
+
   it 'publishes a snapshot after a buffer only when the last one was taken' do
     session.ui_feed = feed
     session.add(220.hz.triangle.at(-12.db), name: :tri)

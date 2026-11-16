@@ -482,6 +482,7 @@ module MB
           @taken = true
           @latest = nil
           @published = 0
+          @parts = @record = nil # (a capture waiting to be published)
           reset_interval
         end
 
@@ -507,43 +508,37 @@ module MB
 
         class << self
           # ui-perf-1 (an option, off by default): capture the parts and
-          # the transport at every buffer and publish at the end of any
-          # buffer during which the painter took the last snapshot.  With
-          # the default handshake a snapshot is captured only at the start
-          # of a buffer after the painter took the last one, so a painter
-          # taking mid-buffer (the usual case) waits a buffer more: 800-frame
-          # buffers come 60 times a second but snapshots 30 (measured with
-          # bin/ui_bench.rb), and the scope and meters change on screen 30
-          # times a second while the painter draws 60.  Costs a capture per
-          # buffer (the parts, a few objects) while a screen is up.
+          # the transport at the end of a buffer's render whenever none is
+          # pending, not only after the painter took the last snapshot, and
+          # publish after the write of any buffer during which the painter
+          # took it.  With the default handshake the capture point (before
+          # the write) comes before the painter could take the snapshot
+          # published after the last write, so 800-frame buffers come 60
+          # times a second but snapshots 30 (bin/ui_bench.rb), and the scope
+          # and meters change on screen 30 times a second while the painter
+          # draws 60.  Captures stay one per snapshot (a pending one waits
+          # for the painter: with short buffers its parts and transport may
+          # be up to a frame old when published), so the render thread
+          # allocates no more than by default.
           # MB_SOUND_UI_EVERY_BUFFER=1 turns it on at start.
           attr_accessor :every_buffer
         end
         self.every_buffer = ENV['MB_SOUND_UI_EVERY_BUFFER'] == '1'
 
-        # True when the painter has taken the last snapshot (the Session
-        # then calls #capture), or every buffer with Feed.every_buffer.
+        # True when no capture is pending and the painter has taken the last
+        # snapshot (the Session then calls #capture), or with
+        # Feed.every_buffer whenever no capture is pending.  (By default
+        # none is ever pending here: a capture is published after the same
+        # buffer's write.)
         def wants_capture?
-          @taken || Feed.every_buffer
+          @parts.nil? && (@taken || Feed.every_buffer)
         end
 
         # The render thread, with the render lock held: reads the parts and
-        # the transport record for the next snapshot.  A capture replacing
-        # one not yet published (Feed.every_buffer) carries its parts' CPU
-        # times into the new parts (ui_parts resets them as it reads).
+        # the transport record for the next snapshot.
         def capture(session)
-          prev = @parts
           @parts = session.ui_parts
-          @parts = Feed.carry_cpu(prev, @parts) if prev
           @record = session.transport_record
-        end
-
-        # +parts+ with the CPU times of +prev+ (by name and kind) added.
-        def self.carry_cpu(prev, parts)
-          parts.map do |q|
-            old = prev.find { |o| o.name == q.name && o.kind == q.kind }
-            old && old.cpu > 0 ? q.with(cpu: q.cpu + old.cpu) : q
-          end
         end
 
         # The render thread, after each buffer is written: accumulates it,
