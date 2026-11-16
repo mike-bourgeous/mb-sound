@@ -52,6 +52,9 @@ module MB
           [:stopped, :start] => :due,
         }.freeze
 
+        # TRANSITIONS by state, then event (looked up without a key Array).
+        NEXT = TRANSITIONS.each_with_object({}) { |((s, e), t), h| (h[s] ||= {})[e] = t }.transform_values(&:freeze).freeze
+
         STATES = TRANSITIONS.flat_map { |(s, _), t| [s, t] }.uniq.freeze
         EVENTS = TRANSITIONS.keys.map(&:last).uniq.freeze
 
@@ -149,7 +152,7 @@ module MB
 
         # Applies +event+, raising StateError for a pair the table lacks.
         def event!(event)
-          to = TRANSITIONS[[@state, event]] or raise StateError, "Pacer: #{event.inspect} in #{@state.inspect}"
+          to = NEXT[@state]&.[](event) or raise StateError, "Pacer: #{event.inspect} in #{@state.inspect}"
           @state = to
         end
 

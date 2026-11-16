@@ -386,6 +386,40 @@ module MB::Sound
         key_to_visible: stats(lat).merge(unseen: unseen, panes: key_panes, each_ms: lat.map { |v| (v * 1000).round(1) }), changed_after_keys: after }
     end
 
+    # --alloc: every object the process allocates for +seconds+ (GC off,
+    # ObjectSpace.trace_object_allocations: a TracePoint, fine in this
+    # diagnostic, never in lib/), from ObjectSpace.dump_all (imemos
+    # included), by site and by file: the first seconds of the recording,
+    # whose timing numbers then include the cost.
+    def self.alloc_map(seconds)
+      require 'objspace'
+      root = File.expand_path('..', __dir__) + '/'
+      GC.start
+      GC.disable
+      gen = GC.count
+      a0 = GC.stat(:total_allocated_objects)
+      ObjectSpace.trace_object_allocations { sleep seconds }
+      total = GC.stat(:total_allocated_objects) - a0
+      sites = Hash.new(0)
+      Dir.mktmpdir('ui_bench_alloc') do |dir|
+        path = File.join(dir, 'dump.json')
+        File.open(path, 'w') { |f| ObjectSpace.dump_all(output: f, since: gen) }
+        File.foreach(path) do |l|
+          o = JSON.parse(l) rescue next
+          type = o['type'] == 'IMEMO' ? "imemo_#{o['imemo_type']}" : o['type']
+          file = o['file'] ? o['file'].sub(root, '').sub(%r{\A.*/gems/}, 'gem ') : '(no site)'
+          sites["#{file}:#{o['line']} #{type}"] += 1
+        end
+      end
+      files = Hash.new(0)
+      sites.each { |k, v| files[k.sub(/:\d* \S+\z/, '')] += v }
+      per_s = ->(h) { h.sort_by { -_2 }.first(25).map { |k, v| [k, (v / seconds).round] } }
+      { seconds: seconds, objects_per_s: (total / seconds).round, sites: per_s.(sites), files: per_s.(files) }
+    ensure
+      ObjectSpace.trace_object_allocations_clear
+      GC.enable
+    end
+
     # The panes a scenario's keys act on (for the sink's key-to-visible).
     KEY_PANES = { design: %i[inspector], typing: %i[repl] }.freeze
   end
@@ -419,6 +453,7 @@ module MB::Sound
       file_watch: [false, 'Record file system calls from the screen\'s threads (UI::FileWatch)'],
       gc_off: [false, 'Diagnosis: GC disabled while recording (what the garbage collector costs the waits; memory grows)'],
       late: [false, 'With --holders: which calls hand the GVL to the render thread late (FastUI::GVLYield.late_log), and the render waits over 2 ms that overlap a GC step'],
+      alloc: [0.0, 'Trace the first this many seconds of the recording: allocation sites by file and site, per second (GC off and traced: the timing numbers include the cost)', 0.0..30.0],
       holders: [false,'Name who holds the GVL while the render thread waits (FastUI::GVLProbe on the render thread, the painter, and worker threads)'],
       quiet_header: [false, 'Skip the header line (one scenario of a multi-scenario run)'],
     ) { |_args, p|
@@ -451,7 +486,7 @@ module MB::Sound
           part = File.join(tmp, "#{sc}.json")
           # (the options parsed, passed on: ARGV is consumed by now)
           args = ['-s', p.seconds.to_s, '--warm', p.warm.to_s, '--size', p.size, '--sink', kind.to_s, '--look', p.look.to_s, '--fps', p.fps.to_s]
-          { bps: '--bps', esc_us: '--esc-us', cell_us: '--cell-us', frame_us: '--frame-us', latency: '-L', sink_cpus: '--sink-cpus', buffer: '--buffer', out_latency: '--out-latency', design_line: '--design-line', key_rate: '--key-rate' }.each do |k, flag|
+          { bps: '--bps', esc_us: '--esc-us', cell_us: '--cell-us', frame_us: '--frame-us', latency: '-L', sink_cpus: '--sink-cpus', buffer: '--buffer', out_latency: '--out-latency', design_line: '--design-line', key_rate: '--key-rate', alloc: '--alloc' }.each do |k, flag|
             v = p.public_send(k)
             args.push(flag, v.to_s) unless v.nil?
           end
@@ -586,6 +621,7 @@ module MB::Sound
         wall0 = UIBench.now
         rec_epoch = Time.now.to_f
         cpu0 = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID)
+        gc0 = GC.stat.slice(:total_allocated_objects, :count, :minor_gc_count, :major_gc_count, :time) # (the whole process's garbage while recording)
         yjit0 = UIBench.yjit_stats
         the_feed = screen ? screen.feed : feed
         pub0 = the_feed.published
@@ -636,7 +672,16 @@ module MB::Sound
           watched = [screen&.thread || plot_thread, screen.is_a?(UI::Tiles) ? screen.instance_variable_get(:@reader) : nil, screen.respond_to?(:pty_thread) ? screen.pty_thread : nil].compact
           UI::FileWatch.start(watched)
         end
-        sleep p.seconds
+        alloc_map = nil
+        if p.alloc > 0
+          # (the first seconds of the recording traced: the keys and the
+          # song still running; the timing numbers then include the cost)
+          a = [p.alloc, p.seconds].min
+          alloc_map = UIBench.alloc_map(a)
+          sleep p.seconds - a
+        else
+          sleep p.seconds
+        end
         blog&.stop
         file_calls = p.file_watch ? UI::FileWatch.stop : nil
         screen ? screen.stop_perf : perf.stop
@@ -673,6 +718,13 @@ module MB::Sound
         published = the_feed.published - pub0
         session.remove_tap(tap) rescue nil
         cpu = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - cpu0
+        gc1 = GC.stat.slice(*gc0.keys)
+        garbage = {
+          objects_per_s: ((gc1[:total_allocated_objects] - gc0[:total_allocated_objects]) / wall).round,
+          gc_per_min: ((gc1[:count] - gc0[:count]) * 60 / wall).round(1),
+          minor: gc1[:minor_gc_count] - gc0[:minor_gc_count], major: gc1[:major_gc_count] - gc0[:major_gc_count],
+          gc_ms_per_min: ((gc1[:time] - gc0[:time]) * 60 / wall).round(1),
+        }
         yjit = yjit0 && UIBench.yjit_stats.to_h { |k, v| [k, v - yjit0[k]] }
         d1 = UI::Perf.run_delays(named.call)
         load1 = UI::Perf.loadavg
@@ -680,6 +732,7 @@ module MB::Sound
         if screen.is_a?(UI::Band)
           rects = { band: Struct.new(:x, :y, :w, :h).new(0, 0, cols, screen.height) }
         end
+
 
         stop_plot = true
         plot_thread&.join(2)
@@ -700,6 +753,7 @@ module MB::Sound
         row = {
           scenario: sc, knob: knob, ui_waves: ENV['MB_SOUND_UI_WAVES'], holders: holder_table, every_buffer: UI::Feed.every_buffer, snapshot_timed: UI::FrameRate.snapshot_timed, echo_wake: UI::Tiles.echo_wake, out_latency: p.out_latency, sink: cfg, size: [rows, cols], buffer: session.buffer_size, seconds: p.seconds, loadavg: [load0, load1],
           yjit: yjit,
+          garbage: garbage, alloc_map: alloc_map,
           run_delay_ms: delay, clean: %i[painter render].all? { |k| delay[k] && delay[k] < wall * 1000 * 0.01 }, cpu_s: cpu.round(2), wall_s: wall.round(2),
           snapshots_per_s: (published / wall).round(1), buffers_per_s: (bufs / wall).round(1),
           file_calls: file_calls && file_calls.map { |m, path, loc, th| [m, path, loc, th] },
@@ -716,6 +770,7 @@ module MB::Sound
         puts format('  clocks: screen started at %.6f, recording from %.6f (%.1f s after the screen; epoch seconds, as --yjit-log stamps)', screen_epoch, rec_epoch, rec_epoch - screen_epoch) if screen_epoch
         perf.headline(s).each { |l| puts "  #{l}" }
         puts "  feed: #{row[:snapshots_per_s]} snapshots/s published, #{row[:buffers_per_s]} render buffers/s"
+        puts "  garbage (whole process): #{garbage[:objects_per_s]} objects/s, GC #{garbage[:gc_per_min]}/min (#{garbage[:minor]} minor, #{garbage[:major]} major), GC time #{garbage[:gc_ms_per_min]} ms/min"
         puts "  YJIT while recording: #{yjit[:compiled_block_count]} blocks compiled in #{(yjit[:compile_time_ns] / 1e6).round(1)} ms, #{yjit[:invalidation_count]} invalidations (#{yjit.select { |k, v| k.start_with?('invalidate_') && v.to_i > 0 }.map { |k, v| "#{k.to_s.delete_prefix('invalidate_')} #{v}" }.join(', ')}), #{yjit[:code_gc_count]} code GCs" if yjit
         puts "  frames: #{s[:refreshes_per_s]}/s refreshed, #{s[:written_per_s]}/s written; lateness p50/p99/max #{s[:late_ms].values_at(:p50, :p99, :max).join('/')} ms; " \
              "write p99/max #{s[:write_ms].values_at(:p99, :max).join('/')} ms (#{s[:writes_over_2ms]} over 2 ms); bytes p50/p95/max #{s[:bytes_per_written].values_at(:p50, :p95, :max).join('/')}; full #{s[:full_redraws]}; GC #{s[:gc][:runs]} (max #{s[:gc][:max_ms]} ms)"
@@ -759,6 +814,12 @@ module MB::Sound
           if (o = ht[:blockers][:other])
             puts format('    %-22s (GC, unwatched threads) held the GVL in %3d render waits >= 1 ms (%6.1f ms, longest %5.2f)', 'other', o[:waits_over_1ms], o[:wait_ms_total], o[:longest_wait_ms])
           end
+        end
+        if (am = row[:alloc_map])
+          puts "  allocations over the recording's first #{am[:seconds]} s (traced, so slower): #{am[:objects_per_s]} objects/s; by file:"
+          am[:files].first(15).each { |f, n| puts format('    %7d/s  %s', n, f) }
+          puts '  by site:'
+          am[:sites].first(20).each { |f, n| puts format('    %7d/s  %s', n, f) }
         end
         kv = sr[:key_to_visible]
         puts "  key to visible (#{kv[:panes].join(', ')} at the sink): #{kv[:n]} keys, p50/p95/max #{kv.values_at(:p50, :p95, :max).join('/')} ms, #{kv[:unseen]} unseen" unless kv[:panes].empty?
