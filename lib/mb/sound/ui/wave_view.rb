@@ -57,8 +57,8 @@ module MB
         # What the preview pane draws live: +label+ of the node's row,
         # +kind+ (:tone or :four_pole), +watch+ (the frozen watch list the
         # tap publishes: [[node, key], ...]), +keys+ (the keys in order),
-        # +display+ (a ToneDisplay or FilterDisplay, kept per node).
-        Target = Data.define(:label, :kind, :watch, :keys, :display)
+        # +view+ (a ToneDisplay or FilterDisplay, kept per node).
+        Target = Data.define(:label, :kind, :watch, :keys, :view)
 
         # Keys published per node kind.
         KEYS = { tone: %i[frequency width scan].freeze, four_pole: %i[cutoff resonance].freeze, lfo: %i[frequency width scan phase].freeze }.freeze
@@ -170,10 +170,10 @@ module MB
           node = group[lane] || group.first
           t = @target
           unless t && t.watch[0] && t.watch[0][0].equal?(node)
-            display = (t && t.display.node.equal?(node)) ? t.display : (kind == :four_pole ? FilterDisplay.new(node) : ToneDisplay.new(node))
+            display = (t && t.view.node.equal?(node)) ? t.view : (kind == :four_pole ? FilterDisplay.new(node) : ToneDisplay.new(node))
             keys = KEYS.fetch(kind)
             watch = keys.map { |k| [node, k].freeze }.freeze
-            t = @target = Target.new(label: info.nodes[info.node].label, kind: kind, watch: watch, keys: keys, display: display)
+            t = @target = Target.new(label: info.nodes[info.node].label, kind: kind, watch: watch, keys: keys, view: display)
           end
           @feed = feed
           tap = (feed.wave_tap ||= Tap.new)
@@ -385,8 +385,9 @@ module MB
             @wave_live = false
             return super unless WaveView.live?
             n = s&.inspector&.selected
+            return if n && draw_envelope(c, n, state)
             t = WaveView.target
-            return super unless n && t && t.label == n.label && t.display.supported?
+            return super unless n && t && t.label == n.label && t.view.supported?
             feed_tap = WaveView.feed&.wave_tap
             vals = (state[:wave_vals] ||= Array.new(Tap::MAX, Float::NAN))
             got = feed_tap && feed_tap.read(t.watch, vals)
@@ -407,6 +408,38 @@ module MB
             end
             nil
           end
+
+          private
+
+          # An envelope row (Plot::Panels::EnvelopeView's rendered trace,
+          # kept per preview data) drawn by the wave kernel with the
+          # playhead as its marker; true if it drew.
+          def draw_envelope(c, n, state)
+            d = n.params&.preview
+            return false unless d.is_a?(Hash) && d[:kind] == :envelope
+            tr = Plot::Panels::EnvelopeView.trace(d)
+            unless state[:env_trace].equal?(tr)
+              state[:env_trace] = tr
+              state[:env_data] = Numo::SFloat.cast(tr.level)
+              state[:env_range] = [[tr.level.min, 0.0].min, [tr.level.max, 1.0].max]
+            end
+            @playhead = !n.live.nil?
+            @wave_live = @playhead # (a live pane while a note's playhead moves, as before)
+            w = c.w
+            h = c.h
+            return true if w <= 0 || h <= 0
+            live = n.live && live_now(n.live)
+            at = live && Plot::Panels::EnvelopeView.playhead(tr, live)
+            mark = at && tr.total > 0 ? ((at / tr.total) * 2 * w).floor.clamp(0, 2 * w - 1) : -1
+            c.clear
+            c.text(0, 0, c.fit("#{tr.label} live", w), :dim)
+            if h > 1
+              lo, hi = state[:env_range]
+              Plot::Wave.draw(c.grid, state[:env_data], x: c.x, y: c.y + 1, w: w, h: h - 1, lo: lo, hi: hi,
+                              fg: MB::Term::Cells.pack(Theme.rgb(:key)) || -1, mark: mark, mark_fg: MB::Term::Cells.pack(Theme.rgb(:warn)) || -1)
+            end
+            true
+          end
         end
 
         # [data, lo, hi, title, marker dot column or nil] for Target +t+ at
@@ -415,21 +448,21 @@ module MB
           case t.kind
           when :lfo
             f, wd, sc, ph = vals[0], vals[1], vals[2], vals[3]
-            d = t.display.cycle(t.display.rate / LFO_POINTS, wd, sc) or return nil
+            d = t.view.cycle(t.view.rate / LFO_POINTS, wd, sc) or return nil
             peak = [d.abs.max.to_f, 1.0].max
             mark = ph.finite? && w > 0 ? ((ph % 1.0) * 2 * w).floor.clamp(0, 2 * w - 1) : nil
             [d, -peak, peak, "#{n.label} #{f.finite? ? Plot::Panels.hz_text(f.abs) : '?'} live, now at #{ph.finite? ? format('%.2f', ph % 1.0) : '?'}", mark]
           when :tone
             f, wd, sc = vals[0], vals[1], vals[2]
-            d = t.display.cycle(f, wd, sc) or return nil
+            d = t.view.cycle(f, wd, sc) or return nil
             peak = [d.abs.max.to_f, 1.0].max
             peak = (peak * 4).ceil / 4.0 if peak > 1.0
             extra = [wd.finite? ? "pw #{format('%.2f', wd)}" : nil, sc.finite? ? "scan #{format('%.2f', sc)}" : nil].compact.join(' ')
             [d, -peak, peak, "#{n.label} #{Plot::Panels.hz_text(f.abs)} live #{extra}".rstrip]
           when :four_pole
             cut, res = vals[0], vals[1]
-            d = t.display.curve(cut, res)
-            r = t.display.range
+            d = t.view.curve(cut, res)
+            r = t.view.range
             [d, r.begin, r.end, "#{n.label} #{Plot::Panels.hz_text(cut.finite? ? cut : 0.0)} reso #{res.finite? ? format('%.2f', res) : '?'} live"]
           end
         end

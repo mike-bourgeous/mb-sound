@@ -84,7 +84,7 @@ RSpec.describe('wave display budgets', :aggregate_failures) do
     info_node = MB::Sound::UI::Inspect::NodeInfo.new(key: 0, label: 'row', role: :osc, count: 1, params: node.param_snapshot, preview: nil, knobs: [].freeze)
     info = MB::Sound::UI::Inspect::InspectInfo.new(track: :t, tracks: [:t].freeze, knobs: [].freeze, nodes: [info_node].freeze, node: 0, code: nil, error: nil)
     snap = MB::Sound::UI::Snapshot.fake.then { |s| s.with(slow: s.slow.with(inspector: info)) }
-    wv.target = wv::Target.new(label: 'row', kind: kind, watch: watch, keys: keys, display: display)
+    wv.target = wv::Target.new(label: 'row', kind: kind, watch: watch, keys: keys, view: display)
     pane = MB::Sound::UI::Panes::Preview.new
     grid = MB::Sound::Plot::Text::NativeCells.new(60, 12)
     canvas = MB::Sound::UI::Canvas.new(grid, 0, 0, 60, 12)

@@ -100,7 +100,7 @@ RSpec.describe(MB::Sound::UI::WaveView, :aggregate_failures) do
       expect(wv.lfo_tone_of(lfo)).to equal(lfo)
       d = MB::Sound::UI::WaveView::ToneDisplay.new(lfo)
       expect(d.why).to be_nil
-      t = MB::Sound::UI::WaveView::Target.new(label: 'lfo', kind: :lfo, watch: [].freeze, keys: wv::KEYS[:lfo], display: d)
+      t = MB::Sound::UI::WaveView::Target.new(label: 'lfo', kind: :lfo, watch: [].freeze, keys: wv::KEYS[:lfo], view: d)
       n = Struct.new(:label).new('lfo')
       data, lo, hi, title, mark = wv.picture(t, [2.0, Float::NAN, Float::NAN, 0.2], n, 40)
       expect(data.length).to eq(wv::LFO_POINTS)
@@ -139,7 +139,7 @@ RSpec.describe(MB::Sound::UI::WaveView, :aggregate_failures) do
       node = MB::Sound::UI::Inspect::NodeInfo.new(key: 0, label: 'osc1', role: :osc, count: 1, params: tone.param_snapshot, preview: nil, knobs: [].freeze)
       info = MB::Sound::UI::Inspect::InspectInfo.new(track: :t, tracks: [:t].freeze, knobs: [].freeze, nodes: [node].freeze, node: 0, code: nil, error: nil)
       snap = MB::Sound::UI::Snapshot.fake.then { |s| s.with(slow: s.slow.with(inspector: info)) }
-      wv.target = MB::Sound::UI::WaveView::Target.new(label: 'osc1', kind: :tone, watch: watch, keys: %i[frequency width scan], display: MB::Sound::UI::WaveView::ToneDisplay.new(tone))
+      wv.target = MB::Sound::UI::WaveView::Target.new(label: 'osc1', kind: :tone, watch: watch, keys: %i[frequency width scan], view: MB::Sound::UI::WaveView::ToneDisplay.new(tone))
       pane = MB::Sound::UI::Panes::Preview.new
       grid = MB::Sound::Plot::Text::NativeCells.new(40, 8)
       canvas = MB::Sound::UI::Canvas.new(grid, 0, 0, 40, 8)
@@ -149,6 +149,30 @@ RSpec.describe(MB::Sound::UI::WaveView, :aggregate_failures) do
       expect(text.lines.first).to include('osc1 110 Hz live pw 0.30')
       expect(text).to match(/[⠁-⣿]/)
       expect(pane.priority).to eq(:live)
+    end
+
+    it 'draws an envelope\'s trace with the playhead as its marker while live' do
+      env = MB::Sound::Envelope.new(attack: 0.01, decay: 0.3, sustain: 0.6, release: 0.4, sample_rate: 48000)
+      params = env.param_snapshot
+      draw = lambda do |live|
+        node = MB::Sound::UI::Inspect::NodeInfo.new(key: 0, label: 'amp env', role: :env, count: 1, params: params, preview: nil, knobs: [].freeze, live: live)
+        info = MB::Sound::UI::Inspect::InspectInfo.new(track: :t, tracks: [:t].freeze, knobs: [].freeze, nodes: [node].freeze, node: 0, code: nil, error: nil)
+        snap = MB::Sound::UI::Snapshot.fake.then { |s| s.with(slow: s.slow.with(inspector: info)) }
+        pane = MB::Sound::UI::Panes::Preview.new
+        grid = MB::Sound::Plot::Text::NativeCells.new(40, 8)
+        pane.draw(MB::Sound::UI::Canvas.new(grid, 0, 0, 40, 8), snap, {})
+        [grid, pane]
+      end
+      wv.mode = :live
+      quiet, pane = draw.(nil)
+      expect(quiet.to_text(:none).lines.first).to include('live')
+      expect(pane.priority).to eq(:list) # (no note: nothing moves)
+      held, pane = draw.({ stage: :segment, segment: 1, position: 0.1, peak: 1.0, at: MB::Sound::UI::Panes::Preview.now }.freeze)
+      expect(held.lines(:truecolor)).not_to eq(quiet.lines(:truecolor)) # (the marker)
+      expect(pane.priority).to eq(:live)
+      wv.mode = :off
+      off, = draw.(nil)
+      expect(off.to_text(:none)).not_to include(' live')
     end
   end
 end
