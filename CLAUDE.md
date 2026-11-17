@@ -183,7 +183,7 @@ The container has no audio device, so check sound-producing code by rendering it
 - Use non-fast-forward merge commits when features are complete
 - The trunk branch is `master-ai` (upstream GitHub trunk is `master`; the old unconnected local history is tagged `local-master-pre-reconcile`)
 - Local development; no push to remote
-- Before merging, check which branch the main checkout (`/app`) is on; the user switches branches there.  If `/app` isn't on `master-ai`, merge in the feature's worktree (`git checkout master-ai` there) instead of switching `/app`.  Write merge messages to a file for `git merge -F file` (`-F -` doesn't read stdin).
+- Before merging, check which branch the main checkout (`/app`) is on; the user switches branches there, and never switch it yourself.  If `/app` isn't on `master-ai`, merge in a detached worktree at master-ai's tip and move the branch there: `git update-ref refs/heads/master-ai <merge sha> <old tip>` when master-ai is checked out nowhere, or `git merge --ff-only` in the checkout that has it.  Don't attach master-ai to a worktree of your own (git then refuses to check it out anywhere else, natively included); if you had to, release it (remove the worktree or switch it to detached) right after the commit (maintainer, 2026-11-17).  Write merge messages to a file for `git merge -F file` (`-F -` doesn't read stdin).
 
 ## Collaboration
 
