@@ -19,6 +19,12 @@ WORKDIR /
 # mb-sound: no audio devices in the container
 ENV OUTPUT_TYPE=null
 
+# Mountain Time is the project's clock for dated folders, notes, and listings
+# (maintainer, 2026-11-17); the link and /etc/timezone are for tools that do
+# not read TZ.
+ENV TZ=America/Denver
+RUN ln -sfn /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
 # Claude
 ENV IS_DEMO=1
 # Per-machine config at /claude, with shared folders mounted inside it by
