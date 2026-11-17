@@ -12,6 +12,8 @@
 #                        mount a host folder read-write (repeatable)
 #   -h, --help           this help
 # Arguments after `--` go to `docker run` as they are (only when creating).
+# Containers run in Mountain Time (TZ=America/Denver); switch an existing one
+# without recreating it: ln -sfn /usr/share/zoneinfo/America/Denver /etc/localtime && echo America/Denver > /etc/timezone
 
 APPNAME=mb-sound
 
@@ -164,6 +166,7 @@ else
 		"${mounts[@]}" \
 		-e CLAUDE_CONFIG_DIR=/claude \
 		-e GH_CONFIG_DIR=/gh \
+		-e TZ=America/Denver \
 		${run_args[@]+"${run_args[@]}"} \
 		$APPNAME /bin/bash
 fi
