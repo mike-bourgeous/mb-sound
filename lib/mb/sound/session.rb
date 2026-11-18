@@ -37,6 +37,7 @@ require_relative 'session/racks'
 require_relative 'session/ui_feed'
 require_relative 'session/warming'
 require_relative 'session/carry'
+require_relative 'session/set_clear'
 
 module MB
   module Sound
@@ -101,6 +102,7 @@ module MB
       include Warming
       include Buses # (strip rules and steps, undo subjects: registered, so include order doesn't matter)
       include Cue
+      include SetClear
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.

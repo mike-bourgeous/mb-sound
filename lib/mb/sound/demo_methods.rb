@@ -23,11 +23,13 @@ module MB
       # GraphIO::Document (`play_form doc.form`); `demo` again returns the
       # one loaded last without loading it again.
       #
-      # The Session must be quiet: with players playing, it says so (the
-      # set's scenes would land on top of them) unless +replace: true+,
-      # which stops everything first (as #panic, quietly).  A demo that
-      # fails to load says so in one line (#load_failure).
-      def demo(name = nil, replace: false)
+      # A new demo replaces the whole set before it (the maintainer,
+      # 2026-11-18: "A new demo should replace the entire previous demo"):
+      # it stops everything and clears the set first (Session#clear_set),
+      # saying what it replaced, all one undo step (undo puts the earlier
+      # set back).  A demo that fails to load says so in one line
+      # (#load_failure).
+      def demo(name = nil)
         last = Session.current.arrangement.demo_document
         return last if name.nil? && last && !Session.current.arrangement.tracks.empty?
         name = (name || :night_bus).to_sym
@@ -36,29 +38,21 @@ module MB
         end
 
         s = Session.current
-        unless s.players.empty?
-          unless replace
-            return MB::Sound.live_error(ArgumentError.new(
-              "demo #{name.inspect} loads into this Session, but #{s.players.keys.map(&:inspect).join(', ')} #{s.players.length == 1 ? 'is' : 'are'} playing " \
-              "(stop :all, fade: 0 first, or demo #{name.inspect}, replace: true)"
-            ))
-          end
-          s.reset_scheduler
-          s.remove(fade: 0)
-          s.process_buffer unless s.realtime?
-        end
-
+        replaced = s.set_summary
         path = File.join(GraphIO.library_presets_dir, "#{name}#{GraphIO::EXTENSION}")
-        begin
-          doc = GraphIO.load(path, session: s)
+        doc = begin
+          s.clear_set(label: "demo #{name.inspect}") {
+            rewind
+            GraphIO.load(path, session: s).tap { |d| s.arrangement.demo_document = d }
+          }
         rescue StandardError => e
           return MB::Sound.live_error(load_failure(name, e))
         end
-        rewind if s.players.empty?
-        s.arrangement.demo_document = doc
+        return nil if doc.nil? # (refused live: an armed or wired track)
 
         arr = s.arrangement
         puts "\e[1mdemo #{name.inspect}\e[0m: #{DEMOS[name]}, paused at bar 1"
+        puts "  replaced #{replaced} (undo puts it back)" unless replaced.empty?
         puts "  tracks  #{arr.tracks.keys.join(' ')}"
         puts "  scenes  #{arr.scenes.keys.join(' ')}"
         puts "  knobs   #{s.knobs.keys.join(' ')}" unless s.knobs.empty?
@@ -75,12 +69,6 @@ module MB
 
       private
 
-      # The name of the demo set +session+ holds (see #demo), or nil.
-      def loaded_demo(session)
-        path = session.arrangement.demo_document&.path
-        path && File.basename(path, GraphIO::EXTENSION).to_sym
-      end
-
       # The error #demo reports when demo +name+ fails to load with +e+:
       # +e+ itself when it reads as one line (a GraphIO::LoadError, an
       # ArgumentError; see ErrorFormat.short?), else (a bug inside the
@@ -93,7 +81,7 @@ module MB
         frame = e.backtrace&.first.to_s[/\A[^:]+:\d+/]
         where = frame ? " at #{frame.delete_prefix("#{File.expand_path('../../..', __dir__)}/")}" : ''
         error = GraphIO::LoadError.new(
-          "demo #{name.inspect} didn't load (the set may be partly there): #{ErrorFormat.summary(e)}#{where}, a bug in mb-sound"
+          "demo #{name.inspect} didn't load (the set may be partly there; undo puts back the set before it): #{ErrorFormat.summary(e)}#{where}, a bug in mb-sound"
         )
         error.set_backtrace(e.backtrace)
         error

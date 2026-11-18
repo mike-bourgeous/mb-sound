@@ -68,6 +68,25 @@ module MB
         Session.current.arrangement.untrack(name)
       end
 
+      # Clears the set (fixes-15): stops everything now and takes out the
+      # tracks, scenes, flow, knobs, buses, routes, mute groups, clocks,
+      # racks, and master chain, so a new set starts empty (a demo does
+      # this first).  The tempo, meter, key, tuning, and master gain stay.
+      # One undo step: undo puts the whole set back, its players at the
+      # next bar.  Refused while a track is armed or wired.  Prints what
+      # it cleared.
+      #
+      #     clear_set
+      #     undo               # the set is back
+      def clear_set
+        s = Session.current
+        what = s.set_summary
+        return nil if s.clear_set.nil?
+
+        puts "clear_set: #{what.empty? ? 'the set was empty' : "cleared #{what}"} (undo puts it back)"
+        true
+      end
+
       # Gives track +name+ the effect insert +effects+ (Arrangement::Fx): a
       # library effect (`L.fx.reverb.hall`, `:hall`, `{ reverb: :plate }`),
       # a Proc taking the signal, or a list of those, processing what its

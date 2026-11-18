@@ -38,13 +38,47 @@ RSpec.describe(MB::Sound::DemoMethods) do
     expect(session.players.keys).to include(:drums, :reese, :sub)
   end
 
-  it 'asks before loading over players, and replace: true stops them' do
+  it 'stops what plays and loads paused at bar 1' do
     within { MB::Sound.bg(:hum, 110.hz.at(0.1), on: :now) }
     session.process_buffer(800)
-    expect { within { MB::Sound.demo(:night_bus) } }.to raise_error(ArgumentError, /:hum is playing \(stop :all, fade: 0 first, or demo :night_bus, replace: true\)/)
-    expect { within { MB::Sound.demo(:night_bus, replace: true) } }.to output(/paused at bar 1/).to_stdout
+    expect { within { MB::Sound.demo(:night_bus) } }.to output(/paused at bar 1/).to_stdout
     expect(session.players).to be_empty
     expect(session.transport.position).to eq(0)
+  end
+
+  # fixes-15 (the maintainer, 2026-11-18: "A new demo should replace the
+  # entire previous demo"): Night Bus then Tunnel Vision raised a
+  # NoMethodError, then a name clash (Night Bus's knob :echo, Tunnel
+  # Vision's bus :echo)
+  it 'replaces the demo before it, playing or not, and undo puts it back' do
+    expect { within { MB::Sound.demo(:night_bus) } }.to output(/paused at bar 1/).to_stdout
+    within { MB::Sound.go(:drop) }
+    10.times { session.process_buffer(800) }
+    expect(session.players.keys).to include(:drums, :hook)
+    night = session.arrangement
+
+    expect { within { MB::Sound.demo(:tunnel_vision) } }.to output(
+      /demo :tunnel_vision.*paused at bar 1\n  replaced demo :night_bus \(12 tracks, 12 scenes, 5 knobs, a master chain, and a flow\) \(undo puts it back\)/
+    ).to_stdout
+    expect(session.players).to be_empty
+    expect(session.transport.position).to eq(0)
+    expect(session.arrangement.tracks.keys).to eq(%i[pad pluck drums reese sub neuro boom riser])
+    expect(session.knobs.keys).to eq(%i[cut grit space air lift])
+    expect(session.bus_names).to eq(%i[hall echo])
+    expect(session.knobs[:cut].spec.range).to eq(150.0..8000.0)
+
+    within { MB::Sound.undo(on: :now) }
+    4.times { session.process_buffer(800) }
+    expect(session.arrangement).to equal(night)
+    expect(session.knobs.keys).to eq(%i[cut space echo air morph])
+    expect(session.bus_names).to eq([])
+    expect(session.players.keys).to include(:drums, :hook) # (its players back, on: :now)
+    expect(within { MB::Sound.demo }.path).to end_with('night_bus.mbg.rb')
+
+    within { MB::Sound.redo!(on: :now) }
+    4.times { session.process_buffer(800) }
+    expect(session.arrangement.tracks.keys).to start_with(:pad, :pluck)
+    expect(session.bus_names).to eq(%i[hall echo])
   end
 
   it 'suggests names for unknown demos and lists the demos' do
