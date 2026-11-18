@@ -441,9 +441,10 @@ module SessionFuzz
 
   # +lines+ without the swaps of a track that may have stopped by the time
   # the swap lands (+events+, see #track_events: no start after the stop
-  # landed and by the swap's call): a swap of a track that isn't playing is
-  # a user error by design (PlaybackMethods#swap's guard when it's called,
-  # ClipSwaps' "No background player" where it lands), and those were
+  # landed and by the swap's call): a swap of a track that stops between
+  # its call and its landing is a user error by design (ClipSwaps' "No
+  # background player" where it lands; since gen-ux-1 a swap called on a
+  # track that isn't playing starts it, as bg), and those were
   # generated songs' errors (INVALID).  Swaps land at their call `on: :now`,
   # else within a bar.  Dropped, not drawn otherwise, so every other seed
   # keeps its song (fix-batch23: batch 23's soak had 3 such songs in 48,

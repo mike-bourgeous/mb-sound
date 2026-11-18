@@ -616,7 +616,10 @@ module MB
       # swapped too, and play the new clip when resumed.  On a track (see
       # ArrangementMethods#track), the new clip becomes the track's clip,
       # as with `bg :name, clip`, so `bg :name` or a scene's :on after a
-      # stop plays it.  See Session#swap.
+      # stop plays it; a track that isn't playing (stopped, or its
+      # one-shot clip ended) starts with the new clip, exactly as `bg
+      # :name, clip` at the same launch point (a line says so in the
+      # console).  See Session#swap.
       #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
@@ -650,6 +653,7 @@ module MB
           ))
         end
         clips = clips.call if clips.is_a?(Library::Entry) && clips.kind != :generator
+        given = clips
 
         name = player_name(name)
         if clips.is_a?(Library::Entry) || clips.is_a?(Sequence::Clip)
@@ -658,14 +662,22 @@ module MB
           track = name.is_a?(Symbol) && Session.current.arrangement.tracks[name]
           clips = track ? Library::Generators.track_clip(clips, name, Session.current, reuse: true) : (clips.is_a?(Library::Entry) ? clips.call : clips)
         end
-        # (ux-notes-1: the maintainer's `swap :growl, riff` after a one-shot
-        # clip had ended the track; Session#swap said only "No background
-        # player :growl is playing or stopped")
+        # A track that isn't playing (stopped, never started, or a one-shot
+        # clip ended) starts with the new clip, as `bg :name, clip`, at the
+        # same launch point (gen-ux-1, the maintainer, 2026-11-17: "swap on
+        # a track that's not playing should act like bg instead of
+        # displaying an error"; since ux-notes-1 it was an error naming bg)
         session = Session.current
-        if name.is_a?(Symbol) && session.arrangement.tracks[name]&.patch? && !session.playing_after_queue?(name) && !session.resumable?(name)
-          return MB::Sound.live_error(ArgumentError.new(
-            "swap #{name.inspect}: track #{name.inspect} isn't playing (a one-shot clip ended, or it was stopped); bg #{name.inspect}, clip plays a clip on its instrument"
-          ))
+        if name.is_a?(Symbol) && (track = session.arrangement.tracks[name]) && !session.playing_after_queue?(name)
+          unless clips.is_a?(Hash)
+            $stdout.puts "swap #{name.inspect}: #{name.inspect} wasn't playing; starting it with the new clip (as bg #{name.inspect}, clip)" if MB::Sound.live?
+            return bg(name, given, at: point.given? ? point : nil)
+          end
+          if track.patch? && !session.resumable?(name)
+            return MB::Sound.live_error(ArgumentError.new(
+              "swap #{name.inspect}: track #{name.inspect} isn't playing, so there are no clips to pair with old => new; bg #{name.inspect}, clip plays a clip on its instrument"
+            ))
+          end
         end
         session_command(name, label: "swap #{name.inspect}", kind: :swap) { |session, time|
           session.swap(name, clips, at: point, start_time: point.given? ? nil : time)

@@ -627,11 +627,36 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect { in_session { MB::Sound.play(:bowl, stream) } }.to raise_error(ArgumentError, /play takes one sound \(got 2\); for a clip on :bowl's instrument: bg :bowl, clip/)
     end
 
-    it 'says to bg a track whose one-shot clip ended, and a comma for `swap :bowl. seq(...)`' do
+    it 'starts a track whose one-shot clip ended or that was stopped, as bg, and says a comma for `swap :bowl. seq(...)` (gen-ux-1)' do
       in_session { MB::Sound.swap(:bowl, MB::Sound.seq(MB::Sound::C3).n16, at: :now) }
       @session.process_buffer while @session.playing_after_queue?(:bowl) && @session.frame < 48_000 * 30
       expect(@session.playing_after_queue?(:bowl)).to eq(false)
-      expect { in_session { MB::Sound.swap(:bowl, riff) } }.to raise_error(ArgumentError, /track :bowl isn't playing .*bg :bowl, clip/)
+      # (the maintainer, 2026-11-17: "swap on a track that's not playing
+      # should act like bg instead of displaying an error")
+      entry = in_session { MB::Sound.swap(:bowl, riff, at: :now) }
+      expect(entry.kind).to eq(:bg)
+      expect(@session.playing_after_queue?(:bowl)).to eq(true)
+      @session.process_buffer
+      expect(@session.arrangement.tracks[:bowl].clip).to eq(riff)
+      expect(@session.players[:bowl]).not_to include('MIDI')
+      # Stopped: starts again with the new clip, at swap's launch point
+      in_session { MB::Sound.stop(:bowl, fade: 0) }
+      @session.process_buffer
+      expect(@session.playing_after_queue?(:bowl)).to eq(false)
+      other = MB::Sound.seq(MB::Sound::E3, MB::Sound::G3).n8.loop
+      bar = @session.transport.bar
+      entry = in_session { MB::Sound.swap(:bowl, other, on: :bar) }
+      expect(entry.kind).to eq(:bg)
+      expect(entry.to_s).to match(/lands #{bar + 1}:1/)
+      @session.process_buffer until @session.transport.bar > bar
+      @session.process_buffer
+      expect(@session.players.keys).to include(:bowl)
+      expect(@session.arrangement.tracks[:bowl].clip).to eq(other)
+      # old => new pairs need clips playing
+      in_session { MB::Sound.stop(:bowl, fade: 0) }
+      @session.process_buffer
+      @session.forget(:bowl) if @session.resumable?(:bowl)
+      expect { in_session { MB::Sound.swap(:bowl, other => riff) } }.to raise_error(ArgumentError, /isn't playing, so there are no clips to pair.*bg :bowl, clip/)
       e = (MB::Sound.module_eval('swap :bowl. seq(C2)') rescue $!)
       expect(MB::Sound::ErrorFormat.summary(e)).to end_with('(did you mean :bowl, seq(...) (a comma after :bowl, not a period)?)')
     end
