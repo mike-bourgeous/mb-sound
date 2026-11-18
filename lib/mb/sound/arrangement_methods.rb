@@ -68,6 +68,25 @@ module MB
         Session.current.arrangement.untrack(name)
       end
 
+      # Clears the set (fixes-15): stops everything now and takes out the
+      # tracks, scenes, flow, knobs, buses, routes, mute groups, clocks,
+      # racks, and master chain, so a new set starts empty (a demo does
+      # this first).  The tempo, meter, key, tuning, and master gain stay.
+      # One undo step: undo puts the whole set back, its players at the
+      # next bar.  Refused while a track is armed or wired.  Prints what
+      # it cleared.
+      #
+      #     clear_set
+      #     undo               # the set is back
+      def clear_set
+        s = Session.current
+        what = s.set_summary
+        return nil if s.clear_set.nil?
+
+        puts "clear_set: #{what.empty? ? 'the set was empty' : "cleared #{what}"} (undo puts it back)"
+        true
+      end
+
       # Gives track +name+ the effect insert +effects+ (Arrangement::Fx): a
       # library effect (`L.fx.reverb.hall`, `:hall`, `{ reverb: :plate }`),
       # a Proc taking the signal, or a list of those, processing what its
@@ -81,7 +100,17 @@ module MB
       #     fx :keys, L.fx.reverb.hall
       #     fx :keys, [:juno1, :hall], on: :bar
       #     fx :keys, :off
+      #
+      # A block is not an effect: Ruby would drop it silently (the
+      # maintainer's `fx(:sub) { it.pan(1) }` changed nothing), so a block
+      # warns once per line, naming the Proc spelling, and is ignored.
       def fx(name, effects = Arrangement::KEEP_FX, at: nil, on: nil, in: nil)
+        if block_given?
+          n = name.inspect
+          Internal.warn_once_per_site(:fx_block,
+            "fx #{n} takes its effect as an argument, not a block, so the block was ignored#{' and nothing changed' if effects.equal?(Arrangement::KEEP_FX)}; " \
+            "give a Proc taking the track's signal: fx #{n}, ->(s) { s.pan(1) }")
+        end
         arrangement = Session.current.arrangement
         if effects.equal?(Arrangement::KEEP_FX)
           tr = arrangement.tracks[name] or raise ArgumentError, "fx #{name.inspect}: no track #{name.inspect}#{GraphIO.suggest(name, arrangement.tracks.keys)}"
@@ -148,7 +177,15 @@ module MB
           entry = seek(section, at: point)
           others = pb.sections_for_scene(name) - [section]
           also = others.empty? ? '' : "; also #{others.map(&:inspect).join(', ')}: go #{name.inspect}, section: #{others.first.inspect}"
-          puts "\e[2mgo #{name.inspect}: the flow seeks to its section #{section.inspect} (#{entry.respond_to?(:lands) ? entry.lands : 'queued'}) and plays on from there#{also}\e[0m" if entry
+          if entry
+            # (fixes-15: "(101:1)" alone read as where the section is; it
+            # is where the seek lands, here before the section's place)
+            lands = entry.respond_to?(:lands) ? entry.lands : nil
+            to = pb.seek_target(section)
+            way = to && lands ? (to < lands.pos ? ' back' : to > lands.pos ? ' ahead' : '') : ''
+            place = to ? " (#{arr.session.stamp(to)})" : ''
+            puts "\e[2mgo #{name.inspect}: #{lands ? "at #{lands}" : 'when it lands'} the flow seeks#{way} to its section #{section.inspect}#{place} and plays on from there#{also}\e[0m"
+          end
           return entry
         end
 

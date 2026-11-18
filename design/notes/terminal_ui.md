@@ -232,13 +232,13 @@ ui.keyboard.base = 60     # z is C4 (octaves; also - and +)
 
 ## The usability sweep (ux-1, 2026-10-17)
 
-The maintainer's notes from testing natively in Konsole, item by item (brief: /app/tmp/briefs/ux-1.md).
+The maintainer's notes from testing natively in Konsole, item by item (brief: /app/workbench/briefs/ux-1.md).
 
 - **Bugs**: pane bodies follow their canvas (stale panes after any relayout); leaving KEYS focuses the REPL (NAV i went back into KEYS, where Up/Down are velocity) and kitty-only key bytes reach Reline as legacy; `vis` and play's plot go to a scope/spectrum slot (`Tiles#plot_pane`, `Band#plot_pane`, `PlaybackMethods#visualize_in_ui`) instead of drawing over the screen; KEYS Enter's capture and step entry's swap run console lines through `UI.run_line` (journaled, undoable, take lines), one per armed track, a broken patch named in the messages pane with its line (`UI.error_origin`).
 - **Prompt and line editing**: see "Using it" above (`UI::Prompt`, `UI::EnterSubmits`).
 - **Tiles**: the band at the bottom by default; rules between stacked panes (box-drawing joins, `hrule` glyph, titles set into the rule, the focused pane's border in the key color); `?` in NAV shows the keys (`Tiles::KEY_HELP`, also on help :ui); warnings and live errors go to `UI.messages` while a screen is up (`:messages` pane, "! n (m)" on the status line, NAV m, a band strip, a summary on `ui off`; kept off the terminal when the screen owns it); `ui.fps` is measured (frames written per second), `ui.target_fps` the painter's rate, NAV f a readout, `ui.stats[:pane_cpu_ms]`; `ui :wall` for big terminals; the keyboard pane scales to a piano (2-5 columns per white key, velocity fill, neighbor octaves dimmed); `keys` and F2; `fg` and `jobs` after Ctrl-Z.
 - **Scripts**: `--ui [LAYOUT]` plays songs (`:show`) and synths/effects (`:play`, KEYS mode) in a console-less screen (`Tiles` with `repl: :none`, `on_key:`; `Session#paused=` for Space); live synth/effect scripts take Esc (all notes off, twice all sound off), q, l, `MIDI_LOG=1`, `MIDI_STUCK=s` (`ScriptRunner::LiveKeys`).
-- `debug_dump` writes the console's state to tmp/debug/<time>/.
+- `debug_dump` writes the console's state to /app/workbench/data/sessions/debug/<time>/.
 
 - **Plots and tables**: `overlay a, b` / `overlay saw: a, square: b` (labels and titles inferred; `overlay_chart` for figures; the Hash-of-Hashes form is gone), and one themed table, `MB::Sound::Table`, for `table`, processing matrices, and the scripts (no `MB::U.table` left).
 
@@ -399,7 +399,7 @@ The maintainer's answers to round 4 (workbench brief ux-r4b.md, with two correct
 
 **Tweak versions**: `tweak` names copies `:<root>_v2`, `_v3` (root: the first clip's name as a Ruby name, `<track>_slot<n>` unnamed), the lineage in `Arrangement#tweak_history`, `ClipInfo#history` (the clip detail pane's second line, "bass_a → transpose: 2 → :reverse"), and the undo label (`tweak :bass, transpose: 2 -> :bass_a_v2`).
 
-**Matrix ▶ (decided 2026-10-18, gesture-curves)**: ▶ home column, dim ▷ where another scene would keep the slot playing, ◆ queued: `UI::Panes::Clips.play_marks` `:will_play` (default; `PLAY_MARKS` table) or `:all`, `:current` (only the home column: the current scene's if it gives the playing slot, else the first column showing it); captures for the maintainer's choice in /app/tmp/ux-r4b/matrix_compare/ (made by its make_captures.rb).
+**Matrix ▶ (decided 2026-10-18, gesture-curves)**: ▶ home column, dim ▷ where another scene would keep the slot playing, ◆ queued: `UI::Panes::Clips.play_marks` `:will_play` (default; `PLAY_MARKS` table) or `:all`, `:current` (only the home column: the current scene's if it gives the playing slot, else the first column showing it); captures for the maintainer's choice in /app/workbench/data/ui/work/2026-10-18-ux-r4b/matrix_compare/ (made by its make_captures.rb).
 
 | lesson | mechanism | class ruled out | status |
 |---|---|---|---|

@@ -242,6 +242,24 @@ module MB
           }
         end
 
+        # Where #seek_now(+name+) would move the timeline now (whole notes),
+        # or nil when only a generate step plays the section (found when
+        # the seek lands) or the form has ended.  For messages (fixes-15:
+        # `go :build` said "(101:1)", where the seek lands, and the
+        # maintainer read it as where the build is; it went back to 17:1).
+        def seek_target(name)
+          target = control_target(name)
+          @lock.synchronize {
+            return nil if @ended
+            index, pos, = @where[name]
+            return pos if pos
+            index ||= target[0] == :label ? @form.labels[name] : first_play(name)
+            index && score_positions[index]
+          }
+        rescue ArgumentError
+          nil
+        end
+
         # Moves the timeline to +name+ (a section or label of the form) and
         # plays the form from there: where it last started or is set to
         # start next, else where it sits in the form played straight

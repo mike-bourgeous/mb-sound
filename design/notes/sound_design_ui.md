@@ -17,7 +17,7 @@ The tiled screen for designing sounds (sound-design-ui-1, 2026-10-26): the maint
 
 Design inputs: the library design draft (workbench `research/library-design/design-draft.md` and STATE.md: picker with find-as-you-type, Enter doing the likely action named on the status line, a shortcut per action, auditions on CUE only, a side panel, save key flow, A/B, dirty state, favourites; morph/randomize later), terminal_ui.md (tiles, panes as Ruby kinds, layouts as data, pane modes, the command bus), params.md (the Param record), racks.md (the inspection protocol: `param_info`, `param_snapshot`, `Plot::Panels.preview`).
 
-Mock-up captures (with a real patch: `preset :dnb_reese` on a track with its cutoff on a knob, and a pad reading the same knob) at 120x40 and 236x80, with a value prompt and a second track: `/app/tmp/sound_design_mockup/` (made by its `make_captures.rb`, which also lists the open questions in its README).
+Mock-up captures (with a real patch: `preset :dnb_reese` on a track with its cutoff on a knob, and a pad reading the same knob) at 120x40 and 236x80, with a value prompt and a second track: `/app/workbench/data/ui/work/2026-10-26-sound-design-mockup/` (made by its `make_captures.rb`, which also lists the open questions in its README).
 
 ## Using it
 

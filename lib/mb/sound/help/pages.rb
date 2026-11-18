@@ -382,6 +382,34 @@ module MB
         end
       end
 
+      # `help Owner#name` for a method the owner doesn't have (see
+      # Help.owner_method_page): what was asked, and the names it might be
+      # (+spelled+: the owner's methods spelled like it; +others+: [label,
+      # DocIndex::Entry] pairs of other owners of the name).
+      class MissPage
+        include Page
+        include Text
+
+        def title = @text
+
+        def initialize(text, owner, spelled, others)
+          @text = text
+          @owner = owner
+          @spelled = spelled
+          @others = others
+        end
+
+        def to_s
+          d = Doc.new
+          d.title("help #{@text}")
+          name = @text[/[#.]([^#.]+)\z/, 1]
+          d.para(@owner ? "#{@owner} has no method #{name}." : "No class or module named #{@text[/\A[^#.]+(?=[#.][^#.]+\z)/]}.")
+          rows = @spelled.map { |s| ["help #{s}", ''] } + @others.map { |label, e| ["help #{label}", e.summary] }
+          d.heading('Did you mean').rows(rows, max_label: 40) unless rows.empty?
+          d.to_s
+        end
+      end
+
       # Search results (`help /reson/`) for a Regexp over names and doc comments.
       class SearchPage
         include Page

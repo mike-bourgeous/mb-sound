@@ -686,6 +686,17 @@ module SessionFuzz
       else "bg :#{s.bg_name}, 220.hz.saw.note(\"x\").with_meta(cutoff: 9000, rack: :x, gain: 99).lp4(900).note(\"darker\") * 0.1#{s.on}"
       end
     },
+    ->(s) {
+      # (fixes-15, the maintainer's 2026-11-16 note "cannot load tunnel
+      # vision") a set document declaring the song's knob :cut again with
+      # a range and value in Hz, loaded mid-song: the knob takes the typed
+      # value as its number (a NoMethodError before), and what reads it
+      # follows
+      next unless s.knob
+
+      cut = s.pick(['(150.hz..8000.hz).at(2400.hz)', '(100.hz..5000.hz).at(600.hz)'])
+      "GraphIO.load(%(graph \#{GraphIO::FORMAT}, name: \"cut\", kind: :set\\nknob :cut, #{cut}\\n), session: Session.current)"
+    },
     # (new commands go here, at the end)
   ].freeze
 
