@@ -28,6 +28,9 @@ default:
   file: 20
   example: 8
 files:
+  spec/bin/ui_bench_spec.rb:
+    file: 30
+    reason: three real bin/ui_bench.rb processes (each 5-7 s of startup, UI and YJIT warm-up, a demo set's load, then 1.5 s recorded), the tiles against a model terminal, the dropout scenario with the device-queue model, and ui :wall with console lines typed; 22.4 s at PARALLEL=8 on the 7950X container under load (x1.07 = 21 reference seconds) against the default 20 (ui-perf-2 round 5, 2026-11-17)
   spec/bin/midi/midi_roll_spec.rb:
     file: 24
     reason: 27 examples running bin/midi/midi_roll.rb (8.0-8.8 s alone in the Mac container); 48.4 s in batch 30's idle PARALLEL=8 suite at x2.34 = 20.7 reference seconds against the default 20. No regression from omnibus19 (alternating runs at 065847ce 8.8/8.5 s vs 2c1bd815 8.0/8.0 s, 2026-11-11), so it sits at the default's edge under contention
