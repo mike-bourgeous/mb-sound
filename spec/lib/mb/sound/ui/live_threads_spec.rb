@@ -40,20 +40,27 @@ RSpec.describe('live threads with a screen up', :aggregate_failures) do
 
   # Threads started since +base+, sampled every 20 ms for +seconds+: each
   # one neither the render thread nor a yielder nor allowed, with where it
-  # was made.
+  # was made.  A thread counts when two samples in a row see it so: a
+  # worker joins the yielders in its first lines (ChartWorker#run), and a
+  # loaded machine once let one sample land before that (the chart
+  # worker, seed 47008 of the UI directory, 2026-11-18).
   def stragglers(base, seconds)
     gy = MB::Sound::FastUI::GVLYield
     found = {}
+    seen = {}.compare_by_identity
     t0 = MB::U.clock_now
     while MB::U.clock_now - t0 < seconds
       yielders = gy.yielders
+      now = {}.compare_by_identity
       (Thread.list - base - [@pump]).each do |t|
         next if t.equal?(@session.render_thread) || yielders.include?(t) || ALLOWED_LIVE_THREADS.key?(t.name.to_s)
         next if t.inspect.include?('/spec/') # (the spec's own: the fake terminal's reader)
         next unless t.alive?
 
-        found[t.name.to_s] ||= t.inspect[%r{/\S+:\d+}]
+        now[t] = true
+        found[t.name.to_s] ||= t.inspect[%r{/\S+:\d+}] if seen.key?(t)
       end
+      seen = now
       sleep 0.02
     end
     found

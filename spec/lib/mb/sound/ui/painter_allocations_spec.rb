@@ -52,6 +52,17 @@ RSpec.describe('the painter\'s allocations per frame', :aggregate_failures) do
     @tiles = ui::Tiles.new(layout: ui.tiles_layout_named(layout), input: @term.slave, output: @term.slave, repl: :none,
                            probe: false, size: [40, 140], clock: -> { 1.0 + frame / 60.0 }, source: -> { snaps[frame % snaps.length] },
                            keyboard: ui::Keyboard.new(out: UIHelpers::NullKeyboardOut.new))
+    # The picker's head and path cache renews every Picker::KEEP seconds
+    # (2), so a renewal could land in the measured frames: an earlier
+    # example's cache aging out there gave 50 objects a frame from
+    # Library::Index#all_entries and Library.document_paths (the sound
+    # screen, seed 47008 of the UI directory on a loaded machine; the same
+    # guard as inspector_allocations_spec's).  The detail line's memo
+    # starts empty too, so the warm-up keeps the picked entry's line.
+    stub_const('MB::Sound::UI::Picker::KEEP', 1e9)
+    ui::Picker.instance_variable_set(:@cache, nil)
+    details = ui::Panes::Picker::DETAILS
+    details.keys.each { |k| details.delete(k) }
     @tiles.start(thread: false)
     @tiles.enter(focus) if focus
     80.times { frame += 1; @tiles.refresh } # (warm: caches, first draws)
