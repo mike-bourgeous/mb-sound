@@ -755,9 +755,51 @@ module MB::Sound
         pub0 = the_feed&.published.to_i
         dev = session.output.is_a?(UIBench::DeviceModel) ? session.output : nil
         under0 = dev&.underruns.to_i
+        # (a real DeviceOutput, e.g. OUTPUT_TYPE=device AUDIO_BACKEND=null:
+        # its own underrun count, polled 20 times a second for their times)
+        real = !dev && session.output.respond_to?(:underruns) && session.output.respond_to?(:queue_limit) ? session.output : nil
+        real_log = []
+        real_q0 = real&.queue_limit
+        poll_stop = false
+        real_poll = real && Thread.new do
+          Thread.current.name = 'ui_bench device poll'
+          last = real.underruns
+          until poll_stop
+            sleep 0.05
+            u = real.underruns
+            if u != last
+              real_log << [(UIBench.now - wall0).round(2), u - last, real.queue_limit, (session.transport.bar_at(session.transport.position).to_f.round(2) rescue nil)]
+              last = u
+            end
+          end
+        end
         cpu_th0 = { render: UIBench.thread_cpu(session.render_thread), painter: UIBench.thread_cpu(screen&.thread || plot_thread) }
         bufs = 0
         tap = session.add_tap { |_| bufs += 1 }
+        during = nil
+        if p.during
+          # (typed as he typed commands: each at its time, into the REPL
+          # pane's Pry, or a plain thread with no screen)
+          cmds = p.during.split(' ;; ')
+          during = Thread.new do
+            Thread.current.name = 'ui_bench during'
+            cmds.each_with_index do |c, i|
+              t = wall0 + p.seconds * (i + 1) / (cmds.length + 1)
+              d = t - UIBench.now
+              sleep d if d > 0
+              if screen.is_a?(UI::Tiles) && screen.host
+                screen.host.write("#{c}\r")
+              else
+                begin
+                  MB::Sound.module_eval(c)
+                rescue => e
+                  warn "ui_bench --during: #{e.class}: #{e.message}"
+                end
+              end
+              $stderr.puts format('ui_bench --during at %.2f s: %s', UIBench.now - wall0, c)
+            end
+          end
+        end
         holders = nil
         blog = nil
         yield0 = nil
@@ -777,7 +819,7 @@ module MB::Sound
             break if th.length >= 6
             n = t.name.to_s
             next if th.value?(t) || n.empty?
-            th[n.sub(/\Amb-sound /i, '').tr(' ', '_').to_sym] = t if n.match?(/render|scheduler|poll|preview|worker/i) && !n.match?(/\AMB::Sound::Session render/)
+            th[n.sub(/\Amb-sound /i, '').tr(' ', '_').to_sym] = t if n.match?(/render|scheduler|poll|preview|worker|warm|during/i) && !n.match?(/\AMB::Sound::Session render/)
           end
           FastUI::GVLProbe.start(th.values)
           holders = th.keys
@@ -805,30 +847,6 @@ module MB::Sound
           # input, the pty reader; the REPL's Pry thread is the console's)
           watched = [screen&.thread || plot_thread, screen.is_a?(UI::Tiles) ? screen.instance_variable_get(:@reader) : nil, screen.respond_to?(:pty_thread) ? screen.pty_thread : nil].compact
           UI::FileWatch.start(watched)
-        end
-        during = nil
-        if p.during
-          # (typed as he typed commands: each at its time, into the REPL
-          # pane's Pry, or a plain thread with no screen)
-          cmds = p.during.split(' ;; ')
-          during = Thread.new do
-            Thread.current.name = 'ui_bench during'
-            cmds.each_with_index do |c, i|
-              t = wall0 + p.seconds * (i + 1) / (cmds.length + 1)
-              d = t - UIBench.now
-              sleep d if d > 0
-              if screen.is_a?(UI::Tiles) && screen.host
-                screen.host.write("#{c}\r")
-              else
-                begin
-                  MB::Sound.module_eval(c)
-                rescue => e
-                  warn "ui_bench --during: #{e.class}: #{e.message}"
-                end
-              end
-              $stderr.puts format('ui_bench --during at %.2f s: %s', UIBench.now - wall0, c)
-            end
-          end
         end
         alloc_map = nil
         if p.alloc > 0
@@ -875,8 +893,13 @@ module MB::Sound
           FastUI::GVLProbe.stop
         end
         published = the_feed ? the_feed.published - pub0 : 0
+        if real_poll
+          poll_stop = true
+          real_poll.join(1)
+          device = { real: true, underruns: real_log.sum { _1[1] }, per_min: (real_log.sum { _1[1] } * 60.0 / wall).round(1), queue_ms: [real_q0, real.queue_limit].map { |q| (q * 1000.0 / real.sample_rate).round }, log: real_log }
+        end
         cpu_share = cpu_th0.to_h { |k, v| c1 = UIBench.thread_cpu(k == :render ? session.render_thread : (screen&.thread || plot_thread)); [k, v && c1 ? ((c1 - v) / wall * 100).round(1) : nil] }
-        device = nil
+        device ||= nil
         if dev
           # Underruns while recording, each with the buffer whose render
           # (or write) was running when the pull found the queue short
@@ -944,7 +967,9 @@ module MB::Sound
         puts format('  clocks: screen started at %.6f, recording from %.6f (%.1f s after the screen; epoch seconds, as --yjit-log stamps)', screen_epoch, rec_epoch, rec_epoch - screen_epoch) if screen_epoch
         perf.headline(s).each { |l| puts "  #{l}" }
         puts "  feed: #{row[:snapshots_per_s]} snapshots/s published, #{row[:buffers_per_s]} render buffers/s; CPU share: render thread #{cpu_share[:render]}%, painter #{cpu_share[:painter] || '-'}%; yielding #{UI::Yielding.on ? 'on' : 'off'}#{p.demo ? "; demo #{p.demo.inspect}" : ''}#{p.line ? "; line #{p.line}" : ''}"
-        if device
+        if device && device[:real]
+          puts "  device output: #{device[:underruns]} underruns while recording (#{device[:per_min]}/min), queue #{device[:queue_ms].join(' -> ')} ms#{device[:log].empty? ? '' : "; at #{device[:log].first(8).map { |t, n, _q, bar| "#{t} s (bar #{bar}) x#{n}" }.join(', ')}"}"
+        elsif device
           puts "  device model: queue #{device[:queue_ms]} ms, pulls of #{device[:period]} frames: #{device[:underruns]} underruns (#{device[:per_min]}/min), least left after a pull #{device[:min_slack_ms]} ms#{device[:at_s].empty? ? '' : "; at #{device[:at_s].first(8).map { |t, sh| "#{t} s (#{sh} short)" }.join(', ')}"}"
           lm = device[:lag_ms]
           puts "    lag behind the schedule p50/p99/max #{lm.values_at(:p50, :p99, :max).join('/')} ms; pulls lagging per min over #{device[:lags_over_per_min].map { |k, v| "#{k} ms: #{v}" }.join(', ')}; worst at #{device[:worst_lags].map { |t, l| "#{t} s #{l} ms" }.join(', ')}"
