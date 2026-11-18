@@ -159,6 +159,10 @@ RSpec.describe(MB::Sound::UI::Perf) do
     after do
       cap.cancel
       cap.thread&.join(2)
+      # (a cancel stays set until the next start; Capture.run called
+      # directly, as 'capture run' below does, would skip its phase 2:
+      # seen in a spec:quick process, 2026-11-18)
+      cap.instance_variable_set(:@cancel, false)
     end
 
     it 'names the settings it ran with (smooth, waves, yielding, YJIT, the screen\'s age) in one line' do
