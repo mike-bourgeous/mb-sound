@@ -803,6 +803,9 @@ module MB
             arr = session.arrangement
             if arr.tracks.empty?
               UI.run_line('demo', session)
+              # (read again: a demo replaces the set, Arrangement included,
+              # through Session#clear_set)
+              arr = session.arrangement
               scene = arr.scenes.keys[1] || arr.scenes.keys[0]
               UI.run_line("go #{scene.inspect}", session) if scene
               "nothing was playing: loaded demo #{arr.demo_document&.name.to_s.to_sym.inspect} and went to #{scene.inspect}"
@@ -885,7 +888,8 @@ module MB
               target = design || Design.last
               # (a designed track that is gone, or an earlier run's temporary
               # one, would be made again by `design`: not adopted)
-              target = nil if target && (target == TRACK || !arr.tracks.key?(target))
+              # (the Session's set now: a demo loaded above replaced it)
+              target = nil if target && (target == TRACK || !session.arrangement.tracks.key?(target))
               made = false
               knob_was = nil
               begin

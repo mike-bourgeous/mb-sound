@@ -265,6 +265,26 @@ RSpec.describe(MB::Sound::UI::Perf) do
       expect(text).to match(/audio playing \(peak -12\.0 dBFS\), no set, [0-9.]+ bpm, buffer \d+ frames \([0-9.]+\/s\), [0-9.]+ snapshots\/s/)
     end
 
+    # A demo replaces the whole set, its Arrangement included
+    # (Session#clear_set, fixes-15): the capture read the scenes from the
+    # Arrangement before the demo, found none, and recorded silence
+    # ("loaded demo :\"\" and went to nil" on a pty, 2026-11-18)
+    it 'reads the scenes from the set the demo loaded, which replaces the Arrangement' do
+      set = Struct.new(:tracks, :scenes, :demo_document)
+      loaded = set.new({ drums: :drums }, { intro: :intro, groove: :groove }, Struct.new(:name).new('night_bus'))
+      current = session.arrangement
+      allow(session).to receive(:arrangement) { current }
+      allow(MB::Sound::UI).to receive(:run_line) { |code, _s| lines << code; current = loaded if code == 'demo'; nil }
+      heard = [{ audible: false, peak_db: nil, buffers: 0, players: [] }, { audible: true, peak_db: -10.0, buffers: 20, players: [:drums] }]
+      allow(cap).to receive(:listen) { heard.shift }
+      allow(cap).to receive(:wait).and_call_original
+      allow(cap).to receive(:wait).with(2.0).and_return(true)
+      cap.run(seconds: 1.0, dir: tmp_path('cap'), out: out)
+      expect(lines.first(2)).to eq(['demo', 'go :groove'])
+      text = MB::U.remove_ansi(out.string)
+      expect(text).to include('nothing was playing: loaded demo :night_bus and went to :groove', 'demo :night_bus')
+    end
+
     it 'records a silent set as such when there is nothing to start' do
       tracks[:pad] = :pad # (a set without scenes)
       allow(cap).to receive(:listen).and_return({ audible: false, peak_db: nil, buffers: 0, players: [] })
