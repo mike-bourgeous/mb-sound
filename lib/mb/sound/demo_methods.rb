@@ -67,6 +67,14 @@ module MB
         doc
       end
 
+      # The demo sets (name => what it is), printed as a list.
+      def demos
+        DEMOS.each { |n, about| puts "  #{n.inspect.ljust(14)} #{about}" }
+        DEMOS
+      end
+
+      private
+
       # The name of the demo set +session+ holds (see #demo), or nil.
       def loaded_demo(session)
         path = session.arrangement.demo_document&.path
@@ -89,12 +97,6 @@ module MB
         )
         error.set_backtrace(e.backtrace)
         error
-      end
-
-      # The demo sets (name => what it is), printed as a list.
-      def demos
-        DEMOS.each { |n, about| puts "  #{n.inspect.ljust(14)} #{about}" }
-        DEMOS
       end
     end
 
