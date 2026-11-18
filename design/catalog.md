@@ -199,7 +199,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 ### Time and patterns
 
 - `:sequences` Clips and sequences: seq grid events rest euclid melody acid chord arp strum echo scale .loop .n8 ...
-- `:generative` Generative music: tones chord weights harmony generate strikes dice melody motifs beats rhythm
+- `:generative` Generative music: tones chord weights harmony progression generate strikes dice melody motifs beats rhythm
 - `:tempo` Tempo, tuning, and the timeline: bpm tempo accel rit meter rewind seek bar transport tuning
 - `:schedule` Scheduling: at_bar after every scheduled cancel reset_scheduler marker at_marker
 - `:key` The session key and modes: key mode modes scale .degrees .snap .lock

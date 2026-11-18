@@ -14,7 +14,9 @@ module MB
         # +slots+ are Events (start, length, velocity) to give notes;
         # +start+ is the note to start nearest to (the field's strongest
         # note nearest it).
-        # +fields+ (a steered range) gives [field, start] for a range.
+        # +fields+ (a steered range, a source following the key) gives
+        # [field, start] for a range and a resolved source (nil for what
+        # doesn't move).
         def initialize(field, slots, length:, leap:, rest:, start:, fields: nil)
           @field = field
           @fields = fields
@@ -29,11 +31,12 @@ module MB
 
         # The events of +cycle+ with +dice+; steered options (G3) come
         # decided for the cycle: +rest+ (0..1), +leap+ (rounded, at least
-        # 1), and +range+ (one of the ranges the steered range chooses).
-        def events(cycle, dice, rest: @rest, leap: @leap, range: nil)
+        # 1), +range+ (one of the ranges the steered range chooses), and
+        # +key+ (the source resolved for the session key, KeyFollow).
+        def events(cycle, dice, rest: @rest, leap: @leap, range: nil, key: nil)
           rest = rest.to_f.clamp(0.0, 1.0)
           leap = MB::M.max(leap.round, 1)
-          field, start = range ? field_for(range) : [@field, @start]
+          field, start = range || key ? field_for(range, key) : [@field, @start]
           current = nil
           @slots.each_with_index.filter_map { |slot, i|
             next nil if i > 0 && rest > 0 && dice.rand(:rest, i) < rest
@@ -53,13 +56,16 @@ module MB
 
         private
 
-        # [field, start note] for a steered +range+ (cached).
-        def field_for(range)
-          @mutex.synchronize { @by_range[range] } || begin
-            pair = @fields.call(range).freeze
+        # [field, start note] for a steered +range+ and the source resolved
+        # for the session key (+key+, KeyFollow; either nil when it doesn't
+        # move), cached.
+        def field_for(range, key = nil)
+          id = [range, key]
+          @mutex.synchronize { @by_range[id] } || begin
+            pair = @fields.call(range, key).freeze
             @mutex.synchronize {
               @by_range.shift while @by_range.length >= 16
-              @by_range[range] ||= pair
+              @by_range[id] ||= pair
             }
           end
         end

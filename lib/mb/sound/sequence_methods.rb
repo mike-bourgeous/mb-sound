@@ -113,18 +113,27 @@ module MB
       # Returns a MB::Sound::Scale (see Scale.new and Scale.[]): a name such
       # as :minor or :dorian (Scale.names), or an Array of offsets in
       # semitones, with a +root+ (a Note, note number, or name like :a).
-      # A pure value: without a +root+, the root is the session key's root
-      # (see KeyMethods#key) as it is now, and bare `scale` is the session
-      # key's Scale.
+      # Without a +root+ (or with +root+ :key), the root is the session
+      # key's root (see KeyMethods#key) as it is now, and bare `scale` (or
+      # `scale(:key)`) is the session key's Scale.
+      #
+      # Generators follow those live (gen-ux-1, Generative::KeyFollow): a
+      # motifs, melody, or strikes made from `scale(:phrygian)` plays
+      # phrygian on whatever root `key` sets, cycle by cycle, and one made
+      # from bare `scale` plays the key's root and mode.  Everywhere else
+      # they are the scale of the key when they were made.
       #
       #     scale(:minor, :a)[2]          # => C5 (degree 0 is A4)
       #     scale(:dorian, D3).chord(0)   # => [50, 53, 57]
-      #     key :d; scale(:dorian)        # D dorian
+      #     key :d; scale(:dorian)        # D dorian (following the key's root in generators)
       #     scale                         # the session key's scale
+      #     motifs(scale(:phrygian), 4)   # key :a, at: bar(9) moves it to A phrygian
       def scale(intervals = nil, root = nil)
         session_key = Session.existing&.then { |s| s.transport.key(s.now) } || Sequence.current_transport.key
-        return session_key.scale if intervals.nil? && root.nil?
-        Scale[intervals, root.nil? && !intervals.is_a?(Scale) ? session_key.root : root]
+        return session_key.scale.following(:key) if (intervals.nil? || intervals == :key) && (root.nil? || root == :key)
+        return Scale[intervals, root] unless root.nil? || root == :key
+        return intervals if intervals.is_a?(Scale) && root.nil?
+        Scale[intervals, session_key.root].following(:root)
       end
 
       # Returns a Euclidean rhythm (Sequence::Generators.euclid_pattern):
@@ -184,7 +193,23 @@ module MB
       # beat) before it (Generative::Steer).
       #
       #     melody(h, 8, range: knob(:reg).choose(A2..A4, A3..A5), rest: knob(:space), vary: true).loop
+      #
+      # Following the key (gen-ux-1, Generative::KeyFollow): with +vary:
+      # true+, a scale made without a root (`scale(:dorian)`), bare `scale`,
+      # values built from them, a `progression(...)`, or no scale at all
+      # (the session key's scale) follow the session key cycle by cycle;
+      # without +vary:+ a melody is a fixed clip in the key as it is now
+      # (and no scale is the chromatic scale, as before).
+      #
+      #     melody(8, vary: true).loop        # in the session key, following it
+      #     melody(progression(1, 6, 4, 5), 8, range: A3..A5, vary: true)
       def melody(scale = nil, count = 8, step: 16, rhythm: nil, start: nil, leap: 3, range: nil, weights: nil, rest: 0, seed: nil, vary: false, lead: nil)
+        # (`melody(8, vary: true)`: a count and no scale)
+        scale, count = nil, scale if scale.is_a?(Integer)
+        scale = Generative::KeyFollow.implicit if scale.nil? && vary
+        follow = vary && Generative::KeyFollow.follows?(scale)
+        given_scale = scale
+        scale = Generative::KeyFollow.resolve(scale, Generative::KeyFollow.key_at(Session.existing&.now || Sequence.current_transport.position))
         probability = [Generative::Weights, Generative::Harmony, Generative::Field, Generative::FieldTimeline].any? { |c| scale.is_a?(c) }
         seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
         steered = { rest: rest, leap: leap, range: range }.select { |_, v| MIDI::Param.param?(v) }
@@ -214,10 +239,18 @@ module MB
           notes = Generative.notes_of(field)
           raise ArgumentError, 'The melody\'s field has no notes' if notes.empty?
           start = start.nil? ? (notes.first + notes.last) / 2 : Scale.root_number(start)
+          # (a steered range, and the source resolved for the key; gen-ux-1)
+          fields = ->(r, src) {
+            f = Generative.field(src || scale, range: (ranges ? r : range) || Generative::DEFAULT_RANGE)
+            n = Generative.notes_of(f)
+            [f, (n.first + n.last) / 2]
+          }
           walk = Generative::Melody.new(field, slots, length: length, leap: steered.key?(:leap) ? 3 : leap, rest: steered.key?(:rest) ? 0 : rest, start: start,
-            fields: ranges && ->(r) { f = Generative.field(scale, range: r); n = Generative.notes_of(f); [f, (n.first + n.last) / 2] })
+            fields: (ranges || follow) && fields)
+          steered[:key] = Generative::KeyFollow::Param.new(given_scale) if follow
           unless steered.empty?
             values = ranges ? ranges.flat_map { |r| Generative.notes_of(Generative.field(scale, range: r)) }.uniq.sort : notes
+            values = (ranges ? ranges.flat_map { |r| Generative.field(scale, range: r).notes } : field.notes).uniq.sort if follow
             return Sequence::Clip.generate(length, values: values, seed: seed, name: "melody(seed: #{seed})", reach: reach, loop: false, lead: lead, params: steered) { |cycle, dice, **v|
               walk.events(cycle, dice, **v)
             }
@@ -228,6 +261,7 @@ module MB
 
         scale = Scale[scale]
         start ||= 0
+        range_given = !range.nil?
         range ||= (scale.root - 12)..(scale.root + 12)
         lo = Scale.root_number(range.begin)
         hi = Scale.root_number(range.end)
@@ -240,6 +274,20 @@ module MB
 
         clip = Sequence::Clip.new(make.(seed), length: length, seed: seed)
         return clip unless vary
+
+        if follow
+          # Following the key: each cycle's scale is the key's then, the
+          # range around its root unless given (gen-ux-1)
+          given_range = range_given
+          values = ((lo - (given_range ? 0 : 11))..(hi + (given_range ? 0 : 11))).to_a
+          return Sequence::Clip.generate(length, values: values, seed: seed, name: "melody(seed: #{seed})", reach: reach, loop: false, events: clip.events,
+                                         lead: lead, params: { key: Generative::KeyFollow::Param.new(given_scale) }) { |cycle, _dice, key:|
+            sc = key
+            r = given_range ? [lo, hi] : [Scale.root_number(sc.root - 12), Scale.root_number(sc.root + 12)]
+            notes = Sequence::Generators.melody_notes(sc, slots.length, rng: Random.new(Sequence::Clip.cycle_seed(seed, cycle)), range: r, weights: weights, leap: leap, rest: rest, start: start)
+            slots.zip(notes).filter_map { |slot, n| n && slot.with(value: n) }
+          }
+        end
 
         # A generator clip: each cycle draws from its own seed (the same
         # notes as before the generative layer; the clip's own events stay

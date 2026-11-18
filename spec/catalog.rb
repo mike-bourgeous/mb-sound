@@ -25,7 +25,9 @@ module Catalog
   # (17 554 bytes: also a question for the maintainer)
   # 17 600 until omnibus19 added derivative and integral (17 807 bytes:
   # a question for the maintainer, as before)
-  BUDGET = 17_850
+  # 17 850 until gen-ux-1 added fadeout to :play and progression to
+  # :generative (17 862 bytes: a question for the maintainer, as before)
+  BUDGET = 17_900
 
   # Characters for a description, and bytes for a whole line
   DESCRIPTION_MAX = 80

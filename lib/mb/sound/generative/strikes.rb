@@ -30,13 +30,16 @@ module MB
           @note_length = note_length
           @seed = seed
           @sharp = {}.compare_by_identity
+          @by_key = {}
           @mutex = Mutex.new
         end
 
         # The events of +cycle+ with +dice+ (Dice.new(seed, cycle)); a
         # moving +chance+ (a knob, cc, LFO) comes decided for the cycle at
-        # its decision point (Generative::Steer, G3).
-        def events(cycle, dice, chance: @chance)
+        # its decision point (Generative::Steer, G3), and a source following
+        # the session key comes resolved for the cycle as +key+ (KeyFollow).
+        def events(cycle, dice, chance: @chance, key: nil)
+          field = key ? field_for(key) : @field
           root = Dice.new(dice.seed, :strike)
           chance = chance.respond_to?(:call) ? chance.call(cycle).to_f : chance.to_f.clamp(0.0, 1.0)
           first = cycle * @steps
@@ -50,7 +53,7 @@ module MB
             next if (1...@gap).any? { |d| cand[i - d] }
 
             pos = cycle * @length + s * @every
-            f = Generative.field_at(@field, pos)
+            f = Generative.field_at(field, pos)
             note = sharp(f).then { |w| (k = Dice.index(w, dice.rand(:note, s))) && f.notes[k] }
             next unless note
             v = @velocity.is_a?(Range) ? @velocity.begin + (@velocity.end - @velocity.begin) * dice.rand(:vel, s) : @velocity.to_f
@@ -60,6 +63,18 @@ module MB
         end
 
         private
+
+        # The Field or FieldTimeline of source +key+ (resolved for a key),
+        # cached.
+        def field_for(key)
+          @mutex.synchronize { @by_key[key] } || begin
+            f = Generative.field(key)
+            @mutex.synchronize {
+              @by_key.shift while @by_key.length >= 16
+              @by_key[key] ||= f
+            }
+          end
+        end
 
         # The sharpened weights of field +f+ (cached per Field object).
         def sharp(f)

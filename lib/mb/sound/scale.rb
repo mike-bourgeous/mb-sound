@@ -164,7 +164,16 @@ module MB
       # 0 is in the octave from C4 up, e.g. A4 for :a).  Only its pitch
       # class matters for #transpose, #snap, and #include?; #note and #[]
       # count degrees from the root note.
-      def initialize(intervals = :chromatic, root: 0, period: 12, name: nil)
+      #
+      # +follow+ (gen-ux-1; Scale#following) marks a scale made without a
+      # root, which generators read again for every cycle on the session
+      # key (Generative::KeyFollow): :root keeps its offsets on the key's
+      # root, :key is the key's own scale.  As a value it is the scale it
+      # was made as (on the key in effect then).
+      def initialize(intervals = :chromatic, root: 0, period: 12, name: nil, follow: nil)
+        raise ArgumentError, "A scale's follow: is nil, :root, or :key (got #{follow.inspect})" unless [nil, :root, :key].include?(follow)
+        @follow = follow
+        @on_keys = nil
         @period = exact(Interval.semitones(period))
         raise ArgumentError, "A scale period must be positive (got #{period.inspect})" unless @period.is_a?(Numeric) && @period > 0
 
@@ -206,6 +215,29 @@ module MB
       # Returns this scale with another root (see #initialize).
       def with_root(root)
         Scale.new(@offsets, root: root, period: @period, name: @name)
+      end
+
+      # How this scale follows the session key in generators (see
+      # #initialize): :root, :key, or nil (a fixed scale).
+      def following(kind = nil)
+        return @follow if kind.nil?
+        Scale.new(@offsets, root: @root, period: @period, name: @name, follow: kind)
+      end
+
+      # True for a scale made without a root (see #following).
+      def follows_key?
+        !@follow.nil?
+      end
+
+      # This following scale on MusicalKey +key+ (a fixed Scale): its own
+      # offsets on the key's root (follow :root), or the key's scale (:key);
+      # a fixed scale as it is.
+      def at_key(key)
+        case @follow
+        when :root then (@on_keys ||= {})[key.root] ||= Scale.new(@offsets, root: key.root, period: @period, name: @name)
+        when :key then key.scale
+        else self
+        end
       end
 
       # Returns the +n+th mode of this scale: the same notes starting from
