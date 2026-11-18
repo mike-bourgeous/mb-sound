@@ -25,7 +25,8 @@ module MB
       #
       # The Session must be quiet: with players playing, it says so (the
       # set's scenes would land on top of them) unless +replace: true+,
-      # which stops everything first (as #panic, quietly).
+      # which stops everything first (as #panic, quietly).  A demo that
+      # fails to load says so in one line (#load_failure).
       def demo(name = nil, replace: false)
         last = Session.current.arrangement.demo_document
         return last if name.nil? && last && !Session.current.arrangement.tracks.empty?
@@ -48,7 +49,11 @@ module MB
         end
 
         path = File.join(GraphIO.library_presets_dir, "#{name}#{GraphIO::EXTENSION}")
-        doc = GraphIO.load(path, session: s)
+        begin
+          doc = GraphIO.load(path, session: s)
+        rescue StandardError => e
+          return MB::Sound.live_error(load_failure(name, e))
+        end
         rewind if s.players.empty?
         s.arrangement.demo_document = doc
 
@@ -60,6 +65,30 @@ module MB
         puts "\e[2mTry:\e[0m go :#{arr.scenes.keys[1] || arr.scenes.keys[0]}    turn :cut, 3000, over: 2    go :drop    stop :all"
         puts "\e[2m     \e[0mplay_form demo.form   (the whole song; loop!, onward, finish steer it)    ui :tiles    help :demo"
         doc
+      end
+
+      # The name of the demo set +session+ holds (see #demo), or nil.
+      def loaded_demo(session)
+        path = session.arrangement.demo_document&.path
+        path && File.basename(path, GraphIO::EXTENSION).to_sym
+      end
+
+      # The error #demo reports when demo +name+ fails to load with +e+:
+      # +e+ itself when it reads as one line (a GraphIO::LoadError, an
+      # ArgumentError; see ErrorFormat.short?), else (a bug inside the
+      # library) a GraphIO::LoadError of one line naming the error and
+      # where it was raised, with +e+ as its cause (fixes-15: a
+      # NoMethodError printed its whole backtrace in the console).
+      def load_failure(name, e)
+        return e if ErrorFormat.short?(e)
+
+        frame = e.backtrace&.first.to_s[/\A[^:]+:\d+/]
+        where = frame ? " at #{frame.delete_prefix("#{File.expand_path('../../..', __dir__)}/")}" : ''
+        error = GraphIO::LoadError.new(
+          "demo #{name.inspect} didn't load (the set may be partly there): #{ErrorFormat.summary(e)}#{where}, a bug in mb-sound"
+        )
+        error.set_backtrace(e.backtrace)
+        error
       end
 
       # The demo sets (name => what it is), printed as a list.

@@ -52,6 +52,39 @@ RSpec.describe(MB::Sound::DemoMethods) do
     expect { MB::Sound.demos }.to output(/:night_bus +"Night Bus: Last Stop".*:tunnel_vision +"Tunnel Vision"/m).to_stdout
   end
 
+  # fixes-15 (the maintainer's 2026-11-16 note "cannot load tunnel vision"):
+  # loading a demo again kept a NoMethodError from its Hz knobs
+  it 'loads the same demo again, its knobs back at their defaults' do
+    expect { within { MB::Sound.demo(:tunnel_vision) } }.to output(/paused at bar 1/).to_stdout
+    within { MB::Sound.turn(:cut, 5000.hz) }
+    session.process_buffer(800)
+    expect { within { MB::Sound.demo(:tunnel_vision) } }.to output(/paused at bar 1/).to_stdout
+    session.process_buffer(800)
+    expect(session.knobs[:cut].value).to eq(2400.0)
+    expect(session.knobs[:cut].spec.range).to eq(150.0..8000.0)
+  end
+
+  it 'reports a bug while loading as one line naming where it was raised' do
+    bug = NoMethodError.new("undefined method 'to_f' for an instance of MB::Sound::Pitch")
+    bug.set_backtrace(["#{File.expand_path('../../../../lib/mb/sound/graph_node/knob.rb', __dir__)}:176:in 'clamp'"])
+    allow(MB::Sound::GraphIO).to receive(:load).and_raise(bug)
+    expect { within { MB::Sound.demo(:tunnel_vision) } }.to raise_error(MB::Sound::GraphIO::LoadError) { |e|
+      expect(e.message).to match(%r{\Ademo :tunnel_vision didn't load .*NoMethodError: undefined method 'to_f'.* at lib/mb/sound/graph_node/knob.rb:176, a bug in mb-sound\z})
+      expect(e.cause).to equal(bug)
+      expect(MB::Sound::ErrorFormat.console(e, color: false).lines.length).to eq(1)
+    }
+
+    # (an error mb-sound raises on purpose stays as it is)
+    allow(MB::Sound::GraphIO).to receive(:load).and_raise(MB::Sound::GraphIO::LoadError.new('x.mbg.rb:3: no such thing'))
+    expect { within { MB::Sound.demo(:tunnel_vision) } }.to raise_error(MB::Sound::GraphIO::LoadError, 'x.mbg.rb:3: no such thing')
+  end
+
+  it 'lists the demos on its help page' do
+    page = MB::Sound::ColorPolicy.strip(MB::Sound.help(:demos).to_s)
+    expect(page).to include('A demo set to explore')
+    MB::Sound::DemoMethods::DEMOS.each_key { |name| expect(page).to match(/^  demo #{Regexp.escape(name.inspect)} +\S/) }
+  end
+
   it 'is not taken by Pry or another MB::Sound method' do
     require 'pry'
     expect(Pry::Commands.keys.map(&:to_s)).not_to include('demo', 'demos')

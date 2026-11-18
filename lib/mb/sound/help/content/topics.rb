@@ -1170,23 +1170,31 @@ module MB
       about <<~TEXT
         `demo` loads a whole set into the session, paused at bar 1: Night
         Bus (bin/songs/night_bus_flow.rb), tech house at 126 BPM with 12
-        tracks, 12 scenes, 5 knobs, a master chain, and its song form.
+        tracks, 12 scenes, 5 knobs, a master chain, and its song form;
+        `demo :tunnel_vision` loads the other set (the list is below).
         Nothing plays until you do something: `go :groove` launches a
         scene, `turn :cut, 3000, over: 2` opens the hook's filter, `play_form
         demo.form` plays the whole song (steer it with `loop!`, `onward`,
         `finish`), and `tracks`, `scenes`, `knobs`, `ui :tiles` show what
         is there.  With something already playing, `demo` asks first
-        (`demo :night_bus, replace: true` stops it).  `demos` lists the
-        sets.  The set is a set document in mb-sound's presets/ (saved by
-        bin/save_presets.rb), so `save :mine, set` keeps your changes.
+        (`demo :night_bus, replace: true` stops it).  The set is a set document in
+        mb-sound's presets/ (saved by bin/save_presets.rb), so `save :mine,
+        set` keeps your changes.
       TEXT
+      section do |d|
+        # (fixes-15: the maintainer's note asked for the list here, not a
+        # pointer to it)
+        d.heading('The demos  (demos prints this list)')
+        d.rows(DemoMethods::DEMOS.map { |name, about| ["demo #{name.inspect}", about] }, max_label: 22, wrap: true)
+      end
       commands :demo, :demos
       note :arrangement
       see :sets, :flow, :knobs, :presets
       example 'the demo sets', sound: false do
-        demos.keys
+        demos
       end
     end
+    Help::TOPIC_ALIASES.merge!(demos: :demo)
 
     Help.topic :genres, 'Genre templates', group: :arrange do
       about <<~TEXT
