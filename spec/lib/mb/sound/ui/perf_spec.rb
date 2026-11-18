@@ -201,6 +201,96 @@ RSpec.describe(MB::Sound::UI::Perf) do
     end
   end
 
+  # Capture.run on a real tiled screen, with the console lines it runs
+  # recorded instead of run and the Session a non-realtime one (the
+  # maintainer's 2026-11-16 captures: a second capture adopted the first's
+  # :ui_perf track and recorded a stopped set; his keys sent the scripted
+  # arrows to the track levels)
+  describe 'capture run' do
+    let(:cap) { MB::Sound::UI::Perf::Capture }
+    let(:design) { MB::Sound::UI::Design }
+    let(:out) { StringIO.new }
+    let(:session) { MB::Sound::Session.new(realtime: false) }
+    let(:lines) { [] }
+    let(:tracks) { {} }
+
+    before do
+      @tiles, @term = ui_tiles(:tiles, rows: 30, cols: 100)
+      @term.wait_for('t> ')
+      MB::Sound::UI.instance_variable_set(:@tiles, @tiles)
+      allow(MB::Sound::Session).to receive(:current).and_return(session)
+      allow(session.arrangement).to receive(:tracks).and_return(tracks)
+      allow(MB::Sound::UI).to receive(:run_line) { |code, _s| lines << code; nil }
+      @last_was = design.last
+      stub_const('MB::Sound::UI::Perf::Capture::STEP', 0.02)
+    end
+
+    after do
+      MB::Sound::UI.instance_variable_set(:@tiles, nil)
+      design.last = @last_was
+      @tiles&.stop
+      @term&.close
+      session.close
+    end
+
+    it 'removes a temporary track an earlier run left, makes its own, removes it at the end, and never opens a designed track that is gone' do
+      tracks[:ui_perf] = :leftover
+      design.last = :bass # (designed once, since untracked: `design :bass` would make it again)
+      removed = 0
+      allow(cap).to receive(:remove_track) { removed += 1; tracks.delete(:ui_perf); true }
+      allow(cap).to receive(:listen).and_return({ audible: true, peak_db: -9.5, buffers: 20, players: [:drums] })
+      dir = cap.run(seconds: 2.5, dir: tmp_path('cap'), out: out)
+      expect(removed).to eq(2) # (the leftover first, its own at the end)
+      expect(lines).to include('design :ui_perf', 'design off')
+      expect(lines).not_to include('design :bass')
+      expect(design.last).to eq(:bass) # (put back: `design` alone opens what it opened before)
+      expect(out.string).to include("removed a :ui_perf track an earlier capture left")
+      expect(File.exist?(File.join(dir, 'design', 'frames.json'))).to eq(true)
+    end
+
+    it 'decides whether anything plays by the mix, starts the demo when nothing does, and says so in the settings line' do
+      heard = [{ audible: false, peak_db: nil, buffers: 0, players: [] }, { audible: true, peak_db: -12.0, buffers: 20, players: [:drums] }]
+      allow(cap).to receive(:listen) { heard.shift }
+      allow(cap).to receive(:wait).and_call_original
+      allow(cap).to receive(:wait).with(2.0).and_return(true) # (the set settling: not needed here)
+      cap.run(seconds: 1.0, dir: tmp_path('cap'), out: out)
+      expect(lines.first).to eq('demo')
+      expect(lines).to include('stop :all') # (what it started, it stops)
+      text = MB::U.remove_ansi(out.string)
+      expect(text).to include('nothing was playing: loaded demo')
+      expect(text).to match(/audio playing \(peak -12\.0 dBFS\), no set, [0-9.]+ bpm, buffer \d+ frames \([0-9.]+\/s\), [0-9.]+ snapshots\/s/)
+    end
+
+    it 'records a silent set as such when there is nothing to start' do
+      tracks[:pad] = :pad # (a set without scenes)
+      allow(cap).to receive(:listen).and_return({ audible: false, peak_db: nil, buffers: 0, players: [] })
+      cap.run(seconds: 1.0, dir: tmp_path('cap'), out: out)
+      text = MB::U.remove_ansi(out.string)
+      expect(text).to include('audio NOT playing (silent)', 'a set of 1 tracks', 'nothing was playing and the set has no scenes')
+      expect(lines).not_to include('stop :all')
+    end
+
+    it 'stops the scripted keys with one line when the focus or the pick moves, and sets the swept knob back' do
+      tracks[:bass] = :bass
+      design.last = :bass
+      knob = Struct.new(:value).new(0.5)
+      allow(session).to receive(:knobs).and_return({ cut: knob })
+      allow(cap).to receive(:listen).and_return({ audible: true, peak_db: -9.5, buffers: 20, players: [:bass] })
+      allow(cap).to receive(:pick_knob).and_return(:cut)
+      targets = [[:inspector, :pane, :cut]] * 5 + [[:tracks, :nav, nil]]
+      allow(cap).to receive(:key_target) { targets.length > 1 ? targets.shift : targets.first }
+      typed = []
+      allow(@tiles).to receive(:type_scripted) { |b| typed << b; knob.value = 0.9; @tiles }
+      cap.run(seconds: 4.0, dir: tmp_path('cap'), out: out)
+      expect(typed.length).to eq(4) # (the expected target read once, then 4 keys checked against it)
+      text = MB::U.remove_ansi(out.string)
+      expect(text.lines.grep(/phase 2 stopped/).length).to eq(1)
+      expect(text).to include('phase 2 stopped after 4 scripted keys: the focus is :tracks in nav mode', "(don't type then)")
+      expect(lines).not_to include('stop :all')
+      expect(lines).to include('design :bass', 'turn :cut, 0.5') # (the knob set back by a console line)
+    end
+  end
+
   describe "on the tiled screen" do
     after { @tiles&.stop; @term&.close }
 

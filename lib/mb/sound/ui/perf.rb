@@ -389,7 +389,18 @@ module MB
           y = st[:yielding]
           "settings: smooth #{st[:smooth]}, waves #{st[:waves]}, yielding #{y[:on] ? "on (painter #{y[:painter] ? 'on' : 'off'}, input #{y[:input] ? 'on' : 'off'})" : 'off'}; " \
             "Ruby #{st[:ruby]} #{st[:yjit] ? "YJIT (threshold #{st[:yjit_threshold] || 'Ruby\'s'}, #{st[:yjit_blocks]} blocks compiled)" : 'no YJIT'}; " \
-            "screen up #{st[:screen_seconds] ? "#{st[:screen_seconds]} s" : '-'}#{st[:screen_seconds] && st[:screen_seconds] < 20 ? ' (cold: its first 20 s compile)' : ''}"
+            "screen up #{st[:screen_seconds] ? "#{st[:screen_seconds]} s" : '-'}#{st[:screen_seconds] && st[:screen_seconds] < 20 ? ' (cold: its first 20 s compile)' : ''}" \
+            "#{sound_line(st)}"
+        end
+
+        # The sound part of .settings_line (a capture's conditions: whether
+        # anything was audible, the song, tempo, buffer size, and the
+        # snapshots the painter got a second), or ''.
+        def self.sound_line(st)
+          return '' unless st.key?(:playing)
+          rate = st[:buffer] && st[:sample_rate] ? " (#{(st[:sample_rate].to_f / st[:buffer]).round(1)}/s)" : ''
+          "; audio #{st[:playing] ? "playing (peak #{st[:peak_db]} dBFS)" : 'NOT playing (silent)'}, #{st[:song]}, #{st[:bpm] || '-'} bpm, " \
+            "buffer #{st[:buffer] || '-'} frames#{rate}, #{st[:snapshots_per_s] || '-'} snapshots/s"
         end
 
         # The 1, 5, and 15 minute load averages, or nil (no /proc).
@@ -672,7 +683,7 @@ module MB
             end
             @cancel = false
             out.puts "\e[1mui.perf :capture\e[0m: #{seconds.round} s.  Phase 1: the tiles with the set playing (type a few keys, scroll, NAV around).  " \
-                     'Phase 2: the sound-design screen with a knob moving.  Results print here (ui.perf :cancel stops early).'
+                     'Phase 2: the sound-design screen with a knob moving by scripted keys (don\'t type then).  Results print here (ui.perf :cancel stops early).'
             @thread = Thread.new do
               Thread.current.name = 'MB::Sound::UI perf capture'
               Thread.current.report_on_exception = false
@@ -722,23 +733,109 @@ module MB
             nil
           end
 
+          # The temporary track phase 2 designs when there is no designed
+          # track to open.  Owned by one run: made, used, and removed by it
+          # (a leftover from an earlier run is removed first, never adopted).
+          TRACK = :ui_perf
+
+          # Seconds the mix is listened to before deciding whether anything
+          # plays, and the peak under which it counts as silent (-60 dBFS).
+          LISTEN = 0.5
+          SILENT = 0.001
+
+          # Whether the mix is audible: its peak over +seconds+ from a tap on
+          # the render thread (two Floats a buffer, only while listening),
+          # the buffers heard, and the players.  A Session that isn't
+          # rendering (idle, paused) hears nothing.
+          def self.listen(session, seconds = LISTEN)
+            peak = 0.0
+            heard = 0
+            tap = session.add_tap do |mix|
+              mix.each do |c|
+                hi = c.max
+                lo = -c.min
+                hi = lo if lo > hi
+                peak = hi if hi > peak
+              end
+              heard += 1
+            end
+            t_end = MB::U.clock_now + seconds
+            sleep 0.05 while MB::U.clock_now < t_end && !@cancel
+            session.remove_tap(tap)
+            { audible: peak > SILENT, peak_db: peak > 0 ? (20 * Math.log10(peak)).round(1) : nil, buffers: heard, players: session.players.keys }
+          end
+
+          # What a capture's printout and files say about the sound: whether
+          # it was audible, the song, the tempo, the buffer size, and the
+          # rate the render thread wrote buffers at.
+          def self.conditions(session, heard)
+            arr = session.arrangement
+            doc = arr.demo_document
+            song = doc && !arr.tracks.empty? ? "demo #{doc.name.to_s.to_sym.inspect}" : (arr.tracks.empty? ? 'no set' : "a set of #{arr.tracks.length} tracks")
+            {
+              playing: heard[:audible], peak_db: heard[:peak_db], players: heard[:players].length,
+              song: song, bpm: (session.transport.bpm.to_f.round(1) rescue nil),
+              buffer: (session.buffer_size rescue nil), sample_rate: (session.sample_rate rescue nil),
+            }
+          end
+
+          # Starts something to hear when nothing plays: a scene of the set
+          # that is loaded, else the demo.  Returns a note, or nil if it
+          # could not.
+          def self.start_sound(session)
+            arr = session.arrangement
+            if arr.tracks.empty?
+              UI.run_line('demo', session)
+              scene = arr.scenes.keys[1] || arr.scenes.keys[0]
+              UI.run_line("go #{scene.inspect}", session) if scene
+              "nothing was playing: loaded demo #{arr.demo_document&.name.to_s.to_sym.inspect} and went to #{scene.inspect}"
+            elsif (scene = arr.scenes.keys[1] || arr.scenes.keys[0])
+              UI.run_line("go #{scene.inspect}", session)
+              "nothing was playing: went to scene #{scene.inspect} of the loaded set"
+            end
+          end
+
+          # Removes the capture's temporary track (stopped, untracked, and
+          # its knobs forgotten).  Returns true if none is left.
+          def self.remove_track(session)
+            return true unless session.arrangement.tracks.key?(TRACK)
+            UI.run_line("stop #{TRACK.inspect}, fade: 0", session) rescue nil
+            UI.run_line("untrack #{TRACK.inspect}", session) rescue nil
+            !session.arrangement.tracks.key?(TRACK)
+          end
+
+          # The screen state the scripted keys rely on: the same screen, the
+          # focused pane, the input mode, and the knob the inspector picks.
+          def self.key_target(tiles)
+            insp = tiles.pane_object(:inspector)
+            state = tiles.pane_state(:inspector)
+            picked = insp && state && insp.respond_to?(:picked, true) ? insp.__send__(:picked, state)&.first : nil
+            [tiles.tiler.focus, tiles.router.mode, picked]
+          end
+
           # The capture itself (on the calling thread).  Returns the
           # directory it saved.
           def self.run(seconds: SECONDS, design: nil, dir: nil, out: $stdout)
             notes = []
             session = Session.current
-            started_demo = false
-            if session.players.empty? && session.arrangement.tracks.empty?
-              # (console lines, journaled as if typed: UI.run_line)
-              UI.run_line('demo', session)
-              scene = session.arrangement.scenes.keys[1] || session.arrangement.scenes.keys[0]
-              UI.run_line("go #{scene.inspect}", session) if scene
-              started_demo = true
-              notes << "nothing played: loaded demo :night_bus and went to #{scene.inspect}"
+            arr = session.arrangement
+            # (a temporary track an earlier run left: removed, never adopted)
+            if arr.tracks.key?(TRACK)
+              notes << (remove_track(session) ? "removed a #{TRACK.inspect} track an earlier capture left" : "could not remove the #{TRACK.inspect} track an earlier capture left")
+            end
+            # Something to hear: decided by the mix, not by tracks or players
+            heard = listen(session)
+            started = nil
+            unless heard[:audible]
+              started = start_sound(session)
+              notes << (started || 'nothing was playing and the set has no scenes: recorded as it is (silent)')
+              wait(2.0) if started
+              heard = listen(session) if started
             end
             tiles = UI.tiles
             # (the design screen open at the start stays open at the end)
             was_design = tiles&.active? && tiles.layout_name == :sound
+            found = tiles&.active? ? [tiles, tiles.layout_name, tiles.tiler.focus, tiles.router.mode] : nil
             unless tiles&.active? && !was_design
               UI.show(:tiles)
               tiles = UI.tiles
@@ -749,28 +846,35 @@ module MB
             # warm-ups, and pane rates stepped down by them settle first; in
             # a pty run they were a 120-160 ms stall at 0.3 s and the list
             # panes at their slowest rate, 2026-11-16)
-            wait(2.0) if started_demo || notes.include?('phase 1 opened ui :tiles')
+            wait(2.0) if started || notes.include?('phase 1 opened ui :tiles')
             half = seconds / 2.0
             loads = [Perf.loadavg]
             delays0 = Perf.run_delays(render: session.render_thread, painter: tiles&.thread)
-            settings = Perf.settings(tiles)
+            settings = Perf.settings(tiles).merge(conditions(session, heard))
+            last_designed = Design.last
             t0 = MB::U.clock_now
             p1 = p2 = nil
             k = 0
             knob = nil
             begin
               # Phase 1: the tiles
+              pub0 = tiles.feed.published
               p1 = tiles.start_perf(label: "tiles #{tiles.layout_name}")
               wait(half)
               tiles.stop_perf
+              settings[:snapshots_per_s] = ((tiles.feed.published - pub0) / [MB::U.clock_now - t0, 1e-3].max).round(1)
 
               # Phase 2: the sound-design screen with a knob sweeping
               target = design || Design.last
+              # (a designed track that is gone, or an earlier run's temporary
+              # one, would be made again by `design`: not adopted)
+              target = nil if target && (target == TRACK || !arr.tracks.key?(target))
               made = false
+              knob_was = nil
               begin
                 unless @cancel
                   unless target
-                    target = :ui_perf
+                    target = TRACK
                     made = true
                   end
                   UI.run_line("design #{target.inspect}", session)
@@ -778,9 +882,20 @@ module MB
                   wait(1.0) # (the screen settles: first walks, warm-up frames)
                   knob = Capture.pick_knob(tiles)
                   notes << (knob ? "phase 2 turns #{knob.inspect}" : 'phase 2 found no knob row in the inspector: its arrows turn nothing (key times are frames, not changes)')
+                  knob_was = knob && session.knobs[knob]&.value
+                  expect = key_target(tiles)
                   p2 = tiles.start_perf(label: "design #{target.inspect}")
                   t_end = MB::U.clock_now + half - 1.0
                   while MB::U.clock_now < t_end && !@cancel
+                    # (each key only where the script expects it: keys typed
+                    # meanwhile can move the focus or the pick, and the
+                    # arrows then turned track levels, 2026-11-16)
+                    now_at = UI.tiles.equal?(tiles) ? key_target(tiles) : nil
+                    if now_at != expect
+                      what = now_at ? "the focus is #{now_at[0].inspect} in #{now_at[1]} mode, picking #{now_at[2].inspect} (expected #{expect[0].inspect}, #{expect[1]}, #{expect[2].inspect})" : 'the screen changed'
+                      notes << "phase 2 stopped after #{k} scripted keys: #{what}; keys typed during the scripted phase reach the screen (don't type then)"
+                      break
+                    end
                     tiles.type_scripted((k / SWEEP).even? ? "\e[C" : "\e[D")
                     k += 1
                     sleep STEP
@@ -790,17 +905,36 @@ module MB
               rescue => e
                 notes << "phase 2 skipped: #{e.class}: #{e.message} (run `design :name` once, then ui.perf :capture)"
               ensure
+                UI.tiles&.stop_perf rescue nil
+                # (the swept knob back where it was: the script's only change)
+                if knob && !knob_was.nil? && !made
+                  begin
+                    # (a console line, journaled and in the take, as the
+                    # arrows' turns were: UI.run_line)
+                    UI.run_line("turn #{knob.inspect}, #{RubyValue.to_ruby(knob_was)}", session) if session.knobs[knob] && session.knobs[knob].value != knob_was
+                  rescue => e
+                    notes << "could not set #{knob.inspect} back: #{e.class}: #{e.message}"
+                  end
+                end
                 UI.run_line('design off', session) rescue nil unless was_design
                 if made
-                  UI.run_line('stop :ui_perf, fade: 0', session) rescue nil
-                  UI.run_line('untrack :ui_perf', session) rescue nil
+                  notes << "could not remove the temporary #{TRACK.inspect} track" unless remove_track(session)
+                  Design.last = last_designed == TRACK ? nil : last_designed
                 end
               end
             ensure
-              # (a failure or a cancel: recording stops, a demo the capture
-              # started stops)
+              # (a failure or a cancel: recording stops, a sound the capture
+              # started stops, and the screen's focus and mode come back)
               UI.tiles&.stop_perf rescue nil
-              UI.run_line('stop :all', session) rescue nil if started_demo
+              UI.run_line('stop :all', session) rescue nil if started
+              if found && (t = UI.tiles)&.active? && t.layout_name == found[1]
+                begin
+                  t.focus(found[2]) if found[2] && t.tiler.focus != found[2]
+                  t.router.mode = found[3] if %i[repl nav].include?(found[3]) && t.router.mode != found[3]
+                rescue StandardError
+                  nil
+                end
+              end
             end
             notes << "cancelled after #{(MB::U.clock_now - t0).round} s: saved what was recorded" if @cancel
             loads << Perf.loadavg
