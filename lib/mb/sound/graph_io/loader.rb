@@ -766,11 +766,15 @@ module MB
 
         # The Session's knob for a set document's `knob` line: made, or
         # given the document's options and value if the session has it.
+        # The value is the redeclared knob's default, read through its
+        # Spec as a fresh declaration reads it (a typed value like
+        # 2400.hz, the document's own, as the knob's number; fixes-15:
+        # a second demo declaring :cut in Hz raised a NoMethodError).
         def session_knob(name, value, opts)
           existing = @session.knobs[name]
           k = @session.knob(name, value, **opts)
           raise LoadError.new("#{@label}: knob #{name} can't be made (its name is taken in the session)", path: @path) unless k
-          k.set(value, frame: k.next_frame) if existing && k.target != value
+          k.set(k.spec.default, frame: k.next_frame) if existing && k.target != k.spec.default
           k
         end
 
