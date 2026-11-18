@@ -88,7 +88,8 @@ module SessionFuzz
     'seq(C5, D5).n8', 'seq(F3, A3, C4, E4).n4.loop', 'seq(G4.n16, B4.n16, D5.n8).loop',
     # Generators steered by the knob :busy (G3: read at each cycle's decision point)
     'melody(scale(:minor, :a).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop',
-    'motifs(scale(:dorian, :d).weights, 8, density: knob(:busy), mutate: knob(:busy), evolve: 1, seed: 4)',
+    # (echo on a generator works per cycle, gen-ux-1)
+    'motifs(scale(:dorian, :d).weights, 8, density: knob(:busy), mutate: knob(:busy), evolve: 1, seed: 4).echo(3.n32, 2, pitch: 7.st)',
   ].freeze
   DRUMS = [
     "grid(16, kick: 'x...x...', snare: '....x...').loop", "grid(16, cymbal: 'X')", "grid(8, kick: 'x.x.', hat: 'xxxx').loop",

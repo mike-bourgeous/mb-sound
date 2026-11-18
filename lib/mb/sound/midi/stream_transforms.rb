@@ -48,7 +48,9 @@ module MB
         # 2026-10-31: "I want to be able to put echo on clips", after
         # `swap :bowl, riff.loop.echo(...)` refused the Stream and `cue`
         # played it on the default patch).  `clip.stream.echo(...)` is the
-        # live Stream, as before.
+        # live Stream, as before.  On generator clips they work per cycle
+        # instead (Clip#bake_cycles, gen-ux-1), so the generator keeps
+        # generating.
         CLIP_BAKED = [:echo].freeze
 
         # Returns a stream that repeats each note +count+ times, +delay+
@@ -548,7 +550,10 @@ module MB
         MIDI::Stream::CLIP_TRANSFORMS.each do |name|
           if MIDI::Stream::CLIP_BAKED.include?(name)
             define_method(name) do |*args, **kwargs, &block|
-              bake(MIDI::Transform::Spec.new.public_send(name, *args, **kwargs, &block))
+              spec = MIDI::Transform::Spec.new.public_send(name, *args, **kwargs, &block)
+              # (generators keep generating: each cycle goes through the
+              # transform as it's made; gen-ux-1)
+              generated? ? bake_cycles(spec) : bake(spec)
             end
           else
             define_method(name) do |*args, **kwargs, &block|
