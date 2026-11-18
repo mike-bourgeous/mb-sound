@@ -392,11 +392,28 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound.players.values).to all(end_with('(fading out)'))
       end
 
-      it 'has #fadeout as an alias for #outro' do
+      it 'ends everything with #fadeout and no names, as #outro' do
         MB::Sound.bg(:a, 220.hz.sine)
         sleep 0.05
         expect(MB::Sound.fadeout(fade: 0).name).to eq(:a)
         expect(MB::Sound.players).to be_empty
+      end
+
+      it 'fades out only the named players with #fadeout, over four bars by default (gen-ux-1)' do
+        MB::Sound.bg(:a, 220.hz.sine, at: :now)
+        MB::Sound.bg(:b, 330.hz.sine, at: :now)
+        MB::Sound.bg(:c, 440.hz.sine, at: :now)
+        deadline = MB::U.clock_now + 5
+        # (players waiting to start stop at once; wait for them to start)
+        sleep 0.01 until (MB::Sound.players.keys.sort == %i[a b c] && MB::Sound.players.values.none? { |v| v.include?('starts at') }) || MB::U.clock_now > deadline
+        expect(MB::Sound.fadeout(:a, :b).map(&:name)).to contain_exactly(:a, :b)
+        expect(MB::Sound.players[:a]).to end_with('(fading out)')
+        expect(MB::Sound.players[:b]).to end_with('(fading out)')
+        expect(MB::Sound.players[:c]).not_to end_with('(fading out)')
+        expect(MB::Sound.fadeout(:c, fade: 0).name).to eq(:c)
+        expect(MB::Sound.players.keys).to contain_exactly(:a, :b)
+        expect { expect(MB::Sound.fadeout(:aa, fade: 0)).to eq([]) }.to output(/No background player :aa is playing .*\nDid you mean\?  :a/).to_stderr
+        MB::Sound.stop(:all, fade: 0)
       end
 
       it 'no longer has #hush' do

@@ -168,7 +168,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 
 ### Start and stop
 
-- `:play` Playing things: bg stop outro panic players stopped resume forget play wait master_gain monitor_gain warm_up gc
+- `:play` Playing things: bg stop outro fadeout panic players stopped resume forget play wait master_gain monitor_gain warm_up ...
 - `:files` Files, inputs, and outputs: read write list file_input file_output input output use_output latency loopback close_outputs
 - `:guide` The user guide: guide lesson help
 

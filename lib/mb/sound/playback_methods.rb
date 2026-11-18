@@ -292,13 +292,29 @@ module MB
       # by default (+:fade+ sets the number of bars), starting now or at a
       # launch point (`outro on: 4`, `outro at: bar(33)`).  A flow playing
       # ends at the same point (no section begins after it; as `stop
-      # :all`).  Also available as #fadeout.  Returns the journal entries,
-      # as #stop.  See #stop, and #panic to stop everything right away.
+      # :all`).  #fadeout without names does the same.  Returns the journal
+      # entries, as #stop.  See #stop, and #panic to stop everything right
+      # away.
       def outro(fade: nil, at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
         stop(:all, fade: fade, at: point)
       end
-      alias fadeout outro
+
+      # Fades out and stops the named tracks or players (+names+, as #stop
+      # takes them; unknown names get a did-you-mean) over four bars by
+      # default (+:fade+ sets the number of bars), now or at a launch point;
+      # with no names, ends everything, exactly as #outro.  Returns the
+      # journal entries, as #stop.  (gen-ux-1, the maintainer, 2026-11-17:
+      # "I'd like fadeout to accept a track name".)
+      #
+      #     fadeout :pad                 # the pad fades out over 4 bars
+      #     fadeout :pad, :bell, fade: 8, on: :bar
+      #     fadeout                      # everything (outro)
+      def fadeout(*names, fade: nil, at: nil, on: nil, in: nil)
+        point = LaunchPoint.of(binding) or return nil
+        return outro(fade: fade, at: point) if names.empty?
+        stop(*names, fade: fade, at: point)
+      end
 
       # Stops every background player immediately, with no fade, including
       # players that are fading out or waiting to start.  The master effects

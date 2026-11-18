@@ -19,7 +19,9 @@ module MB
         player on a shared timeline; `play` is the foreground version
         (waits until the sound ends; Ctrl-C to stop).  Commands return
         journal entries that say where they land.  Sounds end through
-        envelopes, clips, `until` (alias `for`: `.for(2.bars)`), or `stop`.  `play`, `bg`, and `render`
+        envelopes, clips, `until` (alias `for`: `.for(2.bars)`), or `stop`
+        (`fadeout :pad` fades one track out over 4 bars; `outro` ends
+        everything).  `play`, `bg`, and `render`
         take graphs and more: files, audio arrays, Samples (once), Slices
         (one by one), clips (on their instrument, e.g. a chop's slices, or
         a soft saw), grids (a TR-909, or a TR-808 for its own voices like
@@ -32,7 +34,7 @@ module MB
         (no 45-80 ms stalls; memory grows about 1-2 MB/s until `gc
         :normal`; `now` shows it).
       TEXT
-      commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up, :gc
+      commands :bg, :stop, :outro, :fadeout, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up, :gc
       dsl :at, :until, :for, :and_then
       note :method_modules, :scripts
       see :sets, :now, :files
