@@ -87,7 +87,9 @@ module SessionFuzz
     'seq(C4, E4, G4).n8.loop', 'seq(A3, R, C4.n4, E4).n16.loop', 'seq(C3.n4, G3.n8.dotted, Eb3.n16).loop',
     'seq(C5, D5).n8', 'seq(F3, A3, C4, E4).n4.loop', 'seq(G4.n16, B4.n16, D5.n8).loop',
     # Generators steered by the knob :busy (G3: read at each cycle's decision point)
-    'melody(scale(:minor, :a).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop',
+    # (a scale without a root: follows the session key, which songs with
+    # wires set; gen-ux-1)
+    'melody(scale(:minor).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop',
     # (echo on a generator works per cycle, with uneven gaps; gen-ux-1)
     'motifs(scale(:dorian, :d).weights, 8, density: knob(:busy), mutate: knob(:busy), evolve: 1, seed: 4).echo([3.n32, 1.n16], 2, pitch: 7.st)',
   ].freeze
