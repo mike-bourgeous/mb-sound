@@ -148,7 +148,15 @@ module MB
           entry = seek(section, at: point)
           others = pb.sections_for_scene(name) - [section]
           also = others.empty? ? '' : "; also #{others.map(&:inspect).join(', ')}: go #{name.inspect}, section: #{others.first.inspect}"
-          puts "\e[2mgo #{name.inspect}: the flow seeks to its section #{section.inspect} (#{entry.respond_to?(:lands) ? entry.lands : 'queued'}) and plays on from there#{also}\e[0m" if entry
+          if entry
+            # (fixes-15: "(101:1)" alone read as where the section is; it
+            # is where the seek lands, here before the section's place)
+            lands = entry.respond_to?(:lands) ? entry.lands : nil
+            to = pb.seek_target(section)
+            way = to && lands ? (to < lands.pos ? ' back' : to > lands.pos ? ' ahead' : '') : ''
+            place = to ? " (#{arr.session.stamp(to)})" : ''
+            puts "\e[2mgo #{name.inspect}: #{lands ? "at #{lands}" : 'when it lands'} the flow seeks#{way} to its section #{section.inspect}#{place} and plays on from there#{also}\e[0m"
+          end
           return entry
         end
 
