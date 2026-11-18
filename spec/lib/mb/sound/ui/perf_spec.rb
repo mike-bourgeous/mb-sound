@@ -127,7 +127,26 @@ RSpec.describe(MB::Sound::UI::Perf) do
       expect(json).to include('frames' => 1, 'machine' => a_hash_including('cores'))
       frames = JSON.parse(File.read(File.join(dir, 'frames.json')))
       expect(frames['bytes']).to eq([2000])
-      expect(frames['panes']['meters'].length).to eq(1)
+      expect(frames['pane_gaps']['meters'].length).to eq(1)
+      # The per-frame panes column stays (it was once overwritten by the
+      # per-pane gaps), with which panes each frame drew
+      expect(frames['panes']).to eq([1])
+      expect(frames['panes_drawn']).to eq([['meters']])
+      expect(frames['pane_names']).to eq(['meters'])
+    end
+
+    it 'says which panes each frame drew, so slow frames can be attributed' do
+      p = perf_class.new(clock: clock, ack: nil)
+      [[100.0, %i[scope meters]], [100.02, %i[transport]], [100.04, []]].each do |t, names|
+        p.begin_frame(t)
+        names.each { |n| p.pane_drew(n, t, t - 0.016) }
+        p.painted(names.length, false, false, names.empty? ? 0 : 300)
+        p.wrote(t, t + 0.001) unless names.empty?
+        p.end_frame(frame(p, at: t))
+      end
+      expect(p.records[:panes]).to eq([2, 1, 0])
+      expect(p.records[:pane_mask].map { |m| p.panes_in(m) }).to eq([%i[scope meters], %i[transport], []])
+      expect(p.pane_names).to eq(%i[scope meters transport])
     end
   end
 

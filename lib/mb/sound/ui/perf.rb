@@ -55,8 +55,13 @@ module MB
         # Queries by kind.
         ACK_QUERIES = { da1: "\e[c", dsr: "\e[6n" }.freeze
 
-        # Per-frame fields, each a preallocated Array of RING values.
-        FIELDS = %i[at late paint write bytes panes repl full gc_ms gc_runs skipped].freeze
+        # Per-frame fields, each a preallocated Array of RING values
+        # (+panes+ counts the panes a frame drew; +pane_mask+ says which:
+        # bit i is the i-th pane name in #pane_names).
+        FIELDS = %i[at late paint write bytes panes pane_mask repl full gc_ms gc_runs skipped].freeze
+
+        # Panes told apart in +pane_mask+ (bits of an immediate Integer).
+        MASK_PANES = 60
 
         attr_reader :started_at, :stopped_at, :count, :ack_kind, :identity, :pending_keys
 
@@ -88,6 +93,7 @@ module MB
           @gc_time0 = 0
           @frame_bytes = 0
           @frame_panes = 0
+          @frame_mask = 0
           @frame_repl = false
           @frame_full = false
           @write_start = nil
@@ -99,6 +105,7 @@ module MB
           @start_gap_at = 0.0
           @last_start = nil
           @panes = {} # name => [ring of gaps, count, last draw]
+          @pane_bits = {} # name => its bit in pane_mask
           @key_lock = Mutex.new
           @keys_arrival = Array.new(KEY_RING, 0.0)
           @keys_handled = Array.new(KEY_RING, 0.0)
@@ -143,6 +150,7 @@ module MB
           @gc_time0 = GC.stat(:time)
           @frame_bytes = 0
           @frame_panes = 0
+          @frame_mask = 0
           @frame_repl = false
           @frame_full = false
           @write_start = @write_end = nil
@@ -195,6 +203,7 @@ module MB
           c[:write][i] = f.write
           c[:bytes][i] = @frame_bytes
           c[:panes][i] = @frame_panes
+          c[:pane_mask][i] = @frame_mask
           c[:repl][i] = @frame_repl ? 1 : 0
           c[:full][i] = @frame_full ? 1 : 0
           c[:gc_runs][i] = GC.count - @gc_count0
@@ -207,6 +216,8 @@ module MB
         def pane_drew(name, now, prev)
           return unless running?
           e = @panes[name] || (@panes[name] = [Array.new(PANE_RING, 0.0), 0, nil])
+          bit = @pane_bits[name] || (@pane_bits.length < MASK_PANES ? (@pane_bits[name] = 1 << @pane_bits.length) : 0)
+          @frame_mask |= bit
           if prev
             ring = e[0]
             ring[e[1] % PANE_RING] = now - prev
@@ -573,6 +584,15 @@ module MB
           FIELDS.to_h { |f| [f, values(f)] }
         end
 
+        # Pane names in bit order (bit i of +pane_mask+ is the i-th name).
+        def pane_names = @pane_bits.keys
+
+        # The names of the panes frame record +mask+ drew.
+        def panes_in(mask)
+          m = mask.to_i
+          @pane_bits.filter_map { |name, bit| name if m & bit != 0 }
+        end
+
         # Writes report.txt, summary.json, and frames.json to +dir+
         # (default: a new folder under Perf.captures_dir named for the
         # machine, the terminal, and the time).  Returns the directory.
@@ -583,7 +603,11 @@ module MB
           head = extra[:settings] ? "#{Perf.settings_line(extra[:settings])}\n\n" : ''
           File.write(File.join(dir, 'report.txt'), head + MB::U.remove_ansi(report(s).to_s) + "\n")
           File.write(File.join(dir, 'summary.json'), JSON.pretty_generate(s.merge(machine: Perf.machine, **extra)))
-          File.write(File.join(dir, 'frames.json'), JSON.generate(records.merge(panes: @panes.to_h { |n, (r, c, _)| [n, r.first([c, PANE_RING].min)] })))
+          # (per frame: +panes+ drawn, and which in +panes_drawn+; per pane:
+          # its gaps between draws in +pane_gaps+)
+          rec = records
+          File.write(File.join(dir, 'frames.json'), JSON.generate(rec.merge(panes_drawn: rec[:pane_mask].map { |m| panes_in(m) }, pane_names: pane_names,
+                                                                             pane_gaps: @panes.to_h { |n, (r, c, _)| [n, r.first([c, PANE_RING].min)] })))
           dir
         end
 
