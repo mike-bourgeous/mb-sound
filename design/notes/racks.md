@@ -77,7 +77,7 @@ Full-word aliases: `note_rack`, `audio_rack`, `instrument_rack`, `listener_rack`
 - Multi-output nodes list `:out_1`, `:out_2`, ...; nodes with side outputs (`GraphNode::Ports`: Tone `wraps`/`increment`, TempoNode `jumps`) add them after the main output as `:control` ports with descriptions and `in_use` (Ports#port_info used to return only these, as an Array).
 - `#sources` and `#inputs` keep their return values.  `port_info_spec` checks every node of every graph sweep factory.
 - `params` (generic, for graph code on the build thread): a node's `:param` inputs by name, constants as numbers, other nodes as given (through Tees to the node itself).  ChannelMixer keeps its own `params` and adds declared ranges.  Dynamics' and Limiter's kernel setting vectors were also called `params`; they are `kernel_params` now, so `params` means one thing.
-- For painters and other threads (the Mac UI owner's contract, `/app/tmp/briefs/ui-rack-contract.md`, 2026-10-17): `param_info` is a frozen Hash `{ name => ParamValue }` and `param_snapshot` one deep-frozen (Ractor-shareable) `Params`; both read settings only (no sampling, no render lock), so UI::Poll can take them about 4 times a second.  Shapes:
+- For painters and other threads (the Mac UI owner's contract, `/app/workbench/briefs/ui-rack-contract.md`, 2026-10-17): `param_info` is a frozen Hash `{ name => ParamValue }` and `param_snapshot` one deep-frozen (Ractor-shareable) `Params`; both read settings only (no sampling, no render lock), so UI::Poll can take them about 4 times a second.  Shapes:
 
   ```ruby
   GraphNode::Traversable::ParamValue = Data.define(:value, :type, :unit, :range, :label, :detail)
@@ -157,7 +157,7 @@ Slots and swaps of racks (R3), zones, Hash matchers, `within`/`sometimes`, MIDI 
 
 ## Demo
 
-`bin/songs/rack_demo.rb`: an `mrack` (arp + echo) feeding an `irack` (a pluck instrument) through the `:dub` rack (rack knobs `:space`, opened over bars 4-6 with `turn :"dub/space"`, and `:tone` with `.mod`), an `arack` with a sidechain port pumping a pad from the kick track, and a bass through a named effect rack; `--show` prints the racks and their Ruby.  Console help: `help :racks`.  The dub rack is the library rack preset `:dub_echo` (`bin/save_presets.rb`, `LIBRARY_PRESET_RACKS`).  Listening set: `/app/tmp/listening/racks-r2/` (bench id racks-r2-2026-10-17).
+`bin/songs/rack_demo.rb`: an `mrack` (arp + echo) feeding an `irack` (a pluck instrument) through the `:dub` rack (rack knobs `:space`, opened over bars 4-6 with `turn :"dub/space"`, and `:tone` with `.mod`), an `arack` with a sidechain port pumping a pad from the kick track, and a bass through a named effect rack; `--show` prints the racks and their Ruby.  Console help: `help :racks`.  The dub rack is the library rack preset `:dub_echo` (`bin/save_presets.rb`, `LIBRARY_PRESET_RACKS`).  Listening set: `/app/workbench/data/bench/sets/racks-r2/` (bench id racks-r2-2026-10-17).
 
 ## Racks as library entries (library-core-1, 2026-10-26)
 

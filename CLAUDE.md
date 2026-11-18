@@ -41,7 +41,7 @@ bundle exec rspec spec/some_spec.rb        # Run a single test file
 bundle exec rspec spec/some_spec.rb:42     # Run a specific test line
 bundle exec rake                  # Default task (runs spec)
 bin/sound.rb                      # Launch interactive Pry console with MB::Sound context
-bin/preset_bench.rb reverb -d /app/tmp/listening  # library presets as a Listening Bench set, loudness-matched (--vs master-ai, --notes; library.md)
+bin/preset_bench.rb reverb -d /app/workbench/data/bench/sets  # library presets as a Listening Bench set (agents write sets into data/; his console default stays tmp/listening), loudness-matched (--vs master-ai, --notes; library.md)
 bundle exec rake memcheck         # all C extension specs under Valgrind in parallel processes (MEMCHECK_PARALLEL=N; est. ~10 min at 8 on the Mac, ~1.1 GB each, 2026-10-30; logs in tmp/memcheck/; manual: pre-release or leak hunts; options in Rakefile)
 bundle exec rake memcheck:changed # only the memcheck specs for extensions changed since master-ai (MEMCHECK_DRY=1, FULL=1)
 bundle exec rake memcheck:status  # last full memcheck (a record; full runs are manual) and whether the map knows ext/
@@ -123,7 +123,7 @@ Rules that bind work outside their subsystem (details in the notes named):
 - Live paths (console commands, the UI, saving documents) never fork the console: a fork holds the GVL long enough for a dropout (the first `ui.note`'s `git rev-parse`); start processes through `MB::Sound::Starter` (`.spawn`/`.popen`/`.capture`; bin/sound.rb's starter process forks instead; `spawn_sites_spec.rb`), and read git's files with `Internal.git_dirs`/`git_head` (terminal_ui.md).
 - bin/ scripts use a `ScriptingMethods` helper (parameters as options only, graph code inside the block) and the shebang `#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby` (`spec/bin/shebang_spec.rb`; never `RUBY_YJIT_ENABLE=1`/`--yjit`) (scripts.md).
 - Importers find files a foreign project names by another machine's path through `MB::Sound::MediaIndex.for(root)#resolve` (name, then trailing folders; ambiguity reported), never a lookup of their own (importers.md).
-- Specs use synthetic MIDI files (`spec/support/midi_writer.rb`), SoundFonts (`spec/support/sf2_writer.rb`), and SysEx dumps, never the maintainer's tmp/music/ or real SQ-80 banks (never commit .syx banks or anything derived); specs stubbing `GraphIO.presets_dir` call `Library.reload!` (midi.md, sq80.md, library.md).
+- Specs use synthetic MIDI files (`spec/support/midi_writer.rb`), SoundFonts (`spec/support/sf2_writer.rb`), and SysEx dumps, never the maintainer's private data (`/app/workbench/data/`) or real SQ-80 banks (never commit .syx banks or anything derived); specs stubbing `GraphIO.presets_dir` call `Library.reload!` (midi.md, sq80.md, library.md).
 
 ### Sibling Libraries
 
@@ -159,7 +159,7 @@ The container has no audio device, so check sound-producing code by rendering it
 - `multitap` and other multi-output results are `Channels` bundles, which are deliberately not Enumerable (`.to_a` for `shuffle`, `reverse`, etc.).
 - C4 = 60 (C3 = 48).  Derive expected values in specs from note constants or a quick script; hand-computed notes and offsets caused several wrong assertions.
 - A realtime Session's render thread runs until `close`; close sessions in spec `after` blocks.  `kill -QUIT <pid>` prints every thread's backtrace (`MB::U.sigquit_backtrace`, set up in spec_helper).
-- Agents running the console, the tuner, or `ui.note` from a worktree export `MB_SOUND_CHECKOUT_TMP=<their scratch>` first: fits, tuner files, ui notes, and Bench sets otherwise go to the main checkout's `/app/tmp` (a review run once replaced one of the maintainer's fits; hand_tune.md).
+- Agents running the console, the tuner, or `ui.note` from a worktree export `MB_SOUND_CHECKOUT_TMP=<their scratch>` first: fits, tuner files, ui notes, and Bench sets otherwise go to the main checkout's `/app/tmp` (a review run once replaced one of the maintainer's fits; hand_tune.md).  Private data lives in `/app/workbench/data/` (never committed; `data/INDEX.md`, `data/README.md`); `/app/tmp` is his sessions' handoff inbox plus build outputs: agents write rounds and Bench sets into `workbench/data/<topic>/work/YYYY-MM-DD-purpose/` and `data/bench/sets/`, and file the inbox with `workbench/bench-tools/file_handoff.rb`; golden tasks need `MB_SOUND_GOLDEN_DIR=/app/workbench/data/sound-design/sound-guards` (approvals moved there 2026-11-17).
 - Before adding `bin/sound.rb` commands, check for collisions with `MB::Sound` methods and Pry commands (`Pry::Commands`; e.g. `reset` and `watch` are taken).
 
 ### Process

@@ -167,6 +167,7 @@ else
 		-e CLAUDE_CONFIG_DIR=/claude \
 		-e GH_CONFIG_DIR=/gh \
 		-e TZ=America/Denver \
+		-e MB_SOUND_GOLDEN_DIR=/app/workbench/data/sound-design/sound-guards \
 		${run_args[@]+"${run_args[@]}"} \
 		$APPNAME /bin/bash
 fi
