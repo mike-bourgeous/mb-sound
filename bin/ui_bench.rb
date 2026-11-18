@@ -55,7 +55,9 @@ module MB::Sound
       konsole: { bps: nil, esc_us: 2.0, cell_us: 0.3, frame_us: 1000.0 },
     }.freeze
 
-    SCENARIOS = %i[band tiles flood design typing plot].freeze
+    # (wall: ui :wall, the performance panes; none: the song with no
+    # screen, for the render thread's own numbers)
+    SCENARIOS = %i[band tiles wall flood design typing plot none].freeze
 
     # Escape sequences the sink counts (CSI, ESC 7/8 and other two-byte
     # escapes, DCS/OSC strings).
@@ -343,6 +345,104 @@ module MB::Sound
       end
     end
 
+    # --queue-ms: a null output that models a sound card's queue, so a
+    # dropout shows as it does on a device.  The device pulls +period+
+    # frames every period (a PipeWire quantum, or the requested period)
+    # from a queue the writer fills; #write blocks while the queue holds
+    # more than +queue+ frames (DeviceOutput's queue limit) and a pull
+    # finding fewer than +period+ frames is an underrun (the device plays
+    # what is there and goes on; the late frames play late).  The pull
+    # schedule starts at the first write.  Preallocated records; the
+    # render thread sleeps in #write without the GVL, as on a device.
+    class DeviceModel < NullOutput
+      attr_reader :queue, :period, :underruns
+
+      def initialize(channels:, buffer_size:, queue:, period:, max: 4096)
+        super(channels: channels, buffer_size: buffer_size, sleep: false)
+        @queue = queue
+        @period = period
+        @pull_s = period / 48000.0
+        @t0 = nil
+        @written = 0
+        @pulled = 0
+        @pulls = 0
+        @underruns = 0
+        @max = max
+        @under_at = Array.new(max, 0.0)
+        @under_short = Array.new(max, 0)
+        @min_slack = nil
+        @slack = Array.new(PULLS, 0) # (frames left after each pull, the first PULLS pulls)
+      end
+
+      # Pulls whose slack is kept.
+      PULLS = 1 << 17
+
+      # The queue's lag behind its schedule at each pull, in ms: how much
+      # less it held than a writer keeping it full (queue - period - left),
+      # with each pull's monotonic time.  A lag over (queue - period) is an
+      # underrun.
+      def lags(from = 0.0, to = Float::INFINITY)
+        n = [@pulls, PULLS].min
+        q = (@queue - @period) / 48.0
+        (0...n).filter_map { |i| t = @t0 + (i + 1) * @pull_s; [t, (q - @slack[i] / 48.0).round(2)] if t >= from && t <= to }
+      end
+
+      def latency = @queue / 48000.0
+
+      # Underruns as [[monotonic seconds, frames short]].
+      def underrun_list = (0...[@underruns, @max].min).map { |i| [@under_at[i], @under_short[i]] }
+
+      # The least the queue held at a pull (frames; nil before any).
+      attr_reader :min_slack
+
+      def write(data)
+        n = data[0].length
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        @t0 ||= now
+        advance(now)
+        @written += n
+        @frames_written += n
+        while @written - @pulled > @queue
+          nxt = @t0 + (@pulls + 1) * @pull_s
+          d = nxt - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          Kernel.sleep(d) if d > 0
+          advance(Process.clock_gettime(Process::CLOCK_MONOTONIC))
+        end
+        nil
+      end
+
+      private def advance(now)
+        due = ((now - @t0) / @pull_s).floor
+        while @pulls < due
+          have = @written - @pulled
+          left = have - @period
+          @min_slack = left if @min_slack.nil? || left < @min_slack
+          @slack[@pulls] = left if @pulls < PULLS
+          if have >= @period
+            @pulled += @period
+          else
+            i = @underruns
+            if i < @max
+              @under_at[i] = @t0 + (@pulls + 1) * @pull_s
+              @under_short[i] = @period - have
+            end
+            @underruns = i + 1
+            @pulled = @written # (what was there played; the rest of the pull is silence)
+          end
+          @pulls += 1
+        end
+      end
+    end
+
+    # A thread's time on a CPU in seconds (/proc/self/task/<tid>/schedstat's
+    # first field), or nil.
+    def thread_cpu(thread)
+      return nil unless thread&.native_thread_id
+      File.read("/proc/self/task/#{thread.native_thread_id}/schedstat").split[0].to_i / 1e9
+    rescue SystemCallError
+      nil
+    end
+
     # Percentiles of +v+ in ms.
     def stats(v) = UI::Perf.stats(v)
 
@@ -442,6 +542,13 @@ module MB::Sound
       screen: [nil, 'Write the sink\'s last frame as text to this file (one scenario)', String],
       sink_cpus: [nil, 'Pin the sink process to these CPUs (taskset list, e.g. 30,31)', String],
       buffer: [nil, 'Render buffer size in frames for the null output (default 800; 128, 256, ...)', Integer],
+      queue_ms: [nil, 'Model a sound card: a queue of this many ms the device drains (underruns counted as dropouts; see --device-period)', Float],
+      device_period: [nil, 'With --queue-ms: frames the device pulls at a time (default: the buffer size; 1024 for a PipeWire quantum)', Integer],
+      demo: [nil, 'Play this demo set instead of the song (e.g. tunnel_vision; goes to --demo-go)', Symbol],
+      demo_go: [:drop, 'With --demo: the scene to go to (its second scene if it has none of the name), or :form for play_form demo.form', Symbol],
+      line: [nil, 'A console line run after the song starts (e.g. "master { it.reverb(:hall).limit.master(:club) }")', String],
+      no_yield: [false, 'GVL yielding off (UI::Yielding.on = false, as MB_SOUND_YIELD=0)'],
+      during: [nil, 'Console lines typed during the recording, separated by " ;; ", spread evenly over it (into the REPL pane; with no screen, run on a thread as a console would)', String],
       design_line: [nil, 'design: the console line that opens the sound-design screen (default: the acid bass)', String],
       key_rate: [nil, 'design: knob turns per second by arrow keys (default 8.3; 0 for none, e.g. an LFO patch held)', Float],
       out_latency: [nil, 'Output latency the null output reports, in buffers (a device\'s queue: meters and scopes show what is heard)', Float],
@@ -486,7 +593,7 @@ module MB::Sound
           part = File.join(tmp, "#{sc}.json")
           # (the options parsed, passed on: ARGV is consumed by now)
           args = ['-s', p.seconds.to_s, '--warm', p.warm.to_s, '--size', p.size, '--sink', kind.to_s, '--look', p.look.to_s, '--fps', p.fps.to_s]
-          { bps: '--bps', esc_us: '--esc-us', cell_us: '--cell-us', frame_us: '--frame-us', latency: '-L', sink_cpus: '--sink-cpus', buffer: '--buffer', out_latency: '--out-latency', design_line: '--design-line', key_rate: '--key-rate', alloc: '--alloc' }.each do |k, flag|
+          { bps: '--bps', esc_us: '--esc-us', cell_us: '--cell-us', frame_us: '--frame-us', latency: '-L', sink_cpus: '--sink-cpus', buffer: '--buffer', out_latency: '--out-latency', design_line: '--design-line', key_rate: '--key-rate', alloc: '--alloc', queue_ms: '--queue-ms', device_period: '--device-period', demo: '--demo', demo_go: '--demo-go', line: '--line', during: '--during' }.each do |k, flag|
             v = p.public_send(k)
             args.push(flag, v.to_s) unless v.nil?
           end
@@ -498,6 +605,7 @@ module MB::Sound
           args << '--holders' if p.holders
           args << '--late' if p.late
           args << '--gc-off' if p.gc_off
+          args << '--no-yield' if p.no_yield
           ok = system(RbConfig.ruby, __FILE__, *args, '-S', sc.to_s, '-j', part, '--quiet-header')
           raise "ui_bench: scenario #{sc} failed (#{$?.inspect})" unless ok
           results.concat(JSON.parse(File.read(part)))
@@ -511,7 +619,13 @@ module MB::Sound
       MB::Sound.warm_up
       UI.warm_up
       UI.warm_up_console
-      if p.buffer || p.out_latency
+      UI::Yielding.on = false if p.no_yield
+      if p.queue_ms
+        # (a modelled sound card's queue: dropouts counted as on a device)
+        bs = p.buffer || 800
+        out = UIBench::DeviceModel.new(channels: 2, buffer_size: bs, queue: (p.queue_ms * 48.0).round, period: p.device_period || bs)
+        Session.use_output(out)
+      elsif p.buffer || p.out_latency
         # (a null output of the asked size, optionally reporting a device's
         # latency, before the scenario starts the song)
         out = NullOutput.new(channels: 2, buffer_size: p.buffer || 800)
@@ -541,11 +655,23 @@ module MB::Sound
 
         if sc == :design
           session = Session.current
+        elsif p.demo
+          # (a demo set, as the maintainer played Tunnel Vision on 2026-11-16)
+          MB::Sound.demo(p.demo)
+          session = Session.current
+          if p.demo_go == :form
+            MB::Sound.module_eval('play_form demo.form')
+          else
+            scenes = session.arrangement.scenes.keys
+            MB::Sound.go(scenes.include?(p.demo_go) ? p.demo_go : (scenes[1] || scenes[0]))
+          end
+          Thread.pass until session.running?
         else
           MB::Sound.last_stop(perform: true, seed: 1)
           session = Session.current
           Thread.pass until session.running?
         end
+        MB::Sound.module_eval(p.line) if p.line && sc != :design
 
         screen = nil
         screen_epoch = nil
@@ -589,8 +715,10 @@ module MB::Sound
               nil
             end
           end
+        when :none
+          screen = nil
         else
-          layout = sc == :design ? :sound : :tiles
+          layout = { design: :sound, wall: :wall }.fetch(sc, :tiles)
           screen = UI::Tiles.new(layout: UI.tiles_layout_named(layout), input: slave, output: slave, repl: :thread, look: p.look, fps: p.fps, probe: true)
         end
 
@@ -623,8 +751,11 @@ module MB::Sound
         cpu0 = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID)
         gc0 = GC.stat.slice(:total_allocated_objects, :count, :minor_gc_count, :major_gc_count, :time) # (the whole process's garbage while recording)
         yjit0 = UIBench.yjit_stats
-        the_feed = screen ? screen.feed : feed
-        pub0 = the_feed.published
+        the_feed = screen ? screen.feed : (sc == :plot ? feed : nil)
+        pub0 = the_feed&.published.to_i
+        dev = session.output.is_a?(UIBench::DeviceModel) ? session.output : nil
+        under0 = dev&.underruns.to_i
+        cpu_th0 = { render: UIBench.thread_cpu(session.render_thread), painter: UIBench.thread_cpu(screen&.thread || plot_thread) }
         bufs = 0
         tap = session.add_tap { |_| bufs += 1 }
         holders = nil
@@ -661,6 +792,9 @@ module MB::Sound
         GC.disable if p.gc_off
         if screen
           perf = screen.start_perf
+        elsif sc == :none
+          perf = UI::Perf.new(ack: nil, label: 'no screen')
+          perf.start_probe(render: session.render_thread)
         else
           perf = UI::Perf.new(ack: nil, label: 'plot (standalone)')
           pacer.perf = perf
@@ -672,6 +806,30 @@ module MB::Sound
           watched = [screen&.thread || plot_thread, screen.is_a?(UI::Tiles) ? screen.instance_variable_get(:@reader) : nil, screen.respond_to?(:pty_thread) ? screen.pty_thread : nil].compact
           UI::FileWatch.start(watched)
         end
+        during = nil
+        if p.during
+          # (typed as he typed commands: each at its time, into the REPL
+          # pane's Pry, or a plain thread with no screen)
+          cmds = p.during.split(' ;; ')
+          during = Thread.new do
+            Thread.current.name = 'ui_bench during'
+            cmds.each_with_index do |c, i|
+              t = wall0 + p.seconds * (i + 1) / (cmds.length + 1)
+              d = t - UIBench.now
+              sleep d if d > 0
+              if screen.is_a?(UI::Tiles) && screen.host
+                screen.host.write("#{c}\r")
+              else
+                begin
+                  MB::Sound.module_eval(c)
+                rescue => e
+                  warn "ui_bench --during: #{e.class}: #{e.message}"
+                end
+              end
+              $stderr.puts format('ui_bench --during at %.2f s: %s', UIBench.now - wall0, c)
+            end
+          end
+        end
         alloc_map = nil
         if p.alloc > 0
           # (the first seconds of the recording traced: the keys and the
@@ -682,6 +840,7 @@ module MB::Sound
         else
           sleep p.seconds
         end
+        during&.join(5)
         blog&.stop
         file_calls = p.file_watch ? UI::FileWatch.stop : nil
         screen ? screen.stop_perf : perf.stop
@@ -715,7 +874,22 @@ module MB::Sound
           }
           FastUI::GVLProbe.stop
         end
-        published = the_feed.published - pub0
+        published = the_feed ? the_feed.published - pub0 : 0
+        cpu_share = cpu_th0.to_h { |k, v| c1 = UIBench.thread_cpu(k == :render ? session.render_thread : (screen&.thread || plot_thread)); [k, v && c1 ? ((c1 - v) / wall * 100).round(1) : nil] }
+        device = nil
+        if dev
+          # Underruns while recording, each with the buffer whose render
+          # (or write) was running when the pull found the queue short
+          list = dev.underrun_list.drop(under0).select { |at, _| at >= wall0 && at <= wall0 + wall }
+          lags = dev.lags(wall0 + 0.5, wall0 + wall) # (after the first half second, until the recording ended)
+          lv = lags.map(&:last)
+          worst = lags.max_by(5) { |_, l| l }
+          device = { queue_ms: (dev.queue / 48.0).round(1), period: dev.period, underruns: list.length, per_min: (list.length * 60.0 / wall).round(1),
+                     min_slack_ms: dev.min_slack && (dev.min_slack / 48.0).round(1), at_s: list.map { |at, short| [(at - wall0).round(3), short] },
+                     lag_ms: UI::Perf.stats(lv.map { |x| x / 1000.0 }),
+                     lags_over_per_min: [5, 10, 16, 21, 32, 43].to_h { |ms| [ms, (lv.count { |x| x > ms } * 60.0 / wall).round(1)] },
+                     worst_lags: worst.map { |t, l| [(t - wall0).round(3), l] } }
+        end
         session.remove_tap(tap) rescue nil
         cpu = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - cpu0
         gc1 = GC.stat.slice(*gc0.keys)
@@ -728,7 +902,7 @@ module MB::Sound
         yjit = yjit0 && UIBench.yjit_stats.to_h { |k, v| [k, v - yjit0[k]] }
         d1 = UI::Perf.run_delays(named.call)
         load1 = UI::Perf.loadavg
-        rects = screen.is_a?(UI::Tiles) ? screen.tiler.rects.to_h { |n, r| [n, r] } : (screen ? {} : { scope: Struct.new(:x, :y, :w, :h).new(0, 0, cols, rows) })
+        rects = screen.is_a?(UI::Tiles) ? screen.tiler.rects.to_h { |n, r| [n, r] } : (screen || sc == :none ? {} : { scope: Struct.new(:x, :y, :w, :h).new(0, 0, cols, rows) })
         if screen.is_a?(UI::Band)
           rects = { band: Struct.new(:x, :y, :w, :h).new(0, 0, cols, screen.height) }
         end
@@ -755,7 +929,7 @@ module MB::Sound
           yjit: yjit,
           garbage: garbage, alloc_map: alloc_map,
           run_delay_ms: delay, clean: %i[painter render].all? { |k| delay[k] && delay[k] < wall * 1000 * 0.01 }, cpu_s: cpu.round(2), wall_s: wall.round(2),
-          snapshots_per_s: (published / wall).round(1), buffers_per_s: (bufs / wall).round(1),
+          snapshots_per_s: (published / wall).round(1), buffers_per_s: (bufs / wall).round(1), cpu_share_pct: cpu_share, device: device, demo: p.demo, line: p.line, fps: p.fps, yielding: UI::Yielding.on,
           file_calls: file_calls && file_calls.map { |m, path, loc, th| [m, path, loc, th] },
           perf: s, sink_report: UIBench.sink_report(sink, rects, warm, key_panes: UIBench::KEY_PANES[sc] || []), machine: machine,
           pane_cpu_ms: screen.is_a?(UI::Tiles) ? screen.stats[:pane_cpu_ms] : nil, # (each pane's draws, the last 200)
@@ -769,7 +943,12 @@ module MB::Sound
         puts "== #{sc} (#{kind} sink, #{session.buffer_size}-frame buffers#{UI::Feed.every_buffer ? ', every-buffer snapshots' : ''}#{UI::FrameRate.snapshot_timed ? ', snapshot-timed' : ''}#{UI::Tiles.echo_wake ? ', echo wake' : ''}#{p.out_latency ? ", output latency #{p.out_latency} buffers" : ''}#{knob ? ", turning #{knob.inspect}" : ''}#{ENV['MB_SOUND_UI_WAVES'] ? ", MB_SOUND_UI_WAVES=#{ENV['MB_SOUND_UI_WAVES']}" : ''}): load #{load0&.first}->#{load1&.first}, run delay ms #{delay.map { |k, v| "#{k} #{v}" }.join(' ')} (#{row[:clean] ? 'clean' : 'contended'}), CPU #{row[:cpu_s]} s of #{row[:wall_s]} s"
         puts format('  clocks: screen started at %.6f, recording from %.6f (%.1f s after the screen; epoch seconds, as --yjit-log stamps)', screen_epoch, rec_epoch, rec_epoch - screen_epoch) if screen_epoch
         perf.headline(s).each { |l| puts "  #{l}" }
-        puts "  feed: #{row[:snapshots_per_s]} snapshots/s published, #{row[:buffers_per_s]} render buffers/s"
+        puts "  feed: #{row[:snapshots_per_s]} snapshots/s published, #{row[:buffers_per_s]} render buffers/s; CPU share: render thread #{cpu_share[:render]}%, painter #{cpu_share[:painter] || '-'}%; yielding #{UI::Yielding.on ? 'on' : 'off'}#{p.demo ? "; demo #{p.demo.inspect}" : ''}#{p.line ? "; line #{p.line}" : ''}"
+        if device
+          puts "  device model: queue #{device[:queue_ms]} ms, pulls of #{device[:period]} frames: #{device[:underruns]} underruns (#{device[:per_min]}/min), least left after a pull #{device[:min_slack_ms]} ms#{device[:at_s].empty? ? '' : "; at #{device[:at_s].first(8).map { |t, sh| "#{t} s (#{sh} short)" }.join(', ')}"}"
+          lm = device[:lag_ms]
+          puts "    lag behind the schedule p50/p99/max #{lm.values_at(:p50, :p99, :max).join('/')} ms; pulls lagging per min over #{device[:lags_over_per_min].map { |k, v| "#{k} ms: #{v}" }.join(', ')}; worst at #{device[:worst_lags].map { |t, l| "#{t} s #{l} ms" }.join(', ')}"
+        end
         puts "  garbage (whole process): #{garbage[:objects_per_s]} objects/s, GC #{garbage[:gc_per_min]}/min (#{garbage[:minor]} minor, #{garbage[:major]} major), GC time #{garbage[:gc_ms_per_min]} ms/min"
         puts "  YJIT while recording: #{yjit[:compiled_block_count]} blocks compiled in #{(yjit[:compile_time_ns] / 1e6).round(1)} ms, #{yjit[:invalidation_count]} invalidations (#{yjit.select { |k, v| k.start_with?('invalidate_') && v.to_i > 0 }.map { |k, v| "#{k.to_s.delete_prefix('invalidate_')} #{v}" }.join(', ')}), #{yjit[:code_gc_count]} code GCs" if yjit
         puts "  frames: #{s[:refreshes_per_s]}/s refreshed, #{s[:written_per_s]}/s written; lateness p50/p99/max #{s[:late_ms].values_at(:p50, :p99, :max).join('/')} ms; " \
