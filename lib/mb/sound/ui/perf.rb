@@ -129,12 +129,27 @@ module MB
           @pending_query = nil
           @probe_started = false
           @audio = nil
+          @data = nil
+          @data0 = nil
+          @data1 = nil
+        end
+
+        # Counts the snapshots the screen's feed publishes while recording
+        # (+feed+ answers #published): the data rate, the most the scope
+        # and meters can change a second, beside the frame rate (at
+        # 1024-frame buffers 46.9 a second while the status line read
+        # 60/60 Hz, 2026-11-16).  Returns self.
+        def count_data(feed)
+          @data = feed
+          @data0 = feed.published
+          self
         end
 
         def running? = @stopped_at.nil?
 
         # Ends recording (the rings stay for the report).
         def stop
+          @data1 ||= @data&.published
           @stopped_at ||= @clock.call
           stop_probe
           self
@@ -481,6 +496,7 @@ module MB
             kept: n,
             refreshes_per_s: (@count / secs).round(1),
             written_per_s: (written.length / secs).round(1),
+            data_per_s: @data ? (((@data1 || @data.published) - @data0) / secs).round(1) : nil,
             late_ms: Perf.stats(values(:late)),
             paint_ms: Perf.stats(values(:paint)),
             write_ms: Perf.stats(values(:write)),
@@ -543,7 +559,8 @@ module MB
           require_relative '../help' # (console help loads on first use)
           d = Help::Doc.new
           d.title 'UI frame instruments', 'ui.perf :report'
-          d.para "#{s[:seconds]} s, #{s[:frames]} refreshes (#{s[:refreshes_per_s]}/s), #{s[:written_per_s]} written/s, " \
+          data = s[:data_per_s] ? ", #{s[:data_per_s]} snapshots/s (new data: the most the scope and meters change a second)" : ''
+          d.para "#{s[:seconds]} s, #{s[:frames]} refreshes (#{s[:refreshes_per_s]}/s), #{s[:written_per_s]} written/s#{data}, " \
                  "#{s[:kb_per_s]} kB/s.  Times in ms.  An answer to the terminal query bounds its parse time, not its paint."
           d.lines headline(s).map { |l| "  #{l}" }
           d.heading 'Frames'

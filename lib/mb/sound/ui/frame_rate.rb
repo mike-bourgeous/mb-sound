@@ -176,6 +176,7 @@ module MB
         def start_perf(**opts)
           stop_perf
           p = Perf.new(clock: @clock, ack: perf_ack, **opts)
+          p.count_data(feed) if respond_to?(:feed) && feed.respond_to?(:published)
           perf_identify(p)
           @pacer.perf = p
           @rates.perf = p

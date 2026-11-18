@@ -318,6 +318,9 @@ RSpec.describe(MB::Sound::UI::Perf) do
       expect(p.identity[:xtversion]).to eq('Konsole 24.08.3')
       expect(s[:keys][:n]).to eq(2) # (the answers aren't keys)
       expect(@tiles.perf).to be_nil
+      # The data rate beside the frame rate (no song here: no snapshots)
+      expect(s[:data_per_s]).to eq(0.0)
+      expect(MB::U.remove_ansi(p.report(s).to_s)).to include('0.0 snapshots/s (new data')
     end
 
     it 'times scripted keys (the capture\'s knob turns) like typed ones, handled through the Router' do
