@@ -12,6 +12,22 @@ RSpec.describe(MB::Sound::MIDI::Transform::Echo, :midi_transforms) do
     ])
   end
 
+  it 'cycles an Array of delays, each the gap before the next repeat (gen-ux-1)' do
+    out = ons(read_all(one_note.echo([1/8r, 1/4r], 4, pitch: [1, 2])))
+    expect(out.map { |e| e.first(3) }).to eq([
+      [:note_on, 60, 0r], [:note_on, 61, 1/8r], [:note_on, 63, 3/8r], [:note_on, 64, 1/2r], [:note_on, 66, 3/4r],
+    ])
+    # A gate fraction is of the gap before each repeat
+    s = list_stream(ev.note_on(60, time: 0r), ev.note_off(60, time: 3r))
+    gated = read_all(s.echo([1/8r, 1/4r], 2, pitch: 1, gate: 0.5)).select { |e| e[0] == :note_off }.map { |e| e[2] }
+    expect(gated).to eq([1/8r + 1/16r, 3/8r + 1/8r, 3r])
+    # One gap in an Array is the plain delay
+    fresh = -> { list_stream(ev.note_on(60, time: 0r), ev.note_off(60, time: 1/10r)) }
+    expect(read_all(fresh.().echo([1/4r], 3, pitch: 7.st))).to eq(read_all(fresh.().echo(1/4r, 3, pitch: 7.st)))
+    expect { one_note.echo([], 2) }.to raise_error(ArgumentError, /at least one gap/)
+    expect { one_note.echo([1/8r, -1/8r], 2) }.to raise_error(ArgumentError, /negative/)
+  end
+
   it 'gives echoes the length of the played note by default' do
     out = read_all(one_note.echo(1/4r, 2, pitch: 12))
     expect(out.map { |e| e.first(3) }).to eq([

@@ -881,6 +881,9 @@ module MB
         them without wrapping (notes that leave drop out; live streams only
         shift later).  Grid kits take the same transforms, row by row
         (`beat.reverse`, `beat.swing(0.6)`, `beat.humanize`).
+        `clip.echo(3.n16, 3, pitch: 7.st)` bakes echoes into the clip
+        (a generator keeps generating, echoed cycle by cycle); an Array of
+        gaps is cycled like `pitch:` (`echo([3.n32, 5.n32], 4)`).
         `clip.show` prints a clip as text: `:grid` (grid characters, so a
         kit's `show.rows` parse back), `:roll` (a piano roll), or
         `:degrees` (scale degrees in the session key).
