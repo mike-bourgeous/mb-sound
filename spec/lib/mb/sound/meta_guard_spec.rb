@@ -80,6 +80,7 @@ module MetaGuard
     'lib/mb/sound/take.rb' => ['takes write their metadata as the replay\'s meta:', %i[to_ruby replay]],
     'lib/mb/sound/graph_io/comments.rb' => ['a document\'s comments become notes, and the writer asks which notes to print as comments', %i[args notes_of args_of]],
     'lib/mb/sound/ui/inspect.rb' => ['the inspector shows a node\'s notes (quoted: Meta.notes_text)', %i[notes_of]],
+    'lib/mb/sound/session/set_clear.rb' => ['clear_set and its undo move the set\'s metadata Store with the rest of the set (SetState#metadata; never looked into)', %i[install_set_state]],
     # (other things named meta or metadata)
     'lib/mb/sound/io_methods.rb' => ['MB::Sound.read hands back an FFMPEGInput\'s file tags (not mb-sound metadata)', %i[read]],
     'lib/mb/sound/player/items.rb' => ['the player shows a file\'s ffmpeg tags (not mb-sound metadata)', %i[load_file]],
