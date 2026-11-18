@@ -100,7 +100,17 @@ module MB
       #     fx :keys, L.fx.reverb.hall
       #     fx :keys, [:juno1, :hall], on: :bar
       #     fx :keys, :off
+      #
+      # A block is not an effect: Ruby would drop it silently (the
+      # maintainer's `fx(:sub) { it.pan(1) }` changed nothing), so a block
+      # warns once per line, naming the Proc spelling, and is ignored.
       def fx(name, effects = Arrangement::KEEP_FX, at: nil, on: nil, in: nil)
+        if block_given?
+          n = name.inspect
+          Internal.warn_once_per_site(:fx_block,
+            "fx #{n} takes its effect as an argument, not a block, so the block was ignored#{' and nothing changed' if effects.equal?(Arrangement::KEEP_FX)}; " \
+            "give a Proc taking the track's signal: fx #{n}, ->(s) { s.pan(1) }")
+        end
         arrangement = Session.current.arrangement
         if effects.equal?(Arrangement::KEEP_FX)
           tr = arrangement.tracks[name] or raise ArgumentError, "fx #{name.inspect}: no track #{name.inspect}#{GraphIO.suggest(name, arrangement.tracks.keys)}"

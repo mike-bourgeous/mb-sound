@@ -85,6 +85,13 @@ RSpec.describe(MB::Sound::Arrangement::Fx, :aggregate_failures) do
       expect { MB::Sound.fx(:pad, :hall) }.to raise_error(described_class::Error, /a graph track's effects go in its graph/)
       expect { MB::Sound.fx(:nope, :hall) }.to raise_error(ArgumentError, /no track :nope/)
       expect { MB::Sound.track(:keys, :funk_keys, fx: :hal) }.to raise_error(described_class::Error, /no effect :hal/)
+
+      # (fixes-15, the maintainer's `fx(:sub) { it.pan(1) }`: Ruby dropped
+      # the block, nothing changed, nothing said so)
+      expect { expect(MB::Sound.fx(:keys) { it.pan(1) }).to eq([]) }.to output(
+        /warning: fx :keys takes its effect as an argument, not a block, so the block was ignored and nothing changed; give a Proc taking the track's signal: fx :keys, ->\(s\) \{ s\.pan\(1\) \}\n\z/
+      ).to_stderr
+      expect(s.arrangement.tracks[:keys].fx).to be_nil.or eq([])
     }
   end
 
