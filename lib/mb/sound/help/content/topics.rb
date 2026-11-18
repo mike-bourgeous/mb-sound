@@ -1006,13 +1006,15 @@ module MB
 
     Help.topic :schedule, 'Scheduling', group: :time do
       about <<~TEXT
-        Blocks on the Session timeline: commands inside them land exactly at
-        the block's time, and each block is one undo step.  `at_bar`,
-        `after`, and `every` take launch points too (`at_bar in: 2.beats`,
-        `every 1.n4, on: :beat`) and return a handle that prints when it
-        runs and has `cancel`.  `reset_scheduler` (or `panic`, which also
-        stops the players) cancels everything scheduled, stops a song
-        form, and replaces a stuck scheduler.
+        Blocks on the Session timeline.  `at_bar`, `after`, `every`, and
+        `at_marker` return a handle: `.cancel` takes the block back
+        (`ticks = every(1) { ... }; ticks.cancel`), `cancel` alone cancels
+        every scheduled block, `scheduled` lists them, and
+        `reset_scheduler` (or `panic`, which also stops the players)
+        cancels everything, stops a song form, and replaces a stuck
+        scheduler.  Commands inside a block land exactly at its time, and
+        each block is one undo step.  `at_bar`, `after`, and `every` take
+        launch points too (`at_bar in: 2.beats`, `every 1.n4, on: :beat`).
       TEXT
       commands :at_bar, :after, :every, :scheduled, :cancel, :reset_scheduler, :marker, :at_marker
       note :method_modules

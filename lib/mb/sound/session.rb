@@ -835,6 +835,8 @@ module MB
         pb = @arrangement&.playback
         form = !!(pb && !pb.ended?)
         pb.stop if form
+        # (at_marker blocks waiting for their marker: gen-ux-1)
+        @markers&.cancel_waits
         @scheduler.reset(wait: wait).merge(form: form)
       end
 
