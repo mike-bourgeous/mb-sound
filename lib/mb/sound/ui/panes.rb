@@ -362,6 +362,17 @@ module MB
         # Space stays the transport's), s solos or unsolos it, m mutes or
         # unmutes it, from the snapshot's flags (marked solo and muted in
         # its row).
+        #
+        # Enter, by screen (tracks-enter-1, the maintainer's "track enter:
+        # maybe focus that track's knobs in :wall, design that track in
+        # :design", then "Do 'by screen'"): on a screen with an inspector
+        # (ui :sound, :tuning; the screen sets state[:design]) Enter
+        # designs the picked track (`design :drums`, a console line; only
+        # the focus moves when the inspector shows it already); elsewhere it
+        # takes the track into the knobs pane (a PaneKeys::Focus: its
+        # knobs only, a knobs pane put in for a while where the layout has
+        # none, Esc back here on the track: #key_returned), or says the
+        # track has none.  i designs the picked track from any screen.
         class Tracks < Pane
           include KnobTurns
 
@@ -389,6 +400,8 @@ module MB
             on 'm', :mute, help: 'mute, unmute it'
             on ['d', :delete], :untrack, help: 'remove it from the set (untrack; d twice; undo brings it back)', label: 'd Del'
             on 'v', :stopped_view, help: 'hide or show stopped tracks'
+            on :enter, :open, help: "its knobs in the knobs pane (Esc back); a design screen: design it", label: 'Enter'
+            on 'i', :design, help: 'design it: the sound screen on it (design :drums; design off back)'
             on 'e', :edit_line, help: PaneKeys::EDIT_HELP
             on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
           end
@@ -601,6 +614,41 @@ module MB
             RESUMES.include?(st) ? PaneKeys::Run["resume #{name.inspect}"] : PaneKeys::Run["stop #{name.inspect}"]
           end
 
+          # The most rows a knobs pane put in for Enter takes.
+          KNOB_ROWS = 12
+
+          # Enter: on a design screen the picked track designed (#key_design;
+          # the inspector focused when it shows the track already), else its
+          # knobs in the knobs pane (a PaneKeys::Focus; Esc comes back here).
+          def key_open(state)
+            name = state[:cursor] or return 'pick a track first (Up Down)'
+            s = state[:snap]
+            if state[:design]
+              return PaneKeys::Focus[:inspector, note: "designing #{name} (Esc: NAV)"] if s&.inspector&.track == name
+              return key_design(state)
+            end
+            n = Knobs.names_of_track(s, name).length
+            return "#{name} has no knobs: i designs it (design #{name.inspect})" if n == 0
+            PaneKeys::Focus[:knobs, :track, name, rows: (n + 2).clamp(4, KNOB_ROWS)]
+          end
+
+          # i: designs the picked track (`design :drums`: the sound screen
+          # with the inspector on it; `design off` puts this screen back).
+          def key_design(state)
+            name = state[:cursor] or return 'pick a track first (Up Down)'
+            unless state[:snap]&.tracks&.any? { |x| x.name == name }
+              return "#{name}: not a track (design takes a track: design #{name.inspect} would make one)"
+            end
+            PaneKeys::Run["design #{name.inspect}", "designing #{name}"]
+          end
+
+          # Back from the knobs pane's Esc (a PaneKeys::Focus): the cursor
+          # on track +name+ (the one t/T went to there).
+          def key_returned(state, name, _from = nil)
+            state[:cursor] = name
+            "#{name} (Enter its knobs, Left Right level, Space play/stop)"
+          end
+
           # v: hides or shows stopped tracks (this pane only).
           def key_stopped_view(state)
             state[:hide_stopped] = !state[:hide_stopped]
@@ -740,6 +788,15 @@ module MB
         # `turn` line a press (each rebuilds their track).  Turn lines show
         # on the pane's last row while in the mode, never in the REPL pane.
         # Outside the mode the pane draws as it always has.
+        #
+        # One track's knobs (tracks-enter-1, the maintainer's "track enter:
+        # maybe focus that track's knobs in :wall", then "by screen"): the
+        # tracks pane's Enter (a PaneKeys::Focus) calls #key_track, and the
+        # pane lists only the knobs of that track (.of_track: named under
+        # it, or read by its graph), titled "knobs: drums", pinned to it
+        # until Esc (back into the tracks pane on the track: #key_escape)
+        # or Enter on another track; t/T go to the next or previous track
+        # with knobs.  Without a track the pane draws as before.
         class Knobs < Pane
           include KnobTurns
           jump 'o'
@@ -756,6 +813,8 @@ module MB
             on ['H'], :turn, -KnobTurns::FINE, help: 'turn down, fine'
             on '0', :reset, help: "the knob's default"
             on :enter, :ask, help: 'type a value (turn :cut, 3000.hz)', label: 'Enter'
+            on ['t'], :other_track, 1, help: "one track's knobs (tracks pane Enter): the next, previous track's", label: 't T'
+            on ['T'], :other_track, -1, help: "one track's knobs (tracks pane Enter): the next, previous track's", label: 't T'
             on 'e', :edit_line, help: PaneKeys::EDIT_HELP
             on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
           end
@@ -772,13 +831,14 @@ module MB
 
             state[:snap] = s
             c = turn_line_canvas(c, state) if state[:mode]
-            if s.knobs.empty?
-              c.puts ['no knobs', :dim]
+            knobs = state[:track] ? track_list(state, s) : s.knobs
+            if knobs.empty?
+              c.puts [state[:track] ? "#{state[:track]}: no knobs now (Esc back)" : 'no knobs', :dim]
               return
             end
-            name_w = [[s.knobs.map { |k| k.name.to_s.length }.max, 4].max, 8].min
-            return draw_mode(c, s, state, name_w) if state[:mode]
-            s.knobs.first(c.h).each_with_index do |k, y|
+            name_w = [[knobs.map { |k| k.name.to_s.length }.max, 4].max, 8].min
+            return draw_mode(c, knobs, state, name_w) if state[:mode]
+            knobs.first(c.h).each_with_index do |k, y|
               spec = k.spec
               value = "#{Panes.fmt(k.value)}#{spec.unit ? " #{spec.unit}" : ''}"
               x = c.line(y, [c.pad(k.name, name_w), :name], ' ')
@@ -792,26 +852,120 @@ module MB
           # out first).
           def key_pick(state, d)
             out = flush(state)
-            n = state[:snap]&.knobs&.length.to_i
+            knobs = listed(state)
+            n = knobs.length
             state[:pick] = n == 0 ? 0 : (state[:pick].to_i + d).clamp(0, n - 1)
-            k = n == 0 ? nil : state[:snap].knobs[state[:pick]]
+            k = n == 0 ? nil : knobs[state[:pick]]
             note = k ? "#{k.name} (Left Right turn, Enter a value, 0 default)" : 'no knobs'
             out.empty? ? note : [*out, note]
           end
 
+          # The knobs of track +name+ in snapshot +s+ (KnobValues, in the
+          # snapshot's order): those named under it (:"drums/level",
+          # :"bass/cutoff", per-instance rack knobs :"bass/dub/space") and
+          # those its graph reads (Snapshot#knob_users: Session knobs like
+          # :cut, the build knobs its patch read).
+          def self.of_track(s, name)
+            return [].freeze unless s
+            users = s.knob_users[name] || []
+            s.knobs.select { |k| track_knob?(k.name, name, users) }.freeze
+          end
+
+          # The names of track +name+'s knobs (see .of_track) from snapshot
+          # +s+'s knob specs (the poll's, there before the first values).
+          def self.names_of_track(s, name)
+            return [].freeze unless s
+            users = s.knob_users[name] || []
+            s.slow.knob_specs.keys.select { |k| track_knob?(k, name, users) }.freeze
+          end
+
+          # True if knob +kn+ is track +name+'s: named under it or in
+          # +users+ (what its graph reads).
+          def self.track_knob?(kn, name, users) = Session::Name[kn].owner == name || users.include?(kn)
+
+          # The tracks pane's Enter (a PaneKeys::Focus from pane +from+):
+          # the pane shows track +name+'s knobs, the cursor on the first,
+          # until Esc (back to +from+) or another track.
+          def key_track(state, name, from = nil)
+            out = flush(state)
+            state[:track] = name
+            state[:from] = from
+            state[:pick] = 0
+            state[:top] = 0
+            n = Knobs.names_of_track(state[:snap], name).length
+            [*out, "knobs: #{name} (#{n})  Left Right turn  t T other tracks  Esc back to the tracks"]
+          end
+
+          # t/T: the next or previous track (by +d+) with knobs, while the
+          # pane shows one track's.
+          def key_other_track(state, d)
+            now = state[:track] or return "all knobs here (t T step tracks after Enter on a track in the tracks pane)"
+            s = state[:snap] or return 'no snapshot yet'
+            names = s.tracks.map(&:name)
+            names << now unless names.include?(now)
+            i = names.index(now)
+            (names.length - 1).times do |j|
+              t = names[(i + d * (j + 1)) % names.length]
+              next if Knobs.names_of_track(s, t).empty?
+              return key_track(state, t, state[:from])
+            end
+            "#{now}: the only track with knobs"
+          end
+
+          # Esc while the pane shows one track's knobs: back into the pane
+          # that sent it (the tracks pane, on the track: its key_returned),
+          # this pane taken away if Enter put it in for a while; else nil
+          # (Esc goes to NAV as in any pane).
+          def key_escape(state)
+            track = state[:track] or return nil
+            out = flush(state)
+            from = state[:from]
+            temporary_closed(state)
+            [*out, PaneKeys::Focus[from || :tracks, :returned, track, leave: true]]
+          end
+
+          # Its track filter goes when the screen takes the pane away.
+          def temporary_closed(state)
+            state[:track] = state[:from] = nil
+            state[:pick] = state[:top] = 0
+            state[:track_list] = nil
+          end
+
+          # "knobs: drums" while the pane shows one track's knobs (the
+          # screen's chrome; nil: the pane's title).
+          def state_title(state) = state[:track] ? "knobs: #{state[:track]}" : nil
+
           private
+
+          # The knobs the keys act on: the track's while there is one, else
+          # all of the snapshot's.
+          def listed(state)
+            s = state[:snap] or return [].freeze
+            state[:track] ? track_list(state, s) : s.knobs
+          end
+
+          # Knobs.of_track for the state's track, kept while the snapshot's
+          # knob list and the users are the same objects (no garbage per
+          # frame while filtered).
+          def track_list(state, s)
+            c = state[:track_list]
+            return c[3] if c && c[0].equal?(s.knobs) && c[1].equal?(s.knob_users) && c[2] == state[:track]
+            list = Knobs.of_track(s, state[:track])
+            state[:track_list] = [s.knobs, s.knob_users, state[:track], list]
+            list
+          end
 
           # The rows in the mode: the picked knob reversed, scrolled into
           # view, the value a key set (or a held gesture's target, in the
           # queued color) over the snapshot's.
-          def draw_mode(c, s, state, name_w)
-            n = s.knobs.length
+          def draw_mode(c, knobs, state, name_w)
+            n = knobs.length
             pick = state[:pick] = state[:pick].to_i.clamp(0, n - 1)
             top = state[:top].to_i
             top = pick if pick < top
             top = pick - c.h + 1 if c.h > 0 && pick >= top + c.h
             state[:top] = top = top.clamp(0, [n - c.h, 0].max)
-            s.knobs[top, c.h].each_with_index do |k, y|
+            knobs[top, c.h].each_with_index do |k, y|
               spec = k.spec
               v, turning = shown_value(state, k.name, k)
               value = "#{Panes.fmt(v)}#{spec.unit ? " #{spec.unit}" : ''}"
@@ -827,8 +981,8 @@ module MB
           def no_knob_note = 'no knobs to turn (knob :cut, 800, range: 100..8000)'
 
           def picked(state)
-            knobs = state[:snap]&.knobs
-            return nil if knobs.nil? || knobs.empty?
+            knobs = listed(state)
+            return nil if knobs.empty?
             k = knobs[state[:pick].to_i.clamp(0, knobs.length - 1)]
             [k.name, k]
           end

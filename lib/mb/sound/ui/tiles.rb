@@ -1202,7 +1202,7 @@ module MB
 
         # Panes a temporary jump takes rows from first (else the largest
         # flexible pane).
-        TEMPORARY_PREFER = { picker: :inspector }.freeze
+        TEMPORARY_PREFER = { picker: :inspector, knobs: :scope }.freeze
 
         # Takes away pane +name+ opened by its jump letter (#jump_unlocked):
         # the layout comes back as it was, the focus where it was.
@@ -1210,6 +1210,8 @@ module MB
           restore = @temporary_jumps.delete(name) or return
           act(MB::Term::Input::Action.of(:mode, :nav)) if @tiler.focus == name
           restore.call
+          pane = @panes[name]
+          pane.temporary_closed(@states[name]) if pane.respond_to?(:temporary_closed) # (the knobs pane's track filter goes with it)
           @full = true
           @router.mode
         end
@@ -1759,6 +1761,8 @@ module MB
               else
                 flash(Tiles.one_line("no console here: #{x.code}"), :warn)
               end
+            when PaneKeys::Focus
+              focus_pane(name, x)
             when String
               flash(x, :key)
             when MB::Term::Input::Action
@@ -1788,6 +1792,37 @@ module MB
           pane.lines_ran(@states[name]) if ran && pane.respond_to?(:lines_ran)
           @full = true
         end
+
+        # A PaneKeys::Focus from pane +from+: into the pane it names (put
+        # in for a while with its +rows+ where none is on screen; the
+        # asking pane taken away first with +leave+ when a jump or Focus
+        # put it in), then the target's key_<action> with the Focus's args
+        # and +from+, its result handled like a key's.  The titles are
+        # planned again (the knobs pane's names its track).
+        def focus_pane(from, x)
+          @input_lock.synchronize do
+            target = jump_target(x.pane)
+            if target.nil? && x.rows
+              @temporary_jumps[x.pane] = plot_pane(x.pane, height: [x.rows, @rows / 2].min, prefer: TEMPORARY_PREFER[x.pane])
+              target = jump_target(x.pane)
+            end
+            return flash("no #{x.pane} pane here (: show :#{x.pane})", :dim) unless target
+            close_temporary_jump(from) if x.leave && from != target && @temporary_jumps[from]
+            enter_unlocked(target)
+            # (pane to pane: the Router stays :pane, so #mode_changed doesn't
+            # move the mode mark)
+            pane_mode(target) if @router.mode == :pane
+            pane = @panes[target]
+            # (a pane put in just now hasn't drawn: the asker's snapshot, the
+            # same feed's, until it does)
+            @states[target][:snap] ||= @states[from][:snap]
+            r = x.action && pane.respond_to?(:key_action) ? pane.key_action(x.action, @states[target], *x.args, from) : nil
+            flash(Tiles.one_line(x.note), :key) if x.note
+            pane_result(target, r) if r
+            @relayout = true
+          end
+        end
+        private :focus_pane
 
         # The typed answer (nil: cancelled) to the open PaneKeys::Ask: the
         # asking pane's key_<answer>, handled like a key's result (a
@@ -2287,6 +2322,9 @@ module MB
             next unless pl.name
             @states[pl.name][:title_in_rule] = true
             @states[pl.name][:level] = @density.level
+            # (a screen with an inspector is a design screen: the tracks
+            # pane's Enter designs its track there; tracks-enter-1)
+            @states[pl.name][:design] = names.include?(:inspector)
           end
           @canvases = {}
           @drawn_at = {}
@@ -2551,7 +2589,9 @@ module MB
               next Chrome::Item.new(name: :"tabs@#{r.x},#{r.y}", rect: r)
             end
             under_tabs = strips.any? { |t| t.y == r.y - 1 && t.x == r.x }
-            title = under_tabs || p.name == :repl ? nil : @panes[p.name]&.title || (@panes[p.name] ? p.name.to_s : nil)
+            pane = @panes[p.name]
+            # (a pane's title by its state: the knobs pane's "knobs: drums")
+            title = under_tabs || p.name == :repl ? nil : (pane.respond_to?(:state_title) && pane.state_title(@states[p.name])) || pane&.title || (pane ? p.name.to_s : nil)
             n = order.index(p.name)
             Chrome::Item.new(name: p.name, rect: r, title: title, number: n && n + 1, focused: p.name == @tiler.focus,
                              jump: @jumps[p.name], note: @show_fps ? rate_note(p) : nil)

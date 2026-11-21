@@ -6,7 +6,7 @@
 
 ## Quick reference
 
-- `design :bass` (or `ui :sound`) opens the screen on a track; panes: inspector, preview, code, RENDER (`UI::PatchRender`), library picker (`l`).
+- `design :bass` (or `ui :sound`) opens the screen on a track; panes: inspector, preview, code, RENDER (`UI::PatchRender`), library picker (`l`); tracks pane Enter or i: `design` it.
 - A new track starts from `preset :init` (`bin/synths/init_voice.rb`); code `lib/mb/sound/ui/`; specs `spec/lib/mb/sound/ui/sound_panes_spec.rb`, `spec/lib/mb/sound/ui/patch_render_spec.rb`; guards `inspect_presets_spec.rb` (sections, Up/Down), `inspect_audible_spec.rb` (every turn heard or marked); help `help :inspector`.
 - Measure the screen: `bin/ui_demo.rb --design 'design :bass, L.inst.acid, riff' -s 20` (each pane's redraws/s and CPU, the playhead's moves; terminal_ui.md).
 - Live wave displays (prototype, off by default): `ui.waves :live` (`UI::WaveView.mode`, `MB_SOUND_UI_WAVES=live`) (`ui/wave_view.rb`; The live wave displays, below); scheduling: preview workers yield the GVL to the render thread (`UI::Yielding`, `FastUI::GVLYield`; `MB_SOUND_YIELD=0` off), charts are drawn off the painter (`Result#pictures`, `UI::ChartWorker`), `PatchRender.hold_sweeps` (off; The workers yield, below).
@@ -285,6 +285,10 @@ In the mock-up's README, numbered; the ones that change direction: whether `:sou
 ## The UX review's fixes (sd-ux-fixes-1, 2026-11-13)
 
 The reviewer agent's findings (workbench `research/sd-ux-review-1/report.md`), fixed: a typed unit value on a preset's plain-number knob lands at its number or is refused (`Session::Knobs#knob_value`, `Param.implied_unit`; params.md); Enter's value prompt shows the old value selected and the first printable key replaces it (`PaneKeys::Ask` `select: true`, mb-term `LineInput#prefill`); junk typed there is read with Prism and answered with what fits (`KnobTurns.typed_problem`, shared with the knobs pane since knobs-pane-keys-1); a limited turn says "limited to X" on the turn line every time (`Thread.current[:mb_sound_clamp_notes]`, `Tiles#run_turn_line`); a key that changes Enter's hint replaces the earlier flash (`Tiles#pane_action`); noise's frequency and phase are hidden (`Tone#noise_only?`), a start phase is listed last, and a row's default stop skips start phases, unnamed `param_N` inputs, counts, and build knobs (`last_resort_stop?`); the panel's cells take plain numbers (an envelope's A D S R); F says why it does nothing on a patch block or a Ruby library instrument; the header names a library instrument (`InspectInfo#instrument`); knob rows follow the gain they scale (`Classify.attach_knobs`, above); the picker's "+N more" has its own row; RENDER's o says "overlay off/on"; recall and xfade print one line (`KnobMethods::KnobEntries`), snaps a table (`KnobMethods::Snapshots`), CODE rounds float noise; `save` refuses a name or a track; `track(:x)` alone on an existing track says where to see it; L paths and patch typos get did-you-mean.  The idle focused inspector allocates 443 objects a frame (was 2210; `inspector_allocations_spec.rb`, terminal_ui.md).  Design questions left for the maintainer: the design screen's save, binding filter-bank and formant settings, design's first `bg`, Esc in KEYS, auditions in undo, `tuner 'dir'` order, help pages taking the keys, and the render stalls on instrument loads.
+
+## From the tracks pane (tracks-enter-1, 2026-11-21)
+
+Enter on a track in the tracks pane designs it on this screen (any layout with an inspector pane): `design :drums` runs as a printed console line, the inspector on the track; when the inspector already shows it, only the focus moves into the inspector.  `i` in the tracks pane designs the picked track from any screen (a performance screen switches here; `design off` goes back).  On performance screens Enter shows the track's knobs in the knobs pane instead (terminal_ui.md, Enter on a track, by screen).
 
 ## Not built yet
 

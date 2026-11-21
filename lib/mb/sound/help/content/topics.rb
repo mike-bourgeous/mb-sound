@@ -2096,7 +2096,10 @@ module MB
         steps).  In the tracks pane Left/Right set the level a dB a press
         (held: live, then one `level :bass, -6.0.db` line), Space plays a stopped track again
         (`resume :bass`) or stops a playing one (NAV Space is the
-        transport), x stops, s solos, m mutes, = types a level.  In the form pane Up/Down
+        transport), x stops, s solos, m mutes, = types a level, Enter shows
+        the track's knobs in the knobs pane (t T other tracks, Esc back to
+        the track; on `ui :sound` Enter designs it), i designs it (`design
+        :bass` from any screen).  In the form pane Up/Down
         pick a section, Enter goes there next (`goto :drop`), r loops it
         (`loop!`, or `practice :drop`), n `onward`, > `skip`, f `finish`,
         Space the transport.  In the buses pane Up/Down pick a bus or a
@@ -2105,8 +2108,7 @@ module MB
         bus.  In the messages pane Enter opens the bottom one in full
         (`ui.message 2`).  In those panes (and the matrix, knobs, racks,
         queue) e puts the picked row's line on the console unrun, to
-        edit.  Every key
-        runs one console
+        edit.  Every key that changes the set runs one console
         line: journaled, undoable, in your take (knob turns show on the
         pane's last row, other lines in the console).  `ui :mixer` shows
         buses beside the master.
