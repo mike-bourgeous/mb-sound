@@ -959,7 +959,9 @@ RSpec.describe(MB::Sound::Form) do
     end
 
     it 'lists the spellings for anything else' do
-      expect { within { MB::Sound.seek(0) } }.to raise_error(ArgumentError, /seek takes a bar .*12\.bars = bar 13.*got a plain number \(0\)/)
+      expect { within { MB::Sound.seek(-2) } }.to raise_error(ArgumentError, /seek takes a bar .*12\.bars = bar 13.*got a plain number \(-2\)/)
+      # (ux-friction-1: the maintainer's `seek 0` for the start)
+      expect { within { MB::Sound.seek(0) } }.to raise_error(ArgumentError, /seek 0: bars count from 1, so the start is seek 1/)
       expect { within { MB::Sound.seek(-1.seconds) } }.to raise_error(ArgumentError, /seek takes a bar/)
       expect { within { MB::Sound.seek(:drop, 2) } }.to raise_error(ArgumentError, /a beat goes with a bar number/)
     end

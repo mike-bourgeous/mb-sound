@@ -477,15 +477,18 @@ module MB
         entries.length == 1 ? entries.first : entries
       end
 
-      # True if every name in +names+ is something a strip command
-      # (+command+: mute, solo, level, ...) can act on: a track, player,
-      # bus, rack, or mute group (or a monitor, cue, or wire of one), or a
-      # name already muted or soloed.  Else the error goes through
-      # MB::Sound.live_error with a did-you-mean, and the command does
-      # nothing (ux-friction-1: the maintainer's `solo :plubk` silenced
-      # every track but a name that wasn't there; `level :plubk` made a
-      # knob).  Scheduled blocks (a context with a time) skip the check, since
-      # they may name players their song starts later.
+      # False (after MB::Sound.live_error with a did-you-mean, so the
+      # command does nothing) if a name in +names+ is nothing a strip
+      # command (+command+: mute, solo, level, ...) can act on, a track,
+      # player, bus, rack, or mute group (or a monitor, cue, or wire of
+      # one), or a name already muted or soloed, while a known name is
+      # spelled close to it: a typo (ux-friction-1: the maintainer's
+      # `solo :plubk` silenced every track but a name that wasn't there;
+      # `level :plubk` made a knob).  A new name nothing is spelled like
+      # still works, applying when a player of that name starts (lesson
+      # :design sets `level :l_lead, -16.db` before `design :l_lead`);
+      # live, a dim line says so.  Scheduled blocks (a context with a
+      # time) skip the check.
       def strip_names_known?(command, names)
         ctx = Session.context
         return true if ctx&.time || ctx&.batch || names.empty?
@@ -494,13 +497,14 @@ module MB
         known = session.names.to_h.reject { |_, kind| kind == :knob || kind == :knob_group || kind == :clock }.keys |
                 session.players.keys | session.arrangement.tracks.keys | session.mute_groups.keys | info[:muted] | info[:soloed]
         names.each do |n|
-          next if n.is_a?(Integer) || known.include?(n)
-          base = n.to_s.split('/').first.to_sym
-          next if known.include?(base)
+          next if n.is_a?(Integer) || known.include?(n) || known.include?(Session::Name[n].strip_owner)
 
-          MB::Sound.live_error(ArgumentError.new(
-            "#{command} #{n.inspect}: no track, player, bus, or mute group #{n.inspect}#{GraphIO.suggest(n, known)} (tracks lists them)"
-          ))
+          hint = GraphIO.suggest(n, known)
+          if hint.empty?
+            $stdout.puts "\e[2m#{command} #{n.inspect}: nothing is named #{n.inspect} yet; it applies when a player of that name starts\e[0m" if MB::Sound.live?
+            next
+          end
+          MB::Sound.live_error(ArgumentError.new("#{command} #{n.inspect}: no track, player, bus, or mute group #{n.inspect}#{hint} (tracks lists them)"))
           return false
         end
         true

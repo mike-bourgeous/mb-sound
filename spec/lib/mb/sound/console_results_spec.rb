@@ -81,6 +81,9 @@ RSpec.describe('console command results') do
       within { MB::Sound.level(:pad, -6.db) }
       run(800)
       expect(session.strip_info[:muted]).to eq([:"pluck/live"])
+      # A new name nothing is spelled like still works (lesson :design's level before its track)
+      within { MB::Sound.level(:l_lead, -16.db) }
+      expect(session.knobs.key?(:"l_lead/level")).to eq(true)
 
       # A bus has no fader: level refuses it, naming mute and feed (his
       # `level :hall, -80.db` changed nothing); mute works on buses
