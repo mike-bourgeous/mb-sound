@@ -29,10 +29,27 @@
  * the watched thread that ran it.  Records are pushed at RESUMED and in the
  * GC hook, both with the GVL held, and drained with it, so the log needs no
  * atomics.
+ *
+ * Stacks (GVLProbe.stacks_start, gvl-main-1): where a thread was while it
+ * kept a waiting thread off the GVL.  A native watchdog thread (no GVL)
+ * checks every millisecond whether the waiter (the render thread) has
+ * waited at least the threshold; if so it signals the watched thread
+ * holding the GVL, whose handler records its native backtrace
+ * (backtrace(3), resolved later with dladdr) and, optionally, its Ruby
+ * frames (rb_profile_frames, the labels and paths copied as text in the
+ * handler, as sampling profilers do).  A hold in C code (a C extension, a
+ * system call that keeps the GVL, the VM itself) is never interrupted by
+ * Ruby's timeslice; this says which code it was.  Opt-in instrumentation
+ * (MB::Sound::DropoutProbe stacks:).
  */
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#include <errno.h>
+#include <pthread.h>
+#include <signal.h>
+#include <dlfcn.h>
+#include <execinfo.h>
 
 #include <ruby.h>
 #include <ruby/thread.h>
@@ -57,6 +74,8 @@ struct probe_slot {
 	int32_t waits[PROBE_RING]; // nanoseconds, capped at 2.1 s
 	int32_t holds[PROBE_RING];
 	int holder_at_ready;
+	pthread_t pthread; // (the native thread, set at RESUMED, for stacks)
+	int has_pthread;
 	uint64_t blocker_count;
 	int32_t blocker_waits[PROBE_BLOCKERS];
 	int8_t blockers[PROBE_BLOCKERS];
@@ -165,6 +184,10 @@ static void probe_event(rb_event_flag_t event, const rb_internal_thread_event_da
 				}
 			}
 			s->resumed_ns = now;
+			if (!s->has_pthread) {
+				s->pthread = pthread_self();
+				s->has_pthread = 1;
+			}
 			probe_holder = i;
 		} else if (event & RUBY_INTERNAL_THREAD_EVENT_SUSPENDED) {
 			s->suspended_ns = now;
@@ -453,6 +476,275 @@ static VALUE probe_log_stats(VALUE self)
 	return h;
 }
 
+// Stacks (see the top).
+#define STACK_SAMPLES 512
+#define STACK_C 48
+#define STACK_RB 32
+#define STACK_TEXT 120
+
+struct stack_sample {
+	int64_t at_ns;
+	int64_t wait_ns;
+	int8_t holder;
+	int n_c;
+	void *c[STACK_C];
+	int n_rb;
+	int lines[STACK_RB];
+	char label[STACK_RB][STACK_TEXT];
+	char path[STACK_RB][STACK_TEXT];
+};
+
+static struct stack_sample *stack_ring;
+static volatile uint64_t stack_head; // written by the handlers
+static uint64_t stack_tail;
+static uint64_t stack_lost;
+static volatile sig_atomic_t stack_request;
+static volatile int64_t stack_pending_wait;
+static volatile int stack_pending_holder;
+static volatile int stack_running;
+static int stack_ruby;
+static int stack_waiter;
+static int64_t stack_threshold_ns;
+static int64_t stack_every_ns;
+static int stack_signal;
+static pthread_t stack_thread;
+static int stack_thread_started;
+static struct sigaction stack_old_action;
+
+static void stack_copy_text(char *dst, VALUE v)
+{
+	dst[0] = '\0';
+	if (!RB_TYPE_P(v, T_STRING)) {
+		return;
+	}
+	long len = RSTRING_LEN(v);
+	if (len > STACK_TEXT - 1) {
+		len = STACK_TEXT - 1;
+	}
+	memcpy(dst, RSTRING_PTR(v), (size_t)len);
+	dst[len] = '\0';
+}
+
+// The signal handler: runs on the thread holding the GVL.  No allocation.
+static void stack_handler(int sig, siginfo_t *info, void *ctx)
+{
+	(void)sig;
+	(void)info;
+	(void)ctx;
+	int saved = errno;
+	if (!stack_request || stack_ring == NULL) {
+		errno = saved;
+		return;
+	}
+	stack_request = 0;
+	uint64_t i = stack_head;
+	if (i - stack_tail >= STACK_SAMPLES) {
+		stack_lost++;
+		errno = saved;
+		return;
+	}
+	struct stack_sample *s = &stack_ring[i % STACK_SAMPLES];
+	s->at_ns = probe_now();
+	s->wait_ns = stack_pending_wait;
+	s->holder = (int8_t)stack_pending_holder;
+	// (the first two frames are this handler and the signal trampoline)
+	void *c[STACK_C + 2];
+	int n_c = backtrace(c, STACK_C + 2);
+	s->n_c = n_c > 2 ? n_c - 2 : 0;
+	memcpy(s->c, c + 2, sizeof(void *) * (size_t)s->n_c);
+	s->n_rb = 0;
+	if (stack_ruby) {
+		VALUE frames[STACK_RB];
+		int lines[STACK_RB];
+		int n = rb_profile_frames(0, STACK_RB, frames, lines);
+		for (int k = 0; k < n; k++) {
+			s->lines[k] = lines[k];
+			stack_copy_text(s->label[k], rb_profile_frame_label(frames[k]));
+			if (s->label[k][0] == '\0') {
+				stack_copy_text(s->label[k], rb_profile_frame_method_name(frames[k]));
+			}
+			stack_copy_text(s->path[k], rb_profile_frame_path(frames[k]));
+		}
+		s->n_rb = n;
+	}
+	__atomic_store_n(&stack_head, i + 1, __ATOMIC_RELEASE);
+	errno = saved;
+}
+
+// The watchdog thread (no GVL, no Ruby calls).
+static void *stack_watch(void *arg)
+{
+	(void)arg;
+	int64_t last_ready = 0;
+	int64_t last_at = 0;
+	struct timespec tick = { 0, 1000000 };
+	while (stack_running) {
+		nanosleep(&tick, NULL);
+		if (!probe_hook || stack_waiter >= probe_slot_count) {
+			continue;
+		}
+		int64_t ready = probe_slots[stack_waiter].ready_ns;
+		int h = probe_holder;
+		if (ready == 0 || h < 0 || h == stack_waiter || h >= probe_slot_count) {
+			continue;
+		}
+		int64_t now = probe_now();
+		if (now - ready < stack_threshold_ns) {
+			continue;
+		}
+		if (ready == last_ready && now - last_at < stack_every_ns) {
+			continue;
+		}
+		struct probe_slot *hs = &probe_slots[h];
+		if (!hs->has_pthread || stack_request) {
+			continue;
+		}
+		last_ready = ready;
+		last_at = now;
+		stack_pending_wait = now - ready;
+		stack_pending_holder = h;
+		stack_request = 1;
+		if (pthread_kill(hs->pthread, stack_signal) != 0) {
+			stack_request = 0;
+		}
+	}
+	return NULL;
+}
+
+/*
+ * GVLProbe.stacks_start(threshold = 0.02, waiter = 0, ruby = true, every = threshold)
+ * -> true: while watched slot +waiter+ has waited for the GVL at least
+ * +threshold+ seconds, records where the watched thread holding it is, at
+ * most once every +every+ seconds of one wait (see the top).  Needs
+ * GVLProbe.start first (the waiter and holder are watched slots).
+ */
+static VALUE probe_stacks_start(int argc, VALUE *argv, VALUE self)
+{
+	VALUE threshold, waiter, ruby, every;
+	rb_scan_args(argc, argv, "04", &threshold, &waiter, &ruby, &every);
+	if (stack_running) {
+		return Qtrue;
+	}
+	if (stack_ring == NULL) {
+		stack_ring = calloc(STACK_SAMPLES, sizeof(*stack_ring));
+		if (stack_ring == NULL) {
+			rb_raise(rb_eNoMemError, "Could not allocate the GVLProbe stack ring");
+		}
+	}
+	stack_threshold_ns = (int64_t)((NIL_P(threshold) ? 0.02 : NUM2DBL(threshold)) * 1e9);
+	stack_every_ns = NIL_P(every) ? stack_threshold_ns : (int64_t)(NUM2DBL(every) * 1e9);
+	stack_waiter = NIL_P(waiter) ? 0 : NUM2INT(waiter);
+	stack_ruby = NIL_P(ruby) ? 1 : RTEST(ruby);
+
+	// (backtrace's first call loads the unwinder: never in a handler)
+	void *warm[4];
+	(void)backtrace(warm, 4);
+
+#ifdef SIGRTMIN
+	stack_signal = SIGRTMIN + 5;
+#else
+	stack_signal = SIGPROF;
+#endif
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_sigaction = stack_handler;
+	sa.sa_flags = SA_SIGINFO | SA_RESTART;
+	sigemptyset(&sa.sa_mask);
+	if (sigaction(stack_signal, &sa, &stack_old_action) != 0) {
+		rb_sys_fail("GVLProbe.stacks_start: sigaction");
+	}
+
+	stack_request = 0;
+	stack_running = 1;
+	if (pthread_create(&stack_thread, NULL, stack_watch, NULL) != 0) {
+		stack_running = 0;
+		sigaction(stack_signal, &stack_old_action, NULL);
+		rb_raise(rb_eRuntimeError, "GVLProbe.stacks_start: could not start the watchdog thread");
+	}
+	stack_thread_started = 1;
+	return Qtrue;
+}
+
+static void *stack_join(void *arg)
+{
+	(void)arg;
+	pthread_join(stack_thread, NULL);
+	return NULL;
+}
+
+// GVLProbe.stacks_stop -> nil: stops the watchdog (samples stay for
+// stacks_drain).
+static VALUE probe_stacks_stop(VALUE self)
+{
+	if (!stack_thread_started) {
+		return Qnil;
+	}
+	stack_running = 0;
+	rb_thread_call_without_gvl(stack_join, NULL, RUBY_UBF_IO, NULL);
+	stack_thread_started = 0;
+	stack_request = 0;
+	sigaction(stack_signal, &stack_old_action, NULL);
+	return Qnil;
+}
+
+// One native frame as text: "symbol+0xoffset (library)" or the address.
+static VALUE stack_c_frame(void *addr)
+{
+	Dl_info info;
+	if (dladdr(addr, &info) && info.dli_fname) {
+		const char *lib = strrchr(info.dli_fname, '/');
+		lib = lib ? lib + 1 : info.dli_fname;
+		if (info.dli_sname) {
+			return rb_sprintf("%s+0x%lx (%s)", info.dli_sname, (unsigned long)((char *)addr - (char *)info.dli_saddr), lib);
+		}
+		return rb_sprintf("0x%lx (%s+0x%lx)", (unsigned long)addr, lib, (unsigned long)((char *)addr - (char *)info.dli_fbase));
+	}
+	return rb_sprintf("0x%lx", (unsigned long)addr);
+}
+
+/*
+ * GVLProbe.stacks_drain -> Array of Hashes, oldest first: { at_ns:,
+ * wait_ns: (the waiter's wait so far), holder: (slot), c: [native frames,
+ * innermost first], ruby: ["label path:line", ...] }, and { lost: n } last
+ * when samples were dropped (the ring was full).
+ */
+static VALUE probe_stacks_drain(VALUE self)
+{
+	VALUE out = rb_ary_new();
+	if (stack_ring == NULL) {
+		return out;
+	}
+	uint64_t head = __atomic_load_n(&stack_head, __ATOMIC_ACQUIRE);
+	VALUE k_at = ID2SYM(rb_intern("at_ns")), k_wait = ID2SYM(rb_intern("wait_ns")), k_holder = ID2SYM(rb_intern("holder"));
+	VALUE k_c = ID2SYM(rb_intern("c")), k_ruby = ID2SYM(rb_intern("ruby"));
+	for (uint64_t i = stack_tail; i < head; i++) {
+		struct stack_sample *s = &stack_ring[i % STACK_SAMPLES];
+		VALUE h = rb_hash_new();
+		rb_hash_aset(h, k_at, LL2NUM(s->at_ns));
+		rb_hash_aset(h, k_wait, LL2NUM(s->wait_ns));
+		rb_hash_aset(h, k_holder, INT2NUM(s->holder));
+		VALUE c = rb_ary_new_capa(s->n_c);
+		for (int k = 0; k < s->n_c; k++) {
+			rb_ary_push(c, stack_c_frame(s->c[k]));
+		}
+		rb_hash_aset(h, k_c, c);
+		VALUE r = rb_ary_new_capa(s->n_rb);
+		for (int k = 0; k < s->n_rb; k++) {
+			rb_ary_push(r, rb_sprintf("%s %s:%d", s->label[k], s->path[k], s->lines[k]));
+		}
+		rb_hash_aset(h, k_ruby, r);
+		rb_ary_push(out, h);
+	}
+	stack_tail = head;
+	if (stack_lost) {
+		VALUE h = rb_hash_new();
+		rb_hash_aset(h, ID2SYM(rb_intern("lost")), ULL2NUM(stack_lost));
+		stack_lost = 0;
+		rb_ary_push(out, h);
+	}
+	return out;
+}
+
 void mb_fast_ui_init_gvl_probe(VALUE mFastUI)
 {
 	probe_threads = rb_ary_new();
@@ -469,4 +761,7 @@ void mb_fast_ui_init_gvl_probe(VALUE mFastUI)
 	rb_define_module_function(mProbe, "log_stop", probe_log_stop, 0);
 	rb_define_module_function(mProbe, "log_drain", probe_log_drain, 0);
 	rb_define_module_function(mProbe, "log_stats", probe_log_stats, 0);
+	rb_define_module_function(mProbe, "stacks_start", probe_stacks_start, -1);
+	rb_define_module_function(mProbe, "stacks_stop", probe_stacks_stop, 0);
+	rb_define_module_function(mProbe, "stacks_drain", probe_stacks_drain, 0);
 }
