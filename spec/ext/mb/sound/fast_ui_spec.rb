@@ -390,6 +390,44 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
       expect(probe.waits(0)).to eq([])
     end
 
+    describe 'stacks' do
+      after {
+        probe.stacks_stop
+        probe.stacks_drain
+      }
+
+      def hold_in_c(seconds) = MB::Sound::FastLatency.spin(seconds)
+
+      it 'records where the thread holding the GVL is, natively and in Ruby, while the waiter waits past the threshold',
+         memcheck_skip: 'Valgrind serializes threads (the waiter never waits); stacks_drain on an empty ring still runs in the next example' do
+        probe.stacks_drain
+        waiter = Thread.new { 10.times { sleep 0.002 } }
+        probe.start([waiter, Thread.current])
+        probe.stacks_start(0.01, 0, true, 0.01)
+        sleep 0.001
+        hold_in_c(0.06)
+        waiter.join
+        probe.stacks_stop
+        st = probe.stacks_drain
+
+        expect(st).not_to be_empty
+        s = st.first
+        expect(s).to include(holder: 1, wait_ns: be >= 10_000_000)
+        expect(s[:c]).not_to be_empty
+        expect(s[:c].join(' ')).to include('fast_latency')
+        expect(s[:ruby].first(3).join(' ')).to include('spin').and include('hold_in_c')
+      end
+
+      it 'records nothing while no watched thread waits long, and stops cleanly' do
+        probe.start([Thread.current])
+        expect(probe.stacks_start(0.01)).to eq(true)
+        sleep 0.03
+        probe.stacks_stop
+        expect(probe.stacks_drain).to eq([])
+        expect(probe.stacks_stop).to be_nil
+      end
+    end
+
     describe 'log' do
       after {
         probe.log_stop

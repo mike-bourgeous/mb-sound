@@ -127,6 +127,8 @@ module MB
           in_write = ->(a, b) { writes.any? { |w| a >= w[:enter] - 100_000 && b <= w[:exit] + 100_000 } }
           gvl = 0
           gvl_by = Hash.new(0)
+          gvl_whole = 0 # (the longest single wait overlapping the window, whole: the window clips the others)
+          gvl_whole_by = nil
           blocked = 0
           ctx.fetch(:threads, []).each do |e|
             next unless e[:thread] == render
@@ -139,6 +141,10 @@ module MB
 
             gvl += w
             gvl_by[e[:holder] || 'another thread'] += w
+            if e[:c] - e[:b] > gvl_whole
+              gvl_whole = e[:c] - e[:b]
+              gvl_whole_by = e[:holder] || 'another thread'
+            end
           end
 
           # CPU time of the render thread between writes, scaled by how much
@@ -191,6 +197,7 @@ module MB
           base[:components] = {
             away_ms: ms.(away), waiting_ms: ms.(waits), cpu_ms: ms.(cpu), gc_ms: ms.(gc), gc_render_ms: ms.(gc_render), gc_other_ms: ms.(gc_other),
             gc_longest_ms: ms.(longest_gc), gc_majors: majors, gvl_ms: ms.(gvl), gvl_by: gvl_by.transform_values { |v| ms.(v) },
+            gvl_wait_ms: ms.(gvl_whole), gvl_wait_by: gvl_whole_by,
             lock_ms: ms.(blocked), os_wake_ms: ms.(os_wake), unaccounted_ms: ms.(unaccounted), yjit_ms: ms.(yjit), render_ms: ms.(render_cpu),
             system_ms: ms.(system), episode_ms: ms.(episode_ns),
           }
@@ -239,7 +246,15 @@ module MB
             format('render thread cpu %.1f ms of %.1f away', c[:cpu_ms], c[:away_ms])
           when :gvl
             holder, ms = gvl_by.max_by { |_, v| v }
-            format('waited %.1f ms for the GVL, mostly held by %s (%.1f ms)', c[:gvl_ms], holder, ms / 1e6)
+            whole = c[:gvl_wait_ms].to_f
+            # (the window ends at the gap: a wait that began before it or
+            # went on after it counts only in part there)
+            if whole > c[:gvl_ms] + 0.05
+              format('waited %.1f ms for the GVL in one wait (%.1f of it in the %.1f ms before the gap), held by %s',
+                whole, c[:gvl_ms], c[:away_ms] + c[:waiting_ms], c[:gvl_wait_by] || holder)
+            else
+              format('waited %.1f ms for the GVL, mostly held by %s (%.1f ms)', c[:gvl_ms], holder, ms / 1e6)
+            end
           when :lock
             format('blocked off the GVL %.1f ms outside #write (the render lock, a sleep, or IO)', c[:lock_ms])
           when :system

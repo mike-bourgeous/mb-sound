@@ -76,7 +76,11 @@ module MB
         startup: Analysis::STARTUP,
         announce: true,
         follow: false,
+        stacks: nil,
       }.freeze
+
+      # Stack samples kept (#stacks).
+      MAX_STACKS = 2000
 
       @armed = nil
 
@@ -148,8 +152,12 @@ module MB
       # start line, for callers that print their own; the per-dropout lines
       # still come unless +quiet+), +follow+ (true: follow the default
       # Session when it is replaced, as `latency :low` and `use_output` do:
-      # the console's `dropouts`).  Lines go through Internal.console_puts,
-      # so with a screen up they land in the REPL pane (or the messages).
+      # the console's `dropouts`), +stacks+ (nil: off; seconds: while the
+      # render thread has waited at least this long for the GVL, record
+      # where the watched thread holding it is, natively and in Ruby
+      # (FastUI::GVLProbe.stacks_start): for holds Ruby's timeslice can't
+      # break, in C code).  Lines go through Internal.console_puts, so with
+      # a screen up they land in the REPL pane (or the messages).
       def initialize(session, **opts)
         unknown = opts.keys - DEFAULTS.keys
         raise ArgumentError, "Unknown dropout probe options: #{unknown.join(', ')} (known: #{DEFAULTS.keys.join(', ')})" unless unknown.empty?
@@ -206,6 +214,22 @@ module MB
         @polls = 0
         @trace_stats = nil
         @log_stats = nil
+        @stacks = [] # GVL holders' stack samples (+stacks+ option)
+        @stacks_on = false
+      end
+
+      # Stack samples (the +stacks+ option): Hashes of :t_s, :wait_ms (the
+      # render thread's wait so far), :holder (a thread name), :c (native
+      # frames, innermost first), :ruby (Ruby frames, innermost first).
+      def stacks
+        @lock.synchronize { @stacks.dup }
+      end
+
+      # A short inspect (the console prints results: the default one listed
+      # every record, thousands of lines).
+      def inspect
+        format('#<%s %s %s, %d dropouts%s>', self.class.name, @options[:name], running? ? "running #{elapsed.round(1)} s" : 'stopped',
+          @dropouts.length, @options[:json] ? " -> #{@options[:json]}" : '')
       end
 
       def running?
@@ -228,6 +252,7 @@ module MB
         end
         FastUI::GVLProbe.log_start(@options[:gvl_threshold], @options[:gc_threshold])
         watch_threads
+        start_stacks if @options[:stacks]
         @stopping = false
         @thread = Thread.new { monitor }
         @thread.name = 'dropout-probe'
@@ -257,6 +282,11 @@ module MB
         @output.trace_stop if @traced
         FastUI::GVLProbe.log_stop
         @log_stats = FastUI::GVLProbe.log_stats
+        if @stacks_on
+          FastUI::GVLProbe.stacks_stop
+          @lock.synchronize { drain_stacks }
+          @stacks_on = false
+        end
         FastUI::GVLProbe.stop
         if @latency_probe
           @latency_probe.stop
@@ -472,6 +502,7 @@ module MB
           attach_output unless @session.output.equal?(@output)
           drain_trace
           drain_log
+          drain_stacks if @stacks_on
           sample(now)
           if now - @last_watch > 1_000_000_000
             @last_watch = now
@@ -538,6 +569,27 @@ module MB
               @gvl_top = @gvl_top.max_by(10, &:first) if @gvl_top.length > 20
             end
           end
+        end
+      end
+
+      # Starts the stack sampler (the +stacks+ option) on the render thread's
+      # waits (slot 0 when it is watched: WATCH lists it first).
+      def start_stacks
+        return unless @slots.first&.first == 'render'
+
+        @stacks_on = FastUI::GVLProbe.stacks_start(@options[:stacks].to_f, 0, true)
+      end
+
+      def drain_stacks
+        names = @slots.map(&:first)
+        FastUI::GVLProbe.stacks_drain.each do |s|
+          next if s[:lost]
+          next if @stacks.length >= MAX_STACKS
+
+          @stacks << {
+            t_s: ((s[:at_ns] - @started_mono) / 1e9).round(3), wait_ms: (s[:wait_ns] / 1e6).round(1),
+            holder: s[:holder] >= 0 ? names[s[:holder]] : nil, c: s[:c], ruby: s[:ruby],
+          }
         end
       end
 

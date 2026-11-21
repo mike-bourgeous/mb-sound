@@ -63,6 +63,13 @@ end
 # playing (see MB::Sound::LiveMethods)
 MB::Sound.live = true
 
+# Every Pry result printed requires io/console again, and Ruby looks a C
+# extension's feature up on the load path each time, holding the GVL: over
+# a network mount of the checkout that held it up to 135 ms a line
+# (dropouts).  Features already required return at once (see
+# MB::Sound::RequireOnce).
+MB::Sound::RequireOnce.install
+
 # Shared Tee buffer checks are off unless MB_SOUND_CHECK_SHARED is set; here
 # they only warn, so a live set keeps playing (see GraphNode::Tee)
 MB::Sound::GraphNode::Tee.shared_check = :warn if MB::Sound::GraphNode::Tee.shared_check
