@@ -366,11 +366,12 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(MB::Sound::TransportMethods.toggle_line(@session)).to eq('pause')
     # The second Space flashes the Status's words, not flash's own return
     # value (seen 2026-11-21 after `demo :tunnel_vision`: the status line
-    # read `=> ["paused at 1:1.677; ...", :dim, 565237.19, 0]`); this
-    # session renders offline, so it says so instead of pausing
+    # read `=> ["paused at 1:1.677; ...", :dim, 565237.19, 0]`)
     @term.write(' ')
-    expect(@term.wait_for(/renders do not pause/)).to eq(true), @term.text
+    expect(@term.wait_for(/paused at 1:1; effects ring out/)).to eq(true), @term.text
     expect(@term.text).not_to include('=> [')
+    expect(@session.transport_paused?).to eq(true)
+    expect(MB::Sound::TransportMethods.toggle_line(@session)).to eq('start')
   end
   # Persona panel round 2 (2026-10-18): K16/N7 (NAV K in :studio said "K:
   # not a NAV key"), K17 (no legend for step entry's lengths), M12 (step

@@ -806,8 +806,8 @@ module MB
       # scheduled it (:user, :form, :take, :script; see Scheduler::Entry)
       # and +label+ the command to show.  See Scheduler for how and when
       # blocks run (and Scheduler::Entry for +:exact+).
-      def schedule(time, period: nil, description: nil, epoch: nil, owner: :user, label: nil, exact: false, &block)
-        @scheduler.schedule(time, period: period, description: description, epoch: epoch, owner: owner, label: label, exact: exact, &block)
+      def schedule(time, period: nil, description: nil, epoch: nil, owner: :user, label: nil, exact: false, held: nil, &block)
+        @scheduler.schedule(time, period: period, description: description, epoch: epoch, owner: owner, label: label, exact: exact, held: held, &block)
       end
 
       # Starts the background rendering thread of a realtime session (and
@@ -1173,6 +1173,12 @@ module MB
             end
             n = (@changes.empty? ? nil : frames_before_seek(remaining, per_sample)) || remaining
             n = cell if cell && cell < n
+            # A take's line typed while paused runs on its frame of the
+            # pause (see TransportPause)
+            if @tp_paused && (h = @scheduler.next_held_frame(@frame - @tp_frame))
+              k = h - (@frame - @tp_frame)
+              n = k if k < n
+            end
             last = false
             if until_pos
               left = until_pos - @transport.position

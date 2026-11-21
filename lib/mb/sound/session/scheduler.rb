@@ -34,8 +34,10 @@ module MB
         # cancels :user blocks; #reset everything but :take lines.
         # +label+ is the command for display (e.g. "at_bar 9"), +status+
         # :pending (waiting for its time), :due (handed to the runner),
-        # :running, :ran, or :cancelled.
-        Entry = Struct.new(:id, :time, :period, :block, :description, :epoch, :owner, :label, :status, :exact, keyword_init: true)
+        # :running, :ran, or :cancelled.  +held+ (a take's line typed while
+        # the transport was paused; Session::TransportPause) is the frames
+        # into the pause where it runs: only then, while paused.
+        Entry = Struct.new(:id, :time, :period, :block, :description, :epoch, :owner, :label, :status, :exact, :held, keyword_init: true)
 
         # A printable handle for a scheduled block, returned by
         # ScheduleMethods#at_bar, #after, #every (and Session#schedule):
@@ -277,7 +279,7 @@ module MB
         end
 
         # See Session#schedule.  Returns a Handle.
-        def schedule(time, period: nil, description: nil, epoch: nil, owner: :user, label: nil, exact: false, &block)
+        def schedule(time, period: nil, description: nil, epoch: nil, owner: :user, label: nil, exact: false, held: nil, &block)
           raise ArgumentError, 'Pass a block to schedule' unless block
           raise ArgumentError, "Period must be positive (got #{period.inspect})" if period && period <= 0
 
@@ -294,7 +296,8 @@ module MB
               owner: owner,
               label: label,
               status: :pending,
-              exact: exact && !@realtime
+              exact: exact && !@realtime,
+              held: held&.to_i
             )
           }
           Handle.new(self, entry)
@@ -437,6 +440,17 @@ module MB
           }
         end
 
+        # True if +entry+ may run now as far as pauses go: an entry for a
+        # point inside a pause (+held+ frames into it; Session::
+        # TransportPause) runs only once the transport has been paused that
+        # long; others always.
+        def held_due?(entry)
+          h = entry.held
+          return true if h.nil?
+          now = @session.pause_held_frames
+          !now.nil? && now >= h
+        end
+
         # Starts blocks whose time is before +to+ plus half a bar of
         # lookahead while +playing+, or whose time has come while idle.
         def dispatch(from, to, playing:)
@@ -448,6 +462,7 @@ module MB
             @entries.each_value do |e|
               next if e.exact || (e.epoch && e.epoch != epoch)
               next unless e.status == :pending
+              next unless held_due?(e)
               while e.time <= horizon
                 (list ||= []) << [e, e.time]
                 break e.status = :due unless e.period
@@ -487,14 +502,42 @@ module MB
           due = @mutex.synchronize {
             epoch = @session.epoch
             list = nil # (made only when something is due)
-            @entries.each_value { |e| (list ||= []) << e if e.exact && e.status == :pending && (e.epoch.nil? || e.epoch == epoch) && (e.time <= from || e.time < to) }
+            @entries.each_value { |e| (list ||= []) << e if e.exact && e.status == :pending && (e.epoch.nil? || e.epoch == epoch) && (e.time <= from || e.time < to) && held_due?(e) }
             list&.each { |e| e.status = :due }
             list
           }
           return false if due.nil?
 
-          due.sort_by { |e| [e.time, e.id] }.each { |e| run(e, e.time, e.time > from ? e.time : nil) }
-          true
+          ran = false
+          due.sort_by { |e| [e.time, e.id] }.each do |e|
+            # A line that paused the transport leaves later lines of the
+            # span for after the resume (see Session::TransportPause): the
+            # timeline won't reach their time until then
+            if e.time > from && @session.transport_paused? && e.held.nil?
+              @mutex.synchronize { e.status = :pending }
+              next
+            end
+            run(e, e.time, e.time > from ? e.time : nil)
+            ran = true
+          end
+          ran
+        end
+
+        # The fewest frames into the current pause at which an entry for
+        # it is still to run (entries with +held:+, lines typed while
+        # paused, replayed by takes), or nil.  Session#process_buffer ends
+        # a span there, so the entry runs on its frame at any buffer size.
+        def next_held_frame(held_now)
+          @mutex.synchronize {
+            epoch = @session.epoch
+            best = nil
+            @entries.each_value do |e|
+              next unless e.held && e.status == :pending && (e.epoch.nil? || e.epoch == epoch)
+              next unless e.held > held_now
+              best = e.held if best.nil? || e.held < best
+            end
+            best
+          }
         end
 
         # Queues +block+ to run on the scheduler thread between scheduled

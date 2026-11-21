@@ -79,13 +79,13 @@ module MB
       # without notes fade out over 10 ms and hold their place, and track,
       # bus, and master effects ring out (Session::TransportPause).  Playing
       # on continues from the same place without retriggering notes (see
-      # #start for +resync+).  The old freeze is #suspend.  Plain renders
-      # never pause (a take's replay does, as it was played).  Returns a
-      # Status.
+      # #start for +resync+).  The old freeze is #suspend.  Renders
+      # (PlaybackMethods#render) never pause (a take's replay does, as it
+      # was played).  Returns a Status.
       def pause
         s = Session.current
         return start if TransportMethods.would_start?(s)
-        return Status.new(:playing, s.stamp(s.now), 'renders do not pause') unless s.realtime? || Session.context&.replaying?
+        return Status.new(:playing, s.stamp(s.now), 'renders do not pause') if TransportMethods.rendering?(s)
 
         s.pause_transport
         Status.new(:paused, s.stamp(s.now), 'effects ring out; pause again (or start) plays on')
@@ -110,6 +110,15 @@ module MB
         Status.new(:suspended, s.stamp(s.now), 'silence, nothing renders; suspend again (or start) plays on')
       end
       alias suspend_playback suspend
+
+      # True if +session+ is in a render that keeps time while idle (see
+      # PlaybackMethods#render: a pause there would hold the timeline short
+      # of its end bar for good), where #pause does nothing; a take's
+      # replay pauses as it was played, and a realtime or console-driven
+      # Session pauses.
+      def self.rendering?(session)
+        !session.realtime? && session.advance_idle? && !Session.context&.replaying?
+      end
 
       # The flow #start plays in +arrangement+ when none is playing: the
       # last one built (a demo's set builds its flow as it loads), or nil.
