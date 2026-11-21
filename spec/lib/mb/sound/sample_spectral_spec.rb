@@ -306,6 +306,107 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
     end
   end
 
+  describe 'waveform shape (lock:, closure:, closure_length:)' do
+    # A bandlimited sawtooth at 110.3 Hz, one second: its partials do not
+    # close by themselves at any stretch
+    let(:saw) {
+      i = Numo::DFloat.new(48000).seq / 48000
+      (1..50).sum { |k| Numo::NMath.sin(i * (2 * Math::PI * 110.3 * k)) / k } * 0.4
+    }
+
+    # How much +y+ (a stretch of +x+ by +ratio+, no onsets) keeps +x+'s
+    # waveform: per 4096-sample frame, the peaks' phase differences from
+    # the input at the same place, at the best time shift (1: the same
+    # waveform moved in time), weighted by the peaks, averaged
+    def shape_kept(y, x, ratio, upto: nil)
+      y = Numo::DFloat.cast(y)
+      n = 4096
+      w = described_class.hann(n)
+      taus = Numo::DFloat.new(1201).seq(-600)
+      vals = (n...(upto || (y.length - n))).step(4800).map { |c|
+        ic = (c / ratio).round
+        seg = x[(Numo::Int64.new(n).seq + ic - n / 2) % x.length]
+        fa = Numo::Pocketfft.rfft(y[(c - n / 2)...(c + n / 2)] * w)
+        fb = Numo::Pocketfft.rfft(seg * w)
+        mb = fb.abs
+        c2 = mb[1...-1]
+        pk = ((c2 > mb[0...-2]) & (c2 >= mb[2..]) & (c2 > mb.max * 0.01)).where + 1
+        om = pk.cast_to(Numo::DFloat) * (2 * Math::PI / n)
+        d = (fa[pk] * fb[pk].conj).arg
+        wt = fa[pk].abs * mb[pk]
+        (Numo::NMath.cos(d.reshape(1, d.length) - taus.reshape(taus.length, 1) * om.reshape(1, om.length)).dot(wt) / wt.sum).max
+      }
+      vals.sum / vals.length
+    end
+
+    it 'keeps the waveform of a looped tone with lock: :shape, its phases closing before the wrap' do
+      spread = {}
+      plain = described_class.looped([saw], 1.285, report: spread)[0]
+      shaped = {}
+      locked = described_class.looped([saw], 1.285, lock: :shape, report: shaped)[0]
+      # (the spread closure moves every harmonic by its own amount)
+      # (the frames before the closing span, a quarter of this short
+      # loop, are the input's waveform; in the span it drifts as in a
+      # spread closure)
+      expect(shape_kept(plain, saw, 1.285)).to be < 0.95
+      expect(shape_kept(locked, saw, 1.285, upto: locked.length * 3 / 4 - 2048)).to be > 0.98
+      expect(shape_kept(locked, saw, 1.285)).to be > shape_kept(plain, saw, 1.285) + 0.03
+      expect(spread[:closure][1]).to be < 0.01
+      expect(shaped[:closure][1]).to be < 0.01
+      expect(locked.length).to eq(plain.length)
+      expect(rms(locked) / rms(saw)).to be_within(0.05).of(1)
+      # Unlooped too (the vocoder's own drift)
+      free = described_class.vocoder([saw], 1.285, lock: :shape)[0]
+      expect(shape_kept(free, saw, 1.285)).to be > 0.98
+    end
+
+    it 'locks the shape of a sound with partials of several notes where they fit' do
+      i = Numo::DFloat.new(48000).seq / 48000
+      chord = [110.0, 138.6, 164.8].sum { |f| (1..30).sum { |k| Numo::NMath.sin(i * (2 * Math::PI * f * k)) / k } } * 0.15
+      a = shape_kept(described_class.vocoder([chord], 1.285)[0], chord, 1.285)
+      b = shape_kept(described_class.vocoder([chord], 1.285, lock: :shape)[0], chord, 1.285)
+      expect(b).to be > a + 0.05
+    end
+
+    it 'closes a harmonic tone with a small pitch change instead with closure: :shift' do
+      report = {}
+      y = described_class.looped([saw], 1.285, closure: :shift, report: report)[0]
+      expect(shape_kept(y, saw, 1.285)).to be > 0.98
+      expect(report[:closure][1]).to be < 0.01
+      expect(report[:shift].abs).to be > 0.1
+      expect(report[:shift].abs).to be <= described_class::SHIFT_CENTS
+    end
+
+    it 'closes only in the last closure_length samples: the frames before are those of a stretch closing later' do
+      out = {}
+      a = described_class.looped([saw], 1.285, closure_length: 12000, report: out)[0]
+      b = described_class.looped([saw], 1.285, closure_length: 24000)[0]
+      # (the first half window also holds the last frames, around the
+      # circle)
+      before = a.length - 24000 - 4096
+      expect(a[2048...before]).to eq(b[2048...before])
+      expect(a[0...2048]).not_to eq(b[0...2048])
+      expect(a[(a.length - 6000)..]).not_to eq(b[(b.length - 6000)..])
+      expect(out[:closure][1]).to be < 0.01
+    end
+
+    it 'takes the options through Sample#stretch, printing them, and checks them' do
+      s = MB::Sound::Sample[Numo::SFloat.cast(saw)].looped
+      t = s.stretch(1.25, mode: :spectral, lock: :shape)
+      expect(t.lineage[3]).to eq({ mode: :spectral, lock: :shape })
+      expect(t.data(0)).to eq(Numo::SFloat.cast(described_class.looped(s.to_a.map { |c| Numo::DFloat.cast(c) }, 1.25, lock: :shape, onsets: s.onsets(wrap: true))[0]))
+      expect(s.stretch(1.25, mode: :spectral, closure: :shift, closure_length: 0.25).lineage[3]).to eq({ mode: :spectral, closure: :shift, closure_length: 0.25 })
+      expect(s.stretch(1.25, mode: :spectral, wrap: false, lock: :shape).data(0)).not_to eq(s.stretch(1.25, mode: :spectral, wrap: false).data(0))
+
+      expect { s.stretch(1.25, mode: :spectral, lock: :tight) }.to raise_error(ArgumentError, /lock:/)
+      expect { s.stretch(1.25, mode: :spectral, closure: :fast) }.to raise_error(ArgumentError, /closure:/)
+      expect { s.stretch(1.25, mode: :spectral, closure_length: 0) }.to raise_error(ArgumentError, /closure_length:/)
+      expect { s.stretch(1.25, mode: :spectral, lock: :shape, closure: :shift) }.to raise_error(ArgumentError, /lock: :shape/)
+      expect { s.stretch(1.25, mode: :slice, lock: :shape) }.to raise_error(ArgumentError, /lock:/)
+      expect { s.stretch(1.25, closure: :shift) }.to raise_error(ArgumentError, /closure:/)
+    end
+  end
+
   describe MB::Sound::Sample::Spectral::Stream do
     let(:held) {
       i = Numo::DFloat.new(48000).seq / 48000

@@ -83,12 +83,13 @@ module MB
         # +wrap+ is for audio
         # that loops (its end flows into its start): the stretch reads it
         # as an endless stream and its own end flows into its start
-        # (#looped with one pass).
-        def vocoder(channels, ratio, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false, span: 1.0, noise: 0)
-          return looped(channels, ratio, window: window, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise) if wrap
+        # (#looped with one pass).  +lock+ (LOCKS) :shape also keeps the
+        # peaks' relative phases, the waveform (#shape_lock).
+        def vocoder(channels, ratio, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false, span: 1.0, noise: 0, lock: :peaks)
+          return looped(channels, ratio, window: window, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise, lock: lock) if wrap
 
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
-          voc = Vocoder.new(channels, window: window, overlap: overlap, randomize: randomize, seed: seed, link: link, shape: shape, noise: noise)
+          voc = Vocoder.new(channels, window: window, overlap: overlap, randomize: randomize, seed: seed, link: link, shape: shape, noise: noise, lock: lock)
           n = voc.window
           hs = voc.hop
           len = voc.length
@@ -138,12 +139,25 @@ module MB
         # one piece (for measuring: any one of them alone does not loop,
         # which is why the phases are closed; a single closed pass sounds
         # the same at the wrap, so Sample#stretch makes one).
-        def looped(channels, ratio, passes: 1, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, report: nil, span: 1.0, noise: 0)
+        #
+        # +closure+ :shift instead changes every frame's advance by one
+        # factor (a pitch change of up to SHIFT_CENTS, #closing_scale)
+        # that brings the most partials round at once (a harmonic
+        # sound's all: its shape kept), then spreads what is left;
+        # +closure_length+ (samples) spreads the closing over only that
+        # much output before the wrap.  With +lock+ :shape (#shape_lock)
+        # the frames close over SHAPE_CLOSING windows before the wrap
+        # (or +closure_length+), unlocked there; report[:shift] is the
+        # pitch change (cents) and report[:residual] what it left.
+        def looped(channels, ratio, passes: 1, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, report: nil, span: 1.0, noise: 0, closure: :spread, closure_length: nil, lock: :peaks)
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
           passes = Integer(passes)
           raise ArgumentError, "passes: is 1 or more (got #{passes})" unless passes >= 1
+          closure = closure.to_sym
+          raise ArgumentError, "closure: is one of #{CLOSURES.map(&:inspect).join(', ')} (got #{closure.inspect})" unless CLOSURES.include?(closure)
+          raise ArgumentError, 'lock: :shape closes its own way (closure: :spread over a span before the wrap)' if lock == :shape && closure != :spread
 
-          voc = Vocoder.new(channels, window: window, overlap: overlap, randomize: randomize, seed: seed, link: link, shape: shape, wrap: true, noise: noise)
+          voc = Vocoder.new(channels, window: window, overlap: overlap, randomize: randomize, seed: seed, link: link, shape: shape, wrap: true, noise: noise, lock: lock)
           n = voc.window
           hs = voc.hop
           len = voc.length
@@ -166,7 +180,20 @@ module MB
           centers << [out_len, centers[0][1] + passes * len]
           resets = (-1..passes).flat_map { |k| resets3.select { |o| o >= len && o < 2 * len }.map { |o| o - len + k * len } }
 
-          run = ->(extra, sums) {
+          # Each frame's share of the closing: the part of the output
+          # between it and the frame before that lies in the closing
+          # span (the whole loop, or +closure_length+ samples before the
+          # wrap).  Shape-locked frames close in a span before the wrap
+          # where they run free (their phases are the input's, moved in
+          # time, until then).
+          free_span = lock == :shape
+          closure_length = MB::M.min(out_len / 4, SHAPE_CLOSING * n) if free_span && closure_length.nil?
+          from = closure_length.nil? ? 0 : out_len - MB::M.clamp(Integer(closure_length.round), 1, out_len)
+          shares = centers.each_with_index.map { |(pos, _), m|
+            m.zero? ? 0.0 : MB::M.max(0, pos - MB::M.max(centers[m - 1][0], from)).to_f / (out_len - from)
+          }
+
+          run = ->(extra, sums, scale = nil, track = false) {
             voc.restart
             attack_until = nil
             ri = 0
@@ -179,7 +206,8 @@ module MB
               attack = !attack_until.nil? && center < attack_until
               hop = m.zero? ? hs : pos - centers[m - 1][0]
               closing = m == centers.length - 1
-              ys = voc.frame(m, center, attack: attack, hop: hop, extra: extra && m > 0 ? extra * (hop.to_f / out_len) : nil, synth: !sums.nil? && !closing)
+              part = extra && shares[m] > 0 ? extra * shares[m] : nil
+              ys = voc.frame(m, center, attack: attack, hop: hop, extra: part, synth: !sums.nil? && !closing, scale: scale, track: track, free: free_span && shares[m] > 0)
               sums.add_wrapped(pos, ys, voc, attack) if sums && !closing
               last = voc.rotation if closing
             end
@@ -191,13 +219,70 @@ module MB
             # (every phase random: nothing to close)
             run.call(nil, sums)
           else
-            error = run.call(nil, nil)
+            shift = closure == :shift
+            error = run.call(nil, nil, nil, shift)
             weights = voc.magnitudes
             before = (error.abs * weights).sum / (TWO_PI * weights.sum + 1e-300)
-            left = run.call(-error, sums)
-            report[:closure] = [before, (left.abs * weights).sum / (TWO_PI * weights.sum + 1e-300)] if report
+            scale = nil
+            if shift
+              x = closing_scale(error, voc.advance, weights)
+              scale = 1 + x
+              error = princarg(error + voc.advance * x)
+            end
+            left = run.call(-error, sums, scale)
+            if report
+              report[:closure] = [before, (left.abs * weights).sum / (TWO_PI * weights.sum + 1e-300)]
+              report[:shift] = 1200 * Math.log2(scale) if scale
+              report[:residual] = (error.abs * weights).sum / (TWO_PI * weights.sum + 1e-300) if scale
+            end
           end
           sums.finish(0, out_len, voc)
+        end
+
+        # How Spectral.looped closes its phases (closure:).
+        CLOSURES = [:spread, :shift].freeze
+
+        # The largest pitch change closure: :shift makes (cents).
+        SHIFT_CENTS = 10.0
+
+        # The change x of every frame's phase advance (a scale of 1 + x,
+        # a pitch change of as much, within SHIFT_CENTS) that brings the
+        # most of the loop's partials, weighted by +weights+, round to
+        # their starting phases at the wrap, given their phase errors
+        # there (+error+) and their advances since their last resets
+        # (+advance+, Vocoder#advance): the errors become error +
+        # advance × x.  A harmonic sound's partials all close at once
+        # (the fundamental turning a whole number of times in the loop),
+        # so the waveform keeps its shape; among nearly equal choices
+        # the smallest change wins.
+        def closing_scale(error, advance, weights)
+          limit = 2**(SHIFT_CENTS / 1200) - 1
+          w = weights / (weights.sum + 1e-300)
+          order = w.sort_index.reverse
+          # (the bins holding 99% of the weight set the search's step)
+          strong = order[0...MB::M.clamp(w[order].cumsum.lt(0.99).count_true + 1, 1, 64)]
+          reach = advance[strong].abs.max.to_f
+          return 0.0 if reach <= 0
+
+          # (scores of the changes xs, a DFloat, over the bins idx)
+          score = ->(xs, idx) {
+            e = error[idx]
+            a = advance[idx]
+            ws = w[idx]
+            out = Numo::DFloat.zeros(xs.length)
+            (0...xs.length).step(1024) do |i|
+              j = MB::M.min(i + 1024, xs.length)
+              out[i...j] = Numo::NMath.cos(e.reshape(1, e.length) + xs[i...j].reshape(j - i, 1) * a.reshape(1, a.length)).dot(ws)
+            end
+            out - xs.abs * (0.05 / limit)
+          }
+          step = 0.05 / reach
+          count = MB::M.min((limit / step).ceil, 4000)
+          step = limit / count
+          xs = Numo::DFloat.new(2 * count + 1).seq(-count) * (limit / count)
+          best = xs[score.call(xs, strong).max_index].to_f
+          fine = Numo::DFloat.new(21).seq(-10) * (step / 10) + best
+          fine[score.call(fine, Numo::Int64.new(w.length).seq).max_index].to_f
         end
 
         # A phase vocoder's running state (see Spectral.vocoder): the
@@ -212,7 +297,9 @@ module MB
           # +channels+ as Spectral.vocoder takes them.  With +wrap+ the
           # frames read the input in a circle (a loop); without, zeros
           # outside it.
-          def initialize(channels, window: WINDOW, overlap: OVERLAP, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false, noise: 0)
+          def initialize(channels, window: WINDOW, overlap: OVERLAP, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false, noise: 0, lock: :peaks)
+            raise ArgumentError, "lock: is one of #{LOCKS.map(&:inspect).join(', ')} (got #{lock.inspect})" unless LOCKS.include?(lock)
+            @shape_lock = lock == :shape
             @randomize = randomize.to_f
             raise ArgumentError, "randomize: is 0..1 (got #{@randomize})" unless @randomize >= 0 && @randomize <= 1
             @noise = noise.to_f
@@ -289,12 +376,20 @@ module MB
             @phi = nil
             @mag = nil
             @center = nil
+            @advance = nil
           end
 
           # The last frame's phase rotation (output phase minus input
           # phase per bin, -pi...pi) and its magnitudes.
           def rotation = Spectral.princarg(@theta - @phi)
           def magnitudes = @mag
+
+          # Each bin's phase advance since the first frame or its last
+          # reset (radians; frames made with +track+), as locking hands
+          # it on: scaling every frame's advance by s moves the last
+          # frame's phases by (s - 1) times this, exactly (the peaks,
+          # regions, and resets depend on magnitudes alone).
+          def advance = @advance
 
           # The +window+ samples of +x+ centered on +center+.
           def read(x, center)
@@ -313,13 +408,14 @@ module MB
           # frame is not randomized.  +extra+ (radians per bin) is added
           # to the phase advance before locking (Spectral.looped's
           # closing).  +index+ numbers the frame for the random phases.
-          def frame(index, center, attack: false, hop: @hop, extra: nil, synth: true)
+          def frame(index, center, attack: false, hop: @hop, extra: nil, synth: true, scale: nil, track: false, free: false)
             spec = Numo::Pocketfft.rfft(read(@mix, center) * @w)
             phi = spec.arg
             mag = spec.abs
 
             if @theta.nil?
               @theta = phi.dup
+              @advance = track ? Numo::DFloat.zeros(@bins) : nil
             else
               ha = center - @center
               if ha == hop
@@ -331,11 +427,29 @@ module MB
                 ref = Numo::Pocketfft.rfft(read(@mix, center - @reference) * @w).arg
                 winst_h = (@omega + Spectral.princarg(phi - ref - @omega * @reference) / @reference) * hop
               end
+              omega_inst = @shape_lock ? winst_h / hop : nil
+              # (a scale changes the stretched frames' advance, not the
+              # unstretched ones', which rebuild an attack as it was)
+              scaled = scale && ha != hop
+              winst_h *= scale if scaled
+              if track
+                # (the phase advance since each bin's last reset, as
+                # locking hands it on: the part of @theta a scale of the
+                # advance multiplies)
+                owner = Spectral.regions(mag)
+                moved = ha == hop ? @advance : @advance + winst_h
+                @advance = owner ? moved[owner] : moved
+              end
               winst_h += extra if extra
-              @theta = Spectral.lock(@theta + winst_h, phi, mag)
+              advanced = @theta + winst_h
+              advanced = Spectral.shape_lock(advanced, phi, mag, omega_inst, @window / 4) if @shape_lock && !free
+              @theta = Spectral.lock(advanced, phi, mag)
               if attack
                 rising = mag.gt(@mag * RESET_RISE)
-                @theta[rising] = phi[rising] if rising.count_true > 0
+                if rising.count_true > 0
+                  @theta[rising] = phi[rising]
+                  @advance[rising] = 0 if track
+                end
               end
             end
             @phi = phi
@@ -609,6 +723,74 @@ module MB
           end
           peaks[marker.cumsum]
         end
+
+        # Phase locking modes (Vocoder, lock:): :peaks, identity locking
+        # around each peak; :shape, peaks also kept in their input's
+        # relative phases (Spectral.shape_lock).
+        LOCKS = [:peaks, :shape].freeze
+
+        # Shape locking (lock: :shape): the peaks of +mag+ whose
+        # +advanced+ phases (moved on by their frequencies, +omega+ in
+        # radians per sample) fit a time shift of the input frame (+phi+
+        # delayed by tau samples, |tau| <= +reach+, the tau that fits the
+        # strongest peaks best) within a quarter cycle take the input's
+        # phases at that shift, so the frame is the input's waveform
+        # moved in time; peaks that do not fit (other sounds' partials)
+        # keep their own.  A harmonic sound's partials all fit (a shift
+        # by whole periods continues them), so its waveform keeps its
+        # shape as it is stretched.
+        def shape_lock(advanced, phi, mag, omega, reach)
+          nb = mag.length
+          return advanced if nb < 5
+
+          c = mag[2...(nb - 2)]
+          is_peak = (c > mag[1...(nb - 3)]) & (c > mag[0...(nb - 4)]) & (c >= mag[3...(nb - 1)]) & (c >= mag[4...nb]) & (c > mag.max * SHAPE_FLOOR)
+          peaks = is_peak.where + 2
+          return advanced if peaks.length < 2
+
+          strong = peaks[mag[peaks].sort_index.reverse[0...MB::M.min(peaks.length, SHAPE_PEAKS)]]
+          w = mag[strong]
+          dev0 = princarg(advanced[strong] - phi[strong])
+          om = omega[strong]
+          fits = ->(taus) { Numo::NMath.cos(dev0.reshape(1, dev0.length) - taus.reshape(taus.length, 1) * om.reshape(1, om.length)).dot(w) }
+          # (a coarse grid as fine as the highest peak needs, then every
+          # sample around its best; of nearly equal shifts, a whole
+          # period apart, the shortest)
+          stride = MB::M.clamp((0.25 / (om.abs.max.to_f + 1e-30)).floor, 1, reach)
+          coarse = Numo::DFloat.new(2 * (reach / stride) + 1).seq(-(reach / stride)) * stride
+          best = coarse[(fits.call(coarse) - coarse.abs * (0.02 * w.sum / reach)).max_index].to_f
+          taus = Numo::DFloat.new(2 * stride + 1).seq(best - stride)
+          raw = fits.call(taus)
+          i = (raw - taus.abs * (0.02 * w.sum / reach)).max_index
+          tau = taus[i].to_f
+          if i > 0 && i < taus.length - 1
+            # (between the grid's samples: the top of a parabola through
+            # the best and its neighbours, so shifts are not rounded)
+            a = raw[i - 1]
+            b = raw[i]
+            cc = raw[i + 1]
+            den = a - 2 * b + cc
+            tau += MB::M.clamp(0.5 * (a - cc) / den, -0.5, 0.5) if den < 0
+          end
+          dev = princarg(advanced[peaks] - phi[peaks] - omega[peaks] * tau)
+          fit = dev.abs.lt(Math::PI / 2)
+          return advanced unless fit.count_true > 0
+
+          out = advanced.dup
+          p = peaks[fit]
+          out[p] = advanced[p] - dev[fit]
+          out
+        end
+
+        # Shape-locked loops (lock: :shape, closure: :spread) close
+        # their phases over this many windows before the wrap (at most a
+        # quarter of the loop), running free there.
+        SHAPE_CLOSING = 6
+
+        # Peaks below this share of a frame's top magnitude (-40 dB), and
+        # beyond this many of the strongest, set no shape (shape_lock).
+        SHAPE_FLOOR = 0.01
+        SHAPE_PEAKS = 48
 
         # Identity phase locking (Laroche & Dolson 1999): peak bins keep
         # +advanced+ (their phases moved on by their frequencies); every
