@@ -228,6 +228,7 @@ RSpec.describe(MB::Sound::UI::Perf) do
       @last_was = design.last
       stub_const('MB::Sound::UI::Perf::Capture::STEP', 0.02)
       stub_const('MB::Sound::UI::Perf::Capture::LAND', 0.05) # (no sound screen here: the inspector never shows the track)
+      allow(cap).to receive(:bar_seconds).and_return(0.01) # (a wait for the track lasts LAND or 3.5 bars)
     end
 
     after do
@@ -339,7 +340,7 @@ RSpec.describe(MB::Sound::UI::Perf) do
       allow(cap).to receive(:key_target) { targets.shift || ok }
       typed = []
       allow(@tiles).to receive(:type_scripted) { |b| typed << b; @tiles }
-      cap.run(seconds: 4.0, dir: tmp_path('cap'), out: out)
+      cap.run(seconds: 2.5, dir: tmp_path('cap'), out: out)
       text = MB::U.remove_ansi(out.string)
       expect(text).not_to include('phase 2 stopped', "don't type")
       expect(text).to include('phase 2 held its keys 1 time', 'no key typed', 'the set and its form playing on', 'the set stopped :ui_perf', 'the capture started :ui_perf again (1 time)')
@@ -357,7 +358,7 @@ RSpec.describe(MB::Sound::UI::Perf) do
       targets = [ok] * 3
       allow(cap).to receive(:key_target) { targets.shift || [:inspector, :pane, nil] }
       allow(@tiles).to receive(:type_scripted) { @tiles }
-      cap.run(seconds: 4.0, dir: tmp_path('cap'), out: out)
+      cap.run(seconds: 2.5, dir: tmp_path('cap'), out: out)
       text = MB::U.remove_ansi(out.string)
       expect(text).to include('phase 2 stopped after 2 scripted keys', 'with no key typed (the screen changed by itself: the set stopped :ui_perf')
       expect(text).not_to include("don't type")
