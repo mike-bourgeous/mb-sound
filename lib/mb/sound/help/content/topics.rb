@@ -2044,7 +2044,10 @@ module MB
         steps).  In the tracks pane Left/Right set the level a dB a press
         (held: live, then one `level :bass, -6.0.db` line), Space plays a stopped track again
         (`resume :bass`) or stops a playing one (NAV Space is the
-        transport), x stops, s solos, m mutes.  Every key runs one console
+        transport), x stops, s solos, m mutes.  In the form pane Up/Down
+        pick a section, Enter goes there next (`goto :drop`), r loops it
+        (`loop!`, or `practice :drop`), n `onward`, > `skip`, f `finish`,
+        Space the transport.  Every key runs one console
         line: journaled, undoable, in your take (knob turns show on the
         pane's last row, other lines in the console).  `ui :mixer` shows
         buses beside the master.

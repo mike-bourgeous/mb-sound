@@ -97,7 +97,35 @@ module MB
           @times = nil
           @start_time = nil
           @pass_start = nil
+          @section_rows = nil # (see #section_rows)
           check_form
+        end
+
+        # The form's sections for listings (the console's `sections`, the
+        # tiled screen's form pane), in the order they first play: one
+        # frozen [name, text] pair per section, +text+ its plays' lengths
+        # and passes ("8 bars x2", or "8 bars x2 · 4 bars" for a section
+        # that plays in two places).  A generative form lists its sections
+        # as declared (its order is decided as it plays).  Frozen, and the
+        # same object every call (forms don't change while they play).
+        def section_rows
+          @section_rows ||= begin
+            plays = @form.generative? ? @form.sections.values.map { |s| [s.name, s.times, s.length] } : @form.plays
+            texts = {}
+            plays.each do |name, times, len|
+              t = "#{Playback.length_text(len)}#{" x#{times}" if times != 1}"
+              (texts[name] ||= []) << t
+            end
+            texts.map { |name, list| [name, list.join(' · ').freeze].freeze }.freeze
+          end
+        end
+
+        # A section length as listings say it: "8 bars" (a number of bars)
+        # or the Duration's own words.
+        def self.length_text(len)
+          return len.to_s unless len.is_a?(Numeric)
+          n = len.is_a?(Rational) && len.denominator == 1 ? len.to_i : len
+          "#{n} bar#{n == 1 ? '' : 's'}"
         end
 
         # Starts the form at timeline position +time+ (whole notes).

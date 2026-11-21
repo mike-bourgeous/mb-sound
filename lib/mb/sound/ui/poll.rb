@@ -435,7 +435,7 @@ module MB
           FormInfo.new(
             section: pb.section, pass: pb.pass, from: pb.pass_start, to: pb.boundary,
             next: nxt.section, next_at: nxt.at.to_s.freeze, committed: nxt.committed,
-            looping: pb.looping?, ended: false
+            looping: pb.looping?, ended: false, sections: pb.section_rows
           )
         end
       end

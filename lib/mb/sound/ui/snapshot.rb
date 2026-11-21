@@ -136,8 +136,11 @@ module MB
       # The form playing: +section+, +pass+, the section's start and end
       # (+from+, +to+: timeline positions, whole notes), the +next+ section
       # and its start (+next_at+, bar:beat), and whether it is +committed+,
-      # +looping+, or +ended+.
-      FormInfo = Data.define(:section, :pass, :from, :to, :next, :next_at, :committed, :looping, :ended)
+      # +looping+, or +ended+; +sections+ lists the form's sections as
+      # Form::Playback#section_rows does ([name, text] pairs, frozen).
+      FormInfo = Data.define(:section, :pass, :from, :to, :next, :next_at, :committed, :looping, :ended, :sections) do
+        def initialize(sections: [].freeze, **rest) = super(sections: sections, **rest)
+      end
 
       # Master meter readings over one snapshot's buffers: +peak+ and +rms+
       # (Arrays, one dBFS value per channel), +true_peak+ (dBTP, the

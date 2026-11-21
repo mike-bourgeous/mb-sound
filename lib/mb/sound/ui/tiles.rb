@@ -1666,7 +1666,8 @@ module MB
         # a Preview moves a knob live (Session#preview_turn, unjournaled: a
         # held key's gesture), a Commit runs the gesture's line from the
         # Session (Session#gesture_line) as a Turn; then the pane's
-        # #lines_ran.  A String flashes.
+        # #lines_ran.  A String flashes; an MB::Term::Input::Action runs as
+        # the NAV key it names would (#act).
         def pane_result(name, r)
           ran = false
           Array(r).each do |x|
@@ -1709,6 +1710,10 @@ module MB
               end
             when String
               flash(x, :key)
+            when MB::Term::Input::Action
+              # (a pane key that does what a NAV key does: the form pane's
+              # Space is NAV Space's transport toggle)
+              act(x)
             when :close
               # (a pane asking to be closed: the page pane's q, back to what
               # opened it)
