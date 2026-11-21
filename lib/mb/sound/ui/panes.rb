@@ -16,10 +16,20 @@ module MB
         # to 3 significant figures.
         def fmt(v)
           return '-' if v.nil?
-          v = v.to_f
-          return '-inf' if v == -Float::INFINITY
-          v.abs >= 100 || v == v.round ? v.round.to_s : format('%.3g', v)
+          # (frozen strings kept per value: the painter formats the same
+          # values frame after frame; ui-perf-1, 28 objects a frame on the
+          # sound screen)
+          FMT_MEMO[v] ||= begin
+            FMT_MEMO.clear if FMT_MEMO.length >= MEMO_MAX
+            f = v.to_f
+            (f == -Float::INFINITY ? '-inf' : f.abs >= 100 || f == f.round ? f.round.to_s : format('%.3g', f)).freeze
+          end
         end
+
+        # Formatted values kept (.fmt, .db), at most MEMO_MAX each.
+        FMT_MEMO = {}
+        DB_MEMO = {}
+        MEMO_MAX = 4096
 
         # The unit of a knob with Knob::Spec +spec+ driving a param named
         # +name+: the spec's, else what the Param names table implies for
@@ -32,8 +42,21 @@ module MB
         # A dB value to one decimal ("-8.1", "-inf").
         def db(v)
           return '-' if v.nil?
-          v.finite? ? format('%.1f', v) : '-inf'
+          DB_MEMO[v] ||= begin
+            DB_MEMO.clear if DB_MEMO.length >= MEMO_MAX
+            (v.finite? ? format('%.1f', v) : '-inf').freeze
+          end
         end
+
+        # .db right-justified to 5 columns, kept per value.
+        def db5(v)
+          return -'    -' if v.nil?
+          DB5_MEMO[v] ||= begin
+            DB5_MEMO.clear if DB5_MEMO.length >= MEMO_MAX
+            db(v).rjust(5).freeze
+          end
+        end
+        DB5_MEMO = {}
 
         # 0..1 for a dBFS level on the meter scale.
         def db_frac(v)
@@ -45,8 +68,27 @@ module MB
         def load_text(load)
           return ['-', :dim] if load.nil?
           pct = (load * 100).round
-          [format('%d%%', pct), load < 0.5 ? :ok : load < 0.8 ? :warn : :bad]
+          [format('%d%%', pct), load_role(load)]
         end
+
+        # The role of a load fraction (see .load_text).
+        def load_role(load)
+          return :dim if load.nil?
+          load < 0.5 ? :ok : load < 0.8 ? :warn : :bad
+        end
+
+        # .load_text's text right-justified to 4 columns, kept per
+        # percentage (the transport pane each frame).
+        def load_text4(load)
+          return LOAD_DASH if load.nil?
+          pct = (load * 100).round
+          LOAD_MEMO[pct] ||= begin
+            LOAD_MEMO.clear if LOAD_MEMO.length >= MEMO_MAX
+            format('%d%%', pct).rjust(4).freeze
+          end
+        end
+        LOAD_DASH = '   -'.freeze
+        LOAD_MEMO = {}
 
         # Transport: play state, bar:beat, tempo, meter, render load, and
         # output underruns.
@@ -66,17 +108,49 @@ module MB
               state[:seq] = s.seq
             end
 
-            load, role = Panes.load_text(s.load)
-            segs = [
-              [s.playing ? c.glyph(:play) : c.glyph(:stop), s.playing ? :ok : :dim], ' ',
-              [s.stamp.ljust(6), :key], ' ',
-              [Panes.fmt(s.bpm), :name], [' bpm ', :dim], [s.meter, :name],
-              ['  load ', :dim], [load.rjust(4), role], ' ',
-            ]
-            x = c.line(0, *segs)
+            # (one text call per segment and strings kept while their values
+            # stay, instead of segment Arrays and new strings each frame: the
+            # same cells, no garbage in the steady state; ui-perf-1)
+            role = Panes.load_role(s.load)
+            beat = s.beat.floor
+            unless state[:stamp_bar] == s.bar && state[:stamp_beat] == beat
+              state[:stamp_bar] = s.bar
+              state[:stamp_beat] = beat
+              state[:stamp] = s.stamp.ljust(6).freeze
+            end
+            unless state[:meter_of].equal?(s.bar_length) || state[:meter_of] == s.bar_length
+              state[:meter_of] = s.bar_length
+              state[:meter] = s.meter.freeze
+            end
+            # (paused: the bar stands while effects ring out, a pause sign
+            # instead of the stop square; its String kept per glyph set)
+            x = if s.paused
+              sep = c.glyph(:sep)
+              unless state[:pause_of].equal?(sep)
+                state[:pause_of] = sep
+                state[:pause_mark] = (sep * 2).freeze
+              end
+              c.text(0, 0, state[:pause_mark], :warn)
+            else
+              c.text(0, 0, s.playing ? c.glyph(:play) : c.glyph(:stop), s.playing ? :ok : :dim)
+            end
+            x = c.text(x, 0, -' ')
+            x = c.text(x, 0, state[:stamp], :key)
+            x = c.text(x, 0, -' ')
+            x = c.text(x, 0, Panes.fmt(s.bpm), :name)
+            x = c.text(x, 0, -' bpm ', :dim)
+            x = c.text(x, 0, state[:meter], :name)
+            x = c.text(x, 0, -'  load ', :dim)
+            x = c.text(x, 0, Panes.load_text4(s.load), role)
+            x = c.text(x, 0, -' ')
             x = c.sparkline(hist, lo: 0.0, hi: 1.0, width: 8, x: x, y: 0, role: role)
             if s.underruns
-              c.line(0, ['  xruns ', :dim], [s.underruns.to_s, s.underruns > (state[:xruns_at_start] ||= s.underruns) ? :bad : :ok], x: x)
+              unless state[:xruns_of] == s.underruns
+                state[:xruns_of] = s.underruns
+                state[:xruns] = s.underruns.to_s.freeze
+              end
+              x = c.text(x, 0, -'  xruns ', :dim)
+              c.text(x, 0, state[:xruns], s.underruns > (state[:xruns_at_start] ||= s.underruns) ? :bad : :ok)
             end
           end
         end
@@ -117,7 +191,39 @@ module MB
         # Left/Right its level a dB down or up (`level :kick, -3.db`), 0
         # back to 0 dB, x stops it, d (or Delete) twice removes it from the
         # set (`untrack`, undoable), v hides or shows stopped tracks.
+        #
+        # knobs-pane-keys-1 (the maintainer: "Pressing and holding the arrow
+        # key in the tracks pane to change levels should change level
+        # faster, but most of the keys just repeat the same level, and
+        # there's a pretty long delay"; "If I can stop a track in the tracks
+        # pane, I should also be able to resume it"; "S would be for solo";
+        # "M for mute"): the level a key set is carried for the next key and
+        # shown at once (UI::CarriedValues, as the knob panes do), so every
+        # repeat of a held arrow steps on.  A level is a knob
+        # (:"drums/level", Session::Faders), so its keys are a knob gesture
+        # (UI::KnobTurns, UI::TurnGesture; round 2, the maintainer's
+        # 2026-11-21 "yes" to "a live preview while held and one `level`
+        # line on release, as knobs do"): each Left/Right moves the level
+        # live (PaneKeys::Preview), and when the keys stop the gesture is
+        # ONE line, its final value (`level :drums, -10.0.db`;
+        # Session#gesture_line): one journal entry, one undo step, a take
+        # line replaying the sweep heard.  0 is one `level :drums, 0.0.db`
+        # line.  Level lines print as knob turns do: nothing in the REPL
+        # pane, the latest on the pane's last row in its mode
+        # (KnobTurns#turn_line_canvas).  Space plays or stops the picked
+        # track (`resume :kick` when stopped, `stop :kick` when playing; NAV
+        # Space stays the transport's), s solos or unsolos it, m mutes or
+        # unmutes it, from the snapshot's flags (marked solo and muted in
+        # its row).
         class Tracks < Pane
+          include KnobTurns
+
+          # The loudest level the keys set (Session::Faders::MAX_LEVEL, +12 dB).
+          MAX_DB = (20 * Math.log10(Session::Faders::MAX_LEVEL)).floor.to_f
+
+          # Part states a track's Space resumes from (else it stops it).
+          RESUMES = %i[stopped stopping fading ringing].freeze
+
           def initialize = super(:tracks, rate: 8, height: 6, width: 30, title: 'tracks', min_height: 2, description: 'tracks and players: state, clip, armed, recording')
 
           mode_keys do
@@ -126,10 +232,13 @@ module MB
             on [:down, 'j'], :pick, 1, help: 'the track below', label: 'Up Down'
             on [:page_up], :pick, -5, help: 'five tracks up', label: 'PgUp PgDn'
             on [:page_down], :pick, 5, help: 'five tracks down', label: 'PgUp PgDn'
-            on [:left, 'h'], :level, -1, help: 'its level 1 dB down (level)', label: 'Left Right'
-            on [:right, 'l'], :level, 1, help: 'its level 1 dB up (level)', label: 'Left Right'
+            on [:left, 'h'], :level, -1, help: 'its level 1 dB down, up (held: live, one level line)', label: 'Left Right'
+            on [:right, 'l'], :level, 1, help: 'its level 1 dB down, up (held: live, one level line)', label: 'Left Right'
             on '0', :level, 0, help: 'its level back to 0 dB'
             on 'x', :stop_track, help: 'stop it (stop)'
+            on ' ', :play_stop, help: 'this track: resume or stop (NAV Space: the transport)', label: 'Space'
+            on 's', :solo, help: 'solo, unsolo it'
+            on 'm', :mute, help: 'mute, unmute it'
             on ['d', :delete], :untrack, help: 'remove it from the set (untrack; d twice; undo brings it back)', label: 'd Del'
             on 'v', :stopped_view, help: 'hide or show stopped tracks'
             on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
@@ -140,15 +249,19 @@ module MB
             muted: :dim, asleep: :dim, stopped: :dim,
           }.freeze
 
-          # [[name, clip, state, armed, trigger, level], ...] from snapshot
-          # +s+ (stopped ones left out when +hide+).
+          # [[name, clip, state, armed, trigger, level, muted, soloed], ...]
+          # from snapshot +s+ (stopped ones left out when +hide+); +muted+
+          # and +soloed+ are the player's own flags.
           def self.rows(s, hide: false)
             parts = s.players.to_h { |p| [p.name, p] }
-            rows = s.tracks.map { |t| [t.name, t.clip, parts[t.name]&.state || :stopped, t.armed, t.trigger, t.level] }
+            rows = s.tracks.map { |t|
+              p = parts[t.name]
+              [t.name, t.clip, p&.state || :stopped, t.armed, t.trigger, t.level, p&.muted || false, p&.soloed || false]
+            }
             names = s.tracks.map(&:name)
             parts.each_value do |p|
               next if names.include?(p.name) || Session::Name.monitored(p.name)
-              rows << [p.name, 'bg', p.state, false]
+              rows << [p.name, 'bg', p.state, false, nil, nil, p.muted, p.soloed]
             end
             hide ? rows.reject { |r| r[2] == :stopped } : rows
           end
@@ -157,6 +270,7 @@ module MB
             return unless s
 
             state[:snap] = s
+            c = turn_line_canvas(c, state) if state[:mode] # (the latest level line)
             rec = s.recording.to_h { |r| [r.name, r] }
             all = Tracks.rows(s)
             rows = state[:hide_stopped] ? all.reject { |r| r[2] == :stopped } : all
@@ -176,8 +290,10 @@ module MB
             top = cur - fit + 1 if cur && cur >= top + fit
             state[:top] = top = top.clamp(0, [rows.length - fit, 0].max)
             show = rows[top, fit]
-            show.each_with_index do |(name, clip, st, armed, trigger, level), y|
+            show.each_with_index do |(name, clip, st, armed, trigger, level, muted, soloed), y|
               r = rec[name]
+              st = :muted if muted && st == :playing # (its own mute; :muted is also a solo elsewhere's silence)
+              level = carried(state, name) || level if state[:pending] # (a level a key just set, until the poll has it)
               glyph, role =
                 if r then [c.glyph(:rec), :rec]
                 elsif armed then [c.glyph(:armed), :armed]
@@ -188,15 +304,16 @@ module MB
               x = c.line(y, [glyph, role], picked ? ['▸', :key] : ' ', [c.pad(name, name_w), picked ? :key : :name], ' ')
               what = r ? "rec #{c.glyph(:arrow)}#{r.ends}#{r.queued ? ' (queued)' : ''}" : st == :playing ? clip.to_s : "#{st} #{clip}"
               what = "trigger #{what}" if trigger # (a trigger track: heard only by sidechains)
+              what = "solo #{what}" if soloed
               what = "#{level.finite? ? Panes.fmt(level) : '-inf'} dB #{what}" if level # (its level, when set away from unity)
-              c.text(x, y, c.fit(what, c.w - x), r ? :rec : st == :playing ? :text : :dim)
+              c.text_fit(x, y, what, c.w - x, r ? :rec : st == :playing ? :text : :dim)
             end
             if show.length < rows.length
               below = rows.length - top - show.length
               more = [top > 0 ? "#{top} above" : nil, below > 0 ? "+#{below} more" : nil].compact.join(', ')
-              c.text(0, c.h - 1, c.fit(more, c.w), :dim)
+              c.text_fit(0, c.h - 1, more, c.w, :dim)
             elsif hidden > 0 && c.h > rows.length
-              c.text(0, c.h - 1, c.fit("#{hidden} stopped hidden (v)", c.w), :dim)
+              c.text_fit(0, c.h - 1, "#{hidden} stopped hidden (v)", c.w, :dim)
             end
           end
 
@@ -207,26 +324,82 @@ module MB
             i = names.index(state[:cursor])
             i = i ? (i + d).clamp(0, names.length - 1) : (d > 0 ? 0 : names.length - 1)
             state[:cursor] = names[i]
-            "#{names[i]} (Left Right level, x stop)"
+            hidden = state[:hide_stopped] ? '; v shows stopped tracks' : ''
+            "#{names[i]} (Left Right level, Space play/stop, s solo, m mute#{hidden})"
           end
 
           # The arrows' scrolling (Pane's) picks here.
           def key_scroll(state, *) = key_pick(state, 1)
 
-          # Left/Right: the picked track's level by +d+ dB (0: back to 0 dB).
+          # Left/Right: the picked track's level by +d+ dB, on from the
+          # level the last key set while the poll catches up (CarriedValues:
+          # a held arrow steps every repeat), at most MAX_DB: a step of a
+          # knob gesture on its level knob (a live Preview; the Commit, one
+          # `level` line, when the keys stop: KnobTurns#key_tick).  0: back
+          # to 0 dB, one `level` line (after any gesture's).
           def key_level(state, d)
             name = state[:cursor] or return 'pick a track first (Up Down)'
             t = state[:snap]&.tracks&.find { |x| x.name == name }
             return "#{name}: not a track (a player of its own; its graph sets its level)" unless t
-            now = t.level && t.level.finite? ? t.level : 0.0
-            db = d.zero? ? 0.0 : (now + d).round(1)
-            PaneKeys::Run["level #{name.inspect}, #{RubyValue.to_ruby(db)}.db", "#{name} at #{Panes.fmt(db)} dB"]
+            if d.zero?
+              carry(state, name, 0.0)
+              return [*flush(state), PaneKeys::Turn["level #{name.inspect}, 0.0.db", "#{name} at 0 dB"]]
+            end
+            now = carried(state, name) || t.level
+            now = 0.0 unless now&.finite?
+            db = [(now + d).round(1), MAX_DB].min
+            return "#{name} at #{Panes.fmt(db)} dB (the most a level goes)" if db == now && d > 0
+            carry(state, name, db)
+            kn = Session::Name.level(name)
+            g = (state[:gesture] ||= TurnGesture.new)
+            out = g.turning? && g.knob != kn ? flush(state) : nil
+            from = g.turning? ? g.value : Decibels.new(now).to_f
+            pv = g.step(kn, from, Decibels.new(db).to_f, self.class.clock.call)
+            [*out, pv.with(note: "#{name} at #{Panes.fmt(db)} dB")]
+          end
+
+          # A level gesture's Commit (KnobTurns#key_tick) says its line on
+          # the status line, not the knob's gain.
+          def key_tick(state)
+            r = super
+            r.is_a?(PaneKeys::Commit) ? r.with(note: nil) : r
+          end
+
+          # Space: plays the picked track again if it is stopped (or
+          # stopping: `resume :kick`), else stops it (`stop :kick`).
+          def key_play_stop(state)
+            row = picked_row(state) or return 'pick a track first (Up Down)'
+            name, _, st = row
+            return key_stop_track(state) unless RESUMES.include?(st)
+            # (the poll's list of what can come back lags the parts by up to
+            # its period: a track these keys just stopped counts too)
+            if st == :stopped && !state[:snap].stopped.include?(name) && !state[:stopped_here]&.include?(name)
+              return "#{name} has nothing to resume (it never played: launch it from the clip matrix or a scene)"
+            end
+            state[:stopped_here]&.delete(name)
+            PaneKeys::Run["resume #{name.inspect}", "#{name} resuming (on the next bar)"]
+          end
+
+          # s: solos the picked track, or unsolos it if it is soloed.
+          def key_solo(state)
+            row = picked_row(state) or return 'pick a track first (Up Down)'
+            name = row[0]
+            row[7] ? PaneKeys::Run["unsolo #{name.inspect}", "#{name} unsoloed"] : PaneKeys::Run["solo #{name.inspect}", "#{name} soloed"]
+          end
+
+          # m: mutes the picked track, or unmutes it if it is muted.
+          def key_mute(state)
+            row = picked_row(state) or return 'pick a track first (Up Down)'
+            name = row[0]
+            row[6] ? PaneKeys::Run["unmute #{name.inspect}", "#{name} unmuted"] : PaneKeys::Run["mute #{name.inspect}", "#{name} muted"]
           end
 
           # x: stops the picked track (`stop :kick`).
           def key_stop_track(state)
             name = state[:cursor] or return 'pick a track first (Up Down)'
-            PaneKeys::Run["stop #{name.inspect}", "#{name} stopping"]
+            hide = state[:hide_stopped] ? ' (stopped tracks are hidden: v shows them)' : ''
+            (state[:stopped_here] ||= []) << name unless state[:stopped_here]&.include?(name)
+            PaneKeys::Run["stop #{name.inspect}", "#{name} stopping#{hide}"]
           end
 
           # d (Delete): the picked track out of the set (`untrack :clap`) on
@@ -253,6 +426,23 @@ module MB
             state[:top] = 0
             state[:hide_stopped] ? 'stopped tracks hidden (v shows them)' : 'stopped tracks shown'
           end
+
+          private
+
+          # Another key's flush of a level gesture (KnobTurns#flush), its
+          # note left to the line as #key_tick does.
+          def flush(state) = super.map { |r| r.is_a?(PaneKeys::Commit) ? r.with(note: nil) : r }
+
+          # (KnobTurns' value carried for the level knob: the rows read the
+          # track's own carried dB)
+          def remember(_state, _g) = nil
+
+          # The picked track's row (see .rows) in the snapshot it drew, or nil.
+          def picked_row(state)
+            name = state[:cursor] or return nil
+            s = state[:snap] or return nil
+            Tracks.rows(s).find { |r| r[0] == name }
+          end
         end
 
         # Queued changes, soonest first, with where each lands.
@@ -269,23 +459,62 @@ module MB
             end
             q.first(c.h).each_with_index do |e, y|
               x = c.line(y, [e.lands.ljust(6), :queued], ' ', [e.kind.to_s, :dim], ' ')
-              c.text(x, y, c.fit(e.subject.inspect, c.w - x), :name)
+              c.text_fit(x, y, e.subject.inspect, c.w - x, :name)
             end
           end
         end
 
         # Knobs: a meter at each knob's position in its range, and its value.
+        #
+        # In the pane's mode (NAV Enter, or its jump letter o: the
+        # maintainer's 2026-11-21 "o works for knobs jump for now";
+        # knobs-pane-keys-1, the maintainer:
+        # "I expect the knobs pane to let me turn the knobs with the
+        # keyboard") the keys of the racks pane's knob rows, through the
+        # same UI::KnobTurns: Up/Down pick a knob (reversed; the list
+        # scrolls to it), Left/Right turn it by 2% of its position (Shift or
+        # H/L 0.2%; held: a live sweep and one `turn` line when the keys
+        # stop), 0 its default, Enter a typed value.  Build knobs turn one
+        # `turn` line a press (each rebuilds their track).  Turn lines show
+        # on the pane's last row while in the mode, never in the REPL pane.
+        # Outside the mode the pane draws as it always has.
         class Knobs < Pane
-          def initialize = super(:knobs, rate: 15, height: 6, width: 28, title: 'knobs', description: 'session knobs: a meter of each one\'s position and its value')
+          include KnobTurns
+          jump 'o'
+
+          mode_keys do
+            group 'Knobs'
+            on [:up, 'k'], :pick, -1, help: 'previous knob', label: 'Up Down j k'
+            on [:down, 'j'], :pick, 1, help: 'next knob', label: 'Up Down j k'
+            on [:right, 'l'], :turn, KnobTurns::STEP, help: 'turn the knob up (held: a live sweep, one turn line)', label: 'Right l'
+            on [:left, 'h'], :turn, -KnobTurns::STEP, help: 'turn the knob down (held: a live sweep, one turn line)', label: 'Left h'
+            on [:right, :shift], :turn, KnobTurns::FINE, help: 'turn up, fine'
+            on [:left, :shift], :turn, -KnobTurns::FINE, help: 'turn down, fine'
+            on ['L'], :turn, KnobTurns::FINE, help: 'turn up, fine'
+            on ['H'], :turn, -KnobTurns::FINE, help: 'turn down, fine'
+            on '0', :reset, help: "the knob's default"
+            on :enter, :ask, help: 'type a value (turn :cut, 3000.hz)', label: 'Enter'
+            on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
+          end
+
+          keys do
+            group 'Knobs'
+            doc 'Enter', 'pick and turn knobs (Esc back to NAV)'
+          end
+
+          def initialize = super(:knobs, rate: 15, height: 6, width: 28, title: 'knobs', description: 'session knobs: a meter of each one\'s position and its value; turn them from its keys')
 
           def draw_body(c, s, state)
             return unless s
 
+            state[:snap] = s
+            c = turn_line_canvas(c, state) if state[:mode]
             if s.knobs.empty?
               c.puts ['no knobs', :dim]
               return
             end
             name_w = [[s.knobs.map { |k| k.name.to_s.length }.max, 4].max, 8].min
+            return draw_mode(c, s, state, name_w) if state[:mode]
             s.knobs.first(c.h).each_with_index do |k, y|
               spec = k.spec
               value = "#{Panes.fmt(k.value)}#{spec.unit ? " #{spec.unit}" : ''}"
@@ -295,6 +524,51 @@ module MB
               c.text(x + 1, y, value, :text)
             end
           end
+
+          # Up/Down: the previous or next knob (a held gesture's line goes
+          # out first).
+          def key_pick(state, d)
+            out = flush(state)
+            n = state[:snap]&.knobs&.length.to_i
+            state[:pick] = n == 0 ? 0 : (state[:pick].to_i + d).clamp(0, n - 1)
+            k = n == 0 ? nil : state[:snap].knobs[state[:pick]]
+            note = k ? "#{k.name} (Left Right turn, Enter a value, 0 default)" : 'no knobs'
+            out.empty? ? note : [*out, note]
+          end
+
+          private
+
+          # The rows in the mode: the picked knob reversed, scrolled into
+          # view, the value a key set (or a held gesture's target, in the
+          # queued color) over the snapshot's.
+          def draw_mode(c, s, state, name_w)
+            n = s.knobs.length
+            pick = state[:pick] = state[:pick].to_i.clamp(0, n - 1)
+            top = state[:top].to_i
+            top = pick if pick < top
+            top = pick - c.h + 1 if c.h > 0 && pick >= top + c.h
+            state[:top] = top = top.clamp(0, [n - c.h, 0].max)
+            s.knobs[top, c.h].each_with_index do |k, y|
+              spec = k.spec
+              v, turning = shown_value(state, k.name, k)
+              value = "#{Panes.fmt(v)}#{spec.unit ? " #{spec.unit}" : ''}"
+              sel = top + y == pick
+              x = c.run(0, y, c.pad(k.name, name_w), sel ? :key : :name, reverse: sel)
+              x = c.text(x, y, ' ')
+              mw = [c.w - x - value.length - 1, 3].max
+              x = c.meter(spec.position(v).to_f, width: mw, x: x, y: y, role: :key)
+              c.text(x + 1, y, value, turning ? :queued : :text)
+            end
+          end
+
+          def no_knob_note = 'no knobs to turn (knob :cut, 800, range: 100..8000)'
+
+          def picked(state)
+            knobs = state[:snap]&.knobs
+            return nil if knobs.nil? || knobs.empty?
+            k = knobs[state[:pick].to_i.clamp(0, knobs.length - 1)]
+            [k.name, k]
+          end
         end
 
         # Master meters: peak per channel (with a 1.5 s hold), RMS,
@@ -302,6 +576,9 @@ module MB
         class Meters < Pane
           # Seconds a peak is held.
           HOLD = 1.5
+
+          # Channel labels of a stereo master.
+          LR = %w[L R].freeze
 
           def initialize = super(:meters, rate: 30, height: 6, width: 30, needs: [:meters], title: 'master', min_height: 4, description: 'master meters: peak with hold, RMS, short-term LUFS, true peak')
 
@@ -312,21 +589,52 @@ module MB
               return
             end
 
+            # (text calls, held peaks updated in place, strings kept per
+            # value: the same cells without garbage each frame; ui-perf-1)
             holds = (state[:holds] ||= [])
-            labels = m.peak.length == 2 ? %w[L R] : m.peak.each_index.map { |i| (i + 1).to_s }
-            rows = [c.h - 2, m.peak.length].min
+            n = m.peak.length
+            rows = c.h - 2 < n ? c.h - 2 : n
             rows.times do |ch|
               peak = m.peak[ch]
               h = holds[ch]
-              holds[ch] = h = [peak, s.time] if h.nil? || peak >= h[0] || s.time - h[1] > HOLD
-              x = c.line(ch, [labels[ch], :dim], ' ')
-              mw = [c.w - x - 6, 3].max
+              if h.nil?
+                holds[ch] = h = [peak, s.time]
+              elsif peak >= h[0] || s.time - h[1] > HOLD
+                h[0] = peak
+                h[1] = s.time
+              end
+              x = c.text(0, ch, n == 2 ? LR[ch] : (ch + 1).to_s, :dim)
+              x = c.text(x, ch, -' ')
+              mw = c.w - x - 6
+              mw = 3 if mw < 3
               x = c.meter(Panes.db_frac(peak), width: mw, x: x, y: ch, zones: DB_ZONES, hold: Panes.db_frac(h[0]))
-              c.text(x + 1, ch, Panes.db(h[0]).rjust(5), h[0] > -1.0 ? :bad : :text)
+              c.text(x + 1, ch, Panes.db5(h[0]), h[0] > -1.0 ? :bad : :text)
             end
             y = rows
-            c.line(y, ['S ', :dim], [Panes.db(m.lufs_s), :key], [' LUFS  ', :dim], ['TP ', :dim], [Panes.db(m.true_peak), m.true_peak > -1.0 ? :bad : :text])
-            c.line(y + 1, ['RMS ', :dim], m.rms.map { |r| Panes.db(r) }.join(' '))
+            x = c.text(0, y, -'S ', :dim)
+            x = c.text(x, y, Panes.db(m.lufs_s), :key)
+            x = c.text(x, y, -' LUFS  ', :dim)
+            x = c.text(x, y, -'TP ', :dim)
+            c.text(x, y, Panes.db(m.true_peak), m.true_peak > -1.0 ? :bad : :text)
+            x = c.text(0, y + 1, -'RMS ', :dim)
+            c.text(x, y + 1, rms_line(m.rms, state))
+          end
+
+          # The RMS values as one line ("-8.1 -9.2"), rebuilt only when a
+          # value's text changed (Panes.db keeps one String per value).
+          def rms_line(rms, state)
+            parts = (state[:rms_parts] ||= [])
+            same = parts.length == rms.length
+            i = 0
+            while i < rms.length
+              t = Panes.db(rms[i])
+              same = false unless parts[i].equal?(t)
+              parts[i] = t
+              i += 1
+            end
+            parts.pop while parts.length > rms.length
+            return state[:rms_line] if same && state[:rms_line]
+            state[:rms_line] = parts.join(' ').freeze
           end
         end
 
@@ -468,12 +776,12 @@ module MB
             @rows = [c.h - 1, 1].max
             @offset = @offset.clamp(0, [@lines.length - @rows, 0].max)
             @lines[@offset, @rows].to_a.each_with_index do |l, y|
-              c.text(0, y, c.fit(l, c.w), :text)
+              c.text_fit(0, y, l, c.w, :text)
             end
             last = [@offset + @rows, @lines.length].min
             status = "lines #{@offset + 1}-#{last} of #{@lines.length}#{@found ? "  /#{@find}" : ''}  " \
                      "#{state[:mode] ? 'j k PgUp PgDn g G, / search, y copy, Esc back, q closes' : 'Enter reads, q closes'}"
-            c.text(0, c.h - 1, c.fit(status, c.w), :dim)
+            c.text_fit(0, c.h - 1, status, c.w, :dim)
           end
 
           # / : the search prompt (its answer: #key_found).
@@ -571,7 +879,7 @@ module MB
               return if c.h <= 0
             end
             unless @figure
-              c.text(0, 0, c.fit('no plot yet (plot 440.hz.sine, chart { ... })', c.w), :dim)
+              c.text_fit(0, 0, 'no plot yet (plot 440.hz.sine, chart { ... })', c.w, :dim)
               return
             end
             cells = c.grid.class
@@ -663,8 +971,22 @@ module MB
             end
             data = s&.scope
             data = state[:silence] ||= [Numo::SFloat.zeros(256)] if data.nil? || data.empty?
-            live.draw(chart(data, s&.sample_rate || 48000), c.grid, x: c.x, y: c.y)
+            rate = s&.sample_rate || 48000
+            # (the same sample count, channels, and rate as the traced
+            # chart: its lines again from the new samples, nothing allocated;
+            # ui-perf-2.  Otherwise the chart, and a new trace of it.)
+            return if traced? && state[:trace_rate] == rate && live.retrace(data, c.grid, x: c.x, y: c.y)
+            ch = chart(data, rate)
+            live.draw(ch, c.grid, x: c.x, y: c.y)
+            if traced?
+              live.trace(ch)
+              state[:trace_rate] = rate
+            end
           end
+
+          # True for panes whose chart is plain lines of the samples (the
+          # scope), which Plot::Live#retrace draws without a chart.
+          def traced? = self.class == Scope
 
           private
 

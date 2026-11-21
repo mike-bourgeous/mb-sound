@@ -176,6 +176,12 @@ module MB
           console, dsl = rows.partition.with_index { |_, i| names[i][1] == :console }
           d.heading('Commands').rows(console) unless console.empty?
           d.heading('Node and value methods').rows(dsl) unless dsl.empty?
+          # (ux-friction-1 round 2: from :unison he couldn't find .unison's own page)
+          first = names.find { |_, kind| kind == :dsl }&.first || names.first&.first
+          if first
+            how = names.any? { |_, kind| kind == :dsl } ? "help .#{first}" : "help :#{first}"
+            d.note("Each one's page (arguments, examples): #{how}#{names.any? { |_, k| k == :dsl } && names.any? { |_, k| k == :console } ? ", help :#{names.find { |_, k| k == :console }.first}" : ''}")
+          end
           extra_sections(d)
           # (its aliases' too: help note is the pitch topic, and ui.note's
           # entry shows there)

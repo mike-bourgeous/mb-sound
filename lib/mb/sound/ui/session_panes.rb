@@ -80,7 +80,7 @@ module MB
             x = c.line(y, [glyph, role], ' ', [c.pad(b.name, name_w), :name], [" #{c.glyph(:arrow)} ", :dim], [b.to.to_s, :key])
             state = b.muted ? ' muted' : b.asleep ? ' asleep' : ''
             pct = load ? "  #{Panes.load_text(load.load)[0]}" : ''
-            c.text(x, y, c.fit("#{state}#{pct}  #{b.description}", c.w - x), :dim)
+            c.text_fit(x, y, "#{state}#{pct}  #{b.description}", c.w - x, :dim)
           end
 
           # Input and output meters side by side ("in ▕███  ▏-18.2 out ...").
@@ -226,7 +226,7 @@ module MB
             clocks = s.clocks
             free = c.h - 2 - [labels.length, c.h - 2].min
             shown = clocks.first([free, clocks.length].min)
-            labels.first(c.h - 2 - shown.length).each_with_index { |(x, t), i| c.text([x - 1, 0].max, 2 + i, c.fit(t, c.w - [x - 1, 0].max), :dim) }
+            labels.first(c.h - 2 - shown.length).each_with_index { |(x, t), i| c.text_fit([x - 1, 0].max, 2 + i, t, c.w - [x - 1, 0].max, :dim) }
             shown.each_with_index { |k, i| Lane.clock_row(c, c.h - shown.length + i, k) }
           end
 
@@ -235,7 +235,7 @@ module MB
             x = c.line(y, ['⏱ ', :dim], [k.name.to_s, :name], ' ')
             bar = [[c.w / 5, 4].max, 10].min
             x = c.meter(k.phase, width: bar, x: x, y: y, role: :key)
-            c.text(x + 1, y, c.fit("#{k.unit == :cycles ? 'cycle' : 'bar'} #{k.count} · #{k.what}", [c.w - x - 1, 0].max), :dim)
+            c.text_fit(x + 1, y, "#{k.unit == :cycles ? 'cycle' : 'bar'} #{k.count} · #{k.what}", [c.w - x - 1, 0].max, :dim)
           end
         end
 
@@ -273,7 +273,7 @@ module MB
             m.events.last(rows).each do |stamp, src, kind, text|
               x = c.line(y, [stamp.ljust(6), :dim], ' ')
               x = c.text(x, y, text, kind == :on ? :name : kind == :cc ? :key : :dim)
-              c.text(x + 1, y, c.fit(src.to_s, [c.w - x - 1, 0].max), :dim)
+              c.text_fit(x + 1, y, src.to_s, [c.w - x - 1, 0].max, :dim)
               y += 1
             end
           end

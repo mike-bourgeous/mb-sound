@@ -109,6 +109,24 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       expect(e.submit?(0.05 + q * 0.8)).to eq(false)
       expect(e.submit?(0.05 + q * 1.05)).to eq(true)
     end
+
+    it 'with hold_sweeps renders only once changes stop for DEBOUNCE' do
+      pr.hold_sweeps = true
+      d = pr::Debounce.new
+      t = 0.0
+      40.times do
+        d.change(t)
+        expect(d.submit?(t)).to eq(false)
+        t += 0.05
+      end
+      expect(d.submit?(t - 0.05 + pr::DEBOUNCE * 0.8)).to eq(false)
+      expect(d.submit?(t - 0.05 + pr::DEBOUNCE * 1.05)).to eq(true)
+      e = pr::Debounce.new
+      e.change(0.0)
+      expect(e.submit?(0.0, urgent: true)).to eq(true) # (nothing shown yet: at once)
+    ensure
+      pr.hold_sweeps = false
+    end
   end
 
   describe MB::Sound::UI::PatchRender::Driver do
@@ -381,6 +399,34 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       w.close
       expect(w.thread).to be_nil
     end
+
+    it 'gives the GVL to the live render thread while it renders, with the same results as without' do
+      was = ui::Yielding.on
+      @session, = bass_session
+      fake = Thread.new { loop { sleep 0.001 } } # (standing in for the live render thread)
+      src = source_of(@session, :saw).with(thread: -> { fake })
+      gy = MB::Sound::FastUI::GVLYield
+      results = [true, false].map do |on|
+        ui::Yielding.on = on
+        done = Queue.new
+        seen = nil
+        w = pr::Worker.new { |r|
+          seen = [gy.yielders.include?(Thread.current), gy.priority.equal?(fake)]
+          done << r
+        }
+        w.submit(job_for(@session, 1, source: src))
+        r = done.pop(timeout: 30)
+        w.close
+        expect(seen).to eq([on, on])
+        expect([gy.yielders, gy.priority]).to eq([[], nil]) # (let go when the thread ends)
+        r
+      end
+      expect(results[0].error).to be_nil
+      %i[cycle lo hi spectrum peak rms lufs periods settled].each { |k| expect(results[0].send(k)).to eq(results[1].send(k)), k.to_s }
+    ensure
+      ui::Yielding.on = was
+      fake&.kill&.join
+    end
   end
 
   describe 'the pane' do
@@ -431,6 +477,31 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       expect(draw(none, { title_in_rule: true })[0]).to include('nothing to render')
       graph = snap.with(slow: snap.slow.with(render_source: ui_fake_render_source.with(synth: nil, note: 'pad has no synth voice to copy')))
       expect(draw(graph, { title_in_rule: true })[0]).to include('pad has no synth voice')
+    ensure
+      pr.seconds = pr::SECONDS
+    end
+
+    it 'draws the plots of a render on the worker (the painter copies their cells), the same as drawing them on the painter' do
+      snap = ui_fake_snapshot
+      now = 0.0
+      drawn = []
+      [true, false].each do |worker|
+        st = { title_in_rule: true, driver: pr::Driver.new(clock: -> { now }) }
+        allow(ui::Panes::Render).to receive(:pictures).and_return(nil) unless worker
+        2.times do
+          [[90, 18], [100, 9], [60, 9]].each { |w, h| drawn << [worker, draw(snap, st, w: w, h: h)] }
+          st[:guess] = !st[:guess]
+          now += 0.3
+          draw(snap, st, w: 90, h: 18) # (a second render: the first drawn faintly behind it)
+          now += 0.3
+        end
+        r = st[:driver].shown
+        expect(r.pictures.nil?).to eq(!worker)
+        expect(r.pictures[2].compact.length).to eq(3) if worker # (the cycle, the spectrum, the envelope)
+      end
+      with, without = drawn.partition(&:first)
+      expect(with.map(&:last)).to eq(without.map(&:last))
+      expect(with.map(&:last).uniq.length).to be > 3
     ensure
       pr.seconds = pr::SECONDS
     end

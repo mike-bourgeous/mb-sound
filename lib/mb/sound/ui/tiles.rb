@@ -62,10 +62,17 @@ module MB
         # (Keys.table lists the REPL keys in effect).
         KEY_HELP = Keys.table(live: false).freeze
 
+        # What .one_line changes (newlines and escapes are control
+        # characters too).
+        ONE_LINE_CONTROL = /[\x00-\x1f\x7f]/
+
         # +text+ as one line for a cell row: control characters become
         # spaces, and a multi-line text keeps its first line and " ...".
         def self.one_line(text)
           t = text.to_s
+          # (one line with no control characters is itself: a key's note
+          # flashes on every turn; ui-perf-2 round 3)
+          return t unless t.match?(ONE_LINE_CONTROL)
           first, rest = t.split("\n", 2)
           first = first.to_s.gsub(/\e\[[0-9;?]*[A-Za-z]/, '').gsub(/[\x00-\x1f\x7f]/, ' ')
           rest.to_s.strip.empty? ? first : "#{first} ..."
@@ -151,7 +158,7 @@ module MB
                        mouse: false, nav_esc: nil, kitty: false, context: nil, probe: true, scrollback: MB::Term::VT::SCROLLBACK, pry: {},
                        keyboard: nil, keys_kitty: nil, on_key: nil, hints: nil, play_keys: nil, on_action: nil, nav_once: true)
           # (Every instance variable set up front, in one order: one object shape)
-          @term = @ambiguous = @host = @stopping = @full = @painter = @reader = @hidden = @relayout = @repl_full = @match = @search = @flash = @reloaded_at = @size_checked_at = @resized = @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = @line_cursor = @old_winch = @signals = @attached = @poll = @polled_at = @polled_target = @poll_warned = @last = @painter_warned = @heard = nil
+          @term = @ambiguous = @host = @stopping = @full = @painter = @reader = @hidden = @relayout = @repl_full = @match = @search = @flash = @reloaded_at = @size_checked_at = @resized = @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = @line_cursor = @old_winch = @signals = @attached = @poll = @polled_at = @polled_target = @poll_warned = @last = @painter_warned = @heard = @yield_render = nil
           raise ArgumentError, "Layout #{layout.name.inspect} has no repl pane (`repl` in the layout block)" unless layout.repl? || repl == :none
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless MB::Term::Cells::MODES.key?(color)
 
@@ -162,6 +169,10 @@ module MB
           @match = @search = @flash = @painter_warned = @reloaded_at = @size_checked_at = @resized = nil
           @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = nil
           @line_cursor = @old_winch = @signals = @wake_r = @wake_w = nil
+          @echo_key_at = nil # (Tiles.echo_wake: when the last REPL key arrived, until its echo wakes the painter)
+          @status_canvas = @status_right = @status_right_key = nil # (draw_status's canvas and right-hand text, kept)
+          @pane_badge = @pane_hint = nil # (draw_status's pane badge and hint, kept: #pane_badge, #pane_hint)
+          @layout_panes = nil # ([layout, its pane names]: #layout_panes)
           @attached = @poll = @polled_at = @poll_warned = @last = nil
           @asking = nil # ([pane name, PaneKeys::Ask] while a pane's value prompt is open)
           @overlay_from_play = false # (see #key_help)
@@ -251,6 +262,13 @@ module MB
           @hints = hints || (play_keys && Keys.hints(play_keys))
           @status_note = nil
           @note_capture = nil # (UI::NoteLog.capture when NAV # opened its prompt)
+          @features = {} # (the terminal probe's findings, for ui.perf's identity)
+          # (with @full: clear the terminal and send every cell, for a screen
+          # the terminal may not show as we left it; without, a full repaint
+          # of the grid is sent as the cells that differ from what it shows)
+          @clear = false
+          @draw_items = [] # (the painter's reused pane rows: #refresh_unlocked)
+          @draw_rows = {}
         end
 
         # The virtual keyboard (UI::Keyboard) KEYS mode plays.
@@ -260,6 +278,27 @@ module MB
         # render pane's view and cursor), or nil if it has none yet.  Read
         # by ui.note (UI::NoteLog.capture) to say what was looked at.
         def pane_state(name) = @states.key?(name) ? @states[name] : nil
+
+        # The pane object named +name+ in the current layout, or nil
+        # (ui.perf :capture asks the inspector whether a knob is picked).
+        def pane_object(name) = @panes[name]
+
+        # Handles +bytes+ (e.g. "\e[C") as if typed: decoded, each key
+        # through the Router, timed by ui.perf like a typed key, and the
+        # painter woken as the input thread does (ui.perf :capture's
+        # scripted knob turns).  Returns self.
+        def type_scripted(bytes)
+          events = MB::Term::Input::Decoder.new.feed(bytes)
+          perf = @pacer.perf
+          events.each do |e|
+            arrival = @clock.call
+            repl = e.is_a?(MB::Term::Input::Key) && @router.state == :repl
+            handle(e)
+            perf&.key(arrival, @clock.call, repl) if e.is_a?(MB::Term::Input::Key) && !e.release?
+          end
+          @painter&.wakeup rescue nil
+          self
+        end
 
         # The Session this screen shows (nil: the default one).
         def session = @session
@@ -288,8 +327,9 @@ module MB
           return show_again if @hidden
 
           @term = MB::Term::Terminal.new(input: @input.dup, output: @output.dup)
-          @term.enter(mouse: @mouse, kitty: @kitty)
+          @term.enter(mouse: @mouse, kitty: @kitty, mode: UI::ConsoleKeys.mode_to_restore(@input))
           features = @probe ? @term.probe : {}
+          @features = features
           @ambiguous = features[:ambiguous] || (::Reline.core.instance_variable_get(:@ambiguous_width) rescue nil) || 1
           @glyphs = :ascii if @ambiguous == 2 && @glyphs == :unicode && ENV['MB_SOUND_UI_GLYPHS'].to_s.empty?
           @rows, @cols = terminal_size
@@ -301,6 +341,7 @@ module MB
             @host = MB::Term::Input::ReplHost.new(rows: r.h, cols: r.w, mode: @repl_mode, scrollback: @scrollback, ambiguous_width: @ambiguous,
                                         target: @context || TOPLEVEL_BINDING, pry: @pry_opts)
             @host.start
+            @host.on_output = method(:echo_output) # (does nothing unless Tiles.echo_wake armed it for a key)
             # A Pry of our own (:thread) reads through the global Reline,
             # whose Ctrl-]/F2 bindings (ConsoleKeys) act on the screen that
             # owns the reading thread: this one, not a new one on the real
@@ -310,7 +351,7 @@ module MB
           @active = true
           @stopping = false
           install_signals
-          @full = true
+          @full = @clear = true
           @term.typed_during_probe.each { |e| handle(e) }
           hook_keyboard
           keys if @start_keys && @tiler.layout.panes.include?(:keyboard)
@@ -342,6 +383,7 @@ module MB
           (@reader.join(0.5) || @reader.kill) if @reader && !Thread.current.equal?(@reader)
           @painter&.join(1)
           @painter = @reader = nil
+          @states.each_value { |st| Pane.close_workers(st) } # (the panes' preview workers)
           [@wake_r, @wake_w].each { |io| io&.close rescue nil }
           @wake_r = @wake_w = nil
           restore_signals
@@ -413,7 +455,7 @@ module MB
             @rows, @cols = terminal_size
             @tiler.resize_screen(@cols, @rows - 1)
             @relayout = true
-            @full = true
+            @full = @clear = true
             @repl_full = true
             @host.vt.invalidate
           end
@@ -465,6 +507,13 @@ module MB
           @lock.synchronize { @grid.to_text(mode) }
         end
 
+        # Seconds since this screen's first frame (on its clock), or nil
+        # before it (ui.perf :capture says it: a screen's first 10-20 s
+        # compile under YJIT).
+        def seconds_up
+          @first_refresh && @clock.call - @first_refresh
+        end
+
         # Painter costs, as for Band#stats, plus the REPL's pty bytes and
         # reader CPU.
         def stats
@@ -486,12 +535,27 @@ module MB
           }
         end
 
+        # ui.perf on the tiles asks the terminal (it owns the input): a DA1
+        # query after a sampled frame, and XTVERSION / DA2 for its identity.
+        private def perf_ack = @term ? :da1 : nil
+
+        private def perf_identify(p)
+          p.identify(features: @features || {}, term: @term, size: [@rows, @cols])
+          # The render thread's wake delay and the painter's, input's, pty
+          # reader's, and REPL's GVL waits while recording
+          s = @session || Session.existing
+          threads = { render: s&.render_thread, painter: @painter, input: @reader }
+          threads[:pty] = @host.reader if @host&.reader
+          threads[:repl] = @host.thread if @host&.thread
+          p.start_probe(threads.compact) if threads[:render] && threads[:painter]
+        end
+
         # Panes that raised (name => message).
         def failures = @failures.dup
 
-        # Redraws everything on the next frame.
+        # Redraws everything on the next frame (the terminal cleared first).
         def invalidate
-          @full = true
+          @full = @clear = true
         end
 
         def inspect
@@ -505,6 +569,8 @@ module MB
         # pane there).
         def split(axis = :cols, name = nil, at: nil)
           axis = { v: :cols, s: :rows, beside: :cols, below: :rows }.fetch(axis, axis)
+          name = pane_arg(name) if name
+          at = pane_arg(at) if at
           tile { |t| t.split(at || t.focus, axis, name) }
         end
 
@@ -512,6 +578,7 @@ module MB
         # The REPL stays (without it the console has nowhere to draw; zoom
         # another pane over it instead).
         def close(name = nil)
+          name = pane_arg(name) if name
           tile do |t|
             name ||= t.focus
             raise MB::Term::Viewports::Error, 'The REPL pane stays (z zooms another pane over it)' if name == :repl
@@ -520,24 +587,39 @@ module MB
         end
 
         # Toggles zooming the focused pane (or +name+).
-        def zoom(name = nil) = tile { |t| t.zoom(name || t.focus) }
+        def zoom(name = nil) = (name = pane_arg(name) if name; tile { |t| t.zoom(name || t.focus) })
 
         # Focuses pane +name+ (or the next one).
-        def focus(name = nil) = tile { |t| name ? t.focus!(name) : t.focus_next }
+        def focus(name = nil) = (name = pane_arg(name) if name; tile { |t| name ? t.focus!(name) : t.focus_next })
 
         # Moves the focused pane's edge +dir+ (:left, :right, :up, :down) by
         # +cells+.
-        def resize(dir, cells = 1, name: nil) = tile { |t| t.resize(name || t.focus, dir, cells) }
+        def resize(dir, cells = 1, name: nil) = (name = pane_arg(name) if name; tile { |t| t.resize(name || t.focus, dir, cells) })
 
         # Equal shares for the focused pane's siblings.
-        def equalize(name = nil) = tile { |t| t.equalize(name || t.focus) }
+        def equalize(name = nil) = (name = pane_arg(name) if name; tile { |t| t.equalize(name || t.focus) })
 
         # Swaps panes +a+ and +b+ (default: the focused one).
-        def swap(a, b = nil) = tile { |t| t.swap(a, b || t.focus) }
+        def swap(a, b = nil) = (a = pane_arg(a); b = pane_arg(b) if b; tile { |t| t.swap(a, b || t.focus) })
+
+        # Pane name +name+ given to a command, an alias resolved
+        # (UI::PANE_ALIASES: :pager is :page), raising with a did-you-mean
+        # for a name that is no pane (ux-friction-1: `ui.show :pagr` showed
+        # an empty pane by that name).  A layout's own names pass, and with
+        # +kinds+ so do the jump letters' pane kinds (see #jump).
+        private def pane_arg(name, kinds: false)
+          return name unless name.is_a?(Symbol)
+          n = UI.pane_name(name)
+          return n if kinds && jump_target(n)
+          kind_names = kinds ? [:keyboard, *UI.panes.values.map { |p| PaneKeys.kind_of(p) rescue nil }.compact] : []
+          UI.pane_name!(name, also: @tiler.layout.panes + @panes.keys + kind_names)
+        end
 
         # Shows pane +name+ in the focused slot (or +at+).  The REPL pane
         # is never replaced: on it, +name+ goes beside it instead.
         def show(name, at: nil)
+          name = pane_arg(name)
+          at = pane_arg(at) if at
           tile do |t|
             at ||= t.focus
             if at == :repl && name != :repl && @host && !t.layout.panes.include?(name)
@@ -1025,6 +1107,7 @@ module MB
         #
         #     ui.enter :clips
         def enter(name = nil)
+          name = pane_arg(name) if name
           @input_lock.synchronize { enter_unlocked(name) }
           @router.mode
         end
@@ -1060,6 +1143,7 @@ module MB
         #
         #     ui.jump :tracks
         def jump(name)
+          name = pane_arg(name, kinds: true)
           @input_lock.synchronize { jump_unlocked(name) }
           @router.mode
         end
@@ -1265,7 +1349,7 @@ module MB
           when :search_next then @search ? search(@search, a.args[0] || 1) : flash('no search yet (/)', :warn)
           when :copy then copy
           when :palette then @router.open_line(:palette, ':', history: @palette_history)
-          when :redraw then @full = true
+          when :redraw then @full = @clear = true
           when :panic # (a script screen's own panic, e.g. a synth screen's notes off, else the console's)
             @on_action ? @on_action.call(a) : run_safely { UI.run_line('panic', keys_session || Session.current) }
           when :pause # (a script screen's own pause, else the console's transport toggle: start or pause, a take line)
@@ -1275,7 +1359,11 @@ module MB
               run_safely {
                 s = keys_session || Session.current
                 st = UI.run_line(TransportMethods.toggle_line(s), s)
-                flash(st.to_s, :dim) if st.is_a?(TransportMethods::Status)
+                next st unless st.is_a?(TransportMethods::Status)
+                # (self: run_safely flashes any other result, and flash's
+                # own return value printed as `=> [text, role, ...]`)
+                flash(st.to_s, :dim)
+                self
               }
             end
           when :keys then keys
@@ -1591,7 +1679,7 @@ module MB
               next flash('no session to turn knobs in', :warn) unless s
               begin
                 v = s.preview_turn(x.knob, x.value)
-                flash("#{x.knob} #{GraphNode::Knob.number(v)}  (held: one line when you let go)", :key)
+                flash("#{x.note || "#{x.knob} #{GraphNode::Knob.number(v)}"}  (held: one line when you let go)", :key)
               rescue ArgumentError => e
                 flash("#{e.class}: #{e.message}", :bad)
               end
@@ -1676,12 +1764,30 @@ module MB
         # Seconds until a pane on screen has a line due (UI::PaneKeys
         # key_wait: a gesture ending), or nil.
         def pane_wait
-          @tiler.layout.panes.filter_map { |n| (p = @panes[n]).respond_to?(:key_wait) ? p.key_wait(@states[n]) : nil }.min
+          # (no Arrays: the input thread asks before every read)
+          best = nil
+          layout_panes.each do |n|
+            p = @panes[n]
+            next unless p.respond_to?(:key_wait)
+            w = p.key_wait(@states[n])
+            best = w if w && (best.nil? || w < best)
+          end
+          best
+        end
+
+        # The layout's pane names, kept per layout (the input thread asks
+        # several times a key; Layout#panes walks the tree into new Arrays).
+        def layout_panes
+          l = @tiler.layout
+          k = @layout_panes
+          return k[1] if k && k[0].equal?(l)
+          @layout_panes = [l, l.panes.freeze].freeze
+          @layout_panes[1]
         end
 
         # Runs the lines panes on screen have due (key_tick).
         def tick_panes
-          @tiler.layout.panes.each do |n|
+          layout_panes.each do |n|
             p = @panes[n]
             next unless p.respond_to?(:key_tick) && p.respond_to?(:key_wait) && p.key_wait(@states[n])
             r = p.key_tick(@states[n])
@@ -1880,7 +1986,7 @@ module MB
           names =
             if l.text[0, l.cursor - word.length].end_with?(':')
               # A Symbol: pane names (the catalog) and layouts (`show :sc` Tab)
-              UI.pane_catalog.names.map(&:to_s) + UI.layout_table.map { |r| r[0].to_s }
+              UI.pane_catalog.names.map(&:to_s) + UI::PANE_ALIASES.keys.map(&:to_s) + UI.layout_table.map { |r| r[0].to_s }
             else
               (COMMANDS + palette_binding.receiver.public_methods(false) + palette_binding.local_variables).map(&:to_s).uniq
             end
@@ -1905,7 +2011,7 @@ module MB
               tile { |t| t.focus!(name) } if name
             end
           when MB::Term::Input::Focus
-            @full = true if e.in
+            @full = @clear = true if e.in
             # Key releases go to the focused window: notes off on the way out
             @keyboard.all_off(mono_now) unless e.in
           end
@@ -1940,8 +2046,15 @@ module MB
           io = @term.input
           now = @clock.call
           mono = mono_now
-          waits = [@decoder.pending? ? @decoder.esc_timeout : nil, @router.wait(mono), @keyboard.wait(mono), @input_lock.synchronize { pane_wait }, timeout].compact
-          wait = waits.min
+          # (the soonest of the waits, without an Array a read)
+          wait = @decoder.pending? ? @decoder.esc_timeout : nil
+          w = @router.wait(mono)
+          wait = w if w && (wait.nil? || w < wait)
+          w = @keyboard.wait(mono)
+          wait = w if w && (wait.nil? || w < wait)
+          w = @input_lock.synchronize { pane_wait }
+          wait = w if w && (wait.nil? || w < wait)
+          wait = timeout if timeout && (wait.nil? || timeout < wait)
           wait = 0.25 if wait.nil? && !timeout.nil?
           ready = wait_input(io, wait.nil? ? 0.5 : wait)
           return now if @stopping
@@ -1950,6 +2063,12 @@ module MB
               data = io.read_nonblock(4096, exception: false)
               return if data == :wait_readable
               raise IOError, 'terminal closed' if data.nil?
+              if (pf = @pacer.perf)
+                # (ui.perf's queries: their answers parse as Replies, set
+                # before the bytes are decoded)
+                @decoder.expect_cpr = pf.expect_cpr?
+                @decoder.expect_dcs = pf.expect_dcs?(@clock.call)
+              end
               @decoder.feed(data)
             elsif @decoder.pending?
               @decoder.flush
@@ -1957,11 +2076,55 @@ module MB
               []
             end
           @input_lock.synchronize { @router.tick(Process.clock_gettime(Process::CLOCK_MONOTONIC)) }
-          events.each { |e| handle(e) }
+          # (Tiles.echo_wake: armed before the keys reach the pty, so an echo
+          # that comes back before this thread runs again still wakes the
+          # painter)
+          @echo_key_at = @clock.call if Tiles.echo_wake && @router.state == :repl && events.any? { |e| e.is_a?(MB::Term::Input::Key) }
+          if (perf = @pacer.perf)
+            # (ui.perf: replies to its queries are taken out here, never
+            # reaching the Router, Pry, or NAV; keys are timed to the frame
+            # that shows them)
+            arrival = @clock.call
+            events.each do |e|
+              next if e.is_a?(MB::Term::Input::Reply) && perf.reply(e, arrival)
+              repl = e.is_a?(MB::Term::Input::Key) && @router.state == :repl
+              handle(e)
+              perf.key(arrival, @clock.call, repl, typed: true) if e.is_a?(MB::Term::Input::Key) && !e.release?
+            end
+            @decoder.expect_cpr = false
+            @decoder.expect_dcs = false
+          else
+            events.each { |e| handle(e) }
+          end
           @input_lock.synchronize { tick_panes } # (gestures whose keys stopped: their lines)
           (@painter&.wakeup rescue nil) if @keyboard.tick(mono_now)
           (@painter&.wakeup rescue nil) unless events.empty?
           now
+        end
+
+        class << self
+          # ui-perf-1 (an option, off by default): the REPL's output wakes
+          # the painter once after each key typed into it.  A key wakes the
+          # painter at once, but Pry's echo comes back through the pty about
+          # 0.6 ms later and misses that frame, so typing showed on the next
+          # deadline (key to visible ~9 ms at 60/s).  One wake per key, within
+          # ECHO_WINDOW of it: a flood of console output wakes nothing more.
+          # MB_SOUND_UI_ECHO_WAKE=1 turns it on at start (for screens started
+          # after).
+          attr_accessor :echo_wake
+        end
+        self.echo_wake = ENV['MB_SOUND_UI_ECHO_WAKE'] == '1' || ENV['MB_SOUND_UI_SMOOTH'] == '1'
+
+        # Seconds after a REPL key its echo may wake the painter.
+        ECHO_WINDOW = 0.1
+
+        # The pty reader, after REPL output reached the VT (Tiles.echo_wake):
+        # wakes the painter if this is the first output since a key.
+        def echo_output
+          k = @echo_key_at or return
+          @echo_key_at = nil
+          return if @clock.call - k > ECHO_WINDOW
+          @painter&.wakeup rescue nil
         end
 
         def handle(e)
@@ -2055,6 +2218,7 @@ module MB
           if @grid.nil? || @grid.width != @cols || @grid.height != @rows
             @grid = klass.new(@cols, @rows)
             @shown = klass.new(@cols, @rows)
+            @clear = true # (a new size: the terminal's cells aren't the new @shown)
           end
           names = @placed.map(&:name).compact
           @feed.needs = names.flat_map { |n| @panes[n]&.needs || [] }.uniq
@@ -2162,15 +2326,33 @@ module MB
           # for, instead of being cleared when the frame ends
           full = @full
           @full = false
+          # ui-perf-1: a full repaint (a focus move, a mode change, a pane
+          # key, a relayout) redraws every pane into a cleared grid, but
+          # only a cleared terminal (start, a new size, Ctrl-L, focus in,
+          # #invalidate) is sent every cell; otherwise the frame is the
+          # cells that differ from what the terminal shows.  (Every pane key
+          # on the sound screen sent the whole screen: 13 KB a step.)
+          clear = full && @clear
+          @clear = false if full
           if full
             @grid.clear
             Chrome.paint(@grid, @chrome, glyphs: @glyphs, nav: %i[nav once].include?(@router.mode))
           end
 
           drawn = 0
-          items = @placed.filter_map do |p|
-            next if p.tabs || p.name == :repl || !@panes[p.name]
-            [p.name, p.name, @panes[p.name], p.opts[:rate], @drawn_at[p.name]]
+          repl_drawn = false
+          # (one reused row per pane, refilled each frame: no per-frame
+          # Arrays; ui-perf-1)
+          items = @draw_items
+          items.clear
+          @placed.each do |p|
+            next if p.tabs || p.name == :repl || !(pane = @panes[p.name])
+            row = (@draw_rows[p.name] ||= Array.new(5))
+            row[0] = row[1] = p.name
+            row[2] = pane
+            row[3] = p.opts[:rate]
+            row[4] = @drawn_at[p.name]
+            items << row
           end
           draw = panes_to_draw(items, now, full, snap)
           @placed.each do |p|
@@ -2179,7 +2361,10 @@ module MB
               next
             end
             if p.name == :repl
-              drawn += 1 if draw_repl(p, full)
+              if draw_repl(p, full)
+                drawn += 1
+                repl_drawn = true
+              end
               next
             end
             pane = @panes[p.name]
@@ -2218,20 +2403,31 @@ module MB
           note_long_output
           draw_status(now, snap)
 
-          cells = @grid.frame(full ? nil : @shown, @mode, row: 1, col: 1, sync: false)
-          cells = '' if cells == "\e[0m" || cells.empty?
+          cells = @grid.frame(clear ? nil : @shown, @mode, row: 1, col: 1, sync: false)
+          cells = -'' if cells == -"\e[0m" || cells.empty?
           @shown.copy_from(@grid)
           cursor = cursor_bytes
           out = nil
-          if !cells.empty? || cursor != @last_cursor || full
-            out = "\e[?2026h\e[?25l#{full ? "\e[0m\e[H\e[2J" : ''}#{cells}#{cursor}\e[?2026l"
+          perf = @pacer.perf
+          if !cells.empty? || cursor != @last_cursor || clear
+            # (ui.perf: a terminal query after some frames; its answer times the terminal's parse)
+            ack = perf&.ack_query(now)
+            out = "\e[?2026h\e[?25l#{clear ? "\e[0m\e[H\e[2J" : ''}#{cells}#{cursor}\e[?2026l#{ack}"
+            perf&.painted(drawn, repl_drawn, clear, out.bytesize)
             write(out)
             note_written(now, out.bytesize)
             @last_cursor = cursor
+          else
+            perf&.painted(drawn, repl_drawn, clear, 0)
           end
           cpu = thread_cpu - cpu0
-          @frames << [cpu, out&.bytesize || 0, drawn]
-          @frames.shift if @frames.length > STATS
+          # (the oldest row refilled once the window is full: no Array
+          # per frame)
+          row = @frames.length >= STATS ? @frames.shift : Array.new(3)
+          row[0] = cpu
+          row[1] = out&.bytesize || 0
+          row[2] = drawn
+          @frames << row
           note_slow(now, cpu)
           out
         end
@@ -2343,7 +2539,7 @@ module MB
             @grid.put_run(x0 + box_w - 1, y0 + dy, rule[2], border, nil, 0)
           end
           title = ' keys (Esc closes; a key listed here closes and acts) '
-          c.text([(box_w - title.length) / 2, 1].max, 0, c.fit(title, box_w - 2), :title)
+          c.text_fit([(box_w - title.length) / 2, 1].max, 0, title, box_w - 2, :title)
           x = 2
           columns.each_with_index do |column, i|
             y = 2
@@ -2351,7 +2547,7 @@ module MB
               lines.each do |a, b|
                 break if y >= box_h - 1
                 if b.nil?
-                  c.text(x, y, c.fit(a, box_w - x - 2), :title)
+                  c.text_fit(x, y, a, box_w - x - 2, :title)
                 else
                   c.line(y, [a, :key], '  ', [c.fit(b, [box_w - x - a.length - 4, 0].max), :dim], x: x)
                 end
@@ -2366,7 +2562,9 @@ module MB
 
         def draw_status(now, snap)
           y = @rows - 1
-          c = Canvas.new(@grid, 0, y, @cols, 1, glyphs: @glyphs)
+          # (one canvas while the size and glyphs stay; ui-perf-1)
+          c = @status_canvas
+          c = @status_canvas = Canvas.new(@grid, 0, y, @cols, 1, glyphs: @glyphs) unless c && c.grid.equal?(@grid) && c.y == y && c.w == @cols && c.glyph_set == @glyphs
           c.clear
           mode = @router.mode
           if mode == :line
@@ -2385,11 +2583,11 @@ module MB
           end
           @line_cursor = nil
           step = mode == :grab && @keyboard.entry == :step
-          badge = mode == :once || (mode == :overlay && @router.once_return) ? ' ^W ' : %i[nav overlay].include?(mode) ? ' NAV ' : mode == :grab ? (step ? ' STEP ' : ' KEYS ') : mode == :pane ? " #{@tiler.focus.to_s.upcase} " : @host ? ' REPL ' : ' PLAY '
+          badge = mode == :once || (mode == :overlay && @router.once_return) ? -' ^W ' : %i[nav overlay].include?(mode) ? -' NAV ' : mode == :grab ? (step ? -' STEP ' : -' KEYS ') : mode == :pane ? pane_badge : @host ? -' REPL ' : -' PLAY '
           role = %i[nav overlay once].include?(mode) ? :armed : mode == :grab ? (step ? :queued : :rec) : mode == :pane ? :queued : :key
           @grid.put_run(0, y, badge, MB::Term::Cells.pack(Theme.rgb(role)), nil, MB::Term::Cells::REVERSE | MB::Term::Cells::BOLD)
           x = badge.length + 1
-          right = snap ? "#{snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} " : ''
+          right = status_right(snap, c)
           right = "#{frame_rate[:text]}  #{right}" if @show_fps
           unread = UI.messages.unread
           if unread > 0 && !@tiler.layout.panes.include?(:messages)
@@ -2399,21 +2597,70 @@ module MB
           end
           flash = @flash && now < @flash[2] ? @flash : nil
           @flash = nil if @flash && !flash
-          x = c.line(0, [@tiler.focus.to_s, :name], (@tiler.layout.zoom ? [' (zoomed)', :warn] : ' '), x: x)
+          f = @tiler.focus
+          x = c.text(x, 0, f.is_a?(Symbol) ? f.name : f.to_s, :name)
+          x = @tiler.layout.zoom ? c.text(x, 0, -' (zoomed)', :warn) : c.text(x, 0, -' ')
           room = @cols - x - right.length - 1
           if flash
-            c.text(x + 1, 0, c.fit(flash[0], room), flash[1])
+            c.text_fit(x + 1, 0, flash[0], room, flash[1])
           else
             hint =
               if @router.state == :pending then "#{MB::Term::Input::Keymap.chord_name(@router.prefix.key.chord)} ..."
-              elsif mode == :play then @status_note || @hints || ''
-              elsif mode == :pane then "#{enter_hint}Esc nav  ? keys  #{(m = @panes[@tiler.focus]&.mode_keymap) ? Keys.hints(m) : ''}"
+              elsif mode == :play then @status_note || @hints || -''
+              elsif mode == :pane then pane_hint
               else HINTS[step ? :step : mode] || ''
               end
-            c.text(x + 1, 0, c.fit(hint, room), @status_note && mode == :play ? :key : :dim)
+            c.text_fit(x + 1, 0, hint, room, @status_note && mode == :play ? :key : :dim)
           end
           c.text(@cols - right.length, 0, right, :key) unless right.empty?
           c.text(warn_at, 0, badge_w, :warn) if warn_at
+        end
+
+        # The status line's right-hand text: play state and bar:beat ("▶
+        # 17:3 "), or "" without a snapshot, kept while they stay.
+        def status_right(snap, c)
+          return -'' unless snap
+          beat = snap.beat.floor
+          k = @status_right_key ||= [nil, nil, nil, nil, nil]
+          unless k[0] == snap.playing && k[1] == snap.bar && k[2] == beat && k[3] == @glyphs && k[4] == snap.paused
+            k[0] = snap.playing
+            k[1] = snap.bar
+            k[2] = beat
+            k[3] = @glyphs
+            k[4] = snap.paused
+            # (paused: the bar stands while effects ring out, a pause sign)
+            @status_right = "#{snap.paused ? c.glyph(:sep) * 2 : snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} ".freeze
+          end
+          @status_right
+        end
+
+        # The status line's badge in a pane's mode (" INSPECTOR "), kept
+        # while the focus stays.
+        def pane_badge
+          f = @tiler.focus
+          k = @pane_badge
+          return k[1] if k && k[0].equal?(f)
+          @pane_badge = [f, " #{f.to_s.upcase} ".freeze]
+          @pane_badge[1]
+        end
+
+        # The status line's hint in a pane's mode ("Enter: ...  Esc nav  ?
+        # keys  ..."), kept while the pane, its Enter hint, and its keys'
+        # hints stay (ui-perf-2 round 3: three Strings a frame).
+        def pane_hint
+          p = @panes[@tiler.focus]
+          h = p.respond_to?(:enter_hint) ? p.enter_hint(@states[@tiler.focus]) : nil
+          m = p&.mode_keymap
+          keys = m ? Keys.hints(m) : nil
+          k = (@pane_hint ||= [nil, nil, nil, nil, nil])
+          unless k[4] && k[0].equal?(p) && k[1] == h && k[2].equal?(keys) && k[3] == h.nil?
+            k[0] = p
+            k[1] = h
+            k[2] = keys
+            k[3] = h.nil?
+            k[4] = "#{h ? "Enter: #{h}  " : ''}Esc nav  ? keys  #{keys || ''}".freeze
+          end
+          k[4]
         end
 
         # "Enter: <what it does>  " for the focused pane in its mode, when
@@ -2432,7 +2679,7 @@ module MB
             return "\e[#{@line_cursor[0] + 1};#{@line_cursor[1] + 1}H\e[?25h"
           end
           r = repl_rect
-          return '' unless r && @host && @router.mode == :repl && @scroll == 0
+          return -'' unless r && @host && @router.mode == :repl && @scroll == 0
           vt = @host.vt
           row, col, visible = @host.synchronize { [vt.row, vt.col, vt.cursor_visible?] }
           return '' unless visible && row < r.h && col < r.w
@@ -2467,7 +2714,7 @@ module MB
         # MIDI notes and controllers for `ui.on` bindings, from the
         # Session's MIDI log (read without the render lock).
         def poll_midi
-          return if @router.midi_map.empty?
+          return unless @router.midi_bound?
           s = @attached or return
           n = s.midi_log_length
           @midi_seen = n if @midi_seen.nil? || @midi_seen > n

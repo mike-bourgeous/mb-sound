@@ -109,6 +109,50 @@ RSpec.describe(MB::Sound::Take) do
     end
   end
 
+  # pause-tails-1: the timeline stands still while paused, so lines typed
+  # during a pause record their frames into it (held:) and replays run them
+  # there; the tails rendered meanwhile replay too
+  it 'replays a pause, the lines typed during it, and the resume, bit for bit at other buffer sizes' do
+    lines = {
+      0 => [
+        'track(:bass, q: 1, fx: ->(sig) { sig.delay(0.1, feedback: 0.5) }) { |c| c.number * c.amp_env(0, 0, 1, 0.05) * 0.01 }',
+        'track :pad, 0.05.constant',
+        'scene :verse, pad: :on, bass: seq(C3, E3, G3, B3).n8.loop',
+        'go :verse, at: :now',
+      ],
+      100 => ['pause'],
+      110 => ['mute :bass'], # (audible: it cuts the delay's tail)
+      121 => ['unmute :bass'],
+      190 => ['start'],
+    }
+    b = MB::Sound::Take.console_binding
+    out = []
+    MB::Sound.seed(5)
+    t = MB::Sound::Take.new(session: session)
+    300.times do |i|
+      lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, b) } }
+      out << session.process_buffer[0].dup
+    end
+    live = SpecBuffers.join(out)
+    expect(t.lines.map(&:held)).to eq([nil, nil, nil, nil, nil, 10 * 800, 21 * 800, 90 * 800])
+    # the delay rang on into the pause (the bass's notes released at its start)
+    expect(live[(100 * 800 + 4800)...(100 * 800 + 8000)].abs.max).to be > 0
+    expect(live[(121 * 800 + 2000)...(121 * 800 + 4000)].abs.max).to be > 0 # (unmuted: the tail again)
+    expect(t.to_ruby).to include(', held: 8000')
+
+    path = tmp_path('take.rb')
+    expect { t.save(path) }.to output(/Saved the take to/).to_stdout
+    load path
+    r = MB::Sound::Take::Replay.last
+    [[800], [367, 368]].each do |sizes|
+      MB::Sound.seed(5)
+      data = replay(r, sizes)
+      expect(data.length).to be >= live.length
+      diff = (data[0...live.length] - live).abs.max
+      expect(diff).to eq(0), "max difference #{diff} at buffer sizes #{sizes}"
+    end
+  end
+
   it 'replays played MIDI, controller moves, learn, monitors, and recorded and captured clips bit for bit' do
     ev = MB::Sound::MIDI::Event
     played = [[60, 2.1r, 2.35r], [64, 2.6r, 2.9r], [67, 3.3r, 4.5r], [72, 3.99r, 4.2r], [48, 4.25r, 4.5r], [55, 5r, 5.8r]]
@@ -646,6 +690,16 @@ RSpec.describe(MB::Sound::Take) do
     end
     expect(t.lines.map(&:skipped)).to eq([true, true, true, false])
     expect(t.to_ruby).to include('# skipped (foreground): ui :keys').and include('# skipped (foreground): ui.keys')
+  end
+
+  it 'leaves out blank lines (Enter on nothing; ux-friction-1)' do
+    t = MB::Sound::Take.new(session: session)
+    ['x = 1', '', "  \n", 'y = 2'].each do |code|
+      t.begin_line(code)
+      t.end_line
+    end
+    expect(t.lines.map(&:code)).to eq(['x = 1', 'y = 2'])
+    expect(t.recent_lines.map(&:last)).to eq(['x = 1', 'y = 2'])
   end
 
   it 'saves to the user data directory by default, or a set home' do

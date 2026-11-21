@@ -12,6 +12,118 @@ module MB
         # Seconds of written frames #fps counts.
         WINDOW = 2.0
 
+        class << self
+          # ui-perf-1 (an option, off by default): the painter times its
+          # frames to the render thread's snapshots (UI::Pacer#timing,
+          # SnapshotTiming), for screens made after it is set.
+          # MB_SOUND_UI_SNAPSHOT_TIMED=1 turns it on at start.
+          attr_accessor :snapshot_timed
+        end
+        self.snapshot_timed = ENV['MB_SOUND_UI_SNAPSHOT_TIMED'] == '1' || ENV['MB_SOUND_UI_SMOOTH'] == '1'
+
+        # The painter's pacing (konsole-pacing, 2026-11-21; `ui.pace`):
+        # :exact (the default) writes frames on the target's deadlines;
+        # :terminal also keeps frame writes at least the detected terminal's
+        # TerminalProfile#min_gap apart (Konsole before 26.04: 12 ms), so
+        # every frame written is shown (Pacer#min_gap).
+        # MB_SOUND_UI_PACE=terminal sets :terminal at start.
+        PACES = %i[exact terminal].freeze
+
+        class << self
+          # :exact or :terminal (see PACES), for every screen.
+          attr_reader :pace
+
+          def pace=(mode)
+            raise ArgumentError, "pace is one of #{PACES.map(&:inspect).join(', ')} (got #{mode.inspect})" unless PACES.include?(mode)
+            @pace = mode
+          end
+
+          # True once the "this terminal can't show that rate" notice has
+          # printed (once a process).
+          attr_accessor :pace_noticed
+        end
+        self.pace = ENV['MB_SOUND_UI_PACE'] == 'terminal' ? :terminal : :exact
+        self.pace_noticed = false
+
+        # When the newest snapshot's data becomes visible, for
+        # Pacer#timing, read on the painter thread from the Feed's newest
+        # snapshot alone (the render thread does nothing more): snapshots
+        # are published at the end of each buffer (with Feed.every_buffer;
+        # else every other one), so the next comes about a buffer after
+        # the newest, and with an output latency they become visible
+        # (Follow#heard) that much later; the times of the last snapshots
+        # seen are kept, so a heard time is exact rather than predicted.
+        # Buffers shorter than MIN_SHARE of a frame period time nothing:
+        # every frame on the grid has a new snapshot then.  Allocates
+        # nothing.
+        class SnapshotTiming
+          MIN_SHARE = 0.5
+
+          # Snapshot times kept (for heard times under output latency).
+          KEEP = 8
+
+          # Seconds without a snapshot after which frames keep the grid (a
+          # paused or stopped render thread).
+          STALE = 0.1
+
+          # +feed+ a Proc returning the screen's Feed; +pacer+ its Pacer.
+          def initialize(feed, pacer)
+            @feed = feed
+            @pacer = pacer
+            @seq = nil
+            @times = Array.new(KEEP, -Float::INFINITY)
+            @pos = 0
+            @last_seq = nil
+            @exact = false
+          end
+
+          # At each frame's start: notes the newest snapshot.
+          def mark
+            s = @feed.call&.latest
+            @seq = s&.seq
+            note(s)
+          end
+
+          # The time at or after +time+ when new data becomes visible, or
+          # nil (no snapshots, stale ones, or short buffers).
+          def next_after(time)
+            s = @feed.call&.latest or return nil
+            note(s)
+            buf = s.buffer_size.to_f / s.sample_rate
+            return nil if buf < MIN_SHARE * @pacer.period || time - s.time > STALE + buf
+            lat = s.latency.to_f
+            # (a kept snapshot heard at or after +time+: exact)
+            best = nil
+            i = 0
+            while i < KEEP
+              h = @times[i] + lat
+              best = h if h >= time && (best.nil? || h < best)
+              i += 1
+            end
+            @exact = !best.nil?
+            return best if best
+            base = s.time + lat
+            base + ((time - base) / buf).ceil * buf
+          end
+
+          # True when the data #next_after named has arrived: a kept
+          # snapshot's heard time, or a snapshot newer than the frame's.
+          def arrived?
+            return true if @exact
+            s = @feed.call&.latest
+            !s.nil? && s.seq != @seq
+          end
+
+          private
+
+          def note(s)
+            return if s.nil? || s.seq == @last_seq
+            @last_seq = s.seq
+            @times[@pos] = s.time
+            @pos = (@pos + 1) % KEEP
+          end
+        end
+
         # Frames per second the painter ran lately: its refreshes over the
         # last WINDOW seconds, the first number of the status line's
         # readout (NAV f, "60/60 Hz"; ui-api-1: `ui.fps` counted written
@@ -41,6 +153,40 @@ module MB
           @target_fps = rate
           @pacer.fps = rate
           @rates.fps = rate
+          pace_notice
+        end
+
+        # The terminal's TerminalProfile (when it shows what is written),
+        # detected from the environment (KONSOLE_VERSION) unless set; nil
+        # when unknown.
+        def terminal_profile
+          return @terminal_profile if defined?(@terminal_profile)
+          @terminal_profile = TerminalProfile.detect
+        end
+
+        # Sets the profile (a TerminalProfile or nil; the bench's model
+        # terminal), and applies the pacing again.
+        def terminal_profile=(profile)
+          @terminal_profile = profile
+          apply_timing
+        end
+
+        # The pacing in use (FrameRate.pace).
+        def pace = FrameRate.pace
+
+        # Once a process: a line when the target writes frames closer
+        # together than the terminal shows them (Konsole before 26.04 shows
+        # frames under 10 ms apart at about 25 a second) and the pacing is
+        # :exact.  Returns the line printed, or nil.
+        def pace_notice(out = $stdout)
+          pr = terminal_profile
+          return nil if FrameRate.pace_noticed || FrameRate.pace == :terminal || pr.nil? || !pr.collapses?(1.0 / @target_fps)
+          FrameRate.pace_noticed = true
+          best = pr.max_shown_fps.floor
+          line = "#{pr.name} shows a frame only #{(pr.short * 1000).round} ms after output stops, so at #{@target_fps.round} fps it shows about " \
+                 "#{pr.collapsed_fps.round} a second: ui.target_fps = 60 (or up to #{best}), or ui.pace :terminal (frames spaced for it)"
+          out.puts "\e[33m#{line}\e[0m"
+          line
         end
 
         # The painter's pacing (UI::Pacer): deadlines, and each frame's
@@ -79,7 +225,42 @@ module MB
           { fps: f, cpu_ms: cpu, kb_per_s: kbs.round(1), pacing: pace, rates: @rates.to_h, live_panes: slow && { name: slow[0], fps: slow[1] }, text: text }
         end
 
+        # The UI::Perf recording this screen's frames (`ui.perf`), or nil.
+        def perf = @pacer.perf
+
+        # Starts recording frames into a new UI::Perf (replacing one that
+        # runs); options as for Perf.new (+ack:+ defaults to the screen's
+        # #perf_ack).  Returns it.
+        def start_perf(**opts)
+          stop_perf
+          p = Perf.new(clock: @clock, ack: perf_ack, target: @target_fps, **opts)
+          p.count_data(feed) if respond_to?(:feed) && feed.respond_to?(:published)
+          perf_identify(p)
+          @pacer.perf = p
+          @rates.perf = p
+          p
+        end
+
+        # Stops recording; returns the UI::Perf (kept for its report), or
+        # nil.
+        def stop_perf
+          p = @pacer.perf
+          @pacer.perf = nil
+          @rates.perf = nil
+          p&.stop
+        end
+
         private
+
+        # The terminal query kind ui.perf uses on this screen (nil: none,
+        # the band's input is Reline's).
+        def perf_ack = nil
+
+        # Fills in the terminal's identity (screens with a terminal of
+        # their own also ask it).
+        def perf_identify(p)
+          p.identify(size: [@rows, @cols])
+        end
 
         # [name, measured redraws/s] of the slowest visible pane that wants
         # the painter's rate (meters and live panes, UI::PaneRates), or nil
@@ -99,7 +280,28 @@ module MB
           @rates = PaneRates.new(target, clock: @clock)
           @render_load = nil
           @pacer.on_frame = ->(f) { @rates.observe(f.paint + f.write, @render_load, f.at) }
+          apply_timing
         end
+
+        public
+
+        # Times frames to snapshots or not, as FrameRate.snapshot_timed says
+        # now (at start, and from `ui.smooth` while the screen runs).
+        def apply_timing
+          @pacer.min_gap = FrameRate.pace == :terminal ? terminal_profile&.min_gap : nil
+          if FrameRate.snapshot_timed
+            @pacer.timing ||= SnapshotTiming.new(-> { @feed }, @pacer)
+            # (timed frames come up to the window early: panes at the
+            # painter's rate stay due on each of them)
+            @rates.slack = Pacer::TIMING_WINDOW
+          else
+            @pacer.timing = nil
+            @rates.slack = 0.0
+          end
+          nil
+        end
+
+        private
 
         # Which of the panes due this frame draw (UI::PaneRates): +items+
         # are [key, name, pane, explicit rate or nil, drawn_at]; all of
@@ -108,13 +310,29 @@ module MB
         def panes_to_draw(items, now, full, snap)
           @render_load = snap&.load
           @rates.begin_frame(now)
-          cands = items.filter_map do |key, name, pane, explicit, drawn_at|
+          # (reused Arrays, no per-pane candidate Arrays: the painter's
+          # steady state allocates nothing here; ui-perf-1.  The keys come
+          # back in no particular order: callers ask include?)
+          out = (@draw_keys ||= [])
+          keys = (@cand_keys ||= [])
+          lates = (@cand_lates ||= [])
+          out.clear
+          keys.clear
+          lates.clear
+          items.each do |key, name, pane, explicit, drawn_at|
             pr = PaneRates.priority_of(name, pane)
-            next [key, pr, Float::INFINITY] if full || drawn_at.nil?
-            next unless @rates.due?(pr, pane.rate, explicit, drawn_at, now)
-            [key, pr, (now - drawn_at) * @rates.rate(pr, pane.rate, explicit)]
+            if full || (pr == :meter && (drawn_at.nil? || @rates.due?(pr, pane.rate, explicit, drawn_at, now)))
+              out << key
+            elsif drawn_at.nil?
+              keys << key
+              lates << Float::INFINITY
+            elsif pr != :meter && @rates.due?(pr, pane.rate, explicit, drawn_at, now)
+              keys << key
+              lates << (now - drawn_at) * @rates.rate(pr, pane.rate, explicit)
+            end
           end
-          full ? cands.map(&:first) : @rates.pick(cands)
+          @rates.pick_into(out, keys, lates)
+          out
         end
 
         # A pane's rate for NAV f's badges: measured redraws per second
@@ -129,7 +347,11 @@ module MB
         def paced_loop(stop)
           Thread.current.name = 'MB::Sound::UI'
           Thread.current.priority = -1
+          # (a live thread: code it calls takes cached data rather than
+          # reading files, e.g. Library::Index#document_entries)
+          Thread.current[:mb_sound_live] = true
           @pacer.run(stop) do |now|
+            yield_to_render
             refresh(now)
           rescue => e
             warn "UI painter: #{e.class}: #{e.message}" unless @painter_warned
@@ -138,14 +360,52 @@ module MB
           end
         rescue => e
           warn "UI painter stopped: #{e.class}: #{e.message}"
+        ensure
+          stop_yielding
+        end
+
+        # The painter (and, on the tiled screen, its input thread) hand the
+        # GVL to the followed Session's render thread whenever that wakes
+        # (UI::Yielding, Yielding.painter; ui-perf-2): a pane draw otherwise
+        # kept the render thread waiting up to Ruby's 10 ms timeslice.
+        # Joins when the render thread is first known or changes (a new
+        # Session), on the painter thread before each frame: two ivar reads
+        # and a comparison when nothing changed, no allocation.
+        def yield_to_render
+          return unless Yielding.painter
+          t = @attached&.render_thread
+          t = nil unless t&.alive?
+          return if t.equal?(@yield_render)
+          @yield_render = t
+          input = Yielding.input && defined?(@reader) ? @reader : nil
+          if t
+            Yielding.join(Thread.current, render: t)
+            Yielding.join(input, render: t) if input
+          else
+            stop_yielding
+          end
+        end
+
+        # The painter and input threads stop yielding (the painter's loop
+        # ended, or no render thread to follow).
+        def stop_yielding
+          @yield_render = nil
+          Yielding.leave(Thread.current)
+          Yielding.leave(@reader) if defined?(@reader) && @reader
         end
 
         # Times a terminal write for the Pacer's breakdown.
+        # (with `ui.pace :terminal` the write first waits out the
+        # terminal's least gap since the last one: Pacer#hold_before_write)
         def timed_write
+          @pacer.hold_before_write
           t = @clock.call
           yield
         ensure
-          @pacer.note_write(@clock.call - t)
+          t1 = @clock.call
+          @pacer.note_write(t1 - t)
+          @pacer.wrote_at(t1)
+          @pacer.perf&.wrote(t, t1)
         end
 
         # Notes a frame of +bytes+ written at +now+.

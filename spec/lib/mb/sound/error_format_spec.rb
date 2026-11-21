@@ -57,6 +57,62 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect(described_class.summary(e)).not_to include('pitch first')
     end
 
+    it "points the maintainer's echo and effect-chaining guesses at what exists (ux-friction-1)" do
+      e = (1.constant.echo rescue $!)
+      expect(described_class.summary(e)).to include('did you mean delay(0.375, feedback: 0.4) (an echo; also tape_echo, ping_pong')
+      cab = MB::Sound::Library.index.lookup(:rotary, :cabinet)
+      asym = MB::Sound::Library.index.lookup(:shape_db, :asymmetric)
+      %i[| & + >>].each do |op|
+        e = (cab.public_send(op, asym) rescue $!)
+        expect(described_class.summary(e)).to include("did you mean fx :track, [#{cab.head_path}, #{asym.head_path}] (a list chains effects in order)"), op.inspect
+      end
+      expect { cab.then(asym) }.to raise_error(ArgumentError, /then takes a block, not an argument: fx :track, \[/)
+      expect { cab.call(asym) }.to raise_error(ArgumentError, /call takes a signal, not #{Regexp.escape(asym.head_path)}: fx :track, \[/)
+      expect(cab.then { |x| x.name }).to eq(:cabinet)
+    end
+
+    it "points the maintainer's LFO, scale, and note guesses at what exists (ux-friction-1 round 2)" do
+      lfo = 2.bars.lfo.ramp
+      expect(described_class.summary((lfo.exp rescue $!))).to include('did you mean at(D3.number..B6.number).freq (an LFO swept in notes')
+      expect(described_class.summary((lfo.at(150..2000).unipolar rescue $!))).to include('did you mean at(150..2000) (it maps the whole -1..1 swing')
+      s = described_class.summary((0.2.hz.lfo.freerun rescue $!))
+      expect(s).to include('did you mean freewheel (a bar-synced LFO running free of the timeline')
+      expect(s).not_to match(/did you mean free\?/)
+      expect(described_class.summary((MB::Sound.scale.phrygian rescue $!))).to include('did you mean scale(:phrygian) (a mode by name')
+      expect(described_class.summary((MB::Sound::A2.minor rescue $!))).to include('did you mean scale(:minor, A2) (the mode first, then the root)')
+      expect(described_class.summary((1.beat.ramp rescue $!))).to include('did you mean 1.beat.lfo.ramp (the shape comes after .lfo')
+      expect(described_class.summary((MB::Sound::A2.nonsense_name rescue $!))).not_to include('scale(')
+    end
+
+    it 'prints a constant typed at the prompt as one line, not a backtrace (ux-friction-1 round 2: III)' do
+      e = (MB::Sound.module_eval('III') rescue $!)
+      expect(e).to be_a(NameError)
+      expect(described_class.short?(e)).to eq(true)
+      expect(described_class.console(e, color: false)).to start_with('NameError: uninitialized constant MB::Sound::III')
+    end
+
+    it "prints a typo on the ui facade as one line, and points ui.warn at the messages pane (ux-friction-1 round 2)" do
+      e = (MB::Sound::UI.facade.frobnicate rescue $!)
+      expect(described_class.short?(e)).to eq(true)
+      expect(described_class.console(e, color: false)).to start_with("NoMethodError: undefined method 'frobnicate'")
+      e = (MB::Sound::UI.facade.warn rescue $!)
+      expect(described_class.console(e, color: false)).to include('did you mean ui.messages (the messages pane, NAV m')
+    end
+
+    it "answers the maintainer's unison and motifs guesses of his third take (ux-friction-1 round 2)" do
+      sum = ->(&f) { described_class.summary((f.call rescue $!)) }
+      expect(sum.() { 110.hz.unison(5, pan: 0..1) }).to eq('ArgumentError: unison: unknown keyword: :pan (did you mean spread:?)')
+      expect(sum.() { 110.hz.unison(5, spread: 0..1) }).to include('(got 0..1); 1 is the widest, and an LFO moves it: spread: 4.bars.lfo.at(0..1)')
+      expect(sum.() { 3.bar.lfo.at(5.cents..60.cents) }).to include('in semitones that is .at(0.05..0.6), as a detune node takes (1.cents is 0.01)')
+      expect(sum.() { 3.bar.lfo.at(5..60) * 1.cents }).to include('an Interval is a pitch step, not a gain: multiply by its semitones')
+      expect(sum.() { MB::Sound.motifs(MB::Sound.scale, length: 1.n8) }).to eq('ArgumentError: motifs: unknown keyword: :length (did you mean legato:?)')
+      expect(sum.() { MB::Sound.motifs(MB::Sound.scale, answer: true) }).to include('like { b: :a } (the default; {} for none) (got true)')
+      expect(sum.() { MB::Sound.scale(:phrygian, :a, range: MB::Sound::A1..MB::Sound::A4) }).to include(
+        'scale takes a mode and a root, no keywords (got range: A1..A4): they belong to the call around it, e.g. motifs(scale(:phrygian, :a), range: A1..A4)'
+      )
+      expect(MB::Sound.motifs(MB::Sound.scale, answer: {})).to be_a(MB::Sound::Sequence::Clip)
+    end
+
     it 'turns Did you mean blocks in messages into a parenthesis' do
       e = ArgumentError.new("no scene :dorp\nDid you mean?  :drop\n                :dorm")
       expect(described_class.summary(e)).to eq('ArgumentError: no scene :dorp (did you mean :drop, :dorm?)')

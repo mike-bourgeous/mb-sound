@@ -522,6 +522,7 @@ module MB
             }
           }
           worker.priority = WARM_PRIORITY
+          MB::Sound::UI::Yielding.join(worker) if defined?(MB::Sound::UI::Yielding) # (a sandbox render: hands the GVL to the render thread; ui-perf-2)
           if background
             background.started!
             Thread.new {

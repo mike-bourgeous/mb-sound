@@ -1101,13 +1101,18 @@ module MB
         perform it with loop!, onward, goto, skip, finish, practice, seek.
         `flow` alone shows it (where it is, what comes next, how to end
         it); `start` (or `play`, `go` with nothing) plays the loaded flow
-        and `pause` (NAV Space) toggles.  `outro in: 4.bars` and `stop
-        :all` end the flow too; `go :scene` during it seeks the flow to
-        the next section playing that scene (else the nearest behind;
+        and `pause` (NAV Space) toggles: the bar stops, sounding notes
+        release, loops and drones fade out and hold their place, and
+        echoes and reverbs ring out; playing on doesn't retrigger notes
+        (`start resync: true` puts tempo-synced LFOs back on the grid).
+        `suspend` is the old freeze (silence, nothing renders).  `outro
+        in: 4.bars` and `stop :all` end the flow too; `go :scene` during
+        it seeks the flow to the next section playing that scene (else the
+        nearest behind;
         `go :drop, section: :drop2` picks one; a scene no section plays
         ends the flow: you're driving).
       TEXT
-      commands :flow, :start, :pause, :play_form, :section, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter
+      commands :flow, :start, :pause, :play_form, :section, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter, :suspend
       note :arrangement
       see :sets, :long_form
       example 'a tiny song form' do
@@ -1971,7 +1976,22 @@ module MB
         it; `ui off` sums them up).  NAV f shows the frame rate and each
         pane's rate beside its number (`ui.fps` is what was drawn,
         `ui.target_fps` the painter's rate; meters and scopes run at it and
-        everything slows in steps when the CPU is busy).
+        everything slows in steps when the CPU is busy).  `ui.perf` records
+        what that number can't see (frame lateness, the worst stall, each
+        pane's update age, key-to-frame time, the terminal's answer time to
+        a query after a frame, the render thread's wake delay):
+        `ui.perf :report`, `:stop`, `:save`; `ui.perf :capture` records a
+        minute of the tiles and the sound screen in your terminal and saves
+        it under tmp/ui-perf/captures/ (`ui.perf :cancel` stops it early).
+        `ui.smooth :on` (off by default; `ui.smooth` says which) makes the
+        scope and meters change on every frame at any buffer size and typing
+        show at once: a snapshot after every buffer, frames timed to them,
+        and the console's echo waking the screen.  A terminal may show
+        fewer frames than are written: Konsole before 26.04 shows a frame
+        only 10 ms after output stops, so above about 95 frames a second it
+        shows about 25 (keep `ui.target_fps` at 60 there; the report's
+        Rates estimate what it showed).  `ui.pace :terminal` (off by
+        default) spaces frames so that each one shows.
 
         `ui.note 'the cutoff turns too slowly'` keeps a note for the next
         UI refinement round with the screen as text, the layout and focused
@@ -2013,15 +2033,21 @@ module MB
         ◆ is queued with its countdown in beats), the clip under its cursor
         (`clip`: a piano roll and the Ruby that made it), racks with their
         knobs, buses with meters.  Focus a pane in NAV (its number, or a
-        for clips, r racks, b buses) and press Enter for its keys: arrows
+        for clips, r racks, o knobs, b buses) and press Enter for its keys: arrows
         move, Enter launches the cell (`launch :bass, 3`), g its scene (`go
         :drop`), x stops the track, + - > < transpose, L legato, S swing, Q
         quantize, D double, H half, R reverse (`tweak :bass, transpose: 1`),
-        u undo; in racks Left/Right turn the picked knob (Shift: fine;
-        a held key is one `turn :x, 0 => 0.3, 1.n8 => 0.5` line when you let
-        go: its fitted keyframes; the take keeps the raw steps).
-        Every key runs one console line, printed in the console: journaled,
-        undoable, in your take.  `ui :mixer` shows buses beside the master.
+        u undo; in racks and the knobs pane Up/Down pick a knob and
+        Left/Right turn it (Shift: fine; 0 its default; Enter types a
+        value; a held key is one `turn :x, 0 => 0.3, 1.n8 => 0.5` line
+        when you let go: its fitted keyframes; the take keeps the raw
+        steps).  In the tracks pane Left/Right set the level a dB a press
+        (held: live, then one `level :bass, -6.0.db` line), Space plays a stopped track again
+        (`resume :bass`) or stops a playing one (NAV Space is the
+        transport), x stops, s solos, m mutes.  Every key runs one console
+        line: journaled, undoable, in your take (knob turns show on the
+        pane's last row, other lines in the console).  `ui :mixer` shows
+        buses beside the master.
       TEXT
       section do |d|
         rows = UI.layout_table.map do |name, kind, desc, size, panes, current|
@@ -2034,7 +2060,7 @@ module MB
       section do |d|
         # (The pane catalog, ui.panes: ux-1 r3 item 40)
         d.heading('Panes  (ui.panes; ui.list: what is on screen; ui.size)')
-        d.rows(UI.pane_catalog.entries.map { |e| [e.name.inspect, "#{e.description} (#{e.open})"] }, max_label: 12, wrap: true)
+        d.rows(UI.pane_catalog.entries.map { |e| [[e.name, *e.aliases].map(&:inspect).join(' '), "#{e.description} (#{e.open})"] }, max_label: 12, wrap: true)
         d.heading('Sizes  (one decision per terminal size: UI::Density)')
         d.rows(UI::Density.table.map { |t| t.split(': ', 2) }, max_label: 20)
       end
@@ -2098,6 +2124,15 @@ module MB
         of the voice (a settled cycle, its spectrum, half a second of
         envelope) after the knobs stop moving.  Small screens get fewer
         panes: the voice, its preview, and the console at 80x24.
+
+        `ui.waves :live` (a prototype, off by default; `ui.waves :off`
+        goes back, `ui.waves` says which) draws the preview every frame
+        from what the playing voice used in its latest buffer, the way a
+        wavetable synth's display moves: an oscillator's cycle with its
+        pulse width and wavetable scan, a filter's response at the cutoff
+        an LFO or envelope moves it to, an LFO's shape with a marker at its
+        phase, an envelope's playhead; an oscillator with no cheap cycle
+        (FM, sync, noise) shows one period of the voice's output.
       TEXT
       commands :design, :ui, :knob, :turn, :learn, :bind
       note :sound_design_ui

@@ -125,7 +125,8 @@ module MB
           raise ArgumentError, "motifs' form is an Array of 1 to 64 letters (Symbols, nil for a silent phrase), like %i[a a b a] (got #{form.inspect})"
         end
         letters = form.compact.uniq
-        raise ArgumentError, "motifs' answer: is a Hash of letter => the letter it answers, like { b: :a } (got #{answer.inspect})" unless answer.is_a?(Hash)
+        # (ux-friction-1 round 2: his `answer: true`; the default answers b with a)
+        raise ArgumentError, "motifs' answer: is a Hash of letter => the letter it answers, like { b: :a } (the default; {} for none) (got #{answer.inspect})" unless answer.is_a?(Hash)
         answer = answer.select { |k, _| letters.include?(k) }
         answer.each do |k, v|
           raise ArgumentError, "motifs' answer: letters are Symbols (got #{k.inspect} => #{v.inspect})" unless k.is_a?(Symbol) && v.is_a?(Symbol)
@@ -134,7 +135,10 @@ module MB
         end
         { density: density, vary: vary, mutate: mutate }.each do |name, x|
           next if MIDI::Param.param?(x)
-          raise ArgumentError, "motifs' #{name}: is from 0 to 1, or a knob or other param (got #{x.inspect})" unless x.is_a?(Numeric) && x.real? && x.between?(0, 1)
+          next if x.is_a?(Numeric) && x.real? && x.between?(0, 1)
+          # (ux-friction-1 round 2: the maintainer's `density: 0.2..1`)
+          moving = x.is_a?(Range) ? "; to move it between #{x.begin} and #{x.end}: #{name}: knob(:#{name}), then turn :#{name}, 4.bars.lfo.at(#{x.begin}..#{x.end})" : ''
+          raise ArgumentError, "motifs' #{name}: is from 0 to 1, or a knob or other param (got #{x.inspect})#{moving}"
         end
         ranges = Generative.steered_ranges(range, 'motifs')
         raise ArgumentError, "motifs' evolve: is a whole number of passes from 1 (got #{evolve.inspect})" unless evolve.is_a?(Integer) && evolve >= 1
@@ -145,7 +149,7 @@ module MB
         fields = ->(r) {
           f = Generative.motif_field(source, range: r, around: ranges ? nil : around, width: width)
           n = Generative.notes_of(f)
-          raise ArgumentError, "motifs' field has no notes#{r ? " in #{r}" : ''}" if n.empty?
+          raise ArgumentError, "motifs' field has no notes#{r ? " in #{r}" : ''}#{Generative.empty_range_hint(source, r)}" if n.empty?
           [f, ranges || around.nil? ? (n.first + n.last) / 2r : Scale.root_number(around), n]
         }
         field, center, notes = fields.(ranges ? ranges.first : range)

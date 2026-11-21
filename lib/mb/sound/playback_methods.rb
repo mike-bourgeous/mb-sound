@@ -188,7 +188,7 @@ module MB
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
         # (a clip's echo or arp stream on a track: it would replace the
         # track's instrument with the default patch; ux-notes-1)
-        if (e = Internal.stream_for_track_error('bg', name, sound))
+        if (e = Internal.stream_for_track_error('bg', name, sound) || Internal.clip_name_for_track_error('bg', name, sound))
           return MB::Sound.live_error(e)
         end
 
@@ -415,9 +415,18 @@ module MB
           return out.respond_to?(:profile) ? out.profile : nil
         end
 
+        name = profile.to_s.delete_prefix(':').to_sym
+        unless DeviceOutput::PROFILES.key?(name)
+          # (ux-friction-1: the maintainer's `latency :Low` and `:video`
+          # guesses; a null output took any name silently)
+          names = DeviceOutput::PROFILES.keys
+          close = names.find { |n| n.to_s.casecmp?(name.to_s) }
+          hint = close ? " (did you mean #{close.inspect}?)" : GraphIO.suggest(name, names)
+          return MB::Sound.live_error(ArgumentError.new("latency #{profile.inspect}: no such profile#{hint}; the profiles are #{names.map(&:inspect).join(', ')}"))
+        end
         type = Internal.detect_output == :null ? :null : :device
-        use_output(MB::Sound.output(output_type: type, channels: 2, shared: false, profile: profile))
-        profile.to_s.delete_prefix(':').to_sym
+        use_output(MB::Sound.output(output_type: type, channels: 2, shared: false, profile: name))
+        name
       end
       alias lag latency
 
@@ -508,7 +517,9 @@ module MB
         elsif !block.nil? && effects != :show
           raise ArgumentError, 'Pass a block for master effects, or nil to remove them, not both'
         elsif block.nil? && effects
-          raise ArgumentError, "Pass a block for master effects, a mastering preset (#{Mastering.names.map(&:inspect).join(', ')}), or nil to remove them (got #{effects.inspect})"
+          # (ux-friction-1 round 2: the maintainer's `master -30.db`)
+          level = effects.is_a?(Numeric) ? "; the master level is master_gain #{effects.inspect}" : ''
+          raise ArgumentError, "Pass a block for master effects, a mastering preset (#{Mastering.names.map(&:inspect).join(', ')}), or nil to remove them (got #{effects.inspect})#{level}"
         end
 
         label = preset ? "master #{preset.call_ruby}" : block ? 'master' : 'master nil'
@@ -620,7 +631,7 @@ module MB
           example = name.length == 1 ? "swap #{name.keys.first.inspect}, clip" : 'swap :bass, clip'
           return MB::Sound.live_error(ArgumentError.new("swap takes the player's name first, then its new clip: #{example} (a Hash in parentheses is the name; old => new pairs follow the name: swap :drums, beat => beat2)"))
         end
-        if (e = Internal.stream_for_track_error('swap', name, clips, any: true))
+        if (e = Internal.stream_for_track_error('swap', name, clips, any: true) || Internal.clip_name_for_track_error('swap', name, clips))
           return MB::Sound.live_error(e)
         end
         raise ArgumentError, 'Pass a new clip or old => new pairs, not both' if clips && !pairs.empty?
@@ -671,7 +682,9 @@ module MB
       # or nil if there was nothing to resume.
       #
       # Only players with Symbol names are kept after stopping; see
-      # #stopped and #forget.
+      # #stopped and #forget.  A player a stop is still fading out comes
+      # back from where its fade is (the stop is cancelled; its clips play
+      # on in phase), as a player still ringing out does.
       #
       # Example (bin/sound.rb):
       #     bg :pad, pad_graph

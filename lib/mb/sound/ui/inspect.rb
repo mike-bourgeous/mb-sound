@@ -240,6 +240,37 @@ module MB
             info.with(nodes: nodes.freeze)
           end
 
+          # The copies (synth lanes, unison copies) of +info+'s selected row
+          # as nodes, from this Gatherer's cache, or nil (UI::WaveView's
+          # watch list; ui-wave-perf-1).
+          def group_of(info)
+            sel = info&.node or return nil
+            entry = @cache[info.track] or return nil
+            return nil unless entry[:nodes][sel]&.label == info.nodes[sel]&.label
+            entry[:groups][sel]
+          end
+
+          # The Synth playing +info+'s track whose lanes are the +lanes+
+          # copies of a row (the first Synth with that many lanes, else the
+          # first), kept with the cache entry, or nil (UI::WaveView's voice
+          # output tap; ui-wave-perf-1).
+          def synth_of(info, lanes)
+            entry = @cache[info&.track] or return nil
+            found = (entry[:synths] ||= entry[:roots].flat_map { |r| r.respond_to?(:graph) ? r.graph.grep(MB::Sound::Synth) : [] }.uniq.freeze)
+            found.find { |sy| sy.lanes.length == lanes } || found.first
+          rescue StandardError
+            nil
+          end
+
+          # The copies of the voice's amp envelope for +info+'s selected
+          # row (same voice), or nil.
+          def amp_env_group(info)
+            entry = @cache[info&.track] or return nil
+            n = info.nodes[info.node] if info.node
+            i = entry[:nodes].index { |m| m.what == 'amp env' && (n.nil? || m.voice.nil? || n.voice.nil? || m.voice == n.voice) }
+            i && entry[:groups][i]
+          end
+
           private
 
           # The build knobs of track +track+'s graph +entry+: the switches

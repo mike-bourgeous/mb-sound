@@ -1184,6 +1184,17 @@ module MB
 
         durations = amplitude.is_a?(Range) ? [amplitude.begin, amplitude.end].count { |v| v.is_a?(Sequence::Duration) } : 0
         raise ArgumentError, 'Use a Range of Durations (e.g. 3.n16..5.n16), not a single Duration' if amplitude.is_a?(Sequence::Duration)
+        if amplitude.is_a?(Range) && durations == 0 && !(amplitude.begin.is_a?(Numeric) && amplitude.end.is_a?(Numeric))
+          # (ux-friction-1 round 2: `.at(D3..B6)` raised NoMethodError 'to_f' for a Note)
+          if amplitude.begin.is_a?(Interval) && amplitude.end.is_a?(Interval)
+            # (his `detune: 3.bar.lfo.at(5.cents..60.cents)`: unison's detune node is in semitones)
+            lo, hi = [amplitude.begin, amplitude.end].map { |i| MB::M.sigfigs(i.to_semitones.to_f, 6) }
+            raise ArgumentError, "#at takes a Range of numbers, not Intervals (got #{amplitude.inspect}); in semitones that is .at(#{lo}..#{hi}), " \
+                                 'as a detune node takes (1.cents is 0.01)'
+          end
+          raise ArgumentError, "#at takes a Range of numbers (Hz for a cutoff: .at(150..2000); got #{amplitude.inspect}); " \
+                               'for a sweep in notes, .at(D3.number..B6.number).freq'
+        end
         raise ArgumentError, 'Both ends of a Range must be Durations, or neither' if durations == 1
         raise ArgumentError, 'A phasor outputs cycles (0...1) and has no amplitude; scale it with arithmetic' if phasor? && !@in_or_at
         GraphNode::ArithmeticMethods.check_at(amplitude) unless @in_or_at
@@ -1752,6 +1763,24 @@ module MB
         or_at(1)
       end
 
+      # Why Tone#freewheel refused a tone that isn't tempo-synced
+      # (ux-friction-1 round 2: the maintainer's `0.2.hz.lfo...freewheel`).
+      FREEWHEEL_ONLY_SYNCED = 'Only tempo-synced tones (e.g. 4.bars.lfo) can freewheel; ' \
+                              'a Hz LFO (0.2.hz.lfo) already runs free of the timeline'
+
+      # Raises for options given to Sequence::Duration#lfo, which takes
+      # none (ux-friction-1 round 2: the maintainer's
+      # `2.bars.lfo(unipolar: true)` said only "wrong number of
+      # arguments").  Tone#lfo and Pitch#lfo keep no parameters: the
+      # literal binder reads node methods' parameters (a keyword rest made
+      # it pass `frequency:` to lfo).
+      def self.lfo_takes_no_options(args, keys)
+        given = [*args.map(&:inspect), *keys.map { |k, v| "#{k}: #{v.inspect}" }].join(', ')
+        raise ArgumentError, "lfo takes no options (got #{given}): the rate comes before it (2.bars.lfo, 0.2.hz.lfo), the shape after it (.ramp), " \
+                             'and the range in .at(150..2000), which maps the whole -1..1 swing (no unipolar needed); ' \
+                             'a synth voice\'s v.lfo(5, unipolar: true) is the LFO that takes options'
+      end
+
       # Locks this tone's phase to the timeline of +tempo+ (a
       # Sequence::TempoNode in :hz mode, usually this tone's frequency; see
       # Pitch, Sequence::Duration#hz): at each sample where the tempo node's
@@ -1784,7 +1813,7 @@ module MB
       # Sequence::TempoNode#freewheel), so every tone made from the same
       # tempo pitch freewheels.
       def freewheel(free = true)
-        raise ArgumentError, 'Only tempo-synced tones (e.g. 4.bars.lfo) can freewheel' if @tempo.nil?
+        raise ArgumentError, FREEWHEEL_ONLY_SYNCED if @tempo.nil?
 
         @tempo.freewheel(free)
         self
@@ -1952,6 +1981,7 @@ module MB
         state = @state
         state.last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
         state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
+        state.last_scan = scan.is_a?(Numo::NArray) ? scan[-1] : scan if @table
         state.last_pivot = pivot[-1] if pivot.is_a?(Numo::NArray)
 
         buf.not_inplace!

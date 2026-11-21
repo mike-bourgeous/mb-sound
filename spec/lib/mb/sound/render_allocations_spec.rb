@@ -134,6 +134,44 @@ RSpec.describe('render-path allocations') do
       expect_budget(objects: 36, bytes: 3_100) # (omnibus18: before 43.4 objects, 3.7 kB: Tone.jump_residual per reset; after 30.1, 2.6 kB; gen-midi-2's unfused Unison::Detune 81, 6.3 kB; fix-alloc-1 planned it: 30.1, 2.6 kB)
     end
 
+    # A live screen's Feed (UI::Feed) runs on the render thread: per buffer
+    # it meters and fills the scope ring, and per snapshot (at most one a
+    # buffer, here every buffer: the worst case, a painter always waiting)
+    # it builds the frozen Snapshot.  ui-perf-2 round 3 (objects per buffer;
+    # the song alone 24.3): the sound screen's feed with two knobs 67.2 ->
+    # 59.3 (KnobValues kept while unchanged), the tiles' 138.0 -> 79.3 (the
+    # scope copied by Kernels.circular_read instead of Numo's concatenate,
+    # the meters' intervals refilled).  What is left is mostly the
+    # Session's side (the stamp, the parts list, the held notes), the
+    # meters' K-weighting biquads, and the Snapshot's Data objects.
+    describe 'with a screen up' do
+      def with_feed(needs)
+        start_song
+        session.knob(:cut, 800, range: 100..8000, curve: :exp)
+        session.knob(:drive, 0.3, range: 0.0..1.0)
+        feed = MB::Sound::UI::Feed.new
+        feed.needs = needs
+        feed.knob_refs = session.knobs.to_a
+        session.ui_feed = feed
+        render(1500)
+        feed.take
+        m = ctx { AllocationBudget.measure(buffers: 400) { session.process_buffer; feed.take } }
+        puts "\n\e[1m#{RSpec.current_example.description}\e[0m\n#{m.report}" if ENV['ALLOC_REPORT']
+        m
+      end
+
+      it 'the sound screen\'s feed (knobs, no meters or scope)' do
+        m = with_feed(%i[inspect render])
+        expect(m.objects_per_buffer).to be <= 68, m.report
+        expect(m.top(60).map(&:first).grep(/KnobValue/)).to be_empty # (no knob turned: the last snapshot's KnobValues)
+      end
+
+      it 'the tiles\' feed (meters and the scope)' do
+        m = with_feed(%i[meters scope])
+        expect(m.objects_per_buffer).to be <= 90, m.report
+      end
+    end
+
     it 'a hard-synced lead through a delay (sync pulses, delay lines)' do
       ctx do
         lead = MB::Sound.seq(MB::Sound::A3, MB::Sound::C4, MB::Sound::E4).n8.loop.synth(voices: 2) { |v|

@@ -374,6 +374,23 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       expect(lines.join("\n")).to include('seq(C3, D3).n8')
     end
 
+    # It draws at the target rate as a live pane: on ui :wall at 122 fps its
+    # piano's Strings and Arrays were 90k objects a second, more than half
+    # the process's garbage (2026-11-17: 957 objects a draw at 137x8, now
+    # under 100)
+    it 'draws the piano without making Strings and Arrays per key' do
+      %w[z c b].each { |k| press(k, 0.0) }
+      grid = MB::Term::Grid.new(137, 8)
+      c = MB::Sound::UI::Canvas.new(grid, 0, 0, 137, 8)
+      pane = MB::Sound::UI::Panes::Keyboard.new(kb)
+      snap = ui_fake_snapshot
+      state = {}
+      10.times { pane.draw(c, snap, state) }
+      before = GC.stat(:total_allocated_objects)
+      50.times { pane.draw(c, snap, state) }
+      expect((GC.stat(:total_allocated_objects) - before) / 50.0).to be < 200
+    end
+
     it 'fills a zoomed pane by its sections: taller keys, the chord held, a roll of recent notes, the armed tracks (ux-1 r3 item 31)' do
       kb.releases = true
       %w[z c b].each { |k| press(k, 0.0) } # C3 E3 G3

@@ -430,6 +430,12 @@ module MB
           @midi.dup
         end
 
+        # True when any MIDI binding is set (no copy: screens ask every
+        # frame).
+        def midi_bound?
+          !@midi.empty?
+        end
+
         # A MIDI event (+type+ :note or :cc, +number+, +value+ 0..1):
         # notes act on note-on, CCs when they cross 0.5 upward (a button),
         # so a held pad doesn't repeat.  Returns the Action, or nil.

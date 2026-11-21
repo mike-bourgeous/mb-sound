@@ -6,7 +6,7 @@ module MB
       # the painter thread by Poll from public APIs that never take the
       # render lock.  Frozen plain data.
       Slow = Data.define(:tracks, :scenes, :scene, :queued, :recording, :armed, :form, :knob_specs, :buses, :routes, :landed, :clips, :midi,
-                         :matrix, :racks, :clocks, :inspector, :render_source, :cue_heard) do
+                         :matrix, :racks, :clocks, :inspector, :render_source, :cue_heard, :stopped, :build_knobs) do
         # (The fields ux-1 r3 added default to empty: +buses+ BusInfos,
         # +routes+ (player => { to:, send: { bus => level } }), +landed+
         # LandedInfos (newest last), +clips+ ClipInfos, +midi+ a MidiInfo;
@@ -15,10 +15,14 @@ module MB
         # an Inspect::InspectInfo while a pane needs :inspect, else nil;
         # sound-design-ui-2: +render_source+ the inspected track's
         # PatchRender::Source while a pane needs :render, else nil;
-        # ui-scaffold-1: +cue_heard+ Session#cue_heard?, where auditions play)
+        # ui-scaffold-1: +cue_heard+ Session#cue_heard?, where auditions play;
+        # knobs-pane-keys-1: +stopped+ the names Session#resume can bring
+        # back (Session#stopped), +build_knobs+ the knobs patches read while
+        # building (Arrangement::BuildKnobs: a turn rebuilds, so keys turn
+        # them a step a press, never a held sweep))
         def initialize(tracks:, scenes:, scene:, queued:, recording:, armed:, form:, knob_specs:, buses: [].freeze, routes: {}.freeze,
                        landed: [].freeze, clips: [].freeze, midi: nil, matrix: nil, racks: [].freeze, clocks: [].freeze, inspector: nil, render_source: nil,
-                       cue_heard: false)
+                       cue_heard: false, stopped: [].freeze, build_knobs: [].freeze)
           super
         end
 
@@ -143,8 +147,13 @@ module MB
 
       # The CPU used by one part: +name+, +kind+ (:player, :bus, :master),
       # +state+ (see Session::UIFeed::UIPart), and +load+ (its share of the
-      # snapshot's audio time, e.g. 0.12 for 12%).
-      PartLoad = Data.define(:name, :kind, :state, :load)
+      # snapshot's audio time, e.g. 0.12 for 12%); a player's own +muted+
+      # and +soloed+ flags.
+      PartLoad = Data.define(:name, :kind, :state, :load, :muted, :soloed) do
+        def initialize(name:, kind:, state:, load:, muted: false, soloed: false)
+          super
+        end
+      end
 
       # A knob's +value+ as of the snapshot, with its +spec+
       # (GraphNode::Knob::Spec: range, curve, unit).
@@ -158,7 +167,8 @@ module MB
       # Fast fields: +seq+ (publish count), +time+ (MB::U.clock_now when
       # published), +frame+, +pos+ (timeline position in whole notes),
       # +bar+, +beat+ (Rational, counting from 1), +bpm+, +bar_length+
-      # (whole notes), +playing+, +sample_rate+, +buffer_size+, +load+ and
+      # (whole notes), +playing+, +paused+ (the transport is paused while
+      # effects ring out: Session::TransportPause), +sample_rate+, +buffer_size+, +load+ and
       # +load_max+ (render time over buffer time, mean and worst over the
       # snapshot's buffers), +parts+ (PartLoads), +master+ (MasterLevels,
       # or nil without a meter pane), +scope+ (frozen Numo::SFloats, one per
@@ -174,14 +184,14 @@ module MB
       # HeldNotes on the Session's MIDI inputs, always); +sounding+
       # (reserved for notes after a scale transform; nil).
       Snapshot = Data.define(
-        :seq, :time, :frame, :pos, :bar, :beat, :bpm, :bar_length, :playing,
+        :seq, :time, :frame, :pos, :bar, :beat, :bpm, :bar_length, :playing, :paused,
         :sample_rate, :buffer_size, :load, :load_max, :parts, :master, :scope,
         :underruns, :knobs, :slow, :latency, :bus_levels, :send_levels, :notes, :sounding
       ) do
         # Defaults for every field (a stopped transport at bar 1).
         def self.defaults
           {
-            seq: 0, time: 0.0, frame: 0, pos: 0r, bar: 1, beat: 1r, bpm: 120, bar_length: 1r, playing: false,
+            seq: 0, time: 0.0, frame: 0, pos: 0r, bar: 1, beat: 1r, bpm: 120, bar_length: 1r, playing: false, paused: false,
             sample_rate: 48000, buffer_size: 800, load: nil, load_max: nil, parts: [].freeze, master: nil, scope: nil,
             underruns: nil, knobs: [].freeze, slow: Slow.empty, latency: 0.0,
             bus_levels: nil, send_levels: nil, notes: [].freeze, sounding: nil,
@@ -221,6 +231,8 @@ module MB
         def inspector = slow.inspector
         def render_source = slow.render_source
         def cue_heard = slow.cue_heard
+        def stopped = slow.stopped
+        def build_knobs = slow.build_knobs
 
         # Track +name+'s state for the clip matrix: the player's state this
         # buffer (#parts: :playing, :starting, :stopping, :ringing,
@@ -260,6 +272,8 @@ module MB
           @block_frames = 0
           @energies = []
           @frames = []
+          @peak = Array.new(channels, 0.0)
+          @sumsq = Array.new(channels, 0.0)
           reset_interval
         end
 
@@ -394,8 +408,9 @@ module MB
         end
 
         def reset_interval
-          @peak = Array.new(@channels, 0.0)
-          @sumsq = Array.new(@channels, 0.0)
+          # (refilled: #take maps them into new Arrays, so these never leave)
+          @peak.fill(0.0)
+          @sumsq.fill(0.0)
           @true_peak = 0.0
           @count = 0
         end
@@ -438,7 +453,20 @@ module MB
 
         # The samples oldest first (new frozen SFloats, one per channel).
         def to_a
-          @rings.map { |r| (@pos == 0 ? r.dup : r[@pos..].concatenate(r[0...@pos])).freeze }.freeze
+          # (Kernels.circular_read into a new SFloat: one object a channel;
+          # Numo's concatenate of two views was about 25; ui-perf-2 round 3)
+          out = Array.new(@rings.length)
+          c = 0
+          while c < @rings.length
+            r = @rings[c]
+            a = Numo::SFloat.zeros(@length)
+            unless MB::Sound::Kernels.circular_read(r, @pos, @length, a)
+              a = @pos == 0 ? r.dup : r[@pos..].concatenate(r[0...@pos])
+            end
+            out[c] = a.freeze
+            c += 1
+          end
+          out.freeze
         end
       end
 
@@ -452,6 +480,9 @@ module MB
       class Feed
         # Samples per channel kept for scope panes.
         SCOPE_LENGTH = 1024
+
+        # (#build's bus and send levels without a :buses pane)
+        NO_BUS_LEVELS = [nil, nil].freeze
 
         # What visible panes need besides the basics (:meters, :scope).
         attr_reader :needs
@@ -475,6 +506,11 @@ module MB
         # Snapshots published so far.
         attr_reader :published
 
+        # The live wave displays' tap (UI::WaveView::Tap; the render thread
+        # publishes its watched values after every buffer), or nil (the
+        # default: nothing to do; ui-wave-perf-1).
+        attr_accessor :wave_tap
+
         def initialize(scope_length: SCOPE_LENGTH)
           @scope_length = scope_length
           @needs = [].freeze
@@ -482,6 +518,10 @@ module MB
           @taken = true
           @latest = nil
           @published = 0
+          @parts = @record = nil # (a capture waiting to be published)
+          @wave_tap = nil
+          @knob_values = [].freeze # (the last snapshot's KnobValues, see #knob_values)
+          @knob_objects = [] # (the knobs they were read from)
           reset_interval
         end
 
@@ -505,10 +545,32 @@ module MB
           @bus_meter ||= BusMeter.new(ch, session.sample_rate)
         end
 
-        # True when the painter has taken the last snapshot (the Session
-        # then calls #capture).
+        class << self
+          # ui-perf-1 (an option, off by default): capture the parts and
+          # the transport at the end of a buffer's render whenever none is
+          # pending, not only after the painter took the last snapshot, and
+          # publish after the write of any buffer during which the painter
+          # took it.  With the default handshake the capture point (before
+          # the write) comes before the painter could take the snapshot
+          # published after the last write, so 800-frame buffers come 60
+          # times a second but snapshots 30 (bin/ui_bench.rb), and the scope
+          # and meters change on screen 30 times a second while the painter
+          # draws 60.  Captures stay one per snapshot (a pending one waits
+          # for the painter: with short buffers its parts and transport may
+          # be up to a frame old when published), so the render thread
+          # allocates no more than by default.
+          # MB_SOUND_UI_EVERY_BUFFER=1 turns it on at start.
+          attr_accessor :every_buffer
+        end
+        self.every_buffer = ENV['MB_SOUND_UI_EVERY_BUFFER'] == '1' || ENV['MB_SOUND_UI_SMOOTH'] == '1'
+
+        # True when no capture is pending and the painter has taken the last
+        # snapshot (the Session then calls #capture), or with
+        # Feed.every_buffer whenever no capture is pending.  (By default
+        # none is ever pending here: a capture is published after the same
+        # buffer's write.)
         def wants_capture?
-          @taken
+          @parts.nil? && (@taken || Feed.every_buffer)
         end
 
         # The render thread, with the render lock held: reads the parts and
@@ -536,8 +598,10 @@ module MB
             @scope ||= ScopeRing.new(mix.length, @scope_length)
             @scope.write(mix)
           end
+          @wave_tap&.publish
 
           return unless @parts && @record
+          return unless @taken # (Feed.every_buffer: captured, but the painter hasn't taken the last one yet)
 
           @latest = build(session)
           @published += 1
@@ -567,29 +631,63 @@ module MB
           rec = @record
           stamp = Session::Stamp.at(rec[:pos], session.transport)
           parts = @parts.map { |p|
-            PartLoad.new(name: p.name, kind: p.kind, state: p.state, load: seconds > 0 ? p.cpu / seconds : 0.0)
+            PartLoad.new(name: p.name, kind: p.kind, state: p.state, load: seconds > 0 ? p.cpu / seconds : 0.0, muted: p.muted, soloed: p.soloed)
           }.freeze
           out = session.output
           underruns = out.respond_to?(:underruns) ? out.underruns : nil
-          bus_levels, send_levels = @needs.include?(:buses) && @bus_meter ? @bus_meter.take : [nil, nil]
+          bus_levels, send_levels = @needs.include?(:buses) && @bus_meter ? @bus_meter.take : NO_BUS_LEVELS
           slow, refs = @polled
 
           Snapshot.new(
             seq: @published + 1, time: MB::U.clock_now, frame: rec[:frame], pos: rec[:pos],
-            bar: stamp.bar, beat: stamp.beat, bpm: rec[:bpm], bar_length: rec[:bar_length], playing: rec[:playing],
+            bar: stamp.bar, beat: stamp.beat, bpm: rec[:bpm], bar_length: rec[:bar_length], playing: rec[:playing], paused: !!rec[:paused],
             sample_rate: rate, buffer_size: session.buffer_size,
             load: @frames > 0 && @load_sum > 0 ? @load_sum / @frames : nil, load_max: @load_max > 0 ? @load_max : nil,
             parts: parts,
             master: @needs.include?(:meters) && @meter ? @meter.take : nil,
             scope: @needs.include?(:scope) && @scope ? @scope.to_a : nil,
             underruns: underruns,
-            knobs: refs.map { |name, k| KnobValue.new(name: name, value: k.value, spec: k.spec) }.freeze,
+            knobs: knob_values(refs),
             slow: slow,
             latency: out.respond_to?(:latency) ? out.latency.to_f : 0.0,
             bus_levels: bus_levels, send_levels: send_levels,
             notes: session.respond_to?(:held_notes) ? session.held_notes : [].freeze,
             sounding: nil
           )
+        end
+
+        # The snapshot's KnobValues for +refs+ ([name, knob] pairs): the last
+        # snapshot's frozen Array when no knob changed (nothing allocated on
+        # the render thread, and panes keyed on the Array's identity keep
+        # their caches), else a new one reusing the unchanged KnobValues
+        # (ui-perf-2 round 3: 2 objects per knob per snapshot before).
+        def knob_values(refs)
+          prev = @knob_values
+          held = @knob_objects
+          n = refs.length
+          same = prev.length == n
+          i = 0
+          while same && i < n
+            name, k = refs[i]
+            kv = prev[i]
+            same = kv.name.equal?(name) && held[i].equal?(k) && kv.spec.equal?(k.spec) && kv.value.eql?(k.value)
+            i += 1
+          end
+          return prev if same
+
+          out = Array.new(n)
+          i = 0
+          while i < n
+            name, k = refs[i]
+            kv = prev[i]
+            value = k.value
+            spec = k.spec
+            out[i] = kv && kv.name.equal?(name) && held[i].equal?(k) && kv.spec.equal?(spec) && kv.value.eql?(value) ? kv : KnobValue.new(name: name, value: value, spec: spec)
+            held[i] = k
+            i += 1
+          end
+          held.slice!(n..) if held.length > n
+          @knob_values = out.freeze
         end
 
         def reset_interval

@@ -81,6 +81,9 @@ module MB
           @problems = []
           @warned = Set.new
           @documents = {} # path => [mtime, size, Entry]
+          @document_list = nil # (the last scan's entries and when: what live threads read)
+          @document_list_at = nil
+          @document_scan = nil # (the background rescan's Thread, while one runs)
           @uses = {}.compare_by_identity # (Data#hash would hash every setting per lookup)
           @loading = false
         end
@@ -295,6 +298,7 @@ module MB
             @files = []
             @pins = []
             @documents.clear
+            @document_list = nil
             @problems.clear
           end
           self
@@ -334,10 +338,47 @@ module MB
           end
         end
 
+        # Seconds a live thread's document list may age before a rescan
+        # starts in the background.
+        DOCUMENT_STALE = 2.0
+
         # Entries for the shelves' graph documents (headers read once per
-        # file version).
+        # file version).  A scan stats every document (a network round
+        # trip each where the library lives on sshfs: the Linux desktop's
+        # /app), so a live thread (the UI's painter: Thread#[:mb_sound_live];
+        # ui-perf-1 measured the sound screen's library picker scanning on
+        # it 1.5 times a second, 310 file calls a second) gets the last
+        # scan's list, and a list older than DOCUMENT_STALE starts a rescan
+        # on a thread of its own (file calls wait off the GVL there).  Only
+        # a live thread's first call scans where it runs.
         def document_entries
           return [] unless defined?(MB::Sound::GraphIO::Loader)
+          if Thread.current[:mb_sound_live] && (list = @document_list)
+            rescan_documents if Process.clock_gettime(Process::CLOCK_MONOTONIC) - @document_list_at > DOCUMENT_STALE
+            return list
+          end
+          scan_documents
+        end
+
+        # Whether a background rescan runs (for specs).
+        def document_scan? = @document_scan&.alive? || false
+
+        private def rescan_documents
+          @lock.synchronize do
+            return if @document_scan&.alive?
+            @document_list_at = Process.clock_gettime(Process::CLOCK_MONOTONIC) # (one rescan per stale period, even if it fails)
+            @document_scan = Thread.new do
+              Thread.current.name = 'MB::Sound library scan'
+              Thread.current.priority = -1
+              scan_documents
+            rescue StandardError, ScriptError
+              nil
+            end
+          end
+        end
+
+        # Scans the shelves' documents now; keeps the list for live threads.
+        private def scan_documents
           list = []
           Library.shelves.each do |shelf|
             next unless shelf.dir && File.directory?(shelf.dir)
@@ -345,6 +386,11 @@ module MB
               e = document_entry(path, shelf)
               list << e if e
             end
+          end
+          list.freeze
+          @lock.synchronize do
+            @document_list = list
+            @document_list_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           end
           list
         end

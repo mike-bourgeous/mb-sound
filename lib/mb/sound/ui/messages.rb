@@ -38,7 +38,16 @@ module MB
         def total = @lock.synchronize { @total }
 
         # Messages that came since #mark_read (repeats included).
-        def unread = @lock.synchronize { @entries.each_value.count { |e| e.seq > @read } }
+        def unread
+          # (a block, not each_value.count: no Enumerator per frame; the
+          # status line asks every frame)
+          @lock.synchronize do
+            n = 0
+            read = @read
+            @entries.each_value { |e| n += 1 if e.seq > read }
+            n
+          end
+        end
 
         # Records +text+ (ANSI escapes and surrounding space removed;
         # repeats count).  Returns the Entry.

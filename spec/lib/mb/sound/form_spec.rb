@@ -849,7 +849,9 @@ RSpec.describe(MB::Sound::Form) do
       expect(st.state).to eq(:started)
       expect(st.to_s).to start_with('started at 1:1; flow a b')
       expect(within { MB::Sound.go }.state).to eq(:playing) # (already playing: says so)
-      expect(within { MB::Sound.pause }.to_s).to include('renders do not pause')
+      # (pause-tails-1: a console-driven Session pauses; start plays on at once)
+      expect(within { MB::Sound.pause }.state).to eq(:paused)
+      expect(within { MB::Sound.start }.state).to eq(:resumed)
       data = run_bars(3)
       expect(changes(data)).to eq([[0, 48], [bar, 50]])
       expect(set.playback.ended?).to eq(true)
@@ -959,7 +961,9 @@ RSpec.describe(MB::Sound::Form) do
     end
 
     it 'lists the spellings for anything else' do
-      expect { within { MB::Sound.seek(0) } }.to raise_error(ArgumentError, /seek takes a bar .*12\.bars = bar 13.*got a plain number \(0\)/)
+      expect { within { MB::Sound.seek(-2) } }.to raise_error(ArgumentError, /seek takes a bar .*12\.bars = bar 13.*got a plain number \(-2\)/)
+      # (ux-friction-1: the maintainer's `seek 0` for the start)
+      expect { within { MB::Sound.seek(0) } }.to raise_error(ArgumentError, /seek 0: bars count from 1, so the start is seek 1/)
       expect { within { MB::Sound.seek(-1.seconds) } }.to raise_error(ArgumentError, /seek takes a bar/)
       expect { within { MB::Sound.seek(:drop, 2) } }.to raise_error(ArgumentError, /a beat goes with a bar number/)
     end

@@ -94,7 +94,10 @@ module MB
         def wire(name = nil, stream = nil, monitor: true, at: nil, on: nil, in: nil)
           point = LaunchPoint.of(binding) or return nil
           unless name.is_a?(Symbol)
-            return MB::Sound.live_error(ArgumentError.new("wire takes a track name and a stream: wire :lead, midi.arp(:up) (got #{name.inspect[0, 60]})"))
+            # (ux-friction-1 round 2: the maintainer's `wire 2, :keys`, for
+            # the keyboard pane to play player 2's sound)
+            keys = name.is_a?(Integer) || name.nil? ? "; the keyboard pane plays armed tracks: arm :x (a track: track(:x) { |v| v.hz.ramp }); a numbered player plays no notes" : ''
+            return MB::Sound.live_error(ArgumentError.new("wire takes a track name and a stream: wire :lead, midi.arp(:up) (got #{name.inspect[0, 60]})#{keys}"))
           end
           if stream.nil?
             return MB::Sound.live_error(ArgumentError.new("wire #{name.inspect}, stream: give the stream (midi.arp(:up), riff.stream.echo(1.n8, 3)); unwire #{name.inspect} stops one"))

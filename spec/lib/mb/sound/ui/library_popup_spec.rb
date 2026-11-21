@@ -91,5 +91,31 @@ RSpec.describe(MB::Sound::UI::LibraryPopup, :aggregate_failures) do
       @term.type("[1].firs\t")
       expect(wait_until { prompt_line == 't> [1].first' }).to eq(true), prompt_line.inspect
     end
+
+    it 'stays closed on a chain recalled from history, so Up goes on to older lines' do
+      @tiles, @term = ui_tiles(:tiles, rows: 30, cols: 100)
+      expect(@term.wait_for('t> ')).to eq(true), @term.text
+      @term.type("6 * 7\r")
+      expect(@term.wait_for('=> 42')).to eq(true), @term.text
+      @term.type('e = L.fx.bar')
+      expect(wait_until { listed?('L.fx.bar') }).to eq(true), @term.text
+      @term.write("\e")
+      expect(wait_until { ::Reline.dialog_proc(:mb_library).context.list.nil? }).to eq(true)
+      @term.write("\r")
+      # (run: its value, or a NameError where L isn't defined; history either way)
+      expect(wait_until { @term.text.match?(/NameError|Entry bar/) && prompt_line == 't>' }).to eq(true), @term.text
+
+      @term.write("\e[A")
+      expect(wait_until { prompt_line == 't> e = L.fx.bar' }).to eq(true), prompt_line.inspect
+      @term.write("\e[A")
+      expect(wait_until { prompt_line == 't> 6 * 7' }).to eq(true), "#{prompt_line.inspect}\n#{@term.text}"
+      expect(@term.text).not_to include('barberpole')
+
+      # Typing on the recalled chain opens the list as before
+      @term.write("\e[B")
+      expect(wait_until { prompt_line == 't> e = L.fx.bar' }).to eq(true), prompt_line.inspect
+      @term.type('b')
+      expect(@term.wait_for(/barberpole +phaser/)).to eq(true), @term.text
+    end
   end
 end

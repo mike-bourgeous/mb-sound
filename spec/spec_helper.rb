@@ -114,6 +114,7 @@ require_relative 'support/carry_check'
 require_relative 'support/render_budget'
 require_relative 'support/multiple_exception_backtrace' # (RSpec's formatters and two after-hook errors)
 require_relative 'support/rss_report'
+require_relative 'support/ui_thread_guard' # (examples leaving UI threads running; before ui_screen_guard: its around hook is outside)
 require_relative 'support/ui_screen_guard'
 
 # Records the extension methods each memcheck spec calls (rake memcheck:map)

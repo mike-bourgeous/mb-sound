@@ -65,7 +65,7 @@ module MB
         # to draw instead of following a Session (specs, captures).
         def initialize(layout:, io: $stdout, session: nil, at: :bottom, color: :ansi256, look: :auto, glyphs: UI.glyphs, size: nil, clock: nil, cells: Kernels.cell_grid, fps: 60, panes: UI.panes, source: nil)
           # (Every instance variable set up front, in one order: one object shape)
-          @stopping = @thread = @first_refresh = @reasserted_at = @full = @resized = @rows = @cols = @density = @shown_layout = @boxed = @height = @placed = @rule_row = @grid = @shown = @chrome = @size_checked_at = @old_winch = @winch_installed = @attached = @poll = @polled_at = @polled_target = @poll_warned = @last = @painter_warned = @heard = @starter = nil
+          @stopping = @thread = @first_refresh = @reasserted_at = @full = @resized = @rows = @cols = @density = @shown_layout = @boxed = @height = @placed = @rule_row = @grid = @shown = @chrome = @size_checked_at = @old_winch = @winch_installed = @attached = @poll = @polled_at = @polled_target = @poll_warned = @last = @painter_warned = @heard = @starter = @yield_render = nil
           raise ArgumentError, "at: is :top or :bottom (got #{at.inspect})" unless %i[top bottom].include?(at)
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless MB::Term::Cells::MODES.key?(color)
 
@@ -88,6 +88,7 @@ module MB
           @refresh_lock = Mutex.new
           @active = false
           @frames = []
+          @draw_items = @draw_rows = nil # (the painter's reused pane rows: #refresh)
           @slowest = []
           @yields = 0
           @failures = {}
@@ -138,6 +139,7 @@ module MB
           @thread&.wakeup rescue nil
           @thread&.join(2)
           @thread = nil
+          @placed.each { |p| Pane.close_workers(p.state) } # (the panes' preview workers)
           @active = false
           restore_winch
           detach
@@ -183,7 +185,21 @@ module MB
           top = band_top
           drawn = 0
           paint_chrome if full
-          draw = panes_to_draw(@placed.map { |p| [p, p.pane.name, p.pane, nil, p.drawn_at] }, now, full, snap)
+          # (reused rows, as the tiles' painter keeps them: no Arrays per
+          # frame; ui-perf-2 round 3)
+          items = (@draw_items ||= [])
+          items.clear
+          rows = (@draw_rows ||= {}.compare_by_identity)
+          @placed.each do |p|
+            row = (rows[p] ||= Array.new(5))
+            row[0] = p
+            row[1] = p.pane.name
+            row[2] = p.pane
+            row[3] = nil
+            row[4] = p.drawn_at
+            items << row
+          end
+          draw = panes_to_draw(items, now, full, snap)
           @placed.each do |p|
             next unless draw.include?(p)
 
@@ -223,13 +239,22 @@ module MB
           out = nil
           if !cells.empty? || reassert
             out = "\e[?2026h\e7#{region_cmd}#{cells}\e8\e[?2026l"
+            @pacer.perf&.painted(drawn, false, full, out.bytesize)
             write(out)
             note_written(now, out.bytesize)
+          else
+            @pacer.perf&.painted(drawn, false, full, 0)
           end
 
           cpu = thread_cpu - cpu0
-          @frames << [cpu, out&.bytesize || 0, drawn, GC.count != gc0]
-          @frames.shift if @frames.length > STATS
+          # (the oldest row refilled once the window is full: no Array
+          # per frame)
+          row = @frames.length >= STATS ? @frames.shift : Array.new(4)
+          row[0] = cpu
+          row[1] = out&.bytesize || 0
+          row[2] = drawn
+          row[3] = GC.count != gc0
+          @frames << row
           note_slow(now, cpu, parts) if cpu > SLOW_PART
           out
         end

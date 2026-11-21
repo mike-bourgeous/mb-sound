@@ -52,6 +52,9 @@ module MB
           [:stopped, :start] => :due,
         }.freeze
 
+        # TRANSITIONS by state, then event (looked up without a key Array).
+        NEXT = TRANSITIONS.each_with_object({}) { |((s, e), t), h| (h[s] ||= {})[e] = t }.transform_values(&:freeze).freeze
+
         STATES = TRANSITIONS.flat_map { |(s, _), t| [s, t] }.uniq.freeze
         EVENTS = TRANSITIONS.keys.map(&:last).uniq.freeze
 
@@ -61,8 +64,11 @@ module MB
         # One frame's timing, in seconds: +paint+ (the refresh but its
         # write), +write+, +sleep+ (asked for), +slept+ (actual), +late+
         # (how far past its deadline the frame started), +skipped+
-        # (deadlines missed before it), +wrote+ (bytes, 0 for none).
-        Frame = Data.define(:at, :paint, :write, :sleep, :slept, :late, :skipped, :wrote)
+        # (deadlines missed before it), +wrote+ (bytes, 0 for none), +hold+
+        # (seconds the write waited for #min_gap, not in +paint+).
+        Frame = Data.define(:at, :paint, :write, :sleep, :slept, :late, :skipped, :wrote, :hold) do
+          def initialize(hold: 0.0, **rest) = super
+        end
 
         # Frames kept for #breakdown (2.5 s at 240/s).
         KEEP = 600
@@ -77,7 +83,32 @@ module MB
         OFFSET_GAIN = 0.1
         MAX_OFFSET = 0.5
 
+        # Seconds short of the sleep asked for that count as woken early
+        # (Thread#wakeup) rather than a timer firing a little early.
+        WOKEN_EARLY = 0.001
+
+        # Frames timed to new data (#timing): the share of a period a
+        # frame may move from its deadline to meet the data, the seconds
+        # after the data's predicted time the painter wakes, and the
+        # seconds between looks while the data is late.
+        TIMING_WINDOW = 0.25
+        TIMING_MARGIN = 0.0003
+        TIMING_POLL = 0.0005
+
         attr_reader :state, :period, :deadline, :skipped
+
+        # ui-perf-1 (an option, off by default; FrameRate.snapshot_timed):
+        # an object timing frames to new data (FrameRate::SnapshotTiming:
+        # #mark at each frame's start, #next_after(time) the time new data
+        # becomes visible at or after +time+ or nil, #arrived? whether it
+        # has).  A frame whose next deadline is within TIMING_WINDOW of a
+        # period of new data moves to the data's time (then waits for it to
+        # arrive, at most to the window's end), and the deadlines follow
+        # from there; otherwise frames keep the deadline grid.  Without it
+        # the painter's 60 Hz and 800-frame buffers (also 60 a second) beat:
+        # a frame just before a buffer's snapshot shows the old one, and
+        # the scope's visible updates come 33 ms apart now and then.
+        attr_accessor :timing
 
         # Seconds the deadline spacing is shortened by (the rate trim), and
         # seconds before each deadline the painter asks to wake (the wake
@@ -86,6 +117,18 @@ module MB
 
         # Called with each Frame after it (UI::PaneRates#observe).
         attr_accessor :on_frame
+
+        # konsole-pacing (2026-11-21; `ui.pace :terminal`, off by default):
+        # the least seconds between frame writes, or nil.  Konsole before
+        # 26.04 shows output only 10 ms after it stops arriving (at the
+        # latest 40 ms after it starts), so frames written closer than that
+        # show at about 25 a second; with a gap the deadlines are at least
+        # this far apart and a woken frame's write waits for it
+        # (#hold_before_write), so every frame shows.  See TerminalProfile.
+        attr_accessor :min_gap
+
+        # A UI::Perf recording frames (`ui.perf`), or nil.
+        attr_accessor :perf
 
         # +fps+ the target rate; +clock+ a Proc of seconds; +sleeper+ a
         # Proc that sleeps (fake clocks advance their time there).
@@ -99,10 +142,16 @@ module MB
           @write = 0.0
           @lock = Mutex.new
           @on_frame = nil
+          @perf = nil
           @trim = 0.0
           @offset = 0.0
           @window_at = nil
           @window_frames = 0
+          @woken = false
+          @timing = nil
+          @min_gap = nil
+          @hold = 0.0
+          @last_write = nil
           self.fps = fps
         end
 
@@ -118,7 +167,7 @@ module MB
 
         # Applies +event+, raising StateError for a pair the table lacks.
         def event!(event)
-          to = TRANSITIONS[[@state, event]] or raise StateError, "Pacer: #{event.inspect} in #{@state.inspect}"
+          to = NEXT[@state]&.[](event) or raise StateError, "Pacer: #{event.inspect} in #{@state.inspect}"
           @state = to
         end
 
@@ -126,6 +175,22 @@ module MB
         # the frame's time splits into paint and write).
         def note_write(seconds)
           @write += seconds
+        end
+
+        # Before a frame's write (the screen's timed write): waits until
+        # #min_gap has passed since the last write ended, and notes the
+        # wait as the frame's hold.  Nothing without a gap.
+        def hold_before_write
+          g = @min_gap or return
+          if @last_write && (w = @last_write + g - @clock.call) > 0
+            @sleeper.call(w)
+            @hold += w
+          end
+        end
+
+        # The screen's timed write ended at +t+ (for #min_gap).
+        def wrote_at(t)
+          @last_write = t
         end
 
         # Runs frames until +stop+ (a Proc) is true: yields the frame's
@@ -148,6 +213,9 @@ module MB
           start = @clock.call
           late = [start - @deadline, 0.0].max
           @write = 0.0
+          @hold = 0.0
+          @perf&.begin_frame(start)
+          @timing&.mark
           out = yield start
           done = @clock.call
           event!(:painted)
@@ -156,27 +224,57 @@ module MB
           # less than a period past it starts at once, and only the
           # deadlines a frame overran by more than a whole period are skipped
           step = @period - @trim
-          nxt = @deadline + step
+          step = @min_gap if @min_gap && step < @min_gap
+          # (a frame woken before its deadline, by a key, leaves that
+          # deadline for the next frame: ui-perf-1, a woken frame used to
+          # push the next one a whole period past the deadline it slept
+          # toward)
+          nxt = @woken && done < @deadline ? @deadline : @deadline + step
           missed = 0
           if done > nxt + step
             missed = ((done - nxt) / step).floor
             nxt += missed * step
           end
           @skipped += missed
+          # (timed to new data: the deadline moves to the data's time when
+          # that is within the window, without the wake offset)
+          timed = false
+          limit = nil
+          if @timing && missed == 0
+            win = TIMING_WINDOW * @period
+            t = @timing.next_after(nxt - win)
+            if t && t <= nxt + win
+              limit = nxt + win
+              nxt = t + TIMING_MARGIN
+              timed = true
+            end
+          end
           @deadline = nxt
-          want = nxt - @offset - done
+          want = nxt - (timed ? 0.0 : @offset) - done
           @sleeper.call(want) if want > 0
           woke = @clock.call
           slept = woke - done
-          adapt(woke, want)
+          # (woken early: Thread#wakeup ended the sleep before its time)
+          @woken = want > 0 && slept < want - WOKEN_EARLY
+          if timed && !@woken
+            # (the data late: look again until it comes or the window ends;
+            # the frame's deadline is then when it starts, so the next
+            # deadline follows the data)
+            @sleeper.call(TIMING_POLL) until @timing.arrived? || @clock.call >= limit
+            woke = @clock.call
+            slept = woke - done
+            @deadline = woke
+          end
+          adapt(woke, @woken || timed ? 0.0 : want)
           event!(:woke)
-          f = Frame.new(at: start, paint: done - start - @write, write: @write, sleep: want, slept: slept, late: late, skipped: missed,
-                        wrote: out.is_a?(String) ? out.bytesize : 0)
+          f = Frame.new(at: start, paint: done - start - @write - @hold, write: @write, sleep: want, slept: slept, late: late, skipped: missed,
+                        wrote: out.is_a?(String) ? out.bytesize : 0, hold: @hold)
           @lock.synchronize do
             @frames << f
             @frames.shift if @frames.length > KEEP
           end
           @on_frame&.call(f)
+          @perf&.end_frame(f)
           f
         end
 
@@ -195,7 +293,9 @@ module MB
           return if span < ADAPT_SECONDS
 
           measured = @window_frames / span
-          err = 1.0 / measured - @period # (seconds per frame too long, positive when short of the target)
+          # (seconds per frame too long, positive when short of the target;
+          # the target is the gap's rate when #min_gap is the longer)
+          err = 1.0 / measured - (@min_gap && @min_gap > @period ? @min_gap : @period)
           @trim = (@trim + TRIM_GAIN * err).clamp(0.0, MAX_TRIM * @period)
           @window_at = woke
           @window_frames = 0
@@ -207,9 +307,9 @@ module MB
         end
 
         # The last frames' timing over +window+ seconds: refreshes per
-        # second, written frames per second, and p50/max milliseconds of
-        # paint, write, sleep asked, oversleep, and lateness, plus skipped
-        # deadlines.
+        # second, written frames per second, and p50/p99/max milliseconds
+        # of paint, write, sleep asked, oversleep, and lateness, skipped
+        # deadlines, and the longest gap between frame starts.
         def breakdown(window: 2.0)
           now = @clock.call
           fs = @lock.synchronize { @frames.select { |f| f.at > now - window } }
@@ -220,20 +320,38 @@ module MB
             written: (fs.count { |f| f.wrote > 0 } / window).round(1),
             paint_ms: ms.(fs.map(&:paint)),
             write_ms: ms.(fs.map(&:write)),
+            hold_ms: ms.(fs.map(&:hold)),
             sleep_ms: ms.(fs.map(&:sleep)),
             oversleep_ms: ms.(fs.map { |f| f.slept - f.sleep }),
             late_ms: ms.(fs.map(&:late)),
             skipped: fs.sum(&:skipped),
+            # (ui-perf-1: the longest time between two frames' starts in
+            # the window, the stall a steady rate can hide)
+            gap_ms: fs.each_cons(2).map { |a, b| (b.at - a.at) * 1000 }.max&.then { |v| MB::M.sigfigs(v, 3) },
           }
         end
 
         # The breakdown as one line for the status bar (NAV f): refreshes
-        # against the target, frames written, and where a frame's time went.
+        # against the target, frames written, where a frame's time went
+        # (p50s), and the window's p99 lateness and longest gap between
+        # frames when they hitch (ui-perf-1: smooth is p99 and gaps, not
+        # means; #hitches decides, so steady frames keep the line short).
         def readout(window: 2.0)
           b = breakdown(window: window)
           f = ->(v) { v.nil? ? '-' : format('%.1f', v) }
           "#{b[:refreshes].round}/#{b[:target].round} Hz · #{b[:written].round} written · paint #{f.(b[:paint_ms][:p50])} write #{f.(b[:write_ms][:p50])} " \
-            "wait #{f.(b[:sleep_ms][:p50])}+#{f.(b[:oversleep_ms][:p50])} ms#{b[:skipped] > 0 ? " · #{b[:skipped]} missed" : ''}"
+            "wait #{f.(b[:sleep_ms][:p50])}+#{f.(b[:oversleep_ms][:p50])} ms" \
+            "#{hitches(b) ? " · late p99 #{f.(b[:late_ms][:p99])} / stall #{b[:gap_ms]&.round || '-'} ms" : ''}" \
+            "#{b[:skipped] > 0 ? " · #{b[:skipped]} missed" : ''}"
+        end
+
+        # True when a #breakdown's frames hitch: p99 lateness over half a
+        # frame period, or a gap between frame starts over two periods.
+        def hitches(b = breakdown)
+          period_ms = @period * 1000
+          late = b[:late_ms][:p99]
+          gap = b[:gap_ms]
+          (!late.nil? && late > period_ms / 2) || (!gap.nil? && gap > period_ms * 2)
         end
 
         # The transition table as text lines (for the spec and help).

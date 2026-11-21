@@ -38,7 +38,12 @@ module MB
       # +choices+ are answers given while the line ran that a replay can't
       # ask again ([kind, key, choice] rows; see .note_choice), e.g. how a
       # rack conflict of a loaded document was settled.
-      Line = Struct.new(:id, :code, :issued, :lands, :skipped, :epoch, :choices, keyword_init: true)
+      #
+      # +held+ is the frames into a pause of the transport where a line
+      # typed while paused landed (Session#pause_held_frames; nil
+      # otherwise): the timeline stands still then, so its position can't
+      # tell those lines apart (pause-tails-1).
+      Line = Struct.new(:id, :code, :issued, :lands, :skipped, :epoch, :choices, :held, keyword_init: true)
 
       # Commands that play in the foreground or show things (they would
       # block or draw during a replay), skipped by replays: lines that start
@@ -238,11 +243,17 @@ module MB
       end
 
       # Starts recording a console line (Pry's :before_eval hook).  Returns
-      # the Line.
+      # the Line, or nil for a blank line (Enter on nothing changes nothing,
+      # so takes leave it out; ux-friction-1: his take kept three).
       def begin_line(code)
+        if code.to_s.strip.empty?
+          Session.set_context_fields(take_line: nil)
+          return nil
+        end
         line = @mutex.synchronize {
           @next_id += 1
-          Line.new(id: @next_id, code: code.to_s, issued: session.clock, lands: [], skipped: foreground?(code), epoch: session.epoch - @start_epoch, choices: [])
+          Line.new(id: @next_id, code: code.to_s, issued: session.clock, lands: [], skipped: foreground?(code), epoch: session.epoch - @start_epoch, choices: [],
+                   held: session.pause_held_frames)
         }
         @mutex.synchronize { @lines << line }
         Session.set_context_fields(take_line: [self, line])
@@ -400,7 +411,7 @@ module MB
             out << "  # skipped (foreground): #{l.code.lines.first.to_s.strip}\n"
             next
           end
-          out << "  r.line #{ruby_value(l.issued.pos)}, #{ruby_value(l.lands)}, <<~'RUBY'#{l.epoch.to_i > 0 ? ", epoch: #{l.epoch}" : ''}#{l.choices.to_a.empty? ? '' : ", choices: #{l.choices.inspect}"}\n"
+          out << "  r.line #{ruby_value(l.issued.pos)}, #{ruby_value(l.lands)}, <<~'RUBY'#{l.epoch.to_i > 0 ? ", epoch: #{l.epoch}" : ''}#{l.held ? ", held: #{l.held}" : ''}#{l.choices.to_a.empty? ? '' : ", choices: #{l.choices.inspect}"}\n"
           l.code.each_line { |c| out << "    #{c.chomp}\n" }
           out << "  RUBY\n"
         end
@@ -415,7 +426,7 @@ module MB
           midi.each { |name, rows| r.midi(rows, input: name) }
           r.decisions(decisions)
           r.gestures(gestures)
-          lines.each { |l| r.line(l.issued.pos, l.lands.dup, l.code, epoch: l.epoch.to_i, choices: l.choices.to_a.dup) }
+          lines.each { |l| r.line(l.issued.pos, l.lands.dup, l.code, epoch: l.epoch.to_i, choices: l.choices.to_a.dup, held: l.held) }
         end
       end
 

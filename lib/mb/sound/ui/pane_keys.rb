@@ -134,9 +134,11 @@ module MB
 
         # A live, unjournaled knob move a pane key asks for (a step of a
         # held-key gesture; UI::TurnGesture): the screen calls
-        # Session#preview_turn.  A Commit follows.
-        Preview = Data.define(:knob, :value) do
-          def self.[](knob, value) = new(knob: knob, value: value)
+        # Session#preview_turn.  A Commit follows.  +note+, if given, is
+        # what the status line says (the tracks pane's "drums at -3 dB"),
+        # else the knob and its value.
+        Preview = Data.define(:knob, :value, :note) do
+          def self.[](knob, value, note = nil) = new(knob: knob, value: value, note: note&.freeze)
         end
 
         # The end of a held-key gesture on +knob+: the screen runs

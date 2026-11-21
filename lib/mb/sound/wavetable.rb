@@ -596,7 +596,9 @@ module MB
         sync = false unless sync && @mode == :cycle && @spacing
         scan_wrap = !!scan_wrap && @mode == :cycle && @frame_count > 1
         by_rate = @kernel_specs[sample_rate] ||= {}
-        by_rate[[emphasis, sync, scan_wrap]] ||= begin
+        # (an Integer key: an Array key allocated one per buffer of every
+        # wavetable tone)
+        by_rate[(emphasis ? 4 : 0) | (sync ? 2 : 0) | (scan_wrap ? 1 : 0)] ||= begin
           hi, lo = thresholds(sample_rate, sync: sync)
           levels, loop_levels = sync ? [sync_level_set(emphasis), nil] : level_set(emphasis)
           [

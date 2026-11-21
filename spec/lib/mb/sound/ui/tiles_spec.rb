@@ -270,6 +270,71 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     expect_meters_only_in_place
   end
 
+  it 'wakes the painter once for the REPL output after a key with Tiles.echo_wake (ui-perf-1, an option)' do
+    old = MB::Sound::UI::Tiles.echo_wake
+    MB::Sound::UI::Tiles.echo_wake = true
+    start
+    host = @tiles.instance_variable_get(:@host)
+    expect(host.on_output).not_to be_nil
+    painter = @tiles.instance_variable_get(:@painter)
+    wakes = 0
+    fake = Object.new
+    fake.define_singleton_method(:wakeup) { wakes += 1 if Thread.current.name == 'MB::Term pty' } # (the echo's wakes, not the key's)
+    begin
+      @tiles.instance_variable_set(:@painter, fake)
+      @term.type('1')
+      ok = wait_until(timeout: 2) { wakes >= 1 }
+      expect(ok).to eq(true)
+      @term.type('2')
+      expect(wait_until(timeout: 2) { wakes >= 2 }).to eq(true)
+      settled = wakes
+      @tiles.send(:echo_output) # (more output: no key since the last wake)
+      expect(wakes).to eq(settled)
+      @tiles.instance_variable_set(:@echo_key_at, @tiles.instance_variable_get(:@clock).call - 1.0)
+      @tiles.send(:echo_output) # (a key long ago: no wake)
+      expect(wakes).to eq(settled)
+    ensure
+      @tiles.instance_variable_set(:@painter, painter)
+      MB::Sound::UI::Tiles.echo_wake = old
+    end
+  end
+
+  it 'sends a full repaint as the cells that changed, the terminal showing the grid after focus moves, zooms, overlays, and modes (ui-perf-1)' do
+    start(source: -> { ui_fake_snapshot })
+    expect(@term.wait_for('LUFS')).to eq(true)
+    whole = -> { [@term.text, @tiles.to_text].map { |t| t.lines.map(&:rstrip).join("\n") } }
+    same = lambda do |what|
+      @term.read_and_settle
+      ok = wait_until(timeout: 2) { a, b = whole.(); a == b }
+      a, b = whole.()
+      expect(ok).to eq(true), "#{what}: the terminal shows\n#{a}\n\nthe grid holds\n#{b}"
+    end
+    same.('start')
+
+    cleared = @term.bytes
+    nav('2')
+    same.('focus 2')
+    nav('3')
+    same.('focus 3')
+    nav('z')
+    same.('zoom')
+    nav('z')
+    same.('unzoom')
+    nav('?')
+    expect(@term.wait_for('keys (Esc closes')).to eq(true)
+    same.('key overlay')
+    @term.write("\e")
+    same.('overlay closed')
+    @term.type('i')
+    same.('back to the REPL')
+    # (every step sent the whole screen before: 34 KB for these seven
+    # steps; their changed cells are 10 KB, 2026-11-16)
+    expect(@term.bytes - cleared).to be < 20_000
+
+    @tiles.act(MB::Term::Input::Action.of(:redraw)) # Ctrl-L still sends everything
+    same.('redraw')
+  end
+
   it 'draws rules between stacked panes, joined, with the lower pane\'s title set into the rule (ux-1 item 9)' do
     %i[unicode ascii].each do |glyphs|
       @tiles&.stop

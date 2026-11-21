@@ -557,6 +557,102 @@ RSpec.describe(MB::Sound::Session) do
       expect(nonzero(data)).to eq([96000 * 2 - 120000])
     end
 
+    # (knobs-pane-keys-1 round 2: the tracks pane's Space during a stop's
+    # fade got "No background player to resume")
+    describe 'while a stop is still fading it out' do
+      # Plays :pad (1.0), stops it with a one-bar fade at 1/16 (frame
+      # 6000), resumes it (asked at frame 52000, landing on the next bar,
+      # 96000, with a quarter-bar fade-in), and stops it again at bar 3
+      # (288000) with a quarter-bar fade.  Returns [channel 0, the session].
+      def stop_resume(size)
+        s = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120),
+                                   buffer_size: size, realtime: false, raise_errors: true)
+        @sessions << s
+        out = []
+        s.add(1.constant, name: :pad, fade: 0)
+        s.remove(:pad, fade: 1, time: 1/16r)
+        events = { 52_000 => -> { expect(s.resume(:pad, fade: 1/4r, start_time: 1r)).to eq(:pad) },
+                   200_000 => -> { s.remove(:pad, fade: 1/4r, time: 3r) } }
+        done = []
+        while s.frame < 420_000
+          events.each { |f, ev| next if done.include?(f) || s.frame < f; ev.call; done << f }
+          out << s.process_buffer[0].dup
+        end
+        [SpecBuffers.join(out), s]
+      end
+
+      before { @sessions = [] }
+      after { @sessions.each(&:close) }
+
+      it 'turns the gain around from where it is, on the next bar, never stopping or restarting the graph, and a later stop still works' do
+        data, s = stop_resume(800)
+        expect(data[50_000]).to be_between(0.2, 0.9) # (fading)
+        bar = 96_000
+        expect(data[bar - 1]).to be < 0.2
+        up = data[bar...(bar + 24_000)].to_a
+        expect(up.each_cons(2).all? { |x, y| y >= x }).to eq(true) # (the quarter-bar fade-in, from where the fade was)
+        expect(up.first).to be_within(0.01).of(data[bar - 1])
+        expect(data[bar + 24_000]).to be_within(1e-6).of(1.0)
+        expect(data[(bar + 24_000)...288_000].to_a.uniq).to eq([1.0]) # (the stop's end never comes)
+        expect(data[-1]).to eq(0)
+        expect(s.stopped.keys).to eq([:pad]) # (the second stop ended it, kept for resume)
+        expect(s.players).to be_empty
+      end
+
+      it 'keeps the player in the players list the whole time' do
+        s = MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true)
+        @sessions << s
+        s.add(1.constant, name: :pad, fade: 0)
+        10.times { s.process_buffer }
+        s.remove(:pad, fade: 1)
+        5.times { s.process_buffer }
+        s.resume(:pad, at: :now, fade: 1/8r)
+        200.times { s.process_buffer; expect(s.players.keys).to eq([:pad]); expect(s.stopped).to be_empty }
+      end
+
+      it 'gives the same samples at 800- and 367-frame buffers' do
+        a, = stop_resume(800)
+        b, = stop_resume(367)
+        n = [a.length, b.length].min
+        expect((a[0...n] - b[0...n]).abs.max).to be < 1e-4 # (-80 dB)
+      end
+
+      it 'undoes each step, and a take of stop and resume inside the fade replays the same' do
+        s = MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true)
+        @sessions << s
+        b = MB::Sound::Take.console_binding
+        t = MB::Sound::Take.new(session: s)
+        line = ->(code) { MB::Sound::Session.with_context(session: s) { t.line(code, b) } }
+        lines = { 0 => 'bg :pad, 1.constant', 130 => 'stop :pad, fade: 1', 150 => 'resume :pad, fade: 1/4r' }
+        out = []
+        300.times do |i|
+          line.(lines[i]) if lines[i]
+          out << s.process_buffer[0].dup
+        end
+        live = SpecBuffers.join(out)
+        expect(s.players.keys).to eq([:pad])
+        expect(live[-1]).to eq(1.0)
+        [[800], [367, 368]].each do |sizes|
+          rep = []
+          t.replay.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_sizes: sizes, tail: 0) { |mix| rep << mix[0].dup }
+          rep = SpecBuffers.join(rep)
+          n = [rep.length, live.length].min
+          expect(n).to be > 250 * 800
+          expect((rep[0...n] - live[0...n]).abs.max).to be < 1e-4, "replay at #{sizes.inspect} differs"
+        end
+
+        # Undo the resume: stopped again (a declick fade), kept for resume
+        MB::Sound::Session.with_context(session: s) { s.undo(on: :now) }
+        100.times { s.process_buffer }
+        expect(s.players).to be_empty
+        expect(s.stopped.keys).to eq([:pad])
+        # Undo the stop: playing again
+        MB::Sound::Session.with_context(session: s) { s.undo(on: :now) }
+        100.times { s.process_buffer }
+        expect(s.players.keys).to eq([:pad])
+      end
+    end
+
     it 'resumes the most recently stopped graph with no name' do
       session.add(1.constant, name: :a)
       session.add(2.constant, name: :b, at: :now)
