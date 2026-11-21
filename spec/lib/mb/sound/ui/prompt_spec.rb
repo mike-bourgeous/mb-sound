@@ -30,13 +30,16 @@ RSpec.describe(MB::Sound::UI::Prompt, :aggregate_failures) do
 
   # Reline's multiline editor in a pty with EnterSubmits: +keys+ typed,
   # returning what readmultiline returned.
-  def readmultiline(*keys)
+  def readmultiline(*keys, pry_indent: false)
     script = <<~RUBY
       $LOAD_PATH.unshift #{File.expand_path('../../../../../lib', __dir__).inspect}
       require 'reline'
       require 'prism'
       require 'mb/sound/ui/prompt'
       MB::Sound::UI::EnterSubmits.install!
+      MB::Sound::UI::FirstLineSpaces.install!
+      # (Pry 0.16's auto-indent proc: 0 for the first line, else its indent)
+      Reline.auto_indent_proc = ->(lines, i, _b, _n) { i == 0 ? 0 : 2 * lines.first(i).count { |l| l.end_with?(' do') } } if #{pry_indent}
       $stdout.sync = true
       text = Reline.readmultiline('> ', false) { |t| Prism.parse(t).success? }
       puts "RESULT:\#{text.inspect}"
@@ -66,5 +69,13 @@ RSpec.describe(MB::Sound::UI::Prompt, :aggregate_failures) do
     expect(readmultiline("6 * 7\n")).to eq('"6 * 7"')
     # Alt-Enter: a new line even in a complete buffer
     expect(readmultiline('1', "\e\r", '2', "\r")).to eq('"1\n2"')
+  end
+
+  it "keeps the space after a first word deleted with Backspace (the maintainer's swap:pluck)" do
+    # bg :pluck, the cursor after bg, two Backspaces, swap typed in their place
+    keys = ['bg :pluck', *(["\e[D"] * 7), "\x7f", "\x7f", 'swap', "\r"]
+    expect(readmultiline(*keys, pry_indent: true)).to eq('"swap :pluck"')
+    # Continuation lines are still indented by the proc
+    expect(readmultiline("[1].each do\r", 'p 1', "\r", 'end', "\r", pry_indent: true)).to start_with('"[1].each do\n  p 1\n')
   end
 end

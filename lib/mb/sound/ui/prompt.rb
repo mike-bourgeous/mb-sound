@@ -130,6 +130,32 @@ module MB
           confirm_multiline_termination ? finish : key_newline(key)
         end
       end
+
+      # Leaves the first line's leading spaces alone (ux-friction-1, the
+      # maintainer's note of 2026-11-21: "Moving the cursor left with arrow
+      # keys then deleting the command also deletes the space before the
+      # first :.  The space should stay").  Reline re-indents the line being
+      # edited after every edit through the auto-indent proc, and Pry's
+      # proc answers 0 for the first line, so deleting `bg` from a recalled
+      # `bg :pluck, :pad` stripped the space too and `swap` typed there ran
+      # as `swap:pluck, :pad`.  The first line has no indentation to fix;
+      # continuation lines are still indented as before.  Prepended to
+      # Reline::LineEditor by bin/sound.rb (the console and the tiles' REPL
+      # pane alike).
+      module FirstLineSpaces
+        def self.install!
+          return unless defined?(::Reline::LineEditor)
+          ::Reline::LineEditor.prepend(self) unless ::Reline::LineEditor.ancestors.include?(self)
+        end
+
+        private
+
+        def process_auto_indent(line_index = @line_index, **)
+          return if line_index == 0
+
+          super
+        end
+      end
     end
   end
 end
