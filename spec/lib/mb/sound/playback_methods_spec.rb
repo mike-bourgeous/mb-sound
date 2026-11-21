@@ -231,12 +231,16 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(out).to be_a(MB::Sound::DeviceOutput)
         expect(out.profile).to eq(:low)
         expect(out.buffer_size).to eq(256)
-        expect(MB::Sound.latency).to eq(:low)
+        # (no argument: what the sound card gets, then the profile;
+        # console-offers-1)
+        expect { expect(MB::Sound.latency).to eq(:low) }.to output(
+          /\AAudio out: null "NULL Playback Device" at 48000 Hz, buffer 256 frames \(latency :low\), period 128, .*\nQueue: .*\nUnderruns \(xruns\): \d+ so far\n\z/
+        ).to_stdout
       end
 
       it 'is also called lag' do
         expect(MB::Sound.lag(:safe)).to eq(:safe)
-        expect(MB::Sound.lag).to eq(:safe)
+        expect { expect(MB::Sound.lag).to eq(:safe) }.to output(/buffer 800 frames \(latency :safe\)/).to_stdout
       end
 
       it 'refuses to switch while players are running' do

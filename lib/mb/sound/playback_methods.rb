@@ -417,17 +417,21 @@ module MB
       # with a new output (see #use_output), so stop all players first.
       # Light patches (e.g. a few band-limited oscillators) can use :low;
       # heavy graphs need :default or :safe.  An AUDIO_PROFILE environment
-      # variable still takes precedence.  Without a profile, returns the
+      # variable still takes precedence.  Without a profile, prints what the
+      # output gets (DeviceReport.report: backend, device, rate, buffer,
+      # period, how many frames the sound server pulls at a time, the queue,
+      # and the underruns (xruns) so far; console-offers-1) and returns the
       # current output's profile (nil if it has none).  Also available as
       # #lag.
       #
       # Example (bin/sound.rb):
       #     latency :low     # about 16-19 ms on the user's Mac
       #     lag :default     # about 45-56 ms
-      #     latency          # => :default
+      #     latency          # prints the facts, => :default
       def latency(profile = nil)
         if profile.nil?
           out = Session.default.output
+          puts DeviceReport.report(out)
           return out.respond_to?(:profile) ? out.profile : nil
         end
 

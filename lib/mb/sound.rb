@@ -119,6 +119,7 @@ require_relative 'sound/genre_methods'
 require_relative 'sound/sampler_methods'
 require_relative 'sound/tracker'
 require_relative 'sound/tracker_methods'
+require_relative 'sound/dropout_methods'
 require_relative 'sound/fit_patch'
 require_relative 'sound/hand_tune'
 require_relative 'sound/reference'
@@ -172,6 +173,7 @@ module MB
     extend GenreMethods
     extend SamplerMethods
     extend TrackerMethods
+    extend DropoutMethods
     extend HelpAutoload
 
     # Speed of sound for wavelength calculations, in meters per second.
@@ -225,6 +227,7 @@ require_relative 'sound/null_output'
 require_relative 'sound/concealment'
 require_relative 'sound/device_output'
 require_relative 'sound/jack'
+require_relative 'sound/device_report'
 require_relative 'sound/device_input'
 require_relative 'sound/loopback'
 require_relative 'sound/array_input'

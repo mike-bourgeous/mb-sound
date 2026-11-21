@@ -172,6 +172,20 @@ RSpec.describe(MB::Term::Viewports, :aggregate_failures) do
       expect(t.redo.layout.panes).to include(:knobs)
     end
 
+    it 'names the layout the next undo goes back to (a caller tells undo steps apart)' do
+      expect(t.undo_layout).to be_nil
+      before = t.layout
+      t.close(:journal)
+      expect(t.undo_layout).to equal(before)
+      after = t.layout
+      t.focus!(:repl) # (not an undo step)
+      expect(t.undo_layout).to equal(before)
+      t.split(:repl, :cols, :knobs)
+      expect(t.undo_layout).not_to equal(before)
+      expect(t.undo.undo_layout).to equal(before)
+      expect(after.panes).not_to include(:journal)
+    end
+
     it 'swaps panes keeping the slots' do
       t.swap(:tracks, :repl)
       expect(t.rects[:repl]).to eq(studio.rects(120, 40)[:tracks])
