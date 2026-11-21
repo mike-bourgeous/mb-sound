@@ -78,6 +78,7 @@ module MB::Sound
       debt = 0.0
       key_i = 0
       sent = []
+      reads = [] # (when each chunk was read: a terminal's update timers restart per chunk)
       replies = 0
       cpu0 = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID)
       pay = lambda do
@@ -103,6 +104,7 @@ module MB::Sound
         rescue EOFError, Errno::EIO
           break
         end
+        reads << now - t0
         debt += data.bytesize.to_f / cfg[:bps] if cfg[:bps]
         cur[:bytes] += data.bytesize
         pos = 0 # (scanned up to)
@@ -164,7 +166,7 @@ module MB::Sound
         pay.call
       end
     ensure
-      File.write(out, JSON.generate({ frames: frames, keys_sent: sent, replies: replies, screen: prev, # (the last frame's screen)
+      File.write(out, JSON.generate({ frames: frames, keys_sent: sent, reads: reads, replies: replies, screen: prev, # (the last frame's screen)
                                       cpu: Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - cpu0 }))
     end
 
@@ -486,6 +488,41 @@ module MB::Sound
         key_to_visible: stats(lat).merge(unseen: unseen, panes: key_panes, each_ms: lat.map { |v| (v * 1000).round(1) }), changed_after_keys: after }
     end
 
+    # What a terminal following +profile+ (a UI::TerminalProfile) would
+    # show of the sink's frames: its view updates from the chunks' read
+    # times (each restarts a :bulk terminal's short timer; :sync shows each
+    # frame at its end), each frame's delay from arrival to the update
+    # that shows it, and per pane the updates that changed it (visible
+    # rate and gaps), optionally moved to the refreshes of a +vsync+ Hz
+    # display.  The sink's own "visible" numbers count every frame.
+    def present_report(data, rects, t_from, profile, vsync: nil)
+      frames = data['frames'].select { |f| f[0] >= t_from }
+      return { model: profile.name, frames: 0 } if frames.empty?
+      ftimes = frames.map(&:first)
+      reads = (data['reads'] || []).select { |t| t >= t_from - 0.05 }
+      arrivals = profile.kind == :sync || reads.empty? ? ftimes : reads
+      updates = profile.presents(arrivals)
+      shown = UI::TerminalProfile.shown_by(ftimes, updates)
+      at = ->(i) { vsync ? UI::TerminalProfile.vsync(updates[i], vsync) : updates[i] }
+      delays = ftimes.each_with_index.filter_map { |t, k| shown[k] && at.(shown[k]) - t }
+      used = shown.compact.uniq
+      span = [ftimes.last - ftimes.first, 1e-6].max
+      hit = ->(f, r) { f[6].any? { |y, x0, x1| y >= r.y && y < r.y + r.h && x1 >= r.x && x0 < r.x + r.w } }
+      shown_times = ->(idx) { idx.map { |i| at.(i) }.uniq }
+      all_t = shown_times.(used)
+      panes = rects.to_h do |name, r|
+        idx = frames.each_index.filter_map { |k| shown[k] if hit.(frames[k], r) }.uniq
+        ts = shown_times.(idx)
+        [name, stats(ts.each_cons(2).map { |a, b| b - a }).merge(visible_per_s: (ts.length / span).round(1))]
+      end
+      { model: profile.name, kind: profile.kind, vsync: vsync, frames: frames.length, written_per_s: (frames.length / span).round(1),
+        updates_per_s: (all_t.length / span).round(1), update_gaps_ms: stats(all_t.each_cons(2).map { |a, b| b - a }),
+        delay_ms: stats(delays), panes: panes,
+        # (frames arriving under the short timer after the one before: each
+        # holds back the earlier frame's update, the hitch at any rate)
+        close_per_s: profile.short ? (ftimes.each_cons(2).count { |a, b| b - a < profile.short } / span).round(1) : nil }
+    end
+
     # --alloc: every object the process allocates for +seconds+ (GC off,
     # ObjectSpace.trace_object_allocations: a TracePoint, fine in this
     # diagnostic, never in lib/), from ObjectSpace.dump_all (imemos
@@ -562,6 +599,10 @@ module MB::Sound
       late: [false, 'With --holders: which calls hand the GVL to the render thread late (FastUI::GVLYield.late_log), and the render waits over 2 ms that overlap a GC step'],
       alloc: [0.0, 'Trace the first this many seconds of the recording: allocation sites by file and site, per second (GC off and traced: the timing numbers include the cost)', 0.0..30.0],
       holders: [false,'Name who holds the GVL while the render thread waits (FastUI::GVLProbe on the render thread, the painter, and worker threads)'],
+      present: [nil, 'Model when a terminal shows the frames (UI::TerminalProfile): konsole (Konsole before 26.04: 10 ms after output stops, 40 ms at the latest), konsole26 or sync (each DEC 2026 frame at its end), cadence:HZ, interval:MS, bulk:SHORT,LONG (ms); several joined by +', String],
+      vsync: [nil, 'With --present: the display\'s refresh rate (Hz); updates move to its next refresh', Float],
+      no_song: [false, 'Play nothing but --line (no song or demo; e.g. --line "bg 120.hz.ramp.filter(:lowpass, cutoff: 2.hz.ramp.at(3000..150))")'],
+      pace: [nil, 'The painter\'s pacing (ui.pace): exact or terminal (frame writes spaced for the --present terminal\'s short timer)', Symbol],
       quiet_header: [false, 'Skip the header line (one scenario of a multi-scenario run)'],
     ) { |_args, p|
       ENV['AUDIO_PROFILE'] = p.latency.to_s if p.latency
@@ -593,7 +634,7 @@ module MB::Sound
           part = File.join(tmp, "#{sc}.json")
           # (the options parsed, passed on: ARGV is consumed by now)
           args = ['-s', p.seconds.to_s, '--warm', p.warm.to_s, '--size', p.size, '--sink', kind.to_s, '--look', p.look.to_s, '--fps', p.fps.to_s]
-          { bps: '--bps', esc_us: '--esc-us', cell_us: '--cell-us', frame_us: '--frame-us', latency: '-L', sink_cpus: '--sink-cpus', buffer: '--buffer', out_latency: '--out-latency', design_line: '--design-line', key_rate: '--key-rate', alloc: '--alloc', queue_ms: '--queue-ms', device_period: '--device-period', demo: '--demo', demo_go: '--demo-go', line: '--line', during: '--during' }.each do |k, flag|
+          { bps: '--bps', esc_us: '--esc-us', cell_us: '--cell-us', frame_us: '--frame-us', latency: '-L', sink_cpus: '--sink-cpus', buffer: '--buffer', out_latency: '--out-latency', design_line: '--design-line', key_rate: '--key-rate', alloc: '--alloc', queue_ms: '--queue-ms', device_period: '--device-period', demo: '--demo', demo_go: '--demo-go', line: '--line', during: '--during', present: '--present', vsync: '--vsync', pace: '--pace' }.each do |k, flag|
             v = p.public_send(k)
             args.push(flag, v.to_s) unless v.nil?
           end
@@ -606,6 +647,7 @@ module MB::Sound
           args << '--late' if p.late
           args << '--gc-off' if p.gc_off
           args << '--no-yield' if p.no_yield
+          args << '--no-song' if p.no_song
           ok = system(RbConfig.ruby, __FILE__, *args, '-S', sc.to_s, '-j', part, '--quiet-header')
           raise "ui_bench: scenario #{sc} failed (#{$?.inspect})" unless ok
           results.concat(JSON.parse(File.read(part)))
@@ -666,12 +708,17 @@ module MB::Sound
             MB::Sound.go(scenes.include?(p.demo_go) ? p.demo_go : (scenes[1] || scenes[0]))
           end
           Thread.pass until session.running?
+        elsif p.no_song
+          # (nothing but --line plays: the maintainer's scope test signal)
+          raise ArgumentError, '--no-song needs --line' unless p.line
+          session = Session.current
         else
           MB::Sound.last_stop(perform: true, seed: 1)
           session = Session.current
           Thread.pass until session.running?
         end
         MB::Sound.module_eval(p.line) if p.line && sc != :design
+        Thread.pass until session.running? if p.no_song
 
         screen = nil
         screen_epoch = nil
@@ -723,6 +770,10 @@ module MB::Sound
         end
 
         if screen
+          # (the model terminal's profile, for ui.pace :terminal; no
+          # KONSOLE_VERSION here)
+          UI::FrameRate.pace = p.pace if p.pace
+          screen.terminal_profile = UI::TerminalProfile.parse(p.present.split('+').first) if p.present && screen.respond_to?(:terminal_profile=)
           screen.start
           screen_epoch = Time.now.to_f # (for matching --yjit-log stamps: the screen's first seconds compile)
           UI.instance_variable_set(screen.is_a?(UI::Tiles) ? :@tiles : :@band, screen)
@@ -956,6 +1007,12 @@ module MB::Sound
           file_calls: file_calls && file_calls.map { |m, path, loc, th| [m, path, loc, th] },
           perf: s, sink_report: UIBench.sink_report(sink, rects, warm, key_panes: UIBench::KEY_PANES[sc] || []), machine: machine,
           pane_cpu_ms: screen.is_a?(UI::Tiles) ? screen.stats[:pane_cpu_ms] : nil, # (each pane's draws, the last 200)
+          pace: screen.respond_to?(:pace) ? screen.pace : nil,
+          # (each model as written, then on the --vsync display too)
+          presents: p.present&.split('+')&.flat_map { |m|
+            pr = UI::TerminalProfile.parse(m)
+            [UIBench.present_report(sink, rects, warm, pr), p.vsync && UIBench.present_report(sink, rects, warm, pr, vsync: p.vsync)].compact
+          },
         }
         results << row
 
@@ -986,6 +1043,16 @@ module MB::Sound
           puts format('  %-12s visible %5.1f/s, visible gaps p50/p95/max %s/%s/%s ms; painter draws %s/s, age p95/max %s/%s ms; draw CPU p50/p99/max %s/%s/%s ms',
                       name, v[:visible_per_s], v[:p50] || '-', v[:p95] || '-', v[:max] || '-', pa[:rate] || '-', pa[:p95] || '-', pa[:max] || '-',
                       pc[:p50] || '-', pc[:p99] || '-', pc[:max] || '-')
+        end
+        (row[:presents] || []).each do |pr|
+          next if pr[:frames].to_i == 0
+          g = pr[:update_gaps_ms]
+          d = pr[:delay_ms]
+          puts "  terminal model #{pr[:model]}#{pr[:vsync] ? " on a #{pr[:vsync].round} Hz display" : ''}: #{pr[:updates_per_s]} view updates/s of #{pr[:written_per_s]} frames/s written#{pr[:close_per_s] ? " (#{pr[:close_per_s]}/s within the short timer of the frame before)" : ''}; " \
+               "update gaps p50/p95/max #{g.values_at(:p50, :p95, :max).join('/')} ms; write to view p50/p95/max #{d.values_at(:p50, :p95, :max).join('/')} ms"
+          pr[:panes].sort_by { |_, v| -v[:visible_per_s] }.first(4).each do |name, v|
+            puts format('    %-12s shown %5.1f/s, gaps p50/p95/max %s/%s/%s ms', name, v[:visible_per_s], v[:p50] || '-', v[:p95] || '-', v[:max] || '-')
+          end
         end
         if file_calls
           puts "  file calls from the screen's threads: #{file_calls.length}#{file_calls.empty? ? '' : " (#{(file_calls.length / wall).round(1)}/s)"}"
