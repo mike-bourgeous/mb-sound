@@ -671,7 +671,9 @@ module MB
       # or nil if there was nothing to resume.
       #
       # Only players with Symbol names are kept after stopping; see
-      # #stopped and #forget.
+      # #stopped and #forget.  A player a stop is still fading out comes
+      # back from where its fade is (the stop is cancelled; its clips play
+      # on in phase), as a player still ringing out does.
       #
       # Example (bin/sound.rb):
       #     bg :pad, pad_graph

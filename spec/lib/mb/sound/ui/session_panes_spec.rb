@@ -234,6 +234,21 @@ RSpec.describe('UI session panes', :aggregate_failures) do
         expect(@session.journal.changes.select { |e| e.subject == :drums }.map(&:kind)).to include(:stop, :resume)
         resumed = @session.journal.changes.reverse.find { |e| e.kind == :resume && e.subject == :drums }
         expect(resumed.lands.pos % @session.transport.bar_length).to eq(0) # (on a bar line)
+        # Space while a stop still fades it out: the stop is cancelled, the
+        # player fades back in where it is (Session#resume, round 2; it
+        # used to print "No background player to resume")
+        row_state = -> { st[:snap]&.players&.find { |p| p.name == :drums }&.state }
+        expect(wait_until { row_state.() == :playing }).to eq(true), row_state.().inspect
+        resumes = -> { @session.journal.changes.count { |e| e.kind == :resume && e.subject == :drums } }
+        was = resumes.()
+        @session.fade_out = 32 # (a stop's fade long enough for the poll to see it fading, with the pump running ahead of real time)
+        @term.write(' ') # (playing: stop, a fade over bars)
+        expect(wait_until { %i[fading stopping].include?(row_state.()) }).to eq(true), row_state.().inspect
+        @term.write(' ') # (still fading: resume)
+        expect(wait_until { resumes.() == was + 1 }).to eq(true)
+        expect(wait_until { @session.players.key?(:drums) && @session.stopped.empty? && row_state.() == :playing }).to eq(true), row_state.().inspect
+        expect(@term.text).not_to include('No background player')
+
         before = @session.level(:drums).to_f
         turns = -> { @session.journal.changes.select { |e| e.kind == :turn && e.subject == :"drums/level" } }
         @term.write("\e[D")
