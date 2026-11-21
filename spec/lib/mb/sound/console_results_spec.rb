@@ -100,6 +100,18 @@ RSpec.describe('console command results') do
     end
   end
 
+  describe '#track on a track that is not playing' do
+    it "says live that the new sound plays from its next launch (ux-friction-1 round 2)" do
+      allow(MB::Sound).to receive(:live?).and_return(true)
+      expect { within { MB::Sound.track(:t) { |v| v.hz.ramp } } }.to output(/track :t: :t isn't playing, so its new sound plays from its next launch \(bg :t, clip/).to_stdout
+      within { MB::Sound.bg(:t, MB::Sound.seq(MB::Sound::A4).n1.loop) }
+      run(1600)
+      expect { within { MB::Sound.track(:t) { |v| v.hz.saw } } }.not_to output.to_stdout
+      allow(MB::Sound).to receive(:live?).and_return(false)
+      expect { within { MB::Sound.track(:u) { |v| v.hz.ramp } } }.not_to output.to_stdout
+    end
+  end
+
   describe '#forget' do
     it 'returns journal entries and can be undone' do
       within do
