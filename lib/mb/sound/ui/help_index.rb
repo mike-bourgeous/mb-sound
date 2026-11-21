@@ -33,7 +33,10 @@ module MB
         # time).
         def entries
           out = []
-          UI.pane_catalog.entries.each { |e| out << Entry.new(kind: :pane, name: e.name.to_s, what: e.description.to_s, how: e.open) }
+          UI.pane_catalog.entries.each do |e|
+            out << Entry.new(kind: :pane, name: e.name.to_s, what: e.description.to_s, how: e.open)
+            e.aliases.each { |a| out << Entry.new(kind: :pane, name: a.to_s, what: "#{e.description} (another name for :#{e.name})", how: e.open) }
+          end
           UI.layout_table.each do |name, kind, desc, size, _panes, _cur|
             out << Entry.new(kind: :layout, name: name.to_s, what: [desc, size && "(#{size})", kind == :script ? 'a script screen' : nil].compact.join(' '),
                              how: kind == :script ? "--ui #{name}" : "ui #{name.inspect}")

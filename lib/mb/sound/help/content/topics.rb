@@ -2034,7 +2034,7 @@ module MB
       section do |d|
         # (The pane catalog, ui.panes: ux-1 r3 item 40)
         d.heading('Panes  (ui.panes; ui.list: what is on screen; ui.size)')
-        d.rows(UI.pane_catalog.entries.map { |e| [e.name.inspect, "#{e.description} (#{e.open})"] }, max_label: 12, wrap: true)
+        d.rows(UI.pane_catalog.entries.map { |e| [[e.name, *e.aliases].map(&:inspect).join(' '), "#{e.description} (#{e.open})"] }, max_label: 12, wrap: true)
         d.heading('Sizes  (one decision per terminal size: UI::Density)')
         d.rows(UI::Density.table.map { |t| t.split(': ', 2) }, max_label: 20)
       end

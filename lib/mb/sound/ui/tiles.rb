@@ -505,6 +505,8 @@ module MB
         # pane there).
         def split(axis = :cols, name = nil, at: nil)
           axis = { v: :cols, s: :rows, beside: :cols, below: :rows }.fetch(axis, axis)
+          name = pane_arg(name) if name
+          at = pane_arg(at) if at
           tile { |t| t.split(at || t.focus, axis, name) }
         end
 
@@ -512,6 +514,7 @@ module MB
         # The REPL stays (without it the console has nowhere to draw; zoom
         # another pane over it instead).
         def close(name = nil)
+          name = pane_arg(name) if name
           tile do |t|
             name ||= t.focus
             raise MB::Term::Viewports::Error, 'The REPL pane stays (z zooms another pane over it)' if name == :repl
@@ -520,24 +523,39 @@ module MB
         end
 
         # Toggles zooming the focused pane (or +name+).
-        def zoom(name = nil) = tile { |t| t.zoom(name || t.focus) }
+        def zoom(name = nil) = (name = pane_arg(name) if name; tile { |t| t.zoom(name || t.focus) })
 
         # Focuses pane +name+ (or the next one).
-        def focus(name = nil) = tile { |t| name ? t.focus!(name) : t.focus_next }
+        def focus(name = nil) = (name = pane_arg(name) if name; tile { |t| name ? t.focus!(name) : t.focus_next })
 
         # Moves the focused pane's edge +dir+ (:left, :right, :up, :down) by
         # +cells+.
-        def resize(dir, cells = 1, name: nil) = tile { |t| t.resize(name || t.focus, dir, cells) }
+        def resize(dir, cells = 1, name: nil) = (name = pane_arg(name) if name; tile { |t| t.resize(name || t.focus, dir, cells) })
 
         # Equal shares for the focused pane's siblings.
-        def equalize(name = nil) = tile { |t| t.equalize(name || t.focus) }
+        def equalize(name = nil) = (name = pane_arg(name) if name; tile { |t| t.equalize(name || t.focus) })
 
         # Swaps panes +a+ and +b+ (default: the focused one).
-        def swap(a, b = nil) = tile { |t| t.swap(a, b || t.focus) }
+        def swap(a, b = nil) = (a = pane_arg(a); b = pane_arg(b) if b; tile { |t| t.swap(a, b || t.focus) })
+
+        # Pane name +name+ given to a command, an alias resolved
+        # (UI::PANE_ALIASES: :pager is :page), raising with a did-you-mean
+        # for a name that is no pane (ux-friction-1: `ui.show :pagr` showed
+        # an empty pane by that name).  A layout's own names pass, and with
+        # +kinds+ so do the jump letters' pane kinds (see #jump).
+        private def pane_arg(name, kinds: false)
+          return name unless name.is_a?(Symbol)
+          n = UI.pane_name(name)
+          return n if kinds && jump_target(n)
+          kind_names = kinds ? [:keyboard, *UI.panes.values.map { |p| PaneKeys.kind_of(p) rescue nil }.compact] : []
+          UI.pane_name!(name, also: @tiler.layout.panes + @panes.keys + kind_names)
+        end
 
         # Shows pane +name+ in the focused slot (or +at+).  The REPL pane
         # is never replaced: on it, +name+ goes beside it instead.
         def show(name, at: nil)
+          name = pane_arg(name)
+          at = pane_arg(at) if at
           tile do |t|
             at ||= t.focus
             if at == :repl && name != :repl && @host && !t.layout.panes.include?(name)
@@ -1025,6 +1043,7 @@ module MB
         #
         #     ui.enter :clips
         def enter(name = nil)
+          name = pane_arg(name) if name
           @input_lock.synchronize { enter_unlocked(name) }
           @router.mode
         end
@@ -1060,6 +1079,7 @@ module MB
         #
         #     ui.jump :tracks
         def jump(name)
+          name = pane_arg(name, kinds: true)
           @input_lock.synchronize { jump_unlocked(name) }
           @router.mode
         end
@@ -1880,7 +1900,7 @@ module MB
           names =
             if l.text[0, l.cursor - word.length].end_with?(':')
               # A Symbol: pane names (the catalog) and layouts (`show :sc` Tab)
-              UI.pane_catalog.names.map(&:to_s) + UI.layout_table.map { |r| r[0].to_s }
+              UI.pane_catalog.names.map(&:to_s) + UI::PANE_ALIASES.keys.map(&:to_s) + UI.layout_table.map { |r| r[0].to_s }
             else
               (COMMANDS + palette_binding.receiver.public_methods(false) + palette_binding.local_variables).map(&:to_s).uniq
             end
