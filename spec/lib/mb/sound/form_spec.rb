@@ -920,7 +920,7 @@ RSpec.describe(MB::Sound::Form) do
       flow { a 2; b 2; c 2 }
       run(bar / 2)
       e = nil
-      expect { e = within { MB::Sound.go :c, on: :bar } }.to output(/go :c: the flow seeks to its section :c \(2:1\) and plays on/).to_stdout
+      expect { e = within { MB::Sound.go :c, on: :bar } }.to output(/go :c: at 2:1 the flow seeks ahead to its section :c \(5:1\) and plays on/).to_stdout
       expect(e.kind).to eq(:seek)
       run(bar) # (to bar 2, where the seek lands: the timeline jumps to c at bar 5)
       expect(transport.position).to be_within(1/100r).of(4 + 1/2r)
@@ -944,9 +944,12 @@ RSpec.describe(MB::Sound::Form) do
       expect(pb.section).to eq(:b2)
       expect(pb.section_for_scene(:b)).to eq(:a2)
       expect(pb.section_for_scene(:a)).to eq(:b2)
+      # (fixes-15: the maintainer's `go :build` said "(101:1)", where the
+      # seek lands, and he read it as where the build is; it went back)
+      expect { within { MB::Sound.go(:b, on: :bar) } }.to output(/go :b: at 5:1 the flow seeks back to its section :a2 \(3:1\) and plays on/).to_stdout
       expect { within { MB::Sound.go(:a, section: :a2) } }.to raise_error(ArgumentError, /sections playing :a: :a, :b, :b2/)
       e = nil
-      expect { e = within { MB::Sound.go(:a, section: :a, on: :beat) } }.to output(/seeks to its section :a .*also :b, :b2: go :a, section: :b/).to_stdout
+      expect { e = within { MB::Sound.go(:a, section: :a, on: :beat) } }.to output(/seeks back to its section :a \(1:1\) .*also :b, :b2: go :a, section: :b/).to_stdout
       expect(e.kind).to eq(:seek)
     end
 

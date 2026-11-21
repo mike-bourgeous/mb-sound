@@ -48,12 +48,82 @@ module MB
 
       def self.topic_page(name) = TopicPage.new(TOPICS.fetch(name), index)
 
+      # `Owner#method`, `Owner.method`, and `A::B#method` (fixes-15: `help
+      # Clip#ghost_chords` read the # as a Ruby comment and searched).
+      OWNER_METHOD = /\A((?:::)?[A-Z]\w*(?:::[A-Z]\w*)*)([#.])([a-z_]\w*[?!=]?)\z/
+
+      # The page for +text+ naming a method of a class or module the way
+      # Ruby's docs do (OWNER_METHOD: # for an instance method, . for a
+      # module's or class's own), or nil for other text: the method's page
+      # (its owner's doc index entry, or one made from the method), else a
+      # MissPage with the names it might be (spellings among the owner's
+      # methods, other owners of the name in the index).  +binding+
+      # resolves the name as the console would (`Clip` is
+      # Sequence::Clip there only through the index's owners).
+      def self.owner_method_page(text, binding = nil)
+        m = text.to_s.strip.match(OWNER_METHOD) or return nil
+        const, sep, name = m[1], m[2], m[3].to_sym
+        mod = owner_named(const, name, binding)
+        entry = mod && owner_entry(mod, sep, name)
+        return MethodPage.new([entry], index) if entry
+
+        others = index.find_all(name).reject { |e| e.owner.equal?(mod) }.map { |e| ["#{e.surface == 'console' ? '' : "#{e.surface}#"}#{name}", e] }
+        known = mod ? (sep == '#' ? mod.public_instance_methods : mod.public_methods) : []
+        spelled = DidYouMean::SpellChecker.new(dictionary: known.map(&:to_s)).correct(name.to_s).first(3)
+        MissPage.new(text.to_s.strip, mod && mod.name.to_s.sub('MB::Sound::', ''), spelled.map { |s| "#{const}#{sep}#{s}" }, others)
+      end
+
+      # The class or module +const+ names (through +binding+, then MB::Sound
+      # and Object, then the class or module whose name ends with it,
+      # preferring one defining +name+), or nil.
+      def self.owner_named(const, name, binding)
+        found = begin
+          binding&.eval(const)
+        rescue NameError, SyntaxError
+          nil
+        end
+        [MB::Sound, Object].each do |base|
+          break if found
+
+          found = base.const_get(const.delete_prefix('::'))
+        rescue NameError
+          nil
+        end
+        return found if found.is_a?(Module)
+
+        tail = "::#{const.delete_prefix('::')}"
+        list = ObjectSpace.each_object(Module).select { |c| (n = c.name) && n.start_with?('MB::') && n.end_with?(tail) }
+        documented = (index.console_methods + index.dsl_methods).to_set(&:owner)
+        list.min_by { |c| [c.method_defined?(name) || c.respond_to?(name) ? 0 : 1, documented.include?(c) ? 0 : 1, c.name.length, c.name] }
+      end
+
+      # A doc index entry for method +name+ of +mod+ (+sep+ '#': an
+      # instance method, '.': its own), or nil if it has none (public).
+      def self.owner_entry(mod, sep, name)
+        if sep == '#'
+          return nil unless mod.public_method_defined?(name)
+
+          um = DocIndex.unwrap(mod.instance_method(name))
+          owner = um.owner
+          index.find_all(name).find { |e| e.owner.equal?(owner) } ||
+            DocIndex::Entry.new(name: name, owner: owner, surface: owner.name.to_s.sub('MB::Sound::', ''),
+                                original: (um.original_name == name ? nil : um.original_name), unbound: um)
+        else
+          return nil unless mod.respond_to?(name)
+
+          um = mod.method(name).unbind
+          DocIndex::Entry.new(name: name, owner: mod, surface: mod.name.to_s.sub('MB::Sound::', ''),
+                              original: (um.original_name == name ? nil : um.original_name), unbound: um)
+        end
+      end
+
       # What `help x` returns for each kind of argument.
       def self.page_for(subject)
         case subject
         when nil then Desk.new(index)
         when Regexp then SearchPage.new(subject, index)
         when Symbol, String
+          page = owner_method_page(subject.to_s) and return page
           name = subject.to_sym
           return topic_page(name) if TOPICS.key?(name)
           return topic_page(TOPIC_ALIASES[name]) if TOPIC_ALIASES.key?(name)
@@ -83,8 +153,11 @@ module MB
       # scrollable, q closes); else in a terminal through Pry's pager
       # ($PAGER, default `less -R -F -X`, which prints pages that fit
       # directly), plain text when color is off (ColorPolicy); into pipes
-      # and non-terminals, the whole plain text.  +pry+ is the Pry
-      # instance (nil outside the console: plain output).
+      # and non-terminals, the whole plain text.  A screen that can't page
+      # (the band of `ui :vis`) gets the text printed in the console's
+      # scroll region above it, never the pager (fixes-15: less drew over
+      # the band and left Pry's input line under its border).  +pry+ is
+      # the Pry instance (nil outside the console: plain output).
       def self.show(page, output = $stdout, pry = nil)
         text = Help.for_output(page.to_s, output)
         screen = defined?(UI) && UI.respond_to?(:screen) ? UI.screen : nil
@@ -95,7 +168,7 @@ module MB
           else
             screen.page(MB::U.remove_ansi(text), title: title)
           end
-        elsif pry && ColorPolicy.animate?(output) && Pry.config.pager
+        elsif screen.nil? && pry && ColorPolicy.animate?(output) && Pry.config.pager
           Pry::Pager.new(pry).page(text.end_with?("\n") ? text : "#{text}\n")
         else
           output.puts(text)
@@ -173,6 +246,7 @@ module MB
       def self.page_for_text(text, binding = nil)
         text = text.to_s.strip
         return page_for(nil) if text.empty?
+        page = owner_method_page(text, binding) and return page
 
         tree = Prism.parse(text)
         if tree.success? && (stmts = tree.value.statements.body).length == 1

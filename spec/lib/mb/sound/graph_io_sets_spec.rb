@@ -172,6 +172,27 @@ RSpec.describe('set documents', :aggregate_failures) do
     expect(RecipeHelpers.max_diff(ref, got)).to eq(0)
   end
 
+  # fixes-15 (the maintainer's 2026-11-16 note: a second demo raised a
+  # NoMethodError from Knob::Spec#clamp): knob lines loaded into a session
+  # that has those knobs give them their new ranges and typed values, read
+  # as a fresh declaration reads them (Hz, dB, and seconds)
+  it 'loads typed knob values over knobs the session already has' do
+    s = session
+    doc = ->(cut, lvl, time) { "graph #{io::FORMAT}, name: \"k\", kind: :set\nknob :cut, #{cut}\nknob :lvl, #{lvl}\nknob :time, #{time}\n" }
+    io.load(doc.('(200.hz..6000.hz).at(700.hz)', '(-24.db..0.db).at(-6.db)', '(0.01.seconds..1.seconds).at(0.25.seconds)'), session: s)
+    io.load(doc.('(150.hz..8000.hz).at(2400.hz)', '(-30.db..6.db).at(-12.db)', '(10.ms..2.seconds).at(500.ms)'), session: s)
+    s.process_buffer(800)
+    expect(s.knobs[:cut].spec.range).to eq(150.0..8000.0)
+    expect(s.knobs[:cut].value).to eq(2400.0)
+    expect(s.knobs[:lvl].value).to be_within(1e-12).of(-12.db.to_f)
+    expect(s.knobs[:time].value).to be_within(1e-12).of(0.5)
+
+    # (the same document again: nothing to change)
+    io.load(doc.('(150.hz..8000.hz).at(2400.hz)', '(-30.db..6.db).at(-12.db)', '(10.ms..2.seconds).at(500.ms)'), session: s)
+    s.process_buffer(800)
+    expect(s.knobs[:cut].value).to eq(2400.0)
+  end
+
   it 'saves a loaded set again to the same text, playing bit for bit' do
     a = session
     within(a) { MB::Sound.seed(3); MB::Sound::GraphIOSetSpec.build }

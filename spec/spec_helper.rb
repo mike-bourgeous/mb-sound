@@ -97,6 +97,7 @@ require_relative 'support/render_window_song'
 require_relative 'support/clip_node_reference'
 require_relative 'support/plan_helpers'
 require_relative 'support/kernel_helpers'
+require_relative 'support/env_restore' # (OUTPUT_TYPE and friends put back after every example)
 require_relative 'support/transport_guard'
 require_relative 'support/session_guard'
 require_relative 'support/spawn_guard' # (process starts while a Session plays)

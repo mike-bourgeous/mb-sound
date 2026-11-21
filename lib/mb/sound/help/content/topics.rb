@@ -1076,13 +1076,16 @@ module MB
         notes playing on and the old effect's tail ringing out (one undo
         step); `fx :keys, :off` takes it out, `fx :keys` says what it is.
         `untrack :clap` removes a track from the set (it stops now; undo
-        brings it back; d twice in the tracks pane).
+        brings it back; d twice in the tracks pane).  `clear_set` stops
+        everything and takes out the whole set (tracks, scenes, flow,
+        knobs, buses, master chain; tempo and key stay), one undo step;
+        a `demo` does it first.
         A track's insert is its `master { }`: a Proc takes the track's signal,
         `fx :drums, -> { it.softclip(0.1, 0.9).limiter(ceiling: -6.db) }`.
         In `ui :sound` the library picker's Enter on an effect does this
         for the inspected track.
       TEXT
-      commands :track, :tracks, :untrack, :fx, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
+      commands :track, :tracks, :untrack, :clear_set, :fx, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement
       see :flow, :knobs, :now, :library
       example 'two scenes' do
@@ -1189,23 +1192,32 @@ module MB
       about <<~TEXT
         `demo` loads a whole set into the session, paused at bar 1: Night
         Bus (bin/songs/night_bus_flow.rb), tech house at 126 BPM with 12
-        tracks, 12 scenes, 5 knobs, a master chain, and its song form.
+        tracks, 12 scenes, 5 knobs, a master chain, and its song form;
+        `demo :tunnel_vision` loads the other set (the list is below).
         Nothing plays until you do something: `go :groove` launches a
         scene, `turn :cut, 3000, over: 2` opens the hook's filter, `play_form
         demo.form` plays the whole song (steer it with `loop!`, `onward`,
         `finish`), and `tracks`, `scenes`, `knobs`, `ui :tiles` show what
-        is there.  With something already playing, `demo` asks first
-        (`demo :night_bus, replace: true` stops it).  `demos` lists the
-        sets.  The set is a set document in mb-sound's presets/ (saved by
-        bin/save_presets.rb), so `save :mine, set` keeps your changes.
+        is there.  A demo replaces the set before
+        it, another demo or your own: it stops everything and clears the
+        set first (`clear_set`), and `undo` puts that set back.  The set is a set document in
+        mb-sound's presets/ (saved by bin/save_presets.rb), so `save :mine,
+        set` keeps your changes.
       TEXT
+      section do |d|
+        # (fixes-15: the maintainer's note asked for the list here, not a
+        # pointer to it)
+        d.heading('The demos  (demos prints this list)')
+        d.rows(DemoMethods::DEMOS.map { |name, about| ["demo #{name.inspect}", about] }, max_label: 22, wrap: true)
+      end
       commands :demo, :demos
       note :arrangement
       see :sets, :flow, :knobs, :presets
       example 'the demo sets', sound: false do
-        demos.keys
+        demos
       end
     end
+    Help::TOPIC_ALIASES.merge!(demos: :demo)
 
     Help.topic :genres, 'Genre templates', group: :arrange do
       about <<~TEXT
