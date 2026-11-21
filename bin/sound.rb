@@ -104,6 +104,12 @@ puts MB::Sound::Help.welcome, ''
 # MB::Sound::DropoutMethods)
 MB::Sound::DropoutMethods.start_from_env
 
+# A line when the sound card opens (backend, rate, buffer, and how many frames
+# it pulls at a time), and a warning when it pulls more than the buffer; checked
+# after every console line, on the console's thread (MB::Sound::DeviceReport)
+MB::Sound::DeviceReport.poll
+Pry.config.hooks.add_hook(:after_eval, :mb_sound_device_report) { |_result, _pry| MB::Sound::DeviceReport.poll }
+
 # The take: an always-on log of every line typed and exactly where each change
 # it made landed (see MB::Sound::Take); `take.save` writes a script that
 # replays the performance.  Started after warm_up, so it records the random

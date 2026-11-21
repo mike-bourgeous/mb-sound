@@ -242,7 +242,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `:plots` Plots: plot spectrum spectrogram time_freq hist density mag_phase overlay overlay_chart table chart figure vis
 - `:analysis` Analysis: freq_estimate peaks autocorrelate crosscorrelate peak_correlation analyze_form loudness analyze compare look reverb_match bar_stats compare_bars
 - `:loudness` Loudness: loudness render bar_stats
-- `:now` Help and what is going on: help now lesson players knobs scenes tracks mutes changes markers ruby debug_dump dropouts
+- `:now` Help and what is going on: help now lesson players knobs scenes tracks mutes changes markers ruby debug_dump dropouts latency
 - `:ui` Dashboard band and tiled screen: ui off pane layout keys fg jobs
 - `:inspector` Sound design: the patch inspector: design ui knob turn learn bind
 - `:hand_tune` Hand-tuning a fitted sound: tuner tune save_fit fit_saves restore_fit fit_patch ab retune refine audition
