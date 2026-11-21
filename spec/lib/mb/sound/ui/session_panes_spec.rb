@@ -321,6 +321,27 @@ RSpec.describe('UI session panes', :aggregate_failures) do
       expect(pane.key_action(:stop_track, st).note).to include('v shows them')
     end
 
+    # (ui-phase1-1, the plan's Phase 1 item 13: typed values on every value row)
+    it 'types the picked track\'s level with = (Enter stays unmapped)' do
+      pk = ui::PaneKeys
+      st = { mode: true }
+      paint(st)
+      expect(pane.key_action(:ask_level, st)).to start_with('pick a track first')
+      st[:cursor] = :t1
+      expect(pane.key_action(:ask_level, st)).to eq([pk::Ask['level :t1, ', '0.0.db', :typed_level, select: true]])
+      pane.key_action(:level, st, -1) # (a gesture: its line goes first, the prompt starts at the carried level)
+      r = pane.key_action(:ask_level, st)
+      expect(r[0]).to eq(pk::Commit[:"t1/level"])
+      expect(r[1].text).to eq('-1.0.db')
+      pane.lines_ran(st)
+      expect(pane.key_action(:typed_level, st, '-6.db')).to eq(pk::Turn['level :t1, -6.db', 't1 at -6.db'])
+      expect(pane.key_action(:typed_level, st, '-6.dbx')).to include('numbers have no .dbx')
+      expect(pane.key_action(:typed_level, st, ' ')).to eq('nothing typed')
+      km = ui::Panes::Tracks.mode_keymap.entries
+      expect(km.find { |b| b.chord == ['=', []] }&.action).to eq(:ask_level)
+      expect(km.find { |b| b.chord == [:enter, []] }).to be_nil
+    end
+
     describe 'on a screen' do
       after do
         @tiles&.stop
@@ -385,6 +406,12 @@ RSpec.describe('UI session panes', :aggregate_failures) do
         expect(rows_of.(:repl).join("\n")).not_to include('level :drums')
         MB::Sound::Session.with_context(session: @session) { @session.undo(on: :now) }
         expect(wait_until { (@session.level(:drums).to_f - before).abs < 1e-9 }).to eq(true) # (one undo: the level from before the gesture)
+        # = types a level (ui-phase1-1): the prompt starts selected, typing replaces it
+        @term.type('=')
+        expect(@term.wait_for('level :drums, ')).to eq(true)
+        @term.type("-6.db\r")
+        expect(wait_until { (@session.level(:drums).to_f - -6.db.to_f).abs < 1e-9 }).to eq(true), @session.level(:drums).inspect
+        expect(wait_until { st[:turn_line] == 'level :drums, -6.db' }).to eq(true), st[:turn_line].inspect
         expect(@tiles.mode_problems).to eq([])
       ensure
         stop = true

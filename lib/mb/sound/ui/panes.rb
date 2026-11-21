@@ -382,6 +382,7 @@ module MB
             on [:left, 'h'], :level, -1, help: 'its level 1 dB down, up (held: live, one level line)', label: 'Left Right'
             on [:right, 'l'], :level, 1, help: 'its level 1 dB down, up (held: live, one level line)', label: 'Left Right'
             on '0', :level, 0, help: 'its level back to 0 dB'
+            on '=', :ask_level, help: 'type its level (level :kick, -6.db; Enter stays open)'
             on 'x', :stop_track, help: 'stop it (stop)'
             on ' ', :play_stop, help: 'this track: resume or stop (NAV Space: the transport)', label: 'Space'
             on 's', :solo, help: 'solo, unsolo it'
@@ -504,6 +505,30 @@ module MB
             from = g.turning? ? g.value : Decibels.new(now).to_f
             pv = g.step(kn, from, Decibels.new(db).to_f, self.class.clock.call)
             [*out, pv.with(note: "#{name} at #{Panes.fmt(db)} dB")]
+          end
+
+          # =: type the picked track's level (a prompt line starting with
+          # it, selected so typing replaces it; the knob panes' prompt).
+          # Enter stays unmapped here (the maintainer, 2026-11-21: "let's
+          # give it some more thought").
+          def key_ask_level(state)
+            name = state[:cursor] or return 'pick a track first (Up Down)'
+            t = state[:snap]&.tracks&.find { |x| x.name == name }
+            return "#{name}: not a track (a player of its own; its graph sets its level)" unless t
+            db = carried(state, name) || t.level || 0.0
+            text = db.finite? ? "#{RubyValue.to_ruby(db.round(2).to_f)}.db" : '0'
+            [*flush(state), PaneKeys::Ask["level #{name.inspect}, ", text, :typed_level, select: true]]
+          end
+
+          # The typed answer to #key_ask_level: one `level` line with it
+          # (-6.db, 0.5, 0, a knob name to follow), checked as the knob
+          # panes' typed values are.
+          def key_typed_level(state, text)
+            name = state[:cursor] or return 'pick a track first (Up Down)'
+            text = text.to_s.strip
+            return 'nothing typed' if text.empty?
+            problem = KnobTurns.typed_problem(text) and return "#{name}: #{problem}"
+            PaneKeys::Turn["level #{name.inspect}, #{text}", "#{name} at #{text}"]
           end
 
           # A level gesture's Commit (KnobTurns#key_tick) says its line on

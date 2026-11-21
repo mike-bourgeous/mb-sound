@@ -2047,7 +2047,7 @@ module MB
         steps).  In the tracks pane Left/Right set the level a dB a press
         (held: live, then one `level :bass, -6.0.db` line), Space plays a stopped track again
         (`resume :bass`) or stops a playing one (NAV Space is the
-        transport), x stops, s solos, m mutes.  In the form pane Up/Down
+        transport), x stops, s solos, m mutes, = types a level.  In the form pane Up/Down
         pick a section, Enter goes there next (`goto :drop`), r loops it
         (`loop!`, or `practice :drop`), n `onward`, > `skip`, f `finish`,
         Space the transport.  In the buses pane Up/Down pick a bus or a
