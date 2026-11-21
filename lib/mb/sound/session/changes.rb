@@ -74,7 +74,7 @@ module MB
         # Change kinds whose subject isn't a player or :master (no undo
         # snapshots; e.g. scene launches, whose players' changes are
         # separate).
-        NO_SNAPSHOT_KINDS = [:scene, :skip, :snap, :rec, :arm, :disarm, :learn, :record, :stop_record].freeze
+        NO_SNAPSHOT_KINDS = [:scene, :skip, :snap, :rec, :arm, :disarm, :learn, :record, :stop_record, :pause, :play_on].freeze
 
         # The Journal of changes made to this Session.
         attr_reader :journal
@@ -241,7 +241,7 @@ module MB
         def transport_record_for(playing)
           {
             frame: @frame, pos: @transport.position, bpm: @transport.bpm,
-            bar_length: @transport.bar_length, playing: playing
+            bar_length: @transport.bar_length, playing: playing, paused: @tp_paused
           }.freeze
         end
 

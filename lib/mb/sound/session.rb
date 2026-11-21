@@ -31,6 +31,7 @@ require_relative 'session/stems'
 require_relative 'session/cue'
 require_relative 'session/monitor_trim'
 require_relative 'session/pause_fade'
+require_relative 'session/transport_pause'
 require_relative 'session/safety_limiter'
 require_relative 'session/buses'
 require_relative 'session/racks'
@@ -97,6 +98,7 @@ module MB
       include Stems
       include MonitorTrim
       include PauseFade
+      include TransportPause
       include SafetyLimiter
       include UIFeed
       include Warming
@@ -137,6 +139,8 @@ module MB
         :clip, # (the clip a track's patch was built for, or nil; see #built_clip)
         :ends_after, # (nodes whose ending starts its quiet ring-out; Tails#end_after)
         :ends_tail, # (that ring-out's cap in seconds, nil for Master::MAX_TAIL_SECONDS; Tails#end_after)
+        :pause_level, :pause_ramp, # (the strip's pause level and its Fades::Ramp while the transport pauses; nil for 1; TransportPause)
+        :pause_whole, # (true while it holds as a whole: not rendered once faded; TransportPause)
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
@@ -332,6 +336,7 @@ module MB
         @paused = false
         @render_error = nil # (see #render_error)
         init_pause_fade
+        init_transport_pause
 
         @players = {}
         @stopped = {}
@@ -1157,7 +1162,8 @@ module MB
             # typed in, like live lines typed between buffers, so a tempo
             # they set covers the whole span (see Scheduler::Entry#exact)
             from = @transport.position
-            to = from + span_step(remaining, per_sample)
+            # (a paused transport stands still: TransportPause)
+            to = @tp_paused ? from : from + span_step(remaining, per_sample)
             if @scheduler.dispatch_exact(from, to)
               @scheduler.apply_timed_changes
               commit_due_seeks unless @changes.empty?
@@ -1247,7 +1253,10 @@ module MB
       # Called with the render lock held.
       def render_span(count, per_sample, to = nil)
         from = @transport.position
-        to ||= Sequence::Transport.position_at(from, count, per_sample)
+        # A paused transport stands still while everything renders (see
+        # TransportPause)
+        paused = @tp_paused
+        to = paused ? from : (to || Sequence::Transport.position_at(from, count, per_sample))
         old_span = Thread.current[:mb_sound_span]
         old_deferral = Thread.current[:mb_sound_plan_deferral]
         @span.frame = @frame
@@ -1256,8 +1265,8 @@ module MB
         # Offline renders waiting for scheduled blocks keep time while idle
         # (see #advance_idle=), live and offline sessions while a form plays
         # (see Form::Playback#keeps_time?); otherwise the timeline pauses
-        keep_time = @advance_idle || form_keeps_time?(from)
-        @span.moving = keep_time || !idle?
+        keep_time = !paused && (@advance_idle || form_keeps_time?(from))
+        @span.moving = !paused && (keep_time || !idle?)
         @span.sample_rate = sample_rate
         @span.run = @run_frame
         Thread.current[:mb_sound_span] = @span
@@ -1274,7 +1283,7 @@ module MB
           @scheduler.seeked(from)
         end
 
-        @scheduler.dispatch(from, to, playing: keep_time || !idle?)
+        @scheduler.dispatch(from, to, playing: !paused && (keep_time || !idle?))
 
         # MIDI input lands on exact frames before changes (a recording
         # closing in this span needs its events) and graphs read it
@@ -1294,6 +1303,9 @@ module MB
         deferral = plan_deferral
         deferral&.apply
         Thread.current[:mb_sound_plan_deferral] = deferral
+
+        # Held places stay held, graphs started meanwhile too
+        hold_timeline_nodes if paused
 
         # (a reused copy, taken under the lock: every span; dropouts-2)
         players = (@span_player_list ||= [])
@@ -1321,7 +1333,7 @@ module MB
         # Graphs kept for #resume or #undo keep their shared nodes in step
         read_kept_graphs(@frame + count)
 
-        moving = playing || keep_time
+        moving = !paused && (playing || keep_time)
         if moving
           whole_notes = to - from
           @transport.advance_span(from, to, whole_notes)
@@ -1949,7 +1961,9 @@ module MB
         end
 
         ringing = p.ring&.active && !p.fade_out
-        if p.stop_at && p.stop_at < to
+        # (on a paused transport, from == to: a stop landing there is due;
+        # TransportPause)
+        if p.stop_at && (p.stop_at < to || (p.stop_at <= from && to == from))
           if ringing
             # Stops its notes on the exact sample of its stop time, then
             # rings out (see Tails)
@@ -2064,6 +2078,23 @@ module MB
             frames -= asleep_after
           end
         end
+        # A player holding as a whole while the transport is paused (see
+        # TransportPause) stops on the last frame of its fade out, as at a
+        # mute ramp's end, and isn't rendered until the resume
+        if p.pause_whole && asleep_after == 0
+          pr = p.pause_ramp
+          silent_from = pr.nil? ? (p.pause_level.to_f <= 0 ? base + offset : nil) : (pr.to <= 0 ? pr.start + pr.length : nil)
+          if silent_from && silent_from <= base + offset
+            p.pause_level = 0.0
+            p.pause_ramp = nil
+            read_while_asleep(p, frames)
+            p.read_to = base + offset + frames
+            return
+          elsif silent_from && silent_from < base + offset + frames
+            asleep_after = base + offset + frames - silent_from
+            frames -= asleep_after
+          end
+        end
         # A muted player kept awake only by a pre-mute send stops on the
         # frame the send turns off (Buses#pre_mute_off_at), as at a mute
         # ramp's end, so it sleeps at the same point at any buffer size
@@ -2145,6 +2176,10 @@ module MB
           # mute/solo; readers hear it pre-fader, before the mute (+reader+
           # below: its fade and key level; Faders#reader_levels)
           fade = fade_ramp(p, base + offset, frames)
+          if p.pause_ramp || (p.pause_level && p.pause_level < 1)
+            pl = ramp_levels(p, :pause_level, :pause_ramp, base + offset, frames)
+            fade = fade ? fade * pl : pl if pl
+          end
           level = fader_levels(p, base + offset, frames)
           gain = fade ? (level ? fade * level : fade) : level
           strip = ramp_levels(p, :strip_level, :strip_ramp, base + offset, frames)

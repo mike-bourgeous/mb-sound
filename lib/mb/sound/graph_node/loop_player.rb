@@ -1,4 +1,5 @@
 require_relative '../sequence/timeline_node'
+require_relative '../sequence/timeline_hold_fade'
 
 module MB
   module Sound
@@ -52,6 +53,7 @@ module MB
         include GraphNode
         include SampleRateHelper
         include Sequence::TimelineNode
+        prepend Sequence::TimelineHoldFade # (holds its place while the transport is paused)
         node_traits memory: :short, timeline: true, fresh: 'it finds its place from the timeline in a rebuilt graph; its stretcher\'s slices start fresh (not moved yet)'
 
         MODES = [:stretch, :resample].freeze
@@ -120,6 +122,10 @@ module MB
           @timeline_paused = nil
           @timeline_launch = nil
           @node_type_name = 'LoopPlayer'
+          @hold_mode = nil # (pausing in place: Sequence::TimelineHoldFade)
+          @hold_k = nil
+          @hold_i = nil
+          @hold_buf = nil
           @graph_node_name = sample.name
           prepare if mode == :stretch && clock.nil? && @stream.nil?
         end
