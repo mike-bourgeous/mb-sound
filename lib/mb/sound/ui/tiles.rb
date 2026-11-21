@@ -1367,11 +1367,17 @@ module MB
             else
               run_safely {
                 s = keys_session || Session.current
-                # (a flow's first section builds before it lands: said at
-                # once; form-start-1)
-                note = TransportMethods.start_note(s)
-                flash(note, :dim) if note
-                st = UI.run_line(TransportMethods.toggle_line(s), s)
+                line = TransportMethods.toggle_line(s)
+                # (an answer on the next frame: a first start warms every
+                # track before the music, 1.8 s for a demo's 8; the painter
+                # draws this while `start` runs; ui-phase1-1, the plan's
+                # Phase 1 item 2.  A flow's first section says what it
+                # builds, in the words `start` prints: form-start-1)
+                if line == 'start'
+                  flash(TransportMethods.start_note(s) || 'starting... (warming the tracks first)', :key)
+                  @full = true
+                end
+                st = UI.run_line(line, s)
                 next st unless st.is_a?(TransportMethods::Status)
                 # (self: run_safely flashes any other result, and flash's
                 # own return value printed as `=> [text, role, ...]`)
@@ -1711,7 +1717,8 @@ module MB
         # a Preview moves a knob live (Session#preview_turn, unjournaled: a
         # held key's gesture), a Commit runs the gesture's line from the
         # Session (Session#gesture_line) as a Turn; then the pane's
-        # #lines_ran.  A String flashes.
+        # #lines_ran.  A String flashes; an MB::Term::Input::Action runs as
+        # the NAV key it names would (#act).
         def pane_result(name, r)
           ran = false
           Array(r).each do |x|
@@ -1754,6 +1761,10 @@ module MB
               end
             when String
               flash(x, :key)
+            when MB::Term::Input::Action
+              # (a pane key that does what a NAV key does: the form pane's
+              # Space is NAV Space's transport toggle)
+              act(x)
             when :close
               # (a pane asking to be closed: the page pane's q, back to what
               # opened it)

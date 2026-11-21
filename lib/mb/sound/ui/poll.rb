@@ -85,7 +85,7 @@ module MB
           changes = @lock.synchronize { @open.values }
           pos = s.transport.position
           queued = changes.select { |e| e.status == :queued }.last(QUEUED).map { |e|
-            QueuedInfo.new(seq: e.seq, kind: e.kind, subject: e.subject, lands: e.lands.to_s.freeze, pos: e.lands&.pos)
+            QueuedInfo.new(seq: e.seq, kind: e.kind, subject: e.subject, lands: e.lands.to_s.freeze, pos: e.lands&.pos, source: e.source)
           }.freeze
           recording = changes.select { |e| e.kind == :rec && e.status != :failed && e.status != :cancelled }.filter_map { |e|
             ends = e.data[:ends]
@@ -435,7 +435,7 @@ module MB
           FormInfo.new(
             section: pb.section, pass: pb.pass, from: pb.pass_start, to: pb.boundary,
             next: nxt.section, next_at: nxt.at.to_s.freeze, committed: nxt.committed,
-            looping: pb.looping?, ended: false
+            looping: pb.looping?, ended: false, sections: pb.section_rows
           )
         end
       end

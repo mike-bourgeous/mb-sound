@@ -83,10 +83,49 @@ module MB
       # Declares a section outside a flow block, so `flow do ... end` can
       # play it with a bare call (see Arrangement#section): `section
       # :verse, 8.bars, fill: :roll`.  Also available as #define_section.
-      def section(name, length, **options)
+      # With no arguments, returns the section of the form playing (a
+      # Symbol), or nil.
+      def section(name = nil, length = nil, **options)
+        if name.nil? && length.nil? && options.empty?
+          pb = Session.current.arrangement.playback
+          return pb && !pb.ended? ? pb.section : nil
+        end
+        raise ArgumentError, "section #{name.inspect} needs a length (section #{name.inspect}, 8.bars)" if length.nil?
         Session.current.arrangement.section(name, length, **options)
       end
       alias define_section section
+
+      # Lists the sections of the form playing, like #players lists
+      # players (the maintainer, 2026-11-16: "a `sections` command like
+      # `players`"): section name => its lengths and passes ("8 bars x2"),
+      # the one playing marked with its pass and bar, the next one with
+      # where it starts, in the order they first play.  Without a form
+      # playing, the loaded flow's (`demo`'s, or the last one built), else
+      # an empty Hash.  The form pane on the tiled screen steers them (NAV
+      # Enter on it; help :ui).
+      def sections
+        arrangement = Session.current.arrangement
+        pb = arrangement.playback
+        if pb.nil? || pb.ended?
+          f = TransportMethods.loaded_flow(arrangement)
+          return {} unless f
+          return Form::Playback.rows_of(f).to_h { |name, text| [name, text] }
+        end
+        nxt = pb.upcoming
+        t = arrangement.session.transport
+        pb.section_rows.to_h do |name, text|
+          if name == pb.section
+            bars = (t.bar_at(pb.boundary) - t.bar_at(pb.pass_start)).to_r
+            bars = bars.denominator == 1 ? bars.to_i : bars.to_f.round(2)
+            bar = (t.bar_at(Session.current.now) - t.bar_at(pb.pass_start)).floor + 1
+            [name, "#{text} (playing: pass #{pb.pass}, bar #{bar} of #{bars}#{', looping' if pb.looping?})"]
+          elsif name == nxt.section
+            [name, "#{text} (next, at #{nxt.at}#{nxt.committed ? '' : ', open'})"]
+          else
+            [name, text]
+          end
+        end
+      end
 
       # Repeats the section playing now until #onward (from the next
       # boundary that hasn't been decided yet).  Returns where it applies.

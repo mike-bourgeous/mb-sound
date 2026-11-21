@@ -289,6 +289,27 @@ RSpec.describe(MB::Sound::Form) do
       expect(session.journal.changes.find { |e| e.kind == :stop }.data).to eq({ ring: true })
     end
 
+    # (ui-phase1-1; the maintainer, 2026-11-16: "a `sections` command like `players`")
+    it 'lists its sections with `sections` (the one playing, the next) and names the one playing with `section`' do
+      expect(within { MB::Sound.sections }).to eq({})
+      expect(within { MB::Sound.section }).to be_nil
+      setup_scenes(:intro, :verse, :outro)
+      f = within { MB::Sound.flow(play: false) { intro 2; verse 1.bar, times: 2; outro 1 } }
+      expect(f).to be_a(MB::Sound::Form)
+      expect(within { MB::Sound.sections }).to eq(intro: '2 bars', verse: '1 bar x2', outro: '1 bar') # (loaded, not playing)
+      flow do
+        intro 2
+        verse 1.bar, times: 2
+        outro 1
+      end
+      run(bar + 800)
+      expect(within { MB::Sound.section }).to eq(:intro)
+      expect(within { MB::Sound.sections }).to eq(intro: '2 bars (playing: pass 1, bar 2 of 2)', verse: '1 bar x2 (next, at 3:1, open)', outro: '1 bar')
+      within { MB::Sound.loop! }
+      expect(within { MB::Sound.sections }[:intro]).to end_with(', looping)')
+      expect { within { MB::Sound.section(:bridge) } }.to raise_error(ArgumentError, /needs a length/)
+    end
+
     it 'registers a :section marker for each section' do
       setup_scenes(:intro, :verse)
       flow do

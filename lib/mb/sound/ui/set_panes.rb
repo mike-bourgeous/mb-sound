@@ -42,19 +42,24 @@ module MB
 
           mode_keys do
             group 'Clip matrix'
-            on [:up, 'k'], :move, 0, -1, help: 'cursor up', label: 'arrows hjkl'
-            on [:down, 'j'], :move, 0, 1, help: 'cursor down', label: 'arrows hjkl'
-            on [:left, 'h'], :move, -1, 0, help: 'cursor left', label: 'arrows hjkl'
-            on [:right, 'l'], :move, 1, 0, help: 'cursor right', label: 'arrows hjkl'
-            on [:home], :move_to, :first, help: 'first column'
-            on [:end], :move_to, :last, help: 'last column'
+            on [:up, 'k'], :move, 0, -1, help: 'move the cursor', label: 'arrows hjkl'
+            on [:down, 'j'], :move, 0, 1, help: 'move the cursor', label: 'arrows hjkl'
+            on [:left, 'h'], :move, -1, 0, help: 'move the cursor', label: 'arrows hjkl'
+            on [:right, 'l'], :move, 1, 0, help: 'move the cursor', label: 'arrows hjkl'
+            on [:home], :move_to, :first, help: 'first, last column', label: 'Home End'
+            on [:end], :move_to, :last, help: 'first, last column', label: 'Home End'
             on :enter, :launch, help: 'launch the cell: its clip on the track (■: stop the track)'
             on 'g', :scene, help: "launch the cursor column's scene (go)"
             on ['x', '.'], :stop, help: 'stop the track (rings out)'
+            on ' ', :play_stop, help: 'the cell: stop it if it plays, else launch it', label: 'Space'
+            on 's', :solo, help: 'solo, mute the track (again: un-)', label: 's m'
+            on 'm', :mute, help: 'solo, mute the track (again: un-)', label: 's m'
+            on 'a', :cue_cell, help: 'audition the cell in CUE (cue :bass, 3), again: uncue'
             group 'Tweak the track\'s clip (a new slot, at its launch point)'
             EDITS.each { |key, help, _| on key, :tweak, key, help: help }
             group 'Clip matrix'
             on 'u', :undo, help: 'undo the last change (at the next bar)'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
           end
 
           keys do
@@ -243,6 +248,44 @@ module MB
             end
           end
 
+          # Space (ui-phase1-1, the plan's Phase 1 item 15: the tracks
+          # pane's keys in the matrix): the cell's track stops if the cell
+          # is what it plays, else the cell launches (Enter's line).
+          def key_play_stop(state)
+            cell = cursor_cell(state) or return 'no clip here'
+            t, slot, = cell
+            return PaneKeys::Run["stop #{t.name.inspect}", "stop #{t.name.inspect}"] if slot.is_a?(Integer) && t.playing == slot && t.state == :playing
+            key_launch(state)
+          end
+
+          # s: solos the cursor's track, or unsolos it (the player's flag).
+          def key_solo(state)
+            name = cursor_track(state) or return 'no track here'
+            part = state[:snap].players.find { |p| p.name == name }
+            part&.soloed ? PaneKeys::Run["unsolo #{name.inspect}", "#{name} unsoloed"] : PaneKeys::Run["solo #{name.inspect}", "#{name} soloed"]
+          end
+
+          # m: mutes the cursor's track, or unmutes it (the player's flag).
+          def key_mute(state)
+            name = cursor_track(state) or return 'no track here'
+            part = state[:snap].players.find { |p| p.name == name }
+            part&.muted ? PaneKeys::Run["unmute #{name.inspect}", "#{name} unmuted"] : PaneKeys::Run["mute #{name.inspect}", "#{name} muted"]
+          end
+
+          # a: auditions the cell on CUE (`cue :bass, 3`), or ends the
+          # track's CUE when it has one playing (`uncue :bass`).
+          def key_cue_cell(state)
+            cell = cursor_cell(state) or return 'no clip here'
+            t, slot, = cell
+            cue = MB::Sound::Session::Name.cue(t.name)
+            return PaneKeys::Run["uncue #{t.name.inspect}", "#{t.name} out of CUE"] if state[:snap].players.any? { |p| p.name == cue }
+            return "#{t.name.inspect}: nothing in this cell to audition" unless slot.is_a?(Integer)
+            PaneKeys::Run["cue #{t.name.inspect}, #{slot}", "#{label(t, slot)} in CUE (the phones; a again: uncue, launch :#{t.name} takes it to MAIN)"]
+          end
+
+          # e: Enter's line for the cell (PaneKeys#key_edit_line).
+          def edit_line(state) = key_launch(state)
+
           def key_scene(state)
             cell = cursor_cell(state) or return 'no scene here'
             _, _, sc = cell
@@ -268,6 +311,9 @@ module MB
           def key_undo(_state) = PaneKeys::Run['undo', 'undo']
 
           private
+
+          # The cursor's track name, or nil.
+          def cursor_track(state) = cursor_cell(state)&.first&.name
 
           def cursor_cell(state)
             m = state[:snap]&.matrix or return nil
@@ -412,6 +458,7 @@ module MB
             on ['H'], :turn, -FINE, help: 'turn down, fine'
             on '0', :reset, help: "the knob's default"
             on :enter, :ask, help: 'type a value (turn :"bass/dub/tone", 3000.hz)', label: 'Enter'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
           end
 
           keys do

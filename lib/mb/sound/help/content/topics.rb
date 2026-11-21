@@ -1041,9 +1041,11 @@ module MB
         every scheduled block, `scheduled` lists them, and
         `reset_scheduler` (or `panic`, which also stops the players)
         cancels everything, stops a song form, and replaces a stuck
-        scheduler.  Commands inside a block land exactly at its time, and
-        each block is one undo step.  `at_bar`, `after`, and `every` take
-        launch points too (`at_bar in: 2.beats`, `every 1.n4, on: :beat`).
+        scheduler.  `cancel queued: :bass, kind: :stop` takes back a change
+        still waiting to land (the queue pane's x; one undo step).
+        Commands inside a block land exactly at its time, and each block is
+        one undo step.  `at_bar`, `after`, and `every` take launch points
+        too (`at_bar in: 2.beats`, `every 1.n4, on: :beat`).
       TEXT
       commands :at_bar, :after, :every, :scheduled, :cancel, :reset_scheduler, :marker, :at_marker
       note :method_modules
@@ -1133,10 +1135,12 @@ module MB
         same name) with labels, gotos, and picks decided at commit points;
         perform it with loop!, onward, goto, skip, finish, practice, seek.
         `flow` alone shows it (where it is, what comes next, how to end
-        it); `start` (or `play`, `go` with nothing) plays the loaded flow
-        (its first section's tracks start together, first notes included,
-        once the last is built: "starting: building 4 tracks ...") and
-        `pause` (NAV Space) toggles: the bar stops, sounding notes
+        it), `sections` lists its sections like `players` (the one playing,
+        the next), `section` alone names the one playing; `start` (or
+        `play`, `go` with nothing) plays the loaded flow (its first
+        section's tracks start together, first notes included, once the
+        last is built: "starting: building 4 tracks ...") and `pause` (NAV
+        Space) toggles: the bar stops, sounding notes
         release, loops and drones fade out and hold their place, and
         echoes and reverbs ring out; playing on doesn't retrigger notes
         (`start resync: true` puts tempo-synced LFOs back on the grid).
@@ -1147,7 +1151,7 @@ module MB
         `go :drop, section: :drop2` picks one; a scene no section plays
         ends the flow: you're driving).
       TEXT
-      commands :flow, :start, :pause, :play_form, :section, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter, :suspend
+      commands :flow, :start, :pause, :play_form, :section, :sections, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter, :suspend
       note :arrangement
       see :sets, :long_form
       example 'a tiny song form' do
@@ -2081,7 +2085,9 @@ module MB
         knobs, buses with meters.  Focus a pane in NAV (its number, or a
         for clips, r racks, o knobs, b buses) and press Enter for its keys: arrows
         move, Enter launches the cell (`launch :bass, 3`), g its scene (`go
-        :drop`), x stops the track, + - > < transpose, L legato, S swing, Q
+        :drop`), x stops the track, Space plays or stops the cell, s m
+        solo and mute its track, a auditions it in CUE (`cue :bass, 3`),
+        + - > < transpose, L legato, S swing, Q
         quantize, D double, H half, R reverse (`tweak :bass, transpose: 1`),
         u undo; in racks and the knobs pane Up/Down pick a knob and
         Left/Right turn it (Shift: fine; 0 its default; Enter types a
@@ -2090,7 +2096,17 @@ module MB
         steps).  In the tracks pane Left/Right set the level a dB a press
         (held: live, then one `level :bass, -6.0.db` line), Space plays a stopped track again
         (`resume :bass`) or stops a playing one (NAV Space is the
-        transport), x stops, s solos, m mutes.  Every key runs one console
+        transport), x stops, s solos, m mutes, = types a level.  In the form pane Up/Down
+        pick a section, Enter goes there next (`goto :drop`), r loops it
+        (`loop!`, or `practice :drop`), n `onward`, > `skip`, f `finish`,
+        Space the transport.  In the buses pane Up/Down pick a bus or a
+        send, Left/Right the send's level (one `feed :pad, :verb, -9.0.db`
+        line when you let go), 0 closes it, Enter types it, m mutes the
+        bus.  In the messages pane Enter opens the bottom one in full
+        (`ui.message 2`).  In those panes (and the matrix, knobs, racks,
+        queue) e puts the picked row's line on the console unrun, to
+        edit.  Every key
+        runs one console
         line: journaled, undoable, in your take (knob turns show on the
         pane's last row, other lines in the console).  `ui :mixer` shows
         buses beside the master.

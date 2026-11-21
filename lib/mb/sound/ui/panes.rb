@@ -157,13 +157,104 @@ module MB
 
         # Form: the section playing, how far through it, and what comes
         # next; the current scene without a form.
+        #
+        # In its own mode (NAV Enter; ui-phase1-1, the 2026-11-21 plan's
+        # Phase 1 item 3: "the form pane is the only place the song's
+        # sections show, and it does nothing") the keys steer the form with
+        # the lines a player types: Up/Down pick one of its sections
+        # (Form::Playback#section_rows, in the order they first play),
+        # Enter goes there next (`goto :drop`, at the section's end), r
+        # loops the section (`loop!` for the one playing, `practice :drop`
+        # for another; again on a looping one: `onward`), n moves on
+        # (`onward`), > leaves at the next bar line (`skip`), f plays the
+        # ending next (`finish`), Space plays or pauses the transport as
+        # NAV Space does (the plan's vocabulary: a pane with nothing of its
+        # own to play).  With one row the picked section shows on it; with
+        # more, the status line and then the sections, the picked one
+        # reversed.  Outside the mode it draws as it always has.
         class Form < Pane
-          def initialize = super(:form, rate: 8, height: 1, width: 44, description: 'the form\'s section, how far through, and what comes next (or the scene)')
+          mode_keys do
+            group 'Form'
+            on [:up, 'k'], :pick, -1, help: 'the section above, below', label: 'Up Down'
+            on [:down, 'j'], :pick, 1, help: 'the section above, below', label: 'Up Down'
+            on :enter, :goto, help: 'go there next (goto :drop, at this section\'s end)', label: 'Enter'
+            on 'r', :loop, help: 'loop it (loop!, or practice :drop for another; again: onward)'
+            on 'n', :onward, help: 'move on after a loop (onward)'
+            on '>', :skip, help: 'leave this section at the next bar line (skip)'
+            on 'f', :finish, help: 'the ending next (finish)'
+            on ' ', :transport, help: 'play / pause the transport (as NAV Space)', label: 'Space'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
+            on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
+          end
+
+          def initialize = super(:form, rate: 8, height: 1, width: 44, description: 'the form\'s section, how far through, and what comes next (or the scene); steer it from its keys')
 
           def draw_body(c, s, state)
             return unless s
 
+            state[:snap] = s
             f = s.form
+            return draw_mode(c, s, f, state) if state[:mode]
+            draw_status(c, s, f)
+          end
+
+          # Up/Down: the section above or below (from the one playing when
+          # none is picked yet).
+          def key_pick(state, d)
+            rows = rows_of(state) or return no_form_note(state)
+            i = rows.index { |r| r[0] == picked_name(state) } || 0
+            i = (i + d).clamp(0, rows.length - 1)
+            state[:pick] = rows[i][0]
+            "#{rows[i][0]} #{rows[i][1]} (Enter goes there next, r loops it)"
+          end
+
+          # The arrows' scrolling (Pane's) picks here.
+          def key_scroll(state, *) = key_pick(state, 1)
+
+          # Enter: the picked section next (`goto :drop`).
+          def key_goto(state)
+            name = picked_name(state) or return no_form_note(state)
+            PaneKeys::Run["goto #{name.inspect}", "#{name} next (at this section's end)"]
+          end
+
+          # r: loops the picked section: `loop!` for the one playing
+          # (`onward` if it already loops), `practice :drop` for another.
+          def key_loop(state)
+            name = picked_name(state) or return no_form_note(state)
+            f = state[:snap].form
+            return PaneKeys::Run["practice #{name.inspect}", "#{name} next, looping (n moves on)"] unless name == f.section
+            return PaneKeys::Run['onward', "#{name} stops looping (onward)"] if f.looping
+            PaneKeys::Run['loop!', "#{name} loops (n or r moves on)"]
+          end
+
+          # n: the form moves on after a loop (`onward`).
+          def key_onward(state)
+            rows_of(state) or return no_form_note(state)
+            PaneKeys::Run['onward', 'the form moves on at the next boundary']
+          end
+
+          # >: leaves the section playing at the next bar line (`skip`).
+          def key_skip(state)
+            rows_of(state) or return no_form_note(state)
+            PaneKeys::Run['skip', 'leaving this section at the next bar line']
+          end
+
+          # f: the form's ending next (`finish`).
+          def key_finish(state)
+            rows_of(state) or return no_form_note(state)
+            PaneKeys::Run['finish', 'the ending next']
+          end
+
+          # Space: the transport's play / pause, as NAV Space.
+          def key_transport(_state) = MB::Term::Input::Action.of(:pause)
+
+          # e: Enter's line (PaneKeys#key_edit_line).
+          def edit_line(state) = key_goto(state)
+
+          private
+
+          # The status line (the pane outside its mode).
+          def draw_status(c, s, f)
             if f.nil? || f.ended
               text = f&.ended ? 'form ended' : 'no form'
               x = c.line(0, [text, :dim])
@@ -179,6 +270,62 @@ module MB
             x = c.meter(bars > 0 ? (bar - 1 + (s.beat.to_f - 1) / (len * 4).to_f) / bars : 0.0, width: 8, x: x, y: 0, role: :key)
             x = c.line(0, [" #{bar}/#{Panes.fmt(bars)}", :dim], x: x)
             c.line(0, ["  #{c.glyph(:arrow)} ", :dim], [f.next ? f.next.to_s : '?', f.committed ? :name : :dim], [" #{f.next_at}", :dim], x: x)
+          end
+
+          # The mode: one row shows the picked section; more rows show the
+          # status line, then the sections (the picked one reversed, the one
+          # playing marked, the next one's start beside it).
+          def draw_mode(c, s, f, state)
+            rows = f && !f.ended ? f.sections : nil
+            if rows.nil? || rows.empty?
+              draw_status(c, s, f)
+              c.text_fit(0, 1, 'no form to steer (flow do ... end, or a demo)', c.w, :dim) if c.h > 1
+              return
+            end
+            pick = rows.index { |r| r[0] == picked_name(state) } || 0
+            if c.h == 1
+              section_row(c, 0, rows[pick], f, true, "#{pick + 1}/#{rows.length} ")
+              return
+            end
+            draw_status(c, s, f)
+            fit = c.h - 1
+            top = state[:top].to_i
+            top = pick if pick < top
+            top = pick - fit + 1 if pick >= top + fit
+            state[:top] = top = top.clamp(0, [rows.length - fit, 0].max)
+            rows[top, fit].each_with_index { |r, i| section_row(c, i + 1, r, f, top + i == pick) }
+          end
+
+          # One section's row: playing (▶) or next (→) marks, its name
+          # (reversed when picked), its lengths.
+          def section_row(c, y, row, f, sel, prefix = nil)
+            name, text = row
+            mark = name == f.section ? [c.glyph(:play), :ok] : name == f.next ? [c.glyph(:arrow), :name] : [' ', nil]
+            x = prefix ? c.text(0, y, prefix, :dim) : 0
+            x = c.text(x, y, mark[0], mark[1])
+            x = c.text(x, y, ' ')
+            x = c.run(x, y, name.to_s, sel ? :key : :name, reverse: sel)
+            what = name == f.section ? " #{text}#{f.looping ? ' ∞ looping' : ''}" : name == f.next ? " #{text}  at #{f.next_at}" : " #{text}"
+            c.text_fit(x, y, what, [c.w - x, 0].max, :dim)
+          end
+
+          # The picked section's name: the one picked, else the one playing.
+          def picked_name(state)
+            rows = rows_of(state) or return nil
+            p = state[:pick]
+            return p if p && rows.any? { |r| r[0] == p }
+            state[:snap].form.section || rows[0][0]
+          end
+
+          # The playing form's section rows, or nil without one.
+          def rows_of(state)
+            f = state[:snap]&.form
+            return nil if f.nil? || f.ended || f.sections.empty?
+            f.sections
+          end
+
+          def no_form_note(state)
+            state[:snap]&.form&.ended ? 'the form ended (start plays it again)' : 'no form playing (flow do ... end, or a demo)'
           end
         end
 
@@ -235,12 +382,14 @@ module MB
             on [:left, 'h'], :level, -1, help: 'its level 1 dB down, up (held: live, one level line)', label: 'Left Right'
             on [:right, 'l'], :level, 1, help: 'its level 1 dB down, up (held: live, one level line)', label: 'Left Right'
             on '0', :level, 0, help: 'its level back to 0 dB'
+            on '=', :ask_level, help: 'type its level (level :kick, -6.db; Enter stays open)'
             on 'x', :stop_track, help: 'stop it (stop)'
             on ' ', :play_stop, help: 'this track: resume or stop (NAV Space: the transport)', label: 'Space'
             on 's', :solo, help: 'solo, unsolo it'
             on 'm', :mute, help: 'mute, unmute it'
             on ['d', :delete], :untrack, help: 'remove it from the set (untrack; d twice; undo brings it back)', label: 'd Del'
             on 'v', :stopped_view, help: 'hide or show stopped tracks'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
             on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
           end
 
@@ -358,6 +507,30 @@ module MB
             [*out, pv.with(note: "#{name} at #{Panes.fmt(db)} dB")]
           end
 
+          # =: type the picked track's level (a prompt line starting with
+          # it, selected so typing replaces it; the knob panes' prompt).
+          # Enter stays unmapped here (the maintainer, 2026-11-21: "let's
+          # give it some more thought").
+          def key_ask_level(state)
+            name = state[:cursor] or return 'pick a track first (Up Down)'
+            t = state[:snap]&.tracks&.find { |x| x.name == name }
+            return "#{name}: not a track (a player of its own; its graph sets its level)" unless t
+            db = carried(state, name) || t.level || 0.0
+            text = db.finite? ? "#{RubyValue.to_ruby(db.round(2).to_f)}.db" : '0'
+            [*flush(state), PaneKeys::Ask["level #{name.inspect}, ", text, :typed_level, select: true]]
+          end
+
+          # The typed answer to #key_ask_level: one `level` line with it
+          # (-6.db, 0.5, 0, a knob name to follow), checked as the knob
+          # panes' typed values are.
+          def key_typed_level(state, text)
+            name = state[:cursor] or return 'pick a track first (Up Down)'
+            text = text.to_s.strip
+            return 'nothing typed' if text.empty?
+            problem = KnobTurns.typed_problem(text) and return "#{name}: #{problem}"
+            PaneKeys::Turn["level #{name.inspect}, #{text}", "#{name} at #{text}"]
+          end
+
           # A level gesture's Commit (KnobTurns#key_tick) says its line on
           # the status line, not the knob's gain.
           def key_tick(state)
@@ -420,6 +593,14 @@ module MB
             "d again removes #{name} from the set (undo brings it back)"
           end
 
+          # e: Space's line for the picked track (`resume :kick` or `stop
+          # :kick`; PaneKeys#key_edit_line), without its bookkeeping.
+          def edit_line(state)
+            row = picked_row(state) or return 'pick a track first (Up Down)'
+            name, _, st = row
+            RESUMES.include?(st) ? PaneKeys::Run["resume #{name.inspect}"] : PaneKeys::Run["stop #{name.inspect}"]
+          end
+
           # v: hides or shows stopped tracks (this pane only).
           def key_stopped_view(state)
             state[:hide_stopped] = !state[:hide_stopped]
@@ -445,21 +626,102 @@ module MB
           end
         end
 
+        # The keys of the panes that show queued changes (the queue and the
+        # launch lane; ui-phase1-1, the plan's Phase 1 item 5: "pick a
+        # queued change; x cancels it"): Up/Down pick one, soonest first
+        # (the soonest until one is picked), x cancels it with the console
+        # line `cancel queued: :bass, kind: :stop` (ScheduleMethods#cancel:
+        # one undo step, so u in the clip matrix or `undo` queues it
+        # again).  The set's own changes (source :set: a song form's next
+        # section) are refused with a flash: the form pane steers those.
+        # A pane including it keeps its snapshot in `state[:snap]`.
+        module QueuedKeys
+          def self.included(base)
+            base.mode_keys do
+              group 'Queued'
+              on [:up, 'k'], :pick_queued, -1, help: 'the change before, after', label: 'Up Down'
+              on [:down, 'j'], :pick_queued, 1, help: 'the change before, after', label: 'Up Down'
+              on 'x', :cancel_queued, help: 'cancel it before it lands (cancel queued: :bass, kind: :stop; undo queues it again)'
+              on 'e', :edit_line, help: PaneKeys::EDIT_HELP
+              on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
+            end
+          end
+
+          # Up/Down: the queued change before or after the picked one.
+          def key_pick_queued(state, d)
+            q = sorted_queued(state)
+            return 'nothing queued' if q.empty?
+            i = (picked_index(state, q) + d).clamp(0, q.length - 1)
+            e = q[i]
+            state[:pick] = e.seq
+            "#{e.kind} #{e.subject.inspect} lands #{e.lands} (x cancels it)"
+          end
+
+          # The arrows' scrolling (Pane's) picks here.
+          def key_scroll(state, *) = key_pick_queued(state, 1)
+
+          # x: cancels the picked queued change (all queued changes of its
+          # kind for its subject: `cancel queued:` names them so).
+          def key_cancel_queued(state)
+            q = sorted_queued(state)
+            return 'nothing queued to cancel' if q.empty?
+            e = q[picked_index(state, q)]
+            if e.source == :set
+              return "#{e.kind} #{e.subject.inspect} is the song form's own (steer it in the form pane: goto, skip, loop!)"
+            end
+            state[:pick] = nil
+            PaneKeys::Run["cancel queued: #{e.subject.inspect}, kind: #{e.kind.inspect}", "#{e.kind} #{e.subject.inspect} cancelled (undo queues it again)"]
+          end
+
+          # e: x's line for the picked change (PaneKeys#key_edit_line).
+          def edit_line(state)
+            q = sorted_queued(state)
+            return 'nothing queued' if q.empty?
+            e = q[picked_index(state, q)]
+            PaneKeys::Run["cancel queued: #{e.subject.inspect}, kind: #{e.kind.inspect}"]
+          end
+
+          private
+
+          # The snapshot's queued changes, soonest first.
+          def sorted_queued(state)
+            s = state[:snap] or return []
+            s.queued.sort_by { |e| [e.pos || Float::INFINITY, e.seq] }
+          end
+
+          # The picked change's index in +q+ (the soonest when none is
+          # picked or it landed).
+          def picked_index(state, q)
+            q.index { |e| e.seq == state[:pick] } || 0
+          end
+        end
+
         # Queued changes, soonest first, with where each lands.
+        #
+        # In its mode (NAV Enter; ui-phase1-1, the plan's Phase 1 item 5)
+        # the keys of UI::Panes::QueuedKeys: Up/Down pick a queued change
+        # (reversed), x cancels it (`cancel queued: :bass, kind: :stop`;
+        # undo queues it again).
         class Queue < Pane
-          def initialize = super(:queue, rate: 4, height: 6, width: 26, title: 'queued', description: 'queued changes, soonest first, with where each lands')
+          include QueuedKeys
+
+          def initialize = super(:queue, rate: 4, height: 6, width: 26, title: 'queued', description: 'queued changes, soonest first, with where each lands; cancel one from its keys')
 
           def draw_body(c, s, state)
             return unless s
 
+            state[:snap] = s
             q = s.queued.sort_by { |e| [e.pos || Float::INFINITY, e.seq] }
             if q.empty?
               c.puts ['nothing queued', :dim]
               return
             end
-            q.first(c.h).each_with_index do |e, y|
+            pick = state[:mode] ? picked_index(state, q) : nil
+            top = pick && pick >= c.h ? pick - c.h + 1 : 0
+            q[top, c.h].each_with_index do |e, y|
               x = c.line(y, [e.lands.ljust(6), :queued], ' ', [e.kind.to_s, :dim], ' ')
-              c.text_fit(x, y, e.subject.inspect, c.w - x, :name)
+              sel = pick == top + y
+              sel ? c.run(x, y, c.fit(e.subject.inspect, c.w - x), :name, reverse: true) : c.text_fit(x, y, e.subject.inspect, c.w - x, :name)
             end
           end
         end
@@ -494,6 +756,7 @@ module MB
             on ['H'], :turn, -KnobTurns::FINE, help: 'turn down, fine'
             on '0', :reset, help: "the knob's default"
             on :enter, :ask, help: 'type a value (turn :cut, 3000.hz)', label: 'Enter'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
             on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
           end
 
@@ -644,6 +907,13 @@ module MB
         # repeat count), errors in the bad color (ux-1 r3 item 38: long
         # warnings kept their important tail off screen).  Entries that
         # don't fit go off the top.
+        #
+        # In its mode the bottom message shown is the picked one (its
+        # number reversed; Up/Down pick an older or newer one, scrolling),
+        # and Enter opens it in full (`ui.message n`, the message pane; a
+        # view, not a set change, so no console line runs: the pane returns
+        # NAV's way of calling Tiles#message), e puts that line on the
+        # console (ui-phase1-1, the plan's Phase 1 item 8).
         class Messages < Pane
           ROLES = { error: :bad, warn: :warn, note: :dim }.freeze
 
@@ -652,7 +922,27 @@ module MB
             on [:up, 'k'], :scroll, 1, help: 'older, newer messages', label: 'Up Down'
             on [:down, 'j'], :scroll, -1, help: 'older, newer messages', label: ''
             on [:end, 'G'], :scroll, :newest, help: 'back to the newest', label: 'End'
+            on :enter, :open_message, help: 'open the picked (bottom) message in full (ui.message n)', label: 'Enter'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
             on 'y', :copy_text, help: 'copy the pane\'s text (OSC 52)'
+          end
+
+          # Enter: the picked message (the bottom one shown) in full.
+          def key_open_message(state)
+            n = picked_message(state) or return 'no messages to open'
+            MB::Term::Input::Action.of(:message, n)
+          end
+
+          # e: `ui.message n` for the picked message (PaneKeys#key_edit_line).
+          def edit_line(state)
+            n = picked_message(state) or return 'no messages'
+            PaneKeys::Run["ui.message #{n}"]
+          end
+
+          # The picked message's number (1: the newest), or nil without one.
+          def picked_message(state)
+            n = (state[:scroll].to_i + 1)
+            UI.messages.recent(n).length >= n ? n : nil
           end
 
           # Scrolls back +by+ messages (positive: older), or to the newest.
@@ -686,10 +976,14 @@ module MB
             # From the top down, newest at the bottom (maintainer, 2026-10-18:
             # "would prefer starting from the top"); once full it scrolls
             y = 0
+            last = blocks.length - 1
+            i = 0
             blocks.reverse_each do |gutter, lines, role|
-              c.text(0, y, gutter.rjust(gw)[0, gw], :dim)
+              # (in the mode, the picked one: the bottom block, reversed)
+              state && state[:mode] && i == last ? c.run(0, y, gutter.rjust(gw)[0, gw], :key, reverse: true) : c.text(0, y, gutter.rjust(gw)[0, gw], :dim)
               lines.each_with_index { |l, k| c.text(gw, y + k, l, role) }
               y += lines.length
+              i += 1
             end
           end
         end

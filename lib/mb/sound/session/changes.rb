@@ -218,6 +218,24 @@ module MB
           }
         end
 
+        # Cancels the queued changes of +subject+ (of +kind+ only, if
+        # given) before they land, as one undo step labeled +label+ (undo
+        # issues them again; ScheduleMethods#cancel's `queued:`, the queue
+        # pane's x).  Changes the set made itself (source :set: a song
+        # form's launches, scene blocks) stay: steer the form instead.
+        # Returns [cancelled entries, kept set entries].
+        def cancel_queued(subject, kind: nil, label: 'cancel')
+          cancelled, kept = @render_lock.synchronize {
+            list = @changes.select { |c| c.subject == subject && (kind.nil? || c.kind == kind) }
+            own, mine = list.partition { |c| c.entry&.source == :set }
+            @changes -= mine
+            mine.each { |c| c.entry = @journal.add(c.entry.with(status: :cancelled)) }
+            [mine, own]
+          }
+          push_step(label, [], [], cancelled: cancelled) unless cancelled.empty?
+          [cancelled.map(&:entry), kept.map(&:entry)]
+        end
+
         # Runs the block under the render lock (between buffers), e.g. to
         # move the timeline and launch what plays there as one step (see
         # Form::Playback#seek).  Returns the block's value.

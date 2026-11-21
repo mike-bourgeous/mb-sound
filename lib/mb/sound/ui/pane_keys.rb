@@ -182,6 +182,25 @@ module MB
         # The pane's NAV jump letter, or nil.
         def jump = self.class.jump
 
+        # What `e` says in each pane's keys (EDIT_HELP; one wording).
+        EDIT_HELP = "this row's line onto the console to edit (not run)"
+
+        # e (ui-phase1-1, the 2026-11-21 plan's "every key is a console line
+        # he can read and learn from"): the console line the picked row's
+        # main action would run goes onto the REPL's prompt, unrun (a
+        # Paste: the screen goes to the REPL with it typed in), so it can
+        # be edited and run by hand.  One implementation: a pane says which
+        # line is its row's with `edit_line(state)`, returning a Run or a
+        # Turn (its code goes on the prompt) or a String (why there is
+        # none: flashed).  Bound as `on 'e', :edit_line, help:
+        # PaneKeys::EDIT_HELP` in the panes whose modes have e free.
+        def key_edit_line(state)
+          r = respond_to?(:edit_line) ? edit_line(state) : nil
+          return r if r.is_a?(String)
+          return "#{name}: no line to edit here" unless r.respond_to?(:code)
+          Paste[r.code, 'on the console line: edit it, Enter runs it']
+        end
+
         # Runs the key_<action> method for a keymap binding.  Returns its
         # result (a String flashes), or a note if the pane has none.
         def key_action(action, state, *args)

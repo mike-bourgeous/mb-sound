@@ -173,15 +173,36 @@ module MB
       #     ticks.cancel        # or: cancel ticks, or cancel (everything)
       # See #reset_scheduler to also stop a song form and a stuck
       # scheduler.
-      def cancel(*schedules)
-        session = Session.current
-        # Everything: scheduled blocks and at_marker blocks still waiting
-        # for their markers (gen-ux-1)
-        return session.cancel + session.markers.cancel_waits if schedules.empty?
+      #
+      # With +queued:+ (a track, player, scene, or knob name), cancels the
+      # changes still waiting to land for it instead (+kind:+ narrows them:
+      # :stop, :scene, :knob, ...; `changes` and the queue pane show both):
+      # `cancel queued: :bass, kind: :stop` keeps the bass playing.  One undo
+      # step (undo queues them again).  The set's own changes (a song
+      # form's next section, scene blocks) stay: steer the form (goto,
+      # skip, loop!).  Returns the cancelled journal entries.
+      def cancel(*schedules, queued: nil, kind: nil)
+        if queued.nil?
+          raise ArgumentError, 'cancel kind: goes with queued: (cancel queued: :bass, kind: :stop)' if kind
+          session = Session.current
+          # Everything: scheduled blocks and at_marker blocks still waiting
+          # for their markers (gen-ux-1)
+          return session.cancel + session.markers.cancel_waits if schedules.empty?
 
-        waits, handles = schedules.partition { |x| x.is_a?(Session::Markers::Wait) }
-        waits.each(&:cancel)
-        (handles.empty? ? [] : session.cancel(*handles)) + waits
+          waits, handles = schedules.partition { |x| x.is_a?(Session::Markers::Wait) }
+          waits.each(&:cancel)
+          return (handles.empty? ? [] : session.cancel(*handles)) + waits
+        end
+        raise ArgumentError, 'cancel takes schedule handles or queued:, not both' unless schedules.empty?
+
+        line = "cancel queued: #{queued.inspect}#{", kind: #{kind.inspect}" if kind}"
+        done, kept = Session.current.cancel_queued(queued, kind: kind, label: line)
+        if done.empty?
+          why = kept.empty? ? "nothing queued for #{queued.inspect}#{" of kind #{kind.inspect}" if kind} (changes lists what is)" :
+                              "#{queued.inspect}'s queued #{kept.map(&:kind).uniq.join(', ')} is the song form's own (steer it: goto, skip, loop!)"
+          return MB::Sound.live_error(ArgumentError.new("cancel: #{why}"))
+        end
+        done
       end
 
       # The scheduler's panic button, leaving the players alone (see

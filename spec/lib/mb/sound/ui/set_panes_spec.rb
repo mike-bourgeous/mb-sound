@@ -46,6 +46,33 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       expect(key(:clips, st, :stop).code).to eq('stop :pad')
     end
 
+    # (ui-phase1-1, the plan's Phase 1 item 15: the tracks pane's keys here)
+    it 'plays or stops the cell with Space, solos and mutes the track with s and m, and auditions the cell in CUE with a' do
+      run = ui::PaneKeys::Run
+      st = { title_in_rule: true, mode: true }
+      draw(:clips, snap, st)
+      key(:clips, st, :move, 1, 0) # drums, drop: beat_a plays
+      expect(key(:clips, st, :play_stop)).to eq(run['stop :drums', 'stop :drums'])
+      key(:clips, st, :move, 1, 0) # drums, break: fill
+      expect(key(:clips, st, :play_stop).code).to eq('launch :drums, 1')
+      expect(key(:clips, st, :solo)).to eq(run['solo :drums', 'drums soloed'])
+      expect(key(:clips, st, :mute)).to eq(run['mute :drums', 'drums muted'])
+      expect(key(:clips, st, :cue_cell)).to eq(run['cue :drums, 1', 'fill in CUE (the phones; a again: uncue, launch :drums takes it to MAIN)'])
+      flags = snap.with(parts: snap.parts.map { |p| p.name == :drums ? p.with(muted: true, soloed: true) : p }.push(ui::PartLoad.new(name: :"drums/cue", kind: :player, state: :playing, load: 0.0)).freeze)
+      draw(:clips, flags, st)
+      expect(key(:clips, st, :solo).code).to eq('unsolo :drums')
+      expect(key(:clips, st, :mute).code).to eq('unmute :drums')
+      expect(key(:clips, st, :cue_cell)).to eq(run['uncue :drums', 'drums out of CUE'])
+      key(:clips, st, :move, -9, 0) # intro: drums stopped there
+      draw(:clips, snap, st)
+      expect(key(:clips, st, :cue_cell)).to include('nothing in this cell to audition')
+      expect(key(:clips, st, :play_stop).code).to eq('stop :drums') # (a ■ cell: Enter's stop)
+      km = ui::Panes::Clips.mode_keymap.entries
+      { [' ', []] => :play_stop, ['s', []] => :solo, ['m', []] => :mute, ['a', []] => :cue_cell, ['S', []] => :tweak }.each do |chord, action|
+        expect(km.find { |b| b.chord == chord }&.action).to eq(action), chord.inspect
+      end
+    end
+
     it 'tweaks the track\'s clip with one key per edit, refusing tracks with nothing playing' do
       st = { title_in_rule: true, mode: true }
       draw(:clips, snap, st)
@@ -441,6 +468,32 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       expect(@term.text).not_to include('(40/10r)')
       turns = @session.journal.changes.select { |c| c.kind == :turn }
       expect(turns.length).to eq(1)
+    end
+
+    # (ui-phase1-1: the tracks pane's s, m, Space in the clip matrix)
+    it 'solos, mutes, and stops the cursor\'s track of a playing demo from the clip matrix' do
+      @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+      expect { MB::Sound::Session.with_context(session: @session) { MB::Sound.demo(:night_bus); MB::Sound.go(:groove, on: :now) } }.to output(/night_bus/).to_stdout
+      8.times { @session.process_buffer }
+      @tiles, @term = ui_tiles(:session, rows: 60, cols: 236, session: @session)
+      stop = false
+      pump = Thread.new { until stop; @session.process_buffer; sleep 0.004; end }
+      @tiles.enter(:clips)
+      st = @tiles.instance_variable_get(:@states)[:clips]
+      expect(wait_until { st[:snap]&.matrix&.tracks&.any? && @tiles.router.mode == :pane }).to eq(true)
+      name = st[:snap].matrix.tracks[0].name
+      kinds = -> { @session.journal.changes.select { |e| e.subject == name }.map(&:kind) }
+      @term.type('s')
+      expect(wait_until { kinds.().include?(:solo) }).to eq(true)
+      @term.type('m')
+      expect(wait_until { kinds.().include?(:mute) }).to eq(true)
+      @term.write(' ')
+      expect(wait_until { (kinds.() & %i[stop swap]).any? }).to eq(true), kinds.().inspect # (a launch of the cell is a swap)
+      expect(@tiles.mode_problems).to eq([])
+    ensure
+      stop = true
+      pump&.join
+      MB::Sound.rewind
     end
   end
 
