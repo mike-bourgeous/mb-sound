@@ -6,7 +6,7 @@ module MB
       # the painter thread by Poll from public APIs that never take the
       # render lock.  Frozen plain data.
       Slow = Data.define(:tracks, :scenes, :scene, :queued, :recording, :armed, :form, :knob_specs, :buses, :routes, :landed, :clips, :midi,
-                         :matrix, :racks, :clocks, :inspector, :render_source, :cue_heard, :stopped, :build_knobs) do
+                         :matrix, :racks, :clocks, :inspector, :render_source, :cue_heard, :stopped, :build_knobs, :knob_users) do
         # (The fields ux-1 r3 added default to empty: +buses+ BusInfos,
         # +routes+ (player => { to:, send: { bus => level } }), +landed+
         # LandedInfos (newest last), +clips+ ClipInfos, +midi+ a MidiInfo;
@@ -19,10 +19,13 @@ module MB
         # knobs-pane-keys-1: +stopped+ the names Session#resume can bring
         # back (Session#stopped), +build_knobs+ the knobs patches read while
         # building (Arrangement::BuildKnobs: a turn rebuilds, so keys turn
-        # them a step a press, never a held sweep))
+        # them a step a press, never a held sweep); tracks-enter-1:
+        # +knob_users+ { player name => [knob names] } the knobs each
+        # player's graph reads (Session#knob_readers) with the build knobs
+        # each track's patch read)
         def initialize(tracks:, scenes:, scene:, queued:, recording:, armed:, form:, knob_specs:, buses: [].freeze, routes: {}.freeze,
                        landed: [].freeze, clips: [].freeze, midi: nil, matrix: nil, racks: [].freeze, clocks: [].freeze, inspector: nil, render_source: nil,
-                       cue_heard: false, stopped: [].freeze, build_knobs: [].freeze)
+                       cue_heard: false, stopped: [].freeze, build_knobs: [].freeze, knob_users: {}.freeze)
           super
         end
 
@@ -233,6 +236,7 @@ module MB
         def cue_heard = slow.cue_heard
         def stopped = slow.stopped
         def build_knobs = slow.build_knobs
+        def knob_users = slow.knob_users
 
         # Track +name+'s state for the clip matrix: the player's state this
         # buffer (#parts: :playing, :starting, :stopping, :ringing,

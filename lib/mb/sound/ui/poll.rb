@@ -114,6 +114,7 @@ module MB
             clocks: clock_infos(s),
             stopped: (s.stopped.keys.freeze rescue [].freeze),
             build_knobs: arr.respond_to?(:build_knob_names) ? arr.build_knob_names : [].freeze,
+            knob_users: knob_users(s, arr),
             inspector: (info = needs&.include?(:inspect) ? (@inspector ||= Inspect::Gatherer.new).call(s) : nil),
             render_source: needs&.include?(:render) ? render_source(s, arr, info) : nil,
             cue_heard: (s.cue_heard? rescue false)
@@ -122,6 +123,23 @@ module MB
           # render thread's tap; off by default, ui-wave-perf-1)
           WaveView.watch_for(s, @inspector, info) if WaveView.live? && info
           [slow, knobs.to_a.freeze]
+        end
+
+        # { player name => [knob names] }: the knobs each player's graph
+        # reads (Session#knob_readers, the same frozen Hash while nothing
+        # joined) with the build knobs each track's patch read
+        # (Arrangement::BuildKnobs), for the knobs pane's track filter.
+        def knob_users(s, arr)
+          readers = s.respond_to?(:knob_readers) ? s.knob_readers : {}.freeze
+          names = arr.respond_to?(:build_knob_names) ? arr.build_knob_names : []
+          return readers if names.empty?
+          # (build_knobs_of: its own lock only, never the render lock)
+          users = readers.dup
+          arr.tracks.each_key do |t|
+            built = arr.build_knobs_of(t)
+            users[t] = ((users[t] || []) | built).freeze unless built.empty?
+          end
+          users.freeze
         end
 
         # +slow+ with the inspector's info for the current Inspect.target

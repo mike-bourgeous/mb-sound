@@ -286,8 +286,17 @@ module MB
 
           fresh.each { |k| follow_rack_knob(k) if k.rack_knob&.follow }
           joined.each_value { |k| k.listen(knob_midi) if k.cc && !k.listening }
+          note_knob_readers(player, joined.keys) if player
           joined
         end
+
+        # The Session knobs each player's graph read when it last joined
+        # ({ player name => [knob names] }, frozen; replaced, never changed,
+        # so threads read it without a lock): what "this track's knobs"
+        # means beyond the knobs named under it (tracks-enter-1: the tracks
+        # pane's Enter shows them in the knobs pane).  Names of knobs gone
+        # since may stay; readers filter by the knobs that exist.
+        def knob_readers = @knob_readers
 
         # Drops the rack knobs of players that are gone (see
         # Racks#prune_knob_instances): forgotten players' instances leave
@@ -771,9 +780,19 @@ module MB
           @knob_frame = nil
           @knob_midi = nil
           @knob_gestures = {}
+          @knob_readers = {}.freeze
           @committing_gesture = nil
           @alias_noted = nil
           @clamp_warned = nil
+        end
+
+        # Keeps +names+ as the knobs player +name+'s graph reads
+        # (#knob_readers), a new frozen Hash when they changed.
+        def note_knob_readers(name, names)
+          @knob_lock.synchronize {
+            return if @knob_readers[name] == names
+            @knob_readers = @knob_readers.merge(name => names.freeze).freeze
+          }
         end
 
         def knob_suggestion(name, define: false)
