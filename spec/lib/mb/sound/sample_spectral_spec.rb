@@ -304,6 +304,21 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       expect(played).not_to eq(loop.stretch(1.25, mode: :spectral).data(0))
       expect(loop.follow(stretch: { mode: :spectral, wrap: false }).sample(60000)).to eq(loop.stretch(1.25, mode: :spectral).data(0))
     end
+
+    describe 'loop players with the shape lock (the looped default)' do
+      include BufferSizeHelpers
+
+      it 'play the shape-locked loop, lock: :peaks opting out, the same at any buffer size' do
+        loop = MB::Sound::Sample[Numo::SFloat.cast(held), bpm: 150, beats: 2.5]
+        shaped = loop.stretch(1.25, mode: :spectral, wrap: true, lock: :shape).data(0)
+        peaks = loop.stretch(1.25, mode: :spectral, wrap: true, lock: :peaks).data(0)
+        expect(shaped).not_to eq(peaks)
+        expect(loop.follow(stretch: :spectral).sample(60000)).to eq(shaped)
+        expect(loop.follow(stretch: { mode: :spectral, lock: :peaks }).sample(60000)).to eq(peaks)
+        # (a loop and a half: the read wraps the cached stretch)
+        expect_invariant(-> { loop.follow(stretch: :spectral) }, seconds: 1.9, sizes: [[367, 368], [64]])
+      end
+    end
   end
 
   describe 'waveform shape (lock:, closure:, closure_length:)' do
@@ -341,7 +356,7 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
 
     it 'keeps the waveform of a looped tone with lock: :shape, its phases closing before the wrap' do
       spread = {}
-      plain = described_class.looped([saw], 1.285, report: spread)[0]
+      plain = described_class.looped([saw], 1.285, lock: :peaks, report: spread)[0]
       shaped = {}
       locked = described_class.looped([saw], 1.285, lock: :shape, report: shaped)[0]
       # (the spread closure moves every harmonic by its own amount)
@@ -358,6 +373,40 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       # Unlooped too (the vocoder's own drift)
       free = described_class.vocoder([saw], 1.285, lock: :shape)[0]
       expect(shape_kept(free, saw, 1.285)).to be > 0.98
+    end
+
+    it 'locks the shape by default in looped stretches only, lock: :peaks opting out' do
+      x = [saw]
+      shaped = described_class.looped(x, 1.285, lock: :shape)[0]
+      peaks = described_class.looped(x, 1.285, lock: :peaks)[0]
+      expect(described_class.looped(x, 1.285)[0]).to eq(shaped)
+      expect(described_class.vocoder(x, 1.285, wrap: true)[0]).to eq(shaped)
+      expect(peaks).not_to eq(shaped)
+      # (unlooped stretches keep identity locking alone)
+      expect(described_class.vocoder(x, 1.285)[0]).to eq(described_class.vocoder(x, 1.285, lock: :peaks)[0])
+      expect(described_class.vocoder(x, 1.285)[0]).not_to eq(described_class.vocoder(x, 1.285, lock: :shape)[0])
+      # (where the lock cannot help: all-random phases, and closure: :shift)
+      expect(described_class.looped(x, 1.285, randomize: 1, seed: 3)[0]).to eq(described_class.looped(x, 1.285, randomize: 1, seed: 3, lock: :peaks)[0])
+      expect(described_class.looped(x, 1.285, closure: :shift)[0]).to eq(described_class.looped(x, 1.285, closure: :shift, lock: :peaks)[0])
+      expect(described_class.loop_lock(0, :spread)).to eq(:shape)
+      expect(described_class.loop_lock(0.5, :spread)).to eq(:shape)
+      expect(described_class.loop_lock(1, :spread)).to eq(:peaks)
+      expect(described_class.loop_lock(0, :shift)).to eq(:peaks)
+
+      # Sample#stretch of a loop (and of anything with wrap: true): the
+      # waveform kept, the default not printed; lock: :peaks prints
+      s = MB::Sound::Sample[Numo::SFloat.cast(saw)].looped
+      t = s.stretch(1.285, mode: :spectral)
+      expect(t.lineage[3]).to eq({ mode: :spectral })
+      expect(t.data(0)).to eq(s.stretch(1.285, mode: :spectral, lock: :shape).data(0))
+      expect(shape_kept(t.data(0), saw, 1.285, upto: t.length * 3 / 4 - 2048)).to be > 0.98
+      opt_out = s.stretch(1.285, mode: :spectral, lock: :peaks)
+      expect(opt_out.lineage[3]).to eq({ mode: :spectral, lock: :peaks })
+      expect(shape_kept(opt_out.data(0), saw, 1.285)).to be < 0.95
+      expect(s.stretch(1.285, mode: :spectral, closure: :shift).data(0)).to eq(s.stretch(1.285, mode: :spectral, closure: :shift, lock: :peaks).data(0))
+      u = MB::Sound::Sample[Numo::SFloat.cast(saw)]
+      expect(u.stretch(1.285, mode: :spectral, wrap: true).data(0)).to eq(t.data(0))
+      expect(u.stretch(1.285, mode: :spectral).data(0)).to eq(u.stretch(1.285, mode: :spectral, lock: :peaks).data(0))
     end
 
     it 'locks the shape of a sound with partials of several notes where they fit' do
@@ -627,7 +676,7 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       closed = smp.stretch(4, mode: :spectral, noise: 1)
       expect(closed.length).to eq(192000)
       expect(self_similarity(closed.data(0), 4096)).to be < 0.04
-      expect(self_similarity(smp.stretch(4, mode: :spectral, noise: 0).data(0), 4096)).to be > 0.05
+      expect(self_similarity(smp.stretch(4, mode: :spectral, noise: 0, lock: :peaks).data(0), 4096)).to be > 0.05
       stream = smp.spectral_stream(noise: 1)
       step = 1.0 / 192000
       out = Numo::DFloat.zeros(96000)

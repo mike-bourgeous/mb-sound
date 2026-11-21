@@ -84,9 +84,12 @@ module MB
         # that loops (its end flows into its start): the stretch reads it
         # as an endless stream and its own end flows into its start
         # (#looped with one pass).  +lock+ (LOCKS) :shape also keeps the
-        # peaks' relative phases, the waveform (#shape_lock).
-        def vocoder(channels, ratio, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false, span: 1.0, noise: 0, lock: :peaks)
+        # peaks' relative phases, the waveform (#shape_lock); nil is
+        # :peaks here and #loop_lock's choice (:shape) with +wrap+.
+        def vocoder(channels, ratio, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, wrap: false, span: 1.0, noise: 0, lock: nil)
           return looped(channels, ratio, window: window, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise, lock: lock) if wrap
+
+          lock ||= :peaks
 
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
           voc = Vocoder.new(channels, window: window, overlap: overlap, randomize: randomize, seed: seed, link: link, shape: shape, noise: noise, lock: lock)
@@ -145,16 +148,19 @@ module MB
         # that brings the most partials round at once (a harmonic
         # sound's all: its shape kept), then spreads what is left;
         # +closure_length+ (samples) spreads the closing over only that
-        # much output before the wrap.  With +lock+ :shape (#shape_lock)
-        # the frames close over SHAPE_CLOSING windows before the wrap
-        # (or +closure_length+), unlocked there; report[:shift] is the
+        # much output before the wrap.  With +lock+ :shape (#shape_lock;
+        # the default, #loop_lock, unless +randomize+ is 1 or +closure+
+        # :shift; :peaks for identity locking alone) the frames close
+        # over SHAPE_CLOSING windows before the wrap (or
+        # +closure_length+), unlocked there; report[:shift] is the
         # pitch change (cents) and report[:residual] what it left.
-        def looped(channels, ratio, passes: 1, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, report: nil, span: 1.0, noise: 0, closure: :spread, closure_length: nil, lock: :peaks)
+        def looped(channels, ratio, passes: 1, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, report: nil, span: 1.0, noise: 0, closure: :spread, closure_length: nil, lock: nil)
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
           passes = Integer(passes)
           raise ArgumentError, "passes: is 1 or more (got #{passes})" unless passes >= 1
           closure = closure.to_sym
           raise ArgumentError, "closure: is one of #{CLOSURES.map(&:inspect).join(', ')} (got #{closure.inspect})" unless CLOSURES.include?(closure)
+          lock = loop_lock(randomize, closure) if lock.nil?
           raise ArgumentError, 'lock: :shape closes its own way (closure: :spread over a span before the wrap)' if lock == :shape && closure != :spread
 
           voc = Vocoder.new(channels, window: window, overlap: overlap, randomize: randomize, seed: seed, link: link, shape: shape, wrap: true, noise: noise, lock: lock)
@@ -241,6 +247,17 @@ module MB
 
         # How Spectral.looped closes its phases (closure:).
         CLOSURES = [:spread, :shift].freeze
+
+        # The phase locking Spectral.looped uses when not told (lock:
+        # nil, as Sample#stretch and LoopPlayer's cached loops leave
+        # it): :shape, a tone's waveform kept (the maintainer's default
+        # since stretch-lock-default-1, 2026-11-21), except where it
+        # cannot help: +randomize+ 1 (Paulstretch: every phase random,
+        # so the lock only costs time) and +closure+ :shift (the two do
+        # not combine), :peaks there.  `lock: :peaks` opts out.
+        def loop_lock(randomize, closure)
+          randomize.to_f >= 1 || closure.to_sym != :spread ? :peaks : :shape
+        end
 
         # The largest pitch change closure: :shift makes (cents).
         SHIFT_CENTS = 10.0

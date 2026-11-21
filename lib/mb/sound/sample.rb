@@ -1719,7 +1719,7 @@ module MB
         edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |chans|
           if wrap
             Spectral.looped(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise,
-                            closure: closure || :spread, closure_length: close_n, lock: lock || :peaks)
+                            closure: closure || :spread, closure_length: close_n, lock: lock)
           elsif randomize >= 1 && onsets.nil?
             Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
           else
