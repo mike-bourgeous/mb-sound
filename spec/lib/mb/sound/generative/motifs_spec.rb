@@ -191,4 +191,15 @@ RSpec.describe('MB::Sound#motifs (phrase memory)', :aggregate_failures) do
       expect { MB::Sound::GraphIO.load('motifs(scale(:minor, A4).weights, 1000)') }.to raise_error(MB::Sound::GraphIO::LoadError, /256/)
     end
   end
+  it "names what the maintainer's wrong sources, ranges, and densities meant (ux-friction-1 round 2)" do
+    s = MB::Sound
+    expect { s.motifs(:minor) }.to raise_error(ArgumentError, /got :minor\); a mode by name is a scale: scale\(:minor\)/)
+    expect { s.motifs(s::C0..s::C2) }.to raise_error(ArgumentError, /a Range of notes goes in range:, after the notes to draw from \(scale, range: C0\.\.C2\)/)
+    expect { s.motifs(s.chord(0, 5, 7)) }.to raise_error(ArgumentError, /chord\(0, 5, 7\) is the MIDI chord transform: a chord's notes are chord\(:min, root: :a\)/)
+    expect { s.motifs(s.scale(:phrygian, 0), range: s::A1..s::A1) }.to raise_error(ArgumentError,
+      "motifs' field has no notes in A1..A1 (C phrygian); the nearest are Gs1 and As1: widen the range, or move the scale's root")
+    expect(s.motifs(s.scale(:phrygian, 0), range: s::Ab1..s::Ab1).values).to eq([32])
+    expect { s.motifs(s.scale(:phrygian), density: 0.2..1) }.to raise_error(ArgumentError,
+      /\(got 0.2..1\); to move it between 0.2 and 1: density: knob\(:density\), then turn :density, 4.bars.lfo.at\(0.2..1\)/)
+  end
 end
