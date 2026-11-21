@@ -902,7 +902,11 @@ module SessionFuzz
         super
       end
     }.new(channels: 2, sleep: :virtual, buffer_size: 800)
-    s = MB::Sound::Session.new(output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 120), master_gain: 1, channels: 2, buffer_size: 800, realtime: true, raise_errors: true)
+    # (no live-only output stages: a realtime Session's -1 dBFS safety
+    # limiter and monitor trim aren't in the offline reference; songs
+    # louder than -1 dBFS failed the relation, merge train 2026-11-21)
+    s = MB::Sound::Session.new(output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 120), master_gain: 1, channels: 2, buffer_size: 800, realtime: true, raise_errors: true,
+                               safety_limiter: false, monitor: false)
     s.exact_lanes = true
     lands = nil
     MB::Sound::Session.with_context(session: s) do

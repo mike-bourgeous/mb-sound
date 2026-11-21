@@ -519,6 +519,15 @@ RSpec.describe('session fuzzing') do
     end
   end
 
+  # (merge train 2026-11-21's soak: seeds 788010/20/30/46 failed :form_start
+  # because the live side's realtime Session had its -1 dBFS safety
+  # limiter on and the offline reference doesn't; a song louder than -1
+  # dBFS, its tr909 kit peaking at 1.01)
+  it 'holds form_start for a song louder than the live safety limiter (seed 788010)', render_budget: { seconds: 30, reason: 'one random song, one relation' } do
+    song = SessionFuzz.generate(Random.new(788010))
+    expect(SessionFuzz.check(:form_start, song)).to be_nil
+  end
+
   it 'swaps a kit only where every scene plays it a grid with those rows (seed 773034)', render_budget: { seconds: 60, reason: 'one random song' } do
     song = SessionFuzz.generate(Random.new(773034), commands: 26)
     expect(song.code).to include('t3: beats(16')
