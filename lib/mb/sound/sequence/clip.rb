@@ -112,6 +112,15 @@ module MB
           @clock = nil # (see Clocked)
           @carried_meta = nil # (Meta::Carrier, through Named)
           @provenance = nil # (Provenance::Readers, through Named: an importer's)
+          # (set later, all nil until used, so every clip keeps one object
+          # shape: #named, #derive_from, a recipe's record (Recipe), a loaded
+          # document (GraphIO::Loader); otherwise a `:performance` warning,
+          # "Clip reached 8 shape variations")
+          @name = nil
+          @source = nil
+          @derivation = nil
+          @graph_recipe = nil
+          @graph_io_document = nil
           @events = events.sort_by(&:start).freeze
           @values = values&.uniq&.freeze
           @performed = !!performed

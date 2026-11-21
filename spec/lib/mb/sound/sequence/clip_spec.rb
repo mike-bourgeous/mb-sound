@@ -6,6 +6,26 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
     clip.events.map { |e| [e.value, e.start, e.length] }
   end
 
+  # (a :performance warning, "Clip reached 8 shape variations", failed
+  # duration_spec.rb:128 in one process of a parallel run, 2026-11-21:
+  # names, derivations, recipe records, and loaded documents set their
+  # instance variables later in varying orders; CLAUDE.md: set every one in
+  # the constructor, nil until used)
+  it 'keeps one instance variable layout through names, transforms, recipes, and loaded documents' do
+    base = MB::Sound::Sequence::Clip.new([]).instance_variables
+    clips = [
+      MB::Sound.seq(c4, e4).named(:a),
+      MB::Sound.seq(c4, e4).transpose(2).named(:b),
+      MB::Sound.seq(c4, e4).loop.reverse,
+      MB::Sound::GraphIO.load("graph 12\nseq(C4, E4).loop.transpose(3)"),
+    ]
+    clips.each do |c|
+      expect(c).to be_a(MB::Sound::Sequence::Clip)
+      # (Seqs set their steps first, then the Clip's own)
+      expect(c.instance_variables - [:@steps]).to eq(base), c.inspect
+    end
+  end
+
   describe '#performed?' do
     it 'is false for written clips, and kept by transforms of a performed clip' do
       written = MB::Sound.seq(60, 62).n8
