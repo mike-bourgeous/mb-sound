@@ -102,4 +102,10 @@ RSpec.describe(MB::Sound::Tuning, :aggregate_failures) do
   it 'describes itself' do
     expect(tuning.to_s).to eq('12-TET, A4 = 440.0 Hz')
   end
+  it "points the maintainer's positional guesses at the keyword form (ux-friction-1 round 2)" do
+    expect { MB::Sound.tuning(MB::Sound::A4, 480) }.to raise_error(ArgumentError, 'tuning takes the note as a keyword: tuning a4: 480 (or note: and frequency:)')
+    expect { MB::Sound.tuning(:b4, 480.5) }.to raise_error(ArgumentError, /tuning b4: 480.5/)
+    expect { MB::Sound.tune(MB::Sound::A4, 480) }.to raise_error(ArgumentError, /tune names a track: .*; for the reference pitch, tuning a4: 480 \(the note as a keyword\)/)
+    expect(MB::Sound.tuning.to_s).to eq('12-TET, A4 = 440.0 Hz')
+  end
 end
