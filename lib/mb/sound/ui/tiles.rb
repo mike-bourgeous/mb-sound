@@ -697,6 +697,9 @@ module MB
           unless @tiler.focus == :page
             @page_opener = opener || (@router.mode == :repl || @tiler.focus.nil? ? :repl : @tiler.focus)
           end
+          # (a page closed as a pane, NAV x or ui.close, left its closer:
+          # the next page then never opened; console-offers-1)
+          @page_close = nil if @page_close && !@tiler.layout.panes.include?(:page)
           unless @page_close
             repl = @tiler.rects[:repl] || @tiler.rects.values.max_by(&:area)
             rows = [(repl ? repl.h : @rows) - REPL_MIN_ROWS - 1, 3].max
@@ -728,6 +731,7 @@ module MB
             return self
           end
           @panes[:plot].show(figure) if @panes[:plot].respond_to?(:show)
+          @plot_close = nil if @plot_close && !@tiler.layout.panes.include?(:plot) # (closed as a pane; see #page)
           unless @plot_close || @tiler.layout.panes.include?(:plot)
             repl = @tiler.rects[:repl] || @tiler.rects.values.max_by(&:area)
             rows = [((repl ? repl.h : @rows) - REPL_MIN_ROWS - 1) * 2 / 3, 6].max
@@ -768,10 +772,10 @@ module MB
         end
 
         # Undoes the last layout change (split, close, resize, ...; 100 steps).
-        def undo = tile(&:undo)
+        def undo = tile(hint: false, &:undo)
 
         # Redoes a layout change undone with #undo.
-        def redo = tile(&:redo)
+        def redo = tile(hint: false, &:redo)
 
         # The next (+dir+ 1) or previous tab.
         def tab(dir = 1) = tile { |t| t.tab(dir) }
@@ -782,11 +786,15 @@ module MB
           return @tiler.layout if name.nil?
 
           l = UI.tiles_layout_named(name)
+          dropped = nil
           @lock.synchronize do
+            before = @tiler.layout
             @tiler.layout = l
+            dropped = closed_panes(before)
             @layout_name = l.name
             @relayout = true
           end
+          close_hint(dropped) if dropped
           self
         end
 
@@ -1055,6 +1063,7 @@ module MB
         # one away.  Marks the messages read.
         def messages(on = :toggle)
           UI.messages.mark_read
+          @messages_restore = nil if @messages_restore && !@tiler.layout.panes.include?(:messages) # (closed as a pane; see #page)
           in_layout = @messages_restore.nil? && @tiler.layout.panes.include?(:messages)
           if in_layout
             return self if on == true || on == false
@@ -1560,10 +1569,17 @@ module MB
           @router.mode == :grab ? (@router.mode = :repl) : leave_keys
         end
 
-        def tile(pin: true)
+        # Runs a layout change on the Tiler under the screen's lock.  A
+        # change that is an undo step and drops panes (NAV x, `ui.close`,
+        # `ui.show` over a pane) flashes how to get them back (#close_hint);
+        # +hint+ false for undo and redo themselves.
+        def tile(pin: true, hint: true)
+          dropped = nil
           @lock.synchronize do
             was = @tiler.focus
+            before = @tiler.layout
             yield @tiler
+            dropped = closed_panes(before) if hint
             # Keys go where the focus is: in REPL mode the REPL keeps it, in
             # KEYS the keyboard (a split or `show` from the console doesn't
             # take it; NAV moves it; #enter does, +pin+ false)
@@ -1574,10 +1590,35 @@ module MB
           end
           # (a pane's own mode ends when the focus leaves it, whatever moved it)
           @router.mode = :nav if @router.mode == :pane && (@tiler.focus != @mode_pane || into(@tiler.focus) != :pane)
+          close_hint(dropped) if dropped
           self
         rescue MB::Term::Viewports::Error => e
           flash(e.message, :bad)
           self
+        end
+
+        # The panes the change from +before+ to the Tiler's layout dropped,
+        # when it was an undo step (so `ui.undo` brings them back), or nil.
+        # Empty slots (:empty1, ...) don't count; temporary panes closed
+        # their own way (q on a page, NAV m) aren't undo steps.
+        def closed_panes(before)
+          after = @tiler.layout
+          return nil if after.equal?(before) || !@tiler.undo_layout.equal?(before)
+          gone = (before.panes - after.panes).reject { |n| n.to_s.match?(/\Aempty\d+\z/) }
+          gone.empty? ? nil : gone
+        end
+
+        # Flashes how to get closed panes +names+ back (console-offers-1,
+        # 2026-11-21): "closed page (also :pager): ui.undo brings it back,
+        # or ui.show :page in the focused slot".  Undo first: it puts the
+        # pane back where it was (with a page's text), while `ui.show`
+        # replaces the focused pane, which is a neighbor after a close.
+        def close_hint(names)
+          first = names.first
+          aliases = UI::PANE_ALIASES.select { |_, v| v == first }.keys
+          also = names.length == 1 && !aliases.empty? ? " (also #{aliases.map(&:inspect).join(', ')})" : ''
+          them = names.length == 1 ? 'it' : 'them'
+          flash("closed #{names.join(', ')}#{also}: ui.undo brings #{them} back, or ui.show #{first.inspect} in the focused slot", :key)
         end
 
         # Shows +text+ on the status line for FLASH seconds: one line, no
