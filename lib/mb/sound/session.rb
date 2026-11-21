@@ -711,8 +711,9 @@ module MB
       end
 
       # Plays a stopped graph again (see #remove), with the same launch and
-      # fade options as #add.  With no +name+, resumes the most recently
-      # stopped graph.  Returns the name, or nil if there is nothing to
+      # fade options as #add (a graph still fading out or ringing out after
+      # its stop comes back from where it is: #revive_fading, Tails).  With
+      # no +name+, resumes the most recently stopped graph.  Returns the name, or nil if there is nothing to
       # resume under that name (or it is already playing).
       #
       # Looping clips come back in phase with the timeline.  Other nodes
@@ -734,7 +735,7 @@ module MB
         @render_lock.synchronize {
           p = @mutex.synchronize {
             name ||= @stopped.keys.reject { |n| disarmed_monitor?(n) }.last
-            p = @stopped[name] || ringing_player(name)
+            p = @stopped[name] || ringing_player(name) || fading_player(name)
             next nil if p.nil? || @players.each_value.any? { |o| o.name == name && o.current? }
             p
           }
@@ -1719,6 +1720,8 @@ module MB
         @mutex.synchronize {
           # A player still ringing out comes back as it is (see Tails)
           next name if revive_ringing(name, start)
+          # So does one still fading out after a stop (#revive_fading)
+          next name if revive_fading(name, fade)
 
           p = @stopped[name]
           next nil if p.nil? || @players.each_value.any? { |o| o.name == name && o.current? }
@@ -1733,6 +1736,39 @@ module MB
             fade: fade
           )
         }
+      end
+
+      # The player named +name+ that a stop is fading out (or will fade
+      # out: its stop time not reached yet), not replaced by a newer graph
+      # and not ringing out, or nil.  Called with @mutex held.
+      private def fading_player(name)
+        return nil if @players.each_value.any? { |o| o.name == name && o.current? }
+        p = @players.each_value.select { |x| x.name == name }.max_by(&:serial)
+        p && p.keep && p.fade_out && !p.handed && !p.ring ? p : nil
+      end
+
+      # Revives player +name+ while a stop fades it out (knobs-pane-keys-1
+      # round 2, the maintainer's 2026-11-21 "If I can stop a track ..., I
+      # should also be able to resume it"; the tracks pane's Space during a
+      # four-bar fade): the stop is cancelled, and its gain turns around
+      # from where it is up to full over +fade+ bars (the resume's fade-in;
+      # the declick when nil), on the resume's landing sample.  Its graph
+      # never stopped, so clips play on in phase and nothing restarts.
+      # Returns the player, or nil if none is fading.  Called with @mutex
+      # held.
+      private def revive_fading(name, fade)
+        p = fading_player(name) or return nil
+        p.stop_at = nil
+        p.fade_out = nil
+        p.keep = false
+        if p.fading_out || p.ramp
+          frame = @landing_frame || @frame
+          p.ramp = Fades::Ramp.after(p.ramp, p.gain, 1.0, frame, fade_frames(fade || declick_bars, output.sample_rate.to_f))
+          p.fading_out = false
+        end
+        @order.delete(name)
+        @order << name
+        p
       end
 
       # Shortens a graph description for #players.
