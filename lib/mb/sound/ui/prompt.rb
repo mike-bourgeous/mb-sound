@@ -156,6 +156,34 @@ module MB
           super
         end
       end
+
+      # Backspace with only indentation before the cursor joins the line
+      # to the one above (ux-friction-1, the maintainer, 2026-11-21: "Can't
+      # backspace from line 2 to line 1").  Reline's auto-indent (Pry's
+      # proc) puts the indentation back after every edit, so Backspace
+      # after a continuation line's indent deleted a space that came right
+      # back and the cursor never reached the line's start; now the indent
+      # before the cursor goes and the newline with it, as Backspace at the
+      # line's start always did.  Prepended to Reline::LineEditor by
+      # bin/sound.rb with FirstLineSpaces.
+      module BackspaceJoins
+        def self.install!
+          return unless defined?(::Reline::LineEditor)
+          ::Reline::LineEditor.prepend(self) unless ::Reline::LineEditor.ancestors.include?(self)
+        end
+
+        private
+
+        def em_delete_prev_char(key, arg: 1)
+          if @is_multiline && @line_index > 0 && @byte_pointer > 0 && current_line.byteslice(0, @byte_pointer).match?(/\A[ \t]+\z/)
+            @buffer_of_lines[@line_index] = current_line.byteslice(@byte_pointer..)
+            @byte_pointer = 0
+          end
+          super
+        end
+
+        def backward_delete_char(key, arg: 1) = em_delete_prev_char(key, arg: arg)
+      end
     end
   end
 end

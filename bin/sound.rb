@@ -126,10 +126,13 @@ MB::Sound::UI.install_pry!
 # open constructs, and Enter runs a complete command wherever the cursor is
 # (Alt-Enter for a new line; see MB::Sound::UI::Prompt and
 # MB::Sound::UI::EnterSubmits); deleting the first word of a line keeps the
-# space after it (MB::Sound::UI::FirstLineSpaces)
+# space after it (MB::Sound::UI::FirstLineSpaces), and Backspace after a
+# continuation line's indentation joins it to the line above
+# (MB::Sound::UI::BackspaceJoins)
 MB::Sound::UI::Prompt.install!
 MB::Sound::UI::EnterSubmits.install!
 MB::Sound::UI::FirstLineSpaces.install!
+MB::Sound::UI::BackspaceJoins.install!
 
 # Pry 0.16 reads with Reline's multiline editor, which treats piped input as
 # one paste and evaluates it as a single block (so `printf 'a\nb\n' |
