@@ -59,6 +59,70 @@ RSpec.describe(MB::Sound::UI::Facade, :aggregate_failures) do
     MB::Sound::UI::WaveView.mode = :off
   end
 
+  # konsole-pacing (2026-11-21): `ui.perf :stop` returned the UI::Perf,
+  # whose rings Pry printed as 209 000 lines; he typed `ui.perf.report` too
+  it 'prints one line for every ui.perf action and takes ui.perf.report' do
+    require 'pp'
+    t, tiles_term = ui_tiles(:tiles)
+    allow(facade).to receive(:screen).and_return(t)
+    st = facade.perf(:start)
+    expect(st).to be_a(ui::Facade::PerfStatus)
+    expect(st.pretty_inspect.lines.length).to eq(1)
+    expect(st.inspect).to start_with('ui.perf: recording')
+    expect(facade.perf.inspect).to match(/\Aui\.perf: recording [\d.]+ s/) # (no argument while recording: a status line, no report)
+    expect($stdout.string).not_to include('UI frame instruments')
+    expect(facade.perf.report.inspect).to start_with('ui.perf: recording')
+    expect($stdout.string.scan('UI frame instruments').length).to eq(1)
+    stop = facade.perf.stop
+    expect(stop.inspect).to match(/\Aui\.perf: stopped after [\d.]+ s/)
+    expect($stdout.string.scan('UI frame instruments').length).to eq(2)
+    expect(ui.last_perf.pretty_inspect.lines.length).to eq(1)
+    expect(ui.last_perf.inspect).to match(/\A#<MB::Sound::UI::Perf stopped, \d+ frames>\z/)
+    expect(facade.perf(:cancel).inspect).to eq('ui.perf: no capture is running')
+    expect { facade.perf(:reprot) }.to raise_error(ArgumentError, /did you mean :report\?/)
+  ensure
+    t&.stop
+    tiles_term&.close
+  end
+
+  it 'refuses a mistyped ui.smooth or ui.pace with a did-you-mean (his `ui.smooth :omn`), and sets the pacing on the running screen' do
+    expect { facade.smooth(:omn) }.to raise_error(ArgumentError, /got :omn; did you mean :on\?/)
+    expect(ui::Feed.every_buffer).to eq(false)
+    expect { facade.pace(:termnal) }.to raise_error(ArgumentError, /did you mean :terminal\?/)
+    expect(facade.pace).to eq(:exact)
+    t, tiles_term = ui_tiles(:tiles)
+    allow(facade).to receive(:screen).and_return(t)
+    t.terminal_profile = ui::TerminalProfile.konsole_bulk
+    pacer = t.instance_variable_get(:@pacer)
+    expect(pacer.min_gap).to be_nil
+    expect(facade.pace(:terminal)).to eq(:terminal)
+    expect(pacer.min_gap).to be_within(1e-9).of(0.012)
+    t.terminal_profile = ui::TerminalProfile.konsole_sync # (Konsole 26.04 shows each synchronized frame: no gap)
+    expect(pacer.min_gap).to be_nil
+    expect(facade.pace(:exact)).to eq(:exact)
+  ensure
+    ui::FrameRate.pace = :exact
+    t&.stop
+    tiles_term&.close
+  end
+
+  it 'says once when the typed target is faster than the terminal shows, naming 60 (konsole-pacing)' do
+    t, tiles_term = ui_tiles(:tiles)
+    t.terminal_profile = ui::TerminalProfile.konsole_bulk('Konsole 23.08')
+    ui::FrameRate.pace_noticed = false
+    t.target_fps = 60
+    expect($stdout.string).to eq('')
+    t.target_fps = 120
+    expect($stdout.string).to include('Konsole 23.08 shows a frame only 10 ms after output stops, so at 120 fps it shows about 25 a second', 'ui.target_fps = 60', 'ui.pace :terminal')
+    n = $stdout.string.length
+    t.target_fps = 240
+    expect($stdout.string.length).to eq(n) # (once a process)
+  ensure
+    ui::FrameRate.pace_noticed = false
+    t&.stop
+    tiles_term&.close
+  end
+
   it 'turns every-buffer snapshots, snapshot-timed frames, and echo wake on and off together with ui.smooth, off by default (ui-perf-2)' do
     ui = MB::Sound::UI
     expect(facade.smooth).to eq(:off)

@@ -64,8 +64,11 @@ module MB
         # One frame's timing, in seconds: +paint+ (the refresh but its
         # write), +write+, +sleep+ (asked for), +slept+ (actual), +late+
         # (how far past its deadline the frame started), +skipped+
-        # (deadlines missed before it), +wrote+ (bytes, 0 for none).
-        Frame = Data.define(:at, :paint, :write, :sleep, :slept, :late, :skipped, :wrote)
+        # (deadlines missed before it), +wrote+ (bytes, 0 for none), +hold+
+        # (seconds the write waited for #min_gap, not in +paint+).
+        Frame = Data.define(:at, :paint, :write, :sleep, :slept, :late, :skipped, :wrote, :hold) do
+          def initialize(hold: 0.0, **rest) = super
+        end
 
         # Frames kept for #breakdown (2.5 s at 240/s).
         KEEP = 600
@@ -115,6 +118,15 @@ module MB
         # Called with each Frame after it (UI::PaneRates#observe).
         attr_accessor :on_frame
 
+        # konsole-pacing (2026-11-21; `ui.pace :terminal`, off by default):
+        # the least seconds between frame writes, or nil.  Konsole before
+        # 26.04 shows output only 10 ms after it stops arriving (at the
+        # latest 40 ms after it starts), so frames written closer than that
+        # show at about 25 a second; with a gap the deadlines are at least
+        # this far apart and a woken frame's write waits for it
+        # (#hold_before_write), so every frame shows.  See TerminalProfile.
+        attr_accessor :min_gap
+
         # A UI::Perf recording frames (`ui.perf`), or nil.
         attr_accessor :perf
 
@@ -137,6 +149,9 @@ module MB
           @window_frames = 0
           @woken = false
           @timing = nil
+          @min_gap = nil
+          @hold = 0.0
+          @last_write = nil
           self.fps = fps
         end
 
@@ -162,6 +177,22 @@ module MB
           @write += seconds
         end
 
+        # Before a frame's write (the screen's timed write): waits until
+        # #min_gap has passed since the last write ended, and notes the
+        # wait as the frame's hold.  Nothing without a gap.
+        def hold_before_write
+          g = @min_gap or return
+          if @last_write && (w = @last_write + g - @clock.call) > 0
+            @sleeper.call(w)
+            @hold += w
+          end
+        end
+
+        # The screen's timed write ended at +t+ (for #min_gap).
+        def wrote_at(t)
+          @last_write = t
+        end
+
         # Runs frames until +stop+ (a Proc) is true: yields the frame's
         # start time to the block (the refresh; its result: bytes written
         # or nil), then sleeps until the next deadline.
@@ -182,6 +213,7 @@ module MB
           start = @clock.call
           late = [start - @deadline, 0.0].max
           @write = 0.0
+          @hold = 0.0
           @perf&.begin_frame(start)
           @timing&.mark
           out = yield start
@@ -192,6 +224,7 @@ module MB
           # less than a period past it starts at once, and only the
           # deadlines a frame overran by more than a whole period are skipped
           step = @period - @trim
+          step = @min_gap if @min_gap && step < @min_gap
           # (a frame woken before its deadline, by a key, leaves that
           # deadline for the next frame: ui-perf-1, a woken frame used to
           # push the next one a whole period past the deadline it slept
@@ -234,8 +267,8 @@ module MB
           end
           adapt(woke, @woken || timed ? 0.0 : want)
           event!(:woke)
-          f = Frame.new(at: start, paint: done - start - @write, write: @write, sleep: want, slept: slept, late: late, skipped: missed,
-                        wrote: out.is_a?(String) ? out.bytesize : 0)
+          f = Frame.new(at: start, paint: done - start - @write - @hold, write: @write, sleep: want, slept: slept, late: late, skipped: missed,
+                        wrote: out.is_a?(String) ? out.bytesize : 0, hold: @hold)
           @lock.synchronize do
             @frames << f
             @frames.shift if @frames.length > KEEP
@@ -260,7 +293,9 @@ module MB
           return if span < ADAPT_SECONDS
 
           measured = @window_frames / span
-          err = 1.0 / measured - @period # (seconds per frame too long, positive when short of the target)
+          # (seconds per frame too long, positive when short of the target;
+          # the target is the gap's rate when #min_gap is the longer)
+          err = 1.0 / measured - (@min_gap && @min_gap > @period ? @min_gap : @period)
           @trim = (@trim + TRIM_GAIN * err).clamp(0.0, MAX_TRIM * @period)
           @window_at = woke
           @window_frames = 0
@@ -285,6 +320,7 @@ module MB
             written: (fs.count { |f| f.wrote > 0 } / window).round(1),
             paint_ms: ms.(fs.map(&:paint)),
             write_ms: ms.(fs.map(&:write)),
+            hold_ms: ms.(fs.map(&:hold)),
             sleep_ms: ms.(fs.map(&:sleep)),
             oversleep_ms: ms.(fs.map { |f| f.slept - f.sleep }),
             late_ms: ms.(fs.map(&:late)),

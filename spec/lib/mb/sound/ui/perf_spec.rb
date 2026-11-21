@@ -10,6 +10,50 @@ RSpec.describe(MB::Sound::UI::Perf) do
     MB::Sound::UI::Pacer::Frame.new(at: at, paint: paint, write: write, sleep: 0.01, slept: 0.01, late: late, skipped: skipped, wrote: 0)
   end
 
+  # konsole-pacing (2026-11-21): "at 120fps the report says it drew 80-odd
+  # per second"; the rates in his terms, and what Konsole 23.08 showed
+  describe 'rates' do
+    def record(p, fps, seconds, written_every: 1)
+      t = 100.0
+      (fps * seconds).round.times do |i|
+        p.begin_frame(t)
+        w = (i % written_every).zero?
+        p.painted(1, false, false, w ? 400 : 0)
+        p.wrote(t + 0.001, t + 0.0012) if w
+        p.end_frame(frame(p, at: t, paint: 0.001, write: 0.0002))
+        t += 1.0 / fps
+      end
+      clock.t = t
+    end
+
+    it 'says the target, refreshes, written frames, and the frames Konsole before 26.04 showed, with a sentence where they differ' do
+      p = perf_class.new(clock: clock, ack: nil, target: 120)
+      p.identify(features: {})
+      p.identity[:xtversion] = 'Konsole 23.08.5'
+      record(p, 120, 2.0)
+      s = p.stop.summary
+      expect(s[:target_fps]).to eq(120)
+      expect(s[:shown][:model]).to eq('Konsole 23.08')
+      expect(s[:shown][:per_s]).to be_between(23.0, 25.5)
+      rows, says = p.rate_lines(s)
+      expect(rows.map(&:first)).to eq(['target', 'refreshes', 'written', 'shown (est.)'])
+      expect(says.join(' ')).to include('frames written under 10 ms apart are shown together, about 24 a second', 'ui.target_fps = 60')
+      expect(MB::U.remove_ansi(p.report(s).to_s)).to include('Rates (a second)', 'shown (est.)')
+      expect(p.inspect).to eq('#<MB::Sound::UI::Perf stopped, 240 frames>')
+    end
+
+    it 'says refreshes with nothing new to draw, and no terminal line for a terminal without a known rule' do
+      p = perf_class.new(clock: clock, ack: nil, target: 120)
+      p.identify(features: {})
+      p.identity[:env] = {} # (not Konsole)
+      record(p, 120, 2.0, written_every: 3)
+      s = p.stop.summary
+      expect(s[:shown]).to be_nil
+      _rows, says = p.rate_lines(s)
+      expect(says.join(' ')).to match(/Written 40 of 120 refreshes a second: 80 had nothing new to draw/)
+    end
+  end
+
   describe 'records' do
     it 'keeps each frame, the worst gap between written frames, and pane update ages' do
       p = perf_class.new(clock: clock, ack: nil)

@@ -271,4 +271,47 @@ RSpec.describe(MB::Sound::UI::Pacer, :aggregate_failures) do
     expect(p.state).to eq(:stopped)
     expect(run_for(p, @t + 1.0, 0.001)).to be_within(1).of(60)
   end
+
+  # konsole-pacing (2026-11-21, `ui.pace :terminal`): Konsole before 26.04
+  # shows frames under 10 ms apart together, about 25 a second
+  describe 'min_gap' do
+    it 'spaces frames at least the gap apart whatever the target, and keeps the target when it is slower' do
+      p = fake(120)
+      p.min_gap = 0.012
+      starts = []
+      p.run(-> { @t >= 5.0 }) { |now| starts << now; @t += 0.001; 'x' }
+      gaps = starts.each_cons(2).map { |a, b| b - a }
+      expect(gaps.min).to be >= 0.012 - 1e-9
+      expect(starts.length).to be_within(3).of(5.0 / 0.012)
+      p60 = fake(60)
+      p60.min_gap = 0.012
+      expect(run_for(p60, 10.0, 0.002)).to be_within(1).of(600)
+    end
+
+    it 'holds a write until the gap since the last one has passed, and counts the hold apart from paint' do
+      p = fake(60)
+      p.min_gap = 0.012
+      p.wrote_at(1.0)
+      @t = 1.005
+      p.hold_before_write
+      expect(@t).to be_within(1e-9).of(1.012)
+      @t = 1.03
+      p.hold_before_write # (past the gap: no wait)
+      expect(@t).to eq(1.03)
+      q = fake(60)
+      q.min_gap = 0.012
+      q.run(-> { @t >= 1.0 }) do |_now|
+        @t += 0.001
+        q.hold_before_write
+        @t += 0.0001
+        q.wrote_at(@t)
+        'x'
+      end
+      b = q.breakdown(window: 1.0)
+      expect(b[:paint_ms][:p50]).to be_within(0.05).of(1.1) # (the 0.1 ms "write" is not noted as one here)
+      expect(b[:hold_ms][:max]).to be < 0.001 # (the deadlines are 16.7 ms apart: nothing to hold)
+      r = fake(60)
+      expect { r.hold_before_write }.not_to(change { @t }) # (no gap: nothing)
+    end
+  end
 end
