@@ -62,7 +62,7 @@ RSpec.describe('bin/ui_bench.rb, the dropout scenario') do
     expect([k['model'], kv['vsync'], k26['model']]).to eq(['Konsole', 120.0, 'Konsole 26.04'])
     expect(k['written_per_s']).to be < 90 # (12 ms apart at least, though 122 was asked)
     expect(k['updates_per_s']).to be > k['written_per_s'] * 0.9 # (each frame shown)
-    expect(k['close_per_s']).to eq(0.0)
+    expect(k['close_per_s']).to be < 2 # (none written closer; the sink stamps a frame after parsing it, so a slow first frame can look close to the next)
     expect(k['delay_ms']['p50']).to be_within(1.5).of(10.0)
   end
 end
