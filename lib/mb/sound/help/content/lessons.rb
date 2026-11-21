@@ -125,7 +125,9 @@ module MB
       step 'Your own patch' do
         say <<~TEXT
           A patch of your own shows its numbers in the inspector, dim with a
-          dot: an envelope's points here.
+          dot: an envelope's points here.  At the prompt, Up brings the
+          track line back, and Alt-Up/Alt-Down on one of its numbers step it
+          and run the line again (Alt-Shift-Left/Right jump between numbers).
         TEXT
         type do
           track(:l_pad) { |c| c.synth(voices: 4) { |v| v.hz.saw.at(-12.db).lp4(900.hz) * v.env([[1, 0.02], [0.6, 0.3], [0, 0.6]], release_at: 2) } }

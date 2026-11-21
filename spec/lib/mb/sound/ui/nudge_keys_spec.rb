@@ -98,7 +98,7 @@ RSpec.describe(MB::Sound::UI::NudgeKeys, :aggregate_failures) do
       h.push('fx :d, ->{ it.lp4(300) }')
       %w[301 302 303].each do |v|
         MB::Sound::UI::NudgeKeys.submitting("fx :d, ->{ it.lp4(#{v}) }")
-        h.push("fx :d, ->{ it.lp4(#{v}) }")
+        h << "fx :d, ->{ it.lp4(#{v}) }" # (as Pry::Instance pushes)
       end
       expect(h.to_a).to eq(['fx :d, ->{ it.lp4(300) }', 'fx :d, ->{ it.lp4(303) }'])
       expect(saved).to eq(['fx :d, ->{ it.lp4(300) }'])
@@ -112,6 +112,16 @@ RSpec.describe(MB::Sound::UI::NudgeKeys, :aggregate_failures) do
       expect(h.to_a.length).to eq(4)
       MB::Sound::UI::NudgeHistory.flush
       expect(saved.last).to eq('changes 1')
+
+      # Lines Reline already added (readline with add_history: the tiles'
+      # own Pry thread) aren't added twice
+      h.push('f(1)')
+      %w[2 3].each do |v|
+        h.instance_variable_get(:@history) << "f(#{v})"
+        MB::Sound::UI::NudgeKeys.submitting("f(#{v})")
+        h << "f(#{v})"
+      end
+      expect(h.to_a.last(2)).to eq(['f(1)', 'f(3)'])
     ensure
       MB::Sound::UI::NudgeHistory.pending = nil
     end

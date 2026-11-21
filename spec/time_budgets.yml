@@ -28,6 +28,9 @@ default:
   file: 20
   example: 8
 files:
+  spec/bin/sound_nudge_spec.rb:
+    example: 14
+    reason: one real bin/sound.rb in a pty with a track playing (about 2 s of startup), a track line defined, recalled, and nudged three times with each step landing a bar later at 960 bpm, three console probes, undo landing, and a failing line; 7.8 s at PARALLEL=4 on the busy 7950X container against the default 8 (repl-scrub-1, 2026-11-21)
   spec/bin/ui_bench_spec.rb:
     file: 30
     reason: three real bin/ui_bench.rb processes (each 5-7 s of startup, UI and YJIT warm-up, a demo set's load, then 1.5 s recorded), the tiles against a model terminal, the dropout scenario with the device-queue model, and ui :wall with console lines typed; 22.4 s at PARALLEL=8 on the 7950X container under load (x1.07 = 21 reference seconds) against the default 20 (ui-perf-2 round 5, 2026-11-17)

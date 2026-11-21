@@ -1260,6 +1260,11 @@ module MB
         `choose` keep their steps).  Takes keep the raw steps, so a replay
         sounds as you played it; `smooth_gesture` makes the last gesture the
         fitted curve on purpose (undoable).
+
+        A number written in a line needs no knob to try values: recall the
+        line (Up), put the cursor on the number (Alt-Shift-Left/Right jump
+        between numbers), and Alt-Up/Alt-Down step it and run the line
+        again, landing where the line lands (`help :ui` has the keys).
       TEXT
       commands :knob, :knobs, :turn, :snap, :snaps, :recall, :xfade, :learn, :smooth_gesture
       note :arrangement
@@ -1951,6 +1956,16 @@ module MB
         of the screen, and scrolled lines stay in the terminal's scrollback.
         `ui :deck` adds knobs and CPU, `ui :mini` is one line, `ui off`
         hides it.
+
+        At the prompt (with or without a screen), Alt-Up/Alt-Down step the
+        number at the cursor and run the line again, as Enter would (the
+        take, the journal, undo; it lands where the line lands); the line
+        stays with the cursor on the number for the next step.  A number
+        steps by its last written digit (300 -> 301, 0.125 -> 0.126);
+        Alt-Shift is a fine step (0.125 -> 0.1251), Ctrl-Alt a coarse one
+        (10 steps); Alt-Shift-Left/Right jump between numbers, and Esc then
+        Up/Down works where Alt-arrows don't arrive.  Keys pressed together
+        run the line once; history keeps one entry for the run.
 
         `ui :tiles` (or `:studio`, `:keys`, `:wall`) takes the whole screen:
         panes tiled around the console, which keeps a 10 000-line scrollback

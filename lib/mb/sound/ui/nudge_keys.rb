@@ -252,7 +252,11 @@ module MB
           end
           return line if line.empty?
 
-          if @mb_sound_nudge_last && !@history.empty? && @history[-1] == @mb_sound_nudge_last
+          if !@history.empty? && @history[-1] == line
+            # (Reline added it already: readline with add_history, as the
+            # tiles' own Pry thread reads; the run's previous entry goes)
+            @history.delete_at(-2) if @mb_sound_nudge_last && @history.length > 1 && @history[-2] == @mb_sound_nudge_last
+          elsif @mb_sound_nudge_last && !@history.empty? && @history[-1] == @mb_sound_nudge_last
             @history[-1] = line
           else
             NudgeHistory.flush
@@ -264,6 +268,10 @@ module MB
           ExitClose.register(NudgeHistory) if defined?(ExitClose)
           line
         end
+
+        # (Pry's `alias << push` names the original method: Pry::Instance
+        # pushes with <<)
+        def <<(line) = push(line)
 
         # Writes +line+ to the history file as Pry's #push would.
         def mb_sound_nudge_save(line)
