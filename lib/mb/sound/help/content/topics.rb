@@ -1101,7 +1101,9 @@ module MB
         perform it with loop!, onward, goto, skip, finish, practice, seek.
         `flow` alone shows it (where it is, what comes next, how to end
         it); `start` (or `play`, `go` with nothing) plays the loaded flow
-        and `pause` (NAV Space) toggles: the bar stops, sounding notes
+        (its first section's tracks start together, first notes included,
+        once the last is built: "starting: building 4 tracks ...") and
+        `pause` (NAV Space) toggles: the bar stops, sounding notes
         release, loops and drones fade out and hold their place, and
         echoes and reverbs ring out; playing on doesn't retrigger notes
         (`start resync: true` puts tempo-synced LFOs back on the grid).
