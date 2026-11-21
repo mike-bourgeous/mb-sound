@@ -42,10 +42,10 @@ module MB
 
           mode_keys do
             group 'Clip matrix'
-            on [:up, 'k'], :move, 0, -1, help: 'cursor up', label: 'arrows hjkl'
-            on [:down, 'j'], :move, 0, 1, help: 'cursor down', label: 'arrows hjkl'
-            on [:left, 'h'], :move, -1, 0, help: 'cursor left', label: 'arrows hjkl'
-            on [:right, 'l'], :move, 1, 0, help: 'cursor right', label: 'arrows hjkl'
+            on [:up, 'k'], :move, 0, -1, help: 'move the cursor', label: 'arrows hjkl'
+            on [:down, 'j'], :move, 0, 1, help: 'move the cursor', label: 'arrows hjkl'
+            on [:left, 'h'], :move, -1, 0, help: 'move the cursor', label: 'arrows hjkl'
+            on [:right, 'l'], :move, 1, 0, help: 'move the cursor', label: 'arrows hjkl'
             on [:home], :move_to, :first, help: 'first column'
             on [:end], :move_to, :last, help: 'last column'
             on :enter, :launch, help: 'launch the cell: its clip on the track (■: stop the track)'
@@ -55,6 +55,7 @@ module MB
             EDITS.each { |key, help, _| on key, :tweak, key, help: help }
             group 'Clip matrix'
             on 'u', :undo, help: 'undo the last change (at the next bar)'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
           end
 
           keys do
@@ -243,6 +244,9 @@ module MB
             end
           end
 
+          # e: Enter's line for the cell (PaneKeys#key_edit_line).
+          def edit_line(state) = key_launch(state)
+
           def key_scene(state)
             cell = cursor_cell(state) or return 'no scene here'
             _, _, sc = cell
@@ -412,6 +416,7 @@ module MB
             on ['H'], :turn, -FINE, help: 'turn down, fine'
             on '0', :reset, help: "the knob's default"
             on :enter, :ask, help: 'type a value (turn :"bass/dub/tone", 3000.hz)', label: 'Enter'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
           end
 
           keys do

@@ -2053,7 +2053,9 @@ module MB
         Space the transport.  In the buses pane Up/Down pick a bus or a
         send, Left/Right the send's level (one `feed :pad, :verb, -9.0.db`
         line when you let go), 0 closes it, Enter types it, m mutes the
-        bus.  Every key runs one console
+        bus.  In those panes (and the matrix, knobs, racks, queue) e puts
+        the picked row's line on the console unrun, to edit.  Every key
+        runs one console
         line: journaled, undoable, in your take (knob turns show on the
         pane's last row, other lines in the console).  `ui :mixer` shows
         buses beside the master.

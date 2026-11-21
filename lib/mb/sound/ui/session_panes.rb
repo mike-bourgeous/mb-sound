@@ -60,6 +60,7 @@ module MB
             on '0', :close_send, help: 'close the send (feed :pad, :verb, 0)'
             on :enter, :ask_send, help: 'type the send\'s level (feed :pad, :verb, -9.db)', label: 'Enter'
             on 'm', :mute_bus, help: 'mute, unmute the bus (mute :verb)'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
             on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
           end
 
@@ -190,6 +191,16 @@ module MB
             info = state[:snap].buses.find { |b| b.name == bus }
             run = info&.muted ? PaneKeys::Run["unmute #{bus.inspect}", "#{bus} unmuted"] : PaneKeys::Run["mute #{bus.inspect}", "#{bus} muted"]
             [*out, run]
+          end
+
+          # e: a send row's `feed` line at its level, a bus row's `mute`
+          # (PaneKeys#key_edit_line).
+          def edit_line(state)
+            r = picked_row(state) or return 'pick a bus or a send first (Up Down)'
+            return key_mute_bus(state).last if r[0] == :bus
+            why = not_a_send(r) and return why
+            db = carried(state, [r[1], r[5]]) || level_db(r[3])
+            PaneKeys::Turn["feed #{r[1].inspect}, #{r[5].inspect}, #{db.finite? ? "#{RubyValue.to_ruby(db.round(2))}.db" : '0'}"]
           end
 
           # The pending send line, once the keys stopped (GAP), else nil.

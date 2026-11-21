@@ -183,6 +183,7 @@ module MB
             on '>', :skip, help: 'leave this section at the next bar line (skip)'
             on 'f', :finish, help: 'the ending next (finish)'
             on ' ', :transport, help: 'play / pause the transport (as NAV Space)', label: 'Space'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
             on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
           end
 
@@ -246,6 +247,9 @@ module MB
 
           # Space: the transport's play / pause, as NAV Space.
           def key_transport(_state) = MB::Term::Input::Action.of(:pause)
+
+          # e: Enter's line (PaneKeys#key_edit_line).
+          def edit_line(state) = key_goto(state)
 
           private
 
@@ -384,6 +388,7 @@ module MB
             on 'm', :mute, help: 'mute, unmute it'
             on ['d', :delete], :untrack, help: 'remove it from the set (untrack; d twice; undo brings it back)', label: 'd Del'
             on 'v', :stopped_view, help: 'hide or show stopped tracks'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
             on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
           end
 
@@ -563,6 +568,14 @@ module MB
             "d again removes #{name} from the set (undo brings it back)"
           end
 
+          # e: Space's line for the picked track (`resume :kick` or `stop
+          # :kick`; PaneKeys#key_edit_line), without its bookkeeping.
+          def edit_line(state)
+            row = picked_row(state) or return 'pick a track first (Up Down)'
+            name, _, st = row
+            RESUMES.include?(st) ? PaneKeys::Run["resume #{name.inspect}"] : PaneKeys::Run["stop #{name.inspect}"]
+          end
+
           # v: hides or shows stopped tracks (this pane only).
           def key_stopped_view(state)
             state[:hide_stopped] = !state[:hide_stopped]
@@ -604,6 +617,7 @@ module MB
               on [:up, 'k'], :pick_queued, -1, help: 'the change before, after', label: 'Up Down'
               on [:down, 'j'], :pick_queued, 1, help: 'the change before, after', label: 'Up Down'
               on 'x', :cancel_queued, help: 'cancel it before it lands (cancel queued: :bass, kind: :stop; undo queues it again)'
+              on 'e', :edit_line, help: PaneKeys::EDIT_HELP
               on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
             end
           end
@@ -632,6 +646,14 @@ module MB
             end
             state[:pick] = nil
             PaneKeys::Run["cancel queued: #{e.subject.inspect}, kind: #{e.kind.inspect}", "#{e.kind} #{e.subject.inspect} cancelled (undo queues it again)"]
+          end
+
+          # e: x's line for the picked change (PaneKeys#key_edit_line).
+          def edit_line(state)
+            q = sorted_queued(state)
+            return 'nothing queued' if q.empty?
+            e = q[picked_index(state, q)]
+            PaneKeys::Run["cancel queued: #{e.subject.inspect}, kind: #{e.kind.inspect}"]
           end
 
           private
@@ -709,6 +731,7 @@ module MB
             on ['H'], :turn, -KnobTurns::FINE, help: 'turn down, fine'
             on '0', :reset, help: "the knob's default"
             on :enter, :ask, help: 'type a value (turn :cut, 3000.hz)', label: 'Enter'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
             on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
           end
 

@@ -93,6 +93,15 @@ module MB
           [*flush(state), PaneKeys::Ask["turn #{kn.inspect}, ", TurnGesture.number(value), :typed, select: true]]
         end
 
+        # e: the picked knob's `turn` line at the value shown
+        # (PaneKeys#key_edit_line).
+        def edit_line(state)
+          cell = picked(state) or return no_knob_note
+          kn, k = cell
+          value, = shown_value(state, kn, k)
+          PaneKeys::Turn["turn #{kn.inspect}, #{TurnGesture.number(value)}"]
+        end
+
         # The typed answer to #key_ask: one `turn` line with it (Ruby:
         # 3000, 3000.hz, -6.db).
         def key_typed(state, text)
