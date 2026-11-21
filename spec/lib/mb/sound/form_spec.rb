@@ -690,6 +690,108 @@ RSpec.describe(MB::Sound::Form) do
     end
   end
 
+  # (form-start-1, the maintainer, 2026-11-21: "The first pad note seems
+  # to be skipped when I start the tunnel vision demo": a form started
+  # from idle kept time while its first scene's tracks were still
+  # building, so a track built late landed past 1:1 and its clip never
+  # played the notes before its landing)
+  describe 'starting from idle' do
+    # A virtual-clock NullOutput that keeps what it writes (channel 0).
+    def start_output(buffer_size)
+      Class.new(MB::Sound::NullOutput) {
+        def written = @written ||= []
+        def written_frames = written.sum(&:length)
+        def write(data)
+          written << data[0].dup
+          super
+        end
+        def mono = SpecBuffers.join(written)
+      }.new(channels: 1, sleep: :virtual, buffer_size: buffer_size)
+    end
+
+    # Plays a two-bar flow whose scene starts track :fast (a quarter-level
+    # gate, built at once) and :slow (a half-level gate, whose build lets
+    # +build_seconds+ of audio render first, as a slow patch build does on
+    # a live session: nil offline).  Returns the mix (channel 0) and the
+    # journal entries of the two tracks' starts.
+    def start_flow(s, buffer_size:, out: nil, build_seconds: nil, launch: {})
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.track(:fast) { |c| c.gate * 0.25 }
+        MB::Sound.track(:slow) { |c|
+          out.consume(build_seconds) if build_seconds
+          c.gate * 0.5
+        }
+        MB::Sound.scene(:a, fast: MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n4.loop, slow: MB::Sound.seq(MB::Sound::G4).n2.loop)
+        f = s.arrangement.build_form { a 2.bars }
+        if out
+          s.ensure_running # (a render thread already running, as after `demo`)
+          MB::Sound::Internal.wait_audio(s, 0.05)
+          MB::Sound.play_form(f, warm_up: false, **launch)
+          audio_until(s) { s.journal.changes.count { |e| e.kind == :bg && e.status == :landed } == 2 }
+          land = s.journal.changes.select { |e| e.kind == :bg }.map { |e| e.lands.frame }.max
+          audio_until(s) { out.written_frames > land + 2.5 * bar }
+          data = out.mono
+        else
+          MB::Sound.play_form(f, warm_up: false, **launch)
+          data = SpecBuffers.join(Array.new((3.5 * bar / buffer_size).ceil) { s.process_buffer(buffer_size)[0].dup })
+        end
+        [data, s.journal.changes.select { |e| e.kind == :bg }.to_h { |e| [e.subject, e] }]
+      end
+    end
+
+    # Lets session +s+ render until the block is true (at most 10 s of
+    # audio).
+    def audio_until(s)
+      200.times do
+        return if yield
+        MB::Sound::Internal.wait_audio(s, 0.05)
+      end
+      raise 'the session never got there'
+    end
+
+    def start_sessions(n)
+      offline = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false),
+                                       transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: n, realtime: false)
+      out = start_output(n)
+      live = MB::Sound::Session.new(master_gain: 1, output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: n, realtime: true)
+      [offline, live, out]
+    end
+
+    [512, *SlowTier.slow_tier([367, 800])].each do |n|
+      it "lands the first section's tracks together, first notes included, as an offline render plays them (#{n}-frame buffers)" do
+        offline, live, out = start_sessions(n)
+        expected, = start_flow(offline, buffer_size: n)
+        data, starts = start_flow(live, buffer_size: n, out: out, build_seconds: 0.3)
+
+        # (the slow build delays the start; both tracks land on one frame)
+        expect(starts[:fast].lands.frame).to eq(starts[:slow].lands.frame)
+        land = starts[:slow].lands.frame
+        expect(land).to be >= 0.3 * 48000
+        expect(starts[:slow].lands.to_s).to eq('1:1')
+        expect(data[0...land].abs.max).to eq(0)
+        expect(data[land...(land + 2 * bar)].to_a).to eq(expected[0...(2 * bar)].to_a)
+      ensure
+        offline&.close
+        live&.close
+      end
+    end
+
+    it 'lands the group on its launch point when the form starts on a later bar' do
+      offline, live, out = start_sessions(512)
+      live.transport.seek(15/16r)
+      offline.transport.seek(15/16r)
+      expected, = start_flow(offline, buffer_size: 512, launch: { on: :bar })
+      data, starts = start_flow(live, buffer_size: 512, out: out, build_seconds: 0.3, launch: { on: :bar })
+      expect(starts.values.map { |e| e.lands.to_s }).to eq(['2:1', '2:1'])
+      land = starts[:slow].lands.frame
+      off_land = expected.to_a.index { |v| v != 0 }
+      expect(data[land...(land + 2 * bar)].to_a).to eq(expected[off_land...(off_land + 2 * bar)].to_a)
+    ensure
+      offline&.close
+      live&.close
+    end
+  end
+
   describe 'fills' do
     it 'plays a section\'s fill in its last bar: the fill scene and fill-marked notes' do
       set.track(:x) { |c| c.notes.number }

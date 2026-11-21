@@ -584,7 +584,7 @@ module MB
 
         # Its code compiled here rather than where it lands, or in the
         # background, the change held until it is done (see Warming)
-        hold = warm_graph(name, nodes, warm, warm_time(point, start_time), background: warm_hold_for_add, found: found)
+        hold = warm_graph(name, nodes, warm, warm_time(point, start_time), background: warm_hold_for_add, found: found) || group_hold_for_add
 
         default = @players.empty? && !queued_start? ? :now : :bar # (launch_time's :auto, kept for a held change's re-time)
         time = start_time ? start_time.to_r : launch_time(point, timeline_nodes, default: default)
@@ -1273,7 +1273,8 @@ module MB
         # (see #advance_idle=), live and offline sessions while a form plays
         # (see Form::Playback#keeps_time?); otherwise the timeline pauses
         keep_time = !paused && (@advance_idle || form_keeps_time?(from))
-        @span.moving = !paused && (keep_time || !idle?)
+        idle = timeline_idle?
+        @span.moving = !paused && (keep_time || !idle)
         @span.sample_rate = sample_rate
         @span.run = @run_frame
         Thread.current[:mb_sound_span] = @span
@@ -1290,7 +1291,7 @@ module MB
           @scheduler.seeked(from)
         end
 
-        @scheduler.dispatch(from, to, playing: !paused && (keep_time || !idle?))
+        @scheduler.dispatch(from, to, playing: !paused && (keep_time || !idle))
 
         # MIDI input lands on exact frames before changes (a recording
         # closing in this span needs its events) and graphs read it
@@ -1340,7 +1341,9 @@ module MB
         # Graphs kept for #resume or #undo keep their shared nodes in step
         read_kept_graphs(@frame + count)
 
-        moving = !paused && (playing || keep_time)
+        # (starts that only wait for a hold leave the timeline where it
+        # is: see #timeline_idle?)
+        moving = !paused && ((playing && !(players.empty? && timeline_idle?)) || keep_time)
         if moving
           whole_notes = to - from
           @transport.advance_span(from, to, whole_notes)
