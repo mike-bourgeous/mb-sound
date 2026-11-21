@@ -322,7 +322,9 @@ RSpec.describe('UI session panes', :aggregate_failures) do
     end
 
     # (ui-phase1-1, the plan's Phase 1 item 13: typed values on every value row)
-    it 'types the picked track\'s level with = (Enter stays unmapped)' do
+    # (Enter was left free here for tracks-enter-1, whose Enter opens the
+    # track's knobs: merge train 2026-11-21)
+    it 'types the picked track\'s level with = (Enter is the knobs, not a typed level)' do
       pk = ui::PaneKeys
       st = { mode: true }
       paint(st)
@@ -339,7 +341,7 @@ RSpec.describe('UI session panes', :aggregate_failures) do
       expect(pane.key_action(:typed_level, st, ' ')).to eq('nothing typed')
       km = ui::Panes::Tracks.mode_keymap.entries
       expect(km.find { |b| b.chord == ['=', []] }&.action).to eq(:ask_level)
-      expect(km.find { |b| b.chord == [:enter, []] }).to be_nil
+      expect(km.find { |b| b.chord == [:enter, []] }&.action).to eq(:open)
     end
 
     describe 'on a screen' do
