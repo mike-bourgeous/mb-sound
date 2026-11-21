@@ -1591,7 +1591,7 @@ module MB
               next flash('no session to turn knobs in', :warn) unless s
               begin
                 v = s.preview_turn(x.knob, x.value)
-                flash("#{x.knob} #{GraphNode::Knob.number(v)}  (held: one line when you let go)", :key)
+                flash("#{x.note || "#{x.knob} #{GraphNode::Knob.number(v)}"}  (held: one line when you let go)", :key)
               rescue ArgumentError => e
                 flash("#{e.class}: #{e.message}", :bad)
               end

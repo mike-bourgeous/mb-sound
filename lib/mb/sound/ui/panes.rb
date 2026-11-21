@@ -125,13 +125,24 @@ module MB
         # pane, I should also be able to resume it"; "S would be for solo";
         # "M for mute"): the level a key set is carried for the next key and
         # shown at once (UI::CarriedValues, as the knob panes do), so every
-        # repeat of a held arrow steps on; Space plays or stops the picked
+        # repeat of a held arrow steps on.  A level is a knob
+        # (:"drums/level", Session::Faders), so its keys are a knob gesture
+        # (UI::KnobTurns, UI::TurnGesture; round 2, the maintainer's
+        # 2026-11-21 "yes" to "a live preview while held and one `level`
+        # line on release, as knobs do"): each Left/Right moves the level
+        # live (PaneKeys::Preview), and when the keys stop the gesture is
+        # ONE line, its final value (`level :drums, -10.0.db`;
+        # Session#gesture_line): one journal entry, one undo step, a take
+        # line replaying the sweep heard.  0 is one `level :drums, 0.0.db`
+        # line.  Level lines print as knob turns do: nothing in the REPL
+        # pane, the latest on the pane's last row in its mode
+        # (KnobTurns#turn_line_canvas).  Space plays or stops the picked
         # track (`resume :kick` when stopped, `stop :kick` when playing; NAV
         # Space stays the transport's), s solos or unsolos it, m mutes or
         # unmutes it, from the snapshot's flags (marked solo and muted in
         # its row).
         class Tracks < Pane
-          include CarriedValues
+          include KnobTurns
 
           # The loudest level the keys set (Session::Faders::MAX_LEVEL, +12 dB).
           MAX_DB = (20 * Math.log10(Session::Faders::MAX_LEVEL)).floor.to_f
@@ -147,8 +158,8 @@ module MB
             on [:down, 'j'], :pick, 1, help: 'the track below', label: 'Up Down'
             on [:page_up], :pick, -5, help: 'five tracks up', label: 'PgUp PgDn'
             on [:page_down], :pick, 5, help: 'five tracks down', label: 'PgUp PgDn'
-            on [:left, 'h'], :level, -1, help: 'its level 1 dB down (level)', label: 'Left Right'
-            on [:right, 'l'], :level, 1, help: 'its level 1 dB up (level)', label: 'Left Right'
+            on [:left, 'h'], :level, -1, help: 'its level 1 dB down, up (held: live, one level line)', label: 'Left Right'
+            on [:right, 'l'], :level, 1, help: 'its level 1 dB down, up (held: live, one level line)', label: 'Left Right'
             on '0', :level, 0, help: 'its level back to 0 dB'
             on 'x', :stop_track, help: 'stop it (stop)'
             on ' ', :play_stop, help: 'this track: resume or stop (NAV Space: the transport)', label: 'Space'
@@ -185,6 +196,7 @@ module MB
             return unless s
 
             state[:snap] = s
+            c = turn_line_canvas(c, state) if state[:mode] # (the latest level line)
             rec = s.recording.to_h { |r| [r.name, r] }
             all = Tracks.rows(s)
             rows = state[:hide_stopped] ? all.reject { |r| r[2] == :stopped } : all
@@ -245,19 +257,38 @@ module MB
           # The arrows' scrolling (Pane's) picks here.
           def key_scroll(state, *) = key_pick(state, 1)
 
-          # Left/Right: the picked track's level by +d+ dB (0: back to 0 dB),
-          # on from the level the last key set while the poll catches up
-          # (CarriedValues: a held arrow steps every repeat), at most MAX_DB.
+          # Left/Right: the picked track's level by +d+ dB, on from the
+          # level the last key set while the poll catches up (CarriedValues:
+          # a held arrow steps every repeat), at most MAX_DB: a step of a
+          # knob gesture on its level knob (a live Preview; the Commit, one
+          # `level` line, when the keys stop: KnobTurns#key_tick).  0: back
+          # to 0 dB, one `level` line (after any gesture's).
           def key_level(state, d)
             name = state[:cursor] or return 'pick a track first (Up Down)'
             t = state[:snap]&.tracks&.find { |x| x.name == name }
             return "#{name}: not a track (a player of its own; its graph sets its level)" unless t
+            if d.zero?
+              carry(state, name, 0.0)
+              return [*flush(state), PaneKeys::Turn["level #{name.inspect}, 0.0.db", "#{name} at 0 dB"]]
+            end
             now = carried(state, name) || t.level
             now = 0.0 unless now&.finite?
-            db = d.zero? ? 0.0 : [(now + d).round(1), MAX_DB].min
+            db = [(now + d).round(1), MAX_DB].min
             return "#{name} at #{Panes.fmt(db)} dB (the most a level goes)" if db == now && d > 0
             carry(state, name, db)
-            PaneKeys::Run["level #{name.inspect}, #{RubyValue.to_ruby(db)}.db", "#{name} at #{Panes.fmt(db)} dB"]
+            kn = Session::Name.level(name)
+            g = (state[:gesture] ||= TurnGesture.new)
+            out = g.turning? && g.knob != kn ? flush(state) : nil
+            from = g.turning? ? g.value : Decibels.new(now).to_f
+            pv = g.step(kn, from, Decibels.new(db).to_f, self.class.clock.call)
+            [*out, pv.with(note: "#{name} at #{Panes.fmt(db)} dB")]
+          end
+
+          # A level gesture's Commit (KnobTurns#key_tick) says its line on
+          # the status line, not the knob's gain.
+          def key_tick(state)
+            r = super
+            r.is_a?(PaneKeys::Commit) ? r.with(note: nil) : r
           end
 
           # Space: plays the picked track again if it is stopped (or
@@ -323,6 +354,14 @@ module MB
           end
 
           private
+
+          # Another key's flush of a level gesture (KnobTurns#flush), its
+          # note left to the line as #key_tick does.
+          def flush(state) = super.map { |r| r.is_a?(PaneKeys::Commit) ? r.with(note: nil) : r }
+
+          # (KnobTurns' value carried for the level knob: the rows read the
+          # track's own carried dB)
+          def remember(_state, _g) = nil
 
           # The picked track's row (see .rows) in the snapshot it drew, or nil.
           def picked_row(state)

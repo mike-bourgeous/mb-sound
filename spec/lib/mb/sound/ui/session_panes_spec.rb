@@ -67,8 +67,11 @@ RSpec.describe('UI session panes', :aggregate_failures) do
 
     state[:cursor] = :t3
     r = pane.key_action(:level, state, -1)
-    expect(r.code).to eq('level :t3, -3.0.db')
-    expect(pane.key_action(:level, state, 0).code).to eq('level :t3, 0.0.db')
+    expect(r).to eq([ui::PaneKeys::Preview[:"t3/level", -3.0.db.to_f, 't3 at -3 dB']]) # (live; its level line when the keys stop)
+    r = pane.key_action(:level, state, 0)
+    expect(r[0]).to eq(ui::PaneKeys::Commit[:"t3/level"]) # (the gesture's line goes out first)
+    expect(r[1]).to eq(ui::PaneKeys::Turn['level :t3, 0.0.db', 't3 at 0 dB'])
+    pane.lines_ran(state)
     expect(pane.key_action(:stop_track, state).code).to eq('stop :t3')
     # (d twice: untrack, the cursor on the next track)
     expect(pane.key_action(:untrack, state)).to eq('d again removes t3 from the set (undo brings it back)')
@@ -109,22 +112,50 @@ RSpec.describe('UI session panes', :aggregate_failures) do
       grid.to_text(:none).lines.map(&:rstrip)
     end
 
-    it 'steps every repeat of a held arrow on from the level the last key set, shown before the poll has it' do
+    # (round 2, the maintainer's 2026-11-21 "yes": a live preview while
+    # held and one `level` line on release, as knobs do)
+    it 'moves the level live on every repeat of a held arrow, the row following, and commits one level line when the keys stop' do
+      pk = ui::PaneKeys
       st = { mode: true }
       paint(st)
       st[:cursor] = :t1
       # (a held key: one key, 0.4 s, then 30 a second; the snapshot never catches up)
-      codes = [pane.key_action(:level, st, -1).code]
+      out = [pane.key_action(:level, st, -1)]
       @now += 0.4
-      9.times { codes << pane.key_action(:level, st, -1).code; @now += 1 / 30.0 }
-      expect(codes).to eq((1..10).map { |i| "level :t1, -#{i}.0.db" })
-      expect(paint(st).find { |l| l.include?('t1') }).to include('-10 dB') # (the old snapshot, the carried level)
-      @now += ui::CarriedValues::PENDING + 0.01
-      expect(paint(st).find { |l| l.include?('t1') }).not_to include('dB') # (the snapshot's again)
-      expect(pane.key_action(:level, st, 1).code).to eq('level :t1, 1.0.db') # (on from the snapshot's 0 dB)
-      12.times { pane.key_action(:level, st, 1) }
+      9.times do |i|
+        out << pane.key_action(:level, st, -1)
+        expect(paint(st).find { |l| l.include?('t1') }).to include("-#{i + 2} dB") # (the row, on the next frame)
+        expect(pane.key_tick(st)).to be_nil # (still held: no line)
+        @now += 1 / 30.0
+      end
+      expect(out.map(&:length).uniq).to eq([1])
+      expect(out.map { |r| r[0] }).to eq((1..10).map { |i| pk::Preview[:"t1/level", (-i.to_f).db.to_f, "t1 at -#{i} dB"] })
+      expect(pane.key_wait(st)).to be_within(1e-9).of(ui::TurnGesture::GAP - 1 / 30.0)
+      @now += ui::TurnGesture::GAP
+      expect(pane.key_tick(st)).to eq(pk::Commit[:"t1/level"]) # (one line, Session#gesture_line: `level :t1, -10.0.db`)
+      pane.lines_ran(st)
+      expect(pane.key_tick(st)).to be_nil
+      expect(pane.key_wait(st)).to be_nil
+
+      # A tap: one preview, one commit
+      @now += 5 # (past the carried level: the snapshot's 0 dB again)
+      expect(paint(st).find { |l| l.include?('t1') }).not_to include('dB')
+      expect(pane.key_action(:level, st, 1)).to eq([pk::Preview[:"t1/level", 1.0.db.to_f, 't1 at 1 dB']])
+      @now += ui::TurnGesture::GAP
+      expect(pane.key_tick(st)).to eq(pk::Commit[:"t1/level"])
+      pane.lines_ran(st)
+
+      # The +12 dB ceiling (on from the carried level), and 0: one line after the gesture's
+      12.times { pane.key_action(:level, st, 1); @now += 0.03 }
       expect(pane.key_action(:level, st, 1)).to eq('t1 at 12 dB (the most a level goes)')
-      expect(pane.key_action(:level, st, 0).code).to eq('level :t1, 0.0.db')
+      out = pane.key_action(:level, st, 0)
+      expect(out).to eq([pk::Commit[:"t1/level"], pk::Turn['level :t1, 0.0.db', 't1 at 0 dB']])
+      pane.lines_ran(st)
+
+      # The latest level line on the pane's last row, in its mode only
+      st[:turn_line] = 'level :t1, 0.0.db'
+      expect(paint(st).last).to eq('level :t1, 0.0.db')
+      expect(paint(st.merge(mode: false)).last).not_to include('level :t1')
     end
 
     it 'plays or stops the picked track with Space: resume when stopped or stopping, stop when playing' do
@@ -203,8 +234,21 @@ RSpec.describe('UI session panes', :aggregate_failures) do
         expect(@session.journal.changes.select { |e| e.subject == :drums }.map(&:kind)).to include(:stop, :resume)
         resumed = @session.journal.changes.reverse.find { |e| e.kind == :resume && e.subject == :drums }
         expect(resumed.lands.pos % @session.transport.bar_length).to eq(0) # (on a bar line)
+        before = @session.level(:drums).to_f
+        turns = -> { @session.journal.changes.select { |e| e.kind == :turn && e.subject == :"drums/level" } }
         @term.write("\e[D")
         expect(@term.wait_for(/▸drums\s+-1 dB/)).to eq(true), @term.lines.grep(/drums/).first.inspect
+        # (live at once, unjournaled; one level line when the keys stop, on
+        # the pane's last row, not in the REPL pane: round 2)
+        expect(wait_until { (@session.level(:drums).to_f - -1.db.to_f).abs < 1e-3 }).to eq(true)
+        expect(wait_until { turns.().length == 1 }).to eq(true)
+        expect(turns.()[0].data).to include(gesture: true)
+        expect(wait_until { st[:turn_line] == 'level :drums, -1.0.db' }).to eq(true), st[:turn_line].inspect
+        rows_of = ->(pane) { r = @tiles.tiler.placed.find { |p| p.name == pane }.rect; @term.lines[r.y, r.h].map { |l| l[r.x, r.w].to_s } }
+        expect(wait_until { rows_of.(:tracks).any? { |l| l.include?('level :drums, -1.0.db') } }).to eq(true), rows_of.(:tracks).join("\n")
+        expect(rows_of.(:repl).join("\n")).not_to include('level :drums')
+        MB::Sound::Session.with_context(session: @session) { @session.undo(on: :now) }
+        expect(wait_until { (@session.level(:drums).to_f - before).abs < 1e-9 }).to eq(true) # (one undo: the level from before the gesture)
         expect(@tiles.mode_problems).to eq([])
       ensure
         stop = true

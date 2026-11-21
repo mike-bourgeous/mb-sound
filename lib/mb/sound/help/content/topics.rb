@@ -2022,7 +2022,7 @@ module MB
         value; a held key is one `turn :x, 0 => 0.3, 1.n8 => 0.5` line
         when you let go: its fitted keyframes; the take keeps the raw
         steps).  In the tracks pane Left/Right set the level a dB a press
-        (held: a step every repeat), Space plays a stopped track again
+        (held: live, then one `level :bass, -6.0.db` line), Space plays a stopped track again
         (`resume :bass`) or stops a playing one (NAV Space is the
         transport), x stops, s solos, m mutes.  Every key runs one console
         line: journaled, undoable, in your take (knob turns show on the
