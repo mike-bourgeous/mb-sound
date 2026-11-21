@@ -461,6 +461,29 @@ module MB
         end
       end
 
+      # An ArgumentError for console +command+ (bg, swap) given track
+      # +name+ and a Symbol +ref+ naming a clip (a slot, a capture, or
+      # another track's named clip, as `launch` and `cue` find them),
+      # pointing at `launch`/`cue`, else nil (ux-friction-1: the
+      # maintainer's `bg :pluck, :pad` and `swap :pluck, :pad` said "No
+      # preset or genre :pad" and "Pass a Clip..."; `cue :pluck, :pad` then
+      # `launch` was what played pad's clip on the pluck).
+      def clip_name_for_track_error(command, name, ref)
+        return nil unless name.is_a?(Symbol) && ref.is_a?(Symbol)
+        arr = Session.current.arrangement
+        return nil unless arr.tracks[name]&.patch?
+        named = ->(list) { list.find { |c| c.respond_to?(:named?) && c.named? && c.name == ref } }
+        found = named.(arr.slots(name)) || arr.captures[ref] || arr.all_slots.each_value.lazy.map { |l| named.(l) }.find(&:itself)
+        return nil unless found
+
+        ArgumentError.new(
+          "#{command} #{name.inspect}, #{ref.inspect}: #{ref.inspect} is a clip's name; launch #{name.inspect}, #{ref.inspect} plays it on " \
+          "#{name.inspect}'s instrument at its launch point (cue #{name.inspect}, #{ref.inspect} auditions it first, then launch)"
+        )
+      rescue StandardError
+        nil
+      end
+
       # Library Entry +entry+ given to +command+ (`bg`) for the existing
       # track +name+: a clip or generator entry's clip at its defaults (as
       # `track :x, entry` takes it, so it plays on the track; a

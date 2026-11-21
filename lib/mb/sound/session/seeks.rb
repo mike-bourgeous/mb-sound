@@ -139,6 +139,8 @@ module MB
           case ArgTypes.classify(target)
           when :number, :ratio
             return @transport.bar_position(target) if target >= 1
+            # (ux-friction-1: the maintainer's `seek 0` for the start)
+            raise ArgumentError, "seek #{target.inspect}: bars count from 1, so the start is seek 1 (or seek 0.bars, a length from the start)" if target >= 0
           when :duration, :seconds, :samples
             pos = target.to_whole_notes(sample_rate: output_open? ? sample_rate : 48000, transport: @transport).to_r
             return pos if pos >= 0
