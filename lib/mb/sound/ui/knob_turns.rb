@@ -32,7 +32,14 @@ module MB
         PENDING = CarriedValues::PENDING
 
         def self.included(base)
-          base.extend(CarriedValues::ClassMethods)
+          base.extend(ClassMethods)
+        end
+
+        module ClassMethods
+          attr_writer :clock
+
+          # The gestures' clock.
+          def clock = @clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
         end
 
         # The value one turn by +step+ (a position step: STEP, FINE, or

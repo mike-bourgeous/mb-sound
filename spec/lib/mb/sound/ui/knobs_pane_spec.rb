@@ -191,7 +191,9 @@ RSpec.describe('the knobs pane', :aggregate_failures) do
       # (the gesture's one line: the pane's turn line, on its last row, not
       # in the REPL pane: KnobTurns, inspector-headers-1)
       expect(wait_until { st[:turn_line].to_s.start_with?("turn #{name.inspect}, ") }).to eq(true), st[:turn_line].inspect
-      expect(@term.text).not_to include("turn #{name.inspect}, ")
+      rows_of = ->(pane) { r = @tiles.tiler.placed.find { |p| p.name == pane }.rect; @term.lines[r.y, r.h].map { |l| l[r.x, r.w].to_s } }
+      expect(wait_until { rows_of.(:knobs).any? { |l| l.include?("turn #{name.inspect}") } }).to eq(true), rows_of.(:knobs).join("\n")
+      expect(rows_of.(:repl).join("\n")).not_to include("turn #{name.inspect}, ")
       expect(wait_until { @session.journal.changes.count { |e| e.kind == :turn } == before_turns + 1 }).to eq(true)
       expect(@tiles.mode_problems).to eq([])
     ensure

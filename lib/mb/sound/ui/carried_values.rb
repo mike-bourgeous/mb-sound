@@ -9,21 +9,16 @@ module MB
       # the pane shows it on the next frame instead of the old value.
       #
       # Kept in the pane's per-placement state (`state[:pending]`: key =>
-      # [value, when]).  The including class gets a settable clock
-      # (monotonic seconds; specs set their own).
+      # [value, when]).  The including class gets KnobTurns' settable clock
+      # (KnobTurns::ClassMethods: monotonic seconds; specs set their own).
       module CarriedValues
         # Seconds a value a key set is used over the snapshot's.
         PENDING = 0.6
 
+        # (KnobTurns includes this module before its ClassMethods exist;
+        # classes including either get the one clock)
         def self.included(base)
-          base.extend(ClassMethods)
-        end
-
-        module ClassMethods
-          attr_writer :clock
-
-          # The panes' key clock.
-          def clock = @clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+          base.extend(KnobTurns::ClassMethods) if base.is_a?(Class)
         end
 
         private
