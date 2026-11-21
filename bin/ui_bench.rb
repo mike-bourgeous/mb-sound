@@ -1027,6 +1027,10 @@ module MB::Sound
           perf: s, sink_report: UIBench.sink_report(sink, rects, warm, key_panes: UIBench::KEY_PANES[sc] || []), machine: machine,
           pane_cpu_ms: screen.is_a?(UI::Tiles) ? screen.stats[:pane_cpu_ms] : nil, # (each pane's draws, the last 200)
           pace: screen.respond_to?(:pace) ? screen.pace : nil,
+          # (the painter's own record of its write gaps: writes closer than
+          # the terminal's gap, counted on its clock; the model terminal's
+          # close_per_s comes from the sink's stamps, which load delays)
+          pacer_writes: screen.respond_to?(:pacer) ? screen.pacer.write_gaps : nil,
           # (each model as written, then on the --vsync display too)
           presents: p.present&.split('+')&.flat_map { |m|
             pr = UI::TerminalProfile.parse(m)

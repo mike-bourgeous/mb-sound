@@ -154,6 +154,9 @@ module MB
           @min_gap = nil
           @hold = 0.0
           @last_write = nil
+          @write_gap_min = nil
+          @close_writes = 0
+          @gap_writes = 0
           self.fps = fps
         end
 
@@ -182,12 +185,33 @@ module MB
         # Before a frame's write (the screen's timed write): waits until
         # #min_gap has passed since the last write ended, and notes the
         # wait as the frame's hold.  Nothing without a gap.
+        # (the sleep can end early, a key's Thread#wakeup: it waits again
+        # until the gap has passed.)  Each write's gap since the last one,
+        # on this clock, goes into #write_gaps.
         def hold_before_write
           g = @min_gap or return
-          if @last_write && (w = @last_write + g - @clock.call) > 0
+          return unless @last_write
+          t0 = @clock.call
+          now = t0
+          while (w = @last_write + g - now) > 0
             @sleeper.call(w)
-            @hold += w
+            now = @clock.call
           end
+          @hold += now - t0
+          gap = now - @last_write
+          @write_gap_min = gap if @write_gap_min.nil? || gap < @write_gap_min
+          @close_writes += 1 if gap < g - 1e-9 # (float rounding of a wait that ended on the gap)
+          @gap_writes += 1
+        end
+
+        # The writer's own record of the gaps #hold_before_write kept
+        # (pace-default-1): writes checked, the shortest gap from a write's
+        # end to the next write's start in ms (nil before two writes), and
+        # writes closer than #min_gap (0 by construction: the property the
+        # bench reports, read on the painter's clock rather than from a
+        # model terminal's stamps, which a busy machine delays).
+        def write_gaps
+          { writes: @gap_writes, min_ms: @write_gap_min && (@write_gap_min * 1000).round(3), under_gap: @close_writes }
         end
 
         # The screen's timed write ended at +t+ (for #min_gap).

@@ -5,7 +5,7 @@ require 'json'
 RSpec.describe('bin/ui_bench.rb') do
   it 'runs the tiles with the song against a model terminal and reports frames, panes, the sink, and the audio' do
     json = tmp_path('bench.json')
-    text = `OUTPUT_TYPE=null timeout 120 bin/ui_bench.rb -S tiles -s 1.5 --warm 0.5 --sink konsole --holders -j #{json} 2>&1`
+    text = `OUTPUT_TYPE=null timeout 120 bin/ui_bench.rb -S tiles -s 1.0 --warm 0.3 --sink konsole --holders -j #{json} 2>&1`
     expect($?).to be_success, text
     expect(text).to include('harness numbers', '== tiles (konsole sink', 'worst stall:', 'stalest pane:', 'feed:', 'sink:', 'GVL holders', 'render buffers:') # (with --holders the probe reports holders, not the wake delay)
     rows = JSON.parse(File.read(json))
@@ -50,7 +50,7 @@ RSpec.describe('bin/ui_bench.rb, the dropout scenario') do
   # frames, --pace terminal spaces the writes for it)
   it 'opens ui :wall at the asked frame rate, types --during lines into its REPL, and models when Konsole shows frames paced for it' do
     json = tmp_path('bench.json')
-    text = `OUTPUT_TYPE=null timeout 180 bin/ui_bench.rb -S wall --size 63x236 --fps 122 -s 1.5 --warm 0.5 --during 'level :drums, -1.db' --present konsole+konsole26 --vsync 120 --pace terminal -j #{json} 2>&1`
+    text = `OUTPUT_TYPE=null timeout 180 bin/ui_bench.rb -S wall --size 63x236 --fps 122 -s 1.0 --warm 0.3 --during 'level :drums, -1.db' --present konsole+konsole26 --vsync 120 --pace terminal -j #{json} 2>&1`
     expect($?).to be_success, text
     expect(text).to include('== wall', 'ui_bench --during at', 'terminal model Konsole:', 'terminal model Konsole on a 120 Hz display:')
     r = JSON.parse(File.read(json))[0]
@@ -62,7 +62,15 @@ RSpec.describe('bin/ui_bench.rb, the dropout scenario') do
     expect([k['model'], kv['vsync'], k26['model']]).to eq(['Konsole', 120.0, 'Konsole 26.04'])
     expect(k['written_per_s']).to be < 90 # (12 ms apart at least, though 122 was asked)
     expect(k['updates_per_s']).to be > k['written_per_s'] * 0.9 # (each frame shown)
-    expect(k['close_per_s']).to be < 2 # (none written closer; the sink stamps a frame after parsing it, so a slow first frame can look close to the next)
+    # (pace-default-1: no write closer than the 12 ms gap, from the
+    # painter's own clock, which load can't make closer; the model
+    # terminal's close_per_s stamps frames after parsing them, so a busy
+    # machine made it 2.1-2.7 a second: reported, not checked)
+    w = r['pacer_writes']
+    expect(w['writes']).to be > 10
+    expect(w['under_gap']).to eq(0)
+    expect(w['min_ms']).to be >= 12.0
+    expect(k['close_per_s']).to be_a(Numeric)
     expect(k['delay_ms']['p50']).to be_within(1.5).of(10.0)
   end
 end

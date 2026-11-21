@@ -320,6 +320,25 @@ RSpec.describe(MB::Sound::UI::Pacer, :aggregate_failures) do
       expect { r.hold_before_write }.not_to(change { @t }) # (no gap: nothing)
     end
 
+    it 'waits out the gap again when a key ends the hold early, and records the gaps on its own clock (pace-default-1)' do
+      @t = 0.0
+      wakes = [1.004]
+      p = described_class.new(60, clock: -> { @t }, sleeper: lambda { |s|
+        w = wakes.find { |x| x > @t + 1e-12 && x < @t + s }
+        @t = w || @t + s
+      })
+      p.min_gap = 0.012
+      p.wrote_at(1.0)
+      @t = 1.001
+      p.hold_before_write # (woken at 1.004, then sleeps to 1.012)
+      expect(@t).to be_within(1e-9).of(1.012)
+      p.wrote_at(1.0125)
+      @t = 1.03
+      p.hold_before_write
+      expect(p.write_gaps).to eq(writes: 2, min_ms: 12.0, under_gap: 0)
+      expect(described_class.new(60, clock: -> { 0.0 }).write_gaps).to eq(writes: 0, min_ms: nil, under_gap: 0)
+    end
+
     # pace-default-1 (2026-11-21, the gap is the default on Konsole before
     # 26.04): a woken frame (a key, the REPL's echo) used to start at once
     # and hold its write for the gap, which then held the deadline's frame
