@@ -227,6 +227,7 @@ RSpec.describe(MB::Sound::UI::Perf) do
       allow(MB::Sound::UI).to receive(:run_line) { |code, _s| lines << code; nil }
       @last_was = design.last
       stub_const('MB::Sound::UI::Perf::Capture::STEP', 0.02)
+      stub_const('MB::Sound::UI::Perf::Capture::LAND', 0.05) # (no sound screen here: the inspector never shows the track)
     end
 
     after do
@@ -305,13 +306,77 @@ RSpec.describe(MB::Sound::UI::Perf) do
       allow(cap).to receive(:key_target) { targets.length > 1 ? targets.shift : targets.first }
       typed = []
       allow(@tiles).to receive(:type_scripted) { |b| typed << b; knob.value = 0.9; @tiles }
+      # (his keys: two arrived from the terminal while the script ran)
+      allow_any_instance_of(MB::Sound::UI::Perf).to receive(:typed_keys).and_return(2)
       cap.run(seconds: 4.0, dir: tmp_path('cap'), out: out)
       expect(typed.length).to eq(4) # (the expected target read once, then 4 keys checked against it)
       text = MB::U.remove_ansi(out.string)
       expect(text.lines.grep(/phase 2 stopped/).length).to eq(1)
-      expect(text).to include('phase 2 stopped after 4 scripted keys: the focus is :tracks in nav mode', "(don't type then)")
+      expect(text).to include('phase 2 stopped after 4 scripted keys: the focus is :tracks in nav mode', '2 keys came from the terminal', "(don't type then)")
       expect(lines).not_to include('stop :all')
       expect(lines).to include('design :bass', 'turn :cut, 0.5') # (the knob set back by a console line)
+    end
+
+    # The maintainer's two tunnel_vision captures (2026-11-21): phase 2
+    # stopped after 21 keys, "picking nil", telling him not to type though
+    # he hadn't; the flow's next scene had stopped the temporary track (a
+    # scene stops the tracks it doesn't name) and the inspector fell back
+    # to the first playing one.  No key from the terminal: the keys wait,
+    # the track starts again, and the sweep goes on (the set and its form
+    # never paused: their load is what phase 2 measures).
+    it 'holds the keys when the pick moves by itself, starts the temporary track again, and goes on, the set playing on' do
+      allow(cap).to receive(:listen).and_return({ audible: true, peak_db: -9.5, buffers: 20, players: [:drums] })
+      allow(cap).to receive(:remove_track) { true }
+      allow(cap).to receive(:pick_knob).and_return(:'ui_perf/cutoff')
+      allow(cap).to receive(:wait_drawn).and_return(true)
+      allow(session).to receive(:ui_graphs).and_return({ drums: :graph }) # (:ui_perf stopped by the set)
+      allow(session).to receive(:playing_after_queue?).and_return(false)
+      allow(MB::Sound::UI::Inspect).to receive(:target).and_return({ track: :ui_perf, node: nil })
+      # (the inspector shows the first playing track until :ui_perf plays again)
+      allow(cap).to receive(:drawn_track) { lines.include?('bg :ui_perf') ? :ui_perf : :drums }
+      ok = [:inspector, :pane, :'ui_perf/cutoff']
+      targets = [ok] * 4 + [[:inspector, :pane, nil]] + [ok] * 1000
+      allow(cap).to receive(:key_target) { targets.shift || ok }
+      typed = []
+      allow(@tiles).to receive(:type_scripted) { |b| typed << b; @tiles }
+      cap.run(seconds: 4.0, dir: tmp_path('cap'), out: out)
+      text = MB::U.remove_ansi(out.string)
+      expect(text).not_to include('phase 2 stopped', "don't type")
+      expect(text).to include('phase 2 held its keys 1 time', 'no key typed', 'the set and its form playing on', 'the set stopped :ui_perf', 'the capture started :ui_perf again (1 time)')
+      expect(lines).to include('design :ui_perf', 'bg :ui_perf')
+      expect(lines).not_to include(/pause|stop :all/) # (the set and its form play on)
+      expect(typed.length).to be > 4 # (the sweep went on after the pause)
+    end
+
+    it 'stops with "by itself" (not "don\'t type then") when the screen does not come back and no key was typed' do
+      allow(cap).to receive(:listen).and_return({ audible: true, peak_db: -9.5, buffers: 20, players: [:drums] })
+      allow(cap).to receive(:remove_track) { true }
+      allow(cap).to receive(:pick_knob).and_return(:'ui_perf/cutoff')
+      allow(session).to receive(:ui_graphs).and_return({ drums: :graph })
+      ok = [:inspector, :pane, :'ui_perf/cutoff']
+      targets = [ok] * 3
+      allow(cap).to receive(:key_target) { targets.shift || [:inspector, :pane, nil] }
+      allow(@tiles).to receive(:type_scripted) { @tiles }
+      cap.run(seconds: 4.0, dir: tmp_path('cap'), out: out)
+      text = MB::U.remove_ansi(out.string)
+      expect(text).to include('phase 2 stopped after 2 scripted keys', 'with no key typed (the screen changed by itself: the set stopped :ui_perf')
+      expect(text).not_to include("don't type")
+    end
+
+    # A Down pressed while the inspector still shows the first playing
+    # track (the designed one lands on its launch point) moved the
+    # inspector to that track (Inspector#key_pick): a pty run, 2026-11-21
+    it 'picks a knob only on the track it designs, never pressing Down on another' do
+      insp = Class.new { private def picked(_state) = nil }.new
+      tiles = double('tiles', pane_object: insp, pane_state: {})
+      downs = 0
+      allow(tiles).to receive(:type_scripted) { downs += 1; tiles }
+      allow(cap).to receive(:drawn_track).and_return(:drums)
+      expect(cap.pick_knob(tiles, tries: 3, track: :ui_perf)).to be_nil
+      expect(downs).to eq(0)
+      allow(cap).to receive(:drawn_track).and_return(:ui_perf)
+      expect(cap.pick_knob(tiles, tries: 3, track: :ui_perf)).to be_nil
+      expect(downs).to eq(3)
     end
   end
 
@@ -341,6 +406,7 @@ RSpec.describe(MB::Sound::UI::Perf) do
       expect(@tiles.host.vt.text).not_to include('Konsole')
       expect(p.identity[:xtversion]).to eq('Konsole 24.08.3')
       expect(s[:keys][:n]).to eq(2) # (the answers aren't keys)
+      expect(p.typed_keys).to eq(2) # (from the terminal)
       expect(@tiles.perf).to be_nil
       # The data rate beside the frame rate (no song here: no snapshots)
       expect(s[:data_per_s]).to eq(0.0)
@@ -355,6 +421,7 @@ RSpec.describe(MB::Sound::UI::Perf) do
       expect(@term.wait_for('t> ab')).to eq(true) # (to the REPL, as typed)
       wait_until { p.summary[:keys][:n] >= 2 }
       expect(p.summary[:keys][:n]).to eq(2)
+      expect(p.typed_keys).to eq(0) # (scripted: not his)
       @tiles.stop_perf
       expect(@tiles.pane_object(:no_such_pane)).to be_nil
       expect(MB::Sound::UI::Perf::Capture.pick_knob(@tiles)).to be_nil # (no inspector on this layout)

@@ -2065,7 +2065,7 @@ module MB
               next if e.is_a?(MB::Term::Input::Reply) && perf.reply(e, arrival)
               repl = e.is_a?(MB::Term::Input::Key) && @router.state == :repl
               handle(e)
-              perf.key(arrival, @clock.call, repl) if e.is_a?(MB::Term::Input::Key) && !e.release?
+              perf.key(arrival, @clock.call, repl, typed: true) if e.is_a?(MB::Term::Input::Key) && !e.release?
             end
             @decoder.expect_cpr = false
             @decoder.expect_dcs = false

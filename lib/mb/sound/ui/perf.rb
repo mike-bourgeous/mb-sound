@@ -65,6 +65,10 @@ module MB
 
         attr_reader :started_at, :stopped_at, :count, :ack_kind, :identity, :pending_keys
 
+        # Keys from the terminal (not Tiles#type_scripted's) while recording:
+        # ui.perf :capture tells his keys from the screen changing by itself.
+        attr_reader :typed_keys
+
         # Where captures and saves go (tmp/ui-perf/captures in the main
         # checkout, $MB_SOUND_CHECKOUT_TMP, or the user data directory).
         def self.captures_dir
@@ -115,6 +119,7 @@ module MB
           @key_lat = Array.new(KEY_RING, 0.0)
           @key_lat_count = 0
           @key_unseen = 0
+          @typed_keys = 0
           @ack_sent = nil
           @ack_wrote = nil
           @ack_from_start = Array.new(ACK_RING, 0.0)
@@ -300,10 +305,12 @@ module MB
         end
 
         # A key arrived at +arrival+ and its handler finished at +handled+;
-        # +repl+ when it went to the REPL (its echo comes through the pty).
-        def key(arrival, handled, repl)
+        # +repl+ when it went to the REPL (its echo comes through the pty);
+        # +typed+ when it came from the terminal (#typed_keys).
+        def key(arrival, handled, repl, typed: false)
           return unless running?
           @key_lock.synchronize do
+            @typed_keys += 1 if typed
             if @key_tail - @key_head >= KEY_RING
               @key_head += 1
               @key_unseen += 1
@@ -732,15 +739,20 @@ module MB
 
           # Steps the sound screen's inspector down (as typed: Down) until
           # its picked row has a knob to turn, at most +tries+ rows (the
-          # inspector opens on a node row, which turns nothing).  Returns
-          # the knob's name, or nil.
-          def self.pick_knob(tiles, tries: 24)
+          # inspector opens on a node row, which turns nothing).  With
+          # +track+, presses only while the inspector draws that track: a
+          # Down on another (the first playing, shown until a designed track
+          # lands) moves the inspector to it (Inspector#key_pick; a
+          # tunnel_vision pty run, 2026-11-21).  Returns the knob's name, or
+          # nil.
+          def self.pick_knob(tiles, tries: 24, track: nil)
             insp = tiles.pane_object(:inspector) or return nil
             return nil unless insp.respond_to?(:picked, true)
             tries.times do
               # (Inspector#picked is the pane's own private helper: read,
               # never changed, from here)
               state = tiles.pane_state(:inspector) or return nil # (not on this screen)
+              return nil if track && drawn_track(tiles) != track
               if (kn = insp.__send__(:picked, state))
                 return kn[0]
               end
@@ -748,6 +760,75 @@ module MB
               sleep 0.05
             end
             nil
+          end
+
+          # The track the sound screen's inspector drew last, or nil.
+          def self.drawn_track(tiles)
+            state = tiles.pane_state(:inspector) or return nil
+            state[:snap]&.inspector&.track
+          end
+
+          # Seconds phase 2 waits for its track on the inspector: a designed
+          # track lands on its launch point (a bar or more; until then the
+          # inspector shows the first playing track), and a track a scene
+          # stopped lands again when played.
+          LAND = 8.0
+
+          # Waits until the inspector draws track +name+ and targets it, at
+          # most +seconds+.  True once it does.
+          def self.wait_drawn(tiles, name, seconds = LAND)
+            t_end = MB::U.clock_now + seconds
+            until drawn_track(tiles) == name && Inspect.target.is_a?(Hash) && Inspect.target[:track] == name
+              return false if @cancel || MB::U.clock_now > t_end
+              sleep 0.05
+            end
+            true
+          end
+
+          # Waits (scripted keys held; the set plays on) for phase 2's screen to come back to
+          # +expect+ after it changed with no key typed: plays the capture's
+          # temporary track again if the set stopped it (+made+), waits for
+          # it on the inspector, and picks +knob+ again if the pick moved.
+          # Returns [back?, what changed (one phrase)].
+          def self.come_back(tiles, session, target, knob, expect, made)
+            playing = session.ui_graphs.key?(target)
+            shown = drawn_track(tiles)
+            why =
+              if !playing then "the set stopped #{target.inspect} (a scene that doesn't name a track stops it)"
+              elsif shown != target then "the inspector showed #{shown.inspect}"
+              else 'the inspector\'s pick moved'
+              end
+            # (started again until it plays, a bar apart: a start landing on
+            # the bar where the flow's next scene launches is stopped by that
+            # scene, tunnel_vision's 1-bar pullup, 2026-11-21; never more
+            # than RESTARTS)
+            restarts = 0
+            bar = bar_seconds(session)
+            last = nil
+            t_end = MB::U.clock_now + [LAND, 3.5 * bar].max
+            until (back = drawn_track(tiles) == target && Inspect.target.is_a?(Hash) && Inspect.target[:track] == target)
+              now = MB::U.clock_now
+              break if @cancel || now > t_end
+              if made && restarts < RESTARTS && (last.nil? || now - last > bar + 0.1) && !session.ui_graphs.key?(target)
+                UI.run_line("bg #{target.inspect}", session)
+                restarts += 1
+                last = now
+              end
+              sleep 0.05
+            end
+            back &&= key_target(tiles) == expect || (pick_knob(tiles, track: target) == knob && key_target(tiles) == expect)
+            [back, why, restarts]
+          end
+
+          # Starts of the temporary track one wait of phase 2 makes at most.
+          RESTARTS = 3
+
+          # Seconds of a bar at the Session's tempo now (2.0 if unknown).
+          def self.bar_seconds(session)
+            t = session.transport
+            t.seconds_of(t.meter_at(t.position).bar_length).to_f
+          rescue StandardError
+            2.0
           end
 
           # The temporary track phase 2 designs when there is no designed
@@ -900,13 +981,22 @@ module MB
                   end
                   UI.run_line("design #{target.inspect}", session)
                   tiles = UI.tiles
+                  t_design = MB::U.clock_now
                   wait(1.0) # (the screen settles: first walks, warm-up frames)
-                  knob = Capture.pick_knob(tiles)
+                  # (and the track is on the inspector: it lands on its
+                  # launch point, a bar or more away)
+                  unless wait_drawn(tiles, target)
+                    notes << "phase 2: the inspector did not show #{target.inspect} within #{(MB::U.clock_now - t_design).round(1)} s of `design` (it shows #{drawn_track(tiles).inspect})"
+                  end
+                  knob = Capture.pick_knob(tiles, track: target)
                   notes << (knob ? "phase 2 turns #{knob.inspect}" : 'phase 2 found no knob row in the inspector: its arrows turn nothing (key times are frames, not changes)')
                   knob_was = knob && session.knobs[knob]&.value
                   expect = key_target(tiles)
                   p2 = tiles.start_perf(label: "design #{target.inspect}")
                   t_end = MB::U.clock_now + half - 1.0
+                  waited = 0.0
+                  waits = []
+                  restarted = 0
                   while MB::U.clock_now < t_end && !@cancel
                     # (each key only where the script expects it: keys typed
                     # meanwhile can move the focus or the pick, and the
@@ -914,12 +1004,34 @@ module MB
                     now_at = UI.tiles.equal?(tiles) ? key_target(tiles) : nil
                     if now_at != expect
                       what = now_at ? "the focus is #{now_at[0].inspect} in #{now_at[1]} mode, picking #{now_at[2].inspect} (expected #{expect[0].inspect}, #{expect[1]}, #{expect[2].inspect})" : 'the screen changed'
-                      notes << "phase 2 stopped after #{k} scripted keys: #{what}; keys typed during the scripted phase reach the screen (don't type then)"
-                      break
+                      typed = p2.typed_keys
+                      if typed > 0
+                        notes << "phase 2 stopped after #{k} scripted keys: #{what}; #{typed} key#{typed == 1 ? '' : 's'} came from the terminal during the scripted phase (don't type then)"
+                        break
+                      end
+                      # (no key typed: the screen changed by itself, e.g. the
+                      # flow's next scene stopped the temporary track and the
+                      # inspector fell back to the first playing one, a
+                      # tunnel_vision capture, 2026-11-21: the keys wait
+                      # until it is back; the set and its form play on)
+                      t_gap = MB::U.clock_now
+                      back, why, n = come_back(tiles, session, target, knob, expect, made) if now_at && knob && now_at[0] == expect[0] && now_at[1] == expect[1]
+                      waited += MB::U.clock_now - t_gap
+                      waits << why if why
+                      restarted += n || 0
+                      unless back
+                        notes << "phase 2 stopped after #{k} scripted keys: #{what}, with no key typed (the screen changed by itself#{why ? ": #{why}" : ''})"
+                        break
+                      end
+                      next
                     end
                     tiles.type_scripted((k / SWEEP).even? ? "\e[C" : "\e[D")
                     k += 1
                     sleep STEP
+                  end
+                  unless waits.empty?
+                    notes << "phase 2 held its keys #{waits.length} time#{waits.length == 1 ? '' : 's'} (#{waited.round(1)} s in all, no key typed, the set and its form playing on): #{waits.uniq.join('; ')}" \
+                             "#{restarted > 0 ? "; the capture started #{target.inspect} again (#{restarted} time#{restarted == 1 ? '' : 's'})" : ''}"
                   end
                   tiles.stop_perf
                 end
