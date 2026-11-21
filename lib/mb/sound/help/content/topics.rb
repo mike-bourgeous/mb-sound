@@ -2044,7 +2044,10 @@ module MB
         steps).  In the tracks pane Left/Right set the level a dB a press
         (held: live, then one `level :bass, -6.0.db` line), Space plays a stopped track again
         (`resume :bass`) or stops a playing one (NAV Space is the
-        transport), x stops, s solos, m mutes.  Every key runs one console
+        transport), x stops, s solos, m mutes, Enter shows the track's
+        knobs in the knobs pane (t T other tracks, Esc back to the track;
+        on `ui :sound` Enter designs it), i designs it (`design :bass`
+        from any screen).  Every key that changes the set runs one console
         line: journaled, undoable, in your take (knob turns show on the
         pane's last row, other lines in the console).  `ui :mixer` shows
         buses beside the master.
