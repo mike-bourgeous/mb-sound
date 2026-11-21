@@ -6,7 +6,7 @@ module MB
       # the painter thread by Poll from public APIs that never take the
       # render lock.  Frozen plain data.
       Slow = Data.define(:tracks, :scenes, :scene, :queued, :recording, :armed, :form, :knob_specs, :buses, :routes, :landed, :clips, :midi,
-                         :matrix, :racks, :clocks, :inspector, :render_source, :cue_heard) do
+                         :matrix, :racks, :clocks, :inspector, :render_source, :cue_heard, :stopped, :build_knobs) do
         # (The fields ux-1 r3 added default to empty: +buses+ BusInfos,
         # +routes+ (player => { to:, send: { bus => level } }), +landed+
         # LandedInfos (newest last), +clips+ ClipInfos, +midi+ a MidiInfo;
@@ -15,10 +15,14 @@ module MB
         # an Inspect::InspectInfo while a pane needs :inspect, else nil;
         # sound-design-ui-2: +render_source+ the inspected track's
         # PatchRender::Source while a pane needs :render, else nil;
-        # ui-scaffold-1: +cue_heard+ Session#cue_heard?, where auditions play)
+        # ui-scaffold-1: +cue_heard+ Session#cue_heard?, where auditions play;
+        # knobs-pane-keys-1: +stopped+ the names Session#resume can bring
+        # back (Session#stopped), +build_knobs+ the knobs patches read while
+        # building (Arrangement::BuildKnobs: a turn rebuilds, so keys turn
+        # them a step a press, never a held sweep))
         def initialize(tracks:, scenes:, scene:, queued:, recording:, armed:, form:, knob_specs:, buses: [].freeze, routes: {}.freeze,
                        landed: [].freeze, clips: [].freeze, midi: nil, matrix: nil, racks: [].freeze, clocks: [].freeze, inspector: nil, render_source: nil,
-                       cue_heard: false)
+                       cue_heard: false, stopped: [].freeze, build_knobs: [].freeze)
           super
         end
 
@@ -143,8 +147,13 @@ module MB
 
       # The CPU used by one part: +name+, +kind+ (:player, :bus, :master),
       # +state+ (see Session::UIFeed::UIPart), and +load+ (its share of the
-      # snapshot's audio time, e.g. 0.12 for 12%).
-      PartLoad = Data.define(:name, :kind, :state, :load)
+      # snapshot's audio time, e.g. 0.12 for 12%); a player's own +muted+
+      # and +soloed+ flags.
+      PartLoad = Data.define(:name, :kind, :state, :load, :muted, :soloed) do
+        def initialize(name:, kind:, state:, load:, muted: false, soloed: false)
+          super
+        end
+      end
 
       # A knob's +value+ as of the snapshot, with its +spec+
       # (GraphNode::Knob::Spec: range, curve, unit).
@@ -221,6 +230,8 @@ module MB
         def inspector = slow.inspector
         def render_source = slow.render_source
         def cue_heard = slow.cue_heard
+        def stopped = slow.stopped
+        def build_knobs = slow.build_knobs
 
         # Track +name+'s state for the clip matrix: the player's state this
         # buffer (#parts: :playing, :starting, :stopping, :ringing,
@@ -619,7 +630,7 @@ module MB
           rec = @record
           stamp = Session::Stamp.at(rec[:pos], session.transport)
           parts = @parts.map { |p|
-            PartLoad.new(name: p.name, kind: p.kind, state: p.state, load: seconds > 0 ? p.cpu / seconds : 0.0)
+            PartLoad.new(name: p.name, kind: p.kind, state: p.state, load: seconds > 0 ? p.cpu / seconds : 0.0, muted: p.muted, soloed: p.soloed)
           }.freeze
           out = session.output
           underruns = out.respond_to?(:underruns) ? out.underruns : nil

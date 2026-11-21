@@ -1,29 +1,35 @@
+require 'prism'
+
 module MB
   module Sound
     module UI
       # Turning knobs from a pane's keys (the racks pane since ux-r4b, the
-      # inspector since sound-design-ui-1; one implementation, so both turn
-      # alike): a held turn key is a live sweep (PaneKeys::Preview, the
-      # screen's Session#preview_turn) and ONE journaled console line when
+      # inspector since sound-design-ui-1, the knobs pane since
+      # knobs-pane-keys-1; one implementation, so all turn alike): a held
+      # turn key is a live sweep (PaneKeys::Preview, the screen's
+      # Session#preview_turn) and ONE journaled console line when
       # the keys stop (PaneKeys::Commit, Session#gesture_line), through a
-      # UI::TurnGesture; a set value is one `turn :name, value` line
-      # (PaneKeys::Turn).  The value a key set stands in for the knob for
-      # PENDING seconds, until the snapshot catches up.  Turn lines never
+      # UI::TurnGesture; a set value (0: the default; Enter: a typed one,
+      # #key_ask) is one `turn :name, value` line (PaneKeys::Turn).  The
+      # value a key set stands in for the knob for PENDING seconds, until
+      # the snapshot catches up (UI::CarriedValues).  Turn lines never
       # print in the REPL pane: the latest shows on the pane's last row
       # (#turn_line_canvas; inspector-headers-1).
       #
       # A pane including it defines `picked(state)`: the knob its keys
       # turn as [knob name, KnobValue] (from the snapshot it drew), or nil.
       # Its class gets a settable clock (monotonic seconds; specs set their
-      # own).
+      # own), and the carried values of UI::CarriedValues.
       module KnobTurns
+        include CarriedValues
+
         # Position steps of a turn: coarse and fine (Shift).
         STEP = 0.02
         FINE = 0.002
 
         # Seconds a turned value is used over the snapshot's, until the
-        # snapshot catches up.
-        PENDING = 0.6
+        # snapshot catches up (CarriedValues::PENDING).
+        PENDING = CarriedValues::PENDING
 
         def self.included(base)
           base.extend(ClassMethods)
@@ -55,9 +61,15 @@ module MB
         # A turn key: starts or extends the gesture on the picked knob
         # (another knob's gesture goes out first) with a live Preview;
         # its Commit comes from #key_tick when the keys stop (or #flush).
+        #
+        # A build knob (#build_knob?: read while a track builds, so each
+        # turn rebuilds it at its launch point) turns one `turn` line a
+        # press instead, never a held sweep (a sweep of a structure can't
+        # be one line: BuildKnobs).
         def key_turn(state, step)
           cell = picked(state) or return no_knob_note
           kn, k = cell
+          return step_turn(state, kn, k, step) if build_knob?(state, kn)
           now = self.class.clock.call
           g = (state[:gesture] ||= TurnGesture.new)
           out = g.turning? && g.knob != kn ? flush(state) : nil
@@ -71,6 +83,71 @@ module MB
           kn, k = cell
           [*flush(state), set(state, kn, k.spec.default)]
         end
+
+        # Enter: type the picked knob's value (a prompt line starting with
+        # its value, selected so typing replaces it); #key_typed runs it.
+        def key_ask(state)
+          cell = picked(state) or return no_knob_note
+          kn, k = cell
+          value, = shown_value(state, kn, k)
+          [*flush(state), PaneKeys::Ask["turn #{kn.inspect}, ", TurnGesture.number(value), :typed, select: true]]
+        end
+
+        # The typed answer to #key_ask: one `turn` line with it (Ruby:
+        # 3000, 3000.hz, -6.db).
+        def key_typed(state, text)
+          cell = picked(state) or return no_knob_note
+          text = text.to_s.strip
+          return 'nothing typed' if text.empty?
+          problem = KnobTurns.typed_problem(text) and return "#{cell[0]}: #{problem}"
+          PaneKeys::Turn["turn #{cell[0].inspect}, #{text}", "#{cell[0]} #{text}"]
+        end
+
+        # What fits the value prompt, for its messages.
+        TYPED_FITS = 'type a number (3000), a value with its unit (3000.hz, -6.db, 250.ms, 1.bars), or a knob\'s name to follow (:mix)'
+
+        # Why +text+ typed into the value prompt can't be a turn's value,
+        # or nil (sd-ux-fixes-1, the review's #15: junk gave a raw
+        # NameError "for module MB::Sound" or a SyntaxError "(eval at
+        # take.rb:267)"): read with Prism, never run.  Numbers, numbers
+        # with a unit method, Symbols, and other expressions pass; a
+        # syntax error, several statements, a number method that doesn't
+        # exist, or a bare name the console doesn't know get words.
+        def self.typed_problem(text)
+          r = Prism.parse(text)
+          return "#{text.inspect} isn't a value (#{r.errors.first.message}); #{TYPED_FITS}" unless r.errors.empty?
+          body = r.value.statements&.body || []
+          return "#{text.inspect} is #{body.length} statements; #{TYPED_FITS}" unless body.length == 1
+          node = body[0]
+          case node
+          when Prism::CallNode
+            recv = node.receiver
+            if recv.nil? && node.arguments.nil? && node.block.nil?
+              return nil if MB::Sound.respond_to?(node.name)
+              return "#{node.name} isn't a console command or value; #{TYPED_FITS}"
+            end
+            number = recv.is_a?(Prism::IntegerNode) || recv.is_a?(Prism::FloatNode) || recv.is_a?(Prism::RationalNode)
+            if number && node.arguments.nil? && !1.respond_to?(node.name)
+              near = DidYouMean::SpellChecker.new(dictionary: UNIT_WORDS).correct(node.name.to_s).first
+              return "numbers have no .#{node.name}#{" (did you mean .#{near}?)" if near}; #{TYPED_FITS}"
+            end
+          when Prism::ConstantReadNode
+            # (note names like C4 come from const_missing)
+            known = begin
+              MB::Sound.const_get(node.name)
+              true
+            rescue NameError
+              false
+            end
+            return "#{node.name} isn't a constant of the console; #{TYPED_FITS}" unless known
+          when Prism::StringNode, Prism::InterpolatedStringNode, Prism::ArrayNode, Prism::HashNode, Prism::NilNode, Prism::TrueNode, Prism::FalseNode
+            return "#{text} isn't a number; #{TYPED_FITS}"
+          end
+          nil
+        end
+
+        # Unit words on numbers, for #typed_problem's did-you-mean.
+        UNIT_WORDS = %w[hz khz db ms seconds samples bars beats cents semitones cycles bpm n1 n2 n4 n8 n16 n32 st oct].freeze
 
         # Time passes (the screen calls it while #key_wait says so): the
         # gesture's Commit once its keys stopped, else nil.
@@ -124,6 +201,19 @@ module MB
 
         def no_knob_note = 'no knob to turn here'
 
+        # True if knob +kn+ is a build knob (the snapshot's
+        # Slow#build_knobs); panes with more to say override it.
+        def build_knob?(state, kn) = state[:snap]&.build_knobs&.include?(kn) == true
+
+        # One `turn` line moving knob +kn+ (KnobValue +k+) by +step+ from
+        # the value shown (a build knob's press), or nil at the range's end.
+        def step_turn(state, kn, k, step)
+          v, = shown_value(state, kn, k)
+          to = KnobTurns.turned(k.spec, v, step)
+          return nil if to == v.to_f
+          set(state, kn, to.to_f == to.round ? to.round : to)
+        end
+
         # The gesture's Commit now (another key), as an Array (empty
         # without one).
         def flush(state)
@@ -135,21 +225,16 @@ module MB
 
         # The gesture's last value stands in for the knob until the
         # snapshot catches up.
-        def remember(state, g)
-          (state[:pending] ||= {})[g.knob] = [g.value, self.class.clock.call]
-        end
+        def remember(state, g) = carry(state, g.knob, g.value)
 
         # A `turn` line setting knob +kn+ to +value+.
         def set(state, kn, value)
-          (state[:pending] ||= {})[kn] = [value, self.class.clock.call]
+          carry(state, kn, value)
           v = TurnGesture.number(value)
           PaneKeys::Turn["turn #{kn.inspect}, #{v}", "#{kn} #{v}"]
         end
 
-        def pending(state, kn)
-          v, at = state[:pending]&.[](kn)
-          v if at && self.class.clock.call - at < PENDING
-        end
+        def pending(state, kn) = carried(state, kn)
       end
     end
   end

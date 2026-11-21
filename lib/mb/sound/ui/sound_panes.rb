@@ -154,20 +154,18 @@ module MB
             "type #{cell[0]}'s value"
           end
 
-          # A turn key on a build knob (read while the track builds: the
-          # init voice's sync) is one `turn` line a step (each rebuilds the
-          # track), never a held sweep; other knobs turn as in KnobTurns.
+          # A turn key on a literal param binds it (#literal_turn); knobs
+          # turn as in KnobTurns (a build knob, read while the track builds:
+          # the init voice's sync, one `turn` line a step, each rebuilding
+          # the track, never a held sweep).
           def key_turn(state, step)
-            cell = picked(state)
-            info = state[:snap]&.inspector
-            return literal_turn(state, step) || super if cell.nil?
-            return super unless info&.build_knobs&.include?(cell[0])
-            kn, k = cell
-            v, = shown_value(state, kn, k)
-            to = KnobTurns.turned(k.spec, v, step)
-            return nil if to == v.to_f
-            set(state, kn, to.to_f == to.round ? to.round : to)
+            return literal_turn(state, step) || super if picked(state).nil?
+            super
           end
+
+          # The inspected track's build knobs (InspectInfo#build_knobs: also
+          # those its graph reads that no build noted yet), else the set's.
+          def build_knob?(state, kn) = state[:snap]&.inspector&.build_knobs&.include?(kn) == true || super
 
           # A turn key on a literal param that can be bound (sound-design-2,
           # the envelope editor: an envelope's point, a segment list's time
@@ -939,67 +937,8 @@ module MB
               return "#{name}: #{b.reason}" unless b.line
               return [*flush(state), PaneKeys::Ask['', b.line, :bind]]
             end
-            cell = picked(state) or return no_knob_note
-            kn, k = cell
-            value, = shown_value(state, kn, k)
-            [*flush(state), PaneKeys::Ask["turn #{kn.inspect}, ", TurnGesture.number(value), :typed, select: true]]
+            super
           end
-
-          # The typed answer to #key_ask: one `turn` line with it (Ruby:
-          # 3000, 3000.hz, -6.db).
-          def key_typed(state, text)
-            cell = picked(state) or return no_knob_note
-            text = text.to_s.strip
-            return 'nothing typed' if text.empty?
-            problem = Inspector.typed_problem(text) and return "#{cell[0]}: #{problem}"
-            PaneKeys::Turn["turn #{cell[0].inspect}, #{text}", "#{cell[0]} #{text}"]
-          end
-
-          # What fits the value prompt, for its messages.
-          TYPED_FITS = 'type a number (3000), a value with its unit (3000.hz, -6.db, 250.ms, 1.bars), or a knob\'s name to follow (:mix)'
-
-          # Why +text+ typed into the value prompt can't be a turn's value,
-          # or nil (sd-ux-fixes-1, the review's #15: junk gave a raw
-          # NameError "for module MB::Sound" or a SyntaxError "(eval at
-          # take.rb:267)"): read with Prism, never run.  Numbers, numbers
-          # with a unit method, Symbols, and other expressions pass; a
-          # syntax error, several statements, a number method that doesn't
-          # exist, or a bare name the console doesn't know get words.
-          def self.typed_problem(text)
-            r = Prism.parse(text)
-            return "#{text.inspect} isn't a value (#{r.errors.first.message}); #{TYPED_FITS}" unless r.errors.empty?
-            body = r.value.statements&.body || []
-            return "#{text.inspect} is #{body.length} statements; #{TYPED_FITS}" unless body.length == 1
-            node = body[0]
-            case node
-            when Prism::CallNode
-              recv = node.receiver
-              if recv.nil? && node.arguments.nil? && node.block.nil?
-                return nil if MB::Sound.respond_to?(node.name)
-                return "#{node.name} isn't a console command or value; #{TYPED_FITS}"
-              end
-              number = recv.is_a?(Prism::IntegerNode) || recv.is_a?(Prism::FloatNode) || recv.is_a?(Prism::RationalNode)
-              if number && node.arguments.nil? && !1.respond_to?(node.name)
-                near = DidYouMean::SpellChecker.new(dictionary: UNIT_WORDS).correct(node.name.to_s).first
-                return "numbers have no .#{node.name}#{" (did you mean .#{near}?)" if near}; #{TYPED_FITS}"
-              end
-            when Prism::ConstantReadNode
-              # (note names like C4 come from const_missing)
-              known = begin
-                MB::Sound.const_get(node.name)
-                true
-              rescue NameError
-                false
-              end
-              return "#{node.name} isn't a constant of the console; #{TYPED_FITS}" unless known
-            when Prism::StringNode, Prism::InterpolatedStringNode, Prism::ArrayNode, Prism::HashNode, Prism::NilNode, Prism::TrueNode, Prism::FalseNode
-              return "#{text} isn't a number; #{TYPED_FITS}"
-            end
-            nil
-          end
-
-          # Unit words on numbers, for #typed_problem's did-you-mean.
-          UNIT_WORDS = %w[hz khz db ms seconds samples bars beats cents semitones cycles bpm n1 n2 n4 n8 n16 n32 st oct].freeze
 
           # The `bind` line #key_ask offered, as typed (Enter runs it).
           def key_bind(state, text)
