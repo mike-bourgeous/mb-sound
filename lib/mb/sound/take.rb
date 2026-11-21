@@ -238,8 +238,13 @@ module MB
       end
 
       # Starts recording a console line (Pry's :before_eval hook).  Returns
-      # the Line.
+      # the Line, or nil for a blank line (Enter on nothing changes nothing,
+      # so takes leave it out; ux-friction-1: his take kept three).
       def begin_line(code)
+        if code.to_s.strip.empty?
+          Session.set_context_fields(take_line: nil)
+          return nil
+        end
         line = @mutex.synchronize {
           @next_id += 1
           Line.new(id: @next_id, code: code.to_s, issued: session.clock, lands: [], skipped: foreground?(code), epoch: session.epoch - @start_epoch, choices: [])
