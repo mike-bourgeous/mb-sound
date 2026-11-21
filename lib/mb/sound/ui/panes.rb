@@ -882,6 +882,13 @@ module MB
         # repeat count), errors in the bad color (ux-1 r3 item 38: long
         # warnings kept their important tail off screen).  Entries that
         # don't fit go off the top.
+        #
+        # In its mode the bottom message shown is the picked one (its
+        # number reversed; Up/Down pick an older or newer one, scrolling),
+        # and Enter opens it in full (`ui.message n`, the message pane; a
+        # view, not a set change, so no console line runs: the pane returns
+        # NAV's way of calling Tiles#message), e puts that line on the
+        # console (ui-phase1-1, the plan's Phase 1 item 8).
         class Messages < Pane
           ROLES = { error: :bad, warn: :warn, note: :dim }.freeze
 
@@ -890,7 +897,27 @@ module MB
             on [:up, 'k'], :scroll, 1, help: 'older, newer messages', label: 'Up Down'
             on [:down, 'j'], :scroll, -1, help: 'older, newer messages', label: ''
             on [:end, 'G'], :scroll, :newest, help: 'back to the newest', label: 'End'
+            on :enter, :open_message, help: 'open the picked (bottom) message in full (ui.message n)', label: 'Enter'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
             on 'y', :copy_text, help: 'copy the pane\'s text (OSC 52)'
+          end
+
+          # Enter: the picked message (the bottom one shown) in full.
+          def key_open_message(state)
+            n = picked_message(state) or return 'no messages to open'
+            MB::Term::Input::Action.of(:message, n)
+          end
+
+          # e: `ui.message n` for the picked message (PaneKeys#key_edit_line).
+          def edit_line(state)
+            n = picked_message(state) or return 'no messages'
+            PaneKeys::Run["ui.message #{n}"]
+          end
+
+          # The picked message's number (1: the newest), or nil without one.
+          def picked_message(state)
+            n = (state[:scroll].to_i + 1)
+            UI.messages.recent(n).length >= n ? n : nil
           end
 
           # Scrolls back +by+ messages (positive: older), or to the newest.
@@ -924,10 +951,14 @@ module MB
             # From the top down, newest at the bottom (maintainer, 2026-10-18:
             # "would prefer starting from the top"); once full it scrolls
             y = 0
+            last = blocks.length - 1
+            i = 0
             blocks.reverse_each do |gutter, lines, role|
-              c.text(0, y, gutter.rjust(gw)[0, gw], :dim)
+              # (in the mode, the picked one: the bottom block, reversed)
+              state && state[:mode] && i == last ? c.run(0, y, gutter.rjust(gw)[0, gw], :key, reverse: true) : c.text(0, y, gutter.rjust(gw)[0, gw], :dim)
               lines.each_with_index { |l, k| c.text(gw, y + k, l, role) }
               y += lines.length
+              i += 1
             end
           end
         end

@@ -18,7 +18,7 @@ RSpec.describe('UI pane e: the row\'s line onto the console', :aggregate_failure
 
   # The panes whose modes bind e to the shared action, and the ones that
   # keep e for something of their own or have no rows (with why).
-  BOUND = %i[form tracks knobs queue lane buses clips racks].freeze
+  BOUND = %i[form tracks knobs queue lane buses clips racks messages].freeze
   OWN_E = {
     picker: 'e is its own edit (the action\'s line), the same idea first',
     tuner: 'e is its own edit (the line onto the console), the same idea first',
