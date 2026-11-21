@@ -1358,6 +1358,10 @@ module MB
             else
               run_safely {
                 s = keys_session || Session.current
+                # (a flow's first section builds before it lands: said at
+                # once; form-start-1)
+                note = TransportMethods.start_note(s)
+                flash(note, :dim) if note
                 st = UI.run_line(TransportMethods.toggle_line(s), s)
                 next st unless st.is_a?(TransportMethods::Status)
                 # (self: run_safely flashes any other result, and flash's

@@ -159,7 +159,10 @@ module MB
             return
           end
           # A change for a time already past lands now, but its action
-          # sees its own time (a lead: track starting before the beat)
+          # sees its own time (a lead: track starting before the beat; a
+          # held change keeps it as +given+ while it waits: Changes#change)
+          given = change.given
+          return line.lands << [land || change.time, given] if given
           line.lands << (land && change.time && change.time < land ? [land, change.time] : (land || change.time))
         end
       end

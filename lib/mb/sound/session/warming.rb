@@ -116,9 +116,15 @@ module MB
         # The changes one console command queued while its graphs warm in
         # the background (see Warming): released, each change re-timed if
         # its time has passed, once every warm-up thread added to it is
-        # done.
+        # done.  A group hold (Session#group_hold: a form's first section)
+        # also counts the thread building its graphs, so they land
+        # together once the last one is built (and warmed).
         class WarmHold
-          def initialize
+          # The Session of a group hold (see Session#group_hold), else nil.
+          attr_reader :session
+
+          def initialize(session = nil)
+            @session = session
             @lock = Mutex.new
             @threads = 0
             @changes = [] # [Change, retime Proc]
@@ -235,6 +241,29 @@ module MB
         def warm_background=(value)
           raise ArgumentError, "warm_background must be :auto, true, or false (got #{value.inspect})" unless [:auto, true, false].include?(value)
           @warm_background = value
+        end
+
+        # A new group hold (a WarmHold counting its builder; see
+        # #with_group_hold): the graphs started while it is the context's
+        # land together once the last one is built and warmed, where the
+        # timeline stands then (a held start doesn't move an idle timeline:
+        # Changes#timeline_idle?).  A form's first section lands this way
+        # (form-start-1, the maintainer, 2026-11-21: "The first pad note
+        # seems to be skipped when I start the tunnel vision demo": its
+        # tracks, built one by one, landed past 1:1 and lost their first
+        # notes).
+        def group_hold
+          WarmHold.new(self).tap(&:started!)
+        end
+
+        # Runs the block with +hold+ (from #group_hold) as the hold graphs
+        # started on this thread join (see Session#add), then releases it
+        # if its warm-ups are done (else the last one does).  Returns the
+        # block's value.
+        def with_group_hold(hold)
+          Session.with_context_fields(group_hold: hold) { yield }
+        ensure
+          release_warm_hold(hold) if hold.finished!
         end
 
         # The last warm-ups (Warm values, oldest first).
@@ -429,6 +458,13 @@ module MB
           group.warm_hold ||= WarmHold.new
         end
 
+        # The group hold graphs #add starts now join (see #group_hold), or
+        # nil.
+        def group_hold_for_add
+          hold = Session.context&.group_hold
+          hold if hold&.session.equal?(self)
+        end
+
         # Lets the changes held by +hold+ land (on the warm-up thread, when
         # its last warm-up is done): a change whose time has passed is
         # re-timed by its Proc (the launch point's next alignment from now).
@@ -441,6 +477,7 @@ module MB
               t = retime.call.to_r
               t = @transport.position if t < @transport.position
               @changes.delete(c)
+              c.given += t - c.time if c.given # (a lead keeps its distance)
               c.time = t
               queue_change(c)
               c.entry = @journal.add(c.entry.with(lands: stamp(t)))

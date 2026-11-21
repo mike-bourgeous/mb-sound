@@ -354,6 +354,8 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
       MB::Sound.flow(play: false) { sp_a 2 }
     end
     session = @session
+    # (what Space flashes at once while the first section builds; form-start-1)
+    expect(MB::Sound::TransportMethods.start_note(@session)).to eq('starting: building 1 track, landing together ...')
     out = Object.new
     out.define_singleton_method(:target_session) { session }
     %i[note_on note_off cc].each { |m| out.define_singleton_method(m) { |*, **| nil } }
@@ -364,6 +366,7 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(wait_until { @session.arrangement.playback }).to be_truthy, @term.text
     expect(@term.wait_for(/started at 1:1; flow sp_a/)).to eq(true), @term.text
     expect(MB::Sound::TransportMethods.toggle_line(@session)).to eq('pause')
+    expect(MB::Sound::TransportMethods.start_note(@session)).to be_nil
     # The second Space flashes the Status's words, not flash's own return
     # value (seen 2026-11-21 after `demo :tunnel_vision`: the status line
     # read `=> ["paused at 1:1.677; ...", :dim, 565237.19, 0]`)
@@ -372,6 +375,7 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(@term.text).not_to include('=> [')
     expect(@session.transport_paused?).to eq(true)
     expect(MB::Sound::TransportMethods.toggle_line(@session)).to eq('start')
+    expect(MB::Sound::TransportMethods.start_note(@session)).to be_nil # (it plays on: nothing to build)
   end
   # Persona panel round 2 (2026-10-18): K16/N7 (NAV K in :studio said "K:
   # not a NAV key"), K17 (no legend for step entry's lengths), M12 (step

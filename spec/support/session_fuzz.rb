@@ -34,6 +34,13 @@
 # - :meta: the song without its metadata (the `meta` lines and the
 #   `.note(...)`/`.with_meta(...)` calls of the `meta` command, metadata-2)
 #   gives the same mix, bit for bit: metadata never acts as data
+# - :form_start: a flow of the song's first scene started from idle on a
+#   realtime Session (a virtual-clock NullOutput, the render thread
+#   running) whose track builds each let audio render first (as slow
+#   patch builds do live) lands every track on one frame and plays, from
+#   there, what an offline render plays from bar 1, within -80 dB
+#   (form-start-1: a form kept time while its first scene's tracks were
+#   built one by one, so late tracks lost their first notes)
 #
 # Renders use exact_lanes: true (synth lanes freed on the 800-frame grid,
 # so voice allocation is the same at any buffer size; see Synth).
@@ -48,7 +55,7 @@ require_relative 'recipe_helpers'
 require_relative 'carry_check'
 
 module SessionFuzz
-  RELATIONS = %i[runs buffer_size plan timeline warm carry meta].freeze
+  RELATIONS = %i[runs buffer_size plan timeline warm carry meta form_start].freeze
 
   # Relations known to fail for a reason recorded elsewhere, as
   # { relation => [[Regexp on the script, 'reason'], ...] }: skipped, counted.
@@ -833,6 +840,101 @@ module SessionFuzz
     MB::Sound.rewind
   end
 
+  # Audio a track build lets render first in :form_start's live start
+  # (seconds; a slow patch build).
+  FORM_START_BUILD = 0.05
+
+  # Slows track builds while SessionFuzz.build_delay is set (see
+  # #render_form_start).
+  module SlowBuild
+    def build(clip)
+      SessionFuzz.build_delay&.call
+      super
+    end
+  end
+  MB::Sound::Arrangement::Track.prepend(SlowBuild)
+
+  class << self
+    # A Proc each track build calls first, or nil (see SlowBuild).
+    attr_accessor :build_delay
+  end
+
+  # The song's definitions (header, knobs, tracks, scenes, buses) and a
+  # flow of its first scene for two bars, or nil if it has no track.
+  def form_start_code(song)
+    defs = song.lines.grep(/\A(knob |track[( ]|scene |bus\()/)
+    return nil if defs.none? { |l| l.start_with?('track') } || defs.none? { |l| l.start_with?('scene :s1') }
+    [(song.header + defs).join("\n"), 'flow(seed: 1, warm_up: false) { s1 2 }']
+  end
+
+  # :form_start (see the file comment): nil if it holds, :skip if the
+  # song has no tracks, else a failure message.
+  def form_start_problem(song)
+    defs, start = form_start_code(song)
+    return :skip if defs.nil?
+
+    ref = render("#{defs}\n#{start}", 2)
+    got, lands = render_form_start(defs, start, ref.first.length)
+    return "the first section's tracks landed on frames #{lands.inspect}, not together" if lands.values.uniq.length > 1
+    return :skip if lands.empty?
+
+    from = lands.values.first
+    got = got.map { |c| c[from...[from + ref.first.length, c.length].min] }
+    compare(ref, got, tolerance: 1e-4 * [peak(ref), 1e-2].max, label: "the first section started live from idle (slow track builds) vs offline")
+  end
+
+  # Starts +start+ (a flow) on a realtime Session after +defs+, with the
+  # render thread running and each track build letting FORM_START_BUILD
+  # seconds of audio render first; renders until +frames+ past the
+  # tracks' landing.  Returns the mix and { track => landing frame }.
+  def render_form_start(defs, start, frames)
+    MB::Sound.rewind
+    MB::Sound.seed(1)
+    plan = MB::Sound::Plan
+    old = [plan.enabled, plan.precision, plan.rebuilds]
+    plan.enabled = true
+    plan.precision = :fast
+    plan.rebuilds = :inline
+    out = Class.new(MB::Sound::NullOutput) {
+      def written = @written ||= []
+      def write(data)
+        written << data.map(&:dup)
+        super
+      end
+    }.new(channels: 2, sleep: :virtual, buffer_size: 800)
+    s = MB::Sound::Session.new(output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 120), master_gain: 1, channels: 2, buffer_size: 800, realtime: true, raise_errors: true)
+    s.exact_lanes = true
+    lands = nil
+    MB::Sound::Session.with_context(session: s) do
+      RecipeHelpers.eval_recipe(defs)
+      s.ensure_running
+      MB::Sound::Internal.wait_audio(s, 0.05)
+      first = s.journal.next_seq
+      SessionFuzz.build_delay = -> { out.consume(FORM_START_BUILD) }
+      begin
+        RecipeHelpers.eval_recipe(start)
+      ensure
+        SessionFuzz.build_delay = nil
+      end
+      starts = -> { s.journal.changes.select { |e| e.seq >= first && e.kind == :bg } }
+      400.times do
+        break if starts.().all? { |e| e.status == :landed }
+        MB::Sound::Internal.wait_audio(s, 0.05)
+      end
+      lands = starts.().to_h { |e| [e.subject, e.lands.frame] }
+      target = (lands.values.max || 0) + frames
+      400.times do
+        break if out.written.sum { |d| d[0].length } >= target
+        MB::Sound::Internal.wait_audio(s, 0.05)
+      end
+    end
+    [out.written.transpose.map { |c| Numo::DFloat.cast(SpecBuffers.join(c)) }, lands]
+  ensure
+    s&.close
+    plan.enabled, plan.precision, plan.rebuilds = old
+    MB::Sound.rewind
+  end
+
   # Warnings a generated song may cause on purpose (commands for players
   # a scene or a one-shot clip has already ended); anything else printed
   # during a render fails :runs.
@@ -1021,6 +1123,8 @@ module SessionFuzz
       # denormal tails: tolerance 1e-20)
       plain, got = trim_silent(plain, got)
       compare(plain, got, tolerance: 1e-20, label: "#{plans.length} carried rebuild#{'s' unless plans.length == 1} vs none#{" (up to frame #{fresh}, where a sleeping track's rebuild started fresh)" if fresh}")
+    when :form_start
+      form_start_problem(song)
     when :timeline
       parts = timeline_parts(song)
       return :skip if parts.empty?
