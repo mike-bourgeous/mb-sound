@@ -288,7 +288,7 @@ module MB
           return show_again if @hidden
 
           @term = MB::Term::Terminal.new(input: @input.dup, output: @output.dup)
-          @term.enter(mouse: @mouse, kitty: @kitty)
+          @term.enter(mouse: @mouse, kitty: @kitty, mode: UI::ConsoleKeys.mode_to_restore(@input))
           features = @probe ? @term.probe : {}
           @ambiguous = features[:ambiguous] || (::Reline.core.instance_variable_get(:@ambiguous_width) rescue nil) || 1
           @glyphs = :ascii if @ambiguous == 2 && @glyphs == :unicode && ENV['MB_SOUND_UI_GLYPHS'].to_s.empty?
