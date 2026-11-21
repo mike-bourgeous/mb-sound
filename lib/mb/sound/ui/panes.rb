@@ -588,21 +588,93 @@ module MB
           end
         end
 
+        # The keys of the panes that show queued changes (the queue and the
+        # launch lane; ui-phase1-1, the plan's Phase 1 item 5: "pick a
+        # queued change; x cancels it"): Up/Down pick one, soonest first
+        # (the soonest until one is picked), x cancels it with the console
+        # line `cancel queued: :bass, kind: :stop` (ScheduleMethods#cancel:
+        # one undo step, so u in the clip matrix or `undo` queues it
+        # again).  The set's own changes (source :set: a song form's next
+        # section) are refused with a flash: the form pane steers those.
+        # A pane including it keeps its snapshot in `state[:snap]`.
+        module QueuedKeys
+          def self.included(base)
+            base.mode_keys do
+              group 'Queued'
+              on [:up, 'k'], :pick_queued, -1, help: 'the change before, after', label: 'Up Down'
+              on [:down, 'j'], :pick_queued, 1, help: 'the change before, after', label: 'Up Down'
+              on 'x', :cancel_queued, help: 'cancel it before it lands (cancel queued: :bass, kind: :stop; undo queues it again)'
+              on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
+            end
+          end
+
+          # Up/Down: the queued change before or after the picked one.
+          def key_pick_queued(state, d)
+            q = sorted_queued(state)
+            return 'nothing queued' if q.empty?
+            i = (picked_index(state, q) + d).clamp(0, q.length - 1)
+            e = q[i]
+            state[:pick] = e.seq
+            "#{e.kind} #{e.subject.inspect} lands #{e.lands} (x cancels it)"
+          end
+
+          # The arrows' scrolling (Pane's) picks here.
+          def key_scroll(state, *) = key_pick_queued(state, 1)
+
+          # x: cancels the picked queued change (all queued changes of its
+          # kind for its subject: `cancel queued:` names them so).
+          def key_cancel_queued(state)
+            q = sorted_queued(state)
+            return 'nothing queued to cancel' if q.empty?
+            e = q[picked_index(state, q)]
+            if e.source == :set
+              return "#{e.kind} #{e.subject.inspect} is the song form's own (steer it in the form pane: goto, skip, loop!)"
+            end
+            state[:pick] = nil
+            PaneKeys::Run["cancel queued: #{e.subject.inspect}, kind: #{e.kind.inspect}", "#{e.kind} #{e.subject.inspect} cancelled (undo queues it again)"]
+          end
+
+          private
+
+          # The snapshot's queued changes, soonest first.
+          def sorted_queued(state)
+            s = state[:snap] or return []
+            s.queued.sort_by { |e| [e.pos || Float::INFINITY, e.seq] }
+          end
+
+          # The picked change's index in +q+ (the soonest when none is
+          # picked or it landed).
+          def picked_index(state, q)
+            q.index { |e| e.seq == state[:pick] } || 0
+          end
+        end
+
         # Queued changes, soonest first, with where each lands.
+        #
+        # In its mode (NAV Enter; ui-phase1-1, the plan's Phase 1 item 5)
+        # the keys of UI::Panes::QueuedKeys: Up/Down pick a queued change
+        # (reversed), x cancels it (`cancel queued: :bass, kind: :stop`;
+        # undo queues it again).
         class Queue < Pane
-          def initialize = super(:queue, rate: 4, height: 6, width: 26, title: 'queued', description: 'queued changes, soonest first, with where each lands')
+          include QueuedKeys
+
+          def initialize = super(:queue, rate: 4, height: 6, width: 26, title: 'queued', description: 'queued changes, soonest first, with where each lands; cancel one from its keys')
 
           def draw_body(c, s, state)
             return unless s
 
+            state[:snap] = s
             q = s.queued.sort_by { |e| [e.pos || Float::INFINITY, e.seq] }
             if q.empty?
               c.puts ['nothing queued', :dim]
               return
             end
-            q.first(c.h).each_with_index do |e, y|
+            pick = state[:mode] ? picked_index(state, q) : nil
+            top = pick && pick >= c.h ? pick - c.h + 1 : 0
+            q[top, c.h].each_with_index do |e, y|
               x = c.line(y, [e.lands.ljust(6), :queued], ' ', [e.kind.to_s, :dim], ' ')
-              c.text_fit(x, y, e.subject.inspect, c.w - x, :name)
+              sel = pick == top + y
+              sel ? c.run(x, y, c.fit(e.subject.inspect, c.w - x), :name, reverse: true) : c.text_fit(x, y, e.subject.inspect, c.w - x, :name)
             end
           end
         end

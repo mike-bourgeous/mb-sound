@@ -1010,7 +1010,9 @@ module MB
         `every 1.n4, on: :beat`) and return a handle that prints when it
         runs and has `cancel`.  `reset_scheduler` (or `panic`, which also
         stops the players) cancels everything scheduled, stops a song
-        form, and replaces a stuck scheduler.
+        form, and replaces a stuck scheduler.  `cancel queued: :bass,
+        kind: :stop` takes back a change still waiting to land (the queue
+        pane's x; one undo step).
       TEXT
       commands :at_bar, :after, :every, :scheduled, :cancel, :reset_scheduler, :marker, :at_marker
       note :method_modules

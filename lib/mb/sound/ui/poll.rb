@@ -85,7 +85,7 @@ module MB
           changes = @lock.synchronize { @open.values }
           pos = s.transport.position
           queued = changes.select { |e| e.status == :queued }.last(QUEUED).map { |e|
-            QueuedInfo.new(seq: e.seq, kind: e.kind, subject: e.subject, lands: e.lands.to_s.freeze, pos: e.lands&.pos)
+            QueuedInfo.new(seq: e.seq, kind: e.kind, subject: e.subject, lands: e.lands.to_s.freeze, pos: e.lands&.pos, source: e.source)
           }.freeze
           recording = changes.select { |e| e.kind == :rec && e.status != :failed && e.status != :cancelled }.filter_map { |e|
             ends = e.data[:ends]

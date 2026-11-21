@@ -181,7 +181,13 @@ module MB
         # The launch lane (ux-1 r3 item 32d): the next bars from the
         # playhead at the left, queued changes as marks moving toward it,
         # the next one's countdown in beats, and a flash when one lands.
+        #
+        # In its mode (NAV Enter; ui-phase1-1) the queue pane's keys
+        # (QueuedKeys): Up/Down pick a queued change, shown reversed on the
+        # top row, x cancels it.
         class Lane < Pane
+          include QueuedKeys
+
           # Bars the lane shows.
           BARS = 4
 
@@ -189,16 +195,20 @@ module MB
           FLASH = 0.8
 
           def initialize = super(:lane, rate: 15, height: 4, width: 40, title: 'launch lane', min_height: 2,
-                                        description: 'queued changes moving toward the playhead, with a beat countdown to the next')
+                                        description: 'queued changes moving toward the playhead, with a beat countdown to the next; cancel one from its keys')
 
-          def draw_body(c, s, _state)
+          def draw_body(c, s, state)
             return unless s
+            state[:snap] = s
             len = s.bar_length.to_r
             now = MB::U.clock_now
             flash = s.landed.reverse.find { |e| e.at && now - e.at < FLASH }
             q = s.queued.select { |e| e.pos }.sort_by(&:pos)
             nxt = q.find { |e| e.pos >= s.pos }
-            if flash
+            picked = state[:mode] && !s.queued.empty? ? (sq = sorted_queued(state))[picked_index(state, sq)] : nil
+            if picked
+              c.run(0, 0, c.fit(" #{picked.kind} #{picked.subject.inspect} lands #{picked.lands}  x cancels ", c.w), :name, reverse: true)
+            elsif flash
               c.run(0, 0, c.fit(" landed: #{flash.kind} #{flash.subject.inspect} ", c.w), :ok, reverse: true)
             elsif nxt
               beats = ((nxt.pos - s.pos) * 4).to_f

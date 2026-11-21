@@ -289,6 +289,79 @@ RSpec.describe('UI session panes', :aggregate_failures) do
     expect(draw(:lane, snap_with(landed: flash), 41, 4)[0]).to include('landed: scene :drop')
   end
 
+  # (ui-phase1-1, the plan's Phase 1 item 5: "pick a queued change; x cancels it")
+  describe 'the queue and lane panes\' keys' do
+    def paint(name, snap, state, w: 41, h: 4)
+      grid = MB::Term::Cells.new(w, h)
+      ui.panes.fetch(name).draw(ui::Canvas.new(grid, 0, 0, w, h), snap, state.merge!(title_in_rule: true))
+      grid.to_text(:none).lines.map(&:rstrip)
+    end
+
+    it 'picks a queued change, soonest first, and cancels it with a cancel queued: line; the set\'s own are refused' do
+      %i[queue lane].each do |name|
+        pane = ui.panes.fetch(name)
+        snap = ui_fake_snapshot
+        st = { mode: true }
+        plain = paint(name, snap, {})
+        expect(paint(name, snap, { mode: false })).to eq(plain)
+        paint(name, snap, st)
+        expect(pane.key_action(:cancel_queued, st)).to eq(ui::PaneKeys::Run['cancel queued: :cut, kind: :knob', 'knob :cut cancelled (undo queues it again)'])
+        expect(pane.key_action(:pick_queued, st, 1)).to eq('mute :pad lands 18:1 (x cancels it)')
+        expect(pane.key_action(:pick_queued, st, 1)).to include(':pad') # (stops at the last)
+        expect(pane.key_action(:cancel_queued, st).code).to eq('cancel queued: :pad, kind: :mute')
+        pane.key_action(:scroll, st, 0)
+        expect(st[:pick]).to eq(9)
+        own = snap.with(slow: snap.slow.with(queued: [ui::QueuedInfo.new(seq: 4, kind: :scene, subject: :drop, lands: '25:1', pos: 24r, source: :set)].freeze))
+        paint(name, own, st)
+        expect(pane.key_action(:cancel_queued, st)).to include("song form's own")
+        none = snap.with(slow: snap.slow.with(queued: [].freeze))
+        paint(name, none, st)
+        expect(pane.key_action(:cancel_queued, st)).to eq('nothing queued to cancel')
+        expect(pane.key_action(:pick_queued, st, 1)).to eq('nothing queued')
+        expect(ui::Panes.const_get(name.capitalize).mode_keymap.entries.find { |b| b.chord == ['x', []] }&.action).to eq(:cancel_queued)
+      end
+      # (the picked one reversed in the queue, named on the lane's top row)
+      st = { mode: true, pick: 9 }
+      expect(paint(:lane, ui_fake_snapshot, st)[0]).to eq(' mute :pad lands 18:1  x cancels')
+      grid = MB::Term::Cells.new(30, 4)
+      ui.panes.fetch(:queue).draw(ui::Canvas.new(grid, 0, 0, 30, 4), ui_fake_snapshot, st)
+      expect(grid.to_text(:none).lines[1]).to include(':pad')
+    end
+
+    describe 'on a screen' do
+      after do
+        @tiles&.stop
+        @term&.close
+        @session&.close
+        MB::Sound.rewind
+      end
+
+      it 'cancels a queued stop of a demo track with x in the queue pane: the track plays on, and undo queues it again' do
+        @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+        expect { MB::Sound::Session.with_context(session: @session) { MB::Sound.demo(:night_bus); MB::Sound.go(:groove, on: :now) } }.to output(/night_bus/).to_stdout
+        8.times { @session.process_buffer }
+        MB::Sound::Session.with_context(session: @session) { MB::Sound.stop(:drums, at: MB::Sound.bar(200)) }
+        @tiles, @term = ui_tiles(:session, rows: 60, cols: 236, session: @session)
+        @tiles.show(:queue, at: :repl) unless @tiles.tiler.layout.panes.include?(:queue)
+        stop = false
+        pump = Thread.new { until stop; @session.process_buffer; sleep 0.004; end }
+        @tiles.enter(:queue)
+        st = @tiles.instance_variable_get(:@states)[:queue]
+        expect(wait_until { st[:snap]&.queued&.any? { |e| e.subject == :drums } && @tiles.router.mode == :pane }).to eq(true)
+        @term.type('x')
+        expect(wait_until { @session.queued.none? { |e| e.subject == :drums } }).to eq(true)
+        expect(@term.wait_for('cancel queued: :drums, kind: :stop')).to eq(true)
+        expect(@session.players.key?(:drums)).to eq(true)
+        MB::Sound::Session.with_context(session: @session) { @session.undo(on: :now) }
+        expect(@session.queued.map { |e| [e.kind, e.subject] }).to include([:stop, :drums])
+        expect(@tiles.mode_problems).to eq([])
+      ensure
+        stop = true
+        pump&.join
+      end
+    end
+  end
+
   it 'shows mapped controllers beside their knobs and the latest MIDI events' do
     midi = ui::MidiInfo.new(events: [['17:1', :keys, :on, 'C4 v100'], ['17:2', :keys, :cc, 'cc 21 = 64']].freeze, ccs: { 21 => 64 }.freeze, mapped: [[:cut, 21]].freeze)
     lines = draw(:midi, snap_with(midi: midi), 50, 5)

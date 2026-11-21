@@ -215,6 +215,41 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
   end
 
   describe '#scheduled and #cancel' do
+    # (ui-phase1-1: the queue pane's x needs a line that cancels what it shows)
+    it 'cancels queued changes by name and kind with queued:, as one undo step, leaving a song form\'s own' do
+      within do
+        MB::Sound.bg(:a, 1.constant)
+        run(800)
+        MB::Sound.stop(:a, on: :bar)
+        expect(session.queued.map(&:kind)).to eq([:stop])
+        done = MB::Sound.cancel(queued: :a, kind: :stop)
+        expect(done.map { |e| [e.kind, e.status] }).to eq([[:stop, :cancelled]])
+        expect(session.queued).to be_empty
+        expect(session.undo_steps.last.label).to eq('cancel queued: :a, kind: :stop')
+      end
+      run(96000 * 2)
+      expect(session.players.keys).to eq([:a]) # (the stop never landed)
+      within do
+        MB::Sound.stop(:a, on: :bar)
+        MB::Sound.cancel(queued: :a)
+        session.undo(on: :now) # (before its bar: queues the stop again for it)
+      end
+      expect(session.queued.map(&:kind)).to eq([:stop])
+      run(96000 * 2)
+      expect(session.players).to be_empty
+
+      within do
+        expect { MB::Sound.cancel(queued: :a) }.to raise_error(ArgumentError, /nothing queued for :a/)
+        expect { MB::Sound.cancel(kind: :stop) }.to raise_error(ArgumentError, /goes with queued:/)
+        expect { MB::Sound.cancel(1, queued: :a) }.to raise_error(ArgumentError, /not both/)
+        # (a change the set made itself stays)
+        session.arrangement # (the set exists)
+        MB::Sound::Session.with_context(session: session, source: :set) { MB::Sound.bg(:b, 2.constant, at: MB::Sound.bar(9)) }
+        expect { MB::Sound.cancel(queued: :b) }.to raise_error(ArgumentError, /song form's own/)
+        expect(session.queued.map(&:subject)).to eq([:b])
+      end
+    end
+
     it 'lists and cancels scheduled blocks' do
       within do
         a = MB::Sound.at_bar(5) { }

@@ -126,8 +126,12 @@ module MB
 
       # A queued change: +kind+ (:add, :stop, :knob, ...), +subject+, and
       # where it +lands+ (bar:beat text) and its timeline position +pos+
-      # (whole notes, or nil).
-      QueuedInfo = Data.define(:seq, :kind, :subject, :lands, :pos)
+      # (whole notes, or nil); +source+ the journal entry's (:set for the
+      # set's own changes, a song form's launches: the queue pane's x
+      # leaves those).
+      QueuedInfo = Data.define(:seq, :kind, :subject, :lands, :pos, :source) do
+        def initialize(source: nil, **rest) = super(source: source, **rest)
+      end
 
       # A recording: the track +name+ and where it ends (+ends+, bar:beat
       # text; +pos+ in whole notes), or +queued+ if it hasn't started.
