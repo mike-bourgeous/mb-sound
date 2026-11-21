@@ -2017,11 +2017,17 @@ module MB
         move, Enter launches the cell (`launch :bass, 3`), g its scene (`go
         :drop`), x stops the track, + - > < transpose, L legato, S swing, Q
         quantize, D double, H half, R reverse (`tweak :bass, transpose: 1`),
-        u undo; in racks Left/Right turn the picked knob (Shift: fine;
-        a held key is one `turn :x, 0 => 0.3, 1.n8 => 0.5` line when you let
-        go: its fitted keyframes; the take keeps the raw steps).
-        Every key runs one console line, printed in the console: journaled,
-        undoable, in your take.  `ui :mixer` shows buses beside the master.
+        u undo; in racks and the knobs pane Up/Down pick a knob and
+        Left/Right turn it (Shift: fine; 0 its default; in knobs Enter types
+        a value; a held key is one `turn :x, 0 => 0.3, 1.n8 => 0.5` line
+        when you let go: its fitted keyframes; the take keeps the raw
+        steps).  In the tracks pane Left/Right set the level a dB a press
+        (held: a step every repeat), Space plays a stopped track again
+        (`resume :bass`) or stops a playing one (NAV Space is the
+        transport), x stops, s solos, m mutes.  Every key runs one console
+        line: journaled, undoable, in your take (knob turns show on the
+        pane's last row, other lines in the console).  `ui :mixer` shows
+        buses beside the master.
       TEXT
       section do |d|
         rows = UI.layout_table.map do |name, kind, desc, size, panes, current|
