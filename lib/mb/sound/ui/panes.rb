@@ -117,7 +117,28 @@ module MB
         # Left/Right its level a dB down or up (`level :kick, -3.db`), 0
         # back to 0 dB, x stops it, d (or Delete) twice removes it from the
         # set (`untrack`, undoable), v hides or shows stopped tracks.
+        #
+        # knobs-pane-keys-1 (the maintainer: "Pressing and holding the arrow
+        # key in the tracks pane to change levels should change level
+        # faster, but most of the keys just repeat the same level, and
+        # there's a pretty long delay"; "If I can stop a track in the tracks
+        # pane, I should also be able to resume it"; "S would be for solo";
+        # "M for mute"): the level a key set is carried for the next key and
+        # shown at once (UI::CarriedValues, as the knob panes do), so every
+        # repeat of a held arrow steps on; Space plays or stops the picked
+        # track (`resume :kick` when stopped, `stop :kick` when playing; NAV
+        # Space stays the transport's), s solos or unsolos it, m mutes or
+        # unmutes it, from the snapshot's flags (marked solo and muted in
+        # its row).
         class Tracks < Pane
+          include CarriedValues
+
+          # The loudest level the keys set (Session::Faders::MAX_LEVEL, +12 dB).
+          MAX_DB = (20 * Math.log10(Session::Faders::MAX_LEVEL)).floor.to_f
+
+          # Part states a track's Space resumes from (else it stops it).
+          RESUMES = %i[stopped stopping fading ringing].freeze
+
           def initialize = super(:tracks, rate: 8, height: 6, width: 30, title: 'tracks', min_height: 2, description: 'tracks and players: state, clip, armed, recording')
 
           mode_keys do
@@ -130,6 +151,9 @@ module MB
             on [:right, 'l'], :level, 1, help: 'its level 1 dB up (level)', label: 'Left Right'
             on '0', :level, 0, help: 'its level back to 0 dB'
             on 'x', :stop_track, help: 'stop it (stop)'
+            on ' ', :play_stop, help: 'this track: play a stopped one again (resume), stop a playing one (NAV Space: the transport)', label: 'Space'
+            on 's', :solo, help: 'solo or unsolo it (solo, unsolo)'
+            on 'm', :mute, help: 'mute or unmute it (mute, unmute)'
             on ['d', :delete], :untrack, help: 'remove it from the set (untrack; d twice; undo brings it back)', label: 'd Del'
             on 'v', :stopped_view, help: 'hide or show stopped tracks'
             on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
@@ -140,15 +164,19 @@ module MB
             muted: :dim, asleep: :dim, stopped: :dim,
           }.freeze
 
-          # [[name, clip, state, armed, trigger, level], ...] from snapshot
-          # +s+ (stopped ones left out when +hide+).
+          # [[name, clip, state, armed, trigger, level, muted, soloed], ...]
+          # from snapshot +s+ (stopped ones left out when +hide+); +muted+
+          # and +soloed+ are the player's own flags.
           def self.rows(s, hide: false)
             parts = s.players.to_h { |p| [p.name, p] }
-            rows = s.tracks.map { |t| [t.name, t.clip, parts[t.name]&.state || :stopped, t.armed, t.trigger, t.level] }
+            rows = s.tracks.map { |t|
+              p = parts[t.name]
+              [t.name, t.clip, p&.state || :stopped, t.armed, t.trigger, t.level, p&.muted || false, p&.soloed || false]
+            }
             names = s.tracks.map(&:name)
             parts.each_value do |p|
               next if names.include?(p.name) || Session::Name.monitored(p.name)
-              rows << [p.name, 'bg', p.state, false]
+              rows << [p.name, 'bg', p.state, false, nil, nil, p.muted, p.soloed]
             end
             hide ? rows.reject { |r| r[2] == :stopped } : rows
           end
@@ -176,8 +204,10 @@ module MB
             top = cur - fit + 1 if cur && cur >= top + fit
             state[:top] = top = top.clamp(0, [rows.length - fit, 0].max)
             show = rows[top, fit]
-            show.each_with_index do |(name, clip, st, armed, trigger, level), y|
+            show.each_with_index do |(name, clip, st, armed, trigger, level, muted, soloed), y|
               r = rec[name]
+              st = :muted if muted && st == :playing # (its own mute; :muted is also a solo elsewhere's silence)
+              level = carried(state, name) || level if state[:pending] # (a level a key just set, until the poll has it)
               glyph, role =
                 if r then [c.glyph(:rec), :rec]
                 elsif armed then [c.glyph(:armed), :armed]
@@ -188,6 +218,7 @@ module MB
               x = c.line(y, [glyph, role], picked ? ['▸', :key] : ' ', [c.pad(name, name_w), picked ? :key : :name], ' ')
               what = r ? "rec #{c.glyph(:arrow)}#{r.ends}#{r.queued ? ' (queued)' : ''}" : st == :playing ? clip.to_s : "#{st} #{clip}"
               what = "trigger #{what}" if trigger # (a trigger track: heard only by sidechains)
+              what = "solo #{what}" if soloed
               what = "#{level.finite? ? Panes.fmt(level) : '-inf'} dB #{what}" if level # (its level, when set away from unity)
               c.text(x, y, c.fit(what, c.w - x), r ? :rec : st == :playing ? :text : :dim)
             end
@@ -207,26 +238,63 @@ module MB
             i = names.index(state[:cursor])
             i = i ? (i + d).clamp(0, names.length - 1) : (d > 0 ? 0 : names.length - 1)
             state[:cursor] = names[i]
-            "#{names[i]} (Left Right level, x stop)"
+            hidden = state[:hide_stopped] ? '; v shows stopped tracks' : ''
+            "#{names[i]} (Left Right level, Space play/stop, s solo, m mute#{hidden})"
           end
 
           # The arrows' scrolling (Pane's) picks here.
           def key_scroll(state, *) = key_pick(state, 1)
 
-          # Left/Right: the picked track's level by +d+ dB (0: back to 0 dB).
+          # Left/Right: the picked track's level by +d+ dB (0: back to 0 dB),
+          # on from the level the last key set while the poll catches up
+          # (CarriedValues: a held arrow steps every repeat), at most MAX_DB.
           def key_level(state, d)
             name = state[:cursor] or return 'pick a track first (Up Down)'
             t = state[:snap]&.tracks&.find { |x| x.name == name }
             return "#{name}: not a track (a player of its own; its graph sets its level)" unless t
-            now = t.level && t.level.finite? ? t.level : 0.0
-            db = d.zero? ? 0.0 : (now + d).round(1)
+            now = carried(state, name) || t.level
+            now = 0.0 unless now&.finite?
+            db = d.zero? ? 0.0 : [(now + d).round(1), MAX_DB].min
+            return "#{name} at #{Panes.fmt(db)} dB (the most a level goes)" if db == now && d > 0
+            carry(state, name, db)
             PaneKeys::Run["level #{name.inspect}, #{RubyValue.to_ruby(db)}.db", "#{name} at #{Panes.fmt(db)} dB"]
+          end
+
+          # Space: plays the picked track again if it is stopped (or
+          # stopping: `resume :kick`), else stops it (`stop :kick`).
+          def key_play_stop(state)
+            row = picked_row(state) or return 'pick a track first (Up Down)'
+            name, _, st = row
+            return key_stop_track(state) unless RESUMES.include?(st)
+            # (the poll's list of what can come back lags the parts by up to
+            # its period: a track these keys just stopped counts too)
+            if st == :stopped && !state[:snap].stopped.include?(name) && !state[:stopped_here]&.include?(name)
+              return "#{name} has nothing to resume (it never played: launch it from the clip matrix or a scene)"
+            end
+            state[:stopped_here]&.delete(name)
+            PaneKeys::Run["resume #{name.inspect}", "#{name} resuming (on the next bar)"]
+          end
+
+          # s: solos the picked track, or unsolos it if it is soloed.
+          def key_solo(state)
+            row = picked_row(state) or return 'pick a track first (Up Down)'
+            name = row[0]
+            row[7] ? PaneKeys::Run["unsolo #{name.inspect}", "#{name} unsoloed"] : PaneKeys::Run["solo #{name.inspect}", "#{name} soloed"]
+          end
+
+          # m: mutes the picked track, or unmutes it if it is muted.
+          def key_mute(state)
+            row = picked_row(state) or return 'pick a track first (Up Down)'
+            name = row[0]
+            row[6] ? PaneKeys::Run["unmute #{name.inspect}", "#{name} unmuted"] : PaneKeys::Run["mute #{name.inspect}", "#{name} muted"]
           end
 
           # x: stops the picked track (`stop :kick`).
           def key_stop_track(state)
             name = state[:cursor] or return 'pick a track first (Up Down)'
-            PaneKeys::Run["stop #{name.inspect}", "#{name} stopping"]
+            hide = state[:hide_stopped] ? ' (stopped tracks are hidden: v shows them)' : ''
+            (state[:stopped_here] ||= []) << name unless state[:stopped_here]&.include?(name)
+            PaneKeys::Run["stop #{name.inspect}", "#{name} stopping#{hide}"]
           end
 
           # d (Delete): the picked track out of the set (`untrack :clap`) on
@@ -252,6 +320,15 @@ module MB
             state[:hide_stopped] = !state[:hide_stopped]
             state[:top] = 0
             state[:hide_stopped] ? 'stopped tracks hidden (v shows them)' : 'stopped tracks shown'
+          end
+
+          private
+
+          # The picked track's row (see .rows) in the snapshot it drew, or nil.
+          def picked_row(state)
+            name = state[:cursor] or return nil
+            s = state[:snap] or return nil
+            Tracks.rows(s).find { |r| r[0] == name }
           end
         end
 
