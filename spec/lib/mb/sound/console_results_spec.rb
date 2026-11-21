@@ -59,6 +59,31 @@ RSpec.describe('console command results') do
     end
   end
 
+  describe 'mute, solo, and level of a name that is nothing' do
+    it 'refuse with a did-you-mean instead of soloing or leveling a name nothing plays (the maintainer\'s solo :plubk)' do
+      within do
+        MB::Sound.bg(:pluck, 1.constant)
+        MB::Sound.bg(:pad, 1.constant)
+      end
+      run(800)
+      %i[solo mute unmute unsolo].each do |cmd|
+        expect { within { MB::Sound.public_send(cmd, :plubk) } }.to raise_error(ArgumentError, /\A#{cmd} :plubk: no track, player, bus, or mute group :plubk \(did you mean pluck\?\)/)
+      end
+      expect { within { MB::Sound.level(:plubk, -6.db) } }.to raise_error(ArgumentError, /level :plubk: .*did you mean pluck/)
+      expect(session.strip_info[:soloed]).to eq([])
+      expect(session.knobs.key?(:"plubk/level")).to eq(false)
+
+      # Real names, monitors of them, names already muted, and bare solo work
+      e = within { MB::Sound.solo(:pluck) }
+      expect(e.to_s).to start_with('solo :pluck')
+      within { MB::Sound.unsolo }
+      within { MB::Sound.mute(:"pluck/live") }
+      within { MB::Sound.level(:pad, -6.db) }
+      run(800)
+      expect(session.strip_info[:muted]).to eq([:"pluck/live"])
+    end
+  end
+
   describe '#forget' do
     it 'returns journal entries and can be undone' do
       within do

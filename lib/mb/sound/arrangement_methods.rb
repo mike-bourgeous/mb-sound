@@ -314,6 +314,7 @@ module MB
         name = player_name(name)
         return session.level(name) if value.nil?
         point = LaunchPoint.of(binding) or return nil
+        return nil unless strip_names_known?(:level, [name])
         session_command(name, label: "level #{name.inspect}", kind: :turn) { |s, time|
           s.level(name, value, at: point, over: over, curve: curve, from: from, smooth: smooth, start_time: point.given? ? nil : time)
         }
@@ -441,6 +442,7 @@ module MB
       # scheduled block's time inside one, and is one undo step).
       def strip_command(kind, names, point, fade:)
         names = names.flatten.map { |n| player_name(n) }
+        return nil unless strip_names_known?(kind, names)
         label = "#{kind} #{names.map(&:inspect).join(', ')}".strip
         value = session_command(names, label: label) { |session, time|
           session.public_send(kind, *names, at: point, fade: fade, start_time: point.given? ? nil : time)
@@ -450,6 +452,35 @@ module MB
         session = Session.current
         entries = value.map { |c| session.journal[c.seq] }
         entries.length == 1 ? entries.first : entries
+      end
+
+      # True if every name in +names+ is something a strip command
+      # (+command+: mute, solo, level, ...) can act on: a track, player,
+      # bus, rack, or mute group (or a monitor, cue, or wire of one), or a
+      # name already muted or soloed.  Else the error goes through
+      # MB::Sound.live_error with a did-you-mean, and the command does
+      # nothing (ux-friction-1: the maintainer's `solo :plubk` silenced
+      # every track but a name that wasn't there; `level :plubk` made a
+      # knob).  Scheduled blocks (a context with a time) skip the check, since
+      # they may name players their song starts later.
+      def strip_names_known?(command, names)
+        ctx = Session.context
+        return true if ctx&.time || ctx&.batch || names.empty?
+        session = Session.current
+        info = session.strip_info
+        known = session.names.to_h.reject { |_, kind| kind == :knob || kind == :knob_group || kind == :clock }.keys |
+                session.players.keys | session.arrangement.tracks.keys | session.mute_groups.keys | info[:muted] | info[:soloed]
+        names.each do |n|
+          next if n.is_a?(Integer) || known.include?(n)
+          base = n.to_s.split('/').first.to_sym
+          next if known.include?(base)
+
+          MB::Sound.live_error(ArgumentError.new(
+            "#{command} #{n.inspect}: no track, player, bus, or mute group #{n.inspect}#{GraphIO.suggest(n, known)} (tracks lists them)"
+          ))
+          return false
+        end
+        true
       end
 
       # Runs a hold or unhold command (see #hold) like #strip_command.
