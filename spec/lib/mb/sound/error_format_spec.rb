@@ -91,6 +91,14 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect(described_class.console(e, color: false)).to start_with('NameError: uninitialized constant MB::Sound::III')
     end
 
+    it "prints a typo on the ui facade as one line, and points ui.warn at the messages pane (ux-friction-1 round 2)" do
+      e = (MB::Sound::UI.facade.frobnicate rescue $!)
+      expect(described_class.short?(e)).to eq(true)
+      expect(described_class.console(e, color: false)).to start_with("NoMethodError: undefined method 'frobnicate'")
+      e = (MB::Sound::UI.facade.warn rescue $!)
+      expect(described_class.console(e, color: false)).to include('did you mean ui.messages (the messages pane, NAV m')
+    end
+
     it 'turns Did you mean blocks in messages into a parenthesis' do
       e = ArgumentError.new("no scene :dorp\nDid you mean?  :drop\n                :dorm")
       expect(described_class.summary(e)).to eq('ArgumentError: no scene :dorp (did you mean :drop, :dorm?)')

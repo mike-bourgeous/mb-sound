@@ -157,6 +157,10 @@ module MB
         elsif r.is_a?(Sequence::Duration) && Tone::WAVE_TYPES.include?(name)
           d = RubyValue.to_ruby(r)
           "#{d}.lfo.#{name} (the shape comes after .lfo; #{d}.hz.#{name} is a tone at that rate)"
+        elsif (r.is_a?(UI::Facade) || r.is_a?(UI::Pending)) && %i[warn warning warnings].include?(name)
+          # (his `ui.warn`, looking for where warnings show with a screen up)
+          'ui.messages (the messages pane, NAV m: warnings from players and threads; the console\'s own commands warn in the REPL) ' \
+            'or ui.message 1 (the newest in full)'
         end
       rescue StandardError
         nil
@@ -194,6 +198,10 @@ module MB
         # MB::Sound.const_missing's super inside lib/ (ux-friction-1 round
         # 2: the maintainer's `motifs(III, ...)` printed a backtrace)
         return true if e.instance_of?(NameError) && e.backtrace_locations&.first&.label.to_s.end_with?('MB::Sound.const_missing')
+        # A proxy's method_missing passing an unknown name to super (`ui.warn`,
+        # `ui.foo`: UI::Facade) raises from inside lib/ for a typo at the
+        # prompt (ux-friction-1 round 2)
+        return true if e.is_a?(NoMethodError) && e.backtrace_locations&.first&.label.to_s.end_with?('#method_missing')
 
         !raised_inside?(e)
       end
