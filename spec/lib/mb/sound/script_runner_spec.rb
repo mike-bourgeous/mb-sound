@@ -473,13 +473,17 @@ RSpec.describe(MB::Sound::ScriptRunner) do
 
     context 'when playing live' do
       before(:each) do
+        @output_type_was = ENV['OUTPUT_TYPE']
         ENV['OUTPUT_TYPE'] = 'null'
       end
 
       after(:each) do
         MB::Sound::Session.default.close
         MB::Sound.rewind
-        ENV.delete('OUTPUT_TYPE')
+        # (put back as it was: deleting it sent later specs in the process,
+        # e.g. perf_spec's capture runs, to a real device that a container
+        # doesn't have)
+        @output_type_was.nil? ? ENV.delete('OUTPUT_TYPE') : ENV['OUTPUT_TYPE'] = @output_type_was
       end
 
       it 'stops an endless song after --bars, cancelling later schedules' do
