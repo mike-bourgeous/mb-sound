@@ -230,6 +230,15 @@ module MB
         text
       end
 
+      # Keywords people guess for recorded DSL methods, and the keyword
+      # they meant (ux-friction-1 round 2: the maintainer's
+      # `unison(5, pan: 0..1)` and `motifs(..., length: 1.n8)`):
+      # method name => { guess => keyword }.
+      KEYWORD_GUESSES = {
+        unison: { pan: :spread, width: :spread, stereo: :spread, amount: :detune, cents: :detune },
+        motifs: { length: :legato, gate: :legato, note_length: :legato, steps: :step, division: :step, scale: :range },
+      }.freeze
+
       # Ruby's own argument errors (arity and keywords), which
       # #argument_help rewrites.
       ARGUMENT_ERROR = /\A(?:wrong number of arguments \(.+\)|unknown keywords?: .+|missing keywords?: .+)\z/
@@ -254,6 +263,7 @@ module MB
         meth = method || raising_method(e, receiver, name) or return nil
 
         keys = (keywords_of(meth) + keys.to_a).uniq
+        hints ||= KEYWORD_GUESSES[name.to_sym]
         text = "#{name}: #{e.message}"
         found = []
         if (m = e.message.match(/\Aunknown keywords?: (.+)\z/))

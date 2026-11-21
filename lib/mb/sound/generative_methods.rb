@@ -125,7 +125,8 @@ module MB
           raise ArgumentError, "motifs' form is an Array of 1 to 64 letters (Symbols, nil for a silent phrase), like %i[a a b a] (got #{form.inspect})"
         end
         letters = form.compact.uniq
-        raise ArgumentError, "motifs' answer: is a Hash of letter => the letter it answers, like { b: :a } (got #{answer.inspect})" unless answer.is_a?(Hash)
+        # (ux-friction-1 round 2: his `answer: true`; the default answers b with a)
+        raise ArgumentError, "motifs' answer: is a Hash of letter => the letter it answers, like { b: :a } (the default; {} for none) (got #{answer.inspect})" unless answer.is_a?(Hash)
         answer = answer.select { |k, _| letters.include?(k) }
         answer.each do |k, v|
           raise ArgumentError, "motifs' answer: letters are Symbols (got #{k.inspect} => #{v.inspect})" unless k.is_a?(Symbol) && v.is_a?(Symbol)

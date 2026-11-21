@@ -99,6 +99,20 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect(described_class.console(e, color: false)).to include('did you mean ui.messages (the messages pane, NAV m')
     end
 
+    it "answers the maintainer's unison and motifs guesses of his third take (ux-friction-1 round 2)" do
+      sum = ->(&f) { described_class.summary((f.call rescue $!)) }
+      expect(sum.() { 110.hz.unison(5, pan: 0..1) }).to eq('ArgumentError: unison: unknown keyword: :pan (did you mean spread:?)')
+      expect(sum.() { 110.hz.unison(5, spread: 0..1) }).to include('(got 0..1); 1 is the widest, and an LFO moves it: spread: 4.bars.lfo.at(0..1)')
+      expect(sum.() { 3.bar.lfo.at(5.cents..60.cents) }).to include('in semitones that is .at(0.05..0.6), as a detune node takes (1.cents is 0.01)')
+      expect(sum.() { 3.bar.lfo.at(5..60) * 1.cents }).to include('an Interval is a pitch step, not a gain: multiply by its semitones')
+      expect(sum.() { MB::Sound.motifs(MB::Sound.scale, length: 1.n8) }).to eq('ArgumentError: motifs: unknown keyword: :length (did you mean legato:?)')
+      expect(sum.() { MB::Sound.motifs(MB::Sound.scale, answer: true) }).to include('like { b: :a } (the default; {} for none) (got true)')
+      expect(sum.() { MB::Sound.scale(:phrygian, :a, range: MB::Sound::A1..MB::Sound::A4) }).to include(
+        'scale takes a mode and a root, no keywords (got range: A1..A4): they belong to the call around it, e.g. motifs(scale(:phrygian, :a), range: A1..A4)'
+      )
+      expect(MB::Sound.motifs(MB::Sound.scale, answer: {})).to be_a(MB::Sound::Sequence::Clip)
+    end
+
     it 'turns Did you mean blocks in messages into a parenthesis' do
       e = ArgumentError.new("no scene :dorp\nDid you mean?  :drop\n                :dorm")
       expect(described_class.summary(e)).to eq('ArgumentError: no scene :dorp (did you mean :drop, :dorm?)')

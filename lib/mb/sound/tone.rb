@@ -1186,6 +1186,12 @@ module MB
         raise ArgumentError, 'Use a Range of Durations (e.g. 3.n16..5.n16), not a single Duration' if amplitude.is_a?(Sequence::Duration)
         if amplitude.is_a?(Range) && durations == 0 && !(amplitude.begin.is_a?(Numeric) && amplitude.end.is_a?(Numeric))
           # (ux-friction-1 round 2: `.at(D3..B6)` raised NoMethodError 'to_f' for a Note)
+          if amplitude.begin.is_a?(Interval) && amplitude.end.is_a?(Interval)
+            # (his `detune: 3.bar.lfo.at(5.cents..60.cents)`: unison's detune node is in semitones)
+            lo, hi = [amplitude.begin, amplitude.end].map { |i| MB::M.sigfigs(i.to_semitones.to_f, 6) }
+            raise ArgumentError, "#at takes a Range of numbers, not Intervals (got #{amplitude.inspect}); in semitones that is .at(#{lo}..#{hi}), " \
+                                 'as a detune node takes (1.cents is 0.01)'
+          end
           raise ArgumentError, "#at takes a Range of numbers (Hz for a cutoff: .at(150..2000); got #{amplitude.inspect}); " \
                                'for a sweep in notes, .at(D3.number..B6.number).freq'
         end

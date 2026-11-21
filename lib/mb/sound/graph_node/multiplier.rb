@@ -64,7 +64,9 @@ module MB
               add(m)
 
             else
-              raise ArgumentError, "Multiplicand #{m.inspect} at index #{idx} is not a Numeric and does not respond to :sample"
+              # (ux-friction-1 round 2: his `3.bar.lfo.at(5..60) * 1.cents` for a detune)
+              unit = m.is_a?(Interval) ? '; an Interval is a pitch step, not a gain: multiply by its semitones (node * 0.01 for cents; 1.cents is 0.01 semitones)' : ''
+              raise ArgumentError, "Multiplicand #{m.inspect} at index #{idx} is not a Numeric and does not respond to :sample#{unit}"
             end
           end
 
