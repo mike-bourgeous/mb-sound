@@ -100,6 +100,7 @@ module MB
         9 => :tempo_live,
         10 => :prefader_sends,
         11 => :metadata,
+        12 => :following_scales,
       }.freeze
       FORMAT = FORMATS.keys.max
 

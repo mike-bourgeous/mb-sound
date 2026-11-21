@@ -162,6 +162,10 @@ module MB
           # lines change the tempo where they land (documents before
           # format 9, read as tempo: and tempo; see GraphIO::FORMAT)
           @old_tempo = false
+          # Whether scales without a root are fixed on the key at load
+          # (documents before format 12, whose rootless scales didn't follow
+          # the session key; see GraphIO::FORMAT)
+          @old_scales = false
           @path = path
           @label = path || '(graph document)'
           @given_inputs = inputs.transform_keys(&:to_sym)
@@ -527,6 +531,7 @@ module MB
               @old_ring = !GraphIO.since?(version, :ring_all_typed_inputs)
               @old_shift = !GraphIO.since?(version, :clip_shift)
               @old_tempo = !GraphIO.since?(version, :tempo_live)
+              @old_scales = !GraphIO.since?(version, :following_scales)
               @comment_notes = GraphIO.since?(version, :metadata)
               @document.read_graph_line(kwargs, offsets: @header_offsets || {})
             when :inputs
@@ -1204,6 +1209,9 @@ module MB
             raise error(node, "#{name} raised #{e.class}: #{e.message}")
           end
           check_result(node, result) if receiver.is_a?(Numeric) || result.is_a?(Integer)
+          # (before format 12 a scale without a root was the session key's
+          # root when loaded, a fixed scale; gen-ux-1)
+          result = result.with_root(result.root) if @old_scales && name == :scale && result.is_a?(Scale) && result.follows_key?
           result
         end
 

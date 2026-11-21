@@ -157,6 +157,18 @@ RSpec.describe(MB::Sound::Generative::KeyFollow, :aggregate_failures) do
       expect(st[3] - classes(MB::Sound::Scale[:minor, :eb])).to eq([])
     end
 
+    it 'loads rootless scales of documents before format 12 as fixed scales, and newer ones following' do
+      io = MB::Sound::GraphIO
+      expect(io::FORMATS[12]).to eq(:following_scales)
+      body = "motifs(scale(:minor), 4, seed: 3).hz.sine * 0.1\n"
+      # (the motifs clip in a loaded graph: steered only when its scale follows the key)
+      clip_of = ->(graph) { graph.graph.filter_map { |n| n.instance_variable_get(:@clip) }.grep(MB::Sound::Sequence::Clip).first }
+      old = clip_of.(io.load("graph 11\n#{body}"))
+      new = clip_of.(io.load("graph #{io::FORMAT}\n#{body}"))
+      expect(old.send(:steered?)).to eq(false)
+      expect(new.send(:steered?)).to eq(true)
+    end
+
     it 'prints back and loads in graph documents' do
       MB::Sound.seed(1)
       clip = MB::Sound.motifs(MB::Sound.progression(:i, :VI, scale: MB::Sound.scale(:minor)), 4, seed: 3)

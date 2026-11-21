@@ -99,7 +99,7 @@ RSpec.describe(MB::Sound::GraphIO::Comments, :aggregate_failures) do
   end
 
   it 'leaves comments of documents before format 11 as comments' do
-    expect(MB::Sound::GraphIO::FORMAT).to eq(11)
+    expect(MB::Sound::GraphIO::FORMATS.key(:metadata)).to eq(11) # (the format that added them)
     g = io.load(head.sub(/graph \d+/, 'graph 10') + body)
     expect(g.meta.notes).to eq([])
     expect(g.graph.map { |n| n.respond_to?(:meta) ? n.meta.notes : [] }.flatten).to eq([])
