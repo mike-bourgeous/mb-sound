@@ -680,6 +680,77 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
   end
 
+  # (gen-ux-1 round 2, the maintainer, 2026-11-21: "don't make me type bg
+  # first and then swap")
+  describe 'swap and track over a bg graph' do
+    before do
+      @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120),
+                                        channels: 1, buffer_size: 800, realtime: false, master_gain: 1)
+      in_session { MB::Sound.bg(:hum, 220.hz.sine.at(0.1), on: :now) }
+      10.times { @session.process_buffer }
+    end
+
+    after do
+      @session.close
+      MB::Sound.rewind
+    end
+
+    def in_session(&block) = MB::Sound::Session.with_context(session: @session, &block)
+
+    # Renders until the timeline passes the next bar line.
+    def next_bar
+      bar = @session.transport.bar
+      @session.process_buffer until @session.transport.bar > bar
+      @session.process_buffer
+    end
+
+    it 'replaces a bg graph with swap, or starts one, as bg at the launch point' do
+      entry = in_session { MB::Sound.swap(:hum, 330.hz.sine.at(0.1)) }
+      expect(entry.kind).to eq(:bg)
+      expect(entry.to_s).to match(/lands 2:1/)
+      expect(@session.players[:hum]).to include('freq=220')
+      next_bar
+      expect(@session.players[:hum]).to include('freq=330')
+      expect(@session.players.keys).to eq([:hum])
+
+      entry = in_session { MB::Sound.swap(:buzz, 55.hz.square.at(0.05), at: :now) }
+      expect(entry.kind).to eq(:bg)
+      @session.process_buffer
+      expect(@session.players.keys).to contain_exactly(:hum, :buzz)
+
+      # A clip for a graph that plays none still says so
+      expect { in_session { MB::Sound.swap(:hum, MB::Sound.seq(MB::Sound::C4).loop) } }.to raise_error(ArgumentError, /doesn't play any clips/)
+    end
+
+    it 'gives a track defined over a playing bg graph the name and the sound, at its launch point' do
+      expect(in_session { MB::Sound.track(:hum, 330.hz.sine.at(0.1)) }).to eq(:hum)
+      expect(@session.players[:hum]).to include('freq=220')
+      next_bar
+      expect(@session.players[:hum]).to include('freq=330')
+      expect(@session.players.keys).to eq([:hum])
+      expect(@session.arrangement.tracks[:hum]).not_to be_nil
+      in_session { MB::Sound.stop(:hum, fade: 0) }
+      @session.process_buffer
+      in_session { MB::Sound.bg(:hum) }
+      next_bar
+      expect(@session.players[:hum]).to include('freq=330')
+
+      # A patch with a clip plays it in place of the graph
+      in_session { MB::Sound.bg(:drone, 110.hz.sine.at(0.1), on: :now) }
+      @session.process_buffer
+      in_session { MB::Sound.track(:drone, MB::Sound.seq(MB::Sound::C4).n4.loop) { |c| c.tone.saw.at(0.1) * c.env } }
+      next_bar
+      expect(@session.players[:drone]).not_to include('freq=110')
+
+      # A patch with nothing to play leaves the graph playing
+      in_session { MB::Sound.bg(:pad, 165.hz.sine.at(0.1), on: :now) }
+      @session.process_buffer
+      in_session { MB::Sound.track(:pad) { |c| c.tone.saw.at(0.1) * c.env } }
+      next_bar
+      expect(@session.players[:pad]).to include('freq=165')
+    end
+  end
+
   describe '#resume, #stopped, and #forget' do
     after(:each) do
       MB::Sound::Session.default.close

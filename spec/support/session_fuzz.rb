@@ -701,6 +701,26 @@ module SessionFuzz
       cut = s.pick(['(150.hz..8000.hz).at(2400.hz)', '(100.hz..5000.hz).at(600.hz)'])
       "GraphIO.load(%(graph \#{GraphIO::FORMAT}, name: \"cut\", kind: :set\\nknob :cut, #{cut}\\n), session: Session.current)"
     },
+    ->(s) {
+      # (gen-ux-1 round 2, "don't make me type bg first and then swap") a
+      # graph swapped into a bg graph player, or into a name with nothing
+      # playing: it replaces the graph, or starts it, as bg
+      name = s.bg_name
+      swap = "swap :#{name}, #{s.pick(['330.0.hz.triangle * 0.1', '110.0.hz.saw.lp4(700) * 0.08', 'noise.at(0.02).lp4(900)'])}"
+      s.rng.rand < 0.7 ? "bg :#{name}, #{s.pick(HELD)}#{s.on}; after(in: #{s.pick(['2.beats', '1/8r'])}) { #{swap} }" : swap + s.on
+    },
+    ->(s) {
+      # (gen-ux-1 round 2) a track defined over a playing bg graph takes
+      # the name and plays its own sound there (a graph, or a patch with
+      # a clip), or, with nothing to play, leaves the graph playing
+      name = s.bg_name
+      track = case s.rng.rand(3)
+              when 0 then "track :#{name}, 0.05.constant.filter(:lowpass, cutoff: 600)"
+              when 1 then "track(:#{name}, seq(C4, E4).n8.loop) { |c| c.tone.saw.at(0.1) * c.env }"
+              else "track(:#{name}) { |c| c.tone.saw.at(0.1) * c.env }"
+              end
+      "bg :#{name}, #{s.pick(HELD)}#{s.on}; after(in: #{s.pick(['2.beats', '1/8r'])}) { #{track} }"
+    },
     # (new commands go here, at the end)
   ].freeze
 

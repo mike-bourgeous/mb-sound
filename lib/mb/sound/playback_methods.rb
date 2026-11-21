@@ -619,7 +619,12 @@ module MB
       # stop plays it; a track that isn't playing (stopped, or its
       # one-shot clip ended) starts with the new clip, exactly as `bg
       # :name, clip` at the same launch point (a line says so in the
-      # console).  See Session#swap.
+      # console).  A graph given for a player that isn't a track (`bg :x,
+      # graph` earlier, or nothing yet) replaces its graph, or starts it,
+      # as `bg :x, graph` at the swap's launch point.  See Session#swap.
+      #
+      #     bg :hum, 55.hz.saw.lp4(300)
+      #     swap :hum, 55.hz.square.lp4(500)        # the new hum on the next bar
       #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
@@ -678,6 +683,19 @@ module MB
               "swap #{name.inspect}: track #{name.inspect} isn't playing, so there are no clips to pair with old => new; bg #{name.inspect}, clip plays a clip on its instrument"
             ))
           end
+        end
+        # A graph (not a clip, kit, or pairs) for a player that isn't a
+        # track replaces the player's graph, or starts it, as `bg :name,
+        # graph` at the swap's launch point (gen-ux-1 round 2, the maintainer,
+        # 2026-11-21: "don't make me type bg first and then swap"; it raised
+        # "Player :x doesn't play any clips")
+        graph = !(clips.is_a?(Sequence::Clip) || clips.is_a?(Sequence::Kit) || clips.is_a?(Hash) || clips.is_a?(Library::Entry))
+        if graph && name.is_a?(Symbol) && !session.arrangement.tracks[name]
+          if MB::Sound.live?
+            what = session.playing_after_queue?(name) ? "the new graph replaces #{name.inspect}'s" : "#{name.inspect} wasn't playing; starting it with the new graph"
+            $stdout.puts "swap #{name.inspect}: #{what} (as bg #{name.inspect}, graph)"
+          end
+          return bg(name, given, at: point.given? ? point : nil)
         end
         session_command(name, label: "swap #{name.inspect}", kind: :swap) { |session, time|
           session.swap(name, clips, at: point, start_time: point.given? ? nil : time)

@@ -411,10 +411,39 @@ module MB
         else
           # (not playing after all: the knobs take their values now)
           landings.each { |k, v| k.set(v, frame: k.next_frame) unless v == k.value }
+          take_over_player(tr) if old.nil? && @session.playing_after_queue?(name)
         end
         name
       ensure
         drop_checked_build unless ahead
+      end
+
+      # A new track +tr+ named like a playing player that isn't a track (a
+      # `bg :x, graph`) takes the name over (gen-ux-1 round 2; the
+      # maintainer's take, 2026-11-21: `track(:x) { }` over a playing bg
+      # graph returned :x while the graph played on): with something to
+      # play (its graph, or its patch with a clip) it starts at its launch
+      # point in place of the graph, as a scene's :on would; with nothing
+      # yet (a patch, no clip) the graph plays on and the console says how
+      # to go on.
+      def take_over_player(tr)
+        name = tr.name
+        unless tr.graph || (tr.patch? && tr.clip)
+          if MB::Sound.live?
+            $stdout.puts "track #{name.inspect}: the graph playing as #{name.inspect} plays on until the track gets a clip (bg #{name.inspect}, clip) or it stops (stop #{name.inspect})"
+          end
+          return nil
+        end
+
+        $stdout.puts "track #{name.inspect}: takes over the graph playing as #{name.inspect} at its launch point" if MB::Sound.live?
+        result = nil
+        @session.command("track #{name.inspect}") {
+          before = undo_state
+          time = Session.context&.time || resolve(tr.q || @quant, tr)
+          result = start_track(tr, tr.clocked_clip(tr.clip), time, tr.fade)
+          @session.note_undo_extra(self, before, undo_state)
+        }
+        result
       end
 
       # Runs the block with #track's check of a new instrument for track
