@@ -104,7 +104,12 @@ module MB
       # A block is not an effect: Ruby would drop it silently (the
       # maintainer's `fx(:sub) { it.pan(1) }` changed nothing), so a block
       # warns once per line, naming the Proc spelling, and is ignored.
-      def fx(name, effects = Arrangement::KEEP_FX, at: nil, on: nil, in: nil)
+      def fx(name, effects = Arrangement::KEEP_FX, *_more, at: nil, on: nil, in: nil)
+        unless _more.empty?
+          # (ux-friction-1: the maintainer's guesses at a chain)
+          list = [effects, *_more].map { |e| e.is_a?(Library::Entry) ? e.head_path : e.inspect }.join(', ')
+          return MB::Sound.live_error(ArgumentError.new("fx #{name.inspect} takes one effect or a list: fx #{name.inspect}, [#{list}] (a list chains them in order)"))
+        end
         if block_given?
           n = name.inspect
           Internal.warn_once_per_site(:fx_block,
@@ -117,7 +122,15 @@ module MB
           return tr.fx || []
         end
         point = LaunchPoint.of(binding) or return nil
-        arrangement.fx(name, effects, point)
+        result = arrangement.fx(name, effects, point)
+        if result.is_a?(Symbol) && !Session.context&.time && MB::Sound.live?
+          # (ux-friction-1: fx on a stopped track returned :pluck and he
+          # couldn't tell anything had happened until his next `bg :pluck`)
+          tr = arrangement.tracks[name]
+          what = tr&.fx ? Arrangement::Fx.label(tr.fx) : 'no effect'
+          $stdout.puts "\e[2mfx #{name.inspect}: #{name.inspect} isn't playing, so #{what} plays from its next launch (bg #{name.inspect}, its scene, or launch)\e[0m" unless Session.current.playing_after_queue?(name)
+        end
+        result
       rescue Arrangement::Fx::Error => e
         MB::Sound.live_error(e)
       end

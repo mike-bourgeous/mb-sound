@@ -57,6 +57,20 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect(described_class.summary(e)).not_to include('pitch first')
     end
 
+    it "points the maintainer's echo and effect-chaining guesses at what exists (ux-friction-1)" do
+      e = (1.constant.echo rescue $!)
+      expect(described_class.summary(e)).to include('did you mean delay(0.375, feedback: 0.4) (an echo; also tape_echo, ping_pong')
+      cab = MB::Sound::Library.index.lookup(:rotary, :cabinet)
+      asym = MB::Sound::Library.index.lookup(:shape_db, :asymmetric)
+      %i[| & + >>].each do |op|
+        e = (cab.public_send(op, asym) rescue $!)
+        expect(described_class.summary(e)).to include("did you mean fx :track, [#{cab.head_path}, #{asym.head_path}] (a list chains effects in order)"), op.inspect
+      end
+      expect { cab.then(asym) }.to raise_error(ArgumentError, /then takes a block, not an argument: fx :track, \[/)
+      expect { cab.call(asym) }.to raise_error(ArgumentError, /call takes a signal, not #{Regexp.escape(asym.head_path)}: fx :track, \[/)
+      expect(cab.then { |x| x.name }).to eq(:cabinet)
+    end
+
     it 'turns Did you mean blocks in messages into a parenthesis' do
       e = ArgumentError.new("no scene :dorp\nDid you mean?  :drop\n                :dorm")
       expect(described_class.summary(e)).to eq('ArgumentError: no scene :dorp (did you mean :drop, :dorm?)')

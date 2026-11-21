@@ -57,7 +57,7 @@ module MB
           # (Ruby's spelling suggestions for these, write and collect, lead
           # nowhere)
           suggestions.replace([hint.call(*e.args.first(1))])
-        elsif e.is_a?(NoMethodError) && (hint = node_guess(e))
+        elsif e.is_a?(NoMethodError) && (hint = node_guess(e) || entry_guess(e))
           suggestions.replace([hint])
         end
         message = message.sub(/ for module MB::Sound\z/, '').sub(/ for module MB::Sound(?=\n)/, '')
@@ -93,6 +93,8 @@ module MB
       NODE_GUESSES = {
         delta: SLOPE, diff: SLOPE, difference: SLOPE, deriv: SLOPE, ddt: SLOPE,
         cumsum: SUM, running_sum: SUM, accum: SUM, sum: SUM, integ: SUM,
+        # (ux-friction-1: the maintainer's `fx :pluck, ->{ it.echo }`)
+        echo: 'delay(0.375, feedback: 0.4) (an echo; also tape_echo, ping_pong, dual_delay, or the library\'s L.fx.dub_echo)',
         transpose: ->(node) {
           next nil unless node.is_a?(Tone)
 
@@ -109,6 +111,24 @@ module MB
 
         hint = NODE_GUESSES[e.name]
         hint.respond_to?(:call) ? hint.call(node) : hint
+      rescue StandardError
+        nil
+      end
+
+      # Operators people reach for to chain library effects (ux-friction-1:
+      # the maintainer's `L.fx.cabinet | L.fx.asymmetric`, `&`, `+`), and
+      # the list that chains them.
+      ENTRY_CHAIN = %i[| & + >> << chain pipe compose].freeze
+
+      # The ENTRY_CHAIN suggestion for NoMethodError +e+ on a library
+      # Entry, or nil.
+      def entry_guess(e)
+        entry = e.receiver
+        return nil unless entry.is_a?(Library::Entry) && ENTRY_CHAIN.include?(e.name)
+
+        other = e.args.first
+        b = other.is_a?(Library::Entry) ? other.head_path : 'L.fx.hall'
+        Library::Entry.chain_hint(entry.head_path, b)
       rescue StandardError
         nil
       end
