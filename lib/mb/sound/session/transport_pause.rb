@@ -110,6 +110,9 @@ module MB
             p.pause_ramp = Fades::Ramp.after(p.pause_ramp, p.pause_level || 1.0, 0.0, frame, k)
           end
           hold_timeline_nodes
+          # Live notes held on the MIDI inputs release too (their monitors
+          # play on: the keyboard still plays while paused)
+          @midi_lock.synchronize { @midi_inputs.values }.each(&:release_held!)
         end
 
         # The :play_on change's action (render lock held).

@@ -204,6 +204,26 @@ RSpec.describe(MB::Sound::Session::TransportPause, :aggregate_failures) do
     expect(session.transport_paused?).to eq(false)
   end
 
+  it 'releases a live key held at the pause on its sample, and plays nothing for it at the resume' do
+    ev = MB::Sound::MIDI::Event
+    # a key down at 0.1 s and up at 2 s (held through the pause)
+    session.midi_in.input = MB::Sound::MIDI::Stream.new(MIDIListSource.new(ev.parse([0x90, 60, 100], time: 1/10r), ev.parse([0x80, 60, 64], time: 2r)))
+    session.add(0.constant, name: :clock, on: :now)
+    seen = []
+    session.add_tap { seen.concat(session.midi_in.span.events) if session.midi_in.span }
+    run(24000)
+    expect(session.midi_in.held_notes.map(&:note)).to eq([60])
+    session.pause_transport
+    run(24000)
+    expect(session.midi_in.held_notes).to eq([])
+    session.play_on
+    run(49000)
+    got = seen.map { |st| [st.frame, st.event.type, st.event.note] }
+    # the note-off owed at the pause sample, then the key's own note-off
+    # at 2 s (a note nothing holds any more); no new note-on at the resume
+    expect(got).to eq([[4800, :note_on, 60], [24000, :note_off, 60], [96000, :note_off, 60]])
+  end
+
   describe 'the console commands on a realtime Session' do
     let(:rt) { MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: :virtual, buffer_size: 256), channels: 1, master_gain: 1, realtime: true, transport: MB::Sound::Sequence::Transport.new(bpm: 120)) }
 

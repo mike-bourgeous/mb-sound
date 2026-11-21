@@ -208,6 +208,25 @@ module MB
           @held_list
         end
 
+        # Owes note-offs for every note held on this input now (keys, added
+        # sources, the wired stream; and the wired stream's pedal), sent at
+        # the start of the next read: the transport's pause releases
+        # sounding notes (Session::TransportPause; a key still down plays
+        # nothing more until pressed again).  A replay has them in its log.
+        # Returns the number of notes released.
+        def release_held!
+          return 0 if @replay || @held.empty?
+
+          offs = @held.each_value.map { |h| MIDI::Event.parse([0x80 | (h.channel & 15), h.note, 0], time: 0r) }
+          offs << MIDI::Event.parse([0xB0, 64, 0], time: 0r) if @wire_pedal
+          @live_lock&.release(:wire)
+          (@pending_offs ||= []).concat(offs)
+          n = @held.length
+          @held.clear
+          @held_list = @held.values.freeze
+          n
+        end
+
         # The streams added with #add_source (and the wired stream, see
         # #wire_to).
         def sources
