@@ -2050,7 +2050,10 @@ module MB
         transport), x stops, s solos, m mutes.  In the form pane Up/Down
         pick a section, Enter goes there next (`goto :drop`), r loops it
         (`loop!`, or `practice :drop`), n `onward`, > `skip`, f `finish`,
-        Space the transport.  Every key runs one console
+        Space the transport.  In the buses pane Up/Down pick a bus or a
+        send, Left/Right the send's level (one `feed :pad, :verb, -9.0.db`
+        line when you let go), 0 closes it, Enter types it, m mutes the
+        bus.  Every key runs one console
         line: journaled, undoable, in your take (knob turns show on the
         pane's last row, other lines in the console).  `ui :mixer` shows
         buses beside the master.

@@ -34,6 +34,127 @@ RSpec.describe('UI session panes', :aggregate_failures) do
     expect(draw(:buses, snap_with(buses: [].freeze)).first).to start_with('no buses')
   end
 
+  # (ui-phase1-1, the plan's Phase 1 item 6: "it shows each send's level in
+  # dB but nothing can change it")
+  describe 'the buses pane\'s keys' do
+    let(:pane) { ui.panes.fetch(:buses) }
+    let(:snap) { ui_fake_snapshot.with(bus_levels: nil, send_levels: nil) }
+
+    around do |ex|
+      @now = 10.0
+      ui::Panes::Buses.clock = -> { @now }
+      ex.run
+    ensure
+      ui::Panes::Buses.clock = nil
+    end
+
+    def paint(state, snap = self.snap, w: 50, h: 8)
+      grid = MB::Term::Cells.new(w, h)
+      pane.draw(ui::Canvas.new(grid, 0, 0, w, h), snap, state.merge!(title_in_rule: true))
+      grid.to_text(:none).lines.map(&:rstrip)
+    end
+
+    it 'draws as before outside its mode; picks buses and sends; steps a send with one feed line when the keys stop; 0, Enter, m' do
+      pk = ui::PaneKeys
+      plain = paint({})
+      expect(paint({ mode: false })).to eq(plain)
+      st = { mode: true }
+      expect(paint(st)[0..3]).to eq(plain[0..3]) # (nothing picked: the same rows)
+      expect(pane.key_action(:send, st, 1.0)).to start_with('pick a send first')
+      expect(pane.key_action(:pick, st, 1)).to eq(['verb (m mutes it; its sends below: Left Right, 0, Enter)'])
+      expect(pane.key_action(:send, st, 1.0)).to include('a bus has no fader')
+      expect(pane.key_action(:mute_bus, st)).to eq([pk::Run['mute :verb', 'verb muted']])
+      expect(pane.key_action(:pick, st, 1)).to eq(['pad > verb (Left Right its level, 0 closes it, Enter types it, m mutes verb)'])
+
+      # A held Right: each repeat steps on and shows at once; no line until the keys stop
+      out = (1..5).map { |i| r = pane.key_action(:send, st, 1.0); @now += 0.03; expect(paint(st)[1]).to match(/pad\s+-#{12 - i}\.0 dB/); r }
+      expect(out.map(&:length).uniq).to eq([1])
+      expect(out.last).to eq(['pad > verb at -7 dB (one feed line when you let go)'])
+      expect(pane.key_tick(st)).to be_nil
+      expect(pane.key_wait(st)).to be_within(1e-9).of(ui::Panes::Buses::GAP - 0.03)
+      @now += ui::Panes::Buses::GAP
+      expect(pane.key_tick(st)).to eq(pk::Turn['feed :pad, :verb, -7.0.db', 'pad > verb at -7 dB'])
+      expect(pane.key_wait(st)).to be_nil
+      expect(paint(st)[1]).to match(/pad\s+-7\.0 dB/) # (carried until the poll has it)
+
+      # Another key sends the pending line first
+      pane.key_action(:send, st, -0.1)
+      r = pane.key_action(:pick, st, -1)
+      expect(r[0]).to eq(pk::Turn['feed :pad, :verb, -7.1.db', 'pad > verb at -7.1 dB'])
+      pane.key_action(:pick, st, 1)
+
+      expect(pane.key_action(:close_send, st)).to eq(pk::Turn['feed :pad, :verb, 0', 'pad > verb closed (u or undo opens it again)'])
+      expect(pane.key_action(:send, st, -1.0)).to include('is off (Right opens it at -40 dB)')
+      expect(pane.key_action(:send, st, 1.0).last).to include('-40 dB')
+      ask = pane.key_action(:ask_send, st)
+      expect(ask[0]).to eq(pk::Turn['feed :pad, :verb, -40.0.db', 'pad > verb at -40 dB']) # (the pending line first)
+      expect(ask[1]).to eq(pk::Ask['feed :pad, :verb, ', '-40.0.db', :typed_send, select: true])
+      expect(pane.key_action(:typed_send, st, '-9.db')).to eq(pk::Turn['feed :pad, :verb, -9.db', 'pad > verb -9.db'])
+      expect(pane.key_action(:typed_send, st, '-9.dbb')).to include('numbers have no .dbb')
+      expect(pane.key_action(:mute_bus, st)).to eq([pk::Run['mute :verb', 'verb muted']]) # (a send row: its bus)
+
+      # The routed-whole row, the muted bus
+      2.times { pane.key_action(:pick, st, 1) }
+      expect(pane.key_action(:send, st, 1.0)).to include('whole (to:)')
+      muted = snap.with(slow: snap.slow.with(buses: snap.slow.buses.map { |b| b.with(muted: true) }.freeze))
+      paint(st, muted)
+      expect(pane.key_action(:mute_bus, st)).to eq([pk::Run['unmute :drums', 'drums unmuted']])
+
+      # The latest feed line on the last row, in the mode only
+      st[:turn_line] = 'feed :pad, :verb, -9.db'
+      expect(paint(st).last).to eq('feed :pad, :verb, -9.db')
+      expect(paint(st.merge(mode: false)).last).not_to include('feed')
+
+      km = ui::Panes::Buses.mode_keymap.entries
+      { [:right, []] => :send, ['0', []] => :close_send, [:enter, []] => :ask_send, ['m', []] => :mute_bus }.each do |chord, action|
+        expect(km.find { |b| b.chord == chord }&.action).to eq(action), chord.inspect
+      end
+    end
+
+    describe 'on a screen' do
+      after do
+        @tiles&.stop
+        @term&.close
+        @session&.close
+        MB::Sound.rewind
+      end
+
+      it 'turns a send up with held keys, one feed line on release, and mutes the bus, on a playing set' do
+        ui::Panes::Buses.clock = nil
+        @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+        expect { MB::Sound::Session.with_context(session: @session) { MB::Sound.demo(:night_bus); MB::Sound.go(:groove, on: :now) } }.to output(/night_bus/).to_stdout
+        MB::Sound::Session.with_context(session: @session) do
+          MB::Sound.bus(:wash) { |sig| sig * 0.5 }
+          MB::Sound.feed(:drums, :wash, -20.db)
+        end
+        8.times { @session.process_buffer }
+        @tiles, @term = ui_tiles(:session, rows: 60, cols: 236, session: @session)
+        @tiles.show(:buses, at: :repl) unless @tiles.tiler.layout.panes.include?(:buses)
+        stop = false
+        pump = Thread.new { until stop; @session.process_buffer; sleep 0.004; end }
+        @tiles.enter(:buses)
+        st = @tiles.instance_variable_get(:@states)[:buses]
+        expect(wait_until { st[:rows]&.any? { |r| r[0] == :feed && r[1] == :drums && r[5] == :wash } && @tiles.router.mode == :pane }).to eq(true)
+        rows = st[:rows].reject { |r| r[0] == :levels }
+        (rows.index { |r| r[0] == :feed && r[1] == :drums && r[5] == :wash } + 1).times { @term.write("\e[B") }
+        expect(wait_until { st[:pick] == [:feed, :drums, :wash] }).to eq(true), st[:pick].inspect
+        sends = -> { @session.journal.changes.select { |e| e.kind == :send && e.subject == :drums } }
+        was = sends.().length
+        3.times { @term.write("\e[C") }
+        expect(@term.wait_for(/drums\s+-17\.0 dB/)).to eq(true) # (shown at once)
+        expect(wait_until { sends.().length == was + 1 }).to eq(true) # (one line when the keys stop)
+        expect(wait_until { (@session.routes.dig(:drums, :send, :wash).to_f - -17.db.to_f).abs < 1e-6 }).to eq(true)
+        expect(wait_until { st[:turn_line] == 'feed :drums, :wash, -17.0.db' }).to eq(true), st[:turn_line].inspect
+        @term.type('m')
+        expect(wait_until { @session.journal.changes.any? { |e| e.kind == :mute && e.subject == :wash } }).to eq(true)
+        expect(@tiles.mode_problems).to eq([])
+      ensure
+        stop = true
+        pump&.join
+      end
+    end
+  end
+
   it 'shows track levels set away from unity in the tracks pane (omnibus17)' do
     tracks = [ui::TrackInfo.new(name: :bass, q: '1', clip: 'bass_a', armed: false, level: -6.0),
               ui::TrackInfo.new(name: :pad, q: '1', clip: 'chords', armed: false)].freeze
