@@ -1101,13 +1101,18 @@ module MB
         perform it with loop!, onward, goto, skip, finish, practice, seek.
         `flow` alone shows it (where it is, what comes next, how to end
         it); `start` (or `play`, `go` with nothing) plays the loaded flow
-        and `pause` (NAV Space) toggles.  `outro in: 4.bars` and `stop
-        :all` end the flow too; `go :scene` during it seeks the flow to
-        the next section playing that scene (else the nearest behind;
+        and `pause` (NAV Space) toggles: the bar stops, sounding notes
+        release, loops and drones fade out and hold their place, and
+        echoes and reverbs ring out; playing on doesn't retrigger notes
+        (`start resync: true` puts tempo-synced LFOs back on the grid).
+        `suspend` is the old freeze (silence, nothing renders).  `outro
+        in: 4.bars` and `stop :all` end the flow too; `go :scene` during
+        it seeks the flow to the next section playing that scene (else the
+        nearest behind;
         `go :drop, section: :drop2` picks one; a scene no section plays
         ends the flow: you're driving).
       TEXT
-      commands :flow, :start, :pause, :play_form, :section, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter
+      commands :flow, :start, :pause, :play_form, :section, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter, :suspend
       note :arrangement
       see :sets, :long_form
       example 'a tiny song form' do

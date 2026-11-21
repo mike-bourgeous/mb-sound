@@ -51,6 +51,23 @@ module MB
           @remaining = length.to_r # whole notes, for Durations
           @time = MB::Sound::Length::Source.new(length) unless musical?
           @node_type_name = 'Until'
+          @hold_on = false # (see #timeline_hold)
+        end
+
+        # A musical length stops counting while the transport is paused
+        # (see TimelineNode#timeline_hold_mode); seconds and samples count
+        # on, as the sound passes in wall time.
+        def timeline_hold_mode
+          :native
+        end
+
+        def timeline_hold(on, fade_frames: 0)
+          @hold_on = !!on
+          self
+        end
+
+        def timeline_held?
+          @hold_on
         end
 
         # True if the length is musical (a Duration that follows the tempo).
@@ -69,7 +86,7 @@ module MB
           return nil if data.nil?
 
           if musical?
-            @remaining -= data.length * whole_notes_per_sample unless timeline_paused?
+            @remaining -= data.length * whole_notes_per_sample unless timeline_paused? || @hold_on
           else
             @elapsed += data.length
           end
@@ -124,7 +141,7 @@ module MB
 
         # Samples left at the current tempo (unlimited while paused).
         def musical_samples_left
-          return Float::INFINITY if timeline_paused? && @remaining > 0
+          return Float::INFINITY if (timeline_paused? || @hold_on) && @remaining > 0
 
           (@remaining / whole_notes_per_sample).round
         end

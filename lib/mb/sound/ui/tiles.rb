@@ -1339,7 +1339,11 @@ module MB
               run_safely {
                 s = keys_session || Session.current
                 st = UI.run_line(TransportMethods.toggle_line(s), s)
-                flash(st.to_s, :dim) if st.is_a?(TransportMethods::Status)
+                next st unless st.is_a?(TransportMethods::Status)
+                # (self: run_safely flashes any other result, and flash's
+                # own return value printed as `=> [text, role, ...]`)
+                flash(st.to_s, :dim)
+                self
               }
             end
           when :keys then keys
@@ -2597,13 +2601,15 @@ module MB
         def status_right(snap, c)
           return -'' unless snap
           beat = snap.beat.floor
-          k = @status_right_key ||= [nil, nil, nil, nil]
-          unless k[0] == snap.playing && k[1] == snap.bar && k[2] == beat && k[3] == @glyphs
+          k = @status_right_key ||= [nil, nil, nil, nil, nil]
+          unless k[0] == snap.playing && k[1] == snap.bar && k[2] == beat && k[3] == @glyphs && k[4] == snap.paused
             k[0] = snap.playing
             k[1] = snap.bar
             k[2] = beat
             k[3] = @glyphs
-            @status_right = "#{snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} ".freeze
+            k[4] = snap.paused
+            # (paused: the bar stands while effects ring out, a pause sign)
+            @status_right = "#{snap.paused ? c.glyph(:sep) * 2 : snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} ".freeze
           end
           @status_right
         end

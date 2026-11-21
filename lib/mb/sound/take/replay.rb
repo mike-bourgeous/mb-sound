@@ -25,7 +25,7 @@ module MB
       # between buffer sizes by about 1e-12 (naive shapes like asaw can
       # move an edge by a sample).
       class Replay
-        Line = Struct.new(:issued, :lands, :code, :epoch, :choices, keyword_init: true)
+        Line = Struct.new(:issued, :lands, :code, :epoch, :choices, :held, keyword_init: true)
 
         # The last Replay created (for loading a saved take from code).
         class << self
@@ -82,10 +82,12 @@ module MB
         # launch), after +epoch+ seeks had landed (the line runs in that
         # pass over the timeline; see Session#epoch).  +choices+ are the
         # answers the line got live ([kind, key, choice]; see
-        # Take.note_choice), given again instead of asking.
-        def line(issued, lands, code, epoch: 0, choices: [])
+        # Take.note_choice), given again instead of asking.  +held+ (a line
+        # typed while the transport was paused) is the frames into the
+        # replayed pause where it runs (Session::TransportPause).
+        def line(issued, lands, code, epoch: 0, choices: [], held: nil)
           lands = lands.map { |t| t.is_a?(Array) ? t.map(&:to_r) : t.to_r }
-          @lines << Line.new(issued: issued.to_r, lands: lands, code: code, epoch: epoch, choices: choices)
+          @lines << Line.new(issued: issued.to_r, lands: lands, code: code, epoch: epoch, choices: choices, held: held&.to_i)
           self
         end
 
@@ -149,7 +151,7 @@ module MB
           @lines_left = @lines.length
           @lines.each_with_index do |l, i|
             eval_at = [l.issued, *l.lands.map { |t| Array(t).first }].min
-            session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i, owner: :take, exact: true) do
+            session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i, owner: :take, exact: true, held: l.held) do
               @lines_left -= 1
               run_line(session, binding, l, i)
             end
@@ -212,7 +214,9 @@ module MB
 
             # The timeline stops when nothing plays; with nothing playing or
             # due, it never moves again
-            break if transport.position == before && session.idle? && !session.schedule_due? && ended_short(session, finish)
+            # (a pause stands the timeline still too: lines typed during it
+            # are still to run)
+            break if transport.position == before && session.idle? && !session.schedule_due? && !(session.transport_paused? && @lines_left > 0) && ended_short(session, finish)
           end
 
           if tail && tail > 0

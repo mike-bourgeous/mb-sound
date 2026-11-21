@@ -122,7 +122,18 @@ module MB
               state[:meter_of] = s.bar_length
               state[:meter] = s.meter.freeze
             end
-            x = c.text(0, 0, s.playing ? c.glyph(:play) : c.glyph(:stop), s.playing ? :ok : :dim)
+            # (paused: the bar stands while effects ring out, a pause sign
+            # instead of the stop square; its String kept per glyph set)
+            x = if s.paused
+              sep = c.glyph(:sep)
+              unless state[:pause_of].equal?(sep)
+                state[:pause_of] = sep
+                state[:pause_mark] = (sep * 2).freeze
+              end
+              c.text(0, 0, state[:pause_mark], :warn)
+            else
+              c.text(0, 0, s.playing ? c.glyph(:play) : c.glyph(:stop), s.playing ? :ok : :dim)
+            end
             x = c.text(x, 0, -' ')
             x = c.text(x, 0, state[:stamp], :key)
             x = c.text(x, 0, -' ')

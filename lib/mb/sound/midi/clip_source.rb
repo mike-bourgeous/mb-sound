@@ -111,6 +111,30 @@ module MB
           @choke_swap = nil # (see #ring_out)
           @carried_sounding = nil
           @content_from = nil # (see #chase_at_position)
+          @hold_state = nil # (nil, :pending, :held; see #timeline_hold)
+        end
+
+        # Holds while the transport is paused (Session::TransportPause): the
+        # first read after the hold sends note-offs for the sounding notes
+        # at its start (a Jump), and the clip position stops until the
+        # release, so the clip continues from the same place without
+        # playing the released notes again (their note-ons are behind it;
+        # their own note-offs are dropped as not sounding).
+        def timeline_hold_mode
+          :native
+        end
+
+        def timeline_hold(on, fade_frames: 0)
+          if on
+            @hold_state ||= :pending
+          else
+            @hold_state = nil
+          end
+          self
+        end
+
+        def timeline_held?
+          !@hold_state.nil?
         end
 
         # The current clip position in whole notes (a Rational).
@@ -533,6 +557,8 @@ module MB
         end
 
         def read_events(from, to)
+          return held_events(from) if @hold_state
+
           # Quiet reads: a read ending at or before the frame of the next
           # possible edge (see #arm_quiet) returns nothing after comparing
           # integer frames of its end (at the rate of the stream time's
@@ -578,6 +604,21 @@ module MB
           end
 
           read_span(from, to)
+        end
+
+        # The events of a read while held (see #timeline_hold): a Jump at
+        # +from+ on the first (note-offs for every sounding note), then
+        # none; the clip position stays where the hold found it.
+        def held_events(from)
+          if @lazy_from
+            @clip_position += Sequence::TempoMap.whole_notes_for(from - @lazy_from, @quiet_wnps)
+            @lazy_from = nil
+          end
+          @quiet_frame = nil
+          return Stream::NO_EVENTS if @hold_state == :held
+
+          @hold_state = :held
+          [Jump.new(from)]
         end
 
         # The edges for stream times [from, to): on the clip's clock, or at
