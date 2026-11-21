@@ -61,8 +61,9 @@ module MB
 
         # Changes whose landing reads which players are playing, fading
         # out, or stopped (a swap's target, a resume's stopped player, the
-        # stopped players a forget discards; see #state_change?).
-        STATE_KINDS = %i[swap resume forget].freeze
+        # stopped players a forget discards, whether a stop finds a player
+        # already fading out; see #state_change?).
+        STATE_KINDS = %i[swap resume forget stop].freeze
 
         # True for a change whose action depends on the players' state
         # where it lands (STATE_KINDS): the buffer splits on its frame, so
@@ -77,6 +78,14 @@ module MB
         # `.ratchet(2)` in the same bar played the ratchet at 367 frames,
         # since the swap fell through to the queued launch, and the plain
         # kit at 800, where it swapped the stopped player).
+        #
+        # A stop splits too (fix-fuzz-788022, batch 39's soak seed 788022):
+        # landing at its span's start, a stop for a later frame of the span
+        # moved the stop time of a player already fading out (one a
+        # replacement's crossfade was handing over from) back to that
+        # fade's start, so a cut ended the fade at the span's first frame,
+        # up to a buffer before the stop, at 367 frames, and on the stop's
+        # frame at 800, where the stop began a buffer.
         def state_change?(c)
           STATE_KINDS.include?(c.kind)
         end
@@ -261,7 +270,7 @@ module MB
         # between samples landed inside the first piece, so the state was
         # copied up to a buffer before the old graph stopped; SessionFuzz's
         # :carry relation found it at 137.5 BPM).  Changes reading the
-        # players' state (#state_change?: swaps, resumes, forgets) split on
+        # players' state (#state_change?: swaps, resumes, forgets, stops) split on
         # the floor sample too, so they land after the players that ended
         # before them retired (fix-808-fuzz).
         #
