@@ -353,7 +353,9 @@ module MB
 
         # Knobs: a meter at each knob's position in its range, and its value.
         #
-        # In the pane's mode (NAV Enter; knobs-pane-keys-1, the maintainer:
+        # In the pane's mode (NAV Enter, or its jump letter o: the
+        # maintainer's 2026-11-21 "o works for knobs jump for now";
+        # knobs-pane-keys-1, the maintainer:
         # "I expect the knobs pane to let me turn the knobs with the
         # keyboard") the keys of the racks pane's knob rows, through the
         # same UI::KnobTurns: Up/Down pick a knob (reversed; the list
@@ -365,6 +367,7 @@ module MB
         # Outside the mode the pane draws as it always has.
         class Knobs < Pane
           include KnobTurns
+          jump 'o'
 
           mode_keys do
             group 'Knobs'

@@ -2013,7 +2013,7 @@ module MB
         ◆ is queued with its countdown in beats), the clip under its cursor
         (`clip`: a piano roll and the Ruby that made it), racks with their
         knobs, buses with meters.  Focus a pane in NAV (its number, or a
-        for clips, r racks, b buses) and press Enter for its keys: arrows
+        for clips, r racks, o knobs, b buses) and press Enter for its keys: arrows
         move, Enter launches the cell (`launch :bass, 3`), g its scene (`go
         :drop`), x stops the track, + - > < transpose, L legato, S swing, Q
         quantize, D double, H half, R reverse (`tweak :bass, transpose: 1`),

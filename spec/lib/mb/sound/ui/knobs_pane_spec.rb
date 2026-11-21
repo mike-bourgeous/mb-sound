@@ -153,7 +153,7 @@ RSpec.describe('the knobs pane', :aggregate_failures) do
     expect(ours).to include(*racks)
     expect(ours.map { |c, _, _| c[0] }).to include(:enter, 'y')
     expect(ui::Panes::Knobs.keymap.help_groups.flatten.join(' ')).to include('Enter', 'pick and turn knobs')
-    expect(ui::Panes::Knobs.jump).to be_nil
+    expect(ui::Panes::Knobs.jump).to eq('o') # (the maintainer's 2026-11-21 pick)
   end
 
   describe 'on a screen' do
@@ -162,6 +162,28 @@ RSpec.describe('the knobs pane', :aggregate_failures) do
       @term&.close
       @session&.close
       MB::Sound.rewind
+    end
+
+    it 'jumps into the pane with NAV o, and says o is no NAV key while the pane is not on screen, as r does for racks' do
+      @tiles, @term = ui_tiles(:tiles, rows: 40, cols: 120)
+      expect(@term.wait_for('t> ')).to eq(true)
+      expect(@tiles.tiler.layout.panes).not_to include(:knobs, :racks)
+      { 'o' => 'o: not a NAV key', 'r' => 'r: not a NAV key' }.each do |letter, said|
+        @term.write("\x1d")
+        expect(wait_mode(@tiles, :nav)).to eq(true)
+        @term.type(letter)
+        expect(@term.wait_for(said)).to eq(true), @term.text
+        @term.write("\e")
+      end
+      @tiles.show(:knobs, at: :repl)
+      expect(wait_until { @tiles.instance_variable_get(:@jumps)[:knobs] == 'o' }).to eq(true) # (bound, and beside its number in NAV)
+      @term.write("\x1d")
+      expect(wait_mode(@tiles, :nav)).to eq(true)
+      expect(@term.wait_for(/\d o /)).to eq(true), @term.text
+      @term.type('o')
+      expect(wait_settled(@tiles) { @tiles.router.mode == :pane && @tiles.tiler.focus == :knobs }).to eq(true)
+      expect(@term.wait_for(' KNOBS ')).to eq(true) # (the mode's badge)
+      expect(@tiles.mode_problems).to eq([])
     end
 
     it 'goes into the pane from NAV, turns a knob of a loaded demo with the arrows, and journals the turn' do
