@@ -286,6 +286,8 @@ RSpec.describe(MB::Sound::Session::Carry, :aggregate_failures) do
     ['session.rb', 'render_player'] => "starting a graph's timeline nodes, and the clock wait of one that played",
     ['strip.rb', 'catch_up_waiting'] => 'graphs whose input nothing has read yet',
     ['strip.rb', 'read_kept_graphs'] => 'graphs read by their own player',
+    ['transport_pause.rb', 'hold_timeline_nodes'] => 'holding the timeline nodes of graphs that started them (a carried one holds from its first span)',
+    ['transport_pause.rb', 'apply_play_on'] => 'releasing the timeline nodes of graphs that started them',
   }.freeze
 
   it 'reads what was heard of a player through Player#heard?, and +started+ only in the render mechanics' do
