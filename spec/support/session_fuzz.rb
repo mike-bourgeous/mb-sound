@@ -87,8 +87,11 @@ module SessionFuzz
     'seq(C4, E4, G4).n8.loop', 'seq(A3, R, C4.n4, E4).n16.loop', 'seq(C3.n4, G3.n8.dotted, Eb3.n16).loop',
     'seq(C5, D5).n8', 'seq(F3, A3, C4, E4).n4.loop', 'seq(G4.n16, B4.n16, D5.n8).loop',
     # Generators steered by the knob :busy (G3: read at each cycle's decision point)
-    'melody(scale(:minor, :a).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop',
-    'motifs(scale(:dorian, :d).weights, 8, density: knob(:busy), mutate: knob(:busy), evolve: 1, seed: 4)',
+    # (a scale without a root: follows the session key, which songs with
+    # wires set; gen-ux-1)
+    'melody(scale(:minor).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop',
+    # (echo on a generator works per cycle, with uneven gaps; gen-ux-1)
+    'motifs(scale(:dorian, :d).weights, 8, density: knob(:busy), mutate: knob(:busy), evolve: 1, seed: 4).echo([3.n32, 1.n16], 2, pitch: 7.st)',
   ].freeze
   DRUMS = [
     "grid(16, kick: 'x...x...', snare: '....x...').loop", "grid(16, cymbal: 'X')", "grid(8, kick: 'x.x.', hat: 'xxxx').loop",
@@ -440,9 +443,10 @@ module SessionFuzz
 
   # +lines+ without the swaps of a track that may have stopped by the time
   # the swap lands (+events+, see #track_events: no start after the stop
-  # landed and by the swap's call): a swap of a track that isn't playing is
-  # a user error by design (PlaybackMethods#swap's guard when it's called,
-  # ClipSwaps' "No background player" where it lands), and those were
+  # landed and by the swap's call): a swap of a track that stops between
+  # its call and its landing is a user error by design (ClipSwaps' "No
+  # background player" where it lands; since gen-ux-1 a swap called on a
+  # track that isn't playing starts it, as bg), and those were
   # generated songs' errors (INVALID).  Swaps land at their call `on: :now`,
   # else within a bar.  Dropped, not drawn otherwise, so every other seed
   # keeps its song (fix-batch23: batch 23's soak had 3 such songs in 48,
@@ -696,6 +700,26 @@ module SessionFuzz
 
       cut = s.pick(['(150.hz..8000.hz).at(2400.hz)', '(100.hz..5000.hz).at(600.hz)'])
       "GraphIO.load(%(graph \#{GraphIO::FORMAT}, name: \"cut\", kind: :set\\nknob :cut, #{cut}\\n), session: Session.current)"
+    },
+    ->(s) {
+      # (gen-ux-1 round 2, "don't make me type bg first and then swap") a
+      # graph swapped into a bg graph player, or into a name with nothing
+      # playing: it replaces the graph, or starts it, as bg
+      name = s.bg_name
+      swap = "swap :#{name}, #{s.pick(['330.0.hz.triangle * 0.1', '110.0.hz.saw.lp4(700) * 0.08', 'noise.at(0.02).lp4(900)'])}"
+      s.rng.rand < 0.7 ? "bg :#{name}, #{s.pick(HELD)}#{s.on}; after(in: #{s.pick(['2.beats', '1/8r'])}) { #{swap} }" : swap + s.on
+    },
+    ->(s) {
+      # (gen-ux-1 round 2) a track defined over a playing bg graph takes
+      # the name and plays its own sound there (a graph, or a patch with
+      # a clip), or, with nothing to play, leaves the graph playing
+      name = s.bg_name
+      track = case s.rng.rand(3)
+              when 0 then "track :#{name}, 0.05.constant.filter(:lowpass, cutoff: 600)"
+              when 1 then "track(:#{name}, seq(C4, E4).n8.loop) { |c| c.tone.saw.at(0.1) * c.env }"
+              else "track(:#{name}) { |c| c.tone.saw.at(0.1) * c.env }"
+              end
+      "bg :#{name}, #{s.pick(HELD)}#{s.on}; after(in: #{s.pick(['2.beats', '1/8r'])}) { #{track} }"
     },
     # (new commands go here, at the end)
   ].freeze

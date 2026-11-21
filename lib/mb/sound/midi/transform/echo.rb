@@ -10,7 +10,9 @@ module MB
         # Each played note-on schedules +count+ repeats, +delay+ apart
         # (seconds, a Length, or a Duration read at the tempo of the
         # played note-on, so a tempo change doesn't move echoes already
-        # scheduled).  Repeat i is moved by the sum of the first i +pitch+
+        # scheduled; an Array of them is cycled, each the gap before the
+        # next repeat, so `[3.n32, 5.n32]` lands repeats 3, 8, 11, 16, ...
+        # thirty-seconds after the note; gen-ux-1).  Repeat i is moved by the sum of the first i +pitch+
         # steps (scale degrees of +scale+, chromatic by default, or
         # Intervals; an Array is cycled: `[4, 3, 5]` climbs a major triad)
         # and has the played velocity times +velocity+ ** i.  Repeats under
@@ -25,7 +27,8 @@ module MB
           # Echoes quieter than this (normalized velocity) are dropped.
           FLOOR = 1 / 127r
 
-          # The delay between repeats (seconds, a Length, or a Duration).
+          # The delay between repeats (seconds, a Length, or a Duration), or
+          # an Array of them (gaps, cycled).
           attr_reader :delay
 
           # The number of repeats after the played note.
@@ -39,13 +42,18 @@ module MB
             super(parent, overlap: overlap, jump: jump, transport: transport)
 
             raise ArgumentError, "Echo count must be a non-negative Integer (got #{count.inspect})" unless count.is_a?(Integer) && count >= 0
-            raise ArgumentError, "An echo delay can't be negative (got #{delay.is_a?(Length) ? delay : delay.inspect})" if seconds_of(delay) < 0
+            gaps = delay.is_a?(Array) ? delay : [delay]
+            raise ArgumentError, 'An echo delay Array needs at least one gap' if gaps.empty?
+            gaps.each do |g|
+              raise ArgumentError, "An echo delay can't be negative (got #{g.is_a?(Length) ? g : g.inspect})" if seconds_of(g) < 0
+            end
             unless gate.nil? || (gate.is_a?(Numeric) && gate > 0) || gate.is_a?(Length)
               raise ArgumentError, "Echo gate must be nil, a positive fraction of the delay, or a Length (got #{gate.inspect})"
             end
             raise ArgumentError, "Echo velocity must be a non-negative number (got #{velocity.inspect})" unless velocity.is_a?(Numeric) && velocity >= 0
 
             @delay = delay
+            @gaps = gaps.freeze
             @count = count
             @scale = Scale[scale, root]
             steps = pitch.is_a?(Array) ? pitch : [pitch]
@@ -67,7 +75,7 @@ module MB
           private
 
           def describe
-            parts = [@delay.to_s, @count.to_s]
+            parts = [@delay.is_a?(Array) ? "[#{@delay.join(', ')}]" : @delay.to_s, @count.to_s]
             parts << "pitch: #{@pitch.is_a?(Array) ? "[#{@pitch.join(', ')}]" : @pitch}" unless @pitch == 0
             parts << "velocity: #{MB::M.sigfigs(@velocity, 3)}" unless @velocity == 1
             parts << "gate: #{@gate}" if @gate
@@ -79,7 +87,14 @@ module MB
           end
 
           def tail_seconds
-            seconds_of(@delay) * @count
+            offsets.last
+          end
+
+          # The time of each repeat after its note (seconds; index 0 is the
+          # note itself), at the current tempo.
+          def offsets
+            t = 0r
+            [0r] + Array.new(@count) { |i| t += seconds_of(@gaps[i % @gaps.length]) }
           end
 
           def input_event(e)
@@ -92,39 +107,42 @@ module MB
 
           # Schedules the played note (if dry) and its echoes.
           def note_on(e)
-            d = seconds_of(@delay)
+            offs = offsets
             chain = []
 
-            add_note(e, 0, d, chain) if @dry
+            add_note(e, 0, offs, chain) if @dry
             (1..@count).each do |i|
               echo = echo_event(e, i)
               break unless echo # out of range or too quiet: the rest would be too
               echo = @block.call(echo, i) if @block
               next unless echo
-              add_note(echo.at(e.time + d * i), i, d, chain)
+              add_note(echo.at(e.time + offs[i]), i, offs, chain)
             end
 
-            (@chains[[e.channel, e.note]] ||= []) << [d, chain]
+            (@chains[[e.channel, e.note]] ||= []) << [offs, chain]
           end
 
           # Schedules the note-offs of the oldest chain started by this key.
           def note_off(e)
             key = [e.channel, e.note]
             list = @chains[key]
-            d, chain = list&.shift
+            offs, chain = list&.shift
             @chains.delete(key) if list && list.empty?
             return unless chain
 
-            # The delay of the note-on, so a tempo change can't move an
+            # The offsets of the note-on, so a tempo change can't move an
             # echo's note-off before its note-on
             chain.each do |note, channel, id, i, gated|
               next if gated
-              schedule_off(Event.note_off(note, e.velocity, channel: channel, time: e.time + d * i), id)
+              schedule_off(Event.note_off(note, e.velocity, channel: channel, time: e.time + offs[i]), id)
             end
           end
 
-          def add_note(event, index, d, chain)
+          # (+offs+: the repeat offsets, see #offsets; a gate fraction is of
+          # the gap before repeat +index+)
+          def add_note(event, index, offs, chain)
             gated = @gate && index > 0
+            d = gated ? offs[index] - offs[index - 1] : nil
             # Ungated echoes keep the played note's hint (with_note copies it)
             event = event.with_length_hint(gate_seconds(d)) if gated
             id = schedule_on(event)

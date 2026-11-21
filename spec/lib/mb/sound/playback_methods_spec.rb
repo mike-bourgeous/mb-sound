@@ -392,11 +392,28 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound.players.values).to all(end_with('(fading out)'))
       end
 
-      it 'has #fadeout as an alias for #outro' do
+      it 'ends everything with #fadeout and no names, as #outro' do
         MB::Sound.bg(:a, 220.hz.sine)
         sleep 0.05
         expect(MB::Sound.fadeout(fade: 0).name).to eq(:a)
         expect(MB::Sound.players).to be_empty
+      end
+
+      it 'fades out only the named players with #fadeout, over four bars by default (gen-ux-1)' do
+        MB::Sound.bg(:a, 220.hz.sine, at: :now)
+        MB::Sound.bg(:b, 330.hz.sine, at: :now)
+        MB::Sound.bg(:c, 440.hz.sine, at: :now)
+        deadline = MB::U.clock_now + 5
+        # (players waiting to start stop at once; wait for them to start)
+        sleep 0.01 until (MB::Sound.players.keys.sort == %i[a b c] && MB::Sound.players.values.none? { |v| v.include?('starts at') }) || MB::U.clock_now > deadline
+        expect(MB::Sound.fadeout(:a, :b).map(&:name)).to contain_exactly(:a, :b)
+        expect(MB::Sound.players[:a]).to end_with('(fading out)')
+        expect(MB::Sound.players[:b]).to end_with('(fading out)')
+        expect(MB::Sound.players[:c]).not_to end_with('(fading out)')
+        expect(MB::Sound.fadeout(:c, fade: 0).name).to eq(:c)
+        expect(MB::Sound.players.keys).to contain_exactly(:a, :b)
+        expect { expect(MB::Sound.fadeout(:aa, fade: 0)).to eq([]) }.to output(/No background player :aa is playing .*\nDid you mean\?  :a/).to_stderr
+        MB::Sound.stop(:all, fade: 0)
       end
 
       it 'no longer has #hush' do
@@ -610,11 +627,36 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect { in_session { MB::Sound.play(:bowl, stream) } }.to raise_error(ArgumentError, /play takes one sound \(got 2\); for a clip on :bowl's instrument: bg :bowl, clip/)
     end
 
-    it 'says to bg a track whose one-shot clip ended, and a comma for `swap :bowl. seq(...)`' do
+    it 'starts a track whose one-shot clip ended or that was stopped, as bg, and says a comma for `swap :bowl. seq(...)` (gen-ux-1)' do
       in_session { MB::Sound.swap(:bowl, MB::Sound.seq(MB::Sound::C3).n16, at: :now) }
       @session.process_buffer while @session.playing_after_queue?(:bowl) && @session.frame < 48_000 * 30
       expect(@session.playing_after_queue?(:bowl)).to eq(false)
-      expect { in_session { MB::Sound.swap(:bowl, riff) } }.to raise_error(ArgumentError, /track :bowl isn't playing .*bg :bowl, clip/)
+      # (the maintainer, 2026-11-17: "swap on a track that's not playing
+      # should act like bg instead of displaying an error")
+      entry = in_session { MB::Sound.swap(:bowl, riff, at: :now) }
+      expect(entry.kind).to eq(:bg)
+      expect(@session.playing_after_queue?(:bowl)).to eq(true)
+      @session.process_buffer
+      expect(@session.arrangement.tracks[:bowl].clip).to eq(riff)
+      expect(@session.players[:bowl]).not_to include('MIDI')
+      # Stopped: starts again with the new clip, at swap's launch point
+      in_session { MB::Sound.stop(:bowl, fade: 0) }
+      @session.process_buffer
+      expect(@session.playing_after_queue?(:bowl)).to eq(false)
+      other = MB::Sound.seq(MB::Sound::E3, MB::Sound::G3).n8.loop
+      bar = @session.transport.bar
+      entry = in_session { MB::Sound.swap(:bowl, other, on: :bar) }
+      expect(entry.kind).to eq(:bg)
+      expect(entry.to_s).to match(/lands #{bar + 1}:1/)
+      @session.process_buffer until @session.transport.bar > bar
+      @session.process_buffer
+      expect(@session.players.keys).to include(:bowl)
+      expect(@session.arrangement.tracks[:bowl].clip).to eq(other)
+      # old => new pairs need clips playing
+      in_session { MB::Sound.stop(:bowl, fade: 0) }
+      @session.process_buffer
+      @session.forget(:bowl) if @session.resumable?(:bowl)
+      expect { in_session { MB::Sound.swap(:bowl, other => riff) } }.to raise_error(ArgumentError, /isn't playing, so there are no clips to pair.*bg :bowl, clip/)
       e = (MB::Sound.module_eval('swap :bowl. seq(C2)') rescue $!)
       expect(MB::Sound::ErrorFormat.summary(e)).to end_with('(did you mean :bowl, seq(...) (a comma after :bowl, not a period)?)')
     end
@@ -635,6 +677,77 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         e = (MB::Sound.module_eval('nosuchname_here') rescue $!)
         expect(MB::Sound::ErrorFormat.summary(e)).not_to include('the track')
       end
+    end
+  end
+
+  # (gen-ux-1 round 2, the maintainer, 2026-11-21: "don't make me type bg
+  # first and then swap")
+  describe 'swap and track over a bg graph' do
+    before do
+      @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120),
+                                        channels: 1, buffer_size: 800, realtime: false, master_gain: 1)
+      in_session { MB::Sound.bg(:hum, 220.hz.sine.at(0.1), on: :now) }
+      10.times { @session.process_buffer }
+    end
+
+    after do
+      @session.close
+      MB::Sound.rewind
+    end
+
+    def in_session(&block) = MB::Sound::Session.with_context(session: @session, &block)
+
+    # Renders until the timeline passes the next bar line.
+    def next_bar
+      bar = @session.transport.bar
+      @session.process_buffer until @session.transport.bar > bar
+      @session.process_buffer
+    end
+
+    it 'replaces a bg graph with swap, or starts one, as bg at the launch point' do
+      entry = in_session { MB::Sound.swap(:hum, 330.hz.sine.at(0.1)) }
+      expect(entry.kind).to eq(:bg)
+      expect(entry.to_s).to match(/lands 2:1/)
+      expect(@session.players[:hum]).to include('freq=220')
+      next_bar
+      expect(@session.players[:hum]).to include('freq=330')
+      expect(@session.players.keys).to eq([:hum])
+
+      entry = in_session { MB::Sound.swap(:buzz, 55.hz.square.at(0.05), at: :now) }
+      expect(entry.kind).to eq(:bg)
+      @session.process_buffer
+      expect(@session.players.keys).to contain_exactly(:hum, :buzz)
+
+      # A clip for a graph that plays none still says so
+      expect { in_session { MB::Sound.swap(:hum, MB::Sound.seq(MB::Sound::C4).loop) } }.to raise_error(ArgumentError, /doesn't play any clips/)
+    end
+
+    it 'gives a track defined over a playing bg graph the name and the sound, at its launch point' do
+      expect(in_session { MB::Sound.track(:hum, 330.hz.sine.at(0.1)) }).to eq(:hum)
+      expect(@session.players[:hum]).to include('freq=220')
+      next_bar
+      expect(@session.players[:hum]).to include('freq=330')
+      expect(@session.players.keys).to eq([:hum])
+      expect(@session.arrangement.tracks[:hum]).not_to be_nil
+      in_session { MB::Sound.stop(:hum, fade: 0) }
+      @session.process_buffer
+      in_session { MB::Sound.bg(:hum) }
+      next_bar
+      expect(@session.players[:hum]).to include('freq=330')
+
+      # A patch with a clip plays it in place of the graph
+      in_session { MB::Sound.bg(:drone, 110.hz.sine.at(0.1), on: :now) }
+      @session.process_buffer
+      in_session { MB::Sound.track(:drone, MB::Sound.seq(MB::Sound::C4).n4.loop) { |c| c.tone.saw.at(0.1) * c.env } }
+      next_bar
+      expect(@session.players[:drone]).not_to include('freq=110')
+
+      # A patch with nothing to play leaves the graph playing
+      in_session { MB::Sound.bg(:pad, 165.hz.sine.at(0.1), on: :now) }
+      @session.process_buffer
+      in_session { MB::Sound.track(:pad) { |c| c.tone.saw.at(0.1) * c.env } }
+      next_bar
+      expect(@session.players[:pad]).to include('freq=165')
     end
   end
 

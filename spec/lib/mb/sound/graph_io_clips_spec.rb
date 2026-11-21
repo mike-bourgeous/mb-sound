@@ -41,6 +41,9 @@ module MB::Sound
       ],
       'baked transforms (saved as events)' => [-> { seq(C4, E4).n8.loop.bake(echo(1.n16, 2, velocity: 0.5).strum(20.ms)).tone }, "events(\n  [0r, 1/16r, 60, 0.75],"],
       'MIDI transform chains' => [-> { seq(C4, E4).n8.loop.notes.echo(1.n16, 2).tone }, 'seq(C4, E4).n8.loop.notes.echo(1.n16, 2)'],
+      # (gen-ux-1: uneven echo gaps, cycled)
+      'MIDI echo with an Array of gaps' => [-> { seq(C4, E4).n8.loop.notes.echo([3.n32, 5.n32], 3, pitch: [7.st, 5.st]).tone }, 'echo([3.n32, 5.n32], 3, pitch: [7.st, 5.st])'],
+      'echo on a generator, per cycle' => [-> { motifs(scale(:minor, :a), 4, seed: 3).echo([3.n32, 1.n16], 2).tone }, 'motifs(scale(:minor, A4), 4, seed: 3).echo([3.n32, 1.n16], 2)'],
       'clip synth' => [-> { seq(C4, E4, G4).n8.loop.synth(voices: 2) { |v| v.tone.saw * v.env(0, 0.1, 0.5, 0.1) } }, 'seq(C4, E4, G4).n8.loop.synth(voices: 2)'],
     }.freeze
   end

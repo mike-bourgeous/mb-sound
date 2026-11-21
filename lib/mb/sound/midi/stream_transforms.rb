@@ -48,20 +48,25 @@ module MB
         # 2026-10-31: "I want to be able to put echo on clips", after
         # `swap :bowl, riff.loop.echo(...)` refused the Stream and `cue`
         # played it on the default patch).  `clip.stream.echo(...)` is the
-        # live Stream, as before.
+        # live Stream, as before.  On generator clips they work per cycle
+        # instead (Clip#bake_cycles, gen-ux-1), so the generator keeps
+        # generating.
         CLIP_BAKED = [:echo].freeze
 
         # Returns a stream that repeats each note +count+ times, +delay+
         # apart (seconds, a Length, or a Duration such as 3.n16; an eighth
-        # note by default, so `clip.echo` echoes eighths 3 times), each
-        # repeat moved by +:pitch+ and scaled by +:velocity+ (see
-        # Transform::Echo):
+        # note by default, so `clip.echo` echoes eighths 3 times; an Array
+        # of them is cycled like +:pitch+, each the gap before the next
+        # repeat: `echo([3.n32, 5.n32], 4)` repeats 3, 8, 11, and 16
+        # thirty-seconds after the note), each repeat moved by +:pitch+ and
+        # scaled by +:velocity+ (see Transform::Echo):
         # - +:pitch+: a step in scale degrees of +:scale+ (chromatic by
         #   default, so degrees are semitones), an Interval, or an Array of
         #   steps cycled through (`[4, 3, 5]` climbs a major triad).
         # - +:velocity+: multiplier per repeat (e.g. 0.7, or -3.db).
         # - +:gate+: nil (default) for repeats as long as the played note,
-        #   a fraction of the delay, or a Length.
+        #   a fraction of the delay (of the gap before each repeat), or a
+        #   Length.
         # - +:dry+: false leaves out the played notes.
         # - +:scale+/+:root+: a Scale, a name (:minor), or an Array of
         #   offsets, with its root (:a, A3).
@@ -75,6 +80,7 @@ module MB
         #     stream.echo(3.n16, 4, pitch: 7.st, velocity: 0.7)
         #     stream.echo(1.n16, 11, pitch: 2, scale: :minor, root: :a, velocity: 0.86)
         #     stream.echo(1.n8.dotted, 8) { |e, i| i.odd? ? e.transpose(12) : e }
+        #     stream.echo([3.n32, 5.n32], 6, pitch: [7.st, -12.st])   # an uneven, cycling rhythm
         def echo(delay = 1.n8, count = 3, **options, &block)
           Stream.new(Transform::Echo.new(self, delay, count, **options, &block))
         end
@@ -548,7 +554,10 @@ module MB
         MIDI::Stream::CLIP_TRANSFORMS.each do |name|
           if MIDI::Stream::CLIP_BAKED.include?(name)
             define_method(name) do |*args, **kwargs, &block|
-              bake(MIDI::Transform::Spec.new.public_send(name, *args, **kwargs, &block))
+              spec = MIDI::Transform::Spec.new.public_send(name, *args, **kwargs, &block)
+              # (generators keep generating: each cycle goes through the
+              # transform as it's made; gen-ux-1)
+              generated? ? bake_cycles(spec) : bake(spec)
             end
           else
             define_method(name) do |*args, **kwargs, &block|

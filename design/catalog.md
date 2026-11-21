@@ -168,7 +168,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 
 ### Start and stop
 
-- `:play` Playing things: bg stop outro panic players stopped resume forget play wait master_gain monitor_gain warm_up gc
+- `:play` Playing things: bg stop outro fadeout panic players stopped resume forget play wait master_gain monitor_gain warm_up ...
 - `:files` Files, inputs, and outputs: read write list file_input file_output input output use_output latency loopback close_outputs
 - `:guide` The user guide: guide lesson help
 
@@ -199,7 +199,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 ### Time and patterns
 
 - `:sequences` Clips and sequences: seq grid events rest euclid melody acid chord arp strum echo scale .loop .n8 ...
-- `:generative` Generative music: tones chord weights harmony generate strikes dice melody motifs beats rhythm
+- `:generative` Generative music: tones chord weights harmony progression generate strikes dice melody motifs beats rhythm
 - `:tempo` Tempo, tuning, and the timeline: bpm tempo accel rit meter rewind seek bar transport tuning
 - `:schedule` Scheduling: at_bar after every scheduled cancel reset_scheduler marker at_marker
 - `:key` The session key and modes: key mode modes scale .degrees .snap .lock

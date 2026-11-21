@@ -168,7 +168,10 @@ module MB
       # Runs the block at marker +name+ (like #at_bar): now if the marker is
       # ahead, else the next time it is set (e.g. when a song form next
       # reaches section or label +name+).  Commands inside land exactly at the
-      # marker.  Returns true if it was scheduled right away.  Warns (with
+      # marker.  Returns a handle with #cancel (a Session::Markers::Wait:
+      # `drop = at_marker(:drop) { ... }; drop.cancel`; #scheduled? is true
+      # once the marker was reached; `reset_scheduler` cancels it too).
+      # Warns (with
       # suggestions) for a name that is neither a marker yet nor a section
       # or label of the form playing, which is often a typo.  Also
       # available as #on_marker.
@@ -182,9 +185,12 @@ module MB
           hint = Form.suggest(name, known.uniq)
           warn "at_marker: no marker #{name.inspect} yet; the block runs when one is set#{hint}" unless hint.empty?
         end
-        session.markers.on(name) { |_m, pos|
-          session.schedule(pos, description: "marker #{name.inspect}", label: "at_marker #{name.inspect}", &block)
+        label = "at_marker #{name.inspect}"
+        wait = Session::Markers::Wait.new(session.markers, name, label) { |_m, pos|
+          session.schedule(pos, description: "marker #{name.inspect}", label: label, &block)
         }
+        session.markers.on(name, wait)
+        wait
       end
       alias on_marker at_marker
 

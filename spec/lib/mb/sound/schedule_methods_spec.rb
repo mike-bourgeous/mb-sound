@@ -246,6 +246,25 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       expect(ran).to eq([])
     end
 
+    it 'cancels at_marker handles, alone or with everything (gen-ux-1)' do
+      ran = []
+      a = b = nil
+      within do
+        MB::Sound.bg(:a, 0.constant)
+        a = MB::Sound.at_marker(:x) { ran << :a }
+        b = MB::Sound.at_marker(:x) { ran << :b }
+        MB::Sound.at_marker(:x) { ran << :c }
+        MB::Sound.at_bar(2) { ran << 2 }
+      end
+      within { expect(MB::Sound.cancel(a)).to eq([a]) }
+      expect(a).to be_cancelled
+      within { expect(MB::Sound.cancel.length).to eq(3) } # at_bar 2 and the two waits
+      expect(b).to be_cancelled
+      within { MB::Sound.marker(:x, at: MB::Sound.bar(2)) }
+      run(96000 * 3)
+      expect(ran).to eq([])
+    end
+
     it 'cancels a block handed to the runner ahead of its time' do
       ran = false
       h = nil

@@ -243,6 +243,7 @@ require_relative 'sound/sequence'
 require_relative 'sound/graph_node/tape_echo' # (after Sequence: its presets use musical lengths)
 require_relative 'sound/generative'
 require_relative 'sound/midi/streams'
+require_relative 'sound/generative/key_follow' # (a MIDI::Param; gen-ux-1)
 require_relative 'sound/notes'
 require_relative 'sound/synth'
 require_relative 'sound/drums'

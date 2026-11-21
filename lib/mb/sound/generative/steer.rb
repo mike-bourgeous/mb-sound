@@ -141,7 +141,9 @@ module MB
                else
                  pos + origin
                end
-          @params.transform_values { |v| ValueSource.value_at(v, tl) }.freeze
+          # (the session key is read for the cycle's start, counting key
+          # changes queued by then; KeyFollow::Param, gen-ux-1)
+          @params.transform_values { |v| ValueSource.value_at(v, v.is_a?(KeyFollow::Param) ? tl + @lead : tl) }.freeze
         end
       end
     end

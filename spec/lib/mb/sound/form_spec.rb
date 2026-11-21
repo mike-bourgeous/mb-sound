@@ -813,9 +813,44 @@ RSpec.describe(MB::Sound::Form) do
       end
       run_bars(3)
       expect(ran).to eq([2r]) # once, at the first b
-      expect(within { MB::Sound.at_marker(:b) { ran << session.now } }).to eq(false) # waits for the next b
+      wait = within { MB::Sound.at_marker(:b) { ran << session.now } }
+      expect(wait.scheduled?).to eq(false) # waits for the next b
+      expect(wait.to_s).to eq('at_marker :b waits for the marker')
       run_bars(4)
       expect(ran).to eq([2r, 6r])
+      expect(wait.scheduled?).to eq(true)
+      expect(wait.to_s).to match(/\Aat_marker :b ran /)
+    end
+
+    it 'returns a handle from at_marker that cancels a waiting or scheduled block; reset_scheduler cancels them too (gen-ux-1)' do
+      setup_scenes(:a, :b)
+      ran = []
+      waiting = within { MB::Sound.at_marker(:b) { ran << [:waiting, session.now] } }
+      cancelled = within { MB::Sound.at_marker(:b) { ran << [:cancelled, session.now] } }
+      expect(cancelled.cancel).to be(cancelled)
+      expect(cancelled.to_s).to eq('at_marker :b cancelled')
+      flow do
+        a 2
+        b 2
+        a 2
+        b 2
+      end
+      run_bars(3)
+      expect(ran).to eq([[:waiting, 2r]])
+      expect(waiting.scheduled?).to eq(true)
+      # Scheduled at the marker, then cancelled before it runs
+      later = within { MB::Sound.at_marker(:vo) { ran << [:later, session.now] } }
+      within { MB::Sound.marker(:vo, at: MB::Sound.bar(5)) }
+      expect(later.scheduled?).to eq(true)
+      later.cancel
+      expect(later.schedule).to be_cancelled
+      # reset_scheduler stops waiting ones
+      gone = within { MB::Sound.at_marker(:hit) { ran << [:hit, session.now] } }
+      expect { within { MB::Sound.reset_scheduler } }.to output(/reset_scheduler/).to_stderr
+      expect(gone).to be_cancelled
+      within { MB::Sound.marker(:hit, at: MB::Sound.bar(6)) }
+      run_bars(4)
+      expect(ran).to eq([[:waiting, 2r]])
     end
 
     it 'keeps markers apart from form names and warns about at_marker typos' do

@@ -47,6 +47,11 @@ module MB
       # Resonator effects play as struck instruments (`track :bells,
       # L.fx.bell` is L.inst.bell); other effects raise with where they go.
       #
+      # A track named like a playing `bg` graph takes the name over: with a
+      # graph, or a patch and a clip, it plays in place of the graph at its
+      # launch point; a patch with no clip yet leaves the graph playing
+      # until `bg :name, clip` (gen-ux-1).
+      #
       # +fx:+ is the track's effect insert (Arrangement::Fx): `track :keys,
       # L.inst.tine_piano, fx: L.fx.reverb.hall`, a chain `fx: [:juno1,
       # :hall]`; it stays through new instruments until given again (#fx

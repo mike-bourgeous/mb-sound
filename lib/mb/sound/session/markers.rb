@@ -84,7 +84,10 @@ module MB
         # Calls the block with the Marker and its position the next time
         # marker +name+ is at or after Session#now: right away if it already
         # is, else when it is next set.  Returns true if it ran right away.
-        def on(name, &block)
+        # +callable+ (anything with #call, e.g. a Wait) may stand in for the
+        # block.
+        def on(name, callable = nil, &block)
+          block ||= callable
           m = self[name]
           if m && pos_of(m) >= @session.now
             block.call(m, pos_of(m))
@@ -92,6 +95,83 @@ module MB
           else
             @mutex.synchronize { @waiting[name] << block }
             false
+          end
+        end
+
+        # Stops +block+ (given to #on) from waiting for marker +name+.
+        # Returns true if it was waiting.
+        def unwait(name, block)
+          @mutex.synchronize {
+            list = @waiting.fetch(name, nil)
+            gone = list&.delete(block)
+            @waiting.delete(name) if list && list.empty?
+            !gone.nil?
+          }
+        end
+
+        # Cancels every Wait (FormMethods#at_marker's handles) still
+        # waiting or scheduled (Session#reset_scheduler).  Returns them.
+        def cancel_waits
+          waits = @mutex.synchronize { @waiting.values.flatten.grep(Wait) }
+          waits.each(&:cancel)
+        end
+
+        # The handle FormMethods#at_marker returns: a block waiting for a
+        # marker (it is the block #on keeps), which schedules its own block
+        # at the marker when the marker is set (then it prints and cancels
+        # as that schedule handle, Scheduler::Handle).  #cancel stops it
+        # either way.
+        class Wait
+          # The schedule handle once the marker was reached, else nil.
+          attr_reader :schedule
+
+          # +schedule+ (a Proc of the Marker and its position) returns the
+          # schedule handle for the block.
+          def initialize(markers, name, label, &schedule)
+            @markers = markers
+            @name = name
+            @label = label
+            @schedule_proc = schedule
+            @schedule = nil
+            @cancelled = false
+          end
+
+          # Called by Markers when the marker is reached.
+          def call(marker, pos)
+            @schedule = @schedule_proc.call(marker, pos) unless @cancelled
+          end
+
+          # True once the marker was reached and the block scheduled.
+          def scheduled?
+            !@schedule.nil?
+          end
+
+          def cancelled?
+            @cancelled
+          end
+
+          # Stops waiting, and cancels the scheduled block if the marker was
+          # reached and it hasn't run.  Returns self.
+          def cancel
+            @cancelled = true
+            @markers.unwait(@name, self)
+            @schedule&.cancel
+            self
+          end
+
+          # E.g. "at_marker :drop waits for the marker", or as the schedule
+          # handle once scheduled ("at_marker :drop runs 9:1").
+          def to_s
+            return @schedule.to_s if @schedule
+            "#{@label} #{@cancelled ? 'cancelled' : 'waits for the marker'}"
+          end
+
+          def inspect
+            "#<at_marker #{self}>"
+          end
+
+          def pretty_print(q)
+            q.text(inspect)
           end
         end
 

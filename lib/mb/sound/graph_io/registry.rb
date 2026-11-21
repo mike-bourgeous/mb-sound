@@ -82,6 +82,7 @@ module MB
           'MB::Sound::Generative::Weights' => %i[+ - * / ** blur floor normalize blend over],
           'MB::Sound::Generative::Harmony' => %i[+ - * ** blur over],
           'MB::Sound::Generative::Field' => %i[**],
+          'MB::Sound::Generative::KeyFollow::Progression' => %i[over],
           # Moving parameters of MIDI transforms (MIDI::Param#to_ruby)
           'MB::Sound::MIDI::Param::Base' => ARITHMETIC.to_a,
           # Racks applied to sources (`sig.then(&arack { |s| ... })`;

@@ -546,7 +546,9 @@ RSpec.describe('session fuzzing') do
   it 'drops swaps of tracks that may have stopped (seeds 776002, 776003, 776046)', render_budget: { seconds: 90, reason: 'three random songs' } do
     [776002, 776003, 776046].each do |seed|
       song = SessionFuzz.generate(Random.new(seed))
-      expect(song.code).not_to include('swap :'), "seed #{seed}"
+      # (track swaps: the bg graph swaps of gen-ux-1 round 2's command
+      # start or replace their graph, so they may stay)
+      expect(song.code).not_to match(/swap :t\d/), "seed #{seed}"
       expect(SessionFuzz.check(:runs, song)).to be_nil, "seed #{seed}"
     end
 

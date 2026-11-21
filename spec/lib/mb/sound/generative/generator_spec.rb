@@ -120,6 +120,39 @@ RSpec.describe('MB::Sound generator clips', :aggregate_failures) do
       expect(baked.events.length).to eq((0..2).sum { |i| c.events_for(i).length })
     end
 
+    it 'echoes each generated cycle without baking the generator (gen-ux-1)' do
+      c = arp
+      e = c.echo(1.n16, 2, pitch: 7.st, velocity: 0.5)
+      expect(e).to be_looping
+      expect(e.send(:generated?)).to eq(true)
+      [0, 5, 9].each do |cycle|
+        made = c.events_for(cycle)
+        echoed = e.events_for(cycle)
+        # Each note plus two echoes a sixteenth apart, a fifth up each time
+        expect(echoed.map { |x| [x.start, x.value] }.sort).to eq(
+          made.flat_map { |x| (0..2).map { |i| [x.start + i * 1r / 16, x.value + 7 * i] } }.sort
+        )
+        expect(echoed.map(&:velocity).max).to be > 0.3
+      end
+      # Cycles still differ (the generator keeps generating)
+      expect(e.events_for(5).map(&:value)).not_to eq(e.events_for(9).map(&:value))
+      # Echoes past the end of a cycle play in the next one
+      cycle = (0..20).find { |cy| c.events_for(cy).any? { |x| x.start == 7r / 8 } }
+      late = e.events_for(cycle).select { |x| x.start >= 1 }
+      expect(late).not_to be_empty
+      tail = edges(e, cycle + 1, cycle + 1 + 1r / 8).select { |x| x[1] == :on && x[4] == cycle }
+      expect(tail.map { |x| x[0] - cycle }.sort).to eq(late.map(&:start).sort)
+      # A long tail reaches several cycles on (the clip looks back for it)
+      long = c.echo(1.bar, 3)
+      on = edges(long, 7, 8).select { |x| x[1] == :on }
+      expect(on.map { |x| x[4] }.uniq.sort).to eq([4, 5, 6, 7])
+      # Plain clips still bake (the tail wraps to the loop's start)
+      plain = MB::Sound.seq(60, 62).n8.loop.echo(1.n8, 1)
+      expect(plain.send(:generated?)).to eq(false)
+      expect(plain.length).to eq(1r / 4)
+      expect(plain.events.map(&:value).sort).to eq([60, 60, 62, 62])
+    end
+
     it 'plays a non-looping generator clip as its first cycle' do
       c = arp(loop: false)
       expect(c).not_to be_looping

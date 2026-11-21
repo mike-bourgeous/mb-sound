@@ -42,6 +42,32 @@ module MB
         Generative::Harmony.new(keyframes, curve: curve, loop: loop).with_recipe(nil, :harmony, [keyframes], { curve: curve == :linear ? nil : curve, loop: loop }.compact)
       end
 
+      # A chord progression on degrees of the session key's scale (gen-ux-1;
+      # Generative::KeyFollow::Progression): +chords+ are degrees counted
+      # from 1 like Roman numerals (`1, 6, 3, 7`), Roman numeral Symbols
+      # (`:i, :VI, :III, :VII`; case is ignored: each chord is the scale's
+      # own triad on that degree), or [chord, length] pairs; each lasts
+      # +every+ (a bar by default) unless its pair says, and the
+      # progression loops.  Generators (motifs, melody, strikes) take it as
+      # their source: the scale's notes with the chord's tones weighted
+      # +weight+ over them, held until the next chord (+curve:+ :step, or
+      # :linear and other curves to blend into the next), re-voicing each
+      # phrase into the chord where its notes start.  It follows the session
+      # key live (`key :a, at: bar(9)` moves it), or +scale+ (a Scale; one
+      # without a root follows the key's root in its own mode).
+      #
+      #     chords = progression(:i, :VI, :III, :VII)        # a bar each, in the session key
+      #     bg :lead, ambient_koto_voice(motifs(chords, 8, range: A3..A5))
+      #     progression([1, 2.bars], 4, 5, scale: scale(:dorian))
+      def progression(*chords, every: 1.bar, scale: nil, weight: 1.5, curve: :step)
+        scale = MB::Sound.scale if scale.nil?
+        Generative::KeyFollow::Progression.new(chords, every: every, scale: scale, weight: weight, curve: curve)
+          .with_recipe(nil, :progression, chords, {
+            every: every == 1.bar ? nil : every, scale: scale.following == :key ? nil : scale,
+            weight: weight == 1.5 ? nil : weight, curve: curve == :step ? nil : curve,
+          }.compact)
+      end
+
       # Counter-based dice for +seed+ and optional keys (Generative::Dice):
       # every draw is a pure function of the seed and its keys.
       #
@@ -70,9 +96,20 @@ module MB
       #       16.times.filter_map { |i| [i * 1/16r, 1/32r, F2s, 0.6] if dice.rand(:hat, i) < busy }
       #     }
       #     turn :busy, 0.9, over: 8     # the hats fill in over 8 bars, a cycle at a time
+      #
+      # A scale without a root (or bare `scale`, a `progression`, or a value
+      # built from them) given as an option follows the session key: the
+      # block gets it resolved for each cycle (gen-ux-1).
+      #
+      #     arp = generate(1.bar, sc: scale(:minor)) { |cycle, dice, sc:|
+      #       sc.notes(A3..A5).then { |n| Array.new(8) { |i| [i * 1/8r, 1/16r, dice.pick(n, :n, i), 0.7] } }
+      #     }
       def generate(length, values: nil, seed: nil, name: nil, align: :timeline, reach: nil, lead: nil, **params, &block)
         raise ArgumentError, 'generate needs a block: { |cycle, dice| rows }' unless block
         Generative.check_block_keywords(block, params, %i[values seed name align reach lead], 'generate')
+        # (scales without a root and values made from them follow the
+        # session key: the block gets them resolved for each cycle; gen-ux-1)
+        params = params.transform_values { |v| Generative::KeyFollow.follows?(v) ? Generative::KeyFollow::Param.new(v) : v }
         Sequence::Clip.generate(length, values: values, seed: seed, name: name, align: align, reach: reach, lead: lead, params: params, &block)
       end
 
@@ -117,8 +154,24 @@ module MB
       #     knob :wander, 0.1
       #     lead = motifs(h, 8, density: knob(:busy), mutate: knob(:wander), evolve: 1)
       #     turn :busy, 0.9, over: 8
-      def motifs(source, steps = 8, step: 1.n8, form: %i[a a b a], answer: { b: :a }, density: 0.5, vary: 0.2, mutate: 0.15,
+      #
+      # Following the key (gen-ux-1, Generative::KeyFollow): a +source+ made
+      # from a scale without a root (`scale(:phrygian)`), bare `scale`, a
+      # `progression(...)`, or no source at all (`motifs(8)`: the session
+      # key's scale) is read again for every phrase on the session key, so
+      # the motifs keep their rhythm and contour and move with `key`, from
+      # the phrase that starts where the change lands.
+      #
+      #     motifs(scale(:phrygian), 4, evolve: 1, range: C3..C6)
+      #     motifs(progression(:i, :VI, :III, :VII), 8, range: A3..A5)
+      def motifs(source = nil, steps = nil, step: 1.n8, form: %i[a a b a], answer: { b: :a }, density: 0.5, vary: 0.2, mutate: 0.15,
                  evolve: 2, leap: 3, range: nil, around: nil, width: nil, velocity: 0.55..0.85, legato: 0.9, seed: nil, align: :timeline, lead: nil)
+        # `motifs(8)`: no source, so the session key (gen-ux-1)
+        source, steps = nil, source if source.is_a?(Integer) && steps.nil?
+        steps ||= 8
+        source = Generative::KeyFollow.implicit if source.nil?
+        follow = Generative::KeyFollow.follows?(source)
+        snapshot = Generative::KeyFollow.resolve(source, Generative::KeyFollow.key_at(Session.existing&.now || Sequence.current_transport.position))
         raise ArgumentError, "motifs' steps is an Integer from 1 to 256 (got #{steps.inspect})" unless steps.is_a?(Integer) && steps.between?(1, 256)
         step = Generative.length_of(step, :step)
         unless form.is_a?(Array) && !form.empty? && form.length <= 64 && form.all? { |l| l.nil? || l.is_a?(Symbol) } && form.any?
@@ -146,22 +199,25 @@ module MB
         raise ArgumentError, "motifs' legato: is from 0.05 to 1 (got #{legato.inspect})" unless legato.is_a?(Numeric) && legato.real? && legato.between?(0.05, 1)
         raise ArgumentError, "motifs' velocity: is from 0 to 1, or a Range (got #{velocity.inspect})" unless velocity.is_a?(Range) || (velocity.is_a?(Numeric) && velocity.between?(0, 1))
 
-        fields = ->(r) {
-          f = Generative.motif_field(source, range: r, around: ranges ? nil : around, width: width)
+        fields = ->(r, src = snapshot) {
+          f = Generative.motif_field(src, range: r, around: ranges ? nil : around, width: width)
           n = Generative.notes_of(f)
-          raise ArgumentError, "motifs' field has no notes#{r ? " in #{r}" : ''}#{Generative.empty_range_hint(source, r)}" if n.empty?
-          [f, ranges || around.nil? ? (n.first + n.last) / 2r : Scale.root_number(around), n]
+          raise ArgumentError, "motifs' field has no notes#{r ? " in #{r}" : ''}#{Generative.empty_range_hint(src, r)}" if n.empty?
+          [f, ranges || around.nil? ? (n.first + n.last) / 2r : Scale.root_number(around), n, f]
         }
-        field, center, notes = fields.(ranges ? ranges.first : range)
+        field, center, notes, f0 = fields.(ranges ? ranges.first : range)
         notes = ranges.flat_map { |r| fields.(r)[2] }.uniq.sort if ranges
+        # (a source following the key may play any note in its range)
+        notes = (ranges ? ranges.flat_map { |r| fields.(r)[3].notes } : f0.notes).uniq.sort if follow
         seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
         # (a steered density thins and fills around its home: a library
         # generator's default for it, else 0.5; Library::Generators.home)
         home = MIDI::Param.param?(density) ? Library::Generators.home(density) : nil
         m = Generative::Motifs.new(field, steps: steps, step: step, form: form.dup.freeze, answer: answer.freeze, density: density, vary: vary,
           mutate: mutate, evolve: evolve, leap: leap, around: center, velocity: velocity, legato: legato.rationalize(1r / 1024), seed: seed,
-          fields: ranges && ->(r) { fields.(r).first(2) }, home: home)
+          fields: (ranges || follow) && ->(r, src) { fields.(ranges ? r : range, src || snapshot).first(2) }, home: home)
         params = { density: density, vary: vary, mutate: mutate, range: (range if ranges) }.select { |_, v| MIDI::Param.param?(v) }
+        params[:key] = Generative::KeyFollow::Param.new(source) if follow
         unless params.empty?
           return Sequence::Clip.generate(m.length, values: notes, seed: seed, name: "motifs(seed: #{seed})", align: align, lead: lead, params: params) { |cycle, dice, **v|
             m.events(cycle, dice, **v)
@@ -276,7 +332,18 @@ module MB
       # A moving +chance+ (`knob(:rain)`, `cc(1)`, a tempo LFO) is read once
       # per cycle at its decision point, +lead:+ (one beat, or the cycle if
       # shorter) before the cycle (G3; Generative::Steer).
-      def strikes(field, every: 1.n4, length: 1.bar, chance: 0.25, gap: 2, sharpen: 2, velocity: 0.5..0.9, note: nil, seed: nil, align: :timeline, lead: nil)
+      #
+      # Without a +field+, the strikes draw from the session key's scale;
+      # a field made from a scale without a root (`scale(:dorian).weights.
+      # over(A2..A4)`) or a progression follows the session key, cycle by
+      # cycle (gen-ux-1, Generative::KeyFollow).
+      def strikes(field = nil, every: 1.n4, length: 1.bar, chance: 0.25, gap: 2, sharpen: 2, velocity: 0.5..0.9, note: nil, seed: nil, align: :timeline, lead: nil)
+        # (no field: the session key; a field following the key is read
+        # for every cycle; gen-ux-1)
+        field = Generative::KeyFollow.implicit if field.nil?
+        follow = Generative::KeyFollow.follows?(field)
+        given = field
+        field = Generative::KeyFollow.resolve(field, Generative::KeyFollow.key_at(Session.existing&.now || Sequence.current_transport.position))
         every = Generative.length_of(every, :every)
         length = Generative.length_of(length, :length)
         note = note ? Generative.length_of(note, :note) : every
@@ -289,9 +356,12 @@ module MB
         source = Generative.field(field)
         s = Generative::Strikes.new(source, every: every, length: length, chance: chance, gap: gap, sharpen: sharpen,
           velocity: velocity, note_length: note, seed: seed)
-        if moving
-          return Sequence::Clip.generate(length, values: Generative.notes_of(source), seed: seed, name: "strikes(seed: #{seed})", align: align,
-            reach: MB::M.max(length * 2, length + note), lead: lead, params: { chance: chance }) { |cycle, dice, **v| s.events(cycle, dice, **v) }
+        if moving || follow
+          params = moving ? { chance: chance } : {}
+          params[:key] = Generative::KeyFollow::Param.new(given) if follow
+          values = follow ? source.notes : Generative.notes_of(source)
+          return Sequence::Clip.generate(length, values: values, seed: seed, name: "strikes(seed: #{seed})", align: align,
+            reach: MB::M.max(length * 2, length + note), lead: lead, params: params) { |cycle, dice, **v| s.events(cycle, dice, **v) }
         end
         Sequence::Clip.generate(length, values: Generative.notes_of(source), seed: seed, name: "strikes(seed: #{seed})", align: align,
           reach: MB::M.max(length * 2, length + note)) { |cycle, dice| s.events(cycle, dice) }

@@ -19,7 +19,9 @@ module MB
         player on a shared timeline; `play` is the foreground version
         (waits until the sound ends; Ctrl-C to stop).  Commands return
         journal entries that say where they land.  Sounds end through
-        envelopes, clips, `until` (alias `for`: `.for(2.bars)`), or `stop`.  `play`, `bg`, and `render`
+        envelopes, clips, `until` (alias `for`: `.for(2.bars)`), or `stop`
+        (`fadeout :pad` fades one track out over 4 bars; `outro` ends
+        everything).  `play`, `bg`, and `render`
         take graphs and more: files, audio arrays, Samples (once), Slices
         (one by one), clips (on their instrument, e.g. a chop's slices, or
         a soft saw), grids (a TR-909, or a TR-808 for its own voices like
@@ -32,7 +34,7 @@ module MB
         (no 45-80 ms stalls; memory grows about 1-2 MB/s until `gc
         :normal`; `now` shows it).
       TEXT
-      commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up, :gc
+      commands :bg, :stop, :outro, :fadeout, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up, :gc
       dsl :at, :until, :for, :and_then
       note :method_modules, :scripts
       see :sets, :now, :files
@@ -884,6 +886,9 @@ module MB
         them without wrapping (notes that leave drop out; live streams only
         shift later).  Grid kits take the same transforms, row by row
         (`beat.reverse`, `beat.swing(0.6)`, `beat.humanize`).
+        `clip.echo(3.n16, 3, pitch: 7.st)` bakes echoes into the clip
+        (a generator keeps generating, echoed cycle by cycle); an Array of
+        gaps is cycled like `pitch:` (`echo([3.n32, 5.n32], 4)`).
         `clip.show` prints a clip as text: `:grid` (grid characters, so a
         kit's `show.rows` parse back), `:roll` (a piano roll), or
         `:degrees` (scale degrees in the session key).
@@ -933,13 +938,19 @@ module MB
         `knob(:reg).choose(A2..A4, A3..A5)` for `range:`), read once per
         cycle a `lead:` (one beat) before it starts, so a `turn` steers the
         next cycle and takes replay it; `generate(1.bar, busy: knob(:busy))
-        { |cycle, dice, busy:| }` hands them to your block.  The demo
+        { |cycle, dice, busy:| }` hands them to your block.  They follow
+        the session key live: `motifs(scale(:phrygian), 8)` (a scale
+        without a root) plays phrygian on whatever root `key` sets, cycle by
+        cycle; no source at all (`motifs(8)`, `melody(8, vary: true)`,
+        `strikes`) is the key's own scale; `progression(:i, :VI, :III,
+        :VII)` is a chord a bar on degrees of the key, so the lines re-voice
+        into each chord and move when the key does.  The demo
         songs' and genre templates' generators are in the library:
         `L.gen` (`L.gen.koto_motif(seed: 3)`, `play L.gen.techno_beat`)
         and `L.flow` for their section chains (`help :library`);
         `lesson :generative` puts them on tracks step by step.
       TEXT
-      commands :tones, :chord, :weights, :harmony, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
+      commands :tones, :chord, :weights, :harmony, :progression, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
       note :generative
       see :sequences, :random, :long_form
       example 'a melody that blurs and changes key' do
@@ -951,6 +962,12 @@ module MB
         h = scale(:dorian, :d).weights + chord(:min7, root: :d).weights * 1.5
         tune = motifs(h, 8, form: %i[a a b a], answer: { b: :a }, range: A3..A5, around: D4)
         bg :try, tune.synth(voices: 2) { |v| v.hz.triangle * v.env(0.005, 0.2, 0.3, 0.2) }.at(-14.db)
+      end
+      example 'motifs over a chord progression, following the key' do
+        key :a, :minor
+        tune = motifs(progression(:i, :VI, :III, :VII), 8, range: A3..A5)
+        bg :try, tune.synth(voices: 2) { |v| v.hz.triangle * v.env(0.005, 0.2, 0.3, 0.2) }.at(-14.db)
+        key :d, at: bar(3)
       end
       example 'an evolving beat steered by a knob' do
         knob :energy, 0.3
@@ -1009,13 +1026,15 @@ module MB
 
     Help.topic :schedule, 'Scheduling', group: :time do
       about <<~TEXT
-        Blocks on the Session timeline: commands inside them land exactly at
-        the block's time, and each block is one undo step.  `at_bar`,
-        `after`, and `every` take launch points too (`at_bar in: 2.beats`,
-        `every 1.n4, on: :beat`) and return a handle that prints when it
-        runs and has `cancel`.  `reset_scheduler` (or `panic`, which also
-        stops the players) cancels everything scheduled, stops a song
-        form, and replaces a stuck scheduler.
+        Blocks on the Session timeline.  `at_bar`, `after`, `every`, and
+        `at_marker` return a handle: `.cancel` takes the block back
+        (`ticks = every(1) { ... }; ticks.cancel`), `cancel` alone cancels
+        every scheduled block, `scheduled` lists them, and
+        `reset_scheduler` (or `panic`, which also stops the players)
+        cancels everything, stops a song form, and replaces a stuck
+        scheduler.  Commands inside a block land exactly at its time, and
+        each block is one undo step.  `at_bar`, `after`, and `every` take
+        launch points too (`at_bar in: 2.beats`, `every 1.n4, on: :beat`).
       TEXT
       commands :at_bar, :after, :every, :scheduled, :cancel, :reset_scheduler, :marker, :at_marker
       note :method_modules
@@ -1577,7 +1596,10 @@ module MB
         sections (`drop 8, key: :d, mode: :dorian`), and are undoable.
         `scale(:dorian)` without a root uses the key's root; bare `scale`
         is the key's scale; `degrees`, `snap`, and `lock` follow the key
-        as it changes.  `mode knob(:dark)` walks the modes from Lydian to
+        as it changes, and so do generators made from a scale without a
+        root, from no scale at all, or from a `progression(1, 6, 4, 5)`
+        (`motifs(scale(:phrygian), 8)` moves to the new root on the
+        cycle a `key :a, at: bar(9)` lands on; `help :generative`).  `mode knob(:dark)` walks the modes from Lydian to
         Locrian, one note at a time (`modes(:dorian..:phrygian, by:
         knob(:dark))` for part of the walk).
       TEXT
