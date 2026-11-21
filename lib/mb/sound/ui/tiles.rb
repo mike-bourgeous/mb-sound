@@ -1358,7 +1358,16 @@ module MB
             else
               run_safely {
                 s = keys_session || Session.current
-                st = UI.run_line(TransportMethods.toggle_line(s), s)
+                line = TransportMethods.toggle_line(s)
+                # (an answer on the next frame: a first start warms every
+                # track before the music, 1.8 s for a demo's 8; the painter
+                # draws this while `start` runs; ui-phase1-1, the plan's
+                # Phase 1 item 2)
+                if line == 'start'
+                  flash('starting... (warming the tracks first)', :key)
+                  @full = true
+                end
+                st = UI.run_line(line, s)
                 next st unless st.is_a?(TransportMethods::Status)
                 # (self: run_safely flashes any other result, and flash's
                 # own return value printed as `=> [text, role, ...]`)
