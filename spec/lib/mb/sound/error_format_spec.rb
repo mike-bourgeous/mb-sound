@@ -71,6 +71,26 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect(cab.then { |x| x.name }).to eq(:cabinet)
     end
 
+    it "points the maintainer's LFO, scale, and note guesses at what exists (ux-friction-1 round 2)" do
+      lfo = 2.bars.lfo.ramp
+      expect(described_class.summary((lfo.exp rescue $!))).to include('did you mean at(D3.number..B6.number).freq (an LFO swept in notes')
+      expect(described_class.summary((lfo.at(150..2000).unipolar rescue $!))).to include('did you mean at(150..2000) (it maps the whole -1..1 swing')
+      s = described_class.summary((0.2.hz.lfo.freerun rescue $!))
+      expect(s).to include('did you mean freewheel (a bar-synced LFO running free of the timeline')
+      expect(s).not_to match(/did you mean free\?/)
+      expect(described_class.summary((MB::Sound.scale.phrygian rescue $!))).to include('did you mean scale(:phrygian) (a mode by name')
+      expect(described_class.summary((MB::Sound::A2.minor rescue $!))).to include('did you mean scale(:minor, A2) (the mode first, then the root)')
+      expect(described_class.summary((1.beat.ramp rescue $!))).to include('did you mean 1.beat.lfo.ramp (the shape comes after .lfo')
+      expect(described_class.summary((MB::Sound::A2.nonsense_name rescue $!))).not_to include('scale(')
+    end
+
+    it 'prints a constant typed at the prompt as one line, not a backtrace (ux-friction-1 round 2: III)' do
+      e = (MB::Sound.module_eval('III') rescue $!)
+      expect(e).to be_a(NameError)
+      expect(described_class.short?(e)).to eq(true)
+      expect(described_class.console(e, color: false)).to start_with('NameError: uninitialized constant MB::Sound::III')
+    end
+
     it 'turns Did you mean blocks in messages into a parenthesis' do
       e = ArgumentError.new("no scene :dorp\nDid you mean?  :drop\n                :dorm")
       expect(described_class.summary(e)).to eq('ArgumentError: no scene :dorp (did you mean :drop, :dorm?)')
